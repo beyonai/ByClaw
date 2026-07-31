@@ -16,6 +16,10 @@ P6="${REDIS_CLUSTER_PORT_6:-6376}"
 
 NODES="redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5 redis-node-6"
 
+for i in 1 2 3 4 5 6; do
+    mkdir -p "redisdata/node-$i"
+done
+
 echo "Starting Redis Cluster (6 nodes)..."
 # Start only the 6 nodes. The bundled init service is unreliable (fixed sleep,
 # no retry, not idempotent); we do the create here instead.

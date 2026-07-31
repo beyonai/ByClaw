@@ -1,0 +1,225 @@
+.splitModal {
+  :global {
+    .@{antPrefix}-modal-body {
+      padding-top: 12px;
+    }
+  }
+}
+
+.splitTitle {
+  h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  p {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.45);
+  }
+}
+
+.splitBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.splitReqHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.splitReqLabel {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  font-size: 12px;
+  color: #1677ff;
+  background: rgba(22, 119, 255, 0.1);
+  border-radius: 4px;
+}
+
+.splitReqName {
+  font-size: 14px;
+}
+
+.splitReqDesc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.splitAiHint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.6);
+  background: rgba(250, 173, 20, 0.08);
+  border: 1px solid rgba(250, 173, 20, 0.25);
+  border-radius: 6px;
+}
+
+.splitAiIcon {
+  color: #faad14;
+}
+
+// 工具条:左侧 AI 提示占满,右侧列表/图切换。
+.splitToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  .splitAiHint {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+// 画布视口:限高并允许横纵滚动,节点多/链长时不撑爆弹窗。
+.splitCanvasWrap {
+  max-height: 420px;
+  overflow: auto;
+  background: #fafafa;
+  background-image: radial-gradient(rgba(0, 0, 0, 0.06) 1px, transparent 1px);
+  background-size: 16px 16px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+}
+
+.splitCanvas {
+  position: relative;
+}
+
+.splitEdges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.splitEdgePath {
+  fill: none;
+  stroke: #1677ff;
+  stroke-width: 1.6;
+  opacity: 0.7;
+}
+
+.splitNode {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.splitNodeHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.splitNodeTitle {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.splitNodeRepo {
+  width: 100%;
+}
+
+.splitNodeHeadOps {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.splitNodeField {
+  width: 100%;
+}
+
+.splitCellSelect {
+  width: 100%;
+}
+
+.splitAiTag {
+  margin: 0;
+  padding: 0 6px;
+  font-size: 11px;
+  color: #faad14;
+  background: rgba(250, 173, 20, 0.1);
+  border: none;
+}
+
+.splitCanvasFooter {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.splitFootNote {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+// 列表视图:CSS Grid 表格,列宽与表头/数据行共用同一套 fr 定义,保证对齐。
+.splitTable {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.splitRowHead,
+.splitRow {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.4fr) minmax(150px, 1.2fr) minmax(120px, 1fr) minmax(130px, 1fr) minmax(
+      150px,
+      1.2fr
+    ) 48px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+}
+
+.splitRowHead {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.55);
+  background: #fafafa;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.splitRow {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.colTitle,
+.colRepo,
+.colBranch,
+.colMember,
+.colDep {
+  min-width: 0;
+}
+
+.colOps {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}

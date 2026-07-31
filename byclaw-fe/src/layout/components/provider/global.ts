@@ -19,6 +19,10 @@ export interface IGlobalContext {
   agentId: string;
   setAgentId?: React.Dispatch<React.SetStateAction<string>>;
   agentInfo?: IAgentCache;
+
+  /** 输入框最后一个 @ 的数字员工，仅用于驱动左侧资源联动，不改变当前会话的实际 agentId。 */
+  siderAgentId?: string;
+  setSiderAgentId?: React.Dispatch<React.SetStateAction<string>>;
   EventEmitter: EventEmitter$Cls;
   uploadFileConfig?: IAgentFileUploadConf;
 

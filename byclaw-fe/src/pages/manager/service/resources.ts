@@ -279,7 +279,7 @@ export const queryCallMCPToolRequest = (params: {
     destination: string;
   };
 }) => {
-  return POST<any>('/byaiService//tool/mcp/callToolRequest', params);
+  return POST<any>('/byaiService/tool/mcp/callToolRequest', params);
 };
 
 /**

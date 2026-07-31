@@ -140,6 +140,8 @@ const PCLayout = () => {
   const [isClose, setIsClose] = useState(false);
   const [sessionId, setSessionId] = useState<string>('');
   const [agentId, setAgentId] = useState<string>('');
+  // 仅用于左侧资源联动，与实际聊天 agentId 分离。
+  const [siderAgentId, setSiderAgentId] = useState<string>('');
   const [modPswModalVisible, setModPswModalVisible] = useState(false);
   const [pcLayoutContentId] = useState('pcLayoutId');
   const [containChatLayout, setContainChatLayout] = useState(false);
@@ -165,6 +167,7 @@ const PCLayout = () => {
       resetChat: () => {
         setSessionId('');
         setAgentId('');
+        setSiderAgentId('');
       },
       getState: () => ({
         sessionId,
@@ -318,6 +321,8 @@ const PCLayout = () => {
             setSessionId,
             agentId,
             setAgentId,
+            siderAgentId,
+            setSiderAgentId,
             uploadFileConfig,
             agentInfo: curAgentInfo,
             EventEmitter: myEventEmitter,

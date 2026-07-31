@@ -16,11 +16,13 @@ import socket
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from by_framework import run_worker
 from by_framework_history_byclaw.byclaw_history import ByClawHistoryBackend
 from dotenv import load_dotenv
+
+from byclaw_data.redis_client import get_redis_settings
 
 # by_framework 在模块导入时创建 RotatingFileHandler("by-framework.log")，
 # Windows 下多进程共用同一文件会在轮转时触发 WinError 32。
@@ -45,7 +47,7 @@ def _fix_framework_log_handler() -> None:
 
 _fix_framework_log_handler()
 
-from byclaw_data.runtime import normalize_runtime_environment
+from byclaw_data.runtime import normalize_runtime_environment  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,8 @@ class WorkerConfig:
     redis_db: int
     redis_password: str | None
     redis_username: str | None
+    redis_mode: Literal["standalone", "cluster"]
+    redis_cluster_nodes: list[tuple[str, int]] | None
     consumer_group: str
     workspace_dir: str
     be_domainname_url: str
@@ -89,20 +93,23 @@ class WorkerConfig:
             raw = os.environ.get(key)
             return raw.strip() if raw and raw.strip() else None
 
-        def as_int(key: str, default: int) -> int:
-            raw = os.environ.get(key)
-            return int(raw.strip(), 10) if raw and raw.strip() else default
+        redis_settings = get_redis_settings()
+        redis_cluster_nodes = (
+            list(redis_settings.cluster_hosts) if redis_settings.cluster_hosts else None
+        )
 
         return cls(
             api_key=opt("OPENAI_API_KEY"),
             base_url=opt("OPENAI_BASE_URL"),
             model_name=os.environ.get("DATACLOUD_LLM_MODEL", "main.py未设置"),
             worker_id=_default_worker_id(),
-            redis_host=os.environ.get("DATACLOUD_GATEWAY_REDIS_HOST", "localhost"),
-            redis_port=as_int("DATACLOUD_GATEWAY_REDIS_PORT", 6379),
-            redis_db=as_int("DATACLOUD_GATEWAY_REDIS_DB", 0),
-            redis_password=opt("DATACLOUD_GATEWAY_REDIS_PASSWORD"),
-            redis_username=opt("DATACLOUD_GATEWAY_REDIS_USERNAME"),
+            redis_host=redis_settings.host,
+            redis_port=redis_settings.port,
+            redis_db=redis_settings.db,
+            redis_password=redis_settings.password or None,
+            redis_username=redis_settings.username or None,
+            redis_mode="cluster" if redis_cluster_nodes else "standalone",
+            redis_cluster_nodes=redis_cluster_nodes,
             consumer_group=os.environ.get(
                 "DATACLOUD_GATEWAY_CONSUMER_GROUP", "datacloud"
             ),
@@ -123,6 +130,8 @@ class WorkerConfig:
             "redis_db": self.redis_db,
             "redis_password": self.redis_password,
             "redis_username": self.redis_username,
+            "redis_mode": self.redis_mode,
+            "redis_cluster_nodes": self.redis_cluster_nodes,
             "consumer_group": self.consumer_group,
             "workspace_dir": self.workspace_dir,
             "api_key": self.api_key,

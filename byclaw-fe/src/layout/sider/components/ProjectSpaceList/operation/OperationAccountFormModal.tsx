@@ -1,0 +1,133 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Form, Input, Modal, Select, message } from 'antd';
+import { useIntl } from '@umijs/max';
+import type { OperationAccount, OperationAccountFormValues, OperationPlatformOption } from './types';
+import styles from './index.module.less';
+
+// 运营账号新增、编辑共用同一弹窗；账号持久化和登录流程由父组件按后端接口能力接入。
+export interface OperationAccountFormModalProps {
+  open: boolean;
+  account?: OperationAccount | null;
+  platformOptions?: OperationPlatformOption[];
+  loading?: boolean;
+  onCancel: () => void;
+  onSubmit: (values: OperationAccountFormValues, account?: OperationAccount | null) => void | Promise<void>;
+}
+
+// 表单校验失败不再重复提示保存失败，只有真实接口或运行异常才展示错误消息。
+const isFormValidationError = (error: unknown) => typeof error === 'object' && error !== null && 'errorFields' in error;
+
+const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
+  open,
+  account,
+  platformOptions,
+  loading = false,
+  onCancel,
+  onSubmit,
+}) => {
+  const intl = useIntl();
+  const [form] = Form.useForm<OperationAccountFormValues>();
+  const [submitting, setSubmitting] = useState(false);
+  // 状态更新存在一个渲染间隔，使用同步标记拦截这个间隔内的连续点击。
+  const submittingRef = useRef(false);
+  const t = useCallback((id: string) => intl.formatMessage({ id: `projectSpace.operation.accountForm.${id}` }), [intl]);
+  const platformT = useCallback(
+    (id: string) => intl.formatMessage({ id: `projectSpace.operation.platform.${id}` }),
+    [intl]
+  );
+  // 后端未下发平台配置时使用产品约定的平台集合，保证新增账号的基础表单可用。
+  const defaultPlatformOptions = useMemo<OperationPlatformOption[]>(
+    () => [
+      { value: 'wechat', label: platformT('wechat') },
+      { value: 'xiaohongshu', label: platformT('xiaohongshu') },
+      { value: 'video', label: platformT('video') },
+      { value: 'douyin', label: platformT('douyin') },
+    ],
+    [platformT]
+  );
+  const availablePlatformOptions = platformOptions?.length ? platformOptions : defaultPlatformOptions;
+  const defaultPlatformId = availablePlatformOptions[0]?.value;
+  const isSubmitting = loading || submitting;
+
+  useEffect(() => {
+    if (!open) return;
+    // 每次打开都按当前编辑对象重置，避免上一次新增或编辑残留到下一次操作。
+    form.resetFields();
+    form.setFieldsValue({
+      platformId: account?.platformId || defaultPlatformId,
+      accountName: account?.accountName || '',
+      accountId: account?.accountId || '',
+    });
+  }, [account, defaultPlatformId, form, open]);
+
+  const handleSubmit = useCallback(async () => {
+    if (loading || submittingRef.current) return;
+
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      const values = await form.validateFields();
+      await onSubmit(values, account);
+    } catch (error) {
+      if (!isFormValidationError(error)) {
+        message.error(t('saveFailed'));
+      }
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  }, [account, form, loading, onSubmit, t]);
+
+  const handleCancel = useCallback(() => {
+    if (!isSubmitting) onCancel();
+  }, [isSubmitting, onCancel]);
+
+  return (
+    <Modal
+      title={t(account ? 'editTitle' : 'addTitle')}
+      open={open}
+      centered
+      width={560}
+      className={styles.operationFormModal}
+      confirmLoading={isSubmitting}
+      closable={!isSubmitting}
+      maskClosable={!isSubmitting}
+      keyboard={!isSubmitting}
+      destroyOnClose
+      okText={t('save')}
+      cancelText={t('cancel')}
+      cancelButtonProps={{ disabled: isSubmitting }}
+      onCancel={handleCancel}
+      onOk={() => void handleSubmit()}
+    >
+      <Form<OperationAccountFormValues> form={form} layout="vertical">
+        <div className={styles.operationFormGrid}>
+          <Form.Item
+            label={t('field.platform')}
+            name="platformId"
+            rules={[{ required: true, message: t('validation.platformRequired') }]}
+          >
+            <Select options={availablePlatformOptions} placeholder={t('placeholder.platform')} />
+          </Form.Item>
+          <Form.Item
+            label={t('field.accountName')}
+            name="accountName"
+            rules={[{ required: true, whitespace: true, message: t('validation.accountNameRequired') }]}
+          >
+            <Input placeholder={t('placeholder.accountName')} />
+          </Form.Item>
+          <Form.Item
+            className={styles.operationFormFull}
+            label={t('field.accountId')}
+            name="accountId"
+            rules={[{ required: true, whitespace: true, message: t('validation.accountIdRequired') }]}
+          >
+            <Input placeholder={t('placeholder.accountId')} />
+          </Form.Item>
+        </div>
+      </Form>
+    </Modal>
+  );
+};
+
+export default OperationAccountFormModal;

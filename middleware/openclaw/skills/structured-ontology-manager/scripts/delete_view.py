@@ -1,18 +1,18 @@
 #!/usr/local/bin/python3
-"""删除结构化本体视图。
+"""删除已提交的视图（⚠️ 不可逆，需二次确认后调用）。
+
+同时删除工作区本地文件、OWL 数据和 Discovery 注册。
 
 I/O 协议：stdin JSON → stdout JSON
 
 入参（stdin JSON）:
     {
-        "view_code": "v_task_user"   # 必填
+        "workspace_name": "travel_reimbursement",   # 必填
+        "view_code":      "v_travel_full"           # 必填
     }
 
 出参（stdout JSON）:
-    {"ok": true, "view_code": "v_task_user"}
-    {"ok": false, "error": "..."}
-
-所有业务逻辑由 datacloud_platform 的 ontology-manager API 提供服务。
+    {"ok": true}
 """
 
 from __future__ import annotations
@@ -23,32 +23,36 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from _common import post_ontology_api
+from _common import post_ontology_api, stdout_json
 
 
 def main() -> None:
     raw = sys.argv[1] if len(sys.argv) > 1 else sys.stdin.read().strip()
     if not raw:
-        print(json.dumps({"ok": False, "error": "缺少入参"}), flush=True)
+        stdout_json({"ok": False, "error": "缺少入参，需要 workspace_name 和 view_code"})
         sys.exit(1)
 
     params: dict = json.loads(raw)
+    workspace_name: str = params.get("workspace_name", "").strip()
     view_code: str = params.get("view_code", "").strip()
 
+    if not workspace_name:
+        stdout_json({"ok": False, "error": "workspace_name 不能为空"})
+        sys.exit(1)
     if not view_code:
-        print(json.dumps({"ok": False, "error": "view_code 不能为空"}), flush=True)
+        stdout_json({"ok": False, "error": "view_code 不能为空"})
         sys.exit(1)
 
-    result = post_ontology_api(
-        "/view/delete",
-        {"view_code": view_code},
-    )
-    print(json.dumps(result, ensure_ascii=False), flush=True)
+    result = post_ontology_api("/workspace/view/delete", {
+        "workspace_name": workspace_name,
+        "view_code": view_code,
+    })
+    stdout_json(result)
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False), flush=True)
+        stdout_json({"ok": False, "error": str(exc)})
         sys.exit(1)

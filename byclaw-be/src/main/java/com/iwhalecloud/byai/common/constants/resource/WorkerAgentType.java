@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 @Getter
 public enum WorkerAgentType {
 
+    BY_SUPER("BY_SUPER", "超级助手"),
     BYCLAW_EXE("BYCLAW_EXE", "openclaw"),
     BYCLAW_DATA("BYCLAW_DATA", "datacloud"),
     BYCLAW_QA("BYCLAW_QA", "搜问"),

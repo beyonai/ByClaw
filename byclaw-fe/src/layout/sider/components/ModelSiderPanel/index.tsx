@@ -56,7 +56,7 @@ const ModelSiderPanel: React.FC = () => {
   const intl = useIntl();
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const { agentId, EventEmitter } = useGlobal();
+  const { EventEmitter } = useGlobal();
   const activeSiderAgent = useActiveSiderAgent();
   const isModelsPage = pathname.startsWith('/models');
   const { defaultDigEmployeeId, userInfo } = useSelector(({ employees, user }: any) => ({
@@ -64,9 +64,10 @@ const ModelSiderPanel: React.FC = () => {
     userInfo: user?.userInfo,
   }));
 
+  // 模型列表与其它左侧资源面板统一使用当前联动员工。
   const resourceId = useMemo(
-    () => `${agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId || ''}`,
-    [agentId, defaultDigEmployeeId, userInfo?.defaultDigEmployeeId]
+    () => `${activeSiderAgent.resourceId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId || ''}`,
+    [activeSiderAgent.resourceId, defaultDigEmployeeId, userInfo?.defaultDigEmployeeId]
   );
 
   const formatTokens = (n: number) => {
@@ -265,11 +266,11 @@ const ModelSiderPanel: React.FC = () => {
                       {current
                         ? intl.formatMessage({ id: 'fileBrowserEntry.debug.currentModel' })
                         : intl.formatMessage({
-                            id:
+                          id:
                               item.status === 'ENABLED'
                                 ? 'personalModel.action.enable'
                                 : 'personalModel.action.disable',
-                          })}
+                        })}
                     </Tag>
                   </div>
                   <div className={styles.modelCode}>{item.modelCode || '-'}</div>

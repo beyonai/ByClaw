@@ -22,8 +22,10 @@ import {
 } from 'antd';
 import {
   AppstoreOutlined,
+  BarChartOutlined,
   ClockCircleOutlined,
   CloseOutlined,
+  CloudDownloadOutlined,
   DeleteOutlined,
   DingdingOutlined,
   EditOutlined,
@@ -32,7 +34,9 @@ import {
   FileTextOutlined,
   FundProjectionScreenOutlined,
   GithubOutlined,
+  IdcardOutlined,
   LeftOutlined,
+  PlayCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
   RightOutlined,
@@ -74,8 +78,25 @@ import {
   type DevloopTaskFileDiff,
 } from '@/service/devloop';
 import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
+import { queryMyCreatedAndSubscribedAgentsV2 } from '@/service/digitalEmployees';
+import { getResourceListByPage as listKnowledgeBases } from '@/service/knowledgeCenter';
 import SessionOverviewDrawer from './SessionOverviewDrawer';
 import TaskDetailDrawer from './TaskDetailDrawer';
+import {
+  OperationAccountPanel,
+  OperationTaskFormModal,
+  OperationWorkflowTimeline,
+  type OperationAccount,
+  type OperationAccountFormValues,
+  type OperationAgentOption,
+  type OperationIdentifier,
+  type OperationSelectOption,
+  type OperationTaskFormValues,
+  type OperationTaskType,
+  type OperationWorkOption,
+  type OperationWorkflowStatus,
+  type OperationWorkflowStep,
+} from './operation';
 import { isCurrentUserTaskAssignee } from './taskAccess';
 import { getTaskDateRangePresets, type TaskDateRange } from './taskDatePresets';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
@@ -112,9 +133,14 @@ import { downloadFile as downloadUrlFile, getFileUrl } from '@/utils/file';
 import { sessionHandler } from '@/utils/session';
 import type { ISession } from '@/typescript/session';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
+import { ResourceTypeMap } from '@/constants/resource';
 import ProjectMemberList from './ProjectMemberList';
+import Integration from './Integration';
+import RequirementSplitModal from './RequirementSplitModal';
+import type { SplitTaskDraft } from './RequirementSplitModal/types';
 import ListEndMessage from './ListEndMessage';
 import styles from './index.module.less';
+import operationStyles from './operation/index.module.less';
 
 type SourceType = 'dingtalk' | 'dingtalk_todo' | 'github_issue';
 
@@ -232,6 +258,12 @@ const getTaskStatusMeta = (status?: string) => {
   if (['暂停', 'paused', 'pause'].includes(normalizedStatus)) {
     return { labelId: 'task.status.paused', className: 'Paused' };
   }
+  if (['待确认', 'confirm', 'waiting_confirmation'].includes(normalizedStatus)) {
+    return { labelId: 'task.status.waitingConfirmation', className: 'Paused' };
+  }
+  if (['失败', 'failed', 'error'].includes(normalizedStatus)) {
+    return { labelId: 'task.status.failed', className: 'Failed' };
+  }
   return { labelId: 'task.status.pending', className: 'Pending' };
 };
 
@@ -272,6 +304,158 @@ type ManualRequirementForm = {
   productContent: string;
 };
 
+type OperationProjectDetailData = {
+  operationAccounts?: unknown[];
+  operationChannels?: unknown[];
+  accounts?: unknown[];
+};
+
+// 个别服务版本会在返回值外包一层 data，统一优先取第一个非空数组，避免表单选项因响应形态不同丢失。
+const getFirstOperationArray = (...candidates: unknown[]): any[] => {
+  const arrayCandidates = candidates.filter(Array.isArray);
+  return arrayCandidates.find((candidate) => candidate.length > 0) || arrayCandidates[0] || [];
+};
+
+// 运营账号接口还在联调阶段，这里集中兼容项目详情已返回的三种字段名。
+const getOperationAccountSource = (detail?: OperationProjectDetailData | null): Record<string, any>[] => {
+  return getFirstOperationArray(detail?.operationAccounts, detail?.operationChannels, detail?.accounts).filter(
+    (item): item is Record<string, any> => !!item && typeof item === 'object'
+  );
+};
+
+// 后端当前有多种登录状态表达，统一为账号卡片使用的固定状态枚举。
+const normalizeOperationLoginStatus = (account: Record<string, any>): OperationAccount['loginStatus'] => {
+  const status = `${account.loginStatus || account.status || ''}`.trim().toLowerCase();
+  if (['logged_in', 'online', 'connected'].includes(status) || account.loggedIn === true) return 'logged_in';
+  if (['expired', 'invalid'].includes(status)) return 'expired';
+  if (['logged_out', 'offline', 'disconnected'].includes(status) || account.loggedIn === false) return 'logged_out';
+  return 'unknown';
+};
+
+// 项目详情返回的账号结构未完全统一，依次解析已知的同义字段，保证账号管理和任务表单使用同一数据。
+const normalizeOperationAccounts = (detail?: OperationProjectDetailData | null): OperationAccount[] => {
+  return getOperationAccountSource(detail)
+    .map((item, index) => ({
+      id: item.id ?? item.operationAccountId ?? item.accountPkId ?? item.accountId ?? `operation-account-${index}`,
+      platformId: `${item.platformId ?? item.platform ?? item.channelId ?? ''}`,
+      accountName: item.accountName || item.name || '',
+      accountId: `${item.accountId ?? item.platformAccountId ?? item.accountCode ?? ''}`,
+      avatar: item.avatar,
+      loginStatus: normalizeOperationLoginStatus(item),
+      metrics: {
+        followers: item.metrics?.followers ?? item.followers,
+        works: item.metrics?.works ?? item.worksCount,
+        views: item.metrics?.views ?? item.metrics?.reads ?? item.views,
+        interactions: item.metrics?.interactions ?? item.interactions,
+        followerGrowth: item.metrics?.followerGrowth ?? item.metrics?.growth,
+      },
+      canEdit: item.canEdit,
+    }))
+    .filter((item) => item.platformId && item.accountName);
+};
+
+// 作品与账号一起从项目详情读取，分析任务再按账号过滤可选作品。
+const getOperationWorks = (detail?: OperationProjectDetailData | null): OperationWorkOption[] => {
+  return getOperationAccountSource(detail).flatMap((account) => {
+    const accountId = account.id ?? account.operationAccountId ?? account.accountPkId ?? account.accountId;
+    const works = Array.isArray(account.works) ? account.works : [];
+    return works
+      .filter((work): work is Record<string, any> => !!work && typeof work === 'object')
+      .map((work, index) => ({
+        value: work.id ?? work.workId ?? `${accountId || 'account'}-work-${index}`,
+        label: work.title || work.name || `${work.id || work.workId || ''}`,
+        accountId,
+      }));
+  });
+};
+
+// 列表和详情需兼容后端的旧枚举值，前端统一显示三类运营任务。
+const normalizeOperationTaskType = (task: any): OperationTaskType => {
+  const taskType = `${task?.taskType || task?.operationType || task?.type || ''}`.trim().toLowerCase();
+  if (['content', 'publish', 'content_creation', 'content_publish'].includes(taskType)) return 'content';
+  if (['analyze', 'analysis', 'analytics', 'data_analysis'].includes(taskType)) return 'analyze';
+  return 'collect';
+};
+
+// 工作流的运行状态来源不同，下方统一映射给时间轴的状态枚举。
+const normalizeOperationWorkflowStatus = (status?: string): OperationWorkflowStatus => {
+  const normalizedStatus = `${status || ''}`.trim().toLowerCase();
+  if (['doing', 'running', 'in_progress'].includes(normalizedStatus)) return 'in_progress';
+  if (['confirm', 'waiting_confirmation', 'paused'].includes(normalizedStatus)) return 'waiting_confirmation';
+  if (['done', 'completed', 'success'].includes(normalizedStatus)) return 'completed';
+  if (['failed', 'error'].includes(normalizedStatus)) return 'failed';
+  return 'pending';
+};
+
+// 任务工作流在新老接口中位置不同，按已知字段依次查找并归一化步骤。
+const normalizeOperationWorkflow = (task: any): OperationWorkflowStep[] => {
+  const workflowCandidates = [
+    task?.workflow,
+    task?.workflowSteps,
+    task?.stages,
+    task?.taskState?.stages,
+    task?.state?.stages,
+  ];
+  const workflow = workflowCandidates.find((candidate) => Array.isArray(candidate));
+  if (!Array.isArray(workflow)) return [];
+
+  return workflow
+    .filter((step) => !!step && typeof step === 'object')
+    .map((step: Record<string, any>, index) => ({
+      id: step.id ?? step.stageId ?? step.stepId ?? index,
+      name: step.name || step.stageName || step.title || `${index + 1}`,
+      agentName: step.agentName || step.agent || step.executorName,
+      status: normalizeOperationWorkflowStatus(step.status || step.state),
+      summary: step.summary || step.detail || step.resultSummary || step.activity,
+      startedAt: step.startedAt || step.startTime,
+      completedAt: step.completedAt || step.finishTime,
+    }));
+};
+
+// 运营任务配置可能以 JSON 字符串或对象返回，只接受普通对象避免数组被误当配置读取。
+const parseOperationConfig = (rawConfig: unknown): Record<string, any> => {
+  if (!rawConfig) return {};
+  if (typeof rawConfig === 'object' && !Array.isArray(rawConfig)) return rawConfig as Record<string, any>;
+  if (typeof rawConfig !== 'string') return {};
+  try {
+    const parsedConfig = JSON.parse(rawConfig);
+    return parsedConfig && typeof parsedConfig === 'object' && !Array.isArray(parsedConfig) ? parsedConfig : {};
+  } catch {
+    return {};
+  }
+};
+
+// 任务详情既可直接返回分类配置，也可把三种配置收在统一对象中，这里优先读取当前任务类型的配置。
+const getOperationTaskConfig = (task: any, taskType: OperationTaskType): Record<string, any> => {
+  const rootConfig = parseOperationConfig(task?.operationConfig || task?.config);
+  const configKey =
+    taskType === 'collect' ? 'collectConfig' : taskType === 'content' ? 'contentConfig' : 'analyzeConfig';
+  return parseOperationConfig(task?.[configKey] || rootConfig[configKey] || rootConfig);
+};
+
+// 执行数字员工可能以单值、逗号分隔字符串或数组返回，统一为数组后再进行名称匹配。
+const normalizeOperationIdentifierList = (rawValue: unknown): OperationIdentifier[] => {
+  if (Array.isArray(rawValue)) {
+    return rawValue.filter(
+      (value): value is OperationIdentifier =>
+        (typeof value === 'string' || typeof value === 'number') && `${value}`.trim() !== ''
+    );
+  }
+  if (typeof rawValue === 'number') return [rawValue];
+  if (typeof rawValue !== 'string' || !rawValue.trim()) return [];
+
+  try {
+    const parsedValue = JSON.parse(rawValue);
+    if (Array.isArray(parsedValue)) return normalizeOperationIdentifierList(parsedValue);
+  } catch {
+    // 非 JSON 字符串继续按逗号分隔格式处理。
+  }
+  return rawValue
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+};
+
 type ResourceFileScope = 'current' | 'all';
 type ProjectResourceSession = NonNullable<ProjectSpace['sessions']>[number];
 type ProjectSpaceFileItem = FileBrowserItem &
@@ -282,12 +466,15 @@ type ProjectSpaceFileTreeItem = FileTreeItem & ProjectSpaceFileItem;
 
 type Props = {
   project?: ProjectSpace;
+  projects?: ProjectSpace[];
+  onSwitchProject?: (projectId: string | number) => void;
   onBack: () => void;
   onEditProject?: (project: ProjectSpace) => void;
   onDeleteProject?: (project: ProjectSpace) => void;
   onProjectSharedChange?: (projectId: string | number) => void;
   onCurrentUserRemoved?: (projectId: number) => void;
   developProjectEnabled?: boolean;
+  operationProjectEnabled?: boolean;
 };
 
 const REQUIREMENT_PAGE_SIZE = 20;
@@ -477,12 +664,15 @@ const getResourceSessionIdByPath = (path: string) => {
 
 const ProjectDetailPanel: React.FC<Props> = ({
   project,
+  projects,
+  onSwitchProject,
   onBack,
   onEditProject,
   onDeleteProject,
   onProjectSharedChange,
   onCurrentUserRemoved,
   developProjectEnabled = false,
+  operationProjectEnabled = false,
 }) => {
   const intl = useIntl();
   // 项目详情的所有固定界面文案统一从 detail 命名空间读取。
@@ -509,11 +699,22 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [visibleRequirementCount, setVisibleRequirementCount] = useState(REQUIREMENT_PAGE_SIZE);
   const [detailReq, setDetailReq] = useState<RequirementItem | null>(null);
   const [startingRequirementIds, setStartingRequirementIds] = useState<Set<number>>(() => new Set());
+  // 拆单弹窗:点「启动」先弹此窗确认多仓库任务拆分,确认后再走真实启动(演示态)。
+  const [splitRequirement, setSplitRequirement] = useState<RequirementItem | null>(null);
   const [tasks, setTasks] = useState<any[]>([]);
   const [hasMoreTasks, setHasMoreTasks] = useState(false);
   const [taskDateRange, setTaskDateRange] = useState<TaskDateRange>(null);
   const [taskSearchKeyword, setTaskSearchKeyword] = useState('');
-  const [, setMembers] = useState<any[]>([]);
+  const [members, setMembers] = useState<any[]>([]);
+  // 运营任务表单依赖的账号、作品、知识库、数字员工均由详情容器统一加载和归一化。
+  const [operationAccounts, setOperationAccounts] = useState<OperationAccount[]>([]);
+  const [operationWorks, setOperationWorks] = useState<OperationWorkOption[]>([]);
+  const [operationKnowledgeBases, setOperationKnowledgeBases] = useState<OperationSelectOption[]>([]);
+  const [operationAgents, setOperationAgents] = useState<OperationAgentOption[]>([]);
+  const [operationOptionsLoading, setOperationOptionsLoading] = useState(false);
+  const [operationAgentsLoading, setOperationAgentsLoading] = useState(false);
+  const [operationAccountSaving, setOperationAccountSaving] = useState(false);
+  const [operationTaskSaving, setOperationTaskSaving] = useState(false);
   const [resourceFileScope, setResourceFileScope] = useState<ResourceFileScope>('current');
   const [sharedFiles, setSharedFiles] = useState<FileBrowserItem[]>([]);
   const [sharedFilesLoading, setSharedFilesLoading] = useState(false);
@@ -564,6 +765,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [logList, setLogList] = useState<ScanLogEntry[]>([]);
   const [logLoading, setLogLoading] = useState(false);
   const [channelPanelOpen, setChannelPanelOpen] = useState(false);
+  // 运营账号信息较多，沿用渠道配置的覆盖式大面板，避免挤压左侧项目详情。
+  const [operationAccountPanelOpen, setOperationAccountPanelOpen] = useState(false);
+  // 运营任务使用独立表单弹窗，和账号大面板不能同时打开。
+  const [operationTaskModalOpen, setOperationTaskModalOpen] = useState(false);
   const [taskKanbanOpen, setTaskKanbanOpen] = useState(false);
   // 研发任务通过更多操作打开环节详情抽屉，不必先经整体视图。
   const [detailTask, setDetailTask] = useState<any>(null);
@@ -599,6 +804,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const sourceSavingRef = useRef(false);
   // 手工需求的新建和修改共用同步锁，避免 React 状态尚未刷新时重复提交。
   const manualRequirementSubmittingRef = useRef(false);
+  // 状态更新前先占用同步锁，避免运营任务表单双击时重复调用创建接口。
+  const operationTaskSubmittingRef = useRef(false);
   // 删除确认弹窗返回 Promise 时会展示 loading；同步锁用于拦截重复确认。
   const deletingManualRequirementIdRef = useRef<number | null>(null);
   const resourceClickTimerRef = useRef<number | null>(null);
@@ -636,6 +843,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
     if (projectType === 'develop') {
       return { classSuffix: 'Development', text: intl.formatMessage({ id: 'projectSpace.scene.development' }) };
     }
+    if (projectType === 'operation') {
+      return { classSuffix: 'Operation', text: intl.formatMessage({ id: 'projectSpace.scene.operation' }) };
+    }
     if (project.sharedFlag) {
       return { classSuffix: 'Shared', text: intl.formatMessage({ id: 'projectSpace.scene.shared' }) };
     }
@@ -643,15 +853,17 @@ const ProjectDetailPanel: React.FC<Props> = ({
   }, [intl, project, projectType]);
   // 未配置研发项目时，即使存在历史 develop 数据也不展示研发闭环能力。
   const isDevelopProject = developProjectEnabled && projectType === 'develop';
+  // 运营能力与项目类型静态参数共用开关，避免未启用的环境误展示运营工作台。
+  const isOperationProject = operationProjectEnabled && projectType === 'operation';
   const fileResourceId = activeSiderAgent.resourceId || (project?.resourceId ? `${project.resourceId}` : '');
   const { handlePreview: handleResourcePreview, handleDownload: handleResourceDownload } = useFilePreviewActions({
     resourceId: fileResourceId,
     EventEmitter,
     previewClassName: fileSiderStyles.previewContent,
   });
-  // 需求只服务研发项目；成员管理同时服务研发项目和普通共享项目。
+  // 需求只服务研发项目；运营项目固定展示任务、资源、成员三个页签。
   const showRequirementsTab = isDevelopProject;
-  const showMembersTab = isDevelopProject || !!project?.sharedFlag;
+  const showMembersTab = isDevelopProject || isOperationProject || !!project?.sharedFlag;
   const canEnterDetailTaskSession = useMemo(
     () => isCurrentUserTaskAssignee(detailTask, userInfo),
     [detailTask, userInfo]
@@ -745,9 +957,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
         setChannelPanelOpen(false);
         clearDetailPanel?.();
       }
+      if (operationAccountPanelOpen) {
+        // 账号管理与任务详情都占用右侧大区域，打开任务详情前先移除账号管理覆盖层。
+        setOperationAccountPanelOpen(false);
+        clearDetailPanel?.();
+      }
       setDetailTask(task);
     },
-    [channelPanelOpen, clearDetailPanel]
+    [channelPanelOpen, clearDetailPanel, operationAccountPanelOpen]
   );
 
   const projectSessions = useMemo(() => {
@@ -959,9 +1176,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const fetchRepos = useCallback(async () => {
     if (!projectId) return;
-    // 收集源编辑页的仓库下拉复用项目详情接口返回的 repos，和 /devloop 页面保持一致。
+    // 项目详情接口同时承载仓库与运营账号，后端字段落地后无需再改任务表单的数据入口。
     const detail = await getProject(projectId);
     setRepos(detail?.repos || []);
+    setOperationAccounts(normalizeOperationAccounts(detail));
+    setOperationWorks(getOperationWorks(detail));
   }, [projectId]);
 
   useEffect(() => {
@@ -1002,6 +1221,71 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setMembers(memberList);
   }, [projectId]);
 
+  const fetchOperationAgents = useCallback(async () => {
+    setOperationAgentsLoading(true);
+    try {
+      const res = await queryMyCreatedAndSubscribedAgentsV2({ pageNum: 1, pageSize: 100 });
+      // 请求封装通常直接返回 list，部分环境仍会保留一层 data，这里兼容两种响应形态。
+      const agentList = getFirstOperationArray(res?.list, res?.data?.list);
+      setOperationAgents(
+        agentList
+          .map((agent: any) => ({
+            value: agent.resourceId ?? agent.agentId ?? agent.id,
+            label: agent.agentName || agent.resourceName || agent.name || '',
+            avatar: agent.avatar || agent.avatarUrl,
+            description: agent.description || agent.resourceDesc,
+            keywords: [agent.agentName, agent.resourceName, agent.name, agent.description].filter(Boolean).join(' '),
+          }))
+          .filter(
+            (agent: OperationAgentOption) =>
+              agent.value !== undefined && agent.value !== null && `${agent.value}` !== '' && !!agent.label
+          )
+      );
+    } catch (error) {
+      console.error('Failed to load operation agents:', error);
+      setOperationAgents([]);
+    } finally {
+      setOperationAgentsLoading(false);
+    }
+  }, []);
+
+  const fetchOperationKnowledgeBases = useCallback(async () => {
+    setOperationOptionsLoading(true);
+    try {
+      const res = await listKnowledgeBases({
+        pageNum: 1,
+        pageSize: 100,
+        queryAll: true,
+        resourceTypeList: [ResourceTypeMap.knowledgeBase, ResourceTypeMap.knowledgeBaseQa],
+      });
+      // 知识库接口在不同版本中使用 rows 或 list，统一归一后再提供给运营任务表单。
+      const knowledgeBaseList = getFirstOperationArray(res?.rows, res?.list, res?.data?.rows, res?.data?.list);
+      setOperationKnowledgeBases(
+        knowledgeBaseList
+          .map((knowledgeBase: any) => ({
+            value:
+              knowledgeBase.resourceId ??
+              knowledgeBase.resourceSourcePkId ??
+              knowledgeBase.datasetId ??
+              knowledgeBase.id,
+            label: knowledgeBase.resourceName || knowledgeBase.datasetName || knowledgeBase.name || '',
+          }))
+          .filter(
+            (knowledgeBase: OperationSelectOption) =>
+              knowledgeBase.value !== undefined &&
+              knowledgeBase.value !== null &&
+              `${knowledgeBase.value}` !== '' &&
+              !!knowledgeBase.label
+          )
+      );
+    } catch (error) {
+      console.error('Failed to load operation knowledge bases:', error);
+      setOperationKnowledgeBases([]);
+    } finally {
+      setOperationOptionsLoading(false);
+    }
+  }, []);
+
   const handleMembersChange = useCallback(
     (memberList: any[]) => {
       setMembers(memberList);
@@ -1022,6 +1306,139 @@ const ProjectDetailPanel: React.FC<Props> = ({
     }
     onBack();
   }, [clearDetailPanel, onBack, onCurrentUserRemoved, projectId]);
+
+  // 运营任务负责人只能从当前项目成员中选择，避免把无项目权限的用户写入任务。
+  const operationAssigneeOptions = useMemo<OperationSelectOption[]>(
+    () =>
+      members
+        .map((member) => ({
+          value: member.userId ?? member.targetId ?? member.id,
+          label: member.userName || member.targetName || member.name || '',
+        }))
+        .filter(
+          (member) => member.value !== undefined && member.value !== null && `${member.value}` !== '' && !!member.label
+        ),
+    [members]
+  );
+
+  // 将异步加载的数据收敛为表单唯一选项入口，避免子组件直接依赖多个接口响应。
+  const operationTaskOptions = useMemo(
+    () => ({
+      assignees: operationAssigneeOptions,
+      agents: operationAgents,
+      knowledgeBases: operationKnowledgeBases,
+      accounts: operationAccounts,
+      works: operationWorks,
+    }),
+    [operationAccounts, operationAgents, operationAssigneeOptions, operationKnowledgeBases, operationWorks]
+  );
+
+  // 覆盖式账号面板关闭时必须同时清理右侧详情容器，避免遗留遮罩层。
+  const handleCloseOperationAccountPanel = useCallback(() => {
+    setOperationAccountPanelOpen(false);
+    clearDetailPanel?.();
+  }, [clearDetailPanel]);
+
+  // 账号管理只服务运营项目；打开前关闭任务详情和整体视图，防止多个大面板重叠。
+  const handleOpenOperationAccountPanel = useCallback(() => {
+    if (!isOperationProject) return;
+    setDetailTask(null);
+    setTaskKanbanOpen(false);
+    setOperationTaskModalOpen(false);
+    setOperationAccountPanelOpen(true);
+  }, [isOperationProject]);
+
+  // 专用账号接口尚未合入时先维护当前页面草稿，后续仅替换此处的保存实现即可。
+  const handleSaveOperationAccount = useCallback(
+    async (values: OperationAccountFormValues, account?: OperationAccount | null) => {
+      setOperationAccountSaving(true);
+      try {
+        setOperationAccounts((currentAccounts) => {
+          if (account) {
+            return currentAccounts.map((currentAccount) =>
+              `${currentAccount.id}` === `${account.id}` ? { ...currentAccount, ...values } : currentAccount
+            );
+          }
+          return [
+            ...currentAccounts,
+            {
+              ...values,
+              id: `operation-account-${Date.now()}`,
+              loginStatus: 'logged_out',
+              canEdit: true,
+            },
+          ];
+        });
+        message.success(intl.formatMessage({ id: 'projectSpace.operation.account.saveSuccess' }));
+      } finally {
+        setOperationAccountSaving(false);
+      }
+    },
+    [intl]
+  );
+
+  // 新建运营任务时重新读取关联资源，确保成员、账号、知识库和数字员工均为最新数据。
+  const handleOpenOperationTaskModal = useCallback(() => {
+    if (!isOperationProject) return;
+    if (operationAccountPanelOpen) handleCloseOperationAccountPanel();
+    setOperationTaskModalOpen(true);
+    // 表单选项来自现有成员、知识库和数字员工接口，打开时并行刷新以避免使用旧缓存。
+    void Promise.allSettled([fetchRepos(), fetchOperationAgents(), fetchOperationKnowledgeBases()]);
+  }, [
+    fetchRepos,
+    fetchOperationAgents,
+    fetchOperationKnowledgeBases,
+    handleCloseOperationAccountPanel,
+    isOperationProject,
+    operationAccountPanelOpen,
+  ]);
+
+  // 运营任务提交前统一序列化日期，并只携带当前任务类型对应的配置对象。
+  const handleSubmitOperationTask = useCallback(
+    async (values: OperationTaskFormValues) => {
+      if (!projectId || operationTaskSubmittingRef.current) return;
+
+      // 表单保存 Dayjs，接口只接收标准时间字符串；开始、结束时间按整天边界计算。
+      const serializeDateRange = (dateRange?: NonNullable<OperationTaskFormValues['collectConfig']>['dateRange']) => ({
+        startTime: dateRange?.[0]?.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
+        endTime: dateRange?.[1]?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
+      });
+      const collectConfig = values.collectConfig
+        ? { ...values.collectConfig, ...serializeDateRange(values.collectConfig.dateRange), dateRange: undefined }
+        : undefined;
+      const analyzeConfig = values.analyzeConfig
+        ? { ...values.analyzeConfig, ...serializeDateRange(values.analyzeConfig.dateRange), dateRange: undefined }
+        : undefined;
+
+      operationTaskSubmittingRef.current = true;
+      setOperationTaskSaving(true);
+      try {
+        await createTask({
+          projectId,
+          title: values.taskName.trim(),
+          taskName: values.taskName.trim(),
+          description: values.description?.trim() || undefined,
+          taskType: values.taskType,
+          assigneeId: values.assigneeId,
+          dueTime: values.dueTime?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
+          controllerAgentId: values.agentSelection?.controllerAgentId,
+          executorAgentIds: values.agentSelection?.executorAgentIds || [],
+          collectConfig,
+          contentConfig: values.contentConfig,
+          analyzeConfig,
+        });
+        message.success(intl.formatMessage({ id: 'projectSpace.operation.task.createSuccess' }));
+        setOperationTaskModalOpen(false);
+        await fetchTasks({ pageNum: 1 });
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'projectSpace.operation.task.createFailed' }));
+      } finally {
+        operationTaskSubmittingRef.current = false;
+        setOperationTaskSaving(false);
+      }
+    },
+    [fetchTasks, intl, projectId]
+  );
 
   const fetchProjectResourceSessions = useCallback(async () => {
     if (!projectId) return;
@@ -1507,6 +1924,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setHasMoreTasks(false);
     setTasksRefreshLoading(false);
     setTasksLoadingMore(false);
+    setOperationAccountPanelOpen(false);
+    setOperationTaskModalOpen(false);
+    setOperationAccounts([]);
+    setOperationAgents([]);
+    setOperationKnowledgeBases([]);
+    setOperationWorks([]);
+    setDetailTask(null);
     setActiveTab(showRequirementsTab ? 'requirements' : 'tasks');
     setDetailReq(null);
     setRequirementSearchKeyword('');
@@ -1627,6 +2051,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       { key: 'tasks', label: t('tabs.tasks') },
       { key: 'resources', label: t('tabs.resources') },
       ...(showMembersTab ? [{ key: 'members', label: t('tabs.members') }] : []),
+      ...(showRequirementsTab ? [{ key: 'integration', label: t('tabs.integration') }] : []),
     ],
     [showMembersTab, showRequirementsTab, t]
   );
@@ -2129,6 +2554,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
     }
   };
 
+  // 拆单确认:演示态下拆分结果尚无后端多任务接口,仍走原有单任务启动;真实实现将按 tasks 批量建任务。
+  const handleConfirmSplit = async (splitTasks: SplitTaskDraft[]) => {
+    const requirement = splitRequirement;
+    if (!requirement) return;
+    setSplitRequirement(null);
+    void splitTasks;
+    await handleStartTask(requirement);
+  };
+
   const handleGroupSearch = (value: string) => {
     if (!value || value.length < 2) {
       setGroupOptions([]);
@@ -2375,6 +2809,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
       // 渠道配置大面板只服务需求页签；切换到其他页签时立即移除右侧覆盖层。
       handleCloseChannelPanel();
     }
+    if (nextTab !== 'tasks' && operationAccountPanelOpen) {
+      // 账号管理仅属于运营项目任务页签，切换页签时立即收起覆盖层。
+      handleCloseOperationAccountPanel();
+    }
     setActiveTab(nextTab);
   };
 
@@ -2436,6 +2874,66 @@ const ProjectDetailPanel: React.FC<Props> = ({
     clearDetailPanel?.();
   }, [activeTab, channelPanelOpen, clearDetailPanel]);
 
+  useEffect(() => {
+    if (!operationAccountPanelOpen) return;
+    // 账号管理使用覆盖主会话区域的大页面，容量足以承载多平台筛选和账号数据卡片。
+    const overlayDetailPanelOptions = { overlay: true } as NonNullable<
+      Parameters<NonNullable<typeof setDetailPanel>>[1]
+    > & { overlay: boolean };
+    setDetailPanel?.(
+      <OperationAccountPanel
+        accounts={operationAccounts}
+        loading={false}
+        savingAccount={operationAccountSaving}
+        onBack={handleCloseOperationAccountPanel}
+        onSaveAccount={handleSaveOperationAccount}
+      />,
+      overlayDetailPanelOptions
+    );
+  }, [
+    handleCloseOperationAccountPanel,
+    handleSaveOperationAccount,
+    operationAccountPanelOpen,
+    operationAccountSaving,
+    operationAccounts,
+    setDetailPanel,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (operationAccountPanelOpen) clearDetailPanel?.();
+    };
+  }, [clearDetailPanel, operationAccountPanelOpen]);
+
+  useEffect(() => {
+    if (!operationAccountPanelOpen || activeTab === 'tasks') return;
+    setOperationAccountPanelOpen(false);
+    clearDetailPanel?.();
+  }, [activeTab, clearDetailPanel, operationAccountPanelOpen]);
+
+  // 详情抽屉底部启动入口:与列表「启动」按钮同源,读完需求内容可直接启动,无需退回列表 hover。
+  const renderRequirementDetailFooter = (requirement: RequirementItem) => {
+    const isStarting = startingRequirementIds.has(requirement.itemId);
+    const isStarted = requirement.sessionId !== undefined && requirement.sessionId !== null;
+    return (
+      <div className={styles.requirementDetailFooter}>
+        {isStarted ? (
+          <Button disabled>{t('requirement.started')}</Button>
+        ) : (
+          <Button
+            type="primary"
+            loading={isStarting}
+            disabled={isStarting}
+            // V2:同样先弹拆单窗确认多仓库任务,确认后再启动。
+            onClick={() => setSplitRequirement(requirement)}
+          >
+            {t(isStarting ? 'requirement.starting' : 'requirement.start')}
+          </Button>
+        )}
+      </div>
+    );
+  };
+
   // 需求列表保持紧凑，完整字段统一在右侧抽屉展示。
   const renderRequirementDetailDrawer = () => {
     if (!detailReq) return null;
@@ -2458,6 +2956,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
         open={!!detailReq}
         onClose={() => setDetailReq(null)}
         width={640}
+        footer={renderRequirementDetailFooter(detailReq)}
       >
         <div className={styles.requirementDetailDrawerContent}>
           <div className={styles.requirementDetailTitleRow}>
@@ -2663,7 +3162,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
                             disabled={isStarting}
                             onClick={(event) => {
                               event.stopPropagation();
-                              void handleStartTask(item);
+                              // V2:先弹拆单窗确认多仓库任务,确认后再启动。
+                              setSplitRequirement(item);
                             }}
                           >
                             {t(isStarting ? 'requirement.starting' : 'requirement.start')}
@@ -2729,7 +3229,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
     </div>
   );
 
-  // 资源 Tab 顶部的“代码变更”卡片:仅研发项目有任务/分支概念,普通项目隐藏。
   const renderCodeChanges = () => {
     if (!isDevelopProject) return null;
     const empty = (id: string, values?: Record<string, string | number>) => (
@@ -3013,9 +3512,162 @@ const ProjectDetailPanel: React.FC<Props> = ({
     );
   };
 
+  const renderOperationTaskDetailDrawer = () => {
+    if (!detailTask) return null;
+
+    const operationTaskType = normalizeOperationTaskType(detailTask);
+    const operationTaskConfig = getOperationTaskConfig(detailTask, operationTaskType);
+    const workflowSteps = normalizeOperationWorkflow(detailTask);
+    const rawProgress = Number(detailTask.progress ?? 0);
+    // 任务进度缺失或不是数字时按 0 展示，避免给 progress 原生控件传入 NaN。
+    const progress = Number.isFinite(rawProgress) ? Math.min(100, Math.max(0, rawProgress)) : 0;
+    const operationTaskTypeLabel = intl.formatMessage({
+      id: `projectSpace.operation.task.type.${operationTaskType}`,
+    });
+    const platformId = `${
+      operationTaskConfig.channel ||
+      operationTaskConfig.publishChannel ||
+      operationTaskConfig.platformId ||
+      detailTask.platformId ||
+      ''
+    }`;
+    const knownPlatformIds = ['wechat', 'xiaohongshu', 'video', 'douyin'];
+    const platformLabel = knownPlatformIds.includes(platformId)
+      ? intl.formatMessage({ id: `projectSpace.operation.platform.${platformId}` })
+      : platformId || '-';
+    const operationAccountId =
+      operationTaskConfig.publishAccountId ?? operationTaskConfig.accountId ?? detailTask.operationAccountId;
+    const operationAccount = operationAccounts.find((account) => `${account.id}` === `${operationAccountId}`);
+    const controllerAgentId =
+      detailTask.controllerAgentId ?? detailTask.agentSelection?.controllerAgentId ?? detailTask.operationAgentId;
+    const executorAgentIdsValue =
+      detailTask.executorAgentIds ?? detailTask.agentSelection?.executorAgentIds ?? detailTask.operationAgentIds;
+    const executorAgentIds = normalizeOperationIdentifierList(executorAgentIdsValue);
+    const controllerAgent = operationAgents.find((agent) => `${agent.value}` === `${controllerAgentId}`);
+    const executorAgentNames = operationAgents
+      .filter((agent) => executorAgentIds.some((agentId) => `${agentId}` === `${agent.value}`))
+      .map((agent) => agent.label)
+      .join(', ');
+    const taskDueTime = detailTask.dueTime || detailTask.due || detailTask.deadline;
+    const taskIcon =
+      operationTaskType === 'collect' ? (
+        <CloudDownloadOutlined />
+      ) : operationTaskType === 'content' ? (
+        <EditOutlined />
+      ) : (
+        <BarChartOutlined />
+      );
+
+    return (
+      <Drawer
+        title={intl.formatMessage({ id: 'projectSpace.operation.task.detail.title' })}
+        className={operationStyles.operationTaskDrawer}
+        open
+        onClose={() => setDetailTask(null)}
+        width={640}
+        extra={
+          detailTask.sessionId ? (
+            canEnterDetailTaskSession ? (
+              <Button
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                onClick={() => {
+                  handleOpenTaskSession(detailTask);
+                  setDetailTask(null);
+                }}
+              >
+                {intl.formatMessage({ id: 'projectSpace.operation.task.detail.enterSession' })}
+              </Button>
+            ) : (
+              <Button
+                icon={<EyeOutlined />}
+                onClick={() => {
+                  handleOpenReadonlySession(detailTask);
+                  setDetailTask(null);
+                }}
+              >
+                {intl.formatMessage({ id: 'projectSpace.operation.task.detail.viewSession' })}
+              </Button>
+            )
+          ) : null
+        }
+      >
+        <div className={styles.taskDetailDrawerContent}>
+          <div className={styles.taskDetailTitle}>{detailTask.title || detailTask.taskName || t('task.unnamed')}</div>
+          <div className={styles.taskHero}>
+            <div className={styles.taskHeroAgent}>
+              <span className={`${styles.taskHeroAvatar} ${operationStyles.operationTaskDetailIcon}`}>{taskIcon}</span>
+              <div>
+                <small>{operationTaskTypeLabel}</small>
+                <strong>{platformLabel}</strong>
+              </div>
+            </div>
+            <div className={styles.taskHeroProgress}>
+              <progress className={styles.taskHeroProgressBar} value={progress} max={100} />
+              <p>{intl.formatMessage({ id: 'projectSpace.operation.task.detail.progress' }, { progress })}</p>
+            </div>
+          </div>
+
+          <div className={styles.phaseSection}>
+            <h3 className={styles.phaseSectionTitle}>
+              {intl.formatMessage({ id: 'projectSpace.operation.task.detail.configuration' })}
+            </h3>
+            <div className={styles.taskContextGrid}>
+              <div className={`${styles.taskContextItem} ${styles.taskContextItemFull}`}>
+                <label>{intl.formatMessage({ id: 'projectSpace.operation.task.detail.description' })}</label>
+                <strong>{detailTask.description || '-'}</strong>
+              </div>
+              <div className={styles.taskContextItem}>
+                <label>{intl.formatMessage({ id: 'projectSpace.operation.task.detail.assignee' })}</label>
+                <strong>{detailTask.assigneeName || detailTask.assignee || '-'}</strong>
+              </div>
+              <div className={styles.taskContextItem}>
+                <label>{intl.formatMessage({ id: 'projectSpace.operation.task.detail.dueTime' })}</label>
+                <strong>
+                  {taskDueTime && dayjs(taskDueTime).isValid() ? dayjs(taskDueTime).format('YYYY-MM-DD') : '-'}
+                </strong>
+              </div>
+              <div className={styles.taskContextItem}>
+                <label>{intl.formatMessage({ id: 'projectSpace.operation.task.detail.account' })}</label>
+                <strong>{operationAccount?.accountName || detailTask.accountName || '-'}</strong>
+              </div>
+              <div className={styles.taskContextItem}>
+                <label>{intl.formatMessage({ id: 'projectSpace.operation.task.detail.topic' })}</label>
+                <strong>{operationTaskConfig.topic || '-'}</strong>
+              </div>
+              <div className={styles.taskContextItem}>
+                <label>{intl.formatMessage({ id: 'projectSpace.operation.task.detail.controllerAgent' })}</label>
+                <strong>{controllerAgent?.label || detailTask.controllerAgentName || '-'}</strong>
+              </div>
+              <div className={styles.taskContextItem}>
+                <label>{intl.formatMessage({ id: 'projectSpace.operation.task.detail.executorAgents' })}</label>
+                <strong>{executorAgentNames || detailTask.executorAgentNames?.join?.(', ') || '-'}</strong>
+              </div>
+            </div>
+          </div>
+
+          <OperationWorkflowTimeline steps={workflowSteps} />
+        </div>
+      </Drawer>
+    );
+  };
+
   const renderTasks = () => (
     <div className={styles.detailTaskPanel}>
       <div className={styles.detailTaskHeader}>
+        {isOperationProject && (
+          <button
+            type="button"
+            className={operationStyles.operationAccountEntry}
+            onClick={handleOpenOperationAccountPanel}
+          >
+            <span className={operationStyles.operationAccountEntryLabel}>
+              <IdcardOutlined />
+              <span>{intl.formatMessage({ id: 'projectSpace.operation.account.entry' })}</span>
+            </span>
+            <RightOutlined />
+          </button>
+        )}
         <div className={styles.detailTaskSearchRow}>
           <div className={`${styles.searchInput} ${styles.detailTaskSearch}`}>
             <Input
@@ -3040,29 +3692,46 @@ const ProjectDetailPanel: React.FC<Props> = ({
             />
           </Tooltip>
         </div>
-        {/* 普通项目任务按会话展示，仅隐藏研发项目专用的日期筛选和任务视图入口。 */}
-        {isDevelopProject && (
+        {/* 研发项目保留日期筛选；运营项目提供整体视图和新建任务入口。 */}
+        {(isDevelopProject || isOperationProject) && (
           <div className={styles.detailTaskHeaderActions}>
-            <DatePicker.RangePicker
-              size="small"
-              allowClear
-              value={taskDateRange}
-              placeholder={[t('task.dateStartPlaceholder'), t('task.dateEndPlaceholder')]}
-              presets={taskDatePresets}
-              onChange={(dates) => {
-                void fetchTasks({ pageNum: 1, dateRange: dates as TaskDateRange });
-              }}
-            />
-            {/* 研发项目始终保留任务视图入口，筛选无结果时仍可查看空态看板。 */}
+            {isDevelopProject && (
+              <DatePicker.RangePicker
+                size="small"
+                allowClear
+                value={taskDateRange}
+                placeholder={[t('task.dateStartPlaceholder'), t('task.dateEndPlaceholder')]}
+                presets={taskDatePresets}
+                onChange={(dates) => {
+                  void fetchTasks({ pageNum: 1, dateRange: dates as TaskDateRange });
+                }}
+              />
+            )}
+            {/* 两类任务都保留整体视图入口，筛选无结果时仍可查看空态看板。 */}
             <Tooltip title={t('task.viewTooltip')} placement="top">
               <Button
                 aria-label={t('task.viewTooltip')}
                 size="small"
                 className={`${styles.detailHeaderActionButton} ${styles.detailTaskViewButton}`}
                 icon={<AppstoreOutlined />}
-                onClick={() => setTaskKanbanOpen(true)}
+                onClick={() => {
+                  if (isOperationProject && operationAccountPanelOpen) handleCloseOperationAccountPanel();
+                  setTaskKanbanOpen(true);
+                }}
               />
             </Tooltip>
+            {/* 新建运营任务与新增需求保持一致，使用带悬停说明的紧凑图标按钮。 */}
+            {isOperationProject && (
+              <Tooltip title={intl.formatMessage({ id: 'projectSpace.operation.task.new' })} placement="top">
+                <Button
+                  aria-label={intl.formatMessage({ id: 'projectSpace.operation.task.new' })}
+                  size="small"
+                  className={styles.detailHeaderActionButton}
+                  icon={<PlusOutlined />}
+                  onClick={handleOpenOperationTaskModal}
+                />
+              </Tooltip>
+            )}
           </div>
         )}
       </div>
@@ -3077,13 +3746,32 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 {tasks.map((task) => {
                   const taskAssignee = task.assignee || task.assigneeName || task.agentName || '-';
                   const taskCreateTime = task.createTime ? dayjs(task.createTime).format('MM-DD HH:mm') : '-';
+                  const rawTaskDueTime = task.dueTime || task.due || task.deadline;
+                  const taskDueTime =
+                    rawTaskDueTime && dayjs(rawTaskDueTime).isValid()
+                      ? dayjs(rawTaskDueTime).format('YYYY-MM-DD')
+                      : '-';
+                  const operationTaskType = normalizeOperationTaskType(task);
+                  const operationTaskTypeLabel = intl.formatMessage({
+                    id: `projectSpace.operation.task.type.${operationTaskType}`,
+                  });
+                  const operationTaskIconClass = {
+                    collect: operationStyles.operationTaskIconCollect,
+                    content: operationStyles.operationTaskIconContent,
+                    analyze: operationStyles.operationTaskIconAnalyze,
+                  }[operationTaskType];
+                  const showStructuredTaskMeta = isDevelopProject || isOperationProject;
                   // 优先按用户 ID 判断处理人；历史数据缺失 ID 时再用用户名兜底，避免同名用户误判。
                   const isCurrentUserAssignee = isCurrentUserTaskAssignee(task, userInfo);
-                  // 非研发项目的任务即会话，第二行直接展示会话摘要；研发项目保留负责人和创建时间。
+                  // 普通项目按会话展示；研发任务和运营任务保留负责人及各自的关键时间。
                   const taskDescription = isDevelopProject
                     ? `${taskAssignee} · ${taskCreateTime}`
-                    : `${task.sessionContent || ''}`;
-                  const taskStatusMeta = getTaskStatusMeta(task.status || task.taskStatus || task.currentStatus);
+                    : isOperationProject
+                      ? `${taskAssignee} · ${taskDueTime}`
+                      : `${task.sessionContent || ''}`;
+                  const taskStatusMeta = getTaskStatusMeta(
+                    task.operationState || task.status || task.taskStatus || task.currentStatus
+                  );
                   // 下拉菜单展开时维持状态标签的让位，防止悬浮菜单遮挡右侧内容。
                   const isTaskActionOpen = openTaskActionId === `${task.taskId}`;
                   const isTaskSelected = selectedTaskId === `${task.taskId}`;
@@ -3091,9 +3779,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
                   return (
                     <div
                       key={task.taskId}
-                      className={`${styles.detailTaskCard} ${isTaskSelected ? styles.detailTaskCardActive : ''}`}
+                      className={`${styles.detailTaskCard} ${
+                        isOperationProject ? operationStyles.operationTaskCard : ''
+                      } ${isTaskSelected ? styles.detailTaskCardActive : ''}`}
                       onClick={() => {
                         setSelectedTaskId(`${task.taskId}`);
+                        if (isOperationProject && operationAccountPanelOpen) {
+                          // 从账号管理返回任务会话时先释放覆盖层，避免进入会话后仍遮挡主区域。
+                          handleCloseOperationAccountPanel();
+                        }
                         // 研发项目仅允许处理人进入会话，其他成员打开只读任务详情。
                         if (isDevelopProject && !isCurrentUserAssignee) {
                           handleOpenTaskDetail(task);
@@ -3107,23 +3801,37 @@ const ProjectDetailPanel: React.FC<Props> = ({
                           {/* 研发任务保持绿色研发图标，区别于普通会话。 */}
                           <FundProjectionScreenOutlined />
                         </div>
+                      ) : isOperationProject ? (
+                        <Tooltip title={operationTaskTypeLabel} placement="top">
+                          <div className={`${operationStyles.operationTaskIcon} ${operationTaskIconClass}`}>
+                            {operationTaskType === 'collect' ? (
+                              <CloudDownloadOutlined />
+                            ) : operationTaskType === 'content' ? (
+                              <EditOutlined />
+                            ) : (
+                              <BarChartOutlined />
+                            )}
+                          </div>
+                        </Tooltip>
                       ) : (
                         <ChatAvatar session={normalizeTaskSession(task, projectId, t)} size={32} />
                       )}
                       <div
                         className={`${styles.detailTaskCardHeader} ${
-                          isDevelopProject ? styles.detailTaskCardHeaderWithAction : ''
+                          showStructuredTaskMeta ? styles.detailTaskCardHeaderWithAction : ''
                         } ${isTaskActionOpen ? styles.detailTaskCardHeaderWithActionOpen : ''}`}
                       >
                         <div className={styles.detailTaskMain}>
                           <div className={styles.detailTaskTitleRow}>
-                            <h4 className={styles.detailTaskTitle}>{task.title || t('task.unnamed')}</h4>
+                            <h4 className={styles.detailTaskTitle}>
+                              {task.title || task.taskName || t('task.unnamed')}
+                            </h4>
                           </div>
                           {/* 任务名称和描述仅用于列表扫读，不显示悬停提示。 */}
                           <p className={styles.detailTaskDescription}>{taskDescription}</p>
                         </div>
-                        {/* 非研发项目的任务按普通会话展示，不显示研发任务状态。 */}
-                        {isDevelopProject && (
+                        {/* 普通项目按会话展示，不显示统一任务状态。 */}
+                        {showStructuredTaskMeta && (
                           <Tag
                             bordered={false}
                             className={`${styles.detailTaskStatusTag} ${
@@ -3133,7 +3841,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                             {t(taskStatusMeta.labelId)}
                           </Tag>
                         )}
-                        {isDevelopProject && (
+                        {showStructuredTaskMeta && (
                           <Dropdown
                             trigger={['hover']}
                             placement="bottomRight"
@@ -3149,7 +3857,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                               },
                             }}
                           >
-                            {/* 研发任务详情改为辅助操作，卡片主点击始终进入任务会话。 */}
+                            {/* 结构化任务详情作为辅助操作，卡片主点击仍进入任务会话。 */}
                             <Button
                               type="text"
                               size="small"
@@ -3174,7 +3882,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
               {!hasMoreTasks && !tasksLoading && <ListEndMessage />}
             </>
           ) : (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('common.empty')} />
+            <Empty
+              className={isOperationProject ? operationStyles.operationTaskEmpty : undefined}
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={
+                isOperationProject ? intl.formatMessage({ id: 'projectSpace.operation.task.empty' }) : t('common.empty')
+              }
+            />
           )}
           {tasksLoadingMore && tasks.length > 0 && (
             <div className={styles.detailTaskLoadingMore}>
@@ -3196,19 +3910,35 @@ const ProjectDetailPanel: React.FC<Props> = ({
         }}
       />
 
-      <TaskDetailDrawer
-        task={detailTask}
-        onClose={() => setDetailTask(null)}
-        canEnterSession={canEnterDetailTaskSession}
-        onEnterSession={(task) => {
-          handleOpenTaskSession(task);
-          setDetailTask(null);
-        }}
-        onViewSession={(task) => {
-          handleOpenReadonlySession(task);
-          setDetailTask(null);
-        }}
-      />
+      {isOperationProject ? (
+        renderOperationTaskDetailDrawer()
+      ) : (
+        <TaskDetailDrawer
+          task={detailTask}
+          onClose={() => setDetailTask(null)}
+          canEnterSession={canEnterDetailTaskSession}
+          onEnterSession={(task) => {
+            handleOpenTaskSession(task);
+            setDetailTask(null);
+          }}
+          onViewSession={(task) => {
+            handleOpenReadonlySession(task);
+            setDetailTask(null);
+          }}
+        />
+      )}
+
+      {isOperationProject && (
+        <OperationTaskFormModal
+          open={operationTaskModalOpen}
+          options={operationTaskOptions}
+          loading={operationTaskSaving}
+          optionLoading={operationOptionsLoading}
+          agentLoading={operationAgentsLoading}
+          onCancel={() => setOperationTaskModalOpen(false)}
+          onSubmit={handleSubmitOperationTask}
+        />
+      )}
     </div>
   );
 
@@ -3220,6 +3950,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
       return renderTasks();
     }
     if (activeTab === 'resources') return renderResources();
+    if (activeTab === 'integration') {
+      if (showRequirementsTab) return <Integration active />;
+      return renderTasks();
+    }
     if (activeTab === 'members') {
       if (showMembersTab) {
         return (
@@ -3854,8 +4588,24 @@ const ProjectDetailPanel: React.FC<Props> = ({
       <div className={styles.detailPanelHeader}>
         <Button className={styles.detailBackButton} icon={<LeftOutlined />} onClick={onBack} />
         <div className={styles.detailPanelTitle}>
-          {/* 左侧详情头部仅保留项目名称，避免描述占用会话列表空间。 */}
-          <h3>{project?.projectName || t('project.detailTitle')}</h3>
+          {/* 详情头部项目名称改为下拉选择，切换后直接刷新当前详情面板。 */}
+          {onSwitchProject && projects && projects.length > 0 ? (
+            <Select
+              className={styles.detailProjectSelect}
+              variant="borderless"
+              showSearch
+              optionFilterProp="label"
+              value={project?.projectId}
+              onChange={(value) => onSwitchProject(value)}
+              options={projects.map((p) => ({
+                value: p.projectId,
+                label: p.projectName,
+              }))}
+              optionLabelProp="label"
+            />
+          ) : (
+            <h3>{project?.projectName || t('project.detailTitle')}</h3>
+          )}
           {projectScene && (
             <Tag
               bordered={false}
@@ -3892,6 +4642,19 @@ const ProjectDetailPanel: React.FC<Props> = ({
       </Spin>
       {renderAddSourceModal()}
       {renderManualRequirementModal()}
+      <RequirementSplitModal
+        open={splitRequirement !== null}
+        requirement={
+          splitRequirement
+            ? { title: splitRequirement.title, description: getRequirementDetailText(splitRequirement, t) }
+            : null
+        }
+        repos={repos}
+        members={operationAssigneeOptions}
+        confirmLoading={splitRequirement ? startingRequirementIds.has(splitRequirement.itemId) : false}
+        onCancel={() => setSplitRequirement(null)}
+        onConfirm={handleConfirmSplit}
+      />
       {renderRepoModal()}
       {renderDwsAuthModal()}
       {renderLogDrawer()}

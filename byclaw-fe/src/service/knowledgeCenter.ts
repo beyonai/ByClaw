@@ -261,8 +261,8 @@ export interface CheckUploadFileConflictsResult {
 }
 
 // 上传前检查同路径同名文件，供前端做覆盖确认
-export const checkUploadFileConflicts = (data: CheckUploadFileConflictsPayload) =>
-  POST<CheckUploadFileConflictsResult>('/byaiService/datasetController/checkUploadFileConflicts', data);
+export const checkUploadFileConflicts = (data: CheckUploadFileConflictsPayload, config?: ConfigType) =>
+  POST<CheckUploadFileConflictsResult>('/byaiService/datasetController/checkUploadFileConflicts', data, config);
 
 // 删除文件
 export const removeFile = (data: RemoveFilePayload, config?: ConfigType) =>

@@ -1,0 +1,21 @@
+{
+  "name": "@byclaw/connector-third-party-common",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared execution descriptor and protocol utilities for third-party agent connectors",
+  "files": ["dist"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

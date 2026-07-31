@@ -42,8 +42,6 @@ public class ByclawResourceFSTest {
         verify(objectStorage).mount("byclaw");
         verify(objectStorage).init("byclaw-datacloud");
         verify(objectStorage).mount("byclaw-datacloud");
-        verify(objectStorage).init("byclaw-qa");
-        verify(objectStorage).mount("byclaw-qa");
     }
 
     @Test

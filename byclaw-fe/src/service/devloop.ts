@@ -1,7 +1,7 @@
 import { POST, type ConfigType } from '@/service/common/request';
 
 // 默认项目只用于系统内置项目回显和编辑，接口层类型也需要覆盖，避免前端判断 default 时类型不一致。
-type DevloopProjectType = 'normal' | 'develop' | 'default';
+type DevloopProjectType = 'normal' | 'operation' | 'develop' | 'default';
 
 type DevloopProjectShareFlag = 'N' | 'Y';
 
@@ -256,9 +256,26 @@ export const checkGitHubPat = () => POST<any>('/byaiService/devloop/pat/github/c
 export const searchDingtalkGroups = (query: string) =>
   POST<any>('/byaiService/devloop/dingtalk/groups/search', { query });
 
-// 研发任务
-export const createTask = (data: { projectId: number; sourceItemId?: number; title?: string }) =>
-  POST<any>('/byaiService/devloop/task/create', data);
+// 研发任务继续兼容 sourceItemId；运营任务在同一任务框架下补充任务配置和数字员工编排字段。
+export type DevloopTaskCreatePayload = {
+  // projectId、title、sourceItemId 为原研发任务调用保留字段。
+  projectId: number;
+  sourceItemId?: number;
+  title?: string;
+  taskName?: string;
+  description?: string;
+  // 以下字段只由运营任务提交；后端联调完成前保持可选以兼容旧接口契约。
+  taskType?: 'collect' | 'content' | 'analyze';
+  assigneeId?: string | number;
+  dueTime?: string;
+  controllerAgentId?: string | number;
+  executorAgentIds?: Array<string | number>;
+  collectConfig?: Record<string, any>;
+  contentConfig?: Record<string, any>;
+  analyzeConfig?: Record<string, any>;
+};
+
+export const createTask = (data: DevloopTaskCreatePayload) => POST<any>('/byaiService/devloop/task/create', data);
 
 export const listTasks = (query: DevloopTaskListQuery) =>
   POST<DevloopTaskPage>('/byaiService/devloop/task/list', query);

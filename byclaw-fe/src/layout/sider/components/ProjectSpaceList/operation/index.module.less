@@ -1,0 +1,683 @@
+// 账号表单和运营任务表单共用紧凑弹窗基线，避免项目详情侧栏中出现过大的默认间距。
+.operationFormModal,
+.operationTaskModal {
+  :global {
+    .@{antPrefix}-modal-content {
+      overflow: hidden;
+      border-radius: 12px;
+    }
+
+    .@{antPrefix}-modal-body {
+      padding-top: 12px;
+    }
+
+    .@{antPrefix}-modal-footer {
+      border-top: 0;
+    }
+
+    .@{antPrefix}-form-item {
+      margin-bottom: 16px;
+    }
+
+    .@{antPrefix}-form-item-label {
+      padding-bottom: 6px;
+    }
+
+    .@{antPrefix}-input,
+    .@{antPrefix}-input-number,
+    .@{antPrefix}-picker,
+    .@{antPrefix}-select-selector {
+      border-radius: 8px;
+    }
+  }
+}
+
+.operationTaskModal {
+  :global {
+    .@{antPrefix}-modal-body {
+      padding-right: 12px;
+    }
+  }
+}
+
+.operationFormGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+
+  :global {
+    .@{antPrefix}-form-item {
+      min-width: 0;
+    }
+  }
+}
+
+.operationFormFull {
+  grid-column: 1 / -1;
+}
+
+.operationFullControl {
+  width: 100%;
+}
+
+// 任务配置字段较多，表单主体独立滚动，底部操作区始终保留在弹窗可见区域。
+.operationTaskFormBody {
+  max-height: min(68vh, 680px);
+  padding-right: 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #d7dce5 transparent;
+}
+
+.operationTaskSection {
+  margin-top: 4px;
+  padding: 16px 16px 0;
+  border: 1px solid #edf0f5;
+  border-radius: 10px;
+  background: #fafbfd;
+
+  & + & {
+    margin-top: 16px;
+  }
+
+  h3 {
+    margin: 0 0 14px;
+    color: #1f2633;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 20px;
+  }
+}
+
+// 总控与执行数字员工在桌面端并排展示，窄屏时由媒体查询切换为单列。
+.agentSelector {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.agentSelectorField {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+
+  :global {
+    .@{antPrefix}-select {
+      width: 100%;
+    }
+  }
+}
+
+.operationFieldLabel {
+  margin-bottom: 6px;
+  color: rgba(0, 0, 0, 0.88);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.operationRequiredMark {
+  margin-left: 4px;
+  color: #ff4d4f;
+}
+
+.operationFieldHint {
+  margin-top: 6px;
+  color: #8b95a5;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+// 账号管理以右侧覆盖大页面展示，不挤压项目详情的任务列表空间。
+.accountPanel {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  background: #f7f9fc;
+}
+
+// 账号管理属于任务页内部入口，使用整行浅色按钮与任务操作区分层级。
+.operationAccountEntry {
+  width: calc(100% - 8px);
+  min-height: 36px;
+  margin: 0 4px -8px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #1f2633;
+  background: #f1f3f6;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+
+  &:hover {
+    background: #eaf1ff;
+  }
+
+  svg {
+    color: #1f2633;
+    font-size: 12px;
+  }
+}
+
+// 左侧账号图标与文案组合展示，右侧箭头仍保持贴边对齐。
+.operationAccountEntryLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+
+  svg {
+    color: #1f2633;
+    font-size: 14px;
+  }
+}
+
+// 三类运营任务沿用任务卡片交互，仅用颜色和图标快速区分任务性质。
+.operationTaskCard {
+  &:hover {
+    border-color: #e1e8f0;
+    background: #f7fafb;
+  }
+}
+
+.operationTaskIcon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+
+.operationTaskIconCollect {
+  color: #2563b8;
+  background: #e8f1ff;
+}
+
+.operationTaskIconContent {
+  color: #a8556a;
+  background: #fbeef2;
+}
+
+.operationTaskIconAnalyze {
+  color: #7c4cb0;
+  background: #f3ecff;
+}
+
+.operationTaskEmpty {
+  padding-top: 28px;
+}
+
+.operationTaskDrawer {
+  :global {
+    .@{antPrefix}-drawer-body {
+      padding: 20px;
+    }
+  }
+}
+
+.operationTaskDetailIcon {
+  border-radius: 9px;
+  color: #0f766e;
+  background: #e6f5f2;
+}
+
+// 账号管理的标题、统计、筛选和卡片列表分区，列表区可独立滚动。
+.accountPanelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-shrink: 0;
+
+  h2 {
+    margin: 0;
+    color: #1f2633;
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 28px;
+  }
+
+  p {
+    margin: 4px 0 0;
+    color: #75839a;
+    font-size: 13px;
+    line-height: 20px;
+  }
+}
+
+.accountPanelHeading {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.operationBackButton {
+  flex-shrink: 0;
+  margin-top: -2px;
+  color: #667085;
+}
+
+.accountStats {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.accountStatItem {
+  min-width: 0;
+  padding: 14px 16px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border: 1px solid #e7ebf2;
+  border-radius: 10px;
+  background: #fff;
+
+  strong {
+    color: #1f2633;
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 28px;
+  }
+
+  span {
+    min-width: 0;
+    overflow: hidden;
+    color: #75839a;
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.accountFilterRow {
+  margin: 16px 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.accountPlatformFilter {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.accountFilterCount {
+  flex-shrink: 0;
+  color: #8b95a5;
+  font-size: 12px;
+}
+
+.accountPanelSpin {
+  min-height: 0;
+  flex: 1;
+
+  :global {
+    .@{antPrefix}-spin-container {
+      height: 100%;
+      min-height: 0;
+    }
+  }
+}
+
+.accountEmpty {
+  height: 100%;
+  min-height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed #dbe1eb;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.accountGrid {
+  height: 100%;
+  min-height: 0;
+  padding: 2px 2px 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+  align-content: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.accountCard {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #e5eaf2;
+  border-radius: 12px;
+  background: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+}
+
+.accountCardClickable {
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    border-color: #b9cdfd;
+    outline: none;
+    box-shadow: 0 8px 20px rgba(31, 45, 77, 0.08);
+    transform: translateY(-1px);
+  }
+}
+
+.accountCardHeader {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  :global {
+    .@{antPrefix}-tag {
+      flex-shrink: 0;
+      margin-inline-end: 0;
+    }
+  }
+}
+
+.accountPlatformMark {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  color: #246bfe;
+  background: #eaf2ff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.accountCardIdentity {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+
+  strong,
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong {
+    color: #1f2633;
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  span {
+    color: #8b95a5;
+    font-size: 12px;
+    line-height: 18px;
+  }
+}
+
+.accountPlatformName {
+  margin-top: 10px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.accountMetricGrid {
+  margin-top: 14px;
+  padding: 12px 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid #f0f2f6;
+  border-bottom: 1px solid #f0f2f6;
+
+  div {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+
+    & + div {
+      border-left: 1px solid #f0f2f6;
+    }
+  }
+
+  strong,
+  span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong {
+    color: #1f2633;
+    font-size: 13px;
+    line-height: 20px;
+  }
+
+  span {
+    color: #8b95a5;
+    font-size: 11px;
+    line-height: 18px;
+  }
+}
+
+.accountCardFooter {
+  min-width: 0;
+  min-height: 28px;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+
+  & > span {
+    color: #98a2b3;
+    font-size: 11px;
+  }
+}
+
+.accountCardActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+
+  :global {
+    .@{antPrefix}-btn {
+      padding-inline: 4px;
+    }
+  }
+}
+
+// 工作流按纵向时间轴展示，状态颜色由组件传入的标准状态类控制。
+.workflowPanel {
+  min-width: 0;
+}
+
+.workflowTitle {
+  margin: 0 0 16px;
+  color: #1f2633;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.workflowEmpty {
+  padding: 24px 0;
+}
+
+.workflowList {
+  min-width: 0;
+}
+
+.workflowStep {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  column-gap: 10px;
+}
+
+.workflowStepRail {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.workflowStepIcon {
+  position: relative;
+  z-index: 1;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: #fff;
+  font-size: 13px;
+}
+
+.workflowStepLine {
+  width: 1px;
+  min-height: 26px;
+  flex: 1;
+  background: #dce2eb;
+}
+
+.workflowStepBody {
+  min-width: 0;
+  margin-bottom: 14px;
+  padding: 2px 0 14px;
+  border-bottom: 1px solid #f0f2f6;
+}
+
+.workflowStepHeader {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  strong {
+    min-width: 0;
+    overflow: hidden;
+    color: #1f2633;
+    font-size: 14px;
+    line-height: 22px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  span {
+    flex-shrink: 0;
+    font-size: 12px;
+  }
+}
+
+.workflowStepAgent {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #7d8796;
+  font-size: 12px;
+
+  strong {
+    color: #536075;
+    font-weight: 500;
+  }
+}
+
+.workflowStepSummary {
+  margin: 6px 0 0;
+  color: #667085;
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.workflowStepTime {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  color: #98a2b3;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.workflowStepPending {
+  color: #98a2b3;
+}
+
+.workflowStepInProgress {
+  color: #246bfe;
+}
+
+.workflowStepWaiting {
+  color: #faad14;
+}
+
+.workflowStepCompleted {
+  color: #52c41a;
+}
+
+.workflowStepFailed {
+  color: #ff4d4f;
+}
+
+@media (max-width: 720px) {
+  .operationFormGrid,
+  .agentSelector,
+  .accountStats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .operationFormFull {
+    grid-column: auto;
+  }
+
+  .accountPanel {
+    padding: 12px;
+  }
+
+  .accountPanelHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .accountFilterRow {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

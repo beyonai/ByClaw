@@ -12,6 +12,7 @@ I/O 协议：stdin JSON → stdout JSON
         "entity_code": "by_meeting_note",
         "entity_name": "会议纪要",
         "entity_desc": "会议纪要文档对象",
+        "use_domain": "ods",                         // 可选：ods=原始对象，ads=应用对象；默认 ads
         "kb_resource_id": "10000003",              // 必填：知识库资源 ID，脚本自动从 Redis 解析 kb_id
         "kb_resource_id": "10000003",              // 必填：知识库资源 ID，脚本自动从 Redis 解析 kb_id
         "kb_directory": "/meeting",
@@ -57,6 +58,8 @@ I/O 协议：stdin JSON → stdout JSON
       每条关系包含 relation_code（关系编码）、relation_name（关系名称）、
       target_entity_code（目标对象编码）、relation_type（关系基数）四个字段；
       target_entity_code 引用的对象必须已在本体库中存在，否则 API 侧会报错；
+    - use_domain 表示对象的使用领域，仅支持 ods / ads，省略时默认 ads；
+      脚本将其写入 ext_property.use_domain 后传给 ontology API；
     - template_file_path / rules_file_path 为可选文件路径；
     - 若路径不为空，脚本会通过外部接口读取文件内容，分别以 template / rules 为键写入 ext_property 字典后传给 ontology API；
     - 若路径不为空但读取内容为空，直接报错，不会继续调用 ontology API。
@@ -181,14 +184,23 @@ def main() -> None:
     entity_code: str = params.get("entity_code", "").strip()
     template_file_path: str = params.get("template_file_path", "").strip()
     rules_file_path: str = params.get("rules_file_path", "").strip()
-    template_file_path: str = params.get("template_file_path", "").strip()
-    rules_file_path: str = params.get("rules_file_path", "").strip()
 
     if not entity_code:
         print(json.dumps({"ok": False, "error": "entity_code 不能为空"}), flush=True)
         sys.exit(1)
 
     if action == "collect":
+        use_domain = str(params.get("use_domain") or "ads").strip().lower()
+        if use_domain not in {"ods", "ads"}:
+            print(
+                json.dumps(
+                    {"ok": False, "error": "use_domain 仅支持 ods 或 ads"},
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+            sys.exit(1)
+
         kb_resource_id: str = params.get("kb_resource_id", "").strip()
         if not kb_resource_id:
             print(json.dumps({"ok": False, "error": "kb_resource_id 不能为空"}, ensure_ascii=False), flush=True)
@@ -311,6 +323,7 @@ def main() -> None:
             ext_property["kb_resource_id"] = str(kb_resource_id)
         if kb_id:
             ext_property["kb_id"] = str(kb_id)
+        ext_property["use_domain"] = use_domain
 
 
         result = post_ontology_api(

@@ -16,6 +16,8 @@ export const DEFAULT_AIMODEL_CONFIG_REDIS_KEY = "byai:aimodel:config";
 export const DEFAULT_AIMODEL_TYPELIST_REDIS_KEY = "byai:aimodel:typelist";
 export const DEFAULT_AIMODEL_TYPELIST_FIELD = "LLM";
 export const DEFAULT_AIMODEL_SECRET_PROVIDER_NAME = "baiying-aimodel-redis";
+export const DEFAULT_AIMODEL_TIMEOUT_SECONDS = 600;
+export const AIMODEL_TIMEOUT_ENV = "BYCLAW_LLM_IDLE_TIME";
 export const AIMODEL_ABILITY_TEXT = "3";
 export const AIMODEL_ABILITY_MULTIMODAL = "7";
 
@@ -78,6 +80,10 @@ function positiveInt(value: unknown): number | undefined {
               ? Number(value.trim())
               : NaN;
     return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
+}
+
+export function resolveAimodelTimeoutSeconds(): number {
+    return positiveInt(process.env[AIMODEL_TIMEOUT_ENV]) ?? DEFAULT_AIMODEL_TIMEOUT_SECONDS;
 }
 
 function normalizeLowerEnum(value: unknown, allowed: Set<string>, fallback: string): string {
@@ -387,6 +393,7 @@ function parseBaiyingAimodelProviderBundleFromRecord(params: {
             secretProviderName: params.secretProviderName,
         }),
         api,
+        timeoutSeconds: resolveAimodelTimeoutSeconds(),
         modelId: modelCode,
         modelName: nonEmptyString(raw.modelName) || modelCode,
         contextWindow: positiveInt(raw.maxContentToken) ?? 128000,

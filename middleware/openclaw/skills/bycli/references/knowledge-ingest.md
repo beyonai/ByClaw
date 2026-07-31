@@ -77,7 +77,7 @@ node bycli/scripts/bycli-markdown-ingest.mjs ingest \
 The `ingest` command prefers existing Markdown files in the bycli session directory. Only inline Markdown without a readable local file is written to a temporary file before upload. It then calls:
 
 ```bash
-node 知识库管理/scripts/by-knowledge-manager.mjs upload \
+node by-knowledge-manager/scripts/by-knowledge-manager.mjs upload \
   --resource-id <resourceId> \
   --directory-path / \
   --file-path <temp-md-file>

@@ -18,6 +18,7 @@ import org.springframework.web.multipart.MultipartFile;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.common.storage.KnowledgeResourceFS;
 import com.iwhalecloud.byai.common.storage.ResourceFS;
 import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
@@ -48,6 +49,9 @@ class FsOperationApplicationServiceTest {
 
     @Mock
     private ResourceFS resourceFS;
+
+    @Mock
+    private KnowledgeResourceFS knowledgeResourceFS;
 
     @Mock
     private AuthApplicationService authApplicationService;
@@ -188,6 +192,24 @@ class FsOperationApplicationServiceTest {
     }
 
     @Test
+    void putFile_routesKnowledgeResourcePathToPrivateKnowledgeFs() {
+        FsOperationApplicationService service = service();
+        SsResource resource = new SsResource();
+        resource.setResourceId(10001L);
+        when(ssResourceService.findById(10001L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        when(knowledgeResourceFS.write(any(MultipartFile.class), anyString())).thenReturn(new FileMetadata());
+
+        service.putFile("RESOURCE", 10001L,
+            "/resource/kg_doc/KG_DOC_10001/.bykc/KB001/raw/origin/a.txt", "text/plain",
+            new MultipartFileUtil("file", "a.txt", "text/plain", "demo".getBytes(StandardCharsets.UTF_8)));
+
+        verify(knowledgeResourceFS).write(any(MultipartFile.class),
+            eq("/resource/kg_doc/KG_DOC_10001/.bykc/KB001/raw/origin/a.txt"));
+        verify(resourceFS, never()).write(any(MultipartFile.class), anyString());
+    }
+
+    @Test
     void renameDirectory_deletesOnlyCopiedSourceFilesWhenPartialCopyFails() {
         // 目录 rename 是 copy + delete；当中途失败时，只允许删除已经复制成功的源对象。
         FsOperationApplicationService service = service();
@@ -228,6 +250,7 @@ class FsOperationApplicationServiceTest {
         FsOperationApplicationService service = new FsOperationApplicationService();
         ReflectionTestUtils.setField(service, "userFS", userFS);
         ReflectionTestUtils.setField(service, "resourceFS", resourceFS);
+        ReflectionTestUtils.setField(service, "knowledgeResourceFS", knowledgeResourceFS);
         ReflectionTestUtils.setField(service, "authApplicationService", authApplicationService);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
         return service;

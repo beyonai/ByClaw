@@ -1,0 +1,322 @@
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: #666;
+  font-size: 18px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+
+  &:hover {
+    color: #1677ff;
+  }
+}
+
+.modalTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #1d3f8e;
+}
+
+.connectorList {
+  margin: 0 -8px;
+}
+
+.connectorItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 66px;
+  padding: 9px 10px;
+  border-radius: 8px;
+
+  &:hover {
+    background: #f7f9fc;
+  }
+}
+
+.connectorIcon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  color: #1677ff;
+  font-size: 24px;
+  background: #edf4ff;
+  border-radius: 8px;
+
+  // AntdIcon 内部默认字号会覆盖容器字号，这里确保各展示场景能统一控制图标大小。
+  :global(.anticon) {
+    font-size: inherit !important;
+  }
+}
+
+.connectorContent {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+
+  strong {
+    color: #1f2937;
+    font-size: 14px;
+  }
+
+  span {
+    overflow: hidden;
+    color: #7a8596;
+    font-size: 13px;
+    line-height: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.viewAllButton {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px 10px 2px;
+  color: #526174;
+  font-size: 14px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid #eef1f5;
+  cursor: pointer;
+
+  &:hover {
+    color: #1677ff;
+  }
+}
+
+.settingsModal {
+  :global(.ant-modal-content) {
+    border-radius: 16px;
+  }
+
+  :global(.ant-modal-header) {
+    margin-bottom: 10px;
+  }
+}
+
+.authorizationModal,
+.qrModal {
+  :global(.ant-modal-content) {
+    border-radius: 16px;
+  }
+}
+
+.authorizationContent,
+.qrContent {
+  text-align: center;
+
+  h2 {
+    margin: 16px 0 8px;
+    color: #172033;
+    font-size: 21px;
+  }
+
+  > p {
+    margin: 0 auto 22px;
+    color: #697586;
+    line-height: 22px;
+  }
+}
+
+.authorizationIcons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: #b0bac8;
+  font-size: 26px;
+
+  .connectorIcon,
+  .productIcon {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+  }
+}
+
+.productIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  background: #1677ff;
+}
+
+.permissionBlock {
+  padding: 20px 24px;
+  margin-bottom: 24px;
+  text-align: left;
+  background: #f7f9fc;
+  border-radius: 12px;
+
+  > strong {
+    display: block;
+    margin-bottom: 16px;
+    color: #526174;
+    font-size: 14px;
+  }
+
+  > div {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-top: 13px;
+    color: #4b5b70;
+    font-size: 19px;
+
+    span {
+      display: flex;
+      flex-direction: column;
+      font-size: 14px;
+    }
+
+    b {
+      color: #26354a;
+    }
+
+    small {
+      margin-top: 3px;
+      color: #7a8596;
+      font-size: 12px;
+    }
+  }
+}
+
+.privacyTip {
+  display: block;
+  margin-top: 14px;
+  color: #7a8596;
+  font-size: 12px;
+
+  :global(.anticon) {
+    margin-right: 4px;
+    color: #52c41a;
+  }
+}
+
+.qrContent {
+  > .connectorIcon {
+    width: 54px;
+    height: 54px;
+    border-radius: 14px;
+  }
+}
+
+.qrCode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 220px;
+  height: 220px;
+  margin: 14px auto 20px;
+  color: #a2adbc;
+  background: repeating-linear-gradient(45deg, #fafbfd, #fafbfd 5px, #f3f6fa 5px, #f3f6fa 10px);
+  border: 1px dashed #d7dee8;
+  border-radius: 12px;
+  cursor: pointer;
+
+  :global(.anticon) {
+    margin-bottom: 10px;
+    font-size: 62px;
+  }
+
+  span {
+    font-size: 13px;
+  }
+}
+
+.selection {
+  // 已连接状态替换原连接器入口，直接回显已授权的平台图标。
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+}
+
+.selectionItem {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+
+  .connectorIcon {
+    width: 32px;
+    height: 32px;
+    font-size: 20px;
+    border-radius: 8px;
+  }
+}
+
+.moreSelection {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: #4b5563;
+  font-size: 15px;
+  background: #f0f1f3;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.configurationDrawer {
+  :global(.ant-drawer-body) {
+    padding: 20px;
+    background: #f7f8fa;
+  }
+}
+
+.configurationGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.compactItem {
+  min-height: 88px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #edf0f4;
+  box-shadow: 0 2px 6px rgba(17, 24, 39, 4%);
+
+  .connectorIcon {
+    width: 42px;
+    height: 42px;
+  }
+}
+
+@media (max-width: 640px) {
+  .configurationGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .connectorContent span {
+    white-space: normal;
+  }
+}

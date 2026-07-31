@@ -1,4 +1,4 @@
-"""Tests for api.py — the three ByResourceId endpoints."""
+"""Tests for api.py resource-scoped endpoints."""
 
 import os
 import pytest
@@ -6,7 +6,19 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 from httpx import AsyncClient, ASGITransport
 
+from by_qa.knowledge_base.infrastructure.storage import StorageAuthenticationError
 from api import app
+
+
+@pytest.fixture(autouse=True)
+def _patch_resourcefs_config():
+    """Default ResourceFS lookup to absent so legacy Redis tests stay focused."""
+    with patch(
+        "api.get_kg_doc_from_resourcefs",
+        new_callable=AsyncMock,
+    ) as mock_fn:
+        mock_fn.return_value = None
+        yield mock_fn
 
 
 @pytest.fixture
@@ -72,6 +84,7 @@ class TestImportByResourceId:
                     "resourceId": "100",
                     "filePath": "/docs/test.pdf",
                     "fileDescription": "desc",
+                    "processFrontMatter": "false",
                 },
                 files={"fileContent": ("test.pdf", b"fake-pdf", "application/pdf")},
             )
@@ -80,6 +93,7 @@ class TestImportByResourceId:
         mock_service.upload_file.assert_called_once()
         req_arg = mock_service.upload_file.call_args[0][0]
         assert req_arg.kb_code == "1"
+        assert req_arg.process_front_matter is False
 
 
 # ---------------------------------------------------------------------------
@@ -111,9 +125,18 @@ class TestFileToMarkdownIndexByResourceId:
 
     @pytest.mark.asyncio
     async def test_success(self, client, _patch_redis_config):
+        from byclaw_userfs_storage import build_byclaw_userfs_headers, get_byclaw_resource_id
+
         _patch_redis_config.return_value = {"resourceCode": "5"}
         mock_service = AsyncMock()
         mock_service.create_file_to_markdown_index_task.return_value = "task-1"
+        background_context = {}
+
+        async def capture_background_context(*args, **kwargs):
+            background_context["headers"] = build_byclaw_userfs_headers()
+            background_context["resource_id"] = get_byclaw_resource_id()
+
+        mock_service.execute_file_to_markdown_index_task.side_effect = capture_background_context
         with (
             patch("api.resolve_knowledge_item_ingestion_service", return_value=mock_service),
             patch("api.resolve_document_chunking_service", return_value=AsyncMock()),
@@ -121,11 +144,119 @@ class TestFileToMarkdownIndexByResourceId:
             resp = await client.post(
                 "/api/v1/fileToMarkdownIndexByResourceId",
                 json={"resourceId": "100", "filePath": "/docs/test.pdf"},
+                headers={"Beyond-Token": "token-123"},
             )
         body = resp.json()
         assert body["resultCode"] == "0"
         call_args = mock_service.create_file_to_markdown_index_task.call_args[0][0]
         assert call_args.kb_code == "5"
+        assert background_context == {
+            "headers": {
+                "system-code": "BYCLAW-QA",
+                "beyond-token": "token-123",
+            },
+            "resource_id": "100",
+        }
+
+    @pytest.mark.asyncio
+    async def test_resourcefs_config_is_preferred(
+        self,
+        client,
+        _patch_resourcefs_config,
+        _patch_redis_config,
+    ):
+        _patch_resourcefs_config.return_value = {
+            "resourceId": 100,
+            "resourceCode": "5",
+        }
+        mock_service = AsyncMock()
+        mock_service.create_file_to_markdown_index_task.return_value = "task-1"
+        with (
+            patch(
+                "api.resolve_knowledge_item_ingestion_service",
+                return_value=mock_service,
+            ),
+            patch(
+                "api.resolve_document_chunking_service",
+                return_value=AsyncMock(),
+            ),
+        ):
+            resp = await client.post(
+                "/api/v1/fileToMarkdownIndexByResourceId",
+                json={"resourceId": "100", "filePath": "/docs/test.pdf"},
+                headers={"Beyond-Token": "token-123"},
+            )
+
+        assert resp.json()["resultCode"] == "0"
+        assert (
+            mock_service.create_file_to_markdown_index_task.call_args[0][0].kb_code
+            == "5"
+        )
+        _patch_redis_config.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_resourcefs_auth_failure_does_not_fall_back_to_redis(
+        self,
+        client,
+        _patch_resourcefs_config,
+        _patch_redis_config,
+    ):
+        _patch_resourcefs_config.side_effect = StorageAuthenticationError(
+            "forbidden"
+        )
+        _patch_redis_config.return_value = {"resourceCode": "5"}
+
+        resp = await client.post(
+            "/api/v1/fileToMarkdownIndexByResourceId",
+            json={"resourceId": "100", "filePath": "/docs/test.pdf"},
+            headers={"Beyond-Token": "token-123"},
+        )
+
+        assert resp.json()["resultCode"] == "-1"
+        _patch_redis_config.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# downloadFileByResourceId
+# ---------------------------------------------------------------------------
+
+class TestDownloadFileByResourceId:
+
+    @pytest.mark.asyncio
+    async def test_success_binds_resource_context(self, client, _patch_redis_config):
+        from byclaw_userfs_storage import get_byclaw_resource_id
+
+        _patch_redis_config.return_value = {"resourceCode": "155"}
+        mock_service = AsyncMock()
+        download_context = {}
+
+        async def capture_download_context(request):
+            download_context["resource_id"] = get_byclaw_resource_id()
+            download_context["kn_code"] = request.kb_code
+            download_context["file_path"] = request.file_path
+            return {
+                "filename": "api.md",
+                "media_type": "text/markdown",
+                "content": b"# api",
+            }
+
+        mock_service.download_file.side_effect = capture_download_context
+        with patch("api.resolve_knowledge_base_service", return_value=mock_service):
+            resp = await client.post(
+                "/api/v1/downloadFileByResourceId",
+                json={
+                    "resourceId": 11029731,
+                    "filePath": "/门户设计/api.md",
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.content == b"# api"
+        assert download_context == {
+            "resource_id": "11029731",
+            "kn_code": "155",
+            "file_path": "/门户设计/api.md",
+        }
 
 
 # ---------------------------------------------------------------------------

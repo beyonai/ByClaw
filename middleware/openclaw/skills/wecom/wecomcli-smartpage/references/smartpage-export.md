@@ -11,7 +11,7 @@
 ### 命令
 
 ```bash
-wecom-cli doc smartpage_export_task '<JSON 参数>'
+wecom-cli doc smartpage_export_task --json '<JSON 参数>'
 ```
 
 ### 技能定义
@@ -92,7 +92,7 @@ wecom-cli doc smartpage_export_task '<JSON 参数>'
 ### 命令
 
 ```bash
-wecom-cli doc smartpage_get_export_result '<JSON 参数>'
+wecom-cli doc smartpage_get_export_result --json '<JSON 参数>'
 ```
 
 ### 技能定义

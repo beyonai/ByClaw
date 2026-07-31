@@ -1,4 +1,5 @@
-export type ProjectType = 'normal' | 'develop' | 'default';
+// operation 为运营项目；default 仅用于系统内置项目的回显和编辑，不出现在普通新建选项中。
+export type ProjectType = 'normal' | 'operation' | 'develop' | 'default';
 
 export type ProjectShareFlag = 'N' | 'Y';
 

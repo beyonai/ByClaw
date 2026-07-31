@@ -22,6 +22,7 @@ import type { UploadFileRef } from './components/UploadFile';
 import type { IAgentFileUploadConf } from '../../hooks/useAgentUploadFileConfig';
 import type { DefaultValueSchema } from './RichInput/types';
 import type { ContextUsed } from '@/hooks/useContextUsed';
+import { getLastMentionedDigitalEmployeeId } from './utils/mention';
 
 export type IProps = {
   getMessageList?: () => Array<IMessage>;
@@ -137,9 +138,13 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   restoreInputDraft = () => {
     const { inputDraft } = this.props;
-    if (!inputDraft || (!inputDraft.text && isEmpty(inputDraft.resourceList))) return;
+    if (!inputDraft || (!inputDraft.text && isEmpty(inputDraft.resourceList))) {
+      this.syncSiderAgent([]);
+      return;
+    }
 
     this.richInputRef.current?.setText(inputDraft);
+    this.syncSiderAgent(inputDraft.resourceList || []);
     this.setState((prevState) => ({
       ...prevState,
       inputValue: inputDraft.text || '',
@@ -220,6 +225,15 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     );
   };
 
+  syncSiderAgent = (resourceList: RichInputResourceList) => {
+    // 左侧资源区跟随最后一个 @ 的员工，但不修改会话 agentId，避免输入框因会话身份变化而重挂载。
+    this.props.globalContext.setSiderAgentId?.(getLastMentionedDigitalEmployeeId(resourceList));
+  };
+
+  getPersistentMentionDraft = (): DefaultValueSchema => {
+    return this.richInputRef.current?.getPersistentMentionDraft() || { text: '', resourceList: [] };
+  };
+
   getQuoteAgentIds = (): string[] => {
     const inlineAgentIds = this.getInlineDigitalEmployeeList()
       .map((item) => `${item.resourceId}`)
@@ -251,7 +265,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
       this.onSendQuery();
 
-      this.richInputRef.current?.setText('');
+      this.richInputRef.current?.clearAfterSend();
       this.sttCompRef.current?.stop();
 
       if (this.autoSendRunner) {
@@ -377,14 +391,17 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     const payload = this.getSendPayload();
 
     if (!payload || isEmpty(payload)) return false;
+    // 发送前提取要保留的 @ 员工，后续即使输入组件重挂载也能从草稿恢复。
+    const persistentMentionDraft = this.getPersistentMentionDraft();
     this.finallySendQuery(payload);
 
     this.setState((prevState) => ({
       ...prevState,
-      inputValue: '',
+      inputValue: persistentMentionDraft.text,
       fileList: [],
+      resourceList: persistentMentionDraft.resourceList,
     }));
-    this.props.onInputDraftChange?.({ text: '', resourceList: [] });
+    this.props.onInputDraftChange?.(persistentMentionDraft);
 
     return true;
   };
@@ -446,7 +463,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
                   onClick={() => {
                     const canSend = this.onSendQuery();
                     if (canSend) {
-                      this.richInputRef.current?.setText('');
+                      this.richInputRef.current?.clearAfterSend();
                     }
                   }}
                   style={{
@@ -613,6 +630,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
               connectNet: resourceList.some((item) => `${item.resourceId}` === `${connectNetAgentId}`),
             }));
             this.props.onInputDraftChange?.({ text, resourceList });
+            this.syncSiderAgent(resourceList);
             if (!cannotAt && agentId !== currentAgentId) {
               let nextAgentType = agentType;
               if (!currentAgentId && agentId) {

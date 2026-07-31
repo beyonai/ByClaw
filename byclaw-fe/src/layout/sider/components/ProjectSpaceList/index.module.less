@@ -394,6 +394,12 @@
   background: #f3ecff;
 }
 
+// 运营项目沿用原型的青绿色标签，与研发项目和普通共享项目形成稳定区分；标签优先级由 index.tsx 控制。
+.projectTagOperation {
+  color: #0f766e;
+  background: #e6f5f2;
+}
+
 .sessionList {
   position: relative;
   z-index: 0;
@@ -654,6 +660,24 @@
 
   h3 {
     margin: 0;
+    color: #1f2633;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 20px;
+  }
+}
+
+// 详情头部项目名称下拉选择器，视觉上替代 h3 标题。
+.detailProjectSelect {
+  min-width: 0;
+  max-width: 220px;
+
+  // 选中态文字与原 h3 标题保持一致：14px 加粗。
+  :global(.ant-select-selector) {
+    padding-left: 0 !important;
+  }
+
+  :global(.ant-select-selection-item) {
     color: #1f2633;
     font-size: 14px;
     font-weight: 700;
@@ -1438,6 +1462,11 @@
   gap: 16px;
 }
 
+.requirementDetailFooter {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .requirementDetailTitle {
   min-width: 0;
   flex: 1;
@@ -1897,6 +1926,11 @@
 .detailTaskStatusPaused {
   color: #b7791f;
   background: #fff7e6;
+}
+
+.detailTaskStatusFailed {
+  color: #cf1322;
+  background: #fff1f0;
 }
 
 .detailTaskStatusDone {

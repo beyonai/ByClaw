@@ -1,0 +1,407 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { Button, Input, Modal, Segmented, Select, Tag, Tooltip } from 'antd';
+import {
+  ApartmentOutlined,
+  DeleteOutlined,
+  PlusOutlined,
+  ThunderboltOutlined,
+  UnorderedListOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
+import { useIntl } from '@umijs/max';
+import styles from './index.module.less';
+import { buildLayers, buildSuggestedSplit } from './mock';
+import type { MemberOption, RepoOption, SplitTaskDraft } from './types';
+
+type SplitView = 'list' | 'graph';
+
+// DAG 画布几何常量:列=拓扑深度,行=同层次序。边的锚点按这套尺寸算,改卡片尺寸需同步。
+const NODE_W = 220;
+const NODE_H = 168;
+const COL_GAP = 72;
+const ROW_GAP = 28;
+const PAD = 24;
+
+type RequirementSplitModalProps = {
+  open: boolean;
+  // 待拆分的需求(标题用于生成 AI 预拆建议,演示态)。
+  requirement: { title: string; description?: string } | null;
+  repos: RepoOption[];
+  // 承接人候选:项目成员,与原有任务负责人同源。
+  members: MemberOption[];
+  confirmLoading?: boolean;
+  onCancel: () => void;
+  // 确认后把拆分结果交回父级;演示态父级仍走原有单任务启动。
+  onConfirm: (tasks: SplitTaskDraft[]) => void;
+};
+
+const RequirementSplitModal: React.FC<RequirementSplitModalProps> = ({
+  open,
+  requirement,
+  repos,
+  members,
+  confirmLoading,
+  onCancel,
+  onConfirm,
+}) => {
+  const intl = useIntl();
+  const t = React.useCallback(
+    (id: string, values?: Record<string, string | number>) =>
+      intl.formatMessage({ id: `projectSpace.detail.${id}` }, values),
+    [intl]
+  );
+
+  const [tasks, setTasks] = useState<SplitTaskDraft[]>([]);
+  // 视图切换:默认列表,用户可切到依赖图。
+  const [view, setView] = useState<SplitView>('list');
+
+  // 每次打开时按需求标题重新生成 AI 预拆依赖图(演示态),并回到默认列表视图。
+  useEffect(() => {
+    if (open && requirement) {
+      setTasks(buildSuggestedSplit(requirement.title, repos));
+      setView('list');
+    }
+  }, [open, requirement, repos]);
+
+  const repoOptions = useMemo(
+    () =>
+      repos.map((repo) => ({
+        value: repo.repoId,
+        label: repo.repoFullName || repo.repoUrl || String(repo.repoId),
+      })),
+    [repos]
+  );
+
+  const repoLabelOf = (repoId?: number) =>
+    repoOptions.find((option) => option.value === repoId)?.label ?? t('reqSplit.placeholder.repo');
+
+  // 布局:分层 + 画布尺寸。节点绝对定位,边画在底层 SVG。
+  const layers = useMemo(() => buildLayers(tasks), [tasks]);
+  const posOf = useMemo(() => {
+    const map = new Map<string, { x: number; y: number }>();
+    layers.forEach((node) => {
+      map.set(node.task.rowId, {
+        x: PAD + node.depth * (NODE_W + COL_GAP),
+        y: PAD + node.order * (NODE_H + ROW_GAP),
+      });
+    });
+    return map;
+  }, [layers]);
+
+  const canvasSize = useMemo(() => {
+    const maxDepth = layers.reduce((max, node) => Math.max(max, node.depth), 0);
+    const maxOrder = layers.reduce((max, node) => Math.max(max, node.order), 0);
+    return {
+      width: PAD * 2 + (maxDepth + 1) * NODE_W + maxDepth * COL_GAP,
+      height: PAD * 2 + (maxOrder + 1) * NODE_H + maxOrder * ROW_GAP,
+    };
+  }, [layers]);
+
+  const patchTask = (rowId: string, patch: Partial<SplitTaskDraft>) =>
+    setTasks((prev) => prev.map((task) => (task.rowId === rowId ? { ...task, ...patch } : task)));
+
+  const removeTask = (rowId: string) =>
+    // 删节点同时断开所有指向它的依赖边,避免悬空引用。
+    setTasks((prev) =>
+      prev
+        .filter((task) => task.rowId !== rowId)
+        .map((task) => ({ ...task, dependsOn: task.dependsOn.filter((dep) => dep !== rowId) }))
+    );
+
+  const addTask = () =>
+    setTasks((prev) => [
+      ...prev,
+      {
+        rowId: `row-${Date.now()}`,
+        title: '',
+        repoId: repos[0]?.repoId,
+        branch: '',
+        dependsOn: [],
+        aiSuggested: false,
+      },
+    ]);
+
+  // 至少一行、且每行都填了标题/选了仓库/分支/承接成员才允许确认(演示态最小校验)。
+  const canConfirm =
+    tasks.length > 0 &&
+    tasks.every(
+      (task) =>
+        task.title.trim() !== '' &&
+        task.repoId !== undefined &&
+        task.branch.trim() !== '' &&
+        task.assigneeId !== undefined &&
+        `${task.assigneeId}` !== ''
+    );
+
+  // 依赖候选:除自己外的所有任务,label 用任务标题(标题空时退化到仓库名)。
+  const depOptionsFor = (rowId: string) =>
+    tasks
+      .filter((other) => other.rowId !== rowId)
+      .map((other) => ({
+        value: other.rowId,
+        label: other.title.trim() || repoLabelOf(other.repoId),
+      }));
+
+  // 列表视图:一行一个任务(标题 + 仓库 + 分支 + 承接成员 + 依赖),窄栏友好、默认视图。
+  const renderList = () => (
+    <div className={styles.splitTable}>
+      <div className={styles.splitRowHead}>
+        <span className={styles.colTitle}>{t('reqSplit.col.title')}</span>
+        <span className={styles.colRepo}>{t('reqSplit.col.repo')}</span>
+        <span className={styles.colBranch}>{t('reqSplit.col.branch')}</span>
+        <span className={styles.colMember}>{t('reqSplit.col.member')}</span>
+        <span className={styles.colDep}>{t('reqSplit.col.dependsOn')}</span>
+        <span className={styles.colOps} />
+      </div>
+      {tasks.map((task) => (
+        <div className={styles.splitRow} key={task.rowId}>
+          <div className={styles.colTitle}>
+            <Input
+              size="small"
+              placeholder={t('reqSplit.placeholder.title')}
+              value={task.title}
+              onChange={(event) => patchTask(task.rowId, { title: event.target.value })}
+            />
+          </div>
+          <div className={styles.colRepo}>
+            <Select
+              size="small"
+              className={styles.splitCellSelect}
+              placeholder={t('reqSplit.placeholder.repo')}
+              value={task.repoId}
+              options={repoOptions}
+              onChange={(repoId) => patchTask(task.rowId, { repoId })}
+            />
+          </div>
+          <div className={styles.colBranch}>
+            <Input
+              size="small"
+              placeholder={t('reqSplit.placeholder.branch')}
+              value={task.branch}
+              onChange={(event) => patchTask(task.rowId, { branch: event.target.value })}
+            />
+          </div>
+          <div className={styles.colMember}>
+            <Select
+              size="small"
+              showSearch
+              optionFilterProp="label"
+              className={styles.splitCellSelect}
+              suffixIcon={<UserOutlined />}
+              value={task.assigneeId}
+              placeholder={t('reqSplit.placeholder.member')}
+              options={members}
+              notFoundContent={members.length ? undefined : t('reqSplit.noMembers')}
+              onChange={(assigneeId) => patchTask(task.rowId, { assigneeId })}
+            />
+          </div>
+          <div className={styles.colDep}>
+            <Tooltip title={t('reqSplit.dependsOnHint')}>
+              <Select
+                size="small"
+                mode="multiple"
+                allowClear
+                maxTagCount="responsive"
+                className={styles.splitCellSelect}
+                placeholder={t('reqSplit.placeholder.dependsOn')}
+                value={task.dependsOn}
+                options={depOptionsFor(task.rowId)}
+                onChange={(dependsOn) => patchTask(task.rowId, { dependsOn })}
+              />
+            </Tooltip>
+          </div>
+          <div className={styles.colOps}>
+            {task.aiSuggested ? <Tag className={styles.splitAiTag}>{t('reqSplit.aiTag')}</Tag> : null}
+            <Button
+              type="text"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              aria-label={t('common.delete')}
+              onClick={() => removeTask(task.rowId)}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  // 依赖图视图:节点绝对定位,边画在底层 SVG。箭头方向 = 上游 → 下游(先做 → 后做)。
+  const renderGraph = () => (
+    <div className={styles.splitCanvasWrap}>
+      <div className={styles.splitCanvas} style={{ width: canvasSize.width, height: canvasSize.height }}>
+        <svg className={styles.splitEdges} width={canvasSize.width} height={canvasSize.height}>
+          <defs>
+            <marker id="splitArrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="#1677ff" />
+            </marker>
+          </defs>
+          {tasks.flatMap((task) =>
+            task.dependsOn.map((depId) => {
+              const from = posOf.get(depId);
+              const to = posOf.get(task.rowId);
+              if (!from || !to) return null;
+              // 从上游卡右侧中点连到下游卡左侧中点,中段贝塞尔避免直线穿卡。
+              const x1 = from.x + NODE_W;
+              const y1 = from.y + NODE_H / 2;
+              const x2 = to.x;
+              const y2 = to.y + NODE_H / 2;
+              const midX = (x1 + x2) / 2;
+              return (
+                <path
+                  key={`${depId}-${task.rowId}`}
+                  className={styles.splitEdgePath}
+                  d={`M${x1},${y1} C${midX},${y1} ${midX},${y2} ${x2},${y2}`}
+                  markerEnd="url(#splitArrow)"
+                />
+              );
+            })
+          )}
+        </svg>
+        {layers.map((node) => {
+          const { task } = node;
+          const pos = posOf.get(task.rowId)!;
+          return (
+            <div
+              className={styles.splitNode}
+              key={task.rowId}
+              style={{ left: pos.x, top: pos.y, width: NODE_W, height: NODE_H }}
+            >
+              <div className={styles.splitNodeHead}>
+                <Input
+                  size="small"
+                  variant="borderless"
+                  className={styles.splitNodeTitle}
+                  placeholder={t('reqSplit.placeholder.title')}
+                  value={task.title}
+                  onChange={(event) => patchTask(task.rowId, { title: event.target.value })}
+                />
+                <div className={styles.splitNodeHeadOps}>
+                  {task.aiSuggested ? <Tag className={styles.splitAiTag}>{t('reqSplit.aiTag')}</Tag> : null}
+                  <Button
+                    type="text"
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    aria-label={t('common.delete')}
+                    onClick={() => removeTask(task.rowId)}
+                  />
+                </div>
+              </div>
+
+              <div className={styles.splitNodeField}>
+                <Select
+                  size="small"
+                  variant="borderless"
+                  className={styles.splitNodeRepo}
+                  placeholder={t('reqSplit.placeholder.repo')}
+                  value={task.repoId}
+                  options={repoOptions}
+                  onChange={(repoId) => patchTask(task.rowId, { repoId })}
+                />
+              </div>
+
+              <div className={styles.splitNodeField}>
+                <Input
+                  size="small"
+                  placeholder={t('reqSplit.placeholder.branch')}
+                  value={task.branch}
+                  onChange={(event) => patchTask(task.rowId, { branch: event.target.value })}
+                />
+              </div>
+
+              <div className={styles.splitNodeField}>
+                <Select
+                  size="small"
+                  showSearch
+                  optionFilterProp="label"
+                  className={styles.splitCellSelect}
+                  suffixIcon={<UserOutlined />}
+                  value={task.assigneeId}
+                  placeholder={t('reqSplit.placeholder.member')}
+                  options={members}
+                  notFoundContent={members.length ? undefined : t('reqSplit.noMembers')}
+                  onChange={(assigneeId) => patchTask(task.rowId, { assigneeId })}
+                />
+              </div>
+
+              <div className={styles.splitNodeField}>
+                <Tooltip title={t('reqSplit.dependsOnHint')}>
+                  <Select
+                    size="small"
+                    mode="multiple"
+                    allowClear
+                    maxTagCount="responsive"
+                    className={styles.splitCellSelect}
+                    placeholder={t('reqSplit.placeholder.dependsOn')}
+                    value={task.dependsOn}
+                    options={depOptionsFor(task.rowId)}
+                    onChange={(dependsOn) => patchTask(task.rowId, { dependsOn })}
+                  />
+                </Tooltip>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  return (
+    <Modal
+      title={
+        <div className={styles.splitTitle}>
+          <h3>{t('reqSplit.title')}</h3>
+          <p>{t('reqSplit.subtitle')}</p>
+        </div>
+      }
+      open={open}
+      onCancel={onCancel}
+      onOk={() => onConfirm(tasks)}
+      okButtonProps={{ disabled: !canConfirm }}
+      confirmLoading={confirmLoading}
+      okText={t('reqSplit.confirm')}
+      cancelText={t('common.cancel')}
+      width={960}
+      centered
+      className={styles.splitModal}
+    >
+      <div className={styles.splitBody}>
+        {/* 需求头:这张需求将落成下面多个仓库任务(列表或依赖图两种视图)。 */}
+        <div className={styles.splitReqHead}>
+          <span className={styles.splitReqLabel}>{t('reqSplit.reqLabel')}</span>
+          <strong className={styles.splitReqName}>{requirement?.title ?? '-'}</strong>
+        </div>
+        {requirement?.description ? <p className={styles.splitReqDesc}>{requirement.description}</p> : null}
+
+        <div className={styles.splitToolbar}>
+          <div className={styles.splitAiHint}>
+            <ThunderboltOutlined className={styles.splitAiIcon} />
+            <span>{view === 'graph' ? t('reqSplit.graphHint') : t('reqSplit.listHint')}</span>
+          </div>
+          {/* 列表/图切换,默认列表。 */}
+          <Segmented
+            size="small"
+            value={view}
+            onChange={(value) => setView(value as SplitView)}
+            options={[
+              { value: 'list', label: t('reqSplit.view.list'), icon: <UnorderedListOutlined /> },
+              { value: 'graph', label: t('reqSplit.view.graph'), icon: <ApartmentOutlined /> },
+            ]}
+          />
+        </div>
+
+        {view === 'list' ? renderList() : renderGraph()}
+
+        <div className={styles.splitCanvasFooter}>
+          <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={addTask}>
+            {t('reqSplit.addTask')}
+          </Button>
+          <p className={styles.splitFootNote}>{t('reqSplit.footNote', { count: tasks.length })}</p>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+export default RequirementSplitModal;

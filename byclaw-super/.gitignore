@@ -1,0 +1,9 @@
+node_modules/
+.pnpm-store/
+dist/
+.env
+coverage/
+*.log
+.dev/
+.workbuddy/
+.claude/
