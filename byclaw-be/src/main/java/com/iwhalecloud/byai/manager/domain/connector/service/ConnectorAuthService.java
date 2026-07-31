@@ -13,6 +13,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -65,6 +67,14 @@ public class ConnectorAuthService {
      */
     public ConnectorAuth findById(Long authId) {
         return connectorAuthMapper.selectOne(ownerQuery(authId));
+    }
+
+    /** 查询指定用户当前已开启且仍有效的连接器编码。 */
+    public List<String> findEnabledConnectorCodes(Long userId) {
+        if (userId == null || userId <= 0) {
+            return Collections.emptyList();
+        }
+        return connectorAuthMapper.selectEnabledConnectorCodes(String.valueOf(userId));
     }
 
     /** 更新当前用户指定连接器的全局启用状态。 */

@@ -14,6 +14,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -88,5 +90,14 @@ class ConnectorAuthServiceTest {
         service.updateEnableFlag(3001L, true);
 
         verify(connectionStateService).updateEnableFlag("1001", 3001L, true);
+    }
+
+    @Test
+    void findEnabledConnectorCodesQueriesForTheExplicitUser() {
+        when(connectorAuthMapper.selectEnabledConnectorCodes("1001"))
+            .thenReturn(List.of("dingtalk"));
+
+        assertThat(service.findEnabledConnectorCodes(1001L)).containsExactly("dingtalk");
+        verify(connectorAuthMapper).selectEnabledConnectorCodes("1001");
     }
 }

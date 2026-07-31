@@ -5,12 +5,29 @@ import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
+
+import java.util.List;
 
 /**
  * 用户连接器授权绑定 Mapper。
  */
 @Mapper
 public interface ConnectorAuthMapper extends BaseMapper<ConnectorAuth> {
+
+    /** 查询用户当前已开启且仍有效的连接器编码。 */
+    @Select("""
+        SELECT info.connector_code
+        FROM byai_connector_auth auth
+        JOIN byai_connector_info info
+          ON info.connector_id = auth.connector_id
+        WHERE auth.user_id = #{userId}
+          AND auth.enable_flag = 'Y'
+          AND auth.status_cd = '00A'
+          AND info.status_cd = '00A'
+        ORDER BY info.sort ASC, info.connector_id ASC
+        """)
+    List<String> selectEnabledConnectorCodes(@Param("userId") String userId);
 
     /** 并发首次绑定时忽略有效授权唯一键冲突，兼容 openGauss。 */
     @Insert("""
