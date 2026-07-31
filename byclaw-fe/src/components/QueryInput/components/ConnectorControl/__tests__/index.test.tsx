@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 const mockMessageError = jest.fn();
 const mockMessageSuccess = jest.fn();
@@ -76,6 +76,70 @@ describe('ConnectorControl authorization states', () => {
 
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  it('loads the connector list when the component mounts', async () => {
+    render(<ConnectorControl canAuthorize value={[]} onChange={jest.fn()} />);
+
+    await waitFor(() => {
+      expect(mockQueryConnectorList).toHaveBeenCalledWith({ pageNum: 1, pageSize: 100, keyword: '' });
+    });
+  });
+
+  it('renders selected connectors as an avatar group and opens settings on click', async () => {
+    const { container } = render(
+      <ConnectorControl
+        canAuthorize
+        value={[
+          {
+            id: 1,
+            code: 'dingtalk',
+            name: '钉钉',
+            description: '',
+            authType: 'oauth',
+            icon: <span>钉</span>,
+            enableFlag: 'Y',
+          },
+          {
+            id: 2,
+            code: 'lark',
+            name: '飞书',
+            description: '',
+            authType: 'oauth',
+            icon: <span>飞</span>,
+            enableFlag: 'Y',
+          },
+        ]}
+        onChange={jest.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(mockQueryConnectorList).toHaveBeenCalledTimes(1);
+    });
+
+    expect(container.querySelector('.ant-avatar-group')).not.toBeNull();
+    expect(container.querySelectorAll('.ant-avatar')).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: '查看已连接连接器' }));
+    expect(screen.getByRole('dialog', { name: '连接器设置' })).toBeInTheDocument();
+  });
+
+  it('does not show the view-all action when the connector list is empty', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [],
+      pageNum: 1,
+      pageSize: 100,
+      total: 0,
+      totalPages: 0,
+    });
+
+    render(<ConnectorControl canAuthorize value={[]} onChange={jest.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+
+    await screen.findByText('暂无连接器');
+    expect(screen.queryByText('查看全部连接器')).not.toBeInTheDocument();
   });
 
   it('uses the backend error message when authorization is cancelled', () => {
@@ -204,6 +268,7 @@ describe('ConnectorControl authorization states', () => {
       connectors.some((connector: { id: number }) => connector.id === 9)
     );
     expect(connectedSelections).toHaveLength(1);
+    expect(screen.getByRole('switch', { name: '停用企业微信' })).toBeChecked();
 
     await act(async () => {
       jest.advanceTimersByTime(6000);

@@ -12,18 +12,38 @@ import org.apache.ibatis.annotations.Param;
 @Mapper
 public interface ConnectorAuthMapper extends BaseMapper<ConnectorAuth> {
 
-    /** 并发首次绑定时忽略有效授权唯一键冲突，避免 PostgreSQL 将外层事务置为 aborted。 */
+    /** 并发首次绑定时忽略有效授权唯一键冲突，兼容 openGauss。 */
     @Insert("""
-        INSERT INTO byai_connector_auth (
+        MERGE INTO byai_connector_auth target
+        USING (
+            SELECT
+                #{auth.authId} AS auth_id,
+                #{auth.userId} AS user_id,
+                #{auth.connectorId} AS connector_id,
+                #{auth.authName} AS auth_name,
+                #{auth.authMode} AS auth_mode,
+                #{auth.authCredential} AS auth_credential,
+                #{auth.expireTime} AS expire_time,
+                #{auth.enableFlag} AS enable_flag,
+                #{auth.statusCd} AS status_cd,
+                #{auth.lastSyncTime} AS last_sync_time,
+                #{auth.createBy} AS create_by,
+                #{auth.createTime} AS create_time,
+                #{auth.updateTime} AS update_time
+        ) source
+        ON (
+            target.user_id = source.user_id
+            AND target.connector_id = source.connector_id
+            AND target.status_cd = '00A'
+        )
+        WHEN NOT MATCHED THEN INSERT (
             auth_id, user_id, connector_id, auth_name, auth_mode, auth_credential,
             expire_time, enable_flag, status_cd, last_sync_time, create_by, create_time, update_time
         ) VALUES (
-            #{auth.authId}, #{auth.userId}, #{auth.connectorId}, #{auth.authName}, #{auth.authMode},
-            #{auth.authCredential}, #{auth.expireTime}, #{auth.enableFlag}, #{auth.statusCd},
-            #{auth.lastSyncTime}, #{auth.createBy}, #{auth.createTime}, #{auth.updateTime}
+            source.auth_id, source.user_id, source.connector_id, source.auth_name, source.auth_mode,
+            source.auth_credential, source.expire_time, source.enable_flag, source.status_cd,
+            source.last_sync_time, source.create_by, source.create_time, source.update_time
         )
-        ON CONFLICT (user_id, connector_id) WHERE status_cd = '00A'
-        DO NOTHING
         """)
     int insertActiveIgnoreConflict(@Param("auth") ConnectorAuth auth);
 }

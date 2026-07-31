@@ -77,6 +77,17 @@ class ConnectorSchemaTest {
     }
 
     @Test
+    void connectorWriteMappersUseOpenGaussCompatibleMergeInsteadOfPostgresOnConflict() throws Exception {
+        String authSql = read("byclaw-be/src/main/java/com/iwhalecloud/byai/manager/mapper/connector/ConnectorAuthMapper.java");
+        String manifestSql = read("byclaw-be/src/main/java/com/iwhalecloud/byai/manager/mapper/users/UserPrivateParamMapper.java");
+
+        assertThat(authSql).contains("merge into byai_connector_auth");
+        assertThat(authSql).doesNotContain("on conflict");
+        assertThat(manifestSql).contains("merge into po_user_private_param");
+        assertThat(manifestSql).doesNotContain("on conflict");
+    }
+
+    @Test
     void providerRoutingDmlUsesSequenceAndDefinesProviderMappings() throws Exception {
         String sql = read("deploy/migrations/versions/V0.3.1/V0.3.1__dml.sql");
 

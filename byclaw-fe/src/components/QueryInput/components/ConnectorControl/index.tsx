@@ -10,7 +10,7 @@ import {
   QrcodeOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
-import { Button, Drawer, Empty, Modal, Spin, Switch, Tooltip, message } from 'antd';
+import { Avatar, Button, Drawer, Empty, Modal, Spin, Switch, Tooltip, message } from 'antd';
 import classNames from 'classnames';
 
 import AntdIcon from '@/components/AntdIcon';
@@ -93,25 +93,18 @@ const ConnectorSelection = ({ value, onOpen }: { value: Connector[]; onOpen: () 
   const remainingCount = value.length - displayedConnectors.length;
 
   return (
-    <span className={styles.selection} aria-label="已连接连接器">
-      {displayedConnectors.map((connector) => (
-        <Tooltip key={connector.id} title={connector.name}>
-          <button
-            aria-label={`查看${connector.name}连接器`}
-            className={styles.selectionItem}
-            type="button"
-            onClick={onOpen}
-          >
-            <ConnectorIcon connector={connector} />
-          </button>
-        </Tooltip>
-      ))}
-      {remainingCount > 0 && (
-        <button aria-label="查看全部已连接连接器" className={styles.moreSelection} type="button" onClick={onOpen}>
-          +{remainingCount}
-        </button>
-      )}
-    </span>
+    <Tooltip title="查看已连接连接器">
+      <button className={styles.selection} type="button" aria-label="查看已连接连接器" onClick={onOpen}>
+        <Avatar.Group className={styles.selectionGroup} size={28}>
+          {displayedConnectors.map((connector) => (
+            <Avatar key={connector.id} className={styles.selectionAvatar} aria-label={connector.name}>
+              <ConnectorIcon connector={connector} />
+            </Avatar>
+          ))}
+          {remainingCount > 0 && <Avatar className={styles.selectionMoreAvatar}>+{remainingCount}</Avatar>}
+        </Avatar.Group>
+      </button>
+    </Tooltip>
   );
 };
 
@@ -136,6 +129,7 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
   const startAuthorizationGenerationRef = useRef(0);
   const authorizationTimerRef = useRef<number>();
   const cancelledAuthorizationIdsRef = useRef<Set<string>>(new Set());
+  const hasLoadedInitialConnectorsRef = useRef(false);
 
   const clearAuthorizationTimer = useCallback(() => {
     if (authorizationTimerRef.current === undefined) return;
@@ -205,8 +199,10 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
       // 仅在后端确认 connected 后回显连接器并允许消息携带该连接器 ID。
       clearAuthorizationTimer();
       activeAuthorizationIdRef.current = undefined;
+      const enabledConnector = { ...connector, enableFlag: 'Y' as const };
+      setConnectors((items) => items.map((item) => (item.id === authorization.connectorId ? enabledConnector : item)));
       setAuthorizedIds((ids) => new Set([...ids, connector.id]));
-      setSelected(connector, true);
+      setSelected(enabledConnector, true);
       setAuthorizationSession(undefined);
       setAuthorizingConnector(undefined);
       message.success(`${connector.name} 已连接`);
@@ -314,6 +310,13 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
       }
     }
   }, [connectors.length, onChange]);
+
+  useEffect(() => {
+    if (hasLoadedInitialConnectorsRef.current) return;
+
+    hasLoadedInitialConnectorsRef.current = true;
+    void loadAuthorizedConnectors();
+  }, [loadAuthorizedConnectors]);
 
   const openSettings = () => {
     setSettingsOpen(true);
@@ -500,17 +503,19 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
               : !loadingConnectors && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无连接器" />}
           </div>
         </Spin>
-        <button
-          className={styles.viewAllButton}
-          type="button"
-          onClick={() => {
-            setSettingsOpen(false);
-            setConfigurationOpen(true);
-          }}
-        >
-          <SettingOutlined />
-          查看全部连接器
-        </button>
+        {connectors.length > 0 && (
+          <button
+            className={styles.viewAllButton}
+            type="button"
+            onClick={() => {
+              setSettingsOpen(false);
+              setConfigurationOpen(true);
+            }}
+          >
+            <SettingOutlined />
+            查看全部连接器
+          </button>
+        )}
       </Modal>
 
       {/* 授权说明页与真实授权任务页分开，避免在前端伪造平台授权结果。 */}

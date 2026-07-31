@@ -309,44 +309,47 @@
 }
 
 .selection {
-  // 已连接状态替换原连接器入口，直接回显已授权的平台图标。
-  display: inline-flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 8px;
-  padding: 0;
-}
-
-.selectionItem {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   padding: 0;
   background: transparent;
   border: 0;
   cursor: pointer;
+}
+
+.selectionGroup {
+  display: inline-flex;
+  align-items: center;
+}
+
+.selectionAvatar {
+  color: #1677ff;
+  background: #edf4ff;
+  border: 2px solid #fff;
+
+  :global(.@{antPrefix}-avatar-string) {
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: normal;
+    transform: none !important;
+  }
 
   .connectorIcon {
-    width: 32px;
-    height: 32px;
-    font-size: 20px;
-    border-radius: 8px;
+    width: auto;
+    height: auto;
+    background: transparent;
+    font-size: 18px;
+    border-radius: 0;
   }
 }
 
-.moreSelection {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
+.selectionMoreAvatar {
   color: #4b5563;
-  font-size: 15px;
+  font-size: 14px !important;
   background: #f0f1f3;
-  border: 0;
-  border-radius: 50%;
-  cursor: pointer;
+  border: 2px solid #fff;
 }
 
 .configurationDrawer {
