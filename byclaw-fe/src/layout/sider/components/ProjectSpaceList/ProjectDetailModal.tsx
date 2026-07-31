@@ -378,6 +378,36 @@ type ChannelSourcePageState = {
   total: number;
 };
 
+type ChannelSearchInputProps = {
+  keyword: string;
+  placeholder: string;
+  onKeywordChange: (value: string) => void;
+};
+
+const ChannelSearchInput: React.FC<ChannelSearchInputProps> = ({ keyword, placeholder, onKeywordChange }) => {
+  const [inputValue, setInputValue] = useState(keyword);
+
+  useEffect(() => {
+    setInputValue(keyword);
+  }, [keyword]);
+
+  return (
+    <Input
+      allowClear
+      className={styles.detailChannelPanelSearch}
+      suffix={<SearchOutlined />}
+      placeholder={placeholder}
+      value={inputValue}
+      onChange={(event) => {
+        const value = event.target.value;
+        // 输入框在右侧面板内部维护状态，避免每次按键都重新设置整块详情面板而中断中文输入法。
+        setInputValue(value);
+        onKeywordChange(value);
+      }}
+    />
+  );
+};
+
 // AI 评分明细：与后端 score_detail JSON 字段、满分口径对齐
 type ScoreDetail = {
   businessValue?: number;
@@ -2887,10 +2917,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const handleChannelSearchChange = useCallback(
     (value: string) => {
-      setChannelSearchKeyword(value);
       if (channelSearchTimerRef.current) clearTimeout(channelSearchTimerRef.current);
       // 输入停顿后再向后端搜索，避免每输入一个字符都请求渠道分页接口。
       channelSearchTimerRef.current = setTimeout(() => {
+        setChannelSearchKeyword(value);
         void fetchChannelSources({ keyword: value, pageNum: 1 });
         channelSearchTimerRef.current = null;
       }, 300);
@@ -2940,6 +2970,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
           <p>{t('channel.count', { count: channelSourcePage.total })}</p>
         </div>
         <div className={styles.detailChannelPanelActions}>
+          <ChannelSearchInput
+            keyword={channelSearchKeyword}
+            placeholder={t('channel.searchPlaceholder')}
+            onKeywordChange={handleChannelSearchChange}
+          />
           <Tooltip title={t('channel.add')} placement="top">
             <Button type="primary" icon={<PlusOutlined />} onClick={() => openAddSourceModal()}>
               {t('channel.add')}
@@ -2951,14 +2986,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
         </div>
       </div>
       <div className={styles.detailChannelPanelBody} onScroll={handleChannelPanelScroll}>
-        <Input
-          allowClear
-          className={styles.detailChannelPanelSearch}
-          prefix={<SearchOutlined />}
-          placeholder={t('channel.searchPlaceholder')}
-          value={channelSearchKeyword}
-          onChange={(event) => handleChannelSearchChange(event.target.value)}
-        />
         {renderSourceList(
           channelSearchKeyword.trim() ? t('channel.searchEmpty') : t('channel.empty'),
           { panel: true, loading: channelSourcesLoading },
