@@ -138,7 +138,7 @@ export type DevloopProjectSpaceFile = {
 // 项目管理
 export const createProject = (data: DevloopProjectPayload) => POST<any>('/byaiService/project/create', data);
 
-export const listProjects = (data?: { keyword?: string }, config?: ConfigType) =>
+export const listProjects = (data?: { keyword?: string; pageNum?: number; pageSize?: number }, config?: ConfigType) =>
   POST<any>('/byaiService/project/list', data || {}, config);
 
 export const getProject = (projectId: number) => POST<any>('/byaiService/project/get', { projectId });
@@ -207,7 +207,8 @@ export const updateScanSource = (data: {
 
 export const deleteScanSource = (sourceId: number) => POST<any>('/byaiService/devloop/source/delete', { sourceId });
 
-export const listScanSources = (projectId: number) => POST<any>('/byaiService/devloop/source/list', { projectId });
+export const listScanSources = (data: { projectId: number; keyword?: string; pageNum?: number; pageSize?: number }) =>
+  POST<any>('/byaiService/devloop/source/list', data);
 
 export const toggleScanSource = (sourceId: number, enabled: string) =>
   POST<any>('/byaiService/devloop/source/toggle', { sourceId, enabled });

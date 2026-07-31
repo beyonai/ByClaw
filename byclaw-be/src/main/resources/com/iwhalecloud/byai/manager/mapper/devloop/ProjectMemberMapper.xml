@@ -44,8 +44,8 @@
                  LEFT JOIN ss_resource c ON a.agent_id = c.resource_id
         WHERE a.project_id = #{projectId}
         <if test="userName != null and userName != ''">
-            <!-- 成员列表搜索只匹配姓名，避免账号和绑定数字员工名称产生额外命中。 -->
-            AND b.user_name LIKE CONCAT('%', #{userName}, '%')
+            <!-- 成员列表搜索只匹配姓名，避免账号和绑定数字员工名称产生额外命中；统一转换后忽略大小写。 -->
+            AND LOWER(b.user_name) LIKE CONCAT('%', LOWER(#{userName}), '%')
         </if>
         <!-- 创建人置顶、当前登录人次之，其余成员按最近加入时间倒序展示。 -->
         ORDER BY CASE

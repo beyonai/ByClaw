@@ -50,14 +50,14 @@ public class ProjectController {
     }
 
     /**
-     * 查询项目列表
+     * 分页查询项目列表
      *
      * @param projectQo 查询条件（keyword / projectType / isShare，可分页）
-     * @return 项目列表
+     * @return 项目分页列表
      */
     @PostMapping("/list")
-    public ResponseUtil<List<ProjectListDto>> listProjects(@RequestBody ProjectQo projectQo) {
-        return ResponseUtil.successResponse(projectApplicationService.listProjects(projectQo));
+    public ResponseUtil<PageInfo<ProjectListDto>> listProjects(@RequestBody ProjectQo projectQo) {
+        return ResponseUtil.successResponse(projectApplicationService.selectProjectsByQo(projectQo));
     }
 
     /**

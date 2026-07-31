@@ -257,6 +257,22 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(list);
     }
 
+    /** 渠道配置大面板按名称后端搜索并分页返回，手工需求的内部来源不计入渠道总数。 */
+    public ResponseUtil<PageInfo<Map<String, Object>>> listScanSources(Long projectId, String keyword, int pageNum,
+        int pageSize) {
+        Page<ScanSource> sourcePage = scanSourceService.listByProjectIdPage(projectId, keyword, MANUAL_SOURCE_TYPE,
+            pageNum, pageSize);
+        PageInfo<Map<String, Object>> result = new PageInfo<>();
+        result.setPageNum((int) sourcePage.getCurrent());
+        result.setPageSize((int) sourcePage.getSize());
+        result.setTotal(sourcePage.getTotal());
+        result.setTotalPages((int) sourcePage.getPages());
+        List<Map<String, Object>> sourceList = sourcePage.getRecords().stream().map(this::scanSourceToVo)
+            .collect(java.util.stream.Collectors.toList());
+        result.setList(sourceList);
+        return ResponseUtil.successResponse(result);
+    }
+
     /** 扫描源对外视图：白名单字段，刻意排除 createBy/updateBy/时间戳/deleteFlag 等内部字段。 */
     private Map<String, Object> scanSourceToVo(ScanSource s) {
         Map<String, Object> map = new HashMap<>();
@@ -1241,7 +1257,8 @@ public class DevloopApplicationService {
             .le(query.getCreateTimeEnd() != null, ByaiSession::getCreateTime, query.getCreateTimeEnd());
         // 任务名称与会话标题一一对应，搜索仅匹配名称，分页总数与前端搜索结果一致。
         if (StringUtils.isNotBlank(query.getTaskName())) {
-            wrapper.like(ByaiSession::getSessionName, query.getTaskName().trim());
+            // PostgreSQL 的 LIKE 区分大小写，任务名称统一小写后支持大小写混输搜索。
+            wrapper.apply("LOWER(session_name) LIKE {0}", "%" + query.getTaskName().trim().toLowerCase(Locale.ROOT) + "%");
         }
         if (DEFAULT_PROJECT_ID.equals(query.getProjectId()) || Boolean.TRUE.equals(query.getOnlyMine())) {
             // 默认项目共用 -1 分组必须按创建人隔离；onlyMine 过滤同样只看当前登录用户的会话，两者叠加无害。

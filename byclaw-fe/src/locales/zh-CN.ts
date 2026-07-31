@@ -1378,6 +1378,8 @@ export default {
   'projectSpace.scene.personal': '个人',
   'projectSpace.selectProject': '请选择项目',
   'projectSpace.unnamedProject': '未命名项目',
+  'projectSpace.projectSearchPlaceholder': '搜索项目',
+  'projectSpace.projectSearchEmpty': '未找到匹配项目',
   'projectSpace.newChatName': '新建会话',
   'projectSpace.searchPlaceholder': '请输入关键字',
   'projectSpace.createProject': '新建项目',
@@ -1694,6 +1696,8 @@ export default {
   'projectSpace.detail.channel.count': '{count} 个渠道',
   'projectSpace.detail.channel.add': '新增渠道',
   'projectSpace.detail.channel.empty': '暂无渠道，点击右上角新增渠道',
+  'projectSpace.detail.channel.searchPlaceholder': '搜索渠道',
+  'projectSpace.detail.channel.searchEmpty': '未找到匹配渠道',
   'projectSpace.detail.source.empty': '暂无收集源，点击右上角 + 添加',
   // 收集源已统一命名为渠道，弹窗标题与详情操作入口共用这两个文案。
   'projectSpace.detail.source.addTitle': '新增渠道',
