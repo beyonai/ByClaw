@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import Any
@@ -23,6 +24,7 @@ _HEADER_CONTEXT: ContextVar[dict[str, str]] = ContextVar(
     default={},
 )
 _SYSTEM_CODE = "BYCLAW-QA"
+RESOURCE_ID_HEADER = "x-byclaw-resource-id"
 
 
 def set_byclaw_userfs_headers(headers: Mapping[str, str]) -> Token[dict[str, str]]:
@@ -44,6 +46,26 @@ def build_byclaw_userfs_headers() -> dict[str, str]:
         "system-code": _SYSTEM_CODE,
         "beyond-token": token,
     }
+
+
+def get_byclaw_resource_id() -> str | None:
+    resource_id = (_HEADER_CONTEXT.get().get(RESOURCE_ID_HEADER) or "").strip()
+    if not resource_id:
+        return None
+    if not resource_id.isdigit() or int(resource_id) <= 0:
+        raise StorageConfigurationError("invalid ByClaw resourceId for knowledge storage")
+    return resource_id
+
+
+@contextmanager
+def bind_byclaw_resource_id(resource_id: str | int):
+    current = dict(_HEADER_CONTEXT.get())
+    current[RESOURCE_ID_HEADER] = str(resource_id)
+    token = _HEADER_CONTEXT.set(current)
+    try:
+        yield
+    finally:
+        _HEADER_CONTEXT.reset(token)
 
 _NAMESPACE = "BYCLAW-USER"
 _ROOT = "/.bykc"
@@ -346,14 +368,24 @@ class ByClawUserFsKnowledgeStorageProvider:
         _ensure_json_success(response, "move")
 
 
-def build_byclaw_userfs_storage_provider() -> ByClawUserFsKnowledgeStorageProvider:
-    return ByClawUserFsKnowledgeStorageProvider()
+def build_byclaw_userfs_storage_provider():
+    """Compatibility alias for deployments that still configure the legacy factory."""
+    from byclaw_knowledge_storage import ByClawKnowledgeStorageProvider
+
+    logger.warning(
+        "BY_QA_STORAGE_PROVIDER uses deprecated byclaw_userfs_storage factory; "
+        "enabling resource-aware knowledge storage compatibility"
+    )
+    return ByClawKnowledgeStorageProvider()
 
 
 __all__ = [
     "ByClawUserFsKnowledgeStorageProvider",
+    "RESOURCE_ID_HEADER",
+    "bind_byclaw_resource_id",
     "build_byclaw_userfs_headers",
     "build_byclaw_userfs_storage_provider",
+    "get_byclaw_resource_id",
     "reset_byclaw_userfs_headers",
     "set_byclaw_userfs_headers",
 ]

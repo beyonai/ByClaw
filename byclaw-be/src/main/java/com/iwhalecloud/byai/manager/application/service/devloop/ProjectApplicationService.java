@@ -34,8 +34,10 @@ import com.iwhalecloud.byai.manager.dto.devloop.MemberBatchDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberSaveDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileDeleteDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileQueryDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileRenameDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileSaveDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareTargetDTO;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
@@ -59,6 +61,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.util.UriComponentsBuilder;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -69,6 +72,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -323,7 +327,9 @@ public class ProjectApplicationService {
      * @return 成员列表
      */
     public List<ProjectMemberListDto> listProjectMembers(Long projectId, String userName) {
-        return projectMemberService.listProjectMembers(projectId, StringUtils.trimToNull(userName));
+        // 成员列表需要以当前登录用户为第二优先级，排序逻辑由查询 SQL 统一处理。
+        return projectMemberService.listProjectMembers(projectId, StringUtils.trimToNull(userName),
+            CurrentUserHolder.getCurrentUserId());
     }
 
     /**
@@ -460,6 +466,13 @@ public class ProjectApplicationService {
             Project project = projectService.findById(member.getProjectId());
             if (project != null && project.getCreateBy() != null && project.getCreateBy().equals(member.getUserId())) {
                 throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.member.creator.remove.forbidden");
+            }
+            Long currentUserId = CurrentUserHolder.getCurrentUserId();
+            boolean isProjectCreator = project != null && Objects.equals(project.getCreateBy(), currentUserId);
+            boolean isRemovingSelf = Objects.equals(member.getUserId(), currentUserId);
+            if (!isProjectCreator && !isRemovingSelf) {
+                // 成员移除接口仅允许创建者管理成员，或普通成员主动退出项目。
+                throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.member.remove.forbidden");
             }
         }
         projectMemberService.removeMember(memberId);
@@ -766,6 +779,96 @@ public class ProjectApplicationService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.id.required");
         }
         return projectShareFileService.listSpaceFiles(dto.getProjectId());
+    }
+
+    /**
+     * 修改项目共享文件的展示名称；对象存储路径保持不变，避免重命名影响已有预览链接。
+     *
+     * @param dto 含项目 ID、文件 ID 和新文件名
+     */
+    public void renameShareFile(ProjectShareFileRenameDto dto) {
+        Project project = validateShareFileOperation(dto == null ? null : dto.getProjectId(),
+            dto == null ? null : dto.getFileId());
+        String fileName = StringUtils.trimToEmpty(dto.getFileName());
+        if (fileName.isEmpty() || fileName.contains("/") || fileName.contains("\\")) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.share.file.name.invalid");
+        }
+
+        Files file = fileService.findById(dto.getFileId());
+        if (file == null || !Objects.equals(file.getProjectId(), project.getProjectId())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.share.file.not.found");
+        }
+        // 共享文件通过 fileUrl 预览，名称仅更新文件元数据即可保持已有链接可用。
+        file.setFileName(fileName);
+        file.setConvertFileName(fileName);
+        fileService.update(file);
+    }
+
+    /**
+     * 删除项目共享文件及其文件元数据；仅移除当前项目已关联的文件。
+     *
+     * @param dto 含项目 ID、文件 ID
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteShareFile(ProjectShareFileDeleteDto dto) {
+        Project project = validateShareFileOperation(dto == null ? null : dto.getProjectId(),
+            dto == null ? null : dto.getFileId());
+        Files file = fileService.findById(dto.getFileId());
+        if (file == null || !Objects.equals(file.getProjectId(), project.getProjectId())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.share.file.not.found");
+        }
+
+        deleteShareFileStorage(file);
+        // 存储文件删除成功后，再删除项目关联和文件元数据，避免列表残留已删除文件。
+        projectShareFileService.removeByProjectAndFile(project.getProjectId(), dto.getFileId());
+        fileService.remove(dto.getFileId());
+    }
+
+    /**
+     * 根据共享文件预览地址提取对象存储路径，并删除实际文件。
+     *
+     * @param file 项目共享文件元数据
+     */
+    private void deleteShareFileStorage(Files file) {
+        try {
+            String filePath = UriComponentsBuilder.fromUriString(file.getFileUrl()).build().getQueryParams()
+                .getFirst("filePath");
+            if (StringUtils.isBlank(filePath)) {
+                throw new IllegalArgumentException("project shared file path is empty");
+            }
+            commonFileStorage.delete(commonFilePathResolver.projectShare(filePath));
+        }
+        catch (Exception e) {
+            log.error("Failed to delete project shared file storage, fileId={}", file.getFileId(), e);
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.share.file.delete.failed", e);
+        }
+    }
+
+    /**
+     * 校验共享文件操作参数、文件归属和项目创建者权限。
+     *
+     * @param projectId 项目 ID
+     * @param fileId 文件 ID
+     * @return 已校验项目
+     */
+    private Project validateShareFileOperation(Long projectId, Long fileId) {
+        if (projectId == null || projectId == 0L) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.id.required");
+        }
+        if (fileId == null || fileId == 0L) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.share.file.not.found");
+        }
+        Project project = projectService.findById(projectId);
+        if (project == null || DeleteFlag.DELETED.equals(project.getDeleteFlag())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.not.found");
+        }
+        if (!Objects.equals(project.getCreateBy(), CurrentUserHolder.getCurrentUserId())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.creator.operation.forbidden");
+        }
+        if (!projectShareFileService.existsByProjectAndFile(projectId, fileId)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.share.file.not.found");
+        }
+        return project;
     }
 
 }

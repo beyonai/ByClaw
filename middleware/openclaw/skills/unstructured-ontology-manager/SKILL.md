@@ -55,23 +55,34 @@ allowed-tools: execute, read_file
 
 ### 创建对象的信息收集步骤
 
-收集基本信息（对象名称、编码、描述、知识库、目录、字段）后，**必须额外询问以下四个可选配置**，不得跳过：
+收集基本信息（对象名称、编码、描述、知识库、目录、字段）后，**必须确定对象的使用领域，并额外询问以下四个可选配置**，不得跳过：
 
-1. **字段术语绑定**：对每个字段，判断是否需要绑定术语：
+1. **对象使用领域（`use_domain`）**：根据对象在知识整理流程中的来源和用途判断：
+   - `ods`（原始对象）：直接采集或保存的原始内容，基本保持来源形态。例如采集的文章、文档、图片、视频、会议录音
+   - `ads`（应用对象）：从原始内容中整理、抽取、归纳出的业务知识。例如从文章中提取的产品、品牌、人物、事件等
+   - 判断关键是“这个对象本身是否为采集到的原始内容”，而不是内容谈论的主题。例如文章谈论产品：文章对象是 `ods`，从文章整理出的产品对象是 `ads`
+   - 能根据上下文确定时直接判断；无法确定时询问用户。用户未指定或脚本未收到该参数时默认 `ads`
+   - **交互说明不得省略**：只要向用户询问使用哪个领域，或向用户建议某个领域，都必须同时说明当前仅有以下两种领域及其用途：
+     - `ods`（原始领域）：用于直接采集、保存并基本保持来源形态的原始内容
+     - `ads`（应用领域）：用于从原始内容中整理、抽取或归纳得到的业务知识
+   - 推荐领域时还必须结合当前对象解释推荐理由，并允许用户改选；禁止只说“请选择 ods/ads”或只给出推荐值而不解释两种类型
+   - 推荐话术示例：“当前支持 `ods` 和 `ads` 两种领域：`ods` 用于采集的原始内容，`ads` 用于从原始内容整理出的业务知识。这个对象是从文章中提取的产品信息，因此建议使用 `ads`。如果你希望把它作为原始采集内容保存，也可以改选 `ods`。”
+
+2. **字段术语绑定**：对每个字段，判断是否需要绑定术语：
    - 如果字段通过 `relations` 关联了其他对象（有 `join_keys`），系统会自动绑定术语，**无需手动填写**
    - 如果字段是人员、部门等系统术语，收集 `term_type_code`（如 `user_name`、`dept_name`）和 `rel_term_codeorname`（`code` 或 `name`）；可先调 `list_term_types.py` 确认可用类型
    - 如果字段是自定义枚举（如会议类型、状态），收集 `term_values`（字符串列表，如 `["草稿", "已提交", "已审批"]`）
    - `term_type_code` 与 `term_values` **互斥，不能同时填写**
 
-2. **是否需要绑定模板文件？**
+3. **是否需要绑定模板文件？**
    - 若是，请用户提供模板文件路径（`template_file_path`），用于指定该对象的解析/提取模板
    - 若否，`template_file_path` 留空
 
-3. **是否需要绑定规则文件？**
+4. **是否需要绑定规则文件？**
    - 若是，请用户提供规则文件路径（`rules_file_path`），用于指定该对象的处理规则
    - 若否，`rules_file_path` 留空
 
-4. **是否需要定义与其他对象的关联关系？**
+5. **是否需要定义与其他对象的关联关系？**
    - 若是，向用户收集每条关系的以下信息，允许添加多条：
      - `relation_code`：关系编码（英文下划线，如 `has_participant`）
      - `relation_name`：关系名称（如 `参会人`）
@@ -100,7 +111,7 @@ allowed-tools: execute, read_file
 | 查看/列出 + 对象         | `/usr/local/bin/python3 scripts/list_resources.py '{}'`                                                                                                                                                                                                                                                                                                                          |
 | 查看知识库列表            | `/usr/local/bin/python3 scripts/list_knowledge_bases.py '{}'`                                                                                                                                                                                                                                                                                                                    |
 | 查看知识库目录            | `/usr/local/bin/python3 scripts/list_kb_directories.py '{"kb_id":"<kb_id>"}'`                                                                                                                                                                                                                                                                                                    |
-| 创建/新建 + 对象（收集阶段）   | `/usr/local/bin/python3 scripts/create_object.py '{"action":"collect","entity_code":"<code>","entity_name":"<name>","entity_desc":"<entity_desc>","kb_resource_id":"<resourceId>","kb_id":"<resourceCode>","kb_directory":"<dir>","fields":[],"relations":[{"relation_code":"<rel_code>","relation_name":"<rel_name>","target_class":"<target_code>","relation_type":"<ONE_TO_ONE |ONE_TO_MANY|MANY_TO_ONE|MANY_TO_MANY>","join_keys":[{"sourceField":"<本对象属性编码>","targetField":"<目标对象属性编码>"}]}],"session_id":"<sid>","template_file_path":"<path_or_empty>","rules_file_path":"<path_or_empty>"}'` |
+| 创建/新建 + 对象（收集阶段）   | `/usr/local/bin/python3 scripts/create_object.py '{"action":"collect","entity_code":"<code>","entity_name":"<name>","entity_desc":"<entity_desc>","use_domain":"<ods_or_ads>","kb_resource_id":"<resourceId>","kb_id":"<resourceCode>","kb_directory":"<dir>","fields":[],"relations":[{"relation_code":"<rel_code>","relation_name":"<rel_name>","target_class":"<target_code>","relation_type":"<ONE_TO_ONE |ONE_TO_MANY|MANY_TO_ONE|MANY_TO_MANY>","join_keys":[{"sourceField":"<本对象属性编码>","targetField":"<目标对象属性编码>"}]}],"session_id":"<sid>","template_file_path":"<path_or_empty>","rules_file_path":"<path_or_empty>"}'` |
 | 确认提交               | `/usr/local/bin/python3 scripts/create_object.py '{"action":"submit","entity_code":"<code>","session_id":"<sid>"}'`                                                                                                                                                                                                                                                              |
 | 删除 + 对象            | `/usr/local/bin/python3 scripts/delete_object.py '{"entity_code":"<code>"}'`                                                                                                                                                                                                                                                                                                     |
 | 挂载/添加到助理/数字员工      | `/usr/local/bin/python3 scripts/mount_resource.py '{"agent_id":<id>,"resource_code":"<code>"}'`                                                                                                                                                                                                                                                                                  |
@@ -121,6 +132,7 @@ allowed-tools: execute, read_file
 
 - `kb_resource_id`：知识库资源 ID（必填），来自 `list_knowledge_bases.py` 返回的 **`resourceId`** 字段（如 `"10000765"`）。
 - `kb_id`：知识库资源 编码（必填），来自 `list_knowledge_bases.py` 返回的 **`resourceCode`** 字段（如 `"59"`）。
+- `use_domain`：对象使用领域，仅支持 `ods` / `ads`；`ods` 表示采集的原始对象，`ads` 表示从原始内容整理出的应用对象，默认 `ads`。脚本将其写入外部 API 的 `ext_property.use_domain`
 - `kb_directory`：知识库目录路径，来自 `list_kb_directories.py` 返回的 `directoryPath` 字段
 - `resource_id`：创建目录时使用，来自 `list_knowledge_bases.py` 返回的 **`resourceId`** 字段（如 `"10000765"`），**不是 `resourceCode`**
 - `directory_name`：要创建的目录或文件夹名称

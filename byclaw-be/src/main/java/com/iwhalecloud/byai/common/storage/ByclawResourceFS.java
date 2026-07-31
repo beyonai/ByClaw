@@ -12,7 +12,7 @@ public class ByclawResourceFS extends ByclawFS implements ResourceFS {
     private static final Logger LOGGER = LoggerFactory.getLogger(ByclawResourceFS.class);
 
     private static final String SHARE_TYPE_PUBLIC = "public";
-    private static final List<String> RESOURCE_BUCKETS = List.of("byclaw", "byclaw-datacloud", "byclaw-qa");
+    private static final List<String> RESOURCE_BUCKETS = List.of("byclaw", "byclaw-datacloud");
 
     public ByclawResourceFS(ObjectStorage objectStorage) {
         super(objectStorage);

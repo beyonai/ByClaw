@@ -9,8 +9,10 @@ import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberSaveDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileDeleteDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileQueryDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileRenameDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileSaveDto;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
@@ -208,5 +210,27 @@ public class ProjectController {
     @PostMapping("/share/listSpaceFiles")
     public ResponseUtil<List<ProjectShareFileListDto>> listSpaceFiles(@RequestBody ProjectShareFileQueryDto dto) {
         return ResponseUtil.successResponse(projectApplicationService.listSpaceFiles(dto));
+    }
+
+    /**
+     * 重命名项目共享文件，仅项目创建者可操作。
+     *
+     * @param dto 包含 projectId、fileId、fileName
+     */
+    @PostMapping("/share/rename")
+    public ResponseUtil<Void> renameShareFile(@RequestBody ProjectShareFileRenameDto dto) {
+        projectApplicationService.renameShareFile(dto);
+        return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 删除项目共享文件，仅项目创建者可操作。
+     *
+     * @param dto 包含 projectId、fileId
+     */
+    @PostMapping("/share/delete")
+    public ResponseUtil<Void> deleteShareFile(@RequestBody ProjectShareFileDeleteDto dto) {
+        projectApplicationService.deleteShareFile(dto);
+        return ResponseUtil.successResponse();
     }
 }

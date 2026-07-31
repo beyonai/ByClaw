@@ -17,7 +17,7 @@ interface KeyboardHandlerParams {
   isComposing: React.RefObject<boolean>;
   onSend?: (payload: PayloadType) => void;
   getPayload: () => PayloadType;
-  setText: (text: string) => void;
+  clearAfterSend: () => void;
   canSend?: (payload: { text: string }) => boolean;
 }
 
@@ -26,7 +26,7 @@ export const createKeyboardHandler = ({
   isComposing,
   onSend,
   getPayload,
-  setText,
+  clearAfterSend,
   canSend,
 }: KeyboardHandlerParams) => {
   return (event: React.KeyboardEvent) => {
@@ -202,7 +202,7 @@ export const createKeyboardHandler = ({
               return;
             }
             onSend(payload);
-            setText('');
+            clearAfterSend();
           }
           return;
         }

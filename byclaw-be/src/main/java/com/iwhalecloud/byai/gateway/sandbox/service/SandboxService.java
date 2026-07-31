@@ -224,6 +224,9 @@ public class SandboxService {
     @Value("${sandbox.reconcile.lock.enabled:true}")
     private boolean reconcileJobLockEnabled;
 
+    @Value("${sandbox.reconcile.orphan-cleanup.enabled:true}")
+    private boolean reconcileOrphanCleanupEnabled;
+
     @Lazy
     @Autowired
     private WorkerRegistry gatewayWorkerRegistry;
@@ -1739,6 +1742,11 @@ public class SandboxService {
 
                 if (isTerminalState || isPendingTimeout) {
                     String reason = buildCleanupReason("orphan", orphan);
+                    if (!reconcileOrphanCleanupEnabled) {
+                        LOGGER.info("孤儿沙箱自动清理已关闭，跳过清理（保留用于排障），sandboxId：{}，状态：{}，reason：{}，创建时间：{}，已存在：{} 分钟",
+                            orphan.getSandboxId(), orphan.getState(), reason, orphan.getCreatedAt(), ageMinutes);
+                        continue;
+                    }
                     LOGGER.info("自动清理孤儿沙箱，sandboxId：{}，状态：{}，cleanupReason：{}，创建时间：{}，已存在：{} 分钟",
                         orphan.getSandboxId(), orphan.getState(), reason, orphan.getCreatedAt(), ageMinutes);
                     cleanupRemoteSandboxQuietly(group.getUserCode(), group.getSandboxType(),

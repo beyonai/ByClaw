@@ -39,6 +39,7 @@
                b.user_name,
                c.resource_name
         FROM byai_project_member a
+                 LEFT JOIN byai_project d ON a.project_id = d.project_id
                  LEFT JOIN po_users b ON a.user_id = b.user_id
                  LEFT JOIN ss_resource c ON a.agent_id = c.resource_id
         WHERE a.project_id = #{projectId}
@@ -46,7 +47,14 @@
             <!-- 成员列表搜索只匹配姓名，避免账号和绑定数字员工名称产生额外命中。 -->
             AND b.user_name LIKE CONCAT('%', #{userName}, '%')
         </if>
-        ORDER BY a.create_time ASC
+        <!-- 创建人置顶、当前登录人次之，其余成员按最近加入时间倒序展示。 -->
+        ORDER BY CASE
+                     WHEN a.user_id = d.create_by THEN 0
+                     WHEN a.user_id = #{currentUserId} THEN 1
+                     ELSE 2
+                 END ASC,
+                 a.create_time DESC,
+                 a.member_id DESC
     </select>
 
 </mapper>

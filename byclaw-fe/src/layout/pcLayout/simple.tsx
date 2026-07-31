@@ -40,6 +40,25 @@ const SimpleLayout = () => {
 
   const [sessionId, setSessionId] = useState<string>('');
   const [agentId, setAgentId] = useState<string>('');
+  // 调试布局也保持和正式布局相同的左侧联动状态。
+  const [siderAgentId, setSiderAgentId] = useState<string>('');
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined') return;
+    (window as any).__BYCLAW_E2E__ = {
+      ...((window as any).__BYCLAW_E2E__ || {}),
+      EventEmitter: myEventEmitter,
+      resetChat: () => {
+        setSessionId('');
+        setAgentId('');
+        setSiderAgentId('');
+      },
+      getState: () => ({
+        sessionId,
+        agentId,
+      }),
+    };
+  }, [agentId, sessionId]);
 
   useEffect(() => {
     if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined') return;
@@ -136,6 +155,8 @@ const SimpleLayout = () => {
           agentId,
           agentInfo: curAgentInfo,
           setAgentId,
+          siderAgentId,
+          setSiderAgentId,
           EventEmitter: myEventEmitter,
           layoutMode: LayoutMode.debug,
         }}

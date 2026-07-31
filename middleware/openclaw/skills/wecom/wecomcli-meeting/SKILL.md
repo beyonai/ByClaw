@@ -8,6 +8,8 @@ metadata:
 ---
 # 企业微信会议技能
 
+开始任何任务前，必须先阅读上级共享政策 [operating-policy.md](../references/operating-policy.md)；共享政策优先于本文件中的示例和局部规则。
+
 > `wecom-cli` 是企业微信提供的命令行程序，所有操作通过执行 `wecom-cli` 命令完成。
 
 ## 概述
@@ -236,8 +238,8 @@ wecom-cli meeting set_invite_meeting_members '{"meetingid": "<会议id>", "invit
 
 **步骤:**
 
-1. **解析用户意图**: 时间 + 主题已有，邀请人未提及则默认留空，直接创建。
-2. **调用创建命令**:
+1. **解析用户意图**: 时间 + 主题已有，邀请人未提及则默认留空。
+2. **先发送操作确认卡片**，明确会议标题、时间、时长、地点和邀请范围；收到“确认/执行/同意”后才调用创建命令。
 
 ```bash
 wecom-cli meeting create_meeting '{"title": "周例会", "meeting_start_datetime": "2026-03-18 15:00", "meeting_duration": 3600}'
@@ -270,7 +272,7 @@ wecom-cli contact get_userlist '{}'
 
 在返回的 `userlist` 中筛选 `name` 包含 "张三" 和 "李四" 的成员，获取其 `userid`。
 
-3. **信息已充分，直接调用创建命令** (禁止暴露内部 ID):
+3. **信息已充分，先发送操作确认卡片**；收到明确确认后调用创建命令（禁止暴露内部 ID）:
 
 ```bash
 wecom-cli meeting create_meeting '{"title": "技术方案评审", "meeting_start_datetime": "2026-03-18 15:00", "meeting_duration": 3600, "location": "3楼会议室", "invitees": {"userid": ["zhangsan", "lisi"]}}'
@@ -466,7 +468,7 @@ wecom-cli meeting set_invite_meeting_members '{"meetingid": "<target_meetingid>"
 
 - **信息追问**: 缺少时间或主题时，简洁追问用户；未提及邀请人则默认留空
 - **通讯录查询**: 涉及参与人时，需先通过 `wecomcli-contact` 技能的 `get_userlist` 接口获取全量通讯录成员，再按姓名/别名本地筛选匹配出对应的 `userid`。该接口无入参，返回当前用户可见范围内的成员列表 (含 `userid`，`name`，`alias`)
-- **直接创建**: 时间 + 主题已知即可直接创建，邀请人有则带上，无则留空；无论信息是一次性提供还是上下文可推断，非必要则均不请求确认，直接创建即可
+- **创建确认**: 时间 + 主题已知即可准备创建，邀请人有则带上，无则留空；但任何创建都必须先发送共享政策规定的操作确认卡片，收到明确确认后才能调用接口
 - **时间格式**: 统一使用 `YYYY-MM-DD HH:mm` 格式
 - **会议列表时间范围限制**: 仅支持查询当日及前后 30 天内的会议
 - **查询详情需两步**: 先通过 `list_user_meetings` 获取会议 ID 列表，再通过 `get_meeting_info` 逐个获取详情

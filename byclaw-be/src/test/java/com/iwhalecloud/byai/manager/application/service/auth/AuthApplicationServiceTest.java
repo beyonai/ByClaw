@@ -41,6 +41,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.MessageSource;
 import org.springframework.data.redis.core.SetOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -103,6 +104,90 @@ class AuthApplicationServiceTest {
         when(organizationService.findOrganizationByUserId(any())).thenReturn(List.of());
         when(positionService.findPositionByUserId(any())).thenReturn(List.of());
         when(stationService.getStationByUserId(any())).thenReturn(null);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        UserType.PLAT_MAN,
+        UserType.PLAT_DEVOPS,
+        UserType.BUSINESS_MAN
+    })
+    void hasResourceManagePermission_allowsGlobalAdministratorRoles(String userType) {
+        AuthApplicationService service = new AuthApplicationService();
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserId(2L);
+        loginInfo.setUserCode("manager");
+        UsersOrganization administratorRole = new UsersOrganization();
+        administratorRole.setUserType(userType);
+        loginInfo.setUsersOrganizations(List.of(administratorRole));
+        CurrentUserHolder.setLoginInfo(loginInfo);
+        SsResource resource = new SsResource();
+        resource.setCreateBy(1L);
+
+        assertThat(service.hasResourceManagePermission(resource)).isTrue();
+    }
+
+    @Test
+    void hasResourceManagePermission_allowsAdminVip() {
+        AuthApplicationService service = new AuthApplicationService();
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserId(2L);
+        loginInfo.setUserCode("adminvip");
+        CurrentUserHolder.setLoginInfo(loginInfo);
+        SsResource resource = new SsResource();
+        resource.setCreateBy(1L);
+
+        assertThat(service.hasResourceManagePermission(resource)).isTrue();
+    }
+
+    @Test
+    void hasResourceManagePermission_allowsOrganizationAdminForManagedResourceOrganization() {
+        AuthApplicationService service = new AuthApplicationService();
+        OrganizationService organizationService = mock(OrganizationService.class);
+        ReflectionTestUtils.setField(service, "organizationService", organizationService);
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserId(2L);
+        UsersOrganization organizationAdministrator = new UsersOrganization();
+        organizationAdministrator.setUserType(UserType.ORG_MAN);
+        loginInfo.setUsersOrganizations(List.of(organizationAdministrator));
+        CurrentUserHolder.setLoginInfo(loginInfo);
+        SsResource resource = new SsResource();
+        resource.setCreateBy(1L);
+        resource.setManOrgId(100L);
+        when(organizationService.isOrganizationManManager(100L)).thenReturn(true);
+
+        assertThat(service.hasResourceManagePermission(resource)).isTrue();
+    }
+
+    @Test
+    void hasResourceManagePermission_doesNotGloballyAllowOrganizationAdminOutsideManagedOrganization() {
+        AuthApplicationService service = new AuthApplicationService();
+        OrganizationService organizationService = mock(OrganizationService.class);
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        PositionService positionService = mock(PositionService.class);
+        StationService stationService = mock(StationService.class);
+        ReflectionTestUtils.setField(service, "organizationService", organizationService);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "positionService", positionService);
+        ReflectionTestUtils.setField(service, "stationService", stationService);
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserId(2L);
+        UsersOrganization organizationAdministrator = new UsersOrganization();
+        organizationAdministrator.setUserType(UserType.ORG_MAN);
+        loginInfo.setUsersOrganizations(List.of(organizationAdministrator));
+        CurrentUserHolder.setLoginInfo(loginInfo);
+        SsResource resource = new SsResource();
+        resource.setResourceId(500L);
+        resource.setResourceBizType(ResourceBizTypeEnum.AGENT.name());
+        resource.setCreateBy(1L);
+        resource.setManOrgId(100L);
+        when(organizationService.isOrganizationManManager(100L)).thenReturn(false);
+        when(organizationService.findOrganizationByUserId(2L)).thenReturn(List.of());
+        when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> new ArrayList<>());
+        when(positionService.findPositionByUserId(2L)).thenReturn(List.of());
+        when(stationService.getStationByUserId(2L)).thenReturn(null);
+
+        assertThat(service.hasResourceManagePermission(resource)).isFalse();
     }
 
     /**

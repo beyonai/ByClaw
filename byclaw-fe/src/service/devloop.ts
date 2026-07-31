@@ -174,6 +174,14 @@ export const saveProjectFileToSpace = (data: {
   fileName: string;
 }) => POST<void>('/byaiService/project/share/saveToSpace', data);
 
+// 共享文件的名称和存储位置由项目维度接口管理，避免误走数字员工文件浏览接口。
+export const renameProjectSpaceFile = (data: { projectId: number; fileId: number; fileName: string }) =>
+  POST<void>('/byaiService/project/share/rename', data);
+
+// 删除项目共享文件时由后端同步清理对象存储、文件元数据和项目关联记录。
+export const deleteProjectSpaceFile = (data: { projectId: number; fileId: number }) =>
+  POST<void>('/byaiService/project/share/delete', data);
+
 // 扫描源管理
 export const createScanSource = (data: {
   projectId: number;

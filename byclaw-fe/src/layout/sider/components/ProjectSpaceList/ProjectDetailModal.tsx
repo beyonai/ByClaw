@@ -54,20 +54,23 @@ import {
   createScanSource,
   createTask,
   deleteManualRequirement,
+  deleteProjectSpaceFile,
   deleteProjectRepo,
   deleteScanSource,
   getProject,
-  listProjectSpaceFiles,
-  listProjectSessionsByQo,
-  listProjectMembers,
   getTaskChanges,
   getTaskFileDiff,
+  listProjectMembers,
+  listProjectSpaceFiles,
+  listProjectSessionsByQo,
   listRequirementsByProject,
   listScanLogs,
   listScanSources,
   listTasks,
+  removeProjectMember,
   saveGitHubPat,
   saveProjectFileToSpace,
+  renameProjectSpaceFile,
   searchDingtalkGroups,
   startDwsDeviceAuth,
   toggleScanSource,
@@ -452,7 +455,6 @@ type ProjectSpaceFileItem = FileBrowserItem &
   DevloopProjectSpaceFile & {
     isProjectSpaceFile: true;
   };
-type ProjectSpaceFileTreeItem = FileTreeItem & ProjectSpaceFileItem;
 
 type Props = {
   project?: ProjectSpace;
@@ -630,7 +632,7 @@ const normalizeProjectSpaceFile = (file: DevloopProjectSpaceFile): ProjectSpaceF
   isProjectSpaceFile: true,
 });
 
-const isProjectSpaceFile = (item: FileTreeItem): item is ProjectSpaceFileTreeItem =>
+const isProjectSpaceFile = (item: FileBrowserItem): item is ProjectSpaceFileItem =>
   'isProjectSpaceFile' in item && item.isProjectSpaceFile === true;
 
 const getRequirementDetailText = (requirement: RequirementItem, t: ProjectDetailTranslate) =>
@@ -687,7 +689,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [hasMoreTasks, setHasMoreTasks] = useState(false);
   const [taskDateRange, setTaskDateRange] = useState<TaskDateRange>(null);
   const [taskSearchKeyword, setTaskSearchKeyword] = useState('');
-  const [, setMembers] = useState<any[]>([]);
+  const [members, setMembers] = useState<any[]>([]);
   const [resourceFileScope, setResourceFileScope] = useState<ResourceFileScope>('current');
   const [sharedFiles, setSharedFiles] = useState<FileBrowserItem[]>([]);
   const [sharedFilesLoading, setSharedFilesLoading] = useState(false);
@@ -1333,6 +1335,63 @@ const ProjectDetailPanel: React.FC<Props> = ({
     onBack();
   }, [clearDetailPanel, onBack, onCurrentUserRemoved, projectId]);
 
+  const handleExitProject = useCallback(() => {
+    if (!projectId || isProjectCreator) return;
+
+    Modal.confirm({
+      title: t('project.exit'),
+      content: t('project.exitConfirm'),
+      okText: t('project.exit'),
+      cancelText: t('common.cancel'),
+      okButtonProps: { danger: true },
+      // 返回 Promise 后确认按钮自动进入 loading，避免重复提交退出请求。
+      onOk: async () => {
+        const currentUserId = userInfo?.userId ?? userInfo?.id;
+        let currentMember = members.find(
+          (member) =>
+            `${member?.userId ?? ''}` === `${currentUserId ?? ''}` ||
+            (!!userInfo?.userCode && `${member?.userCode ?? ''}` === `${userInfo.userCode}`)
+        );
+
+        if (!currentMember?.memberId) {
+          // 详情初始化尚未完成时重新查询成员，确保退出操作仍能定位当前用户的成员记录。
+          const res = await listProjectMembers(projectId);
+          const memberList = Array.isArray(res) ? res : [];
+          currentMember = memberList.find(
+            (member) =>
+              `${member?.userId ?? ''}` === `${currentUserId ?? ''}` ||
+              (!!userInfo?.userCode && `${member?.userCode ?? ''}` === `${userInfo.userCode}`)
+          );
+        }
+
+        const memberId = Number(currentMember?.memberId);
+        if (!Number.isFinite(memberId) || memberId <= 0) {
+          message.error(t('project.exitMemberNotFound'));
+          return;
+        }
+
+        try {
+          // 退出项目复用成员移除接口，由后端校验只能移除当前登录用户本人。
+          await removeProjectMember(memberId);
+          message.success(t('project.exitSuccess'));
+          handleCurrentUserRemoved();
+        } catch (error: any) {
+          message.error(error?.message || t('project.exitFailed'));
+          throw error;
+        }
+      },
+    });
+  }, [
+    handleCurrentUserRemoved,
+    isProjectCreator,
+    members,
+    projectId,
+    t,
+    userInfo?.id,
+    userInfo?.userCode,
+    userInfo?.userId,
+  ]);
+
   const fetchProjectResourceSessions = useCallback(async () => {
     if (!projectId) return;
     try {
@@ -1517,16 +1576,25 @@ const ProjectDetailPanel: React.FC<Props> = ({
         quote: 'common.quote',
         preview: 'fileBrowser.action.preview',
         download: 'directoryManage.downloadFile',
+        rename: 'fileBrowser.action.rename',
+        delete: 'fileBrowser.action.delete',
       };
-      const actionKeys = ['quote', ...(canPreviewFile(item) ? (['preview'] as const) : []), 'download'] as const;
+      const actionKeys: Array<keyof typeof labelIdMap> = [
+        'quote',
+        ...(canPreviewFile(item) ? ['preview' as const] : []),
+        'download',
+        // 项目创建者可管理共享文件，普通成员仍保留引用、预览、下载能力。
+        ...(isProjectCreator ? (['rename', 'delete'] as const) : []),
+      ];
 
       // 项目共享文件来自 listSpaceFiles，引用操作与文件树双击共用同一个处理函数。
       return actionKeys.map((key) => ({
         key,
+        danger: key === 'delete',
         label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: labelIdMap[key] })}</div>,
       }));
     },
-    [intl]
+    [intl, isProjectCreator]
   );
 
   const getSessionResourceFileActionItems = useCallback(
@@ -1563,6 +1631,18 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const handleDeleteResourceFile = useCallback(
     async (item: FileBrowserItem) => {
+      if (isProjectSpaceFile(item)) {
+        if (!projectId) return;
+        try {
+          // 共享文件删除走项目维度接口，避免将 fileUrl 误当作普通文件浏览器路径。
+          await deleteProjectSpaceFile({ projectId, fileId: item.fileId });
+          message.success(intl.formatMessage({ id: 'fileBrowser.delete.success' }));
+          await fetchSharedResourceFiles();
+        } catch (error: any) {
+          message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.delete.failed' }));
+        }
+        return;
+      }
       if (!fileResourceId) return;
       const itemPath = normalizeFileBrowserPath(item.path);
       const parentPath = getParentDirectoryPath(itemPath);
@@ -1577,12 +1657,30 @@ const ProjectDetailPanel: React.FC<Props> = ({
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.delete.failed' }));
       }
     },
-    [fileResourceId, intl, pruneResourceDirectoryCache, refreshResourceDirectory]
+    [fetchSharedResourceFiles, fileResourceId, intl, projectId, pruneResourceDirectoryCache, refreshResourceDirectory]
   );
 
   const handleResourceRenameOk = useCallback(
     async (newName: string) => {
-      if (!resourceRenameTarget || !fileResourceId) return;
+      if (!resourceRenameTarget) return;
+      if (isProjectSpaceFile(resourceRenameTarget)) {
+        if (!projectId) return;
+        setResourceRenameLoading(true);
+        try {
+          // 共享文件重命名只修改项目空间的文件名称，不复用普通文件浏览接口。
+          await renameProjectSpaceFile({ projectId, fileId: resourceRenameTarget.fileId, fileName: newName });
+          message.success(intl.formatMessage({ id: 'fileBrowser.rename.success' }));
+          setResourceRenameOpen(false);
+          setResourceRenameTarget(null);
+          await fetchSharedResourceFiles();
+        } catch (error: any) {
+          message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.rename.failed' }));
+        } finally {
+          setResourceRenameLoading(false);
+        }
+        return;
+      }
+      if (!fileResourceId) return;
       const parentPath = getParentDirectoryPath(resourceRenameTarget.path);
       setResourceRenameLoading(true);
       try {
@@ -1600,7 +1698,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
         setResourceRenameLoading(false);
       }
     },
-    [fileResourceId, intl, pruneResourceDirectoryCache, refreshResourceDirectory, resourceRenameTarget]
+    [
+      fetchSharedResourceFiles,
+      fileResourceId,
+      intl,
+      projectId,
+      pruneResourceDirectoryCache,
+      refreshResourceDirectory,
+      resourceRenameTarget,
+    ]
   );
 
   const handleSharedResourcePreview = useCallback(
@@ -1719,9 +1825,26 @@ const ProjectDetailPanel: React.FC<Props> = ({
         void handleSharedResourcePreview(item);
       } else if (key === 'download') {
         handleSharedResourceDownload(item);
+      } else if (key === 'rename') {
+        setResourceRenameTarget(item);
+        setResourceRenameOpen(true);
+      } else if (key === 'delete') {
+        Modal.confirm({
+          title: intl.formatMessage({ id: 'fileBrowser.delete.confirm' }),
+          content: intl.formatMessage({ id: 'fileBrowser.delete.confirmName' }, { name: item.name }),
+          okButtonProps: { danger: true },
+          // 返回 Promise 后确认按钮会自动进入 loading，避免重复删除同一个共享文件。
+          onOk: () => handleDeleteResourceFile(item),
+        });
       }
     },
-    [handleResourceItemDoubleClick, handleSharedResourceDownload, handleSharedResourcePreview]
+    [
+      handleDeleteResourceFile,
+      handleResourceItemDoubleClick,
+      handleSharedResourceDownload,
+      handleSharedResourcePreview,
+      intl,
+    ]
   );
 
   const handleResourceFileAction = useCallback(
@@ -2682,6 +2805,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
     void fetchSources();
   };
 
+  const handleCloseIntegrationConfig = () => {
+    setIntegrationConfigOpen(false);
+    clearDetailPanel?.();
+  };
+
   const handleTabChange = (nextTab: string) => {
     if (nextTab !== 'requirements' && channelPanelOpen) {
       // 渠道配置大面板只服务需求页签；切换到其他页签时立即移除右侧覆盖层。
@@ -2751,30 +2879,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setChannelPanelOpen(false);
     clearDetailPanel?.();
   }, [activeTab, channelPanelOpen, clearDetailPanel]);
-
-  useEffect(() => {
-    if (!integrationConfigOpen) return;
-    // 与渠道面板同一模式：集成测试配置内容多，用右侧覆盖层承载。
-    const overlayDetailPanelOptions = { overlay: true } as NonNullable<
-      Parameters<NonNullable<typeof setDetailPanel>>[1]
-    > & { overlay: boolean };
-    setDetailPanel?.(renderIntegrationConfigPanel(), overlayDetailPanelOptions);
-  }, [integrationConfigOpen, setDetailPanel, t]);
-
-  useEffect(() => {
-    return () => {
-      if (integrationConfigOpen) {
-        clearDetailPanel?.();
-      }
-    };
-  }, [integrationConfigOpen, clearDetailPanel]);
-
-  useEffect(() => {
-    if (!integrationConfigOpen || activeTab === 'integration') return;
-    // 兜底：非点击页签的 activeTab 切换也要关闭集成测试配置覆盖层。
-    setIntegrationConfigOpen(false);
-    clearDetailPanel?.();
-  }, [activeTab, integrationConfigOpen, clearDetailPanel]);
 
   // 需求列表保持紧凑，完整字段统一在右侧抽屉展示。
   const renderRequirementDetailDrawer = () => {
@@ -3158,7 +3262,16 @@ const ProjectDetailPanel: React.FC<Props> = ({
   ];
 
   const integrationHistoryList = [
-    { runId: 'run-1-12-3', version: 'v1.12.3', passRate: '18/18', result: 'pass' as const, time: '2026-07-27 09:41', round: 3, kickbackTo: '', reason: '' },
+    {
+      runId: 'run-1-12-3',
+      version: 'v1.12.3',
+      passRate: '18/18',
+      result: 'pass' as const,
+      time: '2026-07-27 09:41',
+      round: 3,
+      kickbackTo: '',
+      reason: '',
+    },
     {
       runId: 'run-1-12-2',
       version: 'v1.12.2',
@@ -3169,7 +3282,16 @@ const ProjectDetailPanel: React.FC<Props> = ({
       kickbackTo: 'coder',
       reason: '登录用例 3 条失败:跨模块调用鉴权头丢失',
     },
-    { runId: 'run-1-12-1', version: 'v1.12.1', passRate: '18/18', result: 'pass' as const, time: '2026-07-26 10:22', round: 1, kickbackTo: '', reason: '' },
+    {
+      runId: 'run-1-12-1',
+      version: 'v1.12.1',
+      passRate: '18/18',
+      result: 'pass' as const,
+      time: '2026-07-26 10:22',
+      round: 1,
+      kickbackTo: '',
+      reason: '',
+    },
   ];
 
   // 结果详情 mock:按 runId 取一次运行的完整结果(status.json + 各套件明细 + 失败截图)。
@@ -3191,24 +3313,56 @@ const ProjectDetailPanel: React.FC<Props> = ({
       resultDir: '/opt/byclaw/ci/e2e-results/feature-login-sso/round-2',
       suites: [
         {
-          suiteId: 'suite-api', name: '接口回归(pytest)', status: 'passed',
-          total: 8, passed: 8, failed: 0, durationSec: 96,
-          reportPath: 'reports/suite-api.xml', logPath: 'logs/suite-api.log', failedCases: [],
+          suiteId: 'suite-api',
+          name: '接口回归(pytest)',
+          status: 'passed',
+          total: 8,
+          passed: 8,
+          failed: 0,
+          durationSec: 96,
+          reportPath: 'reports/suite-api.xml',
+          logPath: 'logs/suite-api.log',
+          failedCases: [],
         },
         {
-          suiteId: 'suite-web', name: 'Web 端到端(playwright)', status: 'failed',
-          total: 6, passed: 3, failed: 3, durationSec: 214,
-          reportPath: 'reports/suite-web.xml', logPath: 'logs/suite-web.log',
+          suiteId: 'suite-web',
+          name: 'Web 端到端(playwright)',
+          status: 'failed',
+          total: 6,
+          passed: 3,
+          failed: 3,
+          durationSec: 214,
+          reportPath: 'reports/suite-web.xml',
+          logPath: 'logs/suite-web.log',
           failedCases: [
-            { caseId: 'test_login_sso', message: 'AssertionError: 期望跳转工作台,实际停留登录页(鉴权头缺失)', artifacts: ['artifacts/suite-web/test_login_sso.png', 'artifacts/suite-web/test_login_sso.webm'] },
-            { caseId: 'test_login_remember', message: 'TimeoutError: 等待 #dashboard 超时 30s', artifacts: ['artifacts/suite-web/test_login_remember.png'] },
-            { caseId: 'test_login_logout', message: 'AssertionError: 登出后 session 未清除', artifacts: ['artifacts/suite-web/test_login_logout.png'] },
+            {
+              caseId: 'test_login_sso',
+              message: 'AssertionError: 期望跳转工作台,实际停留登录页(鉴权头缺失)',
+              artifacts: ['artifacts/suite-web/test_login_sso.png', 'artifacts/suite-web/test_login_sso.webm'],
+            },
+            {
+              caseId: 'test_login_remember',
+              message: 'TimeoutError: 等待 #dashboard 超时 30s',
+              artifacts: ['artifacts/suite-web/test_login_remember.png'],
+            },
+            {
+              caseId: 'test_login_logout',
+              message: 'AssertionError: 登出后 session 未清除',
+              artifacts: ['artifacts/suite-web/test_login_logout.png'],
+            },
           ],
         },
         {
-          suiteId: 'suite-smoke', name: '冒烟(jest)', status: 'passed',
-          total: 4, passed: 4, failed: 0, durationSec: 73,
-          reportPath: 'reports/suite-smoke.xml', logPath: 'logs/suite-smoke.log', failedCases: [],
+          suiteId: 'suite-smoke',
+          name: '冒烟(jest)',
+          status: 'passed',
+          total: 4,
+          passed: 4,
+          failed: 0,
+          durationSec: 73,
+          reportPath: 'reports/suite-smoke.xml',
+          logPath: 'logs/suite-smoke.log',
+          failedCases: [],
         },
       ],
     },
@@ -3228,9 +3382,42 @@ const ProjectDetailPanel: React.FC<Props> = ({
       reason: '',
       resultDir: '/opt/byclaw/ci/e2e-results/feature-login-sso/round-3',
       suites: [
-        { suiteId: 'suite-api', name: '接口回归(pytest)', status: 'passed', total: 8, passed: 8, failed: 0, durationSec: 92, reportPath: 'reports/suite-api.xml', logPath: 'logs/suite-api.log', failedCases: [] },
-        { suiteId: 'suite-web', name: 'Web 端到端(playwright)', status: 'passed', total: 6, passed: 6, failed: 0, durationSec: 209, reportPath: 'reports/suite-web.xml', logPath: 'logs/suite-web.log', failedCases: [] },
-        { suiteId: 'suite-smoke', name: '冒烟(jest)', status: 'passed', total: 4, passed: 4, failed: 0, durationSec: 71, reportPath: 'reports/suite-smoke.xml', logPath: 'logs/suite-smoke.log', failedCases: [] },
+        {
+          suiteId: 'suite-api',
+          name: '接口回归(pytest)',
+          status: 'passed',
+          total: 8,
+          passed: 8,
+          failed: 0,
+          durationSec: 92,
+          reportPath: 'reports/suite-api.xml',
+          logPath: 'logs/suite-api.log',
+          failedCases: [],
+        },
+        {
+          suiteId: 'suite-web',
+          name: 'Web 端到端(playwright)',
+          status: 'passed',
+          total: 6,
+          passed: 6,
+          failed: 0,
+          durationSec: 209,
+          reportPath: 'reports/suite-web.xml',
+          logPath: 'logs/suite-web.log',
+          failedCases: [],
+        },
+        {
+          suiteId: 'suite-smoke',
+          name: '冒烟(jest)',
+          status: 'passed',
+          total: 4,
+          passed: 4,
+          failed: 0,
+          durationSec: 71,
+          reportPath: 'reports/suite-smoke.xml',
+          logPath: 'logs/suite-smoke.log',
+          failedCases: [],
+        },
       ],
     },
   };
@@ -3325,13 +3512,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const setManualRecord = (
     caseId: string,
-    patch: Partial<{ result: 'pass' | 'fail' | 'skip' | ''; remark: string; shots: string[] }>,
+    patch: Partial<{ result: 'pass' | 'fail' | 'skip' | ''; remark: string; shots: string[] }>
   ) => setManualRunRecords((prev) => ({ ...prev, [caseId]: { ...prev[caseId], ...patch } }));
-
-  const handleCloseIntegrationConfig = () => {
-    setIntegrationConfigOpen(false);
-    clearDetailPanel?.();
-  };
 
   const handleToggleIntegrationConfig = () => {
     if (integrationConfigOpen) {
@@ -3341,8 +3523,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setIntegrationConfigOpen(true);
   };
 
-  const phaseLabelOf = (key: string) =>
-    integrationFlowPhases.find((p) => p.key === key)?.label ?? key;
+  const phaseLabelOf = (key: string) => integrationFlowPhases.find((p) => p.key === key)?.label ?? key;
 
   // 左侧集成测试概览:入口按钮(打开右侧配置面板) + 闭环流程条 + 历次结果。内容多的配置移到右侧,避免左栏挤压。
   const renderIntegration = () => (
@@ -3395,12 +3576,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 <Tag key="result" color={item.result === 'pass' ? 'success' : 'error'}>
                   {t(item.result === 'pass' ? 'integration.history.pass' : 'integration.history.reject')}
                 </Tag>,
-                <Button
-                  key="view"
-                  type="link"
-                  size="small"
-                  onClick={() => openIntegrationResult(item.runId)}
-                >
+                <Button key="view" type="link" size="small" onClick={() => openIntegrationResult(item.runId)}>
                   {t('integration.history.viewResult')}
                 </Button>,
               ]}
@@ -3438,175 +3614,236 @@ const ProjectDetailPanel: React.FC<Props> = ({
   );
 
   // 右侧集成测试配置面板:环境信息 + 测试用例集,空间充足可容纳复杂配置。
-  const renderIntegrationConfigPanel = () => (
-    <div className={styles.detailChannelPanel}>
-      <div className={styles.detailChannelPanelHeader}>
-        <div className={styles.detailChannelPanelTitle}>
-          <h3>{t('integration.configEntry')}</h3>
-          <p>{t('integration.configSubtitle')}</p>
-        </div>
-        <div className={styles.detailChannelPanelActions}>
-          <Tooltip title={t('common.close')} placement="top">
-            <Button icon={<CloseOutlined />} onClick={handleCloseIntegrationConfig} />
-          </Tooltip>
-        </div>
-      </div>
-      <div className={styles.detailChannelPanelBody}>
-        <div className={styles.integrationPanel}>
-          {/* 环境信息配置 */}
-          <div className={styles.integrationSection}>
-            <div className={styles.integrationSectionHeader}>
-              <span className={styles.integrationSectionTitle}>{t('integration.env.title')}</span>
-              <Button
-                type="link"
-                size="small"
-                icon={<PlusOutlined />}
-                onClick={() => {
-                  setIntegrationEnvReadOnly(false);
-                  setIntegrationEnvTab('basic');
-                  setIntegrationEnvModalOpen(true);
-                }}
-              >
-                {t('integration.env.add')}
-              </Button>
-            </div>
-            <div className={styles.integrationCardGrid}>
-            {integrationEnvList.map((env) => (
-              <div className={styles.detailSourceCard} key={env.id}>
-                <div className={styles.detailSourceHeader}>
-                  <span className={styles.detailSourceIcon}>
-                    <FundProjectionScreenOutlined />
-                  </span>
-                  <div className={styles.detailSourceTitle}>
-                    <strong>{env.name}</strong>
-                    <span>{env.address}</span>
-                  </div>
-                  <Tag color={env.status === 'ready' ? 'success' : 'default'}>
-                    {t(env.status === 'ready' ? 'integration.env.statusReady' : 'integration.env.statusUnknown')}
-                  </Tag>
-                </div>
-                <div className={styles.integrationCardBody}>
-                  <div className={styles.integrationField}>
-                    <span className={styles.integrationFieldLabel}>{t('integration.env.branchStrategy')}</span>
-                    <span className={styles.integrationFieldValue}>{env.branchStrategy}</span>
-                  </div>
-                  <div className={styles.integrationField}>
-                    <span className={styles.integrationFieldLabel}>{t('integration.env.middlewares')}</span>
-                    <span className={styles.integrationFieldValue}>
-                      {env.middlewares.map((m) => (
-                        <Tag key={m} className={styles.integrationMwTag}>
-                          {m}
-                        </Tag>
-                      ))}
-                    </span>
-                  </div>
-                </div>
-                <div className={styles.integrationCardActions}>
-                  <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => openEnvModal(env, true)}>
-                    {t('common.view')}
-                  </Button>
-                  <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEnvModal(env, false)}>
-                    {t('common.edit')}
-                  </Button>
-                  <Button type="link" size="small" danger icon={<DeleteOutlined />} onClick={() => handleDeleteEnv(env)}>
-                    {t('common.delete')}
-                  </Button>
-                </div>
-              </div>
-            ))}
-            </div>
+  const renderIntegrationConfigPanel = () => {
+    return (
+      <div className={styles.detailChannelPanel}>
+        <div className={styles.detailChannelPanelHeader}>
+          <div className={styles.detailChannelPanelTitle}>
+            <h3>{t('integration.configEntry')}</h3>
+            <p>{t('integration.configSubtitle')}</p>
           </div>
-
-          {/* 测试用例集管理:每个套件是独立工程,带运行器与运行命令 */}
-          <div className={styles.integrationSection}>
-            <div className={styles.integrationSectionHeader}>
-              <span className={styles.integrationSectionTitle}>{t('integration.suite.title')}</span>
-              <Button
-                type="link"
-                size="small"
-                icon={<PlusOutlined />}
-                onClick={() => {
-                  setIntegrationSuiteReadOnly(false);
-                  setIntegrationSuiteModalOpen(true);
-                }}
-              >
-                {t('integration.suite.add')}
-              </Button>
-            </div>
-            <div className={styles.integrationCardGrid}>
-            {integrationSuiteList.map((suite) => (
-              <div className={styles.detailSourceCard} key={suite.id}>
-                <div className={styles.detailSourceHeader}>
-                  <span className={styles.detailSourceIcon}>
-                    <FileTextOutlined />
-                  </span>
-                  <div className={styles.detailSourceTitle}>
-                    <strong>{suite.name}</strong>
-                    <span>
-                      {suite.source}
-                      {suite.branch ? ` · ${suite.branch}` : ''}
-                    </span>
-                  </div>
-                  <Tag color="processing">{suite.runner}</Tag>
-                  <Tag color={suite.enabled ? 'success' : 'default'}>
-                    {t(suite.enabled ? 'integration.suite.enabled' : 'integration.suite.disabled')}
-                  </Tag>
-                </div>
-                <div className={styles.integrationCardBody}>
-                  {suite.runner === 'manual' ? (
-                    <div className={styles.integrationField}>
-                      <span className={styles.integrationFieldLabel}>{t('integration.suite.manualCases')}</span>
-                      <span className={styles.integrationFieldValue}>
-                        {t('integration.suite.caseCount', { count: suite.caseCount })}
-                        {' · '}
-                        {t('integration.suite.manualHint')}
+          <div className={styles.detailChannelPanelActions}>
+            <Tooltip title={t('common.close')} placement="top">
+              <Button icon={<CloseOutlined />} onClick={handleCloseIntegrationConfig} />
+            </Tooltip>
+          </div>
+        </div>
+        <div className={styles.detailChannelPanelBody}>
+          <div className={styles.integrationPanel}>
+            {/* 环境信息配置 */}
+            <div className={styles.integrationSection}>
+              <div className={styles.integrationSectionHeader}>
+                <span className={styles.integrationSectionTitle}>{t('integration.env.title')}</span>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={() => {
+                    setIntegrationEnvReadOnly(false);
+                    setIntegrationEnvTab('basic');
+                    setIntegrationEnvModalOpen(true);
+                  }}
+                >
+                  {t('integration.env.add')}
+                </Button>
+              </div>
+              <div className={styles.integrationCardGrid}>
+                {integrationEnvList.map((env) => (
+                  <div className={styles.detailSourceCard} key={env.id}>
+                    <div className={styles.detailSourceHeader}>
+                      <span className={styles.detailSourceIcon}>
+                        <FundProjectionScreenOutlined />
                       </span>
+                      <div className={styles.detailSourceTitle}>
+                        <strong>{env.name}</strong>
+                        <span>{env.address}</span>
+                      </div>
+                      <Tag color={env.status === 'ready' ? 'success' : 'default'}>
+                        {t(env.status === 'ready' ? 'integration.env.statusReady' : 'integration.env.statusUnknown')}
+                      </Tag>
                     </div>
-                  ) : (
-                    <>
+                    <div className={styles.integrationCardBody}>
                       <div className={styles.integrationField}>
-                        <span className={styles.integrationFieldLabel}>{t('integration.suite.sourceType')}</span>
+                        <span className={styles.integrationFieldLabel}>{t('integration.env.branchStrategy')}</span>
+                        <span className={styles.integrationFieldValue}>{env.branchStrategy}</span>
+                      </div>
+                      <div className={styles.integrationField}>
+                        <span className={styles.integrationFieldLabel}>{t('integration.env.middlewares')}</span>
                         <span className={styles.integrationFieldValue}>
-                          {t(suite.sourceType === 'git' ? 'integration.suite.sourceGit' : 'integration.suite.sourceShared')}
-                          {' · '}
-                          {t('integration.suite.caseCount', { count: suite.caseCount })}
+                          {env.middlewares.map((m) => (
+                            <Tag key={m} className={styles.integrationMwTag}>
+                              {m}
+                            </Tag>
+                          ))}
                         </span>
                       </div>
-                      <div className={styles.integrationField}>
-                        <span className={styles.integrationFieldLabel}>{t('integration.suite.runCommand')}</span>
-                        <span className={`${styles.integrationFieldValue} ${styles.integrationMono}`}>{suite.runCommand}</span>
-                      </div>
-                      <div className={styles.integrationField}>
-                        <span className={styles.integrationFieldLabel}>{t('integration.suite.reportPath')}</span>
-                        <span className={`${styles.integrationFieldValue} ${styles.integrationMono}`}>{suite.reportPath}</span>
-                      </div>
-                    </>
-                  )}
-                </div>
-                <div className={styles.integrationCardActions}>
-                  {suite.runner === 'manual' ? (
-                    <Button type="link" size="small" icon={<PlayCircleOutlined />} onClick={() => openManualRun(suite)}>
-                      {t('integration.suite.runManual')}
-                    </Button>
-                  ) : null}
-                  <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => openSuiteModal(suite, true)}>
-                    {t('common.view')}
-                  </Button>
-                  <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openSuiteModal(suite, false)}>
-                    {t('common.edit')}
-                  </Button>
-                  <Button type="link" size="small" danger icon={<DeleteOutlined />} onClick={() => handleDeleteSuite(suite)}>
-                    {t('common.delete')}
-                  </Button>
-                </div>
+                    </div>
+                    <div className={styles.integrationCardActions}>
+                      <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => openEnvModal(env, true)}>
+                        {t('common.view')}
+                      </Button>
+                      <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEnvModal(env, false)}>
+                        {t('common.edit')}
+                      </Button>
+                      <Button
+                        type="link"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => handleDeleteEnv(env)}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
+
+            {/* 测试用例集管理:每个套件是独立工程,带运行器与运行命令 */}
+            <div className={styles.integrationSection}>
+              <div className={styles.integrationSectionHeader}>
+                <span className={styles.integrationSectionTitle}>{t('integration.suite.title')}</span>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={() => {
+                    setIntegrationSuiteReadOnly(false);
+                    setIntegrationSuiteModalOpen(true);
+                  }}
+                >
+                  {t('integration.suite.add')}
+                </Button>
+              </div>
+              <div className={styles.integrationCardGrid}>
+                {integrationSuiteList.map((suite) => (
+                  <div className={styles.detailSourceCard} key={suite.id}>
+                    <div className={styles.detailSourceHeader}>
+                      <span className={styles.detailSourceIcon}>
+                        <FileTextOutlined />
+                      </span>
+                      <div className={styles.detailSourceTitle}>
+                        <strong>{suite.name}</strong>
+                        <span>
+                          {suite.source}
+                          {suite.branch ? ` · ${suite.branch}` : ''}
+                        </span>
+                      </div>
+                      <Tag color="processing">{suite.runner}</Tag>
+                      <Tag color={suite.enabled ? 'success' : 'default'}>
+                        {t(suite.enabled ? 'integration.suite.enabled' : 'integration.suite.disabled')}
+                      </Tag>
+                    </div>
+                    <div className={styles.integrationCardBody}>
+                      {suite.runner === 'manual' ? (
+                        <div className={styles.integrationField}>
+                          <span className={styles.integrationFieldLabel}>{t('integration.suite.manualCases')}</span>
+                          <span className={styles.integrationFieldValue}>
+                            {t('integration.suite.caseCount', { count: suite.caseCount })}
+                            {' · '}
+                            {t('integration.suite.manualHint')}
+                          </span>
+                        </div>
+                      ) : (
+                        <>
+                          <div className={styles.integrationField}>
+                            <span className={styles.integrationFieldLabel}>{t('integration.suite.sourceType')}</span>
+                            <span className={styles.integrationFieldValue}>
+                              {t(
+                                suite.sourceType === 'git'
+                                  ? 'integration.suite.sourceGit'
+                                  : 'integration.suite.sourceShared'
+                              )}
+                              {' · '}
+                              {t('integration.suite.caseCount', { count: suite.caseCount })}
+                            </span>
+                          </div>
+                          <div className={styles.integrationField}>
+                            <span className={styles.integrationFieldLabel}>{t('integration.suite.runCommand')}</span>
+                            <span className={`${styles.integrationFieldValue} ${styles.integrationMono}`}>
+                              {suite.runCommand}
+                            </span>
+                          </div>
+                          <div className={styles.integrationField}>
+                            <span className={styles.integrationFieldLabel}>{t('integration.suite.reportPath')}</span>
+                            <span className={`${styles.integrationFieldValue} ${styles.integrationMono}`}>
+                              {suite.reportPath}
+                            </span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <div className={styles.integrationCardActions}>
+                      {suite.runner === 'manual' ? (
+                        <Button
+                          type="link"
+                          size="small"
+                          icon={<PlayCircleOutlined />}
+                          onClick={() => openManualRun(suite)}
+                        >
+                          {t('integration.suite.runManual')}
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="link"
+                        size="small"
+                        icon={<EyeOutlined />}
+                        onClick={() => openSuiteModal(suite, true)}
+                      >
+                        {t('common.view')}
+                      </Button>
+                      <Button
+                        type="link"
+                        size="small"
+                        icon={<EditOutlined />}
+                        onClick={() => openSuiteModal(suite, false)}
+                      >
+                        {t('common.edit')}
+                      </Button>
+                      <Button
+                        type="link"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => handleDeleteSuite(suite)}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
+
+  useEffect(() => {
+    if (!integrationConfigOpen) return;
+    // 与渠道面板同一模式：集成测试配置内容多，用右侧覆盖层承载。
+    const overlayDetailPanelOptions = { overlay: true } as NonNullable<
+      Parameters<NonNullable<typeof setDetailPanel>>[1]
+    > & { overlay: boolean };
+    setDetailPanel?.(renderIntegrationConfigPanel(), overlayDetailPanelOptions);
+  }, [integrationConfigOpen, setDetailPanel, t]);
+
+  useEffect(() => {
+    return () => {
+      if (integrationConfigOpen) {
+        clearDetailPanel?.();
+      }
+    };
+  }, [integrationConfigOpen, clearDetailPanel]);
+
+  useEffect(() => {
+    if (!integrationConfigOpen || activeTab === 'integration') return;
+    // 兜底：非点击页签的 activeTab 切换也要关闭集成测试配置覆盖层。
+    setIntegrationConfigOpen(false);
+    clearDetailPanel?.();
+  }, [activeTab, integrationConfigOpen, clearDetailPanel]);
 
   const renderCodeChanges = () => {
     if (!isDevelopProject) return null;
@@ -4695,175 +4932,181 @@ const ProjectDetailPanel: React.FC<Props> = ({
           ...(integrationSuiteReadOnly
             ? []
             : [
-                <Button
-                  key="save"
-                  type="primary"
-                  onClick={() => {
-                    message.info(t('integration.envModal.demoHint'));
-                    setIntegrationSuiteModalOpen(false);
-                  }}
-                >
-                  {t('integration.envModal.save')}
-                </Button>,
-              ]),
+              <Button
+                key="save"
+                type="primary"
+                onClick={() => {
+                  message.info(t('integration.envModal.demoHint'));
+                  setIntegrationSuiteModalOpen(false);
+                }}
+              >
+                {t('integration.envModal.save')}
+              </Button>,
+            ]),
         ]}
         width={560}
         zIndex={1100}
       >
         {/* 查看态:整块表单禁用,只读展示。 */}
         <ConfigProvider componentDisabled={integrationSuiteReadOnly}>
-        <div className={styles.formField}>
-          <label>{t('integration.suiteModal.name')}</label>
-          <Input
-            placeholder={t('integration.suiteModal.namePlaceholder')}
-            value={integrationSuiteForm.name}
-            onChange={(e) => setField('name', e.target.value)}
-          />
-        </div>
-        <div className={styles.integrationConnRow}>
-          <div className={styles.formField} style={{ flex: 1 }}>
-            <label>{t('integration.suiteModal.runner')}</label>
-            <Select
-              value={integrationSuiteForm.runner}
-              onChange={(v: TestSuite['runner']) =>
-                setIntegrationSuiteForm((prev) => ({
-                  ...prev,
-                  runner: v,
-                  runCommand: runnerDefaults[v].cmd,
-                  reportPath: runnerDefaults[v].report,
-                }))
-              }
-              options={[
-                { value: 'pytest', label: 'pytest (Python)' },
-                { value: 'playwright', label: 'Playwright (Node)' },
-                { value: 'jest', label: 'Jest (Node)' },
-                { value: 'vitest', label: 'Vitest (Node)' },
-                { value: 'custom', label: t('integration.suiteModal.runnerCustom') },
-                { value: 'manual', label: t('integration.suiteModal.runnerManual') },
-              ]}
-              style={{ width: '100%' }}
+          <div className={styles.formField}>
+            <label>{t('integration.suiteModal.name')}</label>
+            <Input
+              placeholder={t('integration.suiteModal.namePlaceholder')}
+              value={integrationSuiteForm.name}
+              onChange={(e) => setField('name', e.target.value)}
             />
           </div>
-          {!isManual && (
+          <div className={styles.integrationConnRow}>
             <div className={styles.formField} style={{ flex: 1 }}>
-              <label>{t('integration.suiteModal.sourceType')}</label>
+              <label>{t('integration.suiteModal.runner')}</label>
               <Select
-                value={integrationSuiteForm.sourceType}
-                onChange={(v) => setField('sourceType', v)}
+                value={integrationSuiteForm.runner}
+                onChange={(v: TestSuite['runner']) =>
+                  setIntegrationSuiteForm((prev) => ({
+                    ...prev,
+                    runner: v,
+                    runCommand: runnerDefaults[v].cmd,
+                    reportPath: runnerDefaults[v].report,
+                  }))
+                }
                 options={[
-                  { value: 'git', label: t('integration.suite.sourceGit') },
-                  { value: 'shared', label: t('integration.suite.sourceShared') },
+                  { value: 'pytest', label: 'pytest (Python)' },
+                  { value: 'playwright', label: 'Playwright (Node)' },
+                  { value: 'jest', label: 'Jest (Node)' },
+                  { value: 'vitest', label: 'Vitest (Node)' },
+                  { value: 'custom', label: t('integration.suiteModal.runnerCustom') },
+                  { value: 'manual', label: t('integration.suiteModal.runnerManual') },
                 ]}
                 style={{ width: '100%' }}
               />
             </div>
-          )}
-        </div>
-        {!isManual && (
-        <>
-        <div className={styles.formField}>
-          <label>
-            {t(integrationSuiteForm.sourceType === 'git' ? 'integration.suiteModal.gitUrl' : 'integration.suiteModal.sharedPath')}
-          </label>
-          <Input
-            placeholder={
-              integrationSuiteForm.sourceType === 'git' ? 'git@git.internal:qa/byclaw-api-e2e.git' : '/by/testcases/smoke/'
-            }
-            value={integrationSuiteForm.source}
-            onChange={(e) => setField('source', e.target.value)}
-          />
-        </div>
-        {integrationSuiteForm.sourceType === 'git' && (
-          <div className={styles.formField}>
-            <label>{t('integration.suiteModal.branch')}</label>
-            <Input
-              placeholder="main"
-              value={integrationSuiteForm.branch}
-              onChange={(e) => setField('branch', e.target.value)}
-            />
-          </div>
-        )}
-        <div className={styles.formField}>
-          <label>{t('integration.suiteModal.workdir')}</label>
-          <Input
-            placeholder="."
-            value={integrationSuiteForm.workdir}
-            onChange={(e) => setField('workdir', e.target.value)}
-          />
-        </div>
-        <div className={styles.formField}>
-          <label>{t('integration.suite.runCommand')}</label>
-          <Input.TextArea
-            className={styles.integrationStageScript}
-            autoSize={{ minRows: 2, maxRows: 6 }}
-            placeholder="pytest -q --junitxml=report/junit.xml"
-            value={integrationSuiteForm.runCommand}
-            onChange={(e) => setField('runCommand', e.target.value)}
-          />
-        </div>
-        <div className={styles.formField}>
-          <label>{t('integration.suite.reportPath')}</label>
-          <Input
-            placeholder="report/junit.xml"
-            value={integrationSuiteForm.reportPath}
-            onChange={(e) => setField('reportPath', e.target.value)}
-          />
-        </div>
-        <div className={styles.integrationNote}>{t('integration.suiteModal.reportHint')}</div>
-        {renderIntegrationSuiteSpec()}
-        </>
-        )}
-
-        {/* 手动测试:人工检查清单编辑,每条含 标题/步骤/预期。执行时测试人逐条记录结果。 */}
-        {isManual && (
-          <>
-            <div className={styles.integrationSectionHeader}>
-              <span className={styles.integrationSectionTitle}>{t('integration.suiteModal.manualCasesTitle')}</span>
-              <Button type="link" size="small" icon={<PlusOutlined />} onClick={addCase}>
-                {t('integration.suiteModal.addCase')}
-              </Button>
-            </div>
-            <div className={styles.integrationNote}>{t('integration.suiteModal.manualCasesHint')}</div>
-            {integrationSuiteForm.manualCases.map((c, idx) => (
-              <div className={styles.integrationStageCard} key={c.id}>
-                <div className={styles.integrationStageHead}>
-                  <span className={styles.integrationStageIdx}>{idx + 1}</span>
-                  <Input
-                    className={styles.integrationStageName}
-                    placeholder={t('integration.suiteModal.caseTitle')}
-                    value={c.title}
-                    onChange={(e) => updateCase(c.id, { title: e.target.value })}
-                  />
-                  <Button
-                    type="link"
-                    danger
-                    size="small"
-                    icon={<DeleteOutlined />}
-                    onClick={() => removeCase(c.id)}
-                  />
-                </div>
-                <div className={styles.formField}>
-                  <label>{t('integration.suiteModal.caseSteps')}</label>
-                  <Input.TextArea
-                    autoSize={{ minRows: 2, maxRows: 8 }}
-                    placeholder={t('integration.suiteModal.caseStepsPlaceholder')}
-                    value={c.steps}
-                    onChange={(e) => updateCase(c.id, { steps: e.target.value })}
-                  />
-                </div>
-                <div className={styles.formField}>
-                  <label>{t('integration.suiteModal.caseExpected')}</label>
-                  <Input.TextArea
-                    autoSize={{ minRows: 1, maxRows: 4 }}
-                    placeholder={t('integration.suiteModal.caseExpectedPlaceholder')}
-                    value={c.expected}
-                    onChange={(e) => updateCase(c.id, { expected: e.target.value })}
-                  />
-                </div>
+            {!isManual && (
+              <div className={styles.formField} style={{ flex: 1 }}>
+                <label>{t('integration.suiteModal.sourceType')}</label>
+                <Select
+                  value={integrationSuiteForm.sourceType}
+                  onChange={(v) => setField('sourceType', v)}
+                  options={[
+                    { value: 'git', label: t('integration.suite.sourceGit') },
+                    { value: 'shared', label: t('integration.suite.sourceShared') },
+                  ]}
+                  style={{ width: '100%' }}
+                />
               </div>
-            ))}
-          </>
-        )}
+            )}
+          </div>
+          {!isManual && (
+            <>
+              <div className={styles.formField}>
+                <label>
+                  {t(
+                    integrationSuiteForm.sourceType === 'git'
+                      ? 'integration.suiteModal.gitUrl'
+                      : 'integration.suiteModal.sharedPath'
+                  )}
+                </label>
+                <Input
+                  placeholder={
+                    integrationSuiteForm.sourceType === 'git'
+                      ? 'git@git.internal:qa/byclaw-api-e2e.git'
+                      : '/by/testcases/smoke/'
+                  }
+                  value={integrationSuiteForm.source}
+                  onChange={(e) => setField('source', e.target.value)}
+                />
+              </div>
+              {integrationSuiteForm.sourceType === 'git' && (
+                <div className={styles.formField}>
+                  <label>{t('integration.suiteModal.branch')}</label>
+                  <Input
+                    placeholder="main"
+                    value={integrationSuiteForm.branch}
+                    onChange={(e) => setField('branch', e.target.value)}
+                  />
+                </div>
+              )}
+              <div className={styles.formField}>
+                <label>{t('integration.suiteModal.workdir')}</label>
+                <Input
+                  placeholder="."
+                  value={integrationSuiteForm.workdir}
+                  onChange={(e) => setField('workdir', e.target.value)}
+                />
+              </div>
+              <div className={styles.formField}>
+                <label>{t('integration.suite.runCommand')}</label>
+                <Input.TextArea
+                  className={styles.integrationStageScript}
+                  autoSize={{ minRows: 2, maxRows: 6 }}
+                  placeholder="pytest -q --junitxml=report/junit.xml"
+                  value={integrationSuiteForm.runCommand}
+                  onChange={(e) => setField('runCommand', e.target.value)}
+                />
+              </div>
+              <div className={styles.formField}>
+                <label>{t('integration.suite.reportPath')}</label>
+                <Input
+                  placeholder="report/junit.xml"
+                  value={integrationSuiteForm.reportPath}
+                  onChange={(e) => setField('reportPath', e.target.value)}
+                />
+              </div>
+              <div className={styles.integrationNote}>{t('integration.suiteModal.reportHint')}</div>
+              {renderIntegrationSuiteSpec()}
+            </>
+          )}
+
+          {/* 手动测试:人工检查清单编辑,每条含 标题/步骤/预期。执行时测试人逐条记录结果。 */}
+          {isManual && (
+            <>
+              <div className={styles.integrationSectionHeader}>
+                <span className={styles.integrationSectionTitle}>{t('integration.suiteModal.manualCasesTitle')}</span>
+                <Button type="link" size="small" icon={<PlusOutlined />} onClick={addCase}>
+                  {t('integration.suiteModal.addCase')}
+                </Button>
+              </div>
+              <div className={styles.integrationNote}>{t('integration.suiteModal.manualCasesHint')}</div>
+              {integrationSuiteForm.manualCases.map((c, idx) => (
+                <div className={styles.integrationStageCard} key={c.id}>
+                  <div className={styles.integrationStageHead}>
+                    <span className={styles.integrationStageIdx}>{idx + 1}</span>
+                    <Input
+                      className={styles.integrationStageName}
+                      placeholder={t('integration.suiteModal.caseTitle')}
+                      value={c.title}
+                      onChange={(e) => updateCase(c.id, { title: e.target.value })}
+                    />
+                    <Button
+                      type="link"
+                      danger
+                      size="small"
+                      icon={<DeleteOutlined />}
+                      onClick={() => removeCase(c.id)}
+                    />
+                  </div>
+                  <div className={styles.formField}>
+                    <label>{t('integration.suiteModal.caseSteps')}</label>
+                    <Input.TextArea
+                      autoSize={{ minRows: 2, maxRows: 8 }}
+                      placeholder={t('integration.suiteModal.caseStepsPlaceholder')}
+                      value={c.steps}
+                      onChange={(e) => updateCase(c.id, { steps: e.target.value })}
+                    />
+                  </div>
+                  <div className={styles.formField}>
+                    <label>{t('integration.suiteModal.caseExpected')}</label>
+                    <Input.TextArea
+                      autoSize={{ minRows: 1, maxRows: 4 }}
+                      placeholder={t('integration.suiteModal.caseExpectedPlaceholder')}
+                      value={c.expected}
+                      onChange={(e) => updateCase(c.id, { expected: e.target.value })}
+                    />
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
         </ConfigProvider>
       </Modal>
     );
@@ -4927,319 +5170,319 @@ const ProjectDetailPanel: React.FC<Props> = ({
           ...(integrationEnvReadOnly
             ? []
             : [
-                <Button
-                  key="save"
-                  type="primary"
-                  onClick={() => {
-                    message.info(t('integration.envModal.demoHint'));
-                    setIntegrationEnvModalOpen(false);
-                  }}
-                >
-                  {t('integration.envModal.save')}
-                </Button>,
-              ]),
+              <Button
+                key="save"
+                type="primary"
+                onClick={() => {
+                  message.info(t('integration.envModal.demoHint'));
+                  setIntegrationEnvModalOpen(false);
+                }}
+              >
+                {t('integration.envModal.save')}
+              </Button>,
+            ]),
         ]}
         width={720}
         zIndex={1100}
       >
         {/* 查看态:整块表单禁用,只读展示。内容按 基本信息/环境准备/测试账号/结果规范 分 Tab,避免又窄又长。 */}
         <ConfigProvider componentDisabled={integrationEnvReadOnly}>
-        <Tabs
-          activeKey={integrationEnvTab}
-          onChange={setIntegrationEnvTab}
-          items={[
-            {
-              key: 'basic',
-              label: t('integration.envModal.tabBasic'),
-              children: (
-                <>
-        <div className={styles.formField}>
-          <label>{t('integration.envModal.name')}</label>
-          <Input
-            placeholder={t('integration.envModal.namePlaceholder')}
-            value={integrationEnvForm.name}
-            onChange={(e) => setField('name', e.target.value)}
-          />
-        </div>
-        <div className={styles.formField}>
-          <label>{t('integration.envModal.address')}</label>
-          <Input
-            placeholder="https://it-integration.internal:8443"
-            value={integrationEnvForm.address}
-            onChange={(e) => setField('address', e.target.value)}
-          />
-        </div>
-        <div className={styles.formField}>
-          <label>{t('integration.envModal.orchestrator')}</label>
-          <Select
-            value={orchestrator}
-            onChange={(v) => setField('orchestrator', v)}
-            options={[
-              { value: 'script', label: t('integration.envModal.orchScript') },
-              { value: 'jenkins', label: t('integration.envModal.orchJenkins') },
-              { value: 'k8s', label: t('integration.envModal.orchK8s') },
-              { value: 'webhook', label: t('integration.envModal.orchWebhook') },
-            ]}
-            style={{ width: '100%' }}
-          />
-          <div className={styles.integrationNote}>{t('integration.envModal.orchHint')}</div>
-        </div>
-                </>
-              ),
-            },
-            {
-              key: 'prepare',
-              label: t('integration.envModal.tabPrepare'),
-              children:
-                orchestrator !== 'script' ? (
-                  <div className={styles.integrationNote}>{t(`integration.envModal.hint.${orchestrator}`)}</div>
-                ) : (
-          <>
-            {/* 连接信息:目标构建机 */}
-            <div className={styles.integrationSectionTitle}>{t('integration.envModal.connTitle')}</div>
-            <div className={styles.formField}>
-              <label>{t('integration.envModal.connProtocol')}</label>
-              <Radio.Group
-                value={integrationEnvForm.connProtocol}
-                onChange={(e) => setField('connProtocol', e.target.value)}
-                options={[
-                  { value: 'ssh', label: 'SSH' },
-                  { value: 'local', label: t('integration.envModal.connLocal') },
-                ]}
-                optionType="button"
-              />
-            </div>
-            {integrationEnvForm.connProtocol === 'ssh' && (
-              <>
-                <div className={styles.integrationConnRow}>
-                  <div className={styles.formField} style={{ flex: 2 }}>
-                    <label>{t('integration.envModal.connHost')}</label>
-                    <Input
-                      placeholder="10.0.12.34"
-                      value={integrationEnvForm.connHost}
-                      onChange={(e) => setField('connHost', e.target.value)}
-                    />
-                  </div>
-                  <div className={styles.formField} style={{ flex: 1 }}>
-                    <label>{t('integration.envModal.connPort')}</label>
-                    <Input
-                      placeholder="22"
-                      value={integrationEnvForm.connPort}
-                      onChange={(e) => setField('connPort', e.target.value)}
-                    />
-                  </div>
-                  <div className={styles.formField} style={{ flex: 1 }}>
-                    <label>{t('integration.envModal.connUser')}</label>
-                    <Input
-                      placeholder="deploy"
-                      value={integrationEnvForm.connUser}
-                      onChange={(e) => setField('connUser', e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div className={styles.integrationConnRow}>
-                  <div className={styles.formField} style={{ flex: 1 }}>
-                    <label>{t('integration.envModal.connAuth')}</label>
-                    <Select
-                      value={integrationEnvForm.connAuth}
-                      onChange={(v) => setField('connAuth', v)}
-                      options={[
-                        { value: 'key', label: t('integration.envModal.connAuthKey') },
-                        { value: 'password', label: t('integration.envModal.connAuthPassword') },
-                      ]}
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-                  <div className={styles.formField} style={{ flex: 2 }}>
-                    <label>{t('integration.envModal.connCredentialRef')}</label>
-                    <Input
-                      placeholder="it-integration-ssh-key"
-                      value={integrationEnvForm.connCredentialRef}
-                      onChange={(e) => setField('connCredentialRef', e.target.value)}
-                    />
-                  </div>
-                </div>
-              </>
-            )}
-            <div className={styles.formField}>
-              <label>{t('integration.envModal.connWorkdir')}</label>
-              <Input
-                placeholder="/opt/byclaw/ci"
-                value={integrationEnvForm.connWorkdir}
-                onChange={(e) => setField('connWorkdir', e.target.value)}
-              />
-            </div>
-
-            {/* 生命周期阶段:每阶段一段完整脚本 */}
-            <div className={styles.repoModalDivider} />
-            <div className={styles.integrationSectionHeader}>
-              <span className={styles.integrationSectionTitle}>{t('integration.envModal.stagesTitle')}</span>
-              <Button type="link" size="small" icon={<PlusOutlined />} onClick={addStage}>
-                {t('integration.envModal.addStage')}
-              </Button>
-            </div>
-            <div className={styles.integrationNote}>{t('integration.envModal.varsHint')}</div>
-            {integrationEnvForm.stages.map((stage, idx) => (
-              <div className={styles.integrationStageCard} key={stage.id}>
-                <div className={styles.integrationStageHead}>
-                  <span className={styles.integrationStageIdx}>{idx + 1}</span>
-                  <Input
-                    className={styles.integrationStageName}
-                    placeholder={t('integration.envModal.stageName')}
-                    value={stage.name}
-                    onChange={(e) => updateStage(stage.id, { name: e.target.value })}
-                  />
-                  <Select
-                    size="small"
-                    value={stage.interpreter}
-                    onChange={(v) => updateStage(stage.id, { interpreter: v })}
-                    options={[
-                      { value: 'bash', label: 'bash' },
-                      { value: 'sh', label: 'sh' },
-                      { value: 'python', label: 'python' },
-                      { value: 'node', label: 'node' },
-                    ]}
-                    style={{ width: 96 }}
-                  />
-                  <Select
-                    size="small"
-                    value={stage.source}
-                    onChange={(v) => updateStage(stage.id, { source: v })}
-                    options={[
-                      { value: 'inline', label: t('integration.envModal.sourceInline') },
-                      { value: 'path', label: t('integration.envModal.sourcePath') },
-                    ]}
-                    style={{ width: 110 }}
-                  />
-                  <Button
-                    type="link"
-                    danger
-                    size="small"
-                    icon={<DeleteOutlined />}
-                    onClick={() => removeStage(stage.id)}
-                  />
-                </div>
-                {stage.source === 'inline' ? (
-                  <Input.TextArea
-                    className={styles.integrationStageScript}
-                    autoSize={{ minRows: 3, maxRows: 12 }}
-                    placeholder={t('integration.envModal.scriptPlaceholder')}
-                    value={stage.script}
-                    onChange={(e) => updateStage(stage.id, { script: e.target.value })}
-                  />
-                ) : (
-                  <Input
-                    placeholder="deploy/db/incremental/run-all.sh"
-                    value={stage.script}
-                    onChange={(e) => updateStage(stage.id, { script: e.target.value })}
-                  />
-                )}
-                <div className={styles.integrationStageFoot}>
-                  <span>{t('integration.envModal.workdir')}</span>
-                  <Input
-                    size="small"
-                    value={stage.workdir}
-                    onChange={(e) => updateStage(stage.id, { workdir: e.target.value })}
-                    style={{ width: 200 }}
-                  />
-                  <span>{t('integration.envModal.timeout')}</span>
-                  <InputNumber
-                    size="small"
-                    min={1}
-                    value={stage.timeoutSec}
-                    onChange={(v) => updateStage(stage.id, { timeoutSec: Number(v) || 300 })}
-                    style={{ width: 90 }}
-                  />
-                  <Switch
-                    size="small"
-                    checked={stage.continueOnError}
-                    onChange={(v) => updateStage(stage.id, { continueOnError: v })}
-                  />
-                  <span>{t('integration.envModal.continueOnError')}</span>
-                </div>
-              </div>
-            ))}
-          </>
+          <Tabs
+            activeKey={integrationEnvTab}
+            onChange={setIntegrationEnvTab}
+            items={[
+              {
+                key: 'basic',
+                label: t('integration.envModal.tabBasic'),
+                children: (
+                  <>
+                    <div className={styles.formField}>
+                      <label>{t('integration.envModal.name')}</label>
+                      <Input
+                        placeholder={t('integration.envModal.namePlaceholder')}
+                        value={integrationEnvForm.name}
+                        onChange={(e) => setField('name', e.target.value)}
+                      />
+                    </div>
+                    <div className={styles.formField}>
+                      <label>{t('integration.envModal.address')}</label>
+                      <Input
+                        placeholder="https://it-integration.internal:8443"
+                        value={integrationEnvForm.address}
+                        onChange={(e) => setField('address', e.target.value)}
+                      />
+                    </div>
+                    <div className={styles.formField}>
+                      <label>{t('integration.envModal.orchestrator')}</label>
+                      <Select
+                        value={orchestrator}
+                        onChange={(v) => setField('orchestrator', v)}
+                        options={[
+                          { value: 'script', label: t('integration.envModal.orchScript') },
+                          { value: 'jenkins', label: t('integration.envModal.orchJenkins') },
+                          { value: 'k8s', label: t('integration.envModal.orchK8s') },
+                          { value: 'webhook', label: t('integration.envModal.orchWebhook') },
+                        ]}
+                        style={{ width: '100%' }}
+                      />
+                      <div className={styles.integrationNote}>{t('integration.envModal.orchHint')}</div>
+                    </div>
+                  </>
                 ),
-            },
-            {
-              key: 'accounts',
-              label: t('integration.envModal.tabAccounts'),
-              children: (
-                <>
-        {/* 被测应用的业务测试账号:E2E 登录用。密码只存凭据引用,编排层注入成环境变量供脚本读取。 */}
-        <div className={styles.integrationSectionHeader}>
-          <span className={styles.integrationSectionTitle}>{t('integration.envModal.accTitle')}</span>
-          <Button type="link" size="small" icon={<PlusOutlined />} onClick={addAccount}>
-            {t('integration.envModal.accAdd')}
-          </Button>
-        </div>
-        <div className={styles.integrationNote}>{t('integration.envModal.accHint')}</div>
-        {integrationEnvForm.testAccounts.map((acc) => (
-          <div className={styles.integrationAccountCard} key={acc.id}>
-            <div className={styles.integrationAccountRow}>
-              <div className={styles.formField} style={{ flex: 1 }}>
-                <label>{t('integration.envModal.accRole')}</label>
-                <Input
-                  placeholder={t('integration.envModal.accRolePlaceholder')}
-                  value={acc.role}
-                  onChange={(e) => updateAccount(acc.id, { role: e.target.value })}
-                />
-              </div>
-              <div className={styles.formField} style={{ flex: 1 }}>
-                <label>{t('integration.envModal.accEnvPrefix')}</label>
-                <Input
-                  placeholder="E2E_ADMIN"
-                  value={acc.envPrefix}
-                  onChange={(e) => updateAccount(acc.id, { envPrefix: e.target.value.toUpperCase() })}
-                />
-              </div>
-              <Button
-                type="link"
-                danger
-                size="small"
-                icon={<DeleteOutlined />}
-                onClick={() => removeAccount(acc.id)}
-              />
-            </div>
-            <div className={styles.integrationAccountRow}>
-              <div className={styles.formField} style={{ flex: 1 }}>
-                <label>{t('integration.envModal.accUsername')}</label>
-                <Input
-                  placeholder="qa_admin"
-                  value={acc.username}
-                  onChange={(e) => updateAccount(acc.id, { username: e.target.value })}
-                />
-              </div>
-              <div className={styles.formField} style={{ flex: 1 }}>
-                <label>{t('integration.envModal.accCredentialRef')}</label>
-                <Input
-                  placeholder="it-integration-e2e-admin"
-                  value={acc.credentialRef}
-                  onChange={(e) => updateAccount(acc.id, { credentialRef: e.target.value })}
-                />
-              </div>
-            </div>
-            {acc.envPrefix && (
-              <div className={styles.integrationAccountInject}>
-                {t('integration.envModal.accInject', {
-                  user: `$${acc.envPrefix}_USER`,
-                  pass: `$${acc.envPrefix}_PASS`,
-                })}
-              </div>
-            )}
-          </div>
-        ))}
-                </>
-              ),
-            },
-            {
-              key: 'spec',
-              label: t('integration.envModal.tabSpec'),
-              children: renderIntegrationRunSpec(),
-            },
-          ]}
-        />
+              },
+              {
+                key: 'prepare',
+                label: t('integration.envModal.tabPrepare'),
+                children:
+                  orchestrator !== 'script' ? (
+                    <div className={styles.integrationNote}>{t(`integration.envModal.hint.${orchestrator}`)}</div>
+                  ) : (
+                    <>
+                      {/* 连接信息:目标构建机 */}
+                      <div className={styles.integrationSectionTitle}>{t('integration.envModal.connTitle')}</div>
+                      <div className={styles.formField}>
+                        <label>{t('integration.envModal.connProtocol')}</label>
+                        <Radio.Group
+                          value={integrationEnvForm.connProtocol}
+                          onChange={(e) => setField('connProtocol', e.target.value)}
+                          options={[
+                            { value: 'ssh', label: 'SSH' },
+                            { value: 'local', label: t('integration.envModal.connLocal') },
+                          ]}
+                          optionType="button"
+                        />
+                      </div>
+                      {integrationEnvForm.connProtocol === 'ssh' && (
+                        <>
+                          <div className={styles.integrationConnRow}>
+                            <div className={styles.formField} style={{ flex: 2 }}>
+                              <label>{t('integration.envModal.connHost')}</label>
+                              <Input
+                                placeholder="10.0.12.34"
+                                value={integrationEnvForm.connHost}
+                                onChange={(e) => setField('connHost', e.target.value)}
+                              />
+                            </div>
+                            <div className={styles.formField} style={{ flex: 1 }}>
+                              <label>{t('integration.envModal.connPort')}</label>
+                              <Input
+                                placeholder="22"
+                                value={integrationEnvForm.connPort}
+                                onChange={(e) => setField('connPort', e.target.value)}
+                              />
+                            </div>
+                            <div className={styles.formField} style={{ flex: 1 }}>
+                              <label>{t('integration.envModal.connUser')}</label>
+                              <Input
+                                placeholder="deploy"
+                                value={integrationEnvForm.connUser}
+                                onChange={(e) => setField('connUser', e.target.value)}
+                              />
+                            </div>
+                          </div>
+                          <div className={styles.integrationConnRow}>
+                            <div className={styles.formField} style={{ flex: 1 }}>
+                              <label>{t('integration.envModal.connAuth')}</label>
+                              <Select
+                                value={integrationEnvForm.connAuth}
+                                onChange={(v) => setField('connAuth', v)}
+                                options={[
+                                  { value: 'key', label: t('integration.envModal.connAuthKey') },
+                                  { value: 'password', label: t('integration.envModal.connAuthPassword') },
+                                ]}
+                                style={{ width: '100%' }}
+                              />
+                            </div>
+                            <div className={styles.formField} style={{ flex: 2 }}>
+                              <label>{t('integration.envModal.connCredentialRef')}</label>
+                              <Input
+                                placeholder="it-integration-ssh-key"
+                                value={integrationEnvForm.connCredentialRef}
+                                onChange={(e) => setField('connCredentialRef', e.target.value)}
+                              />
+                            </div>
+                          </div>
+                        </>
+                      )}
+                      <div className={styles.formField}>
+                        <label>{t('integration.envModal.connWorkdir')}</label>
+                        <Input
+                          placeholder="/opt/byclaw/ci"
+                          value={integrationEnvForm.connWorkdir}
+                          onChange={(e) => setField('connWorkdir', e.target.value)}
+                        />
+                      </div>
+
+                      {/* 生命周期阶段:每阶段一段完整脚本 */}
+                      <div className={styles.repoModalDivider} />
+                      <div className={styles.integrationSectionHeader}>
+                        <span className={styles.integrationSectionTitle}>{t('integration.envModal.stagesTitle')}</span>
+                        <Button type="link" size="small" icon={<PlusOutlined />} onClick={addStage}>
+                          {t('integration.envModal.addStage')}
+                        </Button>
+                      </div>
+                      <div className={styles.integrationNote}>{t('integration.envModal.varsHint')}</div>
+                      {integrationEnvForm.stages.map((stage, idx) => (
+                        <div className={styles.integrationStageCard} key={stage.id}>
+                          <div className={styles.integrationStageHead}>
+                            <span className={styles.integrationStageIdx}>{idx + 1}</span>
+                            <Input
+                              className={styles.integrationStageName}
+                              placeholder={t('integration.envModal.stageName')}
+                              value={stage.name}
+                              onChange={(e) => updateStage(stage.id, { name: e.target.value })}
+                            />
+                            <Select
+                              size="small"
+                              value={stage.interpreter}
+                              onChange={(v) => updateStage(stage.id, { interpreter: v })}
+                              options={[
+                                { value: 'bash', label: 'bash' },
+                                { value: 'sh', label: 'sh' },
+                                { value: 'python', label: 'python' },
+                                { value: 'node', label: 'node' },
+                              ]}
+                              style={{ width: 96 }}
+                            />
+                            <Select
+                              size="small"
+                              value={stage.source}
+                              onChange={(v) => updateStage(stage.id, { source: v })}
+                              options={[
+                                { value: 'inline', label: t('integration.envModal.sourceInline') },
+                                { value: 'path', label: t('integration.envModal.sourcePath') },
+                              ]}
+                              style={{ width: 110 }}
+                            />
+                            <Button
+                              type="link"
+                              danger
+                              size="small"
+                              icon={<DeleteOutlined />}
+                              onClick={() => removeStage(stage.id)}
+                            />
+                          </div>
+                          {stage.source === 'inline' ? (
+                            <Input.TextArea
+                              className={styles.integrationStageScript}
+                              autoSize={{ minRows: 3, maxRows: 12 }}
+                              placeholder={t('integration.envModal.scriptPlaceholder')}
+                              value={stage.script}
+                              onChange={(e) => updateStage(stage.id, { script: e.target.value })}
+                            />
+                          ) : (
+                            <Input
+                              placeholder="deploy/db/incremental/run-all.sh"
+                              value={stage.script}
+                              onChange={(e) => updateStage(stage.id, { script: e.target.value })}
+                            />
+                          )}
+                          <div className={styles.integrationStageFoot}>
+                            <span>{t('integration.envModal.workdir')}</span>
+                            <Input
+                              size="small"
+                              value={stage.workdir}
+                              onChange={(e) => updateStage(stage.id, { workdir: e.target.value })}
+                              style={{ width: 200 }}
+                            />
+                            <span>{t('integration.envModal.timeout')}</span>
+                            <InputNumber
+                              size="small"
+                              min={1}
+                              value={stage.timeoutSec}
+                              onChange={(v) => updateStage(stage.id, { timeoutSec: Number(v) || 300 })}
+                              style={{ width: 90 }}
+                            />
+                            <Switch
+                              size="small"
+                              checked={stage.continueOnError}
+                              onChange={(v) => updateStage(stage.id, { continueOnError: v })}
+                            />
+                            <span>{t('integration.envModal.continueOnError')}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  ),
+              },
+              {
+                key: 'accounts',
+                label: t('integration.envModal.tabAccounts'),
+                children: (
+                  <>
+                    {/* 被测应用的业务测试账号:E2E 登录用。密码只存凭据引用,编排层注入成环境变量供脚本读取。 */}
+                    <div className={styles.integrationSectionHeader}>
+                      <span className={styles.integrationSectionTitle}>{t('integration.envModal.accTitle')}</span>
+                      <Button type="link" size="small" icon={<PlusOutlined />} onClick={addAccount}>
+                        {t('integration.envModal.accAdd')}
+                      </Button>
+                    </div>
+                    <div className={styles.integrationNote}>{t('integration.envModal.accHint')}</div>
+                    {integrationEnvForm.testAccounts.map((acc) => (
+                      <div className={styles.integrationAccountCard} key={acc.id}>
+                        <div className={styles.integrationAccountRow}>
+                          <div className={styles.formField} style={{ flex: 1 }}>
+                            <label>{t('integration.envModal.accRole')}</label>
+                            <Input
+                              placeholder={t('integration.envModal.accRolePlaceholder')}
+                              value={acc.role}
+                              onChange={(e) => updateAccount(acc.id, { role: e.target.value })}
+                            />
+                          </div>
+                          <div className={styles.formField} style={{ flex: 1 }}>
+                            <label>{t('integration.envModal.accEnvPrefix')}</label>
+                            <Input
+                              placeholder="E2E_ADMIN"
+                              value={acc.envPrefix}
+                              onChange={(e) => updateAccount(acc.id, { envPrefix: e.target.value.toUpperCase() })}
+                            />
+                          </div>
+                          <Button
+                            type="link"
+                            danger
+                            size="small"
+                            icon={<DeleteOutlined />}
+                            onClick={() => removeAccount(acc.id)}
+                          />
+                        </div>
+                        <div className={styles.integrationAccountRow}>
+                          <div className={styles.formField} style={{ flex: 1 }}>
+                            <label>{t('integration.envModal.accUsername')}</label>
+                            <Input
+                              placeholder="qa_admin"
+                              value={acc.username}
+                              onChange={(e) => updateAccount(acc.id, { username: e.target.value })}
+                            />
+                          </div>
+                          <div className={styles.formField} style={{ flex: 1 }}>
+                            <label>{t('integration.envModal.accCredentialRef')}</label>
+                            <Input
+                              placeholder="it-integration-e2e-admin"
+                              value={acc.credentialRef}
+                              onChange={(e) => updateAccount(acc.id, { credentialRef: e.target.value })}
+                            />
+                          </div>
+                        </div>
+                        {acc.envPrefix && (
+                          <div className={styles.integrationAccountInject}>
+                            {t('integration.envModal.accInject', {
+                              user: `$${acc.envPrefix}_USER`,
+                              pass: `$${acc.envPrefix}_PASS`,
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </>
+                ),
+              },
+              {
+                key: 'spec',
+                label: t('integration.envModal.tabSpec'),
+                children: renderIntegrationRunSpec(),
+              },
+            ]}
+          />
         </ConfigProvider>
       </Modal>
     );
@@ -5255,7 +5498,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
     const allDecided = cases.length > 0 && decided === cases.length;
     return (
       <Modal
-        title={suite ? t('integration.manualRun.title', { name: suite.name }) : t('integration.manualRun.title', { name: '' })}
+        title={
+          suite
+            ? t('integration.manualRun.title', { name: suite.name })
+            : t('integration.manualRun.title', { name: '' })
+        }
         open={manualRunOpen}
         onCancel={() => setManualRunOpen(false)}
         footer={[
@@ -5331,9 +5578,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                     setManualRecord(c.id, { shots: [...rec.shots, file.name] });
                     return false;
                   }}
-                  onRemove={(file) =>
-                    setManualRecord(c.id, { shots: rec.shots.filter((n) => n !== file.name) })
-                  }
+                  onRemove={(file) => setManualRecord(c.id, { shots: rec.shots.filter((n) => n !== file.name) })}
                 >
                   {rec.shots.length >= 6 ? null : (
                     <div>
@@ -5414,7 +5659,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
     };
     return (
       <Modal
-        title={r ? t('integration.result.title', { version: r.version }) : t('integration.result.title', { version: '' })}
+        title={
+          r ? t('integration.result.title', { version: r.version }) : t('integration.result.title', { version: '' })
+        }
         open={integrationResultOpen}
         onCancel={() => setIntegrationResultOpen(false)}
         footer={[
@@ -5588,6 +5835,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
     ...(showRequirementsTab ? [{ key: 'add-source', label: t('source.addTitle') }] : []),
     ...(onEditProject ? [{ key: 'edit-project', label: t('project.edit') }] : []),
     ...(onDeleteProject ? [{ key: 'delete-project', label: t('project.delete'), danger: true }] : []),
+    // 非创建者通过项目菜单退出，成员列表不再提供“移除自己”入口。
+    ...(!isProjectCreator ? [{ key: 'exit-project', label: t('project.exit'), danger: true }] : []),
   ];
 
   const handleDetailAction = ({ key }: { key: string }) => {
@@ -5601,6 +5850,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
     }
     if (key === 'delete-project' && project) {
       onDeleteProject?.(project);
+      return;
+    }
+    if (key === 'exit-project') {
+      handleExitProject();
     }
   };
 

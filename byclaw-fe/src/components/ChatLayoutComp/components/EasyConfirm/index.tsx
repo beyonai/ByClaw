@@ -74,6 +74,7 @@ const EasyConfirm = (props: IProps) => {
   const [list, setList] = useState<IEasyConfirmCompProps[]>([]);
 
   const currentMsgIdRef = useRef(lastMsg?.msgId || '');
+  const pendingNewSessionDraftRef = useRef(false);
 
   const getUUId = useCallback((easyConfirmItem: IEasyConfirmCompProps) => {
     const listItem = easyConfirmItem?.messageListItem || easyConfirmItem?.thinkListItem;
@@ -89,6 +90,15 @@ const EasyConfirm = (props: IProps) => {
   }, [compProps]);
 
   const inputDraftKey = sessionId || 'default';
+  if (sessionId && pendingNewSessionDraftRef.current) {
+    // 新会话从 default 临时键切到真实 sessionId 时同步迁移草稿，避免输入框重挂载后只剩当前员工。
+    const pendingDraft = inputDraftMap.get('default');
+    if (pendingDraft && !inputDraftMap.has(inputDraftKey)) {
+      inputDraftMap.set(inputDraftKey, pendingDraft);
+    }
+    inputDraftMap.delete('default');
+    pendingNewSessionDraftRef.current = false;
+  }
   const inputDraft = inputDraftMap.get(inputDraftKey);
 
   const onInputDraftChange = useCallback(
@@ -105,6 +115,8 @@ const EasyConfirm = (props: IProps) => {
 
   const onSendWithDraftClean = useCallback(
     (param: ISendProps) => {
+      // 无 sessionId 时发送会创建新会话，标记后续需要把 default 草稿迁移到真实会话。
+      pendingNewSessionDraftRef.current = inputDraftKey === 'default';
       inputDraftMap.delete(inputDraftKey);
       onSend(param);
     },

@@ -36,7 +36,7 @@ const showVersion = () => {
     'text-shadow: 0 1px 2px rgba(0,0,0,0.3)',
   ].join(';');
   const icon = '🚀';
-  const message = `${icon} ${Version} 项目构建于 ${buildTime}`;
+  const message = `${icon} ${Version} 项目构建时间 ${buildTime}`;
 
   console.log(`%c${message}`, styles);
 };
