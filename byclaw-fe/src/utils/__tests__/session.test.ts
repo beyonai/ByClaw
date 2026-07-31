@@ -26,6 +26,16 @@ describe('utils/session', () => {
     ).toEqual(['2', '3', '1']);
   });
 
+  it('formatByUpdateTime sorts formatted API timestamps and falls back to createTime', () => {
+    expect(
+      formatByUpdateTime([
+        { sessionId: 'old', updateTime: '2026-07-29 09:00:00', createTime: '2026-07-29 09:00:00' } as any,
+        { sessionId: 'active', updateTime: '2026-07-31 14:19:00', createTime: '2026-07-20 09:00:00' } as any,
+        { sessionId: 'created', updateTime: '', createTime: '2026-07-30 09:00:00' } as any,
+      ]).map((item) => item.sessionId)
+    ).toEqual(['active', 'created', 'old']);
+  });
+
   it('updateSessionHandler updates an existing session and re-sorts the list', () => {
     const state = {
       sessionList: [
