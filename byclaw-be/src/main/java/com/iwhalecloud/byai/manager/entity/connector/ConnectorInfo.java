@@ -48,6 +48,9 @@ public class ConnectorInfo {
     /** 连接器公共请求配置，JSON字符串 */
     private String requestConfig;
 
+    /** 渠道最新 Runtime Manifest，禁止包含用户凭证 */
+    private String runtimeManifest;
+
     /** 前端页面排序权重 */
     private Integer sort;
 

@@ -1714,14 +1714,13 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(result);
     }
 
-    /** 构造某用户的 DWS 授权状态视图。includeDbToken=true 时附带 DB 授权记录(hasToken/savedAt)。 */
-    private Map<String, Object> buildDwsStatus(Long userId, boolean includeDbToken) {
+    /** 构造某用户的 DWS 授权状态视图；旧入口按原响应结构附带 hasToken/savedAt 兼容字段。 */
+    private Map<String, Object> buildDwsStatus(Long userId, boolean includeLegacyTokenFields) {
         Map<String, Object> runtimeStatus = dwsAuthService.getAuthStatus(userId);
         Map<String, Object> result = new HashMap<>();
-        if (includeDbToken) {
-            Map<String, Object> dbStatus = dwsAuthService.checkDwsToken();
-            result.put("hasToken", dbStatus.get("hasToken"));
-            result.put("savedAt", dbStatus.getOrDefault("savedAt", ""));
+        if (includeLegacyTokenFields) {
+            result.put("hasToken", Boolean.TRUE.equals(runtimeStatus.get("authenticated")));
+            result.put("savedAt", "");
         }
         result.put("runtimeAuthenticated", runtimeStatus.get("authenticated"));
         result.put("tokenValid", runtimeStatus.get("tokenValid"));
@@ -1741,7 +1740,6 @@ public class DevloopApplicationService {
         if (!injected) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.dws.token.invalid"));
         }
-        dwsAuthService.recordAuthToDb();
         return ResponseUtil.successResponse(null);
     }
 }

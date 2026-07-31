@@ -9,7 +9,7 @@ import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
-import org.springframework.dao.DuplicateKeyException;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -24,6 +24,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorAuthorizationProvider;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.RedisAuthorizationSession;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.RedisAuthorizationSessionRepository;
+import com.iwhalecloud.byai.manager.domain.connector.manifest.InvalidConnectorManifestException;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorAuthorizationDto;
 import com.iwhalecloud.byai.manager.dto.connector.StartConnectorAuthorizationRequest;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
@@ -42,6 +43,7 @@ public class ConnectorAuthorizationService {
     private static final String AUTHORIZATION_NOT_FOUND = "AUTHORIZATION_NOT_FOUND";
     private static final String SESSION_ALREADY_ACTIVE = "SESSION_ALREADY_ACTIVE";
     private static final String AUTH_BINDING_FAILED = "AUTH_BINDING_FAILED";
+    private static final String CONNECTOR_MANIFEST_INVALID = "CONNECTOR_MANIFEST_INVALID";
     private static final String AUTH_CANCELLED = "AUTH_CANCELLED";
     private static final String PROVIDER_PROTOCOL_ERROR = "PROVIDER_PROTOCOL_ERROR";
 
@@ -50,18 +52,39 @@ public class ConnectorAuthorizationService {
     private final RedisAuthorizationSessionRepository sessionRepository;
     private final ConnectorAuthMapper connectorAuthMapper;
     private final SequenceService sequenceService;
+    private final ConnectorConnectionStateService connectionStateService;
 
+    @Autowired
     public ConnectorAuthorizationService(
             ConnectorInfoService connectorInfoService,
             AuthorizationProviderRegistry providerRegistry,
             RedisAuthorizationSessionRepository sessionRepository,
             ConnectorAuthMapper connectorAuthMapper,
-            SequenceService sequenceService) {
+            SequenceService sequenceService,
+            ConnectorConnectionStateService connectionStateService) {
         this.connectorInfoService = connectorInfoService;
         this.providerRegistry = providerRegistry;
         this.sessionRepository = sessionRepository;
         this.connectorAuthMapper = connectorAuthMapper;
         this.sequenceService = sequenceService;
+        this.connectionStateService = connectionStateService;
+    }
+
+    /** 仅供不加载 Spring 容器的既有单元测试使用。 */
+    ConnectorAuthorizationService(
+            ConnectorInfoService connectorInfoService,
+            AuthorizationProviderRegistry providerRegistry,
+            RedisAuthorizationSessionRepository sessionRepository,
+            ConnectorAuthMapper connectorAuthMapper,
+            SequenceService sequenceService) {
+        this(
+            connectorInfoService,
+            providerRegistry,
+            sessionRepository,
+            connectorAuthMapper,
+            sequenceService,
+            null
+        );
     }
 
     public ConnectorAuthorizationDto start(StartConnectorAuthorizationRequest request, String userId) {
@@ -75,7 +98,7 @@ public class ConnectorAuthorizationService {
                 saveEnabledAuthorization(userId, connector, null, null);
                 return connected(UUID.randomUUID().toString(), connector.getConnectorId(), null);
             } catch (RuntimeException e) {
-                return failed(null, connector.getConnectorId(), AUTH_BINDING_FAILED, "授权绑定保存失败", null);
+                return bindingFailure(null, connector.getConnectorId(), e);
             }
         }
 
@@ -302,13 +325,15 @@ public class ConnectorAuthorizationService {
             }
             return recoverFinalizingAfterCasFailure(session);
         } catch (RuntimeException e) {
+            String errorCode = bindingErrorCode(e);
+            String errorMessage = bindingErrorMessage(e);
             RedisAuthorizationSession failed = replacement(
                 session,
                 AuthorizationStatus.FAILED,
                 null,
                 null,
-                AUTH_BINDING_FAILED,
-                "授权绑定保存失败"
+                errorCode,
+                errorMessage
             );
             if (sessionRepository.compareAndSetStatus(
                     session.authorizationId(),
@@ -521,6 +546,10 @@ public class ConnectorAuthorizationService {
             ConnectorInfo connector,
             AuthorizationStatusResult statusResult,
             String authorizationId) {
+        if (connectionStateService != null) {
+            connectionStateService.saveEnabledAuthorization(userId, connector, statusResult, authorizationId);
+            return;
+        }
         ConnectorAuth existing = findActiveAuthorization(userId, connector.getConnectorId());
         Date now = new Date();
         ConnectorAuth auth = existing == null ? new ConnectorAuth() : existing;
@@ -534,18 +563,21 @@ public class ConnectorAuthorizationService {
         auth.setAuthId(sequenceService.nextVal());
         auth.setCreateBy(userId);
         auth.setCreateTime(now);
-        try {
-            requireSingleAffectedRow(connectorAuthMapper.insert(auth));
-        } catch (DuplicateKeyException e) {
-            ConnectorAuth winner = findActiveAuthorization(userId, connector.getConnectorId());
-            if (winner == null) {
-                throw e;
-            }
-            Date retryTime = new Date();
-            applyEnabledAuthorization(winner, userId, connector, statusResult, authorizationId, retryTime);
-            winner.setUpdateTime(retryTime);
-            requireSingleAffectedRow(connectorAuthMapper.updateById(winner));
+        int inserted = connectorAuthMapper.insertActiveIgnoreConflict(auth);
+        if (inserted == 1) {
+            return;
         }
+        if (inserted != 0) {
+            throw new IllegalStateException("Connector authorization insert returned an unexpected row count");
+        }
+        ConnectorAuth winner = findActiveAuthorization(userId, connector.getConnectorId());
+        if (winner == null) {
+            throw new IllegalStateException("Connector authorization conflict without an active winner");
+        }
+        Date retryTime = new Date();
+        applyEnabledAuthorization(winner, userId, connector, statusResult, authorizationId, retryTime);
+        winner.setUpdateTime(retryTime);
+        requireSingleAffectedRow(connectorAuthMapper.updateById(winner));
     }
 
     private ConnectorAuth findActiveAuthorization(String userId, Long connectorId) {
@@ -558,6 +590,9 @@ public class ConnectorAuthorizationService {
     }
 
     private ConnectorAuth findEnabledActiveAuthorization(String userId, Long connectorId) {
+        if (connectionStateService != null) {
+            return connectionStateService.findEnabledActiveAuthorization(userId, connectorId);
+        }
         return connectorAuthMapper.selectOne(new LambdaQueryWrapper<ConnectorAuth>()
             .eq(ConnectorAuth::getUserId, userId)
             .eq(ConnectorAuth::getConnectorId, connectorId)
@@ -704,6 +739,31 @@ public class ConnectorAuthorizationService {
         result.setErrorCode(errorCode);
         result.setErrorMessage(errorMessage);
         return result;
+    }
+
+    private ConnectorAuthorizationDto bindingFailure(
+            String authorizationId,
+            Long connectorId,
+            RuntimeException error) {
+        return failed(
+            authorizationId,
+            connectorId,
+            bindingErrorCode(error),
+            bindingErrorMessage(error),
+            null
+        );
+    }
+
+    private String bindingErrorCode(RuntimeException error) {
+        return error instanceof InvalidConnectorManifestException
+            ? CONNECTOR_MANIFEST_INVALID
+            : AUTH_BINDING_FAILED;
+    }
+
+    private String bindingErrorMessage(RuntimeException error) {
+        return error instanceof InvalidConnectorManifestException
+            ? "连接器运行时配置无效"
+            : "授权绑定保存失败";
     }
 
     private ConnectorAuthorizationDto authorizationNotFound(String authorizationId) {

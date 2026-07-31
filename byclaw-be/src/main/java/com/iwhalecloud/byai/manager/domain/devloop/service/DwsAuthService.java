@@ -5,9 +5,6 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,18 +20,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
-import com.iwhalecloud.byai.manager.entity.users.UserPrivateParam;
-import com.iwhalecloud.byai.manager.mapper.users.UserPrivateParamMapper;
-import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -54,7 +46,6 @@ public class DwsAuthService {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String DWS_BIN = "dws";
-    private static final String PARAM_KEY_DWS_TOKEN = "DWS_TOKEN";
     /**
      * 关闭 keychain,改用 file-DEK 后端把登录态加密落到 DWS_CONFIG_DIR。
      * 这是 per-user 目录隔离生效的前提:默认 keychain 模式下 token 存系统钥匙串,DWS_CONFIG_DIR 换目录也读到同一份(全局共享)。
@@ -78,12 +69,6 @@ public class DwsAuthService {
      * 这才是隔离的关键:每个用户单独一份 HOME,放到 {bucket}/by/.connector-auth/.dws;共用 HOME 会导致一人授权全员"已授权"。
      */
     private static final String DWS_HOME_SEGMENT = "by/.connector-auth/.dws";
-
-    @Autowired
-    private UserPrivateParamMapper userPrivateParamMapper;
-
-    @Autowired
-    private SequenceService sequenceService;
 
     @Autowired
     private UserBucketNamingService userBucketNamingService;
@@ -307,8 +292,6 @@ public class DwsAuthService {
                     if (finished && bgProcess.exitValue() == 0) {
                         log.info("[DwsAuth] device flow completed successfully, authorizationId={}, userId={}",
                             authId, authUserId);
-                        // 记录授权到 DB:用发起授权的用户身份,不再取最近一条猜人。
-                        recordAuthToDbForUser(authUserId);
                     } else if (!finished) {
                         log.warn("[DwsAuth] device flow timed out (900s), authorizationId={}, userId={}",
                             authId, authUserId);
@@ -554,79 +537,13 @@ public class DwsAuthService {
     }
 
     /**
-     * 检查用户是否已保存 DWS 授权记录
+     * 兼容旧 Service 调用：hasToken 表示用户 native-home 当前存在 DWS 认证状态，savedAt 保留为空字符串。
+     * 凭证只由 dws 写入用户 native-home，不再读取或生成 DWS_TOKEN 数据库记录。
      */
     public Map<String, Object> checkDwsToken() {
         Long userId = CurrentUserHolder.getCurrentUserId();
-        LambdaQueryWrapper<UserPrivateParam> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(UserPrivateParam::getUserId, userId)
-               .eq(UserPrivateParam::getParamKey, PARAM_KEY_DWS_TOKEN)
-               .eq(UserPrivateParam::getDeleteFlag, "0");
-        UserPrivateParam param = userPrivateParamMapper.selectOne(wrapper);
-        if (param == null || param.getParamValueCipher() == null) {
-            return Map.of("hasToken", false);
-        }
-        return Map.of("hasToken", true, "savedAt", param.getUpdateTime() != null ? param.getUpdateTime().toString() : "");
-    }
-
-    /**
-     * 记录授权完成到 DB（后台线程调用，userId 由发起授权时捕获传入，不再"取最近一条"猜人）。
-     */
-    private void recordAuthToDbForUser(Long userId) {
-        if (userId == null) {
-            log.warn("[DwsAuth] recordAuthToDbForUser skipped: null userId");
-            return;
-        }
-        try {
-            Map<String, Object> status = getAuthStatus(userId);
-            String expiresAt = (String) status.getOrDefault("expiresAt", "");
-
-            String metadata = String.format("{\"expiresAt\":\"%s\",\"authorizedAt\":\"%s\"}",
-                expiresAt, LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
-
-            saveOrUpdateParam(userId, PARAM_KEY_DWS_TOKEN, metadata);
-            log.info("[DwsAuth] recorded auth to DB for userId={}", userId);
-        } catch (Exception e) {
-            log.error("[DwsAuth] recordAuthToDbForUser failed, userId={}", userId, e);
-        }
-    }
-
-    /**
-     * 记录授权完成到 DB（有用户上下文时调用）
-     */
-    public void recordAuthToDb() {
-        recordAuthToDbForUser(CurrentUserHolder.getCurrentUserId());
-    }
-
-    private void saveOrUpdateParam(Long userId, String key, String value) {
-        LambdaQueryWrapper<UserPrivateParam> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(UserPrivateParam::getUserId, userId)
-               .eq(UserPrivateParam::getParamKey, key)
-               .eq(UserPrivateParam::getDeleteFlag, "0");
-        UserPrivateParam existing = userPrivateParamMapper.selectOne(wrapper);
-
-        String cipher = Sm4Util.encrypt(value);
-        String last4 = value.length() > 4 ? value.substring(value.length() - 4) : value;
-
-        if (existing != null) {
-            existing.setParamValueCipher(cipher);
-            existing.setParamValueLast4(last4);
-            existing.setUpdateBy(userId);
-            existing.setUpdateTime(new Date());
-            userPrivateParamMapper.updateById(existing);
-        } else {
-            UserPrivateParam param = new UserPrivateParam();
-            param.setParamId(sequenceService.nextVal());
-            param.setUserId(userId);
-            param.setParamKey(key);
-            param.setParamValueCipher(cipher);
-            param.setParamValueLast4(last4);
-            param.setDescription("DWS CLI 钉钉授权记录");
-            param.setStatus("1");
-            param.setCreateBy(userId);
-            param.setCreateTime(new Date());
-            param.setDeleteFlag("0");
-            userPrivateParamMapper.insert(param);
-        }
+        Map<String, Object> runtimeStatus = getAuthStatus(userId);
+        boolean hasToken = Boolean.TRUE.equals(runtimeStatus.get("authenticated"));
+        return Map.of("hasToken", hasToken, "savedAt", "");
     }
 }

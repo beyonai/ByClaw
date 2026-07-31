@@ -31,6 +31,9 @@ public class ConnectorAuthService {
     @Autowired
     private ConnectorInfoMapper connectorInfoMapper;
 
+    @Autowired
+    private ConnectorConnectionStateService connectionStateService;
+
     /**
      * 新增用户连接器授权记录。
      *
@@ -66,18 +69,7 @@ public class ConnectorAuthService {
 
     /** 更新当前用户指定连接器的全局启用状态。 */
     public void updateEnableFlag(Long connectorId, boolean enabled) {
-        ConnectorAuth auth = connectorAuthMapper.selectOne(new QueryWrapper<ConnectorAuth>()
-            .eq("connector_id", connectorId)
-            .eq("user_id", currentUserId())
-            .eq("status_cd", "00A")
-            .orderByDesc("update_time")
-            .last("LIMIT 1"));
-        if (auth == null) {
-            throw new IllegalArgumentException("连接器尚未授权");
-        }
-        auth.setEnableFlag(enabled ? "Y" : "N");
-        auth.setUpdateTime(new java.util.Date());
-        connectorAuthMapper.updateById(auth);
+        connectionStateService.updateEnableFlag(currentUserId(), connectorId, enabled);
     }
 
     private QueryWrapper<ConnectorAuth> ownerQuery(Long authId) {

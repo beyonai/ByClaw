@@ -1,42 +1,25 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-import java.util.concurrent.Executor;
+import java.lang.reflect.Field;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.data.redis.connection.RedisConnectionFactory;
-import org.springframework.data.redis.connection.stream.ReadOffset;
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.core.StreamOperations;
-import org.springframework.test.util.ReflectionTestUtils;
-
-import com.iwhaleai.byai.framework.common.Constants;
+import org.springframework.beans.factory.annotation.Value;
 
 class SandboxWakeupStreamListenerTest {
 
     @Test
-    @SuppressWarnings("unchecked")
-    void createConsumerGroup_usesFrameworkControlPlaneManagementStreamKey() {
-        RedisTemplate<String, Object> redisTemplate = mock(RedisTemplate.class);
-        StreamOperations<String, Object, Object> streamOperations = mock(StreamOperations.class);
-        when(redisTemplate.opsForStream()).thenReturn(streamOperations);
-        SandboxWakeupStreamListener listener = new SandboxWakeupStreamListener(
-            mock(RedisConnectionFactory.class),
-            redisTemplate,
-            mock(SandboxWakeupMessageHandler.class),
-            mock(Executor.class)
-        );
-        ReflectionTestUtils.setField(listener, "consumerGroup", SandboxWakeupStreamListener.DEFAULT_CONSUMER_GROUP);
+    void streamKey_remainsConfigurableForLegacyDeployments() throws NoSuchFieldException {
+        Field streamKeyField = SandboxWakeupStreamListener.class.getDeclaredField("streamKey");
 
-        ReflectionTestUtils.invokeMethod(listener, "createConsumerGroupIfAbsent");
+        Value value = streamKeyField.getAnnotation(Value.class);
 
-        verify(streamOperations).createGroup(
-            Constants.QueueNames.controlPlaneManagementStream(),
-            ReadOffset.latest(),
-            SandboxWakeupStreamListener.DEFAULT_CONSUMER_GROUP
+        assertNotNull(value);
+        assertEquals(
+            "${byclaw.sandbox.wakeup-stream.key:byai_gateway:control_plane:mgmt:wakeup}",
+            value.value()
         );
     }
 }

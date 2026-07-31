@@ -21,7 +21,6 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.dao.DuplicateKeyException;
 
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
@@ -34,6 +33,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorAuthorizationProvider;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.RedisAuthorizationSession;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.RedisAuthorizationSessionRepository;
+import com.iwhalecloud.byai.manager.domain.connector.manifest.InvalidConnectorManifestException;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorAuthorizationDto;
 import com.iwhalecloud.byai.manager.dto.connector.StartConnectorAuthorizationRequest;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
@@ -65,7 +65,7 @@ class ConnectorAuthorizationServiceTest {
         connectorAuthMapper = mock(ConnectorAuthMapper.class);
         sequenceService = mock(SequenceService.class);
         provider = mock(ConnectorAuthorizationProvider.class);
-        when(connectorAuthMapper.insert(any())).thenReturn(1);
+        when(connectorAuthMapper.insertActiveIgnoreConflict(any())).thenReturn(1);
         when(connectorAuthMapper.updateById(any())).thenReturn(1);
         service = new ConnectorAuthorizationService(
             connectorInfoService,
@@ -192,7 +192,7 @@ class ConnectorAuthorizationServiceTest {
             eq(winner.getAuthorizationId()), eq(AuthorizationStatus.PENDING), eq(0L), any());
         verify(sessionRepository).compareAndSetStatus(
             eq(winner.getAuthorizationId()), eq(AuthorizationStatus.FINALIZING), eq(1L), any());
-        verify(connectorAuthMapper).insert(any(ConnectorAuth.class));
+        verify(connectorAuthMapper).insertActiveIgnoreConflict(any(ConnectorAuth.class));
         verify(sequenceService).nextVal();
         ArgumentCaptor<AuthorizationSessionContext> cancelCaptor = ArgumentCaptor.forClass(AuthorizationSessionContext.class);
         verify(provider).cancel(cancelCaptor.capture());
@@ -293,7 +293,7 @@ class ConnectorAuthorizationServiceTest {
         assertThat(first.getStatus()).isEqualTo("connected");
         assertThat(second.getStatus()).isEqualTo("connected");
         ArgumentCaptor<ConnectorAuth> insertCaptor = ArgumentCaptor.forClass(ConnectorAuth.class);
-        verify(connectorAuthMapper).insert(insertCaptor.capture());
+        verify(connectorAuthMapper).insertActiveIgnoreConflict(insertCaptor.capture());
         assertEnabledBinding(insertCaptor.getValue(), "NONE");
         assertThat(insertCaptor.getValue().getAuthId()).isEqualTo(77L);
         assertThat(insertCaptor.getValue().getAuthCredential()).isNull();
@@ -308,19 +308,19 @@ class ConnectorAuthorizationServiceTest {
     }
 
     @Test
-    void noneAuthorizationRetriesDuplicateInsertByUpdatingUniqueActiveWinner() {
+    void noneAuthorizationUpdatesUniqueActiveWinnerWhenInsertIsIgnored() {
         ConnectorInfo connector = connector("local", null, "NONE", null);
         when(connectorInfoService.findById(CONNECTOR_ID)).thenReturn(connector);
         ConnectorAuth winner = new ConnectorAuth();
         winner.setAuthId(99L);
         when(connectorAuthMapper.selectOne(any())).thenReturn(null, winner);
         when(sequenceService.nextVal()).thenReturn(98L);
-        when(connectorAuthMapper.insert(any())).thenThrow(new DuplicateKeyException("concurrent active binding"));
+        when(connectorAuthMapper.insertActiveIgnoreConflict(any())).thenReturn(0);
 
         ConnectorAuthorizationDto result = service.start(request(), USER_ID);
 
         assertThat(result.getStatus()).isEqualTo("connected");
-        verify(connectorAuthMapper).insert(any(ConnectorAuth.class));
+        verify(connectorAuthMapper).insertActiveIgnoreConflict(any(ConnectorAuth.class));
         verify(connectorAuthMapper).updateById(winner);
         assertEnabledBinding(winner, "NONE");
         assertThat(winner.getAuthId()).isEqualTo(99L);
@@ -347,12 +347,35 @@ class ConnectorAuthorizationServiceTest {
         when(connectorInfoService.findById(CONNECTOR_ID)).thenReturn(connector);
         when(connectorAuthMapper.selectOne(any())).thenReturn(null);
         when(sequenceService.nextVal()).thenReturn(77L);
-        when(connectorAuthMapper.insert(any())).thenReturn(0);
+        when(connectorAuthMapper.insertActiveIgnoreConflict(any())).thenReturn(0);
 
         ConnectorAuthorizationDto result = service.start(request(), USER_ID);
 
         assertThat(result.getStatus()).isEqualTo("failed");
         assertThat(result.getErrorCode()).isEqualTo("AUTH_BINDING_FAILED");
+    }
+
+    @Test
+    void invalidManifestReturnsStableErrorWithoutExposingValidationDetails() {
+        ConnectorInfo connector = connector("local", null, "NONE", null);
+        ConnectorConnectionStateService connectionStateService = mock(ConnectorConnectionStateService.class);
+        ConnectorAuthorizationService transactionalService = new ConnectorAuthorizationService(
+            connectorInfoService,
+            providerRegistry,
+            sessionRepository,
+            connectorAuthMapper,
+            sequenceService,
+            connectionStateService
+        );
+        when(connectorInfoService.findById(CONNECTOR_ID)).thenReturn(connector);
+        org.mockito.Mockito.doThrow(new InvalidConnectorManifestException("runtime_manifest is required"))
+            .when(connectionStateService).saveEnabledAuthorization(USER_ID, connector, null, null);
+
+        ConnectorAuthorizationDto result = transactionalService.start(request(), USER_ID);
+
+        assertThat(result.getStatus()).isEqualTo("failed");
+        assertThat(result.getErrorCode()).isEqualTo("CONNECTOR_MANIFEST_INVALID");
+        assertThat(result.getErrorMessage()).isEqualTo("连接器运行时配置无效");
     }
 
     @Test
@@ -419,7 +442,7 @@ class ConnectorAuthorizationServiceTest {
         assertThat(terminalPoll.getStatus()).isEqualTo("connected");
         verify(provider).queryStatus(any());
         ArgumentCaptor<ConnectorAuth> authCaptor = ArgumentCaptor.forClass(ConnectorAuth.class);
-        verify(connectorAuthMapper).insert(authCaptor.capture());
+        verify(connectorAuthMapper).insertActiveIgnoreConflict(authCaptor.capture());
         ConnectorAuth auth = authCaptor.getValue();
         assertEnabledBinding(auth, "DEVICE_FLOW");
         assertThat(auth.getAuthId()).isEqualTo(501L);

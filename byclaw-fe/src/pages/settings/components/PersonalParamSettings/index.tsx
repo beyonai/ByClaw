@@ -196,6 +196,19 @@ const PersonalParamSettings: React.FC = () => {
       render: (description) => description || '-',
     },
     {
+      title: intl.formatMessage({ id: 'settings.params.source' }),
+      dataIndex: 'source',
+      width: 120,
+      render: (_, record) => {
+        const managed = record.managed ?? record.source === 'CONNECTOR';
+        return managed ? (
+          <Tag color="blue">{intl.formatMessage({ id: 'settings.params.source.connector' })}</Tag>
+        ) : (
+          <Tag>{intl.formatMessage({ id: 'settings.params.source.user' })}</Tag>
+        );
+      },
+    },
+    {
       title: intl.formatMessage({ id: 'settings.params.status' }),
       dataIndex: 'status',
       width: 120,
@@ -212,10 +225,7 @@ const PersonalParamSettings: React.FC = () => {
       width: 150,
       render: (_, record) =>
         record.hasValue ? (
-          <Tag color="green">
-            {intl.formatMessage({ id: 'settings.params.configured' })}
-            {record.valueLast4 ? ` ****${record.valueLast4}` : ''}
-          </Tag>
+          <Tag color="green">{intl.formatMessage({ id: 'settings.params.configured' })}</Tag>
         ) : (
           <Tag>{intl.formatMessage({ id: 'settings.params.notConfigured' })}</Tag>
         ),
@@ -235,22 +245,32 @@ const PersonalParamSettings: React.FC = () => {
       fixed: 'right',
       render: (_, record) => {
         const enabled = record.enabled ?? record.status === 'NORMAL';
+        const managed = record.managed ?? record.source === 'CONNECTOR';
+        if (managed) {
+          return '-';
+        }
         return (
           <Space>
-            <Button type="link" size="small" onClick={() => handleEnable(record, !enabled)}>
-              {intl.formatMessage({ id: enabled ? 'settings.params.disable' : 'settings.params.enable' })}
-            </Button>
-            <Button type="link" size="small" onClick={() => openEditModal(record)}>
-              {intl.formatMessage({ id: 'common.edit' })}
-            </Button>
-            <Popconfirm
-              title={intl.formatMessage({ id: 'settings.params.confirmDelete' })}
-              onConfirm={() => handleDelete(record)}
-            >
-              <Button type="link" size="small" danger>
-                {intl.formatMessage({ id: 'common.delete' })}
+            {record.enableable !== false && (
+              <Button type="link" size="small" onClick={() => handleEnable(record, !enabled)}>
+                {intl.formatMessage({ id: enabled ? 'settings.params.disable' : 'settings.params.enable' })}
               </Button>
-            </Popconfirm>
+            )}
+            {record.editable !== false && (
+              <Button type="link" size="small" onClick={() => openEditModal(record)}>
+                {intl.formatMessage({ id: 'common.edit' })}
+              </Button>
+            )}
+            {record.deletable !== false && (
+              <Popconfirm
+                title={intl.formatMessage({ id: 'settings.params.confirmDelete' })}
+                onConfirm={() => handleDelete(record)}
+              >
+                <Button type="link" size="small" danger>
+                  {intl.formatMessage({ id: 'common.delete' })}
+                </Button>
+              </Popconfirm>
+            )}
           </Space>
         );
       },
@@ -303,7 +323,7 @@ const PersonalParamSettings: React.FC = () => {
             showTotal: (count) => intl.formatMessage({ id: 'settings.params.paginationTotal' }, { total: count }),
           }}
           onChange={handleTableChange}
-          scroll={{ x: 1080 }}
+          scroll={{ x: 1200 }}
           locale={{ emptyText: <Empty description={intl.formatMessage({ id: 'settings.params.empty' })} /> }}
         />
       </Card>

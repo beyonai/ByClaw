@@ -1,4 +1,7 @@
--- 初始化企业协作平台连接器元信息，仅补充缺失记录。
+-- V0.3.1 增量 DML：补齐连接器模板、内置 Skill 拆分及 Runtime Manifest。
+-- INSERT/UPDATE 均带业务条件或存在性判断，避免重复执行时产生重复数据。
+
+-- 初始化钉钉、飞书和企业微信连接器元信息，仅补充 connector_code 尚不存在的记录。
 INSERT INTO byai.byai_connector_info (
     connector_id,
     connector_code,
@@ -94,12 +97,14 @@ SET param_value = CASE
 WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
   AND c.param_value NOT LIKE '%"skillCode":"knowledge-collection"%';
 
+-- 补充公开互联网渠道路由 Skill，已存在同名 skillCode 时不重复追加。
 UPDATE byai.byai_system_config c
 SET param_value = left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1)
     || ',{"skillName":"agent-reach","skillCode":"agent-reach","skillDescZh":"路由公开互联网渠道能力，并按 ByClaw 覆盖规则选择 byCLI 等执行器。","skillDescEn":"Route public-internet channels and select executors such as byCLI according to ByClaw override rules."}]'
 WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
   AND c.param_value NOT LIKE '%"skillCode":"agent-reach"%';
 
+-- 补充独立 byCLI 执行 Skill，避免继续把 bycli 与知识采集编排能力混为一体。
 UPDATE byai.byai_system_config c
 SET param_value = left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1)
     || ',{"skillName":"bycli","skillCode":"bycli","skillDescZh":"通过浏览器与 Adapter 执行网站操作、复用或维护适配器，并返回采集结果。","skillDescEn":"Execute website operations through the browser and adapters, reuse or maintain adapters, and return collected results."}]'
@@ -116,6 +121,7 @@ WHERE NOT EXISTS (
        OR resource_code = 'bycli'
 );
 
+-- 为新增的 byCLI 资源补齐内置 Skill 扩展记录；resource_id 已存在时保持原记录不变。
 INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
 SELECT 25,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP
 WHERE NOT EXISTS (
@@ -197,3 +203,22 @@ WHERE g.grant_obj_id = 14
         AND existing.grant_to_obj_id = g.grant_to_obj_id
         AND existing.grant_to_obj_type = g.grant_to_obj_type
   );
+
+-- Runtime Manifest 不包含 token、refresh token 或 App Secret；真实凭证仍由 CLI native-home 管理。
+-- 钉钉使用 DWS CLI，并将 HOME 与 DWS_CONFIG_DIR 统一到用户连接器授权目录。
+UPDATE byai.byai_connector_info
+SET runtime_manifest = '{"authStorage":{"environment":{"DWS_CONFIG_DIR":"/by/.connector-auth/.dws/config","DWS_DISABLE_KEYCHAIN":"1","HOME":"/by/.connector-auth/.dws"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.dws","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"dingtalk","runtime":{"authorizeIn":"be-auth-job","commands":{"login":["dws","auth","login","--device","-y"],"logout":["dws","auth","reset","-y"],"status":["dws","auth","status","--format","json"]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"dws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.52"}',
+    update_time = CURRENT_TIMESTAMP
+WHERE connector_code = 'dingtalk';
+
+-- 飞书使用 lark-cli，登录时申请 docs、drive、wiki 三个业务域权限。
+UPDATE byai.byai_connector_info
+SET runtime_manifest = '{"authStorage":{"environment":{"HOME":"/by/.connector-auth/.lark-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.lark-cli","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"lark","runtime":{"authorizeIn":"be-auth-job","commands":{"login":["lark-cli","auth","login","--domain","docs","--domain","drive","--domain","wiki","--no-wait","--json"],"logout":["lark-cli","auth","logout","--json"],"status":["lark-cli","auth","status","--json","--verify"]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"fws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.78"}',
+    update_time = CURRENT_TIMESTAMP
+WHERE connector_code = 'lark';
+
+-- 企业微信保持占位状态；在 Provider 与 CLI 命令完成验证前不发布 runtime_manifest。
+UPDATE byai.byai_connector_info
+SET runtime_manifest = NULL,
+    update_time = CURRENT_TIMESTAMP
+WHERE connector_code = 'wecom';

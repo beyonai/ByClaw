@@ -24,15 +24,18 @@ class ConnectorAuthServiceTest {
 
     private ConnectorAuthMapper connectorAuthMapper;
     private ConnectorInfoMapper connectorInfoMapper;
+    private ConnectorConnectionStateService connectionStateService;
     private ConnectorAuthService service;
 
     @BeforeEach
     void setUp() {
         connectorAuthMapper = mock(ConnectorAuthMapper.class);
         connectorInfoMapper = mock(ConnectorInfoMapper.class);
+        connectionStateService = mock(ConnectorConnectionStateService.class);
         service = new ConnectorAuthService();
         ReflectionTestUtils.setField(service, "connectorAuthMapper", connectorAuthMapper);
         ReflectionTestUtils.setField(service, "connectorInfoMapper", connectorInfoMapper);
+        ReflectionTestUtils.setField(service, "connectionStateService", connectionStateService);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(1001L);
@@ -78,5 +81,12 @@ class ConnectorAuthServiceTest {
         QueryWrapper<ConnectorAuth> query = (QueryWrapper<ConnectorAuth>) captor.getValue();
         assertThat(query.getSqlSegment()).contains("auth_id", "user_id", "status_cd");
         assertThat(query.getParamNameValuePairs().values()).contains(2001L, "1001", "00A");
+    }
+
+    @Test
+    void updateEnableFlagDelegatesToTransactionalConnectionStateService() {
+        service.updateEnableFlag(3001L, true);
+
+        verify(connectionStateService).updateEnableFlag("1001", 3001L, true);
     }
 }
