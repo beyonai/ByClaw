@@ -24,6 +24,9 @@ export async function buildHttpApp(
   });
   await app.register(cors, { origin: options.corsOrigin });
 
+  // 容器编排探针使用根路径；业务调用仍保留带服务前缀的健康检查。
+  registerHealthRoutes(app, options);
+
   await app.register(
     async (api) => {
       registerHealthRoutes(api, options);

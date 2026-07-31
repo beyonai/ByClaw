@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "ByClaw conductor engine and multi-tenant super assistant service",
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build:packages": "pnpm -r --if-present run build",
     "dev": "pnpm run build:packages && tsx app/index.ts",
