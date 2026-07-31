@@ -20,6 +20,7 @@ import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.common.storage.KnowledgeResourceFS;
 import com.iwhalecloud.byai.common.storage.ResourceFS;
 import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
@@ -65,11 +66,16 @@ public class FsOperationApplicationService {
 
     private static final String EXTERNAL_RESOURCE_SKILL_ROOT = "/byclaw/resource/skill";
 
+    private static final String KNOWLEDGE_RESOURCE_ROOT = "/resource/kg_doc/";
+
     @Autowired
     private UserFS userFS;
 
     @Autowired
     private ResourceFS resourceFS;
+
+    @Autowired
+    private KnowledgeResourceFS knowledgeResourceFS;
 
     @Autowired
     private AuthApplicationService authApplicationService;
@@ -339,6 +345,10 @@ public class FsOperationApplicationService {
             userFS.init();
             return userFS.write(file, path);
         }
+        if (isKnowledgeResourcePath(path)) {
+            knowledgeResourceFS.init();
+            return knowledgeResourceFS.write(file, path);
+        }
         resourceFS.init();
         return resourceFS.write(file, path);
     }
@@ -349,6 +359,11 @@ public class FsOperationApplicationService {
         if (spaceType == FsSpaceType.USER) {
             userFS.init();
             userFS.write(new java.io.ByteArrayInputStream(bytes), bytes.length, resolvedContentType, path);
+            return;
+        }
+        if (isKnowledgeResourcePath(path)) {
+            knowledgeResourceFS.init();
+            knowledgeResourceFS.write(new java.io.ByteArrayInputStream(bytes), bytes.length, resolvedContentType, path);
             return;
         }
         resourceFS.init();
@@ -373,6 +388,9 @@ public class FsOperationApplicationService {
         if (spaceType == FsSpaceType.USER) {
             return userFS.read(path);
         }
+        if (isKnowledgeResourcePath(path)) {
+            return knowledgeResourceFS.read(path);
+        }
         return resourceFS.read(path);
     }
 
@@ -380,6 +398,10 @@ public class FsOperationApplicationService {
         if (spaceType == FsSpaceType.USER) {
             userFS.init();
             return Boolean.TRUE.equals(userFS.delete(path));
+        }
+        if (isKnowledgeResourcePath(path)) {
+            knowledgeResourceFS.init();
+            return Boolean.TRUE.equals(knowledgeResourceFS.delete(path));
         }
         resourceFS.init();
         return Boolean.TRUE.equals(resourceFS.delete(path));
@@ -393,7 +415,14 @@ public class FsOperationApplicationService {
         if (spaceType == FsSpaceType.USER) {
             return userFS.list(path, maxDepth);
         }
+        if (isKnowledgeResourcePath(path)) {
+            return knowledgeResourceFS.list(path, maxDepth);
+        }
         return resourceFS.list(path, maxDepth);
+    }
+
+    private boolean isKnowledgeResourcePath(String path) {
+        return StringUtils.startsWith(path, KNOWLEDGE_RESOURCE_ROOT);
     }
 
     private void streamFile(FsSpaceType spaceType, String path, OutputStream outputStream) throws IOException {

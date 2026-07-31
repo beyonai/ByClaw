@@ -194,8 +194,6 @@ export default function useRender({
               <MoreActions
                 deleteMessage={deleteMessage}
                 msg={msg}
-                employeesList={employeesList}
-                agentList={agentList}
                 showTroubleshoot
               />
               {[IMessageState.Done, IMessageState.Cancel].includes(messageState) && (
@@ -207,7 +205,7 @@ export default function useRender({
         </div>
       );
     },
-    [deleteMessage, updateMessage, canRefrence, employeesList, agentList]
+    [deleteMessage, updateMessage, canRefrence]
   );
 
   const uploadFileRender = useCallback((fileList?: IFile[], msg?: IMessage) => {

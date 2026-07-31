@@ -461,10 +461,12 @@
                 <choose>
                     <!-- 配置技能弹窗只按技能 resourceCode 模糊搜索，避免描述命中导致结果不直观。 -->
                     <when test="resourceBizTypeList != null and resourceBizTypeList.size() == 1 and resourceBizTypeList.contains('SKILL')">
-                        and (a.resource_code like concat('%', #{keyword}, '%') or a.resource_name like concat('%', #{keyword}, '%'))
+                        and (UPPER(a.resource_code) like concat('%', UPPER(#{keyword}), '%')
+                            or UPPER(a.resource_name) like concat('%', UPPER(#{keyword}), '%'))
                     </when>
                     <otherwise>
-                        and (a.resource_name like concat('%', #{keyword}, '%') or a.resource_desc like concat('%', #{keyword}, '%'))
+                        and (UPPER(a.resource_name) like concat('%', UPPER(#{keyword}), '%')
+                            or UPPER(a.resource_desc) like concat('%', UPPER(#{keyword}), '%'))
                     </otherwise>
                 </choose>
             </if>

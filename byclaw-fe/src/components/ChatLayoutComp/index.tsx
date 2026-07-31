@@ -30,7 +30,7 @@ import EasyConfirm from './components/EasyConfirm';
 import type { IState as UseEmployeesIState } from '@/models/useEmployees.ts';
 
 import styles from './index.module.less';
-import { getResponseAgentInfo } from '../MessageList/utils';
+import { getResponseAgentInfo, isMultiAgentResponsePayload, type ResponseMetadataPayload } from '../MessageList/utils';
 
 type IProps = {
   sessionId: string;
@@ -159,9 +159,13 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   }, [currentSession?.projectId, projectId]);
 
   const onReceivedChatMessages = useCallback(
-    (payload?: { sessionId?: string; metadata?: string }) => {
+    (payload?: ResponseMetadataPayload) => {
       const { sessionId: sourceSessionId, metadata } = payload || {};
       if (`${sourceSessionId}` !== `${sessionId}`) {
+        return;
+      }
+      if (isMultiAgentResponsePayload(payload)) {
+        // 多员工会话由输入框 mention 决定参与员工，不能用最后完成的单个回答覆盖全局 agentId。
         return;
       }
       const agentInfo = getResponseAgentInfo({ agentList, employeesList }, metadata);

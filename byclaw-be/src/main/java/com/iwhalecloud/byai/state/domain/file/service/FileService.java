@@ -55,6 +55,24 @@ public class FileService {
     }
 
     /**
+     * 更新文件元数据，供项目共享文件等仅修改展示信息的场景使用。
+     *
+     * @param files 文件实体
+     */
+    public void update(Files files) {
+        filesMapper.updateById(files);
+    }
+
+    /**
+     * 删除文件元数据，调用方需先完成所属业务的权限和关联校验。
+     *
+     * @param fileId 文件 ID
+     */
+    public void remove(Long fileId) {
+        filesMapper.deleteById(fileId);
+    }
+
+    /**
      * API-01 - 上传文件 上传一个或多个文件到指定会话，支持为每个文件附加多个标签
      */
     public KnowledgeResponse<Map<String, Object>> uploadFiles(MultipartFile[] files, List<String> tags, Long chatId,

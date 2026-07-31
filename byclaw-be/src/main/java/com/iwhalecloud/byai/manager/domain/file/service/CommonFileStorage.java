@@ -29,4 +29,13 @@ public class CommonFileStorage {
     public InputStream read(StorageLocation location) {
         return objectStorage.get(location);
     }
+
+    /**
+     * 删除公共文件存储中的对象。
+     *
+     * @param location 文件存储位置
+     */
+    public void delete(StorageLocation location) {
+        objectStorage.delete(location);
+    }
 }

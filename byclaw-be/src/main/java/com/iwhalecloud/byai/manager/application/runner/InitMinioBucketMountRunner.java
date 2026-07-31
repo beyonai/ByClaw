@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.runner;
 
+import com.iwhalecloud.byai.common.storage.KnowledgeResourceFS;
 import com.iwhalecloud.byai.common.storage.ResourceFS;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,6 +40,9 @@ public class InitMinioBucketMountRunner implements ApplicationRunner {
     private ResourceFS resourceFS;
 
     @Autowired
+    private KnowledgeResourceFS knowledgeResourceFS;
+
+    @Autowired
     private MinioConfig minioConfig;
 
     @Override
@@ -58,6 +62,7 @@ public class InitMinioBucketMountRunner implements ApplicationRunner {
         }
         try {
             resourceFS.init();
+            knowledgeResourceFS.init();
         } catch (Exception e) {
             // 公共 bucket 初始化是启动增强动作，不应该因为环境或rclone问题把整个服务启动打挂。
             LOGGER.error("MinIO公共bucket初始化任务执行失败，系统继续启动, storageType={}", storageType, e);
