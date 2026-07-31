@@ -26,6 +26,7 @@ import {
   ASK_USER_QUESTION_ENABLED,
   ASK_USER_QUESTION_TOOL_NAME,
   DELEGATE_AGENT_TOOL_NAME,
+  DOWNLOAD_ATTACHMENT_ENABLED,
   DOWNLOAD_ATTACHMENT_TOOL_NAME,
   INSPECT_ATTACHMENT_TOOL_NAME,
   LEADER_FILE_TOOL_NAMES,
@@ -520,13 +521,13 @@ class PiLeaderSession implements LeaderSession {
         ...(ASK_USER_QUESTION_ENABLED ? [ASK_USER_QUESTION_TOOL_NAME] : []),
         ...LEADER_FILE_TOOL_NAMES,
         INSPECT_ATTACHMENT_TOOL_NAME,
-        DOWNLOAD_ATTACHMENT_TOOL_NAME,
+        ...(DOWNLOAD_ATTACHMENT_ENABLED ? [DOWNLOAD_ATTACHMENT_TOOL_NAME] : []),
       ],
       customTools: [
         delegateAgent,
         ...(ASK_USER_QUESTION_ENABLED ? [askUserQuestion] : []),
         inspectAttachment,
-        downloadAttachment,
+        ...(DOWNLOAD_ATTACHMENT_ENABLED ? [downloadAttachment] : []),
       ],
       resourceLoader,
       sessionManager,
@@ -606,7 +607,9 @@ class PiLeaderSession implements LeaderSession {
         ...(input.attachments.length > 0 && input.inspectAttachment
           ? [INSPECT_ATTACHMENT_TOOL_NAME]
           : []),
-        ...(input.attachments.length > 0 && input.downloadAttachment
+        ...(DOWNLOAD_ATTACHMENT_ENABLED &&
+        input.attachments.length > 0 &&
+        input.downloadAttachment
           ? [DOWNLOAD_ATTACHMENT_TOOL_NAME]
           : []),
       ]);
@@ -653,6 +656,7 @@ class PiLeaderSession implements LeaderSession {
           content: formatGroupChatMemoryDelta(
             input.groupChatContext,
             update.messages,
+            input.sessionContext.timezone,
           ),
           display: false,
           details: {

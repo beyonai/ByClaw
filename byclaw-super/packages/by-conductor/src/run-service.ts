@@ -470,10 +470,13 @@ export class RunService {
     }
     const active = this.#active.get(runId);
     active?.controller.abort(new Error(reason));
-    await Promise.allSettled([
+    const [, delegationCancellation] = await Promise.allSettled([
       active?.leader.abort() ?? Promise.resolve(),
       this.delegationService.cancelRun(runId, reason),
     ]);
+    if (delegationCancellation.status === "rejected") {
+      throw delegationCancellation.reason;
+    }
     return this.#finishCancelled(cancelling, reason);
   }
 
@@ -982,7 +985,7 @@ ${JSON.stringify(response)}`;
       });
 
       if (runController.signal.aborted) {
-        await this.#finishCancelled(current, "run cancelled");
+        await this.#finishLocallyCancelledRun(current, "run cancelled");
         return;
       }
       if (!result.text.trim()) {
@@ -1023,7 +1026,7 @@ ${JSON.stringify(response)}`;
       this.events.close(finished.id);
     } catch (error) {
       if (controller?.signal.aborted) {
-        await this.#finishCancelled(current, "run cancelled");
+        await this.#finishLocallyCancelledRun(current, "run cancelled");
       } else {
         await this.#finishFailed(current, error instanceof Error ? error.message : String(error));
       }
@@ -1046,6 +1049,17 @@ ${JSON.stringify(response)}`;
       }
       this.#persistentWaiting.delete(run.id);
     }
+  }
+
+  /**
+   * 用户取消时由 cancelRun 在外部执行确认停止后收敛终态；其他本地 Abort 仍直接结束 Run。
+   */
+  async #finishLocallyCancelledRun(run: Run, reason: string): Promise<void> {
+    const latest = await this.runs.get(run.id);
+    if (latest?.status === "CANCELLING") {
+      return;
+    }
+    await this.#finishCancelled(latest ?? run, reason);
   }
 
   /** 保存 Run 中间状态并发出统一状态事件。 */

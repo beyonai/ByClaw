@@ -190,6 +190,9 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
           thinkingLevel,
           ...(attachments.length > 0 ? { attachments } : {}),
           ...(sourceAgentId ? { sourceAgentId } : {}),
+          ...(command.header.sessionId
+            ? { externalSessionId: command.header.sessionId }
+            : {}),
           ...(groupChatRef ? { groupChatRef } : {}),
           ...auth,
         })
@@ -199,6 +202,9 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
           ...(sessionContext ? { context: sessionContext } : {}),
           ...(attachments.length > 0 ? { attachments } : {}),
           ...(sourceAgentId ? { sourceAgentId } : {}),
+          ...(command.header.sessionId
+            ? { externalSessionId: command.header.sessionId }
+            : {}),
           ...(groupChatRef ? { groupChatRef } : {}),
           ...auth,
         });

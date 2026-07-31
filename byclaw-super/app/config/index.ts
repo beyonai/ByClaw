@@ -14,6 +14,10 @@ export interface AppConfig {
   corsOrigin: string | boolean;
   logLevel: string;
   delegationTimeoutMs: number;
+  openClaw: {
+    firstEventTimeoutMs: number;
+    cancelConfirmationTimeoutMs: number;
+  };
   redis: RedisConnectionConfig;
   auth: BeyondTokenVerifierOptions;
   byClawBe: Omit<ByClawBeAgentCatalogOptions, "fetchImpl">;
@@ -118,6 +122,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     corsOrigin: corsOrigin === "*" ? true : corsOrigin,
     logLevel: env.LOG_LEVEL ?? defaults.http.logLevel,
     delegationTimeoutMs,
+    openClaw: {
+      firstEventTimeoutMs: integer(
+        env.OPENCLAW_FIRST_EVENT_TIMEOUT_MS ??
+          String(defaults.openClaw.firstEventTimeoutMs),
+        "OPENCLAW_FIRST_EVENT_TIMEOUT_MS",
+        1,
+        3_600_000,
+      ),
+      cancelConfirmationTimeoutMs: integer(
+        env.OPENCLAW_CANCEL_CONFIRM_TIMEOUT_MS ??
+          String(defaults.openClaw.cancelConfirmationTimeoutMs),
+        "OPENCLAW_CANCEL_CONFIRM_TIMEOUT_MS",
+        1,
+        300_000,
+      ),
+    },
     redis,
     auth: {
       publicKey: env.LOGIN_JWT_PUBLIC_KEY ?? DEFAULT_BYCLAW_LOGIN_JWT_PUBLIC_KEY,

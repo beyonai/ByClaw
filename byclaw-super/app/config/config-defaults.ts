@@ -18,7 +18,11 @@ export const APP_CONFIG_DEFAULTS = {
     statementTimeoutMs: 30_000,
     migrateOnStart: false,
   },
-  delegationTimeoutMs: 1_800_000,
+  delegationTimeoutMs: 900_000,
+  openClaw: {
+    firstEventTimeoutMs: 300_000,
+    cancelConfirmationTimeoutMs: 30_000,
+  },
   worker: {
     enabled: true,
     agentType: "BY_SUPER",

@@ -74,7 +74,7 @@ export class DelegationService {
     private readonly connectors: ConnectorRegistry,
     private readonly delegations: DelegationRepository,
     private readonly events: RunEventStore,
-    private readonly timeoutMs = 1_800_000,
+    private readonly timeoutMs = 900_000,
     private readonly now: () => number = Date.now,
     private readonly createId: () => string = randomUUID,
   ) {}
@@ -182,7 +182,12 @@ export class DelegationService {
         timedOut = true;
         controller.abort(new Error(`Delegation timed out after ${this.timeoutMs}ms`));
         if (execution) {
-          void this.#cancelExecution(input.runId, delegationId, execution, "delegation timeout");
+          void this.#cancelExecution(
+            input.runId,
+            delegationId,
+            execution,
+            "delegation timeout",
+          ).catch(() => undefined);
         }
       }, this.timeoutMs);
     };
@@ -206,6 +211,7 @@ export class DelegationService {
             : {}),
         });
       } else {
+        const externalSessionId = optionalMetadataString(input.metadata, "externalSessionId");
         const request: ConnectorRequest = {
           userCode: input.session.owner.userCode,
           ...(input.session.owner.userName ? { userName: input.session.owner.userName } : {}),
@@ -216,12 +222,20 @@ export class DelegationService {
           task: input.task,
           attachments: [...(input.attachments ?? [])],
           ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
+          ...(externalSessionId ? { externalSessionId } : {}),
           metadata: input.metadata,
         };
         execution = await connector.start(request, { signal: controller.signal });
       }
+      // Connector 一旦返回便立即纳入 Run 级取消，避免 externalRef 落库期间出现取消盲区。
+      this.#track(input.runId, delegationId, execution);
       if (controller.signal.aborted) {
-        await execution.cancel(timedOut ? "delegation timeout" : "run cancelled");
+        await this.#cancelExecution(
+          input.runId,
+          delegationId,
+          execution,
+          timedOut ? "delegation timeout" : "run cancelled",
+        );
         return await this.#finishAborted(delegation, timedOut);
       }
 
@@ -236,8 +250,6 @@ export class DelegationService {
         };
         await this.#saveDelegation(delegation);
       }
-      this.#track(input.runId, delegationId, execution);
-
       let output = delegation.partialOutput ?? "";
       const artifacts: ArtifactRef[] = [];
       let pendingInteractionId: string | undefined;
@@ -448,13 +460,18 @@ export class DelegationService {
           await this.#finish(delegation, "COMPLETED", result);
           return result;
         }
+        const eventTimedOut = event.error.timedOut === true;
         const result: AgentResult = {
-          status: "failed",
+          status: eventTimedOut ? "timed_out" : "failed",
           output,
           artifacts,
           error: event.error.message,
         };
-        await this.#finish(delegation, "FAILED", result);
+        await this.#finish(
+          delegation,
+          eventTimedOut ? "TIMED_OUT" : "FAILED",
+          result,
+        );
         return result;
       }
 
@@ -624,14 +641,58 @@ export class DelegationService {
     return updated;
   }
 
-  /** 取消指定 Run 当前所有活动委派；单个取消失败不会阻止其他委派被取消。 */
+  /** 取消指定 Run 当前所有活动委派；全部尝试后统一报告未能停止的外部执行。 */
   async cancelRun(runId: string, reason = "run cancelled"): Promise<void> {
-    const active = [...(this.#active.get(runId)?.entries() ?? [])];
-    await Promise.allSettled(
-      active.map(([delegationId, item]) =>
-        this.#cancelExecution(runId, delegationId, item.execution, reason),
-      ),
+    const activeById = this.#active.get(runId) ?? new Map<string, ActiveExecution>();
+    const active = [...activeById.entries()];
+    const persisted = await this.delegations.listByRun(runId);
+    const recoverable = persisted.filter(
+      (delegation) =>
+        !TERMINAL_DELEGATION_STATUSES.has(delegation.status) &&
+        delegation.externalRef &&
+        !activeById.has(delegation.id),
     );
+    const results = await Promise.allSettled(
+      [
+        ...active.map(([delegationId, item]) =>
+          this.#cancelExecution(runId, delegationId, item.execution, reason),
+        ),
+        ...recoverable.map(async (delegation) => {
+          const connector = this.connectors.require(delegation.connectorId);
+          if (!connector.resume || !delegation.externalRef) {
+            throw new Error(
+              `Connector cannot resume persisted cancellation: ${delegation.connectorId}`,
+            );
+          }
+          const execution = await connector.resume(delegation.externalRef, {
+            signal: new AbortController().signal,
+            ...(delegation.connectorCursor
+              ? { cursor: delegation.connectorCursor }
+              : {}),
+          });
+          this.#track(runId, delegation.id, execution);
+          try {
+            await this.#cancelExecution(
+              runId,
+              delegation.id,
+              execution,
+              reason,
+            );
+          } finally {
+            this.#untrack(runId, delegation.id);
+          }
+        }),
+      ],
+    );
+    const failures = results.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        `Failed to cancel ${failures.length} active delegation(s) for Run ${runId}`,
+      );
+    }
   }
 
   /** 记录活动 Connector 执行，供 Run 级取消统一查找。 */
@@ -667,7 +728,14 @@ export class DelegationService {
     if (item) {
       item.cancelPromise = promise;
     }
-    await promise;
+    try {
+      await promise;
+    } catch (error) {
+      if (item?.cancelPromise === promise) {
+        delete item.cancelPromise;
+      }
+      throw error;
+    }
   }
 
   /** 将 AbortSignal 的中止原因转换为取消或超时结果，并统一完成委派。 */
@@ -774,4 +842,13 @@ function interactionRequestFromEvent(value: JsonValue | undefined): UserInteract
     throw new Error("Persisted interaction request is invalid");
   }
   return request as unknown as UserInteractionRequest;
+}
+
+/** 从 Run 级 ephemeral metadata 读出非空字符串值（externalSessionId 随 Beyond-Token 同路径透传）。 */
+function optionalMetadataString(
+  metadata: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = metadata[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
