@@ -62,7 +62,10 @@ export type TestAccount = {
   role: string; // 角色说明,如 管理员 / 普通用户 / 审批人
   envPrefix: string; // 环境变量前缀,如 E2E_ADMIN
   username: string;
-  credentialRef: string; // 密码凭据 key,指向 ~/.openclaw/credentials/,不存明文
+  // 登录密码明文,提交后端 SM4 加密存密文;编辑时后端不回显,回填为空,留空=保持原值。
+  credentialRef: string;
+  // 编辑既有账号时后端只回是否已设密码(密文不回显),用于密码框占位提示。
+  hasCredential?: boolean;
 };
 
 // 手动测试用例:无法自动化的场景由人工按步骤执行、逐条记录结果。
@@ -112,7 +115,8 @@ export type IntegrationRunSuiteResult = {
 export type IntegrationRunResult = {
   runId: string;
   version: string;
-  status: 'passed' | 'failed' | 'error' | 'timeout';
+  // running 为执行中(轮询态);其余为终态。
+  status: 'running' | 'passed' | 'failed' | 'error' | 'timeout';
   round: number;
   branch: string;
   commit: string;
@@ -126,6 +130,21 @@ export type IntegrationRunResult = {
   reason: string;
   resultDir: string;
   suites: IntegrationRunSuiteResult[];
+  // 执行步骤明细(后端契约外补充):stages + 套件命令逐步进度,轮询时展示。
+  steps?: IntegrationRunStep[];
+};
+
+// 一次执行内的单步(环境 stage 或套件命令),对齐后端 runStepToVo。
+export type IntegrationRunStep = {
+  seq: number;
+  stepType: 'stage' | 'suite';
+  stepName: string;
+  exitCode?: number;
+  status: 'running' | 'passed' | 'failed' | 'error' | 'timeout' | 'skipped';
+  durationSec: number;
+  logText?: string;
+  startedAt?: string;
+  finishedAt?: string;
 };
 
 // V2:一个需求下的一个子任务。集成挂在需求级,一个需求常拆成多任务、分布在不同仓库,

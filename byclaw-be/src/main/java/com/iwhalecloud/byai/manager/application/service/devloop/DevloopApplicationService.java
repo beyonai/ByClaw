@@ -11,6 +11,9 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.*;
@@ -19,6 +22,8 @@ import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDeleteDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementUpdateDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.IntegrationEnvDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.IntegrationSuiteDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
@@ -129,6 +134,18 @@ public class DevloopApplicationService {
 
     @Autowired
     private ScanSourceService scanSourceService;
+
+    @Autowired
+    private IntegrationEnvService integrationEnvService;
+
+    @Autowired
+    private IntegrationSuiteService integrationSuiteService;
+
+    @Autowired
+    private IntegrationRunService integrationRunService;
+
+    @Autowired
+    private DangerousScriptGuard dangerousScriptGuard;
 
     @Autowired
     private ScanLogService scanLogService;
@@ -274,6 +291,366 @@ public class DevloopApplicationService {
         map.put("createBy", s.getCreateBy());
         map.put("createByName", resolveUserName(parseUserId(s.getCreateBy())));
         return map;
+    }
+
+    // ========== 集成测试环境 ==========
+
+    /** 创建集成测试环境 */
+    public ResponseUtil<Map<String, Object>> createIntegrationEnv(IntegrationEnvDTO dto) {
+        IntegrationEnv env = new IntegrationEnv();
+        applyIntegrationEnvDto(env, dto, null);
+        env.setCreateBy(CurrentUserHolder.getCurrentUserId());
+        IntegrationEnv created = integrationEnvService.create(env);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("envId", created.getEnvId());
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 更新集成测试环境 */
+    public ResponseUtil<Void> updateIntegrationEnv(IntegrationEnvDTO dto) {
+        IntegrationEnv env = new IntegrationEnv();
+        env.setEnvId(dto.getEnvId());
+        // 更新前载入原值:密码留空需继承旧密文,避免整列 JSON 覆盖把已存密文清掉。
+        IntegrationEnv existing = integrationEnvService.findById(dto.getEnvId());
+        applyIntegrationEnvDto(env, dto, existing);
+        env.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        integrationEnvService.update(env);
+        return ResponseUtil.successResponse(null);
+    }
+
+    /** 删除集成测试环境 */
+    public ResponseUtil<Void> deleteIntegrationEnv(Long envId) {
+        integrationEnvService.delete(envId);
+        return ResponseUtil.successResponse(null);
+    }
+
+    /** 查询项目下的集成测试环境列表 */
+    public ResponseUtil<List<Map<String, Object>>> listIntegrationEnvs(Long projectId) {
+        List<Map<String, Object>> list = integrationEnvService.listByProjectId(projectId).stream()
+            .map(this::integrationEnvToVo).collect(java.util.stream.Collectors.toList());
+        return ResponseUtil.successResponse(list);
+    }
+
+    /** DTO → 实体字段拷贝(projectId 仅创建时来自入参,更新时不改归属项目)。 */
+    private void applyIntegrationEnvDto(IntegrationEnv env, IntegrationEnvDTO dto, IntegrationEnv existing) {
+        // 保存即过高危闸门:环境准备 stages 会在测试机上执行,含删库/格式化等命令直接拒绝入库。
+        validateStagesSafety(dto.getStages());
+        env.setProjectId(dto.getProjectId());
+        env.setEnvName(dto.getEnvName());
+        env.setAddress(dto.getAddress());
+        env.setOrchestrator(dto.getOrchestrator());
+        env.setConnProtocol(dto.getConnProtocol());
+        env.setConnHost(dto.getConnHost());
+        env.setConnPort(dto.getConnPort());
+        env.setConnUser(dto.getConnUser());
+        env.setConnAuth(dto.getConnAuth());
+        // 连接凭据存 SM4 密文,不再是 po_user_private_param 的 key。前端传明文密码/私钥;
+        // 留空表示"保持原值"——不 set,靠 updateById 只更新非 null 列跳过,避免误清空。
+        if (StringUtils.isNotBlank(dto.getConnCredentialRef())) {
+            env.setConnCredentialRef(Sm4Util.encrypt(dto.getConnCredentialRef()));
+        }
+        env.setConnWorkdir(dto.getConnWorkdir());
+        env.setStages(dto.getStages());
+        // 测试账号密码同样存密文;整列 JSON 覆盖写,故留空密码需按账号 id 从原值继承旧密文。
+        env.setTestAccounts(encryptTestAccounts(dto.getTestAccounts(),
+            existing == null ? null : existing.getTestAccounts()));
+    }
+
+    // 逐个 stage 过高危闸门;命中即抛,由全局异常处理包成 ResponseUtil.fail 回前端。
+    private void validateStagesSafety(String stagesJson) {
+        if (StringUtils.isBlank(stagesJson)) {
+            return;
+        }
+        JSONArray stages = JSON.parseArray(stagesJson);
+        if (stages == null) {
+            return;
+        }
+        for (int i = 0; i < stages.size(); i++) {
+            JSONObject stage = stages.getJSONObject(i);
+            if (stage == null) {
+                continue;
+            }
+            String label = StringUtils.defaultIfBlank(stage.getString("name"), "环境阶段-" + (i + 1));
+            String hit = dangerousScriptGuard.detect(label, stage.getString("script"));
+            if (hit != null) {
+                throw new IllegalArgumentException(hit);
+            }
+        }
+    }
+
+    // 遍历测试账号,把明文 credentialRef 加密为 SM4 密文;账号密码留空则沿用同 id 旧密文(编辑仅改用户名等场景)。
+    private String encryptTestAccounts(String incomingJson, String existingJson) {
+        if (StringUtils.isBlank(incomingJson)) {
+            return incomingJson;
+        }
+        JSONArray accounts = JSON.parseArray(incomingJson);
+        if (accounts == null) {
+            return incomingJson;
+        }
+        Map<String, String> oldCipherById = new HashMap<>();
+        JSONArray existingAccounts = StringUtils.isBlank(existingJson) ? null : JSON.parseArray(existingJson);
+        if (existingAccounts != null) {
+            for (int i = 0; i < existingAccounts.size(); i++) {
+                JSONObject acc = existingAccounts.getJSONObject(i);
+                if (acc != null && StringUtils.isNotBlank(acc.getString("id"))) {
+                    oldCipherById.put(acc.getString("id"), acc.getString("credentialRef"));
+                }
+            }
+        }
+        for (int i = 0; i < accounts.size(); i++) {
+            JSONObject acc = accounts.getJSONObject(i);
+            if (acc == null) {
+                continue;
+            }
+            String pwd = acc.getString("credentialRef");
+            if (StringUtils.isNotBlank(pwd)) {
+                acc.put("credentialRef", Sm4Util.encrypt(pwd));
+            } else {
+                // 留空:沿用旧密文;新账号无旧值则置空,执行时按缺失处理。
+                acc.put("credentialRef", oldCipherById.getOrDefault(acc.getString("id"), ""));
+            }
+        }
+        return accounts.toJSONString();
+    }
+
+    // 回显时把每个账号的密文 credentialRef 抹成空串,补 hasCredential 布尔供前端展示"已设密码";密文绝不出库到浏览器。
+    private String maskTestAccounts(String testAccountsJson) {
+        if (StringUtils.isBlank(testAccountsJson)) {
+            return testAccountsJson;
+        }
+        JSONArray accounts = JSON.parseArray(testAccountsJson);
+        if (accounts == null) {
+            return testAccountsJson;
+        }
+        for (int i = 0; i < accounts.size(); i++) {
+            JSONObject acc = accounts.getJSONObject(i);
+            if (acc == null) {
+                continue;
+            }
+            acc.put("hasCredential", StringUtils.isNotBlank(acc.getString("credentialRef")));
+            acc.put("credentialRef", "");
+        }
+        return accounts.toJSONString();
+    }
+
+    private Map<String, Object> integrationEnvToVo(IntegrationEnv e) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("envId", e.getEnvId());
+        map.put("projectId", e.getProjectId());
+        map.put("envName", e.getEnvName());
+        map.put("address", e.getAddress());
+        map.put("orchestrator", e.getOrchestrator());
+        map.put("connProtocol", e.getConnProtocol());
+        map.put("connHost", e.getConnHost());
+        map.put("connPort", e.getConnPort());
+        map.put("connUser", e.getConnUser());
+        map.put("connAuth", e.getConnAuth());
+        // 安全:密文绝不回显,只告知前端是否已配置;编辑时密码框留空即保持原值。
+        map.put("hasConnCredential", StringUtils.isNotBlank(e.getConnCredentialRef()));
+        map.put("connWorkdir", e.getConnWorkdir());
+        map.put("stages", e.getStages());
+        // 测试账号回传时抹掉密文,仅保留是否已设密码标记(hasCredential),不泄露任何凭据值。
+        map.put("testAccounts", maskTestAccounts(e.getTestAccounts()));
+        map.put("createBy", e.getCreateBy());
+        map.put("createByName", resolveUserName(e.getCreateBy()));
+        map.put("createTime", e.getCreateTime());
+        return map;
+    }
+
+    // ========== 端到端测试用例集 ==========
+
+    /** 创建测试用例集 */
+    public ResponseUtil<Map<String, Object>> createIntegrationSuite(IntegrationSuiteDTO dto) {
+        IntegrationSuite suite = new IntegrationSuite();
+        applyIntegrationSuiteDto(suite, dto);
+        suite.setCreateBy(CurrentUserHolder.getCurrentUserId());
+        IntegrationSuite created = integrationSuiteService.create(suite);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("suiteId", created.getSuiteId());
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 更新测试用例集 */
+    public ResponseUtil<Void> updateIntegrationSuite(IntegrationSuiteDTO dto) {
+        IntegrationSuite suite = new IntegrationSuite();
+        suite.setSuiteId(dto.getSuiteId());
+        applyIntegrationSuiteDto(suite, dto);
+        suite.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        integrationSuiteService.update(suite);
+        return ResponseUtil.successResponse(null);
+    }
+
+    /** 删除测试用例集 */
+    public ResponseUtil<Void> deleteIntegrationSuite(Long suiteId) {
+        integrationSuiteService.delete(suiteId);
+        return ResponseUtil.successResponse(null);
+    }
+
+    /** 启用/停用测试用例集 */
+    public ResponseUtil<Void> toggleIntegrationSuite(Long suiteId, String enabled) {
+        integrationSuiteService.toggle(suiteId, enabled);
+        return ResponseUtil.successResponse(null);
+    }
+
+    /** 查询项目下的测试用例集列表 */
+    public ResponseUtil<List<Map<String, Object>>> listIntegrationSuites(Long projectId) {
+        List<Map<String, Object>> list = integrationSuiteService.listByProjectId(projectId).stream()
+            .map(this::integrationSuiteToVo).collect(java.util.stream.Collectors.toList());
+        return ResponseUtil.successResponse(list);
+    }
+
+    /** DTO → 实体字段拷贝(projectId 仅创建时来自入参,更新时不改归属项目)。 */
+    private void applyIntegrationSuiteDto(IntegrationSuite suite, IntegrationSuiteDTO dto) {
+        // 保存即过高危闸门:套件 runCommand 会在测试机上执行,含破坏性命令直接拒绝入库。
+        String hit = dangerousScriptGuard.detect("套件命令", dto.getRunCommand());
+        if (hit != null) {
+            throw new IllegalArgumentException(hit);
+        }
+        suite.setProjectId(dto.getProjectId());
+        suite.setSuiteName(dto.getSuiteName());
+        suite.setRunner(dto.getRunner());
+        suite.setSourceType(dto.getSourceType());
+        suite.setRepoId(dto.getRepoId());
+        suite.setSource(dto.getSource());
+        suite.setBranch(dto.getBranch());
+        suite.setRunCommand(dto.getRunCommand());
+        suite.setWorkdir(dto.getWorkdir());
+        suite.setReportPath(dto.getReportPath());
+        suite.setCaseCount(dto.getCaseCount());
+        suite.setEnabled(dto.getEnabled());
+        suite.setManualFile(dto.getManualFile());
+    }
+
+    private Map<String, Object> integrationSuiteToVo(IntegrationSuite s) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("suiteId", s.getSuiteId());
+        map.put("projectId", s.getProjectId());
+        map.put("suiteName", s.getSuiteName());
+        map.put("runner", s.getRunner());
+        map.put("sourceType", s.getSourceType());
+        map.put("repoId", s.getRepoId());
+        map.put("source", s.getSource());
+        map.put("branch", s.getBranch());
+        map.put("runCommand", s.getRunCommand());
+        map.put("workdir", s.getWorkdir());
+        map.put("reportPath", s.getReportPath());
+        map.put("caseCount", s.getCaseCount());
+        map.put("enabled", s.getEnabled());
+        map.put("manualFile", s.getManualFile());
+        map.put("createBy", s.getCreateBy());
+        map.put("createByName", resolveUserName(s.getCreateBy()));
+        map.put("createTime", s.getCreateTime());
+        return map;
+    }
+
+    // ========== 集成测试执行 ==========
+
+    /** 触发一次「执行测试」:秒回 runId,后台异步跑 stages + 套件命令并轮询。 */
+    public ResponseUtil<Map<String, Object>> startIntegrationRun(Long suiteId, Long envId) {
+        IntegrationRun run = integrationRunService.startRun(suiteId, envId, CurrentUserHolder.getCurrentUserId());
+        Map<String, Object> result = new HashMap<>();
+        result.put("runId", run.getRunId());
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 查询一次执行的完整结果(对齐前端 IntegrationRunResult),供轮询。 */
+    public ResponseUtil<Map<String, Object>> getIntegrationRun(Long runId) {
+        IntegrationRun run = integrationRunService.getRun(runId);
+        if (run == null) {
+            return ResponseUtil.fail("执行记录不存在: " + runId);
+        }
+        List<IntegrationRunStep> steps = integrationRunService.listSteps(runId);
+        return ResponseUtil.successResponse(runToResultVo(run, steps));
+    }
+
+    /** 查询某套件的历史执行列表。 */
+    public ResponseUtil<List<Map<String, Object>>> listIntegrationRuns(Long suiteId) {
+        List<Map<String, Object>> list = integrationRunService.listBySuiteId(suiteId).stream()
+            .map(this::runToHistoryVo).collect(java.util.stream.Collectors.toList());
+        return ResponseUtil.successResponse(list);
+    }
+
+    /** run + steps + 解析出的 suites 组装成前端 IntegrationRunResult 契约(camelCase)。 */
+    private Map<String, Object> runToResultVo(IntegrationRun run, List<IntegrationRunStep> steps) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("runId", String.valueOf(run.getRunId()));
+        map.put("version", "");
+        map.put("status", run.getStatus());
+        map.put("round", 1);
+        map.put("branch", StringUtils.defaultString(run.getBranch()));
+        map.put("commit", StringUtils.defaultString(run.getCommitRef()));
+        IntegrationEnv env = integrationEnvService.findById(run.getEnvId());
+        map.put("envName", env != null ? env.getEnvName() : "");
+        map.put("startedAt", formatDateTime(run.getStartedAt()));
+        map.put("finishedAt", formatDateTime(run.getFinishedAt()));
+        map.put("durationSec", run.getDurationSec());
+
+        Map<String, Object> totals = new HashMap<>();
+        totals.put("total", nvl(run.getTotal()));
+        totals.put("passed", nvl(run.getPassed()));
+        totals.put("failed", nvl(run.getFailed()));
+        totals.put("skipped", nvl(run.getSkipped()));
+        map.put("totals", totals);
+
+        map.put("kickbackTo", StringUtils.defaultString(run.getKickbackTo()));
+        map.put("reason", StringUtils.defaultString(run.getReason()));
+        map.put("resultDir", StringUtils.defaultString(run.getResultDir()));
+        // suites 由 executor 解析 JUnit 后落 suites_json;无报告时为空数组。
+        map.put("suites", StringUtils.isNotBlank(run.getSuitesJson())
+            ? JSON.parseArray(run.getSuitesJson()) : new java.util.ArrayList<>());
+        // steps 明细:前端渲染逐步进度(契约外的补充字段,便于展示执行过程)。
+        map.put("steps", steps.stream().map(this::runStepToVo).collect(java.util.stream.Collectors.toList()));
+        return map;
+    }
+
+    private Map<String, Object> runStepToVo(IntegrationRunStep s) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("seq", s.getSeq());
+        map.put("stepType", s.getStepType());
+        map.put("stepName", s.getStepName());
+        map.put("exitCode", s.getExitCode());
+        map.put("status", s.getStatus());
+        map.put("durationSec", s.getDurationSec());
+        map.put("logText", s.getLogText());
+        map.put("startedAt", s.getStartedAt());
+        map.put("finishedAt", s.getFinishedAt());
+        return map;
+    }
+
+    /** run 组装成历史列表项(对齐前端 integrationHistoryList)。 */
+    private Map<String, Object> runToHistoryVo(IntegrationRun run) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("runId", String.valueOf(run.getRunId()));
+        map.put("suiteId", run.getSuiteId());
+        map.put("status", run.getStatus());
+        map.put("branch", StringUtils.defaultString(run.getBranch()));
+        map.put("round", 1);
+        int total = nvl(run.getTotal());
+        int passed = nvl(run.getPassed());
+        map.put("passRate", total > 0 ? Math.round(passed * 100.0 / total) : 0);
+        map.put("total", total);
+        map.put("passed", passed);
+        map.put("failed", nvl(run.getFailed()));
+        map.put("kickbackTo", StringUtils.defaultString(run.getKickbackTo()));
+        map.put("reason", StringUtils.defaultString(run.getReason()));
+        map.put("durationSec", run.getDurationSec());
+        map.put("time", formatDateTime(run.getCreateTime()));
+        map.put("createByName", resolveUserName(run.getCreateBy()));
+        return map;
+    }
+
+    private int nvl(Integer v) {
+        return v == null ? 0 : v;
+    }
+
+    /** run 时间统一格式化为 yyyy-MM-dd HH:mm:ss 字符串,前端直接展示,避免 Date 序列化歧义。 */
+    private String formatDateTime(Date date) {
+        if (date == null) {
+            return "";
+        }
+        return new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(date);
     }
 
     /** 字符串 userId 转 Long,非法返回 null(供 resolveUserName 等按 Long 取用户名)。 */

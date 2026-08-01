@@ -4074,7 +4074,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     }
     if (activeTab === 'resources') return renderResources();
     if (activeTab === 'integration') {
-      if (showRequirementsTab) return <Integration active />;
+      if (showRequirementsTab) return <Integration active projectId={projectId} repos={repos} />;
       return renderTasks();
     }
     if (activeTab === 'members') {
