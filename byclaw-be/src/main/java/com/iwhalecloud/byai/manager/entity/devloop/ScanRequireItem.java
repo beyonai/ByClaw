@@ -10,8 +10,8 @@ import java.util.Date;
 
 @Getter
 @Setter
-@TableName("byai_scan_log_item")
-public class ScanLogItem {
+@TableName("byai_scan_require_item")
+public class ScanRequireItem {
 
     @TableId(value = "item_id", type = IdType.INPUT)
     private Long itemId;

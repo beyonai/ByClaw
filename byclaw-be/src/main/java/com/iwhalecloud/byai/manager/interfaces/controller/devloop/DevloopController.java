@@ -116,9 +116,9 @@ public class DevloopController {
      * @return 扫描发现的每条需求/Issue信息
      */
     @PostMapping("/log/items")
-    public ResponseUtil<List<Map<String, Object>>> listScanLogItems(@RequestBody Map<String, Object> params) {
+    public ResponseUtil<List<Map<String, Object>>> listScanRequireItems(@RequestBody Map<String, Object> params) {
         Long logId = Long.valueOf(params.get("logId").toString());
-        return applicationService.listScanLogItems(logId);
+        return applicationService.listScanRequireItems(logId);
     }
 
     /**
@@ -426,5 +426,29 @@ public class DevloopController {
             return ResponseUtil.failRes(I18nUtil.get("devloop.dws.token.required"));
         }
         return applicationService.saveDwsToken(token);
+    }
+
+    /**
+     * 创建运营需求
+     *
+     * @param params 入参
+     * @return ResponseUtil
+     */
+    @PostMapping("/requirement/createOperationRequirement")
+    public ResponseUtil<Long> createOperationRequirement(@RequestBody Map<String, Object> params) {
+        Long id = applicationService.createOperationRequirement(params);
+        return ResponseUtil.successResponse(id);
+    }
+
+    /**
+     * 修改运营需求
+     *
+     * @param params
+     * @return ResponseUtil
+     */
+    @PostMapping("/requirement/updateOperationRequirement")
+    public ResponseUtil<Map<String, Object>> updateOperationRequirement(@RequestBody Map<String, Object> params) {
+        applicationService.updateOperationRequirement(params);
+        return ResponseUtil.successResponse();
     }
 }

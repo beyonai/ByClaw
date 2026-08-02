@@ -178,3 +178,112 @@ COMMENT ON COLUMN byai.byai_integration_run_step.started_at IS '开始时间';
 COMMENT ON COLUMN byai.byai_integration_run_step.finished_at IS '结束时间';
 
 CREATE INDEX IF NOT EXISTS idx_integration_run_step_run ON byai.byai_integration_run_step (run_id, seq);
+
+
+CREATE TABLE byai_project_account
+(
+    account_id    BIGINT      NOT NULL,
+    project_id    BIGINT      NOT NULL,
+    platform_code VARCHAR(20) NOT NULL,
+    account_code  VARCHAR(100),
+    account_name  VARCHAR(100),
+    status        VARCHAR(20) NOT NULL DEFAULT 'connected',
+    login_status  VARCHAR(20),
+    config        TEXT,
+    metrics       TEXT,
+    create_by     BIGINT,
+    create_time   TIMESTAMP            DEFAULT CURRENT_TIMESTAMP,
+    update_by     BIGINT,
+    update_time   TIMESTAMP,
+    status_cd     CHAR(3)              DEFAULT '00A',
+
+    CONSTRAINT pk_byai_project_account PRIMARY KEY (account_id)
+);
+
+COMMENT ON TABLE byai_project_account IS '运营账号表';
+COMMENT ON COLUMN byai_project_account.account_id IS '账号ID（PK）';
+COMMENT ON COLUMN byai_project_account.project_id IS '所属项目ID → byai_project.project_id';
+COMMENT ON COLUMN byai_project_account.platform_code IS '平台编码：WeChatAccount-微信公众号 / Xiaohongshu-小红书 / WeChatChannels-视频号 / Internet-互联网 / GitHub-GitHub';
+COMMENT ON COLUMN byai_project_account.account_code IS '账号编码（平台账号唯一标识，如 oa-beyond-ai）';
+COMMENT ON COLUMN byai_project_account.account_name IS '账号名称（如 BeyondAI实验室）';
+COMMENT ON COLUMN byai_project_account.status IS '连接状态：connected-已连接 / disconnected-未连接';
+COMMENT ON COLUMN byai_project_account.login_status IS '登录状态：online-已登录 / offline-未登录';
+COMMENT ON COLUMN byai_project_account.config IS '账号配置，TEXT 存 JSON 字符串（粉丝数、作品数等静态概要）';
+COMMENT ON COLUMN byai_project_account.metrics IS '运营指标，TEXT 存 JSON 字符串：{"followers":"12.8万","works":"286","reads":"34.6万","growth":"+8.4%"}';
+COMMENT ON COLUMN byai_project_account.create_by IS '创建人';
+COMMENT ON COLUMN byai_project_account.create_time IS '创建时间';
+COMMENT ON COLUMN byai_project_account.update_by IS '更新人';
+COMMENT ON COLUMN byai_project_account.update_time IS '更新时间';
+COMMENT ON COLUMN byai_project_account.status_cd IS '状态：00A-有效 / 00X-无效';
+
+
+/**账号-发布作品明细表**/
+CREATE TABLE byai_project_account_work
+(
+    work_id           BIGINT       NOT NULL,
+    account_id        BIGINT       NOT NULL,
+    work_title        VARCHAR(500) NOT NULL,
+    work_type         VARCHAR(20)  NOT NULL,
+    work_url          VARCHAR(1000),
+    cover_url         VARCHAR(1000),
+    publish_time      TIMESTAMP,
+    status            VARCHAR(20) DEFAULT 'normal',
+    read_count        BIGINT      DEFAULT 0,
+    like_count        BIGINT      DEFAULT 0,
+    comment_count     BIGINT      DEFAULT 0,
+    favorite_count    BIGINT      DEFAULT 0,
+    share_count       BIGINT      DEFAULT 0,
+    interaction_count BIGINT      DEFAULT 0,
+    interaction_rate  NUMERIC(5, 2),
+    metrics           TEXT,
+    ext_count_1       BIGINT      DEFAULT 0,
+    ext_count_2       BIGINT      DEFAULT 0,
+    ext_count_3       BIGINT      DEFAULT 0,
+    ext_count_4       BIGINT      DEFAULT 0,
+    ext_count_5       BIGINT      DEFAULT 0,
+    ext_count_6       BIGINT      DEFAULT 0,
+    ext_count_7       BIGINT      DEFAULT 0,
+    ext_count_8       BIGINT      DEFAULT 0,
+    ext_count_9       BIGINT      DEFAULT 0,
+    ext_count_10      BIGINT      DEFAULT 0,
+    create_by         BIGINT,
+    create_time       TIMESTAMP   DEFAULT CURRENT_TIMESTAMP,
+    update_by         BIGINT,
+    update_time       TIMESTAMP,
+    status_cd         CHAR(3)     DEFAULT '00A',
+
+    CONSTRAINT pk_byai_project_account_work PRIMARY KEY (work_id)
+);
+
+COMMENT ON TABLE byai_project_account_work IS '账号-发布作品明细表';
+COMMENT ON COLUMN byai_project_account_work.work_id IS '作品ID（PK）';
+COMMENT ON COLUMN byai_project_account_work.account_id IS '所属账号ID → byai_project_account.account_id';
+COMMENT ON COLUMN byai_project_account_work.work_title IS '作品标题';
+COMMENT ON COLUMN byai_project_account_work.work_type IS '作品类型：article-文章 / post-笔记 / short-video-短视频';
+COMMENT ON COLUMN byai_project_account_work.work_url IS '作品链接';
+COMMENT ON COLUMN byai_project_account_work.cover_url IS '封面图链接';
+COMMENT ON COLUMN byai_project_account_work.publish_time IS '发布时间';
+COMMENT ON COLUMN byai_project_account_work.status IS '状态：normal-正常 / hidden-隐藏 / deleted-已删除';
+COMMENT ON COLUMN byai_project_account_work.read_count IS '阅读量/播放量';
+COMMENT ON COLUMN byai_project_account_work.like_count IS '点赞数';
+COMMENT ON COLUMN byai_project_account_work.comment_count IS '评论数';
+COMMENT ON COLUMN byai_project_account_work.favorite_count IS '收藏数';
+COMMENT ON COLUMN byai_project_account_work.share_count IS '分享/转发数';
+COMMENT ON COLUMN byai_project_account_work.interaction_count IS '互动总数';
+COMMENT ON COLUMN byai_project_account_work.interaction_rate IS '互动率（百分比，0–100.00）';
+COMMENT ON COLUMN byai_project_account_work.metrics IS '扩展指标，TEXT 存 JSON 字符串';
+COMMENT ON COLUMN byai_project_account_work.ext_count_1 IS '扩展统计列1';
+COMMENT ON COLUMN byai_project_account_work.ext_count_2 IS '扩展统计列2';
+COMMENT ON COLUMN byai_project_account_work.ext_count_3 IS '扩展统计列3';
+COMMENT ON COLUMN byai_project_account_work.ext_count_4 IS '扩展统计列4';
+COMMENT ON COLUMN byai_project_account_work.ext_count_5 IS '扩展统计列5';
+COMMENT ON COLUMN byai_project_account_work.ext_count_6 IS '扩展统计列6';
+COMMENT ON COLUMN byai_project_account_work.ext_count_7 IS '扩展统计列7';
+COMMENT ON COLUMN byai_project_account_work.ext_count_8 IS '扩展统计列8';
+COMMENT ON COLUMN byai_project_account_work.ext_count_9 IS '扩展统计列9';
+COMMENT ON COLUMN byai_project_account_work.ext_count_10 IS '扩展统计列10';
+COMMENT ON COLUMN byai_project_account_work.create_by IS '创建人';
+COMMENT ON COLUMN byai_project_account_work.create_time IS '创建时间';
+COMMENT ON COLUMN byai_project_account_work.update_by IS '更新人';
+COMMENT ON COLUMN byai_project_account_work.update_time IS '更新时间';
+COMMENT ON COLUMN byai_project_account_work.status_cd IS '状态：00A-有效 / 00X-无效';

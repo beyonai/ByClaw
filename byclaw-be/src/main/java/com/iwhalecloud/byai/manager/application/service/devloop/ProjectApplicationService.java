@@ -44,7 +44,7 @@ import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectMember;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
-import com.iwhalecloud.byai.manager.entity.devloop.ScanLogItem;
+import com.iwhalecloud.byai.manager.entity.devloop.ScanRequireItem;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanSource;
 import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
@@ -664,7 +664,7 @@ public class ProjectApplicationService {
             if (!MANUAL_SOURCE_TYPE.equals(source.getSourceType()) || source.getSourceId() == null) {
                 continue;
             }
-            for (ScanLogItem item : scanLogService.listCreatedItemsBySource(source.getSourceId())) {
+            for (ScanRequireItem item : scanLogService.listCreatedItemsBySource(source.getSourceId())) {
                 if (isManualRequirementBoundToRepo(item, repoId)) {
                     count++;
                 }
@@ -676,7 +676,7 @@ public class ProjectApplicationService {
     /**
      * 仅识别带手工需求命名空间的 JSON，历史需求未保存 repoId 时返回 false，保持原有删除行为。
      */
-    private boolean isManualRequirementBoundToRepo(ScanLogItem item, Long repoId) {
+    private boolean isManualRequirementBoundToRepo(ScanRequireItem item, Long repoId) {
         if (item == null || StringUtils.isBlank(item.getContent()) || repoId == null) {
             return false;
         }
