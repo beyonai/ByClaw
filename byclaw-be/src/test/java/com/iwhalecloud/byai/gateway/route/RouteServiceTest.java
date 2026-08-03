@@ -326,6 +326,32 @@ class RouteServiceTest {
     }
 
     @Test
+    void route_removesLeadingDigitalEmployeePlaceholderWhenSingleDigitalEmployeeAndAgentIdPresent() throws Exception {
+        ChatProcessContext ctx = buildContext(WorkerAgentType.BYCLAW_EXE.getCode(), 10000998L);
+        ctx.getAssistantChatDto().setChatContent("{{DIG_EMPLOYEE_10000998}}帮我处理这个任务");
+
+        ResourceVo agent = new ResourceVo();
+        agent.setResourceType(AgentMetaEnum.DIG_EMPLOYEE);
+        agent.setResourceId("10000998");
+        agent.setResourceName("liu0518");
+        ctx.getAssistantChatDto().setResourceList(Arrays.asList(agent));
+
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any());
+        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue()).isEqualTo("帮我处理这个任务");
+    }
+
+    @Test
     void route_replacesCompositeSkillPlaceholderBeforeSendingToGateway() throws Exception {
         ChatProcessContext ctx = buildContext();
         ctx.getAssistantChatDto().setChatContent(
