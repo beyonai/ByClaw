@@ -27,6 +27,8 @@ public enum KnowledgeServiceOperation {
     UPDATE_FILE("updateFile", "/api/v1/knowledgeItems/update"),
     DELETE_FILE("deleteFile", "/api/v1/knowledgeItems/delete"),
     READ_FILE("readFile", "/api/v1/readFile"),
+    BUILD_RESULT("buildResult", "/api/v1/buildResult"),
+    BUILD_PREVIEW("buildPreview", "/api/v1/buildPreview"),
     GET_FILE_METADATA("getFileMetadata", "/api/v1/knowledgeItems/metadata/get"),
     MOVE_KNOWLEDGE_ITEMS("moveKnowledgeItems", "/api/v1/knowledgeItems/move"),
     KNOWLEDGE_ITEM_REFERENCES("knowledgeItemReferences", "/api/v1/knowledgeItems/references"),

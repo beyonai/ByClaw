@@ -20,14 +20,12 @@ export function getDatasetDownloadParamsFromQueryFile(
   if (!qf) return null;
   const resourceId = qf.resourceId ?? qf.datasetId;
   const name = qf.fileName !== null && qf.fileName !== undefined && qf.fileName !== '' ? String(qf.fileName) : '';
-  const directoryPathRaw =
-    qf.directoryPath !== null && qf.directoryPath !== undefined && String(qf.directoryPath).trim() !== ''
-      ? String(qf.directoryPath)
-      : name
-        ? name.startsWith('/')
-          ? name
-          : `/${name}`
-        : '';
+  let directoryPathRaw = '';
+  if (qf.directoryPath !== null && qf.directoryPath !== undefined && String(qf.directoryPath).trim() !== '') {
+    directoryPathRaw = String(qf.directoryPath);
+  } else if (name) {
+    directoryPathRaw = name.startsWith('/') ? name : `/${name}`;
+  }
   if (resourceId === null || resourceId === undefined || `${resourceId}` === '' || !directoryPathRaw) {
     return null;
   }
@@ -74,6 +72,22 @@ export const downloadResourceFile = (params: DownloadDatasetFileParams) =>
     },
     {
       responseType: 'blob',
+    }
+  );
+
+// 下载 QA 构建阶段为 PPT/PPTX 生成的 PDF 预览产物
+export const downloadKnowledgeBuildPreview = (params: DownloadDatasetFileParams) =>
+  GET<any>(
+    '/byaiService/datasetController/buildPreview',
+    {
+      resourceId: params.resourceId,
+      filePath: normalizeDatasetDirectoryPath(params.directoryPath),
+    },
+    {
+      responseType: 'blob',
+      responseCfg: {
+        hideErrorTips: true,
+      },
     }
   );
 

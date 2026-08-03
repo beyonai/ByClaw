@@ -169,6 +169,8 @@ const MIME_MAP: Record<string, string> = {
   json: 'application/json',
   html: 'text/html',
   xml: 'text/xml',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   // 代码/配置文件按纯文本取回,交给预览层做语法高亮。
   ...Object.fromEntries(CODE_TEXT_EXTENSIONS.map((ext) => [ext, 'text/plain'])),
 };

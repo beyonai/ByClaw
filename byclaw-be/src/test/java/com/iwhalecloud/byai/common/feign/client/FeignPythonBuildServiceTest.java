@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDownload;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbBuildResult;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -77,6 +78,52 @@ class FeignPythonBuildServiceTest {
         assertThat((JSONObject) payload)
             .containsEntry("resourceId", 11029731L)
             .containsEntry("filePath", "/门户设计/api.md")
+            .doesNotContainKey("knCode");
+    }
+
+    @Test
+    void localBuildResult_usesResourceEndpointAndResourcePayload() {
+        FeignPythonBuildService service = new FeignPythonBuildService();
+        KbBuildResult request = new KbBuildResult();
+        request.setKnCode("155");
+        request.setFilePath("/门户设计/api.pptx");
+        request.setChunkPage(2);
+        request.setChunkPageSize(10);
+        request.setIncludeMarkdown(false);
+
+        String path = ReflectionTestUtils.invokeMethod(service, "resolveLocalRequestPath",
+            KnowledgeServiceOperation.BUILD_RESULT, 11029731L, "/api/v1/buildResult");
+        Object payload = ReflectionTestUtils.invokeMethod(service, "buildLocalPayload",
+            KnowledgeServiceOperation.BUILD_RESULT, 11029731L, request);
+
+        assertThat(path).isEqualTo("/api/v1/buildResultByResourceId");
+        assertThat(payload).isInstanceOf(JSONObject.class);
+        assertThat((JSONObject) payload)
+            .containsEntry("resourceId", 11029731L)
+            .containsEntry("filePath", "/门户设计/api.pptx")
+            .containsEntry("chunkPage", 2)
+            .containsEntry("chunkPageSize", 10)
+            .containsEntry("includeMarkdown", false)
+            .doesNotContainKey("knCode");
+    }
+
+    @Test
+    void localBuildPreview_usesResourceEndpointAndResourcePayload() {
+        FeignPythonBuildService service = new FeignPythonBuildService();
+        KbFileDownload request = new KbFileDownload();
+        request.setKnCode("155");
+        request.setFilePath("/门户设计/api.pptx");
+
+        String path = ReflectionTestUtils.invokeMethod(service, "resolveLocalRequestPath",
+            KnowledgeServiceOperation.BUILD_PREVIEW, 11029731L, "/api/v1/buildPreview");
+        Object payload = ReflectionTestUtils.invokeMethod(service, "buildLocalPayload",
+            KnowledgeServiceOperation.BUILD_PREVIEW, 11029731L, request);
+
+        assertThat(path).isEqualTo("/api/v1/buildPreviewByResourceId");
+        assertThat(payload).isInstanceOf(JSONObject.class);
+        assertThat((JSONObject) payload)
+            .containsEntry("resourceId", 11029731L)
+            .containsEntry("filePath", "/门户设计/api.pptx")
             .doesNotContainKey("knCode");
     }
 

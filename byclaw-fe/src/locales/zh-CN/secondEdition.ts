@@ -333,6 +333,8 @@ export default {
   'fileBrowser.move.failed': '移动失败',
   'fileBrowser.preview.failed': '预览失败',
   'fileBrowser.preview.unavailable': '文件不可在线预览，请下载查看',
+  'fileBrowser.preview.pptMarkdownFallback':
+    '暂未生成 PDF 预览，当前展示知识构建提取出的 Markdown 内容。重新构建后可查看幻灯片版式。',
   'fileBrowser.createFolder.prompt': '请输入文件夹名称',
   'fileBrowser.createFolder.duplicateName': '当前目录下已存在同名文件夹',
   'fileBrowser.createFolder.success': '创建文件夹成功',

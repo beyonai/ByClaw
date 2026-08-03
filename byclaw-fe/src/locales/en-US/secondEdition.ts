@@ -336,6 +336,8 @@ export default {
   'fileBrowser.move.failed': 'Move failed',
   'fileBrowser.preview.failed': 'Preview failed',
   'fileBrowser.preview.unavailable': 'This file cannot be previewed online. Please download it to view.',
+  'fileBrowser.preview.pptMarkdownFallback':
+    'A PDF preview is not available yet. Showing the Markdown extracted during the knowledge build. Rebuild the file to preview the slide layout.',
   'fileBrowser.createFolder.prompt': 'Enter folder name',
   'fileBrowser.createFolder.duplicateName': 'A folder with this name already exists in the current folder',
   'fileBrowser.createFolder.success': 'Folder created successfully',

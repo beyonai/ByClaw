@@ -24,6 +24,7 @@ import com.iwhaleai.byai.framework.util.http.RetryConfig;
 import com.iwhalecloud.byai.common.constants.resource.SystemCode;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.FileBuildStatus;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbBuildResult;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbGlob;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbListDir;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.Data;
@@ -54,6 +55,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbImportResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileUpdateResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileMetadataResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBaseInfo;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBuildResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
@@ -103,6 +105,8 @@ public class FeignPythonBuildService {
         KnowledgeServiceOperation.LIST_DIR, "/api/v1/listDirByResourceId",
         KnowledgeServiceOperation.DELETE_DIR, "/api/v1/directories/deleteByResourceId",
         KnowledgeServiceOperation.READ_FILE, "/api/v1/readFileByResourceId",
+        KnowledgeServiceOperation.BUILD_RESULT, "/api/v1/buildResultByResourceId",
+        KnowledgeServiceOperation.BUILD_PREVIEW, "/api/v1/buildPreviewByResourceId",
         KnowledgeServiceOperation.KNOWLEDGE_BUILD, "/api/v1/fileToMarkdownIndexByResourceId",
         KnowledgeServiceOperation.DOWNLOAD_FILE, "/api/v1/downloadFileByResourceId");
 
@@ -399,6 +403,15 @@ public class FeignPythonBuildService {
     }
 
     /**
+     * 查询知识库文件完整构建结果。
+     */
+    public PythonBuildResponse<KnowledgeBuildResult> buildResult(KbBuildResult request, Long resourceId) {
+        return post(KnowledgeServiceOperation.BUILD_RESULT, request,
+            new TypeReference<PythonBuildResponse<KnowledgeBuildResult>>() {
+            }, resourceId);
+    }
+
+    /**
      * 查询指定知识库文件当前已入库的元数据。
      */
     public PythonBuildResponse<KbFileMetadataResult> getKnowledgeFileMetadata(KbFileMetadataGet request) {
@@ -521,16 +534,27 @@ public class FeignPythonBuildService {
     }
 
     public InputStream fileDownload(KbFileDownload kbFileDownload, Long resourceId) {
+        return downloadKnowledgeFile(kbFileDownload, resourceId, KnowledgeServiceOperation.DOWNLOAD_FILE);
+    }
+
+    /**
+     * 下载知识库构建生成的 PDF 预览流。
+     */
+    public InputStream buildPreview(KbFileDownload request, Long resourceId) {
+        return downloadKnowledgeFile(request, resourceId, KnowledgeServiceOperation.BUILD_PREVIEW);
+    }
+
+    private InputStream downloadKnowledgeFile(KbFileDownload kbFileDownload, Long resourceId,
+        KnowledgeServiceOperation operation) {
         try {
-            String requestPath = resolvePath(kbFileDownload, KnowledgeServiceOperation.DOWNLOAD_FILE);
+            String requestPath = resolvePath(kbFileDownload, operation);
             KnowledgeServiceEndpoint endpoint = resolveRoute(kbFileDownload);
             if (endpoint.isDirectUrl()) {
                 return validateDownloadResponse(directDownload(endpoint.getBaseUrl(), requestPath, kbFileDownload),
                     requestPath);
             }
-            requestPath = resolveLocalRequestPath(KnowledgeServiceOperation.DOWNLOAD_FILE, resourceId, requestPath);
-            Object localPayload =
-                buildLocalPayload(KnowledgeServiceOperation.DOWNLOAD_FILE, resourceId, kbFileDownload);
+            requestPath = resolveLocalRequestPath(operation, resourceId, requestPath);
+            Object localPayload = buildLocalPayload(operation, resourceId, kbFileDownload);
             CompletableFuture<InputStream> completableFuture = discoveryHttpClient.download("POST",
                 endpoint.getServiceName(), requestPath, this.buildHeaders(resourceId), null, localPayload, null);
             // 提取文件流
@@ -541,7 +565,7 @@ public class FeignPythonBuildService {
         }
         catch (Exception e) {
             logger.error(e.getMessage(), e);
-            throw new BaseException("调用 Python 构建服务下载接口失败", e);
+            throw new BaseException("调用 Python 构建服务文件流接口失败", e);
         }
     }
 

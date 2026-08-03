@@ -4,6 +4,8 @@ import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.feign.client.FeignPythonBuildService;
 import com.iwhalecloud.byai.common.feign.request.knowledge.Folder;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileImport;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbBuildResult;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDownload;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataGet;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbGlob;
@@ -21,6 +23,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearc
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBuildResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
@@ -28,6 +31,7 @@ import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationServ
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeBuildResultRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
@@ -37,6 +41,7 @@ import com.iwhalecloud.byai.manager.dto.resource.UploadResult;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.io.ByteArrayInputStream;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,6 +53,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.support.StaticMessageSource;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.mock.web.MockHttpServletResponse;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -162,6 +168,63 @@ class DatasetApplicationServiceTest {
         assertThat(result.getData()).hasSize(1);
         assertThat(result.getData().get(0).getKnCode()).isEqualTo("100");
         assertThat(result.getData().get(0).getFilePath()).isEqualTo("/hr/renewal.md");
+    }
+
+    @Test
+    void buildResult_mapsResourceIdToKnCodeAndBack() {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+
+        KnowledgeBuildResult qaResult = new KnowledgeBuildResult();
+        qaResult.setKnCode("personal-kb");
+        qaResult.setFilePath("/slides/demo.pptx");
+        KnowledgeBuildResult.BuildInfo buildInfo = new KnowledgeBuildResult.BuildInfo();
+        buildInfo.setStatus("complete");
+        qaResult.setBuild(buildInfo);
+        PythonBuildResponse<KnowledgeBuildResult> response = new PythonBuildResponse<>();
+        response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+        response.setResultObject(qaResult);
+        when(feignPythonBuildService.buildResult(any(), eq(100L))).thenReturn(response);
+
+        KnowledgeBuildResultRequest request = new KnowledgeBuildResultRequest();
+        request.setResourceId(100L);
+        request.setFilePath("slides/demo.pptx");
+        request.setChunkPage(2);
+        request.setChunkPageSize(10);
+        request.setIncludeMarkdown(false);
+
+        KnowledgeBuildResult result = service.buildResult(request);
+
+        ArgumentCaptor<KbBuildResult> captor = ArgumentCaptor.forClass(KbBuildResult.class);
+        verify(feignPythonBuildService).buildResult(captor.capture(), eq(100L));
+        assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
+        assertThat(captor.getValue().getFilePath()).isEqualTo("/slides/demo.pptx");
+        assertThat(captor.getValue().getChunkPage()).isEqualTo(2);
+        assertThat(captor.getValue().getChunkPageSize()).isEqualTo(10);
+        assertThat(captor.getValue().getIncludeMarkdown()).isFalse();
+        assertThat(result.getKnCode()).isEqualTo("100");
+        assertThat(result.getBuild().getStatus()).isEqualTo("complete");
+    }
+
+    @Test
+    void buildPreview_streamsGeneratedPdfInline() throws Exception {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+        when(feignPythonBuildService.buildPreview(any(), eq(100L)))
+            .thenReturn(new ByteArrayInputStream("%PDF-1.7\npreview".getBytes()));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        service.buildPreview(100L, "slides/demo.pptx", response);
+
+        ArgumentCaptor<KbFileDownload> captor = ArgumentCaptor.forClass(KbFileDownload.class);
+        verify(feignPythonBuildService).buildPreview(captor.capture(), eq(100L));
+        assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
+        assertThat(captor.getValue().getFilePath()).isEqualTo("/slides/demo.pptx");
+        assertThat(response.getContentType()).isEqualTo("application/pdf");
+        assertThat(response.getHeader("Content-Disposition")).startsWith("inline;filename=demo.pdf");
+        assertThat(response.getContentAsByteArray()).startsWith("%PDF-1.7".getBytes());
     }
 
     @Test

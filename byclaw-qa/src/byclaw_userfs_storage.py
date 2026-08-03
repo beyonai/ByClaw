@@ -276,12 +276,22 @@ class ByClawUserFsKnowledgeStorageProvider:
                 logger.warning("byclaw-userfs download: no available instances for service=%s", service_name)
                 raise StorageOperationError(f"No available instances for service: {service_name}")
             url = f"http://{instance.host}:{instance.port}{path}"
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(url, headers=headers, params=params)
-                if not resp.is_success:
-                    logger.warning("byclaw-userfs download failed: GET %s -> %d, body=%s", path, resp.status_code, resp.text[:500])
-                    raise _translate_response_error(resp.status_code, f"byclaw-userfs.read: HTTP {resp.status_code}")
-                return resp.content
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(url, headers=headers, params=params)
+            except httpx.HTTPError as exc:
+                logger.warning(
+                    "byclaw-userfs download transport failed: GET %s, error_type=%s",
+                    path,
+                    type(exc).__name__,
+                )
+                raise StorageOperationError(
+                    f"byclaw-userfs.read transport failed: {type(exc).__name__}"
+                ) from exc
+            if not resp.is_success:
+                logger.warning("byclaw-userfs download failed: GET %s -> %d, body=%s", path, resp.status_code, resp.text[:500])
+                raise _translate_response_error(resp.status_code, f"byclaw-userfs.read: HTTP {resp.status_code}")
+            return resp.content
         finally:
             await discovery_client.close()
 

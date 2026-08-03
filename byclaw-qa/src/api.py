@@ -13,6 +13,8 @@ New routes:
   POST /api/v1/directories/deleteByResourceId
   POST /api/v1/listDirByResourceId
   POST /api/v1/readFileByResourceId
+  POST /api/v1/buildResultByResourceId
+  POST /api/v1/buildPreviewByResourceId
   POST /api/v1/downloadFileByResourceId
 
 Usage in start.sh:  uvicorn api:app --host ... --port ...
@@ -25,6 +27,7 @@ import io
 import json
 import zipfile
 from typing import Any
+from urllib.parse import quote
 
 import mimetypes
 from pathlib import PurePosixPath
@@ -35,6 +38,8 @@ from pydantic import ValidationError
 
 from by_qa.core import logger
 from by_qa.knowledge_base.api.schemas import (
+    BuildPreviewRequest,
+    BuildResultRequest,
     CreateDirectoryRequest,
     DeleteDirectoryRequest,
     FileToMarkdownIndexRequest,
@@ -53,6 +58,7 @@ from by_qa.knowledge_base.services.zip_batch_import_service import ZipBatchImpor
 from by_qa.knowledge_base.infrastructure.storage import (
     StorageError,
     StorageNotFoundError,
+    StorageOperationError,
 )
 from byclaw_knowledge_storage import get_kg_doc_from_resourcefs
 from byclaw_userfs_storage import (
@@ -120,6 +126,14 @@ async def _resolve_kn_code(resource_id: str) -> str | None:
             "KG_DOC config not found in ResourceFS: resourceId=%s; "
             "falling back to Redis",
             resource_id,
+        )
+        config = None
+    except StorageOperationError as exc:
+        logger.warning(
+            "Failed to read KG_DOC config from ResourceFS; falling back to Redis: "
+            "resourceId=%s, error=%s",
+            resource_id,
+            exc,
         )
         config = None
     except StorageError as exc:
@@ -536,6 +550,127 @@ async def read_file_by_resource_id(body: dict[str, Any] = Body(...)):
     result["knCode"] = str(resource_id)
     result_object = {k: v for k, v in result.items() if v is not None}
     return _success(result_object)
+
+
+# -- buildResultByResourceId --------------------------------------------------
+
+@app.post("/api/v1/buildResultByResourceId")
+async def build_result_by_resource_id(body: dict[str, Any] = Body(...)):
+    resource_id = body.get("resourceId")
+    if not resource_id:
+        return _error("resourceId is required")
+
+    kn_code = await _resolve_kn_code(str(resource_id))
+    if kn_code is None:
+        return _error(f"cannot resolve resourceId: {resource_id}")
+
+    body_mapped = {**body, "knCode": kn_code}
+    body_mapped.pop("resourceId", None)
+
+    try:
+        request = BuildResultRequest.model_validate(body_mapped)
+    except ValidationError as exc:
+        return _error("request validation failed", {"errors": json.loads(exc.json())})
+
+    logger.info(
+        "buildResultByResourceId request received: resourceId=%s, filePath=%s, chunkPage=%s, chunkPageSize=%s, includeMarkdown=%s",
+        resource_id,
+        request.file_path,
+        request.chunk_page,
+        request.chunk_page_size,
+        request.include_markdown,
+    )
+    try:
+        with bind_byclaw_resource_id(resource_id):
+            service = await resolve_knowledge_base_service()
+            result = await service.build_result(request)
+    except KnowledgeBaseConfigurationError as exc:
+        logger.exception("buildResultByResourceId configuration error: resourceId=%s", resource_id)
+        return _error(str(exc))
+    except KnowledgeBaseValidationError as exc:
+        logger.exception("buildResultByResourceId validation error: resourceId=%s", resource_id)
+        return _error(str(exc))
+    except Exception as exc:
+        logger.exception(
+            "buildResultByResourceId unexpected error: resourceId=%s, filePath=%s",
+            resource_id,
+            request.file_path,
+        )
+        return _error(str(exc) or "failed to query build result")
+
+    result["knCode"] = str(resource_id)
+    logger.info(
+        "buildResultByResourceId response ready: resourceId=%s, filePath=%s, status=%s, chunkCount=%s",
+        resource_id,
+        request.file_path,
+        result.get("build", {}).get("status"),
+        result.get("chunks", {}).get("total"),
+    )
+    return _success(result)
+
+
+# -- buildPreviewByResourceId -------------------------------------------------
+
+@app.post("/api/v1/buildPreviewByResourceId")
+async def build_preview_by_resource_id(body: dict[str, Any] = Body(...)):
+    resource_id = body.get("resourceId")
+    if not resource_id:
+        return _error("resourceId is required")
+
+    kn_code = await _resolve_kn_code(str(resource_id))
+    if kn_code is None:
+        return _error(f"cannot resolve resourceId: {resource_id}")
+
+    body_mapped = {**body, "knCode": kn_code}
+    body_mapped.pop("resourceId", None)
+    try:
+        request = BuildPreviewRequest.model_validate(body_mapped)
+    except ValidationError as exc:
+        return _error("request validation failed", {"errors": json.loads(exc.json())})
+
+    logger.info(
+        "buildPreviewByResourceId request received: resourceId=%s, filePath=%s",
+        resource_id,
+        request.file_path,
+    )
+    try:
+        with bind_byclaw_resource_id(resource_id):
+            service = await resolve_knowledge_base_service()
+            content = await service.build_preview(request)
+    except KnowledgeBaseConfigurationError as exc:
+        logger.exception(
+            "buildPreviewByResourceId configuration error: resourceId=%s",
+            resource_id,
+        )
+        return _error(str(exc))
+    except KnowledgeBaseValidationError as exc:
+        logger.info(
+            "buildPreviewByResourceId unavailable: resourceId=%s, filePath=%s, error=%s",
+            resource_id,
+            request.file_path,
+            exc,
+        )
+        return _error(str(exc))
+    except Exception as exc:
+        logger.exception(
+            "buildPreviewByResourceId unexpected error: resourceId=%s, filePath=%s",
+            resource_id,
+            request.file_path,
+        )
+        return _error(str(exc) or "failed to read build preview")
+
+    filename = f"{PurePosixPath(request.file_path).stem}.pdf"
+    logger.info(
+        "buildPreviewByResourceId response ready: resourceId=%s, filePath=%s, outputBytes=%s",
+        resource_id,
+        request.file_path,
+        len(content),
+    )
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(filename)}"},
+    )
 
 
 # -- downloadFileByResourceId -------------------------------------------------

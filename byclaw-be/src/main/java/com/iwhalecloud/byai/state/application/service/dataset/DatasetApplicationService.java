@@ -21,6 +21,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.Data;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.DirOrFile;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.FileBuildStatus;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbBuildResult;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbGlob;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryDelete;
@@ -46,6 +47,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearc
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBuildResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
 import com.iwhalecloud.byai.common.util.JsonUtil;
 import com.iwhalecloud.byai.common.util.RedisUtil;
@@ -62,6 +64,7 @@ import com.iwhalecloud.byai.manager.domain.resource.util.DigEmployeeRedisKeys;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeBuildResultRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
@@ -727,6 +730,30 @@ public class DatasetApplicationService {
         }
         catch (IOException e) {
             throw new BaseException("下载知识库文件失败：" + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 输出 QA 为 PPT/PPTX 构建生成的 PDF 预览；不存在时由统一异常处理返回错误，前端降级为 Markdown。
+     */
+    public void buildPreview(Long resourceId, String filePath, HttpServletResponse response) {
+        SsResource ssResource = loadDatasetResource(resourceId);
+        validateDatasetReadablePermission(ssResource);
+
+        KbFileDownload request = new KbFileDownload();
+        request.setKnCode(ssResource.getResourceCode());
+        request.setFilePath(normalizeKnowledgeFilePath(filePath));
+        String originalName = getLastSplitName(request.getFilePath());
+        int suffixIndex = originalName.lastIndexOf('.');
+        String previewName = (suffixIndex > 0 ? originalName.substring(0, suffixIndex) : originalName) + ".pdf";
+        try (InputStream inputStream = feignPythonBuildService.buildPreview(request, resourceId)) {
+            response.setContentType(MediaType.APPLICATION_PDF_VALUE);
+            response.setHeader("Content-Disposition",
+                "inline;filename=" + URLEncoder.encode(previewName, StandardCharsets.UTF_8));
+            IOUtils.copy(inputStream, response.getOutputStream());
+        }
+        catch (IOException e) {
+            throw new BaseException("读取知识库构建预览失败：" + e.getMessage(), e);
         }
     }
 
@@ -1476,6 +1503,35 @@ public class DatasetApplicationService {
         assertPythonBuildSuccess(ret, "读取知识库文件内容");
 
         KbFileReadResult result = ret.getResultObject();
+        if (result != null) {
+            result.setKnCode(String.valueOf(request.getResourceId()));
+        }
+        return result;
+    }
+
+    /**
+     * 查询知识库文件完整构建结果。对外使用 resourceId，内部转为 QA knCode。
+     */
+    public KnowledgeBuildResult buildResult(KnowledgeBuildResultRequest request) {
+        if (request == null || request.getResourceId() == null) {
+            throw new BaseException("知识库资源标识不能为空");
+        }
+
+        SsResource ssResource = loadDatasetResource(request.getResourceId());
+        validateDatasetReadablePermission(ssResource);
+
+        KbBuildResult qaRequest = new KbBuildResult();
+        qaRequest.setKnCode(ssResource.getResourceCode());
+        qaRequest.setFilePath(normalizeKnowledgeFilePath(request.getFilePath()));
+        qaRequest.setChunkPage(request.getChunkPage() == null ? 1 : request.getChunkPage());
+        qaRequest.setChunkPageSize(request.getChunkPageSize() == null ? 20 : request.getChunkPageSize());
+        qaRequest.setIncludeMarkdown(request.getIncludeMarkdown() == null || request.getIncludeMarkdown());
+
+        PythonBuildResponse<KnowledgeBuildResult> ret =
+            feignPythonBuildService.buildResult(qaRequest, request.getResourceId());
+        assertPythonBuildSuccess(ret, "查询知识库文件构建结果");
+
+        KnowledgeBuildResult result = ret.getResultObject();
         if (result != null) {
             result.setKnCode(String.valueOf(request.getResourceId()));
         }

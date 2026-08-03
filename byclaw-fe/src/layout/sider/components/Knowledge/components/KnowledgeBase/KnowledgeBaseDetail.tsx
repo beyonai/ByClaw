@@ -1,5 +1,18 @@
 import React, { useState, useRef, useEffect, useCallback, useContext, useMemo } from 'react';
-import { Input, Breadcrumb, Tree, Spin, App, ConfigProvider, Dropdown, Button, Tooltip, Upload, Empty } from 'antd';
+import {
+  Alert,
+  Input,
+  Breadcrumb,
+  Tree,
+  Spin,
+  App,
+  ConfigProvider,
+  Dropdown,
+  Button,
+  Tooltip,
+  Upload,
+  Empty,
+} from 'antd';
 import { EllipsisOutlined, LeftOutlined } from '@ant-design/icons';
 import classnames from 'classnames';
 import { AntdTreeNodeAttribute, EventDataNode } from 'antd/es/tree';
@@ -9,7 +22,7 @@ import UploadConfirmModal, { type UploadConfirmFile } from '@/components/UploadC
 import { useIntl } from '@umijs/max';
 import useVirtualHeight from '@/hooks/useVirtualHeight';
 import useGlobal from '@/hooks/useGlobal';
-import { downloadResourceFile } from '@/service/file';
+import { downloadKnowledgeBuildPreview, downloadResourceFile } from '@/service/file';
 import {
   createFolder as createFileBrowserFolder,
   ensureFolder as ensureFileBrowserFolder,
@@ -21,6 +34,7 @@ import { resolveTreeItemDirectoryPath } from './service';
 import { HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH, SiderContentContext } from '@/layout/sider/siderContentContext';
 import {
   checkUploadFileConflicts,
+  getKnowledgeBuildResult,
   uploadFiles as uploadKnowledgeFiles,
   type QueryDirAndFileByLevelItem,
 } from '@/service/knowledgeCenter';
@@ -313,14 +327,22 @@ function getFileType(name: string): string {
 }
 
 interface FilePreviewPanelProps {
-  blob: Blob | null;
+  data: string | Blob | null;
   fileName: string;
   fileType: string;
   loading: boolean;
+  fallbackNotice?: string;
   onClose: () => void;
 }
 
-const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ blob, fileName, fileType, loading, onClose }) => (
+const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
+  data,
+  fileName,
+  fileType,
+  loading,
+  fallbackNotice,
+  onClose,
+}) => (
   <div className={styles.previewPanel}>
     <div className={styles.previewHeader}>
       <span className={styles.previewTitle}>{fileName}</span>
@@ -329,10 +351,13 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ blob, fileName, fil
       </span>
     </div>
     <div className={styles.previewBody}>
+      {fallbackNotice && (
+        <Alert className={styles.previewFallbackNotice} type="warning" showIcon message={fallbackNotice} />
+      )}
       <Spin spinning={loading} wrapperClassName={styles.previewSpin}>
-        {blob && (
+        {data && (
           <React.Suspense fallback={null}>
-            <PreViewFile data={blob} type={fileType} title={fileName} className={styles.previewContent} />
+            <PreViewFile data={data} type={fileType} title={fileName} className={styles.previewContent} />
           </React.Suspense>
         )}
       </Spin>
@@ -631,13 +656,18 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
   );
 
   const renderPreviewPanel = useCallback(
-    (item: IKnowledgeDetailTreeItem, options: { blob?: Blob | null; loading: boolean }) => {
+    (
+      item: IKnowledgeDetailTreeItem,
+      options: { data?: string | Blob | null; fileType?: string; fallbackNotice?: string; loading: boolean }
+    ) => {
+      const fileName = String(item.title || item.collectionName || '');
       setDetailPanel?.(
         <FilePreviewPanel
-          blob={options.blob ?? null}
-          fileName={String(item.title || item.collectionName || '')}
-          fileType={getFileType(String(item.title || item.collectionName || ''))}
+          data={options.data ?? null}
+          fileName={fileName}
+          fileType={options.fileType || getFileType(fileName)}
           loading={options.loading}
+          fallbackNotice={options.fallbackNotice}
           onClose={() => clearDetailPanel?.()}
         />,
         { width: HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH }
@@ -662,6 +692,41 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
 
       renderPreviewPanel(item, { loading: true });
       try {
+        const fileType = getFileType(fileName);
+        if (['ppt', 'pptx'].includes(fileType)) {
+          try {
+            const previewRes: any = await downloadKnowledgeBuildPreview({
+              resourceId: dataset.resourceId,
+              directoryPath,
+            });
+            const previewBlob = getRawBlob(previewRes);
+            renderPreviewPanel(item, {
+              data: new Blob([previewBlob], { type: 'application/pdf' }),
+              fileType: 'pdf',
+              loading: false,
+            });
+            return;
+          } catch (previewError) {
+            const buildResult = await getKnowledgeBuildResult({
+              resourceId: dataset.resourceId,
+              filePath: directoryPath,
+              chunkPage: 1,
+              chunkPageSize: 1,
+              includeMarkdown: true,
+            });
+            const markdown = buildResult?.markdown?.data || '';
+            if (!markdown) {
+              throw previewError;
+            }
+            renderPreviewPanel(item, {
+              data: markdown,
+              fileType: 'md',
+              fallbackNotice: intl.formatMessage({ id: 'fileBrowser.preview.pptMarkdownFallback' }),
+              loading: false,
+            });
+            return;
+          }
+        }
         const res: any = await downloadResourceFile({
           resourceId: dataset.resourceId,
           directoryPath,
@@ -669,7 +734,7 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
         const rawBlob = getRawBlob(res);
         const mimeType = getMimeType(fileName);
         const blob = mimeType ? new Blob([rawBlob], { type: mimeType }) : rawBlob;
-        renderPreviewPanel(item, { blob, loading: false });
+        renderPreviewPanel(item, { data: blob, loading: false });
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.preview.failed' }));
         clearDetailPanel?.();

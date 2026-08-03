@@ -16,6 +16,7 @@ import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetIdDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeBuildResultRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
@@ -37,6 +38,7 @@ import com.iwhalecloud.byai.state.domain.resource.vo.DatasetDetailVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.KnowledgeCapabilityVo;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBuildResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileUpdateResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileMetadataResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
@@ -357,6 +359,15 @@ public class DatasetController {
     }
 
     /**
+     * 预览 QA 构建阶段为 PPT/PPTX 生成的 PDF 产物。
+     */
+    @GetMapping(value = "/buildPreview")
+    public void buildPreview(@RequestParam("resourceId") Long resourceId,
+        @RequestParam("filePath") String filePath, HttpServletResponse response) {
+        datasetApplicationService.buildPreview(resourceId, filePath, response);
+    }
+
+    /**
      * 读取知识库文件 Markdown 内容，供技能侧按资源 ID 调用。
      *
      * @param request 文件读取参数
@@ -366,6 +377,15 @@ public class DatasetController {
     public ResponseUtil<KbFileReadResult> readFile(@RequestBody KnowledgeReadFileRequest request) {
         return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
             datasetApplicationService.readFile(request));
+    }
+
+    /**
+     * 查询知识库文件的构建结果，包括 Markdown、分块和向量检索摘要。
+     */
+    @PostMapping(value = "/buildResult")
+    public ResponseUtil<KnowledgeBuildResult> buildResult(@RequestBody KnowledgeBuildResultRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
+            datasetApplicationService.buildResult(request));
     }
 
     /**

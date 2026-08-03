@@ -1,4 +1,4 @@
-import { uploadImage, uploadFiles, downloadResourceFile } from '../file';
+import { downloadKnowledgeBuildPreview, downloadResourceFile, uploadFiles, uploadImage } from '../file';
 
 // Mock the request module
 jest.mock('@/service/common/request', () => ({
@@ -65,6 +65,23 @@ describe('File Service', () => {
         { resourceId: 10053191, directoryPath: '/测试.docx' },
         {
           responseType: 'blob',
+        }
+      );
+    });
+  });
+
+  describe('downloadKnowledgeBuildPreview', () => {
+    it('should request the generated PDF as a blob without global error tips', () => {
+      downloadKnowledgeBuildPreview({ resourceId: 10053191, directoryPath: 'slides/demo.pptx' });
+
+      expect(mockGET).toHaveBeenCalledWith(
+        '/byaiService/datasetController/buildPreview',
+        { resourceId: 10053191, filePath: '/slides/demo.pptx' },
+        {
+          responseType: 'blob',
+          responseCfg: {
+            hideErrorTips: true,
+          },
         }
       );
     });
