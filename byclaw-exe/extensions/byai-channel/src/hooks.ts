@@ -40,7 +40,7 @@ import {
 import {
     resolveByaiAgentIdFromSessionKey,
     resolveByaiSessionIdFromSessionKey,
-} from "./session-key.js";
+} from "../../shared/src/session-key.js";
 import { resolveByaiSessionStatus } from "./session-status-route.js";
 import { createRedisInstance } from "./utils.js";
 import path from "node:path";

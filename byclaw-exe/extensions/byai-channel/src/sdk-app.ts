@@ -29,7 +29,7 @@ import {
   isBaiyingEnhanceConfigured,
   waitForBaiyingEnhanceColdStartReady,
 } from "./baiying-enhance-readiness.js";
-import { normalizeByaiAgentId } from "./session-key.js";
+import { normalizeByaiAgentId } from "../../shared/src/session-key.js";
 import {
   buildByaiMultiAgentLaneMessages,
   parseByaiLaneMetadata,

@@ -59,7 +59,7 @@ import {
   buildBroadcastSessionKey,
   resolveByaiSessionKey,
   resolveSdkTargetAgentId,
-} from "./session-key.js";
+} from "../../shared/src/session-key.js";
 import { waitForManagedBaiyingAgentConfig } from "./managed-agent-config-wait.js";
 import {
   appendByaiLaneToTarget,
