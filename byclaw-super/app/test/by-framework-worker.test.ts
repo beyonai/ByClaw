@@ -149,12 +149,14 @@ describe("ByClawSuperGatewayWorker", () => {
 
   it("emits an Agent call node and nests delegated output under it", async () => {
     const emitEvent = vi.fn(async () => undefined);
+    const emitProtocolChunk = vi.fn(async () => undefined);
     const emitState = vi.fn(async () => undefined);
     const worker = createWorker({
       createSessionRun: vi.fn(async () => run()),
       cancelRun: vi.fn(),
       streamEvents: () => delegatedEvents(),
       emitEvent,
+      emitProtocolChunk,
     });
 
     const result = await worker.processCommand(
@@ -163,14 +165,42 @@ describe("ByClawSuperGatewayWorker", () => {
     );
 
     expect(emitEvent).toHaveBeenCalledTimes(3);
-    expect(emitState).toHaveBeenCalledWith(
+    expect(emitState).not.toHaveBeenCalled();
+    expect(emitProtocolChunk).toHaveBeenNthCalledWith(
+      1,
+      "session-1",
+      "trace-1",
       "",
-      EventType.REASONING_LOG_START,
+      expect.objectContaining({
+        eventType: EventType.REASONING_LOG_START,
+        contentType: "1002",
+        messageId: "run-1:reasoning",
+        parentMessageId: "-1",
+      }),
     );
-    expect(emitState).toHaveBeenCalledWith("", EventType.REASONING_LOG_END);
-    expect(emitState).not.toHaveBeenCalledWith(
-      expect.stringMatching(/任务已创建|任务开始执行|正在理解任务/),
-      EventType.REASONING_LOG_DELTA,
+    expect(emitProtocolChunk).toHaveBeenNthCalledWith(
+      2,
+      "session-1",
+      "trace-1",
+      "正在整理子 Agent 结果",
+      expect.objectContaining({
+        eventType: EventType.REASONING_LOG_DELTA,
+        contentType: "1002",
+        messageId: "run-1:reasoning",
+        parentMessageId: "-1",
+      }),
+    );
+    expect(emitProtocolChunk).toHaveBeenNthCalledWith(
+      3,
+      "session-1",
+      "trace-1",
+      "",
+      expect.objectContaining({
+        eventType: EventType.REASONING_LOG_END,
+        contentType: "1002",
+        messageId: "run-1:reasoning",
+        parentMessageId: "-1",
+      }),
     );
     expect(emitEvent).toHaveBeenNthCalledWith(
       1,
@@ -488,6 +518,7 @@ function createWorker(options: {
   cancelRun: ReturnType<typeof vi.fn>;
   streamEvents: () => AsyncIterable<RunEvent>;
   emitEvent?: ReturnType<typeof vi.fn>;
+  emitProtocolChunk?: ReturnType<typeof vi.fn>;
   logger?: ReturnType<typeof loggerMock>;
 }): ByClawSuperGatewayWorker {
   return new ByClawSuperGatewayWorker({
@@ -516,8 +547,14 @@ function createWorker(options: {
       respondToInteraction:
         options.respondToInteraction ?? vi.fn(async () => undefined),
     },
-    ...(options.emitEvent
-      ? { protocolEmitter: { emitEvent: options.emitEvent } }
+    ...(options.emitEvent || options.emitProtocolChunk
+      ? {
+          protocolEmitter: {
+            emitEvent: options.emitEvent ?? vi.fn(async () => undefined),
+            emitChunk:
+              options.emitProtocolChunk ?? vi.fn(async () => undefined),
+          },
+        }
       : {}),
     ...(options.logger ? { logger: options.logger } : {}),
   });
@@ -606,20 +643,24 @@ async function* delegatedEvents(): AsyncIterable<RunEvent> {
     agentName: "数据分析助手",
     status: "RUNNING",
   });
-  yield event(3, "delegation.output.delta", {
+  yield event(3, "delegation.progress", {
+    delegationId: "delegation-1",
+    message: "正在整理子 Agent 结果",
+  });
+  yield event(4, "delegation.output.delta", {
     delegationId: "delegation-1",
     agentId: "agent-1",
     agentName: "数据分析助手",
     text: "子 Agent 输出",
   });
-  yield event(4, "delegation.completed", {
+  yield event(5, "delegation.completed", {
     delegationId: "delegation-1",
     agentId: "agent-1",
     agentName: "数据分析助手",
     status: "COMPLETED",
   });
-  yield event(5, "leader.delta", { text: "汇总答案" });
-  yield event(6, "run.completed", {
+  yield event(6, "leader.delta", { text: "汇总答案" });
+  yield event(7, "run.completed", {
     status: "COMPLETED",
     finalAnswer: "汇总答案",
   });

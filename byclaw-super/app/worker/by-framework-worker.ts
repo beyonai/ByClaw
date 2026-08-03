@@ -13,6 +13,7 @@ import {
   GatewayDataEmitter,
   GatewayWorker,
   ResumeCommand,
+  SseReasonMessageType,
   WorkerRegistry,
   WorkerRunner,
   type AgentContext,
@@ -22,7 +23,6 @@ import {
 import { BeyondTokenAuthError } from "../auth/beyond-token.js";
 import type { RunIngressService } from "../ingress/run-ingress-service.js";
 import {
-  closeReasoning,
   commandGroupChatRef,
   commandLogFields,
   commandSessionContext,
@@ -49,7 +49,7 @@ type WorkerRunService = Pick<
   RunService,
   "streamEvents" | "cancelRun" | "respondToInteraction"
 >;
-type WorkerProtocolEmitter = Pick<GatewayDataEmitter, "emitEvent">;
+type WorkerProtocolEmitter = Pick<GatewayDataEmitter, "emitChunk" | "emitEvent">;
 type WorkerRunIngress = Pick<
   RunIngressService,
   "createSessionRun" | "createRun" | "resolvePrincipal" | "authorizeRun"
@@ -265,6 +265,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     let reasoningStarted = false;
     let reasoningEnded = false;
     let answer = "";
+    const reasoningMessageId = `${run.id}:reasoning`;
 
     for await (const event of this.#runService.streamEvents(run.id)) {
       if (context.isCancelRequested()) {
@@ -276,7 +277,13 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         isDelegationReasoningEvent(event) &&
         (!reasoningStarted || reasoningEnded)
       ) {
-        await context.emitState("", EventType.REASONING_LOG_START);
+        await this.#emitReasoning(
+          run.id,
+          context,
+          reasoningMessageId,
+          "",
+          EventType.REASONING_LOG_START,
+        );
         reasoningStarted = true;
         reasoningEnded = false;
       }
@@ -286,16 +293,34 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       const progress = progressMessage(event);
       if (progress) {
         if (!reasoningStarted || reasoningEnded) {
-          await context.emitState("", EventType.REASONING_LOG_START);
+          await this.#emitReasoning(
+            run.id,
+            context,
+            reasoningMessageId,
+            "",
+            EventType.REASONING_LOG_START,
+          );
           reasoningStarted = true;
           reasoningEnded = false;
         }
-        await context.emitState(progress, EventType.REASONING_LOG_DELTA);
+        await this.#emitReasoning(
+          run.id,
+          context,
+          reasoningMessageId,
+          progress,
+          EventType.REASONING_LOG_DELTA,
+        );
       }
 
       if (event.type === "leader.delta") {
         if (reasoningStarted && !reasoningEnded) {
-          await context.emitState("", EventType.REASONING_LOG_END);
+          await this.#emitReasoning(
+            run.id,
+            context,
+            reasoningMessageId,
+            "",
+            EventType.REASONING_LOG_END,
+          );
           reasoningEnded = true;
         }
         const delta = stringData(event.data.text);
@@ -311,7 +336,15 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
           answer = finalAnswer;
           await context.emitChunk(finalAnswer, EventType.ANSWER_DELTA);
         }
-        await closeReasoning(context, reasoningStarted, reasoningEnded);
+        if (reasoningStarted && !reasoningEnded) {
+          await this.#emitReasoning(
+            run.id,
+            context,
+            reasoningMessageId,
+            "",
+            EventType.REASONING_LOG_END,
+          );
+        }
         this.#logRunFinished(principal, run, "completed", run.createdAt, finalAnswer);
         return new AgentTaskResult({
           status: AgentState.COMPLETED,
@@ -321,7 +354,15 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       }
 
       if (event.type === "run.cancelled") {
-        await closeReasoning(context, reasoningStarted, reasoningEnded);
+        if (reasoningStarted && !reasoningEnded) {
+          await this.#emitReasoning(
+            run.id,
+            context,
+            reasoningMessageId,
+            "",
+            EventType.REASONING_LOG_END,
+          );
+        }
         await context.checkCancelled();
         const reason = stringData(event.data.reason) || "run cancelled";
         this.#logRunFinished(principal, run, "cancelled", run.createdAt, reason);
@@ -333,7 +374,15 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       }
 
       if (event.type === "run.failed") {
-        await closeReasoning(context, reasoningStarted, reasoningEnded);
+        if (reasoningStarted && !reasoningEnded) {
+          await this.#emitReasoning(
+            run.id,
+            context,
+            reasoningMessageId,
+            "",
+            EventType.REASONING_LOG_END,
+          );
+        }
         const error = stringData(event.data.error) || "Run failed";
         this.#logRunFinished(principal, run, "failed", run.createdAt, error);
         throw new Error(error);
@@ -341,6 +390,29 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     }
 
     throw new Error(`Run event stream ended without a terminal event: ${run.id}`);
+  }
+
+  /** 按 byai-channel 的协议把普通文本放入前端思考区，而不是作为 3003 标题原样展示。 */
+  async #emitReasoning(
+    runId: string,
+    context: AgentContext,
+    messageId: string,
+    content: string,
+    eventType: EventType,
+  ): Promise<void> {
+    await this.#protocolEmitter.emitChunk(
+      context.sessionId,
+      context.traceId,
+      content,
+      {
+        eventType,
+        contentType: SseReasonMessageType.think_text,
+        sourceAgentType: this.#agentType,
+        messageId,
+        parentMessageId: "-1",
+        metadata: { parent_run_id: runId },
+      },
+    );
   }
 
   /** 记录 Run 终态，便于在日志中追踪“谁、返回什么、会话维度”。不记录 Token 与凭证。 */
