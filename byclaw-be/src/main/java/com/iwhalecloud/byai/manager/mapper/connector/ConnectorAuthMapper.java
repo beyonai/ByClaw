@@ -19,6 +19,7 @@ public interface ConnectorAuthMapper extends BaseMapper<ConnectorAuth> {
     /** 查询全部有效连接器及指定用户的开启状态。 */
     @Select("""
         SELECT info.connector_code,
+               info.skill_code,
                CASE WHEN auth.enable_flag = 'Y' THEN TRUE ELSE FALSE END AS enabled
         FROM byai_connector_info info
         LEFT JOIN (

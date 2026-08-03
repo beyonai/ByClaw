@@ -10,5 +10,8 @@ public class ConnectorEnableStateDto {
 
     private String connectorCode;
 
+    /** 对应的 OpenClaw skill code。 */
+    private String skillCode;
+
     private Boolean enabled;
 }

@@ -5153,6 +5153,7 @@ INSERT INTO byai.byai_connector_info (
     description,
     connector_type,
     provider_code,
+    skill_code,
     auth_mode,
     auth_config,
     request_config,
@@ -5166,6 +5167,7 @@ SELECT
     seed.description,
     'SYSTEM',
     seed.provider_code,
+    seed.skill_code,
     seed.auth_mode,
     seed.auth_config,
     '{}',
@@ -5176,17 +5178,18 @@ FROM (
            '钉钉' AS connector_name,
            '通过 DWS 连接钉钉工作空间' AS description,
            'dws-dingtalk' AS provider_code,
+           'dws' AS skill_code,
            'DEVICE_FLOW' AS auth_mode,
            '{}' AS auth_config,
            '{"authStorage":{"environment":{"DWS_CONFIG_DIR":"/by/.connector-auth/.dws/config","DWS_DISABLE_KEYCHAIN":"1","DWS_HOME":"/by/.connector-auth/.dws"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.dws","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"dingtalk","runtime":{"authorizeIn":"be-auth-job","commands":{"login":["dws","auth","login","--device","-y"],"logout":["dws","auth","reset","-y"],"status":["dws","auth","status","--format","json"]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"dws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.52"}' AS runtime_manifest,
            10 AS sort
     UNION ALL
-    SELECT 'lark', '飞书', '通过 lark-cli 连接飞书工作空间', 'lark-cli', 'DEVICE_FLOW',
+    SELECT 'lark', '飞书', '通过 lark-cli 连接飞书工作空间', 'lark-cli', 'fws', 'DEVICE_FLOW',
            '{"domains":["docs","drive","wiki"]}',
            '{"authStorage":{"environment":{"LARK_HOME":"/by/.connector-auth/.lark-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.lark-cli","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"lark","runtime":{"authorizeIn":"be-auth-job","commands":{"login":["lark-cli","auth","login","--domain","docs","--domain","drive","--domain","wiki","--no-wait","--json"],"logout":["lark-cli","auth","logout","--json"],"status":["lark-cli","auth","status","--json","--verify"]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"fws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.78"}',
            20
     UNION ALL
-    SELECT 'wecom', '企业微信', '通过 wecom-cli 连接企业微信工作空间', 'wecom-cli', 'CLI_INIT',
+    SELECT 'wecom', '企业微信', '通过 wecom-cli 连接企业微信工作空间', 'wecom-cli', 'wecomcli', 'CLI_INIT',
            '{"authorizationTimeoutSeconds":120,"probeCommand":["wecom-cli","contact","get_userlist","{}"]}' AS auth_config,
            '{"authStorage":{"environment":{"WECOM_HOME":"/by/.connector-auth/.wecom-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.wecom-cli","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"wecom","runtime":{"authorizeIn":"be-auth-job","commands":{"login":["wecom-cli","init","--noninteractive","--no-open"],"logout":["wecom-cli","cache","clear"],"status":["wecom-cli","cache","status"]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"wecomcli","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"0.1.9"}' AS runtime_manifest,
            30

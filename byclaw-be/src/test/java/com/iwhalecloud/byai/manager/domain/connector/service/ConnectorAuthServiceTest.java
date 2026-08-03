@@ -98,16 +98,25 @@ class ConnectorAuthServiceTest {
     void findConnectorEnableStatesReturnsAllConnectorsInMapperOrder() {
         when(connectorAuthMapper.selectConnectorEnableStates("1001"))
             .thenReturn(java.util.List.of(
-                state("dingtalk", true),
-                state("lark", false),
-                state("wecom", false)));
+                state("dingtalk", "dws", true),
+                state("lark", "fws", false),
+                state("wecom", "wecomcli", false)));
 
         assertThat(service.findConnectorEnableStates(1001L))
             .containsExactly(
-                Map.entry("dingtalk", true),
-                Map.entry("lark", false),
-                Map.entry("wecom", false));
+                Map.entry("dws", true),
+                Map.entry("fws", false),
+                Map.entry("wecomcli", false));
         verify(connectorAuthMapper).selectConnectorEnableStates("1001");
+    }
+
+    @Test
+    void findConnectorEnableStatesUsesConnectorCodeWhenManifestSkillIsMissing() {
+        when(connectorAuthMapper.selectConnectorEnableStates("1001"))
+            .thenReturn(java.util.List.of(state("custom", null, true)));
+
+        assertThat(service.findConnectorEnableStates(1001L))
+            .containsExactly(Map.entry("custom", true));
     }
 
     @Test
@@ -117,9 +126,10 @@ class ConnectorAuthServiceTest {
         verifyNoInteractions(connectorAuthMapper);
     }
 
-    private ConnectorEnableStateDto state(String connectorCode, boolean enabled) {
+    private ConnectorEnableStateDto state(String connectorCode, String skillCode, boolean enabled) {
         ConnectorEnableStateDto state = new ConnectorEnableStateDto();
         state.setConnectorCode(connectorCode);
+        state.setSkillCode(skillCode);
         state.setEnabled(enabled);
         return state;
     }

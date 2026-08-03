@@ -40,9 +40,9 @@ class ScriptServiceTest {
     @Test
     void metadataIncludesEveryActiveConnectorAsBoolean() {
         Map<String, Boolean> states = new LinkedHashMap<>();
-        states.put("dingtalk", true);
-        states.put("lark", false);
-        states.put("wecom", false);
+        states.put("dws", true);
+        states.put("fws", false);
+        states.put("wecomcli", false);
         when(connectorAuthService.findConnectorEnableStates(1001L)).thenReturn(states);
 
         Map<String, Object> metadata = service.getMetadataByassistantChatDto(new AssistantChatDto());

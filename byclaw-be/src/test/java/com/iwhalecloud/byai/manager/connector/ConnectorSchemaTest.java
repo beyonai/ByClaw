@@ -20,7 +20,8 @@ class ConnectorSchemaTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final Pattern WECOM_SEED_ROW = Pattern.compile(
         "SELECT\\s+'wecom'\\s*,\\s*'企业微信'\\s*,\\s*'([^']*)'\\s*,\\s*'([^']*)'\\s*,\\s*'([^']*)'\\s*,"
-            + "\\s*'([^']*)'(?:\\s+AS\\s+auth_config)?\\s*,\\s*'([^']*)'(?:\\s+AS\\s+runtime_manifest)?\\s*,"
+            + "\\s*'([^']*)'\\s*,\\s*'([^']*)'(?:\\s+AS\\s+auth_config)?\\s*,"
+            + "\\s*'([^']*)'(?:\\s+AS\\s+runtime_manifest)?\\s*,"
             + "\\s*30",
         Pattern.CASE_INSENSITIVE | Pattern.DOTALL
     );
@@ -48,6 +49,8 @@ class ConnectorSchemaTest {
         String sql = read("byclaw-be/src/main/java/com/iwhalecloud/byai/manager/mapper/connector/ConnectorAuthMapper.java");
 
         assertThat(sql).contains("auth.enable_flag = 'y'");
+        assertThat(sql).contains("info.skill_code");
+        assertThat(sql).doesNotContain("info.runtime_manifest");
         assertThat(sql).doesNotContain("auth.expire_time is null or auth.expire_time > current_timestamp");
     }
 
@@ -74,7 +77,9 @@ class ConnectorSchemaTest {
         String sql = read("deploy/migrations/versions/V0.3.1/V0.3.1__ddl.sql");
 
         assertThat(sql).contains("provider_code varchar(64)");
+        assertThat(sql).contains("skill_code varchar(64)");
         assertThat(sql).contains("comment on column byai.byai_connector_info.provider_code");
+        assertThat(sql).contains("comment on column byai.byai_connector_info.skill_code");
         assertThat(sql).contains("comment on column byai.byai_connector_info.auth_mode");
         assertThat(sql).contains("device_flow", "cli_init");
     }
@@ -238,6 +243,7 @@ class ConnectorSchemaTest {
     private void assertWecomProductionSeed(ConnectorSeed seed) throws Exception {
         assertThat(seed.description()).isEqualTo(EXPECTED_WECOM_DESCRIPTION);
         assertThat(seed.providerCode()).isEqualTo("wecom-cli");
+        assertThat(seed.skillCode()).isEqualTo("wecomcli");
         assertThat(seed.authMode()).isEqualTo("CLI_INIT");
         assertThat(parseJson(seed.authConfig())).isEqualTo(parseJson(EXPECTED_WECOM_AUTH_CONFIG));
         assertThat(parseJson(seed.runtimeManifest())).isEqualTo(parseJson(EXPECTED_WECOM_RUNTIME_MANIFEST));
@@ -262,7 +268,7 @@ class ConnectorSchemaTest {
         Matcher matcher = pattern.matcher(sql);
         assertThat(matcher.find()).as(label).isTrue();
         ConnectorSeed seed = new ConnectorSeed(
-            matcher.group(1), matcher.group(2), matcher.group(3), matcher.group(4), matcher.group(5)
+            matcher.group(1), matcher.group(2), matcher.group(3), matcher.group(4), matcher.group(5), matcher.group(6)
         );
         assertThat(matcher.find()).as(label + " must be unique").isFalse();
         return seed;
@@ -289,6 +295,7 @@ class ConnectorSchemaTest {
     private record ConnectorSeed(
         String description,
         String providerCode,
+        String skillCode,
         String authMode,
         String authConfig,
         String runtimeManifest

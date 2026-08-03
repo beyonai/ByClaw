@@ -60,6 +60,19 @@ class ConnectorManifestCanonicalizerTest {
     }
 
     @Test
+    void canonicalizeRejectsSkillCodeMismatch() {
+        ConnectorInfo connector = connector("dingtalk");
+        connector.setSkillCode("fws");
+
+        assertThatThrownBy(() -> canonicalizer.canonicalize(connector, manifest(
+            "dingtalk",
+            "/by/.connector-auth/.dws",
+            "{\"status\":[\"dws\",\"auth\",\"status\"]}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("skill.code");
+    }
+
+    @Test
     void canonicalizeRejectsCredentialPathOutsideConnectorAuthRoot() {
         assertThatThrownBy(() -> canonicalizer.canonicalize(connector("dingtalk"), manifest(
             "dingtalk",

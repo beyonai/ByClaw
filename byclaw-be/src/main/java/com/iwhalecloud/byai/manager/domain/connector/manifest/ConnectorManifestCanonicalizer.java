@@ -51,7 +51,7 @@ public class ConnectorManifestCanonicalizer {
         }
         try {
             JsonNode root = objectMapper.readTree(manifestJson);
-            validateRoot(root, connector.getConnectorCode());
+            validateRoot(root, connector.getConnectorCode(), connector.getSkillCode());
             return objectMapper.writeValueAsString(canonicalNode(root));
         } catch (InvalidConnectorManifestException e) {
             throw e;
@@ -76,7 +76,7 @@ public class ConnectorManifestCanonicalizer {
         }
     }
 
-    private void validateRoot(JsonNode root, String connectorCode) {
+    private void validateRoot(JsonNode root, String connectorCode, String connectorSkillCode) {
         requireObject(root, "Manifest root");
         rejectSensitiveFields(root);
         requireText(root, "schemaVersion", SCHEMA_VERSION);
@@ -121,7 +121,10 @@ public class ConnectorManifestCanonicalizer {
         }
 
         JsonNode skill = requireObject(root.get("skill"), "skill");
-        requireNonBlankText(skill, "code");
+        String manifestSkillCode = requireNonBlankText(skill, "code");
+        if (StringUtils.hasText(connectorSkillCode) && !connectorSkillCode.equals(manifestSkillCode)) {
+            throw invalid("skill.code must equal connector skillCode");
+        }
         requireNonBlankText(skill, "source");
         requireNonBlankText(skill, "installScope");
         requireNonBlankText(skill, "grantScope");
