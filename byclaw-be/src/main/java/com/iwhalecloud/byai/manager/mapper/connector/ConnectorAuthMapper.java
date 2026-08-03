@@ -16,13 +16,13 @@ import java.util.List;
 @Mapper
 public interface ConnectorAuthMapper extends BaseMapper<ConnectorAuth> {
 
-    /** 查询全部有效连接器及指定用户的开启状态。 */
+    /** 查询指定用户已授权连接器及其开启状态。 */
     @Select("""
         SELECT info.connector_code,
                info.skill_code,
                CASE WHEN auth.enable_flag = 'Y' THEN TRUE ELSE FALSE END AS enabled
         FROM byai_connector_info info
-        LEFT JOIN (
+        INNER JOIN (
             SELECT connector_id, enable_flag
             FROM (
                 SELECT connector_id,

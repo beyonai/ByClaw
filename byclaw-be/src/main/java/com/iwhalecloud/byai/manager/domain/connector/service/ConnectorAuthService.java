@@ -71,7 +71,7 @@ public class ConnectorAuthService {
         return connectorAuthMapper.selectOne(ownerQuery(authId));
     }
 
-    /** 查询全部有效连接器及指定用户的开启状态。 */
+    /** 查询指定用户已授权连接器及其开启状态。 */
     public Map<String, Boolean> findConnectorEnableStates(Long userId) {
         if (userId == null || userId <= 0) {
             return Collections.emptyMap();

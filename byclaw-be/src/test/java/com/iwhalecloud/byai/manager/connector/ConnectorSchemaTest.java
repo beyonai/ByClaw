@@ -45,13 +45,15 @@ class ConnectorSchemaTest {
     }
 
     @Test
-    void enabledConnectorMetadataQueryUsesEnableFlagWithoutExpirationJudgement() throws Exception {
+    void enabledConnectorMetadataQueryReturnsOnlyAuthorizedConnectorsWithoutExpirationJudgement() throws Exception {
         String sql = read("byclaw-be/src/main/java/com/iwhalecloud/byai/manager/mapper/connector/ConnectorAuthMapper.java");
 
+        assertThat(sql).contains("inner join (");
+        assertThat(sql).doesNotContain("left join (");
         assertThat(sql).contains("auth.enable_flag = 'y'");
         assertThat(sql).contains("info.skill_code");
         assertThat(sql).doesNotContain("info.runtime_manifest");
-        assertThat(sql).doesNotContain("auth.expire_time is null or auth.expire_time > current_timestamp");
+        assertThat(sql).doesNotContain("auth.expire_time");
     }
 
     @Test

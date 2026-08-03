@@ -95,18 +95,16 @@ class ConnectorAuthServiceTest {
     }
 
     @Test
-    void findConnectorEnableStatesReturnsAllConnectorsInMapperOrder() {
+    void findConnectorEnableStatesReturnsAuthorizedConnectorsIncludingDisabledState() {
         when(connectorAuthMapper.selectConnectorEnableStates("1001"))
             .thenReturn(java.util.List.of(
                 state("dingtalk", "dws", true),
-                state("lark", "fws", false),
-                state("wecom", "wecomcli", false)));
+                state("lark", "fws", false)));
 
         assertThat(service.findConnectorEnableStates(1001L))
             .containsExactly(
                 Map.entry("dws", true),
-                Map.entry("fws", false),
-                Map.entry("wecomcli", false));
+                Map.entry("fws", false));
         verify(connectorAuthMapper).selectConnectorEnableStates("1001");
     }
 
