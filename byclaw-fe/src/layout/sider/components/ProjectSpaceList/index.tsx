@@ -21,6 +21,7 @@ import {
 } from '@/pages/projectSpace/service';
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
+import { getStoredProjectScopeId, saveProjectScopeIdToStorage } from '@/pages/projectSpace/constants';
 import { saveProjectMembers } from '@/service/devloop';
 import AntdIcon from '@/components/AntdIcon';
 import { SiderContentContext } from '../../siderContentContext';
@@ -29,8 +30,6 @@ import ProjectDetailPanel from './ProjectDetailModal';
 import styles from './index.module.less';
 
 const PROJECT_SESSION_PAGE_SIZE = 30;
-// 左侧项目选择仅持久化项目 ID，刷新浏览器后由最新可见项目列表校验并恢复。
-const PROJECT_SCOPE_STORAGE_KEY = 'byclaw.projectSpace.selectedProjectId';
 
 type ProjectSessionPageState = {
   pageNum: number;
@@ -92,32 +91,6 @@ const renderProjectSceneTag = (project: ProjectSpace, t: ProjectSpaceTranslate, 
 };
 
 const isDefaultProject = (project?: ProjectSpace) => project?.projectType === 'default';
-
-const getStoredProjectScopeId = () => {
-  if (typeof window === 'undefined') return undefined;
-
-  try {
-    return window.localStorage.getItem(PROJECT_SCOPE_STORAGE_KEY)?.trim() || undefined;
-  } catch {
-    // 浏览器禁用本地存储时不影响当前会话中的项目切换。
-    return undefined;
-  }
-};
-
-const saveProjectScopeIdToStorage = (projectId?: string | number) => {
-  if (typeof window === 'undefined') return;
-
-  try {
-    const normalizedProjectId = `${projectId ?? ''}`.trim();
-    if (normalizedProjectId) {
-      window.localStorage.setItem(PROJECT_SCOPE_STORAGE_KEY, normalizedProjectId);
-      return;
-    }
-    window.localStorage.removeItem(PROJECT_SCOPE_STORAGE_KEY);
-  } catch {
-    // 浏览器禁用本地存储时不影响当前会话中的项目切换。
-  }
-};
 
 const getProjectIdFromSaveResponse = (response: any) => {
   // 创建接口有的环境返回 data.projectId，有的请求封装会直接返回 projectId，这里统一兜底取值。
@@ -236,6 +209,16 @@ const ProjectSpaceList: React.FC = () => {
   const activeScopeProject = useMemo(() => {
     return mergedProjects.find((project) => project.projectId === projectScopeId);
   }, [mergedProjects, projectScopeId]);
+
+  useEffect(() => {
+    if (!activeScopeProject?.projectId) return;
+
+    // 缓存恢复或权限校验回退后，将最终有效项目同步给所有新会话入口。
+    EventEmitter.emit('projectSpace-active-project-change', {
+      projectId: activeScopeProject.projectId,
+      projectName: activeScopeProject.projectName,
+    });
+  }, [EventEmitter, activeScopeProject?.projectId, activeScopeProject?.projectName]);
 
   const scopeTitle = activeScopeProject?.projectName || t('selectProject');
   const currentUserId = userInfo.userId ?? userInfo.id;
@@ -1058,15 +1041,16 @@ const ProjectSpaceList: React.FC = () => {
         },
       };
     });
-    setDetailProject((prev) =>
-      prev?.projectId === projectId
-        ? {
-          ...prev,
-          sessions: removeSession(prev.sessions),
-          sessionCount: Math.max(0, Number(prev.sessionCount ?? (prev.sessions || []).length) - 1),
-        }
-        : prev
-    );
+    setDetailProject((prev) => {
+      if (prev?.projectId !== projectId) {
+        return prev;
+      }
+      return {
+        ...prev,
+        sessions: removeSession(prev.sessions),
+        sessionCount: Math.max(0, Number(prev.sessionCount ?? (prev.sessions || []).length) - 1),
+      };
+    });
   }, []);
 
   const handleProjectSessionDeleteRollback = useCallback((project: ProjectSpace, restoredSession: ProjectSession) => {
