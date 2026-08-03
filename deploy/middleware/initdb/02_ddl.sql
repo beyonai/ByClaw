@@ -1413,8 +1413,8 @@ COMMENT ON COLUMN byai.po_user_private_param.param_value_cipher IS '参数值密
 COMMENT ON COLUMN byai.po_user_private_param.param_value_last4 IS '参数值后四位，用于前端提示';
 COMMENT ON COLUMN byai.po_user_private_param.description IS '参数说明';
 COMMENT ON COLUMN byai.po_user_private_param.status IS '参数状态，NORMAL正常，DISABLED停用';
-COMMENT ON COLUMN byai.po_user_private_param.param_source IS '参数来源：USER用户维护，CONNECTOR系统托管连接器快照';
-COMMENT ON COLUMN byai.po_user_private_param.source_ref IS '系统托管参数来源业务标识，连接器快照使用 connector_code';
+COMMENT ON COLUMN byai.po_user_private_param.param_source IS '参数来源：USER用户维护，CONNECTOR系统托管连接器环境参数';
+COMMENT ON COLUMN byai.po_user_private_param.source_ref IS '系统托管参数来源业务标识，连接器环境参数使用 connector_code';
 COMMENT ON COLUMN byai.po_user_private_param.create_by IS '创建人ID';
 COMMENT ON COLUMN byai.po_user_private_param.create_time IS '创建时间';
 COMMENT ON COLUMN byai.po_user_private_param.update_by IS '更新人ID';
@@ -1431,9 +1431,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_private_param_key
     ON byai.po_user_private_param (user_id, param_key)
     WHERE delete_flag = '0';
 
--- 同一用户、同一连接器仅保留一份未删除的系统托管快照，普通 USER 参数不受该索引约束。
+-- 同一用户、同一连接器可以保存多条环境参数，但同一参数名只能有一条未删除记录。
 CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_private_param_connector
-    ON byai.po_user_private_param (user_id, param_source, source_ref)
+    ON byai.po_user_private_param (user_id, param_source, source_ref, param_key)
     WHERE delete_flag = '0' AND param_source = 'CONNECTOR';
 
 -- 沙箱健康检测-水位模型配置表

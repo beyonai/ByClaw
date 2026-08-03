@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.manager.dto.connector.ConnectorEnableStateDto;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorAuthMapper;
@@ -14,11 +15,12 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -93,11 +95,32 @@ class ConnectorAuthServiceTest {
     }
 
     @Test
-    void findEnabledConnectorCodesQueriesForTheExplicitUser() {
-        when(connectorAuthMapper.selectEnabledConnectorCodes("1001"))
-            .thenReturn(List.of("dingtalk"));
+    void findConnectorEnableStatesReturnsAllConnectorsInMapperOrder() {
+        when(connectorAuthMapper.selectConnectorEnableStates("1001"))
+            .thenReturn(java.util.List.of(
+                state("dingtalk", true),
+                state("lark", false),
+                state("wecom", false)));
 
-        assertThat(service.findEnabledConnectorCodes(1001L)).containsExactly("dingtalk");
-        verify(connectorAuthMapper).selectEnabledConnectorCodes("1001");
+        assertThat(service.findConnectorEnableStates(1001L))
+            .containsExactly(
+                Map.entry("dingtalk", true),
+                Map.entry("lark", false),
+                Map.entry("wecom", false));
+        verify(connectorAuthMapper).selectConnectorEnableStates("1001");
+    }
+
+    @Test
+    void findConnectorEnableStatesReturnsEmptyMapForInvalidUser() {
+        assertThat(service.findConnectorEnableStates(null)).isEmpty();
+        assertThat(service.findConnectorEnableStates(0L)).isEmpty();
+        verifyNoInteractions(connectorAuthMapper);
+    }
+
+    private ConnectorEnableStateDto state(String connectorCode, boolean enabled) {
+        ConnectorEnableStateDto state = new ConnectorEnableStateDto();
+        state.setConnectorCode(connectorCode);
+        state.setEnabled(enabled);
+        return state;
     }
 }

@@ -8,7 +8,7 @@ WORKDIR /app
 RUN addgroup -g 1001 -S appgroup && \
     adduser -u 1001 -S appuser -G appgroup
 
-# 安装依赖：curl（健康检查）、bash、gcompat（dws 所需的 glibc 兼容层）、nodejs/npm（Lark CLI）
+# 安装依赖：curl（健康检查）、bash、gcompat（dws 所需的 glibc 兼容层）、nodejs/npm（Lark/WeCom CLI）
 RUN apk add --no-cache \
     curl \
     bash \
@@ -18,10 +18,14 @@ RUN apk add --no-cache \
     npm \
     && rm -rf /var/cache/apk/*
 
-# 安装 Lark CLI
+# 安装 Lark/WeCom CLI
 ARG LARKSUITE_CLI_VERSION=1.0.78
-RUN npm install --global "@larksuite/cli@${LARKSUITE_CLI_VERSION}" \
+ARG WECOM_CLI_VERSION=0.1.9
+RUN npm install --global \
+        "@larksuite/cli@${LARKSUITE_CLI_VERSION}" \
+        "@wecom/cli@${WECOM_CLI_VERSION}" \
     && lark-cli --version \
+    && wecom-cli --version \
     && npm cache clean --force
 
 # 安装 DWS CLI。amd64 用随仓库预下载的二进制（避免构建时网络下载）；

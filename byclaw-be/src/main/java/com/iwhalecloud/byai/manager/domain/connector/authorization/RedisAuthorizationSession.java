@@ -11,6 +11,7 @@ public record RedisAuthorizationSession(
     String connectorCode,
     String providerCode,
     AuthorizationStatus status,
+    String phase,
     String authorizationUrlCipher,
     String providerSessionId,
     String providerStateCipher,
@@ -19,4 +20,37 @@ public record RedisAuthorizationSession(
     String errorCode,
     String errorMessage,
     long version) {
+    public RedisAuthorizationSession(
+            String authorizationId,
+            String userId,
+            Long connectorId,
+            String connectorCode,
+            String providerCode,
+            AuthorizationStatus status,
+            String authorizationUrlCipher,
+            String providerSessionId,
+            String providerStateCipher,
+            String ownerInstanceId,
+            Date expiresAt,
+            String errorCode,
+            String errorMessage,
+            long version) {
+        this(
+            authorizationId,
+            userId,
+            connectorId,
+            connectorCode,
+            providerCode,
+            status,
+            null,
+            authorizationUrlCipher,
+            providerSessionId,
+            providerStateCipher,
+            ownerInstanceId,
+            expiresAt,
+            errorCode,
+            errorMessage,
+            version
+        );
+    }
 }

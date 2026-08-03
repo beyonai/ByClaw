@@ -9,6 +9,17 @@ public record AuthorizationStartResult(
     String providerSessionId,
     String providerState,
     String errorCode,
-    String errorMessage
+    String errorMessage,
+    String phase
 ) {
+    public AuthorizationStartResult(
+            AuthorizationStatus status,
+            String authorizationUrl,
+            Date expiresAt,
+            String providerSessionId,
+            String providerState,
+            String errorCode,
+            String errorMessage) {
+        this(status, authorizationUrl, expiresAt, providerSessionId, providerState, errorCode, errorMessage, null);
+    }
 }

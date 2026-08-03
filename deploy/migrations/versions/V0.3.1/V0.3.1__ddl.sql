@@ -166,11 +166,13 @@ SELECT byai.add_column_if_missing('byai', 'po_user_private_param', 'source_ref',
 
 DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
 
--- 同一用户、同一连接器仅保留一份未删除的系统托管快照，普通 USER 参数不受该索引约束。
+-- 同一用户、同一连接器可以保存多条环境参数，但同一参数名只能有一条未删除记录。
+DROP INDEX IF EXISTS byai.uk_po_user_private_param_connector;
+
 CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_private_param_connector
-    ON byai.po_user_private_param (user_id, param_source, source_ref)
+    ON byai.po_user_private_param (user_id, param_source, source_ref, param_key)
     WHERE delete_flag = '0' AND param_source = 'CONNECTOR';
 
 COMMENT ON COLUMN byai.byai_connector_info.runtime_manifest IS '连接器最新 Runtime Manifest 模板，规范化完整 JSON';
-COMMENT ON COLUMN byai.po_user_private_param.param_source IS '参数来源：USER用户维护，CONNECTOR系统托管连接器快照';
-COMMENT ON COLUMN byai.po_user_private_param.source_ref IS '系统托管参数来源业务标识，连接器快照使用 connector_code';
+COMMENT ON COLUMN byai.po_user_private_param.param_source IS '参数来源：USER用户维护，CONNECTOR系统托管连接器环境参数';
+COMMENT ON COLUMN byai.po_user_private_param.source_ref IS '系统托管参数来源业务标识，连接器环境参数使用 connector_code';

@@ -1,9 +1,10 @@
 package com.iwhalecloud.byai.manager.domain.connector.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -15,6 +16,7 @@ import com.iwhalecloud.byai.manager.entity.users.UserPrivateParam;
 import com.iwhalecloud.byai.manager.mapper.users.UserPrivateParamMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.util.Date;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -25,115 +27,154 @@ class ConnectorManifestServiceTest {
 
     private UserPrivateParamMapper mapper;
     private SequenceService sequenceService;
-    private ConnectorManifestCanonicalizer canonicalizer;
     private ConnectorManifestService service;
 
     @BeforeEach
     void setUp() {
-        mapper = mock(UserPrivateParamMapper.class);
-        sequenceService = mock(SequenceService.class);
-        canonicalizer = new ConnectorManifestCanonicalizer(new ObjectMapper());
-        service = new ConnectorManifestService(mapper, sequenceService, canonicalizer);
-        when(mapper.insertConnectorSnapshotIgnoreConflict(any())).thenReturn(1);
+        mapper = org.mockito.Mockito.mock(UserPrivateParamMapper.class);
+        sequenceService = org.mockito.Mockito.mock(SequenceService.class);
+        service = new ConnectorManifestService(
+            mapper,
+            sequenceService,
+            new ConnectorManifestCanonicalizer(new ObjectMapper())
+        );
+        when(mapper.insertConnectorParamIgnoreConflict(any())).thenReturn(1);
         when(mapper.updateById(any())).thenReturn(1);
     }
 
     @Test
-    void upsertAndEnableCreatesManagedEncryptedSnapshot() {
-        when(mapper.selectOne(any())).thenReturn(null);
-        when(sequenceService.nextVal()).thenReturn(9001L);
-        ConnectorInfo connector = connector(manifest("1.0.52", "status"));
+    void upsertAndEnableCreatesOneEncryptedManagedRowPerEnvironmentEntry() {
+        when(mapper.selectList(any())).thenReturn(List.of());
+        when(sequenceService.nextVal()).thenReturn(9001L, 9002L, 9003L);
 
-        boolean changed = service.upsertAndEnable(USER_ID, connector);
+        boolean changed = service.upsertAndEnable(USER_ID, connector(dwsManifest()));
 
         assertThat(changed).isTrue();
         ArgumentCaptor<UserPrivateParam> captor = ArgumentCaptor.forClass(UserPrivateParam.class);
-        verify(mapper).insertConnectorSnapshotIgnoreConflict(captor.capture());
-        UserPrivateParam inserted = captor.getValue();
-        assertThat(inserted.getParamId()).isEqualTo(9001L);
-        assertThat(inserted.getUserId()).isEqualTo(USER_ID);
-        assertThat(inserted.getParamKey()).isEqualTo("CONNECTOR_DINGTALK_MANIFEST");
-        assertThat(inserted.getParamSource()).isEqualTo("CONNECTOR");
-        assertThat(inserted.getSourceRef()).isEqualTo("dingtalk");
-        assertThat(inserted.getStatus()).isEqualTo("NORMAL");
-        assertThat(inserted.getDeleteFlag()).isEqualTo("0");
-        assertThat(Sm4Util.decrypt(inserted.getParamValueCipher()))
-            .isEqualTo(canonicalizer.canonicalize(connector, connector.getRuntimeManifest()));
+        verify(mapper, times(3)).insertConnectorParamIgnoreConflict(captor.capture());
+        assertThat(captor.getAllValues())
+            .extracting(UserPrivateParam::getParamKey)
+            .containsExactly("DWS_CONFIG_DIR", "DWS_DISABLE_KEYCHAIN", "DWS_HOME");
+        assertThat(captor.getAllValues())
+            .allSatisfy(param -> {
+                assertThat(param.getUserId()).isEqualTo(USER_ID);
+                assertThat(param.getParamSource()).isEqualTo("CONNECTOR");
+                assertThat(param.getSourceRef()).isEqualTo("dingtalk");
+                assertThat(param.getStatus()).isEqualTo("NORMAL");
+                assertThat(param.getDeleteFlag()).isEqualTo("0");
+            });
+        assertThat(captor.getAllValues())
+            .extracting(param -> Sm4Util.decrypt(param.getParamValueCipher()))
+            .containsExactly(
+                "/by/.connector-auth/.dws/config",
+                "1",
+                "/by/.connector-auth/.dws"
+            );
     }
 
     @Test
-    void upsertAndEnableSkipsEquivalentCanonicalContent() {
-        ConnectorInfo connector = connector(manifest("1.0.52", "status"));
-        UserPrivateParam existing = existing(connector, "NORMAL");
-        when(mapper.selectOne(any())).thenReturn(existing);
+    void upsertAndEnableSkipsEquivalentActiveParameters() {
+        List<UserPrivateParam> existing = List.of(
+            existing("DWS_CONFIG_DIR", "/by/.connector-auth/.dws/config", "CONNECTOR", "dingtalk", "NORMAL"),
+            existing("DWS_DISABLE_KEYCHAIN", "1", "CONNECTOR", "dingtalk", "NORMAL"),
+            existing("DWS_HOME", "/by/.connector-auth/.dws", "CONNECTOR", "dingtalk", "NORMAL")
+        );
+        when(mapper.selectList(any())).thenReturn(existing);
 
-        boolean changed = service.upsertAndEnable(USER_ID, connector);
+        boolean changed = service.upsertAndEnable(USER_ID, connector(dwsManifest()));
 
         assertThat(changed).isFalse();
+        verify(mapper, never()).insertConnectorParamIgnoreConflict(any());
         verify(mapper, never()).updateById(any());
-        verify(mapper, never()).insertConnectorSnapshotIgnoreConflict(any());
     }
 
     @Test
-    void upsertAndEnableUpdatesConcurrentWinnerWhenInsertIsIgnored() {
-        ConnectorInfo connector = connector(manifest("1.0.52", "status"));
-        UserPrivateParam winner = existing(connector, "DISABLED");
-        when(mapper.selectOne(any())).thenReturn(null, winner);
-        when(mapper.insertConnectorSnapshotIgnoreConflict(any())).thenReturn(0);
+    void upsertAndEnableUpdatesChangedValueRestoresDisabledAndDisablesStaleKey() {
+        UserPrivateParam changedValue = existing(
+            "DWS_CONFIG_DIR", "/old/config", "CONNECTOR", "dingtalk", "NORMAL");
+        UserPrivateParam disabled = existing(
+            "DWS_DISABLE_KEYCHAIN", "1", "CONNECTOR", "dingtalk", "DISABLED");
+        UserPrivateParam current = existing(
+            "DWS_HOME", "/by/.connector-auth/.dws", "CONNECTOR", "dingtalk", "NORMAL");
+        UserPrivateParam stale = existing(
+            "CONNECTOR_DINGTALK_MANIFEST", "{}", "CONNECTOR", "dingtalk", "NORMAL");
+        when(mapper.selectList(any())).thenReturn(List.of(changedValue, disabled, current, stale));
 
-        boolean changed = service.upsertAndEnable(USER_ID, connector);
+        boolean changed = service.upsertAndEnable(USER_ID, connector(dwsManifest()));
 
         assertThat(changed).isTrue();
-        assertThat(winner.getStatus()).isEqualTo("NORMAL");
-        verify(mapper).updateById(winner);
+        assertThat(Sm4Util.decrypt(changedValue.getParamValueCipher()))
+            .isEqualTo("/by/.connector-auth/.dws/config");
+        assertThat(disabled.getStatus()).isEqualTo("NORMAL");
+        assertThat(stale.getStatus()).isEqualTo("DISABLED");
+        verify(mapper, times(3)).updateById(any());
+        verify(mapper, never()).insertConnectorParamIgnoreConflict(any());
     }
 
     @Test
-    void upsertAndEnableUpdatesChangedContentAndRestoresDisabledSnapshot() {
-        ConnectorInfo oldConnector = connector(manifest("1.0.51", "status"));
-        ConnectorInfo latest = connector(manifest("1.0.52", "status"));
-        UserPrivateParam existing = existing(oldConnector, "DISABLED");
-        Date oldUpdateTime = existing.getUpdateTime();
-        when(mapper.selectOne(any())).thenReturn(existing);
+    void upsertAndEnableRejectsKeyOwnedByUserBeforeWritingAnything() {
+        UserPrivateParam userOwned = existing(
+            "DWS_HOME", "/custom/home", "USER", null, "NORMAL");
+        when(mapper.selectList(any())).thenReturn(List.of(userOwned));
 
-        boolean changed = service.upsertAndEnable(USER_ID, latest);
-
-        assertThat(changed).isTrue();
-        verify(mapper).updateById(existing);
-        assertThat(existing.getStatus()).isEqualTo("NORMAL");
-        assertThat(existing.getUpdateTime()).isAfter(oldUpdateTime);
-        assertThat(Sm4Util.decrypt(existing.getParamValueCipher()))
-            .isEqualTo(canonicalizer.canonicalize(latest, latest.getRuntimeManifest()));
+        assertThatThrownBy(() -> service.upsertAndEnable(USER_ID, connector(dwsManifest())))
+            .isInstanceOf(ConnectorParameterConflictException.class)
+            .hasMessageContaining("DWS_HOME");
+        verify(mapper, never()).insertConnectorParamIgnoreConflict(any());
+        verify(mapper, never()).updateById(any());
     }
 
     @Test
-    void disableRetainsSnapshotAndChangesOnlyStatus() {
-        ConnectorInfo connector = connector(manifest("1.0.52", "status"));
-        UserPrivateParam existing = existing(connector, "NORMAL");
-        String cipher = existing.getParamValueCipher();
-        when(mapper.selectOne(any())).thenReturn(existing);
+    void upsertAndEnableRejectsConcurrentWinnerOwnedByAnotherConnector() {
+        when(mapper.selectList(any())).thenReturn(List.of());
+        when(sequenceService.nextVal()).thenReturn(9001L);
+        when(mapper.insertConnectorParamIgnoreConflict(any())).thenReturn(0);
+        when(mapper.selectOne(any())).thenReturn(
+            existing("DWS_CONFIG_DIR", "/other", "CONNECTOR", "other", "NORMAL"));
 
-        boolean changed = service.disable(USER_ID, connector);
-
-        assertThat(changed).isTrue();
-        verify(mapper).updateById(existing);
-        assertThat(existing.getStatus()).isEqualTo("DISABLED");
-        assertThat(existing.getDeleteFlag()).isEqualTo("0");
-        assertThat(existing.getParamValueCipher()).isEqualTo(cipher);
+        assertThatThrownBy(() -> service.upsertAndEnable(USER_ID, connector(dwsManifest())))
+            .isInstanceOf(ConnectorParameterConflictException.class)
+            .hasMessageContaining("DWS_CONFIG_DIR");
     }
 
-    private UserPrivateParam existing(ConnectorInfo connector, String status) {
-        UserPrivateParam existing = new UserPrivateParam();
-        existing.setParamId(7001L);
-        existing.setUserId(USER_ID);
-        existing.setParamKey("CONNECTOR_DINGTALK_MANIFEST");
-        existing.setParamSource("CONNECTOR");
-        existing.setSourceRef("dingtalk");
-        existing.setParamValueCipher(Sm4Util.encrypt(canonicalizer.canonicalize(connector, connector.getRuntimeManifest())));
-        existing.setStatus(status);
-        existing.setDeleteFlag("0");
-        existing.setUpdateTime(new Date(System.currentTimeMillis() - 1_000L));
-        return existing;
+    @Test
+    void disableChangesEveryActiveParameterForTheConnector() {
+        UserPrivateParam first = existing(
+            "DWS_HOME", "/by/.connector-auth/.dws", "CONNECTOR", "dingtalk", "NORMAL");
+        UserPrivateParam second = existing(
+            "DWS_CONFIG_DIR", "/by/.connector-auth/.dws/config", "CONNECTOR", "dingtalk", "NORMAL");
+        UserPrivateParam alreadyDisabled = existing(
+            "DWS_DISABLE_KEYCHAIN", "1", "CONNECTOR", "dingtalk", "DISABLED");
+        when(mapper.selectList(any())).thenReturn(List.of(first, second, alreadyDisabled));
+
+        boolean changed = service.disable(USER_ID, connector(dwsManifest()));
+
+        assertThat(changed).isTrue();
+        assertThat(first.getStatus()).isEqualTo("DISABLED");
+        assertThat(second.getStatus()).isEqualTo("DISABLED");
+        verify(mapper, times(2)).updateById(any());
+    }
+
+    private UserPrivateParam existing(
+            String key,
+            String value,
+            String source,
+            String sourceRef,
+            String status) {
+        UserPrivateParam param = new UserPrivateParam();
+        param.setParamId((long) Math.abs(key.hashCode()));
+        param.setUserId(USER_ID);
+        param.setParamKey(key);
+        param.setParamValueCipher(Sm4Util.encrypt(value));
+        param.setParamSource(source);
+        param.setSourceRef(sourceRef);
+        if ("CONNECTOR".equals(source) && "dingtalk".equals(sourceRef)) {
+            param.setDescription("系统托管连接器环境参数：钉钉 / " + key);
+        }
+        param.setStatus(status);
+        param.setDeleteFlag("0");
+        param.setUpdateTime(new Date(System.currentTimeMillis() - 1_000L));
+        return param;
     }
 
     private ConnectorInfo connector(String manifest) {
@@ -145,17 +186,21 @@ class ConnectorManifestServiceTest {
         return connector;
     }
 
-    private String manifest(String version, String commandName) {
+    private String dwsManifest() {
         return """
             {
               "schemaVersion":"1.0",
               "id":"dingtalk",
-              "version":"%s",
-              "runtime":{"type":"cli","commands":{"%s":["dws","auth","status"]}},
+              "version":"1.0.52",
+              "runtime":{"type":"cli","commands":{"status":["dws","auth","status"]}},
               "authStorage":{"mode":"native-home","nativePath":"/by/.connector-auth/.dws",
-                "environment":{"HOME":"/by/.connector-auth/.dws"}},
+                "environment":{
+                  "DWS_HOME":"/by/.connector-auth/.dws",
+                  "DWS_CONFIG_DIR":"/by/.connector-auth/.dws/config",
+                  "DWS_DISABLE_KEYCHAIN":"1"
+                }},
               "skill":{"code":"dws","source":"system-builtin","installScope":"user","grantScope":"agent"}
             }
-            """.formatted(version, commandName);
+            """;
     }
 }

@@ -14,15 +14,20 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+
+import jakarta.annotation.PreDestroy;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationSessionContext;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationProgress;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
@@ -43,14 +48,20 @@ public class LarkCliAuthorizationProvider implements ConnectorAuthorizationProvi
     private static final int MAX_COMPLETION_TERMINAL_RESULTS = 256;
     private static final Duration CLI_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration MAX_COMPLETION_TERMINAL_TTL = Duration.ofMinutes(15);
+    private static final Duration APP_INITIALIZATION_TIMEOUT = Duration.ofMinutes(10);
+    private static final Duration START_OUTPUT_TIMEOUT = Duration.ofSeconds(10);
+    private static final long START_OUTPUT_POLL_MILLIS = 20L;
     private static final List<String> CONFIG_SHOW_COMMAND = List.of("lark-cli", "config", "show");
+    private static final List<String> CONFIG_INIT_NEW_COMMAND =
+        List.of("lark-cli", "config", "init", "--new");
     private static final List<String> STATUS_COMMAND =
         List.of("lark-cli", "auth", "status", "--json", "--verify");
 
     private static final String INVALID_USER = "INVALID_USER";
     private static final String PROVIDER_WORKSPACE_ERROR = "PROVIDER_WORKSPACE_ERROR";
-    private static final String APP_CONFIG_MISSING = "APP_CONFIG_MISSING";
-    private static final String APP_CONFIG_FAILED = "APP_CONFIG_FAILED";
+    private static final String APP_INIT_URL_MISSING = "APP_INIT_URL_MISSING";
+    private static final String APP_INIT_FAILED = "APP_INIT_FAILED";
+    private static final String APP_INIT_EXPIRED = "APP_INIT_EXPIRED";
     private static final String APP_CONFIG_CHECK_FAILED = "APP_CONFIG_CHECK_FAILED";
     private static final String PROVIDER_CONFIG_INVALID = "PROVIDER_CONFIG_INVALID";
     private static final String PROVIDER_START_FAILED = "PROVIDER_START_FAILED";
@@ -60,8 +71,9 @@ public class LarkCliAuthorizationProvider implements ConnectorAuthorizationProvi
 
     private static final String INVALID_USER_MESSAGE = "Invalid user";
     private static final String WORKSPACE_ERROR_MESSAGE = "Unable to prepare the Lark credential workspace";
-    private static final String APP_CONFIG_MISSING_MESSAGE = "Lark application configuration is missing";
-    private static final String APP_CONFIG_FAILED_MESSAGE = "Unable to initialize Lark application configuration";
+    private static final String APP_INIT_URL_MISSING_MESSAGE = "Lark application initialization URL was not provided";
+    private static final String APP_INIT_FAILED_MESSAGE = "Unable to initialize Lark application";
+    private static final String APP_INIT_EXPIRED_MESSAGE = "Lark application initialization expired";
     private static final String APP_CONFIG_CHECK_FAILED_MESSAGE = "Unable to check Lark application configuration";
     private static final String PROVIDER_CONFIG_INVALID_MESSAGE = "Invalid Lark authorization configuration";
     private static final String PROVIDER_START_FAILED_MESSAGE = "Unable to start Lark authorization";
@@ -72,25 +84,27 @@ public class LarkCliAuthorizationProvider implements ConnectorAuthorizationProvi
     private final ConnectorCliRunner cliRunner;
     private final ConnectorCredentialWorkspaceService workspaceService;
     private final ObjectMapper objectMapper;
-    private final String appId;
-    private final String appSecret;
+    private static final String APP_INITIALIZATION_PHASE = "app_initialization";
+    private static final String USER_AUTHORIZATION_PHASE = "user_authorization";
+    private static final Pattern HTTPS_URL = Pattern.compile("https://[^\\s\\p{Cntrl}]+", Pattern.CASE_INSENSITIVE);
     private final ConcurrentHashMap<String, ManagedProcess> completionProcesses = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ManagedProcess> initializationProcesses = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, AuthorizationStatusResult> initializationProgressResults =
+        new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, CompletionTerminalResult> completionTerminalResults =
         new ConcurrentHashMap<>();
     private final Object completionTerminalResultsLock = new Object();
+    private final Object lifecycleGate = new Object();
+    private boolean shuttingDown;
     private final Object[] authorizationLocks = createAuthorizationLocks();
 
     public LarkCliAuthorizationProvider(
         ConnectorCliRunner cliRunner,
         ConnectorCredentialWorkspaceService workspaceService,
-        ObjectMapper objectMapper,
-        @Value("${CONNECTOR_LARK_APP_ID:}") String appId,
-        @Value("${CONNECTOR_LARK_APP_SECRET:}") String appSecret) {
+        ObjectMapper objectMapper) {
         this.cliRunner = cliRunner;
         this.workspaceService = workspaceService;
         this.objectMapper = objectMapper;
-        this.appId = appId;
-        this.appSecret = appSecret;
     }
 
     @Override
@@ -100,6 +114,11 @@ public class LarkCliAuthorizationProvider implements ConnectorAuthorizationProvi
 
     @Override
     public AuthorizationStartResult start(AuthorizationStartContext context) {
+        synchronized (lifecycleGate) {
+            if (shuttingDown) {
+                return failedStart(PROVIDER_START_FAILED, PROVIDER_START_FAILED_MESSAGE);
+            }
+        }
         Long userId = parseUserId(context == null ? null : context.userId());
         if (userId == null) {
             return failedStart(INVALID_USER, INVALID_USER_MESSAGE);
@@ -133,24 +152,15 @@ public class LarkCliAuthorizationProvider implements ConnectorAuthorizationProvi
             if (!isNotConfigured(configResult)) {
                 return failedStart(APP_CONFIG_CHECK_FAILED, APP_CONFIG_CHECK_FAILED_MESSAGE);
             }
-            if (isBlank(appId) || isBlank(appSecret)) {
-                return failedStart(APP_CONFIG_MISSING, APP_CONFIG_MISSING_MESSAGE);
-            }
-            CliResult initResult;
-            try {
-                initResult = cliRunner.run(
-                    configInitCommand(),
-                    workspace.environment(),
-                    appSecret + System.lineSeparator(),
-                    CLI_TIMEOUT);
-            } catch (RuntimeException e) {
-                return failedStart(APP_CONFIG_FAILED, APP_CONFIG_FAILED_MESSAGE);
-            }
-            if (initResult == null || initResult.exitCode() != 0 || initResult.truncated()) {
-                return failedStart(APP_CONFIG_FAILED, APP_CONFIG_FAILED_MESSAGE);
-            }
+            return startAppInitialization(context.authorizationId(), workspace, loginCommand);
         }
 
+        return startUserAuthorization(loginCommand, workspace);
+    }
+
+    private AuthorizationStartResult startUserAuthorization(
+            List<String> loginCommand,
+            ConnectorCliWorkspace workspace) {
         CliResult loginResult;
         try {
             loginResult = cliRunner.run(loginCommand, workspace.environment(), null, CLI_TIMEOUT);
@@ -176,11 +186,118 @@ public class LarkCliAuthorizationProvider implements ConnectorAuthorizationProvi
                 null,
                 providerState,
                 null,
-                null
+                null,
+                USER_AUTHORIZATION_PHASE
             );
         } catch (RuntimeException | JsonProcessingException e) {
             return failedStart(PROVIDER_PROTOCOL_ERROR, PROVIDER_PROTOCOL_ERROR_MESSAGE);
         }
+    }
+
+    private AuthorizationStartResult startAppInitialization(
+            String authorizationId,
+            ConnectorCliWorkspace workspace,
+            List<String> loginCommand) {
+        if (isBlank(authorizationId)) {
+            return failedStart(PROVIDER_PROTOCOL_ERROR, PROVIDER_PROTOCOL_ERROR_MESSAGE);
+        }
+        ManagedProcess process;
+        try {
+            process = cliRunner.start(CONFIG_INIT_NEW_COMMAND, workspace.environment(), null);
+        } catch (RuntimeException e) {
+            return failedStart(APP_INIT_FAILED, APP_INIT_FAILED_MESSAGE);
+        }
+        if (process == null) {
+            return failedStart(APP_INIT_FAILED, APP_INIT_FAILED_MESSAGE);
+        }
+        boolean admitted;
+        synchronized (lifecycleGate) {
+            admitted = !shuttingDown && initializationProcesses.putIfAbsent(authorizationId, process) == null;
+        }
+        if (!admitted) {
+            destroyProcess(process);
+            return failedStart(APP_INIT_FAILED, APP_INIT_FAILED_MESSAGE);
+        }
+        String authorizationUrl = waitForHttpsUrl(process);
+        if (authorizationUrl == null) {
+            initializationProcesses.remove(authorizationId, process);
+            destroyProcess(process);
+            return failedStart(APP_INIT_URL_MISSING, APP_INIT_URL_MISSING_MESSAGE);
+        }
+        try {
+            ObjectNode state = objectMapper.createObjectNode();
+            state.put("phase", APP_INITIALIZATION_PHASE);
+            state.putPOJO("loginCommand", loginCommand);
+            Date expiresAt = new Date(System.currentTimeMillis() + APP_INITIALIZATION_TIMEOUT.toMillis());
+            String providerState = objectMapper.writeValueAsString(state);
+            scheduleInitializationExpiry(authorizationId, process, expiresAt);
+            return new AuthorizationStartResult(
+                AuthorizationStatus.PENDING,
+                authorizationUrl,
+                expiresAt,
+                null,
+                providerState,
+                null,
+                null,
+                APP_INITIALIZATION_PHASE
+            );
+        } catch (JsonProcessingException e) {
+            initializationProcesses.remove(authorizationId, process);
+            destroyProcess(process);
+            return failedStart(PROVIDER_PROTOCOL_ERROR, PROVIDER_PROTOCOL_ERROR_MESSAGE);
+        }
+    }
+
+    private String waitForHttpsUrl(ManagedProcess process) {
+        long deadline = System.nanoTime() + START_OUTPUT_TIMEOUT.toNanos();
+        try {
+            while (System.nanoTime() < deadline) {
+                if (process.outputTruncated()) {
+                    return null;
+                }
+                String url = firstHttpsUrl(process.output());
+                if (url != null) {
+                    return url;
+                }
+                if (!process.isAlive() && process.outputComplete()) {
+                    return null;
+                }
+                TimeUnit.MILLISECONDS.sleep(START_OUTPUT_POLL_MILLIS);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (RuntimeException e) {
+            return null;
+        }
+        return null;
+    }
+
+    private String firstHttpsUrl(String output) {
+        if (output == null) {
+            return null;
+        }
+        Matcher matcher = HTTPS_URL.matcher(output);
+        while (matcher.find()) {
+            String candidate = matcher.group();
+            while (!candidate.isEmpty() && "\"'.,;)]}".indexOf(candidate.charAt(candidate.length() - 1)) >= 0) {
+                candidate = candidate.substring(0, candidate.length() - 1);
+            }
+            if (validInitializationUrl(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private void scheduleInitializationExpiry(String authorizationId, ManagedProcess process, Date expiresAt) {
+        long delayMillis = Math.max(0L, expiresAt.getTime() - System.currentTimeMillis());
+        java.util.concurrent.CompletableFuture.delayedExecutor(
+            delayMillis, TimeUnit.MILLISECONDS).execute(() -> {
+                if (initializationProcesses.remove(authorizationId, process)) {
+                    destroyProcess(process);
+                }
+                initializationProgressResults.remove(authorizationId);
+            });
     }
 
     @Override
@@ -215,6 +332,10 @@ public class LarkCliAuthorizationProvider implements ConnectorAuthorizationProvi
             return terminalResult;
         }
 
+        if (isApplicationInitializationState(session.providerState())) {
+            return queryApplicationInitialization(session, workspace, authorizationId);
+        }
+
         ConnectedAccount connected;
         try {
             connected = readConnectedAccount(workspace);
@@ -234,9 +355,14 @@ public class LarkCliAuthorizationProvider implements ConnectorAuthorizationProvi
 
         ManagedProcess process;
         try {
-            process = completionProcesses.computeIfAbsent(
-                authorizationId,
-                ignored -> cliRunner.start(completionCommand(deviceCode), workspace.environment(), null));
+            synchronized (lifecycleGate) {
+                if (shuttingDown) {
+                    return failedStatus(PROVIDER_AUTH_FAILED, PROVIDER_AUTH_FAILED_MESSAGE);
+                }
+                process = completionProcesses.computeIfAbsent(
+                    authorizationId,
+                    ignored -> cliRunner.start(completionCommand(deviceCode), workspace.environment(), null));
+            }
         } catch (RuntimeException e) {
             return recordAuthFailure(session, authorizationId);
         }
@@ -262,6 +388,136 @@ public class LarkCliAuthorizationProvider implements ConnectorAuthorizationProvi
         }
     }
 
+    private AuthorizationStatusResult queryApplicationInitialization(
+            AuthorizationSessionContext session,
+            ConnectorCliWorkspace workspace,
+            String authorizationId) {
+        if (session.expiresAt() != null && session.expiresAt().getTime() <= System.currentTimeMillis()) {
+            ManagedProcess expired = initializationProcesses.remove(authorizationId);
+            destroyProcess(expired);
+            return failedStatus(APP_INIT_EXPIRED, APP_INIT_EXPIRED_MESSAGE);
+        }
+        List<String> loginCommand;
+        try {
+            loginCommand = decodeInitializationLoginCommand(session.providerState());
+        } catch (JsonProcessingException | RuntimeException e) {
+            return failedStatus(PROVIDER_PROTOCOL_ERROR, PROVIDER_PROTOCOL_ERROR_MESSAGE);
+        }
+        AuthorizationStatusResult existingProgress = initializationProgressResults.get(authorizationId);
+        if (existingProgress != null) {
+            return existingProgress;
+        }
+
+        ManagedProcess process = initializationProcesses.get(authorizationId);
+        if (process != null) {
+            try {
+                if (process.outputTruncated()) {
+                    initializationProcesses.remove(authorizationId, process);
+                    destroyProcess(process);
+                    return failedStatus(APP_INIT_FAILED, APP_INIT_FAILED_MESSAGE);
+                }
+                if (process.isAlive()) {
+                    return pendingStatus();
+                }
+                initializationProcesses.remove(authorizationId, process);
+                if (process.exitCode() == null || process.exitCode() != 0) {
+                    destroyProcess(process);
+                    return failedStatus(APP_INIT_FAILED, APP_INIT_FAILED_MESSAGE);
+                }
+            } catch (RuntimeException e) {
+                initializationProcesses.remove(authorizationId, process);
+                destroyProcess(process);
+                return failedStatus(APP_INIT_FAILED, APP_INIT_FAILED_MESSAGE);
+            }
+        }
+
+        CliResult configResult;
+        try {
+            configResult = cliRunner.run(CONFIG_SHOW_COMMAND, workspace.environment(), null, CLI_TIMEOUT);
+        } catch (RuntimeException e) {
+            return failedStatus(APP_CONFIG_CHECK_FAILED, APP_CONFIG_CHECK_FAILED_MESSAGE);
+        }
+        if (configResult == null || configResult.exitCode() != 0) {
+            if (process == null && configResult != null && isNotConfigured(configResult)) {
+                return pendingStatus();
+            }
+            return failedStatus(APP_INIT_FAILED, APP_INIT_FAILED_MESSAGE);
+        }
+
+        AuthorizationStartResult login = startUserAuthorization(loginCommand, workspace);
+        if (login.status() != AuthorizationStatus.PENDING) {
+            return failedStatus(login.errorCode(), login.errorMessage());
+        }
+        AuthorizationStatusResult progress = new AuthorizationStatusResult(
+            AuthorizationStatus.PENDING,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            new AuthorizationProgress(
+                USER_AUTHORIZATION_PHASE,
+                login.authorizationUrl(),
+                login.providerState(),
+                login.expiresAt()
+            )
+        );
+        AuthorizationStatusResult winner = initializationProgressResults.putIfAbsent(authorizationId, progress);
+        return winner == null ? progress : winner;
+    }
+
+    private boolean isApplicationInitializationState(String providerState) {
+        if (providerState == null) {
+            return false;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(providerState);
+            return root != null && APP_INITIALIZATION_PHASE.equals(textValue(root, "phase"));
+        } catch (JsonProcessingException | RuntimeException e) {
+            return false;
+        }
+    }
+
+    private List<String> decodeInitializationLoginCommand(String providerState) throws JsonProcessingException {
+        JsonNode root = objectMapper.readTree(providerState);
+        if (root == null || !root.isObject() || !APP_INITIALIZATION_PHASE.equals(textValue(root, "phase"))) {
+            throw new IllegalArgumentException("Invalid provider state");
+        }
+        JsonNode commandNode = root.get("loginCommand");
+        if (commandNode == null || !commandNode.isArray() || commandNode.size() < 6 || commandNode.size() > 100) {
+            throw new IllegalArgumentException("Invalid provider state");
+        }
+        List<String> command = new ArrayList<>();
+        commandNode.forEach(element -> {
+            if (!element.isTextual() || element.textValue().isBlank()
+                    || element.textValue().codePoints().anyMatch(Character::isISOControl)) {
+                throw new IllegalArgumentException("Invalid provider state");
+            }
+            command.add(element.textValue());
+        });
+        if (!command.subList(0, 3).equals(List.of("lark-cli", "auth", "login"))
+                || !command.subList(command.size() - 2, command.size()).equals(List.of("--no-wait", "--json"))) {
+            throw new IllegalArgumentException("Invalid provider state");
+        }
+        List<String> selector = command.subList(3, command.size() - 2);
+        if (selector.equals(List.of("--recommend"))) {
+            return List.copyOf(command);
+        }
+        if (selector.size() == 2 && "--scope".equals(selector.getFirst())) {
+            return List.copyOf(command);
+        }
+        if (selector.size() >= 2 && selector.size() % 2 == 0) {
+            for (int index = 0; index < selector.size(); index += 2) {
+                if (!"--domain".equals(selector.get(index))) {
+                    throw new IllegalArgumentException("Invalid provider state");
+                }
+            }
+            return List.copyOf(command);
+        }
+        throw new IllegalArgumentException("Invalid provider state");
+    }
+
     @Override
     public void cancel(AuthorizationSessionContext session) {
         if (session == null || session.authorizationId() == null) {
@@ -270,20 +526,31 @@ public class LarkCliAuthorizationProvider implements ConnectorAuthorizationProvi
         String authorizationId = session.authorizationId();
         synchronized (authorizationLock(authorizationId)) {
             recordTerminalResult(session, authorizationId, CompletionTerminalState.CANCELLED);
+            ManagedProcess initialization = initializationProcesses.remove(authorizationId);
+            destroyProcess(initialization);
+            initializationProgressResults.remove(authorizationId);
             removeAndDestroyCompletionProcess(authorizationId);
         }
     }
 
-    private List<String> configInitCommand() {
-        return List.of(
-            "lark-cli",
-            "config",
-            "init",
-            "--app-id",
-            appId,
-            "--app-secret-stdin",
-            "--brand",
-            "feishu");
+    @PreDestroy
+    void shutdown() {
+        List<ManagedProcess> initialization;
+        List<ManagedProcess> completion;
+        synchronized (lifecycleGate) {
+            if (shuttingDown) {
+                return;
+            }
+            shuttingDown = true;
+            initialization = List.copyOf(initializationProcesses.values());
+            completion = List.copyOf(completionProcesses.values());
+            initializationProcesses.clear();
+            completionProcesses.clear();
+        }
+        initialization.forEach(this::destroyProcess);
+        completion.forEach(this::destroyProcess);
+        initializationProgressResults.clear();
+        completionTerminalResults.clear();
     }
 
     private boolean isNotConfigured(CliResult result) {
@@ -597,6 +864,21 @@ public class LarkCliAuthorizationProvider implements ConnectorAuthorizationProvi
         }
     }
 
+    private boolean validInitializationUrl(String value) {
+        if (isBlank(value)) {
+            return false;
+        }
+        try {
+            URI uri = new URI(value);
+            String host = uri.getHost();
+            return "https".equalsIgnoreCase(uri.getScheme())
+                && ("open.feishu.cn".equalsIgnoreCase(host) || "open.larksuite.com".equalsIgnoreCase(host))
+                && "/page/cli".equals(uri.getPath());
+        } catch (URISyntaxException e) {
+            return false;
+        }
+    }
+
     private AuthorizationStatusResult recordConnected(
         AuthorizationSessionContext session,
         String authorizationId,
@@ -698,6 +980,9 @@ public class LarkCliAuthorizationProvider implements ConnectorAuthorizationProvi
     }
 
     private void destroyProcess(ManagedProcess process) {
+        if (process == null) {
+            return;
+        }
         try {
             process.destroy();
         } catch (RuntimeException e) {

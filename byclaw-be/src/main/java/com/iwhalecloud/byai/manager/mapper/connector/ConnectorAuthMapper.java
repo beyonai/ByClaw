@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.mapper.connector;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.iwhalecloud.byai.manager.dto.connector.ConnectorEnableStateDto;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
@@ -15,19 +16,33 @@ import java.util.List;
 @Mapper
 public interface ConnectorAuthMapper extends BaseMapper<ConnectorAuth> {
 
-    /** 查询用户当前已开启且仍有效的连接器编码。 */
+    /** 查询全部有效连接器及指定用户的开启状态。 */
     @Select("""
-        SELECT info.connector_code
-        FROM byai_connector_auth auth
-        JOIN byai_connector_info info
-          ON info.connector_id = auth.connector_id
-        WHERE auth.user_id = #{userId}
-          AND auth.enable_flag = 'Y'
-          AND auth.status_cd = '00A'
-          AND info.status_cd = '00A'
+        SELECT info.connector_code,
+               CASE WHEN auth.enable_flag = 'Y' THEN TRUE ELSE FALSE END AS enabled
+        FROM byai_connector_info info
+        LEFT JOIN (
+            SELECT connector_id, enable_flag
+            FROM (
+                SELECT connector_id,
+                       enable_flag,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY connector_id
+                           ORDER BY CASE WHEN enable_flag = 'Y' THEN 0 ELSE 1 END,
+                                    update_time DESC NULLS LAST,
+                                    create_time DESC,
+                                    auth_id DESC
+                       ) AS row_num
+                FROM byai_connector_auth
+                WHERE user_id = #{userId}
+                  AND status_cd = '00A'
+            ) ranked
+            WHERE row_num = 1
+        ) auth ON auth.connector_id = info.connector_id
+        WHERE info.status_cd = '00A'
         ORDER BY info.sort ASC, info.connector_id ASC
         """)
-    List<String> selectEnabledConnectorCodes(@Param("userId") String userId);
+    List<ConnectorEnableStateDto> selectConnectorEnableStates(@Param("userId") String userId);
 
     /** 并发首次绑定时忽略有效授权唯一键冲突，兼容 openGauss。 */
     @Insert("""

@@ -82,7 +82,6 @@ public class ConnectorConnectionStateService {
         if (connector == null || !"00A".equals(connector.getStatusCd())) {
             throw new IllegalArgumentException("连接器不存在或已失效");
         }
-
         boolean manifestChanged = enabled
             ? manifestService.upsertAndEnable(user.userId(), connector)
             : manifestService.disable(user.userId(), connector);

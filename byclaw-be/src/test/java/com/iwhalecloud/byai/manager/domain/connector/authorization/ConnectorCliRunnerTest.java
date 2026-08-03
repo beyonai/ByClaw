@@ -213,6 +213,25 @@ class ConnectorCliRunnerTest {
     }
 
     @Test
+    void managedProcessExposesOutputDrainCompletion() throws Exception {
+        ConnectorCliRunner.ManagedProcess process = runner.start(
+            List.of("/bin/sh", "-c", "echo ready; sleep 30"),
+            Map.of(),
+            null);
+        try {
+            assertThat(await(() -> process.output().contains("ready"), TEST_TIMEOUT)).isTrue();
+            assertThat(process.isAlive()).isTrue();
+            assertThat(managedOutputComplete(process)).isFalse();
+
+            process.destroy();
+
+            assertThat(await(() -> managedOutputComplete(process), TEST_TIMEOUT)).isTrue();
+        } finally {
+            process.destroy();
+        }
+    }
+
+    @Test
     void overallDeadlineIncludesDefinitiveOutputDrain() throws Exception {
         Path childPidFile = tempDir.resolve("drain-child.pid");
         try {
@@ -306,6 +325,14 @@ class ConnectorCliRunnerTest {
             return (boolean) ConnectorCliRunner.ManagedProcess.class.getMethod("outputTruncated").invoke(process);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("ManagedProcess.outputTruncated() is required", e);
+        }
+    }
+
+    private boolean managedOutputComplete(ConnectorCliRunner.ManagedProcess process) {
+        try {
+            return (boolean) ConnectorCliRunner.ManagedProcess.class.getMethod("outputComplete").invoke(process);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("ManagedProcess.outputComplete() is required", e);
         }
     }
 

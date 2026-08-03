@@ -7,6 +7,14 @@ description: 管理飞书/Lark 产品能力（IM消息/群聊/机器人/卡片�
 
 通过官方 `lark-cli` 命令管理飞书/Lark 产品能力。本 skill 是 ByClaw/OpenClaw 里的聚合入口，结构参考 `dws`，但底层只走 `lark-cli`。
 
+## 连接器运行时 HOME 隔离（最高优先级）
+
+- OpenClaw 会注入飞书专属 `LARK_HOME`。每次执行 Lark CLI 都必须仅为该子进程映射 HOME，命令形式为 `HOME="$LARK_HOME" lark-cli ...`。
+- 执行本 Skill 的 Python 脚本时同样使用 `HOME="$LARK_HOME" python3 ...`，使脚本内部启动的 `lark-cli` 继承同一用户凭证目录。
+- 本规则适用于父 Skill、子 Skill、scripts 和 references 中出现的所有 Lark CLI 命令；其中展示的裸 `lark-cli ...` 仅表示参数结构，实际执行必须增加上述前缀。
+- `LARK_HOME` 缺失或为空时必须停止执行并报告连接器运行时参数缺失，不得回退到默认 HOME、共享目录或其他用户目录。
+- 不得修改 OpenClaw 全局 `HOME`，不得执行 `export HOME="$LARK_HOME"`；映射只允许作用于当前 Lark CLI 或脚本子进程。
+
 ## 严格禁止 (NEVER DO)
 
 - 不要使用 `lark-cli` 以外的方式操作飞书资源；禁止自行 `curl`、手写 HTTP 客户端、浏览器点 UI。

@@ -188,6 +188,8 @@ public class ConnectorCliRunner {
 
         String output();
 
+        boolean outputComplete();
+
         boolean outputTruncated();
 
         void destroy();
@@ -231,6 +233,11 @@ public class ConnectorCliRunner {
         @Override
         public String output() {
             return output.snapshot();
+        }
+
+        @Override
+        public boolean outputComplete() {
+            return outputCompleted.getCount() == 0;
         }
 
         @Override

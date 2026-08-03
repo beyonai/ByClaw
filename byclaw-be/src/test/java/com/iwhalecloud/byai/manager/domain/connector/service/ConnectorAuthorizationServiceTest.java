@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -25,6 +26,7 @@ import org.mockito.ArgumentCaptor;
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationProviderRegistry;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationProgress;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationSessionContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartResult;
@@ -67,6 +69,8 @@ class ConnectorAuthorizationServiceTest {
         provider = mock(ConnectorAuthorizationProvider.class);
         when(connectorAuthMapper.insertActiveIgnoreConflict(any())).thenReturn(1);
         when(connectorAuthMapper.updateById(any())).thenReturn(1);
+        lenient().when(sessionRepository.tryAcquireStartLock(eq(USER_ID), eq(CONNECTOR_ID), any(Duration.class)))
+            .thenReturn(Optional.of("start-lock-token"));
         service = new ConnectorAuthorizationService(
             connectorInfoService,
             providerRegistry,
@@ -278,6 +282,36 @@ class ConnectorAuthorizationServiceTest {
     }
 
     @Test
+    void concurrentStartIsRejectedBeforeProviderSideEffectsWhenStartLockIsBusy() {
+        ConnectorInfo connector = connector("lark", "lark-cli", "DEVICE_FLOW", null);
+        when(connectorInfoService.findById(CONNECTOR_ID)).thenReturn(connector);
+        when(providerRegistry.get("lark-cli")).thenReturn(provider);
+        when(sessionRepository.tryAcquireStartLock(eq(USER_ID), eq(CONNECTOR_ID), any(Duration.class)))
+            .thenReturn(Optional.empty());
+
+        ConnectorAuthorizationDto result = service.start(request(), USER_ID);
+
+        assertThat(result.getStatus()).isEqualTo("failed");
+        assertThat(result.getErrorCode()).isEqualTo("SESSION_ALREADY_ACTIVE");
+        verify(provider, never()).start(any());
+    }
+
+    @Test
+    void existingActiveSessionIsRejectedBeforeProviderSideEffectsAfterStartLockAcquired() {
+        ConnectorInfo connector = connector("lark", "lark-cli", "DEVICE_FLOW", null);
+        when(connectorInfoService.findById(CONNECTOR_ID)).thenReturn(connector);
+        when(providerRegistry.get("lark-cli")).thenReturn(provider);
+        when(sessionRepository.hasActiveSession(USER_ID, CONNECTOR_ID)).thenReturn(true);
+
+        ConnectorAuthorizationDto result = service.start(request(), USER_ID);
+
+        assertThat(result.getStatus()).isEqualTo("failed");
+        assertThat(result.getErrorCode()).isEqualTo("SESSION_ALREADY_ACTIVE");
+        verify(provider, never()).start(any());
+        verify(sessionRepository).releaseStartLock(USER_ID, CONNECTOR_ID, "start-lock-token");
+    }
+
+    @Test
     void noneAuthorizationIdempotentlyUpsertsEnabledBindingWithoutRedisOrProvider() {
         ConnectorInfo connector = connector("local", null, "NONE", null);
         when(connectorInfoService.findById(CONNECTOR_ID)).thenReturn(connector);
@@ -408,6 +442,80 @@ class ConnectorAuthorizationServiceTest {
         assertThat(result.getStatus()).isEqualTo("pending");
         assertThat(result.getAuthorizationUrl()).isEqualTo(AUTHORIZATION_URL);
         verify(sessionRepository, never()).compareAndSetStatus(any(), any(), anyLong(), any());
+    }
+
+    @Test
+    void pendingStatusPersistsAndReturnsProviderProgressTransition() {
+        RedisAuthorizationSession pending = sessionWithPhase(AuthorizationStatus.PENDING, 3L, "app_initialization");
+        String nextUrl = "https://open.feishu.cn/user-authorization";
+        String nextState = "{\"phase\":\"user_authorization\",\"deviceCode\":\"next-secret\"}";
+        Date nextExpiry = new Date(System.currentTimeMillis() + Duration.ofMinutes(5).toMillis());
+        when(sessionRepository.findOwned(AUTHORIZATION_ID, USER_ID)).thenReturn(Optional.of(pending));
+        when(sessionRepository.tryAcquireStatusLock(eq(AUTHORIZATION_ID), any(Duration.class)))
+            .thenReturn(Optional.of("lock-token"));
+        when(providerRegistry.get("lark-cli")).thenReturn(provider);
+        when(provider.queryStatus(any())).thenReturn(new AuthorizationStatusResult(
+            AuthorizationStatus.PENDING,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            new AuthorizationProgress("user_authorization", nextUrl, nextState, nextExpiry)
+        ));
+        when(sessionRepository.compareAndSetStatus(
+            eq(AUTHORIZATION_ID), eq(AuthorizationStatus.PENDING), eq(3L), any())).thenReturn(true);
+
+        ConnectorAuthorizationDto result = service.status(AUTHORIZATION_ID, USER_ID);
+
+        ArgumentCaptor<RedisAuthorizationSession> replacementCaptor =
+            ArgumentCaptor.forClass(RedisAuthorizationSession.class);
+        verify(sessionRepository).compareAndSetStatus(
+            eq(AUTHORIZATION_ID), eq(AuthorizationStatus.PENDING), eq(3L), replacementCaptor.capture());
+        RedisAuthorizationSession replacement = replacementCaptor.getValue();
+        assertThat(replacement.status()).isEqualTo(AuthorizationStatus.PENDING);
+        assertThat(replacement.phase()).isEqualTo("user_authorization");
+        assertThat(replacement.expiresAt()).isEqualTo(nextExpiry);
+        assertThat(Sm4Util.decrypt(replacement.authorizationUrlCipher())).isEqualTo(nextUrl);
+        assertThat(Sm4Util.decrypt(replacement.providerStateCipher())).isEqualTo(nextState);
+        assertThat(result.getStatus()).isEqualTo("pending");
+        assertThat(result.getPhase()).isEqualTo("user_authorization");
+        assertThat(result.getAuthorizationUrl()).isEqualTo(nextUrl);
+        verify(sessionRepository).releaseStatusLock(AUTHORIZATION_ID, "lock-token");
+    }
+
+    @Test
+    void appInitializationPollReturnsCurrentSessionWhenAnotherInstanceOwnsTransitionLock() {
+        RedisAuthorizationSession pending = sessionWithPhase(AuthorizationStatus.PENDING, 3L, "app_initialization");
+        when(sessionRepository.findOwned(AUTHORIZATION_ID, USER_ID)).thenReturn(Optional.of(pending));
+        when(sessionRepository.tryAcquireStatusLock(eq(AUTHORIZATION_ID), any(Duration.class)))
+            .thenReturn(Optional.empty());
+
+        ConnectorAuthorizationDto result = service.status(AUTHORIZATION_ID, USER_ID);
+
+        assertThat(result.getStatus()).isEqualTo("pending");
+        assertThat(result.getPhase()).isEqualTo("app_initialization");
+        assertThat(result.getAuthorizationUrl()).isEqualTo(AUTHORIZATION_URL);
+        verifyNoInteractions(providerRegistry);
+        verify(sessionRepository, never()).releaseStatusLock(any(), any());
+    }
+
+    @Test
+    void appInitializationLockWinnerRereadsSessionBeforeCallingProvider() {
+        RedisAuthorizationSession stale = sessionWithPhase(AuthorizationStatus.PENDING, 3L, "app_initialization");
+        RedisAuthorizationSession advanced = sessionWithPhase(AuthorizationStatus.PENDING, 4L, "user_authorization");
+        when(sessionRepository.findOwned(AUTHORIZATION_ID, USER_ID))
+            .thenReturn(Optional.of(stale), Optional.of(advanced));
+        when(sessionRepository.tryAcquireStatusLock(eq(AUTHORIZATION_ID), any(Duration.class)))
+            .thenReturn(Optional.of("lock-token"));
+
+        ConnectorAuthorizationDto result = service.status(AUTHORIZATION_ID, USER_ID);
+
+        assertThat(result.getPhase()).isEqualTo("user_authorization");
+        assertThat(result.getAuthorizationUrl()).isEqualTo(AUTHORIZATION_URL);
+        verifyNoInteractions(providerRegistry);
+        verify(sessionRepository).releaseStatusLock(AUTHORIZATION_ID, "lock-token");
     }
 
     @Test
@@ -787,6 +895,29 @@ class ConnectorAuthorizationServiceTest {
             "lark",
             "lark-cli",
             status,
+            Sm4Util.encrypt(AUTHORIZATION_URL),
+            "provider-session-1",
+            Sm4Util.encrypt(PROVIDER_STATE),
+            null,
+            futureExpiry(),
+            null,
+            null,
+            version
+        );
+    }
+
+    private RedisAuthorizationSession sessionWithPhase(
+            AuthorizationStatus status,
+            long version,
+            String phase) {
+        return new RedisAuthorizationSession(
+            AUTHORIZATION_ID,
+            USER_ID,
+            CONNECTOR_ID,
+            "lark",
+            "lark-cli",
+            status,
+            phase,
             Sm4Util.encrypt(AUTHORIZATION_URL),
             "provider-session-1",
             Sm4Util.encrypt(PROVIDER_STATE),

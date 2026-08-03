@@ -13,6 +13,7 @@ import com.iwhalecloud.byai.manager.dto.users.UserPrivateParamDTO;
 import com.iwhalecloud.byai.manager.entity.users.UserPrivateParam;
 import com.iwhalecloud.byai.manager.mapper.users.UserPrivateParamMapper;
 import com.iwhalecloud.byai.manager.vo.users.UserPrivateParamVO;
+import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -30,6 +31,9 @@ class UserPrivateParamApplicationServiceTest {
         mapper = mock(UserPrivateParamMapper.class);
         service = new UserPrivateParamApplicationService();
         ReflectionTestUtils.setField(service, "userPrivateParamMapper", mapper);
+        SequenceService sequenceService = mock(SequenceService.class);
+        when(sequenceService.nextVal()).thenReturn(8001L);
+        ReflectionTestUtils.setField(service, "sequenceService", sequenceService);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(1001L);
@@ -90,21 +94,22 @@ class UserPrivateParamApplicationServiceTest {
     }
 
     @Test
-    void userCannotCreateAReservedConnectorManifestKey() {
+    void legacyManifestShapedKeyIsNotReservedBecauseOwnershipUsesParamSource() {
         UserPrivateParamDTO request = new UserPrivateParamDTO();
         request.setKey("CONNECTOR_LARK_MANIFEST");
         request.setValue("{}");
 
-        assertThatThrownBy(() -> service.save(request))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("系统保留");
+        UserPrivateParamVO saved = service.save(request);
+
+        assertThat(saved.getKey()).isEqualTo("CONNECTOR_LARK_MANIFEST");
+        assertThat(saved.getSource()).isEqualTo("USER");
     }
 
     private UserPrivateParam managedParam() {
         UserPrivateParam managed = new UserPrivateParam();
         managed.setParamId(7001L);
         managed.setUserId(1001L);
-        managed.setParamKey("CONNECTOR_DINGTALK_MANIFEST");
+        managed.setParamKey("DWS_HOME");
         managed.setParamSource("CONNECTOR");
         managed.setSourceRef("dingtalk");
         managed.setStatus("NORMAL");

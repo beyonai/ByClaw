@@ -16,6 +16,8 @@ public class ConnectorAuthorizationDto {
 
     private String status;
 
+    private String phase;
+
     private String qrCodeUrl;
 
     private String authorizationUrl;

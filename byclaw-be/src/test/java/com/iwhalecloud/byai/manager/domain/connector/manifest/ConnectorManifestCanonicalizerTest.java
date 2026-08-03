@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.domain.connector.manifest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
@@ -100,6 +101,46 @@ class ConnectorManifestCanonicalizerTest {
             .hasMessageContaining("64 KiB");
     }
 
+    @Test
+    void extractEnvironmentReturnsValidatedCanonicalOrder() {
+        ConnectorInfo connector = connector("dingtalk");
+        String manifest = manifestWithEnvironment("""
+            {
+              "DWS_HOME":"/by/.connector-auth/.dws",
+              "DWS_DISABLE_KEYCHAIN":"1",
+              "DWS_CONFIG_DIR":"/by/.connector-auth/.dws/config"
+            }
+            """);
+
+        assertThat(canonicalizer.extractEnvironment(connector, manifest))
+            .containsExactly(
+                entry("DWS_CONFIG_DIR", "/by/.connector-auth/.dws/config"),
+                entry("DWS_DISABLE_KEYCHAIN", "1"),
+                entry("DWS_HOME", "/by/.connector-auth/.dws"));
+    }
+
+    @Test
+    void canonicalizeRejectsInvalidEnvironmentVariableNames() {
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector("dingtalk"),
+            manifestWithEnvironment("{\"lower-case\":\"value\"}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("environment key");
+
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector("dingtalk"),
+            manifestWithEnvironment("{\"1INVALID\":\"value\"}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("environment key");
+
+        String oversizedKey = "A".repeat(129);
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector("dingtalk"),
+            manifestWithEnvironment("{\"" + oversizedKey + "\":\"value\"}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("environment key");
+    }
+
     private ConnectorInfo connector(String connectorCode) {
         ConnectorInfo connector = new ConnectorInfo();
         connector.setConnectorCode(connectorCode);
@@ -117,5 +158,19 @@ class ConnectorManifestCanonicalizerTest {
               "skill":{"code":"dws","source":"system-builtin","installScope":"user","grantScope":"agent"}
             }
             """.formatted(id, commands, nativePath, nativePath);
+    }
+
+    private String manifestWithEnvironment(String environment) {
+        return """
+            {
+              "schemaVersion":"1.0",
+              "id":"dingtalk",
+              "version":"1.0.52",
+              "runtime":{"type":"cli","commands":{"status":["dws","auth","status"]}},
+              "authStorage":{"mode":"native-home","nativePath":"/by/.connector-auth/.dws",
+                "environment":%s},
+              "skill":{"code":"dws","source":"system-builtin","installScope":"user","grantScope":"agent"}
+            }
+            """.formatted(environment);
     }
 }

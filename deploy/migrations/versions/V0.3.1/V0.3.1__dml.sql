@@ -12,6 +12,7 @@ INSERT INTO byai.byai_connector_info (
     auth_mode,
     auth_config,
     request_config,
+    runtime_manifest,
     sort
 )
 SELECT
@@ -24,6 +25,7 @@ SELECT
     seed.auth_mode,
     seed.auth_config,
     '{}',
+    seed.runtime_manifest,
     seed.sort
 FROM (
     SELECT 'dingtalk' AS connector_code,
@@ -32,32 +34,23 @@ FROM (
            'dws-dingtalk' AS provider_code,
            'DEVICE_FLOW' AS auth_mode,
            '{}' AS auth_config,
+           '{"authStorage":{"environment":{"DWS_CONFIG_DIR":"/by/.connector-auth/.dws/config","DWS_DISABLE_KEYCHAIN":"1","DWS_HOME":"/by/.connector-auth/.dws"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.dws","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"dingtalk","runtime":{"authorizeIn":"be-auth-job","commands":{"login":["dws","auth","login","--device","-y"],"logout":["dws","auth","reset","-y"],"status":["dws","auth","status","--format","json"]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"dws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.52"}' AS runtime_manifest,
            10 AS sort
     UNION ALL
     SELECT 'lark', '飞书', '通过 lark-cli 连接飞书工作空间', 'lark-cli', 'DEVICE_FLOW',
-           '{"domains":["docs","drive","wiki"]}', 20
+           '{"domains":["docs","drive","wiki"]}',
+           '{"authStorage":{"environment":{"LARK_HOME":"/by/.connector-auth/.lark-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.lark-cli","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"lark","runtime":{"authorizeIn":"be-auth-job","commands":{"login":["lark-cli","auth","login","--domain","docs","--domain","drive","--domain","wiki","--no-wait","--json"],"logout":["lark-cli","auth","logout","--json"],"status":["lark-cli","auth","status","--json","--verify"]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"fws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.78"}', 20
     UNION ALL
-    SELECT 'wecom', '企业微信', '企业微信授权能力即将开放', 'wecom-cli', 'CLI_INIT', '{}', 30
+    SELECT 'wecom', '企业微信', '通过 wecom-cli 连接企业微信工作空间', 'wecom-cli', 'CLI_INIT',
+           '{"authorizationTimeoutSeconds":120,"probeCommand":["wecom-cli","contact","get_userlist","{}"]}' AS auth_config,
+           '{"authStorage":{"environment":{"WECOM_HOME":"/by/.connector-auth/.wecom-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.wecom-cli","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"wecom","runtime":{"authorizeIn":"be-auth-job","commands":{"login":["wecom-cli","init","--noninteractive","--no-open"],"logout":["wecom-cli","cache","clear"],"status":["wecom-cli","cache","status"]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"wecomcli","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"0.1.9"}' AS runtime_manifest,
+           30
 ) seed
 WHERE NOT EXISTS (
     SELECT 1
     FROM byai.byai_connector_info existing
     WHERE existing.connector_code = seed.connector_code
 );
-
--- 统一修正新增和已有连接器的 Provider 路由与授权方式。
-UPDATE byai.byai_connector_info
-SET provider_code = CASE connector_code
-        WHEN 'dingtalk' THEN 'dws-dingtalk'
-        WHEN 'lark' THEN 'lark-cli'
-        WHEN 'wecom' THEN 'wecom-cli'
-    END,
-    auth_mode = CASE connector_code
-        WHEN 'dingtalk' THEN 'DEVICE_FLOW'
-        WHEN 'lark' THEN 'DEVICE_FLOW'
-        WHEN 'wecom' THEN 'CLI_INIT'
-    END
-WHERE connector_code IN ('dingtalk', 'lark', 'wecom');
 
 -- 知识采集默认绑定迁移到编排 Skill；仅迁移仍使用旧 bycli 绑定的内置资源。
 UPDATE byai.ss_resource
@@ -203,22 +196,3 @@ WHERE g.grant_obj_id = 14
         AND existing.grant_to_obj_id = g.grant_to_obj_id
         AND existing.grant_to_obj_type = g.grant_to_obj_type
   );
-
--- Runtime Manifest 不包含 token、refresh token 或 App Secret；真实凭证仍由 CLI native-home 管理。
--- 钉钉使用 DWS CLI，并将 HOME 与 DWS_CONFIG_DIR 统一到用户连接器授权目录。
-UPDATE byai.byai_connector_info
-SET runtime_manifest = '{"authStorage":{"environment":{"DWS_CONFIG_DIR":"/by/.connector-auth/.dws/config","DWS_DISABLE_KEYCHAIN":"1","HOME":"/by/.connector-auth/.dws"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.dws","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"dingtalk","runtime":{"authorizeIn":"be-auth-job","commands":{"login":["dws","auth","login","--device","-y"],"logout":["dws","auth","reset","-y"],"status":["dws","auth","status","--format","json"]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"dws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.52"}',
-    update_time = CURRENT_TIMESTAMP
-WHERE connector_code = 'dingtalk';
-
--- 飞书使用 lark-cli，登录时申请 docs、drive、wiki 三个业务域权限。
-UPDATE byai.byai_connector_info
-SET runtime_manifest = '{"authStorage":{"environment":{"HOME":"/by/.connector-auth/.lark-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.lark-cli","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"lark","runtime":{"authorizeIn":"be-auth-job","commands":{"login":["lark-cli","auth","login","--domain","docs","--domain","drive","--domain","wiki","--no-wait","--json"],"logout":["lark-cli","auth","logout","--json"],"status":["lark-cli","auth","status","--json","--verify"]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"fws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.78"}',
-    update_time = CURRENT_TIMESTAMP
-WHERE connector_code = 'lark';
-
--- 企业微信保持占位状态；在 Provider 与 CLI 命令完成验证前不发布 runtime_manifest。
-UPDATE byai.byai_connector_info
-SET runtime_manifest = NULL,
-    update_time = CURRENT_TIMESTAMP
-WHERE connector_code = 'wecom';

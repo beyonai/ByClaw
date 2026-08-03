@@ -5,6 +5,7 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.manager.dto.connector.ConnectorEnableStateDto;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorAuthMapper;
@@ -14,7 +15,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.Collections;
-import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -69,12 +71,16 @@ public class ConnectorAuthService {
         return connectorAuthMapper.selectOne(ownerQuery(authId));
     }
 
-    /** 查询指定用户当前已开启且仍有效的连接器编码。 */
-    public List<String> findEnabledConnectorCodes(Long userId) {
+    /** 查询全部有效连接器及指定用户的开启状态。 */
+    public Map<String, Boolean> findConnectorEnableStates(Long userId) {
         if (userId == null || userId <= 0) {
-            return Collections.emptyList();
+            return Collections.emptyMap();
         }
-        return connectorAuthMapper.selectEnabledConnectorCodes(String.valueOf(userId));
+        Map<String, Boolean> states = new LinkedHashMap<>();
+        for (ConnectorEnableStateDto state : connectorAuthMapper.selectConnectorEnableStates(String.valueOf(userId))) {
+            states.put(state.getConnectorCode(), Boolean.TRUE.equals(state.getEnabled()));
+        }
+        return states;
     }
 
     /** 更新当前用户指定连接器的全局启用状态。 */

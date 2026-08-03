@@ -9,7 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -38,12 +38,16 @@ class ScriptServiceTest {
     }
 
     @Test
-    void metadataIncludesEnabledConnectorCodesAsY() {
-        when(connectorAuthService.findEnabledConnectorCodes(1001L))
-            .thenReturn(List.of("dingtalk", "lark"));
+    void metadataIncludesEveryActiveConnectorAsBoolean() {
+        Map<String, Boolean> states = new LinkedHashMap<>();
+        states.put("dingtalk", true);
+        states.put("lark", false);
+        states.put("wecom", false);
+        when(connectorAuthService.findConnectorEnableStates(1001L)).thenReturn(states);
 
         Map<String, Object> metadata = service.getMetadataByassistantChatDto(new AssistantChatDto());
 
-        assertThat(metadata).containsEntry("authConnector", Map.of("dingtalk", "Y", "lark", "Y"));
+        assertThat(metadata).containsEntry("authConnectorList", states);
+        assertThat(metadata).doesNotContainKey("authConnector");
     }
 }

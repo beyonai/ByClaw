@@ -15,6 +15,7 @@ import java.text.SimpleDateFormat;
 import java.time.Duration;
 import java.util.Date;
 import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,6 +40,9 @@ class RedisAuthorizationSessionRepositoryTest {
     private static final String USER_INDEX_KEY_PREFIX = "connector:authorization:{auth}:user:";
     private static final String SESSION_KEY = "connector:authorization:{auth}:session:" + AUTHORIZATION_ID;
     private static final String USER_INDEX_KEY = USER_INDEX_KEY_PREFIX + USER_ID + ":" + CONNECTOR_ID;
+    private static final String STATUS_LOCK_KEY = "connector:authorization:{auth}:status-lock:" + AUTHORIZATION_ID;
+    private static final String START_LOCK_KEY =
+        "connector:authorization:{auth}:start-lock:" + USER_ID + ":" + CONNECTOR_ID;
 
     @Mock
     private StringRedisTemplate redisTemplate;
@@ -103,6 +107,55 @@ class RedisAuthorizationSessionRepositoryTest {
                 "redis.call('SET', KEYS[2], ARGV[2], 'PX', ttlMillis)",
                 "return 1");
         verify(valueOperations, never()).set(anyString(), anyString(), any(Duration.class));
+    }
+
+    @Test
+    void activeSessionCheckReadsTheUserConnectorIndex() {
+        when(valueOperations.get(USER_INDEX_KEY)).thenReturn(AUTHORIZATION_ID, null);
+
+        assertThat(repository.hasActiveSession(USER_ID, CONNECTOR_ID)).isTrue();
+        assertThat(repository.hasActiveSession(USER_ID, CONNECTOR_ID)).isFalse();
+
+        verify(valueOperations, times(2)).get(USER_INDEX_KEY);
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void statusTransitionLockUsesUniqueTokenTtlAndCompareDeleteRelease() {
+        Duration ttl = Duration.ofSeconds(90);
+        when(valueOperations.setIfAbsent(eq(STATUS_LOCK_KEY), anyString(), eq(ttl))).thenReturn(true);
+        when(redisTemplate.execute(
+            any(RedisScript.class),
+            eq(List.of(STATUS_LOCK_KEY)),
+            anyString())).thenReturn(1L);
+
+        Optional<String> token = repository.tryAcquireStatusLock(AUTHORIZATION_ID, ttl);
+        repository.releaseStatusLock(AUTHORIZATION_ID, token.orElseThrow());
+
+        ArgumentCaptor<String> tokenCaptor = ArgumentCaptor.forClass(String.class);
+        verify(valueOperations).setIfAbsent(eq(STATUS_LOCK_KEY), tokenCaptor.capture(), eq(ttl));
+        verify(redisTemplate).execute(
+            any(RedisScript.class),
+            eq(List.of(STATUS_LOCK_KEY)),
+            eq(tokenCaptor.getValue()));
+        assertThat(tokenCaptor.getValue()).isNotBlank();
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void startLockIsScopedByUserAndConnectorAndUsesCompareDeleteRelease() {
+        Duration ttl = Duration.ofMinutes(2);
+        when(valueOperations.setIfAbsent(eq(START_LOCK_KEY), anyString(), eq(ttl))).thenReturn(true);
+        when(redisTemplate.execute(
+            any(RedisScript.class),
+            eq(List.of(START_LOCK_KEY)),
+            anyString())).thenReturn(1L);
+
+        String token = repository.tryAcquireStartLock(USER_ID, CONNECTOR_ID, ttl).orElseThrow();
+        repository.releaseStartLock(USER_ID, CONNECTOR_ID, token);
+
+        verify(valueOperations).setIfAbsent(START_LOCK_KEY, token, ttl);
+        verify(redisTemplate).execute(any(RedisScript.class), eq(List.of(START_LOCK_KEY)), eq(token));
     }
 
     @Test
@@ -319,8 +372,13 @@ class RedisAuthorizationSessionRepositoryTest {
                 "if indexedAuthorizationId == current.authorizationId then",
                 "redis.call('DEL', KEYS[2])")
             .doesNotContain(
-                "replacement.status == 'PENDING'",
-                "replacement.status == 'FINALIZING'");
+                "or replacement.status == 'PENDING'",
+                "or replacement.status == 'FINALIZING'");
+        assertThat(script).contains(
+            "if current.status == 'PENDING' and replacement.status == 'PENDING' then",
+            "if redis.call('GET', KEYS[2]) ~= current.authorizationId then",
+            "replacementPttl = replacementExpiresAt - redisNowMillis",
+            "redis.call('PEXPIRE', KEYS[2], replacementPttl)");
         int keyGuard = script.indexOf("if KEYS[2] ~= expectedIndexKey then");
         assertThat(keyGuard).isNotNegative();
         assertThat(keyGuard).isLessThan(script.indexOf("redis.call('SET', KEYS[1]"));
