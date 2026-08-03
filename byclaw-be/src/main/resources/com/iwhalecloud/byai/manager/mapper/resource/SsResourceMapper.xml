@@ -1155,7 +1155,7 @@
               AND a.catalog_id = #{catalogId}
           </if>
           <if test="keyword != null and keyword != ''">
-              AND a.resource_name LIKE CONCAT('%', #{keyword}, '%')
+              AND UPPER(a.resource_name) LIKE CONCAT('%', UPPER(#{keyword}), '%')
           </if>
         ORDER BY
             CASE WHEN a.resource_biz_type IN ('KG_DOC', 'KG_QA') THEN 0 ELSE 1 END,
@@ -1375,6 +1375,9 @@
                  join po_users b on a.create_by = b.user_id
         where resource_id = #{resourceId}
           and p_catalog_id = #{pCatalogId}
+          <if test="keyword != null and keyword != ''">
+              and UPPER(a.catalog_name) like CONCAT('%', UPPER(#{keyword}), '%')
+          </if>
         union all
         select a.file_id       as id,
                a.file_name     as name,
@@ -1388,6 +1391,9 @@
                  join po_users b on a.create_by = b.user_id
         where a.dataset_id =#{resourceId}
                   and a.file_collect_id =  #{pCatalogId}
+          <if test="keyword != null and keyword != ''">
+              and UPPER(a.file_name) like CONCAT('%', UPPER(#{keyword}), '%')
+          </if>
     </select>
 
 

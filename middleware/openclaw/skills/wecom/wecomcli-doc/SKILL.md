@@ -9,8 +9,6 @@ metadata:
 
 # 企业微信文档管理
 
-开始任何任务前，必须先阅读上级共享政策 [operating-policy.md](../references/operating-policy.md)；共享政策优先于本文件中的示例和局部规则。
-
 > `wecom-cli` 是企业微信提供的命令行程序，所有操作通过执行 `wecom-cli` 命令完成。
 
 资源型技能，负责普通doc文档的新建、内容读取与覆写。文档接口支持通过 `docid` 或 `url` 二选一定位文档。

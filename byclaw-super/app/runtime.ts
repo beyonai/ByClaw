@@ -286,6 +286,9 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     const openClaw = new OpenClawByFrameworkConnector({
       redis,
       sourceAgentType: config.worker.agentType,
+      firstEventTimeoutMs: config.openClaw.firstEventTimeoutMs,
+      cancelConfirmationTimeoutMs:
+        config.openClaw.cancelConfirmationTimeoutMs,
     });
     connectors.register(openClaw);
     const descriptors = new ExecutionDescriptorClient({

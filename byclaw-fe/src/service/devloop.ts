@@ -1,4 +1,5 @@
 import { POST, type ConfigType } from '@/service/common/request';
+import type { IntegrationStage, TestAccount } from '@/layout/sider/components/ProjectSpaceList/Integration/types';
 
 // 默认项目只用于系统内置项目回显和编辑，接口层类型也需要覆盖，避免前端判断 default 时类型不一致。
 type DevloopProjectType = 'normal' | 'operation' | 'develop' | 'default';
@@ -138,7 +139,7 @@ export type DevloopProjectSpaceFile = {
 // 项目管理
 export const createProject = (data: DevloopProjectPayload) => POST<any>('/byaiService/project/create', data);
 
-export const listProjects = (data?: { keyword?: string }, config?: ConfigType) =>
+export const listProjects = (data?: { keyword?: string; pageNum?: number; pageSize?: number }, config?: ConfigType) =>
   POST<any>('/byaiService/project/list', data || {}, config);
 
 export const getProject = (projectId: number) => POST<any>('/byaiService/project/get', { projectId });
@@ -174,6 +175,14 @@ export const saveProjectFileToSpace = (data: {
   fileName: string;
 }) => POST<void>('/byaiService/project/share/saveToSpace', data);
 
+// 共享文件的名称和存储位置由项目维度接口管理，避免误走数字员工文件浏览接口。
+export const renameProjectSpaceFile = (data: { projectId: number; fileId: number; fileName: string }) =>
+  POST<void>('/byaiService/project/share/rename', data);
+
+// 删除项目共享文件时由后端同步清理对象存储、文件元数据和项目关联记录。
+export const deleteProjectSpaceFile = (data: { projectId: number; fileId: number }) =>
+  POST<void>('/byaiService/project/share/delete', data);
+
 // 扫描源管理
 export const createScanSource = (data: {
   projectId: number;
@@ -199,7 +208,8 @@ export const updateScanSource = (data: {
 
 export const deleteScanSource = (sourceId: number) => POST<any>('/byaiService/devloop/source/delete', { sourceId });
 
-export const listScanSources = (projectId: number) => POST<any>('/byaiService/devloop/source/list', { projectId });
+export const listScanSources = (data: { projectId: number; keyword?: string; pageNum?: number; pageSize?: number }) =>
+  POST<any>('/byaiService/devloop/source/list', data);
 
 export const toggleScanSource = (sourceId: number, enabled: string) =>
   POST<any>('/byaiService/devloop/source/toggle', { sourceId, enabled });
@@ -357,3 +367,86 @@ export const checkDwsAuthStatusBySource = (sourceId: number) =>
   POST<any>('/byaiService/devloop/dws/authStatus/bySource', { sourceId });
 
 export const saveDwsToken = (token: string) => POST<any>('/byaiService/devloop/dws/saveToken', { token });
+
+// 集成测试环境
+// stages / testAccounts 前端为结构化数组，落库为JSON字符串，故服务层统一序列化后再发。
+// 定时(cron)与执行员工不在环境里，归属独立测试数字员工配置，避免重复。
+export type IntegrationEnvPayload = {
+  projectId: number;
+  envName: string;
+  address?: string;
+  orchestrator?: 'script' | 'jenkins' | 'k8s' | 'webhook';
+  connProtocol?: 'ssh' | 'local';
+  connHost?: string;
+  connPort?: string;
+  connUser?: string;
+  connAuth?: 'key' | 'password';
+  // 连接凭据key，指向 ~/.openclaw/credentials/，不传明文密码。
+  connCredentialRef?: string;
+  connWorkdir?: string;
+  stages?: IntegrationStage[];
+  testAccounts?: TestAccount[];
+};
+
+// stages/testAccounts 序列化为JSON字符串以匹配后端 IntegrationEnvDTO 的 String 字段。
+const encodeEnvPayload = (data: Partial<IntegrationEnvPayload>) => ({
+  ...data,
+  stages: data.stages !== undefined ? JSON.stringify(data.stages) : undefined,
+  testAccounts: data.testAccounts !== undefined ? JSON.stringify(data.testAccounts) : undefined,
+});
+
+export const createIntegrationEnv = (data: IntegrationEnvPayload) =>
+  POST<any>('/byaiService/devloop/integration/env/create', encodeEnvPayload(data));
+
+export const updateIntegrationEnv = (data: Partial<IntegrationEnvPayload> & { envId: number }) =>
+  POST<any>('/byaiService/devloop/integration/env/update', encodeEnvPayload(data));
+
+export const deleteIntegrationEnv = (envId: number) =>
+  POST<any>('/byaiService/devloop/integration/env/delete', { envId });
+
+export const listIntegrationEnvs = (projectId: number) =>
+  POST<any>('/byaiService/devloop/integration/env/list', { projectId });
+
+// 端到端测试用例集
+// manual 套件的清单(manualCases)不入库,仅登记 manualFile 路径;caseCount 为数字,enabled 落库为 '0'/'1'。
+export type IntegrationSuitePayload = {
+  projectId: number;
+  suiteName: string;
+  runner?: string;
+  sourceType?: string;
+  repoId?: number;
+  source?: string;
+  branch?: string;
+  runCommand?: string;
+  workdir?: string;
+  reportPath?: string;
+  caseCount?: number;
+  enabled?: string;
+  manualFile?: string;
+};
+
+export const createIntegrationSuite = (data: IntegrationSuitePayload) =>
+  POST<any>('/byaiService/devloop/integration/suite/create', data);
+
+export const updateIntegrationSuite = (data: Partial<IntegrationSuitePayload> & { suiteId: number }) =>
+  POST<any>('/byaiService/devloop/integration/suite/update', data);
+
+export const deleteIntegrationSuite = (suiteId: number) =>
+  POST<any>('/byaiService/devloop/integration/suite/delete', { suiteId });
+
+export const toggleIntegrationSuite = (suiteId: number, enabled: string) =>
+  POST<any>('/byaiService/devloop/integration/suite/toggle', { suiteId, enabled });
+
+export const listIntegrationSuites = (projectId: number) =>
+  POST<any>('/byaiService/devloop/integration/suite/list', { projectId });
+
+// ===== 集成测试执行 =====
+// 点「执行测试」秒回 runId,后台异步跑;前端轮询 getIntegrationRun 直到 status 进入终态。
+export const startIntegrationRun = (suiteId: number, envId: number) =>
+  POST<{ runId: string }>('/byaiService/devloop/integration/run/start', { suiteId, envId });
+
+export const getIntegrationRun = (runId: string | number) =>
+  POST<any>('/byaiService/devloop/integration/run/get', { runId });
+
+export const listIntegrationRuns = (suiteId: number) =>
+  POST<any[]>('/byaiService/devloop/integration/run/list', { suiteId });

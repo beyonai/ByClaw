@@ -29,6 +29,11 @@ describe("应用配置", () => {
       APP_CONFIG_DEFAULTS.database.maxConnections,
     );
     expect(config.runLeaseMs).toBe(APP_CONFIG_DEFAULTS.run.leaseMs);
+    expect(config.delegationTimeoutMs).toBe(900_000);
+    expect(config.openClaw).toEqual({
+      firstEventTimeoutMs: 300_000,
+      cancelConfirmationTimeoutMs: 30_000,
+    });
     expect(config.piProvider).toBe(APP_CONFIG_DEFAULTS.pi.provider);
     expect(config.piModel).toBe(APP_CONFIG_DEFAULTS.pi.model);
     expect(config.serviceDiscovery).toMatchObject({
@@ -56,6 +61,15 @@ describe("应用配置", () => {
     expect(config.instanceId).toBe("instance-a");
   });
 
+  it("OpenGauss 使用 PostgreSQL 协议驱动", () => {
+    const config = loadConfig({
+      ...required,
+      DB_TYPE: "opengauss",
+    });
+
+    expect(config.database.host).toBe("postgres.internal");
+  });
+
   it("环境变量优先于代码默认值", () => {
     const config = loadConfig({
       ...required,
@@ -70,11 +84,19 @@ describe("应用配置", () => {
       BYCLAW_SUPER_DISCOVERY_PORT: "3443",
       BYCLAW_SUPER_DISCOVERY_PROTOCOL: "https",
       BYCLAW_SUPER_DISCOVERY_WEIGHT: "3",
+      DELEGATION_TIMEOUT_MS: "800000",
+      OPENCLAW_FIRST_EVENT_TIMEOUT_MS: "240000",
+      OPENCLAW_CANCEL_CONFIRM_TIMEOUT_MS: "15000",
     });
 
     expect(config.database.host).toBe("postgres.internal");
     expect(config.database.port).toBe(6_432);
     expect(config.runLeaseMs).toBe(45_000);
+    expect(config.delegationTimeoutMs).toBe(800_000);
+    expect(config.openClaw).toEqual({
+      firstEventTimeoutMs: 240_000,
+      cancelConfirmationTimeoutMs: 15_000,
+    });
     expect(config.piProvider).toBe("openai");
     expect(config.piModel).toBe("gpt-test");
     expect(config.openAiBaseUrl).toBe("https://model.example.test/v1");

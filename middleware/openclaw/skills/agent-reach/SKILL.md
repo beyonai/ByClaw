@@ -46,6 +46,9 @@ description: Use when the user asks to research, search, read, or look up anythi
    企业微信/WeCom 的对应请求，加载并遵循 `wecomcli` skill，再由其选择具体业务能力；钉钉/DingTalk 的对应请求，
    加载并遵循 `dws` skill。`byclaw-capability-doctor` 中已有的 provider 状态仅用于被动诊断，
    不能替代业务 Skill 的意图路由、授权与调用流程。
+11. 企业来源的采集、归档、批量搜索或入库请求交给采集编排器 `knowledge-collection`；其按来源加载 WeCom 或 Feishu
+    采集桥接，再委派 `wecomcli` 或 `fws`。路由器只完成该交接与被动诊断，不得作为公共互联网任务交给 `bycli`，
+    不得自行执行企业 CLI、管理采集产物、凭据或后处理。
 
 ## Agent Reach 官方主体（v1.5.0）
 

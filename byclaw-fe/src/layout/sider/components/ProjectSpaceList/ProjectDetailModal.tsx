@@ -53,20 +53,23 @@ import {
   createScanSource,
   createTask,
   deleteManualRequirement,
+  deleteProjectSpaceFile,
   deleteProjectRepo,
   deleteScanSource,
   getProject,
-  listProjectSpaceFiles,
-  listProjectSessionsByQo,
-  listProjectMembers,
   getTaskChanges,
   getTaskFileDiff,
+  listProjectMembers,
+  listProjectSpaceFiles,
+  listProjectSessionsByQo,
   listRequirementsByProject,
   listScanLogs,
   listScanSources,
   listTasks,
+  removeProjectMember,
   saveGitHubPat,
   saveProjectFileToSpace,
+  renameProjectSpaceFile,
   searchDingtalkGroups,
   startDwsDeviceAuth,
   toggleScanSource,
@@ -220,6 +223,41 @@ type TaskQueryState = {
 
 type TaskFetchOptions = Partial<TaskQueryState> & {
   append?: boolean;
+};
+
+type ChannelSourcePageState = {
+  pageNum: number;
+  total: number;
+};
+
+type ChannelSearchInputProps = {
+  keyword: string;
+  placeholder: string;
+  onKeywordChange: (value: string) => void;
+};
+
+const ChannelSearchInput: React.FC<ChannelSearchInputProps> = ({ keyword, placeholder, onKeywordChange }) => {
+  const [inputValue, setInputValue] = useState(keyword);
+
+  useEffect(() => {
+    setInputValue(keyword);
+  }, [keyword]);
+
+  return (
+    <Input
+      allowClear
+      className={styles.detailChannelPanelSearch}
+      suffix={<SearchOutlined />}
+      placeholder={placeholder}
+      value={inputValue}
+      onChange={(event) => {
+        const value = event.target.value;
+        // 输入框在右侧面板内部维护状态，避免每次按键都重新设置整块详情面板而中断中文输入法。
+        setInputValue(value);
+        onKeywordChange(value);
+      }}
+    />
+  );
 };
 
 // AI 评分明细：与后端 score_detail JSON 字段、满分口径对齐
@@ -462,7 +500,6 @@ type ProjectSpaceFileItem = FileBrowserItem &
   DevloopProjectSpaceFile & {
     isProjectSpaceFile: true;
   };
-type ProjectSpaceFileTreeItem = FileTreeItem & ProjectSpaceFileItem;
 
 type Props = {
   project?: ProjectSpace;
@@ -480,6 +517,8 @@ type Props = {
 const REQUIREMENT_PAGE_SIZE = 20;
 // 任务列表固定页大小，取消分页器后按此值触底追加。
 const TASK_PAGE_SIZE = 20;
+// 渠道配置大面板按后端分页加载，单页与项目下拉统一为 30 条。
+const CHANNEL_SOURCE_PAGE_SIZE = 30;
 // 后端尚未限制手工需求的两个长文本字段，前端统一限制为 1000 字，避免无界内容写入任务提示词。
 const MANUAL_REQUIREMENT_CONTENT_MAX_LENGTH = 1000;
 
@@ -643,7 +682,7 @@ const normalizeProjectSpaceFile = (file: DevloopProjectSpaceFile): ProjectSpaceF
   isProjectSpaceFile: true,
 });
 
-const isProjectSpaceFile = (item: FileTreeItem): item is ProjectSpaceFileTreeItem =>
+const isProjectSpaceFile = (item: FileBrowserItem): item is ProjectSpaceFileItem =>
   'isProjectSpaceFile' in item && item.isProjectSpaceFile === true;
 
 const getRequirementDetailText = (requirement: RequirementItem, t: ProjectDetailTranslate) =>
@@ -769,6 +808,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [operationAccountPanelOpen, setOperationAccountPanelOpen] = useState(false);
   // 运营任务使用独立表单弹窗，和账号大面板不能同时打开。
   const [operationTaskModalOpen, setOperationTaskModalOpen] = useState(false);
+  const [channelSearchKeyword, setChannelSearchKeyword] = useState('');
+  const [channelSources, setChannelSources] = useState<ScanSourceItem[]>([]);
+  const [channelSourcesLoading, setChannelSourcesLoading] = useState(false);
+  const [channelSourcePage, setChannelSourcePage] = useState<ChannelSourcePageState>({ pageNum: 0, total: 0 });
   const [taskKanbanOpen, setTaskKanbanOpen] = useState(false);
   // 研发任务通过更多操作打开环节详情抽屉，不必先经整体视图。
   const [detailTask, setDetailTask] = useState<any>(null);
@@ -794,6 +837,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const groupSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requirementSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const taskSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const channelSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const channelSourceRequestIdRef = useRef(0);
   const dwsAuthTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dwsAuthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startingRequirementIdsRef = useRef<Set<number>>(new Set());
@@ -1015,7 +1060,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
     if (!projectId) return [];
     setSourcesLoading(true);
     try {
-      const sourceList = (await listScanSources(projectId)) || [];
+      const sourcePage = await listScanSources({ projectId, pageNum: 1, pageSize: CHANNEL_SOURCE_PAGE_SIZE });
+      const sourceList = getArrayData(sourcePage);
       setSources(sourceList);
       void fetchSourceDwsStatuses(sourceList as ScanSourceItem[]);
       return sourceList as ScanSourceItem[];
@@ -1023,6 +1069,45 @@ const ProjectDetailPanel: React.FC<Props> = ({
       setSourcesLoading(false);
     }
   }, [projectId, fetchSourceDwsStatuses]);
+
+  const fetchChannelSources = useCallback(
+    async (options: { append?: boolean; keyword?: string; pageNum?: number } = {}) => {
+      if (!projectId) return [];
+      const { append = false, keyword = channelSearchKeyword, pageNum = 1 } = options;
+      const requestId = ++channelSourceRequestIdRef.current;
+      setChannelSourcesLoading(true);
+      try {
+        // 渠道名称搜索和分页均由后端执行，前端只合并已经加载的页数据。
+        const sourcePage = await listScanSources({
+          projectId,
+          keyword: keyword.trim() || undefined,
+          pageNum,
+          pageSize: CHANNEL_SOURCE_PAGE_SIZE,
+        });
+        const nextSources = getArrayData(sourcePage) as ScanSourceItem[];
+        if (requestId !== channelSourceRequestIdRef.current) return nextSources;
+        let mergedSources = nextSources;
+        setChannelSources((previousSources) => {
+          if (!append) return nextSources;
+          const sourceMap = new Map(previousSources.map((source) => [source.sourceId, source]));
+          nextSources.forEach((source) => sourceMap.set(source.sourceId, source));
+          mergedSources = Array.from(sourceMap.values());
+          return mergedSources;
+        });
+        setChannelSourcePage({
+          pageNum: Number(sourcePage?.pageNum ?? pageNum),
+          total: Number(sourcePage?.total ?? nextSources.length),
+        });
+        void fetchSourceDwsStatuses(mergedSources);
+        return mergedSources;
+      } finally {
+        if (requestId === channelSourceRequestIdRef.current) {
+          setChannelSourcesLoading(false);
+        }
+      }
+    },
+    [channelSearchKeyword, fetchSourceDwsStatuses, projectId]
+  );
 
   // 当前登录用户是否为该源创建者:控制授权/编辑/删除入口。
   const isSourceCreator = useCallback(
@@ -1170,6 +1255,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     () => () => {
       if (taskSearchTimerRef.current) clearTimeout(taskSearchTimerRef.current);
       if (requirementSearchTimerRef.current) clearTimeout(requirementSearchTimerRef.current);
+      if (channelSearchTimerRef.current) clearTimeout(channelSearchTimerRef.current);
     },
     []
   );
@@ -1440,6 +1526,63 @@ const ProjectDetailPanel: React.FC<Props> = ({
     [fetchTasks, intl, projectId]
   );
 
+  const handleExitProject = useCallback(() => {
+    if (!projectId || isProjectCreator) return;
+
+    Modal.confirm({
+      title: t('project.exit'),
+      content: t('project.exitConfirm'),
+      okText: t('project.exit'),
+      cancelText: t('common.cancel'),
+      okButtonProps: { danger: true },
+      // 返回 Promise 后确认按钮自动进入 loading，避免重复提交退出请求。
+      onOk: async () => {
+        const currentUserId = userInfo?.userId ?? userInfo?.id;
+        let currentMember = members.find(
+          (member) =>
+            `${member?.userId ?? ''}` === `${currentUserId ?? ''}` ||
+            (!!userInfo?.userCode && `${member?.userCode ?? ''}` === `${userInfo.userCode}`)
+        );
+
+        if (!currentMember?.memberId) {
+          // 详情初始化尚未完成时重新查询成员，确保退出操作仍能定位当前用户的成员记录。
+          const res = await listProjectMembers(projectId);
+          const memberList = Array.isArray(res) ? res : [];
+          currentMember = memberList.find(
+            (member) =>
+              `${member?.userId ?? ''}` === `${currentUserId ?? ''}` ||
+              (!!userInfo?.userCode && `${member?.userCode ?? ''}` === `${userInfo.userCode}`)
+          );
+        }
+
+        const memberId = Number(currentMember?.memberId);
+        if (!Number.isFinite(memberId) || memberId <= 0) {
+          message.error(t('project.exitMemberNotFound'));
+          return;
+        }
+
+        try {
+          // 退出项目复用成员移除接口，由后端校验只能移除当前登录用户本人。
+          await removeProjectMember(memberId);
+          message.success(t('project.exitSuccess'));
+          handleCurrentUserRemoved();
+        } catch (error: any) {
+          message.error(error?.message || t('project.exitFailed'));
+          throw error;
+        }
+      },
+    });
+  }, [
+    handleCurrentUserRemoved,
+    isProjectCreator,
+    members,
+    projectId,
+    t,
+    userInfo?.id,
+    userInfo?.userCode,
+    userInfo?.userId,
+  ]);
+
   const fetchProjectResourceSessions = useCallback(async () => {
     if (!projectId) return;
     try {
@@ -1624,16 +1767,25 @@ const ProjectDetailPanel: React.FC<Props> = ({
         quote: 'common.quote',
         preview: 'fileBrowser.action.preview',
         download: 'directoryManage.downloadFile',
+        rename: 'fileBrowser.action.rename',
+        delete: 'fileBrowser.action.delete',
       };
-      const actionKeys = ['quote', ...(canPreviewFile(item) ? (['preview'] as const) : []), 'download'] as const;
+      const actionKeys: Array<keyof typeof labelIdMap> = [
+        'quote',
+        ...(canPreviewFile(item) ? ['preview' as const] : []),
+        'download',
+        // 项目创建者可管理共享文件，普通成员仍保留引用、预览、下载能力。
+        ...(isProjectCreator ? (['rename', 'delete'] as const) : []),
+      ];
 
       // 项目共享文件来自 listSpaceFiles，引用操作与文件树双击共用同一个处理函数。
       return actionKeys.map((key) => ({
         key,
+        danger: key === 'delete',
         label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: labelIdMap[key] })}</div>,
       }));
     },
-    [intl]
+    [intl, isProjectCreator]
   );
 
   const getSessionResourceFileActionItems = useCallback(
@@ -1670,6 +1822,18 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const handleDeleteResourceFile = useCallback(
     async (item: FileBrowserItem) => {
+      if (isProjectSpaceFile(item)) {
+        if (!projectId) return;
+        try {
+          // 共享文件删除走项目维度接口，避免将 fileUrl 误当作普通文件浏览器路径。
+          await deleteProjectSpaceFile({ projectId, fileId: item.fileId });
+          message.success(intl.formatMessage({ id: 'fileBrowser.delete.success' }));
+          await fetchSharedResourceFiles();
+        } catch (error: any) {
+          message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.delete.failed' }));
+        }
+        return;
+      }
       if (!fileResourceId) return;
       const itemPath = normalizeFileBrowserPath(item.path);
       const parentPath = getParentDirectoryPath(itemPath);
@@ -1684,12 +1848,30 @@ const ProjectDetailPanel: React.FC<Props> = ({
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.delete.failed' }));
       }
     },
-    [fileResourceId, intl, pruneResourceDirectoryCache, refreshResourceDirectory]
+    [fetchSharedResourceFiles, fileResourceId, intl, projectId, pruneResourceDirectoryCache, refreshResourceDirectory]
   );
 
   const handleResourceRenameOk = useCallback(
     async (newName: string) => {
-      if (!resourceRenameTarget || !fileResourceId) return;
+      if (!resourceRenameTarget) return;
+      if (isProjectSpaceFile(resourceRenameTarget)) {
+        if (!projectId) return;
+        setResourceRenameLoading(true);
+        try {
+          // 共享文件重命名只修改项目空间的文件名称，不复用普通文件浏览接口。
+          await renameProjectSpaceFile({ projectId, fileId: resourceRenameTarget.fileId, fileName: newName });
+          message.success(intl.formatMessage({ id: 'fileBrowser.rename.success' }));
+          setResourceRenameOpen(false);
+          setResourceRenameTarget(null);
+          await fetchSharedResourceFiles();
+        } catch (error: any) {
+          message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.rename.failed' }));
+        } finally {
+          setResourceRenameLoading(false);
+        }
+        return;
+      }
+      if (!fileResourceId) return;
       const parentPath = getParentDirectoryPath(resourceRenameTarget.path);
       setResourceRenameLoading(true);
       try {
@@ -1707,7 +1889,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
         setResourceRenameLoading(false);
       }
     },
-    [fileResourceId, intl, pruneResourceDirectoryCache, refreshResourceDirectory, resourceRenameTarget]
+    [
+      fetchSharedResourceFiles,
+      fileResourceId,
+      intl,
+      projectId,
+      pruneResourceDirectoryCache,
+      refreshResourceDirectory,
+      resourceRenameTarget,
+    ]
   );
 
   const handleSharedResourcePreview = useCallback(
@@ -1826,9 +2016,26 @@ const ProjectDetailPanel: React.FC<Props> = ({
         void handleSharedResourcePreview(item);
       } else if (key === 'download') {
         handleSharedResourceDownload(item);
+      } else if (key === 'rename') {
+        setResourceRenameTarget(item);
+        setResourceRenameOpen(true);
+      } else if (key === 'delete') {
+        Modal.confirm({
+          title: intl.formatMessage({ id: 'fileBrowser.delete.confirm' }),
+          content: intl.formatMessage({ id: 'fileBrowser.delete.confirmName' }, { name: item.name }),
+          okButtonProps: { danger: true },
+          // 返回 Promise 后确认按钮会自动进入 loading，避免重复删除同一个共享文件。
+          onOk: () => handleDeleteResourceFile(item),
+        });
       }
     },
-    [handleResourceItemDoubleClick, handleSharedResourceDownload, handleSharedResourcePreview]
+    [
+      handleDeleteResourceFile,
+      handleResourceItemDoubleClick,
+      handleSharedResourceDownload,
+      handleSharedResourcePreview,
+      intl,
+    ]
   );
 
   const handleResourceFileAction = useCallback(
@@ -2358,7 +2565,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
       setSourceModalOpen(false);
       setEditingSource(null);
       const sourceList = await fetchSources();
-      await fetchRequirements(sourceList, requirementSearchKeyword.trim());
+      await Promise.all([
+        fetchRequirements(sourceList, requirementSearchKeyword.trim()),
+        channelPanelOpen ? fetchChannelSources({ keyword: channelSearchKeyword, pageNum: 1 }) : Promise.resolve(),
+      ]);
     } catch {
       message.error(t(editingSource ? 'source.updateFailed' : 'source.addFailed'));
     } finally {
@@ -2472,7 +2682,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
         await deleteScanSource(source.sourceId);
         message.success(t('source.deleteSuccess'));
         const sourceList = await fetchSources();
-        await fetchRequirements(sourceList, requirementSearchKeyword.trim());
+        await Promise.all([
+          fetchRequirements(sourceList, requirementSearchKeyword.trim()),
+          channelPanelOpen ? fetchChannelSources({ keyword: channelSearchKeyword, pageNum: 1 }) : Promise.resolve(),
+        ]);
       },
     });
   };
@@ -2483,7 +2696,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
       const res = await triggerScan(sourceId);
       message.success(t('source.scanSuccess', { count: res?.createdCount || 0 }));
       const sourceList = await fetchSources();
-      await fetchRequirements(sourceList, requirementSearchKeyword.trim());
+      await Promise.all([
+        fetchRequirements(sourceList, requirementSearchKeyword.trim()),
+        channelPanelOpen ? fetchChannelSources({ keyword: channelSearchKeyword, pageNum: 1 }) : Promise.resolve(),
+      ]);
     } catch {
       message.error(t('source.scanFailed'));
     } finally {
@@ -2495,6 +2711,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
     await toggleScanSource(sourceId, checked ? '1' : '0');
     message.success(t(checked ? 'source.enabled' : 'source.paused'));
     await fetchSources();
+    if (channelPanelOpen) {
+      await fetchChannelSources({ keyword: channelSearchKeyword, pageNum: 1 });
+    }
   };
 
   const handleViewLogs = async (source: ScanSourceItem) => {
@@ -2693,11 +2912,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
     );
   };
 
-  const renderSourceList = (emptyText = t('source.empty'), options: { panel?: boolean } = {}) => (
-    <Spin spinning={sourcesLoading && !sources.length}>
-      {sources.length ? (
+  const renderSourceList = (
+    emptyText = t('source.empty'),
+    options: { panel?: boolean; loading?: boolean } = {},
+    sourceList: ScanSourceItem[] = sources
+  ) => (
+    <Spin spinning={(options.loading ?? sourcesLoading) && !sourceList.length}>
+      {sourceList.length ? (
         <div className={options.panel ? styles.detailChannelSourceList : styles.detailSourceList}>
-          {sources.map((source) => (
+          {sourceList.map((source) => (
             <div key={source.sourceId} className={styles.detailSourceCard}>
               <div className={styles.detailSourceHeader}>
                 <span className={styles.detailSourceIcon}>{getSourceIcon(source.sourceType)}</span>
@@ -2791,7 +3014,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
   );
 
   const handleCloseChannelPanel = () => {
+    if (channelSearchTimerRef.current) {
+      clearTimeout(channelSearchTimerRef.current);
+      channelSearchTimerRef.current = null;
+    }
+    // 关闭面板后忽略尚未返回的查询，避免旧搜索结果重新写回下一次打开的面板。
+    channelSourceRequestIdRef.current += 1;
     setChannelPanelOpen(false);
+    setChannelSearchKeyword('');
+    setChannelSourcesLoading(false);
     clearDetailPanel?.();
   };
 
@@ -2800,9 +3031,41 @@ const ProjectDetailPanel: React.FC<Props> = ({
       handleCloseChannelPanel();
       return;
     }
+    // 每次打开渠道配置都从后端重新查询第一页，避免沿用上次输入的搜索条件。
+    setChannelSearchKeyword('');
     setChannelPanelOpen(true);
-    void fetchSources();
+    void fetchChannelSources({ keyword: '', pageNum: 1 });
   };
+
+  const handleChannelSearchChange = useCallback(
+    (value: string) => {
+      if (channelSearchTimerRef.current) clearTimeout(channelSearchTimerRef.current);
+      // 输入停顿后再向后端搜索，避免每输入一个字符都请求渠道分页接口。
+      channelSearchTimerRef.current = setTimeout(() => {
+        setChannelSearchKeyword(value);
+        void fetchChannelSources({ keyword: value, pageNum: 1 });
+        channelSearchTimerRef.current = null;
+      }, 300);
+    },
+    [fetchChannelSources]
+  );
+
+  const handleChannelPanelScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      const loadedCount = channelSources.length;
+      if (channelSourcesLoading || loadedCount >= channelSourcePage.total) return;
+      const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
+      if (scrollHeight - scrollTop - clientHeight <= 80) {
+        // 渠道列表独立触底分页，继续使用当前搜索关键字查询下一页。
+        void fetchChannelSources({
+          append: true,
+          keyword: channelSearchKeyword,
+          pageNum: channelSourcePage.pageNum + 1,
+        });
+      }
+    },
+    [channelSearchKeyword, channelSourcePage, channelSources.length, channelSourcesLoading, fetchChannelSources]
+  );
 
   const handleTabChange = (nextTab: string) => {
     if (nextTab !== 'requirements' && channelPanelOpen) {
@@ -2821,9 +3084,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
       <div className={styles.detailChannelPanelHeader}>
         <div className={styles.detailChannelPanelTitle}>
           <h3>{t('channel.title')}</h3>
-          <p>{t('channel.count', { count: sources.length })}</p>
+          <p>{t('channel.count', { count: channelSourcePage.total })}</p>
         </div>
         <div className={styles.detailChannelPanelActions}>
+          <ChannelSearchInput
+            keyword={channelSearchKeyword}
+            placeholder={t('channel.searchPlaceholder')}
+            onKeywordChange={handleChannelSearchChange}
+          />
           <Tooltip title={t('channel.add')} placement="top">
             <Button type="primary" icon={<PlusOutlined />} onClick={() => openAddSourceModal()}>
               {t('channel.add')}
@@ -2834,7 +3102,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
           </Tooltip>
         </div>
       </div>
-      <div className={styles.detailChannelPanelBody}>{renderSourceList(t('channel.empty'), { panel: true })}</div>
+      <div className={styles.detailChannelPanelBody} onScroll={handleChannelPanelScroll}>
+        {renderSourceList(
+          channelSearchKeyword.trim() ? t('channel.searchEmpty') : t('channel.empty'),
+          { panel: true, loading: channelSourcesLoading },
+          channelSources
+        )}
+      </div>
     </div>
   );
 
@@ -2847,6 +3121,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setDetailPanel?.(renderChannelPanel(), overlayDetailPanelOptions);
   }, [
     channelPanelOpen,
+    channelSearchKeyword,
+    channelSourcePage.total,
+    channelSources,
+    channelSourcesLoading,
     dwsAuthed,
     dwsExpired,
     dwsExpiresAt,
@@ -2854,8 +3132,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     repos,
     scanningId,
     setDetailPanel,
-    sources,
-    sourcesLoading,
+    sourceDwsStatusMap,
     t,
   ]);
 
@@ -3951,7 +4228,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     }
     if (activeTab === 'resources') return renderResources();
     if (activeTab === 'integration') {
-      if (showRequirementsTab) return <Integration active />;
+      if (showRequirementsTab) return <Integration active projectId={projectId} repos={repos} />;
       return renderTasks();
     }
     if (activeTab === 'members') {
@@ -4561,6 +4838,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
     ...(showRequirementsTab ? [{ key: 'add-source', label: t('source.addTitle') }] : []),
     ...(onEditProject ? [{ key: 'edit-project', label: t('project.edit') }] : []),
     ...(onDeleteProject ? [{ key: 'delete-project', label: t('project.delete'), danger: true }] : []),
+    // 非创建者通过项目菜单退出，成员列表不再提供“移除自己”入口。
+    ...(!isProjectCreator ? [{ key: 'exit-project', label: t('project.exit'), danger: true }] : []),
   ];
 
   const handleDetailAction = ({ key }: { key: string }) => {
@@ -4574,6 +4853,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
     }
     if (key === 'delete-project' && project) {
       onDeleteProject?.(project);
+      return;
+    }
+    if (key === 'exit-project') {
+      handleExitProject();
     }
   };
 

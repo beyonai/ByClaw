@@ -4163,6 +4163,7 @@ INSERT INTO "byai"."sandbox_service_spec" ("service_key", "spec_json", "template
     '{"mcp": {"servers": {"env": {"GBRAIN_HOME": "/by/.openclaw/gbrain"}, "gbrain": {"args": ["serve"], "command": "gbrain"}}}, "meta": {"lastTouchedAt": "2026-03-27T08:46:51.148Z", "lastTouchedVersion": "2026.3.28"}, "hooks": {"internal": {"enabled": true, "entries": {"boot-md": {"enabled": false}, "session-memory": {"enabled": true}}}}, "tools": {"web": {"search": {"enabled": false}}, "profile": "full"}, "agents": {"list": [{"id": "main", "skills": [], "default": true, "workspace": "${OPENCLAW_STATE_DIR}/workspace"}, {"id": "ui-skill-tester", "name": "UI技能测试", "identity": {"name": "UI技能测试"}, "workspace": "/by/.openclaw/workspace-ui-skill-tester"}, {"id": "ui-skill-creator", "name": "UI技能创建", "model": {"primary": "byclaw/kimi-k2.6"}, "tools": {"deny": ["image", "image_generate", "music_generate", "video_generate", "tts", "canvas", "browser", "agents_list", "update_plan", "code_execution", "cron", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "sessions_yield", "subagents", "session_status", "exec", "x_search", "process", "nodes", "gateway", "message", "write", "edit", "memory_search", "memory_get"], "profile": "full", "alsoAllow": ["ui-skill-modeler", "jarvis_run_flow", "read"]}, "identity": {"name": "UI技能创建"}, "workspace": "/by/.openclaw/workspace-ui-skill-creator"}], "defaults": {"model": {"primary": "byclaw/${MODEL_ID}"}, "models": {"byclaw/kimi-k2.5": {"alias": "kimi-k2.5"}}, "subagents": {"maxConcurrent": 8}, "compaction": {"mode": "safeguard"}, "maxConcurrent": 4, "skipBootstrap": true, "verboseDefault": "full", "thinkingDefault": "high", "bootstrapMaxChars": 15000, "blockStreamingBreak": "text_end", "blockStreamingDefault": "on"}}, "models": {"providers": {"byclaw": {"api": "openai-completions", "apiKey": "${MODEL_API_KEY}", "models": [{"id": "${MODEL_ID}", "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "name": "${MODEL_NAME}", "input": ["text"], "maxTokens": 8192, "reasoning": true, "contextWindow": 128000}, {"id": "kimi-k2.5", "api": "openai-completions", "cost": {"input": 4, "output": 21, "cacheRead": 0.7, "cacheWrite": 0}, "name": "kimi-k2.5", "input": ["text", "image"], "maxTokens": 32000, "reasoning": true, "contextWindow": 256000}], "baseUrl": "${MODEL_BASE_URL}"}}}, "skills": {"load": {"watch": true, "watchDebounceMs": 5000}, "install": {"nodeManager": "pnpm"}}, "wizard": {"lastRunAt": "2026-02-03T07:41:55.092Z", "lastRunMode": "local", "lastRunCommand": "configure", "lastRunVersion": "2026.1.30"}, "browser": {"enabled": true, "headless": false, "profiles": {"work": {"color": "#0066CC", "cdpPort": 18801}, "chrome": {"color": "#00AA00", "cdpUrl": "http://127.0.0.1:18792"}, "openclaw": {"color": "#FF4500", "cdpUrl": "http://localhost:9222"}}, "attachOnly": false, "ssrfPolicy": {"dangerouslyAllowPrivateNetwork": true}, "defaultProfile": "openclaw", "executablePath": "/usr/bin/google-chrome"}, "gateway": {"auth": {"mode": "token", "token": "${OPENCLAW_GATEWAY_TOKEN}"}, "bind": "lan", "mode": "local", "port": 8080, "nodes": {"browser": {"mode": "off"}}, "controlUi": {"allowedOrigins": ["*"], "allowInsecureAuth": true, "dangerouslyDisableDeviceAuth": true, "dangerouslyAllowHostHeaderOriginFallback": true}, "tailscale": {"mode": "off", "resetOnExit": false}}, "plugins": {"load": {"paths": ["/app/dist-runtime/extensions/baiying-enhance", "/app/dist-runtime/extensions/byai-channel", "/app/dist-runtime/extensions/byclaw-sqlite", "/app/custom-plugins/foundry", "/app/custom-plugins/runtime"]}, "allow": ["browser", "byai-channel", "baiying-enhance", "byclaw-sqlite", "diagnostics-otel", "memory-core", "ui-skill-foundry", "pincer-runtime"], "slots": {"memory": "none", "contextEngine": "modeler-image-cleaner"}, "enabled": true, "entries": {"xai": {"enabled": false}, "browser": {"enabled": true}, "byai-channel": {"enabled": true}, "byclaw-sqlite": {"enabled": true}, "pincer-runtime": {"config": {"identifyPageUrl": "http://127.0.0.1:8005"}, "enabled": true}, "baiying-enhance": {"config": {"watchDebounceMs": 500, "mainParentAgentId": "main", "workspaceAutoSeed": true, "embedApiKeysFromJson": true, "mergeAllowSpawnForMain": true}, "enabled": true}, "diagnostics-otel": {"enabled": true}, "ui-skill-foundry": {"config": {"identifyPageUrl": "http://127.0.0.1:8005"}, "enabled": true}}}, "channels": {"byai-channel": {"enabled": true, "dmPolicy": "open", "allowFrom": ["*"], "webhookPath": "/webhook/byai-channel", "streamEnabled": true, "blockStreaming": true, "sessionKeyPerSessionId": true}}, "commands": {"native": "auto", "restart": true, "nativeSkills": "auto", "ownerDisplay": "raw"}, "diagnostics": {"otel": {"logs": false, "traces": true, "enabled": true, "headers": {"Authorization": "Basic cGstbGYtMmVlYzQ2YTUtMWZiZi00MDNiLWI0NzAtMTlkMjdlZmZlNDRlOnNrLWxmLTc3MDc4MjE1LTg5YmQtNDViNy1hZmIyLWUyYjEzZjc5YWYxMw==", "x-langfuse-ingestion-version": "4"}, "metrics": false, "endpoint": "https://us.cloud.langfuse.com/api/public/otel", "protocol": "http/protobuf", "sampleRate": 1, "serviceName": "openclaw-gateway", "captureContent": {"enabled": true, "toolInputs": true, "toolOutputs": true, "systemPrompt": true, "inputMessages": true, "outputMessages": true, "toolDefinitions": true}, "flushIntervalMs": 5000}, "enabled": true}}',
     '2026-06-17 17:57:57.666');
 
+-- 重建全新环境的 OpenClaw 内置 Skill 清单，并纳入 knowledge-collection、agent-reach 与独立 bycli。
 delete from byai.byai_system_config where param_code in('OPENCLAW_BUNDLED_SKILLS');
 INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc) VALUES (nextval('byai.seq_any_table'), 'text', 'OPENCLAW_BUNDLED_SKILLS', 'OpenClaw内置Skill清单', 'OPENCLAW_BUNDLED_SKILLS', '[{
 		"skillName": "1password",
@@ -4489,10 +4490,22 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
 		"skillDescEn": "Provide AI agents with persistent long-term memory, knowledge graph construction and hybrid search, supporting knowledge storage, correlation analysis and intelligent query."
 	},
 	{
+		"skillName": "knowledge-collection",
+		"skillCode": "knowledge-collection",
+		"skillDescZh": "编排跨互联网与企业平台的知识采集，统一采集产物协议、后处理及知识库入库或知识整理。",
+		"skillDescEn": "Orchestrate knowledge collection across public internet and enterprise platforms, including canonical artifacts, post-processing, and knowledge-base ingestion or organization."
+	},
+	{
+		"skillName": "agent-reach",
+		"skillCode": "agent-reach",
+		"skillDescZh": "路由公开互联网渠道能力，并按 ByClaw 覆盖规则选择 byCLI 等执行器。",
+		"skillDescEn": "Route public-internet channels and select executors such as byCLI according to ByClaw override rules."
+	},
+	{
 		"skillName": "bycli",
 		"skillCode": "bycli",
-		"skillDescZh": "bycli 是一个全能力技能，把任意网站、桌面应用或外部 CLI 统一成 bycli <site>无需爬页面就能执行命令、驱动浏览器、修复或编写适配器、并将采集内容入库",
-		"skillDescEn": "bycli is an all-in-one skill that unifies any website, desktop app, or external CLI into a single bycli ‹ site> <command> interface, letting an agent run commands, drive the browser, fix or author adapters, and ingest collected content into a knowledge base without"
+		"skillDescZh": "通过浏览器与 Adapter 执行网站操作、复用或维护适配器，并返回采集结果。",
+		"skillDescEn": "Execute website operations through the browser and adapters, reuse or maintain adapters, and return collected results."
 	}
 ]', 'OpenClaw 仓库 skills/ 目录下内置（随安装分发）的 Agent Skill 元数据 JSON 数组');
 
@@ -4539,8 +4552,9 @@ VALUES(12,'BYAI','SKILL','ATOM','浩鲸百应技能市场浏览','技能市场�
 INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
 VALUES(13,'BYAI','SKILL','ATOM','知识记忆管理','知识记忆管理技能。输入需要记录的项目背景、决策过程或人物关系，输出结构化的长期记忆资产，支持全文检索和智能关联。适用于项目经验沉淀、历史决策追溯、团队知识传承、个人知识库建设。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'gbrain',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
 
+-- 知识采集资源改为绑定编排 Skill，不再直接绑定 bycli 执行器。
 INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
-VALUES(14,'BYAI','SKILL','ATOM','知识采集','网络内容采集技能。输入任意网站链接或应用名称，输出结构化的采集内容，支持网页信息抓取、应用数据提取和内容归档入库。适用于竞品信息收集、行业动态追踪、资料批量采集、内容聚合。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'bycli',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+VALUES(14,'BYAI','SKILL','ATOM','知识采集','网络内容采集技能。输入任意网站链接或应用名称，输出结构化的采集内容，支持网页信息抓取、应用数据提取和内容归档入库。适用于竞品信息收集、行业动态追踪、资料批量采集、内容聚合。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'knowledge-collection',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
 
 INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
 VALUES(15,'BYAI','SKILL','ATOM','钉钉连接器','钉钉协同办公技能。输入办公事务指令，输出钉钉平台上的待办、审批、日程、文档等协同操作结果。适用于待办同步、会议安排、审批流程、团队文档协作、考勤管理。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'dws',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
@@ -4548,7 +4562,11 @@ VALUES(15,'BYAI','SKILL','ATOM','钉钉连接器','钉钉协同办公技能。�
 INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
 VALUES(16,'BYAI','SKILL','ATOM','可视化报告生成','数据可视化报告技能。输入各类经营数据（表格、文本、API数据），输出专业的交互式数据分析报告，包含智能图表、地图点位展示、KPI看板和经营建议，支持导出PDF。适用于经营分析、选址评估、竞品对比、数据汇报、商圈研究。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'amap-visual-report-generator',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
 
--- inner来源技能(1~16)
+-- 为 byCLI 单独创建执行 Skill 资源，保留 knowledge-collection 作为上层编排入口。
+INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
+VALUES(25,'BYAI','SKILL','ATOM','byCLI','通过浏览器与 Adapter 执行网站操作、复用或维护适配器，并返回采集结果。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'bycli',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+
+-- 重建 inner 来源技能扩展记录，并包含新拆分的 byCLI 资源 25。
 DELETE from byai.ss_res_ext_skill WHERE skill_type in('inner');
 INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time) VALUES(1,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
 INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time) VALUES(2,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
@@ -4566,6 +4584,8 @@ INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,ski
 INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time) VALUES(14,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
 INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time) VALUES(15,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
 INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time) VALUES(16,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
+-- 新增资源 25 对应独立 byCLI 内置 Skill 扩展记录。
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time) VALUES(25,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
 
 -- 第四步：更新已存在的扩展表记录（直接关联主表获取种子数据，避免 CTE 作用域问题）
 UPDATE byai.ss_res_ext_skill e
@@ -4605,7 +4625,7 @@ FROM byai.ss_resource r
 WHERE e.resource_id = r.resource_id
   AND r.resource_biz_type = 'SKILL'
   AND r.owner_type = 'enterprise'
-  AND r.resource_code IN ('podcast-outline','tech-article','podcast-video','podcast-voice','podcast-script','slide-dec','unstructured-ontology-manager','structured-ontology-manager','crm-demo-showcase','github-issues-mgmt','github-code-analysis','iwhalehub','gbrain','bycli','dws','amap-visual-report-generator');
+  AND r.resource_code IN ('podcast-outline','tech-article','podcast-video','podcast-voice','podcast-script','slide-dec','unstructured-ontology-manager','structured-ontology-manager','crm-demo-showcase','github-issues-mgmt','github-code-analysis','iwhalehub','gbrain','knowledge-collection','bycli','dws','amap-visual-report-generator');
 
 -- 沙箱健康检测-默认水位模型初始化
 INSERT INTO byai.sandbox_health_watermark_model (
@@ -4971,3 +4991,201 @@ INSERT INTO "byai"."sandbox_service_spec" ("service_key", "spec_json", "template
 delete from ss_resource where resource_biz_type in('SKILL') and  resource_id in(24);
 delete from ss_res_ext_skill where skill_type in('inner') and resource_id in(24);
 delete from au_privilege_grant where grant_obj_type in('SKILL') and grant_obj_id in(24);
+
+-- ========== V0.3.1 增量数据（合并到全新初始化脚本） ==========
+-- 以下语句与 V0.3.1 增量 DML 保持一致，用于兼容已有种子数据并确保脚本可重复执行。
+-- 知识采集默认绑定迁移到编排 Skill；仅迁移仍使用旧 bycli 绑定的内置资源。
+UPDATE byai.ss_resource
+SET resource_code = 'knowledge-collection',
+    update_time = CURRENT_TIMESTAMP
+WHERE resource_id = 14
+  AND resource_name = '知识采集'
+  AND resource_code = 'bycli';
+
+-- 同步修正运行期技能快照中的 resourceCode，保留其余 JSON 字段。
+UPDATE byai.ss_res_ext_skill e
+SET target_content = jsonb_set(
+        target_content::jsonb,
+        '{resourceCode}',
+        '"knowledge-collection"'::jsonb,
+        false
+    )::text
+WHERE e.resource_id = 14
+  AND target_content IS NOT NULL
+  AND target_content::jsonb ->> 'resourceCode' = 'bycli'
+  AND EXISTS (
+      SELECT 1
+      FROM byai.ss_resource r
+      WHERE r.resource_id = e.resource_id
+        AND r.resource_id = 14
+        AND r.resource_name = '知识采集'
+        AND r.resource_code = 'knowledge-collection'
+  );
+
+-- openGauss 缺少 JSONB 聚合函数；逐项补齐内置 Skill，避免已有一项时跳过其他项。
+UPDATE byai.byai_system_config c
+SET param_value = CASE
+        WHEN rtrim(c.param_value) = '[]' THEN '['
+        ELSE left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1) || ','
+    END
+    || '{"skillName":"knowledge-collection","skillCode":"knowledge-collection","skillDescZh":"编排跨互联网与企业平台的知识采集，统一采集产物协议、后处理及知识库入库或知识整理。","skillDescEn":"Orchestrate knowledge collection across public internet and enterprise platforms, including canonical artifacts, post-processing, and knowledge-base ingestion or organization."}]'
+WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
+  AND c.param_value NOT LIKE '%"skillCode":"knowledge-collection"%';
+
+-- 补充公开互联网渠道路由 Skill，已存在同名 skillCode 时不重复追加。
+UPDATE byai.byai_system_config c
+SET param_value = left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1)
+    || ',{"skillName":"agent-reach","skillCode":"agent-reach","skillDescZh":"路由公开互联网渠道能力，并按 ByClaw 覆盖规则选择 byCLI 等执行器。","skillDescEn":"Route public-internet channels and select executors such as byCLI according to ByClaw override rules."}]'
+WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
+  AND c.param_value NOT LIKE '%"skillCode":"agent-reach"%';
+
+-- 补充独立 byCLI 执行 Skill，避免继续把 bycli 与知识采集编排能力混为一体。
+UPDATE byai.byai_system_config c
+SET param_value = left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1)
+    || ',{"skillName":"bycli","skillCode":"bycli","skillDescZh":"通过浏览器与 Adapter 执行网站操作、复用或维护适配器，并返回采集结果。","skillDescEn":"Execute website operations through the browser and adapters, reuse or maintain adapters, and return collected results."}]'
+WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
+  AND c.param_value NOT LIKE '%"skillCode":"bycli"%';
+
+-- 初始化独立 bycli 执行 Skill 资源，保留 knowledge-collection 作为默认编排资源。
+INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
+SELECT 25,'BYAI','SKILL','ATOM','byCLI','通过浏览器与 Adapter 执行网站操作、复用或维护适配器，并返回采集结果。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'bycli',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE'
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM byai.ss_resource
+    WHERE resource_id = 25
+       OR resource_code = 'bycli'
+);
+
+-- 为新增的 byCLI 资源补齐内置 Skill 扩展记录；resource_id 已存在时保持原记录不变。
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
+SELECT 25,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.ss_res_ext_skill WHERE resource_id = 25
+);
+
+-- 修正 bycli 运行期技能快照，避免资源 ID 曾被其他技能复用时残留错误 target_content。
+UPDATE byai.ss_res_ext_skill e
+SET target_content = json_build_object(
+        'resourceId', r.resource_id,
+        'resourceCode', r.resource_code,
+        'resourceName', r.resource_name,
+        'resourceDesc', r.resource_desc,
+        'resourceBizType', r.resource_biz_type,
+        'resourceType', r.resource_type,
+        'ownerType', r.owner_type,
+        'sourceType', e.source_type,
+        'skillType', e.skill_type,
+        'skillUrl', e.skill_url,
+        'version', e.version,
+        'skillPackageFormat', e.skill_package_format,
+        'skillOriginalFilename', e.skill_original_filename,
+        'skillPackageSize', e.skill_package_size,
+        'skillPackageHash', e.skill_package_hash,
+        'syncStatus', e.sync_status,
+        'syncError', e.sync_error,
+        'lastSyncTime', to_char(e.last_sync_time, 'YYYY-MM-DD HH24:MI:SS')
+    )::text
+FROM byai.ss_resource r
+WHERE e.resource_id = 25
+  AND r.resource_id = 25
+  AND r.resource_code = 'bycli';
+
+-- 复制知识采集 Skill 的可用授权，使未传 ownerType 的技能列表也能发现 bycli。
+INSERT INTO byai.au_privilege_grant (
+    privilege_grant_id,
+    grant_type,
+    oper_type,
+    grant_obj_type,
+    grant_obj_id,
+    eff_date,
+    exp_date,
+    status_cd,
+    create_staff,
+    create_date,
+    update_staff,
+    update_date,
+    grant_to_type,
+    grant_to_obj_id,
+    grant_to_obj_type,
+    allow_unsubscribe
+)
+SELECT
+    COALESCE((SELECT MAX(privilege_grant_id) FROM byai.au_privilege_grant), 0)
+        + ROW_NUMBER() OVER (ORDER BY g.privilege_grant_id),
+    g.grant_type,
+    g.oper_type,
+    g.grant_obj_type,
+    25,
+    g.eff_date,
+    g.exp_date,
+    g.status_cd,
+    g.create_staff,
+    g.create_date,
+    g.update_staff,
+    g.update_date,
+    g.grant_to_type,
+    g.grant_to_obj_id,
+    g.grant_to_obj_type,
+    g.allow_unsubscribe
+FROM byai.au_privilege_grant g
+WHERE g.grant_obj_id = 14
+  AND NOT EXISTS (
+      SELECT 1
+      FROM byai.au_privilege_grant existing
+      WHERE existing.grant_obj_id = 25
+        AND existing.grant_type = g.grant_type
+        AND existing.grant_to_type = g.grant_to_type
+        AND existing.grant_to_obj_id = g.grant_to_obj_id
+        AND existing.grant_to_obj_type = g.grant_to_obj_type
+  );
+
+-- ========== V0.3.1 连接器授权数据（合并到全新初始化脚本） ==========
+-- 初始化企业协作平台连接器元信息及 Runtime Manifest。
+-- Manifest 不包含 token、refresh token 或 App Secret；真实凭证由 CLI native-home 管理。
+-- 钉钉使用 DWS CLI，飞书使用 lark-cli；企业微信在 Provider 完成前仅保留占位元信息。
+INSERT INTO byai.byai_connector_info (
+    connector_id,
+    connector_code,
+    connector_name,
+    description,
+    connector_type,
+    provider_code,
+    auth_mode,
+    auth_config,
+    request_config,
+    runtime_manifest,
+    sort
+)
+SELECT
+    nextval('byai.seq_any_table'),
+    seed.connector_code,
+    seed.connector_name,
+    seed.description,
+    'SYSTEM',
+    seed.provider_code,
+    seed.auth_mode,
+    seed.auth_config,
+    '{}',
+    seed.runtime_manifest,
+    seed.sort
+FROM (
+    SELECT 'dingtalk' AS connector_code,
+           '钉钉' AS connector_name,
+           '通过 DWS 连接钉钉工作空间' AS description,
+           'dws-dingtalk' AS provider_code,
+           'DEVICE_FLOW' AS auth_mode,
+           '{}' AS auth_config,
+           '{"authStorage":{"environment":{"DWS_CONFIG_DIR":"/by/.connector-auth/.dws/config","DWS_DISABLE_KEYCHAIN":"1","HOME":"/by/.connector-auth/.dws"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.dws","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"dingtalk","runtime":{"authorizeIn":"be-auth-job","commands":{"login":["dws","auth","login","--device","-y"],"logout":["dws","auth","reset","-y"],"status":["dws","auth","status","--format","json"]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"dws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.52"}' AS runtime_manifest,
+           10 AS sort
+    UNION ALL
+    SELECT 'lark', '飞书', '通过 lark-cli 连接飞书工作空间', 'lark-cli', 'DEVICE_FLOW',
+           '{"domains":["docs","drive","wiki"]}',
+           '{"authStorage":{"environment":{"HOME":"/by/.connector-auth/.lark-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.lark-cli","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"lark","runtime":{"authorizeIn":"be-auth-job","commands":{"login":["lark-cli","auth","login","--domain","docs","--domain","drive","--domain","wiki","--no-wait","--json"],"logout":["lark-cli","auth","logout","--json"],"status":["lark-cli","auth","status","--json","--verify"]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"fws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.78"}',
+           20
+    UNION ALL
+    SELECT 'wecom', '企业微信', '企业微信授权能力即将开放', 'wecom-cli', 'CLI_INIT', '{}', NULL, 30
+) seed
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_connector_info existing
+    WHERE existing.connector_code = seed.connector_code
+);

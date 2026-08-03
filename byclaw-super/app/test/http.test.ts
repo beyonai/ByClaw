@@ -773,7 +773,7 @@ describe("Session / Run HTTP/SSE API", () => {
     expect(missingToken.json()).toMatchObject({ resultCode: 401, type: 1 });
     expect(missingHistoryToken.statusCode).toBe(401);
     expect((await app.inject({ method: "GET", url: "/byclawSuper/ready" })).statusCode).toBe(503);
-    expect((await app.inject({ method: "GET", url: "/ready" })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: "/ready" })).statusCode).toBe(503);
     expect((await app.inject({ method: "POST", url: "/v1/sessions" })).statusCode).toBe(404);
     await service.dispose();
   });

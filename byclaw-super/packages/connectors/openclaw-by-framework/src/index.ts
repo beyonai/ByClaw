@@ -37,13 +37,19 @@ export const OPENCLAW_BY_FRAMEWORK_CONNECTOR_ID = "openclaw-by-framework";
 
 type RedisClient = ReturnType<typeof createRedis>;
 type GatewayClientLike = Pick<GatewayClient, "sendMessage" | "cancelTask">;
+type WorkerRegistryLike = Pick<WorkerRegistry, "getExecutionByMessageId">;
+
+const TERMINAL_EXECUTION_STATUSES = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
 
 export interface OpenClawConnectorOptions {
   redisOptions?: RedisConnectionConfig;
   redis?: RedisClient;
   gatewayClient?: GatewayClientLike;
+  registry?: WorkerRegistryLike;
   readBlockMs?: number;
   sourceAgentType?: string;
+  firstEventTimeoutMs?: number;
+  cancelConfirmationTimeoutMs?: number;
 }
 
 /**
@@ -62,18 +68,30 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
 
   readonly #redis: RedisClient;
   readonly #client: GatewayClientLike;
+  readonly #registry: WorkerRegistryLike | undefined;
   readonly #ownsRedis: boolean;
   readonly #readBlockMs: number;
   readonly #sourceAgentType: string;
+  readonly #firstEventTimeoutMs: number;
+  readonly #cancelConfirmationTimeoutMs: number;
 
   /** 可注入 Redis 和 GatewayClient 以支持测试；缺省时创建并持有真实连接。 */
   constructor(options: OpenClawConnectorOptions = {}) {
     this.#redis = options.redis ?? createRedis(options.redisOptions);
     this.#ownsRedis = !options.redis;
-    this.#client =
-      options.gatewayClient ?? new GatewayClient(new WorkerRegistry(this.#redis), this.#redis);
+    if (options.gatewayClient) {
+      this.#registry = options.registry;
+      this.#client = options.gatewayClient;
+    } else {
+      const registry = new WorkerRegistry(this.#redis);
+      this.#registry = registry;
+      this.#client = new GatewayClient(registry, this.#redis);
+    }
     this.#readBlockMs = options.readBlockMs ?? 1_000;
     this.#sourceAgentType = options.sourceAgentType ?? "BY_SUPER";
+    this.#firstEventTimeoutMs = options.firstEventTimeoutMs ?? 300_000;
+    this.#cancelConfirmationTimeoutMs =
+      options.cancelConfirmationTimeoutMs ?? 30_000;
   }
 
   /**
@@ -117,7 +135,17 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
       targetAgentType,
       sessionId: childSessionId,
       // 有附件时构造与 byclaw-be 一致的 {text, files} 内容；无附件保持纯字符串。
-      content: buildByFrameworkContent(request.task, request.attachments),
+      // by-framework 入站 Run 在投递内容末尾声明会话工作区、指明附件在工作区内的读取路径，
+      // 并提示子 agent 落盘位置；该后缀只进入 wire payload，request.task 本身不变
+      //（它是委派幂等/恢复的匹配键）。
+      content: buildByFrameworkContent(
+        withSessionWorkspaceReminder(
+          request.task,
+          request.externalSessionId,
+          request.attachments,
+        ),
+        request.attachments,
+      ),
       userCode: request.userCode,
       ...(request.userName ? { userName: request.userName } : {}),
       requireOnlineWorker: true,
@@ -134,23 +162,11 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
       );
     }
 
-    let cancelPromise: Promise<void> | undefined;
-    // 缓存取消 Promise，使用户取消、超时和 AbortSignal 竞争时只发送一次请求。
-    const cancel = async (reason: string): Promise<void> => {
-      if (!cancelPromise) {
-        cancelPromise = this.#client
-          .cancelTask({
-            messageId: response.message_id,
-            sessionId: childSessionId,
-            targetAgentType,
-            reason,
-            requestedBy: "byclaw-super",
-            cancelMode: "graceful",
-          })
-          .then(() => undefined);
-      }
-      await cancelPromise;
-    };
+    const cancel = this.#createCancel(
+      response.message_id,
+      childSessionId,
+      targetAgentType,
+    );
     if (context.signal.aborted) {
       await cancel("aborted before event stream started");
       throw abortError(context.signal.reason);
@@ -197,20 +213,7 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
     if (!childSessionId || !messageId || !traceId || !targetAgentType) {
       throw new Error("OpenClaw external execution reference is incomplete");
     }
-    let cancelPromise: Promise<void> | undefined;
-    const cancel = async (reason: string): Promise<void> => {
-      cancelPromise ??= this.#client
-        .cancelTask({
-          messageId,
-          sessionId: childSessionId,
-          targetAgentType,
-          reason,
-          requestedBy: "byclaw-super",
-          cancelMode: "graceful",
-        })
-        .then(() => undefined);
-      await cancelPromise;
-    };
+    const cancel = this.#createCancel(messageId, childSessionId, targetAgentType);
     return {
       ref,
       events: this.#readEvents(
@@ -294,6 +297,68 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
     }
   }
 
+  /** 创建幂等取消句柄，并确认 by-framework 中的外部 execution 已离开运行态。 */
+  #createCancel(
+    messageId: string,
+    sessionId: string,
+    targetAgentType: string,
+  ): (reason: string) => Promise<void> {
+    let cancelPromise: Promise<void> | undefined;
+    return async (reason: string): Promise<void> => {
+      cancelPromise ??= this.#cancelAndConfirm(
+        messageId,
+        sessionId,
+        targetAgentType,
+        reason,
+      );
+      await cancelPromise;
+    };
+  }
+
+  /** 校验取消受理结果；生产路径继续轮询 execution 终态，避免把请求受理误当成已停止。 */
+  async #cancelAndConfirm(
+    messageId: string,
+    sessionId: string,
+    targetAgentType: string,
+    reason: string,
+  ): Promise<void> {
+    const response = await this.#client.cancelTask({
+      messageId,
+      sessionId,
+      targetAgentType,
+      reason,
+      requestedBy: "byclaw-super",
+      cancelMode: "force",
+    });
+    if (response.status === "ALREADY_FINISHED") {
+      return;
+    }
+    if (!response.success || response.status !== "CANCEL_REQUESTED") {
+      throw new Error(
+        `OpenClaw cancellation failed: status=${response.status}, error=${response.error ?? "unknown"}`,
+      );
+    }
+    if (!this.#registry) {
+      return;
+    }
+
+    const deadline = Date.now() + this.#cancelConfirmationTimeoutMs;
+    while (Date.now() < deadline) {
+      const execution = await this.#registry.getExecutionByMessageId(
+        messageId,
+        sessionId,
+      );
+      const status = String(execution?.status ?? "");
+      if (TERMINAL_EXECUTION_STATUSES.has(status)) {
+        return;
+      }
+      await delay(Math.min(250, Math.max(1, deadline - Date.now())));
+    }
+    throw new Error(
+      `OpenClaw cancellation was not confirmed within ${this.#cancelConfirmationTimeoutMs}ms`,
+    );
+  }
+
   /**
    * 从独立会话 Stream 持续读取事件，过滤其他 trace 和 reasoning 事件，
    * 再映射成与具体传输无关的 ConnectorEvent。
@@ -308,12 +373,39 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
     const stream = QueueNames.session_data_stream(sessionId);
     let cursor = startCursor;
     let output = "";
+    let firstEventReceived = false;
+    const firstEventDeadline = Date.now() + this.#firstEventTimeoutMs;
     while (!signal.aborted) {
+      if (!firstEventReceived && Date.now() >= firstEventDeadline) {
+        const reason = `OpenClaw first event timed out after ${this.#firstEventTimeoutMs}ms`;
+        let cancellationError: string | undefined;
+        try {
+          await cancel(reason);
+        } catch (error) {
+          cancellationError = error instanceof Error ? error.message : String(error);
+        }
+        yield {
+          type: "failed",
+          error: {
+            code: "OPENCLAW_FIRST_EVENT_TIMEOUT",
+            message: cancellationError ? `${reason}; ${cancellationError}` : reason,
+            retryable: true,
+            timedOut: true,
+          },
+        };
+        return;
+      }
+      const blockMs = firstEventReceived
+        ? this.#readBlockMs
+        : Math.min(
+            this.#readBlockMs,
+            Math.max(1, firstEventDeadline - Date.now()),
+          );
       const rows = await this.#redis.xread(
         "COUNT",
         50,
         "BLOCK",
-        this.#readBlockMs,
+        blockMs,
         "STREAMS",
         stream,
         cursor,
@@ -324,6 +416,7 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
         if (!message || (message.trace_id && message.trace_id !== traceId)) {
           continue;
         }
+        firstEventReceived = true;
         if (message.event_type === EventType.ANSWER_DELTA) {
           const text = extractContent(message.data);
           if (text) {
@@ -400,7 +493,66 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
   }
 }
 
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 export type { RedisConnectionConfig } from "@byclaw/by-framework";
+
+/**
+ * 仅对 by-framework 入站 Run（externalSessionId 存在）在 task 末尾追加会话工作区提示。
+ * 该后缀只进入投递内容，不回写 request.task，保证委派的幂等/恢复匹配不受影响。
+ */
+function withSessionWorkspaceReminder(
+  task: string,
+  externalSessionId: string | undefined,
+  attachments: readonly RunAttachment[],
+): string {
+  if (!externalSessionId) {
+    return task;
+  }
+  const workspace = `/by/.sessions/${externalSessionId}/`;
+  const readPaths = sessionWorkspaceReadPaths(attachments);
+  if (readPaths.length === 0) {
+    return `${task}\n\nYour session workspace is \`${workspace}\`. If you produce any files, place them under this session workspace.`;
+  }
+  const lines = [
+    `Your session workspace is \`${workspace}\`.`,
+    "Files attached to this task are available in this workspace for reading:",
+    ...readPaths.map((path) => `- \`${path}\``),
+    "If you produce any files, place them under this session workspace.",
+  ];
+  return `${task}\n\n${lines.join("\n")}`;
+}
+
+/**
+ * 列出附件在沙箱会话工作区内的读取路径。BE 投递的 `filePath`（= attachment.path）
+ * 是对象存储 key，形如 `/.sessions/<sessionId>/<file>`（前导 /、不含 `..`）；沙箱将其
+ * 挂在 `/by` 下，故读取路径 = `/by` + 该 key。非会话工作区 key 一律忽略。仅向子 agent
+ * 提示读取位置。
+ */
+function sessionWorkspaceReadPaths(
+  attachments: readonly RunAttachment[],
+): string[] {
+  const seen = new Set<string>();
+  const paths: string[] = [];
+  for (const attachment of attachments) {
+    const objectKey = attachment.path?.trim();
+    if (
+      !objectKey ||
+      !objectKey.startsWith("/.sessions/") ||
+      objectKey.includes("..")
+    ) {
+      continue;
+    }
+    const readPath = `/by${objectKey}`;
+    if (!seen.has(readPath)) {
+      seen.add(readPath);
+      paths.push(readPath);
+    }
+  }
+  return paths;
+}
 
 /**
  * 按 byclaw-be 兼容结构构造投递内容：无附件时为纯字符串；

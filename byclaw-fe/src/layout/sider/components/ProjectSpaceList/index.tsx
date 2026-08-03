@@ -21,6 +21,7 @@ import {
 } from '@/pages/projectSpace/service';
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
+import { getStoredProjectScopeId, saveProjectScopeIdToStorage } from '@/pages/projectSpace/constants';
 import { saveProjectMembers } from '@/service/devloop';
 import AntdIcon from '@/components/AntdIcon';
 import { SiderContentContext } from '../../siderContentContext';
@@ -29,8 +30,6 @@ import ProjectDetailPanel from './ProjectDetailModal';
 import styles from './index.module.less';
 
 const PROJECT_SESSION_PAGE_SIZE = 30;
-// 左侧项目选择仅持久化项目 ID，刷新浏览器后由最新可见项目列表校验并恢复。
-const PROJECT_SCOPE_STORAGE_KEY = 'byclaw.projectSpace.selectedProjectId';
 
 type ProjectSessionPageState = {
   pageNum: number;
@@ -164,32 +163,6 @@ const renderProjectSceneTag = (project: ProjectSpace, t: ProjectSpaceTranslate, 
 
 const isDefaultProject = (project?: ProjectSpace) => project?.projectType === 'default';
 
-const getStoredProjectScopeId = () => {
-  if (typeof window === 'undefined') return undefined;
-
-  try {
-    return window.localStorage.getItem(PROJECT_SCOPE_STORAGE_KEY)?.trim() || undefined;
-  } catch {
-    // 浏览器禁用本地存储时不影响当前会话中的项目切换。
-    return undefined;
-  }
-};
-
-const saveProjectScopeIdToStorage = (projectId?: string | number) => {
-  if (typeof window === 'undefined') return;
-
-  try {
-    const normalizedProjectId = `${projectId ?? ''}`.trim();
-    if (normalizedProjectId) {
-      window.localStorage.setItem(PROJECT_SCOPE_STORAGE_KEY, normalizedProjectId);
-      return;
-    }
-    window.localStorage.removeItem(PROJECT_SCOPE_STORAGE_KEY);
-  } catch {
-    // 浏览器禁用本地存储时不影响当前会话中的项目切换。
-  }
-};
-
 const getProjectIdFromSaveResponse = (response: any) => {
   // 创建接口有的环境返回 data.projectId，有的请求封装会直接返回 projectId，这里统一兜底取值。
   return `${response?.projectId || response?.id || response?.data?.projectId || response?.data?.id || ''}`;
@@ -245,11 +218,20 @@ const ProjectSpaceList: React.FC = () => {
   );
   const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const { clearDetailPanel } = React.useContext(SiderContentContext);
-  const { projects, loading, fetchProjects } = useProjectList();
+  const {
+    projects,
+    loading,
+    keyword: projectScopeSearchKeyword,
+    setKeyword: setProjectScopeSearchKeyword,
+    fetchProjects,
+    hasMore: hasMoreProjects,
+    loadMoreProjects,
+  } = useProjectList();
   // 项目类型配置决定研发、运营能力是否开放，侧栏表单和详情使用同一份结果。
   const { projectTypeOptions, projectTypeLoading, isDevelopProjectEnabled, isOperationProjectEnabled } =
     useProjectTypeConfig();
   const [projectScopeId, setProjectScopeId] = useState<string | undefined>(() => getStoredProjectScopeId());
+  const [projectScopeDropdownOpen, setProjectScopeDropdownOpen] = useState(false);
   const [sessionKeyword, setSessionKeyword] = useState('');
   const [projectDetailMap, setProjectDetailMap] = useState<Record<string, ProjectSpace>>({});
   const [detailLoadingMap, setDetailLoadingMap] = useState<Record<string, boolean>>({});
@@ -301,6 +283,16 @@ const ProjectSpaceList: React.FC = () => {
   const activeScopeProject = useMemo(() => {
     return mergedProjects.find((project) => project.projectId === projectScopeId);
   }, [mergedProjects, projectScopeId]);
+
+  useEffect(() => {
+    if (!activeScopeProject?.projectId) return;
+
+    // 缓存恢复或权限校验回退后，将最终有效项目同步给所有新会话入口。
+    EventEmitter.emit('projectSpace-active-project-change', {
+      projectId: activeScopeProject.projectId,
+      projectName: activeScopeProject.projectName,
+    });
+  }, [EventEmitter, activeScopeProject?.projectId, activeScopeProject?.projectName]);
 
   const scopeTitle = activeScopeProject?.projectName || t('selectProject');
   const currentUserId = userInfo.userId ?? userInfo.id;
@@ -481,6 +473,9 @@ const ProjectSpaceList: React.FC = () => {
     }
     // 用户主动切换项目时取消新建项目的等待态，以当前选择为准。
     pendingCreatedProjectIdRef.current = undefined;
+    // 切换完成后清空后端搜索条件，下一次打开从第一页重新加载项目。
+    setProjectScopeSearchKeyword('');
+    setProjectScopeDropdownOpen(false);
     updateProjectScopeId(key);
     const selectedProject = mergedProjects.find((project) => project.projectId === key);
     if (!selectedProject) return;
@@ -508,6 +503,18 @@ const ProjectSpaceList: React.FC = () => {
     // 搜索结果不能当作完整缓存使用，切回项目时恢复默认会话列表。
     void fetchProjectSessions(selectedProject, { force: true, keyword: '' });
   };
+
+  const handleProjectScopeMenuScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      if (!hasMoreProjects || loading) return;
+      const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
+      if (scrollHeight - scrollTop - clientHeight <= 64) {
+        // 下拉项目列表触底才请求下一页，单次固定由后端返回 30 条数据。
+        void loadMoreProjects();
+      }
+    },
+    [hasMoreProjects, loadMoreProjects, loading]
+  );
 
   const handleProjectSessionBound = useCallback(
     (payload: {
@@ -1132,15 +1139,16 @@ const ProjectSpaceList: React.FC = () => {
         },
       };
     });
-    setDetailProject((prev) =>
-      prev?.projectId === projectId
-        ? {
-          ...prev,
-          sessions: removeSession(prev.sessions),
-          sessionCount: Math.max(0, Number(prev.sessionCount ?? (prev.sessions || []).length) - 1),
-        }
-        : prev
-    );
+    setDetailProject((prev) => {
+      if (prev?.projectId !== projectId) {
+        return prev;
+      }
+      return {
+        ...prev,
+        sessions: removeSession(prev.sessions),
+        sessionCount: Math.max(0, Number(prev.sessionCount ?? (prev.sessions || []).length) - 1),
+      };
+    });
   }, []);
 
   const handleProjectSessionDeleteRollback = useCallback((project: ProjectSpace, restoredSession: ProjectSession) => {
@@ -1284,21 +1292,45 @@ const ProjectSpaceList: React.FC = () => {
           <div className={styles.header}>
             <div className={styles.scopeActionRow}>
               <Dropdown
-                trigger={['click']}
+                // 展开状态仅由项目输入框控制，避免 Dropdown 点击触发与输入框聚焦同时切换导致闪退。
+                trigger={[]}
+                open={projectScopeDropdownOpen}
                 overlayClassName={styles.scopeDropdown}
+                onOpenChange={(open) => {
+                  setProjectScopeDropdownOpen(open);
+                  if (!open) setProjectScopeSearchKeyword('');
+                }}
                 menu={{
                   items: projectScopeMenuItems,
                   selectedKeys: projectScopeId ? [projectScopeId] : [],
                   onClick: handleSelectProjectScope,
                 }}
+                dropdownRender={(menu) => (
+                  <div className={styles.scopeDropdownMenu} onScroll={handleProjectScopeMenuScroll}>
+                    {projectScopeMenuItems.length ? (
+                      menu
+                    ) : !loading ? (
+                      <Empty
+                        className={styles.scopeDropdownEmpty}
+                        image={Empty.PRESENTED_IMAGE_SIMPLE}
+                        description={t('projectSearchEmpty')}
+                      />
+                    ) : null}
+                    {loading && <Spin className={styles.scopeDropdownLoading} size="small" />}
+                  </div>
+                )}
               >
-                <button type="button" className={styles.scopeRow}>
-                  <span className={styles.scopeTitle}>{scopeTitle}</span>
-                  {/* 项目下拉只保留切换箭头，不展示会话数量统计。 */}
-                  <span className={styles.scopeMeta}>
-                    <DownOutlined />
-                  </span>
-                </button>
+                {/* 项目选择框同时作为后端搜索入口，聚焦后直接输入关键词。 */}
+                <Input
+                  allowClear={projectScopeDropdownOpen}
+                  className={styles.scopeInput}
+                  placeholder={projectScopeDropdownOpen ? t('projectSearchPlaceholder') : undefined}
+                  suffix={<DownOutlined />}
+                  value={projectScopeDropdownOpen ? projectScopeSearchKeyword : scopeTitle}
+                  onFocus={() => setProjectScopeDropdownOpen(true)}
+                  onClick={() => setProjectScopeDropdownOpen(true)}
+                  onChange={(event) => setProjectScopeSearchKeyword(event.target.value)}
+                />
               </Dropdown>
               <Tooltip title={t('createProject')} placement="top">
                 {/* 右侧仅保留新建项目入口，项目详情由下方快捷入口承载。 */}

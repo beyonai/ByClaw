@@ -254,20 +254,16 @@ public class AssistantChatController {
 
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
         Set<Long> allowedSessionIds = sessionService.findBatchByIds(sessionIds).stream()
-            .filter(session -> isCurrentUserSession(session, currentUserId))
-            .map(ByaiSession::getSessionId)
+            .filter(session -> isCurrentUserSession(session, currentUserId)).map(ByaiSession::getSessionId)
             .collect(Collectors.toSet());
 
-        List<RunningChatInfo> list = sessionIds.stream()
-            .filter(allowedSessionIds::contains)
-            .map(runningOutputStreamRegistry::getRunning)
-            .collect(Collectors.toList());
+        List<RunningChatInfo> list = sessionIds.stream().filter(allowedSessionIds::contains)
+            .map(runningOutputStreamRegistry::getRunning).collect(Collectors.toList());
         return ResponseUtil.successResponse(list);
     }
 
     @PostMapping(value = "/runningSnapshot")
-    public ResponseUtil<RunningChatSnapshotResponse> runningSnapshot(
-        @RequestBody RunningChatSnapshotRequest request) {
+    public ResponseUtil<RunningChatSnapshotResponse> runningSnapshot(@RequestBody RunningChatSnapshotRequest request) {
         if (request == null || request.getSessionId() == null) {
             return ResponseUtil.successResponse(null);
         }

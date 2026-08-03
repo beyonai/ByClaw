@@ -191,13 +191,7 @@ export default function useRender({
                   {/* <Memory msg={msg} /> */}
                 </>
               )}
-              <MoreActions
-                deleteMessage={deleteMessage}
-                msg={msg}
-                employeesList={employeesList}
-                agentList={agentList}
-                showTroubleshoot
-              />
+              <MoreActions deleteMessage={deleteMessage} msg={msg} showTroubleshoot />
               {[IMessageState.Done, IMessageState.Cancel].includes(messageState) && (
                 <ThumbUp updateMessage={updateMessage} msg={msg} />
               )}
@@ -207,7 +201,7 @@ export default function useRender({
         </div>
       );
     },
-    [deleteMessage, updateMessage, canRefrence, employeesList, agentList]
+    [deleteMessage, updateMessage, canRefrence]
   );
 
   const uploadFileRender = useCallback((fileList?: IFile[], msg?: IMessage) => {

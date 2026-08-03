@@ -14,6 +14,10 @@ export interface AppConfig {
   corsOrigin: string | boolean;
   logLevel: string;
   delegationTimeoutMs: number;
+  openClaw: {
+    firstEventTimeoutMs: number;
+    cancelConfirmationTimeoutMs: number;
+  };
   redis: RedisConnectionConfig;
   auth: BeyondTokenVerifierOptions;
   byClawBe: Omit<ByClawBeAgentCatalogOptions, "fetchImpl">;
@@ -70,11 +74,11 @@ export interface ByFrameworkWorkerConfig {
 /** 从环境变量加载并校验应用配置，避免无效端口或半配置模型进入运行期。 */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const defaults = APP_CONFIG_DEFAULTS;
-  if (
-    (env.DB_TYPE ?? defaults.database.type).toLowerCase() !==
-    defaults.database.type
-  ) {
-    throw new Error("DB_TYPE must be postgresql");
+  const databaseType = (
+    env.DB_TYPE ?? defaults.database.type
+  ).toLowerCase();
+  if (!["postgresql", "opengauss"].includes(databaseType)) {
+    throw new Error("DB_TYPE must be postgresql or opengauss");
   }
   const port = integer(
     env.PORT ?? String(defaults.http.port),
@@ -118,6 +122,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     corsOrigin: corsOrigin === "*" ? true : corsOrigin,
     logLevel: env.LOG_LEVEL ?? defaults.http.logLevel,
     delegationTimeoutMs,
+    openClaw: {
+      firstEventTimeoutMs: integer(
+        env.OPENCLAW_FIRST_EVENT_TIMEOUT_MS ??
+          String(defaults.openClaw.firstEventTimeoutMs),
+        "OPENCLAW_FIRST_EVENT_TIMEOUT_MS",
+        1,
+        3_600_000,
+      ),
+      cancelConfirmationTimeoutMs: integer(
+        env.OPENCLAW_CANCEL_CONFIRM_TIMEOUT_MS ??
+          String(defaults.openClaw.cancelConfirmationTimeoutMs),
+        "OPENCLAW_CANCEL_CONFIRM_TIMEOUT_MS",
+        1,
+        300_000,
+      ),
+    },
     redis,
     auth: {
       publicKey: env.LOGIN_JWT_PUBLIC_KEY ?? DEFAULT_BYCLAW_LOGIN_JWT_PUBLIC_KEY,

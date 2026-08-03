@@ -29,4 +29,16 @@ public class UserPrivateParamVO {
     private String valueLast4;
 
     private Date updateTime;
+
+    private String source;
+
+    private String sourceRef;
+
+    private Boolean managed;
+
+    private Boolean editable;
+
+    private Boolean deletable;
+
+    private Boolean enableable;
 }

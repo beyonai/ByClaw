@@ -100,3 +100,21 @@ export const addSessionHandler = (state: ISessionState, newSession: Omit<ISessio
 
   return newState;
 };
+
+/**
+ * 会话第一页请求期间可能收到 createSession 事件，接口返回后需要保留这批本地新增会话，
+ * 避免首次进入系统时列表响应覆盖刚发起的新聊天。
+ */
+export const getSessionsCreatedDuringRequest = (
+  sessionsAtRequestStart: ISession[] = [],
+  currentSessions: ISession[] = [],
+  responseSessions: ISession[] = []
+) => {
+  const initialSessionIds = new Set(sessionsAtRequestStart.map((session) => `${session.sessionId}`));
+  const responseSessionIds = new Set(responseSessions.map((session) => `${session.sessionId}`));
+
+  return currentSessions.filter((session) => {
+    const sessionId = `${session.sessionId}`;
+    return !initialSessionIds.has(sessionId) && !responseSessionIds.has(sessionId);
+  });
+};

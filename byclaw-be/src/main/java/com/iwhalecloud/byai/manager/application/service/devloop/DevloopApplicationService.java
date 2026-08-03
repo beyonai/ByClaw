@@ -10,7 +10,11 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.*;
@@ -19,6 +23,8 @@ import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDeleteDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementUpdateDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.IntegrationEnvDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.IntegrationSuiteDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
@@ -31,7 +37,7 @@ import com.iwhalecloud.byai.manager.entity.users.UserPrivateParam;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
-import com.iwhalecloud.byai.manager.mapper.devloop.ScanLogItemMapper;
+import com.iwhalecloud.byai.manager.mapper.devloop.ScanRequireItemMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionExtMapper;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
@@ -95,14 +101,13 @@ public class DevloopApplicationService {
     private static final String MANUAL_SOURCE_NAME = MANUAL_SOURCE_TYPE;
 
     /**
-     * 手工录入内容的持久化包裹标识。外部扫描内容仍按原文存储，读取时只识别该流程创建的记录，
-     * 不改变已有渠道内容。
+     * 手工录入内容的持久化包裹标识。外部扫描内容仍按原文存储，读取时只识别该流程创建的记录， 不改变已有渠道内容。
      */
     private static final String MANUAL_REQUIREMENT_CONTENT_KEY = "manualRequirement";
 
     /** 手工需求 JSON 包裹中持久化的稳定、语言无关的来源标识。 */
-    private static final Set<String> MANUAL_REQUIREMENT_ORIGIN_TYPES =
-        Set.of("manual", "customer_feedback", "internal_proposal");
+    private static final Set<String> MANUAL_REQUIREMENT_ORIGIN_TYPES = Set.of("manual", "customer_feedback",
+        "internal_proposal");
 
     /** 仅用于内部 JSON 包裹的独立 Mapper，避免受 HTTP JSON 全局配置影响。 */
     private static final ObjectMapper MANUAL_REQUIREMENT_MAPPER = new ObjectMapper();
@@ -125,10 +130,22 @@ public class DevloopApplicationService {
     private ByaiSessionExtMapper byaiSessionExtMapper;
 
     @Autowired
-    private ScanLogItemMapper scanLogItemMapper;
+    private ScanRequireItemMapper scanRequireItemMapper;
 
     @Autowired
     private ScanSourceService scanSourceService;
+
+    @Autowired
+    private IntegrationEnvService integrationEnvService;
+
+    @Autowired
+    private IntegrationSuiteService integrationSuiteService;
+
+    @Autowired
+    private IntegrationRunService integrationRunService;
+
+    @Autowired
+    private DangerousScriptGuard dangerousScriptGuard;
 
     @Autowired
     private ScanLogService scanLogService;
@@ -231,8 +248,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 校验当前登录用户是否为该扫描源创建者。是则返回 null(放行);否则返回错误提示。
-     * 后端硬控制:前端隐藏按钮只是体验,越权改删/授权必须在服务端挡住。
+     * 校验当前登录用户是否为该扫描源创建者。是则返回 null(放行);否则返回错误提示。 后端硬控制:前端隐藏按钮只是体验,越权改删/授权必须在服务端挡住。
      */
     private String requireSourceCreator(Long sourceId) {
         if (sourceId == null) {
@@ -257,6 +273,22 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(list);
     }
 
+    /** 渠道配置大面板按名称后端搜索并分页返回，手工需求的内部来源不计入渠道总数。 */
+    public ResponseUtil<PageInfo<Map<String, Object>>> listScanSources(Long projectId, String keyword, int pageNum,
+        int pageSize) {
+        Page<ScanSource> sourcePage = scanSourceService.listByProjectIdPage(projectId, keyword, MANUAL_SOURCE_TYPE,
+            pageNum, pageSize);
+        PageInfo<Map<String, Object>> result = new PageInfo<>();
+        result.setPageNum((int) sourcePage.getCurrent());
+        result.setPageSize((int) sourcePage.getSize());
+        result.setTotal(sourcePage.getTotal());
+        result.setTotalPages((int) sourcePage.getPages());
+        List<Map<String, Object>> sourceList = sourcePage.getRecords().stream().map(this::scanSourceToVo)
+            .collect(java.util.stream.Collectors.toList());
+        result.setList(sourceList);
+        return ResponseUtil.successResponse(result);
+    }
+
     /** 扫描源对外视图：白名单字段，刻意排除 createBy/updateBy/时间戳/deleteFlag 等内部字段。 */
     private Map<String, Object> scanSourceToVo(ScanSource s) {
         Map<String, Object> map = new HashMap<>();
@@ -274,6 +306,367 @@ public class DevloopApplicationService {
         map.put("createBy", s.getCreateBy());
         map.put("createByName", resolveUserName(parseUserId(s.getCreateBy())));
         return map;
+    }
+
+    // ========== 集成测试环境 ==========
+
+    /** 创建集成测试环境 */
+    public ResponseUtil<Map<String, Object>> createIntegrationEnv(IntegrationEnvDTO dto) {
+        IntegrationEnv env = new IntegrationEnv();
+        applyIntegrationEnvDto(env, dto, null);
+        env.setCreateBy(CurrentUserHolder.getCurrentUserId());
+        IntegrationEnv created = integrationEnvService.create(env);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("envId", created.getEnvId());
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 更新集成测试环境 */
+    public ResponseUtil<Void> updateIntegrationEnv(IntegrationEnvDTO dto) {
+        IntegrationEnv env = new IntegrationEnv();
+        env.setEnvId(dto.getEnvId());
+        // 更新前载入原值:密码留空需继承旧密文,避免整列 JSON 覆盖把已存密文清掉。
+        IntegrationEnv existing = integrationEnvService.findById(dto.getEnvId());
+        applyIntegrationEnvDto(env, dto, existing);
+        env.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        integrationEnvService.update(env);
+        return ResponseUtil.successResponse(null);
+    }
+
+    /** 删除集成测试环境 */
+    public ResponseUtil<Void> deleteIntegrationEnv(Long envId) {
+        integrationEnvService.delete(envId);
+        return ResponseUtil.successResponse(null);
+    }
+
+    /** 查询项目下的集成测试环境列表 */
+    public ResponseUtil<List<Map<String, Object>>> listIntegrationEnvs(Long projectId) {
+        List<Map<String, Object>> list = integrationEnvService.listByProjectId(projectId).stream()
+            .map(this::integrationEnvToVo).collect(java.util.stream.Collectors.toList());
+        return ResponseUtil.successResponse(list);
+    }
+
+    /** DTO → 实体字段拷贝(projectId 仅创建时来自入参,更新时不改归属项目)。 */
+    private void applyIntegrationEnvDto(IntegrationEnv env, IntegrationEnvDTO dto, IntegrationEnv existing) {
+        // 保存即过高危闸门:环境准备 stages 会在测试机上执行,含删库/格式化等命令直接拒绝入库。
+        validateStagesSafety(dto.getStages());
+        env.setProjectId(dto.getProjectId());
+        env.setEnvName(dto.getEnvName());
+        env.setAddress(dto.getAddress());
+        env.setOrchestrator(dto.getOrchestrator());
+        env.setConnProtocol(dto.getConnProtocol());
+        env.setConnHost(dto.getConnHost());
+        env.setConnPort(dto.getConnPort());
+        env.setConnUser(dto.getConnUser());
+        env.setConnAuth(dto.getConnAuth());
+        // 连接凭据存 SM4 密文,不再是 po_user_private_param 的 key。前端传明文密码/私钥;
+        // 留空表示"保持原值"——不 set,靠 updateById 只更新非 null 列跳过,避免误清空。
+        if (StringUtils.isNotBlank(dto.getConnCredentialRef())) {
+            env.setConnCredentialRef(Sm4Util.encrypt(dto.getConnCredentialRef()));
+        }
+        env.setConnWorkdir(dto.getConnWorkdir());
+        env.setStages(dto.getStages());
+        // 测试账号密码同样存密文;整列 JSON 覆盖写,故留空密码需按账号 id 从原值继承旧密文。
+        env.setTestAccounts(
+            encryptTestAccounts(dto.getTestAccounts(), existing == null ? null : existing.getTestAccounts()));
+    }
+
+    // 逐个 stage 过高危闸门;命中即抛,由全局异常处理包成 ResponseUtil.fail 回前端。
+    private void validateStagesSafety(String stagesJson) {
+        if (StringUtils.isBlank(stagesJson)) {
+            return;
+        }
+        JSONArray stages = JSON.parseArray(stagesJson);
+        if (stages == null) {
+            return;
+        }
+        for (int i = 0; i < stages.size(); i++) {
+            JSONObject stage = stages.getJSONObject(i);
+            if (stage == null) {
+                continue;
+            }
+            String label = StringUtils.defaultIfBlank(stage.getString("name"), "环境阶段-" + (i + 1));
+            String hit = dangerousScriptGuard.detect(label, stage.getString("script"));
+            if (hit != null) {
+                throw new IllegalArgumentException(hit);
+            }
+        }
+    }
+
+    // 遍历测试账号,把明文 credentialRef 加密为 SM4 密文;账号密码留空则沿用同 id 旧密文(编辑仅改用户名等场景)。
+    private String encryptTestAccounts(String incomingJson, String existingJson) {
+        if (StringUtils.isBlank(incomingJson)) {
+            return incomingJson;
+        }
+        JSONArray accounts = JSON.parseArray(incomingJson);
+        if (accounts == null) {
+            return incomingJson;
+        }
+        Map<String, String> oldCipherById = new HashMap<>();
+        JSONArray existingAccounts = StringUtils.isBlank(existingJson) ? null : JSON.parseArray(existingJson);
+        if (existingAccounts != null) {
+            for (int i = 0; i < existingAccounts.size(); i++) {
+                JSONObject acc = existingAccounts.getJSONObject(i);
+                if (acc != null && StringUtils.isNotBlank(acc.getString("id"))) {
+                    oldCipherById.put(acc.getString("id"), acc.getString("credentialRef"));
+                }
+            }
+        }
+        for (int i = 0; i < accounts.size(); i++) {
+            JSONObject acc = accounts.getJSONObject(i);
+            if (acc == null) {
+                continue;
+            }
+            String pwd = acc.getString("credentialRef");
+            if (StringUtils.isNotBlank(pwd)) {
+                acc.put("credentialRef", Sm4Util.encrypt(pwd));
+            }
+            else {
+                // 留空:沿用旧密文;新账号无旧值则置空,执行时按缺失处理。
+                acc.put("credentialRef", oldCipherById.getOrDefault(acc.getString("id"), ""));
+            }
+        }
+        return accounts.toJSONString();
+    }
+
+    // 回显时把每个账号的密文 credentialRef 抹成空串,补 hasCredential 布尔供前端展示"已设密码";密文绝不出库到浏览器。
+    private String maskTestAccounts(String testAccountsJson) {
+        if (StringUtils.isBlank(testAccountsJson)) {
+            return testAccountsJson;
+        }
+        JSONArray accounts = JSON.parseArray(testAccountsJson);
+        if (accounts == null) {
+            return testAccountsJson;
+        }
+        for (int i = 0; i < accounts.size(); i++) {
+            JSONObject acc = accounts.getJSONObject(i);
+            if (acc == null) {
+                continue;
+            }
+            acc.put("hasCredential", StringUtils.isNotBlank(acc.getString("credentialRef")));
+            acc.put("credentialRef", "");
+        }
+        return accounts.toJSONString();
+    }
+
+    private Map<String, Object> integrationEnvToVo(IntegrationEnv e) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("envId", e.getEnvId());
+        map.put("projectId", e.getProjectId());
+        map.put("envName", e.getEnvName());
+        map.put("address", e.getAddress());
+        map.put("orchestrator", e.getOrchestrator());
+        map.put("connProtocol", e.getConnProtocol());
+        map.put("connHost", e.getConnHost());
+        map.put("connPort", e.getConnPort());
+        map.put("connUser", e.getConnUser());
+        map.put("connAuth", e.getConnAuth());
+        // 安全:密文绝不回显,只告知前端是否已配置;编辑时密码框留空即保持原值。
+        map.put("hasConnCredential", StringUtils.isNotBlank(e.getConnCredentialRef()));
+        map.put("connWorkdir", e.getConnWorkdir());
+        map.put("stages", e.getStages());
+        // 测试账号回传时抹掉密文,仅保留是否已设密码标记(hasCredential),不泄露任何凭据值。
+        map.put("testAccounts", maskTestAccounts(e.getTestAccounts()));
+        map.put("createBy", e.getCreateBy());
+        map.put("createByName", resolveUserName(e.getCreateBy()));
+        map.put("createTime", e.getCreateTime());
+        return map;
+    }
+
+    // ========== 端到端测试用例集 ==========
+
+    /** 创建测试用例集 */
+    public ResponseUtil<Map<String, Object>> createIntegrationSuite(IntegrationSuiteDTO dto) {
+        IntegrationSuite suite = new IntegrationSuite();
+        applyIntegrationSuiteDto(suite, dto);
+        suite.setCreateBy(CurrentUserHolder.getCurrentUserId());
+        IntegrationSuite created = integrationSuiteService.create(suite);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("suiteId", created.getSuiteId());
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 更新测试用例集 */
+    public ResponseUtil<Void> updateIntegrationSuite(IntegrationSuiteDTO dto) {
+        IntegrationSuite suite = new IntegrationSuite();
+        suite.setSuiteId(dto.getSuiteId());
+        applyIntegrationSuiteDto(suite, dto);
+        suite.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        integrationSuiteService.update(suite);
+        return ResponseUtil.successResponse(null);
+    }
+
+    /** 删除测试用例集 */
+    public ResponseUtil<Void> deleteIntegrationSuite(Long suiteId) {
+        integrationSuiteService.delete(suiteId);
+        return ResponseUtil.successResponse(null);
+    }
+
+    /** 启用/停用测试用例集 */
+    public ResponseUtil<Void> toggleIntegrationSuite(Long suiteId, String enabled) {
+        integrationSuiteService.toggle(suiteId, enabled);
+        return ResponseUtil.successResponse(null);
+    }
+
+    /** 查询项目下的测试用例集列表 */
+    public ResponseUtil<List<Map<String, Object>>> listIntegrationSuites(Long projectId) {
+        List<Map<String, Object>> list = integrationSuiteService.listByProjectId(projectId).stream()
+            .map(this::integrationSuiteToVo).collect(java.util.stream.Collectors.toList());
+        return ResponseUtil.successResponse(list);
+    }
+
+    /** DTO → 实体字段拷贝(projectId 仅创建时来自入参,更新时不改归属项目)。 */
+    private void applyIntegrationSuiteDto(IntegrationSuite suite, IntegrationSuiteDTO dto) {
+        // 保存即过高危闸门:套件 runCommand 会在测试机上执行,含破坏性命令直接拒绝入库。
+        String hit = dangerousScriptGuard.detect("套件命令", dto.getRunCommand());
+        if (hit != null) {
+            throw new IllegalArgumentException(hit);
+        }
+        suite.setProjectId(dto.getProjectId());
+        suite.setSuiteName(dto.getSuiteName());
+        suite.setRunner(dto.getRunner());
+        suite.setSourceType(dto.getSourceType());
+        suite.setRepoId(dto.getRepoId());
+        suite.setSource(dto.getSource());
+        suite.setBranch(dto.getBranch());
+        suite.setRunCommand(dto.getRunCommand());
+        suite.setWorkdir(dto.getWorkdir());
+        suite.setReportPath(dto.getReportPath());
+        suite.setCaseCount(dto.getCaseCount());
+        suite.setEnabled(dto.getEnabled());
+        suite.setManualFile(dto.getManualFile());
+    }
+
+    private Map<String, Object> integrationSuiteToVo(IntegrationSuite s) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("suiteId", s.getSuiteId());
+        map.put("projectId", s.getProjectId());
+        map.put("suiteName", s.getSuiteName());
+        map.put("runner", s.getRunner());
+        map.put("sourceType", s.getSourceType());
+        map.put("repoId", s.getRepoId());
+        map.put("source", s.getSource());
+        map.put("branch", s.getBranch());
+        map.put("runCommand", s.getRunCommand());
+        map.put("workdir", s.getWorkdir());
+        map.put("reportPath", s.getReportPath());
+        map.put("caseCount", s.getCaseCount());
+        map.put("enabled", s.getEnabled());
+        map.put("manualFile", s.getManualFile());
+        map.put("createBy", s.getCreateBy());
+        map.put("createByName", resolveUserName(s.getCreateBy()));
+        map.put("createTime", s.getCreateTime());
+        return map;
+    }
+
+    // ========== 集成测试执行 ==========
+
+    /** 触发一次「执行测试」:秒回 runId,后台异步跑 stages + 套件命令并轮询。 */
+    public ResponseUtil<Map<String, Object>> startIntegrationRun(Long suiteId, Long envId) {
+        IntegrationRun run = integrationRunService.startRun(suiteId, envId, CurrentUserHolder.getCurrentUserId());
+        Map<String, Object> result = new HashMap<>();
+        result.put("runId", run.getRunId());
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 查询一次执行的完整结果(对齐前端 IntegrationRunResult),供轮询。 */
+    public ResponseUtil<Map<String, Object>> getIntegrationRun(Long runId) {
+        IntegrationRun run = integrationRunService.getRun(runId);
+        if (run == null) {
+            return ResponseUtil.fail("执行记录不存在: " + runId);
+        }
+        List<IntegrationRunStep> steps = integrationRunService.listSteps(runId);
+        return ResponseUtil.successResponse(runToResultVo(run, steps));
+    }
+
+    /** 查询某套件的历史执行列表。 */
+    public ResponseUtil<List<Map<String, Object>>> listIntegrationRuns(Long suiteId) {
+        List<Map<String, Object>> list = integrationRunService.listBySuiteId(suiteId).stream().map(this::runToHistoryVo)
+            .collect(java.util.stream.Collectors.toList());
+        return ResponseUtil.successResponse(list);
+    }
+
+    /** run + steps + 解析出的 suites 组装成前端 IntegrationRunResult 契约(camelCase)。 */
+    private Map<String, Object> runToResultVo(IntegrationRun run, List<IntegrationRunStep> steps) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("runId", String.valueOf(run.getRunId()));
+        map.put("version", "");
+        map.put("status", run.getStatus());
+        map.put("round", 1);
+        map.put("branch", StringUtils.defaultString(run.getBranch()));
+        map.put("commit", StringUtils.defaultString(run.getCommitRef()));
+        IntegrationEnv env = integrationEnvService.findById(run.getEnvId());
+        map.put("envName", env != null ? env.getEnvName() : "");
+        map.put("startedAt", formatDateTime(run.getStartedAt()));
+        map.put("finishedAt", formatDateTime(run.getFinishedAt()));
+        map.put("durationSec", run.getDurationSec());
+
+        Map<String, Object> totals = new HashMap<>();
+        totals.put("total", nvl(run.getTotal()));
+        totals.put("passed", nvl(run.getPassed()));
+        totals.put("failed", nvl(run.getFailed()));
+        totals.put("skipped", nvl(run.getSkipped()));
+        map.put("totals", totals);
+
+        map.put("kickbackTo", StringUtils.defaultString(run.getKickbackTo()));
+        map.put("reason", StringUtils.defaultString(run.getReason()));
+        map.put("resultDir", StringUtils.defaultString(run.getResultDir()));
+        // suites 由 executor 解析 JUnit 后落 suites_json;无报告时为空数组。
+        map.put("suites", StringUtils.isNotBlank(run.getSuitesJson()) ? JSON.parseArray(run.getSuitesJson())
+            : new java.util.ArrayList<>());
+        // steps 明细:前端渲染逐步进度(契约外的补充字段,便于展示执行过程)。
+        map.put("steps", steps.stream().map(this::runStepToVo).collect(java.util.stream.Collectors.toList()));
+        return map;
+    }
+
+    private Map<String, Object> runStepToVo(IntegrationRunStep s) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("seq", s.getSeq());
+        map.put("stepType", s.getStepType());
+        map.put("stepName", s.getStepName());
+        map.put("exitCode", s.getExitCode());
+        map.put("status", s.getStatus());
+        map.put("durationSec", s.getDurationSec());
+        map.put("logText", s.getLogText());
+        map.put("startedAt", s.getStartedAt());
+        map.put("finishedAt", s.getFinishedAt());
+        return map;
+    }
+
+    /** run 组装成历史列表项(对齐前端 integrationHistoryList)。 */
+    private Map<String, Object> runToHistoryVo(IntegrationRun run) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("runId", String.valueOf(run.getRunId()));
+        map.put("suiteId", run.getSuiteId());
+        map.put("status", run.getStatus());
+        map.put("branch", StringUtils.defaultString(run.getBranch()));
+        map.put("round", 1);
+        int total = nvl(run.getTotal());
+        int passed = nvl(run.getPassed());
+        map.put("passRate", total > 0 ? Math.round(passed * 100.0 / total) : 0);
+        map.put("total", total);
+        map.put("passed", passed);
+        map.put("failed", nvl(run.getFailed()));
+        map.put("kickbackTo", StringUtils.defaultString(run.getKickbackTo()));
+        map.put("reason", StringUtils.defaultString(run.getReason()));
+        map.put("durationSec", run.getDurationSec());
+        map.put("time", formatDateTime(run.getCreateTime()));
+        map.put("createByName", resolveUserName(run.getCreateBy()));
+        return map;
+    }
+
+    private int nvl(Integer v) {
+        return v == null ? 0 : v;
+    }
+
+    /** run 时间统一格式化为 yyyy-MM-dd HH:mm:ss 字符串,前端直接展示,避免 Date 序列化歧义。 */
+    private String formatDateTime(Date date) {
+        if (date == null) {
+            return "";
+        }
+        return new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(date);
     }
 
     /** 字符串 userId 转 Long,非法返回 null(供 resolveUserName 等按 Long 取用户名)。 */
@@ -305,7 +698,7 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes(I18nUtil.get("devloop.source.not.found"));
         }
 
-        List<ScanLogItem> items;
+        List<ScanRequireItem> items;
         String type = source.getSourceType();
         if ("github_issue".equals(type)) {
             String pat = patService.getGitHubPat(source.getCreateBy());
@@ -331,7 +724,7 @@ public class DevloopApplicationService {
         }
 
         // 一次 LLM 调用完成拆分+评分，返回派发列表（子需求+未拆分条），再按确认规则派生
-        List<ScanLogItem> dispatchItems = scoringService.splitAndScore(items);
+        List<ScanRequireItem> dispatchItems = scoringService.splitAndScore(items);
         autoDeriveForSource(source, dispatchItems);
 
         Map<String, Object> result = new HashMap<>();
@@ -357,10 +750,10 @@ public class DevloopApplicationService {
     }
 
     /** 查询单次扫描的详细条目 */
-    public ResponseUtil<List<Map<String, Object>>> listScanLogItems(Long logId) {
-        List<ScanLogItem> items = scanLogService.listItemsByLogId(logId);
+    public ResponseUtil<List<Map<String, Object>>> listScanRequireItems(Long logId) {
+        List<ScanRequireItem> items = scanLogService.listItemsByLogId(logId);
         List<Map<String, Object>> list = new ArrayList<>();
-        for (ScanLogItem item : items) {
+        for (ScanRequireItem item : items) {
             list.add(toRequirementMap(item));
         }
         return ResponseUtil.successResponse(list);
@@ -370,9 +763,9 @@ public class DevloopApplicationService {
      * 按扫描源直接查询已收集的需求(action=created)，供需求列表展示。 需求随日志滚动，按“最近N条日志”遍历会漏掉早期扫到的需求，故直接按 source 查条目。
      */
     public ResponseUtil<List<Map<String, Object>>> listRequirementsBySource(Long sourceId) {
-        List<ScanLogItem> items = scanLogService.listCreatedItemsBySource(sourceId);
+        List<ScanRequireItem> items = scanLogService.listCreatedItemsBySource(sourceId);
         List<Map<String, Object>> list = new ArrayList<>();
-        for (ScanLogItem item : items) {
+        for (ScanRequireItem item : items) {
             list.add(toRequirementMap(item));
         }
         return ResponseUtil.successResponse(list);
@@ -398,17 +791,16 @@ public class DevloopApplicationService {
             sourceById.put(s.getSourceId(), s);
             sourceIds.add(s.getSourceId());
         }
-        List<ScanLogItem> items = scanLogService.listCreatedItemsBySources(sourceIds, title);
+        List<ScanRequireItem> items = scanLogService.listCreatedItemsBySources(sourceIds, title);
         List<Map<String, Object>> list = new ArrayList<>();
-        for (ScanLogItem item : items) {
+        for (ScanRequireItem item : items) {
             list.add(toRequirementMap(item, sourceById.get(item.getSourceId())));
         }
         return ResponseUtil.successResponse(list);
     }
 
     /**
-     * 新建手工需求，复用扫描日志存储，使需求列表、任务启动和任务详情继续沿用既有关联链路。
-     * 每个项目只维护一个禁用的内部来源，不参与定时扫描或渠道配置。
+     * 新建手工需求，复用扫描日志存储，使需求列表、任务启动和任务详情继续沿用既有关联链路。 每个项目只维护一个禁用的内部来源，不参与定时扫描或渠道配置。
      */
     @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Map<String, Object>> createManualRequirement(ManualRequirementDTO dto) {
@@ -433,9 +825,9 @@ public class DevloopApplicationService {
 
         ScanSource source = findOrCreateManualSource(dto.getProjectId());
         ScanLog log = scanLogService.createLog(source.getSourceId(), dto.getProjectId());
-        ScanLogItem item = scanLogService.createItem(log.getLogId(), source.getSourceId(), title,
-            serializeManualRequirementContent(originType, dto.getBranch(), dto.getRepoId(), originalContent,
-                dto.getProductContent()),
+        ScanRequireItem item = scanLogService.createItem(
+            log.getLogId(), source.getSourceId(), title, serializeManualRequirementContent(originType, dto.getBranch(),
+                dto.getRepoId(), originalContent, dto.getProductContent()),
             "manual:" + UUID.randomUUID(), null, "created");
         scanLogService.completeLog(log.getLogId(), 1, 1);
 
@@ -443,8 +835,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 修改手工录入需求。需求必须仍未启动，且通过内部 manual 来源和 JSON 包裹双重识别，
-     * 防止扫描渠道需求被误改。
+     * 修改手工录入需求。需求必须仍未启动，且通过内部 manual 来源和 JSON 包裹双重识别， 防止扫描渠道需求被误改。
      */
     @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Map<String, Object>> updateManualRequirement(ManualRequirementUpdateDTO dto) {
@@ -464,7 +855,7 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.sourceType.unsupported"));
         }
 
-        ScanLogItem item = scanLogItemMapper.selectById(dto.getItemId());
+        ScanRequireItem item = scanRequireItemMapper.selectById(dto.getItemId());
         ScanSource source = getEditableManualRequirementSource(item);
         if (source == null) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.edit.forbidden"));
@@ -473,14 +864,14 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.repo.invalid"));
         }
 
-        ScanLogItem updateItem = new ScanLogItem();
+        ScanRequireItem updateItem = new ScanRequireItem();
         updateItem.setTitle(title);
         updateItem.setContent(serializeManualRequirementContent(originType, dto.getBranch(), dto.getRepoId(),
             originalContent, dto.getProductContent()));
-        LambdaUpdateWrapper<ScanLogItem> updateWrapper = new LambdaUpdateWrapper<ScanLogItem>()
-            .eq(ScanLogItem::getItemId, dto.getItemId()).eq(ScanLogItem::getAction, "created")
-            .isNull(ScanLogItem::getSessionId);
-        if (scanLogItemMapper.update(updateItem, updateWrapper) == 0) {
+        LambdaUpdateWrapper<ScanRequireItem> updateWrapper = new LambdaUpdateWrapper<ScanRequireItem>()
+            .eq(ScanRequireItem::getItemId, dto.getItemId()).eq(ScanRequireItem::getAction, "created")
+            .isNull(ScanRequireItem::getSessionId);
+        if (scanRequireItemMapper.update(updateItem, updateWrapper) == 0) {
             // 与创建任务并发时，由条件更新保证已启动需求不会被覆盖。
             return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.edit.forbidden"));
         }
@@ -499,7 +890,7 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.itemId.required"));
         }
 
-        ScanLogItem item = scanLogItemMapper.selectById(dto.getItemId());
+        ScanRequireItem item = scanRequireItemMapper.selectById(dto.getItemId());
         ScanSource source = getEditableManualRequirementSource(item);
         if (source == null) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.delete.forbidden"));
@@ -514,10 +905,10 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.delete.creator.required"));
         }
 
-        LambdaQueryWrapper<ScanLogItem> deleteWrapper = new LambdaQueryWrapper<ScanLogItem>()
-            .eq(ScanLogItem::getItemId, dto.getItemId()).eq(ScanLogItem::getAction, "created")
-            .isNull(ScanLogItem::getSessionId);
-        if (scanLogItemMapper.delete(deleteWrapper) == 0) {
+        LambdaQueryWrapper<ScanRequireItem> deleteWrapper = new LambdaQueryWrapper<ScanRequireItem>()
+            .eq(ScanRequireItem::getItemId, dto.getItemId()).eq(ScanRequireItem::getAction, "created")
+            .isNull(ScanRequireItem::getSessionId);
+        if (scanRequireItemMapper.delete(deleteWrapper) == 0) {
             // 与创建任务并发时，由条件删除保证已启动需求不会被删除。
             return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.delete.forbidden"));
         }
@@ -525,10 +916,9 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 返回可编辑的手工需求来源；未启动、内部 manual 来源且内容可解析时才放行。
-     * 该校验同时保证外部扫描需求保持原有只读行为。
+     * 返回可编辑的手工需求来源；未启动、内部 manual 来源且内容可解析时才放行。 该校验同时保证外部扫描需求保持原有只读行为。
      */
-    private ScanSource getEditableManualRequirementSource(ScanLogItem item) {
+    private ScanSource getEditableManualRequirementSource(ScanRequireItem item) {
         if (item == null || item.getSourceId() == null || item.getSessionId() != null
             || !"created".equals(item.getAction())) {
             return null;
@@ -541,8 +931,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 每个项目复用一个禁用来源，因为扫描条目、任务派生和需求查询都通过 sourceId 关联。
-     * 该来源永不作为外部扫描渠道被调度。
+     * 每个项目复用一个禁用来源，因为扫描条目、任务派生和需求查询都通过 sourceId 关联。 该来源永不作为外部扫描渠道被调度。
      */
     private ScanSource findOrCreateManualSource(Long projectId) {
         for (ScanSource source : scanSourceService.listByProjectId(projectId)) {
@@ -581,8 +970,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 将语言无关字段保存为带命名空间的 JSON 包裹，而不存已渲染的文案。
-     * 既可无歧义解析，也兼容历史和第三方渠道的纯文本扫描内容。
+     * 将语言无关字段保存为带命名空间的 JSON 包裹，而不存已渲染的文案。 既可无歧义解析，也兼容历史和第三方渠道的纯文本扫描内容。
      */
     private String serializeManualRequirementContent(String originType, String branch, Long repoId,
         String originalContent, String productContent) {
@@ -601,14 +989,14 @@ public class DevloopApplicationService {
         }
     }
 
-    private Map<String, Object> toRequirementMap(ScanLogItem item) {
+    private Map<String, Object> toRequirementMap(ScanRequireItem item) {
         return toRequirementMap(item, null);
     }
 
     /**
      * 扫描条目转统一需求视图；手工来源名称与内容在读取时国际化，避免持久化内部标识和已渲染文案。
      */
-    private Map<String, Object> toRequirementMap(ScanLogItem item, ScanSource source) {
+    private Map<String, Object> toRequirementMap(ScanRequireItem item, ScanSource source) {
         Map<String, Object> map = new HashMap<>();
         map.put("itemId", item.getItemId());
         map.put("title", item.getTitle());
@@ -633,28 +1021,29 @@ public class DevloopApplicationService {
             map.put("productContent", manualContent.productContent());
         }
         if (source != null) {
-            map.put("sourceName", MANUAL_SOURCE_TYPE.equals(source.getSourceType())
-                ? I18nUtil.get("devloop.manualRequirement.source.name") : source.getSourceName());
+            map.put("sourceName",
+                MANUAL_SOURCE_TYPE.equals(source.getSourceType())
+                    ? I18nUtil.get("devloop.manualRequirement.source.name")
+                    : source.getSourceName());
             map.put("sourceType", source.getSourceType());
         }
         return map;
     }
 
     /**
-     * 获取需求视图和 LLM 任务提示词共用的可读描述。
-     * 格式化在当前执行上下文完成，再交给异步会话执行。
+     * 获取需求视图和 LLM 任务提示词共用的可读描述。 格式化在当前执行上下文完成，再交给异步会话执行。
      */
-    private String getRequirementContent(ScanLogItem item) {
+    private String getRequirementContent(ScanRequireItem item) {
         if (item == null) {
             return "";
         }
         ManualRequirementContent manualContent = parseManualRequirementContent(item.getContent());
-        return manualContent != null ? formatManualRequirementContent(manualContent) : StringUtils.defaultString(item.getContent());
+        return manualContent != null ? formatManualRequirementContent(manualContent)
+            : StringUtils.defaultString(item.getContent());
     }
 
     /**
-     * 仅解析手工录入 JSON 包裹；格式错误、缺失包裹或字段不完整时返回 {@code null}，
-     * 保留已有扫描需求的原始内容路径。
+     * 仅解析手工录入 JSON 包裹；格式错误、缺失包裹或字段不完整时返回 {@code null}， 保留已有扫描需求的原始内容路径。
      */
     private ManualRequirementContent parseManualRequirementContent(String content) {
         if (StringUtils.isBlank(content)) {
@@ -676,8 +1065,7 @@ public class DevloopApplicationService {
                 ? repoIdNode.asLong()
                 : null;
             return new ManualRequirementContent(manual.path("sourceType").asText("manual"),
-                manual.path("branch").asText(""), repoId, originalContent,
-                manual.path("productContent").asText(""));
+                manual.path("branch").asText(""), repoId, originalContent, manual.path("productContent").asText(""));
         }
         catch (Exception ignored) {
             return null;
@@ -685,8 +1073,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 使用当前请求语言格式化持久化的手工字段。禁止把结果再存回库：
-     * 后续读取者的语言可能不同，JSON 包裹保持语言无关。
+     * 使用当前请求语言格式化持久化的手工字段。禁止把结果再存回库： 后续读取者的语言可能不同，JSON 包裹保持语言无关。
      */
     private String formatManualRequirementContent(ManualRequirementContent content) {
         StringBuilder description = new StringBuilder();
@@ -852,7 +1239,7 @@ public class DevloopApplicationService {
         Long sourceItemId, String title) {
         // 防止重复启动：该需求已关联会话则拒绝重复启动
         if (sourceItemId != null) {
-            ScanLogItem existing = scanLogItemMapper.selectById(sourceItemId);
+            ScanRequireItem existing = scanRequireItemMapper.selectById(sourceItemId);
             if (existing != null && existing.getSessionId() != null) {
                 return ResponseUtil.failRes(I18nUtil.get("devloop.task.requirement.already.started"));
             }
@@ -869,7 +1256,7 @@ public class DevloopApplicationService {
         Long agentId = member.getAgentId();
 
         if (sourceItemId != null && (title == null || title.isEmpty())) {
-            ScanLogItem item = scanLogItemMapper.selectById(sourceItemId);
+            ScanRequireItem item = scanRequireItemMapper.selectById(sourceItemId);
             if (item != null)
                 title = item.getTitle();
         }
@@ -879,7 +1266,7 @@ public class DevloopApplicationService {
 
         // 将手工需求 JSON 按当前执行上下文的语言渲染后，再写入异步 LLM 提示词。
         // 普通扫描内容经 getRequirementContent 处理时保持原样。
-        ScanLogItem sourceItem = sourceItemId != null ? scanLogItemMapper.selectById(sourceItemId) : null;
+        ScanRequireItem sourceItem = sourceItemId != null ? scanRequireItemMapper.selectById(sourceItemId) : null;
         String description = sourceItem != null && StringUtils.isNotBlank(sourceItem.getContent())
             ? getRequirementContent(sourceItem)
             : title;
@@ -911,10 +1298,10 @@ public class DevloopApplicationService {
 
         // 需求项回写 sessionId，标记“已启动”并支持跳转会话
         if (sourceItemId != null) {
-            ScanLogItem item = new ScanLogItem();
+            ScanRequireItem item = new ScanRequireItem();
             item.setItemId(sourceItemId);
             item.setSessionId(sessionId);
-            scanLogItemMapper.updateById(item);
+            scanRequireItemMapper.updateById(item);
         }
 
         // 事务提交后再异步触发 chat：确保异步线程能读到本事务已建的 session。
@@ -933,7 +1320,7 @@ public class DevloopApplicationService {
      * 单 agent 并发达上限(全局 cap，默认1)则跳过，避免一股脑丢给 codeagent 导致 OOM。 全员已满则本轮不派，留待下轮重新捞取未启动需求（轻量排队）。
      * 每条任务以「被选中成员本人」身份创建（负责人=该成员，用其绑定 agent 执行）。
      */
-    public void autoDeriveForSource(ScanSource source, List<ScanLogItem> newItems) {
+    public void autoDeriveForSource(ScanSource source, List<ScanRequireItem> newItems) {
         if (source == null) {
             return;
         }
@@ -947,11 +1334,11 @@ public class DevloopApplicationService {
         int threshold = source.getScoreThreshold() != null ? source.getScoreThreshold() : 70;
 
         // 待派需求 = 本轮新增 + 本源历史未启动(sessionId=null)，合并去重；后者实现“上轮全忙、本轮补派”的轻量排队
-        List<ScanLogItem> pending = collectPendingItems(source, newItems, byScore, threshold);
+        List<ScanRequireItem> pending = collectPendingItems(source, newItems, byScore, threshold);
         // 新增 vs 重捞拆分统计：新增=本轮扫到的未启动条数，重捞=历史未启动补进来的条数
         int newCount = 0;
         if (newItems != null) {
-            for (ScanLogItem it : newItems) {
+            for (ScanRequireItem it : newItems) {
                 if (it.getItemId() != null && it.getSessionId() == null) {
                     newCount++;
                 }
@@ -987,7 +1374,7 @@ public class DevloopApplicationService {
         int skippedByCap = 0;
         LoginInfo previous = CurrentUserHolder.getLoginInfo();
         try {
-            for (ScanLogItem item : pending) {
+            for (ScanRequireItem item : pending) {
                 ProjectMember chosen = pickLeastLoadedMember(candidates, loadByAgent, cap);
                 if (chosen == null) {
                     // 全员满 cap：本轮不再派，剩余需求下轮重新捞取
@@ -1043,23 +1430,23 @@ public class DevloopApplicationService {
     /**
      * 收集本源待派需求：本轮新增 + 历史未启动(sessionId=null)，按 itemId 去重。 score 模式仅保留综合分达阈值者。历史未启动的参与，实现全忙跳过后下轮自动补派。
      */
-    private List<ScanLogItem> collectPendingItems(ScanSource source, List<ScanLogItem> newItems, boolean byScore,
-        int threshold) {
-        Map<Long, ScanLogItem> byId = new LinkedHashMap<>();
+    private List<ScanRequireItem> collectPendingItems(ScanSource source, List<ScanRequireItem> newItems,
+        boolean byScore, int threshold) {
+        Map<Long, ScanRequireItem> byId = new LinkedHashMap<>();
         if (newItems != null) {
-            for (ScanLogItem it : newItems) {
+            for (ScanRequireItem it : newItems) {
                 if (it.getItemId() != null && it.getSessionId() == null) {
                     byId.put(it.getItemId(), it);
                 }
             }
         }
-        for (ScanLogItem it : scanLogService.listCreatedItemsBySource(source.getSourceId())) {
+        for (ScanRequireItem it : scanLogService.listCreatedItemsBySource(source.getSourceId())) {
             if (it.getItemId() != null && it.getSessionId() == null) {
                 byId.putIfAbsent(it.getItemId(), it);
             }
         }
-        List<ScanLogItem> result = new ArrayList<>();
-        for (ScanLogItem it : byId.values()) {
+        List<ScanRequireItem> result = new ArrayList<>();
+        for (ScanRequireItem it : byId.values()) {
             // 疑似/确认重复的不派发，只放行 normal 与人工判过“其实不同”(not_dup)；空值兼容历史数据视为 normal
             String dedup = it.getDedupStatus();
             if (dedup != null && !"normal".equals(dedup) && !"not_dup".equals(dedup)) {
@@ -1149,11 +1536,10 @@ public class DevloopApplicationService {
     }
 
     /** 判定任务类型：需求项含 bug/缺陷 标记归为 bug，否则为需求 */
-    private String detectTaskType(ScanLogItem item, String title) {
+    private String detectTaskType(ScanRequireItem item, String title) {
         String haystack = ((item != null && item.getTitle() != null ? item.getTitle() : "") + " "
-            + getRequirementContent(item) + " "
-            + (item != null && item.getAction() != null ? item.getAction() : "") + " " + (title != null ? title : ""))
-            .toLowerCase();
+            + getRequirementContent(item) + " " + (item != null && item.getAction() != null ? item.getAction() : "")
+            + " " + (title != null ? title : "")).toLowerCase();
         if (haystack.contains("bug") || haystack.contains("缺陷") || haystack.contains("修复")) {
             return "bug";
         }
@@ -1169,13 +1555,14 @@ public class DevloopApplicationService {
     /**
      * 解析任务目标仓库：手工需求先取自身 JSON 的 repoId，再取扫描源 repoId；均缺失时取项目首个仓库兜底。
      */
-    private ProjectRepo resolveTaskRepo(Long projectId, ScanLogItem item) {
+    private ProjectRepo resolveTaskRepo(Long projectId, ScanRequireItem item) {
         if (item != null) {
             ScanSource source = item.getSourceId() != null ? scanSourceService.findById(item.getSourceId()) : null;
             if (source != null && MANUAL_SOURCE_TYPE.equals(source.getSourceType())) {
                 // 单条手工需求的仓库优先级最高，历史 JSON 缺少该字段时自然继续走后续兜底。
                 ManualRequirementContent manualContent = parseManualRequirementContent(item.getContent());
-                ProjectRepo manualRepo = manualContent != null ? findProjectRepo(projectId, manualContent.repoId()) : null;
+                ProjectRepo manualRepo = manualContent != null ? findProjectRepo(projectId, manualContent.repoId())
+                    : null;
                 if (manualRepo != null) {
                     return manualRepo;
                 }
@@ -1230,8 +1617,8 @@ public class DevloopApplicationService {
         }
         catch (IllegalArgumentException e) {
             // DTO 可能在无 Spring 上下文的场景执行，接口返回前统一把校验文案转换为当前语言。
-            String message = "创建时间开始值不能晚于结束值".equals(e.getMessage())
-                ? I18nUtil.get("devloop.task.date.range.invalid") : e.getMessage();
+            String message = "创建时间开始值不能晚于结束值".equals(e.getMessage()) ? I18nUtil.get("devloop.task.date.range.invalid")
+                : e.getMessage();
             return ResponseUtil.failRes(message);
         }
 
@@ -1241,7 +1628,8 @@ public class DevloopApplicationService {
             .le(query.getCreateTimeEnd() != null, ByaiSession::getCreateTime, query.getCreateTimeEnd());
         // 任务名称与会话标题一一对应，搜索仅匹配名称，分页总数与前端搜索结果一致。
         if (StringUtils.isNotBlank(query.getTaskName())) {
-            wrapper.like(ByaiSession::getSessionName, query.getTaskName().trim());
+            // PostgreSQL 的 LIKE 区分大小写，任务名称统一小写后支持大小写混输搜索。
+            wrapper.apply("LOWER(session_name) LIKE {0}", "%" + query.getTaskName().trim().toLowerCase(Locale.ROOT) + "%");
         }
         if (DEFAULT_PROJECT_ID.equals(query.getProjectId()) || Boolean.TRUE.equals(query.getOnlyMine())) {
             // 默认项目共用 -1 分组必须按创建人隔离；onlyMine 过滤同样只看当前登录用户的会话，两者叠加无害。
@@ -1271,8 +1659,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 任务状态保存在会话状态投影中，数据库没有可直接过滤的状态列。
-     * 因此状态看板查询需先读取状态投影，再对每个状态列独立分页，保证四列总数和加载更多结果准确。
+     * 任务状态保存在会话状态投影中，数据库没有可直接过滤的状态列。 因此状态看板查询需先读取状态投影，再对每个状态列独立分页，保证四列总数和加载更多结果准确。
      */
     private ResponseUtil<PageInfo<DevloopTaskViewDto>> listTasksByStatus(DevloopTaskListQueryDto query,
         LambdaQueryWrapper<ByaiSession> wrapper, String taskStatus) {
@@ -1372,8 +1759,8 @@ public class DevloopApplicationService {
         // 代码变更是只读展示,任何本地/远程异常都不抛前端:顶层兜底,失败返回 http_error 空态并记日志。
         try {
             // 与 resolveTaskContext 同口径：手工需求自身仓库优先，再回退扫描源和项目仓库。
-            ScanLogItem item = scanLogItemMapper.selectOne(
-                new LambdaQueryWrapper<ScanLogItem>().eq(ScanLogItem::getSessionId, sessionId).last("limit 1"));
+            ScanRequireItem item = scanRequireItemMapper.selectOne(
+                new LambdaQueryWrapper<ScanRequireItem>().eq(ScanRequireItem::getSessionId, sessionId).last("limit 1"));
             ProjectRepo repo = resolveTaskRepo(s.getProjectId(), item);
             String repoFullName = repo != null ? repo.getRepoFullName() : null;
             String baseBranch = repo != null && repo.getDefaultBranch() != null && !repo.getDefaultBranch().isEmpty()
@@ -1431,8 +1818,8 @@ public class DevloopApplicationService {
             if (s == null) {
                 return ResponseUtil.failRes(I18nUtil.get("devloop.task.session.not.found"));
             }
-            ScanLogItem item = scanLogItemMapper.selectOne(
-                new LambdaQueryWrapper<ScanLogItem>().eq(ScanLogItem::getSessionId, sessionId).last("limit 1"));
+            ScanRequireItem item = scanRequireItemMapper.selectOne(
+                new LambdaQueryWrapper<ScanRequireItem>().eq(ScanRequireItem::getSessionId, sessionId).last("limit 1"));
             ProjectRepo repo = resolveTaskRepo(s.getProjectId(), item);
             String repoFullName = repo != null ? repo.getRepoFullName() : null;
             String baseBranch = repo != null && repo.getDefaultBranch() != null && !repo.getDefaultBranch().isEmpty()
@@ -1564,17 +1951,16 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 实时解析任务上下文：不落库，按需从关联链路查。需求/仓库优先级为：手工需求 JSON.repoId、扫描源 repoId、项目仓库；
-     * agent：session.objectId(数字员工resourceId) -> 资源名；负责人：session.creatorId -> 用户名； 分支：由 taskType(据需求内容判定) + sessionId
-     * 确定性重算。关联信息变化后展示随之更新。
+     * 实时解析任务上下文：不落库，按需从关联链路查。需求/仓库优先级为：手工需求 JSON.repoId、扫描源 repoId、项目仓库； agent：session.objectId(数字员工resourceId) ->
+     * 资源名；负责人：session.creatorId -> 用户名； 分支：由 taskType(据需求内容判定) + sessionId 确定性重算。关联信息变化后展示随之更新。
      */
     private Map<String, Object> resolveTaskContext(ByaiSession s) {
         Map<String, Object> ctx = new HashMap<>();
         Long sessionId = s.getSessionId();
 
         // 派生任务会把 sessionId 回写到需求项；据此还原需求与仓库。手动任务无此行，走项目兜底仓库。
-        ScanLogItem item = scanLogItemMapper
-            .selectOne(new LambdaQueryWrapper<ScanLogItem>().eq(ScanLogItem::getSessionId, sessionId).last("limit 1"));
+        ScanRequireItem item = scanRequireItemMapper.selectOne(
+            new LambdaQueryWrapper<ScanRequireItem>().eq(ScanRequireItem::getSessionId, sessionId).last("limit 1"));
         if (item != null) {
             ctx.put("requirementTitle", item.getTitle());
             ctx.put("requirementOriginId", item.getOriginId());
@@ -1658,8 +2044,6 @@ public class DevloopApplicationService {
 
     // ========== 项目成员 ==========
 
-
-
     // ========== DWS 钉钉授权 ==========
 
     /** 启动设备授权流程（异步启动dws进程，返回userCode和verificationUrl） */
@@ -1668,8 +2052,8 @@ public class DevloopApplicationService {
         if (Boolean.TRUE.equals(result.get("success"))) {
             return ResponseUtil.successResponse(result);
         }
-        return ResponseUtil.failRes(
-            (String) result.getOrDefault("message", I18nUtil.get("devloop.dws.auth.start.failed")));
+        return ResponseUtil
+            .failRes((String) result.getOrDefault("message", I18nUtil.get("devloop.dws.auth.start.failed")));
     }
 
     /** 检查DWS授权状态（前端轮询用）：新建源弹窗里当前用户给自己授权的场景，查当前登录用户。 */
@@ -1678,8 +2062,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 按扫描源查授权状态：查该源【创建者】的授权(不是当前登录用户)，用于列表逐源展示。
-     * 额外返回 canAuthorize(当前登录用户==创建者才可授权) 与创建者名，供前端 (c) 文案与入口控制。
+     * 按扫描源查授权状态：查该源【创建者】的授权(不是当前登录用户)，用于列表逐源展示。 额外返回 canAuthorize(当前登录用户==创建者才可授权) 与创建者名，供前端 (c) 文案与入口控制。
      */
     public ResponseUtil<Map<String, Object>> checkDwsAuthStatusBySource(Long sourceId) {
         ScanSource source = scanSourceService.findById(sourceId);
@@ -1697,14 +2080,13 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(result);
     }
 
-    /** 构造某用户的 DWS 授权状态视图。includeDbToken=true 时附带 DB 授权记录(hasToken/savedAt)。 */
-    private Map<String, Object> buildDwsStatus(Long userId, boolean includeDbToken) {
+    /** 构造某用户的 DWS 授权状态视图；旧入口按原响应结构附带 hasToken/savedAt 兼容字段。 */
+    private Map<String, Object> buildDwsStatus(Long userId, boolean includeLegacyTokenFields) {
         Map<String, Object> runtimeStatus = dwsAuthService.getAuthStatus(userId);
         Map<String, Object> result = new HashMap<>();
-        if (includeDbToken) {
-            Map<String, Object> dbStatus = dwsAuthService.checkDwsToken();
-            result.put("hasToken", dbStatus.get("hasToken"));
-            result.put("savedAt", dbStatus.getOrDefault("savedAt", ""));
+        if (includeLegacyTokenFields) {
+            result.put("hasToken", Boolean.TRUE.equals(runtimeStatus.get("authenticated")));
+            result.put("savedAt", "");
         }
         result.put("runtimeAuthenticated", runtimeStatus.get("authenticated"));
         result.put("tokenValid", runtimeStatus.get("tokenValid"));
@@ -1724,7 +2106,51 @@ public class DevloopApplicationService {
         if (!injected) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.dws.token.invalid"));
         }
-        dwsAuthService.recordAuthToDb();
         return ResponseUtil.successResponse(null);
+    }
+
+    /**
+     * 创建运营需求
+     *
+     * @param params 入参
+     * @return ResponseUtil
+     */
+    public Long createOperationRequirement(Map<String, Object> params) {
+
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        String title = MapParamUtil.getStringValue(params, "requirementName");
+
+        ScanSource source = new ScanSource();
+        source.setProjectId(projectId);
+        source.setSourceName(MapParamUtil.getStringValue(params, "operationType"));
+        source.setSourceType(MapParamUtil.getStringValue(params, "operationType"));
+        source.setConfig("{}");
+        source.setEnabled("0");
+        source.setConfirmMode("operation");
+        source.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
+        scanSourceService.create(source);
+
+        ScanLog scanLog = scanLogService.createLog(source.getSourceId(), projectId);
+
+        ScanRequireItem scanRequireItem = scanLogService.createItem(scanLog.getLogId(), source.getSourceId(), title,
+            JSON.toJSONString(params), "operation:" + UUID.randomUUID(), null, "created");
+
+        return scanRequireItem.getItemId();
+    }
+
+    /**
+     * 修改运营需求（仅更新 ScanRequireItem）。
+     *
+     * @param params 入参，需含 itemId；requirementName 作为标题，整包 params 写入 content
+     */
+    public void updateOperationRequirement(Map<String, Object> params) {
+        Long itemId = MapParamUtil.getLongValue(params, "itemId");
+        String title = MapParamUtil.getStringValue(params, "requirementName");
+
+        ScanRequireItem updateItem = new ScanRequireItem();
+        updateItem.setItemId(itemId);
+        updateItem.setTitle(title);
+        updateItem.setContent(JSON.toJSONString(params));
+        scanRequireItemMapper.updateById(updateItem);
     }
 }

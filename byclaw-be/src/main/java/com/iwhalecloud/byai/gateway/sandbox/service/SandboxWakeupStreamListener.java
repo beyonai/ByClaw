@@ -25,8 +25,6 @@ import org.springframework.data.redis.stream.StreamMessageListenerContainer;
 import org.springframework.data.redis.stream.StreamMessageListenerContainer.StreamMessageListenerContainerOptions;
 import org.springframework.stereotype.Component;
 
-import com.iwhaleai.byai.framework.common.Constants;
-
 /**
  * Listens to control-plane wakeup events and connects them to sandbox lifecycle management.
  */
@@ -36,6 +34,7 @@ public class SandboxWakeupStreamListener
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SandboxWakeupStreamListener.class);
 
+    static final String DEFAULT_STREAM_KEY = "byai_gateway:control_plane:mgmt:wakeup";
     static final String DEFAULT_CONSUMER_GROUP = "byclaw_sandbox_wakeup_group";
     private static final String CONSUMER_NAME_PREFIX = "byclaw-sandbox-wakeup:";
 
@@ -47,8 +46,8 @@ public class SandboxWakeupStreamListener
     @Value("${byclaw.sandbox.wakeup-stream.enabled:true}")
     private boolean enabled;
 
-    /** 控制面管理 Stream Key 由 Gateway 框架统一生成，避免生产端与消费端命名不一致。 */
-    private final String streamKey = Constants.QueueNames.controlPlaneManagementStream();
+    @Value("${byclaw.sandbox.wakeup-stream.key:" + DEFAULT_STREAM_KEY + "}")
+    private String streamKey;
 
     @Value("${byclaw.sandbox.wakeup-stream.consumer-group:" + DEFAULT_CONSUMER_GROUP + "}")
     private String consumerGroup;

@@ -83,6 +83,8 @@ import com.iwhalecloud.byai.state.domain.session.qo.QryByClawFileByUserCodeQo;
 import com.iwhalecloud.byai.state.domain.session.qo.QrySkillListByUserCodeQo;
 import io.modelcontextprotocol.spec.McpSchema;
 import io.swagger.v3.oas.annotations.Parameter;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 @RestController
 @RequestMapping("/tool")
 public class ToolManController {
@@ -489,16 +491,18 @@ public class ToolManController {
 
     /** 第三方技能超市：按下载地址安装技能到指定数字员工。 */
     @PostMapping("/installThirdPartySkill")
-    public ResponseUtil<ObjectZipImportResult> installThirdPartySkill(@RequestBody ThirdPartySkillInstallQo request) {
+    public ResponseUtil<ObjectZipImportResult> installThirdPartySkill(HttpServletRequest httpRequest,
+        @RequestBody ThirdPartySkillInstallQo request) {
         long startNanos = System.nanoTime();
         String userCode = CurrentUserHolder.getCurrentUserCode();
         Long digId = request == null ? null : request.getDigId();
         String downloadUrl = request == null ? null : request.getDownloadUrl();
         String requestBody = serializeThirdPartySkillInstallRequest(request);
+        String requestContext = serializeThirdPartySkillInstallRequestContext(httpRequest, request);
         String downloadUrlHash = StringUtils.isBlank(downloadUrl) ? "" : DigestUtils.sha256Hex(downloadUrl.trim());
         logger.info(
-            "第三方技能安装接口调用开始，userCode={}, requestBody={}, downloadUrlHash={}",
-            userCode, requestBody, downloadUrlHash);
+            "第三方技能安装接口调用开始，userCode={}, requestBody={}, requestContext={}, downloadUrlHash={}",
+            userCode, requestBody, requestContext, downloadUrlHash);
         try {
             if (request == null) {
                 throw new IllegalArgumentException(I18nUtil.get("param.cannot.be.null"));
@@ -526,15 +530,17 @@ public class ToolManController {
         }
         catch (IllegalArgumentException | BdpRuntimeException e) {
             logger.warn(
-                "第三方技能安装接口调用失败，userCode={}, digId={}, requestBody={}, downloadUrlHash={}, reason={}, "
-                    + "durationMs={}",
-                userCode, digId, requestBody, downloadUrlHash, e.getMessage(), elapsedMillis(startNanos));
+                "第三方技能安装接口调用失败，userCode={}, digId={}, requestBody={}, requestContext={}, "
+                    + "downloadUrlHash={}, reason={}, durationMs={}",
+                userCode, digId, requestBody, requestContext, downloadUrlHash, e.getMessage(),
+                elapsedMillis(startNanos));
             return ResponseUtil.fail(e.getMessage());
         }
         catch (Exception e) {
             logger.error(
-                "第三方技能安装接口调用异常，userCode={}, digId={}, requestBody={}, downloadUrlHash={}, durationMs={}",
-                userCode, digId, requestBody, downloadUrlHash, elapsedMillis(startNanos), e);
+                "第三方技能安装接口调用异常，userCode={}, digId={}, requestBody={}, requestContext={}, "
+                    + "downloadUrlHash={}, durationMs={}",
+                userCode, digId, requestBody, requestContext, downloadUrlHash, elapsedMillis(startNanos), e);
             return ResponseUtil.fail(e.getMessage() != null ? e.getMessage()
                 : I18nUtil.get("byclaw.third.party.skill.install.failed"));
         }
@@ -542,6 +548,75 @@ public class ToolManController {
 
     static String serializeThirdPartySkillInstallRequest(ThirdPartySkillInstallQo request) {
         return request == null ? "null" : JSON.toJSONString(request);
+    }
+
+    static String serializeThirdPartySkillInstallRequestContext(HttpServletRequest httpRequest,
+        ThirdPartySkillInstallQo request) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("requestBody", request);
+        context.put("currentLoginInfo", CurrentUserHolder.getLoginInfo());
+        context.put("currentUserId", CurrentUserHolder.getCurrentUserId());
+        context.put("currentUserCode", CurrentUserHolder.getCurrentUserCode());
+        context.put("currentUserName", CurrentUserHolder.getCurrentUserName());
+        context.put("currentEnterpriseId", CurrentUserHolder.getEnterpriseId());
+        context.put("currentAssistantId", CurrentUserHolder.getAssistantId());
+        context.put("currentDefaultDigEmployeeId", CurrentUserHolder.getDefaultDigEmployeeId());
+        context.put("currentSessionDatasetId", CurrentUserHolder.getLoginInfo() == null
+            ? null : CurrentUserHolder.getSessionDatasetId());
+        if (httpRequest == null) {
+            return JSON.toJSONString(context);
+        }
+
+        Map<String, List<String>> headers = new LinkedHashMap<>();
+        if (httpRequest.getHeaderNames() != null) {
+            Collections.list(httpRequest.getHeaderNames()).forEach(
+                name -> headers.put(name, Collections.list(httpRequest.getHeaders(name))));
+        }
+        Map<String, List<String>> parameters = new LinkedHashMap<>();
+        httpRequest.getParameterMap().forEach((name, values) ->
+            parameters.put(name, values == null ? Collections.emptyList() : Arrays.asList(values)));
+
+        HttpSession session = httpRequest.getSession(false);
+        Map<String, String> sessionAttributes = new LinkedHashMap<>();
+        if (session != null && session.getAttributeNames() != null) {
+            Collections.list(session.getAttributeNames()).forEach(name ->
+                sessionAttributes.put(name, String.valueOf(session.getAttribute(name))));
+        }
+        String beyondToken = httpRequest.getHeader("Beyond-Token");
+        String sessionUserCode = session == null ? null : String.valueOf(session.getAttribute("USER_CODE"));
+        String authenticationSource;
+        if (StringUtils.isNotBlank(beyondToken)) {
+            authenticationSource = "BEYOND_TOKEN";
+        }
+        else if (StringUtils.isNotBlank(sessionUserCode) && !"null".equalsIgnoreCase(sessionUserCode)) {
+            authenticationSource = "SESSION_NOT_ACCEPTED";
+        }
+        else if (StringUtils.isNotBlank(httpRequest.getHeader("SSO-TOKEN"))) {
+            authenticationSource = "SSO_TOKEN";
+        }
+        else if (StringUtils.isNotBlank(httpRequest.getHeader("accessToken"))) {
+            authenticationSource = "ACCESS_TOKEN";
+        }
+        else {
+            authenticationSource = "UNKNOWN";
+        }
+
+        context.put("httpMethod", httpRequest.getMethod());
+        context.put("requestUrl", httpRequest.getRequestURL().toString());
+        context.put("requestUri", httpRequest.getRequestURI());
+        context.put("queryString", httpRequest.getQueryString());
+        context.put("remoteAddress", httpRequest.getRemoteAddr());
+        context.put("contentType", httpRequest.getContentType());
+        context.put("characterEncoding", httpRequest.getCharacterEncoding());
+        context.put("contentLength", httpRequest.getContentLengthLong());
+        context.put("requestHeaders", headers);
+        context.put("requestParameters", parameters);
+        context.put("beyondToken", beyondToken);
+        context.put("systemCode", httpRequest.getHeader("system-code"));
+        context.put("authenticationSource", authenticationSource);
+        context.put("httpSessionId", session == null ? null : session.getId());
+        context.put("httpSessionAttributes", sessionAttributes);
+        return JSON.toJSONString(context);
     }
 
     private static long elapsedMillis(long startNanos) {

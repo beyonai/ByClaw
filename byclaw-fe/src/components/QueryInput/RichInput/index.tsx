@@ -44,6 +44,9 @@ const isAgentToolNode = (node: unknown): node is ResourceElementType => {
   return candidate.type === ELEMENT_RESOURCE && candidate.isAgentTool === true;
 };
 
+const getAgentIdentityKeys = (node: { agentId?: string | number; resourceCode?: string }) =>
+  [node.agentId, node.resourceCode].filter(Boolean).map((item) => `${item}`);
+
 /** 带 aria-label 的 Editable 根元素，用于无障碍与测试定位（slate-react 未将 aria-label 透传到 DOM） */
 const EditableRootWithAria = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>((props, ref) => (
   <div {...props} ref={ref} aria-label="byai-input" />
@@ -53,7 +56,7 @@ EditableRootWithAria.displayName = 'EditableRootWithAria';
 export interface RichInputRef {
   setText: (val: SetTextParams) => void;
   clearAfterSend: () => void;
-  getPersistentMentionDraft: () => { text: string; resourceList: Resource[] };
+  getPersistentMentionDraft: (includeQuestion?: boolean) => { text: string; resourceList: Resource[] };
   appendText: (text: string) => void;
   insertItem: (item: any, type: IResourceType) => any;
   getPayload: () => PayloadType;
@@ -153,17 +156,42 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
     // 发送后保留所有已 @ 的数字员工；其它赋值场景只保留默认数字员工。
     const paragraph = editor.children[0];
     if (Element.isElement(paragraph) && paragraph.children) {
-      const nodesToKeep = paragraph.children.filter(
-        (child: any) =>
-          child.type === ELEMENT_MENTION &&
-          (child.isDefaultAgent || (preserveDigitalEmployees && child.resourceType === ResourceType.digitalEmployee))
-      );
+      const retainedEmployeeIds = new Set<string>();
+      const nodesToKeep = paragraph.children
+        .filter(
+          (child: any) =>
+            child.type === ELEMENT_MENTION &&
+            (child.isDefaultAgent || (preserveDigitalEmployees && child.resourceType === ResourceType.digitalEmployee))
+        )
+        .filter((child: any) => {
+          if (child.resourceType !== ResourceType.digitalEmployee) return true;
+          const identityKeys = getAgentIdentityKeys(child);
+          if (identityKeys.some((item) => retainedEmployeeIds.has(item))) return false;
+          identityKeys.forEach((item) => retainedEmployeeIds.add(item));
+          return true;
+        });
 
       let newNodes: Descendant[] = [];
       if (typeof val === 'string') {
         newNodes = getNodesByTemplate(val);
       } else {
         newNodes = getDescendantValueByDefaultValue(val);
+
+        // 草稿可能同时包含路由默认员工和手动 @ 员工；默认员工已由当前编辑器保留时，避免再次插入。
+        const preservedEmployeeIds = new Set(
+          nodesToKeep
+            .filter((node: any) => node.resourceType === ResourceType.digitalEmployee)
+            .flatMap((node: any) => getAgentIdentityKeys(node))
+        );
+        // 同时去掉草稿自身的重复员工，以及与当前默认员工重复的节点。
+        const restoredEmployeeIds = new Set(preservedEmployeeIds);
+        newNodes = newNodes.filter((node: any) => {
+          if (node.type !== ELEMENT_MENTION || node.resourceType !== ResourceType.digitalEmployee) return true;
+          const identityKeys = getAgentIdentityKeys(node);
+          if (identityKeys.some((item) => restoredEmployeeIds.has(item))) return false;
+          identityKeys.forEach((item) => restoredEmployeeIds.add(item));
+          return true;
+        });
       }
 
       // 构建新的段落内容：保留的节点 + 新文本
@@ -190,11 +218,12 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
 
   const setText = (val: SetTextParams) => replaceText(val);
 
-  // 触发发送后只清空本轮问题和其它引用，保留用户手动 @ 的数字员工，便于继续追问。
+  // 触发发送后只清空本轮问题和其它引用，保留输入框中已 @ 的数字员工，便于继续追问。
   const clearAfterSend = () => replaceText('', true);
 
-  // 草稿只保存手动 @ 的员工；路由自带的默认员工由 agentId 恢复，不能重复写入输入框。
-  const getPersistentMentionDraft = () => {
+  // 草稿保存输入框中的全部数字员工 mention，避免回答过程切换当前 agent 后丢失其中一个。
+  const getPersistentMentionDraft = (includeQuestion = false) => {
+    const mentionedEmployeeIds = new Set<string>();
     const mentionNodes = Array.from(
       Editor.nodes(editor, {
         at: [],
@@ -202,20 +231,35 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
         match: (node) =>
           Element.isElement(node) &&
           node.type === ELEMENT_MENTION &&
-          node.resourceType === ResourceType.digitalEmployee &&
-          !node.isDefaultAgent,
+          node.resourceType === ResourceType.digitalEmployee,
       })
-    ).map(([node]) => node);
-    const resourceList = getResourceList([
-      {
-        type: 'paragraph',
-        children: mentionNodes,
-      } as ParagraphElementType,
-    ]);
+    )
+      .map(([node]) => node)
+      .filter((node: any) => {
+        const identityKeys = getAgentIdentityKeys(node);
+        if (identityKeys.some((item) => mentionedEmployeeIds.has(item))) return false;
+        identityKeys.forEach((item) => mentionedEmployeeIds.add(item));
+        return true;
+      });
+    const resourceList = getResourceList(
+      includeQuestion
+        ? value
+        : [
+            {
+              type: 'paragraph',
+              children: mentionNodes,
+            } as ParagraphElementType,
+        ]
+    );
+    const mentionText = mentionNodes.map((node: any) => `{{${getNodeResourceData(node).id}}}`).join('');
+    const defaultMentionText = mentionNodes
+      .filter((node: any) => node.isDefaultAgent)
+      .map((node: any) => `{{${getNodeResourceData(node).id}}}`)
+      .join('');
 
     return {
-      // 使用与普通输入草稿一致的资源占位符，输入框重挂载时可以还原为 mention 节点。
-      text: mentionNodes.map((node: any) => `{{${getNodeResourceData(node).id}}}`).join(''),
+      // 普通草稿还要带上问题文本；发送后的草稿只保留数字员工 mention。
+      text: includeQuestion ? `${defaultMentionText}${getInputText(value).text}` : mentionText,
       resourceList,
     };
   };

@@ -30,6 +30,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * 用户个人参数配置管理。
@@ -53,7 +55,14 @@ public class UserPrivateParamApplicationService {
 
     private static final String DELETE_FLAG_DELETED = "1";
 
+    private static final String PARAM_SOURCE_USER = "USER";
+
+    private static final String PARAM_SOURCE_CONNECTOR = "CONNECTOR";
+
     private static final Pattern PARAM_KEY_PATTERN = Pattern.compile("[A-Z_][A-Z0-9_]{0,127}");
+
+    private static final Pattern CONNECTOR_MANIFEST_KEY_PATTERN =
+        Pattern.compile("CONNECTOR_[A-Z0-9_]+_MANIFEST");
 
     @Autowired
     private UserPrivateParamMapper userPrivateParamMapper;
@@ -91,11 +100,17 @@ public class UserPrivateParamApplicationService {
 
     @Transactional(rollbackFor = Exception.class)
     public UserPrivateParamVO save(UserPrivateParamDTO request) {
-        validateSaveRequest(request);
+        if (request == null) {
+            throw new IllegalArgumentException("个人参数配置不能为空");
+        }
         Long userId = currentUserId();
         Date now = new Date();
         boolean create = request.getParamId() == null;
         UserPrivateParam entity = create ? new UserPrivateParam() : getOwnedParam(userId, request.getParamId());
+        if (!create) {
+            assertUserManaged(entity);
+        }
+        validateSaveRequest(request);
         String nextKey = normalizeKey(request.getKey());
         ensureKeyUnique(userId, nextKey, create ? null : entity.getParamId());
 
@@ -105,6 +120,8 @@ public class UserPrivateParamApplicationService {
             entity.setCreateBy(userId);
             entity.setCreateTime(now);
             entity.setDeleteFlag(DELETE_FLAG_NORMAL);
+            entity.setParamSource(PARAM_SOURCE_USER);
+            entity.setSourceRef(null);
         }
 
         entity.setParamKey(nextKey);
@@ -128,7 +145,7 @@ public class UserPrivateParamApplicationService {
         else {
             userPrivateParamMapper.updateById(entity);
         }
-        refreshPrivateParamCache(userId, currentUserCode());
+        refreshPrivateParamCacheAfterCommit(userId, currentUserCode());
         return toVo(entity);
     }
 
@@ -140,6 +157,7 @@ public class UserPrivateParamApplicationService {
         }
         Long userId = currentUserId();
         UserPrivateParam param = getOwnedParam(userId, paramId);
+        assertUserManaged(param);
         Date now = new Date();
         UserPrivateParam update = new UserPrivateParam();
         update.setParamId(param.getParamId());
@@ -148,7 +166,7 @@ public class UserPrivateParamApplicationService {
         update.setUpdateBy(userId);
         update.setUpdateTime(now);
         userPrivateParamMapper.updateById(update);
-        refreshPrivateParamCache(userId, currentUserCode());
+        refreshPrivateParamCacheAfterCommit(userId, currentUserCode());
         return Boolean.TRUE;
     }
 
@@ -160,6 +178,7 @@ public class UserPrivateParamApplicationService {
         }
         Long userId = currentUserId();
         UserPrivateParam param = getOwnedParam(userId, paramId);
+        assertUserManaged(param);
         Date now = new Date();
         String nextStatus = Boolean.FALSE.equals(request.getEnabled()) ? DISABLED : NORMAL;
         UserPrivateParam update = new UserPrivateParam();
@@ -170,7 +189,7 @@ public class UserPrivateParamApplicationService {
         userPrivateParamMapper.updateById(update);
         param.setStatus(nextStatus);
         param.setUpdateTime(now);
-        refreshPrivateParamCache(userId, currentUserCode());
+        refreshPrivateParamCacheAfterCommit(userId, currentUserCode());
         return toVo(param);
     }
 
@@ -284,6 +303,9 @@ public class UserPrivateParamApplicationService {
         if (!PARAM_KEY_PATTERN.matcher(key).matches()) {
             throw new IllegalArgumentException("参数名必须符合环境变量格式：[A-Z_][A-Z0-9_]{0,127}");
         }
+        if (CONNECTOR_MANIFEST_KEY_PATTERN.matcher(key).matches()) {
+            throw new IllegalArgumentException("该参数名为系统保留的连接器 Manifest Key");
+        }
     }
 
     private String normalizeKey(String key) {
@@ -335,7 +357,21 @@ public class UserPrivateParamApplicationService {
         vo.setHasValue(StringUtils.isNotBlank(param.getParamValueCipher()));
         vo.setValueLast4(param.getParamValueLast4());
         vo.setUpdateTime(param.getUpdateTime());
+        String source = StringUtils.defaultIfBlank(param.getParamSource(), PARAM_SOURCE_USER);
+        boolean managed = PARAM_SOURCE_CONNECTOR.equals(source);
+        vo.setSource(source);
+        vo.setSourceRef(param.getSourceRef());
+        vo.setManaged(managed);
+        vo.setEditable(!managed);
+        vo.setDeletable(!managed);
+        vo.setEnableable(!managed);
         return vo;
+    }
+
+    private void assertUserManaged(UserPrivateParam param) {
+        if (param != null && PARAM_SOURCE_CONNECTOR.equals(param.getParamSource())) {
+            throw new IllegalArgumentException("系统托管连接器参数不允许用户修改");
+        }
     }
 
     private Long currentUserId() {
@@ -356,6 +392,21 @@ public class UserPrivateParamApplicationService {
 
     private void refreshPrivateParamCache(Long userId, String userCode) {
         refreshPrivateParamCache(userId, userCode, listParams(userId));
+    }
+
+    /** 在当前数据库事务提交后刷新缓存；无事务调用时立即刷新。 */
+    public void refreshPrivateParamCacheAfterCommit(Long userId, String userCode) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    refreshPrivateParamCache(userId, userCode);
+                }
+            });
+            return;
+        }
+        refreshPrivateParamCache(userId, userCode);
     }
 
     private void refreshPrivateParamCache(Long userId, String userCode, List<UserPrivateParam> params) {

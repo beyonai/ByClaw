@@ -105,7 +105,7 @@ public class DevloopScanJob {
     /** 根据源类型分派到对应扫描服务，扫描后按确认规则自动派生任务 */
     private void doScan(ScanSource source) {
         String type = source.getSourceType();
-        List<com.iwhalecloud.byai.manager.entity.devloop.ScanLogItem> newItems;
+        List<com.iwhalecloud.byai.manager.entity.devloop.ScanRequireItem> newItems;
         switch (type) {
             case SOURCE_TYPE_GITHUB_ISSUE:
                 String pat = patService.getGitHubPat(source.getCreateBy());
@@ -128,7 +128,7 @@ public class DevloopScanJob {
         }
         // 一次 LLM 调用完成拆分+评分：一条消息里的多个独立需求被拆开，各自打分；
         // 返回派发列表（子需求 + 未拆分条，不含被拆分的原始条），再按确认规则自动派生。
-        List<com.iwhalecloud.byai.manager.entity.devloop.ScanLogItem> dispatchItems = scoringService
+        List<com.iwhalecloud.byai.manager.entity.devloop.ScanRequireItem> dispatchItems = scoringService
             .splitAndScore(newItems);
         devloopApplicationService.autoDeriveForSource(source, dispatchItems);
     }

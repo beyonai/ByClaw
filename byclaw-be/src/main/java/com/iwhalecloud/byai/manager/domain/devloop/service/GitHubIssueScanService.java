@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
-import com.iwhalecloud.byai.manager.entity.devloop.ScanLogItem;
+import com.iwhalecloud.byai.manager.entity.devloop.ScanRequireItem;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanSource;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -38,8 +38,8 @@ public class GitHubIssueScanService {
     private ProjectRepoMapper projectRepoMapper;
 
     /** 执行一次 Issue 扫描，返回本次新增的条目列表 */
-    public List<ScanLogItem> scan(ScanSource source, String pat) {
-        List<ScanLogItem> items = new ArrayList<>();
+    public List<ScanRequireItem> scan(ScanSource source, String pat) {
+        List<ScanRequireItem> items = new ArrayList<>();
         Long logId = null;
 
         try {
@@ -99,7 +99,7 @@ public class GitHubIssueScanService {
                 if (scanLogService.isDuplicate(source.getSourceId(), issueNumber)) {
                     continue;
                 }
-                ScanLogItem item = scanLogService.createItem(logId,
+                ScanRequireItem item = scanLogService.createItem(logId,
                     source.getSourceId(), title, content,
                     issueNumber, htmlUrl, "created");
                 items.add(item);

@@ -27,7 +27,7 @@ import com.iwhalecloud.byai.manager.domain.devloop.service.ScanLogService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ScanSourceService;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDTO;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanLog;
-import com.iwhalecloud.byai.manager.entity.devloop.ScanLogItem;
+import com.iwhalecloud.byai.manager.entity.devloop.ScanRequireItem;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanSource;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 
@@ -84,7 +84,7 @@ class DevloopApplicationServiceManualRequirementTest {
         when(scanLogService.createItem(eq(400L), eq(300L), eq("Improve login flow"), any(), any(), eq(null),
             eq("created")))
             .thenAnswer(invocation -> {
-                ScanLogItem item = new ScanLogItem();
+                ScanRequireItem item = new ScanRequireItem();
                 item.setItemId(500L);
                 item.setSourceId(300L);
                 item.setTitle("Improve login flow");

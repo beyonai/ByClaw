@@ -96,9 +96,10 @@
 |-----------------|------|------|
 | `relation_code` | 是 | 关系编码，英文下划线，如 `has_participant` |
 | `relation_name` | 是 | 关系名称，如 `参会人` |
-| `target_class`  | 是 | 目标对象编码，目标对象必须已在本体库中存在 |
+| `target_object_code` | 是 | 目标对象在 collect 后返回并实际落库的最终编码，目标对象必须已在本体库中存在 |
 | `relation_type` | 是 | 关系基数：`ONE_TO_ONE` / `ONE_TO_MANY` / `MANY_TO_ONE` / `MANY_TO_MANY` |
 | `join_keys`     | 否 | 连接键数组，指定本对象与目标对象通过哪对属性关联，格式见下方示例 |
+| `cascade_delete` | 否 | 严格 boolean；为 true 时删除目标 Owner 会展示当前 Dependent 的关联文件 |
 
 **关系基数说明：**
 
@@ -117,7 +118,7 @@
         {
             "relation_code": "has_participant",
             "relation_name": "参会人",
-            "target_class": "by_employee",
+            "target_object_code": "by_employee",
             "relation_type": "MANY_TO_MANY",
             "join_keys": [
                 {"sourceField": "employee_code", "targetField": "code"}
@@ -126,18 +127,29 @@
         {
             "relation_code": "belongs_to_project",
             "relation_name": "所属项目",
-            "target_class": "by_project",
+            "target_object_code": "by_project",
             "relation_type": "MANY_TO_ONE",
             "join_keys": [
                 {"sourceField": "project_id", "targetField": "id"}
-            ]
+            ],
+            "cascade_delete": true
         }
     ]
 }
 ```
 
-> **注意**：`target_class` 引用的对象必须已在本体库中存在。可通过 `list_resources.py` 查看已有对象列表，再填写对应编码。
+> **注意**：collect 可能在入参对象编码后追加随机数，因此 `target_object_code` 必须使用 collect 后返回并实际落库的最终编码，不得使用 collect 入参中的原始对象编码。优先采用 collect 响应返回的编码；无法确认时，必须通过 `list_resources.py` 查询并采用库中记录的编码。例如 collect 入参为 `Product`，响应或对象列表显示为 `Product_8472`，则填写 `Product_8472`。
 > 有 `join_keys` 的关联字段（如 `employee_code`、`project_id`），系统会自动将其 `term_type_code` 绑定为对应的目标对象编码，无需手动填写。
+
+### 级联删除固定语义
+
+- 当前对象是 Dependent，`target_object_code` 指向 Owner。
+- `cascade_delete: true` 只允许 `MANY_TO_ONE` 或 `ONE_TO_ONE`。
+- 删除 Owner：发现实际关联文件后弹出表单，用户可逐个选择是否删除。
+- 取消删除某个 Dependent：保留文件、清空其 source join key 并解除关系；不提供重新关联。
+- 删除 Dependent：不删除 Owner。
+- source join key 必须存在且允许清空，不能是不可清空的业务主键。
+- 不创建反向关系，不接受 `inverse`、`lifecycle` 或其他所有权策略字段。
 
 ## 与结构化本体的区别
 

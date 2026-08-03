@@ -122,6 +122,13 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     this.restoreInputDraft();
   }
 
+  componentDidUpdate(prevProps: IProps) {
+    if (`${prevProps.sessionId || ''}` !== `${this.props.sessionId || ''}`) {
+      // 新会话取得真实 sessionId 后重新读取已迁移的草稿，保证所有 @ 员工都恢复到输入框。
+      this.restoreInputDraft();
+    }
+  }
+
   componentWillUnmount() {
     const { EventEmitter } = this.props.globalContext;
     EventEmitter.off('queryInput-push-fileList', this.pushFileList);
@@ -230,8 +237,8 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     this.props.globalContext.setSiderAgentId?.(getLastMentionedDigitalEmployeeId(resourceList));
   };
 
-  getPersistentMentionDraft = (): DefaultValueSchema => {
-    return this.richInputRef.current?.getPersistentMentionDraft() || { text: '', resourceList: [] };
+  getPersistentMentionDraft = (includeQuestion = false): DefaultValueSchema => {
+    return this.richInputRef.current?.getPersistentMentionDraft(includeQuestion) || { text: '', resourceList: [] };
   };
 
   getQuoteAgentIds = (): string[] => {
@@ -629,7 +636,11 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
               inputValue: text,
               connectNet: resourceList.some((item) => `${item.resourceId}` === `${connectNetAgentId}`),
             }));
-            this.props.onInputDraftChange?.({ text, resourceList });
+            // 只要存在数字员工，就保存完整 mention 草稿，防止回答过程中默认 agent 变化后丢失其它员工。
+            const draft = resourceList.some((item) => `${item.resourceType}` === `${ResourceTypeMap.digitalEmployee}`)
+              ? this.getPersistentMentionDraft(true)
+              : { text, resourceList };
+            this.props.onInputDraftChange?.(draft);
             this.syncSiderAgent(resourceList);
             if (!cannotAt && agentId !== currentAgentId) {
               let nextAgentType = agentType;

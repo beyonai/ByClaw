@@ -63,6 +63,7 @@ import com.iwhalecloud.byai.common.constants.auth.GrantObjType;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.resource.SystemCode;
+import com.iwhalecloud.byai.common.constants.users.UserType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.util.CompletionsUtils;
@@ -120,6 +121,8 @@ public class AuthApplicationService {
     private static final String USE_APPLY_PENDING_LABEL_KEY = "auth.use.apply.status.pending";
 
     private static final String DEFAULT_SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX = "_main";
+
+    private static final String ADMIN_VIP_USER_CODE = "adminvip";
 
     private static final Set<String> MANAGE_USE_INHERIT_TARGET_TYPES = Set.of(GrantToObjType.USER, GrantToObjType.ORG,
         GrantToObjType.POST, GrantToObjType.STATION);
@@ -758,8 +761,9 @@ public class AuthApplicationService {
     }
 
     /**
-     * 校验当前用户是否有权限维护某个资源的管理/使用名单。 当前放行规则： 1. 平台管理员； 2. 资源创建人； 3. 对该资源拥有有效 ALLOW_MANAGE 权限的人； 4. 资源归属组织的组织管理员。
-     * 这里把校验逻辑统一收口，后续两个设置接口都复用这一套， 避免出现“管理人员设置有校验、使用人员设置没校验”的不一致问题。
+     * 校验当前用户是否有权限维护某个资源的管理/使用名单。 当前放行规则： 1. 平台管理/运维、业务管理员或超级管理员； 2. 资源创建人；
+     * 3. 资源归属组织的组织管理员； 4. 对该资源拥有有效 ALLOW_MANAGE 权限的人。 这里把校验逻辑统一收口，后续两个设置接口都复用这一套，
+     * 避免出现“管理人员设置有校验、使用人员设置没校验”的不一致问题。
      */
     private void validateResourceMemberSettingPermission(SsResource ssResource) {
         if (hasResourceMemberSettingPermission(ssResource)) {
@@ -802,9 +806,13 @@ public class AuthApplicationService {
      */
     private boolean hasResourceMemberSettingPermission(SsResource ssResource) {
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        boolean hasGlobalAdminRole = CurrentUserHolder.getUsersOrganizations().stream()
+            .anyMatch(item -> StringUtils.equalsAny(item.getUserType(), UserType.PLAT_MAN, UserType.PLAT_DEVOPS,
+                UserType.BUSINESS_MAN));
 
-        // 平台管理员拥有全局操作权限。
-        if (CurrentUserHolder.isPlatformManager()) {
+        // 平台管理/运维、业务管理员和超级管理员拥有全局管理权限。
+        if (hasGlobalAdminRole
+            || ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode())) {
             return true;
         }
 

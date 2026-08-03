@@ -210,7 +210,8 @@ Adding a new context region = a new processor in this pipeline, not a prompt str
 
 - `delegateAgent` — present only when the Run's authorized-agent snapshot is non-empty; real delegation still re-validates via `DelegationService`.
 - `inspectAttachment` — controlled tool that reads only the current Run's attachment IDs (resolved through `ByAiAttachmentResolver`, which downloads by `fileId` from ByClaw BE using the Run's short-lived credential; contract in `.dev/attachments-be-read-contract.md`).
-- Pi built-in `read`/`write`/`edit`/`grep`/`find`/`ls` — always enabled, pinned to a per-Session directory under the cache root (`<sessionCacheDirectory>/<sessionId>/files`), not the repo root, so `.env`/source stay out of reach and Sessions are file-isolated; cleaned on Session dispose.
+- `downloadAttachment` — implementation and protocol kept, but currently **disabled** (`DOWNLOAD_ATTACHMENT_ENABLED = false`); the BE download endpoint is pending rework. While disabled, the Leader must delegate file reading to a specialist agent (see the base system prompt) instead of downloading. Re-enable centrally once the endpoint is wired.
+- Pi built-in `read`/`write`/`edit`/`grep`/`find`/`ls` — **disabled** (`LEADER_FILE_TOOL_NAMES` is empty). The per-Session cwd (`<sessionCacheDirectory>/<sessionId>/files`) is still created for `downloadAttachment`, but no built-in file tool reads/writes it. Re-enable centrally by uncommenting entries in `LEADER_FILE_TOOL_NAMES` (`context/active-leader-tools.ts`).
 - `askUserQuestion` — implementation and protocol kept, but currently **disabled** (`ASK_USER_QUESTION_ENABLED = false`); re-enable centrally when frontend interaction is fixed.
 - `bash` and MCP stay disabled — `bash` would let any caller run arbitrary host commands (RCE).
 

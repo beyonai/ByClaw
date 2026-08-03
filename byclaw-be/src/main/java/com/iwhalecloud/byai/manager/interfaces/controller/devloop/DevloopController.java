@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
+import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
@@ -10,6 +11,8 @@ import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDeleteDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementUpdateDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.IntegrationEnvDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.IntegrationSuiteDTO;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -61,13 +64,16 @@ public class DevloopController {
     /**
      * 查询项目下的扫描源列表
      *
-     * @param params 包含 projectId
-     * @return 扫描源列表（含启用状态、最近扫描时间等）
+     * @param params 包含 projectId、keyword、pageNum、pageSize
+     * @return 扫描源分页列表（含启用状态、最近扫描时间等）
      */
     @PostMapping("/source/list")
-    public ResponseUtil<List<Map<String, Object>>> listScanSources(@RequestBody Map<String, Object> params) {
-        Long projectId = Long.valueOf(params.get("projectId").toString());
-        return applicationService.listScanSources(projectId);
+    public ResponseUtil<PageInfo<Map<String, Object>>> listScanSources(@RequestBody Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        String keyword = MapParamUtil.getStringValue(params, "keyword");
+        int pageNum = Math.max(1, MapParamUtil.getIntValue(params, "pageNum", 1));
+        int pageSize = Math.max(1, MapParamUtil.getIntValue(params, "pageSize", 30));
+        return applicationService.listScanSources(projectId, keyword, pageNum, pageSize);
     }
 
     /**
@@ -114,9 +120,9 @@ public class DevloopController {
      * @return 扫描发现的每条需求/Issue信息
      */
     @PostMapping("/log/items")
-    public ResponseUtil<List<Map<String, Object>>> listScanLogItems(@RequestBody Map<String, Object> params) {
+    public ResponseUtil<List<Map<String, Object>>> listScanRequireItems(@RequestBody Map<String, Object> params) {
         Long logId = Long.valueOf(params.get("logId").toString());
-        return applicationService.listScanLogItems(logId);
+        return applicationService.listScanRequireItems(logId);
     }
 
     /**
@@ -129,6 +135,140 @@ public class DevloopController {
     public ResponseUtil<List<Map<String, Object>>> listRequirementsBySource(@RequestBody Map<String, Object> params) {
         Long sourceId = Long.valueOf(params.get("sourceId").toString());
         return applicationService.listRequirementsBySource(sourceId);
+    }
+
+    // ========== 集成测试环境 ==========
+
+    /**
+     * 创建集成测试环境
+     *
+     * @param dto 环境信息（projectId、envName 必填；stages/testAccounts 为JSON字符串）
+     * @return 新建环境ID
+     */
+    @PostMapping("/integration/env/create")
+    public ResponseUtil<Map<String, Object>> createIntegrationEnv(@RequestBody IntegrationEnvDTO dto) {
+        return applicationService.createIntegrationEnv(dto);
+    }
+
+    /**
+     * 修改集成测试环境
+     *
+     * @param dto 包含 envId（必填）及待更新字段
+     */
+    @PostMapping("/integration/env/update")
+    public ResponseUtil<Void> updateIntegrationEnv(@RequestBody IntegrationEnvDTO dto) {
+        return applicationService.updateIntegrationEnv(dto);
+    }
+
+    /**
+     * 删除集成测试环境
+     *
+     * @param params 包含 envId
+     */
+    @PostMapping("/integration/env/delete")
+    public ResponseUtil<Void> deleteIntegrationEnv(@RequestBody Map<String, Object> params) {
+        Long envId = Long.valueOf(params.get("envId").toString());
+        return applicationService.deleteIntegrationEnv(envId);
+    }
+
+    /**
+     * 查询项目下的集成测试环境列表
+     *
+     * @param params 包含 projectId
+     */
+    @PostMapping("/integration/env/list")
+    public ResponseUtil<List<Map<String, Object>>> listIntegrationEnvs(@RequestBody Map<String, Object> params) {
+        Long projectId = Long.valueOf(params.get("projectId").toString());
+        return applicationService.listIntegrationEnvs(projectId);
+    }
+
+    /**
+     * 新建端到端测试用例集
+     *
+     * @param dto 用例集信息（projectId、suiteName 必填）
+     * @return 新建用例集ID
+     */
+    @PostMapping("/integration/suite/create")
+    public ResponseUtil<Map<String, Object>> createIntegrationSuite(@RequestBody IntegrationSuiteDTO dto) {
+        return applicationService.createIntegrationSuite(dto);
+    }
+
+    /**
+     * 修改端到端测试用例集
+     *
+     * @param dto 包含 suiteId（必填）及待更新字段
+     */
+    @PostMapping("/integration/suite/update")
+    public ResponseUtil<Void> updateIntegrationSuite(@RequestBody IntegrationSuiteDTO dto) {
+        return applicationService.updateIntegrationSuite(dto);
+    }
+
+    /**
+     * 删除端到端测试用例集
+     *
+     * @param params 包含 suiteId
+     */
+    @PostMapping("/integration/suite/delete")
+    public ResponseUtil<Void> deleteIntegrationSuite(@RequestBody Map<String, Object> params) {
+        Long suiteId = Long.valueOf(params.get("suiteId").toString());
+        return applicationService.deleteIntegrationSuite(suiteId);
+    }
+
+    /**
+     * 启用/停用端到端测试用例集
+     *
+     * @param params 包含 suiteId、enabled('0'/'1')
+     */
+    @PostMapping("/integration/suite/toggle")
+    public ResponseUtil<Void> toggleIntegrationSuite(@RequestBody Map<String, Object> params) {
+        Long suiteId = Long.valueOf(params.get("suiteId").toString());
+        String enabled = params.get("enabled").toString();
+        return applicationService.toggleIntegrationSuite(suiteId, enabled);
+    }
+
+    /**
+     * 查询项目下的端到端测试用例集列表
+     *
+     * @param params 包含 projectId
+     */
+    @PostMapping("/integration/suite/list")
+    public ResponseUtil<List<Map<String, Object>>> listIntegrationSuites(@RequestBody Map<String, Object> params) {
+        Long projectId = Long.valueOf(params.get("projectId").toString());
+        return applicationService.listIntegrationSuites(projectId);
+    }
+
+    /**
+     * 触发一次「执行测试」:连上集成测试环境跑 stages + 套件命令,秒回 runId,后台异步执行。
+     *
+     * @param params 包含 suiteId、envId
+     */
+    @PostMapping("/integration/run/start")
+    public ResponseUtil<Map<String, Object>> startIntegrationRun(@RequestBody Map<String, Object> params) {
+        Long suiteId = Long.valueOf(params.get("suiteId").toString());
+        Long envId = Long.valueOf(params.get("envId").toString());
+        return applicationService.startIntegrationRun(suiteId, envId);
+    }
+
+    /**
+     * 查询一次执行的完整结果(含步骤进度),供前端轮询。
+     *
+     * @param params 包含 runId
+     */
+    @PostMapping("/integration/run/get")
+    public ResponseUtil<Map<String, Object>> getIntegrationRun(@RequestBody Map<String, Object> params) {
+        Long runId = Long.valueOf(params.get("runId").toString());
+        return applicationService.getIntegrationRun(runId);
+    }
+
+    /**
+     * 查询某套件的历史执行列表。
+     *
+     * @param params 包含 suiteId
+     */
+    @PostMapping("/integration/run/list")
+    public ResponseUtil<List<Map<String, Object>>> listIntegrationRuns(@RequestBody Map<String, Object> params) {
+        Long suiteId = Long.valueOf(params.get("suiteId").toString());
+        return applicationService.listIntegrationRuns(suiteId);
     }
 
     /** 按项目一次查全部需求(时间倒序)，供需求列表直查，替代前端逐源循环 */
@@ -290,5 +430,29 @@ public class DevloopController {
             return ResponseUtil.failRes(I18nUtil.get("devloop.dws.token.required"));
         }
         return applicationService.saveDwsToken(token);
+    }
+
+    /**
+     * 创建运营需求
+     *
+     * @param params 入参
+     * @return ResponseUtil
+     */
+    @PostMapping("/requirement/createOperationRequirement")
+    public ResponseUtil<Long> createOperationRequirement(@RequestBody Map<String, Object> params) {
+        Long id = applicationService.createOperationRequirement(params);
+        return ResponseUtil.successResponse(id);
+    }
+
+    /**
+     * 修改运营需求
+     *
+     * @param params
+     * @return ResponseUtil
+     */
+    @PostMapping("/requirement/updateOperationRequirement")
+    public ResponseUtil<Map<String, Object>> updateOperationRequirement(@RequestBody Map<String, Object> params) {
+        applicationService.updateOperationRequirement(params);
+        return ResponseUtil.successResponse();
     }
 }

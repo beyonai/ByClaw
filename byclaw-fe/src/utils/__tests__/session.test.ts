@@ -2,6 +2,7 @@ import {
   addSessionHandler,
   formatByUpdateTime,
   getSessionObjectTypeMap,
+  getSessionsCreatedDuringRequest,
   sessionHandler,
   setSessionObjectTypeMap,
   updateSessionHandler,
@@ -115,5 +116,25 @@ describe('utils/session', () => {
       sessionName: 'New Chat',
       updateTime: '1000',
     });
+  });
+
+  it('keeps a session created while the first-page request is pending', () => {
+    const createdSessions = getSessionsCreatedDuringRequest(
+      [{ sessionId: 'old' }] as any,
+      [{ sessionId: 'new' }, { sessionId: 'old' }] as any,
+      [{ sessionId: 'old' }] as any
+    );
+
+    expect(createdSessions).toEqual([{ sessionId: 'new' }]);
+  });
+
+  it('does not duplicate a newly created session already returned by the server', () => {
+    const createdSessions = getSessionsCreatedDuringRequest(
+      [{ sessionId: 'old' }] as any,
+      [{ sessionId: 'new' }, { sessionId: 'old' }] as any,
+      [{ sessionId: 'new' }, { sessionId: 'old' }] as any
+    );
+
+    expect(createdSessions).toEqual([]);
   });
 });

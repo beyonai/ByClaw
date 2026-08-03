@@ -30,3 +30,32 @@ export const PROJECT_DETAIL_SECTIONS = [
 ] as const;
 
 export type ProjectDetailSection = (typeof PROJECT_DETAIL_SECTIONS)[number]['key'];
+
+// 当前项目仅持久化 ID，项目列表加载后会根据用户权限再次校验该值。
+export const PROJECT_SCOPE_STORAGE_KEY = 'byclaw.projectSpace.selectedProjectId';
+
+export const getStoredProjectScopeId = () => {
+  if (typeof window === 'undefined') return undefined;
+
+  try {
+    return window.localStorage.getItem(PROJECT_SCOPE_STORAGE_KEY)?.trim() || undefined;
+  } catch {
+    // 浏览器禁用本地存储时不影响当前会话中的项目切换。
+    return undefined;
+  }
+};
+
+export const saveProjectScopeIdToStorage = (projectId?: string | number) => {
+  if (typeof window === 'undefined') return;
+
+  try {
+    const normalizedProjectId = `${projectId ?? ''}`.trim();
+    if (normalizedProjectId) {
+      window.localStorage.setItem(PROJECT_SCOPE_STORAGE_KEY, normalizedProjectId);
+      return;
+    }
+    window.localStorage.removeItem(PROJECT_SCOPE_STORAGE_KEY);
+  } catch {
+    // 浏览器禁用本地存储时不影响当前会话中的项目切换。
+  }
+};

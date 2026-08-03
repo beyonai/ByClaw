@@ -60,6 +60,22 @@ const SimpleLayout = () => {
     };
   }, [agentId, sessionId]);
 
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined') return;
+    (window as any).__BYCLAW_E2E__ = {
+      ...((window as any).__BYCLAW_E2E__ || {}),
+      EventEmitter: myEventEmitter,
+      resetChat: () => {
+        setSessionId('');
+        setAgentId('');
+      },
+      getState: () => ({
+        sessionId,
+        agentId,
+      }),
+    };
+  }, [agentId, sessionId]);
+
   const { userInfo } = useSelector(({ user }) => ({ userInfo: user.userInfo }));
 
   const layoutRef = useRef<HTMLElement>(null);

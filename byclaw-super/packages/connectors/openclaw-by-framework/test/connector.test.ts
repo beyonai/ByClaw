@@ -94,6 +94,185 @@ describe("OpenClawByFrameworkConnector", () => {
     expect(cancelTask).toHaveBeenCalledOnce();
   });
 
+  it("rejects cancellation when by-framework does not accept it", async () => {
+    const redis = {
+      xread: vi.fn(async () => null),
+      ping: vi.fn(async () => "PONG"),
+      quit: vi.fn(async () => "OK"),
+      status: "ready",
+    };
+    const connector = new OpenClawByFrameworkConnector({
+      redis: redis as never,
+      gatewayClient: {
+        sendMessage: vi.fn(async () => ({
+          success: true,
+          message_id: "message-1",
+          trace_id: "trace-1",
+          target_worker_id: "worker-1",
+          timestamp: Date.now(),
+          status: "QUEUED",
+        })),
+        cancelTask: vi.fn(async () => ({
+          success: false,
+          message_id: "message-1",
+          execution_id: "",
+          worker_id: "",
+          status: "NOT_FOUND",
+          timestamp: Date.now(),
+          error: "execution not found",
+        })),
+      },
+    });
+
+    const execution = await connector.start(request(), {
+      signal: new AbortController().signal,
+    });
+
+    await expect(execution.cancel("user cancelled")).rejects.toThrow(
+      "OpenClaw cancellation failed: status=NOT_FOUND",
+    );
+  });
+
+  it("waits until the OpenClaw execution reaches a terminal state", async () => {
+    const redis = {
+      xread: vi.fn(async () => null),
+      ping: vi.fn(async () => "PONG"),
+      quit: vi.fn(async () => "OK"),
+      status: "ready",
+    };
+    const getExecutionByMessageId = vi.fn(async () => ({
+      status: "CANCELLED",
+    }));
+    const connector = new OpenClawByFrameworkConnector({
+      redis: redis as never,
+      registry: { getExecutionByMessageId },
+      gatewayClient: {
+        sendMessage: vi.fn(async () => ({
+          success: true,
+          message_id: "message-1",
+          trace_id: "trace-1",
+          target_worker_id: "worker-1",
+          timestamp: Date.now(),
+          status: "QUEUED",
+        })),
+        cancelTask: vi.fn(async () => ({
+          success: true,
+          message_id: "message-1",
+          execution_id: "execution-1",
+          worker_id: "worker-1",
+          status: "CANCEL_REQUESTED",
+          timestamp: Date.now(),
+        })),
+      },
+    });
+
+    const execution = await connector.start(request(), {
+      signal: new AbortController().signal,
+    });
+    await execution.cancel("user cancelled");
+
+    expect(getExecutionByMessageId).toHaveBeenCalledWith(
+      "message-1",
+      "maestro:user-1:session-1:run-1:delegation-1",
+    );
+  });
+
+  it("rejects cancellation when the OpenClaw execution stays running", async () => {
+    const redis = {
+      xread: vi.fn(async () => null),
+      ping: vi.fn(async () => "PONG"),
+      quit: vi.fn(async () => "OK"),
+      status: "ready",
+    };
+    const connector = new OpenClawByFrameworkConnector({
+      redis: redis as never,
+      registry: {
+        getExecutionByMessageId: vi.fn(async () => ({ status: "RUNNING" })),
+      },
+      gatewayClient: {
+        sendMessage: vi.fn(async () => ({
+          success: true,
+          message_id: "message-1",
+          trace_id: "trace-1",
+          target_worker_id: "worker-1",
+          timestamp: Date.now(),
+          status: "QUEUED",
+        })),
+        cancelTask: vi.fn(async () => ({
+          success: true,
+          message_id: "message-1",
+          execution_id: "execution-1",
+          worker_id: "worker-1",
+          status: "CANCEL_REQUESTED",
+          timestamp: Date.now(),
+        })),
+      },
+      cancelConfirmationTimeoutMs: 5,
+    });
+
+    const execution = await connector.start(request(), {
+      signal: new AbortController().signal,
+    });
+
+    await expect(execution.cancel("user cancelled")).rejects.toThrow(
+      "OpenClaw cancellation was not confirmed within 5ms",
+    );
+  });
+
+  it("times out when OpenClaw does not emit its first event", async () => {
+    const redis = {
+      xread: vi.fn(async () => null),
+      ping: vi.fn(async () => "PONG"),
+      quit: vi.fn(async () => "OK"),
+      status: "ready",
+    };
+    const cancelTask = vi.fn(async () => ({
+      success: false,
+      message_id: "message-1",
+      execution_id: "execution-1",
+      worker_id: "worker-1",
+      status: "ALREADY_FINISHED",
+      timestamp: Date.now(),
+    }));
+    const connector = new OpenClawByFrameworkConnector({
+      redis: redis as never,
+      gatewayClient: {
+        sendMessage: vi.fn(async () => ({
+          success: true,
+          message_id: "message-1",
+          trace_id: "trace-1",
+          target_worker_id: "worker-1",
+          timestamp: Date.now(),
+          status: "QUEUED",
+        })),
+        cancelTask,
+      },
+      readBlockMs: 1,
+      firstEventTimeoutMs: 5,
+    });
+
+    const execution = await connector.start(request(), {
+      signal: new AbortController().signal,
+    });
+    const events = [];
+    for await (const event of execution.events) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      {
+        type: "failed",
+        error: {
+          code: "OPENCLAW_FIRST_EVENT_TIMEOUT",
+          message: "OpenClaw first event timed out after 5ms",
+          retryable: true,
+          timedOut: true,
+        },
+      },
+    ]);
+    expect(cancelTask).toHaveBeenCalledOnce();
+  });
+
   it("turns an error event into a failed connector event", async () => {
     const redis = {
       xread: vi.fn(async () => [
@@ -420,6 +599,120 @@ describe("OpenClawByFrameworkConnector", () => {
         cursor: "9-0",
       },
     ]);
+  });
+
+  it("appends the session workspace reminder for by-framework inbound runs", async () => {
+    const sendMessage = vi.fn(async () => ({
+      success: true,
+      message_id: "message-1",
+      trace_id: "trace-1",
+      target_worker_id: "worker-1",
+      timestamp: Date.now(),
+      status: "QUEUED",
+    }));
+    const connector = new OpenClawByFrameworkConnector({
+      redis: {
+        xread: vi.fn(),
+        ping: vi.fn(async () => "PONG"),
+        quit: vi.fn(async () => "OK"),
+        status: "ready",
+      } as never,
+      gatewayClient: { sendMessage, cancelTask: vi.fn() },
+    });
+    const req = request();
+    req.externalSessionId = "ext-session-9";
+
+    await connector.start(req, { signal: new AbortController().signal });
+
+    const sent = sendMessage.mock.calls[0][0] as { content: string };
+    expect(sent.content).toBe(
+      "analyze\n\nYour session workspace is `/by/.sessions/ext-session-9/`. If you produce any files, place them under this session workspace.",
+    );
+    // request.task 本身不被改写，后缀只进入投递内容（保住委派幂等/恢复匹配键）。
+    expect(req.task).toBe("analyze");
+  });
+
+  it("lists attachment read paths under the session workspace for by-framework inbound runs", async () => {
+    const sendMessage = vi.fn(async () => ({
+      success: true,
+      message_id: "message-1",
+      trace_id: "trace-1",
+      target_worker_id: "worker-1",
+      timestamp: Date.now(),
+      status: "QUEUED",
+    }));
+    const connector = new OpenClawByFrameworkConnector({
+      redis: {
+        xread: vi.fn(),
+        ping: vi.fn(async () => "PONG"),
+        quit: vi.fn(async () => "OK"),
+        status: "ready",
+      } as never,
+      gatewayClient: { sendMessage, cancelTask: vi.fn() },
+    });
+    const req = request();
+    req.externalSessionId = "ext-session-9";
+    // BE 投递的 filePath 是对象存储 key /.sessions/<sid>/<file>；非该形态的会被忽略。
+    req.attachments = [
+      {
+        id: "a1",
+        name: "data.csv",
+        path: "/.sessions/ext-session-9/data.csv",
+        provenance: "by-framework",
+      },
+      {
+        id: "a2",
+        name: "notes.txt",
+        path: "/.sessions/ext-session-9/docs/notes.txt",
+        provenance: "by-framework",
+      },
+      {
+        id: "a3",
+        name: "external",
+        path: "https://example.com/x",
+        provenance: "by-framework",
+      },
+    ];
+
+    await connector.start(req, { signal: new AbortController().signal });
+
+    const sent = sendMessage.mock.calls[0][0] as { content: unknown };
+    const message = (sent.content as Array<{ content: { text: string } }>)[0];
+    expect(message.content.text).toBe(
+      "analyze\n\n" +
+        "Your session workspace is `/by/.sessions/ext-session-9/`.\n" +
+        "Files attached to this task are available in this workspace for reading:\n" +
+        "- `/by/.sessions/ext-session-9/data.csv`\n" +
+        "- `/by/.sessions/ext-session-9/docs/notes.txt`\n" +
+        "If you produce any files, place them under this session workspace.",
+    );
+    // request.task 本身不被改写，后缀只进入投递内容（保住委派幂等/恢复匹配键）。
+    expect(req.task).toBe("analyze");
+  });
+
+  it("leaves the task unchanged when externalSessionId is absent (HTTP inbound)", async () => {
+    const sendMessage = vi.fn(async () => ({
+      success: true,
+      message_id: "message-1",
+      trace_id: "trace-1",
+      target_worker_id: "worker-1",
+      timestamp: Date.now(),
+      status: "QUEUED",
+    }));
+    const connector = new OpenClawByFrameworkConnector({
+      redis: {
+        xread: vi.fn(),
+        ping: vi.fn(async () => "PONG"),
+        quit: vi.fn(async () => "OK"),
+        status: "ready",
+      } as never,
+      gatewayClient: { sendMessage, cancelTask: vi.fn() },
+    });
+
+    await connector.start(request(), { signal: new AbortController().signal });
+
+    const sent = sendMessage.mock.calls[0][0] as { content: string };
+    expect(sent.content).toBe("analyze");
   });
 
   it("forwards attachments as by-framework {text, files} content without fileIp", async () => {

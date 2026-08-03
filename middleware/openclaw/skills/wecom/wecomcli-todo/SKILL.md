@@ -9,8 +9,6 @@ metadata:
 
 # 企业微信待办事项管理技能
 
-开始任何任务前，必须先阅读上级共享政策 [operating-policy.md](../references/operating-policy.md)；共享政策优先于本文件中的示例和局部规则。
-
 > `wecom-cli` 是企业微信提供的命令行程序，所有操作通过执行 `wecom-cli` 命令完成。
 
 ## 概述
@@ -305,3 +303,4 @@ wecom-cli todo delete_todo '{"todo_id": "TODO_ID"}'
 | `1` | 到期时 | `7` | 提前 1 天 |
 | `3` | 提前 15 分钟 | `8` | 提前 2 天 |
 | `5` | 提前 1 小时 | `9` | 提前 1 周 |
+

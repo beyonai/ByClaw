@@ -34,7 +34,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
-import com.iwhalecloud.byai.manager.mapper.devloop.ScanLogItemMapper;
+import com.iwhalecloud.byai.manager.mapper.devloop.ScanRequireItemMapper;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
 
 @ExtendWith(MockitoExtension.class)
@@ -50,7 +50,7 @@ class DevloopApplicationServiceTaskQueryTest {
     private LoginApplicationService loginApplicationService;
 
     @Mock
-    private ScanLogItemMapper scanLogItemMapper;
+    private ScanRequireItemMapper scanRequireItemMapper;
 
     @Mock
     private ProjectRepoMapper projectRepoMapper;
@@ -68,7 +68,7 @@ class DevloopApplicationServiceTaskQueryTest {
         ReflectionTestUtils.setField(service, "byaiSessionMapper", byaiSessionMapper);
         ReflectionTestUtils.setField(service, "taskStateReader", taskStateReader);
         ReflectionTestUtils.setField(service, "loginApplicationService", loginApplicationService);
-        ReflectionTestUtils.setField(service, "scanLogItemMapper", scanLogItemMapper);
+        ReflectionTestUtils.setField(service, "scanRequireItemMapper", scanRequireItemMapper);
         ReflectionTestUtils.setField(service, "projectRepoMapper", projectRepoMapper);
     }
 
@@ -92,7 +92,7 @@ class DevloopApplicationServiceTaskQueryTest {
         sessionPage.setRecords(Collections.singletonList(session));
         sessionPage.setTotal(41);
         when(byaiSessionMapper.selectPage(any(Page.class), any())).thenReturn(sessionPage);
-        when(scanLogItemMapper.selectOne(any())).thenReturn(null);
+        when(scanRequireItemMapper.selectOne(any())).thenReturn(null);
         when(projectRepoMapper.selectList(any())).thenReturn(Collections.emptyList());
 
         LoginInfo owner = new LoginInfo();

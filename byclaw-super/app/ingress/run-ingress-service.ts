@@ -49,6 +49,11 @@ export interface CreateSessionRunRequest extends AuthenticatedIngressRequest {
    * HTTP/SSE 入口不得由调用方指定，统一走 userCode 兜底规则。
    */
   sourceAgentId?: string;
+  /**
+   * by-framework 入站带来的外部 Session ID（仅 by-framework Worker 入口提供）。
+   * 用于在 Session 上标记来源并供后续委派声明会话工作区；HTTP 入口不提供。
+   */
+  externalSessionId?: string;
   /** Gateway 只提供定位引用；正文由 Super 使用当前 Token 从 BE 权威读取。 */
   groupChatRef?: GroupChatRefV1;
 }
@@ -104,7 +109,13 @@ export class RunIngressService {
       agentList,
       ...(ingressContext ? { ingressContext } : {}),
       // Token 同时写入专用短期凭证表，供其他实例在 lease 接管后恢复。
-      metadata: { "Beyond-Token": input.beyondToken },
+      // externalSessionId 随 metadata 短暂透传到委派层，用于声明会话工作区，不持久化。
+      metadata: {
+        "Beyond-Token": input.beyondToken,
+        ...(input.externalSessionId
+          ? { externalSessionId: input.externalSessionId }
+          : {}),
+      },
       executionCredential: {
         secret: input.beyondToken,
         expiresAt: authenticated.credentialExpiresAt,
@@ -145,7 +156,13 @@ export class RunIngressService {
       thinkingLevel: input.thinkingLevel ?? "off",
       agentList,
       ...(ingressContext ? { ingressContext } : {}),
-      metadata: { "Beyond-Token": input.beyondToken },
+      // 追加 Run 同属 by-framework 入站时也需声明会话工作区，externalSessionId 走 metadata 透传。
+      metadata: {
+        "Beyond-Token": input.beyondToken,
+        ...(input.externalSessionId
+          ? { externalSessionId: input.externalSessionId }
+          : {}),
+      },
       executionCredential: {
         secret: input.beyondToken,
         expiresAt: authenticated.credentialExpiresAt,
