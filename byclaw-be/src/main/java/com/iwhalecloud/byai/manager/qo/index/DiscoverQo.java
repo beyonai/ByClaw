@@ -79,4 +79,12 @@ public class DiscoverQo extends AuthQo {
      */
     private Boolean includeAllResourceStatus;
 
+    /**
+     * 仅查询当前账号下可用的数字员工（我创建的 或 红名单授权给我的）。
+     * <p>
+     * 仅供新增的 discoverMine 接口使用，原 discover 接口不传该字段，默认为 null，行为不变。
+     * </p>
+     */
+    private Boolean mineOnly;
+
 }

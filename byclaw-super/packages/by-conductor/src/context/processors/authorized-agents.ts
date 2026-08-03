@@ -1,4 +1,4 @@
-import type { AgentProfile } from "../../types.js";
+import type { AgentProfile } from "../../domain/types.js";
 import type {
   ContextBuildInput,
   ContextBuildState,

@@ -5,7 +5,7 @@ import {
   normalizeRunAttachments,
   resolveAttachmentSelection,
   toSafeAttachmentSummary,
-} from "../src/attachments.js";
+} from "../src/application/attachments.js";
 
 describe("normalizeRunAttachments", () => {
   it("maps by-framework file fields onto RunAttachment and ignores fileIp", () => {

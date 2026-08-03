@@ -1,12 +1,12 @@
-import type { ExecutionCredential } from "./execution-credentials.js";
-import type { PiSessionCheckpoint } from "./pi-session-checkpoint.js";
+import type { ExecutionCredential } from "../domain/execution-credentials.js";
+import type { PiSessionCheckpoint } from "../pi-session-checkpoint.js";
 import type {
   CallerPrincipal,
   Delegation,
   Run,
   RunEvent,
   Session,
-} from "./types.js";
+} from "../domain/types.js";
 
 export interface SessionRepository {
   /** 新建或覆盖保存 Session。 */

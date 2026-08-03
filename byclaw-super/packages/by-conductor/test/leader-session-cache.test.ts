@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { LeaderSessionCache } from "../src/leader-session-cache.js";
+import { LeaderSessionCache } from "../src/application/leader-session-cache.js";
 import type {
   LeaderSession,
   LeaderSessionFactory,
-} from "../src/leader.js";
+} from "../src/ports/leader.js";
 
 describe("LeaderSessionCache", () => {
   it("single-flights creation and evicts the least recently used idle session", async () => {

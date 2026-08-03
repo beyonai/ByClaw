@@ -262,8 +262,8 @@ REDIS_PORT=
 REDIS_DATABASE=
 # cluster 模式改填：REDIS_CLUSTER_HOST=redis-1:6379,redis-2:6379
 
-# 默认 Pi 模型的凭证
-OPENAI_API_KEY=
+# Redis 默认 LLM 不可用时的 DeepSeek 兜底凭证
+ARK_API_KEY=
 
 # 只在部署值与代码默认值不同时填写，例如：
 # PORT=10001

@@ -59,12 +59,13 @@ import {
   buildBroadcastSessionKey,
   resolveByaiSessionKey,
   resolveSdkTargetAgentId,
-} from "./session-key.js";
+} from "../../shared/src/session-key.js";
 import { waitForManagedBaiyingAgentConfig } from "./managed-agent-config-wait.js";
 import {
   appendByaiLaneToTarget,
   parseByaiLaneMetadata,
 } from "./multi-agent.js";
+import { loadGroupChatContextForAgent } from "./group-chat-context.js";
 
 const CHANNEL_ID = BYAI_CHANNEL_ID;
 const MANAGED_BAIYING_AGENT_PREFIX = "baiying-agent-";
@@ -516,11 +517,30 @@ async function deliverReplyToAgentViaSdkUnderGate(
 
   const workspaceDir = rt.agent.resolveAgentWorkspaceDir(cfg, sessionAgentId);
   const includeUserMdReloadHint = consumeWorkspaceReloadHint(workspaceDir);
+  const groupChatContext = await loadGroupChatContextForAgent({
+    extraPayload: message.extraPayload,
+    sessionId: message.sessionId,
+    beyondToken: message.beyondToken,
+    currentAgentIds: [
+      laneMetadata?.agentId,
+      stringValue(extraPayload.agent_id),
+      targetAgentId,
+      sessionAgentId,
+    ],
+    currentAgentNames: [
+      laneMetadata?.agentName,
+      stringValue(extraPayload.agent_name),
+      sessionAgentName,
+    ],
+    signal: deps.abortController?.signal,
+    logger: log,
+  });
   setPromptInjectionSnapshot(
     sessionKey,
     buildPromptInjectionSnapshot({
       request: activeRequest,
       currentUserText: message.text,
+      ...(groupChatContext ? { groupChatContext } : {}),
       workspaceDir,
       includeUserMdReloadHint,
     }),

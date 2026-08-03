@@ -601,9 +601,13 @@ public class RouteService {
             messageContent = contentObjects;
         }
 
+        String actionType = chatDto.getActionType() == null ? ActionType.ASK_AGENT : chatDto.getActionType();
         Map<String, Object> gatewayParams = params == null ? new HashMap<>() : new HashMap<>(params);
-        if (WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(targetAgentType)
-                && ctx != null && ctx.getUserMessageId() != null) {
+        if (ActionType.ASK_AGENT.equals(actionType)
+                && StringUtils.isNotBlank(sessionId)
+                && ctx != null
+                && ctx.getUserMessageId() != null
+                && ctx.getUserMessageId() > 0) {
             Map<String, Object> groupChat = new HashMap<>();
             groupChat.put("schemaVersion", "byclaw.group-chat-ref/v1");
             groupChat.put("conversationKey", sessionId);
@@ -618,7 +622,7 @@ public class RouteService {
                 messageContent,
                 userCode,
                 currentUserName,
-                chatDto.getActionType() == null ? ActionType.ASK_AGENT : chatDto.getActionType(),
+                actionType,
                 "-1",
                 answerMessageId,
                 traceId,

@@ -7,7 +7,7 @@ import type {
   RunAttachment,
   UserInteractionRequest,
   UserInteractionResponse,
-} from "./types.js";
+} from "../domain/types.js";
 
 /** 编排层传给 Connector 的完整执行上下文；metadata 只在当前 Run 内短暂使用。 */
 export interface ConnectorRequest {
