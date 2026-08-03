@@ -669,6 +669,10 @@
             <if test="(userOrgIds != null and userOrgIds.size() > 0) or userId != null">
                 and (k.black_count = 0 or k.black_count is null)
             </if>
+            <!-- 仅当前账号下可用：我创建的 或 红名单授权给我的（discoverMine 接口使用，原 discover 不传 mineOnly，不受影响） -->
+            <if test="mineOnly == true">
+                and (k.red_count &gt; 0 or a.create_by = #{userId})
+            </if>
             <!-- 发布组织过滤 -->
             <if test="publishOrgIds != null and publishOrgIds.size() > 0">
                 and a.man_org_id in

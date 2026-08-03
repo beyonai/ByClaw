@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { filterDelegableAgents } from "../src/delegable-agents.js";
-import type { AgentProfile } from "../src/types.js";
+import { filterDelegableAgents } from "../src/domain/delegable-agents.js";
+import type { AgentProfile } from "../src/domain/types.js";
 
 function agent(id: string, code?: string): AgentProfile {
   return {

@@ -2,10 +2,10 @@ import type {
   AttachmentInspection,
   AttachmentInspectionMode,
   MaterializedAttachment,
-} from "./attachment-inspection.js";
-import type { PiSessionCheckpoint } from "./pi-session-checkpoint.js";
-import type { SessionContextV1 } from "./session-context.js";
-import type { GroupChatContextV1 } from "./group-chat-context.js";
+} from "../domain/attachment-inspection.js";
+import type { PiSessionCheckpoint } from "../pi-session-checkpoint.js";
+import type { SessionContextV1 } from "../domain/session-context.js";
+import type { GroupChatContextV1 } from "../domain/group-chat-context.js";
 import type {
   AgentProfile,
   AgentResult,
@@ -14,7 +14,7 @@ import type {
   ThinkingLevel,
   UserInteractionQuestion,
   UserInteractionResponse,
-} from "./types.js";
+} from "../domain/types.js";
 
 /** Leader 执行单次 Run 所需的授权快照和边界回调。 */
 export interface LeaderRunInput {

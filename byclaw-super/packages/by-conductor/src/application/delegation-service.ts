@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { ConnectorExecution, ConnectorRequest } from "./connectors.js";
-import { ConnectorRegistry } from "./connectors.js";
+import type { ConnectorExecution, ConnectorRequest } from "../ports/connectors.js";
+import { ConnectorRegistry } from "../ports/connectors.js";
 import type {
   DelegationRepository,
   RunEventStore,
   RunExecutionClaim,
-} from "./repositories.js";
+} from "../ports/repositories.js";
 import type {
   AgentProfile,
   AgentResult,
@@ -17,8 +17,8 @@ import type {
   Session,
   UserInteractionRequest,
   UserInteractionResponse,
-} from "./types.js";
-import { TERMINAL_DELEGATION_STATUSES } from "./types.js";
+} from "../domain/types.js";
+import { TERMINAL_DELEGATION_STATUSES } from "../domain/types.js";
 
 /** 表示 Leader 请求了本次 Run 授权快照之外的 Agent。 */
 export class UnauthorizedAgentError extends Error {
@@ -787,7 +787,7 @@ export class DelegationService {
   async #saveDelegationWithEvent(
     delegation: Delegation,
     event: Parameters<RunEventStore["append"]>[0],
-  ): Promise<import("./types.js").RunEvent> {
+  ): Promise<import("../domain/types.js").RunEvent> {
     const claim = this.#claims.get(delegation.runId);
     if (this.delegations.saveWithEvent) {
       return this.delegations.saveWithEvent(delegation, event, claim);
@@ -805,7 +805,7 @@ export class DelegationService {
 
   async #appendEvent(
     event: Parameters<RunEventStore["append"]>[0],
-  ): Promise<import("./types.js").RunEvent> {
+  ): Promise<import("../domain/types.js").RunEvent> {
     const claim = this.#claims.get(event.runId);
     if (claim && this.events.appendForClaim) {
       return this.events.appendForClaim(event, claim);

@@ -28,6 +28,10 @@ import { loadConfig, type AppConfig } from "./config/index.js";
 import { RedisByClawBeEndpointResolver } from "./business/endpoint-resolver.js";
 import { RedisServiceRegistrar } from "./business/service-registrar.js";
 import { RunIngressService } from "./ingress/run-ingress-service.js";
+import {
+  RedisFirstLlmProvider,
+  type LlmProviderResolution,
+} from "./llm-provider/index.js";
 import { buildHttpApp } from "./server/app.js";
 import { ByFrameworkWorkerRuntime } from "./worker/by-framework-worker.js";
 
@@ -45,13 +49,15 @@ class LazyPiLeaderFactory implements LeaderSessionFactory, AgentCapabilityCompil
   >;
 
   /** 立即启动一次模型运行时初始化，并把成功或异常缓存为稳定结果。 */
-  constructor(config: PiRuntimeConfig) {
-    this.#factory = PiLeaderSessionFactory.create(config).then(
-      (factory) => ({ factory }),
-      (error: unknown) => ({
-        error: error instanceof Error ? error : new Error(String(error)),
-      }),
-    );
+  constructor(config: PiRuntimeConfig | Promise<PiRuntimeConfig>) {
+    this.#factory = Promise.resolve(config)
+      .then(PiLeaderSessionFactory.create)
+      .then(
+        (factory) => ({ factory }),
+        (error: unknown) => ({
+          error: error instanceof Error ? error : new Error(String(error)),
+        }),
+      );
   }
 
   /** 使用已经初始化的 Pi 工厂创建业务 Session 对应的 Pi 会话。 */
@@ -105,19 +111,40 @@ export interface Application {
 // 组装辅助：把 createApplication 里自成一块的配置/选项/健康聚合抽离出来
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 收敛 Pi 模型运行时配置：provider/model/baseUrl 按是否配置条件展开。 */
-function buildPiRuntimeConfig(config: AppConfig, database: PostgresDatabase): PiRuntimeConfig {
-  return {
-    ...(config.piProvider ? { provider: config.piProvider } : {}),
-    ...(config.piModel ? { model: config.piModel } : {}),
-    ...(config.openAiBaseUrl ? { openAiBaseUrl: config.openAiBaseUrl } : {}),
-    ...(config.arkBaseUrl ? { arkBaseUrl: config.arkBaseUrl } : {}),
+/** 收敛 Pi 运行时配置，并注入 Redis 优先的模型解析结果。 */
+function buildPiRuntimeConfig(
+  config: AppConfig,
+  database: PostgresDatabase,
+  llmProvider: Promise<LlmProviderResolution>,
+): Promise<PiRuntimeConfig> {
+  return llmProvider.then((resolved) => ({
+    llmProvider: resolved.config,
     checkpointStore: database.checkpoints,
     instanceId: config.instanceId,
     ...(config.piSessionCacheDirectory
       ? { sessionCacheDirectory: config.piSessionCacheDirectory }
       : {}),
-  };
+  }));
+}
+
+function createLlmProviderResolution(
+  config: AppConfig,
+  redis: ReturnType<typeof createRedis>,
+): Promise<LlmProviderResolution> {
+  const source = new RedisFirstLlmProvider({
+    redis,
+    fallback: {
+      providerId: config.piProvider ?? "volcengine-ark",
+      modelId: config.piModel ?? "deepseek-v4-pro-260425",
+      baseUrl: config.arkBaseUrl ?? "https://ark.cn-beijing.volces.com/api/v3",
+      ...(config.arkApiKey ? { apiKey: config.arkApiKey } : {}),
+    },
+    logger: {
+      info: (message) => console.info(message),
+      warn: (message) => console.warn(message),
+    },
+  });
+  return source.resolve();
 }
 
 /** 组装 RunService 的可观测/队列/凭证运行期参数。 */
@@ -252,15 +279,20 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     return { runService, runIngress };
   }
 
-  function initPi(endpointResolver: RedisByClawBeEndpointResolver) {
+  function initPi(
+    endpointResolver: RedisByClawBeEndpointResolver,
+    redis: ReturnType<typeof createRedis>,
+  ) {
     const delegationService = new DelegationService(
       connectors,
       delegationRepository,
       eventStore,
       config.delegationTimeoutMs,
     );
-    // 后续模型配置改为由业务系统读取；此处仍按 AppConfig 构造 Pi 运行时。
-    const leaders = new LazyPiLeaderFactory(buildPiRuntimeConfig(config, database));
+    const llmProvider = createLlmProviderResolution(config, redis);
+    const leaders = new LazyPiLeaderFactory(
+      buildPiRuntimeConfig(config, database, llmProvider),
+    );
     // 数字员工授权列表由 ByClaw BE 实时提供，外部调用方不再传入 agentList。
     const agentCatalog = new ByClawBeAgentCatalog({
       ...config.byClawBe,
@@ -363,7 +395,7 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     leaders,
     agentCatalog,
     groupChatContexts,
-  } = initPi(endpointResolver);
+  } = initPi(endpointResolver, redis);
 
   // 4) Run 流水线：RunService（快照授权、调度 Leader）+ 入站鉴权与 Run 创建。
   const { runService, runIngress } = initService(endpointResolver);

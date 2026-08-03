@@ -1,7 +1,7 @@
 import type {
   LeaderSession,
   LeaderSessionFactory,
-} from "./leader.js";
+} from "../ports/leader.js";
 
 interface CacheEntry {
   session: Promise<LeaderSession>;

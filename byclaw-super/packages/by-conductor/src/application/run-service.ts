@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import {
   ATTACHMENT_INSPECTION_ERROR_CODES,
   AttachmentInspectionError,
-  type AttachmentResolver,
-} from "./attachment-inspection.js";
+} from "../domain/attachment-inspection.js";
+import type { AttachmentResolver } from "../ports/attachment-resolver.js";
 import { DelegationService } from "./delegation-service.js";
-import type { RunIngressContextV1 } from "./group-chat-context.js";
-import type { LeaderSession, LeaderSessionFactory } from "./leader.js";
+import type { RunIngressContextV1 } from "../domain/group-chat-context.js";
+import type { LeaderSession, LeaderSessionFactory } from "../ports/leader.js";
 import { LeaderSessionCache } from "./leader-session-cache.js";
 import type {
   DelegationRepository,
@@ -19,7 +19,7 @@ import type {
   RunPageCursor,
   RunRepository,
   SessionRepository,
-} from "./repositories.js";
+} from "../ports/repositories.js";
 import type {
   AgentProfile,
   CallerPrincipal,
@@ -32,13 +32,13 @@ import type {
   ThinkingLevel,
   UserInteractionQuestion,
   UserInteractionResponse,
-} from "./types.js";
-import { TERMINAL_RUN_STATUSES } from "./types.js";
+} from "../domain/types.js";
+import { TERMINAL_RUN_STATUSES } from "../domain/types.js";
 import { resolveAttachmentSelection } from "./attachments.js";
 import {
   createSessionContext,
   type SessionContextInput,
-} from "./session-context.js";
+} from "../domain/session-context.js";
 
 export interface CreateSessionInput {
   owner: CallerPrincipal;

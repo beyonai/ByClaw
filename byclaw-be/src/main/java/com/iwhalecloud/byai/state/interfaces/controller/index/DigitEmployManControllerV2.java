@@ -99,6 +99,20 @@ public class DigitEmployManControllerV2 {
     }
 
     /**
+     * 发现数字员工（仅当前账号下可用：我创建的 或 红名单授权给我的）
+     *
+     * @param discoverQo 查询条件
+     * @return ResponseUtil
+     */
+    @PostMapping("/discoverMine")
+    @WithSpan("发现数字员工-我的可用")
+    @AddingSpanAttributes
+    public ResponseUtil discoverMine(@SpanAttribute("discoverQo") @RequestBody DiscoverQo discoverQo) {
+        List<DigitEmployMarketVo> list = digitEmployManServiceV2.discoverMine(discoverQo);
+        return ResponseUtil.successResponse(list);
+    }
+
+    /**
      * 查询热门对象
      * 
      * @param hotQo 查询对象

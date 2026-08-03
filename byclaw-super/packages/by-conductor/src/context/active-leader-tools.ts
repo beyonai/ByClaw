@@ -1,4 +1,4 @@
-import type { AgentProfile } from "../types.js";
+import type { AgentProfile } from "../domain/types.js";
 
 export const DELEGATE_AGENT_TOOL_NAME = "delegateAgent";
 export const ASK_USER_QUESTION_TOOL_NAME = "askUserQuestion";

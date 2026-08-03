@@ -11,6 +11,7 @@ import {
   resetByclawChatContextForTest,
 } from "./chat-context-store.js";
 import type { ActiveSdkRequest } from "./session-context.js";
+import { parseGroupChatContext } from "./group-chat-context.js";
 
 function mockRequest(overrides: Partial<ActiveSdkRequest> = {}): ActiveSdkRequest {
   return {
@@ -145,9 +146,57 @@ describe("prompt-injection-snapshot", () => {
       currentUserText: "处理当前 lane 的独立任务",
     });
 
-    expect(snapshot.appendSystemContext).toContain("ByClaw 聊天室接力上下文需要通过");
+    expect(snapshot.appendSystemContext).toContain("补充性的 ByClaw 聊天室接力上下文");
+    expect(snapshot.appendSystemContext).toContain("不是权威 BE 快照");
     expect(snapshot.appendSystemContext).toContain("默认只返回当前调用工具的 agent/lane 的聊天室记录");
     expect(snapshot.appendSystemContext).not.toContain("本轮任务很可能需要跨 agent 聊天室上下文");
     expect(snapshot.appendSystemContext).not.toContain("优先用过滤参数查询这些 agent/角色相关的历史");
+  });
+
+  it("injects the authoritative BE snapshot directly instead of requiring the local tool", () => {
+    const request = mockRequest({
+      laneMetadata: {
+        agentId: "200",
+        agentName: "Agent A",
+      },
+    });
+    const groupChatContext = parseGroupChatContext({
+      schemaVersion: "byclaw.group-chat-context/v1",
+      conversationKey: "100",
+      snapshot: {
+        beforeMessageId: "20",
+        lastIncludedMessageId: "19",
+        generatedAt: Date.now(),
+      },
+      messages: [
+        {
+          messageId: "19",
+          sequence: 0,
+          createdAt: Date.now(),
+          role: "assistant",
+          speaker: {
+            type: "agent",
+            agentId: "201",
+            agentName: "Agent B",
+          },
+          content: "Agent B 的公开结论",
+        },
+      ],
+      truncation: {
+        truncated: false,
+        omittedMessageCount: 0,
+      },
+    });
+
+    const snapshot = buildPromptInjectionSnapshot({
+      request,
+      currentUserText: "总结刚才的讨论",
+      groupChatContext,
+    });
+
+    expect(snapshot.appendSystemContext).toContain("<byclaw_group_chat_context>");
+    expect(snapshot.appendSystemContext).toContain("Agent B 的公开结论");
+    expect(snapshot.appendSystemContext).toContain("跨 Agent 事实应优先以本 BE 快照为准");
+    expect(snapshot.appendSystemContext).not.toContain("本轮任务很可能需要跨 agent 聊天室上下文");
   });
 });

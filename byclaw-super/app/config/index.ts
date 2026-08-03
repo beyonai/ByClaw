@@ -59,8 +59,8 @@ export interface AppConfig {
   piSessionCacheIdleTtlMs: number;
   piProvider?: string;
   piModel?: string;
-  openAiBaseUrl?: string;
   arkBaseUrl?: string;
+  arkApiKey?: string;
 }
 
 /** by-framework 入站 Worker 的业务层配置。 */
@@ -404,14 +404,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "PI_PROVIDER",
     ),
     piModel: nonEmpty(env.PI_MODEL ?? defaults.pi.model, "PI_MODEL"),
-    openAiBaseUrl: nonEmpty(
-      env.OPENAI_BASE_URL ?? defaults.pi.openAiBaseUrl,
-      "OPENAI_BASE_URL",
-    ),
     arkBaseUrl: nonEmpty(
       env.ARK_BASE_URL ?? defaults.pi.arkBaseUrl,
       "ARK_BASE_URL",
     ),
+    ...(env.ARK_API_KEY?.trim() ? { arkApiKey: env.ARK_API_KEY.trim() } : {}),
   };
 }
 

@@ -3,7 +3,7 @@ import {
   AgentCapabilityCardService,
   AgentCapabilityCompileError,
   type AgentCapabilityDraftGenerator,
-} from "../src/agent-capability.js";
+} from "../src/application/agent-capability.js";
 
 const validDraft = {
   summary: "分析经营数据并定位异常指标",

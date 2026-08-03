@@ -120,7 +120,7 @@ export function buildByclawChatContextToolPrompt(
   });
   if (isEnglish) {
     return [
-      "ByClaw chat handoff context is available through the `byclaw_chat_context` tool.",
+      "Supplemental ByClaw chat handoff context is available through the process-local `byclaw_chat_context` tool; it may be incomplete across workers or restarts and is not an authoritative BE snapshot.",
       "When the user asks you to continue, take over, review a previous agent's work, or refer to another @agent in the same ByClaw chat, call `byclaw_chat_context` first and use its visible messages instead of assuming access to private OpenClaw transcripts.",
       "Normally call it without `current_lane_only=false`; by default it returns only the current calling agent/lane's chat records to avoid repeated or unrelated context.",
       "For parallel @agent requests, keep your answer scoped to your own lane. The tool defaults to the current lane; only set `current_lane_only=false` when the user explicitly asks for cross-agent handoff or review.",
@@ -128,7 +128,7 @@ export function buildByclawChatContextToolPrompt(
     ].filter(Boolean).join("\n");
   }
   return [
-    "ByClaw 聊天室接力上下文需要通过 `byclaw_chat_context` 工具获取。",
+    "可通过进程内 `byclaw_chat_context` 工具获取补充性的 ByClaw 聊天室接力上下文；它可能因跨 Worker 或重启而不完整，不是权威 BE 快照。",
     "当用户要求“继续/承接/接力/复核上条/参考同一聊天室里的其他 @agent 输出”时，先调用 `byclaw_chat_context`，基于工具返回的可见消息承接，不要假设能读取其他 OpenClaw agent 的私有 transcript。",
     "一般情况下调用工具时不要设置 `current_lane_only=false`；默认只返回当前调用工具的 agent/lane 的聊天室记录，避免重复或无关上下文进入会话。",
     "并行 @多个 agent 派活时，只回答自己 lane 的任务；工具默认只返回当前 lane，只有用户明确要求跨 agent 接力/复核时才设置 `current_lane_only=false`。",
