@@ -33,7 +33,8 @@
   }
 }
 
-.scopeRow {
+// 项目选择框聚焦后直接接收搜索输入，不再在下拉菜单内额外放置搜索框。
+.scopeInput {
   width: 100%;
   min-width: 0;
   height: 36px;
@@ -48,29 +49,23 @@
   font-size: 14px;
   font-weight: 400;
   text-align: left;
-  cursor: pointer;
+  cursor: text;
   transition: border-color 0.2s, box-shadow 0.2s;
 
   &:hover {
     border-color: #b8cdfd;
   }
-}
 
-.scopeTitle {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
+  :global {
+    .@{antPrefix}-input {
+      min-width: 0;
+      text-overflow: ellipsis;
+    }
 
-.scopeMeta {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: #7b8798;
-  font-size: 14px;
-  font-weight: 400;
+    .@{antPrefix}-input-suffix {
+      color: #7b8798;
+    }
+  }
 }
 
 .scopeDropdown {
@@ -89,6 +84,22 @@
       width: 100%;
     }
   }
+}
+
+.scopeDropdownMenu {
+  min-width: 240px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.scopeDropdownEmpty {
+  margin: 16px 0;
+}
+
+.scopeDropdownLoading {
+  display: flex;
+  justify-content: center;
+  padding: 10px 0;
 }
 
 .scopeMenuLabel {
@@ -1335,6 +1346,12 @@
   overflow-y: auto;
   padding: 16px 12px 24px;
   background: #fff;
+}
+
+// 渠道搜索与新增按钮放在同一工具栏，滚动列表时始终保持可见。
+.detailChannelPanelSearch {
+  height: 34px;
+  width: 220px;
 }
 
 .detailChannelSourceList {

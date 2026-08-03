@@ -6,8 +6,8 @@
 # 安装官方 CLI
 npx @larksuite/cli@latest install
 
-# 初始化应用配置；会输出授权/配置链接。OpenClaw 未配置时默认使用 force-init
-lark-cli config init --new --force-init
+# 初始化应用配置；会输出授权/配置链接
+lark-cli config init --new
 
 # OpenClaw/Hermes/Lark Channel 环境优先绑定 Agent 已配置的应用
 lark-cli config bind --source openclaw --identity user-default
@@ -67,7 +67,7 @@ lark-cli config bind --source openclaw --identity bot-only
 
 仅在本机非 OpenClaw 场景，或管理员明确要创建飞书应用用于填入 OpenClaw 渠道时，才使用 `config init`：
 
-1. 执行 `lark-cli config init --new --force-init`；该初始化配置动作不属于外部写操作，无需用户确认。
+1. 非 Agent 本机场景执行 `lark-cli config init --new`；OpenClaw/Hermes 环境下如管理员明确要新建独立应用，才执行 `lark-cli config init --new --force-init`。
 2. 立即读取本次输出，只从本次输出提取配置链接，通常是 `https://open.feishu.cn/page/cli?...`。
 3. 执行 `python3 scripts/qrcode_data_uri.py "<url>" --alt "飞书应用配置二维码"`，从 JSON 输出读取 `markdownImage`。
 4. 将 URL 原样嵌入 Markdown 超链接返回给管理员，格式为 `[点击打开飞书应用配置](<url>)`，并在下一行返回 `markdownImage` 二维码；不要修改、拼接或重新编码 URL，禁止输出裸长链接。
@@ -114,7 +114,9 @@ lark-cli auth login --device-code <device_code> --json
 - 不要修改、拼接、编码/解码授权 URL。
 - 不要在同一轮展示 URL 后立刻阻塞轮询 `--device-code`；用户看不到 URL 会导致流程卡住。
 - 不要复用历史 `verification_url` 或 `device_code`；每次重新授权都重新生成。`device_code` 只允许用于本次授权会话的后续确认轮。
-- 用户回复已授权后，由 agent 执行 `lark-cli auth login --device-code <device_code> --json`，成功后再用 `lark-cli auth status --json --verify` 确认登录态。
+- 用户回复已授权后，由 agent 执行 `lark-cli auth login --device-code <device_code> --json`，成功后再用 `lark-cli auth status --json --verify` 确认登录态；用户回复“已授权”本身不代表登录成功。
+- `verification_url`、二维码和 `device_code` 只属于本次授权会话。若 `device_code` 已过期、已使用、无效或登录命令失败，必须丢弃旧授权信息，重新执行 `auth login --scope/--domain --no-wait --json` 生成全新的链接和 `device_code`，禁止重试旧值。
+- 单个业务请求最多执行两轮完整授权流程；第二轮仍失败时停止自动重试，报告最新错误并要求用户重新发起授权。未通过 `auth status --json --verify` 前不得恢复原业务命令。
 - bot 身份缺少 scope 时禁止执行 `auth login`；直接返回错误 envelope 中的 `console_url`，让管理员在飞书开放平台开通权限并发布/生效。
 
 ## 全局 flags

@@ -19,7 +19,7 @@ cli_version: ">=1.0.15"
 - 危险操作必须先向用户确认，用户同意后才加 `--yes` 执行
 - 单次批量操作不超过 30 条记录
 - 所有命令必须**严格遵循**对应产品参考文档里面规定的参数格式（如：如果有参数值，则参数和参数值之间至少用一个空格隔开）
-- OpenClaw agent 调用本 skill 时，一旦出现鉴权异常（`AUTH_TOKEN_EXPIRED`、`USER_TOKEN_ILLEGAL`、401/403），必须立即中断当前业务命令并强制进入设备登录流程：`exec(dws auth login --device)` → `process(读取该次 exec 返回)` → 从本次返回内容中“直接打开以下链接”后的完整 URL 提取 `login_url` → 按 `"[点击登录钉钉](<login_url>)"` 返回客户端；禁止跳过任一步、禁止继续执行业务命令、禁止使用普通 verify 链接或其他来源的链接
+- OpenClaw agent 调用本 skill 时，一旦出现鉴权异常（`AUTH_TOKEN_EXPIRED`、`USER_TOKEN_ILLEGAL`、401/403），必须立即中断当前业务命令并强制进入设备登录流程：清理鉴权缓存 → `exec(dws auth login --device)` → `process(读取该次 exec 返回)` → 从本次返回内容中“直接打开以下链接”后的完整 URL 提取 `login_url` → 向用户展示 `"[点击登录钉钉](<login_url>)"`，但不得结束本次授权流程；必须继续轮询同一个进程，直到设备授权完成、Token 交换成功且进程自然退出后，才可结束授权流程。设备授权流程至少等待 90 秒，建议设置 120 秒超时；禁止跳过任一步、禁止继续执行业务命令、禁止使用普通 verify 链接或其他来源的链接
 
 
 ## 产品总览
@@ -134,19 +134,23 @@ dws schema <path> --jq '.tool.required'      # 只看必填字段
 1. 遇到错误，加 `--verbose` 重试一次
 2. 若 stderr 出现 `RECOVERY_EVENT_ID=<event_id>`，优先按 [recovery-guide.md](./references/recovery-guide.md) 执行 recovery 闭环
 3. 仍然失败，报告完整错误信息给用户，禁止自行尝试替代方案
-4. 认证失败时（如 `AUTH_TOKEN_EXPIRED`、`USER_TOKEN_ILLEGAL`、401/403），必须通过 OpenClaw 的 `exec` 工具执行 `dws auth login --device`，不得改用其他登录方式
-5. `exec` 执行后必须**立即**调用 OpenClaw 的 `process` 工具读取该次执行返回内容，并且只允许从**本次 `process` 返回内容**中提取设备登录链接
+4. 认证失败时（如 `AUTH_TOKEN_EXPIRED`、`USER_TOKEN_ILLEGAL`、401/403），必须通过 OpenClaw 的 `exec` 工具执行 `dws auth login --device`，不得改用其他登录方式；执行前必须先清理鉴权缓存
+5. `exec` 执行后必须调用 OpenClaw 的 `process` 工具读取**同一个进程**的输出，并且只允许从**本次 `process` 返回内容**中提取设备登录链接。首次读取到登录链接后，可以立即向用户展示链接，但这只是进度通知，不代表授权流程结束
 6. `login_url` 必须取控制台输出里“或者直接打开以下链接：”下一行的完整 URL（形如 `https://login.dingtalk.com/oauth2/device/verify.htm?user_code=...`），不得取只有域名路径的普通 `链接:`，不得复用历史链接，不得拼接、猜测或改写授权码
-7. 成功提取到设备登录链接后，必须用 Markdown 超链接返回给客户端，格式必须为：`[点击登录钉钉](<login_url>)`
-8. 如果本次 `dws auth login --device` 未提取到“直接打开”的完整链接，返回明确失败原因并提示用户手工执行 `dws auth login --device`
-9. 各产品高频错误及排查流程见 [error-codes.md](./references/error-codes.md)
+7. 成功提取到设备登录链接后，必须用 Markdown 超链接向客户端展示，格式必须为：`[点击登录钉钉](<login_url>)`；展示后必须继续调用 `process` 轮询，不能因已经拿到链接而返回最终结果或结束进程
+8. 轮询期间必须保持该 `exec` 进程存活，直到出现明确的 Token 交换成功信号并以退出码 0 自然退出。不得只轮询固定一次，也不得在用户说“已授权”后立即停止轮询
+9. 设备授权默认等待 120 秒，最低不得少于 90 秒；若 OpenClaw 的 `exec/process` 支持超时参数，必须显式设置；若进程仍在运行，不得将工具调用超时误判为授权失败，应继续读取同一进程状态
+10. 只有在进程正常退出、Token 已成功写入配置且没有鉴权错误时，才可报告授权成功并恢复原业务命令。若进程超时、被杀死、非零退出或未完成 Token 交换，必须报告授权未完成并要求重新执行设备登录，禁止继续执行业务命令
+11. 如果本次 `dws auth login --device` 未提取到“直接打开”的完整链接，返回明确失败原因并提示用户手工执行 `dws auth login --device`
+12. 各产品高频错误及排查流程见 [error-codes.md](./references/error-codes.md)
 
 ### OpenClaw 鉴权异常强制策略（最高优先级）
 - 触发条件：任一 dws 命令返回 `AUTH_TOKEN_EXPIRED`、`USER_TOKEN_ILLEGAL`、401 或 403
 - 前提步骤：执行设备登录前，必须先通过 OpenClaw 的 `exec` 清理 `$DWS_CONFIG_DIR` 目录缓存（示例：`exec(rm -rf "$DWS_CONFIG_DIR"/* "$DWS_CONFIG_DIR"/.[!.]* "$DWS_CONFIG_DIR"/..?*)`），并确认清理命令执行成功后才可继续后续鉴权流程，避免缓存数据残留导致重新授权失败
-- 强制动作：只能执行 `exec` 调用 `dws auth login --device`，并立即 `process` 读取该次执行结果
+- 强制动作：只能执行 `exec` 调用 `dws auth login --device`，并通过 `process` 持续读取该次执行结果；首次读取到链接后展示给用户，但必须保持进程存活并继续轮询至自然退出
 - 链接提取：`login_url` 只能取本次 `process` 输出中“或者直接打开以下链接：”下一行的完整 URL（必须包含 `user_code` 查询参数）
-- 返回规范：提取成功仅允许返回 `"[点击登录钉钉](<login_url>)"`；提取失败必须返回失败原因与手工执行提示
+- 返回规范：提取成功必须展示 `"[点击登录钉钉](<login_url>)"`，但不得把展示链接作为授权流程的最终返回；只有 Token 交换成功且进程正常退出后才可报告成功。提取失败或授权未完成时，必须返回失败原因与手工执行提示
+- 超时规范：设备登录轮询至少保留 90 秒，默认 120 秒；不得在轮询中途结束 Agent 调用、释放进程或把用户尚未完成扫码视为失败
 - 禁止事项：禁止继续任何业务命令、禁止使用非 `dws auth login --device` 的登录命令、禁止使用非 dws 通道补救、禁止使用普通 `链接:` 或历史输出作为 `login_url`
 
 

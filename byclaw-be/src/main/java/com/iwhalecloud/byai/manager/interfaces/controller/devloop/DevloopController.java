@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
+import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
@@ -63,13 +64,16 @@ public class DevloopController {
     /**
      * 查询项目下的扫描源列表
      *
-     * @param params 包含 projectId
-     * @return 扫描源列表（含启用状态、最近扫描时间等）
+     * @param params 包含 projectId、keyword、pageNum、pageSize
+     * @return 扫描源分页列表（含启用状态、最近扫描时间等）
      */
     @PostMapping("/source/list")
-    public ResponseUtil<List<Map<String, Object>>> listScanSources(@RequestBody Map<String, Object> params) {
-        Long projectId = Long.valueOf(params.get("projectId").toString());
-        return applicationService.listScanSources(projectId);
+    public ResponseUtil<PageInfo<Map<String, Object>>> listScanSources(@RequestBody Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        String keyword = MapParamUtil.getStringValue(params, "keyword");
+        int pageNum = Math.max(1, MapParamUtil.getIntValue(params, "pageNum", 1));
+        int pageSize = Math.max(1, MapParamUtil.getIntValue(params, "pageSize", 30));
+        return applicationService.listScanSources(projectId, keyword, pageNum, pageSize);
     }
 
     /**

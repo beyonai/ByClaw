@@ -1379,6 +1379,8 @@ export default {
   'projectSpace.scene.personal': '个人',
   'projectSpace.selectProject': '请选择项目',
   'projectSpace.unnamedProject': '未命名项目',
+  'projectSpace.projectSearchPlaceholder': '搜索项目',
+  'projectSpace.projectSearchEmpty': '未找到匹配项目',
   'projectSpace.newChatName': '新建会话',
   'projectSpace.searchPlaceholder': '请输入关键字',
   'projectSpace.createProject': '新建项目',
@@ -1877,7 +1879,8 @@ export default {
   'projectSpace.detail.integration.run.env': '集成测试环境',
   'projectSpace.detail.integration.run.envPlaceholder': '选择一个已配置的环境',
   'projectSpace.detail.integration.run.start': '开始执行',
-  'projectSpace.detail.integration.run.hint': '将连上所选环境，依次执行环境准备阶段与该套件的运行命令，完成后解析报告汇总结果。',
+  'projectSpace.detail.integration.run.hint':
+    '将连上所选环境，依次执行环境准备阶段与该套件的运行命令，完成后解析报告汇总结果。',
   'projectSpace.detail.integration.run.noEnv': '尚未配置集成测试环境，请先在「环境信息」新增一个环境。',
   'projectSpace.detail.integration.run.startFailed': '触发执行失败，请稍后重试。',
   'projectSpace.detail.integration.manualRun.title': '手动测试 · {name}',
@@ -1990,6 +1993,8 @@ export default {
   'projectSpace.detail.channel.count': '{count} 个渠道',
   'projectSpace.detail.channel.add': '新增渠道',
   'projectSpace.detail.channel.empty': '暂无渠道，点击右上角新增渠道',
+  'projectSpace.detail.channel.searchPlaceholder': '搜索渠道',
+  'projectSpace.detail.channel.searchEmpty': '未找到匹配渠道',
   'projectSpace.detail.source.empty': '暂无收集源，点击右上角 + 添加',
   // 收集源已统一命名为渠道，弹窗标题与详情操作入口共用这两个文案。
   'projectSpace.detail.source.addTitle': '新增渠道',

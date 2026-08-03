@@ -1387,6 +1387,8 @@ export default {
   'projectSpace.scene.personal': 'Personal',
   'projectSpace.selectProject': 'Select a project',
   'projectSpace.unnamedProject': 'Unnamed project',
+  'projectSpace.projectSearchPlaceholder': 'Search projects',
+  'projectSpace.projectSearchEmpty': 'No matching projects',
   'projectSpace.newChatName': 'New conversation',
   'projectSpace.searchPlaceholder': 'Enter keywords',
   'projectSpace.createProject': 'New project',
@@ -2012,6 +2014,8 @@ export default {
   'projectSpace.detail.channel.count': '{count} channels',
   'projectSpace.detail.channel.add': 'Add channel',
   'projectSpace.detail.channel.empty': 'No channels. Add one from the upper-right corner.',
+  'projectSpace.detail.channel.searchPlaceholder': 'Search channels',
+  'projectSpace.detail.channel.searchEmpty': 'No matching channels',
   'projectSpace.detail.source.empty': 'No collection sources. Click + in the upper-right corner to add one.',
   // Keep the source modal titles aligned with the channel terminology.
   'projectSpace.detail.source.addTitle': 'Add Channel',

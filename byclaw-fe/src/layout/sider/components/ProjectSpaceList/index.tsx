@@ -218,11 +218,20 @@ const ProjectSpaceList: React.FC = () => {
   );
   const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const { clearDetailPanel } = React.useContext(SiderContentContext);
-  const { projects, loading, fetchProjects } = useProjectList();
+  const {
+    projects,
+    loading,
+    keyword: projectScopeSearchKeyword,
+    setKeyword: setProjectScopeSearchKeyword,
+    fetchProjects,
+    hasMore: hasMoreProjects,
+    loadMoreProjects,
+  } = useProjectList();
   // 项目类型配置决定研发、运营能力是否开放，侧栏表单和详情使用同一份结果。
   const { projectTypeOptions, projectTypeLoading, isDevelopProjectEnabled, isOperationProjectEnabled } =
     useProjectTypeConfig();
   const [projectScopeId, setProjectScopeId] = useState<string | undefined>(() => getStoredProjectScopeId());
+  const [projectScopeDropdownOpen, setProjectScopeDropdownOpen] = useState(false);
   const [sessionKeyword, setSessionKeyword] = useState('');
   const [projectDetailMap, setProjectDetailMap] = useState<Record<string, ProjectSpace>>({});
   const [detailLoadingMap, setDetailLoadingMap] = useState<Record<string, boolean>>({});
@@ -464,6 +473,9 @@ const ProjectSpaceList: React.FC = () => {
     }
     // 用户主动切换项目时取消新建项目的等待态，以当前选择为准。
     pendingCreatedProjectIdRef.current = undefined;
+    // 切换完成后清空后端搜索条件，下一次打开从第一页重新加载项目。
+    setProjectScopeSearchKeyword('');
+    setProjectScopeDropdownOpen(false);
     updateProjectScopeId(key);
     const selectedProject = mergedProjects.find((project) => project.projectId === key);
     if (!selectedProject) return;
@@ -491,6 +503,18 @@ const ProjectSpaceList: React.FC = () => {
     // 搜索结果不能当作完整缓存使用，切回项目时恢复默认会话列表。
     void fetchProjectSessions(selectedProject, { force: true, keyword: '' });
   };
+
+  const handleProjectScopeMenuScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      if (!hasMoreProjects || loading) return;
+      const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
+      if (scrollHeight - scrollTop - clientHeight <= 64) {
+        // 下拉项目列表触底才请求下一页，单次固定由后端返回 30 条数据。
+        void loadMoreProjects();
+      }
+    },
+    [hasMoreProjects, loadMoreProjects, loading]
+  );
 
   const handleProjectSessionBound = useCallback(
     (payload: {
@@ -1268,21 +1292,45 @@ const ProjectSpaceList: React.FC = () => {
           <div className={styles.header}>
             <div className={styles.scopeActionRow}>
               <Dropdown
-                trigger={['click']}
+                // 展开状态仅由项目输入框控制，避免 Dropdown 点击触发与输入框聚焦同时切换导致闪退。
+                trigger={[]}
+                open={projectScopeDropdownOpen}
                 overlayClassName={styles.scopeDropdown}
+                onOpenChange={(open) => {
+                  setProjectScopeDropdownOpen(open);
+                  if (!open) setProjectScopeSearchKeyword('');
+                }}
                 menu={{
                   items: projectScopeMenuItems,
                   selectedKeys: projectScopeId ? [projectScopeId] : [],
                   onClick: handleSelectProjectScope,
                 }}
+                dropdownRender={(menu) => (
+                  <div className={styles.scopeDropdownMenu} onScroll={handleProjectScopeMenuScroll}>
+                    {projectScopeMenuItems.length ? (
+                      menu
+                    ) : !loading ? (
+                      <Empty
+                        className={styles.scopeDropdownEmpty}
+                        image={Empty.PRESENTED_IMAGE_SIMPLE}
+                        description={t('projectSearchEmpty')}
+                      />
+                    ) : null}
+                    {loading && <Spin className={styles.scopeDropdownLoading} size="small" />}
+                  </div>
+                )}
               >
-                <button type="button" className={styles.scopeRow}>
-                  <span className={styles.scopeTitle}>{scopeTitle}</span>
-                  {/* 项目下拉只保留切换箭头，不展示会话数量统计。 */}
-                  <span className={styles.scopeMeta}>
-                    <DownOutlined />
-                  </span>
-                </button>
+                {/* 项目选择框同时作为后端搜索入口，聚焦后直接输入关键词。 */}
+                <Input
+                  allowClear={projectScopeDropdownOpen}
+                  className={styles.scopeInput}
+                  placeholder={projectScopeDropdownOpen ? t('projectSearchPlaceholder') : undefined}
+                  suffix={<DownOutlined />}
+                  value={projectScopeDropdownOpen ? projectScopeSearchKeyword : scopeTitle}
+                  onFocus={() => setProjectScopeDropdownOpen(true)}
+                  onClick={() => setProjectScopeDropdownOpen(true)}
+                  onChange={(event) => setProjectScopeSearchKeyword(event.target.value)}
+                />
               </Dropdown>
               <Tooltip title={t('createProject')} placement="top">
                 {/* 右侧仅保留新建项目入口，项目详情由下方快捷入口承载。 */}

@@ -192,4 +192,3 @@ def _run_async_in_thread(coro: Any) -> Any:
 def stdout_json(data: Any) -> None:
     """向 stdout 输出 JSON 并 flush。"""
     print(json.dumps(data, ensure_ascii=False), flush=True)
-

@@ -1,6 +1,6 @@
 # Typed Error Conventions
 
-byCLI 用 5 类 typed error 让 agent 能从 exit code 直接分辨"参数错 / 没数据 / 接口挂 / 要登录 / 超时"。silent `return []` / silent `return [{sentinel}]` / scalar sentinel (`'-'`) / `Math.max/min` silent clamp / `CliError('HTTP_ERROR')` 这些"绿但错"的写法必须在 adapter review 中拦截；新违例必须立刻收掉。
+byCLI 用 5 类 typed error 让 agent 能从 exit code 直接分辨"参数错 / 没数据 / 接口挂 / 要登录 / 超时"。silent `return []` / silent `return [{sentinel}]` / scalar sentinel (`'-'`) / `Math.max/min` silent clamp / `CliError('HTTP_ERROR')` 这些"绿但错"的写法都被 audit gate 抓得越来越紧（[`scripts/check-typed-error-lint.mjs`](../../../scripts/check-typed-error-lint.mjs) 的 baseline JSON 只能减不能加，新违例必须立刻收掉）。
 
 每条 rule 都挂了真实 anti-pattern 反例（PR #1329 三轮迭代是主要素材库）。
 
@@ -16,7 +16,7 @@ byCLI 用 5 类 typed error 让 agent 能从 exit code 直接分辨"参数错 / 
 | 需要登录（cookie 缺 / 401 / 302 → /login / "请登录" 页） | `AuthRequiredError(domain, message?)` | `AUTH_REQUIRED` | 77 |
 | 等响应超时（CDP / page.evaluate / 流式回复） | `TimeoutError(label, seconds)` | `TIMEOUT` | 75 |
 
-类签名以项目当前 typed-error 实现为准。
+类签名定义见 [`src/errors.ts`](../../../src/errors.ts)。
 
 **禁止泛用 `CliError('HTTP_ERROR' / 'NO_DATA' / 'USER_NOT_FOUND' / 'FETCH_ERROR' / 'INVALID_ARGUMENT' / 'API_ERROR' / 'THREAD_NOT_FOUND')`** —— 这些都对应到 5 类里其中一个，没有不能映射的场景（PR #1329 R3 commit `c40daf7` 把 7 处 `CliError(...)` 全部替换成了上面 5 类）。`CliError` 基类只用作子类的实现细节，adapter 代码不应直接 new。
 
@@ -34,7 +34,7 @@ const contentLimit = Math.max(50, Number(args.contentLimit) || 400);
 const page = Math.max(1, Number(args.page) || 1);
 ```
 
-**修法**（站点级 `utils.js` 的 `normalizePositiveInteger` / `normalizeLimit`）：
+**修法**（[`clis/1point3acres/utils.js`](../../../clis/1point3acres/utils.js) 的 `normalizePositiveInteger` / `normalizeLimit`）：
 
 ```js
 import { ArgumentError } from '@sovovs/bycli/errors';
@@ -56,7 +56,7 @@ export function normalizeLimit(value, defaultValue, maxValue, label = 'limit') {
 }
 ```
 
-**用法**（adapter 的 `args` 校验段）：
+**用法**（[`clis/1point3acres/thread.js#L37-L39`](../../../clis/1point3acres/thread.js)）：
 
 ```js
 const page = normalizePositiveInteger(args.page, 1, 'page');
@@ -64,7 +64,7 @@ const limit = normalizePositiveInteger(args.limit, 10, 'limit');
 const contentLimit = normalizePositiveInteger(args.contentLimit, 400, 'contentLimit', { min: 50 });
 ```
 
-**注意**：自动检查可能只覆盖部分 `Math.min(...limit...)` 形态。`Math.max(1, ...)` 单边 floor 和非-`limit` 命名（`page` / `timeout` / `contentLimit`）容易漏检，必须靠**人审 checklist** 兜住：**任何外部参数（args.\* / kwargs.\*）做 Math.max / Math.min / `|| N` 当兜底都是 silent-clamp**。
+**注意**：当前 silent-clamp 检测的 regex（在 [`src/convention-audit.ts`](../../../src/convention-audit.ts) 的 `auditTypedErrorPatterns` 节，由 [`scripts/check-typed-error-lint.mjs`](../../../scripts/check-typed-error-lint.mjs) 调）只抓 `Math.min(...limit...)`。`Math.max(1, ...)` 单边 floor 和非-`limit` 命名（`page` / `timeout` / `contentLimit`）都不在 regex 里，所以 #1329 R3 时被 F-P-0 review 而不是 gate 挡下来 → 必须靠**人审 checklist** 兜：**任何外部参数（args.\* / kwargs.\*）做 Math.max / Math.min / `|| N` 当兜底都是 silent-clamp**。
 
 ### 何时抽 site-level helper
 
@@ -176,7 +176,7 @@ if (items.length === 0) return [];
 if (items.length === 0) throw new EmptyResultError('site command', `optional context`);
 ```
 
-`EmptyResultError` 的 hint 默认是 `'The page structure may have changed, or you may need to log in'`，自己传 message 比默认更有用：写**为什么空了**（"No results for '<query>'" / "uid=<X> 在该论坛没有发过帖子"）。
+`EmptyResultError` 的 hint 默认是 `'The page structure may have changed, or you may need to log in'`（见 [`src/errors.ts#L134`](../../../src/errors.ts)），自己传 message 比默认更有用：写**为什么空了**（"No results for '<query>'" / "uid=<X> 在该论坛没有发过帖子"）。
 
 ---
 
@@ -220,7 +220,7 @@ if (!/id="postlist"/.test(html)) throw new EmptyResultError('1point3acres thread
 
 ## 7. 已经 grandfathered 的旧 adapter
 
-repo 里可能仍有相当数量的 `CliError('HTTP_ERROR')` / `Math.max(1, Math.min(...))` 式旧写法。**新写 adapter 必须按本文档**；旧 adapter 不强制立刻迁移，但碰到时应顺手收敛，避免复制旧模式。
+repo 里仍有相当数量的 `CliError('HTTP_ERROR')` / `Math.max(1, Math.min(...))` 式的旧写法，被 [`scripts/typed-error-lint-baseline.json`](../../../scripts/typed-error-lint-baseline.json) 圈住（baseline 只允许减、不允许加）。**新写 adapter 必须按本文档**；旧 adapter 不强制立刻迁移，但碰到时顺手收一条是欢迎的——清掉一条 baseline 自然下降一条，gate 不会卡。
 
 ---
 

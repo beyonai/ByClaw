@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 扫描日志领域服务 管理扫描执行记录和扫描条目，提供去重判断
@@ -118,7 +119,8 @@ public class ScanLogService {
         wrapper.in(ScanRequireItem::getSourceId, sourceIds).eq(ScanRequireItem::getAction, "created");
         String normalizedTitle = StringUtils.trimToNull(title);
         if (normalizedTitle != null) {
-            wrapper.like(ScanRequireItem::getTitle, normalizedTitle);
+            // PostgreSQL 的 LIKE 区分大小写，需求标题查询统一小写后保持搜索口径一致。
+            wrapper.apply("LOWER(title) LIKE {0}", "%" + normalizedTitle.toLowerCase(Locale.ROOT) + "%");
         }
         wrapper.orderByDesc(ScanRequireItem::getCreateTime);
         return scanRequireItemMapper.selectList(wrapper);

@@ -32,6 +32,12 @@ public class UserPrivateParam {
 
     private String status;
 
+    /** 参数来源：USER 用户维护，CONNECTOR 连接器服务托管 */
+    private String paramSource;
+
+    /** 来源业务标识；连接器托管参数保存 connectorCode */
+    private String sourceRef;
+
     private Long createBy;
 
     private Date createTime;

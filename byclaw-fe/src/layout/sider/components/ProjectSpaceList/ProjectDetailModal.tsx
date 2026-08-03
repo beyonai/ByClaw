@@ -225,6 +225,41 @@ type TaskFetchOptions = Partial<TaskQueryState> & {
   append?: boolean;
 };
 
+type ChannelSourcePageState = {
+  pageNum: number;
+  total: number;
+};
+
+type ChannelSearchInputProps = {
+  keyword: string;
+  placeholder: string;
+  onKeywordChange: (value: string) => void;
+};
+
+const ChannelSearchInput: React.FC<ChannelSearchInputProps> = ({ keyword, placeholder, onKeywordChange }) => {
+  const [inputValue, setInputValue] = useState(keyword);
+
+  useEffect(() => {
+    setInputValue(keyword);
+  }, [keyword]);
+
+  return (
+    <Input
+      allowClear
+      className={styles.detailChannelPanelSearch}
+      suffix={<SearchOutlined />}
+      placeholder={placeholder}
+      value={inputValue}
+      onChange={(event) => {
+        const value = event.target.value;
+        // 输入框在右侧面板内部维护状态，避免每次按键都重新设置整块详情面板而中断中文输入法。
+        setInputValue(value);
+        onKeywordChange(value);
+      }}
+    />
+  );
+};
+
 // AI 评分明细：与后端 score_detail JSON 字段、满分口径对齐
 type ScoreDetail = {
   businessValue?: number;
@@ -482,6 +517,8 @@ type Props = {
 const REQUIREMENT_PAGE_SIZE = 20;
 // 任务列表固定页大小，取消分页器后按此值触底追加。
 const TASK_PAGE_SIZE = 20;
+// 渠道配置大面板按后端分页加载，单页与项目下拉统一为 30 条。
+const CHANNEL_SOURCE_PAGE_SIZE = 30;
 // 后端尚未限制手工需求的两个长文本字段，前端统一限制为 1000 字，避免无界内容写入任务提示词。
 const MANUAL_REQUIREMENT_CONTENT_MAX_LENGTH = 1000;
 
@@ -771,6 +808,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [operationAccountPanelOpen, setOperationAccountPanelOpen] = useState(false);
   // 运营任务使用独立表单弹窗，和账号大面板不能同时打开。
   const [operationTaskModalOpen, setOperationTaskModalOpen] = useState(false);
+  const [channelSearchKeyword, setChannelSearchKeyword] = useState('');
+  const [channelSources, setChannelSources] = useState<ScanSourceItem[]>([]);
+  const [channelSourcesLoading, setChannelSourcesLoading] = useState(false);
+  const [channelSourcePage, setChannelSourcePage] = useState<ChannelSourcePageState>({ pageNum: 0, total: 0 });
   const [taskKanbanOpen, setTaskKanbanOpen] = useState(false);
   // 研发任务通过更多操作打开环节详情抽屉，不必先经整体视图。
   const [detailTask, setDetailTask] = useState<any>(null);
@@ -796,6 +837,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const groupSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requirementSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const taskSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const channelSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const channelSourceRequestIdRef = useRef(0);
   const dwsAuthTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dwsAuthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startingRequirementIdsRef = useRef<Set<number>>(new Set());
@@ -1017,7 +1060,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
     if (!projectId) return [];
     setSourcesLoading(true);
     try {
-      const sourceList = (await listScanSources(projectId)) || [];
+      const sourcePage = await listScanSources({ projectId, pageNum: 1, pageSize: CHANNEL_SOURCE_PAGE_SIZE });
+      const sourceList = getArrayData(sourcePage);
       setSources(sourceList);
       void fetchSourceDwsStatuses(sourceList as ScanSourceItem[]);
       return sourceList as ScanSourceItem[];
@@ -1025,6 +1069,45 @@ const ProjectDetailPanel: React.FC<Props> = ({
       setSourcesLoading(false);
     }
   }, [projectId, fetchSourceDwsStatuses]);
+
+  const fetchChannelSources = useCallback(
+    async (options: { append?: boolean; keyword?: string; pageNum?: number } = {}) => {
+      if (!projectId) return [];
+      const { append = false, keyword = channelSearchKeyword, pageNum = 1 } = options;
+      const requestId = ++channelSourceRequestIdRef.current;
+      setChannelSourcesLoading(true);
+      try {
+        // 渠道名称搜索和分页均由后端执行，前端只合并已经加载的页数据。
+        const sourcePage = await listScanSources({
+          projectId,
+          keyword: keyword.trim() || undefined,
+          pageNum,
+          pageSize: CHANNEL_SOURCE_PAGE_SIZE,
+        });
+        const nextSources = getArrayData(sourcePage) as ScanSourceItem[];
+        if (requestId !== channelSourceRequestIdRef.current) return nextSources;
+        let mergedSources = nextSources;
+        setChannelSources((previousSources) => {
+          if (!append) return nextSources;
+          const sourceMap = new Map(previousSources.map((source) => [source.sourceId, source]));
+          nextSources.forEach((source) => sourceMap.set(source.sourceId, source));
+          mergedSources = Array.from(sourceMap.values());
+          return mergedSources;
+        });
+        setChannelSourcePage({
+          pageNum: Number(sourcePage?.pageNum ?? pageNum),
+          total: Number(sourcePage?.total ?? nextSources.length),
+        });
+        void fetchSourceDwsStatuses(mergedSources);
+        return mergedSources;
+      } finally {
+        if (requestId === channelSourceRequestIdRef.current) {
+          setChannelSourcesLoading(false);
+        }
+      }
+    },
+    [channelSearchKeyword, fetchSourceDwsStatuses, projectId]
+  );
 
   // 当前登录用户是否为该源创建者:控制授权/编辑/删除入口。
   const isSourceCreator = useCallback(
@@ -1172,6 +1255,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     () => () => {
       if (taskSearchTimerRef.current) clearTimeout(taskSearchTimerRef.current);
       if (requirementSearchTimerRef.current) clearTimeout(requirementSearchTimerRef.current);
+      if (channelSearchTimerRef.current) clearTimeout(channelSearchTimerRef.current);
     },
     []
   );
@@ -2481,7 +2565,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
       setSourceModalOpen(false);
       setEditingSource(null);
       const sourceList = await fetchSources();
-      await fetchRequirements(sourceList, requirementSearchKeyword.trim());
+      await Promise.all([
+        fetchRequirements(sourceList, requirementSearchKeyword.trim()),
+        channelPanelOpen ? fetchChannelSources({ keyword: channelSearchKeyword, pageNum: 1 }) : Promise.resolve(),
+      ]);
     } catch {
       message.error(t(editingSource ? 'source.updateFailed' : 'source.addFailed'));
     } finally {
@@ -2595,7 +2682,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
         await deleteScanSource(source.sourceId);
         message.success(t('source.deleteSuccess'));
         const sourceList = await fetchSources();
-        await fetchRequirements(sourceList, requirementSearchKeyword.trim());
+        await Promise.all([
+          fetchRequirements(sourceList, requirementSearchKeyword.trim()),
+          channelPanelOpen ? fetchChannelSources({ keyword: channelSearchKeyword, pageNum: 1 }) : Promise.resolve(),
+        ]);
       },
     });
   };
@@ -2606,7 +2696,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
       const res = await triggerScan(sourceId);
       message.success(t('source.scanSuccess', { count: res?.createdCount || 0 }));
       const sourceList = await fetchSources();
-      await fetchRequirements(sourceList, requirementSearchKeyword.trim());
+      await Promise.all([
+        fetchRequirements(sourceList, requirementSearchKeyword.trim()),
+        channelPanelOpen ? fetchChannelSources({ keyword: channelSearchKeyword, pageNum: 1 }) : Promise.resolve(),
+      ]);
     } catch {
       message.error(t('source.scanFailed'));
     } finally {
@@ -2618,6 +2711,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
     await toggleScanSource(sourceId, checked ? '1' : '0');
     message.success(t(checked ? 'source.enabled' : 'source.paused'));
     await fetchSources();
+    if (channelPanelOpen) {
+      await fetchChannelSources({ keyword: channelSearchKeyword, pageNum: 1 });
+    }
   };
 
   const handleViewLogs = async (source: ScanSourceItem) => {
@@ -2816,11 +2912,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
     );
   };
 
-  const renderSourceList = (emptyText = t('source.empty'), options: { panel?: boolean } = {}) => (
-    <Spin spinning={sourcesLoading && !sources.length}>
-      {sources.length ? (
+  const renderSourceList = (
+    emptyText = t('source.empty'),
+    options: { panel?: boolean; loading?: boolean } = {},
+    sourceList: ScanSourceItem[] = sources
+  ) => (
+    <Spin spinning={(options.loading ?? sourcesLoading) && !sourceList.length}>
+      {sourceList.length ? (
         <div className={options.panel ? styles.detailChannelSourceList : styles.detailSourceList}>
-          {sources.map((source) => (
+          {sourceList.map((source) => (
             <div key={source.sourceId} className={styles.detailSourceCard}>
               <div className={styles.detailSourceHeader}>
                 <span className={styles.detailSourceIcon}>{getSourceIcon(source.sourceType)}</span>
@@ -2914,7 +3014,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
   );
 
   const handleCloseChannelPanel = () => {
+    if (channelSearchTimerRef.current) {
+      clearTimeout(channelSearchTimerRef.current);
+      channelSearchTimerRef.current = null;
+    }
+    // 关闭面板后忽略尚未返回的查询，避免旧搜索结果重新写回下一次打开的面板。
+    channelSourceRequestIdRef.current += 1;
     setChannelPanelOpen(false);
+    setChannelSearchKeyword('');
+    setChannelSourcesLoading(false);
     clearDetailPanel?.();
   };
 
@@ -2923,9 +3031,41 @@ const ProjectDetailPanel: React.FC<Props> = ({
       handleCloseChannelPanel();
       return;
     }
+    // 每次打开渠道配置都从后端重新查询第一页，避免沿用上次输入的搜索条件。
+    setChannelSearchKeyword('');
     setChannelPanelOpen(true);
-    void fetchSources();
+    void fetchChannelSources({ keyword: '', pageNum: 1 });
   };
+
+  const handleChannelSearchChange = useCallback(
+    (value: string) => {
+      if (channelSearchTimerRef.current) clearTimeout(channelSearchTimerRef.current);
+      // 输入停顿后再向后端搜索，避免每输入一个字符都请求渠道分页接口。
+      channelSearchTimerRef.current = setTimeout(() => {
+        setChannelSearchKeyword(value);
+        void fetchChannelSources({ keyword: value, pageNum: 1 });
+        channelSearchTimerRef.current = null;
+      }, 300);
+    },
+    [fetchChannelSources]
+  );
+
+  const handleChannelPanelScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      const loadedCount = channelSources.length;
+      if (channelSourcesLoading || loadedCount >= channelSourcePage.total) return;
+      const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
+      if (scrollHeight - scrollTop - clientHeight <= 80) {
+        // 渠道列表独立触底分页，继续使用当前搜索关键字查询下一页。
+        void fetchChannelSources({
+          append: true,
+          keyword: channelSearchKeyword,
+          pageNum: channelSourcePage.pageNum + 1,
+        });
+      }
+    },
+    [channelSearchKeyword, channelSourcePage, channelSources.length, channelSourcesLoading, fetchChannelSources]
+  );
 
   const handleTabChange = (nextTab: string) => {
     if (nextTab !== 'requirements' && channelPanelOpen) {
@@ -2944,9 +3084,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
       <div className={styles.detailChannelPanelHeader}>
         <div className={styles.detailChannelPanelTitle}>
           <h3>{t('channel.title')}</h3>
-          <p>{t('channel.count', { count: sources.length })}</p>
+          <p>{t('channel.count', { count: channelSourcePage.total })}</p>
         </div>
         <div className={styles.detailChannelPanelActions}>
+          <ChannelSearchInput
+            keyword={channelSearchKeyword}
+            placeholder={t('channel.searchPlaceholder')}
+            onKeywordChange={handleChannelSearchChange}
+          />
           <Tooltip title={t('channel.add')} placement="top">
             <Button type="primary" icon={<PlusOutlined />} onClick={() => openAddSourceModal()}>
               {t('channel.add')}
@@ -2957,7 +3102,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
           </Tooltip>
         </div>
       </div>
-      <div className={styles.detailChannelPanelBody}>{renderSourceList(t('channel.empty'), { panel: true })}</div>
+      <div className={styles.detailChannelPanelBody} onScroll={handleChannelPanelScroll}>
+        {renderSourceList(
+          channelSearchKeyword.trim() ? t('channel.searchEmpty') : t('channel.empty'),
+          { panel: true, loading: channelSourcesLoading },
+          channelSources
+        )}
+      </div>
     </div>
   );
 
@@ -2970,6 +3121,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setDetailPanel?.(renderChannelPanel(), overlayDetailPanelOptions);
   }, [
     channelPanelOpen,
+    channelSearchKeyword,
+    channelSourcePage.total,
+    channelSources,
+    channelSourcesLoading,
     dwsAuthed,
     dwsExpired,
     dwsExpiresAt,
@@ -2977,8 +3132,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     repos,
     scanningId,
     setDetailPanel,
-    sources,
-    sourcesLoading,
+    sourceDwsStatusMap,
     t,
   ]);
 

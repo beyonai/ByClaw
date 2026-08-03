@@ -9,8 +9,6 @@ metadata:
 
 # 通讯录成员查询技能
 
-开始任何任务前，必须先阅读上级共享政策 [operating-policy.md](../references/operating-policy.md)；共享政策优先于本文件中的示例和局部规则。
-
 > `wecom-cli` 是企业微信提供的命令行程序，所有操作通过执行 `wecom-cli` 命令完成。
 
 获取当前用户可见范围内的通讯录成员，并在本地按姓名/别名进行筛选匹配。

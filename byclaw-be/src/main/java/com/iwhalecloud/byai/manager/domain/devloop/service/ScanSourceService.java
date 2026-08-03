@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanSource;
 import com.iwhalecloud.byai.manager.mapper.devloop.ScanSourceMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -10,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 扫描源领域服务
@@ -64,6 +66,25 @@ public class ScanSourceService {
                .eq(ScanSource::getDeleteFlag, "0")
                .orderByDesc(ScanSource::getCreateTime);
         return scanSourceMapper.selectList(wrapper);
+    }
+
+    /** 分页查询项目渠道，搜索只匹配渠道名称并排除手工需求使用的内部来源。 */
+    public Page<ScanSource> listByProjectIdPage(Long projectId, String keyword, String excludedSourceType, int pageNum,
+        int pageSize) {
+        LambdaQueryWrapper<ScanSource> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ScanSource::getProjectId, projectId).eq(ScanSource::getDeleteFlag, "0");
+        if (excludedSourceType != null) {
+            // 保留历史空类型渠道，仅排除手工需求创建的明确内部来源。
+            wrapper.and(query -> query.isNull(ScanSource::getSourceType).or()
+                .ne(ScanSource::getSourceType, excludedSourceType));
+        }
+        String normalizedKeyword = org.apache.commons.lang3.StringUtils.trimToNull(keyword);
+        if (normalizedKeyword != null) {
+            // PostgreSQL 的 LIKE 区分大小写，渠道名称统一小写后支持大小写混输搜索。
+            wrapper.apply("LOWER(source_name) LIKE {0}", "%" + normalizedKeyword.toLowerCase(Locale.ROOT) + "%");
+        }
+        wrapper.orderByDesc(ScanSource::getCreateTime);
+        return scanSourceMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
     }
 
     /** 查询所有启用且未删除的扫描源，供定时任务使用 */

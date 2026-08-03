@@ -59,6 +59,8 @@ import { updateMessageStructById } from '@/service/message';
 
 import { AskUserQuestions, buildQueryQuestion, type IMessageListItemContent } from './index';
 
+jest.setTimeout(15000);
+
 const updateMessageStructByIdMock = updateMessageStructById as jest.MockedFunction<typeof updateMessageStructById>;
 
 const questions = [
@@ -350,7 +352,7 @@ describe('AskUserQuestions', () => {
     expect(onUpdate).toHaveBeenLastCalledWith(
       expect.objectContaining({ substance: expect.objectContaining({ formStatus: IFormStatus.FINISH }) })
     );
-  });
+  }, 15000);
 
   // 全量测试以双 worker 运行时，Ant Design 状态更新可能超过 Jest 默认的 5 秒超时。
   it('does not finish or emit when persistence fails', async () => {

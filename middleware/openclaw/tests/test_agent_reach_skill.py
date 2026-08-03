@@ -183,62 +183,60 @@ class AgentReachSkillContractTest(unittest.TestCase):
         self.assertIn("default_prompt:", metadata)
         self.assertIn("$agent-reach", metadata)
 
-    def test_bycli_skill_is_the_single_entry_for_web_and_collection_tasks(self):
+    def test_bycli_skill_defers_public_internet_routing_to_agent_reach(self):
         skill = BYCLI_SKILL.read_text(encoding="utf-8")
 
-        self.assertIn("本 skill 是唯一入口", skill)
-        self.assertIn("网页读取、搜索、采集、抓取、网站操作和打开 URL", skill)
-        self.assertIn("入库 / 知识整理 / 跳过", skill)
-        self.assertIn("bycli list -f json", skill)
-        self.assertIn("connector bridge", skill)
-        self.assertIn("使用 dws bridge", skill)
+        self.assertIn("## Agent Reach 边界", skill)
+        self.assertIn("公共互联网调研、搜索或读取", skill)
+        self.assertIn("Agent Reach 选择 byCLI", skill)
+        self.assertIn("被动诊断不得启动 Chrome", skill)
 
-    def test_bycli_is_presented_as_browser_driver_and_collection_orchestrator(self):
+    def test_bycli_is_presented_as_an_executor_not_a_collection_orchestrator(self):
         skill = BYCLI_SKILL.read_text(encoding="utf-8")
         metadata = (BYCLI_SKILL.parent / "agents" / "openai.yaml").read_text(encoding="utf-8")
         frontmatter = skill.split("---", 2)[1]
 
-        self.assertIn("web search, scraping, crawling, structured data collection", frontmatter)
-        self.assertIn("## 采集成功后的收尾", skill)
-        self.assertIn("### 自动落盘", skill)
-        self.assertIn("所有采集原始产物放入会话专属目录", skill)
-        self.assertIn('display_name: "byCLI 浏览器驱动与采集"', metadata)
-        self.assertIn('short_description: "驱动浏览器采集数据、修复失败的 adapter、编写新 adapter"', metadata)
-        self.assertIn('default_prompt: "用 bycli 帮我采集这个网站的数据"', metadata)
+        self.assertNotIn("Do not use for public internet research", frontmatter)
+        self.assertIn("task has already been routed to byCLI", frontmatter)
+        self.assertIn("generic public webpage", skill)
+        self.assertIn('display_name: "byCLI 网站执行器"', metadata)
+        self.assertIn('short_description: "执行已路由的网站与浏览器任务，并发现、修复或编写 Adapter"', metadata)
+        self.assertIn('default_prompt: "使用 $bycli 执行这个已路由的网站任务。"', metadata)
 
-    def test_bycli_documents_collection_retention_and_browser_cleanup(self):
+    def test_bycli_cleanup_is_limited_to_resources_owned_by_the_current_task(self):
         skill = BYCLI_SKILL.read_text(encoding="utf-8")
 
         for phrase in (
-            "清理遵循“只清理当前任务创建或独占拥有的资源”原则",
-            "当前任务创建或独占拥有的 TAB",
-            "bycli browser <session> close",
-            "bycli daemon stop",
-            "openclaw browser --browser-profile openclaw stop",
-            "入库成功且用户未要求保留时可由 knowledge-ingest 清理",
-            "session 结束不主动清理",
+            "仅清理当前任务创建或独占拥有的资源",
+            "任务开始前已经运行",
+            "不得停止预先存在或共享的 daemon 与 Chromium",
+            "adapter 自行管理其 TAB",
+            "接管用户已打开的 TAB",
         ):
             self.assertIn(phrase, skill)
 
-    def test_bycli_recovers_a_stopped_browser_with_start_chrome_script(self):
+    def test_bycli_uses_one_profile_explicit_openclaw_browser_command(self):
         skill = BYCLI_SKILL.read_text(encoding="utf-8")
-        cold_start = skill.split("### 1. 冷启动和桥接检查", 1)[1].split("### 2. TAB 分流", 1)[0]
 
-        expected_steps = (
-            "openclaw browser --browser-profile openclaw status",
-            "status 明确显示浏览器未运行",
-            "if test -x /usr/local/bin/start-chrome.sh; then",
-            "/usr/local/bin/start-chrome.sh",
-            "openclaw browser --browser-profile openclaw start",
-            "bycli doctor",
-            "bycli daemon status",
-        )
-        for step in expected_steps:
-            self.assertIn(step, cold_start)
-        positions = [cold_start.index(step) for step in expected_steps]
-        self.assertEqual(positions, sorted(positions))
-        self.assertIn("否则执行 `openclaw browser --browser-profile openclaw start`", cold_start)
-        self.assertIn("openclaw browser --browser-profile openclaw stop", skill)
+        self.assertNotIn("`openclaw browser start`", skill)
+        self.assertNotIn("`openclaw browser stop`", skill)
+        self.assertIn("`openclaw browser --browser-profile openclaw start`", skill)
+        self.assertIn("`openclaw browser --browser-profile openclaw stop`", skill)
+
+    def test_bycli_groups_priority_and_stop_rules_without_relaxing_ownership(self):
+        skill = BYCLI_SKILL.read_text(encoding="utf-8")
+
+        for phrase in (
+            "## 规则优先级",
+            "用户明确的当前操作范围和安全边界",
+            "STOP / 认证 / 浏览器生命周期规则",
+            "## 认证、人工验证与 STOP",
+            "不得调用 `state`、`tab list`、`get url`",
+            "不得跳转、bind、重试、AutoFix 或重跑 trace",
+            "只使用已经返回的结果",
+            "不得执行 `pkill`、kill-all 或停止共享进程",
+        ):
+            self.assertIn(phrase, skill)
 
     def test_bycli_evals_cover_status_discovery_and_safe_login_boundaries(self):
         evals = json.loads((BYCLI_SKILL.parent / "evals" / "evals.json").read_text(encoding="utf-8"))
@@ -249,9 +247,13 @@ class AgentReachSkillContractTest(unittest.TestCase):
         self.assertIn("bycli list -f json", expected[5])
         self.assertIn("bycli web read --url", expected[5])
         self.assertIn("不存在 web/read", expected[5])
-        self.assertIn("openclaw browser --browser-profile openclaw status", expected[5])
-        self.assertIn("/usr/local/bin/start-chrome.sh", expected[5])
+        self.assertIn("openclaw browser --browser-profile openclaw start", expected[5])
         self.assertIn("不得代填或提交凭据", expected[8])
+        self.assertIn("可点击链接", expected[12])
+        self.assertIn("不得调用 get url、state、tab list", expected[13])
+        self.assertIn("不需要", expected[14])
+        self.assertIn("/usr/local/bin/start-chrome.sh 存在且可执行", expected[15])
+        self.assertIn("openclaw browser --browser-profile openclaw start", expected[15])
 
 
 if __name__ == "__main__":
