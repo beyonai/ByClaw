@@ -199,3 +199,86 @@ WHERE g.grant_obj_id = 14
         AND existing.grant_to_obj_id = g.grant_to_obj_id
         AND existing.grant_to_obj_type = g.grant_to_obj_type
   );
+
+-- 注册 agent-reach 为可被资源授权接口查询的内置 Skill。
+-- 资源 ID 26 已在目标环境验证未占用；各步骤均带存在性判断，支持重复执行。
+INSERT INTO byai.ss_resource (
+    resource_id, system_code, resource_biz_type, resource_type, resource_name,
+    resource_desc, resource_version_id, host_type, catalog_id, man_org_id,
+    man_user_id, create_by, create_time, update_by, update_time, com_acct_id,
+    resource_status, resource_d_verid, resource_r_verid, resource_code,
+    publish_time, auth_status, publish_portal, parent_resource_id, publish_type,
+    owner_type, impl_type, worker_agent_type
+)
+SELECT
+    26, 'BYAI', 'SKILL', 'ATOM', 'agent-reach',
+    '路由公开互联网渠道能力，并按 ByClaw 覆盖规则选择 byCLI 等执行器。',
+    '1.0', 'hosted', 10, -1, '10001', 10001, CURRENT_TIMESTAMP,
+    10001, CURRENT_TIMESTAMP, 1, 2, -1, -1, 'agent-reach',
+    CURRENT_TIMESTAMP, 'passed', 1, -1, 'publish', 'enterprise', 'SKILL', 'NONE'
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.ss_resource
+    WHERE resource_id = 26 OR resource_code = 'agent-reach'
+);
+
+INSERT INTO byai.ss_res_ext_skill (
+    resource_id, skill_type, source_type, version, skill_url,
+    skill_package_format, skill_original_filename, skill_package_size,
+    skill_package_hash, sync_status, sync_error, last_sync_time
+)
+SELECT
+    26, 'inner', 'SYSTEM_BUILTIN', 'v0.1', '', 'zip', NULL, NULL, NULL,
+    'SUCCESS', NULL, CURRENT_TIMESTAMP
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.ss_res_ext_skill WHERE resource_id = 26
+);
+
+UPDATE byai.ss_res_ext_skill e
+SET target_content = json_build_object(
+    'resourceId', r.resource_id,
+    'resourceCode', r.resource_code,
+    'resourceName', r.resource_name,
+    'resourceDesc', r.resource_desc,
+    'resourceBizType', r.resource_biz_type,
+    'resourceType', r.resource_type,
+    'ownerType', r.owner_type,
+    'sourceType', e.source_type,
+    'skillType', e.skill_type,
+    'skillUrl', e.skill_url,
+    'version', e.version,
+    'skillPackageFormat', e.skill_package_format,
+    'skillOriginalFilename', e.skill_original_filename,
+    'skillPackageSize', e.skill_package_size,
+    'skillPackageHash', e.skill_package_hash,
+    'syncStatus', e.sync_status,
+    'syncError', e.sync_error,
+    'lastSyncTime', to_char(e.last_sync_time, 'YYYY-MM-DD HH24:MI:SS')
+)::text
+FROM byai.ss_resource r
+WHERE e.resource_id = 26
+  AND r.resource_id = 26
+  AND r.resource_code = 'agent-reach';
+
+-- 复制 knowledge-collection 的可用授权，使未传 ownerType 的技能列表也能发现 agent-reach。
+INSERT INTO byai.au_privilege_grant (
+    privilege_grant_id, grant_type, oper_type, grant_obj_type, grant_obj_id,
+    eff_date, exp_date, status_cd, create_staff, create_date, update_staff,
+    update_date, grant_to_type, grant_to_obj_id, grant_to_obj_type,
+    allow_unsubscribe
+)
+SELECT
+    COALESCE((SELECT MAX(privilege_grant_id) FROM byai.au_privilege_grant), 0)
+        + ROW_NUMBER() OVER (ORDER BY g.privilege_grant_id),
+    g.grant_type, g.oper_type, g.grant_obj_type, 26, g.eff_date, g.exp_date,
+    g.status_cd, g.create_staff, g.create_date, g.update_staff, g.update_date,
+    g.grant_to_type, g.grant_to_obj_id, g.grant_to_obj_type, g.allow_unsubscribe
+FROM byai.au_privilege_grant g
+WHERE g.grant_obj_id = 14
+  AND NOT EXISTS (
+      SELECT 1 FROM byai.au_privilege_grant existing
+      WHERE existing.grant_obj_id = 26
+        AND existing.grant_type = g.grant_type
+        AND existing.grant_to_type = g.grant_to_type
+        AND existing.grant_to_obj_id = g.grant_to_obj_id
+        AND existing.grant_to_obj_type = g.grant_to_obj_type
+  );
