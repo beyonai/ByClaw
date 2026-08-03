@@ -69,9 +69,8 @@ export const APP_CONFIG_DEFAULTS = {
     sessionMaxEntries: 20_000,
   },
   pi: {
-    provider: "zhipu",
-    model: "glm-5.2",
-    openAiBaseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
+    provider: "volcengine-ark",
+    model: "deepseek-v4-pro-260425",
     arkBaseUrl: "https://ark.cn-beijing.volces.com/api/v3",
   },
 } as const;

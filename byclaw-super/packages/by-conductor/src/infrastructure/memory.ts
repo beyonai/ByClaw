@@ -8,15 +8,15 @@ import type {
   RunPage,
   RunRepository,
   SessionRepository,
-} from "./repositories.js";
-import type { ExecutionCredential } from "./execution-credentials.js";
+} from "../ports/repositories.js";
+import type { ExecutionCredential } from "../domain/execution-credentials.js";
 import type {
   CallerPrincipal,
   Delegation,
   Run,
   RunEvent,
   Session,
-} from "./types.js";
+} from "../domain/types.js";
 
 /** 开发闭环使用的 Session 内存仓库；所有读写都复制对象，避免调用方意外修改存储。 */
 export class InMemorySessionRepository implements SessionRepository {

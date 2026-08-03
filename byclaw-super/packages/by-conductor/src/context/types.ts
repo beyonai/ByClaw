@@ -1,6 +1,6 @@
-import type { AgentProfile, CallerPrincipal } from "../types.js";
-import type { SessionContextV1 } from "../session-context.js";
-import type { GroupChatContextV1 } from "../group-chat-context.js";
+import type { AgentProfile, CallerPrincipal } from "../domain/types.js";
+import type { SessionContextV1 } from "../domain/session-context.js";
+import type { GroupChatContextV1 } from "../domain/group-chat-context.js";
 
 /** 一次上下文编译所需的原始快照；读取外部数据应在进入编译器之前完成。 */
 export interface ContextBuildInput {

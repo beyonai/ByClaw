@@ -2,7 +2,7 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type {
   GroupChatContextV1,
   GroupChatMessageV1,
-} from "./group-chat-context.js";
+} from "../domain/group-chat-context.js";
 
 export const GROUP_CHAT_MEMORY_CUSTOM_MESSAGE_TYPE =
   "byclaw.group-chat-memory/v1";

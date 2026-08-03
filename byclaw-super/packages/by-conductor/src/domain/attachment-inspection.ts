@@ -1,5 +1,3 @@
-import type { CallerPrincipal, RunAttachment } from "./types.js";
-
 /** inspectAttachment 支持的读取模式。 */
 export const ATTACHMENT_INSPECTION_MODES = [
   "metadata",
@@ -76,32 +74,4 @@ export interface MaterializedAttachment {
   mediaType?: string;
   byteSize: number;
   relativePath: string;
-}
-
-/**
- * 传输无关的附件读取边界。首个实现为 app 层的 `ByAiAttachmentResolver`：
- * 用 Run 短期执行凭证调 BE，由 BE 按 fileId + 当前用户校验归属后返回有界内容，
- * 绝不信任客户端自报的 `url`。
- */
-export interface AttachmentResolver {
-  inspect(input: {
-    attachment: RunAttachment;
-    principal: CallerPrincipal;
-    /** Run 短期执行凭证（Beyond-Token）；仅本次调用内存可见。 */
-    credential: string;
-    mode: AttachmentInspectionMode;
-    signal: AbortSignal;
-  }): Promise<AttachmentInspection>;
-  /**
-   * 把附件原始字节下载到调用方提供的可信会话目录。可选以兼容仅支持 inspect
-   * 的 Resolver；工具参数不会向模型暴露 destinationDirectory。
-   */
-  materialize?(input: {
-    attachment: RunAttachment;
-    principal: CallerPrincipal;
-    /** Run 短期执行凭证（Beyond-Token）；仅本次调用内存可见。 */
-    credential: string;
-    destinationDirectory: string;
-    signal: AbortSignal;
-  }): Promise<MaterializedAttachment>;
 }

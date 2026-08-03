@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.gateway.route;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.JSONArray;
 import com.iwhaleai.byai.framework.client.GatewayClient;
+import com.iwhaleai.byai.framework.core.protocol.ActionType;
 import com.iwhaleai.byai.framework.core.protocol.ExecutionStatus;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -280,6 +281,51 @@ class RouteServiceTest {
     }
 
     @Test
+    void route_sendsGroupChatReferenceToRegularAgent() throws Exception {
+        ChatProcessContext ctx = buildContext(WorkerAgentType.BYCLAW_CODE.getCode(), 123L);
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Map<String, Object>> metadataCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(eq("BYCLAW_CODE_u1"), eq("3"), eq("hello"),
+                eq("u1"), eq("testUser"), eq(ActionType.ASK_AGENT), eq("-1"), eq("2"),
+                eq(ctx.getTraceId()), paramsCaptor.capture(), metadataCaptor.capture());
+        org.assertj.core.api.Assertions.assertThat(paramsCaptor.getValue().get("groupChat"))
+                .isEqualTo(Map.of(
+                        "schemaVersion", "byclaw.group-chat-ref/v1",
+                        "conversationKey", "3",
+                        "beforeMessageId", "1"));
+        org.assertj.core.api.Assertions.assertThat(metadataCaptor.getValue())
+                .containsEntry("Beyond-Token", "test-beyond-token");
+    }
+
+    @Test
+    void route_doesNotSendGroupChatReferenceForControlAction() throws Exception {
+        ChatProcessContext ctx = buildContext(WorkerAgentType.BYCLAW_CODE.getCode(), 123L);
+        ctx.getAssistantChatDto().setActionType("CONTROL_ACTION");
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                eq("CONTROL_ACTION"), anyString(), anyString(), anyString(), paramsCaptor.capture(), any());
+        org.assertj.core.api.Assertions.assertThat(paramsCaptor.getValue()).doesNotContainKey("groupChat");
+    }
+
+    @Test
     void route_replacesCompositeSkillPlaceholderBeforeSendingToGateway() throws Exception {
         ChatProcessContext ctx = buildContext();
         ctx.getAssistantChatDto().setChatContent(
@@ -400,6 +446,11 @@ class RouteServiceTest {
         org.assertj.core.api.Assertions.assertThat(traceIdCaptor.getValue())
                 .isEqualTo(TraceIdCodec.encode(ctx.getUserMessageId(), ctx.getModelAnswerMessageId()));
         Map<String, Object> params = paramsCaptor.getValue();
+        org.assertj.core.api.Assertions.assertThat(params.get("groupChat"))
+                .isEqualTo(Map.of(
+                        "schemaVersion", "byclaw.group-chat-ref/v1",
+                        "conversationKey", "3",
+                        "beforeMessageId", "1"));
         JSONObject batchPayload = (JSONObject) params.get("multi_agent");
         org.assertj.core.api.Assertions.assertThat(batchPayload)
                 .containsEntry("turnId", "turn-1")

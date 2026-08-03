@@ -1,4 +1,4 @@
-import type { AttachmentProvenance, RunAttachment } from "./types.js";
+import type { AttachmentProvenance, RunAttachment } from "../domain/types.js";
 
 /** 附件输入错误；HTTP/Worker 捕获后映射为 400 / 失败事件，不静默丢弃。 */
 export class AttachmentInputError extends Error {

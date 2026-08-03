@@ -5,30 +5,28 @@ import {
 } from "../business/agent-catalog.js";
 
 describe("ByClaw BE Agent Catalog", () => {
-  it("calls discover with the token and maps only authorized agents", async () => {
+  it("calls discoverMine with the token and maps only authorized agents", async () => {
     const fetchImpl = vi.fn(async () =>
       Response.json({
         code: 0,
         msg: "Operation successful",
         success: true,
-        data: {
-          list: [
-            {
-              id: "10001912",
-              name: "企业微信助手",
-              resourceCode: "BYAI_DIG_EMPLOYEE_10001912",
-              resourceDesc: "企业微信助手",
-              tagName: "个人助理",
-              skills: '[{"skillCode":"dws"},{"skillCode":"wecomcli"}]',
-              usesPermissions: true,
-            },
-            {
-              id: "10001913",
-              name: "未授权助手",
-              usesPermissions: false,
-            },
-          ],
-        },
+        data: [
+          {
+            id: "10001912",
+            name: "企业微信助手",
+            resourceCode: "BYAI_DIG_EMPLOYEE_10001912",
+            resourceDesc: "企业微信助手",
+            tagName: "个人助理",
+            skills: '[{"skillCode":"dws"},{"skillCode":"wecomcli"}]',
+            usesPermissions: true,
+          },
+          {
+            id: "10001913",
+            name: "未授权助手",
+            usesPermissions: false,
+          },
+        ],
       }),
     );
     const catalog = new ByClawBeAgentCatalog({
@@ -60,7 +58,7 @@ describe("ByClaw BE Agent Catalog", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
     const [url, init] = fetchImpl.mock.calls[0] ?? [];
     expect(String(url)).toBe(
-      "http://byclaw-be.by-service.svc.cluster.local:8086/byaiService/api/v2/digitEmploy/discover",
+      "http://byclaw-be.by-service.svc.cluster.local:8086/byaiService/api/v2/digitEmploy/discoverMine",
     );
     expect(init?.headers).toMatchObject({
       "Beyond-Token": "secret-token",
@@ -69,8 +67,6 @@ describe("ByClaw BE Agent Catalog", () => {
     });
     expect(JSON.parse(String(init?.body))).toEqual({
       terminals: ["ALL", "PC", "APP"],
-      pageNum: 1,
-      pageSize: 9_999,
       keyword: "",
       metaStatus: "ALL",
       orgFilters: [{ type: "all" }],
@@ -100,22 +96,20 @@ describe("ByClaw BE Agent Catalog", () => {
         Response.json({
           code: 0,
           success: true,
-          data: {
-            list: [
-              {
-                id: "3001",
-                name: "问数助手",
-                agentType: "005",
-                usesPermissions: true,
-              },
-              {
-                id: "3002",
-                name: "问答助手",
-                agentType: "006",
-                usesPermissions: true,
-              },
-            ],
-          },
+          data: [
+            {
+              id: "3001",
+              name: "问数助手",
+              agentType: "005",
+              usesPermissions: true,
+            },
+            {
+              id: "3002",
+              name: "问答助手",
+              agentType: "006",
+              usesPermissions: true,
+            },
+          ],
         }),
       ) as typeof fetch,
     });
@@ -148,38 +142,36 @@ describe("ByClaw BE Agent Catalog", () => {
         Response.json({
           code: 0,
           success: true,
-          data: {
-            list: [
-              {
-                id: "2001",
-                name: "SSE",
-                createType: " from_third ",
-                integrationType: " interface ",
-                usesPermissions: true,
-              },
-              {
-                id: "2002",
-                name: "A2A",
-                createType: "FROM_THIRD",
-                integrationType: "a2a",
-                usesPermissions: true,
-              },
-              {
-                id: "2003",
-                name: "PAGE",
-                createType: "FROM_THIRD",
-                integrationType: "PAGE",
-                usesPermissions: true,
-              },
-              {
-                id: "2004",
-                name: "Not allowlisted",
-                createType: "FROM_THIRD",
-                integrationType: "INTERFACE",
-                usesPermissions: true,
-              },
-            ],
-          },
+          data: [
+            {
+              id: "2001",
+              name: "SSE",
+              createType: " from_third ",
+              integrationType: " interface ",
+              usesPermissions: true,
+            },
+            {
+              id: "2002",
+              name: "A2A",
+              createType: "FROM_THIRD",
+              integrationType: "a2a",
+              usesPermissions: true,
+            },
+            {
+              id: "2003",
+              name: "PAGE",
+              createType: "FROM_THIRD",
+              integrationType: "PAGE",
+              usesPermissions: true,
+            },
+            {
+              id: "2004",
+              name: "Not allowlisted",
+              createType: "FROM_THIRD",
+              integrationType: "INTERFACE",
+              usesPermissions: true,
+            },
+          ],
         }),
       ) as typeof fetch,
     });
@@ -199,9 +191,7 @@ describe("ByClaw BE Agent Catalog", () => {
   });
 
   it("falls back to BYCLAW_BE_BASE_URL when Redis has no instance", async () => {
-    const fetchImpl = vi.fn(async () =>
-      Response.json({ code: 0, success: true, data: { list: [] } }),
-    );
+    const fetchImpl = vi.fn(async () => Response.json({ code: 0, success: true, data: [] }));
     const catalog = new ByClawBeAgentCatalog({
       baseUrl: "http://127.0.0.1:18086",
       timeoutMs: 1_000,
@@ -212,6 +202,6 @@ describe("ByClaw BE Agent Catalog", () => {
     await catalog.listAuthorizedAgents({ beyondToken: "secret-token" });
 
     const [url] = fetchImpl.mock.calls[0] ?? [];
-    expect(String(url)).toBe("http://127.0.0.1:18086/byaiService/api/v2/digitEmploy/discover");
+    expect(String(url)).toBe("http://127.0.0.1:18086/byaiService/api/v2/digitEmploy/discoverMine");
   });
 });

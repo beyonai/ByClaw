@@ -5,12 +5,10 @@ import { THIRD_PARTY_INTERFACE_SSE_CONNECTOR_ID } from "@byclaw/connector-third-
 import { THIRD_PARTY_PAGE_CONNECTOR_ID } from "@byclaw/connector-third-party-page";
 import type { ByClawBeEndpointResolver } from "./endpoint-resolver.js";
 
-const DISCOVER_PATH = "/byaiService/api/v2/digitEmploy/discover";
+const DISCOVER_PATH = "/byaiService/api/v2/digitEmploy/discoverMine";
 
 const DISCOVER_REQUEST = {
   terminals: ["ALL", "PC", "APP"],
-  pageNum: 1,
-  pageSize: 9_999,
   keyword: "",
   metaStatus: "ALL",
   orgFilters: [{ type: "all" }],
@@ -39,7 +37,8 @@ type DiscoverResponse = {
   code?: number;
   msg?: string;
   success?: boolean;
-  data?: { list?: DiscoverAgent[] };
+  /** discoverMine 返回全量数字员工列表，data 直接是数组。 */
+  data?: DiscoverAgent[];
 };
 
 export interface AuthorizedAgentCatalog {
@@ -72,7 +71,7 @@ export class ByClawBeAgentCatalogError extends Error {
   }
 }
 
-/** 通过 ByClaw BE 的 discover API 加载当前用户可使用的数字员工。 */
+/** 通过 ByClaw BE 的 discoverMine API 加载当前账号下可使用的数字员工（全量、不分页）。 */
 export class ByClawBeAgentCatalog implements AuthorizedAgentCatalog {
   readonly #fallbackBaseUrl: URL;
   readonly #timeoutMs: number;
@@ -130,12 +129,13 @@ export class ByClawBeAgentCatalog implements AuthorizedAgentCatalog {
     }
 
     const result = await parseResponse(response);
-    if (result.code !== 0 || result.success === false || !Array.isArray(result.data?.list)) {
+    const items = result.data;
+    if (result.code !== 0 || result.success === false || !Array.isArray(items)) {
       throw new ByClawBeAgentCatalogError(
         `ByClaw BE discover returned invalid result${result.msg ? `: ${result.msg}` : ""}`,
       );
     }
-    return toAuthorizedAgents(result.data.list, this.#thirdPartyDirect);
+    return toAuthorizedAgents(items, this.#thirdPartyDirect);
   }
 }
 
