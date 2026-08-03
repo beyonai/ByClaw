@@ -13,8 +13,6 @@ import {
   type ThinkingLevel,
 } from "@byclaw/by-conductor";
 import {
-  EventType,
-  type AgentContext,
   type AskAgentCommand,
   type GatewayCommand,
 } from "@byclaw/by-framework";
@@ -240,17 +238,6 @@ export function recordScalar(
     }
   }
   return undefined;
-}
-
-/** 关闭尚未结束的简化思考阶段，且不透传内部 reasoning。 */
-export async function closeReasoning(
-  context: AgentContext,
-  started: boolean,
-  ended: boolean,
-): Promise<void> {
-  if (started && !ended) {
-    await context.emitState("", EventType.REASONING_LOG_END);
-  }
 }
 
 /** 将内部事件转换为对调用方安全、稳定的执行进度。 */
