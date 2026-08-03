@@ -132,12 +132,7 @@ public class ParamService {
         }
         params.put("agent_id", assistantChatDto.getAgentId());
         params.put("ext_params", assistantChatDto.getExtParams());
-        SsResource ssResource = ssResourceService.findById(assistantChatDto.getAgentId());
-        if (ssResource == null) {
-            params.put("worker_agent_type", WorkerAgentType.BYCLAW_EXE.getCode());
-        } else {
-            params.put("worker_agent_type", ssResource.getWorkerAgentType());
-        }
+        params.put("worker_agent_type", resolveWorkerAgentType(assistantChatDto.getAgentId()));
 
         if (assistantChatDto.getAgentId() != null) {
             AgentResourceChatInfoDto resourceAgent = ssSuperassistSubAgentService.getResourceAgent(isDebug,
@@ -209,6 +204,17 @@ public class ParamService {
         }
 
         return params;
+    }
+
+    /**
+     * 未指定数字员工时直接路由到公共超级助手；非空 ID 仍按资源配置路由，资源不存在时兼容旧 OpenClaw。
+     */
+    String resolveWorkerAgentType(Long agentId) {
+        if (agentId == null) {
+            return WorkerAgentType.BY_SUPER.getCode();
+        }
+        SsResource ssResource = ssResourceService.findById(agentId);
+        return ssResource == null ? WorkerAgentType.BYCLAW_EXE.getCode() : ssResource.getWorkerAgentType();
     }
 
     /**

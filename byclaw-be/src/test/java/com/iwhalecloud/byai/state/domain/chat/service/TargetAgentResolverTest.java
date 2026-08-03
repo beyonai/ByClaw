@@ -82,4 +82,12 @@ class TargetAgentResolverTest {
 
         assertThat(agentId).isEqualTo(1002L);
     }
+
+    @Test
+    void resolveAgentType_routesNullAgentIdToBySuperDespiteLegacyResumeAgentType() {
+        String targetAgentType = targetAgentResolver.resolveAgentType(
+            WorkerAgentType.BY_SUPER.getCode(), null, "BYCLAW_EXE_user001", "user001");
+
+        assertThat(targetAgentType).isEqualTo(WorkerAgentType.BY_SUPER.getCode());
+    }
 }
