@@ -1,9 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Empty, Segmented, Spin, Tag } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, LoginOutlined, PlusOutlined } from '@ant-design/icons';
+import { Button, Empty, Modal, Segmented, Spin, Tag } from 'antd';
+import { ArrowLeftOutlined, DeleteOutlined, EditOutlined, LoginOutlined, PlusOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import OperationAccountFormModal from './OperationAccountFormModal';
-import type { OperationAccount, OperationAccountFormValues, OperationPlatformOption } from './types';
+import type {
+  OperationAccount,
+  OperationAccountFormValues,
+  OperationIdentifier,
+  OperationPlatformOption,
+} from './types';
 import styles from './index.module.less';
 
 // 账号管理大面板只负责展示与交互，读取、保存、登录及权限判断全部由项目详情容器传入。
@@ -13,9 +18,16 @@ export interface OperationAccountPanelProps {
   loading?: boolean;
   savingAccount?: boolean;
   canManage?: boolean;
+  loginTarget?: OperationAccount | null;
+  loginPreparingAccountId?: OperationIdentifier | null;
+  loginConfirming?: boolean;
+  deletingAccountId?: OperationIdentifier | null;
   onBack?: () => void;
   onAccountClick?: (account: OperationAccount) => void;
-  onLogin?: (account: OperationAccount) => void;
+  onLogin?: (account: OperationAccount) => void | Promise<void>;
+  onConfirmLogin?: () => void | Promise<void>;
+  onCancelLogin?: () => void;
+  onDeleteAccount?: (account: OperationAccount) => void | Promise<void>;
   onSaveAccount?: (values: OperationAccountFormValues, account?: OperationAccount | null) => void | Promise<void>;
 }
 
@@ -33,9 +45,16 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   loading = false,
   savingAccount = false,
   canManage = true,
+  loginTarget,
+  loginPreparingAccountId,
+  loginConfirming = false,
+  deletingAccountId,
   onBack,
   onAccountClick,
   onLogin,
+  onConfirmLogin,
+  onCancelLogin,
+  onDeleteAccount,
   onSaveAccount,
 }) => {
   const intl = useIntl();
@@ -51,13 +70,19 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
     (id: string) => intl.formatMessage({ id: `projectSpace.operation.platform.${id}` }),
     [intl]
   );
+  const loginT = useCallback(
+    (id: string, values?: Record<string, string | number>) =>
+      intl.formatMessage({ id: `projectSpace.operation.accountLogin.${id}` }, values),
+    [intl]
+  );
   // 账号接口未配置平台字典时沿用产品支持的平台，后端下发时优先使用后端数据。
   const defaultPlatformOptions = useMemo<OperationPlatformOption[]>(
     () => [
-      { value: 'wechat', label: platformT('wechat') },
-      { value: 'xiaohongshu', label: platformT('xiaohongshu') },
-      { value: 'video', label: platformT('video') },
-      { value: 'douyin', label: platformT('douyin') },
+      // 平台编码统一使用 OPERATION_CHANNEL 静态参数值，避免账号筛选与任务表单出现不同编码。
+      { value: 'WeChatAccount', label: platformT('wechat') },
+      { value: 'Xiaohongshu', label: platformT('xiaohongshu') },
+      { value: 'WeChatChannels', label: platformT('video') },
+      { value: 'Douyin', label: platformT('douyin') },
     ],
     [platformT]
   );
@@ -130,6 +155,21 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
     [onAccountClick]
   );
 
+  const handleDeleteAccount = useCallback(
+    (account: OperationAccount) => {
+      if (!onDeleteAccount) return;
+      Modal.confirm({
+        title: t('deleteConfirmTitle'),
+        content: t('deleteConfirmContent', { account: account.accountName }),
+        okText: t('deleteConfirmOk'),
+        cancelText: t('deleteConfirmCancel'),
+        okButtonProps: { danger: true },
+        onOk: () => onDeleteAccount(account),
+      });
+    },
+    [onDeleteAccount, t]
+  );
+
   const renderMetric = (value?: string | number) =>
     value === undefined || value === null || value === '' ? '-' : value;
 
@@ -157,6 +197,23 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
           </Button>
         )}
       </header>
+
+      {loginTarget && (
+        <section className={styles.accountLoginNotice} aria-live="polite">
+          <div className={styles.accountLoginNoticeContent}>
+            <strong>{loginT('remoteTitle', { account: loginTarget.accountName })}</strong>
+            <span>{loginT('remoteHint')}</span>
+          </div>
+          <div className={styles.accountLoginNoticeActions}>
+            <Button disabled={loginConfirming} onClick={onCancelLogin}>
+              {loginT('cancel')}
+            </Button>
+            <Button type="primary" loading={loginConfirming} onClick={() => void onConfirmLogin?.()}>
+              {loginT('complete')}
+            </Button>
+          </div>
+        </section>
+      )}
 
       <section className={styles.accountStats} aria-label={t('statistics')}>
         <div className={styles.accountStatItem}>
@@ -194,6 +251,17 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
               const platform = platformOptionMap.get(account.platformId);
               const platformLabel = platform?.label || account.platformId;
               const status = account.loginStatus || 'unknown';
+              // 当前支持的四个运营平台均通过 UI Agent 浏览器登录，历史短编码继续兼容。
+              const canLogin = [
+                'WeChatAccount',
+                'wechat',
+                'Xiaohongshu',
+                'xiaohongshu',
+                'WeChatChannels',
+                'video',
+                'Douyin',
+                'douyin',
+              ].includes(account.platformId);
               return (
                 <article
                   key={String(account.id)}
@@ -233,14 +301,23 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
                   <div className={styles.accountCardFooter}>
                     <span>{t('recentData')}</span>
                     <div className={styles.accountCardActions}>
-                      {onLogin && (
+                      {onLogin && canLogin && (
                         <Button
                           type="link"
                           size="small"
                           icon={<LoginOutlined />}
+                          loading={`${loginPreparingAccountId ?? ''}` === `${account.id}`}
+                          disabled={
+                            !!loginTarget ||
+                            loginConfirming ||
+                            (loginPreparingAccountId !== undefined &&
+                              loginPreparingAccountId !== null &&
+                              `${loginPreparingAccountId}` !== `${account.id}`)
+                          }
                           onClick={(event) => {
                             event.stopPropagation();
-                            onLogin(account);
+                            // 登录失败由统一请求层提示，卡片侧消费 reject，避免事件回调产生未处理 Promise。
+                            void Promise.resolve(onLogin(account)).catch(() => undefined);
                           }}
                         >
                           {t(status === 'logged_in' ? 'relogin' : 'login')}
@@ -257,6 +334,22 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
                           }}
                         >
                           {t('edit')}
+                        </Button>
+                      )}
+                      {canSaveAccount && onDeleteAccount && account.canEdit !== false && (
+                        <Button
+                          danger
+                          type="link"
+                          size="small"
+                          icon={<DeleteOutlined />}
+                          loading={`${deletingAccountId ?? ''}` === `${account.id}`}
+                          disabled={deletingAccountId !== undefined && deletingAccountId !== null}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleDeleteAccount(account);
+                          }}
+                        >
+                          {t('delete')}
                         </Button>
                       )}
                     </div>

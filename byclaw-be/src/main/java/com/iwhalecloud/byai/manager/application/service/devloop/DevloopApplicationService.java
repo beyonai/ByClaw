@@ -22,6 +22,10 @@ import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDeleteDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementUpdateDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.OperationRequirementDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.OperationAccountDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.OperationRequirementStartDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.OperationTaskDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationEnvDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationSuiteDTO;
@@ -31,6 +35,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.*;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
 import com.iwhalecloud.byai.manager.entity.users.UserPrivateParam;
@@ -39,6 +44,7 @@ import com.iwhalecloud.byai.manager.mapper.devloop.ProjectMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ScanRequireItemMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
+import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionExtMapper;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
 import com.iwhalecloud.byai.manager.mapper.users.UserPrivateParamMapper;
@@ -59,7 +65,6 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.io.ByteArrayOutputStream;
-
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
@@ -169,6 +174,15 @@ public class DevloopApplicationService {
     private ProjectMemberService projectMemberService;
 
     @Autowired
+    private OperationRequirementService operationRequirementService;
+
+    @Autowired
+    private OperationAccountService operationAccountService;
+
+    @Autowired
+    private OperationTaskService operationTaskService;
+
+    @Autowired
     private SequenceService sequenceService;
 
     @Autowired
@@ -191,6 +205,9 @@ public class DevloopApplicationService {
 
     @Autowired
     private SsResourceMapper ssResourceMapper;
+
+    @Autowired
+    private SsSandboxRecordMapper sandboxRecordMapper;
 
     @Autowired
     private ByaiSystemConfigService byaiSystemConfigService;
@@ -2110,47 +2127,659 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 创建运营需求
-     *
-     * @param params 入参
-     * @return ResponseUtil
+     * 创建运营需求。
+     * 运营需求使用独立表，不能创建扫描源或扫描日志，避免污染研发需求渠道与扫描记录。
      */
-    public Long createOperationRequirement(Map<String, Object> params) {
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Map<String, Object>> createOperationRequirement(OperationRequirementDTO dto) {
+        String accessError = validateOperationProjectAccess(dto == null ? null : dto.getProjectId());
+        if (accessError != null) {
+            return ResponseUtil.failRes(accessError);
+        }
+        String validationError = validateOperationRequirement(dto, false);
+        if (validationError != null) {
+            return ResponseUtil.failRes(validationError);
+        }
 
-        Long projectId = MapParamUtil.getLongValue(params, "projectId");
-        String title = MapParamUtil.getStringValue(params, "requirementName");
+        OperationRequirement requirement = new OperationRequirement();
+        applyOperationRequirementDto(requirement, dto);
+        requirement.setCreateBy(CurrentUserHolder.getCurrentUserId());
+        OperationRequirement created = operationRequirementService.create(requirement);
 
-        ScanSource source = new ScanSource();
-        source.setProjectId(projectId);
-        source.setSourceName(MapParamUtil.getStringValue(params, "operationType"));
-        source.setSourceType(MapParamUtil.getStringValue(params, "operationType"));
-        source.setConfig("{}");
-        source.setEnabled("0");
-        source.setConfirmMode("operation");
-        source.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
-        scanSourceService.create(source);
+        Map<String, Object> result = new HashMap<>();
+        result.put("itemId", created.getItemId());
+        return ResponseUtil.successResponse(result);
+    }
 
-        ScanLog scanLog = scanLogService.createLog(source.getSourceId(), projectId);
+    /** 修改尚未启动的运营需求，项目归属始终以已存记录为准。 */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Void> updateOperationRequirement(OperationRequirementDTO dto) {
+        String validationError = validateOperationRequirement(dto, true);
+        if (validationError != null) {
+            return ResponseUtil.failRes(validationError);
+        }
+        OperationRequirement existing = operationRequirementService.findById(dto.getItemId());
+        if (existing == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationRequirement.notFound"));
+        }
+        String accessError = validateOperationProjectAccess(existing.getProjectId());
+        if (accessError != null) {
+            return ResponseUtil.failRes(accessError);
+        }
+        if (!"todo".equals(existing.getStatus())) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationRequirement.edit.forbidden"));
+        }
 
-        ScanRequireItem scanRequireItem = scanLogService.createItem(scanLog.getLogId(), source.getSourceId(), title,
-            JSON.toJSONString(params), "operation:" + UUID.randomUUID(), null, "created");
+        OperationRequirement update = new OperationRequirement();
+        update.setItemId(existing.getItemId());
+        applyOperationRequirementDto(update, dto);
+        // 编辑接口不接受 projectId，防止跨项目篡改归属。
+        update.setProjectId(null);
+        update.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        operationRequirementService.update(update);
+        return ResponseUtil.successResponse(null);
+    }
 
-        return scanRequireItem.getItemId();
+    /** 分页查询当前用户可访问运营项目的需求列表。 */
+    public ResponseUtil<PageInfo<Map<String, Object>>> listOperationRequirements(Long projectId, String keyword,
+        int pageNum, int pageSize) {
+        String accessError = validateOperationProjectAccess(projectId);
+        if (accessError != null) {
+            return ResponseUtil.failRes(accessError);
+        }
+        Page<OperationRequirement> page = operationRequirementService.pageByProjectId(projectId, keyword, pageNum,
+            pageSize);
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (OperationRequirement requirement : page.getRecords()) {
+            list.add(toOperationRequirementMap(requirement));
+        }
+        PageInfo<Map<String, Object>> result = new PageInfo<>();
+        result.setPageNum(pageNum);
+        result.setPageSize(pageSize);
+        result.setTotal(page.getTotal());
+        result.setTotalPages((int) page.getPages());
+        result.setList(list);
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 查询单条运营需求详情。 */
+    public ResponseUtil<Map<String, Object>> getOperationRequirement(Long itemId) {
+        OperationRequirement requirement = operationRequirementService.findById(itemId);
+        if (requirement == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationRequirement.notFound"));
+        }
+        String accessError = validateOperationProjectAccess(requirement.getProjectId());
+        if (accessError != null) {
+            return ResponseUtil.failRes(accessError);
+        }
+        return ResponseUtil.successResponse(toOperationRequirementMap(requirement));
+    }
+
+    /** 删除未启动的运营需求，已关联会话的记录需保留用于任务追溯。 */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Void> deleteOperationRequirement(Long itemId) {
+        OperationRequirement requirement = operationRequirementService.findById(itemId);
+        if (requirement == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationRequirement.notFound"));
+        }
+        String accessError = validateOperationProjectAccess(requirement.getProjectId());
+        if (accessError != null) {
+            return ResponseUtil.failRes(accessError);
+        }
+        if (!"todo".equals(requirement.getStatus())) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationRequirement.delete.forbidden"));
+        }
+        operationRequirementService.delete(itemId, CurrentUserHolder.getCurrentUserId());
+        return ResponseUtil.successResponse(null);
     }
 
     /**
-     * 修改运营需求（仅更新 ScanRequireItem）。
-     *
-     * @param params 入参，需含 itemId；requirementName 作为标题，整包 params 写入 content
+     * 启动运营需求并一次创建前端确认后的多个运营任务。
+     * 任务拆解结果由前端展示给用户调整后提交，后端仅负责校验、持久化和需求状态流转。
      */
-    public void updateOperationRequirement(Map<String, Object> params) {
-        Long itemId = MapParamUtil.getLongValue(params, "itemId");
-        String title = MapParamUtil.getStringValue(params, "requirementName");
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<List<Map<String, Object>>> startOperationRequirement(OperationRequirementStartDTO dto) {
+        if (dto == null || dto.getRequirementId() == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.requirementId.required"));
+        }
+        OperationRequirement requirement = operationRequirementService.findById(dto.getRequirementId());
+        if (requirement == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationRequirement.notFound"));
+        }
+        String accessError = validateOperationProjectAccess(requirement.getProjectId());
+        if (accessError != null) {
+            return ResponseUtil.failRes(accessError);
+        }
+        if (!"todo".equals(requirement.getStatus())) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.requirement.start.forbidden"));
+        }
+        List<OperationTaskDTO> taskDtos = dto.getTasks();
+        if (taskDtos == null || taskDtos.isEmpty()) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.tasks.required"));
+        }
 
-        ScanRequireItem updateItem = new ScanRequireItem();
-        updateItem.setItemId(itemId);
-        updateItem.setTitle(title);
-        updateItem.setContent(JSON.toJSONString(params));
-        scanRequireItemMapper.updateById(updateItem);
+        List<Map<String, Object>> createdTasks = new ArrayList<>();
+        for (OperationTaskDTO taskDto : taskDtos) {
+            String validationError = validateOperationTaskForStart(taskDto, requirement);
+            if (validationError != null) {
+                return ResponseUtil.failRes(validationError);
+            }
+            OperationTask task = new OperationTask();
+            task.setRequirementId(requirement.getItemId());
+            task.setProjectId(requirement.getProjectId());
+            task.setTitle(taskDto.getTitle().trim());
+            task.setDescription(StringUtils.trimToNull(taskDto.getDescription()));
+            task.setOperationType(requirement.getOperationType());
+            task.setStatus("todo");
+            task.setAssignee(taskDto.getAssignee());
+            task.setDueTime(parseOperationDueTime(taskDto.getDueTime()));
+            task.setProgress(0);
+            task.setConfig(requirement.getConfig());
+            task.setAgentSelection("[]");
+            task.setWorkflow("[]");
+            task.setCreateBy(CurrentUserHolder.getCurrentUserId());
+            createdTasks.add(toOperationTaskMap(operationTaskService.create(task)));
+        }
+
+        OperationRequirement update = new OperationRequirement();
+        update.setItemId(requirement.getItemId());
+        update.setStatus("launched");
+        update.setProgress(0);
+        update.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        operationRequirementService.update(update);
+        return ResponseUtil.successResponse(createdTasks);
+    }
+
+    /** 按项目分页查询已从运营需求拆解出的任务，支持负责人、日期、状态和忽略大小写搜索。 */
+    public ResponseUtil<PageInfo<Map<String, Object>>> listOperationTasks(Long projectId, String keyword, boolean onlyMine,
+        String createTimeStart, String createTimeEnd, String status, int pageNum, int pageSize) {
+        String accessError = validateOperationProjectAccess(projectId);
+        if (accessError != null) {
+            return ResponseUtil.failRes(accessError);
+        }
+        Long assignee = onlyMine ? CurrentUserHolder.getCurrentUserId() : null;
+        Page<OperationTask> page = operationTaskService.pageByProjectId(projectId, assignee, keyword,
+            parseOperationDueTime(createTimeStart), parseOperationDueTime(createTimeEnd), status, pageNum, pageSize);
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (OperationTask task : page.getRecords()) {
+            list.add(toOperationTaskMap(task));
+        }
+        PageInfo<Map<String, Object>> result = new PageInfo<>();
+        result.setPageNum(pageNum);
+        result.setPageSize(pageSize);
+        result.setTotal(page.getTotal());
+        result.setTotalPages((int) page.getPages());
+        result.setList(list);
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 查询运营任务详情。 */
+    public ResponseUtil<Map<String, Object>> getOperationTask(Long taskId) {
+        OperationTask task = operationTaskService.findById(taskId);
+        if (task == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.notFound"));
+        }
+        String accessError = validateOperationProjectAccess(task.getProjectId());
+        if (accessError != null) {
+            return ResponseUtil.failRes(accessError);
+        }
+        return ResponseUtil.successResponse(toOperationTaskMap(task));
+    }
+
+    /**
+     * 确认数字员工后启动运营任务并创建主会话。
+     * 多个数字员工的编排信息先按 JSON 保存，实际工作流调度由后续执行服务读取该结构继续推进。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Map<String, Object>> executeOperationTask(OperationTaskDTO dto) {
+        if (dto == null || dto.getTaskId() == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.id.required"));
+        }
+        OperationTask task = operationTaskService.findById(dto.getTaskId());
+        if (task == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.notFound"));
+        }
+        String accessError = validateOperationProjectAccess(task.getProjectId());
+        if (accessError != null) {
+            return ResponseUtil.failRes(accessError);
+        }
+        if (task.getSessionId() != null) {
+            Map<String, Object> result = new HashMap<>();
+            result.put("taskId", task.getTaskId());
+            result.put("sessionId", task.getSessionId());
+            return ResponseUtil.successResponse(result);
+        }
+        if (!"todo".equals(task.getStatus())) {
+            // 仅待执行任务允许创建会话，避免已完成或已取消任务被重复启动。
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.execute.forbidden"));
+        }
+        if (dto.getAgentIds() == null || dto.getAgentIds().isEmpty()) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.agents.required"));
+        }
+
+        Long primaryAgentId = dto.getAgentIds().stream().filter(Objects::nonNull).findFirst().orElse(null);
+        if (primaryAgentId == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.agents.required"));
+        }
+        AssistantChatDto chatDto = new AssistantChatDto();
+        chatDto.setAgentId(primaryAgentId);
+        chatDto.setProjectId(task.getProjectId());
+        chatDto.setChatContent(task.getTitle());
+        // 运营任务复用研发任务的 DevLoop 聊天通道，确保首条任务指令按统一链路持久化并触发数字员工。
+        chatDto.setAccessTerminal("DevLoop");
+        chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
+        assistantChatService.createGroupChatSession(chatDto);
+        // 会话创建只负责持久化会话和成员；必须显式进入聊天链路，首条运营任务指令才会写入消息列表并触发数字员工执行。
+        chatDto.setChatContent(buildOperationTaskPrompt(task));
+        LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
+
+        List<Map<String, Object>> workflow = new ArrayList<>();
+        for (int index = 0; index < dto.getAgentIds().size(); index++) {
+            Long agentId = dto.getAgentIds().get(index);
+            if (agentId == null) {
+                continue;
+            }
+            Map<String, Object> step = new LinkedHashMap<>();
+            step.put("id", agentId);
+            step.put("name", I18nUtil.get("devloop.operationTask.workflow.step"));
+            step.put("agentId", agentId);
+            step.put("status", index == 0 ? "in_progress" : "pending");
+            workflow.add(step);
+        }
+
+        OperationTask update = new OperationTask();
+        update.setTaskId(task.getTaskId());
+        update.setStatus("doing");
+        update.setProgress(5);
+        update.setSessionId(chatDto.getSessionId());
+        update.setAgentSelection(JSON.toJSONString(dto.getAgentIds()));
+        update.setWorkflow(JSON.toJSONString(workflow));
+        update.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        operationTaskService.update(update);
+
+        // 事务提交后异步发送首条指令，确保前端跳转到会话时可以加载已持久化的任务和消息上下文。
+        submitTaskChatAfterCommit(chatDto, loginInfo, task.getTaskId());
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("taskId", task.getTaskId());
+        result.put("sessionId", chatDto.getSessionId());
+        return ResponseUtil.successResponse(result);
+    }
+
+    /**
+     * 运营任务会话的首条指令统一由服务端构建，避免前端只创建空会话且遗漏任务说明。
+     */
+    private String buildOperationTaskPrompt(OperationTask task) {
+        String operationType = task.getOperationType();
+        String operationTypeLabel = switch (operationType == null ? "" : operationType) {
+            case "collect" -> I18nUtil.get("devloop.operationTask.type.collect");
+            case "publish", "content" -> I18nUtil.get("devloop.operationTask.type.publish");
+            case "analyze" -> I18nUtil.get("devloop.operationTask.type.analyze");
+            default -> I18nUtil.get("devloop.operationTask.type.default");
+        };
+        return I18nUtil.get("devloop.operationTask.chat.prompt", task.getTitle(),
+            StringUtils.defaultIfBlank(task.getDescription(), I18nUtil.get("devloop.operationTask.chat.description.empty")),
+            operationTypeLabel);
+    }
+
+    /** 创建运营账号，账号仅能归属运营项目。 */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Map<String, Object>> createOperationAccount(OperationAccountDTO dto) {
+        String accessError = validateOperationProjectAccess(dto == null ? null : dto.getProjectId());
+        if (accessError != null) {
+            return ResponseUtil.failRes(accessError);
+        }
+        String validationError = validateOperationAccount(dto, false);
+        if (validationError != null) {
+            return ResponseUtil.failRes(validationError);
+        }
+        OperationAccount account = new OperationAccount();
+        applyOperationAccountDto(account, dto);
+        account.setCreateBy(CurrentUserHolder.getCurrentUserId());
+        OperationAccount created = operationAccountService.create(account);
+        Map<String, Object> result = new HashMap<>();
+        result.put("accountId", created.getAccountId());
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 编辑运营账号，项目归属由已有账号反查，避免请求跨项目修改。 */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Void> updateOperationAccount(OperationAccountDTO dto) {
+        String validationError = validateOperationAccount(dto, true);
+        if (validationError != null) {
+            return ResponseUtil.failRes(validationError);
+        }
+        OperationAccount existing = operationAccountService.findById(dto.getAccountId());
+        if (existing == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.notFound"));
+        }
+        String accessError = validateOperationProjectAccess(existing.getProjectId());
+        if (accessError != null) {
+            return ResponseUtil.failRes(accessError);
+        }
+        OperationAccount update = new OperationAccount();
+        update.setAccountId(existing.getAccountId());
+        applyOperationAccountDto(update, dto);
+        update.setProjectId(null);
+        if (!StringUtils.equals(existing.getPlatformCode(), update.getPlatformCode())
+            || !StringUtils.equals(existing.getAccountCode(), update.getAccountCode())) {
+            // 平台或平台账号发生变化后，旧沙箱登录态不能继续代表新账号，需恢复为未登录状态。
+            JSONObject config = parseOperationAccountConfig(existing.getConfig());
+            config.remove("browserSessionId");
+            config.remove("browserSandboxId");
+            config.remove("browserLoginConfirmedAt");
+            update.setConfig(config.toJSONString());
+            update.setLoginStatus("offline");
+        }
+        update.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        operationAccountService.update(update);
+        return ResponseUtil.successResponse(null);
+    }
+
+    /** 软删除运营账号，历史需求和任务中的账号标识继续保留用于审计追溯。 */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Void> deleteOperationAccount(Long accountId) {
+        if (accountId == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.id.required"));
+        }
+        OperationAccount existing = operationAccountService.findById(accountId);
+        if (existing == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.notFound"));
+        }
+        String accessError = validateOperationProjectAccess(existing.getProjectId());
+        if (accessError != null) {
+            return ResponseUtil.failRes(accessError);
+        }
+        operationAccountService.delete(accountId, CurrentUserHolder.getCurrentUserId());
+        return ResponseUtil.successResponse(null);
+    }
+
+    /** 查询运营项目账号，返回格式与账号管理面板保持一致。 */
+    public ResponseUtil<List<Map<String, Object>>> listOperationAccounts(Long projectId) {
+        String accessError = validateOperationProjectAccess(projectId);
+        if (accessError != null) {
+            return ResponseUtil.failRes(accessError);
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (OperationAccount account : operationAccountService.listByProjectId(projectId)) {
+            result.add(toOperationAccountMap(account));
+        }
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 校验采集沙箱属于当前用户，成功后回写对应平台账号状态。 */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Map<String, Object>> loginOperationAccount(Long accountId, String sandboxId) {
+        if (accountId == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.id.required"));
+        }
+        if (StringUtils.isBlank(sandboxId)) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.browser.sandbox.required"));
+        }
+        OperationAccount account = operationAccountService.findById(accountId);
+        if (account == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.notFound"));
+        }
+        String accessError = validateOperationProjectAccess(account.getProjectId());
+        if (accessError != null) {
+            return ResponseUtil.failRes(accessError);
+        }
+        String currentUserCode = CurrentUserHolder.getCurrentUserCode();
+        List<SsSandboxRecord> runningSandboxes = StringUtils.isNotBlank(currentUserCode)
+            ? sandboxRecordMapper.selectRunningByUser(currentUserCode)
+            : List.of();
+        boolean ownedRunningSandbox = runningSandboxes != null && runningSandboxes.stream()
+            .anyMatch(record -> StringUtils.equals(record.getSandboxId(), sandboxId.trim()));
+        if (!ownedRunningSandbox) {
+            log.warn("[OperationAccount] 账号登录沙箱校验失败，accountId={}，sandboxId={}，userCode={}", accountId,
+                sandboxId, currentUserCode);
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.browser.sandbox.invalid"));
+        }
+
+        OperationAccount update = new OperationAccount();
+        update.setAccountId(accountId);
+        update.setStatus("connected");
+        update.setLoginStatus("online");
+        update.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        JSONObject config = parseOperationAccountConfig(account.getConfig());
+        // 保存当前用户沙箱引用，后续 UI Agent 执行发布任务时复用同一份浏览器登录态。
+        config.remove("browserSessionId");
+        config.put("browserSandboxId", sandboxId.trim());
+        config.put("browserLoginConfirmedAt", System.currentTimeMillis());
+        update.setConfig(config.toJSONString());
+        operationAccountService.update(update);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("accountId", accountId);
+        result.put("loginStatus", "online");
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 校验项目存在、类型和当前成员访问权限。 */
+    private String validateOperationProjectAccess(Long projectId) {
+        if (projectId == null) {
+            return I18nUtil.get("devloop.operationRequirement.projectId.required");
+        }
+        Project project = projectMapper.selectById(projectId);
+        if (project == null || DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
+            return I18nUtil.get("project.not.found");
+        }
+        if (!"operation".equals(project.getProjectType())) {
+            return I18nUtil.get("devloop.operationRequirement.project.type.invalid");
+        }
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        if (currentUserId == null || (!currentUserId.equals(project.getCreateBy())
+            && !projectMemberService.isMember(projectId, currentUserId))) {
+            return I18nUtil.get("devloop.operationRequirement.member.required");
+        }
+        return null;
+    }
+
+    /** 校验新增和编辑共用的基础字段与状态范围。 */
+    private String validateOperationRequirement(OperationRequirementDTO dto, boolean editing) {
+        if (dto == null) {
+            return I18nUtil.get("devloop.operationRequirement.parameter.required");
+        }
+        if (editing && dto.getItemId() == null) {
+            return I18nUtil.get("devloop.operationRequirement.itemId.required");
+        }
+        if (StringUtils.isBlank(dto.getRequirementName())) {
+            return I18nUtil.get("devloop.operationRequirement.title.required");
+        }
+        if (dto.getRequirementName().trim().length() > 500) {
+            return I18nUtil.get("devloop.operationRequirement.title.length.invalid");
+        }
+        if (StringUtils.isBlank(dto.getOperationType())
+            || !Set.of("collect", "publish", "analyze").contains(dto.getOperationType())) {
+            return I18nUtil.get("devloop.operationRequirement.type.invalid");
+        }
+        if (dto.getProgress() != null && (dto.getProgress() < 0 || dto.getProgress() > 100)) {
+            return I18nUtil.get("devloop.operationRequirement.progress.invalid");
+        }
+        if (dto.getStatus() != null && !Set.of("todo", "launched", "doing", "pendingReview", "done", "cancelled")
+            .contains(dto.getStatus())) {
+            return I18nUtil.get("devloop.operationRequirement.status.invalid");
+        }
+        return null;
+    }
+
+    /** 校验运营需求拆解任务，负责人必须是项目创建者或已加入项目的成员。 */
+    private String validateOperationTaskForStart(OperationTaskDTO dto, OperationRequirement requirement) {
+        if (dto == null || StringUtils.isBlank(dto.getTitle())) {
+            return I18nUtil.get("devloop.operationTask.title.required");
+        }
+        if (dto.getTitle().trim().length() > 500) {
+            return I18nUtil.get("devloop.operationTask.title.length.invalid");
+        }
+        if (dto.getAssignee() == null) {
+            return I18nUtil.get("devloop.operationTask.assignee.required");
+        }
+        Project project = projectMapper.selectById(requirement.getProjectId());
+        if (project == null || (!dto.getAssignee().equals(project.getCreateBy())
+            && !projectMemberService.isMember(requirement.getProjectId(), dto.getAssignee()))) {
+            return I18nUtil.get("devloop.operationTask.assignee.invalid");
+        }
+        try {
+            parseOperationDueTime(dto.getDueTime());
+        }
+        catch (IllegalArgumentException exception) {
+            return I18nUtil.get("devloop.operationRequirement.dueTime.invalid");
+        }
+        return null;
+    }
+
+    /** 校验运营账号新增和编辑的基础字段，平台登录凭据由 UI Agent 沙箱浏览器维护。 */
+    private String validateOperationAccount(OperationAccountDTO dto, boolean editing) {
+        if (dto == null) {
+            return I18nUtil.get("devloop.operationAccount.parameter.required");
+        }
+        if (editing && dto.getAccountId() == null) {
+            return I18nUtil.get("devloop.operationAccount.id.required");
+        }
+        if (StringUtils.isBlank(dto.getPlatformCode()) || StringUtils.isBlank(dto.getAccountCode())
+            || StringUtils.isBlank(dto.getAccountName())) {
+            return I18nUtil.get("devloop.operationAccount.field.required");
+        }
+        if (dto.getPlatformCode().trim().length() > 20 || dto.getAccountCode().trim().length() > 100
+            || dto.getAccountName().trim().length() > 100) {
+            return I18nUtil.get("devloop.operationAccount.field.length.invalid");
+        }
+        return null;
+    }
+
+    /** 将接口参数映射到实体，类型专属字段统一序列化到 config。 */
+    private void applyOperationRequirementDto(OperationRequirement target, OperationRequirementDTO dto) {
+        target.setProjectId(dto.getProjectId());
+        target.setTitle(dto.getRequirementName().trim());
+        target.setDescription(StringUtils.trimToNull(dto.getDescription()));
+        target.setOperationType(dto.getOperationType());
+        target.setAssignee(dto.getAssignee());
+        target.setDueTime(parseOperationDueTime(dto.getDueTime()));
+        target.setStatus(StringUtils.defaultIfBlank(dto.getStatus(), "todo"));
+        target.setProgress(dto.getProgress() == null ? 0 : dto.getProgress());
+        target.setConfig(dto.getConfig() == null ? "{}" : JSON.toJSONString(dto.getConfig()));
+    }
+
+    /** 将账号保存参数映射到实体，连接和登录状态由登录流程维护，不接受前端直接覆盖。 */
+    private void applyOperationAccountDto(OperationAccount target, OperationAccountDTO dto) {
+        target.setProjectId(dto.getProjectId());
+        target.setPlatformCode(dto.getPlatformCode().trim());
+        target.setAccountCode(dto.getAccountCode().trim());
+        target.setAccountName(dto.getAccountName().trim());
+    }
+
+    /** 配置列可能包含历史空值或损坏 JSON，读取失败按空配置处理且不打印敏感内容。 */
+    private JSONObject parseOperationAccountConfig(String config) {
+        if (StringUtils.isBlank(config)) {
+            return new JSONObject();
+        }
+        try {
+            JSONObject result = JSON.parseObject(config);
+            return result == null ? new JSONObject() : result;
+        }
+        catch (Exception exception) {
+            log.warn("[OperationAccount] 账号配置解析失败，按空配置处理");
+            return new JSONObject();
+        }
+    }
+
+    /** 将前端标准时间字符串转换为数据库时间；空值表示未设置完成时间。 */
+    private Date parseOperationDueTime(String dueTime) {
+        String normalizedDueTime = StringUtils.trimToNull(dueTime);
+        if (normalizedDueTime == null) {
+            return null;
+        }
+        try {
+            return new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").parse(normalizedDueTime);
+        }
+        catch (java.text.ParseException exception) {
+            throw new IllegalArgumentException(I18nUtil.get("devloop.operationRequirement.dueTime.invalid"), exception);
+        }
+    }
+
+    /** 运营需求转前端任务卡片可直接消费的统一结构。 */
+    private Map<String, Object> toOperationRequirementMap(OperationRequirement requirement) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("taskId", requirement.getItemId());
+        result.put("itemId", requirement.getItemId());
+        result.put("projectId", requirement.getProjectId());
+        result.put("title", requirement.getTitle());
+        result.put("requirementName", requirement.getTitle());
+        result.put("description", requirement.getDescription());
+        result.put("operationType", requirement.getOperationType());
+        result.put("status", requirement.getStatus());
+        result.put("assigneeId", requirement.getAssignee());
+        result.put("assignee", resolveUserName(requirement.getAssignee()));
+        result.put("dueTime", formatDateTime(requirement.getDueTime()));
+        result.put("progress", requirement.getProgress());
+        result.put("createTime", requirement.getCreateTime());
+        result.put("config", parseOperationConfig(requirement.getConfig()));
+        return result;
+    }
+
+    /** 运营任务转为前端任务列表和详情可共用的结构。 */
+    private Map<String, Object> toOperationTaskMap(OperationTask task) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("taskId", task.getTaskId());
+        result.put("requirementId", task.getRequirementId());
+        result.put("projectId", task.getProjectId());
+        result.put("title", task.getTitle());
+        result.put("description", task.getDescription());
+        result.put("operationType", task.getOperationType());
+        result.put("status", task.getStatus());
+        result.put("assigneeId", task.getAssignee());
+        result.put("assignee", resolveUserName(task.getAssignee()));
+        result.put("dueTime", formatDateTime(task.getDueTime()));
+        result.put("progress", task.getProgress());
+        result.put("sessionId", task.getSessionId());
+        result.put("config", parseOperationConfig(task.getConfig()));
+        result.put("agentIds", parseOperationJsonArray(task.getAgentSelection()));
+        result.put("workflow", parseOperationJsonArray(task.getWorkflow()));
+        result.put("createTime", formatDateTime(task.getCreateTime()));
+        return result;
+    }
+
+    /** 运营账号转为前端账号卡片使用的字段，指标JSON解析失败时按空对象返回。 */
+    private Map<String, Object> toOperationAccountMap(OperationAccount account) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("id", account.getAccountId());
+        result.put("accountId", account.getAccountId());
+        result.put("projectId", account.getProjectId());
+        result.put("platformCode", account.getPlatformCode());
+        result.put("accountCode", account.getAccountCode());
+        result.put("accountName", account.getAccountName());
+        result.put("loginStatus", account.getLoginStatus());
+        result.put("status", account.getStatus());
+        result.put("metrics", parseOperationConfig(account.getMetrics()));
+        result.put("canEdit", true);
+        return result;
+    }
+
+    /** 配置读取失败时返回空对象，避免历史坏数据阻断运营列表。 */
+    private Map<String, Object> parseOperationConfig(String config) {
+        if (StringUtils.isBlank(config)) {
+            return new HashMap<>();
+        }
+        try {
+            return JSON.parseObject(config);
+        }
+        catch (Exception exception) {
+            log.warn("[OperationRequirement] 配置JSON解析失败，返回空配置，config={}", config, exception);
+            return new HashMap<>();
+        }
+    }
+
+    /** JSON 数组字段读取失败时返回空数组，避免历史异常数据阻断运营任务列表。 */
+    private List<Object> parseOperationJsonArray(String value) {
+        if (StringUtils.isBlank(value)) {
+            return new ArrayList<>();
+        }
+        try {
+            return JSON.parseArray(value);
+        }
+        catch (Exception exception) {
+            log.warn("[OperationTask] JSON数组解析失败，返回空数组，value={}", value, exception);
+            return new ArrayList<>();
+        }
     }
 }

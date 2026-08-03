@@ -257,6 +257,99 @@ export const updateManualRequirement = (data: Omit<ManualRequirementPayload, 'pr
 export const deleteManualRequirement = (itemId: number) =>
   POST<any>('/byaiService/devloop/requirement/delete', { itemId });
 
+// 运营需求独立于研发扫描需求，三类需求的差异化字段统一收敛到 config，避免前端依赖数据库字段命名。
+export type OperationRequirementPayload = {
+  itemId?: number;
+  projectId?: number;
+  requirementName: string;
+  description?: string;
+  operationType: 'collect' | 'publish' | 'analyze';
+  assignee?: string | number;
+  dueTime?: string;
+  status?: 'todo' | 'launched' | 'doing' | 'pendingReview' | 'done' | 'cancelled';
+  progress?: number;
+  config?: Record<string, any>;
+};
+
+/** 创建运营需求；需求创建与后续执行运营任务分离，避免误走研发任务创建接口。 */
+export const createOperationRequirement = (data: OperationRequirementPayload) =>
+  POST<{ itemId: number }>('/byaiService/devloop/requirement/createOperationRequirement', data);
+
+/** 修改未启动运营需求；项目归属由后端根据 itemId 反查。 */
+export const updateOperationRequirement = (data: Omit<OperationRequirementPayload, 'projectId'> & { itemId: number }) =>
+  POST<void>('/byaiService/devloop/requirement/updateOperationRequirement', data);
+
+/** 按运营项目分页查询需求，后端负责名称的忽略大小写模糊搜索。 */
+export const listOperationRequirements = (data: {
+  projectId: number;
+  keyword?: string;
+  pageNum?: number;
+  pageSize?: number;
+}) => POST<DevloopTaskPage>('/byaiService/devloop/requirement/operation/list', data);
+
+/** 查询运营需求详情，供后续编辑和执行入口复用。 */
+export const getOperationRequirement = (itemId: number) =>
+  POST<any>('/byaiService/devloop/requirement/operation/get', { itemId });
+
+/** 删除未启动的运营需求。 */
+export const deleteOperationRequirement = (itemId: number) =>
+  POST<void>('/byaiService/devloop/requirement/operation/delete', { itemId });
+
+// 运营需求启动后会拆解为多个独立运营任务，任务与需求分别维护状态和执行会话。
+export type OperationTaskStartItem = {
+  title: string;
+  description?: string;
+  assignee: string | number;
+  dueTime?: string;
+};
+
+export const startOperationRequirement = (data: { requirementId: number; tasks: OperationTaskStartItem[] }) =>
+  POST<any[]>('/byaiService/devloop/requirement/operation/start', data);
+
+export const listOperationTasks = (data: {
+  projectId: number;
+  keyword?: string;
+  onlyMine?: boolean;
+  createTimeStart?: string;
+  createTimeEnd?: string;
+  status?: string;
+  pageNum?: number;
+  pageSize?: number;
+}) => POST<DevloopTaskPage>('/byaiService/devloop/operation/task/list', data);
+
+export const getOperationTask = (taskId: number) => POST<any>('/byaiService/devloop/operation/task/get', { taskId });
+
+export const executeOperationTask = (data: { taskId: number; agentIds: Array<string | number> }) =>
+  POST<{ taskId: number; sessionId: number }>('/byaiService/devloop/operation/task/execute', data);
+
+// 运营账号由项目维度独立维护，新增需求表单和账号管理大面板共用此数据源。
+export type OperationAccountPayload = {
+  accountId?: string | number;
+  projectId?: number;
+  platformCode: string;
+  accountCode: string;
+  accountName: string;
+};
+
+export const listOperationAccounts = (projectId: number) =>
+  POST<any[]>('/byaiService/devloop/operation/account/list', { projectId });
+
+export const createOperationAccount = (data: OperationAccountPayload) =>
+  POST<{ accountId: number }>('/byaiService/devloop/operation/account/create', data);
+
+export const updateOperationAccount = (data: OperationAccountPayload & { accountId: string | number }) =>
+  POST<void>('/byaiService/devloop/operation/account/update', data);
+
+export const deleteOperationAccount = (accountId: string | number) =>
+  POST<void>('/byaiService/devloop/operation/account/delete', { accountId });
+
+// UI Agent 登录完成后携带采集沙箱标识确认账号状态，服务端会校验沙箱归属。
+export const loginOperationAccount = (accountId: string | number, sandboxId: string) =>
+  POST<{ accountId: number; loginStatus: string }>('/byaiService/devloop/operation/account/login', {
+    accountId,
+    sandboxId,
+  });
+
 // PAT 管理
 export const saveGitHubPat = (pat: string) => POST<any>('/byaiService/devloop/pat/github', { pat });
 

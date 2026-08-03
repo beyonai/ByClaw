@@ -12,8 +12,6 @@ export type OperationCollectionMode = 'once' | 'periodic';
 
 export type OperationAnalysisScope = 'account' | 'works';
 
-export type OperationConfirmationRule = 'manual' | 'auto';
-
 export type OperationWorkflowStatus = 'pending' | 'in_progress' | 'waiting_confirmation' | 'completed' | 'failed';
 
 // 所有下拉选项复用基础结构，keywords 仅供前端筛选，不作为接口提交字段。
@@ -95,9 +93,7 @@ export interface OperationContentConfig {
   publishChannel?: string;
   publishAccountId?: OperationIdentifier;
   topic?: string;
-  plannedCount?: number;
   publishSchedule?: string;
-  confirmationRule?: OperationConfirmationRule;
 }
 
 export interface OperationAnalyzeConfig {
@@ -105,7 +101,6 @@ export interface OperationAnalyzeConfig {
   accountId?: OperationIdentifier;
   scope?: OperationAnalysisScope;
   workIds?: OperationIdentifier[];
-  dateRange?: OperationDateRange;
 }
 
 export interface OperationTaskFormValues {
@@ -114,16 +109,14 @@ export interface OperationTaskFormValues {
   taskType: OperationTaskType;
   assigneeId?: OperationIdentifier;
   dueTime?: Dayjs | null;
-  agentSelection?: OperationAgentSelection;
   collectConfig?: OperationCollectConfig;
   contentConfig?: OperationContentConfig;
   analyzeConfig?: OperationAnalyzeConfig;
 }
 
-// 任务表单的候选数据全部由容器加载，组件不内置模拟账号、成员或作品数据。
+// 需求表单的候选数据全部由容器加载，组件不内置模拟账号、成员或作品数据。
 export interface OperationTaskFormOptions {
   assignees?: OperationSelectOption[];
-  agents?: OperationAgentOption[];
   collectChannels?: OperationPlatformOption[];
   knowledgeBases?: OperationSelectOption[];
   directories?: OperationDirectoryOption[];

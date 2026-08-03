@@ -47,19 +47,28 @@ import dayjs from 'dayjs';
 import {
   checkDwsAuthStatus,
   checkDwsAuthStatusBySource,
+  createOperationAccount,
+  createOperationRequirement,
   checkGitHubPat,
   createManualRequirement,
   createProjectRepo,
   createScanSource,
   createTask,
   deleteManualRequirement,
+  deleteOperationAccount,
+  deleteOperationRequirement,
   deleteProjectSpaceFile,
   deleteProjectRepo,
   deleteScanSource,
+  getOperationRequirement,
   getProject,
   getTaskChanges,
   getTaskFileDiff,
   listProjectMembers,
+  listOperationAccounts,
+  loginOperationAccount,
+  listOperationRequirements,
+  listOperationTasks,
   listProjectSpaceFiles,
   listProjectSessionsByQo,
   listRequirementsByProject,
@@ -72,10 +81,14 @@ import {
   renameProjectSpaceFile,
   searchDingtalkGroups,
   startDwsDeviceAuth,
+  startOperationRequirement,
   toggleScanSource,
   triggerScan,
   updateManualRequirement,
+  updateOperationAccount,
+  updateOperationRequirement,
   updateScanSource,
+  executeOperationTask,
   type DevloopProjectSpaceFile,
   type DevloopTaskChanges,
   type DevloopTaskFileDiff,
@@ -83,16 +96,19 @@ import {
 import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
 import { queryMyCreatedAndSubscribedAgentsV2 } from '@/service/digitalEmployees';
 import { getResourceListByPage as listKnowledgeBases } from '@/service/knowledgeCenter';
+import { getSandboxInfo, launchSandboxByUserCode, navigateSandboxBrowser, type SandboxInfo } from '@/service/sandbox';
 import SessionOverviewDrawer from './SessionOverviewDrawer';
 import TaskDetailDrawer from './TaskDetailDrawer';
 import {
   OperationAccountPanel,
+  OperationRequirementStartModal,
   OperationTaskFormModal,
   OperationWorkflowTimeline,
   type OperationAccount,
   type OperationAccountFormValues,
   type OperationAgentOption,
   type OperationIdentifier,
+  type OperationRequirementStartTask,
   type OperationSelectOption,
   type OperationTaskFormValues,
   type OperationTaskType,
@@ -109,6 +125,7 @@ import ChatAvatar from '@/components/ChatAvatar';
 import RenameModal from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/RenameModal';
 import { DragType } from '@/components/QueryInput/withDrag';
 import useGlobal from '@/hooks/useGlobal';
+import useAppStore from '@/models/common/useAppStore';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
@@ -133,6 +150,7 @@ import {
   unwrapListResponse,
 } from '@/layout/sider/components/FileSiderPanel/utils';
 import { downloadFile as downloadUrlFile, getFileUrl } from '@/utils/file';
+import { getVNCUrl } from '@/utils/chat';
 import { sessionHandler } from '@/utils/session';
 import type { ISession } from '@/typescript/session';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
@@ -146,6 +164,18 @@ import styles from './index.module.less';
 import operationStyles from './operation/index.module.less';
 
 type SourceType = 'dingtalk' | 'dingtalk_todo' | 'github_issue';
+
+// 四个平台复用采集沙箱中的浏览器，登录入口只维护平台地址，不再创建独立 Recorder 会话。
+const OPERATION_PLATFORM_LOGIN_URLS: Record<string, string> = {
+  WeChatAccount: 'https://mp.weixin.qq.com/',
+  wechat: 'https://mp.weixin.qq.com/',
+  Xiaohongshu: 'https://creator.xiaohongshu.com/',
+  xiaohongshu: 'https://creator.xiaohongshu.com/',
+  WeChatChannels: 'https://channels.weixin.qq.com/',
+  video: 'https://channels.weixin.qq.com/',
+  Douyin: 'https://creator.douyin.com/',
+  douyin: 'https://creator.douyin.com/',
+};
 
 type ScanSourceItem = {
   sourceId: number;
@@ -375,9 +405,10 @@ const normalizeOperationAccounts = (detail?: OperationProjectDetailData | null):
   return getOperationAccountSource(detail)
     .map((item, index) => ({
       id: item.id ?? item.operationAccountId ?? item.accountPkId ?? item.accountId ?? `operation-account-${index}`,
-      platformId: `${item.platformId ?? item.platform ?? item.channelId ?? ''}`,
+      platformId: `${item.platformId ?? item.platformCode ?? item.platform ?? item.channelId ?? ''}`,
       accountName: item.accountName || item.name || '',
-      accountId: `${item.accountId ?? item.platformAccountId ?? item.accountCode ?? ''}`,
+      // 新接口的 accountId 是系统主键，平台侧标识优先读取 accountCode，避免卡片误展示数字主键。
+      accountId: `${item.accountCode ?? item.platformAccountId ?? item.platformAccountCode ?? item.accountId ?? ''}`,
       avatar: item.avatar,
       loginStatus: normalizeOperationLoginStatus(item),
       metrics: {
@@ -390,21 +421,6 @@ const normalizeOperationAccounts = (detail?: OperationProjectDetailData | null):
       canEdit: item.canEdit,
     }))
     .filter((item) => item.platformId && item.accountName);
-};
-
-// 作品与账号一起从项目详情读取，分析任务再按账号过滤可选作品。
-const getOperationWorks = (detail?: OperationProjectDetailData | null): OperationWorkOption[] => {
-  return getOperationAccountSource(detail).flatMap((account) => {
-    const accountId = account.id ?? account.operationAccountId ?? account.accountPkId ?? account.accountId;
-    const works = Array.isArray(account.works) ? account.works : [];
-    return works
-      .filter((work): work is Record<string, any> => !!work && typeof work === 'object')
-      .map((work, index) => ({
-        value: work.id ?? work.workId ?? `${accountId || 'account'}-work-${index}`,
-        label: work.title || work.name || `${work.id || work.workId || ''}`,
-        accountId,
-      }));
-  });
 };
 
 // 列表和详情需兼容后端的旧枚举值，前端统一显示三类运营任务。
@@ -469,6 +485,60 @@ const getOperationTaskConfig = (task: any, taskType: OperationTaskType): Record<
   const configKey =
     taskType === 'collect' ? 'collectConfig' : taskType === 'content' ? 'contentConfig' : 'analyzeConfig';
   return parseOperationConfig(task?.[configKey] || rootConfig[configKey] || rootConfig);
+};
+
+// 运营需求接口以扁平字段加 config 返回；编辑时恢复为表单的三类嵌套配置，避免直接依赖接口响应形态。
+const getOperationTaskInitialValues = (task: any): Partial<OperationTaskFormValues> => {
+  const taskType = normalizeOperationTaskType(task);
+  const config = getOperationTaskConfig(task, taskType);
+  const toValidDate = (value?: string) => {
+    const date = dayjs(value);
+    return date.isValid() ? date : null;
+  };
+  const toDateRange = (start?: string, end?: string) => {
+    const startDate = toValidDate(start);
+    const endDate = toValidDate(end);
+    return startDate || endDate ? ([startDate, endDate] as [dayjs.Dayjs | null, dayjs.Dayjs | null]) : null;
+  };
+
+  return {
+    taskName: task?.title || task?.taskName || task?.requirementName || '',
+    description: task?.description || '',
+    taskType,
+    assigneeId: task?.assigneeId ?? task?.assignee,
+    dueTime: toValidDate(task?.dueTime || task?.due || task?.deadline),
+    collectConfig:
+      taskType === 'collect'
+        ? {
+          ...config,
+          channel: config.channel ?? config.collectSource,
+          accountOrAddress: config.accountOrAddress ?? config.collectAccount,
+          topic: config.topic ?? config.collectTopic,
+          dateRange: toDateRange(config.startTime ?? config.collectStart, config.endTime ?? config.collectEnd),
+          mode: config.mode ?? config.collectMethod,
+          schedule: config.schedule ?? config.collectSchedule,
+          organize: Boolean(config.organize ?? config.knowledgeOrganization),
+          organizeTemplateId: config.organizeTemplateId ?? config.knowledgeOrganization?.templateId,
+        }
+        : undefined,
+    contentConfig:
+      taskType === 'content'
+        ? {
+          ...config,
+          topic: config.topic ?? config.publishTopic,
+        }
+        : undefined,
+    analyzeConfig:
+      taskType === 'analyze'
+        ? {
+          ...config,
+          platformId: config.platformId ?? config.analysisChannel,
+          accountId: config.accountId ?? config.analysisAccountId,
+          scope: config.scope ?? config.analysisType,
+          workIds: config.workIds ?? config.selectedWorks ?? config.selectedWorkIds,
+        }
+        : undefined,
+  };
 };
 
 // 执行数字员工可能以单值、逗号分隔字符串或数组返回，统一为数组后再进行名称匹配。
@@ -734,6 +804,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [sourceDwsStatusMap, setSourceDwsStatusMap] = useState<Record<number, SourceDwsStatus>>({});
   const [repos, setRepos] = useState<RepoOption[]>([]);
   const [requirements, setRequirements] = useState<RequirementItem[]>([]);
+  // 运营需求独立于研发扫描需求，启动后才会拆解为运营任务。
+  const [operationRequirements, setOperationRequirements] = useState<any[]>([]);
+  const [operationRequirementsLoading, setOperationRequirementsLoading] = useState(false);
+  const [operationRequirementsRefreshing, setOperationRequirementsRefreshing] = useState(false);
+  // 运营需求使用独立详情数据，避免复用研发扫描需求字段后展示无关的来源和评分信息。
+  const [operationRequirementDetail, setOperationRequirementDetail] = useState<any>(null);
+  const [operationRequirementDetailLoading, setOperationRequirementDetailLoading] = useState(false);
   const [requirementSearchKeyword, setRequirementSearchKeyword] = useState('');
   const [visibleRequirementCount, setVisibleRequirementCount] = useState(REQUIREMENT_PAGE_SIZE);
   const [detailReq, setDetailReq] = useState<RequirementItem | null>(null);
@@ -748,12 +825,25 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 运营任务表单依赖的账号、作品、知识库、数字员工均由详情容器统一加载和归一化。
   const [operationAccounts, setOperationAccounts] = useState<OperationAccount[]>([]);
   const [operationWorks, setOperationWorks] = useState<OperationWorkOption[]>([]);
+  const [operationAccountsLoading, setOperationAccountsLoading] = useState(false);
   const [operationKnowledgeBases, setOperationKnowledgeBases] = useState<OperationSelectOption[]>([]);
   const [operationAgents, setOperationAgents] = useState<OperationAgentOption[]>([]);
   const [operationOptionsLoading, setOperationOptionsLoading] = useState(false);
-  const [operationAgentsLoading, setOperationAgentsLoading] = useState(false);
   const [operationAccountSaving, setOperationAccountSaving] = useState(false);
+  const [operationAccountDeletingId, setOperationAccountDeletingId] = useState<OperationIdentifier | null>(null);
+  // 账号登录复用采集沙箱的远程桌面，面板内仅保留完成登录确认状态。
+  const [operationAccountLoginTarget, setOperationAccountLoginTarget] = useState<OperationAccount | null>(null);
+  const [operationAccountLoginPreparingId, setOperationAccountLoginPreparingId] = useState<OperationIdentifier | null>(
+    null
+  );
+  const [operationAccountLoginConfirming, setOperationAccountLoginConfirming] = useState(false);
+  const operationAccountLoginSandboxIdRef = useRef('');
   const [operationTaskSaving, setOperationTaskSaving] = useState(false);
+  const [operationRequirementStartTarget, setOperationRequirementStartTarget] = useState<any>(null);
+  const [operationRequirementStarting, setOperationRequirementStarting] = useState(false);
+  // 运营任务执行先复用研发任务的多仓库拆分确认弹窗，承接成员绑定的数字员工直接作为执行编排。
+  const [operationTaskSplitTarget, setOperationTaskSplitTarget] = useState<any>(null);
+  const [operationTaskExecuting, setOperationTaskExecuting] = useState(false);
   const [resourceFileScope, setResourceFileScope] = useState<ResourceFileScope>('current');
   const [sharedFiles, setSharedFiles] = useState<FileBrowserItem[]>([]);
   const [sharedFilesLoading, setSharedFilesLoading] = useState(false);
@@ -808,6 +898,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [operationAccountPanelOpen, setOperationAccountPanelOpen] = useState(false);
   // 运营任务使用独立表单弹窗，和账号大面板不能同时打开。
   const [operationTaskModalOpen, setOperationTaskModalOpen] = useState(false);
+  // 运营需求未启动前允许修改；保存时根据该状态决定调用新增还是编辑接口。
+  const [editingOperationTask, setEditingOperationTask] = useState<any>(null);
   const [channelSearchKeyword, setChannelSearchKeyword] = useState('');
   const [channelSources, setChannelSources] = useState<ScanSourceItem[]>([]);
   const [channelSourcesLoading, setChannelSourcesLoading] = useState(false);
@@ -854,10 +946,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const manualRequirementSubmittingRef = useRef(false);
   // 状态更新前先占用同步锁，避免运营任务表单双击时重复调用创建接口。
   const operationTaskSubmittingRef = useRef(false);
+  // 二次确认弹窗由 Promise 控制 loading，同步标记额外拦截重复触发删除请求。
+  const deletingOperationTaskIdRef = useRef<number | null>(null);
   // 删除确认弹窗返回 Promise 时会展示 loading；同步锁用于拦截重复确认。
   const deletingManualRequirementIdRef = useRef<number | null>(null);
   const resourceClickTimerRef = useRef<number | null>(null);
   const requirementQueryVersionRef = useRef(0);
+  // 连续点击不同运营需求时仅接收最后一次详情请求，防止慢请求覆盖当前抽屉内容。
+  const operationRequirementDetailRequestRef = useRef(0);
   const taskQueryRef = useRef<TaskQueryState>({
     pageNum: 1,
     pageSize: TASK_PAGE_SIZE,
@@ -883,21 +979,22 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 项目类型来自后端/静态参数，先按字符串归一，避免默认项目枚举声明不同步时报比较类型错误。
   const projectType = project?.projectType ? String(project.projectType) : undefined;
   // 详情标题与项目列表使用同一场景标签规则，研发项目优先于共享状态展示。
-  const projectScene = useMemo(() => {
+  const projectScenes = useMemo(() => {
     if (!project) return null;
     if (projectType === 'default') {
-      return { classSuffix: 'Default', text: intl.formatMessage({ id: 'projectSpace.scene.default' }) };
+      return [{ classSuffix: 'Default', text: intl.formatMessage({ id: 'projectSpace.scene.default' }) }];
     }
     if (projectType === 'develop') {
-      return { classSuffix: 'Development', text: intl.formatMessage({ id: 'projectSpace.scene.development' }) };
+      return [{ classSuffix: 'Development', text: intl.formatMessage({ id: 'projectSpace.scene.development' }) }];
     }
     if (projectType === 'operation') {
-      return { classSuffix: 'Operation', text: intl.formatMessage({ id: 'projectSpace.scene.operation' }) };
+      // 运营标签优先于共享范围展示，详情头部只保留一个项目类型标签。
+      return [{ classSuffix: 'Operation', text: intl.formatMessage({ id: 'projectSpace.scene.operation' }) }];
     }
     if (project.sharedFlag) {
-      return { classSuffix: 'Shared', text: intl.formatMessage({ id: 'projectSpace.scene.shared' }) };
+      return [{ classSuffix: 'Shared', text: intl.formatMessage({ id: 'projectSpace.scene.shared' }) }];
     }
-    return { classSuffix: 'Personal', text: intl.formatMessage({ id: 'projectSpace.scene.personal' }) };
+    return [{ classSuffix: 'Personal', text: intl.formatMessage({ id: 'projectSpace.scene.personal' }) }];
   }, [intl, project, projectType]);
   // 未配置研发项目时，即使存在历史 develop 数据也不展示研发闭环能力。
   const isDevelopProject = developProjectEnabled && projectType === 'develop';
@@ -909,8 +1006,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
     EventEmitter,
     previewClassName: fileSiderStyles.previewContent,
   });
-  // 需求只服务研发项目；运营项目固定展示任务、资源、成员三个页签。
-  const showRequirementsTab = isDevelopProject;
+  // 研发项目展示扫描需求；运营项目展示独立运营需求，两者共用需求页签但数据链路隔离。
+  const showRequirementsTab = isDevelopProject || isOperationProject;
   const showMembersTab = isDevelopProject || isOperationProject || !!project?.sharedFlag;
   const canEnterDetailTaskSession = useMemo(
     () => isCurrentUserTaskAssignee(detailTask, userInfo),
@@ -1157,6 +1254,26 @@ const ProjectDetailPanel: React.FC<Props> = ({
     [projectId]
   );
 
+  // 运营需求使用专表和专用接口查询，不能与研发扫描需求混用同一份列表数据。
+  const fetchOperationRequirements = useCallback(
+    async (keyword = '') => {
+      if (!projectId || !isOperationProject) return;
+      setOperationRequirementsLoading(true);
+      try {
+        const page = await listOperationRequirements({
+          projectId,
+          keyword: keyword.trim() || undefined,
+          pageNum: 1,
+          pageSize: TASK_PAGE_SIZE,
+        });
+        setOperationRequirements(Array.isArray(page?.list) ? page.list : []);
+      } finally {
+        setOperationRequirementsLoading(false);
+      }
+    },
+    [isOperationProject, projectId]
+  );
+
   const fetchTasks = useCallback(
     async ({ append = false, ...overrides }: TaskFetchOptions = {}) => {
       if (!projectId) return;
@@ -1181,14 +1298,25 @@ const ProjectDetailPanel: React.FC<Props> = ({
       taskRequestCountRef.current += 1;
       setTasksLoading(true);
       try {
-        const taskPage = await listTasks({
-          projectId,
-          pageNum: queryState.pageNum,
-          pageSize: queryState.pageSize,
-          createTimeStart: queryState.dateRange?.[0]?.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
-          createTimeEnd: queryState.dateRange?.[1]?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
-          taskName: queryState.taskName || undefined,
-        });
+        // 运营任务只读取运营任务表；研发与普通项目仍沿用既有任务/会话接口。
+        const taskPage = isOperationProject
+          ? await listOperationTasks({
+            projectId,
+            pageNum: queryState.pageNum,
+            pageSize: queryState.pageSize,
+            keyword: queryState.taskName || undefined,
+            onlyMine: false,
+            createTimeStart: queryState.dateRange?.[0]?.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
+            createTimeEnd: queryState.dateRange?.[1]?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
+          })
+          : await listTasks({
+            projectId,
+            pageNum: queryState.pageNum,
+            pageSize: queryState.pageSize,
+            createTimeStart: queryState.dateRange?.[0]?.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
+            createTimeEnd: queryState.dateRange?.[1]?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
+            taskName: queryState.taskName || undefined,
+          });
         // 筛选重置列表，触底请求只追加未出现过的任务，避免滚动事件重复触发产生重复卡片。
         if (queryVersion !== taskQueryVersionRef.current) return;
 
@@ -1213,7 +1341,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
         setTasksLoading(taskRequestCountRef.current > 0);
       }
     },
-    [projectId]
+    [isOperationProject, projectId]
   );
 
   const handleTaskSearchChange = useCallback(
@@ -1265,12 +1393,26 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const fetchRepos = useCallback(async () => {
     if (!projectId) return;
-    // 项目详情接口同时承载仓库与运营账号，后端字段落地后无需再改任务表单的数据入口。
+    // 仓库仍由项目详情接口提供；运营账号改为专用接口读取，避免依赖未稳定的详情扩展字段。
     const detail = await getProject(projectId);
     setRepos(detail?.repos || []);
-    setOperationAccounts(normalizeOperationAccounts(detail));
-    setOperationWorks(getOperationWorks(detail));
   }, [projectId]);
+
+  const fetchOperationAccounts = useCallback(async () => {
+    if (!projectId || !isOperationProject) return;
+    setOperationAccountsLoading(true);
+    try {
+      const accountList = await listOperationAccounts(projectId);
+      const normalizedAccounts = normalizeOperationAccounts({
+        operationAccounts: Array.isArray(accountList) ? accountList : [],
+      });
+      setOperationAccounts(normalizedAccounts);
+      // 作品同步接口尚未接入时不保留上一项目的作品缓存，避免分析任务错误选择跨项目作品。
+      setOperationWorks([]);
+    } finally {
+      setOperationAccountsLoading(false);
+    }
+  }, [isOperationProject, projectId]);
 
   useEffect(() => {
     if (
@@ -1311,7 +1453,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
   }, [projectId]);
 
   const fetchOperationAgents = useCallback(async () => {
-    setOperationAgentsLoading(true);
     try {
       const res = await queryMyCreatedAndSubscribedAgentsV2({ pageNum: 1, pageSize: 100 });
       // 请求封装通常直接返回 list，部分环境仍会保留一层 data，这里兼容两种响应形态。
@@ -1333,8 +1474,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
     } catch (error) {
       console.error('Failed to load operation agents:', error);
       setOperationAgents([]);
-    } finally {
-      setOperationAgentsLoading(false);
     }
   }, []);
 
@@ -1410,123 +1549,500 @@ const ProjectDetailPanel: React.FC<Props> = ({
     [members]
   );
 
-  // 将异步加载的数据收敛为表单唯一选项入口，避免子组件直接依赖多个接口响应。
+  // 拆分弹窗提交的是项目成员 ID；运营任务执行接口需要数字员工 ID，在此保留两者的稳定映射。
+  const operationMemberAgentIdMap = useMemo(() => {
+    const memberAgentMap = new Map<string, number>();
+    members.forEach((member) => {
+      const memberUserId = member.userId ?? member.targetId ?? member.id;
+      const agentId = Number(member.agentId);
+      if (
+        memberUserId !== undefined &&
+        memberUserId !== null &&
+        `${memberUserId}` !== '' &&
+        Number.isFinite(agentId) &&
+        agentId > 0
+      ) {
+        memberAgentMap.set(`${memberUserId}`, agentId);
+      }
+    });
+    return memberAgentMap;
+  }, [members]);
+
+  // 将异步加载的数据收敛为需求表单唯一选项入口；数字员工用于执行后的工作流展示，执行时由承接成员绑定关系自动映射。
   const operationTaskOptions = useMemo(
     () => ({
       assignees: operationAssigneeOptions,
-      agents: operationAgents,
       knowledgeBases: operationKnowledgeBases,
       accounts: operationAccounts,
       works: operationWorks,
     }),
-    [operationAccounts, operationAgents, operationAssigneeOptions, operationKnowledgeBases, operationWorks]
+    [operationAccounts, operationAssigneeOptions, operationKnowledgeBases, operationWorks]
   );
 
-  // 覆盖式账号面板关闭时必须同时清理右侧详情容器，避免遗留遮罩层。
-  const handleCloseOperationAccountPanel = useCallback(() => {
-    setOperationAccountPanelOpen(false);
-    clearDetailPanel?.();
-  }, [clearDetailPanel]);
+  // 关闭账号登录时同步收起全局远程桌面，避免切换账号或项目后保留旧平台页面。
+  const handleCloseOperationAccountRemoteDesktop = useCallback(() => {
+    operationAccountLoginSandboxIdRef.current = '';
+    setOperationAccountLoginTarget(null);
+    setOperationAccountLoginPreparingId(null);
+    setOperationAccountLoginConfirming(false);
+    EventEmitter.emit('beyond-main-driver-open-type', '');
+  }, [EventEmitter]);
 
-  // 账号管理只服务运营项目；打开前关闭任务详情和整体视图，防止多个大面板重叠。
+  // 覆盖式账号面板关闭时必须同时清理右侧详情容器和远程桌面，避免遗留遮罩层。
+  const handleCloseOperationAccountPanel = useCallback(() => {
+    handleCloseOperationAccountRemoteDesktop();
+    setOperationAccountPanelOpen(false);
+    setOperationAccountDeletingId(null);
+    clearDetailPanel?.();
+  }, [clearDetailPanel, handleCloseOperationAccountRemoteDesktop]);
+
+  // 账号管理只服务运营项目；打开前关闭需求详情、任务详情和整体视图，防止多个大面板重叠。
   const handleOpenOperationAccountPanel = useCallback(() => {
     if (!isOperationProject) return;
+    operationRequirementDetailRequestRef.current += 1;
+    setOperationRequirementDetail(null);
+    setOperationRequirementDetailLoading(false);
     setDetailTask(null);
     setTaskKanbanOpen(false);
     setOperationTaskModalOpen(false);
     setOperationAccountPanelOpen(true);
   }, [isOperationProject]);
 
-  // 专用账号接口尚未合入时先维护当前页面草稿，后续仅替换此处的保存实现即可。
+  // 账号管理与新增运营需求共用同一账号接口，保存成功后统一刷新，避免本地草稿与服务端数据不一致。
   const handleSaveOperationAccount = useCallback(
     async (values: OperationAccountFormValues, account?: OperationAccount | null) => {
+      if (!projectId) return;
       setOperationAccountSaving(true);
       try {
-        setOperationAccounts((currentAccounts) => {
-          if (account) {
-            return currentAccounts.map((currentAccount) =>
-              `${currentAccount.id}` === `${account.id}` ? { ...currentAccount, ...values } : currentAccount
-            );
-          }
-          return [
-            ...currentAccounts,
-            {
-              ...values,
-              id: `operation-account-${Date.now()}`,
-              loginStatus: 'logged_out',
-              canEdit: true,
-            },
-          ];
-        });
+        const payload = {
+          projectId,
+          platformCode: values.platformId,
+          accountCode: values.accountId,
+          accountName: values.accountName,
+        };
+        if (account) {
+          await updateOperationAccount({ ...payload, accountId: account.id });
+        } else {
+          await createOperationAccount(payload);
+        }
+        await fetchOperationAccounts();
         message.success(intl.formatMessage({ id: 'projectSpace.operation.account.saveSuccess' }));
       } finally {
         setOperationAccountSaving(false);
       }
     },
-    [intl]
+    [fetchOperationAccounts, intl, projectId]
   );
 
-  // 新建运营任务时重新读取关联资源，确保成员、账号、知识库和数字员工均为最新数据。
+  // 删除账号使用后端软删除；若账号正在登录，先关闭远程桌面避免继续操作已失效账号。
+  const handleDeleteOperationAccount = useCallback(
+    async (account: OperationAccount) => {
+      setOperationAccountDeletingId(account.id);
+      try {
+        await deleteOperationAccount(account.id);
+        if (`${operationAccountLoginTarget?.id ?? ''}` === `${account.id}`) {
+          handleCloseOperationAccountRemoteDesktop();
+        }
+        await fetchOperationAccounts();
+        message.success(intl.formatMessage({ id: 'projectSpace.operation.account.deleteSuccess' }));
+      } finally {
+        setOperationAccountDeletingId(null);
+      }
+    },
+    [fetchOperationAccounts, handleCloseOperationAccountRemoteDesktop, intl, operationAccountLoginTarget?.id]
+  );
+
+  // 优先复用采集流程已经启动的沙箱；首次使用尚无沙箱时按当前用户启动默认 openclaw 沙箱。
+  const resolveOperationAccountSandbox = useCallback(async (): Promise<SandboxInfo> => {
+    const currentSandboxes = await getSandboxInfo({});
+    const runningSandbox =
+      currentSandboxes.find((sandbox) => sandbox.status === 'RUNNING' && !!sandbox.sandboxId) ||
+      currentSandboxes.find((sandbox) => !!sandbox.sandboxId);
+    if (runningSandbox) {
+      useAppStore.setState({ sandboxesInfo: runningSandbox });
+      return runningSandbox;
+    }
+    if (!userInfo?.userCode) throw new Error('missing_user_code');
+    const launchedSandbox = await launchSandboxByUserCode({ userCode: userInfo.userCode, serviceKey: 'openclaw' });
+    const sandboxInfo: SandboxInfo = {
+      ...launchedSandbox,
+      userCode: userInfo.userCode,
+      sandboxType: 'byclaw',
+      status: 'RUNNING',
+    };
+    useAppStore.setState({ sandboxesInfo: sandboxInfo });
+    return sandboxInfo;
+  }, [userInfo?.userCode]);
+
+  // 沙箱准备完成后立即打开远程桌面，再异步导航登录页，避免导航等待期间用户看不到扫码入口。
+  const handleLoginOperationAccount = useCallback(
+    async (account: OperationAccount) => {
+      const loginUrl = OPERATION_PLATFORM_LOGIN_URLS[account.platformId];
+      if (!loginUrl || operationAccountLoginPreparingId !== null) return;
+      setOperationAccountLoginPreparingId(account.id);
+      try {
+        const sandboxInfo = await resolveOperationAccountSandbox();
+        operationAccountLoginSandboxIdRef.current = sandboxInfo.sandboxId;
+        setOperationAccountLoginTarget(account);
+        EventEmitter.emit('beyond-main-driver-open-type', {
+          drawerType: 'vnc',
+          title: intl.formatMessage({ id: 'projectSpace.operation.accountLogin.remoteDesktop' }),
+          canClose: true,
+          // 账号管理页保持原位，远程桌面只覆盖右侧区域，不参与主页面宽度计算。
+          overlay: true,
+          width: '50vw',
+        });
+        EventEmitter.emit('beyond-main-driver-message', {
+          url: getVNCUrl(sandboxInfo),
+        });
+        try {
+          await navigateSandboxBrowser({
+            sandboxId: sandboxInfo.sandboxId,
+            targetUrl: loginUrl,
+            sessionKey: `operation-account-${account.id}`,
+          });
+        } catch {
+          // 导航失败时保留远程桌面，用户仍可在沙箱浏览器中手工进入对应平台完成登录。
+          message.warning(intl.formatMessage({ id: 'projectSpace.operation.accountLogin.navigateFailed' }));
+        }
+      } catch {
+        message.error(intl.formatMessage({ id: 'projectSpace.operation.accountLogin.startFailed' }));
+      } finally {
+        setOperationAccountLoginPreparingId(null);
+      }
+    },
+    [EventEmitter, intl, operationAccountLoginPreparingId, resolveOperationAccountSandbox]
+  );
+
+  const handleConfirmOperationAccountLogin = useCallback(async () => {
+    const sandboxId = operationAccountLoginSandboxIdRef.current;
+    if (!operationAccountLoginTarget || !sandboxId || operationAccountLoginConfirming) return;
+    setOperationAccountLoginConfirming(true);
+    try {
+      await loginOperationAccount(operationAccountLoginTarget.id, sandboxId);
+      await fetchOperationAccounts();
+      message.success(intl.formatMessage({ id: 'projectSpace.operation.account.loginSuccess' }));
+      handleCloseOperationAccountRemoteDesktop();
+    } catch {
+      message.error(intl.formatMessage({ id: 'projectSpace.operation.accountLogin.confirmFailed' }));
+    } finally {
+      setOperationAccountLoginConfirming(false);
+    }
+  }, [
+    fetchOperationAccounts,
+    handleCloseOperationAccountRemoteDesktop,
+    intl,
+    operationAccountLoginConfirming,
+    operationAccountLoginTarget,
+  ]);
+
+  // 新增运营需求时重新读取关联资源，确保成员、账号和知识库均为最新数据。
   const handleOpenOperationTaskModal = useCallback(() => {
     if (!isOperationProject) return;
     if (operationAccountPanelOpen) handleCloseOperationAccountPanel();
+    setEditingOperationTask(null);
     setOperationTaskModalOpen(true);
-    // 表单选项来自现有成员、知识库和数字员工接口，打开时并行刷新以避免使用旧缓存。
-    void Promise.allSettled([fetchRepos(), fetchOperationAgents(), fetchOperationKnowledgeBases()]);
+    // 数字员工改到任务执行阶段选择，需求表单只刷新当前原型要求的关联资源。
+    void Promise.allSettled([fetchRepos(), fetchOperationAccounts(), fetchOperationKnowledgeBases()]);
   }, [
     fetchRepos,
-    fetchOperationAgents,
+    fetchOperationAccounts,
     fetchOperationKnowledgeBases,
     handleCloseOperationAccountPanel,
     isOperationProject,
     operationAccountPanelOpen,
   ]);
 
-  // 运营任务提交前统一序列化日期，并只携带当前任务类型对应的配置对象。
+  // 只有尚未启动的运营需求可以编辑；任务已拆解后需求配置需保持稳定以便追溯。
+  const handleOpenEditOperationTaskModal = useCallback(
+    (task: any) => {
+      if (!isOperationProject || task?.status !== 'todo') return;
+      setDetailTask(null);
+      setEditingOperationTask(task);
+      setOperationTaskModalOpen(true);
+    },
+    [isOperationProject]
+  );
+
+  // 运营需求提交前统一序列化日期，并将页面字段转换为运营需求接口约定的三类配置结构。
   const handleSubmitOperationTask = useCallback(
     async (values: OperationTaskFormValues) => {
       if (!projectId || operationTaskSubmittingRef.current) return;
+      const editingOperationTaskId = Number(editingOperationTask?.itemId ?? editingOperationTask?.taskId);
+      const isEditingOperationTask = Number.isFinite(editingOperationTaskId) && editingOperationTaskId > 0;
 
       // 表单保存 Dayjs，接口只接收标准时间字符串；开始、结束时间按整天边界计算。
       const serializeDateRange = (dateRange?: NonNullable<OperationTaskFormValues['collectConfig']>['dateRange']) => ({
         startTime: dateRange?.[0]?.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
         endTime: dateRange?.[1]?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
       });
-      const collectConfig = values.collectConfig
-        ? { ...values.collectConfig, ...serializeDateRange(values.collectConfig.dateRange), dateRange: undefined }
-        : undefined;
-      const analyzeConfig = values.analyzeConfig
-        ? { ...values.analyzeConfig, ...serializeDateRange(values.analyzeConfig.dateRange), dateRange: undefined }
-        : undefined;
+      const collectDateRange = serializeDateRange(values.collectConfig?.dateRange);
+      // 页面内部字段保留在配置中，同时补齐接口文档中的稳定字段名，后端执行能力可直接按该结构读取。
+      const config =
+        values.taskType === 'collect'
+          ? {
+            ...values.collectConfig,
+            dateRange: undefined,
+            ...collectDateRange,
+            collectSource: values.collectConfig?.channel,
+            collectAccount: values.collectConfig?.accountOrAddress,
+            collectTopic: values.collectConfig?.topic,
+            collectStart: collectDateRange.startTime?.slice(0, 10),
+            collectEnd: collectDateRange.endTime?.slice(0, 10),
+            collectMethod: values.collectConfig?.mode,
+            collectSchedule: values.collectConfig?.schedule,
+            knowledgeOrganization: values.collectConfig?.organize
+              ? { templateId: values.collectConfig?.organizeTemplateId }
+              : null,
+          }
+          : values.taskType === 'content'
+            ? {
+              ...values.contentConfig,
+              publishTopic: values.contentConfig?.topic,
+            }
+            : {
+              ...values.analyzeConfig,
+              analysisChannel: values.analyzeConfig?.platformId,
+              analysisAccountId: values.analyzeConfig?.accountId,
+              analysisType: values.analyzeConfig?.scope,
+              // selectedWorks 是运营需求接口约定字段；同时保留旧字段兼容后续执行服务的历史读取逻辑。
+              selectedWorks: values.analyzeConfig?.workIds || [],
+              selectedWorkIds: values.analyzeConfig?.workIds || [],
+            };
 
       operationTaskSubmittingRef.current = true;
       setOperationTaskSaving(true);
       try {
-        await createTask({
-          projectId,
-          title: values.taskName.trim(),
-          taskName: values.taskName.trim(),
+        const operationRequirementPayload = {
+          requirementName: values.taskName.trim(),
           description: values.description?.trim() || undefined,
-          taskType: values.taskType,
-          assigneeId: values.assigneeId,
+          operationType: values.taskType === 'content' ? 'publish' : values.taskType,
+          assignee: values.assigneeId,
           dueTime: values.dueTime?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
-          controllerAgentId: values.agentSelection?.controllerAgentId,
-          executorAgentIds: values.agentSelection?.executorAgentIds || [],
-          collectConfig,
-          contentConfig: values.contentConfig,
-          analyzeConfig,
-        });
-        message.success(intl.formatMessage({ id: 'projectSpace.operation.task.createSuccess' }));
+          // 编辑时保留当前状态与进度，避免只修改标题后意外重置运营需求状态。
+          status: isEditingOperationTask ? editingOperationTask.status : undefined,
+          progress: isEditingOperationTask ? editingOperationTask.progress : undefined,
+          config,
+        };
+        if (isEditingOperationTask) {
+          await updateOperationRequirement({ itemId: editingOperationTaskId, ...operationRequirementPayload });
+        } else {
+          await createOperationRequirement({ projectId, ...operationRequirementPayload });
+        }
+        message.success(
+          intl.formatMessage({
+            id: isEditingOperationTask
+              ? 'projectSpace.operation.requirement.updateSuccess'
+              : 'projectSpace.operation.requirement.createSuccess',
+          })
+        );
         setOperationTaskModalOpen(false);
-        await fetchTasks({ pageNum: 1 });
+        setEditingOperationTask(null);
+        await fetchOperationRequirements(requirementSearchKeyword.trim());
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'projectSpace.operation.task.createFailed' }));
+        message.error(
+          error?.message ||
+            intl.formatMessage({
+              id: isEditingOperationTask
+                ? 'projectSpace.operation.requirement.updateFailed'
+                : 'projectSpace.operation.requirement.createFailed',
+            })
+        );
       } finally {
         operationTaskSubmittingRef.current = false;
         setOperationTaskSaving(false);
       }
     },
-    [fetchTasks, intl, projectId]
+    [editingOperationTask, fetchOperationRequirements, intl, projectId, requirementSearchKeyword]
+  );
+
+  // 删除成功后先同步移除本地卡片，再异步刷新第一页，保证确认弹窗关闭后列表立即反馈结果。
+  const handleDeleteOperationTask = useCallback(
+    (task: any) => {
+      const itemId = Number(task?.itemId ?? task?.taskId);
+      if (
+        !Number.isFinite(itemId) ||
+        itemId <= 0 ||
+        task?.status !== 'todo' ||
+        deletingOperationTaskIdRef.current !== null
+      ) {
+        return;
+      }
+
+      Modal.confirm({
+        title: intl.formatMessage({ id: 'projectSpace.operation.requirement.deleteConfirmTitle' }),
+        content: intl.formatMessage(
+          { id: 'projectSpace.operation.requirement.deleteConfirm' },
+          { name: task?.title || task?.taskName || task?.requirementName || '' }
+        ),
+        okText: t('common.delete'),
+        cancelText: t('common.cancel'),
+        okButtonProps: { danger: true },
+        onOk: async () => {
+          if (deletingOperationTaskIdRef.current !== null) return;
+          deletingOperationTaskIdRef.current = itemId;
+          try {
+            await deleteOperationRequirement(itemId);
+            message.success(intl.formatMessage({ id: 'projectSpace.operation.requirement.deleteSuccess' }));
+            if (`${detailTask?.itemId ?? detailTask?.taskId}` === `${itemId}`) setDetailTask(null);
+            setOperationRequirements((currentTasks) =>
+              currentTasks.filter((currentTask) => `${currentTask.itemId ?? currentTask.taskId}` !== `${itemId}`)
+            );
+            void fetchOperationRequirements(requirementSearchKeyword.trim()).catch(() => {
+              // 删除接口已成功，刷新失败时保留本地移除结果，避免向用户误报删除失败。
+            });
+          } catch (error: any) {
+            message.error(
+              error?.message || intl.formatMessage({ id: 'projectSpace.operation.requirement.deleteFailed' })
+            );
+            throw error;
+          } finally {
+            deletingOperationTaskIdRef.current = null;
+          }
+        },
+      });
+    },
+    [detailTask, fetchOperationRequirements, intl, requirementSearchKeyword, t]
+  );
+
+  // 启动前先提供可编辑的默认拆解结果；运营需求和运营任务分表保存，避免把需求直接当任务执行。
+  const getOperationRequirementStartTasks = useCallback(
+    (requirement: any): OperationRequirementStartTask[] => {
+      const operationType = normalizeOperationTaskType(requirement);
+      const taskKeys =
+        operationType === 'collect'
+          ? ['collect', 'organize', 'archive']
+          : operationType === 'content'
+            ? ['create', 'review', 'publish']
+            : ['collect', 'analyze', 'report'];
+      const assignee = requirement?.assigneeId ?? requirement?.assignee;
+      return taskKeys.map((key) => ({
+        title: intl.formatMessage(
+          { id: `projectSpace.operation.requirementStart.template.${operationType}.${key}.title` },
+          { name: requirement?.title || '' }
+        ),
+        description: intl.formatMessage(
+          { id: `projectSpace.operation.requirementStart.template.${operationType}.${key}.description` },
+          { name: requirement?.title || '' }
+        ),
+        assignee,
+      }));
+    },
+    [intl]
+  );
+
+  // 运营需求只允许从待启动状态进入拆解确认，避免重复生成运营任务。
+  const handleOpenOperationRequirementStart = useCallback((requirement: any) => {
+    if (requirement?.status !== 'todo') return;
+    setOperationRequirementStartTarget(requirement);
+  }, []);
+
+  const closeOperationRequirementDetail = useCallback(() => {
+    operationRequirementDetailRequestRef.current += 1;
+    setOperationRequirementDetail(null);
+    setOperationRequirementDetailLoading(false);
+  }, []);
+
+  // 点击运营需求后先用列表数据立即打开抽屉，再读取详情接口补齐最新配置和状态。
+  const handleOpenOperationRequirementDetail = useCallback(
+    async (requirement: any) => {
+      const requirementId = Number(requirement?.itemId ?? requirement?.taskId);
+      if (!Number.isFinite(requirementId) || requirementId <= 0) return;
+      const requestId = ++operationRequirementDetailRequestRef.current;
+      setOperationRequirementDetail(requirement);
+      setOperationRequirementDetailLoading(true);
+      try {
+        const detail = await getOperationRequirement(requirementId);
+        if (requestId !== operationRequirementDetailRequestRef.current) return;
+        setOperationRequirementDetail({ ...requirement, ...(detail || {}) });
+      } catch (error) {
+        if (requestId !== operationRequirementDetailRequestRef.current) return;
+        console.error('Failed to load operation requirement detail:', error);
+        message.error(intl.formatMessage({ id: 'projectSpace.operation.requirement.detail.loadFailed' }));
+      } finally {
+        if (requestId === operationRequirementDetailRequestRef.current) {
+          setOperationRequirementDetailLoading(false);
+        }
+      }
+    },
+    [intl]
+  );
+
+  const handleSubmitOperationRequirementStart = useCallback(
+    async (tasksToStart: OperationRequirementStartTask[]) => {
+      const requirementId = Number(operationRequirementStartTarget?.itemId);
+      if (!Number.isFinite(requirementId) || requirementId <= 0) return;
+      setOperationRequirementStarting(true);
+      try {
+        await startOperationRequirement({
+          requirementId,
+          tasks: tasksToStart.map((task) => ({
+            title: task.title.trim(),
+            description: task.description?.trim() || undefined,
+            assignee: task.assignee!,
+            dueTime: operationRequirementStartTarget?.dueTime,
+          })),
+        });
+        message.success(intl.formatMessage({ id: 'projectSpace.operation.requirementStart.success' }));
+        setOperationRequirementStartTarget(null);
+        closeOperationRequirementDetail();
+        setActiveTab('tasks');
+        await Promise.all([fetchOperationRequirements(requirementSearchKeyword.trim()), fetchTasks({ pageNum: 1 })]);
+      } catch (error: any) {
+        message.error(
+          error?.message || intl.formatMessage({ id: 'projectSpace.operation.requirementStart.submitFailed' })
+        );
+      } finally {
+        setOperationRequirementStarting(false);
+      }
+    },
+    [
+      fetchOperationRequirements,
+      fetchTasks,
+      intl,
+      closeOperationRequirementDetail,
+      operationRequirementStartTarget,
+      requirementSearchKeyword,
+    ]
+  );
+
+  // 运营任务执行入口先进入与研发项目一致的多仓库拆分确认流程。
+  const handleOpenOperationTaskExecute = useCallback((task: any) => {
+    if (!task || task.sessionId || task.status !== 'todo') return;
+    setOperationTaskSplitTarget(task);
+  }, []);
+
+  // 多仓库拆分确认后，将承接成员绑定的数字员工直接传给执行接口，不再额外弹出数字员工选择。
+  const handleConfirmOperationTaskSplit = useCallback(
+    async (splitTasks: SplitTaskDraft[]) => {
+      const task = operationTaskSplitTarget;
+      if (!task) return;
+      const selectedMemberIds = splitTasks.map((splitTask) => splitTask.assigneeId).filter(Boolean);
+      const agentIds = Array.from(
+        new Set(selectedMemberIds.map((memberId) => operationMemberAgentIdMap.get(`${memberId}`)).filter(Boolean))
+      ) as number[];
+      if (agentIds.length !== new Set(selectedMemberIds.map((memberId) => `${memberId}`)).size) {
+        message.error(intl.formatMessage({ id: 'projectSpace.operation.execute.validation.assigneeAgentRequired' }));
+        return;
+      }
+
+      const taskId = Number(task.taskId);
+      if (!Number.isFinite(taskId) || taskId <= 0) return;
+      setOperationTaskExecuting(true);
+      try {
+        await executeOperationTask({ taskId, agentIds });
+        message.success(intl.formatMessage({ id: 'projectSpace.operation.execute.success' }));
+        setOperationTaskSplitTarget(null);
+        // 与研发任务保持一致：后台先创建会话并异步发送首条任务指令，不能在消息落库前立即进入会话，否则页面会先展示为空。
+        setDetailTask(null);
+        await Promise.all([fetchTasks({ pageNum: 1 }), fetchOperationAgents()]);
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'projectSpace.operation.execute.submitFailed' }));
+      } finally {
+        setOperationTaskExecuting(false);
+      }
+    },
+    [fetchOperationAgents, fetchTasks, intl, operationMemberAgentIdMap, operationTaskSplitTarget]
   );
 
   const handleExitProject = useCallback(() => {
@@ -2099,17 +2615,22 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const fetchDetailData = useCallback(async () => {
     if (!projectId) return;
     // 打开详情时并行请求当前可见 tab 需要的数据，成员 tab 隐藏时不额外查询成员。
-    const requirementPromise = showRequirementsTab
-      ? fetchSources().then((sourceList) => fetchRequirements(sourceList, ''))
-      : Promise.resolve();
+    const requirementPromise = isOperationProject
+      ? fetchOperationRequirements('')
+      : showRequirementsTab
+        ? fetchSources().then((sourceList) => fetchRequirements(sourceList, ''))
+        : Promise.resolve();
     const memberPromise = showMembersTab ? fetchMembers() : Promise.resolve();
-    await Promise.all([requirementPromise, fetchTasks(), memberPromise, fetchRepos()]);
+    await Promise.all([requirementPromise, fetchTasks(), memberPromise, fetchRepos(), fetchOperationAccounts()]);
   }, [
     fetchMembers,
+    fetchOperationAccounts,
+    fetchOperationRequirements,
     fetchRepos,
     fetchRequirements,
     fetchSources,
     fetchTasks,
+    isOperationProject,
     projectId,
     showMembersTab,
     showRequirementsTab,
@@ -2135,11 +2656,27 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setTasksRefreshLoading(false);
     setTasksLoadingMore(false);
     setOperationAccountPanelOpen(false);
+    setOperationAccountLoginTarget(null);
+    setOperationAccountLoginPreparingId(null);
+    setOperationAccountLoginConfirming(false);
+    if (operationAccountLoginSandboxIdRef.current) {
+      EventEmitter.emit('beyond-main-driver-open-type', '');
+    }
+    operationAccountLoginSandboxIdRef.current = '';
     setOperationTaskModalOpen(false);
     setOperationAccounts([]);
     setOperationAgents([]);
     setOperationKnowledgeBases([]);
     setOperationWorks([]);
+    setOperationRequirements([]);
+    setOperationRequirementsRefreshing(false);
+    operationRequirementDetailRequestRef.current += 1;
+    setOperationRequirementDetail(null);
+    setOperationRequirementDetailLoading(false);
+    setOperationRequirementStartTarget(null);
+    // 切换项目时关闭运营任务拆分弹窗，并清理可能残留的执行状态。
+    setOperationTaskSplitTarget(null);
+    setOperationTaskExecuting(false);
     setDetailTask(null);
     setActiveTab(showRequirementsTab ? 'requirements' : 'tasks');
     setDetailReq(null);
@@ -2147,13 +2684,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setVisibleRequirementCount(REQUIREMENT_PAGE_SIZE);
     startingRequirementIdsRef.current.clear();
     setStartingRequirementIds(new Set());
-    if (!showRequirementsTab) {
+    if (!isDevelopProject) {
       setSources([]);
       setRequirements([]);
       setLastLog(null);
     }
     fetchDetailData();
-  }, [fetchDetailData, showRequirementsTab]);
+  }, [EventEmitter, fetchDetailData, isDevelopProject, showRequirementsTab]);
 
   useEffect(() => {
     setResourceFileScope('current');
@@ -2239,8 +2776,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
     };
   }, []);
 
-  const hasRequirementVisibleData = sources.length > 0 || requirements.length > 0 || !!lastLog;
-  const requirementsTabLoading = sourcesLoading || requirementsLoading;
+  const hasRequirementVisibleData = isOperationProject
+    ? operationRequirements.length > 0
+    : sources.length > 0 || requirements.length > 0 || !!lastLog;
+  const requirementsTabLoading = isOperationProject
+    ? operationRequirementsLoading
+    : sourcesLoading || requirementsLoading;
   const visibleRequirements = useMemo(
     () => requirements.slice(0, visibleRequirementCount),
     [requirements, visibleRequirementCount]
@@ -2252,7 +2793,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     (activeTab === 'requirements' &&
       requirementsTabLoading &&
       !hasRequirementVisibleData &&
-      !requirementsRefreshLoading) ||
+      !(isOperationProject ? operationRequirementsRefreshing : requirementsRefreshLoading)) ||
     (activeTab === 'tasks' && tasksLoading && !tasks.length && !tasksRefreshLoading);
 
   const tabItems = useMemo(
@@ -2290,6 +2831,19 @@ const ProjectDetailPanel: React.FC<Props> = ({
   };
 
   const handleRefreshRequirements = useCallback(async () => {
+    if (isOperationProject) {
+      if (operationRequirementsRefreshing) return;
+      setOperationRequirementsRefreshing(true);
+      try {
+        await fetchOperationRequirements(requirementSearchKeyword.trim());
+      } catch (error) {
+        console.error('Failed to refresh operation requirements:', error);
+        message.error(intl.formatMessage({ id: 'projectSpace.operation.requirement.refreshFailed' }));
+      } finally {
+        setOperationRequirementsRefreshing(false);
+      }
+      return;
+    }
     if (!showRequirementsTab || requirementsRefreshLoading) return;
     setRequirementsRefreshLoading(true);
     try {
@@ -2302,7 +2856,18 @@ const ProjectDetailPanel: React.FC<Props> = ({
       // 手动刷新按钮只响应自己的刷新动作，避免打开渠道配置时拉渠道数据导致按钮转圈。
       setRequirementsRefreshLoading(false);
     }
-  }, [fetchRequirements, fetchSources, requirementSearchKeyword, requirementsRefreshLoading, showRequirementsTab, t]);
+  }, [
+    fetchOperationRequirements,
+    fetchRequirements,
+    fetchSources,
+    intl,
+    isOperationProject,
+    operationRequirementsRefreshing,
+    requirementSearchKeyword,
+    requirementsRefreshLoading,
+    showRequirementsTab,
+    t,
+  ]);
 
   const handleRequirementSearchChange = useCallback(
     (value: string) => {
@@ -2312,11 +2877,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
       // 与会话、任务列表统一在输入停顿后查询，避免每个字符都请求需求接口。
       requirementSearchTimerRef.current = setTimeout(() => {
-        void fetchRequirements(undefined, value.trim());
+        if (isOperationProject) {
+          void fetchOperationRequirements(value.trim());
+        } else {
+          void fetchRequirements(undefined, value.trim());
+        }
         requirementSearchTimerRef.current = null;
       }, 300);
     },
-    [fetchRequirements]
+    [fetchOperationRequirements, fetchRequirements, isOperationProject]
   );
 
   const handleRequirementSearchSubmit = useCallback(() => {
@@ -2324,8 +2893,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
       clearTimeout(requirementSearchTimerRef.current);
       requirementSearchTimerRef.current = null;
     }
-    void fetchRequirements(undefined, requirementSearchKeyword.trim());
-  }, [fetchRequirements, requirementSearchKeyword]);
+    if (isOperationProject) {
+      void fetchOperationRequirements(requirementSearchKeyword.trim());
+    } else {
+      void fetchRequirements(undefined, requirementSearchKeyword.trim());
+    }
+  }, [fetchOperationRequirements, fetchRequirements, isOperationProject, requirementSearchKeyword]);
 
   const handleRequirementListScroll = useCallback(
     (event: React.UIEvent<HTMLDivElement>) => {
@@ -3078,8 +3651,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
       // 渠道配置大面板只服务需求页签；切换到其他页签时立即移除右侧覆盖层。
       handleCloseChannelPanel();
     }
-    if (nextTab !== 'tasks' && operationAccountPanelOpen) {
-      // 账号管理仅属于运营项目任务页签，切换页签时立即收起覆盖层。
+    if (nextTab !== 'requirements' && operationAccountPanelOpen) {
+      // 账号管理仅属于运营项目需求页签，切换页签时立即收起覆盖层。
       handleCloseOperationAccountPanel();
     }
     setActiveTab(nextTab);
@@ -3166,18 +3739,35 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setDetailPanel?.(
       <OperationAccountPanel
         accounts={operationAccounts}
-        loading={false}
+        loading={operationAccountsLoading}
         savingAccount={operationAccountSaving}
+        loginTarget={operationAccountLoginTarget}
+        loginPreparingAccountId={operationAccountLoginPreparingId}
+        loginConfirming={operationAccountLoginConfirming}
+        deletingAccountId={operationAccountDeletingId}
         onBack={handleCloseOperationAccountPanel}
         onSaveAccount={handleSaveOperationAccount}
+        onLogin={handleLoginOperationAccount}
+        onConfirmLogin={handleConfirmOperationAccountLogin}
+        onCancelLogin={handleCloseOperationAccountRemoteDesktop}
+        onDeleteAccount={handleDeleteOperationAccount}
       />,
       overlayDetailPanelOptions
     );
   }, [
     handleCloseOperationAccountPanel,
+    handleCloseOperationAccountRemoteDesktop,
+    handleConfirmOperationAccountLogin,
+    handleDeleteOperationAccount,
+    handleLoginOperationAccount,
     handleSaveOperationAccount,
     operationAccountPanelOpen,
+    operationAccountLoginConfirming,
+    operationAccountLoginPreparingId,
+    operationAccountLoginTarget,
+    operationAccountDeletingId,
     operationAccountSaving,
+    operationAccountsLoading,
     operationAccounts,
     setDetailPanel,
   ]);
@@ -3189,10 +3779,16 @@ const ProjectDetailPanel: React.FC<Props> = ({
   }, [clearDetailPanel, operationAccountPanelOpen]);
 
   useEffect(() => {
-    if (!operationAccountPanelOpen || activeTab === 'tasks') return;
-    setOperationAccountPanelOpen(false);
-    clearDetailPanel?.();
-  }, [activeTab, clearDetailPanel, operationAccountPanelOpen]);
+    if (!operationAccountPanelOpen || activeTab === 'requirements') return;
+    // 账号管理入口已移动到运营需求 Tab，切换到其他 Tab 时再关闭覆盖式大页面。
+    handleCloseOperationAccountPanel();
+  }, [activeTab, handleCloseOperationAccountPanel, operationAccountPanelOpen]);
+
+  useEffect(() => {
+    if (!operationRequirementDetail || activeTab === 'requirements') return;
+    // 运营需求详情只属于需求 Tab，切换页面时同步关闭，避免抽屉覆盖其他业务内容。
+    closeOperationRequirementDetail();
+  }, [activeTab, closeOperationRequirementDetail, operationRequirementDetail]);
 
   // 详情抽屉底部启动入口:与列表「启动」按钮同源,读完需求内容可直接启动,无需退回列表 hover。
   const renderRequirementDetailFooter = (requirement: RequirementItem) => {
@@ -3327,6 +3923,442 @@ const ProjectDetailPanel: React.FC<Props> = ({
       </Drawer>
     );
   };
+
+  // 运营需求字段与研发扫描需求不同，详情抽屉按运营类型展示负责人、时间和类型专属配置。
+  const renderOperationRequirementDetailDrawer = () => {
+    if (!operationRequirementDetail) return null;
+    const requirement = operationRequirementDetail;
+    const operationType = normalizeOperationTaskType(requirement);
+    const config = getOperationTaskConfig(requirement, operationType);
+    const isStarted = requirement.status !== 'todo';
+    const dueTime = requirement.dueTime || requirement.due || requirement.deadline;
+    const createdAt = requirement.createTime || requirement.createdAt;
+    const rawProgress = Number(requirement.progress ?? 0);
+    const progress = Number.isFinite(rawProgress) ? Math.min(100, Math.max(0, rawProgress)) : 0;
+    const emptyValue = t('common.emptyValue');
+    const formatPlatform = (platformId?: string) => {
+      const platformKeyMap: Record<string, string> = {
+        WeChatAccount: 'wechat',
+        wechat: 'wechat',
+        Xiaohongshu: 'xiaohongshu',
+        xiaohongshu: 'xiaohongshu',
+        WeChatChannels: 'video',
+        video: 'video',
+        Douyin: 'douyin',
+        douyin: 'douyin',
+      };
+      const platformKey = platformKeyMap[`${platformId || ''}`];
+      if (platformKey) return intl.formatMessage({ id: `projectSpace.operation.platform.${platformKey}` });
+      if (platformId === 'Internet') {
+        return intl.formatMessage({ id: 'projectSpace.operation.taskForm.collect.channel.internet' });
+      }
+      if (platformId === 'GitHub') {
+        return intl.formatMessage({ id: 'projectSpace.operation.taskForm.collect.channel.github' });
+      }
+      return platformId || emptyValue;
+    };
+    const formatAccount = (accountId?: OperationIdentifier) => {
+      const account = operationAccounts.find(
+        (item) => `${item.id}` === `${accountId}` || `${item.accountId}` === `${accountId}`
+      );
+      return account?.accountName || (accountId !== undefined && accountId !== null ? `${accountId}` : emptyValue);
+    };
+    const formatDateRange = (start?: string, end?: string) => {
+      const values = [start, end]
+        .filter(Boolean)
+        .map((value) => (dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD') : value));
+      return values.length ? values.join(' - ') : emptyValue;
+    };
+    const configItems: Array<{ label: string; value: React.ReactNode }> = [];
+    let configTitleId = 'projectSpace.operation.taskForm.collect.title';
+
+    if (operationType === 'collect') {
+      const knowledgeBaseId = config.knowledgeBaseId;
+      const knowledgeBase = operationKnowledgeBases.find((item) => `${item.value}` === `${knowledgeBaseId}`);
+      const collectMode = config.mode ?? config.collectMethod;
+      configItems.push(
+        {
+          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectChannel' }),
+          value: formatPlatform(config.channel ?? config.collectSource),
+        },
+        {
+          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectAccountOrAddress' }),
+          value: config.accountOrAddress ?? config.collectAccount ?? emptyValue,
+        },
+        {
+          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectTopic' }),
+          value: config.topic ?? config.collectTopic ?? emptyValue,
+        },
+        {
+          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectDateRange' }),
+          value: formatDateRange(config.startTime ?? config.collectStart, config.endTime ?? config.collectEnd),
+        },
+        {
+          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.knowledgeBase' }),
+          value: knowledgeBase?.label || (knowledgeBaseId ? `${knowledgeBaseId}` : emptyValue),
+        },
+        {
+          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectMode' }),
+          value: collectMode
+            ? intl.formatMessage({ id: `projectSpace.operation.taskForm.collect.mode.${collectMode}` })
+            : emptyValue,
+        }
+      );
+    } else if (operationType === 'content') {
+      configTitleId = 'projectSpace.operation.taskForm.content.title';
+      const contentTypeKeyMap: Record<string, string> = {
+        'wechat-article': 'wechatArticle',
+        'xiaohongshu-post': 'xiaohongshuPost',
+        'short-video': 'shortVideo',
+      };
+      const contentTypeKey = contentTypeKeyMap[config.contentType];
+      configItems.push(
+        {
+          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.contentType' }),
+          value: contentTypeKey
+            ? intl.formatMessage({ id: `projectSpace.operation.taskForm.content.type.${contentTypeKey}` })
+            : config.contentType || emptyValue,
+        },
+        {
+          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.publishChannel' }),
+          value: formatPlatform(config.publishChannel),
+        },
+        {
+          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.publishAccount' }),
+          value: formatAccount(config.publishAccountId),
+        },
+        {
+          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.contentTopic' }),
+          value: config.topic ?? config.publishTopic ?? emptyValue,
+        },
+        {
+          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.publishSchedule' }),
+          value: config.publishSchedule || emptyValue,
+        }
+      );
+    } else {
+      configTitleId = 'projectSpace.operation.taskForm.analyze.title';
+      const analysisScope = config.scope ?? config.analysisType;
+      configItems.push(
+        {
+          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.analysisPlatform' }),
+          value: formatPlatform(config.platformId ?? config.analysisChannel),
+        },
+        {
+          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.analysisAccount' }),
+          value: formatAccount(config.accountId ?? config.analysisAccountId),
+        },
+        {
+          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.analysisScope' }),
+          value: analysisScope
+            ? intl.formatMessage({ id: `projectSpace.operation.taskForm.analyze.scope.${analysisScope}` })
+            : emptyValue,
+        }
+      );
+    }
+
+    return (
+      <Drawer
+        title={intl.formatMessage({ id: 'projectSpace.operation.requirement.detail.title' })}
+        className={styles.requirementDetailDrawer}
+        open
+        onClose={closeOperationRequirementDetail}
+        width={640}
+        footer={
+          <div className={styles.requirementDetailFooter}>
+            {isStarted ? (
+              <Button disabled>{intl.formatMessage({ id: 'projectSpace.operation.requirement.started' })}</Button>
+            ) : (
+              <Button
+                type="primary"
+                onClick={() => {
+                  closeOperationRequirementDetail();
+                  handleOpenOperationRequirementStart(requirement);
+                }}
+              >
+                {intl.formatMessage({ id: 'projectSpace.operation.requirement.start' })}
+              </Button>
+            )}
+          </div>
+        }
+      >
+        <Spin spinning={operationRequirementDetailLoading}>
+          <div className={styles.requirementDetailDrawerContent}>
+            <div className={styles.requirementDetailTitleRow}>
+              <div className={styles.requirementDetailTitle}>{requirement.title || requirement.requirementName}</div>
+              <Tag color={isStarted ? 'processing' : 'default'}>
+                {intl.formatMessage({
+                  id: isStarted
+                    ? 'projectSpace.operation.requirement.started'
+                    : 'projectSpace.detail.requirement.notStarted',
+                })}
+              </Tag>
+            </div>
+
+            <section className={styles.requirementDetailSection}>
+              <h3>{intl.formatMessage({ id: 'projectSpace.operation.requirement.detail.basicInfo' })}</h3>
+              <div className={styles.requirementDetailInfoGrid}>
+                <div className={styles.requirementDetailInfoItem}>
+                  <label>{intl.formatMessage({ id: 'projectSpace.operation.requirement.detail.id' })}</label>
+                  <span>{requirement.itemId || requirement.taskId || emptyValue}</span>
+                </div>
+                <div className={styles.requirementDetailInfoItem}>
+                  <label>{intl.formatMessage({ id: 'projectSpace.operation.requirement.detail.type' })}</label>
+                  <span>{intl.formatMessage({ id: `projectSpace.operation.task.type.${operationType}` })}</span>
+                </div>
+                <div className={styles.requirementDetailInfoItem}>
+                  <label>{intl.formatMessage({ id: 'projectSpace.operation.requirement.detail.assignee' })}</label>
+                  <span>{requirement.assigneeName || requirement.assignee || emptyValue}</span>
+                </div>
+                <div className={styles.requirementDetailInfoItem}>
+                  <label>{intl.formatMessage({ id: 'projectSpace.operation.requirement.detail.dueTime' })}</label>
+                  <span>{dueTime && dayjs(dueTime).isValid() ? dayjs(dueTime).format('YYYY-MM-DD') : emptyValue}</span>
+                </div>
+                <div className={styles.requirementDetailInfoItem}>
+                  <label>{intl.formatMessage({ id: 'projectSpace.operation.requirement.detail.createdAt' })}</label>
+                  <span>
+                    {createdAt && dayjs(createdAt).isValid() ? dayjs(createdAt).format('YYYY-MM-DD HH:mm') : emptyValue}
+                  </span>
+                </div>
+                <div className={styles.requirementDetailInfoItem}>
+                  <label>{intl.formatMessage({ id: 'projectSpace.operation.requirement.detail.progress' })}</label>
+                  <span>{progress}%</span>
+                </div>
+              </div>
+            </section>
+
+            <section className={styles.requirementDetailSection}>
+              <h3>{intl.formatMessage({ id: 'projectSpace.operation.requirement.detail.description' })}</h3>
+              <div className={styles.requirementDetailText}>
+                {requirement.description ||
+                  intl.formatMessage({ id: 'projectSpace.operation.requirementStart.emptyDescription' })}
+              </div>
+            </section>
+
+            <section className={styles.requirementDetailSection}>
+              <h3>{intl.formatMessage({ id: configTitleId })}</h3>
+              <div className={styles.requirementDetailInfoGrid}>
+                {configItems.map((item) => (
+                  <div key={item.label} className={styles.requirementDetailInfoItem}>
+                    <label>{item.label}</label>
+                    <span>{item.value}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        </Spin>
+      </Drawer>
+    );
+  };
+
+  const renderOperationRequirements = () => (
+    <div className={styles.detailRequirementsPanel}>
+      <div className={styles.detailRequirementsToolbar}>
+        <button
+          type="button"
+          className={operationStyles.operationAccountEntry}
+          onClick={handleOpenOperationAccountPanel}
+        >
+          <span className={operationStyles.operationAccountEntryLabel}>
+            <IdcardOutlined />
+            <span>{intl.formatMessage({ id: 'projectSpace.operation.account.entry' })}</span>
+          </span>
+          <RightOutlined />
+        </button>
+        <div className={styles.detailRequirementHeader}>
+          <div className={`${styles.searchInput} ${styles.detailRequirementSearch}`}>
+            <Input
+              allowClear
+              placeholder={intl.formatMessage({ id: 'projectSpace.operation.requirement.searchPlaceholder' })}
+              suffix={<SearchOutlined onClick={handleRequirementSearchSubmit} />}
+              value={requirementSearchKeyword}
+              onChange={(event) => handleRequirementSearchChange(event.target.value)}
+              onPressEnter={handleRequirementSearchSubmit}
+            />
+          </div>
+          <Space size={6}>
+            <Tooltip title={intl.formatMessage({ id: 'projectSpace.operation.requirement.new' })} placement="top">
+              <Button
+                aria-label={intl.formatMessage({ id: 'projectSpace.operation.requirement.new' })}
+                size="small"
+                className={`${styles.detailHeaderActionButton} ${styles.detailManualRequirementAddButton}`}
+                icon={<PlusOutlined />}
+                onClick={handleOpenOperationTaskModal}
+              />
+            </Tooltip>
+            <Tooltip title={t('common.refresh')} placement="top">
+              <Button
+                aria-label={t('common.refresh')}
+                size="small"
+                className={`${styles.detailHeaderActionButton} ${styles.detailRequirementRefreshButton}`}
+                icon={<ReloadOutlined />}
+                loading={operationRequirementsRefreshing}
+                disabled={operationRequirementsRefreshing}
+                onClick={handleRefreshRequirements}
+              />
+            </Tooltip>
+          </Space>
+        </div>
+      </div>
+      {/* 运营需求独立滚动，启动后刷新当前列表并由任务页展示拆解结果。 */}
+      <div className={styles.detailRequirementScroll}>
+        <Spin
+          spinning={
+            operationRequirementsLoading && operationRequirements.length > 0 && !operationRequirementsRefreshing
+          }
+        >
+          {operationRequirements.length ? (
+            <div className={styles.detailRequirementList}>
+              {operationRequirements.map((requirement) => {
+                const isTodo = requirement.status === 'todo';
+                const isActionOpen = openManualRequirementActionId === `operation-${requirement.itemId}`;
+                const actionItems: MenuProps['items'] = isTodo
+                  ? [
+                    {
+                      key: 'edit',
+                      icon: <EditOutlined />,
+                      label: intl.formatMessage({ id: 'projectSpace.operation.requirement.edit' }),
+                    },
+                    {
+                      key: 'delete',
+                      icon: <DeleteOutlined />,
+                      label: intl.formatMessage({ id: 'projectSpace.operation.requirement.delete' }),
+                      danger: true,
+                    },
+                  ]
+                  : [];
+                const dueTime =
+                  requirement.dueTime && dayjs(requirement.dueTime).isValid()
+                    ? dayjs(requirement.dueTime).format('YYYY-MM-DD')
+                    : '-';
+                const type = normalizeOperationTaskType(requirement);
+                return (
+                  <div
+                    key={requirement.itemId}
+                    className={`${styles.detailRequirementItem} ${
+                      isTodo ? styles.detailRequirementItemWithAction : ''
+                    }`}
+                    // 运营需求和研发需求保持一致，点击卡片主体在右侧打开完整详情。
+                    onClick={() => void handleOpenOperationRequirementDetail(requirement)}
+                  >
+                    <div className={styles.detailRequirementSummary}>
+                      <span className={styles.detailRequirementIcon}>
+                        <FileTextOutlined />
+                      </span>
+                      <div className={styles.detailRequirementMain}>
+                        <strong>{requirement.title || requirement.requirementName}</strong>
+                        <span>
+                          {intl.formatMessage({ id: `projectSpace.operation.task.type.${type}` })}
+                          {' · '}
+                          {requirement.assignee || '-'}
+                          {' · '}
+                          {dueTime}
+                        </span>
+                      </div>
+                      <div
+                        className={`${styles.detailRequirementActions} ${
+                          isActionOpen ? styles.detailRequirementActionsOpen : ''
+                        }`}
+                      >
+                        {isTodo && (
+                          <Button
+                            size="small"
+                            className={`${styles.detailRequirementAction} ${styles.detailRequirementStartAction}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleOpenOperationRequirementStart(requirement);
+                            }}
+                          >
+                            {intl.formatMessage({ id: 'projectSpace.operation.requirement.start' })}
+                          </Button>
+                        )}
+                        {!isTodo && (
+                          <span
+                            className={`${styles.detailRequirementAction} ${styles.detailRequirementStartedAction}`}
+                          >
+                            {intl.formatMessage({ id: 'projectSpace.operation.requirement.started' })}
+                          </span>
+                        )}
+                        {isTodo && (
+                          <Dropdown
+                            trigger={['hover']}
+                            placement="bottomRight"
+                            onOpenChange={(open) =>
+                              setOpenManualRequirementActionId(open ? `operation-${requirement.itemId}` : undefined)
+                            }
+                            menu={{
+                              items: actionItems,
+                              onClick: ({ key, domEvent }) => {
+                                domEvent.preventDefault();
+                                domEvent.stopPropagation();
+                                setOpenManualRequirementActionId(undefined);
+                                if (key === 'edit') {
+                                  handleOpenEditOperationTaskModal(requirement);
+                                } else if (key === 'delete') {
+                                  handleDeleteOperationTask(requirement);
+                                }
+                              },
+                            }}
+                          >
+                            <Button
+                              type="text"
+                              size="small"
+                              aria-label={intl.formatMessage({ id: 'projectSpace.operation.requirement.more' })}
+                              className={`${styles.detailRequirementMoreAction} ${
+                                isActionOpen ? styles.detailRequirementMoreActionOpen : ''
+                              }`}
+                              icon={<EllipsisOutlined />}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                              }}
+                            />
+                          </Dropdown>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {!operationRequirementsLoading && <ListEndMessage />}
+            </div>
+          ) : (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={intl.formatMessage({ id: 'projectSpace.operation.requirement.empty' })}
+            />
+          )}
+        </Spin>
+      </div>
+      {renderOperationRequirementDetailDrawer()}
+      <OperationTaskFormModal
+        open={operationTaskModalOpen}
+        mode={editingOperationTask ? 'edit' : 'create'}
+        entityLabel="requirement"
+        initialValues={editingOperationTask ? getOperationTaskInitialValues(editingOperationTask) : undefined}
+        options={operationTaskOptions}
+        loading={operationTaskSaving}
+        optionLoading={operationOptionsLoading}
+        onCancel={() => {
+          setOperationTaskModalOpen(false);
+          setEditingOperationTask(null);
+        }}
+        onSubmit={handleSubmitOperationTask}
+      />
+      <OperationRequirementStartModal
+        open={!!operationRequirementStartTarget}
+        requirement={operationRequirementStartTarget}
+        initialTasks={
+          operationRequirementStartTarget ? getOperationRequirementStartTasks(operationRequirementStartTarget) : []
+        }
+        assignees={operationAssigneeOptions}
+        loading={operationRequirementStarting}
+        onCancel={() => setOperationRequirementStartTarget(null)}
+        onSubmit={handleSubmitOperationRequirementStart}
+      />
+    </div>
+  );
 
   const renderRequirements = () => (
     <div className={styles.detailRequirementsPanel}>
@@ -3810,21 +4842,42 @@ const ProjectDetailPanel: React.FC<Props> = ({
     const platformId = `${
       operationTaskConfig.channel ||
       operationTaskConfig.publishChannel ||
+      operationTaskConfig.analysisChannel ||
       operationTaskConfig.platformId ||
       detailTask.platformId ||
       ''
     }`;
-    const knownPlatformIds = ['wechat', 'xiaohongshu', 'video', 'douyin'];
-    const platformLabel = knownPlatformIds.includes(platformId)
-      ? intl.formatMessage({ id: `projectSpace.operation.platform.${platformId}` })
+    // 任务配置保存后端 OPERATION_CHANNEL 编码，详情展示时再映射为国际化文本。
+    const operationPlatformLabelKeyMap: Record<string, string> = {
+      WeChatAccount: 'wechat',
+      Xiaohongshu: 'xiaohongshu',
+      WeChatChannels: 'video',
+      Douyin: 'douyin',
+    };
+    const platformLabelKey = operationPlatformLabelKeyMap[platformId];
+    const platformLabel = platformLabelKey
+      ? intl.formatMessage({ id: `projectSpace.operation.platform.${platformLabelKey}` })
       : platformId || '-';
     const operationAccountId =
-      operationTaskConfig.publishAccountId ?? operationTaskConfig.accountId ?? detailTask.operationAccountId;
-    const operationAccount = operationAccounts.find((account) => `${account.id}` === `${operationAccountId}`);
+      operationTaskConfig.publishAccountId ??
+      operationTaskConfig.analysisAccountId ??
+      operationTaskConfig.accountId ??
+      detailTask.operationAccountId;
+    const operationAccount = operationAccounts.find(
+      (account) => `${account.accountId}` === `${operationAccountId}` || `${account.id}` === `${operationAccountId}`
+    );
+    const rootOperationTaskConfig = parseOperationConfig(detailTask.operationConfig || detailTask.config);
     const controllerAgentId =
-      detailTask.controllerAgentId ?? detailTask.agentSelection?.controllerAgentId ?? detailTask.operationAgentId;
+      detailTask.controllerAgentId ??
+      detailTask.agentSelection?.controllerAgentId ??
+      rootOperationTaskConfig.agentSelection?.controllerAgentId ??
+      detailTask.operationAgentId;
     const executorAgentIdsValue =
-      detailTask.executorAgentIds ?? detailTask.agentSelection?.executorAgentIds ?? detailTask.operationAgentIds;
+      detailTask.agentIds ??
+      detailTask.executorAgentIds ??
+      detailTask.agentSelection?.executorAgentIds ??
+      rootOperationTaskConfig.agentSelection?.executorAgentIds ??
+      detailTask.operationAgentIds;
     const executorAgentIds = normalizeOperationIdentifierList(executorAgentIdsValue);
     const controllerAgent = operationAgents.find((agent) => `${agent.value}` === `${controllerAgentId}`);
     const executorAgentNames = operationAgents
@@ -3872,6 +4925,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 {intl.formatMessage({ id: 'projectSpace.operation.task.detail.viewSession' })}
               </Button>
             )
+          ) : detailTask.status === 'todo' ? (
+            <Button
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              onClick={() => handleOpenOperationTaskExecute(detailTask)}
+            >
+              {intl.formatMessage({ id: 'projectSpace.operation.execute.action' })}
+            </Button>
           ) : null
         }
       >
@@ -3916,7 +4977,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
               </div>
               <div className={styles.taskContextItem}>
                 <label>{intl.formatMessage({ id: 'projectSpace.operation.task.detail.topic' })}</label>
-                <strong>{operationTaskConfig.topic || '-'}</strong>
+                <strong>
+                  {operationTaskConfig.publishTopic ||
+                    operationTaskConfig.collectTopic ||
+                    operationTaskConfig.topic ||
+                    '-'}
+                </strong>
               </div>
               <div className={styles.taskContextItem}>
                 <label>{intl.formatMessage({ id: 'projectSpace.operation.task.detail.controllerAgent' })}</label>
@@ -3938,19 +5004,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const renderTasks = () => (
     <div className={styles.detailTaskPanel}>
       <div className={styles.detailTaskHeader}>
-        {isOperationProject && (
-          <button
-            type="button"
-            className={operationStyles.operationAccountEntry}
-            onClick={handleOpenOperationAccountPanel}
-          >
-            <span className={operationStyles.operationAccountEntryLabel}>
-              <IdcardOutlined />
-              <span>{intl.formatMessage({ id: 'projectSpace.operation.account.entry' })}</span>
-            </span>
-            <RightOutlined />
-          </button>
-        )}
         <div className={styles.detailTaskSearchRow}>
           <div className={`${styles.searchInput} ${styles.detailTaskSearch}`}>
             <Input
@@ -3975,10 +5028,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
             />
           </Tooltip>
         </div>
-        {/* 研发项目保留日期筛选；运营项目提供整体视图和新建任务入口。 */}
+        {/* 研发和运营任务均支持按创建日期筛选，并通过任务视图查看各状态分布。 */}
         {(isDevelopProject || isOperationProject) && (
           <div className={styles.detailTaskHeaderActions}>
-            {isDevelopProject && (
+            {(isDevelopProject || isOperationProject) && (
               <DatePicker.RangePicker
                 size="small"
                 allowClear
@@ -3990,28 +5043,25 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 }}
               />
             )}
-            {/* 两类任务都保留整体视图入口，筛选无结果时仍可查看空态看板。 */}
-            <Tooltip title={t('task.viewTooltip')} placement="top">
-              <Button
-                aria-label={t('task.viewTooltip')}
-                size="small"
-                className={`${styles.detailHeaderActionButton} ${styles.detailTaskViewButton}`}
-                icon={<AppstoreOutlined />}
-                onClick={() => {
-                  if (isOperationProject && operationAccountPanelOpen) handleCloseOperationAccountPanel();
-                  setTaskKanbanOpen(true);
-                }}
-              />
-            </Tooltip>
-            {/* 新建运营任务与新增需求保持一致，使用带悬停说明的紧凑图标按钮。 */}
-            {isOperationProject && (
-              <Tooltip title={intl.formatMessage({ id: 'projectSpace.operation.task.new' })} placement="top">
+            {isDevelopProject && (
+              <Tooltip title={t('task.viewTooltip')} placement="top">
                 <Button
-                  aria-label={intl.formatMessage({ id: 'projectSpace.operation.task.new' })}
+                  aria-label={t('task.viewTooltip')}
                   size="small"
-                  className={styles.detailHeaderActionButton}
-                  icon={<PlusOutlined />}
-                  onClick={handleOpenOperationTaskModal}
+                  className={`${styles.detailHeaderActionButton} ${styles.detailTaskViewButton}`}
+                  icon={<AppstoreOutlined />}
+                  onClick={() => setTaskKanbanOpen(true)}
+                />
+              </Tooltip>
+            )}
+            {isOperationProject && (
+              <Tooltip title={t('task.viewTooltip')} placement="top">
+                <Button
+                  aria-label={t('task.viewTooltip')}
+                  size="small"
+                  className={`${styles.detailHeaderActionButton} ${styles.detailTaskViewButton}`}
+                  icon={<AppstoreOutlined />}
+                  onClick={() => setTaskKanbanOpen(true)}
                 />
               </Tooltip>
             )}
@@ -4058,6 +5108,18 @@ const ProjectDetailPanel: React.FC<Props> = ({
                   // 下拉菜单展开时维持状态标签的让位，防止悬浮菜单遮挡右侧内容。
                   const isTaskActionOpen = openTaskActionId === `${task.taskId}`;
                   const isTaskSelected = selectedTaskId === `${task.taskId}`;
+                  const operationTaskActionItems: MenuProps['items'] = [
+                    // 运营任务未启动时将“启动”放在详情前，并保持菜单文案简洁。
+                    ...(isOperationProject && task.status === 'todo' && !task.sessionId
+                      ? [
+                        {
+                          key: 'execute',
+                          label: intl.formatMessage({ id: 'projectSpace.operation.execute.action' }),
+                        },
+                      ]
+                      : []),
+                    { key: 'view-detail', label: t('task.viewDetail') },
+                  ];
 
                   return (
                     <div
@@ -4071,7 +5133,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
                           // 从账号管理返回任务会话时先释放覆盖层，避免进入会话后仍遮挡主区域。
                           handleCloseOperationAccountPanel();
                         }
-                        // 研发项目仅允许处理人进入会话，其他成员打开只读任务详情。
+                        // 未启动运营需求没有会话，主点击直接打开详情；研发任务仍按处理人控制进入会话。
+                        if (isOperationProject && !task.sessionId) {
+                          handleOpenTaskDetail(task);
+                          return;
+                        }
                         if (isDevelopProject && !isCurrentUserAssignee) {
                           handleOpenTaskDetail(task);
                           return;
@@ -4130,13 +5196,17 @@ const ProjectDetailPanel: React.FC<Props> = ({
                             placement="bottomRight"
                             onOpenChange={(open) => setOpenTaskActionId(open ? `${task.taskId}` : undefined)}
                             menu={{
-                              items: [{ key: 'view-detail', label: t('task.viewDetail') }],
-                              onClick: ({ domEvent }) => {
+                              items: operationTaskActionItems,
+                              onClick: ({ key, domEvent }) => {
                                 domEvent.preventDefault();
                                 domEvent.stopPropagation();
                                 setSelectedTaskId(`${task.taskId}`);
                                 setOpenTaskActionId(undefined);
-                                handleOpenTaskDetail(task);
+                                if (key === 'execute') {
+                                  handleOpenOperationTaskExecute(task);
+                                } else {
+                                  handleOpenTaskDetail(task);
+                                }
                               },
                             }}
                           >
@@ -4181,17 +5251,20 @@ const ProjectDetailPanel: React.FC<Props> = ({
         </Spin>
       </div>
 
-      <SessionOverviewDrawer
-        open={taskKanbanOpen}
-        onClose={() => setTaskKanbanOpen(false)}
-        projectId={projectId}
-        // 整体任务视图沿用任务列表的处理人校验和进入会话逻辑。
-        canEnterSession={(task) => isCurrentUserTaskAssignee(task, userInfo)}
-        onEnterSession={(task) => {
-          handleOpenTaskSession(task);
-          setTaskKanbanOpen(false);
-        }}
-      />
+      {(isDevelopProject || isOperationProject) && (
+        <SessionOverviewDrawer
+          open={taskKanbanOpen}
+          onClose={() => setTaskKanbanOpen(false)}
+          projectId={projectId}
+          operationProject={isOperationProject}
+          // 整体任务视图沿用任务列表的处理人校验和进入会话逻辑。
+          canEnterSession={(task) => isCurrentUserTaskAssignee(task, userInfo)}
+          onEnterSession={(task) => {
+            handleOpenTaskSession(task);
+            setTaskKanbanOpen(false);
+          }}
+        />
+      )}
 
       {isOperationProject ? (
         renderOperationTaskDetailDrawer()
@@ -4208,18 +5281,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
             handleOpenReadonlySession(task);
             setDetailTask(null);
           }}
-        />
-      )}
-
-      {isOperationProject && (
-        <OperationTaskFormModal
-          open={operationTaskModalOpen}
-          options={operationTaskOptions}
-          loading={operationTaskSaving}
-          optionLoading={operationOptionsLoading}
-          agentLoading={operationAgentsLoading}
-          onCancel={() => setOperationTaskModalOpen(false)}
-          onSubmit={handleSubmitOperationTask}
         />
       )}
     </div>
@@ -4252,7 +5313,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       }
       return renderTasks();
     }
-    return renderRequirements();
+    return isOperationProject ? renderOperationRequirements() : renderRequirements();
   };
 
   const renderAddSourceModal = () => (
@@ -4873,7 +5934,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   );
 
   const detailActionItems: MenuProps['items'] = [
-    ...(showRequirementsTab ? [{ key: 'add-source', label: t('source.addTitle') }] : []),
+    // 运营项目通过“新增需求”维护运营需求，不提供研发扫描渠道入口。
+    ...(showRequirementsTab && !isOperationProject ? [{ key: 'add-source', label: t('source.addTitle') }] : []),
     // 研发项目一个项目挂多个仓库,提供独立的仓库管理入口(列表 + 新增,复用仓库弹窗)。
     ...(isDevelopProject ? [{ key: 'manage-repos', label: t('repository.manageTitle') }] : []),
     ...(onEditProject ? [{ key: 'edit-project', label: t('project.edit') }] : []),
@@ -4935,15 +5997,18 @@ const ProjectDetailPanel: React.FC<Props> = ({
           ) : (
             <h3>{project?.projectName || t('project.detailTitle')}</h3>
           )}
-          {projectScene && (
-            <Tag
-              bordered={false}
-              className={`${styles.projectTag} ${styles[`projectTag${projectScene.classSuffix}`]} ${
-                styles.detailProjectSceneTag
-              }`}
-            >
-              {projectScene.text}
-            </Tag>
+          {projectScenes && (
+            <span className={`${styles.projectTagGroup} ${styles.detailProjectSceneTag}`}>
+              {projectScenes.map((scene) => (
+                <Tag
+                  key={scene.classSuffix}
+                  bordered={false}
+                  className={`${styles.projectTag} ${styles[`projectTag${scene.classSuffix}`]}`}
+                >
+                  {scene.text}
+                </Tag>
+              ))}
+            </span>
           )}
         </div>
         <div className={styles.detailPanelActions}>
@@ -4972,17 +6037,40 @@ const ProjectDetailPanel: React.FC<Props> = ({
       {renderAddSourceModal()}
       {renderManualRequirementModal()}
       <RequirementSplitModal
-        open={splitRequirement !== null}
+        open={splitRequirement !== null || operationTaskSplitTarget !== null}
         requirement={
-          splitRequirement
-            ? { title: splitRequirement.title, description: getRequirementDetailText(splitRequirement, t) }
+          splitRequirement || operationTaskSplitTarget
+            ? {
+              title: (splitRequirement || operationTaskSplitTarget).title,
+              description: splitRequirement
+                ? getRequirementDetailText(splitRequirement, t)
+                : operationTaskSplitTarget.description,
+            }
             : null
         }
         repos={repos}
         members={operationAssigneeOptions}
-        confirmLoading={splitRequirement ? startingRequirementIds.has(splitRequirement.itemId) : false}
-        onCancel={() => setSplitRequirement(null)}
-        onConfirm={handleConfirmSplit}
+        confirmLoading={
+          operationTaskSplitTarget
+            ? operationTaskExecuting
+            : splitRequirement
+              ? startingRequirementIds.has(splitRequirement.itemId)
+              : false
+        }
+        onCancel={() => {
+          if (operationTaskSplitTarget) {
+            setOperationTaskSplitTarget(null);
+            return;
+          }
+          setSplitRequirement(null);
+        }}
+        onConfirm={(splitTasks) => {
+          if (operationTaskSplitTarget) {
+            void handleConfirmOperationTaskSplit(splitTasks);
+            return;
+          }
+          void handleConfirmSplit(splitTasks);
+        }}
       />
       {renderRepoModal()}
       {renderDwsAuthModal()}

@@ -1,28 +1,26 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DatePicker, Form, Input, InputNumber, Modal, Radio, Select, Switch, message } from 'antd';
+import { DatePicker, Form, Input, Modal, Radio, Select, Switch, message } from 'antd';
 import { useIntl } from '@umijs/max';
-import OperationAgentSelector from './OperationAgentSelector';
 import type {
   OperationAccount,
-  OperationAgentSelection,
   OperationIdentifier,
   OperationPlatformOption,
   OperationSelectOption,
   OperationTaskFormOptions,
   OperationTaskFormValues,
-  OperationTaskType,
 } from './types';
 import styles from './index.module.less';
 
-// 三类运营任务复用此弹窗；父组件负责提供项目成员、账号、知识库和数字员工等动态选项。
+// 三类运营需求复用此弹窗；父组件负责提供项目成员、账号和知识库等动态选项。
 export interface OperationTaskFormModalProps {
   open: boolean;
   mode?: 'create' | 'edit';
+  // 同一套三类配置表单可用于运营需求或历史运营任务，标题和提交文案按实体区分。
+  entityLabel?: 'task' | 'requirement';
   initialValues?: Partial<OperationTaskFormValues>;
   options?: OperationTaskFormOptions;
   loading?: boolean;
   optionLoading?: boolean;
-  agentLoading?: boolean;
   onCancel: () => void;
   onSubmit: (values: OperationTaskFormValues) => void | Promise<void>;
 }
@@ -36,11 +34,11 @@ const isFormValidationError = (error: unknown) => typeof error === 'object' && e
 const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
   open,
   mode = 'create',
+  entityLabel = 'task',
   initialValues,
   options = {},
   loading = false,
   optionLoading = false,
-  agentLoading = false,
   onCancel,
   onSubmit,
 }) => {
@@ -73,25 +71,16 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
       taskName: '',
       description: '',
       taskType: 'collect',
-      agentSelection: { executorAgentIds: [] },
       collectConfig: { mode: 'once', organize: false },
-      contentConfig: { plannedCount: 1, confirmationRule: 'manual' },
+      contentConfig: {},
       analyzeConfig: { scope: 'account' },
       ...initialValues,
-      agentSelection: {
-        executorAgentIds: [],
-        ...initialValues?.agentSelection,
-      },
       collectConfig: {
         mode: 'once',
         organize: false,
         ...initialValues?.collectConfig,
       },
-      contentConfig: {
-        plannedCount: 1,
-        confirmationRule: 'manual',
-        ...initialValues?.contentConfig,
-      },
+      contentConfig: { ...initialValues?.contentConfig },
       analyzeConfig: {
         scope: 'account',
         ...initialValues?.analyzeConfig,
@@ -101,26 +90,27 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
   );
   const defaultPlatformOptions = useMemo<OperationPlatformOption[]>(
     () => [
-      { value: 'wechat', label: platformT('wechat') },
-      { value: 'xiaohongshu', label: platformT('xiaohongshu') },
-      { value: 'video', label: platformT('video') },
-      { value: 'douyin', label: platformT('douyin') },
+      // 平台值与 OPERATION_CHANNEL 静态参数及运营需求接口保持一致，展示文本仍由国际化键决定。
+      { value: 'WeChatAccount', label: platformT('wechat') },
+      { value: 'Xiaohongshu', label: platformT('xiaohongshu') },
+      { value: 'WeChatChannels', label: platformT('video') },
+      { value: 'Douyin', label: platformT('douyin') },
     ],
     [platformT]
   );
   const defaultCollectChannels = useMemo<OperationPlatformOption[]>(
     () => [
       ...defaultPlatformOptions.slice(0, 3),
-      { value: 'internet', label: t('collect.channel.internet') },
-      { value: 'github', label: t('collect.channel.github') },
+      { value: 'Internet', label: t('collect.channel.internet') },
+      { value: 'GitHub', label: t('collect.channel.github') },
     ],
     [defaultPlatformOptions, t]
   );
   const defaultContentTypes = useMemo<OperationSelectOption<string>[]>(
     () => [
-      { value: 'wechat_article', label: t('content.type.wechatArticle') },
-      { value: 'xiaohongshu_post', label: t('content.type.xiaohongshuPost') },
-      { value: 'short_video', label: t('content.type.shortVideo') },
+      { value: 'wechat-article', label: t('content.type.wechatArticle') },
+      { value: 'xiaohongshu-post', label: t('content.type.xiaohongshuPost') },
+      { value: 'short-video', label: t('content.type.shortVideo') },
     ],
     [t]
   );
@@ -129,6 +119,32 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
   const analysisPlatforms = options.analysisPlatforms?.length ? options.analysisPlatforms : defaultPlatformOptions;
   const contentTypes = options.contentTypes?.length ? options.contentTypes : defaultContentTypes;
   const isSubmitting = loading || submitting;
+  const modalTitle = intl.formatMessage({
+    id:
+      entityLabel === 'requirement'
+        ? mode === 'edit'
+          ? 'projectSpace.operation.requirement.form.editTitle'
+          : 'projectSpace.operation.requirement.form.createTitle'
+        : `projectSpace.operation.taskForm.${mode === 'edit' ? 'editTitle' : 'createTitle'}`,
+  });
+  const submitText = intl.formatMessage({
+    id:
+      entityLabel === 'requirement'
+        ? mode === 'edit'
+          ? 'projectSpace.operation.requirement.form.save'
+          : 'projectSpace.operation.requirement.form.create'
+        : `projectSpace.operation.taskForm.${mode === 'edit' ? 'save' : 'create'}`,
+  });
+  const entityT = useCallback(
+    (id: string) =>
+      intl.formatMessage({
+        id:
+          entityLabel === 'requirement'
+            ? `projectSpace.operation.requirement.form.${id}`
+            : `projectSpace.operation.taskForm.${id}`,
+      }),
+    [entityLabel, intl]
+  );
 
   // 发布和分析共用账号池，但必须按当前平台过滤，避免跨平台账号被提交到任务配置。
   const getAccountOptions = useCallback(
@@ -136,7 +152,8 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
       accounts
         .filter((account) => !platformId || account.platformId === platformId)
         .map((account) => ({
-          value: account.id,
+          // 运营需求配置需保存平台侧账号编码，而非本系统账号主键，后续执行服务可直接使用。
+          value: account.accountId,
           label: t('accountOption', { name: account.accountName, id: account.accountId }),
         })),
     [t]
@@ -180,7 +197,7 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
   useEffect(() => {
     if (!open || !publishChannel || !options.accounts?.length) return;
     const selectedAccountId = form.getFieldValue(['contentConfig', 'publishAccountId']);
-    const selectedAccount = options.accounts.find((account) => `${account.id}` === `${selectedAccountId}`);
+    const selectedAccount = options.accounts.find((account) => `${account.accountId}` === `${selectedAccountId}`);
     if (selectedAccount && selectedAccount.platformId !== publishChannel) {
       // 发布渠道一次只允许选择一个，切换渠道后清理原渠道账号，
       // 避免提交不一致的渠道和账号组合。
@@ -191,7 +208,7 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
   useEffect(() => {
     if (!open || !analysisPlatformId || !options.accounts?.length) return;
     const selectedAccountId = form.getFieldValue(['analyzeConfig', 'accountId']);
-    const selectedAccount = options.accounts.find((account) => `${account.id}` === `${selectedAccountId}`);
+    const selectedAccount = options.accounts.find((account) => `${account.accountId}` === `${selectedAccountId}`);
     if (selectedAccount && selectedAccount.platformId !== analysisPlatformId) {
       // 分析平台变化时同步清理账号和作品，防止把旧平台作品带入新任务。
       form.setFieldsValue({
@@ -260,19 +277,6 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
     if (!isSubmitting) onCancel();
   }, [isSubmitting, onCancel]);
 
-  const validateAgentSelection = useCallback(
-    (_: unknown, value?: OperationAgentSelection) => {
-      if (!hasIdentifier(value?.controllerAgentId)) {
-        return Promise.reject(new Error(t('validation.controllerAgentRequired')));
-      }
-      if (!value?.executorAgentIds?.length) {
-        return Promise.reject(new Error(t('validation.executorAgentRequired')));
-      }
-      return Promise.resolve();
-    },
-    [t]
-  );
-
   const renderCollectFields = () => (
     <section className={styles.operationTaskSection}>
       <h3>{t('collect.title')}</h3>
@@ -292,7 +296,6 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
           <Input placeholder={t('placeholder.collectAccountOrAddress')} />
         </Form.Item>
         <Form.Item
-          className={styles.operationFormFull}
           label={t('field.collectTopic')}
           name={['collectConfig', 'topic']}
           rules={[{ required: true, whitespace: true, message: t('validation.collectTopicRequired') }]}
@@ -300,7 +303,6 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
           <Input placeholder={t('placeholder.collectTopic')} />
         </Form.Item>
         <Form.Item
-          className={styles.operationFormFull}
           label={t('field.collectDateRange')}
           name={['collectConfig', 'dateRange']}
           rules={[{ required: true, message: t('validation.collectDateRangeRequired') }]}
@@ -399,6 +401,7 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
           <Select options={publishChannels} loading={optionLoading} placeholder={t('placeholder.publishChannel')} />
         </Form.Item>
         <Form.Item
+          className={styles.operationFormFull}
           label={t('field.publishAccount')}
           name={['contentConfig', 'publishAccountId']}
           rules={[{ required: true, message: t('validation.publishAccountRequired') }]}
@@ -411,13 +414,6 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
             placeholder={t('placeholder.publishAccount')}
             notFoundContent={t('emptyAccount')}
           />
-        </Form.Item>
-        <Form.Item
-          label={t('field.plannedCount')}
-          name={['contentConfig', 'plannedCount']}
-          rules={[{ required: true, message: t('validation.plannedCountRequired') }]}
-        >
-          <InputNumber className={styles.operationFullControl} min={1} precision={0} />
         </Form.Item>
         <Form.Item
           className={styles.operationFormFull}
@@ -434,21 +430,6 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
           rules={[{ required: true, whitespace: true, message: t('validation.publishScheduleRequired') }]}
         >
           <Input placeholder={t('placeholder.publishSchedule')} />
-        </Form.Item>
-        <Form.Item
-          className={styles.operationFormFull}
-          label={t('field.confirmationRule')}
-          name={['contentConfig', 'confirmationRule']}
-          rules={[{ required: true, message: t('validation.confirmationRuleRequired') }]}
-        >
-          <Radio.Group
-            optionType="button"
-            buttonStyle="solid"
-            options={[
-              { value: 'manual', label: t('content.confirmation.manual') },
-              { value: 'auto', label: t('content.confirmation.auto') },
-            ]}
-          />
         </Form.Item>
       </div>
     </section>
@@ -480,6 +461,7 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
           />
         </Form.Item>
         <Form.Item
+          className={styles.operationFormFull}
           label={t('field.analysisScope')}
           name={['analyzeConfig', 'scope']}
           rules={[{ required: true, message: t('validation.analysisScopeRequired') }]}
@@ -492,13 +474,6 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
               { value: 'works', label: t('analyze.scope.works') },
             ]}
           />
-        </Form.Item>
-        <Form.Item
-          label={t('field.analysisDateRange')}
-          name={['analyzeConfig', 'dateRange']}
-          rules={[{ required: true, message: t('validation.analysisDateRangeRequired') }]}
-        >
-          <DatePicker.RangePicker className={styles.operationFullControl} />
         </Form.Item>
         {analysisScope === 'works' && (
           <Form.Item
@@ -527,7 +502,7 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
 
   return (
     <Modal
-      title={t(mode === 'edit' ? 'editTitle' : 'createTitle')}
+      title={modalTitle}
       open={open}
       centered
       width={800}
@@ -537,7 +512,7 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
       maskClosable={!isSubmitting}
       keyboard={!isSubmitting}
       destroyOnClose
-      okText={t(mode === 'edit' ? 'save' : 'create')}
+      okText={submitText}
       cancelText={t('cancel')}
       cancelButtonProps={{ disabled: isSubmitting }}
       onCancel={handleCancel}
@@ -548,21 +523,25 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
           <div className={styles.operationFormGrid}>
             <Form.Item
               className={styles.operationFormFull}
-              label={t('field.taskName')}
+              label={entityT('field.name')}
               name="taskName"
-              rules={[{ required: true, whitespace: true, message: t('validation.taskNameRequired') }]}
+              rules={[{ required: true, whitespace: true, message: entityT('validation.nameRequired') }]}
             >
-              <Input placeholder={t('placeholder.taskName')} />
+              <Input maxLength={500} showCount placeholder={entityT('placeholder.name')} />
             </Form.Item>
-            <Form.Item className={styles.operationFormFull} label={t('field.description')} name="description">
-              <Input.TextArea rows={3} placeholder={t('placeholder.description')} />
+            <Form.Item className={styles.operationFormFull} label={entityT('field.description')} name="description">
+              <Input.TextArea rows={3} placeholder={entityT('placeholder.description')} />
             </Form.Item>
             <Form.Item
-              label={t('field.taskType')}
+              className={styles.operationFormFull}
+              label={entityT('field.type')}
               name="taskType"
-              rules={[{ required: true, message: t('validation.taskTypeRequired') }]}
+              rules={[{ required: true, message: entityT('validation.typeRequired') }]}
             >
-              <Select<OperationTaskType>
+              {/* 与采集方式保持一致，类型切换更直观，同时保留三个类型的已填写配置。 */}
+              <Radio.Group
+                optionType="button"
+                buttonStyle="solid"
                 options={[
                   { value: 'collect', label: t('taskType.collect') },
                   { value: 'content', label: t('taskType.content') },
@@ -600,13 +579,6 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
                 rules={[{ required: true, message: t('validation.dueTimeRequired') }]}
               >
                 <DatePicker className={styles.operationFullControl} />
-              </Form.Item>
-              <Form.Item
-                className={styles.operationFormFull}
-                name="agentSelection"
-                rules={[{ validator: validateAgentSelection }]}
-              >
-                <OperationAgentSelector agents={options.agents} loading={agentLoading} disabled={isSubmitting} />
               </Form.Item>
             </div>
           </section>

@@ -10,6 +10,10 @@ import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDeleteDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementUpdateDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.OperationRequirementDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.OperationAccountDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.OperationRequirementStartDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.OperationTaskDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationEnvDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationSuiteDTO;
@@ -432,27 +436,102 @@ public class DevloopController {
         return applicationService.saveDwsToken(token);
     }
 
-    /**
-     * 创建运营需求
-     *
-     * @param params 入参
-     * @return ResponseUtil
-     */
+    /** 创建运营需求，独立于钉钉和 GitHub 的研发扫描需求。 */
     @PostMapping("/requirement/createOperationRequirement")
-    public ResponseUtil<Long> createOperationRequirement(@RequestBody Map<String, Object> params) {
-        Long id = applicationService.createOperationRequirement(params);
-        return ResponseUtil.successResponse(id);
+    public ResponseUtil<Map<String, Object>> createOperationRequirement(@RequestBody OperationRequirementDTO dto) {
+        return applicationService.createOperationRequirement(dto);
     }
 
-    /**
-     * 修改运营需求
-     *
-     * @param params
-     * @return ResponseUtil
-     */
+    /** 修改尚未启动的运营需求。 */
     @PostMapping("/requirement/updateOperationRequirement")
-    public ResponseUtil<Map<String, Object>> updateOperationRequirement(@RequestBody Map<String, Object> params) {
-        applicationService.updateOperationRequirement(params);
-        return ResponseUtil.successResponse();
+    public ResponseUtil<Void> updateOperationRequirement(@RequestBody OperationRequirementDTO dto) {
+        return applicationService.updateOperationRequirement(dto);
+    }
+
+    /** 分页查询运营项目需求，支持按名称忽略大小写模糊搜索。 */
+    @PostMapping("/requirement/operation/list")
+    public ResponseUtil<PageInfo<Map<String, Object>>> listOperationRequirements(@RequestBody Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        String keyword = MapParamUtil.getStringValue(params, "keyword");
+        int pageNum = Math.max(1, MapParamUtil.getIntValue(params, "pageNum", 1));
+        int pageSize = Math.max(1, MapParamUtil.getIntValue(params, "pageSize", 30));
+        return applicationService.listOperationRequirements(projectId, keyword, pageNum, pageSize);
+    }
+
+    /** 查询单条运营需求详情。 */
+    @PostMapping("/requirement/operation/get")
+    public ResponseUtil<Map<String, Object>> getOperationRequirement(@RequestBody Map<String, Object> params) {
+        return applicationService.getOperationRequirement(MapParamUtil.getLongValue(params, "itemId"));
+    }
+
+    /** 删除尚未启动的运营需求。 */
+    @PostMapping("/requirement/operation/delete")
+    public ResponseUtil<Void> deleteOperationRequirement(@RequestBody Map<String, Object> params) {
+        return applicationService.deleteOperationRequirement(MapParamUtil.getLongValue(params, "itemId"));
+    }
+
+    /** 启动运营需求并提交用户确认后的任务拆解结果。 */
+    @PostMapping("/requirement/operation/start")
+    public ResponseUtil<List<Map<String, Object>>> startOperationRequirement(
+        @RequestBody OperationRequirementStartDTO dto) {
+        return applicationService.startOperationRequirement(dto);
+    }
+
+    /** 分页查询运营项目已拆解的任务，支持日期、状态和可选的当前负责人筛选。 */
+    @PostMapping("/operation/task/list")
+    public ResponseUtil<PageInfo<Map<String, Object>>> listOperationTasks(@RequestBody Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        String keyword = MapParamUtil.getStringValue(params, "keyword");
+        boolean onlyMine = Boolean.parseBoolean(String.valueOf(params.getOrDefault("onlyMine", false)));
+        String createTimeStart = MapParamUtil.getStringValue(params, "createTimeStart");
+        String createTimeEnd = MapParamUtil.getStringValue(params, "createTimeEnd");
+        String status = MapParamUtil.getStringValue(params, "status");
+        int pageNum = Math.max(1, MapParamUtil.getIntValue(params, "pageNum", 1));
+        int pageSize = Math.max(1, MapParamUtil.getIntValue(params, "pageSize", 30));
+        return applicationService.listOperationTasks(projectId, keyword, onlyMine, createTimeStart, createTimeEnd, status,
+            pageNum, pageSize);
+    }
+
+    /** 查询单条运营任务详情。 */
+    @PostMapping("/operation/task/get")
+    public ResponseUtil<Map<String, Object>> getOperationTask(@RequestBody Map<String, Object> params) {
+        return applicationService.getOperationTask(MapParamUtil.getLongValue(params, "taskId"));
+    }
+
+    /** 确认执行数字员工并创建运营任务会话。 */
+    @PostMapping("/operation/task/execute")
+    public ResponseUtil<Map<String, Object>> executeOperationTask(@RequestBody OperationTaskDTO dto) {
+        return applicationService.executeOperationTask(dto);
+    }
+
+    /** 查询运营项目已绑定的平台账号。 */
+    @PostMapping("/operation/account/list")
+    public ResponseUtil<List<Map<String, Object>>> listOperationAccounts(@RequestBody Map<String, Object> params) {
+        return applicationService.listOperationAccounts(MapParamUtil.getLongValue(params, "projectId"));
+    }
+
+    /** 新增运营平台账号。 */
+    @PostMapping("/operation/account/create")
+    public ResponseUtil<Map<String, Object>> createOperationAccount(@RequestBody OperationAccountDTO dto) {
+        return applicationService.createOperationAccount(dto);
+    }
+
+    /** 编辑运营平台账号的展示信息和平台侧账号标识。 */
+    @PostMapping("/operation/account/update")
+    public ResponseUtil<Void> updateOperationAccount(@RequestBody OperationAccountDTO dto) {
+        return applicationService.updateOperationAccount(dto);
+    }
+
+    /** 删除运营平台账号，后端使用软删除保留历史业务引用。 */
+    @PostMapping("/operation/account/delete")
+    public ResponseUtil<Void> deleteOperationAccount(@RequestBody Map<String, Object> params) {
+        return applicationService.deleteOperationAccount(MapParamUtil.getLongValue(params, "accountId"));
+    }
+
+    /** 校验当前用户的采集沙箱，并更新运营账号登录状态。 */
+    @PostMapping("/operation/account/login")
+    public ResponseUtil<Map<String, Object>> loginOperationAccount(@RequestBody Map<String, Object> params) {
+        return applicationService.loginOperationAccount(MapParamUtil.getLongValue(params, "accountId"),
+            MapParamUtil.getStringValue(params, "sandboxId"));
     }
 }

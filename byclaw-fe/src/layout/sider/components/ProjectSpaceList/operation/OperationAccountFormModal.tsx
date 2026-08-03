@@ -38,10 +38,11 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
   // 后端未下发平台配置时使用产品约定的平台集合，保证新增账号的基础表单可用。
   const defaultPlatformOptions = useMemo<OperationPlatformOption[]>(
     () => [
-      { value: 'wechat', label: platformT('wechat') },
-      { value: 'xiaohongshu', label: platformT('xiaohongshu') },
-      { value: 'video', label: platformT('video') },
-      { value: 'douyin', label: platformT('douyin') },
+      // 账号平台统一保存正式编码，历史短编码只在读取和登录适配层兼容。
+      { value: 'WeChatAccount', label: platformT('wechat') },
+      { value: 'Xiaohongshu', label: platformT('xiaohongshu') },
+      { value: 'WeChatChannels', label: platformT('video') },
+      { value: 'Douyin', label: platformT('douyin') },
     ],
     [platformT]
   );

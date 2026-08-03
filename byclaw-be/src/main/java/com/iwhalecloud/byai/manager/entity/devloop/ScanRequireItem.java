@@ -8,9 +8,14 @@ import lombok.Setter;
 
 import java.util.Date;
 
+/**
+ * 研发扫描条目实体。
+ * 钉钉、GitHub、手工研发需求、评分和研发任务均依赖扫描日志链路，必须映射旧表。
+ * 运营需求由 OperationRequirement 单独映射 byai_operation_requirement，禁止混用。
+ */
 @Getter
 @Setter
-@TableName("byai_scan_require_item")
+@TableName("byai_scan_log_item")
 public class ScanRequireItem {
 
     @TableId(value = "item_id", type = IdType.INPUT)

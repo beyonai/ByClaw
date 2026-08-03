@@ -90,6 +90,74 @@
   }
 }
 
+// 执行任务时将数字员工选择区与上方任务信息卡片拉开，便于区分任务内容和执行配置。
+.operationTaskAgentField {
+  margin-top: 24px;
+}
+
+// 启动需求时按卡片展示 AI 拆解结果，便于用户逐项调整任务内容和负责人。
+.operationDecomposeList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+// AI 拆解结果支持在确认前增删，标题和操作按钮保持同一行，便于连续调整任务。
+.operationDecomposeHeader {
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  h3 {
+    margin: 0;
+  }
+}
+
+.operationDecomposeItem {
+  position: relative;
+  // 左上角预留序号区域，避免与第一项表单标签重叠。
+  padding: 42px 16px 0;
+  border: 1px solid #e8edf4;
+  border-radius: 8px;
+  background: #fff;
+
+  > strong {
+    position: absolute;
+    top: 12px;
+    left: 14px;
+    color: #7d8796;
+    font-size: 13px;
+    font-weight: 600;
+  }
+}
+
+// 删除按钮避开右上角序号，且最后一条任务禁用删除以保证拆解结果至少包含一个任务。
+.operationDecomposeDelete {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+}
+
+// 执行运营任务可选择多个数字员工，选项按自适应网格排列以兼顾窄屏场景。
+.operationAgentCheckboxGroup {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+
+  :global {
+    .@{antPrefix}-checkbox-wrapper {
+      min-width: 0;
+      margin-inline-start: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+}
+
 // 总控与执行数字员工在桌面端并排展示，窄屏时由媒体查询切换为单列。
 .agentSelector {
   display: grid;
@@ -139,11 +207,13 @@
   background: #f7f9fc;
 }
 
-// 账号管理属于任务页内部入口，使用整行浅色按钮与任务操作区分层级。
+// 账号管理属于运营需求页入口，使用整行浅色按钮与需求列表操作区分层级。
 .operationAccountEntry {
   width: calc(100% - 8px);
   min-height: 36px;
-  margin: 0 4px -8px;
+  // 入口独占工具栏首行，底部留出间距，避免后续搜索栏覆盖按钮。
+  // 与研发项目“需求渠道配置”入口保持相同的 16px 下间距，避免账号入口贴近搜索栏。
+  margin: 0 4px 16px;
   padding: 0 10px;
   border: 0;
   border-radius: 7px;
@@ -178,6 +248,44 @@
     color: #1f2633;
     font-size: 14px;
   }
+}
+
+// 远程桌面打开后在账号面板保留确认条，用户扫码完成后无需关闭抽屉即可保存登录状态。
+.accountLoginNotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid #cfe0ff;
+  border-radius: 8px;
+  background: #f3f7ff;
+}
+
+.accountLoginNoticeContent {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+
+  strong {
+    color: #1f2633;
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  span {
+    color: #667085;
+    font-size: 12px;
+  }
+}
+
+.accountLoginNoticeActions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
 }
 
 // 三类运营任务沿用任务卡片交互，仅用颜色和图标快速区分任务性质。
@@ -659,7 +767,8 @@
 @media (max-width: 720px) {
   .operationFormGrid,
   .agentSelector,
-  .accountStats {
+  .accountStats,
+  .operationAgentCheckboxGroup {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -672,6 +781,11 @@
   }
 
   .accountPanelHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .accountLoginNotice {
     align-items: stretch;
     flex-direction: column;
   }

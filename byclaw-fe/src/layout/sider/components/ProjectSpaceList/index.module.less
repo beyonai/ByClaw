@@ -377,6 +377,14 @@
   font-weight: 700;
 }
 
+// 项目标签容器兼容不同项目场景，保持标签与标题之间的稳定布局。
+.projectTagGroup {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .projectHeaderTag {
   margin-left: auto;
 }
@@ -387,10 +395,10 @@
   background: #eaf2ff;
 }
 
-// 共享项目使用绿色标签，便于与个人项目区分。
+// 共享项目沿用统一的浅底标签样式，以绿色区分协作范围。
 .projectTagShared {
-  color: #14865a;
-  background: #e9f8f0;
+  color: #16835a;
+  background: #eaf8f0;
 }
 
 // 默认项目使用中性灰色标签，弱化其系统兜底属性。
@@ -405,10 +413,10 @@
   background: #f3ecff;
 }
 
-// 运营项目沿用原型的青绿色标签，与研发项目和普通共享项目形成稳定区分；标签优先级由 index.tsx 控制。
+// 运营项目沿用统一的浅底标签样式，以青蓝色区别于共享和研发项目。
 .projectTagOperation {
-  color: #0f766e;
-  background: #e6f5f2;
+  color: #1677b8;
+  background: #e8f4fc;
 }
 
 .sessionList {
@@ -1630,7 +1638,11 @@
   min-width: 40px;
   height: 26px;
   padding: 0 5px;
+  border: 1px solid transparent;
   border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 12px;
   line-height: 24px;
   white-space: nowrap;
@@ -1680,6 +1692,9 @@
 
 .detailRequirementStartedAction {
   // 已启动代表不能重复操作，使用浅灰禁用态弱化可点击感。
+  // 状态标签不拦截卡片点击，用户点击标签区域时仍可打开需求详情。
+  pointer-events: none;
+
   &,
   &:disabled,
   &[disabled] {

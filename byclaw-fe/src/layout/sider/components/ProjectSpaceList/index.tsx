@@ -127,37 +127,42 @@ const getOperationSessionDescription = (session: ProjectSession): string | undef
   );
 };
 
-const getProjectScene = (project: ProjectSpace, t: ProjectSpaceTranslate) => {
+const getProjectScenes = (project: ProjectSpace, t: ProjectSpaceTranslate) => {
   if (project.projectType === 'default') {
-    return { classSuffix: 'Default', text: t('scene.default') };
+    return [{ classSuffix: 'Default', text: t('scene.default') }];
   }
 
   // 研发项目即使强制共享，列表也优先展示业务类型标签。
   if (project.projectType === 'develop') {
-    return { classSuffix: 'Development', text: t('scene.development') };
+    return [{ classSuffix: 'Development', text: t('scene.development') }];
   }
 
-  // 运营项目与研发项目一致，强制共享时仍优先展示业务类型标签。
+  // 运营项目优先展示业务类型；即使开启共享也不额外展示共享标签，避免项目标题区域标签过多。
   if (project.projectType === 'operation') {
-    return { classSuffix: 'Operation', text: t('scene.operation') };
+    return [{ classSuffix: 'Operation', text: t('scene.operation') }];
   }
 
   if (project.sharedFlag) {
-    return { classSuffix: 'Shared', text: t('scene.shared') };
+    return [{ classSuffix: 'Shared', text: t('scene.shared') }];
   }
 
-  return { classSuffix: 'Personal', text: t('scene.personal') };
+  return [{ classSuffix: 'Personal', text: t('scene.personal') }];
 };
 
 const renderProjectSceneTag = (project: ProjectSpace, t: ProjectSpaceTranslate, className?: string) => {
-  const scene = getProjectScene(project, t);
+  const scenes = getProjectScenes(project, t);
   return (
-    <Tag
-      bordered={false}
-      className={classNames(styles.projectTag, styles[`projectTag${scene.classSuffix}`], className)}
-    >
-      {scene.text}
-    </Tag>
+    <span className={styles.projectTagGroup}>
+      {scenes.map((scene) => (
+        <Tag
+          key={scene.classSuffix}
+          bordered={false}
+          className={classNames(styles.projectTag, styles[`projectTag${scene.classSuffix}`], className)}
+        >
+          {scene.text}
+        </Tag>
+      ))}
+    </span>
   );
 };
 

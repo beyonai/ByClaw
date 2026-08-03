@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.gateway.sandbox.service.ingress.openclaw.OpenClawUiProxyPaths;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import org.apache.commons.lang3.StringUtils;
@@ -31,6 +32,7 @@ import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxHealthConfigService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxHealthWatermarkModelService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxHealthWatermarkService;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxBrowserNavigationService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchRouting;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxResizeService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
@@ -60,6 +62,9 @@ public class SandboxController {
 
     @Autowired
     private SandboxService sandboxService;
+
+    @Autowired
+    private SandboxBrowserNavigationService sandboxBrowserNavigationService;
 
     @Autowired
     private SsSandboxRecordMapper sandboxRecordMapper;
@@ -228,6 +233,28 @@ public class SandboxController {
             }
         }
         return ResponseUtil.successResponse(data);
+    }
+
+    /**
+     * 通过后端转发采集沙箱的浏览器导航命令，避免前端直接请求沙箱端口触发跨域限制。
+     */
+    @PostMapping("/browser/navigate")
+    public ResponseUtil navigateBrowser(@RequestBody Map<String, Object> params) {
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        if (StringUtils.isBlank(userCode)) {
+            return ResponseUtil.fail(I18nUtil.get("sandbox.browser.user.required"));
+        }
+        try {
+            sandboxBrowserNavigationService.navigate(userCode,
+                params.get("sandboxId") == null ? null : params.get("sandboxId").toString(),
+                params.get("targetUrl") == null ? null : params.get("targetUrl").toString(),
+                params.get("sessionKey") == null ? null : params.get("sessionKey").toString());
+            return ResponseUtil.successResponse();
+        } catch (IllegalArgumentException exception) {
+            return ResponseUtil.fail(I18nUtil.get("sandbox.browser.navigate.failed"));
+        } catch (Exception exception) {
+            return ResponseUtil.fail(I18nUtil.get("sandbox.browser.navigate.failed"));
+        }
     }
 
     /**
