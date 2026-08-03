@@ -12,6 +12,7 @@ import type {
 
 export const DEFAULT_AIMODEL_TYPELIST_REDIS_KEY = "byai:aimodel:typelist";
 export const DEFAULT_AIMODEL_TYPELIST_FIELD = "LLM";
+export const DEFAULT_AIMODEL_CONFIG_REDIS_KEY = "byai:aimodel:config";
 export const AIMODEL_AUTH_TOKEN_SM4_KEY_HEX_ENV =
   "BAIYING_AIMODEL_AUTH_TOKEN_SM4_KEY_HEX";
 
@@ -43,6 +44,7 @@ export class RedisFirstLlmProvider {
   readonly #fallback: DeepSeekEnvironmentFallback;
   readonly #logger: LlmProviderLogger;
   readonly #redisKey: string;
+  readonly #modelConfigRedisKey: string;
   readonly #sm4KeyHex: string | undefined;
 
   constructor(options: {
@@ -50,12 +52,15 @@ export class RedisFirstLlmProvider {
     fallback: DeepSeekEnvironmentFallback;
     logger: LlmProviderLogger;
     redisKey?: string;
+    modelConfigRedisKey?: string;
     sm4KeyHex?: string;
   }) {
     this.#redis = options.redis;
     this.#fallback = options.fallback;
     this.#logger = options.logger;
     this.#redisKey = nonEmptyString(options.redisKey) || DEFAULT_AIMODEL_TYPELIST_REDIS_KEY;
+    this.#modelConfigRedisKey =
+      nonEmptyString(options.modelConfigRedisKey) || DEFAULT_AIMODEL_CONFIG_REDIS_KEY;
     this.#sm4KeyHex = options.sm4KeyHex;
   }
 
@@ -76,6 +81,26 @@ export class RedisFirstLlmProvider {
       );
       return { source: "environment", config };
     }
+  }
+
+  /** 按 BE 返回的模型实例主键解析运行配置；该路径不允许静默回退到默认模型。 */
+  async resolveByModelId(modelId: string): Promise<LlmProviderConfig> {
+    const normalizedModelId = requiredString(modelId, "modelId");
+    const raw = await this.#redis.hget(this.#modelConfigRedisKey, normalizedModelId);
+    if (raw === null) {
+      throw new Error(
+        `missing Redis hash field ${this.#modelConfigRedisKey}:${normalizedModelId}`,
+      );
+    }
+    const parsed = JSON.parse(Buffer.isBuffer(raw) ? raw.toString("utf8") : raw) as unknown;
+    if (!isRecord(parsed)) {
+      throw new Error("Redis model config must be a JSON object");
+    }
+    const record = parsed as AimodelRecord;
+    if (normalizeNumber(record.status) !== 1) {
+      throw new Error(`Redis model config is not active: ${normalizedModelId}`);
+    }
+    return buildRedisProvider(record, this.#sm4KeyHex);
   }
 
   async #resolveRedisDefault(): Promise<LlmProviderConfig> {

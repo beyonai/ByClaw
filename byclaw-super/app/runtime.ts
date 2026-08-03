@@ -10,6 +10,7 @@ import {
   type AgentCapabilityCompiler,
   type LeaderSession,
   type LeaderSessionFactory,
+  type LeaderModelSelection,
   type PiRuntimeConfig,
 } from "@byclaw/by-conductor";
 import { createRedis } from "@byclaw/by-framework";
@@ -23,6 +24,10 @@ import type { FastifyInstance } from "fastify";
 import { createBeyondTokenVerifier } from "./auth/beyond-token.js";
 import { ByClawBeAgentCatalog } from "./business/agent-catalog.js";
 import { ByClawBeGroupChatContextProvider } from "./business/group-chat-context.js";
+import {
+  ByClawBeResourceModelResolver,
+  fingerprintModelConfig,
+} from "./business/resource-model-binding.js";
 import { ByAiAttachmentResolver } from "./business/byai-attachment-resolver.js";
 import { loadConfig, type AppConfig } from "./config/index.js";
 import { RedisByClawBeEndpointResolver } from "./business/endpoint-resolver.js";
@@ -44,13 +49,19 @@ import { ByFrameworkWorkerRuntime } from "./worker/by-framework-worker.js";
  * 而不是在 Composition Root 创建阶段直接丢失诊断上下文。
  */
 class LazyPiLeaderFactory implements LeaderSessionFactory, AgentCapabilityCompiler {
-  readonly #factory: Promise<
+  readonly #defaultFactory: Promise<
     { factory: PiLeaderSessionFactory; error?: never } | { factory?: never; error: Error }
   >;
+  readonly #modelFactories = new Map<string, Promise<PiLeaderSessionFactory>>();
 
   /** 立即启动一次模型运行时初始化，并把成功或异常缓存为稳定结果。 */
-  constructor(config: PiRuntimeConfig | Promise<PiRuntimeConfig>) {
-    this.#factory = Promise.resolve(config)
+  constructor(
+    config: PiRuntimeConfig | Promise<PiRuntimeConfig>,
+    private readonly modelConfig?: (
+      selection: LeaderModelSelection,
+    ) => Promise<PiRuntimeConfig>,
+  ) {
+    this.#defaultFactory = Promise.resolve(config)
       .then(PiLeaderSessionFactory.create)
       .then(
         (factory) => ({ factory }),
@@ -61,8 +72,14 @@ class LazyPiLeaderFactory implements LeaderSessionFactory, AgentCapabilityCompil
   }
 
   /** 使用已经初始化的 Pi 工厂创建业务 Session 对应的 Pi 会话。 */
-  async create(sessionId: string): Promise<LeaderSession> {
-    const initialized = await this.#factory;
+  async create(
+    sessionId: string,
+    model?: LeaderModelSelection,
+  ): Promise<LeaderSession> {
+    if (model) {
+      return (await this.#factoryForModel(model)).create(sessionId);
+    }
+    const initialized = await this.#defaultFactory;
     if (initialized.error) {
       throw initialized.error;
     }
@@ -71,7 +88,7 @@ class LazyPiLeaderFactory implements LeaderSessionFactory, AgentCapabilityCompil
 
   /** 复用已初始化的 Pi 模型执行无状态能力卡编译。 */
   async compile(input: AgentCapabilityCompileInput): Promise<AgentCapabilityCompileResult> {
-    const initialized = await this.#factory;
+    const initialized = await this.#defaultFactory;
     if (initialized.error) {
       throw new AgentCapabilityCompileError("Capability model is unavailable", 503, {
         cause: initialized.error,
@@ -82,7 +99,7 @@ class LazyPiLeaderFactory implements LeaderSessionFactory, AgentCapabilityCompil
 
   /** 将 Pi 初始化异常转换为 readiness 可消费的健康状态。 */
   async health(): Promise<{ healthy: boolean; message?: string; model?: string }> {
-    const initialized = await this.#factory;
+    const initialized = await this.#defaultFactory;
     if (initialized.error) {
       return {
         healthy: false,
@@ -90,6 +107,25 @@ class LazyPiLeaderFactory implements LeaderSessionFactory, AgentCapabilityCompil
       };
     }
     return initialized.factory.health();
+  }
+
+  #factoryForModel(selection: LeaderModelSelection): Promise<PiLeaderSessionFactory> {
+    if (!this.modelConfig) {
+      return Promise.reject(new Error("Leader model hot switching is not configured"));
+    }
+    const key = `${selection.modelId}:${selection.fingerprint}`;
+    const existing = this.#modelFactories.get(key);
+    if (existing) {
+      return existing;
+    }
+    const created = this.modelConfig(selection).then(PiLeaderSessionFactory.create);
+    this.#modelFactories.set(key, created);
+    void created.catch(() => {
+      if (this.#modelFactories.get(key) === created) {
+        this.#modelFactories.delete(key);
+      }
+    });
+    return created;
   }
 }
 
@@ -116,22 +152,23 @@ function buildPiRuntimeConfig(
   config: AppConfig,
   database: PostgresDatabase,
   llmProvider: Promise<LlmProviderResolution>,
+  modelScope?: string,
 ): Promise<PiRuntimeConfig> {
   return llmProvider.then((resolved) => ({
     llmProvider: resolved.config,
     checkpointStore: database.checkpoints,
-    instanceId: config.instanceId,
+    instanceId: modelScope ? `${config.instanceId}:${modelScope}` : config.instanceId,
     ...(config.piSessionCacheDirectory
       ? { sessionCacheDirectory: config.piSessionCacheDirectory }
       : {}),
   }));
 }
 
-function createLlmProviderResolution(
+function createLlmProviderSource(
   config: AppConfig,
   redis: ReturnType<typeof createRedis>,
-): Promise<LlmProviderResolution> {
-  const source = new RedisFirstLlmProvider({
+): RedisFirstLlmProvider {
+  return new RedisFirstLlmProvider({
     redis,
     fallback: {
       providerId: config.piProvider ?? "volcengine-ark",
@@ -144,7 +181,6 @@ function createLlmProviderResolution(
       warn: (message) => console.warn(message),
     },
   });
-  return source.resolve();
 }
 
 /** 组装 RunService 的可观测/队列/凭证运行期参数。 */
@@ -244,7 +280,10 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     }
   }
 
-  function initService(endpointResolver: RedisByClawBeEndpointResolver) {
+  function initService(
+    endpointResolver: RedisByClawBeEndpointResolver,
+    resourceModels: ByClawBeResourceModelResolver,
+  ) {
     // 附件读取边界：按 fileId 经 BE 下载，凭 Run 短期凭证鉴权；契约见 .dev/attachments-be-read-contract.md。
     const attachmentResolver = new ByAiAttachmentResolver({
       ...config.byClawBe,
@@ -275,6 +314,7 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
       config.runCredentialMaxTtlMs,
       groupChatContexts,
       ingressLogger,
+      resourceModels,
     );
     return { runService, runIngress };
   }
@@ -289,9 +329,23 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
       eventStore,
       config.delegationTimeoutMs,
     );
-    const llmProvider = createLlmProviderResolution(config, redis);
+    const llmProvider = createLlmProviderSource(config, redis);
     const leaders = new LazyPiLeaderFactory(
-      buildPiRuntimeConfig(config, database, llmProvider),
+      buildPiRuntimeConfig(config, database, llmProvider.resolve()),
+      async (selection) => {
+        const modelConfig = await llmProvider.resolveByModelId(selection.modelId);
+        if (fingerprintModelConfig(modelConfig) !== selection.fingerprint) {
+          throw new Error(
+            `Leader model config changed before Run execution: ${selection.modelId}`,
+          );
+        }
+        return buildPiRuntimeConfig(
+          config,
+          database,
+          Promise.resolve({ source: "redis", config: modelConfig }),
+          `model:${selection.modelId}:${selection.fingerprint}`,
+        );
+      },
     );
     // 数字员工授权列表由 ByClaw BE 实时提供，外部调用方不再传入 agentList。
     const agentCatalog = new ByClawBeAgentCatalog({
@@ -306,7 +360,12 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
       ...config.byClawBe,
       endpointResolver,
     });
-    return { delegationService, leaders, agentCatalog, groupChatContexts };
+    const resourceModels = new ByClawBeResourceModelResolver({
+      ...config.byClawBe,
+      endpointResolver,
+      llmProvider,
+    });
+    return { delegationService, leaders, agentCatalog, groupChatContexts, resourceModels };
   }
 
   function initConnector() {
@@ -395,10 +454,11 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     leaders,
     agentCatalog,
     groupChatContexts,
+    resourceModels,
   } = initPi(endpointResolver, redis);
 
   // 4) Run 流水线：RunService（快照授权、调度 Leader）+ 入站鉴权与 Run 创建。
-  const { runService, runIngress } = initService(endpointResolver);
+  const { runService, runIngress } = initService(endpointResolver, resourceModels);
 
   // 5) HTTP 入口：/ready 同时要求 Pi、全部已注册 Connector、数据库与 Worker 健康。
   let workerRuntime: ByFrameworkWorkerRuntime | undefined;

@@ -250,6 +250,8 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(resourceCaptor.getValue().getResourceName()).isEqualTo("digemployee.default.super.assistant.resource.name");
         assertThat(resourceCaptor.getValue().getResourceDesc()).isEqualTo("digemployee.default.super.assistant.resource.name");
         assertThat(resourceCaptor.getValue().getOwnerType()).isEqualTo(OwnerType.PERSONAL);
+        assertThat(result.getWorkerAgentType()).isEqualTo(WorkerAgentType.BY_SUPER.getCode());
+        assertThat(resourceCaptor.getValue().getWorkerAgentType()).isEqualTo(WorkerAgentType.BY_SUPER.getCode());
         assertThat(extCaptor.getValue().getAbility()).isEqualTo("digemployee.default.super.assistant.ability");
         assertThat(extCaptor.getValue().getConstraints()).isEqualTo("digemployee.default.super.assistant.constraints");
         assertThat(extCaptor.getValue().getFaqs()).isEqualTo("digemployee.default.super.assistant.faqs");

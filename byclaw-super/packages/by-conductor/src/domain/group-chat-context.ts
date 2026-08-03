@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { LeaderModelSelection } from "../ports/leader.js";
 
 export const GROUP_CHAT_REF_SCHEMA_VERSION = "byclaw.group-chat-ref/v1" as const;
 export const GROUP_CHAT_CONTEXT_SCHEMA_VERSION =
@@ -70,6 +71,8 @@ export interface RunIngressContextV1 {
   groupChatFingerprint?: string;
   /** Agent 目录回源失败时保留的诊断；Run 仍可由 Leader 降级执行。 */
   agentCatalogError?: string;
+  /** 入口资源在本次 Run 开始前解析的 Leader 模型快照。 */
+  leaderModel?: LeaderModelSelection;
 }
 
 export function parseGroupChatRef(value: unknown): GroupChatRefV1 {

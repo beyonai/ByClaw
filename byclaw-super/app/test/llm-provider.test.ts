@@ -73,6 +73,29 @@ describe("Redis-first LLM provider", () => {
 
     expect(config.apiKey).toBe("secret-token");
   });
+
+  it("resolves a resource-bound model from the config hash by numeric model id", async () => {
+    const hget = vi.fn().mockResolvedValue(
+      JSON.stringify(
+        modelRecord({
+          instanceId: "11000161",
+          modelCode: "MiniMax-M3",
+          isDefault: 0,
+        }),
+      ),
+    );
+    const provider = new RedisFirstLlmProvider({
+      redis: { hget },
+      fallback,
+      logger: { info: vi.fn(), warn: vi.fn() },
+    });
+
+    const config = await provider.resolveByModelId("11000161");
+
+    expect(hget).toHaveBeenCalledWith("byai:aimodel:config", "11000161");
+    expect(config.providerId).toBe("baiying-m-11000161");
+    expect(config.modelId).toBe("MiniMax-M3");
+  });
 });
 
 function modelRecord(overrides: Record<string, unknown> = {}) {

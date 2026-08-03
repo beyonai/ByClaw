@@ -702,7 +702,10 @@ export class RunService {
     }
 
     try {
-      leaderLease = await this.#leaderCache.acquire(session.id);
+      leaderLease = await this.#leaderCache.acquire(
+        session.id,
+        latestLeaderModel(run),
+      );
       const leader = leaderLease.session;
       const latest = await this.runs.get(run.id);
       if (!latest || TERMINAL_RUN_STATUSES.has(latest.status)) {
@@ -1243,6 +1246,10 @@ ${JSON.stringify(response)}`;
     }
     throw new Error(`Interaction event stream ended: ${interactionId}`);
   }
+}
+
+function latestLeaderModel(run: Run) {
+  return run.ingressContext?.leaderModel;
 }
 
 function validateInteractionQuestions(questions: UserInteractionQuestion[]): void {

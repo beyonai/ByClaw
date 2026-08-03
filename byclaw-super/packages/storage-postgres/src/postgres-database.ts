@@ -1885,8 +1885,14 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
   if (record.agentCatalogError !== undefined && !agentCatalogError) {
     throw new Error("Invalid persisted Run agent catalog error");
   }
+  const leaderModel = readLeaderModelSelection(record.leaderModel);
   if (record.groupChat === undefined) {
-    return agentCatalogError ? { agentCatalogError } : undefined;
+    return agentCatalogError || leaderModel
+      ? {
+          ...(agentCatalogError ? { agentCatalogError } : {}),
+          ...(leaderModel ? { leaderModel } : {}),
+        }
+      : undefined;
   }
   const groupChat = parseGroupChatContext(record.groupChat);
   const fingerprint = fingerprintGroupChatContext(groupChat);
@@ -1900,7 +1906,25 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
     groupChat,
     groupChatFingerprint: fingerprint,
     ...(agentCatalogError ? { agentCatalogError } : {}),
+    ...(leaderModel ? { leaderModel } : {}),
   };
+}
+
+function readLeaderModelSelection(raw: unknown) {
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Invalid persisted Run Leader model selection");
+  }
+  const record = raw as Record<string, unknown>;
+  const modelId = typeof record.modelId === "string" ? record.modelId.trim() : "";
+  const fingerprint =
+    typeof record.fingerprint === "string" ? record.fingerprint.trim() : "";
+  if (!modelId || !/^[a-f0-9]{64}$/.test(fingerprint)) {
+    throw new Error("Invalid persisted Run Leader model selection");
+  }
+  return { modelId, fingerprint };
 }
 
 function mapCredential(row: QueryResultRow): ExecutionCredential {
