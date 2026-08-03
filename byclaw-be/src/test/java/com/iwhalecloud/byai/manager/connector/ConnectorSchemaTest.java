@@ -157,6 +157,21 @@ class ConnectorSchemaTest {
     }
 
     @Test
+    void bundledSkillUpdatesIgnoreJsonWhitespaceWhenCheckingExistingSkills() throws Exception {
+        String migrationSql = read("deploy/migrations/versions/V0.3.1/V0.3.1__dml.sql");
+        String initdbSql = read("deploy/middleware/initdb/04_dml.sql");
+        String normalizedJson = "regexp_replace(c.param_value, '\\s', '', 'g')";
+
+        for (String sql : new String[] {migrationSql, initdbSql}) {
+            assertThat(sql).contains(
+                normalizedJson + " not like '%\"skillcode\":\"knowledge-collection\"%'",
+                normalizedJson + " not like '%\"skillcode\":\"agent-reach\"%'",
+                normalizedJson + " not like '%\"skillcode\":\"bycli\"%'"
+            );
+        }
+    }
+
+    @Test
     void backendImagePinsAndVerifiesWecomCli() throws Exception {
         String dockerfile = readPreservingCase("byclaw-be/Dockerfile");
 

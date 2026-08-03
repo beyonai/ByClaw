@@ -88,21 +88,24 @@ SET param_value = CASE
     END
     || '{"skillName":"knowledge-collection","skillCode":"knowledge-collection","skillDescZh":"编排跨互联网与企业平台的知识采集，统一采集产物协议、后处理及知识库入库或知识整理。","skillDescEn":"Orchestrate knowledge collection across public internet and enterprise platforms, including canonical artifacts, post-processing, and knowledge-base ingestion or organization."}]'
 WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
-  AND c.param_value NOT LIKE '%"skillCode":"knowledge-collection"%';
+  AND regexp_replace(c.param_value, '\s', '', 'g')
+      NOT LIKE '%"skillCode":"knowledge-collection"%';
 
 -- 补充公开互联网渠道路由 Skill，已存在同名 skillCode 时不重复追加。
 UPDATE byai.byai_system_config c
 SET param_value = left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1)
     || ',{"skillName":"agent-reach","skillCode":"agent-reach","skillDescZh":"路由公开互联网渠道能力，并按 ByClaw 覆盖规则选择 byCLI 等执行器。","skillDescEn":"Route public-internet channels and select executors such as byCLI according to ByClaw override rules."}]'
 WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
-  AND c.param_value NOT LIKE '%"skillCode":"agent-reach"%';
+  AND regexp_replace(c.param_value, '\s', '', 'g')
+      NOT LIKE '%"skillCode":"agent-reach"%';
 
 -- 补充独立 byCLI 执行 Skill，避免继续把 bycli 与知识采集编排能力混为一体。
 UPDATE byai.byai_system_config c
 SET param_value = left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1)
     || ',{"skillName":"bycli","skillCode":"bycli","skillDescZh":"通过浏览器与 Adapter 执行网站操作、复用或维护适配器，并返回采集结果。","skillDescEn":"Execute website operations through the browser and adapters, reuse or maintain adapters, and return collected results."}]'
 WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
-  AND c.param_value NOT LIKE '%"skillCode":"bycli"%';
+  AND regexp_replace(c.param_value, '\s', '', 'g')
+      NOT LIKE '%"skillCode":"bycli"%';
 
 -- 初始化独立 bycli 执行 Skill 资源，保留 knowledge-collection 作为默认编排资源。
 INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
