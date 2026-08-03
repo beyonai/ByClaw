@@ -1112,12 +1112,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
             <div className={styles.integrationSection}>
               <div className={styles.integrationSectionHeader}>
                 <span className={styles.integrationSectionTitle}>{t('integration.suite.title')}</span>
-                <Button
-                  type="link"
-                  size="small"
-                  icon={<PlusOutlined />}
-                  onClick={openCreateSuiteModal}
-                >
+                <Button type="link" size="small" icon={<PlusOutlined />} onClick={openCreateSuiteModal}>
                   {t('integration.suite.add')}
                 </Button>
               </div>
@@ -1736,7 +1731,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
                                 placeholder={t(
                                   integrationEnvForm.hasConnCredential
                                     ? 'integration.envModal.connCredentialKeep'
-                                    : 'integration.envModal.connCredentialPlaceholder',
+                                    : 'integration.envModal.connCredentialPlaceholder'
                                 )}
                                 value={integrationEnvForm.connCredentialRef}
                                 onChange={(e) => setField('connCredentialRef', e.target.value)}
@@ -1902,7 +1897,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
                               placeholder={t(
                                 acc.hasCredential
                                   ? 'integration.envModal.connCredentialKeep'
-                                  : 'integration.envModal.accCredentialPlaceholder',
+                                  : 'integration.envModal.accCredentialPlaceholder'
                               )}
                               value={acc.credentialRef}
                               onChange={(e) => updateAccount(acc.id, { credentialRef: e.target.value })}

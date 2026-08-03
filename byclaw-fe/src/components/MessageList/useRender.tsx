@@ -191,11 +191,7 @@ export default function useRender({
                   {/* <Memory msg={msg} /> */}
                 </>
               )}
-              <MoreActions
-                deleteMessage={deleteMessage}
-                msg={msg}
-                showTroubleshoot
-              />
+              <MoreActions deleteMessage={deleteMessage} msg={msg} showTroubleshoot />
               {[IMessageState.Done, IMessageState.Cancel].includes(messageState) && (
                 <ThumbUp updateMessage={updateMessage} msg={msg} />
               )}
