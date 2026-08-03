@@ -322,4 +322,78 @@ describe("RunIngressService group chat snapshot", () => {
     expect(runService.createRun).toHaveBeenCalledOnce();
     expect(runService.createRun.mock.calls[0][0].ingressContext).toBeUndefined();
   });
+
+  it("freezes the current resource model selection into every new Run", async () => {
+    const runService = fakeRunService();
+    const resolve = vi.fn(async () => ({
+      modelId: "11000161",
+      fingerprint: "a".repeat(64),
+    }));
+    const ingress = new RunIngressService(
+      runService.impl,
+      async () => ({ userCode: "creator" }),
+      catalog([]),
+      7_200_000,
+      undefined,
+      { info: vi.fn(), warn: vi.fn() },
+      { resolve },
+    );
+
+    await ingress.createSessionRun({
+      beyondToken: PRINCIPAL_TOKEN,
+      systemCode: "BYAI",
+      sourceAgentId: "10000249",
+      message: "hello",
+    });
+
+    expect(resolve).toHaveBeenCalledWith({
+      resourceId: "10000249",
+      beyondToken: PRINCIPAL_TOKEN,
+      systemCode: "BYAI",
+    });
+    expect(runService.createSessionRun.mock.calls[0][0].ingressContext).toEqual({
+      leaderModel: {
+        modelId: "11000161",
+        fingerprint: "a".repeat(64),
+      },
+    });
+  });
+
+  it("retains the last known resource model when a later BE lookup fails", async () => {
+    const runService = fakeRunService();
+    const resolve = vi
+      .fn()
+      .mockResolvedValueOnce({ modelId: "100", fingerprint: "b".repeat(64) })
+      .mockRejectedValueOnce(new Error("BE unavailable"));
+    const warn = vi.fn();
+    const ingress = new RunIngressService(
+      runService.impl,
+      async () => ({ userCode: "creator" }),
+      catalog([]),
+      7_200_000,
+      undefined,
+      { info: vi.fn(), warn },
+      { resolve },
+    );
+    const input = {
+      beyondToken: PRINCIPAL_TOKEN,
+      sourceAgentId: "10000249",
+      message: "hello",
+    };
+
+    await ingress.createSessionRun(input);
+    await ingress.createRun({ ...input, sessionId: "session-1" });
+
+    expect(runService.createRun.mock.calls[0][0].ingressContext.leaderModel).toEqual({
+      modelId: "100",
+      fingerprint: "b".repeat(64),
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resourceId: "10000249",
+        retainedLastKnownModel: true,
+      }),
+      "超级助手模型绑定不可用，本次沿用最后一次有效模型",
+    );
+  });
 });

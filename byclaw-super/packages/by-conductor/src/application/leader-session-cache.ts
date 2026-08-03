@@ -1,10 +1,12 @@
 import type {
+  LeaderModelSelection,
   LeaderSession,
   LeaderSessionFactory,
 } from "../ports/leader.js";
 
 interface CacheEntry {
   session: Promise<LeaderSession>;
+  modelKey: string;
   activeUsers: number;
   lastUsedAt: number;
 }
@@ -35,16 +37,25 @@ export class LeaderSessionCache {
   }
 
   /** 获取缓存租约；调用方必须在 finally 中 release。 */
-  async acquire(sessionId: string): Promise<{
+  async acquire(sessionId: string, model?: LeaderModelSelection): Promise<{
     session: LeaderSession;
     release(): void;
   }> {
     await this.#evictExpired();
     let entry = this.#entries.get(sessionId);
+    const modelKey = modelSelectionKey(model);
+    if (entry && entry.modelKey !== modelKey) {
+      if (entry.activeUsers > 0) {
+        throw new Error(`Cannot switch Leader model while Session is active: ${sessionId}`);
+      }
+      await this.evict(sessionId);
+      entry = undefined;
+    }
     if (!entry) {
-      const session = this.factory.create(sessionId);
+      const session = this.factory.create(sessionId, model);
       entry = {
         session,
+        modelKey,
         activeUsers: 0,
         lastUsedAt: this.#now(),
       };
@@ -123,4 +134,8 @@ export class LeaderSessionCache {
       }
     }
   }
+}
+
+function modelSelectionKey(model: LeaderModelSelection | undefined): string {
+  return model ? `${model.modelId}:${model.fingerprint}` : "default";
 }

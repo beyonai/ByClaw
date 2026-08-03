@@ -92,10 +92,21 @@ export interface LeaderSession {
   dispose(): Promise<void> | void;
 }
 
+/** Run 入站时冻结的 Leader 模型选择；不包含 URL、Token 等敏感配置。 */
+export interface LeaderModelSelection {
+  /** ByAI 模型实例主键，对应 byai:aimodel:config 的 Hash field。 */
+  modelId: string;
+  /** 模型运行配置指纹；同一模型配置变更时也会触发 Session 热切换。 */
+  fingerprint: string;
+}
+
 /** Leader 会话的创建和健康检查 Port。 */
 export interface LeaderSessionFactory {
   /** 为指定业务 Session 创建独立、可复用的 Pi 会话。 */
-  create(sessionId: string): Promise<LeaderSession>;
+  create(
+    sessionId: string,
+    model?: LeaderModelSelection,
+  ): Promise<LeaderSession>;
   /** 检查 Leader Runtime 与模型是否已经就绪。 */
   health(): Promise<{ healthy: boolean; message?: string; model?: string }>;
 }

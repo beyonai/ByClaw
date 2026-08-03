@@ -88,6 +88,23 @@ describe("LeaderSessionCache", () => {
 
     expect(cleaned).toBe(true);
   });
+
+  it("evicts and restores a Session when its model fingerprint changes", async () => {
+    const factory = new CacheLeaderFactory();
+    const cache = new LeaderSessionCache(factory);
+    const firstModel = { modelId: "100", fingerprint: "a".repeat(64) };
+    const secondModel = { modelId: "200", fingerprint: "b".repeat(64) };
+
+    (await cache.acquire("session", firstModel)).release();
+    (await cache.acquire("session", firstModel)).release();
+    expect(factory.create).toHaveBeenCalledTimes(1);
+
+    (await cache.acquire("session", secondModel)).release();
+
+    expect(factory.disposed).toEqual(["session"]);
+    expect(factory.create).toHaveBeenLastCalledWith("session", secondModel);
+    await cache.dispose();
+  });
 });
 
 class CacheLeaderFactory implements LeaderSessionFactory {

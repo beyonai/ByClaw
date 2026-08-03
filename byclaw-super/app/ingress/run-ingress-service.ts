@@ -10,6 +10,7 @@ import type {
   Session,
   SessionContextInput,
   ThinkingLevel,
+  LeaderModelSelection,
 } from "@byclaw/by-conductor";
 import {
   excludeAgentFromGroupChatContext,
@@ -28,6 +29,14 @@ import { truncateForLog } from "../log-format.js";
 interface RunIngressLogger {
   info(bindings: Record<string, unknown>, message: string): void;
   warn(bindings: Record<string, unknown>, message: string): void;
+}
+
+export interface ResourceModelResolver {
+  resolve(input: {
+    resourceId: string;
+    beyondToken: string;
+    systemCode?: string;
+  }): Promise<LeaderModelSelection>;
 }
 
 interface AuthenticatedIngressRequest {
@@ -75,6 +84,8 @@ export class ResourceNotFoundError extends Error {
  * Session 是唯一授权根；Run 和 SSE 都通过 Run.sessionId 回溯 Session.owner。
  */
 export class RunIngressService {
+  readonly #lastKnownLeaderModels = new Map<string, LeaderModelSelection>();
+
   constructor(
     private readonly runService: RunService,
     private readonly verifyBeyondToken: BeyondTokenVerifier,
@@ -82,6 +93,7 @@ export class RunIngressService {
     private readonly credentialMaxTtlMs = 7_200_000,
     private readonly groupChatContexts?: GroupChatContextProvider,
     private readonly logger?: RunIngressLogger,
+    private readonly resourceModels?: ResourceModelResolver,
   ) {}
 
   /** 创建新 Session，并在其中创建首个 Run。 */
@@ -90,15 +102,20 @@ export class RunIngressService {
     const principal = authenticated.principal;
     const attachments = input.attachments ?? [];
     const message = resolveRunMessage(input.message, attachments);
-    const catalog = await this.listAgentsForRun(input);
+    const [catalog, loadedContext, leaderModel] = await Promise.all([
+      this.listAgentsForRun(input),
+      this.loadIngressContext(input),
+      this.loadLeaderModel(input),
+    ]);
     const agentList = this.excludeSelf(
       catalog.agents,
       input.sourceAgentId,
       principal.userCode,
     );
     const ingressContext = this.mergeIngressContext(
-      await this.loadIngressContext(input),
+      loadedContext,
       catalog.error,
+      leaderModel,
     );
     const run = await this.runService.createSessionRun({
       owner: principal,
@@ -139,15 +156,20 @@ export class RunIngressService {
     await this.requireOwnedSession(input.sessionId, principal);
     const attachments = input.attachments ?? [];
     const message = resolveRunMessage(input.message, attachments);
-    const catalog = await this.listAgentsForRun(input);
+    const [catalog, loadedContext, leaderModel] = await Promise.all([
+      this.listAgentsForRun(input),
+      this.loadIngressContext(input),
+      this.loadLeaderModel(input),
+    ]);
     const agentList = this.excludeSelf(
       catalog.agents,
       input.sourceAgentId,
       principal.userCode,
     );
     const ingressContext = this.mergeIngressContext(
-      await this.loadIngressContext(input),
+      loadedContext,
       catalog.error,
+      leaderModel,
     );
     const run = await this.runService.createRun({
       sessionId: input.sessionId,
@@ -406,14 +428,48 @@ export class RunIngressService {
   private mergeIngressContext(
     context: Awaited<ReturnType<RunIngressService["loadIngressContext"]>>,
     agentCatalogError: string | undefined,
+    leaderModel: LeaderModelSelection | undefined,
   ) {
-    if (!context && !agentCatalogError) {
+    if (!context && !agentCatalogError && !leaderModel) {
       return undefined;
     }
     return {
       ...(context ?? {}),
       ...(agentCatalogError ? { agentCatalogError } : {}),
+      ...(leaderModel ? { leaderModel } : {}),
     };
+  }
+
+  /** 每个新 Run 回源当前资源模型；失败时沿用该资源进程内最后一次有效选择。 */
+  private async loadLeaderModel(
+    input: CreateSessionRunRequest,
+  ): Promise<LeaderModelSelection | undefined> {
+    const resourceId = input.sourceAgentId?.trim();
+    if (!resourceId || !this.resourceModels) {
+      return undefined;
+    }
+    try {
+      const model = await this.resourceModels.resolve({
+        resourceId,
+        beyondToken: input.beyondToken,
+        ...(input.systemCode ? { systemCode: input.systemCode } : {}),
+      });
+      this.#lastKnownLeaderModels.set(resourceId, model);
+      return model;
+    } catch (error) {
+      const normalized = error instanceof Error ? error : new Error(String(error));
+      const fallback = this.#lastKnownLeaderModels.get(resourceId);
+      this.logger?.warn(
+        {
+          resourceId,
+          errorName: normalized.name,
+          errorMessage: normalized.message,
+          retainedLastKnownModel: Boolean(fallback),
+        },
+        "超级助手模型绑定不可用，本次沿用最后一次有效模型",
+      );
+      return fallback;
+    }
   }
 
   /**
