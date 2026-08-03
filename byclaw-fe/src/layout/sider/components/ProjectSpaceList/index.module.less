@@ -2821,9 +2821,16 @@
   pointer-events: none;
 }
 
-.repoModalDivider {
-  margin: 16px 0 12px;
-  border-top: 1px solid #f0f0f0;
+// 仓库列表弹窗头:左侧「已有仓库」标签,右侧「新增仓库」按钮。
+.repoManageHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+
+  label {
+    font-weight: 500;
+  }
 }
 
 .dwsAuthDetail {

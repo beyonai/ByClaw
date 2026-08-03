@@ -2140,6 +2140,7 @@ export default {
   'projectSpace.detail.codeChanges.diffUnavailable': '暂时无法获取该文件的变更内容',
   'projectSpace.detail.codeChanges.diffEmpty': '该文件暂无可显示的差异',
   'projectSpace.detail.repository.modalTitle': '维护项目仓库',
+  'projectSpace.detail.repository.manageTitle': '仓库管理',
   'projectSpace.detail.repository.field.existing': '已有仓库',
   'projectSpace.detail.repository.field.fullName': '仓库全名 owner/repo',
   'projectSpace.detail.repository.field.url': '仓库地址（可选）',

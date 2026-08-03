@@ -821,9 +821,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [openTaskActionId, setOpenTaskActionId] = useState<string>();
   const [repoModalOpen, setRepoModalOpen] = useState(false);
   // 仓库弹窗被渠道、手工需求共用，创建完成后按打开来源回填对应表单。
-  const [repoModalTarget, setRepoModalTarget] = useState<'source' | 'manualRequirement'>('source');
+  // manage: 从详情三个点菜单打开的独立仓库管理入口,建完仓库无需回填任何表单。
+  const [repoModalTarget, setRepoModalTarget] = useState<'source' | 'manualRequirement' | 'manage'>('source');
   const [repoForm, setRepoForm] = useState({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
   const [repoSaving, setRepoSaving] = useState(false);
+  // 仓库弹窗默认看列表,点「新增仓库」再弹出表单(嵌套弹窗),避免列表和表单混在一屏。
+  const [repoFormOpen, setRepoFormOpen] = useState(false);
   const [manualRequirementOpen, setManualRequirementOpen] = useState(false);
   const [manualRequirementSubmitting, setManualRequirementSubmitting] = useState(false);
   // 新增、修改共用同一表单，编辑态保存当前待修改的需求条目。
@@ -2635,12 +2638,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
       }
       message.success(t('repository.createSuccess'));
       setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
+      // 建仓成功即关表单:manage 场景退回列表,source/manualRequirement 场景回到各自表单。
+      setRepoFormOpen(false);
       await fetchRepos();
       if (repoModalTarget === 'manualRequirement') {
         setManualRequirementForm((prev) => ({ ...prev, repoId: res.repoId }));
-      } else {
+      } else if (repoModalTarget === 'source') {
         setSourceForm((prev) => ({ ...prev, repoId: res.repoId }));
       }
+      // manage 入口只维护仓库列表,不回填任何表单。
     } catch {
       message.error(t('repository.createFailed'));
     } finally {
@@ -4319,7 +4325,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 onClick={() => {
                   setRepoModalTarget('source');
                   setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
-                  setRepoModalOpen(true);
+                  // 渠道表单里的「+」直接进新增表单,建完回填仓库,不经过列表。
+                  setRepoFormOpen(true);
                 }}
               >
                 {t('common.add')}
@@ -4591,7 +4598,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
               onClick={() => {
                 setRepoModalTarget('manualRequirement');
                 setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
-                setRepoModalOpen(true);
+                // 手工需求表单里的「+」直接进新增表单,建完回填仓库,不经过列表。
+                setRepoFormOpen(true);
               }}
             >
               {t('common.add')}
@@ -4644,18 +4652,75 @@ const ProjectDetailPanel: React.FC<Props> = ({
     </Modal>
   );
 
-  const renderRepoModal = () => (
+  // 新增仓库表单弹窗:独立于列表,建完自动关闭。source/manualRequirement 入口直接打开此弹窗。
+  const renderRepoFormModal = () => (
     <Modal
-      title={t('repository.modalTitle')}
-      open={repoModalOpen}
-      onCancel={() => setRepoModalOpen(false)}
-      footer={<Button onClick={() => setRepoModalOpen(false)}>{t('common.close')}</Button>}
-      width={560}
-      // 仓库弹窗可从渠道或需求弹窗内打开，需要始终覆盖在父弹窗上方。
-      zIndex={1100}
+      title={t('repository.create')}
+      open={repoFormOpen}
+      onCancel={() => setRepoFormOpen(false)}
+      onOk={handleCreateRepo}
+      confirmLoading={repoSaving}
+      okText={t('repository.create')}
+      cancelText={t('common.cancel')}
+      okButtonProps={{ disabled: !repoForm.repoFullName.trim() }}
+      width={480}
+      // 从列表弹窗(zIndex 1100)或渠道/需求弹窗内再叠一层,需盖在上方。
+      zIndex={1200}
     >
       <div className={styles.formField}>
-        <label>{t('repository.field.existing')}</label>
+        <label>{t('repository.field.fullName')}</label>
+        <Input
+          placeholder={t('repository.placeholder.fullName')}
+          value={repoForm.repoFullName}
+          onChange={(event) => setRepoForm((prev) => ({ ...prev, repoFullName: event.target.value }))}
+        />
+      </div>
+      <div className={styles.formField}>
+        <label>{t('repository.field.url')}</label>
+        <Input
+          placeholder={t('repository.placeholder.url')}
+          value={repoForm.repoUrl}
+          onChange={(event) => setRepoForm((prev) => ({ ...prev, repoUrl: event.target.value }))}
+        />
+      </div>
+      <div className={styles.formField}>
+        <label>{t('repository.field.defaultBranch')}</label>
+        <Input
+          placeholder="main"
+          value={repoForm.defaultBranch}
+          onChange={(event) => setRepoForm((prev) => ({ ...prev, defaultBranch: event.target.value }))}
+        />
+      </div>
+    </Modal>
+  );
+
+  // 仓库列表弹窗:先看已有仓库,顶部「新增仓库」按钮弹出独立表单。仅 manage 入口用列表;
+  // source/manualRequirement 入口直接开表单(repoFormOpen),不展示这一层。
+  const renderRepoModal = () => (
+    <>
+      <Modal
+        title={t('repository.modalTitle')}
+        open={repoModalOpen}
+        onCancel={() => setRepoModalOpen(false)}
+        footer={<Button onClick={() => setRepoModalOpen(false)}>{t('common.close')}</Button>}
+        width={560}
+        // 仓库弹窗可从渠道或需求弹窗内打开，需要始终覆盖在父弹窗上方。
+        zIndex={1100}
+      >
+        <div className={styles.repoManageHeader}>
+          <label>{t('repository.field.existing')}</label>
+          <Button
+            type="primary"
+            size="small"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
+              setRepoFormOpen(true);
+            }}
+          >
+            {t('repository.create')}
+          </Button>
+        </div>
         {repos.length ? (
           <List
             size="small"
@@ -4691,36 +4756,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
         ) : (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('repository.empty')} />
         )}
-      </div>
-      <div className={styles.repoModalDivider} />
-      <div className={styles.formField}>
-        <label>{t('repository.field.fullName')}</label>
-        <Input
-          placeholder={t('repository.placeholder.fullName')}
-          value={repoForm.repoFullName}
-          onChange={(event) => setRepoForm((prev) => ({ ...prev, repoFullName: event.target.value }))}
-        />
-      </div>
-      <div className={styles.formField}>
-        <label>{t('repository.field.url')}</label>
-        <Input
-          placeholder={t('repository.placeholder.url')}
-          value={repoForm.repoUrl}
-          onChange={(event) => setRepoForm((prev) => ({ ...prev, repoUrl: event.target.value }))}
-        />
-      </div>
-      <div className={styles.formField}>
-        <label>{t('repository.field.defaultBranch')}</label>
-        <Input
-          placeholder="main"
-          value={repoForm.defaultBranch}
-          onChange={(event) => setRepoForm((prev) => ({ ...prev, defaultBranch: event.target.value }))}
-        />
-      </div>
-      <Button type="primary" icon={<PlusOutlined />} loading={repoSaving} onClick={handleCreateRepo}>
-        {t('repository.create')}
-      </Button>
-    </Modal>
+      </Modal>
+      {renderRepoFormModal()}
+    </>
   );
 
   const renderDwsAuthModal = () => (
@@ -4836,6 +4874,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const detailActionItems: MenuProps['items'] = [
     ...(showRequirementsTab ? [{ key: 'add-source', label: t('source.addTitle') }] : []),
+    // 研发项目一个项目挂多个仓库,提供独立的仓库管理入口(列表 + 新增,复用仓库弹窗)。
+    ...(isDevelopProject ? [{ key: 'manage-repos', label: t('repository.manageTitle') }] : []),
     ...(onEditProject ? [{ key: 'edit-project', label: t('project.edit') }] : []),
     ...(onDeleteProject ? [{ key: 'delete-project', label: t('project.delete'), danger: true }] : []),
     // 非创建者通过项目菜单退出，成员列表不再提供“移除自己”入口。
@@ -4845,6 +4885,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const handleDetailAction = ({ key }: { key: string }) => {
     if (key === 'add-source') {
       handleHeaderAdd();
+      return;
+    }
+    if (key === 'manage-repos') {
+      setRepoModalTarget('manage');
+      setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
+      setRepoModalOpen(true);
       return;
     }
     if (key === 'edit-project' && project) {

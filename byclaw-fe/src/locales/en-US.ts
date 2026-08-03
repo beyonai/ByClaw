@@ -2167,6 +2167,7 @@ export default {
   'projectSpace.detail.codeChanges.diffUnavailable': 'Unable to load the diff for this file',
   'projectSpace.detail.codeChanges.diffEmpty': 'No displayable diff for this file',
   'projectSpace.detail.repository.modalTitle': 'Manage Project Repositories',
+  'projectSpace.detail.repository.manageTitle': 'Repository management',
   'projectSpace.detail.repository.field.existing': 'Existing Repositories',
   'projectSpace.detail.repository.field.fullName': 'Repository Full Name (owner/repo)',
   'projectSpace.detail.repository.field.url': 'Repository URL (Optional)',
