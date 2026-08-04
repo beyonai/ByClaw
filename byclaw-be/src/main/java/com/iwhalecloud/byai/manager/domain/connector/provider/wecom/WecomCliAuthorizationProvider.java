@@ -45,11 +45,14 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorAuth
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.CliResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.ManagedProcess;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialVerifier;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService.ConnectorCliWorkspace;
+import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
 @Component
-public class WecomCliAuthorizationProvider implements ConnectorAuthorizationProvider {
+public class WecomCliAuthorizationProvider
+        implements ConnectorAuthorizationProvider, ConnectorCredentialVerifier {
 
     private static final String PROVIDER_CODE = "wecom-cli";
     private static final List<String> INIT_COMMAND =
@@ -175,6 +178,74 @@ public class WecomCliAuthorizationProvider implements ConnectorAuthorizationProv
     @Override
     public String providerCode() {
         return PROVIDER_CODE;
+    }
+
+    @Override
+    public AuthorizationStatusResult verify(String userId, ConnectorInfo connector) {
+        Long numericUserId = parseUserId(userId);
+        if (numericUserId == null) {
+            return credentialVerificationFailure();
+        }
+        ProviderState providerState;
+        try {
+            providerState = decodeProviderState(connector == null ? null : connector.getAuthConfig());
+        } catch (RuntimeException | JsonProcessingException e) {
+            return failedStatus("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential");
+        }
+        ConnectorCliWorkspace workspace;
+        try {
+            workspace = workspaceService.resolve(numericUserId, PROVIDER_CODE);
+        } catch (RuntimeException e) {
+            return failedStatus(
+                "CREDENTIAL_WORKSPACE_UNAVAILABLE",
+                "Connector credential workspace is unavailable"
+            );
+        }
+        try {
+            CliResult cacheResult = cliRunner.run(
+                CACHE_STATUS_COMMAND,
+                workspace.environment(),
+                null,
+                CLI_TIMEOUT
+            );
+            if (timedOut(cacheResult)) {
+                return credentialVerificationTimeout();
+            }
+            if (!validCacheResult(cacheResult)) {
+                return credentialInvalid();
+            }
+            CliResult probeResult = cliRunner.run(
+                providerState.probeCommand(),
+                workspace.environment(),
+                null,
+                CLI_TIMEOUT
+            );
+            if (timedOut(probeResult)) {
+                return credentialVerificationTimeout();
+            }
+            return validBusinessProbeResult(probeResult) ? connectedStatus() : credentialInvalid();
+        } catch (RuntimeException e) {
+            return credentialVerificationFailure();
+        }
+    }
+
+    private AuthorizationStatusResult credentialInvalid() {
+        return failedStatus("CONNECTOR_CREDENTIAL_INVALID", "Connector credential is invalid");
+    }
+
+    private AuthorizationStatusResult credentialVerificationFailure() {
+        return failedStatus("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential");
+    }
+
+    private AuthorizationStatusResult credentialVerificationTimeout() {
+        return failedStatus(
+            "CONNECTOR_VERIFICATION_TIMEOUT",
+            "Connector credential verification timed out"
+        );
+    }
+
+    private boolean timedOut(CliResult result) {
+        return result != null && result.exitCode() == 124;
     }
 
     @Override

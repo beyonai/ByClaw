@@ -5,10 +5,14 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.connector.ConnectorApplicationService;
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorAuthorizationService;
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorAuthService;
+import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorSkillAuthorizationSyncException;
+import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorSkillAuthorizationSyncService;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorAuthorizationDto;
 import com.iwhalecloud.byai.manager.dto.connector.CancelConnectorAuthorizationRequest;
+import com.iwhalecloud.byai.manager.dto.connector.CompleteSkillAuthorizationRequest;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorConnectionDto;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorListDto;
+import com.iwhalecloud.byai.manager.dto.connector.ConnectorSkillAuthorizationSyncDto;
 import com.iwhalecloud.byai.manager.dto.connector.StartConnectorAuthorizationRequest;
 import com.iwhalecloud.byai.manager.dto.connector.UpdateConnectorEnableRequest;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
@@ -39,6 +43,9 @@ public class ConnectorController {
 
     @Autowired
     private ConnectorAuthService connectorAuthService;
+
+    @Autowired
+    private ConnectorSkillAuthorizationSyncService connectorSkillAuthorizationSyncService;
 
     /**
      * 分页查询连接器列表。
@@ -74,6 +81,26 @@ public class ConnectorController {
             throw new IllegalArgumentException("authorizationId不能为空");
         }
         return ResponseUtil.successResponse(connectorAuthorizationService.cancel(request.getAuthorizationId(), currentUserId()));
+    }
+
+    @PostMapping("/authorization/skill-complete")
+    public ResponseUtil<ConnectorSkillAuthorizationSyncDto> completeSkillAuthorization(
+            @RequestBody CompleteSkillAuthorizationRequest request) {
+        String connectorCode = request == null ? null : request.getConnectorCode();
+        try {
+            return ResponseUtil.successResponse(
+                connectorSkillAuthorizationSyncService.sync(connectorCode, currentUserId())
+            );
+        } catch (ConnectorSkillAuthorizationSyncException e) {
+            return ResponseUtil.failResponse(
+                e.getErrorCode(),
+                ConnectorSkillAuthorizationSyncDto.failed(
+                    connectorCode == null ? null : connectorCode.trim(),
+                    e.getErrorCode(),
+                    e.isRetryable()
+                )
+            );
+        }
     }
 
     @PostMapping("/enable")

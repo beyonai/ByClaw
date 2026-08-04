@@ -27,4 +27,20 @@ class SignAntiReplayFilterTest {
 
         assertThat(filterChain.getRequest()).isSameAs(request);
     }
+
+    @Test
+    void letsConnectorSkillCallbackUseBeyondTokenWithoutCommonRequestSignature() throws Exception {
+        SignAntiReplayFilter filter = new SignAntiReplayFilter();
+        SignAntiReplayConfig config = new SignAntiReplayConfig();
+        config.setEnabled(true);
+        ReflectionTestUtils.setField(filter, "signProperties", config);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST",
+            "/byaiService/connector/authorization/skill-complete");
+        request.setServletPath("/connector/authorization/skill-complete");
+        MockFilterChain filterChain = new MockFilterChain();
+
+        filter.doFilter(request, new MockHttpServletResponse(), filterChain);
+
+        assertThat(filterChain.getRequest()).isSameAs(request);
+    }
 }

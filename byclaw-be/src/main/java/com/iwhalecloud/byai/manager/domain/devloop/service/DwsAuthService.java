@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +28,8 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.CliResult;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -76,6 +79,9 @@ public class DwsAuthService {
     @Autowired
     private LoginApplicationService loginApplicationService;
 
+    @Autowired
+    private ConnectorCliRunner connectorCliRunner;
+
     @FunctionalInterface
     interface DwsProcessLauncher {
 
@@ -83,6 +89,36 @@ public class DwsAuthService {
     }
 
     static record DeviceFlowRegistration(Long userId, Process process) {
+    }
+
+    public enum DwsCredentialOutcome {
+        COMPLETED,
+        TIMEOUT,
+        WORKSPACE_UNAVAILABLE,
+        FAILED
+    }
+
+    public record DwsCredentialStatus(Map<String, Object> status, DwsCredentialOutcome outcome) {
+
+        public DwsCredentialStatus {
+            status = status == null ? Map.of() : Map.copyOf(status);
+        }
+
+        public static DwsCredentialStatus completed(Map<String, Object> status) {
+            return new DwsCredentialStatus(status, DwsCredentialOutcome.COMPLETED);
+        }
+
+        public static DwsCredentialStatus timeout() {
+            return new DwsCredentialStatus(Map.of(), DwsCredentialOutcome.TIMEOUT);
+        }
+
+        public static DwsCredentialStatus workspaceUnavailable() {
+            return new DwsCredentialStatus(Map.of(), DwsCredentialOutcome.WORKSPACE_UNAVAILABLE);
+        }
+
+        public static DwsCredentialStatus failure() {
+            return new DwsCredentialStatus(Map.of(), DwsCredentialOutcome.FAILED);
+        }
     }
 
     private static final class DeviceFlowStartLock {
@@ -511,6 +547,43 @@ public class DwsAuthService {
         } catch (Exception e) {
             log.error("[DwsAuth] getAuthStatus failed", e);
             return Map.of("authenticated", false, "tokenValid", false);
+        }
+    }
+
+    /** Bounded, read-only status query used by connector synchronization. */
+    public DwsCredentialStatus getCredentialStatus(Long userId) {
+        Map<String, String> environment = new HashMap<>();
+        if (!applyUserDwsEnv(environment, userId)) {
+            return DwsCredentialStatus.workspaceUnavailable();
+        }
+        try {
+            CliResult result = connectorCliRunner.run(
+                List.of(DWS_BIN, "auth", "status", "--format", "json"),
+                environment,
+                null,
+                Duration.ofSeconds(10)
+            );
+            if (result.exitCode() == 124) {
+                return DwsCredentialStatus.timeout();
+            }
+            if (result.exitCode() != 0 || result.truncated() || StringUtils.isBlank(result.output())) {
+                return DwsCredentialStatus.failure();
+            }
+            JsonNode node = MAPPER.readTree(result.output());
+            if (node == null || !node.isObject()) {
+                return DwsCredentialStatus.failure();
+            }
+            Map<String, Object> status = new HashMap<>();
+            status.put("authenticated", node.path("authenticated").asBoolean(false));
+            status.put("tokenValid", node.path("token_valid").asBoolean(false));
+            status.put("refreshTokenValid", node.path("refresh_token_valid").asBoolean(false));
+            status.put("expiresAt", node.path("expires_at").asText(""));
+            status.put("userId", node.path("user_id").asText(""));
+            status.put("userName", node.path("user_name").asText(""));
+            return DwsCredentialStatus.completed(status);
+        } catch (Exception e) {
+            log.warn("[DwsAuth] bounded credential status query failed, userId={}", userId, e);
+            return DwsCredentialStatus.failure();
         }
     }
 

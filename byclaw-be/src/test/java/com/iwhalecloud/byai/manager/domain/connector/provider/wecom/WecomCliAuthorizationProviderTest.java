@@ -55,6 +55,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliR
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.ManagedProcess;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService.ConnectorCliWorkspace;
+import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
 class WecomCliAuthorizationProviderTest {
 
@@ -117,6 +118,54 @@ class WecomCliAuthorizationProviderTest {
     @AfterEach
     void tearDown() {
         provider.shutdown();
+    }
+
+    @Test
+    void verifiesExistingWecomCredentialWithTrustedBusinessProbe() {
+        when(workspaceService.resolve(42L, "wecom-cli")).thenReturn(WORKSPACE);
+        when(cliRunner.run(eq(CACHE_STATUS_COMMAND), eq(ENVIRONMENT), eq(null), any(Duration.class)))
+            .thenReturn(new CliResult(0, VALID_CACHE_OUTPUT));
+        when(cliRunner.run(eq(PROBE_COMMAND), eq(ENVIRONMENT), eq(null), any(Duration.class)))
+            .thenReturn(new CliResult(0, VALID_DIRECT_PROBE_OUTPUT));
+
+        AuthorizationStatusResult result = provider.verify("42", connector(VALID_PROVIDER_STATE));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        verify(workspaceService).resolve(42L, "wecom-cli");
+        verify(cliRunner).run(eq(PROBE_COMMAND), eq(ENVIRONMENT), eq(null), any(Duration.class));
+    }
+
+    @Test
+    void rejectsWecomInitializationWithoutValidBusinessProbe() {
+        when(workspaceService.resolve(42L, "wecom-cli")).thenReturn(WORKSPACE);
+        when(cliRunner.run(eq(CACHE_STATUS_COMMAND), eq(ENVIRONMENT), eq(null), any(Duration.class)))
+            .thenReturn(new CliResult(0, VALID_CACHE_OUTPUT));
+        when(cliRunner.run(eq(PROBE_COMMAND), eq(ENVIRONMENT), eq(null), any(Duration.class)))
+            .thenReturn(new CliResult(0, "{\"errcode\":40014,\"errmsg\":\"invalid token\"}"));
+
+        AuthorizationStatusResult result = provider.verify("42", connector(VALID_PROVIDER_STATE));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+        assertThat(result.errorCode()).isEqualTo("CONNECTOR_CREDENTIAL_INVALID");
+    }
+
+    @Test
+    void mapsWecomCredentialVerificationTimeoutToRetryableErrorCode() {
+        when(workspaceService.resolve(42L, "wecom-cli")).thenReturn(WORKSPACE);
+        when(cliRunner.run(eq(CACHE_STATUS_COMMAND), eq(ENVIRONMENT), eq(null), any(Duration.class)))
+            .thenReturn(new CliResult(124, "partial cache status"));
+
+        AuthorizationStatusResult result = provider.verify("42", connector(VALID_PROVIDER_STATE));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+        assertThat(result.errorCode()).isEqualTo("CONNECTOR_VERIFICATION_TIMEOUT");
+        assertThat(result.errorMessage()).doesNotContain("partial cache status");
+    }
+
+    private ConnectorInfo connector(String authConfig) {
+        ConnectorInfo connector = new ConnectorInfo();
+        connector.setAuthConfig(authConfig);
+        return connector;
     }
 
     @Test

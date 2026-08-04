@@ -41,6 +41,9 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
 
     private static final String THIRD_PARTY_SKILL_INSTALL_PATH = "/tool/installThirdPartySkill";
 
+    private static final String CONNECTOR_SKILL_COMPLETE_PATH =
+        "/connector/authorization/skill-complete";
+
 
     public static final String HEADER_SIGNATURE = "x-signature-value";
 
@@ -71,6 +74,12 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
         // 技能超市安装接口使用现有 Beyond-Token 完成用户认证；对端不持有门户通用请求签名密钥，
         // 因此仅跳过通用签名防重放校验，登录鉴权仍由 AccessTokenVerifyInterceptor 执行。
         if (this.isThirdPartySkillInstall(request)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+        // OpenClaw connector Skills authenticate with the current user's Beyond-Token and do not
+        // possess the portal's generic request-signing secret. Login authentication remains mandatory.
+        if (this.isConnectorSkillComplete(request)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -148,6 +157,12 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
         return endsWithPath(request.getRequestURI(), THIRD_PARTY_SKILL_INSTALL_PATH)
             || endsWithPath(request.getServletPath(), THIRD_PARTY_SKILL_INSTALL_PATH)
             || endsWithPath(request.getPathInfo(), THIRD_PARTY_SKILL_INSTALL_PATH);
+    }
+
+    private boolean isConnectorSkillComplete(HttpServletRequest request) {
+        return endsWithPath(request.getRequestURI(), CONNECTOR_SKILL_COMPLETE_PATH)
+            || endsWithPath(request.getServletPath(), CONNECTOR_SKILL_COMPLETE_PATH)
+            || endsWithPath(request.getPathInfo(), CONNECTOR_SKILL_COMPLETE_PATH);
     }
 
     private boolean endsWithFeishuBotEventPath(String path) {

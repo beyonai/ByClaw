@@ -49,6 +49,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliR
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.ManagedProcess;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService.ConnectorCliWorkspace;
+import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
 class LarkCliAuthorizationProviderTest {
 
@@ -76,6 +77,63 @@ class LarkCliAuthorizationProviderTest {
     void setUp() {
         when(workspaceService.resolve(42L, "lark-cli")).thenReturn(WORKSPACE);
         provider = provider(cliRunner);
+    }
+
+    @Test
+    void verifiesExistingLarkUserCredentialInIsolatedWorkspace() {
+        when(cliRunner.run(eq(STATUS), eq(ENVIRONMENT), isNull(), any(Duration.class)))
+            .thenReturn(new CliResult(0, """
+                {"data":{"identity":"user","verified":true,
+                 "identities":{"user":{"openId":"ou_42","name":"Lark User"}}}}
+                """));
+
+        AuthorizationStatusResult result = provider.verify("42", new ConnectorInfo());
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.accountId()).isEqualTo("ou_42");
+        assertThat(result.accountName()).isEqualTo("Lark User");
+        verify(workspaceService).resolve(42L, "lark-cli");
+        verify(cliRunner).run(eq(STATUS), eq(ENVIRONMENT), isNull(), any(Duration.class));
+    }
+
+    @Test
+    void rejectsConfiguredButUnauthenticatedLarkWorkspace() {
+        when(cliRunner.run(eq(STATUS), eq(ENVIRONMENT), isNull(), any(Duration.class)))
+            .thenReturn(new CliResult(0, "{\"configured\":true}"));
+
+        AuthorizationStatusResult result = provider.verify("42", new ConnectorInfo());
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+        assertThat(result.errorCode()).isEqualTo("CONNECTOR_CREDENTIAL_INVALID");
+    }
+
+    @Test
+    void verifierRejectsAuthenticatedBotAndAmbiguousConnectedMarkers() {
+        when(cliRunner.run(eq(STATUS), eq(ENVIRONMENT), isNull(), any(Duration.class)))
+            .thenReturn(
+                new CliResult(0, "{\"identity\":\"bot\",\"verified\":true,\"authenticated\":true}"),
+                new CliResult(0, "{\"authenticated\":true,\"status\":\"connected\"}")
+            );
+
+        AuthorizationStatusResult bot = provider.verify("42", new ConnectorInfo());
+        AuthorizationStatusResult ambiguous = provider.verify("42", new ConnectorInfo());
+
+        assertThat(bot.status()).isEqualTo(AuthorizationStatus.FAILED);
+        assertThat(bot.errorCode()).isEqualTo("CONNECTOR_CREDENTIAL_INVALID");
+        assertThat(ambiguous.status()).isEqualTo(AuthorizationStatus.FAILED);
+        assertThat(ambiguous.errorCode()).isEqualTo("CONNECTOR_CREDENTIAL_INVALID");
+    }
+
+    @Test
+    void mapsLarkCredentialVerificationTimeoutToRetryableErrorCode() {
+        when(cliRunner.run(eq(STATUS), eq(ENVIRONMENT), isNull(), any(Duration.class)))
+            .thenReturn(new CliResult(124, "partial status"));
+
+        AuthorizationStatusResult result = provider.verify("42", new ConnectorInfo());
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+        assertThat(result.errorCode()).isEqualTo("CONNECTOR_VERIFICATION_TIMEOUT");
+        assertThat(result.errorMessage()).doesNotContain("partial status");
     }
 
     @Test

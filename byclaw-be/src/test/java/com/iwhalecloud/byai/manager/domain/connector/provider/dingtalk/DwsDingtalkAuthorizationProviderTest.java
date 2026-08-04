@@ -21,6 +21,8 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService.DwsCredentialStatus;
+import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
 class DwsDingtalkAuthorizationProviderTest {
 
@@ -31,6 +33,42 @@ class DwsDingtalkAuthorizationProviderTest {
     private final DwsAuthService dwsAuthService = mock(DwsAuthService.class);
     private final DwsDingtalkAuthorizationProvider provider =
         new DwsDingtalkAuthorizationProvider(dwsAuthService);
+
+    @Test
+    void verifiesExistingValidDwsCredentialAsConnected() {
+        when(dwsAuthService.getCredentialStatus(42L))
+            .thenReturn(DwsCredentialStatus.completed(connectedStatus()));
+
+        AuthorizationStatusResult result = provider.verify("42", new ConnectorInfo());
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.accountId()).isEqualTo("ding-user-42");
+        assertThat(result.accountName()).isEqualTo("Ding User");
+        verify(dwsAuthService).getCredentialStatus(42L);
+    }
+
+    @Test
+    void rejectsExistingInvalidDwsCredential() {
+        when(dwsAuthService.getCredentialStatus(42L))
+            .thenReturn(DwsCredentialStatus.completed(Map.of("tokenValid", false)));
+
+        AuthorizationStatusResult result = provider.verify("42", new ConnectorInfo());
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+        assertThat(result.errorCode()).isEqualTo("CONNECTOR_CREDENTIAL_INVALID");
+    }
+
+    @Test
+    void mapsDwsCredentialTimeoutAndWorkspaceFailure() {
+        when(dwsAuthService.getCredentialStatus(42L))
+            .thenReturn(DwsCredentialStatus.timeout(), DwsCredentialStatus.workspaceUnavailable());
+
+        AuthorizationStatusResult timeout = provider.verify("42", new ConnectorInfo());
+        AuthorizationStatusResult workspaceFailure = provider.verify("42", new ConnectorInfo());
+
+        assertThat(timeout.errorCode()).isEqualTo("CONNECTOR_VERIFICATION_TIMEOUT");
+        assertThat(workspaceFailure.errorCode()).isEqualTo("CREDENTIAL_WORKSPACE_UNAVAILABLE");
+    }
 
     @Test
     void startsPendingAuthorizationWithExplicitUserAndAuthorizationId() {

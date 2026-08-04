@@ -36,11 +36,14 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorAuth
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.CliResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.ManagedProcess;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialVerifier;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService.ConnectorCliWorkspace;
+import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
 @Component
-public class LarkCliAuthorizationProvider implements ConnectorAuthorizationProvider {
+public class LarkCliAuthorizationProvider
+        implements ConnectorAuthorizationProvider, ConnectorCredentialVerifier {
 
     private static final String PROVIDER_CODE = "lark-cli";
     private static final long DEFAULT_EXPIRES_IN_SECONDS = 600L;
@@ -110,6 +113,43 @@ public class LarkCliAuthorizationProvider implements ConnectorAuthorizationProvi
     @Override
     public String providerCode() {
         return PROVIDER_CODE;
+    }
+
+    @Override
+    public AuthorizationStatusResult verify(String userId, ConnectorInfo connector) {
+        Long numericUserId = parseUserId(userId);
+        if (numericUserId == null) {
+            return failedStatus("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential");
+        }
+        ConnectorCliWorkspace workspace;
+        try {
+            workspace = workspaceService.resolve(numericUserId, PROVIDER_CODE);
+        } catch (RuntimeException e) {
+            return failedStatus(
+                "CREDENTIAL_WORKSPACE_UNAVAILABLE",
+                "Connector credential workspace is unavailable"
+            );
+        }
+        try {
+            CliResult statusResult = cliRunner.run(
+                STATUS_COMMAND,
+                workspace.environment(),
+                null,
+                CLI_TIMEOUT
+            );
+            if (statusResult != null && statusResult.exitCode() == 124) {
+                return failedStatus(
+                    "CONNECTOR_VERIFICATION_TIMEOUT",
+                    "Connector credential verification timed out"
+                );
+            }
+            ConnectedAccount account = parseVerifiedUserAccount(statusResult);
+            return account == null
+                ? failedStatus("CONNECTOR_CREDENTIAL_INVALID", "Connector credential is invalid")
+                : connectedStatus(account);
+        } catch (RuntimeException e) {
+            return failedStatus("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential");
+        }
     }
 
     @Override
@@ -644,6 +684,10 @@ public class LarkCliAuthorizationProvider implements ConnectorAuthorizationProvi
 
     private ConnectedAccount readConnectedAccount(ConnectorCliWorkspace workspace) {
         CliResult result = cliRunner.run(STATUS_COMMAND, workspace.environment(), null, CLI_TIMEOUT);
+        return parseConnectedAccount(result);
+    }
+
+    private ConnectedAccount parseConnectedAccount(CliResult result) {
         if (result == null || result.exitCode() != 0 || result.truncated() || result.output() == null) {
             return null;
         }
@@ -677,6 +721,26 @@ public class LarkCliAuthorizationProvider implements ConnectorAuthorizationProvi
                 textValue(data, root, "accountName", "account_name", "userName", "user_name", "name"));
             Date expiresAt = dateValue(data, root);
             return new ConnectedAccount(accountId, accountName, expiresAt);
+        } catch (JsonProcessingException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    private ConnectedAccount parseVerifiedUserAccount(CliResult result) {
+        if (result == null || result.exitCode() != 0 || result.truncated() || result.output() == null) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(result.output());
+            if (root == null || !root.isObject()) {
+                return null;
+            }
+            JsonNode data = objectData(root);
+            String activeIdentity = textValue(data, root, "identity");
+            if (!"user".equalsIgnoreCase(activeIdentity) || !booleanValue(data, root, "verified")) {
+                return null;
+            }
+            return parseConnectedAccount(result);
         } catch (JsonProcessingException | RuntimeException e) {
             return null;
         }
