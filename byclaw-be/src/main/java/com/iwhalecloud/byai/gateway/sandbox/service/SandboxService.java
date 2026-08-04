@@ -279,6 +279,10 @@ public class SandboxService {
             });
             return;
         }
+        refreshRunningSandboxes(userCode);
+    }
+
+    private void refreshRunningSandboxes(String userCode) {
         List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUser(userCode);
         if (records == null || records.isEmpty()) {
             LOGGER.debug("授权成功后未找到运行中的沙箱，用户编码：{}", userCode);
