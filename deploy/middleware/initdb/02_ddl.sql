@@ -1434,7 +1434,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_private_param_key
 -- 同一用户、同一连接器可以保存多条环境参数，但同一参数名只能有一条未删除记录。
 CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_private_param_connector
     ON byai.po_user_private_param (user_id, param_source, source_ref, param_key)
-    WHERE delete_flag = '0' AND param_source = 'CONNECTOR';
+    WHERE delete_flag = '0' AND param_source = 'CONNECTOR' AND source_ref IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_private_param_connector_null_ref
+    ON byai.po_user_private_param (user_id, param_source, param_key)
+    WHERE delete_flag = '0' AND param_source = 'CONNECTOR' AND source_ref IS NULL;
 
 -- 沙箱健康检测-水位模型配置表
 CREATE TABLE IF NOT EXISTS byai.sandbox_health_watermark_model (

@@ -92,12 +92,7 @@ WITH ranked_active_authorizations AS (
     SELECT auth_id,
            ROW_NUMBER() OVER (
                PARTITION BY user_id, connector_id
-               ORDER BY CASE
-                            WHEN enable_flag = 'Y'
-                                 AND (expire_time IS NULL OR expire_time > CURRENT_TIMESTAMP)
-                                THEN 0
-                            ELSE 1
-                        END ASC,
+                        ORDER BY CASE WHEN enable_flag = 'Y' THEN 0 ELSE 1 END ASC,
                         update_time DESC NULLS LAST,
                         create_time DESC NULLS LAST,
                         auth_id DESC NULLS LAST
@@ -171,10 +166,15 @@ DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
 
 -- 同一用户、同一连接器可以保存多条环境参数，但同一参数名只能有一条未删除记录。
 DROP INDEX IF EXISTS byai.uk_po_user_private_param_connector;
+DROP INDEX IF EXISTS byai.uk_po_user_private_param_connector_null_ref;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_private_param_connector
     ON byai.po_user_private_param (user_id, param_source, source_ref, param_key)
-    WHERE delete_flag = '0' AND param_source = 'CONNECTOR';
+    WHERE delete_flag = '0' AND param_source = 'CONNECTOR' AND source_ref IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_private_param_connector_null_ref
+    ON byai.po_user_private_param (user_id, param_source, param_key)
+    WHERE delete_flag = '0' AND param_source = 'CONNECTOR' AND source_ref IS NULL;
 
 COMMENT ON COLUMN byai.byai_connector_info.runtime_manifest IS '连接器最新 Runtime Manifest 模板，规范化完整 JSON';
 COMMENT ON COLUMN byai.byai_connector_info.skill_code IS 'OpenClaw Skill 路由编码';

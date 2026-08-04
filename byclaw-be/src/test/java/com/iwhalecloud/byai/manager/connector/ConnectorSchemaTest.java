@@ -93,8 +93,8 @@ class ConnectorSchemaTest {
         assertThat(sql).contains(
             "row_number() over",
             "partition by user_id, connector_id",
-            "order by case when enable_flag = 'y' and (expire_time is null or expire_time > current_timestamp) "
-                + "then 0 else 1 end asc, update_time desc nulls last, create_time desc nulls last, "
+            "order by case when enable_flag = 'y' then 0 else 1 end asc, update_time desc nulls last, "
+                + "create_time desc nulls last, "
                 + "auth_id desc nulls last",
             "update byai.byai_connector_auth as duplicate_auth",
             "set status_cd = '00x', enable_flag = 'n', update_time = current_timestamp",
@@ -109,6 +109,7 @@ class ConnectorSchemaTest {
         );
         assertThat(sql).doesNotContain("on byai.byai_connector_auth (user_id, connector_id, status_cd)");
         assertThat(sql).doesNotContain("delete from byai.byai_connector_auth");
+        assertThat(sql).doesNotContain("expire_time is null or expire_time > current_timestamp");
         assertThat(sql.indexOf("with ranked_active_authorizations")).isLessThan(
             sql.indexOf("create unique index if not exists uk_byai_connector_auth_active_user_connector")
         );
