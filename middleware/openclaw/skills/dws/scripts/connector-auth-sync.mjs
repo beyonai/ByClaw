@@ -104,10 +104,12 @@ function tokenFromAuth(auth) {
 }
 
 function loadBeyondToken() {
-  let token = "";
-  for (const filePath of candidateAuthFiles()) {
-    const auth = readJsonIfExists(filePath);
-    token = firstNonEmpty(tokenFromAuth(auth), token);
+  let token = firstNonEmpty(process.env.BEYOND_TOKEN);
+  if (!token) {
+    for (const filePath of candidateAuthFiles()) {
+      const auth = readJsonIfExists(filePath);
+      token = firstNonEmpty(tokenFromAuth(auth), token);
+    }
   }
   if (!token) {
     throw new PublicFailure("AUTH_CONTEXT_UNAVAILABLE", false);

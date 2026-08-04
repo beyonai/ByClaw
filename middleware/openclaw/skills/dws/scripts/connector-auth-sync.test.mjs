@@ -380,13 +380,40 @@ test("retries a malformed success response once and emits no response detail", a
   assert.doesNotMatch(`${result.stdout}${result.stderr}`, /malformed|secret/i);
 });
 
-test("fails without exposing secrets when auth context is unavailable", async () => {
+test("uses the sandbox Beyond-Token environment when session files are unavailable", async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "connector-auth-sync-empty-"));
+  const backend = await startServer((_request, response) => {
+    response.setHeader("Content-Type", "application/json");
+    response.end(JSON.stringify({ code: 0, data: { connected: true } }));
+  });
+  t.after(() => {
+    backend.server.close();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
   const result = await runHelper([], {
     HOME: home,
     OPENCLAW_STATE_DIR: path.join(home, "state"),
     REDIS_HOST: "",
-    BEYOND_TOKEN: "ignored-environment-token",
+    BE_SERVER_PORT: String(backend.port),
+    BEYOND_TOKEN: "sandbox-environment-token",
+  });
+
+  assert.equal(result.code, 0, result.stdout);
+  assert.deepEqual(JSON.parse(result.stdout), { connected: true });
+  assert.equal(backend.requests[0].headers["beyond-token"], "sandbox-environment-token");
+  assert.doesNotMatch(`${result.stdout}${result.stderr}`, /sandbox-environment-token/);
+});
+
+test("fails when auth context is unavailable", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "connector-auth-sync-empty-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+
+  const result = await runHelper([], {
+    HOME: home,
+    OPENCLAW_STATE_DIR: path.join(home, "state"),
+    REDIS_HOST: "",
+    BEYOND_TOKEN: "",
   });
 
   assert.equal(result.code, 1);
@@ -395,5 +422,4 @@ test("fails without exposing secrets when auth context is unavailable", async ()
     errorCode: "AUTH_CONTEXT_UNAVAILABLE",
     retryable: false,
   });
-  assert.doesNotMatch(`${result.stdout}${result.stderr}`, /ignored-environment-token/);
 });
