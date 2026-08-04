@@ -78,6 +78,15 @@ export type ExecuteViaCallAgentInput = {
   resourceContext: ResourceContext;
 };
 
+export type BuildCallAgentLangfuseEnvelopeInput = {
+  traceId: string;
+  sessionId: string;
+  langfuseTraceId?: string;
+  langfuseParentObservationId?: string;
+  baseMetadata: Dict;
+  basePayload: Dict;
+};
+
 function shouldTrackCallAgentRemoteTask(
   callMode: CallAgentMode,
   resourceContext: ResourceContext,
@@ -149,57 +158,22 @@ export async function executeViaCallAgent(
       // 异步调用的话，parent_message_id 为 "-1"，否则call agent的输出会渲染到工具调用下面。但是异步调用的话，工具调用马上就会结束，折叠起来，用户看不到
       defaultParentMessageId = "-1";
     }
-    const langfuseTraceId = asString(input.langfuseTraceId);
-    const dispatchTraceId = langfuseTraceId || input.traceId;
-    const originalTraceId = dispatchTraceId !== input.traceId ? input.traceId : "";
-
     const baseMetadata: Dict = {
       ...(input.metadata || {}),
       toolCallId: input.toolCallId,
     };
-    if (originalTraceId) {
-      baseMetadata.byclaw_original_trace_id = originalTraceId;
-      baseMetadata.channel_trace_id ??= originalTraceId;
-      baseMetadata.openclaw_trace_id ??= originalTraceId;
-    }
-
-    const metadata = withLangfuseSessionAliases(
-      withLangfuseTraceAliases(
-        withLangfuseParentObservationAliases(
-          baseMetadata,
-          input.langfuseParentObservationId,
-        ),
-        langfuseTraceId,
-      ),
-      input.sessionId,
-      { includePlainSessionAliases: true },
-    );
     const basePayload: Dict = { ...input.payload };
-    if (originalTraceId) {
-      basePayload.byclaw_original_trace_id = originalTraceId;
-      basePayload.channel_trace_id ??= originalTraceId;
-      basePayload.openclaw_trace_id ??= originalTraceId;
-    }
-    const payload = withLangfuseSessionAliases(
-      withLangfuseTraceAliases(
-        withLangfuseParentObservationAliases(basePayload, input.langfuseParentObservationId),
-        langfuseTraceId,
-      ),
-      input.sessionId,
-    );
-
+    const langfuseTraceId = asString(input.langfuseTraceId);
     const langfuseSessionId = asString(input.sessionId);
-
-    const payloadLangfuseContext = withLangfuseSessionAliases(
-      withLangfuseTraceAliases(
-        withLangfuseParentObservationAliases(
-          originalTraceId ? { byclaw_original_trace_id: originalTraceId } : {},
-          input.langfuseParentObservationId,
-        ),
+    const { metadata, payload, payloadLangfuseContext, dispatchTraceId } =
+      buildCallAgentLangfuseEnvelope({
+        traceId: input.traceId,
+        sessionId: input.sessionId,
         langfuseTraceId,
-      ),
-      langfuseSessionId,
-    );
+        langfuseParentObservationId: input.langfuseParentObservationId,
+        baseMetadata,
+        basePayload,
+      });
 
     logBaiyingRequest(input.logger, "call_agent.dispatch", {
       resource_id: input.capability.metadata?.resource_id,
@@ -375,6 +349,65 @@ export async function executeViaCallAgent(
   } finally {
     await ctx.redis.quit().catch(() => undefined);
   }
+}
+
+export function buildCallAgentLangfuseEnvelope(
+  input: BuildCallAgentLangfuseEnvelopeInput,
+): {
+  metadata: Dict;
+  payload: Dict;
+  payloadLangfuseContext: Dict;
+  dispatchTraceId: string;
+  originalTraceId: string;
+} {
+  const langfuseTraceId = asString(input.langfuseTraceId);
+  const dispatchTraceId = langfuseTraceId || input.traceId;
+  const originalTraceId = dispatchTraceId !== input.traceId ? input.traceId : "";
+
+  const baseMetadata = { ...input.baseMetadata };
+  if (originalTraceId) {
+    baseMetadata.byclaw_original_trace_id = originalTraceId;
+    baseMetadata.channel_trace_id ??= originalTraceId;
+    baseMetadata.openclaw_trace_id ??= originalTraceId;
+  }
+  const metadata = withLangfuseSessionAliases(
+    withLangfuseTraceAliases(
+      withLangfuseParentObservationAliases(
+        baseMetadata,
+        input.langfuseParentObservationId,
+      ),
+      langfuseTraceId,
+    ),
+    input.sessionId,
+    { includePlainSessionAliases: true },
+  );
+
+  const basePayload = { ...input.basePayload };
+  if (originalTraceId) {
+    basePayload.byclaw_original_trace_id = originalTraceId;
+    basePayload.channel_trace_id ??= originalTraceId;
+    basePayload.openclaw_trace_id ??= originalTraceId;
+  }
+  const payload = withLangfuseSessionAliases(
+    withLangfuseTraceAliases(
+      withLangfuseParentObservationAliases(basePayload, input.langfuseParentObservationId),
+      langfuseTraceId,
+    ),
+    input.sessionId,
+  );
+
+  const payloadLangfuseContext = withLangfuseSessionAliases(
+    withLangfuseTraceAliases(
+      withLangfuseParentObservationAliases(
+        originalTraceId ? { byclaw_original_trace_id: originalTraceId } : {},
+        input.langfuseParentObservationId,
+      ),
+      langfuseTraceId,
+    ),
+    asString(input.sessionId),
+  );
+
+  return { metadata, payload, payloadLangfuseContext, dispatchTraceId, originalTraceId };
 }
 
 function withLangfuseParentObservationAliases(
