@@ -217,8 +217,12 @@ function skillNamesFromScanned(skills: ScannedSkill[]): string[] {
   return mergeSkillNames(skills.map((skill) => skill.skillName));
 }
 
+export async function scanSkillRootNames(skillsDir: string): Promise<string[]> {
+  return skillNamesFromScanned(await scanSkillRoot(skillsDir));
+}
+
 export async function scanWorkspaceSkillNames(workspaceDir: string): Promise<string[]> {
-  return skillNamesFromScanned(await scanSkillRoot(path.join(workspaceDir, SKILLS_DIR_NAME)));
+  return scanSkillRootNames(path.join(workspaceDir, SKILLS_DIR_NAME));
 }
 
 function resolvePluginSkillsDir(): string {
@@ -226,7 +230,7 @@ function resolvePluginSkillsDir(): string {
 }
 
 export async function scanPluginSkillNames(): Promise<string[]> {
-  return skillNamesFromScanned(await scanSkillRoot(resolvePluginSkillsDir()));
+  return scanSkillRootNames(resolvePluginSkillsDir());
 }
 
 function resolveSkillNamesFromPluginRoot(rawSkills: unknown[], pluginSkills: ScannedSkill[]): string[] {

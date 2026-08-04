@@ -2,8 +2,19 @@ import type { Language } from "./types.js";
 
 export type ConnectorAuthorizationMap = Record<string, boolean>;
 
+const MAX_CONNECTOR_NAME_LENGTH = 64;
+const MAX_CONNECTOR_AUTHORIZATION_ENTRIES = 64;
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isValidConnectorSkillName(name: string): boolean {
+  return (
+    name.length > 0 &&
+    name.length <= MAX_CONNECTOR_NAME_LENGTH &&
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(name)
+  );
 }
 
 export function normalizeConnectorAuthorization(
@@ -12,15 +23,19 @@ export function normalizeConnectorAuthorization(
   if (!isPlainRecord(value)) {
     return undefined;
   }
-  const normalized: ConnectorAuthorizationMap = {};
+  const normalized = new Map<string, boolean>();
   for (const [rawName, enabled] of Object.entries(value)) {
     const name = rawName.trim();
-    if (!name || typeof enabled !== "boolean") {
+    if (!isValidConnectorSkillName(name) || typeof enabled !== "boolean") {
       continue;
     }
-    normalized[name] = enabled;
+    const existing = normalized.get(name);
+    normalized.set(name, existing === false || enabled === false ? false : true);
   }
-  return Object.keys(normalized).length > 0 ? normalized : undefined;
+  const cappedEntries = [...normalized.entries()]
+    .toSorted((left, right) => Number(left[1]) - Number(right[1]))
+    .slice(0, MAX_CONNECTOR_AUTHORIZATION_ENTRIES);
+  return cappedEntries.length > 0 ? Object.fromEntries(cappedEntries) : undefined;
 }
 
 export function connectorAuthorizationFromMetadata(

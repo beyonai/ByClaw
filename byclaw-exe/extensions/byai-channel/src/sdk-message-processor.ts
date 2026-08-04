@@ -96,8 +96,19 @@ export async function resolveConnectorSkillFilterForDispatch(params: {
       agentId: params.agentId,
       disabledConnectorSkills,
     });
-    if (resolvedFilter) {
-      return resolvedFilter;
+    if (Array.isArray(resolvedFilter)) {
+      return [...new Set(
+        resolvedFilter
+          .filter((name): name is string => typeof name === "string")
+          .map((name) => name.trim())
+          .filter(Boolean),
+      )];
+    }
+    if (resolvedFilter !== undefined) {
+      params.log?.warn?.(
+        `[byai-channel] connector skill filter provider returned invalid result; failing closed: agentId=${params.agentId}, disabled=${disabledConnectorSkills.join(",")}`,
+      );
+      return [];
     }
     params.log?.warn?.(
       `[byai-channel] connector skill filter provider unavailable; failing closed: agentId=${params.agentId}, disabled=${disabledConnectorSkills.join(",")}`,

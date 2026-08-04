@@ -258,4 +258,18 @@ describe("resolveConnectorSkillFilterForDispatch", () => {
     ).resolves.toEqual([]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("provider failed"));
   });
+
+  it("fails closed when the connector skill filter provider returns an invalid value", async () => {
+    const warn = vi.fn();
+
+    await expect(
+      resolveConnectorSkillFilterForDispatch({
+        agentId: "test-agent",
+        authConnectorList: { fws: false },
+        log: { warn },
+        resolveFilter: async () => "dws" as unknown as string[],
+      }),
+    ).resolves.toEqual([]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("invalid result"));
+  });
 });

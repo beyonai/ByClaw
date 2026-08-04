@@ -18,6 +18,39 @@ describe("connector authorization", () => {
     ).toEqual({ dws: true, fws: false });
   });
 
+  it("rejects connector names that are not valid OpenClaw skill names", () => {
+    expect(
+      normalizeConnectorAuthorization({
+        dws: false,
+        "bad`name": false,
+        "bad\nname": false,
+        "bad_name": false,
+        "-leading": false,
+        "trailing-": false,
+        "double--hyphen": false,
+        ["a".repeat(65)]: false,
+      }),
+    ).toEqual({ dws: false });
+  });
+
+  it.each([
+    { fws: false, " fws ": true },
+    { fws: true, " fws ": false },
+  ])("keeps canonical connector collisions disabled: %j", (value) => {
+    expect(normalizeConnectorAuthorization(value)).toEqual({ fws: false });
+  });
+
+  it("caps connector authorization entries and prioritizes disabled entries", () => {
+    const value = Object.fromEntries([
+      ...Array.from({ length: 64 }, (_, index) => [`enabled-${index}`, true]),
+      ["disabled-last", false],
+    ]);
+
+    const normalized = normalizeConnectorAuthorization(value);
+    expect(Object.keys(normalized ?? {})).toHaveLength(64);
+    expect(normalized).toMatchObject({ "disabled-last": false });
+  });
+
   it.each([undefined, null, [], "{}", {}, { dws: "false" }])(
     "ignores invalid or empty connector authorization: %j",
     (value) => {
