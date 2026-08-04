@@ -1,7 +1,38 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("openclaw/plugin-sdk/media-runtime", () => ({
+  detectMime: vi.fn(async () => "application/octet-stream"),
+  fetchRemoteMedia: vi.fn(),
+  resolveChannelMediaMaxBytes: vi.fn(() => 10_000_000),
+  saveMediaBuffer: vi.fn(),
+}));
+
+vi.mock("./utils.js", () => ({
+  generateRandomId: vi.fn(() => "generated-id"),
+  getAgentNameById: vi.fn(() => undefined),
+}));
+
+vi.mock("./diagnostics.js", () => ({
+  createByaiSdkDiagnosticTrace: vi.fn(() => ({
+    trace: {
+      traceId: "00000000000000000000000000000001",
+      spanId: "0000000000000001",
+      traceFlags: "01",
+    },
+  })),
+  emitByaiSdkDispatchCompleted: vi.fn(),
+  emitByaiSdkDispatchStarted: vi.fn(() => Date.now()),
+  emitByaiSdkMessageReceived: vi.fn(() => Date.now()),
+  runWithByaiSdkDiagnosticTrace: vi.fn(
+    (_trace: unknown, callback: () => unknown) => callback(),
+  ),
+}));
 // 头部原有SDK会话溢出媒体处理导入
 import type { GatewayDataEmitter } from "@byclaw/by-framework";
-import { deliverReplyToAgentViaSdk } from "./sdk-message-processor.js";
+import {
+  deliverReplyToAgentViaSdk,
+  resolveConnectorSkillFilterForDispatch,
+} from "./sdk-message-processor.js";
 import {
   clearActiveSdkRequestByTarget,
   getAgentRunEndPromiseResolver,
@@ -14,6 +45,11 @@ import { setByaiRuntime } from "./runtime.js";
 import type { ResolvedByaiAccount } from "./types.js";
 // 新版本新增导入（冲突右侧）
 import { isOpenClawContextOverflowDispatchError } from "./dispatch-error.js";
+import { setConnectorSkillFilterResolver } from "../../shared/src/connector-skill-filter-runtime.js";
+
+afterEach(() => {
+  setConnectorSkillFilterResolver(undefined);
+});
 
 // 冲突HEAD：SDK自动续答不携带原始媒体的测试套件
 describe("deliverReplyToAgentViaSdk overflow continuation media handling", () => {
@@ -33,13 +69,22 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
       session: {},
     } as never;
     const contexts: Array<Record<string, unknown>> = [];
+    const skillFilters: Array<string[] | undefined> = [];
     let dispatchCount = 0;
+    setConnectorSkillFilterResolver(async () => ["dws", "ordinary-skill"]);
 
     setByaiRuntime({
       agent: {
         resolveAgentWorkspaceDir: () => "/tmp/byai-channel-test-workspace",
       },
       channel: {
+        inbound: {
+          runPreparedReply: async ({
+            runDispatch,
+          }: {
+            runDispatch: () => Promise<unknown>;
+          }) => ({ dispatchResult: await runDispatch() }),
+        },
         routing: {
           resolveAgentRoute: () => ({
             sessionKey: "agent:test-agent:direct:acct-media:user-media",
@@ -64,9 +109,11 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
             ctx: Record<string, unknown>;
             replyOptions: {
               onAgentRunStart?: (runId: string) => Promise<void>;
+              skillFilter?: string[];
             };
           }) => {
             contexts.push(ctx);
+            skillFilters.push(replyOptions.skillFilter);
             dispatchCount += 1;
             const runId = `run-media-${dispatchCount}`;
             await replyOptions.onAgentRunStart?.(runId);
@@ -83,13 +130,21 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
             return { queuedFinal: false, counts: {} };
           },
         },
+        session: {
+          recordInboundSession: vi.fn(),
+          resolveStorePath: vi.fn(() => "/tmp/byai-channel-test-sessions.json"),
+        },
       },
     } as never);
 
-    const emittedStates: string[] = [];
+    const emittedStates: Array<{ state?: string }> = [];
     registerSdkEmitter(account.accountId, {
       emitChunk: async () => {},
-      emitState: async (_sessionId: string, _traceId: string, event: string) => {
+      emitState: async (
+        _sessionId: string,
+        _traceId: string,
+        event: { state?: string },
+      ) => {
         emittedStates.push(event);
       },
     } as unknown as GatewayDataEmitter);
@@ -109,6 +164,7 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
         accountId: account.accountId,
         language: "zh_CN",
         languageProvided: true,
+        authConnectorList: { dws: true, fws: false },
       },
       onReply: async () => {},
     });
@@ -119,7 +175,11 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
     expect(contexts[1]?.RawBody).toContain("上一轮回答因对话达到上下文窗口上限而被截断");
     expect(contexts[1]).not.toHaveProperty("MediaPath");
     expect(contexts[1]).not.toHaveProperty("MediaPaths");
-    expect(emittedStates).toContain("");
+    expect(skillFilters).toEqual([
+      ["dws", "ordinary-skill"],
+      ["dws", "ordinary-skill"],
+    ]);
+    expect(emittedStates).toContainEqual(expect.objectContaining({ state: "" }));
 
     clearActiveSdkRequestByTarget(account.accountId, "test-agent:user-media");
   });
@@ -152,5 +212,50 @@ describe("isOpenClawContextOverflowDispatchError", () => {
       false,
     );
     expect(isOpenClawContextOverflowDispatchError("provider returned HTTP 401")).toBe(false);
+  });
+});
+
+describe("resolveConnectorSkillFilterForDispatch", () => {
+  it("does not resolve a filter for legacy messages without connector authorization", async () => {
+    const resolveFilter = vi.fn(async () => ["dws"]);
+
+    await expect(
+      resolveConnectorSkillFilterForDispatch({
+        agentId: "test-agent",
+        authConnectorList: undefined,
+        resolveFilter,
+      }),
+    ).resolves.toBeUndefined();
+    expect(resolveFilter).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the connector skill filter provider is unavailable", async () => {
+    const warn = vi.fn();
+
+    await expect(
+      resolveConnectorSkillFilterForDispatch({
+        agentId: "test-agent",
+        authConnectorList: { dws: true, fws: false },
+        log: { warn },
+        resolveFilter: async () => undefined,
+      }),
+    ).resolves.toEqual([]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("provider unavailable"));
+  });
+
+  it("fails closed when the connector skill filter provider throws", async () => {
+    const warn = vi.fn();
+
+    await expect(
+      resolveConnectorSkillFilterForDispatch({
+        agentId: "test-agent",
+        authConnectorList: { fws: false },
+        log: { warn },
+        resolveFilter: async () => {
+          throw new Error("provider failed");
+        },
+      }),
+    ).resolves.toEqual([]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("provider failed"));
   });
 });

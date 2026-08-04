@@ -65,10 +65,50 @@ import {
   appendByaiLaneToTarget,
   parseByaiLaneMetadata,
 } from "./multi-agent.js";
+import {
+  disabledConnectorSkillNames,
+  type ConnectorAuthorizationMap,
+} from "./connector-authorization.js";
+import { resolveConnectorSkillFilter } from "../../shared/src/connector-skill-filter-runtime.js";
 
 const CHANNEL_ID = BYAI_CHANNEL_ID;
 const MANAGED_BAIYING_AGENT_PREFIX = "baiying-agent-";
 export { buildBroadcastSessionKey };
+
+type ConnectorSkillFilterDispatchResolver = (request: {
+  agentId: string;
+  disabledConnectorSkills: string[];
+}) => Promise<string[] | undefined>;
+
+export async function resolveConnectorSkillFilterForDispatch(params: {
+  agentId: string;
+  authConnectorList: ConnectorAuthorizationMap | undefined;
+  log?: { warn?: (message: string) => void };
+  resolveFilter?: ConnectorSkillFilterDispatchResolver;
+}): Promise<string[] | undefined> {
+  const disabledConnectorSkills = disabledConnectorSkillNames(params.authConnectorList);
+  if (disabledConnectorSkills.length === 0) {
+    return undefined;
+  }
+
+  try {
+    const resolvedFilter = await (params.resolveFilter ?? resolveConnectorSkillFilter)({
+      agentId: params.agentId,
+      disabledConnectorSkills,
+    });
+    if (resolvedFilter) {
+      return resolvedFilter;
+    }
+    params.log?.warn?.(
+      `[byai-channel] connector skill filter provider unavailable; failing closed: agentId=${params.agentId}, disabled=${disabledConnectorSkills.join(",")}`,
+    );
+  } catch (error) {
+    params.log?.warn?.(
+      `[byai-channel] connector skill filter failed closed: agentId=${params.agentId}, disabled=${disabledConnectorSkills.join(",")}, error=${formatDispatchError(error)}`,
+    );
+  }
+  return [];
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -535,6 +575,12 @@ async function deliverReplyToAgentViaSdkUnderGate(
     log,
   });
 
+  const connectorSkillFilter = await resolveConnectorSkillFilterForDispatch({
+    agentId: sessionAgentId,
+    authConnectorList: message.authConnectorList,
+    log,
+  });
+
   // 一次 dispatchReplyFromConfig 的封装：每次续跑都新建 dispatcher/replyOptions（核心要求每次
   // dispatch 独立的 reply 上下文），但复用同一 sessionKey/To/onReply/abortSignal 闭包，使续跑的
   // agent-events 自动重绑到同一 activeRequest。`bodyText` 为本次投给 core 的提示文本。
@@ -612,6 +658,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
                       dispatcher,
                       replyOptions: {
                         ...replyOptions,
+                        ...(connectorSkillFilter ? { skillFilter: connectorSkillFilter } : {}),
                         abortSignal: deps.abortController?.signal,
                         disableBlockStreaming: true,
                         onAgentRunStart: async (runId: string) => {
