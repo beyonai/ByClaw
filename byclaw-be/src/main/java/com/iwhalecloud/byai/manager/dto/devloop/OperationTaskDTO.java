@@ -34,4 +34,10 @@ public class OperationTaskDTO {
 
     /** 执行阶段选择的一个或多个数字员工。 */
     private List<Long> agentIds;
+
+    /**
+     * 拆分任务确认的承接成员用户 ID；执行时由服务端查询其当前绑定的数字员工。
+     * 保留 agentIds 以兼容已发布的旧调用方。
+     */
+    private List<Long> assigneeIds;
 }

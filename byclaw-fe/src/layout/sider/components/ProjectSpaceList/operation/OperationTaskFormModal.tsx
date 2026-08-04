@@ -1,15 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DatePicker, Form, Input, Modal, Radio, Select, Switch, message } from 'antd';
+import { Button, DatePicker, Form, Input, Modal, Radio, Select, Switch, message } from 'antd';
 import { useIntl } from '@umijs/max';
 import type {
   OperationAccount,
   OperationIdentifier,
+  OperationKnowledgeOrganization,
   OperationPlatformOption,
   OperationSelectOption,
   OperationTaskFormOptions,
   OperationTaskFormValues,
 } from './types';
 import styles from './index.module.less';
+import KnowledgeOrganizationModal from './KnowledgeOrganizationModal';
 
 // 三类运营需求复用此弹窗；父组件负责提供项目成员、账号和知识库等动态选项。
 export interface OperationTaskFormModalProps {
@@ -31,6 +33,13 @@ const hasIdentifier = (value?: OperationIdentifier) => value !== undefined && va
 // Antd 校验对象含 errorFields，保存异常与校验失败需要分别处理，避免重复提示。
 const isFormValidationError = (error: unknown) => typeof error === 'object' && error !== null && 'errorFields' in error;
 
+// 内容类型与平台能力一一对应；新增内容创作需求时按此规则预选发布渠道。
+const CONTENT_TYPE_PUBLISH_CHANNEL_MAP: Record<string, string> = {
+  'wechat-article': 'WeChatAccount',
+  'xiaohongshu-post': 'Xiaohongshu',
+  'short-video': 'Douyin',
+};
+
 const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
   open,
   mode = 'create',
@@ -45,6 +54,7 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
   const intl = useIntl();
   const [form] = Form.useForm<OperationTaskFormValues>();
   const [submitting, setSubmitting] = useState(false);
+  const [knowledgeOrganizationModalOpen, setKnowledgeOrganizationModalOpen] = useState(false);
   // 状态更新前先用同步标记锁住提交入口，避免双击产生两次任务创建请求。
   const submittingRef = useRef(false);
   const t = useCallback(
@@ -59,7 +69,10 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
   const taskType = Form.useWatch('taskType', form) || 'collect';
   const collectMode = Form.useWatch(['collectConfig', 'mode'], form);
   const collectOrganize = Form.useWatch(['collectConfig', 'organize'], form);
+  const knowledgeOrganization = Form.useWatch(['collectConfig', 'knowledgeOrganization'], form);
+  const collectChannel = Form.useWatch(['collectConfig', 'channel'], form);
   const collectKnowledgeBaseId = Form.useWatch(['collectConfig', 'knowledgeBaseId'], form);
+  const contentType = Form.useWatch(['contentConfig', 'contentType'], form);
   const publishChannel = Form.useWatch(['contentConfig', 'publishChannel'], form);
   const analysisPlatformId = Form.useWatch(['analyzeConfig', 'platformId'], form);
   const analysisAccountId = Form.useWatch(['analyzeConfig', 'accountId'], form);
@@ -118,6 +131,13 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
   const publishChannels = options.publishChannels?.length ? options.publishChannels : defaultPlatformOptions;
   const analysisPlatforms = options.analysisPlatforms?.length ? options.analysisPlatforms : defaultPlatformOptions;
   const contentTypes = options.contentTypes?.length ? options.contentTypes : defaultContentTypes;
+  // 只有已接入账号的平台渠道使用账号下拉；互联网、GitHub 等来源继续允许录入地址。
+  const isPlatformCollectChannel = defaultPlatformOptions.some((option) => option.value === collectChannel);
+  // 内容类型切换后优先使用映射渠道筛选账号，避免等待表单字段更新时短暂展示其它平台账号。
+  const publishAccountPlatformId =
+    taskType === 'content' && contentType
+      ? CONTENT_TYPE_PUBLISH_CHANNEL_MAP[contentType] || publishChannel
+      : publishChannel;
   const isSubmitting = loading || submitting;
   const modalTitle = intl.formatMessage({
     id:
@@ -159,8 +179,12 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
     [t]
   );
   const publishAccountOptions = useMemo(
-    () => getAccountOptions(options.accounts, publishChannel),
-    [getAccountOptions, options.accounts, publishChannel]
+    () => getAccountOptions(options.accounts, publishAccountPlatformId),
+    [getAccountOptions, options.accounts, publishAccountPlatformId]
+  );
+  const collectAccountOptions = useMemo(
+    () => getAccountOptions(options.accounts, collectChannel),
+    [collectChannel, getAccountOptions, options.accounts]
   );
   const analysisAccountOptions = useMemo(
     () => getAccountOptions(options.accounts, analysisPlatformId),
@@ -186,40 +210,84 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
       ),
     [analysisAccountId, options.works]
   );
+  const knowledgeOrganizationName = useMemo(
+    () =>
+      knowledgeOrganization?.templateName ||
+      options.organizeTemplates?.find((template) => `${template.value}` === `${knowledgeOrganization?.templateId}`)
+        ?.label,
+    [knowledgeOrganization?.templateId, knowledgeOrganization?.templateName, options.organizeTemplates]
+  );
 
   useEffect(() => {
     if (!open) return;
     // 重新打开时以最新初始值回填，防止关闭弹窗后保留上一份任务草稿。
     form.resetFields();
     form.setFieldsValue(formInitialValues);
+    setKnowledgeOrganizationModalOpen(false);
   }, [form, formInitialValues, open]);
 
   useEffect(() => {
-    if (!open || !publishChannel || !options.accounts?.length) return;
+    if (!open || mode !== 'create' || taskType !== 'collect' || !collectChannels.length) return;
+    const selectedChannel = form.getFieldValue(['collectConfig', 'channel']);
+    if (!hasIdentifier(selectedChannel)) {
+      // 新增采集需求默认选择首个可用渠道；编辑态和用户已选择的渠道均不覆盖。
+      form.setFieldValue(['collectConfig', 'channel'], collectChannels[0].value);
+    }
+  }, [collectChannels, form, mode, open, taskType]);
+
+  useEffect(() => {
+    if (
+      !open ||
+      mode !== 'create' ||
+      taskType !== 'collect' ||
+      !isPlatformCollectChannel ||
+      !collectAccountOptions.length
+    ) {
+      return;
+    }
+    const selectedAccountId = form.getFieldValue(['collectConfig', 'accountOrAddress']);
+    const selectedAccount = options.accounts?.find((account) => `${account.accountId}` === `${selectedAccountId}`);
+    if (!selectedAccount || selectedAccount.platformId !== collectChannel) {
+      // 采集渠道切换后默认选中该平台首个账号，避免把上一个渠道的账号提交给当前采集任务。
+      form.setFieldValue(['collectConfig', 'accountOrAddress'], collectAccountOptions[0].value);
+    }
+  }, [collectAccountOptions, collectChannel, form, isPlatformCollectChannel, mode, open, options.accounts, taskType]);
+
+  useEffect(() => {
+    if (!open || mode !== 'create' || taskType !== 'content' || !contentType) return;
+    const matchedChannel = CONTENT_TYPE_PUBLISH_CHANNEL_MAP[contentType];
+    if (matchedChannel) {
+      // 内容类型变更时覆盖发布渠道，保证公众号文章、小红书图文和短视频对应正确的平台。
+      form.setFieldValue(['contentConfig', 'publishChannel'], matchedChannel);
+    }
+  }, [contentType, form, mode, open, taskType]);
+
+  useEffect(() => {
+    if (!open || !publishAccountPlatformId || !options.accounts?.length) return;
     const selectedAccountId = form.getFieldValue(['contentConfig', 'publishAccountId']);
     const selectedAccount = options.accounts.find((account) => `${account.accountId}` === `${selectedAccountId}`);
-    if (selectedAccount && selectedAccount.platformId !== publishChannel) {
+    if (selectedAccount && selectedAccount.platformId !== publishAccountPlatformId) {
       // 发布渠道一次只允许选择一个，切换渠道后清理原渠道账号，
       // 避免提交不一致的渠道和账号组合。
       form.setFieldValue(['contentConfig', 'publishAccountId'], undefined);
     }
-  }, [form, open, options.accounts, publishChannel]);
+  }, [form, open, options.accounts, publishAccountPlatformId]);
 
   useEffect(() => {
-    if (!open || !analysisPlatformId || !options.accounts?.length) return;
+    if (!open || taskType !== 'analyze' || !analysisPlatformId) return;
     const selectedAccountId = form.getFieldValue(['analyzeConfig', 'accountId']);
-    const selectedAccount = options.accounts.find((account) => `${account.accountId}` === `${selectedAccountId}`);
-    if (selectedAccount && selectedAccount.platformId !== analysisPlatformId) {
-      // 分析平台变化时同步清理账号和作品，防止把旧平台作品带入新任务。
+    const selectedAccount = analysisAccountOptions.find((account) => `${account.value}` === `${selectedAccountId}`);
+    if (!selectedAccount) {
+      // 数据分析渠道切换后默认选中该渠道首个账号，并清理前一账号下的作品，避免提交跨渠道配置。
       form.setFieldsValue({
         analyzeConfig: {
           ...form.getFieldValue('analyzeConfig'),
-          accountId: undefined,
+          accountId: analysisAccountOptions[0]?.value,
           workIds: [],
         },
       });
     }
-  }, [analysisPlatformId, form, open, options.accounts]);
+  }, [analysisAccountOptions, analysisPlatformId, form, open, taskType]);
 
   useEffect(() => {
     if (!open || !hasIdentifier(analysisAccountId)) return;
@@ -256,6 +324,16 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
     setSubmitting(true);
     try {
       const values = await form.validateFields();
+      if (
+        values.taskType === 'collect' &&
+        values.collectConfig?.organize &&
+        !values.collectConfig.knowledgeOrganization
+      ) {
+        // 开启整理但未配置模板时不允许提交，避免后端收到无法执行的空整理配置。
+        message.error(t('validation.organizeTemplateRequired'));
+        setKnowledgeOrganizationModalOpen(true);
+        return;
+      }
       // 只提交当前任务类型的业务配置，避免表单切换后把其它类型的残留字段带给后端。
       await onSubmit({
         ...values,
@@ -277,6 +355,23 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
     if (!isSubmitting) onCancel();
   }, [isSubmitting, onCancel]);
 
+  const handleKnowledgeOrganizationChange = useCallback(
+    (value: OperationKnowledgeOrganization) => {
+      const currentCollectConfig = form.getFieldValue('collectConfig') || {};
+      // 新建整理模板仅归属当前需求，已有模板同时保留 templateId 以兼容后端历史字段。
+      form.setFieldsValue({
+        collectConfig: {
+          ...currentCollectConfig,
+          organize: true,
+          organizeTemplateId: value.mode === 'existing' ? value.templateId : undefined,
+          knowledgeOrganization: value,
+        },
+      });
+      setKnowledgeOrganizationModalOpen(false);
+    },
+    [form]
+  );
+
   const renderCollectFields = () => (
     <section className={styles.operationTaskSection}>
       <h3>{t('collect.title')}</h3>
@@ -291,9 +386,30 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
         <Form.Item
           label={t('field.collectAccountOrAddress')}
           name={['collectConfig', 'accountOrAddress']}
-          rules={[{ required: true, whitespace: true, message: t('validation.collectAccountOrAddressRequired') }]}
+          rules={[
+            {
+              required: true,
+              whitespace: !isPlatformCollectChannel,
+              message: t(
+                isPlatformCollectChannel
+                  ? 'validation.collectAccountRequired'
+                  : 'validation.collectAccountOrAddressRequired'
+              ),
+            },
+          ]}
         >
-          <Input placeholder={t('placeholder.collectAccountOrAddress')} />
+          {isPlatformCollectChannel ? (
+            <Select
+              options={collectAccountOptions}
+              loading={optionLoading}
+              showSearch
+              optionFilterProp="label"
+              placeholder={t('placeholder.collectAccount')}
+              notFoundContent={t('emptyAccount')}
+            />
+          ) : (
+            <Input placeholder={t('placeholder.collectAccountOrAddress')} />
+          )}
         </Form.Item>
         <Form.Item
           label={t('field.collectTopic')}
@@ -359,23 +475,43 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
           </Form.Item>
         )}
         <Form.Item label={t('field.organize')} name={['collectConfig', 'organize']} valuePropName="checked">
-          <Switch checkedChildren={t('common.yes')} unCheckedChildren={t('common.no')} />
+          <Switch
+            checkedChildren={t('common.yes')}
+            unCheckedChildren={t('common.no')}
+            onChange={(checked) => {
+              if (checked) {
+                // 开启知识整理时立即进入配置弹窗，避免只打开开关却没有选择整理规则。
+                setKnowledgeOrganizationModalOpen(true);
+                return;
+              }
+              form.setFieldsValue({
+                collectConfig: {
+                  ...(form.getFieldValue('collectConfig') || {}),
+                  organize: false,
+                  organizeTemplateId: undefined,
+                  knowledgeOrganization: undefined,
+                },
+              });
+            }}
+          />
         </Form.Item>
         {collectOrganize && (
-          <Form.Item
-            label={t('field.organizeTemplate')}
-            name={['collectConfig', 'organizeTemplateId']}
-            rules={[{ required: true, message: t('validation.organizeTemplateRequired') }]}
-          >
-            <Select
-              options={options.organizeTemplates || []}
-              loading={optionLoading}
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              placeholder={t('placeholder.organizeTemplate')}
-              notFoundContent={t('emptyOption')}
-            />
+          <Form.Item label={t('field.organizeTemplate')} required>
+            <div className={styles.knowledgeOrganizationSummary}>
+              <div>
+                <strong>{knowledgeOrganizationName || t('knowledge.unconfigured')}</strong>
+                <span>
+                  {knowledgeOrganization?.mode === 'new'
+                    ? knowledgeOrganization.request || knowledgeOrganization.structure
+                    : knowledgeOrganization
+                      ? t('knowledge.existingSummary')
+                      : t('knowledge.unconfiguredHint')}
+                </span>
+              </div>
+              <Button type="link" disabled={isSubmitting} onClick={() => setKnowledgeOrganizationModalOpen(true)}>
+                {knowledgeOrganization ? t('knowledge.edit') : t('knowledge.configure')}
+              </Button>
+            </div>
           </Form.Item>
         )}
       </div>
@@ -584,6 +720,20 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
           </section>
         </div>
       </Form>
+      <KnowledgeOrganizationModal
+        open={knowledgeOrganizationModalOpen}
+        value={knowledgeOrganization}
+        templates={options.organizeTemplates}
+        loading={optionLoading}
+        onCancel={() => {
+          if (!knowledgeOrganization) {
+            // 首次开启整理后取消配置时同步关闭开关，避免表单保留无效的空整理状态。
+            form.setFieldValue(['collectConfig', 'organize'], false);
+          }
+          setKnowledgeOrganizationModalOpen(false);
+        }}
+        onSubmit={handleKnowledgeOrganizationChange}
+      />
     </Modal>
   );
 };

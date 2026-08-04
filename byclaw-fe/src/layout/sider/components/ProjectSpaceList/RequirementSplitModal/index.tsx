@@ -27,8 +27,12 @@ type RequirementSplitModalProps = {
   // 待拆分的需求(标题用于生成 AI 预拆建议,演示态)。
   requirement: { title: string; description?: string } | null;
   repos: RepoOption[];
+  // 父组件复用已有仓库新增弹窗，拆分弹窗只负责触发入口并在新增后接收刷新后的仓库列表。
+  onAddRepository?: () => void;
   // 承接人候选:项目成员,与原有任务负责人同源。
   members: MemberOption[];
+  // 当前登录用户在项目成员中的标识，作为 AI 拆分任务的默认承接人。
+  defaultAssigneeId?: string | number;
   confirmLoading?: boolean;
   onCancel: () => void;
   // 确认后把拆分结果交回父级;演示态父级仍走原有单任务启动。
@@ -39,7 +43,9 @@ const RequirementSplitModal: React.FC<RequirementSplitModalProps> = ({
   open,
   requirement,
   repos,
+  onAddRepository,
   members,
+  defaultAssigneeId,
   confirmLoading,
   onCancel,
   onConfirm,
@@ -58,10 +64,16 @@ const RequirementSplitModal: React.FC<RequirementSplitModalProps> = ({
   // 每次打开时按需求标题重新生成 AI 预拆依赖图(演示态),并回到默认列表视图。
   useEffect(() => {
     if (open && requirement) {
-      setTasks(buildSuggestedSplit(requirement.title, repos));
+      // 当前用户是项目成员时，AI 预拆与后续新增任务均默认由当前用户承接，仍可手动调整。
+      setTasks(
+        buildSuggestedSplit(requirement.title, repos).map((task) => ({
+          ...task,
+          assigneeId: task.assigneeId ?? defaultAssigneeId,
+        }))
+      );
       setView('list');
     }
-  }, [open, requirement, repos]);
+  }, [defaultAssigneeId, open, requirement, repos]);
 
   const repoOptions = useMemo(
     () =>
@@ -100,6 +112,32 @@ const RequirementSplitModal: React.FC<RequirementSplitModalProps> = ({
   const patchTask = (rowId: string, patch: Partial<SplitTaskDraft>) =>
     setTasks((prev) => prev.map((task) => (task.rowId === rowId ? { ...task, ...patch } : task)));
 
+  // 仓库为空时可直接进入项目仓库新增流程，避免用户关闭拆分弹窗后再返回项目配置补数据。
+  const renderRepositorySelect = (task: SplitTaskDraft, className?: string) => (
+    <div className={styles.splitRepositoryControl}>
+      <Select
+        size="small"
+        className={className || styles.splitCellSelect}
+        placeholder={t('reqSplit.placeholder.repo')}
+        value={task.repoId}
+        options={repoOptions}
+        onChange={(repoId) => patchTask(task.rowId, { repoId })}
+      />
+      {onAddRepository && (
+        <Tooltip title={t('reqSplit.addRepository')}>
+          <Button
+            type="text"
+            size="small"
+            className={styles.splitRepositoryAddButton}
+            icon={<PlusOutlined />}
+            aria-label={t('reqSplit.addRepository')}
+            onClick={onAddRepository}
+          />
+        </Tooltip>
+      )}
+    </div>
+  );
+
   const removeTask = (rowId: string) =>
     // 删节点同时断开所有指向它的依赖边,避免悬空引用。
     setTasks((prev) =>
@@ -116,6 +154,7 @@ const RequirementSplitModal: React.FC<RequirementSplitModalProps> = ({
         title: '',
         repoId: repos[0]?.repoId,
         branch: '',
+        assigneeId: defaultAssigneeId,
         dependsOn: [],
         aiSuggested: false,
       },
@@ -163,16 +202,7 @@ const RequirementSplitModal: React.FC<RequirementSplitModalProps> = ({
               onChange={(event) => patchTask(task.rowId, { title: event.target.value })}
             />
           </div>
-          <div className={styles.colRepo}>
-            <Select
-              size="small"
-              className={styles.splitCellSelect}
-              placeholder={t('reqSplit.placeholder.repo')}
-              value={task.repoId}
-              options={repoOptions}
-              onChange={(repoId) => patchTask(task.rowId, { repoId })}
-            />
-          </div>
+          <div className={styles.colRepo}>{renderRepositorySelect(task)}</div>
           <div className={styles.colBranch}>
             <Input
               size="small"
@@ -289,17 +319,7 @@ const RequirementSplitModal: React.FC<RequirementSplitModalProps> = ({
                 </div>
               </div>
 
-              <div className={styles.splitNodeField}>
-                <Select
-                  size="small"
-                  variant="borderless"
-                  className={styles.splitNodeRepo}
-                  placeholder={t('reqSplit.placeholder.repo')}
-                  value={task.repoId}
-                  options={repoOptions}
-                  onChange={(repoId) => patchTask(task.rowId, { repoId })}
-                />
-              </div>
+              <div className={styles.splitNodeField}>{renderRepositorySelect(task, styles.splitNodeRepo)}</div>
 
               <div className={styles.splitNodeField}>
                 <Input
@@ -364,6 +384,8 @@ const RequirementSplitModal: React.FC<RequirementSplitModalProps> = ({
       cancelText={t('common.cancel')}
       width={960}
       centered
+      // 运营任务详情由 Drawer 展示，拆分弹窗需覆盖抽屉；仓库新增弹窗继续使用 1200 层级。
+      zIndex={1100}
       className={styles.splitModal}
     >
       <div className={styles.splitBody}>

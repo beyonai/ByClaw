@@ -1351,6 +1351,13 @@
             <if test="createBy != null">
                 AND a.create_by = #{createBy}
             </if>
+            <!-- 运营需求的采集知识库仅展示知识库业务类型，其他调用方不传该参数时兼容原查询范围。 -->
+            <if test="resourceBizTypeList != null and resourceBizTypeList.size() > 0">
+                AND a.resource_biz_type IN
+                <foreach collection="resourceBizTypeList" item="resourceBizType" open="(" separator="," close=")">
+                    #{resourceBizType}
+                </foreach>
+            </if>
             <if test="keyword != null and keyword != ''">
                 AND (
                     a.resource_name LIKE CONCAT('%', #{keyword}, '%')

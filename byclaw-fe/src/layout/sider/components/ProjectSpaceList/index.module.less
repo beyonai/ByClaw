@@ -17,19 +17,35 @@
 }
 
 .searchInput {
+  position: relative;
+  min-height: 32px;
   display: flex;
   align-items: center;
   gap: 8px;
 
-  // 搜索框和会话列表保持同一套 Antd 默认尺寸，只覆盖透明背景。
+  // 搜索框和会话列表保持同一套 Antd 默认尺寸；详情入口与输入框通过弹性布局同行展示。
   :global {
     .@{antPrefix}-input-affix-wrapper {
+      width: 100%;
       background-color: transparent;
+    }
+
+    .@{antPrefix}-input-prefix .@{antPrefix}-icon {
+      cursor: pointer;
     }
   }
 
   & > input:first-child {
     flex: 1 0 auto;
+  }
+}
+
+// 详情入口占用独立宽度，搜索输入框填充剩余空间，不再出现按钮遮挡输入内容。
+.searchInputWithDetailShortcut {
+  :global(.@{antPrefix}-input-affix-wrapper) {
+    min-width: 0;
+    flex: 1;
+    width: auto;
   }
 }
 
@@ -129,43 +145,37 @@
   gap: 8px;
 }
 
-// 与员工侧栏“发现数字员工”一致的项目详情快捷入口，保持项目选择器下方的信息层级。
-.enterProjectDetail {
-  width: 100%;
+// 项目详情入口与会话搜索同行：保持常规字重，悬停时仅改变背景。
+.enterProjectDetailShortcut {
+  flex-shrink: 0;
+  height: 32px;
   border: 0;
-  border-radius: 6px;
-  padding: 8px;
+  border-radius: 8px;
+  padding: 0 8px;
   display: flex;
-  flex: 1 1 auto;
   align-items: center;
-  gap: 2px;
-  color: inherit;
+  gap: 6px;
+  color: #1f2633;
   font-family: inherit;
   font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-  background: #f2f6fa;
-}
-
-.enterProjectDetailIcon {
-  flex-shrink: 0;
-  margin-right: 6px;
-  color: inherit;
-  font-size: 16px;
-}
-
-.enterProjectDetailText {
-  // 仅文案使用中等字重，避免右侧箭头随文本变粗。
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.enterProjectDetailArrow {
-  flex-shrink: 0;
-  margin-left: auto;
-  color: inherit;
-  font-size: 16px;
   font-weight: 400;
+  cursor: pointer;
+  background-color: #f2f6fa;
+  transition: background-color 0.2s;
+
+  &:hover,
+  &:focus-visible {
+    background-color: #eaf1ff;
+  }
+
+  :global(.anticon) {
+    color: #1f2633;
+    font-size: 14px;
+  }
+
+  .enterProjectDetailShortcutArrow {
+    font-size: 10px;
+  }
 }
 
 // 新建项目与详情顶部更多入口共用同一图标按钮规格，保持项目侧栏操作样式一致。
@@ -626,6 +636,15 @@
       }
     }
   }
+
+  // 研发项目含需求、任务、资源、成员和测试五项页签，统一单行五等分展示。
+  &.projectDetailPanelTabCount5 {
+    :global {
+      .@{antPrefix}-tabs-nav-list {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+      }
+    }
+  }
 }
 
 .detailPanelHeader {
@@ -837,6 +856,13 @@
   overflow: hidden;
   // 与需求、资源 Tab 共用首个元素的 8px 顶部间距。
   padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+// 资源 Tab 的统一列表占满详情页剩余高度，文件树和代码变更仅在自身内容区滚动。
+.detailResourcesBodyPanel {
+  display: flex;
+  overflow: hidden;
   padding-bottom: 8px;
 }
 
@@ -2046,9 +2072,11 @@
 }
 
 .detailResourcePanel {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  min-width: 0;
 }
 
 .detailReposEmpty {
@@ -2114,6 +2142,131 @@
   border-radius: 8px;
   overflow: hidden;
   background: #fff;
+}
+
+// 顶部切换后的资源内容统一承载在一个大列表区，避免共享、会话、代码变更分别形成卡片。
+.resourceViewContent {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.resourceViewTabBar {
+  flex-shrink: 0;
+  min-width: 0;
+  // 资源二级 Tab 沿用 Ant Design 的文字加粗和下划线选中态，不再使用背景色块。
+  padding: 0 0 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+}
+
+.resourceViewTabs {
+  min-width: 0;
+  flex: 1;
+
+  :global {
+    .@{antPrefix}-tabs-nav {
+      width: 100%;
+      margin: 0;
+
+      &::before {
+        border-bottom: 1px solid #e8edf5;
+      }
+    }
+
+    .@{antPrefix}-tabs-nav-wrap {
+      min-width: 0;
+      flex: 1;
+    }
+
+    // 二级分类按可用项数自动等分整行，单项最窄时优先省略文字，避免互相覆盖。
+    .@{antPrefix}-tabs-nav-list {
+      width: 100%;
+      min-width: 0;
+      flex: 1;
+      display: flex !important;
+      padding: 0;
+      border-radius: 0;
+      background: transparent;
+    }
+
+    .@{antPrefix}-tabs-tab {
+      // 每个二级 Tab 至少保留两个中文字符的可用宽度，避免仅显示一个字后立即省略。
+      min-width: 52px;
+      flex: 1;
+      margin: 0 !important;
+      padding: 4px 6px 7px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #6f7c90;
+      background: transparent !important;
+      box-shadow: none !important;
+      font-size: 13px;
+      font-weight: 400;
+      line-height: 20px;
+
+      .@{antPrefix}-tabs-tab-btn {
+        min-width: 2em;
+        max-width: 100%;
+      }
+    }
+
+    .@{antPrefix}-tabs-tab-active {
+      color: #246bfe;
+      font-weight: 400;
+      background: transparent !important;
+      box-shadow: none !important;
+
+      .@{antPrefix}-tabs-tab-btn {
+        color: inherit;
+        font-weight: inherit;
+      }
+    }
+
+    .@{antPrefix}-tabs-ink-bar {
+      height: 2px;
+      border-radius: 2px;
+      display: block;
+      background: #246bfe;
+    }
+  }
+}
+
+.resourceViewTabLabel {
+  width: 2em;
+  min-width: 2em;
+  max-width: 2em;
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.resourceViewRefresh {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #728096;
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+
+  &:hover {
+    color: #246bfe;
+    background: #eaf2ff;
+  }
 }
 
 .codeChangeHeader {
@@ -2187,27 +2340,6 @@
   text-align: right;
 }
 
-.codeChangeRefresh {
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #728096;
-  background: transparent;
-  cursor: pointer;
-  transition: color 0.2s, background-color 0.2s;
-
-  &:hover {
-    color: #246bfe;
-    background: #eaf2ff;
-  }
-}
-
 .codeChangeEmpty {
   min-height: 120px;
   padding: 16px;
@@ -2231,7 +2363,8 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: clamp(120px, 28vh, 320px);
+  flex: 1;
+  max-height: none;
   overflow-y: auto;
   padding: 4px 8px 8px;
 }
@@ -3422,7 +3555,13 @@
   color: #526075;
 }
 
-// 文件 diff modal:标题含文件名+全路径,正文等宽字体逐行渲染 unified diff。
+// 文件 diff 右侧抽屉：标题显示文件名和完整路径，正文等宽字体逐行渲染 unified diff。
+.diffDrawer {
+  :global(.@{antPrefix}-drawer-body) {
+    padding: 16px;
+  }
+}
+
 .diffModalTitle {
   display: flex;
   align-items: baseline;

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Dropdown, Empty, Input, Modal, Skeleton, Spin, Tag, Tooltip, message } from 'antd';
-import { DownOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
+import { DownOutlined, PlusOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons';
 // @ts-ignore
 import { useDispatch, useIntl, useNavigate, useSelector } from '@umijs/max';
 import classNames from 'classnames';
@@ -23,7 +23,6 @@ import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import { getStoredProjectScopeId, saveProjectScopeIdToStorage } from '@/pages/projectSpace/constants';
 import { saveProjectMembers } from '@/service/devloop';
-import AntdIcon from '@/components/AntdIcon';
 import { SiderContentContext } from '../../siderContentContext';
 import DialogueCard from '../DialogueList/DialogueCard';
 import ProjectDetailPanel from './ProjectDetailModal';
@@ -1342,27 +1341,30 @@ const ProjectSpaceList: React.FC = () => {
                 <Button className={styles.newProjectButton} icon={<PlusOutlined />} onClick={handleOpenCreateProject} />
               </Tooltip>
             </div>
-            {activeScopeProject && (
-              <button
-                type="button"
-                className={styles.enterProjectDetail}
-                onClick={() => void handleOpenProjectDetail(activeScopeProject)}
-              >
-                {/* 使用笔记本图标，保持与员工侧栏“发现数字员工”一致的整行快捷入口结构。 */}
-                <AntdIcon className={styles.enterProjectDetailIcon} type="icon-a-Notebook-onebijiben" />
-                <span className={styles.enterProjectDetailText}>{t('enterProjectDetail')}</span>
-                <AntdIcon className={styles.enterProjectDetailArrow} type="icon-a-Rightyou" />
-              </button>
-            )}
-            {/* 会话搜索紧接项目详情入口，且始终只查询当前选中的项目。 */}
-            <div className={styles.searchInput}>
+            {/* 会话搜索与项目详情入口同行展示，入口不覆盖搜索框。 */}
+            <div
+              className={classNames(styles.searchInput, {
+                [styles.searchInputWithDetailShortcut]: !!activeScopeProject,
+              })}
+            >
               <Input
                 value={sessionKeyword}
-                suffix={<SearchOutlined onClick={handleSessionSearchSubmit} />}
+                prefix={<SearchOutlined onClick={handleSessionSearchSubmit} />}
                 placeholder={t('searchPlaceholder')}
                 onChange={(event) => handleSessionSearchChange(event.target.value)}
                 onPressEnter={handleSessionSearchSubmit}
               />
+              {activeScopeProject && (
+                <button
+                  type="button"
+                  className={styles.enterProjectDetailShortcut}
+                  aria-label={t('enterProjectDetail')}
+                  onClick={() => void handleOpenProjectDetail(activeScopeProject)}
+                >
+                  <span>{t('detailShortcut')}</span>
+                  <RightOutlined className={styles.enterProjectDetailShortcutArrow} />
+                </button>
+              )}
             </div>
           </div>
 

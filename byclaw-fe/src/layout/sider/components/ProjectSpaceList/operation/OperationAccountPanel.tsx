@@ -102,11 +102,6 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
     () => (activePlatform === 'all' ? accounts : accounts.filter((account) => account.platformId === activePlatform)),
     [accounts, activePlatform]
   );
-  const loggedInCount = useMemo(
-    () => accounts.filter((account) => account.loginStatus === 'logged_in').length,
-    [accounts]
-  );
-  const platformCount = useMemo(() => new Set(accounts.map((account) => account.platformId)).size, [accounts]);
   // 没有管理权限或没有保存回调时，隐藏新增和编辑入口，防止出现不可完成的操作。
   const canSaveAccount = canManage && !!onSaveAccount;
 
@@ -214,21 +209,6 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
           </div>
         </section>
       )}
-
-      <section className={styles.accountStats} aria-label={t('statistics')}>
-        <div className={styles.accountStatItem}>
-          <strong>{accounts.length}</strong>
-          <span>{t('stat.total')}</span>
-        </div>
-        <div className={styles.accountStatItem}>
-          <strong>{loggedInCount}</strong>
-          <span>{t('stat.loggedIn')}</span>
-        </div>
-        <div className={styles.accountStatItem}>
-          <strong>{platformCount}</strong>
-          <span>{t('stat.platforms')}</span>
-        </div>
-      </section>
 
       <div className={styles.accountFilterRow}>
         <Segmented

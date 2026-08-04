@@ -62,6 +62,8 @@ import {
   deleteScanSource,
   getOperationRequirement,
   getProject,
+  getTaskChanges,
+  getTaskFileDiff,
   listProjectMembers,
   listOperationAccounts,
   loginOperationAccount,
@@ -88,10 +90,13 @@ import {
   updateScanSource,
   executeOperationTask,
   type DevloopProjectSpaceFile,
+  type DevloopTaskChanges,
+  type DevloopTaskFileDiff,
 } from '@/service/devloop';
 import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
 import { queryMyCreatedAndSubscribedAgentsV2 } from '@/service/digitalEmployees';
 import { getResourceListByPage as listKnowledgeBases } from '@/service/knowledgeCenter';
+import { listOntologyBases } from '@/service/ontology';
 import { getSandboxInfo, launchSandboxByUserCode, navigateSandboxBrowser, type SandboxInfo } from '@/service/sandbox';
 import SessionOverviewDrawer from './SessionOverviewDrawer';
 import TaskDetailDrawer from './TaskDetailDrawer';
@@ -156,7 +161,6 @@ import Integration from './Integration';
 import RequirementSplitModal from './RequirementSplitModal';
 import type { SplitTaskDraft } from './RequirementSplitModal/types';
 import ListEndMessage from './ListEndMessage';
-import ReposTab from './ReposTab';
 import styles from './index.module.less';
 import operationStyles from './operation/index.module.less';
 
@@ -516,6 +520,16 @@ const getOperationTaskInitialValues = (task: any): Partial<OperationTaskFormValu
           schedule: config.schedule ?? config.collectSchedule,
           organize: Boolean(config.organize ?? config.knowledgeOrganization),
           organizeTemplateId: config.organizeTemplateId ?? config.knowledgeOrganization?.templateId,
+          knowledgeOrganization: config.knowledgeOrganization
+            ? {
+              ...config.knowledgeOrganization,
+              // 旧数据只有 templateId，新版弹窗需要显式模式才能正确回显为已有本体。
+              mode: config.knowledgeOrganization.mode || 'existing',
+              templateId: config.knowledgeOrganization.templateId ?? config.organizeTemplateId,
+            }
+            : config.organizeTemplateId
+              ? { mode: 'existing', templateId: config.organizeTemplateId }
+              : undefined,
         }
         : undefined,
     contentConfig:
@@ -562,6 +576,8 @@ const normalizeOperationIdentifierList = (rawValue: unknown): OperationIdentifie
 };
 
 type ResourceFileScope = 'current' | 'all';
+// 资源 Tab 的一级分类统一由顶部切换控制，避免共享文件、会话文件和代码变更被拆成多个卡片。
+type ResourceView = 'shared' | 'sessionCurrent' | 'sessionAll' | 'changes';
 type ProjectResourceSession = NonNullable<ProjectSpace['sessions']>[number];
 type ProjectSpaceFileItem = FileBrowserItem &
   DevloopProjectSpaceFile & {
@@ -588,6 +604,44 @@ const TASK_PAGE_SIZE = 20;
 const CHANNEL_SOURCE_PAGE_SIZE = 30;
 // 后端尚未限制手工需求的两个长文本字段，前端统一限制为 1000 字，避免无界内容写入任务提示词。
 const MANUAL_REQUIREMENT_CONTENT_MAX_LENGTH = 1000;
+
+// GitHub 文件变更状态 -> 角标字母/配色,沿用常见 git 管理视觉:新增绿/修改黄/删除红/重命名蓝。
+const FILE_CHANGE_META: Record<string, { letter: string; labelId: string; className: string }> = {
+  added: { letter: 'A', labelId: 'codeChanges.status.added', className: 'fileChangeAdded' },
+  modified: { letter: 'M', labelId: 'codeChanges.status.modified', className: 'fileChangeModified' },
+  changed: { letter: 'M', labelId: 'codeChanges.status.modified', className: 'fileChangeModified' },
+  removed: { letter: 'D', labelId: 'codeChanges.status.removed', className: 'fileChangeRemoved' },
+  renamed: { letter: 'R', labelId: 'codeChanges.status.renamed', className: 'fileChangeRenamed' },
+  copied: { letter: 'C', labelId: 'codeChanges.status.copied', className: 'fileChangeRenamed' },
+};
+
+const getFileChangeMeta = (status?: string) =>
+  FILE_CHANGE_META[(status || 'modified').toLowerCase()] || FILE_CHANGE_META.modified;
+
+// 从完整路径拆出文件名与所在目录,分别加粗/弱化展示。
+const splitFilePath = (path: string) => {
+  const idx = path.lastIndexOf('/');
+  return idx >= 0 ? { name: path.slice(idx + 1), dir: path.slice(0, idx) } : { name: path, dir: '' };
+};
+
+// unified diff 行类型：git diff 输出按行首字符分类，供右侧抽屉逐行着色展示。
+type DiffLineType = 'meta' | 'hunk' | 'add' | 'del' | 'context';
+
+const classifyDiffLine = (line: string): DiffLineType => {
+  if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ')) {
+    return 'meta';
+  }
+  if (line.startsWith('@@')) return 'hunk';
+  if (line.startsWith('+')) return 'add';
+  if (line.startsWith('-')) return 'del';
+  return 'context';
+};
+
+// 把 unified diff 文本解析为带类型的行数组;meta/无内容行过滤掉文件头噪音只留必要信息。
+const parseDiffLines = (diff?: string | null): { type: DiffLineType; text: string }[] => {
+  if (!diff) return [];
+  return diff.split('\n').map((text) => ({ type: classifyDiffLine(text), text }));
+};
 
 const cronPresets = [
   { value: '*/1 * * * *', labelId: 'source.cron.everyOneMinute' },
@@ -757,7 +811,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const { EventEmitter, sessionId: activeChatSessionId, setSessionId } = useGlobal();
   const activeSiderAgent = useActiveSiderAgent();
   const { setDetailPanel, clearDetailPanel } = React.useContext(SiderContentContext);
-  const [activeTab, setActiveTab] = useState('requirements');
+  const [activeTab, setActiveTab] = useState('tasks');
   const [sources, setSources] = useState<ScanSourceItem[]>([]);
   // 每个钉钉/待办源的授权状态(查各自创建者),键为 sourceId。替代旧的全局 dwsAuthed 单一状态。
   const [sourceDwsStatusMap, setSourceDwsStatusMap] = useState<Record<number, SourceDwsStatus>>({});
@@ -786,6 +840,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [operationWorks, setOperationWorks] = useState<OperationWorkOption[]>([]);
   const [operationAccountsLoading, setOperationAccountsLoading] = useState(false);
   const [operationKnowledgeBases, setOperationKnowledgeBases] = useState<OperationSelectOption[]>([]);
+  const [operationOrganizeTemplates, setOperationOrganizeTemplates] = useState<OperationSelectOption[]>([]);
   const [operationAgents, setOperationAgents] = useState<OperationAgentOption[]>([]);
   const [operationOptionsLoading, setOperationOptionsLoading] = useState(false);
   const [operationAccountSaving, setOperationAccountSaving] = useState(false);
@@ -803,7 +858,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 运营任务执行先复用研发任务的多仓库拆分确认弹窗，承接成员绑定的数字员工直接作为执行编排。
   const [operationTaskSplitTarget, setOperationTaskSplitTarget] = useState<any>(null);
   const [operationTaskExecuting, setOperationTaskExecuting] = useState(false);
-  const [resourceFileScope, setResourceFileScope] = useState<ResourceFileScope>('current');
+  const [resourceView, setResourceView] = useState<ResourceView>('shared');
+  // 会话资源范围由二级 Tab 决定，避免内容区再次出现重复的“当前/全部”筛选。
+  const resourceFileScope: ResourceFileScope = resourceView === 'sessionAll' ? 'all' : 'current';
+  const isSessionResourceView = resourceView === 'sessionCurrent' || resourceView === 'sessionAll';
   const [sharedFiles, setSharedFiles] = useState<FileBrowserItem[]>([]);
   const [sharedFilesLoading, setSharedFilesLoading] = useState(false);
   const [resourceSessions, setResourceSessions] = useState<ProjectResourceSession[]>([]);
@@ -811,6 +869,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [sessionFilesLoadingMap, setSessionFilesLoadingMap] = useState<Record<string, boolean>>({});
   const [resourceChildrenByPath, setResourceChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
   const [resourceExpandedKeys, setResourceExpandedKeys] = useState<React.Key[]>([]);
+  // 资源 Tab 的代码变更视图按当前会话（任务）拉取远程分支相对基线的文件变更。
+  const [taskChanges, setTaskChanges] = useState<DevloopTaskChanges | null>(null);
+  const [taskChangesLoading, setTaskChangesLoading] = useState(false);
+  // 代码变更文件预览：点文件行拉取 unified diff，并在右侧抽屉中逐行渲染。
+  const [diffDrawerFile, setDiffDrawerFile] = useState<string | null>(null);
+  const [diffDrawerData, setDiffDrawerData] = useState<DevloopTaskFileDiff | null>(null);
+  const [diffDrawerLoading, setDiffDrawerLoading] = useState(false);
   const [resourceRenameOpen, setResourceRenameOpen] = useState(false);
   const [resourceRenameTarget, setResourceRenameTarget] = useState<FileBrowserItem | null>(null);
   const [resourceRenameLoading, setResourceRenameLoading] = useState(false);
@@ -866,7 +931,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [repoModalOpen, setRepoModalOpen] = useState(false);
   // 仓库弹窗被渠道、手工需求共用，创建完成后按打开来源回填对应表单。
   // manage: 从详情三个点菜单打开的独立仓库管理入口,建完仓库无需回填任何表单。
-  const [repoModalTarget, setRepoModalTarget] = useState<'source' | 'manualRequirement' | 'manage'>('source');
+  const [repoModalTarget, setRepoModalTarget] = useState<
+    'source' | 'manualRequirement' | 'manage' | 'requirementSplit'
+  >('source');
   const [repoForm, setRepoForm] = useState({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
   const [repoSaving, setRepoSaving] = useState(false);
   // 仓库弹窗默认看列表,点「新增仓库」再弹出表单(嵌套弹窗),避免列表和表单混在一屏。
@@ -960,8 +1027,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   });
   // 研发项目展示扫描需求；运营项目展示独立运营需求，两者共用需求页签但数据链路隔离。
   const showRequirementsTab = isDevelopProject || isOperationProject;
-  const showResourcesTab = !!activeChatSessionId;
-  const showReposTab = showRequirementsTab && !!activeChatSessionId;
+  // 集成测试依赖研发仓库和代码任务，运营项目不展示该入口。
+  const showIntegrationTab = isDevelopProject;
   const showMembersTab = isDevelopProject || isOperationProject || !!project?.sharedFlag;
   const canEnterDetailTaskSession = useMemo(
     () => isCurrentUserTaskAssignee(detailTask, userInfo),
@@ -1220,7 +1287,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
           pageNum: 1,
           pageSize: TASK_PAGE_SIZE,
         });
-        setOperationRequirements(Array.isArray(page?.list) ? page.list : []);
+        const items = Array.isArray(page?.list) ? page.list : [];
+        setOperationRequirements(items);
       } finally {
         setOperationRequirementsLoading(false);
       }
@@ -1437,8 +1505,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
       const res = await listKnowledgeBases({
         pageNum: 1,
         pageSize: 100,
-        queryAll: true,
-        resourceTypeList: [ResourceTypeMap.knowledgeBase, ResourceTypeMap.knowledgeBaseQa],
+        // 与知识库列表页使用相同的业务类型，避免把数字员工等其它资源混入采集知识库选择。
+        resourceBizTypeList: [
+          ResourceTypeMap.knowledgeBase,
+          ResourceTypeMap.knowledgeBaseQa,
+          ResourceTypeMap.knowledgeBaseTerm,
+        ],
       });
       // 知识库接口在不同版本中使用 rows 或 list，统一归一后再提供给运营任务表单。
       const knowledgeBaseList = getFirstOperationArray(res?.rows, res?.list, res?.data?.rows, res?.data?.list);
@@ -1465,6 +1537,28 @@ const ProjectDetailPanel: React.FC<Props> = ({
       setOperationKnowledgeBases([]);
     } finally {
       setOperationOptionsLoading(false);
+    }
+  }, []);
+
+  const fetchOperationOrganizeTemplates = useCallback(async () => {
+    try {
+      const res = await listOntologyBases();
+      // 本体列表接口可能直接返回数组或包在 data/list 中，统一转换为整理模板下拉选项。
+      const ontologyList = getFirstOperationArray(res, res?.list, res?.data, res?.data?.list);
+      setOperationOrganizeTemplates(
+        ontologyList
+          .map((ontology: any) => ({
+            value: ontology.baseId ?? ontology.resourceId ?? ontology.id,
+            label: ontology.displayName || ontology.resourceName || ontology.name || '',
+          }))
+          .filter(
+            (ontology: OperationSelectOption) =>
+              ontology.value !== undefined && ontology.value !== null && `${ontology.value}` !== '' && !!ontology.label
+          )
+      );
+    } catch (error) {
+      console.error('Failed to load operation organize templates:', error);
+      setOperationOrganizeTemplates([]);
     }
   }, []);
 
@@ -1503,34 +1597,22 @@ const ProjectDetailPanel: React.FC<Props> = ({
     [members]
   );
 
-  // 拆分弹窗提交的是项目成员 ID；运营任务执行接口需要数字员工 ID，在此保留两者的稳定映射。
-  const operationMemberAgentIdMap = useMemo(() => {
-    const memberAgentMap = new Map<string, number>();
-    members.forEach((member) => {
-      const memberUserId = member.userId ?? member.targetId ?? member.id;
-      const agentId = Number(member.agentId);
-      if (
-        memberUserId !== undefined &&
-        memberUserId !== null &&
-        `${memberUserId}` !== '' &&
-        Number.isFinite(agentId) &&
-        agentId > 0
-      ) {
-        memberAgentMap.set(`${memberUserId}`, agentId);
-      }
-    });
-    return memberAgentMap;
-  }, [members]);
+  // 只有当前登录用户已加入项目时才作为默认负责人和承接成员，避免下拉框出现无效选中值。
+  const defaultProjectAssigneeId = useMemo(() => {
+    const currentUserId = userInfo?.userId ?? userInfo?.id;
+    return operationAssigneeOptions.find((member) => `${member.value}` === `${currentUserId ?? ''}`)?.value;
+  }, [operationAssigneeOptions, userInfo?.id, userInfo?.userId]);
 
   // 将异步加载的数据收敛为需求表单唯一选项入口；数字员工用于执行后的工作流展示，执行时由承接成员绑定关系自动映射。
   const operationTaskOptions = useMemo(
     () => ({
       assignees: operationAssigneeOptions,
       knowledgeBases: operationKnowledgeBases,
+      organizeTemplates: operationOrganizeTemplates,
       accounts: operationAccounts,
       works: operationWorks,
     }),
-    [operationAccounts, operationAssigneeOptions, operationKnowledgeBases, operationWorks]
+    [operationAccounts, operationAssigneeOptions, operationKnowledgeBases, operationOrganizeTemplates, operationWorks]
   );
 
   // 关闭账号登录时同步收起全局远程桌面，避免切换账号或项目后保留旧平台页面。
@@ -1697,11 +1779,17 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setEditingOperationTask(null);
     setOperationTaskModalOpen(true);
     // 数字员工改到任务执行阶段选择，需求表单只刷新当前原型要求的关联资源。
-    void Promise.allSettled([fetchRepos(), fetchOperationAccounts(), fetchOperationKnowledgeBases()]);
+    void Promise.allSettled([
+      fetchRepos(),
+      fetchOperationAccounts(),
+      fetchOperationKnowledgeBases(),
+      fetchOperationOrganizeTemplates(),
+    ]);
   }, [
     fetchRepos,
     fetchOperationAccounts,
     fetchOperationKnowledgeBases,
+    fetchOperationOrganizeTemplates,
     handleCloseOperationAccountPanel,
     isOperationProject,
     operationAccountPanelOpen,
@@ -1714,8 +1802,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
       setDetailTask(null);
       setEditingOperationTask(task);
       setOperationTaskModalOpen(true);
+      // 编辑旧需求时也重新读取已有本体，确保整理模板名称能正确回显。
+      void fetchOperationOrganizeTemplates();
     },
-    [isOperationProject]
+    [fetchOperationOrganizeTemplates, isOperationProject]
   );
 
   // 运营需求提交前统一序列化日期，并将页面字段转换为运营需求接口约定的三类配置结构。
@@ -1745,8 +1835,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
             collectEnd: collectDateRange.endTime?.slice(0, 10),
             collectMethod: values.collectConfig?.mode,
             collectSchedule: values.collectConfig?.schedule,
+            // 兼容旧执行服务读取 templateId，同时完整保存新增本体的整理需求和结构化要求。
+            organizeTemplateId: values.collectConfig?.knowledgeOrganization?.templateId,
             knowledgeOrganization: values.collectConfig?.organize
-              ? { templateId: values.collectConfig?.organizeTemplateId }
+              ? values.collectConfig?.knowledgeOrganization || null
               : null,
           }
           : values.taskType === 'content'
@@ -1966,37 +2058,39 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setOperationTaskSplitTarget(task);
   }, []);
 
-  // 多仓库拆分确认后，将承接成员绑定的数字员工直接传给执行接口，不再额外弹出数字员工选择。
+  // 多仓库拆分确认后仅提交承接成员；服务端实时查询成员绑定的数字员工，再以 @ 数字员工的方式发起任务会话。
   const handleConfirmOperationTaskSplit = useCallback(
     async (splitTasks: SplitTaskDraft[]) => {
       const task = operationTaskSplitTarget;
       if (!task) return;
-      const selectedMemberIds = splitTasks.map((splitTask) => splitTask.assigneeId).filter(Boolean);
-      const agentIds = Array.from(
-        new Set(selectedMemberIds.map((memberId) => operationMemberAgentIdMap.get(`${memberId}`)).filter(Boolean))
-      ) as number[];
-      if (agentIds.length !== new Set(selectedMemberIds.map((memberId) => `${memberId}`)).size) {
-        message.error(intl.formatMessage({ id: 'projectSpace.operation.execute.validation.assigneeAgentRequired' }));
-        return;
-      }
+      const assigneeIds = Array.from(
+        new Set(
+          splitTasks
+            .map((splitTask) => splitTask.assigneeId)
+            .filter((assigneeId): assigneeId is string | number => assigneeId !== undefined && assigneeId !== null)
+        )
+      );
 
       const taskId = Number(task.taskId);
-      if (!Number.isFinite(taskId) || taskId <= 0) return;
+      if (!Number.isFinite(taskId) || taskId <= 0 || !assigneeIds.length) return;
       setOperationTaskExecuting(true);
       try {
-        await executeOperationTask({ taskId, agentIds });
+        const executeResult = await executeOperationTask({ taskId, assigneeIds });
         message.success(intl.formatMessage({ id: 'projectSpace.operation.execute.success' }));
         setOperationTaskSplitTarget(null);
-        // 与研发任务保持一致：后台先创建会话并异步发送首条任务指令，不能在消息落库前立即进入会话，否则页面会先展示为空。
         setDetailTask(null);
-        await Promise.all([fetchTasks({ pageNum: 1 }), fetchOperationAgents()]);
+        // 执行接口返回前已创建任务会话；确认后立即进入该会话，列表和数字员工数据在后台刷新即可。
+        if (executeResult?.sessionId) {
+          handleOpenTaskSession({ ...task, sessionId: executeResult.sessionId, status: 'doing' });
+        }
+        void Promise.all([fetchTasks({ pageNum: 1 }), fetchOperationAgents()]);
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'projectSpace.operation.execute.submitFailed' }));
       } finally {
         setOperationTaskExecuting(false);
       }
     },
-    [fetchOperationAgents, fetchTasks, intl, operationMemberAgentIdMap, operationTaskSplitTarget]
+    [fetchOperationAgents, fetchTasks, handleOpenTaskSession, intl, operationTaskSplitTarget]
   );
 
   const handleExitProject = useCallback(() => {
@@ -2092,6 +2186,50 @@ const ProjectDetailPanel: React.FC<Props> = ({
       setSharedFilesLoading(false);
     }
   }, [projectId, t]);
+
+  // 代码变更按当前会话(任务)拉取:远程分支相对基线的文件 diff。切换会话时重取。
+  const fetchTaskChanges = useCallback(async (sessionId?: string | number | null) => {
+    if (!sessionId) {
+      setTaskChanges(null);
+      return;
+    }
+    setTaskChangesLoading(true);
+    try {
+      const res = await getTaskChanges(Number(sessionId));
+      setTaskChanges(res || null);
+    } catch (error) {
+      console.error('Failed to load task changes:', error);
+      setTaskChanges(null);
+    } finally {
+      setTaskChangesLoading(false);
+    }
+  }, []);
+
+  // 点变更文件行后打开右侧预览抽屉，并拉取该文件的本地 unified diff。
+  const openFileDiff = useCallback(
+    async (filePath: string) => {
+      const sessionId = currentResourceSession?.sessionId;
+      if (!sessionId) return;
+      setDiffDrawerFile(filePath);
+      setDiffDrawerData(null);
+      setDiffDrawerLoading(true);
+      try {
+        const res = await getTaskFileDiff(Number(sessionId), filePath);
+        setDiffDrawerData(res || null);
+      } catch (error) {
+        console.error('Failed to load file diff:', error);
+        setDiffDrawerData(null);
+      } finally {
+        setDiffDrawerLoading(false);
+      }
+    },
+    [currentResourceSession?.sessionId]
+  );
+
+  const closeFileDiff = useCallback(() => {
+    setDiffDrawerFile(null);
+    setDiffDrawerData(null);
+  }, []);
 
   const fetchSessionResourceFiles = useCallback(
     async (sessionId: string) => {
@@ -2588,7 +2726,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setOperationTaskSplitTarget(null);
     setOperationTaskExecuting(false);
     setDetailTask(null);
-    setActiveTab(showRequirementsTab ? 'requirements' : 'tasks');
+    // 项目详情页签顺序以任务开头，切换项目后也始终回到第一个任务页签。
+    setActiveTab('tasks');
     setDetailReq(null);
     setRequirementSearchKeyword('');
     setVisibleRequirementCount(REQUIREMENT_PAGE_SIZE);
@@ -2603,7 +2742,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
   }, [EventEmitter, fetchDetailData, isDevelopProject, showRequirementsTab]);
 
   useEffect(() => {
-    setResourceFileScope('current');
+    // 切换项目后默认回到共享文件，避免运营项目沿用研发项目的代码变更视图。
+    setResourceView('shared');
+    closeFileDiff();
     setSharedFiles([]);
     setResourceSessions([]);
     setSessionFilesMap({});
@@ -2613,7 +2754,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setResourceRenameOpen(false);
     setResourceRenameTarget(null);
     setResourceRenameLoading(false);
-  }, [fileResourceId, projectId]);
+  }, [closeFileDiff, fileResourceId, projectId]);
+
+  useEffect(() => {
+    // 代码变更仅研发项目提供；项目类型异步切换完成后兜底回到共享文件视图。
+    if (!isDevelopProject && resourceView === 'changes') setResourceView('shared');
+  }, [isDevelopProject, resourceView]);
 
   useEffect(() => {
     if (activeTab !== 'resources' && activeTab !== 'repos') return;
@@ -2625,8 +2771,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
     void fetchSharedResourceFiles();
   }, [activeTab, fetchSharedResourceFiles]);
 
+  // 代码变更只跟当前会话（任务）走；仅在切到对应二级 Tab 时拉取，避免共享文件视图产生无效请求。
   useEffect(() => {
-    if (activeTab !== 'resources' || !fileResourceId) return;
+    if (activeTab !== 'resources' || resourceView !== 'changes' || !isDevelopProject) return;
+    void fetchTaskChanges(currentResourceSession?.sessionId);
+  }, [activeTab, currentResourceSession?.sessionId, fetchTaskChanges, isDevelopProject, resourceView]);
+
+  useEffect(() => {
+    // 当前会话和全部会话按二级 Tab 懒加载，切换到共享文件时不重复请求会话目录。
+    if (activeTab !== 'resources' || !isSessionResourceView || !fileResourceId) return;
     let sessionIds: string[] = [];
     if (resourceFileScope === 'all') {
       sessionIds = projectSessions.map((session) => `${session.sessionId}`).filter(Boolean);
@@ -2641,6 +2794,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     currentResourceSession?.sessionId,
     fetchSessionResourceFiles,
     fileResourceId,
+    isSessionResourceView,
     projectSessions,
     resourceFileScope,
   ]);
@@ -2702,14 +2856,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const tabItems = useMemo(
     () => [
-      ...(showRequirementsTab ? [{ key: 'requirements', label: t('tabs.requirements') }] : []),
       { key: 'tasks', label: t('tabs.tasks') },
-      ...(showResourcesTab ? [{ key: 'resources', label: t('tabs.resources') }] : []),
-      ...(showReposTab ? [{ key: 'repos', label: t('tabs.repos') }] : []),
+      { key: 'resources', label: t('tabs.resources') },
+      ...(showRequirementsTab ? [{ key: 'requirements', label: t('tabs.requirements') }] : []),
       ...(showMembersTab ? [{ key: 'members', label: t('tabs.members') }] : []),
-      ...(showRequirementsTab ? [{ key: 'integration', label: t('tabs.integration') }] : []),
+      ...(showIntegrationTab ? [{ key: 'integration', label: t('tabs.integration') }] : []),
     ],
-    [showMembersTab, showResourcesTab, showReposTab, showRequirementsTab, t]
+    [showIntegrationTab, showMembersTab, showRequirementsTab, t]
   );
 
   const detailPanelTabCountClass = styles[`projectDetailPanelTabCount${tabItems.length}`] || '';
@@ -3124,7 +3277,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       } else if (repoModalTarget === 'source') {
         setSourceForm((prev) => ({ ...prev, repoId: res.repoId }));
       }
-      // manage 入口只维护仓库列表,不回填任何表单。
+      // manage 和 requirementSplit 入口仅刷新仓库列表，拆分弹窗会用刷新后的数据重新生成可选项。
     } catch {
       message.error(t('repository.createFailed'));
     } finally {
@@ -4241,7 +4394,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
         open={operationTaskModalOpen}
         mode={editingOperationTask ? 'edit' : 'create'}
         entityLabel="requirement"
-        initialValues={editingOperationTask ? getOperationTaskInitialValues(editingOperationTask) : undefined}
+        initialValues={
+          editingOperationTask
+            ? getOperationTaskInitialValues(editingOperationTask)
+            : { assigneeId: defaultProjectAssigneeId }
+        }
         options={operationTaskOptions}
         loading={operationTaskSaving}
         optionLoading={operationOptionsLoading}
@@ -4449,6 +4606,189 @@ const ProjectDetailPanel: React.FC<Props> = ({
     </div>
   );
 
+  const renderCodeChanges = () => {
+    if (!isDevelopProject) return null;
+    const empty = (id: string, values?: Record<string, string | number>) => (
+      <div className={styles.codeChangeEmpty}>
+        {taskChangesLoading ? (
+          <Spin size="small" />
+        ) : (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t(id, values)} />
+        )}
+      </div>
+    );
+
+    let body: React.ReactNode;
+    const status = taskChanges?.status;
+    if (!currentResourceSession?.sessionId) {
+      body = empty('codeChanges.selectSession');
+    } else if (taskChangesLoading && !taskChanges) {
+      body = empty('codeChanges.loading');
+    } else if (!taskChanges || status === 'http_error') {
+      body = taskChanges?.message ? (
+        <div className={styles.codeChangeEmpty}>
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={taskChanges.message} />
+        </div>
+      ) : (
+        empty('codeChanges.unavailable')
+      );
+    } else if (status === 'no_repo') {
+      body = empty('codeChanges.noRepository');
+    } else if (status === 'no_token') {
+      body = empty('codeChanges.noToken');
+    } else if (status === 'branch_not_found') {
+      body = empty('codeChanges.branchNotFound', { branch: taskChanges.headBranch || '-' });
+    } else if (!taskChanges.files?.length) {
+      body = empty('codeChanges.noChanges');
+    } else {
+      body = (
+        <div className={styles.codeChangeList}>
+          {taskChanges.files.map((file) => {
+            const meta = getFileChangeMeta(file.status);
+            const { name, dir } = splitFilePath(file.filename);
+            const renamedFrom =
+              file.status?.toLowerCase() === 'renamed' && file.previousFilename ? file.previousFilename : '';
+            // 本地变更点行在右侧抽屉预览 diff；远程变更仍保留 GitHub 文件页入口。
+            const isLocal = taskChanges?.source === 'local';
+            const inner = (
+              <>
+                <span className={`${styles.codeChangeBadge} ${styles[meta.className]}`} title={t(meta.labelId)}>
+                  {meta.letter}
+                </span>
+                <div className={styles.codeChangeInfo}>
+                  <strong className={styles.codeChangeName}>{name}</strong>
+                  {/* 深层目录路径:整段展示并挂 title,过长时 CSS 头部省略(rtl)保留尾部目录名,hover 看全路径。 */}
+                  <span
+                    className={styles.codeChangePath}
+                    title={renamedFrom ? `${renamedFrom} → ${file.filename}` : file.filename}
+                  >
+                    {renamedFrom ? `${renamedFrom} → ${file.filename}` : dir || file.filename}
+                  </span>
+                </div>
+                <div className={styles.codeChangeStat}>
+                  {file.additions > 0 && <span className={styles.codeChangeAdd}>+{file.additions}</span>}
+                  {file.deletions > 0 && <span className={styles.codeChangeDel}>-{file.deletions}</span>}
+                </div>
+              </>
+            );
+            if (file.blobUrl) {
+              return (
+                <a
+                  className={`${styles.codeChangeItem} ${styles.codeChangeItemLink}`}
+                  key={file.filename}
+                  href={file.blobUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {inner}
+                </a>
+              );
+            }
+            if (isLocal) {
+              return (
+                <button
+                  type="button"
+                  className={`${styles.codeChangeItem} ${styles.codeChangeItemLink} ${styles.codeChangeItemButton}`}
+                  key={file.filename}
+                  onClick={() => openFileDiff(file.filename)}
+                >
+                  {inner}
+                </button>
+              );
+            }
+            return (
+              <div className={styles.codeChangeItem} key={file.filename}>
+                {inner}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    const branchLabel = taskChanges?.headBranch || currentResourceSession?.sessionName || '';
+    return (
+      <>
+        <div className={styles.codeChangeHeader}>
+          <div className={styles.codeChangeHeaderMain}>
+            {branchLabel ? (
+              // 分支名即 GitHub 入口：有 compareUrl 就跳转整体比对页，否则展示当前任务分支。
+              taskChanges?.compareUrl ? (
+                <a
+                  className={`${styles.codeChangeBranch} ${styles.codeChangeBranchLink}`}
+                  href={taskChanges.compareUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={t('codeChanges.openInGitHub')}
+                >
+                  {branchLabel}
+                </a>
+              ) : (
+                <span className={styles.codeChangeBranch}>{branchLabel}</span>
+              )
+            ) : null}
+          </div>
+          {status === 'ok' && taskChanges?.files?.length ? (
+            <span className={styles.codeChangeCount}>{taskChanges.files.length}</span>
+          ) : null}
+        </div>
+        {body}
+      </>
+    );
+  };
+
+  // 文件 diff 抽屉：逐行渲染 unified diff，行首 +/-/@@ 分别着色，保持与文件预览一致的右侧查看方式。
+  const renderFileDiffDrawer = () => {
+    const open = !!diffDrawerFile;
+    const lines = parseDiffLines(diffDrawerData?.diff);
+    const status = diffDrawerData?.status;
+    const hasDiff = status === 'ok' && lines.some((l) => l.type === 'add' || l.type === 'del');
+    const fileName = diffDrawerFile ? splitFilePath(diffDrawerFile).name : '';
+    return (
+      <Drawer
+        open={open}
+        onClose={closeFileDiff}
+        width={720}
+        title={
+          <div className={styles.diffModalTitle}>
+            <span className={styles.diffModalName}>{fileName}</span>
+            {diffDrawerFile ? <span className={styles.diffModalPath}>{diffDrawerFile}</span> : null}
+          </div>
+        }
+        className={styles.diffDrawer}
+      >
+        {diffDrawerLoading ? (
+          <div className={styles.diffModalEmpty}>
+            <Spin />
+          </div>
+        ) : !diffDrawerData || status !== 'ok' ? (
+          <div className={styles.diffModalEmpty}>{diffDrawerData?.message || t('codeChanges.diffUnavailable')}</div>
+        ) : !hasDiff ? (
+          <div className={styles.diffModalEmpty}>{t('codeChanges.diffEmpty')}</div>
+        ) : (
+          <div className={styles.diffModalBody}>
+            {lines.map((line, idx) => {
+              if (line.type === 'meta') return null;
+              const cls =
+                line.type === 'add'
+                  ? styles.diffLineAdd
+                  : line.type === 'del'
+                    ? styles.diffLineDel
+                    : line.type === 'hunk'
+                      ? styles.diffLineHunk
+                      : styles.diffLineContext;
+              return (
+                <div className={`${styles.diffLine} ${cls}`} key={idx}>
+                  {line.text || ' '}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Drawer>
+    );
+  };
+
   const renderResources = () => {
     const currentSessionFiles = currentResourceSession?.sessionId
       ? sessionFilesMap[`${currentResourceSession.sessionId}`] || []
@@ -4486,53 +4826,119 @@ const ProjectDetailPanel: React.FC<Props> = ({
       ];
     })();
 
+    // 资源分类收敛到顶部 Tab，文件和代码变更复用同一个内容区，避免多个卡片纵向堆叠。
+    const createResourceViewItem = (key: ResourceView, label: string) => ({
+      key,
+      // 二级 Tab 统一展示前两个字符，Tooltip 保留完整的国际化文案，避免窄屏出现省略号。
+      label: (
+        <Tooltip title={label}>
+          <span className={styles.resourceViewTabLabel}>{Array.from(label).slice(0, 2).join('')}</span>
+        </Tooltip>
+      ),
+    });
+    const resourceViewItems = [
+      createResourceViewItem('shared', t('resource.sharedSpace')),
+      createResourceViewItem('sessionCurrent', t('resource.currentSession')),
+      createResourceViewItem('sessionAll', t('resource.allSessions')),
+      ...(isDevelopProject ? [createResourceViewItem('changes', t('codeChanges.title'))] : []),
+    ];
+    const resourceViewRefreshing =
+      resourceView === 'shared'
+        ? sharedFilesLoading
+        : isSessionResourceView
+          ? Object.values(sessionFilesLoadingMap).some(Boolean)
+          : taskChangesLoading;
+    const handleResourceViewRefresh = () => {
+      if (resourceView === 'shared') {
+        void fetchSharedResourceFiles();
+        return;
+      }
+      if (isSessionResourceView) {
+        refreshSessionResourceFiles();
+        return;
+      }
+      void fetchTaskChanges(currentResourceSession?.sessionId);
+    };
+
     return (
       <div className={styles.detailResourcePanel}>
-        <FileSpaceBlock
-          title={t('resource.sharedSpace')}
-          loading={sharedFilesLoading}
-          items={sharedFiles}
-          currentPath={SHARED_FILE_PATH}
-          emptyText={t('resource.emptySharedFiles')}
-          compactTreePadding
-          resourceEmptyStyle
-          childrenByPath={resourceChildrenByPath}
-          expandedKeys={resourceExpandedKeys}
-          showActions={!!projectId}
-          onRefresh={() => void fetchSharedResourceFiles()}
-          onExpand={setResourceExpandedKeys}
-          onLoadData={loadResourceTreeNode}
-          onNodeClick={handleResourceItemClick}
-          onNodeDoubleClick={handleResourceItemDoubleClick}
-          getActionItems={getSharedResourceFileActionItems}
-          onAction={handleSharedResourceFileAction}
-        />
-        <FileSpaceBlock
-          title={t('resource.sessionSpace')}
-          emptyText={t(resourceFileScope === 'all' ? 'resource.emptySessions' : 'resource.emptyCurrentSession')}
-          groups={sessionGroups}
-          resourceEmptyStyle
-          childrenByPath={resourceChildrenByPath}
-          expandedKeys={resourceExpandedKeys}
-          switchValue={resourceFileScope}
-          defaultGroupsCollapsed={resourceFileScope === 'all'}
-          // “全部会话”只允许展开一个会话，避免多个文件树同时撑开资源卡片。
-          accordionGroups={resourceFileScope === 'all'}
-          groupCollapseResetKey={resourceFileScope}
-          showActions={!!fileResourceId}
-          onRefresh={refreshSessionResourceFiles}
-          switchOptions={[
-            { label: t('resource.scope.current'), value: 'current' },
-            { label: t('resource.scope.all'), value: 'all' },
-          ]}
-          onSwitchChange={(value) => setResourceFileScope(value as ResourceFileScope)}
-          onExpand={setResourceExpandedKeys}
-          onLoadData={loadResourceTreeNode}
-          onNodeClick={handleResourceItemClick}
-          onNodeDoubleClick={handleResourceItemDoubleClick}
-          getActionItems={getSessionResourceFileActionItems}
-          onAction={handleResourceFileAction}
-        />
+        <div className={styles.resourceViewTabBar}>
+          <Tabs
+            activeKey={resourceView}
+            className={styles.resourceViewTabs}
+            items={resourceViewItems}
+            onChange={(key) => setResourceView(key as ResourceView)}
+          />
+          <button
+            type="button"
+            className={styles.resourceViewRefresh}
+            onClick={handleResourceViewRefresh}
+            aria-label={t('common.refresh')}
+          >
+            <ReloadOutlined spin={resourceViewRefreshing} />
+          </button>
+        </div>
+        <div className={styles.resourceViewContent}>
+          {resourceView === 'shared' && (
+            <>
+              <FileSpaceBlock
+                title={t('resource.sharedSpace')}
+                loading={sharedFilesLoading}
+                items={sharedFiles}
+                currentPath={SHARED_FILE_PATH}
+                emptyText={t('resource.emptySharedFiles')}
+                hideHeader
+                fillContainer
+                compactTreePadding
+                resourceEmptyStyle
+                childrenByPath={resourceChildrenByPath}
+                expandedKeys={resourceExpandedKeys}
+                showActions={!!projectId}
+                onExpand={setResourceExpandedKeys}
+                onLoadData={loadResourceTreeNode}
+                onNodeClick={handleResourceItemClick}
+                onNodeDoubleClick={handleResourceItemDoubleClick}
+                getActionItems={getSharedResourceFileActionItems}
+                onAction={handleSharedResourceFileAction}
+              />
+            </>
+          )}
+          {isSessionResourceView && (
+            <FileSpaceBlock
+              title={t('resource.sessionSpace')}
+              emptyText={t(resourceFileScope === 'all' ? 'resource.emptySessions' : 'resource.emptyCurrentSession')}
+              // 当前会话只有一个文件树，无需重复展示与二级 Tab 相同的会话分组标题。
+              groups={resourceFileScope === 'all' ? sessionGroups : undefined}
+              items={currentSessionFiles}
+              currentPath={
+                currentResourceSession?.sessionId ? getSessionFilePath(`${currentResourceSession.sessionId}`) : '/'
+              }
+              loading={
+                currentResourceSession?.sessionId
+                  ? !!sessionFilesLoadingMap[`${currentResourceSession.sessionId}`]
+                  : false
+              }
+              hideHeader
+              fillContainer
+              resourceEmptyStyle
+              childrenByPath={resourceChildrenByPath}
+              expandedKeys={resourceExpandedKeys}
+              defaultGroupsCollapsed={resourceFileScope === 'all'}
+              // “全部会话”仅展开一个分组，避免多棵文件树同时撑开统一的资源内容区。
+              accordionGroups={resourceFileScope === 'all'}
+              groupCollapseResetKey={resourceFileScope}
+              showActions={!!fileResourceId}
+              onExpand={setResourceExpandedKeys}
+              onLoadData={loadResourceTreeNode}
+              onNodeClick={handleResourceItemClick}
+              onNodeDoubleClick={handleResourceItemDoubleClick}
+              getActionItems={getSessionResourceFileActionItems}
+              onAction={handleResourceFileAction}
+            />
+          )}
+          {resourceView === 'changes' && isDevelopProject && renderCodeChanges()}
+        </div>
+        {renderFileDiffDrawer()}
       </div>
     );
   };
@@ -5004,20 +5410,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
       return renderTasks();
     }
     if (activeTab === 'resources') return renderResources();
-    if (activeTab === 'repos' && showReposTab) {
-      return (
-        <ReposTab
-          projectId={projectId}
-          resourceId={fileResourceId}
-          sessionId={currentResourceSession?.sessionId}
-          sessionName={currentResourceSession?.sessionName}
-          codeChangesEnabled={isDevelopProject}
-          onNodeClick={handleResourceItemClick}
-        />
-      );
-    }
     if (activeTab === 'integration') {
-      if (showRequirementsTab) return <Integration active projectId={projectId} repos={repos} />;
+      if (showIntegrationTab) return <Integration active projectId={projectId} repos={repos} />;
       return renderTasks();
     }
     if (activeTab === 'members') {
@@ -5694,6 +6088,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const hideDetailBodyScrollbar = ['requirements', 'tasks', 'members'].includes(activeTab);
   const isRequirementsTab = activeTab === 'requirements';
   const isTasksTab = activeTab === 'tasks' || (activeTab === 'requirements' && !showRequirementsTab);
+  const isResourcesTab = activeTab === 'resources';
   const isMembersTab = activeTab === 'members' && showMembersTab;
 
   return (
@@ -5751,7 +6146,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
             hideDetailBodyScrollbar ? styles.detailBodyPanelScrollbarHidden : ''
           } ${isRequirementsTab ? styles.detailRequirementsBodyPanel : ''} ${
             isTasksTab ? styles.detailTasksBodyPanel : ''
-          } ${isMembersTab ? styles.detailMembersBodyPanel : ''}`}
+          } ${isResourcesTab ? styles.detailResourcesBodyPanel : ''} ${
+            isMembersTab ? styles.detailMembersBodyPanel : ''
+          }`}
         >
           {renderTabContent()}
         </div>
@@ -5771,7 +6168,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
             : null
         }
         repos={repos}
+        onAddRepository={() => {
+          // 拆分弹窗内直接新增仓库，新增表单以更高层级展示并保留当前拆分上下文。
+          setRepoModalTarget('requirementSplit');
+          setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
+          setRepoFormOpen(true);
+        }}
         members={operationAssigneeOptions}
+        defaultAssigneeId={defaultProjectAssigneeId}
         confirmLoading={
           operationTaskSplitTarget
             ? operationTaskExecuting

@@ -80,7 +80,7 @@ const OperationRequirementStartModal: React.FC<OperationRequirementStartModalPro
     >
       <Form form={form} layout="vertical">
         <div className={styles.operationTaskFormBody}>
-          <section className={styles.operationTaskSection}>
+          <section className={`${styles.operationTaskSection} ${styles.operationRequirementSummary}`}>
             <h3>{requirement?.title || t('unnamedRequirement')}</h3>
             <p>{requirement?.description || t('emptyDescription')}</p>
           </section>

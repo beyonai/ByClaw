@@ -90,6 +90,79 @@
   }
 }
 
+// 整理模板配置结果在表单内以摘要呈现，弹窗负责编辑以避免占用采集配置的主表单空间。
+.knowledgeOrganizationSummary {
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid #d9e2ef;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #fff;
+
+  > div {
+    min-width: 0;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  strong,
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong {
+    color: #273142;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  span {
+    color: #8a94a6;
+    font-size: 12px;
+  }
+}
+
+// 知识整理弹窗的说明和模式切换独立成块，和原型中的已有/新增本体选择保持一致。
+.knowledgeOrganizationModal {
+  :global {
+    .@{antPrefix}-modal-body {
+      padding-right: 20px;
+    }
+  }
+}
+
+.knowledgeOrganizationIntro {
+  margin: 0 0 16px;
+  color: #687385;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.knowledgeOrganizationMode {
+  :global {
+    .@{antPrefix}-radio-group {
+      display: flex;
+    }
+
+    .@{antPrefix}-radio-button-wrapper {
+      flex: 1;
+      text-align: center;
+    }
+  }
+}
+
+// 启动运营需求的首张摘要卡片独立补齐底部留白，使标题和需求说明的上下内边距一致。
+.operationRequirementSummary {
+  padding-bottom: 16px;
+}
+
 // 执行任务时将数字员工选择区与上方任务信息卡片拉开，便于区分任务内容和执行配置。
 .operationTaskAgentField {
   margin-top: 24px;
@@ -374,41 +447,6 @@
   flex-shrink: 0;
   margin-top: -2px;
   color: #667085;
-}
-
-.accountStats {
-  margin-top: 18px;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  flex-shrink: 0;
-}
-
-.accountStatItem {
-  min-width: 0;
-  padding: 14px 16px;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  border: 1px solid #e7ebf2;
-  border-radius: 10px;
-  background: #fff;
-
-  strong {
-    color: #1f2633;
-    font-size: 22px;
-    font-weight: 600;
-    line-height: 28px;
-  }
-
-  span {
-    min-width: 0;
-    overflow: hidden;
-    color: #75839a;
-    font-size: 13px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
 }
 
 .accountFilterRow {
@@ -767,7 +805,6 @@
 @media (max-width: 720px) {
   .operationFormGrid,
   .agentSelector,
-  .accountStats,
   .operationAgentCheckboxGroup {
     grid-template-columns: minmax(0, 1fr);
   }

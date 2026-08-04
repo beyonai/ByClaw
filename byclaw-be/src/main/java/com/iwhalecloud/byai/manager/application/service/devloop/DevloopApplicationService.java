@@ -49,7 +49,10 @@ import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionExtMapper;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
 import com.iwhalecloud.byai.manager.mapper.users.UserPrivateParamMapper;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.dto.MultiAgentMetadata;
 import com.iwhalecloud.byai.state.domain.chat.service.AssistantChatService;
+import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
+import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.common.util.threadPoolUti.ThreadPoolUtil;
@@ -1595,7 +1598,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 构造任务启动提示词：从 byai_system_config 取模板并填充占位符； 模板缺失时用内置兜底模板，保证任务始终可创建。
+     * 构造研发任务启动提示词：从 byai_system_config 取模板并填充占位符；模板缺失时用内置兜底模板，保证任务始终可创建。
      */
     private String buildTaskPrompt(String projectName, ProjectRepo repo, String branchName, String taskType,
         String title, String description) {
@@ -1611,7 +1614,7 @@ public class DevloopApplicationService {
             .replace("${description}", description != null ? description : "");
     }
 
-    /** 提示词模板兜底：DB 未配置 DEVLOOP_TASK_START_PROMPT 时使用 */
+    /** 提示词模板兜底：数据库未配置 DEVLOOP_TASK_START_PROMPT 时使用。 */
     private static final String DEFAULT_TASK_PROMPT_TEMPLATE = "你是 ByClaw 开发助手，负责在指定代码仓库中自主完成开发任务。\n\n" + "## 任务信息\n"
         + "- 项目：${projectName}\n" + "- 代码仓库：${repoFullName}\n" + "- 目标分支：${branchName}（尚未创建，需你新建）\n"
         + "- 任务类型：${taskType}\n" + "- 任务标题：${title}\n\n" + "## 需求详情\n${description}\n\n" + "## 仓库访问说明\n"
@@ -1824,7 +1827,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 查询任务单个文件的本地 diff(unified 文本),供前端 modal 逐行渲染。仅本地工作区口径; 工作区不可用或出错时返回 status 非 ok,前端提示,不抛异常。
+     * 查询任务单个文件的本地 diff(unified 文本)，供前端右侧预览抽屉逐行渲染。仅本地工作区口径；工作区不可用或出错时返回 status 非 ok，前端提示，不抛异常。
      */
     public ResponseUtil<Map<String, Object>> getTaskFileDiff(Long sessionId, String filePath) {
         if (sessionId == null || filePath == null || filePath.trim().isEmpty()) {
@@ -2353,32 +2356,37 @@ public class DevloopApplicationService {
             // 仅待执行任务允许创建会话，避免已完成或已取消任务被重复启动。
             return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.execute.forbidden"));
         }
-        if (dto.getAgentIds() == null || dto.getAgentIds().isEmpty()) {
+        List<Long> agentIds = resolveOperationTaskAgentIds(dto, task.getProjectId());
+        if (agentIds.isEmpty()) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.agents.required"));
         }
 
-        Long primaryAgentId = dto.getAgentIds().stream().filter(Objects::nonNull).findFirst().orElse(null);
+        Long primaryAgentId = agentIds.get(0);
         if (primaryAgentId == null) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.agents.required"));
         }
+        List<ResourceVo> mentionedAgents = buildOperationTaskAgentResources(agentIds);
         AssistantChatDto chatDto = new AssistantChatDto();
         chatDto.setAgentId(primaryAgentId);
         chatDto.setProjectId(task.getProjectId());
         chatDto.setChatContent(task.getTitle());
+        chatDto.setResourceList(mentionedAgents);
         // 运营任务复用研发任务的 DevLoop 聊天通道，确保首条任务指令按统一链路持久化并触发数字员工。
         chatDto.setAccessTerminal("DevLoop");
         chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
         assistantChatService.createGroupChatSession(chatDto);
         // 会话创建只负责持久化会话和成员；必须显式进入聊天链路，首条运营任务指令才会写入消息列表并触发数字员工执行。
-        chatDto.setChatContent(buildOperationTaskPrompt(task));
+        chatDto.setChatContent(buildOperationTaskPrompt(task, mentionedAgents));
+        if (agentIds.size() > 1) {
+            // 多个承接成员的员工以并行泳道执行，agentId 清空后由 resourceList 和 multiAgent 路由逐一分发。
+            chatDto.setAgentId(null);
+            chatDto.setExtParams(buildOperationTaskMultiAgentExtParams(task.getTaskId(), agentIds));
+        }
         LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
 
         List<Map<String, Object>> workflow = new ArrayList<>();
-        for (int index = 0; index < dto.getAgentIds().size(); index++) {
-            Long agentId = dto.getAgentIds().get(index);
-            if (agentId == null) {
-                continue;
-            }
+        for (int index = 0; index < agentIds.size(); index++) {
+            Long agentId = agentIds.get(index);
             Map<String, Object> step = new LinkedHashMap<>();
             step.put("id", agentId);
             step.put("name", I18nUtil.get("devloop.operationTask.workflow.step"));
@@ -2392,7 +2400,7 @@ public class DevloopApplicationService {
         update.setStatus("doing");
         update.setProgress(5);
         update.setSessionId(chatDto.getSessionId());
-        update.setAgentSelection(JSON.toJSONString(dto.getAgentIds()));
+        update.setAgentSelection(JSON.toJSONString(agentIds));
         update.setWorkflow(JSON.toJSONString(workflow));
         update.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         operationTaskService.update(update);
@@ -2407,9 +2415,90 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 运营任务会话的首条指令统一由服务端构建，避免前端只创建空会话且遗漏任务说明。
+     * 优先使用拆分弹窗提交的承接成员，实时读取成员绑定关系，避免页面缓存过期后把任务交给旧数字员工。
+     * 未传 assigneeIds 的旧调用仍沿用 agentIds，保证已发布客户端可继续执行任务。
      */
-    private String buildOperationTaskPrompt(OperationTask task) {
+    private List<Long> resolveOperationTaskAgentIds(OperationTaskDTO dto, Long projectId) {
+        if (dto.getAssigneeIds() != null) {
+            LinkedHashSet<Long> assigneeIds = new LinkedHashSet<>();
+            for (Long assigneeId : dto.getAssigneeIds()) {
+                if (assigneeId != null) {
+                    assigneeIds.add(assigneeId);
+                }
+            }
+            if (assigneeIds.isEmpty()) {
+                return Collections.emptyList();
+            }
+            Map<Long, Long> agentIdByAssignee = new HashMap<>();
+            for (ProjectMember member : projectMemberService.listByProjectId(projectId)) {
+                if (member.getUserId() != null && member.getAgentId() != null) {
+                    agentIdByAssignee.put(member.getUserId(), member.getAgentId());
+                }
+            }
+            LinkedHashSet<Long> agentIds = new LinkedHashSet<>();
+            for (Long assigneeId : assigneeIds) {
+                Long agentId = agentIdByAssignee.get(assigneeId);
+                if (agentId == null) {
+                    // 任一承接成员尚未绑定员工时整体拒绝，避免拆分任务只被部分员工执行。
+                    return Collections.emptyList();
+                }
+                agentIds.add(agentId);
+            }
+            return new ArrayList<>(agentIds);
+        }
+
+        LinkedHashSet<Long> agentIds = new LinkedHashSet<>();
+        if (dto.getAgentIds() != null) {
+            for (Long agentId : dto.getAgentIds()) {
+                if (agentId != null) {
+                    agentIds.add(agentId);
+                }
+            }
+        }
+        return new ArrayList<>(agentIds);
+    }
+
+    /** 将承接成员绑定的数字员工转换为聊天资源，首条任务消息会以 @员工 的形式引用这些资源。 */
+    private List<ResourceVo> buildOperationTaskAgentResources(List<Long> agentIds) {
+        List<ResourceVo> resources = new ArrayList<>();
+        for (Long agentId : agentIds) {
+            SsResource agent = ssResourceMapper.selectByResourceId(agentId);
+            ResourceVo resource = new ResourceVo();
+            resource.setId("DIG_EMPLOYEE_" + agentId);
+            resource.setResourceId(String.valueOf(agentId));
+            resource.setResourceName(agent != null && StringUtils.isNotBlank(agent.getResourceName())
+                ? agent.getResourceName() : String.valueOf(agentId));
+            resource.setResourceCode(agent == null ? null : agent.getResourceCode());
+            resource.setResourceType(AgentMetaEnum.DIG_EMPLOYEE);
+            resources.add(resource);
+        }
+        return resources;
+    }
+
+    /** 多承接成员使用聊天系统的并行泳道参数，确保每个被 @ 的数字员工都收到同一条运营任务指令。 */
+    private Map<String, Object> buildOperationTaskMultiAgentExtParams(Long taskId, List<Long> agentIds) {
+        Map<String, Object> extParams = new HashMap<>();
+        Map<String, Object> multiAgent = new HashMap<>();
+        String turnId = "operation-task-" + taskId + "-" + UUID.randomUUID();
+        multiAgent.put("turnId", turnId);
+        multiAgent.put("mode", "parallel");
+        List<Map<String, Object>> lanes = new ArrayList<>();
+        for (int index = 0; index < agentIds.size(); index++) {
+            Long agentId = agentIds.get(index);
+            Map<String, Object> lane = new HashMap<>();
+            lane.put("laneId", turnId + "-agent-" + agentId);
+            lane.put("clientRequestId", turnId + "-lane-" + index);
+            lane.put("agentId", agentId);
+            lane.put("order", index);
+            lanes.add(lane);
+        }
+        multiAgent.put("lanes", lanes);
+        extParams.put(MultiAgentMetadata.EXT_KEY_CAMEL, multiAgent);
+        return extParams;
+    }
+
+    /** 运营任务使用独立配置，避免运营指令变更影响研发任务的启动流程。 */
+    private String buildOperationTaskPrompt(OperationTask task, List<ResourceVo> mentionedAgents) {
         String operationType = task.getOperationType();
         String operationTypeLabel = switch (operationType == null ? "" : operationType) {
             case "collect" -> I18nUtil.get("devloop.operationTask.type.collect");
@@ -2417,9 +2506,170 @@ public class DevloopApplicationService {
             case "analyze" -> I18nUtil.get("devloop.operationTask.type.analyze");
             default -> I18nUtil.get("devloop.operationTask.type.default");
         };
-        return I18nUtil.get("devloop.operationTask.chat.prompt", task.getTitle(),
-            StringUtils.defaultIfBlank(task.getDescription(), I18nUtil.get("devloop.operationTask.chat.description.empty")),
-            operationTypeLabel);
+        String mentions = mentionedAgents.stream()
+            .map(agent -> "{{" + agent.getId() + "}}")
+            .collect(java.util.stream.Collectors.joining(" "));
+        Project project = projectMapper.selectById(task.getProjectId());
+        String projectName = project == null ? "" : StringUtils.defaultString(project.getProjectName());
+        String prompt = buildOperationTaskStartPrompt(task, projectName, operationTypeLabel);
+        return StringUtils.isBlank(mentions) ? prompt : mentions + "\n" + prompt;
+    }
+
+    /**
+     * 构造运营任务启动提示词：按需求类型读取独立模板，缺失时使用对应类型的内置模板。
+     * 提示词仅替换运营项目实际拥有的任务字段，避免代码仓库、分支等研发字段误导运营数字员工。
+     */
+    private String buildOperationTaskStartPrompt(OperationTask task, String projectName, String taskType) {
+        String promptConfigCode = getOperationTaskPromptConfigCode(task.getOperationType());
+        // 未识别的历史类型没有专属参数码，直接使用国际化默认模板，避免查询已废弃的通用配置。
+        String template = StringUtils.isBlank(promptConfigCode) ? null : byaiSystemConfigService.findByParamCode(promptConfigCode);
+        if (StringUtils.isBlank(template)) {
+            template = I18nUtil.get(getOperationTaskPromptDefaultMessageCode(task.getOperationType()));
+        }
+        // 三类运营任务的配置字段分别替换到模板中，避免将 JSON 原文直接交给数字员工理解。
+        Map<String, Object> operationConfigMap = parseOperationConfig(task.getConfig());
+        OperationRequirement requirement = task.getRequirementId() == null ? null
+            : operationRequirementService.findById(task.getRequirementId());
+        String requirementName = requirement == null ? StringUtils.defaultString(task.getTitle())
+            : StringUtils.defaultString(requirement.getTitle());
+        String requirementDescription = requirement == null ? StringUtils.defaultString(task.getDescription())
+            : StringUtils.defaultString(requirement.getDescription());
+        return template.replace("${projectName}", StringUtils.defaultString(projectName))
+            .replace("${taskType}", StringUtils.defaultString(taskType))
+            .replace("${title}", StringUtils.defaultString(task.getTitle()))
+            .replace("${description}", StringUtils.defaultString(task.getDescription()))
+            .replace("${requirementName}", requirementName)
+            .replace("${requirementDescription}", requirementDescription)
+            .replace("${assigneeName}", StringUtils.defaultString(resolveUserName(task.getAssignee())))
+            .replace("${dueTime}", StringUtils.defaultString(formatDateTime(task.getDueTime())))
+            .replace("${knowledgeBase}", resolveOperationResourceName(operationConfigMap.get("knowledgeBaseId")))
+            .replace("${directory}", resolveOperationResourceName(operationConfigMap.get("directoryId")))
+            .replace("${collectChannel}", getOperationPromptValue(operationConfigMap, "channel", "collectSource"))
+            .replace("${collectAccount}", resolveOperationAccountName(
+                findOperationConfigValue(operationConfigMap, "accountOrAddress", "collectAccount")))
+            .replace("${collectTopic}", getOperationPromptValue(operationConfigMap, "topic", "collectTopic"))
+            .replace("${collectStartTime}", getOperationPromptValue(operationConfigMap, "startTime", "collectStart"))
+            .replace("${collectEndTime}", getOperationPromptValue(operationConfigMap, "endTime", "collectEnd"))
+            .replace("${collectMethod}", getOperationPromptValue(operationConfigMap, "mode", "collectMethod"))
+            .replace("${collectSchedule}", getOperationPromptValue(operationConfigMap, "schedule", "collectSchedule"))
+            .replace("${collectOrganize}", getOperationPromptBoolean(operationConfigMap.get("organize")))
+            .replace("${collectOntology}", getOperationKnowledgeOrganizationValue(operationConfigMap, "templateName",
+                "templateId", "organizeTemplateId"))
+            .replace("${collectOrganizationRequest}", getOperationKnowledgeOrganizationValue(operationConfigMap,
+                "request"))
+            .replace("${collectOrganizationStructure}", getOperationKnowledgeOrganizationValue(operationConfigMap,
+                "structure"))
+            .replace("${contentType}", getOperationPromptValue(operationConfigMap, "contentType"))
+            .replace("${publishChannel}", getOperationPromptValue(operationConfigMap, "publishChannel"))
+            .replace("${publishAccount}", resolveOperationAccountName(
+                findOperationConfigValue(operationConfigMap, "publishAccountId")))
+            .replace("${publishTopic}", getOperationPromptValue(operationConfigMap, "topic", "publishTopic"))
+            .replace("${publishSchedule}", getOperationPromptValue(operationConfigMap, "publishSchedule"))
+            .replace("${analysisPlatform}", getOperationPromptValue(operationConfigMap, "platformId", "analysisChannel"))
+            .replace("${analysisAccount}", resolveOperationAccountName(
+                findOperationConfigValue(operationConfigMap, "accountId", "analysisAccountId")))
+            .replace("${analysisScope}", getOperationPromptValue(operationConfigMap, "scope", "analysisType"))
+            .replace("${analysisWorks}", getOperationPromptValue(operationConfigMap, "workIds", "selectedWorks",
+                "selectedWorkIds"));
+    }
+
+    /** 运营需求类型与启动提示词参数一一对应；content 是发布类型的历史兼容值。 */
+    private String getOperationTaskPromptConfigCode(String operationType) {
+        return switch (operationType == null ? "" : operationType) {
+            case "collect" -> "OPLOOP_TASK_START_PROMPT_COLLECT";
+            case "publish", "content" -> "OPLOOP_TASK_START_PROMPT_PUBLISH";
+            case "analyze" -> "OPLOOP_TASK_START_PROMPT_ANALYZE";
+            // 未识别类型使用国际化默认模板，不再依赖已废弃的通用参数码。
+            default -> null;
+        };
+    }
+
+    /** 数据库未配置对应提示词时使用同类型国际化默认模板。 */
+    private String getOperationTaskPromptDefaultMessageCode(String operationType) {
+        return switch (operationType == null ? "" : operationType) {
+            case "collect" -> "devloop.operationTask.prompt.collect.default";
+            case "publish", "content" -> "devloop.operationTask.prompt.publish.default";
+            case "analyze" -> "devloop.operationTask.prompt.analyze.default";
+            default -> "devloop.operationTask.prompt.default";
+        };
+    }
+
+    /** 按字段优先级读取运营配置，兼容接口迭代中保留的旧字段名。 */
+    private Object findOperationConfigValue(Map<String, Object> operationConfig, String... fieldNames) {
+        for (String fieldName : fieldNames) {
+            Object value = operationConfig.get(fieldName);
+            if (value != null && StringUtils.isNotBlank(String.valueOf(value))) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    /** 将运营配置的空值统一替换为国际化的“未配置”，避免提示词遗留空占位内容。 */
+    private String getOperationPromptValue(Map<String, Object> operationConfig, String... fieldNames) {
+        return getOperationPromptValue(findOperationConfigValue(operationConfig, fieldNames));
+    }
+
+    private String getOperationPromptValue(Object value) {
+        return value == null || StringUtils.isBlank(String.valueOf(value))
+            ? I18nUtil.get("devloop.operationTask.prompt.notConfigured")
+            : String.valueOf(value);
+    }
+
+    /** 知识整理开关使用可读文案，避免把 true/false 直接输出到运营提示词。 */
+    private String getOperationPromptBoolean(Object value) {
+        if (value == null || StringUtils.isBlank(String.valueOf(value))) {
+            return I18nUtil.get("devloop.operationTask.prompt.notConfigured");
+        }
+        return Boolean.parseBoolean(String.valueOf(value))
+            ? I18nUtil.get("devloop.operationTask.prompt.enabled")
+            : I18nUtil.get("devloop.operationTask.prompt.disabled");
+    }
+
+    /** 从整理配置中读取本体、整理要求和结构化要求；历史数据仅有 organizeTemplateId 时也可回显本体标识。 */
+    @SuppressWarnings("unchecked")
+    private String getOperationKnowledgeOrganizationValue(Map<String, Object> operationConfig, String... fieldNames) {
+        Object organization = operationConfig.get("knowledgeOrganization");
+        Map<String, Object> organizationConfig = organization instanceof Map
+            ? (Map<String, Object>) organization
+            : parseOperationConfig(organization == null ? null : String.valueOf(organization));
+        Object value = findOperationConfigValue(organizationConfig, fieldNames);
+        if (value == null && Arrays.asList(fieldNames).contains("organizeTemplateId")) {
+            value = operationConfig.get("organizeTemplateId");
+        }
+        return getOperationPromptValue(value);
+    }
+
+    /** 运营账号在提示词中优先显示账号名称，查询不到时保留原始标识以兼容历史配置。 */
+    private String resolveOperationAccountName(Object accountId) {
+        if (accountId == null || StringUtils.isBlank(String.valueOf(accountId))) {
+            return I18nUtil.get("devloop.operationTask.prompt.notConfigured");
+        }
+        try {
+            OperationAccount account = operationAccountService.findById(Long.valueOf(String.valueOf(accountId)));
+            if (account != null && StringUtils.isNotBlank(account.getAccountName())) {
+                return account.getAccountName();
+            }
+        } catch (NumberFormatException exception) {
+            // 非数字配置可能是互联网地址等直接输入值，按原值下发给数字员工。
+        }
+        return String.valueOf(accountId);
+    }
+
+    /** 采集知识库和目录优先展示资源名称；历史配置只有资源 ID 时保留原值，便于数字员工定位配置。 */
+    private String resolveOperationResourceName(Object resourceId) {
+        if (resourceId == null || StringUtils.isBlank(String.valueOf(resourceId))) {
+            return I18nUtil.get("devloop.operationTask.prompt.notConfigured");
+        }
+        try {
+            SsResource resource = ssResourceMapper.selectByResourceId(Long.valueOf(String.valueOf(resourceId)));
+            if (resource != null && StringUtils.isNotBlank(resource.getResourceName())) {
+                return resource.getResourceName();
+            }
+        } catch (NumberFormatException exception) {
+            // 非数字资源标识按原值下发，兼容目录接口可能返回的路径型历史数据。
+        }
+        return String.valueOf(resourceId);
     }
 
     /** 创建运营账号，账号仅能归属运营项目。 */

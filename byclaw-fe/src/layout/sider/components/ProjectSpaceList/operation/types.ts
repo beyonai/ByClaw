@@ -86,6 +86,17 @@ export interface OperationCollectConfig {
   schedule?: string;
   organize?: boolean;
   organizeTemplateId?: OperationIdentifier;
+  // 整理配置既支持引用已有本体，也支持为当前运营需求新建结构化要求。
+  knowledgeOrganization?: OperationKnowledgeOrganization;
+}
+
+// 新建整理模板只归属当前运营需求，结构化要求随需求 config 持久化，避免误写入平台级本体资源。
+export interface OperationKnowledgeOrganization {
+  mode: 'existing' | 'new';
+  templateId?: OperationIdentifier;
+  templateName?: string;
+  request?: string;
+  structure?: string;
 }
 
 export interface OperationContentConfig {

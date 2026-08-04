@@ -332,8 +332,12 @@ export const listOperationTasks = (data: {
 
 export const getOperationTask = (taskId: number) => POST<any>('/byaiService/devloop/operation/task/get', { taskId });
 
-export const executeOperationTask = (data: { taskId: number; agentIds: Array<string | number> }) =>
-  POST<{ taskId: number; sessionId: number }>('/byaiService/devloop/operation/task/execute', data);
+// 新流程传承接成员 ID，由后端读取其最新绑定的数字员工；agentIds 保留给旧调用方兼容使用。
+export const executeOperationTask = (data: {
+  taskId: number;
+  assigneeIds?: Array<string | number>;
+  agentIds?: Array<string | number>;
+}) => POST<{ taskId: number; sessionId: number }>('/byaiService/devloop/operation/task/execute', data);
 
 // 运营账号由项目维度独立维护，新增需求表单和账号管理大面板共用此数据源。
 export type OperationAccountPayload = {
@@ -425,7 +429,7 @@ export type DevloopTaskChanges = {
 export const getTaskChanges = (sessionId: number) =>
   POST<DevloopTaskChanges>('/byaiService/devloop/task/changes', { sessionId });
 
-// 单个文件的本地 diff(unified 文本),供 modal 逐行渲染。status: ok | no_workspace | not_git_repo | git_error。
+// 单个文件的本地 diff（unified 文本），供右侧预览抽屉逐行渲染。status: ok | no_workspace | not_git_repo | git_error。
 export type DevloopTaskFileDiff = {
   status: 'ok' | 'no_workspace' | 'not_git_repo' | 'git_error';
   filename?: string | null;

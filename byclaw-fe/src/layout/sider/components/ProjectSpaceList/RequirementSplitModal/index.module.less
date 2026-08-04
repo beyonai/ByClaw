@@ -135,6 +135,8 @@
 }
 
 .splitNodeRepo {
+  flex: 1;
+  min-width: 0;
   width: 100%;
 }
 
@@ -151,6 +153,18 @@
 
 .splitCellSelect {
   width: 100%;
+}
+
+// 拆分任务的仓库选择和新增入口保持紧凑排列，新增按钮不挤压下拉框内容。
+.splitRepositoryControl {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+}
+
+.splitRepositoryAddButton {
+  flex: 0 0 auto;
 }
 
 .splitAiTag {
@@ -184,10 +198,9 @@
 .splitRowHead,
 .splitRow {
   display: grid;
-  grid-template-columns: minmax(160px, 1.4fr) minmax(150px, 1.2fr) minmax(120px, 1fr) minmax(130px, 1fr) minmax(
-      150px,
-      1.2fr
-    ) 48px;
+  grid-template-columns:
+    minmax(160px, 1.4fr) minmax(150px, 1.2fr) minmax(120px, 1fr) minmax(130px, 1fr) minmax(150px, 1.2fr)
+    48px;
   gap: 8px;
   align-items: center;
   padding: 8px 12px;

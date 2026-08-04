@@ -34,6 +34,8 @@ interface FileSpaceBlockProps {
   expandedKeys: Key[];
   switchOptions?: { label: React.ReactNode; value: string }[];
   switchValue?: string;
+  // 外层已有统一工具栏时隐藏自身标题栏，避免同一文件列表重复出现卡片头部。
+  hideHeader?: boolean;
   compactTreePadding?: boolean;
   fillContainer?: boolean;
   resourceEmptyStyle?: boolean;
@@ -71,6 +73,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   expandedKeys,
   switchOptions,
   switchValue,
+  hideHeader = false,
   compactTreePadding = false,
   fillContainer = false,
   resourceEmptyStyle = false,
@@ -168,25 +171,27 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
         .filter(Boolean)
         .join(' ')}
     >
-      <div className={styles.fileSpaceHeader}>
-        <span className={styles.fileSpaceTitle}>{title}</span>
-        {!!switchOptions?.length && (
-          <Segmented
-            size="small"
-            value={switchValue}
-            options={switchOptions}
-            className={styles.fileSpaceSegmented}
-            onChange={(value) => onSwitchChange?.(`${value}`)}
-          />
-        )}
-        {typeof count === 'number' && <span className={styles.fileSpaceCount}>{count}</span>}
-        {headerExtra}
-        {onRefresh && (
-          <button type="button" className={styles.fileSpaceRefresh} onClick={onRefresh} aria-label="refresh">
-            <ReloadOutlined spin={loading} />
-          </button>
-        )}
-      </div>
+      {!hideHeader && (
+        <div className={styles.fileSpaceHeader}>
+          <span className={styles.fileSpaceTitle}>{title}</span>
+          {!!switchOptions?.length && (
+            <Segmented
+              size="small"
+              value={switchValue}
+              options={switchOptions}
+              className={styles.fileSpaceSegmented}
+              onChange={(value) => onSwitchChange?.(`${value}`)}
+            />
+          )}
+          {typeof count === 'number' && <span className={styles.fileSpaceCount}>{count}</span>}
+          {headerExtra}
+          {onRefresh && (
+            <button type="button" className={styles.fileSpaceRefresh} onClick={onRefresh} aria-label="refresh">
+              <ReloadOutlined spin={loading} />
+            </button>
+          )}
+        </div>
+      )}
       <div className={`${styles.fileSpacePrimaryContent} ${showAlternateContent ? styles.fileSpaceContentHidden : ''}`}>
         {contentBefore}
         {groups ? (

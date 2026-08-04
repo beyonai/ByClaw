@@ -577,6 +577,13 @@
   display: flex;
   flex-direction: column;
 
+  // 项目资源的“全部会话”会渲染多个分组，列表在统一内容区内滚动而不撑破详情页。
+  .fileSpaceGroupList {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
   .fileSpaceTreeWrap {
     flex: 1;
     min-height: 0;
