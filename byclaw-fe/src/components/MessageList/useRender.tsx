@@ -56,10 +56,12 @@ export default function useRender({
   updateMessage,
   deleteMessage,
   sessionId,
+  captureRequirementProjectId,
 }: {
   updateMessage: (message: IMessage) => IMessage;
   deleteMessage: (message: IMessage) => void;
   sessionId?: string;
+  captureRequirementProjectId?: number;
 }) {
   const { ModalNode, setOpen, setMyContent, setMyTitle } = useModal({});
 
@@ -191,7 +193,12 @@ export default function useRender({
                   {/* <Memory msg={msg} /> */}
                 </>
               )}
-              <MoreActions deleteMessage={deleteMessage} msg={msg} showTroubleshoot />
+              <MoreActions
+                deleteMessage={deleteMessage}
+                msg={msg}
+                showTroubleshoot
+                captureRequirementProjectId={captureRequirementProjectId}
+              />
               {[IMessageState.Done, IMessageState.Cancel].includes(messageState) && (
                 <ThumbUp updateMessage={updateMessage} msg={msg} />
               )}
@@ -201,7 +208,7 @@ export default function useRender({
         </div>
       );
     },
-    [deleteMessage, updateMessage, canRefrence]
+    [deleteMessage, updateMessage, canRefrence, captureRequirementProjectId]
   );
 
   const uploadFileRender = useCallback((fileList?: IFile[], msg?: IMessage) => {

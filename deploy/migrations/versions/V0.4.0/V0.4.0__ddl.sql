@@ -364,3 +364,123 @@ COMMENT ON COLUMN byai_project_account_work.create_time IS '创建时间';
 COMMENT ON COLUMN byai_project_account_work.update_by IS '更新人';
 COMMENT ON COLUMN byai_project_account_work.update_time IS '更新时间';
 COMMENT ON COLUMN byai_project_account_work.status_cd IS '状态：00A-有效 / 00X-无效';
+
+-- 默认数字员工:三种固定角色(架构/代码/测试)的兜底员工配置。
+-- 作用域用 project_id 区分:project_id=0 为全局默认行,>0 为该项目的覆盖行。
+-- 项目某角色列为空 => 该角色回退到全局默认;全局也为空 => 未配置。
+-- 单表两级(global+override)在读取时合并,避免层级表与自关联;冗余存 *_agent_name 供展示,改名不即时失效由上层刷新。
+CREATE TABLE IF NOT EXISTS byai.byai_default_agent (
+    id                  BIGINT          NOT NULL,
+    project_id          BIGINT          NOT NULL DEFAULT 0,
+    architect_agent_id  VARCHAR(64),
+    architect_agent_name VARCHAR(200),
+    coder_agent_id      VARCHAR(64),
+    coder_agent_name    VARCHAR(200),
+    tester_agent_id     VARCHAR(64),
+    tester_agent_name   VARCHAR(200),
+    create_by           BIGINT,
+    create_time         TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    update_by           BIGINT,
+    update_time         TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    delete_flag         CHAR(1)         DEFAULT '0',
+    CONSTRAINT pk_byai_default_agent PRIMARY KEY (id)
+);
+COMMENT ON TABLE byai.byai_default_agent IS '默认数字员工表:架构/代码/测试三角色的兜底员工;project_id=0为全局默认,>0为项目覆盖';
+COMMENT ON COLUMN byai.byai_default_agent.id IS '主键ID';
+COMMENT ON COLUMN byai.byai_default_agent.project_id IS '作用域:0全局默认行,>0该研发项目覆盖行 byai_project.project_id';
+COMMENT ON COLUMN byai.byai_default_agent.architect_agent_id IS '架构数字员工ID(资源ID);空表示该角色回退全局默认';
+COMMENT ON COLUMN byai.byai_default_agent.architect_agent_name IS '架构数字员工名称(冗余展示)';
+COMMENT ON COLUMN byai.byai_default_agent.coder_agent_id IS '代码数字员工ID(资源ID);空表示该角色回退全局默认';
+COMMENT ON COLUMN byai.byai_default_agent.coder_agent_name IS '代码数字员工名称(冗余展示)';
+COMMENT ON COLUMN byai.byai_default_agent.tester_agent_id IS '测试数字员工ID(资源ID);空表示该角色回退全局默认';
+COMMENT ON COLUMN byai.byai_default_agent.tester_agent_name IS '测试数字员工名称(冗余展示)';
+COMMENT ON COLUMN byai.byai_default_agent.create_by IS '创建人';
+COMMENT ON COLUMN byai.byai_default_agent.create_time IS '创建时间';
+COMMENT ON COLUMN byai.byai_default_agent.update_by IS '更新人';
+COMMENT ON COLUMN byai.byai_default_agent.update_time IS '更新时间';
+COMMENT ON COLUMN byai.byai_default_agent.delete_flag IS '删除标记 0正常 1删除';
+-- 每个作用域仅一行有效配置(全局或某项目),按 project_id 唯一(仅未删除行)。
+CREATE UNIQUE INDEX IF NOT EXISTS uk_default_agent_project ON byai.byai_default_agent (project_id) WHERE delete_flag = '0';
+
+-- ==========================================================================
+-- 独立测试数字员工配置表:需求级集成的「谁测/何时测/失败怎么打回」总开关(项目级唯一)。
+-- 执行员工不在此表,统一取全局「测试数字员工」默认(byai_default_agent 解析),此处只存节流/准入/打回策略。
+-- 扁平列对齐前端 TesterConfig(schedule/admission/kickback 三组);每项目仅一行有效配置,upsert。
+-- ==========================================================================
+CREATE TABLE IF NOT EXISTS byai.byai_tester_config (
+    id                          BIGINT          NOT NULL,
+    project_id                  BIGINT          NOT NULL,
+    enabled                     CHAR(1)         DEFAULT '1',
+    cron                        VARCHAR(64),
+    cron_label                  VARCHAR(64),
+    timezone                    VARCHAR(64)     DEFAULT 'Asia/Shanghai',
+    require_all_coded           CHAR(1)         DEFAULT '1',
+    max_concurrent_reqs         INTEGER         DEFAULT 2,
+    auto_attribute              CHAR(1)         DEFAULT '1',
+    create_defect_when_unclear  CHAR(1)         DEFAULT '1',
+    max_rounds                  INTEGER         DEFAULT 3,
+    create_by                   BIGINT,
+    create_time                 TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    update_by                   BIGINT,
+    update_time                 TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    delete_flag                 CHAR(1)         DEFAULT '0',
+    CONSTRAINT pk_byai_tester_config PRIMARY KEY (id)
+);
+COMMENT ON TABLE byai.byai_tester_config IS '独立测试数字员工配置表:需求级集成的定时节流+就绪准入+失败打回策略;每研发项目一行,执行员工取全局测试默认';
+COMMENT ON COLUMN byai.byai_tester_config.id IS '主键ID';
+COMMENT ON COLUMN byai.byai_tester_config.project_id IS '所属研发项目ID byai_project.project_id';
+COMMENT ON COLUMN byai.byai_tester_config.enabled IS '是否启用定时批量集成 1启用 0停用(停用退回人工触发)';
+COMMENT ON COLUMN byai.byai_tester_config.cron IS '标准5段cron,决定「多久看一次」,如 0 2 * * *';
+COMMENT ON COLUMN byai.byai_tester_config.cron_label IS 'cron人话展示,如 每日 02:00';
+COMMENT ON COLUMN byai.byai_tester_config.timezone IS '计算下次运行的时区,如 Asia/Shanghai';
+COMMENT ON COLUMN byai.byai_tester_config.require_all_coded IS '就绪门禁:需求下所有子任务都coded才纳入本轮 1是 0否';
+COMMENT ON COLUMN byai.byai_tester_config.max_concurrent_reqs IS '单轮最多并行几个需求的E2E,防打满集成环境';
+COMMENT ON COLUMN byai.byai_tester_config.auto_attribute IS '失败按依赖图自动归因并打回责任任务编码环节 1是 0否';
+COMMENT ON COLUMN byai.byai_tester_config.create_defect_when_unclear IS '归因不清时新建集成缺陷任务 1是 0否';
+COMMENT ON COLUMN byai.byai_tester_config.max_rounds IS '同一需求最多自动打回轮次,超过升级人工介入';
+COMMENT ON COLUMN byai.byai_tester_config.create_by IS '创建人';
+COMMENT ON COLUMN byai.byai_tester_config.create_time IS '创建时间';
+COMMENT ON COLUMN byai.byai_tester_config.update_by IS '更新人';
+COMMENT ON COLUMN byai.byai_tester_config.update_time IS '更新时间';
+COMMENT ON COLUMN byai.byai_tester_config.delete_flag IS '删除标记 0正常 1删除';
+-- 每个项目仅一行有效配置,按 project_id 唯一(仅未删除行)。
+CREATE UNIQUE INDEX IF NOT EXISTS uk_tester_config_project ON byai.byai_tester_config (project_id) WHERE delete_flag = '0';
+
+-- 研发需求拆解为多仓库子任务,支撑需求级批量集成:一个 scan_log_item 可跨多个仓库各起一个会话。
+-- 需求就绪=其下所有子任务的 coder 环节 done;每子任务的环节由 DevloopPhaseService 从会话消息实时投影,不落库。
+CREATE TABLE IF NOT EXISTS byai.byai_scan_item_task (
+    task_id         BIGINT       NOT NULL,
+    requirement_id  BIGINT       NOT NULL,
+    project_id      BIGINT       NOT NULL,
+    repo_id         BIGINT,
+    session_id      BIGINT,
+    status          VARCHAR(20)  NOT NULL DEFAULT 'pending',
+    create_by       BIGINT,
+    create_time     TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    update_by       BIGINT,
+    update_time     TIMESTAMP,
+    delete_flag     CHAR(1)      DEFAULT '0',
+    CONSTRAINT pk_byai_scan_item_task PRIMARY KEY (task_id)
+);
+
+COMMENT ON TABLE byai.byai_scan_item_task IS '研发需求子任务表:一条研发需求(byai_scan_log_item)拆到多个仓库各一个会话,支撑需求级就绪批量集成';
+COMMENT ON COLUMN byai.byai_scan_item_task.task_id IS '子任务ID';
+COMMENT ON COLUMN byai.byai_scan_item_task.requirement_id IS '来源研发需求ID byai_scan_log_item.item_id';
+COMMENT ON COLUMN byai.byai_scan_item_task.project_id IS '所属研发项目ID byai_project.project_id';
+COMMENT ON COLUMN byai.byai_scan_item_task.repo_id IS '目标仓库ID byai_project_repo.repo_id;单仓库需求可空';
+COMMENT ON COLUMN byai.byai_scan_item_task.session_id IS '执行该仓库工作的会话ID byai_session.session_id;启动前为空';
+COMMENT ON COLUMN byai.byai_scan_item_task.status IS '子任务状态 pending待启动/running进行中/done完成/failed失败';
+COMMENT ON COLUMN byai.byai_scan_item_task.create_time IS '创建时间';
+COMMENT ON COLUMN byai.byai_scan_item_task.delete_flag IS '删除标记 0正常 1删除';
+
+-- 同一需求同一仓库只保留一条有效子任务(仅未删除行)。
+CREATE UNIQUE INDEX IF NOT EXISTS uk_scan_item_task_req_repo ON byai.byai_scan_item_task (requirement_id, repo_id) WHERE delete_flag = '0';
+CREATE INDEX IF NOT EXISTS idx_scan_item_task_project ON byai.byai_scan_item_task (project_id, create_time DESC);
+CREATE INDEX IF NOT EXISTS idx_scan_item_task_session ON byai.byai_scan_item_task (session_id);
+
+-- 集成执行记录挂上需求维度:需求级批量把每个 run 关联到触发它的需求,聚合看板与失败打回按此反查。
+ALTER TABLE byai.byai_integration_run ADD COLUMN IF NOT EXISTS requirement_id BIGINT;
+COMMENT ON COLUMN byai.byai_integration_run.requirement_id IS '触发本次执行的研发需求ID byai_scan_log_item.item_id;人工单套件执行可空';
+CREATE INDEX IF NOT EXISTS idx_integration_run_requirement ON byai.byai_integration_run (requirement_id, create_time DESC);
+ALTER TABLE byai.byai_integration_run ADD COLUMN IF NOT EXISTS kickback_at TIMESTAMP;
+COMMENT ON COLUMN byai.byai_integration_run.kickback_at IS '失败打回引擎处理本次执行的时间;非空表示已处理(驱动重工或建缺陷),幂等去重用';

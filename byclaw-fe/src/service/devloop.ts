@@ -560,3 +560,57 @@ export const getIntegrationRun = (runId: string | number) =>
 
 export const listIntegrationRuns = (suiteId: number) =>
   POST<any[]>('/byaiService/devloop/integration/run/list', { suiteId });
+
+// 需求级集成聚合看板:项目下已拆解需求按「需求→多仓库任务」组装,含就绪状态、最近执行结果与打回记录。
+export const listRequirementIntegrations = (projectId: number) =>
+  POST<any[]>('/byaiService/devloop/integration/requirements', { projectId });
+
+// ===== 默认数字员工 =====
+// 三角色(架构/代码/测试)兜底员工:projectId 缺省=全局默认,>0=项目覆盖。
+export type DefaultAgentConfig = {
+  projectId?: number;
+  architectAgentId?: string;
+  architectAgentName?: string;
+  coderAgentId?: string;
+  coderAgentName?: string;
+  testerAgentId?: string;
+  testerAgentName?: string;
+};
+
+// 查某作用域原始配置(全局或某项目覆盖)。projectId 缺省查全局默认。
+export const getDefaultAgent = (projectId?: number) =>
+  POST<DefaultAgentConfig>('/byaiService/devloop/default-agent/get', { projectId });
+
+// 解析项目各角色生效员工(项目覆盖合并到全局默认之上)。
+export const resolveDefaultAgent = (projectId?: number) =>
+  POST<DefaultAgentConfig>('/byaiService/devloop/default-agent/resolve', { projectId });
+
+// 保存某作用域配置(每作用域唯一,后端 upsert)。
+export const saveDefaultAgent = (data: DefaultAgentConfig) =>
+  POST<void>('/byaiService/devloop/default-agent/save', data);
+
+// ===== 独立测试数字员工配置 =====
+// 需求级集成的定时节流+就绪准入+失败打回策略,每项目一行;执行员工统一取全局测试默认(resolveDefaultAgent)。
+// 结构对齐前端 TesterConfig(enabled/schedule/admission/kickback),后端与扁平列互转。
+export type TesterConfigPayload = {
+  projectId: number;
+  enabled: boolean;
+  schedule: { cron: string; cronLabel: string; timezone: string };
+  admission: { requireAllCoded: boolean; maxConcurrentReqs: number };
+  kickback: { autoAttribute: boolean; createDefectWhenUnclear: boolean; maxRounds: number };
+};
+
+// 查项目配置;后端无记录时回填出厂默认,前端始终拿到完整可编辑配置。
+export const getTesterConfig = (projectId: number) =>
+  POST<TesterConfigPayload>('/byaiService/devloop/tester-config/get', { projectId });
+
+// 保存项目配置(每项目唯一,后端 upsert)。
+export const saveTesterConfig = (data: TesterConfigPayload) =>
+  POST<void>('/byaiService/devloop/tester-config/save', data);
+
+// 手动触发一次项目批量集成:对项目下所有启用用例集 × 指定环境各起一次真实 run,返回 runId 列表。
+export const runTesterBatch = (projectId: number, envId: number) =>
+  POST<{ runIds: Array<string | number>; suiteCount: number }>('/byaiService/devloop/tester-config/run', {
+    projectId,
+    envId,
+  });

@@ -22,7 +22,7 @@ import {
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import { getStoredProjectScopeId, saveProjectScopeIdToStorage } from '@/pages/projectSpace/constants';
-import { saveProjectMembers } from '@/service/devloop';
+import { saveDefaultAgent, saveProjectMembers } from '@/service/devloop';
 import { SiderContentContext } from '../../siderContentContext';
 import DialogueCard from '../DialogueList/DialogueCard';
 import ProjectDetailPanel from './ProjectDetailModal';
@@ -999,6 +999,12 @@ const ProjectSpaceList: React.FC = () => {
           await syncProjectShareMembers(createdProjectId, shareMembers);
         }
         message.success(t('message.createSuccess'));
+      }
+      // 仅研发项目落库默认员工覆盖(项目作用域,projectId>0);后端 upsert,空串角色即清除该覆盖回退全局。
+      // 运营/普通项目不显示该区块,也不写空覆盖行。
+      const savedProjectId = editingProject ? editingProject.projectId : createdProjectId;
+      if (savedProjectId && submitIsDevelopProject && values.defaultAgents) {
+        await saveDefaultAgent({ ...values.defaultAgents, projectId: Number(savedProjectId) });
       }
       setProjectModalOpen(false);
       setEditingProject(undefined);

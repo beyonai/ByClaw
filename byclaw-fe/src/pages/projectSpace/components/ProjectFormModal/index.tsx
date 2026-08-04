@@ -7,6 +7,16 @@ import { listProjectMembers } from '@/service/devloop';
 import { DEFAULT_PROJECT_TYPE_OPTION, PROJECT_TYPE_OPTIONS } from '../../constants';
 import type { ProjectTypeOption } from '../../hooks/useProjectTypeConfig';
 import type { ProjectSpace } from '../../types';
+import { getDefaultAgent, type DefaultAgentConfig } from '@/service/devloop';
+import { useDigitalEmployeeOptions } from '../../hooks/useDigitalEmployeeOptions';
+import {
+  DEFAULT_AGENT_ROLES,
+  assignmentToPayload,
+  configToAssignment,
+  emptyAssignment,
+  type DefaultAgentAssignment,
+  type DefaultAgentRole,
+} from '../../defaultAgents';
 import styles from './index.module.less';
 
 export interface ProjectShareMember {
@@ -28,6 +38,8 @@ export interface ProjectFormValues {
   sharedFlag: boolean;
   shareMembers?: ProjectShareMember[];
   shareMembersLoaded?: boolean;
+  // 每项目默认数字员工覆盖(架构/代码/测试)已解析为后端保存入参;空值角色代表沿用全局默认。
+  defaultAgents?: DefaultAgentConfig;
 }
 
 interface Props {
@@ -86,6 +98,10 @@ const ProjectFormModal: React.FC<Props> = ({
   const [selectedShareMembers, setSelectedShareMembers] = useState<ProjectShareMember[]>([]);
   const [shareMembersLoading, setShareMembersLoading] = useState(false);
   const [shareMembersLoaded, setShareMembersLoaded] = useState(false);
+  // 每项目默认数字员工覆盖:弹窗打开时加载可选员工 + 该项目已存覆盖 + 全局默认(placeholder 提示)。
+  const [projectDefaultAgents, setProjectDefaultAgentsDraft] = useState<DefaultAgentAssignment>(emptyAssignment());
+  const [globalDefaultAgents, setGlobalDefaultAgents] = useState<DefaultAgentConfig>({});
+  const { options: agentOptions, loading: agentOptionsLoading } = useDigitalEmployeeOptions(open);
   const currentUserId = userInfo.userId ?? userInfo.id;
   const currentUserCode = userInfo.userCode;
   const currentUserName = userInfo.userName || userInfo.userNickName || userInfo.nickName || currentUserCode;
@@ -183,6 +199,33 @@ const ProjectFormModal: React.FC<Props> = ({
     setSelectedShareMembers((formInitialValues.shareMembers || []).map(normalizeProjectShareMember));
     setShareMembersLoaded(!projectId);
   }, [form, formInitialValues, normalizeProjectShareMember, open, projectId]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    // 全局默认给 placeholder 用;编辑项目再拉该项目的覆盖行回显(新建项目无覆盖,留空即全部回退全局)。
+    getDefaultAgent()
+      .then((config) => {
+        if (!cancelled) setGlobalDefaultAgents(config || {});
+      })
+      .catch(() => {
+        if (!cancelled) setGlobalDefaultAgents({});
+      });
+    if (projectId) {
+      getDefaultAgent(Number(projectId))
+        .then((config) => {
+          if (!cancelled) setProjectDefaultAgentsDraft(configToAssignment(config));
+        })
+        .catch(() => {
+          if (!cancelled) setProjectDefaultAgentsDraft(emptyAssignment());
+        });
+    } else {
+      setProjectDefaultAgentsDraft(emptyAssignment());
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [open, projectId]);
 
   useEffect(() => {
     if (!open || projectId || !visibleProjectTypeOptions.length) return;
@@ -319,6 +362,9 @@ const ProjectFormModal: React.FC<Props> = ({
     handleModalOk();
   };
 
+  const agentSelectOptions = agentOptions.map((option) => ({ value: option.value, label: option.label }));
+  const agentLabelById = new Map(agentOptions.map((option) => [option.value, option.label]));
+
   const handleSubmit = (values: ProjectFormValues) => {
     const submitIsDevelopProject = isDevelopProjectEnabled && values.projectType === 'develop';
     const submitIsOperationProject = values.projectType === 'operation';
@@ -333,7 +379,22 @@ const ProjectFormModal: React.FC<Props> = ({
       sharedFlag: submitSharedFlag,
       shareMembers: submitSharedFlag ? selectedShareMembers : [],
       shareMembersLoaded,
+      // 解析为后端入参并冗余带上员工名(展示列);projectId 由父级在保存时补上。
+      defaultAgents: assignmentToPayload(projectDefaultAgents, agentLabelById),
     });
+  };
+
+  // 未为该角色指定项目覆盖时,占位提示当前生效的全局默认员工(优先冗余名,退选项名,再退id;无则提示未配置)。
+  const globalDefaultLabel = (role: DefaultAgentRole) => {
+    const idKey = `${role}AgentId` as keyof DefaultAgentConfig;
+    const nameKey = `${role}AgentName` as keyof DefaultAgentConfig;
+    const globalId = (globalDefaultAgents[idKey] as string) || '';
+    if (!globalId) return formT('defaultAgent.globalUnset');
+    const name = (globalDefaultAgents[nameKey] as string) || agentLabelById.get(globalId) || globalId;
+    return formT('defaultAgent.globalPrefix') + name;
+  };
+  const handleDefaultAgentChange = (role: DefaultAgentRole, value?: string) => {
+    setProjectDefaultAgentsDraft((prev) => ({ ...prev, [role]: value || '' }));
   };
 
   return (
@@ -448,6 +509,29 @@ const ProjectFormModal: React.FC<Props> = ({
                   </Button>
                 </div>
               </Spin>
+            </div>
+          </Form.Item>
+        )}
+        {isDevelopProject && (
+          <Form.Item label={formT('field.defaultAgents')}>
+            {/* 默认数字员工仅研发项目可配:三种角色(架构/代码/测试)各可单独指定,留空回退全局默认。 */}
+            <div className={styles.defaultAgentField}>
+              {DEFAULT_AGENT_ROLES.map((role) => (
+                <div className={styles.defaultAgentRow} key={role}>
+                  <span className={styles.defaultAgentLabel}>{formT(`defaultAgent.role.${role}`)}</span>
+                  <Select
+                    className={styles.defaultAgentSelect}
+                    value={projectDefaultAgents[role] || undefined}
+                    options={agentSelectOptions}
+                    loading={agentOptionsLoading}
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder={globalDefaultLabel(role)}
+                    onChange={(value?: string) => handleDefaultAgentChange(role, value)}
+                  />
+                </div>
+              ))}
             </div>
           </Form.Item>
         )}

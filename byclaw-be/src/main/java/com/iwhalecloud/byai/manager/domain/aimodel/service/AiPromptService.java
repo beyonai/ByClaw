@@ -31,4 +31,15 @@ public class AiPromptService {
         return aiPromptMapper.selectList(queryWrapper);
     }
 
+    /**
+     * 按 prompt_code 取中文提示词模板；无记录返回 null，交由调用方走内置兜底。
+     * 研发闭环提示词从 byai_system_config 迁至本表后的唯一读取入口。
+     */
+    public String findZhTemplateByCode(String promptCode) {
+        LambdaQueryWrapper<AiPrompt> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(AiPrompt::getPromptCode, promptCode).last("limit 1");
+        AiPrompt prompt = aiPromptMapper.selectOne(queryWrapper);
+        return prompt == null ? null : prompt.getPromptZhTemplate();
+    }
+
 }

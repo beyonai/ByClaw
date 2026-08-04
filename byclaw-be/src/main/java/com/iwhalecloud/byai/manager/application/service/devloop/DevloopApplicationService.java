@@ -29,6 +29,8 @@ import com.iwhalecloud.byai.manager.dto.devloop.OperationTaskDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationEnvDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationSuiteDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.DefaultAgentDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.TesterConfigDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
@@ -53,6 +55,7 @@ import com.iwhalecloud.byai.state.domain.chat.dto.MultiAgentMetadata;
 import com.iwhalecloud.byai.state.domain.chat.service.AssistantChatService;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
+import com.iwhalecloud.byai.manager.domain.aimodel.service.AiPromptService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.common.util.threadPoolUti.ThreadPoolUtil;
@@ -150,7 +153,19 @@ public class DevloopApplicationService {
     private IntegrationSuiteService integrationSuiteService;
 
     @Autowired
+    private DefaultAgentService defaultAgentService;
+
+    @Autowired
     private IntegrationRunService integrationRunService;
+
+    @Autowired
+    private TesterConfigService testerConfigService;
+
+    @Autowired
+    private ScanItemTaskService scanItemTaskService;
+
+    @Autowired
+    private DevloopPhaseService devloopPhaseService;
 
     @Autowired
     private DangerousScriptGuard dangerousScriptGuard;
@@ -214,6 +229,9 @@ public class DevloopApplicationService {
 
     @Autowired
     private ByaiSystemConfigService byaiSystemConfigService;
+
+    @Autowired
+    private AiPromptService aiPromptService;
 
     @Autowired
     private UserBucketNamingService userBucketNamingService;
@@ -579,6 +597,566 @@ public class DevloopApplicationService {
         map.put("createByName", resolveUserName(s.getCreateBy()));
         map.put("createTime", s.getCreateTime());
         return map;
+    }
+
+    // ========== 默认数字员工 ==========
+
+    /** 查询某作用域(projectId 缺省/0=全局默认,>0=项目覆盖)的原始配置。 */
+    public ResponseUtil<Map<String, Object>> getDefaultAgent(Long projectId) {
+        DefaultAgent entity = defaultAgentService.findByScope(projectId);
+        return ResponseUtil.successResponse(defaultAgentToVo(entity, projectId));
+    }
+
+    /** 查询项目各角色生效的默认员工(项目覆盖合并到全局默认之上)。 */
+    public ResponseUtil<Map<String, Object>> resolveDefaultAgent(Long projectId) {
+        DefaultAgent merged = defaultAgentService.resolveForProject(projectId);
+        return ResponseUtil.successResponse(defaultAgentToVo(merged, projectId));
+    }
+
+    /** 保存某作用域默认员工配置(每作用域唯一,upsert)。 */
+    public ResponseUtil<Void> saveDefaultAgent(DefaultAgentDTO dto) {
+        DefaultAgent entity = new DefaultAgent();
+        entity.setProjectId(dto.getProjectId());
+        entity.setArchitectAgentId(dto.getArchitectAgentId());
+        entity.setArchitectAgentName(dto.getArchitectAgentName());
+        entity.setCoderAgentId(dto.getCoderAgentId());
+        entity.setCoderAgentName(dto.getCoderAgentName());
+        entity.setTesterAgentId(dto.getTesterAgentId());
+        entity.setTesterAgentName(dto.getTesterAgentName());
+        defaultAgentService.save(entity, CurrentUserHolder.getCurrentUserId());
+        return ResponseUtil.successResponse(null);
+    }
+
+    /** 实体 → VO;entity 为空时返回各角色为空的占位,前端按空处理为未配置。 */
+    private Map<String, Object> defaultAgentToVo(DefaultAgent entity, Long projectId) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("projectId", entity != null && entity.getProjectId() != null ? entity.getProjectId() : projectId);
+        map.put("architectAgentId", entity == null ? null : entity.getArchitectAgentId());
+        map.put("architectAgentName", entity == null ? null : entity.getArchitectAgentName());
+        map.put("coderAgentId", entity == null ? null : entity.getCoderAgentId());
+        map.put("coderAgentName", entity == null ? null : entity.getCoderAgentName());
+        map.put("testerAgentId", entity == null ? null : entity.getTesterAgentId());
+        map.put("testerAgentName", entity == null ? null : entity.getTesterAgentName());
+        return map;
+    }
+
+    // ========== 独立测试数字员工配置 ==========
+
+    /** 查询项目的独立测试员工配置;无记录回填出厂默认,前端始终拿到完整可编辑配置。 */
+    public ResponseUtil<Map<String, Object>> getTesterConfig(Long projectId) {
+        TesterConfig entity = testerConfigService.findByProject(projectId);
+        return ResponseUtil.successResponse(testerConfigToVo(entity, projectId));
+    }
+
+    /** 保存项目的独立测试员工配置(每项目唯一,upsert)。 */
+    public ResponseUtil<Void> saveTesterConfig(TesterConfigDTO dto) {
+        TesterConfig entity = new TesterConfig();
+        entity.setProjectId(dto.getProjectId());
+        entity.setEnabled(boolToFlag(dto.getEnabled(), "1"));
+        TesterConfigDTO.Schedule schedule = dto.getSchedule();
+        entity.setCron(schedule == null ? null : schedule.getCron());
+        entity.setCronLabel(schedule == null ? null : schedule.getCronLabel());
+        entity.setTimezone(schedule == null || schedule.getTimezone() == null ? "Asia/Shanghai" : schedule.getTimezone());
+        TesterConfigDTO.Admission admission = dto.getAdmission();
+        entity.setRequireAllCoded(boolToFlag(admission == null ? null : admission.getRequireAllCoded(), "1"));
+        entity.setMaxConcurrentReqs(admission == null || admission.getMaxConcurrentReqs() == null
+            ? 2 : admission.getMaxConcurrentReqs());
+        TesterConfigDTO.Kickback kickback = dto.getKickback();
+        entity.setAutoAttribute(boolToFlag(kickback == null ? null : kickback.getAutoAttribute(), "1"));
+        entity.setCreateDefectWhenUnclear(boolToFlag(kickback == null ? null : kickback.getCreateDefectWhenUnclear(), "1"));
+        entity.setMaxRounds(kickback == null || kickback.getMaxRounds() == null ? 3 : kickback.getMaxRounds());
+        testerConfigService.save(entity, CurrentUserHolder.getCurrentUserId());
+        return ResponseUtil.successResponse(null);
+    }
+
+    /**
+     * 手动触发一次项目批量集成:对项目下所有「启用」用例集 × 指定环境各起一次真实 run,秒回 runId 列表。
+     * 需求级就绪批量与失败打回属 V2 引擎,尚未落地;当前手动执行复用单套件 startRun 原语覆盖全部启用套件。
+     */
+    public ResponseUtil<Map<String, Object>> runTesterBatch(Long projectId, Long envId) {
+        List<IntegrationSuite> enabledSuites = integrationSuiteService.listByProjectId(projectId).stream()
+            .filter(s -> "1".equals(s.getEnabled()))
+            .collect(java.util.stream.Collectors.toList());
+        if (enabledSuites.isEmpty()) {
+            return ResponseUtil.fail("项目下没有启用的测试用例集");
+        }
+        Long operatorId = CurrentUserHolder.getCurrentUserId();
+        List<Long> runIds = new java.util.ArrayList<>();
+        for (IntegrationSuite suite : enabledSuites) {
+            IntegrationRun run = integrationRunService.startRun(suite.getSuiteId(), envId, operatorId);
+            runIds.add(run.getRunId());
+        }
+        Map<String, Object> result = new HashMap<>();
+        result.put("runIds", runIds);
+        result.put("suiteCount", enabledSuites.size());
+        return ResponseUtil.successResponse(result);
+    }
+
+    /**
+     * 需求级集成聚合看板:把项目下已拆解的需求(scan_item_task)按 (需求→多仓库任务) 组装成前端 RequirementIntegration[]。
+     * 环节/coded 由 DevloopPhaseService 从会话消息实时投影;需求就绪 = 其下所有子任务 coder 环节 done;
+     * 最近一次集成结果按 requirement_id 反查 integration_run;打回记录来自各会话真实的 [PHASE] REJECT 打点。
+     */
+    public ResponseUtil<List<Map<String, Object>>> listRequirementIntegrations(Long projectId) {
+        List<ScanItemTask> tasks = scanItemTaskService.listByProject(projectId);
+        if (tasks.isEmpty()) {
+            return ResponseUtil.successResponse(new ArrayList<>());
+        }
+        // 需求→子任务分组;保序(listByProject 已按 createTime 升序),让看板需求顺序稳定。
+        Map<Long, List<ScanItemTask>> tasksByReq = new LinkedHashMap<>();
+        for (ScanItemTask t : tasks) {
+            tasksByReq.computeIfAbsent(t.getRequirementId(), k -> new ArrayList<>()).add(t);
+        }
+        // 该项目所有挂需求的执行,一次取尽后按需求取最新,避免逐需求查库。
+        Map<Long, IntegrationRun> latestRunByReq = new HashMap<>();
+        for (IntegrationRun run : integrationRunService.listWithRequirementByProject(projectId)) {
+            latestRunByReq.putIfAbsent(run.getRequirementId(), run);
+        }
+        // 单轮内存缓存 sessionId→快照:同一会话在就绪判定与环节展示间只投影一次。
+        Map<Long, DevloopPhaseService.PhaseSnapshot> snapshotCache = new HashMap<>();
+        List<Map<String, Object>> board = new ArrayList<>();
+        for (Map.Entry<Long, List<ScanItemTask>> entry : tasksByReq.entrySet()) {
+            ScanRequireItem item = scanRequireItemMapper.selectById(entry.getKey());
+            if (item == null) {
+                continue;
+            }
+            board.add(requirementIntegrationToVo(item, entry.getValue(), latestRunByReq.get(entry.getKey()),
+                snapshotCache));
+        }
+        return ResponseUtil.successResponse(board);
+    }
+
+    /** 一个需求 + 其子任务 + 最近执行 → 前端 RequirementIntegration。 */
+    private Map<String, Object> requirementIntegrationToVo(ScanRequireItem item, List<ScanItemTask> tasks,
+        IntegrationRun latestRun, Map<Long, DevloopPhaseService.PhaseSnapshot> snapshotCache) {
+        List<Map<String, Object>> taskVos = new ArrayList<>();
+        List<Map<String, Object>> kickbackTasks = new ArrayList<>();
+        boolean allCoded = true;
+        for (ScanItemTask task : tasks) {
+            DevloopPhaseService.PhaseSnapshot snap = snapshotFor(task.getSessionId(), snapshotCache);
+            ProjectRepo repo = task.getRepoId() != null ? projectRepoMapper.selectById(task.getRepoId()) : null;
+            String repoName = repo != null && repo.getRepoFullName() != null ? repo.getRepoFullName() : "";
+            String branch = task.getSessionId() != null
+                ? buildBranchName(detectTaskType(item, item.getTitle()), task.getSessionId()) : "";
+            boolean coded = isPhaseDone(snap, "coder");
+            allCoded = allCoded && coded;
+            taskVos.add(requirementTaskToVo(task, repoName, branch, snap, coded));
+            appendKickback(kickbackTasks, snap, repoName, branch);
+        }
+        String status = deriveReqIntegrationStatus(allCoded, latestRun);
+        Map<String, Object> map = new HashMap<>();
+        map.put("reqId", String.valueOf(item.getItemId()));
+        map.put("reqNo", StringUtils.defaultString(item.getOriginId(), String.valueOf(item.getItemId())));
+        map.put("reqName", StringUtils.defaultString(item.getTitle()));
+        map.put("tasks", taskVos);
+        map.put("status", status);
+        // 轮次 = 最近执行的打回轮次(打回一次 +1);无执行为 0。
+        map.put("round", latestRun != null && latestRun.getKickbackTo() != null && !latestRun.getKickbackTo().isEmpty()
+            ? maxRound(tasks, snapshotCache) : (latestRun != null ? 1 : 0));
+        map.put("lastRunId", latestRun != null ? String.valueOf(latestRun.getRunId()) : "");
+        map.put("lastRunAt", latestRun != null ? formatDateTime(latestRun.getCreateTime()) : "");
+        map.put("passRate", latestRun != null && nvl(latestRun.getTotal()) > 0
+            ? nvl(latestRun.getPassed()) + "/" + nvl(latestRun.getTotal()) : "");
+        map.put("kickbackTasks", kickbackTasks);
+        return map;
+    }
+
+    /** 子任务 → 前端 RequirementTask;phase 收敛到前端枚举 coder/reviewer/tester/pr/done。 */
+    private Map<String, Object> requirementTaskToVo(ScanItemTask task, String repoName, String branch,
+        DevloopPhaseService.PhaseSnapshot snap, boolean coded) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("id", String.valueOf(task.getTaskId()));
+        map.put("repo", repoName);
+        map.put("branch", branch);
+        map.put("phase", clampReqTaskPhase(snap));
+        map.put("coded", coded);
+        return map;
+    }
+
+    /** 取会话环节快照(带单轮缓存);无会话或未启动返回空快照,视为未就绪。 */
+    private DevloopPhaseService.PhaseSnapshot snapshotFor(Long sessionId,
+        Map<Long, DevloopPhaseService.PhaseSnapshot> cache) {
+        if (sessionId == null) {
+            return devloopPhaseService.emptySnapshot();
+        }
+        return cache.computeIfAbsent(sessionId, devloopPhaseService::buildSnapshot);
+    }
+
+    /** 快照中某环节是否 done。 */
+    private boolean isPhaseDone(DevloopPhaseService.PhaseSnapshot snap, String phaseKey) {
+        if (snap == null || snap.getPhases() == null) {
+            return false;
+        }
+        for (DevloopPhaseService.PhaseState p : snap.getPhases()) {
+            if (phaseKey.equals(p.getKey())) {
+                return DevloopPhaseService.ST_DONE.equals(p.getStatus());
+            }
+        }
+        return false;
+    }
+
+    /** 当前环节收敛到前端 RequirementTask.phase 枚举:coder 前的环节统一显示 coder,全通过显示 done。 */
+    private String clampReqTaskPhase(DevloopPhaseService.PhaseSnapshot snap) {
+        if (snap == null || snap.getCurrentPhase() == null) {
+            return "coder";
+        }
+        if (isPhaseDone(snap, "pr")) {
+            return "done";
+        }
+        String cur = snap.getCurrentPhase();
+        if ("reviewer".equals(cur) || "tester".equals(cur) || "pr".equals(cur)) {
+            return cur;
+        }
+        return "coder";
+    }
+
+    /** 需求集成状态机:最近执行的终态优先,无执行时按是否全就绪落 ready/waiting_ready。 */
+    private String deriveReqIntegrationStatus(boolean allCoded, IntegrationRun latestRun) {
+        if (latestRun != null) {
+            String st = latestRun.getStatus();
+            if ("running".equals(st)) {
+                return "running";
+            }
+            if ("passed".equals(st)) {
+                return "passed";
+            }
+            if ("failed".equals(st) || "error".equals(st) || "timeout".equals(st)) {
+                return "failed";
+            }
+        }
+        return allCoded ? "ready" : "waiting_ready";
+    }
+
+    /** 打回条目取自会话真实 [PHASE] REJECT 打点的最后一条,避免凭空构造归因。 */
+    private void appendKickback(List<Map<String, Object>> kickbackTasks, DevloopPhaseService.PhaseSnapshot snap,
+        String repoName, String branch) {
+        if (snap == null || snap.getKickbacks() == null || snap.getKickbacks().isEmpty()) {
+            return;
+        }
+        DevloopPhaseService.Kickback last = snap.getKickbacks().get(snap.getKickbacks().size() - 1);
+        Map<String, Object> kb = new HashMap<>();
+        kb.put("repo", repoName);
+        kb.put("branch", branch);
+        kb.put("reason", StringUtils.defaultString(last.getReason()));
+        kickbackTasks.add(kb);
+    }
+
+    /** 需求下各子任务快照的最大轮次,作为需求集成轮次展示。 */
+    private int maxRound(List<ScanItemTask> tasks, Map<Long, DevloopPhaseService.PhaseSnapshot> cache) {
+        int max = 1;
+        for (ScanItemTask t : tasks) {
+            DevloopPhaseService.PhaseSnapshot snap = snapshotFor(t.getSessionId(), cache);
+            if (snap != null) {
+                max = Math.max(max, snap.getRound());
+            }
+        }
+        return max;
+    }
+
+    // ========== 需求级就绪批量集成(定时调度入口) ==========
+
+    /**
+     * 定时批量集成入口:遍历所有启用测试配置的项目,按各自 cron 到点后挑「就绪」需求触发集成。
+     * 由 DevloopIntegrationBatchJob 持分布式锁后单节点调用;单个项目失败不影响其余项目。
+     */
+    public void runScheduledIntegrationBatches() {
+        for (TesterConfig config : testerConfigService.listEnabled()) {
+            try {
+                runBatchForProject(config);
+            } catch (Exception e) {
+                logger.error("[IntegrationBatch] 项目 {} 批量集成失败", config.getProjectId(), e);
+            }
+        }
+    }
+
+    /**
+     * 失败打回引擎:扫所有「待打回」的失败执行,按项目策略归因目标环节并驱动会话回到该环节重工。
+     * 达到 maxRounds 上限则停手,按 createDefectWhenUnclear 决定是否建集成缺陷需求交人工;
+     * 每条失败执行经 kickbackAt 幂等闸门只处理一次。由 DevloopIntegrationBatchJob 持锁后单节点调用。
+     */
+    public void runKickbackSweep() {
+        List<IntegrationRun> pending = integrationRunService.listPendingKickback();
+        if (pending.isEmpty()) {
+            return;
+        }
+        // 项目策略按需缓存,避免同项目多条失败执行重复查配置。
+        Map<Long, TesterConfig> configCache = new HashMap<>();
+        Map<Long, DevloopPhaseService.PhaseSnapshot> snapshotCache = new HashMap<>();
+        for (IntegrationRun run : pending) {
+            try {
+                handleKickback(run, configCache, snapshotCache);
+            } catch (Exception e) {
+                logger.error("[Kickback] 处理失败执行异常, runId={}", run.getRunId(), e);
+            }
+        }
+    }
+
+    /**
+     * 单条失败执行的打回:autoAttribute 开启且未超轮次时驱动各子任务会话回目标环节重工;
+     * autoAttribute 关闭或轮次耗尽则停手,按 createDefectWhenUnclear 建集成缺陷交人工。
+     * 无论重工还是停手,处理完都写 kickbackAt 闭合幂等闸门,避免下一轮重复驱动。
+     */
+    private void handleKickback(IntegrationRun run, Map<Long, TesterConfig> configCache,
+        Map<Long, DevloopPhaseService.PhaseSnapshot> snapshotCache) {
+        Long projectId = run.getProjectId();
+        Long requirementId = run.getRequirementId();
+        TesterConfig config = configCache.computeIfAbsent(projectId, testerConfigService::findByProject);
+        List<ScanItemTask> tasks = scanItemTaskService.listByRequirement(requirementId);
+        // 目标环节取执行侧已记的归因(finishSuccessOrFailure 落库,默认 coder)。
+        String target = StringUtils.defaultIfBlank(run.getKickbackTo(), "coder");
+        boolean autoAttribute = config == null || !"0".equals(config.getAutoAttribute());
+        boolean createDefect = config == null || !"0".equals(config.getCreateDefectWhenUnclear());
+        int maxRounds = config == null || config.getMaxRounds() == null ? 3 : config.getMaxRounds();
+        int currentRound = maxRound(tasks, snapshotCache);
+
+        // autoAttribute 关闭 = 不自动归因驱动重工,失败交人工判定;轮次耗尽同样停手交人工。
+        boolean stopAndEscalate = !autoAttribute || currentRound >= maxRounds;
+        if (stopAndEscalate) {
+            if (createDefect) {
+                createIntegrationDefect(run, requirementId, projectId, target, currentRound);
+            }
+            integrationRunService.markKickbackHandled(run.getRunId(), target);
+            logger.info("[Kickback] 需求 {} 停止自动重工(autoAttribute={} 轮次={}/{} 建缺陷={}),转人工",
+                requirementId, autoAttribute, currentRound, maxRounds, createDefect);
+            return;
+        }
+
+        int driven = 0;
+        for (ScanItemTask task : tasks) {
+            if (task.getSessionId() == null) {
+                continue;
+            }
+            driveSessionRework(task.getSessionId(), projectId, target, StringUtils.defaultString(run.getReason()));
+            driven++;
+        }
+        integrationRunService.markKickbackHandled(run.getRunId(), target);
+        logger.info("[Kickback] 需求 {} 失败(runId={})驱动 {} 个会话回到 {} 环节重工", requirementId, run.getRunId(), driven, target);
+    }
+
+    /**
+     * 驱动一个会话回到目标环节重工:向既有会话发一条重工指令消息,由数字员工自身产出
+     * [PHASE] <target> REJECT 打点完成回退(打点只信数字员工回答,后端不伪造标记)。
+     * agentId 必须显式带上:targetAgentResolver 不从会话反查,缺失会静默不触发。
+     */
+    private void driveSessionRework(Long sessionId, Long projectId, String target, String reason) {
+        ByaiSession session = byaiSessionMapper.selectById(sessionId);
+        if (session == null || session.getCreatorId() == null) {
+            logger.warn("[Kickback] 会话 {} 不存在或无创建人,跳过重工驱动", sessionId);
+            return;
+        }
+        Long userId = session.getCreatorId();
+        ProjectMember member = projectMemberService.findByProjectAndUser(projectId, userId);
+        if (member == null || member.getAgentId() == null) {
+            logger.warn("[Kickback] 会话 {} 创建人 {} 未绑定数字员工,跳过重工驱动", sessionId, userId);
+            return;
+        }
+        LoginInfo loginInfo = loginApplicationService.getLoginInfo(userId);
+        if (loginInfo == null) {
+            logger.warn("[Kickback] 会话 {} 创建人 {} 无登录信息,跳过重工驱动", sessionId, userId);
+            return;
+        }
+        AssistantChatDto chatDto = new AssistantChatDto();
+        chatDto.setSessionId(sessionId);
+        chatDto.setAgentId(member.getAgentId());
+        chatDto.setProjectId(projectId);
+        chatDto.setAccessTerminal("DevLoop");
+        chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
+        chatDto.setChatContent(buildReworkPrompt(target, reason));
+        // 复用建任务的「提交后异步执行」通道:chat 耗时数分钟,不阻塞打回扫描。
+        submitTaskChatAfterCommit(chatDto, loginInfo, sessionId);
+    }
+
+    /** 重工指令提示词:告知集成失败与目标环节,要求数字员工打 REJECT 标记并修复。 */
+    private String buildReworkPrompt(String target, String reason) {
+        String template = byaiSystemConfigService.findByParamCode("DEVLOOP_TASK_KICKBACK_PROMPT");
+        if (template == null || template.isEmpty()) {
+            template = DEFAULT_KICKBACK_PROMPT_TEMPLATE;
+        }
+        return template.replace("${target}", target != null ? target : "coder")
+            .replace("${reason}", reason != null ? reason : "");
+    }
+
+    /** 达到最大轮次仍失败:建一条集成缺陷需求(挂项目 manual 来源),交人工排查,不再自动重工。 */
+    private void createIntegrationDefect(IntegrationRun run, Long requirementId, Long projectId, String target,
+        int round) {
+        ScanRequireItem origin = scanRequireItemMapper.selectById(requirementId);
+        String originTitle = origin != null ? StringUtils.defaultString(origin.getTitle()) : String.valueOf(requirementId);
+        String title = "[集成缺陷] " + originTitle + "(第" + round + "轮仍失败)";
+        String content = "需求集成在第 " + round + " 轮仍失败,已达最大重工轮次,转人工排查。\n"
+            + "目标环节: " + target + "\n失败原因: " + StringUtils.defaultString(run.getReason())
+            + "\n关联执行 runId: " + run.getRunId();
+        ScanSource source = findOrCreateManualSource(projectId);
+        ScanLog log = scanLogService.createLog(source.getSourceId(), projectId);
+        scanLogService.createItem(log.getLogId(), source.getSourceId(), title, content, null, null, "add");
+        scanLogService.completeLog(log.getLogId(), 1, 1);
+    }
+
+    /** 打回重工提示词兜底:DB 未配置 DEVLOOP_TASK_KICKBACK_PROMPT 时使用。 */
+    private static final String DEFAULT_KICKBACK_PROMPT_TEMPLATE = "本任务的集成测试未通过,需要回到「${target}」环节修复后重新交付。\n\n"
+        + "## 集成失败原因\n${reason}\n\n" + "## 工作要求\n"
+        + "1. 先用 self-developed-rules skill 打点 [PHASE] ${target} REJECT 集成测试失败,记录本次打回原因与目标环节。\n"
+        + "2. 回到目标分支定位并修复导致集成失败的问题,完成后自测确保编译与相关测试通过。\n"
+        + "3. 修复改动提交并推送到原任务分支,提交信息说明本次为集成失败重工。\n"
+        + "4. 若失败原因不清或无法复现,明确说明遇到的问题,不要臆造修复。\n\n" + "请开始重工处理。";
+
+    /**
+     * 单项目一次批量集成:cron 到点校验 → 选就绪需求(受并发额度约束)→ 对每个启用套件各起一次挂需求的 run。
+     * 就绪 = 其下所有子任务 coder 环节 done(requireAllCoded 关闭时不校验)且尚无挂需求的执行;
+     * 失败后的重集成属打回引擎(Phase D)显式触发,不由本批量循环重复起。
+     */
+    private void runBatchForProject(TesterConfig config) {
+        Long projectId = config.getProjectId();
+        // 挂需求的执行只由批量写入,故最新一条即「上次批量时间」,据此判断本项目 cron 是否到点。
+        List<IntegrationRun> reqRuns = integrationRunService.listWithRequirementByProject(projectId);
+        Date lastBatchAt = reqRuns.isEmpty() ? null : reqRuns.get(0).getCreateTime();
+        if (!isBatchDue(config.getCron(), config.getTimezone(), lastBatchAt)) {
+            return;
+        }
+        List<IntegrationSuite> enabledSuites = integrationSuiteService.listByProjectId(projectId).stream()
+            .filter(s -> "1".equals(s.getEnabled()))
+            .collect(java.util.stream.Collectors.toList());
+        if (enabledSuites.isEmpty()) {
+            logger.info("[IntegrationBatch] 项目 {} 无启用套件,跳过", projectId);
+            return;
+        }
+        List<IntegrationEnv> envs = integrationEnvService.listByProjectId(projectId);
+        if (envs.isEmpty()) {
+            logger.info("[IntegrationBatch] 项目 {} 无集成环境,跳过", projectId);
+            return;
+        }
+        Long envId = envs.get(0).getEnvId();
+
+        // 按需求取最新执行:判断是否在跑(占额度)与是否已有挂需求执行(不重复入选)。
+        Map<Long, IntegrationRun> latestRunByReq = new HashMap<>();
+        for (IntegrationRun run : reqRuns) {
+            latestRunByReq.putIfAbsent(run.getRequirementId(), run);
+        }
+        boolean requireAllCoded = !"0".equals(config.getRequireAllCoded());
+        Map<Long, DevloopPhaseService.PhaseSnapshot> snapshotCache = new HashMap<>();
+        Map<Long, List<ScanItemTask>> tasksByReq = new LinkedHashMap<>();
+        for (ScanItemTask t : scanItemTaskService.listByProject(projectId)) {
+            tasksByReq.computeIfAbsent(t.getRequirementId(), k -> new ArrayList<>()).add(t);
+        }
+        // 并发额度:同一时刻在跑的需求数不超过 maxConcurrentReqs;已在跑的先扣掉。
+        int maxConcurrent = config.getMaxConcurrentReqs() == null ? 2 : config.getMaxConcurrentReqs();
+        int running = 0;
+        List<Long> readyReqIds = new ArrayList<>();
+        for (Map.Entry<Long, List<ScanItemTask>> entry : tasksByReq.entrySet()) {
+            IntegrationRun latest = latestRunByReq.get(entry.getKey());
+            if (latest != null) {
+                if ("running".equals(latest.getStatus())) {
+                    running++;
+                }
+                // 已有挂需求执行:重集成由打回引擎接管,批量不重复入选。
+                continue;
+            }
+            if (requireAllCoded && !allTasksCoded(entry.getValue(), snapshotCache)) {
+                continue;
+            }
+            readyReqIds.add(entry.getKey());
+        }
+        int slots = maxConcurrent - running;
+        if (slots <= 0 || readyReqIds.isEmpty()) {
+            return;
+        }
+        Long operatorId = config.getUpdateBy() != null ? config.getUpdateBy() : config.getCreateBy();
+        int admitted = 0;
+        for (Long reqId : readyReqIds) {
+            if (admitted >= slots) {
+                break;
+            }
+            for (IntegrationSuite suite : enabledSuites) {
+                integrationRunService.startRun(suite.getSuiteId(), envId, operatorId, reqId);
+            }
+            admitted++;
+        }
+        logger.info("[IntegrationBatch] 项目 {} 触发 {} 个就绪需求 × {} 个套件", projectId, admitted, enabledSuites.size());
+    }
+
+    /** 需求下所有子任务的 coder 环节是否都 done(空需求视为未就绪)。 */
+    private boolean allTasksCoded(List<ScanItemTask> tasks, Map<Long, DevloopPhaseService.PhaseSnapshot> cache) {
+        if (tasks.isEmpty()) {
+            return false;
+        }
+        for (ScanItemTask t : tasks) {
+            if (!isPhaseDone(snapshotFor(t.getSessionId(), cache), "coder")) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 本项目批量 cron 是否到点:以上次批量时间为基准算下一次应跑时间,已过则到点。
+     * 首次(无上次批量)、cron 为空、或解析失败时到点(避免漏跑),按配置时区比较。
+     */
+    private boolean isBatchDue(String cron, String timezone, Date lastBatchAt) {
+        if (cron == null || cron.trim().isEmpty() || lastBatchAt == null) {
+            return true;
+        }
+        java.time.ZoneId zone = resolveZone(timezone);
+        try {
+            org.springframework.scheduling.support.CronExpression expr =
+                org.springframework.scheduling.support.CronExpression.parse(toSpringCron(cron));
+            java.time.LocalDateTime last = java.time.LocalDateTime.ofInstant(lastBatchAt.toInstant(), zone);
+            java.time.LocalDateTime nextDue = expr.next(last);
+            return nextDue != null && !nextDue.isAfter(java.time.LocalDateTime.now(zone));
+        } catch (Exception e) {
+            logger.warn("[IntegrationBatch] 无效 cron '{}',本次按到点处理", cron, e);
+            return true;
+        }
+    }
+
+    /** 解析配置时区,非法或为空退回 Asia/Shanghai(与出厂默认一致)。 */
+    private java.time.ZoneId resolveZone(String timezone) {
+        if (timezone == null || timezone.trim().isEmpty()) {
+            return java.time.ZoneId.of("Asia/Shanghai");
+        }
+        try {
+            return java.time.ZoneId.of(timezone.trim());
+        } catch (Exception e) {
+            return java.time.ZoneId.of("Asia/Shanghai");
+        }
+    }
+
+    /** 5 段 Unix cron(分 时 日 月 周)补秒位成 Spring 6 段;已是 6 段原样返回。 */
+    private String toSpringCron(String cron) {
+        String trimmed = cron.trim();
+        return trimmed.split("\\s+").length == 5 ? "0 " + trimmed : trimmed;
+    }
+
+    /** 实体 → 嵌套 VO(对齐前端 TesterConfig);entity 为空时返回出厂默认,前端可直接编辑保存。 */
+    private Map<String, Object> testerConfigToVo(TesterConfig entity, Long projectId) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("projectId", entity != null && entity.getProjectId() != null ? entity.getProjectId() : projectId);
+        map.put("enabled", entity == null || !"0".equals(entity.getEnabled()));
+
+        Map<String, Object> schedule = new HashMap<>();
+        schedule.put("cron", entity == null ? "0 2 * * *" : entity.getCron());
+        schedule.put("cronLabel", entity == null ? "每日 02:00" : entity.getCronLabel());
+        schedule.put("timezone", entity == null || entity.getTimezone() == null ? "Asia/Shanghai" : entity.getTimezone());
+        map.put("schedule", schedule);
+
+        Map<String, Object> admission = new HashMap<>();
+        admission.put("requireAllCoded", entity == null || !"0".equals(entity.getRequireAllCoded()));
+        admission.put("maxConcurrentReqs", entity == null || entity.getMaxConcurrentReqs() == null
+            ? 2 : entity.getMaxConcurrentReqs());
+        map.put("admission", admission);
+
+        Map<String, Object> kickback = new HashMap<>();
+        kickback.put("autoAttribute", entity == null || !"0".equals(entity.getAutoAttribute()));
+        kickback.put("createDefectWhenUnclear", entity == null || !"0".equals(entity.getCreateDefectWhenUnclear()));
+        kickback.put("maxRounds", entity == null || entity.getMaxRounds() == null ? 3 : entity.getMaxRounds());
+        map.put("kickback", kickback);
+        return map;
+    }
+
+    /** Boolean → CHAR(1) 标记;null 取给定默认。 */
+    private String boolToFlag(Boolean value, String defaultFlag) {
+        if (value == null) {
+            return defaultFlag;
+        }
+        return value ? "1" : "0";
     }
 
     // ========== 集成测试执行 ==========
@@ -1322,6 +1900,8 @@ public class DevloopApplicationService {
             item.setItemId(sourceItemId);
             item.setSessionId(sessionId);
             scanRequireItemMapper.updateById(item);
+            // 登记需求→仓库子任务，让需求级就绪聚合与批量集成按 (需求,仓库) 维度可查，不再仅靠 1:1 的 sessionId 绑定。
+            scanItemTaskService.upsertOnStart(sourceItemId, projectId, repo.getRepoId(), sessionId, userId);
         }
 
         // 事务提交后再异步触发 chat：确保异步线程能读到本事务已建的 session。
@@ -1598,11 +2178,11 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 构造研发任务启动提示词：从 byai_system_config 取模板并填充占位符；模板缺失时用内置兜底模板，保证任务始终可创建。
+     * 构造任务启动提示词：从 byai_ai_prompt 取模板并填充占位符； 模板缺失时用内置兜底模板，保证任务始终可创建。
      */
     private String buildTaskPrompt(String projectName, ProjectRepo repo, String branchName, String taskType,
         String title, String description) {
-        String template = byaiSystemConfigService.findByParamCode("DEVLOOP_TASK_START_PROMPT");
+        String template = aiPromptService.findZhTemplateByCode("DEVLOOP_TASK_START_PROMPT");
         if (template == null || template.isEmpty()) {
             template = DEFAULT_TASK_PROMPT_TEMPLATE;
         }
@@ -1614,16 +2194,13 @@ public class DevloopApplicationService {
             .replace("${description}", description != null ? description : "");
     }
 
-    /** 提示词模板兜底：数据库未配置 DEVLOOP_TASK_START_PROMPT 时使用。 */
-    private static final String DEFAULT_TASK_PROMPT_TEMPLATE = "你是 ByClaw 开发助手，负责在指定代码仓库中自主完成开发任务。\n\n" + "## 任务信息\n"
+    /** 提示词模板兜底：DB 未配置 DEVLOOP_TASK_START_PROMPT 时使用，与 byai_ai_prompt 中的当前模板保持一致 */
+    private static final String DEFAULT_TASK_PROMPT_TEMPLATE = "请处理以下任务：\n" + "## 任务信息\n"
         + "- 项目：${projectName}\n" + "- 代码仓库：${repoFullName}\n" + "- 目标分支：${branchName}（尚未创建，需你新建）\n"
-        + "- 任务类型：${taskType}\n" + "- 任务标题：${title}\n\n" + "## 需求详情\n${description}\n\n" + "## 仓库访问说明\n"
-        + "- 目标仓库全路径为 ${repoFullName}，它可能是私有仓库；GitHub 访问令牌(PAT)已配置在环境变量 GH_TOKEN 中，请直接使用它克隆和推送。\n"
-        + "- 用带令牌的完整地址克隆：git clone https://$GH_TOKEN@github.com/${repoFullName}.git\n"
-        + "- 若提示仓库或分支不存在，通常是私有仓库权限问题，请确认已使用环境变量 GH_TOKEN 中的令牌，不要据此判定仓库不存在、也不要改为在本地新建独立项目。\n\n" + "## 工作要求\n"
-        + "1. 克隆仓库 ${repoFullName}，拉取默认分支最新代码；目标分支 ${branchName} 尚不存在，用 git checkout -b ${branchName} 从默认分支新建并切换。\n"
-        + "2. 仔细理解上述需求详情，定位需要修改的代码。\n" + "3. 完成开发后自测，确保编译通过、相关测试通过。\n" + "4. 提交改动到分支 ${branchName} 并推送，提交信息清晰说明本次改动。\n"
-        + "5. 如需求描述不清或存在阻塞，明确说明遇到的问题。\n" + "6. 使用 self-developed-rules skill 持续维护任务状态、阶段、证据与交付物。\n\n" + "请开始处理。";
+        + "- 任务类型：${taskType}\n" + "- 任务标题：${title}\n\n" + "## 需求详情\n${description}\n\n" + "## 代码仓库\n"
+        + "任务的代码克隆仓库路径需要遵循/by/.sessions/{sessionId}/{repoName}/\n\n" + "## 强制要求\n"
+        + "acp下发任务告诉对方启动的时候必须要调用skill：self-developed-rules;\n"
+        + "研发流程的输出文档如：需求文档、设计文档、测试文档保存在/by/.sessions/{sessionId}/下面";
 
     /** 数据库先分页，再读取当前页会话状态投影；单页最多触发 100 次 UserFS 定点读取。 */
     public ResponseUtil<PageInfo<DevloopTaskViewDto>> listTasks(DevloopTaskListQueryDto query) {

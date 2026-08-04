@@ -1,14 +1,5 @@
 // V2:独立测试数字员工。E2E 从「每个任务各自跑」收敛到「需求级、由一个独立测试员工定时批量执行」。
 // 这个配置回答三件事:谁来测(绑定的数字员工)、什么时候测(定时节流 + 就绪准入)、失败怎么办(打回策略)。
-export type TesterAgentOption = {
-  agentId: string;
-  name: string;
-  // 头像:数字员工的展示头像 URL(演示态用占位)。
-  avatar?: string;
-  // 擅长栈,仅用于挑选时展示,不参与逻辑。
-  skills: string[];
-};
-
 // 定时节流:cron 决定「多久看一次」,不是「到点必跑」。到点时只挑「已就绪」的需求批量测。
 export type TesterSchedule = {
   cron: string; // 标准 5 段 cron,如 0 2 * * *(每日 02:00)
@@ -35,9 +26,9 @@ export type TesterKickback = {
 };
 
 // V2:独立测试员工总配置。挂在需求级集成之上,是「定时集成」那条 banner 背后的真实配置。
+// 执行员工不在此配置:统一取全局「测试数字员工」默认(resolveDefaultAgent),改绑定去「默认数字员工」改。
 export type TesterConfig = {
   enabled: boolean; // 关掉则退回人工触发集成,不自动定时
-  agentId: string; // 绑定的独立测试数字员工
   schedule: TesterSchedule;
   admission: TesterAdmission;
   kickback: TesterKickback;
