@@ -32,6 +32,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -257,6 +259,42 @@ public class SandboxService {
         SandboxLaunchRouting routing = new SandboxLaunchRouting(serviceKey,
             SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
         return launchSandboxInternal(userCode, null, routing);
+    }
+
+    /**
+     * 在连接器授权或启用成功后，让当前用户已经运行的沙箱重新加载最新运行时环境。
+     * 单个沙箱刷新失败不影响同一用户其他沙箱，也不回滚已经完成的连接器授权。
+     */
+    public void refreshRunningSandboxesAfterCommit(String userCode) {
+        if (StringUtils.isBlank(userCode)) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    refreshRunningSandboxes(userCode);
+                }
+            });
+            return;
+        }
+        List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUser(userCode);
+        if (records == null || records.isEmpty()) {
+            LOGGER.debug("授权成功后未找到运行中的沙箱，用户编码：{}", userCode);
+            return;
+        }
+        for (SsSandboxRecord record : records) {
+            try {
+                removeSandbox(userCode, record.getResourceId());
+                launchSandbox(userCode, record.getResourceId());
+                LOGGER.info("授权成功后刷新沙箱完成，用户编码：{}，资源ID：{}，沙箱类型：{}",
+                    userCode, record.getResourceId(), record.getSandboxType());
+            } catch (RuntimeException e) {
+                LOGGER.warn("授权成功后刷新沙箱失败（忽略），用户编码：{}，资源ID：{}，沙箱类型：{}，原因：{}",
+                    userCode, record.getResourceId(), record.getSandboxType(), e.getMessage(), e);
+            }
+        }
     }
 
     /**
