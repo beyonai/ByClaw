@@ -6,6 +6,8 @@ import type { GroupChatContextV1 } from "../domain/group-chat-context.js";
 export interface ContextBuildInput {
   /** 稳定的 Supervisor 角色与平台规则，始终位于最终 system prompt 最前面。 */
   baseSystemPrompt: string;
+  /** by-framework 入站会话 ID；存在时声明用户可见的规范会话空间。 */
+  externalSessionId?: string;
   /** 当前 Run 冻结的授权 Agent 快照。 */
   authorizedAgents: readonly AgentProfile[];
   /** Agent 目录回源失败；此时授权快照为空不代表用户确实没有可用数字员工。 */

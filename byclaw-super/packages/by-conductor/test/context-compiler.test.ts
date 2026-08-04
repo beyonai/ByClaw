@@ -48,11 +48,43 @@ describe("ContextCompiler", () => {
     expect(compiled.diagnostics.processors.map(({ name }) => name)).toEqual([
       "supervisor-policy",
       "session-context",
+      "session-workspace",
       "user-context",
       "group-chat-context",
       "authorized-agents",
       "context-cleanup",
     ]);
+  });
+
+  it("injects the canonical by-framework session workspace and rejects the Leader temp cwd", () => {
+    const compiled = new ContextCompiler().compile({
+      baseSystemPrompt: "You are the Supervisor.",
+      externalSessionId: "11034160",
+      authorizedAgents: [],
+      sessionContext: emptySessionContext,
+      currentTime,
+    });
+
+    expect(compiled.dynamicSystemContext).toContain("<session_workspace>");
+    expect(compiled.dynamicSystemContext).toContain(
+      'Canonical session workspace: "/by/.sessions/11034160/"',
+    );
+    expect(compiled.dynamicSystemContext).toContain(
+      "never include it in a delegated task",
+    );
+    expect(compiled.dynamicSystemContext).toContain("/tmp/byclaw-super-pi/");
+  });
+
+  it("does not inject a session workspace for non-by-framework runs", () => {
+    const compiled = new ContextCompiler().compile({
+      baseSystemPrompt: "You are the Supervisor.",
+      authorizedAgents: [],
+      sessionContext: emptySessionContext,
+      currentTime,
+    });
+
+    expect(compiled.dynamicSystemContext).not.toContain("<session_workspace>");
+    expect(compiled.dynamicSystemContext).not.toContain("/by/.sessions/");
   });
 
   it("injects a frozen group chat snapshot as untrusted runtime data", () => {

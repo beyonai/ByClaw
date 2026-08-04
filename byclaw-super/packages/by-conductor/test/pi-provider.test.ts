@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -62,5 +62,13 @@ describe("Pi provider registration", () => {
       xhigh: "high",
       max: "high",
     });
+
+    const leader = await factory.create("internal-session-1");
+    const [instanceDirectory] = await readdir(cacheDirectory);
+    expect(instanceDirectory).toBeDefined();
+    await expect(
+      access(join(cacheDirectory, instanceDirectory!, "internal-session-1", "files")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await leader.dispose();
   });
 });
