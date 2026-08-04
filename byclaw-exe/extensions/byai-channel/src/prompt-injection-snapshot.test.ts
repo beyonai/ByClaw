@@ -62,13 +62,15 @@ describe("prompt-injection-snapshot", () => {
   it("injects connector-unavailable guidance for disabled connectors only", () => {
     const snapshot = buildPromptInjectionSnapshot({
       request: mockRequest({
-        authConnectorList: { dws: true, fws: false },
+        authConnectorList: { dws: true, fws: false, wecomcli: false },
       }),
     });
 
     expect(snapshot.appendSystemContext).toContain("第三方连接器可用性");
-    expect(snapshot.appendSystemContext).toContain("`fws`");
-    expect(snapshot.appendSystemContext).not.toContain("`dws` 连接器当前");
+    expect(snapshot.appendSystemContext).toContain("已启用连接器：`dws`");
+    expect(snapshot.appendSystemContext).toContain("未启用连接器：`fws`, `wecomcli`");
+    expect(snapshot.appendSystemContext).toContain("已启用连接器对应的子任务必须正常执行");
+    expect(snapshot.appendSystemContext).toContain("只列出本次请求实际需要但未启用的连接器");
     expect(snapshot.appendSystemContext).toContain("连接器管理页面");
     expect(snapshot.appendSystemContext).toContain("连接/授权");
     expect(snapshot.appendSystemContext.indexOf("第三方连接器可用性")).toBeGreaterThan(
@@ -90,7 +92,10 @@ describe("prompt-injection-snapshot", () => {
       }),
     });
     expect(english.appendSystemContext).toContain("Third-party connector availability");
-    expect(english.appendSystemContext).toContain("currently not connected or authorized");
+    expect(english.appendSystemContext).toContain("Disabled connectors: `dws`");
+    expect(english.appendSystemContext).toContain(
+      "must execute enabled-connector subtasks normally",
+    );
 
     const enabled = buildPromptInjectionSnapshot({
       request: mockRequest({ authConnectorList: { dws: true } }),
