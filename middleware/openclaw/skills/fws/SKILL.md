@@ -142,11 +142,10 @@ lark-cli schema <service>.<resource>.<method> --format json
 2. 参数缺失或字段格式错误：查 `--help` / `schema` 后修正一次。
 3. `confirmation_required` 或 exit 10：进入危险操作确认流程，不当作普通失败。
 4. OpenClaw 飞书渠道缺失：必须先走下方 OpenClaw 渠道配置缺失流程，不得误走 user 授权。
-5. `error.type=config` 且 `error.subtype=not_configured`：进入下方 OpenClaw 未绑定恢复流程，不得误走渠道初始化或 user 授权。
-6. user 身份鉴权失败或缺少 scope：必须走下方 OpenClaw 鉴权异常强制策略。
-7. bot 身份缺少 scope：不要 `auth login`；把错误中的 `console_url` 原样给用户去开发者后台开权限。
-8. 权限/可见范围/资源不存在：停止盲目重试，报告原始错误和可执行的下一步。
-9. 更多见 [error-codes.md](./references/error-codes.md)。
+5. user 身份鉴权失败或缺少 scope：必须走下方 OpenClaw 鉴权异常强制策略。
+6. bot 身份缺少 scope：不要 `auth login`；把错误中的 `console_url` 原样给用户去开发者后台开权限。
+7. 权限/可见范围/资源不存在：停止盲目重试，报告原始错误和可执行的下一步。
+8. 更多见 [error-codes.md](./references/error-codes.md)。
 
 ### OpenClaw 渠道配置缺失流程（高于用户授权）
 
@@ -156,23 +155,10 @@ lark-cli schema <service>.<resource>.<method> --format json
 - 配置入口：如果当前运行环境能执行命令并回传输出，必须先执行 `lark-cli config init --new --force-init` 获取飞书应用配置链接；从本次输出提取 `https://open.feishu.cn/page/cli?...` 链接，再用 `scripts/qrcode_data_uri.py "<config_url>" --alt "飞书应用配置二维码"` 生成二维码 data URI。
 - 推荐返回：返回 Markdown 配置链接和二维码，并说明“请管理员打开链接或用飞书扫码完成应用配置；完成后需要把 App ID 和 App Secret 安全写入 OpenClaw 的 `channels.feishu`，再回复我继续绑定”。如果无法执行命令或未拿到链接，才退化为手工配置指引；如果二维码生成失败，只返回可点击链接和失败原因，禁止返回破图占位。
 - 用户确认配置成功后：必须先执行 `lark-cli config show` 或 `lark-cli auth status --json --verify` 检查当前会话的 lark-cli 配置；如果能读取到 `appId`，说明 `config init --new --force-init` 已为当前 workspace 写入本地 CLI 应用配置，应立即进入 user 授权/业务查询流程，禁止继续重复回复“仍缺少 channels.feishu”。
-- 本地配置边界：`channels.feishu` 是 OpenClaw 托管渠道配置；`config init --new --force-init` 只写入当前 lark-cli workspace 的本地应用配置。若业务命令返回 `error.subtype=not_configured`，不得声称可绕过绑定直接使用本地配置；必须进入下方 OpenClaw 未绑定恢复流程。若绑定进一步报告渠道缺失，再回到本流程。
+- 本地配置兜底：`channels.feishu` 是 OpenClaw 托管渠道配置；`config init --new --force-init` 是当前 lark-cli workspace 的本地应用配置。当前者缺失但后者已经可用时，可以先用本地配置完成本次查询，同时提醒平台管理员后续把应用凭证同步进 OpenClaw 托管渠道，避免换会话/重建沙箱后丢失。
 - 绑定动作：只有确认 `channels.feishu` 已存在后，才能请求用户确认身份策略并执行 `lark-cli config bind --source openclaw --identity user-default`（个人通讯录等用户资源）或 `--identity bot-only`（机器人/群通知等应用身份场景）。
 - 后续流程：`config bind` 成功后，如果业务还需要访问个人通讯录，再按 OpenClaw 鉴权异常强制策略走 user 授权 split-flow。
 - 禁止事项：禁止把 `config init --new --force-init` 生成的本地 CLI 应用配置说成 OpenClaw 托管渠道已配置；禁止把 App Secret 展示在回复里；禁止在未检查 `lark-cli config show` 前反复要求用户配置 `channels.feishu`。
-
-### OpenClaw 未绑定恢复流程
-
-- 触发条件：任一 `lark-cli` 命令返回 `error.type=config`、`error.subtype=not_configured`，或 `error.message` 含 `openclaw context detected but lark-cli is not bound to it`。
-- 错误归类：这只说明当前 lark-cli workspace 尚未绑定到 OpenClaw 上下文；不能据此断言 `channels.feishu` 缺失，也不能据此断言用户授权缺失。
-- 立即动作：停止原业务命令；不得执行 `auth login`、`config init` 或重复业务请求。先读取 `lark-cli config bind --help`；必要时执行 `lark-cli config show`，只确认已有 profile/app 是否会与绑定冲突。禁止直接输出或整体读取 `$LARK_HOME/.lark-cli/config.json`，禁止在日志或回复中展示 App Secret、token、cookie。
-- 配置边界：本地 app 或用户记录存在与否都不能证明 `channels.feishu` 是否存在，也不能替代绑定。若此前已经明确收到渠道缺失错误，直接进入 OpenClaw 渠道配置缺失流程；否则由用户确认后的 `config bind` 结果完成分流。
-- 身份建议：根据被中断的原始业务给出候选身份。个人通讯录、日历、邮箱、个人云空间等建议 `user-default`；机器人、群通知和应用身份场景建议 `bot-only`；无法判断时建议更安全的 `bot-only`。不得只因本地已有用户记录就自动选择 `user-default`。
-- 确认门禁：`config bind` 可能覆盖已有绑定并锁定身份策略。执行前必须向用户说明绑定意图和候选身份，并取得用户对二者的明确确认；禁止自动绑定。多 app 场景需要 `--app-id` 时必须使用已确认的真实 app ID，不得猜测。
-- 绑定执行：确认后执行 `lark-cli config bind --source openclaw --identity <bot-only|user-default>`；多 app 场景按 CLI 要求追加 `--app-id <confirmed_app_id>`。只有 CLI 明确提示风险转换且用户再次确认后，才可追加 `--force`。
-- 成功后：立即重试原业务命令。若随后出现 user 鉴权异常，进入 OpenClaw 鉴权异常强制策略；bot scope 不足则返回 `console_url`。
-- 失败分流：若绑定返回 `openclaw.json missing channels.feishu section` 或 `configure Feishu in OpenClaw first`，进入 OpenClaw 渠道配置缺失流程；其他失败报告原始错误和可执行下一步，不得循环绑定。
-- 禁止事项：禁止把 bind 描述成“不会覆盖配置”或“无需用户确认”；禁止用 `config init`、`auth login` 或清除现有配置来替代 bind；禁止在未绑定成功前恢复业务命令。
 
 ### OpenClaw 鉴权异常强制策略（最高优先级）
 
