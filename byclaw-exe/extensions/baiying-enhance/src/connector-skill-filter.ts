@@ -1,3 +1,4 @@
+import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
@@ -50,6 +51,59 @@ function bundledSkillRoots(): string[] {
   return mergeSkillNames([scriptRoot, path.resolve(process.cwd(), "skills")]);
 }
 
+async function childDirectories(root: string): Promise<string[]> {
+  try {
+    const entries = await fs.readdir(root, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+      .map((entry) => path.join(root, entry.name));
+  } catch {
+    return [];
+  }
+}
+
+async function discoveredPluginRoots(params: VisibleSkillLoadParams): Promise<string[]> {
+  const configured = Array.isArray(params.config?.plugins?.load?.paths)
+    ? params.config.plugins.load.paths
+        .filter((entry: unknown): entry is string => typeof entry === "string")
+        .map(expandHomePath)
+    : [];
+  const scriptExtensionsRoot = process.argv[1]
+    ? path.resolve(path.dirname(process.argv[1]), "..", "extensions")
+    : "";
+  const extensionContainers = mergeSkillNames(
+    [path.join(resolveStateDir(), "extensions")],
+    [scriptExtensionsRoot, path.resolve(process.cwd(), "extensions")],
+  );
+  const discovered = (await Promise.all(extensionContainers.map(childDirectories))).flat();
+  const scoped = (
+    await Promise.all(
+      discovered
+        .filter((root) => path.basename(root).startsWith("@"))
+        .map(childDirectories),
+    )
+  ).flat();
+  return mergeSkillNames(configured, discovered, scoped);
+}
+
+async function scanPluginManifestSkillNames(pluginRoot: string): Promise<string[]> {
+  let manifest: { skills?: unknown };
+  try {
+    manifest = JSON.parse(
+      await fs.readFile(path.join(pluginRoot, "openclaw.plugin.json"), "utf8"),
+    ) as { skills?: unknown };
+  } catch {
+    return [];
+  }
+  const declaredSkills = Array.isArray(manifest.skills)
+    ? manifest.skills.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const groups = await Promise.all(
+    declaredSkills.map((entry) => scanSkillRootNames(path.resolve(pluginRoot, entry))),
+  );
+  return mergeSkillNames(...groups);
+}
+
 export async function loadVisibleSkillNamesFromOpenClawRoots(
   params: VisibleSkillLoadParams,
 ): Promise<string[]> {
@@ -66,12 +120,14 @@ export async function loadVisibleSkillNamesFromOpenClawRoots(
     configuredExtraDirs,
     bundledSkillRoots(),
   );
-  const [workspaceSkills, pluginSkills, ...rootSkills] = await Promise.all([
+  const pluginRoots = await discoveredPluginRoots(params);
+  const [workspaceSkills, pluginSkills, ...rootAndManifestSkills] = await Promise.all([
     scanWorkspaceSkillNames(params.workspaceDir),
     scanPluginSkillNames(),
     ...roots.map((root) => scanSkillRootNames(root)),
+    ...pluginRoots.map(scanPluginManifestSkillNames),
   ]);
-  return mergeSkillNames(workspaceSkills, pluginSkills, ...rootSkills);
+  return mergeSkillNames(workspaceSkills, pluginSkills, ...rootAndManifestSkills);
 }
 
 export function filterRegisteredSkills(

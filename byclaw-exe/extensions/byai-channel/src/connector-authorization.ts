@@ -4,6 +4,7 @@ export type ConnectorAuthorizationMap = Record<string, boolean>;
 
 const MAX_CONNECTOR_NAME_LENGTH = 64;
 const MAX_CONNECTOR_AUTHORIZATION_ENTRIES = 64;
+const CONNECTOR_AUTHORIZATION_OVERFLOW_KEY = "byclaw-connector-auth-overflow";
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -32,9 +33,18 @@ export function normalizeConnectorAuthorization(
     const existing = normalized.get(name);
     normalized.set(name, existing === false || enabled === false ? false : true);
   }
-  const cappedEntries = [...normalized.entries()]
-    .toSorted((left, right) => Number(left[1]) - Number(right[1]))
-    .slice(0, MAX_CONNECTOR_AUTHORIZATION_ENTRIES);
+  const disabledEntries = [...normalized.entries()].filter(([, enabled]) => !enabled);
+  if (disabledEntries.length > MAX_CONNECTOR_AUTHORIZATION_ENTRIES) {
+    return { [CONNECTOR_AUTHORIZATION_OVERFLOW_KEY]: false };
+  }
+  const enabledEntries = [...normalized.entries()].filter(([, enabled]) => enabled);
+  const cappedEntries = [
+    ...disabledEntries,
+    ...enabledEntries.slice(
+      0,
+      MAX_CONNECTOR_AUTHORIZATION_ENTRIES - disabledEntries.length,
+    ),
+  ];
   return cappedEntries.length > 0 ? Object.fromEntries(cappedEntries) : undefined;
 }
 
@@ -47,15 +57,38 @@ export function connectorAuthorizationFromMetadata(
 export function disabledConnectorSkillNames(
   authorization: ConnectorAuthorizationMap | undefined,
 ): string[] {
+  if (connectorAuthorizationRequiresFailClosed(authorization)) {
+    return [];
+  }
   return Object.entries(authorization ?? {})
     .filter(([, enabled]) => enabled === false)
     .map(([name]) => name);
+}
+
+export function connectorAuthorizationRequiresFailClosed(
+  authorization: ConnectorAuthorizationMap | undefined,
+): boolean {
+  return authorization?.[CONNECTOR_AUTHORIZATION_OVERFLOW_KEY] === false;
 }
 
 export function buildDisabledConnectorPrompt(
   language: Language | string | undefined,
   authorization: ConnectorAuthorizationMap | undefined,
 ): string {
+  if (connectorAuthorizationRequiresFailClosed(authorization)) {
+    const english = typeof language === "string" && language.toLowerCase().startsWith("en");
+    return english
+      ? [
+          "## Third-party connector availability (required)",
+          "The connector authorization policy exceeds the safe processing limit. Treat every third-party connector as unavailable for this conversation and do not call or simulate connector skills.",
+          "Explain that connector availability cannot be verified safely. Ask the user to open the WorkBuddy connector management page, reconnect or authorize the required connector, and retry.",
+        ].join("\n")
+      : [
+          "## 第三方连接器可用性（强制）",
+          "连接器授权策略超过安全限制。本会话必须将所有第三方连接器视为不可用，不要调用或模拟任何连接器 skill。",
+          "请说明当前无法安全确认连接器可用性，并引导用户打开 WorkBuddy 的连接器管理页面，重新连接或授权所需连接器后重试。",
+        ].join("\n");
+  }
   const disabled = disabledConnectorSkillNames(authorization);
   if (disabled.length === 0) {
     return "";

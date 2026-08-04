@@ -218,6 +218,13 @@ function skillNamesFromScanned(skills: ScannedSkill[]): string[] {
 }
 
 export async function scanSkillRootNames(skillsDir: string): Promise<string[]> {
+  const directName = await readSkillNameFromSkillFile(
+    path.join(skillsDir, SKILL_DOC_FILE_NAME),
+    path.basename(skillsDir),
+  );
+  if (directName) {
+    return [directName];
+  }
   return skillNamesFromScanned(await scanSkillRoot(skillsDir));
 }
 

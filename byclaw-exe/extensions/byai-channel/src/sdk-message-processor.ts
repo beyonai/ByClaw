@@ -66,6 +66,7 @@ import {
   parseByaiLaneMetadata,
 } from "./multi-agent.js";
 import {
+  connectorAuthorizationRequiresFailClosed,
   disabledConnectorSkillNames,
   type ConnectorAuthorizationMap,
 } from "./connector-authorization.js";
@@ -86,6 +87,12 @@ export async function resolveConnectorSkillFilterForDispatch(params: {
   log?: { warn?: (message: string) => void };
   resolveFilter?: ConnectorSkillFilterDispatchResolver;
 }): Promise<string[] | undefined> {
+  if (connectorAuthorizationRequiresFailClosed(params.authConnectorList)) {
+    params.log?.warn?.(
+      `[byai-channel] connector authorization exceeds safe limit; failing closed: agentId=${params.agentId}`,
+    );
+    return [];
+  }
   const disabledConnectorSkills = disabledConnectorSkillNames(params.authConnectorList);
   if (disabledConnectorSkills.length === 0) {
     return undefined;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDisabledConnectorPrompt,
+  connectorAuthorizationRequiresFailClosed,
   connectorAuthorizationFromMetadata,
   disabledConnectorSkillNames,
   normalizeConnectorAuthorization,
@@ -49,6 +50,17 @@ describe("connector authorization", () => {
     const normalized = normalizeConnectorAuthorization(value);
     expect(Object.keys(normalized ?? {})).toHaveLength(64);
     expect(normalized).toMatchObject({ "disabled-last": false });
+  });
+
+  it("marks oversized disabled connector policies for fail-closed enforcement", () => {
+    const normalized = normalizeConnectorAuthorization(
+      Object.fromEntries(
+        Array.from({ length: 65 }, (_, index) => [`disabled-${index}`, false]),
+      ),
+    );
+
+    expect(connectorAuthorizationRequiresFailClosed(normalized)).toBe(true);
+    expect(buildDisabledConnectorPrompt("zh_CN", normalized)).toContain("安全限制");
   });
 
   it.each([undefined, null, [], "{}", {}, { dws: "false" }])(

@@ -46,6 +46,7 @@ import type { ResolvedByaiAccount } from "./types.js";
 // 新版本新增导入（冲突右侧）
 import { isOpenClawContextOverflowDispatchError } from "./dispatch-error.js";
 import { setConnectorSkillFilterResolver } from "../../shared/src/connector-skill-filter-runtime.js";
+import { normalizeConnectorAuthorization } from "./connector-authorization.js";
 
 afterEach(() => {
   setConnectorSkillFilterResolver(undefined);
@@ -271,5 +272,23 @@ describe("resolveConnectorSkillFilterForDispatch", () => {
       }),
     ).resolves.toEqual([]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("invalid result"));
+  });
+
+  it("fails closed without calling the provider for oversized disabled policies", async () => {
+    const resolveFilter = vi.fn(async () => ["ordinary-skill"]);
+    const authorization = normalizeConnectorAuthorization(
+      Object.fromEntries(
+        Array.from({ length: 65 }, (_, index) => [`disabled-${index}`, false]),
+      ),
+    );
+
+    await expect(
+      resolveConnectorSkillFilterForDispatch({
+        agentId: "test-agent",
+        authConnectorList: authorization,
+        resolveFilter,
+      }),
+    ).resolves.toEqual([]);
+    expect(resolveFilter).not.toHaveBeenCalled();
   });
 });
