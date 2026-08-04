@@ -60,7 +60,7 @@ class LarkCliAuthorizationProviderTest {
         List.of("lark-cli", "config", "init", "--new", "--force-init");
     private static final List<String> STATUS = List.of("lark-cli", "auth", "status", "--json", "--verify");
     private static final List<String> DEFAULT_LOGIN = List.of(
-        "lark-cli", "auth", "login", "--recommend", "--no-wait", "--json");
+        "lark-cli", "auth", "login", "--domain", "all", "--no-wait", "--json");
     private static final Map<String, String> ENVIRONMENT = Map.of("HOME", "/tmp/lark-cli-test");
     private static final ConnectorCliWorkspace WORKSPACE = new ConnectorCliWorkspace(
         Path.of("/tmp/lark-cli-test"), ENVIRONMENT);
@@ -121,7 +121,7 @@ class LarkCliAuthorizationProviderTest {
             "https://open.feishu.cn/page/cli?user_code=temporary-init-code");
         assertThat(result.providerState()).contains(
             "\"phase\":\"app_initialization\"",
-            "\"loginCommand\":[\"lark-cli\",\"auth\",\"login\",\"--recommend\",\"--no-wait\",\"--json\"]"
+            "\"loginCommand\":[\"lark-cli\",\"auth\",\"login\",\"--domain\",\"all\",\"--no-wait\",\"--json\"]"
         );
         verify(cliRunner).run(eq(CONFIG_SHOW), eq(ENVIRONMENT), isNull(), any(Duration.class));
         verify(cliRunner).start(eq(CONFIG_INIT_NEW), eq(ENVIRONMENT), isNull());

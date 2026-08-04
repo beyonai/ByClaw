@@ -586,7 +586,8 @@ public class LarkCliAuthorizationProvider implements ConnectorAuthorizationProvi
             command.add("--scope");
             command.add(String.join(",", scopes));
         } else {
-            command.add("--recommend");
+            command.add("--domain");
+            command.add("all");
         }
         command.add("--no-wait");
         command.add("--json");
