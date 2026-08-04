@@ -504,6 +504,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
   ): Promise<void> {
     if (event.type === "delegation.started") {
       await this.#emitDelegationStatus(event, context, "_START_");
+      await this.#emitDelegationDetail(event, context, "start");
       return;
     }
     if (event.type === "delegation.output.delta") {
@@ -515,10 +516,12 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     }
     if (event.type === "delegation.completed") {
       await this.#emitDelegationStatus(event, context, "_DONE_");
+      await this.#emitDelegationDetail(event, context, "result");
       return;
     }
     if (event.type === "delegation.failed") {
       await this.#emitDelegationStatus(event, context, "_ERROR_");
+      await this.#emitDelegationDetail(event, context, "result");
     }
   }
 
@@ -584,7 +587,13 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     }
     const agentId = stringData(event.data.agentId);
     const agentName = stringData(event.data.agentName);
-    const content = `正在调用 Agent：${agentName || agentId || "Agent"}`;
+    const displayName = agentName || agentId || "数字员工";
+    const content =
+      status === "_START_"
+        ? `正在让数字员工处理：${displayName}`
+        : status === "_DONE_"
+          ? `数字员工处理完成：${displayName}`
+          : `数字员工处理失败：${displayName}`;
     await this.#protocolEmitter.emitEvent({
       sessionId: context.sessionId,
       traceId: context.traceId,
@@ -604,6 +613,74 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       metadata: {
         parent_run_id: event.runId,
         delegation_id: delegationId,
+        ...(agentId ? { delegated_agent_id: agentId } : {}),
+        ...(agentName ? { delegated_agent_name: agentName } : {}),
+      },
+    });
+  }
+
+  /** 输出挂在 3009 调用节点下的 Input/Output JSON 详情。 */
+  async #emitDelegationDetail(
+    event: RunEvent,
+    context: AgentContext,
+    phase: "start" | "result",
+  ): Promise<void> {
+    const delegationId = stringData(event.data.delegationId);
+    if (!delegationId) {
+      return;
+    }
+    const agentId = stringData(event.data.agentId);
+    const agentName = stringData(event.data.agentName);
+    const error = stringData(event.data.error);
+    const detail =
+      phase === "start"
+        ? {
+            agentId,
+            agentName,
+            task: stringData(event.data.task),
+            ...(stringData(event.data.expectedOutput)
+              ? { expectedOutput: stringData(event.data.expectedOutput) }
+              : {}),
+            ...(Array.isArray(event.data.attachments)
+              ? { attachments: event.data.attachments }
+              : {}),
+          }
+        : {
+            agentId,
+            agentName,
+            status:
+              stringData(event.data.resultStatus) ||
+              stringData(event.data.status) ||
+              (event.type === "delegation.completed" ? "completed" : "failed"),
+            artifactCount:
+              typeof event.data.artifactCount === "number"
+                ? event.data.artifactCount
+                : 0,
+            ...(error ? { error, errorDetail: error } : {}),
+          };
+    const content = JSON.stringify({
+      title: phase === "start" ? "Input" : "Output",
+      json: JSON.stringify(detail, null, 2),
+    });
+    const messageId = `${delegationId}-${phase}`;
+    await this.#protocolEmitter.emitEvent({
+      sessionId: context.sessionId,
+      traceId: context.traceId,
+      eventType: EventType.REASONING_LOG_DELTA,
+      sourceAgentType: this.#agentType,
+      messageId,
+      parentMessageId: delegationId,
+      data: protocolMessage({
+        event: EventType.REASONING_LOG_DELTA,
+        content,
+        contentType: SseReasonMessageType.json_block,
+        orderId: messageId,
+        parentOrderId: delegationId,
+      }),
+      metadata: {
+        parent_run_id: event.runId,
+        delegation_id: delegationId,
+        detail_phase: phase,
         ...(agentId ? { delegated_agent_id: agentId } : {}),
         ...(agentName ? { delegated_agent_name: agentName } : {}),
       },

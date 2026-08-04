@@ -247,7 +247,7 @@ describe("ByClawSuperGatewayWorker", () => {
       contextMock({ emitState }),
     );
 
-    expect(emitEvent).toHaveBeenCalledTimes(3);
+    expect(emitEvent).toHaveBeenCalledTimes(5);
     expect(emitState).not.toHaveBeenCalled();
     expect(emitProtocolChunk).toHaveBeenNthCalledWith(
       1,
@@ -315,7 +315,7 @@ describe("ByClawSuperGatewayWorker", () => {
           status: "_START_",
           choices: [
             expect.objectContaining({
-              delta: { content: "正在调用 Agent：数据分析助手" },
+              delta: { content: "正在让数字员工处理：数据分析助手" },
             }),
           ],
         }),
@@ -323,6 +323,18 @@ describe("ByClawSuperGatewayWorker", () => {
     );
     expect(emitEvent).toHaveBeenNthCalledWith(
       2,
+      expect.objectContaining({
+        messageId: "delegation-1-start",
+        parentMessageId: "delegation-1",
+        data: expect.objectContaining({
+          contentType: "2020",
+          orderId: "delegation-1-start",
+          parentOrderId: "delegation-1",
+        }),
+      }),
+    );
+    expect(emitEvent).toHaveBeenNthCalledWith(
+      3,
       expect.objectContaining({
         messageId: "delegation-1:output",
         parentMessageId: "delegation-1",
@@ -340,19 +352,94 @@ describe("ByClawSuperGatewayWorker", () => {
     );
     expect(emitEvent.mock.calls[0][0].data).not.toHaveProperty("agentId");
     expect(emitEvent.mock.calls[0][0].data).not.toHaveProperty("agentName");
-    expect(emitEvent.mock.calls[1][0].data).not.toHaveProperty("agentId");
-    expect(emitEvent.mock.calls[1][0].data).not.toHaveProperty("agentName");
+    expect(emitEvent.mock.calls[2][0].data).not.toHaveProperty("agentId");
+    expect(emitEvent.mock.calls[2][0].data).not.toHaveProperty("agentName");
     expect(emitEvent).toHaveBeenNthCalledWith(
-      3,
+      4,
       expect.objectContaining({
         messageId: "delegation-1",
         data: expect.objectContaining({
           orderId: "delegation-1",
           status: "_DONE_",
+          choices: [
+            expect.objectContaining({
+              delta: { content: "数字员工处理完成：数据分析助手" },
+            }),
+          ],
         }),
       }),
     );
+    expect(emitEvent).toHaveBeenNthCalledWith(
+      5,
+      expect.objectContaining({
+        messageId: "delegation-1-result",
+        parentMessageId: "delegation-1",
+        data: expect.objectContaining({
+          contentType: "2020",
+          orderId: "delegation-1-result",
+          parentOrderId: "delegation-1",
+        }),
+      }),
+    );
+    const inputBlock = JSON.parse(
+      emitEvent.mock.calls[1][0].data.choices[0].delta.content,
+    );
+    expect(inputBlock.title).toBe("Input");
+    expect(JSON.parse(inputBlock.json)).toEqual({
+      agentId: "agent-1",
+      agentName: "数据分析助手",
+      task: "请分析销售数据",
+      expectedOutput: "结构化结论",
+      attachments: [{ id: "attachment-1", name: "sales.csv", mediaType: "text/csv" }],
+    });
+    const outputBlock = JSON.parse(
+      emitEvent.mock.calls[4][0].data.choices[0].delta.content,
+    );
+    expect(outputBlock.title).toBe("Output");
+    expect(JSON.parse(outputBlock.json)).toEqual({
+      agentId: "agent-1",
+      agentName: "数据分析助手",
+      status: "completed",
+      artifactCount: 1,
+    });
     expect(result.content).toBe("汇总答案");
+  });
+
+  it("emits a structured Output block with errorDetail for failed delegations", async () => {
+    const emitEvent = vi.fn(async () => undefined);
+    const worker = createWorker({
+      createSessionRun: vi.fn(async () => run()),
+      cancelRun: vi.fn(),
+      streamEvents: () => failedDelegationEvents(),
+      emitEvent,
+    });
+
+    await expect(worker.processCommand(askCommand(), contextMock())).rejects.toThrow(
+      "下游数字员工不可用",
+    );
+
+    expect(emitEvent).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        messageId: "delegation-failed",
+        data: expect.objectContaining({
+          contentType: "3009",
+          status: "_ERROR_",
+        }),
+      }),
+    );
+    const outputBlock = JSON.parse(
+      emitEvent.mock.calls[3][0].data.choices[0].delta.content,
+    );
+    expect(outputBlock.title).toBe("Output");
+    expect(JSON.parse(outputBlock.json)).toEqual({
+      agentId: "agent-2",
+      agentName: "失败员工",
+      status: "failed",
+      artifactCount: 0,
+      error: "下游数字员工不可用",
+      errorDetail: "下游数字员工不可用",
+    });
   });
 
   it("maps an external PAGE interaction to the existing 2010 agent card", async () => {
@@ -770,6 +857,9 @@ async function* delegatedEvents(): AsyncIterable<RunEvent> {
     delegationId: "delegation-1",
     agentId: "agent-1",
     agentName: "数据分析助手",
+    task: "请分析销售数据",
+    expectedOutput: "结构化结论",
+    attachments: [{ id: "attachment-1", name: "sales.csv", mediaType: "text/csv" }],
     status: "RUNNING",
   });
   yield event(3, "delegation.progress", {
@@ -787,12 +877,33 @@ async function* delegatedEvents(): AsyncIterable<RunEvent> {
     agentId: "agent-1",
     agentName: "数据分析助手",
     status: "COMPLETED",
+    resultStatus: "completed",
+    artifactCount: 1,
   });
   yield event(6, "leader.delta", { text: "汇总答案" });
   yield event(7, "run.completed", {
     status: "COMPLETED",
     finalAnswer: "汇总答案",
   });
+}
+
+async function* failedDelegationEvents(): AsyncIterable<RunEvent> {
+  yield event(1, "delegation.started", {
+    delegationId: "delegation-failed",
+    agentId: "agent-2",
+    agentName: "失败员工",
+    task: "执行任务",
+  });
+  yield event(2, "delegation.failed", {
+    delegationId: "delegation-failed",
+    agentId: "agent-2",
+    agentName: "失败员工",
+    status: "FAILED",
+    resultStatus: "failed",
+    artifactCount: 0,
+    error: "下游数字员工不可用",
+  });
+  yield event(3, "run.failed", { error: "下游数字员工不可用" });
 }
 
 async function* pageInteractionEvents(): AsyncIterable<RunEvent> {
