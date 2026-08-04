@@ -25,6 +25,7 @@ import {
   markBaiyingEnhanceColdStartUnavailable,
   resetBaiyingEnhanceColdStartReadiness,
 } from "./cold-start-readiness.js";
+import { registerConnectorSkillFilterProvider } from "./connector-skill-filter.js";
 
 function resolvePluginPath(api: OpenClawPluginApi, raw: string): string {
   if (path.isAbsolute(raw)) {
@@ -121,6 +122,7 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
   setSharedRedisJsonStore(redisJsonStore);
 
   registerBaiyingAimodelRuntimeProvider(api, pluginCfg);
+  registerConnectorSkillFilterProvider(api);
 
   registerBaiyingHttpRoutes({ api, registry });
 
