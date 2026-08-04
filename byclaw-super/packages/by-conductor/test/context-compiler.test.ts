@@ -56,7 +56,7 @@ describe("ContextCompiler", () => {
     ]);
   });
 
-  it("injects the canonical by-framework session workspace and rejects the Leader temp cwd", () => {
+  it("injects the canonical by-framework workspace and delegates all file operations", () => {
     const compiled = new ContextCompiler().compile({
       baseSystemPrompt: "You are the Supervisor.",
       externalSessionId: "11034160",
@@ -68,6 +68,18 @@ describe("ContextCompiler", () => {
     expect(compiled.dynamicSystemContext).toContain("<session_workspace>");
     expect(compiled.dynamicSystemContext).toContain(
       'Canonical session workspace: "/by/.sessions/11034160/"',
+    );
+    expect(compiled.dynamicSystemContext).toContain(
+      'Files provided by the user are normally available at "/by/.sessions/11034160/{fileName}"',
+    );
+    expect(compiled.dynamicSystemContext).toContain(
+      "For any task involving files—including locating, listing, reading, parsing, editing, converting, or creating a file—do not perform the file operation yourself.",
+    );
+    expect(compiled.dynamicSystemContext).toContain(
+      "Delegate it to a suitable authorized specialist via delegateAgent.",
+    );
+    expect(compiled.dynamicSystemContext).toContain(
+      "explicitly include the canonical session workspace and the relevant file path",
     );
     expect(compiled.dynamicSystemContext).toContain(
       "never include it in a delegated task",
