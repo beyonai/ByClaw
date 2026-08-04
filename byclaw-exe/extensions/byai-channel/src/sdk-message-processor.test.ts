@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("openclaw/plugin-sdk/media-runtime", () => ({
   detectMime: vi.fn(async () => "application/octet-stream"),
@@ -29,10 +29,7 @@ vi.mock("./diagnostics.js", () => ({
 }));
 // 头部原有SDK会话溢出媒体处理导入
 import type { GatewayDataEmitter } from "@byclaw/by-framework";
-import {
-  deliverReplyToAgentViaSdk,
-  resolveConnectorSkillFilterForDispatch,
-} from "./sdk-message-processor.js";
+import { deliverReplyToAgentViaSdk } from "./sdk-message-processor.js";
 import {
   clearActiveSdkRequestByTarget,
   getAgentRunEndPromiseResolver,
@@ -45,12 +42,6 @@ import { setByaiRuntime } from "./runtime.js";
 import type { ResolvedByaiAccount } from "./types.js";
 // 新版本新增导入（冲突右侧）
 import { isOpenClawContextOverflowDispatchError } from "./dispatch-error.js";
-import { setConnectorSkillFilterResolver } from "../../shared/src/connector-skill-filter-runtime.js";
-import { normalizeConnectorAuthorization } from "./connector-authorization.js";
-
-afterEach(() => {
-  setConnectorSkillFilterResolver(undefined);
-});
 
 // 冲突HEAD：SDK自动续答不携带原始媒体的测试套件
 describe("deliverReplyToAgentViaSdk overflow continuation media handling", () => {
@@ -72,7 +63,6 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
     const contexts: Array<Record<string, unknown>> = [];
     const skillFilters: Array<string[] | undefined> = [];
     let dispatchCount = 0;
-    setConnectorSkillFilterResolver(async () => ["dws", "ordinary-skill"]);
 
     setByaiRuntime({
       agent: {
@@ -176,10 +166,7 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
     expect(contexts[1]?.RawBody).toContain("上一轮回答因对话达到上下文窗口上限而被截断");
     expect(contexts[1]).not.toHaveProperty("MediaPath");
     expect(contexts[1]).not.toHaveProperty("MediaPaths");
-    expect(skillFilters).toEqual([
-      ["dws", "ordinary-skill"],
-      ["dws", "ordinary-skill"],
-    ]);
+    expect(skillFilters).toEqual([undefined, undefined]);
     expect(emittedStates).toContainEqual(expect.objectContaining({ state: "" }));
 
     clearActiveSdkRequestByTarget(account.accountId, "test-agent:user-media");
@@ -213,82 +200,5 @@ describe("isOpenClawContextOverflowDispatchError", () => {
       false,
     );
     expect(isOpenClawContextOverflowDispatchError("provider returned HTTP 401")).toBe(false);
-  });
-});
-
-describe("resolveConnectorSkillFilterForDispatch", () => {
-  it("does not resolve a filter for legacy messages without connector authorization", async () => {
-    const resolveFilter = vi.fn(async () => ["dws"]);
-
-    await expect(
-      resolveConnectorSkillFilterForDispatch({
-        agentId: "test-agent",
-        authConnectorList: undefined,
-        resolveFilter,
-      }),
-    ).resolves.toBeUndefined();
-    expect(resolveFilter).not.toHaveBeenCalled();
-  });
-
-  it("fails closed when the connector skill filter provider is unavailable", async () => {
-    const warn = vi.fn();
-
-    await expect(
-      resolveConnectorSkillFilterForDispatch({
-        agentId: "test-agent",
-        authConnectorList: { dws: true, fws: false },
-        log: { warn },
-        resolveFilter: async () => undefined,
-      }),
-    ).resolves.toEqual([]);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("provider unavailable"));
-  });
-
-  it("fails closed when the connector skill filter provider throws", async () => {
-    const warn = vi.fn();
-
-    await expect(
-      resolveConnectorSkillFilterForDispatch({
-        agentId: "test-agent",
-        authConnectorList: { fws: false },
-        log: { warn },
-        resolveFilter: async () => {
-          throw new Error("provider failed");
-        },
-      }),
-    ).resolves.toEqual([]);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("provider failed"));
-  });
-
-  it("fails closed when the connector skill filter provider returns an invalid value", async () => {
-    const warn = vi.fn();
-
-    await expect(
-      resolveConnectorSkillFilterForDispatch({
-        agentId: "test-agent",
-        authConnectorList: { fws: false },
-        log: { warn },
-        resolveFilter: async () => "dws" as unknown as string[],
-      }),
-    ).resolves.toEqual([]);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("invalid result"));
-  });
-
-  it("fails closed without calling the provider for oversized disabled policies", async () => {
-    const resolveFilter = vi.fn(async () => ["ordinary-skill"]);
-    const authorization = normalizeConnectorAuthorization(
-      Object.fromEntries(
-        Array.from({ length: 65 }, (_, index) => [`disabled-${index}`, false]),
-      ),
-    );
-
-    await expect(
-      resolveConnectorSkillFilterForDispatch({
-        agentId: "test-agent",
-        authConnectorList: authorization,
-        resolveFilter,
-      }),
-    ).resolves.toEqual([]);
-    expect(resolveFilter).not.toHaveBeenCalled();
   });
 });

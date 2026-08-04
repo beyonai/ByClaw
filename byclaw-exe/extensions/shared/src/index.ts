@@ -19,4 +19,3 @@ export * from "./delegated-tool-details.js";
 export * from "./langfuse-observation.js";
 export * from "./langfuse-session-backfill.js";
 export * from "./langfuse-tool-observation.js";
-export * from "./connector-skill-filter-runtime.js";
