@@ -147,19 +147,15 @@ describe("应用配置", () => {
     ]);
   });
 
-  it("解析三方员工直连灰度和安全配置", () => {
+  it("解析三方员工直连安全配置", () => {
     const config = loadConfig({
       ...required,
-      THIRD_PARTY_AGENT_DIRECT_MODE: "allowlist",
-      THIRD_PARTY_AGENT_ALLOWLIST: "1001, 1002,1001",
       THIRD_PARTY_AGENT_ALLOWED_HOSTS:
         "Vendor.EXAMPLE.com, a2a.example.com",
       THIRD_PARTY_AGENT_REQUEST_TIMEOUT_MS: "45000",
     });
 
     expect(config.thirdPartyAgents).toMatchObject({
-      directMode: "allowlist",
-      allowlist: ["1001", "1002"],
       allowedExternalHosts: [
         "vendor.example.com",
         "a2a.example.com",
