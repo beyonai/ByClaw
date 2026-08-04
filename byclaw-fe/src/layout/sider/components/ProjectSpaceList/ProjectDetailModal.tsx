@@ -62,8 +62,6 @@ import {
   deleteScanSource,
   getOperationRequirement,
   getProject,
-  getTaskChanges,
-  getTaskFileDiff,
   listProjectMembers,
   listOperationAccounts,
   loginOperationAccount,
@@ -90,8 +88,6 @@ import {
   updateScanSource,
   executeOperationTask,
   type DevloopProjectSpaceFile,
-  type DevloopTaskChanges,
-  type DevloopTaskFileDiff,
 } from '@/service/devloop';
 import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
 import { queryMyCreatedAndSubscribedAgentsV2 } from '@/service/digitalEmployees';
@@ -160,6 +156,7 @@ import Integration from './Integration';
 import RequirementSplitModal from './RequirementSplitModal';
 import type { SplitTaskDraft } from './RequirementSplitModal/types';
 import ListEndMessage from './ListEndMessage';
+import ReposTab from './ReposTab';
 import styles from './index.module.less';
 import operationStyles from './operation/index.module.less';
 
@@ -592,44 +589,6 @@ const CHANNEL_SOURCE_PAGE_SIZE = 30;
 // 后端尚未限制手工需求的两个长文本字段，前端统一限制为 1000 字，避免无界内容写入任务提示词。
 const MANUAL_REQUIREMENT_CONTENT_MAX_LENGTH = 1000;
 
-// GitHub 文件变更状态 -> 角标字母/配色,沿用常见 git 管理视觉:新增绿/修改黄/删除红/重命名蓝。
-const FILE_CHANGE_META: Record<string, { letter: string; labelId: string; className: string }> = {
-  added: { letter: 'A', labelId: 'codeChanges.status.added', className: 'fileChangeAdded' },
-  modified: { letter: 'M', labelId: 'codeChanges.status.modified', className: 'fileChangeModified' },
-  changed: { letter: 'M', labelId: 'codeChanges.status.modified', className: 'fileChangeModified' },
-  removed: { letter: 'D', labelId: 'codeChanges.status.removed', className: 'fileChangeRemoved' },
-  renamed: { letter: 'R', labelId: 'codeChanges.status.renamed', className: 'fileChangeRenamed' },
-  copied: { letter: 'C', labelId: 'codeChanges.status.copied', className: 'fileChangeRenamed' },
-};
-
-const getFileChangeMeta = (status?: string) =>
-  FILE_CHANGE_META[(status || 'modified').toLowerCase()] || FILE_CHANGE_META.modified;
-
-// 从完整路径拆出文件名与所在目录,分别加粗/弱化展示。
-const splitFilePath = (path: string) => {
-  const idx = path.lastIndexOf('/');
-  return idx >= 0 ? { name: path.slice(idx + 1), dir: path.slice(0, idx) } : { name: path, dir: '' };
-};
-
-// unified diff 行类型:git diff 输出按行首字符分类,供 modal 逐行着色(参考 git 客户端)。
-type DiffLineType = 'meta' | 'hunk' | 'add' | 'del' | 'context';
-
-const classifyDiffLine = (line: string): DiffLineType => {
-  if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ')) {
-    return 'meta';
-  }
-  if (line.startsWith('@@')) return 'hunk';
-  if (line.startsWith('+')) return 'add';
-  if (line.startsWith('-')) return 'del';
-  return 'context';
-};
-
-// 把 unified diff 文本解析为带类型的行数组;meta/无内容行过滤掉文件头噪音只留必要信息。
-const parseDiffLines = (diff?: string | null): { type: DiffLineType; text: string }[] => {
-  if (!diff) return [];
-  return diff.split('\n').map((text) => ({ type: classifyDiffLine(text), text }));
-};
-
 const cronPresets = [
   { value: '*/1 * * * *', labelId: 'source.cron.everyOneMinute' },
   { value: '*/5 * * * *', labelId: 'source.cron.everyFiveMinutes' },
@@ -852,13 +811,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [sessionFilesLoadingMap, setSessionFilesLoadingMap] = useState<Record<string, boolean>>({});
   const [resourceChildrenByPath, setResourceChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
   const [resourceExpandedKeys, setResourceExpandedKeys] = useState<React.Key[]>([]);
-  // 资源 tab 的“代码变更”卡片:按当前会话(任务)拉取远程分支相对基线的文件变更。
-  const [taskChanges, setTaskChanges] = useState<DevloopTaskChanges | null>(null);
-  const [taskChangesLoading, setTaskChangesLoading] = useState(false);
-  // 代码变更文件 diff modal:点文件行拉取该文件 unified diff 并弹窗逐行渲染。
-  const [diffModalFile, setDiffModalFile] = useState<string | null>(null);
-  const [diffModalData, setDiffModalData] = useState<DevloopTaskFileDiff | null>(null);
-  const [diffModalLoading, setDiffModalLoading] = useState(false);
   const [resourceRenameOpen, setResourceRenameOpen] = useState(false);
   const [resourceRenameTarget, setResourceRenameTarget] = useState<FileBrowserItem | null>(null);
   const [resourceRenameLoading, setResourceRenameLoading] = useState(false);
@@ -1008,6 +960,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   });
   // 研发项目展示扫描需求；运营项目展示独立运营需求，两者共用需求页签但数据链路隔离。
   const showRequirementsTab = isDevelopProject || isOperationProject;
+  const showResourcesTab = !!activeChatSessionId;
+  const showReposTab = showRequirementsTab && !!activeChatSessionId;
   const showMembersTab = isDevelopProject || isOperationProject || !!project?.sharedFlag;
   const canEnterDetailTaskSession = useMemo(
     () => isCurrentUserTaskAssignee(detailTask, userInfo),
@@ -2139,50 +2093,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
     }
   }, [projectId, t]);
 
-  // 代码变更按当前会话(任务)拉取:远程分支相对基线的文件 diff。切换会话时重取。
-  const fetchTaskChanges = useCallback(async (sessionId?: string | number | null) => {
-    if (!sessionId) {
-      setTaskChanges(null);
-      return;
-    }
-    setTaskChangesLoading(true);
-    try {
-      const res = await getTaskChanges(Number(sessionId));
-      setTaskChanges(res || null);
-    } catch (error) {
-      console.error('Failed to load task changes:', error);
-      setTaskChanges(null);
-    } finally {
-      setTaskChangesLoading(false);
-    }
-  }, []);
-
-  // 点变更文件行:打开 diff modal 并拉取该文件的本地 unified diff。
-  const openFileDiff = useCallback(
-    async (filePath: string) => {
-      const sessionId = currentResourceSession?.sessionId;
-      if (!sessionId) return;
-      setDiffModalFile(filePath);
-      setDiffModalData(null);
-      setDiffModalLoading(true);
-      try {
-        const res = await getTaskFileDiff(Number(sessionId), filePath);
-        setDiffModalData(res || null);
-      } catch (error) {
-        console.error('Failed to load file diff:', error);
-        setDiffModalData(null);
-      } finally {
-        setDiffModalLoading(false);
-      }
-    },
-    [currentResourceSession?.sessionId]
-  );
-
-  const closeFileDiff = useCallback(() => {
-    setDiffModalFile(null);
-    setDiffModalData(null);
-  }, []);
-
   const fetchSessionResourceFiles = useCallback(
     async (sessionId: string) => {
       if (!fileResourceId || !sessionId) return;
@@ -2706,7 +2616,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   }, [fileResourceId, projectId]);
 
   useEffect(() => {
-    if (activeTab !== 'resources') return;
+    if (activeTab !== 'resources' && activeTab !== 'repos') return;
     void fetchProjectResourceSessions();
   }, [activeTab, fetchProjectResourceSessions]);
 
@@ -2714,12 +2624,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
     if (activeTab !== 'resources') return;
     void fetchSharedResourceFiles();
   }, [activeTab, fetchSharedResourceFiles]);
-
-  // 代码变更只跟当前会话(任务)走,与“会话空间”的当前会话同口径;切会话即重取。仅研发项目拉取。
-  useEffect(() => {
-    if (activeTab !== 'resources' || !isDevelopProject) return;
-    void fetchTaskChanges(currentResourceSession?.sessionId);
-  }, [activeTab, isDevelopProject, currentResourceSession?.sessionId, fetchTaskChanges]);
 
   useEffect(() => {
     if (activeTab !== 'resources' || !fileResourceId) return;
@@ -2800,11 +2704,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
     () => [
       ...(showRequirementsTab ? [{ key: 'requirements', label: t('tabs.requirements') }] : []),
       { key: 'tasks', label: t('tabs.tasks') },
-      { key: 'resources', label: t('tabs.resources') },
+      ...(showResourcesTab ? [{ key: 'resources', label: t('tabs.resources') }] : []),
+      ...(showReposTab ? [{ key: 'repos', label: t('tabs.repos') }] : []),
       ...(showMembersTab ? [{ key: 'members', label: t('tabs.members') }] : []),
       ...(showRequirementsTab ? [{ key: 'integration', label: t('tabs.integration') }] : []),
     ],
-    [showMembersTab, showRequirementsTab, t]
+    [showMembersTab, showResourcesTab, showReposTab, showRequirementsTab, t]
   );
 
   const detailPanelTabCountClass = styles[`projectDetailPanelTabCount${tabItems.length}`] || '';
@@ -4544,199 +4449,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
     </div>
   );
 
-  const renderCodeChanges = () => {
-    if (!isDevelopProject) return null;
-    const empty = (id: string, values?: Record<string, string | number>) => (
-      <div className={styles.codeChangeEmpty}>
-        {taskChangesLoading ? (
-          <Spin size="small" />
-        ) : (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t(id, values)} />
-        )}
-      </div>
-    );
-
-    let body: React.ReactNode;
-    const status = taskChanges?.status;
-    if (!currentResourceSession?.sessionId) {
-      body = empty('codeChanges.selectSession');
-    } else if (taskChangesLoading && !taskChanges) {
-      body = empty('codeChanges.loading');
-    } else if (!taskChanges || status === 'http_error') {
-      body = taskChanges?.message ? (
-        <div className={styles.codeChangeEmpty}>
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={taskChanges.message} />
-        </div>
-      ) : (
-        empty('codeChanges.unavailable')
-      );
-    } else if (status === 'no_repo') {
-      body = empty('codeChanges.noRepository');
-    } else if (status === 'no_token') {
-      body = empty('codeChanges.noToken');
-    } else if (status === 'branch_not_found') {
-      body = empty('codeChanges.branchNotFound', { branch: taskChanges.headBranch || '-' });
-    } else if (!taskChanges.files?.length) {
-      body = empty('codeChanges.noChanges');
-    } else {
-      body = (
-        <div className={styles.codeChangeList}>
-          {taskChanges.files.map((file) => {
-            const meta = getFileChangeMeta(file.status);
-            const { name, dir } = splitFilePath(file.filename);
-            const renamedFrom =
-              file.status?.toLowerCase() === 'renamed' && file.previousFilename ? file.previousFilename : '';
-            // 本地变更点行看 diff(弹 modal);远程变更(有 blobUrl)整行超链到 GitHub 文件页。
-            const isLocal = taskChanges?.source === 'local';
-            const inner = (
-              <>
-                <span className={`${styles.codeChangeBadge} ${styles[meta.className]}`} title={t(meta.labelId)}>
-                  {meta.letter}
-                </span>
-                <div className={styles.codeChangeInfo}>
-                  <strong className={styles.codeChangeName}>{name}</strong>
-                  {/* 深层目录路径:整段展示并挂 title,过长时 CSS 头部省略(rtl)保留尾部目录名,hover 看全路径。 */}
-                  <span
-                    className={styles.codeChangePath}
-                    title={renamedFrom ? `${renamedFrom} → ${file.filename}` : file.filename}
-                  >
-                    {renamedFrom ? `${renamedFrom} → ${file.filename}` : dir || file.filename}
-                  </span>
-                </div>
-                <div className={styles.codeChangeStat}>
-                  {file.additions > 0 && <span className={styles.codeChangeAdd}>+{file.additions}</span>}
-                  {file.deletions > 0 && <span className={styles.codeChangeDel}>-{file.deletions}</span>}
-                </div>
-              </>
-            );
-            if (file.blobUrl) {
-              return (
-                <a
-                  className={`${styles.codeChangeItem} ${styles.codeChangeItemLink}`}
-                  key={file.filename}
-                  href={file.blobUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {inner}
-                </a>
-              );
-            }
-            if (isLocal) {
-              return (
-                <button
-                  type="button"
-                  className={`${styles.codeChangeItem} ${styles.codeChangeItemLink} ${styles.codeChangeItemButton}`}
-                  key={file.filename}
-                  onClick={() => openFileDiff(file.filename)}
-                >
-                  {inner}
-                </button>
-              );
-            }
-            return (
-              <div className={styles.codeChangeItem} key={file.filename}>
-                {inner}
-              </div>
-            );
-          })}
-        </div>
-      );
-    }
-
-    const branchLabel = taskChanges?.headBranch || currentResourceSession?.sessionName || '';
-    return (
-      <div className={styles.codeChangeCard}>
-        <div className={styles.codeChangeHeader}>
-          <div className={styles.codeChangeHeaderMain}>
-            <strong>{t('codeChanges.title')}</strong>
-            {branchLabel ? (
-              // 分支名即 GitHub 入口:有 compareUrl 就超链到整体比对页,否则纯文本展示。
-              taskChanges?.compareUrl ? (
-                <a
-                  className={`${styles.codeChangeBranch} ${styles.codeChangeBranchLink}`}
-                  href={taskChanges.compareUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={t('codeChanges.openInGitHub')}
-                >
-                  {branchLabel}
-                </a>
-              ) : (
-                <span className={styles.codeChangeBranch}>{branchLabel}</span>
-              )
-            ) : null}
-          </div>
-          {status === 'ok' && taskChanges?.files?.length ? (
-            <span className={styles.codeChangeCount}>{taskChanges.files.length}</span>
-          ) : null}
-          <button
-            type="button"
-            className={styles.codeChangeRefresh}
-            onClick={() => void fetchTaskChanges(currentResourceSession?.sessionId)}
-            aria-label="refresh"
-          >
-            <ReloadOutlined spin={taskChangesLoading} />
-          </button>
-        </div>
-        {body}
-      </div>
-    );
-  };
-
-  // 文件 diff modal:逐行渲染 unified diff,行首 +/-/@@ 分别着色,像 git 客户端。
-  const renderFileDiffModal = () => {
-    const open = !!diffModalFile;
-    const lines = parseDiffLines(diffModalData?.diff);
-    const status = diffModalData?.status;
-    const hasDiff = status === 'ok' && lines.some((l) => l.type === 'add' || l.type === 'del');
-    const fileName = diffModalFile ? splitFilePath(diffModalFile).name : '';
-    return (
-      <Modal
-        open={open}
-        onCancel={closeFileDiff}
-        footer={null}
-        width={900}
-        title={
-          <div className={styles.diffModalTitle}>
-            <span className={styles.diffModalName}>{fileName}</span>
-            {diffModalFile ? <span className={styles.diffModalPath}>{diffModalFile}</span> : null}
-          </div>
-        }
-        className={styles.diffModal}
-      >
-        {diffModalLoading ? (
-          <div className={styles.diffModalEmpty}>
-            <Spin />
-          </div>
-        ) : !diffModalData || status !== 'ok' ? (
-          <div className={styles.diffModalEmpty}>{diffModalData?.message || t('codeChanges.diffUnavailable')}</div>
-        ) : !hasDiff ? (
-          <div className={styles.diffModalEmpty}>{t('codeChanges.diffEmpty')}</div>
-        ) : (
-          <div className={styles.diffModalBody}>
-            {lines.map((line, idx) => {
-              if (line.type === 'meta') return null;
-              const cls =
-                line.type === 'add'
-                  ? styles.diffLineAdd
-                  : line.type === 'del'
-                    ? styles.diffLineDel
-                    : line.type === 'hunk'
-                      ? styles.diffLineHunk
-                      : styles.diffLineContext;
-              return (
-                <div className={`${styles.diffLine} ${cls}`} key={idx}>
-                  {line.text || ' '}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Modal>
-    );
-  };
-
   const renderResources = () => {
     const currentSessionFiles = currentResourceSession?.sessionId
       ? sessionFilesMap[`${currentResourceSession.sessionId}`] || []
@@ -4821,8 +4533,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
           getActionItems={getSessionResourceFileActionItems}
           onAction={handleResourceFileAction}
         />
-        {renderCodeChanges()}
-        {renderFileDiffModal()}
       </div>
     );
   };
@@ -5294,6 +5004,18 @@ const ProjectDetailPanel: React.FC<Props> = ({
       return renderTasks();
     }
     if (activeTab === 'resources') return renderResources();
+    if (activeTab === 'repos' && showReposTab) {
+      return (
+        <ReposTab
+          projectId={projectId}
+          resourceId={fileResourceId}
+          sessionId={currentResourceSession?.sessionId}
+          sessionName={currentResourceSession?.sessionName}
+          codeChangesEnabled={isDevelopProject}
+          onNodeClick={handleResourceItemClick}
+        />
+      );
+    }
     if (activeTab === 'integration') {
       if (showRequirementsTab) return <Integration active projectId={projectId} repos={repos} />;
       return renderTasks();

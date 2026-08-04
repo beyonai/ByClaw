@@ -562,6 +562,25 @@ public class ProjectApplicationService {
     }
 
     /**
+     * 查询项目关联的代码仓库列表。
+     *
+     * @param projectId 项目 ID，必填
+     * @return 项目仓库列表
+     */
+    public List<ProjectRepo> listProjectRepos(Long projectId) {
+        if (projectId == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.id.required");
+        }
+        Project project = projectService.findById(projectId);
+        if (project == null || DeleteFlag.DELETED.equals(project.getDeleteFlag())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.not.found");
+        }
+        LambdaQueryWrapper<ProjectRepo> repoWrapper = new LambdaQueryWrapper<>();
+        repoWrapper.eq(ProjectRepo::getProjectId, projectId);
+        return projectRepoMapper.selectList(repoWrapper);
+    }
+
+    /**
      * 规范化项目名称。
      *
      * @param projectName 原始名称

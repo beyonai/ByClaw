@@ -557,6 +557,19 @@
   background: #fff;
 }
 
+// 主文件树与替代视图始终保留节点，只切换可见性，避免返回文件树时丢失展开和输入状态。
+.fileSpacePrimaryContent {
+  display: contents;
+}
+
+.fileSpaceAlternateContent {
+  display: block;
+}
+
+.fileSpaceContentHidden {
+  display: none;
+}
+
 // 任务成果等抽屉场景使用剩余可用高度，文件树内部滚动以保留持续浏览体验。
 .fileSpaceBlockFill {
   flex: 1;

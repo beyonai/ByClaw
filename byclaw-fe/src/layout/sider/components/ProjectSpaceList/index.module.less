@@ -2051,6 +2051,63 @@
   gap: 12px;
 }
 
+.detailReposEmpty {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.detailRepoSearch {
+  padding: 8px 10px;
+  border-bottom: 1px solid #edf1f7;
+}
+
+.repoChangesButton {
+  position: relative;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #728096;
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+
+  &:hover,
+  &.repoChangesButtonActive {
+    color: #246bfe;
+    background: #eaf2ff;
+  }
+}
+
+.repoChangesCount {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border: 2px solid #f7f9fc;
+  border-radius: 9px;
+  color: #fff;
+  background: #3493b9;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+}
+
+.codeChangeCard.repoCodeChangeCard {
+  border: 0;
+  border-radius: 0;
+}
+
 // 代码变更卡片对齐共享文件空间的边框、标题栏和内容留白，保留 Git 状态信息。
 .codeChangeCard {
   border: 1px solid #dfe6f0;

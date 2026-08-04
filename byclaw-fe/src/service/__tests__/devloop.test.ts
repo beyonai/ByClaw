@@ -1,4 +1,10 @@
-import { createManualRequirement, getTaskPhases, listRequirementsByProject, listTasks } from '../devloop';
+import {
+  createManualRequirement,
+  getTaskPhases,
+  listProjectRepos,
+  listRequirementsByProject,
+  listTasks,
+} from '../devloop';
 
 jest.mock('@/service/common/request', () => ({
   POST: jest.fn(),
@@ -42,6 +48,12 @@ describe('Devloop task service', () => {
     getTaskPhases(123);
 
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/devloop/task/phases', { sessionId: 123 });
+  });
+
+  it('queries repositories associated with the current project', () => {
+    listProjectRepos(203);
+
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/project/repo/list', { projectId: 203 });
   });
 
   // 覆盖所有手工录入字段（含来源类型和关联仓库）的前后端请求契约。

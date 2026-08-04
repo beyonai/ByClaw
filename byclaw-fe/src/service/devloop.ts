@@ -136,6 +136,16 @@ export type DevloopProjectSpaceFile = {
   shareLink?: string | null;
 };
 
+export type DevloopProjectRepo = {
+  repoId: number;
+  projectId: number;
+  repoFullName: string;
+  repoUrl?: string;
+  defaultBranch?: string;
+  createBy?: string;
+  createTime?: string;
+};
+
 // 项目管理
 export const createProject = (data: DevloopProjectPayload) => POST<any>('/byaiService/project/create', data);
 
@@ -156,6 +166,9 @@ export const createProjectRepo = (data: {
   repoUrl?: string;
   defaultBranch?: string;
 }) => POST<any>('/byaiService/project/repo/create', data);
+
+export const listProjectRepos = (projectId: number) =>
+  POST<DevloopProjectRepo[]>('/byaiService/project/repo/list', { projectId });
 
 export const deleteProjectRepo = (repoId: number) => POST<any>('/byaiService/project/repo/delete', { repoId });
 

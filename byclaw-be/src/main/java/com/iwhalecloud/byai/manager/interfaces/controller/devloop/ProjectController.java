@@ -16,6 +16,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileRenameDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileSaveDto;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
+import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
@@ -166,6 +167,18 @@ public class ProjectController {
     @PostMapping("/repo/create")
     public ResponseUtil<Map<String, Object>> createProjectRepo(@RequestBody ProjectRepoDTO dto) {
         return ResponseUtil.successResponse(projectApplicationService.createProjectRepo(dto));
+    }
+
+    /**
+     * 查询项目关联的代码仓库列表。
+     *
+     * @param params 包含 projectId（必填）
+     * @return 项目仓库列表
+     */
+    @PostMapping("/repo/list")
+    public ResponseUtil<List<ProjectRepo>> listProjectRepos(@RequestBody Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        return ResponseUtil.successResponse(projectApplicationService.listProjectRepos(projectId));
     }
 
     /**
