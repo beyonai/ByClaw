@@ -38,6 +38,10 @@ import { isContextPressureLength } from "./overflow-length.js";
 import { getByaiRuntime } from "./runtime.js";
 import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import { takePromptInjectionSnapshot } from "./prompt-injection-snapshot.js";
+import {
+  buildConnectorPolicyToolCallWarning,
+  summarizeConnectorAuthorization,
+} from "./connector-authorization.js";
 import { buildByclawChatContextToolPrompt } from "./chat-context-prompt.js";
 import {
   consumeWorkspaceReloadHint,
@@ -608,9 +612,14 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
   }): BeforePromptBuildResult => {
     const snapshot = takePromptInjectionSnapshot(ctx.sessionKey);
     if (snapshot?.appendSystemContext) {
-      api.logger.info(
-        `before_prompt_build hook emits (snapshot), sessionId=${ctx.sessionId}, appendSystemContext=${snapshot.appendSystemContext}`,
+      const connectorAuthorization = summarizeConnectorAuthorization(
+        resolveActiveSdkRequestBySessionKey(ctx.sessionKey)?.authConnectorList,
       );
+      if (connectorAuthorization.disabled.length > 0) {
+        api.logger.info(
+          `[byai-channel] connector soft-control prompt injected: sessionKey=${ctx.sessionKey}, disabled=${connectorAuthorization.disabled.join(",")}, skillFilter=off`,
+        );
+      }
       return {
         appendSystemContext: snapshot.appendSystemContext,
       };
@@ -649,12 +658,26 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
       }
     }
     const appendSystemContext = sections.join("\n\n");
-    api.logger.info(
-      `before_prompt_build hook emits, sessionId=${ctx.sessionId}, appendSystemContext=${appendSystemContext}`,
-    );
     return {
       appendSystemContext,
     };
+  });
+
+  api.on("before_tool_call", (event, ctx) => {
+    const request = resolveActiveSdkRequestBySessionKey(ctx.sessionKey);
+    const toolName = event.toolName ?? event.name;
+    const warning =
+      request && typeof toolName === "string"
+        ? buildConnectorPolicyToolCallWarning({
+            sessionKey: request.sessionKey,
+            toolName,
+            authorization: request.authConnectorList,
+          })
+        : undefined;
+    if (warning) {
+      api.logger.warn(warning);
+    }
+    return undefined;
   });
 
   api.on("message_sending", (event: MessageSendingEvent, ctx: MessageHookContext) => {

@@ -71,6 +71,39 @@ export function connectorAuthorizationRequiresFailClosed(
   return authorization?.[CONNECTOR_AUTHORIZATION_OVERFLOW_KEY] === false;
 }
 
+export function summarizeConnectorAuthorization(
+  authorization: ConnectorAuthorizationMap | undefined,
+): {
+  enabled: string[];
+  disabled: string[];
+  failClosed: boolean;
+} {
+  const failClosed = connectorAuthorizationRequiresFailClosed(authorization);
+  if (failClosed) {
+    return { enabled: [], disabled: [], failClosed: true };
+  }
+  const entries = Object.entries(authorization ?? {}).sort(([left], [right]) =>
+    left < right ? -1 : left > right ? 1 : 0,
+  );
+  return {
+    enabled: entries.filter(([, enabled]) => enabled).map(([name]) => name),
+    disabled: entries.filter(([, enabled]) => !enabled).map(([name]) => name),
+    failClosed: false,
+  };
+}
+
+export function buildConnectorPolicyToolCallWarning(params: {
+  sessionKey: string;
+  toolName: string;
+  authorization: ConnectorAuthorizationMap | undefined;
+}): string | undefined {
+  const { disabled } = summarizeConnectorAuthorization(params.authorization);
+  if (disabled.length === 0) {
+    return undefined;
+  }
+  return `[byai-channel] connector soft-control tool activity: sessionKey=${params.sessionKey}, tool=${params.toolName}, disabled=${disabled.join(",")}, skillFilter=off`;
+}
+
 export function buildDisabledConnectorPrompt(
   language: Language | string | undefined,
   authorization: ConnectorAuthorizationMap | undefined,

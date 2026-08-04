@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDisabledConnectorPrompt,
+  buildConnectorPolicyToolCallWarning,
   connectorAuthorizationRequiresFailClosed,
   connectorAuthorizationFromMetadata,
   disabledConnectorSkillNames,
   normalizeConnectorAuthorization,
+  summarizeConnectorAuthorization,
 } from "./connector-authorization.js";
 
 describe("connector authorization", () => {
@@ -96,6 +98,43 @@ describe("connector authorization", () => {
         wecomcli: false,
       }),
     ).toEqual(["fws", "wecomcli"]);
+  });
+
+  it("summarizes connector authorization with deterministic identifier order", () => {
+    expect(
+      summarizeConnectorAuthorization({ dws: false, fws: true, wecomcli: true }),
+    ).toEqual({
+      enabled: ["fws", "wecomcli"],
+      disabled: ["dws"],
+      failClosed: false,
+    });
+  });
+
+  it("builds a safe tool activity warning only when connectors are disabled", () => {
+    expect(
+      buildConnectorPolicyToolCallWarning({
+        sessionKey: "agent:dws:direct:100",
+        toolName: "baiying_call",
+        authorization: { dws: false, fws: true },
+      }),
+    ).toBe(
+      "[byai-channel] connector soft-control tool activity: sessionKey=agent:dws:direct:100, tool=baiying_call, disabled=dws, skillFilter=off",
+    );
+
+    expect(
+      buildConnectorPolicyToolCallWarning({
+        sessionKey: "agent:dws:direct:100",
+        toolName: "baiying_call",
+        authorization: undefined,
+      }),
+    ).toBeUndefined();
+    expect(
+      buildConnectorPolicyToolCallWarning({
+        sessionKey: "agent:dws:direct:100",
+        toolName: "baiying_call",
+        authorization: { dws: true },
+      }),
+    ).toBeUndefined();
   });
 
   it("builds localized unavailable-connector guidance", () => {

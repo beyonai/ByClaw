@@ -30,6 +30,7 @@ import {
   buildPromptInjectionSnapshot,
   setPromptInjectionSnapshot,
 } from "./prompt-injection-snapshot.js";
+import { summarizeConnectorAuthorization } from "./connector-authorization.js";
 import {
   runSessionDispatchExclusive,
   sessionDispatchQueueDepth,
@@ -502,6 +503,12 @@ async function deliverReplyToAgentViaSdkUnderGate(
     beyondToken: message.beyondToken,
     laneMetadata,
   });
+  const connectorAuthorization = summarizeConnectorAuthorization(
+    activeRequest.authConnectorList,
+  );
+  log?.info?.(
+    `[byai-channel] connector soft-control policy: sessionKey=${activeRequest.sessionKey}, enabled=${connectorAuthorization.enabled.join(",")}, disabled=${connectorAuthorization.disabled.join(",")}, skillFilter=off`,
+  );
   recordByclawChatContextMessage({
     id: laneMetadata?.queryMessageId ?? message.messageId,
     role: "user",
