@@ -283,9 +283,6 @@ export const byFrameworkRedisKeys = {
       config,
     );
   },
-  sessionEventDataStream(config?: RedisConnectionConfig): string {
-    return versioned("byai_gateway:session_event:data_stream", "session_event:data_stream", config);
-  },
   traceMeta(traceId: string, config?: RedisConnectionConfig): string {
     return versioned(`byai_gateway:trace:${traceId}:meta`, `trace:{${traceId}}`, config);
   },
