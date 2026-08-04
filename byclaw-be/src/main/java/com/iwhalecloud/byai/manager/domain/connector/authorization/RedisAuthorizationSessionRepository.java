@@ -1,8 +1,10 @@
 package com.iwhalecloud.byai.manager.domain.connector.authorization;
 
+import java.time.Duration;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -18,6 +20,8 @@ public class RedisAuthorizationSessionRepository {
 
     private static final String SESSION_KEY_PREFIX = "connector:authorization:{auth}:session:";
     private static final String USER_INDEX_KEY_PREFIX = "connector:authorization:{auth}:user:";
+    private static final String STATUS_LOCK_KEY_PREFIX = "connector:authorization:{auth}:status-lock:";
+    private static final String START_LOCK_KEY_PREFIX = "connector:authorization:{auth}:start-lock:";
 
     private static final String CREATE_LUA = """
         local ttlMillis = tonumber(ARGV[3])
@@ -78,14 +82,30 @@ public class RedisAuthorizationSessionRepository {
         replacement.connectorCode = current.connectorCode
         replacement.providerCode = current.providerCode
         replacement.providerSessionId = current.providerSessionId
-        replacement.expiresAt = current.expiresAt
+        local replacementPttl = pttl
+        if current.status == 'PENDING' and replacement.status == 'PENDING' then
+            if redis.call('GET', KEYS[2]) ~= current.authorizationId then
+                return 0
+            end
+            local replacementExpiresAt = tonumber(replacement.expiresAt)
+            if not replacementExpiresAt or replacementExpiresAt <= redisNowMillis then
+                return 0
+            end
+            replacement.expiresAt = replacementExpiresAt
+            replacementPttl = replacementExpiresAt - redisNowMillis
+        else
+            replacement.expiresAt = current.expiresAt
+        end
         replacement.version = tonumber(current.version) + 1
         local releasesActiveIndex = replacement.status == 'CONNECTED'
             or replacement.status == 'FAILED'
             or replacement.status == 'EXPIRED'
             or replacement.status == 'CANCELLED'
         redis.call('SET', KEYS[1], cjson.encode(replacement))
-        redis.call('PEXPIRE', KEYS[1], pttl)
+        redis.call('PEXPIRE', KEYS[1], replacementPttl)
+        if not releasesActiveIndex then
+            redis.call('PEXPIRE', KEYS[2], replacementPttl)
+        end
         if releasesActiveIndex then
             local indexedAuthorizationId = redis.call('GET', KEYS[2])
             if indexedAuthorizationId == current.authorizationId then
@@ -129,6 +149,13 @@ public class RedisAuthorizationSessionRepository {
         return redis.call('DEL', KEYS[1])
         """;
 
+    private static final String RELEASE_STATUS_LOCK_LUA = """
+        if redis.call('GET', KEYS[1]) == ARGV[1] then
+            return redis.call('DEL', KEYS[1])
+        end
+        return 0
+        """;
+
     private static final RedisScript<Long> CREATE_SCRIPT = new DefaultRedisScript<>(CREATE_LUA, Long.class);
     private static final RedisScript<Long> COMPARE_AND_SET_STATUS_SCRIPT =
         new DefaultRedisScript<>(COMPARE_AND_SET_STATUS_LUA, Long.class);
@@ -136,6 +163,8 @@ public class RedisAuthorizationSessionRepository {
         new DefaultRedisScript<>(DELETE_SECRETS_LUA, Long.class);
     private static final RedisScript<Long> REMOVE_EXPIRED_SCRIPT =
         new DefaultRedisScript<>(REMOVE_EXPIRED_LUA, Long.class);
+    private static final RedisScript<Long> RELEASE_STATUS_LOCK_SCRIPT =
+        new DefaultRedisScript<>(RELEASE_STATUS_LOCK_LUA, Long.class);
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
@@ -193,6 +222,13 @@ public class RedisAuthorizationSessionRepository {
         return find(authorizationId).filter(session -> userId.equals(session.userId()));
     }
 
+    public boolean hasActiveSession(String userId, Long connectorId) {
+        if (!StringUtils.hasText(userId) || connectorId == null) {
+            return false;
+        }
+        return StringUtils.hasText(redisTemplate.opsForValue().get(userIndexKey(userId, connectorId)));
+    }
+
     public boolean compareAndSetStatus(
             String authorizationId,
             AuthorizationStatus expectedStatus,
@@ -219,6 +255,51 @@ public class RedisAuthorizationSessionRepository {
         }
         Long result = redisTemplate.execute(DELETE_SECRETS_SCRIPT, List.of(sessionKey(authorizationId)));
         return Long.valueOf(1L).equals(result);
+    }
+
+    public Optional<String> tryAcquireStatusLock(String authorizationId, Duration ttl) {
+        if (!StringUtils.hasText(authorizationId)) {
+            return Optional.empty();
+        }
+        return tryAcquireLock(statusLockKey(authorizationId), ttl);
+    }
+
+    public void releaseStatusLock(String authorizationId, String token) {
+        if (!StringUtils.hasText(authorizationId) || !StringUtils.hasText(token)) {
+            return;
+        }
+        redisTemplate.execute(
+            RELEASE_STATUS_LOCK_SCRIPT,
+            List.of(statusLockKey(authorizationId)),
+            token
+        );
+    }
+
+    public Optional<String> tryAcquireStartLock(String userId, Long connectorId, Duration ttl) {
+        if (!StringUtils.hasText(userId) || connectorId == null) {
+            return Optional.empty();
+        }
+        return tryAcquireLock(startLockKey(userId, connectorId), ttl);
+    }
+
+    public void releaseStartLock(String userId, Long connectorId, String token) {
+        if (!StringUtils.hasText(userId) || connectorId == null || !StringUtils.hasText(token)) {
+            return;
+        }
+        redisTemplate.execute(
+            RELEASE_STATUS_LOCK_SCRIPT,
+            List.of(startLockKey(userId, connectorId)),
+            token
+        );
+    }
+
+    private Optional<String> tryAcquireLock(String key, Duration ttl) {
+        if (!StringUtils.hasText(key) || ttl == null || ttl.isZero() || ttl.isNegative()) {
+            return Optional.empty();
+        }
+        String token = UUID.randomUUID().toString();
+        Boolean acquired = redisTemplate.opsForValue().setIfAbsent(key, token, ttl);
+        return Boolean.TRUE.equals(acquired) ? Optional.of(token) : Optional.empty();
     }
 
     private void validateForCreate(RedisAuthorizationSession session) {
@@ -255,6 +336,14 @@ public class RedisAuthorizationSessionRepository {
 
     private String sessionKey(String authorizationId) {
         return SESSION_KEY_PREFIX + authorizationId;
+    }
+
+    private String statusLockKey(String authorizationId) {
+        return STATUS_LOCK_KEY_PREFIX + authorizationId;
+    }
+
+    private String startLockKey(String userId, Long connectorId) {
+        return START_LOCK_KEY_PREFIX + userId + ":" + connectorId;
     }
 
     private String userIndexKey(String userId, Long connectorId) {

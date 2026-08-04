@@ -4,11 +4,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -26,6 +29,7 @@ public class ConnectorManifestCanonicalizer {
     private static final String SCHEMA_VERSION = "1.0";
     private static final int MAX_MANIFEST_BYTES = 64 * 1024;
     private static final Path CONNECTOR_AUTH_ROOT = Path.of("/by/.connector-auth");
+    private static final Pattern ENVIRONMENT_KEY_PATTERN = Pattern.compile("[A-Z_][A-Z0-9_]{0,127}");
     private static final List<String> SENSITIVE_FIELD_PARTS = List.of(
         "secret", "token", "password", "credential", "devicecode", "authorizationcode");
 
@@ -47,7 +51,7 @@ public class ConnectorManifestCanonicalizer {
         }
         try {
             JsonNode root = objectMapper.readTree(manifestJson);
-            validateRoot(root, connector.getConnectorCode());
+            validateRoot(root, connector.getConnectorCode(), connector.getSkillCode());
             return objectMapper.writeValueAsString(canonicalNode(root));
         } catch (InvalidConnectorManifestException e) {
             throw e;
@@ -56,7 +60,23 @@ public class ConnectorManifestCanonicalizer {
         }
     }
 
-    private void validateRoot(JsonNode root, String connectorCode) {
+    public Map<String, String> extractEnvironment(ConnectorInfo connector, String manifestJson) {
+        String canonicalManifest = canonicalize(connector, manifestJson);
+        try {
+            JsonNode environmentNode = objectMapper.readTree(canonicalManifest)
+                .path("authStorage")
+                .path("environment");
+            Map<String, String> environment = new LinkedHashMap<>();
+            environmentNode.fields().forEachRemaining(field ->
+                environment.put(field.getKey(), field.getValue().textValue()));
+            return Collections.unmodifiableMap(environment);
+        }
+        catch (JsonProcessingException e) {
+            throw new InvalidConnectorManifestException("Invalid connector Manifest JSON", e);
+        }
+    }
+
+    private void validateRoot(JsonNode root, String connectorCode, String connectorSkillCode) {
         requireObject(root, "Manifest root");
         rejectSensitiveFields(root);
         requireText(root, "schemaVersion", SCHEMA_VERSION);
@@ -92,13 +112,19 @@ public class ConnectorManifestCanonicalizer {
         Iterator<Map.Entry<String, JsonNode>> environmentFields = environment.fields();
         while (environmentFields.hasNext()) {
             Map.Entry<String, JsonNode> field = environmentFields.next();
+            if (!ENVIRONMENT_KEY_PATTERN.matcher(field.getKey()).matches()) {
+                throw invalid("authStorage.environment key is invalid: " + field.getKey());
+            }
             if (!field.getValue().isTextual() || !StringUtils.hasText(field.getValue().textValue())) {
                 throw invalid("authStorage.environment values must be non-blank strings");
             }
         }
 
         JsonNode skill = requireObject(root.get("skill"), "skill");
-        requireNonBlankText(skill, "code");
+        String manifestSkillCode = requireNonBlankText(skill, "code");
+        if (StringUtils.hasText(connectorSkillCode) && !connectorSkillCode.equals(manifestSkillCode)) {
+            throw invalid("skill.code must equal connector skillCode");
+        }
         requireNonBlankText(skill, "source");
         requireNonBlankText(skill, "installScope");
         requireNonBlankText(skill, "grantScope");

@@ -17,7 +17,7 @@ import AntdIcon from '@/components/AntdIcon';
 import {
   getConnectorAuthorization,
   cancelConnectorAuthorization,
-  queryConnectorList,
+  queryAllConnectors,
   startConnectorAuthorization,
   updateConnectorEnable,
   type ConnectorAuthorization,
@@ -43,8 +43,9 @@ export type Connector = {
 
 type ConnectorControlProps = {
   canAuthorize: boolean;
-  value: Connector[];
-  onChange: (connectors: Connector[]) => void;
+  // 兼容尚未同步升级的调用方；连接器状态只以后端全局开关为准。
+  value?: Connector[];
+  onChange?: (connectors: Connector[]) => void;
 };
 
 // 已有官方图标的连接器按接口编码匹配，其余平台使用统一图标，列表内容完全以后端返回为准。
@@ -81,6 +82,15 @@ export const getConnectorAuthorizationTerminalError = (
   return authorization.errorMessage || fallbackMessage;
 };
 
+const isSafeAuthorizationUrl = (authorizationUrl: string) => {
+  try {
+    const url = new URL(authorizationUrl);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
 const ConnectorIcon = ({ connector }: { connector: Connector }) => (
   <span className={styles.connectorIcon}>{connector.icon}</span>
 );
@@ -108,7 +118,7 @@ const ConnectorSelection = ({ value, onOpen }: { value: Connector[]; onOpen: () 
   );
 };
 
-const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlProps) => {
+const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   // 分别控制设置列表、完整配置、授权说明和真实授权进度的显示状态。
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [configurationOpen, setConfigurationOpen] = useState(false);
@@ -116,8 +126,6 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
   const [authorizingConnector, setAuthorizingConnector] = useState<Connector>();
   // 一次性授权任务由后端创建，包含真实二维码或第三方授权链接。
   const [authorizationSession, setAuthorizationSession] = useState<ConnectorAuthorization>();
-  // 历史已授权与本轮消息选择分离，避免用户每次发消息都被强制附带所有连接器。
-  const [authorizedIds, setAuthorizedIds] = useState<Set<ConnectorId>>(new Set());
   // 列表完全由后端返回，避免请求完成前短暂展示静态假数据。
   const [connectors, setConnectors] = useState<Connector[]>([]);
   const [loadingConnectors, setLoadingConnectors] = useState(false);
@@ -128,6 +136,7 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
   const checkingAuthorizationIdRef = useRef<string>();
   const startAuthorizationGenerationRef = useRef(0);
   const authorizationTimerRef = useRef<number>();
+  const attemptedAuthorizationOpenKeysRef = useRef<Set<string>>(new Set());
   const cancelledAuthorizationIdsRef = useRef<Set<string>>(new Set());
   const hasLoadedInitialConnectorsRef = useRef(false);
 
@@ -175,40 +184,40 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
     if (!canAuthorize) closeLocalAuthorization();
   }, [canAuthorize, closeLocalAuthorization]);
 
-  // value 仅表示本轮聊天实际携带到 payload 的连接器，不等同于账号已完成授权。
-  const selectedIds = useMemo(() => new Set(value.map((item) => item.id)), [value]);
+  const enabledConnectors = useMemo(() => connectors.filter((connector) => connector.enableFlag === 'Y'), [connectors]);
   const previewConnectors = useMemo(() => connectors.slice(0, 3), [connectors]);
-
-  const setSelected = useCallback(
-    (connector: Connector, selected: boolean) => {
-      // 通过受控回调把授权或停用结果交回聊天输入，保证发送 payload 使用最新选择。
-      if (selected) {
-        if (!selectedIds.has(connector.id)) onChange([...value, connector]);
-        return;
-      }
-      onChange(value.filter((item) => item.id !== connector.id));
-    },
-    [onChange, selectedIds, value]
-  );
 
   const completeAuthorization = useCallback(
     (authorization: ConnectorAuthorization) => {
       const connector = connectors.find((item) => item.id === authorization.connectorId);
       if (!connector) return;
 
-      // 仅在后端确认 connected 后回显连接器并允许消息携带该连接器 ID。
+      // 后端确认 connected 后，本地立即回显为全局开启状态。
       clearAuthorizationTimer();
       activeAuthorizationIdRef.current = undefined;
       const enabledConnector = { ...connector, enableFlag: 'Y' as const };
       setConnectors((items) => items.map((item) => (item.id === authorization.connectorId ? enabledConnector : item)));
-      setAuthorizedIds((ids) => new Set([...ids, connector.id]));
-      setSelected(enabledConnector, true);
       setAuthorizationSession(undefined);
       setAuthorizingConnector(undefined);
       message.success(`${connector.name} 已连接`);
     },
-    [clearAuthorizationTimer, connectors, setSelected]
+    [clearAuthorizationTimer, connectors]
   );
+
+  const tryOpenAuthorizationUrl = useCallback((authorization: ConnectorAuthorization, blockedMessage: string) => {
+    if (!authorization.authorizationUrl) return;
+    const openKey = authorization.phase
+      ? `${authorization.authorizationId}|${authorization.phase}`
+      : `${authorization.authorizationId}||${authorization.authorizationUrl}`;
+    if (attemptedAuthorizationOpenKeysRef.current.has(openKey)) return;
+    attemptedAuthorizationOpenKeysRef.current.add(openKey);
+    const authorizationWindow = window.open(authorization.authorizationUrl, '_blank');
+    if (authorizationWindow) {
+      authorizationWindow.opener = null;
+    } else {
+      message.warning(blockedMessage);
+    }
+  }, []);
 
   const checkAuthorizationStatus = useCallback(
     async (silently = false) => {
@@ -229,7 +238,7 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
         if (activeAuthorizationIdRef.current !== authorizationId) return;
 
         if (authorization.status === 'connected') {
-          // 只有查询到最终成功状态，才允许把连接器加入本轮聊天选择。
+          // 只有查询到最终成功状态，才回显为全局开启。
           completeAuthorization(authorization);
           return;
         }
@@ -242,6 +251,13 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
           message.error(terminalError);
           return;
         }
+        if (authorization.authorizationUrl && !isSafeAuthorizationUrl(authorization.authorizationUrl)) {
+          clearAuthorizationTimer();
+          message.error('授权服务返回了无效的授权链接');
+          return;
+        }
+        setAuthorizationSession(authorization);
+        tryOpenAuthorizationUrl(authorization, '浏览器已阻止自动打开，请点击“继续授权”');
         if (!silently) message.info('尚未检测到授权完成，请完成授权后重试');
       } catch {
         if (activeAuthorizationIdRef.current === authorizationId && !silently) {
@@ -254,7 +270,7 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
         }
       }
     },
-    [authorizationSession, clearAuthorizationTimer, completeAuthorization]
+    [authorizationSession, clearAuthorizationTimer, completeAuthorization, tryOpenAuthorizationUrl]
   );
 
   useEffect(() => {
@@ -280,24 +296,9 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
       setLoadingConnectors(true);
     }
     try {
-      // 文档要求分页请求，这里一次取足当前全部连接器，并原样转换为页面数据。
-      const response = await queryConnectorList({ pageNum: 1, pageSize: 100, keyword: '' });
-      const list = response.list || [];
+      const list = await queryAllConnectors();
       const connectorList = list.map(mapConnectorListItem);
       setConnectors(connectorList);
-
-      // enableFlag 非空表示已经绑定，Y 表示默认启用；N 仍可通过“使用”加入本轮消息。
-      const connectedIds = list
-        .filter((item) => item.enableFlag === 'Y' || item.enableFlag === 'N')
-        .map((item) => item.connectorId);
-      setAuthorizedIds(new Set(connectedIds));
-
-      // 将后端标记为 Y 的连接器同步到聊天输入，保证设置面板与聊天框回显一致。
-      onChange(
-        connectorList.filter((connector) =>
-          list.some((item) => item.enableFlag === 'Y' && item.connectorId === connector.id)
-        )
-      );
     } catch {
       if (!hasCachedConnectors) {
         message.error('连接器列表加载失败，请稍后重试');
@@ -309,7 +310,7 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
         setLoadingConnectors(false);
       }
     }
-  }, [connectors.length, onChange]);
+  }, [connectors.length]);
 
   useEffect(() => {
     if (hasLoadedInitialConnectorsRef.current) return;
@@ -338,11 +339,6 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
       setConnectors((items) =>
         items.map((item) => (item.id === connector.id ? { ...item, enableFlag: enabled ? 'Y' : 'N' } : item))
       );
-      if (enabled) {
-        if (!selectedIds.has(connector.id)) onChange([...value, connector]);
-      } else {
-        onChange(value.filter((item) => item.id !== connector.id));
-      }
     } catch {
       message.error('连接器启用状态更新失败，请稍后重试');
     } finally {
@@ -387,8 +383,15 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
       if (!authorization.authorizationUrl && !authorization.qrCodeUrl) {
         throw new Error('授权服务未返回授权链接或二维码');
       }
+      if (authorization.authorizationUrl && !isSafeAuthorizationUrl(authorization.authorizationUrl)) {
+        throw new Error('授权服务返回了无效的授权链接');
+      }
       activeAuthorizationIdRef.current = authorization.authorizationId;
       setAuthorizationSession(authorization);
+      tryOpenAuthorizationUrl(
+        authorization,
+        `浏览器已阻止自动打开，请点击“打开${authorizingConnector.name}授权页”继续`
+      );
     } catch (error) {
       if (startAuthorizationGenerationRef.current !== requestGeneration) return;
       message.error(error instanceof Error ? error.message : '发起授权失败，请稍后重试');
@@ -419,11 +422,8 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
         </span>
       );
     }
-    if (connector.enableFlag === 'Y' || authorizedIds.has(connector.id)) {
-      let switchLabel = `使用${connector.name}`;
-      if (connector.enableFlag === 'Y') {
-        switchLabel = `停用${connector.name}`;
-      }
+    if (connector.enableFlag === 'Y' || connector.enableFlag === 'N') {
+      const switchLabel = connector.enableFlag === 'Y' ? `停用${connector.name}` : `启用${connector.name}`;
       return (
         <Switch
           checked={connector.enableFlag === 'Y'}
@@ -463,9 +463,9 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
 
   return (
     <>
-      {/* 未连接时显示入口；已有连接时直接回显图标并打开同一设置面板。 */}
-      {value.length ? (
-        <ConnectorSelection value={value} onOpen={openSettings} />
+      {/* 未开启时显示入口；全局开启的连接器直接回显图标并打开同一设置面板。 */}
+      {enabledConnectors.length ? (
+        <ConnectorSelection value={enabledConnectors} onOpen={openSettings} />
       ) : (
         <Tooltip title="连接器">
           <button className={styles.trigger} type="button" aria-label="连接器设置" onClick={openSettings}>
@@ -579,7 +579,11 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
           <div className={styles.qrContent}>
             <ConnectorIcon connector={authorizingConnector} />
             <h2>授权 {authorizingConnector.name}</h2>
-            <p>完成平台授权后，本窗口会自动同步授权结果。</p>
+            <p>
+              {authorizationSession.phase === 'app_initialization'
+                ? '请在飞书页面创建并初始化应用，完成后将继续账号授权。'
+                : '完成平台授权后，本窗口会自动同步授权结果。'}
+            </p>
             {authorizationSession.qrCodeUrl ? (
               <img
                 alt={`${authorizingConnector.name}授权二维码`}
@@ -599,7 +603,9 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
                 target="_blank"
                 type="primary"
               >
-                打开 {authorizingConnector.name} 授权页
+                {authorizationSession.phase === 'user_authorization'
+                  ? '继续授权'
+                  : `打开 ${authorizingConnector.name} 授权页`}
               </Button>
             )}
             <Button block loading={checkingAuthorization} type="link" onClick={() => void checkAuthorizationStatus()}>

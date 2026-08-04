@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { ByaiChannelConfigSchema, ByaiSdkConfigSchema } from "./config-schema.js";
+import type { ConnectorAuthorizationMap } from "./connector-authorization.js";
 
 export type ByaiChannelConfig = z.infer<typeof ByaiChannelConfigSchema>;
 export type ByaiSdkConfig = z.infer<typeof ByaiSdkConfigSchema>;
@@ -64,6 +65,8 @@ export interface ByaiSdkInboundMessage {
   languageProvided: boolean;
   /** Optional `metadata.channelExtension` from gateway (object or string). */
   channelExtension?: Record<string, unknown> | string;
+  /** Per-conversation connector skill authorization from `metadata.authConnectorList`. */
+  authConnectorList?: ConnectorAuthorizationMap;
   beyondToken?: string;
   laneMetadata?: ByaiLaneMetadata;
 }

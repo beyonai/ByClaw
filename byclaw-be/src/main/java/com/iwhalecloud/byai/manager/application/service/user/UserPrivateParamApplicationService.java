@@ -61,9 +61,6 @@ public class UserPrivateParamApplicationService {
 
     private static final Pattern PARAM_KEY_PATTERN = Pattern.compile("[A-Z_][A-Z0-9_]{0,127}");
 
-    private static final Pattern CONNECTOR_MANIFEST_KEY_PATTERN =
-        Pattern.compile("CONNECTOR_[A-Z0-9_]+_MANIFEST");
-
     @Autowired
     private UserPrivateParamMapper userPrivateParamMapper;
 
@@ -302,9 +299,6 @@ public class UserPrivateParamApplicationService {
         String key = normalizeKey(request.getKey());
         if (!PARAM_KEY_PATTERN.matcher(key).matches()) {
             throw new IllegalArgumentException("参数名必须符合环境变量格式：[A-Z_][A-Z0-9_]{0,127}");
-        }
-        if (CONNECTOR_MANIFEST_KEY_PATTERN.matcher(key).matches()) {
-            throw new IllegalArgumentException("该参数名为系统保留的连接器 Manifest Key");
         }
     }
 

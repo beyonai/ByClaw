@@ -13,6 +13,7 @@ import {
     upsertChannelRequestContextBySessionKey as upsertSharedChannelRequestContextBySessionKey,
 } from "./channel-request-context.js";
 import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
+import type { ConnectorAuthorizationMap } from "./connector-authorization.js";
 
 const CHANNEL_ID = "byai-channel" as const;
 const DEFAULT_ACCOUNT_KEY = "default";
@@ -186,6 +187,7 @@ export interface ActiveSdkRequest {
   /** Mirrors `ByaiSdkInboundMessage.languageProvided` (LANG env or metadata.language). */
   languageProvided: boolean;
   channelExtension?: Record<string, unknown> | string;
+  authConnectorList?: ConnectorAuthorizationMap;
   abortController?: AbortController;
   beyondToken?: string;
   laneMetadata?: ByaiLaneMetadata;
@@ -747,6 +749,7 @@ export function registerActiveSdkRequest(params: {
     language: Language;
     languageProvided: boolean;
     channelExtension?: Record<string, unknown> | string;
+    authConnectorList?: ConnectorAuthorizationMap;
     abortController?: AbortController;
     beyondToken?: string;
     laneMetadata?: ByaiLaneMetadata;
@@ -801,6 +804,7 @@ export function registerActiveSdkRequest(params: {
         language: params.language,
         languageProvided: params.languageProvided,
         channelExtension: params.channelExtension,
+        authConnectorList: params.authConnectorList,
         abortController: params.abortController,
         beyondToken: params.beyondToken,
         laneMetadata: params.laneMetadata,
@@ -822,6 +826,7 @@ export function registerActiveSdkRequest(params: {
             language: request.language,
             languageProvided: request.languageProvided,
             channelExtension: request.channelExtension,
+            authConnectorList: request.authConnectorList,
             beyondToken: params.beyondToken,
             laneMetadata: request.laneMetadata,
             ...buildSdkEmitMetadata({

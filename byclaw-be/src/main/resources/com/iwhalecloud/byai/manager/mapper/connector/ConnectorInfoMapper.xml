@@ -19,9 +19,7 @@
                a.description,
                CASE
                    WHEN b.connector_id IS NULL THEN NULL
-                   WHEN b.enable_flag = 'Y'
-                       AND (b.expire_time IS NULL OR b.expire_time > CURRENT_TIMESTAMP)
-                       THEN 'Y'
+                   WHEN b.enable_flag = 'Y' THEN 'Y'
                    ELSE 'N'
                END AS enable_flag
         FROM byai_connector_info a
@@ -32,9 +30,7 @@
                                          ROW_NUMBER() OVER (
                                              PARTITION BY connector_id
                                              ORDER BY CASE
-                                                          WHEN enable_flag = 'Y'
-                                                              AND (expire_time IS NULL OR expire_time > CURRENT_TIMESTAMP)
-                                                              THEN 0
+                                                          WHEN enable_flag = 'Y' THEN 0
                                                           ELSE 1
                                                       END,
                                                       update_time DESC NULLS LAST,
@@ -63,7 +59,6 @@
     <select id="selectConnectionsByUserId" resultType="com.iwhalecloud.byai.manager.dto.connector.ConnectorConnectionDto">
         SELECT i.connector_code AS connector_id,
                CASE
-                   WHEN a.expire_time IS NOT NULL AND a.expire_time &lt;= CURRENT_TIMESTAMP THEN 'expired'
                    WHEN a.enable_flag = 'Y' THEN 'connected'
                    ELSE 'disabled'
                END AS status,
@@ -73,12 +68,10 @@
                               auth_name,
                               enable_flag,
                               expire_time,
-                              ROW_NUMBER() OVER (
+                                  ROW_NUMBER() OVER (
                                   PARTITION BY connector_id
                                   ORDER BY CASE
-                                               WHEN enable_flag = 'Y'
-                                                   AND (expire_time IS NULL OR expire_time > CURRENT_TIMESTAMP)
-                                                   THEN 0
+                                               WHEN enable_flag = 'Y' THEN 0
                                                ELSE 1
                                            END,
                                            update_time DESC NULLS LAST,

@@ -36,6 +36,7 @@ public interface UserPrivateParamMapper extends BaseMapper<UserPrivateParam> {
             target.user_id = source.user_id
             AND target.param_source = source.param_source
             AND target.source_ref = source.source_ref
+            AND target.param_key = source.param_key
             AND target.delete_flag = '0'
             AND target.param_source = 'CONNECTOR'
         )
@@ -49,5 +50,5 @@ public interface UserPrivateParamMapper extends BaseMapper<UserPrivateParam> {
             source.update_time, source.delete_flag
         )
         """)
-    int insertConnectorSnapshotIgnoreConflict(@Param("param") UserPrivateParam param);
+    int insertConnectorParamIgnoreConflict(@Param("param") UserPrivateParam param);
 }

@@ -15,7 +15,6 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -605,10 +604,7 @@ public class ScriptService extends AbstractChatProcess {
             .append(String.valueOf(userId));
         metadata.put(Constants.MSG_ROLE, stringBuilder.toString());
         metadata.put("agentId", agentId);
-        Map<String, String> authConnector = new LinkedHashMap<>();
-        connectorAuthService.findEnabledConnectorCodes(userId)
-            .forEach(connectorCode -> authConnector.put(connectorCode, "Y"));
-        metadata.put("authConnector", authConnector);
+        metadata.put("authConnectorList", connectorAuthService.findConnectorEnableStates(userId));
         // 放在外面，一定会写的
         metadata.put("mode", assistantChatDto.getMode());
         // 增加智能体，聊天消息等标题，头像信息

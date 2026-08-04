@@ -29,6 +29,7 @@ export interface ConnectorListPage {
 
 // 后端保存的连接状态；connected 表示可以被当前用户用于聊天检索。
 export type ConnectorConnectionStatus = 'connected' | 'disabled' | 'pending' | 'failed' | 'expired' | 'cancelled';
+export type ConnectorAuthorizationPhase = 'app_initialization' | 'user_authorization';
 
 export interface ConnectorConnection {
   connectorId: ConnectorId;
@@ -48,6 +49,7 @@ export interface ConnectorAuthorization {
   authorizationId: string;
   connectorId: ConnectorId;
   status: ConnectorConnectionStatus;
+  phase?: ConnectorAuthorizationPhase | null;
   // 二维码和跳转地址由后端按平台返回，前端不保存任何三方凭据。
   qrCodeUrl?: string;
   authorizationUrl?: string;
@@ -59,6 +61,27 @@ export interface ConnectorAuthorization {
 // 文档接口：查询连接器列表；request 层会自动解包 code=0 响应中的 data 字段。
 export const queryConnectorList = (data: ConnectorListQuery) =>
   POST<ConnectorListPage>('/byaiService/connector/listAll', data);
+
+// 聊天入口需要完整目录来表达每个连接器的全局启用状态，不能只读取第一页。
+export const queryAllConnectors = async (keyword = ''): Promise<ConnectorListItem[]> => {
+  const pageSize = 100;
+  const firstPage = await queryConnectorList({ pageNum: 1, pageSize, keyword });
+  const totalPages = Number.isFinite(firstPage.totalPages) ? Math.max(1, Math.floor(firstPage.totalPages)) : 1;
+  const remainingPages = await Promise.all(
+    Array.from({ length: totalPages - 1 }, (_, index) => queryConnectorList({ pageNum: index + 2, pageSize, keyword }))
+  );
+  const connectorsById = new Map<ConnectorId, ConnectorListItem>();
+
+  [firstPage, ...remainingPages].forEach((page) => {
+    (page.list || []).forEach((connector) => {
+      if (!connectorsById.has(connector.connectorId)) {
+        connectorsById.set(connector.connectorId, connector);
+      }
+    });
+  });
+
+  return Array.from(connectorsById.values());
+};
 
 export const updateConnectorEnable = (connectorId: ConnectorId, enabled: boolean) =>
   POST<boolean>('/byaiService/connector/enable', { connectorId, enabled });

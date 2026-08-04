@@ -8,6 +8,14 @@ cli_version: ">=1.0.15"
 
 通过 `dws` 命令管理钉钉产品能力。
 
+## 连接器运行时 HOME 隔离（最高优先级）
+
+- OpenClaw 会注入钉钉专属 `DWS_HOME`。每次直接执行 DWS CLI 都必须仅为该子进程映射 HOME，命令形式为 `HOME="$DWS_HOME" dws ...`。
+- 执行本 Skill 的 Python 脚本时同样使用 `HOME="$DWS_HOME" python3 ...`，使脚本内部启动的 `dws` 继承同一用户凭证目录。
+- 本规则适用于父 Skill、子 Skill、scripts 和 references 中出现的所有 DWS 命令；其中展示的裸 `dws ...` 仅表示参数结构，实际执行必须增加上述前缀。
+- `DWS_HOME` 缺失或为空时必须停止执行并报告连接器运行时参数缺失，不得回退到默认 HOME、共享目录或其他用户目录。
+- 不得修改 OpenClaw 全局 `HOME`，不得执行 `export HOME="$DWS_HOME"`；映射只允许作用于当前 DWS CLI 或脚本子进程。`DWS_CONFIG_DIR` 与 `DWS_DISABLE_KEYCHAIN` 继续从当前环境继承。
+
 ## 严格禁止 (NEVER DO)
 - 不要使用 dws 命令以外的方式操作（禁止 curl、HTTP API、浏览器）
 - 不要编造 UUID、ID 等标识符，必须从命令返回中提取

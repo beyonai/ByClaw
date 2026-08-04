@@ -41,6 +41,7 @@ import {
   type RedisClient,
 } from "../../shared/src/redis-compat.js";
 import { releaseCancelledSessionDispatch } from "./session-dispatch-gate.js";
+import { connectorAuthorizationFromMetadata } from "./connector-authorization.js";
 
 export interface ByaiSdkAppOptions {
   account: ResolvedByaiAccount;
@@ -482,6 +483,7 @@ export class ByaiSdkApp {
           | Record<string, unknown>
           | string
           | undefined,
+        authConnectorList: connectorAuthorizationFromMetadata(metadata),
         beyondToken:
           metadata?.["Beyond-Token"] ?? metadata?.request_headers?.["Beyond-Token"] ?? "",
         laneMetadata,

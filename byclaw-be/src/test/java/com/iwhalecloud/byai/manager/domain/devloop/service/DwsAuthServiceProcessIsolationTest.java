@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -69,6 +70,22 @@ class DwsAuthServiceProcessIsolationTest {
             .containsEntry("DWS_CONFIG_DIR", home.resolve("config").toString());
         assertThat(Files.isDirectory(home)).isTrue();
         assertThat(Files.isDirectory(home.resolve("config"))).isTrue();
+    }
+
+    @Test
+    void deviceFlowSuppressesCliBrowserLaunch() throws Exception {
+        FakeProcess process = FakeProcess.deviceFlow("CODE-1");
+        AtomicReference<java.util.List<String>> command = new AtomicReference<>();
+        DwsAuthService.DwsProcessLauncher launcher = builder -> {
+            command.set(builder.command());
+            return process;
+        };
+        DwsAuthService service = isolatedService(launcher, true);
+
+        assertThat(service.startDeviceAuth(11L, AUTHORIZATION_ID).get("success")).isEqualTo(true);
+        assertThat(command.get()).containsExactly("dws", "auth", "login", "--device", "--no-browser", "-y");
+
+        service.cancelDeviceAuth(AUTHORIZATION_ID, 11L);
     }
 
     @Test

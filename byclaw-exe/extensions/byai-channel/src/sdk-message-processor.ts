@@ -31,6 +31,11 @@ import {
   setPromptInjectionSnapshot,
 } from "./prompt-injection-snapshot.js";
 import {
+  connectorAuthorizationLogDisabledIdentifiers,
+  safeConnectorAuthorizationLog,
+  summarizeConnectorAuthorization,
+} from "./connector-authorization.js";
+import {
   runSessionDispatchExclusive,
   sessionDispatchQueueDepth,
 } from "./session-dispatch-gate.js";
@@ -498,10 +503,22 @@ async function deliverReplyToAgentViaSdkUnderGate(
     language: message.language,
     languageProvided: message.languageProvided,
     channelExtension: message.channelExtension,
+    authConnectorList: message.authConnectorList,
     abortController: deps.abortController,
     beyondToken: message.beyondToken,
     laneMetadata,
   });
+  const connectorAuthorization = summarizeConnectorAuthorization(
+    activeRequest.authConnectorList,
+  );
+  const disabledConnectorLogIdentifiers = connectorAuthorizationLogDisabledIdentifiers(
+    activeRequest.authConnectorList,
+  );
+  safeConnectorAuthorizationLog(
+    log,
+    "info",
+    `[byai-channel] connector soft-control policy: sessionKey=${activeRequest.sessionKey}, enabled=${connectorAuthorization.enabled.join(",")}, disabled=${disabledConnectorLogIdentifiers.join(",")}, skillFilter=off`,
+  );
   recordByclawChatContextMessage({
     id: laneMetadata?.queryMessageId ?? message.messageId,
     role: "user",

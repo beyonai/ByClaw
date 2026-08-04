@@ -54,8 +54,9 @@ class LarkCliAuthorizationProviderTest {
 
     private static final String AUTHORIZATION_ID = "auth-lark-1";
     private static final String DEVICE_CODE = "device-secret-code";
-    private static final String APP_SECRET = "deployment-app-secret";
+    private static final String SENSITIVE_MARKER = "sensitive-provider-detail";
     private static final List<String> CONFIG_SHOW = List.of("lark-cli", "config", "show");
+    private static final List<String> CONFIG_INIT_NEW = List.of("lark-cli", "config", "init", "--new");
     private static final List<String> STATUS = List.of("lark-cli", "auth", "status", "--json", "--verify");
     private static final List<String> DEFAULT_LOGIN = List.of(
         "lark-cli", "auth", "login", "--recommend", "--no-wait", "--json");
@@ -73,7 +74,7 @@ class LarkCliAuthorizationProviderTest {
     @BeforeEach
     void setUp() {
         when(workspaceService.resolve(42L, "lark-cli")).thenReturn(WORKSPACE);
-        provider = provider("", "");
+        provider = provider(cliRunner);
     }
 
     @Test
@@ -102,60 +103,109 @@ class LarkCliAuthorizationProviderTest {
     }
 
     @Test
-    void missingDeploymentCredentialsFailOnlyWhenConfigIsNotConfigured() {
+    void unconfiguredWorkspaceStartsPerUserAppInitializationAndReturnsItsUrl() {
+        ManagedProcess initProcess = mock(ManagedProcess.class);
         when(cliRunner.run(eq(CONFIG_SHOW), eq(ENVIRONMENT), isNull(), any(Duration.class)))
             .thenReturn(notConfiguredResult());
-
-        AuthorizationStartResult result = provider.start(startContext(Map.of()));
-
-        assertFailedStart(result, "APP_CONFIG_MISSING");
-        verify(cliRunner).run(eq(CONFIG_SHOW), eq(ENVIRONMENT), isNull(), any(Duration.class));
-        verifyNoMoreInteractions(cliRunner);
-    }
-
-    @Test
-    void initializesConfigWithSecretOnStdinAndNeverInArgv() {
-        provider = provider("cli_app_id", APP_SECRET);
-        List<String> initCommand = List.of(
-            "lark-cli", "config", "init", "--app-id", "cli_app_id",
-            "--app-secret-stdin", "--brand", "feishu");
-        when(cliRunner.run(eq(CONFIG_SHOW), eq(ENVIRONMENT), isNull(), any(Duration.class)))
-            .thenReturn(notConfiguredResult());
-        when(cliRunner.run(eq(initCommand), eq(ENVIRONMENT), eq(APP_SECRET + System.lineSeparator()),
-            any(Duration.class))).thenReturn(new CliResult(0, "{}"));
-        when(cliRunner.run(eq(DEFAULT_LOGIN), eq(ENVIRONMENT), isNull(), any(Duration.class)))
-            .thenReturn(loginResult("verification_url", "https://open.feishu.cn/device", 600));
+        when(cliRunner.start(eq(CONFIG_INIT_NEW), eq(ENVIRONMENT), isNull())).thenReturn(initProcess);
+        when(initProcess.isAlive()).thenReturn(true);
+        when(initProcess.output()).thenReturn(
+            "Open https://open.feishu.cn/page/cli?user_code=temporary-init-code to continue");
 
         AuthorizationStartResult result = provider.start(startContext(Map.of()));
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
-        ArgumentCaptor<List<String>> commands = ArgumentCaptor.forClass(List.class);
-        verify(cliRunner, times(3)).run(commands.capture(), eq(ENVIRONMENT), any(), any(Duration.class));
-        assertThat(commands.getAllValues()).allSatisfy(command -> assertThat(command).doesNotContain(APP_SECRET));
-        assertThat(commands.getAllValues().get(1)).isEqualTo(initCommand);
+        assertThat(result.phase()).isEqualTo("app_initialization");
+        assertThat(result.authorizationUrl()).isEqualTo(
+            "https://open.feishu.cn/page/cli?user_code=temporary-init-code");
+        assertThat(result.providerState()).contains(
+            "\"phase\":\"app_initialization\"",
+            "\"loginCommand\":[\"lark-cli\",\"auth\",\"login\",\"--recommend\",\"--no-wait\",\"--json\"]"
+        );
+        verify(cliRunner).run(eq(CONFIG_SHOW), eq(ENVIRONMENT), isNull(), any(Duration.class));
+        verify(cliRunner).start(eq(CONFIG_INIT_NEW), eq(ENVIRONMENT), isNull());
     }
 
     @Test
-    void configInitializationFailureIsSanitized() {
-        provider = provider("cli_app_id", APP_SECRET);
-        List<String> initCommand = List.of(
-            "lark-cli", "config", "init", "--app-id", "cli_app_id",
-            "--app-secret-stdin", "--brand", "feishu");
+    void completedAppInitializationAdvancesToUserAuthorizationWithANewUrl() {
+        ManagedProcess initProcess = mock(ManagedProcess.class);
+        when(cliRunner.run(eq(CONFIG_SHOW), eq(ENVIRONMENT), isNull(), any(Duration.class)))
+            .thenReturn(notConfiguredResult(), new CliResult(0, "{\"configured\":true}"));
+        when(cliRunner.start(eq(CONFIG_INIT_NEW), eq(ENVIRONMENT), isNull())).thenReturn(initProcess);
+        when(initProcess.isAlive()).thenReturn(false);
+        when(initProcess.output()).thenReturn("https://open.feishu.cn/page/cli?user_code=init-code");
+        when(initProcess.exitCode()).thenReturn(0);
+        when(cliRunner.run(eq(DEFAULT_LOGIN), eq(ENVIRONMENT), isNull(), any(Duration.class)))
+            .thenReturn(loginResult("verification_url", "https://open.feishu.cn/device", 600));
+
+        AuthorizationStartResult start = provider.start(startContext(Map.of()));
+        AuthorizationStatusResult status = provider.queryStatus(
+            sessionContext(AUTHORIZATION_ID, start.providerState()));
+        AuthorizationStatusResult repeatedStatus = provider.queryStatus(
+            sessionContext(AUTHORIZATION_ID, start.providerState()));
+
+        assertThat(status.status()).isEqualTo(AuthorizationStatus.PENDING);
+        assertThat(status.progress()).isNotNull();
+        assertThat(status.progress().phase()).isEqualTo("user_authorization");
+        assertThat(status.progress().authorizationUrl()).isEqualTo("https://open.feishu.cn/device");
+        assertThat(status.progress().providerState()).isEqualTo("{\"deviceCode\":\"" + DEVICE_CODE + "\"}");
+        assertThat(repeatedStatus.progress()).isEqualTo(status.progress());
+        verify(cliRunner, times(1)).run(eq(DEFAULT_LOGIN), eq(ENVIRONMENT), isNull(), any(Duration.class));
+    }
+
+    @Test
+    void processLossOnAnotherInstanceRemainsPendingUntilSharedConfigAppears() {
+        ManagedProcess initProcess = mock(ManagedProcess.class);
+        when(cliRunner.run(eq(CONFIG_SHOW), eq(ENVIRONMENT), isNull(), any(Duration.class)))
+            .thenReturn(notConfiguredResult(), notConfiguredResult());
+        when(cliRunner.start(eq(CONFIG_INIT_NEW), eq(ENVIRONMENT), isNull())).thenReturn(initProcess);
+        when(initProcess.isAlive()).thenReturn(true);
+        when(initProcess.output()).thenReturn("https://open.feishu.cn/page/cli?user_code=init-code");
+        AuthorizationStartResult start = provider.start(startContext(Map.of()));
+        LarkCliAuthorizationProvider anotherInstance =
+            new LarkCliAuthorizationProvider(cliRunner, workspaceService, objectMapper);
+
+        AuthorizationStatusResult status = anotherInstance.queryStatus(
+            sessionContext(AUTHORIZATION_ID, start.providerState()));
+
+        assertThat(status.status()).isEqualTo(AuthorizationStatus.PENDING);
+        assertThat(status.progress()).isNull();
+        verify(cliRunner, never()).run(eq(DEFAULT_LOGIN), eq(ENVIRONMENT), isNull(), any(Duration.class));
+    }
+
+    @Test
+    void rejectsNonOfficialInitializationUrlAndDestroysProcess() {
+        ManagedProcess initProcess = mock(ManagedProcess.class);
         when(cliRunner.run(eq(CONFIG_SHOW), eq(ENVIRONMENT), isNull(), any(Duration.class)))
             .thenReturn(notConfiguredResult());
-        when(cliRunner.run(eq(initCommand), eq(ENVIRONMENT), eq(APP_SECRET + System.lineSeparator()),
-            any(Duration.class))).thenReturn(new CliResult(8, "failure " + APP_SECRET, true));
+        when(cliRunner.start(eq(CONFIG_INIT_NEW), eq(ENVIRONMENT), isNull())).thenReturn(initProcess);
+        when(initProcess.output()).thenReturn("https://attacker.example/page/cli?user_code=stolen");
+        when(initProcess.isAlive()).thenReturn(false);
+        when(initProcess.outputComplete()).thenReturn(true);
 
         AuthorizationStartResult result = provider.start(startContext(Map.of()));
 
-        assertFailedStart(result, "APP_CONFIG_FAILED");
-        assertThat(result.errorMessage()).doesNotContain(APP_SECRET);
-        verify(cliRunner, times(2)).run(anyList(), eq(ENVIRONMENT), any(), any(Duration.class));
+        assertFailedStart(result, "APP_INIT_URL_MISSING");
+        verify(initProcess).destroy();
+    }
+
+    @Test
+    void shutdownDestroysLiveInitializationProcess() {
+        ManagedProcess initProcess = mock(ManagedProcess.class);
+        when(cliRunner.run(eq(CONFIG_SHOW), eq(ENVIRONMENT), isNull(), any(Duration.class)))
+            .thenReturn(notConfiguredResult());
+        when(cliRunner.start(eq(CONFIG_INIT_NEW), eq(ENVIRONMENT), isNull())).thenReturn(initProcess);
+        when(initProcess.isAlive()).thenReturn(true);
+        when(initProcess.output()).thenReturn("https://open.feishu.cn/page/cli?user_code=init-code");
+        provider.start(startContext(Map.of()));
+
+        provider.shutdown();
+
+        verify(initProcess).destroy();
     }
 
     @Test
     void unrelatedConfigCheckFailureDoesNotOverwriteConfig() {
-        provider = provider("cli_app_id", APP_SECRET);
         when(cliRunner.run(eq(CONFIG_SHOW), eq(ENVIRONMENT), isNull(), any(Duration.class)))
             .thenReturn(new CliResult(3, "{\"error\":{\"subtype\":\"permission_denied\"}}"));
 
@@ -267,7 +317,7 @@ class LarkCliAuthorizationProviderTest {
                 .thenReturn(new CliResult(0, "{}"));
             when(runner.run(eq(DEFAULT_LOGIN), eq(ENVIRONMENT), isNull(), any(Duration.class)))
                 .thenReturn(invalidResult);
-            LarkCliAuthorizationProvider isolated = provider(runner, "", "");
+            LarkCliAuthorizationProvider isolated = provider(runner);
 
             AuthorizationStartResult result = isolated.start(startContext(Map.of()));
 
@@ -533,7 +583,7 @@ class LarkCliAuthorizationProviderTest {
         when(process.isAlive()).thenReturn(true, false, false);
         when(process.exitCode()).thenReturn(0);
         LarkCliAuthorizationProvider isolated =
-            new LarkCliAuthorizationProvider(cliRunner, workspaceService, blockingMapper, "", "");
+            new LarkCliAuthorizationProvider(cliRunner, workspaceService, blockingMapper);
         AuthorizationSessionContext session = sessionContext(AUTHORIZATION_ID, validState());
         assertThat(isolated.queryStatus(session).status()).isEqualTo(AuthorizationStatus.PENDING);
         blockProviderState.set(true);
@@ -712,20 +762,16 @@ class LarkCliAuthorizationProviderTest {
     @Test
     void cliExceptionsMapToStableSanitizedFailures() {
         when(cliRunner.run(eq(CONFIG_SHOW), eq(ENVIRONMENT), isNull(), any(Duration.class)))
-            .thenThrow(new IllegalStateException("command with " + APP_SECRET));
+            .thenThrow(new IllegalStateException("command with " + SENSITIVE_MARKER));
 
         AuthorizationStartResult start = provider.start(startContext(Map.of()));
 
         assertFailedStart(start, "APP_CONFIG_CHECK_FAILED");
-        assertThat(start.errorMessage()).doesNotContain(APP_SECRET);
+        assertThat(start.errorMessage()).doesNotContain(SENSITIVE_MARKER);
     }
 
-    private LarkCliAuthorizationProvider provider(String appId, String appSecret) {
-        return provider(cliRunner, appId, appSecret);
-    }
-
-    private LarkCliAuthorizationProvider provider(ConnectorCliRunner runner, String appId, String appSecret) {
-        return new LarkCliAuthorizationProvider(runner, workspaceService, objectMapper, appId, appSecret);
+    private LarkCliAuthorizationProvider provider(ConnectorCliRunner runner) {
+        return new LarkCliAuthorizationProvider(runner, workspaceService, objectMapper);
     }
 
     private void stubConfiguredLogin(List<String> loginCommand) {

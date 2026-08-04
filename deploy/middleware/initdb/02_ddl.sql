@@ -1413,8 +1413,8 @@ COMMENT ON COLUMN byai.po_user_private_param.param_value_cipher IS '参数值密
 COMMENT ON COLUMN byai.po_user_private_param.param_value_last4 IS '参数值后四位，用于前端提示';
 COMMENT ON COLUMN byai.po_user_private_param.description IS '参数说明';
 COMMENT ON COLUMN byai.po_user_private_param.status IS '参数状态，NORMAL正常，DISABLED停用';
-COMMENT ON COLUMN byai.po_user_private_param.param_source IS '参数来源：USER用户维护，CONNECTOR系统托管连接器快照';
-COMMENT ON COLUMN byai.po_user_private_param.source_ref IS '系统托管参数来源业务标识，连接器快照使用 connector_code';
+COMMENT ON COLUMN byai.po_user_private_param.param_source IS '参数来源：USER用户维护，CONNECTOR系统托管连接器环境参数';
+COMMENT ON COLUMN byai.po_user_private_param.source_ref IS '系统托管参数来源业务标识，连接器环境参数使用 connector_code';
 COMMENT ON COLUMN byai.po_user_private_param.create_by IS '创建人ID';
 COMMENT ON COLUMN byai.po_user_private_param.create_time IS '创建时间';
 COMMENT ON COLUMN byai.po_user_private_param.update_by IS '更新人ID';
@@ -1431,10 +1431,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_private_param_key
     ON byai.po_user_private_param (user_id, param_key)
     WHERE delete_flag = '0';
 
--- 同一用户、同一连接器仅保留一份未删除的系统托管快照，普通 USER 参数不受该索引约束。
+-- 同一用户、同一连接器可以保存多条环境参数，但同一参数名只能有一条未删除记录。
 CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_private_param_connector
-    ON byai.po_user_private_param (user_id, param_source, source_ref)
-    WHERE delete_flag = '0' AND param_source = 'CONNECTOR';
+    ON byai.po_user_private_param (user_id, param_source, source_ref, param_key)
+    WHERE delete_flag = '0' AND param_source = 'CONNECTOR' AND source_ref IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_private_param_connector_null_ref
+    ON byai.po_user_private_param (user_id, param_source, param_key)
+    WHERE delete_flag = '0' AND param_source = 'CONNECTOR' AND source_ref IS NULL;
 
 -- 沙箱健康检测-水位模型配置表
 CREATE TABLE IF NOT EXISTS byai.sandbox_health_watermark_model (
@@ -1744,6 +1748,7 @@ CREATE TABLE IF NOT EXISTS byai.byai_connector_info
     description     TEXT,
     connector_type  VARCHAR(32)  NOT NULL,
     provider_code   VARCHAR(64),
+    skill_code      VARCHAR(64),
     auth_mode       VARCHAR(32),
     auth_config     VARCHAR(4096),
     request_config  VARCHAR(4096),
@@ -1770,6 +1775,7 @@ COMMENT ON COLUMN byai.byai_connector_info.icon_url IS '连接器图标地址';
 COMMENT ON COLUMN byai.byai_connector_info.description IS '连接器功能简介';
 COMMENT ON COLUMN byai.byai_connector_info.connector_type IS '连接器类型：SYSTEM=系统内置，CUSTOM=自定义连接器';
 COMMENT ON COLUMN byai.byai_connector_info.provider_code IS '授权 Provider 路由编码';
+COMMENT ON COLUMN byai.byai_connector_info.skill_code IS 'OpenClaw Skill 路由编码';
 COMMENT ON COLUMN byai.byai_connector_info.auth_mode IS '授权方式：NONE、OAUTH2、AK_SK、PASSWORD、TOKEN、DEVICE_FLOW、CLI_INIT，允许为空';
 COMMENT ON COLUMN byai.byai_connector_info.auth_config IS '连接器通用授权模板配置，JSON字符串';
 COMMENT ON COLUMN byai.byai_connector_info.request_config IS '连接器公共请求配置，JSON字符串';

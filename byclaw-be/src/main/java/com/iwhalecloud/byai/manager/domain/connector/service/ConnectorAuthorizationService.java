@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.service;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -16,6 +17,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationProviderRegistry;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationProgress;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationSessionContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartResult;
@@ -37,6 +39,9 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 public class ConnectorAuthorizationService {
 
     private static final long AUTHORIZATION_TTL_MILLIS = 10 * 60 * 1000L;
+    private static final Duration STATUS_TRANSITION_LOCK_TTL = Duration.ofMinutes(3);
+    private static final Duration AUTHORIZATION_START_LOCK_TTL = Duration.ofMinutes(2);
+    private static final String APP_INITIALIZATION_PHASE = "app_initialization";
 
     private static final String CONNECTOR_NOT_FOUND = "CONNECTOR_NOT_FOUND";
     private static final String PROVIDER_NOT_CONFIGURED = "PROVIDER_NOT_CONFIGURED";
@@ -113,6 +118,41 @@ public class ConnectorAuthorizationService {
             );
         }
 
+        Optional<String> startLockToken = sessionRepository.tryAcquireStartLock(
+            userId,
+            connector.getConnectorId(),
+            AUTHORIZATION_START_LOCK_TTL
+        );
+        if (startLockToken.isEmpty()) {
+            return failed(
+                null,
+                connector.getConnectorId(),
+                SESSION_ALREADY_ACTIVE,
+                "当前连接器已有进行中的授权任务",
+                null
+            );
+        }
+        try {
+            if (sessionRepository.hasActiveSession(userId, connector.getConnectorId())) {
+                return failed(
+                    null,
+                    connector.getConnectorId(),
+                    SESSION_ALREADY_ACTIVE,
+                    "当前连接器已有进行中的授权任务",
+                    null
+                );
+            }
+            return startLocked(request, userId, connector, provider);
+        } finally {
+            releaseStartLockBestEffort(userId, connector.getConnectorId(), startLockToken.get());
+        }
+    }
+
+    private ConnectorAuthorizationDto startLocked(
+            StartConnectorAuthorizationRequest request,
+            String userId,
+            ConnectorInfo connector,
+            ConnectorAuthorizationProvider provider) {
         String authorizationId = UUID.randomUUID().toString();
         AuthorizationStartContext context = new AuthorizationStartContext(
             authorizationId,
@@ -137,6 +177,7 @@ public class ConnectorAuthorizationService {
             connector.getConnectorCode(),
             connector.getProviderCode(),
             initialStatus,
+            active ? startResult.phase() : null,
             active ? encrypt(startResult.authorizationUrl()) : null,
             startResult.providerSessionId(),
             active ? encrypt(startResult.providerState()) : null,
@@ -180,6 +221,29 @@ public class ConnectorAuthorizationService {
         }
         if (session.status() != AuthorizationStatus.PENDING) {
             return toDto(session, null);
+        }
+        if (APP_INITIALIZATION_PHASE.equals(session.phase())) {
+            Optional<String> lockToken = sessionRepository.tryAcquireStatusLock(
+                authorizationId,
+                STATUS_TRANSITION_LOCK_TTL
+            );
+            if (lockToken.isEmpty()) {
+                return toDto(session, decryptBestEffort(session.authorizationUrlCipher()));
+            }
+            try {
+                Optional<RedisAuthorizationSession> refreshed = sessionRepository.findOwned(authorizationId, userId);
+                if (refreshed.isEmpty()) {
+                    return authorizationNotFound(authorizationId);
+                }
+                RedisAuthorizationSession current = refreshed.get();
+                if (current.status() != AuthorizationStatus.PENDING
+                        || !APP_INITIALIZATION_PHASE.equals(current.phase())) {
+                    return toDto(current, decryptBestEffort(current.authorizationUrlCipher()));
+                }
+                return queryPendingStatus(current);
+            } finally {
+                releaseStatusLockBestEffort(authorizationId, lockToken.get());
+            }
         }
         return queryPendingStatus(session);
     }
@@ -276,10 +340,61 @@ public class ConnectorAuthorizationService {
             );
         }
         return switch (result.status()) {
-            case PENDING, FINALIZING -> toDto(session, authorizationUrl);
+            case PENDING -> result.progress() == null
+                ? toDto(session, authorizationUrl)
+                : transitionPendingProgress(session, result.progress());
+            case FINALIZING -> toDto(session, authorizationUrl);
             case CONNECTED -> finalizeConnected(session, result);
             case FAILED, EXPIRED, CANCELLED -> transitionProviderTerminal(session, result);
         };
+    }
+
+    private ConnectorAuthorizationDto transitionPendingProgress(
+            RedisAuthorizationSession session,
+            AuthorizationProgress progress) {
+        if (!StringUtils.hasText(progress.phase())
+                || !StringUtils.hasText(progress.authorizationUrl())
+                || !StringUtils.hasText(progress.providerState())
+                || progress.expiresAt() == null
+                || progress.expiresAt().getTime() <= System.currentTimeMillis()) {
+            return transitionProviderTerminal(
+                session,
+                new AuthorizationStatusResult(
+                    AuthorizationStatus.FAILED,
+                    null,
+                    null,
+                    null,
+                    null,
+                    PROVIDER_PROTOCOL_ERROR,
+                    "授权Provider返回无效进度"
+                )
+            );
+        }
+        RedisAuthorizationSession replacement = new RedisAuthorizationSession(
+            session.authorizationId(),
+            session.userId(),
+            session.connectorId(),
+            session.connectorCode(),
+            session.providerCode(),
+            AuthorizationStatus.PENDING,
+            progress.phase(),
+            encrypt(progress.authorizationUrl()),
+            session.providerSessionId(),
+            encrypt(progress.providerState()),
+            session.ownerInstanceId(),
+            boundedProgressExpiry(progress.expiresAt()),
+            null,
+            null,
+            session.version() + 1L
+        );
+        if (!sessionRepository.compareAndSetStatus(
+                session.authorizationId(),
+                AuthorizationStatus.PENDING,
+                session.version(),
+                replacement)) {
+            return afterCasConflict(session);
+        }
+        return toDto(replacement, progress.authorizationUrl());
     }
 
     private ConnectorAuthorizationDto finalizeConnected(
@@ -493,6 +608,11 @@ public class ConnectorAuthorizationService {
         return new Date(expiresAt.getTime());
     }
 
+    private Date boundedProgressExpiry(Date expiresAt) {
+        long maximumExpiry = System.currentTimeMillis() + AUTHORIZATION_TTL_MILLIS;
+        return new Date(Math.min(expiresAt.getTime(), maximumExpiry));
+    }
+
     private RedisAuthorizationSession replacement(
             RedisAuthorizationSession source,
             AuthorizationStatus status,
@@ -507,6 +627,7 @@ public class ConnectorAuthorizationService {
             source.connectorCode(),
             source.providerCode(),
             status,
+            source.phase(),
             authorizationUrlCipher,
             source.providerSessionId(),
             providerStateCipher,
@@ -538,6 +659,22 @@ public class ConnectorAuthorizationService {
             provider.cancel(context);
         } catch (RuntimeException e) {
             // Provider cleanup is best effort and must not expose platform details.
+        }
+    }
+
+    private void releaseStatusLockBestEffort(String authorizationId, String token) {
+        try {
+            sessionRepository.releaseStatusLock(authorizationId, token);
+        } catch (RuntimeException e) {
+            // The bounded Redis lease will expire; cleanup failure must not mask a valid status response.
+        }
+    }
+
+    private void releaseStartLockBestEffort(String userId, Long connectorId, String token) {
+        try {
+            sessionRepository.releaseStartLock(userId, connectorId, token);
+        } catch (RuntimeException e) {
+            // The bounded Redis lease will expire; cleanup failure must not mask the start result.
         }
     }
 
@@ -775,6 +912,7 @@ public class ConnectorAuthorizationService {
         result.setAuthorizationId(session.authorizationId());
         result.setConnectorId(session.connectorId());
         result.setStatus(externalStatus(session.status()));
+        result.setPhase(session.phase());
         result.setAuthorizationUrl(authorizationUrl);
         result.setExpiresAt(session.expiresAt());
         result.setErrorCode(session.errorCode());

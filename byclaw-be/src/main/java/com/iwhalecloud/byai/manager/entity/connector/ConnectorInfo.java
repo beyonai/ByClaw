@@ -27,6 +27,9 @@ public class ConnectorInfo {
     /** 授权 Provider 路由编码 */
     private String providerCode;
 
+    /** OpenClaw Skill 路由编码 */
+    private String skillCode;
+
     /** 连接器展示名称 */
     private String connectorName;
 

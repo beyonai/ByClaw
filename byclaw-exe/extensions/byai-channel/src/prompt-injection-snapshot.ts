@@ -278,6 +278,13 @@ export function buildPromptInjectionSnapshot(params: {
   if (channelExtPrompt) {
     sections.push(channelExtPrompt);
   }
+  const connectorPrompt = buildDisabledConnectorPrompt(
+    params.request.language,
+    params.request.authConnectorList,
+  );
+  if (connectorPrompt) {
+    sections.push(connectorPrompt);
+  }
   return {
     appendSystemContext: sections.join("\n\n"),
     createdAt: Date.now(),

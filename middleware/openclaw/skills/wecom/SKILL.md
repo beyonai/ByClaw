@@ -9,6 +9,14 @@ description: Use when 用户需要通过 wecom-cli 操作企业微信或 WeCom�
 
 执行任务前，先根据下表选择匹配的子 skill，并阅读对应子目录的 `SKILL.md`。不要只凭这个父级文件直接调用 `wecom-cli`；具体参数、安全规则、异步轮询规则和危险操作处理都在子 skill 中。
 
+## 连接器运行时 HOME 隔离（最高优先级）
+
+- OpenClaw 会注入企业微信专属 `WECOM_HOME`。每次执行 WeCom CLI 都必须仅为该子进程映射 HOME，命令形式为 `HOME="$WECOM_HOME" wecom-cli ...`。
+- 执行企业微信 Skill 的脚本时同样使用 `HOME="$WECOM_HOME" python3 ...`，使脚本内部启动的 `wecom-cli` 继承同一用户凭证目录。
+- 本规则适用于父 Skill、子 Skill、scripts 和 references 中出现的所有 WeCom CLI 命令；其中展示的裸 `wecom-cli ...` 仅表示参数结构，实际执行必须增加上述前缀。
+- `WECOM_HOME` 缺失或为空时必须停止执行并报告连接器运行时参数缺失，不得回退到默认 HOME、共享目录或其他用户目录。
+- 不得修改 OpenClaw 全局 `HOME`，不得执行 `export HOME="$WECOM_HOME"`；映射只允许作用于当前 WeCom CLI 或脚本子进程。
+
 ## MUST DO：授权初始化恢复
 
 ### 必须遵守的错误判断

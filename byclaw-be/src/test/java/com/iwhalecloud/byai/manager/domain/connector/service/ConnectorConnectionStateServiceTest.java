@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -138,6 +139,22 @@ class ConnectorConnectionStateServiceTest {
 
         assertThat(auth.getEnableFlag()).isEqualTo("N");
         verify(manifestService).disable(1001L, connector);
+    }
+
+    @Test
+    void updateEnableFlagUsesEnableFlagEvenWhenExpirationFieldIsPast() {
+        ConnectorInfo connector = connector();
+        ConnectorAuth auth = activeAuth();
+        auth.setExpireTime(new Date(System.currentTimeMillis() - 1_000L));
+        when(connectorAuthMapper.selectOne(any())).thenReturn(auth);
+        when(connectorInfoMapper.selectById(CONNECTOR_ID)).thenReturn(connector);
+        when(manifestService.upsertAndEnable(1001L, connector)).thenReturn(false);
+
+        service.updateEnableFlag(USER_ID, CONNECTOR_ID, true);
+
+        verify(manifestService).upsertAndEnable(1001L, connector);
+        verify(connectorAuthMapper).updateById(auth);
+        assertThat(auth.getEnableFlag()).isEqualTo("Y");
     }
 
     @Test

@@ -87,13 +87,13 @@ describe('PersonalParamSettings', () => {
     });
   });
 
-  it('marks connector manifests as managed and hides user operations', async () => {
+  it('marks connector environment parameters as managed and hides user operations', async () => {
     mockQueryPersonalParams.mockResolvedValueOnce({
       list: [
         {
           paramId: 10002,
-          key: 'CONNECTOR_LARK_MANIFEST',
-          description: 'Lark Runtime Manifest',
+          key: 'LARK_HOME',
+          description: 'Lark CLI home',
           status: 'NORMAL',
           enabled: true,
           hasValue: true,
@@ -113,7 +113,7 @@ describe('PersonalParamSettings', () => {
 
     render(<PersonalParamSettings />);
 
-    const key = await screen.findByText('CONNECTOR_LARK_MANIFEST');
+    const key = await screen.findByText('LARK_HOME');
     expect(screen.getAllByText('settings.params.source')).not.toHaveLength(0);
     const row = key.closest('tr');
     expect(row).not.toBeNull();
