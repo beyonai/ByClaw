@@ -4,6 +4,7 @@ export * from "./processors/authorized-agents.js";
 export * from "./processors/cleanup.js";
 export * from "./processors/group-chat-context.js";
 export * from "./processors/session-context.js";
+export * from "./processors/session-workspace.js";
 export * from "./processors/supervisor-policy.js";
 export * from "./processors/user-context.js";
 export * from "./types.js";

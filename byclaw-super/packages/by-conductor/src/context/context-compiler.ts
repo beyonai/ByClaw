@@ -4,6 +4,7 @@ import { AuthorizedAgentsProcessor } from "./processors/authorized-agents.js";
 import { ContextCleanupProcessor } from "./processors/cleanup.js";
 import { GroupChatContextProcessor } from "./processors/group-chat-context.js";
 import { SessionContextProcessor } from "./processors/session-context.js";
+import { SessionWorkspaceProcessor } from "./processors/session-workspace.js";
 import { SupervisorPolicyProcessor } from "./processors/supervisor-policy.js";
 import { UserContextProcessor } from "./processors/user-context.js";
 import type {
@@ -36,6 +37,7 @@ export class ContextCompiler {
     private readonly processors: readonly ContextProcessor[] = [
       new SupervisorPolicyProcessor(),
       new SessionContextProcessor(),
+      new SessionWorkspaceProcessor(),
       new UserContextProcessor(),
       new GroupChatContextProcessor(),
       new AuthorizedAgentsProcessor(),

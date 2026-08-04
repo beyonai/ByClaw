@@ -762,6 +762,9 @@ ${JSON.stringify(response)}`;
       current = await this.#setStatus(latest, "RUNNING");
       const result = await leader.run({
         message: leaderMessage,
+        ...(current.ingressContext?.externalSessionId
+          ? { externalSessionId: current.ingressContext.externalSessionId }
+          : {}),
         attachments: current.attachments,
         thinkingLevel: current.thinkingLevel ?? "off",
         agents: current.agentList,

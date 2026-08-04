@@ -101,8 +101,6 @@ export class PiLeaderSessionFactory
   async create(sessionId: string): Promise<LeaderSession> {
     const directory = join(this.sessionCacheDirectory, sessionId);
     await mkdir(directory, { recursive: true, mode: 0o700 });
-    const sessionCwd = join(directory, "files");
-    await mkdir(sessionCwd, { recursive: true, mode: 0o700 });
     const stored = await this.checkpointStore?.load(sessionId);
     const manager = stored
       ? (
@@ -115,7 +113,9 @@ export class PiLeaderSessionFactory
     return PiLeaderSession.create(
       this.runtime,
       this.selectedModel,
-      sessionCwd,
+      // Leader 不直接操作业务文件；统一使用内部运行目录，避免把 Pi 状态目录
+      // 伪装成用户会话工作区。业务文件由子 Agent 在 /by/.sessions/{sessionId} 处理。
+      this.cwd,
       this.systemPrompt,
       this.contextCompiler,
       manager,

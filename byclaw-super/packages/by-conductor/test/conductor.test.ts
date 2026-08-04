@@ -802,6 +802,7 @@ describe("RunService", () => {
       thinkingLevel: "high",
       agentList: [],
       ingressContext: {
+        externalSessionId: "11034160",
         groupChat: groupChatContext(),
         groupChatFingerprint: "frozen-fingerprint",
       },
@@ -829,7 +830,9 @@ describe("RunService", () => {
     ]);
     expect(leaderFactory.currentTimes[0]).toEqual(expect.any(Number));
     expect(leaderFactory.groupChatContexts).toEqual([groupChatContext()]);
+    expect(leaderFactory.externalSessionIds).toEqual(["11034160"]);
     expect((await service.getRun(run.id))?.ingressContext).toEqual({
+      externalSessionId: "11034160",
       groupChat: groupChatContext(),
       groupChatFingerprint: "frozen-fingerprint",
     });
@@ -1618,6 +1621,7 @@ class ControlledLeaderFactory implements LeaderSessionFactory {
   readonly thinkingLevels: LeaderRunInput["thinkingLevel"][] = [];
   readonly sessionContexts: LeaderRunInput["sessionContext"][] = [];
   readonly currentTimes: number[] = [];
+  readonly externalSessionIds: Array<string | undefined> = [];
   readonly groupChatContexts: Array<GroupChatContextV1 | undefined> = [];
   readonly authorizedAgentsUnavailable: Array<boolean | undefined> = [];
   readonly createdSessionIds: string[] = [];
@@ -1633,6 +1637,7 @@ class ControlledLeaderFactory implements LeaderSessionFactory {
         this.thinkingLevels.push(input.thinkingLevel);
         this.sessionContexts.push(input.sessionContext);
         this.currentTimes.push(input.currentTime);
+        this.externalSessionIds.push(input.externalSessionId);
         this.groupChatContexts.push(input.groupChatContext);
         this.authorizedAgentsUnavailable.push(input.authorizedAgentsUnavailable);
         await input.onDelta(`${input.message}:delta`);

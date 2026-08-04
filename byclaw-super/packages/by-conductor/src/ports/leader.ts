@@ -19,6 +19,8 @@ import type {
 /** Leader 执行单次 Run 所需的授权快照和边界回调。 */
 export interface LeaderRunInput {
   message: string;
+  /** by-framework 入站会话 ID；存在时用于声明用户可见的规范会话空间。 */
+  externalSessionId?: string;
   /** 本次 Run 的附件；Leader 可据此生成摘要，工具按 ID 引用，不直接抓取内容。 */
   attachments: readonly RunAttachment[];
   thinkingLevel: ThinkingLevel;

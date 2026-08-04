@@ -275,6 +275,9 @@ export class PiLeaderSession implements LeaderSession {
               }
               const context = contextCompiler.compile({
                 baseSystemPrompt: event.systemPrompt,
+                ...(active.externalSessionId
+                  ? { externalSessionId: active.externalSessionId }
+                  : {}),
                 authorizedAgents: active.agents,
                 ...(active.authorizedAgentsUnavailable
                   ? { authorizedAgentsUnavailable: true }
