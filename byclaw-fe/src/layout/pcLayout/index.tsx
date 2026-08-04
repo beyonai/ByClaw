@@ -111,10 +111,6 @@ const PCLayout = () => {
     // 检查 tabItems 中的 hideSider 属性
     if (currentTab?.hideSider || isPcHideSiderContentRoute(pathname)) {
       setSiderContentWidth(0);
-    }
-    // 检查特定路由是否需要隐藏侧边栏
-    else if (pathname === '/knowledgeDetail') {
-      setSiderContentWidth(0);
     } else {
       setSiderContentWidth(DEFAULT_SIDER_CONTENT_WIDTH);
     }

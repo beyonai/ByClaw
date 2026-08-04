@@ -744,6 +744,8 @@ export default {
   'buildResult.noMarkdown': '暂无 Markdown 构建产物',
   'buildResult.noChunks': '暂无知识分块',
   'buildResult.copyMarkdown': '复制 Markdown',
+  'buildResult.downloadSource': '下载源文件',
+  'buildResult.downloadSourceFailed': '源文件下载失败',
   'buildResult.downloadMarkdown': '下载 Markdown',
   'buildResult.copied': 'Markdown 已复制',
   'buildResult.embeddingCoverage': '向量化覆盖',

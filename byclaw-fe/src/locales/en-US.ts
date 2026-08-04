@@ -738,6 +738,8 @@ export default {
   'buildResult.noMarkdown': 'No Markdown build artifact',
   'buildResult.noChunks': 'No knowledge chunks',
   'buildResult.copyMarkdown': 'Copy Markdown',
+  'buildResult.downloadSource': 'Download source file',
+  'buildResult.downloadSourceFailed': 'Failed to download source file',
   'buildResult.downloadMarkdown': 'Download Markdown',
   'buildResult.copied': 'Markdown copied',
   'buildResult.embeddingCoverage': 'Embedding coverage',

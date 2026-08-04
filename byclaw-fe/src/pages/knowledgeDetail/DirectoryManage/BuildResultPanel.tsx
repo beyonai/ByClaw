@@ -7,6 +7,7 @@ import {
   DatabaseOutlined,
   DownloadOutlined,
   EyeOutlined,
+  FileOutlined,
   FileMarkdownOutlined,
   ThunderboltFilled,
 } from '@ant-design/icons';
@@ -14,10 +15,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { useIntl } from '@umijs/max';
 import { Alert, App, Button, Empty, Pagination, Progress, Skeleton, Tabs, Tag, Tooltip } from 'antd';
 import Markdown from '@/components/Markdown';
+import { downloadResourceFile } from '@/service/file';
 import { getKnowledgeBuildResult, type KnowledgeBuildResult } from '@/service/knowledgeCenter';
+import { downloadFile } from '@/utils/file';
 import styles from './index.module.less';
 
 interface BuildResultViewProps {
+  resourceId: string | number;
   result: KnowledgeBuildResult | null;
   loading: boolean;
   chunkLoading: boolean;
@@ -48,6 +52,7 @@ const buildMarkdownName = (fileName?: string) => {
 };
 
 const BuildResultView = ({
+  resourceId,
   result,
   loading,
   chunkLoading,
@@ -59,6 +64,7 @@ const BuildResultView = ({
 }: BuildResultViewProps) => {
   const intl = useIntl();
   const { message } = App.useApp();
+  const [sourceDownloading, setSourceDownloading] = useState(false);
   const markdown = result?.markdown?.data || '';
   const status = result?.build?.status || '';
   const completed = status === 'complete';
@@ -78,7 +84,7 @@ const BuildResultView = ({
     message.success(intl.formatMessage({ id: 'buildResult.copied' }));
   };
 
-  const handleDownload = () => {
+  const handleDownloadMarkdown = () => {
     if (!markdown || !result) return;
     const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -89,6 +95,30 @@ const BuildResultView = ({
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadSource = async () => {
+    const sourceFilePath = result?.filePath || fallbackFilePath;
+    if (!sourceFilePath || sourceDownloading) return;
+
+    setSourceDownloading(true);
+    try {
+      const response: any = await downloadResourceFile({
+        resourceId,
+        directoryPath: sourceFilePath,
+      });
+      const fallbackSourceName =
+        result?.fileName || fallbackFileName || sourceFilePath.split('/').filter(Boolean).pop() || 'source-file';
+      downloadFile({
+        file: response?.file,
+        fileUrl: response?.fileUrl,
+        fileName: response?.fileName || fallbackSourceName,
+      });
+    } catch (downloadError: any) {
+      message.error(downloadError?.message || intl.formatMessage({ id: 'buildResult.downloadSourceFailed' }));
+    } finally {
+      setSourceDownloading(false);
+    }
   };
 
   const statCards: Array<{
@@ -141,7 +171,10 @@ const BuildResultView = ({
       <Tooltip title={intl.formatMessage({ id: 'buildResult.copyMarkdown' })}>
         <Button type="text" icon={<CopyOutlined />} disabled={!markdown} onClick={handleCopy} />
       </Tooltip>
-      <Button icon={<DownloadOutlined />} disabled={!markdown} onClick={handleDownload}>
+      <Button icon={<FileOutlined />} loading={sourceDownloading} onClick={() => void handleDownloadSource()}>
+        {intl.formatMessage({ id: 'buildResult.downloadSource' })}
+      </Button>
+      <Button icon={<DownloadOutlined />} disabled={!markdown} onClick={handleDownloadMarkdown}>
         {intl.formatMessage({ id: 'buildResult.downloadMarkdown' })}
       </Button>
     </div>
@@ -178,7 +211,6 @@ const BuildResultView = ({
         ),
         children: (
           <div className={styles.buildResultSourceWrap}>
-            {markdownActions}
             <pre className={styles.buildResultSource}>
               {markdown || intl.formatMessage({ id: 'buildResult.noMarkdown' })}
             </pre>
@@ -415,6 +447,7 @@ const BuildResultPanel = ({ resourceId, filePath, fileName, onClose }: BuildResu
 
   return (
     <BuildResultView
+      resourceId={resourceId}
       result={result}
       loading={loading}
       chunkLoading={chunkLoading}

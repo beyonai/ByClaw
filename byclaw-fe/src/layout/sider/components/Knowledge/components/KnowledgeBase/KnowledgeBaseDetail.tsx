@@ -31,7 +31,7 @@ import {
 } from '@/service/fileBrowser';
 import type { FileBrowserItem } from '@/service/fileBrowser';
 import { resolveTreeItemDirectoryPath } from './service';
-import { HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH, SiderContentContext } from '@/layout/sider/siderContentContext';
+import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import {
   checkUploadFileConflicts,
   getKnowledgeBuildResult,
@@ -670,7 +670,7 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
           fallbackNotice={options.fallbackNotice}
           onClose={() => clearDetailPanel?.()}
         />,
-        { width: HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH }
+        { overlay: true }
       );
     },
     [clearDetailPanel, setDetailPanel]

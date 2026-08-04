@@ -23,7 +23,7 @@ import InfiniteScrollTable from '@/components/InfiniteScrollTable';
 import KnowledgeBreadcrumb from '@/components/KnowledgeBreadcrumb';
 import useShowModal from '@/hooks/useShowModal';
 import useKnowledgeStore from '@/models/useKnowledgeStore';
-import { HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH, SiderContentContext } from '@/layout/sider/siderContentContext';
+import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { downloadKnowledgeBuildPreview, downloadResourceFile } from '@/service/file';
 import {
   buildDataset,
@@ -1127,7 +1127,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
           fallbackNotice={options.fallbackNotice}
           onClose={() => clearDetailPanel?.()}
         />,
-        { width: HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH }
+        { overlay: true }
       );
     },
     [clearDetailPanel, setDetailPanel]
@@ -1216,7 +1216,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
           fileName={getDirectoryRowName(record)}
           onClose={() => clearDetailPanel?.()}
         />,
-        { width: HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH }
+        { overlay: true }
       );
     },
     [baseInfo?.resourceId, clearDetailPanel, getBuildDirectoryPath, intl, message, setDetailPanel]
