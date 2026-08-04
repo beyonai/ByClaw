@@ -23,6 +23,8 @@ import {
 import { BeyondTokenAuthError } from "../auth/beyond-token.js";
 import type { RunIngressService } from "../ingress/run-ingress-service.js";
 import {
+  agentReadyTitle,
+  commandAgentName,
   commandGroupChatRef,
   commandLogFields,
   commandSessionContext,
@@ -166,6 +168,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     const thinkingLevel = commandThinkingLevel(command);
     const groupChatRef = commandGroupChatRef(command);
     const sessionContext = commandSessionContext(command);
+    const agentName = commandAgentName(command) || "超级助手";
 
     await context.checkCancelled();
     this.#logger?.info(commandLogFields(command), "开始处理 by-framework 入站任务");
@@ -230,7 +233,13 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         await this.#runService.cancelRun(run.id, "by-framework task cancelled");
         await context.checkCancelled();
       }
-      return await this.#forwardRunEvents(run, principal, context);
+      return await this.#forwardRunEvents(
+        run,
+        principal,
+        context,
+        agentName,
+        sessionContext?.locale,
+      );
     } finally {
       this.#activeRuns.delete(command.header.messageId);
     }
@@ -261,11 +270,15 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     run: { id: string; sessionId: string; createdAt: number },
     principal: CallerPrincipal,
     context: AgentContext,
+    agentName: string,
+    locale?: string,
   ): Promise<AgentTaskResult> {
     let reasoningStarted = false;
     let reasoningEnded = false;
     let answer = "";
     const reasoningMessageId = `${run.id}:reasoning`;
+
+    await this.#emitReadyTitle(run.id, context, agentName, locale);
 
     for await (const event of this.#runService.streamEvents(run.id)) {
       if (context.isCancelRequested()) {
@@ -310,6 +323,30 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
           progress,
           EventType.REASONING_LOG_DELTA,
         );
+      }
+
+      if (event.type === "leader.reasoning.delta") {
+        if (!reasoningStarted || reasoningEnded) {
+          await this.#emitReasoning(
+            run.id,
+            context,
+            reasoningMessageId,
+            "",
+            EventType.REASONING_LOG_START,
+          );
+          reasoningStarted = true;
+          reasoningEnded = false;
+        }
+        const delta = stringData(event.data.text);
+        if (delta) {
+          await this.#emitReasoning(
+            run.id,
+            context,
+            reasoningMessageId,
+            delta,
+            EventType.REASONING_LOG_DELTA,
+          );
+        }
       }
 
       if (event.type === "leader.delta") {
@@ -390,6 +427,28 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     }
 
     throw new Error(`Run event stream ended without a terminal event: ${run.id}`);
+  }
+
+  /** 在 Run 开始时输出与 byai-channel 相同的“智能体已就绪”思考标题。 */
+  async #emitReadyTitle(
+    runId: string,
+    context: AgentContext,
+    agentName: string,
+    locale?: string,
+  ): Promise<void> {
+    await this.#protocolEmitter.emitChunk(
+      context.sessionId,
+      context.traceId,
+      agentReadyTitle(agentName, locale),
+      {
+        eventType: EventType.REASONING_LOG_DELTA,
+        contentType: SseReasonMessageType.think_title,
+        sourceAgentType: this.#agentType,
+        messageId: `${runId}:ready`,
+        parentMessageId: "-1",
+        metadata: { parent_run_id: runId },
+      },
+    );
   }
 
   /** 按 byai-channel 的协议把普通文本放入前端思考区，而不是作为 3003 标题原样展示。 */

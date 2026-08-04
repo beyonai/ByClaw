@@ -34,6 +34,8 @@ export interface LeaderRunInput {
   signal: AbortSignal;
   /** 接收最终可见回答的文本增量。 */
   onDelta(text: string): Promise<void> | void;
+  /** 接收模型思考文本增量；不进入最终可见回答。 */
+  onReasoningDelta?(text: string): Promise<void> | void;
   /** Pi 每追加一个原生 entry 后保存 PENDING 工作检查点。 */
   onCheckpoint?(checkpoint: PiSessionCheckpoint): Promise<void> | void;
   /** 执行一次经过授权校验的 Agent 委派。 */
