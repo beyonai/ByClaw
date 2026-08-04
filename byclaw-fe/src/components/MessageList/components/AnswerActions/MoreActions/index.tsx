@@ -156,6 +156,8 @@ function MoreActions(porps: {
   // 所有数字员工回答均可发起运维排查，用户自己发送的提问不展示。
   const canShowTroubleshoot = showTroubleshoot && msg.fromBeyond;
   const canShowTrace = langfuseEnabled && !disabledList?.includes('trace');
+  // 用户提问的操作区只保留调用链图标，数字员工回答才显示国际化文案，避免提问操作区过宽。
+  const showTraceLabel = msg.fromBeyond;
 
   const handleOpenTraceDrawer = React.useCallback(() => {
     // Always seed with the latest known traceId; if the message carried no traceId
@@ -183,7 +185,9 @@ function MoreActions(porps: {
               icon={<LinkOutlined className={btnStyles.icon} />}
               onClick={handleOpenTraceDrawer}
             >
-              <span className={btnStyles.actionsBarText}>{intl.formatMessage({ id: 'messageList.viewTrace' })}</span>
+              {showTraceLabel ? (
+                <span className={btnStyles.actionsBarText}>{intl.formatMessage({ id: 'messageList.viewTrace' })}</span>
+              ) : null}
             </Button>
           </Tooltip>
         </div>

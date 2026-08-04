@@ -708,7 +708,9 @@
 // 详情头部项目名称下拉选择器，视觉上替代 h3 标题。
 .detailProjectSelect {
   min-width: 0;
-  max-width: 220px;
+  // 项目详情下拉需要展示较长项目名称，固定宽度后下拉选项会同步使用该宽度。
+  width: 280px;
+  max-width: 100%;
 
   // 选中态文字与原 h3 标题保持一致：14px 加粗。
   :global(.ant-select-selector) {

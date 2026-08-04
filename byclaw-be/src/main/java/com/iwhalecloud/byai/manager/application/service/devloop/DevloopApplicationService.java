@@ -2544,13 +2544,15 @@ public class DevloopApplicationService {
             .replace("${dueTime}", StringUtils.defaultString(formatDateTime(task.getDueTime())))
             .replace("${knowledgeBase}", resolveOperationResourceName(operationConfigMap.get("knowledgeBaseId")))
             .replace("${directory}", resolveOperationResourceName(operationConfigMap.get("directoryId")))
-            .replace("${collectChannel}", getOperationPromptValue(operationConfigMap, "channel", "collectSource"))
+            .replace("${collectChannel}", getOperationChannelLabel(
+                findOperationConfigValue(operationConfigMap, "channel", "collectSource")))
             .replace("${collectAccount}", resolveOperationAccountName(
                 findOperationConfigValue(operationConfigMap, "accountOrAddress", "collectAccount")))
             .replace("${collectTopic}", getOperationPromptValue(operationConfigMap, "topic", "collectTopic"))
             .replace("${collectStartTime}", getOperationPromptValue(operationConfigMap, "startTime", "collectStart"))
             .replace("${collectEndTime}", getOperationPromptValue(operationConfigMap, "endTime", "collectEnd"))
-            .replace("${collectMethod}", getOperationPromptValue(operationConfigMap, "mode", "collectMethod"))
+            .replace("${collectMethod}", getOperationCollectionMethod(
+                findOperationConfigValue(operationConfigMap, "mode", "collectMethod")))
             .replace("${collectSchedule}", getOperationPromptValue(operationConfigMap, "schedule", "collectSchedule"))
             .replace("${collectOrganize}", getOperationPromptBoolean(operationConfigMap.get("organize")))
             .replace("${collectOntology}", getOperationKnowledgeOrganizationValue(operationConfigMap, "templateName",
@@ -2560,12 +2562,14 @@ public class DevloopApplicationService {
             .replace("${collectOrganizationStructure}", getOperationKnowledgeOrganizationValue(operationConfigMap,
                 "structure"))
             .replace("${contentType}", getOperationPromptValue(operationConfigMap, "contentType"))
-            .replace("${publishChannel}", getOperationPromptValue(operationConfigMap, "publishChannel"))
+            .replace("${publishChannel}", getOperationChannelLabel(
+                operationConfigMap.get("publishChannel")))
             .replace("${publishAccount}", resolveOperationAccountName(
                 findOperationConfigValue(operationConfigMap, "publishAccountId")))
             .replace("${publishTopic}", getOperationPromptValue(operationConfigMap, "topic", "publishTopic"))
             .replace("${publishSchedule}", getOperationPromptValue(operationConfigMap, "publishSchedule"))
-            .replace("${analysisPlatform}", getOperationPromptValue(operationConfigMap, "platformId", "analysisChannel"))
+            .replace("${analysisPlatform}", getOperationChannelLabel(
+                findOperationConfigValue(operationConfigMap, "platformId", "analysisChannel")))
             .replace("${analysisAccount}", resolveOperationAccountName(
                 findOperationConfigValue(operationConfigMap, "accountId", "analysisAccountId")))
             .replace("${analysisScope}", getOperationPromptValue(operationConfigMap, "scope", "analysisType"))
@@ -2614,6 +2618,38 @@ public class DevloopApplicationService {
         return value == null || StringUtils.isBlank(String.valueOf(value))
             ? I18nUtil.get("devloop.operationTask.prompt.notConfigured")
             : String.valueOf(value);
+    }
+
+    /** 将采集方式的内部编码转换为当前语言文案，避免把 once、periodic 等前端枚举直接发送给数字员工。 */
+    private String getOperationCollectionMethod(Object value) {
+        if (value == null || StringUtils.isBlank(String.valueOf(value))) {
+            return I18nUtil.get("devloop.operationTask.prompt.notConfigured");
+        }
+        return switch (String.valueOf(value).trim().toLowerCase(Locale.ROOT)) {
+            case "once" -> I18nUtil.get("devloop.operationTask.collectMethod.once");
+            case "periodic" -> I18nUtil.get("devloop.operationTask.collectMethod.periodic");
+            // 兼容历史数据中的自定义采集方式，无法映射时保留原始文案。
+            default -> String.valueOf(value);
+        };
+    }
+
+    /** 将运营平台内部编码转换为当前语言文案，避免 WeChatAccount 等枚举直接写入运营提示词。 */
+    private String getOperationChannelLabel(Object value) {
+        if (value == null || StringUtils.isBlank(String.valueOf(value))) {
+            return I18nUtil.get("devloop.operationTask.prompt.notConfigured");
+        }
+        String channelCode = String.valueOf(value).trim();
+        return switch (channelCode.toLowerCase(Locale.ROOT)) {
+            case "wechataccount", "wechat", "wechatofficialaccount" -> I18nUtil.get(
+                "devloop.operationTask.channel.wechat");
+            case "xiaohongshu", "rednote" -> I18nUtil.get("devloop.operationTask.channel.xiaohongshu");
+            case "wechatchannels", "wechatvideo", "video" -> I18nUtil.get("devloop.operationTask.channel.video");
+            case "douyin" -> I18nUtil.get("devloop.operationTask.channel.douyin");
+            case "internet" -> I18nUtil.get("devloop.operationTask.channel.internet");
+            case "github" -> I18nUtil.get("devloop.operationTask.channel.github");
+            // 兼容后续新增平台，未配置映射时保留原始编码，避免提示词信息丢失。
+            default -> channelCode;
+        };
     }
 
     /** 知识整理开关使用可读文案，避免把 true/false 直接输出到运营提示词。 */

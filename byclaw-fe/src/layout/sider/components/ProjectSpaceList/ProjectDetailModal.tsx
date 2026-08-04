@@ -1354,6 +1354,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
           ];
         });
         setHasMoreTasks(queryState.pageNum * queryState.pageSize < total);
+        // 返回本次查询结果，详情首次加载时据此决定是否自动切换到需求页签。
+        return taskList;
       } finally {
         if (append && taskAppendingVersionRef.current === queryVersion) {
           taskAppendingVersionRef.current = null;
@@ -1635,6 +1637,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 账号管理只服务运营项目；打开前关闭需求详情、任务详情和整体视图，防止多个大面板重叠。
   const handleOpenOperationAccountPanel = useCallback(() => {
     if (!isOperationProject) return;
+    // 从项目更多菜单进入账号页面时先切回需求页，确保覆盖式账号面板不会被其它页签的副作用关闭。
+    setActiveTab('requirements');
     operationRequirementDetailRequestRef.current += 1;
     setOperationRequirementDetail(null);
     setOperationRequirementDetailLoading(false);
@@ -1775,6 +1779,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 新增运营需求时重新读取关联资源，确保成员、账号和知识库均为最新数据。
   const handleOpenOperationTaskModal = useCallback(() => {
     if (!isOperationProject) return;
+    // 从任意页签新增运营需求时切回需求页，保证需求表单组件已经挂载。
+    setActiveTab('requirements');
     if (operationAccountPanelOpen) handleCloseOperationAccountPanel();
     setEditingOperationTask(null);
     setOperationTaskModalOpen(true);
@@ -2669,7 +2675,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
         ? fetchSources().then((sourceList) => fetchRequirements(sourceList, ''))
         : Promise.resolve();
     const memberPromise = showMembersTab ? fetchMembers() : Promise.resolve();
-    await Promise.all([requirementPromise, fetchTasks(), memberPromise, fetchRepos(), fetchOperationAccounts()]);
+    const [, initialTasks] = await Promise.all([
+      requirementPromise,
+      fetchTasks(),
+      memberPromise,
+      fetchRepos(),
+      fetchOperationAccounts(),
+    ]);
+    return initialTasks;
   }, [
     fetchMembers,
     fetchOperationAccounts,
@@ -2738,7 +2751,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
       setRequirements([]);
       setLastLog(null);
     }
-    fetchDetailData();
+    void fetchDetailData().then((initialTasks) => {
+      if (!showRequirementsTab || !Array.isArray(initialTasks) || initialTasks.length > 0) return;
+      // 仅在用户仍停留在默认任务页签时自动跳转，避免覆盖用户加载期间的主动切换。
+      setActiveTab((currentTab) => (currentTab === 'tasks' ? 'requirements' : currentTab));
+    });
   }, [EventEmitter, fetchDetailData, isDevelopProject, showRequirementsTab]);
 
   useEffect(() => {
@@ -4122,22 +4139,21 @@ const ProjectDetailPanel: React.FC<Props> = ({
         open
         onClose={closeOperationRequirementDetail}
         width={640}
-        footer={
-          <div className={styles.requirementDetailFooter}>
-            {isStarted ? (
-              <Button disabled>{intl.formatMessage({ id: 'projectSpace.operation.requirement.started' })}</Button>
-            ) : (
-              <Button
-                type="primary"
-                onClick={() => {
-                  closeOperationRequirementDetail();
-                  handleOpenOperationRequirementStart(requirement);
-                }}
-              >
-                {intl.formatMessage({ id: 'projectSpace.operation.requirement.start' })}
-              </Button>
-            )}
-          </div>
+        // 运营需求详情的启动入口放在抽屉标题栏右侧，和任务详情的执行入口保持一致。
+        extra={
+          isStarted ? (
+            <Button disabled>{intl.formatMessage({ id: 'projectSpace.operation.requirement.started' })}</Button>
+          ) : (
+            <Button
+              type="primary"
+              onClick={() => {
+                closeOperationRequirementDetail();
+                handleOpenOperationRequirementStart(requirement);
+              }}
+            >
+              {intl.formatMessage({ id: 'projectSpace.operation.requirement.start' })}
+            </Button>
+          )
         }
       >
         <Spin spinning={operationRequirementDetailLoading}>
@@ -4216,13 +4232,20 @@ const ProjectDetailPanel: React.FC<Props> = ({
         <button
           type="button"
           className={operationStyles.operationAccountEntry}
-          onClick={handleOpenOperationAccountPanel}
+          // 账号管理大页面由同一入口控制展开和收起，避免用户只能通过返回按钮关闭。
+          onClick={() => {
+            if (operationAccountPanelOpen) {
+              handleCloseOperationAccountPanel();
+            } else {
+              handleOpenOperationAccountPanel();
+            }
+          }}
         >
           <span className={operationStyles.operationAccountEntryLabel}>
             <IdcardOutlined />
             <span>{intl.formatMessage({ id: 'projectSpace.operation.account.entry' })}</span>
           </span>
-          <RightOutlined />
+          {operationAccountPanelOpen ? <LeftOutlined /> : <RightOutlined />}
         </button>
         <div className={styles.detailRequirementHeader}>
           <div className={`${styles.searchInput} ${styles.detailRequirementSearch}`}>
@@ -6052,6 +6075,19 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const detailActionItems: MenuProps['items'] = [
     // 运营项目通过“新增需求”维护运营需求，不提供研发扫描渠道入口。
     ...(showRequirementsTab && !isOperationProject ? [{ key: 'add-source', label: t('source.addTitle') }] : []),
+    // 运营项目的常用新增入口集中到详情右上角更多菜单，和需求页内入口使用同一套打开逻辑。
+    ...(isOperationProject
+      ? [
+        {
+          key: 'add-operation-account',
+          label: intl.formatMessage({ id: 'projectSpace.operation.account.add' }),
+        },
+        {
+          key: 'add-operation-requirement',
+          label: intl.formatMessage({ id: 'projectSpace.operation.requirement.new' }),
+        },
+      ]
+      : []),
     // 研发项目一个项目挂多个仓库,提供独立的仓库管理入口(列表 + 新增,复用仓库弹窗)。
     ...(isDevelopProject ? [{ key: 'manage-repos', label: t('repository.manageTitle') }] : []),
     ...(onEditProject ? [{ key: 'edit-project', label: t('project.edit') }] : []),
@@ -6063,6 +6099,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const handleDetailAction = ({ key }: { key: string }) => {
     if (key === 'add-source') {
       handleHeaderAdd();
+      return;
+    }
+    if (key === 'add-operation-account') {
+      handleOpenOperationAccountPanel();
+      return;
+    }
+    if (key === 'add-operation-requirement') {
+      handleOpenOperationTaskModal();
       return;
     }
     if (key === 'manage-repos') {
