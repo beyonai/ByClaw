@@ -97,7 +97,10 @@ export function buildConnectorPolicyToolCallWarning(params: {
   toolName: string;
   authorization: ConnectorAuthorizationMap | undefined;
 }): string | undefined {
-  const { disabled } = summarizeConnectorAuthorization(params.authorization);
+  const { disabled, failClosed } = summarizeConnectorAuthorization(params.authorization);
+  if (failClosed) {
+    return `[byai-channel] connector soft-control tool activity: sessionKey=${params.sessionKey}, tool=${params.toolName}, disabled=all, failClosed=true, skillFilter=off`;
+  }
   if (disabled.length === 0) {
     return undefined;
   }

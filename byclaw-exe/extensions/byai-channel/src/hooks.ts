@@ -615,9 +615,13 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
       const connectorAuthorization = summarizeConnectorAuthorization(
         resolveActiveSdkRequestBySessionKey(ctx.sessionKey)?.authConnectorList,
       );
-      if (connectorAuthorization.disabled.length > 0) {
+      if (connectorAuthorization.disabled.length > 0 || connectorAuthorization.failClosed) {
+        const disabled = connectorAuthorization.failClosed
+          ? "all"
+          : connectorAuthorization.disabled.join(",");
+        const failClosed = connectorAuthorization.failClosed ? ", failClosed=true" : "";
         api.logger.info(
-          `[byai-channel] connector soft-control prompt injected: sessionKey=${ctx.sessionKey}, disabled=${connectorAuthorization.disabled.join(",")}, skillFilter=off`,
+          `[byai-channel] connector soft-control prompt injected: sessionKey=${ctx.sessionKey}, disabled=${disabled}${failClosed}, skillFilter=off`,
         );
       }
       return {

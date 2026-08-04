@@ -137,6 +137,29 @@ describe("connector authorization", () => {
     ).toBeUndefined();
   });
 
+  it("warns safely when an oversized disabled policy fails closed", () => {
+    const authorization = normalizeConnectorAuthorization(
+      Object.fromEntries(
+        Array.from({ length: 65 }, (_, index) => [`disabled-${index}`, false]),
+      ),
+    );
+
+    expect(summarizeConnectorAuthorization(authorization)).toEqual({
+      enabled: [],
+      disabled: [],
+      failClosed: true,
+    });
+    expect(
+      buildConnectorPolicyToolCallWarning({
+        sessionKey: "agent:dws:direct:100",
+        toolName: "baiying_call",
+        authorization,
+      }),
+    ).toBe(
+      "[byai-channel] connector soft-control tool activity: sessionKey=agent:dws:direct:100, tool=baiying_call, disabled=all, failClosed=true, skillFilter=off",
+    );
+  });
+
   it("builds localized unavailable-connector guidance", () => {
     const chinese = buildDisabledConnectorPrompt("zh_CN", { dws: false, fws: true });
     expect(chinese).toContain("`dws`");
