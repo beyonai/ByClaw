@@ -497,6 +497,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     language: message.language,
     languageProvided: message.languageProvided,
     channelExtension: message.channelExtension,
+    authConnectorList: message.authConnectorList,
     abortController: deps.abortController,
     beyondToken: message.beyondToken,
     laneMetadata,

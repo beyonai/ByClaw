@@ -59,6 +59,36 @@ describe("prompt-injection-snapshot", () => {
     expect(takePromptInjectionSnapshot(request.sessionKey)).toBeUndefined();
   });
 
+  it("injects connector-unavailable guidance for disabled connectors only", () => {
+    const snapshot = buildPromptInjectionSnapshot({
+      request: mockRequest({
+        authConnectorList: { dws: true, fws: false },
+      }),
+    });
+
+    expect(snapshot.appendSystemContext).toContain("第三方连接器可用性");
+    expect(snapshot.appendSystemContext).toContain("`fws`");
+    expect(snapshot.appendSystemContext).not.toContain("`dws` 连接器当前");
+    expect(snapshot.appendSystemContext).toContain("连接器管理页面");
+    expect(snapshot.appendSystemContext).toContain("连接/授权");
+  });
+
+  it("injects English connector guidance and omits it when none are disabled", () => {
+    const english = buildPromptInjectionSnapshot({
+      request: mockRequest({
+        language: "en_US",
+        authConnectorList: { dws: false },
+      }),
+    });
+    expect(english.appendSystemContext).toContain("Third-party connector availability");
+    expect(english.appendSystemContext).toContain("currently not connected or authorized");
+
+    const enabled = buildPromptInjectionSnapshot({
+      request: mockRequest({ authConnectorList: { dws: true } }),
+    });
+    expect(enabled.appendSystemContext).not.toContain("第三方连接器可用性");
+  });
+
   it("injects a stronger chat context tool hint for cross-agent handoff tasks", () => {
     recordByclawChatContextMessage({
       id: "agent-alpha-message",

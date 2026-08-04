@@ -19,6 +19,7 @@ import {
   type ByclawChatContextSnapshot,
   resolveByclawChatContext,
 } from "./chat-context-store.js";
+import { buildDisabledConnectorPrompt } from "./connector-authorization.js";
 
 export type PromptInjectionSnapshot = {
   appendSystemContext: string;
@@ -247,6 +248,13 @@ export function buildPromptInjectionSnapshot(params: {
   }
   if (params.request.languageProvided) {
     sections.push(buildLanguagePrompt(params.request.language));
+  }
+  const connectorPrompt = buildDisabledConnectorPrompt(
+    params.request.language,
+    params.request.authConnectorList,
+  );
+  if (connectorPrompt) {
+    sections.push(connectorPrompt);
   }
   sections.push(buildByclawAcpLanguagePrompt(
     params.request.language,

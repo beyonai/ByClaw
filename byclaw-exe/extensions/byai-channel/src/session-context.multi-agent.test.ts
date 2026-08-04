@@ -16,6 +16,7 @@ import {
   markActiveSdkDispatchSettled,
   registerActiveSdkRequest,
   registerSdkEmitter,
+  resolveChannelRequestContextBySessionKey,
   resolveActiveSdkRequestBySessionKey,
   resolveActiveSdkRequestByTraceId,
 } from "./session-context.js";
@@ -48,6 +49,26 @@ function registerLaneRequest(params: {
 }
 
 describe("session-context multi-agent lanes", () => {
+  it("keeps connector authorization on the active and shared request contexts", () => {
+    const request = registerActiveSdkRequest({
+      accountId: "acct-connectors",
+      sessionKey: "agent:test:direct:connector-session",
+      to: "test:connector-session",
+      sessionId: "connector-session",
+      traceId: "trace-connectors",
+      language: "zh_CN",
+      languageProvided: true,
+      authConnectorList: { dws: true, fws: false },
+    });
+
+    expect(request.authConnectorList).toEqual({ dws: true, fws: false });
+    expect(
+      resolveChannelRequestContextBySessionKey(request.sessionKey)?.fields.authConnectorList,
+    ).toEqual({ dws: true, fws: false });
+
+    clearActiveSdkRequestRecord(request);
+  });
+
   it("clears one active lane without clearing another lane for the same ByClaw session", () => {
     const accountId = "acct-lane-lifecycle";
     const laneA = registerLaneRequest({ accountId, laneId: "a" });
