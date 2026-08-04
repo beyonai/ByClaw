@@ -180,6 +180,19 @@ class ConnectorSchemaTest {
     }
 
     @Test
+    void bundledSkillUpdatesRepairDoubleEscapedAcpQuotes() throws Exception {
+        String migrationSql = read("deploy/migrations/versions/V0.3.1/V0.3.1__dml.sql");
+        String initdbSql = read("deploy/middleware/initdb/04_dml.sql");
+        String doubleEscapedAcp =
+            "chr(92) || chr(92) || chr(34) || 'acp' || chr(92) || chr(92) || chr(34)";
+        String escapedAcp = "chr(92) || chr(34) || 'acp' || chr(92) || chr(34)";
+
+        for (String sql : new String[] {migrationSql, initdbSql}) {
+            assertThat(sql).contains("replace(c.param_value", doubleEscapedAcp, escapedAcp);
+        }
+    }
+
+    @Test
     void backendImagePinsAndVerifiesWecomCli() throws Exception {
         String dockerfile = readPreservingCase("byclaw-be/Dockerfile");
 

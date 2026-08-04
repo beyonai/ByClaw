@@ -104,6 +104,19 @@ WHERE e.resource_id = r.resource_id
   AND target_content::jsonb ->> 'resourceCode' = 'bycli'
 ;
 
+-- 修复 V0.2.0 种子中 coding-agent 描述的双重反斜杠，恢复 OPENCLAW_BUNDLED_SKILLS 为合法 JSON。
+UPDATE byai.byai_system_config c
+SET param_value = replace(
+        c.param_value,
+        chr(92) || chr(92) || chr(34) || 'acp' || chr(92) || chr(92) || chr(34),
+        chr(92) || chr(34) || 'acp' || chr(92) || chr(34)
+    )
+WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
+  AND position(
+        (chr(92) || chr(92) || chr(34) || 'acp' || chr(92) || chr(92) || chr(34))
+        IN c.param_value
+      ) > 0;
+
 -- openGauss 缺少 JSONB 聚合函数；逐项补齐内置 Skill，避免已有一项时跳过其他项。
 UPDATE byai.byai_system_config c
 SET param_value = CASE

@@ -177,6 +177,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_private_param_connector_null_ref
     WHERE delete_flag = '0' AND param_source = 'CONNECTOR' AND source_ref IS NULL;
 
 COMMENT ON COLUMN byai.byai_connector_info.runtime_manifest IS '连接器最新 Runtime Manifest 模板，规范化完整 JSON';
-COMMENT ON COLUMN byai.byai_connector_info.skill_code IS 'OpenClaw Skill 路由编码';
 COMMENT ON COLUMN byai.po_user_private_param.param_source IS '参数来源：USER用户维护，CONNECTOR系统托管连接器环境参数';
 COMMENT ON COLUMN byai.po_user_private_param.source_ref IS '系统托管参数来源业务标识，连接器环境参数使用 connector_code';
