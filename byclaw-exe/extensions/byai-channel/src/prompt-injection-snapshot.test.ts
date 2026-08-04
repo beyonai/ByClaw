@@ -160,6 +160,43 @@ describe("prompt-injection-snapshot", () => {
     expect(snapshot.appendSystemContext).not.toContain("在正式回答或执行前，先调用 `byclaw_chat_context`");
   });
 
+  it.each([
+    "@Agent Alpha preview the connector dashboard",
+    "@Agent Alpha reviewable connector dashboard",
+  ])("does not treat an English near-match as cross-agent intent: %s", (currentUserText) => {
+    const snapshot = buildPromptInjectionSnapshot({
+      request: mockRequest({
+        language: "en_US",
+        laneMetadata: {
+          laneId: "lane-beta",
+          agentName: "Agent Beta",
+        },
+      }),
+      currentUserText,
+    });
+
+    expect(snapshot.appendSystemContext).not.toContain(
+      "Cross-agent chat context is likely required for this turn.",
+    );
+  });
+
+  it.each([
+    "@Agent Alpha summary of the previous result",
+    "@Agent Alpha 请总结上一条结果",
+  ])("recognizes explicit summary handoff intent: %s", (currentUserText) => {
+    const snapshot = buildPromptInjectionSnapshot({
+      request: mockRequest({
+        laneMetadata: {
+          laneId: "lane-beta",
+          agentName: "Agent Beta",
+        },
+      }),
+      currentUserText,
+    });
+
+    expect(snapshot.appendSystemContext).toContain("本轮任务很可能需要跨 agent 聊天室上下文");
+  });
+
   it("adds chat-room lane metadata to channelExtension for implicit cross-agent follow-up", () => {
     recordByclawChatContextMessage({
       id: "issue-triage-message",
@@ -220,5 +257,7 @@ describe("prompt-injection-snapshot", () => {
     expect(snapshot.appendSystemContext).toContain("默认只返回当前调用工具的 agent/lane 的聊天室记录");
     expect(snapshot.appendSystemContext).not.toContain("本轮任务很可能需要跨 agent 聊天室上下文");
     expect(snapshot.appendSystemContext).not.toContain("优先用过滤参数查询这些 agent/角色相关的历史");
+    expect(snapshot.appendSystemContext).not.toContain("private OpenClaw transcripts");
+    expect(snapshot.appendSystemContext).not.toContain("OpenClaw agent 的私有 transcript");
   });
 });

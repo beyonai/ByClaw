@@ -32,6 +32,7 @@ import {
 } from "./prompt-injection-snapshot.js";
 import {
   connectorAuthorizationLogDisabledIdentifiers,
+  safeConnectorAuthorizationLog,
   summarizeConnectorAuthorization,
 } from "./connector-authorization.js";
 import {
@@ -512,7 +513,9 @@ async function deliverReplyToAgentViaSdkUnderGate(
   const disabledConnectorLogIdentifiers = connectorAuthorizationLogDisabledIdentifiers(
     activeRequest.authConnectorList,
   );
-  log?.info?.(
+  safeConnectorAuthorizationLog(
+    log,
+    "info",
     `[byai-channel] connector soft-control policy: sessionKey=${activeRequest.sessionKey}, enabled=${connectorAuthorization.enabled.join(",")}, disabled=${disabledConnectorLogIdentifiers.join(",")}, skillFilter=off`,
   );
   recordByclawChatContextMessage({

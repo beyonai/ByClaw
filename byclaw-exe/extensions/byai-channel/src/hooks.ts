@@ -39,8 +39,9 @@ import { getByaiRuntime } from "./runtime.js";
 import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import { takePromptInjectionSnapshot } from "./prompt-injection-snapshot.js";
 import {
-  buildConnectorPolicyToolCallWarning,
   connectorAuthorizationLogDisabledIdentifiers,
+  logConnectorPolicyToolActivity,
+  safeConnectorAuthorizationLog,
 } from "./connector-authorization.js";
 import { buildByclawChatContextToolPrompt } from "./chat-context-prompt.js";
 import {
@@ -616,7 +617,9 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
         resolveActiveSdkRequestBySessionKey(ctx.sessionKey)?.authConnectorList,
       );
       if (disabled.length > 0) {
-        api.logger.info(
+        safeConnectorAuthorizationLog(
+          api.logger,
+          "info",
           `[byai-channel] connector soft-control prompt injected: sessionKey=${ctx.sessionKey}, disabled=${disabled.join(",")}, skillFilter=off`,
         );
       }
@@ -666,16 +669,13 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
   api.on("before_tool_call", (event, ctx) => {
     const request = resolveActiveSdkRequestBySessionKey(ctx.sessionKey);
     const toolName = event.toolName ?? event.name;
-    const warning =
-      request && typeof toolName === "string"
-        ? buildConnectorPolicyToolCallWarning({
-            sessionKey: request.sessionKey,
-            toolName,
-            authorization: request.authConnectorList,
-          })
-        : undefined;
-    if (warning) {
-      api.logger.warn(warning);
+    if (request && typeof toolName === "string") {
+      return logConnectorPolicyToolActivity({
+        logger: api.logger,
+        sessionKey: request.sessionKey,
+        toolName,
+        authorization: request.authConnectorList,
+      });
     }
     return undefined;
   });

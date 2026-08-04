@@ -69,9 +69,15 @@ function currentLaneRefs(laneMetadata: ByaiLaneMetadata | undefined): string[] {
 }
 
 function hasExplicitCrossAgentContextIntent(text: string): boolean {
-  return /继续|承接|接力|复核|审查|汇总|参考.{0,12}(?:输出|结果|报告)|上一条|上条|之前的输出|continue|take over|handoff|review|summari[sz]e|previous (?:output|result)/iu.test(
-    text,
-  );
+  const hasChineseIntent =
+    /继续|承接|接力|复核|审查|汇总|总结|参考.{0,12}(?:输出|结果|报告)|上一条|上条|之前的输出/u.test(
+      text,
+    );
+  const hasEnglishIntent =
+    /\b(?:continue|handoff|review|summary|summari[sz]e)\b|\btake\s+over\b|\bprevious\s+(?:output|result)\b/iu.test(
+      text,
+    );
+  return hasChineseIntent || hasEnglishIntent;
 }
 
 export function detectByclawChatContextCrossAgentHint(
@@ -127,7 +133,7 @@ export function buildByclawChatContextToolPrompt(
   if (isEnglish) {
     return [
       "ByClaw chat handoff context is available through the `byclaw_chat_context` tool.",
-      "When the user asks you to continue, take over, review a previous agent's work, or refer to another @agent in the same ByClaw chat, call `byclaw_chat_context` first and use its visible messages instead of assuming access to private OpenClaw transcripts.",
+      "When the user asks you to continue, take over, review a previous agent's work, or refer to another @agent in the same ByClaw chat, call `byclaw_chat_context` first and use its visible messages instead of assuming access to another agent's private runtime transcript.",
       "Normally call it without `current_lane_only=false`; by default it returns only the current calling agent/lane's chat records to avoid repeated or unrelated context.",
       "For parallel @agent requests, keep your answer scoped to your own lane. The tool defaults to the current lane; only set `current_lane_only=false` when the user explicitly asks for cross-agent handoff or review.",
       crossAgentPrompt,
@@ -135,7 +141,7 @@ export function buildByclawChatContextToolPrompt(
   }
   return [
     "ByClaw 聊天室接力上下文需要通过 `byclaw_chat_context` 工具获取。",
-    "当用户要求“继续/承接/接力/复核上条/参考同一聊天室里的其他 @agent 输出”时，先调用 `byclaw_chat_context`，基于工具返回的可见消息承接，不要假设能读取其他 OpenClaw agent 的私有 transcript。",
+    "当用户要求“继续/承接/接力/复核上条/参考同一聊天室里的其他 @agent 输出”时，先调用 `byclaw_chat_context`，基于工具返回的可见消息承接，不要假设能读取其他 agent 的私有运行时 transcript。",
     "一般情况下调用工具时不要设置 `current_lane_only=false`；默认只返回当前调用工具的 agent/lane 的聊天室记录，避免重复或无关上下文进入会话。",
     "并行 @多个 agent 派活时，只回答自己 lane 的任务；工具默认只返回当前 lane，只有用户明确要求跨 agent 接力/复核时才设置 `current_lane_only=false`。",
     crossAgentPrompt,

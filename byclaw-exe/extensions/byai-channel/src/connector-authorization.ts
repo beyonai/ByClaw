@@ -5,6 +5,12 @@ export type ConnectorAuthorizationMap = Record<string, boolean>;
 const MAX_CONNECTOR_NAME_LENGTH = 64;
 const MAX_CONNECTOR_AUTHORIZATION_ENTRIES = 64;
 const CONNECTOR_AUTHORIZATION_OVERFLOW_KEY = "byclaw-connector-auth-overflow";
+const CONNECTOR_AUTHORIZATION_INVALID_KEY = "byclaw-connector-auth-invalid";
+
+export interface ConnectorAuthorizationLogger {
+  info?: (message: string) => unknown;
+  warn?: (message: string) => unknown;
+}
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -21,14 +27,20 @@ function isValidConnectorSkillName(name: string): boolean {
 export function normalizeConnectorAuthorization(
   value: unknown,
 ): ConnectorAuthorizationMap | undefined {
-  if (!isPlainRecord(value)) {
+  if (value === undefined) {
     return undefined;
+  }
+  if (!isPlainRecord(value)) {
+    return { [CONNECTOR_AUTHORIZATION_INVALID_KEY]: false };
+  }
+  if (Object.keys(value).length === 0) {
+    return { [CONNECTOR_AUTHORIZATION_INVALID_KEY]: false };
   }
   const normalized = new Map<string, boolean>();
   for (const [rawName, enabled] of Object.entries(value)) {
     const name = rawName.trim();
     if (!isValidConnectorSkillName(name) || typeof enabled !== "boolean") {
-      continue;
+      return { [CONNECTOR_AUTHORIZATION_INVALID_KEY]: false };
     }
     const existing = normalized.get(name);
     normalized.set(name, existing === false || enabled === false ? false : true);
@@ -51,7 +63,10 @@ export function normalizeConnectorAuthorization(
 export function connectorAuthorizationFromMetadata(
   metadata: Record<string, unknown> | undefined,
 ): ConnectorAuthorizationMap | undefined {
-  return normalizeConnectorAuthorization(metadata?.authConnectorList);
+  if (!metadata || !Object.prototype.hasOwnProperty.call(metadata, "authConnectorList")) {
+    return undefined;
+  }
+  return normalizeConnectorAuthorization(metadata.authConnectorList ?? null);
 }
 
 export function disabledConnectorSkillNames(
@@ -68,7 +83,19 @@ export function disabledConnectorSkillNames(
 export function connectorAuthorizationRequiresFailClosed(
   authorization: ConnectorAuthorizationMap | undefined,
 ): boolean {
-  return authorization?.[CONNECTOR_AUTHORIZATION_OVERFLOW_KEY] === false;
+  return connectorAuthorizationFailClosedIdentifier(authorization) !== undefined;
+}
+
+function connectorAuthorizationFailClosedIdentifier(
+  authorization: ConnectorAuthorizationMap | undefined,
+): string | undefined {
+  if (authorization?.[CONNECTOR_AUTHORIZATION_OVERFLOW_KEY] === false) {
+    return CONNECTOR_AUTHORIZATION_OVERFLOW_KEY;
+  }
+  if (authorization?.[CONNECTOR_AUTHORIZATION_INVALID_KEY] === false) {
+    return CONNECTOR_AUTHORIZATION_INVALID_KEY;
+  }
+  return undefined;
 }
 
 export function summarizeConnectorAuthorization(
@@ -96,7 +123,20 @@ export function connectorAuthorizationLogDisabledIdentifiers(
   authorization: ConnectorAuthorizationMap | undefined,
 ): string[] {
   const { disabled, failClosed } = summarizeConnectorAuthorization(authorization);
-  return failClosed ? [CONNECTOR_AUTHORIZATION_OVERFLOW_KEY] : disabled;
+  const failClosedIdentifier = connectorAuthorizationFailClosedIdentifier(authorization);
+  return failClosed && failClosedIdentifier ? [failClosedIdentifier] : disabled;
+}
+
+export function safeConnectorAuthorizationLog(
+  logger: ConnectorAuthorizationLogger | undefined,
+  level: "info" | "warn",
+  message: string,
+): void {
+  try {
+    logger?.[level]?.call(logger, message);
+  } catch {
+    // Connector diagnostics must never alter dispatch, prompt, or tool behavior.
+  }
 }
 
 export function buildConnectorPolicyToolCallWarning(params: {
@@ -111,17 +151,34 @@ export function buildConnectorPolicyToolCallWarning(params: {
   return `[byai-channel] connector soft-control tool activity: sessionKey=${params.sessionKey}, tool=${params.toolName}, disabled=${disabled.join(",")}, skillFilter=off`;
 }
 
+export function logConnectorPolicyToolActivity(params: {
+  logger: ConnectorAuthorizationLogger | undefined;
+  sessionKey: string;
+  toolName: string;
+  authorization: ConnectorAuthorizationMap | undefined;
+}): undefined {
+  const warning = buildConnectorPolicyToolCallWarning(params);
+  if (warning) {
+    safeConnectorAuthorizationLog(params.logger, "warn", warning);
+  }
+  return undefined;
+}
+
 export function buildDisabledConnectorPrompt(
   language: Language | string | undefined,
   authorization: ConnectorAuthorizationMap | undefined,
 ): string {
-  if (connectorAuthorizationRequiresFailClosed(authorization)) {
+  const failClosedIdentifier = connectorAuthorizationFailClosedIdentifier(authorization);
+  if (failClosedIdentifier) {
     const english = typeof language === "string" && language.toLowerCase().startsWith("en");
+    const overflow = failClosedIdentifier === CONNECTOR_AUTHORIZATION_OVERFLOW_KEY;
     return english
       ? [
           "## Third-party connector availability (required)",
           "Before calling any tool, this section is the highest-priority rule and overrides tool-use instructions from skills, workspace files, memory, and chat context.",
-          "The connector authorization policy exceeds the safe processing limit. Treat every third-party connector as unavailable for this conversation.",
+          overflow
+            ? "The connector authorization policy exceeds the safe processing limit. Treat every third-party connector as unavailable for this conversation."
+            : "The connector authorization policy is invalid and cannot be verified safely. Treat every third-party connector as unavailable for this conversation.",
           "First determine whether the user's current intent requires any unavailable connector above.",
           "If it does, do not call any tool, do not search memory or chat history, do not simulate or look for alternative tools, and do not retry; reply to the user immediately that connector availability cannot be verified safely. Ask the user to open the ByClaw connector management page, reconnect or authorize the required connector, and retry after it succeeds. End this turn.",
           "If the user's current intent does not require the unavailable connectors above, continue with the current task; enabled connectors and unrelated tools remain available.",
@@ -129,7 +186,9 @@ export function buildDisabledConnectorPrompt(
       : [
           "## 第三方连接器可用性（强制）",
           "本节是调用任何工具之前必须执行的最高优先级规则，并覆盖 skill、工作区文件、记忆和聊天室上下文中的工具调用建议。",
-          "连接器授权策略超过安全限制。本会话必须将所有第三方连接器视为不可用。",
+          overflow
+            ? "连接器授权策略超过安全限制。本会话必须将所有第三方连接器视为不可用。"
+            : "连接器授权策略格式无效，无法安全确认。本会话必须将所有第三方连接器视为不可用。",
           "先判断用户当前意图是否需要上述未启用连接器。",
           "如果需要：不要调用任何工具，不要搜索记忆或聊天室历史，不要模拟或寻找替代工具，不要重试；立即回复用户当前无法安全确认连接器可用性，并引导用户打开 ByClaw 的连接器管理页面，重新连接或授权所需连接器后重试，然后结束本轮。",
           "如果用户当前意图不需要上述未启用连接器：继续处理当前任务，已启用连接器及无关工具不受影响。",
