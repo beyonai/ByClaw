@@ -156,6 +156,21 @@ export class DelegationService {
             agentId: agent.id,
             agentName: agent.name,
             connectorId: connector.id,
+            task: input.task,
+            ...(input.expectedOutput
+              ? { expectedOutput: input.expectedOutput }
+              : {}),
+            ...(input.attachments?.length
+              ? {
+                  attachments: input.attachments.map((attachment) => ({
+                    id: attachment.id,
+                    name: attachment.name,
+                    ...(attachment.mediaType
+                      ? { mediaType: attachment.mediaType }
+                      : {}),
+                  })),
+                }
+              : {}),
           },
         });
       } catch (error) {
@@ -778,6 +793,7 @@ export class DelegationService {
         ...(delegation.agentName ? { agentName: delegation.agentName } : {}),
         status,
         artifactCount: result.artifacts.length,
+        resultStatus: result.status,
         ...(result.error ? { error: result.error } : {}),
       },
     });

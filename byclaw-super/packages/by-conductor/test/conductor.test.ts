@@ -65,7 +65,12 @@ describe("DelegationService", () => {
       })(),
       cancel: vi.fn(async () => undefined),
     }));
-    registry.register({ ...fakeConnector(async function* () {}), start });
+    const connector = fakeConnector(async function* () {});
+    registry.register({
+      ...connector,
+      capabilities: { ...connector.capabilities, attachments: true },
+      start,
+    });
     const delegations = new InMemoryDelegationRepository();
     const events = new InMemoryRunEventStore();
     const service = new DelegationService(registry, delegations, events, 1_000);
@@ -84,6 +89,15 @@ describe("DelegationService", () => {
       agents: [agent],
       agentId: "1001",
       task: "analyze",
+      expectedOutput: "structured summary",
+      attachments: [
+        {
+          id: "attachment-1",
+          name: "sales.csv",
+          mediaType: "text/csv",
+          provenance: "by-framework",
+        },
+      ],
       metadata: {},
       signal: new AbortController().signal,
     });
@@ -100,6 +114,16 @@ describe("DelegationService", () => {
       "delegation.output.delta",
       "delegation.completed",
     ]);
+    const startedEvent = storedEvents.find((e) => e.type === "delegation.started");
+    expect(startedEvent?.data).toMatchObject({
+      delegationId: stored?.id,
+      connectorId: "fake",
+      task: "analyze",
+      expectedOutput: "structured summary",
+      attachments: [
+        { id: "attachment-1", name: "sales.csv", mediaType: "text/csv" },
+      ],
+    });
     expect(
       storedEvents
         .filter((event) => event.type === "delegation.output.delta")
@@ -112,6 +136,7 @@ describe("DelegationService", () => {
       agentName: "Analyst",
       status: "COMPLETED",
       artifactCount: 0,
+      resultStatus: "completed",
     });
 
     await expect(
