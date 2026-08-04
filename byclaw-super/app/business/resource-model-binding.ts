@@ -2,10 +2,9 @@ import { createHash } from "node:crypto";
 import type { LeaderModelSelection, LlmProviderConfig } from "@byclaw/by-conductor";
 import type { RedisFirstLlmProvider } from "../llm-provider/index.js";
 import type { ByClawBeEndpointResolver } from "./endpoint-resolver.js";
+import { normalizeBaseUrl, postByClawBeJson, type FetchLike } from "./byclaw-be-http.js";
 
 const RESOURCE_DETAIL_PATH = "/byaiService/open/api/v1/queryDigEmployeeDetail";
-
-type FetchLike = typeof globalThis.fetch;
 
 export interface ByClawBeResourceModelResolverOptions {
   baseUrl: string;
@@ -37,39 +36,22 @@ export class ByClawBeResourceModelResolver {
     systemCode?: string;
   }): Promise<LeaderModelSelection> {
     const resourceId = requiredScalar(input.resourceId, "resourceId");
-    const discoveredBaseUrl = await this.#endpointResolver?.resolve();
-    const url = buildResourceDetailUrl(
-      discoveredBaseUrl ? normalizeBaseUrl(discoveredBaseUrl) : this.#fallbackBaseUrl,
-    );
-    let response: Response;
-    try {
-      response = await this.#fetch(url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "Beyond-Token": input.beyondToken,
-          ...(input.systemCode ? { "System-Code": input.systemCode } : {}),
-        },
-        body: JSON.stringify({ resourceId }),
-        signal: AbortSignal.timeout(this.#timeoutMs),
-      });
-    } catch (error) {
-      throw new Error(
-        error instanceof Error
-          ? `ByClaw BE resource model request failed: ${error.message}`
-          : "ByClaw BE resource model request failed",
-      );
+    const data = await postByClawBeJson({
+      fetchImpl: this.#fetch,
+      ...(this.#endpointResolver ? { endpointResolver: this.#endpointResolver } : {}),
+      fallbackBaseUrl: this.#fallbackBaseUrl,
+      timeoutMs: this.#timeoutMs,
+      path: RESOURCE_DETAIL_PATH,
+      beyondToken: input.beyondToken,
+      ...(input.systemCode ? { systemCode: input.systemCode } : {}),
+      body: { resourceId },
+      label: "resource model",
+      toError: (message) => new Error(message),
+    });
+    if (!isRecord(data)) {
+      throw new Error("ByClaw BE resource model returned invalid result");
     }
-    if (!response.ok) {
-      throw new Error(`ByClaw BE resource model returned HTTP ${response.status}`);
-    }
-    const payload = await parseResponse(response);
-    if (payload.code !== 0 || payload.success === false || !isRecord(payload.data)) {
-      throw new Error(
-        `ByClaw BE resource model returned invalid result${payload.msg ? `: ${payload.msg}` : ""}`,
-      );
-    }
-    const modelId = modelIdFromPrologue(payload.data.prologue);
+    const modelId = modelIdFromPrologue(data.prologue);
     const config = await this.#llmProvider.resolveByModelId(modelId);
     return {
       modelId,
@@ -105,40 +87,6 @@ function requiredScalar(value: unknown, name: string): string {
     throw new Error(`${name} is required`);
   }
   return normalized;
-}
-
-function normalizeBaseUrl(value: string): URL {
-  const url = new URL(value);
-  url.pathname =
-    url.pathname === "/" ? "/" : `/${url.pathname.replace(/^\/+|\/+$/g, "")}`;
-  url.search = "";
-  url.hash = "";
-  return url;
-}
-
-function buildResourceDetailUrl(baseUrl: URL): URL {
-  const url = new URL(baseUrl);
-  const prefix = url.pathname === "/" ? "" : url.pathname.replace(/\/$/, "");
-  url.pathname = `${prefix}${RESOURCE_DETAIL_PATH}`;
-  return url;
-}
-
-async function parseResponse(response: Response): Promise<{
-  code?: number;
-  msg?: string;
-  success?: boolean;
-  data?: unknown;
-}> {
-  try {
-    return (await response.json()) as {
-      code?: number;
-      msg?: string;
-      success?: boolean;
-      data?: unknown;
-    };
-  } catch {
-    throw new Error("ByClaw BE resource model returned invalid JSON");
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
