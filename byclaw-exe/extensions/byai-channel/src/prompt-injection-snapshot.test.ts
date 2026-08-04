@@ -74,6 +74,12 @@ describe("prompt-injection-snapshot", () => {
     expect(snapshot.appendSystemContext.indexOf("第三方连接器可用性")).toBeGreaterThan(
       snapshot.appendSystemContext.indexOf("ByClaw 聊天室接力上下文需要通过"),
     );
+    expect(snapshot.appendSystemContext.indexOf("第三方连接器可用性")).toBeGreaterThan(
+      snapshot.appendSystemContext.indexOf("ByClaw ACP 下游语言元数据"),
+    );
+    expect(snapshot.appendSystemContext.indexOf("第三方连接器可用性")).toBeGreaterThan(
+      snapshot.appendSystemContext.indexOf("channelType"),
+    );
   });
 
   it("injects English connector guidance and omits it when none are disabled", () => {

@@ -249,13 +249,6 @@ export function buildPromptInjectionSnapshot(params: {
   if (params.request.languageProvided) {
     sections.push(buildLanguagePrompt(params.request.language));
   }
-  const connectorPrompt = buildDisabledConnectorPrompt(
-    params.request.language,
-    params.request.authConnectorList,
-  );
-  if (connectorPrompt) {
-    sections.push(connectorPrompt);
-  }
   sections.push(buildByclawAcpLanguagePrompt(
     params.request.language,
     params.request.languageProvided,
@@ -271,6 +264,13 @@ export function buildPromptInjectionSnapshot(params: {
   );
   if (channelExtPrompt) {
     sections.push(channelExtPrompt);
+  }
+  const connectorPrompt = buildDisabledConnectorPrompt(
+    params.request.language,
+    params.request.authConnectorList,
+  );
+  if (connectorPrompt) {
+    sections.push(connectorPrompt);
   }
   return {
     appendSystemContext: sections.join("\n\n"),
