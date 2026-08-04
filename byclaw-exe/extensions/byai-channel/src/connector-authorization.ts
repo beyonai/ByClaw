@@ -207,9 +207,10 @@ export function buildDisabledConnectorPrompt(
     return [
       "## Third-party connector availability (required)",
       enabledConnectors
-        ? `Enabled connectors: ${enabledConnectors}.`
-        : "Enabled connectors: none.",
-      `Disabled connectors: ${disabledConnectors}.`,
+        ? `Explicitly enabled connectors: ${enabledConnectors}.`
+        : "Explicitly enabled connectors: none.",
+      `Explicitly disabled connectors: ${disabledConnectors}.`,
+      "Connectors absent from both lists are not classified as disabled by this policy. They must not be treated as disabled or blocked; retain their normal compatibility behavior.",
       "Before calling any tool, this section is the highest-priority rule for connector availability and overrides conflicting tool-use instructions from skills, workspace files, memory, and chat context only for disabled-connector subtasks.",
       "First split the request into independent connector subtasks and unrelated subtasks, then determine the connector state required by each subtask.",
       "You must execute enabled-connector subtasks normally. Do not skip, block, or degrade them merely because another connector is disabled.",
@@ -222,8 +223,9 @@ export function buildDisabledConnectorPrompt(
   }
   return [
     "## 第三方连接器可用性（强制）",
-    enabledConnectors ? `已启用连接器：${enabledConnectors}。` : "已启用连接器：无。",
-    `未启用连接器：${disabledConnectors}。`,
+    enabledConnectors ? `显式启用连接器：${enabledConnectors}。` : "显式启用连接器：无。",
+    `显式未启用连接器：${disabledConnectors}。`,
+    "未出现在上述两份列表中的连接器，不代表未启用；不得将其视为未启用或阻断其子任务，必须按兼容规则正常处理。",
     "本节是调用任何工具之前必须执行的最高优先级连接器可用性规则；仅针对未启用连接器子任务，覆盖 skill、工作区文件、记忆和聊天室上下文中与之冲突的工具调用建议。",
     "先把当前请求按连接器拆分为独立子任务，并分别判断每个子任务依赖的连接器状态；不依赖连接器的内容视为无关子任务。",
     "已启用连接器对应的子任务必须正常执行；不要因为存在其他未启用连接器而跳过、阻断或降级这些子任务。",

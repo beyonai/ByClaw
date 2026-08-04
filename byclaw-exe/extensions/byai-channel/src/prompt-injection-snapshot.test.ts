@@ -67,8 +67,9 @@ describe("prompt-injection-snapshot", () => {
     });
 
     expect(snapshot.appendSystemContext).toContain("第三方连接器可用性");
-    expect(snapshot.appendSystemContext).toContain("已启用连接器：`dws`");
-    expect(snapshot.appendSystemContext).toContain("未启用连接器：`fws`, `wecomcli`");
+    expect(snapshot.appendSystemContext).toContain("显式启用连接器：`dws`");
+    expect(snapshot.appendSystemContext).toContain("显式未启用连接器：`fws`, `wecomcli`");
+    expect(snapshot.appendSystemContext).toContain("未出现在上述两份列表中的连接器");
     expect(snapshot.appendSystemContext).toContain("已启用连接器对应的子任务必须正常执行");
     expect(snapshot.appendSystemContext).toContain("只列出本次请求实际需要但未启用的连接器");
     expect(snapshot.appendSystemContext).toContain("连接器管理页面");
@@ -92,7 +93,8 @@ describe("prompt-injection-snapshot", () => {
       }),
     });
     expect(english.appendSystemContext).toContain("Third-party connector availability");
-    expect(english.appendSystemContext).toContain("Disabled connectors: `dws`");
+    expect(english.appendSystemContext).toContain("Explicitly disabled connectors: `dws`");
+    expect(english.appendSystemContext).toContain("Connectors absent from both lists");
     expect(english.appendSystemContext).toContain(
       "must execute enabled-connector subtasks normally",
     );
