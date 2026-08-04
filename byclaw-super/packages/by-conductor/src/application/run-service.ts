@@ -775,12 +775,25 @@ ${JSON.stringify(response)}`;
         currentTime: this.now(),
         user: session.owner,
         signal: runController.signal,
-        // Leader 的可见回答增量被规范化为 Run 事件，供 SSE 消费。
+        // Leader 的可见回答与思考增量被规范化为 Run 事件，供对外流协议消费。
         onDelta: async (text) => {
           const event = {
             timestamp: this.now(),
             runId: current.id,
             type: "leader.delta",
+            data: { text },
+          } as const;
+          if (claim && this.events.appendForClaim) {
+            await this.events.appendForClaim(event, claim);
+          } else {
+            await this.events.append(event);
+          }
+        },
+        onReasoningDelta: async (text) => {
+          const event = {
+            timestamp: this.now(),
+            runId: current.id,
+            type: "leader.reasoning.delta",
             data: { text },
           } as const;
           if (claim && this.events.appendForClaim) {

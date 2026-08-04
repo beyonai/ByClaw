@@ -666,6 +666,46 @@ describe("DelegationService", () => {
 });
 
 describe("RunService", () => {
+  it("stores Leader reasoning separately from visible answer deltas", async () => {
+    const leaderFactory: LeaderSessionFactory = {
+      async create() {
+        return {
+          contextRevision: 0,
+          async run(input) {
+            await input.onReasoningDelta?.('The user said "hello"');
+            await input.onDelta("你好！");
+            return { text: "你好！" };
+          },
+          checkpoint: () => undefined,
+          markCommitted: () => undefined,
+          abort: async () => undefined,
+          dispose: () => undefined,
+        };
+      },
+      async health() {
+        return { healthy: true, model: "fake/model" };
+      },
+    };
+    const { events, service } = createRunService(leaderFactory);
+
+    const run = await service.createSessionRun({
+      owner: { userCode: "first-user" },
+      message: "hello",
+      agentList: [],
+    });
+
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
+    const outputEvents = (await events.list(run.id)).filter((event) =>
+      event.type.startsWith("leader."),
+    );
+    expect(outputEvents).toMatchObject([
+      { type: "leader.reasoning.delta", data: { text: 'The user said "hello"' } },
+      { type: "leader.delta", data: { text: "你好！" } },
+    ]);
+    expect((await service.getRun(run.id))?.finalAnswer).toBe("你好！");
+    await service.dispose();
+  });
+
   it("marks an empty Leader answer as failed instead of silently completing", async () => {
     const leaderFactory: LeaderSessionFactory = {
       async create() {

@@ -39,6 +39,10 @@ import type {
   LeaderRunResult,
   LeaderSession,
 } from "./ports/leader.js";
+import {
+  ThinkingStreamParser,
+  type ThinkingStreamSegment,
+} from "./thinking-stream-parser.js";
 
 export interface PiLeaderCompactionConfig {
   enabled: boolean;
@@ -340,32 +344,50 @@ export class PiLeaderSession implements LeaderSession {
     let currentAssistant = "";
     let lastAssistant = "";
     let modelErrorMessage = "";
+    let sawTextDelta = false;
+    let thinkingParser = new ThinkingStreamParser();
     let deltaWrites = Promise.resolve();
     let checkpointWrites = Promise.resolve();
-    // 仅消费可展示的回答文本；Pi 的隐藏推理和工具内部事件不会向外透传。
+    const forwardSegments = (segments: ThinkingStreamSegment[]) => {
+      for (const segment of segments) {
+        if (segment.kind === "answer") {
+          currentAssistant += segment.text;
+          deltaWrites = deltaWrites.then(() => input.onDelta(segment.text));
+        } else if (input.onReasoningDelta) {
+          deltaWrites = deltaWrites.then(() => input.onReasoningDelta?.(segment.text));
+        }
+      }
+    };
+    // 标准 thinking_delta 与普通文本中的 <think> 兼容格式都归一化为独立思考增量。
     const unsubscribe = this.session.subscribe((event) => {
       if (event.type === "message_start" && event.message.role === "assistant") {
         currentAssistant = "";
+        sawTextDelta = false;
+        thinkingParser = new ThinkingStreamParser();
       } else if (
         event.type === "message_update" &&
         event.assistantMessageEvent.type === "text_delta"
       ) {
-        currentAssistant += event.assistantMessageEvent.delta;
+        sawTextDelta = true;
+        forwardSegments(thinkingParser.push(event.assistantMessageEvent.delta));
+      } else if (
+        event.type === "message_update" &&
+        event.assistantMessageEvent.type === "thinking_delta" &&
+        input.onReasoningDelta
+      ) {
         const delta = event.assistantMessageEvent.delta;
-        deltaWrites = deltaWrites.then(() => input.onDelta(delta));
+        deltaWrites = deltaWrites.then(() => input.onReasoningDelta?.(delta));
       } else if (event.type === "message_end" && event.message.role === "assistant") {
         const finalizedText = event.message.content
           .map((content) => (content.type === "text" ? content.text : ""))
           .join("");
-        if (finalizedText.trim()) {
+        if (!sawTextDelta && finalizedText) {
           // 部分 Provider 不发送 text_delta，只在 message_end 给出完整文本。
-          // 此时补发一次增量，确保 SSE 与最终答案都不会静默为空。
-          if (!currentAssistant) {
-            deltaWrites = deltaWrites.then(() => input.onDelta(finalizedText));
-          }
-          currentAssistant = finalizedText;
-          lastAssistant = finalizedText;
-        } else if (currentAssistant.trim()) {
+          // 此时同样执行思考标签拆分，确保最终答案不混入隐藏思考。
+          forwardSegments(thinkingParser.push(finalizedText));
+        }
+        forwardSegments(thinkingParser.finish());
+        if (currentAssistant.trim()) {
           lastAssistant = currentAssistant;
         }
         // 模型调用失败（如 429 限额）时 Pi 以 stopReason:"error" 结束消息；

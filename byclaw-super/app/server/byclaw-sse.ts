@@ -28,6 +28,10 @@ function serializeByClawSse(event: RunEvent, state: SerializerState): string {
     appendReasoning(frames, event, state, progress);
   }
 
+  if (event.type === "leader.reasoning.delta") {
+    appendReasoning(frames, event, state, stringData(event.data.text));
+  }
+
   if (event.type === "leader.delta") {
     appendAnswerDelta(frames, event, state, stringData(event.data.text));
   }

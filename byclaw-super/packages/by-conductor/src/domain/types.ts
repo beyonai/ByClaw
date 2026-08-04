@@ -225,6 +225,7 @@ export type RunEventType =
   | "run.created"
   | "run.attempt"
   | "run.status"
+  | "leader.reasoning.delta"
   | "leader.delta"
   | "delegation.started"
   | "delegation.progress"

@@ -206,6 +206,27 @@ export function commandSourceAgentId(command: {
   return raw ?? "";
 }
 
+/** 从 by-framework 入站参数读取当前超级助手的展示名称。 */
+export function commandAgentName(command: {
+  header: { metadata: Readonly<Record<string, unknown>> };
+  extraPayload?: Readonly<Record<string, unknown>>;
+}): string {
+  const extra = command.extraPayload ?? {};
+  return (
+    recordString(extra, "agent_name") ||
+    recordString(extra, "agentName") ||
+    recordString(command.header.metadata, "agent_name") ||
+    recordString(command.header.metadata, "agentName")
+  );
+}
+
+/** 生成与 byai-channel 一致的 Agent Run 启动标题。 */
+export function agentReadyTitle(agentName: string, locale?: string): string {
+  return locale?.trim().toLowerCase().startsWith("en")
+    ? `${agentName} agent is ready`
+    : `${agentName} 智能体已就绪`;
+}
+
 /** 从记录中读取大小写不敏感的非空字符串值。 */
 export function recordString(
   record: Readonly<Record<string, unknown>>,

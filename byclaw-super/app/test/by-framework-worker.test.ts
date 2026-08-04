@@ -59,6 +59,89 @@ describe("ByClawSuperGatewayWorker", () => {
     );
   });
 
+  it("maps Leader reasoning to reasoningLog events instead of answer text", async () => {
+    const emitChunk = vi.fn(async () => undefined);
+    const emitProtocolChunk = vi.fn(async () => undefined);
+    const worker = createWorker({
+      createSessionRun: vi.fn(async () => run()),
+      cancelRun: vi.fn(),
+      streamEvents: () => reasoningEvents(),
+      emitProtocolChunk,
+    });
+
+    const result = await worker.processCommand(askCommand(), contextMock({ emitChunk }));
+
+    expect(emitProtocolChunk).toHaveBeenNthCalledWith(
+      1,
+      "session-1",
+      "trace-1",
+      "超级助手已就绪",
+      expect.objectContaining({
+        eventType: EventType.REASONING_LOG_DELTA,
+        contentType: "3003",
+        messageId: "run-1:ready",
+        parentMessageId: "-1",
+      }),
+    );
+    expect(emitProtocolChunk).toHaveBeenNthCalledWith(
+      2,
+      "session-1",
+      "trace-1",
+      "",
+      expect.objectContaining({ eventType: EventType.REASONING_LOG_START }),
+    );
+    expect(emitProtocolChunk).toHaveBeenNthCalledWith(
+      3,
+      "session-1",
+      "trace-1",
+      'The user said "hello"',
+      expect.objectContaining({ eventType: EventType.REASONING_LOG_DELTA }),
+    );
+    expect(emitProtocolChunk).toHaveBeenNthCalledWith(
+      4,
+      "session-1",
+      "trace-1",
+      "",
+      expect.objectContaining({ eventType: EventType.REASONING_LOG_END }),
+    );
+    expect(emitChunk).toHaveBeenCalledTimes(1);
+    expect(emitChunk).toHaveBeenCalledWith("你好！", EventType.ANSWER_DELTA);
+    expect(result.content).toBe("你好！");
+    expect(JSON.stringify(emitChunk.mock.calls)).not.toContain("<think>");
+  });
+
+  it("uses the inbound Agent name in the localized ready title", async () => {
+    const emitProtocolChunk = vi.fn(async () => undefined);
+    const worker = createWorker({
+      createSessionRun: vi.fn(async () => run()),
+      cancelRun: vi.fn(),
+      streamEvents: () => completedEvents(),
+      emitProtocolChunk,
+    });
+
+    await worker.processCommand(
+      askCommand("secret-token", undefined, undefined, {
+        language: "zh-CN",
+        agentName: "王重阳的个人助理",
+      }),
+      contextMock(),
+    );
+
+    expect(emitProtocolChunk).toHaveBeenNthCalledWith(
+      1,
+      "session-1",
+      "trace-1",
+      "王重阳的个人助理 智能体已就绪",
+      expect.objectContaining({
+        eventType: EventType.REASONING_LOG_DELTA,
+        contentType: "3003",
+        sourceAgentType: "BY_SUPER",
+        messageId: "run-1:ready",
+        parentMessageId: "-1",
+      }),
+    );
+  });
+
   it("accepts Resume without creating another Run", async () => {
     const createSessionRun = vi.fn();
     const worker = createWorker({
@@ -170,6 +253,18 @@ describe("ByClawSuperGatewayWorker", () => {
       1,
       "session-1",
       "trace-1",
+      "超级助手已就绪",
+      expect.objectContaining({
+        eventType: EventType.REASONING_LOG_DELTA,
+        contentType: "3003",
+        messageId: "run-1:ready",
+        parentMessageId: "-1",
+      }),
+    );
+    expect(emitProtocolChunk).toHaveBeenNthCalledWith(
+      2,
+      "session-1",
+      "trace-1",
       "",
       expect.objectContaining({
         eventType: EventType.REASONING_LOG_START,
@@ -179,7 +274,7 @@ describe("ByClawSuperGatewayWorker", () => {
       }),
     );
     expect(emitProtocolChunk).toHaveBeenNthCalledWith(
-      2,
+      3,
       "session-1",
       "trace-1",
       "正在整理子 Agent 结果",
@@ -191,7 +286,7 @@ describe("ByClawSuperGatewayWorker", () => {
       }),
     );
     expect(emitProtocolChunk).toHaveBeenNthCalledWith(
-      3,
+      4,
       "session-1",
       "trace-1",
       "",
@@ -547,15 +642,10 @@ function createWorker(options: {
       respondToInteraction:
         options.respondToInteraction ?? vi.fn(async () => undefined),
     },
-    ...(options.emitEvent || options.emitProtocolChunk
-      ? {
-          protocolEmitter: {
-            emitEvent: options.emitEvent ?? vi.fn(async () => undefined),
-            emitChunk:
-              options.emitProtocolChunk ?? vi.fn(async () => undefined),
-          },
-        }
-      : {}),
+    protocolEmitter: {
+      emitEvent: options.emitEvent ?? vi.fn(async () => undefined),
+      emitChunk: options.emitProtocolChunk ?? vi.fn(async () => undefined),
+    },
     ...(options.logger ? { logger: options.logger } : {}),
   });
 }
@@ -565,7 +655,7 @@ function askCommand(
   token = "secret-token",
   thinkingLevel?: unknown,
   groupChat?: unknown,
-  environment?: { language?: string; timezone?: string },
+  environment?: { language?: string; timezone?: string; agentName?: string },
 ): AskAgentCommand {
   return new AskAgentCommand(
     header(token, environment),
@@ -574,6 +664,7 @@ function askCommand(
     {
       ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
       ...(groupChat === undefined ? {} : { groupChat }),
+      ...(environment?.agentName ? { agent_name: environment.agentName } : {}),
     },
   );
 }
@@ -632,6 +723,12 @@ async function* completedEvents(): AsyncIterable<RunEvent> {
   yield event(3, "leader.delta", { text: "最终" });
   yield event(4, "leader.delta", { text: "答案" });
   yield event(5, "run.completed", { status: "COMPLETED", finalAnswer: "最终答案" });
+}
+
+async function* reasoningEvents(): AsyncIterable<RunEvent> {
+  yield event(1, "leader.reasoning.delta", { text: 'The user said "hello"' });
+  yield event(2, "leader.delta", { text: "你好！" });
+  yield event(3, "run.completed", { status: "COMPLETED", finalAnswer: "你好！" });
 }
 
 /** 构造一次包含子 Agent 正文的完整委派事件序列。 */
