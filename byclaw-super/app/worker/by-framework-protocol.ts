@@ -287,8 +287,8 @@ export function protocolMessage(input: {
   contentType: string;
   orderId: string;
   parentOrderId: string;
-  agentId: string;
-  agentName: string;
+  agentId?: string;
+  agentName?: string;
   objectType?: string;
   status?: string;
 }): Record<string, unknown> {
@@ -301,8 +301,8 @@ export function protocolMessage(input: {
     contentType: input.contentType,
     orderId: input.orderId,
     parentOrderId: input.parentOrderId,
-    agentId: input.agentId,
-    agentName: input.agentName,
+    ...(input.agentId ? { agentId: input.agentId } : {}),
+    ...(input.agentName ? { agentName: input.agentName } : {}),
     ...(input.objectType ? { objectType: input.objectType } : {}),
     ...(input.status ? { status: input.status } : {}),
     choices: [

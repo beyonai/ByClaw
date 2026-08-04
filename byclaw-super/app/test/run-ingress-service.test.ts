@@ -81,6 +81,20 @@ function makeIngress(
 }
 
 describe("RunIngressService self-exclusion", () => {
+  it("persists the by-framework sessionId in the Run ingress context", async () => {
+    const { ingress, runService } = makeIngress([], "creator");
+
+    await ingress.createSessionRun({
+      beyondToken: PRINCIPAL_TOKEN,
+      message: "hi",
+      externalSessionId: "11034160",
+    });
+
+    expect(runService.createSessionRun.mock.calls[0][0].ingressContext).toEqual({
+      externalSessionId: "11034160",
+    });
+  });
+
   it("continues with an empty agent list and exposes the catalog error when discover fails", async () => {
     const runService = fakeRunService();
     const verify: BeyondTokenVerifier = async () => ({ userCode: "creator" });

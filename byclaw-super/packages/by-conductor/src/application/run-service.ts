@@ -834,7 +834,12 @@ ${JSON.stringify(response)}`;
             ...(delegationInput.expectedOutput
               ? { expectedOutput: delegationInput.expectedOutput }
               : {}),
-            metadata,
+            metadata: {
+              ...metadata,
+              ...(current.ingressContext?.externalSessionId
+                ? { externalSessionId: current.ingressContext.externalSessionId }
+                : {}),
+            },
             signal: delegationInput.signal ?? runController.signal,
             ...(claim ? { leaseClaim: claim } : {}),
             ...(recoveringStage === "LEADER_SYNTHESIZING"

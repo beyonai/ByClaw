@@ -75,7 +75,7 @@ describe("ByClawSuperGatewayWorker", () => {
       1,
       "session-1",
       "trace-1",
-      "超级助手已就绪",
+      "超级助手 智能体已就绪",
       expect.objectContaining({
         eventType: EventType.REASONING_LOG_DELTA,
         contentType: "3003",
@@ -253,7 +253,7 @@ describe("ByClawSuperGatewayWorker", () => {
       1,
       "session-1",
       "trace-1",
-      "超级助手已就绪",
+      "超级助手 智能体已就绪",
       expect.objectContaining({
         eventType: EventType.REASONING_LOG_DELTA,
         contentType: "3003",
@@ -310,8 +310,6 @@ describe("ByClawSuperGatewayWorker", () => {
           event: EventType.REASONING_LOG_DELTA,
           contentType: "3009",
           objectType: "tool_call",
-          agentId: "agent-1",
-          agentName: "数据分析助手",
           orderId: "delegation-1",
           parentOrderId: "-1",
           status: "_START_",
@@ -330,8 +328,6 @@ describe("ByClawSuperGatewayWorker", () => {
         parentMessageId: "delegation-1",
         data: expect.objectContaining({
           contentType: "1002",
-          agentId: "agent-1",
-          agentName: "数据分析助手",
           orderId: "delegation-1:output",
           parentOrderId: "delegation-1",
           choices: [
@@ -342,6 +338,10 @@ describe("ByClawSuperGatewayWorker", () => {
         }),
       }),
     );
+    expect(emitEvent.mock.calls[0][0].data).not.toHaveProperty("agentId");
+    expect(emitEvent.mock.calls[0][0].data).not.toHaveProperty("agentName");
+    expect(emitEvent.mock.calls[1][0].data).not.toHaveProperty("agentId");
+    expect(emitEvent.mock.calls[1][0].data).not.toHaveProperty("agentName");
     expect(emitEvent).toHaveBeenNthCalledWith(
       3,
       expect.objectContaining({
@@ -483,6 +483,37 @@ describe("ByClawSuperGatewayWorker", () => {
 
     expect(cancelRun).toHaveBeenCalledWith("run-1", "caller cancelled");
     expect(result.status).toBe(AgentState.CANCELLED);
+  });
+
+  it("maps CancelTask by executionId when its messageId is unavailable", async () => {
+    let releaseEvents: (() => void) | undefined;
+    const waitForRelease = new Promise<void>((resolve) => {
+      releaseEvents = resolve;
+    });
+    const cancelRun = vi.fn(async () => run("CANCELLED"));
+    const emitProtocolChunk = vi.fn(async () => undefined);
+    const worker = createWorker({
+      createSessionRun: vi.fn(async () => run()),
+      cancelRun,
+      streamEvents: () => cancelledEvents(waitForRelease),
+      emitProtocolChunk,
+    });
+    const processing = worker.processCommand(askCommand(), contextMock());
+    await vi.waitFor(() => expect(emitProtocolChunk).toHaveBeenCalled());
+
+    await worker.onCancelTask(
+      new CancelTaskCommand(
+        header(),
+        "unknown-message",
+        "exec-1",
+        "",
+        "caller cancelled",
+      ),
+    );
+    releaseEvents?.();
+    await processing;
+
+    expect(cancelRun).toHaveBeenCalledWith("run-1", "caller cancelled");
   });
 
   it("rejects AskAgent without Beyond-Token", async () => {
@@ -708,6 +739,7 @@ function contextMock(overrides: {
   return {
     sessionId: "session-1",
     traceId: "trace-1",
+    executionId: "exec-1",
     checkCancelled: vi.fn(async () => undefined),
     isCancelRequested: vi.fn(() => false),
     emitChunk: overrides.emitChunk ?? vi.fn(async () => undefined),

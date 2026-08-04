@@ -223,6 +223,9 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       this.#externalSessionBindings.set(bindingKey, run.sessionId);
     }
     this.#activeRuns.set(command.header.messageId, run.id);
+    if (context.executionId) {
+      this.#activeRuns.set(context.executionId, run.id);
+    }
     this.#logger?.info(
       { ...commandLogFields(command), runId: run.id },
       "by-framework 入站任务已创建 Run",
@@ -242,6 +245,9 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       );
     } finally {
       this.#activeRuns.delete(command.header.messageId);
+      if (context.executionId) {
+        this.#activeRuns.delete(context.executionId);
+      }
     }
   }
 
@@ -250,7 +256,9 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     if (!(command instanceof CancelTaskCommand)) {
       return;
     }
-    const runId = this.#activeRuns.get(command.targetMessageId);
+    const runId =
+      this.#activeRuns.get(command.targetMessageId) ||
+      this.#activeRuns.get(command.targetExecutionId);
     if (!runId) {
       this.#logger?.warn(
         { targetMessageId: command.targetMessageId },
@@ -606,14 +614,14 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         contentType: "3009",
         orderId: delegationId,
         parentOrderId: "-1",
-        agentId,
-        agentName,
         objectType: "tool_call",
         status,
       }),
       metadata: {
         parent_run_id: event.runId,
         delegation_id: delegationId,
+        ...(agentId ? { delegated_agent_id: agentId } : {}),
+        ...(agentName ? { delegated_agent_name: agentName } : {}),
       },
     });
   }
@@ -643,12 +651,12 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         contentType: "1002",
         orderId: `${delegationId}:output`,
         parentOrderId: delegationId,
-        agentId,
-        agentName,
       }),
       metadata: {
         parent_run_id: event.runId,
         delegation_id: delegationId,
+        ...(agentId ? { delegated_agent_id: agentId } : {}),
+        ...(agentName ? { delegated_agent_name: agentName } : {}),
       },
     });
   }
