@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useState, useEffect, useRef } from 'rea
 import { UploadOutlined, SearchOutlined, PlusOutlined, FullscreenOutlined } from '@ant-design/icons';
 import { useIntl, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
-import { Button, Empty, Input, Space, Spin, Tooltip, message, Tabs } from 'antd';
+import { Button, Dropdown, Empty, Input, Space, Spin, Tooltip, message, Tabs } from 'antd';
 import classnames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import useModuleEvent from '@/hooks/useModuleEvent';
@@ -29,6 +29,7 @@ import { useSkillDetailDrawer } from '@/pages/manager/components/SkillDetailDraw
 import ResourceFilter from './components/ResourceFilter';
 import { getDefaultParams } from './components/ResourceFilter';
 import ResourceList from './components/ResourceList';
+import SkillGroupList from './components/SkillGroupList';
 import { saveTool } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
@@ -125,6 +126,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const [catalogId, setCatalogId] = useState<string>('');
   const [searchValue, setSearchValue] = useState('');
   const [debouncedSearchValue, setDebouncedSearchValue] = useState('');
+  const [enterpriseSkillDropdownOpen, setEnterpriseSkillDropdownOpen] = useState(false);
   const [catalogList, setCatalogList] = useState<
     Array<{ catalogId: string | number; catalogName: string; pcatalogId?: string | number }>
   >([]);
@@ -143,6 +145,9 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   };
 
   const [activeTab, setActiveTab] = useState<ResourceTab>(defaultTab());
+  const enterpriseSkillKind = searchParams.get('kind') === 'group' ? 'group' : 'skill';
+  const isEnterpriseSkillGroupMode =
+    resourceType === 'SKILL' && activeTab === 'enterprise' && enterpriseSkillKind === 'group';
   const marketplaceRef = useRef<HTMLDivElement>(null);
   const marketplaceIframeRef = useRef<HTMLIFrameElement>(null);
   const [skillMarketplaceBaseUrl, setSkillMarketplaceBaseUrl] = useState('');
@@ -507,17 +512,30 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     setUseApplyAuditOpen(true);
   };
 
+  const handleEnterpriseSkillKindChange = (kind: 'skill' | 'group') => {
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.set('tab', 'enterprise');
+    nextSearchParams.set('kind', kind);
+    setActiveTab('enterprise');
+    setCatalogId('');
+    setSearchValue('');
+    setDebouncedSearchValue('');
+    setDropdownParam(getDefaultParams());
+    setSearchParams(nextSearchParams);
+  };
   const tabBarExtraContent = (
     <Space>
-      <ResourceFilter
-        resourceType={resourceType}
-        onOk={(param: any) => {
-          setDropdownParam(param);
-          // 刷新逻辑由ResourceList组件内部处理
-        }}
-        defaultParam={dropdownParam}
-        activeTab={activeTab}
-      />
+      {!isEnterpriseSkillGroupMode && (
+        <ResourceFilter
+          resourceType={resourceType}
+          onOk={(param: any) => {
+            setDropdownParam(param);
+            // 刷新逻辑由ResourceList组件内部处理
+          }}
+          defaultParam={dropdownParam}
+          activeTab={activeTab}
+        />
+      )}
       <Input
         className={styles.searchInput}
         placeholder={intl.formatMessage({ id: 'common.inputKeyword' })}
@@ -561,7 +579,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         </Tooltip>
       )}
 
-      {brandVersion === 'openSource' && (
+      {!isEnterpriseSkillGroupMode && brandVersion === 'openSource' && (
         <Tooltip
           title={
             !canImportCurrentEnterpriseResource
@@ -596,7 +614,60 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     },
     {
       key: 'enterprise',
-      label: `${intl.formatMessage({ id: 'resource.enterprise' })}${resourceName}`,
+      label:
+        resourceType === 'SKILL' ? (
+          <Dropdown
+            trigger={['hover', 'click']}
+            open={enterpriseSkillDropdownOpen}
+            onOpenChange={setEnterpriseSkillDropdownOpen}
+            menu={{
+              items: [
+                {
+                  key: 'skill',
+                  label: (
+                    <span aria-checked={enterpriseSkillKind === 'skill'} role="menuitemradio">
+                      {intl.formatMessage({ id: 'resource.skillSingle' })}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'group',
+                  label: (
+                    <span aria-checked={enterpriseSkillKind === 'group'} role="menuitemradio">
+                      {intl.formatMessage({ id: 'resource.skillGroup' })}
+                    </span>
+                  ),
+                },
+              ],
+              onClick: ({ key }: { key: string }) => {
+                if (key === 'skill' || key === 'group') {
+                  setEnterpriseSkillDropdownOpen(false);
+                  handleEnterpriseSkillKindChange(key);
+                }
+              },
+            }}
+          >
+            <span
+              className={styles.enterpriseSkillTabLabel}
+              tabIndex={0}
+              role="button"
+              onFocus={() => setEnterpriseSkillDropdownOpen(true)}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  setEnterpriseSkillDropdownOpen(true);
+                }
+              }}
+            >
+              {intl.formatMessage({
+                id:
+                  enterpriseSkillKind === 'group' ? 'resource.enterpriseSkillGroup' : 'resource.enterpriseSkillSingle',
+              })}
+            </span>
+          </Dropdown>
+        ) : (
+          `${intl.formatMessage({ id: 'resource.enterprise' })}${resourceName}`
+        ),
     },
   ];
   if (resourceType === 'SKILL') {
@@ -673,6 +744,9 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
           const nextTab = key as ResourceTab;
           const nextSearchParams = new URLSearchParams(searchParams);
           nextSearchParams.set('tab', nextTab);
+          if (nextTab !== 'enterprise') {
+            nextSearchParams.delete('kind');
+          }
           setCatalogId('');
           setSearchValue('');
           setDebouncedSearchValue('');
@@ -709,44 +783,54 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
               <img className={styles.marketBg} src={bannerUrl} alt="poster" />
             </div>
           )}
-          <div className={classnames('ub ub-ac gap8', styles.filterBar)}>
-            <Tabs
-              className={classnames('ub-f1', styles.tabs)}
-              activeKey={catalogId}
-              items={[
-                { label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }), key: '' },
-                ...topLevelCatalogList.map((item) => ({
-                  label: item.catalogName,
-                  key: `${item?.catalogId}`,
-                })),
-              ]}
-              onChange={(activeKey) => {
-                setCatalogId(`${activeKey}`);
-                // 重置搜索值
-                setSearchValue('');
-                setDebouncedSearchValue('');
-                // 刷新逻辑由ResourceList组件内部处理
-              }}
+          {!isEnterpriseSkillGroupMode && (
+            <div className={classnames('ub ub-ac gap8', styles.filterBar)}>
+              <Tabs
+                className={classnames('ub-f1', styles.tabs)}
+                activeKey={catalogId}
+                items={[
+                  { label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }), key: '' },
+                  ...topLevelCatalogList.map((item) => ({
+                    label: item.catalogName,
+                    key: `${item?.catalogId}`,
+                  })),
+                ]}
+                onChange={(activeKey) => {
+                  setCatalogId(`${activeKey}`);
+                  setSearchValue('');
+                  setDebouncedSearchValue('');
+                }}
+              />
+            </div>
+          )}
+          {isEnterpriseSkillGroupMode ? (
+            <SkillGroupList
+              key={refreshKey}
+              keyword={debouncedSearchValue}
+              activeDigitalEmployeeId={`${activeDigitalEmployeeId || ''}`}
+              ownerType="enterprise"
+              resourceStatus={2}
             />
-          </div>
-          <ResourceList
-            key={refreshKey}
-            resourceType={resourceType}
-            activeTab={activeTab}
-            searchValue={debouncedSearchValue}
-            catalogId={catalogId}
-            dropdownParam={dropdownParam}
-            resourceName={resourceName}
-            knowledgeCapability={knowledgeCapability}
-            knowledgeCapabilityDisabledTip={knowledgeCapabilityDisabledTip}
-            onDetail={handleDetail}
-            onEdit={handleEditItem}
-            onAuth={handleAuth}
-            onApplyUse={handleApplyUse}
-            onAuditUse={handleAuditUse}
-            onRefresh={refreshList}
-            skillCardViewMode="new"
-          />
+          ) : (
+            <ResourceList
+              key={refreshKey}
+              resourceType={resourceType}
+              activeTab={activeTab}
+              searchValue={debouncedSearchValue}
+              catalogId={catalogId}
+              dropdownParam={dropdownParam}
+              resourceName={resourceName}
+              knowledgeCapability={knowledgeCapability}
+              knowledgeCapabilityDisabledTip={knowledgeCapabilityDisabledTip}
+              onDetail={handleDetail}
+              onEdit={handleEditItem}
+              onAuth={handleAuth}
+              onApplyUse={handleApplyUse}
+              onAuditUse={handleAuditUse}
+              onRefresh={refreshList}
+              skillCardViewMode="new"
+            />
+          )}
         </div>
       )}
       <ResourceImport

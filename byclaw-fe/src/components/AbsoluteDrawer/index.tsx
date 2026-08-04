@@ -7,6 +7,7 @@ import useActionEffect from './useEventEmitter';
 import { getRandomNumber } from '@/utils/math';
 import { IMessage } from '@/typescript/message';
 import WriterMaterialIframe from '@/components/wisdomPen/MaterialIframe';
+import SkillGroupDetailDrawer from '@/components/Resources/components/SkillGroupDetailDrawer';
 
 import styles from './index.module.less';
 
@@ -40,6 +41,9 @@ function AbsoluteDrawer(props: IProps) {
     }
     if (drawerType === 'iframe') {
       return IframeRender;
+    }
+    if (typeof drawerType === 'string' && drawerType.toLocaleLowerCase() === 'skillgroupdetail') {
+      return SkillGroupDetailDrawer;
     }
 
     return FragmentComp;

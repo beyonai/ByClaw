@@ -19,6 +19,8 @@ const INIT_DRAWER_CFG = {
   canClose: false,
 };
 
+const normalizeDrawerType = (type: unknown) => (isString(type) ? type : '');
+
 function useActionEffect() {
   const [drawerCfg, setDrawerCfg] = useState({ ...INIT_DRAWER_CFG });
   const [drawerType, setDrawerType] = useState<string>('');
@@ -26,12 +28,7 @@ function useActionEffect() {
   const { EventEmitter } = useGlobal();
 
   const driverOpen = useCallback((type: string) => {
-    if (!isString(type)) {
-      setDrawerType('');
-      return;
-    }
-
-    const drawerType = `${type}`.toLocaleLowerCase();
+    const drawerType = normalizeDrawerType(type).toLocaleLowerCase();
 
     setDrawerType(['false', 'null', 'undefined'].includes(drawerType) ? '' : drawerType);
   }, []);
@@ -57,7 +54,7 @@ function useActionEffect() {
         myDrawerType = drawerType;
       }
 
-      setDrawerType(myDrawerType);
+      setDrawerType(normalizeDrawerType(myDrawerType));
     };
 
     EventEmitter.on('beyond-absolute-driver-open-type', drawerTypeHandler);
