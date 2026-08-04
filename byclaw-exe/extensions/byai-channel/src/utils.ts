@@ -190,8 +190,10 @@ export async function emitOutOfBandSdkEvent(params: {
   applyByFrameworkRedisKeyPatch({ QueueNames, RegistryKeys }, redisInfo);
   const redis = createRedisClient(redisInfo);
   const userId = await getUserId(userCode, redis);
+  // 需要和 byclaw-be/src/main/java/com/iwhalecloud/byai/state/domain/chat/service/SessionEventStreamListener.java 中的 DEFAULT_STREAM_KEY 一致
+  const DEFAULT_STREAM_KEY = "byai_gateway:session_event:data_stream";
   const emitter = new GatewayDataEmitter(redis, {
-    dataStreamName: byFrameworkRedisKeys.sessionEventDataStream(redisInfo),
+    dataStreamName: DEFAULT_STREAM_KEY,
   });
   await emitter.emitEvent({
     data: {
