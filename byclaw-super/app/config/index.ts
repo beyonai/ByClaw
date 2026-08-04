@@ -12,7 +12,6 @@ import {
   redisConnectionMode,
   requiredEnv,
   requiredEnvEither,
-  thirdPartyDirectMode,
 } from "./env-parsers.js";
 import type { PostgresDatabaseConfig } from "@byclaw/storage-postgres";
 
@@ -21,7 +20,7 @@ export interface AuthConfig {
   publicKey: string;
 }
 
-/** 与 ByClaw BE 对接的根地址与超时；服务发现/灰度等运行期参数在装配时另行注入。 */
+/** 与 ByClaw BE 对接的根地址与超时；服务发现等运行期参数在装配时另行注入。 */
 export interface ByClawBeClientConfig {
   baseUrl: string;
   timeoutMs: number;
@@ -51,8 +50,6 @@ export interface AppConfig {
     heartbeatIntervalMs: number;
   };
   thirdPartyAgents: {
-    directMode: "off" | "allowlist" | "all";
-    allowlist: string[];
     descriptorPath: string;
     serviceCredential?: string;
     requestTimeoutMs: number;
@@ -217,14 +214,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       ),
     },
     thirdPartyAgents: {
-      directMode: thirdPartyDirectMode(
-        env.THIRD_PARTY_AGENT_DIRECT_MODE ??
-          defaults.thirdPartyAgents.directMode,
-      ),
-      allowlist: commaSeparated(
-        env.THIRD_PARTY_AGENT_ALLOWLIST ??
-          defaults.thirdPartyAgents.allowlist,
-      ),
       descriptorPath: nonEmpty(
         env.THIRD_PARTY_AGENT_DESCRIPTOR_PATH ??
           defaults.thirdPartyAgents.descriptorPath,

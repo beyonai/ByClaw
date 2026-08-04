@@ -130,14 +130,10 @@ describe("ByClaw BE Agent Catalog", () => {
     ]);
   });
 
-  it("routes allowlisted third-party employees to their direct connector", async () => {
+  it("routes third-party employees to the connector declared by discoverMine", async () => {
     const catalog = new ByClawBeAgentCatalog({
       baseUrl: "http://127.0.0.1:8086",
       timeoutMs: 1_000,
-      thirdPartyDirect: {
-        mode: "allowlist",
-        allowlist: ["2001", "2002", "2003"],
-      },
       fetchImpl: vi.fn(async () =>
         Response.json({
           code: 0,
@@ -166,7 +162,7 @@ describe("ByClaw BE Agent Catalog", () => {
             },
             {
               id: "2004",
-              name: "Not allowlisted",
+              name: "Another SSE",
               createType: "FROM_THIRD",
               integrationType: "INTERFACE",
               usesPermissions: true,
@@ -186,7 +182,7 @@ describe("ByClaw BE Agent Catalog", () => {
       ["2001", "third-party-interface-sse"],
       ["2002", "third-party-a2a"],
       ["2003", "third-party-page"],
-      ["2004", "openclaw-by-framework"],
+      ["2004", "third-party-interface-sse"],
     ]);
   });
 

@@ -414,6 +414,15 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         }
         const error = stringData(event.data.error) || "Run failed";
         this.#logRunFinished(principal, run, "failed", run.createdAt, error);
+        const userMessage = stringData(event.data.userMessage);
+        if (userMessage) {
+          await context.emitChunk(userMessage, EventType.ANSWER_DELTA);
+          return new AgentTaskResult({
+            status: AgentState.COMPLETED,
+            content: userMessage,
+            replyData: { runId: run.id },
+          });
+        }
         throw new Error(error);
       }
     }

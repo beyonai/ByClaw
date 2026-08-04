@@ -442,6 +442,23 @@ describe("ByClawSuperGatewayWorker", () => {
     });
   });
 
+  it("returns a safe answer instead of throwing when the downstream model fails", async () => {
+    const emitChunk = vi.fn(async () => undefined);
+    const worker = createWorker({
+      createSessionRun: vi.fn(async () => run()),
+      cancelRun: vi.fn(),
+      streamEvents: () => modelFailureEvents(),
+    });
+
+    const result = await worker.processCommand(askCommand(), contextMock({ emitChunk }));
+
+    expect(result.content).toBe("下游模型调用异常，请切换模型或者联系管理员");
+    expect(emitChunk).toHaveBeenCalledWith(
+      "下游模型调用异常，请切换模型或者联系管理员",
+      EventType.ANSWER_DELTA,
+    );
+  });
+
   it("maps an external PAGE interaction to the existing 2010 agent card", async () => {
     const emitEvent = vi.fn(async () => undefined);
     const worker = createWorker({
@@ -904,6 +921,14 @@ async function* failedDelegationEvents(): AsyncIterable<RunEvent> {
     error: "下游数字员工不可用",
   });
   yield event(3, "run.failed", { error: "下游数字员工不可用" });
+}
+
+async function* modelFailureEvents(): AsyncIterable<RunEvent> {
+  yield event(1, "run.failed", {
+    status: "FAILED",
+    error: "Leader model call failed: 403: sensitive provider response",
+    userMessage: "下游模型调用异常，请切换模型或者联系管理员",
+  });
 }
 
 async function* pageInteractionEvents(): AsyncIterable<RunEvent> {

@@ -47,8 +47,6 @@ export const APP_CONFIG_DEFAULTS = {
     heartbeatIntervalMs: 5_000,
   },
   thirdPartyAgents: {
-    directMode: "off",
-    allowlist: "",
     descriptorPath:
       "/byaiService/api/internal/v1/digital-employees",
     requestTimeoutMs: 300_000,

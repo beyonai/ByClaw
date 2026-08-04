@@ -81,6 +81,9 @@ type PendingLeaderInteraction = {
   resolve(response: UserInteractionResponse): void;
 };
 
+const DOWNSTREAM_MODEL_FAILURE_USER_MESSAGE =
+  "下游模型调用异常，请切换模型或者联系管理员";
+
 export interface RunServiceRuntimeOptions {
   executionQueue?: RunExecutionQueue;
   checkpoints?: LeaderCheckpointStore;
@@ -1190,11 +1193,16 @@ ${JSON.stringify(response)}`;
       )
       .catch(() => undefined);
     try {
+      const userMessage = userMessageForRunFailure(error);
       await this.#saveRunWithEvent(finished, {
         timestamp: this.now(),
         runId: finished.id,
         type: "run.failed",
-        data: { status: "FAILED", error },
+        data: {
+          status: "FAILED",
+          error,
+          ...(userMessage ? { userMessage } : {}),
+        },
       });
     } catch (saveError) {
       const concurrent = await this.runs.get(finished.id);
@@ -1267,6 +1275,12 @@ ${JSON.stringify(response)}`;
     }
     throw new Error(`Interaction event stream ended: ${interactionId}`);
   }
+}
+
+function userMessageForRunFailure(error: string): string | undefined {
+  return error.startsWith("Leader model call failed:")
+    ? DOWNSTREAM_MODEL_FAILURE_USER_MESSAGE
+    : undefined;
 }
 
 function latestLeaderModel(run: Run) {

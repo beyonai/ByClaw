@@ -45,10 +45,6 @@ export interface ByClawBeAgentCatalogOptions {
   timeoutMs: number;
   fetchImpl?: FetchLike;
   endpointResolver?: ByClawBeEndpointResolver;
-  thirdPartyDirect?: {
-    mode: "off" | "allowlist" | "all";
-    allowlist: readonly string[];
-  };
 }
 
 export class ByClawBeAgentCatalogError extends Error {
@@ -68,9 +64,6 @@ export class ByClawBeAgentCatalog implements AuthorizedAgentCatalog {
   readonly #timeoutMs: number;
   readonly #fetch: FetchLike;
   readonly #endpointResolver: ByClawBeEndpointResolver | undefined;
-  readonly #thirdPartyDirect: NonNullable<
-    ByClawBeAgentCatalogOptions["thirdPartyDirect"]
-  >;
 
   /** 固定 discover 地址和超时，允许测试注入 fetch 实现。 */
   constructor(options: ByClawBeAgentCatalogOptions) {
@@ -78,10 +71,6 @@ export class ByClawBeAgentCatalog implements AuthorizedAgentCatalog {
     this.#timeoutMs = options.timeoutMs;
     this.#fetch = options.fetchImpl ?? globalThis.fetch;
     this.#endpointResolver = options.endpointResolver;
-    this.#thirdPartyDirect = options.thirdPartyDirect ?? {
-      mode: "off",
-      allowlist: [],
-    };
   }
 
   /** 携带 Beyond-Token 调用发现接口，并只保留 usesPermissions 为真的数字员工。 */
@@ -108,21 +97,13 @@ export class ByClawBeAgentCatalog implements AuthorizedAgentCatalog {
         "ByClaw BE discover returned invalid result",
       );
     }
-    return toAuthorizedAgents(data as DiscoverAgent[], this.#thirdPartyDirect);
+    return toAuthorizedAgents(data as DiscoverAgent[]);
   }
 }
 
 /** 过滤无权限或字段不完整的记录，并转换为 by-conductor AgentProfile。 */
-function toAuthorizedAgents(
-  items: DiscoverAgent[],
-  thirdPartyDirect: NonNullable<
-    ByClawBeAgentCatalogOptions["thirdPartyDirect"]
-  >,
-): AgentProfile[] {
+function toAuthorizedAgents(items: DiscoverAgent[]): AgentProfile[] {
   const agents = new Map<string, AgentProfile>();
-  const allowlist = new Set(
-    thirdPartyDirect.allowlist.map((value) => String(value).trim()).filter(Boolean),
-  );
   for (const item of items) {
     if (item.usesPermissions !== true) {
       continue;
@@ -140,7 +121,7 @@ function toAuthorizedAgents(
       name,
       ...(description ? { description } : {}),
       execution: {
-        connectorId: resolveConnectorId(item, id, thirdPartyDirect.mode, allowlist),
+        connectorId: resolveConnectorId(item),
         targetId: id,
         ...(targetAgentType ? { targetAgentType } : {}),
       },
@@ -149,16 +130,9 @@ function toAuthorizedAgents(
   return [...agents.values()];
 }
 
-/** 灰度开关关闭或员工不在 allowlist 时，保持旧 OpenClaw 执行链路。 */
-function resolveConnectorId(
-  item: DiscoverAgent,
-  id: string,
-  mode: "off" | "allowlist" | "all",
-  allowlist: ReadonlySet<string>,
-): string {
-  const directEnabled =
-    mode === "all" || (mode === "allowlist" && allowlist.has(id));
-  if (!directEnabled || normalizeEnum(item.createType) !== "FROM_THIRD") {
+/** 根据 discoverMine 返回的创建方式和集成类型选择执行链路。 */
+function resolveConnectorId(item: DiscoverAgent): string {
+  if (normalizeEnum(item.createType) !== "FROM_THIRD") {
     return OPENCLAW_BY_FRAMEWORK_CONNECTOR_ID;
   }
   switch (normalizeEnum(item.integrationType)) {

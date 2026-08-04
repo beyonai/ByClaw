@@ -184,10 +184,6 @@ function createOrchestration(input: {
   const agentCatalog = new ByClawBeAgentCatalog({
     ...config.byClawBe,
     endpointResolver,
-    thirdPartyDirect: {
-      mode: config.thirdPartyAgents.directMode,
-      allowlist: config.thirdPartyAgents.allowlist,
-    },
   });
   const groupChatContexts = new ByClawBeGroupChatContextProvider({
     ...config.byClawBe,

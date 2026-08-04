@@ -70,7 +70,7 @@ V1 不使用 tenantId、namespace 或 System-Code。不存在或越权统一返�
 
 - Session owner V1 只使用验签 JWT 的 `userCode`，不接受请求体覆盖；
 - Agent 列表由 ByClaw BE `discover` 接口提供，只保留 `usesPermissions=true` 的记录；
-- 三方员工直连默认关闭；开启后按 `FROM_THIRD + integrationType` 选择专用 Connector，
+- 三方员工按 `discoverMine` 返回的 `FROM_THIRD + integrationType` 自动选择专用 Connector，
   endpoint/header 只通过内部 execution descriptor API 短期获取；
 - ByClaw BE 地址优先读取 Redis `byai_gateway:sd:instances:ByaiService`，没有有效实例时回退 `BYCLAW_BE_BASE_URL`；
 - Pi 的 `delegateAgent` 在执行前仍会服务端校验 Agent ID；

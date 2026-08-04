@@ -765,6 +765,44 @@ describe("RunService", () => {
     await service.dispose();
   });
 
+  it("adds a safe user message to downstream model failure events", async () => {
+    const leaderFactory: LeaderSessionFactory = {
+      async create() {
+        return {
+          contextRevision: 0,
+          async run() {
+            throw new Error("Leader model call failed: 403: sensitive provider response");
+          },
+          checkpoint: () => undefined,
+          markCommitted: () => undefined,
+          abort: async () => undefined,
+          dispose: () => undefined,
+        };
+      },
+      async health() {
+        return { healthy: true };
+      },
+    };
+    const { events, service } = createRunService(leaderFactory);
+    const run = await service.createSessionRun({
+      owner: { userCode: "first-user" },
+      message: "trigger-model-error",
+      agentList: [],
+    });
+
+    await waitFor(async () => (await service.getRun(run.id))?.status === "FAILED");
+    expect((await service.getRun(run.id))?.error).toContain("sensitive provider response");
+    expect((await events.list(run.id)).at(-1)).toMatchObject({
+      type: "run.failed",
+      data: {
+        status: "FAILED",
+        error: "Leader model call failed: 403: sensitive provider response",
+        userMessage: "下游模型调用异常，请切换模型或者联系管理员",
+      },
+    });
+    await service.dispose();
+  });
+
   it("passes Agent catalog unavailability to the Leader without injecting a direct answer", async () => {
     const leaderFactory = new ControlledLeaderFactory();
     const { events, service } = createRunService(leaderFactory);

@@ -102,18 +102,6 @@ export function integer(raw: string, name: string, min: number, max: number): nu
   return value;
 }
 
-export function thirdPartyDirectMode(
-  raw: string,
-): "off" | "allowlist" | "all" {
-  const value = raw.trim().toLowerCase();
-  if (value === "off" || value === "allowlist" || value === "all") {
-    return value;
-  }
-  throw new Error(
-    `THIRD_PARTY_AGENT_DIRECT_MODE must be off, allowlist or all, received: ${raw}`,
-  );
-}
-
 export function commaSeparated(raw: string): string[] {
   return [...new Set(raw.split(",").map((value) => value.trim()).filter(Boolean))];
 }
