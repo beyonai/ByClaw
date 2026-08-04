@@ -63,6 +63,12 @@ describe("connector authorization", () => {
     const prompt = buildDisabledConnectorPrompt("zh_CN", normalized);
     expect(prompt).toContain("安全限制");
     expect(prompt).toContain("ByClaw");
+    expect(prompt).toContain("调用任何工具之前");
+    expect(prompt).toContain("不要调用任何工具");
+    expect(prompt).toContain("不要搜索记忆或聊天室历史");
+    expect(prompt).toContain("不要重试");
+    expect(prompt).toContain("立即回复用户");
+    expect(prompt).toContain("如果用户当前意图不需要上述未启用连接器");
   });
 
   it.each([undefined, null, [], "{}", {}, { dws: "false" }])(
@@ -100,12 +106,23 @@ describe("connector authorization", () => {
     expect(chinese).toContain("ByClaw");
     expect(chinese).toContain("连接器管理页面");
     expect(chinese).toContain("连接/授权");
+    expect(chinese).toContain("调用任何工具之前");
+    expect(chinese).toContain("不要调用任何工具");
+    expect(chinese).toContain("不要搜索记忆或聊天室历史");
+    expect(chinese).toContain("不要重试");
+    expect(chinese).toContain("立即回复用户");
+    expect(chinese).toContain("如果用户当前意图不需要上述未启用连接器");
 
     const english = buildDisabledConnectorPrompt("en_US", { dws: false });
     expect(english).toContain("`dws`");
     expect(english).toContain("currently not connected or authorized");
     expect(english).toContain("ByClaw");
     expect(english).toContain("connector management page");
+    expect(english).toContain("Before calling any tool");
+    expect(english).toContain("do not call any tool");
+    expect(english).toContain("do not search memory or chat history");
+    expect(english).toContain("do not retry");
+    expect(english).toContain("reply to the user immediately");
   });
 
   it("omits guidance when every connector is enabled", () => {

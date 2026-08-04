@@ -71,6 +71,9 @@ describe("prompt-injection-snapshot", () => {
     expect(snapshot.appendSystemContext).not.toContain("`dws` 连接器当前");
     expect(snapshot.appendSystemContext).toContain("连接器管理页面");
     expect(snapshot.appendSystemContext).toContain("连接/授权");
+    expect(snapshot.appendSystemContext.indexOf("第三方连接器可用性")).toBeGreaterThan(
+      snapshot.appendSystemContext.indexOf("ByClaw 聊天室接力上下文需要通过"),
+    );
   });
 
   it("injects English connector guidance and omits it when none are disabled", () => {
