@@ -19,7 +19,6 @@ import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorAuthMapper;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorInfoMapper;
-import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.util.Date;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,7 +36,6 @@ class ConnectorConnectionStateServiceTest {
     private ConnectorManifestService manifestService;
     private UserService userService;
     private UserPrivateParamApplicationService privateParamService;
-    private SandboxService sandboxService;
     private ConnectorConnectionStateService service;
 
     @BeforeEach
@@ -48,15 +46,13 @@ class ConnectorConnectionStateServiceTest {
         manifestService = mock(ConnectorManifestService.class);
         userService = mock(UserService.class);
         privateParamService = mock(UserPrivateParamApplicationService.class);
-        sandboxService = mock(SandboxService.class);
         service = new ConnectorConnectionStateService(
             connectorAuthMapper,
             connectorInfoMapper,
             sequenceService,
             manifestService,
             userService,
-            privateParamService,
-            sandboxService
+            privateParamService
         );
         when(connectorAuthMapper.insertActiveIgnoreConflict(any())).thenReturn(1);
         when(connectorAuthMapper.updateById(any())).thenReturn(1);
@@ -69,7 +65,6 @@ class ConnectorConnectionStateServiceTest {
     @Test
     void saveEnabledAuthorizationWritesBindingProjectionAndSchedulesCacheRefresh() {
         ConnectorInfo connector = connector();
-        connector.setConnectorCode("lark");
         when(connectorAuthMapper.selectOne(any())).thenReturn(null);
         when(sequenceService.nextVal()).thenReturn(8001L);
         when(manifestService.upsertAndEnable(1001L, connector)).thenReturn(true);
@@ -94,19 +89,6 @@ class ConnectorConnectionStateServiceTest {
             .contains("authorization-1", "workspace-ref", "ou_1001");
         verify(manifestService).upsertAndEnable(1001L, connector);
         verify(privateParamService).refreshPrivateParamCacheAfterCommit(1001L, "tester");
-        verify(sandboxService).refreshRunningSandboxesAfterCommit("tester");
-    }
-
-    @Test
-    void saveEnabledAuthorizationDoesNotRefreshSandboxForNonLarkConnector() {
-        ConnectorInfo connector = connector();
-        when(connectorAuthMapper.selectOne(any())).thenReturn(null);
-        when(sequenceService.nextVal()).thenReturn(8001L);
-        when(manifestService.upsertAndEnable(1001L, connector)).thenReturn(false);
-
-        service.saveEnabledAuthorization(USER_ID, connector, null, "authorization-1");
-
-        verify(sandboxService, never()).refreshRunningSandboxesAfterCommit(any());
     }
 
     @Test

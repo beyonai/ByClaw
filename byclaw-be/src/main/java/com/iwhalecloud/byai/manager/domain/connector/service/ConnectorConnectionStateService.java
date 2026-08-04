@@ -7,7 +7,6 @@ import java.util.Map;
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
-import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamApplicationService;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
@@ -31,7 +30,6 @@ public class ConnectorConnectionStateService {
     private final ConnectorManifestService manifestService;
     private final UserService userService;
     private final UserPrivateParamApplicationService privateParamService;
-    private final SandboxService sandboxService;
 
     public ConnectorConnectionStateService(
             ConnectorAuthMapper connectorAuthMapper,
@@ -39,15 +37,13 @@ public class ConnectorConnectionStateService {
             SequenceService sequenceService,
             ConnectorManifestService manifestService,
             UserService userService,
-            UserPrivateParamApplicationService privateParamService,
-            @org.springframework.context.annotation.Lazy SandboxService sandboxService) {
+            UserPrivateParamApplicationService privateParamService) {
         this.connectorAuthMapper = connectorAuthMapper;
         this.connectorInfoMapper = connectorInfoMapper;
         this.sequenceService = sequenceService;
         this.manifestService = manifestService;
         this.userService = userService;
         this.privateParamService = privateParamService;
-        this.sandboxService = sandboxService;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -72,7 +68,6 @@ public class ConnectorConnectionStateService {
         if (manifestChanged) {
             privateParamService.refreshPrivateParamCacheAfterCommit(user.userId(), user.userCode());
         }
-        refreshSandboxForLarkOnly(user.userCode(), connector);
         return auth;
     }
 
@@ -95,15 +90,6 @@ public class ConnectorConnectionStateService {
         requireSingleAffectedRow(connectorAuthMapper.updateById(auth));
         if (manifestChanged) {
             privateParamService.refreshPrivateParamCacheAfterCommit(user.userId(), user.userCode());
-        }
-        if (enabled) {
-            refreshSandboxForLarkOnly(user.userCode(), connector);
-        }
-    }
-
-    private void refreshSandboxForLarkOnly(String userCode, ConnectorInfo connector) {
-        if (connector != null && "lark".equalsIgnoreCase(connector.getConnectorCode())) {
-            sandboxService.refreshRunningSandboxesAfterCommit(userCode);
         }
     }
 

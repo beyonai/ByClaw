@@ -26,9 +26,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -60,31 +57,6 @@ class SandboxServiceTest {
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getGatewayToken()).isEqualTo("0123456789abcdef0123456789abcdef");
-    }
-
-    @Test
-    void refreshRunningSandboxes_restartsEachRunningSandboxAndContinuesAfterFailure() {
-        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
-        SandboxService sandboxService = spy(new SandboxService());
-        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
-
-        SsSandboxRecord first = new SsSandboxRecord();
-        first.setResourceId(11L);
-        first.setSandboxType("openclaw");
-        SsSandboxRecord second = new SsSandboxRecord();
-        second.setResourceId(22L);
-        second.setSandboxType("openclaw");
-        when(sandboxRecordMapper.selectRunningByUser("user001")).thenReturn(List.of(first, second));
-        doThrow(new IllegalStateException("refresh failed")).when(sandboxService).removeSandbox("user001", 11L);
-        doNothing().when(sandboxService).removeSandbox("user001", 22L);
-        doReturn(mock(SandboxLaunchData.class)).when(sandboxService).launchSandbox("user001", 22L);
-
-        sandboxService.refreshRunningSandboxesAfterCommit("user001");
-
-        verify(sandboxService).removeSandbox("user001", 11L);
-        verify(sandboxService).removeSandbox("user001", 22L);
-        verify(sandboxService).launchSandbox("user001", 22L);
-        verify(sandboxService, never()).launchSandbox("user001", 11L);
     }
 
     @Test
