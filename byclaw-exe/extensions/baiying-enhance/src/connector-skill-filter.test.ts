@@ -15,6 +15,7 @@ import {
 
 const originalOpenClawStateDir = process.env.OPENCLAW_STATE_DIR;
 const originalBundledSkillsDir = process.env.OPENCLAW_BUNDLED_SKILLS_DIR;
+const originalBundledPluginsDir = process.env.OPENCLAW_BUNDLED_PLUGINS_DIR;
 
 async function writeSkill(root: string, directory: string, name = directory): Promise<void> {
   await mkdir(path.join(root, directory), { recursive: true });
@@ -37,6 +38,11 @@ describe("connector skill filter runtime", () => {
       delete process.env.OPENCLAW_BUNDLED_SKILLS_DIR;
     } else {
       process.env.OPENCLAW_BUNDLED_SKILLS_DIR = originalBundledSkillsDir;
+    }
+    if (originalBundledPluginsDir === undefined) {
+      delete process.env.OPENCLAW_BUNDLED_PLUGINS_DIR;
+    } else {
+      process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = originalBundledPluginsDir;
     }
   });
 
@@ -77,6 +83,11 @@ describe("connector skill filter provider", () => {
       delete process.env.OPENCLAW_BUNDLED_SKILLS_DIR;
     } else {
       process.env.OPENCLAW_BUNDLED_SKILLS_DIR = originalBundledSkillsDir;
+    }
+    if (originalBundledPluginsDir === undefined) {
+      delete process.env.OPENCLAW_BUNDLED_PLUGINS_DIR;
+    } else {
+      process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = originalBundledPluginsDir;
     }
   });
 
@@ -173,8 +184,11 @@ describe("connector skill filter provider", () => {
     const directExtraDir = path.join(root, "direct-extra-skill");
     const bundledDir = path.join(root, "bundled");
     const pluginRoot = path.join(root, "plugin");
+    const bundledPluginsDir = path.join(root, "bundled-plugins");
+    const bundledPluginRoot = path.join(bundledPluginsDir, "bundled-plugin");
     process.env.OPENCLAW_STATE_DIR = stateDir;
     process.env.OPENCLAW_BUNDLED_SKILLS_DIR = bundledDir;
+    process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = bundledPluginsDir;
 
     await writeSkill(path.join(workspaceDir, "skills"), "workspace-skill");
     await writeSkill(path.join(workspaceDir, ".agents", "skills"), "project-skill");
@@ -187,6 +201,12 @@ describe("connector skill filter provider", () => {
     await writeFile(
       path.join(pluginRoot, "openclaw.plugin.json"),
       JSON.stringify({ id: "test-plugin", skills: ["./skills"] }),
+      "utf8",
+    );
+    await writeSkill(path.join(bundledPluginRoot, "skills"), "bundled-plugin-skill");
+    await writeFile(
+      path.join(bundledPluginRoot, "openclaw.plugin.json"),
+      JSON.stringify({ id: "bundled-plugin", skills: ["./skills"] }),
       "utf8",
     );
 
@@ -209,6 +229,7 @@ describe("connector skill filter provider", () => {
         "direct-extra-skill",
         "bundled-skill",
         "manifest-plugin-skill",
+        "bundled-plugin-skill",
       ]),
     );
   });

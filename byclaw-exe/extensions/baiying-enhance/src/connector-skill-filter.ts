@@ -71,9 +71,20 @@ async function discoveredPluginRoots(params: VisibleSkillLoadParams): Promise<st
   const scriptExtensionsRoot = process.argv[1]
     ? path.resolve(path.dirname(process.argv[1]), "..", "extensions")
     : "";
+  const entrypointExtensionsRoot = process.argv[1]
+    ? path.resolve(path.dirname(process.argv[1]), "extensions")
+    : "";
+  const bundledPluginsRoot = process.env.OPENCLAW_BUNDLED_PLUGINS_DIR?.trim()
+    ? expandHomePath(process.env.OPENCLAW_BUNDLED_PLUGINS_DIR)
+    : "";
   const extensionContainers = mergeSkillNames(
     [path.join(resolveStateDir(), "extensions")],
-    [scriptExtensionsRoot, path.resolve(process.cwd(), "extensions")],
+    [
+      bundledPluginsRoot,
+      entrypointExtensionsRoot,
+      scriptExtensionsRoot,
+      path.resolve(process.cwd(), "extensions"),
+    ],
   );
   const discovered = (await Promise.all(extensionContainers.map(childDirectories))).flat();
   const scoped = (
