@@ -4,6 +4,7 @@ import { THIRD_PARTY_A2A_CONNECTOR_ID } from "@byclaw/connector-third-party-a2a"
 import { THIRD_PARTY_INTERFACE_SSE_CONNECTOR_ID } from "@byclaw/connector-third-party-interface-sse";
 import { THIRD_PARTY_PAGE_CONNECTOR_ID } from "@byclaw/connector-third-party-page";
 import type { ByClawBeEndpointResolver } from "./endpoint-resolver.js";
+import { normalizeBaseUrl, postByClawBeJson, type FetchLike } from "./byclaw-be-http.js";
 
 const DISCOVER_PATH = "/byaiService/api/v2/digitEmploy/discoverMine";
 
@@ -17,8 +18,6 @@ const DISCOVER_REQUEST = {
   language: "zh-CN",
 } as const;
 
-type FetchLike = typeof globalThis.fetch;
-
 type DiscoverAgent = {
   id?: string | number;
   resourceId?: string | number;
@@ -31,14 +30,6 @@ type DiscoverAgent = {
   createType?: string;
   integrationType?: string;
   usesPermissions?: boolean;
-};
-
-type DiscoverResponse = {
-  code?: number;
-  msg?: string;
-  success?: boolean;
-  /** discoverMine 返回全量数字员工列表，data 直接是数组。 */
-  data?: DiscoverAgent[];
 };
 
 export interface AuthorizedAgentCatalog {
@@ -98,53 +89,26 @@ export class ByClawBeAgentCatalog implements AuthorizedAgentCatalog {
     beyondToken: string;
     systemCode?: string;
   }): Promise<AgentProfile[]> {
-    const discoveredBaseUrl = await this.#endpointResolver?.resolve();
-    const url = buildDiscoverUrl(
-      discoveredBaseUrl ? normalizeBaseUrl(discoveredBaseUrl) : this.#fallbackBaseUrl,
-    );
-    let response: Response;
-    try {
-      response = await this.#fetch(url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "Beyond-Token": input.beyondToken,
-          language: "zh-CN",
-          ...(input.systemCode ? { "System-Code": input.systemCode } : {}),
-        },
-        body: JSON.stringify(DISCOVER_REQUEST),
-        signal: AbortSignal.timeout(this.#timeoutMs),
-      });
-    } catch (error) {
+    const data = await postByClawBeJson({
+      fetchImpl: this.#fetch,
+      ...(this.#endpointResolver ? { endpointResolver: this.#endpointResolver } : {}),
+      fallbackBaseUrl: this.#fallbackBaseUrl,
+      timeoutMs: this.#timeoutMs,
+      path: DISCOVER_PATH,
+      beyondToken: input.beyondToken,
+      ...(input.systemCode ? { systemCode: input.systemCode } : {}),
+      body: DISCOVER_REQUEST,
+      extraHeaders: { language: "zh-CN" },
+      label: "discover",
+      toError: (message, statusCode) =>
+        new ByClawBeAgentCatalogError(message, statusCode),
+    });
+    if (!Array.isArray(data)) {
       throw new ByClawBeAgentCatalogError(
-        error instanceof Error ? `ByClaw BE discover request failed: ${error.message}` : "ByClaw BE discover request failed",
+        "ByClaw BE discover returned invalid result",
       );
     }
-
-    if (!response.ok) {
-      throw new ByClawBeAgentCatalogError(
-        `ByClaw BE discover returned HTTP ${response.status}`,
-        response.status,
-      );
-    }
-
-    const result = await parseResponse(response);
-    const items = result.data;
-    if (result.code !== 0 || result.success === false || !Array.isArray(items)) {
-      throw new ByClawBeAgentCatalogError(
-        `ByClaw BE discover returned invalid result${result.msg ? `: ${result.msg}` : ""}`,
-      );
-    }
-    return toAuthorizedAgents(items, this.#thirdPartyDirect);
-  }
-}
-
-/** 解析 discover JSON 响应，并把非 JSON 响应转换为明确的上游异常。 */
-async function parseResponse(response: Response): Promise<DiscoverResponse> {
-  try {
-    return (await response.json()) as DiscoverResponse;
-  } catch {
-    throw new ByClawBeAgentCatalogError("ByClaw BE discover returned invalid JSON");
+    return toAuthorizedAgents(data as DiscoverAgent[], this.#thirdPartyDirect);
   }
 }
 
@@ -263,21 +227,4 @@ function parseSkillCodes(value: string | undefined): string[] {
 /** 将数字或字符串字段统一转换为去空格字符串。 */
 function stringValue(value: unknown): string {
   return typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
-}
-
-/** 校验并标准化 ByClaw BE 根地址，同时保留服务发现返回的 path_prefix。 */
-function normalizeBaseUrl(value: string): URL {
-  const url = new URL(value);
-  url.pathname = url.pathname === "/" ? "/" : `/${url.pathname.replace(/^\/+|\/+$/g, "")}`;
-  url.search = "";
-  url.hash = "";
-  return url;
-}
-
-/** 在环境变量或服务发现根地址后拼接固定的 discover API 路径。 */
-function buildDiscoverUrl(baseUrl: URL): URL {
-  const url = new URL(baseUrl);
-  const prefix = url.pathname === "/" ? "" : url.pathname.replace(/\/$/, "");
-  url.pathname = `${prefix}${DISCOVER_PATH}`;
-  return url;
 }

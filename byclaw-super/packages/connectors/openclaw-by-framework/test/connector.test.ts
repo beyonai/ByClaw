@@ -624,7 +624,8 @@ describe("OpenClawByFrameworkConnector", () => {
 
     await connector.start(req, { signal: new AbortController().signal });
 
-    const sent = sendMessage.mock.calls[0][0] as { content: string };
+    const sent = sendMessage.mock.calls[0][0] as { content: string; sessionId: string };
+    expect(sent.sessionId).toBe("ext-session-9");
     expect(sent.content).toBe(
       "analyze\n\nYour session workspace is `/by/.sessions/ext-session-9/`. If you produce any files, place them under this session workspace.",
     );

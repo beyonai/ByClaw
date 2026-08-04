@@ -105,6 +105,7 @@ suite("PostgreSQL persistence integration", () => {
     const run = {
       ...queuedRun(first.id, "high"),
       ingressContext: {
+        externalSessionId: "11034160",
         groupChat,
         groupChatFingerprint: fingerprintGroupChatContext(groupChat),
       },
@@ -176,6 +177,7 @@ suite("PostgreSQL persistence integration", () => {
         input: "hello",
         thinkingLevel: "high",
         ingressContext: {
+          externalSessionId: "11034160",
           groupChat: {
             conversationKey: "conversation-1",
             snapshot: { beforeMessageId: "message-2" },

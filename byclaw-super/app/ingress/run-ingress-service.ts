@@ -116,6 +116,7 @@ export class RunIngressService {
       loadedContext,
       catalog.error,
       leaderModel,
+      input.externalSessionId,
     );
     const run = await this.runService.createSessionRun({
       owner: principal,
@@ -126,7 +127,7 @@ export class RunIngressService {
       agentList,
       ...(ingressContext ? { ingressContext } : {}),
       // Token 同时写入专用短期凭证表，供其他实例在 lease 接管后恢复。
-      // externalSessionId 随 metadata 短暂透传到委派层，用于声明会话工作区，不持久化。
+      // externalSessionId 也放入 metadata 供本实例立即执行；持久化真值在 ingressContext。
       metadata: {
         "Beyond-Token": input.beyondToken,
         ...(input.externalSessionId
@@ -170,6 +171,7 @@ export class RunIngressService {
       loadedContext,
       catalog.error,
       leaderModel,
+      input.externalSessionId,
     );
     const run = await this.runService.createRun({
       sessionId: input.sessionId,
@@ -178,7 +180,7 @@ export class RunIngressService {
       thinkingLevel: input.thinkingLevel ?? "off",
       agentList,
       ...(ingressContext ? { ingressContext } : {}),
-      // 追加 Run 同属 by-framework 入站时也需声明会话工作区，externalSessionId 走 metadata 透传。
+      // 追加 Run 同属 by-framework 入站时也需声明会话工作区。
       metadata: {
         "Beyond-Token": input.beyondToken,
         ...(input.externalSessionId
@@ -429,12 +431,14 @@ export class RunIngressService {
     context: Awaited<ReturnType<RunIngressService["loadIngressContext"]>>,
     agentCatalogError: string | undefined,
     leaderModel: LeaderModelSelection | undefined,
+    externalSessionId: string | undefined,
   ) {
-    if (!context && !agentCatalogError && !leaderModel) {
+    if (!context && !agentCatalogError && !leaderModel && !externalSessionId) {
       return undefined;
     }
     return {
       ...(context ?? {}),
+      ...(externalSessionId ? { externalSessionId } : {}),
       ...(agentCatalogError ? { agentCatalogError } : {}),
       ...(leaderModel ? { leaderModel } : {}),
     };

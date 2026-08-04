@@ -1878,6 +1878,13 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
     throw new Error("Invalid persisted Run ingress context");
   }
   const record = raw as Record<string, unknown>;
+  const externalSessionId =
+    typeof record.externalSessionId === "string" && record.externalSessionId.trim()
+      ? record.externalSessionId.trim()
+      : undefined;
+  if (record.externalSessionId !== undefined && !externalSessionId) {
+    throw new Error("Invalid persisted Run external session ID");
+  }
   const agentCatalogError =
     typeof record.agentCatalogError === "string" && record.agentCatalogError.trim()
       ? record.agentCatalogError.trim()
@@ -1887,8 +1894,9 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
   }
   const leaderModel = readLeaderModelSelection(record.leaderModel);
   if (record.groupChat === undefined) {
-    return agentCatalogError || leaderModel
+    return externalSessionId || agentCatalogError || leaderModel
       ? {
+          ...(externalSessionId ? { externalSessionId } : {}),
           ...(agentCatalogError ? { agentCatalogError } : {}),
           ...(leaderModel ? { leaderModel } : {}),
         }
@@ -1903,6 +1911,7 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
     throw new Error("Persisted Run group chat context fingerprint mismatch");
   }
   return {
+    ...(externalSessionId ? { externalSessionId } : {}),
     groupChat,
     groupChatFingerprint: fingerprint,
     ...(agentCatalogError ? { agentCatalogError } : {}),

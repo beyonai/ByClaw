@@ -67,6 +67,8 @@ export interface GroupChatContextV1 {
  * 写入 Pi 原生 transcript，原始 Run 快照仍保留用于审计和重试。
  */
 export interface RunIngressContextV1 {
+  /** by-framework 入站会话 ID，同时是子 Agent 应使用的会话空间 ID。 */
+  externalSessionId?: string;
   groupChat?: GroupChatContextV1;
   groupChatFingerprint?: string;
   /** Agent 目录回源失败时保留的诊断；Run 仍可由 Leader 降级执行。 */

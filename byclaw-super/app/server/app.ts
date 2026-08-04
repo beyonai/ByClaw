@@ -1,7 +1,6 @@
 import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance, type FastifyLoggerOptions } from "fastify";
-import { HTTP_API_PREFIX } from "./http-paths.js";
-import type { BuildHttpAppOptions } from "./http-types.js";
+import { HTTP_API_PREFIX, type BuildHttpAppOptions } from "./http-types.js";
 import { registerCapabilityRoutes } from "./routes/capability-routes.js";
 import { registerHealthRoutes } from "./routes/health-routes.js";
 import { registerRunRoutes } from "./routes/run-routes.js";

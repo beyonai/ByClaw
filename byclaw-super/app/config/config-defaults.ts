@@ -9,6 +9,11 @@ export const APP_CONFIG_DEFAULTS = {
     corsOrigin: "*",
     logLevel: "info",
   },
+  auth: {
+    /** 与 ByClaw 后端登录公钥一致的 RS256 公钥（可用 LOGIN_JWT_PUBLIC_KEY 考察）。 */
+    loginJwtPublicKey:
+      "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7wg45uUnUgPB2/uE/hpto6pSoviXi7JzS9ip6J1+CbB/bRYydF+6XnVJ5ddw5AAXSNo51beMKUEWguKg5QVzfrYPw063ojTy/36plFmTpNs7u+2fd4fvy7SrS64NRIfahp7scp6NMMXbgDrFLFXs6KJEsG7ThlA4XS4h5BS+oJ6nSnjYz6iC8PXt4wXSoyf61uWSloihQL9fO0RuAHQtHEuwuT8oHG20sg/ylSwV1/8zF4A0MdlOtbSq5UvvDWyVoOKfmEXt8V8h7ZLFAFABW2vVref5ltY0aTTqv/sM5niCa5JLB0w0beCd8FtiWljk7AF0j1W22YqtSDy2xP58IwIDAQAB",
+  },
   database: {
     type: "postgresql",
     eventListenEnabled: true,

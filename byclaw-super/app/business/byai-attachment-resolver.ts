@@ -21,6 +21,7 @@ import {
   type RunAttachment,
 } from "@byclaw/by-conductor";
 import type { ByClawBeEndpointResolver } from "./endpoint-resolver.js";
+import { appendPath, normalizeBaseUrl, type FetchLike } from "./byclaw-be-http.js";
 
 /**
  * ByClaw BE 附件读取器（T17）：`AttachmentResolver` 的首个实现。
@@ -41,7 +42,6 @@ import type { ByClawBeEndpointResolver } from "./endpoint-resolver.js";
  * 需 BE 侧补齐，见契约文档"已知缺口"一节。
  */
 
-type FetchLike = typeof globalThis.fetch;
 type InspectInput = Parameters<AttachmentResolver["inspect"]>[0];
 type MaterializeInput = Parameters<
   NonNullable<AttachmentResolver["materialize"]>
@@ -205,10 +205,11 @@ export class ByAiAttachmentResolver implements AttachmentResolver {
     destination: string;
   }): Promise<number> {
     const discovered = await this.#endpointResolver?.resolve().catch(() => undefined);
-    const url = buildDownloadUrl(
+    const url = appendPath(
       discovered ? normalizeBaseUrl(discovered) : this.#fallbackBaseUrl,
-      input.fileId,
+      DOWNLOAD_PATH,
     );
+    url.search = `fileId=${encodeURIComponent(input.fileId)}`;
     // 外部取消（Run 取消/接管）与单请求超时会合到同一个信号。
     const combinedSignal = AbortSignal.any([
       input.signal,
@@ -545,20 +546,3 @@ function extensionOf(name: string): string {
   return index >= 0 ? name.slice(index + 1).toLowerCase() : "";
 }
 
-/** 校验并标准化 ByClaw BE 根地址，保留服务发现返回的 path_prefix。 */
-function normalizeBaseUrl(value: string): URL {
-  const url = new URL(value);
-  url.pathname = url.pathname === "/" ? "/" : `/${url.pathname.replace(/^\/+|\/+$/g, "")}`;
-  url.search = "";
-  url.hash = "";
-  return url;
-}
-
-/** 在 BE 根地址后拼接固定的下载路径与 fileId 查询参数。 */
-function buildDownloadUrl(baseUrl: URL, fileId: string): URL {
-  const url = new URL(baseUrl);
-  const prefix = url.pathname === "/" ? "" : url.pathname.replace(/\/$/, "");
-  url.pathname = `${prefix}${DOWNLOAD_PATH}`;
-  url.search = `fileId=${encodeURIComponent(fileId)}`;
-  return url;
-}

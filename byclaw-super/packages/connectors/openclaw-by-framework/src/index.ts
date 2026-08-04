@@ -105,13 +105,18 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
     if (context.signal.aborted) {
       throw abortError(context.signal.reason);
     }
-    const childSessionId = [
-      "maestro",
-      request.userCode,
-      request.sessionId,
-      request.runId,
-      request.delegationId,
-    ].join(":");
+    // by-framework 入站任务必须沿用 BE 传入的 sessionId。该值同时决定被调用
+    // Agent 的会话空间目录；若继续使用 maestro:* 子会话，会错误落到
+    // /by/.sessions/maestro:.../。HTTP 等非 by-framework 入口仍保留隔离子会话。
+    const childSessionId =
+      request.externalSessionId ??
+      [
+        "maestro",
+        request.userCode,
+        request.sessionId,
+        request.runId,
+        request.delegationId,
+      ].join(":");
     const targetAgentType =
       request.agent.execution.targetAgentType?.trim() ||
       `BYCLAW_EXE_${request.userCode}`;
