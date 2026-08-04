@@ -47,9 +47,9 @@ lark-cli config show
 lark-cli auth status --json --verify
 ```
 
-- 如果 `config show` 能看到 `appId`，说明 `config init --new --force-init` 已经把飞书应用写入当前 lark-cli 本地配置；可先继续 user 授权和本次业务查询。
+- 如果 `config show` 能看到 `appId`，说明 `config init --new --force-init` 已经把飞书应用写入当前 lark-cli 本地配置；若业务命令仍返回 `error.subtype=not_configured`，必须完成下方绑定确认和绑定，不能绕过绑定继续查询。
 - 如果仍提示未配置 app，重新生成配置链接或让管理员检查当前 agent 与生成链接时是否同一个 workspace。
-- 即使用本地配置跑通，也要提醒管理员后续把同一个应用凭证同步进 OpenClaw `channels.feishu`，否则新会话、新沙箱或 `config bind --source openclaw` 仍可能失败。
+- 本地 app 或用户记录不能替代 OpenClaw 绑定，也不能证明 `channels.feishu` 已存在；Agent 上下文返回 `error.subtype=not_configured` 时必须先完成绑定确认和绑定。
 
 OpenClaw 渠道存在后，按场景绑定：
 
@@ -60,6 +60,8 @@ lark-cli config bind --source openclaw --identity user-default
 # 机器人发消息、群通知、应用身份场景
 lark-cli config bind --source openclaw --identity bot-only
 ```
+
+AI agent 执行 `config bind` 前必须向用户说明绑定意图和身份 preset，并取得明确确认。绑定可能覆盖已有绑定并锁定身份策略；本地已有 app 或用户授权不等于获得自动绑定许可。个人资源建议 `user-default`，机器人/应用资源建议 `bot-only`，不确定时建议更安全的 `bot-only`。多 app 场景需要 `--app-id` 时只使用用户确认过的真实 app ID。
 
 如果 `config bind` 提示从 `bot-only` 切到 `user-default` 有风险，必须先向用户说明“AI 将以用户飞书身份访问个人资源”，用户确认后才可加 `--force` 重跑。
 

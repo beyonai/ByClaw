@@ -121,7 +121,27 @@ lark-cli config init --new --force-init
 
 8. 用户回复“配置成功了”后，先执行 `lark-cli config show` 或 `lark-cli auth status --json --verify` 检查当前 lark-cli workspace。若能读取到 `appId`，立即继续 user 授权/业务查询，不要再次以 `channels.feishu` 缺失阻塞当前请求。
 9. 若必须进入 OpenClaw 托管模式，等渠道配置完成后，再执行 `lark-cli config bind --source openclaw --identity user-default`（个人通讯录等 user 资源）或 `--identity bot-only`（机器人/应用身份场景）。
-10. 绑定成功或本地配置可用后，如仍缺少 user scope，再按“权限不足 / missing_scope”走授权 split-flow。
+10. 绑定成功后，如仍缺少 user scope，再按“权限不足 / missing_scope”走授权 split-flow；本地配置不能替代 OpenClaw 绑定。
+
+### OpenClaw workspace 未绑定
+
+表现：
+- `error.type == "config"` 且 `error.subtype == "not_configured"`。
+- `error.message` 含 `openclaw context detected but lark-cli is not bound to it`。
+
+处理：
+1. 立即停止原业务命令；这不是 user 授权错误，不要执行 `auth login`。
+2. 读取 `lark-cli config bind --help`；必要时执行 `lark-cli config show`，只确认已有 profile/app 是否会与绑定冲突。不要直接输出或整体读取 `$LARK_HOME/.lark-cli/config.json`，不要展示 secret/token。
+3. 本地 app 或用户记录存在与否都不能证明 `channels.feishu` 是否存在，也不能替代绑定。若此前已经收到渠道缺失错误，进入“OpenClaw 飞书渠道缺失”；否则根据原业务推荐身份：个人资源用 `user-default`，机器人/应用资源用 `bot-only`，不确定时推荐 `bot-only`。
+4. 向用户说明 `config bind` 可能覆盖已有绑定并锁定身份策略，要求用户明确确认绑定意图和身份 preset；AI agent 不得自动绑定。
+5. 用户确认后执行 `lark-cli config bind --source openclaw --identity <bot-only|user-default>`。多 app 场景按 CLI 要求追加用户确认过的 `--app-id`；仅在 CLI 明确要求且用户再次确认后追加 `--force`。
+6. 绑定成功后重试原业务命令；若出现 user 鉴权异常，再走授权 split-flow。
+7. 绑定返回 `openclaw.json missing channels.feishu section` 或 `configure Feishu in OpenClaw first` 时，进入“OpenClaw 飞书渠道缺失”；其他错误停止重试并报告原始错误。
+
+禁止事项：
+- 不要把 bind 描述成“不会覆盖配置”或“无需确认”。
+- 不要把本地已有用户记录当成自动选择 `user-default` 的许可。
+- 不要在绑定成功前继续业务命令。
 
 ### 资源不可见 / not found
 
