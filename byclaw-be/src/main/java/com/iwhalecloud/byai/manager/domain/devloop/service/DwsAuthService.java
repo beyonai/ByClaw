@@ -228,7 +228,8 @@ public class DwsAuthService {
         BufferedReader reader = null;
         boolean drainStarted = false;
         try {
-            List<String> cmd = List.of(DWS_BIN, "auth", "login", "--device", "--no-browser", "-y");
+            List<String> cmd = List.of(
+                DWS_BIN, "auth", "login", "--device", "--no-browser", "--recommend", "-y");
             log.info("[DwsAuth] starting device flow, authorizationId={}, userId={}", authId, authUserId);
 
             ProcessBuilder pb = newDwsProcess(authUserId, cmd);

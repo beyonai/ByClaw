@@ -83,7 +83,8 @@ class DwsAuthServiceProcessIsolationTest {
         DwsAuthService service = isolatedService(launcher, true);
 
         assertThat(service.startDeviceAuth(11L, AUTHORIZATION_ID).get("success")).isEqualTo(true);
-        assertThat(command.get()).containsExactly("dws", "auth", "login", "--device", "--no-browser", "-y");
+        assertThat(command.get()).containsExactly(
+            "dws", "auth", "login", "--device", "--no-browser", "--recommend", "-y");
 
         service.cancelDeviceAuth(AUTHORIZATION_ID, 11L);
     }
