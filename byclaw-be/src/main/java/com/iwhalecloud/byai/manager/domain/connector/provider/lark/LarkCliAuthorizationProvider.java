@@ -53,7 +53,7 @@ public class LarkCliAuthorizationProvider implements ConnectorAuthorizationProvi
     private static final long START_OUTPUT_POLL_MILLIS = 20L;
     private static final List<String> CONFIG_SHOW_COMMAND = List.of("lark-cli", "config", "show");
     private static final List<String> CONFIG_INIT_NEW_COMMAND =
-        List.of("lark-cli", "config", "init", "--new");
+        List.of("lark-cli", "config", "init", "--new", "--force-init");
     private static final List<String> STATUS_COMMAND =
         List.of("lark-cli", "auth", "status", "--json", "--verify");
 

@@ -56,7 +56,8 @@ class LarkCliAuthorizationProviderTest {
     private static final String DEVICE_CODE = "device-secret-code";
     private static final String SENSITIVE_MARKER = "sensitive-provider-detail";
     private static final List<String> CONFIG_SHOW = List.of("lark-cli", "config", "show");
-    private static final List<String> CONFIG_INIT_NEW = List.of("lark-cli", "config", "init", "--new");
+    private static final List<String> CONFIG_INIT_NEW =
+        List.of("lark-cli", "config", "init", "--new", "--force-init");
     private static final List<String> STATUS = List.of("lark-cli", "auth", "status", "--json", "--verify");
     private static final List<String> DEFAULT_LOGIN = List.of(
         "lark-cli", "auth", "login", "--recommend", "--no-wait", "--json");
