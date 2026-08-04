@@ -68,6 +68,12 @@ function currentLaneRefs(laneMetadata: ByaiLaneMetadata | undefined): string[] {
   ]);
 }
 
+function hasExplicitCrossAgentContextIntent(text: string): boolean {
+  return /继续|承接|接力|复核|审查|汇总|参考.{0,12}(?:输出|结果|报告)|上一条|上条|之前的输出|continue|take over|handoff|review|summari[sz]e|previous (?:output|result)/iu.test(
+    text,
+  );
+}
+
 export function detectByclawChatContextCrossAgentHint(
   params: DetectByclawChatContextCrossAgentHintParams,
 ): ByclawChatContextCrossAgentHint {
@@ -82,7 +88,7 @@ export function detectByclawChatContextCrossAgentHint(
   ]).filter((agent) => !currentRefs.some((current) => isSameAgentReference(agent, current)));
 
   return {
-    required: mentionedAgents.length > 0,
+    required: mentionedAgents.length > 0 && hasExplicitCrossAgentContextIntent(text),
     mentionedAgents,
   };
 }

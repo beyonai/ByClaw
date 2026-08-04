@@ -128,6 +128,38 @@ describe("prompt-injection-snapshot", () => {
     expect(snapshot.appendSystemContext).not.toContain("优先用过滤参数查询这些 agent/角色相关的历史：Agent Beta");
   });
 
+  it("does not force cross-agent context for a normal addressed connector query", () => {
+    const snapshot = buildPromptInjectionSnapshot({
+      request: mockRequest({
+        laneMetadata: {
+          laneId: "lane-dingtalk",
+          agentId: "baiying-agent-dingtalk",
+          agentName: "钉钉个人助手",
+        },
+        authConnectorList: { dws: false },
+      }),
+      currentUserText: "@钉钉个人助手 帮我查询钉钉组织通讯录信息",
+    });
+
+    expect(snapshot.appendSystemContext).not.toContain("本轮任务很可能需要跨 agent 聊天室上下文");
+    expect(snapshot.appendSystemContext).not.toContain("在正式回答或执行前，先调用 `byclaw_chat_context`");
+  });
+
+  it("does not force cross-agent context for an independent other-agent request", () => {
+    const snapshot = buildPromptInjectionSnapshot({
+      request: mockRequest({
+        laneMetadata: {
+          laneId: "lane-beta",
+          agentName: "Agent Beta",
+        },
+      }),
+      currentUserText: "@Agent Alpha 请处理这个独立任务",
+    });
+
+    expect(snapshot.appendSystemContext).not.toContain("本轮任务很可能需要跨 agent 聊天室上下文");
+    expect(snapshot.appendSystemContext).not.toContain("在正式回答或执行前，先调用 `byclaw_chat_context`");
+  });
+
   it("adds chat-room lane metadata to channelExtension for implicit cross-agent follow-up", () => {
     recordByclawChatContextMessage({
       id: "issue-triage-message",
