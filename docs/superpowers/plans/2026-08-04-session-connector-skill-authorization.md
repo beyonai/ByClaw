@@ -205,7 +205,7 @@ The Chinese prompt must state, in substance:
 
 ```text
 本会话以下第三方连接器当前处于未连接或未授权状态：`fws`。
-如果用户意图需要其中任一连接器：不要调用或模拟对应 skill；明确说明无法完成相关操作；引导用户打开 WorkBuddy 连接器管理页面，找到对应连接器，点击连接/授权并完成身份认证；连接成功后请用户重试。
+如果用户意图需要其中任一连接器：不要调用或模拟对应 skill；明确说明无法完成相关操作；引导用户打开 ByClaw 连接器管理页面，找到对应连接器，点击连接/授权并完成身份认证；连接成功后请用户重试。
 ```
 
 The English branch carries the same rules. Build from only the `false` keys.

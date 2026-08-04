@@ -60,7 +60,9 @@ describe("connector authorization", () => {
     );
 
     expect(connectorAuthorizationRequiresFailClosed(normalized)).toBe(true);
-    expect(buildDisabledConnectorPrompt("zh_CN", normalized)).toContain("安全限制");
+    const prompt = buildDisabledConnectorPrompt("zh_CN", normalized);
+    expect(prompt).toContain("安全限制");
+    expect(prompt).toContain("ByClaw");
   });
 
   it.each([undefined, null, [], "{}", {}, { dws: "false" }])(
@@ -95,12 +97,14 @@ describe("connector authorization", () => {
     expect(chinese).toContain("`dws`");
     expect(chinese).not.toContain("`fws`");
     expect(chinese).toContain("连接器当前处于未连接或未授权状态");
+    expect(chinese).toContain("ByClaw");
     expect(chinese).toContain("连接器管理页面");
     expect(chinese).toContain("连接/授权");
 
     const english = buildDisabledConnectorPrompt("en_US", { dws: false });
     expect(english).toContain("`dws`");
     expect(english).toContain("currently not connected or authorized");
+    expect(english).toContain("ByClaw");
     expect(english).toContain("connector management page");
   });
 

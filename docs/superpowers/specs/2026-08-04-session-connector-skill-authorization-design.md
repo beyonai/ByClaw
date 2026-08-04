@@ -29,7 +29,7 @@ The normalized map remains attached when an inbound message is split into multi-
 - recognize when the user's intent requires a disabled connector;
 - not call, simulate, or claim success from that connector skill;
 - state that the named connector is currently not connected/authorized and the requested operation cannot be completed;
-- guide the user to open WorkBuddy connector management, find the connector, select connect/authorize, complete identity authorization, and retry after connection succeeds.
+- guide the user to open ByClaw connector management, find the connector, select connect/authorize, complete identity authorization, and retry after connection succeeds.
 
 The wording follows the supplied screenshot's structure. The metadata key is shown as the connector identifier; the model may include a familiar product name when it knows one, but must not invent connection state or connector details.
 

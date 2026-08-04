@@ -81,12 +81,12 @@ export function buildDisabledConnectorPrompt(
       ? [
           "## Third-party connector availability (required)",
           "The connector authorization policy exceeds the safe processing limit. Treat every third-party connector as unavailable for this conversation and do not call or simulate connector skills.",
-          "Explain that connector availability cannot be verified safely. Ask the user to open the WorkBuddy connector management page, reconnect or authorize the required connector, and retry.",
+          "Explain that connector availability cannot be verified safely. Ask the user to open the ByClaw connector management page, reconnect or authorize the required connector, and retry.",
         ].join("\n")
       : [
           "## 第三方连接器可用性（强制）",
           "连接器授权策略超过安全限制。本会话必须将所有第三方连接器视为不可用，不要调用或模拟任何连接器 skill。",
-          "请说明当前无法安全确认连接器可用性，并引导用户打开 WorkBuddy 的连接器管理页面，重新连接或授权所需连接器后重试。",
+          "请说明当前无法安全确认连接器可用性，并引导用户打开 ByClaw 的连接器管理页面，重新连接或授权所需连接器后重试。",
         ].join("\n");
   }
   const disabled = disabledConnectorSkillNames(authorization);
@@ -100,13 +100,13 @@ export function buildDisabledConnectorPrompt(
       "## Third-party connector availability (required)",
       `The following third-party connectors are currently not connected or authorized for this conversation: ${connectors}.`,
       "If the user's intent requires any connector above, do not call or simulate its skill and do not claim that the requested operation succeeded.",
-      "Explain that the connector is unavailable and the operation cannot be completed. Ask the user to open the WorkBuddy connector management page, find the connector, click connect/authorize, complete identity authorization, and retry after the connection succeeds.",
+      "Explain that the connector is unavailable and the operation cannot be completed. Ask the user to open the ByClaw connector management page, find the connector, click connect/authorize, complete identity authorization, and retry after the connection succeeds.",
     ].join("\n");
   }
   return [
     "## 第三方连接器可用性（强制）",
     `本会话以下第三方连接器当前处于未连接或未授权状态：${connectors}。`,
     "如果用户意图需要其中任一连接器，不要调用或模拟对应 skill，也不要声称相关操作已经成功。",
-    "请明确说明该连接器不可用、当前无法完成相关操作，并引导用户打开 WorkBuddy 的连接器管理页面，找到对应连接器，点击连接/授权并完成身份认证；连接成功后请用户重试。",
+    "请明确说明该连接器不可用、当前无法完成相关操作，并引导用户打开 ByClaw 的连接器管理页面，找到对应连接器，点击连接/授权并完成身份认证；连接成功后请用户重试。",
   ].join("\n");
 }
