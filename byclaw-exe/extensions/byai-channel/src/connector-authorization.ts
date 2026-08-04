@@ -92,15 +92,19 @@ export function summarizeConnectorAuthorization(
   };
 }
 
+export function connectorAuthorizationLogDisabledIdentifiers(
+  authorization: ConnectorAuthorizationMap | undefined,
+): string[] {
+  const { disabled, failClosed } = summarizeConnectorAuthorization(authorization);
+  return failClosed ? [CONNECTOR_AUTHORIZATION_OVERFLOW_KEY] : disabled;
+}
+
 export function buildConnectorPolicyToolCallWarning(params: {
   sessionKey: string;
   toolName: string;
   authorization: ConnectorAuthorizationMap | undefined;
 }): string | undefined {
-  const { disabled, failClosed } = summarizeConnectorAuthorization(params.authorization);
-  if (failClosed) {
-    return `[byai-channel] connector soft-control tool activity: sessionKey=${params.sessionKey}, tool=${params.toolName}, disabled=all, failClosed=true, skillFilter=off`;
-  }
+  const disabled = connectorAuthorizationLogDisabledIdentifiers(params.authorization);
   if (disabled.length === 0) {
     return undefined;
   }

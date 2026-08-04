@@ -40,7 +40,7 @@ import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import { takePromptInjectionSnapshot } from "./prompt-injection-snapshot.js";
 import {
   buildConnectorPolicyToolCallWarning,
-  summarizeConnectorAuthorization,
+  connectorAuthorizationLogDisabledIdentifiers,
 } from "./connector-authorization.js";
 import { buildByclawChatContextToolPrompt } from "./chat-context-prompt.js";
 import {
@@ -612,16 +612,12 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
   }): BeforePromptBuildResult => {
     const snapshot = takePromptInjectionSnapshot(ctx.sessionKey);
     if (snapshot?.appendSystemContext) {
-      const connectorAuthorization = summarizeConnectorAuthorization(
+      const disabled = connectorAuthorizationLogDisabledIdentifiers(
         resolveActiveSdkRequestBySessionKey(ctx.sessionKey)?.authConnectorList,
       );
-      if (connectorAuthorization.disabled.length > 0 || connectorAuthorization.failClosed) {
-        const disabled = connectorAuthorization.failClosed
-          ? "all"
-          : connectorAuthorization.disabled.join(",");
-        const failClosed = connectorAuthorization.failClosed ? ", failClosed=true" : "";
+      if (disabled.length > 0) {
         api.logger.info(
-          `[byai-channel] connector soft-control prompt injected: sessionKey=${ctx.sessionKey}, disabled=${disabled}${failClosed}, skillFilter=off`,
+          `[byai-channel] connector soft-control prompt injected: sessionKey=${ctx.sessionKey}, disabled=${disabled.join(",")}, skillFilter=off`,
         );
       }
       return {

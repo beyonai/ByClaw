@@ -156,7 +156,7 @@ describe("connector authorization", () => {
         authorization,
       }),
     ).toBe(
-      "[byai-channel] connector soft-control tool activity: sessionKey=agent:dws:direct:100, tool=baiying_call, disabled=all, failClosed=true, skillFilter=off",
+      "[byai-channel] connector soft-control tool activity: sessionKey=agent:dws:direct:100, tool=baiying_call, disabled=byclaw-connector-auth-overflow, skillFilter=off",
     );
   });
 
