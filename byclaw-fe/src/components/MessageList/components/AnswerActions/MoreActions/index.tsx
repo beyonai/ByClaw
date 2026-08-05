@@ -1,11 +1,12 @@
 import type { IMessage } from '@/typescript/message';
-import { BugOutlined, DeleteOutlined, LinkOutlined } from '@ant-design/icons';
+import { BugOutlined, DeleteOutlined, FileAddOutlined, LinkOutlined } from '@ant-design/icons';
 // @ts-ignore
 import { useIntl } from '@umijs/max';
 import { Button, Popconfirm, Tooltip } from 'antd';
 
 import React from 'react';
 
+import useGlobal from '@/hooks/useGlobal';
 import btnStyles from '@/components/MessageList/index.module.less';
 import TraceDetailDrawer from '@/components/TraceDetailDrawer';
 import { useLangfuseConfigStore } from '@/models/common/useLangfuseConfigStore';
@@ -22,9 +23,11 @@ function MoreActions(porps: {
   msg: IMessage;
   disabledList?: string[];
   showTroubleshoot?: boolean;
+  captureRequirementProjectId?: number;
 }) {
-  const { deleteMessage, msg, disabledList, showTroubleshoot = false } = porps;
+  const { deleteMessage, msg, disabledList, showTroubleshoot = false, captureRequirementProjectId } = porps;
   const { messageId, traceId } = msg;
+  const { EventEmitter } = useGlobal();
   const [troubleshootActionLoading, setTroubleshootActionLoading] = React.useState(false);
   const [traceDrawerOpen, setTraceDrawerOpen] = React.useState(false);
   const [resolvedTraceId, setResolvedTraceId] = React.useState<string | undefined>(traceId);
@@ -155,6 +158,13 @@ function MoreActions(porps: {
   const canDelete = messageId && !disabledList?.includes('delete');
   // 所有数字员工回答均可发起运维排查，用户自己发送的提问不展示。
   const canShowTroubleshoot = showTroubleshoot && msg.fromBeyond;
+  // 仅项目会话下的数字员工回答可沉淀为需求，用户自己发送的提问不展示。
+  const canShowCaptureRequirement = Boolean(captureRequirementProjectId) && msg.fromBeyond;
+
+  const handleCaptureRequirement = React.useCallback(() => {
+    // 携带项目归属一起发事件，聊天页据此打开弹窗；避免刷新丢失路由态时取不到项目。
+    EventEmitter.emit('chat-capture-requirement', { message: msg, projectId: captureRequirementProjectId });
+  }, [EventEmitter, msg, captureRequirementProjectId]);
   const canShowTrace = langfuseEnabled && !disabledList?.includes('trace');
   // 用户提问的操作区只保留调用链图标，数字员工回答才显示国际化文案，避免提问操作区过宽。
   const showTraceLabel = msg.fromBeyond;
@@ -203,6 +213,20 @@ function MoreActions(porps: {
               onClick={handleTroubleshoot}
             >
               <span className={btnStyles.actionsBarText}>{intl.formatMessage({ id: 'messageList.troubleshoot' })}</span>
+            </Button>
+          </Tooltip>
+        </div>
+      ) : null}
+      {canShowCaptureRequirement ? (
+        <div className={btnStyles.actionsBarItem} role="presentation">
+          <Tooltip title={intl.formatMessage({ id: 'captureRequirement.entryTooltip' })}>
+            <Button
+              type="text"
+              size="small"
+              icon={<FileAddOutlined className={btnStyles.icon} />}
+              onClick={handleCaptureRequirement}
+            >
+              <span className={btnStyles.actionsBarText}>{intl.formatMessage({ id: 'captureRequirement.entry' })}</span>
             </Button>
           </Tooltip>
         </div>

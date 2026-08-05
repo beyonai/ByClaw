@@ -17,6 +17,8 @@ import com.iwhalecloud.byai.manager.dto.devloop.OperationTaskDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationEnvDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationSuiteDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.DefaultAgentDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.TesterConfigDTO;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -239,6 +241,89 @@ public class DevloopController {
     public ResponseUtil<List<Map<String, Object>>> listIntegrationSuites(@RequestBody Map<String, Object> params) {
         Long projectId = Long.valueOf(params.get("projectId").toString());
         return applicationService.listIntegrationSuites(projectId);
+    }
+
+    /**
+     * 查询默认数字员工原始配置(某作用域)。
+     *
+     * @param params 可含 projectId:缺省/0=全局默认行,>0=该项目覆盖行
+     */
+    @PostMapping("/default-agent/get")
+    public ResponseUtil<Map<String, Object>> getDefaultAgent(@RequestBody Map<String, Object> params) {
+        return applicationService.getDefaultAgent(parseProjectId(params));
+    }
+
+    /**
+     * 解析项目各角色生效的默认员工(项目覆盖合并到全局默认之上)。
+     *
+     * @param params 可含 projectId;缺省则仅返回全局默认
+     */
+    @PostMapping("/default-agent/resolve")
+    public ResponseUtil<Map<String, Object>> resolveDefaultAgent(@RequestBody Map<String, Object> params) {
+        return applicationService.resolveDefaultAgent(parseProjectId(params));
+    }
+
+    /**
+     * 保存默认数字员工配置(每作用域唯一,upsert)。
+     *
+     * @param dto projectId 缺省/0=全局默认,>0=项目覆盖;各角色 agentId 为空表示不指定
+     */
+    @PostMapping("/default-agent/save")
+    public ResponseUtil<Void> saveDefaultAgent(@RequestBody DefaultAgentDTO dto) {
+        return applicationService.saveDefaultAgent(dto);
+    }
+
+    /**
+     * 查询项目的独立测试数字员工配置(定时节流/就绪准入/失败打回);无记录回填出厂默认。
+     *
+     * @param params 包含 projectId
+     */
+    @PostMapping("/tester-config/get")
+    public ResponseUtil<Map<String, Object>> getTesterConfig(@RequestBody Map<String, Object> params) {
+        Long projectId = Long.valueOf(params.get("projectId").toString());
+        return applicationService.getTesterConfig(projectId);
+    }
+
+    /**
+     * 保存项目的独立测试数字员工配置(每项目唯一,upsert)。
+     *
+     * @param dto 嵌套配置(enabled/schedule/admission/kickback);projectId 必填
+     */
+    @PostMapping("/tester-config/save")
+    public ResponseUtil<Void> saveTesterConfig(@RequestBody TesterConfigDTO dto) {
+        return applicationService.saveTesterConfig(dto);
+    }
+
+    /**
+     * 手动触发一次项目批量集成:对项目下所有启用用例集 × 指定环境各起一次真实执行,秒回 runId 列表。
+     *
+     * @param params 包含 projectId、envId
+     */
+    @PostMapping("/tester-config/run")
+    public ResponseUtil<Map<String, Object>> runTesterBatch(@RequestBody Map<String, Object> params) {
+        Long projectId = Long.valueOf(params.get("projectId").toString());
+        Long envId = Long.valueOf(params.get("envId").toString());
+        return applicationService.runTesterBatch(projectId, envId);
+    }
+
+    /**
+     * 需求级集成聚合看板:项目下已拆解需求按「需求→多仓库任务」组装,含就绪状态、最近执行结果与打回记录。
+     *
+     * @param params 包含 projectId
+     */
+    @PostMapping("/integration/requirements")
+    public ResponseUtil<List<Map<String, Object>>> listRequirementIntegrations(@RequestBody Map<String, Object> params) {
+        Long projectId = Long.valueOf(params.get("projectId").toString());
+        return applicationService.listRequirementIntegrations(projectId);
+    }
+
+    /** projectId 可缺省(全局默认),缺省或空串归一为 null 交由下游按全局处理。 */
+    private Long parseProjectId(Map<String, Object> params) {
+        Object raw = params == null ? null : params.get("projectId");
+        if (raw == null || raw.toString().isEmpty()) {
+            return null;
+        }
+        return Long.valueOf(raw.toString());
     }
 
     /**

@@ -26,6 +26,7 @@ import {
   ClockCircleOutlined,
   CloseOutlined,
   CloudDownloadOutlined,
+  CommentOutlined,
   DeleteOutlined,
   DingdingOutlined,
   EditOutlined,
@@ -99,6 +100,7 @@ import { getResourceListByPage as listKnowledgeBases } from '@/service/knowledge
 import { listOntologyBases } from '@/service/ontology';
 import { getSandboxInfo, launchSandboxByUserCode, navigateSandboxBrowser, type SandboxInfo } from '@/service/sandbox';
 import SessionOverviewDrawer from './SessionOverviewDrawer';
+import MarkdownField from './components/MarkdownField';
 import TaskDetailDrawer from './TaskDetailDrawer';
 import {
   OperationAccountPanel,
@@ -158,6 +160,7 @@ import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { ResourceTypeMap } from '@/constants/resource';
 import ProjectMemberList from './ProjectMemberList';
 import Integration from './Integration';
+import ProjectDefaultAgentPanel from '@/pages/projectSpace/components/ProjectDefaultAgentPanel';
 import RequirementSplitModal from './RequirementSplitModal';
 import type { SplitTaskDraft } from './RequirementSplitModal/types';
 import ListEndMessage from './ListEndMessage';
@@ -2876,10 +2879,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
       { key: 'tasks', label: t('tabs.tasks') },
       { key: 'resources', label: t('tabs.resources') },
       ...(showRequirementsTab ? [{ key: 'requirements', label: t('tabs.requirements') }] : []),
+      // 数字员工与集成测试都是研发闭环能力,仅研发项目可见;数字员工排在成员前。
+      ...(isDevelopProject ? [{ key: 'digitalAgents', label: t('tabs.digitalAgents') }] : []),
       ...(showMembersTab ? [{ key: 'members', label: t('tabs.members') }] : []),
       ...(showIntegrationTab ? [{ key: 'integration', label: t('tabs.integration') }] : []),
     ],
-    [showIntegrationTab, showMembersTab, showRequirementsTab, t]
+    [isDevelopProject, showIntegrationTab, showMembersTab, showRequirementsTab, t]
   );
 
   const detailPanelTabCountClass = styles[`projectDetailPanelTabCount${tabItems.length}`] || '';
@@ -3008,6 +3013,59 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setEditingManualRequirement(null);
     setManualRequirementForm(getDefaultManualRequirementForm());
     setManualRequirementOpen(true);
+  };
+
+  // 聊天录入:开一个绑定当前项目的新会话,用户边聊边贴图沉淀需求,聊完再回需求 tab 定稿。
+  // 与侧栏 handleNewChat 一致——项目归属只靠 navigate state 传递,首轮发送时 useChat 会据此 emit
+  // projectSpace-session-pending 完成绑定;新会话此刻无 sessionId,不能走 -session-context(会被空 id 拦掉)。
+  const openChatRequirementEntry = () => {
+    if (!projectId) {
+      message.warning(t('message.selectProjectFirst'));
+      return;
+    }
+    setSessionId?.('');
+    onBack();
+    navigate('/chat', {
+      state: {
+        keepSiderActiveKey: 'sessions',
+        from: 'projectSpace',
+        projectId,
+        projectName: project?.projectName,
+      },
+    });
+  };
+
+  const requirementAddMenuItems: MenuProps['items'] = [
+    {
+      key: 'manual',
+      icon: <EditOutlined />,
+      label: (
+        <div className={styles.requirementAddMenuItem}>
+          <span className={styles.requirementAddMenuLabel}>{t('requirement.addMenu.manual')}</span>
+          <span className={styles.requirementAddMenuDesc}>{t('requirement.addMenu.manualDesc')}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'chat',
+      icon: <CommentOutlined />,
+      label: (
+        <div className={styles.requirementAddMenuItem}>
+          <span className={styles.requirementAddMenuLabel}>{t('requirement.addMenu.chat')}</span>
+          <span className={styles.requirementAddMenuDesc}>{t('requirement.addMenu.chatDesc')}</span>
+        </div>
+      ),
+    },
+  ];
+
+  const handleRequirementAddMenuClick: MenuProps['onClick'] = ({ key }) => {
+    if (key === 'manual') {
+      openManualRequirementModal();
+      return;
+    }
+    if (key === 'chat') {
+      openChatRequirementEntry();
+    }
   };
 
   const openEditManualRequirementModal = (requirement: RequirementItem) => {
@@ -3303,6 +3361,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
   };
 
   const handleDeleteRepo = (repo: RepoOption) => {
+    // 仓库被渠道或需求引用时不允许删除,否则这些引用会指向失效仓库。前端先拦一道,后端仍应校验。
+    const referencedBySource = sources.some((source) => source.repoId === repo.repoId);
+    const referencedByRequirement = requirements.some((requirement) => requirement.repoId === repo.repoId);
+    if (referencedBySource || referencedByRequirement) {
+      message.warning(t('repository.deleteInUse', { name: `${repo.repoFullName || repo.repoUrl || repo.repoId}` }));
+      return;
+    }
     Modal.confirm({
       title: t('common.deleteConfirmTitle'),
       content: t('repository.deleteConfirm', { name: `${repo.repoFullName || repo.repoUrl || repo.repoId}` }),
@@ -4468,15 +4533,19 @@ const ProjectDetailPanel: React.FC<Props> = ({
             />
           </div>
           <Space size={6}>
-            <Tooltip title={t('manualRequirement.title')} placement="top">
+            {/* 新增需求拆成两种录入方式:hover 展开手工录入 / 聊天录入。 */}
+            <Dropdown
+              trigger={['hover']}
+              placement="bottomRight"
+              menu={{ items: requirementAddMenuItems, onClick: handleRequirementAddMenuClick }}
+            >
               <Button
                 aria-label={t('manualRequirement.title')}
                 size="small"
                 className={`${styles.detailHeaderActionButton} ${styles.detailManualRequirementAddButton}`}
                 icon={<PlusOutlined />}
-                onClick={openManualRequirementModal}
               />
-            </Tooltip>
+            </Dropdown>
             <Tooltip title={t('common.refresh')} placement="top">
               <Button
                 aria-label={t('common.refresh')}
@@ -5433,6 +5502,16 @@ const ProjectDetailPanel: React.FC<Props> = ({
       return renderTasks();
     }
     if (activeTab === 'resources') return renderResources();
+    if (activeTab === 'digitalAgents') {
+      if (isDevelopProject) {
+        return (
+          <div className={styles.detailEmbeddedContent}>
+            <ProjectDefaultAgentPanel projectId={projectId} active={activeTab === 'digitalAgents'} />
+          </div>
+        );
+      }
+      return renderTasks();
+    }
     if (activeTab === 'integration') {
       if (showIntegrationTab) return <Integration active projectId={projectId} repos={repos} />;
       return renderTasks();
@@ -5816,37 +5895,23 @@ const ProjectDetailPanel: React.FC<Props> = ({
         </div>
         <div className={`${styles.formField} ${styles.manualRequirementFormFull}`}>
           <label>{t('manualRequirement.field.originalContent')}</label>
-          <div className={styles.manualRequirementTextArea}>
-            <span className={styles.manualRequirementTextCount}>
-              {manualRequirementForm.originalContent.length}/{MANUAL_REQUIREMENT_CONTENT_MAX_LENGTH}
-            </span>
-            <Input.TextArea
-              maxLength={MANUAL_REQUIREMENT_CONTENT_MAX_LENGTH}
-              placeholder={t('manualRequirement.placeholder.originalContent')}
-              rows={4}
-              value={manualRequirementForm.originalContent}
-              onChange={(event) =>
-                setManualRequirementForm((prev) => ({ ...prev, originalContent: event.target.value }))
-              }
-            />
-          </div>
+          <MarkdownField
+            value={manualRequirementForm.originalContent}
+            maxLength={MANUAL_REQUIREMENT_CONTENT_MAX_LENGTH}
+            rows={4}
+            placeholder={t('manualRequirement.placeholder.originalContent')}
+            onChange={(originalContent) => setManualRequirementForm((prev) => ({ ...prev, originalContent }))}
+          />
         </div>
         <div className={`${styles.formField} ${styles.manualRequirementFormFull}`}>
           <label>{t('manualRequirement.field.productContent')}</label>
-          <div className={styles.manualRequirementTextArea}>
-            <span className={styles.manualRequirementTextCount}>
-              {manualRequirementForm.productContent.length}/{MANUAL_REQUIREMENT_CONTENT_MAX_LENGTH}
-            </span>
-            <Input.TextArea
-              maxLength={MANUAL_REQUIREMENT_CONTENT_MAX_LENGTH}
-              placeholder={t('manualRequirement.placeholder.productContent')}
-              rows={4}
-              value={manualRequirementForm.productContent}
-              onChange={(event) =>
-                setManualRequirementForm((prev) => ({ ...prev, productContent: event.target.value }))
-              }
-            />
-          </div>
+          <MarkdownField
+            value={manualRequirementForm.productContent}
+            maxLength={MANUAL_REQUIREMENT_CONTENT_MAX_LENGTH}
+            rows={4}
+            placeholder={t('manualRequirement.placeholder.productContent')}
+            onChange={(productContent) => setManualRequirementForm((prev) => ({ ...prev, productContent }))}
+          />
         </div>
       </div>
     </Modal>

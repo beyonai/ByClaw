@@ -1,12 +1,9 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
-import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
 import com.iwhalecloud.byai.state.domain.message.qo.MessageQo;
-import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,14 +20,12 @@ import java.util.regex.Pattern;
 /**
  * 研发任务环节追踪服务。
  * 系统里不存在现成的环节数据，只能从会话消息派生：
- * 主路径解析数字员工按约定输出的 [PHASE] 打点标记（零成本、可靠、天然支持打回）；
- * 无打点的历史会话回退到 LLM 抽取。产出 7 环节进度快照，供任务详情逐环节展示。
+ * 解析数字员工按约定输出的 [PHASE] 打点标记（零成本、可靠、天然支持打回），
+ * 无打点标记时返回全未开始。产出 7 环节进度快照，供任务详情逐环节展示。
  */
 @Slf4j
 @Service
 public class DevloopPhaseService {
-
-    private static final String PHASE_PROMPT_CODE = "DEVLOOP_PHASE_EXTRACT_PROMPT";
 
     /** 固定环节顺序：issue → req → design → coder → reviewer → tester → pr */
     public static final List<String> PHASE_ORDER =
@@ -55,9 +50,8 @@ public class DevloopPhaseService {
     public static final String ST_DONE = "done";
     public static final String ST_REJECTED = "rejected";
 
-    // 派生来源：打点标记 / LLM 抽取 / 无信号（全未开始）
+    // 派生来源：打点标记 / 无信号（全未开始）
     private static final String SRC_MARKER = "marker";
-    private static final String SRC_LLM = "llm";
     private static final String SRC_EMPTY = "empty";
 
     // 只解析数字员工的回答(usage=SYSTEM_RESPONSE)。用户输入(usage=USER_INPUT，含任务启动提示词里的
@@ -67,9 +61,6 @@ public class DevloopPhaseService {
 
     // 一个任务的完整对话回看上限，够覆盖多轮打回即可，避免超长会话拖慢解析
     private static final int MAX_MESSAGES = 100;
-
-    // LLM 兜底时拼接的转录文本上限，防止超出模型上下文
-    private static final int MAX_TRANSCRIPT_CHARS = 12000;
 
     /**
      * 打点标记：[PHASE] &lt;环节&gt; &lt;START|DONE|REJECT[-&gt;目标环节]&gt; [原因...]
@@ -82,15 +73,9 @@ public class DevloopPhaseService {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Autowired
-    private AIService aiService;
-
-    @Autowired
-    private ByaiSystemConfigService byaiSystemConfigService;
-
-    @Autowired
     private ByaiMessageHotService byaiMessageHotService;
 
-    /** 计算某会话(任务)的环节进度快照：优先打点标记，无标记回退 LLM，再无信号返回全未开始。 */
+    /** 计算某会话(任务)的环节进度快照：有 [PHASE] 打点标记按标记派生，无标记返回全未开始。 */
     public PhaseSnapshot buildSnapshot(Long sessionId) {
         List<ByaiMessageHotDto> messages = loadMessagesAscending(sessionId);
         int messageCount = messages.size();
@@ -99,11 +84,6 @@ public class DevloopPhaseService {
         if (byMarker != null) {
             byMarker.setMessageCount(messageCount);
             return byMarker;
-        }
-        PhaseSnapshot byLlm = parseByLlm(messages);
-        if (byLlm != null) {
-            byLlm.setMessageCount(messageCount);
-            return byLlm;
         }
         PhaseSnapshot empty = emptySnapshot();
         empty.setMessageCount(messageCount);
@@ -183,7 +163,7 @@ public class DevloopPhaseService {
 
     /**
      * 打点解析：按对话顺序处理每条 [PHASE] 标记，维护各环节状态、轮次与打回记录。
-     * 无任何标记时返回 null，交由 LLM 兜底。
+     * 无任何标记时返回 null，由调用方给出全未开始快照。
      */
     private PhaseSnapshot parseByMarkers(List<ByaiMessageHotDto> messages) {
         Map<String, String> statusByPhase = new LinkedHashMap<>();
@@ -266,89 +246,6 @@ public class DevloopPhaseService {
         }
     }
 
-    /** LLM 兜底：把会话转录喂给模型抽取环节 JSON；无消息或未配置提示词时返回 null。 */
-    private PhaseSnapshot parseByLlm(List<ByaiMessageHotDto> messages) {
-        if (messages.isEmpty()) {
-            return null;
-        }
-        String template = byaiSystemConfigService.findByParamCode(PHASE_PROMPT_CODE);
-        if (template == null || template.isEmpty()) {
-            log.warn("[DevloopPhase] 未配置环节抽取提示词 {}，跳过 LLM 兜底。", PHASE_PROMPT_CODE);
-            return null;
-        }
-        String transcript = buildTranscript(messages);
-        if (transcript.isEmpty()) {
-            return null;
-        }
-        String userPrompt = template.replace("${transcript}", transcript);
-        String raw;
-        try {
-            raw = aiService.generateText(null, userPrompt, (String) null, 800);
-        } catch (Exception e) {
-            log.warn("[DevloopPhase] LLM 抽取环节失败", e);
-            return null;
-        }
-        JsonNode node = parseJson(raw);
-        if (node == null) {
-            return null;
-        }
-        return snapshotFromLlmJson(node);
-    }
-
-    private PhaseSnapshot snapshotFromLlmJson(JsonNode node) {
-        Map<String, String> statusByPhase = new LinkedHashMap<>();
-        for (String p : PHASE_ORDER) {
-            statusByPhase.put(p, ST_PENDING);
-        }
-        JsonNode phases = node.path("phases");
-        if (phases.isArray()) {
-            for (JsonNode ph : phases) {
-                String key = normalizePhase(ph.path("key").asText(null));
-                String status = normalizeStatus(ph.path("status").asText(null));
-                if (key != null && status != null) {
-                    statusByPhase.put(key, status);
-                }
-            }
-        }
-        List<Kickback> kickbacks = new ArrayList<>();
-        JsonNode kbs = node.path("kickbacks");
-        if (kbs.isArray()) {
-            for (JsonNode kb : kbs) {
-                String from = normalizePhase(kb.path("from").asText(null));
-                String to = normalizePhase(kb.path("to").asText(null));
-                if (from != null && to != null) {
-                    kickbacks.add(new Kickback(from, to, kb.path("round").asInt(1), kb.path("reason").asText("")));
-                }
-            }
-        }
-        String currentPhase = normalizePhase(node.path("currentPhase").asText(null));
-        if (currentPhase == null) {
-            currentPhase = deriveCurrentPhase(statusByPhase);
-        }
-        PhaseSnapshot snap = new PhaseSnapshot();
-        snap.setSource(SRC_LLM);
-        snap.setRound(Math.max(1, node.path("round").asInt(1)));
-        snap.setCurrentPhase(currentPhase);
-        snap.setKickbacks(kickbacks);
-        snap.setPhases(toPhaseStates(statusByPhase));
-        return snap;
-    }
-
-    /** 无 currentPhase 时的推导：最高序号的进行中环节，否则最高序号的非未开始环节，否则首环节。 */
-    private String deriveCurrentPhase(Map<String, String> statusByPhase) {
-        String current = PHASE_ORDER.get(0);
-        for (String p : PHASE_ORDER) {
-            String st = statusByPhase.get(p);
-            if (!ST_PENDING.equals(st)) {
-                current = p;
-            }
-            if (ST_RUNNING.equals(st)) {
-                return p;
-            }
-        }
-        return current;
-    }
-
     private List<PhaseState> initPhaseStates() {
         List<PhaseState> states = new ArrayList<>();
         for (String p : PHASE_ORDER) {
@@ -365,28 +262,10 @@ public class DevloopPhaseService {
         return states;
     }
 
-    /** 拼接会话转录：role + 正文（含推理段），截断到上限。 */
-    private String buildTranscript(List<ByaiMessageHotDto> messages) {
-        StringBuilder sb = new StringBuilder();
-        for (ByaiMessageHotDto msg : messages) {
-            String text = messageText(msg);
-            if (text.isEmpty()) {
-                continue;
-            }
-            String role = msg.getRole() != null ? msg.getRole() : "";
-            sb.append(role).append(": ").append(text).append("\n");
-            if (sb.length() >= MAX_TRANSCRIPT_CHARS) {
-                break;
-            }
-        }
-        String result = sb.toString();
-        return result.length() > MAX_TRANSCRIPT_CHARS ? result.substring(0, MAX_TRANSCRIPT_CHARS) : result;
-    }
-
     /**
      * 单条消息的可扫描文本：只取正文 messageContent。
      * 不含 inferLog/callLogs（推理段与工具调用日志，如 git clone/exec 输出），
-     * 那些内容会让 LLM 把准备动作误判成编码环节，且 [PHASE] 汇报标记本就应在正文里。
+     * 那些内容会把准备动作误判成编码环节，且 [PHASE] 汇报标记本就应在正文里。
      */
     private String messageText(ByaiMessageHotDto msg) {
         String content = msg.getMessageContent();
@@ -399,36 +278,6 @@ public class DevloopPhaseService {
         }
         String key = raw.trim().toLowerCase();
         return PHASE_ORDER.contains(key) ? key : null;
-    }
-
-    private String normalizeStatus(String raw) {
-        if (raw == null) {
-            return null;
-        }
-        String s = raw.trim().toLowerCase();
-        if (ST_PENDING.equals(s) || ST_RUNNING.equals(s) || ST_DONE.equals(s) || ST_REJECTED.equals(s)) {
-            return s;
-        }
-        return null;
-    }
-
-    /** 从模型文本中抽取 JSON 对象；容忍 markdown 代码块与前后噪声（同评分服务口径）。 */
-    private JsonNode parseJson(String raw) {
-        if (raw == null || raw.isEmpty()) {
-            return null;
-        }
-        int start = raw.indexOf('{');
-        int end = raw.lastIndexOf('}');
-        if (start < 0 || end <= start) {
-            return null;
-        }
-        String json = raw.substring(start, end + 1);
-        try {
-            return MAPPER.readTree(json);
-        } catch (Exception e) {
-            log.warn("[DevloopPhase] JSON 解析失败: {}", json, e);
-            return null;
-        }
     }
 
     /** 环节进度快照：任务级 currentPhase/round + 各环节状态 + 打回记录。messageCount 供缓存失效判断。 */

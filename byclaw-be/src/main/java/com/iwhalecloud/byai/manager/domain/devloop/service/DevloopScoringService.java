@@ -5,9 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
+import com.iwhalecloud.byai.manager.domain.aimodel.service.AiPromptService;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanRequireItem;
 import com.iwhalecloud.byai.manager.mapper.devloop.ScanRequireItemMapper;
-import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -58,7 +58,7 @@ public class DevloopScoringService {
     private AIService aiService;
 
     @Autowired
-    private ByaiSystemConfigService byaiSystemConfigService;
+    private AiPromptService aiPromptService;
 
     @Autowired
     private ScanRequireItemMapper scanRequireItemMapper;
@@ -77,10 +77,10 @@ public class DevloopScoringService {
             return dispatchList;
         }
         // 优先用「拆分+评分」合并提示词；缺失回退纯评分提示词（此时不拆分，仅评分）
-        String template = byaiSystemConfigService.findByParamCode(SPLIT_SCORE_PROMPT_CODE);
+        String template = aiPromptService.findZhTemplateByCode(SPLIT_SCORE_PROMPT_CODE);
         boolean splitEnabled = template != null && !template.isEmpty();
         if (!splitEnabled) {
-            template = byaiSystemConfigService.findByParamCode(SCORE_PROMPT_CODE);
+            template = aiPromptService.findZhTemplateByCode(SCORE_PROMPT_CODE);
         }
         if (template == null || template.isEmpty()) {
             log.warn("[DevloopScore] 未配置拆分/评分提示词，本批 {} 条需求跳过（分数为空、不拆分）。", items.size());

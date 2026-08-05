@@ -5,6 +5,18 @@
   padding: 4px 2px;
 }
 
+// 右侧覆盖层的「运行记录 / 配置」页签:页签头固定,内容区各自滚动,避免长看板顶掉配置入口。
+.integrationPanelTabs {
+  :global(.ant-tabs-nav) {
+    margin-bottom: 12px;
+  }
+
+  // 覆盖层很宽,给内容一个上限并居左,避免卡片/列表被拉到超长行影响可读性。
+  :global(.ant-tabs-tabpane) > .integrationPanel {
+    max-width: 1080px;
+  }
+}
+
 .integrationSection {
   display: flex;
   flex-direction: column;
@@ -150,24 +162,23 @@
   line-height: 20px;
 }
 
-// 左侧窄面板里 antd List.Item 默认横排(Meta 左、actions 右),空间不足时会 wrap-reverse
-// 把 actions 翻到上面、Meta 文字挤到下面。强制纵向堆叠:Meta 占满整行在上,操作行左对齐在下。
+// 右侧覆盖层宽度充足,恢复 antd List.Item 默认横排:Meta 占左侧剩余宽度,操作(状态 Tag + 查看)靠右,不再纵向堆叠。
 .integrationHistoryList {
   :global {
     .@{antPrefix}-list-item {
       display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 6px;
+      align-items: center;
+      gap: 12px;
     }
 
     .@{antPrefix}-list-item-meta {
-      width: 100%;
+      flex: 1;
       min-width: 0;
     }
 
     .@{antPrefix}-list-item-action {
-      margin-inline-start: 0;
+      flex-shrink: 0;
+      margin-inline-start: 12px;
     }
   }
 }
@@ -300,10 +311,10 @@
   background: #52c41a;
 }
 
-// V2:需求级集成视图列表。
+// V2:需求级集成视图列表。右侧覆盖层宽度充足,卡片按网格平铺而非单列拉伸,与配置页签的 integrationCardGrid 视觉一致。
 .reqIntegrationList {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 10px;
 }
 
@@ -821,6 +832,21 @@
   label {
     font-size: 13px;
     color: #1f2633;
+  }
+}
+
+.testerAgentReadonly {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: #f5f7fa;
+  color: #1f2633;
+
+  strong {
+    font-size: 14px;
+    font-weight: 600;
   }
 }
 

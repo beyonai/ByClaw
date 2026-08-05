@@ -1,24 +1,9 @@
-import type { TesterAgentOption, TesterConfig } from './types';
+import type { TesterConfig } from './types';
 
-// 演示态:可选的独立测试数字员工。真实实现从项目已绑定的数字员工里筛「测试」角色。
-export const TESTER_AGENT_OPTIONS: TesterAgentOption[] = [
-  {
-    agentId: 'agent-e2e-01',
-    name: '集成测试员 · 小验',
-    skills: ['Playwright', 'pytest', 'API 契约'],
-  },
-  { agentId: 'agent-e2e-02', name: '回归测试员 · 小回', skills: ['Jest', 'Cypress', '多端回归'] },
-  {
-    agentId: 'agent-qa-lead',
-    name: '质量负责人 · 老测',
-    skills: ['测试策略', '缺陷归因', '发布门禁'],
-  },
-];
-
-// 演示态默认配置:每日 02:00 批量集成、需求全 coded 才纳入、失败按图自动打回、最多 3 轮。
+// 默认配置:每日 02:00 批量集成、需求全 coded 才纳入、失败按图自动打回、最多 3 轮。
+// agentId 留空=沿用全局「测试数字员工」默认(卡片与弹框回填 resolveDefaultAgent 解析出的名字)。
 export const DEFAULT_TESTER_CONFIG: TesterConfig = {
   enabled: true,
-  agentId: 'agent-e2e-01',
   schedule: { cron: '0 2 * * *', cronLabel: '每日 02:00', timezone: 'Asia/Shanghai' },
   admission: { requireAllCoded: true, maxConcurrentReqs: 2 },
   kickback: { autoAttribute: true, createDefectWhenUnclear: true, maxRounds: 3 },

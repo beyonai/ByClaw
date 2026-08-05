@@ -44,6 +44,11 @@ import {
   listIntegrationRuns,
   listIntegrationSuites,
   startIntegrationRun,
+  resolveDefaultAgent,
+  getTesterConfig,
+  saveTesterConfig,
+  runTesterBatch,
+  listRequirementIntegrations,
   toggleIntegrationSuite,
   updateIntegrationEnv,
   updateIntegrationSuite,
@@ -57,7 +62,6 @@ import {
   E2E_STATUS_ENUM,
   E2E_STATUS_JSON,
   E2E_SUITE_CONTRACT,
-  TESTER_AGENT_OPTIONS,
 } from './mock';
 import type {
   IntegrationRunResult,
@@ -149,11 +153,16 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
   const { setDetailPanel, clearDetailPanel } = React.useContext(SiderContentContext);
   // 集成测试配置(环境+用例集)内容多,沿用需求渠道配置模式:入口按钮打开右侧覆盖面板。
   const [integrationConfigOpen, setIntegrationConfigOpen] = useState(false);
-  // V2:独立测试数字员工配置(谁测 / 何时测 / 失败怎么打回),静态演示态,后端就绪后接入。
+  // 右侧覆盖层分「运行记录 / 配置」两页签:窄左栏放不下看板+日志,挪到右侧;默认停在运行记录。
+  const [integrationPanelTab, setIntegrationPanelTab] = useState<'board' | 'config'>('board');
+  // V2:独立测试数字员工配置(谁测 / 何时测 / 失败怎么打回)。绑定员工与全局「测试数字员工」同源,
+  // 未单独指定时回填项目生效的测试默认员工(resolveDefaultAgent:项目覆盖合并到全局之上)。
   const [testerConfig, setTesterConfig] = useState<TesterConfig>(DEFAULT_TESTER_CONFIG);
   const [testerModalOpen, setTesterModalOpen] = useState(false);
   // 弹框内的草稿:确认才写回 testerConfig,取消不改。
   const [testerDraft, setTesterDraft] = useState<TesterConfig>(DEFAULT_TESTER_CONFIG);
+  // 执行员工不在此配置:直接取项目生效的全局「测试数字员工」默认名(resolveDefaultAgent),只读展示。
+  const [resolvedTesterName, setResolvedTesterName] = useState('');
   // 集成测试「新增测试用例集」弹框(静态演示态)。
   const [integrationSuiteModalOpen, setIntegrationSuiteModalOpen] = useState(false);
   // 查看态:弹框复用新增表单,只读展示,不给保存按钮。
@@ -336,6 +345,22 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
   // 集成测试执行历史:每个套件各查一次,合并后按时间倒序;真实数据替代原静态演示。
   const [integrationHistoryList, setIntegrationHistoryList] = useState<IntegrationRunHistoryVo[]>([]);
 
+  // 需求级集成看板:后端按「需求→多仓库任务」聚合,含就绪状态、最近执行结果与打回记录。
+  const [requirementIntegrationList, setRequirementIntegrationList] = useState<RequirementIntegration[]>([]);
+
+  const loadRequirementIntegrations = React.useCallback(async () => {
+    if (!projectId) {
+      setRequirementIntegrationList([]);
+      return;
+    }
+    try {
+      const list = (await listRequirementIntegrations(projectId)) as RequirementIntegration[] | null;
+      setRequirementIntegrationList(list || []);
+    } catch (e) {
+      setRequirementIntegrationList([]);
+    }
+  }, [projectId]);
+
   const loadIntegrationRuns = React.useCallback(async (suites: IntegrationSuiteVo[]) => {
     // 无自动化套件则清空历史;后端历史按 suiteId 查,这里对启用套件并发取回再合并。
     const autoSuites = suites.filter((s) => s.runner !== 'manual');
@@ -363,12 +388,69 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
     }
   }, [active, loadIntegrationEnvs, loadIntegrationSuites]);
 
+  // 解析项目生效的测试默认员工(项目覆盖合并到全局之上),用于卡片兜底名与弹框占位提示。
+  useEffect(() => {
+    if (!active || !projectId) return;
+    let cancelled = false;
+    resolveDefaultAgent(projectId)
+      .then((config) => {
+        if (!cancelled) setResolvedTesterName(config?.testerAgentName || '');
+      })
+      .catch(() => {
+        if (!cancelled) setResolvedTesterName('');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [active, projectId]);
+
+  // 加载项目的独立测试员工配置;后端无记录时回填出厂默认,前端始终拿到完整可编辑配置。
+  useEffect(() => {
+    if (!active || !projectId) return;
+    let cancelled = false;
+    getTesterConfig(projectId)
+      .then((config) => {
+        if (cancelled || !config) return;
+        const normalized: TesterConfig = {
+          enabled: config.enabled !== false,
+          schedule: {
+            cron: config.schedule?.cron || DEFAULT_TESTER_CONFIG.schedule.cron,
+            cronLabel: config.schedule?.cronLabel || DEFAULT_TESTER_CONFIG.schedule.cronLabel,
+            timezone: config.schedule?.timezone || DEFAULT_TESTER_CONFIG.schedule.timezone,
+          },
+          admission: {
+            requireAllCoded: config.admission?.requireAllCoded !== false,
+            maxConcurrentReqs: config.admission?.maxConcurrentReqs ?? DEFAULT_TESTER_CONFIG.admission.maxConcurrentReqs,
+          },
+          kickback: {
+            autoAttribute: config.kickback?.autoAttribute !== false,
+            createDefectWhenUnclear: config.kickback?.createDefectWhenUnclear !== false,
+            maxRounds: config.kickback?.maxRounds ?? DEFAULT_TESTER_CONFIG.kickback.maxRounds,
+          },
+        };
+        setTesterConfig(normalized);
+      })
+      .catch(() => {
+        // 拉取失败不打断页面,保留出厂默认配置。
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [active, projectId]);
+
   // 套件列表变化后刷新历史(套件加载完成/执行完成后触发)。
   useEffect(() => {
     if (active) {
       loadIntegrationRuns(integrationSuiteList);
     }
   }, [active, integrationSuiteList, loadIntegrationRuns]);
+
+  // 进入面板/切换项目时拉取需求级集成看板。
+  useEffect(() => {
+    if (active) {
+      loadRequirementIntegrations();
+    }
+  }, [active, loadRequirementIntegrations]);
 
   // 执行测试:选环境弹框 + 轮询。runningRunId 非空表示有一次执行在进行,轮询直到进入终态。
   const [runEnvSelectOpen, setRunEnvSelectOpen] = useState(false);
@@ -482,56 +564,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
     { key: 'pr', label: '提交 PR', state: 'pending' as const },
   ];
 
-  // V2 mock:需求级集成视图。集成挂在需求(而非单任务),一个需求拆成多仓库任务,
-  // 由独立测试员工定时批量跑;失败按图归因,分发回责任任务。
-  const requirementIntegrationList: RequirementIntegration[] = [
-    {
-      reqId: 'req-pay',
-      reqNo: 'REQ-2098',
-      reqName: '支付流程改造',
-      status: 'failed',
-      round: 2,
-      lastRunId: 'run-1-12-2',
-      lastRunAt: '2026-07-26 17:08',
-      passRate: '15/18',
-      tasks: [
-        { id: 't-fe', repo: 'byclaw-fe', branch: 'feat/pay-ui', phase: 'pr', coded: true },
-        { id: 't-be', repo: 'byclaw-be', branch: 'feat/pay-api', phase: 'pr', coded: true },
-        { id: 't-mw', repo: 'byclaw-middleware', branch: 'feat/pay-mq', phase: 'pr', coded: true },
-      ],
-      kickbackTasks: [{ repo: 'byclaw-be', branch: 'feat/pay-api', reason: '跨模块调用鉴权头丢失,登录用例 3 条失败' }],
-    },
-    {
-      reqId: 'req-order',
-      reqNo: 'REQ-2101',
-      reqName: '订单中心重构',
-      status: 'waiting_ready',
-      round: 0,
-      lastRunId: '',
-      lastRunAt: '',
-      passRate: '',
-      tasks: [
-        { id: 't2-fe', repo: 'byclaw-fe', branch: 'feat/order-ui', phase: 'pr', coded: true },
-        { id: 't2-be', repo: 'byclaw-be', branch: 'feat/order-api', phase: 'coder', coded: false },
-      ],
-      kickbackTasks: [],
-    },
-    {
-      reqId: 'req-report',
-      reqNo: 'REQ-2087',
-      reqName: '经营报表导出',
-      status: 'passed',
-      round: 3,
-      lastRunId: 'run-1-12-3',
-      lastRunAt: '2026-07-27 09:41',
-      passRate: '18/18',
-      tasks: [
-        { id: 't3-fe', repo: 'byclaw-fe', branch: 'feat/report-ui', phase: 'done', coded: true },
-        { id: 't3-be', repo: 'byclaw-be', branch: 'feat/report-api', phase: 'done', coded: true },
-      ],
-      kickbackTasks: [],
-    },
-  ];
+  // 需求级集成看板数据由后端 listRequirementIntegrations 聚合(见 requirementIntegrationList state)。
 
   // 需求级集成状态 → 展示配色/文案 key。
   const reqIntegrationStatusMeta: Record<RequirementIntegrationStatus, { color: string; labelId: string }> = {
@@ -561,18 +594,68 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
     ? `明日 ${testerConfig.schedule.cronLabel.replace(/^每日\s*/, '')}`
     : t('tester.manualTrigger');
 
-  // 当前绑定的独立测试员工(找不到时兜底第一个,保证卡片有内容)。
-  const boundTesterAgent =
-    TESTER_AGENT_OPTIONS.find((agent) => agent.agentId === testerConfig.agentId) ?? TESTER_AGENT_OPTIONS[0];
+  // 当前绑定的独立测试员工名:优先从员工选项按 id 命中,退全局解析出的测试默认员工名。
+  // 执行员工 = 项目生效的全局测试默认员工;此处只读,改绑定去「默认数字员工」。
+  const boundTesterName = resolvedTesterName;
 
   const openTesterModal = () => {
     setTesterDraft(testerConfig);
     setTesterModalOpen(true);
   };
 
-  const handleSaveTester = () => {
-    setTesterConfig(testerDraft);
-    setTesterModalOpen(false);
+  // 保存草稿到后端(每项目唯一,upsert),成功后写回本地并关闭弹框。
+  const [testerSaving, setTesterSaving] = useState(false);
+  const handleSaveTester = async () => {
+    if (!projectId) return;
+    setTesterSaving(true);
+    try {
+      await saveTesterConfig({ projectId, ...testerDraft });
+      setTesterConfig(testerDraft);
+      setTesterModalOpen(false);
+      message.success(t('tester.saveSuccess'));
+    } catch (e) {
+      message.error(t('tester.saveFailed'));
+    } finally {
+      setTesterSaving(false);
+    }
+  };
+
+  // 手动执行:对项目下所有启用用例集 × 选定环境各起一次真实 run。需先选环境(复用套件执行的环境选择弹框)。
+  const [testerRunning, setTesterRunning] = useState(false);
+  const [testerRunEnvOpen, setTesterRunEnvOpen] = useState(false);
+  const [testerRunEnvId, setTesterRunEnvId] = useState<number | null>(null);
+  const handleManualTesterRun = async () => {
+    if (!projectId) return;
+    if (integrationEnvList.length === 0) {
+      message.warning(t('integration.run.noEnv'));
+      return;
+    }
+    setTesterRunEnvId(integrationEnvList[0]?.envId ?? null);
+    setTesterRunEnvOpen(true);
+  };
+
+  // 确认环境 → 触发批量执行 → 提示起了几条 run,并刷新历史列表。
+  const handleConfirmTesterRun = async () => {
+    if (!projectId || !testerRunEnvId) return;
+    setTesterRunning(true);
+    try {
+      const res = (await runTesterBatch(projectId, testerRunEnvId)) as {
+        runIds: Array<string | number>;
+        suiteCount: number;
+      } | null;
+      if (!res || !res.runIds?.length) {
+        message.error(t('tester.runFailed'));
+        return;
+      }
+      setTesterRunEnvOpen(false);
+      message.success(t('tester.runStarted', { count: res.suiteCount }));
+      loadIntegrationRuns(integrationSuiteList);
+      loadRequirementIntegrations();
+    } catch (e) {
+      message.error(t('tester.runFailed'));
+    } finally {
+      setTesterRunning(false);
+    }
   };
 
   const renderReqIntegrationCard = (req: RequirementIntegration) => {
@@ -842,11 +925,13 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
     patch: Partial<{ result: 'pass' | 'fail' | 'skip' | ''; remark: string; shots: string[] }>
   ) => setManualRunRecords((prev) => ({ ...prev, [caseId]: { ...prev[caseId], ...patch } }));
 
-  const handleToggleIntegrationConfig = () => {
-    if (integrationConfigOpen) {
+  // 打开右侧面板并停在指定页签;已开则再点入口视为收起。
+  const handleOpenIntegrationPanel = (tab: 'board' | 'config' = 'config') => {
+    if (integrationConfigOpen && integrationPanelTab === tab) {
       handleCloseIntegrationConfig();
       return;
     }
+    setIntegrationPanelTab(tab);
     setIntegrationConfigOpen(true);
   };
 
@@ -860,13 +945,17 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
     return 'error';
   };
 
-  // 左侧集成测试概览:入口按钮(打开右侧配置面板) + 闭环流程条 + 历次结果。内容多的配置移到右侧,避免左栏挤压。
+  // 左侧只留轻量入口:面板按钮 + 定时触发条 + 说明。看板与运行日志内容多,挪到右侧覆盖层,避免窄左栏挤压。
   const renderIntegration = () => (
     <div className={styles.integrationPanel}>
-      <button type="button" className={parentStyles.detailChannelEntry} onClick={handleToggleIntegrationConfig}>
+      <button
+        type="button"
+        className={parentStyles.detailChannelEntry}
+        onClick={() => handleOpenIntegrationPanel('config')}
+      >
         <FundProjectionScreenOutlined className={parentStyles.detailChannelEntryIcon} />
         <span>
-          <strong>{t('integration.configEntry')}</strong>
+          <strong>{t('integration.panelEntry')}</strong>
         </span>
         {integrationConfigOpen ? <LeftOutlined /> : <RightOutlined />}
       </button>
@@ -885,6 +974,13 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
         </div>
       </div>
 
+      <div className={styles.integrationNote}>{t('integration.note')}</div>
+    </div>
+  );
+
+  // 运行记录页签:需求级集成看板 + 历次运行日志。右侧覆盖层宽度充足,承载原本挤在左栏的两块内容。
+  const renderIntegrationBoard = () => (
+    <div className={styles.integrationPanel}>
       {/* V2:需求级集成视图。集成挂在需求(而非单任务),展示需求下多仓库任务的就绪度、上次结果与失败分发。 */}
       <div className={styles.integrationSection}>
         <div className={styles.integrationSectionHeader}>
@@ -955,8 +1051,6 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
           }}
         />
       </div>
-
-      <div className={styles.integrationNote}>{t('integration.note')}</div>
     </div>
   );
   // 右侧集成测试配置面板:环境信息 + 测试用例集,空间充足可容纳复杂配置。
@@ -965,8 +1059,8 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
       <div className={parentStyles.detailChannelPanel}>
         <div className={parentStyles.detailChannelPanelHeader}>
           <div className={parentStyles.detailChannelPanelTitle}>
-            <h3>{t('integration.configEntry')}</h3>
-            <p>{t('integration.configSubtitle')}</p>
+            <h3>{t('integration.panelEntry')}</h3>
+            <p>{t('integration.panelSubtitle')}</p>
           </div>
           <div className={parentStyles.detailChannelPanelActions}>
             <Tooltip title={t('common.close')} placement="top">
@@ -975,262 +1069,313 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
           </div>
         </div>
         <div className={parentStyles.detailChannelPanelBody}>
-          <div className={styles.integrationPanel}>
-            {/* V2:独立测试数字员工配置。这是「定时集成」banner 背后的真实配置:谁测/何时测/失败怎么打回。 */}
-            <div className={styles.integrationSection}>
-              <div className={styles.integrationSectionHeader}>
-                <span className={styles.integrationSectionTitle}>{t('tester.title')}</span>
-              </div>
-              {/* 与环境/用例集卡片同一网格 + 外壳,保证宽度与风格一致(单卡时不铺满整行)。 */}
-              <div className={styles.integrationCardGrid}>
-                <div className={parentStyles.detailSourceCard}>
-                  <div className={parentStyles.detailSourceHeader}>
-                    <span className={parentStyles.detailSourceIcon}>
-                      <RobotOutlined />
-                    </span>
-                    <div className={parentStyles.detailSourceTitle}>
-                      <strong>{boundTesterAgent?.name ?? t('tester.noAgent')}</strong>
-                      <span>{(boundTesterAgent?.skills ?? []).join(' / ')}</span>
-                    </div>
-                    <Tag color={testerConfig.enabled ? 'success' : 'default'}>
-                      {t(testerConfig.enabled ? 'tester.enabled' : 'tester.disabled')}
-                    </Tag>
-                  </div>
-                  <div className={styles.integrationCardBody}>
-                    <div className={styles.integrationField}>
-                      <span className={styles.integrationFieldLabel}>{t('tester.schedule')}</span>
-                      <span className={styles.integrationFieldValue}>
-                        {testerConfig.enabled
-                          ? `${testerConfig.schedule.cronLabel} · ${testerConfig.schedule.timezone}`
-                          : t('tester.manualTrigger')}
-                      </span>
-                    </div>
-                    <div className={styles.integrationField}>
-                      <span className={styles.integrationFieldLabel}>{t('tester.admission')}</span>
-                      <span className={styles.integrationFieldValue}>
-                        {testerConfig.admission.requireAllCoded
-                          ? t('tester.admissionAllCoded')
-                          : t('tester.admissionAnyCoded')}
-                        {' · '}
-                        {t('tester.concurrency', { count: testerConfig.admission.maxConcurrentReqs })}
-                      </span>
-                    </div>
-                    <div className={styles.integrationField}>
-                      <span className={styles.integrationFieldLabel}>{t('tester.kickback')}</span>
-                      <span className={styles.integrationFieldValue}>
-                        {testerConfig.kickback.autoAttribute ? t('tester.kickbackAuto') : t('tester.kickbackManual')}
-                        {testerConfig.kickback.createDefectWhenUnclear ? ` · ${t('tester.kickbackDefect')}` : ''}
-                        {' · '}
-                        {t('tester.maxRounds', { count: testerConfig.kickback.maxRounds })}
-                      </span>
-                    </div>
-                    <div className={styles.testerNote}>{t('tester.cardNote')}</div>
-                  </div>
-                  <div className={styles.integrationCardActions}>
-                    <Button type="link" size="small" icon={<EditOutlined />} onClick={openTesterModal}>
-                      {t('common.edit')}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 环境信息配置 */}
-            <div className={styles.integrationSection}>
-              <div className={styles.integrationSectionHeader}>
-                <span className={styles.integrationSectionTitle}>{t('integration.env.title')}</span>
-                <Button
-                  type="link"
-                  size="small"
-                  icon={<PlusOutlined />}
-                  onClick={() => {
-                    setEditingEnvId(null);
-                    setIntegrationEnvReadOnly(false);
-                    setIntegrationEnvTab('basic');
-                    setIntegrationEnvModalOpen(true);
-                  }}
-                >
-                  {t('integration.env.add')}
-                </Button>
-              </div>
-              <div className={styles.integrationCardGrid}>
-                {integrationEnvList.map((env) => (
-                  <div className={parentStyles.detailSourceCard} key={env.envId}>
-                    <div className={parentStyles.detailSourceHeader}>
-                      <span className={parentStyles.detailSourceIcon}>
-                        <FundProjectionScreenOutlined />
-                      </span>
-                      <div className={parentStyles.detailSourceTitle}>
-                        <strong>{env.envName}</strong>
-                        <span>{env.address}</span>
+          <Tabs
+            className={styles.integrationPanelTabs}
+            activeKey={integrationPanelTab}
+            onChange={(key) => setIntegrationPanelTab(key as 'board' | 'config')}
+            items={[
+              { key: 'board', label: t('integration.tab.board'), children: renderIntegrationBoard() },
+              {
+                key: 'config',
+                label: t('integration.tab.config'),
+                children: (
+                  <div className={styles.integrationPanel}>
+                    {/* V2:独立测试数字员工配置。这是「定时集成」banner 背后的真实配置:谁测/何时测/失败怎么打回。 */}
+                    <div className={styles.integrationSection}>
+                      <div className={styles.integrationSectionHeader}>
+                        <span className={styles.integrationSectionTitle}>{t('tester.title')}</span>
                       </div>
-                      <Tag color="processing">{t(orchestratorTagKey(env.orchestrator))}</Tag>
-                    </div>
-                    <div className={styles.integrationCardBody}>
-                      <div className={styles.integrationField}>
-                        <span className={styles.integrationFieldLabel}>{t('integration.envModal.connProtocol')}</span>
-                        <span className={styles.integrationFieldValue}>
-                          {env.connProtocol === 'local'
-                            ? t('integration.envModal.connLocal')
-                            : `${env.connUser || ''}@${env.connHost || ''}${env.connPort ? `:${env.connPort}` : ''}`}
-                        </span>
-                      </div>
-                      <div className={styles.integrationField}>
-                        <span className={styles.integrationFieldLabel}>{t('integration.envModal.tabAccounts')}</span>
-                        <span className={styles.integrationFieldValue}>
-                          {parseJsonArray<TestAccount>(env.testAccounts, []).map((a) => (
-                            <Tag key={a.id} className={styles.integrationMwTag}>
-                              {a.role}
-                            </Tag>
-                          ))}
-                        </span>
-                      </div>
-                    </div>
-                    <div className={styles.integrationCardActions}>
-                      <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => openEnvModal(env, true)}>
-                        {t('common.view')}
-                      </Button>
-                      <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEnvModal(env, false)}>
-                        {t('common.edit')}
-                      </Button>
-                      <Button
-                        type="link"
-                        size="small"
-                        danger
-                        icon={<DeleteOutlined />}
-                        onClick={() => handleDeleteEnv(env)}
-                      >
-                        {t('common.delete')}
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 测试用例集管理:每个套件是独立工程,带运行器与运行命令 */}
-            <div className={styles.integrationSection}>
-              <div className={styles.integrationSectionHeader}>
-                <span className={styles.integrationSectionTitle}>{t('integration.suite.title')}</span>
-                <Button type="link" size="small" icon={<PlusOutlined />} onClick={openCreateSuiteModal}>
-                  {t('integration.suite.add')}
-                </Button>
-              </div>
-              <div className={styles.integrationCardGrid}>
-                {integrationSuiteList.map((suite) => {
-                  const suiteEnabled = suite.enabled !== '0';
-                  return (
-                    <div className={parentStyles.detailSourceCard} key={suite.suiteId}>
-                      <div className={parentStyles.detailSourceHeader}>
-                        <span className={parentStyles.detailSourceIcon}>
-                          <FileTextOutlined />
-                        </span>
-                        <div className={parentStyles.detailSourceTitle}>
-                          <strong>{suite.suiteName}</strong>
-                          <span>
-                            {suite.source}
-                            {suite.branch ? ` · ${suite.branch}` : ''}
-                          </span>
-                        </div>
-                        <Tag color="processing">{suite.runner}</Tag>
-                        <Switch
-                          size="small"
-                          checked={suiteEnabled}
-                          onChange={(next) => handleToggleSuite(suite, next)}
-                        />
-                      </div>
-                      <div className={styles.integrationCardBody}>
-                        {suite.runner === 'manual' ? (
-                          <div className={styles.integrationField}>
-                            <span className={styles.integrationFieldLabel}>{t('integration.suite.manualCases')}</span>
-                            <span className={styles.integrationFieldValue}>
-                              {t('integration.suite.caseCount', { count: suite.caseCount ?? 0 })}
-                              {' · '}
-                              {t('integration.suite.manualHint')}
+                      {/* 与环境/用例集卡片同一网格 + 外壳,保证宽度与风格一致(单卡时不铺满整行)。 */}
+                      <div className={styles.integrationCardGrid}>
+                        <div className={parentStyles.detailSourceCard}>
+                          <div className={parentStyles.detailSourceHeader}>
+                            <span className={parentStyles.detailSourceIcon}>
+                              <RobotOutlined />
                             </span>
+                            <div className={parentStyles.detailSourceTitle}>
+                              <strong>{boundTesterName || t('tester.noAgent')}</strong>
+                              <span>{t('tester.agentHint')}</span>
+                            </div>
+                            <Tag color={testerConfig.enabled ? 'success' : 'default'}>
+                              {t(testerConfig.enabled ? 'tester.enabled' : 'tester.disabled')}
+                            </Tag>
                           </div>
-                        ) : (
-                          <>
+                          <div className={styles.integrationCardBody}>
                             <div className={styles.integrationField}>
-                              <span className={styles.integrationFieldLabel}>{t('integration.suite.sourceType')}</span>
+                              <span className={styles.integrationFieldLabel}>{t('tester.schedule')}</span>
                               <span className={styles.integrationFieldValue}>
-                                {t(
-                                  suite.sourceType === 'git'
-                                    ? 'integration.suite.sourceGit'
-                                    : 'integration.suite.sourceShared'
-                                )}
+                                {testerConfig.enabled
+                                  ? `${testerConfig.schedule.cronLabel} · ${testerConfig.schedule.timezone}`
+                                  : t('tester.manualTrigger')}
+                              </span>
+                            </div>
+                            <div className={styles.integrationField}>
+                              <span className={styles.integrationFieldLabel}>{t('tester.admission')}</span>
+                              <span className={styles.integrationFieldValue}>
+                                {testerConfig.admission.requireAllCoded
+                                  ? t('tester.admissionAllCoded')
+                                  : t('tester.admissionAnyCoded')}
                                 {' · '}
-                                {t('integration.suite.caseCount', { count: suite.caseCount ?? 0 })}
+                                {t('tester.concurrency', { count: testerConfig.admission.maxConcurrentReqs })}
                               </span>
                             </div>
                             <div className={styles.integrationField}>
-                              <span className={styles.integrationFieldLabel}>{t('integration.suite.runCommand')}</span>
-                              <span className={`${styles.integrationFieldValue} ${styles.integrationMono}`}>
-                                {suite.runCommand}
+                              <span className={styles.integrationFieldLabel}>{t('tester.kickback')}</span>
+                              <span className={styles.integrationFieldValue}>
+                                {testerConfig.kickback.autoAttribute
+                                  ? t('tester.kickbackAuto')
+                                  : t('tester.kickbackManual')}
+                                {testerConfig.kickback.createDefectWhenUnclear
+                                  ? ` · ${t('tester.kickbackDefect')}`
+                                  : ''}
+                                {' · '}
+                                {t('tester.maxRounds', { count: testerConfig.kickback.maxRounds })}
                               </span>
                             </div>
-                            <div className={styles.integrationField}>
-                              <span className={styles.integrationFieldLabel}>{t('integration.suite.reportPath')}</span>
-                              <span className={`${styles.integrationFieldValue} ${styles.integrationMono}`}>
-                                {suite.reportPath}
-                              </span>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                      <div className={styles.integrationCardActions}>
-                        {suite.runner === 'manual' ? (
-                          <Button
-                            type="link"
-                            size="small"
-                            icon={<PlayCircleOutlined />}
-                            onClick={() => openManualRun(suite)}
-                          >
-                            {t('integration.suite.runManual')}
-                          </Button>
-                        ) : (
-                          <Button
-                            type="link"
-                            size="small"
-                            icon={<PlayCircleOutlined />}
-                            disabled={!!runningRunId}
-                            onClick={() => openRunEnvSelect(suite)}
-                          >
-                            {t('integration.suite.runTest')}
-                          </Button>
-                        )}
-                        <Button
-                          type="link"
-                          size="small"
-                          icon={<EyeOutlined />}
-                          onClick={() => openSuiteModal(suite, true)}
-                        >
-                          {t('common.view')}
-                        </Button>
-                        <Button
-                          type="link"
-                          size="small"
-                          icon={<EditOutlined />}
-                          onClick={() => openSuiteModal(suite, false)}
-                        >
-                          {t('common.edit')}
-                        </Button>
-                        <Button
-                          type="link"
-                          size="small"
-                          danger
-                          icon={<DeleteOutlined />}
-                          onClick={() => handleDeleteSuite(suite)}
-                        >
-                          {t('common.delete')}
-                        </Button>
+                            <div className={styles.testerNote}>{t('tester.cardNote')}</div>
+                          </div>
+                          <div className={styles.integrationCardActions}>
+                            <Button
+                              type="link"
+                              size="small"
+                              icon={<PlayCircleOutlined />}
+                              loading={testerRunning}
+                              onClick={handleManualTesterRun}
+                            >
+                              {t('tester.runNow')}
+                            </Button>
+                            <Button type="link" size="small" icon={<EditOutlined />} onClick={openTesterModal}>
+                              {t('common.edit')}
+                            </Button>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
+
+                    {/* 环境信息配置 */}
+                    <div className={styles.integrationSection}>
+                      <div className={styles.integrationSectionHeader}>
+                        <span className={styles.integrationSectionTitle}>{t('integration.env.title')}</span>
+                        <Button
+                          type="link"
+                          size="small"
+                          icon={<PlusOutlined />}
+                          onClick={() => {
+                            setEditingEnvId(null);
+                            setIntegrationEnvReadOnly(false);
+                            setIntegrationEnvTab('basic');
+                            setIntegrationEnvModalOpen(true);
+                          }}
+                        >
+                          {t('integration.env.add')}
+                        </Button>
+                      </div>
+                      <div className={styles.integrationCardGrid}>
+                        {integrationEnvList.map((env) => (
+                          <div className={parentStyles.detailSourceCard} key={env.envId}>
+                            <div className={parentStyles.detailSourceHeader}>
+                              <span className={parentStyles.detailSourceIcon}>
+                                <FundProjectionScreenOutlined />
+                              </span>
+                              <div className={parentStyles.detailSourceTitle}>
+                                <strong>{env.envName}</strong>
+                                <span>{env.address}</span>
+                              </div>
+                              <Tag color="processing">{t(orchestratorTagKey(env.orchestrator))}</Tag>
+                            </div>
+                            <div className={styles.integrationCardBody}>
+                              <div className={styles.integrationField}>
+                                <span className={styles.integrationFieldLabel}>
+                                  {t('integration.envModal.connProtocol')}
+                                </span>
+                                <span className={styles.integrationFieldValue}>
+                                  {env.connProtocol === 'local'
+                                    ? t('integration.envModal.connLocal')
+                                    : `${env.connUser || ''}@${env.connHost || ''}${
+                                      env.connPort ? `:${env.connPort}` : ''
+                                    }`}
+                                </span>
+                              </div>
+                              <div className={styles.integrationField}>
+                                <span className={styles.integrationFieldLabel}>
+                                  {t('integration.envModal.tabAccounts')}
+                                </span>
+                                <span className={styles.integrationFieldValue}>
+                                  {parseJsonArray<TestAccount>(env.testAccounts, []).map((a) => (
+                                    <Tag key={a.id} className={styles.integrationMwTag}>
+                                      {a.role}
+                                    </Tag>
+                                  ))}
+                                </span>
+                              </div>
+                            </div>
+                            <div className={styles.integrationCardActions}>
+                              <Button
+                                type="link"
+                                size="small"
+                                icon={<EyeOutlined />}
+                                onClick={() => openEnvModal(env, true)}
+                              >
+                                {t('common.view')}
+                              </Button>
+                              <Button
+                                type="link"
+                                size="small"
+                                icon={<EditOutlined />}
+                                onClick={() => openEnvModal(env, false)}
+                              >
+                                {t('common.edit')}
+                              </Button>
+                              <Button
+                                type="link"
+                                size="small"
+                                danger
+                                icon={<DeleteOutlined />}
+                                onClick={() => handleDeleteEnv(env)}
+                              >
+                                {t('common.delete')}
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 测试用例集管理:每个套件是独立工程,带运行器与运行命令 */}
+                    <div className={styles.integrationSection}>
+                      <div className={styles.integrationSectionHeader}>
+                        <span className={styles.integrationSectionTitle}>{t('integration.suite.title')}</span>
+                        <Button type="link" size="small" icon={<PlusOutlined />} onClick={openCreateSuiteModal}>
+                          {t('integration.suite.add')}
+                        </Button>
+                      </div>
+                      <div className={styles.integrationCardGrid}>
+                        {integrationSuiteList.map((suite) => {
+                          const suiteEnabled = suite.enabled !== '0';
+                          return (
+                            <div className={parentStyles.detailSourceCard} key={suite.suiteId}>
+                              <div className={parentStyles.detailSourceHeader}>
+                                <span className={parentStyles.detailSourceIcon}>
+                                  <FileTextOutlined />
+                                </span>
+                                <div className={parentStyles.detailSourceTitle}>
+                                  <strong>{suite.suiteName}</strong>
+                                  <span>
+                                    {suite.source}
+                                    {suite.branch ? ` · ${suite.branch}` : ''}
+                                  </span>
+                                </div>
+                                <Tag color="processing">{suite.runner}</Tag>
+                                <Switch
+                                  size="small"
+                                  checked={suiteEnabled}
+                                  onChange={(next) => handleToggleSuite(suite, next)}
+                                />
+                              </div>
+                              <div className={styles.integrationCardBody}>
+                                {suite.runner === 'manual' ? (
+                                  <div className={styles.integrationField}>
+                                    <span className={styles.integrationFieldLabel}>
+                                      {t('integration.suite.manualCases')}
+                                    </span>
+                                    <span className={styles.integrationFieldValue}>
+                                      {t('integration.suite.caseCount', { count: suite.caseCount ?? 0 })}
+                                      {' · '}
+                                      {t('integration.suite.manualHint')}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <div className={styles.integrationField}>
+                                      <span className={styles.integrationFieldLabel}>
+                                        {t('integration.suite.sourceType')}
+                                      </span>
+                                      <span className={styles.integrationFieldValue}>
+                                        {t(
+                                          suite.sourceType === 'git'
+                                            ? 'integration.suite.sourceGit'
+                                            : 'integration.suite.sourceShared'
+                                        )}
+                                        {' · '}
+                                        {t('integration.suite.caseCount', { count: suite.caseCount ?? 0 })}
+                                      </span>
+                                    </div>
+                                    <div className={styles.integrationField}>
+                                      <span className={styles.integrationFieldLabel}>
+                                        {t('integration.suite.runCommand')}
+                                      </span>
+                                      <span className={`${styles.integrationFieldValue} ${styles.integrationMono}`}>
+                                        {suite.runCommand}
+                                      </span>
+                                    </div>
+                                    <div className={styles.integrationField}>
+                                      <span className={styles.integrationFieldLabel}>
+                                        {t('integration.suite.reportPath')}
+                                      </span>
+                                      <span className={`${styles.integrationFieldValue} ${styles.integrationMono}`}>
+                                        {suite.reportPath}
+                                      </span>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                              <div className={styles.integrationCardActions}>
+                                {suite.runner === 'manual' ? (
+                                  <Button
+                                    type="link"
+                                    size="small"
+                                    icon={<PlayCircleOutlined />}
+                                    onClick={() => openManualRun(suite)}
+                                  >
+                                    {t('integration.suite.runManual')}
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    type="link"
+                                    size="small"
+                                    icon={<PlayCircleOutlined />}
+                                    disabled={!!runningRunId}
+                                    onClick={() => openRunEnvSelect(suite)}
+                                  >
+                                    {t('integration.suite.runTest')}
+                                  </Button>
+                                )}
+                                <Button
+                                  type="link"
+                                  size="small"
+                                  icon={<EyeOutlined />}
+                                  onClick={() => openSuiteModal(suite, true)}
+                                >
+                                  {t('common.view')}
+                                </Button>
+                                <Button
+                                  type="link"
+                                  size="small"
+                                  icon={<EditOutlined />}
+                                  onClick={() => openSuiteModal(suite, false)}
+                                >
+                                  {t('common.edit')}
+                                </Button>
+                                <Button
+                                  type="link"
+                                  size="small"
+                                  danger
+                                  icon={<DeleteOutlined />}
+                                  onClick={() => handleDeleteSuite(suite)}
+                                >
+                                  {t('common.delete')}
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                ),
+              },
+            ]}
+          />
         </div>
       </div>
     );
@@ -1246,6 +1391,9 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
     // (集成环境卡片就在这个快照里,删除/新增后必须重推才刷新)。
   }, [
     integrationConfigOpen,
+    // 覆盖层是一次性快照,页签是受控组件:切 tab 只改 state 不会自动重推快照,
+    // 必须把 integrationPanelTab 纳入依赖,否则快照里的 activeKey 永远停在旧值,点击「无反应」。
+    integrationPanelTab,
     setDetailPanel,
     t,
     testerConfig,
@@ -2198,6 +2346,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
       open={testerModalOpen}
       onCancel={() => setTesterModalOpen(false)}
       onOk={handleSaveTester}
+      confirmLoading={testerSaving}
       okText={t('integration.envModal.save')}
       cancelText={t('common.cancel')}
       width={560}
@@ -2213,15 +2362,11 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
 
       <div className={parentStyles.formField}>
         <label>{t('tester.agent')}</label>
-        <Select
-          value={testerDraft.agentId}
-          onChange={(agentId) => setTesterDraft((prev) => ({ ...prev, agentId }))}
-          style={{ width: '100%' }}
-          options={TESTER_AGENT_OPTIONS.map((agent) => ({
-            value: agent.agentId,
-            label: `${agent.name} · ${agent.skills.join(' / ')}`,
-          }))}
-        />
+        {/* 执行员工统一取全局「测试数字员工」默认,此处只读展示;改绑定去「默认数字员工」改,避免两处配置不一致。 */}
+        <div className={styles.testerAgentReadonly}>
+          <RobotOutlined />
+          <strong>{resolvedTesterName || t('tester.noAgent')}</strong>
+        </div>
         <p className={styles.testerFormHint}>{t('tester.agentHint')}</p>
       </div>
 
@@ -2361,6 +2506,40 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
     </Modal>
   );
 
+  // 手动执行独立测试员工:选一个环境,对项目下所有启用用例集各起一次真实 run。
+  const renderTesterRunEnvModal = () => (
+    <Modal
+      title={t('tester.runModalTitle')}
+      open={testerRunEnvOpen}
+      onCancel={() => setTesterRunEnvOpen(false)}
+      onOk={handleConfirmTesterRun}
+      okText={t('tester.runConfirm')}
+      okButtonProps={{ loading: testerRunning, disabled: !testerRunEnvId }}
+      confirmLoading={testerRunning}
+      width={480}
+      zIndex={1100}
+    >
+      <div className={styles.integrationField}>
+        <span className={styles.integrationFieldLabel}>{t('tester.runScope')}</span>
+        <span className={styles.integrationFieldValue}>{t('tester.runScopeValue')}</span>
+      </div>
+      <div className={styles.integrationField}>
+        <span className={styles.integrationFieldLabel}>{t('integration.run.env')}</span>
+        <Select
+          style={{ width: '100%' }}
+          value={testerRunEnvId ?? undefined}
+          placeholder={t('integration.run.envPlaceholder')}
+          onChange={(v) => setTesterRunEnvId(v)}
+          options={integrationEnvList.map((env) => ({
+            value: env.envId,
+            label: `${env.envName}${env.connHost ? ` · ${env.connHost}` : ''}`,
+          }))}
+        />
+      </div>
+      <div className={styles.integrationNote}>{t('tester.runModalHint')}</div>
+    </Modal>
+  );
+
   return (
     <>
       {active ? renderIntegration() : null}
@@ -2370,6 +2549,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
       {renderIntegrationResultModal()}
       {renderManualRunModal()}
       {renderTesterModal()}
+      {renderTesterRunEnvModal()}
     </>
   );
 };

@@ -26,6 +26,9 @@ public class IntegrationRun {
 
     private Long envId;
 
+    /** 触发本次执行的研发需求ID ScanRequireItem.itemId;人工单套件执行可空。 */
+    private Long requirementId;
+
     private String status;
 
     private String branch;
@@ -40,10 +43,13 @@ public class IntegrationRun {
 
     private Integer skipped;
 
-    /** 打回目标环节(失败时记录,自动回灌dev-loop留V2) */
+    /** 打回目标环节(失败时记录);由失败打回引擎驱动会话回到该环节重工 */
     private String kickbackTo;
 
     private String reason;
+
+    /** 失败打回引擎处理本次执行的时间;非空表示已处理,幂等去重用 */
+    private Date kickbackAt;
 
     /** 远程结果目录(完整日志/报告/截图落地处) */
     private String resultDir;

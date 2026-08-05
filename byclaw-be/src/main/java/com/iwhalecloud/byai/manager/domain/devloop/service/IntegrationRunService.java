@@ -42,8 +42,16 @@ public class IntegrationRunService {
     @Autowired
     private SequenceService sequenceService;
 
-    /** 触发一次执行:校验 → 建 running 主记录 → 异步执行 → 返回 run(含 runId)。 */
+    /** 人工单套件执行:无需求维度,requirementId 为空。 */
     public IntegrationRun startRun(Long suiteId, Long envId, Long currentUserId) {
+        return startRun(suiteId, envId, currentUserId, null);
+    }
+
+    /**
+     * 触发一次执行:校验 → 建 running 主记录 → 异步执行 → 返回 run(含 runId)。
+     * requirementId 非空表示需求级批量集成触发,run 挂到该需求,供聚合看板与失败打回按需求反查。
+     */
+    public IntegrationRun startRun(Long suiteId, Long envId, Long currentUserId, Long requirementId) {
         IntegrationSuite suite = integrationSuiteService.findById(suiteId);
         if (suite == null || "1".equals(suite.getDeleteFlag())) {
             throw new IllegalArgumentException("测试用例集不存在: " + suiteId);
@@ -58,6 +66,7 @@ public class IntegrationRunService {
         run.setProjectId(suite.getProjectId());
         run.setSuiteId(suiteId);
         run.setEnvId(envId);
+        run.setRequirementId(requirementId);
         run.setStatus("running");
         run.setBranch(suite.getBranch());
         run.setTotal(0);
@@ -95,6 +104,39 @@ public class IntegrationRunService {
         LambdaQueryWrapper<IntegrationRun> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(IntegrationRun::getSuiteId, suiteId)
                .eq(IntegrationRun::getDeleteFlag, "0")
+               .orderByDesc(IntegrationRun::getCreateTime);
+        return integrationRunMapper.selectList(wrapper);
+    }
+
+    /**
+     * 待打回处理的执行:挂需求、已终态失败(failed/error/timeout)、尚未被打回引擎处理过。
+     * kickbackAt 为空是幂等闸门,保证每次失败只驱动一次重工/建一次缺陷。最新在前。
+     */
+    public List<IntegrationRun> listPendingKickback() {
+        LambdaQueryWrapper<IntegrationRun> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(IntegrationRun::getDeleteFlag, "0")
+               .isNotNull(IntegrationRun::getRequirementId)
+               .isNull(IntegrationRun::getKickbackAt)
+               .in(IntegrationRun::getStatus, "failed", "error", "timeout")
+               .orderByDesc(IntegrationRun::getCreateTime);
+        return integrationRunMapper.selectList(wrapper);
+    }
+
+    /** 标记一次失败执行已被打回引擎处理(写 kickbackAt + 最终归因环节),闭合幂等闸门。 */
+    public void markKickbackHandled(Long runId, String kickbackTo) {
+        IntegrationRun update = new IntegrationRun();
+        update.setRunId(runId);
+        update.setKickbackTo(kickbackTo);
+        update.setKickbackAt(new Date());
+        integrationRunMapper.updateById(update);
+    }
+
+    /** 某项目下所有挂了需求维度的执行,最新在前;聚合看板一次取尽后按需求分组,避免逐需求查询。 */
+    public List<IntegrationRun> listWithRequirementByProject(Long projectId) {
+        LambdaQueryWrapper<IntegrationRun> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(IntegrationRun::getProjectId, projectId)
+               .eq(IntegrationRun::getDeleteFlag, "0")
+               .isNotNull(IntegrationRun::getRequirementId)
                .orderByDesc(IntegrationRun::getCreateTime);
         return integrationRunMapper.selectList(wrapper);
     }
