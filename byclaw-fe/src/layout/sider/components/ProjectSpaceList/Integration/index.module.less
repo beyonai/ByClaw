@@ -252,6 +252,94 @@
   white-space: nowrap;
 }
 
+// 看板顶部统计概览条:核心指标前置,响应式自适应换行。对标对比分析型仪表盘的 stat-card 行。
+.reqStatsStrip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.reqStatCard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid #e5eaf2;
+  background: #fff;
+}
+
+.reqStatIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  font-size: 17px;
+  background: #eef2f8;
+  color: #7c8798;
+}
+
+.reqStatBody {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.reqStatValue {
+  color: #1f2633;
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.reqStatLabel {
+  color: #7c8798;
+  font-size: 12px;
+}
+
+// 语义色只染图标底片,卡片壳保持统一,避免整条五彩斑斓。
+.reqStatCard_attention .reqStatIcon {
+  background: #fff1f0;
+  color: #ff4d4f;
+}
+
+.reqStatCard_running .reqStatIcon {
+  background: #e6f0ff;
+  color: #1677ff;
+}
+
+.reqStatCard_passed .reqStatIcon {
+  background: #f6ffed;
+  color: #52c41a;
+}
+
+.reqStatCard_total .reqStatIcon {
+  background: #eef2f8;
+  color: #5a6b85;
+}
+
+.reqStatCard_rate {
+  gap: 12px;
+}
+
+.reqStatRateNum {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1f2633;
+}
+
+.reqIntegrationEmpty {
+  margin: 12px 0;
+  padding: 20px 0;
+  border: 1px dashed #dbe2ec;
+  border-radius: 10px;
+  background: #fafbfd;
+}
+
 // 对标 Vibe Kanban/Nimbalyst 的状态泳道:分组标题 + 计数 + 组内卡片列表。
 .reqIntegrationGroup {
   display: flex;
@@ -319,10 +407,65 @@
 }
 
 .reqIntegrationCard {
-  padding: 12px;
+  position: relative;
+  padding: 12px 12px 12px 15px;
   border-radius: 10px;
   border: 1px solid #e5eaf2;
   background: #fff;
+  overflow: hidden;
+  transition:
+    box-shadow 0.2s ease,
+    border-color 0.2s ease,
+    transform 0.2s ease;
+}
+
+// 左侧 3px 语义强调条:泳道里一眼扫出该卡状态,不必逐张读右上角 Tag。
+.reqIntegrationCard::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: #d4dae4;
+}
+
+.reqIntegrationCard:hover {
+  border-color: #cdd8e8;
+  box-shadow: 0 4px 14px rgba(31, 54, 86, 0.08);
+  transform: translateY(-1px);
+}
+
+.reqIntegrationCard_failed::before {
+  background: #ff4d4f;
+}
+
+.reqIntegrationCard_passed::before {
+  background: #52c41a;
+}
+
+.reqIntegrationCard_running::before {
+  background: #1677ff;
+}
+
+.reqIntegrationCard_ready::before {
+  background: #69a5ff;
+}
+
+.reqIntegrationCard_waiting::before {
+  background: #d4dae4;
+}
+
+// 就绪度进度条行:细条占主宽 + 右侧精确计数。
+.reqIntegrationProgress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+
+  :global(.@{antPrefix}-progress) {
+    flex: 1;
+    margin: 0;
+    line-height: 1;
+  }
 }
 
 .reqIntegrationHead {
@@ -383,8 +526,8 @@
   color: #8794a8;
 }
 
-.reqIntegrationTaskDot {
-  font-weight: 600;
+.reqIntegrationTaskIcon {
+  font-size: 11px;
 }
 
 .reqIntegrationTaskBranch {
@@ -402,8 +545,12 @@
 }
 
 .reqIntegrationReady {
-  color: #246bfe;
+  flex-shrink: 0;
+  color: #5a6b85;
+  font-size: 12px;
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .reqIntegrationKickback {
@@ -415,9 +562,22 @@
 }
 
 .reqIntegrationKickbackItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   color: #cf1322;
   font-size: 12px;
   line-height: 18px;
+
+  & + & {
+    margin-top: 4px;
+  }
+}
+
+.reqIntegrationKickbackIcon {
+  margin-top: 2px;
+  flex-shrink: 0;
+  font-size: 12px;
 }
 
 .reqIntegrationActions {

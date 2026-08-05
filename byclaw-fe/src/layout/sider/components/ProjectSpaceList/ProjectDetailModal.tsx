@@ -3015,7 +3015,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setManualRequirementOpen(true);
   };
 
-  // 聊天录入:开一个绑定当前项目的新会话,用户边聊边贴图沉淀需求,聊完再回需求 tab 定稿。
+  // 聊天录入:仅在右侧开一个绑定当前项目的新会话,左侧项目详情面板保持不变,便于聊完回需求列表定稿。
   // 与侧栏 handleNewChat 一致——项目归属只靠 navigate state 传递,首轮发送时 useChat 会据此 emit
   // projectSpace-session-pending 完成绑定;新会话此刻无 sessionId,不能走 -session-context(会被空 id 拦掉)。
   const openChatRequirementEntry = () => {
@@ -3023,8 +3023,17 @@ const ProjectDetailPanel: React.FC<Props> = ({
       message.warning(t('message.selectProjectFirst'));
       return;
     }
+    // 不再卸载左侧详情面板(去掉 onBack),但渠道配置/账号管理是覆盖右侧主会话区的大页面,
+    // 且 /chat 通常已是当前路由,pathname 不变不会触发布局层自动 clearDetailPanel;
+    // 这里必须显式关掉覆盖层,否则新会话会被残留的覆盖页盖住。
+    if (channelPanelOpen) {
+      setChannelPanelOpen(false);
+      clearDetailPanel?.();
+    }
+    if (operationAccountPanelOpen) {
+      handleCloseOperationAccountPanel();
+    }
     setSessionId?.('');
-    onBack();
     navigate('/chat', {
       state: {
         keepSiderActiveKey: 'sessions',
@@ -3033,6 +3042,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
         projectName: project?.projectName,
       },
     });
+    // 轻提示引导用户怎么聊出需求,并指向回答下方的“沉淀为需求”闭环。
+    message.info(t('requirement.addMenu.chatTip'));
   };
 
   const requirementAddMenuItems: MenuProps['items'] = [

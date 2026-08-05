@@ -9,6 +9,7 @@ import {
   InputNumber,
   List,
   Modal,
+  Progress,
   Radio,
   Select,
   Switch,
@@ -19,10 +20,13 @@ import {
   message,
 } from 'antd';
 import {
+  CheckCircleFilled,
   ClockCircleOutlined,
+  CloseCircleFilled,
   CloseOutlined,
   DeleteOutlined,
   EditOutlined,
+  ExclamationCircleFilled,
   EyeOutlined,
   FileTextOutlined,
   FundProjectionScreenOutlined,
@@ -31,6 +35,7 @@ import {
   PlusOutlined,
   RightOutlined,
   RobotOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
@@ -594,6 +599,27 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
     ? `明日 ${testerConfig.schedule.cronLabel.replace(/^每日\s*/, '')}`
     : t('tester.manualTrigger');
 
+  // 看板顶部统计概览:一眼看清「多少需求、几个要处理、在跑、已通过、总体通过率」,对标对比分析型仪表盘。
+  // 通过率按所有已跑轮次的 passRate("15/18") 聚合,未跑的需求不计入分母,避免把待就绪需求算成 0%。
+  const reqIntegrationStats = (() => {
+    const list = requirementIntegrationList;
+    let passedCases = 0;
+    let totalCases = 0;
+    list.forEach((req) => {
+      if (!req.passRate) return;
+      const [p, tot] = req.passRate.split('/').map((n) => Number(n) || 0);
+      passedCases += p;
+      totalCases += tot;
+    });
+    return {
+      total: list.length,
+      attention: list.filter((r) => r.status === 'failed').length,
+      running: list.filter((r) => r.status === 'running' || r.status === 'ready' || r.status === 'waiting_ready').length,
+      passed: list.filter((r) => r.status === 'passed').length,
+      passRate: totalCases > 0 ? Math.round((passedCases / totalCases) * 100) : null,
+    };
+  })();
+
   // 当前绑定的独立测试员工名:优先从员工选项按 id 命中,退全局解析出的测试默认员工名。
   // 执行员工 = 项目生效的全局测试默认员工;此处只读,改绑定去「默认数字员工」。
   const boundTesterName = resolvedTesterName;
@@ -658,12 +684,26 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
     }
   };
 
+  // 需求状态 → 卡片左侧强调条的语义类:失败红 / 通过绿 / 集成中蓝 / 就绪待跑蓝浅 / 待就绪灰。
+  // 状态色不再只靠右上角 Tag,左边框让泳道里一眼扫出「哪张要处理」。
+  const reqCardAccentClass = (status: RequirementIntegrationStatus) => {
+    if (status === 'failed') return styles.reqIntegrationCard_failed;
+    if (status === 'passed') return styles.reqIntegrationCard_passed;
+    if (status === 'running') return styles.reqIntegrationCard_running;
+    if (status === 'ready') return styles.reqIntegrationCard_ready;
+    return styles.reqIntegrationCard_waiting;
+  };
+
   const renderReqIntegrationCard = (req: RequirementIntegration) => {
     const statusMeta = reqIntegrationStatusMeta[req.status];
     const codedCount = req.tasks.filter((task) => task.coded).length;
     const isReady = req.status !== 'waiting_ready';
+    // 就绪度按已编码任务占比驱动进度条;满编码=绿(可跑),否则蓝(还差)。集成中单独走 active 态。
+    const codedPct = req.tasks.length ? Math.round((codedCount / req.tasks.length) * 100) : 0;
+    const progressStatus: 'success' | 'active' | 'normal' =
+      req.status === 'running' ? 'active' : codedPct >= 100 ? 'success' : 'normal';
     return (
-      <div className={styles.reqIntegrationCard} key={req.reqId}>
+      <div className={`${styles.reqIntegrationCard} ${reqCardAccentClass(req.status)}`} key={req.reqId}>
         <div className={styles.reqIntegrationHead}>
           <div className={styles.reqIntegrationTitle}>
             <span className={styles.reqIntegrationNo}>{req.reqNo}</span>
@@ -672,7 +712,21 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
           <Tag color={statusMeta.color}>{t(statusMeta.labelId)}</Tag>
         </div>
 
-        {/* 需求→多任务→多仓库:每个任务一枚芯片,标出仓库/分支与是否已 coded(就绪判定的最小条件)。 */}
+        {/* 就绪度进度条:替代原本纯文字「就绪 3/5」,配比一眼可读;右侧保留精确计数。 */}
+        <div className={styles.reqIntegrationProgress}>
+          <Progress
+            percent={codedPct}
+            status={progressStatus}
+            showInfo={false}
+            size="small"
+            strokeColor={req.status === 'running' ? '#1677ff' : undefined}
+          />
+          <span className={styles.reqIntegrationReady}>
+            {t('reqIntegration.readyOf', { coded: codedCount, total: req.tasks.length })}
+          </span>
+        </div>
+
+        {/* 需求→多任务→多仓库:每个任务一枚芯片,SVG 图标标出是否已 coded(就绪判定的最小条件)。 */}
         <div className={styles.reqIntegrationTasks}>
           {req.tasks.map((task) => (
             <span
@@ -681,7 +735,11 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
                 task.coded ? styles.reqIntegrationTaskChipReady : styles.reqIntegrationTaskChipPending
               }`}
             >
-              <span className={styles.reqIntegrationTaskDot}>{task.coded ? '✓' : '…'}</span>
+              {task.coded ? (
+                <CheckCircleFilled className={styles.reqIntegrationTaskIcon} />
+              ) : (
+                <ClockCircleOutlined className={styles.reqIntegrationTaskIcon} />
+              )}
               {task.repo}
               <span className={styles.reqIntegrationTaskBranch}>{task.branch}</span>
             </span>
@@ -689,9 +747,6 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
         </div>
 
         <div className={styles.reqIntegrationMeta}>
-          <span className={styles.reqIntegrationReady}>
-            {t('reqIntegration.readyOf', { coded: codedCount, total: req.tasks.length })}
-          </span>
           {isReady && req.passRate ? (
             <span className={parentStyles.detailSourceTime}>
               {t('reqIntegration.lastRun', { rate: req.passRate, time: req.lastRunAt })}
@@ -707,8 +762,11 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
           <div className={styles.reqIntegrationKickback}>
             {req.kickbackTasks.map((kb, idx) => (
               <div key={idx} className={styles.reqIntegrationKickbackItem}>
-                {t('reqIntegration.kickback', { repo: kb.repo, branch: kb.branch })}
-                {kb.reason ? ` · ${kb.reason}` : ''}
+                <CloseCircleFilled className={styles.reqIntegrationKickbackIcon} />
+                <span>
+                  {t('reqIntegration.kickback', { repo: kb.repo, branch: kb.branch })}
+                  {kb.reason ? ` · ${kb.reason}` : ''}
+                </span>
               </div>
             ))}
           </div>
@@ -979,13 +1037,84 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
   );
 
   // 运行记录页签:需求级集成看板 + 历次运行日志。右侧覆盖层宽度充足,承载原本挤在左栏的两块内容。
+  // 看板顶部统计概览条:总数/需处理/进行中/已通过 + 总体通过率,对比分析型仪表盘的核心信息前置。
+  const renderReqStatsStrip = () => {
+    const s = reqIntegrationStats;
+    if (!s.total) return null;
+    const cells: Array<{ key: string; icon: React.ReactNode; label: string; value: React.ReactNode; cls: string }> = [
+      {
+        key: 'total',
+        icon: <FundProjectionScreenOutlined />,
+        label: t('reqIntegration.stats.total'),
+        value: s.total,
+        cls: styles.reqStatCard_total,
+      },
+      {
+        key: 'attention',
+        icon: <ExclamationCircleFilled />,
+        label: t('reqIntegration.stats.attention'),
+        value: s.attention,
+        cls: styles.reqStatCard_attention,
+      },
+      {
+        key: 'running',
+        icon: <SyncOutlined spin={s.running > 0} />,
+        label: t('reqIntegration.stats.running'),
+        value: s.running,
+        cls: styles.reqStatCard_running,
+      },
+      {
+        key: 'passed',
+        icon: <CheckCircleFilled />,
+        label: t('reqIntegration.stats.passed'),
+        value: s.passed,
+        cls: styles.reqStatCard_passed,
+      },
+    ];
+    return (
+      <div className={styles.reqStatsStrip}>
+        {cells.map((c) => (
+          <div key={c.key} className={`${styles.reqStatCard} ${c.cls}`}>
+            <span className={styles.reqStatIcon}>{c.icon}</span>
+            <div className={styles.reqStatBody}>
+              <span className={styles.reqStatValue}>{c.value}</span>
+              <span className={styles.reqStatLabel}>{c.label}</span>
+            </div>
+          </div>
+        ))}
+        {s.passRate !== null ? (
+          <div className={`${styles.reqStatCard} ${styles.reqStatCard_rate}`}>
+            <Progress
+              type="circle"
+              size={40}
+              percent={s.passRate}
+              strokeColor={s.passRate >= 80 ? '#52c41a' : s.passRate >= 50 ? '#faad14' : '#ff4d4f'}
+              format={(p) => <span className={styles.reqStatRateNum}>{p}%</span>}
+            />
+            <div className={styles.reqStatBody}>
+              <span className={styles.reqStatLabel}>{t('reqIntegration.stats.passRate')}</span>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   const renderIntegrationBoard = () => (
     <div className={styles.integrationPanel}>
       {/* V2:需求级集成视图。集成挂在需求(而非单任务),展示需求下多仓库任务的就绪度、上次结果与失败分发。 */}
       <div className={styles.integrationSection}>
         <div className={styles.integrationSectionHeader}>
           <span className={styles.integrationSectionTitle}>{t('reqIntegration.title')}</span>
+          <span className={styles.integrationNextRun}>
+            <ClockCircleOutlined /> {t('reqIntegration.nextRun', { time: integrationNextRunAt })}
+          </span>
         </div>
+        {renderReqStatsStrip()}
+        {/* 空态:引导而非空白。无需求集成数据时给出说明,避免只剩标题的空面板。 */}
+        {reqIntegrationGroups.length === 0 ? (
+          <Empty className={styles.reqIntegrationEmpty} description={t('reqIntegration.empty')} />
+        ) : null}
         {/* 对标 Vibe Kanban/Nimbalyst:按状态分泳道,「需要处理」置顶,便于一眼看出该处理谁。 */}
         {reqIntegrationGroups.map((group) => (
           <div className={styles.reqIntegrationGroup} key={group.key}>
@@ -997,7 +1126,9 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
             <div className={styles.reqIntegrationList}>{group.items.map(renderReqIntegrationCard)}</div>
           </div>
         ))}
-        <div className={styles.integrationFlowKickback}>{t('reqIntegration.kickbackHint')}</div>
+        {reqIntegrationGroups.length > 0 ? (
+          <div className={styles.integrationFlowKickback}>{t('reqIntegration.kickbackHint')}</div>
+        ) : null}
       </div>
 
       <div className={styles.integrationSection}>

@@ -1917,6 +1917,12 @@ export default {
   'projectSpace.detail.reqIntegration.status.failed': '集成失败',
   'projectSpace.detail.reqIntegration.status.passed': '集成通过',
   'projectSpace.detail.reqIntegration.readyOf': '就绪 {coded}/{total} 个任务',
+  'projectSpace.detail.reqIntegration.stats.total': '需求总数',
+  'projectSpace.detail.reqIntegration.stats.attention': '需处理',
+  'projectSpace.detail.reqIntegration.stats.running': '进行中',
+  'projectSpace.detail.reqIntegration.stats.passed': '已通过',
+  'projectSpace.detail.reqIntegration.stats.passRate': '总体通过率',
+  'projectSpace.detail.reqIntegration.empty': '暂无需求级集成,待有需求就绪后自动纳入本视图',
   'projectSpace.detail.reqIntegration.round': '第 {round} 轮',
   'projectSpace.detail.reqIntegration.lastRun': '上次 {rate} · {time}',
   'projectSpace.detail.reqIntegration.waitingHint': '仍有子任务未完成编码,本轮定时跳过',
@@ -2441,6 +2447,8 @@ export default {
   'projectSpace.detail.requirement.addMenu.chat': '聊天录入',
   'projectSpace.detail.requirement.addMenu.manualDesc': '填写表单，支持 Markdown 与图片附件',
   'projectSpace.detail.requirement.addMenu.chatDesc': '进入项目会话，聊完沉淀为需求',
+  // 聊天录入进入新会话后的引导:告诉用户直接聊需求,聊清楚后在回答下方沉淀为需求。
+  'projectSpace.detail.requirement.addMenu.chatTip': '直接把想法聊给我，聊清楚后在回答下方点「沉淀为需求」即可入库',
   // Markdown 编辑器
   'markdownField.insertImage': '插入图片',
   'markdownField.insertFile': '插入附件',
