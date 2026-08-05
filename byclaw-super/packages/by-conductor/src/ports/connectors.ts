@@ -27,6 +27,8 @@ export interface ConnectorRequest {
    * 声明会话工作区，缺失（HTTP 入站）则不附加任何提示。
    */
   externalSessionId?: string;
+  /** by-framework 父消息 ID；Connector 应透传以建立外部执行的级联取消关系。 */
+  parentMessageId?: string;
   metadata: Record<string, unknown>;
 }
 

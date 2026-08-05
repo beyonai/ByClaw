@@ -81,17 +81,23 @@ function makeIngress(
 }
 
 describe("RunIngressService self-exclusion", () => {
-  it("persists the by-framework sessionId in the Run ingress context", async () => {
+  it("persists by-framework session and parent message IDs in the Run", async () => {
     const { ingress, runService } = makeIngress([], "creator");
 
     await ingress.createSessionRun({
       beyondToken: PRINCIPAL_TOKEN,
       message: "hi",
       externalSessionId: "11034160",
+      parentMessageId: "gateway-message-1",
     });
 
     expect(runService.createSessionRun.mock.calls[0][0].ingressContext).toEqual({
       externalSessionId: "11034160",
+      parentMessageId: "gateway-message-1",
+    });
+    expect(runService.createSessionRun.mock.calls[0][0].metadata).toMatchObject({
+      externalSessionId: "11034160",
+      parentMessageId: "gateway-message-1",
     });
   });
 

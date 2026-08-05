@@ -54,6 +54,147 @@ describe("ConnectorRegistry", () => {
 });
 
 describe("DelegationService", () => {
+  it("does not dispatch a connector after its signal was already aborted", async () => {
+    const start = vi.fn();
+    const registry = new ConnectorRegistry();
+    registry.register({
+      ...fakeConnector(async function* () {}),
+      start,
+    });
+    const delegations = new InMemoryDelegationRepository();
+    const service = new DelegationService(
+      registry,
+      delegations,
+      new InMemoryRunEventStore(),
+      1_000,
+    );
+    const controller = new AbortController();
+    controller.abort(new Error("user cancelled"));
+
+    await expect(
+      service.execute({
+        session: {
+          id: "session-1",
+          owner: { userCode: "user-1" },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        runId: "run-pre-cancelled",
+        agents: [agent],
+        agentId: agent.id,
+        task: "must not start",
+        metadata: {},
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("user cancelled");
+
+    expect(start).not.toHaveBeenCalled();
+    expect(await delegations.listByRun("run-pre-cancelled")).toEqual([]);
+  });
+
+  it("does not dispatch a connector when cancellation races with delegation lookup", async () => {
+    const controller = new AbortController();
+    const start = vi.fn();
+    const registry = new ConnectorRegistry();
+    registry.register({
+      ...fakeConnector(async function* () {}),
+      start,
+    });
+    class CancellingDelegationRepository extends InMemoryDelegationRepository {
+      override async listByRun(runId: string) {
+        controller.abort(new Error("cancelled during lookup"));
+        return super.listByRun(runId);
+      }
+    }
+    const delegations = new CancellingDelegationRepository();
+    const service = new DelegationService(
+      registry,
+      delegations,
+      new InMemoryRunEventStore(),
+      1_000,
+      Date.now,
+      () => "delegation-race",
+    );
+
+    await expect(
+      service.execute({
+        session: {
+          id: "session-1",
+          owner: { userCode: "user-1" },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        runId: "run-cancelled-during-lookup",
+        agents: [agent],
+        agentId: agent.id,
+        task: "must not start",
+        metadata: {},
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("cancelled during lookup");
+
+    expect(start).not.toHaveBeenCalled();
+    expect(await delegations.get("delegation-race")).toBeUndefined();
+  });
+
+  it("cancels an external execution when the Run stops during connector start", async () => {
+    let resolveStartEntered!: () => void;
+    const startEntered = new Promise<void>((resolve) => {
+      resolveStartEntered = resolve;
+    });
+    let releaseStart!: () => void;
+    const startRelease = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    const cancel = vi.fn(async () => undefined);
+    const registry = new ConnectorRegistry();
+    registry.register({
+      ...fakeConnector(async function* () {}),
+      async start() {
+        resolveStartEntered();
+        await startRelease;
+        return {
+          ref: { connectorId: "fake", executionId: "external-start-race" },
+          events: (async function* (): AsyncIterable<ConnectorEvent> {})(),
+          cancel,
+        };
+      },
+    });
+    const delegations = new InMemoryDelegationRepository();
+    const service = new DelegationService(
+      registry,
+      delegations,
+      new InMemoryRunEventStore(),
+      1_000,
+    );
+    const controller = new AbortController();
+    const execution = service.execute({
+      session: {
+        id: "session-1",
+        owner: { userCode: "user-1" },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      runId: "run-cancelled-during-start",
+      agents: [agent],
+      agentId: agent.id,
+      task: "cancel while dispatching",
+      metadata: {},
+      signal: controller.signal,
+    });
+    await startEntered;
+
+    controller.abort(new Error("user cancelled during connector start"));
+    releaseStart();
+    const result = await execution;
+
+    expect(result.status).toBe("cancelled");
+    expect(cancel).toHaveBeenCalledWith("run cancelled");
+    expect(
+      (await delegations.listByRun("run-cancelled-during-start"))[0]?.status,
+    ).toBe("CANCELLED");
+  });
+
   it("validates authorization and aggregates normalized output", async () => {
     const registry = new ConnectorRegistry();
     const start = vi.fn(async () => ({
@@ -1292,6 +1433,99 @@ describe("RunService", () => {
 
     expect(cancelled?.status).toBe("CANCELLED");
     expect(leaderFactory.aborted).toBe(1);
+    await service.dispose();
+  });
+
+  it("propagates Run cancellation when a delegation supplies its own signal", async () => {
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const registry = new ConnectorRegistry();
+    let resolveConnectorStarted!: () => void;
+    const connectorStarted = new Promise<void>((resolve) => {
+      resolveConnectorStarted = resolve;
+    });
+    let connectorSignal: AbortSignal | undefined;
+    let connectorParentMessageId: string | undefined;
+    registry.register({
+      ...fakeConnector(async function* () {}),
+      async start(request, context) {
+        connectorSignal = context.signal;
+        connectorParentMessageId = request.parentMessageId;
+        resolveConnectorStarted();
+        return {
+          ref: { connectorId: "fake", executionId: "external-own-signal" },
+          events: (async function* (): AsyncIterable<ConnectorEvent> {
+            await new Promise<void>((resolve) => {
+              if (context.signal.aborted) {
+                resolve();
+                return;
+              }
+              context.signal.addEventListener("abort", () => resolve(), {
+                once: true,
+              });
+            });
+            throw context.signal.reason;
+          })(),
+          cancel: vi.fn(async () => undefined),
+        };
+      },
+    });
+    const delegationService = new DelegationService(
+      registry,
+      delegations,
+      events,
+      1_000,
+    );
+    const leaders: LeaderSessionFactory = {
+      async create() {
+        return {
+          contextRevision: 0,
+          run: async (input) => {
+            const toolController = new AbortController();
+            const result = await input.delegate({
+              agentId: agent.id,
+              task: "wait for cancellation",
+              signal: toolController.signal,
+            });
+            return { text: result.output || result.status };
+          },
+          abort: async () => undefined,
+          checkpoint: () => undefined,
+          markCommitted: () => undefined,
+          dispose: () => undefined,
+        };
+      },
+      async health() {
+        return { healthy: true };
+      },
+    };
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      delegationService,
+      leaders,
+    );
+    const session = await service.createSession({
+      owner: { userCode: "user" },
+    });
+    const run = await service.createRun({
+      sessionId: session.id,
+      message: "delegate and cancel",
+      agentList: [agent],
+      ingressContext: { parentMessageId: "gateway-parent-message" },
+    });
+    await connectorStarted;
+
+    const cancelled = await service.cancelRun(run.id);
+
+    expect(cancelled?.status).toBe("CANCELLED");
+    expect(connectorSignal).toBeDefined();
+    expect(connectorSignal!.aborted).toBe(true);
+    expect(connectorParentMessageId).toBe("gateway-parent-message");
     await service.dispose();
   });
 

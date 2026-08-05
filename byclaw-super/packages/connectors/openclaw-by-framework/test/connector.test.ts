@@ -53,7 +53,9 @@ describe("OpenClawByFrameworkConnector", () => {
       sourceAgentType: "CUSTOM_MAESTRO",
     });
 
-    const execution = await connector.start(request(), { signal: new AbortController().signal });
+    const req = request();
+    req.parentMessageId = "parent-message-1";
+    const execution = await connector.start(req, { signal: new AbortController().signal });
     const events = [];
     for await (const event of execution.events) {
       events.push(event);
@@ -64,6 +66,7 @@ describe("OpenClawByFrameworkConnector", () => {
         sourceAgentType: "CUSTOM_MAESTRO",
         targetAgentType: "BYCLAW_EXE_user-1",
         sessionId: "maestro:user-1:session-1:run-1:delegation-1",
+        parentMessageId: "parent-message-1",
         requireOnlineWorker: true,
         extraPayload: {
           agent_id: "1001",

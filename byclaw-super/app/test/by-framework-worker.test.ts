@@ -36,6 +36,7 @@ describe("ByClawSuperGatewayWorker", () => {
       message: "请分析数据",
       thinkingLevel: "off",
       externalSessionId: "session-1",
+      parentMessageId: "message-1",
       beyondToken: "secret-token",
       systemCode: "system-1",
     });
@@ -518,6 +519,7 @@ describe("ByClawSuperGatewayWorker", () => {
       message: "请分析数据",
       thinkingLevel: "off",
       externalSessionId: "session-1",
+      parentMessageId: "message-1",
       beyondToken: "secret-token",
       systemCode: "system-1",
     });
@@ -526,6 +528,7 @@ describe("ByClawSuperGatewayWorker", () => {
       message: "请分析数据",
       thinkingLevel: "off",
       externalSessionId: "session-1",
+      parentMessageId: "message-1",
       beyondToken: "secret-token",
       systemCode: "system-1",
     });
@@ -559,6 +562,7 @@ describe("ByClawSuperGatewayWorker", () => {
       message: "请分析数据",
       thinkingLevel: "off",
       externalSessionId: "session-1",
+      parentMessageId: "message-1",
       beyondToken: "a-token",
       systemCode: "system-1",
     });
@@ -618,6 +622,44 @@ describe("ByClawSuperGatewayWorker", () => {
     await processing;
 
     expect(cancelRun).toHaveBeenCalledWith("run-1", "caller cancelled");
+  });
+
+  it("cancels the Run when claim-time cancellation only reached the registry", async () => {
+    let releaseEvents: (() => void) | undefined;
+    const waitForRelease = new Promise<void>((resolve) => {
+      releaseEvents = resolve;
+    });
+    const cancelRun = vi.fn(async () => {
+      releaseEvents?.();
+      return run("CANCELLED");
+    });
+    const getExecutionByMessageId = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: "RUNNING",
+        cancel_requested: false,
+      })
+      .mockResolvedValue({
+        // Java SDK 与 Node SDK 可能把布尔值分别写成 true 或 "1"；
+        // 同时模拟 Runner 把状态重新推进到 RUNNING 的 claim/cancel 竞态。
+        status: "RUNNING",
+        cancel_requested: "1",
+        cancel_reason: "cancelled before worker routing",
+      });
+    const worker = createWorker({
+      createSessionRun: vi.fn(async () => run()),
+      cancelRun,
+      streamEvents: () => cancelledEvents(waitForRelease),
+      registry: { getExecutionByMessageId } as WorkerRegistry,
+    });
+
+    const result = await worker.processCommand(askCommand(), contextMock());
+
+    expect(cancelRun).toHaveBeenCalledWith(
+      "run-1",
+      "cancelled before worker routing",
+    );
+    expect(result.status).toBe(AgentState.CANCELLED);
   });
 
   it("rejects AskAgent without Beyond-Token", async () => {
@@ -750,12 +792,17 @@ function createWorker(options: {
   emitEvent?: ReturnType<typeof vi.fn>;
   emitProtocolChunk?: ReturnType<typeof vi.fn>;
   logger?: ReturnType<typeof loggerMock>;
+  registry?: WorkerRegistry;
 }): ByClawSuperGatewayWorker {
   return new ByClawSuperGatewayWorker({
     workerId: "worker-1",
     agentType: "BY_SUPER",
     redis: {} as never,
-    registry: {} as WorkerRegistry,
+    registry:
+      options.registry ??
+      ({
+        getExecutionByMessageId: vi.fn(async () => null),
+      } as unknown as WorkerRegistry),
     runIngress: {
       createSessionRun: options.createSessionRun,
       createRun: options.createRun ?? vi.fn(async () => run()),
