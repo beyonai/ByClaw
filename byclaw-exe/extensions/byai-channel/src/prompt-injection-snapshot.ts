@@ -24,6 +24,7 @@ import {
   formatGroupChatContextForPrompt,
   type GroupChatContextV1,
 } from "./group-chat-context.js";
+import { buildDisabledConnectorPrompt } from "./connector-authorization.js";
 
 export type PromptInjectionSnapshot = {
     appendSystemContext: string;
