@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, DatePicker, Form, Input, Modal, Radio, Select, Switch, message } from 'antd';
+import { Button, DatePicker, Form, Input, InputNumber, Modal, Radio, Select, Switch, message } from 'antd';
 import { useIntl } from '@umijs/max';
 import type {
   OperationAccount,
@@ -84,12 +84,13 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
       taskName: '',
       description: '',
       taskType: 'collect',
-      collectConfig: { mode: 'once', organize: false },
+      collectConfig: { mode: 'once', intervalUnit: 'minute', organize: false },
       contentConfig: {},
       analyzeConfig: { scope: 'account' },
       ...initialValues,
       collectConfig: {
         mode: 'once',
+        intervalUnit: 'minute',
         organize: false,
         ...initialValues?.collectConfig,
       },
@@ -461,14 +462,34 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
             buttonStyle="solid"
             options={[
               { value: 'once', label: t('collect.mode.once') },
+              { value: 'interval', label: t('collect.mode.interval') },
               { value: 'periodic', label: t('collect.mode.periodic') },
             ]}
           />
         </Form.Item>
+        {collectMode === 'interval' && (
+          <>
+            <Form.Item
+              label={t('field.collectInterval')}
+              name={['collectConfig', 'intervalValue']}
+              rules={[{ required: true, message: t('validation.collectIntervalRequired') }]}
+            >
+              <InputNumber min={1} className={styles.operationFullControl} />
+            </Form.Item>
+            <Form.Item label={t('field.collectIntervalUnit')} name={['collectConfig', 'intervalUnit']}>
+              <Select
+                options={[
+                  { value: 'minute', label: t('collect.intervalUnit.minute') },
+                  { value: 'hour', label: t('collect.intervalUnit.hour') },
+                ]}
+              />
+            </Form.Item>
+          </>
+        )}
         {collectMode === 'periodic' && (
           <Form.Item
             label={t('field.collectSchedule')}
-            name={['collectConfig', 'schedule']}
+            name={['collectConfig', 'cronExpr']}
             rules={[{ required: true, whitespace: true, message: t('validation.collectScheduleRequired') }]}
           >
             <Input placeholder={t('placeholder.collectSchedule')} />

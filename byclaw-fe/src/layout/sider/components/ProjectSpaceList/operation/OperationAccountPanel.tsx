@@ -22,6 +22,9 @@ export interface OperationAccountPanelProps {
   loginPreparingAccountId?: OperationIdentifier | null;
   loginConfirming?: boolean;
   deletingAccountId?: OperationIdentifier | null;
+  // 由详情页“新增账号”菜单触发时，账号面板打开后自动显示新增表单。
+  openCreateModal?: boolean;
+  onCreateModalOpened?: () => void;
   onBack?: () => void;
   onAccountClick?: (account: OperationAccount) => void;
   onLogin?: (account: OperationAccount) => void | Promise<void>;
@@ -49,6 +52,8 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   loginPreparingAccountId,
   loginConfirming = false,
   deletingAccountId,
+  openCreateModal = false,
+  onCreateModalOpened,
   onBack,
   onAccountClick,
   onLogin,
@@ -119,6 +124,13 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
     setAccountFormOpen(true);
   }, [canSaveAccount]);
 
+  useEffect(() => {
+    if (!openCreateModal || !canSaveAccount) return;
+    openAddAccountModal();
+    // 通知父容器消费本次请求，避免账号面板后续普通刷新时重复打开新增表单。
+    onCreateModalOpened?.();
+  }, [canSaveAccount, onCreateModalOpened, openAddAccountModal, openCreateModal]);
+
   const openEditAccountModal = useCallback(
     (account: OperationAccount) => {
       if (!canSaveAccount || account.canEdit === false) return;
@@ -164,9 +176,6 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
     },
     [onDeleteAccount, t]
   );
-
-  const renderMetric = (value?: string | number) =>
-    value === undefined || value === null || value === '' ? '-' : value;
 
   return (
     <div className={styles.accountPanel}>
@@ -260,26 +269,8 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
                     <Tag color={ACCOUNT_STATUS_COLOR[status]}>{t(`status.${status}`)}</Tag>
                   </div>
                   <div className={styles.accountPlatformName}>{platformLabel}</div>
-                  <div className={styles.accountMetricGrid}>
-                    <div>
-                      <strong>{renderMetric(account.metrics?.followers)}</strong>
-                      <span>{t('metric.followers')}</span>
-                    </div>
-                    <div>
-                      <strong>{renderMetric(account.metrics?.works)}</strong>
-                      <span>{t('metric.works')}</span>
-                    </div>
-                    <div>
-                      <strong>{renderMetric(account.metrics?.views)}</strong>
-                      <span>{t('metric.views')}</span>
-                    </div>
-                    <div>
-                      <strong>{renderMetric(account.metrics?.followerGrowth)}</strong>
-                      <span>{t('metric.growth')}</span>
-                    </div>
-                  </div>
+                  {/* 当前版本暂不展示账号指标和近 30 天统计，仅保留账号操作按钮。 */}
                   <div className={styles.accountCardFooter}>
-                    <span>{t('recentData')}</span>
                     <div className={styles.accountCardActions}>
                       {onLogin && canLogin && (
                         <Button

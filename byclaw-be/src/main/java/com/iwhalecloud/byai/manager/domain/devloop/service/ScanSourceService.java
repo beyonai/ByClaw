@@ -10,8 +10,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.Date;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * 扫描源领域服务
@@ -20,6 +22,9 @@ import java.util.Locale;
 @Slf4j
 @Service
 public class ScanSourceService {
+
+    /** 运营需求类型直接复用 source_type，不再增加额外记录类型字段。 */
+    public static final Set<String> OPERATION_SOURCE_TYPES = Set.of("collect", "publish", "analyze");
 
     @Autowired
     private ScanSourceMapper scanSourceMapper;
@@ -71,12 +76,19 @@ public class ScanSourceService {
     /** 分页查询项目渠道，搜索只匹配渠道名称并排除手工需求使用的内部来源。 */
     public Page<ScanSource> listByProjectIdPage(Long projectId, String keyword, String excludedSourceType, int pageNum,
         int pageSize) {
+        return listByProjectIdPage(projectId, keyword,
+            excludedSourceType == null ? Set.of() : Set.of(excludedSourceType), pageNum, pageSize);
+    }
+
+    /** 分页查询渠道，并排除手工来源及运营需求来源，避免共享 source 表后跨模块串数据。 */
+    public Page<ScanSource> listByProjectIdPage(Long projectId, String keyword, Collection<String> excludedSourceTypes,
+        int pageNum, int pageSize) {
         LambdaQueryWrapper<ScanSource> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ScanSource::getProjectId, projectId).eq(ScanSource::getDeleteFlag, "0");
-        if (excludedSourceType != null) {
-            // 保留历史空类型渠道，仅排除手工需求创建的明确内部来源。
+        if (excludedSourceTypes != null && !excludedSourceTypes.isEmpty()) {
+            // 保留历史空类型渠道，仅排除明确的内部来源和运营需求来源。
             wrapper.and(query -> query.isNull(ScanSource::getSourceType).or()
-                .ne(ScanSource::getSourceType, excludedSourceType));
+                .notIn(ScanSource::getSourceType, excludedSourceTypes));
         }
         String normalizedKeyword = org.apache.commons.lang3.StringUtils.trimToNull(keyword);
         if (normalizedKeyword != null) {
@@ -84,6 +96,21 @@ public class ScanSourceService {
             wrapper.apply("LOWER(source_name) LIKE {0}", "%" + normalizedKeyword.toLowerCase(Locale.ROOT) + "%");
         }
         wrapper.orderByDesc(ScanSource::getCreateTime);
+        return scanSourceMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
+    }
+
+    /** 分页查询项目下的运营需求，需求记录和研发扫描渠道共用 source_id。 */
+    public Page<ScanSource> pageOperationRequirements(Long projectId, String keyword, int pageNum, int pageSize) {
+        LambdaQueryWrapper<ScanSource> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ScanSource::getProjectId, projectId)
+            .eq(ScanSource::getDeleteFlag, "0")
+            .in(ScanSource::getSourceType, OPERATION_SOURCE_TYPES);
+        String normalizedKeyword = org.apache.commons.lang3.StringUtils.trimToNull(keyword);
+        if (normalizedKeyword != null) {
+            // PostgreSQL 的 LIKE 区分大小写，运营需求搜索统一使用小写比较。
+            wrapper.apply("LOWER(source_name) LIKE {0}", "%" + normalizedKeyword.toLowerCase(Locale.ROOT) + "%");
+        }
+        wrapper.orderByDesc(ScanSource::getCreateTime).orderByDesc(ScanSource::getSourceId);
         return scanSourceMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
     }
 

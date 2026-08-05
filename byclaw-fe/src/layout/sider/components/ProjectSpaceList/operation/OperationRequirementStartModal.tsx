@@ -146,7 +146,7 @@ const OperationRequirementStartModal: React.FC<OperationRequirementStartModalPro
                             name={[field.name, 'title']}
                             rules={[{ required: true, whitespace: true, message: t('validation.titleRequired') }]}
                           >
-                            <Input maxLength={500} showCount />
+                            <Input maxLength={255} showCount />
                           </Form.Item>
                           <Form.Item
                             className={styles.operationFormFull}

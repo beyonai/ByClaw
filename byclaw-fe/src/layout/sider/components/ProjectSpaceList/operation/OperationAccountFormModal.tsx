@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Form, Input, Modal, Select, message } from 'antd';
+import { Form, Input, Modal, Radio, message } from 'antd';
 import { useIntl } from '@umijs/max';
 import type { OperationAccount, OperationAccountFormValues, OperationPlatformOption } from './types';
 import styles from './index.module.less';
@@ -104,13 +104,20 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
       <Form<OperationAccountFormValues> form={form} layout="vertical">
         <div className={styles.operationFormGrid}>
           <Form.Item
+            className={styles.operationFormFull}
             label={t('field.platform')}
             name="platformId"
             rules={[{ required: true, message: t('validation.platformRequired') }]}
           >
-            <Select options={availablePlatformOptions} placeholder={t('placeholder.platform')} />
+            <Radio.Group
+              className={styles.operationPlatformTabs}
+              optionType="button"
+              buttonStyle="solid"
+              options={availablePlatformOptions}
+            />
           </Form.Item>
           <Form.Item
+            className={styles.operationFormHalf}
             label={t('field.accountName')}
             name="accountName"
             rules={[{ required: true, whitespace: true, message: t('validation.accountNameRequired') }]}
@@ -118,7 +125,7 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
             <Input placeholder={t('placeholder.accountName')} />
           </Form.Item>
           <Form.Item
-            className={styles.operationFormFull}
+            className={styles.operationFormHalf}
             label={t('field.accountId')}
             name="accountId"
             rules={[{ required: true, whitespace: true, message: t('validation.accountIdRequired') }]}

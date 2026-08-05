@@ -270,23 +270,23 @@ export const updateManualRequirement = (data: Omit<ManualRequirementPayload, 'pr
 export const deleteManualRequirement = (itemId: number) =>
   POST<any>('/byaiService/devloop/requirement/delete', { itemId });
 
-// 运营需求独立于研发扫描需求，三类需求的差异化字段统一收敛到 config，避免前端依赖数据库字段命名。
+// 运营需求复用扫描源表，三类需求通过 source_type 区分，差异化字段统一收敛到 config。
 export type OperationRequirementPayload = {
   itemId?: number;
   projectId?: number;
   requirementName: string;
-  description?: string;
+
+  /** 运营需求描述，对应 byai_scan_source.source_description。 */
+  sourceDescription?: string;
   operationType: 'collect' | 'publish' | 'analyze';
   assignee?: string | number;
   dueTime?: string;
-  status?: 'todo' | 'launched' | 'doing' | 'pendingReview' | 'done' | 'cancelled';
-  progress?: number;
   config?: Record<string, any>;
 };
 
 /** 创建运营需求；需求创建与后续执行运营任务分离，避免误走研发任务创建接口。 */
 export const createOperationRequirement = (data: OperationRequirementPayload) =>
-  POST<{ itemId: number }>('/byaiService/devloop/requirement/createOperationRequirement', data);
+  POST<{ itemId: number; sourceId: number }>('/byaiService/devloop/requirement/createOperationRequirement', data);
 
 /** 修改未启动运营需求；项目归属由后端根据 itemId 反查。 */
 export const updateOperationRequirement = (data: Omit<OperationRequirementPayload, 'projectId'> & { itemId: number }) =>
@@ -308,7 +308,7 @@ export const getOperationRequirement = (itemId: number) =>
 export const deleteOperationRequirement = (itemId: number) =>
   POST<void>('/byaiService/devloop/requirement/operation/delete', { itemId });
 
-// 运营需求启动后会拆解为多个独立运营任务，任务与需求分别维护状态和执行会话。
+// 运营需求启动后拆解为会话任务，taskId 与 byai_session.session_id 保持一致。
 export type OperationTaskStartItem = {
   title: string;
   description?: string;

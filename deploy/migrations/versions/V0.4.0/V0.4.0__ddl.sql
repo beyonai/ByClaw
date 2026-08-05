@@ -179,83 +179,32 @@ COMMENT ON COLUMN byai.byai_integration_run_step.finished_at IS '结束时间';
 
 CREATE INDEX IF NOT EXISTS idx_integration_run_step_run ON byai.byai_integration_run_step (run_id, seq);
 
--- 运营需求独立于研发扫描结果表，避免运营状态和任务配置影响钉钉、GitHub 等扫描需求。
-CREATE TABLE IF NOT EXISTS byai.byai_operation_requirement (
-    item_id         BIGINT       NOT NULL,
-    project_id      BIGINT       NOT NULL,
-    title           VARCHAR(500) NOT NULL,
-    description     TEXT,
-    operation_type  VARCHAR(20)  NOT NULL,
-    status          VARCHAR(20)  NOT NULL DEFAULT 'todo',
-    assignee        BIGINT,
-    due_time        TIMESTAMP,
-    progress        INT          NOT NULL DEFAULT 0,
-    config          TEXT,
-    create_by       BIGINT,
-    create_time     TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
-    update_by       BIGINT,
-    update_time     TIMESTAMP,
-    delete_flag     CHAR(1)      DEFAULT '0',
-    CONSTRAINT pk_byai_operation_requirement PRIMARY KEY (item_id)
-);
+-- 运营需求复用扫描源主表，source_type=collect/publish/analyze 时表示运营需求。
+-- 研发渠道仍使用原有类型和字段，新增列均允许为空，不改变钉钉、GitHub 扫描逻辑。
+ALTER TABLE byai.byai_scan_source ALTER COLUMN source_name TYPE VARCHAR(500);
+ALTER TABLE byai.byai_scan_source ADD COLUMN IF NOT EXISTS source_description TEXT;
+ALTER TABLE byai.byai_scan_source ADD COLUMN IF NOT EXISTS assignee BIGINT;
+ALTER TABLE byai.byai_scan_source ADD COLUMN IF NOT EXISTS due_time TIMESTAMP;
 
-COMMENT ON TABLE byai.byai_operation_requirement IS '运营需求表，与研发扫描结果表和历史扫描条目表隔离';
-COMMENT ON COLUMN byai.byai_operation_requirement.item_id IS '运营需求ID';
-COMMENT ON COLUMN byai.byai_operation_requirement.project_id IS '所属运营项目ID';
-COMMENT ON COLUMN byai.byai_operation_requirement.title IS '需求名称';
-COMMENT ON COLUMN byai.byai_operation_requirement.description IS '需求描述';
-COMMENT ON COLUMN byai.byai_operation_requirement.operation_type IS '运营需求类型：collect、publish、analyze';
-COMMENT ON COLUMN byai.byai_operation_requirement.status IS '状态：todo、launched、doing、pendingReview、done、cancelled';
-COMMENT ON COLUMN byai.byai_operation_requirement.assignee IS '负责人用户ID';
-COMMENT ON COLUMN byai.byai_operation_requirement.due_time IS '完成时间';
-COMMENT ON COLUMN byai.byai_operation_requirement.progress IS '任务进度，范围0至100';
-COMMENT ON COLUMN byai.byai_operation_requirement.config IS '运营类型专属配置JSON';
-COMMENT ON COLUMN byai.byai_operation_requirement.delete_flag IS '删除标识：0有效，1删除';
+COMMENT ON COLUMN byai.byai_scan_source.source_name IS '扫描源或运营需求名称，运营需求最长500字';
+COMMENT ON COLUMN byai.byai_scan_source.source_type IS '类型：研发渠道dingtalk/github_issue/dingtalk_todo/manual；运营需求collect/publish/analyze';
+COMMENT ON COLUMN byai.byai_scan_source.source_description IS '运营需求描述，研发扫描源为空';
+COMMENT ON COLUMN byai.byai_scan_source.assignee IS '运营需求负责人用户ID，研发扫描源为空';
+COMMENT ON COLUMN byai.byai_scan_source.due_time IS '运营需求计划完成时间，研发扫描源为空';
+COMMENT ON COLUMN byai.byai_scan_source.cron_expr IS '扫描或运营周期任务Cron表达式；间隔模式按config和last_scan_time判断';
+COMMENT ON COLUMN byai.byai_scan_source.config IS '研发渠道或运营需求类型专属配置JSON';
 
-CREATE INDEX IF NOT EXISTS idx_operation_requirement_project ON byai.byai_operation_requirement (project_id, create_time DESC);
-CREATE INDEX IF NOT EXISTS idx_operation_requirement_assignee ON byai.byai_operation_requirement (project_id, assignee);
-CREATE INDEX IF NOT EXISTS idx_operation_requirement_due_time ON byai.byai_operation_requirement (project_id, due_time);
+CREATE INDEX IF NOT EXISTS idx_scan_source_operation_project
+    ON byai.byai_scan_source (project_id, source_type, create_time DESC);
 
--- 运营需求启动后可拆分为多个任务，任务执行状态与原始需求分表维护，便于追溯与重试。
-CREATE TABLE IF NOT EXISTS byai.byai_operation_task (
-    task_id         BIGINT       NOT NULL,
-    requirement_id  BIGINT       NOT NULL,
-    project_id      BIGINT       NOT NULL,
-    title           VARCHAR(500) NOT NULL,
-    description     TEXT,
-    operation_type  VARCHAR(20)  NOT NULL,
-    status          VARCHAR(20)  NOT NULL DEFAULT 'todo',
-    assignee        BIGINT,
-    due_time        TIMESTAMP,
-    progress        INT          NOT NULL DEFAULT 0,
-    config          TEXT,
-    agent_selection TEXT,
-    workflow        TEXT,
-    session_id      BIGINT,
-    create_by       BIGINT,
-    create_time     TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
-    update_by       BIGINT,
-    update_time     TIMESTAMP,
-    delete_flag     CHAR(1)      DEFAULT '0',
-    CONSTRAINT pk_byai_operation_task PRIMARY KEY (task_id)
-);
-
-COMMENT ON TABLE byai.byai_operation_task IS '运营任务表，由运营需求启动后拆解生成';
-COMMENT ON COLUMN byai.byai_operation_task.task_id IS '运营任务ID';
-COMMENT ON COLUMN byai.byai_operation_task.requirement_id IS '来源运营需求ID';
-COMMENT ON COLUMN byai.byai_operation_task.project_id IS '所属运营项目ID';
-COMMENT ON COLUMN byai.byai_operation_task.operation_type IS '运营任务类型：collect、publish、analyze';
-COMMENT ON COLUMN byai.byai_operation_task.status IS '任务状态：todo、doing、pendingReview、done、failed、cancelled';
-COMMENT ON COLUMN byai.byai_operation_task.config IS '从运营需求继承的类型配置JSON';
-COMMENT ON COLUMN byai.byai_operation_task.agent_selection IS '确认执行的数字员工ID列表JSON';
-COMMENT ON COLUMN byai.byai_operation_task.workflow IS '运营工作流步骤及状态JSON';
-COMMENT ON COLUMN byai.byai_operation_task.session_id IS '执行运营任务后关联的主会话ID';
-COMMENT ON COLUMN byai.byai_operation_task.delete_flag IS '删除标识：0有效，1删除';
-
-CREATE INDEX IF NOT EXISTS idx_operation_task_project ON byai.byai_operation_task (project_id, create_time DESC);
-CREATE INDEX IF NOT EXISTS idx_operation_task_requirement ON byai.byai_operation_task (requirement_id, create_time ASC);
-CREATE INDEX IF NOT EXISTS idx_operation_task_assignee ON byai.byai_operation_task (project_id, assignee, create_time DESC);
-
+-- 运营任务直接使用会话主表，任务名称沿用现有 session_name 字段长度（255），不修改研发会话表结构。
+-- 仅为短值运营字段建索引，避免把任务配置 JSON 的 TEXT 全量写入索引。
+CREATE INDEX IF NOT EXISTS idx_session_ext_operation_source
+    ON byai.byai_session_ext (ext_param_value) WHERE ext_param_code = 'oploop_source_id';
+CREATE INDEX IF NOT EXISTS idx_session_ext_operation_status
+    ON byai.byai_session_ext (ext_param_value) WHERE ext_param_code = 'oploop_task_status';
+CREATE INDEX IF NOT EXISTS idx_session_ext_operation_assignee
+    ON byai.byai_session_ext (ext_param_value) WHERE ext_param_code = 'oploop_assignee_id';
 
 CREATE TABLE byai_project_account
 (

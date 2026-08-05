@@ -8,7 +8,7 @@ export type OperationTaskType = 'collect' | 'content' | 'analyze';
 
 export type OperationLoginStatus = 'logged_in' | 'logged_out' | 'expired' | 'unknown';
 
-export type OperationCollectionMode = 'once' | 'periodic';
+export type OperationCollectionMode = 'once' | 'interval' | 'periodic';
 
 export type OperationAnalysisScope = 'account' | 'works';
 
@@ -83,6 +83,11 @@ export interface OperationCollectConfig {
   knowledgeBaseId?: OperationIdentifier;
   directoryId?: OperationIdentifier;
   mode?: OperationCollectionMode;
+  intervalValue?: number;
+  intervalUnit?: 'minute' | 'hour';
+
+  /** 周期采集使用的标准五段 Cron，后端保存到 byai_scan_source.cron_expr。 */
+  cronExpr?: string;
   schedule?: string;
   organize?: boolean;
   organizeTemplateId?: OperationIdentifier;

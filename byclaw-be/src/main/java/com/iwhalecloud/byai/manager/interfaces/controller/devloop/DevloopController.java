@@ -521,7 +521,7 @@ public class DevloopController {
         return applicationService.saveDwsToken(token);
     }
 
-    /** 创建运营需求，独立于钉钉和 GitHub 的研发扫描需求。 */
+    /** 创建运营需求，写入扫描源表并通过运营 source_type 与研发渠道隔离。 */
     @PostMapping("/requirement/createOperationRequirement")
     public ResponseUtil<Map<String, Object>> createOperationRequirement(@RequestBody OperationRequirementDTO dto) {
         return applicationService.createOperationRequirement(dto);
@@ -583,7 +583,7 @@ public class DevloopController {
         return applicationService.getOperationTask(MapParamUtil.getLongValue(params, "taskId"));
     }
 
-    /** 确认执行数字员工并创建运营任务会话。 */
+    /** 确认执行数字员工并启动已拆解的运营任务会话。 */
     @PostMapping("/operation/task/execute")
     public ResponseUtil<Map<String, Object>> executeOperationTask(@RequestBody OperationTaskDTO dto) {
         return applicationService.executeOperationTask(dto);

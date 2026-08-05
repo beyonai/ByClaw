@@ -1944,6 +1944,15 @@
   line-height: 20px;
 }
 
+// 结构化任务右侧统一承载状态和操作，待开始运营任务的执行入口保持常驻可见。
+.detailTaskCardActions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 // 研发任务的详情入口仅在卡片悬停或下拉菜单展开时展示，避免干扰会话主操作。
 .detailTaskMoreAction {
   position: absolute;

@@ -11,7 +11,7 @@ import java.util.Date;
 /**
  * 研发扫描条目实体。
  * 钉钉、GitHub、手工研发需求、评分和研发任务均依赖扫描日志链路，必须映射旧表。
- * 运营需求由 OperationRequirement 单独映射 byai_operation_requirement，禁止混用。
+ * 运营需求保存在 byai_scan_source，并通过 collect/publish/analyze 类型隔离，禁止写入本扫描条目表。
  */
 @Getter
 @Setter

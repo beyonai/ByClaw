@@ -520,7 +520,7 @@ const getOperationTaskInitialValues = (task: any): Partial<OperationTaskFormValu
           topic: config.topic ?? config.collectTopic,
           dateRange: toDateRange(config.startTime ?? config.collectStart, config.endTime ?? config.collectEnd),
           mode: config.mode ?? config.collectMethod,
-          schedule: config.schedule ?? config.collectSchedule,
+          cronExpr: config.cronExpr ?? config.schedule ?? config.collectSchedule,
           organize: Boolean(config.organize ?? config.knowledgeOrganization),
           organizeTemplateId: config.organizeTemplateId ?? config.knowledgeOrganization?.templateId,
           knowledgeOrganization: config.knowledgeOrganization
@@ -820,7 +820,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [sourceDwsStatusMap, setSourceDwsStatusMap] = useState<Record<number, SourceDwsStatus>>({});
   const [repos, setRepos] = useState<RepoOption[]>([]);
   const [requirements, setRequirements] = useState<RequirementItem[]>([]);
-  // 运营需求独立于研发扫描需求，启动后才会拆解为运营任务。
+  // 运营需求通过扫描源类型与研发渠道隔离，启动后才会拆解为会话任务。
   const [operationRequirements, setOperationRequirements] = useState<any[]>([]);
   const [operationRequirementsLoading, setOperationRequirementsLoading] = useState(false);
   const [operationRequirementsRefreshing, setOperationRequirementsRefreshing] = useState(false);
@@ -916,7 +916,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [channelPanelOpen, setChannelPanelOpen] = useState(false);
   // 运营账号信息较多，沿用渠道配置的覆盖式大面板，避免挤压左侧项目详情。
   const [operationAccountPanelOpen, setOperationAccountPanelOpen] = useState(false);
-  // 运营任务使用独立表单弹窗，和账号大面板不能同时打开。
+  // 左侧菜单切换会清空共享详情面板，记录刷新序号以便回到项目空间后恢复账号管理大页面。
+  const [operationAccountPanelRefreshKey, setOperationAccountPanelRefreshKey] = useState(0);
+  // 记录是否由“新增账号”菜单触发新增表单，直接进入账号管理时不自动弹出表单。
+  const [operationAccountCreateRequested, setOperationAccountCreateRequested] = useState(false);
+  // 运营任务使用独立表单弹窗，账号管理打开时允许在其上方叠加新增需求表单。
   const [operationTaskModalOpen, setOperationTaskModalOpen] = useState(false);
   // 运营需求未启动前允许修改；保存时根据该状态决定调用新增还是编辑接口。
   const [editingOperationTask, setEditingOperationTask] = useState<any>(null);
@@ -1278,7 +1282,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     [projectId]
   );
 
-  // 运营需求使用专表和专用接口查询，不能与研发扫描需求混用同一份列表数据。
+  // 运营需求使用专用接口按运营 source_type 查询，不能与研发扫描条目混用同一份列表数据。
   const fetchOperationRequirements = useCallback(
     async (keyword = '') => {
       if (!projectId || !isOperationProject) return;
@@ -1323,7 +1327,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       taskRequestCountRef.current += 1;
       setTasksLoading(true);
       try {
-        // 运营任务只读取运营任务表；研发与普通项目仍沿用既有任务/会话接口。
+        // 运营任务只查询带 oploop_source_id 的会话；研发与普通项目仍沿用既有任务接口。
         const taskPage = isOperationProject
           ? await listOperationTasks({
             projectId,
@@ -1620,6 +1624,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
     [operationAccounts, operationAssigneeOptions, operationKnowledgeBases, operationOrganizeTemplates, operationWorks]
   );
 
+  // 固定表单初始值对象，避免提交 loading 触发父组件重渲染时误判为新初始值并清空用户草稿。
+  const operationTaskInitialValues = useMemo<Partial<OperationTaskFormValues>>(
+    () =>
+      editingOperationTask
+        ? getOperationTaskInitialValues(editingOperationTask)
+        : { assigneeId: defaultProjectAssigneeId },
+    [defaultProjectAssigneeId, editingOperationTask]
+  );
+
   // 关闭账号登录时同步收起全局远程桌面，避免切换账号或项目后保留旧平台页面。
   const handleCloseOperationAccountRemoteDesktop = useCallback(() => {
     operationAccountLoginSandboxIdRef.current = '';
@@ -1633,23 +1646,28 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const handleCloseOperationAccountPanel = useCallback(() => {
     handleCloseOperationAccountRemoteDesktop();
     setOperationAccountPanelOpen(false);
+    setOperationAccountCreateRequested(false);
     setOperationAccountDeletingId(null);
     clearDetailPanel?.();
   }, [clearDetailPanel, handleCloseOperationAccountRemoteDesktop]);
 
   // 账号管理只服务运营项目；打开前关闭需求详情、任务详情和整体视图，防止多个大面板重叠。
-  const handleOpenOperationAccountPanel = useCallback(() => {
-    if (!isOperationProject) return;
-    // 从项目更多菜单进入账号页面时先切回需求页，确保覆盖式账号面板不会被其它页签的副作用关闭。
-    setActiveTab('requirements');
-    operationRequirementDetailRequestRef.current += 1;
-    setOperationRequirementDetail(null);
-    setOperationRequirementDetailLoading(false);
-    setDetailTask(null);
-    setTaskKanbanOpen(false);
-    setOperationTaskModalOpen(false);
-    setOperationAccountPanelOpen(true);
-  }, [isOperationProject]);
+  const handleOpenOperationAccountPanel = useCallback(
+    (openCreateModal = false) => {
+      if (!isOperationProject) return;
+      // 从项目更多菜单进入账号页面时先切回需求页，确保覆盖式账号面板不会被其它页签的副作用关闭。
+      setActiveTab('requirements');
+      operationRequirementDetailRequestRef.current += 1;
+      setOperationRequirementDetail(null);
+      setOperationRequirementDetailLoading(false);
+      setDetailTask(null);
+      setTaskKanbanOpen(false);
+      setOperationTaskModalOpen(false);
+      setOperationAccountCreateRequested(openCreateModal);
+      setOperationAccountPanelOpen(true);
+    },
+    [isOperationProject]
+  );
 
   // 账号管理与新增运营需求共用同一账号接口，保存成功后统一刷新，避免本地草稿与服务端数据不一致。
   const handleSaveOperationAccount = useCallback(
@@ -1782,9 +1800,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 新增运营需求时重新读取关联资源，确保成员、账号和知识库均为最新数据。
   const handleOpenOperationTaskModal = useCallback(() => {
     if (!isOperationProject) return;
-    // 从任意页签新增运营需求时切回需求页，保证需求表单组件已经挂载。
+    // 从任意页签新增运营需求时切回需求页，保证需求表单组件已经挂载；账号管理覆盖层保持不变。
     setActiveTab('requirements');
-    if (operationAccountPanelOpen) handleCloseOperationAccountPanel();
     setEditingOperationTask(null);
     setOperationTaskModalOpen(true);
     // 数字员工改到任务执行阶段选择，需求表单只刷新当前原型要求的关联资源。
@@ -1799,9 +1816,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     fetchOperationAccounts,
     fetchOperationKnowledgeBases,
     fetchOperationOrganizeTemplates,
-    handleCloseOperationAccountPanel,
     isOperationProject,
-    operationAccountPanelOpen,
   ]);
 
   // 只有尚未启动的运营需求可以编辑；任务已拆解后需求配置需保持稳定以便追溯。
@@ -1843,7 +1858,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
             collectStart: collectDateRange.startTime?.slice(0, 10),
             collectEnd: collectDateRange.endTime?.slice(0, 10),
             collectMethod: values.collectConfig?.mode,
-            collectSchedule: values.collectConfig?.schedule,
+            // 周期采集提交标准 Cron，后端写入 byai_scan_source.cron_expr；schedule 仅兼容旧数据。
+            collectSchedule: values.collectConfig?.cronExpr || values.collectConfig?.schedule,
+            cronExpr: values.collectConfig?.cronExpr,
             // 兼容旧执行服务读取 templateId，同时完整保存新增本体的整理需求和结构化要求。
             organizeTemplateId: values.collectConfig?.knowledgeOrganization?.templateId,
             knowledgeOrganization: values.collectConfig?.organize
@@ -1870,13 +1887,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
       try {
         const operationRequirementPayload = {
           requirementName: values.taskName.trim(),
-          description: values.description?.trim() || undefined,
+          // 运营需求描述直接对应扫描源的 source_description，状态由运营任务会话推导。
+          sourceDescription: values.description?.trim() || undefined,
           operationType: values.taskType === 'content' ? 'publish' : values.taskType,
           assignee: values.assigneeId,
           dueTime: values.dueTime?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
-          // 编辑时保留当前状态与进度，避免只修改标题后意外重置运营需求状态。
-          status: isEditingOperationTask ? editingOperationTask.status : undefined,
-          progress: isEditingOperationTask ? editingOperationTask.progress : undefined,
           config,
         };
         if (isEditingOperationTask) {
@@ -1984,6 +1999,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
       }));
     },
     [intl]
+  );
+
+  // 缓存拆解弹窗的初始任务，避免确认启动进入 loading 后父组件重渲染覆盖用户新增或修改的任务。
+  const operationRequirementStartTasks = useMemo(
+    () => (operationRequirementStartTarget ? getOperationRequirementStartTasks(operationRequirementStartTarget) : []),
+    [getOperationRequirementStartTasks, operationRequirementStartTarget]
   );
 
   // 运营需求只允许从待启动状态进入拆解确认，避免重复生成运营任务。
@@ -3896,6 +3917,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
         loginPreparingAccountId={operationAccountLoginPreparingId}
         loginConfirming={operationAccountLoginConfirming}
         deletingAccountId={operationAccountDeletingId}
+        openCreateModal={operationAccountCreateRequested}
+        onCreateModalOpened={() => setOperationAccountCreateRequested(false)}
         onBack={handleCloseOperationAccountPanel}
         onSaveAccount={handleSaveOperationAccount}
         onLogin={handleLoginOperationAccount}
@@ -3913,15 +3936,35 @@ const ProjectDetailPanel: React.FC<Props> = ({
     handleLoginOperationAccount,
     handleSaveOperationAccount,
     operationAccountPanelOpen,
+    operationAccountPanelRefreshKey,
     operationAccountLoginConfirming,
     operationAccountLoginPreparingId,
     operationAccountLoginTarget,
     operationAccountDeletingId,
+    operationAccountCreateRequested,
     operationAccountSaving,
     operationAccountsLoading,
     operationAccounts,
     setDetailPanel,
   ]);
+
+  useEffect(() => {
+    let refreshTimer: number | undefined;
+    const handleSiderMenuRefresh = (payload?: { key?: string }) => {
+      if (payload?.key !== 'sessions' || !operationAccountPanelOpen) return;
+      // 菜单切换时父级会先清空详情面板，延迟刷新确保路由切换完成后再恢复账号管理页面。
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        setOperationAccountPanelRefreshKey((currentKey) => currentKey + 1);
+      }, 0);
+    };
+
+    EventEmitter.on('sider-menu-tab-click-refresh', handleSiderMenuRefresh);
+    return () => {
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+      EventEmitter.off('sider-menu-tab-click-refresh', handleSiderMenuRefresh);
+    };
+  }, [EventEmitter, operationAccountPanelOpen]);
 
   useEffect(() => {
     return () => {
@@ -4493,11 +4536,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
         open={operationTaskModalOpen}
         mode={editingOperationTask ? 'edit' : 'create'}
         entityLabel="requirement"
-        initialValues={
-          editingOperationTask
-            ? getOperationTaskInitialValues(editingOperationTask)
-            : { assigneeId: defaultProjectAssigneeId }
-        }
+        initialValues={operationTaskInitialValues}
         options={operationTaskOptions}
         loading={operationTaskSaving}
         optionLoading={operationOptionsLoading}
@@ -4510,9 +4549,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       <OperationRequirementStartModal
         open={!!operationRequirementStartTarget}
         requirement={operationRequirementStartTarget}
-        initialTasks={
-          operationRequirementStartTarget ? getOperationRequirementStartTasks(operationRequirementStartTarget) : []
-        }
+        initialTasks={operationRequirementStartTasks}
         assignees={operationAssigneeOptions}
         loading={operationRequirementStarting}
         onCancel={() => setOperationRequirementStartTarget(null)}
@@ -5321,22 +5358,18 @@ const ProjectDetailPanel: React.FC<Props> = ({
                     : isOperationProject
                       ? `${taskAssignee} · ${taskDueTime}`
                       : `${task.sessionContent || ''}`;
-                  const taskStatusMeta = getTaskStatusMeta(
-                    task.operationState || task.status || task.taskStatus || task.currentStatus
-                  );
+                  const taskStatusValue = task.operationState || task.status || task.taskStatus || task.currentStatus;
+                  const taskStatusMeta = getTaskStatusMeta(taskStatusValue);
                   // 下拉菜单展开时维持状态标签的让位，防止悬浮菜单遮挡右侧内容。
                   const isTaskActionOpen = openTaskActionId === `${task.taskId}`;
                   const isTaskSelected = selectedTaskId === `${task.taskId}`;
+                  // 统一按最终展示状态判断，兼容历史数据同时返回 operationState=doing、status=todo 的情况。
+                  const canExecuteOperationTask =
+                    isOperationProject &&
+                    task.status === 'todo' &&
+                    taskStatusMeta.className === 'Pending' &&
+                    !task.sessionId;
                   const operationTaskActionItems: MenuProps['items'] = [
-                    // 运营任务未启动时将“启动”放在详情前，并保持菜单文案简洁。
-                    ...(isOperationProject && task.status === 'todo' && !task.sessionId
-                      ? [
-                        {
-                          key: 'execute',
-                          label: intl.formatMessage({ id: 'projectSpace.operation.execute.action' }),
-                        },
-                      ]
-                      : []),
                     { key: 'view-detail', label: t('task.viewDetail') },
                   ];
 
@@ -5386,7 +5419,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
                       )}
                       <div
                         className={`${styles.detailTaskCardHeader} ${
-                          showStructuredTaskMeta ? styles.detailTaskCardHeaderWithAction : ''
+                          showStructuredTaskMeta && !canExecuteOperationTask
+                            ? styles.detailTaskCardHeaderWithAction
+                            : ''
                         } ${isTaskActionOpen ? styles.detailTaskCardHeaderWithActionOpen : ''}`}
                       >
                         <div className={styles.detailTaskMain}>
@@ -5398,52 +5433,68 @@ const ProjectDetailPanel: React.FC<Props> = ({
                           {/* 任务名称和描述仅用于列表扫读，不显示悬停提示。 */}
                           <p className={styles.detailTaskDescription}>{taskDescription}</p>
                         </div>
-                        {/* 普通项目按会话展示，不显示统一任务状态。 */}
+                        {/* 普通项目按会话展示，不显示统一任务状态；结构化任务统一将状态和操作放在右侧。 */}
                         {showStructuredTaskMeta && (
-                          <Tag
-                            bordered={false}
-                            className={`${styles.detailTaskStatusTag} ${
-                              styles[`detailTaskStatus${taskStatusMeta.className}`]
-                            }`}
-                          >
-                            {t(taskStatusMeta.labelId)}
-                          </Tag>
-                        )}
-                        {showStructuredTaskMeta && (
-                          <Dropdown
-                            trigger={['hover']}
-                            placement="bottomRight"
-                            onOpenChange={(open) => setOpenTaskActionId(open ? `${task.taskId}` : undefined)}
-                            menu={{
-                              items: operationTaskActionItems,
-                              onClick: ({ key, domEvent }) => {
-                                domEvent.preventDefault();
-                                domEvent.stopPropagation();
-                                setSelectedTaskId(`${task.taskId}`);
-                                setOpenTaskActionId(undefined);
-                                if (key === 'execute') {
+                          <div className={styles.detailTaskCardActions}>
+                            {/* 待开始状态由执行按钮直接表达，避免同一位置重复展示两个操作提示。 */}
+                            {!canExecuteOperationTask && (
+                              <Tag
+                                bordered={false}
+                                className={`${styles.detailTaskStatusTag} ${
+                                  styles[`detailTaskStatus${taskStatusMeta.className}`]
+                                }`}
+                              >
+                                {t(taskStatusMeta.labelId)}
+                              </Tag>
+                            )}
+                            {canExecuteOperationTask ? (
+                              // 执行按钮复用需求列表“启动”按钮的标签样式，保持运营操作入口视觉统一。
+                              <Button
+                                size="small"
+                                className={`${styles.detailRequirementAction} ${styles.detailRequirementStartAction}`}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  setSelectedTaskId(`${task.taskId}`);
                                   handleOpenOperationTaskExecute(task);
-                                } else {
-                                  handleOpenTaskDetail(task);
-                                }
-                              },
-                            }}
-                          >
-                            {/* 结构化任务详情作为辅助操作，卡片主点击仍进入任务会话。 */}
-                            <Button
-                              type="text"
-                              size="small"
-                              className={`${styles.detailTaskMoreAction} ${
-                                isTaskActionOpen ? styles.detailTaskMoreActionOpen : ''
-                              }`}
-                              icon={<EllipsisOutlined />}
-                              onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                              }}
-                              onMouseDown={(event) => event.stopPropagation()}
-                            />
-                          </Dropdown>
+                                }}
+                                onMouseDown={(event) => event.stopPropagation()}
+                              >
+                                {intl.formatMessage({ id: 'projectSpace.operation.execute.action' })}
+                              </Button>
+                            ) : (
+                              <Dropdown
+                                trigger={['hover']}
+                                placement="bottomRight"
+                                onOpenChange={(open) => setOpenTaskActionId(open ? `${task.taskId}` : undefined)}
+                                menu={{
+                                  items: operationTaskActionItems,
+                                  onClick: ({ domEvent }) => {
+                                    domEvent.preventDefault();
+                                    domEvent.stopPropagation();
+                                    setSelectedTaskId(`${task.taskId}`);
+                                    setOpenTaskActionId(undefined);
+                                    handleOpenTaskDetail(task);
+                                  },
+                                }}
+                              >
+                                {/* 结构化任务详情作为辅助操作，卡片主点击仍进入任务会话。 */}
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  className={`${styles.detailTaskMoreAction} ${
+                                    isTaskActionOpen ? styles.detailTaskMoreActionOpen : ''
+                                  }`}
+                                  icon={<EllipsisOutlined />}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                  }}
+                                  onMouseDown={(event) => event.stopPropagation()}
+                                />
+                              </Dropdown>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
@@ -6178,7 +6229,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       return;
     }
     if (key === 'add-operation-account') {
-      handleOpenOperationAccountPanel();
+      handleOpenOperationAccountPanel(true);
       return;
     }
     if (key === 'add-operation-requirement') {
