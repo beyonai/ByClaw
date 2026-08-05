@@ -63,6 +63,8 @@ export interface CreateSessionRunRequest extends AuthenticatedIngressRequest {
    * 用于在 Session 上标记来源并供后续委派声明会话工作区；HTTP 入口不提供。
    */
   externalSessionId?: string;
+  /** by-framework 入站消息 ID；仅 Worker 入口提供，用于关联后续子 Agent 执行。 */
+  parentMessageId?: string;
   /** Gateway 只提供定位引用；正文由 Super 使用当前 Token 从 BE 权威读取。 */
   groupChatRef?: GroupChatRefV1;
 }
@@ -117,6 +119,7 @@ export class RunIngressService {
       catalog.error,
       leaderModel,
       input.externalSessionId,
+      input.parentMessageId,
     );
     const run = await this.runService.createSessionRun({
       owner: principal,
@@ -132,6 +135,9 @@ export class RunIngressService {
         "Beyond-Token": input.beyondToken,
         ...(input.externalSessionId
           ? { externalSessionId: input.externalSessionId }
+          : {}),
+        ...(input.parentMessageId
+          ? { parentMessageId: input.parentMessageId }
           : {}),
       },
       executionCredential: {
@@ -172,6 +178,7 @@ export class RunIngressService {
       catalog.error,
       leaderModel,
       input.externalSessionId,
+      input.parentMessageId,
     );
     const run = await this.runService.createRun({
       sessionId: input.sessionId,
@@ -185,6 +192,9 @@ export class RunIngressService {
         "Beyond-Token": input.beyondToken,
         ...(input.externalSessionId
           ? { externalSessionId: input.externalSessionId }
+          : {}),
+        ...(input.parentMessageId
+          ? { parentMessageId: input.parentMessageId }
           : {}),
       },
       executionCredential: {
@@ -432,13 +442,21 @@ export class RunIngressService {
     agentCatalogError: string | undefined,
     leaderModel: LeaderModelSelection | undefined,
     externalSessionId: string | undefined,
+    parentMessageId: string | undefined,
   ) {
-    if (!context && !agentCatalogError && !leaderModel && !externalSessionId) {
+    if (
+      !context &&
+      !agentCatalogError &&
+      !leaderModel &&
+      !externalSessionId &&
+      !parentMessageId
+    ) {
       return undefined;
     }
     return {
       ...(context ?? {}),
       ...(externalSessionId ? { externalSessionId } : {}),
+      ...(parentMessageId ? { parentMessageId } : {}),
       ...(agentCatalogError ? { agentCatalogError } : {}),
       ...(leaderModel ? { leaderModel } : {}),
     };

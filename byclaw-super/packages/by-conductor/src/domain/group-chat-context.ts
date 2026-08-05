@@ -69,6 +69,8 @@ export interface GroupChatContextV1 {
 export interface RunIngressContextV1 {
   /** by-framework 入站会话 ID，同时是子 Agent 应使用的会话空间 ID。 */
   externalSessionId?: string;
+  /** by-framework 入站消息 ID；后续委派将其作为 parentMessageId 建立级联取消关系。 */
+  parentMessageId?: string;
   groupChat?: GroupChatContextV1;
   groupChatFingerprint?: string;
   /** Agent 目录回源失败时保留的诊断；Run 仍可由 Leader 降级执行。 */

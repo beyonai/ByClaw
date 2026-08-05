@@ -84,6 +84,9 @@ export class DelegationService {
    * 工具真正执行前会再次从 Run 的 Agent 快照中校验授权，防止模型越权。
    */
   async execute(input: ExecuteDelegationInput): Promise<AgentResult> {
+    // AbortSignal 不会为“注册监听前已经发生”的取消补发事件。先在任何持久化或
+    // Connector 投递之前拒绝，避免已停止的 Run 仍创建并启动新委派。
+    input.signal.throwIfAborted();
     const agent = input.agents.find((candidate) => candidate.id === input.agentId);
     if (!agent) {
       throw new UnauthorizedAgentError(input.agentId);
@@ -101,6 +104,7 @@ export class DelegationService {
       );
     }
     const historical = await this.delegations.listByRun(input.runId);
+    input.signal.throwIfAborted();
     if (input.reuseCompleted) {
       const completed = historical
         .slice()
@@ -181,12 +185,28 @@ export class DelegationService {
       }
     }
 
+    // list/save 期间也可能发生取消。此时委派记录已经存在，但尚未向外部系统
+    // 投递；直接收敛为 CANCELLED，不能继续调用 Connector。
+    if (input.signal.aborted) {
+      try {
+        return await this.#finishAborted(delegation, false);
+      } finally {
+        if (this.#claims.get(input.runId) === input.leaseClaim) {
+          this.#claims.delete(input.runId);
+        }
+      }
+    }
+
     const controller = new AbortController();
     let timedOut = false;
     let execution: ConnectorExecution | undefined;
     // 将 Run 或工具级取消转发到当前委派的独立控制器。
     const forwardAbort = () => controller.abort(input.signal.reason);
     input.signal.addEventListener("abort", forwardAbort, { once: true });
+    // 关闭检查 aborted 与注册监听之间的竞态窗口。
+    if (input.signal.aborted) {
+      forwardAbort();
+    }
     // 外部执行超时不包含等待用户作答的时间；恢复输入后重新开始计时。
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const armTimeout = () => {
@@ -215,6 +235,9 @@ export class DelegationService {
     armTimeout();
 
     try {
+      if (controller.signal.aborted) {
+        return await this.#finishAborted(delegation, false);
+      }
       if (resuming) {
         if (!connector.resume || !delegation.externalRef) {
           throw new Error(`Connector does not support persisted resume: ${connector.id}`);
@@ -227,6 +250,7 @@ export class DelegationService {
         });
       } else {
         const externalSessionId = optionalMetadataString(input.metadata, "externalSessionId");
+        const parentMessageId = optionalMetadataString(input.metadata, "parentMessageId");
         const request: ConnectorRequest = {
           userCode: input.session.owner.userCode,
           ...(input.session.owner.userName ? { userName: input.session.owner.userName } : {}),
@@ -238,6 +262,7 @@ export class DelegationService {
           attachments: [...(input.attachments ?? [])],
           ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
           ...(externalSessionId ? { externalSessionId } : {}),
+          ...(parentMessageId ? { parentMessageId } : {}),
           metadata: input.metadata,
         };
         execution = await connector.start(request, { signal: controller.signal });

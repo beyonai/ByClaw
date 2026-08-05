@@ -159,6 +159,9 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
       // 稳定 ID 让外部执行记录可按 Delegation 定位；真正重连仍走 resume，不重复 send。
       messageId: request.delegationId,
       traceId: request.delegationId,
+      ...(request.parentMessageId
+        ? { parentMessageId: request.parentMessageId }
+        : {}),
     };
     const response = await this.#client.sendMessage(params);
     if (!response.success) {

@@ -825,7 +825,14 @@ ${JSON.stringify(response)}`;
           : {}),
         // 工具调用只进入 DelegationService，不让 Pi 接触 Connector Registry。
         delegate: async (delegationInput) => {
+          runController.signal.throwIfAborted();
           current = await this.#setStatus(current, "WAITING_AGENT");
+          runController.signal.throwIfAborted();
+          // Pi 工具 signal 只代表该次工具调用；Run 级停止必须始终拥有更高优先级，
+          // 不能因为工具传入了独立 signal 就丢失整轮取消。
+          const delegationSignal = delegationInput.signal
+            ? AbortSignal.any([runController.signal, delegationInput.signal])
+            : runController.signal;
           const delegated = await this.delegationService.execute({
             session,
             runId: current.id,
@@ -845,8 +852,11 @@ ${JSON.stringify(response)}`;
               ...(current.ingressContext?.externalSessionId
                 ? { externalSessionId: current.ingressContext.externalSessionId }
                 : {}),
+              ...(current.ingressContext?.parentMessageId
+                ? { parentMessageId: current.ingressContext.parentMessageId }
+                : {}),
             },
-            signal: delegationInput.signal ?? runController.signal,
+            signal: delegationSignal,
             ...(claim ? { leaseClaim: claim } : {}),
             ...(recoveringStage === "LEADER_SYNTHESIZING"
               ? { reuseCompleted: true }

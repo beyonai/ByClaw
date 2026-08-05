@@ -81,6 +81,7 @@ export interface ByClawSuperWorkerOptions {
  */
 export class ByClawSuperGatewayWorker extends GatewayWorker {
   readonly #agentType: string;
+  readonly #registry: WorkerRegistry;
   readonly #runService: WorkerRunService;
   readonly #runIngress: WorkerRunIngress;
   readonly #protocolEmitter: WorkerProtocolEmitter;
@@ -94,6 +95,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     const registry = options.registry ?? new WorkerRegistry(options.redis);
     super(options.workerId, registry, options.redis);
     this.#agentType = options.agentType;
+    this.#registry = registry;
     this.#runService = options.runService;
     this.#runIngress = options.runIngress;
     this.#protocolEmitter =
@@ -196,6 +198,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
           ...(command.header.sessionId
             ? { externalSessionId: command.header.sessionId }
             : {}),
+          parentMessageId: command.header.messageId,
           ...(groupChatRef ? { groupChatRef } : {}),
           ...auth,
         })
@@ -208,6 +211,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
           ...(command.header.sessionId
             ? { externalSessionId: command.header.sessionId }
             : {}),
+          parentMessageId: command.header.messageId,
           ...(groupChatRef ? { groupChatRef } : {}),
           ...auth,
         });
@@ -226,6 +230,11 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     if (context.executionId) {
       this.#activeRuns.set(context.executionId, run.id);
     }
+    const stopCancellationMonitor = this.#monitorPersistedCancellation(
+      command,
+      context,
+      run.id,
+    );
     this.#logger?.info(
       { ...commandLogFields(command), runId: run.id },
       "by-framework 入站任务已创建 Run",
@@ -244,6 +253,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         sessionContext?.locale,
       );
     } finally {
+      stopCancellationMonitor();
       this.#activeRuns.delete(command.header.messageId);
       if (context.executionId) {
         this.#activeRuns.delete(context.executionId);
@@ -271,6 +281,91 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       "正在取消 by-framework 入站 Run",
     );
     await this.#runService.cancelRun(runId, command.reason || "by-framework task cancelled");
+  }
+
+  /**
+   * 兜底 claim 与 cancel 并发窗口：取消方可能在 Worker 写入 worker_id 前只把
+   * execution 标记为 cancel_requested，因而没有控制消息能触发 onCancelTask。
+   * 运行期间轮询同一 execution 真相，确保这种取消也能进入内部 RunService。
+   */
+  #monitorPersistedCancellation(
+    command: GatewayCommand,
+    context: AgentContext,
+    runId: string,
+  ): () => void {
+    let stopped = false;
+    let checking = false;
+    let cancellationForwarded = false;
+    let warned = false;
+    const check = async () => {
+      if (stopped || checking || cancellationForwarded) {
+        return;
+      }
+      checking = true;
+      try {
+        const execution = await this.#registry.getExecutionByMessageId(
+          command.header.messageId,
+          command.header.sessionId,
+        );
+        warned = false;
+        if (stopped) {
+          return;
+        }
+        const status = String(execution?.status ?? "").toUpperCase();
+        const persistedCancelRequested = String(
+          execution?.cancel_requested ?? "",
+        ).toLowerCase();
+        const cancelRequested =
+          context.isCancelRequested() ||
+          execution?.cancel_requested === true ||
+          persistedCancelRequested === "true" ||
+          persistedCancelRequested === "1" ||
+          status === "CANCELLING" ||
+          status === "CANCELLED";
+        if (!cancelRequested) {
+          return;
+        }
+        const reason =
+          typeof execution?.cancel_reason === "string" &&
+          execution.cancel_reason.trim()
+            ? execution.cancel_reason
+            : "by-framework task cancelled";
+        this.#logger?.info(
+          {
+            runId,
+            messageId: command.header.messageId,
+            executionId: context.executionId,
+            status,
+          },
+          "检测到 by-framework 持久取消状态",
+        );
+        await this.#runService.cancelRun(runId, reason);
+        cancellationForwarded = true;
+      } catch (error) {
+        if (!stopped && !warned) {
+          warned = true;
+          this.#logger?.warn(
+            {
+              runId,
+              messageId: command.header.messageId,
+              error: toError(error).message,
+            },
+            "同步 by-framework 持久取消状态失败",
+          );
+        }
+      } finally {
+        checking = false;
+      }
+    };
+    const timer = setInterval(() => {
+      void check();
+    }, 100);
+    timer.unref?.();
+    void check();
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
   }
 
   /** 订阅内部事件流，并只输出简化进度与 Leader 最终回答；终态时记录一条业务返回日志。 */
