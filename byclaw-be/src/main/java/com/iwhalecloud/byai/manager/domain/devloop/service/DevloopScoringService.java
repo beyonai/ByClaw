@@ -9,6 +9,7 @@ import com.iwhalecloud.byai.manager.domain.aimodel.service.AiPromptService;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanRequireItem;
 import com.iwhalecloud.byai.manager.mapper.devloop.ScanRequireItemMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import com.iwhalecloud.byai.state.infrastructure.utils.ChatUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -77,10 +78,12 @@ public class DevloopScoringService {
             return dispatchList;
         }
         // 优先用「拆分+评分」合并提示词；缺失回退纯评分提示词（此时不拆分，仅评分）
-        String template = aiPromptService.findZhTemplateByCode(SPLIT_SCORE_PROMPT_CODE);
+        // language 取请求上下文(前端 header 传入)；扫描定时任务无请求上下文时 ChatUtils 回退中文。
+        String lang = ChatUtils.getLanguage();
+        String template = aiPromptService.findTemplateByCode(SPLIT_SCORE_PROMPT_CODE, lang);
         boolean splitEnabled = template != null && !template.isEmpty();
         if (!splitEnabled) {
-            template = aiPromptService.findZhTemplateByCode(SCORE_PROMPT_CODE);
+            template = aiPromptService.findTemplateByCode(SCORE_PROMPT_CODE, lang);
         }
         if (template == null || template.isEmpty()) {
             log.warn("[DevloopScore] 未配置拆分/评分提示词，本批 {} 条需求跳过（分数为空、不拆分）。", items.size());

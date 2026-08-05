@@ -58,6 +58,7 @@ import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiPromptService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import com.iwhalecloud.byai.state.infrastructure.utils.ChatUtils;
 import com.iwhalecloud.byai.common.util.threadPoolUti.ThreadPoolUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -2182,7 +2183,9 @@ public class DevloopApplicationService {
      */
     private String buildTaskPrompt(String projectName, ProjectRepo repo, String branchName, String taskType,
         String title, String description) {
-        String template = aiPromptService.findZhTemplateByCode("DEVLOOP_TASK_START_PROMPT");
+        // language 从请求上下文取(前端经 header 传入，GlobalI18nFilter 已解析进 attribute)；
+        // 异步/定时任务无请求上下文时 ChatUtils 内部回退中文。
+        String template = aiPromptService.findTemplateByCode("DEVLOOP_TASK_START_PROMPT", ChatUtils.getLanguage());
         if (template == null || template.isEmpty()) {
             template = DEFAULT_TASK_PROMPT_TEMPLATE;
         }
