@@ -9,12 +9,13 @@
 - 默认返回：`application/json`
 - 上传文档接口请求体：`multipart/form-data`
 - 下载文件接口成功响应：`application/octet-stream`
+- PPT/PPTX 构建预览接口成功响应：`application/pdf`
 
 ## 通用约定
 
 ### 成功响应
 
-除下载文件接口外，其余接口统一使用如下响应信封：
+除下载文件和构建预览接口外，其余接口统一使用如下响应信封：
 
 ```json
 {
@@ -73,10 +74,14 @@
 | `POST` | `/api/v1/fileToMarkdown` | 上传文件并同步转换为 Markdown 文件流 |
 | `POST` | `/api/v1/fileToMarkdownIndex` | 异步触发知识构建 |
 | `POST` | `/api/v1/fileBuildStatus` | 查询文档构建状态 |
+| `POST` | `/api/v1/buildResult` | 查询文档最新一次构建结果、Markdown 和切片 |
+| `POST` | `/api/v1/buildPreview` | 获取 PPT/PPTX 构建生成的 PDF 预览 |
 | `POST` | `/api/v1/knowledgeItems/search` | 知识检索 |
 | `GET` | `/health` | 探活 |
 | `POST` | `/api/v1/knowledgeItems/importByResourceId` | 按资源 ID 上传文档（Agent 工具） |
 | `POST` | `/api/v1/fileToMarkdownIndexByResourceId` | 按资源 ID 触发知识构建（Agent 工具） |
+| `POST` | `/api/v1/buildResultByResourceId` | 按资源 ID 查询文档构建结果（Agent 工具） |
+| `POST` | `/api/v1/buildPreviewByResourceId` | 按资源 ID 获取 PPT/PPTX 构建预览（Agent 工具） |
 | `POST` | `/api/v1/knowledgeItems/searchByResourceId` | 按资源 ID 知识检索（Agent 工具） |
 | `POST` | `/api/v1/directories/createByResourceId` | 按资源 ID 创建目录（Agent 工具） |
 | `POST` | `/api/v1/directories/updateByResourceId` | 按资源 ID 修改目录（Agent 工具） |
@@ -860,6 +865,219 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
 }
 ```
 
+### `POST /api/v1/buildResult`
+
+查询指定文件最新一次构建的完整结果，包括构建状态、转换后的 Markdown、切片分页、向量化覆盖率和检索索引覆盖率。
+
+注意：
+
+- 接口查询的是文件最新一次构建任务，不返回历史构建任务列表。
+- 文件必须至少触发过一次知识构建，否则返回 `build task not found`。
+- `includeMarkdown=false` 时不读取 Markdown 正文，适合只查看构建状态和切片统计的场景。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `knCode` | string | 是 | - | 知识库编码 |
+| `filePath` | string | 是 | - | 文件全路径，以 `/` 开头，不包括知识库名称 |
+| `chunkPage` | integer | 否 | `1` | 切片页码，从 `1` 开始 |
+| `chunkPageSize` | integer | 否 | `20` | 每页切片数量，范围为 `1`～`100` |
+| `includeMarkdown` | boolean | 否 | `true` | 是否在响应中返回完整 Markdown 正文 |
+
+请求示例：
+
+```json
+{
+  "knCode": "1",
+  "filePath": "/汇报/年度总结.pptx",
+  "chunkPage": 1,
+  "chunkPageSize": 20,
+  "includeMarkdown": true
+}
+```
+
+成功响应示例：
+
+```json
+{
+  "resultCode": "0",
+  "resultMsg": "success",
+  "resultObject": {
+    "knCode": "1",
+    "filePath": "/汇报/年度总结.pptx",
+    "fileName": "年度总结.pptx",
+    "fileType": "pptx",
+    "fileSize": 859923,
+    "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "build": {
+      "status": "complete",
+      "currentStep": "complete",
+      "errorMessage": null,
+      "startedAt": "2026-08-04T09:56:14.989000+00:00",
+      "finishedAt": "2026-08-04T09:56:16.239000+00:00",
+      "durationMs": 1250,
+      "statusDict": [
+        {
+          "standCode": "complete",
+          "standDisplayValue": "已完成",
+          "standDisplayValueEn": "complete"
+        },
+        {
+          "standCode": "failed",
+          "standDisplayValue": "失败",
+          "standDisplayValueEn": "failed"
+        },
+        {
+          "standCode": "running",
+          "standDisplayValue": "构建中",
+          "standDisplayValueEn": "running"
+        },
+        {
+          "standCode": "unsupported",
+          "standDisplayValue": "不支持构建",
+          "standDisplayValueEn": "unsupported"
+        }
+      ],
+      "stepDict": [
+        {
+          "standCode": "markdown",
+          "standDisplayValue": "原始文件转 Markdown",
+          "standDisplayValueEn": "markdown"
+        },
+        {
+          "standCode": "chunking",
+          "standDisplayValue": "文档切片",
+          "standDisplayValueEn": "chunking"
+        },
+        {
+          "standCode": "vectorizing",
+          "standDisplayValue": "切片向量化",
+          "standDisplayValueEn": "vectorizing"
+        },
+        {
+          "standCode": "complete",
+          "standDisplayValue": "已完成",
+          "standDisplayValueEn": "complete"
+        }
+      ]
+    },
+    "markdown": {
+      "available": true,
+      "data": "# 年度总结\n\n## 第一部分\n...",
+      "lineCount": 128,
+      "characterCount": 4047,
+      "byteCount": 9731
+    },
+    "chunks": {
+      "data": [
+        {
+          "chunkNo": 1,
+          "startLine": 1,
+          "endLine": 18,
+          "content": "# 年度总结\n\n## 第一部分\n...",
+          "characterCount": 526,
+          "hasEmbedding": true,
+          "retrievalIndexed": true
+        }
+      ],
+      "page": 1,
+      "pageSize": 20,
+      "total": 8,
+      "reachedEof": true
+    },
+    "embedding": {
+      "dimension": 1024,
+      "embeddedChunkCount": 8,
+      "coverageRate": 100.0
+    },
+    "retrieval": {
+      "indexedChunkCount": 8,
+      "coverageRate": 100.0
+    }
+  }
+}
+```
+
+主要响应字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `build` | object | 最新构建任务的状态、当前步骤、错误信息、开始/完成时间和耗时 |
+| `markdown.available` | boolean | 是否存在已生成的 Markdown 文件 |
+| `markdown.data` | string/null | Markdown 正文；`includeMarkdown=false` 时为 `null` |
+| `markdown.lineCount` | integer | Markdown 行数 |
+| `markdown.characterCount` | integer/null | Markdown 字符数；未读取正文时为 `null` |
+| `markdown.byteCount` | integer/null | Markdown UTF-8 字节数；未读取正文时为 `null` |
+| `chunks.data` | array[object] | 当前页切片，包含行号、正文、向量和索引状态 |
+| `chunks.total` | integer | 文件切片总数 |
+| `chunks.reachedEof` | boolean | 当前页是否已经到达最后一页 |
+| `embedding.coverageRate` | number | 已生成向量的切片占比，单位为百分比 |
+| `retrieval.coverageRate` | number | 已进入检索索引的切片占比，单位为百分比 |
+
+失败响应示例：
+
+```json
+{
+  "resultCode": "-1",
+  "resultMsg": "build task not found: /汇报/年度总结.pptx",
+  "resultObject": {}
+}
+```
+
+### `POST /api/v1/buildPreview`
+
+获取 PPT/PPTX 在知识构建期间通过 LibreOffice 生成的 PDF 预览。该接口只读取已经生成并保存的预览文件，不会在查询时临时转换。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `knCode` | string | 是 | 知识库编码 |
+| `filePath` | string | 是 | PPT/PPTX 文件全路径，以 `/` 开头，不包括知识库名称 |
+
+请求示例：
+
+```json
+{
+  "knCode": "1",
+  "filePath": "/汇报/年度总结.pptx"
+}
+```
+
+成功响应：
+
+- `200 OK`
+- `Content-Type: application/pdf`
+- `Content-Disposition: inline; filename*=UTF-8''年度总结.pdf`
+- 响应体为 PDF 二进制字节流，不使用 JSON 响应信封
+
+调用示例：
+
+```bash
+curl -X POST http://localhost:8000/api/v1/buildPreview \
+  -H 'Content-Type: application/json' \
+  -d '{"knCode":"1","filePath":"/汇报/年度总结.pptx"}' \
+  --output 年度总结.pdf
+```
+
+限制说明：
+
+- 仅支持 `.ppt` 和 `.pptx` 文件。
+- 文件必须完成一次包含预览生成的构建。
+- 如果旧 PPT/PPTX 没有预览产物，需要重新触发构建。
+- 运行环境必须安装 LibreOffice；预览生成失败不会阻断 Markdown 构建，但本接口将查询不到预览。
+
+失败响应示例：
+
+```json
+{
+  "resultCode": "-1",
+  "resultMsg": "build preview not found; rebuild the PPT/PPTX file first: /汇报/年度总结.pptx",
+  "resultObject": {}
+}
+```
+
 ## 知识检索
 
 ### `POST /api/v1/knowledgeItems/search`
@@ -945,6 +1163,8 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
 | --- | --- | --- |
 | `POST` | `/api/v1/knowledgeItems/importByResourceId` | 按资源 ID 上传文档 |
 | `POST` | `/api/v1/fileToMarkdownIndexByResourceId` | 按资源 ID 触发知识构建 |
+| `POST` | `/api/v1/buildResultByResourceId` | 按资源 ID 查询文档构建结果 |
+| `POST` | `/api/v1/buildPreviewByResourceId` | 按资源 ID 获取 PPT/PPTX 构建预览 |
 | `POST` | `/api/v1/knowledgeItems/searchByResourceId` | 按资源 ID 知识检索 |
 | `POST` | `/api/v1/directories/createByResourceId` | 按资源 ID 创建目录 |
 | `POST` | `/api/v1/directories/updateByResourceId` | 按资源 ID 修改目录 |
@@ -1025,6 +1245,117 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/importByResourceId \
   "resultObject": {}
 }
 ```
+
+失败响应示例：
+
+```json
+{
+  "resultCode": "-1",
+  "resultMsg": "cannot resolve resourceId: 99999",
+  "resultObject": {}
+}
+```
+
+### `POST /api/v1/buildResultByResourceId`
+
+按资源 ID 查询对应知识库中文件的最新构建结果。系统先将 `resourceId` 映射为内部 `knCode`，再执行构建结果查询。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `resourceId` | string | 是 | - | 知识库资源 ID，系统自动映射为内部 `knCode` |
+| `filePath` | string | 是 | - | 文件全路径，以 `/` 开头，不包括知识库名称 |
+| `chunkPage` | integer | 否 | `1` | 切片页码，从 `1` 开始 |
+| `chunkPageSize` | integer | 否 | `20` | 每页切片数量，范围为 `1`～`100` |
+| `includeMarkdown` | boolean | 否 | `true` | 是否在响应中返回完整 Markdown 正文 |
+
+请求示例：
+
+```json
+{
+  "resourceId": "10000003",
+  "filePath": "/汇报/年度总结.pptx",
+  "chunkPage": 1,
+  "chunkPageSize": 20,
+  "includeMarkdown": true
+}
+```
+
+成功响应结构与 `POST /api/v1/buildResult` 相同，但 `resultObject.knCode` 返回请求中的 `resourceId`。关键字段示例：
+
+```json
+{
+  "resultCode": "0",
+  "resultMsg": "success",
+  "resultObject": {
+    "knCode": "10000003",
+    "filePath": "/汇报/年度总结.pptx",
+    "build": {
+      "status": "complete",
+      "currentStep": "complete"
+    },
+    "markdown": {
+      "available": true,
+      "data": "# 年度总结\n..."
+    },
+    "chunks": {
+      "page": 1,
+      "pageSize": 20,
+      "total": 8,
+      "reachedEof": true
+    }
+  }
+}
+```
+
+失败响应示例：
+
+```json
+{
+  "resultCode": "-1",
+  "resultMsg": "cannot resolve resourceId: 99999",
+  "resultObject": {}
+}
+```
+
+### `POST /api/v1/buildPreviewByResourceId`
+
+按资源 ID 获取对应知识库中 PPT/PPTX 文件构建生成的 PDF 预览。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `resourceId` | string | 是 | 知识库资源 ID，系统自动映射为内部 `knCode` |
+| `filePath` | string | 是 | PPT/PPTX 文件全路径，以 `/` 开头，不包括知识库名称 |
+
+请求示例：
+
+```json
+{
+  "resourceId": "10000003",
+  "filePath": "/汇报/年度总结.pptx"
+}
+```
+
+成功响应：
+
+- `200 OK`
+- `Content-Type: application/pdf`
+- `Content-Disposition: inline; filename*=UTF-8''年度总结.pdf`
+- 响应体为 PDF 二进制字节流，不使用 JSON 响应信封
+
+调用示例：
+
+```bash
+curl -X POST http://localhost:8000/api/v1/buildPreviewByResourceId \
+  -H 'Content-Type: application/json' \
+  -d '{"resourceId":"10000003","filePath":"/汇报/年度总结.pptx"}' \
+  --output 年度总结.pdf
+```
+
+文件类型、预览生成时机和失败处理规则与 `POST /api/v1/buildPreview` 相同。
 
 失败响应示例：
 
