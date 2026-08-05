@@ -561,7 +561,7 @@ default_prune_image_repos() {
     local image
     local repo
     local repos=""
-    for image in "${IMAGE_BE:-}" "${IMAGE_FE:-}" "${IMAGE_QA:-}" "${IMAGE_DATA:-}"; do
+    for image in "${IMAGE_BE:-}" "${IMAGE_SUPER:-}" "${IMAGE_FE:-}" "${IMAGE_QA:-}" "${IMAGE_DATA:-}"; do
         [ -n "$image" ] || continue
         repo="$(image_repo_from_ref "$image")"
         [ -n "$repo" ] || continue
@@ -672,7 +672,7 @@ if [ \"\$prune_dangling\" = \"true\" ]; then
   done
 fi
 echo \"[remote:\$(hostname)] image prune completed\"
-sudo K3S_DATA_DIR=\"\${K3S_DATA_DIR}\" k3s crictl images | awk 'NR==1 || /byclaw\\/byclaw-(be|fe|qa|data)/ || /<none>/'
+sudo K3S_DATA_DIR=\"\${K3S_DATA_DIR}\" k3s crictl images | awk 'NR==1 || /byclaw\\/byclaw-(be|super|fe|qa|data)/ || /<none>/'
 "
 }
 

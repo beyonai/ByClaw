@@ -72,7 +72,7 @@ class AssistantChatApplicationServiceTest {
     }
 
     @Test
-    void stopChat_prefersTraceIdAsCancelExecutionId() {
+    void stopChat_decodesGatewayMessageIdFromTraceIdWhenMessageIdIsAbsent() {
         String traceId = TraceIdCodec.encode(11L, 21L);
         StopChatDto stopChatDto = new StopChatDto();
         stopChatDto.setAgentId(30L);
@@ -83,7 +83,7 @@ class AssistantChatApplicationServiceTest {
 
         assistantChatApplicationService.stopChat(stopChatDto);
 
-        verify(gatewayClient).cancelTask(eq(traceId), eq("10"), eq("user cancel task"), eq("BYCLAW_EXE_u1"),
+        verify(gatewayClient).cancelTask(eq("21"), eq("10"), eq("user cancel task"), eq("BYCLAW_EXE_u1"),
             eq("u1"), eq("force"));
         verify(runningOutputStreamRegistry).release(10L, 21L);
         verify(runningChatSnapshotService).delete(10L, 21L);

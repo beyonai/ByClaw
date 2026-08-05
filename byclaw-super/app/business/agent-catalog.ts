@@ -1,0 +1,204 @@
+import type { AgentProfile } from "@byclaw/by-conductor";
+import { OPENCLAW_BY_FRAMEWORK_CONNECTOR_ID } from "@byclaw/connector-openclaw-by-framework";
+import { THIRD_PARTY_A2A_CONNECTOR_ID } from "@byclaw/connector-third-party-a2a";
+import { THIRD_PARTY_INTERFACE_SSE_CONNECTOR_ID } from "@byclaw/connector-third-party-interface-sse";
+import { THIRD_PARTY_PAGE_CONNECTOR_ID } from "@byclaw/connector-third-party-page";
+import type { ByClawBeEndpointResolver } from "./endpoint-resolver.js";
+import { normalizeBaseUrl, postByClawBeJson, type FetchLike } from "./byclaw-be-http.js";
+
+const DISCOVER_PATH = "/byaiService/api/v2/digitEmploy/discoverMine";
+
+const DISCOVER_REQUEST = {
+  terminals: ["ALL", "PC", "APP"],
+  keyword: "",
+  metaStatus: "ALL",
+  orgFilters: [{ type: "all" }],
+  orderField: "updateTime",
+  orderBy: "desc",
+  language: "zh-CN",
+} as const;
+
+type DiscoverAgent = {
+  id?: string | number;
+  resourceId?: string | number;
+  resourceCode?: string;
+  name?: string;
+  resourceDesc?: string;
+  tagName?: string;
+  skills?: string;
+  agentType?: string;
+  createType?: string;
+  integrationType?: string;
+  usesPermissions?: boolean;
+};
+
+export interface AuthorizedAgentCatalog {
+  /** 使用当前登录 Token 查询并返回该用户有权调度的 Agent 快照。 */
+  listAuthorizedAgents(input: {
+    beyondToken: string;
+    systemCode?: string;
+  }): Promise<AgentProfile[]>;
+}
+
+export interface ByClawBeAgentCatalogOptions {
+  baseUrl: string;
+  timeoutMs: number;
+  fetchImpl?: FetchLike;
+  endpointResolver?: ByClawBeEndpointResolver;
+}
+
+export class ByClawBeAgentCatalogError extends Error {
+  /** 创建携带上游 HTTP 状态的 Agent Catalog 调用异常。 */
+  constructor(
+    message: string,
+    readonly statusCode?: number,
+  ) {
+    super(message);
+    this.name = "ByClawBeAgentCatalogError";
+  }
+}
+
+/** 通过 ByClaw BE 的 discoverMine API 加载当前账号下可使用的数字员工（全量、不分页）。 */
+export class ByClawBeAgentCatalog implements AuthorizedAgentCatalog {
+  readonly #fallbackBaseUrl: URL;
+  readonly #timeoutMs: number;
+  readonly #fetch: FetchLike;
+  readonly #endpointResolver: ByClawBeEndpointResolver | undefined;
+
+  /** 固定 discover 地址和超时，允许测试注入 fetch 实现。 */
+  constructor(options: ByClawBeAgentCatalogOptions) {
+    this.#fallbackBaseUrl = normalizeBaseUrl(options.baseUrl);
+    this.#timeoutMs = options.timeoutMs;
+    this.#fetch = options.fetchImpl ?? globalThis.fetch;
+    this.#endpointResolver = options.endpointResolver;
+  }
+
+  /** 携带 Beyond-Token 调用发现接口，并只保留 usesPermissions 为真的数字员工。 */
+  async listAuthorizedAgents(input: {
+    beyondToken: string;
+    systemCode?: string;
+  }): Promise<AgentProfile[]> {
+    const data = await postByClawBeJson({
+      fetchImpl: this.#fetch,
+      ...(this.#endpointResolver ? { endpointResolver: this.#endpointResolver } : {}),
+      fallbackBaseUrl: this.#fallbackBaseUrl,
+      timeoutMs: this.#timeoutMs,
+      path: DISCOVER_PATH,
+      beyondToken: input.beyondToken,
+      ...(input.systemCode ? { systemCode: input.systemCode } : {}),
+      body: DISCOVER_REQUEST,
+      extraHeaders: { language: "zh-CN" },
+      label: "discover",
+      toError: (message, statusCode) =>
+        new ByClawBeAgentCatalogError(message, statusCode),
+    });
+    if (!Array.isArray(data)) {
+      throw new ByClawBeAgentCatalogError(
+        "ByClaw BE discover returned invalid result",
+      );
+    }
+    return toAuthorizedAgents(data as DiscoverAgent[]);
+  }
+}
+
+/** 过滤无权限或字段不完整的记录，并转换为 by-conductor AgentProfile。 */
+function toAuthorizedAgents(items: DiscoverAgent[]): AgentProfile[] {
+  const agents = new Map<string, AgentProfile>();
+  for (const item of items) {
+    if (item.usesPermissions !== true) {
+      continue;
+    }
+    const id = stringValue(item.id ?? item.resourceId);
+    const name = stringValue(item.name);
+    if (!id || !name) {
+      continue;
+    }
+    const description = buildDescription(item);
+    const targetAgentType = resolveTargetAgentType(item.agentType);
+    agents.set(id, {
+      id,
+      ...(stringValue(item.resourceCode) ? { code: stringValue(item.resourceCode) } : {}),
+      name,
+      ...(description ? { description } : {}),
+      execution: {
+        connectorId: resolveConnectorId(item),
+        targetId: id,
+        ...(targetAgentType ? { targetAgentType } : {}),
+      },
+    });
+  }
+  return [...agents.values()];
+}
+
+/** 根据 discoverMine 返回的创建方式和集成类型选择执行链路。 */
+function resolveConnectorId(item: DiscoverAgent): string {
+  if (normalizeEnum(item.createType) !== "FROM_THIRD") {
+    return OPENCLAW_BY_FRAMEWORK_CONNECTOR_ID;
+  }
+  switch (normalizeEnum(item.integrationType)) {
+    case "INTERFACE":
+      return THIRD_PARTY_INTERFACE_SSE_CONNECTOR_ID;
+    case "A2A":
+      return THIRD_PARTY_A2A_CONNECTOR_ID;
+    case "PAGE":
+      return THIRD_PARTY_PAGE_CONNECTOR_ID;
+    default:
+      return OPENCLAW_BY_FRAMEWORK_CONNECTOR_ID;
+  }
+}
+
+/**
+ * 与 ByClaw BE ResourceRuntimeInfoResolver 的数字员工路由保持一致。
+ * 普通数字员工不写目标类型，由 Connector 继续路由到用户隔离的 BYCLAW_EXE Worker。
+ */
+function resolveTargetAgentType(agentType: string | undefined): string | undefined {
+  switch (stringValue(agentType)) {
+    case "005":
+      return "BYCLAW_DATA";
+    case "006":
+      return "BYCLAW_QA";
+    default:
+      return undefined;
+  }
+}
+
+function normalizeEnum(value: unknown): string {
+  return stringValue(value).toUpperCase();
+}
+
+/** 汇总数字员工描述、类型和技能编码，作为 Leader 路由时可见的能力说明。 */
+function buildDescription(item: DiscoverAgent): string {
+  const parts = [stringValue(item.resourceDesc), stringValue(item.tagName)];
+  const skillCodes = parseSkillCodes(item.skills);
+  if (skillCodes.length > 0) {
+    parts.push(`技能：${skillCodes.join("、")}`);
+  }
+  return [...new Set(parts.filter(Boolean))].join("；");
+}
+
+/** 从 discover 的 skills JSON 字符串中安全提取 skillCode。 */
+function parseSkillCodes(value: string | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .map((skill) =>
+        typeof skill === "object" && skill !== null && "skillCode" in skill
+          ? stringValue(skill.skillCode)
+          : "",
+      )
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** 将数字或字符串字段统一转换为去空格字符串。 */
+function stringValue(value: unknown): string {
+  return typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+}

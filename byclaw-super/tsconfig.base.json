@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "sourceMap": true,
+    "composite": true,
+    "types": ["node"],
+    "paths": {
+      "@byclaw/by-conductor": ["./packages/by-conductor/src/index.ts"],
+      "@byclaw/connector-openclaw-by-framework": ["./packages/connectors/openclaw-by-framework/src/index.ts"],
+      "@byclaw/connector-third-party-common": ["./packages/connectors/third-party-common/src/index.ts"],
+      "@byclaw/connector-third-party-interface-sse": ["./packages/connectors/third-party-interface-sse/src/index.ts"],
+      "@byclaw/connector-third-party-a2a": ["./packages/connectors/third-party-a2a/src/index.ts"],
+      "@byclaw/connector-third-party-page": ["./packages/connectors/third-party-page/src/index.ts"],
+      "@byclaw/storage-postgres": ["./packages/storage-postgres/src/index.ts"]
+    }
+  }
+}

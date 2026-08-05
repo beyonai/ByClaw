@@ -1,0 +1,46 @@
+FROM python:3.12-slim
+
+# patchright/playwright chromium 跑起来需要的系统库 + 中文字体
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        fonts-noto-cjk \
+        libnss3 \
+        libnspr4 \
+        libatk1.0-0 \
+        libatk-bridge2.0-0 \
+        libcups2 \
+        libdrm2 \
+        libxkbcommon0 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxfixes3 \
+        libxrandr2 \
+        libgbm1 \
+        libpango-1.0-0 \
+        libcairo2 \
+        libasound2 \
+        libgl1 \
+        libglib2.0-0 \
+        ; \
+    rm -rf /var/lib/apt/lists/*
+
+# 用清华源加速 pip
+RUN pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+    && pip config --global set global.trusted-host pypi.tuna.tsinghua.edu.cn
+
+WORKDIR /tmp
+COPY social_auto_upload-0.1.0-py3-none-any.whl .
+
+# 装 wheel + 下载 patchright chromium + 三道自检
+RUN set -eux; \
+    pip install --no-cache-dir social_auto_upload-0.1.0-py3-none-any.whl; \
+    patchright install chromium; \
+    sau --help >/dev/null; \
+    test -f "$(python3 -c 'from utils.base_social_media import stealth_js_path; print(stealth_js_path())')"; \
+    python3 -c 'from utils.base_social_media import stealth_js_path; p=stealth_js_path(); print("stealth ok:", p, "size=", p.stat().st_size)'
+
+ENV SAU_BASE_DIR=/by/sau \
+    TZ=Asia/Shanghai
+RUN mkdir -p /by/sau/cookies

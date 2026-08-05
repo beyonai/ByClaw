@@ -366,6 +366,13 @@ const RenderContent = (props: ResourceCardProps) => {
       window.dispatchEvent(
         new CustomEvent('digitalEmployeeResourceInstalled', { detail: { resourceId: resource?.resourceId } })
       );
+      if (isSkillResource(resource, resourceType)) {
+        EventEmitter?.emit('beyond-resourceList-resourceType-reload', {
+          resourceType: 'SKILL',
+          resetSkillFilters: false,
+          skipResourceCenterRefresh: true,
+        });
+      }
     },
   });
 

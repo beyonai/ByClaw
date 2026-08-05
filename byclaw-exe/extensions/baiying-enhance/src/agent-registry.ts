@@ -2,6 +2,7 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk/compat";
 import type { AdaptedManagedAgent, ProviderBundle } from "./agent-adapter.js";
 import {
   DEFAULT_AIMODEL_SECRET_PROVIDER_NAME,
+  DEFAULT_AIMODEL_TIMEOUT_SECONDS,
   resolveAimodelConfigRedisKey,
   resolveAimodelTypeListRedisKey,
   resolveAimodelSecretProviderName,
@@ -129,6 +130,7 @@ function upsertDefaultAimodelProvider(
     baseUrl: defaultModel.provider.baseUrl,
     apiKey: defaultModel.provider.apiKey,
     api: defaultModel.provider.api,
+    timeoutSeconds: defaultModel.provider.timeoutSeconds ?? DEFAULT_AIMODEL_TIMEOUT_SECONDS,
     models: [defaultModelDefinition(defaultModel.provider)],
   };
   if (!cfg.agents!.defaults) {
@@ -280,6 +282,7 @@ export function mergeManagedAgentsIntoConfig(params: {
         baseUrl: m.provider.baseUrl,
         apiKey: m.provider.apiKey,
         api: m.provider.api,
+        timeoutSeconds: m.provider.timeoutSeconds ?? DEFAULT_AIMODEL_TIMEOUT_SECONDS,
         models: [defaultModelDefinition(m.provider)],
       };
     }

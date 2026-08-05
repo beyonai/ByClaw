@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
 import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
@@ -29,20 +30,34 @@ class TargetAgentResolverTest {
     }
 
     /**
-     * 默认超级助手已改为真实数字员工资源，但下游仍以 agentId=null 表示 main 路由。
-     *
-     * @author qin.guoquan
-     * @date 2026-05-09 15:20:00
+     * 已迁移到 BY_SUPER 的默认超级助手必须保留真实资源 ID，供后续读取 worker_agent_type。
      */
     @Test
-    void resolveAgentIdWithAssistantChatDto_clearsAgentIdWhenResourceCodeEndsWithMain() {
+    void resolveAgentIdWithAssistantChatDto_keepsAgentIdWhenDefaultSuperAssistantRoutesToBySuper() {
         AssistantChatDto assistantChatDto = new AssistantChatDto();
         assistantChatDto.setAgentId(1001L);
         SsResource resource = new SsResource();
         resource.setResourceId(1001L);
         resource.setResourceBizType(Constants.ResourceBizType.DIG_EMPLOYEE);
         resource.setResourceCode("user001_main");
+        resource.setWorkerAgentType(WorkerAgentType.BY_SUPER.getCode());
         when(ssResourceService.findById(1001L)).thenReturn(resource);
+
+        Long agentId = targetAgentResolver.resolveAgentId(assistantChatDto);
+
+        assertThat(agentId).isEqualTo(1001L);
+    }
+
+    @Test
+    void resolveAgentIdWithAssistantChatDto_keepsLegacyMainRouteBeforeResourceMigration() {
+        AssistantChatDto assistantChatDto = new AssistantChatDto();
+        assistantChatDto.setAgentId(1003L);
+        SsResource resource = new SsResource();
+        resource.setResourceId(1003L);
+        resource.setResourceBizType(Constants.ResourceBizType.DIG_EMPLOYEE);
+        resource.setResourceCode("user003_main");
+        resource.setWorkerAgentType(WorkerAgentType.BYCLAW_EXE.getCode());
+        when(ssResourceService.findById(1003L)).thenReturn(resource);
 
         Long agentId = targetAgentResolver.resolveAgentId(assistantChatDto);
 
@@ -66,5 +81,13 @@ class TargetAgentResolverTest {
         Long agentId = targetAgentResolver.resolveAgentId(1002L);
 
         assertThat(agentId).isEqualTo(1002L);
+    }
+
+    @Test
+    void resolveAgentType_routesNullAgentIdToBySuperDespiteLegacyResumeAgentType() {
+        String targetAgentType = targetAgentResolver.resolveAgentType(
+            WorkerAgentType.BY_SUPER.getCode(), null, "BYCLAW_EXE_user001", "user001");
+
+        assertThat(targetAgentType).isEqualTo(WorkerAgentType.BY_SUPER.getCode());
     }
 }

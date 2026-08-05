@@ -1,0 +1,45 @@
+{
+  "name": "@byclaw/byclaw-super",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ByClaw conductor engine and multi-tenant super assistant service",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build:packages": "pnpm -r --if-present run build",
+    "dev": "pnpm run build:packages && tsx app/index.ts",
+    "build": "pnpm run build:packages && tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "db:migrate": "tsx app/scripts/migrate.ts",
+    "capability:backfill": "tsx app/scripts/backfill-agent-capability-cards.ts",
+    "smoke": "tsx app/scripts/smoke.ts",
+    "typecheck": "pnpm run build:packages && pnpm -r --if-present run typecheck && tsc -p tsconfig.json --noEmit",
+    "test": "pnpm run build && vitest run",
+    "test:e2e": "pnpm run build:packages && tsc -p e2e/tsconfig.json && vitest run --config e2e/vitest.config.ts"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "tsx": "4.23.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  },
+  "dependencies": {
+    "@byclaw/by-conductor": "workspace:*",
+    "@byclaw/by-framework": "1.5.1",
+    "@byclaw/connector-openclaw-by-framework": "workspace:*",
+    "@byclaw/connector-third-party-a2a": "workspace:*",
+    "@byclaw/connector-third-party-common": "workspace:*",
+    "@byclaw/connector-third-party-interface-sse": "workspace:*",
+    "@byclaw/connector-third-party-page": "workspace:*",
+    "@byclaw/storage-postgres": "workspace:*",
+    "@fastify/cors": "11.3.0",
+    "dotenv": "17.4.2",
+    "fastify": "5.10.0",
+    "pino-pretty": "13.1.3"
+  }
+}

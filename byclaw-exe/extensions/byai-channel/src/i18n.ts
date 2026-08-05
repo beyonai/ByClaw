@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { getSessionPathBySessionId } from "./session-path.js";
 import type { Language } from "./types.js";
 import {
@@ -209,6 +211,39 @@ export function buildUserMdReloadPrompt(language?: string): string {
     return [
         "注意：检测到 workspace 下的 USER.md 已更新。",
         "请先重新读取 USER.md，再继续回答，确保使用最新用户信息（如 userName、userCode）。",
+    ].join("\n");
+}
+
+/** Keep chat-created skills scoped to the current agent workspace. */
+export function buildSkillInstallPrompt(workspaceDir: string, language?: string): string {
+    const en = isEnglishLanguage(language);
+    const normalizedWorkspace = typeof workspaceDir === "string" && workspaceDir.trim()
+        ? path.resolve(workspaceDir.trim())
+        : "";
+    const skillsDir = normalizedWorkspace
+        ? path.join(normalizedWorkspace, "skills")
+        : en
+          ? "<current agent workspace>/skills"
+          : "<当前 agent workspace>/skills";
+
+    if (en) {
+        return [
+            "## Skill installation workflow (mandatory)",
+            "**Scope**: Follow this section whenever the user asks via chat to create, install, update, debug, or modify a skill.",
+            `- **Install target**: Always create or install chat-created/chat-installed skills under the current agent workspace skills directory: \`${skillsDir}\`.`,
+            "- **Forbidden route**: Do not use OpenClaw Workshop, OpenClaw skill marketplace/workbench installation flows, or any route that triggers approval/review workflow.",
+            "- **Do not write** chat-created/chat-installed skills to global or shared locations such as `~/.openclaw/skills`, runtime state `skills`, or `/app/skills`; those locations may only be read as existing built-in/platform skill references.",
+            "- If a skill already exists elsewhere and the user wants it available in this chat, copy or recreate the editable skill under the install target, then make later edits there.",
+        ].join("\n");
+    }
+
+    return [
+        "## Skill 安装工作规范（强制）",
+        "**适用范围**：用户在聊天中要求创建、安装、更新、调试或修改 skill 时，必须遵守本节。",
+        `- **安装目标**：通过聊天创建或安装的 skill，一律创建/安装到当前 agent 的 workspace skills 目录：\`${skillsDir}\`。`,
+        "- **禁止路径**：不要使用 OpenClaw Workshop、OpenClaw skill 市场/工作台安装流，或任何会触发审批/审核流程的入口。",
+        "- **禁止写入**：不要把聊天创建/安装的 skill 写到 `~/.openclaw/skills`、运行时 state 的 `skills`、`/app/skills` 等全局/共享目录；这些位置仅可作为已存在内置/平台 skill 的只读引用。",
+        "- 若 skill 已存在于其它位置且用户希望本次聊天可用，请复制或重建到上述安装目标，后续修改也只改该目录下的副本。",
     ].join("\n");
 }
 

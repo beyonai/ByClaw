@@ -741,7 +741,7 @@ public class DigitalEmployeeApplicationService {
         dto.setCorePersonaDefinition(resourceName);
         dto.setPrologue(this.buildDefaultPersonalAssistantPrologue(resourceName, dataset));
         dto.setImplType(ImplType.ASK_AGENT.getCode());
-        // dto.setWorkerAgentType(WorkerAgentType.BYCLAW_EXE.getCode());
+        dto.setWorkerAgentType(WorkerAgentType.BY_SUPER.getCode());
         if (dataset != null && dataset.getResourceId() != null) {
             dto.setRelIds(List.of(dataset.getResourceId()));
         }
@@ -834,7 +834,8 @@ public class DigitalEmployeeApplicationService {
      */
     private void fillDigitalEmployeeImplInfo(SsResource ssResource, String agentType) {
         resourceRuntimeInfoResolver.fillResource(ssResource,
-            resourceRuntimeInfoResolver.resolveDigitalEmployee(agentType, ssResource.getResourceId()));
+            resourceRuntimeInfoResolver.resolveDigitalEmployee(agentType, ssResource.getResourceId(),
+                ssResource.getResourceCode()));
     }
 
     /**

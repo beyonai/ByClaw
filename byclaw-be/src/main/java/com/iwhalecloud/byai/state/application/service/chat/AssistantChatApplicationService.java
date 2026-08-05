@@ -218,10 +218,20 @@ public class AssistantChatApplicationService {
     }
 
     private String resolveStopExecutionId(StopChatDto stopChatDto) {
-        if (StringUtils.isNotBlank(stopChatDto.getTraceId())) {
-            return stopChatDto.getTraceId();
+        if (stopChatDto.getMessageId() != null) {
+            return String.valueOf(stopChatDto.getMessageId());
         }
-        return stopChatDto.getMessageId() == null ? null : String.valueOf(stopChatDto.getMessageId());
+        if (StringUtils.isBlank(stopChatDto.getTraceId())) {
+            return null;
+        }
+        try {
+            Long modelAnswerMessageId = TraceIdCodec.decode(stopChatDto.getTraceId()).getModelAnswerMessageId();
+            return modelAnswerMessageId == null ? null : String.valueOf(modelAnswerMessageId);
+        }
+        catch (Exception e) {
+            log.warn("stopChat traceId 无法解析为 Gateway messageId, traceId={}", stopChatDto.getTraceId());
+            return null;
+        }
     }
 
     private Long resolveStopCleanupMessageId(StopChatDto stopChatDto) {
