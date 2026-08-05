@@ -27,6 +27,8 @@ public class ConnectorSkillAuthorizationSyncService {
     );
     private static final Set<String> PUBLIC_VERIFICATION_ERRORS = Set.of(
         "CREDENTIAL_WORKSPACE_UNAVAILABLE",
+        "CONNECTOR_CACHE_INVALID",
+        "CONNECTOR_BUSINESS_PROBE_INVALID",
         "CONNECTOR_CREDENTIAL_INVALID",
         "CONNECTOR_VERIFICATION_TIMEOUT",
         "CONNECTOR_VERIFICATION_FAILED"

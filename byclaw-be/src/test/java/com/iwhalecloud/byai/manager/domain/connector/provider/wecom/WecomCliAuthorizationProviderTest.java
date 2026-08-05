@@ -146,7 +146,19 @@ class WecomCliAuthorizationProviderTest {
         AuthorizationStatusResult result = provider.verify("42", connector(VALID_PROVIDER_STATE));
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
-        assertThat(result.errorCode()).isEqualTo("CONNECTOR_CREDENTIAL_INVALID");
+        assertThat(result.errorCode()).isEqualTo("CONNECTOR_BUSINESS_PROBE_INVALID");
+    }
+
+    @Test
+    void reportsInvalidCredentialCacheSeparatelyFromBusinessProbeFailure() {
+        when(workspaceService.resolve(42L, "wecom-cli")).thenReturn(WORKSPACE);
+        when(cliRunner.run(eq(CACHE_STATUS_COMMAND), eq(ENVIRONMENT), eq(null), any(Duration.class)))
+            .thenReturn(new CliResult(1, "cache unavailable"));
+
+        AuthorizationStatusResult result = provider.verify("42", connector(VALID_PROVIDER_STATE));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+        assertThat(result.errorCode()).isEqualTo("CONNECTOR_CACHE_INVALID");
     }
 
     @Test
