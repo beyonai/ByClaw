@@ -423,6 +423,12 @@
   background: #f3ecff;
 }
 
+// 初始化中标签:橙色带 loading 图标,提示研发项目工作区尚未就绪。
+.projectTagInitializing {
+  color: #d46b08;
+  background: #fff7e6;
+}
+
 // 运营项目沿用统一的浅底标签样式，以青蓝色区别于共享和研发项目。
 .projectTagOperation {
   color: #1677b8;
@@ -753,6 +759,28 @@
 .detailTabsWrap {
   flex-shrink: 0;
   padding: 12px 10px 8px;
+}
+
+// 研发项目 GH_TOKEN 未配置提醒条,贴在 tab 上方,整条文案可点击进入引导弹窗。
+.githubTokenAlert {
+  flex-shrink: 0;
+  margin: 10px 10px 0;
+}
+
+.projectInitAlert {
+  flex-shrink: 0;
+  margin: 10px 10px 0;
+}
+
+.detailProjectInitTag {
+  color: #d46b08;
+  background: #fff7e6;
+}
+
+.githubTokenAlertText {
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .detailCountRow {
@@ -2896,6 +2924,20 @@
 
 .repoDescription {
   color: #999;
+}
+
+// 仓库标题:仓库名 + 类型标签同行。
+.repoTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+// 已存在工作区时的重复提示,置于类型 radio 下方。
+.repoTypeHint {
+  margin-top: 6px;
+  color: #d46b08;
+  font-size: 12px;
 }
 
 .manualRequirementModal {

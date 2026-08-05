@@ -74,6 +74,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 项目管理应用服务。
@@ -164,8 +165,12 @@ public class ProjectApplicationService {
         project.setProjectName(projectName);
         project.setDescription(dto.getDescription());
         project.setResourceId(dto.getResourceId());
-        project.setProjectType(dto.getProjectType() != null ? dto.getProjectType() : "normal");
+        String projectType = dto.getProjectType() != null ? dto.getProjectType() : "normal";
+        project.setProjectType(projectType);
         project.setIsShare(dto.getIsShare() != null ? dto.getIsShare() : Constants.NO_VALUE_N);
+        // 研发项目须先由架构数字员工初始化工作区,建成前禁止建需求/启动任务;普通项目直接就绪。
+        project.setInitStatus("develop".equals(projectType) ? "pending" : "ready");
+        project.setBuildIndex(Constants.NO_VALUE_N);
         project.setCreateBy(CurrentUserHolder.getCurrentUserId());
         project.setCreateTime(new Date());
         project.setDeleteFlag(DeleteFlag.NORMAL);
@@ -181,6 +186,65 @@ public class ProjectApplicationService {
             MemberRole.OWNER);
 
         return project;
+    }
+
+    /**
+     * 触发研发项目工作区初始化：置为 initializing 并记录建索引/技能包配置。
+     *
+     * @param params 含 projectId、buildIndex(Y/N)、skillPackages(数组)
+     */
+    public void startProjectInit(Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        Project project = requireProject(projectId);
+        boolean buildIndex = Constants.YES_VALUE_Y.equalsIgnoreCase(MapParamUtil.getStringValue(params, "buildIndex"))
+            || Boolean.TRUE.equals(params.get("buildIndex"));
+        Project update = new Project();
+        update.setProjectId(project.getProjectId());
+        update.setInitStatus("initializing");
+        update.setBuildIndex(buildIndex ? Constants.YES_VALUE_Y : Constants.NO_VALUE_N);
+        // 技能包仅建索引时保留;逗号分隔,存量枚举暂由前端约束,后端只落原样。
+        update.setIndexSkills(buildIndex ? joinSkillPackages(params.get("skillPackages")) : "");
+        update.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        update.setUpdateTime(new Date());
+        projectService.update(update);
+    }
+
+    /**
+     * 标记研发项目工作区初始化完成：置为 ready。
+     *
+     * @param projectId 项目 ID
+     */
+    public void completeProjectInit(Long projectId) {
+        Project project = requireProject(projectId);
+        Project update = new Project();
+        update.setProjectId(project.getProjectId());
+        update.setInitStatus("ready");
+        update.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        update.setUpdateTime(new Date());
+        projectService.update(update);
+    }
+
+    private Project requireProject(Long projectId) {
+        if (projectId == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.id.required");
+        }
+        Project project = projectService.findById(projectId);
+        if (project == null || DeleteFlag.DELETED.equals(project.getDeleteFlag())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.not.found");
+        }
+        return project;
+    }
+
+    private String joinSkillPackages(Object raw) {
+        if (!(raw instanceof List<?> list) || list.isEmpty()) {
+            return "";
+        }
+        return list.stream()
+            .filter(Objects::nonNull)
+            .map(Object::toString)
+            .map(String::trim)
+            .filter(item -> !item.isEmpty())
+            .collect(Collectors.joining(","));
     }
 
     /**
@@ -555,6 +619,10 @@ public class ProjectApplicationService {
         map.put("resourceId", project.getResourceId());
         map.put("projectType", project.getProjectType());
         map.put("isShare", project.getIsShare());
+        // 研发项目初始化状态与配置:前端据此拦截建需求/启动任务并展示初始化中指示。
+        map.put("initStatus", project.getInitStatus());
+        map.put("buildIndex", project.getBuildIndex());
+        map.put("indexSkills", project.getIndexSkills());
         map.put("repos", repos);
         map.put("sessions", sessions);
         map.put("sessionCount", sessions.size());
@@ -623,6 +691,9 @@ public class ProjectApplicationService {
         repo.setRepoFullName(repoDto.getRepoFullName().trim());
         repo.setRepoUrl(repoDto.getRepoUrl() != null ? repoDto.getRepoUrl().trim() : null);
         repo.setDefaultBranch(defaultBranch.isEmpty() ? "main" : defaultBranch);
+        // 仅接受受支持的仓库类型,其余(含空)按代码仓库处理;工作区唯一性由应用层/前端保证。
+        String repoType = "workspace".equals(repoDto.getRepoType()) ? "workspace" : "code";
+        repo.setRepoType(repoType);
         repo.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
         repo.setCreateTime(new Date());
         projectRepoMapper.insert(repo);
@@ -648,6 +719,7 @@ public class ProjectApplicationService {
         result.put("repoFullName", repo.getRepoFullName());
         result.put("repoUrl", repo.getRepoUrl());
         result.put("defaultBranch", repo.getDefaultBranch());
+        result.put("repoType", repo.getRepoType());
         return result;
     }
 

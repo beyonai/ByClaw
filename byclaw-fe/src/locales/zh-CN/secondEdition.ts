@@ -168,6 +168,8 @@ export default {
   'settings.params.empty': '暂无个人参数',
   'settings.params.keyRequired': '请输入参数名',
   'settings.params.keyInvalid': '参数名需符合环境变量格式，如 API_TOKEN',
+  'settings.params.common.pick': '常用变量',
+  'settings.params.common.ghToken.desc': 'GitHub 访问令牌，研发项目克隆和推送私有仓库时使用',
   'settings.params.valueRequired': '请输入参数值',
   'settings.params.valueTip': '参数值将加密保存，页面不会回显明文。',
   'settings.params.valueKeepTip': '已配置参数值；留空则保持原值不变。',

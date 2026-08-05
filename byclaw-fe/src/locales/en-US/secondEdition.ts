@@ -167,6 +167,9 @@ export default {
   'settings.params.empty': 'No personal parameters',
   'settings.params.keyRequired': 'Please enter parameter name',
   'settings.params.keyInvalid': 'Use environment variable format, such as API_TOKEN',
+  'settings.params.common.pick': 'Common variables',
+  'settings.params.common.ghToken.desc':
+    'GitHub access token, used by develop projects to clone and push private repositories',
   'settings.params.valueRequired': 'Please enter parameter value',
   'settings.params.valueTip': 'The value will be encrypted and never displayed in plain text.',
   'settings.params.valueKeepTip': 'Value is configured. Leave it empty to keep the existing value.',

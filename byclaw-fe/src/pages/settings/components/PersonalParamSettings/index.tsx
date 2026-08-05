@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Button,
   Card,
+  Dropdown,
   Empty,
   Form,
   Input,
@@ -16,7 +17,9 @@ import {
   Typography,
   message,
 } from 'antd';
+import { DownOutlined } from '@ant-design/icons';
 import type { ColumnsType, TableProps } from 'antd/es/table';
+import type { MenuProps } from 'antd';
 import dayjs from 'dayjs';
 // @ts-ignore
 import { useIntl } from '@umijs/max';
@@ -35,6 +38,12 @@ const { Text } = Typography;
 
 const KEY_PATTERN = /^[A-Z_][A-Z0-9_]{0,127}$/;
 const DEFAULT_PAGE_SIZE = 10;
+
+// 平台约定的常用变量,供新增时一键填充 key(避免拼错)。descriptionId 为空则不覆盖用户已填描述。
+// 目前后端仅识别 GH_TOKEN(研发项目 clone/push 私有仓库);新增约定变量只需在此追加。
+const COMMON_PARAM_KEYS: { key: string; descriptionId: string }[] = [
+  { key: 'GH_TOKEN', descriptionId: 'settings.params.common.ghToken.desc' },
+];
 
 const PersonalParamSettings: React.FC = () => {
   const intl = useIntl();
@@ -82,6 +91,22 @@ const PersonalParamSettings: React.FC = () => {
     form.setFieldsValue({ enabled: true });
     setModalOpen(true);
   };
+
+  // 选中常用变量:填 key,并在描述为空时补默认描述,不覆盖用户已输入的描述。
+  const handlePickCommonKey = (key: string) => {
+    const preset = COMMON_PARAM_KEYS.find((item) => item.key === key);
+    const nextValues: { key: string; description?: string } = { key };
+    if (preset && !form.getFieldValue('description')?.trim()) {
+      nextValues.description = intl.formatMessage({ id: preset.descriptionId });
+    }
+    form.setFieldsValue(nextValues);
+    form.validateFields(['key']);
+  };
+
+  const commonKeyMenuItems: MenuProps['items'] = COMMON_PARAM_KEYS.map((item) => ({
+    key: item.key,
+    label: item.key,
+  }));
 
   const openEditModal = (record: PersonalParam) => {
     setEditingParam(record);
@@ -357,7 +382,25 @@ const PersonalParamSettings: React.FC = () => {
                 },
               ]}
             >
-              <Input disabled={!!editingParam} placeholder="API_TOKEN" maxLength={128} />
+              <Input
+                disabled={!!editingParam}
+                placeholder="API_TOKEN"
+                maxLength={128}
+                // 新增时提供常用变量快捷选择,避免手输拼错(如 GH_TOKEN);编辑态 key 不可改,不显示。
+                addonAfter={
+                  editingParam ? undefined : (
+                    <Dropdown
+                      trigger={['click']}
+                      menu={{ items: commonKeyMenuItems, onClick: ({ key }) => handlePickCommonKey(key) }}
+                    >
+                      <span className={styles.commonKeyTrigger}>
+                        {intl.formatMessage({ id: 'settings.params.common.pick' })}
+                        <DownOutlined />
+                      </span>
+                    </Dropdown>
+                  )
+                }
+              />
             </Form.Item>
             <Form.Item
               label={intl.formatMessage({ id: 'settings.params.enabled' })}

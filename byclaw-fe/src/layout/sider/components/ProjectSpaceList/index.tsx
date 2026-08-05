@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Dropdown, Empty, Input, Modal, Skeleton, Spin, Tag, Tooltip, message } from 'antd';
-import { DownOutlined, PlusOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons';
+import { DownOutlined, LoadingOutlined, PlusOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons';
 // @ts-ignore
 import { useDispatch, useIntl, useNavigate, useSelector } from '@umijs/max';
 import classNames from 'classnames';
@@ -10,6 +10,9 @@ import ProjectFormModal, {
   type ProjectFormValues,
   type ProjectShareMember,
 } from '@/pages/projectSpace/components/ProjectFormModal';
+import ProjectOnboardingWizard, {
+  type OnboardingBasicValues,
+} from '@/pages/projectSpace/components/ProjectOnboardingWizard';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
 import {
@@ -148,6 +151,10 @@ const getProjectScenes = (project: ProjectSpace, t: ProjectSpaceTranslate) => {
   return [{ classSuffix: 'Personal', text: t('scene.personal') }];
 };
 
+// 研发项目未完成初始化(pending/initializing)时展示初始化中标签,提示尚不能建需求/启动任务。
+const isProjectInitializing = (project: ProjectSpace) =>
+  project.projectType === 'develop' && !!project.initStatus && project.initStatus !== 'ready';
+
 const renderProjectSceneTag = (project: ProjectSpace, t: ProjectSpaceTranslate, className?: string) => {
   const scenes = getProjectScenes(project, t);
   return (
@@ -161,6 +168,15 @@ const renderProjectSceneTag = (project: ProjectSpace, t: ProjectSpaceTranslate, 
           {scene.text}
         </Tag>
       ))}
+      {isProjectInitializing(project) && (
+        <Tag
+          bordered={false}
+          icon={<LoadingOutlined spin />}
+          className={classNames(styles.projectTag, styles.projectTagInitializing, className)}
+        >
+          {t('scene.initializing')}
+        </Tag>
+      )}
     </span>
   );
 };
@@ -242,6 +258,8 @@ const ProjectSpaceList: React.FC = () => {
   const [projectSessionPageMap, setProjectSessionPageMap] = useState<Record<string, ProjectSessionPageState>>({});
   const [sessionMoreLoadingMap, setSessionMoreLoadingMap] = useState<Record<string, boolean>>({});
   const [projectModalOpen, setProjectModalOpen] = useState(false);
+  // 研发项目走引导向导(基本信息->仓库->架构初始化);普通项目仍用单表单弹窗。
+  const [wizardOpen, setWizardOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectSpace>();
   const [projectCreating, setProjectCreating] = useState(false);
   const [detailProject, setDetailProject] = useState<ProjectSpace>();
@@ -698,6 +716,72 @@ const ProjectSpaceList: React.FC = () => {
     setProjectModalOpen(true);
   };
 
+  const handleOpenCreateDevelopProject = () => {
+    setEditingProject(undefined);
+    setWizardOpen(true);
+  };
+
+  // 向导 step1:查重 + 建研发项目 + 存架构员工覆盖,返回 projectId 供后续建仓/初始化;失败返回空串。
+  const handleWizardCreateProject = async (values: OnboardingBasicValues): Promise<string> => {
+    const projectName = normalizeProjectName(values.projectName);
+    if (!projectName) {
+      message.warning(t('message.projectNameRequired'));
+      return '';
+    }
+    const duplicateProject = mergedProjects.find(
+      (project) => normalizeProjectName(project.projectName) === projectName
+    );
+    if (duplicateProject) {
+      message.warning(t('message.projectNameDuplicate'));
+      return '';
+    }
+    try {
+      const res = await createProject({
+        projectName,
+        description: values.description?.trim(),
+        projectType: 'develop',
+        // 研发项目强制共享,与单表单弹窗规则一致。
+        isShare: 'Y',
+        shareTargets: [],
+      });
+      const createdProjectId = getProjectIdFromSaveResponse(res);
+      if (!createdProjectId) {
+        message.error(t('message.createFailed'));
+        return '';
+      }
+      // 架构员工作为项目默认覆盖落库(仅 architect 角色,其余留空回退全局)。
+      if (values.architectAgentId) {
+        await saveDefaultAgent({ architectAgentId: values.architectAgentId, projectId: Number(createdProjectId) });
+      }
+      message.success(t('message.createSuccess'));
+      const refreshedProjects = await fetchProjects();
+      const createdProject = refreshedProjects.find((project) => `${project.projectId}` === createdProjectId);
+      updateProjectScopeId(createdProject?.projectId || createdProjectId);
+      return createdProjectId;
+    } catch (error) {
+      console.error('Failed to create develop project via wizard:', error);
+      message.error(t('message.createFailed'));
+      return '';
+    }
+  };
+
+  const handleWizardEnterArchitectChat = (createdProjectId: string) => {
+    const target = mergedProjects.find((project) => `${project.projectId}` === createdProjectId);
+    setWizardOpen(false);
+    clearDetailPanel?.();
+    setAgentId?.('');
+    setSessionId?.('');
+    // 复用新建会话入口进入架构员工聊天,首轮对话自动完成项目绑定后进行工作区初始化。
+    navigate('/chat', {
+      state: {
+        keepSiderActiveKey: 'sessions',
+        from: 'projectSpace',
+        projectId: createdProjectId,
+        projectName: target?.projectName,
+      },
+    });
+  };
+
   const handleNewChat = useCallback(() => {
     if (!activeScopeProject?.projectId) {
       message.warning(t('message.selectProjectFirst'));
@@ -734,6 +818,15 @@ const ProjectSpaceList: React.FC = () => {
       // 详情请求可能在退出项目或切换详情后才返回，只回写仍处于当前详情的同一项目。
       setDetailProject((current) => (`${current?.projectId || ''}` === targetProjectId ? detail : current));
     });
+  };
+
+  // 向导完成:关闭向导并展开新建研发项目的详情。定义在 handleOpenProjectDetail 之后以满足声明顺序。
+  const handleWizardFinish = (createdProjectId: string) => {
+    setWizardOpen(false);
+    const target = mergedProjects.find((project) => `${project.projectId}` === createdProjectId);
+    if (target) {
+      handleOpenProjectDetail(target);
+    }
   };
 
   useEffect(() => {
@@ -1342,10 +1435,29 @@ const ProjectSpaceList: React.FC = () => {
                   onChange={(event) => setProjectScopeSearchKeyword(event.target.value)}
                 />
               </Dropdown>
-              <Tooltip title={t('createProject')} placement="top">
-                {/* 右侧仅保留新建项目入口，项目详情由下方快捷入口承载。 */}
-                <Button className={styles.newProjectButton} icon={<PlusOutlined />} onClick={handleOpenCreateProject} />
-              </Tooltip>
+              {isDevelopProjectEnabled ? (
+                // 启用研发项目后:加号变菜单,普通项目走单表单,研发项目走引导向导。
+                <Dropdown
+                  trigger={['click']}
+                  menu={{
+                    items: [
+                      { key: 'normal', label: t('createProject'), onClick: handleOpenCreateProject },
+                      { key: 'develop', label: t('createDevelopProject'), onClick: handleOpenCreateDevelopProject },
+                    ],
+                  }}
+                >
+                  <Button className={styles.newProjectButton} icon={<PlusOutlined />} />
+                </Dropdown>
+              ) : (
+                <Tooltip title={t('createProject')} placement="top">
+                  {/* 右侧仅保留新建项目入口，项目详情由下方快捷入口承载。 */}
+                  <Button
+                    className={styles.newProjectButton}
+                    icon={<PlusOutlined />}
+                    onClick={handleOpenCreateProject}
+                  />
+                </Tooltip>
+              )}
             </div>
             {/* 会话搜索与项目详情入口同行展示，入口不覆盖搜索框。 */}
             <div
@@ -1405,6 +1517,14 @@ const ProjectSpaceList: React.FC = () => {
           setEditingProject(undefined);
         }}
         onSubmit={handleCreateProject}
+      />
+
+      <ProjectOnboardingWizard
+        open={wizardOpen}
+        onCancel={() => setWizardOpen(false)}
+        onCreateProject={handleWizardCreateProject}
+        onFinish={handleWizardFinish}
+        onEnterArchitectChat={handleWizardEnterArchitectChat}
       />
     </div>
   );

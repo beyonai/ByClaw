@@ -136,12 +136,16 @@ export type DevloopProjectSpaceFile = {
   shareLink?: string | null;
 };
 
+// 仓库类型:workspace 工作区(单个,承载项目上下文/产出) / code 代码仓库(可多个)。存量数据默认 code。
+export type ProjectRepoType = 'workspace' | 'code';
+
 export type DevloopProjectRepo = {
   repoId: number;
   projectId: number;
   repoFullName: string;
   repoUrl?: string;
   defaultBranch?: string;
+  repoType?: ProjectRepoType;
   createBy?: string;
   createTime?: string;
 };
@@ -159,12 +163,25 @@ export const updateProject = (data: Partial<DevloopProjectPayload> & { projectId
 
 export const deleteProject = (projectId: number) => POST<any>('/byaiService/project/delete', { projectId });
 
+// 研发项目工作区初始化状态:ready 已就绪(默认/普通项目)、pending 待初始化、initializing 初始化中。
+// 仅 develop 项目在未 ready 前禁止建需求/启动任务。
+export type ProjectInitStatus = 'ready' | 'pending' | 'initializing';
+
+// 触发研发项目初始化:置 initializing 并下发建索引/技能包配置。
+export const startProjectInit = (data: { projectId: number; buildIndex: boolean; skillPackages: string[] }) =>
+  POST<any>('/byaiService/project/init/start', data);
+
+// 标记研发项目初始化完成:置 ready,之后方可建需求/启动任务。
+export const completeProjectInit = (projectId: number) =>
+  POST<any>('/byaiService/project/init/complete', { projectId });
+
 // 项目仓库维护：扫描源关联仓库时可即席新增/删除
 export const createProjectRepo = (data: {
   projectId: number;
   repoFullName: string;
   repoUrl?: string;
   defaultBranch?: string;
+  repoType?: ProjectRepoType;
 }) => POST<any>('/byaiService/project/repo/create', data);
 
 export const listProjectRepos = (projectId: number) =>

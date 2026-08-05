@@ -25,6 +25,9 @@ public class ProjectRepo {
 
     private String defaultBranch;
 
+    /** 仓库类型 workspace工作区(单个)/code代码仓库(可多个);存量默认 code。 */
+    private String repoType;
+
     private String createBy;
 
     @JSONField(format = "yyyy-MM-dd HH:mm:ss")

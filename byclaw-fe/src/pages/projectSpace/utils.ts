@@ -59,6 +59,8 @@ export const normalizeProject = (item: any): ProjectSpace => ({
   projectType: item?.projectType === 'development' ? 'develop' : item?.projectType || 'normal',
   isShare: item?.isShare === 'Y' || item?.sharedFlag === true ? 'Y' : 'N',
   sharedFlag: item?.isShare === 'Y' || item?.sharedFlag === true,
+  // 存量/普通项目无该字段时按 ready 处理,避免误拦截历史项目建需求/启动任务。
+  initStatus: item?.initStatus || 'ready',
   createBy: item?.createBy,
   createTime: item?.createTime,
   sessionCount: item?.sessionCount ?? item?.sessions?.length ?? 0,

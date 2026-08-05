@@ -17,6 +17,7 @@ jest.mock('@umijs/max', () => ({
   useIntl: () => ({
     formatMessage: ({ id }: { id: string }) => id,
   }),
+  useLocation: () => ({ state: null }),
   useSelector: (selector: (state: any) => any) => mockUseSelector(selector),
 }));
 

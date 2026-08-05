@@ -97,6 +97,29 @@ public class ProjectController {
     }
 
     /**
+     * 触发研发项目工作区初始化：置为 initializing 并记录建索引/技能包配置。
+     *
+     * @param params 包含 projectId（必填）、buildIndex（Y/N，可选）、skillPackages（字符串数组，可选）
+     */
+    @PostMapping("/init/start")
+    public ResponseUtil<Void> startProjectInit(@RequestBody Map<String, Object> params) {
+        projectApplicationService.startProjectInit(params);
+        return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 标记研发项目工作区初始化完成：置为 ready，之后方可建需求/启动任务。
+     *
+     * @param params 包含 projectId（必填）
+     */
+    @PostMapping("/init/complete")
+    public ResponseUtil<Void> completeProjectInit(@RequestBody Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        projectApplicationService.completeProjectInit(projectId);
+        return ResponseUtil.successResponse();
+    }
+
+    /**
      * 查询项目成员列表
      *
      * @param params 包含 projectId，可选 userName / keyword

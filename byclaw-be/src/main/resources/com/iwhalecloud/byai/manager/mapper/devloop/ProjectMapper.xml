@@ -9,6 +9,9 @@
         <result column="resource_id" property="resourceId"/>
         <result column="project_type" property="projectType"/>
         <result column="is_share" property="isShare"/>
+        <result column="init_status" property="initStatus"/>
+        <result column="build_index" property="buildIndex"/>
+        <result column="index_skills" property="indexSkills"/>
         <result column="is_default" property="isDefault"/>
         <result column="create_by" property="createBy"/>
         <result column="create_time" property="createTime"/>
@@ -30,6 +33,7 @@
                a.resource_id,
                a.project_type,
                a.is_share,
+               a.init_status,
                a.create_by,
                a.create_time,
                a.update_by,

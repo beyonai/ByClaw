@@ -3,6 +3,9 @@ export type ProjectType = 'normal' | 'operation' | 'develop' | 'default';
 
 export type ProjectShareFlag = 'N' | 'Y';
 
+// 研发项目工作区初始化状态:ready 已就绪(默认/普通项目)、pending 待初始化、initializing 初始化中。
+export type ProjectInitStatus = 'ready' | 'pending' | 'initializing';
+
 export type ProjectMemberRole = 'owner' | 'admin' | 'member';
 
 export type ProjectResourceScope = 'shared' | 'task' | 'session';
@@ -43,6 +46,9 @@ export interface ProjectSpace {
   projectType: ProjectType;
   isShare: ProjectShareFlag;
   sharedFlag: boolean;
+  // 研发项目工作区初始化状态:ready 已就绪(默认/普通项目)、pending 待初始化、initializing 初始化中。
+  // 存量与普通项目视为 ready;仅 develop 未 ready 前禁止建需求/启动任务。
+  initStatus?: ProjectInitStatus;
   createBy?: string | number;
   createTime?: string;
   sessionCount?: number;

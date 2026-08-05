@@ -428,8 +428,22 @@ CREATE INDEX IF NOT EXISTS idx_scan_item_task_project ON byai.byai_scan_item_tas
 CREATE INDEX IF NOT EXISTS idx_scan_item_task_session ON byai.byai_scan_item_task (session_id);
 
 -- 集成执行记录挂上需求维度:需求级批量把每个 run 关联到触发它的需求,聚合看板与失败打回按此反查。
-ALTER TABLE byai.byai_integration_run ADD COLUMN IF NOT EXISTS requirement_id BIGINT;
+ALTER TABLE byai.byai_integration_run ADD COLUMN requirement_id BIGINT;
 COMMENT ON COLUMN byai.byai_integration_run.requirement_id IS '触发本次执行的研发需求ID byai_scan_log_item.item_id;人工单套件执行可空';
 CREATE INDEX IF NOT EXISTS idx_integration_run_requirement ON byai.byai_integration_run (requirement_id, create_time DESC);
-ALTER TABLE byai.byai_integration_run ADD COLUMN IF NOT EXISTS kickback_at TIMESTAMP;
+ALTER TABLE byai.byai_integration_run ADD COLUMN kickback_at TIMESTAMP;
 COMMENT ON COLUMN byai.byai_integration_run.kickback_at IS '失败打回引擎处理本次执行的时间;非空表示已处理(驱动重工或建缺陷),幂等去重用';
+
+-- 仓库区分工作区与代码仓库:研发项目须有且仅有一个 workspace 仓库承载项目上下文/产出,其余为 code 代码仓库。
+-- 存量行默认 code;工作区先行由应用层保证,DB 仅存类型不强约束唯一,避免历史数据迁移期写入失败。
+ALTER TABLE byai.byai_project_repo ADD COLUMN repo_type VARCHAR(16) NOT NULL DEFAULT 'code';
+COMMENT ON COLUMN byai.byai_project_repo.repo_type IS '仓库类型 workspace工作区(项目上下文/产出落点,单个)/code代码仓库(可多个)';
+
+-- 研发项目工作区初始化状态:架构数字员工建成工作区前禁止建需求/启动任务。
+-- 存量行与普通项目默认 ready(不受限);新建 develop 项目由应用层置 pending,触发后 initializing,完成后 ready。
+ALTER TABLE byai.byai_project ADD COLUMN init_status VARCHAR(16) NOT NULL DEFAULT 'ready';
+COMMENT ON COLUMN byai.byai_project.init_status IS '研发项目初始化状态 ready已就绪/pending待初始化/initializing初始化中;仅 develop 未 ready 前禁用建需求与启动任务';
+ALTER TABLE byai.byai_project ADD COLUMN build_index VARCHAR(4) NOT NULL DEFAULT 'N';
+COMMENT ON COLUMN byai.byai_project.build_index IS '初始化是否建索引 Y建立/N不建立(默认)';
+ALTER TABLE byai.byai_project ADD COLUMN index_skills VARCHAR(512);
+COMMENT ON COLUMN byai.byai_project.index_skills IS '建索引所需技能包,逗号分隔(如 trellis,superpowers)';
