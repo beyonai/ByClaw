@@ -392,14 +392,16 @@ public class OpenSandboxClient {
                 }
                 JsonNode node = objectMapper.readTree(line.substring(5).trim());
                 String type = node.path("type").asText("");
-                String text = node.path("text").asText("");
-                if ("stderr".equals(type)) {
+                String text = commandEventText(node);
+                if ("stderr".equals(type) || "error".equals(type) || node.has("error")) {
                     stderr.append(text);
                 } else if ("stdout".equals(type) || "result".equals(type)) {
                     stdout.append(text);
                 }
                 if (node.has("exit_code")) {
                     exitCode = node.path("exit_code").asInt(exitCode);
+                } else if (node.has("exitCode")) {
+                    exitCode = node.path("exitCode").asInt(exitCode);
                 }
             }
         } catch (IOException e) {
@@ -410,6 +412,18 @@ public class OpenSandboxClient {
             stdout.setLength(Math.min(stdout.length(), maxOutputBytes));
         }
         return new SandboxCommandResult(exitCode, stdout.toString(), stderr.toString(), truncated, false);
+    }
+
+    private String commandEventText(JsonNode node) {
+        for (String field : List.of("text", "output", "message", "data")) {
+            JsonNode value = node.get(field);
+            if (value == null || value.isNull()) {
+                continue;
+            }
+            return value.isTextual() ? value.asText() : value.toString();
+        }
+        JsonNode error = node.get("error");
+        return error == null || error.isNull() ? "" : error.toString();
     }
 
     private String responseBody(Response response) throws IOException {
