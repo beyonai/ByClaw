@@ -62,6 +62,9 @@ public class TrellisInitializer {
             processBuilder.directory(repoPath.toFile());
             processBuilder.redirectErrorStream(true);
 
+            // 跳过 Python 检查（Docker 环境可能没有 Python）
+            processBuilder.environment().put("TRELLIS_SKIP_PYTHON_CHECK", "1");
+
             Process process = processBuilder.start();
 
             // 读取输出
