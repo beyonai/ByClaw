@@ -11,9 +11,15 @@ import com.iwhaleai.byai.framework.util.http.ByHttpClient;
 import com.iwhaleai.byai.framework.util.http.DiscoveryHttpClient;
 import com.iwhaleai.byai.framework.util.http.HttpResponse;
 import com.iwhaleai.byai.framework.util.http.RetryConfig;
+import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
 import com.iwhalecloud.byai.common.constants.resource.SystemCode;
+import com.iwhalecloud.byai.common.exception.BaseException;
+import com.iwhalecloud.byai.common.feign.request.datacloud.InvokeActionReq;
+import com.iwhalecloud.byai.common.feign.request.datacloud.QueryByKnowledgeReq;
 import com.iwhalecloud.byai.common.feign.request.datacloud.TermsOptionsReq;
 import com.iwhalecloud.byai.common.feign.response.DataCloudResponse;
+import com.iwhalecloud.byai.common.feign.response.datacloud.InvokeActionResp;
+import com.iwhalecloud.byai.common.feign.response.datacloud.QueryByKnowledgeResp;
 import com.iwhalecloud.byai.common.feign.response.datacloud.TermsOptionsResp;
 import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -87,8 +93,7 @@ public class FeignDataCloudService {
         logDatacloudStart("POST", url, startTime, termsOptionsReq);
         try {
 
-            HttpResponse response = discoveryHttpClient
-                .post(serviceName, path, buildHeaders(), termsOptionsReq, null)
+            HttpResponse response = discoveryHttpClient.post(serviceName, path, buildHeaders(), termsOptionsReq, null)
                 .get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
 
             String body = JSON.toJSONString(response.getData());
@@ -103,12 +108,68 @@ public class FeignDataCloudService {
         }
     }
 
+    /**
+     * 调用知识库动作（POST /api/v1/rpc/kb/invokeAction）。
+     */
+    public DataCloudResponse<InvokeActionResp> invokeAction(InvokeActionReq invokeActionReq) {
+
+        String path = "/api/v1/rpc/kb/invokeAction";
+        String url = buildDisplayUrl(path, null);
+        long startNanos = System.nanoTime();
+        String startTime = nowForLog();
+        logDatacloudStart("POST", url, startTime, invokeActionReq);
+        try {
+
+            HttpResponse response = discoveryHttpClient.post(serviceName, path, buildHeaders(), invokeActionReq, null)
+                .get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
+
+            String body = JSON.toJSONString(response.getData());
+            logDatacloudEnd("POST", url, startTime, startNanos, body, body);
+
+            return JSON.parseObject(body, new TypeReference<DataCloudResponse<InvokeActionResp>>() {
+            });
+        }
+        catch (Exception e) {
+            logDatacloudError("POST", url, startTime, startNanos, invokeActionReq, e);
+            return null;
+        }
+    }
+
+    /**
+     * 根据知识库资源 ID 分页查询对象基本信息，可选按知识库目录列表和对象名称进一步过滤。返回结果不包含对象的 properties 和 actions。
+     */
+    public DataCloudResponse<QueryByKnowledgeResp> queryObjectsByKnowledge(QueryByKnowledgeReq req) {
+
+        String path = "/api/v1/ontologyBases/objects/queryByKnowledge";
+        String url = buildDisplayUrl(path, null);
+        long startNanos = System.nanoTime();
+        String startTime = nowForLog();
+        logDatacloudStart("POST", url, startTime, req);
+        try {
+
+            HttpResponse response = discoveryHttpClient.post(serviceName, path, buildHeaders(), req, null)
+                .get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
+
+            String body = JSON.toJSONString(response.getData());
+            logDatacloudEnd("POST", url, startTime, startNanos, body, body);
+
+            return JSON.parseObject(body, new TypeReference<DataCloudResponse<QueryByKnowledgeResp>>() {
+            });
+        }
+        catch (Exception e) {
+            logDatacloudError("POST", url, startTime, startNanos, req, e);
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, e.getMessage());
+        }
+    }
+
     // ============================ 本体（Ontology）服务转发 ============================
     // datacloud 的 ontology-server 是标准 REST：读=GET（查询参数走 query string）、建=POST、更新=PUT、删=DELETE。
     // 路径参数（ownerType/baseId/sceneId/...）拼进 URL；GET 的过滤参数放 queryParams，POST 放 body。
     // 响应出口统一把 snake_case 键名归一化为 camelCase（datacloud 实跑返回 snake_case，前端/本端按 camelCase 消费）。
     private static final String ONTOLOGY_BASE_PATH = "/api/v1/ontologyBases";
+
     private static final String ONTOLOGY_RPC_PATH = "/api/v1/rpc";
+
     private static final String DEFAULT_ONTOLOGY_SYSTEM_CODE = "BYCLAW_DATACLOUD";
 
     /** GET 转发：查询参数走 query string，无 body。 */
@@ -215,8 +276,8 @@ public class FeignDataCloudService {
         String baseUrl = protocol + "://" + serviceInstance.getHost() + ":" + serviceInstance.getPort() + pathPrefix;
         try (ByHttpClient client = ByHttpClient.builder().baseUrl(baseUrl).retryConfig(RETRY_CONFIG)
             .timeout(gatewaySecondTimeOut.intValue()).build()) {
-            return client.request(method, path, buildHeaders(), queryParams == null ? new HashMap<>() : queryParams, body,
-                null, gatewaySecondTimeOut.intValue()).get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
+            return client.request(method, path, buildHeaders(), queryParams == null ? new HashMap<>() : queryParams,
+                body, null, gatewaySecondTimeOut.intValue()).get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
         }
     }
 
@@ -533,8 +594,9 @@ public class FeignDataCloudService {
 
     public JSONArray listObjects(String baseId, String cacheMode) {
         String path = String.format("%s/%s/objects", ONTOLOGY_BASE_PATH, pathValue(baseId));
-        return getOntologyData(path, queryOf("cache_mode", cacheMode), new TypeReference<DataCloudResponse<JSONArray>>() {
-        });
+        return getOntologyData(path, queryOf("cache_mode", cacheMode),
+            new TypeReference<DataCloudResponse<JSONArray>>() {
+            });
     }
 
     /** 根据视图编码查询对象列表（POST /api/v1/rpc/view/getObjects）。 */
@@ -544,10 +606,9 @@ public class FeignDataCloudService {
 
     public JSONArray listObjectsByViewCode(String systemCode, String viewCode) {
         String path = ONTOLOGY_RPC_PATH + "/view/getObjects";
-        return postOntologyData(path,
-            rpcBody("system_code", ontologySystemCode(systemCode), "view_code", viewCode),
+        return postOntologyData(path, rpcBody("system_code", ontologySystemCode(systemCode), "view_code", viewCode),
             new TypeReference<DataCloudResponse<JSONArray>>() {
-        });
+            });
     }
 
     /** 创建对象（POST /api/v1/ontologyBases/{baseId}/objects）。 */
@@ -564,10 +625,9 @@ public class FeignDataCloudService {
 
     public JSONObject getObjectDetailByObjectCode(String systemCode, String objectCode) {
         String path = ONTOLOGY_RPC_PATH + "/objectType/getObject";
-        return postOntologyData(path,
-            rpcBody("system_code", ontologySystemCode(systemCode), "code", objectCode),
+        return postOntologyData(path, rpcBody("system_code", ontologySystemCode(systemCode), "code", objectCode),
             new TypeReference<DataCloudResponse<JSONObject>>() {
-        });
+            });
     }
 
     /** 更新对象（PUT /api/v1/ontologyBases/{baseId}/objects/{code}）。 */
@@ -591,8 +651,9 @@ public class FeignDataCloudService {
 
     public JSONArray listViewsByBase(String baseId, String cacheMode) {
         String path = String.format("%s/%s/views", ONTOLOGY_BASE_PATH, pathValue(baseId));
-        return getOntologyData(path, queryOf("cache_mode", cacheMode), new TypeReference<DataCloudResponse<JSONArray>>() {
-        });
+        return getOntologyData(path, queryOf("cache_mode", cacheMode),
+            new TypeReference<DataCloudResponse<JSONArray>>() {
+            });
     }
 
     /** 创建视图（POST /api/v1/ontologyBases/{baseId}/views）。 */
@@ -609,10 +670,9 @@ public class FeignDataCloudService {
 
     public JSONObject getViewDetailByViewCode(String systemCode, String viewCode) {
         String path = ONTOLOGY_RPC_PATH + "/view/getView";
-        return postOntologyData(path,
-            rpcBody("system_code", ontologySystemCode(systemCode), "code", viewCode),
+        return postOntologyData(path, rpcBody("system_code", ontologySystemCode(systemCode), "code", viewCode),
             new TypeReference<DataCloudResponse<JSONObject>>() {
-        });
+            });
     }
 
     /** 更新视图（PUT /api/v1/ontologyBases/{baseId}/views/{code}）。 */
@@ -636,8 +696,9 @@ public class FeignDataCloudService {
 
     public JSONArray listRelationsByBase(String baseId, String cacheMode) {
         String path = String.format("%s/%s/relations", ONTOLOGY_BASE_PATH, pathValue(baseId));
-        return getOntologyData(path, queryOf("cache_mode", cacheMode), new TypeReference<DataCloudResponse<JSONArray>>() {
-        });
+        return getOntologyData(path, queryOf("cache_mode", cacheMode),
+            new TypeReference<DataCloudResponse<JSONArray>>() {
+            });
     }
 
     /** 根据对象编码查询关系列表（POST /api/v1/rpc/objectType/getRelations）。 */
@@ -647,10 +708,9 @@ public class FeignDataCloudService {
 
     public JSONArray listRelationsByObjectCode(String systemCode, String objectCode) {
         String path = ONTOLOGY_RPC_PATH + "/objectType/getRelations";
-        return postOntologyData(path,
-            rpcBody("system_code", ontologySystemCode(systemCode), "object_code", objectCode),
+        return postOntologyData(path, rpcBody("system_code", ontologySystemCode(systemCode), "object_code", objectCode),
             new TypeReference<DataCloudResponse<JSONArray>>() {
-        });
+            });
     }
 
     /** 创建关系（POST /api/v1/ontologyBases/{baseId}/relations）。 */
@@ -664,8 +724,9 @@ public class FeignDataCloudService {
     public JSONObject getRelationDetail(String baseId, String relationCode, String cacheMode) {
         String path = String.format("%s/%s/relations/%s", ONTOLOGY_BASE_PATH, pathValue(baseId),
             pathValue(relationCode));
-        return getOntologyData(path, queryOf("cache_mode", cacheMode), new TypeReference<DataCloudResponse<JSONObject>>() {
-        });
+        return getOntologyData(path, queryOf("cache_mode", cacheMode),
+            new TypeReference<DataCloudResponse<JSONObject>>() {
+            });
     }
 
     /** 更新关系（PUT /api/v1/ontologyBases/{baseId}/relations/{code}）。 */
@@ -687,8 +748,9 @@ public class FeignDataCloudService {
     /** 列出数据源（GET /api/v1/ontologyBases/{baseId}/datasources）。 */
     public JSONArray listDatasources(String baseId, String cacheMode) {
         String path = String.format("%s/%s/datasources", ONTOLOGY_BASE_PATH, pathValue(baseId));
-        return getOntologyData(path, queryOf("cache_mode", cacheMode), new TypeReference<DataCloudResponse<JSONArray>>() {
-        });
+        return getOntologyData(path, queryOf("cache_mode", cacheMode),
+            new TypeReference<DataCloudResponse<JSONArray>>() {
+            });
     }
 
     /** 创建数据源（POST /api/v1/ontologyBases/{baseId}/datasources）。 */
@@ -701,8 +763,9 @@ public class FeignDataCloudService {
     /** 查询数据源详情（GET /api/v1/ontologyBases/{baseId}/datasources/{dbId}）。 */
     public JSONObject getDatasourceDetail(String baseId, String dbId, String cacheMode) {
         String path = String.format("%s/%s/datasources/%s", ONTOLOGY_BASE_PATH, pathValue(baseId), pathValue(dbId));
-        return getOntologyData(path, queryOf("cache_mode", cacheMode), new TypeReference<DataCloudResponse<JSONObject>>() {
-        });
+        return getOntologyData(path, queryOf("cache_mode", cacheMode),
+            new TypeReference<DataCloudResponse<JSONObject>>() {
+            });
     }
 
     /** 删除数据源（DELETE /api/v1/ontologyBases/{baseId}/datasources/{dbId}）。 */
@@ -716,8 +779,9 @@ public class FeignDataCloudService {
     public JSONArray listActions(String baseId, String objectCode, String cacheMode) {
         String path = String.format("%s/%s/objects/%s/actions", ONTOLOGY_BASE_PATH, pathValue(baseId),
             pathValue(objectCode));
-        return getOntologyData(path, queryOf("cache_mode", cacheMode), new TypeReference<DataCloudResponse<JSONArray>>() {
-        });
+        return getOntologyData(path, queryOf("cache_mode", cacheMode),
+            new TypeReference<DataCloudResponse<JSONArray>>() {
+            });
     }
 
     /** 创建对象动作（POST /api/v1/ontologyBases/{baseId}/objects/{objectCode}/actions）。 */
@@ -732,8 +796,9 @@ public class FeignDataCloudService {
     public JSONObject getActionDetail(String baseId, String objectCode, String actionCode, String cacheMode) {
         String path = String.format("%s/%s/objects/%s/actions/%s", ONTOLOGY_BASE_PATH, pathValue(baseId),
             pathValue(objectCode), pathValue(actionCode));
-        return getOntologyData(path, queryOf("cache_mode", cacheMode), new TypeReference<DataCloudResponse<JSONObject>>() {
-        });
+        return getOntologyData(path, queryOf("cache_mode", cacheMode),
+            new TypeReference<DataCloudResponse<JSONObject>>() {
+            });
     }
 
     /** 更新对象动作（PUT /api/v1/ontologyBases/{baseId}/objects/{objectCode}/actions/{code}）。 */

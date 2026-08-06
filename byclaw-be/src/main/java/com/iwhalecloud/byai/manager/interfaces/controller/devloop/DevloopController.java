@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 
+import com.iwhalecloud.byai.common.feign.request.datacloud.QueryByKnowledgeReq;
+import com.iwhalecloud.byai.common.feign.response.datacloud.QueryByKnowledgeResp;
 import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
@@ -313,7 +315,8 @@ public class DevloopController {
      * @param params 包含 projectId
      */
     @PostMapping("/integration/requirements")
-    public ResponseUtil<List<Map<String, Object>>> listRequirementIntegrations(@RequestBody Map<String, Object> params) {
+    public ResponseUtil<List<Map<String, Object>>> listRequirementIntegrations(
+        @RequestBody Map<String, Object> params) {
         Long projectId = Long.valueOf(params.get("projectId").toString());
         return applicationService.listRequirementIntegrations(projectId);
     }
@@ -542,7 +545,8 @@ public class DevloopController {
 
     /** 分页查询运营项目需求，支持按名称忽略大小写模糊搜索。 */
     @PostMapping("/requirement/operation/list")
-    public ResponseUtil<PageInfo<Map<String, Object>>> listOperationRequirements(@RequestBody Map<String, Object> params) {
+    public ResponseUtil<PageInfo<Map<String, Object>>> listOperationRequirements(
+        @RequestBody Map<String, Object> params) {
         Long projectId = MapParamUtil.getLongValue(params, "projectId");
         String keyword = MapParamUtil.getStringValue(params, "keyword");
         int pageNum = Math.max(1, MapParamUtil.getIntValue(params, "pageNum", 1));
@@ -580,8 +584,8 @@ public class DevloopController {
         String status = MapParamUtil.getStringValue(params, "status");
         int pageNum = Math.max(1, MapParamUtil.getIntValue(params, "pageNum", 1));
         int pageSize = Math.max(1, MapParamUtil.getIntValue(params, "pageSize", 30));
-        return applicationService.listOperationTasks(projectId, keyword, onlyMine, createTimeStart, createTimeEnd, status,
-            pageNum, pageSize);
+        return applicationService.listOperationTasks(projectId, keyword, onlyMine, createTimeStart, createTimeEnd,
+            status, pageNum, pageSize);
     }
 
     /** 查询单条运营任务详情。 */
@@ -625,5 +629,12 @@ public class DevloopController {
     public ResponseUtil<Map<String, Object>> loginOperationAccount(@RequestBody Map<String, Object> params) {
         return applicationService.loginOperationAccount(MapParamUtil.getLongValue(params, "accountId"),
             MapParamUtil.getStringValue(params, "sandboxId"));
+    }
+
+    /** 根据知识库资源 ID 分页查询对象基本信息，可选按知识库目录列表和对象名称进一步过滤。返回结果不包含对象的 properties 和 actions。 */
+    @PostMapping("/operation/queryObjectsByKnowledge")
+    public ResponseUtil<QueryByKnowledgeResp> queryObjectsByKnowledge(@RequestBody QueryByKnowledgeReq paramReq) {
+        QueryByKnowledgeResp queryByKnowledgeResp = applicationService.queryObjectsByKnowledge(paramReq);
+        return ResponseUtil.successResponse(queryByKnowledgeResp);
     }
 }

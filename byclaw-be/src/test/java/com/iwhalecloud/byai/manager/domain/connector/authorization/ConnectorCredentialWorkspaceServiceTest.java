@@ -14,6 +14,8 @@ import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -24,6 +26,7 @@ import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationSe
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 
 @ExtendWith(MockitoExtension.class)
+@DisabledOnOs(OS.WINDOWS)
 class ConnectorCredentialWorkspaceServiceTest {
 
     private static final Long USER_ID = 42L;

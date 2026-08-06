@@ -17,8 +17,10 @@ import java.util.function.BooleanSupplier;
 
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
-
+@DisabledOnOs(OS.WINDOWS)
 class ConnectorCliRunnerTest {
 
     private static final Duration TEST_TIMEOUT = Duration.ofSeconds(5);
