@@ -22,6 +22,8 @@ import com.iwhalecloud.byai.gateway.sandbox.command.SandboxProcessSnapshot;
 import com.iwhalecloud.byai.gateway.sandbox.command.SandboxCommandExecutor;
 import com.iwhalecloud.byai.gateway.sandbox.service.UserSandboxResolver;
 import com.iwhalecloud.byai.gateway.sandbox.service.UserSandboxResolver.UserSandboxContext;
+import com.iwhalecloud.byai.manager.domain.users.service.UserService;
+import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationProgress;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationSessionContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartContext;
@@ -48,21 +50,24 @@ public class LarkSandboxAuthorizationRuntime {
     private final LarkSandboxCommandPolicy policy;
     private final ObjectMapper objectMapper;
     private final LarkAuthorizationProperties properties;
+    private final UserService userService;
 
     public LarkSandboxAuthorizationRuntime(
             SandboxCommandExecutor executor,
             UserSandboxResolver sandboxResolver,
             LarkAuthorizationProperties properties,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            UserService userService) {
         this.executor = executor;
         this.sandboxResolver = sandboxResolver;
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.policy = new LarkSandboxCommandPolicy();
+        this.userService = userService;
     }
 
     public AuthorizationStartResult start(AuthorizationStartContext context) {
-        String userCode = context.userId();
+        String userCode = resolveUserCode(context.userId());
         log.info("Starting Lark sandbox authorization: userCode={}, executor=sandbox", userCode);
         try {
             UserSandboxContext sandbox = sandboxResolver.resolve(userCode, properties.getSandboxServiceKey());
@@ -101,13 +106,14 @@ public class LarkSandboxAuthorizationRuntime {
     }
 
     public AuthorizationStatusResult verify(String userId) {
-        log.debug("Verifying Lark authorization in user sandbox: userCode={}", userId);
+        String userCode = resolveUserCode(userId);
+        log.debug("Verifying Lark authorization in user sandbox: userCode={}", userCode);
         try {
-            UserSandboxContext sandbox = sandboxResolver.resolve(userId,
+            UserSandboxContext sandbox = sandboxResolver.resolve(userCode,
                 properties.getSandboxServiceKey());
             return verified(sandbox.sandboxId());
         } catch (RuntimeException e) {
-            log.warn("Lark sandbox verification unavailable: userCode={}, reason={}", userId, e.getMessage());
+            log.warn("Lark sandbox verification unavailable: userCode={}, reason={}", userCode, e.getMessage());
             return failedStatus("LARK_SANDBOX_UNAVAILABLE", "User sandbox is unavailable");
         }
     }
@@ -210,7 +216,23 @@ public class LarkSandboxAuthorizationRuntime {
         SandboxCommandResult login = executor.run(sandbox.sandboxId(), policy.build(
             LarkSandboxCommandPolicy.Action.START_USER_AUTHORIZATION, null, COMMAND_TIMEOUT,
             properties.getMaxOutputBytes()));
-        if (login.exitCode() != 0 || login.truncated()) {
+        if (isNotConfigured(login)) {
+            log.info("Binding Lark CLI to OpenClaw context: sandboxId={}, identity=user-default",
+                sandbox.sandboxId());
+            SandboxCommandResult bind = executor.run(sandbox.sandboxId(), policy.build(
+                LarkSandboxCommandPolicy.Action.BIND_OPENCLAW_CONTEXT, null, COMMAND_TIMEOUT,
+                properties.getMaxOutputBytes()));
+            if (bind.exitCode() != 0 || isNotConfigured(bind)) {
+                log.warn("Failed to bind Lark CLI to OpenClaw context: sandboxId={}, exitCode={}",
+                    sandbox.sandboxId(), bind.exitCode());
+                return failed("PROVIDER_BIND_FAILED", "Unable to bind Lark CLI to OpenClaw context");
+            }
+            log.info("Bound Lark CLI to OpenClaw context: sandboxId={}", sandbox.sandboxId());
+            login = executor.run(sandbox.sandboxId(), policy.build(
+                LarkSandboxCommandPolicy.Action.START_USER_AUTHORIZATION, null, COMMAND_TIMEOUT,
+                properties.getMaxOutputBytes()));
+        }
+        if (login.exitCode() != 0 || login.truncated() || isNotConfigured(login)) {
             return failed("PROVIDER_START_FAILED", "Unable to start Lark authorization");
         }
         try {
@@ -297,15 +319,43 @@ public class LarkSandboxAuthorizationRuntime {
     }
 
     private boolean isNotConfigured(SandboxCommandResult result) {
-        if (result.exitCode() != 3 || result.truncated()) {
+        if (result == null || result.truncated()) {
             return false;
         }
         try {
-            JsonNode root = objectMapper.readTree(result.stdout());
+            String output = commandOutput(result);
+            if (output.isBlank()) {
+                return false;
+            }
+            JsonNode root = objectMapper.readTree(output);
             return "not_configured".equals(root.path("error").path("subtype").asText());
         } catch (JsonProcessingException e) {
             return false;
         }
+    }
+
+    private String commandOutput(SandboxCommandResult result) {
+        String stdout = result.stdout() == null ? "" : result.stdout();
+        String stderr = result.stderr() == null ? "" : result.stderr();
+        if (stdout.isBlank()) {
+            return stderr;
+        }
+        return stderr.isBlank() ? stdout : stdout + "\n" + stderr;
+    }
+
+    private String resolveUserCode(String userId) {
+        if (userService == null || userId == null || userId.isBlank()) {
+            return userId;
+        }
+        try {
+            Users user = userService.findById(Long.valueOf(userId));
+            if (user != null && user.getUserCode() != null && !user.getUserCode().isBlank()) {
+                return user.getUserCode();
+            }
+        } catch (RuntimeException e) {
+            log.warn("Unable to resolve userCode from userId={}, fallback to userId", userId);
+        }
+        return userId;
     }
 
     private String firstUrl(String output) {

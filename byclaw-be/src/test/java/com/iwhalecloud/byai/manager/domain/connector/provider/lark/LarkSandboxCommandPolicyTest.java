@@ -36,6 +36,15 @@ class LarkSandboxCommandPolicyTest {
     }
 
     @Test
+    void buildsOpenClawBindingCommandWithUserIdentity() {
+        var request = policy.build(LarkSandboxCommandPolicy.Action.BIND_OPENCLAW_CONTEXT);
+
+        assertThat(request.argv()).containsExactly(
+            "lark-cli", "config", "bind", "--source", "openclaw", "--identity", "user-default");
+        assertThat(request.background()).isFalse();
+    }
+
+    @Test
     void rejectsControlCharactersAndMissingDeviceCode() {
         assertThatThrownBy(() -> policy.build(
             LarkSandboxCommandPolicy.Action.COMPLETE_USER_AUTHORIZATION,
