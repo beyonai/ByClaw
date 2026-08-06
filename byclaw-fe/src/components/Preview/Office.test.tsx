@@ -3,37 +3,60 @@ import { render, waitFor } from '@testing-library/react';
 
 import { Office } from './Office';
 
-const mockExcelPreview = jest.fn(() => Promise.resolve());
-const mockExcelRender = jest.fn(() => Promise.resolve());
-const mockExcelDestroy = jest.fn();
-const mockExcelInit = jest.fn(() => ({
-  preview: mockExcelPreview,
-  renderExcel: mockExcelRender,
-  destroy: mockExcelDestroy,
+const mockPreview = jest.fn();
+const mockDestroy = jest.fn();
+const mockInit = jest.fn(() => ({ preview: mockPreview, destroy: mockDestroy }));
+
+jest.mock('@umijs/max', () => ({
+  useIntl: () => ({
+    formatMessage: ({ id }: { id: string }) => id,
+  }),
 }));
 
-jest.mock('@js-preview/excel', () => ({
-  __esModule: true,
-  default: {
-    init: mockExcelInit,
-  },
+jest.mock('pptx-preview', () => ({
+  init: (...args: unknown[]) => mockInit(...args),
 }));
 
-describe('Office preview data loading', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
+class MockResizeObserver {
+  private readonly callback: ResizeObserverCallback;
+
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+  }
+
+  observe() {
+    this.callback([{ contentRect: { width: 960, height: 540 } } as ResizeObserverEntry], this as any);
+  }
+
+  disconnect() {}
+
+  unobserve() {}
+}
+
+describe('Office PPTX preview', () => {
+  beforeAll(() => {
+    Object.defineProperty(global, 'ResizeObserver', {
+      configurable: true,
+      value: MockResizeObserver,
+    });
   });
 
-  it('renders Excel ArrayBuffer directly without the preview helper object URL path', async () => {
-    const data = new Blob(['excel content'], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPreview.mockResolvedValue(undefined);
+  });
+
+  it('renders the source PPTX ArrayBuffer in the browser after the panel has a non-zero size', async () => {
+    const source = new ArrayBuffer(16);
+
+    render(<Office data={source} type="pptx" />);
+
+    await waitFor(() => {
+      expect(mockInit).toHaveBeenCalledWith(expect.any(HTMLElement), {
+        width: 960,
+        height: 540,
+      });
+      expect(mockPreview).toHaveBeenCalledWith(source);
     });
-
-    render(<Office data={data} type="xlsx" />);
-
-    await waitFor(() => expect(mockExcelRender).toHaveBeenCalled());
-
-    expect(mockExcelRender.mock.calls[0][0]).toBeInstanceOf(ArrayBuffer);
-    expect(mockExcelPreview).not.toHaveBeenCalled();
   });
 });

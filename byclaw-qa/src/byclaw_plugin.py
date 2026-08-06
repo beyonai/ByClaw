@@ -24,7 +24,6 @@ class RetrievalOperationType(Enum):
     DELETE_FILE = "deleteFile"
     READ_FILE = "readFile"
     BUILD_RESULT = "buildResult"
-    BUILD_PREVIEW = "buildPreview"
     KNOWLEDGE_SEARCH = "knowledgeSearch"
     LIST_DIR = "listDir"
     GLOB = "glob"

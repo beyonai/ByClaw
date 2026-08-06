@@ -734,30 +734,6 @@ public class DatasetApplicationService {
     }
 
     /**
-     * 输出 QA 为 PPT/PPTX 构建生成的 PDF 预览；不存在时由统一异常处理返回错误，前端降级为 Markdown。
-     */
-    public void buildPreview(Long resourceId, String filePath, HttpServletResponse response) {
-        SsResource ssResource = loadDatasetResource(resourceId);
-        validateDatasetReadablePermission(ssResource);
-
-        KbFileDownload request = new KbFileDownload();
-        request.setKnCode(ssResource.getResourceCode());
-        request.setFilePath(normalizeKnowledgeFilePath(filePath));
-        String originalName = getLastSplitName(request.getFilePath());
-        int suffixIndex = originalName.lastIndexOf('.');
-        String previewName = (suffixIndex > 0 ? originalName.substring(0, suffixIndex) : originalName) + ".pdf";
-        try (InputStream inputStream = feignPythonBuildService.buildPreview(request, resourceId)) {
-            response.setContentType(MediaType.APPLICATION_PDF_VALUE);
-            response.setHeader("Content-Disposition",
-                "inline;filename=" + URLEncoder.encode(previewName, StandardCharsets.UTF_8));
-            IOUtils.copy(inputStream, response.getOutputStream());
-        }
-        catch (IOException e) {
-            throw new BaseException("读取知识库构建预览失败：" + e.getMessage(), e);
-        }
-    }
-
-    /**
      * 目录下载按 zip 包输出，和文件管理里的文件夹下载体验保持一致。
      */
     private void downloadKnowledgeDirectoryZip(SsResource ssResource, String directoryPath,

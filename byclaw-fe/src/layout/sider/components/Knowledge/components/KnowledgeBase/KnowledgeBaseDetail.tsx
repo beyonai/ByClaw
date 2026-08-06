@@ -1,18 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useContext, useMemo } from 'react';
-import {
-  Alert,
-  Input,
-  Breadcrumb,
-  Tree,
-  Spin,
-  App,
-  ConfigProvider,
-  Dropdown,
-  Button,
-  Tooltip,
-  Upload,
-  Empty,
-} from 'antd';
+import { Input, Breadcrumb, Tree, Spin, App, ConfigProvider, Dropdown, Button, Tooltip, Upload, Empty } from 'antd';
 import { EllipsisOutlined, LeftOutlined } from '@ant-design/icons';
 import classnames from 'classnames';
 import { AntdTreeNodeAttribute, EventDataNode } from 'antd/es/tree';
@@ -22,7 +9,7 @@ import UploadConfirmModal, { type UploadConfirmFile } from '@/components/UploadC
 import { useIntl } from '@umijs/max';
 import useVirtualHeight from '@/hooks/useVirtualHeight';
 import useGlobal from '@/hooks/useGlobal';
-import { downloadKnowledgeBuildPreview, downloadResourceFile } from '@/service/file';
+import { downloadResourceFile } from '@/service/file';
 import {
   createFolder as createFileBrowserFolder,
   ensureFolder as ensureFileBrowserFolder,
@@ -34,7 +21,6 @@ import { resolveTreeItemDirectoryPath } from './service';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import {
   checkUploadFileConflicts,
-  getKnowledgeBuildResult,
   uploadFiles as uploadKnowledgeFiles,
   type QueryDirAndFileByLevelItem,
 } from '@/service/knowledgeCenter';
@@ -331,18 +317,10 @@ interface FilePreviewPanelProps {
   fileName: string;
   fileType: string;
   loading: boolean;
-  fallbackNotice?: string;
   onClose: () => void;
 }
 
-const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
-  data,
-  fileName,
-  fileType,
-  loading,
-  fallbackNotice,
-  onClose,
-}) => (
+const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ data, fileName, fileType, loading, onClose }) => (
   <div className={styles.previewPanel}>
     <div className={styles.previewHeader}>
       <span className={styles.previewTitle}>{fileName}</span>
@@ -351,9 +329,6 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
       </span>
     </div>
     <div className={styles.previewBody}>
-      {fallbackNotice && (
-        <Alert className={styles.previewFallbackNotice} type="warning" showIcon message={fallbackNotice} />
-      )}
       <Spin spinning={loading} wrapperClassName={styles.previewSpin}>
         {data && (
           <React.Suspense fallback={null}>
@@ -656,10 +631,7 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
   );
 
   const renderPreviewPanel = useCallback(
-    (
-      item: IKnowledgeDetailTreeItem,
-      options: { data?: string | Blob | null; fileType?: string; fallbackNotice?: string; loading: boolean }
-    ) => {
+    (item: IKnowledgeDetailTreeItem, options: { data?: string | Blob | null; fileType?: string; loading: boolean }) => {
       const fileName = String(item.title || item.collectionName || '');
       setDetailPanel?.(
         <FilePreviewPanel
@@ -667,7 +639,6 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
           fileName={fileName}
           fileType={options.fileType || getFileType(fileName)}
           loading={options.loading}
-          fallbackNotice={options.fallbackNotice}
           onClose={() => clearDetailPanel?.()}
         />,
         { overlay: true }
@@ -692,41 +663,6 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
 
       renderPreviewPanel(item, { loading: true });
       try {
-        const fileType = getFileType(fileName);
-        if (['ppt', 'pptx'].includes(fileType)) {
-          try {
-            const previewRes: any = await downloadKnowledgeBuildPreview({
-              resourceId: dataset.resourceId,
-              directoryPath,
-            });
-            const previewBlob = getRawBlob(previewRes);
-            renderPreviewPanel(item, {
-              data: new Blob([previewBlob], { type: 'application/pdf' }),
-              fileType: 'pdf',
-              loading: false,
-            });
-            return;
-          } catch (previewError) {
-            const buildResult = await getKnowledgeBuildResult({
-              resourceId: dataset.resourceId,
-              filePath: directoryPath,
-              chunkPage: 1,
-              chunkPageSize: 1,
-              includeMarkdown: true,
-            });
-            const markdown = buildResult?.markdown?.data || '';
-            if (!markdown) {
-              throw previewError;
-            }
-            renderPreviewPanel(item, {
-              data: markdown,
-              fileType: 'md',
-              fallbackNotice: intl.formatMessage({ id: 'fileBrowser.preview.pptMarkdownFallback' }),
-              loading: false,
-            });
-            return;
-          }
-        }
         const res: any = await downloadResourceFile({
           resourceId: dataset.resourceId,
           directoryPath,

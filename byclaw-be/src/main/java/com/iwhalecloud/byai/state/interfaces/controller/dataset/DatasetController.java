@@ -359,15 +359,6 @@ public class DatasetController {
     }
 
     /**
-     * 预览 QA 构建阶段为 PPT/PPTX 生成的 PDF 产物。
-     */
-    @GetMapping(value = "/buildPreview")
-    public void buildPreview(@RequestParam("resourceId") Long resourceId,
-        @RequestParam("filePath") String filePath, HttpServletResponse response) {
-        datasetApplicationService.buildPreview(resourceId, filePath, response);
-    }
-
-    /**
      * 读取知识库文件 Markdown 内容，供技能侧按资源 ID 调用。
      *
      * @param request 文件读取参数

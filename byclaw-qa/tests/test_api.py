@@ -321,61 +321,6 @@ class TestBuildResultByResourceId:
 
 
 # ---------------------------------------------------------------------------
-# buildPreviewByResourceId
-# ---------------------------------------------------------------------------
-
-class TestBuildPreviewByResourceId:
-
-    @pytest.mark.asyncio
-    async def test_success_returns_pdf_stream(self, client, _patch_redis_config):
-        from byclaw_userfs_storage import get_byclaw_resource_id
-
-        _patch_redis_config.return_value = {"resourceCode": "155"}
-        mock_service = AsyncMock()
-
-        async def build_preview(request):
-            assert get_byclaw_resource_id() == "11029731"
-            assert request.kb_code == "155"
-            assert request.file_path == "/门户设计/api.pptx"
-            return b"%PDF-1.7\npreview"
-
-        mock_service.build_preview.side_effect = build_preview
-        with patch("api.resolve_knowledge_base_service", return_value=mock_service):
-            resp = await client.post(
-                "/api/v1/buildPreviewByResourceId",
-                json={
-                    "resourceId": 11029731,
-                    "filePath": "/门户设计/api.pptx",
-                },
-            )
-
-        assert resp.status_code == 200
-        assert resp.headers["content-type"] == "application/pdf"
-        assert resp.content == b"%PDF-1.7\npreview"
-
-    @pytest.mark.asyncio
-    async def test_unexpected_storage_error_returns_business_error(
-        self, client, _patch_redis_config
-    ):
-        _patch_redis_config.return_value = {"resourceCode": "155"}
-        mock_service = AsyncMock()
-        mock_service.build_preview.side_effect = RuntimeError("storage offline")
-
-        with patch("api.resolve_knowledge_base_service", return_value=mock_service):
-            resp = await client.post(
-                "/api/v1/buildPreviewByResourceId",
-                json={
-                    "resourceId": 11029731,
-                    "filePath": "/门户设计/api.pptx",
-                },
-            )
-
-        body = resp.json()
-        assert body["resultCode"] == "-1"
-        assert body["resultMsg"] == "storage offline"
-
-
-# ---------------------------------------------------------------------------
 # downloadFileByResourceId
 # ---------------------------------------------------------------------------
 

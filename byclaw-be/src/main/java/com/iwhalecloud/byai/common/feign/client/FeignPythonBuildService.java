@@ -106,7 +106,6 @@ public class FeignPythonBuildService {
         KnowledgeServiceOperation.DELETE_DIR, "/api/v1/directories/deleteByResourceId",
         KnowledgeServiceOperation.READ_FILE, "/api/v1/readFileByResourceId",
         KnowledgeServiceOperation.BUILD_RESULT, "/api/v1/buildResultByResourceId",
-        KnowledgeServiceOperation.BUILD_PREVIEW, "/api/v1/buildPreviewByResourceId",
         KnowledgeServiceOperation.KNOWLEDGE_BUILD, "/api/v1/fileToMarkdownIndexByResourceId",
         KnowledgeServiceOperation.DOWNLOAD_FILE, "/api/v1/downloadFileByResourceId");
 
@@ -535,13 +534,6 @@ public class FeignPythonBuildService {
 
     public InputStream fileDownload(KbFileDownload kbFileDownload, Long resourceId) {
         return downloadKnowledgeFile(kbFileDownload, resourceId, KnowledgeServiceOperation.DOWNLOAD_FILE);
-    }
-
-    /**
-     * 下载知识库构建生成的 PDF 预览流。
-     */
-    public InputStream buildPreview(KbFileDownload request, Long resourceId) {
-        return downloadKnowledgeFile(request, resourceId, KnowledgeServiceOperation.BUILD_PREVIEW);
     }
 
     private InputStream downloadKnowledgeFile(KbFileDownload kbFileDownload, Long resourceId,

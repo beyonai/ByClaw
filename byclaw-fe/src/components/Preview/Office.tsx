@@ -1,5 +1,6 @@
 import React, { useRef, useState, useLayoutEffect, useEffect } from 'react';
-import { Spin } from 'antd';
+import { Alert, Spin } from 'antd';
+import { useIntl } from '@umijs/max';
 import type jsPreviewExcel from '@js-preview/excel';
 import type { JsPdfPreview } from '@js-preview/pdf';
 import type { JsDocxPreview } from '@js-preview/docx';
@@ -9,6 +10,10 @@ import ss from './Office.module.less';
 type PdfInit = (el: HTMLElement, opts?: any) => JsPdfPreview;
 type DocxInit = (el: HTMLElement, opts?: any) => JsDocxPreview;
 type PptxInit = (el: HTMLElement, opts?: any) => any;
+type PptxPreviewer = {
+  preview: (data: ArrayBuffer) => Promise<unknown>;
+  destroy: () => void;
+};
 type ExcelPreviewer = JsExcelPreview & {
   renderExcel?: (data: ArrayBuffer) => Promise<any>;
 };
@@ -214,12 +219,13 @@ function OfficePdf({ data, loading: spinning }: DocxProps) {
     let temp: any;
     if (ref.current?.parentElement) obs.observe(ref.current.parentElement);
 
-    const loadLib = libs.jsPreviewPdf
-      ? Promise.resolve(libs.jsPreviewPdf)
-      : import('@js-preview/pdf').then((mod) => {
+    let loadLib = Promise.resolve(libs.jsPreviewPdf!);
+    if (!libs.jsPreviewPdf) {
+      loadLib = import('@js-preview/pdf').then((mod) => {
         libs.jsPreviewPdf = mod.default.init;
         return libs.jsPreviewPdf!;
       });
+    }
 
     loadLib.then((pdfInit) => {
       if (ref.current) {
@@ -301,12 +307,13 @@ function OfficeDocx({ data, loading: spinning }: DocxProps) {
     let temp: any;
     if (ref.current?.parentElement) obs.observe(ref.current.parentElement);
 
-    const loadLib = libs.jsPreviewDocx
-      ? Promise.resolve(libs.jsPreviewDocx)
-      : import('@js-preview/docx').then((mod) => {
+    let loadLib = Promise.resolve(libs.jsPreviewDocx!);
+    if (!libs.jsPreviewDocx) {
+      loadLib = import('@js-preview/docx').then((mod) => {
         libs.jsPreviewDocx = mod.default.init;
         return libs.jsPreviewDocx!;
       });
+    }
 
     loadLib.then((docxInit) => {
       if (ref.current) {
@@ -342,60 +349,122 @@ function OfficeDocx({ data, loading: spinning }: DocxProps) {
 
 function OfficePptx({ data, loading: spinning }: DocxProps) {
   const ref = useRef<HTMLDivElement>(null);
-
-  const [previewer, initPreviewer] = useState<{ preview: (data: ArrayBuffer) => Promise<void>; destroy: () => void }>();
+  const intl = useIntl();
   const [loading, setLoading] = useState<boolean>(false);
   const [buffer, setBuffer] = useState<ArrayBuffer>();
+  const [size, setSize] = useState<[width: number, height: number]>([0, 0]);
+  const [previewFailed, setPreviewFailed] = useState(false);
 
   useEffect(() => {
+    let disposed = false;
+
+    setBuffer(undefined);
+    setPreviewFailed(false);
     if (data instanceof Blob) {
       setLoading(true);
       data
         .arrayBuffer()
         .then((buffer) => {
-          setBuffer(buffer);
+          if (!disposed) {
+            setBuffer(buffer);
+          }
         })
-        .finally(() => setLoading(false));
+        .catch(() => {
+          if (!disposed) {
+            setPreviewFailed(true);
+          }
+        })
+        .finally(() => {
+          if (!disposed) {
+            setLoading(false);
+          }
+        });
+    } else if (data instanceof ArrayBuffer) {
+      setBuffer(data);
     }
+
+    return () => {
+      disposed = true;
+    };
   }, [data]);
 
   useLayoutEffect(() => {
-    let temp: { preview: (data: ArrayBuffer) => Promise<void>; destroy: () => void } | undefined;
+    const root = ref.current;
+    const container = root?.parentElement;
+    if (!container) return;
 
-    const loadLib = libs.pptxInit
-      ? Promise.resolve(libs.pptxInit)
-      : import('pptx-preview').then((mod) => {
+    const updateSize = (width: number, height: number) => {
+      const nextWidth = Math.floor(width);
+      const nextHeight = Math.floor(height);
+      if (nextWidth <= 0 || nextHeight <= 0) return;
+      setSize((current) => (current[0] === nextWidth && current[1] === nextHeight ? current : [nextWidth, nextHeight]));
+    };
+
+    const observer = new ResizeObserver(([entry]) => {
+      updateSize(entry.contentRect.width, entry.contentRect.height);
+    });
+    observer.observe(container);
+    updateSize(container.clientWidth, container.clientHeight);
+
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    const root = ref.current;
+    if (!root || !buffer || size[0] <= 0 || size[1] <= 0) return;
+
+    let disposed = false;
+    let previewer: PptxPreviewer | undefined;
+
+    let loadLib = Promise.resolve(libs.pptxInit!);
+    if (!libs.pptxInit) {
+      loadLib = import('pptx-preview').then((mod) => {
         libs.pptxInit = mod.init;
         return libs.pptxInit!;
       });
+    }
 
-    loadLib.then((pptxInit) => {
-      if (ref.current) {
-        temp = pptxInit(ref.current, {
-          width: ref.current.parentElement?.clientWidth || 310,
-          height: ref.current.parentElement?.clientHeight || 310,
+    setLoading(true);
+    setPreviewFailed(false);
+    root.replaceChildren();
+    loadLib
+      .then((pptxInit) => {
+        if (disposed) return undefined;
+        previewer = pptxInit(root, {
+          width: size[0],
+          height: size[1],
         });
-        initPreviewer(temp);
-      }
-    });
+        return previewer.preview(buffer);
+      })
+      .catch((error) => {
+        if (!disposed) {
+          console.warn('PPTX preview failed', error);
+          setPreviewFailed(true);
+        }
+      })
+      .finally(() => {
+        if (!disposed) {
+          setLoading(false);
+        }
+      });
 
     return () => {
-      temp?.destroy();
-      initPreviewer(undefined);
+      disposed = true;
+      previewer?.destroy();
+      root.replaceChildren();
     };
-  }, [ref]);
-
-  useLayoutEffect(() => {
-    if (buffer && previewer) {
-      previewer.preview(buffer).catch((err) => console.warn(err));
-    }
-  }, [buffer, previewer]);
+  }, [buffer, size]);
 
   return (
     <section className={ss.office}>
       {(spinning || loading) && (
         <div className={ss.loading}>
           <Spin spinning />
+        </div>
+      )}
+      {previewFailed && (
+        <div className={ss.error}>
+          <Alert type="error" showIcon message={intl.formatMessage({ id: 'fileBrowser.preview.failed' })} />
         </div>
       )}
       <div ref={ref} />

@@ -9,13 +9,12 @@
 - 默认返回：`application/json`
 - 上传文档接口请求体：`multipart/form-data`
 - 下载文件接口成功响应：`application/octet-stream`
-- PPT/PPTX 构建预览接口成功响应：`application/pdf`
 
 ## 通用约定
 
 ### 成功响应
 
-除下载文件和构建预览接口外，其余接口统一使用如下响应信封：
+除下载文件接口外，其余接口统一使用如下响应信封：
 
 ```json
 {
@@ -75,13 +74,11 @@
 | `POST` | `/api/v1/fileToMarkdownIndex` | 异步触发知识构建 |
 | `POST` | `/api/v1/fileBuildStatus` | 查询文档构建状态 |
 | `POST` | `/api/v1/buildResult` | 查询文档最新一次构建结果、Markdown 和切片 |
-| `POST` | `/api/v1/buildPreview` | 获取 PPT/PPTX 构建生成的 PDF 预览 |
 | `POST` | `/api/v1/knowledgeItems/search` | 知识检索 |
 | `GET` | `/health` | 探活 |
 | `POST` | `/api/v1/knowledgeItems/importByResourceId` | 按资源 ID 上传文档（Agent 工具） |
 | `POST` | `/api/v1/fileToMarkdownIndexByResourceId` | 按资源 ID 触发知识构建（Agent 工具） |
 | `POST` | `/api/v1/buildResultByResourceId` | 按资源 ID 查询文档构建结果（Agent 工具） |
-| `POST` | `/api/v1/buildPreviewByResourceId` | 按资源 ID 获取 PPT/PPTX 构建预览（Agent 工具） |
 | `POST` | `/api/v1/knowledgeItems/searchByResourceId` | 按资源 ID 知识检索（Agent 工具） |
 | `POST` | `/api/v1/directories/createByResourceId` | 按资源 ID 创建目录（Agent 工具） |
 | `POST` | `/api/v1/directories/updateByResourceId` | 按资源 ID 修改目录（Agent 工具） |
@@ -1025,59 +1022,6 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
 }
 ```
 
-### `POST /api/v1/buildPreview`
-
-获取 PPT/PPTX 在知识构建期间通过 LibreOffice 生成的 PDF 预览。该接口只读取已经生成并保存的预览文件，不会在查询时临时转换。
-
-请求体：`application/json`
-
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `knCode` | string | 是 | 知识库编码 |
-| `filePath` | string | 是 | PPT/PPTX 文件全路径，以 `/` 开头，不包括知识库名称 |
-
-请求示例：
-
-```json
-{
-  "knCode": "1",
-  "filePath": "/汇报/年度总结.pptx"
-}
-```
-
-成功响应：
-
-- `200 OK`
-- `Content-Type: application/pdf`
-- `Content-Disposition: inline; filename*=UTF-8''年度总结.pdf`
-- 响应体为 PDF 二进制字节流，不使用 JSON 响应信封
-
-调用示例：
-
-```bash
-curl -X POST http://localhost:8000/api/v1/buildPreview \
-  -H 'Content-Type: application/json' \
-  -d '{"knCode":"1","filePath":"/汇报/年度总结.pptx"}' \
-  --output 年度总结.pdf
-```
-
-限制说明：
-
-- 仅支持 `.ppt` 和 `.pptx` 文件。
-- 文件必须完成一次包含预览生成的构建。
-- 如果旧 PPT/PPTX 没有预览产物，需要重新触发构建。
-- 运行环境必须安装 LibreOffice；预览生成失败不会阻断 Markdown 构建，但本接口将查询不到预览。
-
-失败响应示例：
-
-```json
-{
-  "resultCode": "-1",
-  "resultMsg": "build preview not found; rebuild the PPT/PPTX file first: /汇报/年度总结.pptx",
-  "resultObject": {}
-}
-```
-
 ## 知识检索
 
 ### `POST /api/v1/knowledgeItems/search`
@@ -1164,7 +1108,6 @@ curl -X POST http://localhost:8000/api/v1/buildPreview \
 | `POST` | `/api/v1/knowledgeItems/importByResourceId` | 按资源 ID 上传文档 |
 | `POST` | `/api/v1/fileToMarkdownIndexByResourceId` | 按资源 ID 触发知识构建 |
 | `POST` | `/api/v1/buildResultByResourceId` | 按资源 ID 查询文档构建结果 |
-| `POST` | `/api/v1/buildPreviewByResourceId` | 按资源 ID 获取 PPT/PPTX 构建预览 |
 | `POST` | `/api/v1/knowledgeItems/searchByResourceId` | 按资源 ID 知识检索 |
 | `POST` | `/api/v1/directories/createByResourceId` | 按资源 ID 创建目录 |
 | `POST` | `/api/v1/directories/updateByResourceId` | 按资源 ID 修改目录 |
@@ -1308,54 +1251,6 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/importByResourceId \
   }
 }
 ```
-
-失败响应示例：
-
-```json
-{
-  "resultCode": "-1",
-  "resultMsg": "cannot resolve resourceId: 99999",
-  "resultObject": {}
-}
-```
-
-### `POST /api/v1/buildPreviewByResourceId`
-
-按资源 ID 获取对应知识库中 PPT/PPTX 文件构建生成的 PDF 预览。
-
-请求体：`application/json`
-
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `resourceId` | string | 是 | 知识库资源 ID，系统自动映射为内部 `knCode` |
-| `filePath` | string | 是 | PPT/PPTX 文件全路径，以 `/` 开头，不包括知识库名称 |
-
-请求示例：
-
-```json
-{
-  "resourceId": "10000003",
-  "filePath": "/汇报/年度总结.pptx"
-}
-```
-
-成功响应：
-
-- `200 OK`
-- `Content-Type: application/pdf`
-- `Content-Disposition: inline; filename*=UTF-8''年度总结.pdf`
-- 响应体为 PDF 二进制字节流，不使用 JSON 响应信封
-
-调用示例：
-
-```bash
-curl -X POST http://localhost:8000/api/v1/buildPreviewByResourceId \
-  -H 'Content-Type: application/json' \
-  -d '{"resourceId":"10000003","filePath":"/汇报/年度总结.pptx"}' \
-  --output 年度总结.pdf
-```
-
-文件类型、预览生成时机和失败处理规则与 `POST /api/v1/buildPreview` 相同。
 
 失败响应示例：
 

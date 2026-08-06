@@ -117,7 +117,6 @@ const PREVIEWABLE_EXTENSIONS = new Set([
   'docx',
   'xls',
   'xlsx',
-  'ppt',
   'pptx',
   'mp4',
   'avi',

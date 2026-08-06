@@ -75,22 +75,6 @@ export const downloadResourceFile = (params: DownloadDatasetFileParams) =>
     }
   );
 
-// 下载 QA 构建阶段为 PPT/PPTX 生成的 PDF 预览产物
-export const downloadKnowledgeBuildPreview = (params: DownloadDatasetFileParams) =>
-  GET<any>(
-    '/byaiService/datasetController/buildPreview',
-    {
-      resourceId: params.resourceId,
-      filePath: normalizeDatasetDirectoryPath(params.directoryPath),
-    },
-    {
-      responseType: 'blob',
-      responseCfg: {
-        hideErrorTips: true,
-      },
-    }
-  );
-
 export const downloadMinIOFileURL = '/byaiService/commonFile/download';
 // 下载MinIO文件
 export const downloadMinIOFile = (params: { fileId: string | number }) =>

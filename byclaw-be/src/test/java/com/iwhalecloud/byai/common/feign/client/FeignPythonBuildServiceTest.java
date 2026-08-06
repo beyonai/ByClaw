@@ -108,26 +108,6 @@ class FeignPythonBuildServiceTest {
     }
 
     @Test
-    void localBuildPreview_usesResourceEndpointAndResourcePayload() {
-        FeignPythonBuildService service = new FeignPythonBuildService();
-        KbFileDownload request = new KbFileDownload();
-        request.setKnCode("155");
-        request.setFilePath("/门户设计/api.pptx");
-
-        String path = ReflectionTestUtils.invokeMethod(service, "resolveLocalRequestPath",
-            KnowledgeServiceOperation.BUILD_PREVIEW, 11029731L, "/api/v1/buildPreview");
-        Object payload = ReflectionTestUtils.invokeMethod(service, "buildLocalPayload",
-            KnowledgeServiceOperation.BUILD_PREVIEW, 11029731L, request);
-
-        assertThat(path).isEqualTo("/api/v1/buildPreviewByResourceId");
-        assertThat(payload).isInstanceOf(JSONObject.class);
-        assertThat((JSONObject) payload)
-            .containsEntry("resourceId", 11029731L)
-            .containsEntry("filePath", "/门户设计/api.pptx")
-            .doesNotContainKey("knCode");
-    }
-
-    @Test
     void validateDownloadResponse_rejectsQaFailureEnvelope() {
         FeignPythonBuildService service = new FeignPythonBuildService();
         byte[] response = "{\"resultCode\":\"-1\",\"resultMsg\":\"file not found\",\"resultObject\":{}}"

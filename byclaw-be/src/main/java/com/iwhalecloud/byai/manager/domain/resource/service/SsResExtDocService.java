@@ -186,8 +186,6 @@ public class SsResExtDocService {
             "readFile", "根据文件路径读取指定知识库下的 Markdown 内容。"));
         resourceService.add(buildKgDocService(qADomainName, "查询构建结果", "POST", "/api/v1/buildResult",
             "buildResult", "查询文件构建状态、Markdown、分块及向量检索摘要。"));
-        resourceService.add(buildKgDocService(qADomainName, "获取构建预览", "POST", "/api/v1/buildPreview",
-            "buildPreview", "获取 PPT/PPTX 构建生成的 PDF 预览文件。"));
         resourceService.add(buildKgDocService(qADomainName, "查看文件元数据", "POST",
             "/api/v1/knowledgeItems/metadata/get", "get_file_metadata", "查看指定文件当前已入库的元数据值。"));
         resourceService.add(buildKgDocService(qADomainName, "检索文档 chunk", "POST", "/api/v1/knowledgeItems/search",

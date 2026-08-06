@@ -14,7 +14,6 @@ New routes:
   POST /api/v1/listDirByResourceId
   POST /api/v1/readFileByResourceId
   POST /api/v1/buildResultByResourceId
-  POST /api/v1/buildPreviewByResourceId
   POST /api/v1/downloadFileByResourceId
 
 Usage in start.sh:  uvicorn api:app --host ... --port ...
@@ -38,7 +37,6 @@ from pydantic import ValidationError
 
 from by_qa.core import logger
 from by_qa.knowledge_base.api.schemas import (
-    BuildPreviewRequest,
     BuildResultRequest,
     CreateDirectoryRequest,
     DeleteDirectoryRequest,
@@ -607,70 +605,6 @@ async def build_result_by_resource_id(body: dict[str, Any] = Body(...)):
         result.get("chunks", {}).get("total"),
     )
     return _success(result)
-
-
-# -- buildPreviewByResourceId -------------------------------------------------
-
-@app.post("/api/v1/buildPreviewByResourceId")
-async def build_preview_by_resource_id(body: dict[str, Any] = Body(...)):
-    resource_id = body.get("resourceId")
-    if not resource_id:
-        return _error("resourceId is required")
-
-    kn_code = await _resolve_kn_code(str(resource_id))
-    if kn_code is None:
-        return _error(f"cannot resolve resourceId: {resource_id}")
-
-    body_mapped = {**body, "knCode": kn_code}
-    body_mapped.pop("resourceId", None)
-    try:
-        request = BuildPreviewRequest.model_validate(body_mapped)
-    except ValidationError as exc:
-        return _error("request validation failed", {"errors": json.loads(exc.json())})
-
-    logger.info(
-        "buildPreviewByResourceId request received: resourceId=%s, filePath=%s",
-        resource_id,
-        request.file_path,
-    )
-    try:
-        with bind_byclaw_resource_id(resource_id):
-            service = await resolve_knowledge_base_service()
-            content = await service.build_preview(request)
-    except KnowledgeBaseConfigurationError as exc:
-        logger.exception(
-            "buildPreviewByResourceId configuration error: resourceId=%s",
-            resource_id,
-        )
-        return _error(str(exc))
-    except KnowledgeBaseValidationError as exc:
-        logger.info(
-            "buildPreviewByResourceId unavailable: resourceId=%s, filePath=%s, error=%s",
-            resource_id,
-            request.file_path,
-            exc,
-        )
-        return _error(str(exc))
-    except Exception as exc:
-        logger.exception(
-            "buildPreviewByResourceId unexpected error: resourceId=%s, filePath=%s",
-            resource_id,
-            request.file_path,
-        )
-        return _error(str(exc) or "failed to read build preview")
-
-    filename = f"{PurePosixPath(request.file_path).stem}.pdf"
-    logger.info(
-        "buildPreviewByResourceId response ready: resourceId=%s, filePath=%s, outputBytes=%s",
-        resource_id,
-        request.file_path,
-        len(content),
-    )
-    return Response(
-        content=content,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(filename)}"},
-    )
 
 
 # -- downloadFileByResourceId -------------------------------------------------
