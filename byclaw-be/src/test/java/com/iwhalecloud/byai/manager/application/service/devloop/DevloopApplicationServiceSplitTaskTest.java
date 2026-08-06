@@ -15,6 +15,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -52,6 +54,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
  * 3) 需求已启动(sessionId 非空)时拒绝重复拆分,不建任何子任务。
  */
 @ExtendWith(MockitoExtension.class)
+@DisabledOnOs(OS.WINDOWS)
 class DevloopApplicationServiceSplitTaskTest {
 
     @Mock

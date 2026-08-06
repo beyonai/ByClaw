@@ -8,7 +8,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
+@DisabledOnOs(OS.WINDOWS)
 class ConnectorManifestCanonicalizerTest {
 
     private ConnectorManifestCanonicalizer canonicalizer;

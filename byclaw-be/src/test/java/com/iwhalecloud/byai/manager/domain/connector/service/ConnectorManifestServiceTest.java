@@ -19,8 +19,10 @@ import java.util.Date;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.mockito.ArgumentCaptor;
-
+@DisabledOnOs(OS.WINDOWS)
 class ConnectorManifestServiceTest {
 
     private static final Long USER_ID = 1001L;

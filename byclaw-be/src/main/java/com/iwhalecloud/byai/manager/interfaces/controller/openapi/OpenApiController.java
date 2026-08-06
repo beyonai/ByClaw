@@ -1,5 +1,9 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.openapi;
 
+import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
+import com.iwhalecloud.byai.common.feign.request.datacloud.InvokeActionReq;
+import com.iwhalecloud.byai.common.feign.response.DataCloudResponse;
+import com.iwhalecloud.byai.common.feign.response.datacloud.InvokeActionResp;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.application.service.openapi.OpenApiApplicationService;
 import com.iwhalecloud.byai.manager.application.service.ontology.OntologyResourceSyncApplicationService;
@@ -53,6 +57,9 @@ public class OpenApiController {
 
     @Autowired
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
+
+    @Autowired
+    private FeignDataCloudService feignDataCloudService;
 
     /**
      * 保存对象的动作相关内容 包括：动作和动作属性
@@ -188,6 +195,19 @@ public class OpenApiController {
         digitalEmployeeApplicationService.synOpenClawWorkSpace(agentId, digitalEmployeeDTO);
 
         return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 调用知识库动作
+     *
+     * @param invokeActionReq 入参
+     * @return ResponseUtil
+     */
+    @ManageLogAnnotation(name = "API调用", description = "调用知识库动作")
+    @PostMapping("/v1/invokeAction")
+    public ResponseUtil<InvokeActionResp> invokeAction(@RequestBody InvokeActionReq invokeActionReq) {
+        DataCloudResponse<InvokeActionResp> invokeActionResp = feignDataCloudService.invokeAction(invokeActionReq);
+        return ResponseUtil.successResponse(invokeActionResp.getData());
     }
 
 }
