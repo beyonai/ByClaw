@@ -387,11 +387,13 @@ public class ProjectInitService {
             if (request.getSubmodules() != null && !request.getSubmodules().isEmpty()) {
                 log.debug("[Step 9/14] Adding {} submodule(s)", request.getSubmodules().size());
                 for (SubmoduleInfo submodule : request.getSubmodules()) {
+                    // 为子模块 URL 注入 token（每个请求都要带上认证信息）
+                    String authenticatedUrl = injectTokenIntoUrl(submodule.getUrl(), ghToken);
                     log.debug("[Step 9/14] Adding submodule: url={}, path={}, branch={}",
                         submodule.getUrl(), submodule.getPath(), submodule.getBranch());
                     gitCommandExecutor.addSubmodule(
                         repoPath,
-                        submodule.getUrl(),
+                        authenticatedUrl,  // 使用带 token 的 URL
                         submodule.getPath(),
                         submodule.getBranch()
                     );
