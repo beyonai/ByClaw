@@ -34,6 +34,10 @@ import com.iwhalecloud.byai.manager.dto.project.SubmoduleInfo;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
+import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamApplicationService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 
@@ -73,6 +77,12 @@ public class ProjectInitService {
 
     @Autowired
     private ProjectRepoMapper projectRepoMapper;
+
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     /**
      * 同步初始化（原有方法，保持向后兼容）
@@ -202,6 +212,15 @@ public class ProjectInitService {
             normalizedPath, request.getSkillPackageName(),
             request.getSubmodules() != null ? request.getSubmodules().size() : 0);
 
+        // 3.5 获取当前用户的 GH_TOKEN（用于 Git 认证）
+        String ghToken = getUserGitHubToken();
+        if (ghToken == null) {
+            throw new BaseException(50403,
+                "GitHub Token (GH_TOKEN) is required for Git operations. " +
+                "Please configure your GitHub Personal Access Token in user settings.");
+        }
+        log.debug("Retrieved GitHub token for user");
+
         // 4. 验证仓库已克隆到本地，如果不存在则自动克隆
         if (!Files.exists(repoPath)) {
             log.warn("Repository not found locally: {}. Attempting to clone from: {}",
@@ -213,7 +232,9 @@ public class ProjectInitService {
                     ? request.getRepoBranch()
                     : repo.getDefaultBranch();
 
-                gitCommandExecutor.cloneRepository(repo.getRepoUrl(), repoPath, branch);
+                // 将 token 嵌入 URL（用于 HTTPS 认证）
+                String authenticatedUrl = injectTokenIntoUrl(repo.getRepoUrl(), ghToken);
+                gitCommandExecutor.cloneRepository(authenticatedUrl, repoPath, branch);
 
                 log.info("Successfully cloned repository to: {}", normalizedPath);
             } catch (BaseException e) {
@@ -315,8 +336,17 @@ public class ProjectInitService {
             // 11. 推送到远程（如果启用且有新提交）
             boolean pushed = false;
             if (Boolean.TRUE.equals(request.getAutoPush()) && newCommit) {
-                gitCommandExecutor.push(repoPath, currentBranch);
-                pushed = true;
+                // 临时设置远程 URL 为带 token 的版本（用于认证）
+                String authenticatedUrl = injectTokenIntoUrl(repo.getRepoUrl(), ghToken);
+                gitCommandExecutor.executeCommand(repoPath, "git", "remote", "set-url", "origin", authenticatedUrl);
+
+                try {
+                    gitCommandExecutor.push(repoPath, currentBranch);
+                    pushed = true;
+                } finally {
+                    // 恢复原始 URL（移除 token）
+                    gitCommandExecutor.executeCommand(repoPath, "git", "remote", "set-url", "origin", repo.getRepoUrl());
+                }
             }
 
             // 12. 更新项目初始化状态为 ready
@@ -602,5 +632,75 @@ public class ProjectInitService {
             log.warn("Failed to get client IP address", e);
         }
         return "unknown";
+    }
+
+    /**
+     * 从 Redis 获取当前用户的 GitHub Token
+     *
+     * @return GitHub Token，如果未配置则返回 null
+     */
+    private String getUserGitHubToken() {
+        try {
+            String userCode = CurrentUserHolder.getCurrentUserCode();
+            if (StringUtils.isBlank(userCode)) {
+                log.warn("Cannot get GitHub token: current user code is blank");
+                return null;
+            }
+
+            String redisKey = UserPrivateParamApplicationService.buildPrivateParamRedisKey(userCode);
+            String cacheJson = stringRedisTemplate.opsForValue().get(redisKey);
+
+            if (StringUtils.isBlank(cacheJson)) {
+                log.warn("User {} has no private params configured in Redis", userCode);
+                return null;
+            }
+
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> cacheData = objectMapper.readValue(cacheJson, java.util.Map.class);
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, String> params = (java.util.Map<String, String>) cacheData.get("params");
+
+            if (params == null || params.isEmpty()) {
+                log.warn("User {} has empty private params", userCode);
+                return null;
+            }
+
+            String ghToken = params.get("GH_TOKEN");
+            if (StringUtils.isBlank(ghToken)) {
+                log.warn("User {} has not configured GH_TOKEN", userCode);
+                return null;
+            }
+
+            log.debug("Retrieved GH_TOKEN for user {}", userCode);
+            return ghToken;
+
+        } catch (Exception e) {
+            log.error("Failed to get GitHub token from Redis", e);
+            return null;
+        }
+    }
+
+    /**
+     * 将 GitHub Token 注入到 Git URL 中（用于 HTTPS 认证）
+     *
+     * @param repoUrl 原始仓库 URL
+     * @param token GitHub Personal Access Token
+     * @return 带 token 的 URL
+     */
+    private String injectTokenIntoUrl(String repoUrl, String token) {
+        if (repoUrl == null || token == null) {
+            return repoUrl;
+        }
+
+        // 仅处理 HTTPS URL
+        if (repoUrl.startsWith("https://")) {
+            // 格式: https://github.com/owner/repo.git -> https://oauth2:TOKEN@github.com/owner/repo.git
+            // 或: https://gitlab.com/owner/repo.git -> https://oauth2:TOKEN@gitlab.com/owner/repo.git
+            return repoUrl.replace("https://", "https://oauth2:" + token + "@");
+        }
+
+        // SSH URL 不需要注入 token
+        log.debug("URL is not HTTPS, skipping token injection: {}", repoUrl);
+        return repoUrl;
     }
 }

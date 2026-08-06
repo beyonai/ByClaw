@@ -8,7 +8,7 @@ WORKDIR /app
 RUN addgroup -g 1001 -S appgroup && \
     adduser -u 1001 -S appuser -G appgroup
 
-# 安装依赖：curl（健康检查）、bash、gcompat（dws 所需的 glibc 兼容层）、nodejs/npm（Lark/WeCom CLI）
+# 安装依赖：curl（健康检查）、bash、gcompat（dws 所需的 glibc 兼容层）、nodejs/npm（Lark/WeCom CLI）、python3/pip（Trellis CLI）
 RUN apk add --no-cache \
     curl \
     bash \
@@ -16,6 +16,8 @@ RUN apk add --no-cache \
     git \
     nodejs \
     npm \
+    python3 \
+    py3-pip \
     && rm -rf /var/cache/apk/*
 
 # 安装 Lark/WeCom CLI
@@ -27,6 +29,11 @@ RUN npm install --global \
     && lark-cli --version \
     && wecom-cli --version \
     && npm cache clean --force
+
+# 安装 Trellis CLI
+ARG TRELLIS_CLI_VERSION=0.1.0
+RUN pip3 install --no-cache-dir "trellis-cli==${TRELLIS_CLI_VERSION}" \
+    && trellis --version
 
 # 安装 DWS CLI。amd64 用随仓库预下载的二进制（避免构建时网络下载）；
 # 仓库只存 amd64 包，arm64 构建时从 npm 包 dingtalk-workspace-cli 在线拉取对应架构二进制。
