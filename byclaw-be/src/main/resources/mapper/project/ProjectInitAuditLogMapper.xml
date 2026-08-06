@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.project.ProjectInitAuditLogMapper">
+
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.domain.project.entity.ProjectInitAuditLog">
+        <id column="id" property="id" jdbcType="BIGINT"/>
+        <result column="request_id" property="requestId" jdbcType="VARCHAR"/>
+        <result column="user_id" property="userId" jdbcType="VARCHAR"/>
+        <result column="username" property="username" jdbcType="VARCHAR"/>
+        <result column="ip_address" property="ipAddress" jdbcType="VARCHAR"/>
+        <result column="repo_path" property="repoPath" jdbcType="VARCHAR"/>
+        <result column="skill_package" property="skillPackage" jdbcType="VARCHAR"/>
+        <result column="branch" property="branch" jdbcType="VARCHAR"/>
+        <result column="submodule_count" property="submoduleCount" jdbcType="INTEGER"/>
+        <result column="status" property="status" jdbcType="VARCHAR"/>
+        <result column="duration_ms" property="durationMs" jdbcType="BIGINT"/>
+        <result column="commit_hash" property="commitHash" jdbcType="VARCHAR"/>
+        <result column="pushed" property="pushed" jdbcType="BOOLEAN"/>
+        <result column="changes" property="changes" jdbcType="VARCHAR"/>
+        <result column="error_message" property="errorMessage" jdbcType="VARCHAR"/>
+        <result column="start_time" property="startTime" jdbcType="TIMESTAMP"/>
+        <result column="end_time" property="endTime" jdbcType="TIMESTAMP"/>
+        <result column="created_at" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="updated_at" property="updateTime" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.iwhalecloud.byai.manager.domain.project.entity.ProjectInitAuditLog"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO project_init_audit_log (
+            request_id, user_id, username, ip_address, repo_path,
+            skill_package, branch, submodule_count, status, duration_ms,
+            commit_hash, pushed, changes, error_message,
+            start_time, end_time, created_at, updated_at
+        ) VALUES (
+            #{requestId}, #{userId}, #{username}, #{ipAddress}, #{repoPath},
+            #{skillPackage}, #{branch}, #{submoduleCount}, #{status}, #{durationMs},
+            #{commitHash}, #{pushed}, #{changes}, #{errorMessage},
+            #{startTime}, #{endTime}, #{createTime}, #{updateTime}
+        )
+    </insert>
+
+    <select id="selectByRequestId" resultMap="BaseResultMap">
+        SELECT * FROM project_init_audit_log
+        WHERE request_id = #{requestId}
+        ORDER BY created_at DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectList" resultMap="BaseResultMap">
+        SELECT * FROM project_init_audit_log
+        <where>
+            <if test="userId != null and userId != ''">
+                AND user_id = #{userId}
+            </if>
+            <if test="repoPath != null and repoPath != ''">
+                AND repo_path LIKE '%' || #{repoPath} || '%'
+            </if>
+            <if test="status != null and status != ''">
+                AND status = #{status}
+            </if>
+            <if test="startTime != null">
+                AND start_time &gt;= #{startTime}
+            </if>
+            <if test="endTime != null">
+                AND start_time &lt;= #{endTime}
+            </if>
+        </where>
+        ORDER BY start_time DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="count" resultType="int">
+        SELECT COUNT(*) FROM project_init_audit_log
+        <where>
+            <if test="userId != null and userId != ''">
+                AND user_id = #{userId}
+            </if>
+            <if test="repoPath != null and repoPath != ''">
+                AND repo_path LIKE '%' || #{repoPath} || '%'
+            </if>
+            <if test="status != null and status != ''">
+                AND status = #{status}
+            </if>
+            <if test="startTime != null">
+                AND start_time &gt;= #{startTime}
+            </if>
+            <if test="endTime != null">
+                AND start_time &lt;= #{endTime}
+            </if>
+        </where>
+    </select>
+
+    <delete id="deleteExpiredLogs">
+        DELETE FROM project_init_audit_log
+        WHERE start_time &lt; #{expireTime}
+    </delete>
+
+</mapper>

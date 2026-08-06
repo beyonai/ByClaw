@@ -1,9 +1,19 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 
+import java.util.List;
+import java.util.Map;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
+import com.iwhalecloud.byai.manager.application.service.project.ProjectInitService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
@@ -14,30 +24,30 @@ import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileRenameDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileSaveDto;
+import com.iwhalecloud.byai.manager.dto.project.ProjectInitRequest;
+import com.iwhalecloud.byai.manager.dto.project.ProjectInitResponse;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
-import java.util.Map;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 
 /**
  * 项目管理控制器 提供研发项目的创建、查询、修改、删除接口
  */
 @RestController
 @RequestMapping("/project")
+@Tag(name = "项目管理", description = "研发项目的创建、查询、修改、删除及初始化接口")
 public class ProjectController {
 
     @Autowired
     private ProjectApplicationService projectApplicationService;
+
+    @Autowired
+    private ProjectInitService projectInitService;
 
     /**
      * 创建项目
@@ -97,14 +107,18 @@ public class ProjectController {
     }
 
     /**
-     * 触发研发项目工作区初始化：置为 initializing 并记录建索引/技能包配置。
+     * 初始化集成项目
      *
-     * @param params 包含 projectId（必填）、buildIndex（Y/N，可选）、skillPackages（字符串数组，可选）
+     * <p>为指定的 Git 仓库初始化 AI 开发技能包(Trellis 或 Superpower),可选添加子模块。
+     * 支持自动提交和推送到远程仓库。使用 Redis 分布式锁防止并发初始化冲突。
+     *
+     * @param request 初始化请求参数
+     * @return 初始化结果,包含仓库路径、分支、技能包名称、子模块列表、提交哈希等信息
      */
     @PostMapping("/init/start")
-    public ResponseUtil<Void> startProjectInit(@RequestBody Map<String, Object> params) {
-        projectApplicationService.startProjectInit(params);
-        return ResponseUtil.successResponse();
+    public ResponseUtil<ProjectInitResponse> initProject(@Valid @RequestBody ProjectInitRequest request) {
+        ProjectInitResponse response = projectInitService.initProject(request);
+        return ResponseUtil.success(response);
     }
 
     /**
