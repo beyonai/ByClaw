@@ -42,7 +42,7 @@ services:
   super:
     image: ${IMAGE_SUPER:-ghcr.io/beyonai/byclaw/byclaw-super:main}
     container_name: byclaw-super-${CONTAINER_SUFFIX:-standalone}
-    user: "1000:1000"
+    user: "1001:1001"
     ports:
       - "${BYCLAW_SUPER_PORT:-3000}:3000"
     env_file:
