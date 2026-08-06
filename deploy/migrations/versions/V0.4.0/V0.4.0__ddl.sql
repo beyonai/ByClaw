@@ -447,3 +447,32 @@ ALTER TABLE byai.byai_project ADD COLUMN build_index VARCHAR(4) NOT NULL DEFAULT
 COMMENT ON COLUMN byai.byai_project.build_index IS '初始化是否建索引 Y建立/N不建立(默认)';
 ALTER TABLE byai.byai_project ADD COLUMN index_skills VARCHAR(512);
 COMMENT ON COLUMN byai.byai_project.index_skills IS '建索引所需技能包,逗号分隔(如 trellis,superpowers)';
+-- 技能组资源类型及成员关系索引。
+COMMENT ON COLUMN byai.ss_resource.resource_biz_type IS '资源类型：DIG_EMPLOYEE=数字员工，AGENT=智能体，KG_DOC=文档知识库，KG_DB=数据知识库，KG_QA=问答知识库，KG_TERM=术语知识库，TOOLKIT=插件，MCP=MCP服务，TOOL=工具，MCP_TOOL=MCP工具，OBJECT=对象，ONTOLOGY_BASE=本体库，SCENE=场景，VIEW=视图，ACTION=动作，TAG=标签资源，MAN_USER=管理用户资源，MAN_ORG=管理组织资源，SKILL=技能，SKILL_GROUP=技能组';
+
+-- 唯一索引创建前仅检查重复数据；发现重复时终止迁移，不修改现有数据。
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM byai.ss_resource_rel_detail
+        WHERE rel_type_name = 'SKILL_GROUP_MEMBER'
+          AND rel_status = 1
+        GROUP BY resource_id, rel_resource_id, rel_type_name
+        HAVING COUNT(*) > 1
+    ) THEN
+        RAISE EXCEPTION 'Duplicate active SKILL_GROUP_MEMBER relationships exist';
+    END IF;
+END
+$$;
+
+CREATE INDEX IF NOT EXISTS idx_ss_resource_rel_group_member
+    ON byai.ss_resource_rel_detail (resource_id, rel_type_name, rel_status, rel_resource_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_ss_resource_rel_group_member
+    ON byai.ss_resource_rel_detail (resource_id, rel_resource_id, rel_type_name)
+    WHERE rel_type_name = 'SKILL_GROUP_MEMBER' AND rel_status = 1;
+
+CREATE INDEX IF NOT EXISTS idx_ss_resource_rel_skill_source_candidate
+    ON byai.ss_resource_rel_detail (resource_id, rel_type_name, rel_status)
+    WHERE rel_resource_info IS NOT NULL;

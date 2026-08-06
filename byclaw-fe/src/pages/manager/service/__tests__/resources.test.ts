@@ -9,7 +9,15 @@ import {
   queryResourceMembers,
   deleteResource,
   uploadSkillZip,
+  pageSkillGroups,
+  getSkillGroupDetail,
+  installSkillGroup,
+  createSkillGroup,
+  addSkillGroupMembers,
+  updateSkillGroup,
+  removeSkillGroupMembers,
 } from '../resources';
+import type { SkillGroup, SkillGroupInstallResult, SkillGroupPageResult } from '../resources';
 import { GET, POST } from '@/service/common/request';
 
 jest.mock('@/service/common/request', () => ({
@@ -19,6 +27,59 @@ jest.mock('@/service/common/request', () => ({
 
 const mockGET = GET as jest.Mock;
 const mockPOST = POST as jest.Mock;
+
+const skillGroupResponseFixture: SkillGroup = {
+  resourceId: '10042909',
+  resourceName: '数据分析技能组',
+  resourceDesc: '常用数据分析技能',
+  avatar: 'https://example.com/skill-group.png',
+  catalogId: '1001',
+  ownerType: 'enterprise',
+  resourceStatus: 2,
+  createBy: '10001',
+  createTime: '2026-08-04 10:00:00',
+  updateTime: '2026-08-04 10:30:00',
+  memberCount: 1,
+  members: [
+    {
+      resourceId: '10042911',
+      resourceCode: 'data-query',
+      resourceName: '数据查询',
+      resourceDesc: '查询数据',
+      avatar: 'https://example.com/skill.png',
+      resourceStatus: 2,
+      ownerType: 'enterprise',
+      skillType: 'builtin',
+      sourceType: 'catalog',
+      version: '1.0.0',
+      skillUrl: 'https://example.com/skill',
+      skillPackageFormat: 'zip',
+      skillOriginalFilename: 'data-query.zip',
+      skillPackageSize: 1024,
+      skillPackageHash: 'sha256:abc',
+      targetContent: 'query',
+      syncStatus: 'synced',
+      syncError: '',
+      lastSyncTime: '2026-08-04 10:20:00',
+    },
+  ],
+};
+
+const pageSkillGroupsResponseFixture: SkillGroupPageResult = {
+  pageNum: 1,
+  pageSize: 10,
+  total: 1,
+  totalPages: 1,
+  list: [skillGroupResponseFixture],
+};
+
+const installSkillGroupResponseFixture: SkillGroupInstallResult = {
+  installedSkillIds: ['10042911'],
+  existingSkillIds: [],
+  removedSkillIds: [],
+  retainedSkillIds: [],
+  totalSkillIds: ['10042911'],
+};
 
 describe('manager resources service', () => {
   beforeEach(() => {
@@ -99,5 +160,70 @@ describe('manager resources service', () => {
         customHandle: true,
       },
     });
+  });
+
+  it('should call pageSkillGroups with the skill group page endpoint', () => {
+    const payload = {
+      pageNum: 1,
+      pageSize: 10,
+      keyword: '技能组',
+      ownerType: 'enterprise',
+      resourceStatus: 2,
+      catalogId: '1001',
+    };
+    pageSkillGroups(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/skillGroup/page', payload);
+  });
+
+  it('should call getSkillGroupDetail with the skill group detail endpoint', () => {
+    const payload = { groupId: '10042909' };
+    getSkillGroupDetail(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/skillGroup/detail', payload);
+  });
+
+  it('should call installSkillGroup with the skill group install endpoint', () => {
+    const payload = { groupId: '10042909', digitalEmployeeId: '10042910' };
+    installSkillGroup(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/skillGroup/install', payload);
+  });
+
+  it('should call createSkillGroup with the skill group create endpoint', () => {
+    const payload = {
+      resourceName: '知识协同',
+      resourceDesc: '连接知识与协作渠道',
+      avatar: '/uploads/knowledge-collaboration.png',
+      ownerType: 'enterprise',
+    };
+    createSkillGroup(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/skillGroup/create', payload);
+  });
+
+  it('should call addSkillGroupMembers with the member association endpoint', () => {
+    const payload = { groupId: '10042909', skillIds: ['10042911', '10042912'] };
+    addSkillGroupMembers(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/skillGroup/member/add', payload);
+  });
+
+  it('should call updateSkillGroup with the skill group update endpoint', () => {
+    const payload = {
+      groupId: '10042909',
+      resourceName: '智采协同',
+      resourceDesc: '整合采集与协作能力',
+      avatar: '/commonFile/preview?filePath=/covers/group.png',
+    };
+    updateSkillGroup(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/skillGroup/update', payload);
+  });
+
+  it('should call removeSkillGroupMembers with the member removal endpoint', () => {
+    const payload = { groupId: '10042909', skillIds: ['10042911'] };
+    removeSkillGroupMembers(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/skillGroup/member/remove', payload);
+  });
+
+  it('should type skill group responses with string IDs', () => {
+    expect(pageSkillGroupsResponseFixture.list[0].resourceId).toBe('10042909');
+    expect(pageSkillGroupsResponseFixture.list[0].members[0].resourceId).toBe('10042911');
+    expect(installSkillGroupResponseFixture.totalSkillIds).toEqual(['10042911']);
   });
 });

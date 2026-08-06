@@ -78,6 +78,10 @@ public enum ResourceBizTypeEnum {
     /**
      * 技能
      */
-    SKILL
+    SKILL,
+    /**
+     * 技能组
+     */
+    SKILL_GROUP
 
 }

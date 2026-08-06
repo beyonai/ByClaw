@@ -1,5 +1,113 @@
 import { GET, POST } from '@/service/common/request';
 
+export interface SkillGroupMember {
+  resourceId: string;
+  resourceCode: string;
+  resourceName: string;
+  resourceDesc: string;
+  avatar: string;
+  resourceStatus: number;
+  ownerType: string;
+  skillType: string;
+  sourceType: string;
+  version: string;
+  skillUrl: string;
+  skillPackageFormat: string;
+  skillOriginalFilename: string;
+  skillPackageSize: number;
+  skillPackageHash: string;
+  targetContent: string;
+  syncStatus: string;
+  syncError: string;
+  lastSyncTime: string;
+}
+
+export interface SkillGroup {
+  resourceId: string;
+  resourceName: string;
+  resourceDesc: string;
+  avatar: string;
+  catalogId: string;
+  ownerType: string;
+  resourceStatus: number;
+  createBy: string;
+  createTime: string;
+  updateTime: string;
+  memberCount: number;
+  members: SkillGroupMember[];
+}
+
+export type SkillGroupVo = SkillGroup;
+
+export interface SkillGroupInstallResult {
+  installedSkillIds: string[];
+  existingSkillIds: string[];
+  removedSkillIds: string[];
+  retainedSkillIds: string[];
+  totalSkillIds: string[];
+}
+
+export interface SkillGroupPageResult {
+  pageNum: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  list: SkillGroup[];
+}
+
+export interface SkillGroupPageParams {
+  pageNum: number;
+  pageSize: number;
+  keyword?: string;
+  ownerType?: string;
+  resourceStatus?: number | string;
+  catalogId?: string;
+}
+
+export interface SkillGroupCreateParams {
+  resourceName: string;
+  resourceDesc?: string;
+  avatar?: string;
+  catalogId?: string | number;
+  ownerType: string;
+}
+
+export interface SkillGroupMemberChangeParams {
+  groupId: string;
+  skillIds: string[];
+}
+
+export interface SkillGroupUpdateParams {
+  groupId: string;
+  resourceName: string;
+  resourceDesc?: string;
+  avatar?: string;
+  catalogId?: string | number;
+}
+
+export const pageSkillGroups = (params: SkillGroupPageParams) =>
+  POST<SkillGroupPageResult>('/byaiService/skillGroup/page', params);
+
+export const getSkillGroupDetail = (params: { groupId: string }) =>
+  POST<SkillGroup>('/byaiService/skillGroup/detail', params);
+
+export const installSkillGroup = (params: { groupId: string; digitalEmployeeId: string }) =>
+  POST<SkillGroupInstallResult>('/byaiService/skillGroup/install', params);
+
+export const createSkillGroup = (params: SkillGroupCreateParams) =>
+  POST<SkillGroup>('/byaiService/skillGroup/create', params);
+
+export const deleteSkillGroup = (params: { groupId: string }) => POST<void>('/byaiService/skillGroup/delete', params);
+
+export const addSkillGroupMembers = (params: SkillGroupMemberChangeParams) =>
+  POST<void>('/byaiService/skillGroup/member/add', params);
+
+export const updateSkillGroup = (params: SkillGroupUpdateParams) =>
+  POST<SkillGroup>('/byaiService/skillGroup/update', params);
+
+export const removeSkillGroupMembers = (params: SkillGroupMemberChangeParams) =>
+  POST<void>('/byaiService/skillGroup/member/remove', params);
+
 /**
  * 固定入口操作能力接口返回数据类型
  * 用于判断当前用户是否具备导入企业知识库、工具包、视图、对象等资源的能力
