@@ -81,11 +81,15 @@ const getTerminalError = (
 
 describe('ConnectorControl authorization states', () => {
   beforeEach(() => {
+    // 上一用例若残留假计时器，异步列表加载与 findBy* 轮询都会卡住。
+    jest.useRealTimers();
     jest.clearAllMocks();
     mockOpenedWindow.opener = window;
     mockWindowOpen.mockReturnValue(mockOpenedWindow);
     mockCancelConnectorAuthorization.mockResolvedValue(true);
     mockUpdateConnectorEnable.mockResolvedValue(true);
+    mockStartConnectorAuthorization.mockReset();
+    mockGetConnectorAuthorization.mockReset();
     mockQueryAllConnectors.mockImplementation(async () => {
       const response = await mockQueryConnectorList({ pageNum: 1, pageSize: 100, keyword: '' });
       return response.list || [];
@@ -109,6 +113,7 @@ describe('ConnectorControl authorization states', () => {
   });
 
   afterEach(() => {
+    jest.clearAllTimers();
     jest.useRealTimers();
   });
 
@@ -902,6 +907,7 @@ describe('ConnectorControl authorization states', () => {
     expect(mockGetConnectorAuthorization).toHaveBeenCalledTimes(1);
     expect(onChange).not.toHaveBeenCalledWith([expect.objectContaining({ id: 9 })]);
     expect(mockMessageError).not.toHaveBeenCalled();
+    jest.useRealTimers();
   });
 
   it('closes locally and sends only one background cancel while cancellation is slow', async () => {
@@ -923,6 +929,9 @@ describe('ConnectorControl authorization states', () => {
     render(<ConnectorControl canAuthorize value={[]} onChange={onChange} />);
 
     fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    await waitFor(() => {
+      expect(mockQueryAllConnectors).toHaveBeenCalled();
+    });
     await screen.findByText('企业微信');
     fireEvent.click(screen.getByRole('button', { name: '连接' }));
     await act(async () => {
