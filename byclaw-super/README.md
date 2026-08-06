@@ -537,6 +537,25 @@ Worker 会复用 HTTP API 的同一条 `RunIngressService` 链路：Token 验签
 by-framework 的 `reasoningLog*`、`answerDelta` 和终态事件。子 Agent 返回的 `Resume`
 只结束原子会话，不会重复创建 Run。
 
+专家团团长继续使用同一个 `BY_SUPER` Worker，但必须在 `extraPayload` 中声明编排者：
+
+```json
+{
+  "orchestrator": {
+    "schemaVersion": "byclaw.orchestrator-ref/v1",
+    "kind": "EXPERT_TEAM",
+    "id": "90001"
+  }
+}
+```
+
+Worker 会携带当前 Beyond-Token 调用
+`POST /byaiService/internal/v1/orchestrators/resolve-runtime`，由 ByClaw BE 原子完成团长权限、
+Prompt、模型和有效团员解析。专家团配置失败时本轮直接失败，不会降级为普通超级助手。
+未传 `orchestrator` 的旧请求继续使用现有 `discoverMine` 和超级助手 Prompt；专家团使用独立的
+最小 Context Pipeline。专家团 binding 额外包含 `kind + id`，同一外部 `sessionId` 不会在不同
+团长或超级助手之间共享 Pi 上下文。
+
 同一个调用者作用域中的 by-framework `sessionId` 会映射到同一个内部 Session，因此连续
 AskAgent 可以保留上下文；binding key 包含 `ownerVersion + userCode`，不同用户即使使用相同
 外部 `sessionId` 也不会碰撞，映射和 Pi 上下文都会跨实例、跨重启保留。

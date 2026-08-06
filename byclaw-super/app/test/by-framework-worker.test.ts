@@ -60,6 +60,51 @@ describe("ByClawSuperGatewayWorker", () => {
     );
   });
 
+  it("passes an expert-team reference and isolates its persistent session binding", async () => {
+    const createSessionRun = vi.fn(async () => run());
+    const get = vi.fn(async () => undefined);
+    const bind = vi.fn(async () => undefined);
+    const worker = createWorker({
+      createSessionRun,
+      cancelRun: vi.fn(),
+      streamEvents: () => completedEvents(),
+      sessionBindings: { get, bind },
+    });
+    const orchestrator = {
+      schemaVersion: "byclaw.orchestrator-ref/v1",
+      kind: "EXPERT_TEAM",
+      id: "team-1",
+    };
+
+    await worker.processCommand(
+      askCommand("secret-token", undefined, undefined, undefined, orchestrator),
+      contextMock(),
+    );
+
+    const bindingSessionId =
+      '["orchestrator","EXPERT_TEAM","team-1","session-1"]';
+    expect(get).toHaveBeenCalledWith({
+      source: "by-framework",
+      userCode: "user-1",
+      externalSessionId: bindingSessionId,
+    });
+    expect(createSessionRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        externalSessionId: "session-1",
+        sourceAgentId: "team-1",
+        orchestrator,
+      }),
+    );
+    expect(bind).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "by-framework",
+        userCode: "user-1",
+        externalSessionId: bindingSessionId,
+        sessionId: "session-1",
+      }),
+    );
+  });
+
   it("maps Leader reasoning to reasoningLog events instead of answer text", async () => {
     const emitChunk = vi.fn(async () => undefined);
     const emitProtocolChunk = vi.fn(async () => undefined);
@@ -793,6 +838,10 @@ function createWorker(options: {
   emitProtocolChunk?: ReturnType<typeof vi.fn>;
   logger?: ReturnType<typeof loggerMock>;
   registry?: WorkerRegistry;
+  sessionBindings?: {
+    get: ReturnType<typeof vi.fn>;
+    bind: ReturnType<typeof vi.fn>;
+  };
 }): ByClawSuperGatewayWorker {
   return new ByClawSuperGatewayWorker({
     workerId: "worker-1",
@@ -828,6 +877,9 @@ function createWorker(options: {
       emitEvent: options.emitEvent ?? vi.fn(async () => undefined),
       emitChunk: options.emitProtocolChunk ?? vi.fn(async () => undefined),
     },
+    ...(options.sessionBindings
+      ? { sessionBindings: options.sessionBindings }
+      : {}),
     ...(options.logger ? { logger: options.logger } : {}),
   });
 }
@@ -838,6 +890,7 @@ function askCommand(
   thinkingLevel?: unknown,
   groupChat?: unknown,
   environment?: { language?: string; timezone?: string; agentName?: string },
+  orchestrator?: unknown,
 ): AskAgentCommand {
   return new AskAgentCommand(
     header(token, environment),
@@ -847,6 +900,7 @@ function askCommand(
       ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
       ...(groupChat === undefined ? {} : { groupChat }),
       ...(environment?.agentName ? { agent_name: environment.agentName } : {}),
+      ...(orchestrator === undefined ? {} : { orchestrator }),
     },
   );
 }

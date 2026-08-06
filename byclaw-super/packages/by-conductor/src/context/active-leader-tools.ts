@@ -42,11 +42,31 @@ export const LEADER_CHECKPOINT_TOOL_NAMES = [
  * 让 Provider 实际收到的 Leader 工具与本轮授权 Agent 快照保持一致。
  * 真实委派仍必须经过 DelegationService 校验。
  */
-export function resolveActiveLeaderToolNames(
-  authorizedAgents: readonly AgentProfile[],
-): string[] {
+export function resolveActiveLeaderToolNames(input: {
+  authorizedAgents: readonly AgentProfile[];
+  hasAttachments: boolean;
+  inspectAttachmentAvailable: boolean;
+  downloadAttachmentAvailable: boolean;
+  /** 专家团团长只能委派，不能直接读取或操作附件。 */
+  expertTeam: boolean;
+}): string[] {
+  const allowDirectAttachmentTools = !input.expertTeam;
   return [
-    ...(authorizedAgents.length > 0 ? [DELEGATE_AGENT_TOOL_NAME] : []),
+    ...(input.authorizedAgents.length > 0
+      ? [DELEGATE_AGENT_TOOL_NAME]
+      : []),
     ...(ASK_USER_QUESTION_ENABLED ? [ASK_USER_QUESTION_TOOL_NAME] : []),
+    ...(allowDirectAttachmentTools ? LEADER_FILE_TOOL_NAMES : []),
+    ...(allowDirectAttachmentTools &&
+    input.hasAttachments &&
+    input.inspectAttachmentAvailable
+      ? [INSPECT_ATTACHMENT_TOOL_NAME]
+      : []),
+    ...(DOWNLOAD_ATTACHMENT_ENABLED &&
+    allowDirectAttachmentTools &&
+    input.hasAttachments &&
+    input.downloadAttachmentAvailable
+      ? [DOWNLOAD_ATTACHMENT_TOOL_NAME]
+      : []),
   ];
 }

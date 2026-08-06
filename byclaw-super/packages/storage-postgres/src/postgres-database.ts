@@ -5,6 +5,7 @@ import {
   LEADER_CHECKPOINT_TOOL_NAMES,
   parseSessionContext,
   parseGroupChatContext,
+  parseExpertTeamRuntimeSnapshot,
   validatePiSessionCheckpoint,
   type AgentCapabilityCardRepository,
   type AgentCapabilityCardUpsert,
@@ -1885,6 +1886,13 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
   if (record.externalSessionId !== undefined && !externalSessionId) {
     throw new Error("Invalid persisted Run external session ID");
   }
+  const parentMessageId =
+    typeof record.parentMessageId === "string" && record.parentMessageId.trim()
+      ? record.parentMessageId.trim()
+      : undefined;
+  if (record.parentMessageId !== undefined && !parentMessageId) {
+    throw new Error("Invalid persisted Run parent message ID");
+  }
   const agentCatalogError =
     typeof record.agentCatalogError === "string" && record.agentCatalogError.trim()
       ? record.agentCatalogError.trim()
@@ -1893,12 +1901,22 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
     throw new Error("Invalid persisted Run agent catalog error");
   }
   const leaderModel = readLeaderModelSelection(record.leaderModel);
+  const orchestrator =
+    record.orchestrator === undefined
+      ? undefined
+      : parseExpertTeamRuntimeSnapshot(record.orchestrator);
   if (record.groupChat === undefined) {
-    return externalSessionId || agentCatalogError || leaderModel
+    return externalSessionId ||
+      parentMessageId ||
+      agentCatalogError ||
+      leaderModel ||
+      orchestrator
       ? {
           ...(externalSessionId ? { externalSessionId } : {}),
+          ...(parentMessageId ? { parentMessageId } : {}),
           ...(agentCatalogError ? { agentCatalogError } : {}),
           ...(leaderModel ? { leaderModel } : {}),
+          ...(orchestrator ? { orchestrator } : {}),
         }
       : undefined;
   }
@@ -1912,10 +1930,12 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
   }
   return {
     ...(externalSessionId ? { externalSessionId } : {}),
+    ...(parentMessageId ? { parentMessageId } : {}),
     groupChat,
     groupChatFingerprint: fingerprint,
     ...(agentCatalogError ? { agentCatalogError } : {}),
     ...(leaderModel ? { leaderModel } : {}),
+    ...(orchestrator ? { orchestrator } : {}),
   };
 }
 

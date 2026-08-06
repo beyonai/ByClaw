@@ -52,12 +52,21 @@ export class ByClawBeResourceModelResolver {
       throw new Error("ByClaw BE resource model returned invalid result");
     }
     const modelId = modelIdFromPrologue(data.prologue);
-    const config = await this.#llmProvider.resolveByModelId(modelId);
-    return {
-      modelId,
-      fingerprint: fingerprintModelConfig(config),
-    };
+    return resolveLeaderModelSelection(this.#llmProvider, modelId);
   }
+}
+
+/** 根据 BE 返回的模型主键生成不包含密钥的、可持久化的 Leader 选择快照。 */
+export async function resolveLeaderModelSelection(
+  llmProvider: Pick<RedisFirstLlmProvider, "resolveByModelId">,
+  rawModelId: unknown,
+): Promise<LeaderModelSelection> {
+  const modelId = requiredScalar(rawModelId, "modelId");
+  const config = await llmProvider.resolveByModelId(modelId);
+  return {
+    modelId,
+    fingerprint: fingerprintModelConfig(config),
+  };
 }
 
 export function fingerprintModelConfig(config: LlmProviderConfig): string {

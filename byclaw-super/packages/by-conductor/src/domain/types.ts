@@ -1,5 +1,5 @@
 import type { SessionContextV1 } from "./session-context.js";
-import type { RunIngressContextV1 } from "./group-chat-context.js";
+import type { RunIngressContextV1 } from "./run-ingress-context.js";
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
@@ -18,6 +18,8 @@ export interface AgentProfile {
   code?: string;
   name: string;
   description?: string;
+  /** 编排者为该 Agent 配置的团队职责，不影响 Connector 路由。 */
+  role?: string;
   execution: AgentExecutionTarget;
 }
 

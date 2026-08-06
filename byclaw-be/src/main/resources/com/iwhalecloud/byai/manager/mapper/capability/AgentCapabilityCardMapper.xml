@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.capability.AgentCapabilityCardMapper">
+
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.capability.AgentCapabilityCardEntity">
+        <result column="system_code" property="systemCode"/>
+        <result column="agent_id" property="agentId"/>
+        <result column="agent_code" property="agentCode"/>
+        <result column="agent_name" property="agentName"/>
+        <result column="schema_version" property="schemaVersion"/>
+        <result column="generator_version" property="generatorVersion"/>
+        <result column="source_version" property="sourceVersion"/>
+        <result column="source_fingerprint" property="sourceFingerprint"/>
+        <result column="card" property="card"/>
+        <result column="routing_text" property="routingText"/>
+        <result column="quality" property="quality"/>
+        <result column="status" property="status"/>
+        <result column="version" property="version"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <!-- 原子 upsert：PostgreSQL/OpenGauss 的 INSERT ... ON CONFLICT，命中主键时版本自增并刷新产物。 -->
+    <insert id="upsert" parameterType="com.iwhalecloud.byai.manager.entity.capability.AgentCapabilityCardEntity">
+        INSERT INTO byai.agent_capability_cards
+            (system_code, agent_id, agent_code, agent_name, schema_version,
+             generator_version, source_version, source_fingerprint, card,
+             routing_text, quality, status, version, created_at, updated_at)
+        VALUES
+            (#{entity.systemCode}, #{entity.agentId}, #{entity.agentCode}, #{entity.agentName},
+             #{entity.schemaVersion}, #{entity.generatorVersion}, #{entity.sourceVersion},
+             #{entity.sourceFingerprint}, #{entity.card}, #{entity.routingText}, #{entity.quality},
+             COALESCE(#{entity.status}, 'ACTIVE'), 0,
+             COALESCE(#{entity.createdAt}, NOW()), COALESCE(#{entity.updatedAt}, NOW()))
+        ON CONFLICT (system_code, agent_id) DO UPDATE
+            SET agent_code        = EXCLUDED.agent_code,
+                agent_name        = EXCLUDED.agent_name,
+                schema_version    = EXCLUDED.schema_version,
+                generator_version = EXCLUDED.generator_version,
+                source_version    = EXCLUDED.source_version,
+                source_fingerprint = EXCLUDED.source_fingerprint,
+                card              = EXCLUDED.card,
+                routing_text      = EXCLUDED.routing_text,
+                quality           = EXCLUDED.quality,
+                status            = 'ACTIVE',
+                version           = agent_capability_cards.version + 1,
+                updated_at        = COALESCE(EXCLUDED.updated_at, NOW())
+    </insert>
+
+</mapper>
