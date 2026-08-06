@@ -100,6 +100,30 @@ public class ProjectInitService {
         long startMillis = System.currentTimeMillis();
 
         try {
+            // 自动填充 submodules：查询 repo_type='code' 的仓库
+            if (request.getSubmodules() == null || request.getSubmodules().isEmpty()) {
+                List<ProjectRepo> codeRepos = projectRepoMapper.selectList(
+                    new LambdaQueryWrapper<ProjectRepo>()
+                        .eq(ProjectRepo::getProjectId, request.getProjectId())
+                        .eq(ProjectRepo::getRepoType, "code")
+                );
+
+                if (!codeRepos.isEmpty()) {
+                    List<SubmoduleInfo> submodules = new ArrayList<>();
+                    for (ProjectRepo repo : codeRepos) {
+                        SubmoduleInfo submodule = new SubmoduleInfo();
+                        submodule.setUrl(repo.getRepoUrl());
+                        submodule.setBranch(repo.getDefaultBranch());
+                        // 使用 repoFullName 作为子模块路径（例如：beyonai/ByClaw）
+                        submodule.setPath(repo.getRepoFullName());
+                        submodules.add(submodule);
+                    }
+                    request.setSubmodules(submodules);
+                    log.debug("Auto-filled {} code repositories as submodules for projectId={}",
+                        submodules.size(), request.getProjectId());
+                }
+            }
+
             ProjectInitResponse response = executeInitialization(request);
 
             // 记录审计日志成功
@@ -133,9 +157,35 @@ public class ProjectInitService {
         String username = getCurrentUsername();
         String ipAddress = getClientIpAddress();
 
+        // 自动填充 submodules：查询 repo_type='code' 的仓库
+        if (request.getSubmodules() == null || request.getSubmodules().isEmpty()) {
+            List<ProjectRepo> codeRepos = projectRepoMapper.selectList(
+                new LambdaQueryWrapper<ProjectRepo>()
+                    .eq(ProjectRepo::getProjectId, request.getProjectId())
+                    .eq(ProjectRepo::getRepoType, "code")
+            );
+
+            if (!codeRepos.isEmpty()) {
+                List<SubmoduleInfo> submodules = new ArrayList<>();
+                for (ProjectRepo repo : codeRepos) {
+                    SubmoduleInfo submodule = new SubmoduleInfo();
+                    submodule.setUrl(repo.getRepoUrl());
+                    submodule.setBranch(repo.getDefaultBranch());
+                    // 使用 repoFullName 作为子模块路径（例如：beyonai/ByClaw）
+                    submodule.setPath(repo.getRepoFullName());
+                    submodules.add(submodule);
+                }
+                request.setSubmodules(submodules);
+                log.debug("Auto-filled {} code repositories as submodules for projectId={}",
+                    submodules.size(), request.getProjectId());
+            }
+        }
+
         // 创建异步任务
         String taskId = taskManager.createTask(userId, requestId,
-            "project_" + request.getProjectId(), request.getSkillPackageName());
+            "project_" + request.getProjectId(),
+            request.getSkillPackages() != null && !request.getSkillPackages().isEmpty()
+                ? String.join(",", request.getSkillPackages()) : "none");
 
         // 异步执行初始化（审计日志将在任务结束时记录）
         executeInitializationAsync(taskId, requestId, request, userId, username, ipAddress);
@@ -190,40 +240,55 @@ public class ProjectInitService {
      * 核心初始化逻辑（同步和异步共用）
      */
     private ProjectInitResponse executeInitialization(ProjectInitRequest request) throws BaseException {
+        log.debug("[Step 1/14] Starting executeInitialization for projectId={}", request.getProjectId());
+
         // 1. 查询项目
+        log.debug("[Step 1/14] Querying project by projectId={}", request.getProjectId());
         Project project = projectService.findById(request.getProjectId());
         if (project == null) {
+            log.error("[Step 1/14] Project not found: projectId={}", request.getProjectId());
             throw new BaseException(50404, "Project not found: " + request.getProjectId());
         }
+        log.debug("[Step 1/14] Project found: projectId=, projectName={}, projectType={}",
+            project.getProjectId(), project.getProjectName(), project.getProjectType());
 
         // 2. 查询 workspace 类型仓库
+        log.debug("[Step 2/14] Querying workspace repository for projectId={}", request.getProjectId());
         ProjectRepo repo = findWorkspaceRepo(request.getProjectId());
         if (repo == null) {
+            log.error("[Step 2/14] No workspace repository configured for project: {}", project.getProjectName());
             throw new BaseException(50404,
                 "No workspace repository configured for project: " + project.getProjectName());
         }
+        log.debug("[Step 2/14] Workspace repo found: repoId={}, provider={}, repoFullName={}, repoUrl={}",
+            repo.getRepoId(), repo.getProvider(), repo.getRepoFullName(), repo.getRepoUrl());
 
         // 3. 构建本地仓库路径
+        log.debug("[Step 3/14] Building local repository path");
         Path repoPath = buildRepoPath(repo);
         String normalizedPath = repoPath.toString();
+        log.debug("[Step 3/14] Local path resolved: {}", normalizedPath);
 
-        log.info("Starting project initialization: projectId={}, provider={}, repoFullName={}, repoUrl={}, path={}, skillPackage={}, submodules={}",
+        log.info("Starting project initialization: projectId={}, provider={}, repoFullName={}, repoUrl={}, path={}, skillPackages={}, submodules={}",
             request.getProjectId(), repo.getProvider(), repo.getRepoFullName(), repo.getRepoUrl(),
-            normalizedPath, request.getSkillPackageName(),
+            normalizedPath, request.getSkillPackages(),
             request.getSubmodules() != null ? request.getSubmodules().size() : 0);
 
         // 3.5 获取当前用户的 GH_TOKEN（用于 Git 认证）
+        log.debug("[Step 3.5/14] Retrieving GitHub token for user authentication");
         String ghToken = getUserGitHubToken();
         if (ghToken == null) {
+            log.error("[Step 3.5/14] GitHub token not found for current user");
             throw new BaseException(50403,
                 "GitHub Token (GH_TOKEN) is required for Git operations. " +
                 "Please configure your GitHub Personal Access Token in user settings.");
         }
-        log.debug("Retrieved GitHub token for user");
+        log.debug("[Step 3.5/14] GitHub token retrieved successfully (length={})", ghToken.length());
 
         // 4. 验证仓库已克隆到本地，如果不存在则自动克隆
+        log.debug("[Step 4/14] Checking if repository exists locally: {}", normalizedPath);
         if (!Files.exists(repoPath)) {
-            log.warn("Repository not found locally: {}. Attempting to clone from: {}",
+            log.warn("[Step 4/14] Repository not found locally: {}. Attempting to clone from: {}",
                 normalizedPath, repo.getRepoUrl());
 
             try {
@@ -231,32 +296,43 @@ public class ProjectInitService {
                 String branch = request.getRepoBranch() != null && !request.getRepoBranch().isBlank()
                     ? request.getRepoBranch()
                     : repo.getDefaultBranch();
+                log.debug("[Step 4/14] Cloning repository: branch={}", branch);
 
                 // 将 token 嵌入 URL（用于 HTTPS 认证）
                 String authenticatedUrl = injectTokenIntoUrl(repo.getRepoUrl(), ghToken);
                 gitCommandExecutor.cloneRepository(authenticatedUrl, repoPath, branch);
 
-                log.info("Successfully cloned repository to: {}", normalizedPath);
+                log.info("[Step 4/14] Successfully cloned repository to: {}", normalizedPath);
             } catch (BaseException e) {
+                log.error("[Step 4/14] Failed to clone repository: {}", repo.getRepoUrl(), e);
                 throw new BaseException(50500,
                     "Failed to clone repository: " + repo.getRepoUrl() +
                     ". Error: " + e.getMessage(), e);
             }
+        } else {
+            log.debug("[Step 4/14] Repository already exists locally: {}", normalizedPath);
         }
 
+        log.debug("[Step 4/14] Verifying Git repository structure");
         if (!gitCommandExecutor.isGitRepository(repoPath)) {
+            log.error("[Step 4/14] Path is not a valid Git repository: {}", normalizedPath);
             throw new BaseException(50400,
                 "Path is not a Git repository (missing .git directory): " + normalizedPath);
         }
+        log.debug("[Step 4/14] Git repository verified successfully");
 
         // 5. 获取锁（非阻塞）
+        log.debug("[Step 5/14] Acquiring repository lock: {}", normalizedPath);
         if (!repoLockManager.acquireLock(normalizedPath)) {
+            log.error("[Step 5/14] Failed to acquire lock - repository is locked by another process: {}", normalizedPath);
             throw new BaseException(50409,
                 "Repository is currently being initialized by another process: " + normalizedPath);
         }
+        log.debug("[Step 5/14] Repository lock acquired successfully");
 
         try {
             // 6. 更新项目状态为 initializing（仅研发项目）
+            log.debug("[Step 6/14] Updating project status to 'initializing'");
             if ("develop".equals(project.getProjectType())) {
                 try {
                     Project projectUpdate = new Project();
@@ -265,30 +341,54 @@ public class ProjectInitService {
                     projectUpdate.setUpdateBy(CurrentUserHolder.getCurrentUserId());
                     projectUpdate.setUpdateTime(new java.util.Date());
                     projectService.update(projectUpdate);
-                    log.info("Project init_status updated to 'initializing': projectId={}", request.getProjectId());
+                    log.info("[Step 6/14] Project init_status updated to 'initializing': projectId={}", request.getProjectId());
                 } catch (Exception e) {
-                    log.error("Failed to update project init_status to 'initializing': projectId={}",
+                    log.error("[Step 6/14] Failed to update project init_status to 'initializing': projectId={}",
                         request.getProjectId(), e);
                     // 继续执行，状态更新失败不影响初始化流程
                 }
+            } else {
+                log.debug("[Step 6/14] Skipping status update - project type is not 'develop': projectType={}", project.getProjectType());
             }
 
-            // 7. 检查技能包是否已初始化（仅当指定了技能包时）
-            if (request.getSkillPackageName() != null && !request.getSkillPackageName().isBlank()) {
-                checkSkillPackageNotInitialized(repoPath, request.getSkillPackageName());
+            // 7. 检查技能包是否已初始化（遍历所有技能包）
+            List<String> skillPackagesToInit = new ArrayList<>();
+            if (request.getSkillPackages() != null && !request.getSkillPackages().isEmpty()) {
+                log.debug("[Step 7/14] Checking {} skill package(s) for initialization", request.getSkillPackages().size());
+                for (String skillPackage : request.getSkillPackages()) {
+                    if (skillPackage != null && !skillPackage.isBlank()) {
+                        log.debug("[Step 7/14] Checking if skill package already initialized: {}", skillPackage);
+                        checkSkillPackageNotInitialized(repoPath, skillPackage);
+                        skillPackagesToInit.add(skillPackage);
+                        log.debug("[Step 7/14] Skill package check passed - not yet initialized: {}", skillPackage);
+                    }
+                }
+                log.debug("[Step 7/14] All skill packages checked: {} to be initialized", skillPackagesToInit.size());
+            } else {
+                log.debug("[Step 7/14] Skipping skill package check - no skill packages specified");
             }
 
             // 8. 切换分支（如果指定）
+            log.debug("[Step 8/14] Checking current branch");
             String currentBranch = gitCommandExecutor.getCurrentBranch(repoPath);
+            log.debug("[Step 8/14] Current branch: {}", currentBranch);
             if (request.getRepoBranch() != null && !request.getRepoBranch().isBlank()) {
+                log.debug("[Step 8/14] Switching to requested branch: {}", request.getRepoBranch());
                 gitCommandExecutor.checkoutBranch(repoPath, request.getRepoBranch());
                 currentBranch = request.getRepoBranch();
+                log.info("[Step 8/14] Switched to branch: {}", currentBranch);
+            } else {
+                log.debug("[Step 8/14] No branch switch requested - staying on: {}", currentBranch);
             }
 
             // 9. 添加子模块（如果有）
+            log.debug("[Step 9/14] Processing submodules");
             List<String> addedSubmodules = new ArrayList<>();
             if (request.getSubmodules() != null && !request.getSubmodules().isEmpty()) {
+                log.debug("[Step 9/14] Adding {} submodule(s)", request.getSubmodules().size());
                 for (SubmoduleInfo submodule : request.getSubmodules()) {
+                    log.debug("[Step 9/14] Adding submodule: url={}, path={}, branch={}",
+                        submodule.getUrl(), submodule.getPath(), submodule.getBranch());
                     gitCommandExecutor.addSubmodule(
                         repoPath,
                         submodule.getUrl(),
@@ -296,26 +396,43 @@ public class ProjectInitService {
                         submodule.getBranch()
                     );
                     addedSubmodules.add(submodule.getPath());
+                    log.info("[Step 9/14] Submodule added successfully: {}", submodule.getPath());
                 }
+                log.debug("[Step 9/14] All submodules added: count={}", addedSubmodules.size());
+            } else {
+                log.debug("[Step 9/14] No submodules to add");
             }
 
-            // 10. 初始化技能包（仅当指定了技能包时）
-            if (request.getSkillPackageName() != null && !request.getSkillPackageName().isBlank()) {
-                initializeSkillPackage(repoPath, request.getSkillPackageName());
+            // 10. 初始化技能包（遍历处理所有技能包）
+            List<String> initializedSkillPackages = new ArrayList<>();
+            if (!skillPackagesToInit.isEmpty()) {
+                log.debug("[Step 10/14] Initializing {} skill package(s)", skillPackagesToInit.size());
+                for (String skillPackage : skillPackagesToInit) {
+                    log.debug("[Step 10/14] Initializing skill package: {}", skillPackage);
+                    initializeSkillPackage(repoPath, skillPackage);
+                    initializedSkillPackages.add(skillPackage);
+                    log.info("[Step 10/14] Skill package initialized successfully: {}", skillPackage);
+                }
+                log.debug("[Step 10/14] All skill packages initialized: count={}", initializedSkillPackages.size());
+            } else {
+                log.debug("[Step 10/14] Skipping skill package initialization - no skill packages specified");
             }
 
             // 11. 提交变更（如果启用）
+            log.debug("[Step 11/14] Processing commit");
             String commitHash = null;
             boolean newCommit = false;
             if (Boolean.TRUE.equals(request.getAutoCommit())) {
+                log.debug("[Step 11/14] Auto-commit enabled - proceeding with commit");
                 // 先获取提交前的 commit hash
                 String oldCommitHash = gitCommandExecutor.getCurrentCommitHash(repoPath);
+                log.debug("[Step 11/14] Current commit hash before changes: {}", oldCommitHash);
 
                 String commitMessage = request.getCommitMessage();
                 if (commitMessage == null || commitMessage.isBlank()) {
                     // 根据实际操作生成提交消息
-                    if (request.getSkillPackageName() != null && !request.getSkillPackageName().isBlank()) {
-                        commitMessage = String.format("chore: init %s skill package", request.getSkillPackageName());
+                    if (!initializedSkillPackages.isEmpty()) {
+                        commitMessage = String.format("chore: init %s skill package(s)", String.join(", ", initializedSkillPackages));
                         if (!addedSubmodules.isEmpty()) {
                             commitMessage += " and add " + addedSubmodules.size() + " submodule(s)";
                         }
@@ -324,32 +441,56 @@ public class ProjectInitService {
                     } else {
                         commitMessage = "chore: update repository";
                     }
+                    log.debug("[Step 11/14] Generated commit message: {}", commitMessage);
+                } else {
+                    log.debug("[Step 11/14] Using provided commit message: {}", commitMessage);
                 }
 
                 // 提交变更
                 commitHash = gitCommandExecutor.commitAll(repoPath, commitMessage);
+                log.debug("[Step 11/14] Commit completed: hash={}", commitHash);
 
                 // 对比提交前后的 hash，判断是否有新提交
                 newCommit = !commitHash.equals(oldCommitHash);
+                if (newCommit) {
+                    log.info("[Step 11/14] New commit created: {}", commitHash.substring(0, Math.min(8, commitHash.length())));
+                } else {
+                    log.debug("[Step 11/14] No changes to commit - hash unchanged: {}", commitHash.substring(0, Math.min(8, commitHash.length())));
+                }
+            } else {
+                log.debug("[Step 11/14] Auto-commit disabled - skipping commit");
             }
 
-            // 11. 推送到远程（如果启用且有新提交）
+            // 12. 推送到远程（如果启用且有新提交）
+            log.debug("[Step 12/14] Processing push to remote");
             boolean pushed = false;
             if (Boolean.TRUE.equals(request.getAutoPush()) && newCommit) {
+                log.debug("[Step 12/14] Auto-push enabled and new commit exists - proceeding with push");
                 // 临时设置远程 URL 为带 token 的版本（用于认证）
                 String authenticatedUrl = injectTokenIntoUrl(repo.getRepoUrl(), ghToken);
+                log.debug("[Step 12/14] Temporarily setting authenticated remote URL");
                 gitCommandExecutor.executeCommand(repoPath, "git", "remote", "set-url", "origin", authenticatedUrl);
 
                 try {
+                    log.debug("[Step 12/14] Pushing to branch: {}", currentBranch);
                     gitCommandExecutor.push(repoPath, currentBranch);
                     pushed = true;
+                    log.info("[Step 12/14] Successfully pushed to remote: branch={}", currentBranch);
                 } finally {
                     // 恢复原始 URL（移除 token）
+                    log.debug("[Step 12/14] Restoring original remote URL");
                     gitCommandExecutor.executeCommand(repoPath, "git", "remote", "set-url", "origin", repo.getRepoUrl());
+                }
+            } else {
+                if (!Boolean.TRUE.equals(request.getAutoPush())) {
+                    log.debug("[Step 12/14] Auto-push disabled - skipping push");
+                } else if (!newCommit) {
+                    log.debug("[Step 12/14] No new commit - skipping push");
                 }
             }
 
-            // 12. 更新项目初始化状态为 ready
+            // 13. 更新项目初始化状态为 ready
+            log.debug("[Step 13/14] Updating project status to 'ready'");
             try {
                 if (project != null && "develop".equals(project.getProjectType())) {
                     Project projectUpdate = new Project();
@@ -358,33 +499,40 @@ public class ProjectInitService {
                     projectUpdate.setUpdateBy(CurrentUserHolder.getCurrentUserId());
                     projectUpdate.setUpdateTime(new java.util.Date());
                     projectService.update(projectUpdate);
-                    log.info("Project init_status updated to 'ready': projectId={}", request.getProjectId());
+                    log.info("[Step 13/14] Project init_status updated to 'ready': projectId={}", request.getProjectId());
+                } else {
+                    log.debug("[Step 13/14] Skipping status update - project type is not 'develop'");
                 }
             } catch (Exception e) {
-                log.error("Failed to update project init_status to 'ready': projectId={}",
+                log.error("[Step 13/14] Failed to update project init_status to 'ready': projectId={}",
                     request.getProjectId(), e);
                 // 不抛出异常，因为初始化本身已成功，只是状态更新失败
             }
 
-            // 13. 构建成功响应
+            // 14. 构建成功响应
+            log.debug("[Step 14/14] Building success response");
             ProjectInitResponse response = ProjectInitResponse.success(
                 normalizedPath,
                 currentBranch,
-                request.getSkillPackageName(),
+                initializedSkillPackages,
                 addedSubmodules,
                 commitHash,
                 pushed
             );
 
-            log.info("Project initialization completed successfully: {}", normalizedPath);
+            log.info("[Step 14/14] Project initialization completed successfully: path={}, branch={}, skillPackages={}, commit={}, pushed={}",
+                normalizedPath, currentBranch, initializedSkillPackages,
+                commitHash != null ? commitHash.substring(0, Math.min(8, commitHash.length())) : "none", pushed);
             return response;
 
         } catch (Exception e) {
             log.error("Project initialization failed: {}", normalizedPath, e);
             throw e;
         } finally {
-            // 14. 释放锁
+            // 释放锁
+            log.debug("[Cleanup] Releasing repository lock: {}", normalizedPath);
             repoLockManager.releaseLock(normalizedPath);
+            log.debug("[Cleanup] Repository lock released");
         }
     }
 

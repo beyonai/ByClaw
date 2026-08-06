@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.dto.project;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -19,10 +20,11 @@ import java.util.List;
 public class ProjectInitResponse {
 
     /**
-     * 仓库绝对路径
+     * 仓库绝对路径（仅内部使用，不返回给前端）
      *
      * 例如: /data/git-repos/project-123
      */
+    @JsonIgnore
     private String repoPath;
 
     /**
@@ -31,11 +33,11 @@ public class ProjectInitResponse {
     private String branch;
 
     /**
-     * 已初始化的技能包名称
+     * 已初始化的技能包列表
      *
-     * 例如: "trellis" 或 "superpower"
+     * 例如: ["trellis", "superpower"]
      */
-    private String skillPackageName;
+    private List<String> skillPackages;
 
     /**
      * 成功添加的子模块路径列表
@@ -66,10 +68,13 @@ public class ProjectInitResponse {
     /**
      * 创建成功响应的便捷方法
      */
-    public static ProjectInitResponse success(String repoPath, String branch, String skillPackageName,
+    public static ProjectInitResponse success(String repoPath, String branch, List<String> skillPackages,
                                                List<String> addedSubmodules, String commitHash, Boolean pushed) {
-        StringBuilder msg = new StringBuilder("Successfully initialized ");
-        msg.append(skillPackageName).append(" skill package");
+        StringBuilder msg = new StringBuilder("Successfully initialized");
+
+        if (skillPackages != null && !skillPackages.isEmpty()) {
+            msg.append(" ").append(String.join(", ", skillPackages)).append(" skill package(s)");
+        }
 
         if (addedSubmodules != null && !addedSubmodules.isEmpty()) {
             msg.append(" and added ").append(addedSubmodules.size()).append(" submodule(s)");
@@ -86,7 +91,7 @@ public class ProjectInitResponse {
         return ProjectInitResponse.builder()
             .repoPath(repoPath)
             .branch(branch)
-            .skillPackageName(skillPackageName)
+            .skillPackages(skillPackages)
             .addedSubmodules(addedSubmodules)
             .commitHash(commitHash)
             .pushed(pushed)

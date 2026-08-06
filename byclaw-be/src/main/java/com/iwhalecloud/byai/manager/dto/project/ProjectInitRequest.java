@@ -34,12 +34,12 @@ public class ProjectInitRequest {
     private String repoBranch;
 
     /**
-     * 技能包名称（可选）
+     * 技能包列表（可选）
      *
-     * 可选值: "trellis" 或 "superpower"
+     * 可选值: ["trellis", "superpower"]
      * 如果不指定，则只执行 Git 操作（clone/submodule），不初始化技能包
      */
-    private String skillPackageName;
+    private List<String> skillPackages;
 
     /**
      * 要添加的子模块列表（可选）
@@ -67,7 +67,7 @@ public class ProjectInitRequest {
     /**
      * 自定义提交消息（可选）
      *
-     * 如果不提供，则使用默认消息: "chore: init {skillPackageName} skill package"
+     * 如果不提供，则使用默认消息: "chore: init {skillPackages} skill package"
      */
     private String commitMessage;
 }
