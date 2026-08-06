@@ -5,8 +5,11 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.Field;
 
 import static org.assertj.core.api.Assertions.assertThat;
+
+import com.iwhalecloud.byai.manager.dto.connector.CompleteSkillAuthorizationRequest;
 
 class ConnectorControllerContractTest {
 
@@ -18,6 +21,15 @@ class ConnectorControllerContractTest {
             .containsExactly("/authorization/start");
         assertThat(findMethod("getAuthorizationStatus").getAnnotation(GetMapping.class).value())
             .containsExactly("/authorization/status");
+        assertThat(findMethod("completeSkillAuthorization").getAnnotation(PostMapping.class).value())
+            .containsExactly("/authorization/skill-complete");
+    }
+
+    @Test
+    void skillCompletionRequestAcceptsOnlyConnectorCode() {
+        assertThat(java.util.Arrays.stream(CompleteSkillAuthorizationRequest.class.getDeclaredFields())
+            .map(Field::getName))
+            .containsExactly("connectorCode");
     }
 
     private Method findMethod(String name) {

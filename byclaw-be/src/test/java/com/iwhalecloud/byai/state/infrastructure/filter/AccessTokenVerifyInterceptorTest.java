@@ -113,4 +113,59 @@ class AccessTokenVerifyInterceptorTest {
         assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
         verifyNoInteractions(jwtTokenFilter, sessionFilter);
     }
+
+    @Test
+    void connectorSkillCallbackForcesBeyondTokenIdentityOverCookieSession() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        JwtTokenFilter jwtTokenFilter = mock(JwtTokenFilter.class);
+        SessionFilter sessionFilter = mock(SessionFilter.class);
+        LoginApplicationService loginApplicationService = mock(LoginApplicationService.class);
+        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwtTokenFilter);
+        ReflectionTestUtils.setField(interceptor, "sessionFilter", sessionFilter);
+        ReflectionTestUtils.setField(interceptor, "loginApplicationService", loginApplicationService);
+        interceptor.init();
+        LoginInfo tokenLoginInfo = new LoginInfo();
+        tokenLoginInfo.setUserId(10058L);
+        tokenLoginInfo.setUserCode("token-user");
+        LoginInfo localLoginInfo = new LoginInfo();
+        localLoginInfo.setUserId(42L);
+        localLoginInfo.setUserCode("token-user");
+        when(jwtTokenFilter.doFilter(null, "portal-login-token")).thenAnswer(invocation -> {
+            CurrentUserHolder.setLoginInfo(tokenLoginInfo);
+            return true;
+        });
+        when(loginApplicationService.getLoginInfo("token-user")).thenReturn(localLoginInfo);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST",
+            "/byaiService/connector/authorization/skill-complete");
+        request.addHeader("Beyond-Token", "portal-login-token");
+        MockHttpSession cookieSession = new MockHttpSession();
+        cookieSession.setAttribute("USER_CODE", "different-cookie-user");
+        request.setSession(cookieSession);
+
+        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
+        assertThat(CurrentUserHolder.getCurrentUserId()).isEqualTo(42L);
+        verify(jwtTokenFilter).doFilter(null, "portal-login-token");
+        verify(loginApplicationService).getLoginInfo("token-user");
+        verifyNoInteractions(sessionFilter);
+    }
+
+    @Test
+    void connectorSkillCallbackRejectsMissingBeyondTokenDespiteCookieSession() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        JwtTokenFilter jwtTokenFilter = mock(JwtTokenFilter.class);
+        SessionFilter sessionFilter = mock(SessionFilter.class);
+        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwtTokenFilter);
+        ReflectionTestUtils.setField(interceptor, "sessionFilter", sessionFilter);
+        interceptor.init();
+        MockHttpServletRequest request = new MockHttpServletRequest("POST",
+            "/byaiService/connector/authorization/skill-complete");
+        MockHttpSession cookieSession = new MockHttpSession();
+        cookieSession.setAttribute("USER_CODE", "cookie-user");
+        request.setSession(cookieSession);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        assertFalse(interceptor.preHandle(request, response, new Object()));
+        assertThat(response.getStatus()).isEqualTo(401);
+        verifyNoInteractions(jwtTokenFilter, sessionFilter);
+    }
 }

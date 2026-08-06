@@ -46,6 +46,9 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
 
     private static final String THIRD_PARTY_SKILL_INSTALL_PATH = "/tool/installThirdPartySkill";
 
+    private static final String CONNECTOR_SKILL_COMPLETE_PATH =
+        "/connector/authorization/skill-complete";
+
     @Value("${byai.access.urlpatterns:}")
     private String urlPattenrs;
 
@@ -154,7 +157,13 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                 if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
                     return true;
                 }
-                return this.authenticateThirdPartySkillInstall(request);
+                return this.authenticateBeyondTokenOnlyRequest(request, "第三方技能安装");
+            }
+            if (this.isConnectorSkillCompleteRequest(request)) {
+                if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+                    return true;
+                }
+                return this.authenticateBeyondTokenOnlyRequest(request, "连接器技能授权同步");
             }
             if (this.checkUrlByRegex(url)) {
                 return true;
@@ -212,15 +221,15 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
      * 技能超市安装必须以调用方显式传入的 Beyond-Token 作为当前用户身份。
      * 即使请求同时携带门户 Cookie，也不能使用 Cookie/Session 覆盖 Token 中的用户。
      */
-    private boolean authenticateThirdPartySkillInstall(HttpServletRequest request) {
+    private boolean authenticateBeyondTokenOnlyRequest(HttpServletRequest request, String operationName) {
         String systemCode = request.getHeader("system-code");
         String beyondToken = request.getHeader("Beyond-Token");
         if (StringUtils.isBlank(beyondToken)) {
-            throw new RuntimeException("第三方技能安装接口必须通过 Beyond-Token 鉴权");
+            throw new RuntimeException(operationName + "接口必须通过 Beyond-Token 鉴权");
         }
         logger.info(
-            "第三方技能安装接口强制Beyond-Token鉴权，requestUri={}, systemCode={}, beyondToken={}",
-            request.getRequestURI(), systemCode, beyondToken);
+            "{}接口强制Beyond-Token鉴权，requestUri={}, systemCode={}",
+            operationName, request.getRequestURI(), systemCode);
         boolean authenticated = jwtTokenFilter.doFilter(systemCode, beyondToken);
         if (!authenticated) {
             return false;
@@ -241,9 +250,9 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
         }
         CurrentUserHolder.setLoginInfo(localLoginInfo);
         logger.info(
-            "第三方技能安装用户身份归一化完成，tokenUserId={}, tokenUserCode={}, localUserId={}, "
+            "{}用户身份归一化完成，tokenUserId={}, tokenUserCode={}, localUserId={}, "
                 + "localUserCode={}, userName={}",
-            tokenUserId, tokenUserCode, localLoginInfo.getUserId(), localLoginInfo.getUserCode(),
+            operationName, tokenUserId, tokenUserCode, localLoginInfo.getUserId(), localLoginInfo.getUserCode(),
             localLoginInfo.getUserName());
         return true;
     }
@@ -252,6 +261,12 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
         String requestUri = request == null ? null : request.getRequestURI();
         return StringUtils.endsWith(requestUri, THIRD_PARTY_SKILL_INSTALL_PATH)
             || StringUtils.endsWith(requestUri, THIRD_PARTY_SKILL_INSTALL_PATH + "/");
+    }
+
+    private boolean isConnectorSkillCompleteRequest(HttpServletRequest request) {
+        String requestUri = request == null ? null : request.getRequestURI();
+        return StringUtils.endsWith(requestUri, CONNECTOR_SKILL_COMPLETE_PATH)
+            || StringUtils.endsWith(requestUri, CONNECTOR_SKILL_COMPLETE_PATH + "/");
     }
 
     /**

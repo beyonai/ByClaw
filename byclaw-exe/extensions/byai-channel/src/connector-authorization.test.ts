@@ -197,11 +197,46 @@ describe("connector authorization", () => {
     ).toBeUndefined();
   });
 
+  it("builds a Chinese per-subtask protocol for mixed connector states", () => {
+    const prompt = buildDisabledConnectorPrompt("zh_CN", {
+      dws: true,
+      fws: false,
+      wecomcli: false,
+    });
+
+    expect(prompt).toContain("显式启用连接器：`dws`");
+    expect(prompt).toContain("显式未启用连接器：`fws`, `wecomcli`");
+    expect(prompt).toContain("按连接器拆分为独立子任务");
+    expect(prompt).toContain("已启用连接器对应的子任务必须正常执行");
+    expect(prompt).toContain("只跳过未启用连接器对应的子任务");
+    expect(prompt).toContain("先完成已启用连接器和无关子任务");
+    expect(prompt).toContain("只列出本次请求实际需要但未启用的连接器");
+    expect(prompt).toContain("不要把已启用连接器描述为不可用");
+  });
+
+  it("builds an English per-subtask protocol for mixed connector states", () => {
+    const prompt = buildDisabledConnectorPrompt("en_US", {
+      dws: true,
+      fws: false,
+      wecomcli: false,
+    });
+
+    expect(prompt).toContain("Explicitly enabled connectors: `dws`");
+    expect(prompt).toContain("Explicitly disabled connectors: `fws`, `wecomcli`");
+    expect(prompt).toContain("split the request into independent connector subtasks");
+    expect(prompt).toContain("must execute enabled-connector subtasks normally");
+    expect(prompt).toContain("skip only the disabled-connector subtasks");
+    expect(prompt).toContain("complete enabled-connector and unrelated subtasks first");
+    expect(prompt).toContain(
+      "list only the connectors required by this request that are disabled",
+    );
+    expect(prompt).toContain("Do not describe an enabled connector as unavailable");
+  });
+
   it("builds localized unavailable-connector guidance", () => {
     const chinese = buildDisabledConnectorPrompt("zh_CN", { dws: false, fws: true });
-    expect(chinese).toContain("`dws`");
-    expect(chinese).not.toContain("`fws`");
-    expect(chinese).toContain("连接器当前处于未连接或未授权状态");
+    expect(chinese).toContain("显式启用连接器：`fws`");
+    expect(chinese).toContain("显式未启用连接器：`dws`");
     expect(chinese).toContain("ByClaw");
     expect(chinese).toContain("连接器管理页面");
     expect(chinese).toContain("连接/授权");
@@ -210,11 +245,11 @@ describe("connector authorization", () => {
     expect(chinese).toContain("不要搜索记忆或聊天室历史");
     expect(chinese).toContain("不要重试");
     expect(chinese).toContain("立即回复用户");
-    expect(chinese).toContain("如果用户当前意图不需要上述未启用连接器");
+    expect(chinese).toContain("不要因某个连接器未启用而结束整个混合任务");
 
     const english = buildDisabledConnectorPrompt("en_US", { dws: false });
-    expect(english).toContain("`dws`");
-    expect(english).toContain("currently not connected or authorized");
+    expect(english).toContain("Explicitly enabled connectors: none");
+    expect(english).toContain("Explicitly disabled connectors: `dws`");
     expect(english).toContain("ByClaw");
     expect(english).toContain("connector management page");
     expect(english).toContain("Before calling any tool");
@@ -222,6 +257,26 @@ describe("connector authorization", () => {
     expect(english).toContain("do not search memory or chat history");
     expect(english).toContain("do not retry");
     expect(english).toContain("reply to the user immediately");
+  });
+
+  it("keeps connectors omitted from a partial policy normally available in Chinese", () => {
+    const prompt = buildDisabledConnectorPrompt("zh_CN", { dws: false });
+
+    expect(prompt).toContain("显式启用连接器：无");
+    expect(prompt).toContain("显式未启用连接器：`dws`");
+    expect(prompt).toContain("未出现在上述两份列表中的连接器");
+    expect(prompt).toContain("不得将其视为未启用");
+    expect(prompt).toContain("按兼容规则正常处理");
+  });
+
+  it("keeps connectors omitted from a partial policy normally available in English", () => {
+    const prompt = buildDisabledConnectorPrompt("en_US", { dws: false });
+
+    expect(prompt).toContain("Explicitly enabled connectors: none");
+    expect(prompt).toContain("Explicitly disabled connectors: `dws`");
+    expect(prompt).toContain("Connectors absent from both lists");
+    expect(prompt).toContain("must not be treated as disabled");
+    expect(prompt).toContain("normal compatibility behavior");
   });
 
   it("omits guidance when every connector is enabled", () => {

@@ -13,10 +13,15 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorAuthorizationProvider;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialVerifier;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService.DwsCredentialOutcome;
+import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService.DwsCredentialStatus;
+import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
 @Component
-public class DwsDingtalkAuthorizationProvider implements ConnectorAuthorizationProvider {
+public class DwsDingtalkAuthorizationProvider
+        implements ConnectorAuthorizationProvider, ConnectorCredentialVerifier {
 
     private static final long DEVICE_FLOW_TTL_MILLIS = 900_000L;
     private static final String INVALID_USER = "INVALID_USER";
@@ -33,6 +38,47 @@ public class DwsDingtalkAuthorizationProvider implements ConnectorAuthorizationP
     @Override
     public String providerCode() {
         return "dws-dingtalk";
+    }
+
+    @Override
+    public AuthorizationStatusResult verify(String userId, ConnectorInfo connector) {
+        Long numericUserId = parseUserId(userId);
+        if (numericUserId == null) {
+            return failedStatus("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential");
+        }
+        try {
+            DwsCredentialStatus credentialStatus = dwsAuthService.getCredentialStatus(numericUserId);
+            if (credentialStatus.outcome() == DwsCredentialOutcome.TIMEOUT) {
+                return failedStatus(
+                    "CONNECTOR_VERIFICATION_TIMEOUT",
+                    "Connector credential verification timed out"
+                );
+            }
+            if (credentialStatus.outcome() == DwsCredentialOutcome.WORKSPACE_UNAVAILABLE) {
+                return failedStatus(
+                    "CREDENTIAL_WORKSPACE_UNAVAILABLE",
+                    "Connector credential workspace is unavailable"
+                );
+            }
+            if (credentialStatus.outcome() != DwsCredentialOutcome.COMPLETED) {
+                return failedStatus("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential");
+            }
+            Map<String, Object> status = credentialStatus.status();
+            if (status != null && Boolean.TRUE.equals(status.get("tokenValid"))) {
+                return new AuthorizationStatusResult(
+                    AuthorizationStatus.CONNECTED,
+                    stringValue(status.get("userId")),
+                    stringValue(status.get("userName")),
+                    parseDate(status.get("expiresAt")),
+                    null,
+                    null,
+                    null
+                );
+            }
+            return failedStatus("CONNECTOR_CREDENTIAL_INVALID", "Connector credential is invalid");
+        } catch (RuntimeException e) {
+            return failedStatus("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential");
+        }
     }
 
     @Override

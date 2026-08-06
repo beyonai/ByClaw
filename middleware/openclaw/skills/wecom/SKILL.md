@@ -12,10 +12,25 @@ description: Use when 用户需要通过 wecom-cli 操作企业微信或 WeCom�
 ## 连接器运行时 HOME 隔离（最高优先级）
 
 - OpenClaw 会注入企业微信专属 `WECOM_HOME`。每次执行 WeCom CLI 都必须仅为该子进程映射 HOME，命令形式为 `HOME="$WECOM_HOME" wecom-cli ...`。
-- 执行企业微信 Skill 的脚本时同样使用 `HOME="$WECOM_HOME" python3 ...`，使脚本内部启动的 `wecom-cli` 继承同一用户凭证目录。
+- 执行会启动 `wecom-cli` 的 Python 脚本时同样使用 `HOME="$WECOM_HOME" python3 ...`，使脚本内部启动的 `wecom-cli` 继承同一用户凭证目录；本 Skill 的 Node.js 平台同步 helper 不适用此规则。
 - 本规则适用于父 Skill、子 Skill、scripts 和 references 中出现的所有 WeCom CLI 命令；其中展示的裸 `wecom-cli ...` 仅表示参数结构，实际执行必须增加上述前缀。
 - `WECOM_HOME` 缺失或为空时必须停止执行并报告连接器运行时参数缺失，不得回退到默认 HOME、共享目录或其他用户目录。
 - 不得修改 OpenClaw 全局 `HOME`，不得执行 `export HOME="$WECOM_HOME"`；映射只允许作用于当前 WeCom CLI 或脚本子进程。
+
+## 授权成功后的平台状态同步（最高优先级）
+
+只有初始化进程成功退出且原始只读业务命令复核成功后，才调用固定的内部同步 helper：
+
+```bash
+node skills/wecom/scripts/connector-auth-sync.mjs
+```
+
+- 上述相对路径以 OpenClaw 工作目录为根。
+- 只能原样执行上述命令；不得增加环境变量赋值、URL、Header、body、用户 ID、connectorCode 参数、shell 包装、`curl` 或其他 HTTP 客户端。
+- helper 的 stdout 必须是单行 JSON；仅当退出码为 0 且顶层布尔字段 `connected` 为 `true` 时，才可报告“连接器已连接”并继续原业务流程。
+- helper 已独占完整的一次重试预算；Skill 不得再次调用 helper。业务校验错误不得重试。同步失败时报告“CLI 授权可能已完成，但平台连接状态同步失败”。
+- 同步失败不得重新执行 `wecom-cli init`，不得因 init 退出成功或本地命令成功而绕过 API 或声称连接器已连接。
+- 禁止读取、显示或要求用户提供认证文件、Token、请求 Header、服务发现信息或内部路径。
 
 ## MUST DO：授权初始化恢复
 
@@ -56,11 +71,11 @@ description: Use when 用户需要通过 wecom-cli 操作企业微信或 WeCom�
    ```
    并让用户提供命令输出中的授权 URL。
 
-6. 如果初始化进程被 `SIGTERM`、中断或异常退出，不要立即判定授权失败；先重新执行第 1 步记录的原始 `wecom-cli` 命令验证授权是否已经生效。若原始命令成功，直接继续业务流程；若原始命令仍返回初始化/授权类错误，再进入下一轮授权恢复。
+6. 如果初始化进程被 `SIGTERM`、中断或异常退出，不要立即判定授权失败；先重新执行第 1 步记录的原始 `wecom-cli` 命令验证授权是否已经生效。若原始命令成功，必须立即原样执行 `node skills/wecom/scripts/connector-auth-sync.mjs`，且仅当退出码为 0、stdout 单行 JSON 的顶层布尔字段 `connected` 为 `true` 时继续业务流程；若原始命令仍返回初始化/授权类错误，再进入下一轮授权恢复。
 
 7. 如果初始化命令提示授权超时，且用户仍要继续当前任务，则重新运行一次 `wecom-cli init --noninteractive --no-open`，返回新的 Markdown 授权链接并继续轮询等待；不得继续使用已经超时的旧进程或旧链接。
 
-8. 初始化进程明确返回成功后，重新执行第 1 步记录的原始 `wecom-cli` 命令。
+8. 初始化进程明确返回成功后，重新执行第 1 步记录的原始 `wecom-cli` 命令；命令成功后调用固定平台状态同步接口，API 成功后才恢复原业务流程。
 
 9. 如果重试原始命令仍返回初始化/授权类错误，最多再执行一轮完整的 Step 1-8；第二轮后仍失败时，停止重试，返回最新错误并说明授权未完成。禁止伪造成功结果。
 
