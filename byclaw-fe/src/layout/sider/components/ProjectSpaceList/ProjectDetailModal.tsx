@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Button,
-  DatePicker,
+  Checkbox,
   Drawer,
   Dropdown,
   Empty,
@@ -101,7 +101,7 @@ import {
 } from '@/service/devloop';
 import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
 import { queryMyCreatedAndSubscribedAgentsV2 } from '@/service/digitalEmployees';
-import { getResourceListByPage as listKnowledgeBases } from '@/service/knowledgeCenter';
+import { queryAuthDoc as listAccessibleKnowledgeBases } from '@/service/knowledgeCenter';
 import { listOntologyBases } from '@/service/ontology';
 import { getSandboxInfo, launchSandboxByUserCode, navigateSandboxBrowser, type SandboxInfo } from '@/service/sandbox';
 import SessionOverviewDrawer from './SessionOverviewDrawer';
@@ -125,7 +125,6 @@ import {
   type OperationWorkflowStep,
 } from './operation';
 import { isCurrentUserTaskAssignee } from './taskAccess';
-import { getTaskDateRangePresets, type TaskDateRange } from './taskDatePresets';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import AntdIcon from '@/components/AntdIcon';
@@ -260,8 +259,8 @@ type RequirementItem = {
 type TaskQueryState = {
   pageNum: number;
   pageSize: number;
-  dateRange: TaskDateRange;
   taskName: string;
+  onlyMine: boolean;
 };
 
 type TaskFetchOptions = Partial<TaskQueryState> & {
@@ -513,6 +512,63 @@ const getOperationTaskInitialValues = (task: any): Partial<OperationTaskFormValu
     const endDate = toValidDate(end);
     return startDate || endDate ? ([startDate, endDate] as [dayjs.Dayjs | null, dayjs.Dayjs | null]) : null;
   };
+  const toNumberList = (value: unknown, fallback: number[] = []) => {
+    if (!Array.isArray(value)) return fallback;
+    return value.map(Number).filter((item) => Number.isInteger(item));
+  };
+  const cronParts = String(config.cronExpr ?? config.schedule ?? config.collectSchedule ?? '')
+    .trim()
+    .split(/\s+/);
+  // 调度表单只保存月日时分，解析时统一使用当前年份作为页面日期组件的承载值。
+  const collectionDateCarrierYear = dayjs().year();
+  const normalizedCronParts = cronParts.length === 6 ? cronParts.slice(1) : cronParts;
+  const [cronMinute, cronHour, cronDay, cronMonth, cronWeekday] =
+    normalizedCronParts.length === 5 ? normalizedCronParts : [];
+  const cronTime =
+    /^\d+$/.test(cronHour || '') && /^\d+$/.test(cronMinute || '')
+      ? toValidDate(
+        `${collectionDateCarrierYear}-01-01 ${(cronHour || '').padStart(2, '0')}:${(cronMinute || '').padStart(
+          2,
+          '0'
+        )}:00`
+      )
+      : null;
+  const cronNumberList = (value?: string) =>
+    value && value !== '*'
+      ? value
+        .split(',')
+        .map(Number)
+        .filter((item) => Number.isInteger(item))
+      : [];
+  const inferredPeriodType =
+    cronMonth && cronMonth !== '*'
+      ? 'yearly'
+      : cronDay && cronDay !== '*'
+        ? 'monthly'
+        : cronWeekday && cronWeekday !== '*'
+          ? 'weekly'
+          : 'daily';
+  const legacyIntervalHours =
+    config.intervalUnit === 'minute'
+      ? Math.max(1, Math.ceil(Number(config.intervalValue || config.interval || 60) / 60))
+      : Number(config.intervalValue || config.interval || 1);
+  const periodMonth = Number(config.periodMonth || (cronMonth !== '*' ? cronMonth : 0)) || undefined;
+  const periodDay = Number(config.periodDay || (cronDay !== '*' ? cronDay : 0)) || undefined;
+  const periodTime = config.periodTime
+    ? toValidDate(
+      `${collectionDateCarrierYear}-01-01 ${
+        String(config.periodTime).length === 5 ? `${config.periodTime}:00` : config.periodTime
+      }`
+    )
+    : cronTime;
+  // 年度周期在页面合并选择月、日和时分，年份只作为日期组件的当前年承载值。
+  const periodYearDateTime =
+    periodMonth && periodDay && periodTime
+      ? periodTime
+        .year(collectionDateCarrierYear)
+        .month(periodMonth - 1)
+        .date(periodDay)
+      : null;
 
   return {
     taskName: task?.title || task?.taskName || task?.requirementName || '',
@@ -527,8 +583,21 @@ const getOperationTaskInitialValues = (task: any): Partial<OperationTaskFormValu
           channel: config.channel ?? config.collectSource,
           accountOrAddress: config.accountOrAddress ?? config.collectAccount,
           topic: config.topic ?? config.collectTopic,
-          dateRange: toDateRange(config.startTime ?? config.collectStart, config.endTime ?? config.collectEnd),
           mode: config.mode ?? config.collectMethod,
+          onceTime: toValidDate(config.onceTime ?? config.startTime ?? config.collectStart),
+          periodType: config.periodType ?? inferredPeriodType,
+          periodWeekdays: toNumberList(config.periodWeekdays, cronNumberList(cronWeekday)),
+          periodMonthDays: toNumberList(config.periodMonthDays, cronNumberList(cronDay)),
+          periodMonth,
+          periodDay,
+          periodTime,
+          periodYearDateTime,
+          intervalHours: Number(config.intervalHours || legacyIntervalHours),
+          intervalWeekdays: toNumberList(
+            config.intervalWeekdays,
+            cronNumberList(cronWeekday).length ? cronNumberList(cronWeekday) : [1, 2, 3, 4, 5, 6, 7]
+          ),
+          effectiveDateRange: toDateRange(config.effectiveStartDate, config.effectiveEndDate),
           cronExpr: config.cronExpr ?? config.schedule ?? config.collectSchedule,
           organize: Boolean(config.organize ?? config.knowledgeOrganization),
           organizeTemplateId: config.organizeTemplateId ?? config.knowledgeOrganization?.templateId,
@@ -861,8 +930,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
       intl.formatMessage({ id: `projectSpace.detail.${id}` }, values),
     [intl]
   );
-  // 任务 Tab 与整体任务视图共享快捷日期范围，保证同一选择对应相同的服务端查询条件。
-  const taskDatePresets = useMemo(() => getTaskDateRangePresets((id) => intl.formatMessage({ id })), [intl]);
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
@@ -895,8 +962,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [splitRequirement, setSplitRequirement] = useState<RequirementItem | null>(null);
   const [tasks, setTasks] = useState<any[]>([]);
   const [hasMoreTasks, setHasMoreTasks] = useState(false);
-  const [taskDateRange, setTaskDateRange] = useState<TaskDateRange>(null);
   const [taskSearchKeyword, setTaskSearchKeyword] = useState('');
+  const [onlyMine, setOnlyMine] = useState(true);
   const [members, setMembers] = useState<any[]>([]);
   // 运营任务表单依赖的账号、作品、知识库、数字员工均由详情容器统一加载和归一化。
   const [operationAccounts, setOperationAccounts] = useState<OperationAccount[]>([]);
@@ -1045,8 +1112,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const taskQueryRef = useRef<TaskQueryState>({
     pageNum: 1,
     pageSize: TASK_PAGE_SIZE,
-    dateRange: null,
     taskName: '',
+    onlyMine: true,
   });
   const taskQueryVersionRef = useRef(0);
   const taskAppendingVersionRef = useRef<number | null>(null);
@@ -1383,8 +1450,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
         setTasksLoadingMore(false);
       }
       taskQueryRef.current = queryState;
-      setTaskDateRange(queryState.dateRange);
       setTaskSearchKeyword(queryState.taskName);
+      setOnlyMine(queryState.onlyMine);
       if (append) {
         // 只有滚动追加时展示底部 loading，刷新和搜索不再复用该提示。
         taskAppendingVersionRef.current = queryVersion;
@@ -1401,16 +1468,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
             pageSize: queryState.pageSize,
             keyword: queryState.taskName || undefined,
             onlyMine: false,
-            createTimeStart: queryState.dateRange?.[0]?.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
-            createTimeEnd: queryState.dateRange?.[1]?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
           })
           : await listTasks({
             projectId,
             pageNum: queryState.pageNum,
             pageSize: queryState.pageSize,
-            createTimeStart: queryState.dateRange?.[0]?.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
-            createTimeEnd: queryState.dateRange?.[1]?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
             taskName: queryState.taskName || undefined,
+            onlyMine: queryState.onlyMine || undefined,
           });
         // 筛选重置列表，触底请求只追加未出现过的任务，避免滚动事件重复触发产生重复卡片。
         if (queryVersion !== taskQueryVersionRef.current) return;
@@ -1469,15 +1533,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
       clearTimeout(taskSearchTimerRef.current);
       taskSearchTimerRef.current = null;
     }
-    // 手动刷新保留当前任务名称和日期范围，避免刷新后丢失用户正在查看的筛选结果。
+    // 手动刷新保留当前任务名称和其它查询条件，避免刷新后丢失用户正在查看的筛选结果。
     setTasksRefreshLoading(true);
     try {
-      await fetchTasks({ pageNum: 1, taskName: taskSearchKeyword.trim(), dateRange: taskDateRange });
+      await fetchTasks({ pageNum: 1, taskName: taskSearchKeyword.trim() });
     } finally {
       // 刷新按钮独立结束，列表已有数据时不再同时显示整块 loading。
       setTasksRefreshLoading(false);
     }
-  }, [fetchTasks, taskDateRange, taskSearchKeyword, tasksRefreshLoading]);
+  }, [fetchTasks, taskSearchKeyword, tasksRefreshLoading]);
 
   useEffect(
     () => () => {
@@ -1577,20 +1641,23 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const fetchOperationKnowledgeBases = useCallback(async () => {
     setOperationOptionsLoading(true);
     try {
-      const res = await listKnowledgeBases({
+      const knowledgeBaseQuery = {
         pageNum: 1,
         pageSize: 100,
         // 与知识库列表页使用相同的业务类型，避免把数字员工等其它资源混入采集知识库选择。
-        resourceBizTypeList: [
+        resourceBizTypes: [
           ResourceTypeMap.knowledgeBase,
           ResourceTypeMap.knowledgeBaseQa,
           ResourceTypeMap.knowledgeBaseTerm,
         ],
-      });
-      // 知识库接口在不同版本中使用 rows 或 list，统一归一后再提供给运营任务表单。
-      const knowledgeBaseList = getFirstOperationArray(res?.rows, res?.list, res?.data?.rows, res?.data?.list);
-      setOperationKnowledgeBases(
-        knowledgeBaseList
+      };
+      const [personalRes, authorizedRes] = await Promise.all([
+        listAccessibleKnowledgeBases({ ...knowledgeBaseQuery, type: 'owner' }),
+        listAccessibleKnowledgeBases({ ...knowledgeBaseQuery, type: 'authorize' }),
+      ]);
+      // 个人知识库和授权给我的知识库统一转换为下拉选项，个人知识库在前，并按资源 ID 合并去重。
+      const getKnowledgeBaseOptions = (res: any): OperationSelectOption[] =>
+        getFirstOperationArray(res?.rows, res?.list, res?.data?.rows, res?.data?.list)
           .map((knowledgeBase: any) => ({
             value:
               knowledgeBase.resourceId ??
@@ -1605,8 +1672,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
               knowledgeBase.value !== null &&
               `${knowledgeBase.value}` !== '' &&
               !!knowledgeBase.label
-          )
-      );
+          );
+      const mergedKnowledgeBaseMap = new Map<string, OperationSelectOption>();
+      [...getKnowledgeBaseOptions(personalRes), ...getKnowledgeBaseOptions(authorizedRes)].forEach((knowledgeBase) => {
+        const knowledgeBaseKey = `${knowledgeBase.value}`;
+        if (!mergedKnowledgeBaseMap.has(knowledgeBaseKey)) {
+          mergedKnowledgeBaseMap.set(knowledgeBaseKey, knowledgeBase);
+        }
+      });
+      setOperationKnowledgeBases(Array.from(mergedKnowledgeBaseMap.values()));
     } catch (error) {
       console.error('Failed to load operation knowledge bases:', error);
       setOperationKnowledgeBases([]);
@@ -1617,11 +1691,22 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const fetchOperationOrganizeTemplates = useCallback(async () => {
     try {
-      const res = await listOntologyBases();
-      // 本体列表接口可能直接返回数组或包在 data/list 中，统一转换为整理模板下拉选项。
-      const ontologyList = getFirstOperationArray(res, res?.list, res?.data, res?.data?.list);
-      setOperationOrganizeTemplates(
-        ontologyList
+      const [personalRes, enterpriseRes] = await Promise.all([
+        listOntologyBases({ ownerType: 'personal' }),
+        listOntologyBases({ ownerType: 'enterprise' }),
+      ]);
+      // 个人本体和企业本体接口可能使用不同分页包装，统一提取后按本体 ID 合并去重。
+      const getOntologyOptions = (res: any): OperationSelectOption[] =>
+        getFirstOperationArray(
+          res,
+          res?.list,
+          res?.records,
+          res?.rows,
+          res?.data,
+          res?.data?.list,
+          res?.data?.records,
+          res?.data?.rows
+        )
           .map((ontology: any) => ({
             value: ontology.baseId ?? ontology.resourceId ?? ontology.id,
             label: ontology.displayName || ontology.resourceName || ontology.name || '',
@@ -1629,8 +1714,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
           .filter(
             (ontology: OperationSelectOption) =>
               ontology.value !== undefined && ontology.value !== null && `${ontology.value}` !== '' && !!ontology.label
-          )
-      );
+          );
+      const mergedOntologyMap = new Map<string, OperationSelectOption>();
+      [...getOntologyOptions(personalRes), ...getOntologyOptions(enterpriseRes)].forEach((ontology) => {
+        const ontologyKey = `${ontology.value}`;
+        if (!mergedOntologyMap.has(ontologyKey)) mergedOntologyMap.set(ontologyKey, ontology);
+      });
+      setOperationOrganizeTemplates(Array.from(mergedOntologyMap.values()));
     } catch (error) {
       console.error('Failed to load operation organize templates:', error);
       setOperationOrganizeTemplates([]);
@@ -1898,33 +1988,73 @@ const ProjectDetailPanel: React.FC<Props> = ({
     [fetchOperationOrganizeTemplates, isOperationProject]
   );
 
-  // 运营需求提交前统一序列化日期，并将页面字段转换为运营需求接口约定的三类配置结构。
+  // 运营需求提交前统一序列化调度字段，并将页面字段转换为运营需求接口约定的三类配置结构。
   const handleSubmitOperationTask = useCallback(
     async (values: OperationTaskFormValues) => {
       if (!projectId || operationTaskSubmittingRef.current) return;
       const editingOperationTaskId = Number(editingOperationTask?.itemId ?? editingOperationTask?.taskId);
       const isEditingOperationTask = Number.isFinite(editingOperationTaskId) && editingOperationTaskId > 0;
 
-      // 表单保存 Dayjs，接口只接收标准时间字符串；开始、结束时间按整天边界计算。
+      // 表单保存 Dayjs，接口只接收标准时间字符串；生效区间按自然日边界保存。
       const serializeDateRange = (dateRange?: NonNullable<OperationTaskFormValues['collectConfig']>['dateRange']) => ({
         startTime: dateRange?.[0]?.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
         endTime: dateRange?.[1]?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
       });
-      const collectDateRange = serializeDateRange(values.collectConfig?.dateRange);
+      const effectiveDateRange = serializeDateRange(values.collectConfig?.effectiveDateRange);
+      const periodYearDateTime = values.collectConfig?.periodYearDateTime;
+      const isYearlyCollection =
+        values.collectConfig?.mode === 'periodic' && values.collectConfig?.periodType === 'yearly';
       // 页面内部字段保留在配置中，同时补齐接口文档中的稳定字段名，后端执行能力可直接按该结构读取。
       const config =
         values.taskType === 'collect'
           ? {
             ...values.collectConfig,
+            // Dayjs 和旧版采集范围不写入 JSON；后端只读取下面的标准字符串字段。
             dateRange: undefined,
-            ...collectDateRange,
+            startTime: undefined,
+            endTime: undefined,
+            collectStart: undefined,
+            collectEnd: undefined,
+            effectiveDateRange: undefined,
+            periodYearDateTime: undefined,
+            intervalValue: undefined,
+            intervalUnit: undefined,
+            schedule: undefined,
+            onceTime:
+                values.collectConfig?.mode === 'once'
+                  ? values.collectConfig?.onceTime?.format('YYYY-MM-DD HH:mm:ss')
+                  : undefined,
+            periodType: values.collectConfig?.mode === 'periodic' ? values.collectConfig?.periodType : undefined,
+            periodWeekdays:
+                values.collectConfig?.mode === 'periodic' &&
+                ['weekly', 'biweekly'].includes(values.collectConfig?.periodType || '')
+                  ? values.collectConfig?.periodWeekdays
+                  : undefined,
+            periodMonthDays:
+                values.collectConfig?.mode === 'periodic' && values.collectConfig?.periodType === 'monthly'
+                  ? values.collectConfig?.periodMonthDays
+                  : undefined,
+            periodMonth: isYearlyCollection && periodYearDateTime ? periodYearDateTime.month() + 1 : undefined,
+            periodDay: isYearlyCollection && periodYearDateTime ? periodYearDateTime.date() : undefined,
+            periodTime:
+                values.collectConfig?.mode === 'periodic'
+                  ? isYearlyCollection
+                    ? periodYearDateTime?.format('HH:mm')
+                    : values.collectConfig?.periodTime?.format('HH:mm')
+                  : undefined,
+            intervalHours:
+                values.collectConfig?.mode === 'interval' ? values.collectConfig?.intervalHours : undefined,
+            intervalWeekdays:
+                values.collectConfig?.mode === 'interval' ? values.collectConfig?.intervalWeekdays : undefined,
+            effectiveStartDate:
+                values.collectConfig?.mode === 'once' ? undefined : effectiveDateRange.startTime?.slice(0, 10),
+            effectiveEndDate:
+                values.collectConfig?.mode === 'once' ? undefined : effectiveDateRange.endTime?.slice(0, 10),
             collectSource: values.collectConfig?.channel,
             collectAccount: values.collectConfig?.accountOrAddress,
             collectTopic: values.collectConfig?.topic,
-            collectStart: collectDateRange.startTime?.slice(0, 10),
-            collectEnd: collectDateRange.endTime?.slice(0, 10),
             collectMethod: values.collectConfig?.mode,
-            // 周期采集提交标准 Cron，后端写入 byai_scan_source.cron_expr；schedule 仅兼容旧数据。
+            // 三种采集方式都提交标准 Cron，后端会按结构化字段重新生成后写入 cron_expr。
             collectSchedule: values.collectConfig?.cronExpr || values.collectConfig?.schedule,
             cronExpr: values.collectConfig?.cronExpr,
             // 兼容旧执行服务读取 templateId，同时完整保存新增本体的整理需求和结构化要求。
@@ -2797,11 +2927,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
       clearTimeout(taskSearchTimerRef.current);
       taskSearchTimerRef.current = null;
     }
-    taskQueryRef.current = { pageNum: 1, pageSize: TASK_PAGE_SIZE, dateRange: null, taskName: '' };
+    taskQueryRef.current = { pageNum: 1, pageSize: TASK_PAGE_SIZE, taskName: '', onlyMine: true };
     taskQueryVersionRef.current += 1;
     taskAppendingVersionRef.current = null;
-    setTaskDateRange(null);
     setTaskSearchKeyword('');
+    setOnlyMine(true);
     setTasks([]);
     setHasMoreTasks(false);
     setTasksRefreshLoading(false);
@@ -4292,6 +4422,16 @@ const ProjectDetailPanel: React.FC<Props> = ({
         .map((value) => (dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD') : value));
       return values.length ? values.join(' - ') : emptyValue;
     };
+    const formatDateTime = (value?: string) =>
+      value && dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm') : value || emptyValue;
+    const formatWeekdays = (value: unknown) => {
+      if (!Array.isArray(value) || !value.length) return emptyValue;
+      return value
+        .map((weekday) =>
+          intl.formatMessage({ id: `projectSpace.operation.taskForm.collect.weekday.${Number(weekday)}` })
+        )
+        .join(', ');
+    };
     const configItems: Array<{ label: string; value: React.ReactNode }> = [];
     let configTitleId = 'projectSpace.operation.taskForm.collect.title';
 
@@ -4313,10 +4453,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
           value: config.topic ?? config.collectTopic ?? emptyValue,
         },
         {
-          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectDateRange' }),
-          value: formatDateRange(config.startTime ?? config.collectStart, config.endTime ?? config.collectEnd),
-        },
-        {
           label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.knowledgeBase' }),
           value: knowledgeBase?.label || (knowledgeBaseId ? `${knowledgeBaseId}` : emptyValue),
         },
@@ -4327,6 +4463,54 @@ const ProjectDetailPanel: React.FC<Props> = ({
             : emptyValue,
         }
       );
+      if (collectMode === 'once') {
+        configItems.push({
+          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectOnceTime' }),
+          value: formatDateTime(config.onceTime ?? config.startTime ?? config.collectStart),
+        });
+      }
+      if (collectMode === 'interval') {
+        configItems.push(
+          {
+            label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectIntervalHours' }),
+            value: config.intervalHours ?? config.intervalValue ?? emptyValue,
+          },
+          {
+            label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectWeekdays' }),
+            value: formatWeekdays(config.intervalWeekdays),
+          }
+        );
+      }
+      if (collectMode === 'periodic') {
+        configItems.push({
+          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectPeriodType' }),
+          value: config.periodType
+            ? intl.formatMessage({ id: `projectSpace.operation.taskForm.collect.period.${config.periodType}` })
+            : emptyValue,
+        });
+        if (config.periodType === 'weekly' || config.periodType === 'biweekly') {
+          configItems.push({
+            label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectWeekdays' }),
+            value: formatWeekdays(config.periodWeekdays),
+          });
+        }
+        if (config.periodType === 'monthly') {
+          configItems.push({
+            label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectMonthDays' }),
+            value: Array.isArray(config.periodMonthDays) ? config.periodMonthDays.join(', ') : emptyValue,
+          });
+        }
+        configItems.push({
+          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectSchedule' }),
+          value: config.cronExpr ?? config.collectSchedule ?? emptyValue,
+        });
+      }
+      if (collectMode === 'periodic' || collectMode === 'interval') {
+        configItems.push({
+          label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectEffectiveDateRange' }),
+          value: formatDateRange(config.effectiveStartDate, config.effectiveEndDate),
+        });
+      }
     } else if (operationType === 'content') {
       configTitleId = 'projectSpace.operation.taskForm.content.title';
       const contentTypeKeyMap: Record<string, string> = {
@@ -5419,42 +5603,44 @@ const ProjectDetailPanel: React.FC<Props> = ({
             />
           </Tooltip>
         </div>
-        {/* 研发和运营任务均支持按创建日期筛选，并通过任务视图查看各状态分布。 */}
+        {/* 研发任务默认只查询当前用户负责的任务，也可切换为查看项目全部任务。 */}
         {(isDevelopProject || isOperationProject) && (
           <div className={styles.detailTaskHeaderActions}>
-            {(isDevelopProject || isOperationProject) && (
-              <DatePicker.RangePicker
-                size="small"
-                allowClear
-                value={taskDateRange}
-                placeholder={[t('task.dateStartPlaceholder'), t('task.dateEndPlaceholder')]}
-                presets={taskDatePresets}
-                onChange={(dates) => {
-                  void fetchTasks({ pageNum: 1, dateRange: dates as TaskDateRange });
+            {isDevelopProject && (
+              <Checkbox
+                checked={onlyMine}
+                onChange={(event) => {
+                  void fetchTasks({ pageNum: 1, onlyMine: event.target.checked });
                 }}
-              />
+              >
+                {intl.formatMessage({ id: 'projectSpace.taskBoard.onlyMine' })}
+              </Checkbox>
             )}
             {isDevelopProject && (
-              <Tooltip title={t('task.viewTooltip')} placement="top">
-                <Button
-                  aria-label={t('task.viewTooltip')}
-                  size="small"
-                  className={`${styles.detailHeaderActionButton} ${styles.detailTaskViewButton}`}
-                  icon={<AppstoreOutlined />}
-                  onClick={() => setTaskKanbanOpen(true)}
-                />
-              </Tooltip>
+              // <Tooltip title={t('task.viewTooltip')} placement="top">
+              <Button
+                // aria-label={t('task.viewTooltip')}
+                size="small"
+                className={`${styles.detailHeaderActionButton} ${styles.detailTaskViewButton}`}
+                icon={<AppstoreOutlined />}
+                onClick={() => setTaskKanbanOpen(true)}
+              >
+                {t('task.viewTooltip')}
+              </Button>
+              // </Tooltip>
             )}
             {isOperationProject && (
-              <Tooltip title={t('task.viewTooltip')} placement="top">
-                <Button
-                  aria-label={t('task.viewTooltip')}
-                  size="small"
-                  className={`${styles.detailHeaderActionButton} ${styles.detailTaskViewButton}`}
-                  icon={<AppstoreOutlined />}
-                  onClick={() => setTaskKanbanOpen(true)}
-                />
-              </Tooltip>
+              // <Tooltip title={t('task.viewTooltip')} placement="top">
+              <Button
+                // aria-label={t('task.viewTooltip')}
+                size="small"
+                className={`${styles.detailHeaderActionButton} ${styles.detailTaskViewButton}`}
+                icon={<AppstoreOutlined />}
+                onClick={() => setTaskKanbanOpen(true)}
+              >
+                {t('task.viewTooltip')}
+              </Button>
+              // </Tooltip>
             )}
           </div>
         )}

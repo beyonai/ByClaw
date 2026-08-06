@@ -24,7 +24,14 @@ import java.util.Set;
 public class ScanSourceService {
 
     /** 运营需求类型直接复用 source_type，不再增加额外记录类型字段。 */
-    public static final Set<String> OPERATION_SOURCE_TYPES = Set.of("collect", "publish", "analyze");
+    public static final String OPERATION_SOURCE_TYPE_COLLECT = "collect";
+
+    public static final String OPERATION_SOURCE_TYPE_PUBLISH = "publish";
+
+    public static final String OPERATION_SOURCE_TYPE_ANALYZE = "analyze";
+
+    public static final Set<String> OPERATION_SOURCE_TYPES = Set.of(OPERATION_SOURCE_TYPE_COLLECT,
+        OPERATION_SOURCE_TYPE_PUBLISH, OPERATION_SOURCE_TYPE_ANALYZE);
 
     @Autowired
     private ScanSourceMapper scanSourceMapper;

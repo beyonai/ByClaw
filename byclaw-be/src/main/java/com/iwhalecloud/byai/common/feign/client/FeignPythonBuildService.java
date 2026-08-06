@@ -42,6 +42,7 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileSearch;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeMetadataSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemReferences;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemsMove;
@@ -57,6 +58,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileMetadataResu
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBaseInfo;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBuildResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
@@ -96,18 +98,6 @@ public class FeignPythonBuildService {
     private static final int MAX_DOWNLOAD_ERROR_BODY_BYTES = 64 * 1024;
 
     static final String RESOURCE_ID_HEADER = "X-Byclaw-Resource-Id";
-
-    private static final String RESOURCE_UPLOAD_PATH = "/api/v1/knowledgeItems/importByResourceId";
-
-    private static final Map<KnowledgeServiceOperation, String> LOCAL_RESOURCE_PATHS = Map.of(
-        KnowledgeServiceOperation.CREATE_DIR, "/api/v1/directories/createByResourceId",
-        KnowledgeServiceOperation.EDIT_DIR, "/api/v1/directories/updateByResourceId",
-        KnowledgeServiceOperation.LIST_DIR, "/api/v1/listDirByResourceId",
-        KnowledgeServiceOperation.DELETE_DIR, "/api/v1/directories/deleteByResourceId",
-        KnowledgeServiceOperation.READ_FILE, "/api/v1/readFileByResourceId",
-        KnowledgeServiceOperation.BUILD_RESULT, "/api/v1/buildResultByResourceId",
-        KnowledgeServiceOperation.KNOWLEDGE_BUILD, "/api/v1/fileToMarkdownIndexByResourceId",
-        KnowledgeServiceOperation.DOWNLOAD_FILE, "/api/v1/downloadFileByResourceId");
 
     @Value("${spring.application.qADomainName:byclaw-qa-manager}")
     private String serviceName;
@@ -302,11 +292,6 @@ public class FeignPythonBuildService {
                     new TypeReference<PythonBuildResponse<KbImportResult>>() {
                     });
             }
-            if (resourceId != null) {
-                requestPath = RESOURCE_UPLOAD_PATH;
-                formFields.remove("knCode");
-                formFields.put("resourceId", String.valueOf(resourceId));
-            }
             HttpResponse httpResponse = discoveryHttpClient.upload(endpoint.getServiceName(), requestPath,
                 originalFilename, "fileContent", streamSupplier, this.buildUploadHeaders(resourceId), formFields).get();
 
@@ -482,6 +467,25 @@ public class FeignPythonBuildService {
     }
 
     /**
+     * Agent DSL 纯元数据检索，只返回文件级结果。
+     */
+    public PythonBuildResponse<KnowledgeMetadataSearchResult> searchKnowledgeMetadata(
+        KbKnowledgeMetadataSearch request) {
+        return post(KnowledgeServiceOperation.KNOWLEDGE_METADATA_SEARCH, request,
+            new TypeReference<PythonBuildResponse<KnowledgeMetadataSearchResult>>() {
+            });
+    }
+
+    /**
+     * 原样透传 Agent DSL 纯元数据检索响应，保留 QA 失败响应中的 errorCode/errorList 等扩展字段。
+     */
+    public PythonBuildResponse<Object> searchKnowledgeMetadataRaw(KbKnowledgeMetadataSearch request) {
+        return post(KnowledgeServiceOperation.KNOWLEDGE_METADATA_SEARCH, request,
+            new TypeReference<PythonBuildResponse<Object>>() {
+            });
+    }
+
+    /**
      * 上传原始文件并同步转换为 Markdown 文件流。
      *
      * @param multipartFile 原始文件
@@ -545,10 +549,8 @@ public class FeignPythonBuildService {
                 return validateDownloadResponse(directDownload(endpoint.getBaseUrl(), requestPath, kbFileDownload),
                     requestPath);
             }
-            requestPath = resolveLocalRequestPath(operation, resourceId, requestPath);
-            Object localPayload = buildLocalPayload(operation, resourceId, kbFileDownload);
             CompletableFuture<InputStream> completableFuture = discoveryHttpClient.download("POST",
-                endpoint.getServiceName(), requestPath, this.buildHeaders(resourceId), null, localPayload, null);
+                endpoint.getServiceName(), requestPath, this.buildHeaders(resourceId), null, kbFileDownload, null);
             // 提取文件流
             return validateDownloadResponse(completableFuture.get(), requestPath);
         }
@@ -688,30 +690,10 @@ public class FeignPythonBuildService {
         if (endpoint.isDirectUrl()) {
             return directPost(endpoint.getBaseUrl(), requestPath, payload, type);
         }
-        requestPath = resolveLocalRequestPath(operation, resourceId, requestPath);
-        Object localPayload = buildLocalPayload(operation, resourceId, payload);
         HttpResponse response = discoveryHttpClient
-            .post(endpoint.getServiceName(), requestPath, buildHeaders(resourceId), localPayload, null)
+            .post(endpoint.getServiceName(), requestPath, buildHeaders(resourceId), payload, null)
             .get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
         return parseResponse(response, type, requestPath);
-    }
-
-    private String resolveLocalRequestPath(KnowledgeServiceOperation operation, Long resourceId,
-        String defaultPath) {
-        if (resourceId == null) {
-            return defaultPath;
-        }
-        return LOCAL_RESOURCE_PATHS.getOrDefault(operation, defaultPath);
-    }
-
-    private Object buildLocalPayload(KnowledgeServiceOperation operation, Long resourceId, Object payload) {
-        if (resourceId == null || !LOCAL_RESOURCE_PATHS.containsKey(operation)) {
-            return payload;
-        }
-        JSONObject resourcePayload = JSON.parseObject(JSON.toJSONString(payload));
-        resourcePayload.remove("knCode");
-        resourcePayload.put("resourceId", resourceId);
-        return resourcePayload;
     }
 
     /**

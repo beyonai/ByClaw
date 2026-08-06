@@ -7,6 +7,12 @@ const mockMessageWarning = jest.fn();
 const mockOpenedWindow = { opener: window } as unknown as Window;
 const mockWindowOpen = jest.spyOn(window, 'open');
 
+// 连接器测试只关心授权交互，补充最小用户状态以兼容组件读取当前用户信息。
+jest.mock('@umijs/max', () => ({
+  useSelector: (selector: (state: { user: { userInfo: Record<string, unknown> } }) => unknown) =>
+    selector({ user: { userInfo: { userId: 1 } } }),
+}));
+
 jest.mock('@/components/AntdIcon', () => () => null);
 jest.mock('@/service/connector', () => ({
   cancelConnectorAuthorization: jest.fn(),
@@ -15,6 +21,16 @@ jest.mock('@/service/connector', () => ({
   queryAllConnectors: jest.fn(),
   startConnectorAuthorization: jest.fn(),
   updateConnectorEnable: jest.fn(),
+}));
+jest.mock('@umijs/max', () => ({
+  useSelector: (selector: (state: any) => any) =>
+    selector({
+      user: {
+        userInfo: {
+          userId: 1,
+        },
+      },
+    }),
 }));
 jest.mock('antd', () => {
   const antd = jest.requireActual('antd');
