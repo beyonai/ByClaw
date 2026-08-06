@@ -85,6 +85,8 @@ public class TransactionAdviceConfig {
         // 否则内部同步异常即使被捕获，也会在方法返回时触发 rollback-only 提交异常。
         txMap.put("synOpenClawWorkSpace", notSurpportedTx);
         txMap.put("syncResourceJsonByBizType", notSurpportedTx);
+        // 资源 JSON 存在性检查会捕获底层文件不存在异常并用目录枚举兜底；不能让底层存储代理将外层事务标记为 rollback-only。
+        txMap.put("existsResourceJsonByBizType", notSurpportedTx);
         txMap.put("upsertStandardJsonArtifact", notSurpportedTx);
         txMap.put("prewarmDueCronSandboxes", notSurpportedTx);
         txMap.put("callAsUser", notSurpportedTx);
