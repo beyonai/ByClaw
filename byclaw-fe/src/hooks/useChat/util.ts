@@ -1,7 +1,8 @@
 import { IText, ITextObj } from '@/components/MessagesComp/Text';
 import { isNil, set, get, compact } from 'lodash';
-import type { IMessageListItem } from '@/typescript/message';
+import type { IMessage, IMessageListItem } from '@/typescript/message';
 import { isTextContentType } from '@/utils/messgae';
+import { ResourceTypeMap } from '@/constants/resource';
 
 function isTextObject(item: IText): item is ITextObj {
   return typeof item === 'object' && item !== null;
@@ -98,3 +99,26 @@ export const substanceHandler = (
     return newMessageItem;
   }
 };
+
+export function getSessionLastAnsMsgMetadata(sessionId: string, ansMsg: IMessage, askMsg?: IMessage) {
+  const mentionedEmployeeIds = new Set(
+    (askMsg?.resourceList || [])
+      .filter((item) => `${item.resourceType}` === `${ResourceTypeMap.digitalEmployee}`)
+      .map((item) => `${item.resourceId}`)
+  );
+  const isMultiAgentHistory = Boolean(
+    ansMsg.multiAgent ||
+      ansMsg.laneId ||
+      ansMsg.turnId ||
+      (askMsg?.answerMsgIds?.length || 0) > 1 ||
+      mentionedEmployeeIds.size > 1
+  );
+  return {
+    sessionId,
+    metadata: ansMsg.metadata,
+    // 多员工会话不能再按最后一条回答切换全局 agent，需要把 lane 信息传给消费方判断。
+    ...(ansMsg.laneId ? { laneId: ansMsg.laneId } : {}),
+    ...(ansMsg.turnId ? { turnId: ansMsg.turnId } : {}),
+    ...(isMultiAgentHistory ? { multiAgent: true } : {}),
+  };
+}

@@ -16,8 +16,8 @@ import type { IMessage } from '@/typescript/message';
 import { getMsgId, hasVisibleMessageContent } from '@/utils/messgae';
 import { getSessionObjectTypeMap } from '@/utils/session';
 import { IMessageState } from '@/constants/message';
-import { ResourceTypeMap } from '@/constants/resource';
 import useGlobal from '../useGlobal';
+import { getSessionLastAnsMsgMetadata } from './util';
 
 // 记录当前会话ID的引用，用于跟踪会话变化
 const curSessionId = {
@@ -309,27 +309,11 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
                   !item.fromBeyond && [`${item.msgId || ''}`, `${item.messageId || ''}`].includes(`${msg.queryMsgId}`)
               )
               : undefined;
-            const mentionedEmployeeIds = new Set(
-              (queryMessage?.resourceList || [])
-                .filter((item) => `${item.resourceType}` === `${ResourceTypeMap.digitalEmployee}`)
-                .map((item) => `${item.resourceId}`)
-            );
-            const isMultiAgentHistory = Boolean(
-              msg.multiAgent ||
-                msg.laneId ||
-                msg.turnId ||
-                (queryMessage?.answerMsgIds?.length || 0) > 1 ||
-                mentionedEmployeeIds.size > 1
-            );
             // 在这里写是因为，只需要每次切换会话查询聊天记录后，找到最后一条fromBeyond的记录
-            EventEmitter.emit('RECEIVE_SESSION_RECORDS_LAST_METADATA', {
-              sessionId,
-              metadata: msg.metadata,
-              // 多员工会话不能再按最后一条回答切换全局 agent，需要把 lane 信息传给消费方判断。
-              ...(msg.laneId ? { laneId: msg.laneId } : {}),
-              ...(msg.turnId ? { turnId: msg.turnId } : {}),
-              ...(isMultiAgentHistory ? { multiAgent: true } : {}),
-            });
+            EventEmitter.emit(
+              'RECEIVE_SESSION_RECORDS_LAST_METADATA',
+              getSessionLastAnsMsgMetadata(sessionId, msg, queryMessage)
+            );
             break;
           }
         }

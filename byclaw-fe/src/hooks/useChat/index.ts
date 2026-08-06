@@ -50,6 +50,7 @@ import type { IState as IEmployeesState } from '@/models/useEmployees';
 import type { IState } from '@/models/useEmployees';
 import type { RichInputResourceList } from '@/components/QueryInput/RichInput';
 import type { IMessageInfo } from '@/models/useMessageStore';
+import { getSessionLastAnsMsgMetadata } from './util';
 
 type ISseRes = {
   message: IMessageListItem;
@@ -671,6 +672,12 @@ function useChat(props: IProps) {
                 latestRuntimeInfo?.clientRequestId || runningInfo.clientRequestId,
                 snapshotStreamId
               );
+              EventEmitter.emit(
+                'RECEIVE_SESSION_RECORDS_LAST_METADATA',
+                getSessionLastAnsMsgMetadata(sessionId, answerMsg, queryMsg)
+              );
+              // scrollToMsgOnSessionChanged 消费者已经进行了 requestIdleCallback 处理
+              EventEmitter.emit('scrollToMsgOnSessionChanged', { sessionId });
             }
           }
 
