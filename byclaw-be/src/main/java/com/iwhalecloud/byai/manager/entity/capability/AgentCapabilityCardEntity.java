@@ -11,7 +11,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * Agent 能力卡快照；与 byclaw-super 的 agent_capability_cards 表结构一致，
+ * Agent 能力卡快照；复用 byclaw-super 的 byai_super_agent_capability_cards 表，
  * 仅保存编译产物，权限关系不进入此表。
  *
  * <p>唯一键为 (systemCode, agentId) 复合主键，无独立 id 列；故不使用 MyBatis-Plus 主键注解。</p>
@@ -20,7 +20,7 @@ import lombok.Setter;
  */
 @Getter
 @Setter
-@TableName("byai.agent_capability_cards")
+@TableName("byai.byai_super_agent_capability_cards")
 public class AgentCapabilityCardEntity implements Serializable {
 
     @Serial

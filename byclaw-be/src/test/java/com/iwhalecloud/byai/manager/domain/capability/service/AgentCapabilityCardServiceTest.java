@@ -83,15 +83,60 @@ class AgentCapabilityCardServiceTest {
     }
 
     @Test
-    void compile_rejectsTooFewKeywords() {
+    void compile_completesTooFewKeywordsFromAgentSource() {
         stubDraft = """
             {"summary":"s","capabilities":["c1"],"bestFor":["b1"],"delivers":["d1"],
              "keywords":["k1"]}
             """;
         AgentCapabilityCompileInput input = input("助手", "描述");
-        assertThatThrownBy(() -> service.compile(input))
-            .isInstanceOf(BaseException.class)
-            .hasMessageContaining("too few keywords");
+
+        AgentCapabilityCompileResult result = service.compile(input);
+
+        assertThat(result.getCard().getKeywords()).contains("k1", "助手", "s1");
+        assertThat(result.getQuality().getWarnings()).anyMatch(warning -> warning.contains("keywords"));
+    }
+
+    @Test
+    void compile_acceptsNestedAliasesScalarListsAndMissingFields() {
+        stubDraft = """
+            {
+              card: {
+                summary: '处理员工制度问题',
+                capabilities: '查询制度,总结制度',
+                best_for: ['员工制度咨询'],
+              },
+              quality: {warnings: '模型仅返回部分字段'}
+            }
+            """;
+        AgentCapabilityCompileInput input = input("制度助手", "根据提供的制度回答员工问题");
+        input.getAgent().setInputTypes(List.of("员工问题", "制度文档"));
+        input.getAgent().setOutputTypes(List.of("制度问答"));
+        input.getAgent().setConstraints(List.of("不能超出所提供的制度"));
+
+        AgentCapabilityCompileResult result = service.compile(input);
+
+        assertThat(result.getCard().getCapabilities()).containsExactly("查询制度", "总结制度");
+        assertThat(result.getCard().getBestFor()).containsExactly("员工制度咨询");
+        assertThat(result.getCard().getRequires()).contains("员工问题", "制度文档");
+        assertThat(result.getCard().getDelivers()).containsExactly("制度问答");
+        assertThat(result.getCard().getLimitations()).containsExactly("不能超出所提供的制度");
+        assertThat(result.getCard().getKeywords()).isNotEmpty();
+        assertThat(result.getQuality().getWarnings()).contains("模型仅返回部分字段");
+    }
+
+    @Test
+    void compile_buildsPersistableCardWhenModelReturnsEmptyObject() {
+        stubDraft = "{}";
+
+        AgentCapabilityCompileResult result = service.compile(input("客服助手", "负责解答客户咨询"));
+
+        assertThat(result.getCard().getSummary()).isEqualTo("负责解答客户咨询");
+        assertThat(result.getCard().getCapabilities()).isNotEmpty();
+        assertThat(result.getCard().getBestFor()).isNotEmpty();
+        assertThat(result.getCard().getDelivers()).isNotEmpty();
+        assertThat(result.getCard().getKeywords()).isNotEmpty();
+        assertThat(result.getRoutingText()).isNotBlank();
+        assertThat(result.getQuality().getWarnings()).isNotEmpty();
     }
 
     @Test
@@ -134,6 +179,18 @@ class AgentCapabilityCardServiceTest {
         assertThatThrownBy(() -> service.compile(input))
             .isInstanceOf(BaseException.class)
             .hasMessageContaining("No JSON object found");
+    }
+
+    @Test
+    void systemPrompt_containsRichAndSparseFewShotExamples() {
+        String prompt = AgentCapabilityCardService.systemPrompt();
+
+        assertThat(prompt)
+            .contains("Example 1 — rich Chinese source:")
+            .contains("经营分析助手")
+            .contains("Example 2 — sparse English source:")
+            .contains("Policy Assistant")
+            .contains("Do not copy their facts.");
     }
 
     private AgentCapabilityCompileInput input(String name, String description) {

@@ -14,6 +14,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.manager.dto.capability.AgentCapabilityCompileInput;
@@ -31,9 +32,63 @@ import com.iwhalecloud.byai.manager.dto.capability.AgentCapabilityCompileResult;
 public class AgentCapabilityCardService {
 
     public static final String SCHEMA_VERSION = "byclaw.agent-capability-card/v1";
-    public static final String GENERATOR_VERSION = "1.0.0";
+    public static final String GENERATOR_VERSION = "1.1.0";
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+        .configure(JsonReadFeature.ALLOW_JAVA_COMMENTS.mappedFeature(), true)
+        .configure(JsonReadFeature.ALLOW_SINGLE_QUOTES.mappedFeature(), true)
+        .configure(JsonReadFeature.ALLOW_TRAILING_COMMA.mappedFeature(), true)
+        .configure(JsonReadFeature.ALLOW_UNQUOTED_FIELD_NAMES.mappedFeature(), true);
+
+    private static final String FEW_SHOT_EXAMPLES = """
+        Follow these examples for abstraction level and evidence discipline. Do not copy their facts.
+
+        Example 1 — rich Chinese source:
+        <agent_source locale="zh-CN">
+        {
+          "name": "经营分析助手",
+          "description": "分析销售、收入和客户转化数据",
+          "skills": [
+            {"name": "SQL 数据分析", "description": "查询和分析结构化经营数据"}
+          ],
+          "inputTypes": ["自然语言问题", "指标", "时间范围"],
+          "outputTypes": ["分析结论", "异常说明"],
+          "constraints": ["不能修改生产数据"]
+        }
+        </agent_source>
+        Output:
+        {
+          "summary": "基于经营数据分析销售、收入和客户转化异常并输出结论。",
+          "capabilities": ["查询经营数据", "分析经营指标", "定位指标异常", "分析客户转化"],
+          "bestFor": ["销售波动分析", "经营指标异常排查", "客户转化分析"],
+          "requires": ["待分析指标", "时间范围", "可访问的经营数据"],
+          "delivers": ["分析结论", "异常说明"],
+          "limitations": ["不能修改生产数据"],
+          "keywords": ["经营分析", "销售分析", "收入分析", "指标异常", "客户转化"],
+          "missingInformation": [],
+          "warnings": []
+        }
+
+        Example 2 — sparse English source:
+        <agent_source locale="en-US">
+        {
+          "name": "Policy Assistant",
+          "description": "Answers employee questions using supplied company policy documents"
+        }
+        </agent_source>
+        Output:
+        {
+          "summary": "Answers employee questions from supplied company policy documents.",
+          "capabilities": ["Answer policy questions", "Summarize supplied policy content"],
+          "bestFor": ["Employee policy questions", "Policy document summaries"],
+          "requires": ["Relevant company policy documents", "A specific employee question"],
+          "delivers": ["Policy-grounded answers", "Policy summaries"],
+          "limitations": ["Cannot answer beyond supplied policy documents"],
+          "keywords": ["company policy", "employee questions", "policy summary"],
+          "missingInformation": ["Applicable jurisdictions", "Policy update dates"],
+          "warnings": []
+        }
+        """;
 
     private static final String SYSTEM_PROMPT = "You compile compact capability cards used by an AI supervisor"
         + " to route work to specialist agents.\n\n"
@@ -55,7 +110,8 @@ public class AgentCapabilityCardService {
         + "  \"keywords\": [\"3-12 routing keywords\"],\n"
         + "  \"missingInformation\": [\"important missing facts\"],\n"
         + "  \"warnings\": [\"source conflicts or ambiguity\"]\n"
-        + "}";
+        + "}\n\n"
+        + FEW_SHOT_EXAMPLES;
 
     @Autowired
     private AgentCapabilityDraftGenerator generator;
@@ -72,18 +128,35 @@ public class AgentCapabilityCardService {
 
         String draftJson = generator.generate(normalized);
         Map<String, Object> parsed = parseJsonObject(draftJson);
-        if (parsed == null) {
-            throw new BaseException("Capability model returned an invalid card");
-        }
+        Map<String, Object> cardDraft = objectMap(parsed.get("card"));
+        Map<String, Object> qualityDraft = objectMap(parsed.get("quality"));
+        List<String> fallbackWarnings = new ArrayList<>();
+        boolean zh = normalized.getLocale().toLowerCase().startsWith("zh");
 
         AgentCapabilityCompileResult.Card card = new AgentCapabilityCompileResult.Card();
-        card.setSummary(requiredText(parsed.get("summary"), "summary", 160));
-        card.setCapabilities(requiredList(parsed.get("capabilities"), "capabilities", 6, 40, 1));
-        card.setBestFor(requiredList(parsed.get("bestFor"), "bestFor", 5, 60, 1));
-        card.setRequires(optionalList(parsed.get("requires"), 4, 40));
-        card.setDelivers(requiredList(parsed.get("delivers"), "delivers", 4, 40, 1));
-        card.setLimitations(optionalList(parsed.get("limitations"), 4, 60));
-        card.setKeywords(requiredList(parsed.get("keywords"), "keywords", 12, 24, 3));
+        card.setSummary(textOrFallback(
+            draftValue(cardDraft, parsed, "summary", "description"),
+            fallbackSummary(normalized.getAgent(), zh), 160, "summary", fallbackWarnings));
+        card.setCapabilities(listOrFallback(
+            draftValue(cardDraft, parsed, "capabilities", "capability", "abilities"),
+            fallbackCapabilities(normalized.getAgent()), 6, 40, 1, "capabilities", fallbackWarnings));
+        card.setBestFor(listOrFallback(
+            draftValue(cardDraft, parsed, "bestFor", "best_for", "bestfor", "scenarios"),
+            fallbackBestFor(normalized.getAgent(), zh), 5, 60, 1, "bestFor", fallbackWarnings));
+        card.setRequires(listOrFallback(
+            draftValue(cardDraft, parsed, "requires", "inputs", "inputTypes", "input_types"),
+            normalized.getAgent().getInputTypes(), 4, 40,
+            hasItems(normalized.getAgent().getInputTypes()) ? 1 : 0, "requires", fallbackWarnings));
+        card.setDelivers(listOrFallback(
+            draftValue(cardDraft, parsed, "delivers", "outputs", "outputTypes", "output_types"),
+            fallbackDelivers(normalized.getAgent(), zh), 4, 40, 1, "delivers", fallbackWarnings));
+        card.setLimitations(listOrFallback(
+            draftValue(cardDraft, parsed, "limitations", "constraints"),
+            normalized.getAgent().getConstraints(), 4, 60,
+            hasItems(normalized.getAgent().getConstraints()) ? 1 : 0, "limitations", fallbackWarnings));
+        card.setKeywords(listOrFallback(
+            draftValue(cardDraft, parsed, "keywords", "tags"),
+            fallbackKeywords(normalized.getAgent(), card), 12, 24, 3, "keywords", fallbackWarnings));
 
         String locale = StringUtils.defaultIfBlank(normalized.getLocale(), "zh-CN");
         AgentCapabilityCompileResult result = new AgentCapabilityCompileResult();
@@ -94,8 +167,11 @@ public class AgentCapabilityCardService {
         result.setRoutingText(renderRoutingText(card, locale));
         AgentCapabilityCompileResult.Quality quality = new AgentCapabilityCompileResult.Quality();
         quality.setConfidence(confidence(normalized));
-        quality.setMissingInformation(optionalList(parsed.get("missingInformation"), 8, 80));
-        quality.setWarnings(optionalList(parsed.get("warnings"), 8, 100));
+        quality.setMissingInformation(optionalList(
+            draftValue(qualityDraft, parsed, "missingInformation", "missing_information"), 8, 80));
+        List<String> warnings = new ArrayList<>(fallbackWarnings);
+        warnings.addAll(optionalList(draftValue(qualityDraft, parsed, "warnings"), 8, 100));
+        quality.setWarnings(optionalList(warnings, 8, 100));
         result.setQuality(quality);
         return result;
     }
@@ -224,38 +300,177 @@ public class AgentCapabilityCardService {
 
     // ==================== 卡片裁剪 ====================
 
-    private String requiredText(Object value, String field, int maxLength) {
+    private String textOrFallback(Object value, String fallback, int maxLength, String field,
+        List<String> warnings) {
         String normalized = normalizeText(value instanceof String s ? s : "", maxLength);
-        if (StringUtils.isBlank(normalized)) {
-            throw new BaseException("Capability model omitted " + field);
+        if (StringUtils.isNotBlank(normalized)) {
+            return normalized;
         }
-        return normalized;
+        warnings.add("Model omitted or malformed " + field + "; derived from agent source");
+        return normalizeText(fallback, maxLength);
     }
 
-    private List<String> requiredList(Object value, String field, int maxItems, int maxLength, int minItems) {
+    private List<String> listOrFallback(Object value, List<String> fallback, int maxItems, int maxLength,
+        int minItems, String field, List<String> warnings) {
         List<String> normalized = optionalList(value, maxItems, maxLength);
-        if (normalized.size() < minItems) {
-            throw new BaseException("Capability model returned too few " + field);
+        if (normalized.size() >= minItems) {
+            return normalized;
         }
-        return normalized;
+        List<String> merged = new ArrayList<>(normalized);
+        if (fallback != null) {
+            merged.addAll(fallback);
+        }
+        List<String> completed = optionalList(merged, maxItems, maxLength);
+        warnings.add("Model omitted or malformed " + field + "; derived from agent source");
+        return completed;
     }
 
     private List<String> optionalList(Object value, int maxItems, int maxLength) {
-        if (!(value instanceof List<?> raw)) {
-            return new ArrayList<>();
-        }
         LinkedHashSet<String> seen = new LinkedHashSet<>();
-        int limit = Math.min(raw.size(), maxItems);
-        for (int i = 0; i < limit; i++) {
-            Object item = raw.get(i);
-            if (item instanceof String s) {
-                String normalized = normalizeText(s, maxLength);
-                if (StringUtils.isNotBlank(normalized)) {
-                    seen.add(normalized);
+        if (value instanceof String text) {
+            for (String item : text.split("[\\n,，;；|]+")) {
+                addNormalized(seen, item, maxLength, maxItems);
+            }
+        } else if (value instanceof List<?> raw) {
+            int limit = Math.min(raw.size(), maxItems);
+            for (int i = 0; i < limit; i++) {
+                Object item = raw.get(i);
+                if (item instanceof String text) {
+                    addNormalized(seen, text, maxLength, maxItems);
+                } else if (item instanceof Map<?, ?>) {
+                    Map<String, Object> map = objectMap(item);
+                    Object text = firstValue(map, "name", "value", "description", "text");
+                    if (text instanceof String s) {
+                        addNormalized(seen, s, maxLength, maxItems);
+                    }
                 }
             }
         }
         return new ArrayList<>(seen);
+    }
+
+    private void addNormalized(LinkedHashSet<String> target, String value, int maxLength, int maxItems) {
+        if (target.size() >= maxItems) {
+            return;
+        }
+        String normalized = normalizeText(value, maxLength);
+        if (StringUtils.isNotBlank(normalized)) {
+            target.add(normalized);
+        }
+    }
+
+    private String fallbackSummary(AgentCapabilityCompileInput.Agent agent, boolean zh) {
+        if (StringUtils.isNotBlank(agent.getDescription())) {
+            return agent.getDescription();
+        }
+        if (StringUtils.isNotBlank(agent.getInstructions())) {
+            return agent.getInstructions();
+        }
+        return zh ? agent.getName() + "的能力卡" : "Capability card for " + agent.getName();
+    }
+
+    private List<String> fallbackCapabilities(AgentCapabilityCompileInput.Agent agent) {
+        List<String> values = new ArrayList<>();
+        addSourceItemNames(values, agent.getSkills());
+        addSourceItemNames(values, agent.getTools());
+        addAll(values, agent.getKnowledgeDomains());
+        if (values.isEmpty()) {
+            addIfNotBlank(values, agent.getDescription());
+        }
+        if (values.isEmpty()) {
+            addIfNotBlank(values, agent.getInstructions());
+        }
+        return values;
+    }
+
+    private List<String> fallbackBestFor(AgentCapabilityCompileInput.Agent agent, boolean zh) {
+        List<String> values = new ArrayList<>();
+        if (agent.getExamples() != null) {
+            for (AgentCapabilityCompileInput.Example example : agent.getExamples()) {
+                addIfNotBlank(values, example.getRequest());
+            }
+        }
+        if (values.isEmpty()) {
+            addIfNotBlank(values, agent.getDescription());
+        }
+        if (values.isEmpty()) {
+            values.add(zh ? agent.getName() + "相关任务" : "Tasks related to " + agent.getName());
+        }
+        return values;
+    }
+
+    private List<String> fallbackDelivers(AgentCapabilityCompileInput.Agent agent, boolean zh) {
+        List<String> values = new ArrayList<>();
+        addAll(values, agent.getOutputTypes());
+        if (values.isEmpty() && agent.getExamples() != null) {
+            for (AgentCapabilityCompileInput.Example example : agent.getExamples()) {
+                addIfNotBlank(values, example.getExpectedOutcome());
+            }
+        }
+        if (values.isEmpty()) {
+            values.add(zh ? agent.getName() + "处理结果" : agent.getName() + " result");
+        }
+        return values;
+    }
+
+    private List<String> fallbackKeywords(AgentCapabilityCompileInput.Agent agent,
+        AgentCapabilityCompileResult.Card card) {
+        List<String> values = new ArrayList<>();
+        addIfNotBlank(values, agent.getName());
+        addIfNotBlank(values, agent.getCode());
+        addSourceItemNames(values, agent.getSkills());
+        addSourceItemNames(values, agent.getTools());
+        addAll(values, agent.getKnowledgeDomains());
+        addAll(values, card.getCapabilities());
+        addAll(values, card.getBestFor());
+        return values;
+    }
+
+    private void addSourceItemNames(List<String> target, List<AgentCapabilityCompileInput.SourceItem> items) {
+        if (items == null) {
+            return;
+        }
+        for (AgentCapabilityCompileInput.SourceItem item : items) {
+            addIfNotBlank(target, item.getName());
+        }
+    }
+
+    private void addAll(List<String> target, List<String> values) {
+        if (values != null) {
+            values.forEach(value -> addIfNotBlank(target, value));
+        }
+    }
+
+    private void addIfNotBlank(List<String> target, String value) {
+        if (StringUtils.isNotBlank(value)) {
+            target.add(value);
+        }
+    }
+
+    private boolean hasItems(List<?> values) {
+        return values != null && !values.isEmpty();
+    }
+
+    private Object draftValue(Map<String, Object> nested, Map<String, Object> root, String... keys) {
+        Object value = firstValue(nested, keys);
+        return value != null ? value : firstValue(root, keys);
+    }
+
+    private Object firstValue(Map<String, Object> values, String... keys) {
+        for (String key : keys) {
+            if (values.containsKey(key) && values.get(key) != null) {
+                return values.get(key);
+            }
+        }
+        return null;
+    }
+
+    private Map<String, Object> objectMap(Object value) {
+        Map<String, Object> result = new TreeMap<>();
+        if (value instanceof Map<?, ?> raw) {
+            raw.forEach((key, item) -> result.put(String.valueOf(key), item));
+        }
+        return result;
     }
 
     // ==================== 路由文本与置信度 ====================
