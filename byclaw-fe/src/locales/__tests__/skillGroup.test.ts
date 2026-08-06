@@ -9,6 +9,9 @@ const skillGroupLocaleIds = [
   'resource.memberSkills',
   'resource.installSkillGroup',
   'resource.installSkillGroupSuccess',
+  'resource.skillGroup.editTitle',
+  'resource.skillGroup.updateSuccess',
+  'resource.skillGroup.edit',
 ] as const;
 
 describe('skill group locale messages', () => {

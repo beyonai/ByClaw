@@ -20,6 +20,8 @@ jest.mock('@/hooks/useGlobal', () => ({
 
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import SkillGroupDetailDrawer from '..';
 import type { IMessage } from '@/typescript/message';
 
@@ -80,6 +82,24 @@ describe('SkillGroupDetailDrawer', () => {
     mockGetSkillGroupDetail.mockRejectedValueOnce(new Error('network error'));
     rerender(<SkillGroupDetailDrawer groupId="102" digitalEmployeeId="201" onClose={jest.fn()} />);
     expect(await screen.findByTestId('skill-group-detail-error')).toBeInTheDocument();
+  });
+
+  it('shows the generated default cover when the group does not provide a poster', async () => {
+    mockGetSkillGroupDetail.mockResolvedValue({ data: { ...detail, avatar: '' } });
+
+    render(<SkillGroupDetailDrawer groupId="101" digitalEmployeeId="201" onClose={jest.fn()} />);
+
+    expect(await screen.findByTestId('skill-group-detail-default-cover')).toHaveAttribute(
+      'src',
+      '/assets/skill-groups/default-skill-group-cover-3x4.png'
+    );
+  });
+
+  it('displays the normalized 3:4 poster without cropping it', () => {
+    const drawerStyles = readFileSync(resolve(__dirname, '../index.module.less'), 'utf8');
+
+    expect(drawerStyles).toMatch(/object-fit:\s*contain/);
+    expect(drawerStyles).not.toMatch(/object-fit:\s*cover/);
   });
 
   it('disables install without an active employee and emits refresh events after success', async () => {

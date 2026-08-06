@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.skillgroup;
 
+import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.common.exception.BaseException;
@@ -11,8 +12,10 @@ import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmplo
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.model.SkillRelationSource;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
@@ -24,8 +27,10 @@ import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupPageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupUpdateQo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
+import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -45,8 +50,8 @@ public class SkillGroupApplicationService {
     private static final String SKILL_GROUP = ResourceBizTypeEnum.SKILL_GROUP.name();
     private static final String SKILL = ResourceBizTypeEnum.SKILL.name();
     private static final String RESOURCE_TYPE_COMBIN = "COMBIN";
-    private static final String OWNER_TYPE_ENTERPRISE = "enterprise";
     private static final String ADMIN_VIP_USER_CODE = "adminvip";
+    private static final String USER_CODE_CONFIG = "USERCODE_CONFIG";
     private static final String MEMBER_REL_TYPE = "SKILL_GROUP_MEMBER";
 
     private final SsResourceService resourceService;
@@ -55,6 +60,8 @@ public class SkillGroupApplicationService {
     private final AuthApplicationService authApplicationService;
     private final SequenceService sequenceService;
     private final DigitalEmployeeApplicationService digitalEmployeeApplicationService;
+    private final SsResExtSkillService extSkillService;
+    private final ByaiSystemConfigService systemConfigService;
 
     public SkillGroupApplicationService(
             SsResourceService resourceService,
@@ -62,20 +69,22 @@ public class SkillGroupApplicationService {
             SkillGroupMapper skillGroupMapper,
             AuthApplicationService authApplicationService,
             SequenceService sequenceService,
-            DigitalEmployeeApplicationService digitalEmployeeApplicationService) {
+            DigitalEmployeeApplicationService digitalEmployeeApplicationService,
+            SsResExtSkillService extSkillService,
+            ByaiSystemConfigService systemConfigService) {
         this.resourceService = resourceService;
         this.relationService = relationService;
         this.skillGroupMapper = skillGroupMapper;
         this.authApplicationService = authApplicationService;
         this.sequenceService = sequenceService;
         this.digitalEmployeeApplicationService = digitalEmployeeApplicationService;
+        this.extSkillService = extSkillService;
+        this.systemConfigService = systemConfigService;
     }
 
     public SkillGroupVo create(SkillGroupCreateQo qo) {
         Long tenantId = requireCurrentTenant();
-        if (OWNER_TYPE_ENTERPRISE.equals(qo.getOwnerType())) {
-            requireEnterpriseCreatePermission();
-        }
+        requireAdminVipCreatePermission();
         SsResource resource = new SsResource();
         resource.setResourceBizType(SKILL_GROUP);
         resource.setResourceType(RESOURCE_TYPE_COMBIN);
@@ -269,6 +278,7 @@ public class SkillGroupApplicationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void delete(Long groupId) {
+        requireAdminVipCreatePermission();
         SsResource group = loadManagedGroupForUpdate(groupId);
         List<SsResourceRelDetail> candidates =
                 skillGroupMapper.selectSkillRelationsWithSourceInfoByTenant(group.getComAcctId());
@@ -329,14 +339,57 @@ public class SkillGroupApplicationService {
         return digitalEmployee;
     }
 
-    private void requireEnterpriseCreatePermission() {
-        boolean allowed = CurrentUserHolder.isBusinessAdmin()
-                || CurrentUserHolder.isOrganizationAdmin()
-                || CurrentUserHolder.isPlatformAdminOrOperator()
-                || ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode());
-        if (!allowed) {
-            throw new BaseException("当前用户没有企业技能组创建权限");
+    private void requireAdminVipCreatePermission() {
+        LinkedHashSet<String> adminVipUserCodes = new LinkedHashSet<>();
+        adminVipUserCodes.add(ADMIN_VIP_USER_CODE);
+        try {
+            collectAdminVipUserCodes(
+                    systemConfigService.getDcSystemConfigValueByCode(USER_CODE_CONFIG), adminVipUserCodes);
         }
+        catch (RuntimeException ignored) {
+            // 配置不可用时与前端 isAdminVip 一致，保留默认 adminvip。
+        }
+        if (!adminVipUserCodes.contains(CurrentUserHolder.getCurrentUserCode())) {
+            throw new BaseException("当前用户不是 AdminVip，没有企业技能组创建权限");
+        }
+    }
+
+    private void collectAdminVipUserCodes(Object value, Collection<String> target) {
+        if (value == null) {
+            return;
+        }
+        if (value instanceof Collection<?>) {
+            ((Collection<?>) value).forEach(item -> collectAdminVipUserCodes(item, target));
+            return;
+        }
+        if (value instanceof Map<?, ?>) {
+            ((Map<?, ?>) value).values().forEach(item -> collectAdminVipUserCodes(item, target));
+            return;
+        }
+        String text = String.valueOf(value).trim();
+        if (text.isEmpty()) {
+            return;
+        }
+        if (looksLikeJson(text)) {
+            try {
+                collectAdminVipUserCodes(JSON.parse(text), target);
+            }
+            catch (RuntimeException ignored) {
+                // 与前端 isAdminVip 保持一致：疑似 JSON 但解析失败时不使用该配置。
+            }
+            return;
+        }
+        for (String userCode : text.split(",")) {
+            String normalized = userCode.trim();
+            if (!normalized.isEmpty()) {
+                target.add(normalized);
+            }
+        }
+    }
+
+    private boolean looksLikeJson(String value) {
+        return value.startsWith("[") || value.startsWith("{")
+                || (value.startsWith("\"") && value.endsWith("\""));
     }
 
     private SsResource loadManagedGroupForUpdate(Long groupId) {
@@ -385,6 +438,10 @@ public class SkillGroupApplicationService {
         for (SsResource resource : resources) {
             byId.put(resource.getResourceId(), resource);
         }
+        Map<Long, SsResExtSkill> extById = new LinkedHashMap<>();
+        for (SsResExtSkill extSkill : extSkillService.findByIds(skillIds)) {
+            extById.put(extSkill.getResourceId(), extSkill);
+        }
         for (Long skillId : skillIds) {
             SsResource skill = byId.get(skillId);
             if (skill == null) {
@@ -396,8 +453,9 @@ public class SkillGroupApplicationService {
             if (!Objects.equals(ResourceStatus.LIST.getNum(), skill.getResourceStatus())) {
                 throw new BaseException("成员技能未上架：" + skillId);
             }
-            if (!authApplicationService.hasResourceUsePermission(skill)) {
-                throw new BaseException("当前用户没有成员技能使用权限：" + skillId);
+            SsResExtSkill extSkill = extById.get(skillId);
+            if (extSkill == null || !SsResExtSkillService.INNER_SKILL_TYPE.equalsIgnoreCase(extSkill.getSkillType())) {
+                throw new BaseException("技能组成员只能选择系统内置技能：" + skillId);
             }
         }
     }

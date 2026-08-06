@@ -17,9 +17,11 @@ import {
   queryResourceOperationPermissions,
   type FixedEntryOperationCapability,
 } from '@/pages/manager/service/resources';
+import type { SkillGroup } from '@/pages/manager/service/resources';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
 import ResourceEdit from './components/ResourceEdit';
 import ResourceImport from './components/ResourceImport';
+import SkillGroupCreateModal from './components/SkillGroupCreateModal';
 import ResourceDetail from './components/ResourceDetail';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
@@ -34,7 +36,7 @@ import { saveTool } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import useGlobal from '@/hooks/useGlobal';
-import { getToken } from '@/utils/auth';
+import { getToken, isAdminVip } from '@/utils/auth';
 import { get, trim, intersection, isEmpty } from 'lodash';
 import { buildSkillMarketplaceUrl, isSkillMarketplaceInstalledMessage } from './utils';
 import styles from './index.module.less';
@@ -120,6 +122,8 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [skillGroupCreateModalOpen, setSkillGroupCreateModalOpen] = useState(false);
+  const [skillGroupEditing, setSkillGroupEditing] = useState<SkillGroup | null>(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [currentItem, setCurrentItem] = useState<IResourceItem | null>(null);
@@ -579,7 +583,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         </Tooltip>
       )}
 
-      {!isEnterpriseSkillGroupMode && brandVersion === 'openSource' && (
+      {brandVersion === 'openSource' && (!isEnterpriseSkillGroupMode || isAdminVip(userInfo)) && (
         <Tooltip
           title={
             !canImportCurrentEnterpriseResource
@@ -596,7 +600,12 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
                 if (!canImportCurrentEnterpriseResource) {
                   return;
                 }
-                setImportModalOpen(true);
+                if (isEnterpriseSkillGroupMode) {
+                  setSkillGroupEditing(null);
+                  setSkillGroupCreateModalOpen(true);
+                } else {
+                  setImportModalOpen(true);
+                }
               }}
             >
               {intl.formatMessage({ id: 'common.import' })}
@@ -620,23 +629,19 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
             trigger={['hover', 'click']}
             open={enterpriseSkillDropdownOpen}
             onOpenChange={setEnterpriseSkillDropdownOpen}
+            placement="bottomLeft"
+            align={{ offset: [0, 6] }}
+            overlayClassName={styles.enterpriseSkillDropdown}
             menu={{
+              selectedKeys: [enterpriseSkillKind],
               items: [
                 {
                   key: 'skill',
-                  label: (
-                    <span aria-checked={enterpriseSkillKind === 'skill'} role="menuitemradio">
-                      {intl.formatMessage({ id: 'resource.skillSingle' })}
-                    </span>
-                  ),
+                  label: intl.formatMessage({ id: 'resource.skillSingle' }),
                 },
                 {
                   key: 'group',
-                  label: (
-                    <span aria-checked={enterpriseSkillKind === 'group'} role="menuitemradio">
-                      {intl.formatMessage({ id: 'resource.skillGroup' })}
-                    </span>
-                  ),
+                  label: intl.formatMessage({ id: 'resource.skillGroup' }),
                 },
               ],
               onClick: ({ key }: { key: string }) => {
@@ -810,6 +815,11 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
               activeDigitalEmployeeId={`${activeDigitalEmployeeId || ''}`}
               ownerType="enterprise"
               resourceStatus={2}
+              canDeleteSkillGroup={isAdminVip(userInfo)}
+              onEditSkillGroup={(group) => {
+                setSkillGroupEditing(group);
+                setSkillGroupCreateModalOpen(true);
+              }}
             />
           ) : (
             <ResourceList
@@ -846,6 +856,17 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         }}
         onSuccess={() => {
           setImportModalOpen(false);
+          refreshList();
+          notifySiderResourceListReload();
+        }}
+      />
+      <SkillGroupCreateModal
+        visible={skillGroupCreateModalOpen}
+        group={skillGroupEditing}
+        onCancel={() => setSkillGroupCreateModalOpen(false)}
+        onSuccess={() => {
+          setSkillGroupCreateModalOpen(false);
+          setSkillGroupEditing(null);
           refreshList();
           notifySiderResourceListReload();
         }}

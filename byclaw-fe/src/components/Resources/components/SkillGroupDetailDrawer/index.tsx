@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Button, Empty, Spin, message } from 'antd';
+import { ArrowLeftOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
 import { getSkillGroupDetail, installSkillGroup } from '@/pages/manager/service/resources';
 import type { SkillGroup, SkillGroupInstallResult } from '@/pages/manager/service/resources';
 import type { IMessage } from '@/typescript/message';
+import { SKILL_GROUP_DEFAULT_COVER } from '../skillGroupCover';
 import styles from './index.module.less';
 
 type DrawerMessage = Partial<IMessage> & {
@@ -29,7 +31,7 @@ type SkillGroupDetail = SkillGroup & {
 const getResponseData = (response: any): SkillGroupDetail | null =>
   response && Object.prototype.hasOwnProperty.call(response, 'data') ? response.data : response || null;
 
-const SkillGroupDetailDrawer: React.FC<SkillGroupDetailDrawerProps> = ({ groupId, digitalEmployeeId }) => {
+const SkillGroupDetailDrawer: React.FC<SkillGroupDetailDrawerProps> = ({ groupId, digitalEmployeeId, onClose }) => {
   const intl = useIntl();
   const { EventEmitter } = useGlobal();
   const [detail, setDetail] = useState<SkillGroupDetail | null>(null);
@@ -37,6 +39,7 @@ const SkillGroupDetailDrawer: React.FC<SkillGroupDetailDrawerProps> = ({ groupId
   const [error, setError] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState(false);
+  const [posterError, setPosterError] = useState(false);
   const mountedRef = useRef(true);
   const installIdentityRef = useRef({ groupId, digitalEmployeeId });
 
@@ -84,6 +87,10 @@ const SkillGroupDetailDrawer: React.FC<SkillGroupDetailDrawerProps> = ({ groupId
       active = false;
     };
   }, [groupId]);
+
+  useEffect(() => {
+    setPosterError(false);
+  }, [detail?.avatar]);
 
   const handleInstall = async () => {
     if (!groupId || !digitalEmployeeId || installing) return;
@@ -153,25 +160,44 @@ const SkillGroupDetailDrawer: React.FC<SkillGroupDetailDrawerProps> = ({ groupId
 
   return (
     <div className={styles.drawer}>
-      <div className={styles.hero}>
-        {detail.avatar ? (
-          <img className={styles.poster} src={detail.avatar} alt={resourceName} />
-        ) : (
-          <div className={styles.posterFallback} aria-label={resourceName}>
-            {resourceName.slice(0, 1)}
-          </div>
-        )}
-        <div className={styles.summary}>
+      <aside className={styles.visualPane}>
+        <button
+          type="button"
+          className={styles.backButton}
+          aria-label={intl.formatMessage({ id: 'common.back' })}
+          onClick={onClose}
+        >
+          <ArrowLeftOutlined />
+        </button>
+        <div className={styles.posterFrame}>
+          {detail.avatar && !posterError ? (
+            <img
+              className={styles.poster}
+              src={detail.avatar}
+              alt={resourceName}
+              onError={() => setPosterError(true)}
+            />
+          ) : (
+            <img
+              className={styles.posterDefault}
+              data-testid="skill-group-detail-default-cover"
+              src={SKILL_GROUP_DEFAULT_COVER}
+              alt=""
+            />
+          )}
+        </div>
+      </aside>
+
+      <main className={styles.detailPane}>
+        <header className={styles.summary}>
           <h1>{resourceName}</h1>
-          <div className={styles.meta}>
-            <span>{intl.formatMessage({ id: 'resource.creator' })}</span>
+          <div className={styles.metaRow}>
             <span>{creator || intl.formatMessage({ id: 'common.none' })}</span>
-          </div>
-          <div className={styles.meta}>
-            <span>{intl.formatMessage({ id: 'resource.category' })}</span>
+            <i />
             <span>{category || intl.formatMessage({ id: 'common.none' })}</span>
           </div>
           <Button
+            className={styles.installButton}
             type="primary"
             disabled={!digitalEmployeeId || installing}
             loading={installing}
@@ -184,29 +210,32 @@ const SkillGroupDetailDrawer: React.FC<SkillGroupDetailDrawerProps> = ({ groupId
               {intl.formatMessage({ id: 'common.operationFailed' })}
             </div>
           ) : null}
-        </div>
-      </div>
+        </header>
 
-      <section className={styles.section}>
-        <h2>{intl.formatMessage({ id: 'resource.description' })}</h2>
-        <p>{description || intl.formatMessage({ id: 'common.none' })}</p>
-      </section>
+        <section className={styles.section}>
+          <h2>{intl.formatMessage({ id: 'resource.description' })}</h2>
+          <p>{description || intl.formatMessage({ id: 'common.none' })}</p>
+        </section>
 
-      <section className={styles.section}>
-        <h2>{intl.formatMessage({ id: 'resource.memberSkills' })}</h2>
-        {members.length ? (
-          <ul className={styles.memberList}>
-            {members.map((member) => (
-              <li key={member.resourceId}>
-                <span>{member.resourceName}</span>
-                {member.resourceDesc ? <small>{member.resourceDesc}</small> : null}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p>{intl.formatMessage({ id: 'common.none' })}</p>
-        )}
-      </section>
+        <section className={styles.section}>
+          <h2>
+            {intl.formatMessage({ id: 'resource.memberSkills' })}
+            <span className={styles.memberCount}>（{members.length}）</span>
+          </h2>
+          {members.length ? (
+            <ul className={styles.memberList}>
+              {members.map((member) => (
+                <li key={member.resourceId}>
+                  <span>{member.resourceName}</span>
+                  {member.resourceDesc ? <small>{member.resourceDesc}</small> : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>{intl.formatMessage({ id: 'common.none' })}</p>
+          )}
+        </section>
+      </main>
     </div>
   );
 };

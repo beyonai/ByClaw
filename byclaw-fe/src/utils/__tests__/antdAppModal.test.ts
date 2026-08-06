@@ -13,14 +13,14 @@ describe('utils/antdAppModal', () => {
     registerAppModalError(null);
   });
 
-  it('registerAppModalError stores modal handler and showRequestErrorModal uses it', () => {
+  it('showRequestErrorModal uses a non-blocking message even when a modal handler is registered', () => {
     const modalError = jest.fn();
     registerAppModalError(modalError);
 
     showRequestErrorModal('boom');
 
-    expect(modalError).toHaveBeenCalledWith({ content: 'boom' });
-    expect((message as any).error).not.toHaveBeenCalled();
+    expect(modalError).not.toHaveBeenCalled();
+    expect((message as any).error).toHaveBeenCalledWith('boom');
   });
 
   it('falls back to message.error and normalizes blank content', () => {

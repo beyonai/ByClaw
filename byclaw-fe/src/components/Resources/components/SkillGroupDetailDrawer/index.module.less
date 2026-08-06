@@ -1,102 +1,174 @@
 .drawer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  width: 100%;
   height: 100%;
-  overflow: auto;
-  padding: 24px;
-  background: #fff;
+  overflow: hidden;
+  background: #f8f8f8;
 }
 
-.hero {
+.visualPane {
+  position: relative;
   display: flex;
-  gap: 24px;
-  padding-bottom: 24px;
-  border-bottom: 1px solid #edf0f5;
-}
-
-.poster,
-.posterFallback {
-  width: 240px;
-  height: 160px;
-  flex: 0 0 auto;
-  border-radius: 12px;
-  object-fit: cover;
-  background: #eef2ff;
-}
-
-.posterFallback {
-  display: flex;
+  min-width: 0;
   align-items: center;
   justify-content: center;
-  color: #315efb;
-  font-size: 48px;
-  font-weight: 600;
+  padding: 72px 48px 48px;
+  border-right: 1px solid #e6e6e6;
+}
+
+.backButton {
+  position: absolute;
+  top: 28px;
+  left: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: #707070;
+  font-size: 18px;
+  background: transparent;
+  cursor: pointer;
+
+  &:hover {
+    color: #1f2533;
+    background: #ededed;
+  }
+}
+
+.posterFrame {
+  display: flex;
+  width: min(72%, 560px);
+  height: min(72vh, 720px);
+  min-height: 320px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.posterDefault,
+.poster {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.detailPane {
+  min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+  padding: 48px 72px 64px;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .summary {
   display: flex;
-  flex: 1;
   min-width: 0;
   flex-direction: column;
   align-items: flex-start;
-  gap: 10px;
+  padding-bottom: 28px;
+  border-bottom: 1px solid #e5e5e5;
 
   h1 {
-    margin: 0 0 4px;
-    color: #1f2533;
-    font-size: 24px;
+    margin: 0;
+    color: #171717;
+    font-size: 28px;
+    line-height: 1.4;
   }
 }
 
-.meta {
+.metaRow {
   display: flex;
-  gap: 8px;
-  color: #707680;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  color: #7f7f7f;
+  font-size: 14px;
 
-  span:last-child {
-    color: #1f2533;
+  i {
+    width: 1px;
+    height: 14px;
+    background: #d5d5d5;
   }
+}
+
+.installButton {
+  margin-top: 20px;
 }
 
 .section {
-  padding: 24px 0;
-  border-bottom: 1px solid #edf0f5;
+  padding: 28px 0;
+  border-bottom: 1px solid #e5e5e5;
 
   h2 {
-    margin: 0 0 12px;
-    color: #1f2533;
+    margin: 0 0 14px;
+    color: #222;
     font-size: 16px;
+    font-weight: 600;
   }
 
   p {
     margin: 0;
-    color: #4d5563;
-    line-height: 1.7;
+    color: #444;
+    font-size: 15px;
+    line-height: 1.8;
     white-space: pre-wrap;
   }
 }
 
+.memberCount {
+  color: #999;
+  font-weight: 400;
+}
+
 .memberList {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   margin: 0;
   padding: 0;
   list-style: none;
 
   li {
     display: flex;
+    min-height: 88px;
     flex-direction: column;
-    gap: 4px;
-    padding: 12px;
-    border: 1px solid #edf0f5;
-    border-radius: 8px;
+    justify-content: center;
+    gap: 6px;
+    padding: 18px 22px;
+    border-radius: 22px;
+    background: #fff;
+  }
+
+  span {
+    color: #1d1d1f;
+    font-size: 16px;
+    font-weight: 600;
   }
 
   small {
-    color: #707680;
+    overflow: hidden;
+    color: #717171;
+    font-size: 14px;
+    line-height: 1.5;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
 .installError {
+  margin-top: 8px;
   color: #d4380d;
   font-size: 12px;
 }
@@ -109,17 +181,28 @@
   padding: 48px;
 }
 
-@media (max-width: 640px) {
-  .hero {
-    flex-direction: column;
+@media (max-width: 900px) {
+  .drawer {
+    display: block;
+    overflow-y: auto;
   }
 
-  .poster,
-  .posterFallback {
-    width: 100%;
+  .visualPane {
+    min-height: 52vh;
+    padding: 72px 24px 36px;
+    border-right: 0;
+    border-bottom: 1px solid #e6e6e6;
   }
 
-  .memberList {
-    grid-template-columns: 1fr;
+  .posterFrame {
+    width: min(74%, 420px);
+    height: 44vh;
+    min-height: 260px;
+  }
+
+  .detailPane {
+    height: auto;
+    overflow: visible;
+    padding: 36px 28px 48px;
   }
 }

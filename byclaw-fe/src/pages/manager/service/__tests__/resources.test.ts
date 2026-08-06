@@ -12,6 +12,10 @@ import {
   pageSkillGroups,
   getSkillGroupDetail,
   installSkillGroup,
+  createSkillGroup,
+  addSkillGroupMembers,
+  updateSkillGroup,
+  removeSkillGroupMembers,
 } from '../resources';
 import type { SkillGroup, SkillGroupInstallResult, SkillGroupPageResult } from '../resources';
 import { GET, POST } from '@/service/common/request';
@@ -181,6 +185,40 @@ describe('manager resources service', () => {
     const payload = { groupId: '10042909', digitalEmployeeId: '10042910' };
     installSkillGroup(payload);
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/skillGroup/install', payload);
+  });
+
+  it('should call createSkillGroup with the skill group create endpoint', () => {
+    const payload = {
+      resourceName: '知识协同',
+      resourceDesc: '连接知识与协作渠道',
+      avatar: '/uploads/knowledge-collaboration.png',
+      ownerType: 'enterprise',
+    };
+    createSkillGroup(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/skillGroup/create', payload);
+  });
+
+  it('should call addSkillGroupMembers with the member association endpoint', () => {
+    const payload = { groupId: '10042909', skillIds: ['10042911', '10042912'] };
+    addSkillGroupMembers(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/skillGroup/member/add', payload);
+  });
+
+  it('should call updateSkillGroup with the skill group update endpoint', () => {
+    const payload = {
+      groupId: '10042909',
+      resourceName: '智采协同',
+      resourceDesc: '整合采集与协作能力',
+      avatar: '/commonFile/preview?filePath=/covers/group.png',
+    };
+    updateSkillGroup(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/skillGroup/update', payload);
+  });
+
+  it('should call removeSkillGroupMembers with the member removal endpoint', () => {
+    const payload = { groupId: '10042909', skillIds: ['10042911'] };
+    removeSkillGroupMembers(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/skillGroup/member/remove', payload);
   });
 
   it('should type skill group responses with string IDs', () => {

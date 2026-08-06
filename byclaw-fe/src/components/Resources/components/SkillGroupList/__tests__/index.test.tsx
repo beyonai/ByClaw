@@ -29,6 +29,20 @@ jest.mock('@/components/InfiniteScroll', () => ({
   ),
 }));
 
+jest.mock('antd', () => ({
+  ...jest.requireActual('antd'),
+  Dropdown: ({ children, menu }: any) => (
+    <div>
+      {children}
+      {menu?.items?.map((item: any) => (
+        <button key={item.key} type="button" aria-label={item.label} onClick={() => item.onClick({ domEvent: { stopPropagation: jest.fn() } })}>
+          {item.label}
+        </button>
+      ))}
+    </div>
+  ),
+}));
+
 import React from 'react';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
@@ -67,9 +81,21 @@ const deferred = <T,>() => {
 };
 
 describe('SkillGroupList', () => {
+  let originalResizeObserver: typeof window.ResizeObserver;
+
   beforeEach(() => {
     mockPageSkillGroups.mockReset();
     mockEmit.mockReset();
+    originalResizeObserver = window.ResizeObserver;
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    Object.defineProperty(window, 'ResizeObserver', {
+      configurable: true,
+      writable: true,
+      value: originalResizeObserver,
+    });
   });
 
   it('fetches and renders the first page', async () => {
@@ -96,7 +122,7 @@ describe('SkillGroupList', () => {
 
     render(<SkillGroupList />);
 
-    expect(await screen.findByTestId('skill-group-empty')).toBeTruthy();
+    expect(await screen.findByTestId('skill-group-empty')).toHaveClass('ant-empty');
   });
 
   it('shows loading and error states for the first page request', async () => {
@@ -268,21 +294,112 @@ describe('SkillGroupList', () => {
       title: 'Group One',
     });
   });
+
+  it('reflows the masonry columns when the list width grows', async () => {
+    let resizeCallback!: ResizeObserverCallback;
+    const observe = jest.fn();
+    const disconnect = jest.fn();
+    const resizeObserver = { observe, disconnect, unobserve: jest.fn() } as unknown as ResizeObserver;
+
+    Object.defineProperty(window, 'ResizeObserver', {
+      configurable: true,
+      writable: true,
+      value: jest.fn((callback: ResizeObserverCallback) => {
+        resizeCallback = callback;
+        return resizeObserver;
+      }),
+    });
+    mockPageSkillGroups.mockResolvedValue({
+      data: {
+        total: 5,
+        list: Array.from({ length: 5 }, (_, index) =>
+          createGroup({ resourceId: `group-${index + 1}`, resourceName: `Group ${index + 1}` })
+        ),
+      },
+    });
+
+    const view = render(<SkillGroupList />);
+    await screen.findByText('Group 5');
+
+    expect(observe).toHaveBeenCalledWith(screen.getByTestId('skill-group-grid'));
+
+    act(() => {
+      resizeCallback([{ contentRect: { width: 1086 } } as ResizeObserverEntry], resizeObserver);
+    });
+    expect(screen.getAllByTestId('skill-group-column')).toHaveLength(3);
+
+    act(() => {
+      resizeCallback([{ contentRect: { width: 1488 } } as ResizeObserverEntry], resizeObserver);
+    });
+    expect(screen.getAllByTestId('skill-group-column')).toHaveLength(5);
+
+    view.unmount();
+    expect(disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to the window resize event when ResizeObserver is unavailable', async () => {
+    let gridWidth = 1086;
+    Object.defineProperty(window, 'ResizeObserver', {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    });
+    jest.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function getClientWidth() {
+      return this.dataset.testid === 'skill-group-grid' ? gridWidth : 0;
+    });
+    mockPageSkillGroups.mockResolvedValue({
+      data: {
+        total: 5,
+        list: Array.from({ length: 5 }, (_, index) =>
+          createGroup({ resourceId: `group-${index + 1}`, resourceName: `Group ${index + 1}` })
+        ),
+      },
+    });
+
+    render(<SkillGroupList />);
+    await screen.findByText('Group 5');
+    expect(screen.getAllByTestId('skill-group-column')).toHaveLength(3);
+
+    gridWidth = 1488;
+    act(() => window.dispatchEvent(new Event('resize')));
+
+    expect(screen.getAllByTestId('skill-group-column')).toHaveLength(5);
+  });
 });
 
 describe('SkillGroupCard', () => {
-  it('renders a deterministic fallback collage and activates from the keyboard', () => {
+  it('uses the default cover while the group cover is unavailable and activates from the keyboard', () => {
     const onClick = jest.fn();
     render(<SkillGroupCard group={createGroup()} onClick={onClick} />);
 
-    expect(screen.getByTestId('skill-group-fallback-cover')).toBeTruthy();
-    expect(screen.getByText('FI')).toBeTruthy();
-    expect(screen.getByText('SE')).toBeTruthy();
+    expect(screen.getByTestId('skill-group-default-cover')).toHaveAttribute(
+      'src',
+      '/assets/skill-groups/default-skill-group-cover-3x4.png'
+    );
 
     const card = screen.getByRole('button', { name: /Group One/ });
     fireEvent.keyDown(card, { key: 'Enter' });
     fireEvent.keyDown(card, { key: ' ' });
     expect(onClick).toHaveBeenCalledTimes(2);
+  });
+
+  it('falls back to the default cover when the group cover fails to load', () => {
+    render(<SkillGroupCard group={createGroup({ avatar: '/invalid-cover.png' })} />);
+
+    fireEvent.error(screen.getByRole('img', { name: '' }));
+
+    expect(screen.getByTestId('skill-group-default-cover')).toBeTruthy();
+  });
+
+  it('resolves backend preview paths before rendering the group cover', () => {
+    render(
+      <SkillGroupCard group={createGroup({ avatar: '/commonFile/preview?style=file&filePath=/covers/group.png' })} />
+    );
+
+    expect(screen.getByRole('img', { name: '' })).toHaveAttribute(
+      'src',
+      '/byaiService/commonFile/preview?style=file&filePath=/covers/group.png'
+    );
   });
 
   it('is focusable and keeps the waterfall card contract in CSS', () => {
@@ -293,12 +410,23 @@ describe('SkillGroupCard', () => {
 
     const listStyles = readFileSync(resolve(__dirname, '../index.module.less'), 'utf8');
     const cardStyles = readFileSync(resolve(__dirname, '../../SkillGroupCard/index.module.less'), 'utf8');
-    expect(listStyles).toMatch(/column-count:\s*4/);
-    expect(listStyles).toMatch(/column-gap:/);
-    expect(listStyles).toMatch(/column-count:\s*3/);
-    expect(listStyles).toMatch(/column-count:\s*2/);
-    expect(listStyles).toMatch(/column-count:\s*1/);
+    expect(listStyles).toMatch(/\.grid\s*{[\s\S]*?display:\s*grid/);
+    expect(listStyles).toMatch(/\.column\s*{[\s\S]*?display:\s*flex[\s\S]*?flex-direction:\s*column/);
+    expect(listStyles).not.toMatch(/column-count:/);
+    expect(listStyles).not.toMatch(/@container/);
     expect(cardStyles).toMatch(/break-inside:\s*avoid/);
+    expect(cardStyles).toMatch(/\.cover\s*{[\s\S]*aspect-ratio:\s*3\s*\/\s*4/);
+    expect(cardStyles).toMatch(/max-width:\s*360px/);
+    expect(cardStyles).toMatch(/max-height:\s*480px/);
+    expect(cardStyles).toMatch(/\.coverImage[\s\S]*object-fit:\s*cover/);
+    expect(cardStyles).toMatch(/\.content\s*{[\s\S]*border-right:/);
+    expect(cardStyles).toMatch(/\.content\s*{[\s\S]*border-bottom:/);
+    expect(cardStyles).toMatch(/\.content\s*{[\s\S]*border-left:/);
+    expect(cardStyles).toMatch(/var\(~'--@\{antPrefix\}-color-border-secondary'\)/);
+    expect(cardStyles).not.toMatch(/var\(--ant-color-border\)/);
+    expect(cardStyles).toMatch(/\.card:hover \.coverImage[\s\S]*transform:\s*scale\(1\.3\)/);
+    expect(cardStyles).toMatch(/\.card:hover \.defaultCoverImage[\s\S]*transform:\s*scale\(1\.3\)/);
+    expect(cardStyles).not.toMatch(/transform:\s*translateY/);
   });
 
   it('does not expose button semantics when no click handler is provided', () => {
@@ -306,5 +434,22 @@ describe('SkillGroupCard', () => {
 
     expect(screen.queryByRole('button', { name: /Group One/ })).toBeNull();
     expect(screen.getByText('Group One').closest('[tabindex]')).toBeNull();
+  });
+
+  it('shows edit and delete actions together only when group management is allowed', () => {
+    const onEdit = jest.fn();
+    const onDelete = jest.fn();
+    const { rerender } = render(
+      <SkillGroupCard group={createGroup()} canDelete onEdit={onEdit} onDelete={onDelete} />
+    );
+
+    expect(screen.getByRole('button', { name: 'resource.skillGroup.edit' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'resource.skillGroup.delete' }).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: 'resource.skillGroup.edit' }));
+    expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ resourceId: 'group-1' }));
+
+    rerender(<SkillGroupCard group={createGroup()} />);
+    expect(screen.queryByRole('button', { name: 'resource.skillGroup.edit' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'resource.skillGroup.delete' })).toBeNull();
   });
 });

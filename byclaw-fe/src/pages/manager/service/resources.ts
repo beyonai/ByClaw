@@ -64,6 +64,27 @@ export interface SkillGroupPageParams {
   catalogId?: string;
 }
 
+export interface SkillGroupCreateParams {
+  resourceName: string;
+  resourceDesc?: string;
+  avatar?: string;
+  catalogId?: string | number;
+  ownerType: string;
+}
+
+export interface SkillGroupMemberChangeParams {
+  groupId: string;
+  skillIds: string[];
+}
+
+export interface SkillGroupUpdateParams {
+  groupId: string;
+  resourceName: string;
+  resourceDesc?: string;
+  avatar?: string;
+  catalogId?: string | number;
+}
+
 export const pageSkillGroups = (params: SkillGroupPageParams) =>
   POST<SkillGroupPageResult>('/byaiService/skillGroup/page', params);
 
@@ -72,6 +93,20 @@ export const getSkillGroupDetail = (params: { groupId: string }) =>
 
 export const installSkillGroup = (params: { groupId: string; digitalEmployeeId: string }) =>
   POST<SkillGroupInstallResult>('/byaiService/skillGroup/install', params);
+
+export const createSkillGroup = (params: SkillGroupCreateParams) =>
+  POST<SkillGroup>('/byaiService/skillGroup/create', params);
+
+export const deleteSkillGroup = (params: { groupId: string }) => POST<void>('/byaiService/skillGroup/delete', params);
+
+export const addSkillGroupMembers = (params: SkillGroupMemberChangeParams) =>
+  POST<void>('/byaiService/skillGroup/member/add', params);
+
+export const updateSkillGroup = (params: SkillGroupUpdateParams) =>
+  POST<SkillGroup>('/byaiService/skillGroup/update', params);
+
+export const removeSkillGroupMembers = (params: SkillGroupMemberChangeParams) =>
+  POST<void>('/byaiService/skillGroup/member/remove', params);
 
 /**
  * 固定入口操作能力接口返回数据类型

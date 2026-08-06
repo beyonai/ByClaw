@@ -28,6 +28,7 @@ import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
@@ -40,6 +41,7 @@ import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
@@ -64,6 +66,8 @@ class SkillGroupApplicationServiceTest {
     private AuthApplicationService authService;
     private SequenceService sequenceService;
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
+    private SsResExtSkillService extSkillService;
+    private ByaiSystemConfigService systemConfigService;
     private SkillGroupApplicationService service;
 
     @BeforeEach
@@ -78,9 +82,17 @@ class SkillGroupApplicationServiceTest {
         authService = mock(AuthApplicationService.class);
         sequenceService = mock(SequenceService.class);
         digitalEmployeeApplicationService = mock(DigitalEmployeeApplicationService.class);
+        extSkillService = mock(SsResExtSkillService.class);
+        systemConfigService = mock(ByaiSystemConfigService.class);
+        when(extSkillService.findByIds(any())).thenAnswer(invocation -> {
+            Iterable<Long> resourceIds = invocation.getArgument(0);
+            java.util.ArrayList<SsResExtSkill> result = new java.util.ArrayList<>();
+            resourceIds.forEach(resourceId -> result.add(innerSkill(resourceId)));
+            return result;
+        });
         service = new SkillGroupApplicationService(
                 resourceService, relationService, mapper, authService, sequenceService,
-                digitalEmployeeApplicationService);
+                digitalEmployeeApplicationService, extSkillService, systemConfigService);
         setCurrentUser("ordinary", UserType.ORD_USER);
     }
 
@@ -91,6 +103,7 @@ class SkillGroupApplicationServiceTest {
 
     @Test
     void createPersonalBuildsFixedGroupResourceAndUsesDefaultResourceSaveOnly() {
+        setCurrentUser("adminvip", UserType.ORD_USER);
         SkillGroupCreateQo qo = createQo("personal");
         when(resourceService.saveResource(any())).thenAnswer(invocation -> {
             SsResource saved = invocation.getArgument(0);
@@ -119,12 +132,12 @@ class SkillGroupApplicationServiceTest {
         assertThat(result.getMembers()).isEmpty();
         assertThat(Arrays.stream(SkillGroupApplicationService.class.getDeclaredFields())
                 .map(field -> field.getType())
-                .noneMatch(SsResExtSkillService.class::equals)).isTrue();
+                .anyMatch(SsResExtSkillService.class::equals)).isTrue();
     }
 
     @Test
     void createPersonalRejectsMissingCurrentTenantBeforeSave() {
-        setCurrentUser("ordinary", UserType.ORD_USER, null);
+        setCurrentUser("adminvip", UserType.ORD_USER, null);
 
         assertThatThrownBy(() -> service.create(createQo("personal")))
                 .isInstanceOf(BaseException.class)
@@ -135,7 +148,7 @@ class SkillGroupApplicationServiceTest {
 
     @Test
     void createEnterpriseRejectsMissingCurrentTenantBeforeSave() {
-        setCurrentUser("business-admin", UserType.BUSINESS_MAN, null);
+        setCurrentUser("adminvip", UserType.ORD_USER, null);
 
         assertThatThrownBy(() -> service.create(createQo("enterprise")))
                 .isInstanceOf(BaseException.class)
@@ -154,39 +167,20 @@ class SkillGroupApplicationServiceTest {
     }
 
     @Test
-    void createEnterpriseAllowsBusinessAdmin() {
+    void createEnterpriseRejectsBusinessAdminWhenNotConfiguredAsAdminVip() {
         setCurrentUser("business-admin", UserType.BUSINESS_MAN);
-        stubResourceSave();
 
-        SkillGroupVo result = service.create(createQo("enterprise"));
-
-        assertThat(result.getResourceId()).isEqualTo(GROUP_ID);
-        verify(resourceService).saveResource(any(SsResource.class));
+        assertThatThrownBy(() -> service.create(createQo("enterprise")))
+                .isInstanceOf(BaseException.class)
+                .hasMessageContaining("AdminVip");
+        verify(resourceService, never()).saveResource(any());
     }
 
     @Test
-    void createEnterpriseAllowsOrganizationAdmin() {
-        setCurrentUser("organization-admin", UserType.ORG_MAN);
-        stubResourceSave();
-
-        assertThat(service.create(createQo("enterprise")).getResourceId()).isEqualTo(GROUP_ID);
-
-        verify(resourceService).saveResource(any(SsResource.class));
-    }
-
-    @Test
-    void createEnterpriseAllowsPlatformAdmin() {
-        setCurrentUser("platform-admin", UserType.PLAT_MAN);
-        stubResourceSave();
-
-        assertThat(service.create(createQo("enterprise")).getResourceId()).isEqualTo(GROUP_ID);
-
-        verify(resourceService).saveResource(any(SsResource.class));
-    }
-
-    @Test
-    void createEnterpriseAllowsPlatformOperator() {
-        setCurrentUser("platform-operator", UserType.PLAT_DEVOPS);
+    void createEnterpriseAllowsConfiguredAdminVip() {
+        setCurrentUser("alice", UserType.ORD_USER);
+        when(systemConfigService.getDcSystemConfigValueByCode("USERCODE_CONFIG"))
+                .thenReturn("[\"alice\",\"bob\"]");
         stubResourceSave();
 
         assertThat(service.create(createQo("enterprise")).getResourceId()).isEqualTo(GROUP_ID);
@@ -197,6 +191,8 @@ class SkillGroupApplicationServiceTest {
     @Test
     void createEnterpriseAllowsAdminVip() {
         setCurrentUser("adminvip", UserType.ORD_USER);
+        when(systemConfigService.getDcSystemConfigValueByCode("USERCODE_CONFIG"))
+                .thenThrow(new IllegalStateException("config unavailable"));
         stubResourceSave();
 
         assertThat(service.create(createQo("enterprise")).getResourceId()).isEqualTo(GROUP_ID);
@@ -488,12 +484,11 @@ class SkillGroupApplicationServiceTest {
     }
 
     @Test
-    void addMembersAllowsAuthorizedSharedSkillFromAnotherTenant() {
+    void addMembersAllowsInnerSkillWithoutUseOrManagePermission() {
         prepareManagedGroup();
         SsResource sharedSkill = skill(501L);
         sharedSkill.setComAcctId(999L);
         when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(sharedSkill));
-        when(authService.hasResourceUsePermission(sharedSkill)).thenReturn(true);
         when(mapper.selectMemberRelationsIncludingInactive(GROUP_ID, List.of(501L))).thenReturn(List.of());
         when(sequenceService.nextVal()).thenReturn(11L);
 
@@ -503,6 +498,8 @@ class SkillGroupApplicationServiceTest {
         verify(mapper).insertActiveMemberIfAbsent(inserted.capture());
         assertThat(inserted.getValue().getRelResourceId()).isEqualTo(501L);
         assertThat(inserted.getValue().getComAcctId()).isEqualTo(TENANT_ID);
+        verify(authService, never()).hasResourceUsePermission(sharedSkill);
+        verify(authService, never()).hasResourceManagePermission(sharedSkill);
     }
 
     @Test
@@ -594,7 +591,7 @@ class SkillGroupApplicationServiceTest {
     }
 
     @Test
-    void addMembersRejectsMissingWrongTypeSelfAndUseDeniedBeforeMutation() {
+    void addMembersRejectsMissingWrongTypeSelfAndNonInnerSkillBeforeMutation() {
         prepareManagedGroup();
         when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of());
         assertThatThrownBy(() -> service.addMembers(memberQo(501L))).isInstanceOf(BaseException.class);
@@ -607,9 +604,9 @@ class SkillGroupApplicationServiceTest {
         when(resourceService.findByIdList(List.of(GROUP_ID))).thenReturn(List.of(group()));
         assertThatThrownBy(() -> service.addMembers(memberQo(GROUP_ID))).isInstanceOf(BaseException.class);
 
-        SsResource denied = skill(501L);
-        when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(denied));
-        when(authService.hasResourceUsePermission(denied)).thenReturn(false);
+        SsResource nonInner = skill(501L);
+        when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(nonInner));
+        when(extSkillService.findByIds(List.of(501L))).thenReturn(List.of(hubSkill(501L)));
         assertThatThrownBy(() -> service.addMembers(memberQo(501L))).isInstanceOf(BaseException.class);
 
         verify(mapper, never()).selectMemberRelationsIncludingInactive(any(), any());
@@ -671,6 +668,16 @@ class SkillGroupApplicationServiceTest {
         InOrder order = inOrder(mapper);
         order.verify(mapper).selectGroupForUpdate(GROUP_ID, TENANT_ID);
         order.verify(mapper).selectSkillRelationsWithSourceInfoByTenant(TENANT_ID);
+    }
+
+    @Test
+    void deleteRejectsNonAdminVipBeforeLoadingGroup() {
+        assertThatThrownBy(() -> service.delete(GROUP_ID))
+                .isInstanceOf(BaseException.class)
+                .hasMessageContaining("AdminVip");
+
+        verify(mapper, never()).selectGroupForUpdate(any(), any());
+        verifyNoInteractions(resourceService, relationService);
     }
 
     @Test
@@ -741,6 +748,7 @@ class SkillGroupApplicationServiceTest {
     }
 
     private void prepareLockedManagedGroup() {
+        setCurrentUser("adminvip", UserType.ORD_USER);
         SsResource group = group();
         when(mapper.selectGroupForUpdate(GROUP_ID, TENANT_ID)).thenReturn(group);
         when(authService.hasResourceManagePermission(group)).thenReturn(true);
@@ -827,6 +835,20 @@ class SkillGroupApplicationServiceTest {
         resource.setResourceBizType("DIG_EMPLOYEE");
         resource.setComAcctId(TENANT_ID);
         return resource;
+    }
+
+    private static SsResExtSkill innerSkill(Long resourceId) {
+        SsResExtSkill extSkill = new SsResExtSkill();
+        extSkill.setResourceId(resourceId);
+        extSkill.setSkillType(SsResExtSkillService.INNER_SKILL_TYPE);
+        return extSkill;
+    }
+
+    private static SsResExtSkill hubSkill(Long resourceId) {
+        SsResExtSkill extSkill = new SsResExtSkill();
+        extSkill.setResourceId(resourceId);
+        extSkill.setSkillType("hub");
+        return extSkill;
     }
 
     private static SsResourceRelDetail relation(Long id, Long skillId, int status) {

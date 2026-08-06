@@ -421,15 +421,13 @@ class SkillGroupContractTest {
         String insertSql = normalizedBoundSql(configuration, "insertDigitalEmployeeSkillIfAbsent",
                 Map.of("relation", relation)).getSql();
         assertThat(insertSql)
-                .startsWith("insert into ss_resource_rel_detail")
-                .contains("rel_resource_info")
-                .contains("rel_type_name")
-                .contains("rel_status")
-                .endsWith("on conflict do nothing");
+                .startsWith("merge into ss_resource_rel_detail target")
+                .contains("when not matched then insert")
+                .doesNotContain("on conflict");
     }
 
     @Test
-    void activeMemberInsertUsesPartialUniqueConflictTargetAndDoesNothing() throws Exception {
+    void activeMemberInsertAlwaysUsesOpenGaussMergeSql() throws Exception {
         Configuration configuration = buildMapperConfiguration();
         com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail relation =
                 new com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail();
@@ -448,20 +446,55 @@ class SkillGroupContractTest {
                 configuration, "insertActiveMemberIfAbsent", Map.of("relation", relation)).getSql();
 
         assertThat(sql)
-                .startsWith("insert into ss_resource_rel_detail")
-                .contains("resource_rel_detail_id")
-                .contains("resource_id")
-                .contains("rel_resource_id")
-                .contains("create_by")
-                .contains("create_time")
-                .contains("update_by")
-                .contains("update_time")
-                .contains("com_acct_id")
-                .contains("rel_type_name")
-                .contains("rel_status")
-                .contains("on conflict (resource_id, rel_resource_id, rel_type_name)")
-                .contains("where rel_type_name = 'skill_group_member' and rel_status = 1")
-                .endsWith("do nothing");
+                .startsWith("merge into ss_resource_rel_detail target")
+                .contains("when not matched then insert")
+                .doesNotContain("on conflict");
+    }
+
+    @Test
+    void openGaussUsesMergeForDigitalEmployeeSkillInsert() throws Exception {
+        Configuration configuration = buildMapperConfiguration("opengauss");
+        SsResourceRelDetail relation = new SsResourceRelDetail();
+        relation.setResourceRelDetailId(90001L);
+        relation.setResourceId(30001L);
+        relation.setRelResourceId(20001L);
+        relation.setCreateBy(50001L);
+        relation.setCreateTime(new Date(1_000L));
+        relation.setUpdateBy(50001L);
+        relation.setUpdateTime(new Date(1_000L));
+        relation.setComAcctId(60001L);
+        relation.setRelTypeName("DIG_EMPLOYEE_SKILL");
+        relation.setRelStatus(1);
+
+        String sql = normalizedBoundSql(configuration, "insertDigitalEmployeeSkillIfAbsent",
+                Map.of("relation", relation)).getSql();
+        assertThat(sql)
+                .startsWith("merge into ss_resource_rel_detail target")
+                .contains("when not matched then insert")
+                .doesNotContain("on conflict");
+    }
+
+    @Test
+    void openGaussUsesMergeForActiveMemberInsert() throws Exception {
+        Configuration configuration = buildMapperConfiguration("opengauss");
+        SsResourceRelDetail relation = new SsResourceRelDetail();
+        relation.setResourceRelDetailId(70001L);
+        relation.setResourceId(10001L);
+        relation.setRelResourceId(20001L);
+        relation.setCreateBy(50001L);
+        relation.setCreateTime(new Date(1_000L));
+        relation.setUpdateBy(50001L);
+        relation.setUpdateTime(new Date(1_000L));
+        relation.setComAcctId(60001L);
+        relation.setRelTypeName("SKILL_GROUP_MEMBER");
+        relation.setRelStatus(1);
+
+        String sql = normalizedBoundSql(
+                configuration, "insertActiveMemberIfAbsent", Map.of("relation", relation)).getSql();
+        assertThat(sql)
+                .startsWith("merge into ss_resource_rel_detail target")
+                .contains("when not matched then insert")
+                .doesNotContain("on conflict");
     }
 
     @Test
@@ -565,6 +598,17 @@ class SkillGroupContractTest {
 
     private static Configuration buildMapperConfiguration() throws Exception {
         Configuration configuration = new Configuration();
+        try (InputStream input = Resources.getResourceAsStream(MAPPER_RESOURCE)) {
+            XMLMapperBuilder builder =
+                    new XMLMapperBuilder(input, configuration, MAPPER_RESOURCE, configuration.getSqlFragments());
+            builder.parse();
+        }
+        return configuration;
+    }
+
+    private static Configuration buildMapperConfiguration(String databaseId) throws Exception {
+        Configuration configuration = new Configuration();
+        configuration.setDatabaseId(databaseId);
         try (InputStream input = Resources.getResourceAsStream(MAPPER_RESOURCE)) {
             XMLMapperBuilder builder =
                     new XMLMapperBuilder(input, configuration, MAPPER_RESOURCE, configuration.getSqlFragments());

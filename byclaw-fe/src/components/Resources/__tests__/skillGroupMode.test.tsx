@@ -1,4 +1,5 @@
 const mockSetSearchParams = jest.fn();
+let mockAdminVip = true;
 let mockSkillGroupMountCount = 0;
 const mockSkillGroupProps = jest.fn();
 const mockEventHandlers: Record<string, (payload?: unknown) => void> = {};
@@ -37,7 +38,11 @@ jest.mock('@umijs/max', () => ({
 }));
 
 jest.mock('antd', () => ({
-  Button: ({ children, ...props }: any) => <button {...props}>{children}</button>,
+  Button: ({ children, ...props }: any) => (
+    <button type="button" {...props}>
+      {children}
+    </button>
+  ),
   Dropdown: ({ children, menu }: any) => {
     const [open, setOpen] = require('react').useState(false);
     const show = () => setOpen(true);
@@ -51,6 +56,7 @@ jest.mock('antd', () => ({
                 type="button"
                 role="menuitem"
                 key={item.key}
+                data-selected={menu.selectedKeys?.includes(item.key) || undefined}
                 onClick={() => menu.onClick?.({ key: item.key })}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
@@ -125,6 +131,15 @@ jest.mock('@/components/Resources/components/ResourceFilter', () => ({
   getDefaultParams: () => ({}),
 }));
 jest.mock('@/components/Resources/components/ResourceImport', () => ({ __esModule: true, default: () => null }));
+jest.mock('@/components/Resources/components/SkillGroupCreateModal', () => ({
+  __esModule: true,
+  default: ({ visible, onSuccess }: any) =>
+    visible ? (
+      <button type="button" data-testid="skill-group-create-modal" onClick={onSuccess}>
+        Create skill group
+      </button>
+    ) : null,
+}));
 jest.mock('@/components/Resources/components/ResourceEdit', () => ({ __esModule: true, default: () => null }));
 jest.mock('@/components/Resources/components/ResourceDetail', () => ({ __esModule: true, default: () => null }));
 jest.mock('@/pages/manager/components/AuthListDrawer', () => ({ __esModule: true, default: () => null }));
@@ -156,21 +171,26 @@ jest.mock('@/service/digitalEmployees', () => ({
 jest.mock('@/service/knowledgeCenter', () => ({ queryKnowledgeCapability: jest.fn().mockResolvedValue({}) }));
 jest.mock('@/pages/manager/service/resources', () => ({
   applyResourceUse: jest.fn(),
-  queryFixedEntryOperationCapability: jest.fn().mockResolvedValue({}),
+  queryFixedEntryOperationCapability: jest.fn().mockResolvedValue({ canImportEnterpriseSkill: true }),
   queryResourceOperationPermissions: jest.fn(),
 }));
-jest.mock('@/pages/manager/service/session', () => ({ getDcSystemConfig: jest.fn().mockResolvedValue({}) }));
+jest.mock('@/pages/manager/service/session', () => ({
+  getDcSystemConfig: jest.fn(({ paramCode }: { paramCode: string }) =>
+    Promise.resolve(paramCode === 'BYAI_BRAND_VERSION' ? { paramValue: 'openSource' } : {})
+  ),
+}));
 jest.mock('@/pages/manager/service/DigitalEmployeeMgr', () => ({ saveTool: jest.fn() }));
 jest.mock('@/constants/knowledge', () => ({ resourceBizTypeMap: {} }));
 jest.mock('@/utils', () => ({ getRuntimeActualUrl: (value: string) => value }));
-jest.mock('@/utils/auth', () => ({ getToken: () => '' }));
+jest.mock('@/utils/auth', () => ({ getToken: () => '', isAdminVip: () => mockAdminVip }));
 
 import React from 'react';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import Resources from '..';
 
 describe('Resources enterprise skill mode', () => {
   beforeEach(() => {
+    mockAdminVip = true;
     mockSkillGroupMountCount = 0;
     mockSkillGroupProps.mockReset();
     Object.keys(mockEventHandlers).forEach((event) => delete mockEventHandlers[event]);
@@ -190,6 +210,21 @@ describe('Resources enterprise skill mode', () => {
     expect(screen.getByText('resource.enterpriseSkillSingle')).toBeTruthy();
     expect(screen.getByTestId('resource-list')).toBeTruthy();
     expect(window.location.search).toBe('?tab=enterprise');
+  });
+
+  it('marks the current enterprise skill type as selected in the menu', () => {
+    const singleView = renderAt('?tab=enterprise');
+    fireEvent.focus(screen.getByText('resource.enterpriseSkillSingle'));
+
+    expect(screen.getByRole('menuitem', { name: 'resource.skillSingle' })).toHaveAttribute('data-selected', 'true');
+    expect(screen.getByRole('menuitem', { name: 'resource.skillGroup' })).not.toHaveAttribute('data-selected');
+
+    singleView.unmount();
+    renderAt('?tab=enterprise&kind=group');
+    fireEvent.focus(screen.getByText('resource.enterpriseSkillGroup'));
+
+    expect(screen.getByRole('menuitem', { name: 'resource.skillSingle' })).not.toHaveAttribute('data-selected');
+    expect(screen.getByRole('menuitem', { name: 'resource.skillGroup' })).toHaveAttribute('data-selected', 'true');
   });
 
   it('opens the enterprise skill menu from keyboard focus and switches to groups', async () => {
@@ -234,6 +269,30 @@ describe('Resources enterprise skill mode', () => {
 
     expect(screen.getByTestId('resource-filter')).toBeTruthy();
     expect(screen.getByText('Sales')).toBeTruthy();
+  });
+
+  it('uses the upload entry to open the skill group create dialog and refresh the group list', async () => {
+    renderAt('?tab=enterprise&kind=group');
+
+    const importButton = await screen.findByRole('button', { name: 'common.import' });
+    const initialMountId = Number(screen.getByTestId('skill-group-list').textContent);
+    fireEvent.click(importButton);
+    fireEvent.click(screen.getByTestId('skill-group-create-modal'));
+
+    await waitFor(() =>
+      expect(Number(screen.getByTestId('skill-group-list').textContent)).toBeGreaterThan(initialMountId)
+    );
+  });
+
+  it('hides the skill group create entry from non AdminVip users', async () => {
+    mockAdminVip = false;
+    renderAt('?tab=enterprise&kind=group');
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole('button', { name: 'common.import' })).toBeNull();
   });
 
   it('clears enterprise skill kind when changing to another tab', () => {

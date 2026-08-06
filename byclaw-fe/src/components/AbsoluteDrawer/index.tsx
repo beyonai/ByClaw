@@ -34,6 +34,7 @@ function AbsoluteDrawer(props: IProps) {
 
     driverOpen,
   } = useActionEffect();
+  const isSkillGroupDetail = typeof drawerType === 'string' && drawerType.toLocaleLowerCase() === 'skillgroupdetail';
 
   const ContentComp = React.useMemo(() => {
     if (drawerType === 'writerMateriaIframe') {
@@ -42,12 +43,12 @@ function AbsoluteDrawer(props: IProps) {
     if (drawerType === 'iframe') {
       return IframeRender;
     }
-    if (typeof drawerType === 'string' && drawerType.toLocaleLowerCase() === 'skillgroupdetail') {
+    if (isSkillGroupDetail) {
       return SkillGroupDetailDrawer;
     }
 
     return FragmentComp;
-  }, [drawerType]);
+  }, [drawerType, isSkillGroupDetail]);
 
   return (
     <Drawer
@@ -58,13 +59,15 @@ function AbsoluteDrawer(props: IProps) {
       placement="right"
       footer={null}
       mask={false}
-      title={drawerCfg.title}
+      title={isSkillGroupDetail ? undefined : drawerCfg.title}
+      closable={!isSkillGroupDetail}
       styles={{
         body: {
           padding: '0',
         },
         header: {
           padding: '12px',
+          ...(isSkillGroupDetail ? { display: 'none' } : {}),
         },
       }}
       rootClassName={styles.drawer}

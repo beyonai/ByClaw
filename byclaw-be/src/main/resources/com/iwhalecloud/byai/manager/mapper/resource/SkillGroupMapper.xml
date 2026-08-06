@@ -141,34 +141,38 @@
     </update>
 
     <insert id="insertActiveMemberIfAbsent">
-        INSERT INTO ss_resource_rel_detail (
-            resource_rel_detail_id,
-            resource_id,
-            rel_resource_id,
-            rel_resource_info,
-            create_by,
-            create_time,
-            update_by,
-            update_time,
-            com_acct_id,
-            rel_type_name,
-            rel_status
-        ) VALUES (
-            #{relation.resourceRelDetailId},
-            #{relation.resourceId},
-            #{relation.relResourceId},
-            #{relation.relResourceInfo},
-            #{relation.createBy},
-            #{relation.createTime},
-            #{relation.updateBy},
-            #{relation.updateTime},
-            #{relation.comAcctId},
-            #{relation.relTypeName},
-            #{relation.relStatus}
+        MERGE INTO ss_resource_rel_detail target
+        USING (
+            SELECT
+                #{relation.resourceRelDetailId} AS resource_rel_detail_id,
+                #{relation.resourceId} AS resource_id,
+                #{relation.relResourceId} AS rel_resource_id,
+                #{relation.relResourceInfo} AS rel_resource_info,
+                #{relation.createBy} AS create_by,
+                CAST(#{relation.createTime} AS TIMESTAMP WITH TIME ZONE) AS create_time,
+                #{relation.updateBy} AS update_by,
+                CAST(#{relation.updateTime} AS TIMESTAMP WITH TIME ZONE) AS update_time,
+                #{relation.comAcctId} AS com_acct_id,
+                #{relation.relTypeName} AS rel_type_name,
+                #{relation.relStatus} AS rel_status
+        ) source
+        ON (
+            target.resource_id = source.resource_id
+            AND target.rel_resource_id = source.rel_resource_id
+            AND target.rel_type_name = source.rel_type_name
+            AND target.rel_type_name = 'SKILL_GROUP_MEMBER'
+            AND target.rel_status = 1
+            AND source.rel_type_name = 'SKILL_GROUP_MEMBER'
+            AND source.rel_status = 1
         )
-        ON CONFLICT (resource_id, rel_resource_id, rel_type_name)
-        WHERE rel_type_name = 'SKILL_GROUP_MEMBER' AND rel_status = 1
-        DO NOTHING
+        WHEN NOT MATCHED THEN INSERT (
+            resource_rel_detail_id, resource_id, rel_resource_id, rel_resource_info,
+            create_by, create_time, update_by, update_time, com_acct_id, rel_type_name, rel_status
+        ) VALUES (
+            source.resource_rel_detail_id, source.resource_id, source.rel_resource_id, source.rel_resource_info,
+            source.create_by, source.create_time, source.update_by, source.update_time,
+            source.com_acct_id, source.rel_type_name, source.rel_status
+        )
     </insert>
 
     <select id="selectPage" resultMap="SkillGroupResultMap">
@@ -290,32 +294,37 @@
     </select>
 
     <insert id="insertDigitalEmployeeSkillIfAbsent">
-        INSERT INTO ss_resource_rel_detail (
-            resource_rel_detail_id,
-            resource_id,
-            rel_resource_id,
-            rel_resource_info,
-            create_by,
-            create_time,
-            update_by,
-            update_time,
-            com_acct_id,
-            rel_type_name,
-            rel_status
-        ) VALUES (
-            #{relation.resourceRelDetailId},
-            #{relation.resourceId},
-            #{relation.relResourceId},
-            #{relation.relResourceInfo},
-            #{relation.createBy},
-            #{relation.createTime},
-            #{relation.updateBy},
-            #{relation.updateTime},
-            #{relation.comAcctId},
-            #{relation.relTypeName},
-            #{relation.relStatus}
+        MERGE INTO ss_resource_rel_detail target
+        USING (
+            SELECT
+                #{relation.resourceRelDetailId} AS resource_rel_detail_id,
+                #{relation.resourceId} AS resource_id,
+                #{relation.relResourceId} AS rel_resource_id,
+                #{relation.relResourceInfo} AS rel_resource_info,
+                #{relation.createBy} AS create_by,
+                CAST(#{relation.createTime} AS TIMESTAMP WITH TIME ZONE) AS create_time,
+                #{relation.updateBy} AS update_by,
+                CAST(#{relation.updateTime} AS TIMESTAMP WITH TIME ZONE) AS update_time,
+                #{relation.comAcctId} AS com_acct_id,
+                #{relation.relTypeName} AS rel_type_name,
+                #{relation.relStatus} AS rel_status
+        ) source
+        ON (
+            target.resource_id = source.resource_id
+            AND target.rel_resource_id = source.rel_resource_id
+            AND (target.rel_type_name = 'DIG_EMPLOYEE_SKILL' OR target.rel_type_name IS NULL)
+            AND (target.rel_status = 1 OR target.rel_status IS NULL)
+            AND source.rel_type_name = 'DIG_EMPLOYEE_SKILL'
+            AND source.rel_status = 1
         )
-        ON CONFLICT DO NOTHING
+        WHEN NOT MATCHED THEN INSERT (
+            resource_rel_detail_id, resource_id, rel_resource_id, rel_resource_info,
+            create_by, create_time, update_by, update_time, com_acct_id, rel_type_name, rel_status
+        ) VALUES (
+            source.resource_rel_detail_id, source.resource_id, source.rel_resource_id, source.rel_resource_info,
+            source.create_by, source.create_time, source.update_by, source.update_time,
+            source.com_acct_id, source.rel_type_name, source.rel_status
+        )
     </insert>
 
     <select id="selectSkillRelationsWithSourceInfo" resultMap="ResourceRelationResultMap">
