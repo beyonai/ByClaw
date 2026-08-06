@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import {
   parseGroupChatRef,
+  parseOrchestratorRef,
   type GroupChatRefV1,
+  type OrchestratorRefV1,
   THINKING_LEVELS,
   isThinkingLevel,
   normalizeRunAttachments,
@@ -193,6 +195,17 @@ export function commandGroupChatRef(
 }
 
 /**
+ * 读取调用方声明的编排者定位。缺失表示旧版超级助手请求；存在时严格校验协议，
+ * 真正的专家团权限仍由 ingress 携带 Beyond-Token 向 BE 验证。
+ */
+export function commandOrchestratorRef(
+  command: AskAgentCommand,
+): OrchestratorRefV1 | undefined {
+  const value = command.extraPayload.orchestrator;
+  return value === undefined ? undefined : parseOrchestratorRef(value);
+}
+
+/**
  * 从 AskAgent extraPayload 读取当前入口 Agent ID，用于排除超级助手自身。
  * 兼容 `agent_id` 与 `agentId`，接受字符串或数字（by-framework 约定为 `string | number`），
  * 统一 trim 成非空字符串；缺失或非法时返回空串。
@@ -345,6 +358,22 @@ export function externalSessionBindingKey(
   externalSessionId: string,
 ): string {
   return JSON.stringify([principal.userCode, externalSessionId]);
+}
+
+/** 专家团按编排者隔离持久 Session binding；旧超级助手保持原 key，兼容既有会话。 */
+export function orchestratorBindingSessionId(
+  externalSessionId: string,
+  orchestrator: OrchestratorRefV1 | undefined,
+): string {
+  if (!orchestrator || orchestrator.kind === "SUPER_ASSISTANT") {
+    return externalSessionId;
+  }
+  return JSON.stringify([
+    "orchestrator",
+    orchestrator.kind,
+    orchestrator.id,
+    externalSessionId,
+  ]);
 }
 
 /** 把未知值安全收窄为普通记录。 */

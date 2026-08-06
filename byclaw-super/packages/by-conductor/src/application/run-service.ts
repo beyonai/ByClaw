@@ -5,7 +5,7 @@ import {
 } from "../domain/attachment-inspection.js";
 import type { AttachmentResolver } from "../ports/attachment-resolver.js";
 import { DelegationService } from "./delegation-service.js";
-import type { RunIngressContextV1 } from "../domain/group-chat-context.js";
+import type { RunIngressContextV1 } from "../domain/run-ingress-context.js";
 import type { LeaderSession, LeaderSessionFactory } from "../ports/leader.js";
 import { LeaderSessionCache } from "./leader-session-cache.js";
 import type {
@@ -780,6 +780,9 @@ ${JSON.stringify(response)}`;
           : {}),
         currentTime: this.now(),
         user: session.owner,
+        ...(current.ingressContext?.orchestrator
+          ? { orchestrator: current.ingressContext.orchestrator }
+          : {}),
         signal: runController.signal,
         // Leader 的可见回答与思考增量被规范化为 Run 事件，供对外流协议消费。
         onDelta: async (text) => {

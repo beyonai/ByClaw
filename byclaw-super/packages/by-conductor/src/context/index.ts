@@ -1,5 +1,7 @@
 export * from "./active-leader-tools.js";
 export * from "./context-compiler.js";
+export * from "./expert-team-system-prompt.js";
+export * from "./orchestrator-context-compiler.js";
 export * from "./processors/authorized-agents.js";
 export * from "./processors/cleanup.js";
 export * from "./processors/group-chat-context.js";

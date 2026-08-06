@@ -27,6 +27,7 @@ import {
   commandAgentName,
   commandGroupChatRef,
   commandLogFields,
+  commandOrchestratorRef,
   commandSessionContext,
   commandSourceAgentId,
   commandString,
@@ -37,6 +38,7 @@ import {
   extractMessage,
   extractUserInput,
   isDelegationReasoningEvent,
+  orchestratorBindingSessionId,
   progressMessage,
   protocolMessage,
   recordString,
@@ -169,6 +171,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     const systemCode = commandString(command, "System-Code");
     const thinkingLevel = commandThinkingLevel(command);
     const groupChatRef = commandGroupChatRef(command);
+    const orchestrator = commandOrchestratorRef(command);
     const sessionContext = commandSessionContext(command);
     const agentName = commandAgentName(command) || "超级助手";
 
@@ -179,15 +182,22 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       ...(systemCode ? { systemCode } : {}),
     };
     const principal = await this.#runIngress.resolvePrincipal(auth);
-    const bindingKey = externalSessionBindingKey(principal, command.header.sessionId);
+    const bindingExternalSessionId = orchestratorBindingSessionId(
+      command.header.sessionId,
+      orchestrator,
+    );
+    const bindingKey = externalSessionBindingKey(
+      principal,
+      bindingExternalSessionId,
+    );
     const sessionId = this.#sessionBindings
       ? await this.#sessionBindings.get({
           source: "by-framework",
           userCode: principal.userCode,
-          externalSessionId: command.header.sessionId,
+          externalSessionId: bindingExternalSessionId,
         })
       : this.#externalSessionBindings.get(bindingKey);
-    const sourceAgentId = commandSourceAgentId(command);
+    const sourceAgentId = commandSourceAgentId(command) || orchestrator?.id || "";
     const run = sessionId
       ? await this.#runIngress.createRun({
           sessionId,
@@ -200,6 +210,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
             : {}),
           parentMessageId: command.header.messageId,
           ...(groupChatRef ? { groupChatRef } : {}),
+          ...(orchestrator ? { orchestrator } : {}),
           ...auth,
         })
       : await this.#runIngress.createSessionRun({
@@ -213,13 +224,14 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
             : {}),
           parentMessageId: command.header.messageId,
           ...(groupChatRef ? { groupChatRef } : {}),
+          ...(orchestrator ? { orchestrator } : {}),
           ...auth,
         });
     if (this.#sessionBindings) {
       await this.#sessionBindings.bind({
         source: "by-framework",
         userCode: principal.userCode,
-        externalSessionId: command.header.sessionId,
+        externalSessionId: bindingExternalSessionId,
         sessionId: run.sessionId,
         now: Date.now(),
       });

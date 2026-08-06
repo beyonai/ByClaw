@@ -19,6 +19,7 @@ import { ByClawBeAgentCatalog } from "../business/agent-catalog.js";
 import { ByAiAttachmentResolver } from "../business/byai-attachment-resolver.js";
 import { RedisByClawBeEndpointResolver } from "../business/endpoint-resolver.js";
 import { ByClawBeGroupChatContextProvider } from "../business/group-chat-context.js";
+import { ByClawBeOrchestratorRuntimeProvider } from "../business/orchestrator-runtime.js";
 import {
   ByClawBeResourceModelResolver,
   fingerprintModelConfig,
@@ -194,7 +195,19 @@ function createOrchestration(input: {
     endpointResolver,
     llmProvider,
   });
-  return { delegationService, leaders, agentCatalog, groupChatContexts, resourceModels };
+  const orchestratorRuntimes = new ByClawBeOrchestratorRuntimeProvider({
+    ...config.byClawBe,
+    endpointResolver,
+    llmProvider,
+  });
+  return {
+    delegationService,
+    leaders,
+    agentCatalog,
+    groupChatContexts,
+    resourceModels,
+    orchestratorRuntimes,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -232,8 +245,14 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
   const { connectors, redis, openClaw, endpointResolver } = createConnectors(config);
 
   // 3) 编排核心：委派服务 + Pi Leader + 数字员工授权目录。
-  const { delegationService, leaders, agentCatalog, groupChatContexts, resourceModels } =
-    createOrchestration({ config, database, connectors, endpointResolver, redis });
+  const {
+    delegationService,
+    leaders,
+    agentCatalog,
+    groupChatContexts,
+    resourceModels,
+    orchestratorRuntimes,
+  } = createOrchestration({ config, database, connectors, endpointResolver, redis });
 
   // 4) Run 流水线：RunService（快照授权、调度 Leader）+ 入站鉴权与 Run 创建。
   //    附件读取边界：按 fileId 经 BE 下载，凭 Run 短期凭证鉴权；契约见 .dev/attachments-be-read-contract.md。
@@ -267,6 +286,7 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     groupChatContexts,
     ingressLogger,
     resourceModels,
+    orchestratorRuntimes,
   );
 
   // 5) HTTP 入口：/ready 同时要求 Pi、全部已注册 Connector、数据库与 Worker 健康。
