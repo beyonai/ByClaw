@@ -13,7 +13,15 @@
   `--confirmed-knowledge-base-resource-id` 与 `--confirmed-directory-path` 传给脚本，且确认值必须与解析后的
   知识库资源 ID 和目录完全一致；`--dry-run` 只展示所需确认值，不执行写入。
 - 仅入库用户选中的范围，包括已确认的条目、Markdown 或文件；不得扩大到同一目录或采集批次的其他产物。
-- 入库与知识整理互斥；同一批结果执行 `ingest` 或 `upload-doc` 后，不得再交给知识整理。
+- 入库与知识整理在同一次后处理运行中互斥；不得在一次运行内把 `ingest` 或 `upload-doc` 自动串联到知识整理。
+  用户后续明确发起知识整理时创建新的 run，不复用入库成功状态。
+
+通过 `knowledge-collection` 处理当前采集批次时，选中正文只能来自 `sanitized/items/*.md`。缺失净化正文时先按
+[post-processing.md](post-processing.md) 通过原始执行器重新净化或补采；仍缺失则跳过并告知用户。不得使用 `markdown/*.md`、
+任意 Markdown 目录、stdin 或旧 JSON 绕过该规则。脚本保留这些参数仅用于独立文件与旧输入兼容。
+
+入库结果必须逐篇映射回 inventory `itemId`。只有文章上传成功且对应 build 请求被接受时才记为 success；不等待异步
+索引完成。批量失败且无法确认逐篇结果时记为 unknown，不得清理对应工作副本。结果通过后处理状态脚本写入 run。
 
 ## 命令路由
 

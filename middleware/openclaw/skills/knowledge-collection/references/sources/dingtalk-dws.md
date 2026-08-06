@@ -71,9 +71,12 @@ sanitized/
   `url` 记录原始 URL。
 - DWS 的 `sourceProduct`、`operation`、命令、分页与 `partial` provenance 写入指定的 metadata 文件，
   尤其是 `sanitized/metadata.json`；不得把这些信息作为 `collection-result.json` 的额外顶层字段。
+- `sanitized/metadata.json` 按主契约写入完整 inventory。每项提供稳定 `itemId`、`sourceSkill: dws`、来源对象 ID/URL、
+  用户筛选、关联 `rawArtifacts` 和 materialization 状态；尚未生成正文的列表项仍进入 inventory，但不得进入
+  `collection-result.json.items`。
 - 权限失败时报告当前身份无权访问相应钉钉对象；不得用替代来源补齐。
-- 部分命令或分页失败时保留成功结果，在 `sanitized/metadata.json` 中设置 `partial: true`，并记录失败
-  步骤及分页位置；不得把 partial 结果表述为完整结果。
+- 部分命令或分页失败时保留成功结果，在 `sanitized/metadata.json` 中设置 `collection.status: partial`，并把失败
+  步骤及分页位置写入 `sourceMetadata`；不得把 partial 结果表述为完整结果。
 
 来源执行器 `dws` 只返回采集结果，不得询问或执行 `入库 / 知识整理 / 跳过`。持久化、预览以及唯一后处理选择由
 `knowledge-collection` 按 [post-processing.md](../post-processing.md) 统一完成。

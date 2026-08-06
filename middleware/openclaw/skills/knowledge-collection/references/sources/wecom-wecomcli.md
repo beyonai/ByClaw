@@ -49,7 +49,7 @@ wecom-cli doc smartpage_get_export_result '{"task_id":"<returned-task-id>"}'
 ```
 
 首次命令返回真实 `task_id` 后轮询第二个命令，直到 `task_done=true`。未完成、超时或分页中断时保留成功响应，在
-`sanitized/metadata.json` 写入 `partial: true` 与非敏感 task ID/失败位置；完成后只使用返回的 `content` 生成正文，
+`sanitized/metadata.json` 设置 `collection.status: partial`，并把非敏感 task ID/失败位置写入 `sourceMetadata`；完成后只使用返回的 `content` 生成正文，
 不得补造内容。
 
 ## 私有产物
@@ -78,4 +78,7 @@ sanitized/
 - `raw/` 保存已秘密扫描的后端 JSON；`markdown/` 保存由真实内容转换的 Markdown；`sanitized/items/` 保存净化正文。
 - `collection-result.json` 顶层只能使用主契约固定字段，`source` 写 `wecom`，`backend` 写 `wecom-cli`。
 - 每个 `items[].fileName` 与 `items[].markdown` 必须是采集根目录内指向实际 `sanitized/items/*.md` 文件的相对路径。
+- `sanitized/metadata.json` 按主契约写入完整 inventory。每项提供稳定 `itemId`、`sourceSkill: wecomcli`、来源对象 ID/URL、
+  用户筛选、关联 `rawArtifacts` 和 materialization 状态；尚未生成正文的列表项仍进入 inventory，但不得进入
+  `collection-result.json.items`。
 - 来源执行器不得询问或执行 `入库 / 知识整理 / 跳过`；仅由 `knowledge-collection` 在采集后执行该选择。
