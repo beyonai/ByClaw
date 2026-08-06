@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Button,
-  DatePicker,
+  Checkbox,
   Drawer,
   Dropdown,
   Empty,
@@ -125,7 +125,6 @@ import {
   type OperationWorkflowStep,
 } from './operation';
 import { isCurrentUserTaskAssignee } from './taskAccess';
-import { getTaskDateRangePresets, type TaskDateRange } from './taskDatePresets';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import AntdIcon from '@/components/AntdIcon';
@@ -260,8 +259,8 @@ type RequirementItem = {
 type TaskQueryState = {
   pageNum: number;
   pageSize: number;
-  dateRange: TaskDateRange;
   taskName: string;
+  onlyMine: boolean;
 };
 
 type TaskFetchOptions = Partial<TaskQueryState> & {
@@ -861,8 +860,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
       intl.formatMessage({ id: `projectSpace.detail.${id}` }, values),
     [intl]
   );
-  // 任务 Tab 与整体任务视图共享快捷日期范围，保证同一选择对应相同的服务端查询条件。
-  const taskDatePresets = useMemo(() => getTaskDateRangePresets((id) => intl.formatMessage({ id })), [intl]);
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
@@ -895,8 +892,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [splitRequirement, setSplitRequirement] = useState<RequirementItem | null>(null);
   const [tasks, setTasks] = useState<any[]>([]);
   const [hasMoreTasks, setHasMoreTasks] = useState(false);
-  const [taskDateRange, setTaskDateRange] = useState<TaskDateRange>(null);
   const [taskSearchKeyword, setTaskSearchKeyword] = useState('');
+  const [onlyMine, setOnlyMine] = useState(true);
   const [members, setMembers] = useState<any[]>([]);
   // 运营任务表单依赖的账号、作品、知识库、数字员工均由详情容器统一加载和归一化。
   const [operationAccounts, setOperationAccounts] = useState<OperationAccount[]>([]);
@@ -1045,8 +1042,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const taskQueryRef = useRef<TaskQueryState>({
     pageNum: 1,
     pageSize: TASK_PAGE_SIZE,
-    dateRange: null,
     taskName: '',
+    onlyMine: true,
   });
   const taskQueryVersionRef = useRef(0);
   const taskAppendingVersionRef = useRef<number | null>(null);
@@ -1383,8 +1380,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
         setTasksLoadingMore(false);
       }
       taskQueryRef.current = queryState;
-      setTaskDateRange(queryState.dateRange);
       setTaskSearchKeyword(queryState.taskName);
+      setOnlyMine(queryState.onlyMine);
       if (append) {
         // 只有滚动追加时展示底部 loading，刷新和搜索不再复用该提示。
         taskAppendingVersionRef.current = queryVersion;
@@ -1401,16 +1398,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
             pageSize: queryState.pageSize,
             keyword: queryState.taskName || undefined,
             onlyMine: false,
-            createTimeStart: queryState.dateRange?.[0]?.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
-            createTimeEnd: queryState.dateRange?.[1]?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
           })
           : await listTasks({
             projectId,
             pageNum: queryState.pageNum,
             pageSize: queryState.pageSize,
-            createTimeStart: queryState.dateRange?.[0]?.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
-            createTimeEnd: queryState.dateRange?.[1]?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
             taskName: queryState.taskName || undefined,
+            onlyMine: queryState.onlyMine || undefined,
           });
         // 筛选重置列表，触底请求只追加未出现过的任务，避免滚动事件重复触发产生重复卡片。
         if (queryVersion !== taskQueryVersionRef.current) return;
@@ -1469,15 +1463,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
       clearTimeout(taskSearchTimerRef.current);
       taskSearchTimerRef.current = null;
     }
-    // 手动刷新保留当前任务名称和日期范围，避免刷新后丢失用户正在查看的筛选结果。
+    // 手动刷新保留当前任务名称和其它查询条件，避免刷新后丢失用户正在查看的筛选结果。
     setTasksRefreshLoading(true);
     try {
-      await fetchTasks({ pageNum: 1, taskName: taskSearchKeyword.trim(), dateRange: taskDateRange });
+      await fetchTasks({ pageNum: 1, taskName: taskSearchKeyword.trim() });
     } finally {
       // 刷新按钮独立结束，列表已有数据时不再同时显示整块 loading。
       setTasksRefreshLoading(false);
     }
-  }, [fetchTasks, taskDateRange, taskSearchKeyword, tasksRefreshLoading]);
+  }, [fetchTasks, taskSearchKeyword, tasksRefreshLoading]);
 
   useEffect(
     () => () => {
@@ -2797,11 +2791,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
       clearTimeout(taskSearchTimerRef.current);
       taskSearchTimerRef.current = null;
     }
-    taskQueryRef.current = { pageNum: 1, pageSize: TASK_PAGE_SIZE, dateRange: null, taskName: '' };
+    taskQueryRef.current = { pageNum: 1, pageSize: TASK_PAGE_SIZE, taskName: '', onlyMine: true };
     taskQueryVersionRef.current += 1;
     taskAppendingVersionRef.current = null;
-    setTaskDateRange(null);
     setTaskSearchKeyword('');
+    setOnlyMine(true);
     setTasks([]);
     setHasMoreTasks(false);
     setTasksRefreshLoading(false);
@@ -5419,42 +5413,44 @@ const ProjectDetailPanel: React.FC<Props> = ({
             />
           </Tooltip>
         </div>
-        {/* 研发和运营任务均支持按创建日期筛选，并通过任务视图查看各状态分布。 */}
+        {/* 研发任务默认只查询当前用户负责的任务，也可切换为查看项目全部任务。 */}
         {(isDevelopProject || isOperationProject) && (
           <div className={styles.detailTaskHeaderActions}>
-            {(isDevelopProject || isOperationProject) && (
-              <DatePicker.RangePicker
-                size="small"
-                allowClear
-                value={taskDateRange}
-                placeholder={[t('task.dateStartPlaceholder'), t('task.dateEndPlaceholder')]}
-                presets={taskDatePresets}
-                onChange={(dates) => {
-                  void fetchTasks({ pageNum: 1, dateRange: dates as TaskDateRange });
+            {isDevelopProject && (
+              <Checkbox
+                checked={onlyMine}
+                onChange={(event) => {
+                  void fetchTasks({ pageNum: 1, onlyMine: event.target.checked });
                 }}
-              />
+              >
+                {intl.formatMessage({ id: 'projectSpace.taskBoard.onlyMine' })}
+              </Checkbox>
             )}
             {isDevelopProject && (
-              <Tooltip title={t('task.viewTooltip')} placement="top">
-                <Button
-                  aria-label={t('task.viewTooltip')}
-                  size="small"
-                  className={`${styles.detailHeaderActionButton} ${styles.detailTaskViewButton}`}
-                  icon={<AppstoreOutlined />}
-                  onClick={() => setTaskKanbanOpen(true)}
-                />
-              </Tooltip>
+              // <Tooltip title={t('task.viewTooltip')} placement="top">
+              <Button
+                // aria-label={t('task.viewTooltip')}
+                size="small"
+                className={`${styles.detailHeaderActionButton} ${styles.detailTaskViewButton}`}
+                icon={<AppstoreOutlined />}
+                onClick={() => setTaskKanbanOpen(true)}
+              >
+                {t('task.viewTooltip')}
+              </Button>
+              // </Tooltip>
             )}
             {isOperationProject && (
-              <Tooltip title={t('task.viewTooltip')} placement="top">
-                <Button
-                  aria-label={t('task.viewTooltip')}
-                  size="small"
-                  className={`${styles.detailHeaderActionButton} ${styles.detailTaskViewButton}`}
-                  icon={<AppstoreOutlined />}
-                  onClick={() => setTaskKanbanOpen(true)}
-                />
-              </Tooltip>
+              // <Tooltip title={t('task.viewTooltip')} placement="top">
+              <Button
+                // aria-label={t('task.viewTooltip')}
+                size="small"
+                className={`${styles.detailHeaderActionButton} ${styles.detailTaskViewButton}`}
+                icon={<AppstoreOutlined />}
+                onClick={() => setTaskKanbanOpen(true)}
+              >
+                {t('task.viewTooltip')}
+              </Button>
+              // </Tooltip>
             )}
           </div>
         )}

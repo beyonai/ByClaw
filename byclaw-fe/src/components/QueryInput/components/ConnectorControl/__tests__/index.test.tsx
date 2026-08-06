@@ -16,6 +16,16 @@ jest.mock('@/service/connector', () => ({
   startConnectorAuthorization: jest.fn(),
   updateConnectorEnable: jest.fn(),
 }));
+jest.mock('@umijs/max', () => ({
+  useSelector: (selector: (state: any) => any) =>
+    selector({
+      user: {
+        userInfo: {
+          userId: 1,
+        },
+      },
+    }),
+}));
 jest.mock('antd', () => {
   const antd = jest.requireActual('antd');
   return {
