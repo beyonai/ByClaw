@@ -1097,6 +1097,209 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
 }
 ```
 
+## 门户调用 QA 的元数据检索接口
+
+本节定义门户后端对 QA `POST /api/v1/knowledgeItems/metadataSearch` 的两种调用封装。两个门户接口最终调用同一个 QA 接口，区别在于是否执行资源 ID 与知识库编码的映射：
+
+| 门户接口 | 封装方式 | 请求 ID 体系 | 响应 ID 体系 | QA 接口 |
+| --- | --- | --- | --- | --- |
+| `POST /datasetController/knowledgeItems/metadataSearch` | 资源 ID 映射封装 | `resourceIdList` | `data[].knCode` 回映为 `resourceId` | `POST /api/v1/knowledgeItems/metadataSearch` |
+| `POST /datasetController/knowledgeItems/metadataSearchByKnCode` | QA 原始协议透传 | `knCodeList` | 保留 QA 返回的 `knCode` | `POST /api/v1/knowledgeItems/metadataSearch` |
+
+### `POST /datasetController/knowledgeItems/metadataSearch`
+
+按门户知识库资源 ID 执行 Agent DSL 纯元数据检索，只返回文件级结果。门户会查询资源信息、校验当前调用方的知识库读取权限，并将 `resourceIdList` 转换为 QA 所需的 `knCodeList`。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `resourceIdList` | array[integer] | 是 | 门户知识库资源 ID 列表；门户校验读取权限后映射为 QA `knCodeList` |
+| `where` | object | 是 | Agent DSL 过滤 AST，原样传给 QA |
+| `metadataFieldList` | array[string] | 否 | 需要返回的元数据字段，原样传给 QA |
+| `topK` | integer | 否 | 未传 `pageSize` 时作为每页条数，最大 `10000` |
+| `pageNum` | integer | 否 | 页码，从 `1` 开始；未传时由 QA 使用默认值 `1` |
+| `pageSize` | integer | 否 | 每页条数，最大 `10000`；传入时优先于 `topK` |
+
+请求示例：
+
+```json
+{
+  "resourceIdList": [10000003],
+  "where": {
+    "and": [
+      {"eq": {"fieldName": "status", "value": "active"}},
+      {"contains": {"fieldName": "tags", "value": "contract"}}
+    ]
+  },
+  "metadataFieldList": ["status", "tags", "fileSignature"],
+  "pageNum": 1,
+  "pageSize": 20
+}
+```
+
+映射关系：
+
+| 门户请求/响应 | QA 请求/响应 | 映射规则 |
+| --- | --- | --- |
+| `resourceIdList[]` | `knCodeList[]` | 按 `ss_resource.resource_id` 查询 `resource_code`，并校验知识库读取权限 |
+| `where` | `where` | 原样透传 |
+| `metadataFieldList` | `metadataFieldList` | 原样透传 |
+| `topK` | `topK` | 原样透传 |
+| `pageNum` | `pageNum` | 原样透传 |
+| `pageSize` | `pageSize` | 原样透传 |
+| `data[].knCode` | `resultObject.data[].knCode` | QA 返回 `knCode` 后，门户回映为对应的 `resourceId` 字符串 |
+| `data[].filePath`、`data[].metadata` | 同名字段 | 原样返回 |
+| `total`、`pageNum`、`pageSize` | 同名字段 | 原样返回，不改变 QA 排序和分页顺序 |
+
+门户实际发送给 QA 的请求示例：
+
+```json
+{
+  "knCodeList": ["2"],
+  "where": {
+    "and": [
+      {"eq": {"fieldName": "status", "value": "active"}},
+      {"contains": {"fieldName": "tags", "value": "contract"}}
+    ]
+  },
+  "metadataFieldList": ["status", "tags", "fileSignature"],
+  "pageNum": 1,
+  "pageSize": 20
+}
+```
+
+成功响应示例：
+
+```json
+{
+  "code": 0,
+  "msg": "知识库文件语义检索成功",
+  "data": {
+    "data": [
+      {
+        "knCode": "10000003",
+        "filePath": "/制度/人事/续签流程.md",
+        "metadata": {
+          "status": {
+            "valueType": "string",
+            "value": "active"
+          },
+          "tags": {
+            "valueType": "stringList",
+            "value": ["hr", "contract"]
+          }
+        }
+      }
+    ],
+    "total": 1,
+    "pageNum": 1,
+    "pageSize": 20
+  }
+}
+```
+
+说明：响应项仍使用兼容 QA 的字段名 `knCode`，但其值已经由门户转换为 `resourceId`。门户不会重新排序结果，QA 按 `knowledge_fs_entry.updated_at`、文件 `kid` 生成的稳定顺序会被保留。
+
+失败场景：
+
+- `resourceIdList` 为空、包含空值或资源不存在时，门户直接返回参数或资源错误。
+- 当前调用方没有任一知识库的读取权限时，门户不会调用 QA。
+- QA 返回 DSL 校验或检索错误时，门户按统一异常响应格式返回错误信息。
+
+### `POST /datasetController/knowledgeItems/metadataSearchByKnCode`
+
+QA 原始协议透传接口。门户将请求体直接传给 QA，并原样返回 QA 响应；不查询 `ss_resource`，不执行 `resourceId` 与 `knCode` 转换，也不改写 QA 响应信封。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `knCodeList` | array[string] | 否 | QA 知识库编码范围，直接透传 |
+| `where` | object | 是 | Agent DSL 过滤 AST，直接透传 |
+| `metadataFieldList` | array[string] | 否 | 需要返回的元数据字段，直接透传 |
+| `topK` | integer | 否 | 未传 `pageSize` 时作为每页条数，默认 `500`，最大 `10000` |
+| `pageNum` | integer | 否 | 页码，从 `1` 开始，默认 `1` |
+| `pageSize` | integer | 否 | 每页条数，最大 `10000`；传入时优先于 `topK` |
+
+请求示例：
+
+```json
+{
+  "knCodeList": ["2"],
+  "where": {
+    "and": [
+      {"eq": {"fieldName": "status", "value": "active"}},
+      {"contains": {"fieldName": "tags", "value": "contract"}}
+    ]
+  },
+  "metadataFieldList": ["status", "tags", "fileSignature"],
+  "pageNum": 1,
+  "pageSize": 20
+}
+```
+
+映射关系：
+
+| 门户请求/响应 | QA 请求/响应 | 映射规则 |
+| --- | --- | --- |
+| 完整请求体 | 完整请求体 | 字段和值直接透传，不进行 `knCode` 转换 |
+| QA `resultCode` | 门户 `resultCode` | 原样返回 |
+| QA `resultMsg` | 门户 `resultMsg` | 原样返回 |
+| QA `resultObject` | 门户 `resultObject` | 原样返回，包括成功数据及失败时的 `errorCode/errorList` |
+| `resultObject.data[].knCode` | 同名字段 | 保留 QA 原始 `knCode` |
+
+成功响应示例：
+
+```json
+{
+  "resultCode": "0",
+  "resultMsg": "success",
+  "resultObject": {
+    "data": [
+      {
+        "knCode": "2",
+        "filePath": "/制度/人事/续签流程.md",
+        "metadata": {
+          "status": {
+            "valueType": "string",
+            "value": "active"
+          },
+          "tags": {
+            "valueType": "stringList",
+            "value": ["hr", "contract"]
+          }
+        }
+      }
+    ],
+    "total": 1,
+    "pageNum": 1,
+    "pageSize": 20
+  }
+}
+```
+
+失败响应示例：
+
+```json
+{
+  "resultCode": "-1",
+  "resultMsg": "request validation failed",
+  "resultObject": {
+    "errorCode": "DSL_VALIDATION_ERROR",
+    "errorList": [
+      {
+        "path": "where.and[2]",
+        "code": "TOO_MANY_CONDITIONS",
+        "message": "leaf condition count exceeds limit 12"
+      }
+    ]
+  }
+}
+```
+
+结果顺序由 QA 决定，固定按 `knowledge_fs_entry.updated_at` 从旧到新排序；更新时间相同时按文件 `kid` 从小到大排序。门户不进行二次排序。
+
 ## Agent 工具接口
 
 以下接口专门提供给数字员工（Agent）作为工具调用，使用外部资源 ID（`resourceId`）代替内部知识库编码（`knCode`）。系统自动从 MinIO 配置文件读取 `resourceId` 与 `knCode` 的映射关系，调用方无需感知内部编码。

@@ -55,6 +55,8 @@ class FeignPythonBuildServiceTest {
         assertThat(KnowledgeServiceOperation.READ_FILE.getLocalPath()).isEqualTo("/api/v1/readFile");
         assertThat(KnowledgeServiceOperation.BUILD_RESULT.getLocalPath()).isEqualTo("/api/v1/buildResult");
         assertThat(KnowledgeServiceOperation.DOWNLOAD_FILE.getLocalPath()).isEqualTo("/api/v1/downloadFile");
+        assertThat(KnowledgeServiceOperation.KNOWLEDGE_METADATA_SEARCH.getLocalPath())
+            .isEqualTo("/api/v1/knowledgeItems/metadataSearch");
     }
 
     @Test

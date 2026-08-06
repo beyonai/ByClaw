@@ -2409,7 +2409,8 @@ public class DevloopApplicationService {
      * 令牌变量拼带令牌的 clone 地址。
      */
     private static String buildRepoCloneHint(String provider, String repoUrl, String repoFullName) {
-        RepoProviderSpec spec = REPO_PROVIDER_SPECS.getOrDefault(provider, REPO_PROVIDER_SPECS.get("github"));
+        RepoProviderSpec spec = REPO_PROVIDER_SPECS.getOrDefault(
+            StringUtils.defaultIfBlank(provider, "github"), REPO_PROVIDER_SPECS.get("github"));
         // repoFullName 形如 owner/repo 才按公共域名拼接;显式 repoUrl 一律直用,兼容自建实例。
         boolean hasFullName = repoFullName != null && !repoFullName.trim().isEmpty();
         String cloneUrl;

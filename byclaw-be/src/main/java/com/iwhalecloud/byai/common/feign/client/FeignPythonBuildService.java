@@ -42,6 +42,7 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileSearch;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeMetadataSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemReferences;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemsMove;
@@ -57,6 +58,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileMetadataResu
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBaseInfo;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBuildResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
@@ -461,6 +463,25 @@ public class FeignPythonBuildService {
         KbKnowledgeFileSearch kbKnowledgeFileSearch) {
         return post(KnowledgeServiceOperation.KNOWLEDGE_FILE_SEARCH, kbKnowledgeFileSearch,
             new TypeReference<PythonBuildResponse<KnowledgeFileSearchResult>>() {
+            });
+    }
+
+    /**
+     * Agent DSL 纯元数据检索，只返回文件级结果。
+     */
+    public PythonBuildResponse<KnowledgeMetadataSearchResult> searchKnowledgeMetadata(
+        KbKnowledgeMetadataSearch request) {
+        return post(KnowledgeServiceOperation.KNOWLEDGE_METADATA_SEARCH, request,
+            new TypeReference<PythonBuildResponse<KnowledgeMetadataSearchResult>>() {
+            });
+    }
+
+    /**
+     * 原样透传 Agent DSL 纯元数据检索响应，保留 QA 失败响应中的 errorCode/errorList 等扩展字段。
+     */
+    public PythonBuildResponse<Object> searchKnowledgeMetadataRaw(KbKnowledgeMetadataSearch request) {
+        return post(KnowledgeServiceOperation.KNOWLEDGE_METADATA_SEARCH, request,
+            new TypeReference<PythonBuildResponse<Object>>() {
             });
     }
 

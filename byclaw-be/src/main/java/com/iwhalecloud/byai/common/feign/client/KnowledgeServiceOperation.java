@@ -34,6 +34,7 @@ public enum KnowledgeServiceOperation {
     GLOB("glob", "/api/v1/glob"),
     KNOWLEDGE_SEARCH("knowledgeSearch", "/api/v1/knowledgeItems/search"),
     KNOWLEDGE_FILE_SEARCH("knowledgeFileSearch", "/api/v1/knowledgeItems/searchFile"),
+    KNOWLEDGE_METADATA_SEARCH("metadataSearch", "/api/v1/knowledgeItems/metadataSearch"),
     FILE_TO_MARKDOWN("fileToMarkdown", "/api/v1/fileToMarkdown"),
     KNOWLEDGE_BUILD("knowledgeBuild", "/api/v1/fileToMarkdownIndex"),
     DOWNLOAD_FILE("downloadFile", "/api/v1/downloadFile"),

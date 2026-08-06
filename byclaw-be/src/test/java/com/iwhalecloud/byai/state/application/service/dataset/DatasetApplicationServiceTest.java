@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.dataset;
 
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
+import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.feign.client.FeignPythonBuildService;
 import com.iwhalecloud.byai.common.feign.request.knowledge.Folder;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileImport;
@@ -9,6 +10,7 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataGet;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbGlob;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileSearch;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeMetadataSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemReferences;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemsMove;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeSearch;
@@ -20,6 +22,8 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileMetadataResu
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileUpdateResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataSearchItem;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBuildResult;
@@ -30,6 +34,7 @@ import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationServ
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeMetadataSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeBuildResultRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
@@ -37,6 +42,7 @@ import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.UploadResult;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -58,6 +64,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -79,6 +86,15 @@ class DatasetApplicationServiceTest {
         StaticMessageSource messageSource = new StaticMessageSource();
         messageSource.addMessage("dataset.default.personal.delete.not.allowed", Locale.getDefault(),
             "dataset.default.personal.delete.not.allowed");
+        messageSource.addMessage("dataset.metadata.search.resource.id.list.notempty", Locale.getDefault(),
+            "Knowledge base resource identifier list cannot be empty");
+        messageSource.addMessage("dataset.metadata.search.resource.id.notnull", Locale.getDefault(),
+            "Knowledge base resource identifier cannot be empty");
+        messageSource.addMessage("dataset.metadata.search.operation", Locale.getDefault(),
+            "Search knowledge base file metadata");
+        messageSource.addMessage("dataset.pythonbuild.operation.failed", Locale.getDefault(), "{0} failed: {1}");
+        messageSource.addMessage("dataset.pythonbuild.operation.response.empty", Locale.getDefault(),
+            "{0} failed: knowledge base service returned an empty response");
         ApplicationContext applicationContext = org.mockito.Mockito.mock(ApplicationContext.class);
         org.mockito.Mockito.when(applicationContext.getBean(org.springframework.context.MessageSource.class))
             .thenReturn(messageSource);
@@ -165,6 +181,111 @@ class DatasetApplicationServiceTest {
         assertThat(result.getData()).hasSize(1);
         assertThat(result.getData().get(0).getKnCode()).isEqualTo("100");
         assertThat(result.getData().get(0).getFilePath()).isEqualTo("/hr/renewal.md");
+    }
+
+    @Test
+    void searchKnowledgeMetadata_mapsResourceIdsAndForwardsDslPagination() {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+
+        KnowledgeMetadataSearchItem item = new KnowledgeMetadataSearchItem();
+        item.setKnCode("personal-kb");
+        item.setFilePath("/制度/人事/续签流程.md");
+        item.setMetadata(Map.of("status", Map.of("valueType", "string", "value", "active")));
+        KnowledgeMetadataSearchResult qaResult = new KnowledgeMetadataSearchResult();
+        qaResult.setData(List.of(item));
+        qaResult.setTotal(1L);
+        qaResult.setPageNum(1);
+        qaResult.setPageSize(20);
+        PythonBuildResponse<KnowledgeMetadataSearchResult> response = new PythonBuildResponse<>();
+        response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+        response.setResultObject(qaResult);
+        when(feignPythonBuildService.searchKnowledgeMetadata(any())).thenReturn(response);
+
+        KnowledgeMetadataSearchRequest request = new KnowledgeMetadataSearchRequest();
+        request.setResourceIdList(List.of(100L));
+        request.setWhere(Map.of("eq", Map.of("fieldName", "status", "value", "active")));
+        request.setMetadataFieldList(List.of("status", "tags", "fileSignature"));
+        request.setTopK(500);
+        request.setPageNum(1);
+        request.setPageSize(20);
+
+        KnowledgeMetadataSearchResult result = service.searchKnowledgeMetadata(request);
+
+        ArgumentCaptor<KbKnowledgeMetadataSearch> captor =
+            ArgumentCaptor.forClass(KbKnowledgeMetadataSearch.class);
+        verify(feignPythonBuildService).searchKnowledgeMetadata(captor.capture());
+        assertThat(captor.getValue().getKnCodeList()).containsExactly("personal-kb");
+        assertThat(captor.getValue().getWhere()).isEqualTo(request.getWhere());
+        assertThat(captor.getValue().getMetadataFieldList()).containsExactly("status", "tags", "fileSignature");
+        assertThat(captor.getValue().getTopK()).isEqualTo(500);
+        assertThat(captor.getValue().getPageNum()).isEqualTo(1);
+        assertThat(captor.getValue().getPageSize()).isEqualTo(20);
+        assertThat(result.getData()).singleElement().satisfies(metadataItem -> {
+            assertThat(metadataItem.getKnCode()).isEqualTo("100");
+            assertThat(metadataItem.getFilePath()).isEqualTo("/制度/人事/续签流程.md");
+        });
+        assertThat(result.getTotal()).isEqualTo(1L);
+        assertThat(result.getPageNum()).isEqualTo(1);
+        assertThat(result.getPageSize()).isEqualTo(20);
+    }
+
+    @Test
+    void searchKnowledgeMetadata_rejectsMissingResourceIdWithLocalizedMessage() {
+        KnowledgeMetadataSearchRequest request = new KnowledgeMetadataSearchRequest();
+        request.setResourceIdList(Collections.singletonList(null));
+
+        assertThatThrownBy(() -> service.searchKnowledgeMetadata(request))
+            .isInstanceOf(BaseException.class)
+            .hasMessage("Knowledge base resource identifier cannot be empty");
+
+        verifyNoInteractions(ssResourceService, authApplicationService, feignPythonBuildService);
+    }
+
+    @Test
+    void searchKnowledgeMetadata_localizesKnowledgeServiceFailure() {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+        PythonBuildResponse<KnowledgeMetadataSearchResult> response = new PythonBuildResponse<>();
+        response.setResultCode("-1");
+        response.setResultMsg("remote validation failed");
+        when(feignPythonBuildService.searchKnowledgeMetadata(any())).thenReturn(response);
+
+        KnowledgeMetadataSearchRequest request = new KnowledgeMetadataSearchRequest();
+        request.setResourceIdList(List.of(100L));
+        request.setWhere(Map.of("eq", Map.of("fieldName", "status", "value", "active")));
+
+        assertThatThrownBy(() -> service.searchKnowledgeMetadata(request))
+            .isInstanceOf(BaseException.class)
+            .hasMessage("Search knowledge base file metadata failed: remote validation failed");
+    }
+
+    @Test
+    void searchKnowledgeMetadataByKnCode_passesQaProtocolThroughWithoutResourceLookup() {
+        KbKnowledgeMetadataSearch request = new KbKnowledgeMetadataSearch();
+        request.setKnCodeList(List.of("2"));
+        request.setWhere(Map.of("contains", Map.of("fieldName", "tags", "value", "contract")));
+        request.setMetadataFieldList(List.of("status", "tags"));
+        request.setPageNum(1);
+        request.setPageSize(20);
+
+        Map<String, Object> qaError = Map.of(
+            "errorCode", "DSL_VALIDATION_ERROR",
+            "errorList", List.of(Map.of("path", "where.and[2]", "code", "TOO_MANY_CONDITIONS")));
+        PythonBuildResponse<Object> response = new PythonBuildResponse<>();
+        response.setResultCode("-1");
+        response.setResultMsg("request validation failed");
+        response.setResultObject(qaError);
+        when(feignPythonBuildService.searchKnowledgeMetadataRaw(request)).thenReturn(response);
+
+        PythonBuildResponse<Object> result = service.searchKnowledgeMetadataByKnCode(request);
+
+        assertThat(result).isSameAs(response);
+        assertThat(result.getResultObject()).isEqualTo(qaError);
+        verify(feignPythonBuildService).searchKnowledgeMetadataRaw(request);
+        verifyNoInteractions(ssResourceService, authApplicationService);
     }
 
     @Test
