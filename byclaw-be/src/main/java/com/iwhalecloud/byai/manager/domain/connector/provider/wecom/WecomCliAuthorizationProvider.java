@@ -212,7 +212,7 @@ public class WecomCliAuthorizationProvider
                 return credentialVerificationTimeout();
             }
             if (!validCacheResult(cacheResult)) {
-                return credentialInvalid();
+                return credentialCacheInvalid();
             }
             CliResult probeResult = cliRunner.run(
                 providerState.probeCommand(),
@@ -223,7 +223,7 @@ public class WecomCliAuthorizationProvider
             if (timedOut(probeResult)) {
                 return credentialVerificationTimeout();
             }
-            return validBusinessProbeResult(probeResult) ? connectedStatus() : credentialInvalid();
+            return validBusinessProbeResult(probeResult) ? connectedStatus() : businessProbeInvalid();
         } catch (RuntimeException e) {
             return credentialVerificationFailure();
         }
@@ -231,6 +231,17 @@ public class WecomCliAuthorizationProvider
 
     private AuthorizationStatusResult credentialInvalid() {
         return failedStatus("CONNECTOR_CREDENTIAL_INVALID", "Connector credential is invalid");
+    }
+
+    private AuthorizationStatusResult credentialCacheInvalid() {
+        return failedStatus("CONNECTOR_CACHE_INVALID", "Connector credential cache is invalid");
+    }
+
+    private AuthorizationStatusResult businessProbeInvalid() {
+        return failedStatus(
+            "CONNECTOR_BUSINESS_PROBE_INVALID",
+            "Connector business probe did not succeed"
+        );
     }
 
     private AuthorizationStatusResult credentialVerificationFailure() {

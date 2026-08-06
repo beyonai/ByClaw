@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.gateway.sandbox.client;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -24,6 +25,10 @@ import com.iwhalecloud.byai.gateway.sandbox.client.model.ResizeSandboxResponse;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxDetail;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxEndpoint;
 import com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties;
+import com.iwhalecloud.byai.gateway.sandbox.command.SandboxCommandRequest;
+import com.iwhalecloud.byai.gateway.sandbox.command.SandboxCommandResult;
+import com.iwhalecloud.byai.gateway.sandbox.command.SandboxProcessHandle;
+import com.iwhalecloud.byai.gateway.sandbox.command.SandboxProcessSnapshot;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -221,6 +226,229 @@ public class OpenSandboxClient {
         return execute(httpRequest, SandboxEndpoint.class);
     }
 
+    public SandboxCommandResult runCommand(String sandboxId, SandboxCommandRequest request) {
+        log.debug("Executing foreground command in sandbox: sandboxId={}, timeoutMs={}",
+            sandboxId, request.timeout().toMillis());
+        String body = toJson(commandBody(request, false));
+        try (Response response = commandCall(sandboxId, "/command", body, request.timeout())) {
+            String stream = responseBody(response);
+            return parseCommandStream(stream, request.maxOutputBytes(), false);
+        } catch (IOException e) {
+            throw new OpenSandboxException("Failed to execute command in sandbox " + sandboxId, e);
+        }
+    }
+
+    public SandboxProcessHandle startCommand(String sandboxId, SandboxCommandRequest request) {
+        log.debug("Starting background command in sandbox: sandboxId={}, timeoutMs={}",
+            sandboxId, request.timeout().toMillis());
+        String body = toJson(commandBody(request, true));
+        try (Response response = commandCall(sandboxId, "/command", body, request.timeout())) {
+            String stream = responseBody(response);
+            String processId = firstCommandId(stream);
+            if (processId == null || processId.isBlank()) {
+                throw new OpenSandboxException("OpenSandbox did not return a command id");
+            }
+            log.debug("Background command started: sandboxId={}, processId={}", sandboxId, processId);
+            return new SandboxProcessHandle(sandboxId, processId, Instant.now());
+        } catch (IOException e) {
+            throw new OpenSandboxException("Failed to start command in sandbox " + sandboxId, e);
+        }
+    }
+
+    public SandboxProcessSnapshot getCommandStatus(String sandboxId, String processId) {
+        log.debug("Inspecting sandbox command: sandboxId={}, processId={}", sandboxId, processId);
+        String endpoint = resolveExecdEndpoint(sandboxId);
+        Request request = newExecdRequestBuilder(endpoint + "/command/status/" + encodePath(processId)).get().build();
+        try (Response response = httpClient.newCall(request).execute()) {
+            String body = responseBody(response);
+            if (response.code() == 404) {
+                return new SandboxProcessSnapshot(SandboxProcessSnapshot.State.NOT_FOUND, null, "", 0, false);
+            }
+            ensureSuccessful(response, body);
+            JsonNode root = objectMapper.readTree(body);
+            boolean running = root.path("running").asBoolean(false);
+            Integer exitCode = root.has("exit_code") && !root.get("exit_code").isNull()
+                ? root.get("exit_code").asInt() : null;
+            return new SandboxProcessSnapshot(
+                running ? SandboxProcessSnapshot.State.RUNNING
+                    : (exitCode != null && exitCode == 0
+                        ? SandboxProcessSnapshot.State.EXITED : SandboxProcessSnapshot.State.FAILED),
+                exitCode,
+                root.path("error").asText(""),
+                0,
+                false);
+        } catch (IOException e) {
+            throw new OpenSandboxException("Failed to inspect command " + processId, e);
+        }
+    }
+
+    public SandboxProcessSnapshot getCommandLogs(String sandboxId, String processId, long cursor) {
+        log.debug("Reading sandbox command output: sandboxId={}, processId={}, cursor={}",
+            sandboxId, processId, cursor);
+        String endpoint = resolveExecdEndpoint(sandboxId);
+        HttpUrl url = HttpUrl.parse(endpoint + "/command/" + encodePath(processId) + "/logs")
+            .newBuilder().addQueryParameter("cursor", Long.toString(Math.max(0, cursor))).build();
+        Request request = newExecdRequestBuilder(url.toString()).get().build();
+        try (Response response = httpClient.newCall(request).execute()) {
+            String output = responseBody(response);
+            if (response.code() == 404) {
+                return new SandboxProcessSnapshot(SandboxProcessSnapshot.State.NOT_FOUND, null, "", cursor, false);
+            }
+            ensureSuccessful(response, output);
+            String nextCursor = response.header("EXECD-COMMANDS-TAIL-CURSOR");
+            long parsedCursor = nextCursor == null ? cursor : Long.parseLong(nextCursor);
+            return new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null, output,
+                parsedCursor, false);
+        } catch (IOException | NumberFormatException e) {
+            throw new OpenSandboxException("Failed to read command logs " + processId, e);
+        }
+    }
+
+    public void interruptCommand(String sandboxId, String processId) {
+        log.info("Terminating sandbox command: sandboxId={}, processId={}", sandboxId, processId);
+        String endpoint = resolveExecdEndpoint(sandboxId);
+        HttpUrl url = HttpUrl.parse(endpoint + "/command").newBuilder()
+            .addQueryParameter("id", processId).build();
+        Request request = newExecdRequestBuilder(url.toString()).delete().build();
+        try (Response response = httpClient.newCall(request).execute()) {
+            String body = responseBody(response);
+            if (!response.isSuccessful() && response.code() != 404) {
+                throw new OpenSandboxException("Failed to terminate command " + processId + ": " + body);
+            }
+        } catch (IOException e) {
+            throw new OpenSandboxException("Failed to terminate command " + processId, e);
+        }
+    }
+
+    private Response commandCall(String sandboxId, String path, String body, Duration timeout) throws IOException {
+        String endpoint = resolveExecdEndpoint(sandboxId);
+        Request request = newExecdRequestBuilder(endpoint + path)
+            .post(RequestBody.create(body, JSON_MEDIA_TYPE)).build();
+        Response response = httpClient.newCall(request).execute();
+        if (!response.isSuccessful()) {
+            String error = responseBody(response);
+            response.close();
+            throw new OpenSandboxException("OpenSandbox command failed: HTTP " + response.code() + " " + error);
+        }
+        return response;
+    }
+
+    private String resolveExecdEndpoint(String sandboxId) {
+        SandboxEndpoint endpoint = getSandboxEndpoint(sandboxId, properties.getOpensandbox().getExecdPort());
+        if (endpoint == null || endpoint.getEndpoint() == null || endpoint.getEndpoint().isBlank()) {
+            throw new OpenSandboxException("OpenSandbox Execd endpoint is unavailable for sandbox " + sandboxId);
+        }
+        String value = endpoint.getEndpoint().trim();
+        log.debug("Resolved sandbox Execd endpoint: sandboxId={}, endpointPort={}",
+            sandboxId, properties.getOpensandbox().getExecdPort());
+        return value.startsWith("http://") || value.startsWith("https://")
+            ? value.replaceAll("/$", "")
+            : properties.getOpensandbox().getEndpointScheme() + "://" + value;
+    }
+
+    private Map<String, Object> commandBody(SandboxCommandRequest request, boolean background) {
+        return Map.of(
+            "command", shellCommand(request.argv()),
+            "background", background,
+            "timeout", request.timeout().toMillis(),
+            "envs", request.environment());
+    }
+
+    private String shellCommand(List<String> argv) {
+        return argv.stream().map(this::shellQuote).collect(java.util.stream.Collectors.joining(" "));
+    }
+
+    private String shellQuote(String value) {
+        return "'" + value.replace("'", "'\\''") + "'";
+    }
+
+    private String firstCommandId(String stream) {
+        try {
+            for (String line : stream.split("\\R")) {
+                if (!line.startsWith("data:")) {
+                    continue;
+                }
+                JsonNode node = objectMapper.readTree(line.substring(5).trim());
+                String id = firstText(node, "id", "command_id", "commandId");
+                if (id != null) {
+                    return id;
+                }
+            }
+        } catch (IOException ignored) {
+            // The caller turns a missing id into a stable execution error.
+        }
+        return null;
+    }
+
+    private SandboxCommandResult parseCommandStream(String stream, int maxOutputBytes, boolean ignored) {
+        StringBuilder stdout = new StringBuilder();
+        StringBuilder stderr = new StringBuilder();
+        int exitCode = 0;
+        boolean truncated = false;
+        try {
+            for (String line : stream.split("\\R")) {
+                if (!line.startsWith("data:")) {
+                    continue;
+                }
+                JsonNode node = objectMapper.readTree(line.substring(5).trim());
+                String type = node.path("type").asText("");
+                String text = commandEventText(node);
+                if ("stderr".equals(type) || "error".equals(type) || node.has("error")) {
+                    stderr.append(text);
+                } else if ("stdout".equals(type) || "result".equals(type)) {
+                    stdout.append(text);
+                }
+                if (node.has("exit_code")) {
+                    exitCode = node.path("exit_code").asInt(exitCode);
+                } else if (node.has("exitCode")) {
+                    exitCode = node.path("exitCode").asInt(exitCode);
+                }
+            }
+        } catch (IOException e) {
+            throw new OpenSandboxException("Invalid OpenSandbox command stream", e);
+        }
+        if (stdout.length() + stderr.length() > maxOutputBytes) {
+            truncated = true;
+            stdout.setLength(Math.min(stdout.length(), maxOutputBytes));
+        }
+        return new SandboxCommandResult(exitCode, stdout.toString(), stderr.toString(), truncated, false);
+    }
+
+    private String commandEventText(JsonNode node) {
+        for (String field : List.of("text", "output", "message", "data")) {
+            JsonNode value = node.get(field);
+            if (value == null || value.isNull()) {
+                continue;
+            }
+            return value.isTextual() ? value.asText() : value.toString();
+        }
+        JsonNode error = node.get("error");
+        return error == null || error.isNull() ? "" : error.toString();
+    }
+
+    private String responseBody(Response response) throws IOException {
+        return response.body() == null ? "" : response.body().string();
+    }
+
+    private void ensureSuccessful(Response response, String body) {
+        if (!response.isSuccessful()) {
+            throw new OpenSandboxException("OpenSandbox command API failed: HTTP " + response.code() + " " + body);
+        }
+    }
+
+    private String encodePath(String value) {
+        return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private String firstText(JsonNode node, String... names) {
+        for (String name : names) {
+            if (node.has(name) && node.get(name).isTextual() && !node.get(name).asText().isBlank()) {
+                return node.get(name).asText();
+            }
+        }
+        return null;
+    }
+
     public ResizeSandboxResponse resizeSandbox(String sandboxId, ResizeSandboxRequest request) {
         String url = baseUrl + "/v1/sandboxes/" + sandboxId + "/resize";
         String body = toJson(request);
@@ -308,6 +536,14 @@ public class OpenSandboxClient {
         if (apiKey != null && !apiKey.isBlank()) {
 //            builder.header("Authorization", "Bearer " + apiKey);
             builder.header("OPEN-SANDBOX-API-KEY", apiKey);
+        }
+        return builder;
+    }
+
+    private Request.Builder newExecdRequestBuilder(String url) {
+        Request.Builder builder = newRequestBuilder(url);
+        if (apiKey != null && !apiKey.isBlank()) {
+            builder.header("X-EXECD-ACCESS-TOKEN", apiKey);
         }
         return builder;
     }

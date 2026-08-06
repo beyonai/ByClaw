@@ -9,6 +9,8 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
@@ -118,6 +120,27 @@ class ConnectorSkillAuthorizationSyncServiceTest {
             "CONNECTOR_CREDENTIAL_INVALID",
             () -> service.sync("dingtalk", "42")
         );
+
+        verifyNoInteractions(connectionStateService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "CONNECTOR_CACHE_INVALID",
+        "CONNECTOR_BUSINESS_PROBE_INVALID"
+    })
+    void passesPublicWecomDiagnosticCodesWithoutRetry(String errorCode) {
+        ConnectorInfo connector = activeConnector();
+        AuthorizationStatusResult invalid = result(AuthorizationStatus.FAILED, errorCode);
+        when(connectorInfoService.findByCode("dingtalk")).thenReturn(connector);
+        when(verifierRegistry.get("dws-dingtalk")).thenReturn(verifier);
+        when(verifier.verify("42", connector)).thenReturn(invalid);
+
+        assertThatThrownBy(() -> service.sync("dingtalk", "42"))
+            .isInstanceOfSatisfying(ConnectorSkillAuthorizationSyncException.class, error -> {
+                assertThat(error.getErrorCode()).isEqualTo(errorCode);
+                assertThat(error.isRetryable()).isFalse();
+            });
 
         verifyNoInteractions(connectionStateService);
     }
