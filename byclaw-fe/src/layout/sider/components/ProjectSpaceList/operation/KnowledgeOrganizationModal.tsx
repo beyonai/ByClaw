@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Form, Input, Modal, Radio, Select, message } from 'antd';
+import { Form, Modal, Select, message } from 'antd';
 import { useIntl } from '@umijs/max';
 import type { OperationKnowledgeOrganization, OperationSelectOption } from './types';
 import styles from './index.module.less';
@@ -15,7 +15,7 @@ export interface KnowledgeOrganizationModalProps {
   onSubmit: (value: OperationKnowledgeOrganization) => void;
 }
 
-// 整理配置沿用原型的“已有本体 / 新增本体”两种模式，保存后只写回当前运营需求表单。
+// 该组件保留用于兼容历史引用；当前知识整理已改为在需求表单内直接选择本地已有本体。
 const KnowledgeOrganizationModal: React.FC<KnowledgeOrganizationModalProps> = ({
   open,
   value,
@@ -28,7 +28,8 @@ const KnowledgeOrganizationModal: React.FC<KnowledgeOrganizationModalProps> = ({
   const [form] = Form.useForm<KnowledgeOrganizationFormValues>();
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
-  const mode = Form.useWatch('mode', form) || 'existing';
+  // 记录本次打开是否已经完成初始化，避免模板异步刷新或父表单回写时重复 resetFields 清空用户输入。
+  const initializedOpenRef = useRef(false);
   const isSubmitting = loading || submitting;
   const t = useMemo(
     () => (id: string) => intl.formatMessage({ id: `projectSpace.operation.taskForm.knowledge.${id}` }),
@@ -36,17 +37,25 @@ const KnowledgeOrganizationModal: React.FC<KnowledgeOrganizationModalProps> = ({
   );
 
   useEffect(() => {
-    if (!open) return;
-    // 重新打开时回填已保存配置；新增默认选择第一个已有本体，便于快速完成整理配置。
+    if (!open) {
+      initializedOpenRef.current = false;
+      return;
+    }
+    if (initializedOpenRef.current) return;
+    initializedOpenRef.current = true;
+    // 每次真正打开时回填已保存配置；后续模板列表变化不得重复覆盖当前选择。
     form.resetFields();
     form.setFieldsValue({
-      mode: value?.mode || 'existing',
+      mode: 'existing',
       templateId: value?.templateId ?? templates[0]?.value,
-      templateName: value?.templateName,
-      request: value?.request,
-      structure: value?.structure,
     });
   }, [form, open, templates, value]);
+
+  useEffect(() => {
+    if (!open || !templates.length || form.getFieldValue('templateId') !== undefined) return;
+    // 本体列表异步返回时只补默认选项，不重置表单，避免覆盖用户已经选择的本体。
+    form.setFieldValue('templateId', templates[0].value);
+  }, [form, open, templates]);
 
   const handleSubmit = async () => {
     if (isSubmitting || submittingRef.current) return;
@@ -56,11 +65,9 @@ const KnowledgeOrganizationModal: React.FC<KnowledgeOrganizationModalProps> = ({
       const values = await form.validateFields();
       const selectedTemplate = templates.find((template) => `${template.value}` === `${values.templateId}`);
       onSubmit({
-        ...values,
-        templateId: values.mode === 'existing' ? values.templateId : undefined,
-        templateName: values.mode === 'existing' ? selectedTemplate?.label : values.templateName?.trim(),
-        request: values.request?.trim(),
-        structure: values.structure?.trim(),
+        mode: 'existing',
+        templateId: values.templateId,
+        templateName: selectedTemplate?.label,
       });
     } catch (error: any) {
       if (!error?.errorFields) message.error(t('saveFailed'));
@@ -90,53 +97,21 @@ const KnowledgeOrganizationModal: React.FC<KnowledgeOrganizationModalProps> = ({
     >
       <p className={styles.knowledgeOrganizationIntro}>{t('description')}</p>
       <Form form={form} layout="vertical">
-        <Form.Item name="mode" className={styles.knowledgeOrganizationMode}>
-          <Radio.Group disabled={isSubmitting}>
-            <Radio.Button value="existing">{t('mode.existing')}</Radio.Button>
-            <Radio.Button value="new">{t('mode.new')}</Radio.Button>
-          </Radio.Group>
+        <Form.Item
+          label={t('field.template')}
+          name="templateId"
+          rules={[{ required: true, message: t('validation.templateRequired') }]}
+        >
+          <Select
+            options={templates}
+            loading={loading}
+            showSearch
+            optionFilterProp="label"
+            placeholder={t('placeholder.template')}
+            notFoundContent={null}
+          />
         </Form.Item>
-        {mode === 'existing' ? (
-          <Form.Item
-            label={t('field.template')}
-            name="templateId"
-            rules={[{ required: true, message: t('validation.templateRequired') }]}
-          >
-            <Select
-              options={templates}
-              loading={loading}
-              showSearch
-              optionFilterProp="label"
-              placeholder={t('placeholder.template')}
-              notFoundContent={t('emptyTemplate')}
-            />
-          </Form.Item>
-        ) : (
-          <>
-            <Form.Item
-              label={t('field.templateName')}
-              name="templateName"
-              rules={[{ required: true, whitespace: true, message: t('validation.templateNameRequired') }]}
-            >
-              <Input maxLength={100} showCount placeholder={t('placeholder.templateName')} />
-            </Form.Item>
-            <Form.Item
-              label={t('field.request')}
-              name="request"
-              rules={[{ required: true, whitespace: true, message: t('validation.requestRequired') }]}
-            >
-              <Input.TextArea rows={3} maxLength={1000} showCount placeholder={t('placeholder.request')} />
-            </Form.Item>
-            <Form.Item
-              label={t('field.structure')}
-              name="structure"
-              rules={[{ required: true, whitespace: true, message: t('validation.structureRequired') }]}
-              extra={t('structureHint')}
-            >
-              <Input.TextArea rows={5} maxLength={2000} showCount placeholder={t('placeholder.structure')} />
-            </Form.Item>
-          </>
-        )}
+        {/* “新增本体”表单暂时停用，知识整理只允许选择本地已有本体，避免再次嵌套弹窗。 */}
       </Form>
     </Modal>
   );

@@ -191,7 +191,7 @@ COMMENT ON COLUMN byai.byai_scan_source.source_type IS '类型：研发渠道din
 COMMENT ON COLUMN byai.byai_scan_source.source_description IS '运营需求描述，研发扫描源为空';
 COMMENT ON COLUMN byai.byai_scan_source.assignee IS '运营需求负责人用户ID，研发扫描源为空';
 COMMENT ON COLUMN byai.byai_scan_source.due_time IS '运营需求计划完成时间，研发扫描源为空';
-COMMENT ON COLUMN byai.byai_scan_source.cron_expr IS '扫描或运营周期任务Cron表达式；间隔模式按config和last_scan_time判断';
+COMMENT ON COLUMN byai.byai_scan_source.cron_expr IS '扫描及运营采集调度Cron表达式；单次年份、双周和间隔由config、last_scan_time补充判断';
 COMMENT ON COLUMN byai.byai_scan_source.config IS '研发渠道或运营需求类型专属配置JSON';
 
 CREATE INDEX IF NOT EXISTS idx_scan_source_operation_project

@@ -1,17 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, DatePicker, Form, Input, InputNumber, Modal, Radio, Select, Switch, message } from 'antd';
+import { DatePicker, Form, Input, InputNumber, Modal, Radio, Select, Switch, TimePicker, message } from 'antd';
 import { useIntl } from '@umijs/max';
+import dayjs from 'dayjs';
 import type {
   OperationAccount,
+  OperationCollectConfig,
   OperationIdentifier,
-  OperationKnowledgeOrganization,
   OperationPlatformOption,
   OperationSelectOption,
   OperationTaskFormOptions,
   OperationTaskFormValues,
 } from './types';
 import styles from './index.module.less';
-import KnowledgeOrganizationModal from './KnowledgeOrganizationModal';
 
 // 三类运营需求复用此弹窗；父组件负责提供项目成员、账号和知识库等动态选项。
 export interface OperationTaskFormModalProps {
@@ -40,6 +40,58 @@ const CONTENT_TYPE_PUBLISH_CHANNEL_MAP: Record<string, string> = {
   'short-video': 'Douyin',
 };
 
+// 周期和间隔采集默认覆盖周一至周日，用户仍可按实际需求取消部分日期。
+const ALL_COLLECTION_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7];
+
+// 年度采集只保存月日时分，使用当前年份承载日期并锁定年份选择范围。
+const COLLECTION_DATE_CARRIER_START = dayjs().startOf('year');
+const COLLECTION_DATE_CARRIER_END = dayjs().endOf('year');
+
+// 调度表单使用结构化字段，提交时统一转换为五段 Cron，避免让用户直接填写容易出错的表达式。
+const buildOperationCollectionCron = (config?: OperationCollectConfig) => {
+  if (!config?.mode) return undefined;
+  const toSortedValues = (values?: number[]) =>
+    Array.from(new Set((values || []).filter((value) => Number.isInteger(value)))).sort((left, right) => left - right);
+  const toTimeParts = (value?: OperationCollectConfig['periodTime']) =>
+    value?.isValid() ? { hour: value.hour(), minute: value.minute() } : null;
+
+  if (config.mode === 'once') {
+    if (!config.onceTime?.isValid()) return undefined;
+    return `${config.onceTime.minute()} ${config.onceTime.hour()} ${config.onceTime.date()} ${
+      config.onceTime.month() + 1
+    } *`;
+  }
+  if (config.mode === 'interval') {
+    const weekdays = toSortedValues(config.intervalWeekdays);
+    if (!Number.isInteger(config.intervalHours) || Number(config.intervalHours) < 1 || !weekdays.length)
+      return undefined;
+    // Cron 的小时步长最多覆盖 0-23；更长间隔由后端结合 last_scan_time 精确判断，Cron 保留每小时候选触发点。
+    const hourField = Number(config.intervalHours) <= 23 ? `*/${config.intervalHours}` : '*';
+    return `0 ${hourField} * * ${weekdays.join(',')}`;
+  }
+
+  if (!config.periodType) return undefined;
+  // 年度周期的时分已合并到日期选择器，直接从合并值生成 Cron。
+  if (config.periodType === 'yearly' && config.periodYearDateTime?.isValid()) {
+    return `${config.periodYearDateTime.minute()} ${config.periodYearDateTime.hour()} ${config.periodYearDateTime.date()} ${
+      config.periodYearDateTime.month() + 1
+    } *`;
+  }
+  const time = toTimeParts(config.periodTime);
+  if (!time) return undefined;
+  if (config.periodType === 'daily') return `${time.minute} ${time.hour} * * *`;
+  if (config.periodType === 'weekly' || config.periodType === 'biweekly') {
+    const weekdays = toSortedValues(config.periodWeekdays);
+    return weekdays.length ? `${time.minute} ${time.hour} * * ${weekdays.join(',')}` : undefined;
+  }
+  if (config.periodType === 'monthly') {
+    const monthDays = toSortedValues(config.periodMonthDays);
+    return monthDays.length ? `${time.minute} ${time.hour} ${monthDays.join(',')} * *` : undefined;
+  }
+  if (!config.periodMonth || !config.periodDay) return undefined;
+  return `${time.minute} ${time.hour} ${config.periodDay} ${config.periodMonth} *`;
+};
+
 const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
   open,
   mode = 'create',
@@ -54,7 +106,6 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
   const intl = useIntl();
   const [form] = Form.useForm<OperationTaskFormValues>();
   const [submitting, setSubmitting] = useState(false);
-  const [knowledgeOrganizationModalOpen, setKnowledgeOrganizationModalOpen] = useState(false);
   // 状态更新前先用同步标记锁住提交入口，避免双击产生两次任务创建请求。
   const submittingRef = useRef(false);
   const t = useCallback(
@@ -68,8 +119,8 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
   );
   const taskType = Form.useWatch('taskType', form) || 'collect';
   const collectMode = Form.useWatch(['collectConfig', 'mode'], form);
+  const collectPeriodType = Form.useWatch(['collectConfig', 'periodType'], form);
   const collectOrganize = Form.useWatch(['collectConfig', 'organize'], form);
-  const knowledgeOrganization = Form.useWatch(['collectConfig', 'knowledgeOrganization'], form);
   const collectChannel = Form.useWatch(['collectConfig', 'channel'], form);
   const collectKnowledgeBaseId = Form.useWatch(['collectConfig', 'knowledgeBaseId'], form);
   const contentType = Form.useWatch(['contentConfig', 'contentType'], form);
@@ -84,13 +135,23 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
       taskName: '',
       description: '',
       taskType: 'collect',
-      collectConfig: { mode: 'once', intervalUnit: 'minute', organize: false },
+      collectConfig: {
+        mode: 'once',
+        periodType: 'daily',
+        periodWeekdays: [...ALL_COLLECTION_WEEKDAYS],
+        intervalHours: 1,
+        intervalWeekdays: [...ALL_COLLECTION_WEEKDAYS],
+        organize: false,
+      },
       contentConfig: {},
       analyzeConfig: { scope: 'account' },
       ...initialValues,
       collectConfig: {
         mode: 'once',
-        intervalUnit: 'minute',
+        periodType: 'daily',
+        periodWeekdays: [...ALL_COLLECTION_WEEKDAYS],
+        intervalHours: 1,
+        intervalWeekdays: [...ALL_COLLECTION_WEEKDAYS],
         organize: false,
         ...initialValues?.collectConfig,
       },
@@ -132,6 +193,22 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
   const publishChannels = options.publishChannels?.length ? options.publishChannels : defaultPlatformOptions;
   const analysisPlatforms = options.analysisPlatforms?.length ? options.analysisPlatforms : defaultPlatformOptions;
   const contentTypes = options.contentTypes?.length ? options.contentTypes : defaultContentTypes;
+  const weekdayOptions = useMemo(
+    () =>
+      Array.from({ length: 7 }, (_, index) => ({
+        value: index + 1,
+        label: t(`collect.weekday.${index + 1}`),
+      })),
+    [t]
+  );
+  const monthDayOptions = useMemo(
+    () =>
+      Array.from({ length: 31 }, (_, index) => ({
+        value: index + 1,
+        label: t('collect.monthDay', { day: index + 1 }),
+      })),
+    [t]
+  );
   // 只有已接入账号的平台渠道使用账号下拉；互联网、GitHub 等来源继续允许录入地址。
   const isPlatformCollectChannel = defaultPlatformOptions.some((option) => option.value === collectChannel);
   // 内容类型切换后优先使用映射渠道筛选账号，避免等待表单字段更新时短暂展示其它平台账号。
@@ -211,20 +288,11 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
       ),
     [analysisAccountId, options.works]
   );
-  const knowledgeOrganizationName = useMemo(
-    () =>
-      knowledgeOrganization?.templateName ||
-      options.organizeTemplates?.find((template) => `${template.value}` === `${knowledgeOrganization?.templateId}`)
-        ?.label,
-    [knowledgeOrganization?.templateId, knowledgeOrganization?.templateName, options.organizeTemplates]
-  );
-
   useEffect(() => {
     if (!open) return;
     // 重新打开时以最新初始值回填，防止关闭弹窗后保留上一份任务草稿。
     form.resetFields();
     form.setFieldsValue(formInitialValues);
-    setKnowledgeOrganizationModalOpen(false);
   }, [form, formInitialValues, open]);
 
   useEffect(() => {
@@ -330,15 +398,21 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
         values.collectConfig?.organize &&
         !values.collectConfig.knowledgeOrganization
       ) {
-        // 开启整理但未配置模板时不允许提交，避免后端收到无法执行的空整理配置。
+        // 开启整理但未选择本地本体时不允许提交，避免后端收到无法执行的空整理配置。
         message.error(t('validation.organizeTemplateRequired'));
-        setKnowledgeOrganizationModalOpen(true);
         return;
       }
       // 只提交当前任务类型的业务配置，避免表单切换后把其它类型的残留字段带给后端。
+      const collectConfig =
+        values.taskType === 'collect'
+          ? {
+            ...values.collectConfig,
+            cronExpr: buildOperationCollectionCron(values.collectConfig),
+          }
+          : undefined;
       await onSubmit({
         ...values,
-        collectConfig: values.taskType === 'collect' ? values.collectConfig : undefined,
+        collectConfig,
         contentConfig: values.taskType === 'content' ? values.contentConfig : undefined,
         analyzeConfig: values.taskType === 'analyze' ? values.analyzeConfig : undefined,
       });
@@ -356,21 +430,36 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
     if (!isSubmitting) onCancel();
   }, [isSubmitting, onCancel]);
 
-  const handleKnowledgeOrganizationChange = useCallback(
-    (value: OperationKnowledgeOrganization) => {
-      const currentCollectConfig = form.getFieldValue('collectConfig') || {};
-      // 新建整理模板仅归属当前需求，已有模板同时保留 templateId 以兼容后端历史字段。
-      form.setFieldsValue({
-        collectConfig: {
-          ...currentCollectConfig,
-          organize: true,
-          organizeTemplateId: value.mode === 'existing' ? value.templateId : undefined,
-          knowledgeOrganization: value,
+  const organizeTemplates = useMemo(() => options.organizeTemplates || [], [options.organizeTemplates]);
+  useEffect(() => {
+    if (!open || !collectOrganize || !organizeTemplates.length) return;
+    const currentTemplateId = form.getFieldValue(['collectConfig', 'organizeTemplateId']);
+    if (hasIdentifier(currentTemplateId)) return;
+    const firstTemplate = organizeTemplates[0];
+    // 本体列表异步加载完成后默认选中第一项，避免打开知识整理后还要再次弹窗选择。
+    form.setFieldsValue({
+      collectConfig: {
+        ...(form.getFieldValue('collectConfig') || {}),
+        organizeTemplateId: firstTemplate.value,
+        knowledgeOrganization: {
+          mode: 'existing',
+          templateId: firstTemplate.value,
+          templateName: firstTemplate.label,
         },
+      },
+    });
+  }, [collectOrganize, form, open, organizeTemplates]);
+
+  const handleKnowledgeTemplateChange = useCallback(
+    (templateId: OperationIdentifier) => {
+      const selectedTemplate = organizeTemplates.find((template) => `${template.value}` === `${templateId}`);
+      form.setFieldValue(['collectConfig', 'knowledgeOrganization'], {
+        mode: 'existing',
+        templateId,
+        templateName: selectedTemplate?.label,
       });
-      setKnowledgeOrganizationModalOpen(false);
     },
-    [form]
+    [form, organizeTemplates]
   );
 
   const renderCollectFields = () => (
@@ -413,18 +502,13 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
           )}
         </Form.Item>
         <Form.Item
+          className={styles.operationFormFull}
           label={t('field.collectTopic')}
           name={['collectConfig', 'topic']}
           rules={[{ required: true, whitespace: true, message: t('validation.collectTopicRequired') }]}
         >
-          <Input placeholder={t('placeholder.collectTopic')} />
-        </Form.Item>
-        <Form.Item
-          label={t('field.collectDateRange')}
-          name={['collectConfig', 'dateRange']}
-          rules={[{ required: true, message: t('validation.collectDateRangeRequired') }]}
-        >
-          <DatePicker.RangePicker className={styles.operationFullControl} />
+          {/* 采集主题可能包含多个关键词或说明，独占整行并提供两行输入空间。 */}
+          <Input.TextArea rows={2} maxLength={1000} showCount placeholder={t('placeholder.collectTopic')} />
         </Form.Item>
         <Form.Item
           label={t('field.knowledgeBase')}
@@ -452,89 +536,230 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
             notFoundContent={t('emptyOption')}
           />
         </Form.Item>
-        <Form.Item
-          label={t('field.collectMode')}
-          name={['collectConfig', 'mode']}
-          rules={[{ required: true, message: t('validation.collectModeRequired') }]}
-        >
-          <Radio.Group
-            optionType="button"
-            buttonStyle="solid"
-            options={[
-              { value: 'once', label: t('collect.mode.once') },
-              { value: 'interval', label: t('collect.mode.interval') },
-              { value: 'periodic', label: t('collect.mode.periodic') },
-            ]}
-          />
-        </Form.Item>
+        <div className={styles.operationScheduleTopRow}>
+          <Form.Item
+            className={styles.operationScheduleModeField}
+            label={t('field.collectMode')}
+            name={['collectConfig', 'mode']}
+            rules={[{ required: true, message: t('validation.collectModeRequired') }]}
+          >
+            <Radio.Group
+              optionType="button"
+              buttonStyle="solid"
+              options={[
+                { value: 'once', label: t('collect.mode.once') },
+                { value: 'periodic', label: t('collect.mode.periodic') },
+                { value: 'interval', label: t('collect.mode.interval') },
+              ]}
+            />
+          </Form.Item>
+          {collectMode === 'periodic' && (
+            <div className={styles.operationScheduleInlineFields}>
+              <Form.Item
+                className={styles.operationScheduleQuarterField}
+                label={t('field.collectPeriodType')}
+                name={['collectConfig', 'periodType']}
+                rules={[{ required: true, message: t('validation.collectPeriodTypeRequired') }]}
+              >
+                <Select
+                  options={[
+                    { value: 'daily', label: t('collect.period.daily') },
+                    { value: 'weekly', label: t('collect.period.weekly') },
+                    { value: 'biweekly', label: t('collect.period.biweekly') },
+                    { value: 'monthly', label: t('collect.period.monthly') },
+                    { value: 'yearly', label: t('collect.period.yearly') },
+                  ]}
+                />
+              </Form.Item>
+              {collectPeriodType === 'yearly' ? (
+                <Form.Item
+                  className={styles.operationScheduleQuarterField}
+                  label={t('field.collectYearDateTime')}
+                  name={['collectConfig', 'periodYearDateTime']}
+                  rules={[{ required: true, message: t('validation.collectYearDateTimeRequired') }]}
+                >
+                  {/* 年度周期只关心月、日和时分，固定使用闰年承载值以支持选择 2 月 29 日。 */}
+                  <DatePicker
+                    showTime={{ format: 'HH:mm' }}
+                    format="MM-DD HH:mm"
+                    defaultPickerValue={COLLECTION_DATE_CARRIER_START}
+                    minDate={COLLECTION_DATE_CARRIER_START}
+                    maxDate={COLLECTION_DATE_CARRIER_END}
+                  />
+                </Form.Item>
+              ) : (
+                <Form.Item
+                  className={styles.operationScheduleQuarterField}
+                  label={t('field.collectPeriodTime')}
+                  name={['collectConfig', 'periodTime']}
+                  rules={[{ required: true, message: t('validation.collectPeriodTimeRequired') }]}
+                >
+                  <TimePicker format="HH:mm" />
+                </Form.Item>
+              )}
+            </div>
+          )}
+          {collectMode === 'once' && (
+            <div className={styles.operationScheduleHalfFieldArea}>
+              <Form.Item
+                className={styles.operationScheduleOnceTimeField}
+                label={t('field.collectOnceTime')}
+                name={['collectConfig', 'onceTime']}
+                rules={[{ required: true, message: t('validation.collectOnceTimeRequired') }]}
+              >
+                <DatePicker showTime={{ format: 'HH:mm' }} format="YYYY-MM-DD HH:mm" />
+              </Form.Item>
+            </div>
+          )}
+          {collectMode === 'interval' && (
+            <div className={styles.operationScheduleHalfFieldArea}>
+              <Form.Item
+                className={styles.operationScheduleIntervalField}
+                label={t('field.collectIntervalHours')}
+                name={['collectConfig', 'intervalHours']}
+                rules={[{ required: true, message: t('validation.collectIntervalRequired') }]}
+              >
+                <InputNumber className={styles.operationIntervalHoursInput} min={1} precision={0} />
+              </Form.Item>
+            </div>
+          )}
+        </div>
         {collectMode === 'interval' && (
           <>
             <Form.Item
-              label={t('field.collectInterval')}
-              name={['collectConfig', 'intervalValue']}
-              rules={[{ required: true, message: t('validation.collectIntervalRequired') }]}
+              className={styles.operationFormFull}
+              label={t('field.collectWeekdays')}
+              name={['collectConfig', 'intervalWeekdays']}
+              rules={[{ required: true, type: 'array', min: 1, message: t('validation.collectWeekdaysRequired') }]}
             >
-              <InputNumber min={1} className={styles.operationFullControl} />
-            </Form.Item>
-            <Form.Item label={t('field.collectIntervalUnit')} name={['collectConfig', 'intervalUnit']}>
               <Select
-                options={[
-                  { value: 'minute', label: t('collect.intervalUnit.minute') },
-                  { value: 'hour', label: t('collect.intervalUnit.hour') },
-                ]}
+                mode="multiple"
+                maxTagCount="responsive"
+                options={weekdayOptions}
+                placeholder={t('placeholder.collectWeekdays')}
               />
+            </Form.Item>
+            <Form.Item
+              label={
+                <span className={styles.operationEffectiveDateLabel}>
+                  <span>{t('field.collectEffectiveDateRange')}</span>
+                  <span className={styles.operationEffectiveDateHint}>{t('collect.effectiveRangeHint')}</span>
+                </span>
+              }
+              name={['collectConfig', 'effectiveDateRange']}
+            >
+              <DatePicker.RangePicker className={styles.operationFullControl} />
             </Form.Item>
           </>
         )}
         {collectMode === 'periodic' && (
-          <Form.Item
-            label={t('field.collectSchedule')}
-            name={['collectConfig', 'cronExpr']}
-            rules={[{ required: true, whitespace: true, message: t('validation.collectScheduleRequired') }]}
-          >
-            <Input placeholder={t('placeholder.collectSchedule')} />
-          </Form.Item>
-        )}
-        <Form.Item label={t('field.organize')} name={['collectConfig', 'organize']} valuePropName="checked">
-          <Switch
-            checkedChildren={t('common.yes')}
-            unCheckedChildren={t('common.no')}
-            onChange={(checked) => {
-              if (checked) {
-                // 开启知识整理时立即进入配置弹窗，避免只打开开关却没有选择整理规则。
-                setKnowledgeOrganizationModalOpen(true);
-                return;
-              }
-              form.setFieldsValue({
-                collectConfig: {
-                  ...(form.getFieldValue('collectConfig') || {}),
-                  organize: false,
-                  organizeTemplateId: undefined,
-                  knowledgeOrganization: undefined,
-                },
-              });
-            }}
-          />
-        </Form.Item>
-        {collectOrganize && (
-          <Form.Item label={t('field.organizeTemplate')} required>
-            <div className={styles.knowledgeOrganizationSummary}>
-              <div>
-                <strong>{knowledgeOrganizationName || t('knowledge.unconfigured')}</strong>
-                <span>
-                  {knowledgeOrganization?.mode === 'new'
-                    ? knowledgeOrganization.request || knowledgeOrganization.structure
-                    : knowledgeOrganization
-                      ? t('knowledge.existingSummary')
-                      : t('knowledge.unconfiguredHint')}
+          <>
+            {(collectPeriodType === 'weekly' || collectPeriodType === 'biweekly') && (
+              <Form.Item
+                className={styles.operationFormFull}
+                label={t('field.collectWeekdays')}
+                name={['collectConfig', 'periodWeekdays']}
+                rules={[{ required: true, type: 'array', min: 1, message: t('validation.collectWeekdaysRequired') }]}
+              >
+                <Select
+                  mode="multiple"
+                  maxTagCount="responsive"
+                  options={weekdayOptions}
+                  placeholder={t('placeholder.collectWeekdays')}
+                />
+              </Form.Item>
+            )}
+            {collectPeriodType === 'monthly' && (
+              <Form.Item
+                className={styles.operationFormFull}
+                label={t('field.collectMonthDays')}
+                name={['collectConfig', 'periodMonthDays']}
+                rules={[{ required: true, type: 'array', min: 1, message: t('validation.collectMonthDaysRequired') }]}
+              >
+                <Select
+                  mode="multiple"
+                  maxTagCount="responsive"
+                  options={monthDayOptions}
+                  placeholder={t('placeholder.collectMonthDays')}
+                />
+              </Form.Item>
+            )}
+            <Form.Item
+              label={
+                <span className={styles.operationEffectiveDateLabel}>
+                  <span>{t('field.collectEffectiveDateRange')}</span>
+                  <span className={styles.operationEffectiveDateHint}>{t('collect.effectiveRangeHint')}</span>
                 </span>
-              </div>
-              <Button type="link" disabled={isSubmitting} onClick={() => setKnowledgeOrganizationModalOpen(true)}>
-                {knowledgeOrganization ? t('knowledge.edit') : t('knowledge.configure')}
-              </Button>
-            </div>
-          </Form.Item>
+              }
+              name={['collectConfig', 'effectiveDateRange']}
+            >
+              <DatePicker.RangePicker className={styles.operationFullControl} />
+            </Form.Item>
+          </>
         )}
+        <div className={styles.operationKnowledgeOrganizationRow}>
+          <Form.Item label={t('field.organize')} name={['collectConfig', 'organize']} valuePropName="checked">
+            <Switch
+              checkedChildren={t('common.yes')}
+              unCheckedChildren={t('common.no')}
+              onChange={(checked) => {
+                if (checked) {
+                  const currentCollectConfig = form.getFieldValue('collectConfig') || {};
+                  const selectedTemplateId = currentCollectConfig.organizeTemplateId ?? organizeTemplates[0]?.value;
+                  const selectedTemplate = organizeTemplates.find(
+                    (template) => `${template.value}` === `${selectedTemplateId}`
+                  );
+                  // 开启知识整理后直接使用当前页面的本地本体列表，不再额外打开配置弹窗。
+                  form.setFieldsValue({
+                    collectConfig: {
+                      ...currentCollectConfig,
+                      organize: true,
+                      organizeTemplateId: selectedTemplateId,
+                      knowledgeOrganization: selectedTemplateId
+                        ? {
+                          mode: 'existing',
+                          templateId: selectedTemplateId,
+                          templateName: selectedTemplate?.label,
+                        }
+                        : undefined,
+                    },
+                  });
+                  return;
+                }
+                form.setFieldsValue({
+                  collectConfig: {
+                    ...(form.getFieldValue('collectConfig') || {}),
+                    organize: false,
+                    organizeTemplateId: undefined,
+                    knowledgeOrganization: undefined,
+                  },
+                });
+              }}
+            />
+          </Form.Item>
+          {collectOrganize && (
+            <Form.Item
+              label={t('field.organizeTemplate')}
+              name={['collectConfig', 'organizeTemplateId']}
+              rules={[{ required: true, message: t('validation.organizeTemplateRequired') }]}
+            >
+              <Select
+                options={organizeTemplates}
+                loading={optionLoading}
+                disabled={isSubmitting}
+                showSearch
+                optionFilterProp="label"
+                placeholder={t('placeholder.organizeTemplate')}
+                notFoundContent={null}
+                onChange={handleKnowledgeTemplateChange}
+              />
+            </Form.Item>
+          )}
+          {/*
+            暂停“新增本体”能力，知识整理当前只允许直接选择本地已有本体。
+            后续恢复时应重新设计本体创建和列表刷新流程，避免在需求表单中嵌套弹窗。
+          */}
+        </div>
       </div>
     </section>
   );
@@ -687,7 +912,8 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
               <Input maxLength={500} showCount placeholder={entityT('placeholder.name')} />
             </Form.Item>
             <Form.Item className={styles.operationFormFull} label={entityT('field.description')} name="description">
-              <Input.TextArea rows={3} placeholder={entityT('placeholder.description')} />
+              {/* 需求描述与后端统一限制 1000 字，字数统计便于用户控制输入长度。 */}
+              <Input.TextArea rows={2} maxLength={1000} showCount placeholder={entityT('placeholder.description')} />
             </Form.Item>
             <Form.Item
               className={styles.operationFormFull}
@@ -741,20 +967,6 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
           </section>
         </div>
       </Form>
-      <KnowledgeOrganizationModal
-        open={knowledgeOrganizationModalOpen}
-        value={knowledgeOrganization}
-        templates={options.organizeTemplates}
-        loading={optionLoading}
-        onCancel={() => {
-          if (!knowledgeOrganization) {
-            // 首次开启整理后取消配置时同步关闭开关，避免表单保留无效的空整理状态。
-            form.setFieldValue(['collectConfig', 'organize'], false);
-          }
-          setKnowledgeOrganizationModalOpen(false);
-        }}
-        onSubmit={handleKnowledgeOrganizationChange}
-      />
     </Modal>
   );
 };
