@@ -17,6 +17,8 @@ import com.iwhalecloud.byai.gateway.sandbox.service.UserSandboxResolver;
 import com.iwhalecloud.byai.gateway.sandbox.service.UserSandboxResolver.UserSandboxContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
+import com.iwhalecloud.byai.manager.domain.users.service.UserService;
+import com.iwhalecloud.byai.manager.entity.users.Users;
 
 class LarkSandboxAuthorizationRuntimeTest {
 
@@ -24,11 +26,15 @@ class LarkSandboxAuthorizationRuntimeTest {
     void startsUserAuthorizationInsideResolvedSandbox() {
         SandboxCommandExecutor executor = mock(SandboxCommandExecutor.class);
         UserSandboxResolver resolver = mock(UserSandboxResolver.class);
+        UserService userService = mock(UserService.class);
         LarkAuthorizationProperties properties = new LarkAuthorizationProperties();
         properties.setSandboxServiceKey("openclaw");
         LarkSandboxAuthorizationRuntime runtime = new LarkSandboxAuthorizationRuntime(
-            executor, resolver, properties, new ObjectMapper());
-        when(resolver.resolve("42", "openclaw"))
+            executor, resolver, properties, new ObjectMapper(), userService);
+        Users user = new Users();
+        user.setUserCode("user-code-42");
+        when(userService.findById(42L)).thenReturn(user);
+        when(resolver.resolve("user-code-42", "openclaw"))
             .thenReturn(new UserSandboxContext("sandbox-1", "42", "generation-1", new Date()));
         when(executor.run(any(), any()))
             .thenReturn(new SandboxCommandResult(0, "{\"configured\":true}", "", false, false))
@@ -42,6 +48,6 @@ class LarkSandboxAuthorizationRuntimeTest {
         assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
         assertThat(result.authorizationUrl()).isEqualTo("https://open.feishu.cn/device");
         assertThat(result.providerState()).contains("sandbox-1", "device-1");
-        verify(resolver).resolve("42", "openclaw");
+        verify(resolver).resolve("user-code-42", "openclaw");
     }
 }
