@@ -1,6 +1,6 @@
 import type { LayoutNode, RepoOption, SplitTaskDraft } from './types';
 
-// 演示态分支名:用需求标题里的英文/数字片段,退化为 feat/req。
+// 建议分支名:用需求标题里的英文/数字片段,退化为 feat/req。用户可在拆单弹窗改写,留空则后端 buildBranchName 兜底。
 const suggestBranch = (title: string): string => {
   const slug = title
     .toLowerCase()
@@ -18,9 +18,9 @@ const repoTier = (repoName: string): number => {
   return 1;
 };
 
-// 演示态 AI 预拆:每个仓库预拆一个节点,并按仓库职责推断依赖边,连成一条 mw → be → fe 依赖链。
-// 真实实现由后端按需求内容 + 调用/契约关系产出图;这里只为讲清「一个需求 → 多任务依赖图」。
-// 演示态任务标题:需求标题 + 仓库短名,让 1 对多后的每个任务有可区分的标题。
+// 客户端预拆建议:每个仓库预拆一个节点,并按仓库职责(mw → be → fe)推断依赖边连成一条链,作为拆单弹窗的初始草稿。
+// 仅是启发式初值,用户可增删节点、改仓库/分支/承接人、改依赖;确认后由后端按草稿批量建会话并落库依赖。
+// 任务标题:需求标题 + 仓库短名,让 1 对多后的每个任务有可区分的标题。
 const suggestTaskTitle = (reqTitle: string, repoName: string): string => {
   const shortRepo = repoName.split('/').pop() || repoName;
   return `${reqTitle} · ${shortRepo}`;

@@ -170,6 +170,10 @@ export default {
   'settings.params.common.pick': 'Common variables',
   'settings.params.common.ghToken.desc':
     'GitHub access token, used by develop projects to clone and push private repositories',
+  'settings.params.common.glToken.desc':
+    'GitLab access token, used by develop projects to clone and push private GitLab repositories',
+  'settings.params.common.giteaToken.desc':
+    'Gitea access token, used by develop projects to clone and push private Gitea repositories',
   'settings.params.valueRequired': 'Please enter parameter value',
   'settings.params.valueTip': 'The value will be encrypted and never displayed in plain text.',
   'settings.params.valueKeepTip': 'Value is configured. Leave it empty to keep the existing value.',

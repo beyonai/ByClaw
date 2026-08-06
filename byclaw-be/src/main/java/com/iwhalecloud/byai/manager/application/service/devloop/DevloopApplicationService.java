@@ -34,6 +34,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.TesterConfigDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
+import com.iwhalecloud.byai.manager.dto.devloop.RequirementSplitDTO;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.*;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -733,29 +734,63 @@ public class DevloopApplicationService {
         for (IntegrationRun run : integrationRunService.listWithRequirementByProject(projectId)) {
             latestRunByReq.putIfAbsent(run.getRequirementId(), run);
         }
+        // 需求与仓库一次性批量取尽,避免看板逐需求/逐子任务 selectById 造成 N+1 查询。
+        Map<Long, ScanRequireItem> itemById = batchLoadItems(tasksByReq.keySet());
+        Map<Long, ProjectRepo> repoById = batchLoadRepos(tasks);
         // 单轮内存缓存 sessionId→快照:同一会话在就绪判定与环节展示间只投影一次。
         Map<Long, DevloopPhaseService.PhaseSnapshot> snapshotCache = new HashMap<>();
         List<Map<String, Object>> board = new ArrayList<>();
         for (Map.Entry<Long, List<ScanItemTask>> entry : tasksByReq.entrySet()) {
-            ScanRequireItem item = scanRequireItemMapper.selectById(entry.getKey());
+            ScanRequireItem item = itemById.get(entry.getKey());
             if (item == null) {
                 continue;
             }
             board.add(requirementIntegrationToVo(item, entry.getValue(), latestRunByReq.get(entry.getKey()),
-                snapshotCache));
+                repoById, snapshotCache));
         }
         return ResponseUtil.successResponse(board);
     }
 
+    /** 需求 id → 需求,一次批量取尽。空集合直接返回空表,规避 MyBatis-Plus 空 IN 生成非法 SQL。 */
+    private Map<Long, ScanRequireItem> batchLoadItems(Collection<Long> requirementIds) {
+        if (requirementIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<Long, ScanRequireItem> byId = new HashMap<>();
+        for (ScanRequireItem item : scanRequireItemMapper.selectBatchIds(requirementIds)) {
+            byId.put(item.getItemId(), item);
+        }
+        return byId;
+    }
+
+    /** 仓库 id → 仓库,一次批量取尽子任务涉及的仓库。空集合直接返回空表,规避空 IN 非法 SQL。 */
+    private Map<Long, ProjectRepo> batchLoadRepos(List<ScanItemTask> tasks) {
+        Set<Long> repoIds = new HashSet<>();
+        for (ScanItemTask task : tasks) {
+            if (task.getRepoId() != null) {
+                repoIds.add(task.getRepoId());
+            }
+        }
+        if (repoIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<Long, ProjectRepo> byId = new HashMap<>();
+        for (ProjectRepo repo : projectRepoMapper.selectBatchIds(repoIds)) {
+            byId.put(repo.getRepoId(), repo);
+        }
+        return byId;
+    }
+
     /** 一个需求 + 其子任务 + 最近执行 → 前端 RequirementIntegration。 */
     private Map<String, Object> requirementIntegrationToVo(ScanRequireItem item, List<ScanItemTask> tasks,
-        IntegrationRun latestRun, Map<Long, DevloopPhaseService.PhaseSnapshot> snapshotCache) {
+        IntegrationRun latestRun, Map<Long, ProjectRepo> repoById,
+        Map<Long, DevloopPhaseService.PhaseSnapshot> snapshotCache) {
         List<Map<String, Object>> taskVos = new ArrayList<>();
         List<Map<String, Object>> kickbackTasks = new ArrayList<>();
         boolean allCoded = true;
         for (ScanItemTask task : tasks) {
             DevloopPhaseService.PhaseSnapshot snap = snapshotFor(task.getSessionId(), snapshotCache);
-            ProjectRepo repo = task.getRepoId() != null ? projectRepoMapper.selectById(task.getRepoId()) : null;
+            ProjectRepo repo = task.getRepoId() != null ? repoById.get(task.getRepoId()) : null;
             String repoName = repo != null && repo.getRepoFullName() != null ? repo.getRepoFullName() : "";
             String branch = task.getSessionId() != null
                 ? buildBranchName(detectTaskType(item, item.getTitle()), task.getSessionId()) : "";
@@ -1869,6 +1904,107 @@ public class DevloopApplicationService {
     }
 
     /**
+     * 需求拆分为多仓库子任务:一个需求拆成 N 个子任务,各自 repo/分支/承接员工,子任务间依赖(DAG)落库。
+     * MVP:依赖只记录不控制顺序,全部子任务立即各起会话。防重与单任务启动共用需求 sessionId 闸门。
+     * rowId 是前端临时ID,先给每个子任务预分配真实 taskId 建映射,再把 dependsOn 的 rowId 翻译成 taskId 存库。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Map<String, Object>> splitTask(RequirementSplitDTO dto) {
+        Long projectId = dto.getProjectId();
+        Long sourceItemId = dto.getSourceItemId();
+        List<RequirementSplitDTO.SplitTask> tasks = dto.getTasks();
+        if (projectId == null || sourceItemId == null || tasks == null || tasks.isEmpty()) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.split.tasks.required"));
+        }
+        // 防重复启动:需求已关联会话则拒,与单任务启动同一闸门。
+        ScanRequireItem sourceItem = scanRequireItemMapper.selectById(sourceItemId);
+        if (sourceItem == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.repository.not.found"));
+        }
+        if (sourceItem.getSessionId() != null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.requirement.already.started"));
+        }
+
+        Long operatorId = CurrentUserHolder.getCurrentUserId();
+        LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
+        String taskType = detectTaskType(sourceItem, sourceItem.getTitle());
+        String projectDesc = StringUtils.isNotBlank(sourceItem.getContent()) ? getRequirementContent(sourceItem)
+            : sourceItem.getTitle();
+
+        // 先解析并校验全部子任务的 agent/repo,再动手建会话:失败(缺绑定/仓库不属项目)在无副作用时就返回,
+        // 避免半拆状态。@Transactional 的 rollbackFor 只在抛异常时生效,return failRes 不回滚,所以必须先校验后落库。
+        List<ResolvedSplitTask> resolved = new ArrayList<>();
+        for (RequirementSplitDTO.SplitTask task : tasks) {
+            Long agentId = resolveAgentIdForAssignee(task.getAssigneeId(), projectId);
+            if (agentId == null) {
+                return ResponseUtil.failRes(I18nUtil.get("devloop.task.agent.required"));
+            }
+            ProjectRepo repo = findProjectRepo(projectId, task.getRepoId());
+            if (repo == null) {
+                return ResponseUtil.failRes(I18nUtil.get("devloop.task.repository.not.found"));
+            }
+            String title = StringUtils.isNotBlank(task.getTitle()) ? task.getTitle() : sourceItem.getTitle();
+            resolved.add(new ResolvedSplitTask(task, agentId, repo, title));
+        }
+
+        // 校验通过后再预分配 taskId,建 rowId→taskId 映射,供依赖翻译。
+        Map<String, Long> taskIdByRow = new LinkedHashMap<>();
+        for (RequirementSplitDTO.SplitTask task : tasks) {
+            taskIdByRow.put(task.getRowId(), sequenceService.nextVal());
+        }
+
+        List<Map<String, Object>> created = new ArrayList<>();
+        Long firstSessionId = null;
+        for (ResolvedSplitTask item : resolved) {
+            RequirementSplitDTO.SplitTask task = item.task();
+            ProjectRepo repo = item.repo();
+            SessionStart started = startOneSession(item.agentId(), projectId, item.title(), projectDesc, taskType,
+                repo, task.getBranch(), loginInfo);
+            if (firstSessionId == null) {
+                firstSessionId = started.sessionId();
+            }
+            // 依赖 rowId → 真实 taskId 逗号串;引用不到的 rowId 跳过,避免存悬空ID。
+            String dependsOn = translateDeps(task.getDependsOn(), taskIdByRow);
+            scanItemTaskService.insertSubtaskWithDeps(taskIdByRow.get(task.getRowId()), sourceItemId, projectId,
+                repo.getRepoId(), started.sessionId(), dependsOn, operatorId);
+
+            Map<String, Object> vo = new HashMap<>();
+            vo.put("taskId", taskIdByRow.get(task.getRowId()));
+            vo.put("repoId", repo.getRepoId());
+            vo.put("sessionId", started.sessionId());
+            vo.put("branch", started.branchName());
+            vo.put("dependsOn", dependsOn);
+            created.add(vo);
+        }
+
+        // 需求回写入度0(第一个)子任务的会话,满足"已启动"判定/防重/跳转;拆分多会话由子任务表承载。
+        ScanRequireItem update = new ScanRequireItem();
+        update.setItemId(sourceItemId);
+        update.setSessionId(firstSessionId);
+        scanRequireItemMapper.updateById(update);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("sessionId", firstSessionId);
+        result.put("tasks", created);
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 依赖 rowId 列表翻译成真实 taskId 逗号串;映射不到的 rowId(用户误引用/已删)跳过,不存悬空ID。 */
+    private String translateDeps(List<String> depRowIds, Map<String, Long> taskIdByRow) {
+        if (depRowIds == null || depRowIds.isEmpty()) {
+            return null;
+        }
+        List<String> resolved = new ArrayList<>();
+        for (String rowId : depRowIds) {
+            Long depTaskId = taskIdByRow.get(rowId);
+            if (depTaskId != null) {
+                resolved.add(String.valueOf(depTaskId));
+            }
+        }
+        return resolved.isEmpty() ? null : String.join(",", resolved);
+    }
+
+    /**
      * 从需求派生任务（会话）核心逻辑，不依赖登录 ThreadLocal 取当前用户，供手动启动与定时自动派生复用。 userId 用于成员/agent 校验，loginInfo 透传给异步 chat（自动派生时由源创建者的
      * LoginInfo 构造）。
      */
@@ -1915,23 +2051,10 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes(I18nUtil.get("devloop.task.repository.not.found"));
         }
 
-        // 会话即任务：同步建会话（带 projectId）拿到 sessionId，分支名依赖 sessionId，
-        // 再据此生成完整提示词写回 chatDto，耗时的 LLM 对话放到事务提交后异步执行。
-        // 先用 title 作会话内容让会话名可读，建成后再覆盖为完整提示词供异步 chat 使用。
-        AssistantChatDto chatDto = new AssistantChatDto();
-        chatDto.setSessionId(null);
-        chatDto.setAgentId(agentId);
-        chatDto.setProjectId(projectId);
-        chatDto.setChatContent(title);
-        chatDto.setAccessTerminal("DevLoop");
-        chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
-        assistantChatService.createGroupChatSession(chatDto);
-        Long sessionId = chatDto.getSessionId();
-
-        String branchName = buildBranchName(taskType, sessionId);
-        Project project = projectMapper.selectById(projectId);
-        String projectName = project != null ? project.getProjectName() : "";
-        chatDto.setChatContent(buildTaskPrompt(projectName, repo, branchName, taskType, title, description));
+        // 会话即任务:建会话+算分支+写提示词+登记事务后异步 chat,单任务与拆分共用 startOneSession。
+        // 分支名由后端按会话ID生成(单任务无用户自定义分支入口),故 explicitBranch 传 null。
+        SessionStart started = startOneSession(agentId, projectId, title, description, taskType, repo, null, loginInfo);
+        Long sessionId = started.sessionId();
 
         // 需求项回写 sessionId，标记“已启动”并支持跳转会话
         if (sourceItemId != null) {
@@ -1943,15 +2066,49 @@ public class DevloopApplicationService {
             scanItemTaskService.upsertOnStart(sourceItemId, projectId, repo.getRepoId(), sessionId, userId);
         }
 
-        // 事务提交后再异步触发 chat：确保异步线程能读到本事务已建的 session。
-        submitTaskChatAfterCommit(chatDto, loginInfo, sessionId);
-
         Map<String, Object> result = new HashMap<>();
         result.put("agentId", agentId);
         result.put("sessionId", sessionId);
-        result.put("branchName", branchName);
+        result.put("branchName", started.branchName());
         result.put("title", title);
         return ResponseUtil.successResponse(result);
+    }
+
+    /** 一次会话启动的产物:会话ID + 最终分支名(前端自定义优先,否则后端按会话生成)。 */
+    private record SessionStart(Long sessionId, String branchName) {
+    }
+
+    /** 拆单子任务校验通过后的解析结果:agent/repo/标题已确定,供后续建会话前先整批校验、无副作用地失败返回。 */
+    private record ResolvedSplitTask(RequirementSplitDTO.SplitTask task, Long agentId, ProjectRepo repo, String title) {
+    }
+
+    /**
+     * 建一个开发会话并挂上完整任务提示词,事务提交后异步触发 LLM 对话。
+     * 分支名依赖 sessionId,故先建会话拿 id 再算分支;explicitBranch 非空时(拆分场景用户填写)优先采用。
+     * 不落库需求/子任务,由调用方按单任务或拆分各自登记,保持本方法只管"起一个会话"。
+     */
+    private SessionStart startOneSession(Long agentId, Long projectId, String title, String description,
+        String taskType, ProjectRepo repo, String explicitBranch, LoginInfo loginInfo) {
+        // 先用 title 作会话内容让会话名可读,建成后再覆盖为完整提示词供异步 chat 使用。
+        AssistantChatDto chatDto = new AssistantChatDto();
+        chatDto.setSessionId(null);
+        chatDto.setAgentId(agentId);
+        chatDto.setProjectId(projectId);
+        chatDto.setChatContent(title);
+        chatDto.setAccessTerminal("DevLoop");
+        chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
+        assistantChatService.createGroupChatSession(chatDto);
+        Long sessionId = chatDto.getSessionId();
+
+        String branchName = StringUtils.isNotBlank(explicitBranch) ? explicitBranch.trim()
+            : buildBranchName(taskType, sessionId);
+        Project project = projectMapper.selectById(projectId);
+        String projectName = project != null ? project.getProjectName() : "";
+        chatDto.setChatContent(buildTaskPrompt(projectName, repo, branchName, taskType, title, description));
+
+        // 事务提交后再异步触发 chat：确保异步线程能读到本事务已建的 session。
+        submitTaskChatAfterCommit(chatDto, loginInfo, sessionId);
+        return new SessionStart(sessionId, branchName);
     }
 
     /**
@@ -2229,16 +2386,53 @@ public class DevloopApplicationService {
         }
         String repoFullName = repo != null && repo.getRepoFullName() != null ? repo.getRepoFullName() : "";
         String repoUrl = repo != null && repo.getRepoUrl() != null ? repo.getRepoUrl() : repoFullName;
+        String provider = repo != null ? repo.getProvider() : null;
+        String repoCloneHint = buildRepoCloneHint(provider, repoUrl, repoFullName);
         return template.replace("${projectName}", projectName != null ? projectName : "").replace("${repoUrl}", repoUrl)
             .replace("${repoFullName}", repoFullName).replace("${branchName}", branchName != null ? branchName : "")
             .replace("${taskType}", taskType != null ? taskType : "").replace("${title}", title != null ? title : "")
-            .replace("${description}", description != null ? description : "");
+            .replace("${repoCloneHint}", repoCloneHint).replace("${description}", description != null ? description : "");
+    }
+
+    /** 各代码平台的公共域名与令牌注入约定;自建/私有实例靠显式 repoUrl 兜底,不在此拼接。 */
+    private record RepoProviderSpec(String label, String host, String tokenEnv, String cloneUrlPrefix) {
+    }
+
+    private static final Map<String, RepoProviderSpec> REPO_PROVIDER_SPECS = Map.of(
+        // GitLab 带令牌 clone 必须用 oauth2:token@ 前缀,与 github/gitea 的 $TOKEN@ 不同。
+        "github", new RepoProviderSpec("GitHub", "github.com", "GH_TOKEN", "$GH_TOKEN@"), "gitlab",
+        new RepoProviderSpec("GitLab", "gitlab.com", "GL_TOKEN", "oauth2:$GL_TOKEN@"), "gitea",
+        new RepoProviderSpec("Gitea", "gitea.com", "GITEA_TOKEN", "$GITEA_TOKEN@"));
+
+    /**
+     * 按代码平台生成「仓库访问说明」段,填入模板 ${repoCloneHint} 占位符。 显式 repoUrl(自建/私有实例)优先直用;否则按平台公共域名 +
+     * 令牌变量拼带令牌的 clone 地址。
+     */
+    private static String buildRepoCloneHint(String provider, String repoUrl, String repoFullName) {
+        RepoProviderSpec spec = REPO_PROVIDER_SPECS.getOrDefault(provider, REPO_PROVIDER_SPECS.get("github"));
+        // repoFullName 形如 owner/repo 才按公共域名拼接;显式 repoUrl 一律直用,兼容自建实例。
+        boolean hasFullName = repoFullName != null && !repoFullName.trim().isEmpty();
+        String cloneUrl;
+        if (repoUrl != null && repoUrl.startsWith("http") && !repoUrl.equals(repoFullName)) {
+            // 显式完整地址:在 https:// 后插入令牌前缀,让带令牌 clone 对自建实例同样生效。
+            cloneUrl = repoUrl.replaceFirst("^https?://", "https://" + spec.cloneUrlPrefix());
+        }
+        else if (hasFullName) {
+            cloneUrl = "https://" + spec.cloneUrlPrefix() + spec.host() + "/" + repoFullName + ".git";
+        }
+        else {
+            cloneUrl = "";
+        }
+        return "- 目标仓库全路径为 " + repoFullName + "，它可能是私有仓库；" + spec.label() + " 访问令牌(PAT)已配置在环境变量 " + spec.tokenEnv()
+            + " 中，请直接使用它克隆和推送。\n" + "- 用带令牌的完整地址克隆：git clone " + cloneUrl + "\n"
+            + "- 若提示仓库或分支不存在，通常是私有仓库权限问题，请确认已使用环境变量 " + spec.tokenEnv() + " 中的令牌，不要据此判定仓库不存在、也不要改为在本地新建独立项目。";
     }
 
     /** 提示词模板兜底：DB 未配置 DEVLOOP_TASK_START_PROMPT 时使用，与 byai_ai_prompt 中的当前模板保持一致 */
     private static final String DEFAULT_TASK_PROMPT_TEMPLATE = "请处理以下任务：\n" + "## 任务信息\n"
         + "- 项目：${projectName}\n" + "- 代码仓库：${repoFullName}\n" + "- 目标分支：${branchName}（尚未创建，需你新建）\n"
-        + "- 任务类型：${taskType}\n" + "- 任务标题：${title}\n\n" + "## 需求详情\n${description}\n\n" + "## 代码仓库\n"
+        + "- 任务类型：${taskType}\n" + "- 任务标题：${title}\n\n" + "## 需求详情\n${description}\n\n" + "## 仓库访问说明\n"
+        + "${repoCloneHint}\n\n" + "## 代码仓库\n"
         + "任务的代码克隆仓库路径需要遵循/by/.sessions/{sessionId}/{repoName}/\n\n" + "## 强制要求\n"
         + "acp下发任务告诉对方启动的时候必须要调用skill：self-developed-rules;\n"
         + "研发流程的输出文档如：需求文档、设计文档、测试文档保存在/by/.sessions/{sessionId}/下面";

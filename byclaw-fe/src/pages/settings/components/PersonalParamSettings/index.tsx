@@ -43,6 +43,8 @@ const DEFAULT_PAGE_SIZE = 10;
 // 目前后端仅识别 GH_TOKEN(研发项目 clone/push 私有仓库);新增约定变量只需在此追加。
 const COMMON_PARAM_KEYS: { key: string; descriptionId: string }[] = [
   { key: 'GH_TOKEN', descriptionId: 'settings.params.common.ghToken.desc' },
+  { key: 'GL_TOKEN', descriptionId: 'settings.params.common.glToken.desc' },
+  { key: 'GITEA_TOKEN', descriptionId: 'settings.params.common.giteaToken.desc' },
 ];
 
 const PersonalParamSettings: React.FC = () => {

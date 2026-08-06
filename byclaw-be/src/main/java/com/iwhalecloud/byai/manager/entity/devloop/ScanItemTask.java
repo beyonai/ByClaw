@@ -35,6 +35,9 @@ public class ScanItemTask {
     /** 子任务状态 pending待启动/running进行中/done完成/failed失败。 */
     private String status;
 
+    /** 上游子任务ID列表(逗号分隔),需求内DAG依赖;空=无上游可先开工。 */
+    private String dependsOn;
+
     private Long createBy;
 
     private Date createTime;

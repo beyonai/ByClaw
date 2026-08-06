@@ -10,9 +10,7 @@ import ProjectFormModal, {
   type ProjectFormValues,
   type ProjectShareMember,
 } from '@/pages/projectSpace/components/ProjectFormModal';
-import ProjectOnboardingWizard, {
-  type OnboardingBasicValues,
-} from '@/pages/projectSpace/components/ProjectOnboardingWizard';
+import ProjectOnboardingWizard from '@/pages/projectSpace/components/ProjectOnboardingWizard';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
 import {
@@ -711,18 +709,14 @@ const ProjectSpaceList: React.FC = () => {
     };
   }, []);
 
+  // 唯一新建入口:统一向导。step1 是完整项目表单,选研发才展开后续步骤,非研发建完即完成。
   const handleOpenCreateProject = () => {
-    setEditingProject(undefined);
-    setProjectModalOpen(true);
-  };
-
-  const handleOpenCreateDevelopProject = () => {
     setEditingProject(undefined);
     setWizardOpen(true);
   };
 
-  // 向导 step1:查重 + 建研发项目 + 存架构员工覆盖,返回 projectId 供后续建仓/初始化;失败返回空串。
-  const handleWizardCreateProject = async (values: OnboardingBasicValues): Promise<string> => {
+  // 向导 step1:按表单真实类型/共享/成员/默认员工建项目,返回 projectId 供研发项目后续建仓/初始化;失败返回空串。
+  const handleWizardCreateProject = async (values: ProjectFormValues): Promise<string> => {
     const projectName = normalizeProjectName(values.projectName);
     if (!projectName) {
       message.warning(t('message.projectNameRequired'));
@@ -735,13 +729,20 @@ const ProjectSpaceList: React.FC = () => {
       message.warning(t('message.projectNameDuplicate'));
       return '';
     }
+    const submitIsDevelopProject = isDevelopProjectEnabled && values.projectType === 'develop';
+    const submitIsOperationProject = isOperationProjectEnabled && values.projectType === 'operation';
+    // 默认项目固定不共享,研发/运营项目在对应能力启用时强制共享,其余取表单开关。
+    const submitSharedFlag =
+      values.projectType === 'default'
+        ? false
+        : submitIsDevelopProject || submitIsOperationProject || values.sharedFlag;
+    const shareMembers = submitSharedFlag ? values.shareMembers || [] : [];
     try {
       const res = await createProject({
         projectName,
         description: values.description?.trim(),
-        projectType: 'develop',
-        // 研发项目强制共享,与单表单弹窗规则一致。
-        isShare: 'Y',
+        projectType: values.projectType,
+        isShare: submitSharedFlag ? 'Y' : 'N',
         shareTargets: [],
       });
       const createdProjectId = getProjectIdFromSaveResponse(res);
@@ -749,9 +750,12 @@ const ProjectSpaceList: React.FC = () => {
         message.error(t('message.createFailed'));
         return '';
       }
-      // 架构员工作为项目默认覆盖落库(仅 architect 角色,其余留空回退全局)。
-      if (values.architectAgentId) {
-        await saveDefaultAgent({ architectAgentId: values.architectAgentId, projectId: Number(createdProjectId) });
+      if (submitSharedFlag && shareMembers.length) {
+        await syncProjectShareMembers(createdProjectId, shareMembers);
+      }
+      // 仅研发项目落库默认员工覆盖(项目作用域);其余类型不显示该区块,也不写空覆盖行。
+      if (submitIsDevelopProject && values.defaultAgents) {
+        await saveDefaultAgent({ ...values.defaultAgents, projectId: Number(createdProjectId) });
       }
       message.success(t('message.createSuccess'));
       const refreshedProjects = await fetchProjects();
@@ -759,7 +763,7 @@ const ProjectSpaceList: React.FC = () => {
       updateProjectScopeId(createdProject?.projectId || createdProjectId);
       return createdProjectId;
     } catch (error) {
-      console.error('Failed to create develop project via wizard:', error);
+      console.error('Failed to create project via wizard:', error);
       message.error(t('message.createFailed'));
       return '';
     }
@@ -819,6 +823,26 @@ const ProjectSpaceList: React.FC = () => {
       setDetailProject((current) => (`${current?.projectId || ''}` === targetProjectId ? detail : current));
     });
   };
+
+  // 详情页触发工作区初始化后(pending→initializing):重新拉详情刷新 initStatus,并刷新列表标签。
+  const handleProjectInitStarted = useCallback(
+    (projectId: string | number) => {
+      const targetProjectId = `${projectId || ''}`;
+      if (!targetProjectId) return;
+      const target =
+        mergedProjects.find((project) => `${project.projectId}` === targetProjectId) ||
+        (detailProject && `${detailProject.projectId}` === targetProjectId ? detailProject : undefined);
+      if (target) {
+        void fetchProjectFullDetail(target, true).then((detail) => {
+          setDetailProject((current) => (`${current?.projectId || ''}` === targetProjectId ? detail : current));
+        });
+      }
+      void fetchProjects().catch((error) => {
+        console.error('Failed to refresh project list after init started:', error);
+      });
+    },
+    [detailProject, fetchProjectFullDetail, fetchProjects, mergedProjects]
+  );
 
   // 向导完成:关闭向导并展开新建研发项目的详情。定义在 handleOpenProjectDetail 之后以满足声明顺序。
   const handleWizardFinish = (createdProjectId: string) => {
@@ -1387,6 +1411,7 @@ const ProjectSpaceList: React.FC = () => {
           onDeleteProject={isProjectCreator(detailProject) ? handleDeleteProject : undefined}
           onProjectSharedChange={handleProjectSharedChange}
           onCurrentUserRemoved={handleCurrentUserRemovedFromProject}
+          onProjectInitStarted={handleProjectInitStarted}
           developProjectEnabled={isDevelopProjectEnabled}
           operationProjectEnabled={isOperationProjectEnabled}
         />
@@ -1435,29 +1460,10 @@ const ProjectSpaceList: React.FC = () => {
                   onChange={(event) => setProjectScopeSearchKeyword(event.target.value)}
                 />
               </Dropdown>
-              {isDevelopProjectEnabled ? (
-                // 启用研发项目后:加号变菜单,普通项目走单表单,研发项目走引导向导。
-                <Dropdown
-                  trigger={['click']}
-                  menu={{
-                    items: [
-                      { key: 'normal', label: t('createProject'), onClick: handleOpenCreateProject },
-                      { key: 'develop', label: t('createDevelopProject'), onClick: handleOpenCreateDevelopProject },
-                    ],
-                  }}
-                >
-                  <Button className={styles.newProjectButton} icon={<PlusOutlined />} />
-                </Dropdown>
-              ) : (
-                <Tooltip title={t('createProject')} placement="top">
-                  {/* 右侧仅保留新建项目入口，项目详情由下方快捷入口承载。 */}
-                  <Button
-                    className={styles.newProjectButton}
-                    icon={<PlusOutlined />}
-                    onClick={handleOpenCreateProject}
-                  />
-                </Tooltip>
-              )}
+              <Tooltip title={t('createProject')} placement="top">
+                {/* 唯一新建入口:统一向导。step1 完整表单,选研发才展开后续步骤。 */}
+                <Button className={styles.newProjectButton} icon={<PlusOutlined />} onClick={handleOpenCreateProject} />
+              </Tooltip>
             </div>
             {/* 会话搜索与项目详情入口同行展示，入口不覆盖搜索框。 */}
             <div
@@ -1521,6 +1527,8 @@ const ProjectSpaceList: React.FC = () => {
 
       <ProjectOnboardingWizard
         open={wizardOpen}
+        projectTypeConfigOptions={projectTypeOptions}
+        projectTypeLoading={projectTypeLoading}
         onCancel={() => setWizardOpen(false)}
         onCreateProject={handleWizardCreateProject}
         onFinish={handleWizardFinish}

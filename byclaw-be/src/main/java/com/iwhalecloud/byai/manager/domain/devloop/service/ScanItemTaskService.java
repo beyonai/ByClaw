@@ -91,6 +91,28 @@ public class ScanItemTaskService {
         return task;
     }
 
+    /**
+     * 拆分建子任务:用预分配的 taskId 直接建一条 running 子任务并写依赖。
+     * 拆分需先给全部子任务分配 taskId 以翻译 dependsOn(rowId→taskId),故 taskId 由调用方传入,不在此内生成。
+     * dependsOn 为已翻译好的上游 taskId 逗号串;无上游传 null。
+     */
+    public void insertSubtaskWithDeps(Long taskId, Long requirementId, Long projectId, Long repoId, Long sessionId,
+        String dependsOn, Long operatorId) {
+        Date now = new Date();
+        ScanItemTask task = new ScanItemTask();
+        task.setTaskId(taskId);
+        task.setRequirementId(requirementId);
+        task.setProjectId(projectId);
+        task.setRepoId(repoId);
+        task.setSessionId(sessionId);
+        task.setStatus("running");
+        task.setDependsOn(dependsOn);
+        task.setCreateBy(operatorId);
+        task.setCreateTime(now);
+        task.setDeleteFlag("0");
+        scanItemTaskMapper.insert(task);
+    }
+
     /** 唯一索引 (requirement_id, repo_id) 上的定位;repoId 可空(单仓库需求)。 */
     private ScanItemTask findByRequirementRepo(Long requirementId, Long repoId) {
         LambdaQueryWrapper<ScanItemTask> wrapper = new LambdaQueryWrapper<>();

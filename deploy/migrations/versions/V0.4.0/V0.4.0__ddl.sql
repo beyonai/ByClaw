@@ -404,6 +404,7 @@ CREATE TABLE IF NOT EXISTS byai.byai_scan_item_task (
     repo_id         BIGINT,
     session_id      BIGINT,
     status          VARCHAR(20)  NOT NULL DEFAULT 'pending',
+    depends_on      VARCHAR(512),
     create_by       BIGINT,
     create_time     TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
     update_by       BIGINT,
@@ -419,6 +420,7 @@ COMMENT ON COLUMN byai.byai_scan_item_task.project_id IS '所属研发项目ID b
 COMMENT ON COLUMN byai.byai_scan_item_task.repo_id IS '目标仓库ID byai_project_repo.repo_id;单仓库需求可空';
 COMMENT ON COLUMN byai.byai_scan_item_task.session_id IS '执行该仓库工作的会话ID byai_session.session_id;启动前为空';
 COMMENT ON COLUMN byai.byai_scan_item_task.status IS '子任务状态 pending待启动/running进行中/done完成/failed失败';
+COMMENT ON COLUMN byai.byai_scan_item_task.depends_on IS '上游子任务ID列表(逗号分隔),需求内DAG依赖;空=无上游可先开工';
 COMMENT ON COLUMN byai.byai_scan_item_task.create_time IS '创建时间';
 COMMENT ON COLUMN byai.byai_scan_item_task.delete_flag IS '删除标记 0正常 1删除';
 
@@ -439,10 +441,14 @@ COMMENT ON COLUMN byai.byai_integration_run.kickback_at IS '失败打回引擎�
 ALTER TABLE byai.byai_project_repo ADD COLUMN repo_type VARCHAR(16) NOT NULL DEFAULT 'code';
 COMMENT ON COLUMN byai.byai_project_repo.repo_type IS '仓库类型 workspace工作区(项目上下文/产出落点,单个)/code代码仓库(可多个)';
 
+-- 仓库代码平台:决定 clone host 与令牌注入(github->GH_TOKEN,gitlab->GL_TOKEN oauth2前缀,gitea->GITEA_TOKEN)。
+-- 存量行默认 github;自建/私有实例靠 repo_url 显式完整地址兜底,不受 host 拼接影响。
+ALTER TABLE byai.byai_project_repo ADD COLUMN provider VARCHAR(20) NOT NULL DEFAULT 'github';
+COMMENT ON COLUMN byai.byai_project_repo.provider IS '代码平台 github/gitlab/gitea;决定 clone host 与令牌变量,存量默认 github';
+
 -- 研发项目工作区初始化状态:架构数字员工建成工作区前禁止建需求/启动任务。
--- 存量行与普通项目默认 ready(不受限);新建 develop 项目由应用层置 pending,触发后 initializing,完成后 ready。
-ALTER TABLE byai.byai_project ADD COLUMN init_status VARCHAR(16) NOT NULL DEFAULT 'ready';
-COMMENT ON COLUMN byai.byai_project.init_status IS '研发项目初始化状态 ready已就绪/pending待初始化/initializing初始化中;仅 develop 未 ready 前禁用建需求与启动任务';
+ALTER TABLE byai.byai_project ADD COLUMN init_status VARCHAR(16);
+COMMENT ON COLUMN byai.byai_project.init_status IS '研发项目初始化状态 ready已就绪/pending待初始化/initializing初始化中;仅 develop 未 ready 前禁用建需求与启动任务。无列默认值,应用层建项目时显式赋值';
 ALTER TABLE byai.byai_project ADD COLUMN build_index VARCHAR(4) NOT NULL DEFAULT 'N';
 COMMENT ON COLUMN byai.byai_project.build_index IS '初始化是否建索引 Y建立/N不建立(默认)';
 ALTER TABLE byai.byai_project ADD COLUMN index_skills VARCHAR(512);

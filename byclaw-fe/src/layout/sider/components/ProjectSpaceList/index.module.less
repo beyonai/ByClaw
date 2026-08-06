@@ -2940,6 +2940,38 @@
   font-size: 12px;
 }
 
+// 仓库行「初始化中」进行态:loading 图标 + 文案同行,与相邻的「重新初始化」链接区分。
+.repoInitProgress {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #999;
+  font-size: 14px;
+}
+
+// 工作区初始化配置弹窗:建索引 + 技能包多选。
+.initConfigBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.initConfigDesc {
+  color: #999;
+  font-size: 13px;
+}
+
+.initConfigField {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.initConfigLabel {
+  color: #333;
+  font-weight: 500;
+}
+
 .manualRequirementModal {
   :global {
     .@{antPrefix}-modal-content {

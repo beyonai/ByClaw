@@ -28,6 +28,9 @@ public class ProjectRepo {
     /** 仓库类型 workspace工作区(单个)/code代码仓库(可多个);存量默认 code。 */
     private String repoType;
 
+    /** 代码平台 github/gitlab/gitea;决定 clone host 与令牌变量,存量默认 github。 */
+    private String provider;
+
     private String createBy;
 
     @JSONField(format = "yyyy-MM-dd HH:mm:ss")

@@ -39,6 +39,7 @@ import {
   IdcardOutlined,
   LeftOutlined,
   LoadingOutlined,
+  ThunderboltOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -56,7 +57,6 @@ import {
   createManualRequirement,
   createProjectRepo,
   createScanSource,
-  createTask,
   deleteManualRequirement,
   deleteOperationAccount,
   deleteOperationRequirement,
@@ -83,7 +83,9 @@ import {
   saveProjectFileToSpace,
   renameProjectSpaceFile,
   searchDingtalkGroups,
+  splitTask,
   startDwsDeviceAuth,
+  startProjectInit,
   startOperationRequirement,
   toggleScanSource,
   triggerScan,
@@ -95,6 +97,7 @@ import {
   type DevloopProjectSpaceFile,
   type DevloopTaskChanges,
   type DevloopTaskFileDiff,
+  type RepoProvider,
 } from '@/service/devloop';
 import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
 import { queryMyCreatedAndSubscribedAgentsV2 } from '@/service/digitalEmployees';
@@ -215,6 +218,8 @@ type RepoOption = {
   defaultBranch?: string;
   // 仓库类型:workspace 工作区(单个)/code 代码仓库(可多个);存量无值按 code 处理。
   repoType?: 'workspace' | 'code';
+  // 代码平台:决定展示 host 与 clone/push 行为;存量无值按 github 处理。
+  provider?: RepoProvider;
 };
 
 type ScanLogEntry = {
@@ -600,9 +605,17 @@ type Props = {
   onDeleteProject?: (project: ProjectSpace) => void;
   onProjectSharedChange?: (projectId: string | number) => void;
   onCurrentUserRemoved?: (projectId: number) => void;
+  // 研发项目工作区初始化已触发(pending→initializing):通知父级重新拉详情刷新 initStatus。
+  onProjectInitStarted?: (projectId: string | number) => void;
   developProjectEnabled?: boolean;
   operationProjectEnabled?: boolean;
 };
+
+// 架构初始化可选技能包:枚举暂前端硬编码,与新建向导 step3 保持一致,后续接后端 skill 目录。
+const INIT_SKILL_PACKAGE_OPTIONS = [
+  { value: 'trellis', label: 'trellis' },
+  { value: 'superpowers', label: 'superpowers' },
+];
 
 const REQUIREMENT_PAGE_SIZE = 20;
 // 任务列表固定页大小，取消分页器后按此值触底追加。
@@ -630,6 +643,43 @@ const splitFilePath = (path: string) => {
   const idx = path.lastIndexOf('/');
   return idx >= 0 ? { name: path.slice(idx + 1), dir: path.slice(0, idx) } : { name: path, dir: '' };
 };
+
+// 各代码平台的公共域名;自建/私有实例(非公共域名)靠显式 repoUrl 兜底,不在此拼接。
+const REPO_PROVIDER_HOSTS: Record<RepoProvider, string> = {
+  github: 'github.com',
+  gitlab: 'gitlab.com',
+  gitea: 'gitea.com',
+};
+
+// 仓库展示 URL:优先用显式 repoUrl;缺省时按 owner/repo + 平台公共域名拼接(默认 GitHub)。
+// 两者都没有才返回空,交给调用方兜底占位符。
+const getRepoDisplayUrl = (repo: { repoUrl?: string; repoFullName?: string; provider?: RepoProvider }) => {
+  const explicit = repo.repoUrl?.trim();
+  if (explicit) return explicit;
+  const fullName = repo.repoFullName?.trim();
+  // 仅当形如 owner/repo(含斜杠、非完整 URL)才拼接,避免把已是链接或异常值再拼一次。
+  if (fullName && fullName.includes('/') && !/^https?:\/\//i.test(fullName)) {
+    const host = REPO_PROVIDER_HOSTS[repo.provider ?? 'github'];
+    return `https://${host}/${fullName.replace(/\.git$/i, '')}`;
+  }
+  return '';
+};
+
+// 新增仓库表单的初始/重置值:多处入口(渠道/需求/管理/需求拆分)复用同一份默认,避免字面量漂移。
+type RepoFormState = {
+  repoFullName: string;
+  repoUrl: string;
+  defaultBranch: string;
+  repoType: 'workspace' | 'code';
+  provider: RepoProvider;
+};
+const getDefaultRepoForm = (): RepoFormState => ({
+  repoFullName: '',
+  repoUrl: '',
+  defaultBranch: 'main',
+  repoType: 'code',
+  provider: 'github',
+});
 
 // unified diff 行类型：git diff 输出按行首字符分类，供右侧抽屉逐行着色展示。
 type DiffLineType = 'meta' | 'hunk' | 'add' | 'del' | 'context';
@@ -800,6 +850,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   onDeleteProject,
   onProjectSharedChange,
   onCurrentUserRemoved,
+  onProjectInitStarted,
   developProjectEnabled = false,
   operationProjectEnabled = false,
 }) => {
@@ -823,6 +874,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 每个钉钉/待办源的授权状态(查各自创建者),键为 sourceId。替代旧的全局 dwsAuthed 单一状态。
   const [sourceDwsStatusMap, setSourceDwsStatusMap] = useState<Record<number, SourceDwsStatus>>({});
   const [repos, setRepos] = useState<RepoOption[]>([]);
+  // 工作区初始化配置窗:pending 时从仓库管理触发,复用新建向导 step3 的建索引/技能包配置。
+  const [initModalOpen, setInitModalOpen] = useState(false);
+  const [initStarting, setInitStarting] = useState(false);
+  const [initBuildIndex, setInitBuildIndex] = useState(false);
+  const [initSkillPackages, setInitSkillPackages] = useState<string[]>([]);
   const [requirements, setRequirements] = useState<RequirementItem[]>([]);
   // 运营需求通过扫描源类型与研发渠道隔离，启动后才会拆解为会话任务。
   const [operationRequirements, setOperationRequirements] = useState<any[]>([]);
@@ -947,12 +1003,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [repoModalTarget, setRepoModalTarget] = useState<
     'source' | 'manualRequirement' | 'manage' | 'requirementSplit'
   >('source');
-  const [repoForm, setRepoForm] = useState<{
-    repoFullName: string;
-    repoUrl: string;
-    defaultBranch: string;
-    repoType: 'workspace' | 'code';
-  }>({ repoFullName: '', repoUrl: '', defaultBranch: 'main', repoType: 'code' });
+  const [repoForm, setRepoForm] = useState<RepoFormState>(getDefaultRepoForm());
   const [repoSaving, setRepoSaving] = useState(false);
   // 仓库弹窗默认看列表,点「新增仓库」再弹出表单(嵌套弹窗),避免列表和表单混在一屏。
   const [repoFormOpen, setRepoFormOpen] = useState(false);
@@ -1037,6 +1088,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const isDevelopProject = developProjectEnabled && projectType === 'develop';
   // 研发项目工作区初始化未就绪(pending/initializing)前禁止建需求/启动任务;普通项目与存量(无值)视为就绪。
   const developInitReady = !isDevelopProject || !project?.initStatus || project.initStatus === 'ready';
+  // 区分两种未就绪态:pending 从未触发初始化(引导去仓库管理点初始化),initializing 已触发在后台跑(转圈等待)。
+  const developInitPending = isDevelopProject && project?.initStatus === 'pending';
   // 运营能力与项目类型静态参数共用开关，避免未启用的环境误展示运营工作台。
   const isOperationProject = operationProjectEnabled && projectType === 'operation';
   const fileResourceId = activeSiderAgent.resourceId || (project?.resourceId ? `${project.resourceId}` : '');
@@ -3406,13 +3459,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
         repoUrl: repoForm.repoUrl.trim() || undefined,
         defaultBranch: repoForm.defaultBranch.trim() || undefined,
         repoType: repoForm.repoType,
+        provider: repoForm.provider,
       });
       if (!res?.repoId) {
         message.error(t('repository.createFailed'));
         return;
       }
       message.success(t('repository.createSuccess'));
-      setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main', repoType: 'code' });
+      setRepoForm(getDefaultRepoForm());
       // 建仓成功即关表单:manage 场景退回列表,source/manualRequirement 场景回到各自表单。
       setRepoFormOpen(false);
       await fetchRepos();
@@ -3458,6 +3512,33 @@ const ProjectDetailPanel: React.FC<Props> = ({
         }
       },
     });
+  };
+
+  // 打开初始化配置窗:每次打开重置为默认(不建索引、技能包空),避免带出上次残留。
+  const openInitModal = () => {
+    setInitBuildIndex(false);
+    setInitSkillPackages([]);
+    setInitModalOpen(true);
+  };
+
+  // 触发工作区初始化:下发建索引/技能包配置,后端置 initializing。成功后关窗并通知父级刷新 initStatus。
+  const handleStartInit = async () => {
+    if (!projectId) return;
+    setInitStarting(true);
+    try {
+      await startProjectInit({
+        projectId,
+        buildIndex: initBuildIndex,
+        skillPackages: initBuildIndex ? initSkillPackages : [],
+      });
+      message.success(t('initConfig.started'));
+      setInitModalOpen(false);
+      onProjectInitStarted?.(projectId);
+    } catch (error: any) {
+      message.error(error?.message || t('initConfig.startFailed'));
+    } finally {
+      setInitStarting(false);
+    }
   };
 
   const handleDeleteSource = (source: ScanSourceItem) => {
@@ -3516,30 +3597,44 @@ const ProjectDetailPanel: React.FC<Props> = ({
     }
   };
 
-  const handleStartTask = async (requirement: RequirementItem) => {
-    if (!projectId) return;
-    // 研发项目工作区初始化未就绪前禁止启动任务。
+  // 拆单确认:需求拆成多仓库子任务,各自仓库/分支/承接员工,dependsOn(rowId 引用)记录需求内 DAG 依赖,后端批量建会话。
+  const handleConfirmSplit = async (splitTasks: SplitTaskDraft[]) => {
+    const requirement = splitRequirement;
+    if (!requirement || !projectId) return;
     if (!developInitReady) {
       message.warning(t('initGuard.task'));
       return;
     }
     const requirementId = requirement.itemId;
     if (requirement.sessionId || startingRequirementIdsRef.current.has(requirementId)) return;
+    // 仓库为拆单必填项:未选仓库无法起会话,拦在提交前避免后端整批回滚。
+    const invalid = splitTasks.find((task) => task.repoId === null || task.repoId === undefined);
+    if (invalid) {
+      message.warning(t('requirement.split.repoRequired'));
+      return;
+    }
 
     startingRequirementIdsRef.current.add(requirementId);
     setStartingRequirementIds((prev) => new Set(prev).add(requirementId));
     try {
-      const res = await createTask({
+      const res = await splitTask({
         projectId,
         sourceItemId: requirementId,
-        title: requirement.title,
+        tasks: splitTasks.map((task) => ({
+          rowId: task.rowId,
+          title: task.title,
+          repoId: task.repoId as number,
+          branch: task.branch,
+          assigneeId: task.assigneeId,
+          dependsOn: task.dependsOn,
+        })),
       });
       if (!res) {
         message.error(t('requirement.createTaskFailed'));
         return;
       }
-
-      // 后端 createTask 已建会话(带 projectId)并异步发起对话，前端无需再自建会话回写。
+      setSplitRequirement(null);
+      // 需求回写入度0子任务会话,与单任务启动同口径,让按钮进入"已启动"。
       setRequirements((prev) =>
         prev.map((item) => (item.itemId === requirementId ? { ...item, sessionId: res.sessionId } : item))
       );
@@ -3553,7 +3648,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
       const errorMessage = error?.message || t('requirement.createTaskFailed');
       message.error(errorMessage);
       if (errorMessage.includes('重复启动') || errorMessage.includes('已有进行中的任务')) {
-        // 页面需求数据可能落后于后端任务状态，重复启动失败后主动刷新让按钮状态回到已启动。
         void fetchRequirements(sources, requirementSearchKeyword.trim());
       }
     } finally {
@@ -3564,15 +3658,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
         return next;
       });
     }
-  };
-
-  // 拆单确认:演示态下拆分结果尚无后端多任务接口,仍走原有单任务启动;真实实现将按 tasks 批量建任务。
-  const handleConfirmSplit = async (splitTasks: SplitTaskDraft[]) => {
-    const requirement = splitRequirement;
-    if (!requirement) return;
-    setSplitRequirement(null);
-    void splitTasks;
-    await handleStartTask(requirement);
   };
 
   const handleGroupSearch = (value: string) => {
@@ -5715,7 +5800,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 icon={<PlusOutlined />}
                 onClick={() => {
                   setRepoModalTarget('source');
-                  setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main', repoType: 'code' });
+                  setRepoForm(getDefaultRepoForm());
                   // 渠道表单里的「+」直接进新增表单,建完回填仓库,不经过列表。
                   setRepoFormOpen(true);
                 }}
@@ -5988,7 +6073,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
               icon={<PlusOutlined />}
               onClick={() => {
                 setRepoModalTarget('manualRequirement');
-                setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main', repoType: 'code' });
+                setRepoForm(getDefaultRepoForm());
                 // 手工需求表单里的「+」直接进新增表单,建完回填仓库,不经过列表。
                 setRepoFormOpen(true);
               }}
@@ -6058,6 +6143,19 @@ const ProjectDetailPanel: React.FC<Props> = ({
         )}
       </div>
       <div className={styles.formField}>
+        <label>{t('repository.field.provider')}</label>
+        <Select
+          value={repoForm.provider}
+          onChange={(value: RepoProvider) => setRepoForm((prev) => ({ ...prev, provider: value }))}
+          options={[
+            { value: 'github', label: t('repository.provider.github') },
+            { value: 'gitlab', label: t('repository.provider.gitlab') },
+            { value: 'gitea', label: t('repository.provider.gitea') },
+          ]}
+        />
+        <div className={styles.repoTypeHint}>{t('repository.provider.hint')}</div>
+      </div>
+      <div className={styles.formField}>
         <label>{t('repository.field.fullName')}</label>
         <Input
           placeholder={t('repository.placeholder.fullName')}
@@ -6104,7 +6202,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
             size="small"
             icon={<PlusOutlined />}
             onClick={() => {
-              setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main', repoType: 'code' });
+              setRepoForm(getDefaultRepoForm());
               setRepoFormOpen(true);
             }}
           >
@@ -6116,41 +6214,71 @@ const ProjectDetailPanel: React.FC<Props> = ({
             size="small"
             bordered
             dataSource={repos}
-            renderItem={(repo) => (
-              <List.Item
-                actions={[
-                  <Button
-                    key="delete"
-                    type="link"
-                    danger
-                    size="small"
-                    icon={<DeleteOutlined />}
-                    onClick={() => handleDeleteRepo(repo)}
-                  >
-                    {t('common.delete')}
-                  </Button>,
-                ]}
-              >
-                <List.Item.Meta
-                  title={
-                    <span className={styles.repoTitle}>
-                      {repo.repoFullName}
-                      {repo.repoType === 'workspace' ? (
-                        <Tag color="blue">{t('repository.repoType.workspace')}</Tag>
-                      ) : (
-                        <Tag>{t('repository.repoType.code')}</Tag>
-                      )}
-                    </span>
-                  }
-                  description={
-                    <span className={styles.repoDescription}>
-                      {repo.repoUrl || '-'}
-                      {repo.defaultBranch ? ` · ${repo.defaultBranch}` : ''}
-                    </span>
-                  }
-                />
-              </List.Item>
-            )}
+            renderItem={(repo) => {
+              // 工作区仓库是初始化对象:研发项目未就绪时,该行给出初始化入口。pending 可点触发,initializing 展示进行中禁用态。
+              const isWorkspaceRepo = repo.repoType === 'workspace';
+              const showInitAction = isDevelopProject && isWorkspaceRepo && !developInitReady;
+              const initAction = showInitAction
+                ? project?.initStatus === 'initializing'
+                  ? [
+                    // 初始化中:展示进行中态,但仍保留「重新初始化」入口——后端 startProjectInit 幂等,任务中断/卡住时可覆盖重发,避免死 loading。
+                    <span key="init-progress" className={styles.repoInitProgress}>
+                      <LoadingOutlined spin />
+                      {t('repository.initializing')}
+                    </span>,
+                    <Button key="init" type="link" size="small" onClick={openInitModal}>
+                      {t('repository.reinitWorkspace')}
+                    </Button>,
+                  ]
+                  : [
+                    <Button
+                      key="init"
+                      type="link"
+                      size="small"
+                      icon={<ThunderboltOutlined />}
+                      onClick={openInitModal}
+                    >
+                      {t('repository.initWorkspace')}
+                    </Button>,
+                  ]
+                : [];
+              return (
+                <List.Item
+                  actions={[
+                    ...initAction,
+                    <Button
+                      key="delete"
+                      type="link"
+                      danger
+                      size="small"
+                      icon={<DeleteOutlined />}
+                      onClick={() => handleDeleteRepo(repo)}
+                    >
+                      {t('common.delete')}
+                    </Button>,
+                  ]}
+                >
+                  <List.Item.Meta
+                    title={
+                      <span className={styles.repoTitle}>
+                        {repo.repoFullName}
+                        {repo.repoType === 'workspace' ? (
+                          <Tag color="blue">{t('repository.repoType.workspace')}</Tag>
+                        ) : (
+                          <Tag>{t('repository.repoType.code')}</Tag>
+                        )}
+                      </span>
+                    }
+                    description={
+                      <span className={styles.repoDescription}>
+                        {getRepoDisplayUrl(repo) || '-'}
+                        {repo.defaultBranch ? ` · ${repo.defaultBranch}` : ''}
+                      </span>
+                    }
+                  />
+                </List.Item>
+              );
+            }}
           />
         ) : (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('repository.empty')} />
@@ -6158,6 +6286,54 @@ const ProjectDetailPanel: React.FC<Props> = ({
       </Modal>
       {renderRepoFormModal()}
     </>
+  );
+
+  // 工作区初始化配置窗:复用新建向导 step3 的建索引/技能包配置。技能包枚举暂前端硬编码,后续接后端 skill 目录。
+  const renderInitConfigModal = () => (
+    <Modal
+      title={t('initConfig.title')}
+      open={initModalOpen}
+      onCancel={() => setInitModalOpen(false)}
+      onOk={handleStartInit}
+      okText={t('initConfig.start')}
+      cancelText={t('common.cancel')}
+      confirmLoading={initStarting}
+      width={480}
+      zIndex={1100}
+    >
+      <div className={styles.initConfigBody}>
+        <div className={styles.initConfigDesc}>{t('initConfig.desc')}</div>
+        <div className={styles.initConfigField}>
+          <span className={styles.initConfigLabel}>{t('initConfig.buildIndex')}</span>
+          <Radio.Group
+            value={initBuildIndex}
+            onChange={(e) => {
+              const next = e.target.value as boolean;
+              setInitBuildIndex(next);
+              // 开启建索引默认全选技能包;关闭时清空,避免残留未展示的选择项。
+              setInitSkillPackages(next ? INIT_SKILL_PACKAGE_OPTIONS.map((option) => option.value) : []);
+            }}
+          >
+            <Radio value={false}>{t('initConfig.buildIndexNo')}</Radio>
+            <Radio value={true}>{t('initConfig.buildIndexYes')}</Radio>
+          </Radio.Group>
+        </div>
+        {initBuildIndex && (
+          <div className={styles.initConfigField}>
+            <span className={styles.initConfigLabel}>{t('initConfig.skillLabel')}</span>
+            <Select
+              mode="multiple"
+              allowClear
+              style={{ width: '100%' }}
+              value={initSkillPackages}
+              options={INIT_SKILL_PACKAGE_OPTIONS}
+              placeholder={t('initConfig.skillPlaceholder')}
+              onChange={(vals) => setInitSkillPackages(vals as string[])}
+            />
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 
   const renderDwsAuthModal = () => (
@@ -6310,7 +6486,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     }
     if (key === 'manage-repos') {
       setRepoModalTarget('manage');
-      setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main', repoType: 'code' });
+      setRepoForm(getDefaultRepoForm());
       setRepoModalOpen(true);
       return;
     }
@@ -6368,16 +6544,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
                   {scene.text}
                 </Tag>
               ))}
-              {/* 研发项目工作区未就绪时,头部标签与侧边栏保持一致展示初始化中状态。 */}
-              {!developInitReady && (
-                <Tag
-                  bordered={false}
-                  icon={<LoadingOutlined spin />}
-                  className={`${styles.projectTag} ${styles.detailProjectInitTag}`}
-                >
-                  {intl.formatMessage({ id: 'projectSpace.scene.initializing' })}
-                </Tag>
-              )}
             </span>
           )}
         </div>
@@ -6390,14 +6556,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
           )}
         </div>
       </div>
-      {/* 工作区初始化未完成时置顶阻塞提示,说明当前不能建需求/启动任务;不可关闭,直到就绪。 */}
+      {/* 工作区初始化未完成时置顶阻塞提示,不能建需求/启动任务。pending 引导去仓库管理点初始化,initializing 转圈等待。 */}
       {!developInitReady && (
         <Alert
           className={styles.projectInitAlert}
           type="info"
           showIcon
-          icon={<LoadingOutlined spin />}
-          message={t('initGuard.banner')}
+          icon={developInitPending ? <ClockCircleOutlined /> : <LoadingOutlined spin />}
+          message={developInitPending ? t('initGuard.bannerPending') : t('initGuard.banner')}
         />
       )}
       {/* 研发项目未配置 GH_TOKEN 时贴一条提醒;点击整条打开友好引导弹窗。以提醒为主,可关闭,不阻塞。 */}
@@ -6448,7 +6614,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
         onAddRepository={() => {
           // 拆分弹窗内直接新增仓库，新增表单以更高层级展示并保留当前拆分上下文。
           setRepoModalTarget('requirementSplit');
-          setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main', repoType: 'code' });
+          setRepoForm(getDefaultRepoForm());
           setRepoFormOpen(true);
         }}
         members={operationAssigneeOptions}
@@ -6476,6 +6642,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
         }}
       />
       {renderRepoModal()}
+      {renderInitConfigModal()}
       {renderDwsAuthModal()}
       {renderLogDrawer()}
       <RenameModal

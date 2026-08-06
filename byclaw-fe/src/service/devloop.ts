@@ -139,6 +139,9 @@ export type DevloopProjectSpaceFile = {
 // 仓库类型:workspace 工作区(单个,承载项目上下文/产出) / code 代码仓库(可多个)。存量数据默认 code。
 export type ProjectRepoType = 'workspace' | 'code';
 
+// 代码平台:决定 clone/push 使用的 host 与令牌注入方式。存量无值按 github 处理。
+export type RepoProvider = 'github' | 'gitlab' | 'gitea';
+
 export type DevloopProjectRepo = {
   repoId: number;
   projectId: number;
@@ -146,6 +149,7 @@ export type DevloopProjectRepo = {
   repoUrl?: string;
   defaultBranch?: string;
   repoType?: ProjectRepoType;
+  provider?: RepoProvider;
   createBy?: string;
   createTime?: string;
 };
@@ -182,6 +186,7 @@ export const createProjectRepo = (data: {
   repoUrl?: string;
   defaultBranch?: string;
   repoType?: ProjectRepoType;
+  provider?: RepoProvider;
 }) => POST<any>('/byaiService/project/repo/create', data);
 
 export const listProjectRepos = (projectId: number) =>
@@ -413,6 +418,24 @@ export type DevloopTaskCreatePayload = {
 };
 
 export const createTask = (data: DevloopTaskCreatePayload) => POST<any>('/byaiService/devloop/task/create', data);
+
+// 需求拆分为多仓库子任务:每个子任务独立仓库/分支/承接员工,dependsOn 记录需求内 DAG 依赖(rowId 引用同批其他子任务)。
+export type DevloopSplitTaskPayload = {
+  rowId: string;
+  title: string;
+  repoId: number;
+  branch?: string;
+  assigneeId?: string | number;
+  dependsOn: string[];
+};
+
+export type DevloopSplitPayload = {
+  projectId: number;
+  sourceItemId: number;
+  tasks: DevloopSplitTaskPayload[];
+};
+
+export const splitTask = (data: DevloopSplitPayload) => POST<any>('/byaiService/devloop/task/split', data);
 
 export const listTasks = (query: DevloopTaskListQuery) =>
   POST<DevloopTaskPage>('/byaiService/devloop/task/list', query);

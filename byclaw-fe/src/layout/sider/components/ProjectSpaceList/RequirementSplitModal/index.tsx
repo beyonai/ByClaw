@@ -10,7 +10,7 @@ import {
 } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import styles from './index.module.less';
-import { buildLayers, buildSuggestedSplit } from './mock';
+import { buildLayers, buildSuggestedSplit } from './heuristics';
 import type { MemberOption, RepoOption, SplitTaskDraft } from './types';
 
 type SplitView = 'list' | 'graph';
@@ -35,7 +35,7 @@ type RequirementSplitModalProps = {
   defaultAssigneeId?: string | number;
   confirmLoading?: boolean;
   onCancel: () => void;
-  // 确认后把拆分结果交回父级;演示态父级仍走原有单任务启动。
+  // 确认后把拆分草稿交回父级,由父级调 splitTask 批量建会话并落库依赖。
   onConfirm: (tasks: SplitTaskDraft[]) => void;
 };
 
@@ -61,7 +61,7 @@ const RequirementSplitModal: React.FC<RequirementSplitModalProps> = ({
   // 视图切换:默认列表,用户可切到依赖图。
   const [view, setView] = useState<SplitView>('list');
 
-  // 每次打开时按需求标题重新生成 AI 预拆依赖图(演示态),并回到默认列表视图。
+  // 每次打开时按需求标题重新生成预拆依赖图草稿,并回到默认列表视图。
   useEffect(() => {
     if (open && requirement) {
       // 当前用户是项目成员时，AI 预拆与后续新增任务均默认由当前用户承接，仍可手动调整。
@@ -160,7 +160,7 @@ const RequirementSplitModal: React.FC<RequirementSplitModalProps> = ({
       },
     ]);
 
-  // 至少一行、且每行都填了标题/选了仓库/分支/承接成员才允许确认(演示态最小校验)。
+  // 至少一行、且每行都填了标题/选了仓库/分支/承接成员才允许确认。
   const canConfirm =
     tasks.length > 0 &&
     tasks.every(

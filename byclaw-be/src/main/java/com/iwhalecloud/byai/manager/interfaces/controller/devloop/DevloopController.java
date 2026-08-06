@@ -5,6 +5,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
+import com.iwhalecloud.byai.manager.dto.devloop.RequirementSplitDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDeleteDTO;
@@ -449,6 +450,12 @@ public class DevloopController {
     @PostMapping("/task/create")
     public ResponseUtil<Map<String, Object>> createTask(@RequestBody Map<String, Object> params) {
         return applicationService.createTask(params);
+    }
+
+    /** 需求拆分为多仓库子任务(各自 repo/分支/承接员工,子任务间 DAG 依赖) */
+    @PostMapping("/task/split")
+    public ResponseUtil<Map<String, Object>> splitTask(@RequestBody RequirementSplitDTO dto) {
+        return applicationService.splitTask(dto);
     }
 
     /** 查询项目任务列表 */

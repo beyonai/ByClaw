@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Form, Input, Modal, Radio, Select, Steps, message } from 'antd';
 import {
   CheckCircleFilled,
@@ -17,21 +17,21 @@ import {
   type DevloopProjectRepo,
   type ProjectRepoType,
 } from '@/service/devloop';
-import { useDigitalEmployeeOptions } from '../../hooks/useDigitalEmployeeOptions';
+import ProjectBasicForm, {
+  type ProjectBasicFormHandle,
+  type ProjectFormValues,
+} from '../ProjectFormModal/ProjectBasicForm';
+import type { ProjectTypeOption } from '../../hooks/useProjectTypeConfig';
 import styles from './index.module.less';
-
-export interface OnboardingBasicValues {
-  projectName: string;
-  description?: string;
-  architectAgentId?: string;
-}
 
 interface Props {
   open: boolean;
+  projectTypeConfigOptions?: ProjectTypeOption[];
+  projectTypeLoading?: boolean;
   onCancel: () => void;
-  // 父级负责查重/建研发项目/存默认员工,返回 projectId 字符串;返回空串表示失败(父级已提示)。
-  onCreateProject: (values: OnboardingBasicValues) => Promise<string>;
-  // 完成向导:进入该项目详情。
+  // 父级负责查重/建项目(按表单真实类型)/存共享成员与默认员工,返回 projectId 字符串;空串表示失败(父级已提示)。
+  onCreateProject: (values: ProjectFormValues) => Promise<string>;
+  // 完成:进入该项目详情(非研发项目建完即调,研发项目走完 step3 后调)。
   onFinish: (projectId: string) => void;
   // step3 进入架构数字员工聊天做初始化。
   onEnterArchitectChat: (projectId: string) => void;
@@ -48,6 +48,8 @@ const SKILL_PACKAGE_OPTIONS = [
 
 const ProjectOnboardingWizard: React.FC<Props> = ({
   open,
+  projectTypeConfigOptions,
+  projectTypeLoading,
   onCancel,
   onCreateProject,
   onFinish,
@@ -59,12 +61,13 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
   const [step, setStep] = useState(0);
   const [creating, setCreating] = useState(false);
   const [projectId, setProjectId] = useState('');
-  const [basicForm] = Form.useForm<OnboardingBasicValues>();
-  const { options: agentOptions, loading: agentLoading } = useDigitalEmployeeOptions(open);
-  const agentSelectOptions = useMemo(
-    () => agentOptions.map((option) => ({ value: option.value, label: option.label })),
-    [agentOptions]
-  );
+  // step1 复用单表单弹窗的完整表单主体(类型选择器 + 共享 + 默认员工),命令式取值经 basicRef。
+  const [form] = Form.useForm<ProjectFormValues>();
+  const basicRef = useRef<ProjectBasicFormHandle>(null);
+  const projectType = Form.useWatch('projectType', form);
+  const isDevelopProjectEnabled = (projectTypeConfigOptions ?? []).some((option) => option.value === 'develop');
+  // 仅研发项目展开后续「仓库 → 架构初始化」两步及研发提示;其余类型 step1 填完直接建。
+  const isDevelopProject = isDevelopProjectEnabled && projectType === 'develop';
 
   // 已配置仓库:按后端 repoType 区分工作区与代码仓库(存量数据无类型时按 code 处理)。
   const [repos, setRepos] = useState<DevloopProjectRepo[]>([]);
@@ -82,7 +85,7 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
   const workspaceRepo = repos.find((repo) => repo.repoType === 'workspace');
   const codeRepos = repos.filter((repo) => repo.repoType !== 'workspace');
 
-  // 每次打开重置向导:回到第一步,清空已建项目引用和表单。
+  // 每次打开重置向导:回到第一步,清空已建项目引用与后续步骤状态(step1 表单由 ProjectBasicForm 自行重置)。
   useEffect(() => {
     if (!open) return;
     setStep(0);
@@ -95,28 +98,28 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
     setSkillPackages([]);
     setInitStarted(false);
     setInitStarting(false);
-    basicForm.resetFields();
-  }, [basicForm, open]);
+  }, [open]);
 
   const refreshRepos = useCallback(async (id: string) => {
     const list = await listProjectRepos(Number(id));
     setRepos(Array.isArray(list) ? list : []);
   }, []);
 
-  // step1 提交:建项目拿 projectId,成功后拉一次仓库列表并进入 step2。
+  // step1 提交:按表单真实值建项目拿 projectId。研发项目进 step2 继续建仓;非研发建完即完成关闭。
   const handleCreateBasic = async () => {
-    const values = await basicForm.validateFields();
+    const values = await basicRef.current?.collectValues();
+    if (!values) return;
     setCreating(true);
     try {
-      const createdId = await onCreateProject({
-        projectName: values.projectName.trim(),
-        description: values.description?.trim(),
-        architectAgentId: values.architectAgentId,
-      });
+      const createdId = await onCreateProject(values);
       if (!createdId) return;
       setProjectId(createdId);
-      await refreshRepos(createdId).catch(() => setRepos([]));
-      setStep(1);
+      if (isDevelopProjectEnabled && values.projectType === 'develop') {
+        await refreshRepos(createdId).catch(() => setRepos([]));
+        setStep(1);
+      } else {
+        onFinish(createdId);
+      }
     } finally {
       setCreating(false);
     }
@@ -196,32 +199,21 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
 
   const renderBasicStep = () => (
     <div className={styles.stepBody}>
-      <div className={styles.hint}>
-        <InfoCircleFilled className={styles.hintIcon} />
-        <span>{t('step1.hint')}</span>
-      </div>
-      <Form form={basicForm} layout="vertical" preserve requiredMark>
-        <Form.Item
-          name="projectName"
-          label={t('field.projectName')}
-          rules={[{ required: true, message: t('validation.projectNameRequired') }]}
-        >
-          <Input maxLength={100} placeholder={t('placeholder.projectName')} />
-        </Form.Item>
-        <Form.Item name="description" label={t('field.description')}>
-          <Input.TextArea rows={3} maxLength={500} placeholder={t('placeholder.description')} />
-        </Form.Item>
-        <Form.Item name="architectAgentId" label={t('field.architectAgent')} extra={t('field.architectAgentExtra')}>
-          <Select
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            loading={agentLoading}
-            options={agentSelectOptions}
-            placeholder={t('placeholder.architectAgent')}
-          />
-        </Form.Item>
-      </Form>
+      {/* 研发项目才提示后续步骤(仓库/架构初始化);其余类型 step1 即为全部,不展示研发向导提示。 */}
+      {isDevelopProject && (
+        <div className={styles.hint}>
+          <InfoCircleFilled className={styles.hintIcon} />
+          <span>{t('step1.hint')}</span>
+        </div>
+      )}
+      <ProjectBasicForm
+        ref={basicRef}
+        open={open}
+        form={form}
+        projectTypeConfigOptions={projectTypeConfigOptions}
+        projectTypeLoading={projectTypeLoading}
+        onEnterSubmit={handleCreateBasic}
+      />
     </div>
   );
 
@@ -409,7 +401,8 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
           {t('action.cancel')}
         </Button>,
         <Button key="next" type="primary" loading={creating} onClick={handleCreateBasic}>
-          {t('action.next')}
+          {/* 研发项目继续 step2,主按钮为「下一步」;其余类型 step1 即建成,主按钮为「创建」。 */}
+          {isDevelopProject ? t('action.next') : t('action.create')}
         </Button>,
       ];
     }
@@ -447,7 +440,7 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
   return (
     <Modal
       className={styles.wizard}
-      title={t('title')}
+      title={t('titleCreate')}
       open={open}
       width={720}
       maskClosable={false}
@@ -455,12 +448,15 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
       onCancel={closeBlocked ? undefined : onCancel}
       footer={renderFooter()}
     >
-      <Steps
-        className={styles.steps}
-        current={step}
-        size="small"
-        items={[{ title: t('step1.title') }, { title: t('step2.title') }, { title: t('step3.titleShort') }]}
-      />
+      {/* 仅研发项目展开多步进度条;非研发 step1 即为全部,不展示步进。 */}
+      {isDevelopProject && (
+        <Steps
+          className={styles.steps}
+          current={step}
+          size="small"
+          items={[{ title: t('step1.title') }, { title: t('step2.title') }, { title: t('step3.titleShort') }]}
+        />
+      )}
       {stepPanels[step]()}
     </Modal>
   );

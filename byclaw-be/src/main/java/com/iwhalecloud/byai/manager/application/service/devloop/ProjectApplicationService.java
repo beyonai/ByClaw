@@ -694,6 +694,7 @@ public class ProjectApplicationService {
         // 仅接受受支持的仓库类型,其余(含空)按代码仓库处理;工作区唯一性由应用层/前端保证。
         String repoType = "workspace".equals(repoDto.getRepoType()) ? "workspace" : "code";
         repo.setRepoType(repoType);
+        repo.setProvider(normalizeProvider(repoDto.getProvider()));
         repo.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
         repo.setCreateTime(new Date());
         projectRepoMapper.insert(repo);
@@ -720,7 +721,16 @@ public class ProjectApplicationService {
         result.put("repoUrl", repo.getRepoUrl());
         result.put("defaultBranch", repo.getDefaultBranch());
         result.put("repoType", repo.getRepoType());
+        result.put("provider", repo.getProvider());
         return result;
+    }
+
+    /** 仅接受受支持的代码平台,其余(含空)按 github 处理;与 clone 令牌注入约定保持一致。 */
+    private static String normalizeProvider(String provider) {
+        if ("gitlab".equals(provider) || "gitea".equals(provider)) {
+            return provider;
+        }
+        return "github";
     }
 
     /**
