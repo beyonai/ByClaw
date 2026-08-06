@@ -491,7 +491,7 @@ CREATE TABLE IF NOT EXISTS project_init_audit_log (
     username VARCHAR(128),
     ip_address VARCHAR(45),
     repo_path VARCHAR(512) NOT NULL,
-    skill_package VARCHAR(64) NOT NULL,
+    skill_package VARCHAR(64),
     branch VARCHAR(255),
     submodule_count INTEGER DEFAULT 0,
     status VARCHAR(32) NOT NULL,

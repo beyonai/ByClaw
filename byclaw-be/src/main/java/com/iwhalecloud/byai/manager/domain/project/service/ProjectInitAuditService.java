@@ -57,12 +57,17 @@ public class ProjectInitAuditService {
         try {
             // 构建变更详情
             Map<String, Object> changes = new HashMap<>();
-            changes.put("skillPackage", response.getSkillPackageName());
+            changes.put("skillPackages", response.getSkillPackages());
             changes.put("addedSubmodules", response.getAddedSubmodules());
             changes.put("commitHash", response.getCommitHash());
             changes.put("pushed", response.getPushed());
 
             LocalDateTime now = LocalDateTime.now();
+
+            // 将技能包列表转为逗号分隔的字符串，用于数据库存储
+            String skillPackageStr = (response.getSkillPackages() != null && !response.getSkillPackages().isEmpty())
+                ? String.join(",", response.getSkillPackages())
+                : "none";
 
             ProjectInitAuditLog auditLog = ProjectInitAuditLog.builder()
                 .requestId(requestId)
@@ -70,7 +75,7 @@ public class ProjectInitAuditService {
                 .username(username)
                 .ipAddress(ipAddress)
                 .repoPath(response.getRepoPath())
-                .skillPackage(request.getSkillPackageName())
+                .skillPackage(skillPackageStr)
                 .branch(response.getBranch())
                 .submoduleCount(response.getAddedSubmodules() != null ? response.getAddedSubmodules().size() : 0)
                 .status("SUCCESS")
@@ -114,13 +119,18 @@ public class ProjectInitAuditService {
         try {
             LocalDateTime now = LocalDateTime.now();
 
+            // 将技能包列表转为逗号分隔的字符串，用于数据库存储
+            String skillPackageStr = (request.getSkillPackages() != null && !request.getSkillPackages().isEmpty())
+                ? String.join(",", request.getSkillPackages())
+                : "none";
+
             ProjectInitAuditLog auditLog = ProjectInitAuditLog.builder()
                 .requestId(requestId)
                 .userId(userId)
                 .username(username)
                 .ipAddress(ipAddress)
                 .repoPath("project_" + request.getProjectId())  // 失败时可能还没有真实路径
-                .skillPackage(request.getSkillPackageName())
+                .skillPackage(skillPackageStr)
                 .branch(request.getRepoBranch())
                 .submoduleCount(request.getSubmodules() != null ? request.getSubmodules().size() : 0)
                 .status("FAILED")
