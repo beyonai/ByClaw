@@ -78,6 +78,11 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.io.ByteArrayOutputStream;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.Executor;
 
@@ -112,6 +117,9 @@ public class DevloopApplicationService {
 
     /** 运营任务复用 byai_session.session_name，名称长度必须遵循现有会话主表的255字符限制。 */
     private static final int OPERATION_SESSION_NAME_MAX_LENGTH = 255;
+
+    /** 运营需求描述和采集主题统一限制 1000 字，避免超长配置影响列表、详情和任务提示词。 */
+    private static final int OPERATION_REQUIREMENT_TEXT_MAX_LENGTH = 1000;
 
     /** 手工录入需求复用扫描条目存储，但不作为可扫描渠道。 */
     private static final String MANUAL_SOURCE_TYPE = "manual";
@@ -2959,8 +2967,9 @@ public class DevloopApplicationService {
         source.setSourceName(dto.getRequirementName().trim());
         source.setSourceDescription(StringUtils.trimToNull(dto.getSourceDescription()));
         source.setSourceType(normalizeOperationSourceType(dto.getOperationType()));
-        source.setConfig(dto.getConfig() == null ? "{}" : JSON.toJSONString(dto.getConfig()));
-        source.setCronExpr(resolveOperationCronExpr(dto.getConfig()));
+        Map<String, Object> operationConfig = normalizeOperationScheduleConfig(dto.getConfig());
+        source.setConfig(JSON.toJSONString(operationConfig));
+        source.setCronExpr(getOperationConfigText(operationConfig, "cronExpr"));
         // 需求需用户确认拆解后才启用调度，研发扫描源的默认启用行为不受影响。
         source.setEnabled("0");
         source.setAssignee(dto.getAssignee());
@@ -2999,8 +3008,10 @@ public class DevloopApplicationService {
         update.setSourceName(dto.getRequirementName().trim());
         update.setSourceDescription(StringUtils.trimToNull(dto.getSourceDescription()));
         update.setSourceType(normalizeOperationSourceType(dto.getOperationType()));
-        update.setConfig(dto.getConfig() == null ? "{}" : JSON.toJSONString(dto.getConfig()));
-        update.setCronExpr(resolveOperationCronExpr(dto.getConfig()));
+        Map<String, Object> operationConfig = normalizeOperationScheduleConfig(dto.getConfig());
+        update.setConfig(JSON.toJSONString(operationConfig));
+        // MyBatis 默认忽略 null，类型从采集改为其它运营需求时用空串显式清除旧 Cron。
+        update.setCronExpr(StringUtils.defaultString(getOperationConfigText(operationConfig, "cronExpr")));
         update.setAssignee(dto.getAssignee());
         update.setDueTime(parseOperationDueTime(dto.getDueTime()));
         scanSourceService.update(update);
@@ -3255,7 +3266,7 @@ public class DevloopApplicationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void executeOperationSourceSchedule(ScanSource source) {
-        if (source == null || !ScanSourceService.OPERATION_SOURCE_TYPES.contains(source.getSourceType())) {
+        if (source == null || !ScanSourceService.OPERATION_SOURCE_TYPE_COLLECT.equals(source.getSourceType())) {
             return;
         }
         Long assigneeId = source.getAssignee();
@@ -3463,8 +3474,10 @@ public class DevloopApplicationService {
             .replace("${collectAccount}", resolveOperationAccountName(
                 findOperationConfigValue(operationConfigMap, "accountOrAddress", "collectAccount")))
             .replace("${collectTopic}", getOperationPromptValue(operationConfigMap, "topic", "collectTopic"))
-            .replace("${collectStartTime}", getOperationPromptValue(operationConfigMap, "startTime", "collectStart"))
-            .replace("${collectEndTime}", getOperationPromptValue(operationConfigMap, "endTime", "collectEnd"))
+            .replace("${collectStartTime}", getOperationPromptValue(operationConfigMap, "onceTime",
+                "effectiveStartDate", "startTime", "collectStart"))
+            .replace("${collectEndTime}", getOperationPromptValue(operationConfigMap, "effectiveEndDate", "endTime",
+                "collectEnd"))
             .replace("${collectMethod}", getOperationCollectionMethod(
                 findOperationConfigValue(operationConfigMap, "mode", "collectMethod")))
             .replace("${collectSchedule}", getOperationCollectionSchedule(operationConfigMap))
@@ -3551,16 +3564,19 @@ public class DevloopApplicationService {
         };
     }
 
-    /** 采集调度转换为可读文案：间隔模式展示数值和单位，周期模式展示标准 Cron。 */
+    /** 采集调度转换为可读文案：单次展示时间，间隔展示小时数，周期展示标准 Cron。 */
     private String getOperationCollectionSchedule(Map<String, Object> config) {
         String mode = String.valueOf(findOperationConfigValue(config, "mode", "collectMethod"));
+        if ("once".equalsIgnoreCase(mode)) {
+            return getOperationPromptValue(config, "onceTime", "startTime", "collectStart");
+        }
         if ("interval".equalsIgnoreCase(mode)) {
-            Object interval = findOperationConfigValue(config, "intervalValue", "interval");
+            Object interval = findOperationConfigValue(config, "intervalHours", "intervalValue", "interval");
             Object unit = findOperationConfigValue(config, "intervalUnit", "unit");
             if (interval == null) {
                 return I18nUtil.get("devloop.operationTask.prompt.notConfigured");
             }
-            String unitLabel = "hour".equalsIgnoreCase(String.valueOf(unit))
+            String unitLabel = config.containsKey("intervalHours") || "hour".equalsIgnoreCase(String.valueOf(unit))
                 ? I18nUtil.get("devloop.operationTask.intervalUnit.hour")
                 : I18nUtil.get("devloop.operationTask.intervalUnit.minute");
             return interval + " " + unitLabel;
@@ -3810,9 +3826,22 @@ public class DevloopApplicationService {
         if (dto.getRequirementName().trim().length() > 500) {
             return I18nUtil.get("devloop.operationRequirement.title.length.invalid");
         }
+        if (StringUtils.length(dto.getSourceDescription()) > OPERATION_REQUIREMENT_TEXT_MAX_LENGTH) {
+            return I18nUtil.get("devloop.operationRequirement.description.length.invalid");
+        }
         if (StringUtils.isBlank(dto.getOperationType())
             || !Set.of("collect", "publish", "analyze").contains(dto.getOperationType())) {
             return I18nUtil.get("devloop.operationRequirement.type.invalid");
+        }
+        if (ScanSourceService.OPERATION_SOURCE_TYPE_COLLECT.equals(dto.getOperationType())) {
+            String collectTopic = getOperationConfigText(dto.getConfig(), "topic", "collectTopic");
+            if (StringUtils.length(collectTopic) > OPERATION_REQUIREMENT_TEXT_MAX_LENGTH) {
+                return I18nUtil.get("devloop.operationRequirement.collectTopic.length.invalid");
+            }
+            String scheduleError = validateOperationCollectionSchedule(dto.getConfig());
+            if (scheduleError != null) {
+                return scheduleError;
+            }
         }
         return null;
     }
@@ -3886,20 +3915,230 @@ public class DevloopApplicationService {
         };
     }
 
-    /** 读取运营配置中的标准 Cron；非周期模式不写 cron_expr。 */
+    /** 使用后端生成的 Cron 覆盖请求值，保证 config 展示字段和 byai_scan_source.cron_expr 始终一致。 */
+    private Map<String, Object> normalizeOperationScheduleConfig(Map<String, Object> config) {
+        Map<String, Object> normalized = config == null ? new LinkedHashMap<>() : new LinkedHashMap<>(config);
+        String cronExpr = resolveOperationCronExpr(normalized);
+        if (StringUtils.isBlank(cronExpr)) {
+            normalized.remove("cronExpr");
+            normalized.remove("collectSchedule");
+        }
+        else {
+            normalized.put("cronExpr", cronExpr);
+            normalized.put("collectSchedule", cronExpr);
+        }
+        return normalized;
+    }
+
+    /** 校验资料采集的结构化调度配置，防止绕过前端后写入无法执行的 Cron。 */
+    private String validateOperationCollectionSchedule(Map<String, Object> config) {
+        try {
+            String cronExpr = resolveOperationCronExpr(config);
+            if (StringUtils.isBlank(cronExpr)) {
+                return I18nUtil.get("devloop.operationRequirement.collectSchedule.invalid");
+            }
+            org.springframework.scheduling.support.CronExpression.parse(toSpringCron(cronExpr));
+            String startDateText = getOperationConfigText(config, "effectiveStartDate");
+            String endDateText = getOperationConfigText(config, "effectiveEndDate");
+            LocalDate startDate = parseOperationScheduleDate(startDateText);
+            LocalDate endDate = parseOperationScheduleDate(endDateText);
+            if ((StringUtils.isNotBlank(startDateText) && startDate == null)
+                || (StringUtils.isNotBlank(endDateText) && endDate == null)) {
+                return I18nUtil.get("devloop.operationRequirement.effectiveDate.invalid");
+            }
+            if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
+                return I18nUtil.get("devloop.operationRequirement.effectiveDate.invalid");
+            }
+            return null;
+        }
+        catch (IllegalArgumentException exception) {
+            return I18nUtil.get("devloop.operationRequirement.collectSchedule.invalid");
+        }
+    }
+
+    /**
+     * 根据三种采集方式生成标准五段 Cron 并写入扫描源。
+     * 单次的年份、每双周和生效区间无法只靠 Cron 表达，由 DevloopScanJob 结合 config 二次判断。
+     */
     private String resolveOperationCronExpr(Map<String, Object> config) {
         if (config == null || config.isEmpty()) {
             return null;
         }
         String mode = String.valueOf(config.getOrDefault("mode", config.getOrDefault("collectMethod", "")));
-        if (!"periodic".equalsIgnoreCase(mode)) {
+        if (StringUtils.isBlank(mode)) {
             return null;
         }
-        Object cronValue = config.get("cronExpr");
-        if (cronValue == null && config.get("schedule") instanceof Map<?, ?> schedule) {
-            cronValue = schedule.get("cronExpr");
+        if ("once".equalsIgnoreCase(mode)) {
+            LocalDateTime onceTime = parseOperationScheduleDateTime(getOperationConfigText(config, "onceTime",
+                "startTime", "collectStart"));
+            if (onceTime == null) {
+                throw new IllegalArgumentException("onceTime");
+            }
+            return String.format(Locale.ROOT, "%d %d %d %d *", onceTime.getMinute(), onceTime.getHour(),
+                onceTime.getDayOfMonth(), onceTime.getMonthValue());
         }
-        return cronValue == null ? null : StringUtils.trimToNull(String.valueOf(cronValue));
+        if ("interval".equalsIgnoreCase(mode)) {
+            int intervalHours = getOperationConfigInt(config, "intervalHours", 0);
+            if (intervalHours < 1) {
+                // 旧客户端仍可能提交 intervalValue 和 intervalUnit，统一向上换算为整小时。
+                int legacyInterval = getOperationConfigInt(config, "intervalValue",
+                    getOperationConfigInt(config, "interval", 0));
+                String legacyUnit = getOperationConfigText(config, "intervalUnit", "unit");
+                intervalHours = "minute".equalsIgnoreCase(legacyUnit)
+                    ? Math.max(1, (legacyInterval + 59) / 60) : legacyInterval;
+            }
+            List<Integer> weekdays = getOperationConfigIntList(config.get("intervalWeekdays"), 1, 7);
+            if (weekdays.isEmpty() && config.containsKey("intervalWeekdays")) {
+                throw new IllegalArgumentException("intervalWeekdays");
+            }
+            if (weekdays.isEmpty()) {
+                // 历史间隔配置没有星期字段时按每天执行；新表单始终提交明确的星期集合。
+                weekdays = List.of(1, 2, 3, 4, 5, 6, 7);
+            }
+            if (intervalHours < 1) {
+                throw new IllegalArgumentException("intervalHours");
+            }
+            // 超过 23 小时无法由标准 Cron 精确表达，cron_expr 保留每小时候选点，实际间隔由 last_scan_time 判断。
+            String hourField = intervalHours <= 23 ? "*/" + intervalHours : "*";
+            return "0 " + hourField + " * * " + joinOperationScheduleValues(weekdays);
+        }
+        if (!"periodic".equalsIgnoreCase(mode)) {
+            throw new IllegalArgumentException("mode");
+        }
+
+        String periodType = getOperationConfigText(config, "periodType");
+        if (StringUtils.isBlank(periodType)) {
+            // 旧周期配置直接保存 Cron，新版结构化配置则由后端重新生成。
+            Object cronValue = config.get("cronExpr");
+            if (cronValue == null && config.get("schedule") instanceof Map<?, ?> schedule) {
+                cronValue = schedule.get("cronExpr");
+            }
+            return cronValue == null ? null : StringUtils.trimToNull(String.valueOf(cronValue));
+        }
+        LocalTime periodTime = parseOperationScheduleTime(getOperationConfigText(config, "periodTime"));
+        if (periodTime == null) {
+            throw new IllegalArgumentException("periodTime");
+        }
+        String timePrefix = periodTime.getMinute() + " " + periodTime.getHour() + " ";
+        return switch (periodType.toLowerCase(Locale.ROOT)) {
+            case "daily" -> timePrefix + "* * *";
+            case "weekly", "biweekly" -> {
+                List<Integer> weekdays = getOperationConfigIntList(config.get("periodWeekdays"), 1, 7);
+                if (weekdays.isEmpty()) {
+                    throw new IllegalArgumentException("periodWeekdays");
+                }
+                yield timePrefix + "* * " + joinOperationScheduleValues(weekdays);
+            }
+            case "monthly" -> {
+                List<Integer> monthDays = getOperationConfigIntList(config.get("periodMonthDays"), 1, 31);
+                if (monthDays.isEmpty()) {
+                    throw new IllegalArgumentException("periodMonthDays");
+                }
+                yield timePrefix + joinOperationScheduleValues(monthDays) + " * *";
+            }
+            case "yearly" -> {
+                int month = getOperationConfigInt(config, "periodMonth", 0);
+                int day = getOperationConfigInt(config, "periodDay", 0);
+                if (month < 1 || month > 12 || day < 1 || day > YearMonth.of(2000, month).lengthOfMonth()) {
+                    throw new IllegalArgumentException("periodDate");
+                }
+                yield timePrefix + day + " " + month + " *";
+            }
+            default -> throw new IllegalArgumentException("periodType");
+        };
+    }
+
+    private String getOperationConfigText(Map<String, Object> config, String... fieldNames) {
+        if (config == null) {
+            return null;
+        }
+        for (String fieldName : fieldNames) {
+            Object value = config.get(fieldName);
+            if (value != null && StringUtils.isNotBlank(String.valueOf(value))) {
+                return String.valueOf(value).trim();
+            }
+        }
+        return null;
+    }
+
+    private int getOperationConfigInt(Map<String, Object> config, String fieldName, int fallback) {
+        try {
+            Object value = config == null ? null : config.get(fieldName);
+            return value == null ? fallback : Integer.parseInt(String.valueOf(value));
+        }
+        catch (NumberFormatException exception) {
+            return fallback;
+        }
+    }
+
+    /** 数组字段去重并排序，保证生成的 Cron 稳定，便于配置比较和问题排查。 */
+    private List<Integer> getOperationConfigIntList(Object value, int minimum, int maximum) {
+        if (!(value instanceof Iterable<?> iterable)) {
+            return Collections.emptyList();
+        }
+        TreeSet<Integer> values = new TreeSet<>();
+        for (Object item : iterable) {
+            try {
+                int parsed = Integer.parseInt(String.valueOf(item));
+                if (parsed < minimum || parsed > maximum) {
+                    throw new IllegalArgumentException("scheduleValue");
+                }
+                values.add(parsed);
+            }
+            catch (NumberFormatException exception) {
+                throw new IllegalArgumentException("scheduleValue", exception);
+            }
+        }
+        return new ArrayList<>(values);
+    }
+
+    private String joinOperationScheduleValues(List<Integer> values) {
+        return values.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","));
+    }
+
+    private LocalDateTime parseOperationScheduleDateTime(String value) {
+        if (StringUtils.isBlank(value)) {
+            return null;
+        }
+        for (DateTimeFormatter formatter : List.of(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))) {
+            try {
+                return LocalDateTime.parse(value, formatter);
+            }
+            catch (Exception ignored) {
+                // 尝试下一个兼容格式。
+            }
+        }
+        LocalDate date = parseOperationScheduleDate(value);
+        return date == null ? null : date.atStartOfDay();
+    }
+
+    private LocalTime parseOperationScheduleTime(String value) {
+        if (StringUtils.isBlank(value)) {
+            return null;
+        }
+        for (DateTimeFormatter formatter : List.of(DateTimeFormatter.ofPattern("HH:mm"),
+            DateTimeFormatter.ofPattern("HH:mm:ss"))) {
+            try {
+                return LocalTime.parse(value, formatter);
+            }
+            catch (Exception ignored) {
+                // 尝试下一个兼容格式。
+            }
+        }
+        return null;
+    }
+
+    private LocalDate parseOperationScheduleDate(String value) {
+        if (StringUtils.isBlank(value)) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(value, DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+        }
+        catch (Exception exception) {
+            return null;
+        }
     }
 
     /** 扩展参数中的数字解析失败时返回空，损坏的历史数据不会阻断整个任务列表。 */

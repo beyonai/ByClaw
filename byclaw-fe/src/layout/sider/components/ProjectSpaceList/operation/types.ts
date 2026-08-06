@@ -10,6 +10,8 @@ export type OperationLoginStatus = 'logged_in' | 'logged_out' | 'expired' | 'unk
 
 export type OperationCollectionMode = 'once' | 'interval' | 'periodic';
 
+export type OperationCollectionPeriod = 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly';
+
 export type OperationAnalysisScope = 'account' | 'works';
 
 export type OperationWorkflowStatus = 'pending' | 'in_progress' | 'waiting_confirmation' | 'completed' | 'failed';
@@ -79,10 +81,33 @@ export interface OperationCollectConfig {
   channel?: string;
   accountOrAddress?: string;
   topic?: string;
+
+  /** 仅用于兼容旧版采集时间范围，编辑历史需求时仍可读取但不再提交。 */
   dateRange?: OperationDateRange;
   knowledgeBaseId?: OperationIdentifier;
   directoryId?: OperationIdentifier;
   mode?: OperationCollectionMode;
+
+  /** 单次采集的计划触发时间，提交前序列化为 yyyy-MM-dd HH:mm:ss。 */
+  onceTime?: Dayjs | null;
+  periodType?: OperationCollectionPeriod;
+  periodWeekdays?: number[];
+  periodMonthDays?: number[];
+  periodMonth?: number;
+  periodDay?: number;
+
+  /** 周期采集每天触发的时分，表单态使用 Dayjs。 */
+  periodTime?: Dayjs | null;
+
+  /** 每年采集在表单中合并选择月、日和时分，提交时再拆回稳定接口字段。 */
+  periodYearDateTime?: Dayjs | null;
+  intervalHours?: number;
+  intervalWeekdays?: number[];
+
+  /** 周期和间隔采集的可选生效日期区间。 */
+  effectiveDateRange?: OperationDateRange;
+
+  /** 旧版间隔字段仅用于历史配置回显。 */
   intervalValue?: number;
   intervalUnit?: 'minute' | 'hour';
 

@@ -81,6 +81,107 @@
   width: 100%;
 }
 
+// 间隔小时数只输入数字，使用更紧凑的输入宽度避免占用过多表单空间。
+.operationIntervalHoursInput {
+  width: 100px;
+}
+
+// 周期类型、采集时分和年度采集日期统一占整行的四分之一，保持调度字段宽度一致。
+.operationScheduleQuarterField {
+  width: 25%;
+  min-width: 0;
+  max-width: 25%;
+  flex: 0 0 25%;
+  grid-column: 1 / -1;
+  justify-self: start;
+
+  :global {
+    .@{antPrefix}-form-item-control,
+    .@{antPrefix}-form-item-control-input,
+    .@{antPrefix}-form-item-control-input-content,
+    .@{antPrefix}-select,
+    .@{antPrefix}-picker {
+      width: 100%;
+      min-width: 0;
+    }
+  }
+}
+
+// 生效范围提示紧跟字段标题展示，以较弱的字号和颜色区分主标签与补充说明。
+.operationEffectiveDateLabel {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.operationEffectiveDateHint {
+  color: #8b95a5;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+// 知识整理区域独占新行，开关和本体列表在区域内部保持左右两列对齐。
+.operationKnowledgeOrganizationRow {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+}
+
+// 采集方式占左侧一半，周期类型和采集时分各占右侧四分之一，保证三项同一行展示。
+.operationScheduleTopRow {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  column-gap: 16px;
+  align-items: start;
+}
+
+.operationScheduleModeField {
+  grid-column: span 2;
+  min-width: 0;
+}
+
+// 单次采集时间和间隔小时数均放在采集方式右侧，保证不同采集方式切换时调度字段保持在同一行。
+.operationScheduleHalfFieldArea {
+  grid-column: span 2;
+  min-width: 0;
+}
+
+.operationScheduleOnceTimeField {
+  width: 100%;
+
+  :global {
+    .@{antPrefix}-picker {
+      width: 100%;
+    }
+  }
+}
+
+.operationScheduleIntervalField {
+  width: max-content;
+  max-width: 100%;
+}
+
+// 周期类型和采集时分（年度为采集日期和时分）只在周期采集下显示，各自占调度行的四分之一。
+.operationScheduleInlineFields {
+  grid-column: span 2;
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: flex-start;
+  gap: 16px;
+
+  .operationScheduleQuarterField {
+    width: 100%;
+    max-width: 100%;
+    flex: none;
+    grid-column: auto;
+  }
+}
+
 // 任务配置字段较多，表单主体独立滚动，底部操作区始终保留在弹窗可见区域。
 .operationTaskFormBody {
   max-height: min(68vh, 680px);
