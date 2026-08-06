@@ -8,7 +8,7 @@ WORKDIR /app
 RUN addgroup -g 1001 -S appgroup && \
     adduser -u 1001 -S appuser -G appgroup
 
-# 安装依赖：curl（健康检查）、bash、gcompat（dws 所需的 glibc 兼容层）、nodejs/npm（Lark/WeCom CLI）、python3/pip（Trellis CLI）
+# 安装依赖：curl（健康检查）、bash、gcompat（dws 所需的 glibc 兼容层）、nodejs/npm（Lark/WeCom CLI + Trellis CLI）
 RUN apk add --no-cache \
     curl \
     bash \
@@ -16,9 +16,10 @@ RUN apk add --no-cache \
     git \
     nodejs \
     npm \
-    python3 \
-    py3-pip \
     && rm -rf /var/cache/apk/*
+
+# npm 使用国内镜像加速
+ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 
 # 安装 Lark/WeCom CLI
 ARG LARKSUITE_CLI_VERSION=1.0.78
@@ -30,10 +31,17 @@ RUN npm install --global \
     && wecom-cli --version \
     && npm cache clean --force
 
-# 安装 Trellis CLI
-ARG TRELLIS_CLI_VERSION=0.1.0
-RUN pip3 install --no-cache-dir "trellis-cli==${TRELLIS_CLI_VERSION}" \
-    && trellis --version
+# 复制 Trellis 离线安装包
+COPY resources/mindfoldhq-trellis-core-0.6.12.tgz /tmp/
+COPY resources/mindfoldhq-trellis-0.6.12.tgz /tmp/
+
+# 安装 Trellis CLI（离线安装）
+RUN npm install --global \
+        /tmp/mindfoldhq-trellis-core-0.6.12.tgz \
+        /tmp/mindfoldhq-trellis-0.6.12.tgz \
+    && trellis --version \
+    && rm -f /tmp/mindfoldhq-trellis-*.tgz \
+    && npm cache clean --force
 
 # 安装 DWS CLI。amd64 用随仓库预下载的二进制（避免构建时网络下载）；
 # 仓库只存 amd64 包，arm64 构建时从 npm 包 dingtalk-workspace-cli 在线拉取对应架构二进制。
