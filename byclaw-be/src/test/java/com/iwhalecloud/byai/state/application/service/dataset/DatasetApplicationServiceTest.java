@@ -266,6 +266,7 @@ class DatasetApplicationServiceTest {
 
         ArgumentCaptor<KbFileImport> captor = ArgumentCaptor.forClass(KbFileImport.class);
         verify(feignPythonBuildService).importKnowledgeItem(captor.capture(), eq(100L));
+        assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
         assertThat(captor.getValue().getFilePath()).isEqualTo("/制度");
         assertThat(captor.getValue().getProcessFrontMatter()).isNull();
         assertThat(result.getUploadItems()).extracting("filePath").containsExactly("/制度/考勤.md");
