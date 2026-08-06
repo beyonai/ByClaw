@@ -7,6 +7,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,6 +42,7 @@ public class OpenSandboxClient {
 
     private static final Logger log = LoggerFactory.getLogger(OpenSandboxClient.class);
     private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json; charset=utf-8");
+    private static final Pattern PROCESS_EXIT_CODE_PATTERN = Pattern.compile("(?i)\\bcode\\s+(\\d+)\\b");
 
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -365,10 +368,10 @@ public class OpenSandboxClient {
     private String firstCommandId(String stream) {
         try {
             for (String line : stream.split("\\R")) {
-                if (!line.startsWith("data:")) {
+                JsonNode node = commandEventNode(line);
+                if (node == null) {
                     continue;
                 }
-                JsonNode node = objectMapper.readTree(line.substring(5).trim());
                 String id = firstText(node, "id", "command_id", "commandId");
                 if (id != null) {
                     return id;
@@ -383,35 +386,66 @@ public class OpenSandboxClient {
     private SandboxCommandResult parseCommandStream(String stream, int maxOutputBytes, boolean ignored) {
         StringBuilder stdout = new StringBuilder();
         StringBuilder stderr = new StringBuilder();
+        StringBuilder commandError = new StringBuilder();
         int exitCode = 0;
         boolean truncated = false;
         try {
             for (String line : stream.split("\\R")) {
-                if (!line.startsWith("data:")) {
+                JsonNode node = commandEventNode(line);
+                if (node == null) {
                     continue;
                 }
-                JsonNode node = objectMapper.readTree(line.substring(5).trim());
                 String type = node.path("type").asText("");
                 String text = commandEventText(node);
-                if ("stderr".equals(type) || "error".equals(type) || node.has("error")) {
+                if ("stderr".equals(type)) {
                     stderr.append(text);
+                } else if ("error".equals(type) || node.has("error")) {
+                    commandError.append(text);
                 } else if ("stdout".equals(type) || "result".equals(type)) {
                     stdout.append(text);
                 }
-                if (node.has("exit_code")) {
-                    exitCode = node.path("exit_code").asInt(exitCode);
-                } else if (node.has("exitCode")) {
-                    exitCode = node.path("exitCode").asInt(exitCode);
-                }
+                exitCode = commandExitCode(node, exitCode);
             }
         } catch (IOException e) {
             throw new OpenSandboxException("Invalid OpenSandbox command stream", e);
+        }
+        if (stderr.isEmpty() && !commandError.isEmpty()) {
+            stderr.append(commandError);
         }
         if (stdout.length() + stderr.length() > maxOutputBytes) {
             truncated = true;
             stdout.setLength(Math.min(stdout.length(), maxOutputBytes));
         }
         return new SandboxCommandResult(exitCode, stdout.toString(), stderr.toString(), truncated, false);
+    }
+
+    private JsonNode commandEventNode(String line) throws IOException {
+        String payload = line == null ? "" : line.trim();
+        if (payload.startsWith("data:")) {
+            payload = payload.substring(5).trim();
+        }
+        if (payload.isBlank() || !payload.startsWith("{")) {
+            return null;
+        }
+        return objectMapper.readTree(payload);
+    }
+
+    private int commandExitCode(JsonNode node, int currentExitCode) {
+        if (node.has("exit_code")) {
+            return node.path("exit_code").asInt(currentExitCode);
+        }
+        if (node.has("exitCode")) {
+            return node.path("exitCode").asInt(currentExitCode);
+        }
+        JsonNode error = node.get("error");
+        if (error == null || error.isNull()) {
+            return currentExitCode;
+        }
+        Matcher matcher = PROCESS_EXIT_CODE_PATTERN.matcher(error.path("evalue").asText(""));
+        if (matcher.find()) {
+            return Integer.parseInt(matcher.group(1));
+        }
+        return currentExitCode == 0 ? 1 : currentExitCode;
     }
 
     private String commandEventText(JsonNode node) {
