@@ -173,6 +173,8 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn("来源执行器只负责采集并返回结果", skill)
         self.assertIn("来源执行器不得询问 `入库 / 知识整理 / 跳过`", skill)
         self.assertEqual(1, skill.count("采集结果只选择一种后处理：入库 / 知识整理 / 跳过"))
+        self.assertIn("每次后处理运行只能执行一种操作", skill)
+        self.assertIn("用户已明确指定外部消费", skill)
 
     def test_agent_reach_backends_share_one_collection_contract(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -257,6 +259,18 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
                 self.assertIn("`knowledge-collection` 负责", bridge)
                 self.assertIn("浏览器、curl、直接 HTTP/API", bridge)
 
+    def test_source_bridges_write_nested_partial_status_only(self):
+        for relative_path in (
+            "references/sources/dingtalk-dws.md",
+            "references/sources/feishu-fws.md",
+            "references/sources/wecom-wecomcli.md",
+        ):
+            with self.subTest(relative_path=relative_path):
+                bridge = (SKILL_ROOT / relative_path).read_text(encoding="utf-8")
+                self.assertIn("`collection.status: partial`", bridge)
+                self.assertIn("`sourceMetadata`", bridge)
+                self.assertNotIn("`partial: true`", bridge)
+
     def test_child_skill_routes_resolve_to_expected_frontmatter_names(self):
         for relative_path, expected_name in CHILD_SKILLS.items():
             with self.subTest(relative_path=relative_path):
@@ -296,6 +310,14 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "bycli_filter",
             "只读兼容",
             "新写入不得使用旧格式",
+            "完整文章清单",
+            "已物化正文",
+            "允许为空数组",
+            "sourceSkill",
+            "rawArtifacts",
+            "postProcessing",
+            "retention",
+            "只读兼容旧的扁平",
         ):
             self.assertIn(phrase, contract)
 
@@ -336,6 +358,57 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         ):
             self.assertIn(phrase, processing)
 
+    def test_post_processing_cleans_up_after_successful_external_consumption(self):
+        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "外部消费",
+            "`sanitized/items/*.md`",
+            "仅打开、读取或预览",
+            "不触发清理",
+            "全部成功",
+            "默认清理",
+            "失败或结果不明确时保留",
+            "部分成功时只删除成功文章的工作副本",
+            "不再询问 `入库 / 知识整理 / 跳过`",
+        ):
+            self.assertIn(phrase, processing)
+
+    def test_post_processing_defines_resumable_partial_cleanup_state_machine(self):
+        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "每次后处理运行只能执行一种操作",
+            "显式外部消费",
+            "`sanitized/items/*.md`",
+            "不得回退使用 `markdown/*.md`",
+            "`success`、`failed`、`pending` 或 `unknown`",
+            "operation + target",
+            "全部文章重新执行",
+            "仅失败/待处理文章",
+            "只删除成功文章的工作副本",
+            "保留共享 `raw/`",
+            "未选文章",
+            "cleanupStatus",
+            "knowledge-collection-post-processing.mjs",
+            "requiresGlobalStageRetry",
+            "只重试全局步骤",
+            "已有 run 的 operation、target 与 selection 不可改变",
+        ):
+            self.assertIn(phrase, processing)
+
+    def test_skip_keeps_the_session_without_creating_a_downstream_run(self):
+        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "选择跳过时",
+            "不创建 ingest、organize 或 external run",
+            "不调用 cleanup",
+            "不删除任何会话产物",
+            "结束默认三选一流程",
+        ):
+            self.assertIn(phrase, processing)
+
     def test_ingest_executor_is_discoverable_and_requires_an_explicit_target(self):
         relative_path = "references/knowledge-ingest.md"
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -359,11 +432,15 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "明确提供",
             "确认目标",
             "仅入库用户选中的范围",
-            "入库与知识整理互斥",
+            "入库与知识整理在同一次后处理运行中互斥",
             "选择 `入库`",
             "`ingest` 与 `upload-doc` 执行前",
             "默认 `/` 也必须展示",
             "获得用户明确确认",
+            "`sanitized/items/*.md`",
+            "不得使用 `markdown/*.md`",
+            "build 请求",
+            "逐篇",
         ):
             self.assertIn(phrase, ingest)
 
@@ -376,6 +453,48 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
         self.assertNotIn("token", ingest.lower())
         self.assertNotIn("cookie", ingest.lower())
+
+    def test_post_processing_state_helper_is_discoverable(self):
+        script = SKILL_ROOT / "scripts" / "knowledge-collection-post-processing.mjs"
+        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
+
+        self.assertTrue(script.is_file())
+        for command in ("inspect", "mark-materialized", "record-run", "cleanup", "unlock-stale"):
+            self.assertIn(command, script.read_text(encoding="utf-8"))
+        self.assertIn("scripts/knowledge-collection-post-processing.mjs", processing)
+        for phrase in (
+            '"schemaVersion": "1.0"',
+            "discardUnselectedConfirmed",
+            "superseded",
+            ".post-processing-inputs/",
+            '"kind": "knowledge-base"',
+            '"kind": "knowledge-organization"',
+            '"kind": "external"',
+            "命令成功",
+            "命令失败",
+            "pid",
+            "ownerId",
+            "不能仅凭锁龄",
+        ):
+            self.assertIn(phrase, processing)
+
+    def test_post_processing_documents_post_review_recovery_contract(self):
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
+        combined = f"{contract}\n{processing}"
+
+        for phrase in (
+            "pendingArtifactCleanup",
+            "安全降级为 `pending`",
+            "`sourceSkill + sourceUrl`",
+            "`skipped-retention`",
+            "`build-success`",
+            "`selection.mode` 只能是 `all` 或 `items`",
+            "脚本重新计算并校验 `sessionStatus`",
+            "锁内容写入失败",
+            "stale-lock 回收会在重命名前后再次检查锁内容",
+        ):
+            self.assertIn(phrase, combined)
 
     def test_bycli_is_an_executor_when_delegated_by_knowledge_collection(self):
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")

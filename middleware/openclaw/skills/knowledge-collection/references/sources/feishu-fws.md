@@ -42,8 +42,8 @@ lark-cli minutes +detail --minute-tokens <minute-token> --transcript --as user -
 ```
 
 若命令产生转写文件，必须读取实际生成的文件名和内容，保留说话人、时间戳、顺序和正文；不得猜测文件名或编造
-不存在的摘要、章节、录音或转写。分页或文件读取中断时保留成功结果，在 `sanitized/metadata.json` 写入
-`partial: true` 与非敏感失败位置。授权中断发生在相对时间窗口时，恢复后必须重新计算结束时间，或补采并按
+不存在的摘要、章节、录音或转写。分页或文件读取中断时保留成功结果，在 `sanitized/metadata.json` 设置
+`collection.status: partial`，并把非敏感失败位置写入 `sourceMetadata`。授权中断发生在相对时间窗口时，恢复后必须重新计算结束时间，或补采并按
 `message_id` 去重；不得把中断前的窗口误报为完整结果。
 
 ### 消息与通讯录完整性
@@ -79,4 +79,7 @@ sanitized/
 - `raw/` 保存已秘密扫描的 CLI JSON 和真实导出文件描述；`markdown/` 保存规范化正文；`sanitized/items/` 保存净化正文。
 - `collection-result.json` 顶层只能使用主契约固定字段，`source` 写 `fws`，`backend` 写 `lark-cli`。
 - 每个 `items[].fileName` 与 `items[].markdown` 必须是采集根目录内指向实际 `sanitized/items/*.md` 文件的相对路径。
+- `sanitized/metadata.json` 按主契约写入完整 inventory。每项提供稳定 `itemId`、`sourceSkill: fws`、来源对象 ID/URL、
+  用户筛选、关联 `rawArtifacts` 和 materialization 状态；尚未生成正文的列表项仍进入 inventory，但不得进入
+  `collection-result.json.items`。
 - 来源执行器不得询问或执行 `入库 / 知识整理 / 跳过`；仅由 `knowledge-collection` 在采集后执行该选择。

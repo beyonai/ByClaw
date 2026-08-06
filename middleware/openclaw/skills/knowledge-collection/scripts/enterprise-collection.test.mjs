@@ -102,8 +102,17 @@ async function testWecomExportWritesCanonicalPrivateArtifacts() {
       await stat(join(outputDir, relativePath));
     }
     const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
-    assert.equal(metadata.scope, 'bot-visible');
-    assert.ok(metadata.backendCliVersion);
+    assert.equal(metadata.schemaVersion, '1.0');
+    assert.deepEqual(metadata.storage, { fallback: false });
+    assert.equal(metadata.collection.status, 'complete');
+    assert.equal(metadata.collection.items.length, 1);
+    assert.equal(metadata.collection.items[0].sourceSkill, 'wecomcli');
+    assert.equal(metadata.collection.items[0].materialization.markdownPath, 'markdown/document.md');
+    assert.equal(metadata.collection.items[0].materialization.sanitizedPath, 'sanitized/items/document.md');
+    assert.deepEqual(metadata.retention, { auditRequired: false, userRequested: false });
+    assert.deepEqual(metadata.postProcessing.runs, []);
+    assert.equal(metadata.sourceMetadata.scope, 'bot-visible');
+    assert.ok(metadata.sourceMetadata.backendCliVersion);
     const collection = JSON.parse(await readFile(join(outputDir, 'collection-result.json'), 'utf8'));
     assert.deepEqual(Object.keys(collection).sort(), ['backend', 'filters', 'items', 'schemaVersion', 'source', 'title', 'url']);
     assert.equal(collection.items.length, 1);
@@ -160,6 +169,12 @@ async function testFeishuMinutesReadsCliCreatedTranscript() {
     }
     const normalized = await readFile(join(outputDir, 'sanitized/items/transcript.md'), 'utf8');
     assert.match(normalized, /Speaker A \[00:00\]/);
+    const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
+    assert.equal(metadata.schemaVersion, '1.0');
+    assert.equal(metadata.collection.items[0].sourceSkill, 'fws');
+    assert.equal(metadata.collection.items[0].sourceItemId, 'minute-1');
+    assert.equal(metadata.collection.items[0].materialization.sanitizedPath, 'sanitized/items/transcript.md');
+    assert.deepEqual(metadata.postProcessing.runs, []);
     const collection = JSON.parse(await readFile(join(outputDir, 'collection-result.json'), 'utf8'));
     assert.equal(collection.source, 'fws');
     assert.equal(collection.backend, 'lark-cli');

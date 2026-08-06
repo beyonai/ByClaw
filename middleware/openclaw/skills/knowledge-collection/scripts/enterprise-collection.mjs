@@ -2,7 +2,7 @@
 
 import { chmod, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
@@ -98,6 +98,35 @@ function markdown(content, url, title, source) {
   return `---\ntitle: ${title}\nsource: ${source}\nsource_url: ${url}\ncollection_filters: {}\n---\n\n${content.trim()}\n`;
 }
 
+function collectionMetadata({ itemId, title, url, sourceItemId, sourceSkill, backend, rawArtifacts, markdownPath, sanitizedPath, sourceMetadata }) {
+  return {
+    schemaVersion: '1.0',
+    storage: { fallback: false },
+    collection: {
+      status: 'complete',
+      items: [{
+        itemId,
+        title,
+        sourceUrl: url,
+        sourceItemId,
+        sourceSkill,
+        backend,
+        collectionFilters: {},
+        rawArtifacts,
+        materialization: {
+          status: 'materialized',
+          markdownPath,
+          sanitizedPath,
+          reason: null,
+        },
+      }],
+    },
+    retention: { auditRequired: false, userRequested: false },
+    postProcessing: { runs: [] },
+    sourceMetadata,
+  };
+}
+
 async function collectWecomSmartpage(values) {
   const url = requireValue(values, 'url');
   const outputDir = requireValue(values, 'output-dir');
@@ -121,11 +150,13 @@ async function collectWecomSmartpage(values) {
   }
 
   let content;
+  let completedPoll;
   for (let poll = 1; poll <= MAX_WECOM_POLLS; poll += 1) {
     const pollResult = parseWecomEnvelope(await run(bin, ['doc', 'smartpage_get_export_result', JSON.stringify({ task_id: taskId })]));
     await writePrivateJson(resolve(rawDir, `poll-${poll}.json`), pollResult.outer);
     if (pollResult.business.task_done === true) {
       content = pollResult.business.content;
+      completedPoll = poll;
       break;
     }
   }
@@ -138,13 +169,23 @@ async function collectWecomSmartpage(values) {
     writePrivate(resolve(markdownDir, 'document.md'), normalized),
     writePrivate(resolve(itemDir, 'document.md'), normalized),
     writePrivateJson(resolve(rawDir, 'metadata.json'), { backend: 'wecom-cli', taskId }),
-    writePrivateJson(resolve(sanitizedDir, 'metadata.json'), {
+    writePrivateJson(resolve(sanitizedDir, 'metadata.json'), collectionMetadata({
+      itemId: `wecom-smartpage-${taskId}`,
+      title: 'Exported WeCom Smartpage',
+      url,
+      sourceItemId: taskId,
+      sourceSkill: 'wecomcli',
       backend: 'wecom-cli',
-      backendCliVersion: process.env.WECOM_CLI_VERSION || 'unknown',
-      scope: 'bot-visible',
-      taskId,
-      partial: false,
-    }),
+      rawArtifacts: ['raw/export-task.json', `raw/poll-${completedPoll}.json`],
+      markdownPath: 'markdown/document.md',
+      sanitizedPath: 'sanitized/items/document.md',
+      sourceMetadata: {
+        backend: 'wecom-cli',
+        backendCliVersion: process.env.WECOM_CLI_VERSION || 'unknown',
+        scope: 'bot-visible',
+        taskId,
+      },
+    })),
   ]);
   await writePrivateJson(resolve(root, 'collection-result.json'), {
     schemaVersion: '1.0',
@@ -226,16 +267,27 @@ async function collectFeishuMinutes(values) {
   }
   const title = 'Feishu Minutes Transcript';
   const normalized = markdown(transcript, url, title, 'fws');
+  const transcriptRelativePath = relative(root, transcriptPath).split(sep).join('/');
   await Promise.all([
     writePrivate(resolve(markdownDir, 'transcript.md'), normalized),
     writePrivate(resolve(itemDir, 'transcript.md'), normalized),
     writePrivateJson(resolve(rawDir, 'metadata.json'), { backend: 'lark-cli' }),
-    writePrivateJson(resolve(sanitizedDir, 'metadata.json'), {
+    writePrivateJson(resolve(sanitizedDir, 'metadata.json'), collectionMetadata({
+      itemId: `fws-minute-${minuteToken}`,
+      title,
+      url,
+      sourceItemId: minuteToken,
+      sourceSkill: 'fws',
       backend: 'lark-cli',
-      backendCliVersion: process.env.LARK_CLI_VERSION || 'unknown',
-      partial: false,
-      transcriptFile: 'raw/minutes/cli-created-file',
-    }),
+      rawArtifacts: ['raw/detail.json', transcriptRelativePath],
+      markdownPath: 'markdown/transcript.md',
+      sanitizedPath: 'sanitized/items/transcript.md',
+      sourceMetadata: {
+        backend: 'lark-cli',
+        backendCliVersion: process.env.LARK_CLI_VERSION || 'unknown',
+        transcriptFile: transcriptRelativePath,
+      },
+    })),
   ]);
   await writePrivateJson(resolve(root, 'collection-result.json'), {
     schemaVersion: '1.0',
