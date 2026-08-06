@@ -85,6 +85,7 @@ public class ConnectorManifestCanonicalizer {
 
         JsonNode runtime = requireObject(root.get("runtime"), "runtime");
         requireText(runtime, "type", "cli");
+        requireAllowedText(runtime, "authorizeIn", "be-auth-job", "user-sandbox");
         JsonNode commands = requireObject(runtime.get("commands"), "runtime.commands");
         if (commands.isEmpty()) {
             throw invalid("runtime.commands must not be empty");
@@ -106,6 +107,8 @@ public class ConnectorManifestCanonicalizer {
 
         JsonNode authStorage = requireObject(root.get("authStorage"), "authStorage");
         requireText(authStorage, "mode", "native-home");
+        requireAllowedText(authStorage, "owner", "be-auth-job", "user-sandbox-auth-job");
+        requireAllowedText(authStorage, "runtimeMutation", "provider-refresh-only", "sandbox-native");
         String nativePath = requireNonBlankText(authStorage, "nativePath");
         validateNativePath(nativePath);
         JsonNode environment = requireObject(authStorage.get("environment"), "authStorage.environment");
@@ -198,6 +201,20 @@ public class ConnectorManifestCanonicalizer {
         if (!expected.equals(actual)) {
             throw invalid(field + " must equal " + expected);
         }
+    }
+
+    private void requireAllowedText(JsonNode parent, String field, String... allowed) {
+        JsonNode value = parent.get(field);
+        if (value == null) {
+            return;
+        }
+        String actual = requireNonBlankText(parent, field);
+        for (String candidate : allowed) {
+            if (candidate.equals(actual)) {
+                return;
+            }
+        }
+        throw invalid(field + " contains an unsupported value");
     }
 
     private boolean containsControlCharacter(String value) {

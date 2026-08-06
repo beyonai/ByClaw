@@ -19,9 +19,10 @@ import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLifecycleFacade;
 import com.iwhalecloud.byai.gateway.sandbox.spec.GenericSandboxSpecProcessor;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 import com.iwhalecloud.byai.gateway.sandbox.workspace.SandboxWorkspaceBootstrapInitializer;
+import com.iwhalecloud.byai.manager.domain.connector.provider.lark.LarkAuthorizationProperties;
 
 @Configuration
-@EnableConfigurationProperties(SandboxProperties.class)
+@EnableConfigurationProperties({SandboxProperties.class, LarkAuthorizationProperties.class})
 public class SandboxAutoConfiguration {
 
     @Bean
