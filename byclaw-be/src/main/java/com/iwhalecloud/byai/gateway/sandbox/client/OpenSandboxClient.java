@@ -373,6 +373,9 @@ public class OpenSandboxClient {
                     continue;
                 }
                 String id = firstText(node, "id", "command_id", "commandId");
+                if (id == null && "init".equals(node.path("type").asText(""))) {
+                    id = firstText(node, "text");
+                }
                 if (id != null) {
                     return id;
                 }
