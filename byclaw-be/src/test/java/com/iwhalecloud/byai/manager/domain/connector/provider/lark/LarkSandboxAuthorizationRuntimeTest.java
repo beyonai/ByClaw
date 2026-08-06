@@ -25,12 +25,19 @@ import com.iwhalecloud.byai.manager.entity.users.Users;
 class LarkSandboxAuthorizationRuntimeTest {
 
     @Test
+    void usesOpenClawSandboxExecutorWithoutExternalConfiguration() {
+        LarkAuthorizationProperties properties = new LarkAuthorizationProperties();
+
+        assertThat(properties.isSandboxExecutor()).isTrue();
+        assertThat(properties.getSandboxServiceKey()).isEqualTo("openclaw");
+    }
+
+    @Test
     void startsUserAuthorizationInsideResolvedSandbox() {
         SandboxCommandExecutor executor = mock(SandboxCommandExecutor.class);
         UserSandboxResolver resolver = mock(UserSandboxResolver.class);
         UserService userService = mock(UserService.class);
         LarkAuthorizationProperties properties = new LarkAuthorizationProperties();
-        properties.setSandboxServiceKey("openclaw");
         LarkSandboxAuthorizationRuntime runtime = new LarkSandboxAuthorizationRuntime(
             executor, resolver, properties, new ObjectMapper(), userService);
         Users user = new Users();

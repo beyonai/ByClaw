@@ -8,12 +8,16 @@ import lombok.Data;
 @ConfigurationProperties(prefix = "byclaw.connector.lark")
 public class LarkAuthorizationProperties {
 
-    private String authorizationExecutor = "be";
-    private String sandboxServiceKey = "openclaw";
+    private static final String SANDBOX_SERVICE_KEY = "openclaw";
+
     private int maxOutputBytes = 512 * 1024;
     private int maxConcurrency = 32;
 
     public boolean isSandboxExecutor() {
-        return "sandbox".equalsIgnoreCase(authorizationExecutor);
+        return true;
+    }
+
+    public String getSandboxServiceKey() {
+        return SANDBOX_SERVICE_KEY;
     }
 }
