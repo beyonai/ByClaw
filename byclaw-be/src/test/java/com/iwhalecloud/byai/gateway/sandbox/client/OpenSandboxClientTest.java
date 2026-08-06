@@ -19,6 +19,20 @@ import com.sun.net.httpserver.HttpServer;
 class OpenSandboxClientTest {
 
     @Test
+    void readsBackgroundCommandIdFromNdjsonInitText() throws Exception {
+        OpenSandboxClient client = new OpenSandboxClient(new SandboxProperties());
+        String stream = "{\"type\":\"init\",\"text\":\"90b1315fad0e447b8bb26c77c311e162\","
+            + "\"timestamp\":1785996105659}\n\n"
+            + "{\"type\":\"ping\",\"text\":\"pong\",\"timestamp\":1785996105659}\n\n"
+            + "{\"type\":\"execution_complete\",\"timestamp\":1785996105660}";
+
+        Method parser = OpenSandboxClient.class.getDeclaredMethod("firstCommandId", String.class);
+        parser.setAccessible(true);
+
+        assertThat(parser.invoke(client, stream)).isEqualTo("90b1315fad0e447b8bb26c77c311e162");
+    }
+
+    @Test
     void parsesRawNdjsonCommandEventsAndPreservesCliError() throws Exception {
         OpenSandboxClient client = new OpenSandboxClient(new SandboxProperties());
         String cliError = "{\"ok\":false,\"error\":{\"type\":\"config\","
