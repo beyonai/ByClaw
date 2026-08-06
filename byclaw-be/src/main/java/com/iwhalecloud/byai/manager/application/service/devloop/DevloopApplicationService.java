@@ -38,6 +38,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.TesterConfigDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
+import com.iwhalecloud.byai.manager.dto.devloop.IntegrationResultDto;
 import com.iwhalecloud.byai.manager.dto.devloop.RequirementSplitDTO;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.*;
@@ -1008,6 +1009,147 @@ public class DevloopApplicationService {
         logger.info("[Kickback] 需求 {} 失败(runId={})驱动 {} 个会话回到 {} 环节重工", requirementId, run.getRunId(), driven, target);
     }
 
+    /** 测试员工超时上限:超过后仍无 tester DONE/REJECT 打点则判 timeout,避免 run 永久 running。 */
+    private static final long INTEGRATION_TESTER_TIMEOUT_MS = 60L * 60 * 1000;
+
+    /**
+     * 集成测试结果回收:扫「已下发测试员工、仍 running」的执行,按会话 [PHASE] tester 打点判定终态。
+     * tester DONE=通过、tester REJECT=失败(读结构化结果文件补 total/passed/failed,失败记 kickbackTo 供打回引擎接手);
+     * 无打点且超时判 timeout。收尾只写本 run,不驱动重工——重工仍由 runKickbackSweep 幂等处理。
+     * 由 DevloopIntegrationBatchJob 持锁后单节点调用,与批量触发、打回同一周期。
+     */
+    public void runIntegrationResultSweep() {
+        List<IntegrationRun> running = integrationRunService.listRunningWithSession();
+        for (IntegrationRun run : running) {
+            try {
+                recoverIntegrationResult(run);
+            } catch (Exception e) {
+                logger.error("[IntegrationResult] 回收执行结果异常, runId={}", run.getRunId(), e);
+            }
+        }
+    }
+
+    /**
+     * 单条执行的结果回收:读会话 tester 环节状态决定终态。
+     * done→passed;rejected→failed 并记 coder 打回;两者都未到则看是否超时,超时判 timeout,否则保持 running 等下轮。
+     */
+    private void recoverIntegrationResult(IntegrationRun run) {
+        DevloopPhaseService.PhaseSnapshot snapshot = devloopPhaseService.buildSnapshot(run.getSessionId());
+        String testerStatus = phaseStatus(snapshot, "tester");
+
+        if (DevloopPhaseService.ST_DONE.equals(testerStatus)) {
+            applyIntegrationResult(run, "passed", null);
+            return;
+        }
+        if (DevloopPhaseService.ST_REJECTED.equals(testerStatus)) {
+            String reason = firstTesterRejectReason(snapshot);
+            applyIntegrationResult(run, "failed", StringUtils.defaultIfBlank(reason, "测试未通过,存在失败用例"));
+            return;
+        }
+        // 尚无 tester 终态打点:超时才收口,否则留待下轮继续等待员工完成。
+        long ageMs = System.currentTimeMillis() - run.getStartedAt().getTime();
+        if (ageMs >= INTEGRATION_TESTER_TIMEOUT_MS) {
+            applyIntegrationResult(run, "timeout", "测试数字员工执行超时未回流结果");
+        }
+    }
+
+    /**
+     * 落 run 终态:读结构化结果文件补 total/passed/failed/skipped(缺失按 0);失败/超时记 coder 打回归因,
+     * 供 runKickbackSweep 接手驱动重工。durationSec 从 startedAt 到现在计算。
+     */
+    private void applyIntegrationResult(IntegrationRun run, String status, String reason) {
+        IntegrationResultDto result = tryReadIntegrationResult(run);
+        int total = result != null && result.getTotal() != null ? result.getTotal() : 0;
+        int passed = result != null && result.getPassed() != null ? result.getPassed() : 0;
+        int failed = result != null && result.getFailed() != null ? result.getFailed() : 0;
+        int skipped = result != null && result.getSkipped() != null ? result.getSkipped() : 0;
+        run.setTotal(total);
+        run.setPassed(passed);
+        run.setFailed(failed);
+        run.setSkipped(skipped);
+        // 结果详情弹窗按 suites[].failedCases 展示失败用例;从结构化结果拼一条套件结果,保留失败用例名。
+        run.setSuitesJson(buildSuitesJson(run, status, result));
+        run.setStatus(status);
+        if (!"passed".equals(status)) {
+            run.setKickbackTo("coder");
+            run.setReason(reason);
+        }
+        run.setFinishedAt(new Date());
+        run.setDurationSec((int) ((System.currentTimeMillis() - run.getStartedAt().getTime()) / 1000));
+        integrationRunService.update(run);
+        logger.info("[IntegrationResult] runId={} 收尾 status={} total={} failed={}",
+            run.getRunId(), status, run.getTotal(), run.getFailed());
+    }
+
+    /** 把测试员工的结构化结果拼成前端 suites 契约(单套件一条),失败用例名映射为 failedCases[].caseId。 */
+    private String buildSuitesJson(IntegrationRun run, String status, IntegrationResultDto result) {
+        IntegrationSuite suite = integrationSuiteService.findById(run.getSuiteId());
+        JSONArray failedCases = new JSONArray();
+        if (result != null && result.getFailedCases() != null) {
+            for (String name : result.getFailedCases()) {
+                JSONObject fc = new JSONObject(true);
+                fc.put("caseId", StringUtils.defaultString(name));
+                fc.put("message", "");
+                fc.put("artifacts", new JSONArray());
+                failedCases.add(fc);
+            }
+        }
+        JSONObject suiteResult = new JSONObject(true);
+        suiteResult.put("suiteId", String.valueOf(run.getSuiteId()));
+        suiteResult.put("name", suite != null ? StringUtils.defaultString(suite.getSuiteName()) : "");
+        suiteResult.put("status", "passed".equals(status) ? "passed" : "failed");
+        suiteResult.put("total", nvl(run.getTotal()));
+        suiteResult.put("passed", nvl(run.getPassed()));
+        suiteResult.put("failed", nvl(run.getFailed()));
+        suiteResult.put("durationSec", nvl(run.getDurationSec()));
+        suiteResult.put("reportPath", "");
+        suiteResult.put("logPath", "");
+        suiteResult.put("failedCases", failedCases);
+        JSONArray suites = new JSONArray();
+        suites.add(suiteResult);
+        return suites.toJSONString();
+    }
+
+    private IntegrationResultDto tryReadIntegrationResult(IntegrationRun run) {
+        try {
+            LoginInfo owner = loginApplicationService.getLoginInfo(run.getCreateBy());
+            if (owner == null || StringUtils.isBlank(owner.getUserCode())) {
+                return null;
+            }
+            return taskStateReader.readIntegrationResult(owner.getUserCode(), run.getSessionId());
+        } catch (Exception e) {
+            logger.warn("[IntegrationResult] 读结果文件失败, runId={}, sessionId={}", run.getRunId(), run.getSessionId(), e);
+            return null;
+        }
+    }
+
+    /** 从快照取某环节状态;缺失按未开始。 */
+    private String phaseStatus(DevloopPhaseService.PhaseSnapshot snapshot, String phaseKey) {
+        if (snapshot == null || snapshot.getPhases() == null) {
+            return DevloopPhaseService.ST_PENDING;
+        }
+        for (DevloopPhaseService.PhaseState p : snapshot.getPhases()) {
+            if (phaseKey.equals(p.getKey())) {
+                return p.getStatus();
+            }
+        }
+        return DevloopPhaseService.ST_PENDING;
+    }
+
+    /** 取 tester 环节最近一次打回原因,作为失败 reason。 */
+    private String firstTesterRejectReason(DevloopPhaseService.PhaseSnapshot snapshot) {
+        if (snapshot == null || snapshot.getKickbacks() == null) {
+            return null;
+        }
+        String reason = null;
+        for (DevloopPhaseService.Kickback k : snapshot.getKickbacks()) {
+            if ("tester".equals(k.getFrom())) {
+                reason = k.getReason();
+            }
+        }
+        return reason;
+    }
+
     /**
      * 驱动一个会话回到目标环节重工:向既有会话发一条重工指令消息,由数字员工自身产出 [PHASE] <target> REJECT 打点完成回退(打点只信数字员工回答,后端不伪造标记)。 agentId
      * 必须显式带上:targetAgentResolver 不从会话反查,缺失会静默不触发。
@@ -1255,6 +1397,13 @@ public class DevloopApplicationService {
     /** 查询某套件的历史执行列表。 */
     public ResponseUtil<List<Map<String, Object>>> listIntegrationRuns(Long suiteId) {
         List<Map<String, Object>> list = integrationRunService.listBySuiteId(suiteId).stream().map(this::runToHistoryVo)
+            .collect(java.util.stream.Collectors.toList());
+        return ResponseUtil.successResponse(list);
+    }
+
+    /** 查询某环境的历史执行列表。 */
+    public ResponseUtil<List<Map<String, Object>>> listIntegrationRunsByEnv(Long envId) {
+        List<Map<String, Object>> list = integrationRunService.listByEnvId(envId).stream().map(this::runToHistoryVo)
             .collect(java.util.stream.Collectors.toList());
         return ResponseUtil.successResponse(list);
     }
@@ -2433,7 +2582,7 @@ public class DevloopApplicationService {
     /**
      * 按代码平台生成「仓库访问说明」段,填入模板 ${repoCloneHint} 占位符。 显式 repoUrl(自建/私有实例)优先直用;否则按平台公共域名 + 令牌变量拼带令牌的 clone 地址。
      */
-    private static String buildRepoCloneHint(String provider, String repoUrl, String repoFullName) {
+    public static String buildRepoCloneHint(String provider, String repoUrl, String repoFullName) {
         RepoProviderSpec spec = REPO_PROVIDER_SPECS.getOrDefault(
             StringUtils.defaultIfBlank(provider, "github"), REPO_PROVIDER_SPECS.get("github"));
         // repoFullName 形如 owner/repo 才按公共域名拼接;显式 repoUrl 一律直用,兼容自建实例。

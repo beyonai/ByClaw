@@ -108,6 +108,15 @@ public class IntegrationRunService {
         return integrationRunMapper.selectList(wrapper);
     }
 
+    /** 查询某环境的历史执行列表,最新在前。 */
+    public List<IntegrationRun> listByEnvId(Long envId) {
+        LambdaQueryWrapper<IntegrationRun> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(IntegrationRun::getEnvId, envId)
+               .eq(IntegrationRun::getDeleteFlag, "0")
+               .orderByDesc(IntegrationRun::getCreateTime);
+        return integrationRunMapper.selectList(wrapper);
+    }
+
     /**
      * 待打回处理的执行:挂需求、已终态失败(failed/error/timeout)、尚未被打回引擎处理过。
      * kickbackAt 为空是幂等闸门,保证每次失败只驱动一次重工/建一次缺陷。最新在前。
@@ -120,6 +129,24 @@ public class IntegrationRunService {
                .in(IntegrationRun::getStatus, "failed", "error", "timeout")
                .orderByDesc(IntegrationRun::getCreateTime);
         return integrationRunMapper.selectList(wrapper);
+    }
+
+    /**
+     * 已下发测试员工、仍在跑的执行:status=running 且已冻结 sessionId。
+     * 结果回收 poller 按此捞取,从会话打点与结构化结果文件回流后收尾。最新在前。
+     */
+    public List<IntegrationRun> listRunningWithSession() {
+        LambdaQueryWrapper<IntegrationRun> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(IntegrationRun::getDeleteFlag, "0")
+               .eq(IntegrationRun::getStatus, "running")
+               .isNotNull(IntegrationRun::getSessionId)
+               .orderByDesc(IntegrationRun::getCreateTime);
+        return integrationRunMapper.selectList(wrapper);
+    }
+
+    /** 回收 poller 收尾:整条 run 已在内存设好终态字段,统一落库。 */
+    public void update(IntegrationRun run) {
+        integrationRunMapper.updateById(run);
     }
 
     /** 标记一次失败执行已被打回引擎处理(写 kickbackAt + 最终归因环节),闭合幂等闸门。 */

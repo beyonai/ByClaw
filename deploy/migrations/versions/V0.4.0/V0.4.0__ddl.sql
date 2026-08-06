@@ -537,3 +537,14 @@ COMMENT ON COLUMN project_init_audit_log.start_time IS '开始时间 - 操作开
 COMMENT ON COLUMN project_init_audit_log.end_time IS '结束时间 - 操作结束时间';
 COMMENT ON COLUMN project_init_audit_log.created_at IS '创建时间 - 数据库记录创建时间';
 COMMENT ON COLUMN project_init_audit_log.updated_at IS '更新时间 - 数据库记录更新时间';
+
+-- 集成执行改为「测试数字员工」驱动:run 关联下发给测试员工的会话,结果由 poller 从会话回流,不再 SSH 跑用例命令解析 JUnit。
+-- session_id 为空表示尚未成功下发会话(建 run 失败/无默认测试员工);poller 只回收 status=running 且 session_id 非空的行。
+ALTER TABLE byai.byai_integration_run ADD COLUMN session_id BIGINT;
+COMMENT ON COLUMN byai.byai_integration_run.session_id IS '承载本次测试的数字员工会话ID;结果回流 poller 按此会话读 [PHASE] tester 打点与结构化结果文件';
+ALTER TABLE byai.byai_integration_run ADD COLUMN tester_agent_id BIGINT;
+COMMENT ON COLUMN byai.byai_integration_run.tester_agent_id IS '执行本次测试的测试数字员工ID(下发时由 DefaultAgent 解析并冻结,便于回溯)';
+ALTER TABLE byai.byai_integration_run ADD COLUMN tester_agent_name VARCHAR(200);
+COMMENT ON COLUMN byai.byai_integration_run.tester_agent_name IS '测试数字员工名称(展示用快照)';
+-- 环境维度历史查询(用例集/环境卡片「日志」按钮按 env 反查执行列表)。
+CREATE INDEX IF NOT EXISTS idx_integration_run_env ON byai.byai_integration_run (env_id, create_time DESC);

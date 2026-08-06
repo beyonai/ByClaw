@@ -33,6 +33,7 @@ import {
   LeftOutlined,
   PlayCircleOutlined,
   PlusOutlined,
+  ProfileOutlined,
   RightOutlined,
   RobotOutlined,
   SyncOutlined,
@@ -47,6 +48,7 @@ import {
   getIntegrationRun,
   listIntegrationEnvs,
   listIntegrationRuns,
+  listIntegrationRunsByEnv,
   listIntegrationSuites,
   startIntegrationRun,
   resolveDefaultAgent,
@@ -195,7 +197,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
   }>({
     name: '',
     runner: 'pytest',
-    sourceType: 'git',
+    sourceType: 'code',
     repoId: undefined,
     source: '',
     branch: 'main',
@@ -212,6 +214,15 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
   const [integrationEnvTab, setIntegrationEnvTab] = useState('basic');
   const [integrationResultOpen, setIntegrationResultOpen] = useState(false);
   const [integrationResult, setIntegrationResult] = useState<IntegrationRunResult | null>(null);
+  // 日志弹窗:按环境/套件粒度列出历次运行,点开某条复用 result Modal 看日志。
+  const [logModalOpen, setLogModalOpen] = useState(false);
+  const [logModalTarget, setLogModalTarget] = useState<{
+    kind: 'suite' | 'env';
+    id: number;
+    name: string;
+  } | null>(null);
+  const [logRuns, setLogRuns] = useState<IntegrationRunHistoryVo[]>([]);
+  const [logLoading, setLogLoading] = useState(false);
   const [integrationEnvForm, setIntegrationEnvForm] = useState<{
     name: string;
     address: string;
@@ -557,6 +568,24 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
     setRunningRunId(null);
   };
 
+  // 打开日志弹窗:按粒度拉历次运行列表(env 走新接口,suite 复用现有),点开某条再看该次日志。
+  const openLogModal = async (kind: 'suite' | 'env', id: number, name: string) => {
+    setLogModalTarget({ kind, id, name });
+    setLogRuns([]);
+    setLogModalOpen(true);
+    setLogLoading(true);
+    try {
+      const list = (await (kind === 'env' ? listIntegrationRunsByEnv(id) : listIntegrationRuns(id))) as
+        | IntegrationRunHistoryVo[]
+        | null;
+      setLogRuns(Array.isArray(list) ? list : []);
+    } catch (e) {
+      message.error(t('integration.log.loadFailed'));
+    } finally {
+      setLogLoading(false);
+    }
+  };
+
   // 研发闭环环节:E2E 集成测试插在 tester 之后、pr 之前,失败则打回 coder。用于概览可视化本次任务当前所处环节。
   const integrationFlowPhases = [
     { key: 'issue', label: '需求来源', state: 'done' as const },
@@ -614,7 +643,8 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
     return {
       total: list.length,
       attention: list.filter((r) => r.status === 'failed').length,
-      running: list.filter((r) => r.status === 'running' || r.status === 'ready' || r.status === 'waiting_ready').length,
+      running: list.filter((r) => r.status === 'running' || r.status === 'ready' || r.status === 'waiting_ready')
+        .length,
       passed: list.filter((r) => r.status === 'passed').length,
       passRate: totalCases > 0 ? Math.round((passedCases / totalCases) * 100) : null,
     };
@@ -883,7 +913,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
     setIntegrationSuiteForm({
       name: '',
       runner: 'pytest',
-      sourceType: 'git',
+      sourceType: 'code',
       repoId: undefined,
       source: '',
       branch: 'main',
@@ -902,7 +932,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
     setIntegrationSuiteForm({
       name: suite.suiteName,
       runner: suite.runner ?? 'pytest',
-      sourceType: suite.sourceType ?? 'git',
+      sourceType: suite.sourceType ?? 'code',
       repoId: suite.repoId,
       source: suite.source ?? '',
       branch: suite.branch ?? '',
@@ -947,15 +977,15 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
       return;
     }
     const isManual = f.runner === 'manual';
-    const isGit = f.sourceType === 'git';
+    // code:用例随代码仓库,权威关联走 repoId;standalone:独立仓库,只有 source(git URL)。两者都由测试员工克隆。
+    const isCodeRepo = f.sourceType === 'code';
     const payload = {
       suiteName: f.name,
       runner: f.runner,
       sourceType: f.sourceType,
-      // git 来源权威关联 repoId;shared 无仓库,置空。
-      repoId: isGit ? f.repoId : undefined,
+      repoId: isCodeRepo ? f.repoId : undefined,
       source: f.source,
-      branch: isGit ? f.branch : '',
+      branch: f.branch,
       runCommand: isManual ? '' : f.runCommand,
       workdir: f.workdir,
       reportPath: isManual ? '' : f.reportPath,
@@ -1344,6 +1374,14 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
                               <Button
                                 type="link"
                                 size="small"
+                                icon={<ProfileOutlined />}
+                                onClick={() => openLogModal('env', env.envId, env.envName)}
+                              >
+                                {t('integration.log.button')}
+                              </Button>
+                              <Button
+                                type="link"
+                                size="small"
                                 icon={<EyeOutlined />}
                                 onClick={() => openEnvModal(env, true)}
                               >
@@ -1423,9 +1461,9 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
                                       </span>
                                       <span className={styles.integrationFieldValue}>
                                         {t(
-                                          suite.sourceType === 'git'
-                                            ? 'integration.suite.sourceGit'
-                                            : 'integration.suite.sourceShared'
+                                          suite.sourceType === 'standalone'
+                                            ? 'integration.suite.sourceStandalone'
+                                            : 'integration.suite.sourceCode'
                                         )}
                                         {' · '}
                                         {t('integration.suite.caseCount', { count: suite.caseCount ?? 0 })}
@@ -1471,6 +1509,14 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
                                     {t('integration.suite.runTest')}
                                   </Button>
                                 )}
+                                <Button
+                                  type="link"
+                                  size="small"
+                                  icon={<ProfileOutlined />}
+                                  onClick={() => openLogModal('suite', suite.suiteId, suite.suiteName)}
+                                >
+                                  {t('integration.log.button')}
+                                </Button>
                                 <Button
                                   type="link"
                                   size="small"
@@ -1683,24 +1729,23 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
             {!isManual && (
               <div className={parentStyles.formField} style={{ flex: 1 }}>
                 <label>{t('integration.suiteModal.sourceType')}</label>
-                <Select
+                <Radio.Group
                   value={integrationSuiteForm.sourceType}
-                  onChange={(v) => setField('sourceType', v)}
-                  options={[
-                    { value: 'git', label: t('integration.suite.sourceGit') },
-                    { value: 'shared', label: t('integration.suite.sourceShared') },
-                  ]}
-                  style={{ width: '100%' }}
-                />
+                  onChange={(e) => setField('sourceType', e.target.value)}
+                >
+                  <Radio value="code">{t('integration.suite.sourceCode')}</Radio>
+                  <Radio value="standalone">{t('integration.suite.sourceStandalone')}</Radio>
+                </Radio.Group>
               </div>
             )}
           </div>
           {!isManual && (
             <>
-              {integrationSuiteForm.sourceType === 'git' ? (
-                // git 来源复用项目「关联仓库」列表:source 存仓库 URL(与渠道一致),选中即带出默认分支。
+              <div className={styles.integrationNote}>{t('integration.suiteModal.sourceTypeHint')}</div>
+              {integrationSuiteForm.sourceType === 'code' ? (
+                // code 来源:用例随被测代码,复用项目「关联仓库」列表;source 冗余仓库 URL,权威关联走 repoId。
                 <div className={parentStyles.formField}>
-                  <label>{t('integration.suiteModal.gitUrl')}</label>
+                  <label>{t('integration.suiteModal.codeRepo')}</label>
                   <Select
                     placeholder={t('source.placeholder.repository')}
                     value={integrationSuiteForm.repoId}
@@ -1709,7 +1754,6 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
                       setIntegrationSuiteForm((prev) => ({
                         ...prev,
                         repoId,
-                        // source 冗余仓库 URL 供展示/克隆;权威关联走 repoId。
                         source: repo?.repoUrl || repo?.repoFullName || '',
                         branch: repo?.defaultBranch || prev.branch,
                       }));
@@ -1723,25 +1767,24 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
                   />
                 </div>
               ) : (
+                // standalone 来源:用例在独立仓库,由测试员工按 URL+分支克隆;无 repoId 关联。
                 <div className={parentStyles.formField}>
-                  <label>{t('integration.suiteModal.sharedPath')}</label>
+                  <label>{t('integration.suiteModal.standaloneRepo')}</label>
                   <Input
-                    placeholder="/by/testcases/smoke/"
+                    placeholder="git@git.internal:qa/byclaw-e2e.git"
                     value={integrationSuiteForm.source}
                     onChange={(e) => setField('source', e.target.value)}
                   />
                 </div>
               )}
-              {integrationSuiteForm.sourceType === 'git' && (
-                <div className={parentStyles.formField}>
-                  <label>{t('integration.suiteModal.branch')}</label>
-                  <Input
-                    placeholder="main"
-                    value={integrationSuiteForm.branch}
-                    onChange={(e) => setField('branch', e.target.value)}
-                  />
-                </div>
-              )}
+              <div className={parentStyles.formField}>
+                <label>{t('integration.suiteModal.branch')}</label>
+                <Input
+                  placeholder="main"
+                  value={integrationSuiteForm.branch}
+                  onChange={(e) => setField('branch', e.target.value)}
+                />
+              </div>
               <div className={parentStyles.formField}>
                 <label>{t('integration.suiteModal.workdir')}</label>
                 <Input
@@ -2470,6 +2513,76 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
     );
   };
 
+  // 日志弹窗:列出该环境/套件历次运行,点「查看日志」复用 result Modal 展示 steps[].logText。
+  const renderIntegrationLogModal = () => {
+    const isEnv = logModalTarget?.kind === 'env';
+    const title = isEnv ? t('integration.log.envTitle') : t('integration.log.suiteTitle');
+    return (
+      <Modal
+        title={logModalTarget ? `${title} · ${logModalTarget.name}` : title}
+        open={logModalOpen}
+        onCancel={() => setLogModalOpen(false)}
+        footer={[
+          <Button key="close" onClick={() => setLogModalOpen(false)}>
+            {t('common.close')}
+          </Button>,
+        ]}
+        width={640}
+        zIndex={1100}
+      >
+        <List
+          size="small"
+          bordered
+          loading={logLoading}
+          className={styles.integrationHistoryList}
+          dataSource={logRuns}
+          locale={{
+            emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('integration.log.empty')} />,
+          }}
+          renderItem={(item) => {
+            const passed = item.status === 'passed';
+            const rate = `${item.passed ?? 0}/${item.total ?? 0}`;
+            const suiteName = integrationSuiteList.find((s) => s.suiteId === item.suiteId)?.suiteName;
+            return (
+              <List.Item
+                actions={[
+                  <Tag key="result" color={runStatusColor(item.status)}>
+                    {t(`integration.result.status.${item.status}`)}
+                  </Tag>,
+                  <Button key="view" type="link" size="small" onClick={() => openIntegrationResult(item.runId)}>
+                    {t('integration.log.viewDetail')}
+                  </Button>,
+                ]}
+              >
+                <List.Item.Meta
+                  title={
+                    <span>
+                      {suiteName || `#${item.suiteId}`}
+                      {item.branch ? <span className={styles.integrationHistoryRound}>{item.branch}</span> : null}
+                    </span>
+                  }
+                  description={
+                    <div>
+                      <span className={parentStyles.detailSourceTime}>
+                        {t('integration.history.passRate', { rate })} · {item.time}
+                      </span>
+                      {!passed && item.kickbackTo ? (
+                        <div className={styles.integrationHistoryKickback}>
+                          {t('integration.history.kickback', { phase: phaseLabelOf(item.kickbackTo) })}
+                          {item.reason ? ` · ${item.reason}` : ''}
+                        </div>
+                      ) : null}
+                    </div>
+                  }
+                />
+              </List.Item>
+            );
+          }}
+        />
+      </Modal>
+    );
+  };
+
   // 独立测试员工配置弹框:绑定员工 + 定时 + 就绪准入 + 打回策略(静态演示,确认只写本地状态)。
   const renderTesterModal = () => (
     <Modal
@@ -2678,6 +2791,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
       {renderIntegrationSuiteModal()}
       {renderRunEnvSelectModal()}
       {renderIntegrationResultModal()}
+      {renderIntegrationLogModal()}
       {renderManualRunModal()}
       {renderTesterModal()}
       {renderTesterRunEnvModal()}

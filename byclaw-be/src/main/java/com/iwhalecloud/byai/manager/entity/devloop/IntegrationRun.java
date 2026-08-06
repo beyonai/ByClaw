@@ -51,6 +51,15 @@ public class IntegrationRun {
     /** 失败打回引擎处理本次执行的时间;非空表示已处理,幂等去重用 */
     private Date kickbackAt;
 
+    /** 承载本次测试的数字员工会话ID;结果回流 poller 按此会话读 [PHASE] tester 打点与结构化结果文件 */
+    private Long sessionId;
+
+    /** 执行本次测试的测试数字员工ID(下发时由 DefaultAgent 冻结) */
+    private Long testerAgentId;
+
+    /** 测试数字员工名称快照(展示用) */
+    private String testerAgentName;
+
     /** 远程结果目录(完整日志/报告/截图落地处) */
     private String resultDir;
 

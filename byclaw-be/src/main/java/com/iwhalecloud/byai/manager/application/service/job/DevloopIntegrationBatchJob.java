@@ -50,6 +50,8 @@ public class DevloopIntegrationBatchJob {
                 return;
             }
             devloopApplicationService.runScheduledIntegrationBatches();
+            // 回收已下发测试员工的执行结果:按会话打点判定通过/失败/超时并落库,失败记 coder 打回归因。
+            devloopApplicationService.runIntegrationResultSweep();
             // 同一持锁周期内顺带处理失败打回:失败执行归因后驱动会话重工或建缺陷,幂等去重。
             devloopApplicationService.runKickbackSweep();
         } catch (Exception e) {

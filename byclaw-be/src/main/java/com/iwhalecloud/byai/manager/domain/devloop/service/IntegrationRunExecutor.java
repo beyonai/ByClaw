@@ -3,42 +3,46 @@ package com.iwhalecloud.byai.manager.domain.devloop.service;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
 import com.iwhalecloud.byai.manager.application.service.devloop.IntegrationRunAsyncConfig;
+import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.domain.devloop.exec.CommandExecSpec;
 import com.iwhalecloud.byai.manager.domain.devloop.exec.CommandRunner;
 import com.iwhalecloud.byai.manager.domain.devloop.exec.SshExecResult;
+import com.iwhalecloud.byai.manager.entity.devloop.DefaultAgent;
 import com.iwhalecloud.byai.manager.entity.devloop.IntegrationEnv;
 import com.iwhalecloud.byai.manager.entity.devloop.IntegrationRun;
 import com.iwhalecloud.byai.manager.entity.devloop.IntegrationRunStep;
 import com.iwhalecloud.byai.manager.entity.devloop.IntegrationSuite;
+import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
 import com.iwhalecloud.byai.manager.mapper.devloop.IntegrationRunMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.IntegrationRunStepMapper;
+import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
+import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.service.AssistantChatService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import lombok.extern.slf4j.Slf4j;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
+import com.iwhalecloud.byai.common.util.threadPoolUti.ThreadPoolUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
 
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import java.io.ByteArrayInputStream;
-import java.nio.charset.StandardCharsets;
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executor;
 
 /**
  * 集成测试执行的异步执行体。放在独立 service 里,让 @Async 通过 Spring 代理生效(自调用不走代理)。
- * 全流程:解密连接凭据/测试账号 → 按 seq 跑环境 stages → 跑选中套件 runCommand → 拉取并解析 JUnit → 汇总落库。
- * 任何异常都收敛为 run=error 并记 reason,保证不留 running 僵尸;私钥/密码解密后仅内存持有,不落库不打日志。
+ * 全流程:解密连接凭据/测试账号 → 按 seq 跑环境 stages 把被测系统部署起来 → 拼提示词调起「测试数字员工」跑用例。
+ * 用例的克隆与执行交给测试员工(后端不再 SSH 跑命令、不再解析 JUnit),run 保持 running,结果由回收 poller 从会话回流。
+ * 环境阶段异常收敛为 run=error/failed 并记 reason;私钥/密码解密后仅内存持有,不落库不打日志。
  */
 @Slf4j
 @Service
@@ -48,13 +52,12 @@ public class IntegrationRunExecutor {
     private static final String STATUS_FAILED = "failed";
     private static final String STATUS_ERROR = "error";
     private static final String STATUS_TIMEOUT = "timeout";
-    private static final String STATUS_SKIPPED = "skipped";
 
     private static final String STEP_STAGE = "stage";
-    private static final String STEP_SUITE = "suite";
 
-    /** 套件命令默认超时,stage 用各自 timeoutSec。 */
-    private static final int DEFAULT_SUITE_TIMEOUT_SEC = 1800;
+    // 测试员工 chat 全程流式,时间长;隔离到独立线程池下发,避免占满集成执行线程池。
+    private static final Executor TESTER_CHAT_EXECUTOR =
+        ThreadPoolUtil.getThreadPool(2, 8, 100, 60, "integration-tester-chat");
 
     @Autowired
     private IntegrationRunMapper integrationRunMapper;
@@ -70,6 +73,18 @@ public class IntegrationRunExecutor {
 
     @Autowired
     private DangerousScriptGuard dangerousScriptGuard;
+
+    @Autowired
+    private DefaultAgentService defaultAgentService;
+
+    @Autowired
+    private ProjectRepoMapper projectRepoMapper;
+
+    @Autowired
+    private AssistantChatService assistantChatService;
+
+    @Autowired
+    private LoginApplicationService loginApplicationService;
 
     @Async(IntegrationRunAsyncConfig.INTEGRATION_RUN_EXECUTOR)
     public void executeRun(IntegrationRun run, IntegrationEnv env, IntegrationSuite suite) {
@@ -99,14 +114,10 @@ public class IntegrationRunExecutor {
                 }
             }
 
-            // 2) 跑选中套件的 runCommand(workdir 优先套件自身,否则用环境工作目录)。
-            String suiteWorkdir = StringUtils.defaultIfBlank(suite.getWorkdir(), env.getConnWorkdir());
-            StepOutcome suiteOutcome = runSuiteCommand(run, env, connSecret, injectedEnv, suite, suiteWorkdir, seq++);
-
-            // 3) 拉取并解析 JUnit 报告,拼 suites 结果与 totals。
-            JunitSummary summary = parseJunitReport(env, connSecret, injectedEnv, suite, suiteWorkdir);
-
-            finishSuccessOrFailure(run, suite, suiteOutcome, summary, startMs);
+            // 2) 环境已就绪:把用例克隆与执行交给「测试数字员工」。后端不再 SSH 跑命令、不再解析 JUnit。
+            //    拼提示词(带用例仓库克隆说明 + 被测系统地址 + 运行命令)→ 建会话 → 异步下发 chat;
+            //    run 保持 running,sessionId/testerAgentId/testerAgentName 落库,结果由回收 poller 从会话回流。
+            dispatchTester(run, env, suite, startMs);
         } catch (Exception e) {
             log.error("Integration run execution failed, runId={}", run.getRunId(), e);
             finishError(run, "执行异常: " + rootMessage(e), startMs);
@@ -128,19 +139,98 @@ public class IntegrationRunExecutor {
         return execAndRecord(run, seq, STEP_STAGE, stage.name, spec);
     }
 
-    /** 跑套件 runCommand:高危闸门 → 执行。 */
-    private StepOutcome runSuiteCommand(IntegrationRun run, IntegrationEnv env, String connSecret,
-                                        Map<String, String> injectedEnv, IntegrationSuite suite,
-                                        String workdir, int seq) throws Exception {
-        String blocked = dangerousScriptGuard.detect("套件命令", suite.getRunCommand());
-        if (blocked != null) {
-            return recordBlockedStep(run, seq, STEP_SUITE, suite.getSuiteName(), blocked);
+    /**
+     * 下发「测试数字员工」执行本次集成测试:
+     * 解析测试员工 → 建独立会话 → 拼提示词(用例仓库克隆说明 + 被测系统地址 + 运行命令 + 结果回流约定)→ 事务外异步 chat。
+     * run 保持 running 并冻结 sessionId/testerAgentId/testerAgentName;测试员工完成后由回收 poller 读会话打点与结果文件收尾。
+     */
+    private void dispatchTester(IntegrationRun run, IntegrationEnv env, IntegrationSuite suite, long startMs) {
+        DefaultAgent agent = defaultAgentService.resolveForProject(run.getProjectId());
+        // DefaultAgent 的 testerAgentId 是字符串存储,下发/落库都要 Long;空或非法都按未配置处理。
+        Long testerAgentId = parseAgentId(agent == null ? null : agent.getTesterAgentId());
+        if (testerAgentId == null) {
+            finishError(run, "未配置测试数字员工:请在项目「默认数字员工」中设置测试员工后重试", startMs);
+            return;
         }
-        CommandExecSpec spec = baseSpec(env, connSecret, injectedEnv);
-        spec.setWorkdir(workdir);
-        spec.setCommand(suite.getRunCommand());
-        spec.setTimeoutSec(DEFAULT_SUITE_TIMEOUT_SEC);
-        return execAndRecord(run, seq, STEP_SUITE, suite.getSuiteName(), spec);
+        LoginInfo loginInfo = loginApplicationService.getLoginInfo(run.getCreateBy());
+        if (loginInfo == null) {
+            finishError(run, "无法解析触发用户身份:请重新登录后重试", startMs);
+            return;
+        }
+
+        // 用例所在仓库:code=随代码仓库(按 repoId 取带令牌 clone 说明);standalone=独立用例仓库(直用 source 地址)。
+        String cloneHint = buildCaseCloneHint(suite);
+
+        // 先用套件名建会话让会话名可读,建成拿到 sessionId 后再覆盖为完整提示词。
+        AssistantChatDto chatDto = new AssistantChatDto();
+        chatDto.setSessionId(null);
+        chatDto.setAgentId(testerAgentId);
+        chatDto.setProjectId(run.getProjectId());
+        chatDto.setChatContent("集成测试 - " + StringUtils.defaultString(suite.getSuiteName()));
+        chatDto.setAccessTerminal("DevLoop");
+        chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
+        assistantChatService.createGroupChatSession(chatDto);
+        Long sessionId = chatDto.getSessionId();
+        chatDto.setChatContent(buildTesterPrompt(sessionId, env, suite, cloneHint));
+
+        run.setSessionId(sessionId);
+        run.setTesterAgentId(testerAgentId);
+        run.setTesterAgentName(agent.getTesterAgentName());
+        integrationRunMapper.updateById(run);
+
+        // 事务外异步触发 chat:createGroupChatSession 已提交会话,异步线程能读到;chat 全程流式,不阻塞集成执行线程池。
+        Runnable chatTask = () -> {
+            try {
+                assistantChatService.chat(chatDto, new ByteArrayOutputStream(), loginInfo);
+            } catch (Exception e) {
+                log.error("[Integration] 下发测试员工 chat 失败, runId={}, sessionId={}", run.getRunId(), sessionId, e);
+            }
+        };
+        TESTER_CHAT_EXECUTOR.execute(chatTask);
+        log.info("Integration run dispatched to tester agent, runId={}, sessionId={}, testerAgentId={}",
+            run.getRunId(), sessionId, testerAgentId);
+    }
+
+    /** 用例仓库克隆说明:code 复用代码仓库带令牌 clone 说明;standalone 直用独立仓库地址。 */
+    private String buildCaseCloneHint(IntegrationSuite suite) {
+        boolean standalone = "standalone".equalsIgnoreCase(suite.getSourceType());
+        if (standalone) {
+            String repoUrl = StringUtils.defaultString(suite.getSource());
+            // 独立用例仓库无平台/令牌上下文,直用填写地址;私有仓库令牌由测试员工环境自备。
+            return DevloopApplicationService.buildRepoCloneHint(null, repoUrl, "");
+        }
+        ProjectRepo repo = suite.getRepoId() == null ? null : projectRepoMapper.selectById(suite.getRepoId());
+        String repoFullName = repo != null && repo.getRepoFullName() != null ? repo.getRepoFullName() : "";
+        String repoUrl = repo != null && repo.getRepoUrl() != null ? repo.getRepoUrl() : repoFullName;
+        String provider = repo != null ? repo.getProvider() : null;
+        return DevloopApplicationService.buildRepoCloneHint(provider, repoUrl, repoFullName);
+    }
+
+    /**
+     * 测试员工提示词:克隆用例 → 部署好的被测系统地址 → 运行命令 → 结果结构化回流约定。
+     * 结果文件与 [PHASE] 打点由回收 poller 解析入库,故提示词强约束其格式,不可省略。
+     */
+    private String buildTesterPrompt(Long sessionId, IntegrationEnv env, IntegrationSuite suite, String cloneHint) {
+        String branch = StringUtils.defaultString(suite.getBranch());
+        String runCommand = StringUtils.defaultString(suite.getRunCommand());
+        String address = StringUtils.defaultString(env.getAddress());
+        String resultPath = "/by/.sessions/" + sessionId + "/integration-result.json";
+        return "请执行以下集成/回归测试任务:\n"
+            + "## 测试任务信息\n"
+            + "- 测试用例集:" + StringUtils.defaultString(suite.getSuiteName()) + "\n"
+            + "- 用例分支:" + branch + "\n"
+            + "- 被测系统访问地址(环境已部署就绪,直接对其发起测试):" + address + "\n\n"
+            + "## 用例仓库访问说明\n" + cloneHint + "\n\n"
+            + "## 用例代码克隆路径\n"
+            + "用例仓库克隆到 /by/.sessions/" + sessionId + "/ 下(按仓库名建子目录)。\n\n"
+            + "## 运行方式\n"
+            + "克隆用例后,在用例目录执行运行命令:" + runCommand + "\n\n"
+            + "## 强制要求\n"
+            + "- acp 下发任务时必须调用 skill:self-developed-rules。\n"
+            + "- 测试完成后,必须把结构化结果写入 " + resultPath + ",JSON 字段:total(用例总数)、passed(通过数)、"
+            + "failed(失败数)、skipped(跳过数)、failedCases(失败用例名数组,可空)。\n"
+            + "- 结果确定后在会话中打点:全部通过输出 `[PHASE] tester DONE`;存在失败输出 `[PHASE] tester REJECT->coder` "
+            + "并简述失败原因,供研发闭环打回重工。";
     }
 
     // 高危命令拦截:不执行,落一条 error step(退出码 -1,logText 记原因),返回失败结论让编排层停下。
@@ -302,137 +392,7 @@ public class IntegrationRunExecutor {
         return list;
     }
 
-    /** cat 远程/本机的 JUnit XML 并 DOM 解析;报告缺失或解析失败返回空汇总(不阻断)。 */
-    private JunitSummary parseJunitReport(IntegrationEnv env, String connSecret, Map<String, String> injectedEnv,
-                                          IntegrationSuite suite, String workdir) {
-        JunitSummary summary = new JunitSummary();
-        if (StringUtils.isBlank(suite.getReportPath())) {
-            return summary;
-        }
-        try {
-            CommandExecSpec spec = baseSpec(env, connSecret, injectedEnv);
-            spec.setWorkdir(workdir);
-            spec.setCommand("cat " + shellQuote(suite.getReportPath()));
-            spec.setTimeoutSec(60);
-            SshExecResult result = commandRunner.run(spec);
-            if (!result.isSuccess() || StringUtils.isBlank(result.getOutput())) {
-                return summary;
-            }
-            parseJunitXml(result.getOutput(), suite, summary);
-        } catch (Exception e) {
-            log.warn("Failed to fetch/parse JUnit report, suiteId={}, reportPath={}",
-                suite.getSuiteId(), suite.getReportPath(), e);
-        }
-        return summary;
-    }
-
-    private void parseJunitXml(String xml, IntegrationSuite suite, JunitSummary summary) throws Exception {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        // 防 XXE:测试报告来自被测环境,按不可信输入处理。
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
-        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
-        factory.setExpandEntityReferences(false);
-        DocumentBuilder builder = factory.newDocumentBuilder();
-        Document doc = builder.parse(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
-
-        NodeList testsuites = doc.getElementsByTagName("testsuite");
-        List<JSONObject> failedCases = new ArrayList<>();
-        for (int i = 0; i < testsuites.getLength(); i++) {
-            Element ts = (Element) testsuites.item(i);
-            summary.total += intAttr(ts, "tests");
-            int failures = intAttr(ts, "failures") + intAttr(ts, "errors");
-            summary.failed += failures;
-            summary.skipped += intAttr(ts, "skipped");
-            summary.durationSec += (int) doubleAttr(ts, "time");
-            collectFailedCases(ts, failedCases);
-        }
-        summary.passed = Math.max(0, summary.total - summary.failed - summary.skipped);
-        summary.suiteStatus = summary.failed > 0 ? STATUS_FAILED : STATUS_PASSED;
-
-        JSONObject suiteResult = new JSONObject(true);
-        suiteResult.put("suiteId", String.valueOf(suite.getSuiteId()));
-        suiteResult.put("name", suite.getSuiteName());
-        suiteResult.put("status", summary.suiteStatus);
-        suiteResult.put("total", summary.total);
-        suiteResult.put("passed", summary.passed);
-        suiteResult.put("failed", summary.failed);
-        suiteResult.put("durationSec", summary.durationSec);
-        suiteResult.put("reportPath", StringUtils.defaultString(suite.getReportPath()));
-        suiteResult.put("logPath", "");
-        suiteResult.put("failedCases", failedCases);
-
-        JSONArray suites = new JSONArray();
-        suites.add(suiteResult);
-        summary.suitesJson = suites.toJSONString();
-    }
-
-    private void collectFailedCases(Element testsuite, List<JSONObject> failedCases) {
-        NodeList cases = testsuite.getElementsByTagName("testcase");
-        for (int i = 0; i < cases.getLength(); i++) {
-            Element tc = (Element) cases.item(i);
-            Element failure = firstChildElement(tc, "failure");
-            if (failure == null) {
-                failure = firstChildElement(tc, "error");
-            }
-            if (failure == null) {
-                continue;
-            }
-            String caseId = StringUtils.defaultString(tc.getAttribute("classname"));
-            String name = StringUtils.defaultString(tc.getAttribute("name"));
-            JSONObject fc = new JSONObject(true);
-            fc.put("caseId", StringUtils.isBlank(caseId) ? name : caseId + "#" + name);
-            fc.put("message", StringUtils.defaultIfBlank(failure.getAttribute("message"), truncateMessage(failure.getTextContent())));
-            fc.put("artifacts", new JSONArray());
-            failedCases.add(fc);
-        }
-    }
-
-    private Element firstChildElement(Element parent, String tag) {
-        NodeList children = parent.getElementsByTagName(tag);
-        for (int i = 0; i < children.getLength(); i++) {
-            Node n = children.item(i);
-            if (n.getNodeType() == Node.ELEMENT_NODE) {
-                return (Element) n;
-            }
-        }
-        return null;
-    }
-
-    // ---- 收尾:统一写回 byai_integration_run ----
-
-    private void finishSuccessOrFailure(IntegrationRun run, IntegrationSuite suite, StepOutcome suiteOutcome,
-                                        JunitSummary summary, long startMs) {
-        run.setTotal(summary.total);
-        run.setPassed(summary.passed);
-        run.setFailed(summary.failed);
-        run.setSkipped(summary.skipped);
-        run.setSuitesJson(summary.suitesJson);
-
-        String status;
-        String reason = null;
-        if (STATUS_TIMEOUT.equals(suiteOutcome.status)) {
-            status = STATUS_TIMEOUT;
-            reason = "套件执行超时: " + suite.getSuiteName();
-        } else if (summary.failed > 0) {
-            status = STATUS_FAILED;
-            reason = "存在失败用例: failed=" + summary.failed;
-        } else if (!STATUS_PASSED.equals(suiteOutcome.status)) {
-            // 命令非零退出但报告无失败用例(或无报告):按失败处理,原因取命令结论。
-            status = STATUS_FAILED;
-            reason = "套件命令未成功: " + suite.getSuiteName();
-        } else {
-            status = STATUS_PASSED;
-        }
-
-        if (!STATUS_PASSED.equals(status)) {
-            // 失败/超时记录打回目标环节(自动回灌 dev-loop 留 V2,这里只记录)。
-            run.setKickbackTo("coder");
-            run.setReason(reason);
-        }
-        run.setStatus(status);
-        finalizeRun(run, startMs);
-    }
+    // ---- 收尾:统一写回 byai_integration_run(仅环境阶段失败/下发异常走这里;测试结果由回收 poller 收尾) ----
 
     private void finishByStepFailure(IntegrationRun run, StepOutcome outcome, String reason, long startMs) {
         String status = STATUS_TIMEOUT.equals(outcome.status) ? STATUS_TIMEOUT : STATUS_FAILED;
@@ -474,32 +434,17 @@ public class IntegrationRunExecutor {
         }
     }
 
-    private int intAttr(Element el, String name) {
-        String v = el.getAttribute(name);
-        if (StringUtils.isBlank(v)) {
-            return 0;
+    /** DefaultAgent 里 agentId 以字符串存储;空/非数字返回 null,由调用方按未配置处理。 */
+    private Long parseAgentId(String raw) {
+        if (StringUtils.isBlank(raw)) {
+            return null;
         }
         try {
-            return Integer.parseInt(v.trim());
+            return Long.valueOf(raw.trim());
         } catch (NumberFormatException e) {
-            return 0;
+            log.warn("Invalid tester agentId, not a number: {}", StringUtils.abbreviate(raw, 40));
+            return null;
         }
-    }
-
-    private double doubleAttr(Element el, String name) {
-        String v = el.getAttribute(name);
-        if (StringUtils.isBlank(v)) {
-            return 0;
-        }
-        try {
-            return Double.parseDouble(v.trim());
-        } catch (NumberFormatException e) {
-            return 0;
-        }
-    }
-
-    private String truncateMessage(String text) {
-        return StringUtils.abbreviate(StringUtils.defaultString(text).trim(), 500);
     }
 
     private String rootMessage(Throwable e) {
@@ -537,16 +482,5 @@ public class IntegrationRunExecutor {
             this.name = name;
             this.output = output;
         }
-    }
-
-    /** JUnit 汇总结果 + 对齐前端契约的 suites JSON。 */
-    private static class JunitSummary {
-        int total;
-        int passed;
-        int failed;
-        int skipped;
-        int durationSec;
-        String suiteStatus = STATUS_SKIPPED;
-        String suitesJson;
     }
 }
