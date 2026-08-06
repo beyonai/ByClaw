@@ -69,6 +69,8 @@ export interface QueryDirAndFileByLevelParams {
   /** 当前所在目录路径，根目录为 "/" */
   directoryPath: string;
   language?: string;
+
+  keyword?: string;
 }
 
 /** queryDirAndFileByLevel 单条记录 */

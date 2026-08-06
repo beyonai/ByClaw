@@ -15,4 +15,6 @@ public class UserSpaceDto {
     private String prefix;
 
     private Long resourceId;
+
+    private String keyword;
 }
