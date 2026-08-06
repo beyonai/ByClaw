@@ -235,19 +235,36 @@ public class ProjectInitService {
         }
 
         try {
-            // 6. 检查技能包是否已初始化（仅当指定了技能包时）
+            // 6. 更新项目状态为 initializing（仅研发项目）
+            if ("develop".equals(project.getProjectType())) {
+                try {
+                    Project projectUpdate = new Project();
+                    projectUpdate.setProjectId(project.getProjectId());
+                    projectUpdate.setInitStatus("initializing");
+                    projectUpdate.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+                    projectUpdate.setUpdateTime(new java.util.Date());
+                    projectService.update(projectUpdate);
+                    log.info("Project init_status updated to 'initializing': projectId={}", request.getProjectId());
+                } catch (Exception e) {
+                    log.error("Failed to update project init_status to 'initializing': projectId={}",
+                        request.getProjectId(), e);
+                    // 继续执行，状态更新失败不影响初始化流程
+                }
+            }
+
+            // 7. 检查技能包是否已初始化（仅当指定了技能包时）
             if (request.getSkillPackageName() != null && !request.getSkillPackageName().isBlank()) {
                 checkSkillPackageNotInitialized(repoPath, request.getSkillPackageName());
             }
 
-            // 7. 切换分支（如果指定）
+            // 8. 切换分支（如果指定）
             String currentBranch = gitCommandExecutor.getCurrentBranch(repoPath);
             if (request.getRepoBranch() != null && !request.getRepoBranch().isBlank()) {
                 gitCommandExecutor.checkoutBranch(repoPath, request.getRepoBranch());
                 currentBranch = request.getRepoBranch();
             }
 
-            // 8. 添加子模块（如果有）
+            // 9. 添加子模块（如果有）
             List<String> addedSubmodules = new ArrayList<>();
             if (request.getSubmodules() != null && !request.getSubmodules().isEmpty()) {
                 for (SubmoduleInfo submodule : request.getSubmodules()) {
@@ -261,12 +278,12 @@ public class ProjectInitService {
                 }
             }
 
-            // 9. 初始化技能包（仅当指定了技能包时）
+            // 10. 初始化技能包（仅当指定了技能包时）
             if (request.getSkillPackageName() != null && !request.getSkillPackageName().isBlank()) {
                 initializeSkillPackage(repoPath, request.getSkillPackageName());
             }
 
-            // 10. 提交变更（如果启用）
+            // 11. 提交变更（如果启用）
             String commitHash = null;
             boolean newCommit = false;
             if (Boolean.TRUE.equals(request.getAutoCommit())) {
@@ -302,7 +319,24 @@ public class ProjectInitService {
                 pushed = true;
             }
 
-            // 12. 构建成功响应
+            // 12. 更新项目初始化状态为 ready
+            try {
+                if (project != null && "develop".equals(project.getProjectType())) {
+                    Project projectUpdate = new Project();
+                    projectUpdate.setProjectId(project.getProjectId());
+                    projectUpdate.setInitStatus("ready");
+                    projectUpdate.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+                    projectUpdate.setUpdateTime(new java.util.Date());
+                    projectService.update(projectUpdate);
+                    log.info("Project init_status updated to 'ready': projectId={}", request.getProjectId());
+                }
+            } catch (Exception e) {
+                log.error("Failed to update project init_status to 'ready': projectId={}",
+                    request.getProjectId(), e);
+                // 不抛出异常，因为初始化本身已成功，只是状态更新失败
+            }
+
+            // 13. 构建成功响应
             ProjectInitResponse response = ProjectInitResponse.success(
                 normalizedPath,
                 currentBranch,
@@ -319,7 +353,7 @@ public class ProjectInitService {
             log.error("Project initialization failed: {}", normalizedPath, e);
             throw e;
         } finally {
-            // 13. 释放锁
+            // 14. 释放锁
             repoLockManager.releaseLock(normalizedPath);
         }
     }
