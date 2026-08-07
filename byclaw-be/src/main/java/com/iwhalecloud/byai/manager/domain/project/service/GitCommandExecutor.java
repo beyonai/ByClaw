@@ -325,10 +325,12 @@ public class GitCommandExecutor {
      *
      * @param repoPath Git 仓库路径
      * @param message 提交消息
+     * @param ghUser Git 用户名（可选，从 Redis 读取或使用默认值）
+     * @param ghEmail Git 邮箱（可选，从 Redis 读取或使用默认值）
      * @return 提交哈希值
      * @throws BaseException 如果提交失败
      */
-    public String commitAll(Path repoPath, String message) throws BaseException {
+    public String commitAll(Path repoPath, String message, String ghUser, String ghEmail) throws BaseException {
         // 添加所有变更到暂存区
         executeCommand(repoPath, "git", "add", ".");
 
@@ -340,6 +342,9 @@ public class GitCommandExecutor {
             String commitHash = executeCommand(repoPath, "git", "rev-parse", "HEAD");
             return commitHash.trim();
         }
+
+        // 配置 Git 用户身份（仓库级别，避免全局污染）
+        ensureGitUserConfig(repoPath, ghUser, ghEmail);
 
         // 提交变更
         executeCommand(repoPath, "git", "commit", "-m", message);
@@ -360,6 +365,56 @@ public class GitCommandExecutor {
     public String getCurrentCommitHash(Path repoPath) throws BaseException {
         String commitHash = executeCommand(repoPath, "git", "rev-parse", "HEAD");
         return commitHash.trim();
+    }
+
+    /**
+     * 确保 Git 用户配置存在（仓库级别）
+     *
+     * 在 Docker 容器等环境中，Git 可能没有配置全局用户信息。
+     * 此方法从 Redis 用户私有参数或默认值读取用户信息并在仓库级别配置，仅影响当前仓库。
+     *
+     * Redis 私有参数（与 GH_TOKEN 同级）：
+     * - GH_USER: Git 用户名（默认: "beyonai"）
+     * - GH_EMAIL: Git 邮箱（默认: "haojingbyai@163.com"）
+     *
+     * @param repoPath Git 仓库路径
+     * @param ghUser Git 用户名（可选，为 null 时使用默认值）
+     * @param ghEmail Git 邮箱（可选，为 null 时使用默认值）
+     * @throws BaseException 如果配置失败
+     */
+    private void ensureGitUserConfig(Path repoPath, String ghUser, String ghEmail) throws BaseException {
+        try {
+            // 检查是否已配置 user.name（仓库或全局）
+            String userName = executeCommand(repoPath, "git", "config", "user.name").trim();
+            String userEmail = executeCommand(repoPath, "git", "config", "user.email").trim();
+
+            // 如果已配置，则跳过
+            if (!userName.isEmpty() && !userEmail.isEmpty()) {
+                log.debug("Git user config already exists: {} <{}>", userName, userEmail);
+                return;
+            }
+        } catch (BaseException e) {
+            // git config 不存在会返回 exit code 1，这里捕获后继续配置
+            log.debug("Git user config not found, will configure it");
+        }
+
+        // 从参数读取用户信息（与 GH_TOKEN 从 Redis 读取一致）
+        // 使用参数或默认值
+        String userName = (ghUser != null && !ghUser.trim().isEmpty())
+            ? ghUser.trim()
+            : "beyonai";
+        String userEmail = (ghEmail != null && !ghEmail.trim().isEmpty())
+            ? ghEmail.trim()
+            : "haojingbyai@163.com";
+
+        // 配置仓库级别用户信息（不使用 --global）
+        executeCommand(repoPath, "git", "config", "user.name", userName);
+        executeCommand(repoPath, "git", "config", "user.email", userEmail);
+
+        log.info("Configured Git user for repository: {} <{}> (from params: GH_USER={}, GH_EMAIL={})",
+            userName, userEmail,
+            ghUser != null ? "provided" : "default",
+            ghEmail != null ? "provided" : "default");
     }
 
     /**

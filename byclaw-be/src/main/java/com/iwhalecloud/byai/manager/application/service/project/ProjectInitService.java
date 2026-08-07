@@ -448,8 +448,15 @@ public class ProjectInitService {
                     log.debug("[Step 11/14] Using provided commit message: {}", commitMessage);
                 }
 
+                // 从 Redis 获取 Git 用户信息（与 GH_TOKEN 同级）
+                String ghUser = getUserGitUser();
+                String ghEmail = getUserGitEmail();
+                log.debug("[Step 11/14] Git user info: GH_USER={}, GH_EMAIL={}",
+                    ghUser != null ? "configured" : "default",
+                    ghEmail != null ? "configured" : "default");
+
                 // 提交变更
-                commitHash = gitCommandExecutor.commitAll(repoPath, commitMessage);
+                commitHash = gitCommandExecutor.commitAll(repoPath, commitMessage, ghUser, ghEmail);
                 log.debug("[Step 11/14] Commit completed: hash={}", commitHash);
 
                 // 对比提交前后的 hash，判断是否有新提交
@@ -826,6 +833,98 @@ public class ProjectInitService {
 
         } catch (Exception e) {
             log.error("Failed to get GitHub token from Redis", e);
+            return null;
+        }
+    }
+
+    /**
+     * 从 Redis 获取当前用户的 Git 用户名（GH_USER）
+     *
+     * @return Git 用户名，如果未配置则返回 null
+     */
+    private String getUserGitUser() {
+        try {
+            String userCode = CurrentUserHolder.getCurrentUserCode();
+            if (StringUtils.isBlank(userCode)) {
+                log.debug("Cannot get Git user: current user code is blank");
+                return null;
+            }
+
+            String redisKey = UserPrivateParamApplicationService.buildPrivateParamRedisKey(userCode);
+            String cacheJson = stringRedisTemplate.opsForValue().get(redisKey);
+
+            if (StringUtils.isBlank(cacheJson)) {
+                log.debug("User {} has no private params configured in Redis", userCode);
+                return null;
+            }
+
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> cacheData = objectMapper.readValue(cacheJson, java.util.Map.class);
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, String> params = (java.util.Map<String, String>) cacheData.get("params");
+
+            if (params == null || params.isEmpty()) {
+                log.debug("User {} has empty private params", userCode);
+                return null;
+            }
+
+            String ghUser = params.get("GH_USER");
+            if (StringUtils.isBlank(ghUser)) {
+                log.debug("User {} has not configured GH_USER, will use default", userCode);
+                return null;
+            }
+
+            log.debug("Retrieved GH_USER for user {}: {}", userCode, ghUser);
+            return ghUser;
+
+        } catch (Exception e) {
+            log.error("Failed to get Git user from Redis", e);
+            return null;
+        }
+    }
+
+    /**
+     * 从 Redis 获取当前用户的 Git 邮箱（GH_EMAIL）
+     *
+     * @return Git 邮箱，如果未配置则返回 null
+     */
+    private String getUserGitEmail() {
+        try {
+            String userCode = CurrentUserHolder.getCurrentUserCode();
+            if (StringUtils.isBlank(userCode)) {
+                log.debug("Cannot get Git email: current user code is blank");
+                return null;
+            }
+
+            String redisKey = UserPrivateParamApplicationService.buildPrivateParamRedisKey(userCode);
+            String cacheJson = stringRedisTemplate.opsForValue().get(redisKey);
+
+            if (StringUtils.isBlank(cacheJson)) {
+                log.debug("User {} has no private params configured in Redis", userCode);
+                return null;
+            }
+
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> cacheData = objectMapper.readValue(cacheJson, java.util.Map.class);
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, String> params = (java.util.Map<String, String>) cacheData.get("params");
+
+            if (params == null || params.isEmpty()) {
+                log.debug("User {} has empty private params", userCode);
+                return null;
+            }
+
+            String ghEmail = params.get("GH_EMAIL");
+            if (StringUtils.isBlank(ghEmail)) {
+                log.debug("User {} has not configured GH_EMAIL, will use default", userCode);
+                return null;
+            }
+
+            log.debug("Retrieved GH_EMAIL for user {}: {}", userCode, ghEmail);
+            return ghEmail;
+
+        } catch (Exception e) {
+            log.error("Failed to get Git email from Redis", e);
             return null;
         }
     }
