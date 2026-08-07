@@ -11,8 +11,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * 门户 Agent DSL 纯元数据检索请求。
- * 门户接收知识库资源 ID，校验访问权限后转换为 QA knCode。
+ * 门户 Agent DSL 纯元数据检索请求。 门户接收知识库资源 ID，校验访问权限后转换为 QA knCode。
  *
  * @author qin.guoquan
  * @date 2026-08-06 10:38:38
@@ -22,7 +21,8 @@ import lombok.Setter;
 public class KnowledgeMetadataSearchRequest {
 
     @NotEmpty(message = "{dataset.metadata.search.resource.id.list.notempty}")
-    private List<@NotNull(message = "{dataset.metadata.search.resource.id.notnull}") Long> resourceIdList = new ArrayList<>();
+    private List<@NotNull(
+        message = "{dataset.metadata.search.resource.id.notnull}") Long> resourceIdList = new ArrayList<>();
 
     @NotNull(message = "{dataset.metadata.search.where.notnull}")
     private Map<String, Object> where;
@@ -31,7 +31,7 @@ public class KnowledgeMetadataSearchRequest {
 
     @Positive(message = "{dataset.metadata.search.topk.positive}")
     @Max(value = 10000, message = "{dataset.metadata.search.topk.max}")
-    private Integer topK;
+    private Integer topK = 10;
 
     @Positive(message = "{dataset.metadata.search.page.num.positive}")
     private Integer pageNum;
@@ -39,4 +39,5 @@ public class KnowledgeMetadataSearchRequest {
     @Positive(message = "{dataset.metadata.search.page.size.positive}")
     @Max(value = 10000, message = "{dataset.metadata.search.page.size.max}")
     private Integer pageSize;
+
 }
