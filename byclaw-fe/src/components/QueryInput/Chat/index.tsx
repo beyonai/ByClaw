@@ -23,6 +23,7 @@ import styles from './index.module.less';
 import MentionPopover from '../RichInput/mentionPopover';
 import { IChatSettingValue } from '@/typescript/cloud';
 import { agentTypeMap } from '@/constants/agent';
+import TaskTemplateEntry from '@/components/TaskTemplateModal/TaskTemplateEntry';
 
 type IState = {
   deepThink: boolean;
@@ -278,6 +279,11 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
     return (
       <>
         {this.renderContextUsed()}
+        <TaskTemplateEntry
+          projectId={this.props.projectId}
+          employees={this.props.employeesList as Array<Record<string, any>>}
+          onApply={(result) => this.setInputValue({ inputTxt: result.prompt, isInsert: false })}
+        />
         {showOnlineSearch && (
           <Button
             aria-label={getIntl().formatMessage({ id: 'queryInput.onlineSearch' })}

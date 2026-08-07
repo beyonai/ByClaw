@@ -224,3 +224,44 @@ WHERE i.session_id IS NOT NULL
       SELECT 1 FROM byai.byai_scan_item_task t
       WHERE t.requirement_id = i.item_id AND t.delete_flag = '0'
   );
+
+-- 内置运营任务模板采用固定负数 ID，重复执行迁移时不会重复插入。
+INSERT INTO byai.byai_task_template
+    (template_id, template_type, template_name, description, icon, config, sort_no, is_builtin, status_cd, delete_flag)
+SELECT -2001, 'collect', '素材采集任务模板', '从知识库、连接器或互联网采集素材并归档', '采',
+       '{"title":"采集 AI Agent 行业案例","description":"采集近期企业级 AI Agent 的落地案例，提炼来源、核心场景和可复用亮点。","sourceMode":"knowledge","storageMode":"knowledge","executorType":"agent","runMode":"once"}',
+       10, 'Y', '00A', '0'
+WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2001);
+
+INSERT INTO byai.byai_task_template
+    (template_id, template_type, template_name, description, icon, config, sort_no, is_builtin, status_cd, delete_flag)
+SELECT -2002, 'knowledge', '知识整理任务模板', '按知识库目录或本体结构完成清洗与整理', '知',
+       '{"title":"整理采集素材并沉淀知识","description":"对素材去重、摘要并提炼文章亮点、写法和可复用结构。","materialSource":"当前会话成果","executorType":"agent","runMode":"once"}',
+       20, 'Y', '00A', '0'
+WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2002);
+
+INSERT INTO byai.byai_task_template
+    (template_id, template_type, template_name, description, icon, config, sort_no, is_builtin, status_cd, delete_flag)
+SELECT -2003, 'content', '内容创作任务模板', '结构化描述主题、内容形态、受众与表达要求', '创',
+       '{"title":"创作 BeyondAI 实验室公众号文章","description":"围绕企业 AI Agent 实践创作一篇面向企业管理者的深度文章，包含案例与行动建议。","contentType":"公众号文章","audience":"企业管理者与 AI 产品负责人","executorType":"agent","runMode":"once"}',
+       30, 'Y', '00A', '0'
+WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2003);
+
+INSERT INTO byai.byai_task_template
+    (template_id, template_type, template_name, description, icon, config, sort_no, is_builtin, status_cd, delete_flag)
+SELECT -2004, 'publish', '内容发布任务模板', '选择账号、发布时间与审核规则完成发布', '发',
+       '{"title":"发布已审核内容","description":"将已审核内容发布到指定账号，发布前再次检查标题、封面和品牌口径。","platform":"微信公众号","executorType":"agent","runMode":"once"}',
+       40, 'Y', '00A', '0'
+WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2004);
+
+INSERT INTO byai.byai_task_template
+    (template_id, template_type, template_name, description, icon, config, sort_no, is_builtin, status_cd, delete_flag)
+SELECT -2005, 'analyze', '数据分析任务模板', '围绕账号或作品数据生成复盘与优化建议', '析',
+       '{"title":"运营数据分析与优化","description":"分析近 30 天账号与作品表现，识别高表现内容并输出下一周期优化建议。","analysisScope":"账号整体分析","range":"近 30 天","executorType":"agent","runMode":"once"}',
+       50, 'Y', '00A', '0'
+WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2005);
+
+-- 资料采集模板使用统一的运营任务字段结构；任务执行时由后端替换占位符。
+UPDATE byai.byai_ai_prompt
+SET prompt_zh_template = E'请处理以下资料采集与整理任务：\n\n关联需求\n\n需求名称：${requirementName}\n需求描述：${requirementDescription}\n\n运营任务信息\n\n运营项目：${projectName}\n任务名称：${title}\n\n资料采集配置\n\n采集渠道：${collectChannel}\n采集账号或地址：${collectAccount}\n采集主题：${collectTopic}\n采集开始时间：${collectStartTime}\n采集结束时间：${collectEndTime}\n采集方式：${collectMethod}\n定时规则：${collectSchedule}\n采集知识库：${knowledgeBase}\n采集目录：${directory}\n是否知识整理：${collectOrganize}\n整理本体：${collectOntology}\n整理要求：${collectOrganizationRequest}\n结构化要求：${collectOrganizationStructure}\n\n执行要求\n\n严格依据关联需求和资料采集配置开展工作。\n将采集结果归档到指定知识库和目录，并同步关键进度、产出结果和异常情况。\n涉及登录或对外访问时，先核对对应运营账号和平台配置。'
+WHERE prompt_code = 'OPLOOP_TASK_START_PROMPT_COLLECT';

@@ -53,6 +53,9 @@ export type IProps = {
   inputDraft?: DefaultValueSchema;
   onInputDraftChange?: (draft: DefaultValueSchema) => void;
   contextUsed?: ContextUsed;
+
+  /** 当前会话所属项目，用于仅在运营项目展示任务模板入口。 */
+  projectId?: number;
 };
 
 export type IState = {
@@ -115,6 +118,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     const { EventEmitter } = this.props.globalContext;
     EventEmitter.on('queryInput-push-fileList', this.pushFileList);
     EventEmitter.on('queryInput-set-value', this.setInputValue);
+    EventEmitter.on('queryInput-set-value-and-send', this.setInputValueAndSend);
     EventEmitter.on('queryInput-set-schema-imme', this.setCommonStateBySchema);
     EventEmitter.on('queryInput-paste-files', this.onPasteFiles);
     EventEmitter.emit('pcLayout-contains-chatLayout', true, { waitForListeners: true });
@@ -133,6 +137,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     const { EventEmitter } = this.props.globalContext;
     EventEmitter.off('queryInput-push-fileList', this.pushFileList);
     EventEmitter.off('queryInput-set-value', this.setInputValue);
+    EventEmitter.off('queryInput-set-value-and-send', this.setInputValueAndSend);
     EventEmitter.off('queryInput-set-schema-imme', this.setCommonStateBySchema);
     EventEmitter.off('queryInput-paste-files', this.onPasteFiles);
     EventEmitter.emit('pcLayout-contains-chatLayout', false);
@@ -359,6 +364,16 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
       }
 
       return newState;
+    });
+  };
+
+  // 外部任务模板入口使用该事件将生成内容写入输入框并直接发送。
+  setInputValueAndSend = (text: string) => {
+    if (!text?.trim()) return;
+    this.richInputRef.current?.setText(text);
+    this.setState({ inputValue: text }, () => {
+      this.onSendQuery();
+      this.richInputRef.current?.clearAfterSend();
     });
   };
 

@@ -34,6 +34,7 @@ public class OperationTaskSessionService {
     public static final String EXT_DUE_TIME = "oploop_due_time";
     public static final String EXT_OPERATION_TYPE = "oploop_operation_type";
     public static final String EXT_CONFIG = "oploop_task_config";
+    public static final String EXT_TEMPLATE_ID = "oploop_task_template_id";
     public static final String EXT_AGENT_SELECTION = "oploop_agent_selection";
     public static final String EXT_WORKFLOW = "oploop_workflow";
     public static final String EXT_TRIGGER_TIME = "oploop_trigger_time";

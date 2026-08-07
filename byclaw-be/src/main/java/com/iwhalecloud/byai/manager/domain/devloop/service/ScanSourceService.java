@@ -26,12 +26,15 @@ public class ScanSourceService {
     /** 运营需求类型直接复用 source_type，不再增加额外记录类型字段。 */
     public static final String OPERATION_SOURCE_TYPE_COLLECT = "collect";
 
+    /** 运营需求中的知识整理类型，创建阶段只保存目标，启动时再拆解为具体任务。 */
+    public static final String OPERATION_SOURCE_TYPE_KNOWLEDGE = "knowledge";
+
     public static final String OPERATION_SOURCE_TYPE_PUBLISH = "publish";
 
     public static final String OPERATION_SOURCE_TYPE_ANALYZE = "analyze";
 
     public static final Set<String> OPERATION_SOURCE_TYPES = Set.of(OPERATION_SOURCE_TYPE_COLLECT,
-        OPERATION_SOURCE_TYPE_PUBLISH, OPERATION_SOURCE_TYPE_ANALYZE);
+        OPERATION_SOURCE_TYPE_KNOWLEDGE, OPERATION_SOURCE_TYPE_PUBLISH, OPERATION_SOURCE_TYPE_ANALYZE);
 
     @Autowired
     private ScanSourceMapper scanSourceMapper;

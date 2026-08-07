@@ -402,6 +402,34 @@
   background: #f7f9fc;
 }
 
+// 项目大详情中的账号列表直接嵌入内容区，不再重复显示账号管理标题卡片。
+.accountPanelCompact {
+  padding: 0;
+  background: transparent;
+
+  .accountPanelHeading {
+    display: none;
+  }
+
+  .accountPanelHeader {
+    align-items: center;
+    min-height: 36px;
+    margin-bottom: 12px;
+  }
+
+  .accountFilterRow {
+    display: none;
+  }
+}
+
+.accountPanelCompactExternal .accountPanelHeader {
+  display: none;
+}
+
+.accountCompactFilter {
+  min-width: 128px;
+}
+
 // 账号管理属于运营需求页入口，使用整行浅色按钮与需求列表操作区分层级。
 .operationAccountEntry {
   width: calc(100% - 8px);
@@ -483,7 +511,7 @@
   gap: 8px;
 }
 
-// 三类运营任务沿用任务卡片交互，仅用颜色和图标快速区分任务性质。
+// 四类运营任务沿用任务卡片交互，仅用颜色和图标快速区分任务性质。
 .operationTaskCard {
   &:hover {
     border-color: #e1e8f0;
@@ -504,6 +532,11 @@
 .operationTaskIconCollect {
   color: #2563b8;
   background: #e8f1ff;
+}
+
+.operationTaskIconKnowledge {
+  color: #0f766e;
+  background: #e6f7f4;
 }
 
 .operationTaskIconContent {
@@ -563,6 +596,24 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
+}
+
+.accountPanelActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+
+  // 外置到项目详情顶部的账号筛选、刷新、新增控件统一为 36px 高度。
+  :global(.@{antPrefix}-btn) {
+    height: 32px;
+  }
+
+  :global(.@{antPrefix}-select-selector) {
+    height: 32px !important;
+    display: flex;
+    align-items: center;
+  }
 }
 
 .operationBackButton {

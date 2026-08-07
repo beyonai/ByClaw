@@ -128,6 +128,7 @@ import { isCurrentUserTaskAssignee } from './taskAccess';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import AntdIcon from '@/components/AntdIcon';
+import TaskTemplateModal, { type TaskTemplateApplyResult } from '@/components/TaskTemplateModal';
 import ChatAvatar from '@/components/ChatAvatar';
 import RenameModal from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/RenameModal';
 import { DragType } from '@/components/QueryInput/withDrag';
@@ -435,9 +436,12 @@ const normalizeOperationAccounts = (detail?: OperationProjectDetailData | null):
     .filter((item) => item.platformId && item.accountName);
 };
 
-// 列表和详情需兼容后端的旧枚举值，前端统一显示三类运营任务。
+// 列表和详情需兼容后端的旧枚举值，前端统一显示原型中的四类运营需求。
 const normalizeOperationTaskType = (task: any): OperationTaskType => {
   const taskType = `${task?.taskType || task?.operationType || task?.type || ''}`.trim().toLowerCase();
+  if (['knowledge', 'knowledge_organization', 'knowledge_organize', 'knowledge整理', '知识整理'].includes(taskType)) {
+    return 'knowledge';
+  }
   if (['content', 'publish', 'content_creation', 'content_publish'].includes(taskType)) return 'content';
   if (['analyze', 'analysis', 'analytics', 'data_analysis'].includes(taskType)) return 'analyze';
   return 'collect';
@@ -495,7 +499,13 @@ const parseOperationConfig = (rawConfig: unknown): Record<string, any> => {
 const getOperationTaskConfig = (task: any, taskType: OperationTaskType): Record<string, any> => {
   const rootConfig = parseOperationConfig(task?.operationConfig || task?.config);
   const configKey =
-    taskType === 'collect' ? 'collectConfig' : taskType === 'content' ? 'contentConfig' : 'analyzeConfig';
+    taskType === 'collect'
+      ? 'collectConfig'
+      : taskType === 'content'
+        ? 'contentConfig'
+        : taskType === 'analyze'
+          ? 'analyzeConfig'
+          : 'knowledgeConfig';
   return parseOperationConfig(task?.[configKey] || rootConfig[configKey] || rootConfig);
 };
 
@@ -985,8 +995,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [operationTaskSaving, setOperationTaskSaving] = useState(false);
   const [operationRequirementStartTarget, setOperationRequirementStartTarget] = useState<any>(null);
   const [operationRequirementStarting, setOperationRequirementStarting] = useState(false);
-  // 运营任务执行先复用研发任务的多仓库拆分确认弹窗，承接成员绑定的数字员工直接作为执行编排。
+  // 研发任务继续使用多仓库拆分确认；运营任务执行改为先进入任务模板页面。
   const [operationTaskSplitTarget, setOperationTaskSplitTarget] = useState<any>(null);
+  const [operationTaskTemplateTarget, setOperationTaskTemplateTarget] = useState<any>(null);
   const [operationTaskExecuting, setOperationTaskExecuting] = useState(false);
   const [resourceView, setResourceView] = useState<ResourceView>('shared');
   // 会话资源范围由二级 Tab 决定，避免内容区再次出现重复的“当前/全部”筛选。
@@ -1780,6 +1791,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
     [operationAccounts, operationAssigneeOptions, operationKnowledgeBases, operationOrganizeTemplates, operationWorks]
   );
 
+  const operationTemplateAccountOptions = useMemo<OperationSelectOption[]>(
+    () => operationAccounts.map((account) => ({ label: account.accountName, value: account.id })),
+    [operationAccounts]
+  );
+
   // 固定表单初始值对象，避免提交 loading 触发父组件重渲染时误判为新初始值并清空用户草稿。
   const operationTaskInitialValues = useMemo<Partial<OperationTaskFormValues>>(
     () =>
@@ -1988,95 +2004,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
     [fetchOperationOrganizeTemplates, isOperationProject]
   );
 
-  // 运营需求提交前统一序列化调度字段，并将页面字段转换为运营需求接口约定的三类配置结构。
+  // 运营需求只保存目标信息，执行方式和业务资源由后续任务模板统一补充。
   const handleSubmitOperationTask = useCallback(
     async (values: OperationTaskFormValues) => {
       if (!projectId || operationTaskSubmittingRef.current) return;
       const editingOperationTaskId = Number(editingOperationTask?.itemId ?? editingOperationTask?.taskId);
       const isEditingOperationTask = Number.isFinite(editingOperationTaskId) && editingOperationTaskId > 0;
-
-      // 表单保存 Dayjs，接口只接收标准时间字符串；生效区间按自然日边界保存。
-      const serializeDateRange = (dateRange?: NonNullable<OperationTaskFormValues['collectConfig']>['dateRange']) => ({
-        startTime: dateRange?.[0]?.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
-        endTime: dateRange?.[1]?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
-      });
-      const effectiveDateRange = serializeDateRange(values.collectConfig?.effectiveDateRange);
-      const periodYearDateTime = values.collectConfig?.periodYearDateTime;
-      const isYearlyCollection =
-        values.collectConfig?.mode === 'periodic' && values.collectConfig?.periodType === 'yearly';
-      // 页面内部字段保留在配置中，同时补齐接口文档中的稳定字段名，后端执行能力可直接按该结构读取。
-      const config =
-        values.taskType === 'collect'
-          ? {
-            ...values.collectConfig,
-            // Dayjs 和旧版采集范围不写入 JSON；后端只读取下面的标准字符串字段。
-            dateRange: undefined,
-            startTime: undefined,
-            endTime: undefined,
-            collectStart: undefined,
-            collectEnd: undefined,
-            effectiveDateRange: undefined,
-            periodYearDateTime: undefined,
-            intervalValue: undefined,
-            intervalUnit: undefined,
-            schedule: undefined,
-            onceTime:
-                values.collectConfig?.mode === 'once'
-                  ? values.collectConfig?.onceTime?.format('YYYY-MM-DD HH:mm:ss')
-                  : undefined,
-            periodType: values.collectConfig?.mode === 'periodic' ? values.collectConfig?.periodType : undefined,
-            periodWeekdays:
-                values.collectConfig?.mode === 'periodic' &&
-                ['weekly', 'biweekly'].includes(values.collectConfig?.periodType || '')
-                  ? values.collectConfig?.periodWeekdays
-                  : undefined,
-            periodMonthDays:
-                values.collectConfig?.mode === 'periodic' && values.collectConfig?.periodType === 'monthly'
-                  ? values.collectConfig?.periodMonthDays
-                  : undefined,
-            periodMonth: isYearlyCollection && periodYearDateTime ? periodYearDateTime.month() + 1 : undefined,
-            periodDay: isYearlyCollection && periodYearDateTime ? periodYearDateTime.date() : undefined,
-            periodTime:
-                values.collectConfig?.mode === 'periodic'
-                  ? isYearlyCollection
-                    ? periodYearDateTime?.format('HH:mm')
-                    : values.collectConfig?.periodTime?.format('HH:mm')
-                  : undefined,
-            intervalHours:
-                values.collectConfig?.mode === 'interval' ? values.collectConfig?.intervalHours : undefined,
-            intervalWeekdays:
-                values.collectConfig?.mode === 'interval' ? values.collectConfig?.intervalWeekdays : undefined,
-            effectiveStartDate:
-                values.collectConfig?.mode === 'once' ? undefined : effectiveDateRange.startTime?.slice(0, 10),
-            effectiveEndDate:
-                values.collectConfig?.mode === 'once' ? undefined : effectiveDateRange.endTime?.slice(0, 10),
-            collectSource: values.collectConfig?.channel,
-            collectAccount: values.collectConfig?.accountOrAddress,
-            collectTopic: values.collectConfig?.topic,
-            collectMethod: values.collectConfig?.mode,
-            // 三种采集方式都提交标准 Cron，后端会按结构化字段重新生成后写入 cron_expr。
-            collectSchedule: values.collectConfig?.cronExpr || values.collectConfig?.schedule,
-            cronExpr: values.collectConfig?.cronExpr,
-            // 兼容旧执行服务读取 templateId，同时完整保存新增本体的整理需求和结构化要求。
-            organizeTemplateId: values.collectConfig?.knowledgeOrganization?.templateId,
-            knowledgeOrganization: values.collectConfig?.organize
-              ? values.collectConfig?.knowledgeOrganization || null
-              : null,
-          }
-          : values.taskType === 'content'
-            ? {
-              ...values.contentConfig,
-              publishTopic: values.contentConfig?.topic,
-            }
-            : {
-              ...values.analyzeConfig,
-              analysisChannel: values.analyzeConfig?.platformId,
-              analysisAccountId: values.analyzeConfig?.accountId,
-              analysisType: values.analyzeConfig?.scope,
-              // selectedWorks 是运营需求接口约定字段；同时保留旧字段兼容后续执行服务的历史读取逻辑。
-              selectedWorks: values.analyzeConfig?.workIds || [],
-              selectedWorkIds: values.analyzeConfig?.workIds || [],
-            };
 
       operationTaskSubmittingRef.current = true;
       setOperationTaskSaving(true);
@@ -2088,7 +2021,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
           operationType: values.taskType === 'content' ? 'publish' : values.taskType,
           assignee: values.assigneeId,
           dueTime: values.dueTime?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
-          config,
         };
         if (isEditingOperationTask) {
           await updateOperationRequirement({ itemId: editingOperationTaskId, ...operationRequirementPayload });
@@ -2171,43 +2103,40 @@ const ProjectDetailPanel: React.FC<Props> = ({
     [detailTask, fetchOperationRequirements, intl, requirementSearchKeyword, t]
   );
 
-  // 启动前先提供可编辑的默认拆解结果；运营需求和运营任务分表保存，避免把需求直接当任务执行。
-  const getOperationRequirementStartTasks = useCallback(
-    (requirement: any): OperationRequirementStartTask[] => {
-      const operationType = normalizeOperationTaskType(requirement);
-      const taskKeys =
-        operationType === 'collect'
-          ? ['collect', 'organize', 'archive']
-          : operationType === 'content'
-            ? ['create', 'review', 'publish']
-            : ['collect', 'analyze', 'report'];
-      const assignee = requirement?.assigneeId ?? requirement?.assignee;
-      return taskKeys.map((key) => ({
-        title: intl.formatMessage(
-          { id: `projectSpace.operation.requirementStart.template.${operationType}.${key}.title` },
-          { name: requirement?.title || '' }
-        ),
-        description: intl.formatMessage(
-          { id: `projectSpace.operation.requirementStart.template.${operationType}.${key}.description` },
-          { name: requirement?.title || '' }
-        ),
-        assignee,
-      }));
-    },
-    [intl]
-  );
-
-  // 缓存拆解弹窗的初始任务，避免确认启动进入 loading 后父组件重渲染覆盖用户新增或修改的任务。
+  // 模板启动只生成一条任务，初始任务仅用于沿用需求负责人和完成时间。
   const operationRequirementStartTasks = useMemo(
-    () => (operationRequirementStartTarget ? getOperationRequirementStartTasks(operationRequirementStartTarget) : []),
-    [getOperationRequirementStartTasks, operationRequirementStartTarget]
+    (): OperationRequirementStartTask[] =>
+      operationRequirementStartTarget
+        ? [
+          {
+            title: operationRequirementStartTarget.title || operationRequirementStartTarget.requirementName || '',
+            description:
+                operationRequirementStartTarget.description || operationRequirementStartTarget.sourceDescription,
+            assignee:
+                operationRequirementStartTarget.assigneeId ??
+                operationRequirementStartTarget.assignee ??
+                defaultProjectAssigneeId,
+            dueTime: operationRequirementStartTarget.dueTime,
+          },
+        ]
+        : [],
+    [defaultProjectAssigneeId, operationRequirementStartTarget]
   );
 
-  // 运营需求只允许从待启动状态进入拆解确认，避免重复生成运营任务。
-  const handleOpenOperationRequirementStart = useCallback((requirement: any) => {
-    if (requirement?.status !== 'todo') return;
-    setOperationRequirementStartTarget(requirement);
-  }, []);
+  // 运营需求只允许从待启动状态进入模板目录，相关选项在打开时刷新以避免使用旧资源缓存。
+  const handleOpenOperationRequirementStart = useCallback(
+    (requirement: any) => {
+      if (requirement?.status !== 'todo') return;
+      setOperationRequirementStartTarget(requirement);
+      void Promise.allSettled([
+        fetchOperationAgents(),
+        fetchOperationKnowledgeBases(),
+        fetchOperationOrganizeTemplates(),
+        fetchOperationAccounts(),
+      ]);
+    },
+    [fetchOperationAccounts, fetchOperationAgents, fetchOperationKnowledgeBases, fetchOperationOrganizeTemplates]
+  );
 
   const closeOperationRequirementDetail = useCallback(() => {
     operationRequirementDetailRequestRef.current += 1;
@@ -2252,7 +2181,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
             title: task.title.trim(),
             description: task.description?.trim() || undefined,
             assignee: task.assignee!,
-            dueTime: operationRequirementStartTarget?.dueTime,
+            dueTime: task.dueTime || operationRequirementStartTarget?.dueTime,
+            templateId: task.templateId,
+            config: task.config,
           })),
         });
         message.success(intl.formatMessage({ id: 'projectSpace.operation.requirementStart.success' }));
@@ -2264,6 +2195,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
         message.error(
           error?.message || intl.formatMessage({ id: 'projectSpace.operation.requirementStart.submitFailed' })
         );
+        // 模板弹窗根据 Promise 状态决定是否保留当前草稿，失败时继续停留在详情页便于重试。
+        throw error;
       } finally {
         setOperationRequirementStarting(false);
       }
@@ -2278,10 +2211,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
     ]
   );
 
-  // 运营任务执行入口先进入与研发项目一致的多仓库拆分确认流程。
+  // 运营任务执行入口只打开任务模板页面，不进入研发项目的多仓库拆分流程。
   const handleOpenOperationTaskExecute = useCallback((task: any) => {
     if (!task || task.sessionId || task.status !== 'todo') return;
-    setOperationTaskSplitTarget(task);
+    setDetailTask(null);
+    setOperationTaskTemplateTarget(task);
   }, []);
 
   // 多仓库拆分确认后仅提交承接成员；服务端实时查询成员绑定的数字员工，再以 @ 数字员工的方式发起任务会话。
@@ -3097,9 +3031,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const tabItems = useMemo(
     () => [
+      // 项目小详情优先展示需求入口，任务和资源依次后置。
+      ...(showRequirementsTab ? [{ key: 'requirements', label: t('tabs.requirements') }] : []),
       { key: 'tasks', label: t('tabs.tasks') },
       { key: 'resources', label: t('tabs.resources') },
-      ...(showRequirementsTab ? [{ key: 'requirements', label: t('tabs.requirements') }] : []),
       // 数字员工与集成测试都是研发闭环能力,仅研发项目可见;数字员工排在成员前。
       ...(isDevelopProject ? [{ key: 'digitalAgents', label: t('tabs.digitalAgents') }] : []),
       ...(showMembersTab ? [{ key: 'members', label: t('tabs.members') }] : []),
@@ -4511,7 +4446,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           value: formatDateRange(config.effectiveStartDate, config.effectiveEndDate),
         });
       }
-    } else if (operationType === 'content') {
+    } else if (operationType === 'content' && Object.keys(config).length > 0) {
       configTitleId = 'projectSpace.operation.taskForm.content.title';
       const contentTypeKeyMap: Record<string, string> = {
         'wechat-article': 'wechatArticle',
@@ -4543,7 +4478,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           value: config.publishSchedule || emptyValue,
         }
       );
-    } else {
+    } else if (operationType === 'analyze' && Object.keys(config).length > 0) {
       configTitleId = 'projectSpace.operation.taskForm.analyze.title';
       const analysisScope = config.scope ?? config.analysisType;
       configItems.push(
@@ -4641,17 +4576,19 @@ const ProjectDetailPanel: React.FC<Props> = ({
               </div>
             </section>
 
-            <section className={styles.requirementDetailSection}>
-              <h3>{intl.formatMessage({ id: configTitleId })}</h3>
-              <div className={styles.requirementDetailInfoGrid}>
-                {configItems.map((item) => (
-                  <div key={item.label} className={styles.requirementDetailInfoItem}>
-                    <label>{item.label}</label>
-                    <span>{item.value}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
+            {configItems.length > 0 && (
+              <section className={styles.requirementDetailSection}>
+                <h3>{intl.formatMessage({ id: configTitleId })}</h3>
+                <div className={styles.requirementDetailInfoGrid}>
+                  {configItems.map((item) => (
+                    <div key={item.label} className={styles.requirementDetailInfoItem}>
+                      <label>{item.label}</label>
+                      <span>{item.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
         </Spin>
       </Drawer>
@@ -4849,6 +4786,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
         open={operationTaskModalOpen}
         mode={editingOperationTask ? 'edit' : 'create'}
         entityLabel="requirement"
+        // 运营需求按原型只采集目标信息；采集类型仍在此保留单次、周期、间隔三种执行方式。
+        simpleRequirement
         initialValues={operationTaskInitialValues}
         options={operationTaskOptions}
         loading={operationTaskSaving}
@@ -4864,6 +4803,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
         requirement={operationRequirementStartTarget}
         initialTasks={operationRequirementStartTasks}
         assignees={operationAssigneeOptions}
+        agentOptions={operationAgents}
+        knowledgeOptions={operationKnowledgeBases}
+        ontologyOptions={operationOrganizeTemplates}
+        accountOptions={operationTemplateAccountOptions}
         loading={operationRequirementStarting}
         onCancel={() => setOperationRequirementStartTarget(null)}
         onSubmit={handleSubmitOperationRequirementStart}
@@ -5463,6 +5406,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
     const taskIcon =
       operationTaskType === 'collect' ? (
         <CloudDownloadOutlined />
+      ) : operationTaskType === 'knowledge' ? (
+        <FileTextOutlined />
       ) : operationTaskType === 'content' ? (
         <EditOutlined />
       ) : (
@@ -5667,6 +5612,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                   });
                   const operationTaskIconClass = {
                     collect: operationStyles.operationTaskIconCollect,
+                    knowledge: operationStyles.operationTaskIconKnowledge,
                     content: operationStyles.operationTaskIconContent,
                     analyze: operationStyles.operationTaskIconAnalyze,
                   }[operationTaskType];
@@ -5679,15 +5625,25 @@ const ProjectDetailPanel: React.FC<Props> = ({
                     : isOperationProject
                       ? `${taskAssignee} · ${taskDueTime}`
                       : `${task.sessionContent || ''}`;
-                  const taskStatusValue = task.operationState || task.status || task.taskStatus || task.currentStatus;
+                  const rawTaskStatusLabel = `${task.statusLabel || ''}`.trim().toLowerCase();
+                  // 后端兼容字段可能同时存在，已翻译的状态标签优先于历史 status 编码。
+                  const taskStatusValue =
+                    rawTaskStatusLabel.includes('进行中') ||
+                    rawTaskStatusLabel.includes('运行') ||
+                    rawTaskStatusLabel.includes('完成') ||
+                    rawTaskStatusLabel.includes('失败') ||
+                    rawTaskStatusLabel.includes('暂停')
+                      ? task.statusLabel
+                      : task.operationState || task.status || task.taskStatus || task.currentStatus;
                   const taskStatusMeta = getTaskStatusMeta(taskStatusValue);
                   // 下拉菜单展开时维持状态标签的让位，防止悬浮菜单遮挡右侧内容。
                   const isTaskActionOpen = openTaskActionId === `${task.taskId}`;
                   const isTaskSelected = selectedTaskId === `${task.taskId}`;
                   // 统一按最终展示状态判断，兼容历史数据同时返回 operationState=doing、status=todo 的情况。
+                  const normalizedOperationTaskStatus = `${taskStatusValue || ''}`.trim().toLowerCase();
                   const canExecuteOperationTask =
                     isOperationProject &&
-                    task.status === 'todo' &&
+                    ['todo', 'pending', 'not_started', 'waiting'].includes(normalizedOperationTaskStatus) &&
                     taskStatusMeta.className === 'Pending' &&
                     !task.sessionId;
                   const operationTaskActionItems: MenuProps['items'] = [
@@ -5728,6 +5684,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
                           <div className={`${operationStyles.operationTaskIcon} ${operationTaskIconClass}`}>
                             {operationTaskType === 'collect' ? (
                               <CloudDownloadOutlined />
+                            ) : operationTaskType === 'knowledge' ? (
+                              <FileTextOutlined />
                             ) : operationTaskType === 'content' ? (
                               <EditOutlined />
                             ) : (
@@ -5757,17 +5715,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
                         {/* 普通项目按会话展示，不显示统一任务状态；结构化任务统一将状态和操作放在右侧。 */}
                         {showStructuredTaskMeta && (
                           <div className={styles.detailTaskCardActions}>
-                            {/* 待开始状态由执行按钮直接表达，避免同一位置重复展示两个操作提示。 */}
-                            {!canExecuteOperationTask && (
-                              <Tag
-                                bordered={false}
-                                className={`${styles.detailTaskStatusTag} ${
-                                  styles[`detailTaskStatus${taskStatusMeta.className}`]
-                                }`}
-                              >
-                                {t(taskStatusMeta.labelId)}
-                              </Tag>
-                            )}
+                            {/* 状态标签始终保留；待开始任务同时在右侧提供执行入口。 */}
+                            <Tag
+                              bordered={false}
+                              className={`${styles.detailTaskStatusTag} ${
+                                canExecuteOperationTask ? styles.detailPendingTaskStatusTag : ''
+                              } ${styles[`detailTaskStatus${taskStatusMeta.className}`]}`}
+                            >
+                              {t(taskStatusMeta.labelId)}
+                            </Tag>
                             {canExecuteOperationTask ? (
                               // 执行按钮复用需求列表“启动”按钮的标签样式，保持运营操作入口视觉统一。
                               <Button
@@ -6784,6 +6740,41 @@ const ProjectDetailPanel: React.FC<Props> = ({
       </Spin>
       {renderAddSourceModal()}
       {renderManualRequirementModal()}
+      <TaskTemplateModal
+        open={!!operationTaskTemplateTarget}
+        initialTitle={operationTaskTemplateTarget?.title || operationTaskTemplateTarget?.taskName}
+        initialDescription={operationTaskTemplateTarget?.description}
+        applyText="确定"
+        onCancel={() => setOperationTaskTemplateTarget(null)}
+        onApply={async (result: TaskTemplateApplyResult) => {
+          const task = operationTaskTemplateTarget;
+          const taskId = Number(task?.taskId || task?.sessionId);
+          const assigneeId = task?.assigneeId ?? task?.assignee;
+          if (!Number.isFinite(taskId) || taskId <= 0 || assigneeId === undefined || assigneeId === null) {
+            message.error('任务缺少负责人或有效编号，无法执行');
+            return;
+          }
+          // 先由后端保存模板配置并启动任务，待事务提交后再进入真实会话，避免跳转到空白会话。
+          const executeResult = await executeOperationTask({
+            taskId,
+            assigneeIds: [assigneeId],
+            templateId: result.template.templateId,
+            config: {
+              ...result.values,
+              templateType: result.template.templateType,
+              templateName: result.template.templateName,
+              templatePrompt: result.prompt,
+            },
+          });
+          const sessionId = executeResult?.sessionId || task?.sessionId || task?.taskId;
+          if (!sessionId) {
+            message.error('任务执行后未返回会话，无法打开聊天');
+            return;
+          }
+          setOperationTaskTemplateTarget(null);
+          handleOpenTaskSession({ ...task, sessionId, status: 'doing' });
+        }}
+      />
       <RequirementSplitModal
         open={splitRequirement !== null || operationTaskSplitTarget !== null}
         requirement={

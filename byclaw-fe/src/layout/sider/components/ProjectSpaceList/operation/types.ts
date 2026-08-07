@@ -3,8 +3,8 @@ import type { Dayjs } from 'dayjs';
 // 运营模块中的业务主键均兼容后端数字 ID 与字符串 ID，避免不同资源接口之间发生类型转换错误。
 export type OperationIdentifier = string | number;
 
-// 运营任务、登录状态和工作流状态为前端统一枚举；接口适配层负责兼容后端的历史取值。
-export type OperationTaskType = 'collect' | 'content' | 'analyze';
+// 运营需求按原型拆成四类；接口适配层负责兼容旧版 publish/content 等历史取值。
+export type OperationTaskType = 'collect' | 'knowledge' | 'content' | 'analyze';
 
 export type OperationLoginStatus = 'logged_in' | 'logged_out' | 'expired' | 'unknown';
 

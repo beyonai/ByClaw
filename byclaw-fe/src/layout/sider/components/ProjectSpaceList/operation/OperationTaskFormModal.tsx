@@ -13,12 +13,14 @@ import type {
 } from './types';
 import styles from './index.module.less';
 
-// 三类运营需求复用此弹窗；父组件负责提供项目成员、账号和知识库等动态选项。
+// 四类运营需求复用此弹窗；父组件负责提供项目成员、账号和知识库等动态选项。
 export interface OperationTaskFormModalProps {
   open: boolean;
   mode?: 'create' | 'edit';
-  // 同一套三类配置表单可用于运营需求或历史运营任务，标题和提交文案按实体区分。
+  // 同一套四类配置表单可用于运营需求或历史运营任务，标题和提交文案按实体区分。
   entityLabel?: 'task' | 'requirement';
+  // 原型中的运营需求只录入目标信息；三种执行方式在后续任务模板的执行配置中选择。
+  simpleRequirement?: boolean;
   initialValues?: Partial<OperationTaskFormValues>;
   options?: OperationTaskFormOptions;
   loading?: boolean;
@@ -96,6 +98,7 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
   open,
   mode = 'create',
   entityLabel = 'task',
+  simpleRequirement = false,
   initialValues,
   options = {},
   loading = false,
@@ -118,6 +121,7 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
     [intl]
   );
   const taskType = Form.useWatch('taskType', form) || 'collect';
+  const isSimpleRequirement = entityLabel === 'requirement' && simpleRequirement;
   const collectMode = Form.useWatch(['collectConfig', 'mode'], form);
   const collectPeriodType = Form.useWatch(['collectConfig', 'periodType'], form);
   const collectOrganize = Form.useWatch(['collectConfig', 'organize'], form);
@@ -129,7 +133,7 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
   const analysisAccountId = Form.useWatch(['analyzeConfig', 'accountId'], form);
   const analysisScope = Form.useWatch(['analyzeConfig', 'scope'], form);
 
-  // 为三类任务分别预置最小可用配置，编辑场景再覆盖同名字段，避免切换类型时嵌套对象丢失。
+  // 为现有配置类型预置最小可用字段，编辑场景再覆盖同名字段，避免切换类型时嵌套对象丢失。
   const formInitialValues = useMemo<OperationTaskFormValues>(
     () => ({
       taskName: '',
@@ -406,15 +410,31 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
       const collectConfig =
         values.taskType === 'collect'
           ? {
-            ...values.collectConfig,
+            ...(isSimpleRequirement
+              ? {
+                // 简化需求只保存执行方式和调度字段，渠道、账号、主题等信息在任务模板阶段补充。
+                mode: values.collectConfig?.mode,
+                onceTime: values.collectConfig?.onceTime,
+                periodType: values.collectConfig?.periodType,
+                periodWeekdays: values.collectConfig?.periodWeekdays,
+                periodMonthDays: values.collectConfig?.periodMonthDays,
+                periodMonth: values.collectConfig?.periodMonth,
+                periodDay: values.collectConfig?.periodDay,
+                periodTime: values.collectConfig?.periodTime,
+                periodYearDateTime: values.collectConfig?.periodYearDateTime,
+                intervalHours: values.collectConfig?.intervalHours,
+                intervalWeekdays: values.collectConfig?.intervalWeekdays,
+                effectiveDateRange: values.collectConfig?.effectiveDateRange,
+              }
+              : values.collectConfig),
             cronExpr: buildOperationCollectionCron(values.collectConfig),
           }
           : undefined;
       await onSubmit({
         ...values,
         collectConfig,
-        contentConfig: values.taskType === 'content' ? values.contentConfig : undefined,
-        analyzeConfig: values.taskType === 'analyze' ? values.analyzeConfig : undefined,
+        contentConfig: values.taskType === 'content' && !isSimpleRequirement ? values.contentConfig : undefined,
+        analyzeConfig: values.taskType === 'analyze' && !isSimpleRequirement ? values.analyzeConfig : undefined,
       });
     } catch (error) {
       if (!isFormValidationError(error)) {
@@ -424,7 +444,7 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
       submittingRef.current = false;
       setSubmitting(false);
     }
-  }, [form, loading, onSubmit, t]);
+  }, [form, isSimpleRequirement, loading, onSubmit, t]);
 
   const handleCancel = useCallback(() => {
     if (!isSubmitting) onCancel();
@@ -464,78 +484,82 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
 
   const renderCollectFields = () => (
     <section className={styles.operationTaskSection}>
-      <h3>{t('collect.title')}</h3>
+      <h3>{isSimpleRequirement ? entityT('executionTitle') : t('collect.title')}</h3>
       <div className={styles.operationFormGrid}>
-        <Form.Item
-          label={t('field.collectChannel')}
-          name={['collectConfig', 'channel']}
-          rules={[{ required: true, message: t('validation.collectChannelRequired') }]}
-        >
-          <Select options={collectChannels} loading={optionLoading} placeholder={t('placeholder.collectChannel')} />
-        </Form.Item>
-        <Form.Item
-          label={t('field.collectAccountOrAddress')}
-          name={['collectConfig', 'accountOrAddress']}
-          rules={[
-            {
-              required: true,
-              whitespace: !isPlatformCollectChannel,
-              message: t(
-                isPlatformCollectChannel
-                  ? 'validation.collectAccountRequired'
-                  : 'validation.collectAccountOrAddressRequired'
-              ),
-            },
-          ]}
-        >
-          {isPlatformCollectChannel ? (
-            <Select
-              options={collectAccountOptions}
-              loading={optionLoading}
-              showSearch
-              optionFilterProp="label"
-              placeholder={t('placeholder.collectAccount')}
-              notFoundContent={t('emptyAccount')}
-            />
-          ) : (
-            <Input placeholder={t('placeholder.collectAccountOrAddress')} />
-          )}
-        </Form.Item>
-        <Form.Item
-          className={styles.operationFormFull}
-          label={t('field.collectTopic')}
-          name={['collectConfig', 'topic']}
-          rules={[{ required: true, whitespace: true, message: t('validation.collectTopicRequired') }]}
-        >
-          {/* 采集主题可能包含多个关键词或说明，独占整行并提供两行输入空间。 */}
-          <Input.TextArea rows={2} maxLength={1000} showCount placeholder={t('placeholder.collectTopic')} />
-        </Form.Item>
-        <Form.Item
-          label={t('field.knowledgeBase')}
-          name={['collectConfig', 'knowledgeBaseId']}
-          rules={[{ required: true, message: t('validation.knowledgeBaseRequired') }]}
-        >
-          <Select
-            options={options.knowledgeBases || []}
-            loading={optionLoading}
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            placeholder={t('placeholder.knowledgeBase')}
-            notFoundContent={t('emptyOption')}
-          />
-        </Form.Item>
-        <Form.Item label={t('field.directory')} name={['collectConfig', 'directoryId']}>
-          <Select
-            options={directoryOptions}
-            loading={optionLoading}
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            placeholder={t('placeholder.directory')}
-            notFoundContent={t('emptyOption')}
-          />
-        </Form.Item>
+        {!isSimpleRequirement && (
+          <>
+            <Form.Item
+              label={t('field.collectChannel')}
+              name={['collectConfig', 'channel']}
+              rules={[{ required: true, message: t('validation.collectChannelRequired') }]}
+            >
+              <Select options={collectChannels} loading={optionLoading} placeholder={t('placeholder.collectChannel')} />
+            </Form.Item>
+            <Form.Item
+              label={t('field.collectAccountOrAddress')}
+              name={['collectConfig', 'accountOrAddress']}
+              rules={[
+                {
+                  required: true,
+                  whitespace: !isPlatformCollectChannel,
+                  message: t(
+                    isPlatformCollectChannel
+                      ? 'validation.collectAccountRequired'
+                      : 'validation.collectAccountOrAddressRequired'
+                  ),
+                },
+              ]}
+            >
+              {isPlatformCollectChannel ? (
+                <Select
+                  options={collectAccountOptions}
+                  loading={optionLoading}
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder={t('placeholder.collectAccount')}
+                  notFoundContent={t('emptyAccount')}
+                />
+              ) : (
+                <Input placeholder={t('placeholder.collectAccountOrAddress')} />
+              )}
+            </Form.Item>
+            <Form.Item
+              className={styles.operationFormFull}
+              label={t('field.collectTopic')}
+              name={['collectConfig', 'topic']}
+              rules={[{ required: true, whitespace: true, message: t('validation.collectTopicRequired') }]}
+            >
+              {/* 采集主题可能包含多个关键词或说明，独占整行并提供两行输入空间。 */}
+              <Input.TextArea rows={2} maxLength={1000} showCount placeholder={t('placeholder.collectTopic')} />
+            </Form.Item>
+            <Form.Item
+              label={t('field.knowledgeBase')}
+              name={['collectConfig', 'knowledgeBaseId']}
+              rules={[{ required: true, message: t('validation.knowledgeBaseRequired') }]}
+            >
+              <Select
+                options={options.knowledgeBases || []}
+                loading={optionLoading}
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                placeholder={t('placeholder.knowledgeBase')}
+                notFoundContent={t('emptyOption')}
+              />
+            </Form.Item>
+            <Form.Item label={t('field.directory')} name={['collectConfig', 'directoryId']}>
+              <Select
+                options={directoryOptions}
+                loading={optionLoading}
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                placeholder={t('placeholder.directory')}
+                notFoundContent={t('emptyOption')}
+              />
+            </Form.Item>
+          </>
+        )}
         <div className={styles.operationScheduleTopRow}>
           <Form.Item
             className={styles.operationScheduleModeField}
@@ -697,69 +721,71 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
             </Form.Item>
           </>
         )}
-        <div className={styles.operationKnowledgeOrganizationRow}>
-          <Form.Item label={t('field.organize')} name={['collectConfig', 'organize']} valuePropName="checked">
-            <Switch
-              checkedChildren={t('common.yes')}
-              unCheckedChildren={t('common.no')}
-              onChange={(checked) => {
-                if (checked) {
-                  const currentCollectConfig = form.getFieldValue('collectConfig') || {};
-                  const selectedTemplateId = currentCollectConfig.organizeTemplateId ?? organizeTemplates[0]?.value;
-                  const selectedTemplate = organizeTemplates.find(
-                    (template) => `${template.value}` === `${selectedTemplateId}`
-                  );
-                  // 开启知识整理后直接使用当前页面的本地本体列表，不再额外打开配置弹窗。
+        {!isSimpleRequirement && (
+          <div className={styles.operationKnowledgeOrganizationRow}>
+            <Form.Item label={t('field.organize')} name={['collectConfig', 'organize']} valuePropName="checked">
+              <Switch
+                checkedChildren={t('common.yes')}
+                unCheckedChildren={t('common.no')}
+                onChange={(checked) => {
+                  if (checked) {
+                    const currentCollectConfig = form.getFieldValue('collectConfig') || {};
+                    const selectedTemplateId = currentCollectConfig.organizeTemplateId ?? organizeTemplates[0]?.value;
+                    const selectedTemplate = organizeTemplates.find(
+                      (template) => `${template.value}` === `${selectedTemplateId}`
+                    );
+                    // 开启知识整理后直接使用当前页面的本地本体列表，不再额外打开配置弹窗。
+                    form.setFieldsValue({
+                      collectConfig: {
+                        ...currentCollectConfig,
+                        organize: true,
+                        organizeTemplateId: selectedTemplateId,
+                        knowledgeOrganization: selectedTemplateId
+                          ? {
+                            mode: 'existing',
+                            templateId: selectedTemplateId,
+                            templateName: selectedTemplate?.label,
+                          }
+                          : undefined,
+                      },
+                    });
+                    return;
+                  }
                   form.setFieldsValue({
                     collectConfig: {
-                      ...currentCollectConfig,
-                      organize: true,
-                      organizeTemplateId: selectedTemplateId,
-                      knowledgeOrganization: selectedTemplateId
-                        ? {
-                          mode: 'existing',
-                          templateId: selectedTemplateId,
-                          templateName: selectedTemplate?.label,
-                        }
-                        : undefined,
+                      ...(form.getFieldValue('collectConfig') || {}),
+                      organize: false,
+                      organizeTemplateId: undefined,
+                      knowledgeOrganization: undefined,
                     },
                   });
-                  return;
-                }
-                form.setFieldsValue({
-                  collectConfig: {
-                    ...(form.getFieldValue('collectConfig') || {}),
-                    organize: false,
-                    organizeTemplateId: undefined,
-                    knowledgeOrganization: undefined,
-                  },
-                });
-              }}
-            />
-          </Form.Item>
-          {collectOrganize && (
-            <Form.Item
-              label={t('field.organizeTemplate')}
-              name={['collectConfig', 'organizeTemplateId']}
-              rules={[{ required: true, message: t('validation.organizeTemplateRequired') }]}
-            >
-              <Select
-                options={organizeTemplates}
-                loading={optionLoading}
-                disabled={isSubmitting}
-                showSearch
-                optionFilterProp="label"
-                placeholder={t('placeholder.organizeTemplate')}
-                notFoundContent={null}
-                onChange={handleKnowledgeTemplateChange}
+                }}
               />
             </Form.Item>
-          )}
-          {/*
-            暂停“新增本体”能力，知识整理当前只允许直接选择本地已有本体。
-            后续恢复时应重新设计本体创建和列表刷新流程，避免在需求表单中嵌套弹窗。
-          */}
-        </div>
+            {collectOrganize && (
+              <Form.Item
+                label={t('field.organizeTemplate')}
+                name={['collectConfig', 'organizeTemplateId']}
+                rules={[{ required: true, message: t('validation.organizeTemplateRequired') }]}
+              >
+                <Select
+                  options={organizeTemplates}
+                  loading={optionLoading}
+                  disabled={isSubmitting}
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder={t('placeholder.organizeTemplate')}
+                  notFoundContent={null}
+                  onChange={handleKnowledgeTemplateChange}
+                />
+              </Form.Item>
+            )}
+            {/*
+              暂停“新增本体”能力，知识整理当前只允许直接选择本地已有本体。
+              后续恢复时应重新设计本体创建和列表刷新流程，避免在需求表单中嵌套弹窗。
+            */}
+          </div>
+        )}
       </div>
     </section>
   );
@@ -887,7 +913,7 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
       title={modalTitle}
       open={open}
       centered
-      width={800}
+      width={isSimpleRequirement ? 650 : 800}
       className={styles.operationTaskModal}
       confirmLoading={isSubmitting}
       closable={!isSubmitting}
@@ -926,40 +952,67 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
                 optionType="button"
                 buttonStyle="solid"
                 options={[
-                  { value: 'collect', label: t('taskType.collect') },
-                  { value: 'content', label: t('taskType.content') },
-                  { value: 'analyze', label: t('taskType.analyze') },
+                  {
+                    value: 'collect',
+                    label: isSimpleRequirement ? entityT('type.collect') : t('taskType.collect'),
+                  },
+                  {
+                    value: 'knowledge',
+                    label: isSimpleRequirement ? entityT('type.knowledge') : t('taskType.knowledge'),
+                  },
+                  {
+                    value: 'content',
+                    label: isSimpleRequirement ? entityT('type.content') : t('taskType.content'),
+                  },
+                  {
+                    value: 'analyze',
+                    label: isSimpleRequirement ? entityT('type.analyze') : t('taskType.analyze'),
+                  },
                 ]}
               />
             </Form.Item>
           </div>
 
-          {/* 切换任务类型时保留各类型已填写内容，提交阶段只发送当前类型配置。 */}
-          {taskType === 'collect' && renderCollectFields()}
-          {taskType === 'content' && renderContentFields()}
-          {taskType === 'analyze' && renderAnalyzeFields()}
+          {/* 普通任务切换类型时保留各类型已填写内容；新增需求的执行方式改在选择任务模板后的执行配置中设置。 */}
+          {!isSimpleRequirement && taskType === 'collect' && renderCollectFields()}
+          {!isSimpleRequirement && taskType === 'content' && renderContentFields()}
+          {!isSimpleRequirement && taskType === 'analyze' && renderAnalyzeFields()}
 
           <section className={styles.operationTaskSection}>
-            <h3>{t('assignment.title')}</h3>
+            <h3>{isSimpleRequirement ? entityT('assignmentTitle') : t('assignment.title')}</h3>
             <div className={styles.operationFormGrid}>
               <Form.Item
-                label={t('field.assignee')}
+                label={isSimpleRequirement ? entityT('field.assignee') : t('field.assignee')}
                 name="assigneeId"
-                rules={[{ required: true, message: t('validation.assigneeRequired') }]}
+                rules={[
+                  {
+                    required: true,
+                    message: isSimpleRequirement
+                      ? entityT('validation.assigneeRequired')
+                      : t('validation.assigneeRequired'),
+                  },
+                ]}
               >
                 <Select
                   options={options.assignees || []}
                   loading={optionLoading}
                   showSearch
                   optionFilterProp="label"
-                  placeholder={t('placeholder.assignee')}
+                  placeholder={isSimpleRequirement ? entityT('placeholder.assignee') : t('placeholder.assignee')}
                   notFoundContent={t('emptyAssignee')}
                 />
               </Form.Item>
               <Form.Item
-                label={t('field.dueTime')}
+                label={isSimpleRequirement ? entityT('field.dueTime') : t('field.dueTime')}
                 name="dueTime"
-                rules={[{ required: true, message: t('validation.dueTimeRequired') }]}
+                rules={[
+                  {
+                    required: true,
+                    message: isSimpleRequirement
+                      ? entityT('validation.dueTimeRequired')
+                      : t('validation.dueTimeRequired'),
+                  },
+                ]}
               >
                 <DatePicker className={styles.operationFullControl} />
               </Form.Item>

@@ -24,7 +24,7 @@ public class OperationRequirementDTO {
     @JsonAlias("description")
     private String sourceDescription;
 
-    /** 需求类型：collect-素材采集、publish-内容创作与发布、analyze-数据分析。 */
+    /** 需求类型：collect-素材采集、knowledge-知识整理、publish-内容创作与发布、analyze-数据分析。 */
     private String operationType;
 
     /** 关联的项目成员用户 ID。 */
@@ -34,6 +34,6 @@ public class OperationRequirementDTO {
     @JsonAlias("due_time")
     private String dueTime;
 
-    /** 三类运营需求的差异化配置，按类型保存为 JSON。 */
+    /** 运营需求创建阶段的差异化配置；当前仅素材采集保留执行方式和调度字段。 */
     private Map<String, Object> config;
 }

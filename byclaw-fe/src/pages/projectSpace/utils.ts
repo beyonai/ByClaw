@@ -6,7 +6,16 @@ export const getArrayData = (response: any): any[] => {
   if (Array.isArray(response?.rows)) return response.rows;
   if (Array.isArray(response?.list)) return response.list;
   if (Array.isArray(response?.data)) return response.data;
+  // 部分项目接口会把分页对象再包在 data 中，统一解包后供大详情各 Tab 复用。
+  if (response?.data && response.data !== response) return getArrayData(response.data);
   return [];
+};
+
+// 分页接口存在直接返回和 data 包裹两种结构，统一提取总数供详情 Tab 判断是否继续加载。
+export const getPageTotal = (response: any, fallback = 0): number => {
+  const total = response?.total ?? response?.data?.total;
+  const normalizedTotal = Number(total);
+  return Number.isFinite(normalizedTotal) ? normalizedTotal : fallback;
 };
 
 const getObjectData = (response: any): any => {

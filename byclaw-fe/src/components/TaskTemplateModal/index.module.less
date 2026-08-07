@@ -1,0 +1,163 @@
+.modal {
+  :global(.@{antPrefix}-modal-content) {
+    overflow: hidden;
+    border-radius: 12px;
+  }
+
+  :global(.@{antPrefix}-modal-body) {
+    max-height: min(72vh, 720px);
+    padding: 20px;
+    overflow-y: auto;
+  }
+}
+
+.modalTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  > span {
+    min-width: 0;
+  }
+
+  strong,
+  small {
+    display: block;
+  }
+
+  strong {
+    color: #283346;
+    font-size: 16px;
+  }
+
+  small {
+    margin-top: 3px;
+    color: #8c97a7;
+    font-size: 12px;
+    font-weight: 400;
+  }
+}
+
+.templateGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.templateCard {
+  min-width: 0;
+  min-height: 84px;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e0e6ee;
+  border-radius: 8px;
+  color: inherit;
+  text-align: left;
+  background: #fff;
+  cursor: pointer;
+
+  &:hover {
+    border-color: #9bbcf0;
+    background: #f8faff;
+  }
+
+  > i {
+    width: 48px;
+    height: 48px;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    color: #2868c9;
+    background: #eaf2ff;
+    font-size: 16px;
+    font-style: normal;
+    font-weight: 700;
+  }
+
+  > span {
+    min-width: 0;
+  }
+
+  strong,
+  small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong {
+    color: #303b4c;
+    font-size: 14px;
+  }
+
+  small {
+    margin-top: 5px;
+    color: #8b96a5;
+    font-size: 12px;
+  }
+}
+
+.detailForm {
+  max-width: 100%;
+}
+
+.formGrid,
+.executionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
+
+.methodField {
+  margin-bottom: 16px;
+
+  > strong {
+    display: block;
+    margin-bottom: 8px;
+    color: #303b4c;
+    font-size: 14px;
+  }
+
+  :global(.@{antPrefix}-radio-group) {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  :global(.@{antPrefix}-radio-button-wrapper) {
+    text-align: center;
+  }
+}
+
+.executionSection {
+  padding-top: 16px;
+  border-top: 1px solid #e7ebf1;
+
+  > strong {
+    display: block;
+    margin-bottom: 12px;
+    color: #303b4c;
+    font-size: 14px;
+  }
+}
+
+.executionGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+
+  :global(.@{antPrefix}-input-number) {
+    width: 100%;
+  }
+}
+
+@media (max-width: 760px) {
+  .templateGrid,
+  .formGrid,
+  .executionGrid {
+    grid-template-columns: 1fr;
+  }
+}

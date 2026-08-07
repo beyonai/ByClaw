@@ -31,7 +31,18 @@ import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from './siderContent
 
 export const DEF_SIDER = 'sessions';
 
-const CENTER_TAB_KEYS = new Set(['agent', 'model', 'knowledge', 'tool', 'view', 'object', 'ontology', 'skill', 'file']);
+const CENTER_TAB_KEYS = new Set([
+  'agent',
+  'model',
+  'knowledge',
+  'tool',
+  'view',
+  'object',
+  'ontology',
+  'skill',
+  'file',
+  'projectSpace',
+]);
 
 const SIDER_ACTIVE_TAB_BY_PATH: Partial<Record<string, (typeof tabItems)[number]['key']>> = {
   '/dialogueRecord': 'sessions',
@@ -117,6 +128,15 @@ const Sidebar = () => {
 
       if (tab.key === 'sessions') {
         if (!isChatPage && pathname !== tab.navigatePath) {
+          navigate(tab.navigatePath);
+        }
+        return;
+      }
+
+      // 项目是独立工作区，从聊天页点击时也必须切换右侧大页面；
+      // 资源类菜单仍保持聊天上下文不被打断。
+      if (tab.key === 'projectSpace') {
+        if (pathname !== tab.navigatePath) {
           navigate(tab.navigatePath);
         }
         return;

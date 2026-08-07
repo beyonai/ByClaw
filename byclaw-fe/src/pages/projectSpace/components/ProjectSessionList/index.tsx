@@ -1,22 +1,84 @@
-import { Button, Empty, List, Space, Tag, Typography } from 'antd';
+import { Button, Empty, Spin, Tag, Typography } from 'antd';
 import { MessageOutlined, ReloadOutlined } from '@ant-design/icons';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { listProjectSessionsByQo } from '@/service/devloop';
 import type { ProjectSession } from '../../types';
+import { getArrayData, getPageTotal, normalizeProjectSession } from '../../utils';
+import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
 import styles from '../../index.module.less';
 
+const PAGE_SIZE = 20;
+
 interface Props {
+  projectId: string;
   sessions: ProjectSession[];
   loading?: boolean;
+  keyword?: string;
   onRefresh?: () => void;
   onOpenSession?: (session: ProjectSession) => void;
 }
 
-const ProjectSessionList: React.FC<Props> = ({ sessions, loading, onRefresh, onOpenSession }) => {
-  if (!sessions.length) {
+const ProjectSessionList: React.FC<Props> = ({
+  projectId,
+  sessions,
+  loading,
+  keyword = '',
+  onRefresh,
+  onOpenSession,
+}) => {
+  const [sessionItems, setSessionItems] = useState(sessions);
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(sessions.length);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const requestingRef = useRef(false);
+
+  const loadSessions = useCallback(
+    async (nextPage = 1) => {
+      if (!projectId || (nextPage > 1 && requestingRef.current)) return;
+      if (nextPage > 1) requestingRef.current = true;
+      if (nextPage > 1) setLoadingMore(true);
+      try {
+        const response = await listProjectSessionsByQo({
+          projectId: Number(projectId),
+          pageNum: nextPage,
+          pageSize: PAGE_SIZE,
+          keyword: keyword.trim() || undefined,
+        });
+        const rows = getArrayData(response).map((item) => normalizeProjectSession(item, projectId));
+        setSessionItems((current) => (nextPage === 1 ? rows : [...current, ...rows]));
+        setPage(nextPage);
+        const loadedCount = (nextPage - 1) * PAGE_SIZE + rows.length;
+        setTotal(getPageTotal(response, loadedCount + (rows.length === PAGE_SIZE ? 1 : 0)));
+      } catch (error) {
+        // 详情接口已经提供首屏会话，分页失败时保留当前卡片，刷新仍可通过项目详情入口重试。
+        console.error('Failed to load project sessions:', error);
+      } finally {
+        if (nextPage > 1) requestingRef.current = false;
+        if (nextPage > 1) setLoadingMore(false);
+      }
+    },
+    [keyword, projectId]
+  );
+
+  useEffect(() => {
+    setSessionItems(sessions);
+    setPage(0);
+    setTotal(sessions.length);
+    const timer = window.setTimeout(() => void loadSessions(1), 250);
+    return () => window.clearTimeout(timer);
+  }, [loadSessions, sessions]);
+
+  const hasMore = total > sessionItems.length || (total === 0 && sessionItems.length === PAGE_SIZE);
+  const sentinelRef = useInfiniteScroll(() => {
+    if (hasMore) void loadSessions(page + 1);
+  }, hasMore && !loading && !loadingMore);
+
+  if (!sessionItems.length) {
     return (
       <div className={styles.sessionEmpty}>
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无会话" />
-        <Button icon={<ReloadOutlined />} loading={loading} onClick={onRefresh}>
-          刷新会话
+        <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void loadSessions(1).then(onRefresh)}>
+          刷新
         </Button>
       </div>
     );
@@ -25,19 +87,35 @@ const ProjectSessionList: React.FC<Props> = ({ sessions, loading, onRefresh, onO
   return (
     <div className={styles.sessionListWrap}>
       <div className={styles.sessionToolbar}>
-        <Typography.Text type="secondary">共 {sessions.length} 个会话</Typography.Text>
-        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={onRefresh}>
+        <Typography.Text type="secondary">共 {total || sessionItems.length} 个会话</Typography.Text>
+        <Button
+          size="small"
+          icon={<ReloadOutlined />}
+          loading={loading}
+          onClick={() => void loadSessions(1).then(onRefresh)}
+        >
           刷新
         </Button>
       </div>
-      <List
-        dataSource={sessions}
-        renderItem={(session) => (
-          <List.Item
-            className={styles.sessionItem}
-            actions={[
+      <div className={styles.dataCardGrid}>
+        {sessionItems.map((session) => (
+          <article
+            key={session.sessionId}
+            className={`${styles.dataCard} ${styles.sessionCard}`}
+            onClick={() => onOpenSession?.(session)}
+          >
+            <div className={styles.dataCardHeader}>
+              <Typography.Text strong ellipsis={{ tooltip: session.sessionName }}>
+                {session.sessionName}
+              </Typography.Text>
+              {session.taskId ? <Tag bordered={false}>任务会话</Tag> : null}
+            </div>
+            <Typography.Paragraph className={styles.dataCardDescription} ellipsis={{ rows: 2 }}>
+              {session.sessionContent || '暂无会话摘要'}
+            </Typography.Paragraph>
+            <div className={styles.dataCardFooter}>
+              <Tag bordered={false}>{session.fileCount || 0} 文件</Tag>
               <Button
-                key="open"
                 type="link"
                 size="small"
                 icon={<MessageOutlined />}
@@ -47,23 +125,14 @@ const ProjectSessionList: React.FC<Props> = ({ sessions, loading, onRefresh, onO
                 }}
               >
                 打开会话
-              </Button>,
-            ]}
-            onClick={() => onOpenSession?.(session)}
-          >
-            <List.Item.Meta
-              title={
-                <Space size={8}>
-                  <span>{session.sessionName}</span>
-                  {session.taskId ? <Tag bordered={false}>任务会话</Tag> : null}
-                </Space>
-              }
-              description={session.sessionContent || '暂无会话摘要'}
-            />
-            <Tag bordered={false}>{session.fileCount || 0} 文件</Tag>
-          </List.Item>
-        )}
-      />
+              </Button>
+            </div>
+          </article>
+        ))}
+      </div>
+      <div ref={sentinelRef} className={styles.loadMoreSentinel}>
+        {loadingMore ? <Spin size="small" /> : null}
+      </div>
     </div>
   );
 };

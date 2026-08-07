@@ -42,6 +42,8 @@ export interface ProjectSession {
   matchedEmployeeName?: string;
   matchedEmployeeMatchField?: 'NAME' | 'DESCRIPTION';
   matchedEmployeeMatchText?: string;
+  // 从项目任务模板执行入口进入聊天时，携带模板生成的首条消息并自动发送。
+  initialChatContent?: string;
 }
 
 export interface ProjectSpace {

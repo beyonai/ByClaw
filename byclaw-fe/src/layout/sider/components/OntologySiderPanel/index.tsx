@@ -229,7 +229,11 @@ const StaticTablePanel = ({
  * 本体 sider 面板：直接展示当前数字员工已安装的视图 / 对象节点。
  * 单击节点名看详情、双击引用到对话，三点菜单支持详情/卸载。
  */
-const OntologySiderPanel: React.FC = () => {
+interface OntologySiderPanelProps {
+  embedded?: boolean;
+}
+
+const OntologySiderPanel: React.FC<OntologySiderPanelProps> = ({ embedded = false }) => {
   const intl = useIntl();
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -420,7 +424,11 @@ const OntologySiderPanel: React.FC = () => {
           onReference={() => quoteLeafToChat(leaf)}
           onClose={() => clearDetailPanel?.()}
         />,
-        { width: 350 }
+        {
+          width: 350,
+          tabKey: `ontology:${leaf.resourceId || leaf.viewCode || leaf.objectCode || leaf.code}`,
+          title: leaf.name || leaf.resourceName || leaf.objectName,
+        }
       );
     },
     [clearDetailPanel, quoteLeafToChat, setDetailPanel]
@@ -436,7 +444,7 @@ const OntologySiderPanel: React.FC = () => {
           rowKey={rowKey}
           onClose={() => clearDetailPanel?.()}
         />,
-        { width }
+        { width, tabKey: `ontology-table:${title}`, title }
       );
     },
     [clearDetailPanel, setDetailPanel]
@@ -734,23 +742,27 @@ const OntologySiderPanel: React.FC = () => {
 
   return (
     <div className={`${chromeStyles.container} ${chromeStyles.ontologySiderContainer}`}>
-      <ActiveSiderAgentBar agent={activeSiderAgent} />
-      <div
-        className={chromeStyles.router}
-        onClick={() =>
-          navigate(
-            isOntologyCenterPage ? { pathname: '/chat' } : '/ontologyCenter',
-            isOntologyCenterPage ? { state: { keepSiderActiveKey: 'ontology' } } : undefined
-          )
-        }
-      >
-        <AntdIcon type="icon-a-Boxhezioutline" />
-        <span className={chromeStyles.middle}>{intl.formatMessage({ id: 'sider.ontologyCenter' })}</span>
-        <AntdIcon
-          type={isOntologyCenterPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
-          className={chromeStyles.routerIcon}
-        />
-      </div>
+      {!embedded && (
+        <>
+          <ActiveSiderAgentBar agent={activeSiderAgent} />
+          <div
+            className={chromeStyles.router}
+            onClick={() =>
+              navigate(
+                isOntologyCenterPage ? { pathname: '/chat' } : '/ontologyCenter',
+                isOntologyCenterPage ? { state: { keepSiderActiveKey: 'ontology' } } : undefined
+              )
+            }
+          >
+            <AntdIcon type="icon-a-Boxhezioutline" />
+            <span className={chromeStyles.middle}>{intl.formatMessage({ id: 'sider.ontologyCenter' })}</span>
+            <AntdIcon
+              type={isOntologyCenterPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
+              className={chromeStyles.routerIcon}
+            />
+          </div>
+        </>
+      )}
 
       <Input
         className={styles.search}

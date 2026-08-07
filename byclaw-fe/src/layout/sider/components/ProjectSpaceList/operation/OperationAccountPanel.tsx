@@ -1,6 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Empty, Modal, Segmented, Spin, Tag } from 'antd';
-import { ArrowLeftOutlined, DeleteOutlined, EditOutlined, LoginOutlined, PlusOutlined } from '@ant-design/icons';
+import { Button, Empty, Modal, Select, Segmented, Spin, Tag } from 'antd';
+import {
+  ArrowLeftOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  LoginOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import OperationAccountFormModal from './OperationAccountFormModal';
 import type {
@@ -25,6 +32,11 @@ export interface OperationAccountPanelProps {
   // 由详情页“新增账号”菜单触发时，账号面板打开后自动显示新增表单。
   openCreateModal?: boolean;
   onCreateModalOpened?: () => void;
+  onRefresh?: () => void | Promise<void>;
+  // 项目大详情使用紧凑模式，标题说明和筛选栏收拢到同一行；小详情继续使用完整面板布局。
+  compact?: boolean;
+  toolbarPlacement?: 'inline' | 'external';
+  onToolbarChange?: (toolbar: React.ReactNode | null) => void;
   onBack?: () => void;
   onAccountClick?: (account: OperationAccount) => void;
   onLogin?: (account: OperationAccount) => void | Promise<void>;
@@ -54,6 +66,10 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   deletingAccountId,
   openCreateModal = false,
   onCreateModalOpened,
+  onRefresh,
+  compact = false,
+  toolbarPlacement = 'inline',
+  onToolbarChange,
   onBack,
   onAccountClick,
   onLogin,
@@ -109,6 +125,49 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   );
   // 没有管理权限或没有保存回调时，隐藏新增和编辑入口，防止出现不可完成的操作。
   const canSaveAccount = canManage && !!onSaveAccount;
+  const openAddAccountModal = useCallback(() => {
+    if (!canSaveAccount) return;
+    setEditingAccount(null);
+    setAccountFormOpen(true);
+  }, [canSaveAccount]);
+
+  useEffect(() => {
+    if (!onToolbarChange || toolbarPlacement !== 'external') return;
+    // 大详情把账号筛选和操作按钮提升到页面顶部，与“新建会话”保持同一工具栏。
+    onToolbarChange(
+      <div className={styles.accountPanelActions}>
+        <Select
+          className={styles.accountCompactFilter}
+          value={activePlatform}
+          options={filterOptions}
+          onChange={(value) => setActivePlatform(String(value))}
+        />
+        {onRefresh && (
+          <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void onRefresh()}>
+            {intl.formatMessage({ id: 'projectSpace.detail.common.refresh' })}
+          </Button>
+        )}
+        {canSaveAccount && (
+          // 大详情页的新增账号按钮与需求 Tab 的新增需求按钮使用统一的次级按钮样式。
+          <Button icon={<PlusOutlined />} onClick={openAddAccountModal}>
+            {t('add')}
+          </Button>
+        )}
+      </div>
+    );
+    return () => onToolbarChange(null);
+  }, [
+    activePlatform,
+    canSaveAccount,
+    filterOptions,
+    intl,
+    loading,
+    onRefresh,
+    onToolbarChange,
+    openAddAccountModal,
+    t,
+    toolbarPlacement,
+  ]);
 
   useEffect(() => {
     // 后端刷新平台列表后，若当前筛选平台已失效则回退到全部账号。
@@ -117,12 +176,6 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
       setActivePlatform('all');
     }
   }, [activePlatform, availablePlatformOptions]);
-
-  const openAddAccountModal = useCallback(() => {
-    if (!canSaveAccount) return;
-    setEditingAccount(null);
-    setAccountFormOpen(true);
-  }, [canSaveAccount]);
 
   useEffect(() => {
     if (!openCreateModal || !canSaveAccount) return;
@@ -178,7 +231,11 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   );
 
   return (
-    <div className={styles.accountPanel}>
+    <div
+      className={`${styles.accountPanel} ${compact ? styles.accountPanelCompact : ''} ${
+        toolbarPlacement === 'external' ? styles.accountPanelCompactExternal : ''
+      }`}
+    >
       <header className={styles.accountPanelHeader}>
         <div className={styles.accountPanelHeading}>
           {onBack && (
@@ -195,10 +252,27 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
             <p>{t('description')}</p>
           </div>
         </div>
-        {canSaveAccount && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={openAddAccountModal}>
-            {t('add')}
-          </Button>
+        {toolbarPlacement === 'inline' && (
+          <div className={styles.accountPanelActions}>
+            {compact && (
+              <Select
+                className={styles.accountCompactFilter}
+                value={activePlatform}
+                options={filterOptions}
+                onChange={(value) => setActivePlatform(String(value))}
+              />
+            )}
+            {onRefresh && (
+              <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void onRefresh()}>
+                {intl.formatMessage({ id: 'projectSpace.detail.common.refresh' })}
+              </Button>
+            )}
+            {canSaveAccount && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={openAddAccountModal}>
+                {t('add')}
+              </Button>
+            )}
+          </div>
         )}
       </header>
 

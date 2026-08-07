@@ -111,7 +111,7 @@ const ProjectDefaultAgentPanel: React.FC<Props> = ({ projectId, active }) => {
         ))}
       </div>
       <div className={styles.footer}>
-        <Button className={styles.saveButton} type="primary" loading={saving} onClick={handleSave}>
+        <Button className={styles.saveButton} size="small" type="primary" loading={saving} onClick={handleSave}>
           {t('projectSpace.defaultAgent.save')}
         </Button>
       </div>

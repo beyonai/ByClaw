@@ -32,6 +32,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.IntegrationSuiteDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.DefaultAgentDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.TesterConfigDTO;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectObjectFile;
+import com.iwhalecloud.byai.manager.entity.devloop.OperationTaskTemplate;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -555,6 +556,18 @@ public class DevloopController {
             return ResponseUtil.failRes(I18nUtil.get("devloop.dws.token.required"));
         }
         return applicationService.saveDwsToken(token);
+    }
+
+    /** 查询启用的运营任务模板卡片，可按模板类型筛选。 */
+    @PostMapping("/operation/task-template/list")
+    public ResponseUtil<List<OperationTaskTemplate>> listOperationTaskTemplates(@RequestBody Map<String, Object> params) {
+        return applicationService.listOperationTaskTemplates(MapParamUtil.getStringValue(params, "templateType"));
+    }
+
+    /** 查询单个运营任务模板详情。 */
+    @PostMapping("/operation/task-template/get")
+    public ResponseUtil<OperationTaskTemplate> getOperationTaskTemplate(@RequestBody Map<String, Object> params) {
+        return applicationService.getOperationTaskTemplate(MapParamUtil.getLongValue(params, "templateId"));
     }
 
     /** 创建运营需求，写入扫描源表并通过运营 source_type 与研发渠道隔离。 */

@@ -1775,6 +1775,32 @@
   }
 }
 
+// 待开始任务默认只展示状态；悬停卡片时再用执行按钮替换状态标签，避免操作项长期占位。
+.detailTaskCardActions .detailRequirementStartAction {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 0.2s;
+}
+
+.detailTaskCard:hover .detailTaskCardActions .detailRequirementStartAction,
+.detailTaskCard:focus-within .detailTaskCardActions .detailRequirementStartAction {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.detailTaskCard:hover .detailPendingTaskStatusTag,
+.detailTaskCard:focus-within .detailPendingTaskStatusTag {
+  opacity: 0;
+}
+
+.detailPendingTaskStatusTag {
+  transition: opacity 0.2s;
+}
+
 .detailRequirementStartedAction {
   // 已启动代表不能重复操作，使用浅灰禁用态弱化可点击感。
   // 状态标签不拦截卡片点击，用户点击标签区域时仍可打开需求详情。
@@ -2039,9 +2065,9 @@
 
 // 任务状态标签与任务视图使用同一状态层级，只在列表内采用紧凑尺寸。
 .detailTaskStatusPending {
-  // 待开始改为浅蓝灰，和任务卡片选中时的中性灰底色拉开层级。
-  color: #52667d;
-  background: #e8eff8;
+  // 待开始使用暖色提示，和进行中的蓝色状态明确区分。
+  color: #ad6800;
+  background: #fff3d6;
 }
 
 .detailTaskStatusRunning {

@@ -92,12 +92,29 @@ const Chat = () => {
   }, []);
 
   const locationProjectContext = React.useMemo(() => getProjectChatContext(location.state), [location.state]);
+  const autoSendContent = (location.state as { autoSendContent?: string } | null)?.autoSendContent;
+  const targetSessionId = (location.state as { sessionId?: string | number } | null)?.sessionId;
+  const autoSendKeyRef = React.useRef<string | undefined>(undefined);
   const [projectChatContext, setProjectChatContext] = React.useState<ProjectChatContext>(locationProjectContext);
   const pendingSessionProjectContextRef = React.useRef<ProjectChatContext | undefined>(undefined);
   const sessionProjectContextMapRef = React.useRef<Record<string, ProjectChatContext>>({});
   const [sessionProjectContext, setSessionProjectContext] = React.useState<ProjectChatContext>(() =>
     sessionId ? locationProjectContext : {}
   );
+
+  React.useEffect(() => {
+    if (!sessionId || !targetSessionId || `${sessionId}` !== `${targetSessionId}` || !autoSendContent?.trim()) {
+      return undefined;
+    }
+    const sendKey = `${sessionId}:${autoSendContent}`;
+    if (autoSendKeyRef.current === sendKey) return undefined;
+    autoSendKeyRef.current = sendKey;
+    // 等聊天输入组件完成挂载后再触发，确保事件不会早于输入框监听器注册。
+    const timer = window.setTimeout(() => {
+      EventEmitter.emit('queryInput-set-value-and-send', autoSendContent);
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [EventEmitter, autoSendContent, sessionId, targetSessionId]);
 
   // 沉淀为需求:入口挂在数字员工回答下方(MoreActions),点击后带该条消息发事件到此处打开弹窗。
   // 弹窗需要项目上下文与仓库列表,由聊天页持有,避免逐层透传到深层消息组件。

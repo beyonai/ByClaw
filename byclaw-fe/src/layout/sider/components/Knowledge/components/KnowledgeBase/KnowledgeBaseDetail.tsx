@@ -641,7 +641,11 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
           loading={options.loading}
           onClose={() => clearDetailPanel?.()}
         />,
-        { overlay: true }
+        {
+          overlay: true,
+          tabKey: `knowledge-file:${dataset.resourceId}:${item.id || item.collectionId || fileName}`,
+          title: fileName,
+        }
       );
     },
     [clearDetailPanel, setDetailPanel]

@@ -22,11 +22,15 @@ export const DEFAULT_PROJECT_TYPE_OPTION: { label: string; value: ProjectType } 
 
 // 独立项目详情页使用与侧栏详情一致的 Tab 标识，标签文本统一由消费组件国际化。
 export const PROJECT_DETAIL_SECTIONS = [
-  { key: 'sessions', labelId: 'projectSpace.detail.tabs.sessions' },
   { key: 'tasks', labelId: 'projectSpace.detail.tabs.tasks' },
   { key: 'resources', labelId: 'projectSpace.detail.tabs.resources' },
-  { key: 'members', labelId: 'projectSpace.detail.tabs.members' },
   { key: 'requirements', labelId: 'projectSpace.detail.tabs.requirements' },
+  { key: 'digitalAgents', labelId: 'projectSpace.detail.tabs.digitalAgents' },
+  { key: 'members', labelId: 'projectSpace.detail.tabs.members' },
+  { key: 'integration', labelId: 'projectSpace.detail.tabs.integration' },
+  { key: 'accounts', labelId: 'projectSpace.detail.tabs.accounts' },
+  // 非运营项目仍保留会话页，但按产品顺序放在业务管理页签之后。
+  { key: 'sessions', labelId: 'projectSpace.detail.tabs.sessions' },
 ] as const;
 
 export type ProjectDetailSection = (typeof PROJECT_DETAIL_SECTIONS)[number]['key'];

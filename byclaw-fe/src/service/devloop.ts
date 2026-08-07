@@ -141,6 +141,19 @@ export type DevloopProjectSpaceFile = {
   shareLink?: string | null;
 };
 
+export type OperationTaskTemplateType = 'collect' | 'knowledge' | 'content' | 'publish' | 'analyze';
+
+export type OperationTaskTemplate = {
+  templateId: number;
+  templateType: OperationTaskTemplateType;
+  templateName: string;
+  description?: string;
+  icon?: string;
+  config?: string | Record<string, unknown>;
+  sortNo?: number;
+  isBuiltin?: string;
+};
+
 // 仓库类型:workspace 工作区(单个,承载项目上下文/产出) / code 代码仓库(可多个)。存量数据默认 code。
 export type ProjectRepoType = 'workspace' | 'code';
 
@@ -297,7 +310,7 @@ export const updateManualRequirement = (data: Omit<ManualRequirementPayload, 'pr
 export const deleteManualRequirement = (itemId: number) =>
   POST<any>('/byaiService/devloop/requirement/delete', { itemId });
 
-// 运营需求复用扫描源表，三类需求通过 source_type 区分，差异化字段统一收敛到 config。
+// 运营需求复用扫描源表，四类需求通过 source_type 区分，差异化执行字段统一收敛到 config。
 export type OperationRequirementPayload = {
   itemId?: number;
   projectId?: number;
@@ -305,7 +318,7 @@ export type OperationRequirementPayload = {
 
   /** 运营需求描述，对应 byai_scan_source.source_description。 */
   sourceDescription?: string;
-  operationType: 'collect' | 'publish' | 'analyze';
+  operationType: 'collect' | 'knowledge' | 'publish' | 'analyze';
   assignee?: string | number;
   dueTime?: string;
   config?: Record<string, any>;
@@ -335,12 +348,36 @@ export const getOperationRequirement = (itemId: number) =>
 export const deleteOperationRequirement = (itemId: number) =>
   POST<void>('/byaiService/devloop/requirement/operation/delete', { itemId });
 
+// 聊天输入框与运营需求启动入口共用同一套任务模板目录和详情接口。
+export const listOperationTaskTemplates = (templateType?: OperationTaskTemplateType) =>
+  POST<OperationTaskTemplate[]>('/byaiService/devloop/operation/task-template/list', {
+    templateType: templateType || undefined,
+  });
+
+export const getOperationTaskTemplate = (templateId: number) =>
+  POST<OperationTaskTemplate>('/byaiService/devloop/operation/task-template/get', { templateId });
+
+/** 按当前选择的知识库查询可用本体对象。 */
+export const queryObjectsByKnowledge = (data: {
+  kbResourceId: string | number;
+  kbDirectories?: string[];
+  objectName?: string;
+  pageIndex?: number;
+  pageSize?: number;
+}) => POST<any>('/byaiService/devloop/operation/queryObjectsByKnowledge', data);
+
+/** 查询会话或项目关联的本体对象文件；未传 sessionId 时按项目维度查询。 */
+export const listProjectObjectFiles = (data: { projectId?: number | string; sessionId?: number | string }) =>
+  POST<any>('/byaiService/devloop/operation/listProjectObjectFiles', data);
+
 // 运营需求启动后拆解为会话任务，taskId 与 byai_session.session_id 保持一致。
 export type OperationTaskStartItem = {
   title: string;
   description?: string;
   assignee: string | number;
   dueTime?: string;
+  templateId?: number;
+  config?: Record<string, unknown>;
 };
 
 export const startOperationRequirement = (data: { requirementId: number; tasks: OperationTaskStartItem[] }) =>
@@ -364,6 +401,10 @@ export const executeOperationTask = (data: {
   taskId: number;
   assigneeIds?: Array<string | number>;
   agentIds?: Array<string | number>;
+
+  /** 执行前由任务模板页补充的模板和结构化配置。 */
+  templateId?: number;
+  config?: Record<string, unknown>;
 }) => POST<{ taskId: number; sessionId: number }>('/byaiService/devloop/operation/task/execute', data);
 
 // 运营账号由项目维度独立维护，新增需求表单和账号管理大面板共用此数据源。

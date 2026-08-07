@@ -58,7 +58,6 @@ import com.iwhalecloud.byai.state.domain.session.enums.UserRole;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
-import com.iwhalecloud.byai.state.infrastructure.utils.ChatUtils;
 import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
 import com.iwhalecloud.byai.common.constants.chat.ConversationObjectType;
 import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
@@ -546,7 +545,8 @@ public class AssistantChatService {
 
         String chatContent = assistantChatDto.getChatContent();
         sessionMembersDto
-            .setSessionName(ChatUtils.truncateString(chatContent.replaceAll("\\{\\{[^}]*+\\}\\}", ""), 10));
+            // 任务启动链路只需要截断会话标题，使用已有通用工具避免引入聊天基础设施类加载依赖。
+            .setSessionName(StringUtils.substring(chatContent.replaceAll("\\{\\{[^}]*+\\}\\}", ""), 0, 10));
         sessionMembersDto.setCreatorId(CurrentUserHolder.getCurrentUserId());
         sessionMembersDto.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
         sessionMembersDto.setSessionType(SessionType.H_AS.getCode());

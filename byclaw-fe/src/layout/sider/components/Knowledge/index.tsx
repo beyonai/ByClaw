@@ -8,6 +8,7 @@ import ActiveSiderAgentBar, { useActiveSiderAgent } from '@/layout/sider/compone
 
 interface Props {
   editable?: boolean;
+  embedded?: boolean;
   style?: React.CSSProperties;
   onSelect?: (item: any, dragType: IDragType) => void;
   keyword?: string;
@@ -16,37 +17,31 @@ interface Props {
 }
 
 const DataCenter: React.FC<Props> = (props) => {
-  const { style, onSelect, editable = true, keyword, agentId, agentIds } = props;
+  const { style, onSelect, editable = true, embedded = false, keyword, agentId, agentIds } = props;
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const intl = useIntl();
 
   const activeSiderAgent = useActiveSiderAgent();
   const isKnowledgeCenterPage = pathname.startsWith('/knowledgeCenter');
+  const knowledgeCenterTarget = isKnowledgeCenterPage ? { pathname: '/chat' } : '/knowledgeCenter';
+  const knowledgeCenterState = isKnowledgeCenterPage ? { state: { keepSiderActiveKey: 'knowledge' } } : undefined;
 
   return (
     <div style={style} className={styles.container}>
-      <ActiveSiderAgentBar agent={activeSiderAgent} />
-      <div
-        className={styles.router}
-        onClick={() =>
-          navigate(
-            isKnowledgeCenterPage
-              ? {
-                pathname: '/chat',
-              }
-              : '/knowledgeCenter',
-            isKnowledgeCenterPage ? { state: { keepSiderActiveKey: 'knowledge' } } : undefined
-          )
-        }
-      >
-        <AntdIcon type="icon-zhishi" />
-        <span className={styles.middle}>{intl.formatMessage({ id: 'sider.knowledgeCenter' })}</span>
-        <AntdIcon
-          type={isKnowledgeCenterPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
-          style={{ fontSize: 16, marginLeft: 'auto' }}
-        />
-      </div>
+      {!embedded && (
+        <>
+          <ActiveSiderAgentBar agent={activeSiderAgent} />
+          <div className={styles.router} onClick={() => navigate(knowledgeCenterTarget, knowledgeCenterState)}>
+            <AntdIcon type="icon-zhishi" />
+            <span className={styles.middle}>{intl.formatMessage({ id: 'sider.knowledgeCenter' })}</span>
+            <AntdIcon
+              type={isKnowledgeCenterPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
+              style={{ fontSize: 16, marginLeft: 'auto' }}
+            />
+          </div>
+        </>
+      )}
       <div className={styles.tabsWrapper}>
         <KnowledgeBaseTab
           editable={editable}
@@ -55,6 +50,7 @@ const DataCenter: React.FC<Props> = (props) => {
           agentId={agentId}
           agentIds={agentIds}
           activeAgentResourceId={activeSiderAgent.resourceId}
+          detailInPanel={embedded}
         />
       </div>
     </div>
