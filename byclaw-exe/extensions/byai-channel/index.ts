@@ -14,10 +14,8 @@ import { registerContextSnapshotHook } from "./src/context-snapshot.js";
 import { registerByaiSessionStatusRoute } from "./src/session-status-route.js";
 import { registerRemoteTaskWatchService } from "./src/remote-task-watch.js";
 import { setByaiRuntime } from "./src/runtime.js";
-import {
-  markActiveSdkRequestSubagentEnded,
-  markActiveSdkRequestSubagentSpawned,
-} from "./src/session-context.js";
+import { reportNativeChildRunTerminal } from "./src/native-child-run.js";
+import { markActiveSdkRequestSubagentSpawned } from "./src/session-context.js";
 import {
   cancelActiveSdkCompletionCheck,
   scheduleActiveSdkCompletionCheck,
@@ -89,14 +87,23 @@ function registerFull(api: OpenClawPluginApi) {
     cancelActiveSdkCompletionCheck(request.sessionKey);
   });
   api.on("subagent_ended", (event) => {
-    const request = markActiveSdkRequestSubagentEnded(event?.targetSessionKey);
-    if (!request) {
+    reportNativeChildRunTerminal(api, {
+      childRunId: event?.runId,
+      childSessionKey: event?.targetSessionKey,
+      source: "subagent_ended",
+    });
+  });
+  // 较新核才有的每 run 一次终态信号，且早于 announce 投递。老核不认识该 hook 名会 warn 并
+  // 忽略注册，判定不依赖它——终态事实同样能从 child lifecycle 与 agent_end 抵达。
+  api.on("subagent_progress", (event) => {
+    if (event?.phase !== "ended") {
       return;
     }
-    api.logger.info(
-      `[byai-channel] native subagent ended: requester=${request.sessionKey} child=${event?.targetSessionKey ?? ""} rootLifecyclePhase=${request.rootLifecyclePhase ?? ""} awaitingFollowup=${String(request.awaitingFollowup)}`,
-    );
-    scheduleActiveSdkCompletionCheck(api, request.sessionKey, "subagent_ended");
+    reportNativeChildRunTerminal(api, {
+      childRunId: event.runId,
+      childSessionKey: event.childSessionKey,
+      source: "subagent_progress",
+    });
   });
   startCronNextRunTimeRedisSync();
   api.on("cron_changed", (event) => {

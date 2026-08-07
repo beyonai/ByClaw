@@ -17,12 +17,12 @@ import {
   registerAgentRunEndPromise,
 } from "./session-context";
 import { appendByclawAssistantContextDelta } from "./chat-context-store.js";
-import { registerPendingMessageToolSend } from "./pending-message-tool.js";
 import {
   cancelActiveSdkCompletionCheck,
   scheduleActiveSdkCompletionCheck,
 } from "./sdk-session-completion.js";
 import { isOpenClawContextOverflowDispatchError } from "./dispatch-error.js";
+import { reportNativeChildRunTerminal } from "./native-child-run.js";
 import {
   resolveAssistantDisplayStream,
   resolveAssistantEventKind,
@@ -38,9 +38,11 @@ import {
   emitIncrementalText,
   generateRandomId,
   getAgentNameById,
+  getIncrementalTextSnapshot,
   normalizeReasoningPreviewText,
   rememberIncrementalTextSnapshot,
 } from "./utils";
+import { recordStreamedAnswerSegment } from "./answer-text-ledger.js";
 import {
   buildCompactionNoticeText,
   buildThinkingEndText,
@@ -92,12 +94,13 @@ async function emitChunkGenByBaiyingCallTool(event: AgentEvent, request: ActiveS
   toBeEmittedChunkAfterBaiyingCallTool = undefined;
 }
 
+/** 返回是否真的推给了前端，供答案账本判断该段是否已可见（见 answer-text-ledger.ts）。 */
 async function emitSdkChunk(
   request: ActiveSdkRequest,
   text: string,
   options?: EmitOptions,
-): Promise<void> {
-  await emitSdkChunkTracked(request.sessionKey, {
+): Promise<boolean> {
+  return await emitSdkChunkTracked(request.sessionKey, {
     emitter: resolveSdkEmitter(request.accountId),
     sessionId: request.sessionId,
     traceId: request.traceId,
@@ -163,14 +166,6 @@ async function handleToolEvent(
   if (phase === "start") {
     if (toolCallId && data?.args && typeof data.args === "object") {
       toolStartArgsByCallId.set(toolCallId, data.args);
-    }
-    // message 工具的 action=send 是唯一"无 assistant 流、必须靠 outbound.sendText 投递"的
-    // 可见内容。登记一条待投递，sendText 命中即 emit、未命中即抑制（agent 回复回声）。
-    if (data?.name === "message") {
-      const sendText = extractMessageToolSendText(data?.args);
-      if (sendText) {
-        registerPendingMessageToolSend(request.sessionKey, { toolCallId, text: sendText });
-      }
     }
     const title = buildToolStartTitle(request, data);
     await emitSdkChunk(request, title, {
@@ -290,7 +285,19 @@ async function handleAssistantEvent(
       agentId: request.laneMetadata?.agentId ?? event.agentId,
       agentName: request.laneMetadata?.agentName,
     });
-    await emitSdkChunk(request, answerDelta, answerOptions);
+    const emitted = await emitSdkChunk(request, answerDelta, answerOptions);
+    // 已推给前端的段落才记账（见 answer-text-ledger.ts），子会话也记：它的文本走
+    // REASONING_LOG_DELTA 落在思考通道，位置不同但已经可见，core 事后经 sendText 重投同一
+    // 份原文就是重复。没推成（缺 emitter）则不记，否则会抑制一段从未到达客户端的文本。
+    // 记的是流式缓冲的当前段落全文，段落切换时缓冲已被替换，天然对齐 core 只投最后一段。
+    if (emitted) {
+      recordStreamedAnswerSegment({
+        sessionKey: request.sessionKey,
+        runId: event.runId,
+        segmentText: getIncrementalTextSnapshot(answerStreamKey),
+        isChildSession,
+      });
+    }
   };
   if (explicitDelta && !isReplacement) {
     if (cumulativeText) {
@@ -307,8 +314,8 @@ async function handleAssistantEvent(
     await emitAnswerDelta(explicitDelta);
     return;
   }
-  // assistant 流是权威可见源，按 runId 做简单前缀增量即可（sendText 的去重改由
-  // message tool 事件驱动，不再和 assistant 流抢同一缓冲）。
+  // assistant 流是权威可见源，按 runId 做简单前缀增量即可（sendText 的去重由答案账本
+  // 承担，见 answer-text-ledger.ts，不和 assistant 流抢同一缓冲）。
   await emitIncrementalText({
     key: answerStreamKey,
     rawText: text,
@@ -360,7 +367,19 @@ async function handleLifecycleEvent(
 ) {
   const { data } = event;
   const phase = typeof data?.phase === "string" ? data.phase : undefined;
-  if (!isRootSessionKey(sessionKey) || !phase) {
+  if (!phase) {
+    return;
+  }
+  if (!isRootSessionKey(sessionKey)) {
+    // child run 的终态只喂 native subagent 台账，不碰 root 的 lifecycle 投影与流式收尾。
+    // 这是 announce 之前就能拿到的终态事实，缺了它就只能等 core 推迟发出的 subagent_ended。
+    if (phase === "end" || phase === "error") {
+      reportNativeChildRunTerminal(api, {
+        childRunId: event.runId,
+        childSessionKey: sessionKey,
+        source: "child_lifecycle",
+      });
+    }
     return;
   }
   if (phase === "fallback_step") {
@@ -579,22 +598,6 @@ function extractToolStartArgs(data: {
     return "";
   }
   return JSON.stringify(data.args, null, 2);
-}
-
-// 从 message 工具 args 提取要发送给用户的可见文本。字段优先级对齐 core message-tool
-// 的清洗顺序（text/content/message/caption）。
-function extractMessageToolSendText(args: unknown): string {
-  if (!args || typeof args !== "object") {
-    return "";
-  }
-  const record = args as Record<string, unknown>;
-  for (const field of ["text", "content", "message", "caption"]) {
-    const value = stringValue(record[field]);
-    if (value.trim()) {
-      return value;
-    }
-  }
-  return "";
 }
 
 function extractToolResultText(result: unknown): string {

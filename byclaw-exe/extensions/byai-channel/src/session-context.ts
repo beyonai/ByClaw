@@ -2,7 +2,7 @@ import path from "node:path";
 import { EmitOptions, EventType, type GatewayDataEmitter } from "@byclaw/by-framework";
 import type { ByaiInboundMessage, ByaiLaneMetadata, Language } from "./types.js";
 import { isSessionDispatchBusy } from "./session-dispatch-gate.js";
-import { clearPendingMessageToolSends } from "./pending-message-tool.js";
+import { clearDeliveredAnswerText } from "./answer-text-ledger.js";
 import { generateRandomId } from "./utils.js";
 import { buildContextOverflowText, resolveInboundLanguage } from "./i18n.js";
 import { emitByaiSdkFirstResponse } from "./diagnostics.js";
@@ -114,6 +114,48 @@ export interface ByclawChatContextSnapshot {
     truncated: boolean;
 }
 
+/** 一个 native subagent run 在本 channel 侧的终态台账条目。 */
+export interface NativeChildRunRecord {
+  childSessionKey: string;
+  spawnedAt: number;
+  /**
+   * 终态时刻（epoch ms）；undefined 表示该 run 仍在跑。首个抵达的终态信号写入，
+   * 之后同 run 的其它通道信号只是去重，不再触发状态迁移。
+   */
+  terminalAt?: number;
+  /** 报过终态的通道，仅用于日志与回归诊断，不参与完成判定。 */
+  terminalSources: Set<NativeChildRunTerminalSource>;
+  /**
+   * 本 run 的 announce 续跑是否已被观测到（root lifecycle start 的 runId 归属到本 run）。
+   * 并发 subagent 各有独立 announce 续跑，记账必须按 run 归属；否则先到的那个续跑会被
+   * 误记到后终态的 run 头上，让完成门在它的续跑还没开始时就放行，丢掉后续全部输出。
+   */
+  announceRunObserved: boolean;
+}
+
+/**
+ * direct-path announce 续跑的 runId 由 core 用 announce 幂等键充当：
+ * `announce:v1:<childSessionKey>:<childRunId>`（排队变体再追加 `:agent-loop`）。
+ * 见 `src/agents/subagent-announce-delivery.ts` 的 directIdempotencyKey 与
+ * `src/gateway/server-methods/agent-request-preflight.ts` 的 `runId = request.idempotencyKey`。
+ * 这里按前缀归属而非解析字段，格式变化时归属失败退回等待兜底，不会误记到别的 run。
+ */
+function buildAnnounceRunIdPrefix(record: NativeChildRunRecord, childRunId: string): string {
+  return `announce:v1:${record.childSessionKey}:${childRunId}`;
+}
+
+/**
+ * child run 终态可能从四个互不等待的通道抵达，顺序不可控：
+ * - `child_lifecycle` / `agent_end` 在 child run 收尾时发出，早于 announce 投递；
+ * - `subagent_ended` 在 announce 路径下被 core 推迟到投递记账之后（可能最后到）；
+ * - `subagent_progress` 是较新核才有的每 run 一次信号，缺失时不影响判定。
+ */
+export type NativeChildRunTerminalSource =
+  | "child_lifecycle"
+  | "agent_end"
+  | "subagent_ended"
+  | "subagent_progress";
+
 export interface ActiveSdkRequest {
   accountId: string;
   sessionKey: string;
@@ -124,12 +166,17 @@ export interface ActiveSdkRequest {
   firstAnswerDeltaAt?: number;
   firstVisibleResponseAt?: number;
   boundRunIds: Set<string>;
-  pendingChildSessionKeys: Set<string>;
+  /**
+   * native subagent 的权威台账，按 child runId 索引。child sessionKey 会被 core 跨代复用
+   * （newerGenerationOwnsSession），只有 runId 能区分迟到的旧代终态。是否「还有 child 在跑」
+   * 一律由 hasPendingNativeChildRun 从本表派生，不另存一份 child session 集合以免漂移。
+   */
+  nativeChildRuns: Map<string, NativeChildRunRecord>;
   /**
    * 本 request 派出、尚未回灌结果的委派工作（RemoteAgent 异步任务）tool_call_id 集合。
    * 由 baiying_call 返回 status=DELEGATED_TASK_STATUS 时登记（见 agent-event.handleToolEvent），
    * 由 dispatchRemoteTaskFollowup 成功回灌后消除。非空表示「任务尚未结束，等待所有委派任务完成」，
-   * 完成门据此挂住，避免委派结果回来前前端流被提前收尾。与 pendingChildSessionKeys（原生 subagent）
+   * 完成门据此挂住，避免委派结果回来前前端流被提前收尾。与 nativeChildRuns（原生 subagent）
    * 正交：那是 openclaw subagent，这是 redis 驱动的外部委派。
    */
   delegatedWorkToolCallIds: Set<string>;
@@ -554,13 +601,62 @@ export function buildSdkStateEvent(
     return options?.metadata ? { state, metadata: options.metadata } : state;
 }
 
+/**
+ * 是否还有 native subagent run 未终态。业务合同「所有 subagent 结束」的唯一判据，
+ * 完成门与 abort settle 都读它，避免两处各自维护一份 child 集合而漂移。
+ */
+export function hasPendingNativeChildRun(request: ActiveSdkRequest): boolean {
+    for (const record of request.nativeChildRuns.values()) {
+        if (record.terminalAt === undefined) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** 是否还有 child run 的 announce 续跑没被观测到。 */
+function hasUnobservedAnnounceRun(request: ActiveSdkRequest): boolean {
+    for (const record of request.nativeChildRuns.values()) {
+        if (!record.announceRunObserved) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * 只要还有 child 的 announce 续跑没被观测到，就挂起等待——那是「parent 已就该 child
+ * announce 完毕」的唯一证据。child 终态与每条续跑收尾都要过这道判断：并发 subagent 的
+ * 续跑逐条到来，任何一条结束都不代表其余几条已经跑过。返回是否真的挂起了等待。
+ */
+function armAwaitingAnnounceFollowup(request: ActiveSdkRequest): boolean {
+    if (hasPendingNativeChildRun(request) || !hasUnobservedAnnounceRun(request)) {
+        return false;
+    }
+    request.awaitingFollowup = true;
+    request.awaitingFollowupSince = Date.now();
+    request.followupRunStarted = false;
+    return true;
+}
+
+/** 未终态 child run 占用的 session key，用于清理其派生的 request context 映射。 */
+function listPendingChildSessionKeys(request: ActiveSdkRequest): Set<string> {
+    const keys = new Set<string>();
+    for (const record of request.nativeChildRuns.values()) {
+        if (record.terminalAt === undefined) {
+            keys.add(record.childSessionKey);
+        }
+    }
+    return keys;
+}
+
 export function clearActiveSdkRequestRecord(request: ActiveSdkRequest): void {
   activeSdkRequestsByTarget.delete(buildActiveSdkTargetKey(request.accountId, request.to));
   activeSdkRequestsByTraceId.delete(request.traceId);
   channelRequestContextsBySessionKey.delete(request.sessionKey);
   deleteSharedChannelRequestContextBySessionKey(request.sessionKey);
   activeSdkRequestsBySession.delete(request.sessionKey);
-  for (const childSessionKey of request.pendingChildSessionKeys) {
+  for (const childSessionKey of listPendingChildSessionKeys(request)) {
     channelRequestContextsBySessionKey.delete(childSessionKey);
     deleteSharedChannelRequestContextBySessionKey(childSessionKey);
     activeSdkRequestsByChild.delete(childSessionKey);
@@ -570,8 +666,9 @@ export function clearActiveSdkRequestRecord(request: ActiveSdkRequest): void {
     agentEndResultByRun.delete(runId);
   }
   request.boundRunIds.clear();
+  request.nativeChildRuns.clear();
   sdkEmitterLastChunks.delete(request.sessionKey);
-  clearPendingMessageToolSends(request.sessionKey);
+  clearDeliveredAnswerText(request.sessionKey);
 }
 
 function pruneStaleActiveSdkRequests(now = Date.now()): void {
@@ -621,15 +718,22 @@ export function getLastSdkEmitChunk(runId: string) {
     return sdkEmitterLastChunks.get(runId);
 }
 
+/**
+ * 推一段 chunk 给前端，返回是否真的推出去了。
+ *
+ * 返回值不是装饰：调用方据此决定要不要给答案账本记账（见 answer-text-ledger.ts）。缺
+ * emitter 时这里静默跳过，若调用方仍记账，outbound.sendText 会抑制一段从未到达客户端的
+ * 文本，内容就真丢了。
+ */
 export async function emitSdkChunkTracked(sessionKey: string, params: {
     emitter: GatewayDataEmitter | undefined;
     sessionId: string;
     traceId?: string;
     text: string;
     options?: EmitOptions;
-}): Promise<void> {
+}): Promise<boolean> {
     if (!params.emitter) {
-        return;
+        return false;
     }
     const request = resolveActiveSdkRequestBySessionKey(sessionKey);
     const options = request
@@ -651,6 +755,7 @@ export async function emitSdkChunkTracked(sessionKey: string, params: {
         eventType: options.eventType,
         contentType: options.contentType,
     });
+    return true;
 }
 
 function hasVisibleSdkText(text: string): boolean {
@@ -782,7 +887,7 @@ export function registerActiveSdkRequest(params: {
         traceId: params.traceId,
         createdAt: params.createdAt ?? Date.now(),
         boundRunIds: new Set<string>(),
-        pendingChildSessionKeys: new Set<string>(),
+        nativeChildRuns: new Map<string, NativeChildRunRecord>(),
         delegatedWorkToolCallIds: new Set<string>(),
         pendingOutboundCount: 0,
         awaitingFollowup: false,
@@ -922,7 +1027,7 @@ export function shouldDeferActiveSdkFinal(accountId: string, to: string): boolea
         return false;
     }
     return (
-        request.pendingChildSessionKeys.size > 0 ||
+        hasPendingNativeChildRun(request) ||
         request.awaitingFollowup ||
         request.followupRunStarted
     );
@@ -966,7 +1071,27 @@ export function markActiveSdkRootLifecycleStarted(
         request.deferredForFollowup = true;
         request.followupRunStarted = true;
     }
+    // core 把 subagent_ended 推迟到 announce 投递之后，所以本 channel 常常先看到 announce
+    // 续跑、后看到 child 终态。把续跑按 runId 记到它所属的 child 名下，最后一个 child 终态
+    // 才能分清「我的续跑已经跑过了」和「我的续跑还没开始」，不必为前者空等一个超时窗口。
+    creditAnnounceRunToChildRecord(request, normalizedRunId);
     return request;
+}
+
+/** 把一次 root lifecycle start 归属到它 announce 的那个 child run。 */
+function creditAnnounceRunToChildRecord(
+    request: ActiveSdkRequest,
+    rootRunId: string | null | undefined,
+): void {
+    if (!rootRunId) {
+        return;
+    }
+    for (const [childRunId, record] of request.nativeChildRuns) {
+        if (rootRunId.startsWith(buildAnnounceRunIdPrefix(record, childRunId))) {
+            record.announceRunObserved = true;
+            return;
+        }
+    }
 }
 
 export function markActiveSdkRootLifecycleFinished(
@@ -996,6 +1121,10 @@ export function markActiveSdkRootLifecycleFinished(
     if (!request.pendingDelegatedFollowupRunId) {
         request.awaitingFollowup = false;
         request.followupRunStarted = false;
+        // 并发 subagent 各有一条独立 announce 续跑，本次结束的只是其中一条。剩下的续跑还没
+        // 启动时必须重新挂起等待：否则完成门在这里就放行，其余 announce 的整段输出会在前端
+        // 关流之后才抵达，用户只看到最先 announce 的那条。
+        armAwaitingAnnounceFollowup(request);
     }
     // 2026.6.1 的 overflow 压缩在同一 run 内静默续跑，压缩后不再发新的 lifecycle start，
     // compactionRetryPending 就没有信号来清；而单 run 只压缩一次（overflowRecoveryAttempted
@@ -1191,7 +1320,7 @@ export function markActiveSdkOutboundSent(
  * announce 会在数秒内重启 main；超过此窗口仍未 start，视为 main 不会再续跑（direct+steer
  * 均失败 / 子 agent error 等），强制放行完成门，避免前端流永久不收尾、request 泄漏。
  */
-const AWAITING_FOLLOWUP_TIMEOUT_MS = 45 * 1000;
+const AWAITING_FOLLOWUP_TIMEOUT_MS = 30 * 1000;
 
 /** awaitingFollowup 是否已超过等待窗口（main 续跑迟迟未到）。 */
 function isAwaitingFollowupStale(request: ActiveSdkRequest, now = Date.now()): boolean {
@@ -1221,7 +1350,9 @@ export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boole
     : request.dispatchSettled;
   return Boolean(
     runFinished &&
-      request.pendingChildSessionKeys.size === 0 &&
+      // 业务合同：有 subagent 时必须所有 child run 都终态；parent announce 的收尾由
+      // runFinished / followupRunStarted 那两条判据各自负责。
+      !hasPendingNativeChildRun(request) &&
       // 还有委派工作未回灌结果 ⇒ 任务尚未结束，挂住完成门等待所有委派任务完成。
       request.delegatedWorkToolCallIds.size === 0 &&
       !request.pendingDelegatedFollowupRunId &&
@@ -1305,7 +1436,21 @@ export async function markActiveSdkRequestSubagentSpawned(
   if (!request) {
     return undefined;
   }
-  request.pendingChildSessionKeys.add(childSessionKey);
+  const normalizedRunId = normalizeAlias(runId);
+  // 由toolCall捕获的 sessions_spawn runId 可能会以*结尾，需要过滤
+  if (!normalizedRunId || normalizedRunId.endsWith("*")) {
+    return undefined;
+  }
+  // spawn 有两条通道（subagent_spawned hook 与 sessions_spawn 工具结果），同 runId 重复
+  // 登记必须幂等，否则会凭空多出一个永不终态的条目把完成门永久挂住。
+  if (!request.nativeChildRuns.has(normalizedRunId)) {
+    request.nativeChildRuns.set(normalizedRunId, {
+      childSessionKey,
+      spawnedAt: Date.now(),
+      terminalSources: new Set<NativeChildRunTerminalSource>(),
+      announceRunObserved: false,
+    });
+  }
   request.rootLifecyclePhase = undefined;
   request.awaitingFollowup = false;
   request.deferredForFollowup = false;
@@ -1326,34 +1471,106 @@ export async function markActiveSdkRequestSubagentSpawned(
     },
   });
 
-    bindActiveSdkRequestRunId(childSessionKey, runId);
+    bindActiveSdkRequestRunId(childSessionKey, normalizedRunId);
     return request;
 }
 
-export function markActiveSdkRequestSubagentEnded(
-    childSessionKey: string | undefined,
-): ActiveSdkRequest | undefined {
-  if (!childSessionKey) {
+/** 台账登记一个 child run 终态的结果，供调用方决定日志与完成检查。 */
+export type NativeChildRunTerminalOutcome = {
+  request: ActiveSdkRequest;
+  childSessionKey: string;
+  /** 本次调用是否真正把该 run 从在跑推到终态（false 表示重复信号，已去重）。 */
+  transitioned: boolean;
+  /** 本次调用后是否所有 child run 都已终态。 */
+  allChildRunsTerminal: boolean;
+  /** 是否因此进入等待 parent announce 续跑的状态。 */
+  awaitingFollowupArmed: boolean;
+};
+
+/**
+ * 登记一个 native subagent run 的终态。四个通道（child lifecycle / agent_end /
+ * subagent_ended / subagent_progress）全部收敛到此入口，谁先到都得到同一终局：
+ * 首个信号推进状态，其余只补 terminalSources。无此归一，announce 路径下最后抵达的
+ * subagent_ended 会为一个早已跑完的续跑重新 arm awaitingFollowup，白等满超时窗口。
+ */
+export function markActiveSdkNativeChildRunTerminal(params: {
+  childRunId: string | undefined;
+  source: NativeChildRunTerminalSource;
+  childSessionKey?: string;
+}): NativeChildRunTerminalOutcome | undefined {
+  const normalizedRunId = normalizeAlias(params.childRunId);
+  if (!normalizedRunId) {
     return undefined;
   }
   pruneStaleActiveSdkRequests();
-  const request = activeSdkRequestsByChild.get(childSessionKey);
+  const request = resolveNativeChildRunOwner(normalizedRunId, params.childSessionKey);
   if (!request) {
     return undefined;
   }
-  request.pendingChildSessionKeys.delete(childSessionKey);
+  const record = request.nativeChildRuns.get(normalizedRunId);
+  if (!record) {
+    return undefined;
+  }
+  record.terminalSources.add(params.source);
+  if (record.terminalAt !== undefined) {
+    return {
+      request,
+      childSessionKey: record.childSessionKey,
+      transitioned: false,
+      allChildRunsTerminal: !hasPendingNativeChildRun(request),
+      awaitingFollowupArmed: false,
+    };
+  }
+  record.terminalAt = Date.now();
+  releaseNativeChildRunSessionKey(request, record.childSessionKey);
+  const allChildRunsTerminal = !hasPendingNativeChildRun(request);
+  let awaitingFollowupArmed = false;
+  if (allChildRunsTerminal) {
+    request.lastReasoningText = "";
+    request.lastReasoningMessageId = "";
+    awaitingFollowupArmed = armAwaitingAnnounceFollowup(request);
+  }
+  return {
+    request,
+    childSessionKey: record.childSessionKey,
+    transitioned: true,
+    allChildRunsTerminal,
+    awaitingFollowupArmed,
+  };
+}
+
+/**
+ * 按 child runId 定位台账所属 request。runId 是唯一能区分跨代复用 child sessionKey 的键；
+ * sessionKey 映射只作为 runId 未绑定时的兜底，且必须确认该 request 真的持有此 runId。
+ */
+function resolveNativeChildRunOwner(
+  childRunId: string,
+  childSessionKey?: string,
+): ActiveSdkRequest | undefined {
+  const byRun = activeSdkRequestsByRun.get(childRunId)?.request;
+  if (byRun?.nativeChildRuns.has(childRunId)) {
+    return byRun;
+  }
+  const byChild = childSessionKey ? activeSdkRequestsByChild.get(childSessionKey) : undefined;
+  if (byChild?.nativeChildRuns.has(childRunId)) {
+    return byChild;
+  }
+  return undefined;
+}
+
+/**
+ * 释放 child sessionKey 派生的 request context 映射。同一 sessionKey 可能仍被更新一代的
+ * child run 持有，此时不能清，否则新一代的事件会失去 request 归属。
+ */
+function releaseNativeChildRunSessionKey(request: ActiveSdkRequest, childSessionKey: string): void {
+  for (const record of request.nativeChildRuns.values()) {
+    if (record.childSessionKey === childSessionKey && record.terminalAt === undefined) {
+      return;
+    }
+  }
   channelRequestContextsBySessionKey.delete(childSessionKey);
   deleteSharedChannelRequestContextBySessionKey(childSessionKey);
   activeSdkRequestsByChild.delete(childSessionKey);
-  // 仅当所有子 session 都结束才进入"等 main 续跑"状态：还有兄弟子 agent 在跑时，
-  if (request.pendingChildSessionKeys.size === 0) {
-    request.awaitingFollowup = true;
-    request.awaitingFollowupSince = Date.now();
-    request.followupRunStarted = false;
-    request.lastReasoningText = "";
-    request.lastReasoningMessageId = "";
-  }
-  return request;
 }
 
 /**

@@ -20,7 +20,6 @@ import Icon from '@/components/AntdIcon/icon';
 import Feedback from '../header/components/Feedback';
 import SandboxStatusIndicator from './components/SandboxStatus';
 import useUserDropdown from '../header/useUserDropdown';
-import SiderSearch from './siderSearch';
 import { getDisplayUserNameInChat } from '@/utils/chat';
 import useGlobal from '@/hooks/useGlobal';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
@@ -308,7 +307,6 @@ const Sidebar = () => {
         <div className={styles.logo}>
           <img key="BYAI" alt="BYAI" src={getFaviconIcon} />
         </div>
-        <SiderSearch />
         <Tooltip placement="right" title={intl.formatMessage({ id: 'sider.newChat' })}>
           <div
             className={styles.sideIconWrap}

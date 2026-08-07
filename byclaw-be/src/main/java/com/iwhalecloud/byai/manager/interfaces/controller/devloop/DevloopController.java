@@ -1,6 +1,12 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 
+import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
+import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
+import com.iwhalecloud.byai.common.feign.request.datacloud.InvokeActionReq;
+import com.iwhalecloud.byai.common.feign.request.datacloud.Params;
 import com.iwhalecloud.byai.common.feign.request.datacloud.QueryByKnowledgeReq;
+import com.iwhalecloud.byai.common.feign.response.DataCloudResponse;
+import com.iwhalecloud.byai.common.feign.response.datacloud.InvokeActionResp;
 import com.iwhalecloud.byai.common.feign.response.datacloud.QueryByKnowledgeResp;
 import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -37,6 +43,9 @@ public class DevloopController {
 
     @Autowired
     private DevloopApplicationService applicationService;
+
+    @Autowired
+    private FeignDataCloudService feignDataCloudService;
 
     /**
      * 创建扫描源
@@ -366,6 +375,7 @@ public class DevloopController {
 
     /**
      * 按环境查历史执行列表(时间倒序)。
+     *
      * @param params 包含 envId
      */
     @PostMapping("/integration/run/listByEnv")
@@ -646,5 +656,17 @@ public class DevloopController {
     public ResponseUtil<QueryByKnowledgeResp> queryObjectsByKnowledge(@RequestBody QueryByKnowledgeReq paramReq) {
         QueryByKnowledgeResp queryByKnowledgeResp = applicationService.queryObjectsByKnowledge(paramReq);
         return ResponseUtil.successResponse(queryByKnowledgeResp);
+    }
+
+    /**
+     * 保存对象实例到知识库
+     *
+     * @param params 入参
+     * @return ResponseUtil
+     */
+    @PostMapping("/operation/saveObjectInstanceToKb")
+    public ResponseUtil<InvokeActionResp> saveObjectInstanceToKb(@RequestBody Params params) {
+        InvokeActionResp invokeActionResp = applicationService.saveObjectInstanceToKb(params);
+        return ResponseUtil.successResponse(invokeActionResp);
     }
 }

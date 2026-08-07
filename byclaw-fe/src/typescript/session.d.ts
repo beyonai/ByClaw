@@ -34,4 +34,12 @@ export interface ISession {
 
   defaultChatMode?: IChatModeType;
   sessionExts?: Array<{ extParamName: string; extParamCode: string; extParamValue: string }>;
+
+  /** 项目会话高级搜索返回的命中依据，普通会话列表不返回。 */
+  matchType?: 'DIGITAL_EMPLOYEE' | 'CHAT_CONTENT';
+  matchText?: string;
+  matchedEmployeeId?: string | number;
+  matchedEmployeeName?: string;
+  matchedEmployeeMatchField?: 'NAME' | 'DESCRIPTION';
+  matchedEmployeeMatchText?: string;
 }

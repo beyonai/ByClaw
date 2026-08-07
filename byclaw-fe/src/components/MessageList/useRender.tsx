@@ -402,8 +402,20 @@ export default function useRender({
       const mentionLeftAgentTitle = canMentionLeftAgent
         ? intl.formatMessage({ id: 'messageList.mentionDigitalEmployee' }, { name: leftName })
         : '';
+      const agentResourceDesc = agentInfo?.resourceDesc?.trim();
+      const mentionLeftAgentTooltip = canMentionLeftAgent ? (
+        <div className={styles.agentMentionTooltipContent}>
+          <div>{mentionLeftAgentTitle}</div>
+          {agentResourceDesc ? (
+            <>
+              <div className={styles.agentMentionTooltipDivider} />
+              <div className={styles.agentMentionTooltipDescription}>{agentResourceDesc}</div>
+            </>
+          ) : null}
+        </div>
+      ) : null;
       const leftNameNode = canMentionLeftAgent ? (
-        <Tooltip title={mentionLeftAgentTitle}>
+        <Tooltip title={mentionLeftAgentTooltip} overlayClassName={styles.agentMentionTooltip}>
           <button
             type="button"
             className={styles.agentMentionTrigger}

@@ -26,7 +26,7 @@ function mockRequest(overrides: Partial<ActiveSdkRequest> = {}): ActiveSdkReques
         traceId: "trace-1",
         createdAt: Date.now(),
         boundRunIds: new Set(),
-        pendingChildSessionKeys: new Set(),
+        nativeChildRuns: new Map(),
         pendingOutboundCount: 0,
         awaitingFollowup: false,
         deferredForFollowup: false,

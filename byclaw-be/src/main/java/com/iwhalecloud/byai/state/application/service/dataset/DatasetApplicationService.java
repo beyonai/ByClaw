@@ -834,7 +834,7 @@ public class DatasetApplicationService {
         if (result.getData() != null) {
             for (KbFileUpdateResult.Item item : result.getData()) {
                 if (item != null) {
-                    item.setKnCode(String.valueOf(resourceId));
+                    item.setResourceId(resourceId);
                 }
             }
         }
@@ -989,7 +989,7 @@ public class DatasetApplicationService {
 
         PythonBuildResponse<Data> response = feignPythonBuildService.glob(qaRequest, request.getResourceId());
         assertPythonBuildSuccess(response, "按路径匹配知识库文件或目录");
-        return mapKnowledgeDirItems(response.getResultObject());
+        return mapKnowledgeDirItems(response.getResultObject(), request.getResourceId());
     }
 
     /**
@@ -1069,10 +1069,10 @@ public class DatasetApplicationService {
         kbListDir.setDirectoryPath(normalizeKnowledgeDirectoryPath(directoryPath));
         PythonBuildResponse<Data> response = feignPythonBuildService.listDir(kbListDir, resourceId);
         assertPythonBuildSuccess(response, "查询知识库目录");
-        return mapKnowledgeDirItems(response.getResultObject());
+        return mapKnowledgeDirItems(response.getResultObject(), resourceId);
     }
 
-    private List<DirAndFileVo> mapKnowledgeDirItems(Data resultObject) {
+    private List<DirAndFileVo> mapKnowledgeDirItems(Data resultObject, Long resourceId) {
         List<DirAndFileVo> resultList = new ArrayList<>();
         if (resultObject == null || resultObject.getData() == null) {
             return resultList;
@@ -1082,6 +1082,8 @@ public class DatasetApplicationService {
                 continue;
             }
             DirAndFileVo dirAndFileVo = new DirAndFileVo();
+            dirAndFileVo.setKnCode(dirOrFile.getKnCode());
+            dirAndFileVo.setResourceId(resourceId);
             String type = dirOrFile.getType();
             String name = dirOrFile.getName();
             dirAndFileVo.setType(type);
@@ -1484,7 +1486,7 @@ public class DatasetApplicationService {
 
         KbFileReadResult result = ret.getResultObject();
         if (result != null) {
-            result.setKnCode(String.valueOf(request.getResourceId()));
+            result.setResourceId(request.getResourceId());
         }
         return result;
     }
@@ -1513,7 +1515,7 @@ public class DatasetApplicationService {
 
         KnowledgeBuildResult result = ret.getResultObject();
         if (result != null) {
-            result.setKnCode(String.valueOf(request.getResourceId()));
+            result.setResourceId(request.getResourceId());
         }
         return result;
     }
@@ -1545,7 +1547,7 @@ public class DatasetApplicationService {
         }
 
         List<String> knCodeList = new ArrayList<>();
-        Map<String, String> codeToResourceId = new HashMap<>();
+        Map<String, Long> codeToResourceId = new HashMap<>();
         for (Long resourceId : request.getResourceIdList()) {
             if (resourceId == null) {
                 throw new BaseException("知识库资源标识不能为空");
@@ -1553,7 +1555,7 @@ public class DatasetApplicationService {
             SsResource ssResource = loadDatasetResource(resourceId);
             validateDatasetReadablePermission(ssResource);
             knCodeList.add(ssResource.getResourceCode());
-            codeToResourceId.put(ssResource.getResourceCode(), String.valueOf(resourceId));
+            codeToResourceId.put(ssResource.getResourceCode(), resourceId);
         }
 
         KbKnowledgeSearch kbKnowledgeSearch = new KbKnowledgeSearch();
@@ -1578,9 +1580,9 @@ public class DatasetApplicationService {
                 if (item == null) {
                     continue;
                 }
-                String resourceId = codeToResourceId.get(item.getKnCode());
+                Long resourceId = codeToResourceId.get(item.getKnCode());
                 if (resourceId != null) {
-                    item.setKnCode(resourceId);
+                    item.setResourceId(resourceId);
                 }
             }
         }
@@ -1596,7 +1598,7 @@ public class DatasetApplicationService {
         }
 
         List<String> knCodeList = new ArrayList<>();
-        Map<String, String> codeToResourceId = new HashMap<>();
+        Map<String, Long> codeToResourceId = new HashMap<>();
         for (Long resourceId : request.getResourceIdList()) {
             if (resourceId == null) {
                 throw new BaseException("知识库资源标识不能为空");
@@ -1604,7 +1606,7 @@ public class DatasetApplicationService {
             SsResource ssResource = loadDatasetResource(resourceId);
             validateDatasetReadablePermission(ssResource);
             knCodeList.add(ssResource.getResourceCode());
-            codeToResourceId.put(ssResource.getResourceCode(), String.valueOf(resourceId));
+            codeToResourceId.put(ssResource.getResourceCode(), resourceId);
         }
 
         KbKnowledgeFileSearch kbKnowledgeFileSearch = new KbKnowledgeFileSearch();
@@ -1628,9 +1630,9 @@ public class DatasetApplicationService {
                 if (item == null) {
                     continue;
                 }
-                String resourceId = codeToResourceId.get(item.getKnCode());
+                Long resourceId = codeToResourceId.get(item.getKnCode());
                 if (resourceId != null) {
-                    item.setKnCode(resourceId);
+                    item.setResourceId(resourceId);
                 }
             }
         }
@@ -1639,7 +1641,7 @@ public class DatasetApplicationService {
 
     /**
      * 执行 Agent DSL 纯元数据检索。门户校验 resourceIdList 的访问权限并转换为 QA knCodeList，
-     * 响应中的 knCode 再回映为 resourceId。
+     * 响应中保留 QA knCode，并补充回映后的 resourceId。
      */
     public KnowledgeMetadataSearchResult searchKnowledgeMetadata(KnowledgeMetadataSearchRequest request) {
         if (request == null || request.getResourceIdList() == null || request.getResourceIdList().isEmpty()) {
@@ -1647,7 +1649,7 @@ public class DatasetApplicationService {
         }
 
         List<String> knCodeList = new ArrayList<>();
-        Map<String, String> codeToResourceId = new HashMap<>();
+        Map<String, Long> codeToResourceId = new HashMap<>();
         for (Long resourceId : request.getResourceIdList()) {
             if (resourceId == null) {
                 throw new BaseException(I18nUtil.get("dataset.metadata.search.resource.id.notnull"));
@@ -1655,7 +1657,7 @@ public class DatasetApplicationService {
             SsResource ssResource = loadDatasetResource(resourceId);
             validateDatasetReadablePermission(ssResource);
             knCodeList.add(ssResource.getResourceCode());
-            codeToResourceId.put(ssResource.getResourceCode(), String.valueOf(resourceId));
+            codeToResourceId.put(ssResource.getResourceCode(), resourceId);
         }
 
         KbKnowledgeMetadataSearch qaRequest = new KbKnowledgeMetadataSearch();
@@ -1679,9 +1681,9 @@ public class DatasetApplicationService {
                 if (item == null) {
                     continue;
                 }
-                String resourceId = codeToResourceId.get(item.getKnCode());
+                Long resourceId = codeToResourceId.get(item.getKnCode());
                 if (resourceId != null) {
-                    item.setKnCode(resourceId);
+                    item.setResourceId(resourceId);
                 }
             }
         }

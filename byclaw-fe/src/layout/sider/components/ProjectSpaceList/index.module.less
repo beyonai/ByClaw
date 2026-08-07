@@ -49,6 +49,35 @@
   }
 }
 
+// 高级会话搜索方式收在输入框尾部，保留详情入口的同时也不会遮挡关键词输入区域。
+.sessionSearchModeTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 76px;
+  padding: 0 2px 0 6px;
+  overflow: hidden;
+  border: 0;
+  color: #667085;
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
+
+  &:hover,
+  &:focus-visible {
+    color: #246bfe;
+    outline: 0;
+  }
+
+  :global(.anticon) {
+    font-size: 10px;
+  }
+}
+
 // 项目选择框聚焦后直接接收搜索输入，不再在下拉菜单内额外放置搜索框。
 .scopeInput {
   width: 100%;

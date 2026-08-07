@@ -23,7 +23,7 @@ import {
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import { getStoredProjectScopeId, saveProjectScopeIdToStorage } from '@/pages/projectSpace/constants';
-import { saveDefaultAgent, saveProjectMembers } from '@/service/devloop';
+import { saveDefaultAgent, saveProjectMembers, type DevloopProjectSessionSearchMode } from '@/service/devloop';
 import { SiderContentContext } from '../../siderContentContext';
 import DialogueCard from '../DialogueList/DialogueCard';
 import ProjectDetailPanel from './ProjectDetailModal';
@@ -36,6 +36,7 @@ type ProjectSessionPageState = {
   pageSize: number;
   total: number;
   keyword?: string;
+  searchMode?: DevloopProjectSessionSearchMode;
 };
 
 type ProjectSpaceTranslate = (id: string, values?: Record<string, string | number>) => string;
@@ -251,6 +252,7 @@ const ProjectSpaceList: React.FC = () => {
   const [projectScopeId, setProjectScopeId] = useState<string | undefined>(() => getStoredProjectScopeId());
   const [projectScopeDropdownOpen, setProjectScopeDropdownOpen] = useState(false);
   const [sessionKeyword, setSessionKeyword] = useState('');
+  const [sessionSearchMode, setSessionSearchMode] = useState<DevloopProjectSessionSearchMode>('CHAT_CONTENT');
   const [projectDetailMap, setProjectDetailMap] = useState<Record<string, ProjectSpace>>({});
   const [detailLoadingMap, setDetailLoadingMap] = useState<Record<string, boolean>>({});
   const [projectSessionPageMap, setProjectSessionPageMap] = useState<Record<string, ProjectSessionPageState>>({});
@@ -343,7 +345,15 @@ const ProjectSpaceList: React.FC = () => {
   }, [editingProject]);
 
   const fetchProjectSessions = useCallback(
-    async (project: ProjectSpace, options: { force?: boolean; append?: boolean; keyword?: string } = {}) => {
+    async (
+      project: ProjectSpace,
+      options: {
+        force?: boolean;
+        append?: boolean;
+        keyword?: string;
+        searchMode?: DevloopProjectSessionSearchMode;
+      } = {}
+    ) => {
       const { force = false, append = false } = options;
       const projectId = project.projectId;
       if (!projectId) return project;
@@ -352,6 +362,7 @@ const ProjectSpaceList: React.FC = () => {
       const currentPage = projectSessionPageMap[projectId];
       const nextPageNum = append ? (currentPage?.pageNum || 0) + 1 : 1;
       const queryKeyword = options.keyword ?? currentPage?.keyword ?? '';
+      const querySearchMode = options.searchMode ?? currentPage?.searchMode ?? 'CHAT_CONTENT';
       const setLoadingMap = append ? setSessionMoreLoadingMap : setDetailLoadingMap;
       setLoadingMap((prev) => ({ ...prev, [projectId]: true }));
       try {
@@ -362,6 +373,7 @@ const ProjectSpaceList: React.FC = () => {
             pageNum: nextPageNum,
             pageSize: PROJECT_SESSION_PAGE_SIZE,
             keyword: queryKeyword || undefined,
+            searchMode: queryKeyword ? querySearchMode : undefined,
           },
           { responseCfg: { hideErrorTips: true } }
         );
@@ -385,6 +397,7 @@ const ProjectSpaceList: React.FC = () => {
             pageSize: Number(pageData?.pageSize || PROJECT_SESSION_PAGE_SIZE),
             total,
             keyword: queryKeyword,
+            searchMode: querySearchMode,
           },
         }));
         return nextProject;
@@ -476,12 +489,13 @@ const ProjectSpaceList: React.FC = () => {
     updateProjectScopeId(firstProject.projectId);
     setSessionKeyword('');
     // 打开项目模块时默认选择系统默认项目，让会话列表直接可见。
-    void fetchProjectSessions(firstProject, { force: true, keyword: '' });
+    void fetchProjectSessions(firstProject, { force: true, keyword: '', searchMode: sessionSearchMode });
   }, [
     fetchProjectSessions,
     inaccessibleProjectIds,
     projectScopeId,
     projectSessionPageMap,
+    sessionSearchMode,
     updateProjectScopeId,
     visibleProjects,
   ]);
@@ -1013,7 +1027,11 @@ const ProjectSpaceList: React.FC = () => {
       const selectedProject = mergedProjects.find((project) => project.projectId === projectScopeId);
       if (selectedProject) {
         // 搜索条件只作用于当前项目的会话，不再过滤项目下拉列表。
-        void fetchProjectSessions(selectedProject, { force: true, keyword: nextKeyword });
+        void fetchProjectSessions(selectedProject, {
+          force: true,
+          keyword: nextKeyword,
+          searchMode: sessionSearchMode,
+        });
       }
       sessionSearchTimerRef.current = null;
     }, 300);
@@ -1026,7 +1044,26 @@ const ProjectSpaceList: React.FC = () => {
     }
     const selectedProject = mergedProjects.find((project) => project.projectId === projectScopeId);
     if (selectedProject) {
-      void fetchProjectSessions(selectedProject, { force: true, keyword: sessionKeyword });
+      void fetchProjectSessions(selectedProject, {
+        force: true,
+        keyword: sessionKeyword,
+        searchMode: sessionSearchMode,
+      });
+    }
+  };
+
+  const handleSessionSearchModeChange = (searchMode: DevloopProjectSessionSearchMode) => {
+    if (searchMode === sessionSearchMode) return;
+    if (sessionSearchTimerRef.current) {
+      clearTimeout(sessionSearchTimerRef.current);
+      sessionSearchTimerRef.current = null;
+    }
+
+    setSessionSearchMode(searchMode);
+    const selectedProject = mergedProjects.find((project) => project.projectId === projectScopeId);
+    if (selectedProject) {
+      // 切换方式即刻按当前关键字重新搜索；空关键字仍回到该项目的完整会话列表。
+      void fetchProjectSessions(selectedProject, { force: true, keyword: sessionKeyword, searchMode });
     }
   };
 
@@ -1329,6 +1366,7 @@ const ProjectSpaceList: React.FC = () => {
       const loadedCount = projectDetailMap[projectId]?.sessions?.length ?? project.sessions?.length ?? 0;
       const total = sessionPage?.total ?? project.sessionCount ?? 0;
       const queryKeyword = sessionPage?.keyword ?? sessionKeyword;
+      const querySearchMode = sessionPage?.searchMode ?? sessionSearchMode;
 
       if (!sessionPage || loadedCount >= total || detailLoadingMap[projectId] || sessionMoreLoadingMap[projectId]) {
         return;
@@ -1336,7 +1374,7 @@ const ProjectSpaceList: React.FC = () => {
 
       const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
       if (scrollHeight - scrollTop - clientHeight <= 80) {
-        void fetchProjectSessions(project, { append: true, keyword: queryKeyword });
+        void fetchProjectSessions(project, { append: true, keyword: queryKeyword, searchMode: querySearchMode });
       }
     },
     [
@@ -1346,6 +1384,7 @@ const ProjectSpaceList: React.FC = () => {
       projectSessionPageMap,
       sessionKeyword,
       sessionMoreLoadingMap,
+      sessionSearchMode,
     ]
   );
 
@@ -1353,6 +1392,7 @@ const ProjectSpaceList: React.FC = () => {
     const sessions = sortProjectSessions(project.sessions || []);
     const isLoading = detailLoadingMap[project.projectId];
     const isLoadingMore = sessionMoreLoadingMap[project.projectId];
+    const searchKeyword = projectSessionPageMap[project.projectId]?.keyword || undefined;
 
     if (isLoading) {
       return (
@@ -1391,6 +1431,7 @@ const ProjectSpaceList: React.FC = () => {
               onSessionEditRollback={(payload) => handleProjectSessionNameChange(project, payload)}
               onSessionDeleteOptimistic={() => handleProjectSessionDeleteOptimistic(project, session)}
               onSessionDeleteRollback={() => handleProjectSessionDeleteRollback(project, session)}
+              searchKeyword={searchKeyword}
             />
           );
         })}
@@ -1474,7 +1515,45 @@ const ProjectSpaceList: React.FC = () => {
               <Input
                 value={sessionKeyword}
                 prefix={<SearchOutlined onClick={handleSessionSearchSubmit} />}
-                placeholder={t('searchPlaceholder')}
+                suffix={
+                  <Dropdown
+                    trigger={['click']}
+                    menu={{
+                      selectable: true,
+                      selectedKeys: [sessionSearchMode],
+                      items: [
+                        {
+                          key: 'DIGITAL_EMPLOYEE',
+                          label: t('searchMode.digitalEmployee'),
+                        },
+                        {
+                          key: 'CHAT_CONTENT',
+                          label: t('searchMode.chatContent'),
+                        },
+                      ],
+                      onClick: ({ key }) => handleSessionSearchModeChange(key as DevloopProjectSessionSearchMode),
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className={styles.sessionSearchModeTrigger}
+                      aria-label={t('searchMode.label')}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <span>
+                        {sessionSearchMode === 'DIGITAL_EMPLOYEE'
+                          ? t('searchMode.digitalEmployeeShort')
+                          : t('searchMode.chatContentShort')}
+                      </span>
+                      <DownOutlined />
+                    </button>
+                  </Dropdown>
+                }
+                placeholder={
+                  sessionSearchMode === 'DIGITAL_EMPLOYEE'
+                    ? t('searchPlaceholderDigitalEmployee')
+                    : t('searchPlaceholderChatContent')
+                }
                 onChange={(event) => handleSessionSearchChange(event.target.value)}
                 onPressEnter={handleSessionSearchSubmit}
               />

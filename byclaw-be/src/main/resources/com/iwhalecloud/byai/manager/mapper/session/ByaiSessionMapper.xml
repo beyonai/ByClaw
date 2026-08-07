@@ -214,6 +214,12 @@
         <result column="state" property="state" />
         <result column="project_id" property="projectId" />
         <result column="avatar" property="avatar" />
+        <result column="match_type" property="matchType" />
+        <result column="match_text" property="matchText" />
+        <result column="matched_employee_id" property="matchedEmployeeId" />
+        <result column="matched_employee_name" property="matchedEmployeeName" />
+        <result column="matched_employee_match_field" property="matchedEmployeeMatchField" />
+        <result column="matched_employee_match_text" property="matchedEmployeeMatchText" />
         <collection property="sessionExts"
                     ofType="com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt"
                     select="com.iwhalecloud.byai.manager.mapper.session.ByaiSessionExtMapper.selectBySessionId"
@@ -265,6 +271,130 @@
                a.state,
                a.project_id,
                r.avatar
+        <choose>
+            <when test="digitalEmployeeSearch">
+                , 'DIGITAL_EMPLOYEE' AS match_type
+                , NULL AS match_text
+                , (
+                    SELECT employee.resource_id
+                    FROM ss_resource employee
+                    WHERE employee.resource_biz_type = 'DIG_EMPLOYEE'
+                      AND (
+                        employee.resource_id = a.object_id
+                        OR EXISTS (
+                            SELECT 1
+                            FROM byai_session_member member
+                            WHERE member.session_id = a.session_id
+                              AND member.mem_obj_type = 'AGENT'
+                              AND member.mem_obj_id = employee.resource_id
+                        )
+                      )
+                      AND LOWER(COALESCE(employee.resource_name, '') || ' ' || COALESCE(employee.resource_desc, ''))
+                          LIKE CONCAT('%', LOWER(#{keywordLike}), '%') ESCAPE CHR(92)
+                    ORDER BY employee.resource_id
+                    LIMIT 1
+                ) AS matched_employee_id
+                , (
+                    SELECT employee.resource_name
+                    FROM ss_resource employee
+                    WHERE employee.resource_biz_type = 'DIG_EMPLOYEE'
+                      AND (
+                        employee.resource_id = a.object_id
+                        OR EXISTS (
+                            SELECT 1
+                            FROM byai_session_member member
+                            WHERE member.session_id = a.session_id
+                              AND member.mem_obj_type = 'AGENT'
+                              AND member.mem_obj_id = employee.resource_id
+                        )
+                      )
+                      AND LOWER(COALESCE(employee.resource_name, '') || ' ' || COALESCE(employee.resource_desc, ''))
+                          LIKE CONCAT('%', LOWER(#{keywordLike}), '%') ESCAPE CHR(92)
+                    ORDER BY employee.resource_id
+                    LIMIT 1
+                ) AS matched_employee_name
+                , (
+                    SELECT CASE
+                               WHEN LOWER(COALESCE(employee.resource_name, ''))
+                                   LIKE CONCAT('%', LOWER(#{keywordLike}), '%') ESCAPE CHR(92)
+                                   THEN 'NAME'
+                               ELSE 'DESCRIPTION'
+                           END
+                    FROM ss_resource employee
+                    WHERE employee.resource_biz_type = 'DIG_EMPLOYEE'
+                      AND (
+                        employee.resource_id = a.object_id
+                        OR EXISTS (
+                            SELECT 1
+                            FROM byai_session_member member
+                            WHERE member.session_id = a.session_id
+                              AND member.mem_obj_type = 'AGENT'
+                              AND member.mem_obj_id = employee.resource_id
+                        )
+                      )
+                      AND LOWER(COALESCE(employee.resource_name, '') || ' ' || COALESCE(employee.resource_desc, ''))
+                          LIKE CONCAT('%', LOWER(#{keywordLike}), '%') ESCAPE CHR(92)
+                    ORDER BY employee.resource_id
+                    LIMIT 1
+                ) AS matched_employee_match_field
+                , (
+                    SELECT CASE
+                               WHEN LOWER(COALESCE(employee.resource_name, ''))
+                                   LIKE CONCAT('%', LOWER(#{keywordLike}), '%') ESCAPE CHR(92)
+                                   THEN employee.resource_name
+                               WHEN POSITION(LOWER(#{keyword}) IN LOWER(COALESCE(employee.resource_desc, ''))) &gt; 48
+                                   THEN CONCAT('…', SUBSTRING(
+                                       employee.resource_desc
+                                       FROM POSITION(LOWER(#{keyword}) IN LOWER(COALESCE(employee.resource_desc, ''))) - 47
+                                       FOR 160
+                                   ))
+                               ELSE SUBSTRING(employee.resource_desc FROM 1 FOR 160)
+                           END
+                    FROM ss_resource employee
+                    WHERE employee.resource_biz_type = 'DIG_EMPLOYEE'
+                      AND (
+                        employee.resource_id = a.object_id
+                        OR EXISTS (
+                            SELECT 1
+                            FROM byai_session_member member
+                            WHERE member.session_id = a.session_id
+                              AND member.mem_obj_type = 'AGENT'
+                              AND member.mem_obj_id = employee.resource_id
+                        )
+                      )
+                      AND LOWER(COALESCE(employee.resource_name, '') || ' ' || COALESCE(employee.resource_desc, ''))
+                          LIKE CONCAT('%', LOWER(#{keywordLike}), '%') ESCAPE CHR(92)
+                    ORDER BY employee.resource_id
+                    LIMIT 1
+                ) AS matched_employee_match_text
+            </when>
+            <when test="chatContentSearch">
+                , 'CHAT_CONTENT' AS match_type
+                , (
+                    SELECT CASE
+                               WHEN POSITION(LOWER(#{keyword}) IN LOWER(message.message_content)) &gt; 48
+                                   THEN CONCAT('…', SUBSTRING(
+                                       message.message_content
+                                       FROM POSITION(LOWER(#{keyword}) IN LOWER(message.message_content)) - 47
+                                       FOR 160
+                                   ))
+                               ELSE SUBSTRING(message.message_content FROM 1 FOR 160)
+                           END
+                    FROM byai_message message
+                    WHERE message.session_id = a.session_id
+                      AND message.archived_at IS NULL
+                      AND message."usage" IN (1, 2)
+                      AND message.message_content IS NOT NULL
+                      AND LOWER(message.message_content) LIKE CONCAT('%', LOWER(#{keywordLike}), '%') ESCAPE CHR(92)
+                    ORDER BY message.create_time DESC, message.message_id DESC
+                    LIMIT 1
+                ) AS match_text
+                , NULL AS matched_employee_id
+                , NULL AS matched_employee_name
+                , NULL AS matched_employee_match_field
+                , NULL AS matched_employee_match_text
+            </when>
+        </choose>
         FROM byai_session a
                  JOIN byai_project b ON a.project_id = b.project_id
                  LEFT JOIN ss_resource r ON a.object_id = r.resource_id
@@ -274,13 +404,46 @@
              OR NOT EXISTS (SELECT 1 FROM byai_session_ext oe
                             WHERE oe.session_id = a.session_id
                               AND oe.ext_param_code = 'oploop_source_id'))
-        <if test="keyword != null and keyword != ''">
-            <!-- PostgreSQL 默认 LIKE 区分大小写，统一转换后保证项目会话搜索忽略大小写。 -->
-            AND (
-                LOWER(a.session_name) LIKE CONCAT('%', LOWER(#{keyword}), '%')
-                OR LOWER(a.session_content) LIKE CONCAT('%', LOWER(#{keyword}), '%')
-            )
-        </if>
+        <choose>
+            <when test="digitalEmployeeSearch">
+                <!-- EXISTS 保证成员关系命中不产生会话重复行。 -->
+                AND EXISTS (
+                    SELECT 1
+                    FROM ss_resource employee
+                    WHERE employee.resource_biz_type = 'DIG_EMPLOYEE'
+                      AND (
+                        employee.resource_id = a.object_id
+                        OR EXISTS (
+                            SELECT 1
+                            FROM byai_session_member member
+                            WHERE member.session_id = a.session_id
+                              AND member.mem_obj_type = 'AGENT'
+                              AND member.mem_obj_id = employee.resource_id
+                        )
+                      )
+                      AND LOWER(COALESCE(employee.resource_name, '') || ' ' || COALESCE(employee.resource_desc, ''))
+                          LIKE CONCAT('%', LOWER(#{keywordLike}), '%') ESCAPE CHR(92)
+                )
+            </when>
+            <when test="chatContentSearch">
+                AND EXISTS (
+                    SELECT 1
+                    FROM byai_message message
+                    WHERE message.session_id = a.session_id
+                      AND message.archived_at IS NULL
+                      AND message."usage" IN (1, 2)
+                      AND message.message_content IS NOT NULL
+                      AND LOWER(message.message_content) LIKE CONCAT('%', LOWER(#{keywordLike}), '%') ESCAPE CHR(92)
+                )
+            </when>
+            <when test="keyword != null and keyword != ''">
+                <!-- 保留旧调用的会话标题、摘要搜索语义，兼容尚未传 searchMode 的调用方。 -->
+                AND (
+                    LOWER(a.session_name) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+                    OR LOWER(a.session_content) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+                )
+            </when>
+        </choose>
         <if test="createBy != null">
             AND a.creator_id = #{createBy}
         </if>

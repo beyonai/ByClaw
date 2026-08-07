@@ -54,6 +54,14 @@ export function appendIncrementalTextSnapshot(params: {
   streamSnapshots[params.key] = `${streamSnapshots[params.key] ?? ""}${delta}`;
 }
 
+/**
+ * 读取当前累积到的段落快照。段落被替换时（新段不以旧快照为前缀）这里跟着变，因此调用方
+ * 拿到的始终是「本段目前的全文」，而不是整个 run 的历史拼接。
+ */
+export function getIncrementalTextSnapshot(key: string): string {
+  return streamSnapshots[key] ?? "";
+}
+
 export function clearIncrementalTextSnapshot(keyOrPrefix: string) {
   Object.keys(streamSnapshots).forEach((key) => {
     if (key === keyOrPrefix || key.startsWith(keyOrPrefix)) {
