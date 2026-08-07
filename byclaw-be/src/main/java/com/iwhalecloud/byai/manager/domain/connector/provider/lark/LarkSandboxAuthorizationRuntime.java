@@ -1,9 +1,13 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.lark;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Duration;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -41,6 +45,9 @@ public class LarkSandboxAuthorizationRuntime {
     private static final String USER_PHASE = "user_authorization";
     private static final Pattern URL_PATTERN = Pattern.compile("https://[^\\s\\p{Cntrl}]+",
         Pattern.CASE_INSENSITIVE);
+    /** Lark app-initialization hosts plus the device-verification hosts used by the device-code flow. */
+    private static final Set<String> ALLOWED_AUTHORIZATION_HOSTS = Set.of(
+        "open.feishu.cn", "open.larksuite.com", "accounts.feishu.cn", "accounts.larksuite.com");
     private static final Duration COMMAND_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration INIT_TIMEOUT = Duration.ofMinutes(10);
     private static final long DEFAULT_EXPIRES_SECONDS = 600;
@@ -373,7 +380,18 @@ public class LarkSandboxAuthorizationRuntime {
     }
 
     private boolean validUrl(String value) {
-        return value != null && value.startsWith("https://open.feishu.cn/");
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        try {
+            URI uri = new URI(value);
+            String host = uri.getHost();
+            return "https".equalsIgnoreCase(uri.getScheme())
+                && host != null
+                && ALLOWED_AUTHORIZATION_HOSTS.contains(host.toLowerCase(Locale.ROOT));
+        } catch (URISyntaxException e) {
+            return false;
+        }
     }
 
     private String firstText(JsonNode node, String... names) {
