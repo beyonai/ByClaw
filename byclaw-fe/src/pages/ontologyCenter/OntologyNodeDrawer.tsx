@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Drawer, Empty, Spin, Table, Tag } from 'antd';
+import { Button, Drawer, Empty, List, Spin, Table, Tag, Typography } from 'antd';
 import { CloseOutlined, PaperClipOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
@@ -29,6 +29,8 @@ const OntologyNodeDrawer = ({
   onReference,
   onClose,
   systemCode,
+  relatedFiles = [],
+  onRelatedFileClick,
 }: {
   open: boolean;
   node: any;
@@ -39,6 +41,8 @@ const OntologyNodeDrawer = ({
   showReference?: boolean;
   onReference?: () => void;
   onClose: () => void;
+  relatedFiles?: any[];
+  onRelatedFileClick?: (file: any) => void;
 }) => {
   const intl = useIntl();
   const t = (id: string, v?: any) => intl.formatMessage({ id }, v);
@@ -211,6 +215,23 @@ const OntologyNodeDrawer = ({
         {nodeCode && <span className={styles.mono}>{nodeCode}</span>}
       </div>
       <Spin spinning={loading}>{renderBody()}</Spin>
+      {relatedFiles.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          <Typography.Title level={5}>关联文件</Typography.Title>
+          <List
+            size="small"
+            dataSource={relatedFiles}
+            renderItem={(file: any) => (
+              <List.Item
+                onClick={() => onRelatedFileClick?.(file)}
+                style={{ cursor: onRelatedFileClick ? 'pointer' : undefined }}
+              >
+                {file.fileName || file.filePath || file.path || file.name || '-'}
+              </List.Item>
+            )}
+          />
+        </div>
+      )}
     </>
   );
 
