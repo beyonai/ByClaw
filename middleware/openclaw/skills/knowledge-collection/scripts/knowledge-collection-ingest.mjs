@@ -19,6 +19,7 @@ const DEFAULT_RESOURCE_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_RESOURCE_BYTES = 50 * 1024 * 1024;
 const DEFAULT_MAX_BATCH_BYTES = 100 * 1024 * 1024;
 const DEFAULT_MAX_RESOURCES = 20;
+const DEFAULT_BACKEND_TIMEOUT_MS = 30_000;
 const MAX_RESOURCE_REDIRECTS = 5;
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CANONICAL_LOCAL_PATH = Symbol("canonicalLocalPath");
@@ -643,21 +644,36 @@ function authSummary() {
 async function requestJson(method, url, payload) {
   const normalizedMethod = method.toUpperCase();
   const bodyText = payload === undefined ? "" : JSON.stringify(payload);
-  const response = await fetch(url, {
+  return requestWithDeadline(url, {
     method: normalizedMethod,
     headers: authHeaders(bodyText),
     body: bodyText || undefined,
-  });
-  return parseJsonResponse(response, url);
+  }, normalizedMethod);
 }
 
 async function requestMultipart(url, formData) {
-  const response = await fetch(url, {
+  return requestWithDeadline(url, {
     method: "POST",
     headers: authHeaders("", null),
     body: formData,
-  });
-  return parseJsonResponse(response, url);
+  }, "POST multipart");
+}
+
+async function requestWithDeadline(url, options, operation) {
+  const timeoutMs = positiveIntegerEnv("KNOWLEDGE_COLLECTION_BACKEND_TIMEOUT_MS", DEFAULT_BACKEND_TIMEOUT_MS);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return await parseJsonResponse(response, url);
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`后端 ${operation} 请求超时（${timeoutMs}ms）: ${url}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function parseJsonResponse(response, url) {
@@ -848,6 +864,7 @@ function normalizeResourceCandidate(raw, args, index) {
     fileName,
     contentType,
     kind: isImage ? "image" : isVideo ? "video" : isAudio ? "audio" : "file",
+    ...compactObject({ itemId: firstNonEmpty(asArray(args["item-id"])[index]) }),
   };
 }
 
@@ -1280,8 +1297,9 @@ async function uploadDocsToDataset(candidates, args) {
       confirmation: confirmedImportTarget(resourceId, directoryPath),
     };
   }
+  const resolvedResources = await resolveResourceBatch(candidates, args);
   const formData = new FormData();
-  for (const resolved of await resolveResourceBatch(candidates, args)) {
+  for (const resolved of resolvedResources) {
     formData.append("files", new Blob([resolved.bytes], { type: resolved.contentType }), resolved.candidate.fileName);
   }
   formData.append("resourceId", String(resourceId));
@@ -1300,20 +1318,66 @@ async function uploadDocsToDataset(candidates, args) {
     throw new Error("文件直传未返回任何 uploadItems，上传可能未成功；请检查文件类型与知识库资源 ID");
   }
   const builds = [];
+  const buildErrors = new Map();
   for (const item of uploadItems) {
     const filePath = firstNonEmpty(item?.filePath, item?.path, item?.fileUrl);
     if (!filePath) {
       continue;
     }
-    // directoryPath 在 build 接口的语义其实是“单个文件的 filePath”（来自上一步 uploadItems[].filePath），逐个文件触发解析。
-    const built = await requestJson("POST", buildUrl, { resourceId, directoryPath: filePath });
-    builds.push({ filePath, built });
+    try {
+      // directoryPath 在 build 接口的语义其实是“单个文件的 filePath”（来自上一步 uploadItems[].filePath），逐个文件触发解析。
+      const built = await requestJson("POST", buildUrl, { resourceId, directoryPath: filePath });
+      builds.push({ filePath, built });
+    } catch (error) {
+      buildErrors.set(filePath, error instanceof Error ? error.message : String(error));
+    }
   }
   // uploadItems 非空但无一可 build（都缺 filePath）：等于没建任何索引，反映为失败（M6）。
   if (!builds.length) {
     throw new Error("文件已上传但未触发 build（uploadItems 缺少 filePath），知识库未建索引；请检查后端返回");
   }
-  return { resourceId, directoryPath, uploaded, builds };
+  const itemResults = buildUploadDocItemResults(candidates, uploadItems, builds, buildErrors);
+  return {
+    resourceId,
+    directoryPath,
+    uploaded,
+    builds,
+    ...(itemResults.length ? { itemResults } : {}),
+  };
+}
+
+function buildUploadDocItemResults(candidates, uploadItems, builds, buildErrors) {
+  const selected = candidates.filter((candidate) => typeof candidate.itemId === "string" && candidate.itemId);
+  if (!selected.length) {
+    return [];
+  }
+  const selectedNames = selected.map((candidate) => resultFileName(candidate.fileName));
+  const duplicateSelectedNames = new Set(selectedNames.filter((name, index) => name && selectedNames.indexOf(name) !== index));
+  return selected.map((candidate) => {
+    if (duplicateSelectedNames.has(resultFileName(candidate.fileName))) {
+      return { itemId: candidate.itemId, status: "unknown", reason: "ambiguous-file-name" };
+    }
+    const candidateName = resultFileName(candidate.fileName);
+    const matchingUploads = uploadItems.filter((item) => (
+      resultFileName(item?.fileName || item?.name || item?.filePath || item?.path) === candidateName
+    ));
+    if (matchingUploads.length !== 1) {
+      return { itemId: candidate.itemId, status: "unknown", reason: "upload-result-unmapped" };
+    }
+    const uploaded = matchingUploads[0];
+    if (!uploaded) {
+      return { itemId: candidate.itemId, status: "unknown", reason: "upload-result-unmapped" };
+    }
+    const filePath = firstNonEmpty(uploaded.filePath, uploaded.path, uploaded.fileUrl);
+    const buildError = buildErrors.get(filePath);
+    if (buildError) {
+      return { itemId: candidate.itemId, status: "failed", reason: buildError };
+    }
+    const matchingBuilds = builds.filter((item) => item.filePath === filePath);
+    return matchingBuilds.length === 1
+      ? { itemId: candidate.itemId, status: "success", reason: null }
+      : { itemId: candidate.itemId, status: "unknown", reason: "upload-result-unmapped" };
+  });
 }
 
 function normalizeItem(rawItem, args, index) {
@@ -1341,6 +1405,7 @@ function normalizeItem(rawItem, args, index) {
     fileName: sanitizeFileName(rawItem?.fileName, fallbackName),
     sourceUrl,
     markdown,
+    ...compactObject({ itemId: firstNonEmpty(asArray(args["item-id"])[index]) }),
   };
 }
 
@@ -1475,6 +1540,7 @@ function normalizeCanonicalItem(rawItem, args, index, rootDir) {
     author: firstNonEmpty(rawItem.author),
     publishTime: firstNonEmpty(rawItem.publishTime),
     markdown,
+    itemId: firstNonEmpty(asArray(args["item-id"])[index]),
   });
   normalized[CANONICAL_LOCAL_PATH] = markdownPath.absolutePath;
   return normalized;
@@ -1538,6 +1604,14 @@ function normalizeCanonicalCollectionResult(collectionResult, args, rawOutput, r
   validateCanonicalCollectionResult(collectionResult);
   const items = asArray(collectionResult.items)
     .map((item, index) => normalizeCanonicalItem(item, args, index, rootDir));
+  const seenPaths = new Set();
+  for (const item of items) {
+    const canonicalPath = item[CANONICAL_LOCAL_PATH];
+    if (seenPaths.has(canonicalPath)) {
+      throw new Error(`collection-result.json canonical Markdown 路径重复: ${item.fileName}`);
+    }
+    seenPaths.add(canonicalPath);
+  }
   return {
     schemaVersion: collectionResult.schemaVersion,
     title: collectionResult.title,
@@ -1629,7 +1703,8 @@ function buildCollectionResult(args, stdinValue) {
     collectionResult = normalizeCollectionResult({ items: [] }, args, "");
   }
   collectionResult.items = [...(collectionResult.items || []), ...fileItems];
-  if (!collectionResult.items.length) {
+  const acceptsEmptyCanonicalView = input.type === "collection-result-file" && collectionResult.items.length === 0;
+  if (!collectionResult.items.length && !acceptsEmptyCanonicalView) {
     const { uploadable, extractable } = classifyDiscardedDocCandidates(args, stdinValue);
     if (uploadable.length) {
       throw new Error(`检测到 pdf/docx 等文档（${uploadable.join("、")}），请改用 upload-doc 直传入库（后端 QA 解析，免提取）`);
@@ -1688,6 +1763,7 @@ function toMarkdownFiles(collectionResult) {
       fileName: item.fileName,
       markdown: item.markdown,
       size: Buffer.byteLength(item.markdown || "", "utf8"),
+      ...compactObject({ itemId: item.itemId }),
     };
     if (item.localPath) {
       markdownFile.localPath = item.localPath;
@@ -1696,6 +1772,62 @@ function toMarkdownFiles(collectionResult) {
       markdownFile[CANONICAL_LOCAL_PATH] = item[CANONICAL_LOCAL_PATH];
     }
     return markdownFile;
+  });
+}
+
+function resultFileName(value) {
+  if (!value) {
+    return '';
+  }
+  try {
+    return path.basename(new URL(String(value), 'file:///').pathname);
+  } catch {
+    return path.basename(String(value));
+  }
+}
+
+function buildIngestItemResults(markdownFiles, managerResult) {
+  const selected = markdownFiles.filter((item) => typeof item.itemId === 'string' && item.itemId);
+  if (!selected.length) {
+    return [];
+  }
+  const explicit = asArray(managerResult?.itemResults)
+    .filter((item) => item && typeof item === 'object' && typeof item.itemId === 'string')
+    .map((item) => ({
+      itemId: item.itemId,
+      status: ['success', 'failed', 'pending', 'unknown'].includes(item.status) ? item.status : 'unknown',
+      reason: firstNonEmpty(item.reason) || null,
+    }));
+  if (explicit.length) {
+    const byId = new Map(explicit.map((item) => [item.itemId, item]));
+    return selected.map((item) => byId.get(item.itemId) || {
+      itemId: item.itemId,
+      status: 'unknown',
+      reason: 'manager-result-unmapped',
+    });
+  }
+  const uploaded = asArray(managerResult?.uploaded?.uploadItems ?? managerResult?.uploaded?.items);
+  const builds = asArray(managerResult?.builds);
+  const selectedNames = selected.map((item) => resultFileName(item.fileName || item.localPath));
+  const duplicateSelectedNames = new Set(selectedNames.filter((name, index) => name && selectedNames.indexOf(name) !== index));
+  return selected.map((item) => {
+    const expectedName = resultFileName(item.fileName || item.localPath);
+    if (duplicateSelectedNames.has(expectedName)) {
+      return { itemId: item.itemId, status: 'unknown', reason: 'ambiguous-file-name' };
+    }
+    const uploadedMatches = uploaded.filter((entry) => (
+      resultFileName(entry?.fileName || entry?.name || entry?.filePath || entry?.path) === expectedName
+    ));
+    const uploadedPath = uploadedMatches.length === 1
+      ? firstNonEmpty(uploadedMatches[0]?.filePath, uploadedMatches[0]?.path, uploadedMatches[0]?.fileUrl)
+      : '';
+    const buildMatches = builds.filter((entry) => (
+      uploadedPath && firstNonEmpty(entry?.filePath, entry?.path) === uploadedPath
+    ));
+    if (uploadedMatches.length === 1 && buildMatches.length === 1) {
+      return { itemId: item.itemId, status: 'success', reason: null };
+    }
+    return { itemId: item.itemId, status: 'unknown', reason: 'manager-result-unmapped' };
   });
 }
 
@@ -1944,15 +2076,25 @@ async function uploadMarkdownWithKnowledgeManager(args, payloads) {
       directoryPath,
       manager: result.json,
     };
+    const itemResults = buildIngestItemResults(payloads.markdownFiles, result.json);
     return hasCanonicalArtifacts
       ? {
         ...publicResult,
+        ...(itemResults.length ? { itemResults } : {}),
         files: payloads.markdownFiles.map((item) => ({
           fileName: item.fileName,
           source: item[CANONICAL_LOCAL_PATH] ? "validated-canonical" : "runtime-generated",
         })),
       }
-      : { ...publicResult, tempDir, filePaths, reusedFiles, generatedFiles, sessionDirs };
+      : {
+        ...publicResult,
+        ...(itemResults.length ? { itemResults } : {}),
+        tempDir,
+        filePaths,
+        reusedFiles,
+        generatedFiles,
+        sessionDirs,
+      };
   } finally {
     if (tempDir && !args["keep-temp"] && !preserveTempForContinuation) {
       fs.rmSync(tempDir, { recursive: true, force: true });
@@ -2038,12 +2180,17 @@ function buildPayloads(args, stdinValue) {
   const targetConfig = buildTargetConfig(args, stdinJson, task);
   const runId = toNumber(pick(args, "run-id", stdinJson.runId));
   const markdownFiles = toMarkdownFiles(collectionResult);
+  const itemIds = asArray(args["item-id"]).filter((item) => item !== true && firstNonEmpty(item));
+  if (itemIds.length && itemIds.length !== markdownFiles.length) {
+    throw new Error(`--item-id 数量必须与选中 Markdown 数量一致（${itemIds.length} != ${markdownFiles.length}）`);
+  }
   return {
     runId,
     task,
     targetConfig,
     collectionResult,
     markdownFiles,
+    needsMaterialization: markdownFiles.length === 0 && Boolean(args["collection-result-file"]),
     storePayload: compactObject({ runId, task, collectionResult }),
     importPayload: compactObject({ task, targetConfig, markdownFiles }),
   };
@@ -2091,6 +2238,7 @@ async function printHelp() {
       "--confirmed-knowledge-base-resource-id <id> (required for writes)",
       "--confirmed-directory-path <path> (required for writes)",
       "--confirmed-overwrite-path <path> (repeatable; resumes a conflict after exact recheck)",
+      "--item-id <id> (可重复；按 Markdown 输入顺序绑定 inventory itemId)",
       "stdin JSON 或 Markdown 文本",
     ],
     requiredForImport: ["--knowledge-base-resource-id 或 --knowledge-base-id"],
@@ -2168,7 +2316,13 @@ async function main() {
   }
 
   if (command === "normalize") {
-    render({ ok: true, action: "normalize", summary: summarizePayloads(payloads), payloads });
+    render({
+      ok: true,
+      action: "normalize",
+      ...(payloads.needsMaterialization ? { needsMaterialization: true } : {}),
+      summary: summarizePayloads(payloads),
+      payloads,
+    });
     return;
   }
 
@@ -2178,6 +2332,15 @@ async function main() {
   }
 
   if (command === "ingest") {
+    if (payloads.needsMaterialization) {
+      render({
+        ok: true,
+        action: "ingest",
+        needsMaterialization: true,
+        summary: summarizePayloads(payloads),
+      });
+      return;
+    }
     if (!hasImportTarget(payloads.targetConfig)) {
       const listed = await listKnowledgeBases(args, stdinJson);
       render({ ok: true, action: "select-knowledge-base", needsKnowledgeBaseSelection: true, summary: summarizePayloads(payloads), ...listed });
@@ -2190,9 +2353,9 @@ async function main() {
     );
     const directoryPath = firstNonEmpty(payloads.targetConfig.directoryPath, "/");
     assertConfirmedImportTarget(args, resourceId, directoryPath);
-    const resourceUpload = mediaCandidates.length ? await uploadResources(mediaCandidates, args) : undefined;
     if (args["dry-run"]) {
       const uploaded = await uploadMarkdownWithKnowledgeManager(args, payloads);
+      const resourceUpload = mediaCandidates.length ? await uploadResources(mediaCandidates, args) : undefined;
       if (resourceUpload) {
         render({
           ok: true,
@@ -2223,10 +2386,10 @@ async function main() {
         overwritePaths: uploaded.overwritePaths,
         summary: summarizePayloads(payloads),
         continuation: uploaded.continuation,
-        ...(resourceUpload ? { resourceUpload } : {}),
       });
       return;
     }
+    const resourceUpload = mediaCandidates.length ? await uploadResources(mediaCandidates, args) : undefined;
     if (resourceUpload) {
       render({
         ok: true,
@@ -2234,10 +2397,17 @@ async function main() {
         summary: summarizePayloads(payloads),
         resourceUpload,
         knowledgeIngest: uploaded,
+        ...(uploaded.itemResults ? { itemResults: uploaded.itemResults } : {}),
       });
       return;
     }
-    render({ ok: true, action: "ingest", summary: summarizePayloads(payloads), uploaded });
+    render({
+      ok: true,
+      action: "ingest",
+      summary: summarizePayloads(payloads),
+      uploaded,
+      ...(uploaded.itemResults ? { itemResults: uploaded.itemResults } : {}),
+    });
     return;
   }
 

@@ -454,6 +454,20 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertNotIn("token", ingest.lower())
         self.assertNotIn("cookie", ingest.lower())
 
+    def test_skill_main_entry_exposes_closed_loop_execution_order(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "建立或加载正式会话",
+            "`init-session`",
+            "`inspect`",
+            "`itemResults`",
+            "`record-run`",
+            "`cleanup`",
+            "不得直接修改正式 metadata",
+        ):
+            self.assertIn(phrase, skill)
+
     def test_post_processing_state_helper_is_discoverable(self):
         script = SKILL_ROOT / "scripts" / "knowledge-collection-post-processing.mjs"
         processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
