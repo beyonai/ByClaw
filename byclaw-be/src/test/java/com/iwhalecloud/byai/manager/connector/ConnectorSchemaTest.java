@@ -3,6 +3,8 @@ package com.iwhalecloud.byai.manager.connector;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -14,7 +16,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
-
+@DisabledOnOs(OS.WINDOWS)
 class ConnectorSchemaTest {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();

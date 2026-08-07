@@ -6,8 +6,11 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
+import com.iwhalecloud.byai.common.feign.request.datacloud.InvokeActionReq;
+import com.iwhalecloud.byai.common.feign.request.datacloud.Params;
 import com.iwhalecloud.byai.common.feign.request.datacloud.QueryByKnowledgeReq;
 import com.iwhalecloud.byai.common.feign.response.DataCloudResponse;
+import com.iwhalecloud.byai.common.feign.response.datacloud.InvokeActionResp;
 import com.iwhalecloud.byai.common.feign.response.datacloud.QueryByKnowledgeResp;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
@@ -1013,25 +1016,24 @@ public class DevloopApplicationService {
     private static final long INTEGRATION_TESTER_TIMEOUT_MS = 60L * 60 * 1000;
 
     /**
-     * 集成测试结果回收:扫「已下发测试员工、仍 running」的执行,按会话 [PHASE] tester 打点判定终态。
-     * tester DONE=通过、tester REJECT=失败(读结构化结果文件补 total/passed/failed,失败记 kickbackTo 供打回引擎接手);
-     * 无打点且超时判 timeout。收尾只写本 run,不驱动重工——重工仍由 runKickbackSweep 幂等处理。
-     * 由 DevloopIntegrationBatchJob 持锁后单节点调用,与批量触发、打回同一周期。
+     * 集成测试结果回收:扫「已下发测试员工、仍 running」的执行,按会话 [PHASE] tester 打点判定终态。 tester DONE=通过、tester REJECT=失败(读结构化结果文件补
+     * total/passed/failed,失败记 kickbackTo 供打回引擎接手); 无打点且超时判 timeout。收尾只写本 run,不驱动重工——重工仍由 runKickbackSweep 幂等处理。 由
+     * DevloopIntegrationBatchJob 持锁后单节点调用,与批量触发、打回同一周期。
      */
     public void runIntegrationResultSweep() {
         List<IntegrationRun> running = integrationRunService.listRunningWithSession();
         for (IntegrationRun run : running) {
             try {
                 recoverIntegrationResult(run);
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
                 logger.error("[IntegrationResult] 回收执行结果异常, runId={}", run.getRunId(), e);
             }
         }
     }
 
     /**
-     * 单条执行的结果回收:读会话 tester 环节状态决定终态。
-     * done→passed;rejected→failed 并记 coder 打回;两者都未到则看是否超时,超时判 timeout,否则保持 running 等下轮。
+     * 单条执行的结果回收:读会话 tester 环节状态决定终态。 done→passed;rejected→failed 并记 coder 打回;两者都未到则看是否超时,超时判 timeout,否则保持 running 等下轮。
      */
     private void recoverIntegrationResult(IntegrationRun run) {
         DevloopPhaseService.PhaseSnapshot snapshot = devloopPhaseService.buildSnapshot(run.getSessionId());
@@ -1054,8 +1056,8 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 落 run 终态:读结构化结果文件补 total/passed/failed/skipped(缺失按 0);失败/超时记 coder 打回归因,
-     * 供 runKickbackSweep 接手驱动重工。durationSec 从 startedAt 到现在计算。
+     * 落 run 终态:读结构化结果文件补 total/passed/failed/skipped(缺失按 0);失败/超时记 coder 打回归因, 供 runKickbackSweep 接手驱动重工。durationSec 从
+     * startedAt 到现在计算。
      */
     private void applyIntegrationResult(IntegrationRun run, String status, String reason) {
         IntegrationResultDto result = tryReadIntegrationResult(run);
@@ -1077,8 +1079,8 @@ public class DevloopApplicationService {
         run.setFinishedAt(new Date());
         run.setDurationSec((int) ((System.currentTimeMillis() - run.getStartedAt().getTime()) / 1000));
         integrationRunService.update(run);
-        logger.info("[IntegrationResult] runId={} 收尾 status={} total={} failed={}",
-            run.getRunId(), status, run.getTotal(), run.getFailed());
+        logger.info("[IntegrationResult] runId={} 收尾 status={} total={} failed={}", run.getRunId(), status,
+            run.getTotal(), run.getFailed());
     }
 
     /** 把测试员工的结构化结果拼成前端 suites 契约(单套件一条),失败用例名映射为 failedCases[].caseId。 */
@@ -1117,7 +1119,8 @@ public class DevloopApplicationService {
                 return null;
             }
             return taskStateReader.readIntegrationResult(owner.getUserCode(), run.getSessionId());
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.warn("[IntegrationResult] 读结果文件失败, runId={}, sessionId={}", run.getRunId(), run.getSessionId(), e);
             return null;
         }
@@ -1948,6 +1951,19 @@ public class DevloopApplicationService {
         return resp.getData();
     }
 
+    /**
+     * 保存对象实例到知识库
+     *
+     * @param params 请求参数
+     * @return InvokeActionResp
+     */
+    public InvokeActionResp saveObjectInstanceToKb(Params params) {
+        InvokeActionReq invokeActionReq = new InvokeActionReq();
+        invokeActionReq.setParams(params);
+        DataCloudResponse<InvokeActionResp> response = feignDataCloudService.invokeAction(invokeActionReq);
+        return response.getData();
+    }
+
     /** 手工需求 JSON 包裹中携带的已解析、语言无关的数据。 */
     private record ManualRequirementContent(String sourceType, String branch, Long repoId, String originalContent,
         String productContent) {
@@ -2583,8 +2599,8 @@ public class DevloopApplicationService {
      * 按代码平台生成「仓库访问说明」段,填入模板 ${repoCloneHint} 占位符。 显式 repoUrl(自建/私有实例)优先直用;否则按平台公共域名 + 令牌变量拼带令牌的 clone 地址。
      */
     public static String buildRepoCloneHint(String provider, String repoUrl, String repoFullName) {
-        RepoProviderSpec spec = REPO_PROVIDER_SPECS.getOrDefault(
-            StringUtils.defaultIfBlank(provider, "github"), REPO_PROVIDER_SPECS.get("github"));
+        RepoProviderSpec spec = REPO_PROVIDER_SPECS.getOrDefault(StringUtils.defaultIfBlank(provider, "github"),
+            REPO_PROVIDER_SPECS.get("github"));
         // repoFullName 形如 owner/repo 才按公共域名拼接;显式 repoUrl 一律直用,兼容自建实例。
         boolean hasFullName = repoFullName != null && !repoFullName.trim().isEmpty();
         String cloneUrl;
@@ -3642,12 +3658,13 @@ public class DevloopApplicationService {
                 resolveOperationAccountName(
                     findOperationConfigValue(operationConfigMap, "accountOrAddress", "collectAccount")))
             .replace("${collectTopic}", getOperationPromptValue(operationConfigMap, "topic", "collectTopic"))
-            .replace("${collectStartTime}", getOperationPromptValue(operationConfigMap, "onceTime",
-                "effectiveStartDate", "startTime", "collectStart"))
-            .replace("${collectEndTime}", getOperationPromptValue(operationConfigMap, "effectiveEndDate", "endTime",
-                "collectEnd"))
-            .replace("${collectMethod}", getOperationCollectionMethod(
-                findOperationConfigValue(operationConfigMap, "mode", "collectMethod")))
+            .replace("${collectStartTime}",
+                getOperationPromptValue(operationConfigMap, "onceTime", "effectiveStartDate", "startTime",
+                    "collectStart"))
+            .replace("${collectEndTime}",
+                getOperationPromptValue(operationConfigMap, "effectiveEndDate", "endTime", "collectEnd"))
+            .replace("${collectMethod}",
+                getOperationCollectionMethod(findOperationConfigValue(operationConfigMap, "mode", "collectMethod")))
             .replace("${collectSchedule}", getOperationCollectionSchedule(operationConfigMap))
             .replace("${collectOrganize}", getOperationPromptBoolean(operationConfigMap.get("organize")))
             .replace("${collectOntology}",
@@ -4126,8 +4143,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 根据三种采集方式生成标准五段 Cron 并写入扫描源。
-     * 单次的年份、每双周和生效区间无法只靠 Cron 表达，由 DevloopScanJob 结合 config 二次判断。
+     * 根据三种采集方式生成标准五段 Cron 并写入扫描源。 单次的年份、每双周和生效区间无法只靠 Cron 表达，由 DevloopScanJob 结合 config 二次判断。
      */
     private String resolveOperationCronExpr(Map<String, Object> config) {
         if (config == null || config.isEmpty()) {
@@ -4138,8 +4154,8 @@ public class DevloopApplicationService {
             return null;
         }
         if ("once".equalsIgnoreCase(mode)) {
-            LocalDateTime onceTime = parseOperationScheduleDateTime(getOperationConfigText(config, "onceTime",
-                "startTime", "collectStart"));
+            LocalDateTime onceTime = parseOperationScheduleDateTime(
+                getOperationConfigText(config, "onceTime", "startTime", "collectStart"));
             if (onceTime == null) {
                 throw new IllegalArgumentException("onceTime");
             }
@@ -4153,8 +4169,8 @@ public class DevloopApplicationService {
                 int legacyInterval = getOperationConfigInt(config, "intervalValue",
                     getOperationConfigInt(config, "interval", 0));
                 String legacyUnit = getOperationConfigText(config, "intervalUnit", "unit");
-                intervalHours = "minute".equalsIgnoreCase(legacyUnit)
-                    ? Math.max(1, (legacyInterval + 59) / 60) : legacyInterval;
+                intervalHours = "minute".equalsIgnoreCase(legacyUnit) ? Math.max(1, (legacyInterval + 59) / 60)
+                    : legacyInterval;
             }
             List<Integer> weekdays = getOperationConfigIntList(config.get("intervalWeekdays"), 1, 7);
             if (weekdays.isEmpty() && config.containsKey("intervalWeekdays")) {
