@@ -28,7 +28,7 @@
    `--as user`。
 3. 成功依据进程退出码或顶层 `ok == true`；不得把嵌套 OpenAPI `code` 当作唯一成功条件。
 4. 缺少 OpenClaw 飞书渠道时，遵循 `fws` 的渠道配置流程；用户身份 401/403、失效登录、`missing_scope` 或
-   `permission_violations` 时，遵循 `fws` 的授权 split-flow，只请求实际报告缺失的 scope。`lark-cli 1.0.78` 的
+   `permission_violations` 时，遵循 `fws` 的授权 split-flow，只请求实际报告缺失的 scope。`lark-cli 1.0.84` 的
    `im +messages-search --no-reactions` 仍可能预检 reactions scope，必须如实报告，不得把无关 scope 伪称为已授权。
    若 QR 生成失败而返回验证 URL，必须展示该**可点击**链接并同时说明 QR helper 失败；不得阻塞、伪造二维码或宣称认证成功。
 5. 不得在聊天、原始产物或规范化产物写入 App Secret、access/refresh token、device code、Cookie 或会话。
@@ -77,6 +77,7 @@ sanitized/
 ```
 
 - `raw/` 保存已秘密扫描的 CLI JSON 和真实导出文件描述；`markdown/` 保存规范化正文；`sanitized/items/` 保存净化正文。
+- 本地 enterprise runner 的 `--output-dir` 必须是尚不存在的新目录，不得覆盖或混用已有会话。
 - `collection-result.json` 顶层只能使用主契约固定字段，`source` 写 `fws`，`backend` 写 `lark-cli`。
 - 每个 `items[].fileName` 与 `items[].markdown` 必须是采集根目录内指向实际 `sanitized/items/*.md` 文件的相对路径。
 - `sanitized/metadata.json` 按主契约写入完整 inventory。每项提供稳定 `itemId`、`sourceSkill: fws`、来源对象 ID/URL、
