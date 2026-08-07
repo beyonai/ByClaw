@@ -6,6 +6,15 @@ type DevloopProjectType = 'normal' | 'operation' | 'develop' | 'default';
 
 type DevloopProjectShareFlag = 'N' | 'Y';
 
+export type ProjectResourceType = 'knowledge' | 'digital_employee' | 'ontology';
+
+export type ProjectResourcePayload = {
+  resourceType: ProjectResourceType;
+  resourceId: string | number;
+  resourceName?: string;
+  sortNo?: number;
+};
+
 export type DevloopProjectSessionSearchMode = 'DIGITAL_EMPLOYEE' | 'CHAT_CONTENT';
 
 type DevloopProjectShareTargetPayload = {
@@ -20,6 +29,7 @@ type DevloopProjectPayload = {
   projectType?: DevloopProjectType;
   isShare?: DevloopProjectShareFlag;
   shareTargets?: DevloopProjectShareTargetPayload[];
+  resources?: ProjectResourcePayload[];
 };
 
 type DevloopProjectSessionListPayload = {
@@ -118,6 +128,8 @@ export type DevloopTaskItem = {
   assignee?: string;
   agentName?: string;
   avatar?: string;
+  description?: string;
+  taskDescription?: string;
   branchName?: string;
   repoFullName?: string;
   requirementTitle?: string;
@@ -179,6 +191,12 @@ export const listProjects = (data?: { keyword?: string; pageNum?: number; pageSi
   POST<any>('/byaiService/project/list', data || {}, config);
 
 export const getProject = (projectId: number) => POST<any>('/byaiService/project/get', { projectId });
+
+export const listProjectResources = (projectId: number) =>
+  POST<any>('/byaiService/project/resource/list', { projectId });
+
+export const saveProjectResources = (data: { projectId: number; resources: ProjectResourcePayload[] }) =>
+  POST<void>('/byaiService/project/resource/save', data);
 
 export const updateProject = (data: Partial<DevloopProjectPayload> & { projectId: number }) =>
   POST<any>('/byaiService/project/update', data);

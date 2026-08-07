@@ -25,4 +25,7 @@ public class ProjectDTO {
 
     /** 共享对象：支持 USER 人员、ORG 组织 */
     private List<ProjectShareTargetDTO> shareTargets;
+
+    /** 新建/编辑时绑定的知识库、数字员工、本体资源。 */
+    private List<ProjectResourceDTO> resources;
 }

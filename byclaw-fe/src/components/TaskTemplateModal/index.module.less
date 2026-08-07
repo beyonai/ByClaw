@@ -6,7 +6,7 @@
 
   :global(.@{antPrefix}-modal-body) {
     max-height: min(72vh, 720px);
-    padding: 20px;
+    padding: 12px 16px 16px;
     overflow-y: auto;
   }
 }
@@ -41,8 +41,8 @@
 .templateGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 18px;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .templateCard {
@@ -51,8 +51,8 @@
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr) 18px;
   align-items: center;
-  gap: 12px;
-  padding: 14px;
+  gap: 8px;
+  padding: 10px;
   border: 1px solid #e0e6ee;
   border-radius: 8px;
   color: inherit;
@@ -124,12 +124,14 @@
   }
 
   :global(.@{antPrefix}-radio-group) {
-    width: 100%;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    display: inline-flex;
+    width: auto;
   }
 
   :global(.@{antPrefix}-radio-button-wrapper) {
+    flex: none;
+    width: auto;
+    padding: 0 20px;
     text-align: center;
   }
 }
@@ -152,6 +154,11 @@
   :global(.@{antPrefix}-input-number) {
     width: 100%;
   }
+}
+
+// 执行方式从执行主体配置后另起一行；对应的周期/间隔字段紧随其后并保持同一行布局。
+.executionModeField {
+  grid-column: 1;
 }
 
 @media (max-width: 760px) {

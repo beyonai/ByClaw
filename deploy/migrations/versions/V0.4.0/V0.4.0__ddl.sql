@@ -593,7 +593,7 @@ create table byai_project_object_file
     file_name   varchar(200),
     file_path   varchar(500),
     version     varchar(20),
-    status_cd   varchar(20),
+    status_cd   varchar(100),
     ext_content text,
     create_by   bigint,
     create_time timestamp default current_timestamp,
@@ -613,3 +613,24 @@ comment on column byai_project_object_file.ext_content is '扩展文本内容，
 comment on column byai_project_object_file.create_by is '创建人';
 comment on column byai_project_object_file.create_time is '创建时间';
 comment on column byai_project_object_file.update_time is '更新时间';
+
+-- 项目资源绑定关系：支持一个项目绑定多知识库、多数字员工和多本体。
+CREATE TABLE IF NOT EXISTS byai.byai_project_resource
+(
+    id            BIGINT       NOT NULL,
+    project_id    BIGINT       NOT NULL,
+    resource_type VARCHAR(32)  NOT NULL,
+    resource_id   VARCHAR(128) NOT NULL,
+    resource_name VARCHAR(255),
+    sort_no       INT          NOT NULL DEFAULT 0,
+    create_by     BIGINT,
+    create_time   TIMESTAMP,
+    update_by     BIGINT,
+    update_time   TIMESTAMP,
+    delete_flag   VARCHAR(2)   DEFAULT '0',
+    CONSTRAINT pk_byai_project_resource PRIMARY KEY (id),
+    CONSTRAINT uk_byai_project_resource UNIQUE (project_id, resource_type, resource_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_byai_project_resource_project
+    ON byai.byai_project_resource (project_id, resource_type, sort_no);

@@ -3,7 +3,7 @@ import { Empty, Spin, message } from 'antd';
 import { getMimeType } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import fileSiderStyles from '@/layout/sider/components/FileSiderPanel/index.module.less';
 import { getFileType } from '@/layout/sider/components/FileSiderPanel/utils';
-import { downloadFile } from '@/service/fileBrowser';
+import { downloadResourceFileForPreview } from '@/service/file';
 import { getFileUrl } from '@/utils/file';
 import styles from './index.module.less';
 
@@ -34,7 +34,12 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ fileName, resourceI
         return response.blob();
       }
       if (resourceId && path) {
-        const response: any = await downloadFile(resourceId, path);
+        // 知识库关联文件使用 datasetController/download，directoryPath 必须传完整的知识库文件路径。
+        const response: any = await downloadResourceFileForPreview({
+          resourceId,
+          directoryPath: path,
+          language: 'zh-CN',
+        });
         const rawBlob = response?.file instanceof Blob ? response.file : new Blob([response?.file || response]);
         const mimeType = getMimeType(fileName);
         return mimeType ? new Blob([rawBlob], { type: mimeType }) : rawBlob;

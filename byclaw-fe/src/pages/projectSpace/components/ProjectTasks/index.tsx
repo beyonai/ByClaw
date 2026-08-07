@@ -20,6 +20,9 @@ interface Props {
   keyword?: string;
   onOpenSession?: (session: ProjectSession) => void;
   onToolbarChange?: (toolbar: React.ReactNode | null) => void;
+
+  /** 首屏任务加载完成后通知详情页，用于空列表时切换到需求 tab。 */
+  onInitialLoad?: (hasTasks: boolean) => void;
 }
 
 const PAGE_SIZE = 30;
@@ -31,7 +34,18 @@ const normalizeTaskStatus = (task: DevloopTaskItem) => {
   if (label.includes('失败')) return 'failed';
   if (label.includes('暂停')) return 'paused';
   if (label.includes('待开始') || label.includes('待启动')) return 'pending';
-  return `${task.status || task.statusLabel || ''}`.trim().toLowerCase();
+  // 运营任务列表同时存在 status、operationState、taskStatus、currentStatus 多套历史字段，
+  // 统一回退读取，确保待开始任务能够显示启动按钮。
+  return `${
+    task.status ||
+    (task as any).operationState ||
+    (task as any).taskStatus ||
+    (task as any).currentStatus ||
+    task.statusLabel ||
+    ''
+  }`
+    .trim()
+    .toLowerCase();
 };
 
 // 任务接口在不同项目类型下可能返回 todo/doing 或 pending/in_progress 等编码，
@@ -66,7 +80,7 @@ const getTaskStatusColor = (task: DevloopTaskItem) => {
   return 'warning';
 };
 
-const ProjectTasks: React.FC<Props> = ({ project, keyword = '', onOpenSession, onToolbarChange }) => {
+const ProjectTasks: React.FC<Props> = ({ project, keyword = '', onOpenSession, onToolbarChange, onInitialLoad }) => {
   const intl = useIntl();
   const [tasks, setTasks] = useState<DevloopTaskItem[]>([]);
   const [page, setPage] = useState(0);
@@ -104,24 +118,25 @@ const ProjectTasks: React.FC<Props> = ({ project, keyword = '', onOpenSession, o
         const response =
           project.projectType === 'operation'
             ? await listOperationTasks({
-              projectId: Number(project.projectId),
-              keyword: keyword.trim() || undefined,
-              pageNum: nextPage,
-              pageSize: PAGE_SIZE,
-            })
+                projectId: Number(project.projectId),
+                keyword: keyword.trim() || undefined,
+                pageNum: nextPage,
+                pageSize: PAGE_SIZE,
+              })
             : await listTasks({
-              projectId: Number(project.projectId),
-              pageNum: nextPage,
-              pageSize: PAGE_SIZE,
-              onlyMine: false,
-              taskName: keyword.trim() || undefined,
-            });
+                projectId: Number(project.projectId),
+                pageNum: nextPage,
+                pageSize: PAGE_SIZE,
+                onlyMine: false,
+                taskName: keyword.trim() || undefined,
+              });
         const rows = getArrayData(response) as DevloopTaskItem[];
         setTasks((current) => (nextPage === 1 ? rows : [...current, ...rows]));
         setPage(nextPage);
         const loadedCount = (nextPage - 1) * PAGE_SIZE + rows.length;
         // 部分环境不返回 total，满页时保留一个未知余量，确保底部哨兵仍会请求下一页。
         setTotal(getPageTotal(response, loadedCount + (rows.length === PAGE_SIZE ? 1 : 0)));
+        if (nextPage === 1) onInitialLoad?.(rows.length > 0);
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'projectSpace.tasks.loadFailed' }));
         if (nextPage === 1) setTasks([]);
@@ -131,7 +146,7 @@ const ProjectTasks: React.FC<Props> = ({ project, keyword = '', onOpenSession, o
         else setLoadingMore(false);
       }
     },
-    [intl, keyword, project.projectId, project.projectType]
+    [intl, keyword, onInitialLoad, project.projectId, project.projectType]
   );
   const loadTasksRef = useRef(loadTasks);
 
@@ -169,7 +184,11 @@ const ProjectTasks: React.FC<Props> = ({ project, keyword = '', onOpenSession, o
 
   const isOperationPendingTask = (task: DevloopTaskItem) => {
     const status = normalizeTaskStatus(task);
-    return project.projectType === 'operation' && ['pending', 'todo', 'not_started', 'waiting'].includes(status);
+    return (
+      project.projectType === 'operation' &&
+      !task.sessionId &&
+      ['pending', 'todo', 'not_started', 'waiting', '待开始', '待启动'].includes(status)
+    );
   };
 
   const openTaskSession = (task: DevloopTaskItem) => {
@@ -220,7 +239,12 @@ const ProjectTasks: React.FC<Props> = ({ project, keyword = '', onOpenSession, o
                   </div>
                 </div>
                 <Typography.Paragraph className={styles.dataCardDescription} ellipsis={{ rows: 2 }}>
-                  {task.requirementTitle || task.agentName || task.statusLabel || '-'}
+                  {task.description ||
+                    task.taskDescription ||
+                    task.requirementTitle ||
+                    task.agentName ||
+                    task.statusLabel ||
+                    '-'}
                 </Typography.Paragraph>
                 {task.sessionId && !isOperationPendingTask(task) && (
                   <Button type="link" size="small" icon={<MessageOutlined />} onClick={() => openTaskSession(task)}>

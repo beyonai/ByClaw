@@ -1,6 +1,7 @@
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
-import { Button, Empty, Form, Input, InputNumber, Modal, Radio, Select, Spin, message } from 'antd';
+import { Button, DatePicker, Empty, Form, Input, InputNumber, Modal, Radio, Select, Spin, TimePicker, message } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
+import dayjs, { type Dayjs } from 'dayjs';
 import {
   getOperationTaskTemplate,
   listOperationTaskTemplates,
@@ -12,6 +13,21 @@ import { queryAuthDoc } from '@/service/knowledgeCenter';
 import { ResourceTypeMap } from '@/constants/resource';
 import styles from './index.module.less';
 
+export type OntologyObjectValue = {
+  objectCode?: string;
+  objectName?: string;
+  objectDesc?: string;
+  objectSource?: string;
+  fieldCount?: number;
+  actionCount?: number;
+  ownerType?: string;
+  userCode?: string | null;
+  baseId?: string;
+  kbResourceId?: string;
+  kbDirectory?: string;
+  [key: string]: unknown;
+};
+
 export type TaskTemplateFormValues = {
   title: string;
   description: string;
@@ -21,7 +37,9 @@ export type TaskTemplateFormValues = {
   internetScope?: string;
   storageMode?: 'knowledge' | 'ontology';
   targetKnowledge?: string | number;
-  ontology?: string | number;
+
+  /** 选中的本体对象；提交给后端时为完整对象，表单内 Select 使用 objectCode/objectName 作为 value */
+  ontology?: string | number | OntologyObjectValue;
   materialSource?: string | number;
   contentType?: string;
   audience?: string;
@@ -33,8 +51,15 @@ export type TaskTemplateFormValues = {
   agentId?: string | number;
   agentGroupId?: string | number;
   runMode?: 'once' | 'periodic' | 'interval';
-  schedule?: string;
+  onceTime?: Dayjs | string;
+  periodType?: 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly';
+  periodTime?: Dayjs | string;
+  periodWeekdays?: number[];
+  periodMonthDays?: number[];
+  periodYearDateTime?: Dayjs | string;
   intervalHours?: number;
+  intervalWeekdays?: number[];
+  effectiveDateRange?: [Dayjs | null, Dayjs | null] | null;
 };
 
 export type TaskTemplateApplyResult = {
@@ -43,7 +68,13 @@ export type TaskTemplateApplyResult = {
   prompt: string;
 };
 
-type TaskTemplateOption = { label: string; value: string | number };
+type TaskTemplateOption = {
+  label: string;
+  value: string | number;
+
+  /** 本体对象完整信息，提交 execute 时回传给后端 */
+  raw?: OntologyObjectValue;
+};
 
 export interface TaskTemplateModalProps {
   open: boolean;
@@ -78,7 +109,6 @@ const DEFAULT_CONFIG: Record<OperationTaskTemplateType, TaskTemplateFormValues> 
     title: '整理采集素材并沉淀知识',
     description: '对素材去重、摘要并提炼文章亮点、写法和可复用结构。',
     materialSource: '当前会话成果',
-    ontology: '内容方法论本体',
     executorType: 'agent',
     runMode: 'once',
   },
@@ -113,18 +143,28 @@ const DEFAULT_KNOWLEDGE_OPTIONS = [
   '行业案例知识库 / 企业服务',
   '品牌内容知识库 / 历史文章',
 ].map((value) => ({ label: value, value }));
-const DEFAULT_ONTOLOGY_OPTIONS = ['内容方法论本体', '行业案例本体', '品牌内容资产本体'].map((value) => ({
-  label: value,
-  value,
-}));
 const DEFAULT_ACCOUNT_OPTIONS = ['BeyondAI实验室', '百应AI服务号'].map((value) => ({ label: value, value }));
+const WEEKDAY_OPTIONS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'].map((label, index) => ({
+  label,
+  value: index + 1,
+}));
+const MONTH_DAY_OPTIONS = Array.from({ length: 31 }, (_, index) => ({ label: `${index + 1}日`, value: index + 1 }));
+
+const getOntologySelectValue = (ontology: TaskTemplateFormValues['ontology']): string | number | undefined => {
+  if (ontology === undefined || ontology === null) return undefined;
+  if (typeof ontology === 'object') {
+    return (ontology.objectCode || ontology.objectName) as string | undefined;
+  }
+  return ontology;
+};
 
 const resolveInitialOptionValue = (
   options: TaskTemplateOption[],
-  currentValue: string | number | undefined
+  currentValue: string | number | OntologyObjectValue | undefined
 ): string | number | undefined => {
-  if (currentValue === undefined || currentValue === null) return undefined;
-  if (!options.length || options.some((option) => `${option.value}` === `${currentValue}`)) return currentValue;
+  const normalized = getOntologySelectValue(currentValue as TaskTemplateFormValues['ontology']) ?? currentValue;
+  if (normalized === undefined || normalized === null || typeof normalized === 'object') return undefined;
+  if (!options.length || options.some((option) => `${option.value}` === `${normalized}`)) return normalized;
   return options[0].value;
 };
 
@@ -142,8 +182,18 @@ const parseTemplateConfig = (template: OperationTaskTemplate): TaskTemplateFormV
   }
 };
 
-const findOptionLabel = (options: TaskTemplateOption[], value: string | number | undefined, fallback = '-') =>
-  options.find((option) => `${option.value}` === `${value}`)?.label || (value === undefined ? fallback : `${value}`);
+const findOptionLabel = (
+  options: TaskTemplateOption[],
+  value: string | number | OntologyObjectValue | undefined,
+  fallback = '-'
+) => {
+  if (value && typeof value === 'object') {
+    return value.objectName || value.objectCode || fallback;
+  }
+  return (
+    options.find((option) => `${option.value}` === `${value}`)?.label || (value === undefined ? fallback : `${value}`)
+  );
+};
 
 const buildTemplatePrompt = (
   template: OperationTaskTemplate,
@@ -196,12 +246,27 @@ const buildTemplatePrompt = (
     values.executorType === 'group'
       ? findOptionLabel(options.groups, values.agentGroupId, '数字员工组')
       : findOptionLabel(options.agents, values.agentId, '数字员工');
+  const formatValue = (value: unknown, format = 'YYYY-MM-DD HH:mm') =>
+    dayjs.isDayjs(value) ? value.format(format) : value ? String(value) : '-';
+  const weekdays = (values.periodWeekdays || values.intervalWeekdays || [])
+    .map((value) => WEEKDAY_OPTIONS.find((option) => option.value === value)?.label || value)
+    .join('、');
+  const periodTypeLabel =
+    ({ daily: '每天', weekly: '每周', biweekly: '每双周', monthly: '每月', yearly: '每年' } as Record<string, string>)[
+      values.periodType || ''
+    ] || '待设置周期';
   const runMode =
     values.runMode === 'periodic'
-      ? `按周期执行：${values.schedule || '待设置执行周期'}`
+      ? `按周期执行：${periodTypeLabel} ${
+        values.periodType === 'yearly'
+          ? formatValue(values.periodYearDateTime, 'MM-DD HH:mm')
+          : formatValue(values.periodTime, 'HH:mm')
+      }${weekdays ? `（${weekdays}）` : ''}`
       : values.runMode === 'interval'
-        ? `按间隔执行：每 ${values.intervalHours || 1} 小时`
-        : '单次执行';
+        ? `按间隔执行：每 ${values.intervalHours || 1} 小时${weekdays ? `（${weekdays}）` : ''}`
+        : values.runMode === 'once'
+          ? `单次执行：${formatValue(values.onceTime)}`
+          : '单次执行';
   return [
     '请执行以下运营任务：',
     '',
@@ -245,33 +310,55 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
   const storageMode = Form.useWatch('storageMode', form);
   const executorType = Form.useWatch('executorType', form);
   const runMode = Form.useWatch('runMode', form);
+  const periodType = Form.useWatch('periodType', form);
 
   useEffect(() => {
-    if (!selectedTemplate || selectedTemplate.templateType !== 'collect' || storageMode !== 'ontology') return;
+    if (!selectedTemplate || selectedTemplate.templateType !== 'collect' || storageMode !== 'ontology') {
+      setFetchedOntologyOptions([]);
+      return;
+    }
     const kbResourceId = sourceKnowledge || targetKnowledge;
-    if (!kbResourceId) return;
-    void queryObjectsByKnowledge({ kbResourceId, pageIndex: 1, pageSize: 100 }).then((response: any) => {
-      // 兼容本体对象接口的数组、分页 data.items 及历史 data.data.items 返回结构。
-      const rows = Array.isArray(response)
-        ? response
-        : response?.items ||
-          response?.rows ||
-          response?.list ||
-          response?.data?.items ||
-          response?.data?.rows ||
-          response?.data?.list ||
-          response?.data?.data?.items ||
-          [];
-      setFetchedOntologyOptions(
-        rows
-          .map((item: any) => ({
-            value: item.objectCode || item.objectName,
-            label: item.objectName || item.objectCode,
-          }))
-          .filter((item: TaskTemplateOption) => item.value && item.label)
-      );
-    });
-  }, [selectedTemplate, sourceKnowledge, storageMode, targetKnowledge]);
+    if (!kbResourceId) {
+      setFetchedOntologyOptions([]);
+      form.setFieldValue('ontology', undefined);
+      return;
+    }
+    void queryObjectsByKnowledge({ kbResourceId, pageIndex: 1, pageSize: 100 })
+      .then((response: any) => {
+        // 兼容本体对象接口的数组、分页 data.items 及历史 data.data.items 返回结构。
+        const rows = Array.isArray(response)
+          ? response
+          : response?.items ||
+            response?.rows ||
+            response?.list ||
+            response?.data?.items ||
+            response?.data?.rows ||
+            response?.data?.list ||
+            response?.data?.data?.items ||
+            [];
+        const options = rows
+          .map((item: any) => {
+            const value = item.objectCode || item.objectName;
+            const label = item.objectName || item.objectCode;
+            if (!value || !label) return null;
+            return {
+              value,
+              label,
+              raw: item as OntologyObjectValue,
+            };
+          })
+          .filter(Boolean) as TaskTemplateOption[];
+        setFetchedOntologyOptions(options);
+        // 接口无数据时不展示写死选项，并清空已选本体。
+        if (!options.length) {
+          form.setFieldValue('ontology', undefined);
+        }
+      })
+      .catch(() => {
+        setFetchedOntologyOptions([]);
+        form.setFieldValue('ontology', undefined);
+      });
+  }, [form, selectedTemplate, sourceKnowledge, storageMode, targetKnowledge]);
 
   useEffect(() => {
     if (!open) return;
@@ -286,32 +373,28 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
       })
       .catch((error: any) => message.error(error?.message || '任务模板加载失败'))
       .finally(() => setLoading(false));
-    // 未由调用方传入知识库时，按当前账号权限读取个人和已授权知识库，避免展示固定示例数据。
+    // 未由调用方传入知识库时，按当前账号可读范围拉取（type=all），避免展示固定示例数据。
     if (!knowledgeOptions.length) {
       const query = {
         pageNum: 1,
-        pageSize: 100,
+        pageSize: 1000,
         resourceBizTypes: [
           ResourceTypeMap.knowledgeBase,
           ResourceTypeMap.knowledgeBaseQa,
           ResourceTypeMap.knowledgeBaseTerm,
         ],
+        type: 'all',
       };
-      void Promise.all([queryAuthDoc({ ...query, type: 'owner' }), queryAuthDoc({ ...query, type: 'authorize' })]).then(
-        ([owned, authorized]) => {
-          const rows = [
-            ...(owned?.rows || owned?.list || owned?.data?.rows || owned?.data?.list || []),
-            ...(authorized?.rows || authorized?.list || authorized?.data?.rows || authorized?.data?.list || []),
-          ];
-          const unique = new Map<string, TaskTemplateOption>();
-          rows.forEach((item: any) => {
-            const value = item.resourceId ?? item.resourceSourcePkId ?? item.datasetId ?? item.id;
-            const label = item.resourceName || item.datasetName || item.name;
-            if (value !== undefined && label) unique.set(`${value}`, { value, label });
-          });
-          setFetchedKnowledgeOptions(Array.from(unique.values()));
-        }
-      );
+      void queryAuthDoc(query).then((response) => {
+        const rows = response?.rows || response?.list || response?.data?.rows || response?.data?.list || [];
+        const unique = new Map<string, TaskTemplateOption>();
+        rows.forEach((item: any) => {
+          const value = item.resourceId ?? item.resourceSourcePkId ?? item.datasetId ?? item.id;
+          const label = item.resourceName || item.datasetName || item.name;
+          if (value !== undefined && label) unique.set(`${value}`, { value, label });
+        });
+        setFetchedKnowledgeOptions(Array.from(unique.values()));
+      });
     }
     // 每次打开都重新读取启用模板，避免后台停用后仍展示旧缓存；详情仍由用户从目录中选择。
   }, [form, initialTemplateType, open]);
@@ -322,16 +405,17 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
       const detail = await getOperationTaskTemplate(template.templateId);
       const resolvedTemplate = detail || template;
       const templateValues = parseTemplateConfig(resolvedTemplate);
+      const toDateTime = (value: unknown) => {
+        if (!value) return undefined;
+        const parsed = dayjs(value as string);
+        return parsed.isValid() ? parsed : undefined;
+      };
       const resolvedKnowledgeOptions = knowledgeOptions.length
         ? knowledgeOptions
         : fetchedKnowledgeOptions.length
           ? fetchedKnowledgeOptions
           : DEFAULT_KNOWLEDGE_OPTIONS;
-      const resolvedOntologyOptions = ontologyOptions.length
-        ? ontologyOptions
-        : fetchedOntologyOptions.length
-          ? fetchedOntologyOptions
-          : DEFAULT_ONTOLOGY_OPTIONS;
+      const resolvedOntologyOptions = ontologyOptions.length ? ontologyOptions : fetchedOntologyOptions;
       const resolvedAccountOptions = accountOptions.length ? accountOptions : DEFAULT_ACCOUNT_OPTIONS;
       setSelectedTemplate(resolvedTemplate);
       form.setFieldsValue({
@@ -344,6 +428,9 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
         account: resolveInitialOptionValue(resolvedAccountOptions, templateValues.account),
         agentId: agentOptions[0]?.value || '当前数字员工',
         agentGroupId: agentGroupOptions[0]?.value,
+        onceTime: toDateTime(templateValues.onceTime),
+        periodTime: toDateTime(templateValues.periodTime),
+        periodYearDateTime: toDateTime(templateValues.periodYearDateTime),
       });
     } catch (error: any) {
       message.error(error?.message || '任务模板详情加载失败');
@@ -372,12 +459,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
     [fetchedKnowledgeOptions, knowledgeOptions]
   );
   const availableOntologyOptions = useMemo(
-    () =>
-      ontologyOptions.length
-        ? ontologyOptions
-        : fetchedOntologyOptions.length
-          ? fetchedOntologyOptions
-          : DEFAULT_ONTOLOGY_OPTIONS,
+    () => (ontologyOptions.length ? ontologyOptions : fetchedOntologyOptions),
     [fetchedOntologyOptions, ontologyOptions]
   );
   const availableAccountOptions = useMemo(
@@ -390,6 +472,21 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
     setApplyingTemplate(true);
     try {
       const values = await form.validateFields();
+      const ontologyOption = availableOntologyOptions.find(
+        (option) => `${option.value}` === `${getOntologySelectValue(values.ontology) ?? values.ontology}`
+      );
+      // 表单 Select 存的是编码/名称，提交给后端时改为完整本体对象。
+      const submitValues: TaskTemplateFormValues = {
+        ...values,
+        ontology:
+          ontologyOption?.raw ||
+          (ontologyOption
+            ? {
+              objectCode: String(ontologyOption.value),
+              objectName: ontologyOption.label,
+            }
+            : values.ontology),
+      };
       const prompt = buildTemplatePrompt(selectedTemplate, values, {
         agents: fallbackAgentOptions,
         groups: availableGroupOptions,
@@ -397,7 +494,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
         ontologies: availableOntologyOptions,
         accounts: availableAccountOptions,
       });
-      await onApply({ template: selectedTemplate, values, prompt });
+      await onApply({ template: selectedTemplate, values: submitValues, prompt });
     } catch (error: any) {
       // 运营启动失败由父组件提示并保留当前模板草稿；表单校验错误由 Form 自己展示。
       if (error?.errorFields) return;
@@ -586,7 +683,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
             <section className={styles.executionSection}>
               <strong>执行配置</strong>
               <div className={styles.executionGrid}>
-                <Form.Item label="执行主体" name="executorType">
+                <Form.Item label="执行主体" name="executorType" rules={[{ required: true, message: '请选择执行主体' }]}>
                   <Select
                     options={[
                       { label: '数字员工', value: 'agent' },
@@ -611,7 +708,12 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
                     <Select options={fallbackAgentOptions} showSearch optionFilterProp="label" />
                   </Form.Item>
                 )}
-                <Form.Item label="执行方式" name="runMode">
+                <Form.Item
+                  className={styles.executionModeField}
+                  label="执行方式"
+                  name="runMode"
+                  rules={[{ required: true, message: '请选择执行方式' }]}
+                >
                   <Select
                     options={[
                       { label: '单次执行', value: 'once' },
@@ -620,23 +722,60 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
                     ]}
                   />
                 </Form.Item>
-                {runMode === 'periodic' && (
-                  <Form.Item
-                    label="周期规则"
-                    name="schedule"
-                    rules={[{ required: true, whitespace: true, message: '请输入周期规则' }]}
-                  >
-                    <Input placeholder="例如：每周一 09:00" />
+                {runMode === 'once' && (
+                  <Form.Item label="执行时间" name="onceTime" rules={[{ required: true, message: '请选择执行时间' }]}>
+                    <DatePicker showTime={{ format: 'HH:mm' }} format="YYYY-MM-DD HH:mm" style={{ width: '100%' }} />
                   </Form.Item>
                 )}
+                {runMode === 'periodic' && (
+                  <>
+                    <Form.Item label="周期类型" name="periodType" rules={[{ required: true, message: '请选择周期类型' }]}>
+                      <Select
+                        options={[
+                          { label: '每天', value: 'daily' },
+                          { label: '每周', value: 'weekly' },
+                          { label: '每双周', value: 'biweekly' },
+                          { label: '每月', value: 'monthly' },
+                          { label: '每年', value: 'yearly' },
+                        ]}
+                      />
+                    </Form.Item>
+                    {periodType === 'yearly' ? (
+                      <Form.Item label="月日时分" name="periodYearDateTime" rules={[{ required: true, message: '请选择月日时分' }]}>
+                        <DatePicker showTime={{ format: 'HH:mm' }} format="MM-DD HH:mm" style={{ width: '100%' }} />
+                      </Form.Item>
+                    ) : (
+                      <Form.Item label="执行时分" name="periodTime" rules={[{ required: true, message: '请选择执行时分' }]}>
+                        <TimePicker format="HH:mm" style={{ width: '100%' }} />
+                      </Form.Item>
+                    )}
+                    {(periodType === 'weekly' || periodType === 'biweekly') && (
+                      <Form.Item label="执行日" name="periodWeekdays" rules={[{ required: true, type: 'array', min: 1, message: '请选择执行日' }]}>
+                        <Select mode="multiple" options={WEEKDAY_OPTIONS} />
+                      </Form.Item>
+                    )}
+                    {periodType === 'monthly' && (
+                      <Form.Item label="执行日期" name="periodMonthDays" rules={[{ required: true, type: 'array', min: 1, message: '请选择执行日期' }]}>
+                        <Select mode="multiple" options={MONTH_DAY_OPTIONS} />
+                      </Form.Item>
+                    )}
+                    <Form.Item label="生效日期区间" name="effectiveDateRange">
+                      <DatePicker.RangePicker style={{ width: '100%' }} />
+                    </Form.Item>
+                  </>
+                )}
                 {runMode === 'interval' && (
-                  <Form.Item
-                    label="间隔小时数"
-                    name="intervalHours"
-                    rules={[{ required: true, message: '请输入间隔小时数' }]}
-                  >
-                    <InputNumber min={1} precision={0} />
-                  </Form.Item>
+                  <>
+                    <Form.Item label="每几小时" name="intervalHours" rules={[{ required: true, message: '请输入间隔小时数' }]}>
+                      <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+                    </Form.Item>
+                    <Form.Item label="执行日" name="intervalWeekdays" rules={[{ required: true, type: 'array', min: 1, message: '请选择执行日' }]}>
+                      <Select mode="multiple" options={WEEKDAY_OPTIONS} />
+                    </Form.Item>
+                    <Form.Item label="生效日期区间" name="effectiveDateRange">
+                      <DatePicker.RangePicker style={{ width: '100%' }} />
+                    </Form.Item>
+                  </>
                 )}
               </div>
             </section>

@@ -79,6 +79,9 @@ export const normalizeProject = (item: any): ProjectSpace => ({
   sessions: (item?.sessions || []).map((session: any) => normalizeProjectSession(session, `${item?.projectId || ''}`)),
   repos: Array.isArray(item?.repos) ? item.repos : undefined,
   shareTargets: Array.isArray(item?.shareTargets) ? item.shareTargets.map(normalizeShareTarget) : undefined,
+  resources: Array.isArray(item?.resources) ? item.resources : [],
+  // boundResources 保留别名，兼容早期详情组件对该字段的读取。
+  boundResources: Array.isArray(item?.resources) ? item.resources : [],
 });
 
 export const normalizeProjectDetail = (response: any, fallback?: ProjectSpace): ProjectSpace | undefined => {

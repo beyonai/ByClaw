@@ -23,7 +23,12 @@ import {
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import { getStoredProjectScopeId, saveProjectScopeIdToStorage } from '@/pages/projectSpace/constants';
-import { saveDefaultAgent, saveProjectMembers, type DevloopProjectSessionSearchMode } from '@/service/devloop';
+import {
+  saveDefaultAgent,
+  saveProjectMembers,
+  saveProjectResources,
+  type DevloopProjectSessionSearchMode,
+} from '@/service/devloop';
 import { SiderContentContext } from '../../siderContentContext';
 import DialogueCard from '../DialogueList/DialogueCard';
 import ProjectDetailPanel from './ProjectDetailModal';
@@ -341,6 +346,7 @@ const ProjectSpaceList: React.FC = () => {
       projectType: editingProject.projectType,
       sharedFlag: editingProject.sharedFlag,
       shareMembers: (editingProject.members || []).map(normalizeProjectMember),
+      resources: editingProject.resources || editingProject.boundResources || [],
     };
   }, [editingProject]);
 
@@ -1105,8 +1111,13 @@ const ProjectSpaceList: React.FC = () => {
           projectType: values.projectType,
           isShare: submitSharedFlag ? 'Y' : 'N',
           shareTargets: [],
+          resources: values.resources || [],
         };
         await updateProject(updatePayload);
+        await saveProjectResources({
+          projectId: Number(editingProject.projectId),
+          resources: values.resources || [],
+        });
         if (submitSharedFlag && values.shareMembersLoaded) {
           await syncProjectShareMembers(editingProject.projectId, shareMembers);
         }
@@ -1124,6 +1135,7 @@ const ProjectSpaceList: React.FC = () => {
               submitSharedFlag && values.shareMembersLoaded
                 ? shareMembers.map(normalizeProjectMember)
                 : prev[editingProject.projectId]?.members,
+            resources: values.resources || [],
             shareTargets: [],
           },
         }));
@@ -1137,6 +1149,7 @@ const ProjectSpaceList: React.FC = () => {
             projectType: values.projectType,
             isShare: submitSharedFlag ? 'Y' : 'N',
             sharedFlag: submitSharedFlag,
+            resources: values.resources || [],
           };
         });
       } else {
@@ -1147,6 +1160,7 @@ const ProjectSpaceList: React.FC = () => {
           projectType: values.projectType,
           isShare: submitSharedFlag ? 'Y' : 'N',
           shareTargets: [],
+          resources: values.resources || [],
         });
         createdProjectId = getProjectIdFromSaveResponse(res);
         if (createdProjectId && submitSharedFlag && shareMembers.length) {
