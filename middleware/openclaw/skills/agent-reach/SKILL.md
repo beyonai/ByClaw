@@ -1,6 +1,6 @@
 ---
 name: agent-reach
-description: Use when the user asks to research, search, read, or look up anything on the internet; mentions or shares a webpage, GitHub, YouTube, Bilibili, V2EX, Twitter/X, Reddit, Xiaohongshu, LinkedIn, podcasts, RSS, jobs, code, or social-platform content.
+description: Use when the goal is to READ or LOOK UP something on the public internet for an immediate answer - research, search, or read a webpage, GitHub, YouTube, Bilibili, V2EX, Twitter/X, Reddit, Xiaohongshu, LinkedIn, podcasts, RSS, jobs, code, or social-platform content. This is the public-internet channel router only; it picks a channel and executor and does not archive results. If the user wants material collected, crawled in batch, archived, or ingested into a knowledge base, use knowledge-collection instead.
 ---
 
 # Agent Reach — 互联网能力路由器

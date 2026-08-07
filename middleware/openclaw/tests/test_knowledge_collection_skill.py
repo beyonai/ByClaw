@@ -16,8 +16,11 @@ META_PROMPT_SERVICE = (
     / "src/main/java/com/iwhalecloud/byai/manager/application/service/digitemploy/MetaPromptService.java"
 )
 DESCRIPTION = (
-    "Use when the user asks to collect, crawl, batch-search, archive, ingest, or organize information from internet "
-    "or enterprise sources, or wants existing collected files stored in a knowledge base."
+    "Use when the goal is to COLLECT and keep material rather than just get an answer - collect, crawl, scrape, "
+    "batch-search, archive, ingest, or organize content from internet or enterprise sources, or store "
+    "already-collected files in a knowledge base. This is the collection orchestrator and owns collection artifacts, "
+    "post-processing, and knowledge-base ingestion; prefer it over agent-reach whenever collection intent is explicit, "
+    "even for a single page or result."
 )
 INTERFACE = {
     "display_name": "知识采集",
