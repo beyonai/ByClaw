@@ -1,6 +1,10 @@
 package com.iwhalecloud.byai.manager.domain.project.service;
 
 import com.iwhalecloud.byai.common.exception.BaseException;
+import com.iwhalecloud.byai.common.util.RedisUtil;
+import com.iwhalecloud.byai.common.constants.staticdata.RedisConfig;
+import com.iwhalecloud.byai.manager.entity.staticdata.ByaiSystemConfig;
+import com.alibaba.fastjson2.JSON;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -33,6 +37,65 @@ public class GitCommandExecutor {
     private static final long SUBMODULE_TIMEOUT_SECONDS = 600;
 
     /**
+     * 克隆操作超时时间（15 分钟，因为可能需要下载大量数据）
+     */
+    private static final long CLONE_TIMEOUT_SECONDS = 900;
+
+    /**
+     * 从 Redis 获取默认超时配置
+     *
+     * @return 超时时间（秒），如果未配置则返回默认值
+     */
+    private long getDefaultTimeout() {
+        return getTimeoutFromRedis(RedisConfig.GIT_TIMEOUT_DEFAULT_PARAM_CODE, DEFAULT_TIMEOUT_SECONDS);
+    }
+
+    /**
+     * 从 Redis 获取子模块超时配置
+     *
+     * @return 超时时间（秒），如果未配置则返回默认值
+     */
+    private long getSubmoduleTimeout() {
+        return getTimeoutFromRedis(RedisConfig.GIT_TIMEOUT_SUBMODULE_PARAM_CODE, SUBMODULE_TIMEOUT_SECONDS);
+    }
+
+    /**
+     * 从 Redis 获取克隆超时配置
+     *
+     * @return 超时时间（秒），如果未配置则返回默认值
+     */
+    private long getCloneTimeout() {
+        return getTimeoutFromRedis(RedisConfig.GIT_TIMEOUT_CLONE_PARAM_CODE, CLONE_TIMEOUT_SECONDS);
+    }
+
+    /**
+     * 从 Redis 读取超时配置
+     *
+     * @param paramCode 参数编码
+     * @param defaultValue 默认值
+     * @return 超时时间（秒）
+     */
+    private long getTimeoutFromRedis(String paramCode, long defaultValue) {
+        try {
+            String configJson = RedisUtil.hmGet(RedisConfig.SYSTEM_CONFIG_CODE_KEY, paramCode);
+            if (configJson != null && !configJson.isEmpty()) {
+                ByaiSystemConfig config = JSON.parseObject(configJson, ByaiSystemConfig.class);
+                if (config != null && config.getParamValue() != null) {
+                    long timeout = Long.parseLong(config.getParamValue());
+                    if (timeout > 0) {
+                        log.debug("Using Redis timeout config: {} = {} seconds", paramCode, timeout);
+                        return timeout;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to read Git timeout config from Redis: {}, using default: {} seconds",
+                paramCode, defaultValue, e);
+        }
+        return defaultValue;
+    }
+
+    /**
      * 执行 Git 命令（使用默认超时）
      *
      * @param repoPath Git 仓库路径
@@ -41,7 +104,7 @@ public class GitCommandExecutor {
      * @throws BaseException 如果命令执行失败或超时
      */
     public String executeCommand(Path repoPath, String... command) throws BaseException {
-        return executeCommand(repoPath, DEFAULT_TIMEOUT_SECONDS, command);
+        return executeCommand(repoPath, getDefaultTimeout(), command);
     }
 
     /**
@@ -122,13 +185,14 @@ public class GitCommandExecutor {
      * @throws BaseException 如果命令执行失败或超时
      */
     public String executeSubmoduleCommand(Path repoPath, String... command) throws BaseException {
-        return executeCommand(repoPath, SUBMODULE_TIMEOUT_SECONDS, command);
+        return executeCommand(repoPath, getSubmoduleTimeout(), command);
     }
 
     /**
      * 启动一个线程异步读取进程输出流
      *
      * 防止输出缓冲区满导致进程阻塞
+     * 同时实时打印输出到日志（对大仓库克隆尤其重要）
      */
     private Thread startOutputReader(java.io.InputStream inputStream, StringBuilder output) {
         Thread thread = new Thread(() -> {
@@ -137,6 +201,8 @@ public class GitCommandExecutor {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     output.append(line).append("\n");
+                    // 实时打印到日志（INFO 级别，便于观察大仓库克隆进度）
+                    log.info("Git output: {}", line);
                 }
             } catch (IOException e) {
                 log.warn("Error reading process output: {}", e.getMessage());
@@ -341,8 +407,8 @@ public class GitCommandExecutor {
         command.add(repoUrl);
         command.add(targetPath.toString());
 
-        // 使用更长的超时时间（15分钟），因为克隆可能需要下载大量数据
-        long cloneTimeout = 900; // 15 minutes
+        // 使用动态配置的克隆超时时间（从 Redis 读取，默认 15 分钟）
+        long cloneTimeout = getCloneTimeout();
 
         log.info("Cloning repository from {} to {} (branch: {})",
             repoUrl, targetPath, branch != null ? branch : "default");
