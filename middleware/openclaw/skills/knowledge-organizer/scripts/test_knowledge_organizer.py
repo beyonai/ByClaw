@@ -193,7 +193,7 @@ class KnowledgeOrganizerTests(unittest.TestCase):
             {
                 "service_env": "BE_DOMAINNAME",
                 "method": "POST",
-                "path": "/devloop/operation/listObjectById",
+                "path": "/byaiService/devloop/operation/listObjectById",
                 "payload": {"sessionId": "session-001"},
             },
         )
@@ -202,7 +202,7 @@ class KnowledgeOrganizerTests(unittest.TestCase):
             {
                 "service_env": "BE_DOMAINNAME",
                 "method": "POST",
-                "path": "/devloop/operation/saveOrUpdateObjectFiles",
+                "path": "/byaiService/devloop/operation/saveOrUpdateObjectFiles",
                 "payload": {"objectFiles": [{"objectCode": "raw_doc"}]},
             },
         )
@@ -217,8 +217,6 @@ class KnowledgeOrganizerTests(unittest.TestCase):
             source=source,
             object_code="raw_doc",
             storage_file_name="客户访谈.md",
-            version="2.0.0",
-            status_cd="00A",
             ext_content={"source": "interview"},
         )
 
@@ -228,7 +226,7 @@ class KnowledgeOrganizerTests(unittest.TestCase):
         self.assertEqual(payload["objectName"], "原始文档")
         self.assertEqual(payload["objectCode"], "raw_doc")
         self.assertEqual(payload["fileName"], "客户访谈.md")
-        self.assertEqual(payload["version"], "2.0.0")
+        self.assertEqual(payload["version"], "1.0.0")
         self.assertEqual(payload["statusCd"], "00A")
         self.assertEqual(
             json.loads(str(payload["extContent"])),
@@ -413,6 +411,8 @@ class KnowledgeOrganizerTests(unittest.TestCase):
             text=True,
         )
         self.assertIn("--ext-content-json", ingest_help.stdout)
+        self.assertNotIn("--version", ingest_help.stdout)
+        self.assertNotIn("--status-cd", ingest_help.stdout)
         self.assertNotIn("--labels-json", ingest_help.stdout)
 
 

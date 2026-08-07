@@ -29,11 +29,9 @@ python3 <技能目录>/scripts/knowledge_organizer.py ingest \
 
 支持 `.md`、`.txt`、`.json` 文件。
 
-只有用户或上游流程提供了对应值时，才添加以下可选参数：
+只有用户或上游流程提供了额外元数据时，才添加：
 
 ```bash
---version "<版本>" \
---status-cd "<状态>" \
 --ext-content-json '<元数据JSON>'
 ```
 

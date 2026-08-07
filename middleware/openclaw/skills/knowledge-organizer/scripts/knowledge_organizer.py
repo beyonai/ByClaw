@@ -19,6 +19,8 @@ WORKFLOW_DIRECTORY = "knowledge-organizer"
 STATE_FILE = "state.json"
 OBJECT_FIELDS = ("objectCode", "objectName", "objectDesc", "properties")
 SUPPORTED_SOURCE_SUFFIXES = {".md", ".txt", ".json"}
+OBJECT_FILE_VERSION = "1.0.0"
+OBJECT_FILE_STATUS_CD = "00A"
 
 
 class OrganizerApi(Protocol):
@@ -77,7 +79,7 @@ class ServiceApi:
         result = self.transport.request(
             service_env="BE_DOMAINNAME",
             method="POST",
-            path="/devloop/operation/listObjectById",
+            path="/byaiService/devloop/operation/listObjectById",
             payload={"sessionId": session_id},
         )
         return result if isinstance(result, dict) else {}
@@ -94,7 +96,7 @@ class ServiceApi:
         result = self.transport.request(
             service_env="BE_DOMAINNAME",
             method="POST",
-            path="/devloop/operation/saveOrUpdateObjectFiles",
+            path="/byaiService/devloop/operation/saveOrUpdateObjectFiles",
             payload={"objectFiles": object_files},
         )
         return result if isinstance(result, list) else []
@@ -339,8 +341,6 @@ class KnowledgeOrganizer:
         source: Path,
         object_code: str,
         storage_file_name: str,
-        version: str = "1.0.0",
-        status_cd: str = "00A",
         ext_content: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         task_dir = task_dir.resolve()
@@ -351,10 +351,6 @@ class KnowledgeOrganizer:
         if object_info["domain"] != "ods":
             raise ValueError(f"ingest 只能使用 ODS 对象: {object_code}")
         self._validate_storage_file_name(storage_file_name)
-        version = version.strip()
-        status_cd = status_cd.strip()
-        if not version or not status_cd:
-            raise ValueError("version 和 status cd 不能为空")
         if ext_content is None:
             ext_content = {}
         if not isinstance(ext_content, dict):
@@ -373,8 +369,8 @@ class KnowledgeOrganizer:
             "objectCode": object_code,
             "fileName": storage_file_name,
             "filePath": str(snapshot),
-            "version": version,
-            "statusCd": status_cd,
+            "version": OBJECT_FILE_VERSION,
+            "statusCd": OBJECT_FILE_STATUS_CD,
             "extContent": json.dumps(ext_content, ensure_ascii=False, separators=(",", ":")),
         }
         try:
@@ -401,8 +397,6 @@ class KnowledgeOrganizer:
             "object_code": object_code,
             "object_name": object_info["object_name"],
             "storage_file_name": storage_file_name,
-            "version": version,
-            "status_cd": status_cd,
             "ext_content": ext_content,
             "object_file_id": saved.get("id"),
             "status": "succeeded",
@@ -414,8 +408,8 @@ class KnowledgeOrganizer:
     def organize(
         self, task_dir: Path, object_codes: list[str] | None = None
     ) -> dict[str, Any]:
-        """Submit an asynchronous document-object discovery task."""
-        return self._submit_async(
+        """Submit a document-object discovery task for background processing."""
+        return self._submit_background_task(
             task_dir,
             object_codes=object_codes,
             required_domain="ads",
@@ -427,8 +421,8 @@ class KnowledgeOrganizer:
     def build(
         self, task_dir: Path, object_codes: list[str] | None = None
     ) -> dict[str, Any]:
-        """Submit an asynchronous document-object enrichment task."""
-        return self._submit_async(
+        """Submit a document-object enrichment task for background processing."""
+        return self._submit_background_task(
             task_dir,
             object_codes=object_codes,
             required_domain="ads",
@@ -437,7 +431,7 @@ class KnowledgeOrganizer:
             submit=self.api.enrich_document_objects,
         )
 
-    def _submit_async(
+    def _submit_background_task(
         self,
         task_dir: Path,
         *,
@@ -460,13 +454,13 @@ class KnowledgeOrganizer:
         try:
             response = submit(session_id=session_id, object_codes=normalized_codes)
             if not isinstance(response, dict) or response.get("accepted") is not True:
-                raise ValueError("异步任务响应未确认 accepted=true")
+                raise ValueError("后台任务响应未确认 accepted=true")
             response_session_id = response.get("sessionId")
             if response_session_id is not None and response_session_id != session_id:
-                raise ValueError(f"异步任务会话不匹配: {response_session_id}")
+                raise ValueError(f"后台任务会话不匹配: {response_session_id}")
             task_type = response.get("taskType")
             if task_type is not None and task_type != expected_task_type:
-                raise ValueError(f"异步任务类型不匹配: {task_type}")
+                raise ValueError(f"后台任务类型不匹配: {task_type}")
             record = {
                 "session_id": session_id,
                 "object_codes": normalized_codes,
@@ -703,8 +697,6 @@ def main(argv: list[str] | None = None) -> int:
     ingest.add_argument("--source", required=True, type=Path)
     ingest.add_argument("--object-code", required=True)
     ingest.add_argument("--storage-file-name", required=True)
-    ingest.add_argument("--version", default="1.0.0")
-    ingest.add_argument("--status-cd", default="00A")
     ingest.add_argument("--ext-content-json", default="{}")
 
     organize = commands.add_parser("organize", help="提交异步文档对象发现任务")
@@ -731,8 +723,6 @@ def main(argv: list[str] | None = None) -> int:
                 source=args.source,
                 object_code=args.object_code,
                 storage_file_name=args.storage_file_name,
-                version=args.version,
-                status_cd=args.status_cd,
                 ext_content=_json_object(
                     args.ext_content_json,
                     parser,
