@@ -23,11 +23,14 @@ import com.iwhalecloud.byai.manager.dto.devloop.OperationRequirementDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationAccountDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationRequirementStartDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationTaskDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFileDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ObjectFileSaveDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationEnvDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationSuiteDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.DefaultAgentDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.TesterConfigDTO;
+import com.iwhalecloud.byai.manager.entity.devloop.ProjectObjectFile;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -668,5 +671,32 @@ public class DevloopController {
     public ResponseUtil<InvokeActionResp> saveObjectInstanceToKb(@RequestBody Params params) {
         InvokeActionResp invokeActionResp = applicationService.saveObjectInstanceToKb(params);
         return ResponseUtil.successResponse(invokeActionResp);
+    }
+
+    /**
+     * 批量保存或更新项目业务对象关联文件。
+     *
+     * @param objectFileSaveDTO 对象文件列表
+     * @return 保存后的实体列表
+     */
+    @PostMapping("/operation/saveOrUpdateObjectFiles")
+    public ResponseUtil<List<ProjectObjectFile>> saveOrUpdateObjectFiles(
+        @RequestBody ObjectFileSaveDTO objectFileSaveDTO) {
+        List<ProjectObjectFile> projectObjectFiles = applicationService.saveOrUpdateObjectFiles(objectFileSaveDTO);
+        return ResponseUtil.successResponse(projectObjectFiles);
+    }
+
+
+    /**
+     * 按项目与会话查询业务对象关联文件。
+     *
+     * @param listObjectFileDto 查询条件
+     * @return 对象文件列表
+     */
+    @PostMapping("/operation/listProjectObjectFiles")
+    public ResponseUtil<List<ProjectObjectFile>> listProjectObjectFiles(
+        @RequestBody ListObjectFileDto listObjectFileDto) {
+        List<ProjectObjectFile> projectObjectFiles = applicationService.listProjectObjectFiles(listObjectFileDto);
+        return ResponseUtil.successResponse(projectObjectFiles);
     }
 }

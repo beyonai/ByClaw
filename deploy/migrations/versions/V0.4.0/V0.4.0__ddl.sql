@@ -548,3 +548,34 @@ ALTER TABLE byai.byai_integration_run ADD COLUMN tester_agent_name VARCHAR(200);
 COMMENT ON COLUMN byai.byai_integration_run.tester_agent_name IS '测试数字员工名称(展示用快照)';
 -- 环境维度历史查询(用例集/环境卡片「日志」按钮按 env 反查执行列表)。
 CREATE INDEX IF NOT EXISTS idx_integration_run_env ON byai.byai_integration_run (env_id, create_time DESC);
+
+/**项目关联本体对象文件**/
+create table byai_project_object_file
+(
+    id          bigint primary key,
+    session_id  varchar(50),
+    object_name varchar(200),
+    object_code varchar(200),
+    file_name   varchar(200),
+    file_path   varchar(500),
+    version     varchar(20),
+    status_cd   varchar(20),
+    ext_content text,
+    create_by   bigint,
+    create_time timestamp default current_timestamp,
+    update_time timestamp
+);
+
+comment on table byai_project_object_file is '项目业务对象关联文件表';
+comment on column byai_project_object_file.id is '主键ID';
+comment on column byai_project_object_file.session_id is '会话ID，关联byai_session表';
+comment on column byai_project_object_file.object_name is '业务对象名称';
+comment on column byai_project_object_file.object_code is '业务对象编码';
+comment on column byai_project_object_file.file_name is '文件原始名称';
+comment on column byai_project_object_file.file_path is '文件存储路径';
+comment on column byai_project_object_file.version is '对象版本号';
+comment on column byai_project_object_file.status_cd is '状态编码';
+comment on column byai_project_object_file.ext_content is '扩展文本内容，存储额外属性信息';
+comment on column byai_project_object_file.create_by is '创建人';
+comment on column byai_project_object_file.create_time is '创建时间';
+comment on column byai_project_object_file.update_time is '更新时间';

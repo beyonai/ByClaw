@@ -17,6 +17,7 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
 import com.alibaba.fastjson.JSON;
@@ -25,6 +26,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.*;
+import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFileDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDeleteDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDTO;
@@ -33,6 +35,8 @@ import com.iwhalecloud.byai.manager.dto.devloop.OperationRequirementDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationAccountDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationRequirementStartDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationTaskDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ObjectFileDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ObjectFileSaveDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationEnvDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationSuiteDTO;
@@ -220,6 +224,9 @@ public class DevloopApplicationService {
 
     @Autowired
     private OperationAccountService operationAccountService;
+
+    @Autowired
+    private ProjectObjectFileService projectObjectFileService;
 
     @Autowired
     private SequenceService sequenceService;
@@ -1962,6 +1969,79 @@ public class DevloopApplicationService {
         invokeActionReq.setParams(params);
         DataCloudResponse<InvokeActionResp> response = feignDataCloudService.invokeAction(invokeActionReq);
         return response.getData();
+    }
+
+    /**
+     * 批量保存或更新项目业务对象关联文件。
+     *
+     * @param objectFileSaveDTO 批量保存请求
+     * @return 保存后的实体列表
+     */
+    public List<ProjectObjectFile> saveOrUpdateObjectFiles(ObjectFileSaveDTO objectFileSaveDTO) {
+
+        List<ObjectFileDTO> objectFiles = objectFileSaveDTO.getObjectFiles();
+        if (ListUtil.isEmpty(objectFiles)) {
+            return Collections.emptyList();
+        }
+
+        List<ProjectObjectFile> resultList = new ArrayList<>(objectFiles.size());
+
+        for (ObjectFileDTO objectFileDTO : objectFiles) {
+            ProjectObjectFile projectObjectFile = new ProjectObjectFile();
+            projectObjectFile.setSessionId(objectFileDTO.getSessionId());
+            projectObjectFile.setObjectName(objectFileDTO.getObjectName());
+            projectObjectFile.setObjectCode(objectFileDTO.getObjectCode());
+            projectObjectFile.setFileName(objectFileDTO.getFileName());
+            projectObjectFile.setFilePath(objectFileDTO.getFilePath());
+            projectObjectFile.setVersion(objectFileDTO.getVersion());
+            projectObjectFile.setStatusCd(objectFileDTO.getStatusCd());
+            projectObjectFile.setExtContent(objectFileDTO.getExtContent());
+
+            ProjectObjectFile exist = this.findExist(objectFileDTO);
+            if (exist != null) {
+                projectObjectFile.setId(exist.getId());
+                projectObjectFile.setUpdateTime(new Date());
+                projectObjectFileService.update(projectObjectFile);
+            }
+            else {
+                projectObjectFileService.save(projectObjectFile);
+            }
+
+            resultList.add(projectObjectFile);
+        }
+
+        return resultList;
+    }
+
+    /**
+     * 查询文件是否存在
+     *
+     * @param objectFileDTO 查询对象
+     * @return ProjectObjectFile
+     */
+    private ProjectObjectFile findExist(ObjectFileDTO objectFileDTO) {
+
+        // 如果有主键，先根据主键查询
+        ProjectObjectFile projectObjectFile = projectObjectFileService.findById(objectFileDTO.getId());
+        if (projectObjectFile != null) {
+            return projectObjectFile;
+        }
+
+        // 如果没有根据名称查询
+        return projectObjectFileService.findByBizKey(objectFileDTO.getSessionId(), objectFileDTO.getObjectCode(),
+            objectFileDTO.getFileName());
+    }
+
+    /**
+     * 按项目、会话查询业务对象关联文件。
+     *
+     * @param listObjectFileDto 查询条件
+     * @return 对象文件列表
+     */
+    public List<ProjectObjectFile> listProjectObjectFiles(ListObjectFileDto listObjectFileDto) {
+
+        
+        return projectObjectFileService.listProjectObjectFiles(listObjectFileDto);
     }
 
     /** 手工需求 JSON 包裹中携带的已解析、语言无关的数据。 */
