@@ -85,6 +85,7 @@ const ProjectCenterList: React.FC = () => {
           projectType: values.projectType,
           isShare: isShared ? 'Y' : 'N',
           shareTargets: [],
+          resources: values.resources || [],
         });
         const projectId = getProjectIdFromResponse(response);
         if (!projectId) throw new Error('项目创建成功但未返回项目 ID');

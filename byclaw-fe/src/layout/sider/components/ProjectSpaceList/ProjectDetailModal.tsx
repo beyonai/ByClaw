@@ -2021,6 +2021,27 @@ const ProjectDetailPanel: React.FC<Props> = ({
           operationType: values.taskType === 'content' ? 'publish' : values.taskType,
           assignee: values.assigneeId,
           dueTime: values.dueTime?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
+          // 周期/间隔执行配置需要保留完整结构，并将表单态 Dayjs 转成接口可持久化的字符串。
+          config: values.collectConfig
+            ? {
+                ...values.collectConfig,
+                onceTime: values.collectConfig.onceTime?.isValid()
+                  ? values.collectConfig.onceTime.format('YYYY-MM-DD HH:mm:ss')
+                  : undefined,
+                periodTime: values.collectConfig.periodTime?.isValid()
+                  ? values.collectConfig.periodTime.format('HH:mm:ss')
+                  : undefined,
+                periodYearDateTime: values.collectConfig.periodYearDateTime?.isValid()
+                  ? values.collectConfig.periodYearDateTime.format('YYYY-MM-DD HH:mm:ss')
+                  : undefined,
+                effectiveStartDate: values.collectConfig.effectiveDateRange?.[0]?.isValid()
+                  ? values.collectConfig.effectiveDateRange[0].format('YYYY-MM-DD')
+                  : undefined,
+                effectiveEndDate: values.collectConfig.effectiveDateRange?.[1]?.isValid()
+                  ? values.collectConfig.effectiveDateRange[1].format('YYYY-MM-DD')
+                  : undefined,
+              }
+            : undefined,
         };
         if (isEditingOperationTask) {
           await updateOperationRequirement({ itemId: editingOperationTaskId, ...operationRequirementPayload });

@@ -11,19 +11,23 @@ import {
   Modal,
   Progress,
   Radio,
+  Segmented,
   Select,
   Switch,
+  Table,
   Tabs,
   Tag,
   Tooltip,
   Upload,
   message,
 } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import {
   CheckCircleFilled,
   ClockCircleOutlined,
   CloseCircleFilled,
   CloseOutlined,
+  CopyOutlined,
   DeleteOutlined,
   EditOutlined,
   ExclamationCircleFilled,
@@ -36,6 +40,7 @@ import {
   ProfileOutlined,
   RightOutlined,
   RobotOutlined,
+  SearchOutlined,
   SyncOutlined,
 } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
@@ -70,6 +75,7 @@ import {
   E2E_STATUS_JSON,
   E2E_SUITE_CONTRACT,
 } from './mock';
+import { copyTextToClipboard } from '@/utils/copy';
 import type {
   IntegrationRunResult,
   IntegrationStage,
@@ -147,6 +153,13 @@ type IntegrationRunHistoryVo = {
   durationSec?: number;
   time?: string;
   createByName?: string;
+};
+
+// 三种用例来源的展示文案:表驱动,新增来源时只改这里,避免卡片/弹窗各写一份三元。
+const SUITE_SOURCE_LABEL_KEYS: Record<NonNullable<TestSuite['sourceType']>, string> = {
+  code: 'integration.suite.sourceCode',
+  standalone: 'integration.suite.sourceStandalone',
+  env: 'integration.suite.sourceEnv',
 };
 
 const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) => {
@@ -610,6 +623,9 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
   };
 
   // 对标 Vibe Kanban/Nimbalyst 的「需要你处理 vs 还在工作中」二态模型:按状态分泳道,failed 置顶醒目。
+  // 需求级视图已从运行记录页签下线(改为运行表格),这块与下方 renderReqIntegrationCard/renderReqStatsStrip
+  // 一并保留待用,暂无渲染入口,故显式关闭未使用告警而非删除。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const reqIntegrationGroups = (
     [
       { key: 'attention', labelId: 'reqIntegration.group.attention', statuses: ['failed'] },
@@ -649,6 +665,66 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
       passRate: totalCases > 0 ? Math.round((passedCases / totalCases) * 100) : null,
     };
   })();
+
+  // ---- 运行记录看板:概览条 + 筛选 + 运行表格 ----
+  // 一份数据服务三类读者:概览给项目经理看整体健康度,筛选+表格给测试人员查/比,失败行直达日志给研发定位。
+
+  // 运行记录筛选:状态 + 套件 + 关键字(分支/触发人)。默认全部,不预设过滤避免"数据怎么少了"。
+  const [runFilterStatus, setRunFilterStatus] = useState<'all' | 'failing' | 'passed' | 'running'>('all');
+  const [runFilterSuite, setRunFilterSuite] = useState<number | 'all'>('all');
+  const [runKeyword, setRunKeyword] = useState('');
+
+  // 失败态口径统一:failed/error/timeout 都算"需处理",避免研发只盯 failed 漏掉超时与执行异常。
+  const isFailingRun = (status: IntegrationRunHistoryVo['status']) =>
+    status === 'failed' || status === 'error' || status === 'timeout';
+
+  // 概览统计:总次数/需处理/进行中 + 用例级总体通过率 + 平均耗时。
+  // 通过率按用例数聚合(非按次数),避免一次大套件和一次小套件被等权拉平。
+  const runStats = (() => {
+    const list = integrationHistoryList;
+    let passedCases = 0;
+    let totalCases = 0;
+    let durationSum = 0;
+    let durationCount = 0;
+    list.forEach((r) => {
+      passedCases += r.passed ?? 0;
+      totalCases += r.total ?? 0;
+      // 只统计已结束的运行耗时,running 的耗时还在变,计进去会把均值压低。
+      if (r.status !== 'running' && r.durationSec) {
+        durationSum += r.durationSec;
+        durationCount += 1;
+      }
+    });
+    return {
+      total: list.length,
+      failing: list.filter((r) => isFailingRun(r.status)).length,
+      running: list.filter((r) => r.status === 'running').length,
+      passRate: totalCases > 0 ? Math.round((passedCases / totalCases) * 100) : null,
+      avgDurationSec: durationCount > 0 ? Math.round(durationSum / durationCount) : null,
+    };
+  })();
+
+  const filteredRuns = integrationHistoryList.filter((r) => {
+    if (runFilterStatus === 'failing' && !isFailingRun(r.status)) return false;
+    if (runFilterStatus === 'passed' && r.status !== 'passed') return false;
+    if (runFilterStatus === 'running' && r.status !== 'running') return false;
+    if (runFilterSuite !== 'all' && r.suiteId !== runFilterSuite) return false;
+    const kw = runKeyword.trim().toLowerCase();
+    if (!kw) return true;
+    const suiteName = integrationSuiteList.find((s) => s.suiteId === r.suiteId)?.suiteName ?? '';
+    return [suiteName, r.branch, r.createByName, r.reason].some((v) =>
+      String(v ?? '').toLowerCase().includes(kw)
+    );
+  });
+
+  // 耗时可读化:秒 → 1m 20s,表格里比裸秒数好扫。
+  const formatDuration = (sec?: number | null) => {
+    if (sec === null || sec === undefined) return '-';
+    if (sec < 60) return `${sec}s`;
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return s ? `${m}m ${s}s` : `${m}m`;
+  };
 
   // 当前绑定的独立测试员工名:优先从员工选项按 id 命中,退全局解析出的测试默认员工名。
   // 执行员工 = 项目生效的全局测试默认员工;此处只读,改绑定去「默认数字员工」。
@@ -724,6 +800,8 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
     return styles.reqIntegrationCard_waiting;
   };
 
+  // 需求级需求卡:随需求级视图一同下线,保留待用。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const renderReqIntegrationCard = (req: RequirementIntegration) => {
     const statusMeta = reqIntegrationStatusMeta[req.status];
     const codedCount = req.tasks.filter((task) => task.coded).length;
@@ -977,15 +1055,18 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
       return;
     }
     const isManual = f.runner === 'manual';
-    // code:用例随代码仓库,权威关联走 repoId;standalone:独立仓库,只有 source(git URL)。两者都由测试员工克隆。
+    // code:用例与被测代码同仓,测试员工沿用开发已检出目录、免克隆,权威关联走 repoId;
+    // standalone:用例在另一个仓库,必须先克隆,只有 source(git URL);
+    // env:用例已在环境机上,不涉及任何仓库/分支,这些字段一律清空避免留下误导性配置。
     const isCodeRepo = f.sourceType === 'code';
+    const isOnEnv = f.sourceType === 'env';
     const payload = {
       suiteName: f.name,
       runner: f.runner,
       sourceType: f.sourceType,
       repoId: isCodeRepo ? f.repoId : undefined,
-      source: f.source,
-      branch: f.branch,
+      source: isOnEnv ? '' : f.source,
+      branch: isOnEnv ? '' : f.branch,
       runCommand: isManual ? '' : f.runCommand,
       workdir: f.workdir,
       reportPath: isManual ? '' : f.reportPath,
@@ -1066,8 +1147,8 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
     </div>
   );
 
-  // 运行记录页签:需求级集成看板 + 历次运行日志。右侧覆盖层宽度充足,承载原本挤在左栏的两块内容。
-  // 看板顶部统计概览条:总数/需处理/进行中/已通过 + 总体通过率,对比分析型仪表盘的核心信息前置。
+  // 需求级统计概览条:随需求级视图一同下线,保留待用;现由 renderRunStatsStrip 承担概览。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const renderReqStatsStrip = () => {
     const s = reqIntegrationStats;
     if (!s.total) return null;
@@ -1130,85 +1211,261 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
     );
   };
 
+  // 概览条:项目经理视角的整体健康度。总次数/需处理/进行中/平均耗时 + 通过率环。
+  // 「需处理」可点,等价于把状态筛选切到 failing——概览不只是展示,也是进入明细的入口。
+  const renderRunStatsStrip = () => {
+    const s = runStats;
+    if (!s.total) return null;
+    const cells: Array<{
+      key: string;
+      icon: React.ReactNode;
+      label: string;
+      value: React.ReactNode;
+      cls: string;
+      onClick?: () => void;
+    }> = [
+      {
+        key: 'total',
+        icon: <FundProjectionScreenOutlined />,
+        label: t('runBoard.stats.total'),
+        value: s.total,
+        cls: styles.reqStatCard_total,
+        onClick: () => setRunFilterStatus('all'),
+      },
+      {
+        key: 'failing',
+        icon: <ExclamationCircleFilled />,
+        label: t('runBoard.stats.failing'),
+        value: s.failing,
+        cls: styles.reqStatCard_attention,
+        onClick: () => setRunFilterStatus('failing'),
+      },
+      {
+        key: 'running',
+        icon: <SyncOutlined spin={s.running > 0} />,
+        label: t('runBoard.stats.running'),
+        value: s.running,
+        cls: styles.reqStatCard_running,
+        onClick: () => setRunFilterStatus('running'),
+      },
+      {
+        key: 'duration',
+        icon: <ClockCircleOutlined />,
+        label: t('runBoard.stats.avgDuration'),
+        value: formatDuration(s.avgDurationSec),
+        cls: styles.reqStatCard_passed,
+      },
+    ];
+    return (
+      <div className={styles.reqStatsStrip}>
+        {cells.map((c) => (
+          <div
+            key={c.key}
+            className={`${styles.reqStatCard} ${c.cls} ${c.onClick ? styles.reqStatCardClickable : ''}`}
+            onClick={c.onClick}
+            role={c.onClick ? 'button' : undefined}
+            tabIndex={c.onClick ? 0 : undefined}
+            onKeyDown={(e) => {
+              if (c.onClick && (e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault();
+                c.onClick();
+              }
+            }}
+          >
+            <span className={styles.reqStatIcon}>{c.icon}</span>
+            <div className={styles.reqStatBody}>
+              <span className={styles.reqStatValue}>{c.value}</span>
+              <span className={styles.reqStatLabel}>{c.label}</span>
+            </div>
+          </div>
+        ))}
+        {s.passRate !== null ? (
+          <div className={`${styles.reqStatCard} ${styles.reqStatCard_rate}`}>
+            <Progress
+              type="circle"
+              size={40}
+              percent={s.passRate}
+              strokeColor={s.passRate >= 80 ? '#52c41a' : s.passRate >= 50 ? '#faad14' : '#ff4d4f'}
+              format={(p) => <span className={styles.reqStatRateNum}>{p}%</span>}
+            />
+            <div className={styles.reqStatBody}>
+              <span className={styles.reqStatLabel}>{t('runBoard.stats.passRate')}</span>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  // 运行表格:测试人员查/比的主界面。窄列固定、失败行整行标红底,研发能直接扫到失败与打回原因。
+  const runTableColumns: ColumnsType<IntegrationRunHistoryVo> = [
+    {
+      title: t('runBoard.col.status'),
+      dataIndex: 'status',
+      width: 92,
+      render: (status: IntegrationRunHistoryVo['status']) => (
+        <Tag color={runStatusColor(status)} className={styles.runTableStatusTag}>
+          {t(`integration.result.status.${status}`)}
+        </Tag>
+      ),
+    },
+    {
+      title: t('runBoard.col.suite'),
+      dataIndex: 'suiteId',
+      ellipsis: true,
+      render: (suiteId: number, row) => {
+        const suiteName = integrationSuiteList.find((s) => s.suiteId === suiteId)?.suiteName;
+        return (
+          <div className={styles.runTableSuiteCell}>
+            <span className={styles.runTableSuiteName}>{suiteName || `#${suiteId}`}</span>
+            {row.branch ? <span className={styles.runTableBranch}>{row.branch}</span> : null}
+          </div>
+        );
+      },
+    },
+    {
+      title: t('runBoard.col.passRate'),
+      dataIndex: 'passed',
+      width: 132,
+      render: (_: unknown, row) => {
+        const total = row.total ?? 0;
+        const passed = row.passed ?? 0;
+        // 没跑出用例数时不画 0% 进度条(会被误读成全挂),直接给占位。
+        if (!total) return <span className={styles.runTableMuted}>-</span>;
+        const pct = Math.round((passed / total) * 100);
+        return (
+          <div className={styles.runTableRateCell}>
+            <Progress
+              percent={pct}
+              size="small"
+              showInfo={false}
+              strokeColor={pct >= 80 ? '#52c41a' : pct >= 50 ? '#faad14' : '#ff4d4f'}
+            />
+            <span className={styles.runTableRateText}>
+              {passed}/{total}
+            </span>
+          </div>
+        );
+      },
+    },
+    {
+      title: t('runBoard.col.duration'),
+      dataIndex: 'durationSec',
+      width: 88,
+      render: (sec?: number) => <span className={styles.runTableMono}>{formatDuration(sec)}</span>,
+    },
+    {
+      title: t('runBoard.col.trigger'),
+      dataIndex: 'createByName',
+      width: 110,
+      ellipsis: true,
+      render: (name?: string) => name || <span className={styles.runTableMuted}>-</span>,
+    },
+    {
+      title: t('runBoard.col.time'),
+      dataIndex: 'time',
+      width: 150,
+      render: (time?: string) => <span className={styles.runTableMono}>{time || '-'}</span>,
+    },
+    {
+      title: t('runBoard.col.action'),
+      key: 'action',
+      width: 88,
+      fixed: 'right',
+      render: (_: unknown, row) => (
+        <Button type="link" size="small" onClick={() => openIntegrationResult(row.runId)}>
+          {t('integration.log.viewDetail')}
+        </Button>
+      ),
+    },
+  ];
+
   const renderIntegrationBoard = () => (
     <div className={styles.integrationPanel}>
-      {/* V2:需求级集成视图。集成挂在需求(而非单任务),展示需求下多仓库任务的就绪度、上次结果与失败分发。 */}
       <div className={styles.integrationSection}>
         <div className={styles.integrationSectionHeader}>
-          <span className={styles.integrationSectionTitle}>{t('reqIntegration.title')}</span>
+          <span className={styles.integrationSectionTitle}>{t('runBoard.title')}</span>
           <span className={styles.integrationNextRun}>
             <ClockCircleOutlined /> {t('reqIntegration.nextRun', { time: integrationNextRunAt })}
           </span>
         </div>
-        {renderReqStatsStrip()}
-        {/* 空态:引导而非空白。无需求集成数据时给出说明,避免只剩标题的空面板。 */}
-        {reqIntegrationGroups.length === 0 ? (
-          <Empty className={styles.reqIntegrationEmpty} description={t('reqIntegration.empty')} />
-        ) : null}
-        {/* 对标 Vibe Kanban/Nimbalyst:按状态分泳道,「需要处理」置顶,便于一眼看出该处理谁。 */}
-        {reqIntegrationGroups.map((group) => (
-          <div className={styles.reqIntegrationGroup} key={group.key}>
-            <div className={`${styles.reqIntegrationGroupHead} ${styles[`reqIntegrationGroup_${group.key}`]}`}>
-              <span className={styles.reqIntegrationGroupDot} />
-              <span className={styles.reqIntegrationGroupTitle}>{t(group.labelId)}</span>
-              <span className={styles.reqIntegrationGroupCount}>{group.items.length}</span>
-            </div>
-            <div className={styles.reqIntegrationList}>{group.items.map(renderReqIntegrationCard)}</div>
-          </div>
-        ))}
-        {reqIntegrationGroups.length > 0 ? (
-          <div className={styles.integrationFlowKickback}>{t('reqIntegration.kickbackHint')}</div>
-        ) : null}
-      </div>
+        {renderRunStatsStrip()}
 
-      <div className={styles.integrationSection}>
-        <div className={styles.integrationSectionHeader}>
-          <span className={styles.integrationSectionTitle}>{t('integration.history.title')}</span>
+        {/* 筛选条:状态段选 + 套件下拉 + 关键字。测试人员按状态/套件收敛,研发直接搜分支或失败原因。 */}
+        <div className={styles.runFilterBar}>
+          <Segmented
+            size="small"
+            value={runFilterStatus}
+            onChange={(v) => setRunFilterStatus(v as typeof runFilterStatus)}
+            options={[
+              { value: 'all', label: t('runBoard.filter.all') },
+              { value: 'failing', label: t('runBoard.filter.failing') },
+              { value: 'running', label: t('runBoard.filter.running') },
+              { value: 'passed', label: t('runBoard.filter.passed') },
+            ]}
+          />
+          <Select
+            size="small"
+            className={styles.runFilterSuite}
+            value={runFilterSuite}
+            onChange={(v) => setRunFilterSuite(v)}
+            options={[
+              { value: 'all' as const, label: t('runBoard.filter.allSuites') },
+              ...integrationSuiteList
+                .filter((s) => s.runner !== 'manual')
+                .map((s) => ({ value: s.suiteId, label: s.suiteName || `#${s.suiteId}` })),
+            ]}
+          />
+          <Input
+            size="small"
+            allowClear
+            className={styles.runFilterKeyword}
+            prefix={<SearchOutlined />}
+            placeholder={t('runBoard.filter.keywordPlaceholder')}
+            value={runKeyword}
+            onChange={(e) => setRunKeyword(e.target.value)}
+          />
+          {/* 筛选后条数回显:让"数据变少"是可解释的,而不是像加载失败。 */}
+          <span className={styles.runFilterCount}>
+            {t('runBoard.filter.count', { shown: filteredRuns.length, total: integrationHistoryList.length })}
+          </span>
         </div>
-        <List
+
+        <Table<IntegrationRunHistoryVo>
+          className={styles.runTable}
           size="small"
-          bordered
-          className={styles.integrationHistoryList}
-          dataSource={integrationHistoryList}
-          locale={{ emptyText: t('integration.history.empty') }}
-          renderItem={(item) => {
-            const passed = item.status === 'passed';
-            const rate = `${item.passed ?? 0}/${item.total ?? 0}`;
-            const suiteName = integrationSuiteList.find((s) => s.suiteId === item.suiteId)?.suiteName;
-            return (
-              <List.Item
-                actions={[
-                  <Tag key="result" color={runStatusColor(item.status)}>
-                    {t(`integration.result.status.${item.status}`)}
-                  </Tag>,
-                  <Button key="view" type="link" size="small" onClick={() => openIntegrationResult(item.runId)}>
-                    {t('integration.history.viewResult')}
-                  </Button>,
-                ]}
-              >
-                <List.Item.Meta
-                  title={
-                    <span>
-                      {suiteName || `#${item.suiteId}`}
-                      {item.branch ? <span className={styles.integrationHistoryRound}>{item.branch}</span> : null}
-                    </span>
-                  }
-                  description={
-                    <div>
-                      <span className={parentStyles.detailSourceTime}>
-                        {t('integration.history.passRate', { rate })} · {item.time}
-                      </span>
-                      {!passed && item.kickbackTo ? (
-                        <div className={styles.integrationHistoryKickback}>
-                          {t('integration.history.kickback', { phase: phaseLabelOf(item.kickbackTo) })}
-                          {item.reason ? ` · ${item.reason}` : ''}
-                        </div>
-                      ) : null}
-                    </div>
-                  }
-                />
-              </List.Item>
-            );
+          rowKey="runId"
+          columns={runTableColumns}
+          dataSource={filteredRuns}
+          scroll={{ x: 'max-content' }}
+          pagination={filteredRuns.length > 12 ? { pageSize: 12, size: 'small', showSizeChanger: false } : false}
+          // 失败行整行着色:研发扫一眼就知道该看哪几行,不必逐行读状态标签。
+          rowClassName={(row) => (isFailingRun(row.status) ? styles.runTableRowFailing : '')}
+          locale={{
+            emptyText: (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={
+                  integrationHistoryList.length
+                    ? t('runBoard.emptyFiltered')
+                    : t('integration.history.empty')
+                }
+              />
+            ),
+          }}
+          // 失败行展开显示打回环节与原因:研发定位所需的上下文就在行内,不用先开弹窗。
+          expandable={{
+            rowExpandable: (row) => isFailingRun(row.status) && Boolean(row.kickbackTo || row.reason),
+            expandedRowRender: (row) => (
+              <div className={styles.runTableFailDetail}>
+                {row.kickbackTo ? (
+                  <span className={styles.runTableFailKickback}>
+                    {t('integration.history.kickback', { phase: phaseLabelOf(row.kickbackTo) })}
+                  </span>
+                ) : null}
+                {row.reason ? <span className={styles.runTableFailReason}>{row.reason}</span> : null}
+              </div>
+            ),
           }}
         />
       </div>
@@ -1460,11 +1717,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
                                         {t('integration.suite.sourceType')}
                                       </span>
                                       <span className={styles.integrationFieldValue}>
-                                        {t(
-                                          suite.sourceType === 'standalone'
-                                            ? 'integration.suite.sourceStandalone'
-                                            : 'integration.suite.sourceCode'
-                                        )}
+                                        {t(SUITE_SOURCE_LABEL_KEYS[suite.sourceType ?? 'code'])}
                                         {' · '}
                                         {t('integration.suite.caseCount', { count: suite.caseCount ?? 0 })}
                                       </span>
@@ -1735,6 +1988,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
                 >
                   <Radio value="code">{t('integration.suite.sourceCode')}</Radio>
                   <Radio value="standalone">{t('integration.suite.sourceStandalone')}</Radio>
+                  <Radio value="env">{t('integration.suite.sourceEnv')}</Radio>
                 </Radio.Group>
               </div>
             )}
@@ -1742,7 +1996,10 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
           {!isManual && (
             <>
               <div className={styles.integrationNote}>{t('integration.suiteModal.sourceTypeHint')}</div>
-              {integrationSuiteForm.sourceType === 'code' ? (
+              {/* env 来源:用例已在环境机上,不涉及任何仓库与分支,工作目录基准取环境配置的工作目录。 */}
+              {integrationSuiteForm.sourceType === 'env' ? (
+                <div className={styles.integrationNote}>{t('integration.suiteModal.envSourceHint')}</div>
+              ) : integrationSuiteForm.sourceType === 'code' ? (
                 // code 来源:用例随被测代码,复用项目「关联仓库」列表;source 冗余仓库 URL,权威关联走 repoId。
                 <div className={parentStyles.formField}>
                   <label>{t('integration.suiteModal.codeRepo')}</label>
@@ -1777,14 +2034,22 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
                   />
                 </div>
               )}
-              <div className={parentStyles.formField}>
-                <label>{t('integration.suiteModal.branch')}</label>
-                <Input
-                  placeholder="main"
-                  value={integrationSuiteForm.branch}
-                  onChange={(e) => setField('branch', e.target.value)}
-                />
-              </div>
+              {integrationSuiteForm.sourceType !== 'env' && (
+                <div className={parentStyles.formField}>
+                  <label>{t('integration.suiteModal.branch')}</label>
+                  <Input
+                    placeholder="main"
+                    value={integrationSuiteForm.branch}
+                    onChange={(e) => setField('branch', e.target.value)}
+                  />
+                  {/* 沿用开发检出目录时分支由开发环节决定,此处仅作克隆兜底;克隆来源时它就是要检出的分支。 */}
+                  <div className={styles.integrationNote}>
+                    {integrationSuiteForm.sourceType === 'code'
+                      ? t('integration.suiteModal.branchHintCode')
+                      : t('integration.suiteModal.branchHintStandalone')}
+                  </div>
+                </div>
+              )}
               <div className={parentStyles.formField}>
                 <label>{t('integration.suiteModal.workdir')}</label>
                 <Input
@@ -1792,6 +2057,10 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
                   value={integrationSuiteForm.workdir}
                   onChange={(e) => setField('workdir', e.target.value)}
                 />
+                {/* env 来源的基准目录是环境配置的工作目录,不是克隆出来的用例目录,得说清相对谁。 */}
+                {integrationSuiteForm.sourceType === 'env' && (
+                  <div className={styles.integrationNote}>{t('integration.suiteModal.workdirHintEnv')}</div>
+                )}
               </div>
               <div className={parentStyles.formField}>
                 <label>{t('integration.suite.runCommand')}</label>
@@ -2412,6 +2681,29 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
     />
   );
 
+  // 日志复制走带降级的工具函数:内网常是 http,navigator.clipboard 在非安全上下文不可用。
+  const copyLogText = (text: string) => {
+    if (!text.trim()) {
+      message.warning(t('integration.result.noLog'));
+      return;
+    }
+    copyTextToClipboard(
+      text,
+      () => message.success(t('common.copySuccess')),
+      () => message.error(t('common.copyFail'))
+    );
+  };
+
+  // 整段日志带上步骤名/状态/退出码:贴给研发或 AI 排查时不用再回来对照弹窗。
+  const buildRunLogText = (r: IntegrationRunResult) =>
+    (r.steps ?? [])
+      .map((step) => {
+        const exit = typeof step.exitCode === 'number' ? ` (exit ${step.exitCode})` : '';
+        const head = `[${step.status}] ${step.stepName}${exit}`;
+        return step.logText ? `${head}\n${step.logText}` : head;
+      })
+      .join('\n\n');
+
   // 查看结果:展示一次 E2E 运行的整体状态 + 打回原因 + 各套件明细(失败用例带截图/artifacts)。
   const renderIntegrationResultModal = () => {
     const r = integrationResult;
@@ -2422,6 +2714,15 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
         open={integrationResultOpen}
         onCancel={closeIntegrationResult}
         footer={[
+          // 排查失败通常要整段日志,单步复制之外再给一个一次性复制入口。
+          <Button
+            key="copyAll"
+            icon={<CopyOutlined />}
+            disabled={!r?.steps?.length}
+            onClick={() => copyLogText(r ? buildRunLogText(r) : '')}
+          >
+            {t('integration.result.copyAllLog')}
+          </Button>,
           <Button key="close" onClick={closeIntegrationResult}>
             {t('common.close')}
           </Button>,
@@ -2471,6 +2772,21 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
                           {
                             key: 'log',
                             label: t('integration.result.stepLog'),
+                            // 复制按钮放在折叠头 extra:日志常被折叠着,不展开也能直接复制。
+                            extra: (
+                              <Tooltip title={t('integration.result.copyStepLog')}>
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  icon={<CopyOutlined />}
+                                  onClick={(e) => {
+                                    // 阻止冒泡,否则点复制会顺带折叠/展开面板。
+                                    e.stopPropagation();
+                                    copyLogText(step.logText ?? '');
+                                  }}
+                                />
+                              </Tooltip>
+                            ),
                             children: <pre className={styles.integrationResultStepLog}>{step.logText}</pre>,
                           },
                         ]}

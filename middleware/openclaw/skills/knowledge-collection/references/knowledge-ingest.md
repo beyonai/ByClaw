@@ -12,6 +12,10 @@
   默认 `/` 也必须展示，不得把缺省目录视为用户已经确认。真实写入时必须把已经确认的目标通过
   `--confirmed-knowledge-base-resource-id` 与 `--confirmed-directory-path` 传给脚本，且确认值必须与解析后的
   知识库资源 ID 和目录完全一致；`--dry-run` 只展示所需确认值，不执行写入。
+- 处理当前采集批次时，`ingest` 之前必须先按 [post-processing.md](post-processing.md) 运行 `rewrite-image-links`，
+  把选中正文里的 `images/` 相对链接改写为会话空间下载 URL；相对链接在知识库侧无法解析。该步骤同样适用于知识整理
+  与外部消费，不是入库专属。命令幂等，已改写过的会话可安全重跑。独立 Markdown 文件与 `upload-doc` 不涉及会话空间
+  图片，不需要这一步。
 - 仅入库用户选中的范围，包括已确认的条目、Markdown 或文件；不得扩大到同一目录或采集批次的其他产物。
 - 入库与知识整理在同一次后处理运行中互斥；不得在一次运行内把 `ingest` 或 `upload-doc` 自动串联到知识整理。
   用户后续明确发起知识整理时创建新的 run，不复用入库成功状态。

@@ -496,6 +496,40 @@
   line-height: 20px;
 }
 
+.memberCardMore {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  color: #667085;
+  transition: opacity 0.2s;
+}
+
+.dataCard:hover .memberCardMore,
+.dataCard:focus-within .memberCardMore {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.memberAgentOptions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 360px;
+  margin-top: 12px;
+  overflow-y: auto;
+}
+
+.memberAgentOption {
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .dataCardHeader,
 .dataCardFooter,
 .memberCardIdentity {
@@ -613,6 +647,50 @@
   }
 }
 
+// 运营需求拆分弹窗中的任务编辑区，支持新增/删除任务并保持字段间距清晰。
+.splitTaskToolbar,
+.splitTaskHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.splitTaskToolbar {
+  margin: 16px 0 10px;
+}
+
+.splitTaskList {
+  max-height: 52vh;
+  padding: 2px 4px 4px 2px;
+  overflow-y: auto;
+}
+
+.splitTaskCard {
+  padding: 14px;
+  margin-bottom: 12px;
+  border: 1px solid #e7ecf3;
+  border-radius: 10px;
+  background: #fafcff;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+
+  .splitTaskHeader {
+    margin-bottom: 10px;
+  }
+
+  :global(.@{antPrefix}-input),
+  :global(.@{antPrefix}-select) {
+    width: 100%;
+  }
+
+  :global(.@{antPrefix}-input-textarea) {
+    margin-top: 10px;
+  }
+}
+
 .dataCardDescription {
   min-height: 42px;
   margin: 10px 0 8px !important;
@@ -687,6 +765,7 @@
 
 .resourceCategoryCard {
   min-width: 0;
+  height: 100%;
   min-height: 420px;
   display: flex;
   flex-direction: column;
@@ -698,12 +777,13 @@
 
 .resourceCategoryGrid {
   min-height: 0;
-  height: auto;
+  height: 100%;
+  min-height: 100%;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
-  align-content: start;
-  align-items: start;
+  align-content: stretch;
+  align-items: stretch;
   overflow: visible;
 }
 
@@ -777,6 +857,12 @@
   padding: 10px 4px;
   border-bottom: 1px solid #eef1f5;
   color: #98a2b3;
+
+  &:hover,
+  &:focus-visible {
+    background: #f7f9fc;
+    cursor: pointer;
+  }
 }
 
 .resourceSimpleIcon {

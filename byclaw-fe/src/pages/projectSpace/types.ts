@@ -10,6 +10,17 @@ export type ProjectMemberRole = 'owner' | 'admin' | 'member';
 
 export type ProjectResourceScope = 'shared' | 'task' | 'session';
 
+export type ProjectBoundResourceType = 'knowledge' | 'digital_employee' | 'ontology';
+
+export interface ProjectBoundResource {
+  id?: string | number;
+  projectId?: string | number;
+  resourceType: ProjectBoundResourceType;
+  resourceId: string | number;
+  resourceName?: string;
+  sortNo?: number;
+}
+
 export interface ProjectMember {
   memberId?: string | number;
   projectId?: string | number;
@@ -66,6 +77,8 @@ export interface ProjectSpace {
   sessions?: ProjectSession[];
   repos?: ProjectRepo[];
   shareTargets?: ProjectShareTarget[];
+  resources?: ProjectBoundResource[];
+  boundResources?: ProjectBoundResource[];
 }
 
 export interface ProjectRepo {

@@ -418,15 +418,39 @@ const OperationTaskFormModal: React.FC<OperationTaskFormModalProps> = ({
                 periodType: values.collectConfig?.periodType,
                 periodWeekdays: values.collectConfig?.periodWeekdays,
                 periodMonthDays: values.collectConfig?.periodMonthDays,
-                periodMonth: values.collectConfig?.periodMonth,
-                periodDay: values.collectConfig?.periodDay,
-                periodTime: values.collectConfig?.periodTime,
+                // 年度周期使用一个月日时分选择器，提交时同时展开为后端 Cron 生成所需字段。
+                periodMonth:
+                  values.collectConfig?.periodType === 'yearly' && values.collectConfig.periodYearDateTime?.isValid()
+                    ? values.collectConfig.periodYearDateTime.month() + 1
+                    : values.collectConfig?.periodMonth,
+                periodDay:
+                  values.collectConfig?.periodType === 'yearly' && values.collectConfig.periodYearDateTime?.isValid()
+                    ? values.collectConfig.periodYearDateTime.date()
+                    : values.collectConfig?.periodDay,
+                periodTime:
+                  values.collectConfig?.periodType === 'yearly'
+                    ? values.collectConfig.periodYearDateTime
+                    : values.collectConfig?.periodTime,
                 periodYearDateTime: values.collectConfig?.periodYearDateTime,
                 intervalHours: values.collectConfig?.intervalHours,
                 intervalWeekdays: values.collectConfig?.intervalWeekdays,
                 effectiveDateRange: values.collectConfig?.effectiveDateRange,
               }
-              : values.collectConfig),
+              : {
+                  ...values.collectConfig,
+                  periodMonth:
+                    values.collectConfig?.periodType === 'yearly' && values.collectConfig.periodYearDateTime?.isValid()
+                      ? values.collectConfig.periodYearDateTime.month() + 1
+                      : values.collectConfig?.periodMonth,
+                  periodDay:
+                    values.collectConfig?.periodType === 'yearly' && values.collectConfig.periodYearDateTime?.isValid()
+                      ? values.collectConfig.periodYearDateTime.date()
+                      : values.collectConfig?.periodDay,
+                  periodTime:
+                    values.collectConfig?.periodType === 'yearly'
+                      ? values.collectConfig.periodYearDateTime
+                      : values.collectConfig?.periodTime,
+                }),
             cronExpr: buildOperationCollectionCron(values.collectConfig),
           }
           : undefined;

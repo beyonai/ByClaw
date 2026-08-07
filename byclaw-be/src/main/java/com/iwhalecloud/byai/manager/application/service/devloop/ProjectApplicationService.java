@@ -34,6 +34,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.MemberBatchDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberSaveDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectResourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileDeleteDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileQueryDto;
@@ -44,10 +45,12 @@ import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectMember;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
+import com.iwhalecloud.byai.manager.entity.devloop.ProjectResource;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanRequireItem;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanSource;
 import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
+import com.iwhalecloud.byai.manager.mapper.devloop.ProjectResourceMapper;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
 import com.iwhalecloud.byai.state.domain.file.service.FileService;
@@ -108,6 +111,9 @@ public class ProjectApplicationService {
     private ProjectRepoMapper projectRepoMapper;
 
     @Autowired
+    private ProjectResourceMapper projectResourceMapper;
+
+    @Autowired
     private ScanSourceService scanSourceService;
 
     @Autowired
@@ -151,6 +157,7 @@ public class ProjectApplicationService {
      * @param dto 项目信息
      * @return 新建项目
      */
+    @Transactional
     public Project createProject(ProjectDTO dto) {
         String projectName = normalizeProjectName(dto.getProjectName());
         if (projectName.isEmpty()) {
@@ -177,6 +184,7 @@ public class ProjectApplicationService {
         projectService.save(project);
 
         saveProjectRepos(project.getProjectId(), dto.getRepos());
+        saveProjectResources(project.getProjectId(), dto.getResources());
         if (Constants.YES_VALUE_Y.equalsIgnoreCase(project.getIsShare())) {
             this.saveOrUpdateProjectMember(project.getProjectId(), dto.getShareTargets());
         }
@@ -317,6 +325,9 @@ public class ProjectApplicationService {
             projectRepoMapper
                 .delete(new LambdaQueryWrapper<ProjectRepo>().eq(ProjectRepo::getProjectId, dto.getProjectId()));
             saveProjectRepos(dto.getProjectId(), dto.getRepos());
+        }
+        if (dto.getResources() != null) {
+            saveProjectResources(dto.getProjectId(), dto.getResources());
         }
 
         // 如果不分享的，移除分享成员
@@ -610,6 +621,11 @@ public class ProjectApplicationService {
         LambdaQueryWrapper<ProjectRepo> repoWrapper = new LambdaQueryWrapper<>();
         repoWrapper.eq(ProjectRepo::getProjectId, projectId);
         List<ProjectRepo> repos = projectRepoMapper.selectList(repoWrapper);
+        LambdaQueryWrapper<ProjectResource> resourceWrapper = new LambdaQueryWrapper<>();
+        resourceWrapper.eq(ProjectResource::getProjectId, projectId)
+            .and(item -> item.isNull(ProjectResource::getDeleteFlag)
+                .or().ne(ProjectResource::getDeleteFlag, DeleteFlag.DELETED));
+        List<ProjectResource> resources = projectResourceMapper.selectList(resourceWrapper);
         List<ByaiSessionDto> sessions = projectSessionService.listSessionsByProjectId(projectId);
 
         Map<String, Object> map = new HashMap<>();
@@ -624,6 +640,7 @@ public class ProjectApplicationService {
         map.put("buildIndex", project.getBuildIndex());
         map.put("indexSkills", project.getIndexSkills());
         map.put("repos", repos);
+        map.put("resources", resources);
         map.put("sessions", sessions);
         map.put("sessionCount", sessions.size());
         return map;
@@ -646,6 +663,52 @@ public class ProjectApplicationService {
         LambdaQueryWrapper<ProjectRepo> repoWrapper = new LambdaQueryWrapper<>();
         repoWrapper.eq(ProjectRepo::getProjectId, projectId);
         return projectRepoMapper.selectList(repoWrapper);
+    }
+
+    /** 查询项目绑定的知识库、数字员工和本体资源。 */
+    public List<ProjectResource> listProjectResources(Long projectId) {
+        requireProject(projectId);
+        LambdaQueryWrapper<ProjectResource> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ProjectResource::getProjectId, projectId)
+            .and(item -> item.isNull(ProjectResource::getDeleteFlag)
+                .or().ne(ProjectResource::getDeleteFlag, DeleteFlag.DELETED))
+            .orderByAsc(ProjectResource::getResourceType)
+            .orderByAsc(ProjectResource::getSortNo)
+            .orderByAsc(ProjectResource::getId);
+        return projectResourceMapper.selectList(wrapper);
+    }
+
+    /** 全量覆盖项目资源绑定，传空数组表示解除全部绑定。 */
+    @Transactional
+    public void saveProjectResources(Long projectId, List<ProjectResourceDTO> resources) {
+        requireProject(projectId);
+        projectResourceMapper.delete(new LambdaQueryWrapper<ProjectResource>()
+            .eq(ProjectResource::getProjectId, projectId));
+        if (resources == null || resources.isEmpty()) return;
+
+        Set<String> uniqueKeys = new HashSet<>();
+        int nextSortNo = 0;
+        for (ProjectResourceDTO dto : resources) {
+            String resourceType = StringUtils.trimToEmpty(dto.getResourceType()).toLowerCase(Locale.ROOT);
+            String resourceId = StringUtils.trimToEmpty(dto.getResourceId());
+            if (!Set.of("knowledge", "digital_employee", "ontology").contains(resourceType)
+                || resourceId.isEmpty()) {
+                throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.resource.invalid");
+            }
+            if (!uniqueKeys.add(resourceType + ":" + resourceId)) continue;
+
+            ProjectResource entity = new ProjectResource();
+            entity.setId(sequenceService.nextVal());
+            entity.setProjectId(projectId);
+            entity.setResourceType(resourceType);
+            entity.setResourceId(resourceId);
+            entity.setResourceName(StringUtils.trimToNull(dto.getResourceName()));
+            entity.setSortNo(dto.getSortNo() == null ? nextSortNo++ : dto.getSortNo());
+            entity.setCreateBy(CurrentUserHolder.getCurrentUserId());
+            entity.setCreateTime(new Date());
+            entity.setDeleteFlag(DeleteFlag.NORMAL);
+            projectResourceMapper.insert(entity);
+        }
     }
 
     /**

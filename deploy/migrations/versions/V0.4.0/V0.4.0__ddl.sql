@@ -77,7 +77,7 @@ COMMENT ON COLUMN byai.byai_integration_suite.suite_id IS '用例集ID';
 COMMENT ON COLUMN byai.byai_integration_suite.project_id IS '所属研发项目ID byai_project.project_id';
 COMMENT ON COLUMN byai.byai_integration_suite.suite_name IS '用例集名称';
 COMMENT ON COLUMN byai.byai_integration_suite.runner IS '执行器 pytest/playwright/jest/vitest/custom/manual';
-COMMENT ON COLUMN byai.byai_integration_suite.source_type IS '来源类型 git独立测试工程仓库/shared共享空间用例目录;manual套件无来源仓库';
+COMMENT ON COLUMN byai.byai_integration_suite.source_type IS '来源类型 code沿用开发已检出目录(免克隆)/standalone克隆指定用例仓库/env用例已在环境机上(跳过克隆,按环境连接方式登录执行);manual套件无来源仓库';
 COMMENT ON COLUMN byai.byai_integration_suite.repo_id IS '仅git来源:关联项目仓库ID byai_project_repo.repo_id;仓库改名/换URL不失效';
 COMMENT ON COLUMN byai.byai_integration_suite.source IS '来源:shared共享目录路径;git来源冗余存仓库URL供展示,权威关联走repo_id';
 COMMENT ON COLUMN byai.byai_integration_suite.branch IS 'git来源分支';
@@ -613,3 +613,24 @@ comment on column byai_project_object_file.ext_content is '扩展文本内容，
 comment on column byai_project_object_file.create_by is '创建人';
 comment on column byai_project_object_file.create_time is '创建时间';
 comment on column byai_project_object_file.update_time is '更新时间';
+
+-- 项目资源绑定关系：支持一个项目绑定多知识库、多数字员工和多本体。
+CREATE TABLE IF NOT EXISTS byai.byai_project_resource
+(
+    id            BIGINT       NOT NULL,
+    project_id    BIGINT       NOT NULL,
+    resource_type VARCHAR(32)  NOT NULL,
+    resource_id   VARCHAR(128) NOT NULL,
+    resource_name VARCHAR(255),
+    sort_no       INT          NOT NULL DEFAULT 0,
+    create_by     BIGINT,
+    create_time   TIMESTAMP,
+    update_by     BIGINT,
+    update_time   TIMESTAMP,
+    delete_flag   VARCHAR(2)   DEFAULT '0',
+    CONSTRAINT pk_byai_project_resource PRIMARY KEY (id),
+    CONSTRAINT uk_byai_project_resource UNIQUE (project_id, resource_type, resource_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_byai_project_resource_project
+    ON byai.byai_project_resource (project_id, resource_type, sort_no);

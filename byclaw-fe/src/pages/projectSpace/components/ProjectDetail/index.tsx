@@ -1,6 +1,6 @@
 import { Button, Dropdown, Input, Segmented, Spin, Tag, Typography, message } from 'antd';
 import { MoreOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
 import {
@@ -58,6 +58,7 @@ const ProjectDetail: React.FC<Props> = ({
   const [accountToolbar, setAccountToolbar] = useState<React.ReactNode>(null);
   // 各详情 Tab 自己提供刷新按钮，统一挂到详情页右上角，避免内容区重复放置工具栏。
   const [sectionToolbar, setSectionToolbar] = useState<React.ReactNode>(null);
+  const taskFallbackProjectRef = useRef<string | null>(null);
   const { sessions, total } = useProjectSessions(project);
   const { isDevelopProjectEnabled, isOperationProjectEnabled } = useProjectTypeConfig();
   // 研发和运营能力均以静态参数为准，避免未启用环境误展示对应的业务分区。
@@ -84,8 +85,8 @@ const ProjectDetail: React.FC<Props> = ({
         const order = isDevelopProject
           ? ['requirements', 'tasks', 'resources', 'digitalAgents', 'members', 'integration']
           : isOperationProject
-            ? ['accounts', 'requirements', 'tasks', 'resources', 'members']
-            : ['sessions', 'tasks', 'resources', 'members'];
+          ? ['accounts', 'requirements', 'tasks', 'resources', 'members']
+          : ['sessions', 'tasks', 'resources', 'members'];
         return order.indexOf(left.key) - order.indexOf(right.key);
       }),
     [isDevelopProject, isOperationProject, showMembersSection, showRequirementsSection, showSessionsSection]
@@ -93,18 +94,32 @@ const ProjectDetail: React.FC<Props> = ({
 
   useEffect(() => {
     // 仅在真正切换项目时初始化 Tab；能力配置异步完成或刷新项目详情时不应覆盖用户当前 Tab。
-    setActiveSection(
-      project?.projectType === 'develop'
-        ? 'requirements'
-        : project?.projectType === 'operation'
-          ? 'accounts'
-          : 'sessions'
-    );
+    setActiveSection('tasks');
+    taskFallbackProjectRef.current = null;
     setKeyword('');
     setOperationRequirementModalOpen(false);
     setAccountToolbar(null);
     setSectionToolbar(null);
   }, [project?.projectId, project?.projectType]);
+
+  const handleTasksInitialLoad = useCallback(
+    (hasTasks: boolean) => {
+      const projectKey = `${project?.projectId ?? ''}`;
+      if (
+        hasTasks ||
+        !projectKey ||
+        !showRequirementsSection ||
+        activeSection !== 'tasks' ||
+        taskFallbackProjectRef.current === projectKey
+      ) {
+        return;
+      }
+      // 每个项目只在首次打开且任务首屏为空时自动回退一次，避免刷新空列表时反复抢占用户选择。
+      taskFallbackProjectRef.current = projectKey;
+      setActiveSection('requirements');
+    },
+    [activeSection, project?.projectId, showRequirementsSection]
+  );
 
   useEffect(() => {
     // 切换 Tab 时先清空上一个 Tab 的工具栏，待新 Tab 挂载后重新注册。
@@ -190,6 +205,7 @@ const ProjectDetail: React.FC<Props> = ({
           keyword={keyword}
           onOpenSession={onOpenSession}
           onToolbarChange={setSectionToolbar}
+          onInitialLoad={handleTasksInitialLoad}
         />
       );
     }
@@ -232,6 +248,7 @@ const ProjectDetail: React.FC<Props> = ({
         project={project}
         keyword={keyword}
         onToolbarChange={setSectionToolbar}
+        onStarted={() => setActiveSection('tasks')}
       />
     ) : (
       renderSessionList()
@@ -242,6 +259,27 @@ const ProjectDetail: React.FC<Props> = ({
     if (!isOperationProject || operationRequirementSaving) return;
     setOperationRequirementSaving(true);
     try {
+      const collectConfig = values.collectConfig
+        ? {
+            ...values.collectConfig,
+            // 表单态使用 Dayjs，接口保存字符串；生效区间拆成后端校验使用的两个字段。
+            onceTime: values.collectConfig.onceTime?.isValid()
+              ? values.collectConfig.onceTime.format('YYYY-MM-DD HH:mm:ss')
+              : undefined,
+            periodTime: values.collectConfig.periodTime?.isValid()
+              ? values.collectConfig.periodTime.format('HH:mm:ss')
+              : undefined,
+            periodYearDateTime: values.collectConfig.periodYearDateTime?.isValid()
+              ? values.collectConfig.periodYearDateTime.format('YYYY-MM-DD HH:mm:ss')
+              : undefined,
+            effectiveStartDate: values.collectConfig.effectiveDateRange?.[0]?.isValid()
+              ? values.collectConfig.effectiveDateRange[0].format('YYYY-MM-DD')
+              : undefined,
+            effectiveEndDate: values.collectConfig.effectiveDateRange?.[1]?.isValid()
+              ? values.collectConfig.effectiveDateRange[1].format('YYYY-MM-DD')
+              : undefined,
+          }
+        : undefined;
       await createOperationRequirement({
         projectId: Number(project.projectId),
         requirementName: values.taskName.trim(),
@@ -249,6 +287,8 @@ const ProjectDetail: React.FC<Props> = ({
         operationType: values.taskType === 'content' ? 'publish' : values.taskType,
         assignee: values.assigneeId,
         dueTime: values.dueTime?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
+        // 周期/间隔执行的字段由表单组件完整生成，这里不能只提交需求基础信息。
+        config: collectConfig,
       });
       message.success(intl.formatMessage({ id: 'projectSpace.operation.requirement.createSuccess' }));
       setOperationRequirementModalOpen(false);
@@ -281,12 +321,12 @@ const ProjectDetail: React.FC<Props> = ({
                       : []),
                     ...(onDeleteProject
                       ? [
-                        {
-                          key: 'delete',
-                          danger: true,
-                          label: intl.formatMessage({ id: 'projectSpace.detail.common.delete' }),
-                        },
-                      ]
+                          {
+                            key: 'delete',
+                            danger: true,
+                            label: intl.formatMessage({ id: 'projectSpace.detail.common.delete' }),
+                          },
+                        ]
                       : []),
                   ],
                   onClick: ({ key }) => {
@@ -329,7 +369,8 @@ const ProjectDetail: React.FC<Props> = ({
             onChange={(event) => setKeyword(event.target.value)}
           />
           {activeSection === 'accounts' ? accountToolbar : sectionToolbar}
-          {isOperationProject && activeSection === 'requirements' && (
+          {/* 运营项目的新增需求入口固定放在详情页顶部，切换其它 tab 时仍保持可用。 */}
+          {isOperationProject && (
             <Button icon={<PlusOutlined />} onClick={() => setOperationRequirementModalOpen(true)}>
               {intl.formatMessage({ id: 'projectSpace.operation.requirement.new' })}
             </Button>

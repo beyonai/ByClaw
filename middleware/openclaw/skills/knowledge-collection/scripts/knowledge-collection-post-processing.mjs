@@ -13,6 +13,14 @@ const SESSION_STATUSES = new Set(['success', 'partial', 'failed', 'unknown']);
 const SELECTION_MODES = new Set(['all', 'items']);
 const METADATA_VERSION = '1.0';
 
+// 会话空间根。沙箱把宿主机 <BYCLAW_SANDBOX_FILE_VOLUME_ROOT>/byclaw-<userCode>/by 挂到 /by，
+// 所以 /by 下的绝对路径去掉该前缀就是 fileBrowser 的 path 参数。
+const SANDBOX_WORKSPACE_ROOT = '/by';
+const IMAGE_DOWNLOAD_ENDPOINT = '/byaiService/fileBrowser/download';
+const DEFAULT_IMAGE_LINK_LANGUAGE = 'zh-CN';
+// bycli 把下载的图片统一写进文章目录下的 images/，Markdown 里是 images/img_001.png 这种相对链接。
+const LOCAL_IMAGE_LINK_PATTERN = /!\[([^\]]*)\]\(\s*(images\/[^)\s]+?)\s*\)/g;
+
 function render(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
@@ -1440,6 +1448,173 @@ function setRetention(paths, args) {
   });
 }
 
+function requirePositiveInteger(value, label) {
+  const raw = typeof value === 'string' ? value.trim() : value;
+  if (typeof raw !== 'string' || !/^\d+$/.test(raw)) {
+    throw new Error(`${label} 必须是正整数`);
+  }
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${label} 必须是正整数`);
+  }
+  return parsed;
+}
+
+// 把采集会话内的绝对路径转成 fileBrowser 的 path 参数。会话目录位于 /by 之下时去掉该前缀；
+// 位于工作区回退目录时无法映射到会话空间，调用方必须显式传 --workspace-root。
+function toWorkspacePath(absolutePath, workspaceRoot) {
+  const root = path.resolve(workspaceRoot);
+  const candidate = path.resolve(absolutePath);
+  if (!isInside(root, candidate) || candidate === root) {
+    throw new Error(`路径不在会话空间根 ${workspaceRoot} 之内: ${absolutePath}`);
+  }
+  return `/${path.relative(root, candidate).split(path.sep).join('/')}`;
+}
+
+// 可选的绝对前缀，用于下游消费方无法解析站内相对路径的场景（例如把正文交给外部接口）。
+// 只接受 http/https 的 origin；带凭据、路径、查询或片段的输入一律拒绝，避免拼出错误或泄露凭据的 URL。
+function normalizeImageBaseUrl(value) {
+  if (value === undefined) {
+    return '';
+  }
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) {
+    throw new Error('--base-url 不能为空');
+  }
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`--base-url 不是合法 URL: ${raw}`);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('--base-url 只支持 http 或 https');
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error('--base-url 不得包含凭据');
+  }
+  if (parsed.search || parsed.hash || (parsed.pathname && parsed.pathname !== '/')) {
+    throw new Error('--base-url 只能是 origin，不得包含路径、查询或片段');
+  }
+  return parsed.origin;
+}
+
+function buildImageDownloadUrl(workspacePath, resourceId, language, baseUrl) {
+  const query = new URLSearchParams({
+    resourceId: String(resourceId),
+    path: workspacePath,
+    language,
+  });
+  return `${baseUrl}${IMAGE_DOWNLOAD_ENDPOINT}?${query.toString()}`;
+}
+
+// 逐篇改写 sanitized 正文里的本地图片链接。图片与 Markdown 同处会话空间，因此只做路径映射，
+// 不做上传；图片文件缺失时保留原链接并告警，避免把可用的相对链接换成死链。
+function rewriteImageLinks(paths, args) {
+  const resourceId = requirePositiveInteger(args['resource-id'], '--resource-id');
+  const language = typeof args.language === 'string' && args.language.trim()
+    ? args.language.trim()
+    : DEFAULT_IMAGE_LINK_LANGUAGE;
+  const workspaceRoot = typeof args['workspace-root'] === 'string' && args['workspace-root'].trim()
+    ? path.resolve(args['workspace-root'].trim())
+    : SANDBOX_WORKSPACE_ROOT;
+  const baseUrl = normalizeImageBaseUrl(args['base-url']);
+  const dryRun = args['dry-run'] === true || args['dry-run'] === 'true';
+  return withSessionLock(paths, 'rewrite-image-links', () => {
+    const { metadata } = loadSession(paths, { persistMigration: true });
+    const warnings = [];
+    const items = [];
+    let rewrittenTotal = 0;
+    for (const inventory of metadata.collection.items) {
+      const sanitizedPath = inventory.materialization?.sanitizedPath;
+      if (inventory.materialization?.status !== 'materialized' || typeof sanitizedPath !== 'string') {
+        items.push({ itemId: inventory.itemId, status: 'skipped', reason: 'not-materialized', rewritten: 0 });
+        continue;
+      }
+      const absoluteMarkdown = path.resolve(paths.root, sanitizedPath);
+      const markdownDir = path.dirname(absoluteMarkdown);
+      let markdown;
+      try {
+        markdown = fs.readFileSync(absoluteMarkdown, 'utf8');
+      } catch (error) {
+        warnings.push(`inventory ${inventory.itemId} 正文读取失败: ${error.message}`);
+        items.push({ itemId: inventory.itemId, status: 'failed', reason: 'read-failed', rewritten: 0 });
+        continue;
+      }
+      let rewritten = 0;
+      let missing = 0;
+      let unmappable = 0;
+      const next = markdown.replace(LOCAL_IMAGE_LINK_PATTERN, (match, alt, relativeLink) => {
+        const decodedLink = (() => {
+          try {
+            return decodeURIComponent(relativeLink);
+          } catch {
+            return relativeLink;
+          }
+        })();
+        if (decodedLink.split('/').includes('..')) {
+          unmappable += 1;
+          warnings.push(`inventory ${inventory.itemId} 图片链接含 .. 路径穿越，已保留原链接: ${relativeLink}`);
+          return match;
+        }
+        const absoluteImage = path.resolve(markdownDir, decodedLink);
+        if (!isInside(markdownDir, absoluteImage)) {
+          unmappable += 1;
+          warnings.push(`inventory ${inventory.itemId} 图片超出正文所在目录，已保留原链接: ${relativeLink}`);
+          return match;
+        }
+        let stat;
+        try {
+          stat = fs.lstatSync(absoluteImage);
+        } catch {
+          missing += 1;
+          warnings.push(`inventory ${inventory.itemId} 图片文件不存在，已保留原链接: ${relativeLink}`);
+          return match;
+        }
+        if (!stat.isFile()) {
+          missing += 1;
+          warnings.push(`inventory ${inventory.itemId} 图片不是普通文件，已保留原链接: ${relativeLink}`);
+          return match;
+        }
+        let workspacePath;
+        try {
+          workspacePath = toWorkspacePath(absoluteImage, workspaceRoot);
+        } catch (error) {
+          unmappable += 1;
+          warnings.push(`inventory ${inventory.itemId} 图片无法映射到会话空间，已保留原链接: ${error.message}`);
+          return match;
+        }
+        rewritten += 1;
+        return `![${alt}](${buildImageDownloadUrl(workspacePath, resourceId, language, baseUrl)})`;
+      });
+      if (rewritten && !dryRun) {
+        fs.writeFileSync(absoluteMarkdown, next, { mode: 0o600 });
+      }
+      rewrittenTotal += rewritten;
+      items.push({
+        itemId: inventory.itemId,
+        status: rewritten || (!missing && !unmappable) ? 'success' : 'partial',
+        sanitizedPath,
+        rewritten,
+        missing,
+        unmappable,
+      });
+    }
+    return {
+      ok: true,
+      action: 'rewrite-image-links',
+      dryRun,
+      resourceId,
+      language,
+      workspaceRoot,
+      baseUrl,
+      rewritten: rewrittenTotal,
+      items,
+      warnings,
+    };
+  });
+}
+
 function help() {
   return {
     name: 'knowledge-collection-post-processing',
@@ -1477,6 +1652,7 @@ function help() {
       cleanup: '按 run 状态执行完整会话或部分工作副本清理',
       'unlock-stale': '仅在锁持有 PID 已不存在时安全回收残留锁',
       'set-retention': '设置是否保留本次会话工作副本',
+      'rewrite-image-links': '把 sanitized 正文里的本地图片相对链接改写为 fileBrowser 下载 URL',
     },
   };
 }
@@ -1507,6 +1683,8 @@ function main() {
       result = unlockStale(paths);
     } else if (command === 'set-retention') {
       result = setRetention(paths, args);
+    } else if (command === 'rewrite-image-links') {
+      result = rewriteImageLinks(paths, args);
     } else {
       throw new Error(`未知命令: ${command}`);
     }

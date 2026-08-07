@@ -941,6 +941,139 @@ async function testRetentionCanBeUpdatedThroughStateCommand() {
   }
 }
 
+async function testRewriteImageLinksBuildsFileBrowserUrls() {
+  const root = await createSession(['a']);
+  try {
+    await mkdir(join(root, 'sanitized/items/images'), { recursive: true });
+    await writeFile(join(root, 'sanitized/items/images/img_001.png'), 'png-bytes');
+    await writeFile(
+      join(root, 'sanitized/items/a.md'),
+      '# Article a\n\n![封面](images/img_001.png)\n\n![远程](https://cdn.example.com/x.png)\n',
+    );
+    const result = await runCli([
+      'rewrite-image-links', '--session-dir', root,
+      '--resource-id', '20000385', '--workspace-root', root,
+    ]);
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json.rewritten, 1);
+    const rewritten = await readFile(join(root, 'sanitized/items/a.md'), 'utf8');
+    assert.match(
+      rewritten,
+      /!\[封面\]\(\/byaiService\/fileBrowser\/download\?resourceId=20000385&path=%2Fsanitized%2Fitems%2Fimages%2Fimg_001\.png&language=zh-CN\)/,
+    );
+    // 远程链接不属于本地图片，必须原样保留。
+    assert.match(rewritten, /!\[远程\]\(https:\/\/cdn\.example\.com\/x\.png\)/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testRewriteImageLinksKeepsLinkWhenImageMissing() {
+  const root = await createSession(['a']);
+  try {
+    await writeFile(join(root, 'sanitized/items/a.md'), '# Article a\n\n![丢失](images/img_404.png)\n');
+    const result = await runCli([
+      'rewrite-image-links', '--session-dir', root,
+      '--resource-id', '20000385', '--workspace-root', root,
+    ]);
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json.rewritten, 0);
+    assert.equal(result.json.items[0].missing, 1);
+    assert.ok(result.json.warnings.some((warning) => warning.includes('图片文件不存在')));
+    const unchanged = await readFile(join(root, 'sanitized/items/a.md'), 'utf8');
+    assert.match(unchanged, /!\[丢失\]\(images\/img_404\.png\)/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testRewriteImageLinksSupportsAbsoluteBaseUrl() {
+  const root = await createSession(['a']);
+  try {
+    await mkdir(join(root, 'sanitized/items/images'), { recursive: true });
+    await writeFile(join(root, 'sanitized/items/images/img_001.png'), 'png-bytes');
+    await writeFile(join(root, 'sanitized/items/a.md'), '# Article a\n\n![封面](images/img_001.png)\n');
+    const result = await runCli([
+      'rewrite-image-links', '--session-dir', root,
+      '--resource-id', '20000385', '--workspace-root', root,
+      '--base-url', 'http://123.56.153.229:8080',
+    ]);
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json.rewritten, 1);
+    assert.equal(result.json.baseUrl, 'http://123.56.153.229:8080');
+    const rewritten = await readFile(join(root, 'sanitized/items/a.md'), 'utf8');
+    assert.match(
+      rewritten,
+      /!\[封面\]\(http:\/\/123\.56\.153\.229:8080\/byaiService\/fileBrowser\/download\?resourceId=20000385&/,
+    );
+    // 已是绝对下载 URL 的链接不再匹配，重跑保持幂等。
+    const again = await runCli([
+      'rewrite-image-links', '--session-dir', root,
+      '--resource-id', '20000385', '--workspace-root', root,
+      '--base-url', 'http://123.56.153.229:8080',
+    ]);
+    assert.equal(again.code, 0, again.stderr || again.stdout);
+    assert.equal(again.json.rewritten, 0);
+    assert.equal(await readFile(join(root, 'sanitized/items/a.md'), 'utf8'), rewritten);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testRewriteImageLinksRejectsUnsafeBaseUrl() {
+  const root = await createSession(['a']);
+  try {
+    await mkdir(join(root, 'sanitized/items/images'), { recursive: true });
+    await writeFile(join(root, 'sanitized/items/images/img_001.png'), 'png-bytes');
+    const original = '# Article a\n\n![封面](images/img_001.png)\n';
+    await writeFile(join(root, 'sanitized/items/a.md'), original);
+    const cases = [
+      ['ftp://example.com', /只支持 http 或 https/],
+      ['http://user:pass@example.com', /不得包含凭据/],
+      ['http://example.com/byaiService', /只能是 origin/],
+      ['not-a-url', /不是合法 URL/],
+      ['', /不能为空/],
+    ];
+    for (const [value, expected] of cases) {
+      const rejected = await runCli([
+        'rewrite-image-links', '--session-dir', root,
+        '--resource-id', '20000385', '--workspace-root', root,
+        '--base-url', value,
+      ]);
+      assert.equal(rejected.code, 1, `${value} 应被拒绝`);
+      assert.match(rejected.json.error, expected);
+    }
+    // 任何一次拒绝都不得改动正文。
+    assert.equal(await readFile(join(root, 'sanitized/items/a.md'), 'utf8'), original);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testRewriteImageLinksRejectsMissingResourceIdAndSupportsDryRun() {
+  const root = await createSession(['a']);
+  try {
+    await mkdir(join(root, 'sanitized/items/images'), { recursive: true });
+    await writeFile(join(root, 'sanitized/items/images/img_001.png'), 'png-bytes');
+    const original = '# Article a\n\n![封面](images/img_001.png)\n';
+    await writeFile(join(root, 'sanitized/items/a.md'), original);
+
+    const rejected = await runCli(['rewrite-image-links', '--session-dir', root]);
+    assert.equal(rejected.code, 1);
+    assert.match(rejected.json.error, /--resource-id 必须是正整数/);
+
+    const dry = await runCli([
+      'rewrite-image-links', '--session-dir', root,
+      '--resource-id', '20000385', '--workspace-root', root, '--dry-run',
+    ]);
+    assert.equal(dry.code, 0, dry.stderr || dry.stdout);
+    assert.equal(dry.json.rewritten, 1);
+    assert.equal(await readFile(join(root, 'sanitized/items/a.md'), 'utf8'), original);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 async function testNewRunSupersedesSkippedRetentionCleanupOwnership() {
   const root = await createSession(['a'], metadata([inventoryItem('a')], {
     retention: { auditRequired: false, userRequested: true },
@@ -1529,6 +1662,11 @@ await testSuccessfulPayloadIsDeletedAndHelpPublishesSchema();
 await testSubsetSuccessKeepsSessionAndUnselectedItem();
 await testRetentionPreventsCleanup();
 await testRetentionCanBeUpdatedThroughStateCommand();
+await testRewriteImageLinksBuildsFileBrowserUrls();
+await testRewriteImageLinksKeepsLinkWhenImageMissing();
+await testRewriteImageLinksRejectsMissingResourceIdAndSupportsDryRun();
+await testRewriteImageLinksSupportsAbsoluteBaseUrl();
+await testRewriteImageLinksRejectsUnsafeBaseUrl();
 await testNewRunSupersedesSkippedRetentionCleanupOwnership();
 await testMalformedMetadataFailsClosedBeforeCleanup();
 await testInvalidMaterializationDowngradesWithoutDeletingFiles();

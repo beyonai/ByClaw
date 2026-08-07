@@ -50,6 +50,15 @@ const ProjectFormModal: React.FC<Props> = ({
       title={title || formT(projectId ? 'editTitle' : 'createTitle')}
       open={open}
       confirmLoading={loading}
+      centered
+      // 表单内容较长时只滚动弹窗内容区，避免滚动条落到项目空间页面本身。
+      styles={{
+        body: {
+          maxHeight: 'calc(100vh - 220px)',
+          overflowY: 'auto',
+          paddingInlineEnd: 8,
+        },
+      }}
       okButtonProps={{ disabled: loading || projectTypeLoading }}
       onCancel={onCancel}
       onOk={handleModalOk}

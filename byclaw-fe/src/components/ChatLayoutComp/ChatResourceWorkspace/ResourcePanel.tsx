@@ -94,7 +94,13 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
         return <CodeChangesPanel sessionId={sessionId} onOpenDetail={onOpenDetail} />;
       }
       if (secondaryKey === 'ontology') {
-        return <ObjectFilesPanel projectId={project?.projectId || projectId} sessionId={sessionId} />;
+        return (
+          <ObjectFilesPanel
+            projectId={project?.projectId || projectId}
+            sessionId={sessionId}
+            onOpenDetail={onOpenDetail}
+          />
+        );
       }
       return empty;
     }
@@ -119,7 +125,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
       );
     }
     if (secondaryKey === 'ontology') {
-      return <ObjectFilesPanel projectId={project?.projectId || projectId} />;
+      return <ObjectFilesPanel projectId={project?.projectId || projectId} onOpenDetail={onOpenDetail} />;
     }
     return empty;
   }, [empty, onOpenDetail, primaryKey, project, projectId, resourceId, secondaryKey, sessionId, showCode]);
