@@ -6,7 +6,8 @@ import useGlobal from '@/hooks/useGlobal';
 import { getSkillGroupDetail, installSkillGroup } from '@/pages/manager/service/resources';
 import type { SkillGroup, SkillGroupInstallResult } from '@/pages/manager/service/resources';
 import type { IMessage } from '@/typescript/message';
-import { SKILL_GROUP_DEFAULT_COVER } from '../skillGroupCover';
+import { getFileUrl } from '@/utils/file';
+import { getSkillGroupDefaultCover } from '../skillGroupCover';
 import styles from './index.module.less';
 
 type DrawerMessage = Partial<IMessage> & {
@@ -173,7 +174,7 @@ const SkillGroupDetailDrawer: React.FC<SkillGroupDetailDrawerProps> = ({ groupId
           {detail.avatar && !posterError ? (
             <img
               className={styles.poster}
-              src={detail.avatar}
+              src={getFileUrl(detail.avatar)}
               alt={resourceName}
               onError={() => setPosterError(true)}
             />
@@ -181,7 +182,7 @@ const SkillGroupDetailDrawer: React.FC<SkillGroupDetailDrawerProps> = ({ groupId
             <img
               className={styles.posterDefault}
               data-testid="skill-group-detail-default-cover"
-              src={SKILL_GROUP_DEFAULT_COVER}
+              src={getSkillGroupDefaultCover()}
               alt=""
             />
           )}
