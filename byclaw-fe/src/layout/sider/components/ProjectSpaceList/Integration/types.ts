@@ -73,9 +73,11 @@ export type TestSuite = {
   id: string;
   name: string;
   runner: 'pytest' | 'playwright' | 'jest' | 'vitest' | 'custom' | 'manual';
-  // code: 用例随代码仓库(选项目关联仓库,与被测代码同仓);standalone: 用例存于独立 git 仓库单独维护。
-  // 两种都由测试数字员工 clone 后运行,差别只在克隆哪个仓库。manual 套件不需要来源仓库。
-  sourceType: 'code' | 'standalone';
+  // code: 用例随代码仓库(选项目关联仓库,与被测代码同仓),沿用开发已检出目录,免克隆;
+  // standalone: 用例存于独立 git 仓库单独维护,执行前克隆它;
+  // env: 用例已预置在集成测试环境机上(运维放好/镜像自带),跳过全部克隆,按环境连接方式登录后直接执行。
+  // manual 套件不需要来源仓库。
+  sourceType: 'code' | 'standalone' | 'env';
   source: string;
   branch: string;
   runCommand: string;

@@ -332,6 +332,170 @@
   color: #1f2633;
 }
 
+// ---- 运行记录看板:筛选条 + 运行表格 ----
+
+// 可点统计卡:概览兼作筛选入口,故需要指针与焦点态(键盘可达)。
+.reqStatCardClickable {
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+
+  &:hover {
+    border-color: #c3cfe0;
+    box-shadow: 0 2px 8px rgb(31 38 51 / 8%);
+  }
+
+  &:focus-visible {
+    outline: 2px solid #1677ff;
+    outline-offset: 2px;
+  }
+}
+
+.runFilterBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 8px;
+}
+
+.runFilterSuite {
+  min-width: 150px;
+}
+
+.runFilterKeyword {
+  width: 190px;
+}
+
+// 条数回显推到右侧:与筛选控件同一行但视觉分离,读作结果而非又一个控件。
+.runFilterCount {
+  margin-left: auto;
+  color: #7c8798;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.runTable {
+  :global(.ant-table) {
+    font-size: 12px;
+  }
+
+  // 密集型表格:压缩行高换取一屏更多行,符合 data-dense dashboard 取向。
+  :global(.ant-table-tbody > tr > td) {
+    padding: 6px 8px;
+  }
+
+  :global(.ant-table-thead > tr > th) {
+    padding: 7px 8px;
+    background: #f6f8fb;
+    color: #5a6b85;
+    font-size: 12px;
+    font-weight: 600;
+  }
+}
+
+// 失败行整行浅红底:扫视时先定位到需处理的行,再看细节。
+.runTableRowFailing {
+  > td {
+    background: #fff8f8;
+  }
+
+  &:hover > td {
+    background: #fff1f0 !important;
+  }
+}
+
+.runTableStatusTag {
+  margin-inline-end: 0;
+}
+
+.runTableSuiteCell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.runTableSuiteName {
+  color: #1f2633;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runTableBranch {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: #eef2f8;
+  color: #5a6b85;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runTableRateCell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  :global(.ant-progress) {
+    flex: 1;
+    margin: 0;
+    min-width: 44px;
+  }
+
+  :global(.ant-progress-inner) {
+    background: #eef2f8;
+  }
+}
+
+.runTableRateText {
+  color: #5a6b85;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+// 时间/耗时用等宽数字:纵向对齐才好比较。
+.runTableMono {
+  color: #5a6b85;
+  font-variant-numeric: tabular-nums;
+}
+
+.runTableMuted {
+  color: #b0b8c4;
+}
+
+.runTableFailDetail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.runTableFailKickback {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #fff1f0;
+  color: #cf3b38;
+  font-weight: 600;
+}
+
+.runTableFailReason {
+  flex: 1;
+  min-width: 0;
+  color: #5a6b85;
+  word-break: break-word;
+}
+
 .reqIntegrationEmpty {
   margin: 12px 0;
   padding: 20px 0;
