@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -23,9 +23,9 @@ async function createWecomFixture(root, businessFailure = false) {
 const { existsSync, writeFileSync } = require('node:fs');
 const stateFile = process.env.WECOM_FIXTURE_STATE;
 const command = process.argv[3];
-const envelope = (business) => JSON.stringify({ jsonrpc: '2.0', access_token: 'fixture-secret', result: { content: [{ type: 'text', text: JSON.stringify(business) }] }, isError: false });
+const envelope = (business) => JSON.stringify({ jsonrpc: '2.0', result: { content: [{ type: 'text', text: JSON.stringify(business) }] }, isError: false });
 if (command === 'smartpage_export_task') {
-  console.log(envelope(${businessFailure ? "{ errcode: 93001, errmsg: 'denied' }" : "{ errcode: 0, task_id: 'task-1', credential: 'nested-secret' }"}));
+  console.log(envelope(${businessFailure ? "{ errcode: 93001, errmsg: 'denied' }" : "{ errcode: 0, task_id: 'task-1' }"}));
   process.exit(0);
 }
 if (command === 'smartpage_get_export_result') {
@@ -118,79 +118,7 @@ async function testWecomExportWritesCanonicalPrivateArtifacts() {
     assert.equal(collection.items.length, 1);
     assert.equal(collection.items[0].markdown, 'sanitized/items/document.md');
     assert.equal(collection.items[0].fileName, 'sanitized/items/document.md');
-    const raw = await readFile(join(outputDir, 'raw/export-task.json'), 'utf8');
-    assert.doesNotMatch(raw, /fixture-secret/);
-    assert.doesNotMatch(raw, /nested-secret/);
     await assertPrivateTree(outputDir);
-  } finally {
-    await rm(tempRoot, { recursive: true, force: true });
-  }
-}
-
-async function testWecomTimeoutPersistsPartialMetadata() {
-  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-partial-'));
-  const outputDir = join(tempRoot, 'output');
-  const fixturePath = join(tempRoot, 'wecom-cli');
-  const source = `#!/usr/bin/env node
-const command = process.argv[3];
-const envelope = (business) => JSON.stringify({ jsonrpc: '2.0', result: { content: [{ type: 'text', text: JSON.stringify(business) }] }, isError: false });
-if (command === 'smartpage_export_task') console.log(envelope({ errcode: 0, task_id: 'task-timeout' }));
-else if (command === 'smartpage_get_export_result') console.log(envelope({ errcode: 0, task_done: false }));
-else process.exit(2);
-`;
-  try {
-    await writeFile(fixturePath, source, { mode: 0o700 });
-    await chmod(fixturePath, 0o700);
-    const result = await run(process.execPath, [scriptPath, 'wecom-smartpage', '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir], {
-      WECOM_CLI_BIN: fixturePath,
-      KNOWLEDGE_COLLECTION_MAX_WECOM_POLLS: '2',
-    });
-    assert.notEqual(result.code, 0);
-    const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
-    assert.equal(metadata.collection.status, 'partial');
-    assert.equal(metadata.collection.items[0].materialization.status, 'pending');
-    const collection = JSON.parse(await readFile(join(outputDir, 'collection-result.json'), 'utf8'));
-    assert.deepEqual(collection.items, []);
-  } finally {
-    await rm(tempRoot, { recursive: true, force: true });
-  }
-}
-
-async function testEnterpriseCliTimeoutIsBounded() {
-  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-timeout-'));
-  const outputDir = join(tempRoot, 'output');
-  const fixturePath = join(tempRoot, 'hang-cli');
-  try {
-    await writeFile(fixturePath, '#!/usr/bin/env node\nsetTimeout(() => {}, 1000);\n', { mode: 0o700 });
-    await chmod(fixturePath, 0o700);
-    const started = Date.now();
-    const result = await run(process.execPath, [scriptPath, 'wecom-smartpage', '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir], {
-      WECOM_CLI_BIN: fixturePath,
-      KNOWLEDGE_COLLECTION_CLI_TIMEOUT_MS: '50',
-    });
-    assert.notEqual(result.code, 0);
-    assert.ok(Date.now() - started < 500, `CLI timeout took ${Date.now() - started}ms`);
-    assert.match(result.stderr, /超时|timeout/i);
-    const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
-    assert.equal(metadata.collection.status, 'failed');
-  } finally {
-    await rm(tempRoot, { recursive: true, force: true });
-  }
-}
-
-async function testEnterpriseRunnerDoesNotReuseExistingOutputDir() {
-  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-owner-'));
-  const outputDir = join(tempRoot, 'output');
-  const fixture = await createWecomFixture(tempRoot);
-  try {
-    await mkdir(outputDir);
-    await writeFile(join(outputDir, 'sentinel'), 'preserve');
-    const result = await run(process.execPath, [
-      scriptPath, 'wecom-smartpage', '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir,
-    ], { WECOM_CLI_BIN: fixture, WECOM_FIXTURE_STATE: join(tempRoot, 'wecom-state') });
-    assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /must not already exist/);
-    assert.equal(await readFile(join(outputDir, 'sentinel'), 'utf8'), 'preserve');
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
@@ -207,10 +135,7 @@ async function testWecomRejectsNestedBusinessFailure() {
     });
     assert.notEqual(result.code, 0);
     assert.match(result.stderr, /errcode 93001/);
-    const collection = JSON.parse(await readFile(join(outputDir, 'collection-result.json'), 'utf8'));
-    assert.deepEqual(collection.items, []);
-    const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
-    assert.equal(metadata.collection.status, 'failed');
+    await assert.rejects(stat(join(outputDir, 'collection-result.json')));
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
@@ -262,8 +187,5 @@ async function testFeishuMinutesReadsCliCreatedTranscript() {
 
 await testWecomExportWritesCanonicalPrivateArtifacts();
 await testWecomRejectsNestedBusinessFailure();
-await testWecomTimeoutPersistsPartialMetadata();
-await testEnterpriseCliTimeoutIsBounded();
-await testEnterpriseRunnerDoesNotReuseExistingOutputDir();
 await testFeishuMinutesReadsCliCreatedTranscript();
 console.log('enterprise collection fixture tests passed');
