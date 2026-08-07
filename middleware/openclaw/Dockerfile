@@ -91,8 +91,9 @@ ARG OPENCLI_EXTENSION_VERSION=2.1.13
 ARG DWS_VERSION=v1.0.52
 # buildx 目标架构(amd64/arm64),用于选择预下载二进制或 fallback。
 ARG TARGETARCH
+ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG WECOM_CLI_VERSION=0.1.9
-ARG LARKSUITE_CLI_VERSION=1.0.78
+ARG LARKSUITE_CLI_VERSION=1.0.84
 ARG INSTALL_BROWSER_STACK=true
 
 RUN chown root:root /app
@@ -116,6 +117,13 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
 ENV BYCLI_CONFIG_DIR=/by/.bycli \
     BYCLI_BROWSER_RECOVERY_COMMAND=/usr/local/bin/start-chrome.sh \
     BYCLI_DAEMON_HOST=0.0.0.0
+
+RUN npm config set registry "${NPM_REGISTRY}" --global \
+    && npm config set fund false --global \
+    && npm config set audit false --global \
+    && npm config set fetch-retries 5 --global \
+    && npm config set fetch-retry-mintimeout 20000 --global \
+    && npm config set fetch-retry-maxtimeout 120000 --global
 
 ARG OPENCLI_VERSION=2.1.14
 ARG OPENCLI_EXTENSION_VERSION=2.1.14

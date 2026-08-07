@@ -13,17 +13,16 @@ import {
   deleteSkill,
   queryDigEmployeeRelResourceAuth,
   queryResourceMembers,
-  queryWorkspaceSkillList,
   uploadSkillZip,
 } from '@/pages/manager/service/resources';
 import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import {
   isWorkspaceSkill,
-  mapWorkspaceSkillRows,
   SKILL_DISPLAY_SOURCE_USER_DEVELOPED,
   type WorkspaceSkillItem,
 } from '@/components/Resources/workspaceSkill/utils';
+import { queryDigitalEmployeeSkillResources } from '@/components/Resources/workspaceSkill/queryDigitalEmployeeSkillResources';
 import { useWorkspaceSkillActions } from '@/components/Resources/workspaceSkill/useWorkspaceSkillActions';
 import { useDigitalEmployeeManagePermission } from '@/components/Resources/workspaceSkill/useDigitalEmployeeManagePermission';
 import { batchHandleAuth, listAuthDetail } from '@/pages/manager/service/DigitalResourceMgr';
@@ -37,7 +36,6 @@ import { getManagerMenuConfig, normalizeMenuUrl } from '@/pages/manager/layout/s
 import { getRuntimeActualUrl } from '@/utils';
 import { getToken } from '@/utils/auth';
 import ResourceSiderListItem, {
-  getResourceImageUrl,
   PROPERTY_RESOURCE_TYPE,
   type ResourceItem,
   type ResourceSiderType,
@@ -124,17 +122,6 @@ const dedupeResourceList = (items: ResourceItem[]) => {
     seen.add(key);
     return true;
   });
-};
-
-const mapBoundSkillRows = (rows: ResourceItem[], resourceType: ResourceSiderType) => {
-  if (resourceType !== 'SKILL') {
-    return rows;
-  }
-  return rows.map((item) => ({
-    ...item,
-    resourceLogoUrl: getResourceImageUrl(item),
-    resourceBacked: true,
-  }));
 };
 
 const getGrantItem = (item: any) => ({
@@ -363,33 +350,40 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
       listFetchRef.current = true;
       setLoading(true);
       try {
-        const response = await queryDigEmployeeRelResourceAuth({
-          pageNum,
-          pageSize: PAGE_SIZE,
-          keyword: trim(queryKeyword),
-          resourceId: activeSiderAgent.resourceId,
-          resourceBizTypeList: config.resourceBizTypeList,
-        });
-        const rows = mapBoundSkillRows(getArrayData(response), resourceType);
-        let workspaceSkillRows: ResourceItem[] = [];
-        if (resourceType === 'SKILL' && reset && breadcrumbRef.current.length === 0) {
-          try {
-            const workspaceSkillResponse = await queryWorkspaceSkillList({
-              keyword: trim(queryKeyword),
-              resourceId: activeSiderAgent.resourceId,
-              userCode: userInfo?.userCode,
-            });
-            workspaceSkillRows = mapWorkspaceSkillRows(getArrayData(workspaceSkillResponse)) as ResourceItem[];
-          } catch (error) {
-            console.warn('query workspace skills failed', error);
-          }
+        let rows: ResourceItem[] = [];
+        let nextRows: ResourceItem[] = [];
+        let responsePageNum = pageNum;
+        let responseTotal = 0;
+
+        if (resourceType === 'SKILL') {
+          const skillResult = await queryDigitalEmployeeSkillResources({
+            pageNum,
+            pageSize: PAGE_SIZE,
+            keyword: trim(queryKeyword),
+            resourceId: activeSiderAgent.resourceId,
+            userCode: userInfo?.userCode,
+            includeWorkspace: reset && breadcrumbRef.current.length === 0,
+          });
+          rows = skillResult.boundRows as ResourceItem[];
+          nextRows = skillResult.rows as ResourceItem[];
+          responsePageNum = skillResult.pageNum;
+          responseTotal = skillResult.total;
+        } else {
+          const response = await queryDigEmployeeRelResourceAuth({
+            pageNum,
+            pageSize: PAGE_SIZE,
+            keyword: trim(queryKeyword),
+            resourceId: activeSiderAgent.resourceId,
+            resourceBizTypeList: config.resourceBizTypeList,
+          });
+          rows = getArrayData(response);
+          nextRows = rows;
+          responsePageNum = Number(response?.pageNum) || pageNum;
+          responseTotal = Number(response?.total) || 0;
         }
-        const responsePageNum = Number(response?.pageNum) || pageNum;
-        const responseTotal = Number(response?.total) || 0;
 
         const previousList = reset ? [] : resourceListRef.current;
-        const nextRows = reset ? [...rows, ...workspaceSkillRows] : rows;
-        const nextList = reset ? dedupeResourceList(nextRows) : dedupeResourceList([...previousList, ...nextRows]);
+        const nextList = reset ? dedupeResourceList(nextRows) : dedupeResourceList([...previousList, ...rows]);
         const boundLoadedCount = reset
           ? rows.length
           : previousList.filter((item) => !isWorkspaceSkill(item)).length + rows.length;

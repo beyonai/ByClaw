@@ -1395,8 +1395,8 @@ function validateCanonicalCollectionResult(collectionResult) {
   if (!collectionResult.filters || typeof collectionResult.filters !== "object" || Array.isArray(collectionResult.filters)) {
     throw new Error("collection-result.json filters 必须是对象");
   }
-  if (!Array.isArray(collectionResult.items) || !collectionResult.items.length) {
-    throw new Error("collection-result.json items 必须是非空数组");
+  if (!Array.isArray(collectionResult.items)) {
+    throw new Error("collection-result.json items 必须是数组");
   }
   collectionResult.items.forEach(validateCanonicalItem);
 }
@@ -1441,12 +1441,22 @@ function resolveCanonicalMarkdownPath(rootDir, rawPath, itemIndex, fieldName) {
   };
 }
 
+function assertSanitizedCanonicalPath(rootDir, relativePath, itemIndex, fieldName) {
+  const candidate = path.resolve(rootDir, relativePath);
+  const sanitizedRoot = path.resolve(rootDir, 'sanitized', 'items');
+  if (!isPathInside(sanitizedRoot, candidate) || candidate === sanitizedRoot) {
+    throw new Error(`collection-result.json items[${itemIndex}].${fieldName} 必须位于 sanitized/items/`);
+  }
+}
+
 function normalizeCanonicalItem(rawItem, args, index, rootDir) {
   if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) {
     throw new Error(`collection-result.json items[${index}] 必须是对象`);
   }
   const markdownPath = resolveCanonicalMarkdownPath(rootDir, rawItem.markdown, index, "markdown");
   const fileNamePath = resolveCanonicalMarkdownPath(rootDir, rawItem.fileName, index, "fileName");
+  assertSanitizedCanonicalPath(rootDir, rawItem.markdown, index, "markdown");
+  assertSanitizedCanonicalPath(rootDir, rawItem.fileName, index, "fileName");
   if (markdownPath.absolutePath !== fileNamePath.absolutePath) {
     throw new Error(`collection-result.json items[${index}].markdown 与 fileName 必须指向同一个 Markdown 文件`);
   }

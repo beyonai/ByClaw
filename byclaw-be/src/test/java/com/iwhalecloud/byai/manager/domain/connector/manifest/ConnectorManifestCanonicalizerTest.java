@@ -102,6 +102,21 @@ class ConnectorManifestCanonicalizerTest {
     }
 
     @Test
+    void canonicalizeAcceptsUserSandboxAuthorizationOwnership() {
+        ConnectorInfo connector = connector("dingtalk");
+        String manifest = manifest("dingtalk", "/by/.connector-auth/.dws",
+            "{\"status\":[\"dws\",\"auth\",\"status\"]}")
+            .replace("\"runtime\":{\"type\":\"cli\"",
+                "\"runtime\":{\"authorizeIn\":\"user-sandbox\",\"type\":\"cli\"")
+            .replace("\"authStorage\":{\"mode\":\"native-home\"",
+                "\"authStorage\":{\"owner\":\"user-sandbox-auth-job\","
+                    + "\"runtimeMutation\":\"sandbox-native\",\"mode\":\"native-home\"");
+
+        assertThat(canonicalizer.canonicalize(connector, manifest))
+            .contains("user-sandbox", "user-sandbox-auth-job", "sandbox-native");
+    }
+
+    @Test
     void canonicalizeRejectsOversizedManifest() {
         String oversized = manifest(
             "dingtalk",

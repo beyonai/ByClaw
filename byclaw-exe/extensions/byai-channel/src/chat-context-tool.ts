@@ -100,6 +100,7 @@ function renderContextText(snapshot: ReturnType<typeof resolveByclawChatContext>
   });
   return [
     `ByClaw visible chat context for session ${snapshot.sessionId}:`,
+    "Source: process-local observation cache (supplemental and possibly incomplete; not the authoritative BE snapshot).",
     snapshot.truncated ? `(showing latest ${snapshot.messages.length} of ${snapshot.totalMessages} messages)` : "",
     laneLines.length ? "Lanes:" : "",
     ...laneLines,
@@ -113,7 +114,7 @@ export function createByclawChatContextTool(ctx: ToolContext) {
     name: BYCLAW_CHAT_CONTEXT_TOOL_NAME,
     label: "ByClaw Chat Context",
     description:
-      "Fetch recent visible ByClaw chat messages for the current byai-channel business session. Use this before handoff/continue/review requests across different @agents instead of relying on private OpenClaw transcript state.",
+      "Fetch supplemental process-local ByClaw chat messages for the current business session. This cache may be incomplete across workers or restarts; use an automatically injected BE snapshot as authoritative when present.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -167,7 +168,8 @@ export function createByclawChatContextTool(ctx: ToolContext) {
           },
         ],
         details: {
-          source: "byai-channel",
+          source: "process_observation_cache",
+          authoritative: false,
           requesterSessionKey,
           sessionId: snapshot.sessionId,
           totalMessages: snapshot.totalMessages,

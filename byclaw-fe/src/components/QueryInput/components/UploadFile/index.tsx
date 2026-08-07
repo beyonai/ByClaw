@@ -198,7 +198,7 @@ const UploadFile = forwardRef<UploadFileRef, IProps>((props, ref) => {
               event.currentTarget.click();
             }}
           >
-            <AntdIcon type="icon-shouye-icon-wrapper" />
+            <AntdIcon type="icon-shouye-icon-wrapper" style={{ fontSize: '18px' }} />
           </span>
         </Tooltip>
       )}

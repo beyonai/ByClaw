@@ -194,6 +194,28 @@
         </if>
     </select>
 
+    <select id="selectVisibleBeforeMessageId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+          AND message_id &lt; #{beforeMessageId}
+          AND archived_at IS NULL
+          AND "usage" IN (1, 2)
+          AND message_content IS NOT NULL
+        ORDER BY create_time DESC, message_id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="countVisibleBeforeMessageId" resultType="long">
+        SELECT COUNT(1)
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+          AND message_id &lt; #{beforeMessageId}
+          AND archived_at IS NULL
+          AND "usage" IN (1, 2)
+          AND message_content IS NOT NULL
+    </select>
+
 
     <delete id="deleteByQo">
         DELETE FROM byai_message

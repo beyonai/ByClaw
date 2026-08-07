@@ -129,6 +129,14 @@ npm run build
 - `tools`
 - `sizes`
 
+## Hook 文件目录约定
+
+`before_prompt_build` 会注入文件路由规则，兼容用户在聊天中的目录说法：
+
+- `会话目录`、`session`、`.session`、`.sessions` 统一指当前会话的 `/.sessions/<sessionId>/`；在沙箱绝对路径中对应 `/by/.sessions/<sessionId>/`。
+- `共享目录`、`shared`、`.shared` 统一指 `/.shared/`；在沙箱绝对路径中对应 `/by/.shared/`。
+- `.session` 是兼容别名，BE 实际目录名为 `.sessions`。插件会强制禁止误用 `/session`、`/.session`、`/shared` 等平行目录，并要求文件写入后按完整绝对路径复核。
+
 ### 与配置热重载协作
 
 SDK 模式下，`ByaiSdkApp` 不缓存启动时传入的 `OpenClawConfig`。每次收到 `AskAgentCommand` 并调用 `deliverReplyToAgentViaSdk` 前，都会通过 `getByaiRuntime().config.current()` 读取当前运行时配置。

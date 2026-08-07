@@ -39,6 +39,11 @@ public class TargetAgentResolver {
     public String resolveAgentType(String workerAgentType, Long agentId, String resumeAgentType, String userCode) {
         String targetAgentType = workerAgentType;
 
+        // agentId 为空代表公共超级助手入口；不能被旧会话透传的 BYCLAW_EXE sourceAgentType 覆盖。
+        if (agentId == null && WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(targetAgentType)) {
+            return WorkerAgentType.BY_SUPER.getCode();
+        }
+
         if (StringUtils.isNotBlank(targetAgentType) && targetAgentType.startsWith(WorkerAgentType.DEBUG.getCode())) {
             targetAgentType = WorkerAgentType.DEBUG.getCode() + "_" + agentId;
         }
@@ -51,7 +56,8 @@ public class TargetAgentResolver {
     }
 
     /**
-     * 根据对话入参解析最终 agentId。默认超级助手沿用 Gateway main 路由，返回 null。
+     * 根据对话入参解析最终 agentId。BY_SUPER 默认超级助手保留资源 ID，
+     * 尚未迁移的默认超级助手继续沿用 Gateway main 路由。
      *
      * @param assistantChatDto 对话请求参数
      * @return 最终 agentId
@@ -64,7 +70,8 @@ public class TargetAgentResolver {
     }
 
     /**
-     * 根据 agentId 解析最终 agentId。默认超级助手沿用 Gateway main 路由，返回 null。
+     * 根据 agentId 解析最终 agentId。已迁移到 BY_SUPER 的默认超级助手保留真实资源 ID；
+     * 尚未迁移的默认超级助手继续沿用 Gateway main 路由并返回 null。
      *
      * @param agentId 数字员工标识
      * @return 最终 agentId
@@ -79,7 +86,9 @@ public class TargetAgentResolver {
         }
         boolean isDigitalEmployee = Constants.ResourceBizType.DIG_EMPLOYEE.equals(ssResource.getResourceBizType());
         boolean isDefaultSuperAssistant = StringUtils.endsWith(ssResource.getResourceCode(), "main");
-        if (isDigitalEmployee && isDefaultSuperAssistant) {
+        boolean routesToSuperWorker =
+            WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(ssResource.getWorkerAgentType());
+        if (isDigitalEmployee && isDefaultSuperAssistant && !routesToSuperWorker) {
             logger.info("识别到默认超级助手，清空agentId以沿用main路由, userId={}, agentId={}, resourceCode={}",
                 CurrentUserHolder.getCurrentUserId(), agentId, ssResource.getResourceCode());
             return null;

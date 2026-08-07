@@ -20,6 +20,10 @@ import {
   resolveByclawChatContext,
 } from "./chat-context-store.js";
 import { buildDisabledConnectorPrompt } from "./connector-authorization.js";
+import {
+  formatGroupChatContextForPrompt,
+  type GroupChatContextV1,
+} from "./group-chat-context.js";
 
 export type PromptInjectionSnapshot = {
   appendSystemContext: string;
@@ -228,6 +232,7 @@ function buildEnhancedChannelExtension(
 export function buildPromptInjectionSnapshot(params: {
   request: ActiveSdkRequest;
   currentUserText?: string;
+  groupChatContext?: GroupChatContextV1;
   workspaceDir?: string;
   includeUserMdReloadHint?: boolean;
 }): PromptInjectionSnapshot {
@@ -238,13 +243,20 @@ export function buildPromptInjectionSnapshot(params: {
   }
   if (params.request.sessionId) {
     sections.push(buildSessionFilesPrompt(params.request.sessionId, params.request.language));
-    sections.push(buildByclawChatContextToolPrompt(params.request.language, {
-      crossAgentHint: detectByclawChatContextCrossAgentHint({
-        text: params.currentUserText,
-        laneMetadata: params.request.laneMetadata,
-        knownAgentRefs: collectKnownAgentRefs(params.request.sessionId),
-      }),
-    }));
+    if (params.groupChatContext) {
+      sections.push(formatGroupChatContextForPrompt(
+        params.groupChatContext,
+        params.request.language,
+      ));
+    } else {
+      sections.push(buildByclawChatContextToolPrompt(params.request.language, {
+        crossAgentHint: detectByclawChatContextCrossAgentHint({
+          text: params.currentUserText,
+          laneMetadata: params.request.laneMetadata,
+          knownAgentRefs: collectKnownAgentRefs(params.request.sessionId),
+        }),
+      }));
+    }
   }
   if (params.request.languageProvided) {
     sections.push(buildLanguagePrompt(params.request.language));

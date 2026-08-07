@@ -42,7 +42,7 @@ FROM (
     UNION ALL
     SELECT 'lark', '飞书', '通过 lark-cli 连接飞书工作空间', 'lark-cli', 'fws', 'DEVICE_FLOW',
            '{"domains":["docs","drive","wiki"]}',
-           '{"authStorage":{"environment":{"LARK_HOME":"/by/.connector-auth/.lark-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.lark-cli","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"lark","runtime":{"authorizeIn":"be-auth-job","commands":{"login":["lark-cli","auth","login","--domain","docs","--domain","drive","--domain","wiki","--no-wait","--json"],"logout":["lark-cli","auth","logout","--json"],"status":["lark-cli","auth","status","--json","--verify"]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"fws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.78"}', 20
+           '{"authStorage":{"environment":{"LARK_HOME":"/by/.connector-auth/.lark-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.lark-cli","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"lark","runtime":{"authorizeIn":"be-auth-job","commands":{"login":["lark-cli","auth","login","--domain","docs","--domain","drive","--domain","wiki","--no-wait","--json"],"logout":["lark-cli","auth","logout","--json"],"status":["lark-cli","auth","status","--json","--verify"]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"fws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.84"}', 20
     UNION ALL
     SELECT 'wecom', '企业微信', '通过 wecom-cli 连接企业微信工作空间', 'wecom-cli', 'wecomcli', 'CLI_INIT',
            '{"authorizationTimeoutSeconds":120,"probeCommand":["wecom-cli","contact","get_userlist","{}"]}' AS auth_config,
@@ -372,3 +372,31 @@ WHERE g.grant_obj_id = knowledge_collection.resource_id
         AND existing.grant_to_obj_id = g.grant_to_obj_id
         AND existing.grant_to_obj_type = g.grant_to_obj_type
   );
+
+-- 将飞书 Lark 授权执行归属迁移到用户 OpenClaw 沙箱。
+-- 通过幂等 JSONB 更新兼容已存在的 Lark Runtime Manifest。
+UPDATE byai.byai_connector_info
+SET runtime_manifest = jsonb_set(
+        jsonb_set(
+            jsonb_set(
+                jsonb_set(
+                    runtime_manifest::jsonb,
+                    '{runtime,authorizeIn}',
+                    '"user-sandbox"'::jsonb,
+                    true
+                ),
+                '{authStorage,owner}',
+                '"user-sandbox-auth-job"'::jsonb,
+                true
+            ),
+            '{authStorage,runtimeMutation}',
+            '"sandbox-native"'::jsonb,
+            true
+        ),
+        '{runtime,commands,login}',
+        '["lark-cli","auth","login","--domain","all","--no-wait","--json"]'::jsonb,
+        true
+    )::text,
+    update_time = CURRENT_TIMESTAMP
+WHERE connector_code = 'lark'
+  AND runtime_manifest IS NOT NULL;

@@ -19,6 +19,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import jakarta.annotation.PreDestroy;
 
@@ -87,6 +88,8 @@ public class LarkCliAuthorizationProvider
     private final ConnectorCliRunner cliRunner;
     private final ConnectorCredentialWorkspaceService workspaceService;
     private final ObjectMapper objectMapper;
+    private final LarkSandboxAuthorizationRuntime sandboxRuntime;
+    private final LarkAuthorizationProperties authorizationProperties;
     private static final String APP_INITIALIZATION_PHASE = "app_initialization";
     private static final String USER_AUTHORIZATION_PHASE = "user_authorization";
     private static final Pattern HTTPS_URL = Pattern.compile("https://[^\\s\\p{Cntrl}]+", Pattern.CASE_INSENSITIVE);
@@ -101,13 +104,25 @@ public class LarkCliAuthorizationProvider
     private boolean shuttingDown;
     private final Object[] authorizationLocks = createAuthorizationLocks();
 
+    @Autowired
+    public LarkCliAuthorizationProvider(
+        ConnectorCliRunner cliRunner,
+        ConnectorCredentialWorkspaceService workspaceService,
+        ObjectMapper objectMapper,
+        LarkSandboxAuthorizationRuntime sandboxRuntime,
+        LarkAuthorizationProperties authorizationProperties) {
+        this.cliRunner = cliRunner;
+        this.workspaceService = workspaceService;
+        this.objectMapper = objectMapper;
+        this.sandboxRuntime = sandboxRuntime;
+        this.authorizationProperties = authorizationProperties;
+    }
+
     public LarkCliAuthorizationProvider(
         ConnectorCliRunner cliRunner,
         ConnectorCredentialWorkspaceService workspaceService,
         ObjectMapper objectMapper) {
-        this.cliRunner = cliRunner;
-        this.workspaceService = workspaceService;
-        this.objectMapper = objectMapper;
+        this(cliRunner, workspaceService, objectMapper, null, new LarkAuthorizationProperties());
     }
 
     @Override
@@ -117,6 +132,9 @@ public class LarkCliAuthorizationProvider
 
     @Override
     public AuthorizationStatusResult verify(String userId, ConnectorInfo connector) {
+        if (useSandboxExecutor()) {
+            return sandboxRuntime.verify(userId);
+        }
         Long numericUserId = parseUserId(userId);
         if (numericUserId == null) {
             return failedStatus("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential");
@@ -154,6 +172,9 @@ public class LarkCliAuthorizationProvider
 
     @Override
     public AuthorizationStartResult start(AuthorizationStartContext context) {
+        if (useSandboxExecutor()) {
+            return sandboxRuntime.start(context);
+        }
         synchronized (lifecycleGate) {
             if (shuttingDown) {
                 return failedStart(PROVIDER_START_FAILED, PROVIDER_START_FAILED_MESSAGE);
@@ -342,6 +363,9 @@ public class LarkCliAuthorizationProvider
 
     @Override
     public AuthorizationStatusResult queryStatus(AuthorizationSessionContext session) {
+        if (useSandboxExecutor()) {
+            return sandboxRuntime.queryStatus(session);
+        }
         Long userId = parseUserId(session == null ? null : session.userId());
         if (userId == null) {
             return failedStatus(INVALID_USER, INVALID_USER_MESSAGE);
@@ -560,6 +584,10 @@ public class LarkCliAuthorizationProvider
 
     @Override
     public void cancel(AuthorizationSessionContext session) {
+        if (useSandboxExecutor()) {
+            sandboxRuntime.cancel(session);
+            return;
+        }
         if (session == null || session.authorizationId() == null) {
             return;
         }
@@ -604,6 +632,11 @@ public class LarkCliAuthorizationProvider
         } catch (JsonProcessingException | RuntimeException e) {
             return false;
         }
+    }
+
+    private boolean useSandboxExecutor() {
+        return sandboxRuntime != null && authorizationProperties != null
+            && authorizationProperties.isSandboxExecutor();
     }
 
     private List<String> buildLoginCommand(Map<String, Object> providerConfig) {

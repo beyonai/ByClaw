@@ -257,6 +257,41 @@ test("does not retry a non-retryable backend failure", async (t) => {
   });
 });
 
+test("preserves non-retryable WeCom stage diagnostic codes", async (t) => {
+  for (const errorCode of [
+    "CONNECTOR_CACHE_INVALID",
+    "CONNECTOR_BUSINESS_PROBE_INVALID",
+  ]) {
+    const fixture = createFixture();
+    const backend = await startServer((_request, response) => {
+      response.setHeader("Content-Type", "application/json");
+      response.end(JSON.stringify({
+        code: -1,
+        data: { connected: false, errorCode, retryable: false },
+      }));
+    });
+    t.after(() => {
+      backend.server.close();
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    });
+
+    const result = await runHelper([], {
+      HOME: path.join(fixture.root, "home"),
+      OPENCLAW_STATE_DIR: fixture.stateDir,
+      REDIS_HOST: "",
+      BE_SERVER_PORT: String(backend.port),
+    });
+
+    assert.equal(result.code, 1);
+    assert.equal(backend.requests.length, 1);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      connected: false,
+      errorCode,
+      retryable: false,
+    });
+  }
+});
+
 test("does not retry an unauthorized non-JSON response", async (t) => {
   const fixture = createFixture();
   const backend = await startServer((_request, response) => {

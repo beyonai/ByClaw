@@ -41,6 +41,16 @@ export interface FileBrowserCreateFolderParams {
   path: string;
 }
 
+export interface FileBrowserSaveToKnowledgeParams {
+  resourceId: string | number;
+  sourcePath: string;
+  sourceDir: boolean;
+  targetResourceId: string | number;
+  targetDirectoryPath: string;
+  processFrontMatter?: boolean;
+  overwrite?: boolean;
+}
+
 export function listFiles(params: FileBrowserListParams) {
   return POST<FileBrowserItem[]>('/byaiService/fileBrowser/list', params);
 }
@@ -113,4 +123,8 @@ export function downloadFolder(resourceId: string | number, path: string) {
     { resourceId, path },
     { responseType: 'blob' }
   );
+}
+
+export function saveToKnowledge(params: FileBrowserSaveToKnowledgeParams) {
+  return POST('/byaiService/fileBrowser/saveToKnowledge', params);
 }

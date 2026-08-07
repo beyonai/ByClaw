@@ -550,7 +550,7 @@ async def download_file_by_resource_id(body: dict[str, Any] = Body(...)):
     if kn_code is None:
         return _error(f"cannot resolve resourceId: {resource_id}")
 
-    body_mapped = {**body, "knCode": kn_code}
+    body_mapped = {**body, "knCode": /api/v1/downloadFile}
     body_mapped.pop("resourceId", None)
 
     try:
