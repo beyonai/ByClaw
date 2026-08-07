@@ -19,7 +19,7 @@ RUN apk add --no-cache \
     && rm -rf /var/cache/apk/*
 
 # 安装 Lark/WeCom CLI
-ARG LARKSUITE_CLI_VERSION=1.0.78
+ARG LARKSUITE_CLI_VERSION=1.0.84
 ARG WECOM_CLI_VERSION=0.1.9
 RUN npm install --global \
         "@larksuite/cli@${LARKSUITE_CLI_VERSION}" \
