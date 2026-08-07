@@ -803,6 +803,7 @@ public class ProjectApplicationService {
             return PageHelperUtil.emptyPage(projectSessionQo.getPageNum(), projectSessionQo.getPageSize());
         }
 
+        projectSessionQo.normalizeSearchCondition();
         projectSessionQo.setCreateBy(CurrentUserHolder.getCurrentUserId());
 
         return projectSessionService.listSessionsByProject(projectSessionQo);

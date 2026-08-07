@@ -211,7 +211,9 @@ class ConnectorSchemaTest {
             "DWS_NO_SKILLS=1",
             "DWS_DISABLE_KEYCHAIN=1"
         );
-        assertThat(dockerfile).containsOnlyOnce("RUN npm install --global");
+        assertThat(dockerfile)
+            .containsOnlyOnce("@larksuite/cli@${LARKSUITE_CLI_VERSION}")
+            .containsOnlyOnce("@wecom/cli@${WECOM_CLI_VERSION}");
     }
 
     @Test

@@ -13,10 +13,11 @@ import lombok.Setter;
 @Setter
 public class KbFileReadResult {
 
-    /**
-     * 知识库编码。经 DatasetController 封装后会回映为 ByClaw resourceId。
-     */
+    /** QA 知识库编码。 */
     private String knCode;
+
+    /** 门户知识库资源 ID。 */
+    private Long resourceId;
 
     private String filePath;
 

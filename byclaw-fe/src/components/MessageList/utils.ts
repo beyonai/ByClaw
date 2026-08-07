@@ -139,7 +139,7 @@ export function getResponseAgentInfoByMessage(
         agentId: `${agentInfo?.agentId || resourceAgentId}`,
         name: inlineDigitalEmployee.resourceName || agentInfo?.name || `${resourceAgentId}`,
         chatAvatar: inlineDigitalEmployee.chatAvatar || agentInfo?.chatAvatar,
-        resourceDesc: agentInfo?.resourceDesc || '',
+        resourceDesc: inlineDigitalEmployee.resourceDesc || agentInfo?.resourceDesc || '',
         resourceCode: inlineDigitalEmployee.resourceCode || agentInfo?.resourceCode,
         isSuperAssistant: agentInfo?.isSuperAssistant || false,
         agentType: agentInfo?.agentType,

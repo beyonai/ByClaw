@@ -6,6 +6,8 @@ type DevloopProjectType = 'normal' | 'operation' | 'develop' | 'default';
 
 type DevloopProjectShareFlag = 'N' | 'Y';
 
+export type DevloopProjectSessionSearchMode = 'DIGITAL_EMPLOYEE' | 'CHAT_CONTENT';
+
 type DevloopProjectShareTargetPayload = {
   targetType: string;
   targetId: string | number;
@@ -25,6 +27,9 @@ type DevloopProjectSessionListPayload = {
   pageNum?: number;
   pageSize?: number;
   keyword?: string;
+
+  /** 高级会话搜索方式；不传时后端保持标题、摘要搜索兼容逻辑。 */
+  searchMode?: DevloopProjectSessionSearchMode;
 };
 
 export type DevloopTaskListQuery = {

@@ -325,7 +325,7 @@ async def search_by_resource_id(body: dict[str, Any] = Body(...)):
     if kn_codes is None:
         return _error(f"cannot resolve one or more resourceIds: {resource_id_list}")
 
-    # knCode -> resourceId reverse mapping for response rewriting
+    # 保留 QA 原始 knCode，并补充门户 resourceId 供调用方后续继续使用门户接口。
     code_to_resource_id: dict[str, str] = {}
     for rid, code in zip(str_resource_ids, kn_codes):
         code_to_resource_id[code] = rid
@@ -352,7 +352,7 @@ async def search_by_resource_id(body: dict[str, Any] = Body(...)):
     for item in items:
         row = item.model_dump(by_alias=True)
         kn_code = row.get("knCode", "")
-        row["knCode"] = code_to_resource_id.get(kn_code, kn_code)
+        row["resourceId"] = code_to_resource_id.get(kn_code)
         data.append(row)
 
     return _success({"data": data})
@@ -494,7 +494,7 @@ async def list_dir_by_resource_id(body: dict[str, Any] = Body(...)):
     data = []
     for item in result.data:
         row = item.model_dump(by_alias=True)
-        row["knCode"] = str(resource_id)
+        row["resourceId"] = str(resource_id)
         data.append(row)
 
     return _success({"data": data})
@@ -545,7 +545,7 @@ async def read_file_by_resource_id(body: dict[str, Any] = Body(...)):
         logger.exception("readFileByResourceId validation error: resourceId=%s", resource_id)
         return _error(str(exc))
 
-    result["knCode"] = str(resource_id)
+    result["resourceId"] = str(resource_id)
     result_object = {k: v for k, v in result.items() if v is not None}
     return _success(result_object)
 
@@ -596,7 +596,7 @@ async def build_result_by_resource_id(body: dict[str, Any] = Body(...)):
         )
         return _error(str(exc) or "failed to query build result")
 
-    result["knCode"] = str(resource_id)
+    result["resourceId"] = str(resource_id)
     logger.info(
         "buildResultByResourceId response ready: resourceId=%s, filePath=%s, status=%s, chunkCount=%s",
         resource_id,

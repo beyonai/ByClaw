@@ -15,6 +15,7 @@ import lombok.Setter;
 public class KnowledgeBuildResult {
 
     private String knCode;
+    private Long resourceId;
     private String filePath;
     private String fileName;
     private String fileType;

@@ -15,8 +15,11 @@ import lombok.Setter;
 @Setter
 public class KnowledgeMetadataSearchItem {
 
-    /** 经门户封装后返回 ByClaw resourceId。 */
+    /** QA 知识库编码。 */
     private String knCode;
+
+    /** 门户知识库资源 ID，由 Controller 根据 knCode 回映。 */
+    private Long resourceId;
 
     private String filePath;
 

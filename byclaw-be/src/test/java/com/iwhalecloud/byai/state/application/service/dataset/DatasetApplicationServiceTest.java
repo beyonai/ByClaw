@@ -6,6 +6,7 @@ import com.iwhalecloud.byai.common.feign.client.FeignPythonBuildService;
 import com.iwhalecloud.byai.common.feign.request.knowledge.Folder;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileImport;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbBuildResult;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataGet;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbGlob;
@@ -18,6 +19,7 @@ import com.iwhalecloud.byai.common.feign.response.PythonBuildResponse;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.Data;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.DirOrFile;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbImportResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileMetadataResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileUpdateResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchItem;
@@ -27,6 +29,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataS
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBuildResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
@@ -36,6 +39,7 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeMetadataSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeBuildResultRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
@@ -179,7 +183,8 @@ class DatasetApplicationServiceTest {
         assertThat(captor.getValue().getWhere()).isEqualTo(request.getWhere());
         assertThat(captor.getValue().getMetadataFieldList()).containsExactly("status", "tags");
         assertThat(result.getData()).hasSize(1);
-        assertThat(result.getData().get(0).getKnCode()).isEqualTo("100");
+        assertThat(result.getData().get(0).getKnCode()).isEqualTo("personal-kb");
+        assertThat(result.getData().get(0).getResourceId()).isEqualTo(100L);
         assertThat(result.getData().get(0).getFilePath()).isEqualTo("/hr/renewal.md");
     }
 
@@ -223,7 +228,8 @@ class DatasetApplicationServiceTest {
         assertThat(captor.getValue().getPageNum()).isEqualTo(1);
         assertThat(captor.getValue().getPageSize()).isEqualTo(20);
         assertThat(result.getData()).singleElement().satisfies(metadataItem -> {
-            assertThat(metadataItem.getKnCode()).isEqualTo("100");
+            assertThat(metadataItem.getKnCode()).isEqualTo("personal-kb");
+            assertThat(metadataItem.getResourceId()).isEqualTo(100L);
             assertThat(metadataItem.getFilePath()).isEqualTo("/制度/人事/续签流程.md");
         });
         assertThat(result.getTotal()).isEqualTo(1L);
@@ -289,7 +295,7 @@ class DatasetApplicationServiceTest {
     }
 
     @Test
-    void buildResult_mapsResourceIdToKnCodeAndBack() {
+    void buildResult_preservesQaKnCodeAndAddsResourceId() {
         SsResource resource = defaultPersonalDataset();
         when(ssResourceService.findById(100L)).thenReturn(resource);
         when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
@@ -321,8 +327,38 @@ class DatasetApplicationServiceTest {
         assertThat(captor.getValue().getChunkPage()).isEqualTo(2);
         assertThat(captor.getValue().getChunkPageSize()).isEqualTo(10);
         assertThat(captor.getValue().getIncludeMarkdown()).isFalse();
-        assertThat(result.getKnCode()).isEqualTo("100");
+        assertThat(result.getKnCode()).isEqualTo("personal-kb");
+        assertThat(result.getResourceId()).isEqualTo(100L);
         assertThat(result.getBuild().getStatus()).isEqualTo("complete");
+    }
+
+    @Test
+    void readFile_preservesQaKnCodeAndAddsResourceId() {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+
+        KbFileReadResult qaResult = new KbFileReadResult();
+        qaResult.setKnCode("personal-kb");
+        qaResult.setFilePath("/制度/请假.md");
+        qaResult.setData("# 请假制度");
+        PythonBuildResponse<KbFileReadResult> response = new PythonBuildResponse<>();
+        response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+        response.setResultObject(qaResult);
+        when(feignPythonBuildService.readFile(any(), eq(100L))).thenReturn(response);
+
+        KnowledgeReadFileRequest request = new KnowledgeReadFileRequest();
+        request.setResourceId(100L);
+        request.setFilePath("制度/请假.md");
+
+        KbFileReadResult result = service.readFile(request);
+
+        ArgumentCaptor<KbFileRead> captor = ArgumentCaptor.forClass(KbFileRead.class);
+        verify(feignPythonBuildService).readFile(captor.capture(), eq(100L));
+        assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
+        assertThat(captor.getValue().getFilePath()).isEqualTo("/制度/请假.md");
+        assertThat(result.getKnCode()).isEqualTo("personal-kb");
+        assertThat(result.getResourceId()).isEqualTo(100L);
     }
 
     @Test
@@ -399,7 +435,7 @@ class DatasetApplicationServiceTest {
     }
 
     @Test
-    void updateKnowledgeFile_mapsResourceIdToKnCodeAndReturnsResourceId() {
+    void updateKnowledgeFile_preservesQaKnCodeAndAddsResourceId() {
         SsResource resource = defaultPersonalDataset();
         when(ssResourceService.findById(100L)).thenReturn(resource);
         when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
@@ -427,7 +463,8 @@ class DatasetApplicationServiceTest {
         assertThat(captor.getValue().getProcessFrontMatter()).isTrue();
         assertThat(captor.getValue().getMultipartFile()).isSameAs(file);
         assertThat(result.getData()).singleElement().satisfies(updated -> {
-            assertThat(updated.getKnCode()).isEqualTo("100");
+            assertThat(updated.getKnCode()).isEqualTo("personal-kb");
+            assertThat(updated.getResourceId()).isEqualTo(100L);
             assertThat(updated.getFilePath()).isEqualTo("/制度/请假.md");
             assertThat(updated.getSuccess()).isTrue();
         });
@@ -472,9 +509,13 @@ class DatasetApplicationServiceTest {
         SsResource resource = defaultPersonalDataset();
         when(ssResourceService.findById(100L)).thenReturn(resource);
         when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+        KnowledgeSearchItem qaItem = new KnowledgeSearchItem();
+        qaItem.setKnCode("personal-kb");
+        KnowledgeSearchResult qaResult = new KnowledgeSearchResult();
+        qaResult.setData(List.of(qaItem));
         PythonBuildResponse<KnowledgeSearchResult> response = new PythonBuildResponse<>();
         response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
-        response.setResultObject(new KnowledgeSearchResult());
+        response.setResultObject(qaResult);
         when(feignPythonBuildService.searchKnowledgeItems(any())).thenReturn(response);
 
         KnowledgeSearchRequest request = new KnowledgeSearchRequest();
@@ -486,7 +527,7 @@ class DatasetApplicationServiceTest {
         request.setMetadataFieldList(List.of("owner", "status"));
         request.setFileTypeList(List.of("pdf"));
 
-        service.searchKnowledgeItems(request);
+        KnowledgeSearchResult result = service.searchKnowledgeItems(request);
 
         ArgumentCaptor<KbKnowledgeSearch> captor = ArgumentCaptor.forClass(KbKnowledgeSearch.class);
         verify(feignPythonBuildService).searchKnowledgeItems(captor.capture());
@@ -494,6 +535,9 @@ class DatasetApplicationServiceTest {
         assertThat(captor.getValue().getWhere()).isEqualTo(request.getWhere());
         assertThat(captor.getValue().getMetadataFieldList()).containsExactly("owner", "status");
         assertThat(captor.getValue().getFileTypeList()).containsExactly("pdf");
+        assertThat(result.getData()).hasSize(1);
+        assertThat(result.getData().get(0).getKnCode()).isEqualTo("personal-kb");
+        assertThat(result.getData().get(0).getResourceId()).isEqualTo(100L);
     }
 
     @Test
@@ -524,6 +568,7 @@ class DatasetApplicationServiceTest {
         when(ssResourceService.findById(100L)).thenReturn(resource);
         when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
         DirOrFile file = new DirOrFile();
+        file.setKnCode("personal-kb");
         file.setName("/制度/人事/请假.pdf");
         file.setType("file");
         file.setSize(245760L);
@@ -543,6 +588,8 @@ class DatasetApplicationServiceTest {
         verify(feignPythonBuildService).glob(captor.capture(), eq(100L));
         assertThat(captor.getValue().getPathRule()).isEqualTo("/制度/*/*.pdf");
         assertThat(result).singleElement().satisfies(item -> {
+            assertThat(item.getKnCode()).isEqualTo("personal-kb");
+            assertThat(item.getResourceId()).isEqualTo(100L);
             assertThat(item.getDirectoryPath()).isEqualTo("/制度/人事/请假.pdf");
             assertThat(item.getSize()).isEqualTo(245760L);
         });

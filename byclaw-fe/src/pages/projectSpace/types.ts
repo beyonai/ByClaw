@@ -36,6 +36,12 @@ export interface ProjectSession {
   sessionExts?: Array<{ extParamCode: string; extParamValue: any }>;
   taskId?: string;
   fileCount?: number;
+  matchType?: 'DIGITAL_EMPLOYEE' | 'CHAT_CONTENT';
+  matchText?: string;
+  matchedEmployeeId?: string | number;
+  matchedEmployeeName?: string;
+  matchedEmployeeMatchField?: 'NAME' | 'DESCRIPTION';
+  matchedEmployeeMatchText?: string;
 }
 
 export interface ProjectSpace {
