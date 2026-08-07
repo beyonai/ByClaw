@@ -86,4 +86,50 @@ class LarkSandboxAuthorizationRuntimeTest {
         verify(executor, times(4)).run(org.mockito.ArgumentMatchers.eq("sandbox-1"), requestCaptor.capture());
         assertThat(requestCaptor.getAllValues().get(2).argv()).contains("config", "bind", "--source", "openclaw");
     }
+
+    @Test
+    void acceptsDeviceVerificationUrlOnAccountsHost() {
+        SandboxCommandExecutor executor = mock(SandboxCommandExecutor.class);
+        UserSandboxResolver resolver = mock(UserSandboxResolver.class);
+        UserService userService = mock(UserService.class);
+        LarkSandboxAuthorizationRuntime runtime = new LarkSandboxAuthorizationRuntime(
+            executor, resolver, new LarkAuthorizationProperties(), new ObjectMapper(), userService);
+        when(resolver.resolve("42", "openclaw"))
+            .thenReturn(new UserSandboxContext("sandbox-1", "42", null, new Date()));
+        String verificationUrl =
+            "https://accounts.feishu.cn/oauth/v1/device/verify?flow_id=flow-1&user_code=5ZMG-MUFK";
+        when(executor.run(any(), any()))
+            .thenReturn(new SandboxCommandResult(0, "{\"configured\":true}", "", false, false))
+            .thenReturn(new SandboxCommandResult(0,
+                "{\"verification_url\":\"" + verificationUrl + "\","
+                    + "\"device_code\":\"device-1\",\"expires_in\":600}", "", false, false));
+
+        var result = runtime.start(new AuthorizationStartContext(
+            "auth-1", "42", 1L, "lark", "lark-cli", null, java.util.Map.of()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
+        assertThat(result.authorizationUrl()).isEqualTo(verificationUrl);
+    }
+
+    @Test
+    void rejectsVerificationUrlOnUntrustedHost() {
+        SandboxCommandExecutor executor = mock(SandboxCommandExecutor.class);
+        UserSandboxResolver resolver = mock(UserSandboxResolver.class);
+        UserService userService = mock(UserService.class);
+        LarkSandboxAuthorizationRuntime runtime = new LarkSandboxAuthorizationRuntime(
+            executor, resolver, new LarkAuthorizationProperties(), new ObjectMapper(), userService);
+        when(resolver.resolve("42", "openclaw"))
+            .thenReturn(new UserSandboxContext("sandbox-1", "42", null, new Date()));
+        when(executor.run(any(), any()))
+            .thenReturn(new SandboxCommandResult(0, "{\"configured\":true}", "", false, false))
+            .thenReturn(new SandboxCommandResult(0,
+                "{\"verification_url\":\"https://accounts.feishu.cn.evil.example/verify\","
+                    + "\"device_code\":\"device-1\"}", "", false, false));
+
+        var result = runtime.start(new AuthorizationStartContext(
+            "auth-1", "42", 1L, "lark", "lark-cli", null, java.util.Map.of()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+        assertThat(result.errorCode()).isEqualTo("PROVIDER_PROTOCOL_ERROR");
+    }
 }
