@@ -182,6 +182,14 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
     def test_agent_reach_backends_share_one_collection_contract(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
+        self.assertIn("**取内容前先读这一条**：采集编排器自身永不取内容", skill)
+        self.assertIn("该结果作废，按规范流程重新采集", skill)
+        self.assertIn("不得因「一个链接」「内容公开可读」「直接抓更快」跳过路由", skill)
+        self.assertIn("采集编排器自身不取内容，取内容一律委派来源执行器", skill)
+        self.assertIn(
+            "不得使用 `web_fetch`、`curl`、`wget`、`requests` 或其他直接 HTTP 客户端绕过来源执行器",
+            skill,
+        )
         self.assertIn("Agent Reach 直接后端与 `bycli` 后端返回的结果", skill)
         self.assertIn("必须统一进入同一套 collection contract", skill)
         self.assertIn("不得按执行后端分叉产物协议", skill)

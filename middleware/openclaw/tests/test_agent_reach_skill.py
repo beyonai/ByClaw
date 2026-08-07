@@ -133,7 +133,8 @@ class AgentReachSkillContractTest(unittest.TestCase):
             "`bycli web read --url <URL>`",
             "官方 `references/web.md` 的通用网页读取",
             "`references/career.md` 的 LinkedIn fallback",
-            "不得回退到 Jina Reader、Web Reader MCP、`curl`、`wget`、`requests` 或原站直连",
+            "不得回退到 `web_fetch`、Jina Reader、Web Reader MCP、`curl`、`wget`、`requests` 或原站直连",
+            "公开可读、静态页面、raw URL、纯文本或 Markdown 内容均不是例外",
         ):
             self.assertIn(phrase, override)
 
