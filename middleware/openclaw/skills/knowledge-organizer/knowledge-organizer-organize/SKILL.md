@@ -30,4 +30,4 @@ python3 <knowledge-organizer>/scripts/knowledge_organizer.py organize \
   --resume
 ```
 
-恢复时会沿用已保存的用户意图和对象白名单；只有需要改变限定范围时才重新传入 `--object-code`。成功碎片使用 ADS `instanceId` 和 ODS `originInstanceId`。不得重复处理已成功文件或过滤合法碎片。
+恢复时会沿用已保存的用户意图，但不会自动恢复对象白名单；原任务限定了 ADS 对象时，必须再次逐一传入相同的 `--object-code`，未限定时才省略。成功碎片使用 ADS `instanceId` 和 ODS `originInstanceId`。不得重复处理已成功文件或过滤合法碎片。

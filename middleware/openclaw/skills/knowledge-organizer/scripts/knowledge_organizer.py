@@ -418,10 +418,6 @@ class KnowledgeOrganizer:
 
     def __init__(self, api: OrganizerApi) -> None:
         self.api = api
-        # Entity resolution is serialized across concurrent files so two files
-        # naming the same new entity cannot each create their own instance.
-        self._entity_lock = threading.Lock()
-        self._entity_cache: dict[tuple[str, str], str] = {}
 
     def initialize(self, task_dir: Path, employee_resource_id: str) -> None:
         task_dir = task_dir.resolve()
@@ -498,9 +494,6 @@ class KnowledgeOrganizer:
 
         content = source.read_text(encoding="utf-8")
         digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
-        existing = self._existing_ingestion(state, digest, object_code)
-        if existing is not None:
-            return {"term_id": str(existing["term_id"]), "kb_path": str(existing["kb_path"])}
         snapshot = self._snapshot_source(task_dir, source, digest)
         kb_path = self._kb_path(object_info["object_name"], storage_file_name, digest)
         try:
@@ -559,15 +552,11 @@ class KnowledgeOrganizer:
             for item in state.get("objects", [])
             if isinstance(item, dict) and item.get("domain") == "ads"
         }
-        if allowed_object_codes is None:
-            allowed_object_codes = self._saved_object_scope(state)
         if allowed_object_codes is not None:
             unknown = allowed_object_codes - set(ads_objects)
             if unknown:
                 raise ValueError(f"限定范围包含未授权或非 ADS 对象: {', '.join(sorted(unknown))}")
             ads_objects = {code: detail for code, detail in ads_objects.items() if code in allowed_object_codes}
-            state["organize_object_codes"] = sorted(allowed_object_codes)
-            self._save_state(task_dir, state)
         if user_intent is not None:
             user_intent = user_intent.strip()
             if not user_intent:
@@ -680,31 +669,6 @@ class KnowledgeOrganizer:
         return {"output": output, "selection": selection, "records": records}
 
     @staticmethod
-    def _saved_object_scope(state: dict[str, Any]) -> set[str] | None:
-        """Reuse the ADS object whitelist recorded by an earlier organize run."""
-        saved = state.get("organize_object_codes")
-        if saved is None:
-            return None
-        if not isinstance(saved, list) or not all(isinstance(code, str) and code.strip() for code in saved):
-            raise ValueError("state 中的 organize_object_codes 必须是对象编码字符串数组")
-        return set(saved) or None
-
-    @staticmethod
-    def _existing_ingestion(state: dict[str, Any], digest: str, object_code: str) -> dict[str, Any] | None:
-        """Return a prior successful ingestion of the same content into the same object."""
-        for ingestion in state.get("ingestions", []):
-            if (
-                isinstance(ingestion, dict)
-                and ingestion.get("status") == "succeeded"
-                and ingestion.get("sha256") == digest
-                and ingestion.get("object_code") == object_code
-                and isinstance(ingestion.get("term_id"), str)
-                and isinstance(ingestion.get("kb_path"), str)
-            ):
-                return ingestion
-        return None
-
-    @staticmethod
     def _should_organize(ingestion: dict[str, Any], *, resume: bool) -> bool:
         status = ingestion.get("organize_status")
         succeeded = status == "succeeded" or (
@@ -721,7 +685,7 @@ class KnowledgeOrganizer:
         submitted = {
             instance_id
             for build in state.get("builds", [])
-            if isinstance(build, dict) and build.get("status") != "failed"
+            if isinstance(build, dict)
             for instance_id in build.get("instance_ids", [])
         }
         instance_ids = list(
@@ -788,22 +752,10 @@ class KnowledgeOrganizer:
         self,
         fragments: list[dict[str, str]],
     ) -> tuple[list[str], dict[str, Any] | None]:
-        with self._entity_lock:
-            return self._resolve_entity_ids_locked(fragments)
-
-    def _resolve_entity_ids_locked(
-        self,
-        fragments: list[dict[str, str]],
-    ) -> tuple[list[str], dict[str, Any] | None]:
         resolved: dict[tuple[str, str], str] = {}
         by_object: dict[str, list[str]] = {}
         ambiguous: list[dict[str, Any]] = []
         for fragment in fragments:
-            key = (fragment["object_code"], fragment["entity_name"])
-            cached = self._entity_cache.get(key)
-            if cached is not None:
-                resolved[key] = cached
-                continue
             by_object.setdefault(fragment["object_code"], []).append(fragment["entity_name"])
         for object_code, names in by_object.items():
             unique_names = list(dict.fromkeys(names))
@@ -845,7 +797,6 @@ class KnowledgeOrganizer:
                     resolved[(object_code, entity_name)] = choice
                 else:
                     raise ValueError("模型选择了未返回的实体候选")
-        self._entity_cache.update(resolved)
         return [resolved[(fragment["object_code"], fragment["entity_name"])] for fragment in fragments], selection
 
     @staticmethod
