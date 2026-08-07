@@ -43,7 +43,7 @@ class KnowledgeOrganizerSkillSplitTests(unittest.TestCase):
         resume_section = content.split("中断或失败文件只能使用 CLI 恢复：", maxsplit=1)[1]
         self.assertIn("--resume", resume_section)
         self.assertIn("--object-code", resume_section)
-        self.assertIn("不会自动恢复对象白名单", resume_section)
+        self.assertIn("沿用已保存的用户意图和对象白名单", resume_section)
 
 
 if __name__ == "__main__":
