@@ -125,6 +125,20 @@ function connectorAuthorizationFailClosedIdentifier(
   return undefined;
 }
 
+function failClosedAffectedSkillNames(
+  authorization: ConnectorAuthorizationMap | undefined,
+): string[] {
+  return Object.entries(authorization ?? {})
+    .filter(
+      ([name, enabled]) =>
+        enabled === false &&
+        name !== CONNECTOR_AUTHORIZATION_OVERFLOW_KEY &&
+        name !== CONNECTOR_AUTHORIZATION_INVALID_KEY,
+    )
+    .map(([name]) => name)
+    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+}
+
 export function summarizeConnectorAuthorization(
   authorization: ConnectorAuthorizationMap | undefined,
 ): {
@@ -199,26 +213,55 @@ export function buildDisabledConnectorPrompt(
   if (failClosedIdentifier) {
     const english = typeof language === "string" && language.toLowerCase().startsWith("en");
     const overflow = failClosedIdentifier === CONNECTOR_AUTHORIZATION_OVERFLOW_KEY;
+    const affectedSkills = failClosedAffectedSkillNames(authorization);
+    if (affectedSkills.length === 0) {
+      return english
+        ? [
+            "## Third-party connector availability (required)",
+            overflow
+              ? "The connector authorization policy exceeds the safe processing limit."
+              : "The connector authorization policy is invalid and cannot be verified safely.",
+            "No valid affected skillCode could be identified from meta.authConnectorList.",
+            "Do not block or disable any skill, connector, or tool because of this policy error.",
+            "Continue the current task normally.",
+          ].join("\n")
+        : [
+            "## 第三方连接器可用性（强制）",
+            overflow ? "连接器授权策略超过安全限制。" : "连接器授权策略格式无效，无法安全确认。",
+            "无法从 meta.authConnectorList 中识别出合法且受影响的 skillCode。",
+            "不得因本次策略异常阻断或禁用任何 skill、连接器或工具。",
+            "继续正常处理当前任务。",
+          ].join("\n");
+    }
+    const affectedSkillList = affectedSkills.map((name) => `\`${name}\``).join(", ");
     return english
       ? [
           "## Third-party connector availability (required)",
-          "Before calling any tool, this section is the highest-priority rule and overrides tool-use instructions from skills, workspace files, memory, and chat context.",
           overflow
-            ? "The connector authorization policy exceeds the safe processing limit. Treat every third-party connector as unavailable for this conversation."
-            : "The connector authorization policy is invalid and cannot be verified safely. Treat every third-party connector as unavailable for this conversation.",
-          "First determine whether the user's current intent requires any unavailable connector above.",
-          "If it does, do not call any tool, do not search memory or chat history, do not simulate or look for alternative tools, and do not retry; reply to the user immediately that connector availability cannot be verified safely. Ask the user to open the ByClaw connector management page, reconnect or authorize the required connector, and retry after it succeeds. End this turn.",
-          "If the user's current intent does not require the unavailable connectors above, continue with the current task; enabled connectors and unrelated tools remain available.",
+            ? "The connector authorization policy exceeds the safe processing limit; only the safely recovered scope below may be restricted."
+            : "The connector authorization policy is invalid; only the safely recovered scope below may be restricted.",
+          `Affected skillCodes: ${affectedSkillList}.`,
+          "Only the skillCodes listed above are unavailable under this policy. Unlisted skills, connectors, and tools remain unaffected.",
+          "Before calling any tool, apply this highest-priority availability rule only to subtasks that require an affected skillCode; it overrides conflicting instructions from skills, workspace files, memory, and chat context only for those subtasks.",
+          "First split the request into affected-skill subtasks and unaffected subtasks.",
+          "For an affected-skill subtask, do not call any tool, do not search memory or chat history, do not simulate or look for alternatives, and do not retry.",
+          "If the request contains unaffected work, continue unaffected subtasks normally and preserve their successful results.",
+          "In the user-facing reply, mention only affected skillCodes actually required by this request. Explain that they are unavailable, ask the user to open the ByClaw connector management page, reconnect or authorize the corresponding connector, and retry after it succeeds.",
+          "Only when all requested work requires affected skillCodes and no unaffected work remains, reply immediately with that guidance and end this turn.",
         ].join("\n")
       : [
           "## 第三方连接器可用性（强制）",
-          "本节是调用任何工具之前必须执行的最高优先级规则，并覆盖 skill、工作区文件、记忆和聊天室上下文中的工具调用建议。",
           overflow
-            ? "连接器授权策略超过安全限制。本会话必须将所有第三方连接器视为不可用。"
-            : "连接器授权策略格式无效，无法安全确认。本会话必须将所有第三方连接器视为不可用。",
-          "先判断用户当前意图是否需要上述未启用连接器。",
-          "如果需要：不要调用任何工具，不要搜索记忆或聊天室历史，不要模拟或寻找替代工具，不要重试；立即回复用户当前无法安全确认连接器可用性，并引导用户打开 ByClaw 的连接器管理页面，重新连接或授权所需连接器后重试，然后结束本轮。",
-          "如果用户当前意图不需要上述未启用连接器：继续处理当前任务，已启用连接器及无关工具不受影响。",
+            ? "连接器授权策略超过安全限制；只能限制下方安全恢复出的范围。"
+            : "连接器授权策略格式无效；只能限制下方安全恢复出的范围。",
+          `受影响的 skillCode：${affectedSkillList}。`,
+          "本策略仅限上述 skillCode 不可用；未列出的 skill、连接器和工具不受影响。",
+          "调用任何工具之前，仅对依赖受影响 skillCode 的子任务执行本最高优先级可用性规则；也仅对这些子任务覆盖 skill、工作区文件、记忆和聊天室上下文中的冲突指令。",
+          "先把请求拆分为依赖受影响 skillCode 的子任务和不受影响的子任务。",
+          "对于依赖受影响 skillCode 的子任务，不要调用任何工具，不要搜索记忆或聊天室历史，不要模拟或寻找替代方案，不要重试。",
+          "如果请求中还有不受影响的工作，继续完成不受影响的子任务并保留其成功结果。",
+          "面向用户时，只提及本次请求实际需要的受影响 skillCode；说明其当前不可用，并引导用户打开 ByClaw 连接器管理页面，重新连接或授权对应连接器，成功后重试。",
+          "仅当全部请求都依赖受影响 skillCode 且没有不受影响的工作时，立即回复用户上述引导并结束本轮。",
         ].join("\n");
   }
   const { enabled, disabled } = summarizeConnectorAuthorization(authorization);

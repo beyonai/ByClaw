@@ -96,12 +96,60 @@ describe("connector authorization", () => {
     const prompt = buildDisabledConnectorPrompt("zh_CN", normalized);
     expect(prompt).toContain("安全限制");
     expect(prompt).toContain("ByClaw");
+    expect(prompt).toContain("受影响的 skillCode");
+    expect(prompt).toContain("`disabled-0`");
+    expect(prompt).toContain("未列出的 skill、连接器和工具不受影响");
     expect(prompt).toContain("调用任何工具之前");
     expect(prompt).toContain("不要调用任何工具");
     expect(prompt).toContain("不要搜索记忆或聊天室历史");
     expect(prompt).toContain("不要重试");
     expect(prompt).toContain("立即回复用户");
-    expect(prompt).toContain("如果用户当前意图不需要上述未启用连接器");
+    expect(prompt).toContain("继续完成不受影响的子任务");
+    expect(prompt).not.toContain("所有第三方连接器视为不可用");
+  });
+
+  it("scopes an invalid Chinese policy to recoverable skill codes", () => {
+    const authorization = normalizeConnectorAuthorization({
+      dws: true,
+      fws: "false",
+      bad_name: false,
+      wecomcli: false,
+    });
+    const prompt = buildDisabledConnectorPrompt("zh_CN", authorization);
+
+    expect(prompt).toContain("受影响的 skillCode：`dws`, `fws`, `wecomcli`");
+    expect(prompt).toContain("仅限上述 skillCode");
+    expect(prompt).toContain("未列出的 skill、连接器和工具不受影响");
+    expect(prompt).toContain("继续完成不受影响的子任务");
+    expect(prompt).not.toContain("所有第三方连接器视为不可用");
+    expect(prompt).not.toContain("bad_name");
+  });
+
+  it("scopes an invalid English policy to recoverable skill codes", () => {
+    const authorization = normalizeConnectorAuthorization({
+      dws: true,
+      fws: "false",
+      bad_name: false,
+    });
+    const prompt = buildDisabledConnectorPrompt("en_US", authorization);
+
+    expect(prompt).toContain("Affected skillCodes: `dws`, `fws`");
+    expect(prompt).toContain("Only the skillCodes listed above");
+    expect(prompt).toContain("Unlisted skills, connectors, and tools remain unaffected");
+    expect(prompt).toContain("continue unaffected subtasks");
+    expect(prompt).not.toContain("every third-party connector");
+    expect(prompt).not.toContain("bad_name");
+  });
+
+  it("does not block skills when an invalid policy has no recoverable skill code", () => {
+    const prompt = buildDisabledConnectorPrompt(
+      "en_US",
+      normalizeConnectorAuthorization(null),
+    );
+
+    expect(prompt).toContain("No valid affected skillCode could be identified");
+    expect(prompt).toContain("Do not block or disable any skill, connector, or tool");
+    expect(prompt).not.toContain("do not call any tool");
   });
 
   it("preserves legacy behavior only when connector authorization is absent", () => {
