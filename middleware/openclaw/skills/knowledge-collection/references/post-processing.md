@@ -42,9 +42,16 @@
 
 采集 100 篇但只预存 10 篇时，若用户选择全部，必须在下游操作前按以上流程尝试物化其余 90 篇。
 
-选中正文全部物化后、把正文交给任何下游操作之前，必须先运行 `rewrite-image-links` 改写图片链接。入库、知识整理和
-外部消费三条路径都消费同一批 `sanitized/items/*.md`，都无法解析 `images/` 相对链接，因此该步骤对三者一律必要，
-不是入库专属。补采或重新物化产生新正文后必须再次运行；命令幂等，已改写的正文不受影响。
+选中正文全部物化后、把正文交给任何下游操作之前，必须先改写图片链接。入库、知识整理和外部消费三条路径都消费同一批
+`sanitized/items/*.md`，都无法解析 `images/` 相对链接，因此该步骤对三者一律必要，不是入库专属。补采或重新物化产生
+新正文后必须再次运行；命令幂等，已改写的正文不受影响。
+
+改写有两种模式，按图片需要存活多久选择：
+
+- **会话空间模式**（`--resource-id`）：链接指向采集会话目录里的原图。仅适用于预览和不超出本次会话的消费。
+  完整成功后 cleanup 会删除整个会话目录，链接随之失效，**不可用于入库或知识整理**。
+- **持久化模式**（`--link-map-file`）：先把图片上传到目标知识库，再按上传结果改写链接，图片与文档同生命周期。
+  入库和知识整理必须使用该模式。
 
 - 入库：展示目标、条目和产物范围并取得入库确认，再调用知识库能力。
 - 知识整理：将选中的净化正文及用户要求交给 `knowledge-organizer`。
@@ -80,6 +87,7 @@ node scripts/knowledge-collection-post-processing.mjs record-run --session-dir <
 node scripts/knowledge-collection-post-processing.mjs cleanup --session-dir <dir> --run-id <id>
 node scripts/knowledge-collection-post-processing.mjs unlock-stale --session-dir <dir>
 node scripts/knowledge-collection-post-processing.mjs set-retention --session-dir <dir> --keep true|false
+node scripts/knowledge-collection-post-processing.mjs rewrite-image-links --session-dir <dir> --link-map-file <file>
 node scripts/knowledge-collection-post-processing.mjs rewrite-image-links --session-dir <dir> --resource-id <数字员工资源ID>
 ```
 
@@ -87,7 +95,34 @@ node scripts/knowledge-collection-post-processing.mjs rewrite-image-links --sess
 
 来源执行器把文章图片下载到正文同级的 `images/` 并在 Markdown 里写成相对链接（例如 `images/img_001.png`）。相对链接
 只在会话目录内有意义，知识库、ODS 与外部接口都无法解析，因此入库、知识整理和外部消费之前都必须先用
-`rewrite-image-links` 改写为会话空间下载 URL：
+`rewrite-image-links` 改写。
+
+### 持久化模式（入库与知识整理必须使用）
+
+图片存在采集会话目录里，而完整成功后 cleanup 会删除整个会话目录。若直接写入会话空间链接，入库完成后知识库里的
+图片会全部失效。因此必须先把图片上传到目标知识库，让图片与文档同生命周期：
+
+```text
+node scripts/knowledge-collection-ingest.mjs upload-images \
+  --markdown-file <选中正文> [--markdown-file <更多正文>] \
+  --knowledge-base-resource-id <知识库资源ID> --directory-path <已确认目录> \
+  [--base-url http://<host>:<port>] > <会话目录>/.post-processing-inputs/image-link-map.json
+
+node scripts/knowledge-collection-post-processing.mjs rewrite-image-links \
+  --session-dir <dir> --link-map-file <会话目录>/.post-processing-inputs/image-link-map.json
+```
+
+`upload-images` 只上传不调 `build`——对图片触发 build 会让 QA 服务尝试把图片解析成 Markdown 并切片向量化，没有意义。
+它返回 `linkMap`（正文相对链接 → 知识库下载 URL），`rewrite-image-links` 按该映射改写。映射模式下不读图片文件、
+不推导会话路径，因此 `--resource-id`、`--workspace-root` 和 `--language` 都不参与；映射缺失的链接保留原样并告警。
+`--link-map-file` 只接受 http/https 绝对 URL 或站内绝对路径作为目标，其余形式一律拒绝。
+
+`upload-images` 使用的知识库资源 ID 与目录必须与入库目标一致，并已按 [knowledge-ingest.md](knowledge-ingest.md)
+取得用户确认；不得为图片另选知识库。
+
+### 会话空间模式（仅限预览与本会话内消费）
+
+链接指向会话目录里的原图，会话被清理后失效，因此只适用于预览或明确不超出本次会话的消费：
 
 ```text
 /byaiService/fileBrowser/download?resourceId=<数字员工资源ID>&path=<会话空间绝对路径>&language=zh-CN

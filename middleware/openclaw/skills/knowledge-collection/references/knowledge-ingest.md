@@ -12,10 +12,13 @@
   默认 `/` 也必须展示，不得把缺省目录视为用户已经确认。真实写入时必须把已经确认的目标通过
   `--confirmed-knowledge-base-resource-id` 与 `--confirmed-directory-path` 传给脚本，且确认值必须与解析后的
   知识库资源 ID 和目录完全一致；`--dry-run` 只展示所需确认值，不执行写入。
-- 处理当前采集批次时，`ingest` 之前必须先按 [post-processing.md](post-processing.md) 运行 `rewrite-image-links`，
-  把选中正文里的 `images/` 相对链接改写为会话空间下载 URL；相对链接在知识库侧无法解析。该步骤同样适用于知识整理
-  与外部消费，不是入库专属。命令幂等，已改写过的会话可安全重跑。独立 Markdown 文件与 `upload-doc` 不涉及会话空间
-  图片，不需要这一步。
+- 处理当前采集批次时，`ingest` 之前必须先按 [post-processing.md](post-processing.md) 改写选中正文里的 `images/`
+  相对链接；相对链接在知识库侧无法解析。入库必须使用持久化模式：目标确认后先用 `upload-images` 把图片上传到
+  同一知识库同一目录，把返回的 `linkMap` 写入会话 `.post-processing-inputs/`，再用
+  `rewrite-image-links --link-map-file` 改写，最后才 `ingest`。不得使用会话空间模式（`--resource-id`）——
+  完整成功后 cleanup 会删除整个会话目录，知识库里的图片链接会全部失效。该步骤同样适用于知识整理与外部消费，
+  不是入库专属。命令幂等，已改写过的会话可安全重跑。独立 Markdown 文件与 `upload-doc` 不涉及会话空间图片，
+  不需要这一步。
 - 仅入库用户选中的范围，包括已确认的条目、Markdown 或文件；不得扩大到同一目录或采集批次的其他产物。
 - 入库与知识整理在同一次后处理运行中互斥；不得在一次运行内把 `ingest` 或 `upload-doc` 自动串联到知识整理。
   用户后续明确发起知识整理时创建新的 run，不复用入库成功状态。
@@ -46,6 +49,10 @@
   返回恢复所需路径。用户明确确认全部 `overwritePaths` 后，以保留的 `--markdown-file` 重试，并逐个传入
   `--confirmed-overwrite-path`；脚本会重新检查冲突集合，完全一致时才调用覆盖接口。恢复调用不得重新传入
   已经成功上传的图片、音频或视频。
+- `upload-images`：把选中正文里的本地图片上传到已确认的知识库与目录，只 upload 不 build，返回
+  `linkMap`（正文相对链接 → 知识库下载 URL）供 `rewrite-image-links --link-map-file` 使用。知识库目标使用
+  `--knowledge-base-resource-id`，目录使用 `--directory-path`，必须与入库目标一致；`--base-url` 可选，
+  用于消费方无法解析站内相对路径时追加 origin 前缀。
 - `upload-doc`：仅在用户选中受支持的文档时直传。脚本支持
   `pdf/docx/pptx/xlsx/csv/txt/md`；知识库目标必须使用 `--knowledge-base-resource-id`，目录使用
   `--directory-path`，并且必须先按上方边界获得用户确认，再传入对应的

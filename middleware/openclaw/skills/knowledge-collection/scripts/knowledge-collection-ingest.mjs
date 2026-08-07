@@ -1242,6 +1242,33 @@ function classifyDiscardedDocCandidates(args, stdinValue) {
   return { uploadable: [...uploadable], extractable: [...extractable] };
 }
 
+// 只接受 http/https 的 origin；带凭据、路径、查询或片段一律拒绝，避免拼出错误或泄露凭据的 URL。
+function normalizeDatasetBaseUrl(value) {
+  if (value === undefined) {
+    return "";
+  }
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) {
+    throw new Error("--base-url 不能为空");
+  }
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`--base-url 不是合法 URL: ${raw}`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("--base-url 只支持 http 或 https");
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("--base-url 不得包含凭据");
+  }
+  if (parsed.search || parsed.hash || (parsed.pathname && parsed.pathname !== "/")) {
+    throw new Error("--base-url 只能是 origin，不得包含路径、查询或片段");
+  }
+  return parsed.origin;
+}
+
 function buildDocCandidates(args, stdinValue) {
   const docs = [];
   const rejected = [];
@@ -1254,6 +1281,140 @@ function buildDocCandidates(args, stdinValue) {
     }
   }
   return { docs, rejected };
+}
+
+// 正文里图片的相对链接形态，与 post-processing 的改写模式保持一致。
+const LOCAL_IMAGE_LINK_PATTERN = /!\[([^\]]*)\]\(\s*(images\/[^)\s]+?)\s*\)/g;
+const IMAGE_INGEST_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"]);
+const DATASET_DOWNLOAD_ENDPOINT = "/byaiService/datasetController/download";
+
+// 扫描选中正文，收集实际存在的本地图片。图片缺失、越出正文目录或含 .. 穿越的一律跳过并记录，
+// 避免把无法读取的路径送进上传批次。
+function collectLocalImages(markdownFiles) {
+  const images = new Map();
+  const skipped = [];
+  for (const markdownFile of markdownFiles) {
+    const absoluteMarkdown = path.resolve(markdownFile);
+    const markdownDir = path.dirname(absoluteMarkdown);
+    let markdown;
+    try {
+      markdown = fs.readFileSync(absoluteMarkdown, "utf8");
+    } catch (error) {
+      skipped.push({ markdownFile, reason: `正文读取失败: ${error.message}` });
+      continue;
+    }
+    for (const match of markdown.matchAll(LOCAL_IMAGE_LINK_PATTERN)) {
+      const relativeLink = match[2];
+      let decoded = relativeLink;
+      try {
+        decoded = decodeURIComponent(relativeLink);
+      } catch {
+        // 保留原样，后续按普通相对路径处理。
+      }
+      if (decoded.split("/").includes("..")) {
+        skipped.push({ markdownFile, link: relativeLink, reason: "链接含 .. 路径穿越" });
+        continue;
+      }
+      const absoluteImage = path.resolve(markdownDir, decoded);
+      if (absoluteImage !== markdownDir && !absoluteImage.startsWith(`${markdownDir}${path.sep}`)) {
+        skipped.push({ markdownFile, link: relativeLink, reason: "图片超出正文所在目录" });
+        continue;
+      }
+      const ext = extensionOf(absoluteImage);
+      if (!IMAGE_INGEST_EXTENSIONS.has(ext)) {
+        skipped.push({ markdownFile, link: relativeLink, reason: `不是受支持的图片类型: ${ext || "(none)"}` });
+        continue;
+      }
+      let stat;
+      try {
+        stat = fs.lstatSync(absoluteImage);
+      } catch {
+        skipped.push({ markdownFile, link: relativeLink, reason: "图片文件不存在" });
+        continue;
+      }
+      if (!stat.isFile()) {
+        skipped.push({ markdownFile, link: relativeLink, reason: "图片不是普通文件" });
+        continue;
+      }
+      if (!images.has(absoluteImage)) {
+        images.set(absoluteImage, { absolutePath: absoluteImage, links: [] });
+      }
+      images.get(absoluteImage).links.push({ markdownFile: absoluteMarkdown, link: relativeLink });
+    }
+  }
+  return { images: [...images.values()], skipped };
+}
+
+function buildDatasetDownloadUrl(filePath, resourceId, baseUrl) {
+  const query = new URLSearchParams({ resourceId: String(resourceId), directoryPath: filePath });
+  return `${baseUrl}${DATASET_DOWNLOAD_ENDPOINT}?${query.toString()}`;
+}
+
+// 把正文图片上传到知识库自身，使图片与文档同生命周期：采集会话目录被 cleanup 删除后，
+// 知识库里的图片仍然可访问。图片只 upload 不 build——build 会让 QA 服务尝试把图片解析成
+// Markdown 切片向量化，对图片没有意义。
+async function uploadImagesToDataset(images, args) {
+  const resourceId = positiveSafeIntegerIfPresent(
+    firstPresent(args, ["knowledge-base-resource-id", "resource-id"]),
+    "--knowledge-base-resource-id",
+  );
+  if (!resourceId) {
+    throw new Error("图片入库必须提供 --knowledge-base-resource-id(知识库资源 ID)；可先用 list-kb 查询并让用户选择");
+  }
+  const directoryPath = firstNonEmpty(pick(args, "image-directory-path"), pick(args, "directory-path"), "/");
+  const baseUrl = normalizeDatasetBaseUrl(args["base-url"]);
+  const uploadUrl = await endpoint("/datasetController/uploadFiles");
+  const candidates = images.map((image) => ({
+    fileName: path.basename(image.absolutePath),
+    kind: "image",
+    source: image.absolutePath,
+  }));
+  if (args["dry-run"]) {
+    return {
+      dryRun: true,
+      endpoint: uploadUrl,
+      resourceId,
+      directoryPath,
+      images: images.map((image) => image.absolutePath),
+    };
+  }
+  const formData = new FormData();
+  for (const resolved of await resolveResourceBatch(candidates, args)) {
+    formData.append("files", new Blob([resolved.bytes], { type: resolved.contentType }), resolved.candidate.fileName);
+  }
+  formData.append("resourceId", String(resourceId));
+  formData.append("directoryPath", directoryPath);
+  if (args.overwrite) {
+    formData.append("overwrite", "true");
+  }
+  const uploaded = await requestMultipart(uploadUrl, formData);
+  const uploadItems = asArray(uploaded?.uploadItems ?? uploaded?.items);
+  if (!uploadItems.length) {
+    throw new Error("图片上传未返回任何 uploadItems，上传可能未成功；请检查知识库资源 ID 与目录");
+  }
+  // 按文件名把上传结果映射回本地图片，再展开成「正文相对链接 → 知识库下载 URL」。
+  const byFileName = new Map();
+  for (const item of uploadItems) {
+    const filePath = firstNonEmpty(item?.filePath, item?.path);
+    if (filePath) {
+      byFileName.set(path.basename(filePath), filePath);
+    }
+  }
+  const linkMap = {};
+  const unmapped = [];
+  for (const image of images) {
+    const fileName = path.basename(image.absolutePath);
+    const filePath = byFileName.get(fileName);
+    if (!filePath) {
+      unmapped.push({ fileName, reason: "上传结果里没有对应 filePath" });
+      continue;
+    }
+    const url = buildDatasetDownloadUrl(filePath, resourceId, baseUrl);
+    for (const link of image.links) {
+      linkMap[link.link] = url;
+    }
+  }
+  return { resourceId, directoryPath, uploaded, linkMap, unmapped };
 }
 
 // 文件直传：POST /datasetController/uploadFiles(multipart) → 逐个 POST /datasetController/build。
@@ -2075,7 +2236,8 @@ async function printHelp() {
       "list-kb": "调用 /spaceDir/listPersonalKb 查询可入库个人知识库",
       normalize: "规范化知识采集 Markdown 输出，不请求后端",
       "upload-resource": "上传图片/音频/视频到 /chat/uploadFiles（会话文件，不进知识库）",
-      "upload-doc": "文件直传知识库：/datasetController/uploadFiles + build，后端解析 pdf/docx/pptx/xlsx/csv/txt/md",
+      "upload-images": "把选中正文里的本地图片上传知识库（只 upload 不 build），返回相对链接到下载 URL 的映射",
+    "upload-doc": "文件直传知识库：/datasetController/uploadFiles + build，后端解析 pdf/docx/pptx/xlsx/csv/txt/md",
       ingest: "归一化 Markdown 后调用 by-knowledge-manager upload/build",
     },
     inputs: [
@@ -2135,6 +2297,21 @@ async function main() {
     }
     const result = await uploadDocsToDataset(docs, args);
     render({ ok: true, action: "upload-doc", rejected, ...result });
+    return;
+  }
+
+  if (command === "upload-images") {
+    const markdownFiles = asArray(firstPresent(args, ["markdown-file"]) ?? []).map(String).filter(Boolean);
+    if (!markdownFiles.length) {
+      throw new Error("upload-images 必须用 --markdown-file 指定选中的正文文件（可重复传入）");
+    }
+    const { images, skipped } = collectLocalImages(markdownFiles);
+    if (!images.length) {
+      render({ ok: true, action: "upload-images", images: [], linkMap: {}, skipped });
+      return;
+    }
+    const result = await uploadImagesToDataset(images, args);
+    render({ ok: true, action: "upload-images", imageCount: images.length, skipped, ...result });
     return;
   }
 
