@@ -280,7 +280,8 @@ public class LarkSandboxAuthorizationRuntime {
             JsonNode identity = data.path("identities").path("user");
             return new AuthorizationStatusResult(AuthorizationStatus.CONNECTED,
                 firstText(identity, "openId", "open_id", "userId", "user_id"),
-                firstText(identity, "name", "displayName", "display_name"), null, null, null, null);
+                firstText(identity, "name", "displayName", "display_name", "userName", "user_name"),
+                null, null, null, null);
         } catch (JsonProcessingException e) {
             return failedStatus("PROVIDER_PROTOCOL_ERROR", "Lark authorization returned an invalid response");
         }
