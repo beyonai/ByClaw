@@ -132,4 +132,28 @@ class LarkSandboxAuthorizationRuntimeTest {
         assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
         assertThat(result.errorCode()).isEqualTo("PROVIDER_PROTOCOL_ERROR");
     }
+
+    @Test
+    void verifyReadsUserIdentityFromUnwrappedCliPayload() {
+        SandboxCommandExecutor executor = mock(SandboxCommandExecutor.class);
+        UserSandboxResolver resolver = mock(UserSandboxResolver.class);
+        UserService userService = mock(UserService.class);
+        LarkSandboxAuthorizationRuntime runtime = new LarkSandboxAuthorizationRuntime(
+            executor, resolver, new LarkAuthorizationProperties(), new ObjectMapper(), userService);
+        when(resolver.resolve("42", "openclaw"))
+            .thenReturn(new UserSandboxContext("sandbox-1", "42", null, new Date()));
+        when(executor.run(any(), any())).thenReturn(new SandboxCommandResult(0, """
+            {"appId":"cli_app","brand":"feishu","identity":"user","verified":true,
+             "identities":{"bot":{"status":"ready","verified":true,"openId":"ou_bot"},
+                           "user":{"status":"ready","verified":true,
+                                   "openId":"ou_65c765c074a0098a75f51a15f454313a",
+                                   "userName":"谢逊飞","tokenStatus":"valid"}}}
+            """, "", false, false));
+
+        var result = runtime.verify("42");
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.accountId()).isEqualTo("ou_65c765c074a0098a75f51a15f454313a");
+        assertThat(result.accountName()).isEqualTo("谢逊飞");
+    }
 }
