@@ -27,6 +27,7 @@ import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationProviderRegistry;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationProgress;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationQrCodeEncoder;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationSessionContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartResult;
@@ -124,6 +125,7 @@ class ConnectorAuthorizationServiceTest {
 
         assertThat(result.getStatus()).isEqualTo("pending");
         assertThat(result.getAuthorizationUrl()).isEqualTo(AUTHORIZATION_URL);
+        assertThat(result.getQrCodeUrl()).startsWith("data:image/png;base64,");
         assertThat(result.getExpiresAt()).isEqualTo(expiresAt);
         assertThat(result.getErrorCode()).isNull();
     }
@@ -399,7 +401,8 @@ class ConnectorAuthorizationServiceTest {
             sessionRepository,
             connectorAuthMapper,
             sequenceService,
-            connectionStateService
+            connectionStateService,
+            new AuthorizationQrCodeEncoder()
         );
         when(connectorInfoService.findById(CONNECTOR_ID)).thenReturn(connector);
         org.mockito.Mockito.doThrow(new InvalidConnectorManifestException("runtime_manifest is required"))
