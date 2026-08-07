@@ -42,6 +42,10 @@
 
 采集 100 篇但只预存 10 篇时，若用户选择全部，必须在下游操作前按以上流程尝试物化其余 90 篇。
 
+选中正文全部物化后、把正文交给任何下游操作之前，必须先运行 `rewrite-image-links` 改写图片链接。入库、知识整理和
+外部消费三条路径都消费同一批 `sanitized/items/*.md`，都无法解析 `images/` 相对链接，因此该步骤对三者一律必要，
+不是入库专属。补采或重新物化产生新正文后必须再次运行；命令幂等，已改写的正文不受影响。
+
 - 入库：展示目标、条目和产物范围并取得入库确认，再调用知识库能力。
 - 知识整理：将选中的净化正文及用户要求交给 `knowledge-organizer`。
 - 跳过：保留本次会话产物并结束。选择跳过时不创建 ingest、organize 或 external run，不调用 cleanup，
@@ -76,7 +80,36 @@ node scripts/knowledge-collection-post-processing.mjs record-run --session-dir <
 node scripts/knowledge-collection-post-processing.mjs cleanup --session-dir <dir> --run-id <id>
 node scripts/knowledge-collection-post-processing.mjs unlock-stale --session-dir <dir>
 node scripts/knowledge-collection-post-processing.mjs set-retention --session-dir <dir> --keep true|false
+node scripts/knowledge-collection-post-processing.mjs rewrite-image-links --session-dir <dir> --resource-id <数字员工资源ID>
 ```
+
+## 图片链接改写
+
+来源执行器把文章图片下载到正文同级的 `images/` 并在 Markdown 里写成相对链接（例如 `images/img_001.png`）。相对链接
+只在会话目录内有意义，知识库、ODS 与外部接口都无法解析，因此入库、知识整理和外部消费之前都必须先用
+`rewrite-image-links` 改写为会话空间下载 URL：
+
+```text
+/byaiService/fileBrowser/download?resourceId=<数字员工资源ID>&path=<会话空间绝对路径>&language=zh-CN
+```
+
+默认输出站内相对 URL，适用于知识库等与后端同源的消费方。消费方无法解析相对路径时（例如把正文交给外部接口），
+用 `--base-url` 追加绝对前缀：
+
+```text
+node scripts/knowledge-collection-post-processing.mjs rewrite-image-links --session-dir <dir> \
+  --resource-id <数字员工资源ID> --base-url http://<host>:<port>
+```
+
+`--base-url` 只接受 http/https 的 origin，带凭据、路径、查询或片段一律拒绝，避免拼出错误或泄露凭据的 URL。
+该前缀由 Agent 按当前部署地址传入，脚本不猜测部署域名。
+
+`--resource-id` 是数字员工资源 ID，必须由 Agent 从当前上下文取得后显式传入；脚本不猜测该值，缺失时直接失败。
+`path` 由脚本按会话空间根推导，不接受外部直接传入。默认根为 `/by`；使用工作区回退目录时必须显式传
+`--workspace-root <采集根目录>`，否则图片无法映射到会话空间。`--language` 默认 `zh-CN`，`--dry-run` 只统计不写盘。
+
+改写只针对 `images/` 开头的相对链接，远程 URL 与其他形式一律保留。图片文件缺失、不是普通文件、含 `..` 穿越或
+超出正文所在目录时，保留原链接并返回告警，不得改写成无法访问的 URL。改写是幂等的：已经是下载 URL 的链接不再匹配。
 
 `mark-materialized` 与 `record-run` 的一次性输入文件必须放在会话 `.post-processing-inputs/` 中，并使用
 `"schemaVersion": "1.0"`。文件必须是普通 JSON，不能是符号链接。命令成功持久化正式状态后删除对应输入文件；
