@@ -36,7 +36,7 @@ public final class LarkSandboxCommandPolicy {
             case SHOW_CONFIG -> List.of("lark-cli", "config", "show");
             case INITIALIZE_APP -> List.of("lark-cli", "config", "init", "--new", "--force-init");
             case BIND_OPENCLAW_CONTEXT -> List.of(
-                "lark-cli", "config", "bind", "--source", "openclaw", "--identity", "user-default");
+                "lark-cli", "config", "bind", "--source", "openclaw", "--identity", "user-default", "--force");
             case START_USER_AUTHORIZATION -> List.of(
                 "lark-cli", "auth", "login", "--domain", "all", "--no-wait", "--json");
             case COMPLETE_USER_AUTHORIZATION -> List.of(

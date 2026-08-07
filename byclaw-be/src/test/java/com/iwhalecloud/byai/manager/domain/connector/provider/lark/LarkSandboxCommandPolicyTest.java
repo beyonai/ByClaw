@@ -40,7 +40,7 @@ class LarkSandboxCommandPolicyTest {
         var request = policy.build(LarkSandboxCommandPolicy.Action.BIND_OPENCLAW_CONTEXT);
 
         assertThat(request.argv()).containsExactly(
-            "lark-cli", "config", "bind", "--source", "openclaw", "--identity", "user-default");
+            "lark-cli", "config", "bind", "--source", "openclaw", "--identity", "user-default", "--force");
         assertThat(request.background()).isFalse();
     }
 

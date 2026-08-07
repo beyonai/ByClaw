@@ -199,7 +199,7 @@ class ConnectorSchemaTest {
         String dockerfile = readPreservingCase("byclaw-be/Dockerfile");
 
         assertThat(dockerfile).contains(
-            "ARG LARKSUITE_CLI_VERSION=1.0.78",
+            "ARG LARKSUITE_CLI_VERSION=1.0.84",
             "ARG WECOM_CLI_VERSION=0.1.9",
             "@larksuite/cli@${LARKSUITE_CLI_VERSION}",
             "@wecom/cli@${WECOM_CLI_VERSION}",
