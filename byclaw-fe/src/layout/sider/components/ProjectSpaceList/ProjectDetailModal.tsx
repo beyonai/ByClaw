@@ -2022,23 +2022,23 @@ const ProjectDetailPanel: React.FC<Props> = ({
           // 周期/间隔执行配置需要保留完整结构，并将表单态 Dayjs 转成接口可持久化的字符串。
           config: values.collectConfig
             ? {
-                ...values.collectConfig,
-                onceTime: values.collectConfig.onceTime?.isValid()
-                  ? values.collectConfig.onceTime.format('YYYY-MM-DD HH:mm:ss')
-                  : undefined,
-                periodTime: values.collectConfig.periodTime?.isValid()
-                  ? values.collectConfig.periodTime.format('HH:mm:ss')
-                  : undefined,
-                periodYearDateTime: values.collectConfig.periodYearDateTime?.isValid()
-                  ? values.collectConfig.periodYearDateTime.format('YYYY-MM-DD HH:mm:ss')
-                  : undefined,
-                effectiveStartDate: values.collectConfig.effectiveDateRange?.[0]?.isValid()
-                  ? values.collectConfig.effectiveDateRange[0].format('YYYY-MM-DD')
-                  : undefined,
-                effectiveEndDate: values.collectConfig.effectiveDateRange?.[1]?.isValid()
-                  ? values.collectConfig.effectiveDateRange[1].format('YYYY-MM-DD')
-                  : undefined,
-              }
+              ...values.collectConfig,
+              onceTime: values.collectConfig.onceTime?.isValid()
+                ? values.collectConfig.onceTime.format('YYYY-MM-DD HH:mm:ss')
+                : undefined,
+              periodTime: values.collectConfig.periodTime?.isValid()
+                ? values.collectConfig.periodTime.format('HH:mm:ss')
+                : undefined,
+              periodYearDateTime: values.collectConfig.periodYearDateTime?.isValid()
+                ? values.collectConfig.periodYearDateTime.format('YYYY-MM-DD HH:mm:ss')
+                : undefined,
+              effectiveStartDate: values.collectConfig.effectiveDateRange?.[0]?.isValid()
+                ? values.collectConfig.effectiveDateRange[0].format('YYYY-MM-DD')
+                : undefined,
+              effectiveEndDate: values.collectConfig.effectiveDateRange?.[1]?.isValid()
+                ? values.collectConfig.effectiveDateRange[1].format('YYYY-MM-DD')
+                : undefined,
+            }
             : undefined,
         };
         if (isEditingOperationTask) {
@@ -3053,7 +3053,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
       // 项目小详情优先展示需求入口，任务和资源依次后置。
       ...(showRequirementsTab ? [{ key: 'requirements', label: t('tabs.requirements') }] : []),
       { key: 'tasks', label: t('tabs.tasks') },
-      { key: 'resources', label: t('tabs.resources') },
       // 数字员工与集成测试都是研发闭环能力,仅研发项目可见;数字员工排在成员前。
       ...(isDevelopProject ? [{ key: 'digitalAgents', label: t('tabs.digitalAgents') }] : []),
       ...(showMembersTab ? [{ key: 'members', label: t('tabs.members') }] : []),
@@ -5210,6 +5209,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
     );
   };
 
+  // 资源数据操作仍被项目详情内部文件动作复用；顶层 resources 页签已移除，不再调用该视图渲染器。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const renderResources = () => {
     const currentSessionFiles = currentResourceSession?.sessionId
       ? sessionFilesMap[`${currentResourceSession.sessionId}`] || []
@@ -5859,7 +5860,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
     if (activeTab === 'tasks') {
       return renderTasks();
     }
-    if (activeTab === 'resources') return renderResources();
     if (activeTab === 'digitalAgents') {
       if (isDevelopProject) {
         return (
@@ -6668,7 +6668,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const hideDetailBodyScrollbar = ['requirements', 'tasks', 'members'].includes(activeTab);
   const isRequirementsTab = activeTab === 'requirements';
   const isTasksTab = activeTab === 'tasks' || (activeTab === 'requirements' && !showRequirementsTab);
-  const isResourcesTab = activeTab === 'resources';
   const isMembersTab = activeTab === 'members' && showMembersTab;
 
   return (
@@ -6750,9 +6749,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
             hideDetailBodyScrollbar ? styles.detailBodyPanelScrollbarHidden : ''
           } ${isRequirementsTab ? styles.detailRequirementsBodyPanel : ''} ${
             isTasksTab ? styles.detailTasksBodyPanel : ''
-          } ${isResourcesTab ? styles.detailResourcesBodyPanel : ''} ${
-            isMembersTab ? styles.detailMembersBodyPanel : ''
-          }`}
+          } ${isMembersTab ? styles.detailMembersBodyPanel : ''}`}
         >
           {renderTabContent()}
         </div>
