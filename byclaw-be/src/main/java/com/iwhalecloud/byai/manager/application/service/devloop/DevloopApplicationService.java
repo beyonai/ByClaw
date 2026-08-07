@@ -36,6 +36,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.OperationAccountDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationRequirementStartDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationTaskDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ObjectFileDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ObjectFileGroupDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ObjectFileSaveDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationEnvDTO;
@@ -2033,15 +2034,33 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 按项目、会话查询业务对象关联文件。
+     * 按项目、会话查询业务对象关联文件，并按 objectCode、objectName 归类返回。
      *
      * @param listObjectFileDto 查询条件
-     * @return 对象文件列表
+     * @return 按业务对象归类后的文件组列表
      */
-    public List<ProjectObjectFile> listProjectObjectFiles(ListObjectFileDto listObjectFileDto) {
+    public Collection<ObjectFileGroupDTO> listProjectObjectFiles(ListObjectFileDto listObjectFileDto) {
 
-        
-        return projectObjectFileService.listProjectObjectFiles(listObjectFileDto);
+        List<ProjectObjectFile> projectObjectFiles = projectObjectFileService.listProjectObjectFiles(listObjectFileDto);
+        if (projectObjectFiles == null || projectObjectFiles.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        Map<String, ObjectFileGroupDTO> objectFileGroupMap = new LinkedHashMap<>();
+        for (ProjectObjectFile projectObjectFile : projectObjectFiles) {
+            String groupKey = projectObjectFile.getObjectCode();
+            ObjectFileGroupDTO objectFileGroupDTO = objectFileGroupMap.get(groupKey);
+            if (objectFileGroupDTO == null) {
+                objectFileGroupDTO = new ObjectFileGroupDTO();
+                objectFileGroupDTO.setObjectCode(projectObjectFile.getObjectCode());
+                objectFileGroupDTO.setObjectName(projectObjectFile.getObjectName());
+                objectFileGroupDTO.setProjectObjectFiles(new ArrayList<>());
+                objectFileGroupMap.put(groupKey, objectFileGroupDTO);
+            }
+            objectFileGroupDTO.getProjectObjectFiles().add(projectObjectFile);
+        }
+
+        return objectFileGroupMap.values();
     }
 
     /** 手工需求 JSON 包裹中携带的已解析、语言无关的数据。 */

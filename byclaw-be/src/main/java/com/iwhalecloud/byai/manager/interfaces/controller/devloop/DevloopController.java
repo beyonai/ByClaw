@@ -24,6 +24,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.OperationAccountDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationRequirementStartDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationTaskDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFileDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ObjectFileGroupDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ObjectFileSaveDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationEnvDTO;
@@ -34,6 +35,8 @@ import com.iwhalecloud.byai.manager.entity.devloop.ProjectObjectFile;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
@@ -686,17 +689,16 @@ public class DevloopController {
         return ResponseUtil.successResponse(projectObjectFiles);
     }
 
-
     /**
-     * 按项目与会话查询业务对象关联文件。
+     * 按项目与会话查询业务对象关联文件，按 objectCode、objectName 归类返回。
      *
      * @param listObjectFileDto 查询条件
-     * @return 对象文件列表
+     * @return 归类后的文件组列表
      */
     @PostMapping("/operation/listProjectObjectFiles")
-    public ResponseUtil<List<ProjectObjectFile>> listProjectObjectFiles(
+    public ResponseUtil<Collection<ObjectFileGroupDTO>> listProjectObjectFiles(
         @RequestBody ListObjectFileDto listObjectFileDto) {
-        List<ProjectObjectFile> projectObjectFiles = applicationService.listProjectObjectFiles(listObjectFileDto);
-        return ResponseUtil.successResponse(projectObjectFiles);
+        Collection<ObjectFileGroupDTO> resultList = applicationService.listProjectObjectFiles(listObjectFileDto);
+        return ResponseUtil.successResponse(resultList);
     }
 }
