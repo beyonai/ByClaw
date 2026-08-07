@@ -24,6 +24,17 @@ function isValidConnectorSkillName(name: string): boolean {
   );
 }
 
+function buildFailClosedAuthorization(
+  identifier: string,
+  entries: Array<[string, boolean]>,
+): ConnectorAuthorizationMap {
+  const recoveredEntries = entries
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .slice(0, MAX_CONNECTOR_AUTHORIZATION_ENTRIES)
+    .map(([name]) => [name, false] as const);
+  return Object.fromEntries([[identifier, false], ...recoveredEntries]);
+}
+
 export function normalizeConnectorAuthorization(
   value: unknown,
 ): ConnectorAuthorizationMap | undefined {
@@ -37,17 +48,33 @@ export function normalizeConnectorAuthorization(
     return { [CONNECTOR_AUTHORIZATION_INVALID_KEY]: false };
   }
   const normalized = new Map<string, boolean>();
+  let invalid = false;
   for (const [rawName, enabled] of Object.entries(value)) {
     const name = rawName.trim();
-    if (!isValidConnectorSkillName(name) || typeof enabled !== "boolean") {
-      return { [CONNECTOR_AUTHORIZATION_INVALID_KEY]: false };
+    if (!isValidConnectorSkillName(name)) {
+      invalid = true;
+      continue;
+    }
+    if (typeof enabled !== "boolean") {
+      invalid = true;
+      normalized.set(name, false);
+      continue;
     }
     const existing = normalized.get(name);
     normalized.set(name, existing === false || enabled === false ? false : true);
   }
+  if (invalid) {
+    return buildFailClosedAuthorization(
+      CONNECTOR_AUTHORIZATION_INVALID_KEY,
+      [...normalized.entries()],
+    );
+  }
   const disabledEntries = [...normalized.entries()].filter(([, enabled]) => !enabled);
   if (disabledEntries.length > MAX_CONNECTOR_AUTHORIZATION_ENTRIES) {
-    return { [CONNECTOR_AUTHORIZATION_OVERFLOW_KEY]: false };
+    return buildFailClosedAuthorization(
+      CONNECTOR_AUTHORIZATION_OVERFLOW_KEY,
+      disabledEntries,
+    );
   }
   const enabledEntries = [...normalized.entries()].filter(([, enabled]) => enabled);
   const cappedEntries = [

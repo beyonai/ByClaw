@@ -43,6 +43,37 @@ describe("connector authorization", () => {
     expect(normalizeConnectorAuthorization(value)).toEqual({ fws: false });
   });
 
+  it("retains only recoverable skill codes when a policy is invalid", () => {
+    expect(
+      normalizeConnectorAuthorization({
+        dws: true,
+        fws: "false",
+        bad_name: false,
+        wecomcli: false,
+      }),
+    ).toEqual({
+      "byclaw-connector-auth-invalid": false,
+      dws: false,
+      fws: false,
+      wecomcli: false,
+    });
+  });
+
+  it("retains a bounded recoverable scope when disabled entries overflow", () => {
+    const normalized = normalizeConnectorAuthorization(
+      Object.fromEntries(
+        Array.from({ length: 65 }, (_, index) => [`disabled-${index}`, false]),
+      ),
+    );
+
+    expect(normalized?.["byclaw-connector-auth-overflow"]).toBe(false);
+    expect(
+      Object.keys(normalized ?? {}).filter(
+        (name) => !name.startsWith("byclaw-connector-auth-"),
+      ),
+    ).toHaveLength(64);
+  });
+
   it("caps connector authorization entries and prioritizes disabled entries", () => {
     const value = Object.fromEntries([
       ...Array.from({ length: 64 }, (_, index) => [`enabled-${index}`, true]),
