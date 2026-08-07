@@ -299,6 +299,8 @@ default_env_if_unset "INSTANT_SEARCH_RESERVED_TOKENS" "2000"
 default_env_if_unset "INSTANT_SEARCH_MIN_SENTENCE_TOKENS" "50"
 default_env_if_unset "BY_QA_MODEL_CONFIG_PROVIDER" "redis_model_config:RedisModelConfigProvider"
 default_env_if_unset "BY_QA_STORAGE_PROVIDER" "byclaw_knowledge_storage:build_byclaw_knowledge_storage_provider"
+default_env_if_unset "DSL_MAX_DEPTH" "5"
+default_env_if_unset "DSL_MAX_LEAF_COUNT" "10000"
 
 map_env_alias_if_unset "SERVICE_NAME" "QA_DOMAINNAME"
 if [[ -n "${ROOT_HOST_VALUE-}" && -z "${HOST_MACHINE-}" ]]; then
