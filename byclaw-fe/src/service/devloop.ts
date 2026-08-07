@@ -601,6 +601,9 @@ export const getIntegrationRun = (runId: string | number) =>
 export const listIntegrationRuns = (suiteId: number) =>
   POST<any[]>('/byaiService/devloop/integration/run/list', { suiteId });
 
+export const listIntegrationRunsByEnv = (envId: number) =>
+  POST<any[]>('/byaiService/devloop/integration/run/listByEnv', { envId });
+
 // 需求级集成聚合看板:项目下已拆解需求按「需求→多仓库任务」组装,含就绪状态、最近执行结果与打回记录。
 export const listRequirementIntegrations = (projectId: number) =>
   POST<any[]>('/byaiService/devloop/integration/requirements', { projectId });

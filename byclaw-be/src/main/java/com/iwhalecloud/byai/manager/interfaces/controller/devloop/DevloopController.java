@@ -364,6 +364,16 @@ public class DevloopController {
         return applicationService.listIntegrationRuns(suiteId);
     }
 
+    /**
+     * 按环境查历史执行列表(时间倒序)。
+     * @param params 包含 envId
+     */
+    @PostMapping("/integration/run/listByEnv")
+    public ResponseUtil<List<Map<String, Object>>> listIntegrationRunsByEnv(@RequestBody Map<String, Object> params) {
+        Long envId = Long.valueOf(params.get("envId").toString());
+        return applicationService.listIntegrationRunsByEnv(envId);
+    }
+
     /** 按项目一次查全部需求(时间倒序)，供需求列表直查，替代前端逐源循环 */
     @PostMapping("/project/requirements")
     public ResponseUtil<List<Map<String, Object>>> listRequirementsByProject(@RequestBody Map<String, Object> params) {

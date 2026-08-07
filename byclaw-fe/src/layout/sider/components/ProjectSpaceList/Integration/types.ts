@@ -73,8 +73,9 @@ export type TestSuite = {
   id: string;
   name: string;
   runner: 'pytest' | 'playwright' | 'jest' | 'vitest' | 'custom' | 'manual';
-  // git: 独立测试工程仓库;shared: 共享空间已有的用例目录。manual 套件不需要来源仓库。
-  sourceType: 'git' | 'shared';
+  // code: 用例随代码仓库(选项目关联仓库,与被测代码同仓);standalone: 用例存于独立 git 仓库单独维护。
+  // 两种都由测试数字员工 clone 后运行,差别只在克隆哪个仓库。manual 套件不需要来源仓库。
+  sourceType: 'code' | 'standalone';
   source: string;
   branch: string;
   runCommand: string;
