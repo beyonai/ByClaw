@@ -8,7 +8,13 @@ WORKDIR /app
 RUN addgroup -g 1001 -S appgroup && \
     adduser -u 1001 -S appuser -G appgroup
 
-# 安装依赖：curl（健康检查）、bash、gcompat（dws 所需的 glibc 兼容层）、nodejs/npm（Lark/WeCom CLI + Trellis CLI）
+# 安装依赖：
+# - curl（健康检查）
+# - bash（脚本支持）
+# - gcompat（dws 所需的 glibc 兼容层）
+# - git（仓库操作）
+# - nodejs/npm（Lark/WeCom CLI + Trellis CLI）
+# - python3（Trellis init 依赖，需要 Python ≥ 3.9）
 RUN apk add --no-cache \
     curl \
     bash \
@@ -16,6 +22,7 @@ RUN apk add --no-cache \
     git \
     nodejs \
     npm \
+    python3 \
     && rm -rf /var/cache/apk/*
 
 # npm 使用国内镜像加速
