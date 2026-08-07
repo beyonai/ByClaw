@@ -40,6 +40,16 @@ interface Props {
 const REPO_BRANCH_DEFAULT = 'main';
 const PLACEHOLDER_REPLACE = '__PLACEHOLDER__';
 
+// 建仓表单:工作区与代码仓库共用一份形状,新增/重置都走 emptyRepoForm,避免字面量漂移。
+// description 可选,人工填仓库职责,需求 AI 预拆靠它判断该改哪些仓库。
+type RepoFormState = { repoFullName: string; repoUrl: string; defaultBranch: string; description: string };
+const emptyRepoForm = (): RepoFormState => ({
+  repoFullName: '',
+  repoUrl: '',
+  defaultBranch: REPO_BRANCH_DEFAULT,
+  description: '',
+});
+
 // 架构初始化可选技能包:枚举暂时前端硬编码,后续接后端 skill 目录。
 const SKILL_PACKAGE_OPTIONS = [
   { value: 'trellis', label: 'trellis' },
@@ -72,8 +82,8 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
   // 已配置仓库:按后端 repoType 区分工作区与代码仓库(存量数据无类型时按 code 处理)。
   const [repos, setRepos] = useState<DevloopProjectRepo[]>([]);
   const [repoSaving, setRepoSaving] = useState(false);
-  const [wsForm, setWsForm] = useState({ repoFullName: '', repoUrl: '', defaultBranch: REPO_BRANCH_DEFAULT });
-  const [codeForm, setCodeForm] = useState({ repoFullName: '', repoUrl: '', defaultBranch: REPO_BRANCH_DEFAULT });
+  const [wsForm, setWsForm] = useState<RepoFormState>(emptyRepoForm());
+  const [codeForm, setCodeForm] = useState<RepoFormState>(emptyRepoForm());
 
   // step3 架构初始化选项:是否建索引默认否;建索引时才联动技能包多选。
   const [buildIndex, setBuildIndex] = useState(false);
@@ -92,8 +102,8 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
     setProjectId('');
     setCreating(false);
     setRepos([]);
-    setWsForm({ repoFullName: '', repoUrl: '', defaultBranch: REPO_BRANCH_DEFAULT });
-    setCodeForm({ repoFullName: '', repoUrl: '', defaultBranch: REPO_BRANCH_DEFAULT });
+    setWsForm(emptyRepoForm());
+    setCodeForm(emptyRepoForm());
     setBuildIndex(false);
     setSkillPackages([]);
     setInitStarted(false);
@@ -125,10 +135,7 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
     }
   };
 
-  const addRepo = async (
-    form: { repoFullName: string; repoUrl: string; defaultBranch: string },
-    isWorkspace: boolean
-  ) => {
+  const addRepo = async (form: RepoFormState, isWorkspace: boolean) => {
     if (!projectId) return;
     if (!form.repoFullName.trim()) {
       message.error(t('repo.validation.nameRequired'));
@@ -142,6 +149,7 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
         repoFullName: form.repoFullName.trim(),
         repoUrl: form.repoUrl.trim() || undefined,
         defaultBranch: form.defaultBranch.trim() || undefined,
+        description: form.description.trim() || undefined,
         repoType,
       });
       if (!res?.repoId) {
@@ -149,9 +157,8 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
         return;
       }
       message.success(t('repo.createSuccess'));
-      const reset = { repoFullName: '', repoUrl: '', defaultBranch: REPO_BRANCH_DEFAULT };
-      if (isWorkspace) setWsForm(reset);
-      else setCodeForm(reset);
+      if (isWorkspace) setWsForm(emptyRepoForm());
+      else setCodeForm(emptyRepoForm());
       await refreshRepos(projectId);
     } catch {
       message.error(t('repo.createFailed'));
@@ -218,8 +225,8 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
   );
 
   const renderRepoForm = (
-    formState: { repoFullName: string; repoUrl: string; defaultBranch: string },
-    setForm: React.Dispatch<React.SetStateAction<{ repoFullName: string; repoUrl: string; defaultBranch: string }>>,
+    formState: RepoFormState,
+    setForm: React.Dispatch<React.SetStateAction<RepoFormState>>,
     isWorkspace: boolean
   ) => (
     <div className={styles.repoForm}>
@@ -245,6 +252,15 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
           value={formState.defaultBranch}
           placeholder={REPO_BRANCH_DEFAULT}
           onChange={(e) => setForm((prev) => ({ ...prev, defaultBranch: e.target.value }))}
+        />
+      </div>
+      <div className={styles.repoFormField}>
+        <span className={styles.repoFormLabel}>{t('repo.field.description')}</span>
+        <Input.TextArea
+          value={formState.description}
+          placeholder={t('repo.placeholder.description')}
+          rows={2}
+          onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
         />
       </div>
       <Button

@@ -216,6 +216,8 @@ type RepoOption = {
   repoFullName: string;
   repoUrl?: string;
   defaultBranch?: string;
+  // 人工填写的仓库职责,给后来人和需求 AI 预拆看;存量行为空。
+  description?: string;
   // 仓库类型:workspace 工作区(单个)/code 代码仓库(可多个);存量无值按 code 处理。
   repoType?: 'workspace' | 'code';
   // 代码平台:决定展示 host 与 clone/push 行为;存量无值按 github 处理。
@@ -749,6 +751,8 @@ type RepoFormState = {
   repoFullName: string;
   repoUrl: string;
   defaultBranch: string;
+  // 仓库职责描述,可选;需求 AI 预拆靠它判断该改哪些仓库,只凭仓库名经常拆错。
+  description: string;
   repoType: 'workspace' | 'code';
   provider: RepoProvider;
 };
@@ -756,6 +760,7 @@ const getDefaultRepoForm = (): RepoFormState => ({
   repoFullName: '',
   repoUrl: '',
   defaultBranch: 'main',
+  description: '',
   repoType: 'code',
   provider: 'github',
 });
@@ -3541,6 +3546,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
         repoFullName: repoForm.repoFullName.trim(),
         repoUrl: repoForm.repoUrl.trim() || undefined,
         defaultBranch: repoForm.defaultBranch.trim() || undefined,
+        description: repoForm.description.trim() || undefined,
         repoType: repoForm.repoType,
         provider: repoForm.provider,
       });
@@ -6340,6 +6346,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
           onChange={(event) => setRepoForm((prev) => ({ ...prev, defaultBranch: event.target.value }))}
         />
       </div>
+      <div className={styles.formField}>
+        <label>{t('repository.field.description')}</label>
+        <Input.TextArea
+          placeholder={t('repository.placeholder.description')}
+          value={repoForm.description}
+          rows={3}
+          onChange={(event) => setRepoForm((prev) => ({ ...prev, description: event.target.value }))}
+        />
+      </div>
     </Modal>
   );
 
@@ -6434,6 +6449,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
                       <span className={styles.repoDescription}>
                         {getRepoDisplayUrl(repo) || '-'}
                         {repo.defaultBranch ? ` · ${repo.defaultBranch}` : ''}
+                        {/* 描述另起一行:多为整句,和地址挤一行会把地址/分支挤出可视区。 */}
+                        {repo.description ? <div>{repo.description}</div> : null}
                       </span>
                     }
                   />
@@ -6803,6 +6820,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
             }
             : null
         }
+        // 只有需求拆分走后端 AI 预拆;运营任务拆分没有需求ID,弹窗内自动退化为每仓库一行。
+        presplitTarget={splitRequirement && projectId ? { projectId, sourceItemId: splitRequirement.itemId } : null}
         repos={repos}
         onAddRepository={() => {
           // 拆分弹窗内直接新增仓库，新增表单以更高层级展示并保留当前拆分上下文。

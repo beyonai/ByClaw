@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Input, Modal, Segmented, Select, Tag, Tooltip } from 'antd';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Button, Input, Modal, Segmented, Select, Skeleton, Tag, Tooltip } from 'antd';
 import {
   ApartmentOutlined,
   DeleteOutlined,
@@ -10,7 +10,8 @@ import {
 } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import styles from './index.module.less';
-import { buildLayers, buildSuggestedSplit } from './heuristics';
+import { buildFallbackSplit, buildLayers } from './heuristics';
+import { presplitRequirement } from '@/service/devloop';
 import type { MemberOption, RepoOption, SplitTaskDraft } from './types';
 
 type SplitView = 'list' | 'graph';
@@ -24,8 +25,10 @@ const PAD = 24;
 
 type RequirementSplitModalProps = {
   open: boolean;
-  // 待拆分的需求(标题用于生成 AI 预拆建议,演示态)。
+  // 待拆分的需求(标题/描述用于展示;AI 预拆的输入由后端按 presplitTarget 自己查)。
   requirement: { title: string; description?: string } | null;
+  // 有值才走后端 AI 预拆;为空(如运营任务拆分,没有需求ID)时退化为每仓库一行。
+  presplitTarget?: { projectId: number; sourceItemId: number } | null;
   repos: RepoOption[];
   // 父组件复用已有仓库新增弹窗，拆分弹窗只负责触发入口并在新增后接收刷新后的仓库列表。
   onAddRepository?: () => void;
@@ -42,6 +45,7 @@ type RequirementSplitModalProps = {
 const RequirementSplitModal: React.FC<RequirementSplitModalProps> = ({
   open,
   requirement,
+  presplitTarget,
   repos,
   onAddRepository,
   members,
@@ -60,20 +64,92 @@ const RequirementSplitModal: React.FC<RequirementSplitModalProps> = ({
   const [tasks, setTasks] = useState<SplitTaskDraft[]>([]);
   // 视图切换:默认列表,用户可切到依赖图。
   const [view, setView] = useState<SplitView>('list');
+  // AI 预拆在弹窗打开后异步进行,期间列表位置显示骨架。
+  const [presplitting, setPresplitting] = useState(false);
+  // 模型不可用/输出不可解析时后端降级为每仓库一行,这里记原因用于提示"未使用 AI"。
+  const [degradeReason, setDegradeReason] = useState<string | undefined>(undefined);
+  // 竞态与脏数据保护:只有最后一次请求的结果可以覆盖草稿,且用户已编辑过就不再覆盖。
+  const presplitSeq = useRef(0);
+  const userEdited = useRef(false);
 
-  // 每次打开时按需求标题重新生成预拆依赖图草稿,并回到默认列表视图。
+  // 用户改过任何一行后就不能再被模型结果冲掉,否则异步返回会吃掉用户输入。
+  const markEdited = useCallback(() => {
+    userEdited.current = true;
+  }, []);
+
+  // 父级把 requirement/presplitTarget/repos 作为内联字面量传入,每次渲染都是新身份。
+  // 依赖必须收敛到原始值,否则 effect 每渲染都跑一次,预拆请求会无限重发。
+  const requirementTitle = requirement?.title;
+  const presplitProjectId = presplitTarget?.projectId;
+  const presplitSourceItemId = presplitTarget?.sourceItemId;
+  const repoKey = repos.map((repo) => repo.repoId).join(',');
+
   useEffect(() => {
-    if (open && requirement) {
-      // 当前用户是项目成员时，AI 预拆与后续新增任务均默认由当前用户承接，仍可手动调整。
-      setTasks(
-        buildSuggestedSplit(requirement.title, repos).map((task) => ({
-          ...task,
-          assigneeId: task.assigneeId ?? defaultAssigneeId,
-        }))
-      );
-      setView('list');
+    if (!open || !requirementTitle) {
+      // 关闭即清空:否则下次打开会先闪一帧上一条需求的草稿,且那一帧 canConfirm 可能为真。
+      // seq 自增让仍在飞的上一轮请求结果作废。
+      presplitSeq.current += 1;
+      setTasks([]);
+      setPresplitting(false);
+      setDegradeReason(undefined);
+      return;
     }
-  }, [defaultAssigneeId, open, requirement, repos]);
+    const seq = ++presplitSeq.current;
+    userEdited.current = false;
+    setView('list');
+    setDegradeReason(undefined);
+    // 当前用户是项目成员时，预拆与后续新增任务均默认由当前用户承接，仍可手动调整。
+    const withAssignee = (draft: SplitTaskDraft[]) =>
+      draft.map((task) => ({ ...task, assigneeId: task.assigneeId ?? defaultAssigneeId }));
+    if (presplitProjectId === undefined || presplitSourceItemId === undefined) {
+      // 没有需求ID(运营任务拆分入口)无法调后端预拆,直接给每仓库一行且不标 AI。
+      setTasks(withAssignee(buildFallbackSplit(requirementTitle, repos)));
+      setPresplitting(false);
+      return;
+    }
+    setTasks([]);
+    setPresplitting(true);
+    presplitRequirement({ projectId: presplitProjectId, sourceItemId: presplitSourceItemId })
+      .then((result) => {
+        if (seq !== presplitSeq.current || userEdited.current) {
+          return;
+        }
+        if (!result?.tasks?.length) {
+          setTasks(withAssignee(buildFallbackSplit(requirementTitle, repos)));
+          setDegradeReason('empty_result');
+          return;
+        }
+        setDegradeReason(result.aiSuggested ? undefined : result.degradeReason || 'degraded');
+        setTasks(
+          withAssignee(
+            result.tasks.map((task) => ({
+              rowId: task.rowId,
+              title: task.title || requirementTitle,
+              repoId: task.repoId,
+              branch: task.branch || '',
+              dependsOn: task.dependsOn || [],
+              // 只有后端确认出自模型才标 AI,降级结果不冒充模型产出。
+              aiSuggested: result.aiSuggested,
+              reason: task.reason,
+            }))
+          )
+        );
+      })
+      .catch(() => {
+        if (seq !== presplitSeq.current || userEdited.current) {
+          return;
+        }
+        setTasks(withAssignee(buildFallbackSplit(requirementTitle, repos)));
+        setDegradeReason('request_failed');
+      })
+      .finally(() => {
+        if (seq === presplitSeq.current) {
+          setPresplitting(false);
+        }
+      });
+    // repos 只用于降级兜底,以 repoKey 收敛身份;requirement/presplitTarget 同理只取原始值。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultAssigneeId, open, presplitProjectId, presplitSourceItemId, repoKey, requirementTitle]);
 
   const repoOptions = useMemo(
     () =>
@@ -109,8 +185,10 @@ const RequirementSplitModal: React.FC<RequirementSplitModalProps> = ({
     };
   }, [layers]);
 
-  const patchTask = (rowId: string, patch: Partial<SplitTaskDraft>) =>
+  const patchTask = (rowId: string, patch: Partial<SplitTaskDraft>) => {
+    markEdited();
     setTasks((prev) => prev.map((task) => (task.rowId === rowId ? { ...task, ...patch } : task)));
+  };
 
   // 仓库为空时可直接进入项目仓库新增流程，避免用户关闭拆分弹窗后再返回项目配置补数据。
   const renderRepositorySelect = (task: SplitTaskDraft, className?: string) => (
@@ -138,15 +216,18 @@ const RequirementSplitModal: React.FC<RequirementSplitModalProps> = ({
     </div>
   );
 
-  const removeTask = (rowId: string) =>
+  const removeTask = (rowId: string) => {
+    markEdited();
     // 删节点同时断开所有指向它的依赖边,避免悬空引用。
     setTasks((prev) =>
       prev
         .filter((task) => task.rowId !== rowId)
         .map((task) => ({ ...task, dependsOn: task.dependsOn.filter((dep) => dep !== rowId) }))
     );
+  };
 
-  const addTask = () =>
+  const addTask = () => {
+    markEdited();
     setTasks((prev) => [
       ...prev,
       {
@@ -159,9 +240,11 @@ const RequirementSplitModal: React.FC<RequirementSplitModalProps> = ({
         aiSuggested: false,
       },
     ]);
+  };
 
-  // 至少一行、且每行都填了标题/选了仓库/分支/承接成员才允许确认。
+  // 至少一行、且每行都填了标题/选了仓库/分支/承接成员才允许确认;预拆未回来时不能确认(草稿还是空的)。
   const canConfirm =
+    !presplitting &&
     tasks.length > 0 &&
     tasks.every(
       (task) =>
@@ -399,7 +482,13 @@ const RequirementSplitModal: React.FC<RequirementSplitModalProps> = ({
         <div className={styles.splitToolbar}>
           <div className={styles.splitAiHint}>
             <ThunderboltOutlined className={styles.splitAiIcon} />
-            <span>{view === 'graph' ? t('reqSplit.graphHint') : t('reqSplit.listHint')}</span>
+            <span>
+              {presplitting
+                ? t('reqSplit.presplitting')
+                : view === 'graph'
+                  ? t('reqSplit.graphHint')
+                  : t('reqSplit.listHint')}
+            </span>
           </div>
           {/* 列表/图切换,默认列表。 */}
           <Segmented
@@ -413,10 +502,25 @@ const RequirementSplitModal: React.FC<RequirementSplitModalProps> = ({
           />
         </div>
 
-        {view === 'list' ? renderList() : renderGraph()}
+        {/* 模型不可用/输出不可解析时后端已降级为每仓库一行,必须让用户知道这不是 AI 拆的。 */}
+        {degradeReason ? (
+          <Alert type="warning" showIcon className={styles.splitDegradeAlert} message={t('reqSplit.degradeHint')} />
+        ) : null}
+
+        {/* 预拆异步进行中先占位,骨架行数按仓库数,视觉上和最终列表对齐。 */}
+        {presplitting ? (
+          <div className={styles.splitSkeleton}>
+            <Skeleton active title={false} paragraph={{ rows: Math.max(repos.length, 2) }} />
+          </div>
+        ) : view === 'list' ? (
+          renderList()
+        ) : (
+          renderGraph()
+        )}
 
         <div className={styles.splitCanvasFooter}>
-          <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={addTask}>
+          {/* 预拆返回前新增的行会被结果覆盖(userEdited 只保护已有行的编辑),所以加载中先禁用。 */}
+          <Button size="small" type="dashed" icon={<PlusOutlined />} disabled={presplitting} onClick={addTask}>
             {t('reqSplit.addTask')}
           </Button>
           <p className={styles.splitFootNote}>{t('reqSplit.footNote', { count: tasks.length })}</p>

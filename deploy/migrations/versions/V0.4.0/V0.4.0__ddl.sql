@@ -446,6 +446,11 @@ COMMENT ON COLUMN byai.byai_project_repo.repo_type IS '仓库类型 workspace工
 ALTER TABLE byai.byai_project_repo ADD COLUMN provider VARCHAR(20) NOT NULL DEFAULT 'github';
 COMMENT ON COLUMN byai.byai_project_repo.provider IS '代码平台 github/gitlab/gitea;决定 clone host 与令牌变量,存量默认 github';
 
+-- 仓库用途描述:人工填写,给后来人和大模型理解该仓库承担什么职责。
+-- 需求 AI 预拆据此判断该改哪些仓库,仅凭 owner/repo 名字猜职责经常拆错。可空,存量行为 NULL。
+ALTER TABLE byai.byai_project_repo ADD COLUMN description TEXT;
+COMMENT ON COLUMN byai.byai_project_repo.description IS '仓库用途描述,人工填写;供需求AI预拆判断职责归属与人工理解';
+
 -- 研发项目工作区初始化状态:架构数字员工建成工作区前禁止建需求/启动任务。
 ALTER TABLE byai.byai_project ADD COLUMN init_status VARCHAR(16);
 COMMENT ON COLUMN byai.byai_project.init_status IS '研发项目初始化状态 ready已就绪/pending待初始化/initializing初始化中;仅 develop 未 ready 前禁用建需求与启动任务。无列默认值,应用层建项目时显式赋值';

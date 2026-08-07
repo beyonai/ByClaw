@@ -1510,6 +1510,9 @@ export default {
   'projectSpace.onboarding.repo.field.fullName': 'Repository name',
   'projectSpace.onboarding.repo.field.url': 'Repository URL',
   'projectSpace.onboarding.repo.field.branch': 'Branch',
+  'projectSpace.onboarding.repo.field.description': 'Repository description (optional)',
+  'projectSpace.onboarding.repo.placeholder.description':
+    'What this repository is responsible for; the requirement AI pre-split uses it to decide which repositories to change.',
   'projectSpace.onboarding.repo.placeholder.fullName': 'e.g. org/repo',
   'projectSpace.onboarding.repo.placeholder.url': 'git@... or https://...',
   'projectSpace.onboarding.repo.validation.nameRequired': 'Please enter a repository name',
@@ -2290,6 +2293,9 @@ export default {
     'Pick upstream tasks this one depends on; it enters integration only after all upstreams finish coding.',
   'projectSpace.detail.reqSplit.noMembers': 'No project members yet. Add members first.',
   'projectSpace.detail.reqSplit.aiTag': 'AI split',
+  'projectSpace.detail.reqSplit.presplitting': 'AI is pre-splitting this requirement across the repositories…',
+  'projectSpace.detail.reqSplit.degradeHint':
+    'AI pre-split was not used (model unavailable or its output could not be parsed). One row per repository is listed below with no inferred dependencies; review titles, repositories and dependencies before starting.',
   'projectSpace.detail.reqSplit.addTask': 'Add task',
   'projectSpace.detail.reqSplit.addRepository': 'Add repository',
   'projectSpace.detail.reqSplit.footNote':
@@ -2710,6 +2716,7 @@ export default {
   'projectSpace.detail.repository.field.fullName': 'Repository Full Name (owner/repo)',
   'projectSpace.detail.repository.field.url': 'Repository URL (Optional)',
   'projectSpace.detail.repository.field.defaultBranch': 'Default Branch',
+  'projectSpace.detail.repository.field.description': 'Repository Description (Optional)',
   'projectSpace.detail.repository.field.repoType': 'Repository Type',
   'projectSpace.detail.repository.field.provider': 'Platform',
   'projectSpace.detail.repository.provider.github': 'GitHub',
@@ -2723,6 +2730,8 @@ export default {
     'A workspace repository already exists. Delete the existing one before adding another to avoid duplicates.',
   'projectSpace.detail.repository.placeholder.fullName': 'For example: beyonai/byclaw-test',
   'projectSpace.detail.repository.placeholder.url': 'For example: https://github.com/beyonai/byclaw-test',
+  'projectSpace.detail.repository.placeholder.description':
+    'What this repository is responsible for, e.g. "Backend service exposing project/requirement/task APIs". The requirement AI pre-split uses it to decide which repositories to change.',
   'projectSpace.detail.repository.empty': 'No repositories',
   'projectSpace.detail.repository.initWorkspace': 'Initialize',
   'projectSpace.detail.repository.initializing': 'Initializing',

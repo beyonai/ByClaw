@@ -49,6 +49,8 @@ import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationResultDto;
+import com.iwhalecloud.byai.manager.dto.devloop.RequirementPresplitDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.RequirementPresplitResultDto;
 import com.iwhalecloud.byai.manager.dto.devloop.RequirementSplitDTO;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.*;
@@ -197,6 +199,9 @@ public class DevloopApplicationService {
 
     @Autowired
     private ScanItemTaskService scanItemTaskService;
+
+    @Autowired
+    private RequirementPresplitService requirementPresplitService;
 
     @Autowired
     private DevloopPhaseService devloopPhaseService;
@@ -2226,6 +2231,24 @@ public class DevloopApplicationService {
     }
 
     // ========== 研发任务 ==========
+
+    /**
+     * 需求 AI 预拆:查需求正文与项目仓库清单,交给模型产出子任务草稿,只读不落库。
+     * 前端拿到草稿后允许编辑,点启动才调 {@link #splitTask} 一次性建会话,预拆与落库分离。
+     */
+    public ResponseUtil<RequirementPresplitResultDto> getRequirementPresplit(RequirementPresplitDTO dto) {
+        if (dto == null || dto.getProjectId() == null || dto.getSourceItemId() == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.requirement.not.found"));
+        }
+        ScanRequireItem item = scanRequireItemMapper.selectById(dto.getSourceItemId());
+        if (item == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.requirement.not.found"));
+        }
+        List<ProjectRepo> repos = projectRepoMapper
+            .selectList(new LambdaQueryWrapper<ProjectRepo>().eq(ProjectRepo::getProjectId, dto.getProjectId()));
+        return ResponseUtil.successResponse(requirementPresplitService.getPresplitDraft(item.getTitle(),
+            item.getContent(), repos, getCurrentRequestLanguage()));
+    }
 
     /** 从需求创建任务（前端手动启动入口，身份取当前登录用户） */
     @Transactional(rollbackFor = Exception.class)

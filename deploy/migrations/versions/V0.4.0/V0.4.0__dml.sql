@@ -261,6 +261,16 @@ SELECT -2005, 'analyze', '数据分析任务模板', '围绕账号或作品数�
        50, 'Y', '00A', '0'
 WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2005);
 
+-- 需求 AI 预拆提示词：需求 + 项目仓库清单 → 仓库级子任务草稿（含仓库间依赖）。
+-- 无占位符：需求正文与仓库清单由后端组装成 user message，本模板只作 system prompt。
+delete from byai.byai_ai_prompt where prompt_code = 'DEVLOOP_REQUIREMENT_PRESPLIT_PROMPT';
+
+INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
+VALUES (nextval('byai.seq_any_table'), 'DEVLOOP_PROMPT', 'DEVLOOP_REQUIREMENT_PRESPLIT_PROMPT', '需求AI预拆提示词', '需求拆分弹窗打开时调用，输入需求与项目仓库清单，输出仓库级子任务草稿 JSON，不落库', 'DEVLOOP_REQUIREMENT_PRESPLIT_PROMPT',
+E'你是研发拆单助手。输入是一条需求和该项目下的代码仓库清单，请把需求拆成可并行或串行执行的仓库级子任务。\n\n规则：\n1. 只能使用输入中给出的 repoId，不得编造；与需求无关的仓库不要产出任务。\n2. 一个仓库最多一条任务。需求只涉及一个仓库时就只产出一条。\n3. dependsOn 用同批任务的 rowId 表示上游依赖，必须无环；能并行的不要硬串成链。\n4. title 用中文描述该仓库要做的具体改动，不要照抄需求标题。\n5. branch 全批任务保持一致：输入里给了「工作区分支」时必须原样用它，没给时才用 feat/<英文小写短横线短语>。\n6. reason 一句话说明为什么这个仓库要改、为什么有/没有这个依赖。\n\n只输出 JSON，结构为：\n{"tasks":[{"rowId":"row-0","repoId":123,"title":"...","branch":"feat/xxx","dependsOn":[],"reason":"..."}]}',
+E'You split a requirement into repository-level subtasks. Input is one requirement plus the repository list of its project.\n\nRules:\n1. Use only the repoId values given in the input; never invent one. Skip repositories the requirement does not touch.\n2. At most one task per repository. Emit a single task when only one repository is involved.\n3. dependsOn references rowId values from the same batch and must stay acyclic; do not force a chain when tasks can run in parallel.\n4. title describes the concrete change in that repository; do not copy the requirement title.\n5. branch is the same for every task. When the input provides a workspace branch, use it verbatim; only fall back to feat/<lowercase-dashed-phrase> when none is given.\n6. reason is one sentence on why this repository changes and why the dependency exists or not.\n\nOutput JSON only:\n{"tasks":[{"rowId":"row-0","repoId":123,"title":"...","branch":"feat/xxx","dependsOn":[],"reason":"..."}]}',
+'system', now(), now(), null);
+
 -- 资料采集模板使用统一的运营任务字段结构；任务执行时由后端替换占位符。
 UPDATE byai.byai_ai_prompt
 SET prompt_zh_template = E'请处理以下资料采集与整理任务：\n\n关联需求\n\n需求名称：${requirementName}\n需求描述：${requirementDescription}\n\n运营任务信息\n\n运营项目：${projectName}\n任务名称：${title}\n\n资料采集配置\n\n采集渠道：${collectChannel}\n采集账号或地址：${collectAccount}\n采集主题：${collectTopic}\n采集开始时间：${collectStartTime}\n采集结束时间：${collectEndTime}\n采集方式：${collectMethod}\n定时规则：${collectSchedule}\n采集知识库：${knowledgeBase}\n采集目录：${directory}\n是否知识整理：${collectOrganize}\n整理本体：${collectOntology}\n整理要求：${collectOrganizationRequest}\n结构化要求：${collectOrganizationStructure}\n\n执行要求\n\n严格依据关联需求和资料采集配置开展工作。\n将采集结果进行会话共享范围的知识整理，并同步关键进度、产出结果和异常情况。\n涉及登录或对外访问时，先核对对应运营账号和平台配置。'

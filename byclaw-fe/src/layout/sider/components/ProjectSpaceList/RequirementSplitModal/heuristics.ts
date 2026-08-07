@@ -10,47 +10,22 @@ const suggestBranch = (title: string): string => {
   return slug ? `feat/${slug}` : 'feat/req';
 };
 
-// 仓库职责 → 拓扑序权重:中间件/后端在前,前端在后(fe 依赖 be,be 依赖 mw)。
-const repoTier = (repoName: string): number => {
-  if (/middleware|mw|mq|gateway/i.test(repoName)) return 0;
-  if (/be|api|server|backend/i.test(repoName)) return 1;
-  if (/fe|front|web|ui/i.test(repoName)) return 2;
-  return 1;
-};
-
-// 客户端预拆建议:每个仓库预拆一个节点,并按仓库职责(mw → be → fe)推断依赖边连成一条链,作为拆单弹窗的初始草稿。
-// 仅是启发式初值,用户可增删节点、改仓库/分支/承接人、改依赖;确认后由后端按草稿批量建会话并落库依赖。
-// 任务标题:需求标题 + 仓库短名,让 1 对多后的每个任务有可区分的标题。
-const suggestTaskTitle = (reqTitle: string, repoName: string): string => {
-  const shortRepo = repoName.split('/').pop() || repoName;
-  return `${reqTitle} · ${shortRepo}`;
-};
-
-export const buildSuggestedSplit = (title: string, repos: RepoOption[]): SplitTaskDraft[] => {
+// 降级草稿:每个仓库一行,标题沿用需求标题,不猜依赖、不猜仓库职责顺序、不标 AI。
+// 只在后端预拆不可用时使用(模型未配置/调用失败/输出不可解析,或运营任务入口没有需求ID)。
+// 真正的拆分由后端 /task/presplit 按系统提示词交给大模型产出,不在前端做正则启发式。
+export const buildFallbackSplit = (title: string, repos: RepoOption[]): SplitTaskDraft[] => {
   const branch = suggestBranch(title);
   if (!repos.length) {
-    return [{ rowId: 'row-0', title, repoId: undefined, branch, dependsOn: [], aiSuggested: true }];
+    return [{ rowId: 'row-0', title, repoId: undefined, branch, dependsOn: [], aiSuggested: false }];
   }
-  // 按职责排序后,让每个节点依赖前一个,形成线性依赖链(最常见的多仓库需求拓扑)。
-  const ordered = repos
-    .map((repo, index) => ({
-      repo,
-      index,
-      tier: repoTier(repo.repoFullName || repo.repoUrl || String(repo.repoId)),
-    }))
-    .sort((a, b) => a.tier - b.tier || a.index - b.index);
-
-  return ordered.map((item, idx) => {
-    const repoName = item.repo.repoFullName || item.repo.repoUrl || String(item.repo.repoId);
-    return {
-      rowId: `row-${idx}`,
-      title: suggestTaskTitle(title, repoName),
-      repoId: item.repo.repoId,
-      branch,
-      dependsOn: idx === 0 ? [] : [`row-${idx - 1}`],
-      aiSuggested: true,
-    };
-  });
+  return repos.map((repo, idx) => ({
+    rowId: `row-${idx}`,
+    title,
+    repoId: repo.repoId,
+    branch,
+    dependsOn: [],
+    aiSuggested: false,
+  }));
 };
 
 // 按拓扑深度分层:depth = 最长上游链长度(无上游=0),order = 同层内出现次序。

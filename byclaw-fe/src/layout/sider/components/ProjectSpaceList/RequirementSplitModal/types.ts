@@ -25,8 +25,11 @@ export type SplitTaskDraft = {
   assigneeId?: string | number;
   // 依赖的上游任务 rowId 列表:构成需求内的有向依赖图(DAG)。空数组=无上游,可最先开工。
   dependsOn: string[];
-  // 是否由 AI 预拆生成(用户手动新增的为 false),仅用于标记来源。
+  // 是否由 AI 预拆生成:仅当后端确认结果出自模型时为 true。
+  // 降级兜底(模型不可用/输出不可解析)与用户手动新增均为 false,不能把兜底冒充成模型产出。
   aiSuggested: boolean;
+  // 模型给出的拆分理由,只用于展示,不随 splitTask 落库。
+  reason?: string;
 };
 
 // 布局后的节点:在 buildLayers 里按拓扑深度分层,depth=列,order=同层内的行序。

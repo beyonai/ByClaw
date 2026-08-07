@@ -14,6 +14,8 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFilePkIdDto;
+import com.iwhalecloud.byai.manager.dto.devloop.RequirementPresplitDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.RequirementPresplitResultDto;
 import com.iwhalecloud.byai.manager.dto.devloop.RequirementSplitDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
@@ -481,6 +483,12 @@ public class DevloopController {
     @PostMapping("/task/create")
     public ResponseUtil<Map<String, Object>> createTask(@RequestBody Map<String, Object> params) {
         return applicationService.createTask(params);
+    }
+
+    /** 需求 AI 预拆:模型按仓库清单产出子任务草稿,只读不落库,前端编辑后再调 /task/split */
+    @PostMapping("/task/presplit")
+    public ResponseUtil<RequirementPresplitResultDto> presplitRequirement(@RequestBody RequirementPresplitDTO dto) {
+        return applicationService.getRequirementPresplit(dto);
     }
 
     /** 需求拆分为多仓库子任务(各自 repo/分支/承接员工,子任务间 DAG 依赖) */
