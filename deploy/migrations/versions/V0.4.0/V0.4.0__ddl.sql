@@ -593,7 +593,7 @@ create table byai_project_object_file
     file_name   varchar(200),
     file_path   varchar(500),
     version     varchar(20),
-    status_cd   varchar(20),
+    status_cd   varchar(100),
     ext_content text,
     create_by   bigint,
     create_time timestamp default current_timestamp,

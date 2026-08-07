@@ -1654,19 +1654,17 @@ const ProjectDetailPanel: React.FC<Props> = ({
     try {
       const knowledgeBaseQuery = {
         pageNum: 1,
-        pageSize: 100,
+        pageSize: 1000,
         // 与知识库列表页使用相同的业务类型，避免把数字员工等其它资源混入采集知识库选择。
         resourceBizTypes: [
           ResourceTypeMap.knowledgeBase,
           ResourceTypeMap.knowledgeBaseQa,
           ResourceTypeMap.knowledgeBaseTerm,
         ],
+        type: 'all',
       };
-      const [personalRes, authorizedRes] = await Promise.all([
-        listAccessibleKnowledgeBases({ ...knowledgeBaseQuery, type: 'owner' }),
-        listAccessibleKnowledgeBases({ ...knowledgeBaseQuery, type: 'authorize' }),
-      ]);
-      // 个人知识库和授权给我的知识库统一转换为下拉选项，个人知识库在前，并按资源 ID 合并去重。
+      const knowledgeRes = await listAccessibleKnowledgeBases(knowledgeBaseQuery);
+      // 当前账号可读知识库统一转换为下拉选项，并按资源 ID 去重。
       const getKnowledgeBaseOptions = (res: any): OperationSelectOption[] =>
         getFirstOperationArray(res?.rows, res?.list, res?.data?.rows, res?.data?.list)
           .map((knowledgeBase: any) => ({
@@ -1685,7 +1683,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
               !!knowledgeBase.label
           );
       const mergedKnowledgeBaseMap = new Map<string, OperationSelectOption>();
-      [...getKnowledgeBaseOptions(personalRes), ...getKnowledgeBaseOptions(authorizedRes)].forEach((knowledgeBase) => {
+      getKnowledgeBaseOptions(knowledgeRes).forEach((knowledgeBase) => {
         const knowledgeBaseKey = `${knowledgeBase.value}`;
         if (!mergedKnowledgeBaseMap.has(knowledgeBaseKey)) {
           mergedKnowledgeBaseMap.set(knowledgeBaseKey, knowledgeBase);

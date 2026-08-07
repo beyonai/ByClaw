@@ -109,7 +109,6 @@ const DEFAULT_CONFIG: Record<OperationTaskTemplateType, TaskTemplateFormValues> 
     title: '整理采集素材并沉淀知识',
     description: '对素材去重、摘要并提炼文章亮点、写法和可复用结构。',
     materialSource: '当前会话成果',
-    ontology: '内容方法论本体',
     executorType: 'agent',
     runMode: 'once',
   },
@@ -144,11 +143,6 @@ const DEFAULT_KNOWLEDGE_OPTIONS = [
   '行业案例知识库 / 企业服务',
   '品牌内容知识库 / 历史文章',
 ].map((value) => ({ label: value, value }));
-const DEFAULT_ONTOLOGY_OPTIONS = ['内容方法论本体', '行业案例本体', '品牌内容资产本体'].map((value) => ({
-  label: value,
-  value,
-  raw: { objectName: value, objectCode: value },
-}));
 const DEFAULT_ACCOUNT_OPTIONS = ['BeyondAI实验室', '百应AI服务号'].map((value) => ({ label: value, value }));
 const WEEKDAY_OPTIONS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'].map((label, index) => ({
   label,
@@ -319,23 +313,30 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
   const periodType = Form.useWatch('periodType', form);
 
   useEffect(() => {
-    if (!selectedTemplate || selectedTemplate.templateType !== 'collect' || storageMode !== 'ontology') return;
+    if (!selectedTemplate || selectedTemplate.templateType !== 'collect' || storageMode !== 'ontology') {
+      setFetchedOntologyOptions([]);
+      return;
+    }
     const kbResourceId = sourceKnowledge || targetKnowledge;
-    if (!kbResourceId) return;
-    void queryObjectsByKnowledge({ kbResourceId, pageIndex: 1, pageSize: 100 }).then((response: any) => {
-      // 兼容本体对象接口的数组、分页 data.items 及历史 data.data.items 返回结构。
-      const rows = Array.isArray(response)
-        ? response
-        : response?.items ||
-          response?.rows ||
-          response?.list ||
-          response?.data?.items ||
-          response?.data?.rows ||
-          response?.data?.list ||
-          response?.data?.data?.items ||
-          [];
-      setFetchedOntologyOptions(
-        rows
+    if (!kbResourceId) {
+      setFetchedOntologyOptions([]);
+      form.setFieldValue('ontology', undefined);
+      return;
+    }
+    void queryObjectsByKnowledge({ kbResourceId, pageIndex: 1, pageSize: 100 })
+      .then((response: any) => {
+        // 兼容本体对象接口的数组、分页 data.items 及历史 data.data.items 返回结构。
+        const rows = Array.isArray(response)
+          ? response
+          : response?.items ||
+            response?.rows ||
+            response?.list ||
+            response?.data?.items ||
+            response?.data?.rows ||
+            response?.data?.list ||
+            response?.data?.data?.items ||
+            [];
+        const options = rows
           .map((item: any) => {
             const value = item.objectCode || item.objectName;
             const label = item.objectName || item.objectCode;
@@ -346,10 +347,18 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
               raw: item as OntologyObjectValue,
             };
           })
-          .filter(Boolean) as TaskTemplateOption[]
-      );
-    });
-  }, [selectedTemplate, sourceKnowledge, storageMode, targetKnowledge]);
+          .filter(Boolean) as TaskTemplateOption[];
+        setFetchedOntologyOptions(options);
+        // 接口无数据时不展示写死选项，并清空已选本体。
+        if (!options.length) {
+          form.setFieldValue('ontology', undefined);
+        }
+      })
+      .catch(() => {
+        setFetchedOntologyOptions([]);
+        form.setFieldValue('ontology', undefined);
+      });
+  }, [form, selectedTemplate, sourceKnowledge, storageMode, targetKnowledge]);
 
   useEffect(() => {
     if (!open) return;
@@ -364,32 +373,28 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
       })
       .catch((error: any) => message.error(error?.message || '任务模板加载失败'))
       .finally(() => setLoading(false));
-    // 未由调用方传入知识库时，按当前账号权限读取个人和已授权知识库，避免展示固定示例数据。
+    // 未由调用方传入知识库时，按当前账号可读范围拉取（type=all），避免展示固定示例数据。
     if (!knowledgeOptions.length) {
       const query = {
         pageNum: 1,
-        pageSize: 100,
+        pageSize: 1000,
         resourceBizTypes: [
           ResourceTypeMap.knowledgeBase,
           ResourceTypeMap.knowledgeBaseQa,
           ResourceTypeMap.knowledgeBaseTerm,
         ],
+        type: 'all',
       };
-      void Promise.all([queryAuthDoc({ ...query, type: 'owner' }), queryAuthDoc({ ...query, type: 'authorize' })]).then(
-        ([owned, authorized]) => {
-          const rows = [
-            ...(owned?.rows || owned?.list || owned?.data?.rows || owned?.data?.list || []),
-            ...(authorized?.rows || authorized?.list || authorized?.data?.rows || authorized?.data?.list || []),
-          ];
-          const unique = new Map<string, TaskTemplateOption>();
-          rows.forEach((item: any) => {
-            const value = item.resourceId ?? item.resourceSourcePkId ?? item.datasetId ?? item.id;
-            const label = item.resourceName || item.datasetName || item.name;
-            if (value !== undefined && label) unique.set(`${value}`, { value, label });
-          });
-          setFetchedKnowledgeOptions(Array.from(unique.values()));
-        }
-      );
+      void queryAuthDoc(query).then((response) => {
+        const rows = response?.rows || response?.list || response?.data?.rows || response?.data?.list || [];
+        const unique = new Map<string, TaskTemplateOption>();
+        rows.forEach((item: any) => {
+          const value = item.resourceId ?? item.resourceSourcePkId ?? item.datasetId ?? item.id;
+          const label = item.resourceName || item.datasetName || item.name;
+          if (value !== undefined && label) unique.set(`${value}`, { value, label });
+        });
+        setFetchedKnowledgeOptions(Array.from(unique.values()));
+      });
     }
     // 每次打开都重新读取启用模板，避免后台停用后仍展示旧缓存；详情仍由用户从目录中选择。
   }, [form, initialTemplateType, open]);
@@ -410,11 +415,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
         : fetchedKnowledgeOptions.length
           ? fetchedKnowledgeOptions
           : DEFAULT_KNOWLEDGE_OPTIONS;
-      const resolvedOntologyOptions = ontologyOptions.length
-        ? ontologyOptions
-        : fetchedOntologyOptions.length
-          ? fetchedOntologyOptions
-          : DEFAULT_ONTOLOGY_OPTIONS;
+      const resolvedOntologyOptions = ontologyOptions.length ? ontologyOptions : fetchedOntologyOptions;
       const resolvedAccountOptions = accountOptions.length ? accountOptions : DEFAULT_ACCOUNT_OPTIONS;
       setSelectedTemplate(resolvedTemplate);
       form.setFieldsValue({
@@ -458,12 +459,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
     [fetchedKnowledgeOptions, knowledgeOptions]
   );
   const availableOntologyOptions = useMemo(
-    () =>
-      ontologyOptions.length
-        ? ontologyOptions
-        : fetchedOntologyOptions.length
-          ? fetchedOntologyOptions
-          : DEFAULT_ONTOLOGY_OPTIONS,
+    () => (ontologyOptions.length ? ontologyOptions : fetchedOntologyOptions),
     [fetchedOntologyOptions, ontologyOptions]
   );
   const availableAccountOptions = useMemo(
