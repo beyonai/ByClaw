@@ -19,6 +19,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberSaveDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectResourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileDeleteDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileQueryDto;
@@ -29,6 +30,7 @@ import com.iwhalecloud.byai.manager.dto.project.ProjectInitResponse;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
+import com.iwhalecloud.byai.manager.entity.devloop.ProjectResource;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
@@ -216,6 +218,23 @@ public class ProjectController {
     public ResponseUtil<List<ProjectRepo>> listProjectRepos(@RequestBody Map<String, Object> params) {
         Long projectId = MapParamUtil.getLongValue(params, "projectId");
         return ResponseUtil.successResponse(projectApplicationService.listProjectRepos(projectId));
+    }
+
+    /** 查询项目绑定的知识库、数字员工和本体。 */
+    @PostMapping("/resource/list")
+    public ResponseUtil<List<ProjectResource>> listProjectResources(@RequestBody Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        return ResponseUtil.successResponse(projectApplicationService.listProjectResources(projectId));
+    }
+
+    /** 全量保存项目资源绑定关系。 */
+    @PostMapping("/resource/save")
+    public ResponseUtil<Void> saveProjectResources(@RequestBody Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        List<ProjectResourceDTO> resources = com.alibaba.fastjson.JSON.parseArray(
+            com.alibaba.fastjson.JSON.toJSONString(params.get("resources")), ProjectResourceDTO.class);
+        projectApplicationService.saveProjectResources(projectId, resources);
+        return ResponseUtil.successResponse();
     }
 
     /**

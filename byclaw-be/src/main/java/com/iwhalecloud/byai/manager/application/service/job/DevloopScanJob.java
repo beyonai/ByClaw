@@ -237,6 +237,10 @@ public class DevloopScanJob {
             if (!matchesOperationWeekday(config, "intervalWeekdays", now)) {
                 return false;
             }
+            // 间隔模式也必须命中保存到 cron_expr 的当前触发点，避免调度器每分钟轮询时重复执行。
+            if (!shouldScanByCron(source, now)) {
+                return false;
+            }
             if (source.getLastScanTime() == null) {
                 return true;
             }
@@ -257,7 +261,7 @@ public class DevloopScanJob {
             return false;
         }
         // 周期模式统一读取 byai_scan_source.cron_expr，具体年月日和星期由保存接口生成。
-        return shouldScanByCron(source);
+        return shouldScanByCron(source, now);
     }
 
     /** 判断运营调度是否处于可选生效区间内，超过结束日期后自动停用该源。 */
@@ -299,13 +303,18 @@ public class DevloopScanJob {
     }
 
     private boolean shouldScanByCron(ScanSource source) {
+        return shouldScanByCron(source, LocalDateTime.now(ZoneId.systemDefault()));
+    }
+
+    /** 仅当当前分钟命中 Cron 且尚未消费该触发点时执行，调用方可复用同一时间避免边界漂移。 */
+    private boolean shouldScanByCron(ScanSource source, LocalDateTime now) {
         String cron = source.getCronExpr();
         if (StringUtils.isBlank(cron)) {
             return false;
         }
         try {
             CronExpression expr = CronExpression.parse(toSpringCron(cron));
-            LocalDateTime currentMinute = LocalDateTime.now(ZoneId.systemDefault()).withSecond(0).withNano(0);
+            LocalDateTime currentMinute = now.withSecond(0).withNano(0);
             LocalDateTime currentTrigger = expr.next(currentMinute.minusMinutes(1));
             if (currentTrigger == null || currentTrigger.isAfter(currentMinute)) {
                 return false;

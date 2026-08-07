@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Empty, Modal, Spin, message } from 'antd';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
-import { deleteProject, saveDefaultAgent, saveProjectMembers, updateProject } from '@/service/devloop';
+import { deleteProject, saveDefaultAgent, saveProjectMembers, saveProjectResources, updateProject } from '@/service/devloop';
 import ProjectFormModal, { type ProjectFormValues } from './components/ProjectFormModal';
 import ProjectDetail from './components/ProjectDetail';
 import { useProjectDetail } from './hooks/useProjectDetail';
@@ -31,6 +31,7 @@ const getProjectFormInitialValues = (project?: ProjectSpace): Partial<ProjectFor
       memberId: member.memberId,
       role: member.role,
     })),
+    resources: project.resources || project.boundResources || [],
   };
 };
 
@@ -142,6 +143,11 @@ const ProjectSpacePage: React.FC = () => {
           projectType: values.projectType,
           isShare: values.sharedFlag ? 'Y' : 'N',
           shareTargets: [],
+          resources: values.resources || [],
+        });
+        await saveProjectResources({
+          projectId: Number(editingProject.projectId),
+          resources: values.resources || [],
         });
         // 编辑项目沿用新建表单的成员和研发默认员工配置，
         // 避免页面级入口只更新基本信息。

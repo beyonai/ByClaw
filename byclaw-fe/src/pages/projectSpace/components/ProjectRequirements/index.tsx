@@ -1,5 +1,5 @@
 import { Button, Empty, Input, Modal, Select, Spin, Tag, Typography, message } from 'antd';
-import { PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons';
+import { DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIntl } from '@umijs/max';
 import dayjs from 'dayjs';
@@ -18,6 +18,9 @@ interface Props {
   project: ProjectSpace;
   keyword?: string;
   onToolbarChange?: (toolbar: React.ReactNode | null) => void;
+
+  /** 需求拆分成功后通知详情页切回任务 tab。 */
+  onStarted?: () => void;
 }
 
 const PAGE_SIZE = 20;
@@ -76,10 +79,11 @@ const getRequirementStatusColor = (status: unknown) => {
   if (value === 'launched' || value === 'doing' || value === 'running') return 'processing';
   if (value === 'done' || value === 'completed') return 'success';
   if (value === 'failed') return 'error';
-  return 'blue';
+  // 待开始状态与任务 tab 使用相同的 warning 标签，保持跨 tab 的状态识别一致。
+  return 'warning';
 };
 
-const ProjectRequirements: React.FC<Props> = ({ project, keyword = '', onToolbarChange }) => {
+const ProjectRequirements: React.FC<Props> = ({ project, keyword = '', onToolbarChange, onStarted }) => {
   const intl = useIntl();
   const [requirements, setRequirements] = useState<any[]>([]);
   const [page, setPage] = useState(0);
@@ -207,11 +211,31 @@ const ProjectRequirements: React.FC<Props> = ({ project, keyword = '', onToolbar
       setStartTarget(null);
       setSplitTasks([]);
       await loadRequirements(keyword, 1);
+      // 运营需求拆分成功后，任务列表是下一步操作入口，自动切回任务 tab。
+      onStarted?.();
     } catch (error: any) {
       message.error(error?.message || '需求启动失败');
     } finally {
       setStarting(false);
     }
+  };
+
+  const handleAddSplitTask = () => {
+    const requirementTitle =
+      startTarget?.title || startTarget?.requirementName || startTarget?.sourceName || '运营需求';
+    const defaultAssignee = startTarget?.assigneeId ?? startTarget?.assignee;
+    setSplitTasks((current) => [
+      ...current,
+      {
+        title: `${requirementTitle} - 任务${current.length + 1}`,
+        description: '',
+        assignee: defaultAssignee,
+      },
+    ]);
+  };
+
+  const handleRemoveSplitTask = (index: number) => {
+    setSplitTasks((current) => (current.length <= 1 ? current : current.filter((_, itemIndex) => itemIndex !== index)));
   };
 
   return (
@@ -251,7 +275,6 @@ const ProjectRequirements: React.FC<Props> = ({ project, keyword = '', onToolbar
                           type="link"
                           size="small"
                           className={styles.requirementExecuteButton}
-                          icon={<PlayCircleOutlined />}
                           onClick={() => {
                             const defaultAssignee = item.assigneeId ?? item.assignee;
                             const requirementTitle =
@@ -328,6 +351,7 @@ const ProjectRequirements: React.FC<Props> = ({ project, keyword = '', onToolbar
       <Modal
         open={!!startTarget}
         title="拆分运营需求"
+        width={760}
         okText="确定"
         confirmLoading={starting}
         onCancel={() => {
@@ -339,45 +363,65 @@ const ProjectRequirements: React.FC<Props> = ({ project, keyword = '', onToolbar
         <Typography.Paragraph type="secondary">
           系统已按需求生成 3 个任务，可修改任务名称和描述，负责人沿用需求负责人。
         </Typography.Paragraph>
-        {splitTasks.map((task, index) => (
-          <div key={index} style={{ marginBottom: 24 }}>
-            <Input
-              addonBefore={`${index + 1}. 任务名称`}
-              value={task.title}
-              onChange={(event) =>
-                setSplitTasks((current) =>
-                  current.map((item, itemIndex) =>
-                    itemIndex === index ? { ...item, title: event.target.value } : item
+        <div className={styles.splitTaskToolbar}>
+          <Typography.Text strong>任务列表</Typography.Text>
+          <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={handleAddSplitTask}>
+            新增任务
+          </Button>
+        </div>
+        <div className={styles.splitTaskList}>
+          {splitTasks.map((task, index) => (
+            <div key={index} className={styles.splitTaskCard}>
+              <div className={styles.splitTaskHeader}>
+                <Typography.Text strong>任务 {index + 1}</Typography.Text>
+                <Button
+                  type="text"
+                  danger
+                  size="small"
+                  icon={<DeleteOutlined />}
+                  disabled={splitTasks.length <= 1}
+                  aria-label={`删除任务${index + 1}`}
+                  onClick={() => handleRemoveSplitTask(index)}
+                />
+              </div>
+              <Input
+                addonBefore={`${index + 1}. 任务名称`}
+                value={task.title}
+                onChange={(event) =>
+                  setSplitTasks((current) =>
+                    current.map((item, itemIndex) =>
+                      itemIndex === index ? { ...item, title: event.target.value } : item
+                    )
                   )
-                )
-              }
-            />
-            <Input.TextArea
-              style={{ marginTop: 10 }}
-              rows={2}
-              value={task.description}
-              placeholder="任务描述"
-              onChange={(event) =>
-                setSplitTasks((current) =>
-                  current.map((item, itemIndex) =>
-                    itemIndex === index ? { ...item, description: event.target.value } : item
+                }
+              />
+              <Input.TextArea
+                style={{ marginTop: 10 }}
+                rows={2}
+                value={task.description}
+                placeholder="任务描述"
+                onChange={(event) =>
+                  setSplitTasks((current) =>
+                    current.map((item, itemIndex) =>
+                      itemIndex === index ? { ...item, description: event.target.value } : item
+                    )
                   )
-                )
-              }
-            />
-            <Select
-              style={{ width: '100%', marginTop: 10 }}
-              placeholder="请选择负责人"
-              value={task.assignee}
-              options={splitAssignees}
-              onChange={(value) =>
-                setSplitTasks((current) =>
-                  current.map((item, itemIndex) => (itemIndex === index ? { ...item, assignee: value } : item))
-                )
-              }
-            />
-          </div>
-        ))}
+                }
+              />
+              <Select
+                style={{ width: '100%', marginTop: 10 }}
+                placeholder="请选择负责人"
+                value={task.assignee}
+                options={splitAssignees}
+                onChange={(value) =>
+                  setSplitTasks((current) =>
+                    current.map((item, itemIndex) => (itemIndex === index ? { ...item, assignee: value } : item))
+                  )
+                }
+              />
+            </div>
+          ))}
+        </div>
       </Modal>
     </div>
   );
