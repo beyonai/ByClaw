@@ -13,6 +13,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFilePkIdDto;
 import com.iwhalecloud.byai.manager.dto.devloop.RequirementSplitDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
@@ -560,7 +561,8 @@ public class DevloopController {
 
     /** 查询启用的运营任务模板卡片，可按模板类型筛选。 */
     @PostMapping("/operation/task-template/list")
-    public ResponseUtil<List<OperationTaskTemplate>> listOperationTaskTemplates(@RequestBody Map<String, Object> params) {
+    public ResponseUtil<List<OperationTaskTemplate>> listOperationTaskTemplates(
+        @RequestBody Map<String, Object> params) {
         return applicationService.listOperationTaskTemplates(MapParamUtil.getStringValue(params, "templateType"));
     }
 
@@ -714,4 +716,17 @@ public class DevloopController {
         Collection<ObjectFileGroupDTO> resultList = applicationService.listProjectObjectFiles(listObjectFileDto);
         return ResponseUtil.successResponse(resultList);
     }
+
+    /**
+     * 查询运营任务对象信息
+     *
+     * @param listObjectFilePkIdDto 查询入参
+     * @return ResponseUtil
+     */
+    @PostMapping("/operation/listObjectById")
+    public ResponseUtil<Object> listObjectById(@RequestBody ListObjectFilePkIdDto listObjectFilePkIdDto) {
+        Object object = applicationService.listObjectById(listObjectFilePkIdDto);
+        return ResponseUtil.successResponse(object);
+    }
+
 }

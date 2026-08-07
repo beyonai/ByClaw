@@ -19,6 +19,7 @@ import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
+import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
@@ -27,6 +28,7 @@ import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationSe
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.*;
 import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFileDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFilePkIdDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDeleteDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDTO;
@@ -71,6 +73,7 @@ import com.iwhalecloud.byai.state.domain.chat.service.AssistantChatService;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.session.dto.SessionMembersDto;
+import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiPromptService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
@@ -169,7 +172,7 @@ public class DevloopApplicationService {
     private ByaiSessionMapper byaiSessionMapper;
 
     @Autowired
-    private ByaiSessionExtMapper byaiSessionExtMapper;
+    private SessionExtService sessionExtService;
 
     @Autowired
     private ScanRequireItemMapper scanRequireItemMapper;
@@ -371,8 +374,8 @@ public class DevloopApplicationService {
         // 研发渠道页排除全部运营需求类型，避免新增的知识整理需求混入研发资源列表。
         Set<String> excludedSourceTypes = new HashSet<>(ScanSourceService.OPERATION_SOURCE_TYPES);
         excludedSourceTypes.add(MANUAL_SOURCE_TYPE);
-        Page<ScanSource> sourcePage = scanSourceService.listByProjectIdPage(projectId, keyword,
-            excludedSourceTypes, pageNum, pageSize);
+        Page<ScanSource> sourcePage = scanSourceService.listByProjectIdPage(projectId, keyword, excludedSourceTypes,
+            pageNum, pageSize);
         PageInfo<Map<String, Object>> result = new PageInfo<>();
         result.setPageNum((int) sourcePage.getCurrent());
         result.setPageSize((int) sourcePage.getSize());
@@ -2072,6 +2075,40 @@ public class DevloopApplicationService {
         return objectFileGroupMap.values();
     }
 
+    /**
+     * 查询运营任务对象信息
+     *
+     * @param listObjectFilePkIdDto 查询入参
+     * @return ResponseUtil
+     */
+    public Object listObjectById(ListObjectFilePkIdDto listObjectFilePkIdDto) {
+        Long sessionId = listObjectFilePkIdDto.getSessionId();
+        List<ByaiSessionExt> byaiSessionExts = sessionExtService.selectBySessionId(sessionId);
+        String oploopTaskConfig = this.getOploopTaskConfig(byaiSessionExts);
+        if (StringUtil.isEmpty(oploopTaskConfig)) {
+            return null;
+        }
+        Map<String, Object> oploopTaskConfigMap = JSON.parseObject(oploopTaskConfig, Map.class);
+        return oploopTaskConfigMap.get("ontology");
+    }
+
+    /**
+     * 获取配置属性
+     *
+     * @param byaiSessionExts 扩展字段
+     * @return String
+     */
+    private String getOploopTaskConfig(List<ByaiSessionExt> byaiSessionExts) {
+        for (ByaiSessionExt byaiSessionExt : byaiSessionExts) {
+            String extParamCode = byaiSessionExt.getExtParamCode();
+            String extParamValue = byaiSessionExt.getExtParamValue();
+            if ("oploop_task_config".equalsIgnoreCase(extParamCode)) {
+                return extParamValue;
+            }
+        }
+        return null;
+    }
+
     /** 手工需求 JSON 包裹中携带的已解析、语言无关的数据。 */
     private record ManualRequirementContent(String sourceType, String branch, Long repoId, String originalContent,
         String productContent) {
@@ -2672,8 +2709,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 获取当前请求语言；不依赖聊天基础设施工具类，避免运营任务接口在精简运行包中触发类加载失败。
-     * 异步任务没有请求上下文时统一回退中文，与原有 ChatUtils 行为保持一致。
+     * 获取当前请求语言；不依赖聊天基础设施工具类，避免运营任务接口在精简运行包中触发类加载失败。 异步任务没有请求上下文时统一回退中文，与原有 ChatUtils 行为保持一致。
      */
     private String getCurrentRequestLanguage() {
         try {
@@ -3448,8 +3484,8 @@ public class DevloopApplicationService {
                 StringUtils.defaultString(StringUtils.trimToNull(taskDto.getDescription())));
             extValues.put(OperationTaskSessionService.EXT_DUE_TIME,
                 StringUtils.defaultString(formatDateTime(parseOperationDueTime(taskDto.getDueTime()))));
-            OperationTaskTemplate selectedTemplate = taskDto.getTemplateId() == null
-                ? null : operationTaskTemplateService.get(taskDto.getTemplateId());
+            OperationTaskTemplate selectedTemplate = taskDto.getTemplateId() == null ? null
+                : operationTaskTemplateService.get(taskDto.getTemplateId());
             // 任务执行类型以用户最终选择的模板为准，兼容需求阶段留下的旧 source_type。
             extValues.put(OperationTaskSessionService.EXT_OPERATION_TYPE,
                 selectedTemplate == null ? requirement.getSourceType() : selectedTemplate.getTemplateType());
@@ -3801,7 +3837,8 @@ public class DevloopApplicationService {
             template = I18nUtil.get(getOperationTaskPromptDefaultMessageCode(operationType));
         }
         // 三类运营任务的配置字段分别替换到模板中，避免将 JSON 原文直接交给数字员工理解。
-        Map<String, Object> operationConfigMap = parseOperationConfig(taskExt.get(OperationTaskSessionService.EXT_CONFIG));
+        Map<String, Object> operationConfigMap = parseOperationConfig(
+            taskExt.get(OperationTaskSessionService.EXT_CONFIG));
         // 模板正文统一从 byai_ai_prompt 读取，任务模板表只保存默认配置；这样数据库更新模板后，
         // 已创建的待执行任务也会按照最新提示词结构渲染，而不会被历史 templatePrompt 覆盖。
         ScanSource requirement = findOperationSource(operationTaskSessionService.getSourceId(session.getSessionId()));
@@ -3819,11 +3856,12 @@ public class DevloopApplicationService {
                 StringUtils.defaultString(
                     resolveUserName(parseOperationLong(taskExt.get(OperationTaskSessionService.EXT_ASSIGNEE_ID)))))
             .replace("${dueTime}", StringUtils.defaultString(taskExt.get(OperationTaskSessionService.EXT_DUE_TIME)))
-            .replace("${knowledgeBase}", resolveOperationResourceName(
-                findOperationConfigValue(operationConfigMap, "knowledgeBaseId", "knowledgeBaseId", "sourceKnowledge",
-                    "targetKnowledge")))
-            .replace("${directory}", resolveOperationResourceName(
-                findOperationConfigValue(operationConfigMap, "directoryId", "directory", "kbDirectory")))
+            .replace("${knowledgeBase}",
+                resolveOperationResourceName(findOperationConfigValue(operationConfigMap, "knowledgeBaseId",
+                    "knowledgeBaseId", "sourceKnowledge", "targetKnowledge")))
+            .replace("${directory}",
+                resolveOperationResourceName(
+                    findOperationConfigValue(operationConfigMap, "directoryId", "directory", "kbDirectory")))
             .replace("${collectChannel}",
                 getOperationChannelLabel(findOperationConfigValue(operationConfigMap, "channel", "collectSource")))
             .replace("${collectAccount}",
@@ -3836,12 +3874,12 @@ public class DevloopApplicationService {
             .replace("${collectEndTime}",
                 getOperationPromptValue(operationConfigMap, "effectiveEndDate", "endTime", "collectEnd"))
             .replace("${collectMethod}",
-                getOperationCollectionMethod(findOperationConfigValue(operationConfigMap, "mode", "collectMethod",
-                    "sourceMode")))
+                getOperationCollectionMethod(
+                    findOperationConfigValue(operationConfigMap, "mode", "collectMethod", "sourceMode")))
             .replace("${collectSchedule}", getOperationCollectionSchedule(operationConfigMap))
-            .replace("${collectOrganize}", getOperationPromptBoolean(
-                findOperationConfigValue(operationConfigMap, "organize", "knowledgeOrganize",
-                    "storageMode")))
+            .replace("${collectOrganize}",
+                getOperationPromptBoolean(
+                    findOperationConfigValue(operationConfigMap, "organize", "knowledgeOrganize", "storageMode")))
             .replace("${collectOntology}",
                 getOperationKnowledgeOrganizationValue(operationConfigMap, "templateName", "templateId",
                     "organizeTemplateId", "ontology"))
@@ -3907,8 +3945,21 @@ public class DevloopApplicationService {
     }
 
     private String getOperationPromptValue(Object value) {
-        return value == null || StringUtils.isBlank(String.valueOf(value))
-            ? I18nUtil.get("devloop.operationTask.prompt.notConfigured")
+        if (value == null) {
+            return I18nUtil.get("devloop.operationTask.prompt.notConfigured");
+        }
+        // 本体字段改为完整对象后，提示词展示名称/编码，避免把整个 Map 字符串塞进 prompt。
+        if (value instanceof Map<?, ?> map) {
+            Object objectName = map.get("objectName");
+            if (objectName != null && StringUtils.isNotBlank(String.valueOf(objectName))) {
+                return String.valueOf(objectName);
+            }
+            Object objectCode = map.get("objectCode");
+            if (objectCode != null && StringUtils.isNotBlank(String.valueOf(objectCode))) {
+                return String.valueOf(objectCode);
+            }
+        }
+        return StringUtils.isBlank(String.valueOf(value)) ? I18nUtil.get("devloop.operationTask.prompt.notConfigured")
             : String.valueOf(value);
     }
 
@@ -3990,6 +4041,10 @@ public class DevloopApplicationService {
         Object value = findOperationConfigValue(organizationConfig, fieldNames);
         if (value == null && Arrays.asList(fieldNames).contains("organizeTemplateId")) {
             value = operationConfig.get("organizeTemplateId");
+        }
+        // 任务模板把 ontology 放在 config 顶层，优先读取完整对象。
+        if (value == null && Arrays.asList(fieldNames).contains("ontology")) {
+            value = operationConfig.get("ontology");
         }
         return getOperationPromptValue(value);
     }
@@ -4224,9 +4279,10 @@ public class DevloopApplicationService {
         if (config == null || config.isEmpty()) {
             return false;
         }
-        return Stream.of("mode", "collectMethod", "cronExpr", "collectSchedule", "onceTime", "periodType",
-            "periodWeekdays", "periodMonthDays", "periodMonth", "periodDay", "periodTime", "intervalHours",
-            "intervalValue", "interval", "intervalWeekdays", "effectiveStartDate", "effectiveEndDate")
+        return Stream
+            .of("mode", "collectMethod", "cronExpr", "collectSchedule", "onceTime", "periodType", "periodWeekdays",
+                "periodMonthDays", "periodMonth", "periodDay", "periodTime", "intervalHours", "intervalValue",
+                "interval", "intervalWeekdays", "effectiveStartDate", "effectiveEndDate")
             .anyMatch(field -> config.get(field) != null && StringUtils.isNotBlank(String.valueOf(config.get(field))));
     }
 

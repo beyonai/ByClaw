@@ -12,6 +12,21 @@ import { queryAuthDoc } from '@/service/knowledgeCenter';
 import { ResourceTypeMap } from '@/constants/resource';
 import styles from './index.module.less';
 
+export type OntologyObjectValue = {
+  objectCode?: string;
+  objectName?: string;
+  objectDesc?: string;
+  objectSource?: string;
+  fieldCount?: number;
+  actionCount?: number;
+  ownerType?: string;
+  userCode?: string | null;
+  baseId?: string;
+  kbResourceId?: string;
+  kbDirectory?: string;
+  [key: string]: unknown;
+};
+
 export type TaskTemplateFormValues = {
   title: string;
   description: string;
@@ -21,7 +36,9 @@ export type TaskTemplateFormValues = {
   internetScope?: string;
   storageMode?: 'knowledge' | 'ontology';
   targetKnowledge?: string | number;
-  ontology?: string | number;
+
+  /** 选中的本体对象；提交给后端时为完整对象，表单内 Select 使用 objectCode/objectName 作为 value */
+  ontology?: string | number | OntologyObjectValue;
   materialSource?: string | number;
   contentType?: string;
   audience?: string;
@@ -43,7 +60,13 @@ export type TaskTemplateApplyResult = {
   prompt: string;
 };
 
-type TaskTemplateOption = { label: string; value: string | number };
+type TaskTemplateOption = {
+  label: string;
+  value: string | number;
+
+  /** 本体对象完整信息，提交 execute 时回传给后端 */
+  raw?: OntologyObjectValue;
+};
 
 export interface TaskTemplateModalProps {
   open: boolean;
@@ -116,15 +139,25 @@ const DEFAULT_KNOWLEDGE_OPTIONS = [
 const DEFAULT_ONTOLOGY_OPTIONS = ['内容方法论本体', '行业案例本体', '品牌内容资产本体'].map((value) => ({
   label: value,
   value,
+  raw: { objectName: value, objectCode: value },
 }));
 const DEFAULT_ACCOUNT_OPTIONS = ['BeyondAI实验室', '百应AI服务号'].map((value) => ({ label: value, value }));
 
+const getOntologySelectValue = (ontology: TaskTemplateFormValues['ontology']): string | number | undefined => {
+  if (ontology === undefined || ontology === null) return undefined;
+  if (typeof ontology === 'object') {
+    return (ontology.objectCode || ontology.objectName) as string | undefined;
+  }
+  return ontology;
+};
+
 const resolveInitialOptionValue = (
   options: TaskTemplateOption[],
-  currentValue: string | number | undefined
+  currentValue: string | number | OntologyObjectValue | undefined
 ): string | number | undefined => {
-  if (currentValue === undefined || currentValue === null) return undefined;
-  if (!options.length || options.some((option) => `${option.value}` === `${currentValue}`)) return currentValue;
+  const normalized = getOntologySelectValue(currentValue as TaskTemplateFormValues['ontology']) ?? currentValue;
+  if (normalized === undefined || normalized === null || typeof normalized === 'object') return undefined;
+  if (!options.length || options.some((option) => `${option.value}` === `${normalized}`)) return normalized;
   return options[0].value;
 };
 
@@ -142,8 +175,18 @@ const parseTemplateConfig = (template: OperationTaskTemplate): TaskTemplateFormV
   }
 };
 
-const findOptionLabel = (options: TaskTemplateOption[], value: string | number | undefined, fallback = '-') =>
-  options.find((option) => `${option.value}` === `${value}`)?.label || (value === undefined ? fallback : `${value}`);
+const findOptionLabel = (
+  options: TaskTemplateOption[],
+  value: string | number | OntologyObjectValue | undefined,
+  fallback = '-'
+) => {
+  if (value && typeof value === 'object') {
+    return value.objectName || value.objectCode || fallback;
+  }
+  return (
+    options.find((option) => `${option.value}` === `${value}`)?.label || (value === undefined ? fallback : `${value}`)
+  );
+};
 
 const buildTemplatePrompt = (
   template: OperationTaskTemplate,
@@ -264,11 +307,17 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
           [];
       setFetchedOntologyOptions(
         rows
-          .map((item: any) => ({
-            value: item.objectCode || item.objectName,
-            label: item.objectName || item.objectCode,
-          }))
-          .filter((item: TaskTemplateOption) => item.value && item.label)
+          .map((item: any) => {
+            const value = item.objectCode || item.objectName;
+            const label = item.objectName || item.objectCode;
+            if (!value || !label) return null;
+            return {
+              value,
+              label,
+              raw: item as OntologyObjectValue,
+            };
+          })
+          .filter(Boolean) as TaskTemplateOption[]
       );
     });
   }, [selectedTemplate, sourceKnowledge, storageMode, targetKnowledge]);
@@ -390,6 +439,21 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
     setApplyingTemplate(true);
     try {
       const values = await form.validateFields();
+      const ontologyOption = availableOntologyOptions.find(
+        (option) => `${option.value}` === `${getOntologySelectValue(values.ontology) ?? values.ontology}`
+      );
+      // 表单 Select 存的是编码/名称，提交给后端时改为完整本体对象。
+      const submitValues: TaskTemplateFormValues = {
+        ...values,
+        ontology:
+          ontologyOption?.raw ||
+          (ontologyOption
+            ? {
+              objectCode: String(ontologyOption.value),
+              objectName: ontologyOption.label,
+            }
+            : values.ontology),
+      };
       const prompt = buildTemplatePrompt(selectedTemplate, values, {
         agents: fallbackAgentOptions,
         groups: availableGroupOptions,
@@ -397,7 +461,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
         ontologies: availableOntologyOptions,
         accounts: availableAccountOptions,
       });
-      await onApply({ template: selectedTemplate, values, prompt });
+      await onApply({ template: selectedTemplate, values: submitValues, prompt });
     } catch (error: any) {
       // 运营启动失败由父组件提示并保留当前模板草稿；表单校验错误由 Form 自己展示。
       if (error?.errorFields) return;
