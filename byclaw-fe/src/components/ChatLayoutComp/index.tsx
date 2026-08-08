@@ -228,17 +228,6 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     setResourceListOpen((open) => !open);
   }, []);
 
-  // 会话标题栏按钮负责关闭整个资源工作区；关闭时同步清理资源列表和所有预览页签。
-  const toggleResourceWorkspace = useCallback(() => {
-    if (resourceWorkspaceVisible) {
-      setResourceTabs([]);
-      setActiveResourceTabKey('');
-      setResourceListOpen(false);
-      return;
-    }
-    setResourceListOpen(true);
-  }, [resourceWorkspaceVisible]);
-
   useEffect(() => {
     if (!resourceWorkspaceVisible) {
       if (resourceWorkspaceOwnedRef.current) {
@@ -493,9 +482,10 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 currentSession={currentSession}
                 agentType={myAgentType}
                 projectId={sessionProjectId}
-                // 详情页签存在但资源浮窗关闭时，入口恢复无底色，仅反映右侧小面板的真实开关状态。
-                resourceWorkspaceOpen={resourceWorkspaceVisible}
-                onToggleResourceWorkspace={toggleResourceWorkspace}
+                // 按钮底色只反映右侧资源小面板状态，文件预览单独打开时保持无底色。
+                resourceWorkspaceOpen={resourceListOpen}
+                // 会话标题和文件预览页签共用同一个列表开关，任何入口都不能清空预览 Tab。
+                onToggleResourceWorkspace={toggleResourceList}
               />
             )}
             {isBottom && (

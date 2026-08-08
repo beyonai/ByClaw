@@ -4051,6 +4051,13 @@ public class DevloopApplicationService {
         // 运营提示词与研发提示词统一从 byai_ai_prompt 读取，并按当前语言选择模板。
         String template = StringUtils.isBlank(promptConfigCode) ? null
             : aiPromptService.findTemplateByCode(promptConfigCode, getCurrentRequestLanguage());
+        // 数据库可能仍保留旧版“采集渠道/账号/主题”模板；识别到旧占位符时直接切换新版内置模板，
+        // 避免未执行增量 SQL 的环境继续把已废弃字段发送到首条任务对话中。
+        if ("collect".equals(operationType) && StringUtils.isNotBlank(template)
+            && (template.contains("${collectChannel}") || template.contains("${collectAccount}")
+                || template.contains("${collectTopic}"))) {
+            template = null;
+        }
         if (StringUtils.isBlank(template)) {
             template = I18nUtil.get(getOperationTaskPromptDefaultMessageCode(operationType));
         }
@@ -4074,6 +4081,16 @@ public class DevloopApplicationService {
                 StringUtils.defaultString(
                     resolveUserName(parseOperationLong(taskExt.get(OperationTaskSessionService.EXT_ASSIGNEE_ID)))))
             .replace("${dueTime}", StringUtils.defaultString(taskExt.get(OperationTaskSessionService.EXT_DUE_TIME)))
+            .replace("${sourceMode}",
+                getOperationSourceModeLabel(findOperationConfigValue(operationConfigMap, "sourceMode")))
+            .replace("${sourceValue}", getOperationCollectionSource(operationConfigMap))
+            .replace("${storageMode}",
+                getOperationStorageModeLabel(findOperationConfigValue(operationConfigMap, "storageMode")))
+            .replace("${storageTarget}", getOperationStorageTarget(operationConfigMap))
+            .replace("${runMode}",
+                getOperationRunModeLabel(
+                    findOperationConfigValue(operationConfigMap, "runMode", "mode", "collectMethod")))
+            .replace("${executionTime}", getOperationCollectionSchedule(operationConfigMap))
             .replace("${knowledgeBase}",
                 resolveOperationResourceName(findOperationConfigValue(operationConfigMap, "knowledgeBaseId",
                     "knowledgeBaseId", "sourceKnowledge", "targetKnowledge")))
@@ -4092,8 +4109,8 @@ public class DevloopApplicationService {
             .replace("${collectEndTime}",
                 getOperationPromptValue(operationConfigMap, "effectiveEndDate", "endTime", "collectEnd"))
             .replace("${collectMethod}",
-                getOperationCollectionMethod(
-                    findOperationConfigValue(operationConfigMap, "mode", "collectMethod", "sourceMode")))
+                getOperationRunModeLabel(
+                    findOperationConfigValue(operationConfigMap, "runMode", "mode", "collectMethod")))
             .replace("${collectSchedule}", getOperationCollectionSchedule(operationConfigMap))
             .replace("${collectOrganize}",
                 getOperationPromptBoolean(
@@ -4193,23 +4210,73 @@ public class DevloopApplicationService {
             : String.valueOf(value);
     }
 
-    /** 将采集方式的内部编码转换为当前语言文案，避免把 once、periodic 等前端枚举直接发送给数字员工。 */
-    private String getOperationCollectionMethod(Object value) {
+    /** 将新版任务模板的采集来源类型转换为可读文案。 */
+    private String getOperationSourceModeLabel(Object value) {
         if (value == null || StringUtils.isBlank(String.valueOf(value))) {
             return I18nUtil.get("devloop.operationTask.prompt.notConfigured");
         }
         return switch (String.valueOf(value).trim().toLowerCase(Locale.ROOT)) {
-            case "once" -> I18nUtil.get("devloop.operationTask.collectMethod.once");
-            case "interval" -> I18nUtil.get("devloop.operationTask.collectMethod.interval");
-            case "periodic" -> I18nUtil.get("devloop.operationTask.collectMethod.periodic");
-            // 兼容历史数据中的自定义采集方式，无法映射时保留原始文案。
+            case "connector" -> I18nUtil.get("devloop.operationTask.sourceMode.connector");
+            case "internet" -> I18nUtil.get("devloop.operationTask.sourceMode.internet");
+            case "knowledge" -> I18nUtil.get("devloop.operationTask.sourceMode.knowledge");
             default -> String.valueOf(value);
         };
     }
 
-    /** 采集调度转换为可读文案：单次展示时间，间隔展示小时数，周期展示标准 Cron。 */
+    /** 按采集方式读取对应来源字段，知识库来源优先解析资源名称。 */
+    private String getOperationCollectionSource(Map<String, Object> config) {
+        String sourceMode = StringUtils.defaultString(getOperationConfigText(config, "sourceMode"));
+        return switch (sourceMode.toLowerCase(Locale.ROOT)) {
+            case "connector" -> getOperationPromptValue(config, "connector");
+            case "internet" -> getOperationPromptValue(config, "internetScope");
+            case "knowledge" -> resolveOperationResourceName(findOperationConfigValue(config, "sourceKnowledge"));
+            // 历史配置没有 sourceMode 时继续读取旧来源字段，避免已有任务丢失信息。
+            default -> getOperationPromptValue(config, "connector", "internetScope", "sourceKnowledge",
+                "collectSource", "channel");
+        };
+    }
+
+    /** 将新版任务模板的入库方式转换为可读文案。 */
+    private String getOperationStorageModeLabel(Object value) {
+        if (value == null || StringUtils.isBlank(String.valueOf(value))) {
+            return I18nUtil.get("devloop.operationTask.prompt.notConfigured");
+        }
+        return switch (String.valueOf(value).trim().toLowerCase(Locale.ROOT)) {
+            case "ontology" -> I18nUtil.get("devloop.operationTask.storageMode.ontology");
+            case "knowledge" -> I18nUtil.get("devloop.operationTask.storageMode.knowledge");
+            default -> String.valueOf(value);
+        };
+    }
+
+    /** 入库位置跟随入库方式读取本体或目标知识库，不再使用旧版“知识整理”字段。 */
+    private String getOperationStorageTarget(Map<String, Object> config) {
+        String storageMode = StringUtils.defaultString(getOperationConfigText(config, "storageMode"));
+        if ("ontology".equalsIgnoreCase(storageMode)) {
+            return getOperationKnowledgeOrganizationValue(config, "ontology");
+        }
+        if ("knowledge".equalsIgnoreCase(storageMode)) {
+            return resolveOperationResourceName(findOperationConfigValue(config, "targetKnowledge"));
+        }
+        return getOperationPromptValue(config, "ontology", "targetKnowledge", "knowledgeBaseId");
+    }
+
+    /** 将执行方式的内部编码转换为当前语言文案，避免把 once、periodic 等前端枚举直接发送给数字员工。 */
+    private String getOperationRunModeLabel(Object value) {
+        if (value == null || StringUtils.isBlank(String.valueOf(value))) {
+            return I18nUtil.get("devloop.operationTask.prompt.notConfigured");
+        }
+        return switch (String.valueOf(value).trim().toLowerCase(Locale.ROOT)) {
+            case "once" -> I18nUtil.get("devloop.operationTask.runMode.once");
+            case "interval" -> I18nUtil.get("devloop.operationTask.runMode.interval");
+            case "periodic" -> I18nUtil.get("devloop.operationTask.runMode.periodic");
+            // 兼容历史数据中的自定义执行方式，无法映射时保留原始文案。
+            default -> String.valueOf(value);
+        };
+    }
+
+    /** 采集调度转换为可读文案：单次展示时间，间隔展示小时数，周期展示周期类型、日期和时间。 */
     private String getOperationCollectionSchedule(Map<String, Object> config) {
-        String mode = String.valueOf(findOperationConfigValue(config, "mode", "collectMethod"));
+        String mode = String.valueOf(findOperationConfigValue(config, "runMode", "mode", "collectMethod"));
         if ("once".equalsIgnoreCase(mode)) {
             return getOperationPromptValue(config, "onceTime", "startTime", "collectStart");
         }
@@ -4222,9 +4289,42 @@ public class DevloopApplicationService {
             String unitLabel = config.containsKey("intervalHours") || "hour".equalsIgnoreCase(String.valueOf(unit))
                 ? I18nUtil.get("devloop.operationTask.intervalUnit.hour")
                 : I18nUtil.get("devloop.operationTask.intervalUnit.minute");
-            return interval + " " + unitLabel;
+            String weekdays = getOperationPromptList(config.get("intervalWeekdays"));
+            return interval + " " + unitLabel
+                + (StringUtils.isBlank(weekdays) ? "" : " / " + weekdays);
+        }
+        if ("periodic".equalsIgnoreCase(mode)) {
+            String periodType = StringUtils.defaultString(getOperationConfigText(config, "periodType"));
+            String periodTypeLabel = switch (periodType.toLowerCase(Locale.ROOT)) {
+                case "daily" -> I18nUtil.get("devloop.operationTask.periodType.daily");
+                case "weekly" -> I18nUtil.get("devloop.operationTask.periodType.weekly");
+                case "biweekly" -> I18nUtil.get("devloop.operationTask.periodType.biweekly");
+                case "monthly" -> I18nUtil.get("devloop.operationTask.periodType.monthly");
+                case "yearly" -> I18nUtil.get("devloop.operationTask.periodType.yearly");
+                default -> periodType;
+            };
+            Object dateOrTime = "yearly".equalsIgnoreCase(periodType)
+                ? findOperationConfigValue(config, "periodYearDateTime")
+                : findOperationConfigValue(config, "periodTime");
+            Object days = "monthly".equalsIgnoreCase(periodType) ? config.get("periodMonthDays")
+                : config.get("periodWeekdays");
+            String dayText = getOperationPromptList(days);
+            String schedule = Stream.of(periodTypeLabel, dayText, getOperationPromptValue(dateOrTime))
+                .filter(StringUtils::isNotBlank)
+                .filter(value -> !I18nUtil.get("devloop.operationTask.prompt.notConfigured").equals(value))
+                .collect(java.util.stream.Collectors.joining(" / "));
+            return StringUtils.isBlank(schedule) ? I18nUtil.get("devloop.operationTask.prompt.notConfigured")
+                : schedule;
         }
         return getOperationPromptValue(config, "cronExpr", "schedule", "collectSchedule");
+    }
+
+    /** 调度多选值使用稳定的逗号分隔格式展示，避免数组的 Java 对象文本进入提示词。 */
+    private String getOperationPromptList(Object value) {
+        if (!(value instanceof Collection<?> collection) || collection.isEmpty()) {
+            return "";
+        }
+        return collection.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","));
     }
 
     /** 将运营平台内部编码转换为当前语言文案，避免 WeChatAccount 等枚举直接写入运营提示词。 */

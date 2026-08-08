@@ -24,7 +24,7 @@ delete from byai.byai_ai_prompt where prompt_code in (
 );
 
 INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
-VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMPT_COLLECT', '运营任务启动提示词-资料采集与整理', '运营资料采集与整理任务启动提示词，占位符 ${projectName} ${title} ${requirementName} ${requirementDescription} ${collectChannel} ${collectAccount} ${collectTopic} ${collectStartTime} ${collectEndTime} ${collectMethod} ${collectSchedule} ${knowledgeBase} ${directory} ${collectOrganize} ${collectOntology} ${collectOrganizationRequest} ${collectOrganizationStructure}', 'OPLOOP_TASK_START_PROMPT_COLLECT', '请处理以下资料采集与整理任务：
+VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMPT_COLLECT', '运营任务启动提示词-资料采集与整理', '运营资料采集与整理任务启动提示词，占位符 ${projectName} ${title} ${requirementName} ${requirementDescription} ${sourceMode} ${sourceValue} ${storageMode} ${storageTarget} ${runMode} ${executionTime}', 'OPLOOP_TASK_START_PROMPT_COLLECT', '请处理以下资料采集与整理任务：
 
 ## 关联需求
 - 需求名称：${requirementName}
@@ -35,24 +35,17 @@ VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMP
 - 任务名称：${title}
 
 ## 资料采集配置
-- 采集渠道：${collectChannel}
-- 采集账号或地址：${collectAccount}
-- 采集主题：${collectTopic}
-- 采集开始时间：${collectStartTime}
-- 采集结束时间：${collectEndTime}
-- 采集方式：${collectMethod}
-- 定时规则：${collectSchedule}
-- 采集知识库：${knowledgeBase}
-- 采集目录：${directory}
-- 是否知识整理：${collectOrganize}
-- 整理本体：${collectOntology}
-- 整理要求：${collectOrganizationRequest}
-- 结构化要求：${collectOrganizationStructure}
+- 采集方式：${sourceMode}
+- 采集来源：${sourceValue}
+- 入库方式：${storageMode}
+- 入库位置：${storageTarget}
+- 执行方式：${runMode}
+- 执行时间：${executionTime}
 
 ## 执行要求
 1. 严格依据关联需求和资料采集配置开展工作。
-2. 将采集结果归档到指定知识库和目录，并同步关键进度、产出结果和异常情况。
-3. 涉及登录或对外访问时，先核对对应运营账号和平台配置。
+2. 将采集结果归档到配置的入库位置，并同步关键进度、产出结果和异常情况。
+3. 涉及登录或对外访问时，先核对对应连接器和平台配置。
 ', null, 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
 
 INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
@@ -271,7 +264,9 @@ E'你是研发拆单助手。输入是一条需求和该项目下的代码仓库
 E'You split a requirement into repository-level subtasks. Input is one requirement plus the repository list of its project.\n\nRules:\n1. Use only the repoId values given in the input; never invent one. Skip repositories the requirement does not touch.\n2. At most one task per repository. Emit a single task when only one repository is involved.\n3. dependsOn references rowId values from the same batch and must stay acyclic; do not force a chain when tasks can run in parallel.\n4. title describes the concrete change in that repository; do not copy the requirement title.\n5. branch is the same for every task. When the input provides a workspace branch, use it verbatim; only fall back to feat/<lowercase-dashed-phrase> when none is given.\n6. reason is one sentence on why this repository changes and why the dependency exists or not.\n\nOutput JSON only:\n{"tasks":[{"rowId":"row-0","repoId":123,"title":"...","branch":"feat/xxx","dependsOn":[],"reason":"..."}]}',
 'system', now(), now(), null);
 
--- 资料采集模板使用统一的运营任务字段结构；任务执行时由后端替换占位符。
+-- 资料采集模板使用新版任务表单字段；任务执行时由后端按采集/入库方式替换对应占位符。
 UPDATE byai.byai_ai_prompt
-SET prompt_zh_template = E'请处理以下资料采集与整理任务：\n\n关联需求\n\n需求名称：${requirementName}\n需求描述：${requirementDescription}\n\n运营任务信息\n\n运营项目：${projectName}\n任务名称：${title}\n\n资料采集配置\n\n采集渠道：${collectChannel}\n采集账号或地址：${collectAccount}\n采集主题：${collectTopic}\n采集开始时间：${collectStartTime}\n采集结束时间：${collectEndTime}\n采集方式：${collectMethod}\n定时规则：${collectSchedule}\n采集知识库：${knowledgeBase}\n采集目录：${directory}\n是否知识整理：${collectOrganize}\n整理本体：${collectOntology}\n整理要求：${collectOrganizationRequest}\n结构化要求：${collectOrganizationStructure}\n\n执行要求\n\n严格依据关联需求和资料采集配置开展工作。\n将采集结果进行会话共享范围的知识整理，并同步关键进度、产出结果和异常情况。\n涉及登录或对外访问时，先核对对应运营账号和平台配置。'
+SET prompt_desc = '运营资料采集与整理任务启动提示词，占位符 ${projectName} ${title} ${requirementName} ${requirementDescription} ${sourceMode} ${sourceValue} ${storageMode} ${storageTarget} ${runMode} ${executionTime}',
+    prompt_zh_template = E'请处理以下资料采集与整理任务：\n\n关联需求\n\n需求名称：${requirementName}\n需求描述：${requirementDescription}\n\n运营任务信息\n\n运营项目：${projectName}\n任务名称：${title}\n\n资料采集配置\n\n采集方式：${sourceMode}\n采集来源：${sourceValue}\n入库方式：${storageMode}\n入库位置：${storageTarget}\n执行方式：${runMode}\n执行时间：${executionTime}\n\n执行要求\n\n严格依据关联需求和资料采集配置开展工作。\n将采集结果归档到配置的入库位置，并同步关键进度、产出结果和异常情况。\n涉及登录或对外访问时，先核对对应连接器和平台配置。',
+    update_time = CURRENT_TIMESTAMP
 WHERE prompt_code = 'OPLOOP_TASK_START_PROMPT_COLLECT';

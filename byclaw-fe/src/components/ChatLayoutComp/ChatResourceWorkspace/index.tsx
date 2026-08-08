@@ -66,7 +66,12 @@ const ChatResourceWorkspace: React.FC<ChatResourceWorkspaceProps> = ({
                 type="text"
                 className={`${styles.resourceToggle} ${listOpen ? styles.resourceToggleActive : ''}`}
                 icon={<ResourceListIcon className={styles.resourceToggleIcon} />}
-                onClick={onToggleList}
+                onClick={(event) => {
+                  // 三横线只收起/展开资源列表，阻止事件冒泡到外层详情容器影响文件预览页签。
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onToggleList();
+                }}
                 aria-label={intl.formatMessage({ id: 'chatResource.toggleList' })}
               />
               <Tabs
