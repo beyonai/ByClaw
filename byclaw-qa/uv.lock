@@ -272,7 +272,7 @@ wheels = [
 
 [[package]]
 name = "by-framework"
-version = "0.2.2.dev9"
+version = "0.2.2.dev11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dill" },
@@ -280,9 +280,9 @@ dependencies = [
     { name = "redis" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ac/0e/0c77ed1addda14129d72af555bf84ccc90f7ed29632b09667ee379fd8cf3/by_framework-0.2.2.dev9.tar.gz", hash = "sha256:b432640091b18be9dc6a1413e00d96b4cb5a2614d5ca8fbca267a11ee8119cce", size = 1261356, upload-time = "2026-07-08T09:38:29.198Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/47/45/ed55f665feae8cb622bf98cf9861cdb3ea7ae3af59f42e0f59411c07026c/by_framework-0.2.2.dev11.tar.gz", hash = "sha256:988efa8f1ff439563b3249976083dc4d024fd431ab74b3782c043a19afe95708", size = 1306689, upload-time = "2026-07-30T05:52:56.56Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/72/4f/c5170c49723e04a9c0d11fd709566106f8cd4e6a22982127d8a11371e45d/by_framework-0.2.2.dev9-py3-none-any.whl", hash = "sha256:2e80a349930752570db778d02d7f9b8b3ad8b57a267d92f7e6069c05aba031f4", size = 217818, upload-time = "2026-07-08T09:38:27.854Z" },
+    { url = "https://files.pythonhosted.org/packages/03/63/1828376fb8bbec6eb4e4618754e1c4b2fe9d553fb403078431148b5d4c4d/by_framework-0.2.2.dev11-py3-none-any.whl", hash = "sha256:441db523b2b4a476d9bc4cb102e861713dcd876c8b2b6bd21841137609dd7d11", size = 223908, upload-time = "2026-07-30T05:52:54.654Z" },
 ]
 
 [[package]]
@@ -315,7 +315,7 @@ wheels = [
 
 [[package]]
 name = "by-qa"
-version = "0.2.4"
+version = "0.2.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -323,9 +323,9 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f4/40/ffa370fdeb9e51418954809b94761efc0ea58fb93e82550e45f4a1be9fbc/by_qa-0.2.4.tar.gz", hash = "sha256:115d107ef410f5a63cc8d1c11b092900fa8d32795c7839049a0e8a3724632166", size = 386110, upload-time = "2026-08-07T04:32:28.857Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b7/12/4e7f64f705ca677b0828854b9038a3bd7ec5bff1232377203e94b8c92cbb/by_qa-0.2.5.tar.gz", hash = "sha256:84e12e5e4d239aaa2ceacf71951e9d9d9ecc3d373abbd814a250dd6ca8599d3b", size = 386172, upload-time = "2026-08-08T09:35:27.5Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/66/52/b6dc7e6ce021a2d5f6bfdf29865ab1038ccb447a32f2362a63a4e2f81c34/by_qa-0.2.4-py3-none-any.whl", hash = "sha256:7b28139c19187f63db5b9acc8927ea9e0fbd98d56ad8daf74297218b603043ea", size = 227532, upload-time = "2026-08-07T04:32:27.047Z" },
+    { url = "https://files.pythonhosted.org/packages/e6/83/f82259229ca710b51cf890246a43c3353c522abb230af95133f29a7cbf7b/by_qa-0.2.5-py3-none-any.whl", hash = "sha256:c678061d211c77ca0e4dbb6e6e29795525ea370b125662e881f55eac2b46b6e5", size = 227553, upload-time = "2026-08-08T09:35:26.053Z" },
 ]
 
 [package.optional-dependencies]
@@ -352,6 +352,7 @@ all = [
     { name = "python-docx" },
     { name = "python-multipart" },
     { name = "python-pptx" },
+    { name = "redis" },
     { name = "urllib3" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "xlrd" },
@@ -367,7 +368,6 @@ dependencies = [
     { name = "by-framework-trace-langfuse" },
     { name = "by-qa", extra = ["all"] },
     { name = "langfuse" },
-    { name = "redis" },
 ]
 
 [package.dev-dependencies]
@@ -378,12 +378,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "by-framework", specifier = "==0.2.2.dev9" },
+    { name = "by-framework", specifier = "==0.2.2.dev11" },
     { name = "by-framework-langgraph", specifier = "==0.0.3.dev2" },
     { name = "by-framework-trace-langfuse", specifier = "==0.0.3.dev2" },
-    { name = "by-qa", extras = ["all"], specifier = "==0.2.4" },
+    { name = "by-qa", extras = ["all"], specifier = "==0.2.5" },
     { name = "langfuse", specifier = "==4.3.1" },
-    { name = "redis", specifier = "==7.4.0" },
 ]
 
 [package.metadata.requires-dev]

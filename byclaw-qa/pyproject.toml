@@ -5,12 +5,11 @@ description = "Question answering application module for byclaw."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "by-qa[all]==0.2.4",
-    "by-framework==0.2.2.dev9",
+    "by-qa[all]==0.2.5",
+    "by-framework==0.2.2.dev11",
     "by-framework-langgraph==v0.0.3.dev2",
     "by-framework-trace-langfuse==0.0.3.dev2",
-    "langfuse==4.3.1",
-    "redis==7.4.0"
+    "langfuse==4.3.1"
 ]
 
 [build-system]
