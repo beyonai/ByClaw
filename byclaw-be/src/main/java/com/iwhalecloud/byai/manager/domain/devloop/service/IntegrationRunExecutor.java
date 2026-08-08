@@ -4,6 +4,8 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.common.storage.UserFS;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
 import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
 import com.iwhalecloud.byai.manager.application.service.devloop.IntegrationRunAsyncConfig;
 import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
@@ -162,6 +164,12 @@ public class IntegrationRunExecutor {
     @Autowired
     private ByaiSessionMapper byaiSessionMapper;
 
+    @Autowired
+    private UserFS userFS;
+
+    @Autowired
+    private SandboxUserContextRunner userContextRunner;
+
     /**
      * @param executorModeOverride 按次指定执行方式(backend/tester);null 或非法值走全局配置。
      *                             异步执行,模式必须随调用传进来,不能让调用方改字段。
@@ -200,7 +208,7 @@ public class IntegrationRunExecutor {
             //    backend:后端直接 SSH 跑套件命令 + 解析 JUnit 报告,run 当场出终态(方便本地/联调测试)。
             //    tester:拼提示词下发「测试数字员工」克隆并执行,run 保持 running,结果由回收 poller 从会话回流。
             if (EXECUTOR_MODE_TESTER.equals(effectiveMode)) {
-                dispatchTester(run, env, suite, startMs);
+                dispatchTester(run, env, suite, connSecret, startMs);
             } else {
                 runByBackend(run, env, connSecret, injectedEnv, suite, seq, startMs);
             }
@@ -470,7 +478,8 @@ public class IntegrationRunExecutor {
      * 解析测试员工 → 建独立会话 → 拼提示词(用例仓库克隆说明 + 被测系统地址 + 运行命令 + 结果回流约定)→ 事务外异步 chat。
      * run 保持 running 并冻结 sessionId/testerAgentId/testerAgentName;测试员工完成后由回收 poller 读会话打点与结果文件收尾。
      */
-    private void dispatchTester(IntegrationRun run, IntegrationEnv env, IntegrationSuite suite, long startMs) {
+    private void dispatchTester(IntegrationRun run, IntegrationEnv env, IntegrationSuite suite,
+                                String connSecret, long startMs) {
         DefaultAgent agent = defaultAgentService.resolveForProject(run.getProjectId());
         // DefaultAgent 的 testerAgentId 是字符串存储,下发/落库都要 Long;空或非法都按未配置处理。
         Long testerAgentId = parseAgentId(agent == null ? null : agent.getTesterAgentId());
@@ -497,7 +506,16 @@ public class IntegrationRunExecutor {
         chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
         assistantChatService.createGroupChatSession(chatDto);
         Long sessionId = chatDto.getSessionId();
-        chatDto.setChatContent(buildTesterPrompt(sessionId, env, suite, caseSource));
+
+        // 用例在环境机上时员工必须能 ssh 登进去,而凭据不能进提示词(提示词落会话历史)。
+        // 故把凭据写成沙箱会话目录下的文件,提示词只出现路径:路径不是秘密,凭据不留痕。
+        boolean onEnv = SOURCE_ON_ENV.equalsIgnoreCase(StringUtils.defaultString(suite.getSourceType()));
+        boolean keyAuth = !"password".equalsIgnoreCase(StringUtils.defaultString(env.getConnAuth()));
+        if (onEnv && !writeTesterSshCredential(loginInfo.getUserCode(), sessionId, connSecret, keyAuth)) {
+            finishError(run, "无法向沙箱下发环境机登录凭据:请重试,或改用后端直跑模式执行本套件", startMs);
+            return;
+        }
+        chatDto.setChatContent(buildTesterPrompt(sessionId, env, suite, caseSource, keyAuth));
 
         run.setSessionId(sessionId);
         run.setTesterAgentId(testerAgentId);
@@ -518,6 +536,77 @@ public class IntegrationRunExecutor {
     }
 
     /**
+     * SSH 准备段:沙箱镜像默认不带 ssh 客户端,凭据也只落在文件里,两件事都得在提示词里讲清。
+     * 私钥要 chmod 600(ssh 拒绝宽权限私钥);口令登录需 sshpass,两条路都给出安装命令。
+     * StrictHostKeyChecking=no:沙箱每次是新容器,没有 known_hosts,不关掉会卡在交互确认。
+     */
+    private String buildSshPrepSection(Long sessionId, IntegrationEnv env, boolean keyAuth) {
+        String target = StringUtils.defaultString(env.getConnUser()) + "@" + StringUtils.defaultString(env.getConnHost());
+        String port = StringUtils.defaultIfBlank(env.getConnPort(), "22");
+        String credPath = (keyAuth ? TESTER_SSH_KEY_PATH : TESTER_SSH_PASS_PATH).formatted(sessionId);
+        StringBuilder sb = new StringBuilder("## 登录环境机的准备(必须先做)\n");
+        sb.append("沙箱默认没有 ssh 客户端,登录凭据已由平台写入沙箱文件,按下面步骤操作:\n");
+        sb.append("1) 装 ssh 客户端(已装则跳过):\n")
+            .append("   `command -v ssh || (apt-get update && apt-get install -y openssh-client")
+            .append(keyAuth ? "" : " sshpass").append(") || (apk add --no-cache openssh-client")
+            .append(keyAuth ? "" : " sshpass").append(")`\n");
+        if (keyAuth) {
+            sb.append("2) 私钥已在:").append(credPath)
+                .append("\n   先拷到本地盘再收紧权限(会话目录是网络挂载,chmod 可能无效,而 ssh 拒绝其他人可读的私钥):\n")
+                .append("   `cp ").append(credPath).append(" ").append(TESTER_SSH_KEY_LOCAL)
+                .append(" && chmod 600 ").append(TESTER_SSH_KEY_LOCAL).append("`\n")
+                .append("3) 登录并执行(示例,把 <命令> 换成运行命令):\n")
+                .append("   `ssh -i ").append(TESTER_SSH_KEY_LOCAL)
+                .append(" -p ").append(port)
+                .append(" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ")
+                .append(target).append(" '<命令>'`\n");
+        } else {
+            sb.append("2) 登录口令已在:").append(credPath).append("\n")
+                .append("3) 登录并执行(示例,把 <命令> 换成运行命令):\n")
+                .append("   `sshpass -f ").append(credPath).append(" ssh -p ").append(port)
+                .append(" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ")
+                .append(target).append(" '<命令>'`\n");
+        }
+        sb.append("注意:凭据文件内容属机密,不要 cat 出来、不要写进回复或结果文件、不要提交到任何仓库。\n")
+            .append("多条命令可以用 heredoc 一次性送上去,避免每条都重连。\n\n");
+        return sb.toString();
+    }
+
+    /** 沙箱内环境机凭据文件路径。私钥与口令分开命名,员工按文件名就知道该用哪种登录方式。 */
+    // 带 /by 前缀:UserFS 路径与沙箱内员工看到的路径是同一口径(对齐 INTEGRATION_RESULT_PATH),
+    // 少了前缀会写到别处,员工按提示词里的路径就找不到文件。
+    private static final String TESTER_SSH_KEY_PATH = "/by/.sessions/%s/.env-ssh-key";
+    private static final String TESTER_SSH_PASS_PATH = "/by/.sessions/%s/.env-ssh-pass";
+
+    /** 私钥在沙箱本地盘的落点。ssh 要求私钥不可被他人读,而会话目录是网络挂载,chmod 未必生效。 */
+    private static final String TESTER_SSH_KEY_LOCAL = "/tmp/.env-ssh-key";
+
+    /**
+     * 把环境机登录凭据写进沙箱会话目录。走文件而不是提示词:提示词会落进会话历史并长期可读,
+     * 凭据一旦写进去就再也收不回;文件随会话目录生命周期走,且提示词里只需出现路径。
+     * 返回 false 表示下发失败,调用方须让本次执行失败而不是让员工白跑一趟。
+     */
+    private boolean writeTesterSshCredential(String userCode, Long sessionId, String connSecret, boolean keyAuth) {
+        // 私钥要求尾部换行,否则 ssh 会报 "invalid format";口令去掉首尾空白避免误带换行。
+        String content = keyAuth
+            ? StringUtils.appendIfMissing(connSecret, "\n") : StringUtils.trimToEmpty(connSecret);
+        String path = (keyAuth ? TESTER_SSH_KEY_PATH : TESTER_SSH_PASS_PATH).formatted(sessionId);
+        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+        try {
+            return userContextRunner.callAsUser(userCode, () -> {
+                // ByteArrayInputStream 无需 close,不用 try-with-resources:lambda 不允许抛受检异常。
+                userFS.write(new ByteArrayInputStream(bytes), bytes.length, "text/plain", path);
+                return true;
+            });
+        }
+        catch (Exception e) {
+            // 只记路径与异常类型,绝不记内容:这里手上就是凭据明文。
+            log.error("[Integration] 下发环境机凭据到沙箱失败, sessionId={}, path={}", sessionId, path, e);
+            return false;
+        }
+    }
+
+    /**
      * 用例代码获取方式段:决定测试员工要不要克隆。
      * code=沿用开发已检出的代码:能定位到本需求该仓库的 coder 会话时,直接进那个目录跑命令,免克隆;
      * 定位不到(如人工触发无需求上下文)则退化为克隆同一仓库,行为等价只是多一次克隆。
@@ -531,7 +620,7 @@ public class IntegrationRunExecutor {
                 + StringUtils.defaultString(env.getConnHost()) + ":"
                 + StringUtils.defaultIfBlank(env.getConnPort(), "22") + "\n"
                 + "- 用例所在目录(环境机上的路径):" + StringUtils.defaultString(env.getConnWorkdir()) + "\n"
-                + "- 请用 ssh 登录该环境机,cd 到上述目录后执行运行命令;登录凭据请使用你环境中已配置的该主机凭据。";
+                + "- 请用 ssh 登录该环境机,cd 到上述目录后执行运行命令。";
         }
         if (SOURCE_STANDALONE.equalsIgnoreCase(suite.getSourceType())) {
             String repoUrl = StringUtils.defaultString(suite.getSource());
@@ -594,7 +683,8 @@ public class IntegrationRunExecutor {
      * 测试员工提示词:克隆用例 → 部署好的被测系统地址 → 运行命令 → 结果结构化回流约定。
      * 结果文件与 [PHASE] 打点由回收 poller 解析入库,故提示词强约束其格式,不可省略。
      */
-    private String buildTesterPrompt(Long sessionId, IntegrationEnv env, IntegrationSuite suite, String caseSource) {
+    private String buildTesterPrompt(Long sessionId, IntegrationEnv env, IntegrationSuite suite, String caseSource,
+                                     boolean keyAuth) {
         boolean onEnv = SOURCE_ON_ENV.equalsIgnoreCase(StringUtils.defaultString(suite.getSourceType()));
         String branch = StringUtils.defaultString(suite.getBranch());
         String runCommand = StringUtils.defaultString(suite.getRunCommand());
@@ -607,6 +697,9 @@ public class IntegrationRunExecutor {
             + (onEnv ? "" : "- 用例分支:" + branch + "\n")
             + "- 被测系统访问地址(环境已部署就绪,直接对其发起测试):" + address + "\n\n"
             + "## 用例代码从哪来\n" + caseSource + "\n\n"
+            // onEnv 必须登环境机:沙箱默认没有 ssh 客户端,凭据也只在文件里,两者都要明确给出,
+            // 否则员工只能报「无 ssh、无凭据」而无法执行(实测过)。
+            + (onEnv ? buildSshPrepSection(sessionId, env, keyAuth) : "")
             // env 来源不落沙箱,提"克隆落地路径"只会误导员工在本地找用例。
             + (onEnv ? ""
                 : "## 需要克隆时的落地路径\n"
