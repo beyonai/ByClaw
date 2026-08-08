@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.common.feign.request.datacloud;
 
 import com.alibaba.fastjson.annotation.JSONField;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -19,6 +20,7 @@ import java.util.Map;
 public class Arguments {
 
     /** 文档在知识库中的路径，必须以 / 开头（write_* / delete_kb_*） */
+    @JsonProperty("source_path")
     @JSONField(name = "source_path")
     private String sourcePath;
 
@@ -29,6 +31,7 @@ public class Arguments {
     private Map<String, Object> labels;
 
     /** 文件描述（write_*） */
+    @JsonProperty("file_description")
     @JSONField(name = "file_description")
     private String fileDescription;
 
