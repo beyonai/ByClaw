@@ -81,6 +81,23 @@ function createServer() {
           res.end(JSON.stringify({ code: 0, data: { uploadItems: [] } }));
           return;
         }
+        // 图片上传用例：按 multipart 里实际的 filename 回显 filePath，模拟后端按原名落库。
+        const imageNames = [...bodyText.matchAll(/filename="([^"]+\.(?:png|jpg|jpeg|gif|webp))"/g)].map((m) => m[1]);
+        if (imageNames.length) {
+          const directoryMatch = bodyText.match(/name="directoryPath"\r\n\r\n([^\r]*)/);
+          const directory = (directoryMatch?.[1] || "/").replace(/\/+$/, "");
+          res.end(JSON.stringify({
+            code: 0,
+            data: {
+              uploadItems: imageNames.map((fileName, index) => ({
+                fileId: 88100 + index,
+                fileName,
+                filePath: `${directory}/${fileName}`,
+              })),
+            },
+          }));
+          return;
+        }
         res.end(JSON.stringify({
           code: 0,
           data: { uploadItems: [{ fileId: 88001, fileName: "doc.pdf", filePath: "/imports/doc.pdf" }] },
@@ -923,6 +940,105 @@ async function testMediaOnlyIngestRejectsBeforeUpload() {
   }
 }
 
+// upload-images：图片进知识库、只 upload 不 build、返回可直接喂给 rewrite-image-links 的映射。
+async function testUploadImagesToDatasetWithoutBuild() {
+  const server = createServer();
+  const port = await server.listen();
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "kc-upload-images-"));
+  try {
+    fs.mkdirSync(path.join(workDir, "images"), { recursive: true });
+    fs.writeFileSync(path.join(workDir, "images/img_001.png"), "png-bytes");
+    const markdownFile = path.join(workDir, "a.md");
+    fs.writeFileSync(
+      markdownFile,
+      "# Article a\n\n![封面](images/img_001.png)\n\n![远程](https://cdn.example.com/x.png)\n",
+    );
+    const result = await runCli(
+      [
+        "upload-images",
+        "--markdown-file", markdownFile,
+        "--knowledge-base-resource-id", "90001",
+        "--directory-path", "/imports",
+        "--base-url", "http://123.56.153.229:8080",
+      ],
+      {},
+      port,
+    );
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json?.action, "upload-images");
+    assert.equal(result.json?.imageCount, 1);
+    const upload = server.requests.find((r) => r.url === "/byaiService/datasetController/uploadFiles");
+    assert.ok(upload, "expected /datasetController/uploadFiles request");
+    assert.match(upload.bodyText, /filename="img_001\.png"/);
+    // 图片只 upload，不得触发 build（QA 会尝试把图片解析成 Markdown）。
+    assert.equal(server.requests.some((r) => r.url === "/byaiService/datasetController/build"), false);
+    assert.equal(
+      result.json?.linkMap?.["images/img_001.png"],
+      "http://123.56.153.229:8080/byaiService/datasetController/download?resourceId=90001&directoryPath=%2Fimports%2Fimg_001.png",
+    );
+    // 远程图片不是本地图片，不进上传批次。
+    assert.equal(Object.keys(result.json.linkMap).length, 1);
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
+    await server.close();
+  }
+}
+
+// 缺失图片、越目录与 .. 穿越都跳过并记录，不进上传批次。
+async function testUploadImagesSkipsUnsafeAndMissingImages() {
+  const server = createServer();
+  const port = await server.listen();
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "kc-upload-images-skip-"));
+  try {
+    fs.writeFileSync(path.join(workDir, "outside.png"), "png-bytes");
+    const itemsDir = path.join(workDir, "items");
+    fs.mkdirSync(itemsDir, { recursive: true });
+    const markdownFile = path.join(itemsDir, "a.md");
+    fs.writeFileSync(
+      markdownFile,
+      "# Article a\n\n![缺失](images/img_404.png)\n\n![越界](images/../../outside.png)\n",
+    );
+    const result = await runCli(
+      ["upload-images", "--markdown-file", markdownFile, "--knowledge-base-resource-id", "90001"],
+      {},
+      port,
+    );
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.deepEqual(result.json?.linkMap, {});
+    assert.equal(result.json?.skipped?.length, 2);
+    assert.ok(result.json.skipped.some((entry) => /图片文件不存在/.test(entry.reason)));
+    assert.ok(result.json.skipped.some((entry) => /\.\. 路径穿越/.test(entry.reason)));
+    // 没有可上传图片时不发起上传请求。
+    assert.equal(server.requests.some((r) => r.url === "/byaiService/datasetController/uploadFiles"), false);
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
+    await server.close();
+  }
+}
+
+async function testUploadImagesRequiresMarkdownAndResourceId() {
+  const server = createServer();
+  const port = await server.listen();
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "kc-upload-images-req-"));
+  try {
+    const missingMarkdown = await runCli(["upload-images", "--knowledge-base-resource-id", "90001"], {}, port);
+    assert.equal(missingMarkdown.json?.ok, false);
+    assert.match(String(missingMarkdown.json?.error || ""), /--markdown-file/);
+
+    fs.mkdirSync(path.join(workDir, "images"), { recursive: true });
+    fs.writeFileSync(path.join(workDir, "images/img_001.png"), "png-bytes");
+    const markdownFile = path.join(workDir, "a.md");
+    fs.writeFileSync(markdownFile, "# Article a\n\n![封面](images/img_001.png)\n");
+    const missingResource = await runCli(["upload-images", "--markdown-file", markdownFile], {}, port);
+    assert.equal(missingResource.json?.ok, false);
+    assert.match(String(missingResource.json?.error || ""), /knowledge-base-resource-id/);
+    assert.equal(server.requests.some((r) => r.url === "/byaiService/datasetController/uploadFiles"), false);
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
+    await server.close();
+  }
+}
+
 async function testUploadDocViaDatasetController() {
   const server = createServer();
   const port = await server.listen();
@@ -1332,6 +1448,9 @@ await testMixedMediaAndMarkdownIngestCompletesBothPhases();
 await testMixedStdinObjectKeepsMediaAndMarkdown();
 await testMediaOnlyIngestRejectsBeforeUpload();
 await testNonMediaFileSkipsUploadAndGoesToMarkdown();
+await testUploadImagesToDatasetWithoutBuild();
+await testUploadImagesSkipsUnsafeAndMissingImages();
+await testUploadImagesRequiresMarkdownAndResourceId();
 await testUploadDocViaDatasetController();
 await testUploadDocRejectsUnsupportedType();
 await testUploadDocMissingLocalFileErrors();

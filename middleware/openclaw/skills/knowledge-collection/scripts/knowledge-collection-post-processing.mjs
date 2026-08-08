@@ -1508,10 +1508,59 @@ function buildImageDownloadUrl(workspacePath, resourceId, language, baseUrl) {
   return `${baseUrl}${IMAGE_DOWNLOAD_ENDPOINT}?${query.toString()}`;
 }
 
-// 逐篇改写 sanitized 正文里的本地图片链接。图片与 Markdown 同处会话空间，因此只做路径映射，
+// 读取由 ingest upload-images 产出的「相对链接 → 目标 URL」映射。映射模式下不再按会话空间推导路径，
+// 因此 --resource-id 与 --workspace-root 都不参与；只接受 http/https 绝对 URL 或站内绝对路径，
+// 避免把正文改写成相对链接或非法协议。
+function loadImageLinkMap(filePath) {
+  const absolute = path.resolve(filePath);
+  const stat = fs.lstatSync(absolute);
+  if (!stat.isFile()) {
+    throw new Error(`--link-map-file 必须是普通文件: ${filePath}`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(absolute, 'utf8'));
+  } catch (error) {
+    throw new Error(`--link-map-file 不是合法 JSON: ${error.message}`);
+  }
+  const raw = parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.linkMap
+    ? parsed.linkMap
+    : parsed;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('--link-map-file 必须是链接映射对象，或包含 linkMap 字段的对象');
+  }
+  const map = new Map();
+  for (const [link, target] of Object.entries(raw)) {
+    if (typeof target !== 'string' || !target.trim()) {
+      throw new Error(`链接映射的目标必须是非空字符串: ${link}`);
+    }
+    const value = target.trim();
+    if (/^https?:\/\//.test(value)) {
+      map.set(link, value);
+      continue;
+    }
+    if (value.startsWith('/')) {
+      map.set(link, value);
+      continue;
+    }
+    throw new Error(`链接映射的目标必须是 http/https URL 或站内绝对路径: ${link}`);
+  }
+  if (!map.size) {
+    throw new Error('--link-map-file 未提供任何链接映射');
+  }
+  return map;
+}
+
+// 逐篇改写 sanitized 正文里的本地图片链接。默认按会话空间推导 fileBrowser 下载 URL，只做路径映射
 // 不做上传；图片文件缺失时保留原链接并告警，避免把可用的相对链接换成死链。
+// 传 --link-map-file 时改用映射模式：目标 URL 由上游（通常是 ingest upload-images 把图片传入知识库后）
+// 提供，图片生命周期不再绑定采集会话，会话被 cleanup 删除后正文里的链接依然可用。
 function rewriteImageLinks(paths, args) {
-  const resourceId = requirePositiveInteger(args['resource-id'], '--resource-id');
+  const linkMapFile = typeof args['link-map-file'] === 'string' && args['link-map-file'].trim()
+    ? args['link-map-file'].trim()
+    : '';
+  const linkMap = linkMapFile ? loadImageLinkMap(linkMapFile) : null;
+  const resourceId = linkMap ? 0 : requirePositiveInteger(args['resource-id'], '--resource-id');
   const language = typeof args.language === 'string' && args.language.trim()
     ? args.language.trim()
     : DEFAULT_IMAGE_LINK_LANGUAGE;
@@ -1545,6 +1594,17 @@ function rewriteImageLinks(paths, args) {
       let missing = 0;
       let unmappable = 0;
       const next = markdown.replace(LOCAL_IMAGE_LINK_PATTERN, (match, alt, relativeLink) => {
+        // 映射模式：目标由上游提供，不读磁盘也不推导会话路径。映射缺失时保留原链接并告警。
+        if (linkMap) {
+          const mapped = linkMap.get(relativeLink);
+          if (!mapped) {
+            unmappable += 1;
+            warnings.push(`inventory ${inventory.itemId} 链接映射缺失，已保留原链接: ${relativeLink}`);
+            return match;
+          }
+          rewritten += 1;
+          return `![${alt}](${mapped})`;
+        }
         const decodedLink = (() => {
           try {
             return decodeURIComponent(relativeLink);
@@ -1604,10 +1664,12 @@ function rewriteImageLinks(paths, args) {
       ok: true,
       action: 'rewrite-image-links',
       dryRun,
-      resourceId,
-      language,
-      workspaceRoot,
-      baseUrl,
+      mode: linkMap ? 'link-map' : 'workspace-path',
+      resourceId: linkMap ? undefined : resourceId,
+      language: linkMap ? undefined : language,
+      workspaceRoot: linkMap ? undefined : workspaceRoot,
+      baseUrl: linkMap ? undefined : baseUrl,
+      linkMapFile: linkMap ? linkMapFile : undefined,
       rewritten: rewrittenTotal,
       items,
       warnings,

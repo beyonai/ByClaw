@@ -1,6 +1,6 @@
 ---
 name: agent-reach
-description: Use when the user asks to research, search, read, or look up anything on the internet; mentions or shares a webpage, GitHub, YouTube, Bilibili, V2EX, Twitter/X, Reddit, Xiaohongshu, LinkedIn, podcasts, RSS, jobs, code, or social-platform content.
+description: Use when the goal is to READ or LOOK UP something on the public internet for an immediate answer - research, search, or read a webpage, GitHub, YouTube, Bilibili, V2EX, Twitter/X, Reddit, Xiaohongshu, LinkedIn, podcasts, RSS, jobs, code, or social-platform content. This is the public-internet channel router only; it picks a channel and executor and does not archive results. If the user wants material collected, crawled in batch, archived, or ingested into a knowledge base, use knowledge-collection instead.
 ---
 
 # Agent Reach — 互联网能力路由器
@@ -31,7 +31,8 @@ description: Use when the user asks to research, search, read, or look up anythi
 5. 禁止使用 Jina Reader 或访问 `r.jina.ai`。所有官方 Jina 路径，包括官方 `references/web.md` 的通用网页读取和
    `references/career.md` 的 LinkedIn fallback，均加载并遵循 `bycli` skill：先执行 `bycli list -f json` 动态发现 Adapter；
    通用网页存在 `web/read` 时执行 `bycli web read --url <URL>`，站点专用 Adapter 存在时优先使用专用 Adapter，缺失时按 byCLI
-   Browser 降级规则处理。不得回退到 Jina Reader、Web Reader MCP、`curl`、`wget`、`requests` 或原站直连。
+   Browser 降级规则处理。不得回退到 `web_fetch`、Jina Reader、Web Reader MCP、`curl`、`wget`、`requests` 或原站直连。
+   公开可读、静态页面、raw URL、纯文本或 Markdown 内容均不是例外，也不得因「直接 HTTP 更快」「无需登录」「不需要渲染」跳过 byCLI。
 6. 只有用户的实际任务需要浏览器时，才执行 `bycli` skill 规定的主动桥接检查和恢复流程。
 7. Agent Reach 已由镜像固定安装，不在运行时执行 `agent-reach install`、`uninstall` 或自动更新；可以报告
    `check-update` 结果，但不得自行升级。

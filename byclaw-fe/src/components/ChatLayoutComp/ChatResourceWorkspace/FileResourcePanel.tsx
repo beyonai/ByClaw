@@ -23,6 +23,8 @@ import type { ProjectSpace } from '@/pages/projectSpace/types';
 import {
   deleteProjectSpaceFile,
   listProjectSpaceFiles,
+  listProjectRepos,
+  type DevloopProjectRepo,
   renameProjectSpaceFile,
   saveProjectFileToSpace,
   type DevloopProjectSpaceFile,
@@ -40,6 +42,7 @@ import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import FilePreviewPanel from './FilePreviewPanel';
 import projectStyles from '@/pages/projectSpace/index.module.less';
 import { useInfiniteScroll } from '@/pages/projectSpace/hooks/useInfiniteScroll';
+import { filterSessionRootItems } from './sessionResourceUtils';
 
 type ProjectFileItem = FileBrowserItem & {
   fileId: number;
@@ -49,6 +52,7 @@ type ProjectFileItem = FileBrowserItem & {
 interface FileResourcePanelProps {
   scope: 'session' | 'project';
   sessionId: string;
+  projectId?: number;
   project?: ProjectSpace;
   resourceId?: string;
   onOpenDetail: (panel: React.ReactNode, options: DetailPanelOptions) => void;
@@ -70,6 +74,7 @@ const isProjectFile = (item: FileBrowserItem): item is ProjectFileItem => Number
 const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   scope,
   sessionId,
+  projectId: projectIdProp,
   project,
   resourceId,
   onOpenDetail,
@@ -87,7 +92,8 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const [visibleProjectItemCount, setVisibleProjectItemCount] = useState(20);
   const clickTimerRef = useRef<number | null>(null);
   const rootPath = getSessionFilePath(sessionId);
-  const projectId = Number(project?.projectId);
+  // 项目详情异步加载期间也使用外部项目 ID，确保首次会话文件请求即可过滤仓库目录。
+  const projectId = projectIdProp ?? Number(project?.projectId);
   const canManageProjectFiles = useMemo(() => {
     const currentUserId = userInfo?.userId ?? userInfo?.id;
     return (
@@ -114,8 +120,20 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         const response = await listProjectSpaceFiles(projectId);
         setItems(sortFileBrowserItems(unwrapListResponse<DevloopProjectSpaceFile>(response).map(normalizeProjectFile)));
       } else {
-        const response = await listFiles({ resourceId: resourceId!, path: rootPath });
-        setItems(sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(response)));
+        // 文件与仓库并行查询，但等两者都结束后再更新列表，避免仓库目录先闪现后消失。
+        const [filesResult, reposResult] = await Promise.allSettled([
+          listFiles({ resourceId: resourceId!, path: rootPath }),
+          projectId ? listProjectRepos(projectId) : Promise.resolve<DevloopProjectRepo[]>([]),
+        ]);
+        if (filesResult.status === 'rejected') throw filesResult.reason;
+        const reposResponse =
+          reposResult.status === 'fulfilled' && Array.isArray(reposResult.value) ? reposResult.value : [];
+        if (reposResult.status === 'rejected') {
+          // 仓库查询失败不应隐藏普通会话文件，代码页签仍可独立重试。
+          console.error('Failed to load project repositories for session files:', reposResult.reason);
+        }
+        const files = unwrapListResponse<FileBrowserItem>(filesResult.value);
+        setItems(sortFileBrowserItems(filterSessionRootItems(files, reposResponse)));
       }
     } catch (error) {
       console.error('Failed to load conversation resource files:', error);

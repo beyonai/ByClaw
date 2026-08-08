@@ -178,6 +178,8 @@ export type DevloopProjectRepo = {
   repoFullName: string;
   repoUrl?: string;
   defaultBranch?: string;
+  // 人工填写的仓库职责,给后来人和需求 AI 预拆看。
+  description?: string;
   repoType?: ProjectRepoType;
   provider?: RepoProvider;
   createBy?: string;
@@ -221,6 +223,7 @@ export const createProjectRepo = (data: {
   repoFullName: string;
   repoUrl?: string;
   defaultBranch?: string;
+  description?: string;
   repoType?: ProjectRepoType;
   provider?: RepoProvider;
 }) => POST<any>('/byaiService/project/repo/create', data);
@@ -500,6 +503,24 @@ export type DevloopSplitPayload = {
 };
 
 export const splitTask = (data: DevloopSplitPayload) => POST<any>('/byaiService/devloop/task/split', data);
+
+// AI 预拆:后端按系统配置的提示词把需求+仓库清单交给大模型,返回草稿任务,不落库。
+// aiSuggested=false 表示模型不可用或输出不可解析,后端已降级为每仓库一行且不猜依赖。
+export type DevloopPresplitResult = {
+  aiSuggested: boolean;
+  degradeReason?: string;
+  tasks: {
+    rowId: string;
+    title: string;
+    repoId?: number;
+    branch: string;
+    dependsOn: string[];
+    reason?: string;
+  }[];
+};
+
+export const presplitRequirement = (data: { projectId: number; sourceItemId: number }) =>
+  POST<DevloopPresplitResult>('/byaiService/devloop/task/presplit', data);
 
 export const listTasks = (query: DevloopTaskListQuery) =>
   POST<DevloopTaskPage>('/byaiService/devloop/task/list', query);

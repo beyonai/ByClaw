@@ -1500,6 +1500,8 @@ export default {
   'projectSpace.onboarding.repo.field.fullName': '仓库名称',
   'projectSpace.onboarding.repo.field.url': '仓库地址',
   'projectSpace.onboarding.repo.field.branch': '分支',
+  'projectSpace.onboarding.repo.field.description': '仓库描述（可选）',
+  'projectSpace.onboarding.repo.placeholder.description': '这个仓库负责什么，需求 AI 预拆会据此判断该改哪些仓库。',
   'projectSpace.onboarding.repo.placeholder.fullName': '如 org/repo',
   'projectSpace.onboarding.repo.placeholder.url': 'git@... 或 https://...',
   'projectSpace.onboarding.repo.validation.nameRequired': '请输入仓库名称',
@@ -2260,6 +2262,9 @@ export default {
   'projectSpace.detail.reqSplit.dependsOnHint': '选择本任务依赖的上游任务;上游全部完成编码后本任务才进入集成。',
   'projectSpace.detail.reqSplit.noMembers': '项目暂无成员,请先到成员页添加',
   'projectSpace.detail.reqSplit.aiTag': 'AI 预拆',
+  'projectSpace.detail.reqSplit.presplitting': 'AI 正在按需求内容与仓库清单预拆任务…',
+  'projectSpace.detail.reqSplit.degradeHint':
+    '本次未使用 AI 预拆(模型不可用或返回结果无法解析),下面按每个仓库列了一行、未推断依赖,请自行确认标题、仓库与依赖后再启动。',
   'projectSpace.detail.reqSplit.addTask': '新增任务',
   'projectSpace.detail.reqSplit.addRepository': '新增仓库',
   'projectSpace.detail.reqSplit.footNote':
@@ -2663,6 +2668,7 @@ export default {
   'projectSpace.detail.repository.field.fullName': '仓库全名 owner/repo',
   'projectSpace.detail.repository.field.url': '仓库地址（可选）',
   'projectSpace.detail.repository.field.defaultBranch': '默认分支',
+  'projectSpace.detail.repository.field.description': '仓库描述（可选）',
   'projectSpace.detail.repository.field.repoType': '仓库类型',
   'projectSpace.detail.repository.field.provider': '代码平台',
   'projectSpace.detail.repository.provider.github': 'GitHub',
@@ -2675,6 +2681,8 @@ export default {
   'projectSpace.detail.repository.repoType.workspaceExists': '已存在工作区仓库，新增前请先删除原工作区仓库，避免重复。',
   'projectSpace.detail.repository.placeholder.fullName': '如 beyonai/byclaw-test',
   'projectSpace.detail.repository.placeholder.url': '如 https://github.com/beyonai/byclaw-test',
+  'projectSpace.detail.repository.placeholder.description':
+    '这个仓库负责什么，如「后端服务，提供项目/需求/任务接口」。需求 AI 预拆会据此判断该改哪些仓库。',
   'projectSpace.detail.repository.empty': '暂无仓库',
   'projectSpace.detail.repository.initWorkspace': '初始化',
   'projectSpace.detail.repository.initializing': '初始化中',

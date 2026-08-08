@@ -8,9 +8,9 @@ import ResourceSiderPanel from '@/layout/sider/components/ResourceSiderPanel';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
-import CodeChangesPanel from './CodeChangesPanel';
 import FileResourcePanel from './FileResourcePanel';
 import ObjectFilesPanel from './ObjectFilesPanel';
+import ReposTab from '@/layout/sider/components/ProjectSpaceList/ReposTab';
 import { useChatResourceProject } from './useChatResourceProject';
 import styles from './index.module.less';
 
@@ -84,6 +84,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
           <FileResourcePanel
             scope="session"
             sessionId={sessionId}
+            projectId={projectId}
             project={project}
             resourceId={resourceId}
             onOpenDetail={onOpenDetail}
@@ -91,7 +92,14 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
         );
       }
       if (secondaryKey === 'code' && showCode) {
-        return <CodeChangesPanel sessionId={sessionId} onOpenDetail={onOpenDetail} />;
+        return (
+          <ReposTab
+            projectId={Number(project?.projectId || projectId)}
+            resourceId={resourceId}
+            sessionId={sessionId}
+            codeChangesEnabled
+          />
+        );
       }
       if (secondaryKey === 'ontology') {
         return (
@@ -118,6 +126,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
         <FileResourcePanel
           scope="project"
           sessionId={sessionId}
+          projectId={projectId}
           project={project}
           resourceId={resourceId}
           onOpenDetail={onOpenDetail}
@@ -126,6 +135,16 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
     }
     if (secondaryKey === 'ontology') {
       return <ObjectFilesPanel projectId={project?.projectId || projectId} onOpenDetail={onOpenDetail} />;
+    }
+    if (secondaryKey === 'code' && showCode) {
+      return (
+        <ReposTab
+          projectId={Number(project?.projectId || projectId)}
+          resourceId={resourceId}
+          sessionId={sessionId}
+          codeChangesEnabled
+        />
+      );
     }
     return empty;
   }, [empty, onOpenDetail, primaryKey, project, projectId, resourceId, secondaryKey, sessionId, showCode]);

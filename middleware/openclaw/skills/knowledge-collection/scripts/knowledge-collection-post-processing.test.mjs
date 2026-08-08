@@ -987,6 +987,67 @@ async function testRewriteImageLinksKeepsLinkWhenImageMissing() {
   }
 }
 
+async function testRewriteImageLinksSupportsLinkMapMode() {
+  const root = await createSession(['a']);
+  try {
+    // 映射模式不读图片文件：图片已上传到知识库，会话里的原图可以不存在。
+    await writeFile(
+      join(root, 'sanitized/items/a.md'),
+      '# Article a\n\n![封面](images/img_001.png)\n\n![未映射](images/img_002.png)\n',
+    );
+    const mapFile = join(root, 'link-map.json');
+    await writeFile(mapFile, JSON.stringify({
+      linkMap: {
+        'images/img_001.png':
+          'http://123.56.153.229:8080/byaiService/datasetController/download?resourceId=42&directoryPath=%2Fimages%2Fimg_001.png',
+      },
+    }));
+    const result = await runCli([
+      'rewrite-image-links', '--session-dir', root, '--link-map-file', mapFile,
+    ]);
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json.mode, 'link-map');
+    assert.equal(result.json.rewritten, 1);
+    // 映射模式不使用会话空间参数，避免误导调用者。
+    assert.equal(result.json.resourceId, undefined);
+    assert.equal(result.json.workspaceRoot, undefined);
+    const rewritten = await readFile(join(root, 'sanitized/items/a.md'), 'utf8');
+    assert.match(rewritten, /!\[封面\]\(http:\/\/123\.56\.153\.229:8080\/byaiService\/datasetController\/download\?/);
+    // 映射缺失的链接保留原样并告警，不生成死链。
+    assert.match(rewritten, /!\[未映射\]\(images\/img_002\.png\)/);
+    assert.ok(result.json.warnings.some((warning) => warning.includes('链接映射缺失')));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testRewriteImageLinksRejectsUnsafeLinkMap() {
+  const root = await createSession(['a']);
+  try {
+    const original = '# Article a\n\n![封面](images/img_001.png)\n';
+    await writeFile(join(root, 'sanitized/items/a.md'), original);
+    const mapFile = join(root, 'link-map.json');
+    const cases = [
+      [JSON.stringify({ 'images/img_001.png': 'images/other.png' }), /http\/https URL 或站内绝对路径/],
+      [JSON.stringify({ 'images/img_001.png': 'javascript:alert(1)' }), /http\/https URL 或站内绝对路径/],
+      [JSON.stringify({ 'images/img_001.png': '' }), /必须是非空字符串/],
+      [JSON.stringify({}), /未提供任何链接映射/],
+      ['not-json', /不是合法 JSON/],
+    ];
+    for (const [content, expected] of cases) {
+      await writeFile(mapFile, content);
+      const rejected = await runCli([
+        'rewrite-image-links', '--session-dir', root, '--link-map-file', mapFile,
+      ]);
+      assert.equal(rejected.code, 1, `${content} 应被拒绝`);
+      assert.match(rejected.json.error, expected);
+    }
+    assert.equal(await readFile(join(root, 'sanitized/items/a.md'), 'utf8'), original);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 async function testRewriteImageLinksSupportsAbsoluteBaseUrl() {
   const root = await createSession(['a']);
   try {
@@ -1667,6 +1728,8 @@ await testRewriteImageLinksKeepsLinkWhenImageMissing();
 await testRewriteImageLinksRejectsMissingResourceIdAndSupportsDryRun();
 await testRewriteImageLinksSupportsAbsoluteBaseUrl();
 await testRewriteImageLinksRejectsUnsafeBaseUrl();
+await testRewriteImageLinksSupportsLinkMapMode();
+await testRewriteImageLinksRejectsUnsafeLinkMap();
 await testNewRunSupersedesSkippedRetentionCleanupOwnership();
 await testMalformedMetadataFailsClosedBeforeCleanup();
 await testInvalidMaterializationDowngradesWithoutDeletingFiles();

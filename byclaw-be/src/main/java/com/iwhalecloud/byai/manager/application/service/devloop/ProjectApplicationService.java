@@ -754,6 +754,8 @@ public class ProjectApplicationService {
         repo.setRepoFullName(repoDto.getRepoFullName().trim());
         repo.setRepoUrl(repoDto.getRepoUrl() != null ? repoDto.getRepoUrl().trim() : null);
         repo.setDefaultBranch(defaultBranch.isEmpty() ? "main" : defaultBranch);
+        // 描述可选,空串归一成 null,避免预拆提示词里出现空的 description= 行。
+        repo.setDescription(StringUtils.trimToNull(repoDto.getDescription()));
         // 仅接受受支持的仓库类型,其余(含空)按代码仓库处理;工作区唯一性由应用层/前端保证。
         String repoType = "workspace".equals(repoDto.getRepoType()) ? "workspace" : "code";
         repo.setRepoType(repoType);
@@ -783,6 +785,7 @@ public class ProjectApplicationService {
         result.put("repoFullName", repo.getRepoFullName());
         result.put("repoUrl", repo.getRepoUrl());
         result.put("defaultBranch", repo.getDefaultBranch());
+        result.put("description", repo.getDescription());
         result.put("repoType", repo.getRepoType());
         result.put("provider", repo.getProvider());
         return result;
