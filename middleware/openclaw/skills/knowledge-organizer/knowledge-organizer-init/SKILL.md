@@ -14,6 +14,7 @@ allowed-tools: read, exec
   - 当前输入明确描述为后台、定时、异步或运营任务，或包含除会话 ID 外的任务 ID 时，使用会话共享范围，不传 `--digital-employee-resource-id`。
   - 普通交互请求使用数字员工权限范围，传入 `--digital-employee-resource-id`。
 - 上下文中是否存在数字员工资源 ID 不能用来判断任务类型。后台任务即使能够取得该 ID 也不要传入；普通交互请求缺少该 ID 时，把它作为初始化所需的关键输入向用户确认。
+- 后台任务的会话共享范围初始化失败时，停止并汇报；不得改传 `--digital-employee-resource-id`，也不得切换到数字员工权限范围重试。
 
 ## 执行
 
