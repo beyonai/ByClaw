@@ -367,6 +367,7 @@ dependencies = [
     { name = "by-framework-trace-langfuse" },
     { name = "by-qa", extra = ["all"] },
     { name = "langfuse" },
+    { name = "redis" },
 ]
 
 [package.dev-dependencies]
@@ -382,6 +383,7 @@ requires-dist = [
     { name = "by-framework-trace-langfuse", specifier = "==0.0.3.dev2" },
     { name = "by-qa", extras = ["all"], specifier = "==0.2.4" },
     { name = "langfuse", specifier = "==4.3.1" },
+    { name = "redis", specifier = "==7.4.0" },
 ]
 
 [package.metadata.requires-dev]
