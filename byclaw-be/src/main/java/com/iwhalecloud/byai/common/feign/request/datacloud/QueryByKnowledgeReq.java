@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.common.feign.request.datacloud;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -16,7 +17,7 @@ public class QueryByKnowledgeReq {
     private String kbResourceId;
 
     /** 知识库目录路径列表；非空时匹配任一目录 */
-    private List<String> kbDirectories;
+    private List<String> kbDirectories = new ArrayList<>();
 
     /** 对象名称，不区分大小写的包含匹配 */
     private String objectName;
