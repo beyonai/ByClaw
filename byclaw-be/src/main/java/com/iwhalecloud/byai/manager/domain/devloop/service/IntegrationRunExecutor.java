@@ -45,6 +45,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -82,6 +83,9 @@ public class IntegrationRunExecutor {
     /** 沿用开发检出只做一次目录探测,不该等到克隆那么久。 */
     private static final int VERIFY_TIMEOUT_SEC = 60;
 
+    /** 按需读取报告的体积上限:整份原文要过 HTTP 回前端预览,超限直接拒绝而不是截断出坏 XML。 */
+    private static final int REPORT_MAX_BYTES = 5 * 1024 * 1024;
+
     /** 用例来源:沿用开发已检出目录,免克隆。 */
     private static final String SOURCE_CODE = "code";
 
@@ -94,14 +98,26 @@ public class IntegrationRunExecutor {
     /** 没有前序 coder 会话时用的会话键前缀:仍落在用户桶的 .sessions 下,靠前缀与真实会话 id 区分开。 */
     private static final String RUN_SESSION_KEY_PREFIX = "integration-run-";
 
-    // 执行方式开关:backend=后端直接 SSH 克隆用例+跑命令+解析 JUnit(方便本地/联调自测,run 当场出终态);
+    // 执行方式开关:backend=后端直接 SSH 克隆用例+跑命令+解析 JUnit(run 当场出终态,便于排查);
     // tester=下发测试数字员工克隆并执行(run 保持 running,由回收 poller 从会话回流)。
-    // 默认 tester 为正式形态;本地自测时把 devloop.integration.executorMode 配成 backend 即可,无需改代码。
-    private static final String EXECUTOR_MODE_BACKEND = "backend";
-    private static final String EXECUTOR_MODE_TESTER = "tester";
+    // 默认 tester 为正式形态:定时批量与自动触发都走它。前端「执行测试」弹框可按次覆盖成 backend 调试。
+    public static final String EXECUTOR_MODE_BACKEND = "backend";
+    public static final String EXECUTOR_MODE_TESTER = "tester";
 
-    @Value("${devloop.integration.executorMode:backend}")
+    @Value("${devloop.integration.executorMode:" + EXECUTOR_MODE_TESTER + "}")
     private String executorMode;
+
+    /**
+     * 归一化按次传入的执行方式:只认两个合法值,其余(null/空/拼错)一律回落全局配置。
+     * 入参来自 HTTP,不能让拼错的字符串静默变成 backend——那会让本该下发员工的执行悄悄改道。
+     */
+    private String resolveExecutorMode(String override) {
+        String mode = StringUtils.trimToEmpty(override);
+        if (EXECUTOR_MODE_TESTER.equalsIgnoreCase(mode) || EXECUTOR_MODE_BACKEND.equalsIgnoreCase(mode)) {
+            return mode.toLowerCase();
+        }
+        return StringUtils.defaultIfBlank(executorMode, EXECUTOR_MODE_TESTER);
+    }
 
     // 测试员工 chat 全程流式,时间长;隔离到独立线程池下发,避免占满集成执行线程池。
     private static final Executor TESTER_CHAT_EXECUTOR =
@@ -146,12 +162,18 @@ public class IntegrationRunExecutor {
     @Autowired
     private ByaiSessionMapper byaiSessionMapper;
 
+    /**
+     * @param executorModeOverride 按次指定执行方式(backend/tester);null 或非法值走全局配置。
+     *                             异步执行,模式必须随调用传进来,不能让调用方改字段。
+     */
     @Async(IntegrationRunAsyncConfig.INTEGRATION_RUN_EXECUTOR)
-    public void executeRun(IntegrationRun run, IntegrationEnv env, IntegrationSuite suite) {
+    public void executeRun(IntegrationRun run, IntegrationEnv env, IntegrationSuite suite,
+                           String executorModeOverride) {
         long startMs = System.currentTimeMillis();
         int seq = 0;
-        log.info("Integration run start, runId={}, envId={}, suiteId={}, host={}",
-            run.getRunId(), env.getEnvId(), suite.getSuiteId(), env.getConnHost());
+        String effectiveMode = resolveExecutorMode(executorModeOverride);
+        log.info("Integration run start, runId={}, envId={}, suiteId={}, host={}, mode={}",
+            run.getRunId(), env.getEnvId(), suite.getSuiteId(), env.getConnHost(), effectiveMode);
         try {
             // 连接凭据:connCredentialRef 存的是 SM4 密文,直接解密拿明文(不再查 po_user_private_param)。
             // 安全:reason 会落库并回显前端,绝不能带出任何凭据原值;缺失/解密失败只给通用提示。
@@ -177,7 +199,7 @@ public class IntegrationRunExecutor {
             // 2) 环境已就绪:按执行方式开关分流。
             //    backend:后端直接 SSH 跑套件命令 + 解析 JUnit 报告,run 当场出终态(方便本地/联调测试)。
             //    tester:拼提示词下发「测试数字员工」克隆并执行,run 保持 running,结果由回收 poller 从会话回流。
-            if (EXECUTOR_MODE_TESTER.equals(executorMode)) {
+            if (EXECUTOR_MODE_TESTER.equals(effectiveMode)) {
                 dispatchTester(run, env, suite, startMs);
             } else {
                 runByBackend(run, env, connSecret, injectedEnv, suite, seq, startMs);
@@ -758,6 +780,75 @@ public class IntegrationRunExecutor {
         return list;
     }
 
+    // ---- 报告按需读取:前端点「查看报告」时才 SSH cat,原文不落库 ----
+
+    /**
+     * 按需读取套件报告原文。报告体积可观且只在人工查看时需要,所以不随 run 落库,
+     * 每次查看重新 SSH cat;文件已被环境清掉时按明确错误返回,不伪造空内容。
+     * 凭据只在本方法内解密并塞进 spec.secret,不进命令正文、不写日志。
+     */
+    public ReportContent readSuiteReport(IntegrationRun run, IntegrationEnv env, IntegrationSuite suite) {
+        String reportPath = StringUtils.trimToNull(suite.getReportPath());
+        if (reportPath == null) {
+            return ReportContent.error("该测试用例集没有配置报告路径");
+        }
+        String connSecret = decryptSecret(env.getConnCredentialRef());
+        if (StringUtils.isBlank(connSecret)) {
+            return ReportContent.error("连接凭据缺失或解密失败:请在环境配置中重新填写 SSH 密码/私钥后重试");
+        }
+        CaseCheckout checkout = resolveCaseCheckout(run, env, suite);
+        if (checkout.error != null) {
+            return ReportContent.error(checkout.error);
+        }
+        try {
+            CommandExecSpec spec = reportSpec(env, connSecret, Collections.emptyMap(),
+                suite, resolveSuiteWorkdir(checkout, suite));
+            SshExecResult result = commandRunner.run(spec);
+            String error = reportReadError(reportPath, result);
+            if (error != null) {
+                return ReportContent.error(error);
+            }
+            return ReportContent.ok(reportPath, result.getOutput());
+        } catch (Exception e) {
+            log.warn("Failed to read suite report on demand, runId={}, suiteId={}",
+                run.getRunId(), suite.getSuiteId(), e);
+            return ReportContent.error("报告读取异常: " + rootMessage(e));
+        }
+    }
+
+    /** 报告按需读取结果:成功带路径与原文,失败只带可回显的原因(不含任何凭据)。 */
+    public static final class ReportContent {
+        private final String path;
+        private final String content;
+        private final String error;
+
+        private ReportContent(String path, String content, String error) {
+            this.path = path;
+            this.content = content;
+            this.error = error;
+        }
+
+        static ReportContent ok(String path, String content) {
+            return new ReportContent(path, content, null);
+        }
+
+        static ReportContent error(String error) {
+            return new ReportContent(null, null, error);
+        }
+
+        public String getPath() {
+            return path;
+        }
+
+        public String getContent() {
+            return content;
+        }
+
+        public String getError() {
+            return error;
+        }
+    }
+
     // ---- backend 直跑:JUnit 报告拉取与解析(仅 executorMode=backend 走) ----
 
     private JunitSummary parseJunitReport(IntegrationEnv env, String connSecret, Map<String, String> injectedEnv,
@@ -767,23 +858,81 @@ public class IntegrationRunExecutor {
             return summary;
         }
         try {
-            CommandExecSpec spec = baseSpec(env, connSecret, injectedEnv);
-            spec.setWorkdir(workdir);
-            spec.setCommand("cat " + shellQuote(suite.getReportPath()));
-            spec.setTimeoutSec(60);
-            SshExecResult result = commandRunner.run(spec);
-            if (!result.isSuccess() || StringUtils.isBlank(result.getOutput())) {
+            SshExecResult result = commandRunner.run(reportSpec(env, connSecret, injectedEnv, suite, workdir));
+            summary.reportError = reportReadError(suite.getReportPath(), result);
+            if (summary.reportError != null) {
                 return summary;
             }
             parseJunitXml(result.getOutput(), suite, summary);
         } catch (Exception e) {
+            // 解析失败的具体原因(prolog 位置、非法字符)只有异常里有,带回 run.reason 才能定位,
+            // 否则前端只能看到一句「不可解析」,和「报告没生成」无法区分。
+            summary.reportError = "报告解析失败:" + suite.getReportPath() + " (" + rootMessage(e) + ")";
             log.warn("Failed to fetch/parse JUnit report, suiteId={}, reportPath={}",
                 suite.getSuiteId(), suite.getReportPath(), e);
         }
         return summary;
     }
 
-    private void parseJunitXml(String xml, IntegrationSuite suite, JunitSummary summary) throws Exception {
+    /**
+     * 执行期解析与按需预览共用同一条取数规格,避免两边行为漂移(之前预览能读、执行期读不到就是这么来的)。
+     * 报告路径是绝对路径时不设 workdir:cd 是多余的失败点,目录被清掉会让读取整体失败。
+     */
+    private CommandExecSpec reportSpec(IntegrationEnv env, String connSecret, Map<String, String> injectedEnv,
+                                       IntegrationSuite suite, String workdir) {
+        CommandExecSpec spec = baseSpec(env, connSecret, injectedEnv);
+        String reportPath = suite.getReportPath().trim();
+        if (!reportPath.startsWith("/")) {
+            spec.setWorkdir(workdir);
+        }
+        spec.setCommand(catReportCommand(reportPath));
+        spec.setTimeoutSec(VERIFY_TIMEOUT_SEC);
+        // 报告要按原文取:默认的尾部截断会砍掉 XML 声明,合并的 stderr 会追在根标签之后,两者都让解析必败。
+        spec.setRawOutput(true);
+        return spec;
+    }
+
+    /** 报告读不到时的自描述标记。用 && 链会把「不存在/无权限/超限」压成同一个非零退出,无法定位。 */
+    private static final String RPT_MISSING = "__RPT_MISSING__";
+    private static final String RPT_DENIED = "__RPT_DENIED__";
+    private static final String RPT_TOO_BIG = "__RPT_TOO_BIG__";
+
+    /**
+     * 先卡体积再 cat:报告可能被用例写成几十兆,整份读回会撑爆 JVM 堆与前端预览。
+     * 每种失败回一个标记而不是靠退出码:合法报告必以 `<` 开头,标记不会和报告正文相撞。
+     */
+    private static String catReportCommand(String reportPath) {
+        String p = shellQuote(reportPath);
+        return "if [ ! -f " + p + " ]; then echo " + RPT_MISSING
+            + "; elif [ ! -r " + p + " ]; then echo " + RPT_DENIED
+            + "; else __sz=$(wc -c < " + p + "); if [ \"$__sz\" -gt " + REPORT_MAX_BYTES
+            + " ]; then echo " + RPT_TOO_BIG + " $__sz; else cat " + p + "; fi; fi";
+    }
+
+    /** 把标记翻译成可回显的原因;非标记即读取成功。返回 null 表示内容可用。 */
+    private static String reportReadError(String reportPath, SshExecResult result) {
+        if (result.isTimedOut()) {
+            return "报告读取超时:" + reportPath + " 所在环境机 " + VERIFY_TIMEOUT_SEC + "s 内无响应";
+        }
+        String out = StringUtils.trimToEmpty(result.getOutput());
+        if (out.startsWith(RPT_MISSING)) {
+            return "报告文件不存在:" + reportPath + "(套件命令没有生成报告,或生成到了别的路径)";
+        }
+        if (out.startsWith(RPT_DENIED)) {
+            return "报告文件无读取权限:" + reportPath;
+        }
+        if (out.startsWith(RPT_TOO_BIG)) {
+            return "报告体积超过 " + (REPORT_MAX_BYTES / 1024 / 1024) + "MB 上限:" + reportPath
+                + "(实际 " + StringUtils.trimToEmpty(StringUtils.removeStart(out, RPT_TOO_BIG)) + " 字节)";
+        }
+        if (!result.isSuccess() || out.isEmpty()) {
+            // 不带 stderr:注入的 export 里有测试账号口令,原文进 reason 会落库。排查看步骤日志。
+            return "报告读取命令执行失败:" + reportPath + "(exitCode=" + result.getExitCode() + ")";
+        }
+        return null;
+    }
+
+    static void parseJunitXml(String xml, IntegrationSuite suite, JunitSummary summary) throws Exception {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         // 防 XXE:测试报告来自被测环境,按不可信输入处理。
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
@@ -806,6 +955,8 @@ public class IntegrationRunExecutor {
         }
         summary.passed = Math.max(0, summary.total - summary.failed - summary.skipped);
         summary.suiteStatus = summary.failed > 0 ? STATUS_FAILED : STATUS_PASSED;
+        // 解析走到这里说明 XML 结构可读:置位后 finishSuccessOrFailure 才允许判 passed。
+        summary.reportResolved = true;
 
         JSONObject suiteResult = new JSONObject(true);
         suiteResult.put("suiteId", String.valueOf(suite.getSuiteId()));
@@ -824,7 +975,7 @@ public class IntegrationRunExecutor {
         summary.suitesJson = suites.toJSONString();
     }
 
-    private void collectFailedCases(Element testsuite, List<JSONObject> failedCases) {
+    private static void collectFailedCases(Element testsuite, List<JSONObject> failedCases) {
         NodeList cases = testsuite.getElementsByTagName("testcase");
         for (int i = 0; i < cases.getLength(); i++) {
             Element tc = (Element) cases.item(i);
@@ -845,7 +996,7 @@ public class IntegrationRunExecutor {
         }
     }
 
-    private Element firstChildElement(Element parent, String tag) {
+    private static Element firstChildElement(Element parent, String tag) {
         NodeList children = parent.getElementsByTagName(tag);
         for (int i = 0; i < children.getLength(); i++) {
             Node n = children.item(i);
@@ -858,6 +1009,35 @@ public class IntegrationRunExecutor {
 
     // ---- 收尾:统一写回 byai_integration_run(环境阶段失败/下发异常走这里;backend 直跑另有 finishSuccessOrFailure) ----
 
+    /** run 终态判定结果:passed 时 reason 为 null,其余带可回显的失败原因。 */
+    record RunVerdict(String status, String reason) {
+    }
+
+    /**
+     * 「成功」的判定标准集中在这里:套件命令退出码 0 + 报告可解析且有用例 + 无 failure/error。
+     * 拆成静态方法是为了能直接测「命令成功但报告没取到」这一档,不用起 Spring 上下文。
+     */
+    static RunVerdict decideVerdict(IntegrationSuite suite, String suiteStatus, JunitSummary summary) {
+        if (STATUS_TIMEOUT.equals(suiteStatus)) {
+            return new RunVerdict(STATUS_TIMEOUT, "套件执行超时: " + suite.getSuiteName());
+        }
+        if (summary.failed > 0) {
+            return new RunVerdict(STATUS_FAILED, "存在失败用例: failed=" + summary.failed);
+        }
+        // 配了报告路径就必须拿到可解析且有用例的报告:退出码 0 不代表用例真跑了,
+        // 报告没取到时 total=0/failed=0 会和「全通过」撞成同一个 passed,必须判失败。
+        if (StringUtils.isNotBlank(suite.getReportPath()) && (!summary.reportResolved || summary.total <= 0)) {
+            String detail = StringUtils.defaultIfBlank(summary.reportError,
+                "报告缺失或不可解析: " + suite.getReportPath());
+            return new RunVerdict(STATUS_FAILED, detail + ",无法确认用例是否执行");
+        }
+        if (!STATUS_PASSED.equals(suiteStatus)) {
+            // 命令非零退出但报告无失败用例(或没配报告):按失败处理,原因取命令结论。
+            return new RunVerdict(STATUS_FAILED, "套件命令未成功: " + suite.getSuiteName());
+        }
+        return new RunVerdict(STATUS_PASSED, null);
+    }
+
     /** backend 直跑收尾:据套件命令结论 + JUnit 汇总判定 run 终态,失败/超时记 coder 打回。 */
     private void finishSuccessOrFailure(IntegrationRun run, IntegrationSuite suite, StepOutcome suiteOutcome,
                                         JunitSummary summary, long startMs) {
@@ -867,27 +1047,12 @@ public class IntegrationRunExecutor {
         run.setSkipped(summary.skipped);
         run.setSuitesJson(summary.suitesJson);
 
-        String status;
-        String reason = null;
-        if (STATUS_TIMEOUT.equals(suiteOutcome.status)) {
-            status = STATUS_TIMEOUT;
-            reason = "套件执行超时: " + suite.getSuiteName();
-        } else if (summary.failed > 0) {
-            status = STATUS_FAILED;
-            reason = "存在失败用例: failed=" + summary.failed;
-        } else if (!STATUS_PASSED.equals(suiteOutcome.status)) {
-            // 命令非零退出但报告无失败用例(或无报告):按失败处理,原因取命令结论。
-            status = STATUS_FAILED;
-            reason = "套件命令未成功: " + suite.getSuiteName();
-        } else {
-            status = STATUS_PASSED;
-        }
-
-        if (!STATUS_PASSED.equals(status)) {
+        RunVerdict verdict = decideVerdict(suite, suiteOutcome.status, summary);
+        if (!STATUS_PASSED.equals(verdict.status())) {
             run.setKickbackTo("coder");
-            run.setReason(reason);
+            run.setReason(verdict.reason());
         }
-        run.setStatus(status);
+        run.setStatus(verdict.status());
         finalizeRun(run, startMs);
     }
 
@@ -922,7 +1087,7 @@ public class IntegrationRunExecutor {
         return result.getExitCode() == 0 ? STATUS_PASSED : STATUS_FAILED;
     }
 
-    private int intAttr(Element el, String name) {
+    private static int intAttr(Element el, String name) {
         String v = el.getAttribute(name);
         if (StringUtils.isBlank(v)) {
             return 0;
@@ -934,7 +1099,7 @@ public class IntegrationRunExecutor {
         }
     }
 
-    private double doubleAttr(Element el, String name) {
+    private static double doubleAttr(Element el, String name) {
         String v = el.getAttribute(name);
         if (StringUtils.isBlank(v)) {
             return 0;
@@ -946,7 +1111,7 @@ public class IntegrationRunExecutor {
         }
     }
 
-    private String truncateMessage(String text) {
+    private static String truncateMessage(String text) {
         return StringUtils.abbreviate(StringUtils.defaultString(text).trim(), 500);
     }
 
@@ -1053,7 +1218,7 @@ public class IntegrationRunExecutor {
     }
 
     /** JUnit 汇总结果 + 对齐前端契约的 suites JSON(仅 backend 直跑用)。 */
-    private static class JunitSummary {
+    static class JunitSummary {
         int total;
         int passed;
         int failed;
@@ -1061,5 +1226,15 @@ public class IntegrationRunExecutor {
         int durationSec;
         String suiteStatus = STATUS_SKIPPED;
         String suitesJson;
+        /**
+         * 报告是否真的取回并解析成功。缺这个标记时 total=0/failed=0 既可能是「全通过」也可能是
+         * 「报告没取到」,两者会被判成同一个 passed;finishSuccessOrFailure 靠它把后者判失败。
+         */
+        boolean reportResolved;
+        /**
+         * 报告取不到/解析不了时的具体原因,回显进 run.reason。为空时才用「报告缺失」这类兜底话术:
+         * 「文件不存在」和「XML 结构坏了」的排查方向完全不同,合并成一句话会把人引到错的方向。
+         */
+        String reportError;
     }
 }

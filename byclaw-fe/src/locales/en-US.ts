@@ -2319,6 +2319,8 @@ export default {
   'projectSpace.detail.integration.result.title': 'Integration result {version}',
   'projectSpace.detail.integration.result.runTitle': 'Integration test run',
   'projectSpace.detail.integration.result.notReady': 'Result for this round is not ready yet.',
+  'projectSpace.detail.integration.result.pollGaveUp':
+    'Still no result after 10 minutes, auto-refresh paused. Tester employee results are collected by a scheduled job — reopen this run from history later to view them.',
   'projectSpace.detail.integration.result.status.running': 'Running',
   'projectSpace.detail.integration.result.status.passed': 'Passed',
   'projectSpace.detail.integration.result.status.failed': 'Failed',
@@ -2343,6 +2345,9 @@ export default {
   'projectSpace.detail.integration.result.resultDir': 'Result dir',
   'projectSpace.detail.integration.result.suitesTitle': 'Suite breakdown',
   'projectSpace.detail.integration.result.allPass': 'All cases passed in this suite.',
+  'projectSpace.detail.integration.result.viewReport': 'Click to view the raw report (downloadable)',
+  'projectSpace.detail.integration.result.viewReportBtn': 'Report',
+  'projectSpace.detail.integration.result.reportLoadFailed': 'Failed to read the report; it may have been cleaned up',
   'projectSpace.detail.integration.suite.title': 'Test Suites',
   'projectSpace.detail.integration.suite.add': 'Add suite',
   'projectSpace.detail.integration.suite.deleteConfirm':
@@ -2409,6 +2414,11 @@ export default {
   'projectSpace.detail.integration.run.start': 'Start run',
   'projectSpace.detail.integration.run.hint':
     'Connects to the chosen environment, runs prep stages then this suite’s command, and parses the report on finish.',
+  'projectSpace.detail.integration.run.mode': 'Execution mode',
+  'projectSpace.detail.integration.run.modeBackend': 'Backend direct',
+  'projectSpace.detail.integration.run.modeTester': 'Tester employee',
+  'projectSpace.detail.integration.run.hintTester':
+    'Runs prep stages on the chosen environment, then dispatches the suite to the standalone tester employee. Results flow back asynchronously and are collected by the scheduled job every minute.',
   'projectSpace.detail.integration.run.noEnv': 'No environment configured yet. Add one under "Environment" first.',
   'projectSpace.detail.integration.run.startFailed': 'Failed to start the run, please retry.',
   'projectSpace.detail.integration.manualRun.title': 'Manual test · {name}',
@@ -2425,17 +2435,25 @@ export default {
     "Static demo: manual results will be aggregated into this round's status.json; all-pass marks this suite as passed.",
   'projectSpace.detail.integration.manualRun.submittedFail':
     'Static demo: with failed cases, the real implementation kicks this round back to the coder phase.',
-  'projectSpace.detail.integration.suiteSpec.title': 'Suite Output Contract (for suite authors)',
-  'projectSpace.detail.integration.suiteSpec.intro':
-    'You only own this one test project: emit a JUnit report and signal pass/fail via exit code. The per-run directory, state machine, and status.json are maintained by the orchestration layer (defined under "Associate env") — you do not write them.',
-  'projectSpace.detail.integration.spec.title':
-    'Per-run Result Directory & Status Spec (orchestration layer, read before writing env scripts)',
-  'projectSpace.detail.integration.spec.intro':
-    'The platform injects the per-run result root via the BYCLAW_E2E_RESULT_DIR env var (unique per branch + round). The orchestration layer creates the dir, writes meta, runs each suite, aggregates their JUnit reports, and atomically writes status.json; the platform reads status.json to determine state, never guessing from file existence.',
-  'projectSpace.detail.integration.spec.treeTitle': '① Result directory layout',
-  'projectSpace.detail.integration.spec.statusTitle': '② status.json contract (source of truth, write atomically)',
-  'projectSpace.detail.integration.spec.enumTitle': '③ status enum (closed set)',
-  'projectSpace.detail.integration.spec.scriptTitle': '④ Orchestration script skeleton (bash)',
+  'projectSpace.detail.integration.specEntry': 'Spec',
+  'projectSpace.detail.integration.suiteSpec.calloutTitle':
+    'This suite must satisfy 3 rules, or the platform cannot aggregate its results',
+  'projectSpace.detail.integration.suiteSpec.rule.report':
+    'Emit a JUnit XML report to the "Report path" below; the platform reads it to aggregate pass rate.',
+  'projectSpace.detail.integration.suiteSpec.rule.exitCode':
+    'Signal pass/fail via exit code: 0 = all passed, non-zero = failures or a run error.',
+  'projectSpace.detail.integration.suiteSpec.rule.artifact':
+    'Save a screenshot for each failed case, named after the case ID (e.g. test_login.png); the platform attaches it by name.',
+  'projectSpace.detail.integration.spec.calloutTitle':
+    'The orchestration script must satisfy 3 rules, or the run status cannot be determined',
+  'projectSpace.detail.integration.spec.rule.atomic':
+    'Write status.json atomically (write .tmp, then rename). It is the only source of truth; a half-written JSON is misread.',
+  'projectSpace.detail.integration.spec.rule.failedVsError':
+    'Separate failed from error: failing cases = failed (kicked back to coding), a build/deploy error that never reached the cases = error.',
+  'projectSpace.detail.integration.spec.rule.terminal':
+    'Write a terminal status even on abnormal exit (trap as a safety net), or the run stays in running until the heartbeat times out.',
+  'projectSpace.detail.integration.spec.openFull': 'Read the full spec ↗',
+  'projectSpace.detail.integration.spec.openDemo': 'Download the demo project ↗',
   'projectSpace.detail.integration.envModal.title': 'Associate Integration Environment',
   'projectSpace.detail.integration.envModal.viewTitle': 'Integration Environment Details',
   'projectSpace.detail.integration.envModal.name': 'Environment name',
@@ -2480,7 +2498,6 @@ export default {
   'projectSpace.detail.integration.envModal.tabBasic': 'Basics',
   'projectSpace.detail.integration.envModal.tabPrepare': 'Environment prep',
   'projectSpace.detail.integration.envModal.tabAccounts': 'Test accounts',
-  'projectSpace.detail.integration.envModal.tabSpec': 'Result spec',
   'projectSpace.detail.integration.envModal.accTitle': 'Business test accounts (for E2E login)',
   'projectSpace.detail.integration.envModal.accAdd': 'Add account',
   'projectSpace.detail.integration.envModal.accHint':
@@ -3129,6 +3146,62 @@ export default {
 
   'ApprovalForm.cancelAndSubmit': '取消并提交',
   'ApprovalForm.confirmAndSubmit': '确认并提交',
+
+  // Integration test spec page (platform-wide, /spec/integrationTest)
+  'spec.integrationTest.title': 'Integration Test Spec',
+  'spec.integrationTest.subtitle':
+    'The platform reads test results per this contract. Read it before writing a test project or orchestration script. To skip the boilerplate, download a demo in section ②.',
+  'spec.integrationTest.copy': 'Copy',
+  'spec.integrationTest.copied': 'Copied',
+  'spec.integrationTest.anchor.roles': 'Responsibilities',
+  'spec.integrationTest.anchor.demo': 'Demo projects',
+  'spec.integrationTest.anchor.suite': 'Suite authors',
+  'spec.integrationTest.anchor.orchestrator': 'Orchestrator',
+  'spec.integrationTest.section.roles': 'Responsibility boundaries',
+  'spec.integrationTest.section.demo': 'Download a demo project',
+  'spec.integrationTest.section.suite': 'Required reading for suite authors',
+  'spec.integrationTest.section.orchestrator': 'Orchestrator result spec',
+  'spec.integrationTest.roles.intro':
+    'Identify which role you are and read only that part. Click a card to jump to the matching section.',
+  'spec.integrationTest.roles.platform.name': 'Platform',
+  'spec.integrationTest.roles.platform.who': 'Handled by ByClaw',
+  'spec.integrationTest.roles.platform.d1': 'Injects BYCLAW_E2E_RESULT_DIR (unique per branch + round)',
+  'spec.integrationTest.roles.platform.d2': 'Injects business test account env vars',
+  'spec.integrationTest.roles.platform.d3': 'Reads only status.json to decide state and kickback',
+  'spec.integrationTest.roles.platform.action': 'See what gets injected',
+  'spec.integrationTest.roles.orchestrator.name': 'Orchestrator',
+  'spec.integrationTest.roles.orchestrator.who': 'If you write the environment script',
+  'spec.integrationTest.roles.orchestrator.d1': 'Creates dirs, writes meta, pulls/builds/deploys',
+  'spec.integrationTest.roles.orchestrator.d2': 'Runs each suite and merges their JUnit reports',
+  'spec.integrationTest.roles.orchestrator.d3': 'Atomically writes status.json + refreshes heartbeat',
+  'spec.integrationTest.roles.orchestrator.action': 'Read the result spec →',
+  'spec.integrationTest.roles.suite.name': 'Suite author',
+  'spec.integrationTest.roles.suite.who': 'If you write the test project',
+  'spec.integrationTest.roles.suite.d1': 'Produce JUnit XML at the agreed report path',
+  'spec.integrationTest.roles.suite.d2': 'Express result via exit code (0 pass / non-zero fail)',
+  'spec.integrationTest.roles.suite.d3': 'Keep a screenshot on failure, filename = case ID',
+  'spec.integrationTest.roles.suite.action': 'Read the artifact contract →',
+  'spec.integrationTest.demo.intro':
+    'Both demos run out of the box and only need python3. Run one first to see the artifacts, then adapt it — faster than building from the docs, and less likely to break the contract.',
+  'spec.integrationTest.demo.download': 'Download',
+  'spec.integrationTest.demo.suite.title': 'Test suite demo (pytest)',
+  'spec.integrationTest.demo.suite.desc':
+    'Includes an auto-screenshot-on-failure hook (filename = case ID) and env-var accounts. Ships one deliberately failing case so a single run proves the failure → screenshot → collection chain works.',
+  'spec.integrationTest.demo.suite.run': './run.sh',
+  'spec.integrationTest.demo.orchestrator.title': 'Orchestration script demo (bash)',
+  'spec.integrationTest.demo.orchestrator.desc':
+    'Includes atomic status.json writes, heartbeat refresh, multi-suite JUnit merging, and a terminal-state fallback on crash. Runs standalone without a suite.',
+  'spec.integrationTest.demo.orchestrator.run': 'BYCLAW_E2E_RESULT_DIR=/tmp/e2e-run-1 ./orchestrate.sh',
+  'spec.integrationTest.demo.tip':
+    'Note: the suite demo ships a deliberately failing case, so a run normally ends as failed. Remove it before using the demo in your own project.',
+  'spec.integrationTest.suite.intro':
+    'You own only this one test project: produce a JUnit report and express pass/fail via the exit code. The run-level directory, state machine, and status.json are maintained by the orchestrator — you do not write them.',
+  'spec.integrationTest.orchestrator.intro':
+    'The platform injects this run\'s result root directory via BYCLAW_E2E_RESULT_DIR (unique per branch + round). The orchestrator creates directories, writes meta, runs each suite, merges their JUnit reports, and finally writes status.json atomically. The platform decides state only from status.json — it never guesses from whether a file exists.',
+  'spec.integrationTest.orchestrator.treeTitle': '① Result directory structure',
+  'spec.integrationTest.orchestrator.statusTitle': '② status.json contract (source of truth, write atomically)',
+  'spec.integrationTest.orchestrator.enumTitle': '③ status enum (closed set)',
+  'spec.integrationTest.orchestrator.scriptTitle': '④ Orchestration script skeleton (bash)',
 
   ...secondEdition,
 };

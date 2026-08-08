@@ -35,4 +35,10 @@ public class CommandExecSpec {
     private String command;
 
     private int timeoutSec;
+
+    /**
+     * 读文件原文用。置位后输出不截断、不掺 stderr:默认的尾部截断与 stdout+stderr 合并是给
+     * 步骤日志设计的,套在 cat 报告上会砍掉 XML 声明或在根标签后追加噪声,直接把报告解析成不可读。
+     */
+    private boolean rawOutput;
 }

@@ -749,7 +749,9 @@ public class DevloopApplicationService {
         Long operatorId = CurrentUserHolder.getCurrentUserId();
         List<Long> runIds = new java.util.ArrayList<>();
         for (IntegrationSuite suite : enabledSuites) {
-            IntegrationRun run = integrationRunService.startRun(suite.getSuiteId(), envId, operatorId);
+            // 显式钉死 tester:这个入口就是「执行独立测试员工」,不能因为全局配置被改成 backend 而名不符实。
+            IntegrationRun run = integrationRunService.startRun(suite.getSuiteId(), envId, operatorId, null,
+                IntegrationRunExecutor.EXECUTOR_MODE_TESTER);
             runIds.add(run.getRunId());
         }
         Map<String, Object> result = new HashMap<>();
@@ -1404,9 +1406,13 @@ public class DevloopApplicationService {
 
     // ========== 集成测试执行 ==========
 
-    /** 触发一次「执行测试」:秒回 runId,后台异步跑 stages + 套件命令并轮询。 */
-    public ResponseUtil<Map<String, Object>> startIntegrationRun(Long suiteId, Long envId) {
-        IntegrationRun run = integrationRunService.startRun(suiteId, envId, CurrentUserHolder.getCurrentUserId());
+    /**
+     * 触发一次「执行测试」:秒回 runId,后台异步跑 stages + 套件命令并轮询。
+     * executorMode 由前端弹框按次指定(默认 backend 直跑,便于人工调试);传空走全局配置的正式形态。
+     */
+    public ResponseUtil<Map<String, Object>> startIntegrationRun(Long suiteId, Long envId, String executorMode) {
+        IntegrationRun run = integrationRunService.startRun(suiteId, envId,
+            CurrentUserHolder.getCurrentUserId(), null, executorMode);
         Map<String, Object> result = new HashMap<>();
         result.put("runId", run.getRunId());
         return ResponseUtil.successResponse(result);
@@ -1420,6 +1426,21 @@ public class DevloopApplicationService {
         }
         List<IntegrationRunStep> steps = integrationRunService.listSteps(runId);
         return ResponseUtil.successResponse(runToResultVo(run, steps));
+    }
+
+    /**
+     * 按需读取该次执行的报告原文,供前端下载/在线预览。原文不落库,每次查看重新去环境机取。
+     * 方法名以 get 开头,保证 SSH 往返期间不占用写事务与数据库连接。
+     */
+    public ResponseUtil<Map<String, Object>> getIntegrationRunReport(Long runId) {
+        IntegrationRunExecutor.ReportContent report = integrationRunService.getRunReport(runId);
+        if (report.getError() != null) {
+            return ResponseUtil.fail(report.getError());
+        }
+        Map<String, Object> result = new HashMap<>();
+        result.put("path", report.getPath());
+        result.put("content", report.getContent());
+        return ResponseUtil.successResponse(result);
     }
 
     /** 查询某套件的历史执行列表。 */

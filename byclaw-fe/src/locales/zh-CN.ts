@@ -2287,6 +2287,8 @@ export default {
   'projectSpace.detail.integration.result.title': '集成测试结果 {version}',
   'projectSpace.detail.integration.result.runTitle': '集成测试执行',
   'projectSpace.detail.integration.result.notReady': '该轮次结果暂未就绪。',
+  'projectSpace.detail.integration.result.pollGaveUp':
+    '已等待 10 分钟仍未出结果，暂停自动刷新。测试数字员工的结果由定时任务回收，稍后从历史记录中重新打开即可查看。',
   'projectSpace.detail.integration.result.status.running': '执行中',
   'projectSpace.detail.integration.result.status.passed': '通过',
   'projectSpace.detail.integration.result.status.failed': '失败',
@@ -2311,6 +2313,9 @@ export default {
   'projectSpace.detail.integration.result.resultDir': '结果目录',
   'projectSpace.detail.integration.result.suitesTitle': '各用例集明细',
   'projectSpace.detail.integration.result.allPass': '本套件全部通过,无失败用例。',
+  'projectSpace.detail.integration.result.viewReport': '点击查看报告原文（可下载）',
+  'projectSpace.detail.integration.result.viewReportBtn': '测试报告',
+  'projectSpace.detail.integration.result.reportLoadFailed': '报告读取失败，可能已被环境清理',
   'projectSpace.detail.integration.suite.title': '测试用例集',
   'projectSpace.detail.integration.suite.add': '新增用例集',
   'projectSpace.detail.integration.suite.deleteConfirm':
@@ -2376,6 +2381,11 @@ export default {
   'projectSpace.detail.integration.run.start': '开始执行',
   'projectSpace.detail.integration.run.hint':
     '将连上所选环境，依次执行环境准备阶段与该套件的运行命令，完成后解析报告汇总结果。',
+  'projectSpace.detail.integration.run.mode': '执行方式',
+  'projectSpace.detail.integration.run.modeBackend': '后端直跑',
+  'projectSpace.detail.integration.run.modeTester': '测试数字员工',
+  'projectSpace.detail.integration.run.hintTester':
+    '将连上所选环境执行准备阶段，然后下发给独立测试数字员工执行用例。结果由员工回流，定时任务每分钟回收一次，不会当场出终态。',
   'projectSpace.detail.integration.run.noEnv': '尚未配置集成测试环境，请先在「环境信息」新增一个环境。',
   'projectSpace.detail.integration.run.startFailed': '触发执行失败，请稍后重试。',
   'projectSpace.detail.integration.manualRun.title': '手动测试 · {name}',
@@ -2391,16 +2401,22 @@ export default {
     '静态演示：手测结果将汇总进本轮 status.json，全部通过则本套件计为通过。',
   'projectSpace.detail.integration.manualRun.submittedFail':
     '静态演示：存在失败用例，真实实现会把本轮打回编码环节（coder）。',
-  'projectSpace.detail.integration.suiteSpec.title': '本套件产物约定（用例集作者必读）',
-  'projectSpace.detail.integration.suiteSpec.intro':
-    '你只负责这一个测试工程:产出 JUnit 报告 + 用退出码表达成败即可。整轮的目录、状态机、status.json 由编排层（在「关联环境」里约定）统一维护，无需你自己写。',
-  'projectSpace.detail.integration.spec.title': '整轮结果目录与状态规范（编排层职责，写环境脚本前必读）',
-  'projectSpace.detail.integration.spec.intro':
-    '平台通过环境变量 BYCLAW_E2E_RESULT_DIR 注入本次运行的结果根目录（按分支+轮次唯一）。编排层负责建目录、写 meta、逐个跑用例集、汇总各套件 JUnit、最后原子写 status.json；平台只认 status.json 判断状态，不靠"文件在不在"猜测。',
-  'projectSpace.detail.integration.spec.treeTitle': '① 结果目录结构',
-  'projectSpace.detail.integration.spec.statusTitle': '② status.json 契约（状态真相源，需原子写入）',
-  'projectSpace.detail.integration.spec.enumTitle': '③ status 状态枚举（封闭取值）',
-  'projectSpace.detail.integration.spec.scriptTitle': '④ 编排脚本骨架示例（bash）',
+  'projectSpace.detail.integration.specEntry': '规范',
+  'projectSpace.detail.integration.suiteSpec.calloutTitle': '本套件必须满足 3 条，否则平台无法汇总结果',
+  'projectSpace.detail.integration.suiteSpec.rule.report':
+    '产出 JUnit XML 报告到下面填的「报告路径」，平台读它汇总通过率。',
+  'projectSpace.detail.integration.suiteSpec.rule.exitCode': '退出码表达成败：0 = 全部通过，非 0 = 有失败或运行错误。',
+  'projectSpace.detail.integration.suiteSpec.rule.artifact':
+    '失败用例留截图，文件名 = 用例 ID（如 test_login.png），平台按名挂到失败用例。',
+  'projectSpace.detail.integration.spec.calloutTitle': '编排脚本必须满足 3 条，否则整轮状态判不出来',
+  'projectSpace.detail.integration.spec.rule.atomic':
+    'status.json 原子写入（先写 .tmp 再 rename），平台只认它判状态，读到半截 JSON 会误判。',
+  'projectSpace.detail.integration.spec.rule.failedVsError':
+    '区分 failed 与 error：用例失败 = failed（打回编码），没跑到用例的构建/部署错误 = error。',
+  'projectSpace.detail.integration.spec.rule.terminal':
+    '异常退出也要写终态（trap 兜底），否则本轮会一直挂在 running 直到心跳超时。',
+  'projectSpace.detail.integration.spec.openFull': '查看完整规范 ↗',
+  'projectSpace.detail.integration.spec.openDemo': '下载 demo 工程 ↗',
   'projectSpace.detail.integration.envModal.title': '关联集成测试环境',
   'projectSpace.detail.integration.envModal.viewTitle': '集成测试环境详情',
   'projectSpace.detail.integration.envModal.name': '环境名称',
@@ -2443,7 +2459,6 @@ export default {
   'projectSpace.detail.integration.envModal.tabBasic': '基本信息',
   'projectSpace.detail.integration.envModal.tabPrepare': '环境准备',
   'projectSpace.detail.integration.envModal.tabAccounts': '测试账号',
-  'projectSpace.detail.integration.envModal.tabSpec': '结果规范',
   'projectSpace.detail.integration.envModal.accTitle': '业务测试账号（E2E 登录用）',
   'projectSpace.detail.integration.envModal.accAdd': '新增账号',
   'projectSpace.detail.integration.envModal.accHint':
@@ -3068,6 +3083,61 @@ export default {
   'ThinkRewriteQuestion.originalQuestion': '原查询',
   'thinkStatus.errorDetail': '错误详情',
   compaction: '上下文压缩',
+
+  // 集成测试规范页(全平台一份,/spec/integrationTest)
+  'spec.integrationTest.title': '集成测试规范',
+  'spec.integrationTest.subtitle':
+    '平台按这份契约读取测试结果。写测试工程或环境编排脚本前先过一遍;不想从零写,直接下第②节的 demo 改。',
+  'spec.integrationTest.copy': '复制',
+  'spec.integrationTest.copied': '已复制',
+  'spec.integrationTest.anchor.roles': '职责边界',
+  'spec.integrationTest.anchor.demo': 'demo 工程',
+  'spec.integrationTest.anchor.suite': '用例集作者',
+  'spec.integrationTest.anchor.orchestrator': '编排层',
+  'spec.integrationTest.section.roles': '三方职责边界',
+  'spec.integrationTest.section.demo': '下载 demo 工程',
+  'spec.integrationTest.section.suite': '用例集作者必读',
+  'spec.integrationTest.section.orchestrator': '编排层结果规范',
+  'spec.integrationTest.roles.intro': '先确认你是哪一类人,只读自己那份。点卡片直接跳到对应章节。',
+  'spec.integrationTest.roles.platform.name': '平台',
+  'spec.integrationTest.roles.platform.who': 'ByClaw 负责,你不用管',
+  'spec.integrationTest.roles.platform.d1': '注入 BYCLAW_E2E_RESULT_DIR(按分支+轮次唯一)',
+  'spec.integrationTest.roles.platform.d2': '注入业务测试账号环境变量',
+  'spec.integrationTest.roles.platform.d3': '只读 status.json 判断状态与打回',
+  'spec.integrationTest.roles.platform.action': '了解注入了什么',
+  'spec.integrationTest.roles.orchestrator.name': '编排层',
+  'spec.integrationTest.roles.orchestrator.who': '你若写环境编排脚本',
+  'spec.integrationTest.roles.orchestrator.d1': '建目录、写 meta、拉码构建部署',
+  'spec.integrationTest.roles.orchestrator.d2': '逐个跑用例集并汇总各套件 JUnit',
+  'spec.integrationTest.roles.orchestrator.d3': '原子写 status.json + 刷新心跳',
+  'spec.integrationTest.roles.orchestrator.action': '读结果规范 →',
+  'spec.integrationTest.roles.suite.name': '用例集作者',
+  'spec.integrationTest.roles.suite.who': '你若写测试工程',
+  'spec.integrationTest.roles.suite.d1': '产出 JUnit XML 到约定报告路径',
+  'spec.integrationTest.roles.suite.d2': '用退出码表达成败(0 通过 / 非 0 失败)',
+  'spec.integrationTest.roles.suite.d3': '失败留截图,文件名 = 用例ID',
+  'spec.integrationTest.roles.suite.action': '读产物约定 →',
+  'spec.integrationTest.demo.intro':
+    '两个 demo 都开箱可跑,只依赖 python3。建议先跑一遍看到产物,再照着改成自己的工程 —— 比照文档从零搭省事,也不容易踩契约的坑。',
+  'spec.integrationTest.demo.download': '下载',
+  'spec.integrationTest.demo.suite.title': '测试用例集 demo(pytest)',
+  'spec.integrationTest.demo.suite.desc':
+    '含失败自动截图钩子(文件名=用例ID)、账号从环境变量读。故意留一条失败用例,跑一次就能看到「失败→截图→归集」链路通了。',
+  'spec.integrationTest.demo.suite.run': './run.sh',
+  'spec.integrationTest.demo.orchestrator.title': '编排脚本 demo(bash)',
+  'spec.integrationTest.demo.orchestrator.desc':
+    '含 status.json 原子写、心跳刷新、多套件 JUnit 汇总、异常兜底写终态。不装用例集也能独立跑通汇总链路。',
+  'spec.integrationTest.demo.orchestrator.run': 'BYCLAW_E2E_RESULT_DIR=/tmp/e2e-run-1 ./orchestrate.sh',
+  'spec.integrationTest.demo.tip':
+    '提示:用例集 demo 含一条故意失败的用例,所以整轮结果正常是 failed。接到自己项目前记得删掉它。',
+  'spec.integrationTest.suite.intro':
+    '你只负责这一个测试工程:产出 JUnit 报告 + 用退出码表达成败即可。整轮的目录、状态机、status.json 由编排层统一维护,无需你自己写。',
+  'spec.integrationTest.orchestrator.intro':
+    '平台通过环境变量 BYCLAW_E2E_RESULT_DIR 注入本次运行的结果根目录(按分支+轮次唯一)。编排层负责建目录、写 meta、逐个跑用例集、汇总各套件 JUnit、最后原子写 status.json;平台只认 status.json 判断状态,不靠"文件在不在"猜测。',
+  'spec.integrationTest.orchestrator.treeTitle': '① 结果目录结构',
+  'spec.integrationTest.orchestrator.statusTitle': '② status.json 契约(状态真相源,需原子写入)',
+  'spec.integrationTest.orchestrator.enumTitle': '③ status 状态枚举(封闭取值)',
+  'spec.integrationTest.orchestrator.scriptTitle': '④ 编排脚本骨架示例(bash)',
 
   ...secondEdition,
 };

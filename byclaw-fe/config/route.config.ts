@@ -265,6 +265,19 @@ export default [
         ],
       },
       {
+        // 规范/文档页走独立布局:不要 Sider、会话态与抽屉,页面自己掌控滚动容器。
+        path: '/spec',
+        component: '@/layout/docLayout',
+        routes: [
+          {
+            // 集成测试规范:全平台一份(status.json 契约由平台硬编码读取,项目改不了)。
+            path: '/spec/integrationTest',
+            name: 'specIntegrationTest',
+            component: './spec',
+          },
+        ],
+      },
+      {
         path: '/iframes',
         component: '@/layout/pcLayout/simple',
         routes: [

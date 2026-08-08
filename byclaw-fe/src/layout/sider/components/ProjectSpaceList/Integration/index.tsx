@@ -23,6 +23,7 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
+  BookOutlined,
   CheckCircleFilled,
   ClockCircleOutlined,
   CloseCircleFilled,
@@ -31,6 +32,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   ExclamationCircleFilled,
+  ExclamationCircleOutlined,
   EyeOutlined,
   FileTextOutlined,
   FundProjectionScreenOutlined,
@@ -45,12 +47,15 @@ import {
 } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
+// 复用消息区的文件预览弹窗(内部就是 Preview/Twins),报告 xml 走它的 source 页签 + 下载按钮,不另写预览组件。
+import Previewer from '@/components/MessageList/components/FileRender/components/Previewer';
 import {
   createIntegrationEnv,
   createIntegrationSuite,
   deleteIntegrationEnv,
   deleteIntegrationSuite,
   getIntegrationRun,
+  getIntegrationRunReport,
   listIntegrationEnvs,
   listIntegrationRuns,
   listIntegrationRunsByEnv,
@@ -67,14 +72,14 @@ import {
 } from '@/service/devloop';
 import styles from './index.module.less'; // 集成测试专用类
 import parentStyles from '../index.module.less'; // 共享 chrome 类(与渠道/来源卡片共用,DRY 保留在父级)
+import { DEFAULT_TESTER_CONFIG } from './mock';
+// 契约常量与规范页共用一份,避免弹框文案与规范页各自漂移。
 import {
-  DEFAULT_TESTER_CONFIG,
-  E2E_RESULT_DIR_TREE,
-  E2E_SCRIPT_SKELETON,
-  E2E_STATUS_ENUM,
-  E2E_STATUS_JSON,
-  E2E_SUITE_CONTRACT,
-} from './mock';
+  E2E_RUN_HARD_RULES,
+  E2E_SPEC_PATH,
+  E2E_SPEC_SECTIONS,
+  E2E_SUITE_HARD_RULES,
+} from '@/pages/spec/contracts';
 import { copyTextToClipboard } from '@/utils/copy';
 import type {
   IntegrationRunResult,
@@ -171,6 +176,11 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
       intl.formatMessage({ id: `projectSpace.detail.${id}` }, values),
     [intl]
   );
+  // 规范深链:弹框/面板只放「违反即坏」的最小契约,完整契约与 demo 在规范页。
+  // 新窗口打开,不打断当前填写;锚点让用户直接落到自己那一节,不用在长页里翻。
+  const openSpec = (section: string) => {
+    window.open(`${E2E_SPEC_PATH}#${section}`, '_blank', 'noopener');
+  };
   const { setDetailPanel, clearDetailPanel } = React.useContext(SiderContentContext);
   // 集成测试配置(环境+用例集)内容多,沿用需求渠道配置模式:入口按钮打开右侧覆盖面板。
   const [integrationConfigOpen, setIntegrationConfigOpen] = useState(false);
@@ -228,6 +238,13 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
   const [integrationEnvTab, setIntegrationEnvTab] = useState('basic');
   const [integrationResultOpen, setIntegrationResultOpen] = useState(false);
   const [integrationResult, setIntegrationResult] = useState<IntegrationRunResult | null>(null);
+  // 报告预览:原文不落库,点报告路径才去后端 SSH 取,取回后包成 Blob 交给通用预览弹窗。
+  const [reportPreview, setReportPreview] = useState<{ open: boolean; blob: Blob | null; loading: boolean }>({
+    open: false,
+    blob: null,
+    loading: false,
+  });
+  const [reportFileName, setReportFileName] = useState('');
   // 日志弹窗:按环境/套件粒度列出历次运行,点开某条复用 result Modal 看日志。
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [logModalTarget, setLogModalTarget] = useState<{
@@ -486,37 +503,74 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
   const [runEnvSelectOpen, setRunEnvSelectOpen] = useState(false);
   const [runTargetSuite, setRunTargetSuite] = useState<IntegrationSuiteVo | null>(null);
   const [runSelectedEnvId, setRunSelectedEnvId] = useState<number | null>(null);
+  // 单次执行方式。这个弹框是人工调试入口，默认 backend 直跑：结果当场出、步骤日志和报告都能立刻看。
+  // 正式形态（定时批量）在后端配置里是 tester，两者互不影响。
+  const [runExecutorMode, setRunExecutorMode] = useState<'backend' | 'tester'>('backend');
   const [runStarting, setRunStarting] = useState(false);
   const [runningRunId, setRunningRunId] = useState<string | null>(null);
-  const pollTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 本轮轮询的起点。只在 runningRunId 变化时重置,让退避不被 fetchRun 依赖变化引起的重排打回 2.5s。
+  const pollStartRef = React.useRef(0);
 
   // 执行进入终态即停轮询;组件卸载/关闭结果弹框也清理,避免定时器泄漏。
   const TERMINAL_STATUS = React.useMemo(() => ['passed', 'failed', 'error', 'timeout'], []);
 
   const clearPollTimer = React.useCallback(() => {
     if (pollTimerRef.current) {
-      clearInterval(pollTimerRef.current);
+      clearTimeout(pollTimerRef.current);
       pollTimerRef.current = null;
     }
   }, []);
 
-  React.useEffect(() => clearPollTimer, [clearPollTimer]);
-
   const fetchRun = React.useCallback(
     async (runId: string) => {
       const r = (await getIntegrationRun(runId)) as IntegrationRunResult | null;
-      if (r) {
-        setIntegrationResult(r);
-        if (TERMINAL_STATUS.includes(r.status)) {
-          clearPollTimer();
-          setRunningRunId(null);
-          // 执行结束刷新历史列表,让本次 run 进历史。
-          loadIntegrationRuns(integrationSuiteList);
-        }
-      }
+      if (!r) return false;
+      setIntegrationResult(r);
+      if (!TERMINAL_STATUS.includes(r.status)) return false;
+      setRunningRunId(null);
+      // 执行结束刷新历史列表,让本次 run 进历史。
+      loadIntegrationRuns(integrationSuiteList);
+      return true;
     },
-    [TERMINAL_STATUS, clearPollTimer, loadIntegrationRuns, integrationSuiteList]
+    [TERMINAL_STATUS, loadIntegrationRuns, integrationSuiteList]
   );
+
+  // 轮询节奏。backend 直跑几十秒内出终态,所以开头密;tester 模式要等每分钟一次的回收 cron 从
+  // 会话回流,后端兜底超时是 1 小时,恒定 2.5s 会空打上千次,所以按已等待时长退避。
+  const nextPollDelay = (elapsedMs: number) => {
+    if (elapsedMs < 30_000) return 2500;
+    if (elapsedMs < 120_000) return 5000;
+    return 15_000;
+  };
+  // 轮询上限。超过这个时长仍未终态就交给后端超时兜底,不再让页面无限期打接口。
+  const POLL_MAX_MS = 10 * 60 * 1000;
+
+  // 轮询由 runningRunId 单点驱动:设上就轮,清掉/卸载就停,避免多处 setInterval 各自留定时器。
+  React.useEffect(() => {
+    if (!runningRunId) {
+      clearPollTimer();
+      return;
+    }
+    if (!pollStartRef.current) pollStartRef.current = Date.now();
+    let cancelled = false;
+    const tick = async () => {
+      const reachedTerminal = await fetchRun(runningRunId);
+      if (cancelled || reachedTerminal) return;
+      const elapsed = Date.now() - pollStartRef.current;
+      if (elapsed >= POLL_MAX_MS) {
+        message.info(t('integration.result.pollGaveUp'));
+        setRunningRunId(null);
+        return;
+      }
+      pollTimerRef.current = setTimeout(tick, nextPollDelay(elapsed));
+    };
+    tick();
+    return () => {
+      cancelled = true;
+      clearPollTimer();
+    };
+  }, [runningRunId, fetchRun, clearPollTimer, t]);
 
   // 打开环境选择弹框(自动化套件的「执行测试」入口)。
   const openRunEnvSelect = (suite: IntegrationSuiteVo) => {
@@ -534,7 +588,11 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
     if (!runTargetSuite || !runSelectedEnvId) return;
     setRunStarting(true);
     try {
-      const res = (await startIntegrationRun(runTargetSuite.suiteId, runSelectedEnvId)) as { runId: string } | null;
+      const res = (await startIntegrationRun(
+        runTargetSuite.suiteId,
+        runSelectedEnvId,
+        runExecutorMode,
+      )) as { runId: string } | null;
       const runId = res?.runId;
       if (!runId) {
         message.error(t('integration.run.startFailed'));
@@ -542,12 +600,10 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
       }
       setRunEnvSelectOpen(false);
       setIntegrationResult(null);
-      setRunningRunId(runId);
       setIntegrationResultOpen(true);
-      // 立即拉一次,再定时轮询直到终态。
-      fetchRun(runId);
-      clearPollTimer();
-      pollTimerRef.current = setInterval(() => fetchRun(runId), 2500);
+      // 轮询交给 runningRunId 的 effect:置起点后立刻拉一次并按退避续轮。
+      pollStartRef.current = Date.now();
+      setRunningRunId(runId);
     } catch (e) {
       message.error(t('integration.run.startFailed'));
     } finally {
@@ -565,11 +621,10 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
       }
       setIntegrationResult(r);
       setIntegrationResultOpen(true);
-      // 若该历史仍在执行(running),继续轮询。
+      // 若该历史仍在执行(running),继续轮询。已跑了多久无从得知,起点按打开时间算。
       if (!TERMINAL_STATUS.includes(r.status)) {
+        pollStartRef.current = Date.now();
         setRunningRunId(runId);
-        clearPollTimer();
-        pollTimerRef.current = setInterval(() => fetchRun(runId), 2500);
       }
     } catch (e) {
       message.info(t('integration.result.notReady'));
@@ -578,9 +633,32 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
 
   const closeIntegrationResult = () => {
     setIntegrationResultOpen(false);
-    clearPollTimer();
+    // 清 runningRunId 即停轮询(effect 的 cleanup 负责清定时器)。
     setRunningRunId(null);
   };
+
+  // 打开报告预览:先开弹窗占位再拉取,避免大报告期间界面无反馈。失败只提示,不留空弹窗。
+  const openReportPreview = async (runId: string, reportPath?: string) => {
+    // 文件名先按已知路径猜,拿到响应后用后端返回的真实路径纠正:脚注/表格入口没有 suites,
+    // 前端根本不知道报告路径,只有后端按 suiteId 查得到。
+    setReportFileName(reportPath?.split('/').pop() || 'report.xml');
+    setReportPreview({ open: true, blob: null, loading: true });
+    try {
+      const res = await getIntegrationRunReport(runId);
+      setReportFileName(res.path?.split('/').pop() || 'report.xml');
+      // 带上 charset,Twins 读 Blob 文本与浏览器下载都按 UTF-8 处理,避免中文用例名乱码。
+      setReportPreview({
+        open: true,
+        blob: new Blob([res.content], { type: 'text/xml;charset=utf-8' }),
+        loading: false,
+      });
+    } catch (e: any) {
+      setReportPreview({ open: false, blob: null, loading: false });
+      message.error(e?.message || t('integration.result.reportLoadFailed'));
+    }
+  };
+
+  const closeReportPreview = () => setReportPreview({ open: false, blob: null, loading: false });
 
   // 打开日志弹窗:按粒度拉历次运行列表(env 走新接口,suite 复用现有),点开某条再看该次日志。
   const openLogModal = async (kind: 'suite' | 'env', id: number, name: string) => {
@@ -1371,12 +1449,24 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
     {
       title: t('runBoard.col.action'),
       key: 'action',
-      width: 88,
+      // 两个 link 按钮并排,88 会把「测试报告」挤到换行。
+      width: 150,
       fixed: 'right',
       render: (_: unknown, row) => (
-        <Button type="link" size="small" onClick={() => openIntegrationResult(row.runId)}>
-          {t('integration.log.viewDetail')}
-        </Button>
+        <>
+          <Button type="link" size="small" onClick={() => openIntegrationResult(row.runId)}>
+            {t('integration.log.viewDetail')}
+          </Button>
+          {/* 报告直达:不必先开结果弹窗再展开套件明细。执行中还没有报告,禁用。 */}
+          <Button
+            type="link"
+            size="small"
+            disabled={row.status === 'running'}
+            onClick={() => openReportPreview(row.runId)}
+          >
+            {t('integration.result.viewReportBtn')}
+          </Button>
+        </>
       ),
     },
   ];
@@ -1482,6 +1572,10 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
             <p>{t('integration.panelSubtitle')}</p>
           </div>
           <div className={parentStyles.detailChannelPanelActions}>
+            {/* 规范入口放面板级而不是弹框深处:结果契约是平台硬约定,用户在配置前后都可能要查。 */}
+            <Button icon={<BookOutlined />} onClick={() => openSpec(E2E_SPEC_SECTIONS.roles)}>
+              {t('integration.specEntry')}
+            </Button>
             <Tooltip title={t('common.close')} placement="top">
               <Button icon={<CloseOutlined />} onClick={handleCloseIntegrationConfig} />
             </Tooltip>
@@ -1834,6 +1928,12 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
     editingSuiteId,
     repos,
     runningRunId,
+    // 运行看板的筛选态同理:快照不重推的话,点状态/套件/关键字只改了 state,表格还是旧快照里的行,
+    // 表现为"切换不生效、退出重进才对"。看板数据源本身变化也要重推。
+    runFilterStatus,
+    runFilterSuite,
+    runKeyword,
+    integrationHistoryList,
   ]);
 
   useEffect(() => {
@@ -1850,65 +1950,53 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
     setIntegrationConfigOpen(false);
     clearDetailPanel?.();
   }, [active, integrationConfigOpen, clearDetailPanel]);
-  // 新增测试用例集弹框:选运行器 + 来源 + 运行命令 + 报告路径(静态演示,暂不落库)。
-  // 单套件契约:用例集作者只需知道自己那份产物往哪写、退出码怎么判,不管整轮状态机。
-  const renderIntegrationSuiteSpec = () => (
-    <Collapse
-      size="small"
-      className={styles.integrationSpec}
-      items={[
-        {
-          key: 'suite-spec',
-          label: t('integration.suiteSpec.title'),
-          children: (
-            <div className={styles.integrationSpecBody}>
-              <div className={styles.integrationSpecHint}>{t('integration.suiteSpec.intro')}</div>
-              <pre className={styles.integrationSpecPre}>{E2E_SUITE_CONTRACT}</pre>
-            </div>
-          ),
-        },
-      ]}
-    />
+  // 规范现场提示:三条硬契约 + 「完整规范」+「下载 demo」。
+  // 之所以不再内联整段契约:弹框是「完成一个动作」的容器,长文放这里没人读,
+  // 而且没法分享/收藏。细节交给可寻址的规范页。
+  const renderIntegrationSpecCallout = (
+    section: string,
+    rules: readonly string[],
+    ruleIdPrefix: string,
+    titleId: string
+  ) => (
+    <div className={styles.integrationSpecCallout}>
+      <div className={styles.integrationSpecCalloutTitle}>
+        <ExclamationCircleOutlined />
+        <span>{t(titleId)}</span>
+      </div>
+      <ol className={styles.integrationSpecCalloutRules}>
+        {rules.map((rule) => (
+          <li key={rule}>{t(`${ruleIdPrefix}.${rule}`)}</li>
+        ))}
+      </ol>
+      <div className={styles.integrationSpecCalloutActions}>
+        <Button type="link" size="small" onClick={() => openSpec(section)}>
+          {t('integration.spec.openFull')}
+        </Button>
+        <Button type="link" size="small" onClick={() => openSpec(E2E_SPEC_SECTIONS.demo)}>
+          {t('integration.spec.openDemo')}
+        </Button>
+      </div>
+    </div>
   );
 
-  // 整轮契约(run 级):编排层/环境负责建目录、写 meta、汇总各套件结果、原子写 status.json 并驱动状态机。
-  const renderIntegrationRunSpec = () => (
-    <Collapse
-      size="small"
-      defaultActiveKey={['run-spec']}
-      className={styles.integrationSpec}
-      items={[
-        {
-          key: 'run-spec',
-          label: t('integration.spec.title'),
-          children: (
-            <div className={styles.integrationSpecBody}>
-              <div className={styles.integrationSpecHint}>{t('integration.spec.intro')}</div>
+  // 用例集作者现场提示:报告路径 / 退出码 / 失败证据,三条违反即坏。
+  const renderIntegrationSuiteSpec = () =>
+    renderIntegrationSpecCallout(
+      E2E_SPEC_SECTIONS.suite,
+      E2E_SUITE_HARD_RULES,
+      'integration.suiteSpec.rule',
+      'integration.suiteSpec.calloutTitle'
+    );
 
-              <div className={styles.integrationSpecSubTitle}>{t('integration.spec.treeTitle')}</div>
-              <pre className={styles.integrationSpecPre}>{E2E_RESULT_DIR_TREE}</pre>
-
-              <div className={styles.integrationSpecSubTitle}>{t('integration.spec.statusTitle')}</div>
-              <pre className={styles.integrationSpecPre}>{E2E_STATUS_JSON}</pre>
-
-              <div className={styles.integrationSpecSubTitle}>{t('integration.spec.enumTitle')}</div>
-              <div className={styles.integrationSpecEnum}>
-                {E2E_STATUS_ENUM.map((item) => (
-                  <div className={styles.integrationSpecEnumRow} key={item.code}>
-                    <Tag className={styles.integrationMono}>{item.code}</Tag>
-                    <span>{item.meaning}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className={styles.integrationSpecSubTitle}>{t('integration.spec.scriptTitle')}</div>
-              <pre className={styles.integrationSpecPre}>{E2E_SCRIPT_SKELETON}</pre>
-            </div>
-          ),
-        },
-      ]}
-    />
-  );
+  // 编排层现场提示:原子写 / failed 与 error 区分 / 异常兜底终态。
+  const renderIntegrationRunSpec = () =>
+    renderIntegrationSpecCallout(
+      E2E_SPEC_SECTIONS.orchestrator,
+      E2E_RUN_HARD_RULES,
+      'integration.spec.rule',
+      'integration.spec.calloutTitle'
+    );
 
   const renderIntegrationSuiteModal = () => {
     const setField = (key: keyof typeof integrationSuiteForm, value: string) =>
@@ -2430,6 +2518,9 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
                           </div>
                         </div>
                       ))}
+                      {/* 硬契约贴在编排脚本填写处,而不是单开一个「结果规范」页签:
+                          页签要主动点,填脚本的人正需要看的就是这三条。 */}
+                      {renderIntegrationRunSpec()}
                     </>
                   ),
               },
@@ -2508,11 +2599,6 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
                     ))}
                   </>
                 ),
-              },
-              {
-                key: 'spec',
-                label: t('integration.envModal.tabSpec'),
-                children: renderIntegrationRunSpec(),
               },
             ]}
           />
@@ -2651,7 +2737,14 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
         children: (
           <div className={styles.integrationResultSuiteBody}>
             <div className={styles.integrationResultSuitePaths}>
-              <span className={styles.integrationMono}>{s.reportPath}</span>
+              {/* 报告路径可点:后端按需去环境机读原文,弹窗里能看能下载。没配路径时保持纯文本。 */}
+              {s.reportPath ? (
+                <Tooltip title={t('integration.result.viewReport')}>
+                  <a className={styles.integrationMono} onClick={() => openReportPreview(r.runId, s.reportPath)}>
+                    <FileTextOutlined /> {s.reportPath}
+                  </a>
+                </Tooltip>
+              ) : null}
               <span className={styles.integrationMono}>{s.logPath}</span>
             </div>
             {s.failedCases.length === 0 ? (
@@ -2715,6 +2808,16 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
         open={integrationResultOpen}
         onCancel={closeIntegrationResult}
         footer={[
+          // 报告入口放脚注:reportPath 只在 suites 里,而 tester 回流/解析失败的 run 没有 suites,
+          // 那时套件明细整块不渲染,报告就没了入口。后端只要 runId 就能定位报告路径,这里不依赖 suites。
+          <Button
+            key="report"
+            icon={<FileTextOutlined />}
+            disabled={!r || isRunning}
+            onClick={() => r && openReportPreview(r.runId, r.suites[0]?.reportPath || '')}
+          >
+            {t('integration.result.viewReportBtn')}
+          </Button>,
           // 排查失败通常要整段日志,单步复制之外再给一个一次性复制入口。
           <Button
             key="copyAll"
@@ -3063,7 +3166,24 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
           }))}
         />
       </div>
-      <div className={styles.integrationNote}>{t('integration.run.hint')}</div>
+      {/* 执行方式:这里是人工调试入口,默认 backend 当场出结果;定时批量走后端配置的 tester,不受这里影响。 */}
+      <div className={styles.integrationField}>
+        <span className={styles.integrationFieldLabel}>{t('integration.run.mode')}</span>
+        <Radio.Group
+          value={runExecutorMode}
+          onChange={(e) => setRunExecutorMode(e.target.value)}
+          optionType="button"
+          buttonStyle="solid"
+          size="small"
+          options={[
+            { value: 'backend', label: t('integration.run.modeBackend') },
+            { value: 'tester', label: t('integration.run.modeTester') },
+          ]}
+        />
+      </div>
+      <div className={styles.integrationNote}>
+        {runExecutorMode === 'tester' ? t('integration.run.hintTester') : t('integration.run.hint')}
+      </div>
     </Modal>
   );
 
@@ -3112,6 +3232,14 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
       {renderManualRunModal()}
       {renderTesterModal()}
       {renderTesterRunEnvModal()}
+      {/* 报告预览:复用消息区通用预览弹窗,xml 走高亮源码页签,右上角自带下载/复制。 */}
+      <Previewer
+        previewInfo={reportPreview}
+        onClosePreviewModal={closeReportPreview}
+        fileType="xml"
+        fileName={reportFileName}
+        zIndex={1200}
+      />
     </>
   );
 };

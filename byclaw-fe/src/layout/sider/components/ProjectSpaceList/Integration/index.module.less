@@ -350,12 +350,18 @@
   }
 }
 
+// 父级 .integrationSection 是 flex column 且已有 gap:10px,这里不能再加纵向 margin,
+// 否则筛选条上下各多出一份间距,和统计条/表格的节奏不一致。
+// 与统计卡同一套边框/圆角,读作"工具条"而不是几个散落的控件。
 .runFilterBar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin: 10px 0 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #e5eaf2;
+  background: #fafbfd;
 }
 
 .runFilterSuite {
@@ -766,56 +772,50 @@
   border-top: 1px solid #eef2f8;
 }
 
-// 结果目录与状态规范折叠区。
-.integrationSpec {
+// 规范现场提示条:弹框里只留「违反即坏」的硬契约,完整契约走规范页深链。
+// 用警示黄而不是折叠面板:折叠默认收起=没人点开,这里要求扫一眼就看见。
+.integrationSpecCallout {
   margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #ffe08a;
+  border-left: 3px solid #f5a623;
+  border-radius: 8px;
+  background: #fffbef;
 }
 
-.integrationSpecBody {
+.integrationSpecCalloutTitle {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.integrationSpecHint {
-  color: #526075;
-  font-size: 12px;
-  line-height: 20px;
-}
-
-.integrationSpecSubTitle {
-  margin-top: 4px;
-  color: #1f2633;
+  align-items: center;
+  gap: 6px;
+  color: #8a5a00;
   font-size: 13px;
   font-weight: 600;
-}
-
-.integrationSpecPre {
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: #0f172a;
-  color: #e2e8f0;
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre;
-  overflow-x: auto;
-}
-
-.integrationSpecEnum {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.integrationSpecEnumRow {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 12px;
-  color: #526075;
   line-height: 20px;
+}
+
+.integrationSpecCalloutRules {
+  margin: 6px 0 0;
+  padding-left: 20px;
+  color: #526075;
+  font-size: 12px;
+  line-height: 20px;
+
+  li + li {
+    margin-top: 2px;
+  }
+}
+
+.integrationSpecCalloutActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+
+  :global(.ant-btn-link) {
+    padding: 0 4px;
+    height: 22px;
+    font-size: 12px;
+  }
 }
 
 .integrationNote {

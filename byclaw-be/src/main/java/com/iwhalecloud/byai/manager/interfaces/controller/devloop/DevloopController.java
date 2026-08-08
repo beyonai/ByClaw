@@ -358,7 +358,9 @@ public class DevloopController {
     public ResponseUtil<Map<String, Object>> startIntegrationRun(@RequestBody Map<String, Object> params) {
         Long suiteId = Long.valueOf(params.get("suiteId").toString());
         Long envId = Long.valueOf(params.get("envId").toString());
-        return applicationService.startIntegrationRun(suiteId, envId);
+        // executorMode 可选:前端弹框按次指定 backend/tester,缺省或非法值由执行器回落全局配置。
+        Object mode = params.get("executorMode");
+        return applicationService.startIntegrationRun(suiteId, envId, mode == null ? null : mode.toString());
     }
 
     /**
@@ -370,6 +372,17 @@ public class DevloopController {
     public ResponseUtil<Map<String, Object>> getIntegrationRun(@RequestBody Map<String, Object> params) {
         Long runId = Long.valueOf(params.get("runId").toString());
         return applicationService.getIntegrationRun(runId);
+    }
+
+    /**
+     * 读取一次执行的测试报告原文,供前端在线预览/下载。原文不落库,每次查看按需去环境机读取。
+     *
+     * @param params 包含 runId
+     */
+    @PostMapping("/integration/run/report")
+    public ResponseUtil<Map<String, Object>> getIntegrationRunReport(@RequestBody Map<String, Object> params) {
+        Long runId = Long.valueOf(params.get("runId").toString());
+        return applicationService.getIntegrationRunReport(runId);
     }
 
     /**

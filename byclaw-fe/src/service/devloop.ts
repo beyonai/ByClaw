@@ -679,11 +679,17 @@ export const listIntegrationSuites = (projectId: number) =>
 
 // ===== 集成测试执行 =====
 // 点「执行测试」秒回 runId,后台异步跑;前端轮询 getIntegrationRun 直到 status 进入终态。
-export const startIntegrationRun = (suiteId: number, envId: number) =>
-  POST<{ runId: string }>('/byaiService/devloop/integration/run/start', { suiteId, envId });
+// executorMode:backend=后端直连环境跑用例并当场解析报告(便于排查);tester=下发独立测试数字员工，
+// run 保持 running 等员工回流。省略则由后端全局配置决定（正式形态 tester）。
+export const startIntegrationRun = (suiteId: number, envId: number, executorMode?: 'backend' | 'tester') =>
+  POST<{ runId: string }>('/byaiService/devloop/integration/run/start', { suiteId, envId, executorMode });
 
 export const getIntegrationRun = (runId: string | number) =>
   POST<any>('/byaiService/devloop/integration/run/get', { runId });
+
+// 报告原文不落库，点「查看报告」时后端才 SSH 去环境机读；文件已被清掉会直接返回错误。
+export const getIntegrationRunReport = (runId: string | number) =>
+  POST<{ path: string; content: string }>('/byaiService/devloop/integration/run/report', { runId });
 
 export const listIntegrationRuns = (suiteId: number) =>
   POST<any[]>('/byaiService/devloop/integration/run/list', { suiteId });

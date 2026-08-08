@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 /**
  * 集成测试执行用的通用命令执行器。connProtocol=ssh 走 JSch exec channel,local 走 ProcessBuilder。
@@ -31,20 +32,26 @@ public class CommandRunner {
     /** 单步日志上限,仅存尾部,避免 TEXT 膨胀;完整日志留在远程 result_dir。 */
     private static final int MAX_LOG_CHARS = 32 * 1024;
 
+    /** shell 变量名合法字符集:字母/下划线开头,后接字母数字下划线。 */
+    private static final Pattern VALID_ENV_KEY = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
+
     public SshExecResult run(CommandExecSpec spec) throws Exception {
         String fullCommand = buildFullCommand(spec.getEnv(), spec.getWorkdir(), spec.getCommand());
         if (CONN_LOCAL.equalsIgnoreCase(spec.getConnProtocol())) {
-            return runLocal(fullCommand, spec.getTimeoutSec());
+            return runLocal(fullCommand, spec);
         }
         return runSsh(spec, fullCommand);
     }
 
-    /** 命令前拼 export 注入 env、cd 进 workdir;env 值 shellQuote 防注入。 */
+    /** 命令前拼 export 注入 env、cd 进 workdir;env 值 shellQuote 防注入,键按标识符白名单校验。 */
     private String buildFullCommand(Map<String, String> env, String workdir, String command) {
         StringBuilder sb = new StringBuilder();
         if (env != null) {
             for (Map.Entry<String, String> e : env.entrySet()) {
-                if (StringUtils.isBlank(e.getKey())) {
+                // 键不能 quote(quote 了就不是赋值),所以只能白名单。键来自用户配的 envPrefix,
+                // 带引号/空格/分号时会破坏整条命令语法,后续 cd 与业务命令一起失败,且是注入口子。
+                if (!VALID_ENV_KEY.matcher(StringUtils.defaultString(e.getKey())).matches()) {
+                    log.warn("Skip invalid env key for command injection: {}", e.getKey());
                     continue;
                 }
                 sb.append("export ").append(e.getKey()).append('=')
@@ -76,13 +83,11 @@ public class CommandRunner {
             long deadline = nowPlusSeconds(spec.getTimeoutSec());
             while (!channel.isClosed()) {
                 if (spec.getTimeoutSec() > 0 && System.currentTimeMillis() > deadline) {
-                    String merged = mergeOutput(out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8));
-                    return new SshExecResult(-1, truncate(merged), true);
+                    return new SshExecResult(-1, shapeOutput(spec, out, err), true);
                 }
                 Thread.sleep(POLL_INTERVAL_MS);
             }
-            String merged = mergeOutput(out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8));
-            return new SshExecResult(channel.getExitStatus(), truncate(merged), false);
+            return new SshExecResult(channel.getExitStatus(), shapeOutput(spec, out, err), false);
         } finally {
             if (channel != null && channel.isConnected()) {
                 channel.disconnect();
@@ -111,24 +116,30 @@ public class CommandRunner {
         return session;
     }
 
-    private SshExecResult runLocal(String fullCommand, int timeoutSec) throws Exception {
+    private SshExecResult runLocal(String fullCommand, CommandExecSpec spec) throws Exception {
         ProcessBuilder pb = new ProcessBuilder("bash", "-lc", fullCommand);
-        pb.redirectErrorStream(true);
+        // 本机模式 stderr 由 OS 合流,rawOutput 只能免掉截断这一层。
+        pb.redirectErrorStream(!spec.isRawOutput());
         Process process = pb.start();
         String output;
         try (java.io.InputStream is = process.getInputStream()) {
             output = new String(is.readAllBytes(), StandardCharsets.UTF_8);
         }
+        int timeoutSec = spec.getTimeoutSec();
         if (timeoutSec > 0) {
             boolean done = process.waitFor(timeoutSec, TimeUnit.SECONDS);
             if (!done) {
                 process.destroyForcibly();
-                return new SshExecResult(-1, truncate(output), true);
+                return new SshExecResult(-1, shapeLocalOutput(spec, output), true);
             }
         } else {
             process.waitFor();
         }
-        return new SshExecResult(process.exitValue(), truncate(output), false);
+        return new SshExecResult(process.exitValue(), shapeLocalOutput(spec, output), false);
+    }
+
+    private static String shapeLocalOutput(CommandExecSpec spec, String output) {
+        return spec.isRawOutput() ? output : truncate(output);
     }
 
     private long nowPlusSeconds(int seconds) {
@@ -149,6 +160,19 @@ public class CommandRunner {
     /** 单引号包裹并转义内部单引号,防命令注入(参考 MinioMountHostExecutor.shellQuote)。 */
     private static String shellQuote(String value) {
         return "'" + value.replace("'", "'\"'\"'") + "'";
+    }
+
+    /**
+     * 日志态与原文态的唯一分叉点。rawOutput 时返回未截断的纯 stdout(stdout 为空才回落 stderr,
+     * 保证失败原因不丢),否则按步骤日志的老规则合并 stderr 并留尾部。
+     */
+    private static String shapeOutput(CommandExecSpec spec, ByteArrayOutputStream out, ByteArrayOutputStream err) {
+        String stdout = out.toString(StandardCharsets.UTF_8);
+        String stderr = err.toString(StandardCharsets.UTF_8);
+        if (spec.isRawOutput()) {
+            return StringUtils.isNotBlank(stdout) ? stdout : StringUtils.defaultString(stderr).trim();
+        }
+        return truncate(mergeOutput(stdout, stderr));
     }
 
     private static String mergeOutput(String output, String error) {
