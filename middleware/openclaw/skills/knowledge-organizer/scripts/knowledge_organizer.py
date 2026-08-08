@@ -26,7 +26,7 @@ OBJECT_FILE_STATUS_CD = "00A"
 class OrganizerApi(Protocol):
     def list_authorized_resources(self, employee_resource_id: str, page: int) -> dict[str, Any]: ...
 
-    def list_session_resources(self, *, session_id: str) -> dict[str, Any]: ...
+    def list_session_resources(self, *, session_id: str) -> list[dict[str, Any]]: ...
 
     def get_object(self, object_code: str) -> dict[str, Any]: ...
 
@@ -75,14 +75,16 @@ class ServiceApi:
         )
         return result if isinstance(result, dict) else {}
 
-    def list_session_resources(self, *, session_id: str) -> dict[str, Any]:
+    def list_session_resources(self, *, session_id: str) -> list[dict[str, Any]]:
         result = self.transport.request(
             service_env="BE_DOMAINNAME",
             method="POST",
             path="/byaiService/devloop/operation/listObjectById",
             payload={"sessionId": session_id},
         )
-        return result if isinstance(result, dict) else {}
+        if not isinstance(result, list):
+            raise ValueError("会话共享资源响应必须是数组")
+        return [item for item in result if isinstance(item, dict)]
 
     def get_object(self, object_code: str) -> dict[str, Any]:
         result = self.transport.request(
@@ -569,10 +571,9 @@ class KnowledgeOrganizer:
             page += 1
 
     def _all_session_objects(self, *, session_id: str) -> list[dict[str, Any]]:
-        response = self.api.list_session_resources(session_id=session_id)
-        resources = response.get("items")
+        resources = self.api.list_session_resources(session_id=session_id)
         if not isinstance(resources, list):
-            raise ValueError("会话共享资源响应缺少 items")
+            raise ValueError("会话共享资源响应必须是数组")
         return [item for item in resources if isinstance(item, dict)]
 
     @staticmethod

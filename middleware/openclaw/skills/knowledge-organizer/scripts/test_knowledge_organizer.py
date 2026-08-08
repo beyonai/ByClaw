@@ -40,15 +40,13 @@ class FakeApi:
             ],
         }
 
-    def list_session_resources(self, *, session_id: str) -> dict[str, object]:
+    def list_session_resources(self, *, session_id: str) -> list[dict[str, object]]:
         self.session_resource_calls.append(session_id)
-        return {
-            "items": [
-                {"objectCode": "raw_doc"},
-                {"objectCode": "concept"},
-                {"objectCode": "concept"},
-            ]
-        }
+        return [
+            {"objectCode": "raw_doc"},
+            {"objectCode": "concept"},
+            {"objectCode": "concept"},
+        ]
 
     def get_object(self, object_code: str) -> dict[str, object]:
         domain = "ods" if object_code == "raw_doc" else "ads"
@@ -239,8 +237,8 @@ class KnowledgeOrganizerTests(unittest.TestCase):
         class OdsOnlyApi(FakeApi):
             def list_session_resources(
                 self, *, session_id: str
-            ) -> dict[str, object]:
-                return {"items": [{"objectCode": "raw_doc"}]}
+            ) -> list[dict[str, object]]:
+                return [{"objectCode": "raw_doc"}]
 
         organizer = knowledge_organizer.KnowledgeOrganizer(OdsOnlyApi())
         result = organizer.initialize(
@@ -253,14 +251,16 @@ class KnowledgeOrganizerTests(unittest.TestCase):
     def test_service_api_uses_documented_backend_contracts(self) -> None:
         transport = RecordingTransport(
             [
-                {"items": []},
+                [{"objectCode": "raw_doc"}],
                 [{"id": 7}],
             ]
         )
         api = knowledge_organizer.ServiceApi(transport)
 
-        api.list_session_resources(session_id="session-001")
+        resources = api.list_session_resources(session_id="session-001")
         api.save_object_files(object_files=[{"objectCode": "raw_doc"}])
+
+        self.assertEqual(resources, [{"objectCode": "raw_doc"}])
 
         self.assertEqual(
             transport.requests[0],
