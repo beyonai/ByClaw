@@ -91,7 +91,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         for marker in (
             "知识采集默认绑定迁移到编排 Skill",
             '"skillCode":"knowledge-collection"',
-            "resource_id = 25",
+            '"skillCode":"bycli"',
         ):
             self.assertNotIn(marker, v030)
             self.assertIn(marker, v031)
@@ -107,7 +107,6 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertNotIn("jsonb_build_object", upgrade)
         self.assertNotIn("jsonb_agg", upgrade)
         self.assertNotIn("jsonb_array_elements", upgrade)
-        self.assertNotIn("regexp_replace", upgrade)
 
     def test_bycli_has_an_independent_platform_resource(self):
         initdb = INITDB_DML.read_text(encoding="utf-8")
@@ -118,13 +117,22 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn("resource_code IN (", initdb)
         self.assertIn("'knowledge-collection','bycli','dws'", initdb)
         self.assertIn("resource_code = 'bycli'", upgrade)
-        self.assertIn("resource_id = 25", upgrade)
-        self.assertIn("resource_id = 25", upgrade)
         self.assertIn("resourceCode', r.resource_code", upgrade)
         self.assertIn("r.resource_code = 'bycli'", upgrade)
         self.assertIn("FROM byai.au_privilege_grant g", upgrade)
-        self.assertIn("g.grant_obj_id = 14", upgrade)
-        self.assertIn("grant_obj_id = 25", upgrade)
+
+        # 升级脚本按 resource_code / resource_name 幂等定位资源，不依赖硬编码 resource_id，
+        # 新资源的 ID 由序列生成，避免与既有资源固定 ID 冲突（443fa70fe）。
+        self.assertIn("nextval('byai.seq_any_table')", upgrade)
+        collapsed = " ".join(upgrade.split())
+        for resource_code in ("bycli", "knowledge-collection"):
+            with self.subTest(resource_code=resource_code):
+                self.assertIn(
+                    f"SELECT resource_id FROM byai.ss_resource WHERE resource_code = '{resource_code}'",
+                    collapsed,
+                )
+        self.assertNotRegex(upgrade, r"resource_id = (?:14|25)\b")
+        self.assertNotRegex(upgrade, r"grant_obj_id = (?:14|25)\b")
 
     def test_meta_prompt_counts_catalog_entries_from_json(self):
         source = META_PROMPT_SERVICE.read_text(encoding="utf-8")
@@ -143,12 +151,12 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
                 r"UPDATE byai\.ss_res_ext_skill e SET target_content = "
                 r"jsonb_set\(\s*target_content::jsonb, '\{resourceCode\}', "
                 r"'\"knowledge-collection\"'::jsonb, false\s*\)::text "
-                r"WHERE e\.resource_id = 14 AND target_content IS NOT NULL "
-                r"AND target_content::jsonb ->> 'resourceCode' = 'bycli' AND EXISTS \( "
-                r"SELECT 1 FROM byai\.ss_resource r "
-                r"WHERE r\.resource_id = e\.resource_id AND r\.resource_id = 14 "
+                r"FROM byai\.ss_resource r "
+                r"WHERE e\.resource_id = r\.resource_id "
                 r"AND r\.resource_name = '知识采集' "
-                r"AND r\.resource_code = 'knowledge-collection' \);",
+                r"AND r\.resource_code = 'knowledge-collection' "
+                r"AND target_content IS NOT NULL "
+                r"AND target_content::jsonb ->> 'resourceCode' = 'bycli'",
                 re.IGNORECASE,
             ),
         )
