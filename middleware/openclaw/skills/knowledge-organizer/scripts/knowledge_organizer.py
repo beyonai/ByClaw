@@ -96,7 +96,7 @@ class ServiceApi:
         result = self.transport.request(
             service_env="BE_DOMAINNAME",
             method="POST",
-            path="/devloop/operation/saveObjectInstanceToKb",
+            path="/byaiService/devloop/operation/saveObjectInstanceToKb",
             payload=payload,
         )
         return result if isinstance(result, dict) else {}
