@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.common.feign.request.datacloud.QueryByKnowledgeReq;
 import com.iwhalecloud.byai.common.feign.response.DataCloudResponse;
 import com.iwhalecloud.byai.common.feign.response.datacloud.InvokeActionResp;
 import com.iwhalecloud.byai.common.feign.response.datacloud.QueryByKnowledgeResp;
+import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
@@ -37,6 +38,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.TesterConfigDTO;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectObjectFile;
 import com.iwhalecloud.byai.manager.entity.devloop.OperationTaskTemplate;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -703,11 +705,20 @@ public class DevloopController {
     /**
      * 保存对象实例到知识库
      *
+     * @param request 请求头
      * @param params 入参
      * @return ResponseUtil
      */
     @PostMapping("/operation/saveObjectInstanceToKb")
-    public ResponseUtil<InvokeActionResp> saveObjectInstanceToKb(@RequestBody Params params) {
+    public ResponseUtil<InvokeActionResp> saveObjectInstanceToKb(HttpServletRequest request,
+        @RequestBody Params params) {
+
+        // 如果参数中为null,从请求头中获取
+        if (params.getSessionId() == null) {
+            String XSessionId = request.getHeader("X-Session-Id");
+            params.setSessionId(StringUtil.isNum(XSessionId) ? Long.parseLong(XSessionId) : null);
+        }
+
         InvokeActionResp invokeActionResp = applicationService.saveObjectInstanceToKb(params);
         return ResponseUtil.successResponse(invokeActionResp);
     }

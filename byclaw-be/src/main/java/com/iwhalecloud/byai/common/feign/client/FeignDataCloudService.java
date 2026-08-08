@@ -120,7 +120,16 @@ public class FeignDataCloudService {
         logDatacloudStart("POST", url, startTime, invokeActionReq);
         try {
 
-            HttpResponse response = discoveryHttpClient.post(serviceName, path, buildHeaders(), invokeActionReq, null)
+            Map<String, String> headers = buildHeaders();
+
+            // 放置请求头
+            headers.put("X-User-Code", CurrentUserHolder.getCurrentUserCode());
+            Long sessionId = invokeActionReq.getParams().getSessionId();
+            if (sessionId != null) {
+                headers.put("X-Session-Id", sessionId + "");
+            }
+
+            HttpResponse response = discoveryHttpClient.post(serviceName, path, headers, invokeActionReq, null)
                 .get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
 
             String body = JSON.toJSONString(response.getData());

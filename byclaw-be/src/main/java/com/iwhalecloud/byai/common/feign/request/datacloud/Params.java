@@ -10,6 +10,8 @@ import lombok.Setter;
 @Setter
 public class Params {
 
+    private Long sessionId;
+
     /** 本体对象编码 */
     private String objectCode;
 

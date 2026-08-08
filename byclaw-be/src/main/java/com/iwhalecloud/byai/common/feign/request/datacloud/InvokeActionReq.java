@@ -9,6 +9,9 @@ import lombok.Setter;
 @Getter
 @Setter
 public class InvokeActionReq {
+    public InvokeActionReq() {
+        this.params = new Params();
+    }
 
     private Params params;
 }
