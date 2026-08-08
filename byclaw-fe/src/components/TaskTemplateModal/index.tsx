@@ -144,6 +144,7 @@ const DEFAULT_KNOWLEDGE_OPTIONS = [
   '品牌内容知识库 / 历史文章',
 ].map((value) => ({ label: value, value }));
 const DEFAULT_ACCOUNT_OPTIONS = ['BeyondAI实验室', '百应AI服务号'].map((value) => ({ label: value, value }));
+const CONNECTOR_OPTIONS = ['钉钉', '企业微信', '飞书'].map((value) => ({ label: value, value }));
 const WEEKDAY_OPTIONS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'].map((label, index) => ({
   label,
   value: index + 1,
@@ -305,12 +306,19 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
   const [fetchedKnowledgeOptions, setFetchedKnowledgeOptions] = useState<TaskTemplateOption[]>([]);
   const [fetchedOntologyOptions, setFetchedOntologyOptions] = useState<TaskTemplateOption[]>([]);
   const sourceMode = Form.useWatch('sourceMode', form);
+  const connector = Form.useWatch('connector', form);
   const sourceKnowledge = Form.useWatch('sourceKnowledge', form);
   const targetKnowledge = Form.useWatch('targetKnowledge', form);
   const storageMode = Form.useWatch('storageMode', form);
   const executorType = Form.useWatch('executorType', form);
   const runMode = Form.useWatch('runMode', form);
   const periodType = Form.useWatch('periodType', form);
+
+  useEffect(() => {
+    // 切换到连接器采集后，若模板没有保存连接器，则默认选择第一个可用连接器。
+    if (selectedTemplate?.templateType !== 'collect' || sourceMode !== 'connector' || connector) return;
+    form.setFieldValue('connector', CONNECTOR_OPTIONS[0]?.value);
+  }, [connector, form, selectedTemplate, sourceMode]);
 
   useEffect(() => {
     if (!selectedTemplate || selectedTemplate.templateType !== 'collect' || storageMode !== 'ontology') {
@@ -520,7 +528,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
           </div>
           {sourceMode === 'connector' ? (
             <Form.Item label="连接器" name="connector" rules={[{ required: true, message: '请选择连接器' }]}>
-              <Select options={['钉钉', '企业微信', '飞书'].map((value) => ({ label: value, value }))} />
+              <Select options={CONNECTOR_OPTIONS} />
             </Form.Item>
           ) : sourceMode === 'internet' ? (
             <Form.Item label="搜索范围" name="internetScope" rules={[{ required: true, message: '请输入搜索范围' }]}>
@@ -769,7 +777,11 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
                     <Form.Item label="每几小时" name="intervalHours" rules={[{ required: true, message: '请输入间隔小时数' }]}>
                       <InputNumber min={1} precision={0} style={{ width: '100%' }} />
                     </Form.Item>
-                    <Form.Item label="执行日" name="intervalWeekdays" rules={[{ required: true, type: 'array', min: 1, message: '请选择执行日' }]}>
+                    <Form.Item
+                      label="执行日"
+                      name="intervalWeekdays"
+                      rules={[{ required: true, type: 'array', min: 1, message: '请选择执行日' }]}
+                    >
                       <Select mode="multiple" options={WEEKDAY_OPTIONS} />
                     </Form.Item>
                     <Form.Item label="生效日期区间" name="effectiveDateRange">

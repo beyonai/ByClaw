@@ -1,14 +1,18 @@
 import { Button, Empty, Input, Modal, Select, Spin, Tag, Typography, message } from 'antd';
 import { DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useIntl } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
 import {
   listOperationRequirements,
+  listProjectRepos,
   listProjectMembers,
   listRequirementsByProject,
+  splitTask,
   startOperationRequirement,
 } from '@/service/devloop';
+import RequirementSplitModal from '@/layout/sider/components/ProjectSpaceList/RequirementSplitModal';
+import type { SplitTaskDraft } from '@/layout/sider/components/ProjectSpaceList/RequirementSplitModal/types';
 import type { ProjectRequirement, ProjectSpace } from '../../types';
 import { getArrayData, getPageTotal } from '../../utils';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
@@ -18,6 +22,7 @@ interface Props {
   project: ProjectSpace;
   keyword?: string;
   onToolbarChange?: (toolbar: React.ReactNode | null) => void;
+  onRefreshToolbarChange?: (toolbar: React.ReactNode | null) => void;
 
   /** 需求拆分成功后通知详情页切回任务 tab。 */
   onStarted?: () => void;
@@ -83,7 +88,13 @@ const getRequirementStatusColor = (status: unknown) => {
   return 'warning';
 };
 
-const ProjectRequirements: React.FC<Props> = ({ project, keyword = '', onToolbarChange, onStarted }) => {
+const ProjectRequirements: React.FC<Props> = ({
+  project,
+  keyword = '',
+  onToolbarChange,
+  onRefreshToolbarChange,
+  onStarted,
+}) => {
   const intl = useIntl();
   const [requirements, setRequirements] = useState<any[]>([]);
   const [page, setPage] = useState(0);
@@ -98,6 +109,12 @@ const ProjectRequirements: React.FC<Props> = ({ project, keyword = '', onToolbar
     Array<{ title: string; description: string; assignee?: string | number }>
   >([]);
   const [splitAssignees, setSplitAssignees] = useState<Array<{ label: string; value: string | number }>>([]);
+  const [developSplitTarget, setDevelopSplitTarget] = useState<Record<string, any> | null>(null);
+  const [developSplitRepos, setDevelopSplitRepos] = useState<
+    Array<{ repoId: number; repoFullName: string; repoUrl?: string; defaultBranch?: string }>
+  >([]);
+  const [developSplitConfirming, setDevelopSplitConfirming] = useState(false);
+  const [requirementDetail, setRequirementDetail] = useState<Record<string, any> | null>(null);
 
   const loadRequirements = useCallback(
     async (search = keyword, nextPage = 1) => {
@@ -139,7 +156,7 @@ const ProjectRequirements: React.FC<Props> = ({ project, keyword = '', onToolbar
   const loadRequirementsRef = useRef(loadRequirements);
 
   useEffect(() => {
-    if (!startTarget || project.projectType !== 'operation') return;
+    if ((!startTarget && !developSplitTarget) || !project.projectId) return;
     void listProjectMembers(Number(project.projectId)).then((response) => {
       setSplitAssignees(
         getArrayData(response).map((member: any) => ({
@@ -148,7 +165,78 @@ const ProjectRequirements: React.FC<Props> = ({ project, keyword = '', onToolbar
         }))
       );
     });
-  }, [project.projectId, project.projectType, startTarget]);
+  }, [developSplitTarget, project.projectId, startTarget]);
+
+  useEffect(() => {
+    if (project.projectType !== 'develop' || !project.projectId) return;
+    const projectRepos = (project.repos || [])
+      .filter((repo) => repo.repoId !== undefined && repo.repoId !== null)
+      .map((repo) => ({
+        repoId: Number(repo.repoId),
+        repoFullName: repo.repoFullName,
+        repoUrl: repo.repoUrl,
+        defaultBranch: repo.defaultBranch,
+      }));
+    if (projectRepos.length) {
+      setDevelopSplitRepos(projectRepos);
+      return;
+    }
+    void listProjectRepos(Number(project.projectId))
+      .then((response: any) => {
+        const rows = getArrayData(response);
+        setDevelopSplitRepos(
+          rows
+            .filter((repo: any) => repo.repoId !== undefined && repo.repoId !== null)
+            .map((repo: any) => ({
+              repoId: Number(repo.repoId),
+              repoFullName: repo.repoFullName || repo.repoUrl || `${repo.repoId}`,
+              repoUrl: repo.repoUrl,
+              defaultBranch: repo.defaultBranch,
+            }))
+        );
+      })
+      .catch(() => setDevelopSplitRepos([]));
+  }, [project.projectId, project.projectType, project.repos]);
+
+  const currentUserId = useSelector((state: any) => state.user?.userInfo?.userId ?? state.user?.userInfo?.id);
+  const developInitReady = project.projectType !== 'develop' || !project.initStatus || project.initStatus === 'ready';
+  const defaultDevelopAssigneeId = splitAssignees.find(
+    (member) => currentUserId !== undefined && `${member.value}` === `${currentUserId}`
+  )?.value;
+
+  const handleConfirmDevelopSplit = async (tasks: SplitTaskDraft[]) => {
+    if (!developSplitTarget || developSplitConfirming) return;
+    const sourceItemId = Number(
+      developSplitTarget.itemId ?? developSplitTarget.sourceId ?? developSplitTarget.requirementId
+    );
+    if (!Number.isFinite(sourceItemId) || !tasks.length) {
+      message.error('当前需求缺少有效编号，无法启动');
+      return;
+    }
+    setDevelopSplitConfirming(true);
+    try {
+      await splitTask({
+        projectId: Number(project.projectId),
+        sourceItemId,
+        tasks: tasks.map((task) => ({
+          rowId: task.rowId,
+          title: task.title.trim(),
+          repoId: Number(task.repoId),
+          branch: task.branch.trim(),
+          assigneeId: task.assigneeId,
+          dependsOn: task.dependsOn,
+        })),
+      });
+      message.success('需求已拆分并启动');
+      setDevelopSplitTarget(null);
+      await loadRequirements(keyword, 1);
+      onStarted?.();
+    } catch (error: any) {
+      message.error(error?.message || '需求拆分失败');
+    } finally {
+      setDevelopSplitConfirming(false);
+    }
+  };
 
   useEffect(() => {
     loadRequirementsRef.current = loadRequirements;
@@ -169,7 +257,7 @@ const ProjectRequirements: React.FC<Props> = ({ project, keyword = '', onToolbar
   }, [keyword, project.projectId, project.projectType]);
 
   useEffect(() => {
-    onToolbarChange?.(
+    onRefreshToolbarChange?.(
       <Button
         size="small"
         icon={<ReloadOutlined />}
@@ -179,8 +267,8 @@ const ProjectRequirements: React.FC<Props> = ({ project, keyword = '', onToolbar
         {intl.formatMessage({ id: 'projectSpace.detail.refresh' })}
       </Button>
     );
-    return () => onToolbarChange?.(null);
-  }, [intl, keyword, loadRequirements, loading, onToolbarChange]);
+    return () => onRefreshToolbarChange?.(null);
+  }, [intl, keyword, loadRequirements, loading, onRefreshToolbarChange]);
 
   const hasMore =
     project.projectType === 'operation' &&
@@ -235,7 +323,21 @@ const ProjectRequirements: React.FC<Props> = ({ project, keyword = '', onToolbar
   };
 
   const handleRemoveSplitTask = (index: number) => {
-    setSplitTasks((current) => (current.length <= 1 ? current : current.filter((_, itemIndex) => itemIndex !== index)));
+    if (splitTasks.length <= 1) return;
+    const taskName = splitTasks[index]?.title?.trim() || `任务${index + 1}`;
+    // 删除拆分任务会直接移除当前草稿，先二次确认避免误操作。
+    Modal.confirm({
+      title: '确认删除任务？',
+      content: `删除“${taskName}”后无法恢复，是否继续？`,
+      okText: '删除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: () => {
+        setSplitTasks((current) =>
+          current.length <= 1 ? current : current.filter((_, itemIndex) => itemIndex !== index)
+        );
+      },
+    });
   };
 
   return (
@@ -258,6 +360,12 @@ const ProjectRequirements: React.FC<Props> = ({ project, keyword = '', onToolbar
                 <article
                   key={`${item.requirementId || item.itemId || item.sourceId || index}`}
                   className={styles.dataCard}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setRequirementDetail(item)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') setRequirementDetail(item);
+                  }}
                 >
                   <div className={styles.dataCardHeader}>
                     <Typography.Text
@@ -275,7 +383,8 @@ const ProjectRequirements: React.FC<Props> = ({ project, keyword = '', onToolbar
                           type="link"
                           size="small"
                           className={styles.requirementExecuteButton}
-                          onClick={() => {
+                          onClick={(event) => {
+                            event.stopPropagation();
                             const defaultAssignee = item.assigneeId ?? item.assignee;
                             const requirementTitle =
                               item.title || item.requirementName || item.sourceName || '运营需求';
@@ -300,6 +409,23 @@ const ProjectRequirements: React.FC<Props> = ({ project, keyword = '', onToolbar
                           }}
                         >
                           拆分任务
+                        </Button>
+                      )}
+                      {project.projectType === 'develop' &&
+                        developInitReady &&
+                        !item.sessionId &&
+                        !item.taskId &&
+                        ['todo', 'pending', '待开始', ''].includes(`${item.status || ''}`.toLowerCase()) && (
+                        <Button
+                          type="link"
+                          size="small"
+                          className={styles.requirementExecuteButton}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setDevelopSplitTarget(item);
+                          }}
+                        >
+                          启动
                         </Button>
                       )}
                     </div>
@@ -348,6 +474,80 @@ const ProjectRequirements: React.FC<Props> = ({ project, keyword = '', onToolbar
           ) : null}
         </div>
       </Spin>
+      <Modal
+        open={!!requirementDetail}
+        title={
+          requirementDetail?.title || requirementDetail?.requirementName || requirementDetail?.sourceName || '需求详情'
+        }
+        footer={null}
+        width={680}
+        onCancel={() => setRequirementDetail(null)}
+        destroyOnClose
+      >
+        {requirementDetail && (
+          <div className={styles.requirementDetailContent}>
+            <Typography.Paragraph>
+              {requirementDetail.sourceDescription ||
+                requirementDetail.description ||
+                requirementDetail.originalContent ||
+                requirementDetail.content ||
+                '-'}
+            </Typography.Paragraph>
+            <Typography.Text type="secondary">
+              类型：
+              {project.projectType === 'develop'
+                ? getDevelopRequirementTypeLabel(requirementDetail, intl)
+                : normalizeRequirementType(requirementDetail)}
+            </Typography.Text>
+            <br />
+            <Typography.Text type="secondary">
+              状态：{getRequirementStatusLabel(requirementDetail.status)}
+            </Typography.Text>
+            {requirementDetail.createTime && (
+              <>
+                <br />
+                <Typography.Text type="secondary">
+                  创建时间：{dayjs(requirementDetail.createTime).format('YYYY-MM-DD HH:mm')}
+                </Typography.Text>
+              </>
+            )}
+          </div>
+        )}
+      </Modal>
+      <RequirementSplitModal
+        open={!!developSplitTarget}
+        requirement={
+          developSplitTarget
+            ? {
+              title:
+                  developSplitTarget.title ||
+                  developSplitTarget.requirementName ||
+                  developSplitTarget.sourceName ||
+                  '研发需求',
+              description:
+                  developSplitTarget.description ||
+                  developSplitTarget.sourceDescription ||
+                  developSplitTarget.originalContent,
+            }
+            : null
+        }
+        presplitTarget={
+          developSplitTarget
+            ? {
+              projectId: Number(project.projectId),
+              sourceItemId: Number(
+                developSplitTarget.itemId ?? developSplitTarget.sourceId ?? developSplitTarget.requirementId
+              ),
+            }
+            : null
+        }
+        repos={developSplitRepos}
+        members={splitAssignees}
+        defaultAssigneeId={defaultDevelopAssigneeId}
+        confirmLoading={developSplitConfirming}
+        onCancel={() => setDevelopSplitTarget(null)}
+        onConfirm={(tasks) => void handleConfirmDevelopSplit(tasks)}
+      />
       <Modal
         open={!!startTarget}
         title="拆分运营需求"

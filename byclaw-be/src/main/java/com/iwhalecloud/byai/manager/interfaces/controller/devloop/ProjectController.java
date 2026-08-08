@@ -58,7 +58,7 @@ public class ProjectController {
      * @return 新建项目
      */
     @PostMapping("/create")
-    public ResponseUtil<Project> createProject(@RequestBody ProjectDTO dto) {
+    public ResponseUtil<Project> createProject(@Valid @RequestBody ProjectDTO dto) {
         return ResponseUtil.successResponse(projectApplicationService.createProject(dto));
     }
 
@@ -91,7 +91,7 @@ public class ProjectController {
      * @param dto 包含 projectId（必填）、projectName、description（可选）
      */
     @PostMapping("/update")
-    public ResponseUtil<Void> updateProject(@RequestBody ProjectDTO dto) {
+    public ResponseUtil<Void> updateProject(@Valid @RequestBody ProjectDTO dto) {
         projectApplicationService.updateProject(dto);
         return ResponseUtil.successResponse();
     }

@@ -18,6 +18,7 @@ interface Props {
   project: ProjectSpace;
   keyword?: string;
   onToolbarChange?: (toolbar: React.ReactNode | null) => void;
+  onRefreshToolbarChange?: (toolbar: React.ReactNode | null) => void;
 }
 
 const normalizeLoginStatus = (account: Record<string, any>): OperationAccount['loginStatus'] => {
@@ -47,7 +48,7 @@ const normalizeAccounts = (source: unknown): OperationAccount[] => {
     .filter((item) => item.platformId && item.accountName);
 };
 
-const ProjectAccounts: React.FC<Props> = ({ project, keyword = '', onToolbarChange }) => {
+const ProjectAccounts: React.FC<Props> = ({ project, keyword = '', onToolbarChange, onRefreshToolbarChange }) => {
   const { message } = App.useApp();
   const intl = useIntl();
   const [accounts, setAccounts] = useState<OperationAccount[]>([]);
@@ -115,6 +116,7 @@ const ProjectAccounts: React.FC<Props> = ({ project, keyword = '', onToolbarChan
       compact
       toolbarPlacement="external"
       onToolbarChange={onToolbarChange}
+      onRefreshToolbarChange={onRefreshToolbarChange}
       loading={loading}
       savingAccount={saving}
       deletingAccountId={deletingAccountId}

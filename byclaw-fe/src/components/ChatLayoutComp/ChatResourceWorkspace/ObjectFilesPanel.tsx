@@ -12,6 +12,8 @@ import styles from '@/pages/projectSpace/index.module.less';
 interface ObjectFilesPanelProps {
   projectId?: number | string;
   sessionId?: number | string;
+  /** 外部资源 Tab 刷新时递增，用于重新读取本体对象列表。 */
+  refreshToken?: number;
   onOpenDetail?: (panel: React.ReactNode, options: DetailPanelOptions) => void;
 }
 
@@ -163,7 +165,12 @@ const normalizeObjectFiles = (response: any): ObjectFileItem[] =>
     };
   });
 
-const ObjectFilesPanel: React.FC<ObjectFilesPanelProps> = ({ projectId, sessionId, onOpenDetail }) => {
+const ObjectFilesPanel: React.FC<ObjectFilesPanelProps> = ({
+  projectId,
+  sessionId,
+  refreshToken = 0,
+  onOpenDetail,
+}) => {
   const intl = useIntl();
   const [items, setItems] = useState<ObjectFileItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -188,7 +195,7 @@ const ObjectFilesPanel: React.FC<ObjectFilesPanelProps> = ({ projectId, sessionI
 
   useEffect(() => {
     void loadObjects();
-  }, [loadObjects]);
+  }, [loadObjects, refreshToken]);
 
   return (
     <Spin spinning={loading} className={styles.resourceCategoryBody}>

@@ -15,11 +15,12 @@ interface Props {
   project: ProjectSpace;
   keyword?: string;
   onToolbarChange?: (toolbar: React.ReactNode | null) => void;
+  onRefreshToolbarChange?: (toolbar: React.ReactNode | null) => void;
 }
 
 const PAGE_SIZE = 20;
 
-const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChange }) => {
+const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChange, onRefreshToolbarChange }) => {
   const intl = useIntl();
   const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
   const currentUserId = userInfo.userId ?? userInfo.id;
@@ -160,13 +161,18 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
         <Button size="small" icon={<PlusOutlined />} onClick={() => setAddMemberOpen(true)}>
           {intl.formatMessage({ id: 'projectSpace.members.addMember' })}
         </Button>
-        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void loadMembers()}>
-          {intl.formatMessage({ id: 'projectSpace.detail.refresh' })}
-        </Button>
       </div>
     );
-    return () => onToolbarChange?.(null);
-  }, [intl, loadMembers, loading, onToolbarChange]);
+    onRefreshToolbarChange?.(
+      <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void loadMembers()}>
+        {intl.formatMessage({ id: 'projectSpace.detail.refresh' })}
+      </Button>
+    );
+    return () => {
+      onToolbarChange?.(null);
+      onRefreshToolbarChange?.(null);
+    };
+  }, [intl, loadMembers, loading, onRefreshToolbarChange, onToolbarChange]);
 
   useEffect(() => {
     // 顶部搜索条件变化时从首批成员开始展示，避免沿用上一次展开数量。

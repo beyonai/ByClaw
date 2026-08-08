@@ -37,6 +37,7 @@ export interface OperationAccountPanelProps {
   compact?: boolean;
   toolbarPlacement?: 'inline' | 'external';
   onToolbarChange?: (toolbar: React.ReactNode | null) => void;
+  onRefreshToolbarChange?: (toolbar: React.ReactNode | null) => void;
   onBack?: () => void;
   onAccountClick?: (account: OperationAccount) => void;
   onLogin?: (account: OperationAccount) => void | Promise<void>;
@@ -70,6 +71,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   compact = false,
   toolbarPlacement = 'inline',
   onToolbarChange,
+  onRefreshToolbarChange,
   onBack,
   onAccountClick,
   onLogin,
@@ -133,7 +135,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
 
   useEffect(() => {
     if (!onToolbarChange || toolbarPlacement !== 'external') return;
-    // 大详情把账号筛选和操作按钮提升到页面顶部，与“新建会话”保持同一工具栏。
+    // 大详情把账号筛选和新增账号提升到页面顶部，刷新按钮单独放到最右侧。
     onToolbarChange(
       <div className={styles.accountPanelActions}>
         <Select
@@ -142,11 +144,6 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
           options={filterOptions}
           onChange={(value) => setActivePlatform(String(value))}
         />
-        {onRefresh && (
-          <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void onRefresh()}>
-            {intl.formatMessage({ id: 'projectSpace.detail.common.refresh' })}
-          </Button>
-        )}
         {canSaveAccount && (
           // 大详情页的新增账号按钮与需求 Tab 的新增需求按钮使用统一的次级按钮样式。
           <Button icon={<PlusOutlined />} onClick={openAddAccountModal}>
@@ -155,7 +152,17 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
         )}
       </div>
     );
-    return () => onToolbarChange(null);
+    onRefreshToolbarChange?.(
+      onRefresh ? (
+        <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void onRefresh()}>
+          {intl.formatMessage({ id: 'projectSpace.detail.common.refresh' })}
+        </Button>
+      ) : null
+    );
+    return () => {
+      onToolbarChange(null);
+      onRefreshToolbarChange?.(null);
+    };
   }, [
     activePlatform,
     canSaveAccount,
@@ -163,6 +170,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
     intl,
     loading,
     onRefresh,
+    onRefreshToolbarChange,
     onToolbarChange,
     openAddAccountModal,
     t,

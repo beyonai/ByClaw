@@ -99,6 +99,7 @@ type IntegrationProps = {
   active: boolean;
   projectId: number;
   repos: RepoOption[];
+  embedded?: boolean;
 };
 
 // 后端集成环境VO:与 IntegrationEnvService.integrationEnvToVo 对齐。stages/testAccounts 落库为JSON字符串,取回后解析。
@@ -162,7 +163,7 @@ const SUITE_SOURCE_LABEL_KEYS: Record<NonNullable<TestSuite['sourceType']>, stri
   env: 'integration.suite.sourceEnv',
 };
 
-const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) => {
+const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, embedded = false }) => {
   const intl = useIntl();
   // 项目详情的所有固定界面文案统一从 detail 命名空间读取。
   const t = React.useCallback(
@@ -3102,7 +3103,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos }) =
 
   return (
     <>
-      {active ? renderIntegration() : null}
+      {active ? (embedded ? renderIntegrationConfigPanel() : renderIntegration()) : null}
       {renderIntegrationEnvModal()}
       {renderIntegrationSuiteModal()}
       {renderRunEnvSelectModal()}

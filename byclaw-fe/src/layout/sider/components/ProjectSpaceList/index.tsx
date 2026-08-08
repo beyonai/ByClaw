@@ -36,6 +36,23 @@ import styles from './index.module.less';
 
 const PROJECT_SESSION_PAGE_SIZE = 30;
 
+// 请求层会把业务 code 非 0 的响应以字符串 reject；这里优先展示接口 msg，避免创建失败只显示通用文案。
+const getProjectMutationErrorMessage = (error: unknown, fallback: string) => {
+  if (typeof error === 'string' && error.trim()) return error;
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, any>;
+    return (
+      record.msg ||
+      record.data?.msg ||
+      record.response?.data?.msg ||
+      record.message ||
+      record.response?.data?.message ||
+      fallback
+    );
+  }
+  return fallback;
+};
+
 type ProjectSessionPageState = {
   pageNum: number;
   pageSize: number;
@@ -758,13 +775,16 @@ const ProjectSpaceList: React.FC = () => {
         : submitIsDevelopProject || submitIsOperationProject || values.sharedFlag;
     const shareMembers = submitSharedFlag ? values.shareMembers || [] : [];
     try {
-      const res = await createProject({
-        projectName,
-        description: values.description?.trim(),
-        projectType: values.projectType,
-        isShare: submitSharedFlag ? 'Y' : 'N',
-        shareTargets: [],
-      });
+      const res = await createProject(
+        {
+          projectName,
+          description: values.description?.trim(),
+          projectType: values.projectType,
+          isShare: submitSharedFlag ? 'Y' : 'N',
+          shareTargets: [],
+        },
+        { responseCfg: { hideErrorTips: true } }
+      );
       const createdProjectId = getProjectIdFromSaveResponse(res);
       if (!createdProjectId) {
         message.error(t('message.createFailed'));
@@ -784,7 +804,7 @@ const ProjectSpaceList: React.FC = () => {
       return createdProjectId;
     } catch (error) {
       console.error('Failed to create project via wizard:', error);
-      message.error(t('message.createFailed'));
+      message.error(getProjectMutationErrorMessage(error, t('message.createFailed')));
       return '';
     }
   };
@@ -1153,15 +1173,18 @@ const ProjectSpaceList: React.FC = () => {
           };
         });
       } else {
-        const res = await createProject({
-          projectName,
-          description: values.description?.trim(),
-          // 新增项目空间只提交当前表单字段。
-          projectType: values.projectType,
-          isShare: submitSharedFlag ? 'Y' : 'N',
-          shareTargets: [],
-          resources: values.resources || [],
-        });
+        const res = await createProject(
+          {
+            projectName,
+            description: values.description?.trim(),
+            // 新增项目空间只提交当前表单字段。
+            projectType: values.projectType,
+            isShare: submitSharedFlag ? 'Y' : 'N',
+            shareTargets: [],
+            resources: values.resources || [],
+          },
+          { responseCfg: { hideErrorTips: true } }
+        );
         createdProjectId = getProjectIdFromSaveResponse(res);
         if (createdProjectId && submitSharedFlag && shareMembers.length) {
           await syncProjectShareMembers(createdProjectId, shareMembers);
@@ -1197,7 +1220,9 @@ const ProjectSpaceList: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to create project:', error);
-      message.error(t(editingProject ? 'message.updateFailed' : 'message.createFailed'));
+      message.error(
+        getProjectMutationErrorMessage(error, t(editingProject ? 'message.updateFailed' : 'message.createFailed'))
+      );
     } finally {
       projectSavingRef.current = false;
       setProjectCreating(false);

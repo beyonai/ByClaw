@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.dto.devloop;
 
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.util.List;
@@ -11,6 +12,8 @@ public class ProjectDTO {
 
     private String projectName;
 
+    /** 项目描述最多 500 个字符，与项目空间前端表单保持一致。 */
+    @Size(max = 500, message = "项目描述不能超过500个字符")
     private String description;
 
     private Long resourceId;

@@ -262,6 +262,10 @@
   }
 }
 
+.projectInitAlert {
+  margin: 0 20px 10px;
+}
+
 .detailBody {
   min-height: 0;
   flex: 1;
@@ -494,6 +498,7 @@
   padding: 0 6px;
   font-size: 11px;
   line-height: 20px;
+  transition: opacity 0.2s;
 }
 
 .memberCardMore {
@@ -511,6 +516,11 @@
 .dataCard:focus-within .memberCardMore {
   opacity: 1;
   pointer-events: auto;
+}
+
+.dataCard:hover .memberRoleTag,
+.dataCard:focus-within .memberRoleTag {
+  opacity: 0;
 }
 
 .memberAgentOptions {

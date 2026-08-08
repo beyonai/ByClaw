@@ -1,7 +1,7 @@
-import { Button, Empty, Spin, Tag, Typography, message } from 'antd';
-import { MessageOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Button, Checkbox, Empty, Spin, Tag, Typography, message } from 'antd';
+import { AppstoreOutlined, MessageOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useIntl } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import {
   executeOperationTask,
   listOperationTasks,
@@ -14,12 +14,16 @@ import type { ProjectSession, ProjectSpace } from '../../types';
 import { getArrayData, getPageTotal } from '../../utils';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
 import styles from '../../index.module.less';
+import SessionOverviewDrawer from '@/layout/sider/components/ProjectSpaceList/SessionOverviewDrawer';
+import TaskDetailDrawer from '@/layout/sider/components/ProjectSpaceList/TaskDetailDrawer';
+import { isCurrentUserTaskAssignee } from '@/layout/sider/components/ProjectSpaceList/taskAccess';
 
 interface Props {
   project: ProjectSpace;
   keyword?: string;
   onOpenSession?: (session: ProjectSession) => void;
   onToolbarChange?: (toolbar: React.ReactNode | null) => void;
+  onRefreshToolbarChange?: (toolbar: React.ReactNode | null) => void;
 
   /** 首屏任务加载完成后通知详情页，用于空列表时切换到需求 tab。 */
   onInitialLoad?: (hasTasks: boolean) => void;
@@ -80,19 +84,30 @@ const getTaskStatusColor = (task: DevloopTaskItem) => {
   return 'warning';
 };
 
-const ProjectTasks: React.FC<Props> = ({ project, keyword = '', onOpenSession, onToolbarChange, onInitialLoad }) => {
+const ProjectTasks: React.FC<Props> = ({
+  project,
+  keyword = '',
+  onOpenSession,
+  onToolbarChange,
+  onRefreshToolbarChange,
+  onInitialLoad,
+}) => {
   const intl = useIntl();
+  const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
   const [tasks, setTasks] = useState<DevloopTaskItem[]>([]);
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [taskBoardOpen, setTaskBoardOpen] = useState(false);
   const requestingRef = useRef(false);
   const initialLoadKeyRef = useRef<string | null>(null);
   const [templateTask, setTemplateTask] = useState<DevloopTaskItem | null>(null);
   const [templateAgentOptions, setTemplateAgentOptions] = useState<Array<{ label: string; value: string | number }>>(
     []
   );
+  const [onlyMine, setOnlyMine] = useState(project.projectType === 'develop');
+  const [detailTask, setDetailTask] = useState<DevloopTaskItem | null>(null);
 
   useEffect(() => {
     if (!templateTask || project.projectType !== 'operation') return;
@@ -118,18 +133,18 @@ const ProjectTasks: React.FC<Props> = ({ project, keyword = '', onOpenSession, o
         const response =
           project.projectType === 'operation'
             ? await listOperationTasks({
-                projectId: Number(project.projectId),
-                keyword: keyword.trim() || undefined,
-                pageNum: nextPage,
-                pageSize: PAGE_SIZE,
-              })
+              projectId: Number(project.projectId),
+              keyword: keyword.trim() || undefined,
+              pageNum: nextPage,
+              pageSize: PAGE_SIZE,
+            })
             : await listTasks({
-                projectId: Number(project.projectId),
-                pageNum: nextPage,
-                pageSize: PAGE_SIZE,
-                onlyMine: false,
-                taskName: keyword.trim() || undefined,
-              });
+              projectId: Number(project.projectId),
+              pageNum: nextPage,
+              pageSize: PAGE_SIZE,
+              onlyMine: project.projectType === 'develop' ? onlyMine : false,
+              taskName: keyword.trim() || undefined,
+            });
         const rows = getArrayData(response) as DevloopTaskItem[];
         setTasks((current) => (nextPage === 1 ? rows : [...current, ...rows]));
         setPage(nextPage);
@@ -146,7 +161,7 @@ const ProjectTasks: React.FC<Props> = ({ project, keyword = '', onOpenSession, o
         else setLoadingMore(false);
       }
     },
-    [intl, keyword, onInitialLoad, project.projectId, project.projectType]
+    [intl, keyword, onlyMine, onInitialLoad, project.projectId, project.projectType]
   );
   const loadTasksRef = useRef(loadTasks);
 
@@ -157,7 +172,7 @@ const ProjectTasks: React.FC<Props> = ({ project, keyword = '', onOpenSession, o
   useEffect(() => {
     setPage(0);
     setTotal(0);
-    const loadKey = `${project.projectId}:${project.projectType}:${keyword}`;
+    const loadKey = `${project.projectId}:${project.projectType}:${keyword}:${onlyMine}`;
     // React 严格模式会重复执行 effect，同一筛选条件只加载一次首屏任务数据。
     if (initialLoadKeyRef.current === loadKey) return undefined;
     const timer = window.setTimeout(() => {
@@ -166,16 +181,31 @@ const ProjectTasks: React.FC<Props> = ({ project, keyword = '', onOpenSession, o
     }, 250);
     // 项目或顶部搜索条件变化时重置分页，避免把旧查询结果追加到当前列表。
     return () => window.clearTimeout(timer);
-  }, [keyword, project.projectId, project.projectType]);
+  }, [keyword, onlyMine, project.projectId, project.projectType]);
 
   useEffect(() => {
     onToolbarChange?.(
+      <div className={styles.headerActions}>
+        {project.projectType === 'develop' && (
+          <Checkbox checked={onlyMine} onChange={(event) => setOnlyMine(event.target.checked)}>
+            只看我的任务
+          </Checkbox>
+        )}
+        <Button size="small" icon={<AppstoreOutlined />} onClick={() => setTaskBoardOpen(true)}>
+          任务视图
+        </Button>
+      </div>
+    );
+    onRefreshToolbarChange?.(
       <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void loadTasks(1)}>
         {intl.formatMessage({ id: 'projectSpace.detail.refresh' })}
       </Button>
     );
-    return () => onToolbarChange?.(null);
-  }, [intl, loadTasks, loading, onToolbarChange]);
+    return () => {
+      onToolbarChange?.(null);
+      onRefreshToolbarChange?.(null);
+    };
+  }, [intl, loadTasks, loading, onRefreshToolbarChange, onToolbarChange, onlyMine, project.projectType]);
 
   const hasMore = total > tasks.length || (total === 0 && tasks.length === PAGE_SIZE);
   const sentinelRef = useInfiniteScroll(() => {
@@ -205,13 +235,26 @@ const ProjectTasks: React.FC<Props> = ({ project, keyword = '', onOpenSession, o
     });
   };
 
+  const openTaskDetail = (task: DevloopTaskItem) => {
+    setDetailTask(task);
+  };
+
   return (
     <div className={styles.dataPanel}>
       <Spin spinning={loading}>
         {tasks.length ? (
           <div className={styles.dataCardGrid}>
             {tasks.map((task) => (
-              <article key={`${task.taskId || task.sessionId}`} className={styles.dataCard}>
+              <article
+                key={`${task.taskId || task.sessionId}`}
+                className={styles.dataCard}
+                role="button"
+                tabIndex={0}
+                onClick={() => openTaskDetail(task)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') openTaskDetail(task);
+                }}
+              >
                 <div className={styles.dataCardHeader}>
                   <Typography.Text strong ellipsis={{ tooltip: task.title }}>
                     {task.title || intl.formatMessage({ id: 'projectSpace.tasks.unnamed' })}
@@ -231,7 +274,10 @@ const ProjectTasks: React.FC<Props> = ({ project, keyword = '', onOpenSession, o
                         size="small"
                         className={styles.taskExecuteButton}
                         aria-label="执行任务"
-                        onClick={() => setTemplateTask(task)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setTemplateTask(task);
+                        }}
                       >
                         {intl.formatMessage({ id: 'projectSpace.operation.execute.action' })}
                       </Button>
@@ -247,7 +293,15 @@ const ProjectTasks: React.FC<Props> = ({ project, keyword = '', onOpenSession, o
                     '-'}
                 </Typography.Paragraph>
                 {task.sessionId && !isOperationPendingTask(task) && (
-                  <Button type="link" size="small" icon={<MessageOutlined />} onClick={() => openTaskSession(task)}>
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<MessageOutlined />}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openTaskSession(task);
+                    }}
+                  >
                     {intl.formatMessage({ id: 'projectSpace.tasks.openSession' })}
                   </Button>
                 )}
@@ -318,6 +372,30 @@ const ProjectTasks: React.FC<Props> = ({ project, keyword = '', onOpenSession, o
           });
           setTemplateTask(null);
           void loadTasks(1);
+        }}
+      />
+      <SessionOverviewDrawer
+        open={taskBoardOpen}
+        onClose={() => setTaskBoardOpen(false)}
+        projectId={project.projectId}
+        operationProject={project.projectType === 'operation'}
+        canEnterSession={(task) => Boolean(task.sessionId)}
+        onEnterSession={(task) => {
+          if (task.sessionId) openTaskSession(task);
+          setTaskBoardOpen(false);
+        }}
+      />
+      <TaskDetailDrawer
+        task={detailTask}
+        onClose={() => setDetailTask(null)}
+        canEnterSession={detailTask ? isCurrentUserTaskAssignee(detailTask, userInfo) : false}
+        onEnterSession={(task) => {
+          openTaskSession(task as DevloopTaskItem);
+          setDetailTask(null);
+        }}
+        onViewSession={(task) => {
+          openTaskSession(task as DevloopTaskItem);
+          setDetailTask(null);
         }}
       />
     </div>

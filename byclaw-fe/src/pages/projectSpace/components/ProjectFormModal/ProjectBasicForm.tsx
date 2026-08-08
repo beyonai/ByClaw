@@ -1,12 +1,12 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
-import { Button, Form, Input, Modal, Select, Spin, Switch, Tabs, Tooltip, message } from 'antd';
+import { Button, Form, Input, Modal, Radio, Select, Spin, Switch, Tooltip, message } from 'antd';
 import type { FormInstance } from 'antd';
 import { CloseCircleFilled, PlusOutlined } from '@ant-design/icons';
 import { useIntl, useSelector } from '@umijs/max';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import { listProjectMembers } from '@/service/devloop';
 import { queryAuthDoc } from '@/service/knowledgeCenter';
-import { listOntologyBases } from '@/service/ontology';
+import { listOntologyBases, pageOntologyResources } from '@/service/ontology';
 import { ResourceTypeMap } from '@/constants/resource';
 import type { ProjectResourcePayload, ProjectResourceType } from '@/service/devloop';
 import { DEFAULT_PROJECT_TYPE_OPTION, PROJECT_TYPE_OPTIONS } from '../../constants';
@@ -293,11 +293,26 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
               ResourceTypeMap.knowledgeBaseTerm,
             ],
           };
-          const [knowledgeOwner, knowledgeAuthorized, ontologyPersonal, ontologyEnterprise] = await Promise.all([
+          const [knowledgeOwner, knowledgeAuthorized, ontologyPersonal, ontologyEnterprise, ontologyResourcePersonal, ontologyResourceEnterprise] = await Promise.all([
             queryAuthDoc({ ...knowledgeQuery, type: 'owner' }),
             queryAuthDoc({ ...knowledgeQuery, type: 'authorize' }),
             listOntologyBases({ ownerType: 'personal' }),
             listOntologyBases({ ownerType: 'enterprise' }),
+            // 本体中心卡片使用资源分页接口；同时读取该接口，覆盖本体库列表接口未返回的企业本体资源。
+            pageOntologyResources({
+              ownerType: 'personal',
+              resourceBizTypeList: ['VIEW', 'OBJECT'],
+              statusList: [0, 1, 2, 3, 4, 5],
+              pageNum: 1,
+              pageSize: 1000,
+            }),
+            pageOntologyResources({
+              ownerType: 'enterprise',
+              resourceBizTypeList: ['VIEW', 'OBJECT'],
+              statusList: [0, 1, 2, 3, 4, 5],
+              pageNum: 1,
+              pageSize: 1000,
+            }),
           ]);
           if (cancelled) return;
           const knowledgeMap = new Map<string, { value: string; label: string }>();
@@ -321,15 +336,32 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
               knowledgeMap.set(`${value}`, { value: `${value}`, label });
           });
           const ontologyMap = new Map<string, { value: string; label: string }>();
-          [ontologyPersonal, ontologyEnterprise].forEach((response) => {
-            getArray(response, response?.list, response?.records, response?.rows, response?.data).forEach(
-              (item: any) => {
-                const value = item.baseId ?? item.resourceId ?? item.id;
-                const label = item.displayName || item.resourceName || item.name;
-                if (value !== undefined && value !== null && label)
-                  ontologyMap.set(`${value}`, { value: `${value}`, label });
-              }
-            );
+          [
+            ontologyPersonal,
+            ontologyEnterprise,
+            ontologyResourcePersonal,
+            ontologyResourceEnterprise,
+          ].forEach((response) => {
+            // 本体模块接口可能直接返回数组，也可能包在 data/list/rows 中，统一兼容后合并个人和企业本体。
+            getArray(
+              response,
+              response?.list,
+              response?.records,
+              response?.rows,
+              response?.data,
+              response?.data?.list,
+              response?.data?.records,
+              response?.data?.rows,
+              response?.data?.data,
+              response?.data?.data?.list,
+              response?.data?.data?.records,
+              response?.data?.data?.rows
+            ).forEach((item: any) => {
+              const value = item.baseId ?? item.resourceId ?? item.id;
+              const label = item.displayName || item.resourceName || item.name;
+              if (value !== undefined && value !== null && label)
+                ontologyMap.set(`${value}`, { value: `${value}`, label });
+            });
           });
           setKnowledgeResourceOptions(Array.from(knowledgeMap.values()));
           setOntologyResourceOptions(Array.from(ontologyMap.values()));
@@ -461,8 +493,8 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
                   (resourceType === 'digital_employee'
                     ? agentLabelById.get(resourceId)
                     : resourceType === 'knowledge'
-                    ? knowledgeResourceOptions.find((option) => option.value === resourceId)?.label
-                    : ontologyResourceOptions.find((option) => option.value === resourceId)?.label) || undefined,
+                      ? knowledgeResourceOptions.find((option) => option.value === resourceId)?.label
+                      : ontologyResourceOptions.find((option) => option.value === resourceId)?.label) || undefined,
                 sortNo: index,
               }))
           ),
@@ -550,21 +582,26 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
             <Input maxLength={100} placeholder={formT('placeholder.projectName')} />
           </Form.Item>
           <Form.Item name="description" label={formT('field.description')}>
-            <Input.TextArea rows={3} maxLength={500} placeholder={formT('placeholder.description')} />
+            {/* 项目描述限制 500 字，默认展示两行，避免新建项目弹窗被描述字段撑高。 */}
+            <Input.TextArea
+              rows={2}
+              maxLength={500}
+              showCount
+              placeholder={formT('placeholder.description')}
+            />
           </Form.Item>
-          <Form.Item label={formT('field.projectType')}>
-            <Tabs
+          <Form.Item name="projectType" label={formT('field.projectType')}>
+            <Radio.Group
               className={styles.projectTypeTabs}
-              activeKey={`${projectType || visibleProjectTypeOptions[0]?.value || ''}`}
-              animated={false}
-              items={visibleProjectTypeOptions.map((option) => ({
-                key: option.value,
+              optionType="button"
+              buttonStyle="solid"
+              options={visibleProjectTypeOptions.map((option) => ({
+                value: option.value,
                 label: option.label,
                 disabled:
                   projectTypeLoading || (isEditingDefaultProject ? option.value !== 'default' : option.disabled),
               }))}
-              tabBarGutter={8}
-              onChange={(value) => handleProjectTypeChange(value as ProjectSpace['projectType'])}
+              onChange={(event) => handleProjectTypeChange(event.target.value as ProjectSpace['projectType'])}
             />
           </Form.Item>
           <Form.Item label={formT('field.resources')}>

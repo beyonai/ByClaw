@@ -6,6 +6,7 @@ import {
   GithubOutlined,
   PlusOutlined,
   RightOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import { useCallback, useEffect, useState } from 'react';
 import { useIntl } from '@umijs/max';
@@ -16,10 +17,11 @@ import styles from '../../index.module.less';
 
 interface Props {
   project: ProjectSpace;
+  onRefreshToolbarChange?: (toolbar: React.ReactNode | null) => void;
 }
 
 // 项目资源页使用独立轻量列表，避免把侧栏完整页面嵌入四列卡片后产生宽度和定位冲突。
-const ProjectResources: React.FC<Props> = ({ project }) => {
+const ProjectResources: React.FC<Props> = ({ project, onRefreshToolbarChange }) => {
   const intl = useIntl();
   const [files, setFiles] = useState<DevloopProjectSpaceFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
@@ -40,7 +42,17 @@ const ProjectResources: React.FC<Props> = ({ project }) => {
     void loadFiles();
   }, [loadFiles]);
 
-  const renderCardHeader = (icon: React.ReactNode, title: string, description: string) => (
+  useEffect(() => {
+    // 资源 Tab 的刷新入口统一放到项目详情顶部，重新读取共享文件列表。
+    onRefreshToolbarChange?.(
+      <Button size="small" icon={<ReloadOutlined />} loading={loadingFiles} onClick={() => void loadFiles()}>
+        {intl.formatMessage({ id: 'projectSpace.detail.refresh' })}
+      </Button>
+    );
+    return () => onRefreshToolbarChange?.(null);
+  }, [intl, loadFiles, loadingFiles, onRefreshToolbarChange]);
+
+  const renderCardHeader = (icon: React.ReactNode, title: string, description: string, showAdd = true) => (
     <header className={styles.resourceCardHeader}>
       <div className={styles.resourceCardTitleBlock}>
         <span className={styles.resourceCardIcon}>{icon}</span>
@@ -49,14 +61,19 @@ const ProjectResources: React.FC<Props> = ({ project }) => {
           <Typography.Text type="secondary">{description}</Typography.Text>
         </div>
       </div>
-      <Button type="text" size="small" icon={<PlusOutlined />} className={styles.resourceCardAddButton}>
-        {intl.formatMessage({ id: 'common.add' })}
-      </Button>
+      {showAdd && (
+        <Button type="text" size="small" icon={<PlusOutlined />} className={styles.resourceCardAddButton}>
+          {intl.formatMessage({ id: 'common.add' })}
+        </Button>
+      )}
     </header>
   );
 
   const empty = (
     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'chatResource.empty' })} />
+  );
+  const boundKnowledge = (project.resources || project.boundResources || []).filter(
+    (resource) => resource.resourceType === 'knowledge'
   );
 
   return (
@@ -65,24 +82,25 @@ const ProjectResources: React.FC<Props> = ({ project }) => {
         {renderCardHeader(
           <FileTextOutlined />,
           intl.formatMessage({ id: 'projectSpace.detail.resource.sharedSpace' }),
-          intl.formatMessage({ id: 'projectSpace.resources.sharedFilesDescription' })
+          intl.formatMessage({ id: 'projectSpace.resources.sharedFilesDescription' }),
+          false
         )}
         <Spin spinning={loadingFiles} className={styles.resourceCategoryBody}>
           {files.length
             ? files.map((file) => (
-              <div key={file.fileId} className={styles.resourceSimpleItem}>
-                <span className={styles.resourceSimpleIcon}>DOC</span>
-                <div className={styles.resourceSimpleMain}>
-                  <Typography.Text strong ellipsis={{ tooltip: file.fileName }}>
-                    {file.fileName}
-                  </Typography.Text>
-                  <Typography.Text type="secondary" ellipsis>
-                    {file.fileUrl || intl.formatMessage({ id: 'projectSpace.detail.resource.sharedSpace' })}
-                  </Typography.Text>
+                <div key={file.fileId} className={styles.resourceSimpleItem}>
+                  <span className={styles.resourceSimpleIcon}>DOC</span>
+                  <div className={styles.resourceSimpleMain}>
+                    <Typography.Text strong ellipsis={{ tooltip: file.fileName }}>
+                      {file.fileName}
+                    </Typography.Text>
+                    <Typography.Text type="secondary" ellipsis>
+                      {file.fileUrl || intl.formatMessage({ id: 'projectSpace.detail.resource.sharedSpace' })}
+                    </Typography.Text>
+                  </div>
+                  <RightOutlined />
                 </div>
-                <RightOutlined />
-              </div>
-            ))
+              ))
             : !loadingFiles && empty}
         </Spin>
       </section>
@@ -93,7 +111,24 @@ const ProjectResources: React.FC<Props> = ({ project }) => {
           intl.formatMessage({ id: 'projectSpace.resources.sharedKnowledge' }),
           intl.formatMessage({ id: 'projectSpace.resources.sharedKnowledgeDescription' })
         )}
-        <div className={styles.resourceCategoryBody}>{empty}</div>
+        <div className={styles.resourceCategoryBody}>
+          {boundKnowledge.length
+            ? boundKnowledge.map((resource) => (
+                <div key={`${resource.resourceId}`} className={styles.resourceSimpleItem}>
+                  <span className={styles.resourceSimpleIcon}>KB</span>
+                  <div className={styles.resourceSimpleMain}>
+                    <Typography.Text strong ellipsis={{ tooltip: resource.resourceName }}>
+                      {resource.resourceName || resource.resourceId}
+                    </Typography.Text>
+                    <Typography.Text type="secondary" ellipsis>
+                      当前项目绑定知识库
+                    </Typography.Text>
+                  </div>
+                  <RightOutlined />
+                </div>
+              ))
+            : empty}
+        </div>
       </section>
 
       <section className={styles.resourceCategoryCard}>
@@ -105,21 +140,21 @@ const ProjectResources: React.FC<Props> = ({ project }) => {
         <div className={styles.resourceCategoryBody}>
           {project.projectType === 'develop' && project.repos?.length
             ? project.repos.map((repo) => (
-              <div key={`${repo.repoId || repo.repoFullName}`} className={styles.resourceSimpleItem}>
-                <span className={`${styles.resourceSimpleIcon} ${styles.resourceRepoIcon}`}>
-                  <GithubOutlined />
-                </span>
-                <div className={styles.resourceSimpleMain}>
-                  <Typography.Text strong ellipsis={{ tooltip: repo.repoFullName }}>
-                    {repo.repoFullName}
-                  </Typography.Text>
-                  <Typography.Text type="secondary" ellipsis>
-                    {repo.repoUrl || repo.defaultBranch || '-'}
-                  </Typography.Text>
+                <div key={`${repo.repoId || repo.repoFullName}`} className={styles.resourceSimpleItem}>
+                  <span className={`${styles.resourceSimpleIcon} ${styles.resourceRepoIcon}`}>
+                    <GithubOutlined />
+                  </span>
+                  <div className={styles.resourceSimpleMain}>
+                    <Typography.Text strong ellipsis={{ tooltip: repo.repoFullName }}>
+                      {repo.repoFullName}
+                    </Typography.Text>
+                    <Typography.Text type="secondary" ellipsis>
+                      {repo.repoUrl || repo.defaultBranch || '-'}
+                    </Typography.Text>
+                  </div>
+                  <RightOutlined />
                 </div>
-                <RightOutlined />
-              </div>
-            ))
+              ))
             : empty}
         </div>
       </section>

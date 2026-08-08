@@ -18,6 +18,23 @@ import styles from './index.module.less';
 const getProjectIdFromResponse = (response: any) =>
   `${response?.projectId || response?.id || response?.data?.projectId || response?.data?.id || ''}`;
 
+// 请求层可能以字符串、Error 或响应对象 reject，统一优先提取后端返回的 msg。
+const getProjectMutationErrorMessage = (error: unknown, fallback: string) => {
+  if (typeof error === 'string' && error.trim()) return error;
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, any>;
+    return (
+      record.msg ||
+      record.data?.msg ||
+      record.response?.data?.msg ||
+      record.message ||
+      record.response?.data?.message ||
+      fallback
+    );
+  }
+  return fallback;
+};
+
 const normalizeMemberId = (member: ProjectShareMember | any) =>
   member?.userId ?? String(member?.id || '').replace(/^user_/, '');
 
@@ -79,14 +96,17 @@ const ProjectCenterList: React.FC = () => {
       setCreateLoading(true);
       const isShared = values.projectType === 'develop' || values.projectType === 'operation' || values.sharedFlag;
       try {
-        const response = await createProject({
-          projectName: values.projectName.trim(),
-          description: values.description?.trim(),
-          projectType: values.projectType,
-          isShare: isShared ? 'Y' : 'N',
-          shareTargets: [],
-          resources: values.resources || [],
-        });
+        const response = await createProject(
+          {
+            projectName: values.projectName.trim(),
+            description: values.description?.trim(),
+            projectType: values.projectType,
+            isShare: isShared ? 'Y' : 'N',
+            shareTargets: [],
+            resources: values.resources || [],
+          },
+          { responseCfg: { hideErrorTips: true } }
+        );
         const projectId = getProjectIdFromResponse(response);
         if (!projectId) throw new Error('项目创建成功但未返回项目 ID');
 
@@ -110,8 +130,10 @@ const ProjectCenterList: React.FC = () => {
         navigate(`/projectSpace?projectId=${encodeURIComponent(projectId)}`);
       } catch (error: any) {
         message.error(
-          error?.message ||
+          getProjectMutationErrorMessage(
+            error,
             intl.formatMessage({ id: 'projectSpace.message.createFailed', defaultMessage: '创建项目失败' })
+          )
         );
       } finally {
         setCreateLoading(false);

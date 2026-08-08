@@ -3,6 +3,7 @@ import { Form, Modal } from 'antd';
 import { useIntl } from '@umijs/max';
 import type { ProjectTypeOption } from '../../hooks/useProjectTypeConfig';
 import ProjectBasicForm, { type ProjectBasicFormHandle, type ProjectFormValues } from './ProjectBasicForm';
+import styles from './index.module.less';
 
 export type { ProjectFormValues, ProjectShareMember } from './ProjectBasicForm';
 
@@ -46,6 +47,7 @@ const ProjectFormModal: React.FC<Props> = ({
 
   return (
     <Modal
+      className={styles.projectFormModal}
       destroyOnClose
       title={title || formT(projectId ? 'editTitle' : 'createTitle')}
       open={open}

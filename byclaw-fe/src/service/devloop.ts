@@ -187,7 +187,9 @@ export type DevloopProjectRepo = {
 };
 
 // 项目管理
-export const createProject = (data: DevloopProjectPayload) => POST<any>('/byaiService/project/create', data);
+// 创建项目由页面自行展示业务错误信息，允许调用方关闭请求层的通用错误弹窗。
+export const createProject = (data: DevloopProjectPayload, config?: ConfigType) =>
+  POST<any>('/byaiService/project/create', data, config);
 
 export const listProjects = (data?: { keyword?: string; pageNum?: number; pageSize?: number }, config?: ConfigType) =>
   POST<any>('/byaiService/project/list', data || {}, config);
