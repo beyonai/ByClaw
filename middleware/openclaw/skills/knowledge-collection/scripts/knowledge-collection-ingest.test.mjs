@@ -1073,6 +1073,156 @@ async function testUploadDocViaDatasetController() {
   }
 }
 
+// 建一个形如 <tmp>/<sessionId>/<runName>/20260728_211755 的会话目录，用于时间戳推导。
+function makeTimestampedSessionDir(timestamp = "20260728_211755") {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-run-ts-"));
+  const sessionDir = path.join(base, "session-1", "adapter-weixin-articles", timestamp);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  return { base, sessionDir };
+}
+
+async function testDefaultDirectoryPathUsesRunTimestamp() {
+  const server = createServer();
+  const port = await server.listen();
+  const { base, sessionDir } = makeTimestampedSessionDir();
+  try {
+    const result = await runCli(
+      [
+        "upload-doc",
+        "--allow-private-resource",
+        "--file-url", `http://127.0.0.1:${port}/doc.pdf`,
+        "--knowledge-base-resource-id", "90001",
+        "--session-dir", sessionDir,
+        "--confirmed-knowledge-base-resource-id", "90001",
+        "--confirmed-directory-path", "/20260728_211755/",
+      ],
+      {},
+      port,
+    );
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    const upload = server.requests.find((r) => r.url === "/byaiService/datasetController/uploadFiles");
+    assert.ok(upload, "expected /datasetController/uploadFiles request");
+    assert.match(upload.bodyText, /name="directoryPath"\r\n\r\n\/20260728_211755\//);
+  } finally {
+    await server.close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+}
+
+async function testDefaultDirectoryPathFallsBackToRootWithoutTimestamp() {
+  const server = createServer();
+  const port = await server.listen();
+  // 目录末段不是时间戳（mkdtemp 随机名），应保持历史默认值 "/"。
+  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-no-ts-"));
+  try {
+    const result = await runCli(
+      [
+        "upload-doc",
+        "--dry-run",
+        "--allow-private-resource",
+        "--file-url", `http://127.0.0.1:${port}/doc.pdf`,
+        "--knowledge-base-resource-id", "90001",
+        "--session-dir", sessionDir,
+      ],
+      {},
+      port,
+    );
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json?.directoryPath, "/");
+  } finally {
+    await server.close();
+    fs.rmSync(sessionDir, { recursive: true, force: true });
+  }
+}
+
+async function testExplicitDirectoryPathOverridesRunTimestamp() {
+  const server = createServer();
+  const port = await server.listen();
+  const { base, sessionDir } = makeTimestampedSessionDir();
+  try {
+    const result = await runCli(
+      [
+        "upload-doc",
+        "--dry-run",
+        "--allow-private-resource",
+        "--file-url", `http://127.0.0.1:${port}/doc.pdf`,
+        "--knowledge-base-resource-id", "90001",
+        "--session-dir", sessionDir,
+        "--directory-path", "/imports",
+      ],
+      {},
+      port,
+    );
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json?.directoryPath, "/imports");
+  } finally {
+    await server.close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+}
+
+async function testRunTimestampDefaultStillGatedByConfirmation() {
+  const server = createServer();
+  const port = await server.listen();
+  const { base, sessionDir } = makeTimestampedSessionDir();
+  try {
+    // 确认值仍是旧的 "/"，与解析出的 /<时间戳>/ 不一致 → 必须拒绝且不发上传请求。
+    const result = await runCli(
+      [
+        "upload-doc",
+        "--allow-private-resource",
+        "--file-url", `http://127.0.0.1:${port}/doc.pdf`,
+        "--knowledge-base-resource-id", "90001",
+        "--session-dir", sessionDir,
+        "--confirmed-knowledge-base-resource-id", "90001",
+        "--confirmed-directory-path", "/",
+      ],
+      {},
+      port,
+    );
+    assert.notEqual(result.code, 0, "expected confirmation mismatch to fail");
+    assert.match(result.stderr || result.stdout, /confirmed-directory-path/);
+    assert.equal(
+      server.requests.some((r) => r.url === "/byaiService/datasetController/uploadFiles"),
+      false,
+      "must not upload when the confirmed target disagrees",
+    );
+  } finally {
+    await server.close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+}
+
+// dry-run 会把解析出的目标回显在 confirmation 里，调用方据此拿到要回传的确认值。
+async function testDryRunAdvertisesTimestampedConfirmationTarget() {
+  const server = createServer();
+  const port = await server.listen();
+  const { base, sessionDir } = makeTimestampedSessionDir("20260807_143052");
+  try {
+    const result = await runCli(
+      [
+        "upload-doc",
+        "--dry-run",
+        "--allow-private-resource",
+        "--file-url", `http://127.0.0.1:${port}/doc.pdf`,
+        "--knowledge-base-resource-id", "90001",
+        "--session-dir", sessionDir,
+      ],
+      {},
+      port,
+    );
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json?.directoryPath, "/20260807_143052/");
+    assert.equal(
+      result.json?.confirmation?.requiredArguments?.["confirmed-directory-path"],
+      "/20260807_143052/",
+    );
+  } finally {
+    await server.close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+}
+
 async function testUploadDocRejectsUnsupportedType() {
   const server = createServer();
   const port = await server.listen();
@@ -1452,6 +1602,11 @@ await testUploadImagesToDatasetWithoutBuild();
 await testUploadImagesSkipsUnsafeAndMissingImages();
 await testUploadImagesRequiresMarkdownAndResourceId();
 await testUploadDocViaDatasetController();
+await testDefaultDirectoryPathUsesRunTimestamp();
+await testDefaultDirectoryPathFallsBackToRootWithoutTimestamp();
+await testExplicitDirectoryPathOverridesRunTimestamp();
+await testRunTimestampDefaultStillGatedByConfirmation();
+await testDryRunAdvertisesTimestampedConfirmationTarget();
 await testUploadDocRejectsUnsupportedType();
 await testUploadDocMissingLocalFileErrors();
 await testUploadDocRequiresKnowledgeBaseResourceId();

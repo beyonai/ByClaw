@@ -123,7 +123,7 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
     && npm config set fetch-retry-mintimeout 20000 --global \
     && npm config set fetch-retry-maxtimeout 120000 --global
 
-ARG OPENCLI_VERSION=2.1.16
+ARG OPENCLI_VERSION=2.1.17
 ARG OPENCLI_EXTENSION_VERSION=2.1.16
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \

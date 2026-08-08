@@ -9,9 +9,14 @@
 - 先用 `list-kb` 发现可选知识库。目标有歧义时不得静默选择：要求用户明确提供目标
   `--knowledge-base-resource-id`，或展示候选并让用户确认目标。
 - `ingest` 与 `upload-doc` 执行前，都必须展示解析后的目标目录并获得用户明确确认；脚本采用的
-  默认 `/` 也必须展示，不得把缺省目录视为用户已经确认。真实写入时必须把已经确认的目标通过
+  默认目录也必须展示，不得把缺省目录视为用户已经确认。真实写入时必须把已经确认的目标通过
   `--confirmed-knowledge-base-resource-id` 与 `--confirmed-directory-path` 传给脚本，且确认值必须与解析后的
   知识库资源 ID 和目录完全一致；`--dry-run` 只展示所需确认值，不执行写入。
+- 未显式给出 `--directory-path` 时，默认目录取自会话目录末段的运行时间戳，即 `/<YYYYMMDD_HHMMSS>/`
+  （如 `/20260728_211755/`），使同一批采集产物落在同一个知识库目录下、与会话目录一一对应。时间戳来自
+  `--session-dir`（或 `--output-dir`）的路径片段而非当前时间：确认值必须与解析结果完全相等，现取时间戳
+  两次不会一致。无法从路径推导出时间戳时回退到根目录 `/`。默认值由脚本解析，先跑 `--dry-run` 读取
+  `confirmation.requiredArguments` 即可拿到该次要回传的确认值，不要自行拼接时间戳。
 - 处理当前采集批次时，`ingest` 之前必须先按 [post-processing.md](post-processing.md) 改写选中正文里的 `images/`
   相对链接；相对链接在知识库侧无法解析。入库必须使用持久化模式：目标确认后先用 `upload-images` 把图片上传到
   同一知识库同一目录，把返回的 `linkMap` 写入会话 `.post-processing-inputs/`，再用

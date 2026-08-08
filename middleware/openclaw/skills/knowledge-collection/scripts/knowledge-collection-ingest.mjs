@@ -1196,6 +1196,38 @@ async function uploadResources(candidates, args) {
   return requestMultipart(uploadUrl, formData);
 }
 
+// 采集会话目录末段的运行时间戳，形如 /by/.sessions/<sessionId>/<runName>/20260728_211755/。
+const RUN_TIMESTAMP_PATTERN = /^\d{8}_\d{6}$/;
+
+// 从会话目录路径里取运行时间戳。刻意不用 Date.now() 兜底：
+// assertConfirmedImportTarget 要求调用方回传的 --confirmed-directory-path 与解析结果
+// 完全相等，调用时现取的时间戳两次不会一致，确认环节必然对不上。
+// 复用会话目录的时间戳则是确定值，同一批采集产物落到同一个知识库目录，可反复推导。
+function resolveRunTimestamp(args) {
+  const candidates = [...asArray(args["session-dir"]), pick(args, "output-dir")];
+  for (const candidate of candidates) {
+    const dir = firstNonEmpty(candidate);
+    if (!dir) {
+      continue;
+    }
+    // 时间戳通常是末段，但回退目录可能再往下嵌一层，故整条路径倒序找第一个匹配段。
+    const segments = path.resolve(expandHome(dir)).split(path.sep).filter(Boolean);
+    for (let i = segments.length - 1; i >= 0; i--) {
+      if (RUN_TIMESTAMP_PATTERN.test(segments[i])) {
+        return segments[i];
+      }
+    }
+  }
+  return "";
+}
+
+// 入库目标目录的默认值：能推导出运行时间戳就用 /<时间戳>/，否则保持历史行为的根目录。
+// 显式 --directory-path 始终优先，此函数只提供兜底。
+function defaultIngestDirectoryPath(args) {
+  const timestamp = resolveRunTimestamp(args);
+  return timestamp ? `/${timestamp}/` : "/";
+}
+
 function confirmedImportTarget(resourceId, directoryPath) {
   return {
     knowledgeBaseResourceId: resourceId,
@@ -1361,7 +1393,11 @@ async function uploadImagesToDataset(images, args) {
   if (!resourceId) {
     throw new Error("图片入库必须提供 --knowledge-base-resource-id(知识库资源 ID)；可先用 list-kb 查询并让用户选择");
   }
-  const directoryPath = firstNonEmpty(pick(args, "image-directory-path"), pick(args, "directory-path"), "/");
+  const directoryPath = firstNonEmpty(
+    pick(args, "image-directory-path"),
+    pick(args, "directory-path"),
+    defaultIngestDirectoryPath(args),
+  );
   const baseUrl = normalizeDatasetBaseUrl(args["base-url"]);
   const uploadUrl = await endpoint("/datasetController/uploadFiles");
   const candidates = images.map((image) => ({
@@ -1427,7 +1463,7 @@ async function uploadDocsToDataset(candidates, args) {
   if (!resourceId) {
     throw new Error("文件直传入库必须提供 --knowledge-base-resource-id(知识库资源 ID)；可先用 list-kb 查询并让用户选择");
   }
-  const directoryPath = firstNonEmpty(pick(args, "directory-path"), "/");
+  const directoryPath = firstNonEmpty(pick(args, "directory-path"), defaultIngestDirectoryPath(args));
   assertConfirmedImportTarget(args, resourceId, directoryPath);
   const uploadUrl = await endpoint("/datasetController/uploadFiles");
   const buildUrl = await endpoint("/datasetController/build");
@@ -1839,7 +1875,11 @@ function buildTargetConfig(args, stdinJson, task) {
     ),
     knowledgeBaseId: pick(args, "knowledge-base-id", targetConfigJson.knowledgeBaseId || task.knowledgeBaseId),
     knowledgeBaseName: pick(args, "knowledge-base-name", targetConfigJson.knowledgeBaseName || task.knowledgeBaseName),
-    directoryPath: firstNonEmpty(pick(args, "directory-path"), targetConfigJson.directoryPath, "/"),
+    directoryPath: firstNonEmpty(
+      pick(args, "directory-path"),
+      targetConfigJson.directoryPath,
+      defaultIngestDirectoryPath(args),
+    ),
   });
 }
 
