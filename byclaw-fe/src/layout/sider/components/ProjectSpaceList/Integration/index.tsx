@@ -74,13 +74,9 @@ import styles from './index.module.less'; // 集成测试专用类
 import parentStyles from '../index.module.less'; // 共享 chrome 类(与渠道/来源卡片共用,DRY 保留在父级)
 import { DEFAULT_TESTER_CONFIG } from './mock';
 // 契约常量与规范页共用一份,避免弹框文案与规范页各自漂移。
-import {
-  E2E_RUN_HARD_RULES,
-  E2E_SPEC_PATH,
-  E2E_SPEC_SECTIONS,
-  E2E_SUITE_HARD_RULES,
-} from '@/pages/spec/contracts';
+import { E2E_RUN_HARD_RULES, E2E_SPEC_PATH, E2E_SPEC_SECTIONS, E2E_SUITE_HARD_RULES } from '@/pages/spec/contracts';
 import { copyTextToClipboard } from '@/utils/copy';
+import { getRuntimeActualUrl } from '@/utils';
 import type {
   IntegrationRunResult,
   IntegrationStage,
@@ -178,8 +174,9 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
   );
   // 规范深链:弹框/面板只放「违反即坏」的最小契约,完整契约与 demo 在规范页。
   // 新窗口打开,不打断当前填写;锚点让用户直接落到自己那一节,不用在长页里翻。
+  // 必须过 getRuntimeActualUrl:部署前缀(如 /beyond/)是运行时 publicPath,裸路由拼出来会 404。
   const openSpec = (section: string) => {
-    window.open(`${E2E_SPEC_PATH}#${section}`, '_blank', 'noopener');
+    window.open(getRuntimeActualUrl(`${E2E_SPEC_PATH}#${section}`), '_blank', 'noopener');
   };
   const { setDetailPanel, clearDetailPanel } = React.useContext(SiderContentContext);
   // 集成测试配置(环境+用例集)内容多,沿用需求渠道配置模式:入口按钮打开右侧覆盖面板。
@@ -588,11 +585,9 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
     if (!runTargetSuite || !runSelectedEnvId) return;
     setRunStarting(true);
     try {
-      const res = (await startIntegrationRun(
-        runTargetSuite.suiteId,
-        runSelectedEnvId,
-        runExecutorMode,
-      )) as { runId: string } | null;
+      const res = (await startIntegrationRun(runTargetSuite.suiteId, runSelectedEnvId, runExecutorMode)) as {
+        runId: string;
+      } | null;
       const runId = res?.runId;
       if (!runId) {
         message.error(t('integration.run.startFailed'));
@@ -792,7 +787,9 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
     if (!kw) return true;
     const suiteName = integrationSuiteList.find((s) => s.suiteId === r.suiteId)?.suiteName ?? '';
     return [suiteName, r.branch, r.createByName, r.reason].some((v) =>
-      String(v ?? '').toLowerCase().includes(kw)
+      String(v ?? '')
+        .toLowerCase()
+        .includes(kw)
     );
   });
 
@@ -1537,9 +1534,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, repos, emb
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
                 description={
-                  integrationHistoryList.length
-                    ? t('runBoard.emptyFiltered')
-                    : t('integration.history.empty')
+                  integrationHistoryList.length ? t('runBoard.emptyFiltered') : t('integration.history.empty')
                 }
               />
             ),

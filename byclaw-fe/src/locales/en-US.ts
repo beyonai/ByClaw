@@ -2456,7 +2456,7 @@ export default {
   'projectSpace.detail.integration.spec.rule.failedVsError':
     'Separate failed from error: failing cases = failed (kicked back to coding), a build/deploy error that never reached the cases = error.',
   'projectSpace.detail.integration.spec.rule.terminal':
-    'Write a terminal status even on abnormal exit (trap as a safety net), or the run stays in running until the heartbeat times out.',
+    'Write a terminal status even on abnormal exit (trap as a safety net), or the run stays in running until the platform times it out.',
   'projectSpace.detail.integration.spec.openFull': 'Read the full spec ↗',
   'projectSpace.detail.integration.spec.openDemo': 'Download the demo project ↗',
   'projectSpace.detail.integration.envModal.title': 'Associate Integration Environment',
@@ -3170,15 +3170,15 @@ export default {
     'Identify which role you are and read only that part. Click a card to jump to the matching section.',
   'spec.integrationTest.roles.platform.name': 'Platform',
   'spec.integrationTest.roles.platform.who': 'Handled by ByClaw',
-  'spec.integrationTest.roles.platform.d1': 'Injects BYCLAW_E2E_RESULT_DIR (unique per branch + round)',
-  'spec.integrationTest.roles.platform.d2': 'Injects business test account env vars',
-  'spec.integrationTest.roles.platform.d3': 'Reads only status.json to decide state and kickback',
+  'spec.integrationTest.roles.platform.d1': 'Injects BYCLAW_E2E_RESULT_DIR (unique per run)',
+  'spec.integrationTest.roles.platform.d2': 'Injects business test account env vars (backend-run mode)',
+  'spec.integrationTest.roles.platform.d3': 'Reads status.json to decide state and kickback',
   'spec.integrationTest.roles.platform.action': 'See what gets injected',
   'spec.integrationTest.roles.orchestrator.name': 'Orchestrator',
   'spec.integrationTest.roles.orchestrator.who': 'If you write the environment script',
-  'spec.integrationTest.roles.orchestrator.d1': 'Creates dirs, writes meta, pulls/builds/deploys',
+  'spec.integrationTest.roles.orchestrator.d1': 'Creates dirs, pulls/builds/deploys',
   'spec.integrationTest.roles.orchestrator.d2': 'Runs each suite and merges their JUnit reports',
-  'spec.integrationTest.roles.orchestrator.d3': 'Atomically writes status.json + refreshes heartbeat',
+  'spec.integrationTest.roles.orchestrator.d3': 'Atomically writes status.json',
   'spec.integrationTest.roles.orchestrator.action': 'Read the result spec →',
   'spec.integrationTest.roles.suite.name': 'Suite author',
   'spec.integrationTest.roles.suite.who': 'If you write the test project',
@@ -3195,14 +3195,14 @@ export default {
   'spec.integrationTest.demo.suite.run': './run.sh',
   'spec.integrationTest.demo.orchestrator.title': 'Orchestration script demo (bash)',
   'spec.integrationTest.demo.orchestrator.desc':
-    'Includes atomic status.json writes, heartbeat refresh, multi-suite JUnit merging, and a terminal-state fallback on crash. Runs standalone without a suite.',
+    'Includes atomic status.json writes, multi-suite JUnit merging, and a terminal-state fallback on crash. Runs standalone without a suite.',
   'spec.integrationTest.demo.orchestrator.run': 'BYCLAW_E2E_RESULT_DIR=/tmp/e2e-run-1 ./orchestrate.sh',
   'spec.integrationTest.demo.tip':
     'Note: the suite demo ships a deliberately failing case, so a run normally ends as failed. Remove it before using the demo in your own project.',
   'spec.integrationTest.suite.intro':
     'You own only this one test project: produce a JUnit report and express pass/fail via the exit code. The run-level directory, state machine, and status.json are maintained by the orchestrator — you do not write them.',
   'spec.integrationTest.orchestrator.intro':
-    'The platform injects this run\'s result root directory via BYCLAW_E2E_RESULT_DIR (unique per branch + round). The orchestrator creates directories, writes meta, runs each suite, merges their JUnit reports, and finally writes status.json atomically. The platform decides state only from status.json — it never guesses from whether a file exists.',
+    "The platform injects this run's result root directory via BYCLAW_E2E_RESULT_DIR (unique per branch + round). The orchestrator creates directories, writes meta, runs each suite, merges their JUnit reports, and finally writes status.json atomically. The platform decides state only from status.json — it never guesses from whether a file exists.",
   'spec.integrationTest.orchestrator.treeTitle': '① Result directory structure',
   'spec.integrationTest.orchestrator.statusTitle': '② status.json contract (source of truth, write atomically)',
   'spec.integrationTest.orchestrator.enumTitle': '③ status enum (closed set)',

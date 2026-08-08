@@ -48,6 +48,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.TesterConfigDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
+import com.iwhalecloud.byai.manager.dto.devloop.E2eStatusDto;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationResultDto;
 import com.iwhalecloud.byai.manager.dto.devloop.RequirementPresplitDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.RequirementPresplitResultDto;
@@ -1042,6 +1043,9 @@ public class DevloopApplicationService {
     /** 测试员工超时上限:超过后仍无 tester DONE/REJECT 打点则判 timeout,避免 run 永久 running。 */
     private static final long INTEGRATION_TESTER_TIMEOUT_MS = 60L * 60 * 1000;
 
+    /** 结果根目录,与 IntegrationRunExecutor.E2E_RESULT_DIR 同一口径:提示词下发它,这里回填给看板。 */
+    private static final String E2E_RESULT_DIR = "/by/.sessions/%s/e2e-result";
+
     /**
      * 集成测试结果回收:扫「已下发测试员工、仍 running」的执行,按会话 [PHASE] tester 打点判定终态。 tester DONE=通过、tester REJECT=失败(读结构化结果文件补
      * total/passed/failed,失败记 kickbackTo 供打回引擎接手); 无打点且超时判 timeout。收尾只写本 run,不驱动重工——重工仍由 runKickbackSweep 幂等处理。 由
@@ -1086,18 +1090,35 @@ public class DevloopApplicationService {
      * 落 run 终态:读结构化结果文件补 total/passed/failed/skipped(缺失按 0);失败/超时记 coder 打回归因, 供 runKickbackSweep 接手驱动重工。durationSec 从
      * startedAt 到现在计算。
      */
-    private void applyIntegrationResult(IntegrationRun run, String status, String reason) {
-        IntegrationResultDto result = tryReadIntegrationResult(run);
+    private void applyIntegrationResult(IntegrationRun run, String markerStatus, String reason) {
+        // status.json 是规范页定义的真相源,信息比旧五字段文件全(带 message/截图路径);缺失才回退。
+        E2eStatusDto e2eStatus = tryReadE2eStatus(run);
+        IntegrationResultDto result = e2eStatus != null ? toResultDto(e2eStatus) : tryReadIntegrationResult(run);
+        // 打点决定"员工干完了没",status.json 决定"结果是什么"。二者只在 error 这类细分上不同:
+        // 打点只有 DONE/REJECT 两档,分不出"用例失败"与"构建/环境错误没跑到用例",而打回口径不同。
+        String status = refineStatus(markerStatus, e2eStatus, run);
+        if (e2eStatus != null && StringUtils.isNotBlank(e2eStatus.getReason())) {
+            reason = e2eStatus.getReason();
+        }
         int total = result != null && result.getTotal() != null ? result.getTotal() : 0;
         int passed = result != null && result.getPassed() != null ? result.getPassed() : 0;
         int failed = result != null && result.getFailed() != null ? result.getFailed() : 0;
         int skipped = result != null && result.getSkipped() != null ? result.getSkipped() : 0;
+        // 算不平以分项之和为准,规则由 Totals.reconciledTotal 单点持有(说明见那里)。
+        int sum = passed + failed + skipped;
+        if (total != sum) {
+            logger.warn("[IntegrationResult] runId={} 结果算不平, total={} 分项和={},以分项和为准", run.getRunId(),
+                total, sum);
+            total = sum;
+        }
         run.setTotal(total);
         run.setPassed(passed);
         run.setFailed(failed);
         run.setSkipped(skipped);
+        run.setResultDir(e2eStatus != null ? E2E_RESULT_DIR.formatted(run.getSessionId()) : run.getResultDir());
         // 结果详情弹窗按 suites[].failedCases 展示失败用例;从结构化结果拼一条套件结果,保留失败用例名。
-        run.setSuitesJson(buildSuitesJson(run, status, result));
+        run.setSuitesJson(e2eStatus != null ? buildSuitesJsonFromStatus(run, status, e2eStatus)
+            : buildSuitesJson(run, status, result));
         run.setStatus(status);
         if (!"passed".equals(status)) {
             run.setKickbackTo("coder");
@@ -1108,6 +1129,51 @@ public class DevloopApplicationService {
         integrationRunService.update(run);
         logger.info("[IntegrationResult] runId={} 收尾 status={} total={} failed={}", run.getRunId(), status,
             run.getTotal(), run.getFailed());
+    }
+
+    /**
+     * status.json 版 suites 拼装:比旧结果文件多带失败摘要、截图路径与报告/日志路径,
+     * 结果详情弹窗因此能显示"为什么挂"而不只是"哪条挂"。artifacts 是相对结果根目录的路径。
+     */
+    private String buildSuitesJsonFromStatus(IntegrationRun run, String status, E2eStatusDto e2eStatus) {
+        IntegrationSuite suite = integrationSuiteService.findById(run.getSuiteId());
+        String suiteName = suite != null ? StringUtils.defaultString(suite.getSuiteName()) : "";
+        JSONArray suites = new JSONArray();
+        List<E2eStatusDto.Suite> statusSuites = e2eStatus.getSuites();
+        if (statusSuites == null || statusSuites.isEmpty()) {
+            // 员工写了 totals 但没写 suites 明细:仍产出一条,避免详情弹窗空白。
+            return buildSuitesJson(run, status, toResultDto(e2eStatus));
+        }
+        for (E2eStatusDto.Suite s : statusSuites) {
+            JSONArray failedCases = new JSONArray();
+            if (s.getFailedCases() != null) {
+                for (E2eStatusDto.FailedCase fc : s.getFailedCases()) {
+                    JSONObject item = new JSONObject(true);
+                    item.put("caseId", StringUtils.defaultString(fc.getCaseName()));
+                    item.put("message", StringUtils.defaultString(fc.getMessage()));
+                    JSONArray artifacts = new JSONArray();
+                    if (fc.getArtifacts() != null) {
+                        artifacts.addAll(fc.getArtifacts());
+                    }
+                    item.put("artifacts", artifacts);
+                    failedCases.add(item);
+                }
+            }
+            JSONObject suiteResult = new JSONObject(true);
+            suiteResult.put("suiteId", StringUtils.defaultIfBlank(s.getId(), String.valueOf(run.getSuiteId())));
+            suiteResult.put("name", suiteName);
+            suiteResult.put("status", StringUtils.defaultIfBlank(s.getStatus(),
+                "passed".equals(status) ? "passed" : "failed"));
+            suiteResult.put("total", nvl(run.getTotal()));
+            suiteResult.put("passed", nvl(run.getPassed()));
+            suiteResult.put("failed", nvl(run.getFailed()));
+            suiteResult.put("durationSec", nvl(run.getDurationSec()));
+            suiteResult.put("reportPath", StringUtils.defaultString(s.getReport()));
+            suiteResult.put("logPath", StringUtils.defaultString(s.getLog()));
+            suiteResult.put("failedCases", failedCases);
+            suites.add(suiteResult);
+        }
+        return suites.toJSONString();
     }
 
     /** 把测试员工的结构化结果拼成前端 suites 契约(单套件一条),失败用例名映射为 failedCases[].caseId。 */
@@ -1137,6 +1203,68 @@ public class DevloopApplicationService {
         JSONArray suites = new JSONArray();
         suites.add(suiteResult);
         return suites.toJSONString();
+    }
+
+    /** status.json 里 run 级终态的封闭取值;非终态(running/preparing 等)不参与收尾判定。 */
+    private static final Set<String> E2E_TERMINAL_STATUS = Set.of("passed", "failed", "error", "timeout", "cancelled");
+
+    /**
+     * 用 status.json 细化打点得出的终态。打点是收尾闸门(员工是否干完),这里只在员工明确写了
+     * 终态且与打点不同时采信文件——典型是打点 REJECT 但实际是 error(构建/环境错,没跑到用例)。
+     * 超时收尾不细化:那是平台判的,员工没写完文件,采信它会把超时说成通过。
+     */
+    private String refineStatus(String markerStatus, E2eStatusDto e2eStatus, IntegrationRun run) {
+        if (e2eStatus == null || "timeout".equals(markerStatus)) {
+            return markerStatus;
+        }
+        String fileStatus = StringUtils.lowerCase(StringUtils.trimToEmpty(e2eStatus.getStatus()));
+        if (!E2E_TERMINAL_STATUS.contains(fileStatus) || fileStatus.equals(markerStatus)) {
+            return markerStatus;
+        }
+        logger.info("[IntegrationResult] runId={} status.json({}) 细化打点终态({})", run.getRunId(), fileStatus,
+            markerStatus);
+        return fileStatus;
+    }
+
+    private E2eStatusDto tryReadE2eStatus(IntegrationRun run) {
+        try {
+            LoginInfo owner = loginApplicationService.getLoginInfo(run.getCreateBy());
+            if (owner == null || StringUtils.isBlank(owner.getUserCode())) {
+                return null;
+            }
+            return taskStateReader.readE2eStatus(owner.getUserCode(), run.getSessionId());
+        }
+        catch (Exception e) {
+            logger.warn("[IntegrationResult] 读 status.json 失败, runId={}, sessionId={}", run.getRunId(),
+                run.getSessionId(), e);
+            return null;
+        }
+    }
+
+    /** status.json 的 totals/失败用例名摊平成旧五字段结构,让下游计数与看板逻辑保持单一路径。 */
+    private IntegrationResultDto toResultDto(E2eStatusDto status) {
+        IntegrationResultDto dto = new IntegrationResultDto();
+        E2eStatusDto.Totals totals = status.getTotals();
+        if (totals != null) {
+            // 这里就算平,不把自相矛盾的 total 往下游传。
+            dto.setTotal(totals.reconciledTotal());
+            dto.setPassed(totals.getPassed());
+            dto.setFailed(totals.getFailed());
+            dto.setSkipped(totals.getSkipped());
+        }
+        List<String> names = new ArrayList<>();
+        if (status.getSuites() != null) {
+            for (E2eStatusDto.Suite suite : status.getSuites()) {
+                if (suite.getFailedCases() == null) {
+                    continue;
+                }
+                for (E2eStatusDto.FailedCase fc : suite.getFailedCases()) {
+                    names.add(StringUtils.defaultString(fc.getCaseName()));
+                }
+            }
+        }
+        dto.setFailedCases(names);
+        return dto;
     }
 
     private IntegrationResultDto tryReadIntegrationResult(IntegrationRun run) {
@@ -1433,6 +1561,12 @@ public class DevloopApplicationService {
      * 方法名以 get 开头,保证 SSH 往返期间不占用写事务与数据库连接。
      */
     public ResponseUtil<Map<String, Object>> getIntegrationRunReport(Long runId) {
+        // tester 模式的报告已由员工拷进沙箱结果目录,直接读;读不到才回退 SSH 去环境机取
+        // (backend 直跑模式的报告只在环境机上)。
+        Map<String, Object> sandboxReport = trySandboxReport(runId);
+        if (sandboxReport != null) {
+            return ResponseUtil.successResponse(sandboxReport);
+        }
         IntegrationRunExecutor.ReportContent report = integrationRunService.getRunReport(runId);
         if (report.getError() != null) {
             return ResponseUtil.fail(report.getError());
@@ -1441,6 +1575,40 @@ public class DevloopApplicationService {
         result.put("path", report.getPath());
         result.put("content", report.getContent());
         return ResponseUtil.successResponse(result);
+    }
+
+    /**
+     * 从沙箱结果目录读报告。路径取 status.json 里该套件的 report 字段(相对结果根目录),
+     * 不猜路径:员工可能按不同套件ID命名。取不到返回 null 让调用方走 SSH 回退。
+     */
+    private Map<String, Object> trySandboxReport(Long runId) {
+        try {
+            IntegrationRun run = integrationRunService.getRun(runId);
+            if (run == null || run.getSessionId() == null) {
+                return null;
+            }
+            LoginInfo owner = loginApplicationService.getLoginInfo(run.getCreateBy());
+            if (owner == null || StringUtils.isBlank(owner.getUserCode())) {
+                return null;
+            }
+            E2eStatusDto status = taskStateReader.readE2eStatus(owner.getUserCode(), run.getSessionId());
+            if (status == null || status.getSuites() == null || status.getSuites().isEmpty()) {
+                return null;
+            }
+            String reportPath = status.getSuites().get(0).getReport();
+            String content = taskStateReader.readE2eArtifactText(owner.getUserCode(), run.getSessionId(), reportPath);
+            if (StringUtils.isBlank(content)) {
+                return null;
+            }
+            Map<String, Object> result = new HashMap<>();
+            result.put("path", reportPath);
+            result.put("content", content);
+            return result;
+        }
+        catch (Exception e) {
+            logger.warn("[IntegrationReport] 读沙箱报告失败, runId={}", runId, e);
+            return null;
+        }
     }
 
     /** 查询某套件的历史执行列表。 */

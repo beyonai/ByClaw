@@ -572,6 +572,63 @@ public class IntegrationRunExecutor {
         return sb.toString();
     }
 
+    /** 结果根目录:落在沙箱会话目录下,后端用 UserFS 直接读,无需为取报告再开远程读文件接口。 */
+    private static final String E2E_RESULT_DIR = "/by/.sessions/%s/e2e-result";
+
+    /** onEnv 时用例在环境机上跑,产物先落这里,再由员工拷回沙箱结果根目录。按会话隔离,避免并发覆盖。 */
+    private static final String ENV_MACHINE_RESULT_DIR = "/tmp/byclaw-e2e-%s";
+
+    /**
+     * 结果回流契约段。目录结构与 status.json 字段对齐规范页 /spec/integrationTest
+     * (前端 pages/spec/contracts.ts 是同一份契约的展示面),两处必须同步改。
+     * 产物必须落沙箱而非环境机:后端只从沙箱读,留在环境机上等于没写。
+     */
+    private String buildResultContractSection(Long sessionId, IntegrationSuite suite, boolean onEnv) {
+        String dir = E2E_RESULT_DIR.formatted(sessionId);
+        String suiteId = String.valueOf(suite.getSuiteId());
+        StringBuilder sb = new StringBuilder("## 结果回流(硬性契约,见规范页 /spec/integrationTest)\n");
+        sb.append("本次运行的结果根目录:").append(dir).append("\n")
+            .append("先建好目录:`mkdir -p ").append(dir).append("/reports ").append(dir).append("/logs ")
+            .append(dir).append("/artifacts/").append(suiteId).append("`\n\n")
+            .append("产物按下面结构落,平台按此约定读:\n")
+            .append("- `status.json` 状态真相源(最后写,见下)\n")
+            .append("- `reports/").append(suiteId).append(".xml` JUnit XML 报告(用运行命令的 junitxml 之类参数产出)\n")
+            .append("- `logs/").append(suiteId).append(".log` 运行日志(标准输出重定向即可)\n")
+            .append("- `artifacts/").append(suiteId).append("/<用例ID>.png` 失败证据截图,文件名用用例ID,平台按名挂到失败用例\n\n");
+        if (onEnv) {
+            // 用例在环境机上跑,产物也生成在那边;不拷回沙箱后端就读不到(后端只读沙箱)。
+            String envDir = ENV_MACHINE_RESULT_DIR.formatted(sessionId);
+            sb.append("用例在环境机上运行,产物先落环境机的 ").append(envDir)
+                .append("(在 ssh 会话里 `mkdir -p ").append(envDir).append("/reports ").append(envDir)
+                .append("/logs ").append(envDir).append("/artifacts/").append(suiteId).append("`),")
+                .append("跑完必须拷回沙箱:\n")
+                .append("`scp -r ...:").append(envDir).append("/* ").append(dir).append("/`")
+                .append("(ssh 参数同上,私钥/口令一致)\n")
+                .append("平台只读沙箱,产物留在环境机上等于没写。status.json 可以直接写在沙箱侧,拷完再写。\n\n");
+        }
+        sb.append("最后原子写 status.json(先写 .tmp 再 mv,避免平台读到半截 JSON):\n")
+            .append("`... > ").append(dir).append("/status.json.tmp && mv ")
+            .append(dir).append("/status.json.tmp ").append(dir).append("/status.json`\n\n")
+            .append("内容(status 取 passed/failed/error 之一:用例有失败用 failed;没跑到用例的构建/环境错误用 error):\n")
+            .append("```json\n")
+            .append("{\"schemaVersion\":1,\"status\":\"passed\",\"startedAt\":\"2026-08-07T10:00:00+08:00\",")
+            .append("\"finishedAt\":\"2026-08-07T10:05:00+08:00\",")
+            .append("\"totals\":{\"total\":61,\"passed\":60,\"failed\":0,\"skipped\":1},")
+            .append("\"suites\":[{\"id\":\"").append(suiteId).append("\",\"status\":\"passed\",")
+            .append("\"report\":\"reports/").append(suiteId).append(".xml\",")
+            .append("\"log\":\"logs/").append(suiteId).append(".log\",\"failedCases\":[]}],")
+            .append("\"reason\":\"\"}\n")
+            .append("```\n")
+            // 实测员工把 pytest 尾行的 passed 数当成了 total,导致 total<passed+skipped 数据自相矛盾。
+            .append("totals 必须算平:total = passed + failed + skipped。别把测试框架尾行里的 passed 数当 total。\n")
+            .append("有失败用例时,suites[].failedCases 每项形如 ")
+            .append("`{\"case\":\"test_login\",\"message\":\"断言失败摘要\",\"artifacts\":[\"artifacts/")
+            .append(suiteId).append("/test_login.png\"]}`,artifacts 写相对结果根目录的路径。\n")
+            .append("若用例集没产出 JUnit XML、或失败了却没有截图,照实跑完并在回复里点明该用例集不符合规范页要求,")
+            .append("便于用例集作者补齐。\n\n");
+        return sb.toString();
+    }
+
     /** 沙箱内环境机凭据文件路径。私钥与口令分开命名,员工按文件名就知道该用哪种登录方式。 */
     // 带 /by 前缀:UserFS 路径与沙箱内员工看到的路径是同一口径(对齐 INTEGRATION_RESULT_PATH),
     // 少了前缀会写到别处,员工按提示词里的路径就找不到文件。
@@ -689,7 +746,6 @@ public class IntegrationRunExecutor {
         String branch = StringUtils.defaultString(suite.getBranch());
         String runCommand = StringUtils.defaultString(suite.getRunCommand());
         String address = StringUtils.defaultString(env.getAddress());
-        String resultPath = "/by/.sessions/" + sessionId + "/integration-result.json";
         return "请执行以下集成/回归测试任务:\n"
             + "## 测试任务信息\n"
             + "- 测试用例集:" + StringUtils.defaultString(suite.getSuiteName()) + "\n"
@@ -705,13 +761,21 @@ public class IntegrationRunExecutor {
                 : "## 需要克隆时的落地路径\n"
                     + "克隆到 /by/.sessions/" + sessionId + "/ 下(按仓库名建子目录);沿用开发检出目录时无需克隆。\n\n")
             + "## 运行方式\n"
-            + "在用例所在目录执行运行命令:" + runCommand + "\n\n"
+            + "在用例所在目录执行运行命令:" + runCommand + "\n"
+            // 规范页约定编排脚本从 BYCLAW_E2E_RESULT_DIR 读结果根目录,按规范写的用例集/脚本
+            // 依赖这个变量;不导出会让它们把产物落到默认位置,平台就读不到。
+            + "执行前先导出结果根目录环境变量(按规范写的用例集脚本会读它):\n"
+            // onEnv 时命令跑在环境机上,变量必须导在那一侧,指向环境机本地目录;跑完再拷回沙箱。
+            + (onEnv
+                ? "`export BYCLAW_E2E_RESULT_DIR=" + ENV_MACHINE_RESULT_DIR.formatted(sessionId)
+                    + "`(在 ssh 会话里导出,即环境机上的目录)\n"
+                : "`export BYCLAW_E2E_RESULT_DIR=" + E2E_RESULT_DIR.formatted(sessionId) + "`\n")
+            + "\n"
+            + buildResultContractSection(sessionId, suite, onEnv)
             + "## 强制要求\n"
             + "- acp 下发任务时必须调用 skill:self-developed-rules。\n"
-            + "- 测试完成后,必须把结构化结果写入 " + resultPath + ",JSON 字段:total(用例总数)、passed(通过数)、"
-            + "failed(失败数)、skipped(跳过数)、failedCases(失败用例名数组,可空)。\n"
             + "- 结果确定后在会话中打点:全部通过输出 `[PHASE] tester DONE`;存在失败输出 `[PHASE] tester REJECT->coder` "
-            + "并简述失败原因,供研发闭环打回重工。";
+            + "并简述失败原因,供研发闭环打回重工。打点必须在结果文件写完之后。";
     }
 
     // 高危命令拦截:不执行,落一条 error step(退出码 -1,logText 记原因),返回失败结论让编排层停下。

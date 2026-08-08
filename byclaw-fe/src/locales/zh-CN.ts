@@ -2419,7 +2419,7 @@ export default {
   'projectSpace.detail.integration.spec.rule.failedVsError':
     '区分 failed 与 error：用例失败 = failed（打回编码），没跑到用例的构建/部署错误 = error。',
   'projectSpace.detail.integration.spec.rule.terminal':
-    '异常退出也要写终态（trap 兜底），否则本轮会一直挂在 running 直到心跳超时。',
+    '异常退出也要写终态（trap 兜底），否则本轮会一直挂在 running 直到平台判超时。',
   'projectSpace.detail.integration.spec.openFull': '查看完整规范 ↗',
   'projectSpace.detail.integration.spec.openDemo': '下载 demo 工程 ↗',
   'projectSpace.detail.integration.envModal.title': '关联集成测试环境',
@@ -3106,15 +3106,15 @@ export default {
   'spec.integrationTest.roles.intro': '先确认你是哪一类人,只读自己那份。点卡片直接跳到对应章节。',
   'spec.integrationTest.roles.platform.name': '平台',
   'spec.integrationTest.roles.platform.who': 'ByClaw 负责,你不用管',
-  'spec.integrationTest.roles.platform.d1': '注入 BYCLAW_E2E_RESULT_DIR(按分支+轮次唯一)',
-  'spec.integrationTest.roles.platform.d2': '注入业务测试账号环境变量',
-  'spec.integrationTest.roles.platform.d3': '只读 status.json 判断状态与打回',
+  'spec.integrationTest.roles.platform.d1': '注入 BYCLAW_E2E_RESULT_DIR(每次执行唯一)',
+  'spec.integrationTest.roles.platform.d2': '注入业务测试账号环境变量(后端直跑模式)',
+  'spec.integrationTest.roles.platform.d3': '读 status.json 判断状态与打回',
   'spec.integrationTest.roles.platform.action': '了解注入了什么',
   'spec.integrationTest.roles.orchestrator.name': '编排层',
   'spec.integrationTest.roles.orchestrator.who': '你若写环境编排脚本',
-  'spec.integrationTest.roles.orchestrator.d1': '建目录、写 meta、拉码构建部署',
+  'spec.integrationTest.roles.orchestrator.d1': '建目录、拉码构建部署',
   'spec.integrationTest.roles.orchestrator.d2': '逐个跑用例集并汇总各套件 JUnit',
-  'spec.integrationTest.roles.orchestrator.d3': '原子写 status.json + 刷新心跳',
+  'spec.integrationTest.roles.orchestrator.d3': '原子写 status.json',
   'spec.integrationTest.roles.orchestrator.action': '读结果规范 →',
   'spec.integrationTest.roles.suite.name': '用例集作者',
   'spec.integrationTest.roles.suite.who': '你若写测试工程',
@@ -3131,7 +3131,7 @@ export default {
   'spec.integrationTest.demo.suite.run': './run.sh',
   'spec.integrationTest.demo.orchestrator.title': '编排脚本 demo(bash)',
   'spec.integrationTest.demo.orchestrator.desc':
-    '含 status.json 原子写、心跳刷新、多套件 JUnit 汇总、异常兜底写终态。不装用例集也能独立跑通汇总链路。',
+    '含 status.json 原子写、多套件 JUnit 汇总、异常兜底写终态。不装用例集也能独立跑通汇总链路。',
   'spec.integrationTest.demo.orchestrator.run': 'BYCLAW_E2E_RESULT_DIR=/tmp/e2e-run-1 ./orchestrate.sh',
   'spec.integrationTest.demo.tip':
     '提示:用例集 demo 含一条故意失败的用例,所以整轮结果正常是 failed。接到自己项目前记得删掉它。',
