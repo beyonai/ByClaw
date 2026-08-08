@@ -88,6 +88,43 @@ const getRequirementStatusColor = (status: unknown) => {
   return 'warning';
 };
 
+const getRequirementStatusOrder = (item: Record<string, any>) => {
+  const status = `${item.status || item.action || ''}`.trim().toLowerCase();
+  if (['done', 'completed', 'finished', 'closed', 'failed', 'error', 'cancelled', '已完成', '完成', '失败'].includes(status)) {
+    return 2;
+  }
+  if (
+    ['launched', 'doing', 'running', 'in_progress', 'processing', 'started', 'paused', '进行中', '暂停'].includes(
+      status
+    ) ||
+    Boolean(item.sessionId)
+  ) {
+    return 1;
+  }
+  // todo、pending、created 以及历史空状态都视为待开始，统一排在最前面。
+  return 0;
+};
+
+const getRequirementCreateTime = (item: Record<string, any>) => {
+  const value = item.createTime || item.createdAt || item.createDate || item.sourceCreateTime;
+  if (!value) return 0;
+  const parsed = dayjs(value);
+  return parsed.isValid() ? parsed.valueOf() : 0;
+};
+
+const sortRequirements = (items: any[]) =>
+  [...items].sort((left, right) => {
+    const statusDifference = getRequirementStatusOrder(left) - getRequirementStatusOrder(right);
+    if (statusDifference !== 0) return statusDifference;
+    const timeDifference = getRequirementCreateTime(right) - getRequirementCreateTime(left);
+    if (timeDifference !== 0) return timeDifference;
+    // 创建时间相同时按业务主键倒序，保证排序结果稳定且最新记录优先。
+    return (
+      Number(right.requirementId || right.itemId || right.sourceId || 0) -
+      Number(left.requirementId || left.itemId || left.sourceId || 0)
+    );
+  });
+
 const ProjectRequirements: React.FC<Props> = ({
   project,
   keyword = '',
@@ -133,7 +170,7 @@ const ProjectRequirements: React.FC<Props> = ({
             })
             : await listRequirementsByProject(Number(project.projectId), search.trim());
         const rows = getArrayData(response);
-        setRequirements((current) => (nextPage === 1 ? rows : [...current, ...rows]));
+        setRequirements((current) => sortRequirements(nextPage === 1 ? rows : [...current, ...rows]));
         setPage(nextPage);
         const loadedCount = (nextPage - 1) * PAGE_SIZE + rows.length;
         setTotal(

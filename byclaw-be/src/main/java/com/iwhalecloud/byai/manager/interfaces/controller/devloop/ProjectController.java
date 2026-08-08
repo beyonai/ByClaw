@@ -197,6 +197,13 @@ public class ProjectController {
         return ResponseUtil.successResponse();
     }
 
+    /** 解除项目成员已绑定的数字员工。 */
+    @PostMapping("/member/unbindAgent")
+    public ResponseUtil<Void> unbindMemberAgent(@RequestBody Map<String, Object> params) {
+        projectApplicationService.unbindMemberAgent(params);
+        return ResponseUtil.successResponse();
+    }
+
     /**
      * 新增项目仓库
      *

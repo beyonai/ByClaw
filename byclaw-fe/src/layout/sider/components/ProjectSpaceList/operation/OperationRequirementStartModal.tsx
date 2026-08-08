@@ -89,11 +89,14 @@ const OperationRequirementStartModal: React.FC<OperationRequirementStartModalPro
     <TaskTemplateModal
       open={open}
       agentOptions={agentOptions}
+      agentOptionsOnly
       agentGroupOptions={agentGroupOptions}
       initialTitle={requirement?.title || requirement?.requirementName}
       initialDescription={requirement?.description || requirement?.sourceDescription}
       knowledgeOptions={knowledgeOptions}
+      knowledgeOptionsOnly
       ontologyOptions={ontologyOptions}
+      ontologyOptionsOnly
       accountOptions={accountOptions}
       applyText="确定并启动任务"
       applying={loading}

@@ -383,7 +383,7 @@ const ProjectDetail: React.FC<Props> = ({
                   },
                 }}
               >
-                {/* 更多按钮只在名称区域悬停时显示，项目操作统一收口到菜单中。 */}
+                {/* 更多按钮常驻显示，项目编辑和删除操作统一收口到菜单中。 */}
                 <Button
                   type="text"
                   className={styles.detailProjectMoreButton}

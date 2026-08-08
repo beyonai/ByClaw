@@ -1,6 +1,6 @@
 import { AppstoreOutlined } from '@ant-design/icons';
 import { Button, message } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { getProject } from '@/service/devloop';
 import TaskTemplateModal, { type TaskTemplateApplyResult } from '.';
 
@@ -11,9 +11,16 @@ interface Props {
 }
 
 // 任务模板只出现在运营项目会话；项目类型由后端详情确认，避免普通和研发项目误展示入口。
-const TaskTemplateEntry: React.FC<Props> = ({ projectId, employees = [], onApply }) => {
+const TaskTemplateEntry: React.FC<Props> = ({ projectId, onApply }) => {
   const [visible, setVisible] = useState(false);
   const [operationProject, setOperationProject] = useState(false);
+  const [projectKnowledgeOptions, setProjectKnowledgeOptions] = useState<Array<{ label: string; value: string | number }>>(
+    []
+  );
+  const [projectOntologyOptions, setProjectOntologyOptions] = useState<Array<{ label: string; value: string | number }>>(
+    []
+  );
+  const [projectAgentOptions, setProjectAgentOptions] = useState<Array<{ label: string; value: string | number }>>([]);
 
   useEffect(() => {
     let active = true;
@@ -23,26 +30,45 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, employees = [], onApply
     }
     void getProject(projectId)
       .then((project: any) => {
-        if (active) setOperationProject((project?.projectType || project?.type) === 'operation');
+        if (!active) return;
+        setOperationProject((project?.projectType || project?.type) === 'operation');
+        setProjectKnowledgeOptions(
+          (project?.resources || project?.boundResources || [])
+            .filter((resource: any) => resource.resourceType === 'knowledge')
+            .map((resource: any) => ({
+              value: resource.resourceId,
+              label: resource.resourceName || `${resource.resourceId}`,
+            }))
+        );
+        setProjectOntologyOptions(
+          (project?.resources || project?.boundResources || [])
+            .filter((resource: any) => resource.resourceType === 'ontology')
+            .map((resource: any) => ({
+              value: resource.resourceId,
+              label: resource.resourceName || `${resource.resourceId}`,
+            }))
+        );
+        setProjectAgentOptions(
+          (project?.resources || project?.boundResources || [])
+            .filter((resource: any) => resource.resourceType === 'digital_employee')
+            .map((resource: any) => ({
+              value: resource.resourceId,
+              label: resource.resourceName || `${resource.resourceId}`,
+            }))
+        );
       })
       .catch(() => {
-        if (active) setOperationProject(false);
+        if (active) {
+          setOperationProject(false);
+          setProjectKnowledgeOptions([]);
+          setProjectOntologyOptions([]);
+          setProjectAgentOptions([]);
+        }
       });
     return () => {
       active = false;
     };
   }, [projectId]);
-
-  const agentOptions = useMemo(
-    () =>
-      employees
-        .map((employee) => ({
-          label: employee.agentName || employee.resourceName || employee.name,
-          value: employee.agentId || employee.resourceId || employee.id,
-        }))
-        .filter((item) => item.label && item.value),
-    [employees]
-  );
 
   if (!operationProject) return null;
 
@@ -53,7 +79,12 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, employees = [], onApply
       </Button>
       <TaskTemplateModal
         open={visible}
-        agentOptions={agentOptions}
+        agentOptions={projectAgentOptions}
+        agentOptionsOnly
+        knowledgeOptions={projectKnowledgeOptions}
+        knowledgeOptionsOnly
+        ontologyOptions={projectOntologyOptions}
+        ontologyOptionsOnly
         onCancel={() => setVisible(false)}
         onApply={(result) => {
           onApply(result);

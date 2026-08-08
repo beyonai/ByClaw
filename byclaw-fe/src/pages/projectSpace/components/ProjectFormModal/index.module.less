@@ -146,4 +146,22 @@
   color: #45546a;
   font-size: 13px;
   font-weight: 500;
+
+  &::before {
+    margin-right: 4px;
+    color: #ff4d4f;
+    content: '*';
+  }
+}
+
+.projectResourceFieldError {
+  :global(.ant-select-selector) {
+    border-color: #ff4d4f !important;
+  }
+}
+
+.projectResourceError {
+  margin-top: 4px;
+  color: #ff4d4f;
+  font-size: 12px;
 }

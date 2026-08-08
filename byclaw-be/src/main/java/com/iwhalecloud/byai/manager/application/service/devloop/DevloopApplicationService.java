@@ -3699,7 +3699,9 @@ public class DevloopApplicationService {
                     StringUtils.defaultString(template.getTemplateType()));
             }
             if (dto.getConfig() != null) {
-                templateExtensions.put(OperationTaskSessionService.EXT_CONFIG, JSON.toJSONString(dto.getConfig()));
+                // 执行配置中的本体统一补齐 ID、code、名称和描述，供会话对象详情及 Worker 直接消费。
+                templateExtensions.put(OperationTaskSessionService.EXT_CONFIG,
+                    JSON.toJSONString(enrichOperationTaskOntologyConfig(dto.getConfig())));
             }
             operationTaskSessionService.saveTaskExtensions(task.getSessionId(), templateExtensions);
             taskExt = operationTaskSessionService.getExtValues(task.getSessionId());
@@ -3755,6 +3757,106 @@ public class DevloopApplicationService {
         result.put("taskId", task.getSessionId());
         result.put("sessionId", task.getSessionId());
         return ResponseUtil.successResponse(result);
+    }
+
+    /** 补全任务模板配置中的本体对象；前端字段不完整时优先从资源表读取真实元数据。 */
+    private Map<String, Object> enrichOperationTaskOntologyConfig(Map<String, Object> config) {
+        Map<String, Object> enrichedConfig = new LinkedHashMap<>(config);
+        Object ontology = config.get("ontology");
+        if (ontology == null) {
+            return enrichedConfig;
+        }
+        List<?> ontologyValues = ontology instanceof List<?> list ? list : List.of(ontology);
+        List<Map<String, Object>> enrichedOntologies = new ArrayList<>();
+        for (Object value : ontologyValues) {
+            enrichedOntologies.add(enrichOperationTaskOntology(value));
+        }
+        enrichedConfig.put("ontology", enrichedOntologies);
+        return enrichedConfig;
+    }
+
+    /** 将单个本体值归一为同时兼容资源、本体对象和通用详情字段的结构。 */
+    private Map<String, Object> enrichOperationTaskOntology(Object value) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (value instanceof Map<?, ?> valueMap) {
+            valueMap.forEach((key, itemValue) -> result.put(String.valueOf(key), itemValue));
+        }
+        else if (value != null) {
+            result.put("id", value);
+        }
+
+        Object requestedId = firstOperationOntologyValue(result, "objectId", "resourceId", "id", "baseId");
+        String requestedCode = operationOntologyText(
+            firstOperationOntologyValue(result, "objectCode", "resourceCode", "code"));
+        SsResource resource = findOperationOntologyResource(requestedId, requestedCode);
+        Object id = resource != null && resource.getResourceId() != null ? resource.getResourceId()
+            : requestedId != null ? requestedId : requestedCode;
+        String code = resource != null && StringUtils.isNotBlank(resource.getResourceCode())
+            ? resource.getResourceCode() : requestedCode;
+        if (StringUtils.isBlank(code) && id != null) {
+            code = String.valueOf(id);
+        }
+        String name = operationOntologyText(
+            firstOperationOntologyValue(result, "objectName", "resourceName", "name"));
+        if (StringUtils.isBlank(name) && resource != null) {
+            name = resource.getResourceName();
+        }
+        String description = operationOntologyText(
+            firstOperationOntologyValue(result, "objectDesc", "resourceDesc", "description"));
+        if (StringUtils.isBlank(description) && resource != null) {
+            description = resource.getResourceDesc();
+        }
+
+        result.put("id", id);
+        result.put("objectId", id);
+        result.put("resourceId", id);
+        Object baseId = firstOperationOntologyValue(result, "baseId");
+        result.put("baseId", baseId == null ? id : baseId);
+        result.put("code", StringUtils.defaultString(code));
+        result.put("objectCode", StringUtils.defaultString(code));
+        result.put("resourceCode", StringUtils.defaultString(code));
+        result.put("name", StringUtils.defaultString(name));
+        result.put("objectName", StringUtils.defaultString(name));
+        result.put("resourceName", StringUtils.defaultString(name));
+        result.put("description", StringUtils.defaultString(description));
+        result.put("objectDesc", StringUtils.defaultString(description));
+        result.put("resourceDesc", StringUtils.defaultString(description));
+        return result;
+    }
+
+    private Object firstOperationOntologyValue(Map<String, Object> value, String... keys) {
+        for (String key : keys) {
+            Object candidate = value.get(key);
+            if (candidate != null && StringUtils.isNotBlank(String.valueOf(candidate))) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private String operationOntologyText(Object value) {
+        return value == null ? null : StringUtils.trimToNull(String.valueOf(value));
+    }
+
+    /** 本体绑定可能保存资源 ID 或资源 code，两种情况都兼容查询。 */
+    private SsResource findOperationOntologyResource(Object id, String code) {
+        if (id != null) {
+            try {
+                SsResource resource = ssResourceMapper.selectByResourceId(Long.valueOf(String.valueOf(id)));
+                if (resource != null) {
+                    return resource;
+                }
+            }
+            catch (NumberFormatException ignored) {
+                // 外部本体 ID 可能是字符串编码，继续按 resource_code 查询。
+            }
+        }
+        String resourceCode = StringUtils.defaultIfBlank(code, id == null ? null : String.valueOf(id));
+        if (StringUtils.isBlank(resourceCode)) {
+            return null;
+        }
+        return ssResourceMapper.selectOne(new LambdaQueryWrapper<SsResource>()
+            .eq(SsResource::getResourceCode, resourceCode).last("LIMIT 1"));
     }
 
     /**
@@ -3832,9 +3934,22 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 优先使用拆分弹窗提交的承接成员，实时读取成员绑定关系，避免页面缓存过期后把任务交给旧数字员工。 未传 assigneeIds 的旧调用仍沿用 agentIds，保证已发布客户端可继续执行任务。
+     * 模板页面已显式选择项目绑定数字员工时优先使用 agentIds，不再校验负责人是否绑定数字员工。
+     * 仅兼容未提交 agentIds 的历史调用时，才按 assigneeIds 查询成员绑定关系。
      */
     private List<Long> resolveOperationTaskAgentIds(OperationTaskDTO dto, Long projectId) {
+        LinkedHashSet<Long> explicitAgentIds = new LinkedHashSet<>();
+        if (dto.getAgentIds() != null) {
+            for (Long agentId : dto.getAgentIds()) {
+                if (agentId != null) {
+                    explicitAgentIds.add(agentId);
+                }
+            }
+        }
+        if (!explicitAgentIds.isEmpty()) {
+            return new ArrayList<>(explicitAgentIds);
+        }
+
         if (dto.getAssigneeIds() != null) {
             LinkedHashSet<Long> assigneeIds = new LinkedHashSet<>();
             for (Long assigneeId : dto.getAssigneeIds()) {
@@ -3863,15 +3978,7 @@ public class DevloopApplicationService {
             return new ArrayList<>(agentIds);
         }
 
-        LinkedHashSet<Long> agentIds = new LinkedHashSet<>();
-        if (dto.getAgentIds() != null) {
-            for (Long agentId : dto.getAgentIds()) {
-                if (agentId != null) {
-                    agentIds.add(agentId);
-                }
-            }
-        }
-        return new ArrayList<>(agentIds);
+        return Collections.emptyList();
     }
 
     /** 将承接成员绑定的数字员工转换为聊天资源，首条任务消息会以 @员工 的形式引用这些资源。 */

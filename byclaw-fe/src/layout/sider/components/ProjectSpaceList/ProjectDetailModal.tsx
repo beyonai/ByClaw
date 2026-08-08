@@ -985,6 +985,36 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [operationWorks, setOperationWorks] = useState<OperationWorkOption[]>([]);
   const [operationAccountsLoading, setOperationAccountsLoading] = useState(false);
   const [operationKnowledgeBases, setOperationKnowledgeBases] = useState<OperationSelectOption[]>([]);
+  const boundProjectKnowledgeBases = useMemo<OperationSelectOption[]>(
+    () =>
+      (project?.resources || project?.boundResources || [])
+        .filter((resource) => resource.resourceType === 'knowledge')
+        .map((resource) => ({
+          value: resource.resourceId,
+          label: resource.resourceName || `${resource.resourceId}`,
+        })),
+    [project?.boundResources, project?.resources]
+  );
+  const boundProjectOntologies = useMemo<OperationSelectOption[]>(
+    () =>
+      (project?.resources || project?.boundResources || [])
+        .filter((resource) => resource.resourceType === 'ontology')
+        .map((resource) => ({
+          value: resource.resourceId,
+          label: resource.resourceName || `${resource.resourceId}`,
+        })),
+    [project?.boundResources, project?.resources]
+  );
+  const boundProjectAgents = useMemo<OperationSelectOption[]>(
+    () =>
+      (project?.resources || project?.boundResources || [])
+        .filter((resource) => resource.resourceType === 'digital_employee')
+        .map((resource) => ({
+          value: resource.resourceId,
+          label: resource.resourceName || `${resource.resourceId}`,
+        })),
+    [project?.boundResources, project?.resources]
+  );
   const [operationOrganizeTemplates, setOperationOrganizeTemplates] = useState<OperationSelectOption[]>([]);
   const [operationAgents, setOperationAgents] = useState<OperationAgentOption[]>([]);
   const [operationOptionsLoading, setOperationOptionsLoading] = useState(false);
@@ -4827,9 +4857,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
         requirement={operationRequirementStartTarget}
         initialTasks={operationRequirementStartTasks}
         assignees={operationAssigneeOptions}
-        agentOptions={operationAgents}
-        knowledgeOptions={operationKnowledgeBases}
-        ontologyOptions={operationOrganizeTemplates}
+        agentOptions={boundProjectAgents}
+        knowledgeOptions={boundProjectKnowledgeBases}
+        ontologyOptions={boundProjectOntologies}
         accountOptions={operationTemplateAccountOptions}
         loading={operationRequirementStarting}
         onCancel={() => setOperationRequirementStartTarget(null)}
@@ -6777,20 +6807,31 @@ const ProjectDetailPanel: React.FC<Props> = ({
         open={!!operationTaskTemplateTarget}
         initialTitle={operationTaskTemplateTarget?.title || operationTaskTemplateTarget?.taskName}
         initialDescription={operationTaskTemplateTarget?.description}
+        agentOptions={boundProjectAgents}
+        agentOptionsOnly
+        knowledgeOptions={boundProjectKnowledgeBases}
+        knowledgeOptionsOnly
+        ontologyOptions={boundProjectOntologies}
+        ontologyOptionsOnly
         applyText="确定"
         onCancel={() => setOperationTaskTemplateTarget(null)}
         onApply={async (result: TaskTemplateApplyResult) => {
           const task = operationTaskTemplateTarget;
           const taskId = Number(task?.taskId || task?.sessionId);
-          const assigneeId = task?.assigneeId ?? task?.assignee;
-          if (!Number.isFinite(taskId) || taskId <= 0 || assigneeId === undefined || assigneeId === null) {
-            message.error('任务缺少负责人或有效编号，无法执行');
+          const selectedAgentId = Number(result.values.agentId);
+          if (!Number.isFinite(taskId) || taskId <= 0) {
+            message.error('任务缺少有效编号，无法执行');
+            return;
+          }
+          if (!Number.isFinite(selectedAgentId) || selectedAgentId <= 0) {
+            message.error('请选择当前项目绑定的数字员工');
             return;
           }
           // 先由后端保存模板配置并启动任务，待事务提交后再进入真实会话，避免跳转到空白会话。
           const executeResult = await executeOperationTask({
             taskId,
-            assigneeIds: [assigneeId],
+            // 模板已明确选择项目绑定数字员工，不再校验负责人是否绑定数字员工。
+            agentIds: [selectedAgentId],
             templateId: result.template.templateId,
             config: {
               ...result.values,

@@ -594,6 +594,9 @@ export const removeProjectMember = (memberId: number) => POST<any>('/byaiService
 export const bindMemberAgent = (data: { memberId: number; agentId: number }) =>
   POST<any>('/byaiService/project/member/bindAgent', data);
 
+export const unbindMemberAgent = (memberId: number) =>
+  POST<any>('/byaiService/project/member/unbindAgent', { memberId });
+
 // DWS 钉钉授权
 export const startDwsDeviceAuth = () => POST<any>('/byaiService/devloop/dws/startDeviceAuth', {});
 

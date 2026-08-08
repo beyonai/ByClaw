@@ -78,6 +78,12 @@ export default function ChatTitle(props: ChatTitleProps) {
                 sessionName={titleSession.sessionName}
               />
               <VNC />
+              {isAdminVip(userInfo) && (
+                <span className={styles.btn} onClick={() => setOpenTemplate(true)} style={{ padding: '0 8px' }}>
+                  <AntdIcon type="icon-a-View-grid-listliebiaochakanmoshi" />
+                  <span>{intl.formatMessage({ id: 'chatTitle.saveAsTemplate' })}</span>
+                </span>
+              )}
               {props.onToggleResourceWorkspace && (
                 <Button
                   type="text"
@@ -88,12 +94,6 @@ export default function ChatTitle(props: ChatTitleProps) {
                   onClick={props.onToggleResourceWorkspace}
                   aria-label={intl.formatMessage({ id: 'chatResource.toggleList' })}
                 />
-              )}
-              {isAdminVip(userInfo) && (
-                <span className={styles.btn} onClick={() => setOpenTemplate(true)} style={{ padding: '0 8px' }}>
-                  <AntdIcon type="icon-a-View-grid-listliebiaochakanmoshi" />
-                  <span>{intl.formatMessage({ id: 'chatTitle.saveAsTemplate' })}</span>
-                </span>
               )}
               {/* {!isSimpleSession && (
                 <span className={styles.btn} onClick={onToggleAchievements}>

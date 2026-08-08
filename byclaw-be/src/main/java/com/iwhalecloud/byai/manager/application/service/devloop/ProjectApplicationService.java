@@ -92,6 +92,9 @@ public class ProjectApplicationService {
 
     private static final String PROJECT_TYPE_DEFAULT = "default";
 
+    /** 项目名称前后端统一限制为 100 个字符。 */
+    private static final int PROJECT_NAME_MAX_LENGTH = 100;
+
     /** 手工需求复用的内部扫描源类型，仓库关联实际保存于单条需求 JSON。 */
     private static final String MANUAL_SOURCE_TYPE = "manual";
 
@@ -607,6 +610,12 @@ public class ProjectApplicationService {
         projectMemberService.bindAgent(memberId, agentId);
     }
 
+    /** 解除项目成员与数字员工的绑定关系。 */
+    public void unbindMemberAgent(Map<String, Object> params) {
+        Long memberId = MapParamUtil.getLongValue(params, "memberId");
+        projectMemberService.unbindAgent(memberId);
+    }
+
     /**
      * 查询项目详情，含仓库与会话。
      *
@@ -715,10 +724,15 @@ public class ProjectApplicationService {
      * 规范化项目名称。
      *
      * @param projectName 原始名称
-     * @return 去首尾空格后的名称
+     * @return 校验长度并去除首尾空格后的名称
      */
     private String normalizeProjectName(String projectName) {
-        return projectName == null ? "" : projectName.trim();
+        String normalizedName = projectName == null ? "" : projectName.trim();
+        // 应用层再次校验，确保未经过 @Valid 的内部或开放接口同样受长度限制。
+        if (normalizedName.length() > PROJECT_NAME_MAX_LENGTH) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.max.length");
+        }
+        return normalizedName;
     }
 
     /**

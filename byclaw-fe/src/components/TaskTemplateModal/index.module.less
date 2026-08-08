@@ -114,6 +114,15 @@
   gap: 0 16px;
 }
 
+.sourceMethodRow,
+.storageMethodRow {
+  display: grid;
+  // 两组动态配置字段统一从表单宽度中点开始，保持上下两行对齐。
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+}
+
 .methodField {
   margin-bottom: 16px;
 
@@ -137,6 +146,10 @@
   }
 }
 
+.methodConfigField {
+  margin-bottom: 16px;
+}
+
 .executionSection {
   padding-top: 16px;
   border-top: 1px solid #e7ebf1;
@@ -150,7 +163,8 @@
 }
 
 .executionGrid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  // 执行主体与执行方式占左半区，数字员工和执行时间从 50% 位置开始展示。
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 
   :global(.@{antPrefix}-input-number) {
     width: 100%;
@@ -165,7 +179,9 @@
 @media (max-width: 760px) {
   .templateGrid,
   .formGrid,
-  .executionGrid {
+  .executionGrid,
+  .sourceMethodRow,
+  .storageMethodRow {
     grid-template-columns: 1fr;
   }
 }

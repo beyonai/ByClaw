@@ -2,10 +2,10 @@ import { Button, Checkbox, Empty, Spin, Tag, Typography, message } from 'antd';
 import { AppstoreOutlined, MessageOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
+import dayjs from 'dayjs';
 import {
   executeOperationTask,
   listOperationTasks,
-  listProjectMembers,
   listTasks,
   type DevloopTaskItem,
 } from '@/service/devloop';
@@ -84,6 +84,60 @@ const getTaskStatusColor = (task: DevloopTaskItem) => {
   return 'warning';
 };
 
+const getTaskStatusOrder = (task: DevloopTaskItem) => {
+  const status = normalizeTaskStatus(task);
+  if (
+    [
+      'done',
+      'completed',
+      'finished',
+      'success',
+      'failed',
+      'error',
+      'cancelled',
+      '完成',
+      '已完成',
+      '失败',
+    ].includes(status)
+  ) {
+    return 2;
+  }
+  if (
+    [
+      'doing',
+      'running',
+      'in_progress',
+      'paused',
+      'waiting_confirmation',
+      'processing',
+      'started',
+      '进行中',
+      '暂停',
+    ].includes(status)
+  ) {
+    return 1;
+  }
+  // todo、pending、not_started、waiting 及历史空状态均视为待开始。
+  return 0;
+};
+
+const getTaskCreateTime = (task: DevloopTaskItem) => {
+  const value = task.createTime || (task as any).createdAt || (task as any).createDate;
+  if (!value) return 0;
+  const parsed = dayjs(value);
+  return parsed.isValid() ? parsed.valueOf() : 0;
+};
+
+const sortTasks = (items: DevloopTaskItem[]) =>
+  [...items].sort((left, right) => {
+    const statusDifference = getTaskStatusOrder(left) - getTaskStatusOrder(right);
+    if (statusDifference !== 0) return statusDifference;
+    const timeDifference = getTaskCreateTime(right) - getTaskCreateTime(left);
+    if (timeDifference !== 0) return timeDifference;
+    // 创建时间相同时按任务主键倒序，确保列表顺序稳定。
+    return Number(right.taskId || right.sessionId || 0) - Number(left.taskId || left.sessionId || 0);
+  });
+
 const ProjectTasks: React.FC<Props> = ({
   project,
   keyword = '',
@@ -103,25 +157,54 @@ const ProjectTasks: React.FC<Props> = ({
   const requestingRef = useRef(false);
   const initialLoadKeyRef = useRef<string | null>(null);
   const [templateTask, setTemplateTask] = useState<DevloopTaskItem | null>(null);
-  const [templateAgentOptions, setTemplateAgentOptions] = useState<Array<{ label: string; value: string | number }>>(
-    []
-  );
   const [onlyMine, setOnlyMine] = useState(project.projectType === 'develop');
   const [detailTask, setDetailTask] = useState<DevloopTaskItem | null>(null);
-
-  useEffect(() => {
-    if (!templateTask || project.projectType !== 'operation') return;
-    void listProjectMembers(Number(project.projectId)).then((response) => {
-      const assigneeId = (templateTask as any).assigneeId ?? (templateTask as any).assignee;
-      const options = getArrayData(response)
-        .filter((member: any) => member.agentId && `${member.userId}` === `${assigneeId}`)
-        .map((member: any) => ({
-          label: member.agentName || member.agentName || member.userName,
-          value: member.agentId,
-        }));
-      setTemplateAgentOptions(options);
+  const projectKnowledgeOptions = (project.resources || project.boundResources || [])
+    .filter((resource) => resource.resourceType === 'knowledge')
+    .map((resource) => ({
+      value: resource.resourceId,
+      label: resource.resourceName || `${resource.resourceId}`,
+    }));
+  const projectOntologyOptions = (project.resources || project.boundResources || [])
+    .filter((resource) => resource.resourceType === 'ontology')
+    .map((resource) => {
+      const resourceDetail = resource as typeof resource & Record<string, any>;
+      const code =
+        resourceDetail.objectCode ||
+        resourceDetail.resourceCode ||
+        resourceDetail.code ||
+        `${resource.resourceId}`;
+      const name = resource.resourceName || resourceDetail.objectName || resourceDetail.name || code;
+      const description =
+        resourceDetail.objectDesc || resourceDetail.resourceDesc || resourceDetail.description || '';
+      return {
+        value: resource.resourceId,
+        label: name,
+        // 项目绑定记录可能只保留 ID、名称；先补齐标准字段，模板提交时还会统一归一化别名。
+        raw: {
+          ...resourceDetail,
+          id: resourceDetail.id || resource.resourceId,
+          objectId: resourceDetail.objectId || resource.resourceId,
+          resourceId: resource.resourceId,
+          baseId: resourceDetail.baseId || `${resource.resourceId}`,
+          code,
+          objectCode: resourceDetail.objectCode || code,
+          resourceCode: resourceDetail.resourceCode || code,
+          name,
+          objectName: resourceDetail.objectName || name,
+          resourceName: resource.resourceName || name,
+          description,
+          objectDesc: resourceDetail.objectDesc || description,
+          resourceDesc: resourceDetail.resourceDesc || description,
+        },
+      };
     });
-  }, [project.projectId, project.projectType, templateTask]);
+  const projectAgentOptions = (project.resources || project.boundResources || [])
+    .filter((resource) => resource.resourceType === 'digital_employee')
+    .map((resource) => ({
+      value: resource.resourceId,
+      label: resource.resourceName || `${resource.resourceId}`,
+    }));
 
   const loadTasks = useCallback(
     async (nextPage = 1) => {
@@ -146,7 +229,7 @@ const ProjectTasks: React.FC<Props> = ({
               taskName: keyword.trim() || undefined,
             });
         const rows = getArrayData(response) as DevloopTaskItem[];
-        setTasks((current) => (nextPage === 1 ? rows : [...current, ...rows]));
+        setTasks((current) => sortTasks(nextPage === 1 ? rows : [...current, ...rows]));
         setPage(nextPage);
         const loadedCount = (nextPage - 1) * PAGE_SIZE + rows.length;
         // 部分环境不返回 total，满页时保留一个未知余量，确保底部哨兵仍会请求下一页。
@@ -326,9 +409,14 @@ const ProjectTasks: React.FC<Props> = ({
       </Spin>
       <TaskTemplateModal
         open={!!templateTask}
-        agentOptions={templateAgentOptions}
+        agentOptions={projectAgentOptions}
+        agentOptionsOnly
         initialTitle={templateTask?.title}
         initialDescription={(templateTask as any)?.description || templateTask?.requirementTitle}
+        knowledgeOptions={projectKnowledgeOptions}
+        knowledgeOptionsOnly
+        ontologyOptions={projectOntologyOptions}
+        ontologyOptionsOnly
         applyText="确定"
         onCancel={() => setTemplateTask(null)}
         onApply={async (result: TaskTemplateApplyResult) => {
@@ -337,17 +425,16 @@ const ProjectTasks: React.FC<Props> = ({
             message.error('任务缺少有效编号，无法执行');
             return;
           }
-          const assigneeId = (templateTask as any)?.assigneeId ?? (templateTask as any)?.assignee;
-          const selectedAgentId = templateAgentOptions[0]?.value;
-          if (assigneeId === undefined && selectedAgentId === undefined) {
-            message.error('当前任务没有绑定可执行的数字员工');
+          const selectedAgentId = Number(result.values.agentId);
+          if (!Number.isFinite(selectedAgentId) || selectedAgentId <= 0) {
+            message.error('请选择当前项目绑定的数字员工');
             return;
           }
           // 先把模板提示词和结构化字段交给后端，后端提交事务后发送首条消息，避免跳转到空会话。
           const executeResult = await executeOperationTask({
             taskId,
-            assigneeIds: assigneeId === undefined ? undefined : [assigneeId],
-            agentIds: assigneeId === undefined ? [selectedAgentId!] : undefined,
+            // 数字员工由模板中显式选择，不再根据任务负责人查询成员绑定关系。
+            agentIds: [selectedAgentId],
             templateId: result.template.templateId,
             config: {
               ...result.values,

@@ -4,6 +4,7 @@ import { getMimeType } from '@/components/QueryInput/components/FileBrowserEntry
 import fileSiderStyles from '@/layout/sider/components/FileSiderPanel/index.module.less';
 import { getFileType } from '@/layout/sider/components/FileSiderPanel/utils';
 import { downloadResourceFileForPreview } from '@/service/file';
+import { downloadFile as downloadFileBrowserFile } from '@/service/fileBrowser';
 import { getFileUrl } from '@/utils/file';
 import styles from './index.module.less';
 
@@ -16,9 +17,16 @@ interface FilePreviewPanelProps {
   resourceId?: string;
   path?: string;
   fileUrl?: string;
+  source?: 'dataset' | 'fileBrowser';
 }
 
-const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ fileName, resourceId, path, fileUrl }) => {
+const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
+  fileName,
+  resourceId,
+  path,
+  fileUrl,
+  source = 'dataset',
+}) => {
   const [blob, setBlob] = useState<Blob | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -34,12 +42,15 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ fileName, resourceI
         return response.blob();
       }
       if (resourceId && path) {
-        // 知识库关联文件使用 datasetController/download，directoryPath 必须传完整的知识库文件路径。
-        const response: any = await downloadResourceFileForPreview({
-          resourceId,
-          directoryPath: path,
-          language: 'zh-CN',
-        });
+        // 会话、项目文件来自文件空间；本体关联文件仍按知识库文件来源下载。
+        const response: any =
+          source === 'fileBrowser'
+            ? await downloadFileBrowserFile(resourceId, path)
+            : await downloadResourceFileForPreview({
+                resourceId,
+                directoryPath: path,
+                language: 'zh-CN',
+              });
         const rawBlob = response?.file instanceof Blob ? response.file : new Blob([response?.file || response]);
         const mimeType = getMimeType(fileName);
         return mimeType ? new Blob([rawBlob], { type: mimeType }) : rawBlob;
@@ -61,7 +72,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ fileName, resourceI
     return () => {
       active = false;
     };
-  }, [fileName, fileUrl, path, resourceId]);
+  }, [fileName, fileUrl, path, resourceId, source]);
 
   return (
     <Spin spinning={loading} wrapperClassName={styles.detailSpin}>

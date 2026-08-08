@@ -1,10 +1,18 @@
 import { Avatar, Button, Dropdown, Empty, Input, Modal, Spin, Tag, Typography, message } from 'antd';
-import { DeleteOutlined, MoreOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, UserOutlined } from '@ant-design/icons';
+import {
+  DeleteOutlined,
+  DisconnectOutlined,
+  MoreOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  RobotOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
 import OrgUserSelector from '@/components/OrgUserSelector';
 import type { UserItem } from '@/components/OrgUserSelector/types';
-import { bindMemberAgent, listProjectMembers, saveProjectMembers } from '@/service/devloop';
+import { bindMemberAgent, listProjectMembers, saveProjectMembers, unbindMemberAgent } from '@/service/devloop';
 import { POST } from '@/service/common/request';
 import type { ProjectMember, ProjectSpace } from '../../types';
 import { getArrayData } from '../../utils';
@@ -123,6 +131,29 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
     [bindingMember, loadMembers]
   );
 
+  const handleUnbindAgent = useCallback(
+    (member: ProjectMember) => {
+      if (!member.memberId || !member.agentId) return;
+      Modal.confirm({
+        title: '解绑数字员工',
+        content: `确定解除“${member.userName || member.userCode || member.userId}”当前绑定的数字员工吗？`,
+        okText: '确定解绑',
+        cancelText: '取消',
+        okButtonProps: { danger: true },
+        onOk: async () => {
+          try {
+            await unbindMemberAgent(Number(member.memberId));
+            message.success('数字员工解绑成功');
+            await loadMembers();
+          } catch (error: any) {
+            message.error(error?.message || '数字员工解绑失败');
+          }
+        },
+      });
+    },
+    [loadMembers]
+  );
+
   const handleRemoveMember = useCallback(
     (member: ProjectMember) => {
       if (!isProjectCreator || `${member.userId}` === `${project.createBy}`) {
@@ -231,6 +262,16 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
                               icon: <RobotOutlined />,
                               label: member.agentId ? '更换数字员工' : '绑定数字员工',
                             },
+                            ...(member.agentId
+                              ? [
+                                  {
+                                    key: 'unbind-agent',
+                                    danger: true,
+                                    icon: <DisconnectOutlined />,
+                                    label: '解绑数字员工',
+                                  },
+                                ]
+                              : []),
                             ...(isProjectCreator && !isOwner
                               ? [{ key: 'remove-member', danger: true, icon: <DeleteOutlined />, label: '移除成员' }]
                               : []),
@@ -240,6 +281,8 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
                               setBindingMember(member);
                               setAgentKeyword('');
                               void loadAgentOptions();
+                            } else if (key === 'unbind-agent') {
+                              handleUnbindAgent(member);
                             } else if (key === 'remove-member') {
                               handleRemoveMember(member);
                             }

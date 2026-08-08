@@ -10,9 +10,8 @@ import {
 } from '@ant-design/icons';
 import { useCallback, useEffect, useState } from 'react';
 import { useIntl } from '@umijs/max';
-import { listProjectSpaceFiles, type DevloopProjectSpaceFile } from '@/service/devloop';
-import ObjectFilesPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/ObjectFilesPanel';
-import type { ProjectSpace } from '../../types';
+import { listProjectResources, listProjectSpaceFiles, type DevloopProjectSpaceFile } from '@/service/devloop';
+import type { ProjectBoundResource, ProjectSpace } from '../../types';
 import styles from '../../index.module.less';
 
 interface Props {
@@ -25,6 +24,10 @@ const ProjectResources: React.FC<Props> = ({ project, onRefreshToolbarChange }) 
   const intl = useIntl();
   const [files, setFiles] = useState<DevloopProjectSpaceFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
+  const [boundResources, setBoundResources] = useState<ProjectBoundResource[]>(
+    project.resources || project.boundResources || []
+  );
+  const [loadingBoundResources, setLoadingBoundResources] = useState(false);
 
   const loadFiles = useCallback(async () => {
     setLoadingFiles(true);
@@ -38,19 +41,46 @@ const ProjectResources: React.FC<Props> = ({ project, onRefreshToolbarChange }) 
     }
   }, [intl, project.projectId]);
 
-  useEffect(() => {
-    void loadFiles();
-  }, [loadFiles]);
+  const loadBoundResources = useCallback(async () => {
+    setLoadingBoundResources(true);
+    try {
+      const response = await listProjectResources(Number(project.projectId));
+      const rows = Array.isArray(response)
+        ? response
+        : Array.isArray(response?.data)
+          ? response.data
+          : response?.list || response?.rows || response?.data?.list || response?.data?.rows || [];
+      setBoundResources(rows);
+    } catch (error: any) {
+      setBoundResources([]);
+      message.error(error?.message || intl.formatMessage({ id: 'projectSpace.resources.loadBindingsFailed' }));
+    } finally {
+      setLoadingBoundResources(false);
+    }
+  }, [intl, project.projectId]);
 
   useEffect(() => {
-    // 资源 Tab 的刷新入口统一放到项目详情顶部，重新读取共享文件列表。
+    void loadFiles();
+    void loadBoundResources();
+  }, [loadBoundResources, loadFiles]);
+
+  useEffect(() => {
+    // 资源 Tab 的刷新入口统一放到项目详情顶部，同时刷新共享文件与项目绑定资源。
     onRefreshToolbarChange?.(
-      <Button size="small" icon={<ReloadOutlined />} loading={loadingFiles} onClick={() => void loadFiles()}>
+      <Button
+        size="small"
+        icon={<ReloadOutlined />}
+        loading={loadingFiles || loadingBoundResources}
+        onClick={() => {
+          void loadFiles();
+          void loadBoundResources();
+        }}
+      >
         {intl.formatMessage({ id: 'projectSpace.detail.refresh' })}
       </Button>
     );
     return () => onRefreshToolbarChange?.(null);
-  }, [intl, loadFiles, loadingFiles, onRefreshToolbarChange]);
+  }, [intl, loadBoundResources, loadFiles, loadingBoundResources, loadingFiles, onRefreshToolbarChange]);
 
   const renderCardHeader = (icon: React.ReactNode, title: string, description: string, showAdd = true) => (
     <header className={styles.resourceCardHeader}>
@@ -72,9 +102,8 @@ const ProjectResources: React.FC<Props> = ({ project, onRefreshToolbarChange }) 
   const empty = (
     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'chatResource.empty' })} />
   );
-  const boundKnowledge = (project.resources || project.boundResources || []).filter(
-    (resource) => resource.resourceType === 'knowledge'
-  );
+  const boundKnowledge = boundResources.filter((resource) => resource.resourceType === 'knowledge');
+  const boundOntologies = boundResources.filter((resource) => resource.resourceType === 'ontology');
 
   return (
     <div className={styles.resourceCategoryGrid}>
@@ -111,7 +140,7 @@ const ProjectResources: React.FC<Props> = ({ project, onRefreshToolbarChange }) 
           intl.formatMessage({ id: 'projectSpace.resources.sharedKnowledge' }),
           intl.formatMessage({ id: 'projectSpace.resources.sharedKnowledgeDescription' })
         )}
-        <div className={styles.resourceCategoryBody}>
+        <Spin spinning={loadingBoundResources} className={styles.resourceCategoryBody}>
           {boundKnowledge.length
             ? boundKnowledge.map((resource) => (
                 <div key={`${resource.resourceId}`} className={styles.resourceSimpleItem}>
@@ -127,8 +156,8 @@ const ProjectResources: React.FC<Props> = ({ project, onRefreshToolbarChange }) 
                   <RightOutlined />
                 </div>
               ))
-            : empty}
-        </div>
+            : !loadingBoundResources && empty}
+        </Spin>
       </section>
 
       <section className={styles.resourceCategoryCard}>
@@ -165,7 +194,24 @@ const ProjectResources: React.FC<Props> = ({ project, onRefreshToolbarChange }) 
           intl.formatMessage({ id: 'projectSpace.resources.sharedOntology' }),
           intl.formatMessage({ id: 'projectSpace.resources.sharedOntologyDescription' })
         )}
-        <ObjectFilesPanel projectId={project.projectId} />
+        <Spin spinning={loadingBoundResources} className={styles.resourceCategoryBody}>
+          {boundOntologies.length
+            ? boundOntologies.map((resource) => (
+                <div key={`${resource.resourceId}`} className={styles.resourceSimpleItem}>
+                  <span className={styles.resourceSimpleIcon}>ONTO</span>
+                  <div className={styles.resourceSimpleMain}>
+                    <Typography.Text strong ellipsis={{ tooltip: resource.resourceName }}>
+                      {resource.resourceName || resource.resourceId}
+                    </Typography.Text>
+                    <Typography.Text type="secondary" ellipsis>
+                      当前项目绑定本体
+                    </Typography.Text>
+                  </div>
+                  <RightOutlined />
+                </div>
+              ))
+            : !loadingBoundResources && empty}
+        </Spin>
       </section>
     </div>
   );

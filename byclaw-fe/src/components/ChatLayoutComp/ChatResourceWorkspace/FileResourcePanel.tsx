@@ -218,6 +218,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
           resourceId={projectFileUrl ? undefined : resourceId}
           path={projectFileUrl ? undefined : item.path}
           fileUrl={projectFileUrl}
+          source="fileBrowser"
         />,
         {
           tabKey: `${scope}-file:${projectFile?.fileId || item.path}`,

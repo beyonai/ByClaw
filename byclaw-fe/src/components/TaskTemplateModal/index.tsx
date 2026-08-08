@@ -14,9 +14,18 @@ import { ResourceTypeMap } from '@/constants/resource';
 import styles from './index.module.less';
 
 export type OntologyObjectValue = {
+  id?: string | number;
+  objectId?: string | number;
+  resourceId?: string | number;
   objectCode?: string;
+  resourceCode?: string;
+  code?: string;
   objectName?: string;
+  resourceName?: string;
+  name?: string;
   objectDesc?: string;
+  resourceDesc?: string;
+  description?: string;
   objectSource?: string;
   fieldCount?: number;
   actionCount?: number;
@@ -79,6 +88,8 @@ type TaskTemplateOption = {
 export interface TaskTemplateModalProps {
   open: boolean;
   agentOptions?: Array<{ label: string; value: string | number }>;
+  /** 项目任务场景只允许选择项目绑定数字员工，不回退“当前数字员工”。 */
+  agentOptionsOnly?: boolean;
   agentGroupOptions?: Array<{ label: string; value: string | number }>;
   initialTemplateType?: OperationTaskTemplateType;
   initialTitle?: string;
@@ -90,7 +101,11 @@ export interface TaskTemplateModalProps {
   applying?: boolean;
   initialDescription?: string;
   knowledgeOptions?: TaskTemplateOption[];
+  /** 项目任务场景只允许使用项目绑定知识库，禁止回退到当前账号的全部知识库。 */
+  knowledgeOptionsOnly?: boolean;
   ontologyOptions?: TaskTemplateOption[];
+  /** 项目任务场景只允许使用项目绑定本体，禁止按知识库查询其它本体对象。 */
+  ontologyOptionsOnly?: boolean;
   accountOptions?: TaskTemplateOption[];
 }
 
@@ -164,6 +179,34 @@ const getOntologySelectValues = (ontology: TaskTemplateFormValues['ontology']): 
     .filter((item): item is string | number => item !== undefined && item !== null && `${item}` !== '');
 };
 
+const normalizeOntologyObjectValue = (
+  option: TaskTemplateOption | undefined,
+  fallbackValue: string | number
+): OntologyObjectValue => {
+  const raw = option?.raw || {};
+  const id = raw.objectId ?? raw.resourceId ?? raw.id ?? raw.baseId ?? fallbackValue;
+  const code = raw.objectCode || raw.resourceCode || raw.code || `${fallbackValue}`;
+  const name = raw.objectName || raw.resourceName || raw.name || option?.label || `${fallbackValue}`;
+  const description = raw.objectDesc || raw.resourceDesc || raw.description || '';
+  // 同时保留本体、资源和通用字段别名，兼容后端任务执行、对象详情及 Worker 的不同取值口径。
+  return {
+    ...raw,
+    id,
+    objectId: raw.objectId ?? id,
+    resourceId: raw.resourceId ?? id,
+    baseId: raw.baseId || `${id}`,
+    code,
+    objectCode: raw.objectCode || code,
+    resourceCode: raw.resourceCode || code,
+    name,
+    objectName: raw.objectName || name,
+    resourceName: raw.resourceName || name,
+    description,
+    objectDesc: raw.objectDesc || description,
+    resourceDesc: raw.resourceDesc || description,
+  };
+};
+
 const resolveInitialOptionValue = (
   options: TaskTemplateOption[],
   currentValue: string | number | undefined
@@ -176,10 +219,11 @@ const resolveInitialOptionValue = (
 const resolveInitialOntologyValues = (
   options: TaskTemplateOption[],
   currentValue: TaskTemplateFormValues['ontology']
-): Array<string | number> => {
+): Array<string | number> | undefined => {
   const values = getOntologySelectValues(currentValue);
-  if (!values.length || !options.length) return [];
-  return values.filter((value) => options.some((option) => `${option.value}` === `${value}`));
+  if (!options.length) return undefined;
+  const matchedValues = values.filter((value) => options.some((option) => `${option.value}` === `${value}`));
+  return matchedValues.length ? matchedValues : [options[0].value];
 };
 
 const parseTemplateConfig = (template: OperationTaskTemplate): TaskTemplateFormValues => {
@@ -309,6 +353,7 @@ const buildTemplatePrompt = (
 const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
   open,
   agentOptions = [],
+  agentOptionsOnly = false,
   agentGroupOptions = [],
   initialTemplateType,
   initialTitle,
@@ -318,7 +363,9 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
   applying = false,
   initialDescription,
   knowledgeOptions = [],
+  knowledgeOptionsOnly = false,
   ontologyOptions = [],
+  ontologyOptionsOnly = false,
   accountOptions = [],
 }) => {
   const [form] = Form.useForm<TaskTemplateFormValues>();
@@ -345,6 +392,10 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
   }, [connector, form, selectedTemplate, sourceMode]);
 
   useEffect(() => {
+    if (ontologyOptionsOnly) {
+      setFetchedOntologyOptions([]);
+      return;
+    }
     if (!selectedTemplate || selectedTemplate.templateType !== 'collect' || storageMode !== 'ontology') {
       setFetchedOntologyOptions([]);
       return;
@@ -390,7 +441,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
         setFetchedOntologyOptions([]);
         form.setFieldValue('ontology', []);
       });
-  }, [form, selectedTemplate, sourceKnowledge, storageMode, targetKnowledge]);
+  }, [form, ontologyOptionsOnly, selectedTemplate, sourceKnowledge, storageMode, targetKnowledge]);
 
   useEffect(() => {
     if (!open) return;
@@ -406,7 +457,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
       .catch((error: any) => message.error(error?.message || '任务模板加载失败'))
       .finally(() => setLoading(false));
     // 未由调用方传入知识库时，按当前账号可读范围拉取（type=all），避免展示固定示例数据。
-    if (!knowledgeOptions.length) {
+    if (!knowledgeOptions.length && !knowledgeOptionsOnly) {
       const query = {
         pageNum: 1,
         pageSize: 1000,
@@ -429,7 +480,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
       });
     }
     // 每次打开都重新读取启用模板，避免后台停用后仍展示旧缓存；详情仍由用户从目录中选择。
-  }, [form, initialTemplateType, open]);
+  }, [form, initialTemplateType, knowledgeOptions.length, knowledgeOptionsOnly, open]);
 
   const openTemplateDetail = async (template: OperationTaskTemplate) => {
     setDetailLoading(true);
@@ -442,25 +493,39 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
         const parsed = dayjs(value as string);
         return parsed.isValid() ? parsed : undefined;
       };
-      const resolvedKnowledgeOptions = knowledgeOptions.length
+      const resolvedKnowledgeOptions = knowledgeOptionsOnly
         ? knowledgeOptions
-        : fetchedKnowledgeOptions.length
-          ? fetchedKnowledgeOptions
-          : DEFAULT_KNOWLEDGE_OPTIONS;
-      const resolvedOntologyOptions = ontologyOptions.length ? ontologyOptions : fetchedOntologyOptions;
+        : knowledgeOptions.length
+          ? knowledgeOptions
+          : fetchedKnowledgeOptions.length
+            ? fetchedKnowledgeOptions
+            : DEFAULT_KNOWLEDGE_OPTIONS;
+      const resolvedOntologyOptions = ontologyOptionsOnly
+        ? ontologyOptions
+        : ontologyOptions.length
+          ? ontologyOptions
+          : fetchedOntologyOptions;
       const resolvedAccountOptions = accountOptions.length ? accountOptions : DEFAULT_ACCOUNT_OPTIONS;
       setSelectedTemplate(resolvedTemplate);
       form.setFieldsValue({
         ...templateValues,
+        // 采集类模板每次打开均默认选择界面中的第一个采集方式和入库方式。
+        ...(resolvedTemplate.templateType === 'collect'
+          ? {
+              sourceMode: 'connector' as const,
+              storageMode: 'ontology' as const,
+            }
+          : {}),
         ...(initialTitle ? { title: initialTitle } : {}),
         ...(initialDescription ? { description: initialDescription } : {}),
         sourceKnowledge: resolveInitialOptionValue(resolvedKnowledgeOptions, templateValues.sourceKnowledge),
         targetKnowledge: resolveInitialOptionValue(resolvedKnowledgeOptions, templateValues.targetKnowledge),
         ontology: resolveInitialOntologyValues(resolvedOntologyOptions, templateValues.ontology),
         account: resolveInitialOptionValue(resolvedAccountOptions, templateValues.account),
-        agentId: agentOptions[0]?.value || '当前数字员工',
+        agentId: agentOptions[0]?.value || (agentOptionsOnly ? undefined : '当前数字员工'),
         agentGroupId: agentGroupOptions[0]?.value,
-        onceTime: toDateTime(templateValues.onceTime),
+        // 单次执行使用打开模板时的当前时间，避免复用模板配置中的历史绝对时间。
+        onceTime: dayjs(),
         periodTime: toDateTime(templateValues.periodTime),
         periodYearDateTime: toDateTime(templateValues.periodYearDateTime),
       });
@@ -474,8 +539,13 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
   const title = selectedTemplate ? selectedTemplate.templateName : '选择任务模板';
   const subtitle = selectedTemplate ? '完善结构化任务信息和执行配置' : '用结构化信息精准描述任务，数字员工会据此执行';
   const fallbackAgentOptions = useMemo(
-    () => (agentOptions.length ? agentOptions : [{ label: '当前数字员工', value: '当前数字员工' }]),
-    [agentOptions]
+    () =>
+      agentOptionsOnly
+        ? agentOptions
+        : agentOptions.length
+          ? agentOptions
+          : [{ label: '当前数字员工', value: '当前数字员工' }],
+    [agentOptions, agentOptionsOnly]
   );
   const availableGroupOptions = useMemo(
     () => agentGroupOptions.filter((option) => option.value !== undefined && option.value !== null),
@@ -483,21 +553,39 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
   );
   const availableKnowledgeOptions = useMemo(
     () =>
-      knowledgeOptions.length
+      knowledgeOptionsOnly
         ? knowledgeOptions
-        : fetchedKnowledgeOptions.length
-          ? fetchedKnowledgeOptions
-          : DEFAULT_KNOWLEDGE_OPTIONS,
-    [fetchedKnowledgeOptions, knowledgeOptions]
+        : knowledgeOptions.length
+          ? knowledgeOptions
+          : fetchedKnowledgeOptions.length
+            ? fetchedKnowledgeOptions
+            : DEFAULT_KNOWLEDGE_OPTIONS,
+    [fetchedKnowledgeOptions, knowledgeOptions, knowledgeOptionsOnly]
   );
   const availableOntologyOptions = useMemo(
-    () => (ontologyOptions.length ? ontologyOptions : fetchedOntologyOptions),
-    [fetchedOntologyOptions, ontologyOptions]
+    () =>
+      ontologyOptionsOnly
+        ? ontologyOptions
+        : ontologyOptions.length
+          ? ontologyOptions
+          : fetchedOntologyOptions,
+    [fetchedOntologyOptions, ontologyOptions, ontologyOptionsOnly]
   );
   const availableAccountOptions = useMemo(
     () => (accountOptions.length ? accountOptions : DEFAULT_ACCOUNT_OPTIONS),
     [accountOptions]
   );
+
+  useEffect(() => {
+    const shouldDefaultOntology =
+      selectedTemplate?.templateType === 'knowledge' ||
+      (selectedTemplate?.templateType === 'collect' && storageMode === 'ontology');
+    if (!shouldDefaultOntology || !availableOntologyOptions.length) return;
+    const currentValue = form.getFieldValue('ontology');
+    // 本体列表可能在模板详情打开后异步返回；仅在字段尚未初始化时默认选择第一项，不覆盖用户手动清空。
+    if (currentValue !== undefined && currentValue !== null) return;
+    form.setFieldValue('ontology', [availableOntologyOptions[0].value]);
+  }, [availableOntologyOptions, form, selectedTemplate, storageMode]);
 
   const applyTemplate = async () => {
     if (!selectedTemplate) return;
@@ -509,18 +597,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
         ...values,
         ontology: getOntologySelectValues(values.ontology).map((value) => {
           const ontologyOption = availableOntologyOptions.find((option) => `${option.value}` === `${value}`);
-          return (
-            ontologyOption?.raw ||
-            (ontologyOption
-              ? {
-                  objectCode: String(ontologyOption.value),
-                  objectName: ontologyOption.label,
-                }
-              : {
-                  objectCode: String(value),
-                  objectName: String(value),
-                })
-          );
+          return normalizeOntologyObjectValue(ontologyOption, value);
         }),
       };
       const prompt = buildTemplatePrompt(selectedTemplate, values, {
@@ -544,45 +621,60 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
     if (selectedTemplate.templateType === 'collect') {
       return (
         <>
-          <div className={styles.methodField}>
-            <strong>采集方式</strong>
-            <Form.Item name="sourceMode">
-              <Radio.Group optionType="button" buttonStyle="solid">
-                <Radio.Button value="knowledge">知识库采集</Radio.Button>
-                <Radio.Button value="connector">连接器采集</Radio.Button>
-                <Radio.Button value="internet">互联网采集</Radio.Button>
-              </Radio.Group>
-            </Form.Item>
+          <div className={styles.sourceMethodRow}>
+            <div className={styles.methodField}>
+              <strong>采集方式</strong>
+              <Form.Item name="sourceMode">
+                <Radio.Group optionType="button" buttonStyle="solid">
+                  <Radio.Button value="connector">连接器采集</Radio.Button>
+                  <Radio.Button value="internet">互联网采集</Radio.Button>
+                  <Radio.Button value="knowledge">知识库采集</Radio.Button>
+                </Radio.Group>
+              </Form.Item>
+            </div>
+            {sourceMode === 'connector' ? (
+              <Form.Item
+                className={styles.methodConfigField}
+                label="连接器"
+                name="connector"
+                rules={[{ required: true, message: '请选择连接器' }]}
+              >
+                <Select options={CONNECTOR_OPTIONS} />
+              </Form.Item>
+            ) : sourceMode === 'internet' ? (
+              <Form.Item
+                className={styles.methodConfigField}
+                label="搜索范围"
+                name="internetScope"
+                rules={[{ required: true, message: '请输入搜索范围' }]}
+              >
+                <Input placeholder="公开网页、行业媒体与公众号文章" />
+              </Form.Item>
+            ) : (
+              <Form.Item
+                className={styles.methodConfigField}
+                label="来源知识库"
+                name="sourceKnowledge"
+                rules={[{ required: true, message: '请选择来源知识库' }]}
+              >
+                <Select options={availableKnowledgeOptions} showSearch optionFilterProp="label" />
+              </Form.Item>
+            )}
           </div>
-          {sourceMode === 'connector' ? (
-            <Form.Item label="连接器" name="connector" rules={[{ required: true, message: '请选择连接器' }]}>
-              <Select options={CONNECTOR_OPTIONS} />
-            </Form.Item>
-          ) : sourceMode === 'internet' ? (
-            <Form.Item label="搜索范围" name="internetScope" rules={[{ required: true, message: '请输入搜索范围' }]}>
-              <Input placeholder="公开网页、行业媒体与公众号文章" />
-            </Form.Item>
-          ) : (
-            <Form.Item
-              label="来源知识库"
-              name="sourceKnowledge"
-              rules={[{ required: true, message: '请选择来源知识库' }]}
-            >
-              <Select options={availableKnowledgeOptions} showSearch optionFilterProp="label" />
-            </Form.Item>
-          )}
-          <div className={styles.formGrid}>
-            <Form.Item label="入库方式" name="storageMode">
-              <Select
-                options={[
-                  { label: '知识库', value: 'knowledge' },
-                  { label: '本体', value: 'ontology' },
-                ]}
-              />
-            </Form.Item>
+          <div className={styles.storageMethodRow}>
+            <div className={styles.methodField}>
+              <strong>入库方式</strong>
+              <Form.Item name="storageMode">
+                <Radio.Group optionType="button" buttonStyle="solid">
+                  <Radio.Button value="ontology">本体</Radio.Button>
+                  <Radio.Button value="knowledge">知识库</Radio.Button>
+                </Radio.Group>
+              </Form.Item>
+            </div>
             {storageMode === 'ontology' ? (
               <Form.Item
-                label="本体视图 / 对象"
+                className={styles.methodConfigField}
+                label="本体"
                 name="ontology"
                 rules={[{ required: true, type: 'array', min: 1, message: '请选择目标本体' }]}
               >
@@ -596,6 +688,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
               </Form.Item>
             ) : (
               <Form.Item
+                className={styles.methodConfigField}
                 label="目标知识库"
                 name="targetKnowledge"
                 rules={[{ required: true, message: '请选择目标知识库' }]}
@@ -668,7 +761,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
   return (
     <Modal
       open={open}
-      width={980}
+      width={900}
       centered
       destroyOnClose
       className={styles.modal}

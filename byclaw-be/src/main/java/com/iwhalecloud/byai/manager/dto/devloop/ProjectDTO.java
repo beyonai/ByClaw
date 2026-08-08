@@ -10,6 +10,8 @@ public class ProjectDTO {
 
     private Long projectId;
 
+    /** 项目名称最多 100 个字符，与项目空间前端表单保持一致。 */
+    @Size(max = 100, message = "项目名称不能超过100个字符")
     private String projectName;
 
     /** 项目描述最多 500 个字符，与项目空间前端表单保持一致。 */

@@ -4,8 +4,8 @@ import type { FormInstance } from 'antd';
 import { CloseCircleFilled, PlusOutlined } from '@ant-design/icons';
 import { useIntl, useSelector } from '@umijs/max';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
+import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import { listProjectMembers } from '@/service/devloop';
-import { queryAuthDoc } from '@/service/knowledgeCenter';
 import { listOntologyBases, pageOntologyResources } from '@/service/ontology';
 import { ResourceTypeMap } from '@/constants/resource';
 import type { ProjectResourcePayload, ProjectResourceType } from '@/service/devloop';
@@ -111,6 +111,7 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
       digital_employee: [],
       ontology: [],
     });
+    const [resourceValidationTriggered, setResourceValidationTriggered] = useState(false);
     const { options: agentOptions, loading: agentOptionsLoading } = useDigitalEmployeeOptions(open);
     const currentUserId = userInfo.userId ?? userInfo.id;
     const currentUserCode = userInfo.userCode;
@@ -220,6 +221,7 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
           .filter((resource) => resource.resourceType === 'ontology')
           .map((resource) => `${resource.resourceId}`),
       });
+      setResourceValidationTriggered(false);
       setShareMembersLoaded(!projectId);
     }, [form, formInitialValues, normalizeProjectShareMember, open, projectId]);
 
@@ -287,15 +289,34 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
           const knowledgeQuery = {
             pageNum: 1,
             pageSize: 100,
-            resourceBizTypes: [
+            resourceBizTypeList: [
               ResourceTypeMap.knowledgeBase,
               ResourceTypeMap.knowledgeBaseQa,
               ResourceTypeMap.knowledgeBaseTerm,
             ],
           };
-          const [knowledgeOwner, knowledgeAuthorized, ontologyPersonal, ontologyEnterprise, ontologyResourcePersonal, ontologyResourceEnterprise] = await Promise.all([
-            queryAuthDoc({ ...knowledgeQuery, type: 'owner' }),
-            queryAuthDoc({ ...knowledgeQuery, type: 'authorize' }),
+          const [
+            knowledgePersonal,
+            knowledgeEnterprise,
+            ontologyPersonal,
+            ontologyEnterprise,
+            ontologyResourcePersonal,
+            ontologyResourceEnterprise,
+          ] = await Promise.all([
+            // 与“知识”模块保持一致，分别加载当前账号可用的个人知识和企业知识。
+            listResourceUseAuth({
+              ...knowledgeQuery,
+              ownerType: 'personal',
+              resourceStatus: '2',
+              permission: '',
+            }),
+            listResourceUseAuth({
+              ...knowledgeQuery,
+              ownerType: 'enterprise',
+              resourceStatus: '2',
+              permission: '',
+              belong: 'ALL',
+            }),
             listOntologyBases({ ownerType: 'personal' }),
             listOntologyBases({ ownerType: 'enterprise' }),
             // 本体中心卡片使用资源分页接口；同时读取该接口，覆盖本体库列表接口未返回的企业本体资源。
@@ -318,16 +339,16 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
           const knowledgeMap = new Map<string, { value: string; label: string }>();
           [
             ...getArray(
-              knowledgeOwner?.rows,
-              knowledgeOwner?.list,
-              knowledgeOwner?.data?.rows,
-              knowledgeOwner?.data?.list
+              knowledgePersonal?.rows,
+              knowledgePersonal?.list,
+              knowledgePersonal?.data?.rows,
+              knowledgePersonal?.data?.list
             ),
             ...getArray(
-              knowledgeAuthorized?.rows,
-              knowledgeAuthorized?.list,
-              knowledgeAuthorized?.data?.rows,
-              knowledgeAuthorized?.data?.list
+              knowledgeEnterprise?.rows,
+              knowledgeEnterprise?.list,
+              knowledgeEnterprise?.data?.rows,
+              knowledgeEnterprise?.data?.list
             ),
           ].forEach((item: any) => {
             const value = item.resourceId ?? item.resourceSourcePkId ?? item.datasetId ?? item.id;
@@ -516,8 +537,14 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
       ref,
       () => ({
         collectValues: async () => {
+          // 三类绑定资源均为必填；它们由独立状态维护，需要在提交时与 Form 字段一起校验。
+          setResourceValidationTriggered(true);
+          const hasMissingResource = (
+            ['knowledge', 'digital_employee', 'ontology'] as ProjectResourceType[]
+          ).some((resourceType) => selectedResources[resourceType].length === 0);
           try {
             const values = await form.validateFields();
+            if (hasMissingResource) return null;
             return buildSubmitValues(values);
           } catch {
             // 校验失败:antd 已在字段下方标红,父级据 null 中止提交。
@@ -525,7 +552,7 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
           }
         },
       }),
-      [buildSubmitValues, form]
+      [buildSubmitValues, form, selectedResources]
     );
 
     // 未为该角色指定项目覆盖时,占位提示当前生效的全局默认员工(优先冗余名,退选项名,再退id;无则提示未配置)。
@@ -577,9 +604,12 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
           <Form.Item
             name="projectName"
             label={formT('field.projectName')}
-            rules={[{ required: true, message: formT('validation.projectNameRequired') }]}
+            rules={[
+              { required: true, message: formT('validation.projectNameRequired') },
+              { max: 100, message: formT('validation.projectNameMaxLength') },
+            ]}
           >
-            <Input maxLength={100} placeholder={formT('placeholder.projectName')} />
+            <Input maxLength={100} showCount placeholder={formT('placeholder.projectName')} />
           </Form.Item>
           <Form.Item name="description" label={formT('field.description')}>
             {/* 项目描述限制 500 字，默认展示两行，避免新建项目弹窗被描述字段撑高。 */}
@@ -607,7 +637,13 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
           <Form.Item label={formT('field.resources')}>
             {/* 三类资源共用项目绑定关系表；前端按资源类型分组提交，避免与共享成员混淆。 */}
             <div className={styles.projectResourceFields}>
-              <div>
+              <div
+                className={
+                  resourceValidationTriggered && !selectedResources.knowledge.length
+                    ? styles.projectResourceFieldError
+                    : undefined
+                }
+              >
                 <div className={styles.projectResourceLabel}>{formT('resource.knowledge')}</div>
                 <Select
                   mode="multiple"
@@ -620,8 +656,17 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
                   placeholder={formT('resource.knowledgePlaceholder')}
                   onChange={(value: string[]) => setSelectedResources((prev) => ({ ...prev, knowledge: value }))}
                 />
+                {resourceValidationTriggered && !selectedResources.knowledge.length && (
+                  <div className={styles.projectResourceError}>{formT('validation.knowledgeRequired')}</div>
+                )}
               </div>
-              <div>
+              <div
+                className={
+                  resourceValidationTriggered && !selectedResources.digital_employee.length
+                    ? styles.projectResourceFieldError
+                    : undefined
+                }
+              >
                 <div className={styles.projectResourceLabel}>{formT('resource.digitalEmployee')}</div>
                 <Select
                   mode="multiple"
@@ -634,8 +679,17 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
                   placeholder={formT('resource.digitalEmployeePlaceholder')}
                   onChange={(value: string[]) => setSelectedResources((prev) => ({ ...prev, digital_employee: value }))}
                 />
+                {resourceValidationTriggered && !selectedResources.digital_employee.length && (
+                  <div className={styles.projectResourceError}>{formT('validation.digitalEmployeeRequired')}</div>
+                )}
               </div>
-              <div>
+              <div
+                className={
+                  resourceValidationTriggered && !selectedResources.ontology.length
+                    ? styles.projectResourceFieldError
+                    : undefined
+                }
+              >
                 <div className={styles.projectResourceLabel}>{formT('resource.ontology')}</div>
                 <Select
                   mode="multiple"
@@ -648,6 +702,9 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
                   placeholder={formT('resource.ontologyPlaceholder')}
                   onChange={(value: string[]) => setSelectedResources((prev) => ({ ...prev, ontology: value }))}
                 />
+                {resourceValidationTriggered && !selectedResources.ontology.length && (
+                  <div className={styles.projectResourceError}>{formT('validation.ontologyRequired')}</div>
+                )}
               </div>
             </div>
           </Form.Item>
