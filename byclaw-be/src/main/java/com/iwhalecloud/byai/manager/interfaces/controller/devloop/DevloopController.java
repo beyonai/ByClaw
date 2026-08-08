@@ -622,7 +622,7 @@ public class DevloopController {
         return applicationService.getOperationRequirement(MapParamUtil.getLongValue(params, "itemId"));
     }
 
-    /** 删除尚未启动的运营需求。 */
+    /** 删除运营需求；仅需求创建人可操作。 */
     @PostMapping("/requirement/operation/delete")
     public ResponseUtil<Void> deleteOperationRequirement(@RequestBody Map<String, Object> params) {
         return applicationService.deleteOperationRequirement(MapParamUtil.getLongValue(params, "itemId"));
@@ -654,6 +654,18 @@ public class DevloopController {
     @PostMapping("/operation/task/get")
     public ResponseUtil<Map<String, Object>> getOperationTask(@RequestBody Map<String, Object> params) {
         return applicationService.getOperationTask(MapParamUtil.getLongValue(params, "taskId"));
+    }
+
+    /** 修改尚未开始的运营任务。 */
+    @PostMapping("/operation/task/update")
+    public ResponseUtil<Void> updateOperationTask(@RequestBody OperationTaskDTO dto) {
+        return applicationService.updateOperationTask(dto);
+    }
+
+    /** 删除运营任务；仅任务创建人可操作，已执行任务保留会话成果。 */
+    @PostMapping("/operation/task/delete")
+    public ResponseUtil<Void> deleteOperationTask(@RequestBody Map<String, Object> params) {
+        return applicationService.deleteOperationTask(MapParamUtil.getLongValue(params, "taskId"));
     }
 
     /** 确认执行数字员工并启动已拆解的运营任务会话。 */

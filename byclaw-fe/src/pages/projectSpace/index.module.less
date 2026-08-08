@@ -626,6 +626,58 @@
   opacity: 0;
 }
 
+// 需求和任务的低频操作统一收口到卡片右下角，避免与右上角状态、执行按钮争抢空间。
+.cardMoreAction {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(5px) rotate(90deg);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.dataCard:hover .cardMoreAction,
+.dataCard:focus-within .cardMoreAction {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) rotate(90deg);
+}
+
+.requirementDueTimeWithAction {
+  transition: opacity 0.18s ease;
+}
+
+.requirementDetailContent {
+  :global(.@{antPrefix}-typography) {
+    margin-top: 20px;
+  }
+}
+
+.requirementDetailDescription {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.requirementDetailConfig {
+  max-height: 320px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f6f8fb;
+  color: #475467;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+// 需求卡片右下角操作浮起时隐藏日期，避免两个元素占用同一位置。
+.dataCard:hover .requirementDueTimeWithAction,
+.dataCard:focus-within .requirementDueTimeWithAction {
+  opacity: 0;
+}
+
 // 任务卡片列表自身承接滚动，避免详情页外层 flex/Spin 组合把内容高度锁死。
 .dataPanel,
 .dataPanel > :global(.@{antPrefix}-spin-nested-loading),
