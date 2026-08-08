@@ -23,7 +23,7 @@ class FakeApi:
     def __init__(self) -> None:
         self.agent_resource_calls: list[tuple[str, int]] = []
         self.session_resource_calls: list[str] = []
-        self.saved_object_files: list[dict[str, object]] = []
+        self.saved_object_instances: list[dict[str, object]] = []
         self.discovery_calls: list[tuple[str, list[str]]] = []
         self.enrichment_calls: list[tuple[str, list[str]]] = []
 
@@ -43,9 +43,9 @@ class FakeApi:
     def list_session_resources(self, *, session_id: str) -> list[dict[str, object]]:
         self.session_resource_calls.append(session_id)
         return [
-            {"objectCode": "raw_doc"},
-            {"objectCode": "concept"},
-            {"objectCode": "concept"},
+            {"objectCode": "raw_doc", "kbDirectory": "/原始资料"},
+            {"objectCode": "concept", "kbDirectory": "/概念"},
+            {"objectCode": "concept", "kbDirectory": "/概念"},
         ]
 
     def get_object(self, object_code: str) -> dict[str, object]:
@@ -59,11 +59,15 @@ class FakeApi:
             "must_not_persist": True,
         }
 
-    def save_object_files(
-        self, *, object_files: list[dict[str, object]]
-    ) -> list[dict[str, object]]:
-        self.saved_object_files.extend(object_files)
-        return [{**object_files[0], "id": 11041854}]
+    def save_object_instance(
+        self, *, payload: dict[str, object]
+    ) -> dict[str, object]:
+        self.saved_object_instances.append(payload)
+        return {
+            "records": [{"term_id": "term-11041854"}],
+            "total": 1,
+            "meta": {},
+        }
 
     def discover_document_objects(
         self, *, session_id: str, object_codes: list[str]
@@ -214,6 +218,11 @@ class KnowledgeOrganizerTests(unittest.TestCase):
             ["session-001"],
         )
         self.assertEqual(self.api.agent_resource_calls, [])
+        state = self.organizer._load_state(self.task_dir)
+        directories = {
+            item["object_code"]: item["kb_directory"] for item in state["objects"]
+        }
+        self.assertEqual(directories["raw_doc"], "/原始资料")
         self.assertTrue(
             (
                 self.task_dir
@@ -252,13 +261,13 @@ class KnowledgeOrganizerTests(unittest.TestCase):
         transport = RecordingTransport(
             [
                 [{"objectCode": "raw_doc"}],
-                [{"id": 7}],
+                {"records": [{"term_id": "term-7"}], "total": 1, "meta": {}},
             ]
         )
         api = knowledge_organizer.ServiceApi(transport)
 
         resources = api.list_session_resources(session_id="session-001")
-        api.save_object_files(object_files=[{"objectCode": "raw_doc"}])
+        api.save_object_instance(payload={"objectCode": "raw_doc"})
 
         self.assertEqual(resources, [{"objectCode": "raw_doc"}])
 
@@ -276,12 +285,12 @@ class KnowledgeOrganizerTests(unittest.TestCase):
             {
                 "service_env": "BE_DOMAINNAME",
                 "method": "POST",
-                "path": "/byaiService/devloop/operation/saveOrUpdateObjectFiles",
-                "payload": {"objectFiles": [{"objectCode": "raw_doc"}]},
+                "path": "/devloop/operation/saveObjectInstanceToKb",
+                "payload": {"objectCode": "raw_doc"},
             },
         )
 
-    def test_ingest_snapshots_source_and_saves_backend_object_file(self) -> None:
+    def test_ingest_snapshots_source_and_saves_object_instance_to_kb(self) -> None:
         self.initialize_session_scope()
         source = Path(self.temp_dir.name) / "客户访谈.md"
         source.write_text("# 客户访谈\n正文", encoding="utf-8")
@@ -294,19 +303,25 @@ class KnowledgeOrganizerTests(unittest.TestCase):
             ext_content={"source": "interview"},
         )
 
-        self.assertEqual(result["object_file_id"], 11041854)
-        payload = self.api.saved_object_files[0]
+        self.assertEqual(result["term_id"], "term-11041854")
+        payload = self.api.saved_object_instances[0]
         self.assertEqual(payload["sessionId"], "session-001")
-        self.assertEqual(payload["objectName"], "原始文档")
         self.assertEqual(payload["objectCode"], "raw_doc")
-        self.assertEqual(payload["fileName"], "客户访谈.md")
-        self.assertEqual(payload["version"], "1.0.0")
-        self.assertEqual(payload["statusCd"], "00A")
+        self.assertEqual(payload["actionCode"], "write_raw_doc")
         self.assertEqual(
-            json.loads(str(payload["extContent"])),
+            payload["arguments"],
+            {
+                "sourcePath": "/原始资料/客户访谈.md",
+                "content": "# 客户访谈\n正文",
+                "fileDescription": "客户访谈",
+                "labels": {"source": "interview"},
+            },
+        )
+        self.assertEqual(
+            result["ext_content"],
             {"source": "interview"},
         )
-        self.assertTrue(Path(str(payload["filePath"])).is_file())
+        self.assertTrue(Path(result["snapshot_path"]).is_file())
 
     def test_ingest_is_idempotent_for_same_content_and_object(self) -> None:
         self.initialize_agent_scope()
@@ -327,7 +342,7 @@ class KnowledgeOrganizerTests(unittest.TestCase):
         )
 
         self.assertEqual(first, second)
-        self.assertEqual(len(self.api.saved_object_files), 1)
+        self.assertEqual(len(self.api.saved_object_instances), 1)
 
     def test_ingest_rejects_ads_object(self) -> None:
         self.initialize_session_scope()
@@ -339,6 +354,48 @@ class KnowledgeOrganizerTests(unittest.TestCase):
                 self.task_dir,
                 source=source,
                 object_code="concept",
+                storage_file_name="对象资料.md",
+            )
+
+    def test_ingest_succeeds_when_backend_returns_non_empty_records(self) -> None:
+        class RecordWithoutTermIdApi(FakeApi):
+            def save_object_instance(
+                self, *, payload: dict[str, object]
+            ) -> dict[str, object]:
+                return {"records": [{"filePath": "/raw_doc/对象资料.md"}], "total": 1}
+
+        organizer = knowledge_organizer.KnowledgeOrganizer(RecordWithoutTermIdApi())
+        organizer.initialize(self.task_dir, session_id="session-001")
+        source = Path(self.temp_dir.name) / "notes.md"
+        source.write_text("# 标题", encoding="utf-8")
+
+        result = organizer.ingest(
+            self.task_dir,
+            source=source,
+            object_code="raw_doc",
+            storage_file_name="对象资料.md",
+        )
+
+        self.assertEqual(result["status"], "succeeded")
+        self.assertIsNone(result["term_id"])
+
+    def test_ingest_records_failure_when_backend_records_are_empty(self) -> None:
+        class EmptyRecordsApi(FakeApi):
+            def save_object_instance(
+                self, *, payload: dict[str, object]
+            ) -> dict[str, object]:
+                return {"records": [], "total": 0}
+
+        organizer = knowledge_organizer.KnowledgeOrganizer(EmptyRecordsApi())
+        organizer.initialize(self.task_dir, session_id="session-001")
+        source = Path(self.temp_dir.name) / "notes.md"
+        source.write_text("# 标题", encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "records"):
+            organizer.ingest(
+                self.task_dir,
+                source=source,
+                object_code="raw_doc",
                 storage_file_name="对象资料.md",
             )
 
@@ -396,14 +453,15 @@ class KnowledgeOrganizerTests(unittest.TestCase):
         )
         api = knowledge_organizer.ServiceApi(transport)
 
-        api.discover_document_objects(
-            session_id="session-001",
-            object_codes=["raw_doc"],
-        )
-        api.enrich_document_objects(
-            session_id="session-001",
-            object_codes=["concept"],
-        )
+        with patch.dict(os.environ, {"USER_CODE": "user-001"}):
+            api.discover_document_objects(
+                session_id="session-001",
+                object_codes=["raw_doc"],
+            )
+            api.enrich_document_objects(
+                session_id="session-001",
+                object_codes=["concept"],
+            )
 
         self.assertEqual(
             transport.requests[0],
@@ -412,7 +470,10 @@ class KnowledgeOrganizerTests(unittest.TestCase):
                 "method": "POST",
                 "path": "/api/v1/rpc/kb/discoverDocumentObjectsAsync",
                 "payload": {"params": {"objectCodes": ["raw_doc"]}},
-                "headers": {"X-Session-Id": "session-001"},
+                "headers": {
+                    "X-Session-Id": "session-001",
+                    "X-User-Code": "user-001",
+                },
             },
         )
         self.assertEqual(
@@ -422,9 +483,22 @@ class KnowledgeOrganizerTests(unittest.TestCase):
                 "method": "POST",
                 "path": "/api/v1/rpc/kb/enrichDocumentObjectsAsync",
                 "payload": {"params": {"objectCodes": ["concept"]}},
-                "headers": {"X-Session-Id": "session-001"},
+                "headers": {
+                    "X-Session-Id": "session-001",
+                    "X-User-Code": "user-001",
+                },
             },
         )
+
+    def test_async_datacloud_calls_require_user_code(self) -> None:
+        api = knowledge_organizer.ServiceApi(RecordingTransport([]))
+
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ValueError, "USER_CODE"):
+                api.discover_document_objects(
+                    session_id="session-001",
+                    object_codes=["concept"],
+                )
 
     def test_async_commands_reject_uninitialized_and_unauthorized_objects(self) -> None:
         with self.assertRaisesRegex(ValueError, "未初始化"):

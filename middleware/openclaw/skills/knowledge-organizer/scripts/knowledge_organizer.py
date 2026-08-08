@@ -19,8 +19,6 @@ WORKFLOW_DIRECTORY = "knowledge-organizer"
 STATE_FILE = "state.json"
 OBJECT_FIELDS = ("objectCode", "objectName", "objectDesc", "properties")
 SUPPORTED_SOURCE_SUFFIXES = {".md", ".txt", ".json"}
-OBJECT_FILE_VERSION = "1.0.0"
-OBJECT_FILE_STATUS_CD = "00A"
 
 
 class OrganizerApi(Protocol):
@@ -30,7 +28,7 @@ class OrganizerApi(Protocol):
 
     def get_object(self, object_code: str) -> dict[str, Any]: ...
 
-    def save_object_files(self, *, object_files: list[dict[str, Any]]) -> list[dict[str, Any]]: ...
+    def save_object_instance(self, *, payload: dict[str, Any]) -> dict[str, Any]: ...
 
     def discover_document_objects(
         self, *, session_id: str, object_codes: list[str]
@@ -94,14 +92,21 @@ class ServiceApi:
         )
         return result if isinstance(result, dict) else {}
 
-    def save_object_files(self, *, object_files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def save_object_instance(self, *, payload: dict[str, Any]) -> dict[str, Any]:
         result = self.transport.request(
             service_env="BE_DOMAINNAME",
             method="POST",
-            path="/byaiService/devloop/operation/saveOrUpdateObjectFiles",
-            payload={"objectFiles": object_files},
+            path="/devloop/operation/saveObjectInstanceToKb",
+            payload=payload,
         )
-        return result if isinstance(result, list) else []
+        return result if isinstance(result, dict) else {}
+
+    @staticmethod
+    def _datacloud_headers(session_id: str) -> dict[str, str]:
+        user_code = os.getenv("USER_CODE", "").strip()
+        if not user_code:
+            raise ValueError("USER_CODE 必须配置")
+        return {"X-Session-Id": session_id, "X-User-Code": user_code}
 
     def discover_document_objects(
         self, *, session_id: str, object_codes: list[str]
@@ -111,7 +116,7 @@ class ServiceApi:
             method="POST",
             path="/api/v1/rpc/kb/discoverDocumentObjectsAsync",
             payload={"params": {"objectCodes": object_codes}},
-            headers={"X-Session-Id": session_id},
+            headers=self._datacloud_headers(session_id),
         )
         return result if isinstance(result, dict) else {}
 
@@ -123,7 +128,7 @@ class ServiceApi:
             method="POST",
             path="/api/v1/rpc/kb/enrichDocumentObjectsAsync",
             payload={"params": {"objectCodes": object_codes}},
-            headers={"X-Session-Id": session_id},
+            headers=self._datacloud_headers(session_id),
         )
         return result if isinstance(result, dict) else {}
 
@@ -366,11 +371,13 @@ class KnowledgeOrganizer:
                 / f"{self._safe_file_component(object_name)}.json"
             )
             self._write_json(object_file, filtered)
+            kb_directory = self._knowledge_directory(resource, detail, object_code)
             objects.append(
                 {
                     "object_code": object_code,
                     "object_name": object_name,
                     "domain": domain,
+                    "kb_directory": kb_directory,
                     "path": str(object_file),
                 }
             )
@@ -424,26 +431,33 @@ class KnowledgeOrganizer:
         if not isinstance(ext_content, dict):
             raise ValueError("ext content 必须是 JSON 对象")
 
-        content = source.read_bytes()
-        digest = hashlib.sha256(content).hexdigest()
+        content_bytes = source.read_bytes()
+        digest = hashlib.sha256(content_bytes).hexdigest()
         existing = self._existing_ingestion(state, digest, object_code)
         if existing is not None:
             return existing
 
         snapshot = self._snapshot_source(task_dir, source, digest)
-        object_file = {
+        try:
+            content = content_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("源文件必须使用 UTF-8 编码") from exc
+        payload = {
             "sessionId": str(state["session_id"]),
-            "objectName": object_info["object_name"],
             "objectCode": object_code,
-            "fileName": storage_file_name,
-            "filePath": str(snapshot),
-            "version": OBJECT_FILE_VERSION,
-            "statusCd": OBJECT_FILE_STATUS_CD,
-            "extContent": json.dumps(ext_content, ensure_ascii=False, separators=(",", ":")),
+            "actionCode": f"write_{object_code}",
+            "arguments": {
+                "sourcePath": (
+                    f"{object_info['kb_directory'].rstrip('/')}/{storage_file_name}"
+                ),
+                "content": content,
+                "fileDescription": Path(storage_file_name).stem,
+                "labels": ext_content,
+            },
         }
         try:
-            response = self.api.save_object_files(object_files=[object_file])
-            saved = self._saved_object_file(response, object_code)
+            response = self.api.save_object_instance(payload=payload)
+            saved = self._saved_object_instance(response)
         except Exception as exc:
             state["ingestions"].append(
                 {
@@ -466,7 +480,7 @@ class KnowledgeOrganizer:
             "object_name": object_info["object_name"],
             "storage_file_name": storage_file_name,
             "ext_content": ext_content,
-            "object_file_id": saved.get("id"),
+            "term_id": saved.get("term_id"),
             "status": "succeeded",
         }
         state["ingestions"].append(record)
@@ -603,6 +617,17 @@ class KnowledgeOrganizer:
         return filtered
 
     @staticmethod
+    def _knowledge_directory(
+        resource: dict[str, Any], detail: dict[str, Any], object_code: str
+    ) -> str:
+        directory = str(
+            resource.get("kbDirectory") or detail.get("kbDirectory") or ""
+        ).strip()
+        if not directory:
+            directory = object_code
+        return f"/{directory.strip('/')}"
+
+    @staticmethod
     def _safe_file_component(value: str) -> str:
         safe = value.replace("/", "_").replace("\\", "_").strip()
         if safe in {"", ".", ".."}:
@@ -681,20 +706,12 @@ class KnowledgeOrganizer:
         return destination
 
     @staticmethod
-    def _saved_object_file(
-        response: list[dict[str, Any]], object_code: str
-    ) -> dict[str, Any]:
-        if not response:
-            raise ValueError("保存对象文件响应为空")
-        matching = [
-            item
-            for item in response
-            if isinstance(item, dict) and item.get("objectCode") == object_code
-        ]
-        saved = matching[0] if matching else response[0]
-        if not isinstance(saved, dict) or saved.get("id") is None:
-            raise ValueError("保存对象文件响应缺少 id")
-        return saved
+    def _saved_object_instance(response: dict[str, Any]) -> dict[str, Any]:
+        records = response.get("records")
+        if not isinstance(records, list) or not records:
+            raise ValueError("对象入库响应 records 不存在或为空")
+        saved = records[0]
+        return saved if isinstance(saved, dict) else {}
 
     @staticmethod
     def _existing_ingestion(
