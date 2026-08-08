@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).with_name("knowledge_organizer.py")
@@ -97,6 +99,78 @@ class RecordingTransport:
 
     def close(self) -> None:
         return None
+
+
+class RedisConfigAdapterTests(unittest.TestCase):
+    def load_config(self, environment: dict[str, str]) -> dict[str, object]:
+        with patch.dict(os.environ, environment, clear=True):
+            return knowledge_organizer._redis_config_from_env(dict)
+
+    def test_cluster_config_ignores_empty_standalone_values(self) -> None:
+        config = self.load_config(
+            {
+                "REDIS_CLUSTER_HOST": "redis-1:6371, redis-2:6372",
+                "REDIS_USERNAME": "cluster-user",
+                "REDIS_PASSWORD": "cluster-password",
+                "REDIS_HOST": "",
+                "REDIS_PORT": "",
+            }
+        )
+
+        self.assertEqual(config["mode"], "cluster")
+        self.assertEqual(config["cluster_nodes"], [("redis-1", 6371), ("redis-2", 6372)])
+        self.assertEqual(config["host"], "localhost")
+        self.assertEqual(config["port"], 6379)
+        self.assertEqual(config["username"], "cluster-user")
+        self.assertEqual(config["password"], "cluster-password")
+
+    def test_standard_cluster_config_supports_both_node_variable_names(self) -> None:
+        for variable in ("REDIS_CLUSTER_HOST", "REDIS_CLUSTER_NODES"):
+            with self.subTest(variable=variable):
+                config = self.load_config({variable: "redis-1:6379,redis-2:6380"})
+
+                self.assertEqual(config["mode"], "cluster")
+                self.assertEqual(
+                    config["cluster_nodes"],
+                    [("redis-1", 6379), ("redis-2", 6380)],
+                )
+
+    def test_standalone_config_uses_standard_values(self) -> None:
+        config = self.load_config(
+            {
+                "REDIS_HOST": "redis-single",
+                "REDIS_PORT": "6381",
+                "REDIS_DATABASE": "2",
+                "REDIS_USERNAME": "redis-user",
+                "REDIS_PASSWORD": "redis-password",
+            }
+        )
+
+        self.assertEqual(config["mode"], "standalone")
+        self.assertIsNone(config["cluster_nodes"])
+        self.assertEqual(config["host"], "redis-single")
+        self.assertEqual(config["port"], 6381)
+        self.assertEqual(config["db"], 2)
+        self.assertEqual(config["username"], "redis-user")
+        self.assertEqual(config["password"], "redis-password")
+
+    def test_empty_standalone_config_uses_safe_defaults(self) -> None:
+        config = self.load_config(
+            {
+                "REDIS_HOST": "",
+                "REDIS_PORT": "",
+                "REDIS_DATABASE": "",
+                "REDIS_USERNAME": "",
+                "REDIS_PASSWORD": "",
+            }
+        )
+
+        self.assertEqual(config["mode"], "standalone")
+        self.assertEqual(config["host"], "localhost")
+        self.assertEqual(config["port"], 6379)
+        self.assertEqual(config["db"], 0)
+        self.assertIsNone(config["username"])
+        self.assertEqual(config["password"], "")
 
 
 class KnowledgeOrganizerTests(unittest.TestCase):

@@ -130,6 +130,72 @@ async def _await_if_needed(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 
 
+def _first_non_empty_env(*names: str, default: str = "") -> str:
+    for name in names:
+        value = os.getenv(name, "").strip()
+        if value:
+            return value
+    return default
+
+
+def _env_int(default: int, *names: str) -> int:
+    value = _first_non_empty_env(*names)
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(f"{names[0]} 必须是整数: {value}") from exc
+
+
+def _parse_redis_cluster_nodes(value: str) -> list[tuple[str, int]]:
+    nodes: list[tuple[str, int]] = []
+    for raw_node in value.split(","):
+        node = raw_node.strip()
+        if not node:
+            continue
+        host, separator, port = node.rpartition(":")
+        if not separator:
+            host, port = node, "6379"
+        host = host.strip()
+        if not host:
+            raise ValueError(f"Redis 集群节点缺少 host: {node}")
+        try:
+            nodes.append((host, int(port) if port else 6379))
+        except ValueError as exc:
+            raise ValueError(f"Redis 集群节点端口无效: {node}") from exc
+    return nodes
+
+
+def _redis_config_from_env(redis_config_type: Any) -> Any:
+    """Build a blank-safe standalone or cluster by-framework Redis config."""
+    cluster_value = _first_non_empty_env(
+        "REDIS_CLUSTER_HOST",
+        "REDIS_CLUSTER_NODES",
+    )
+    cluster_nodes = _parse_redis_cluster_nodes(cluster_value)
+    configured_mode = _first_non_empty_env("REDIS_MODE").lower()
+    if configured_mode not in {"", "standalone", "cluster"}:
+        raise ValueError(f"Redis mode 无效: {configured_mode}")
+    mode = configured_mode or ("cluster" if cluster_nodes else "standalone")
+    if mode == "cluster" and not cluster_nodes:
+        raise ValueError("Redis cluster 模式缺少集群节点")
+
+    return redis_config_type(
+        host=_first_non_empty_env("REDIS_HOST", default="localhost"),
+        port=_env_int(6379, "REDIS_PORT"),
+        db=_env_int(
+            0,
+            "REDIS_DATABASE",
+            "REDIS_DB",
+        ),
+        password=_first_non_empty_env("REDIS_PASSWORD"),
+        username=_first_non_empty_env("REDIS_USERNAME") or None,
+        mode=mode,
+        cluster_nodes=cluster_nodes if mode == "cluster" else None,
+    )
+
+
 class ByFrameworkDiscoveryTransport:
     """Read the live login token and call a named service through discovery."""
 
@@ -198,7 +264,7 @@ class ByFrameworkDiscoveryTransport:
         if not service_name or not user_code:
             raise ValueError(f"{service_env} 和 USER_CODE 必须配置")
 
-        redis_client = init_redis(config=RedisConfig.from_env())
+        redis_client = init_redis(config=_redis_config_from_env(RedisConfig))
         user_id = await _await_if_needed(redis_client.get(f"SHARE_BFM_USER_CODE_{user_code}"))
         if isinstance(user_id, bytes):
             user_id = user_id.decode("utf-8")
