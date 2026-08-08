@@ -90,7 +90,8 @@ public class OperationTaskSessionService {
     /** 查询单个运营任务会话；研发会话即使 ID 相同也不会被误识别。 */
     public ByaiSession findById(Long sessionId) {
         ByaiSession session = sessionId == null ? null : byaiSessionMapper.selectById(sessionId);
-        return session != null && isOperationTask(session.getSessionId()) ? session : null;
+        return session != null && !"DELETED".equals(session.getState()) && isOperationTask(session.getSessionId())
+            ? session : null;
     }
 
     /** 查询需求下是否已经创建过运营任务，用于推导需求状态和禁止编辑。 */
@@ -110,7 +111,8 @@ public class OperationTaskSessionService {
             return Collections.emptyList();
         }
         LambdaQueryWrapper<ByaiSession> wrapper = new LambdaQueryWrapper<>();
-        wrapper.apply(operationTaskExistsSql(EXT_SOURCE_ID, String.valueOf(sourceId)))
+        wrapper.and(query -> query.isNull(ByaiSession::getState).or().ne(ByaiSession::getState, "DELETED"))
+            .apply(operationTaskExistsSql(EXT_SOURCE_ID, String.valueOf(sourceId)))
             .orderByAsc(ByaiSession::getCreateTime).orderByAsc(ByaiSession::getSessionId);
         return byaiSessionMapper.selectList(wrapper);
     }
@@ -203,6 +205,29 @@ public class OperationTaskSessionService {
             new LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember>()
                 .eq(com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember::getSessionId, sessionId));
         byaiSessionMapper.deleteById(sessionId);
+    }
+
+    /**
+     * 逻辑删除运营任务会话。已执行任务可能关联聊天消息和成果文件，统一保留底层数据，
+     * 仅通过会话状态从运营任务列表和详情中隐藏。
+     */
+    public void markDeleted(Long sessionId, Long operatorId) {
+        if (sessionId == null) {
+            return;
+        }
+        ByaiSession update = new ByaiSession();
+        update.setSessionId(sessionId);
+        update.setState("DELETED");
+        update.setUpdateBy(operatorId);
+        update.setUpdateTime(new Date());
+        byaiSessionMapper.updateById(update);
+    }
+
+    /** 删除需求时批量逻辑删除其关联任务，避免遗留无法追溯所属需求的任务卡片。 */
+    public void markDeletedBySourceId(Long sourceId, Long operatorId) {
+        for (ByaiSession session : listBySourceId(sourceId)) {
+            markDeleted(session.getSessionId(), operatorId);
+        }
     }
 
     /** 判断会话是否已经带有运营需求关联扩展参数。 */

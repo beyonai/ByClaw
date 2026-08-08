@@ -1,5 +1,18 @@
-import { Button, Empty, Input, Modal, Select, Spin, Tag, Typography, message } from 'antd';
-import { DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import {
+  Button,
+  Descriptions,
+  Drawer,
+  Dropdown,
+  Empty,
+  Input,
+  Modal,
+  Select,
+  Spin,
+  Tag,
+  Typography,
+  message,
+} from 'antd';
+import { DeleteOutlined, MoreOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
@@ -8,9 +21,15 @@ import {
   listProjectRepos,
   listProjectMembers,
   listRequirementsByProject,
+  deleteOperationRequirement,
   splitTask,
   startOperationRequirement,
+  updateOperationRequirement,
 } from '@/service/devloop';
+import {
+  OperationTaskFormModal,
+  type OperationTaskFormValues,
+} from '@/layout/sider/components/ProjectSpaceList/operation';
 import RequirementSplitModal from '@/layout/sider/components/ProjectSpaceList/RequirementSplitModal';
 import type { SplitTaskDraft } from '@/layout/sider/components/ProjectSpaceList/RequirementSplitModal/types';
 import type { ProjectRequirement, ProjectSpace } from '../../types';
@@ -88,6 +107,12 @@ const getRequirementStatusColor = (status: unknown) => {
   return 'warning';
 };
 
+/** 兼容运营需求历史状态编码，所有未启动状态统一按“待开始”处理。 */
+const isPendingRequirement = (item: Record<string, any>) =>
+  ['todo', 'pending', 'created', 'not_started', 'waiting', '待开始', ''].includes(
+    `${item.status || item.action || ''}`.trim().toLowerCase()
+  );
+
 const getRequirementStatusOrder = (item: Record<string, any>) => {
   const status = `${item.status || item.action || ''}`.trim().toLowerCase();
   if (['done', 'completed', 'finished', 'closed', 'failed', 'error', 'cancelled', '已完成', '完成', '失败'].includes(status)) {
@@ -152,6 +177,8 @@ const ProjectRequirements: React.FC<Props> = ({
   >([]);
   const [developSplitConfirming, setDevelopSplitConfirming] = useState(false);
   const [requirementDetail, setRequirementDetail] = useState<Record<string, any> | null>(null);
+  const [editingRequirement, setEditingRequirement] = useState<Record<string, any> | null>(null);
+  const [requirementSaving, setRequirementSaving] = useState(false);
 
   const loadRequirements = useCallback(
     async (search = keyword, nextPage = 1) => {
@@ -193,7 +220,7 @@ const ProjectRequirements: React.FC<Props> = ({
   const loadRequirementsRef = useRef(loadRequirements);
 
   useEffect(() => {
-    if ((!startTarget && !developSplitTarget) || !project.projectId) return;
+    if ((!startTarget && !developSplitTarget && !editingRequirement) || !project.projectId) return;
     void listProjectMembers(Number(project.projectId)).then((response) => {
       setSplitAssignees(
         getArrayData(response).map((member: any) => ({
@@ -202,7 +229,7 @@ const ProjectRequirements: React.FC<Props> = ({
         }))
       );
     });
-  }, [developSplitTarget, project.projectId, startTarget]);
+  }, [developSplitTarget, editingRequirement, project.projectId, startTarget]);
 
   useEffect(() => {
     if (project.projectType !== 'develop' || !project.projectId) return;
@@ -236,6 +263,14 @@ const ProjectRequirements: React.FC<Props> = ({
   }, [project.projectId, project.projectType, project.repos]);
 
   const currentUserId = useSelector((state: any) => state.user?.userInfo?.userId ?? state.user?.userInfo?.id);
+  const isRequirementCreator = (item: Record<string, any>) =>
+    item.canDelete === true ||
+    (currentUserId !== undefined && item.createBy !== undefined && `${currentUserId}` === `${item.createBy}`) ||
+    // 兼容历史接口未返回需求创建人的数据，后端也会按相同规则回退到项目创建人。
+    (item.createBy == null &&
+      currentUserId !== undefined &&
+      project.createBy !== undefined &&
+      `${currentUserId}` === `${project.createBy}`);
   const developInitReady = project.projectType !== 'develop' || !project.initStatus || project.initStatus === 'ready';
   const defaultDevelopAssigneeId = splitAssignees.find(
     (member) => currentUserId !== undefined && `${member.value}` === `${currentUserId}`
@@ -377,6 +412,82 @@ const ProjectRequirements: React.FC<Props> = ({
     });
   };
 
+  const handleUpdateRequirement = async (values: OperationTaskFormValues) => {
+    if (!editingRequirement || requirementSaving) return;
+    const itemId = Number(
+      editingRequirement.itemId ?? editingRequirement.sourceId ?? editingRequirement.requirementId
+    );
+    if (!Number.isFinite(itemId)) {
+      message.error('需求缺少有效编号，无法编辑');
+      return;
+    }
+    setRequirementSaving(true);
+    try {
+      await updateOperationRequirement({
+        itemId,
+        requirementName: values.taskName.trim(),
+        sourceDescription: values.description?.trim() || undefined,
+        operationType: values.taskType === 'content' ? 'publish' : values.taskType,
+        assignee: values.assigneeId,
+        dueTime: values.dueTime?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
+        // 简化需求表单不修改执行配置，保留原需求已有配置，防止编辑基础信息时清空历史字段。
+        config: editingRequirement.config,
+      });
+      message.success('需求已更新');
+      setEditingRequirement(null);
+      await loadRequirements(keyword, 1);
+    } catch (error: any) {
+      message.error(error?.message || '需求更新失败');
+    } finally {
+      setRequirementSaving(false);
+    }
+  };
+
+  const handleDeleteRequirement = (item: Record<string, any>) => {
+    const itemId = Number(item.itemId ?? item.sourceId ?? item.requirementId);
+    if (!Number.isFinite(itemId)) {
+      message.error('需求缺少有效编号，无法删除');
+      return;
+    }
+    const title = item.title || item.requirementName || item.sourceName || '当前需求';
+    const status = `${item.status || item.action || ''}`.trim().toLowerCase();
+    const isRunningRequirement = ['launched', 'doing', 'running', 'in_progress', 'processing', '进行中'].includes(
+      status
+    );
+    Modal.confirm({
+      title: '确认删除需求？',
+      content: `删除“${title}”后将不再展示其关联任务，是否继续？`,
+      okText: '删除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        if (isRunningRequirement) {
+          // 进行中的需求可能仍有任务在执行，删除前增加第二次强确认，降低误删风险。
+          const confirmed = await new Promise<boolean>((resolve) => {
+            Modal.confirm({
+              title: '再次确认删除进行中的需求？',
+              content: `“${title}”仍在进行中，删除后关联任务也将从项目列表隐藏，请再次确认。`,
+              okText: '确认删除',
+              cancelText: '取消',
+              okButtonProps: { danger: true },
+              onOk: () => resolve(true),
+              onCancel: () => resolve(false),
+            });
+          });
+          if (!confirmed) return;
+        }
+        try {
+          await deleteOperationRequirement(itemId);
+          message.success('需求已删除');
+          setRequirementDetail(null);
+          await loadRequirements(keyword, 1);
+        } catch (error: any) {
+          message.error(error?.message || '需求删除失败');
+        }
+      },
+    });
+  };
+
   return (
     <div className={styles.dataPanel}>
       <Spin spinning={loading}>
@@ -415,7 +526,7 @@ const ProjectRequirements: React.FC<Props> = ({
                       <Tag className={styles.requirementStatusTag} color={getRequirementStatusColor(item.status)}>
                         {getRequirementStatusLabel(item.status)}
                       </Tag>
-                      {project.projectType === 'operation' && item.status === 'todo' && (
+                      {project.projectType === 'operation' && isPendingRequirement(item) && (
                         <Button
                           type="link"
                           size="small"
@@ -486,11 +597,47 @@ const ProjectRequirements: React.FC<Props> = ({
                       <Typography.Text type="secondary" ellipsis={{ tooltip: `${assignee}` }}>
                         {assignee}
                       </Typography.Text>
-                      <Typography.Text type="secondary">{formattedDueTime}</Typography.Text>
+                      <Typography.Text
+                        type="secondary"
+                        className={
+                          isPendingRequirement(item) || isRequirementCreator(item)
+                            ? styles.requirementDueTimeWithAction
+                            : undefined
+                        }
+                      >
+                        {formattedDueTime}
+                      </Typography.Text>
                     </div>
                   ) : (
                     <Typography.Text type="secondary">{item.status || item.action || '-'}</Typography.Text>
                   )}
+                  {project.projectType === 'operation' &&
+                    (isPendingRequirement(item) || isRequirementCreator(item)) && (
+                      <Dropdown
+                        trigger={['click']}
+                        menu={{
+                          items: [
+                            ...(isPendingRequirement(item) ? [{ key: 'edit', label: '编辑' }] : []),
+                            ...(isRequirementCreator(item) ? [{ key: 'delete', label: '删除', danger: true }] : []),
+                          ],
+                          onClick: ({ key, domEvent }) => {
+                            domEvent.stopPropagation();
+                            if (key === 'edit') setEditingRequirement(item);
+                            if (key === 'delete') handleDeleteRequirement(item);
+                          },
+                        }}
+                      >
+                        {/* 放在状态容器外，绝对定位才能以整张需求卡片为基准落到右下角。 */}
+                        <Button
+                          type="text"
+                          size="small"
+                          className={styles.cardMoreAction}
+                          icon={<MoreOutlined />}
+                          aria-label="需求操作"
+                          onClick={(event) => event.stopPropagation()}
+                        />
+                      </Dropdown>
+                    )}
                 </article>
               );
             })}
@@ -511,46 +658,95 @@ const ProjectRequirements: React.FC<Props> = ({
           ) : null}
         </div>
       </Spin>
-      <Modal
+      <Drawer
         open={!!requirementDetail}
         title={
           requirementDetail?.title || requirementDetail?.requirementName || requirementDetail?.sourceName || '需求详情'
         }
-        footer={null}
-        width={680}
-        onCancel={() => setRequirementDetail(null)}
+        width={560}
+        onClose={() => setRequirementDetail(null)}
         destroyOnClose
       >
         {requirementDetail && (
           <div className={styles.requirementDetailContent}>
-            <Typography.Paragraph>
+            <Descriptions bordered size="small" column={1}>
+              <Descriptions.Item label="需求编号">
+                {requirementDetail.itemId || requirementDetail.requirementId || requirementDetail.sourceId || '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="需求类型">
+                {project.projectType === 'develop'
+                  ? getDevelopRequirementTypeLabel(requirementDetail, intl)
+                  : intl.formatMessage({
+                      id: `projectSpace.operation.task.type.${normalizeRequirementType(requirementDetail)}`,
+                    })}
+              </Descriptions.Item>
+              <Descriptions.Item label="状态">
+                <Tag color={getRequirementStatusColor(requirementDetail.status)}>
+                  {getRequirementStatusLabel(requirementDetail.status)}
+                </Tag>
+              </Descriptions.Item>
+              {(requirementDetail.assignee || requirementDetail.assigneeName) && (
+                <Descriptions.Item label="指定成员">
+                  {requirementDetail.assigneeName || requirementDetail.assignee}
+                </Descriptions.Item>
+              )}
+              {requirementDetail.dueTime && (
+                <Descriptions.Item label="预期时间">
+                  {dayjs(requirementDetail.dueTime).isValid()
+                    ? dayjs(requirementDetail.dueTime).format('YYYY-MM-DD HH:mm')
+                    : requirementDetail.dueTime}
+                </Descriptions.Item>
+              )}
+              {requirementDetail.createTime && (
+                <Descriptions.Item label="创建时间">
+                  {dayjs(requirementDetail.createTime).format('YYYY-MM-DD HH:mm')}
+                </Descriptions.Item>
+              )}
+              {(requirementDetail.createByName || requirementDetail.createBy) && (
+                <Descriptions.Item label="创建人">
+                  {requirementDetail.createByName || requirementDetail.createBy}
+                </Descriptions.Item>
+              )}
+              {requirementDetail.sourceName && (
+                <Descriptions.Item label="需求来源">{requirementDetail.sourceName}</Descriptions.Item>
+              )}
+              {requirementDetail.branch && (
+                <Descriptions.Item label="分支">{requirementDetail.branch}</Descriptions.Item>
+              )}
+              {requirementDetail.priority && (
+                <Descriptions.Item label="优先级">{requirementDetail.priority}</Descriptions.Item>
+              )}
+              {requirementDetail.score !== undefined && requirementDetail.score !== null && (
+                <Descriptions.Item label="评分">{requirementDetail.score}</Descriptions.Item>
+              )}
+            </Descriptions>
+            <Typography.Title level={5}>需求描述</Typography.Title>
+            <Typography.Paragraph className={styles.requirementDetailDescription}>
               {requirementDetail.sourceDescription ||
                 requirementDetail.description ||
                 requirementDetail.originalContent ||
                 requirementDetail.content ||
                 '-'}
             </Typography.Paragraph>
-            <Typography.Text type="secondary">
-              类型：
-              {project.projectType === 'develop'
-                ? getDevelopRequirementTypeLabel(requirementDetail, intl)
-                : normalizeRequirementType(requirementDetail)}
-            </Typography.Text>
-            <br />
-            <Typography.Text type="secondary">
-              状态：{getRequirementStatusLabel(requirementDetail.status)}
-            </Typography.Text>
-            {requirementDetail.createTime && (
+            {requirementDetail.productContent && (
               <>
-                <br />
-                <Typography.Text type="secondary">
-                  创建时间：{dayjs(requirementDetail.createTime).format('YYYY-MM-DD HH:mm')}
-                </Typography.Text>
+                <Typography.Title level={5}>产品补充</Typography.Title>
+                <Typography.Paragraph className={styles.requirementDetailDescription}>
+                  {requirementDetail.productContent}
+                </Typography.Paragraph>
+              </>
+            )}
+            {requirementDetail.config && Object.keys(requirementDetail.config).length > 0 && (
+              <>
+                <Typography.Title level={5}>执行配置</Typography.Title>
+                <pre className={styles.requirementDetailConfig}>
+                  {JSON.stringify(requirementDetail.config, null, 2)}
+                </pre>
               </>
             )}
           </div>
         )}
-      </Modal>
+      </Drawer>
       <RequirementSplitModal
         open={!!developSplitTarget}
         requirement={
@@ -584,6 +780,31 @@ const ProjectRequirements: React.FC<Props> = ({
         confirmLoading={developSplitConfirming}
         onCancel={() => setDevelopSplitTarget(null)}
         onConfirm={(tasks) => void handleConfirmDevelopSplit(tasks)}
+      />
+      <OperationTaskFormModal
+        open={!!editingRequirement}
+        mode="edit"
+        entityLabel="requirement"
+        simpleRequirement
+        initialValues={
+          editingRequirement
+            ? {
+                taskName:
+                  editingRequirement.title ||
+                  editingRequirement.requirementName ||
+                  editingRequirement.sourceName ||
+                  '',
+                description: editingRequirement.sourceDescription || editingRequirement.description || '',
+                taskType: normalizeRequirementType(editingRequirement),
+                assigneeId: editingRequirement.assigneeId,
+                dueTime: editingRequirement.dueTime ? dayjs(editingRequirement.dueTime) : undefined,
+              }
+            : undefined
+        }
+        options={{ assignees: splitAssignees }}
+        loading={requirementSaving}
+        onCancel={() => setEditingRequirement(null)}
+        onSubmit={handleUpdateRequirement}
       />
       <Modal
         open={!!startTarget}

@@ -1,12 +1,28 @@
-import { Button, Checkbox, Empty, Spin, Tag, Typography, message } from 'antd';
-import { AppstoreOutlined, MessageOutlined, ReloadOutlined } from '@ant-design/icons';
+import {
+  Button,
+  Checkbox,
+  DatePicker,
+  Dropdown,
+  Empty,
+  Input,
+  Modal,
+  Select,
+  Spin,
+  Tag,
+  Typography,
+  message,
+} from 'antd';
+import { AppstoreOutlined, MessageOutlined, MoreOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
 import {
+  deleteOperationTask,
   executeOperationTask,
   listOperationTasks,
+  listProjectMembers,
   listTasks,
+  updateOperationTask,
   type DevloopTaskItem,
 } from '@/service/devloop';
 import TaskTemplateModal, { type TaskTemplateApplyResult } from '@/components/TaskTemplateModal';
@@ -159,6 +175,22 @@ const ProjectTasks: React.FC<Props> = ({
   const [templateTask, setTemplateTask] = useState<DevloopTaskItem | null>(null);
   const [onlyMine, setOnlyMine] = useState(project.projectType === 'develop');
   const [detailTask, setDetailTask] = useState<DevloopTaskItem | null>(null);
+  const [editingTask, setEditingTask] = useState<DevloopTaskItem | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
+  const [editingDescription, setEditingDescription] = useState('');
+  const [editingAssignee, setEditingAssignee] = useState<string | number>();
+  const [editingDueTime, setEditingDueTime] = useState<dayjs.Dayjs | null>(null);
+  const [taskSaving, setTaskSaving] = useState(false);
+  const [memberOptions, setMemberOptions] = useState<Array<{ label: string; value: string | number }>>([]);
+  const currentUserId = userInfo.userId ?? userInfo.id;
+  const isTaskCreator = (task: DevloopTaskItem) =>
+    task.canDelete === true ||
+    (currentUserId !== undefined && task.createBy !== undefined && `${currentUserId}` === `${task.createBy}`) ||
+    // 兼容历史任务未记录创建人的情况，和后端的项目创建人回退规则保持一致。
+    (task.createBy == null &&
+      currentUserId !== undefined &&
+      project.createBy !== undefined &&
+      `${currentUserId}` === `${project.createBy}`);
   const projectKnowledgeOptions = (project.resources || project.boundResources || [])
     .filter((resource) => resource.resourceType === 'knowledge')
     .map((resource) => ({
@@ -322,6 +354,78 @@ const ProjectTasks: React.FC<Props> = ({
     setDetailTask(task);
   };
 
+  const openTaskEdit = (task: DevloopTaskItem) => {
+    setEditingTask(task);
+    setEditingTitle(task.title || '');
+    setEditingDescription(task.description || task.taskDescription || '');
+    setEditingAssignee(task.assigneeId);
+    setEditingDueTime(
+      task.dueTime && dayjs(task.dueTime).isValid() ? dayjs(task.dueTime) : null
+    );
+    if (!project.projectId) return;
+    void listProjectMembers(Number(project.projectId))
+      .then((response) => {
+        setMemberOptions(
+          getArrayData(response).map((member: any) => ({
+            label: member.userName || member.userCode || `${member.userId ?? member.memberId}`,
+            value: member.userId ?? member.memberId,
+          }))
+        );
+      })
+      .catch(() => setMemberOptions([]));
+  };
+
+  const handleUpdateTask = async () => {
+    const taskId = Number(editingTask?.taskId || editingTask?.sessionId);
+    if (!Number.isFinite(taskId) || !editingTitle.trim() || editingAssignee === undefined) {
+      message.warning('请填写任务名称并选择负责人');
+      return;
+    }
+    setTaskSaving(true);
+    try {
+      await updateOperationTask({
+        taskId,
+        title: editingTitle.trim(),
+        description: editingDescription.trim() || undefined,
+        assignee: editingAssignee,
+        dueTime: editingDueTime?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
+      });
+      message.success('任务已更新');
+      setEditingTask(null);
+      setDetailTask(null);
+      await loadTasks(1);
+    } catch (error: any) {
+      message.error(error?.message || '任务更新失败');
+    } finally {
+      setTaskSaving(false);
+    }
+  };
+
+  const handleDeleteTask = (task: DevloopTaskItem) => {
+    const taskId = Number(task.taskId || task.sessionId);
+    if (!Number.isFinite(taskId)) {
+      message.error('任务缺少有效编号，无法删除');
+      return;
+    }
+    Modal.confirm({
+      title: '确认删除任务？',
+      content: `删除“${task.title || '当前任务'}”后将不再在项目任务中展示，是否继续？`,
+      okText: '删除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await deleteOperationTask(taskId);
+          message.success('任务已删除');
+          setDetailTask(null);
+          await loadTasks(1);
+        } catch (error: any) {
+          message.error(error?.message || '任务删除失败');
+        }
+      },
+    });
+  };
+
   return (
     <div className={styles.dataPanel}>
       <Spin spinning={loading}>
@@ -364,6 +468,31 @@ const ProjectTasks: React.FC<Props> = ({
                       >
                         {intl.formatMessage({ id: 'projectSpace.operation.execute.action' })}
                       </Button>
+                    )}
+                    {project.projectType === 'operation' && (isOperationPendingTask(task) || isTaskCreator(task)) && (
+                      <Dropdown
+                        trigger={['click']}
+                        menu={{
+                          items: [
+                            ...(isOperationPendingTask(task) ? [{ key: 'edit', label: '编辑' }] : []),
+                            ...(isTaskCreator(task) ? [{ key: 'delete', label: '删除', danger: true }] : []),
+                          ],
+                          onClick: ({ key, domEvent }) => {
+                            domEvent.stopPropagation();
+                            if (key === 'edit') openTaskEdit(task);
+                            if (key === 'delete') handleDeleteTask(task);
+                          },
+                        }}
+                      >
+                        <Button
+                          type="text"
+                          size="small"
+                          className={styles.cardMoreAction}
+                          icon={<MoreOutlined />}
+                          aria-label="任务操作"
+                          onClick={(event) => event.stopPropagation()}
+                        />
+                      </Dropdown>
                     )}
                   </div>
                 </div>
@@ -461,6 +590,56 @@ const ProjectTasks: React.FC<Props> = ({
           void loadTasks(1);
         }}
       />
+      <Modal
+        open={!!editingTask}
+        title="编辑任务"
+        okText="确定"
+        confirmLoading={taskSaving}
+        onCancel={() => setEditingTask(null)}
+        onOk={() => void handleUpdateTask()}
+        destroyOnClose
+      >
+        <div style={{ display: 'grid', gap: 16 }}>
+          <div>
+            <Typography.Text>任务名称</Typography.Text>
+            <Input
+              style={{ marginTop: 8 }}
+              maxLength={255}
+              value={editingTitle}
+              onChange={(event) => setEditingTitle(event.target.value)}
+            />
+          </div>
+          <div>
+            <Typography.Text>任务描述</Typography.Text>
+            <Input.TextArea
+              style={{ marginTop: 8 }}
+              rows={3}
+              maxLength={1000}
+              showCount
+              value={editingDescription}
+              onChange={(event) => setEditingDescription(event.target.value)}
+            />
+          </div>
+          <div>
+            <Typography.Text>负责人</Typography.Text>
+            <Select
+              style={{ width: '100%', marginTop: 8 }}
+              value={editingAssignee}
+              options={memberOptions}
+              placeholder="请选择负责人"
+              onChange={setEditingAssignee}
+            />
+          </div>
+          <div>
+            <Typography.Text>预期时间</Typography.Text>
+            <DatePicker
+              style={{ width: '100%', marginTop: 8 }}
+              value={editingDueTime}
+              onChange={setEditingDueTime}
+            />
+          </div>
+        </div>
+      </Modal>
       <SessionOverviewDrawer
         open={taskBoardOpen}
         onClose={() => setTaskBoardOpen(false)}

@@ -6,8 +6,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 运营任务启动和执行参数。
- * 启动阶段由需求拆解出任务；执行阶段只允许补充数字员工，不允许篡改需求归属。
+ * 运营任务启动、编辑和执行参数。
+ * 编辑阶段只允许修改待开始任务的基础信息；执行阶段不允许篡改需求归属。
  */
 @Data
 public class OperationTaskDTO {

@@ -114,6 +114,7 @@ export type DevloopTaskItem = {
   projectId: number;
   title?: string;
   createBy?: number;
+  canDelete?: boolean;
   createTime?: string;
   updateTime?: string;
   stateAvailable: boolean;
@@ -126,6 +127,8 @@ export type DevloopTaskItem = {
   loopCount?: number;
   stageLoopCount?: number;
   assignee?: string;
+  assigneeId?: string | number;
+  dueTime?: string;
   agentName?: string;
   avatar?: string;
   description?: string;
@@ -367,7 +370,7 @@ export const listOperationRequirements = (data: {
 export const getOperationRequirement = (itemId: number) =>
   POST<any>('/byaiService/devloop/requirement/operation/get', { itemId });
 
-/** 删除未启动的运营需求。 */
+/** 删除运营需求；后端仅允许需求创建人操作。 */
 export const deleteOperationRequirement = (itemId: number) =>
   POST<void>('/byaiService/devloop/requirement/operation/delete', { itemId });
 
@@ -418,6 +421,19 @@ export const listOperationTasks = (data: {
 }) => POST<DevloopTaskPage>('/byaiService/devloop/operation/task/list', data);
 
 export const getOperationTask = (taskId: number) => POST<any>('/byaiService/devloop/operation/task/get', { taskId });
+
+/** 修改待开始的运营任务。 */
+export const updateOperationTask = (data: {
+  taskId: number;
+  title: string;
+  description?: string;
+  assignee: string | number;
+  dueTime?: string;
+}) => POST<void>('/byaiService/devloop/operation/task/update', data);
+
+/** 删除运营任务；后端仅允许任务创建人操作。 */
+export const deleteOperationTask = (taskId: number) =>
+  POST<void>('/byaiService/devloop/operation/task/delete', { taskId });
 
 // 新流程传承接成员 ID，由后端读取其最新绑定的数字员工；agentIds 保留给旧调用方兼容使用。
 export const executeOperationTask = (data: {

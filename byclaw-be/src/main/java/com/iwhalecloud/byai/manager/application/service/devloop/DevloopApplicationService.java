@@ -3520,7 +3520,7 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(toOperationRequirementMap(requirement));
     }
 
-    /** 删除未启动的运营需求；已关联会话时禁止删除，保证运营任务可追溯。 */
+    /** 删除运营需求；仅需求创建人可操作，关联任务使用逻辑删除保留执行成果。 */
     @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Void> deleteOperationRequirement(Long itemId) {
         ScanSource requirement = findOperationSource(itemId);
@@ -3531,9 +3531,12 @@ public class DevloopApplicationService {
         if (accessError != null) {
             return ResponseUtil.failRes(accessError);
         }
-        if (operationTaskSessionService.existsBySourceId(requirement.getSourceId())) {
-            return ResponseUtil.failRes(I18nUtil.get("devloop.operationRequirement.delete.forbidden"));
+        String creatorError = validateEntityCreator(resolveOperationRequirementCreator(requirement));
+        if (creatorError != null) {
+            return ResponseUtil.failRes(creatorError);
         }
+        operationTaskSessionService.markDeletedBySourceId(requirement.getSourceId(),
+            CurrentUserHolder.getCurrentUserId());
         scanSourceService.delete(requirement.getSourceId());
         return ResponseUtil.successResponse(null);
     }
@@ -3658,6 +3661,83 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes(accessError);
         }
         return ResponseUtil.successResponse(toOperationTaskMap(task));
+    }
+
+    /** 修改待开始运营任务的名称、描述、负责人和预期时间。 */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Void> updateOperationTask(OperationTaskDTO dto) {
+        if (dto == null || dto.getTaskId() == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.id.required"));
+        }
+        ByaiSession task = operationTaskSessionService.findById(dto.getTaskId());
+        if (task == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.notFound"));
+        }
+        String accessError = validateOperationProjectAccess(task.getProjectId());
+        if (accessError != null) {
+            return ResponseUtil.failRes(accessError);
+        }
+        if (!operationTaskSessionService.isPending(task.getSessionId())) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.edit.forbidden"));
+        }
+        if (StringUtils.isBlank(dto.getTitle())) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.title.required"));
+        }
+        if (dto.getTitle().trim().length() > OPERATION_SESSION_NAME_MAX_LENGTH) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.title.length.invalid"));
+        }
+        if (StringUtils.length(dto.getDescription()) > OPERATION_REQUIREMENT_TEXT_MAX_LENGTH) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.description.length.invalid"));
+        }
+        if (dto.getAssignee() == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.assignee.required"));
+        }
+        Project project = projectMapper.selectById(task.getProjectId());
+        if (project == null || (!dto.getAssignee().equals(project.getCreateBy())
+            && !projectMemberService.isMember(task.getProjectId(), dto.getAssignee()))) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.assignee.invalid"));
+        }
+        Date dueTime;
+        try {
+            dueTime = parseOperationDueTime(dto.getDueTime());
+        }
+        catch (IllegalArgumentException exception) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationRequirement.dueTime.invalid"));
+        }
+
+        ByaiSession update = new ByaiSession();
+        update.setSessionId(task.getSessionId());
+        update.setSessionName(dto.getTitle().trim());
+        update.setSessionContent(StringUtils.trimToNull(dto.getDescription()));
+        update.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        update.setUpdateTime(new Date());
+        byaiSessionMapper.updateById(update);
+        Map<String, String> extensions = new LinkedHashMap<>();
+        extensions.put(OperationTaskSessionService.EXT_DESCRIPTION,
+            StringUtils.defaultString(StringUtils.trimToNull(dto.getDescription())));
+        extensions.put(OperationTaskSessionService.EXT_ASSIGNEE_ID, String.valueOf(dto.getAssignee()));
+        extensions.put(OperationTaskSessionService.EXT_DUE_TIME, StringUtils.defaultString(formatDateTime(dueTime)));
+        operationTaskSessionService.saveTaskExtensions(task.getSessionId(), extensions);
+        return ResponseUtil.successResponse(null);
+    }
+
+    /** 删除任意状态的运营任务；只有任务创建人可执行。 */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Void> deleteOperationTask(Long taskId) {
+        ByaiSession task = operationTaskSessionService.findById(taskId);
+        if (task == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.notFound"));
+        }
+        String accessError = validateOperationProjectAccess(task.getProjectId());
+        if (accessError != null) {
+            return ResponseUtil.failRes(accessError);
+        }
+        String creatorError = validateEntityCreator(resolveOperationTaskCreator(task));
+        if (creatorError != null) {
+            return ResponseUtil.failRes(creatorError);
+        }
+        operationTaskSessionService.markDeleted(task.getSessionId(), CurrentUserHolder.getCurrentUserId());
+        return ResponseUtil.successResponse(null);
     }
 
     /** 确认承接成员后启动既有运营任务会话，并保存多员工并行编排信息。 */
@@ -4566,6 +4646,44 @@ public class DevloopApplicationService {
         return null;
     }
 
+    /** 删除需求和任务属于高风险操作，必须由当前业务记录的创建人执行。 */
+    private String validateEntityCreator(Long creatorId) {
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        if (creatorId == null || currentUserId == null || !currentUserId.equals(creatorId)) {
+            return I18nUtil.get("devloop.entity.creator.delete.required");
+        }
+        return null;
+    }
+
+    /** 兼容早期运营需求未写 create_by 的数据，缺失时使用所属项目创建人作为历史创建人。 */
+    private Long resolveOperationRequirementCreator(ScanSource requirement) {
+        if (requirement == null) {
+            return null;
+        }
+        Long creatorId = parseOperationLong(requirement.getCreateBy());
+        if (creatorId != null) {
+            return creatorId;
+        }
+        Project project = projectMapper.selectById(requirement.getProjectId());
+        return project == null ? null : project.getCreateBy();
+    }
+
+    /** 任务创建人缺失时依次回退关联需求创建人和项目创建人，列表权限与删除接口保持一致。 */
+    private Long resolveOperationTaskCreator(ByaiSession task) {
+        if (task == null) {
+            return null;
+        }
+        if (task.getCreatorId() != null) {
+            return task.getCreatorId();
+        }
+        ScanSource requirement = findOperationSource(operationTaskSessionService.getSourceId(task.getSessionId()));
+        if (requirement != null) {
+            return resolveOperationRequirementCreator(requirement);
+        }
+        Project project = projectMapper.selectById(task.getProjectId());
+        return project == null ? null : project.getCreateBy();
+    }
+
     /** 校验新增和编辑共用的基础字段；运营需求状态由关联会话实时推导。 */
     private String validateOperationRequirement(OperationRequirementDTO dto, boolean editing) {
         if (dto == null) {
@@ -4997,6 +5115,11 @@ public class DevloopApplicationService {
         result.put("assignee", resolveUserName(requirement.getAssignee()));
         result.put("dueTime", formatDateTime(requirement.getDueTime()));
         result.put("progress", launched ? 5 : 0);
+        Long creatorId = resolveOperationRequirementCreator(requirement);
+        result.put("createBy", creatorId);
+        result.put("createByName", resolveUserName(creatorId));
+        // 删除权限由服务端直接计算，避免前端因 ID 类型或精度差异误判创建人。
+        result.put("canDelete", Objects.equals(creatorId, CurrentUserHolder.getCurrentUserId()));
         result.put("createTime", requirement.getCreateTime());
         result.put("cronExpr", requirement.getCronExpr());
         result.put("config", parseOperationConfig(requirement.getConfig()));
@@ -5036,6 +5159,9 @@ public class DevloopApplicationService {
         result.put("assignee", resolveUserName(assigneeId));
         result.put("dueTime", ext.get(OperationTaskSessionService.EXT_DUE_TIME));
         result.put("progress", "done".equals(status) ? 100 : "doing".equals(status) ? 5 : 0);
+        Long creatorId = resolveOperationTaskCreator(task);
+        result.put("createBy", creatorId);
+        result.put("canDelete", Objects.equals(creatorId, CurrentUserHolder.getCurrentUserId()));
         result.put("sessionId", "todo".equals(status) ? null : task.getSessionId());
         result.put("config", parseOperationConfig(ext.get(OperationTaskSessionService.EXT_CONFIG)));
         result.put("templateId", parseOperationLong(ext.get(OperationTaskSessionService.EXT_TEMPLATE_ID)));
