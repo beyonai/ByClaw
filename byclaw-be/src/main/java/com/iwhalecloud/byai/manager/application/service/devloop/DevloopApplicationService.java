@@ -3017,18 +3017,56 @@ public class DevloopApplicationService {
         }
         // 代码变更是只读展示,任何本地/远程异常都不抛前端:顶层兜底,失败返回 http_error 空态并记日志。
         try {
-            // 与 resolveTaskContext 同口径：手工需求自身仓库优先，再回退扫描源和项目仓库。
             ScanRequireItem item = scanRequireItemMapper.selectOne(
                 new LambdaQueryWrapper<ScanRequireItem>().eq(ScanRequireItem::getSessionId, sessionId).last("limit 1"));
-            ProjectRepo repo = resolveTaskRepo(s.getProjectId(), item);
-            String repoFullName = repo != null ? repo.getRepoFullName() : null;
-            String baseBranch = repo != null && repo.getDefaultBranch() != null && !repo.getDefaultBranch().isEmpty()
-                ? repo.getDefaultBranch()
+            List<ProjectRepo> projectRepos = projectRepoMapper.selectList(new LambdaQueryWrapper<ProjectRepo>()
+                .eq(ProjectRepo::getProjectId, s.getProjectId()).orderByAsc(ProjectRepo::getRepoId));
+            ProjectRepo workspaceRepo = projectRepos.stream()
+                .filter(candidate -> "workspace".equalsIgnoreCase(candidate.getRepoType())).findFirst().orElse(null);
+
+            // 子任务表记录的是实际业务 code 仓库，拆分任务必须优先按 sessionId 反查，不能只靠需求主表的一对一会话。
+            ScanItemTask sessionTask = scanItemTaskService.findBySession(sessionId);
+            ProjectRepo codeRepo = null;
+            if (sessionTask != null && sessionTask.getRepoId() != null) {
+                codeRepo = projectRepos.stream().filter(candidate -> sessionTask.getRepoId().equals(candidate.getRepoId()))
+                    .filter(candidate -> !"workspace".equalsIgnoreCase(candidate.getRepoType())).findFirst()
+                    .orElse(null);
+                if (codeRepo == null) {
+                    ProjectRepo candidate = projectRepoMapper.selectById(sessionTask.getRepoId());
+                    if (candidate != null && s.getProjectId().equals(candidate.getProjectId())
+                        && !"workspace".equalsIgnoreCase(candidate.getRepoType())) {
+                        codeRepo = candidate;
+                    }
+                }
+            }
+            if (codeRepo == null) {
+                ProjectRepo candidate = resolveTaskRepo(s.getProjectId(), item);
+                if (candidate != null && !"workspace".equalsIgnoreCase(candidate.getRepoType())) {
+                    codeRepo = candidate;
+                }
+            }
+            if (codeRepo == null) {
+                codeRepo = projectRepos.stream()
+                    .filter(candidate -> !"workspace".equalsIgnoreCase(candidate.getRepoType())).findFirst()
+                    .orElse(null);
+            }
+
+            String repoFullName = codeRepo != null ? codeRepo.getRepoFullName() : null;
+            String baseBranch = codeRepo != null && StringUtils.isNotBlank(codeRepo.getDefaultBranch())
+                ? codeRepo.getDefaultBranch()
                 : "main";
             String headBranch = buildBranchName(detectTaskType(item, s.getSessionName()), sessionId);
 
-            // 本地优先:能定位到工作区 git 仓库就用本地 diff(最新、含未 push)。本地采集自身已兜底,再包一层防未捕获异常。
-            Path workspaceDir = resolveSessionWorkspace(s, repoFullName);
+            Path workspaceDir;
+            if (workspaceRepo != null && codeRepo != null) {
+                // 新架构：会话一级目录克隆 workspace 仓库，业务 code 仓库位于其 .gitmodules 声明的子模块路径。
+                Path workspaceRoot = resolveSessionWorkspace(s, workspaceRepo.getRepoFullName());
+                workspaceDir = new GitSubmodulePathResolver().resolve(workspaceRoot, codeRepo).orElse(null);
+            }
+            else {
+                // 兼容尚未配置 workspace 仓库的旧项目，业务仓库仍直接位于会话目录一级。
+                workspaceDir = resolveSessionWorkspace(s, repoFullName);
+            }
             if (workspaceDir != null) {
                 try {
                     LocalGitChangeService.LocalChangeResult local = localGitChangeService.collectChanges(workspaceDir,
