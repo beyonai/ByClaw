@@ -38,8 +38,8 @@ export type TaskTemplateFormValues = {
   storageMode?: 'knowledge' | 'ontology';
   targetKnowledge?: string | number;
 
-  /** 选中的本体对象；提交给后端时为完整对象，表单内 Select 使用 objectCode/objectName 作为 value */
-  ontology?: string | number | OntologyObjectValue;
+  /** 选中的本体对象列表；提交给后端时为完整对象数组，表单内 Select 使用 objectCode/objectName 作为多选 value */
+  ontology?: Array<string | number | OntologyObjectValue>;
   materialSource?: string | number;
   contentType?: string;
   audience?: string;
@@ -151,22 +151,35 @@ const WEEKDAY_OPTIONS = ['周一', '周二', '周三', '周四', '周五', '周�
 }));
 const MONTH_DAY_OPTIONS = Array.from({ length: 31 }, (_, index) => ({ label: `${index + 1}日`, value: index + 1 }));
 
-const getOntologySelectValue = (ontology: TaskTemplateFormValues['ontology']): string | number | undefined => {
-  if (ontology === undefined || ontology === null) return undefined;
-  if (typeof ontology === 'object') {
-    return (ontology.objectCode || ontology.objectName) as string | undefined;
-  }
-  return ontology;
+const getOntologySelectValues = (ontology: TaskTemplateFormValues['ontology']): Array<string | number> => {
+  if (ontology === undefined || ontology === null) return [];
+  const list = Array.isArray(ontology) ? ontology : [ontology];
+  return list
+    .map((item) => {
+      if (item && typeof item === 'object') {
+        return (item.objectCode || item.objectName) as string | undefined;
+      }
+      return item;
+    })
+    .filter((item): item is string | number => item !== undefined && item !== null && `${item}` !== '');
 };
 
 const resolveInitialOptionValue = (
   options: TaskTemplateOption[],
-  currentValue: string | number | OntologyObjectValue | undefined
+  currentValue: string | number | undefined
 ): string | number | undefined => {
-  const normalized = getOntologySelectValue(currentValue as TaskTemplateFormValues['ontology']) ?? currentValue;
-  if (normalized === undefined || normalized === null || typeof normalized === 'object') return undefined;
-  if (!options.length || options.some((option) => `${option.value}` === `${normalized}`)) return normalized;
+  if (currentValue === undefined || currentValue === null) return undefined;
+  if (!options.length || options.some((option) => `${option.value}` === `${currentValue}`)) return currentValue;
   return options[0].value;
+};
+
+const resolveInitialOntologyValues = (
+  options: TaskTemplateOption[],
+  currentValue: TaskTemplateFormValues['ontology']
+): Array<string | number> => {
+  const values = getOntologySelectValues(currentValue);
+  if (!values.length || !options.length) return [];
+  return values.filter((value) => options.some((option) => `${option.value}` === `${value}`));
 };
 
 const parseTemplateConfig = (template: OperationTaskTemplate): TaskTemplateFormValues => {
@@ -177,7 +190,12 @@ const parseTemplateConfig = (template: OperationTaskTemplate): TaskTemplateFormV
         : template.config && typeof template.config === 'object'
           ? template.config
           : {};
-    return { ...(DEFAULT_CONFIG[template.templateType] || DEFAULT_CONFIG.collect), ...rawConfig };
+    const merged = { ...(DEFAULT_CONFIG[template.templateType] || DEFAULT_CONFIG.collect), ...rawConfig };
+    // 兼容历史单选 ontology，统一转成数组便于多选回显。
+    if (merged.ontology !== undefined && merged.ontology !== null && !Array.isArray(merged.ontology)) {
+      merged.ontology = [merged.ontology];
+    }
+    return merged;
   } catch {
     return DEFAULT_CONFIG[template.templateType] || DEFAULT_CONFIG.collect;
   }
@@ -185,9 +203,15 @@ const parseTemplateConfig = (template: OperationTaskTemplate): TaskTemplateFormV
 
 const findOptionLabel = (
   options: TaskTemplateOption[],
-  value: string | number | OntologyObjectValue | undefined,
+  value: string | number | OntologyObjectValue | Array<string | number | OntologyObjectValue> | undefined,
   fallback = '-'
 ) => {
+  if (Array.isArray(value)) {
+    const labels = getOntologySelectValues(value)
+      .map((item) => findOptionLabel(options, item, ''))
+      .filter(Boolean);
+    return labels.length ? labels.join('、') : fallback;
+  }
   if (value && typeof value === 'object') {
     return value.objectName || value.objectCode || fallback;
   }
@@ -328,7 +352,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
     const kbResourceId = sourceKnowledge || targetKnowledge;
     if (!kbResourceId) {
       setFetchedOntologyOptions([]);
-      form.setFieldValue('ontology', undefined);
+      form.setFieldValue('ontology', []);
       return;
     }
     void queryObjectsByKnowledge({ kbResourceId, pageIndex: 1, pageSize: 100 })
@@ -359,12 +383,12 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
         setFetchedOntologyOptions(options);
         // 接口无数据时不展示写死选项，并清空已选本体。
         if (!options.length) {
-          form.setFieldValue('ontology', undefined);
+          form.setFieldValue('ontology', []);
         }
       })
       .catch(() => {
         setFetchedOntologyOptions([]);
-        form.setFieldValue('ontology', undefined);
+        form.setFieldValue('ontology', []);
       });
   }, [form, selectedTemplate, sourceKnowledge, storageMode, targetKnowledge]);
 
@@ -432,7 +456,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
         ...(initialDescription ? { description: initialDescription } : {}),
         sourceKnowledge: resolveInitialOptionValue(resolvedKnowledgeOptions, templateValues.sourceKnowledge),
         targetKnowledge: resolveInitialOptionValue(resolvedKnowledgeOptions, templateValues.targetKnowledge),
-        ontology: resolveInitialOptionValue(resolvedOntologyOptions, templateValues.ontology),
+        ontology: resolveInitialOntologyValues(resolvedOntologyOptions, templateValues.ontology),
         account: resolveInitialOptionValue(resolvedAccountOptions, templateValues.account),
         agentId: agentOptions[0]?.value || '当前数字员工',
         agentGroupId: agentGroupOptions[0]?.value,
@@ -480,20 +504,24 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
     setApplyingTemplate(true);
     try {
       const values = await form.validateFields();
-      const ontologyOption = availableOntologyOptions.find(
-        (option) => `${option.value}` === `${getOntologySelectValue(values.ontology) ?? values.ontology}`
-      );
-      // 表单 Select 存的是编码/名称，提交给后端时改为完整本体对象。
+      // 表单 Select 存的是编码/名称，提交给后端时改为完整本体对象数组。
       const submitValues: TaskTemplateFormValues = {
         ...values,
-        ontology:
-          ontologyOption?.raw ||
-          (ontologyOption
-            ? {
-              objectCode: String(ontologyOption.value),
-              objectName: ontologyOption.label,
-            }
-            : values.ontology),
+        ontology: getOntologySelectValues(values.ontology).map((value) => {
+          const ontologyOption = availableOntologyOptions.find((option) => `${option.value}` === `${value}`);
+          return (
+            ontologyOption?.raw ||
+            (ontologyOption
+              ? {
+                  objectCode: String(ontologyOption.value),
+                  objectName: ontologyOption.label,
+                }
+              : {
+                  objectCode: String(value),
+                  objectName: String(value),
+                })
+          );
+        }),
       };
       const prompt = buildTemplatePrompt(selectedTemplate, values, {
         agents: fallbackAgentOptions,
@@ -556,9 +584,15 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
               <Form.Item
                 label="本体视图 / 对象"
                 name="ontology"
-                rules={[{ required: true, message: '请选择目标本体' }]}
+                rules={[{ required: true, type: 'array', min: 1, message: '请选择目标本体' }]}
               >
-                <Select options={availableOntologyOptions} showSearch optionFilterProp="label" />
+                <Select
+                  mode="multiple"
+                  options={availableOntologyOptions}
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="可多选本体对象"
+                />
               </Form.Item>
             ) : (
               <Form.Item
@@ -582,7 +616,13 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
             />
           </Form.Item>
           <Form.Item label="目标本体" name="ontology">
-            <Select options={availableOntologyOptions} showSearch optionFilterProp="label" />
+            <Select
+              mode="multiple"
+              options={availableOntologyOptions}
+              showSearch
+              optionFilterProp="label"
+              placeholder="可多选本体对象"
+            />
           </Form.Item>
         </div>
       );

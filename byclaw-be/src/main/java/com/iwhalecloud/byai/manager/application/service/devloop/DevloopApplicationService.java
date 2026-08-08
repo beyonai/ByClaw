@@ -4059,7 +4059,19 @@ public class DevloopApplicationService {
         if (value == null) {
             return I18nUtil.get("devloop.operationTask.prompt.notConfigured");
         }
-        // 本体字段改为完整对象后，提示词展示名称/编码，避免把整个 Map 字符串塞进 prompt。
+        // 本体支持多选：提示词按名称/编码拼接，避免把整个数组或 Map 字符串塞进 prompt。
+        if (value instanceof Collection<?> collection) {
+            List<String> labels = new ArrayList<>();
+            for (Object item : collection) {
+                String label = getOperationPromptValue(item);
+                if (StringUtils.isNotBlank(label)
+                    && !I18nUtil.get("devloop.operationTask.prompt.notConfigured").equals(label)) {
+                    labels.add(label);
+                }
+            }
+            return labels.isEmpty() ? I18nUtil.get("devloop.operationTask.prompt.notConfigured")
+                : String.join("、", labels);
+        }
         if (value instanceof Map<?, ?> map) {
             Object objectName = map.get("objectName");
             if (objectName != null && StringUtils.isNotBlank(String.valueOf(objectName))) {
@@ -4153,7 +4165,7 @@ public class DevloopApplicationService {
         if (value == null && Arrays.asList(fieldNames).contains("organizeTemplateId")) {
             value = operationConfig.get("organizeTemplateId");
         }
-        // 任务模板把 ontology 放在 config 顶层，优先读取完整对象。
+        // 任务模板把 ontology 放在 config 顶层，优先读取完整对象（支持多选数组）。
         if (value == null && Arrays.asList(fieldNames).contains("ontology")) {
             value = operationConfig.get("ontology");
         }
