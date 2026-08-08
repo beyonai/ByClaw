@@ -3202,7 +3202,7 @@ export default {
   'spec.integrationTest.suite.intro':
     'You own only this one test project: produce a JUnit report and express pass/fail via the exit code. The run-level directory, state machine, and status.json are maintained by the orchestrator — you do not write them.',
   'spec.integrationTest.orchestrator.intro':
-    "The platform injects this run's result root directory via BYCLAW_E2E_RESULT_DIR (unique per branch + round). The orchestrator creates directories, writes meta, runs each suite, merges their JUnit reports, and finally writes status.json atomically. The platform decides state only from status.json — it never guesses from whether a file exists.",
+    "The platform injects this run's result root directory via BYCLAW_E2E_RESULT_DIR (unique per run). The orchestrator creates directories, runs each suite, merges their JUnit reports, and finally writes status.json atomically. The platform decides state and kickback reason from status.json — it never guesses from whether a file exists.",
   'spec.integrationTest.orchestrator.treeTitle': '① Result directory structure',
   'spec.integrationTest.orchestrator.statusTitle': '② status.json contract (source of truth, write atomically)',
   'spec.integrationTest.orchestrator.enumTitle': '③ status enum (closed set)',

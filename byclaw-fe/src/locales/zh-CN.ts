@@ -3138,7 +3138,7 @@ export default {
   'spec.integrationTest.suite.intro':
     '你只负责这一个测试工程:产出 JUnit 报告 + 用退出码表达成败即可。整轮的目录、状态机、status.json 由编排层统一维护,无需你自己写。',
   'spec.integrationTest.orchestrator.intro':
-    '平台通过环境变量 BYCLAW_E2E_RESULT_DIR 注入本次运行的结果根目录(按分支+轮次唯一)。编排层负责建目录、写 meta、逐个跑用例集、汇总各套件 JUnit、最后原子写 status.json;平台只认 status.json 判断状态,不靠"文件在不在"猜测。',
+    '平台通过环境变量 BYCLAW_E2E_RESULT_DIR 注入本次运行的结果根目录(每次执行唯一)。编排层负责建目录、逐个跑用例集、汇总各套件 JUnit、最后原子写 status.json;平台按 status.json 判断状态与打回原因,不靠"文件在不在"猜测。',
   'spec.integrationTest.orchestrator.treeTitle': '① 结果目录结构',
   'spec.integrationTest.orchestrator.statusTitle': '② status.json 契约(状态真相源,需原子写入)',
   'spec.integrationTest.orchestrator.enumTitle': '③ status 状态枚举(封闭取值)',
