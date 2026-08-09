@@ -120,6 +120,8 @@ const ProjectSpacePage: React.FC = () => {
           projectName: activeProject?.projectName,
           sessionId: session.sessionId,
           autoSendContent: session.initialChatContent,
+          selectedAgentId: session.objectId,
+          selectedAgentObjectType: session.objectType,
         },
       });
     },

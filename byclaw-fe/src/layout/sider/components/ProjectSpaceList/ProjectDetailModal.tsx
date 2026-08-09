@@ -6846,7 +6846,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
             return;
           }
           setOperationTaskTemplateTarget(null);
-          handleOpenTaskSession({ ...task, sessionId, status: 'doing' });
+          handleOpenTaskSession({
+            ...task,
+            sessionId,
+            status: 'doing',
+            // 任务会话携带模板中选中的数字员工，聊天输入框据此保留默认 @ 对象。
+            objectId: selectedAgentId,
+            objectType: 'DigEmployee',
+          });
         }}
       />
       <RequirementSplitModal

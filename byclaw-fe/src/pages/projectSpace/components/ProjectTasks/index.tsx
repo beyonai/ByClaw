@@ -583,6 +583,9 @@ const ProjectTasks: React.FC<Props> = ({
             sessionContent: templateTask.statusLabel || '',
             projectId: `${project.projectId}`,
             taskId: `${templateTask.taskId || sessionId}`,
+            // 跳转聊天页时同步所选数字员工，输入框可立即恢复默认 @，无需等待消息元数据返回。
+            objectId: selectedAgentId,
+            objectType: 'DigEmployee',
             updateTime: templateTask.updateTime,
             createTime: templateTask.createTime,
           });
