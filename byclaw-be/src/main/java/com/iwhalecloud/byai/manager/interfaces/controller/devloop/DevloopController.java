@@ -769,9 +769,10 @@ public class DevloopController {
      * @return ResponseUtil
      */
     @PostMapping("/operation/listObjectById")
-    public ResponseUtil<Object> listObjectById(@RequestBody ListObjectFilePkIdDto listObjectFilePkIdDto) {
-        Object object = applicationService.listObjectById(listObjectFilePkIdDto);
-        return ResponseUtil.successResponse(object);
+    public ResponseUtil<List<Map<String, Object>>> listObjectById(
+        @RequestBody ListObjectFilePkIdDto listObjectFilePkIdDto) {
+        List<Map<String, Object>> resultList = applicationService.listObjectById(listObjectFilePkIdDto);
+        return ResponseUtil.successResponse(resultList);
     }
 
 }

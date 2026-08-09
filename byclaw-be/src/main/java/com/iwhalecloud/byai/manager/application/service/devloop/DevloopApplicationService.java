@@ -1107,8 +1107,7 @@ public class DevloopApplicationService {
         // 算不平以分项之和为准,规则由 Totals.reconciledTotal 单点持有(说明见那里)。
         int sum = passed + failed + skipped;
         if (total != sum) {
-            logger.warn("[IntegrationResult] runId={} 结果算不平, total={} 分项和={},以分项和为准", run.getRunId(),
-                total, sum);
+            logger.warn("[IntegrationResult] runId={} 结果算不平, total={} 分项和={},以分项和为准", run.getRunId(), total, sum);
             total = sum;
         }
         run.setTotal(total);
@@ -1132,8 +1131,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * status.json 版 suites 拼装:比旧结果文件多带失败摘要、截图路径与报告/日志路径,
-     * 结果详情弹窗因此能显示"为什么挂"而不只是"哪条挂"。artifacts 是相对结果根目录的路径。
+     * status.json 版 suites 拼装:比旧结果文件多带失败摘要、截图路径与报告/日志路径, 结果详情弹窗因此能显示"为什么挂"而不只是"哪条挂"。artifacts 是相对结果根目录的路径。
      */
     private String buildSuitesJsonFromStatus(IntegrationRun run, String status, E2eStatusDto e2eStatus) {
         IntegrationSuite suite = integrationSuiteService.findById(run.getSuiteId());
@@ -1162,8 +1160,8 @@ public class DevloopApplicationService {
             JSONObject suiteResult = new JSONObject(true);
             suiteResult.put("suiteId", StringUtils.defaultIfBlank(s.getId(), String.valueOf(run.getSuiteId())));
             suiteResult.put("name", suiteName);
-            suiteResult.put("status", StringUtils.defaultIfBlank(s.getStatus(),
-                "passed".equals(status) ? "passed" : "failed"));
+            suiteResult.put("status",
+                StringUtils.defaultIfBlank(s.getStatus(), "passed".equals(status) ? "passed" : "failed"));
             suiteResult.put("total", nvl(run.getTotal()));
             suiteResult.put("passed", nvl(run.getPassed()));
             suiteResult.put("failed", nvl(run.getFailed()));
@@ -1209,8 +1207,7 @@ public class DevloopApplicationService {
     private static final Set<String> E2E_TERMINAL_STATUS = Set.of("passed", "failed", "error", "timeout", "cancelled");
 
     /**
-     * 用 status.json 细化打点得出的终态。打点是收尾闸门(员工是否干完),这里只在员工明确写了
-     * 终态且与打点不同时采信文件——典型是打点 REJECT 但实际是 error(构建/环境错,没跑到用例)。
+     * 用 status.json 细化打点得出的终态。打点是收尾闸门(员工是否干完),这里只在员工明确写了 终态且与打点不同时采信文件——典型是打点 REJECT 但实际是 error(构建/环境错,没跑到用例)。
      * 超时收尾不细化:那是平台判的,员工没写完文件,采信它会把超时说成通过。
      */
     private String refineStatus(String markerStatus, E2eStatusDto e2eStatus, IntegrationRun run) {
@@ -1535,12 +1532,11 @@ public class DevloopApplicationService {
     // ========== 集成测试执行 ==========
 
     /**
-     * 触发一次「执行测试」:秒回 runId,后台异步跑 stages + 套件命令并轮询。
-     * executorMode 由前端弹框按次指定(默认 backend 直跑,便于人工调试);传空走全局配置的正式形态。
+     * 触发一次「执行测试」:秒回 runId,后台异步跑 stages + 套件命令并轮询。 executorMode 由前端弹框按次指定(默认 backend 直跑,便于人工调试);传空走全局配置的正式形态。
      */
     public ResponseUtil<Map<String, Object>> startIntegrationRun(Long suiteId, Long envId, String executorMode) {
-        IntegrationRun run = integrationRunService.startRun(suiteId, envId,
-            CurrentUserHolder.getCurrentUserId(), null, executorMode);
+        IntegrationRun run = integrationRunService.startRun(suiteId, envId, CurrentUserHolder.getCurrentUserId(), null,
+            executorMode);
         Map<String, Object> result = new HashMap<>();
         result.put("runId", run.getRunId());
         return ResponseUtil.successResponse(result);
@@ -1557,8 +1553,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 按需读取该次执行的报告原文,供前端下载/在线预览。原文不落库,每次查看重新去环境机取。
-     * 方法名以 get 开头,保证 SSH 往返期间不占用写事务与数据库连接。
+     * 按需读取该次执行的报告原文,供前端下载/在线预览。原文不落库,每次查看重新去环境机取。 方法名以 get 开头,保证 SSH 往返期间不占用写事务与数据库连接。
      */
     public ResponseUtil<Map<String, Object>> getIntegrationRunReport(Long runId) {
         // tester 模式的报告已由员工拷进沙箱结果目录,直接读;读不到才回退 SSH 去环境机取
@@ -1578,8 +1573,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 从沙箱结果目录读报告。路径取 status.json 里该套件的 report 字段(相对结果根目录),
-     * 不猜路径:员工可能按不同套件ID命名。取不到返回 null 让调用方走 SSH 回退。
+     * 从沙箱结果目录读报告。路径取 status.json 里该套件的 report 字段(相对结果根目录), 不猜路径:员工可能按不同套件ID命名。取不到返回 null 让调用方走 SSH 回退。
      */
     private Map<String, Object> trySandboxReport(Long runId) {
         try {
@@ -2275,15 +2269,34 @@ public class DevloopApplicationService {
      * @param listObjectFilePkIdDto 查询入参
      * @return ResponseUtil
      */
-    public Object listObjectById(ListObjectFilePkIdDto listObjectFilePkIdDto) {
+    public List<Map<String, Object>> listObjectById(ListObjectFilePkIdDto listObjectFilePkIdDto) {
         Long sessionId = listObjectFilePkIdDto.getSessionId();
         List<ByaiSessionExt> byaiSessionExts = sessionExtService.selectBySessionId(sessionId);
         String oploopTaskConfig = this.getOploopTaskConfig(byaiSessionExts);
         if (StringUtil.isEmpty(oploopTaskConfig)) {
             return null;
         }
+
         Map<String, Object> oploopTaskConfigMap = JSON.parseObject(oploopTaskConfig, Map.class);
-        return oploopTaskConfigMap.get("ontology");
+
+        List<Map<String, Object>> resultList = new ArrayList<>();
+        // 来源
+        List<Map<String, Object>> sourceList = (List<Map<String, Object>>) oploopTaskConfigMap.get("sourceOntology");
+        for (int i = 0; sourceList != null && i < sourceList.size(); i++) {
+            Map<String, Object> ontologyMap = sourceList.get(i);
+            ontologyMap.put("ontologyConfigType", "source");
+            resultList.add(ontologyMap);
+        }
+
+        // 目标
+        List<Map<String, Object>> targetList = (List<Map<String, Object>>) oploopTaskConfigMap.get("ontology");
+        for (int i = 0; targetList != null && i < targetList.size(); i++) {
+            Map<String, Object> ontologyMap = targetList.get(i);
+            ontologyMap.put("ontologyConfigType", "target");
+            resultList.add(ontologyMap);
+        }
+
+        return resultList;
     }
 
     /**
@@ -2422,8 +2435,7 @@ public class DevloopApplicationService {
     // ========== 研发任务 ==========
 
     /**
-     * 需求 AI 预拆:查需求正文与项目仓库清单,交给模型产出子任务草稿,只读不落库。
-     * 前端拿到草稿后允许编辑,点启动才调 {@link #splitTask} 一次性建会话,预拆与落库分离。
+     * 需求 AI 预拆:查需求正文与项目仓库清单,交给模型产出子任务草稿,只读不落库。 前端拿到草稿后允许编辑,点启动才调 {@link #splitTask} 一次性建会话,预拆与落库分离。
      */
     public ResponseUtil<RequirementPresplitResultDto> getRequirementPresplit(RequirementPresplitDTO dto) {
         if (dto == null || dto.getProjectId() == null || dto.getSourceItemId() == null) {
@@ -2994,13 +3006,14 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 在 http(s):// 之后插入令牌前缀,得到带令牌的 clone 地址(令牌以 $VAR 形式留给 shell 展开,不含明文)。
-     * 必须手工拼接:前缀含 $GH_TOKEN 之类的 $,走 replaceFirst 会被当成分组引用直接抛 IllegalArgumentException。
-     * 非 http(s) 地址(如 git@ SSH)原样返回,令牌注入对它无意义。
+     * 在 http(s):// 之后插入令牌前缀,得到带令牌的 clone 地址(令牌以 $VAR 形式留给 shell 展开,不含明文)。 必须手工拼接:前缀含 $GH_TOKEN 之类的 $,走 replaceFirst
+     * 会被当成分组引用直接抛 IllegalArgumentException。 非 http(s) 地址(如 git@ SSH)原样返回,令牌注入对它无意义。
      */
     public static String tokenizedRepoCloneUrl(String provider, String repoUrl) {
         String prefix = repoProviderSpec(provider).cloneUrlPrefix();
-        for (String scheme : new String[] {"https://", "http://"}) {
+        for (String scheme : new String[] {
+            "https://", "http://"
+        }) {
             if (StringUtils.startsWithIgnoreCase(repoUrl, scheme)) {
                 return "https://" + prefix + repoUrl.substring(scheme.length());
             }
@@ -3196,7 +3209,8 @@ public class DevloopApplicationService {
             ScanItemTask sessionTask = scanItemTaskService.findBySession(sessionId);
             ProjectRepo codeRepo = null;
             if (sessionTask != null && sessionTask.getRepoId() != null) {
-                codeRepo = projectRepos.stream().filter(candidate -> sessionTask.getRepoId().equals(candidate.getRepoId()))
+                codeRepo = projectRepos.stream()
+                    .filter(candidate -> sessionTask.getRepoId().equals(candidate.getRepoId()))
                     .filter(candidate -> !"workspace".equalsIgnoreCase(candidate.getRepoType())).findFirst()
                     .orElse(null);
                 if (codeRepo == null) {
@@ -4082,12 +4096,12 @@ public class DevloopApplicationService {
         Object id = resource != null && resource.getResourceId() != null ? resource.getResourceId()
             : requestedId != null ? requestedId : requestedCode;
         String code = resource != null && StringUtils.isNotBlank(resource.getResourceCode())
-            ? resource.getResourceCode() : requestedCode;
+            ? resource.getResourceCode()
+            : requestedCode;
         if (StringUtils.isBlank(code) && id != null) {
             code = String.valueOf(id);
         }
-        String name = operationOntologyText(
-            firstOperationOntologyValue(result, "objectName", "resourceName", "name"));
+        String name = operationOntologyText(firstOperationOntologyValue(result, "objectName", "resourceName", "name"));
         if (StringUtils.isBlank(name) && resource != null) {
             name = resource.getResourceName();
         }
@@ -4145,8 +4159,8 @@ public class DevloopApplicationService {
         if (StringUtils.isBlank(resourceCode)) {
             return null;
         }
-        return ssResourceMapper.selectOne(new LambdaQueryWrapper<SsResource>()
-            .eq(SsResource::getResourceCode, resourceCode).last("LIMIT 1"));
+        return ssResourceMapper.selectOne(
+            new LambdaQueryWrapper<SsResource>().eq(SsResource::getResourceCode, resourceCode).last("LIMIT 1"));
     }
 
     /**
@@ -4224,8 +4238,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 模板页面已显式选择项目绑定数字员工时优先使用 agentIds，不再校验负责人是否绑定数字员工。
-     * 仅兼容未提交 agentIds 的历史调用时，才按 assigneeIds 查询成员绑定关系。
+     * 模板页面已显式选择项目绑定数字员工时优先使用 agentIds，不再校验负责人是否绑定数字员工。 仅兼容未提交 agentIds 的历史调用时，才按 assigneeIds 查询成员绑定关系。
      */
     private List<Long> resolveOperationTaskAgentIds(OperationTaskDTO dto, Long projectId) {
         LinkedHashSet<Long> explicitAgentIds = new LinkedHashSet<>();
@@ -4521,8 +4534,8 @@ public class DevloopApplicationService {
             case "internet" -> getOperationPromptValue(config, "internetScope");
             case "knowledge" -> resolveOperationResourceName(findOperationConfigValue(config, "sourceKnowledge"));
             // 历史配置没有 sourceMode 时继续读取旧来源字段，避免已有任务丢失信息。
-            default -> getOperationPromptValue(config, "connector", "internetScope", "sourceKnowledge",
-                "collectSource", "channel");
+            default -> getOperationPromptValue(config, "connector", "internetScope", "sourceKnowledge", "collectSource",
+                "channel");
         };
     }
 
@@ -4580,8 +4593,7 @@ public class DevloopApplicationService {
                 ? I18nUtil.get("devloop.operationTask.intervalUnit.hour")
                 : I18nUtil.get("devloop.operationTask.intervalUnit.minute");
             String weekdays = getOperationPromptList(config.get("intervalWeekdays"));
-            return interval + " " + unitLabel
-                + (StringUtils.isBlank(weekdays) ? "" : " / " + weekdays);
+            return interval + " " + unitLabel + (StringUtils.isBlank(weekdays) ? "" : " / " + weekdays);
         }
         if ("periodic".equalsIgnoreCase(mode)) {
             String periodType = StringUtils.defaultString(getOperationConfigText(config, "periodType"));
