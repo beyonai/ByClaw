@@ -4069,17 +4069,23 @@ public class DevloopApplicationService {
     /** 补全任务模板配置中的本体对象；前端字段不完整时优先从资源表读取真实元数据。 */
     private Map<String, Object> enrichOperationTaskOntologyConfig(Map<String, Object> config) {
         Map<String, Object> enrichedConfig = new LinkedHashMap<>(config);
-        Object ontology = config.get("ontology");
-        if (ontology == null) {
-            return enrichedConfig;
-        }
-        List<?> ontologyValues = ontology instanceof List<?> list ? list : List.of(ontology);
-        List<Map<String, Object>> enrichedOntologies = new ArrayList<>();
-        for (Object value : ontologyValues) {
-            enrichedOntologies.add(enrichOperationTaskOntology(value));
-        }
-        enrichedConfig.put("ontology", enrichedOntologies);
+        // 目标本体和来源本体都统一补全为包含 ID/code/name 的对象，供执行器和提示词共同使用。
+        enrichOperationTaskOntologyField(enrichedConfig, "ontology");
+        enrichOperationTaskOntologyField(enrichedConfig, "sourceOntology");
         return enrichedConfig;
+    }
+
+    private void enrichOperationTaskOntologyField(Map<String, Object> config, String fieldName) {
+        Object value = config.get(fieldName);
+        if (value == null) {
+            return;
+        }
+        List<?> values = value instanceof List<?> list ? list : List.of(value);
+        List<Map<String, Object>> enrichedValues = new ArrayList<>();
+        for (Object item : values) {
+            enrichedValues.add(enrichOperationTaskOntology(item));
+        }
+        config.put(fieldName, enrichedValues);
     }
 
     /** 将单个本体值归一为同时兼容资源、本体对象和通用详情字段的结构。 */
@@ -4089,21 +4095,23 @@ public class DevloopApplicationService {
             valueMap.forEach((key, itemValue) -> result.put(String.valueOf(key), itemValue));
         }
         else if (value != null) {
-            result.put("id", value);
+            // 仅提交数字/字符串时，前端 Select 的值约定为 resourceId，不把它误当 objectId。
+            result.put("resourceId", value);
         }
 
-        Object requestedId = firstOperationOntologyValue(result, "objectId", "resourceId", "id", "baseId");
+        Object requestedObjectId = firstOperationOntologyValue(result, "objectId", "id");
+        Object requestedResourceId = firstOperationOntologyValue(result, "resourceId");
+        Object requestedId = requestedResourceId != null ? requestedResourceId : requestedObjectId;
         String requestedCode = operationOntologyText(
             firstOperationOntologyValue(result, "objectCode", "resourceCode", "code"));
         SsResource resource = findOperationOntologyResource(requestedId, requestedCode);
-        Object id = resource != null && resource.getResourceId() != null ? resource.getResourceId()
-            : requestedId != null ? requestedId : requestedCode;
+        Object resourceId = resource != null && resource.getResourceId() != null ? resource.getResourceId()
+            : requestedResourceId;
+        Object objectId = requestedObjectId != null ? requestedObjectId : resourceId;
+        Object id = objectId != null ? objectId : requestedId;
         String code = resource != null && StringUtils.isNotBlank(resource.getResourceCode())
             ? resource.getResourceCode()
             : requestedCode;
-        if (StringUtils.isBlank(code) && id != null) {
-            code = String.valueOf(id);
-        }
         String name = operationOntologyText(firstOperationOntologyValue(result, "objectName", "resourceName", "name"));
         if (StringUtils.isBlank(name) && resource != null) {
             name = resource.getResourceName();
@@ -4115,10 +4123,10 @@ public class DevloopApplicationService {
         }
 
         result.put("id", id);
-        result.put("objectId", id);
-        result.put("resourceId", id);
+        result.put("objectId", objectId);
+        result.put("resourceId", resourceId != null ? resourceId : id);
         Object baseId = firstOperationOntologyValue(result, "baseId");
-        result.put("baseId", baseId == null ? id : baseId);
+        result.put("baseId", baseId);
         result.put("code", StringUtils.defaultString(code));
         result.put("objectCode", StringUtils.defaultString(code));
         result.put("resourceCode", StringUtils.defaultString(code));
@@ -4377,6 +4385,12 @@ public class DevloopApplicationService {
             : StringUtils.defaultString(requirement.getSourceName());
         String requirementDescription = requirement == null ? taskExt.get(OperationTaskSessionService.EXT_DESCRIPTION)
             : StringUtils.defaultString(requirement.getSourceDescription());
+        String sourceModeValue = "knowledge".equalsIgnoreCase(operationType)
+            ? getOperationKnowledgeOrganizationValue(operationConfigMap, "sourceOntology", "sourceMode")
+            : getOperationSourceModeLabel(findOperationConfigValue(operationConfigMap, "sourceMode"));
+        String storageModeValue = "knowledge".equalsIgnoreCase(operationType)
+            ? getOperationKnowledgeOrganizationValue(operationConfigMap, "ontology", "storageMode")
+            : getOperationStorageModeLabel(findOperationConfigValue(operationConfigMap, "storageMode"));
         return template.replace("${projectName}", StringUtils.defaultString(projectName))
             .replace("${taskType}", StringUtils.defaultString(taskType))
             .replace("${title}", StringUtils.defaultString(session.getSessionName()))
@@ -4387,11 +4401,9 @@ public class DevloopApplicationService {
                 StringUtils.defaultString(
                     resolveUserName(parseOperationLong(taskExt.get(OperationTaskSessionService.EXT_ASSIGNEE_ID)))))
             .replace("${dueTime}", StringUtils.defaultString(taskExt.get(OperationTaskSessionService.EXT_DUE_TIME)))
-            .replace("${sourceMode}",
-                getOperationSourceModeLabel(findOperationConfigValue(operationConfigMap, "sourceMode")))
+            .replace("${sourceMode}", sourceModeValue)
             .replace("${sourceValue}", getOperationCollectionSource(operationConfigMap))
-            .replace("${storageMode}",
-                getOperationStorageModeLabel(findOperationConfigValue(operationConfigMap, "storageMode")))
+            .replace("${storageMode}", storageModeValue)
             .replace("${storageTarget}", getOperationStorageTarget(operationConfigMap))
             .replace("${runMode}",
                 getOperationRunModeLabel(
@@ -4679,8 +4691,10 @@ public class DevloopApplicationService {
             value = operationConfig.get("organizeTemplateId");
         }
         // 任务模板把 ontology 放在 config 顶层，优先读取完整对象（支持多选数组）。
-        if (value == null && Arrays.asList(fieldNames).contains("ontology")) {
-            value = operationConfig.get("ontology");
+        if (value == null && (Arrays.asList(fieldNames).contains("ontology")
+            || Arrays.asList(fieldNames).contains("sourceOntology"))) {
+            value = operationConfig.get(Arrays.asList(fieldNames).contains("sourceOntology")
+                ? "sourceOntology" : "ontology");
         }
         return getOperationPromptValue(value);
     }

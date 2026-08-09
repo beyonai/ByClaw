@@ -999,10 +999,38 @@ const ProjectDetailPanel: React.FC<Props> = ({
     () =>
       (project?.resources || project?.boundResources || [])
         .filter((resource) => resource.resourceType === 'ontology')
-        .map((resource) => ({
-          value: resource.resourceId,
-          label: resource.resourceName || `${resource.resourceId}`,
-        })),
+        .map((resource) => {
+          const resourceDetail = resource as typeof resource & Record<string, any>;
+          const code =
+            resourceDetail.objectCode ||
+            resourceDetail.resourceCode ||
+            resourceDetail.code ||
+            '';
+          const name = resource.resourceName || resourceDetail.objectName || resourceDetail.name || code;
+          const description =
+            resourceDetail.objectDesc || resourceDetail.resourceDesc || resourceDetail.description || '';
+          return {
+            value: resource.resourceId,
+            label: name,
+            // 绑定资源接口有时只返回 ID/名称，保留标准字段，避免提交时 code 退化为 resourceId。
+            raw: {
+              ...resourceDetail,
+              id: resourceDetail.id,
+              objectId: resourceDetail.objectId,
+              resourceId: resource.resourceId,
+              baseId: resourceDetail.baseId,
+              code,
+              objectCode: resourceDetail.objectCode || code,
+              resourceCode: resourceDetail.resourceCode || code,
+              name,
+              objectName: resourceDetail.objectName || name,
+              resourceName: resource.resourceName || name,
+              description,
+              objectDesc: resourceDetail.objectDesc || description,
+              resourceDesc: resourceDetail.resourceDesc || description,
+            },
+          };
+        }),
     [project?.boundResources, project?.resources]
   );
   const boundProjectAgents = useMemo<OperationSelectOption[]>(

@@ -205,7 +205,7 @@ const ProjectTasks: React.FC<Props> = ({
         resourceDetail.objectCode ||
         resourceDetail.resourceCode ||
         resourceDetail.code ||
-        `${resource.resourceId}`;
+        '';
       const name = resource.resourceName || resourceDetail.objectName || resourceDetail.name || code;
       const description =
         resourceDetail.objectDesc || resourceDetail.resourceDesc || resourceDetail.description || '';
@@ -215,10 +215,10 @@ const ProjectTasks: React.FC<Props> = ({
         // 项目绑定记录可能只保留 ID、名称；先补齐标准字段，模板提交时还会统一归一化别名。
         raw: {
           ...resourceDetail,
-          id: resourceDetail.id || resource.resourceId,
-          objectId: resourceDetail.objectId || resource.resourceId,
+          id: resourceDetail.id,
+          objectId: resourceDetail.objectId,
           resourceId: resource.resourceId,
-          baseId: resourceDetail.baseId || `${resource.resourceId}`,
+          baseId: resourceDetail.baseId,
           code,
           objectCode: resourceDetail.objectCode || code,
           resourceCode: resourceDetail.resourceCode || code,

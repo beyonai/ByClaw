@@ -80,22 +80,18 @@ INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prom
 VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMPT_KNOWLEDGE', '运营任务启动提示词-知识整理',
 '运营知识整理任务启动提示词，占位符 ${projectName} ${title} ${description} ${sourceMode} ${storageMode} ${runMode} ${executionTime}',
 'OPLOOP_TASK_START_PROMPT_KNOWLEDGE',
-'请处理以下知识整理任务：
+'请执行以下任务：
 
-## 运营任务信息
-- 运营项目：${projectName}
-- 任务名称：${title}
-- 任务描述：${description}
+# 运营任务信息
+运营项目：${projectName}
+任务名称：${title}
+任务描述：${description}
+来源本体：${sourceMode}
+目标本体：${storageMode}
 
-## 知识整理配置
-- 来源本体：${sourceMode}
-- 目标本体：${storageMode}
-- 执行方式：${runMode}
-- 执行时间：${executionTime}
-
-## 执行要求
-1. 严格依据任务描述和知识整理配置完成知识结构确认、内容清洗与知识入库。
-2. 保持来源内容的准确性和可追溯性，并同步关键进度、产出结果和异常情况。
+# 任务配置
+执行方式：${runMode}
+执行时间：${executionTime}
 ',
 'Process the following knowledge organization task:
 

@@ -174,7 +174,19 @@ const getOntologySelectValues = (ontology: TaskTemplateFormValues['ontology']): 
   return list
     .map((item) => {
       if (item && typeof item === 'object') {
-        return (item.objectCode || item.objectName) as string | undefined;
+        // 历史配置可能只保存本体 ID、code 或名称，统一提取可用于 Select 回显的标识。
+        return (
+          item.objectId ||
+          item.resourceId ||
+          item.id ||
+          item.baseId ||
+          item.objectCode ||
+          item.resourceCode ||
+          item.code ||
+          item.objectName ||
+          item.resourceName ||
+          item.name
+        ) as string | number | undefined;
       }
       return item;
     })
@@ -187,16 +199,18 @@ const normalizeOntologyObjectValue = (
 ): OntologyObjectValue => {
   const raw = option?.raw || {};
   const id = raw.objectId ?? raw.resourceId ?? raw.id ?? raw.baseId ?? fallbackValue;
-  const code = raw.objectCode || raw.resourceCode || raw.code || `${fallbackValue}`;
+  // resourceId 只表示资源主键，缺少真实 code 时不要用主键伪造 objectCode。
+  const code = raw.objectCode || raw.resourceCode || raw.code || '';
   const name = raw.objectName || raw.resourceName || raw.name || option?.label || `${fallbackValue}`;
   const description = raw.objectDesc || raw.resourceDesc || raw.description || '';
   // 同时保留本体、资源和通用字段别名，兼容后端任务执行、对象详情及 Worker 的不同取值口径。
   return {
     ...raw,
     id,
-    objectId: raw.objectId ?? id,
-    resourceId: raw.resourceId ?? id,
-    baseId: raw.baseId || `${id}`,
+    // 未返回对象主键时不把资源主键伪装成 objectId；两者语义不同。
+    objectId: raw.objectId,
+    resourceId: raw.resourceId ?? fallbackValue,
+    baseId: raw.baseId,
     code,
     objectCode: raw.objectCode || code,
     resourceCode: raw.resourceCode || code,
@@ -233,7 +247,11 @@ const resolveInitialOntologyValues = (
   const matchedValues = values
     .map((value) =>
       options.find(
-        (option) => `${option.value}` === `${value}`.trim() || `${option.label}` === `${value}`.trim()
+        (option) =>
+          `${option.value}` === `${value}`.trim() ||
+          `${option.label}` === `${value}`.trim() ||
+          `${option.raw?.objectId || option.raw?.resourceId || option.raw?.id || ''}` === `${value}`.trim() ||
+          `${option.raw?.objectCode || option.raw?.resourceCode || option.raw?.code || ''}` === `${value}`.trim()
       )
     )
     .filter((option): option is TaskTemplateOption => !!option)
