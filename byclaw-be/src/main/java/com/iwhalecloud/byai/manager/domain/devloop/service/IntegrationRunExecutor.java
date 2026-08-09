@@ -746,6 +746,7 @@ public class IntegrationRunExecutor {
     /**
      * 测试员工提示词:克隆用例 → 部署好的被测系统地址 → 运行命令 → 结果结构化回流约定。
      * 结果文件与 [PHASE] 打点由回收 poller 解析入库,故提示词强约束其格式,不可省略。
+     * 三件事互不替代:结果文件给判定,打点驱动下游环节,任务状态投影驱动看板展示。
      */
     private String buildTesterPrompt(Long sessionId, IntegrationEnv env, IntegrationSuite suite, String caseSource,
                                      boolean keyAuth) {
@@ -780,9 +781,19 @@ public class IntegrationRunExecutor {
             + "\n"
             + buildResultContractSection(sessionId, suite, onEnv)
             + "## 强制要求\n"
-            + "- acp 下发任务时必须调用 skill:self-developed-rules。\n"
+            // 只点角色技能,不点底层状态机技能:状态怎么落是 devloop-integration-test 内部的事,
+            // 提示词摊开底层机制名会让员工绕过角色手册直接调状态机,漏掉回流步骤。
+            + "- 必须调用 skill:devloop-integration-test、skill:devloop-phase-marker。\n"
+            // 写「必须落」而不照抄 coder 提示词的「acp 下发任务时才调用」:测试会话由本方法
+            // createGroupChatSession 直接拉起,没有 acp 下发这一步,条件句会被判定不成立而跳过,
+            // 于是 /by/.acp-runs/sessions/{sessionId}.json 不落盘。看板状态只从该投影读
+            // (DevloopTaskStateReader),缺了它这条测试任务在项目详情里恒显示「待开始」。
+            + "- 开工前先按 devloop-integration-test 落本会话(会话 ID " + sessionId + ")的任务状态,"
+            + "跑完回流后收到终态:测试执行完毕(不论用例通过与否)转 completed;因环境不可达等原因没跑完转 paused 并写明原因。\n"
             + "- 结果确定后在会话中打点:全部通过输出 `[PHASE] tester DONE`;存在失败输出 `[PHASE] tester REJECT->coder` "
-            + "并简述失败原因,供研发闭环打回重工。打点必须在结果文件写完之后。";
+            + "并简述失败原因,供研发闭环打回重工。打点必须在结果文件写完之后。\n"
+            + "- 结果文件、[PHASE] 打点、任务状态是三件事,都要做:结果文件给平台判定测试结论,"
+            + "打点驱动流水线下游环节,任务状态驱动看板展示。";
     }
 
     // 高危命令拦截:不执行,落一条 error step(退出码 -1,logText 记原因),返回失败结论让编排层停下。

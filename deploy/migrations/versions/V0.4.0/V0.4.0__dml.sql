@@ -125,10 +125,6 @@ delete from byai.byai_system_config where param_code in ('DEVLOOP_REQUIREMENT_SC
 delete from byai.byai_system_config where param_code in ('DEVLOOP_PHASE_EXTRACT_PROMPT');
 delete from byai.byai_system_config where param_code in ('DEVLOOP_REQUIREMENT_SPLIT_SCORE_PROMPT');
 
--- TASK_START 模板里的 [PHASE] coder 打点是硬要求：平台靠数字员工回复正文里的打点
--- 派生流水线环节状态（见 DevloopPhaseService.MARKER）。此前模板没要求过，线上 coder
--- 打点实测为 0，需求级批量集成的就绪筛选（allTasksCoded 判 coder 是否 done）恒为空，
--- 定时集成任务从未触发。打点格式细节由 devloop-phase-marker skill 单点持有，此处不复述。
 -- 幂等：先按 prompt_code 清掉旧行再插入当前模板。
 delete from byai.byai_ai_prompt where prompt_code in
     ('DEVLOOP_TASK_START_PROMPT', 'DEVLOOP_REQUIREMENT_SCORE_PROMPT', 'DEVLOOP_REQUIREMENT_SPLIT_SCORE_PROMPT');
@@ -152,8 +148,7 @@ ${repoCloneHint}
 任务的代码克隆仓库路径需要遵循/by/.sessions/{sessionId}/{repoName}/
 
 ## 强制要求
-acp下发任务告诉对方启动的时候必须要调用skill：devloop-phase-marker，self-developed-rules;
-开工前在回复正文输出 [PHASE] coder START，完成后输出 [PHASE] coder DONE；无法完成时输出 [PHASE] coder REJECT->req 原因:<具体原因>。打点必须在回复正文里，写进文件或包在代码块里无效;
+acp下发任务告诉对方启动的时候必须要调用skill：self-developed-rules;
 研发流程的输出文档如：需求文档、设计文档、测试文档保存在/by/.sessions/{sessionId}/下面', null, 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
 
 INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)

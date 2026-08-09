@@ -3028,10 +3028,7 @@ public class DevloopApplicationService {
         + "- 代码仓库：${repoFullName}\n" + "- 目标分支：${branchName}（尚未创建，需你新建）\n" + "- 任务类型：${taskType}\n"
         + "- 任务标题：${title}\n\n" + "## 需求详情\n${description}\n\n" + "## 仓库访问说明\n" + "${repoCloneHint}\n\n" + "## 代码仓库\n"
         + "任务的代码克隆仓库路径需要遵循/by/.sessions/{sessionId}/{repoName}/\n\n" + "## 强制要求\n"
-        + "acp下发任务告诉对方启动的时候必须要调用skill：devloop-phase-marker，self-developed-rules;\n"
-        // 打点是流水线唯一的环节信号:平台靠 [PHASE] coder DONE 判断编码完成,缺了下游集成测试永远筛不到就绪需求。
-        + "开工前在回复正文输出 [PHASE] coder START，完成后输出 [PHASE] coder DONE；"
-        + "无法完成时输出 [PHASE] coder REJECT->req 原因:<具体原因>。打点必须在回复正文里，写进文件或包在代码块里无效;\n"
+        + "acp下发任务告诉对方启动的时候必须要调用skill：self-developed-rules;\n"
         + "研发流程的输出文档如：需求文档、设计文档、测试文档保存在/by/.sessions/{sessionId}/下面";
 
     /** 数据库先分页，再读取当前页会话状态投影；单页最多触发 100 次 UserFS 定点读取。 */
