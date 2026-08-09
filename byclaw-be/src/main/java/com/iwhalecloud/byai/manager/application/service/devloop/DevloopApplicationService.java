@@ -2283,7 +2283,8 @@ public class DevloopApplicationService {
         // 来源
         List<Map<String, Object>> sourceList = (List<Map<String, Object>>) oploopTaskConfigMap.get("sourceOntology");
         for (int i = 0; sourceList != null && i < sourceList.size(); i++) {
-            Map<String, Object> ontologyMap = sourceList.get(i);
+            // 查询接口与执行接口使用同一套本体字段归一化，避免返回结构因入口不同而不一致。
+            Map<String, Object> ontologyMap = enrichOperationTaskOntology(sourceList.get(i));
             ontologyMap.put("ontologyConfigType", "source");
             resultList.add(ontologyMap);
         }
@@ -2291,7 +2292,7 @@ public class DevloopApplicationService {
         // 目标
         List<Map<String, Object>> targetList = (List<Map<String, Object>>) oploopTaskConfigMap.get("ontology");
         for (int i = 0; targetList != null && i < targetList.size(); i++) {
-            Map<String, Object> ontologyMap = targetList.get(i);
+            Map<String, Object> ontologyMap = enrichOperationTaskOntology(targetList.get(i));
             ontologyMap.put("ontologyConfigType", "target");
             resultList.add(ontologyMap);
         }
