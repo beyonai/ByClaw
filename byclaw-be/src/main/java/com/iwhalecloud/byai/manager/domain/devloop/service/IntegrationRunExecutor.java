@@ -778,6 +778,10 @@ public class IntegrationRunExecutor {
                 ? "`export BYCLAW_E2E_RESULT_DIR=" + ENV_MACHINE_RESULT_DIR.formatted(sessionId)
                     + "`(在 ssh 会话里导出,即环境机上的目录)\n"
                 : "`export BYCLAW_E2E_RESULT_DIR=" + E2E_RESULT_DIR.formatted(sessionId) + "`\n")
+            // 套件 ID 用例集自己不知道,但规范要求截图落 artifacts/<套件ID>/;不导出它,
+            // 用例集只能把截图写到源码目录(实测 byclaw-middleware 就是这样),scp 拷不到,
+            // 平台永远读不到失败截图。
+            + "`export BYCLAW_E2E_SUITE_ID=" + suite.getSuiteId() + "`(截图等产物按 artifacts/$BYCLAW_E2E_SUITE_ID/ 落)\n"
             + "\n"
             + buildResultContractSection(sessionId, suite, onEnv)
             + "## 强制要求\n"
