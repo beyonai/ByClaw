@@ -4025,6 +4025,8 @@ public class DevloopApplicationService {
         chatDto.setProjectId(task.getProjectId());
         chatDto.setSessionId(task.getSessionId());
         chatDto.setResourceList(mentionedAgents);
+        // 运营任务首条消息需要在聊天记录中明确展示模板页面选中的数字员工。
+        chatDto.setPreserveLeadingDigitalEmployeeMention(true);
         // 运营任务复用研发任务的 DevLoop 聊天通道，确保首条任务指令按统一链路持久化并触发数字员工。
         chatDto.setAccessTerminal("DevLoop");
         chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
@@ -4036,6 +4038,7 @@ public class DevloopApplicationService {
             chatDto.setExtParams(buildOperationTaskMultiAgentExtParams(task.getSessionId(), agentIds));
         }
         task.setObjectId(primaryAgentId);
+        task.setObjectType("DigEmployee");
         task.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         byaiSessionMapper.updateById(task);
         LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
@@ -4448,6 +4451,7 @@ public class DevloopApplicationService {
     private String getOperationTaskPromptConfigCode(String operationType) {
         return switch (operationType == null ? "" : operationType) {
             case "collect" -> "OPLOOP_TASK_START_PROMPT_COLLECT";
+            case "knowledge" -> "OPLOOP_TASK_START_PROMPT_KNOWLEDGE";
             case "publish", "content" -> "OPLOOP_TASK_START_PROMPT_PUBLISH";
             case "analyze" -> "OPLOOP_TASK_START_PROMPT_ANALYZE";
             // 未识别类型使用国际化默认模板，不再依赖已废弃的通用参数码。

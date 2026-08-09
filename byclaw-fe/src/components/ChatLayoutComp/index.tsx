@@ -175,6 +175,21 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     return Number.isFinite(normalizedProjectId) && normalizedProjectId > 0 ? normalizedProjectId : undefined;
   }, [currentSession?.projectId, projectId]);
 
+  useEffect(() => {
+    const sessionObjectType = `${currentSession?.objectType || ''}`.toLowerCase();
+    const sessionAgentId = currentSession?.objectId;
+    if (sessionObjectType !== 'digemployee' || sessionAgentId === undefined || sessionAgentId === null) return;
+
+    const sessionAgentInfo = getResponseAgentInfo(
+      { agentList, employeesList },
+      JSON.stringify({ agentId: sessionAgentId })
+    );
+    const nextAgentId = `${sessionAgentInfo?.agentId || sessionAgentId}`;
+    // 运营任务进入会话后立即恢复模板所选员工，使输入框默认 @ 该员工并在发送后继续保留。
+    if (`${agentId || ''}` !== nextAgentId) setAgentId?.(nextAgentId);
+    setMyAgentType(sessionAgentInfo?.agentType || agentTypeMap.agent);
+  }, [agentId, agentList, currentSession?.objectId, currentSession?.objectType, employeesList, setAgentId]);
+
   // 旧资源面板仍以单详情节点回调；这里统一补齐稳定身份，才能在多次点击同一资源时复用页签。
   const openResourceDetail = useCallback(
     (panel: React.ReactNode, options: DetailPanelOptions = {}) => {

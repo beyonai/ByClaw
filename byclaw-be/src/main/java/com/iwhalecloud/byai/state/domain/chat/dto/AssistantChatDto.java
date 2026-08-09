@@ -134,6 +134,9 @@ public class AssistantChatDto {
     @Schema(description = "资源列表")
     private List<ResourceVo> resourceList = new ArrayList<>();
 
+    /** 自动启动任务时保留消息开头的数字员工占位符，使聊天记录正常展示所选员工的 @ 标记。 */
+    private boolean preserveLeadingDigitalEmployeeMention;
+
     /**
      * 会话类型 h_as：人与超级助手/数字员工单聊 hs_as：群聊 h_h：人与人单聊
      */

@@ -1,13 +1,14 @@
 
 /**百应运营渠道**/
 -- 运营闭环：按运营需求类型配置独立启动提示词，避免不同类型任务携带无关字段。
--- 后端按 operationType 读取：collect -> OPLOOP_TASK_START_PROMPT_COLLECT，publish/content -> OPLOOP_TASK_START_PROMPT_PUBLISH，analyze -> OPLOOP_TASK_START_PROMPT_ANALYZE。
+-- 后端按 operationType 分别读取采集、知识整理、发布和分析提示词，避免不同任务类型混用字段。
 delete from byai.byai_system_config where param_code in (
     'OPLOOP_TASK_START_PROMPT',
     'OPLOOP_COLLECT_TASK_START_PROMPT',
     'OPLOOP_PUBLISH_TASK_START_PROMPT',
     'OPLOOP_ANALYZE_TASK_START_PROMPT',
     'OPLOOP_TASK_START_PROMPT_COLLECT',
+    'OPLOOP_TASK_START_PROMPT_KNOWLEDGE',
     'OPLOOP_TASK_START_PROMPT_PUBLISH',
     'OPLOOP_TASK_START_PROMPT_ANALYZE'
 );
@@ -19,6 +20,7 @@ delete from byai.byai_ai_prompt where prompt_code in (
     'OPLOOP_PUBLISH_TASK_START_PROMPT',
     'OPLOOP_ANALYZE_TASK_START_PROMPT',
     'OPLOOP_TASK_START_PROMPT_COLLECT',
+    'OPLOOP_TASK_START_PROMPT_KNOWLEDGE',
     'OPLOOP_TASK_START_PROMPT_PUBLISH',
     'OPLOOP_TASK_START_PROMPT_ANALYZE'
 );
@@ -27,20 +29,100 @@ INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prom
 VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMPT_COLLECT', '运营任务启动提示词-资料采集与整理',
 '运营资料采集与整理任务启动提示词，占位符 ${projectName} ${title} ${description} ${requirementName} ${requirementDescription} ${sourceMode} ${sourceValue} ${storageMode} ${storageTarget} ${runMode} ${executionTime}',
 'OPLOOP_TASK_START_PROMPT_COLLECT',
-E'请处理以下资料采集与整理任务：\n\n关联需求\n\n需求名称：${requirementName}\n需求描述：${requirementDescription}\n\n运营任务信息\n\n运营项目：${projectName}\n任务名称：${title}\n任务描述：${description}\n\n资料采集配置\n\n采集方式：${sourceMode}\n采集来源：${sourceValue}\n入库方式：${storageMode}\n入库位置：${storageTarget}\n执行方式：${runMode}\n执行时间：${executionTime}\n\n执行要求\n\n必须使用knowledge-collection技能进行采集。\n严格依据关联需求、任务描述和资料采集配置开展工作。\n将采集结果归档到配置的入库位置，并同步关键进度、产出结果和异常情况。\n涉及登录或对外访问时，先核对对应连接器和平台配置。',
-E'Process the following material collection and organization task:\n\nRelated requirement\n\nRequirement name: ${requirementName}\nRequirement description: ${requirementDescription}\n\nOperation task information\n\nOperation project: ${projectName}\nTask name: ${title}\nTask description: ${description}\n\nMaterial collection configuration\n\nCollection method: ${sourceMode}\nCollection source: ${sourceValue}\nStorage method: ${storageMode}\nStorage destination: ${storageTarget}\nExecution method: ${runMode}\nExecution time: ${executionTime}\n\nExecution requirements\n\nExecute strictly according to the related requirement, task description, and material collection configuration.\nArchive the collected results to the configured destination and report key progress, results, and exceptions.\nBefore logging in or accessing external services, verify the related connector and platform configuration.',
+'请处理以下资料采集与整理任务：
+
+## 运营任务信息
+- 运营项目：${projectName}
+- 任务名称：${title}
+- 任务描述：${description}
+
+## 资料采集配置
+- 采集方式：${sourceMode}
+- 采集来源：${sourceValue}
+- 入库方式：${storageMode}
+- 入库位置：${storageTarget}
+- 执行方式：${runMode}
+- 执行时间：${executionTime}
+
+## 执行要求
+1. 必须使用 knowledge-collection 技能进行采集。
+2. 严格依据关联需求、任务描述和资料采集配置开展工作。
+3. 将采集结果归档到配置的入库位置，并同步关键进度、产出结果和异常情况。
+4. 涉及登录或对外访问时，先核对对应连接器和平台配置。
+',
+'Process the following material collection and organization task:
+
+## Related requirement
+- Requirement name: ${requirementName}
+- Requirement description: ${requirementDescription}
+
+## Operation task information
+- Operation project: ${projectName}
+- Task name: ${title}
+- Task description: ${description}
+
+## Material collection configuration
+- Collection method: ${sourceMode}
+- Collection source: ${sourceValue}
+- Storage method: ${storageMode}
+- Storage destination: ${storageTarget}
+- Execution method: ${runMode}
+- Execution time: ${executionTime}
+
+## Execution requirements
+1. Execute strictly according to the related requirement, task description, and material collection configuration.
+2. Archive the collected results to the configured destination and report key progress, results, and exceptions.
+3. Before logging in or accessing external services, verify the related connector and platform configuration.
+',
+10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
+
+INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
+VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMPT_KNOWLEDGE', '运营任务启动提示词-知识整理',
+'运营知识整理任务启动提示词，占位符 ${projectName} ${title} ${description} ${sourceMode} ${storageMode} ${runMode} ${executionTime}',
+'OPLOOP_TASK_START_PROMPT_KNOWLEDGE',
+'请处理以下知识整理任务：
+
+## 运营任务信息
+- 运营项目：${projectName}
+- 任务名称：${title}
+- 任务描述：${description}
+
+## 知识整理配置
+- 来源本体：${sourceMode}
+- 目标本体：${storageMode}
+- 执行方式：${runMode}
+- 执行时间：${executionTime}
+
+## 执行要求
+1. 严格依据任务描述和知识整理配置完成知识结构确认、内容清洗与知识入库。
+2. 保持来源内容的准确性和可追溯性，并同步关键进度、产出结果和异常情况。
+',
+'Process the following knowledge organization task:
+
+## Operation task information
+- Operation project: ${projectName}
+- Task name: ${title}
+- Task description: ${description}
+
+## Knowledge organization configuration
+- Source ontology: ${sourceMode}
+- Target ontology: ${storageMode}
+- Execution method: ${runMode}
+- Execution time: ${executionTime}
+
+## Execution requirements
+1. Confirm the knowledge structure, clean the content, and ingest the result according to the task description and configuration.
+2. Preserve source accuracy and traceability, and report key progress, results, and exceptions.
+',
 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
 
 INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
 VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMPT_PUBLISH', '运营任务启动提示词-内容创作', '运营内容创作与发布任务启动提示词，占位符 ${projectName} ${title} ${requirementName} ${requirementDescription} ${contentType} ${publishChannel} ${publishAccount} ${publishTopic} ${publishSchedule}', 'OPLOOP_TASK_START_PROMPT_PUBLISH', '请处理以下内容创作与发布任务：
 
-## 关联需求
-- 需求名称：${requirementName}
-- 需求描述：${requirementDescription}
-
 ## 运营任务信息
 - 运营项目：${projectName}
 - 任务名称：${title}
+- 任务描述：${description}
 
 ## 内容创作与发布配置
 - 内容类型：${contentType}
@@ -58,13 +140,10 @@ VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMP
 INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
 VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMPT_ANALYZE', '运营任务启动提示词-数据分析', '运营数据分析与优化任务启动提示词，占位符 ${projectName} ${title} ${requirementName} ${requirementDescription} ${analysisPlatform} ${analysisAccount} ${analysisScope} ${analysisWorks}', 'OPLOOP_TASK_START_PROMPT_ANALYZE', '请处理以下数据分析与优化任务：
 
-## 关联需求
-- 需求名称：${requirementName}
-- 需求描述：${requirementDescription}
-
 ## 运营任务信息
 - 运营项目：${projectName}
 - 任务名称：${title}
+- 任务描述：${description}
 
 ## 数据分析配置
 - 分析平台：${analysisPlatform}

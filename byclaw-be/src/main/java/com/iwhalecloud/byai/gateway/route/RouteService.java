@@ -169,7 +169,9 @@ public class RouteService {
         ctx.targetAgentType = targetAgentType;
 
         // 处理 content 中的资源占位符替换，如 {{DIG_EMPLOYEE_10812779}} 替换为 @xxxxx
-        content = replaceResourcePlaceholders(content, resourceList, agentId);
+        // 运营任务自动发送时保留开头的员工引用，普通单员工聊天仍沿用原有的占位符精简逻辑。
+        Long placeholderAgentId = chatDto.isPreserveLeadingDigitalEmployeeMention() ? null : agentId;
+        content = replaceResourcePlaceholders(content, resourceList, placeholderAgentId);
 
         String answerMessageId = StringUtils.isNotEmpty(ctx.assistantChatDto.getResumeMessageId())
             ? ctx.assistantChatDto.getResumeMessageId()

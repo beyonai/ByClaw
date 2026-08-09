@@ -94,6 +94,9 @@ const Chat = () => {
   const locationProjectContext = React.useMemo(() => getProjectChatContext(location.state), [location.state]);
   const autoSendContent = (location.state as { autoSendContent?: string } | null)?.autoSendContent;
   const targetSessionId = (location.state as { sessionId?: string | number } | null)?.sessionId;
+  const selectedAgentId = (location.state as { selectedAgentId?: string | number } | null)?.selectedAgentId;
+  const selectedAgentObjectType = (location.state as { selectedAgentObjectType?: string } | null)
+    ?.selectedAgentObjectType;
   const autoSendKeyRef = React.useRef<string | undefined>(undefined);
   const [projectChatContext, setProjectChatContext] = React.useState<ProjectChatContext>(locationProjectContext);
   const pendingSessionProjectContextRef = React.useRef<ProjectChatContext | undefined>(undefined);
@@ -115,6 +118,28 @@ const Chat = () => {
     }, 150);
     return () => window.clearTimeout(timer);
   }, [EventEmitter, autoSendContent, sessionId, targetSessionId]);
+
+  React.useEffect(() => {
+    if (
+      !sessionId ||
+      !targetSessionId ||
+      `${sessionId}` !== `${targetSessionId}` ||
+      `${selectedAgentObjectType || ''}`.toLowerCase() !== 'digemployee' ||
+      selectedAgentId === undefined ||
+      selectedAgentId === null
+    ) {
+      return undefined;
+    }
+    // 等聊天输入组件注册事件后恢复任务模板选择的数字员工，使输入框前缀持续显示 @员工。
+    const timer = window.setTimeout(() => {
+      EventEmitter.emit('queryInput-set-schema', {
+        agentId: `${selectedAgentId}`,
+        agentType: agentTypeMap.agent,
+        resourceList: [],
+      });
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [EventEmitter, selectedAgentId, selectedAgentObjectType, sessionId, targetSessionId]);
 
   // 沉淀为需求:入口挂在数字员工回答下方(MoreActions),点击后带该条消息发事件到此处打开弹窗。
   // 弹窗需要项目上下文与仓库列表,由聊天页持有,避免逐层透传到深层消息组件。
