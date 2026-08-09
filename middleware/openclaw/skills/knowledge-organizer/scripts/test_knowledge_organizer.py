@@ -246,6 +246,29 @@ class KnowledgeOrganizerTests(unittest.TestCase):
             ).is_file()
         )
 
+    def test_init_normalizes_session_id_wrapped_in_quotes(self) -> None:
+        for quoted_session_id in (
+            '"session-001"',
+            "'session-001'",
+            '  "\'session-001\'"  ',
+        ):
+            with self.subTest(session_id=quoted_session_id):
+                task_dir = self.task_dir / quoted_session_id.strip()
+                organizer = knowledge_organizer.KnowledgeOrganizer(FakeApi())
+
+                result = organizer.initialize(
+                    task_dir,
+                    session_id=quoted_session_id,
+                )
+
+                self.assertEqual(result["session_id"], "session-001")
+                state = organizer._load_state(task_dir)
+                self.assertEqual(state["session_id"], "session-001")
+
+    def test_init_rejects_session_id_containing_only_quotes(self) -> None:
+        with self.assertRaisesRegex(ValueError, "session id is required"):
+            self.organizer.initialize(self.task_dir, session_id='  ""  ')
+
     def test_init_no_longer_requires_both_ods_and_ads(self) -> None:
         class OdsOnlyApi(FakeApi):
             def list_session_resources(

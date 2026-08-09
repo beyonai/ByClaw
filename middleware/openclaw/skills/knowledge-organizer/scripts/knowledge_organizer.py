@@ -21,6 +21,17 @@ OBJECT_FIELDS = ("objectCode", "objectName", "objectDesc", "properties")
 SUPPORTED_SOURCE_SUFFIXES = {".md", ".txt", ".json"}
 
 
+def _normalize_session_id(value: Any) -> str:
+    session_id = str(value or "").strip()
+    while (
+        len(session_id) >= 2
+        and session_id[0] in {"'", '"'}
+        and session_id[-1] == session_id[0]
+    ):
+        session_id = session_id[1:-1].strip()
+    return session_id
+
+
 class OrganizerApi(Protocol):
     def list_authorized_resources(self, employee_resource_id: str, page: int) -> dict[str, Any]: ...
 
@@ -350,7 +361,7 @@ class KnowledgeOrganizer:
         if (workflow_dir / STATE_FILE).exists():
             raise ValueError(f"任务已初始化: {task_dir}")
 
-        session_id = session_id.strip()
+        session_id = _normalize_session_id(session_id)
         employee_resource_id = employee_resource_id.strip() if employee_resource_id else None
         if not session_id:
             raise ValueError("session id is required")
@@ -456,7 +467,7 @@ class KnowledgeOrganizer:
         except UnicodeDecodeError as exc:
             raise ValueError("源文件必须使用 UTF-8 编码") from exc
         payload = {
-            "sessionId": str(state["session_id"]),
+            "sessionId": _normalize_session_id(state["session_id"]),
             "objectCode": object_code,
             "actionCode": f"write_{object_code}",
             "arguments": {
@@ -559,7 +570,7 @@ class KnowledgeOrganizer:
             if required_source_domain is not None
             else None
         )
-        session_id = str(state.get("session_id") or "").strip()
+        session_id = _normalize_session_id(state.get("session_id"))
         if not session_id:
             raise ValueError("任务状态缺少 session id")
         try:
