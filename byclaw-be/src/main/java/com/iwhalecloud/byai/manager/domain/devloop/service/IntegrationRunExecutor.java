@@ -197,7 +197,7 @@ public class IntegrationRunExecutor {
             // 1) 按 seq 跑环境 stages:非 continueOnError 的 stage 失败即整 run 失败并停止后续。
             List<StageDef> stages = parseStages(env.getStages());
             for (StageDef stage : stages) {
-                StepOutcome outcome = runStage(run, env, connSecret, injectedEnv, stage, seq++);
+                StepOutcome outcome = runStage(run, env, connSecret, injectedEnv, stage, suite, seq++);
                 if (!STATUS_PASSED.equals(outcome.status) && !stage.continueOnError) {
                     finishByStepFailure(run, outcome, "环境阶段失败: " + stage.name, startMs);
                     return;
@@ -218,17 +218,24 @@ public class IntegrationRunExecutor {
         }
     }
 
-    /** 跑单个环境 stage:高危闸门 → 构建命令 → 执行 → 写一条 run_step。 */
+    /** 跑单个环境 stage:高危闸门 → 变量替换 → 构建命令 → 执行 → 写一条 run_step。 */
     private StepOutcome runStage(IntegrationRun run, IntegrationEnv env, String connSecret,
-                                 Map<String, String> injectedEnv, StageDef stage, int seq) throws Exception {
+                                 Map<String, String> injectedEnv, StageDef stage, IntegrationSuite suite,
+                                 int seq) throws Exception {
         // 运行时再过一遍高危闸门:防止绕过保存 API 直接改库注入危险脚本。命中即拦,不执行。
+        // 先于变量替换执行:替换值来自仓库地址等配置,不该成为绕过闸门的入口。
         String blocked = dangerousScriptGuard.detect(stage.name, stage.script);
         if (blocked != null) {
             return recordBlockedStep(run, seq, STEP_STAGE, stage.name, blocked);
         }
-        CommandExecSpec spec = baseSpec(env, connSecret, injectedEnv);
-        spec.setWorkdir(StringUtils.defaultIfBlank(stage.workdir, env.getConnWorkdir()));
-        spec.setCommand(buildStageCommand(stage));
+        // $WORKDIR 与 ${...} 变量都由平台提供,口径见环境配置页「脚本可用变量」提示。
+        // workdir 只算一次:$WORKDIR 必须与命令里实际 cd 的目录一致,否则脚本按 $WORKDIR 拼路径会跑偏。
+        String workdir = StringUtils.defaultIfBlank(stage.workdir, env.getConnWorkdir());
+        Map<String, String> stageEnv = new LinkedHashMap<>(injectedEnv == null ? Map.of() : injectedEnv);
+        stageEnv.put("WORKDIR", StringUtils.defaultString(workdir));
+        CommandExecSpec spec = baseSpec(env, connSecret, stageEnv);
+        spec.setWorkdir(workdir);
+        spec.setCommand(buildStageCommand(expandStageVars(stage, run, env, suite)));
         spec.setTimeoutSec(stage.timeoutSec);
         return execAndRecord(run, seq, STEP_STAGE, stage.name, spec);
     }
@@ -840,6 +847,47 @@ public class IntegrationRunExecutor {
         return spec;
     }
 
+    /**
+     * 展开 stage 脚本里的 ${...} 平台变量,取值口径与环境配置页「脚本可用变量」提示一致。
+     * 返回副本:StageDef 由 parseStages 每次重建,但替换后的脚本不该回写进原对象被别处误用。
+     * 无对应数据时替换为空串而非留着 ${...}:留着会被 shell 当字面量执行,报错更难懂。
+     */
+    private StageDef expandStageVars(StageDef stage, IntegrationRun run, IntegrationEnv env, IntegrationSuite suite) {
+        return expandStageVars(stage, run.getBranch(), run.getCommitRef(), stageRepoUrl(suite), env.getAddress());
+    }
+
+    /** 纯替换逻辑,与仓库查询解耦便于测试;取值来源见上面的重载。 */
+    static StageDef expandStageVars(StageDef stage, String branch, String commit, String repoUrl, String envAddress) {
+        String script = StringUtils.defaultString(stage.script);
+        // source=path 时 script 是环境机上的脚本文件路径,不是脚本正文;替换路径会指向不存在的文件。
+        // 这类脚本要拿变量,用命令里已 export 的同名环境变量($WORKDIR 等)。
+        if ("path".equalsIgnoreCase(stage.source) || !script.contains("${")) {
+            return stage;
+        }
+        StageDef expanded = stage.copy();
+        expanded.script = script
+            .replace("${branch}", StringUtils.defaultString(branch))
+            .replace("${commit}", StringUtils.defaultString(commit))
+            .replace("${repoUrl}", StringUtils.defaultString(repoUrl))
+            .replace("${envAddress}", StringUtils.defaultString(envAddress));
+        return expanded;
+    }
+
+    /**
+     * stage 脚本里 ${repoUrl} 的取值:standalone 套件直接用 source,关联仓库的取仓库地址。
+     * sourceType=env(用例预置在环境机)没有仓库概念,返回空串。
+     */
+    private String stageRepoUrl(IntegrationSuite suite) {
+        if (suite == null || SOURCE_ON_ENV.equalsIgnoreCase(StringUtils.defaultString(suite.getSourceType()))) {
+            return "";
+        }
+        if (SOURCE_STANDALONE.equalsIgnoreCase(suite.getSourceType())) {
+            return StringUtils.defaultString(suite.getSource()).trim();
+        }
+        ProjectRepo repo = suite.getRepoId() == null ? null : projectRepoMapper.selectById(suite.getRepoId());
+        return repo == null ? "" : StringUtils.defaultString(resolveRepoUrl(repo));
+    }
+
     /** stage 命令:inline 用解释器执行脚本正文,path 执行脚本文件。 */
     private String buildStageCommand(StageDef stage) {
         String interpreter = StringUtils.defaultIfBlank(stage.interpreter, "bash");
@@ -1307,8 +1355,8 @@ public class IntegrationRunExecutor {
         return "'" + value.replace("'", "'\"'\"'") + "'";
     }
 
-    /** 环境 stage 解析后的内存态。 */
-    private static class StageDef {
+    /** 环境 stage 解析后的内存态。包可见:变量替换的单测直接构造它,避免为测试暴露更大的执行入口。 */
+    static class StageDef {
         String name;
         String interpreter;
         String source;
@@ -1316,6 +1364,19 @@ public class IntegrationRunExecutor {
         String workdir;
         int timeoutSec;
         boolean continueOnError;
+
+        /** 变量展开用:只改 script,其余字段照搬,避免替换结果污染原始定义。 */
+        StageDef copy() {
+            StageDef c = new StageDef();
+            c.name = name;
+            c.interpreter = interpreter;
+            c.source = source;
+            c.script = script;
+            c.workdir = workdir;
+            c.timeoutSec = timeoutSec;
+            c.continueOnError = continueOnError;
+            return c;
+        }
     }
 
     /**

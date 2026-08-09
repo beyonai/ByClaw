@@ -2489,7 +2489,7 @@ export default {
   'projectSpace.detail.integration.envModal.stagesTitle': 'Lifecycle stages (run in order)',
   'projectSpace.detail.integration.envModal.addStage': 'Add stage',
   'projectSpace.detail.integration.envModal.varsHint':
-    'Available vars: ${branch} ${commit} ${repoUrl} ${envAddress}, plus $WORKDIR from connection.',
+    'Available vars: ${branch} (suite branch), ${repoUrl} (case repo URL; empty when cases live on the env machine), ${envAddress} (system under test), plus the $WORKDIR env var (this stage working dir). With script source "path", ${...} is not substituted — use $WORKDIR.',
   'projectSpace.detail.integration.envModal.stageName': 'Stage name, e.g. build-fe',
   'projectSpace.detail.integration.envModal.sourceInline': 'Inline script',
   'projectSpace.detail.integration.envModal.sourcePath': 'Script path',

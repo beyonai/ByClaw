@@ -2452,7 +2452,7 @@ export default {
   'projectSpace.detail.integration.envModal.stagesTitle': '生命周期阶段（按顺序执行）',
   'projectSpace.detail.integration.envModal.addStage': '新增阶段',
   'projectSpace.detail.integration.envModal.varsHint':
-    '脚本可用变量：${branch} ${commit} ${repoUrl} ${envAddress}，以及连接里的 $WORKDIR。',
+    '脚本可用变量：${branch}（用例集分支）${repoUrl}（用例仓库地址，用例预置在环境机时为空）${envAddress}（被测系统地址），以及环境变量 $WORKDIR（本阶段工作目录）。脚本来源选“路径”时不做 ${...} 替换，请用 $WORKDIR。',
   'projectSpace.detail.integration.envModal.stageName': '阶段名称，如 build-fe',
   'projectSpace.detail.integration.envModal.sourceInline': '内联脚本',
   'projectSpace.detail.integration.envModal.sourcePath': '脚本路径',
