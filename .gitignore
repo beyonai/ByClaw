@@ -118,3 +118,5 @@ byclaw-data/.vscode/settings.json
 .codegraph
 
 .uv-cache/
+
+.pnpm-store/
