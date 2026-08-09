@@ -31,7 +31,11 @@ class OrganizerApi(Protocol):
     def save_object_instance(self, *, payload: dict[str, Any]) -> dict[str, Any]: ...
 
     def discover_document_objects(
-        self, *, session_id: str, object_codes: list[str]
+        self,
+        *,
+        session_id: str,
+        source_object_codes: list[str],
+        object_codes: list[str],
     ) -> dict[str, Any]: ...
 
     def enrich_document_objects(
@@ -109,13 +113,22 @@ class ServiceApi:
         return {"X-Session-Id": session_id, "X-User-Code": user_code}
 
     def discover_document_objects(
-        self, *, session_id: str, object_codes: list[str]
+        self,
+        *,
+        session_id: str,
+        source_object_codes: list[str],
+        object_codes: list[str],
     ) -> dict[str, Any]:
         result = self.transport.request(
             service_env="DATACLOUD_DOMAINNAME",
             method="POST",
             path="/api/v1/rpc/kb/discoverDocumentObjectsAsync",
-            payload={"params": {"objectCodes": object_codes}},
+            payload={
+                "params": {
+                    "sourceObjectCodes": source_object_codes,
+                    "objectCodes": object_codes,
+                }
+            },
             headers=self._datacloud_headers(session_id),
         )
         return result if isinstance(result, dict) else {}
@@ -488,13 +501,18 @@ class KnowledgeOrganizer:
         return record
 
     def organize(
-        self, task_dir: Path, object_codes: list[str] | None = None
+        self,
+        task_dir: Path,
+        object_codes: list[str] | None = None,
+        source_object_codes: list[str] | None = None,
     ) -> dict[str, Any]:
         """Submit a document-object discovery task for background processing."""
         return self._submit_background_task(
             task_dir,
             object_codes=object_codes,
             required_domain="ads",
+            source_object_codes=source_object_codes,
+            required_source_domain="ods",
             state_key="discoveries",
             expected_task_type="documentDiscovery",
             submit=self.api.discover_document_objects,
@@ -522,6 +540,8 @@ class KnowledgeOrganizer:
         state_key: str,
         expected_task_type: str,
         submit: Any,
+        source_object_codes: list[str] | None = None,
+        required_source_domain: str | None = None,
     ) -> dict[str, Any]:
         task_dir = task_dir.resolve()
         state = self._load_state(task_dir)
@@ -530,11 +550,26 @@ class KnowledgeOrganizer:
             object_codes,
             required_domain=required_domain,
         )
+        normalized_source_codes = (
+            self._validated_object_codes(
+                state,
+                source_object_codes,
+                required_domain=required_source_domain,
+            )
+            if required_source_domain is not None
+            else None
+        )
         session_id = str(state.get("session_id") or "").strip()
         if not session_id:
             raise ValueError("任务状态缺少 session id")
         try:
-            response = submit(session_id=session_id, object_codes=normalized_codes)
+            submit_arguments = {
+                "session_id": session_id,
+                "object_codes": normalized_codes,
+            }
+            if normalized_source_codes is not None:
+                submit_arguments["source_object_codes"] = normalized_source_codes
+            response = submit(**submit_arguments)
             if not isinstance(response, dict) or response.get("accepted") is not True:
                 raise ValueError("后台任务响应未确认 accepted=true")
             response_session_id = response.get("sessionId")
@@ -550,6 +585,8 @@ class KnowledgeOrganizer:
                 "accepted": True,
                 "status": "accepted",
             }
+            if normalized_source_codes is not None:
+                record["source_object_codes"] = normalized_source_codes
         except Exception as exc:
             record = {
                 "session_id": session_id,
@@ -559,6 +596,8 @@ class KnowledgeOrganizer:
                 "status": "failed",
                 "error": str(exc),
             }
+            if normalized_source_codes is not None:
+                record["source_object_codes"] = normalized_source_codes
             state[state_key].append(record)
             self._save_state(task_dir, state)
             raise
@@ -785,6 +824,11 @@ def main(argv: list[str] | None = None) -> int:
 
     organize = commands.add_parser("organize", help="提交异步文档对象发现任务")
     organize.add_argument("--task-dir", required=True, type=Path)
+    organize.add_argument(
+        "--source-object-code",
+        action="append",
+        dest="source_object_codes",
+    )
     organize.add_argument("--object-code", action="append", dest="object_codes")
 
     build = commands.add_parser("build", help="提交异步文档对象整理融合任务")
@@ -814,7 +858,11 @@ def main(argv: list[str] | None = None) -> int:
                 ),
             )
         elif args.command == "organize":
-            result = organizer.organize(args.task_dir, args.object_codes)
+            result = organizer.organize(
+                args.task_dir,
+                object_codes=args.object_codes,
+                source_object_codes=args.source_object_codes,
+            )
         else:
             result = organizer.build(args.task_dir, args.object_codes)
         print(json.dumps(result, ensure_ascii=False, indent=2))

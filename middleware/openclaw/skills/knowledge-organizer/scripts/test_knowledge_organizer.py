@@ -24,7 +24,7 @@ class FakeApi:
         self.agent_resource_calls: list[tuple[str, int]] = []
         self.session_resource_calls: list[str] = []
         self.saved_object_instances: list[dict[str, object]] = []
-        self.discovery_calls: list[tuple[str, list[str]]] = []
+        self.discovery_calls: list[tuple[str, list[str], list[str]]] = []
         self.enrichment_calls: list[tuple[str, list[str]]] = []
 
     def list_authorized_resources(
@@ -70,9 +70,13 @@ class FakeApi:
         }
 
     def discover_document_objects(
-        self, *, session_id: str, object_codes: list[str]
+        self,
+        *,
+        session_id: str,
+        source_object_codes: list[str],
+        object_codes: list[str],
     ) -> dict[str, object]:
-        self.discovery_calls.append((session_id, object_codes))
+        self.discovery_calls.append((session_id, source_object_codes, object_codes))
         return {
             "sessionId": session_id,
             "taskType": "documentDiscovery",
@@ -285,7 +289,7 @@ class KnowledgeOrganizerTests(unittest.TestCase):
             {
                 "service_env": "BE_DOMAINNAME",
                 "method": "POST",
-                "path": "/devloop/operation/saveObjectInstanceToKb",
+                "path": "/byaiService/devloop/operation/saveObjectInstanceToKb",
                 "payload": {"objectCode": "raw_doc"},
             },
         )
@@ -399,7 +403,7 @@ class KnowledgeOrganizerTests(unittest.TestCase):
                 storage_file_name="对象资料.md",
             )
 
-    def test_organize_defaults_to_all_ads_objects_without_ingest(self) -> None:
+    def test_organize_defaults_to_all_ods_sources_and_ads_targets(self) -> None:
         self.initialize_session_scope()
 
         result = self.organizer.organize(self.task_dir)
@@ -407,10 +411,11 @@ class KnowledgeOrganizerTests(unittest.TestCase):
         self.assertEqual(result["status"], "accepted")
         self.assertEqual(
             self.api.discovery_calls,
-            [("session-001", ["concept"])],
+            [("session-001", ["raw_doc"], ["concept"])],
         )
         state = self.organizer._load_state(self.task_dir)
         self.assertEqual(len(state["ingestions"]), 0)
+        self.assertEqual(state["discoveries"][0]["source_object_codes"], ["raw_doc"])
         self.assertEqual(state["discoveries"][0]["task_type"], "documentDiscovery")
 
     def test_build_runs_after_init_without_ingest_or_organize(self) -> None:
@@ -436,6 +441,16 @@ class KnowledgeOrganizerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "ADS"):
             self.organizer.build(self.task_dir, ["raw_doc"])
 
+    def test_organize_rejects_ads_source_objects(self) -> None:
+        self.initialize_session_scope()
+
+        with self.assertRaisesRegex(ValueError, "ODS"):
+            self.organizer.organize(
+                self.task_dir,
+                object_codes=["concept"],
+                source_object_codes=["concept"],
+            )
+
     def test_async_datacloud_calls_send_session_header(self) -> None:
         transport = RecordingTransport(
             [
@@ -456,7 +471,8 @@ class KnowledgeOrganizerTests(unittest.TestCase):
         with patch.dict(os.environ, {"USER_CODE": "user-001"}):
             api.discover_document_objects(
                 session_id="session-001",
-                object_codes=["raw_doc"],
+                source_object_codes=["raw_doc"],
+                object_codes=["concept"],
             )
             api.enrich_document_objects(
                 session_id="session-001",
@@ -469,7 +485,12 @@ class KnowledgeOrganizerTests(unittest.TestCase):
                 "service_env": "DATACLOUD_DOMAINNAME",
                 "method": "POST",
                 "path": "/api/v1/rpc/kb/discoverDocumentObjectsAsync",
-                "payload": {"params": {"objectCodes": ["raw_doc"]}},
+                "payload": {
+                    "params": {
+                        "sourceObjectCodes": ["raw_doc"],
+                        "objectCodes": ["concept"],
+                    }
+                },
                 "headers": {
                     "X-Session-Id": "session-001",
                     "X-User-Code": "user-001",
@@ -497,6 +518,7 @@ class KnowledgeOrganizerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "USER_CODE"):
                 api.discover_document_objects(
                     session_id="session-001",
+                    source_object_codes=["raw_doc"],
                     object_codes=["concept"],
                 )
 
@@ -511,7 +533,11 @@ class KnowledgeOrganizerTests(unittest.TestCase):
     def test_async_rejection_is_recorded_as_failure(self) -> None:
         class RejectingApi(FakeApi):
             def discover_document_objects(
-                self, *, session_id: str, object_codes: list[str]
+                self,
+                *,
+                session_id: str,
+                source_object_codes: list[str],
+                object_codes: list[str],
             ) -> dict[str, object]:
                 return {
                     "sessionId": session_id,
@@ -526,7 +552,11 @@ class KnowledgeOrganizerTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "accepted=true"):
-            organizer.organize(self.task_dir, ["concept"])
+            organizer.organize(
+                self.task_dir,
+                object_codes=["concept"],
+                source_object_codes=["raw_doc"],
+            )
 
         state = organizer._load_state(self.task_dir)
         self.assertEqual(state["discoveries"][0]["status"], "failed")
@@ -562,6 +592,14 @@ class KnowledgeOrganizerTests(unittest.TestCase):
         self.assertNotIn("--version", ingest_help.stdout)
         self.assertNotIn("--status-cd", ingest_help.stdout)
         self.assertNotIn("--labels-json", ingest_help.stdout)
+
+        organize_help = subprocess.run(
+            ["python3", str(SCRIPT), "organize", "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertIn("--source-object-code", organize_help.stdout)
 
 
 if __name__ == "__main__":
