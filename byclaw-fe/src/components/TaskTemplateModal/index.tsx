@@ -615,9 +615,16 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
       (selectedTemplate?.templateType === 'collect' && storageMode === 'ontology');
     if (!shouldDefaultOntology || !availableOntologyOptions.length) return;
     const currentValue = form.getFieldValue('ontology');
-    // 本体列表可能在模板详情打开后异步返回；仅在字段尚未初始化时默认选择第一项，不覆盖用户手动清空。
     if (currentValue !== undefined && currentValue !== null) return;
-    form.setFieldValue('ontology', [availableOntologyOptions[0].value]);
+    // 本体列表晚于模板详情返回时，优先按模板 storageMode 回显目标本体，不能直接覆盖为第一项。
+    const configuredTarget =
+      selectedTemplate?.templateType === 'knowledge'
+        ? (form.getFieldValue('storageMode') as TaskTemplateFormValues['ontology'])
+        : undefined;
+    form.setFieldValue(
+      'ontology',
+      resolveInitialOntologyValues(availableOntologyOptions, configuredTarget) || [availableOntologyOptions[0].value]
+    );
   }, [availableOntologyOptions, form, selectedTemplate, storageMode]);
 
   useEffect(() => {
@@ -629,7 +636,12 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
       return;
     }
     if (currentValue !== undefined || !availableOntologyOptions.length) return;
-    form.setFieldValue('sourceOntology', [availableOntologyOptions[0].value]);
+    // 来源本体以模板 sourceMode 为准，例如“会议纪要”；仅未配置或匹配不到时才回退第一项。
+    const configuredSource = form.getFieldValue('sourceMode') as TaskTemplateFormValues['ontology'];
+    form.setFieldValue(
+      'sourceOntology',
+      resolveInitialOntologyValues(availableOntologyOptions, configuredSource) || [availableOntologyOptions[0].value]
+    );
   }, [availableOntologyOptions, form, materialSource, selectedTemplate]);
 
   const applyTemplate = async () => {
