@@ -55,6 +55,7 @@ const ChatResourceWorkspace: React.FC<ChatResourceWorkspaceProps> = ({
     />
   );
   const hasDetailTabs = tabs.length > 0;
+  const hasFilePreview = tabs.some((tab) => tab.key.includes('file:'));
 
   return (
     <SiderContentContext.Provider value={nestedContext}>
@@ -109,7 +110,9 @@ const ChatResourceWorkspace: React.FC<ChatResourceWorkspaceProps> = ({
           key="resource-list"
           className={
             hasDetailTabs
-              ? `${styles.floatingResourcePanel} ${listOpen ? '' : styles.floatingResourcePanelHidden}`
+              ? `${styles.floatingResourcePanel} ${
+                  hasFilePreview ? styles.floatingResourcePanelHalf : ''
+                } ${listOpen ? '' : styles.floatingResourcePanelHidden}`
               : styles.dockedResourcePanel
           }
           aria-hidden={hasDetailTabs && !listOpen}

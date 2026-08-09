@@ -211,6 +211,18 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     [intl]
   );
 
+  /** 文件预览打开后只保留预览页签，自动收起右侧资源列表；预览页签本身不会被关闭。 */
+  const openResourceDetailFromResourceList = useCallback(
+    (panel: React.ReactNode, options: DetailPanelOptions = {}) => {
+      openResourceDetail(panel, options);
+      const tabKey = `${options.tabKey || ''}`;
+      if (tabKey.includes('file:')) {
+        setResourceListOpen(false);
+      }
+    },
+    [openResourceDetail]
+  );
+
   const closeResourceTab = useCallback(
     (key: string) => {
       const next = closeChatResourceTab(resourceTabs, activeResourceTabKey, key);
@@ -246,7 +258,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
         tabs={resourceTabs}
         activeTabKey={activeResourceTabKey}
         onToggleList={toggleResourceList}
-        onOpenDetail={openResourceDetail}
+        onOpenDetail={openResourceDetailFromResourceList}
         onActiveTabChange={setActiveResourceTabKey}
         onCloseTab={closeResourceTab}
       />,
@@ -258,7 +270,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     activeResourceTabKey,
     clearDetailPanel,
     closeResourceTab,
-    openResourceDetail,
+    openResourceDetailFromResourceList,
     resourceListOpen,
     resourceTabs,
     resourceWorkspaceVisible,

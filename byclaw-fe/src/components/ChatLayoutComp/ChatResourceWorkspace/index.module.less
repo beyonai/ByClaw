@@ -115,6 +115,19 @@
   box-shadow: 8px 8px 20px rgba(25, 35, 55, 0.12);
 }
 
+// 文件预览页打开后，资源列表以半高浮窗覆盖在预览区，不再挤压或遮满整个预览页面。
+.floatingResourcePanelHalf {
+  top: 50px;
+  bottom: auto;
+  left: 8px;
+  height: 50%;
+  overflow: hidden;
+  border: 1px solid #e5e8ed;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(25, 35, 55, 0.16);
+}
+
 .floatingResourcePanelHidden {
   display: none;
 }
