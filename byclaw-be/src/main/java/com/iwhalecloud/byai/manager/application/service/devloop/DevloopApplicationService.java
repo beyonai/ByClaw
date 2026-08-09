@@ -3228,22 +3228,25 @@ public class DevloopApplicationService {
                 : "main";
             String headBranch = buildBranchName(detectTaskType(item, s.getSessionName()), sessionId);
 
-            Path workspaceDir;
-            if (workspaceRepo != null && codeRepo != null) {
-                // 新架构：会话一级目录克隆 workspace 仓库，业务 code 仓库位于其 .gitmodules 声明的子模块路径。
-                Path workspaceRoot = resolveSessionWorkspace(s, workspaceRepo.getRepoFullName());
-                workspaceDir = new GitSubmodulePathResolver().resolve(workspaceRoot, codeRepo).orElse(null);
-            }
-            else {
-                // 兼容尚未配置 workspace 仓库的旧项目，业务仓库仍直接位于会话目录一级。
-                workspaceDir = resolveSessionWorkspace(s, repoFullName);
-            }
+            Path workspaceDir = resolveCodeRepoWorkspace(s, workspaceRepo, codeRepo);
             if (workspaceDir != null) {
                 try {
                     LocalGitChangeService.LocalChangeResult local = localGitChangeService.collectChanges(workspaceDir,
                         baseBranch);
                     if (local.getStatus() == LocalGitChangeService.LocalStatus.OK) {
-                        return ResponseUtil.successResponse(localResultToMap(local, repoFullName));
+                        Map<String, Object> changes = localResultToMap(local, repoFullName);
+                        changes.put("repoId", codeRepo != null ? codeRepo.getRepoId() : null);
+                        Object files = changes.get("files");
+                        if (files instanceof List<?> fileChanges) {
+                            for (Object fileChange : fileChanges) {
+                                if (fileChange instanceof Map<?, ?>) {
+                                    @SuppressWarnings("unchecked")
+                                    Map<String, Object> file = (Map<String, Object>) fileChange;
+                                    file.put("repoId", codeRepo != null ? codeRepo.getRepoId() : null);
+                                }
+                            }
+                        }
+                        return ResponseUtil.successResponse(changes);
                     }
                     log.info("[Devloop] 本地工作区变更不可用({}),回退远程 compare, sessionId={}", local.getStatus(), sessionId);
                 }
@@ -3256,7 +3259,19 @@ public class DevloopApplicationService {
             String pat = patService.getGitHubPat(s.getCreatorId() != null ? String.valueOf(s.getCreatorId()) : null);
             GitHubCompareService.CompareResult result = gitHubCompareService.compare(repoFullName, baseBranch,
                 headBranch, pat);
-            return ResponseUtil.successResponse(compareResultToMap(result));
+            Map<String, Object> changes = compareResultToMap(result);
+            changes.put("repoId", codeRepo != null ? codeRepo.getRepoId() : null);
+            Object files = changes.get("files");
+            if (files instanceof List<?> fileChanges) {
+                for (Object fileChange : fileChanges) {
+                    if (fileChange instanceof Map<?, ?>) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> file = (Map<String, Object>) fileChange;
+                        file.put("repoId", codeRepo != null ? codeRepo.getRepoId() : null);
+                    }
+                }
+            }
+            return ResponseUtil.successResponse(changes);
         }
         catch (Exception e) {
             // 兜底:任何未预期异常都吞掉,返回 http_error 空态,前端照常渲染"暂时无法获取代码变更"。
@@ -3277,7 +3292,7 @@ public class DevloopApplicationService {
     /**
      * 查询任务单个文件的本地 diff(unified 文本)，供前端右侧预览抽屉逐行渲染。仅本地工作区口径；工作区不可用或出错时返回 status 非 ok，前端提示，不抛异常。
      */
-    public ResponseUtil<Map<String, Object>> getTaskFileDiff(Long sessionId, String filePath) {
+    public ResponseUtil<Map<String, Object>> getTaskFileDiff(Long sessionId, Long repoId, String filePath) {
         if (sessionId == null || filePath == null || filePath.trim().isEmpty()) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.task.file.diff.parameters.required"));
         }
@@ -3286,14 +3301,27 @@ public class DevloopApplicationService {
             if (s == null) {
                 return ResponseUtil.failRes(I18nUtil.get("devloop.task.session.not.found"));
             }
-            ScanRequireItem item = scanRequireItemMapper.selectOne(
-                new LambdaQueryWrapper<ScanRequireItem>().eq(ScanRequireItem::getSessionId, sessionId).last("limit 1"));
-            ProjectRepo repo = resolveTaskRepo(s.getProjectId(), item);
-            String repoFullName = repo != null ? repo.getRepoFullName() : null;
-            String baseBranch = repo != null && repo.getDefaultBranch() != null && !repo.getDefaultBranch().isEmpty()
-                ? repo.getDefaultBranch()
+            ProjectRepo codeRepo;
+            if (repoId != null) {
+                codeRepo = projectRepoMapper.selectById(repoId);
+            }
+            else {
+                // 兼容旧调用方：未指定仓库时，沿用任务关联需求、扫描源和项目首仓库的既有解析顺序。
+                ScanRequireItem item = scanRequireItemMapper.selectOne(new LambdaQueryWrapper<ScanRequireItem>()
+                    .eq(ScanRequireItem::getSessionId, sessionId).last("limit 1"));
+                codeRepo = resolveTaskRepo(s.getProjectId(), item);
+            }
+            if (codeRepo == null || !s.getProjectId().equals(codeRepo.getProjectId())
+                || "workspace".equalsIgnoreCase(codeRepo.getRepoType())) {
+                return ResponseUtil.failRes(I18nUtil.get("devloop.task.repository.not.found"));
+            }
+            List<ProjectRepo> projectRepos = projectRepoMapper.selectList(new LambdaQueryWrapper<ProjectRepo>()
+                .eq(ProjectRepo::getProjectId, s.getProjectId()).orderByAsc(ProjectRepo::getRepoId));
+            ProjectRepo workspaceRepo = projectRepos.stream()
+                .filter(candidate -> "workspace".equalsIgnoreCase(candidate.getRepoType())).findFirst().orElse(null);
+            String baseBranch = StringUtils.isNotBlank(codeRepo.getDefaultBranch()) ? codeRepo.getDefaultBranch()
                 : "main";
-            Path workspaceDir = resolveSessionWorkspace(s, repoFullName);
+            Path workspaceDir = resolveCodeRepoWorkspace(s, workspaceRepo, codeRepo);
 
             LocalGitChangeService.FileDiffResult result = localGitChangeService.fileDiff(workspaceDir, baseBranch,
                 filePath);
@@ -3312,6 +3340,20 @@ public class DevloopApplicationService {
             map.put("diff", null);
             return ResponseUtil.successResponse(map);
         }
+    }
+
+    /**
+     * 定位会话中的业务代码仓库：workspace 架构从 .gitmodules 解析子模块路径，旧架构回退到会话一级目录。
+     */
+    private Path resolveCodeRepoWorkspace(ByaiSession session, ProjectRepo workspaceRepo, ProjectRepo codeRepo) {
+        if (codeRepo == null) {
+            return null;
+        }
+        if (workspaceRepo != null) {
+            Path workspaceRoot = resolveSessionWorkspace(session, workspaceRepo.getRepoFullName());
+            return new GitSubmodulePathResolver().resolve(workspaceRoot, codeRepo).orElse(null);
+        }
+        return resolveSessionWorkspace(session, codeRepo.getRepoFullName());
     }
 
     /**

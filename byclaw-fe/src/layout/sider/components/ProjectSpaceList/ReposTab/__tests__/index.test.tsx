@@ -90,6 +90,7 @@ describe('ReposTab', () => {
     mockGetTaskChanges.mockResolvedValue({
       status: 'ok',
       source: 'local',
+      repoId: 1,
       repoFullName: 'beyonai/ByClaw',
       headBranch: 'feature/repos-tab',
       files: [
@@ -256,7 +257,7 @@ describe('ReposTab', () => {
     fireEvent.click(changesButton);
     fireEvent.click(within(repoBlock).getByRole('button', { name: /changed\.ts/ }));
 
-    await waitFor(() => expect(mockGetTaskFileDiff).toHaveBeenCalledWith(301, 'src/changed.ts'));
+    await waitFor(() => expect(mockGetTaskFileDiff).toHaveBeenCalledWith(301, 'src/changed.ts', 1));
     expect(await screen.findByText('+new value')).toBeInTheDocument();
   });
 });
