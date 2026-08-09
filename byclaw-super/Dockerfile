@@ -6,12 +6,13 @@ WORKDIR /workspace
 
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG NPM_REPLACE_REGISTRY_HOST=always
+ARG PNPM_VERSION=11.3.0
 ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY} \
     NPM_CONFIG_REPLACE_REGISTRY_HOST=${NPM_REPLACE_REGISTRY_HOST}
 
 RUN npm config set registry "${NPM_REGISTRY}" --global \
     && npm config set replace-registry-host "${NPM_REPLACE_REGISTRY_HOST}" --global \
-    && npm install --global pnpm \
+    && npm install --global "pnpm@${PNPM_VERSION}" \
     && pnpm config set registry "${NPM_REGISTRY}" --location=project \
     && echo "pnpm registry: $(pnpm config get registry)"
 
