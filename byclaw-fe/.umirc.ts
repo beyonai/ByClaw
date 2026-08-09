@@ -17,6 +17,8 @@ const target = `http://${process.env.BE_HOST || process.env.HOST || 'localhost'}
 }`;
 
 const wsTarget = process.env.BYCLAW_PORTAL_URL_WS?.trim() || 'http://localhost:8082';
+// 本地 noVNC 同时包含页面资源和 WebSocket，需直连 OpenSandbox 网关，保持与生产 Nginx 转发方式一致。
+const sandboxTarget = process.env.BYCLAW_SANDBOX_BASE_URL?.trim() || 'http://127.0.0.1:8090';
 
 const isDev = process.env.NODE_ENV === 'development';
 const publicPath = argvOptions.publicPath || '/';
@@ -66,6 +68,12 @@ const umiConfig = getUmiConfig(publicPath);
 export default defineConfig({
   ...myDefineConfig,
   proxy: {
+    // 远程桌面统一使用前端同源地址；开发服务器在此转发到 OpenSandbox，避免直连后端 8086 返回 404。
+    '/v1/sandboxes': {
+      target: sandboxTarget,
+      changeOrigin: true,
+      ws: true,
+    },
     [`${routerBase}byaiService/ws`]: {
       target: wsTarget,
       changeOrigin: true,

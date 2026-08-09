@@ -13,6 +13,7 @@ import {
   GatewayDataEmitter,
   GatewayWorker,
   ResumeCommand,
+  SseReasonMessageType,
   WorkerRegistry,
   WorkerRunner,
   type AgentContext,
@@ -22,9 +23,11 @@ import {
 import { BeyondTokenAuthError } from "../auth/beyond-token.js";
 import type { RunIngressService } from "../ingress/run-ingress-service.js";
 import {
-  closeReasoning,
+  agentReadyTitle,
+  commandAgentName,
   commandGroupChatRef,
   commandLogFields,
+  commandOrchestratorRef,
   commandSessionContext,
   commandSourceAgentId,
   commandString,
@@ -35,6 +38,7 @@ import {
   extractMessage,
   extractUserInput,
   isDelegationReasoningEvent,
+  orchestratorBindingSessionId,
   progressMessage,
   protocolMessage,
   recordString,
@@ -44,13 +48,13 @@ import {
 } from "./by-framework-protocol.js";
 import { truncateForLog } from "../log-format.js";
 
-type RedisClient = ReturnType<typeof createRedis>;
-type WorkerRunService = Pick<
+export type RedisClient = ReturnType<typeof createRedis>;
+export type WorkerRunService = Pick<
   RunService,
   "streamEvents" | "cancelRun" | "respondToInteraction"
 >;
-type WorkerProtocolEmitter = Pick<GatewayDataEmitter, "emitEvent">;
-type WorkerRunIngress = Pick<
+type WorkerProtocolEmitter = Pick<GatewayDataEmitter, "emitChunk" | "emitEvent">;
+export type WorkerRunIngress = Pick<
   RunIngressService,
   "createSessionRun" | "createRun" | "resolvePrincipal" | "authorizeRun"
 >;
@@ -79,6 +83,7 @@ export interface ByClawSuperWorkerOptions {
  */
 export class ByClawSuperGatewayWorker extends GatewayWorker {
   readonly #agentType: string;
+  readonly #registry: WorkerRegistry;
   readonly #runService: WorkerRunService;
   readonly #runIngress: WorkerRunIngress;
   readonly #protocolEmitter: WorkerProtocolEmitter;
@@ -92,6 +97,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     const registry = options.registry ?? new WorkerRegistry(options.redis);
     super(options.workerId, registry, options.redis);
     this.#agentType = options.agentType;
+    this.#registry = registry;
     this.#runService = options.runService;
     this.#runIngress = options.runIngress;
     this.#protocolEmitter =
@@ -165,7 +171,9 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     const systemCode = commandString(command, "System-Code");
     const thinkingLevel = commandThinkingLevel(command);
     const groupChatRef = commandGroupChatRef(command);
+    const orchestrator = commandOrchestratorRef(command);
     const sessionContext = commandSessionContext(command);
+    const agentName = commandAgentName(command) || "超级助手";
 
     await context.checkCancelled();
     this.#logger?.info(commandLogFields(command), "开始处理 by-framework 入站任务");
@@ -174,15 +182,22 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       ...(systemCode ? { systemCode } : {}),
     };
     const principal = await this.#runIngress.resolvePrincipal(auth);
-    const bindingKey = externalSessionBindingKey(principal, command.header.sessionId);
+    const bindingExternalSessionId = orchestratorBindingSessionId(
+      command.header.sessionId,
+      orchestrator,
+    );
+    const bindingKey = externalSessionBindingKey(
+      principal,
+      bindingExternalSessionId,
+    );
     const sessionId = this.#sessionBindings
       ? await this.#sessionBindings.get({
           source: "by-framework",
           userCode: principal.userCode,
-          externalSessionId: command.header.sessionId,
+          externalSessionId: bindingExternalSessionId,
         })
       : this.#externalSessionBindings.get(bindingKey);
-    const sourceAgentId = commandSourceAgentId(command);
+    const sourceAgentId = commandSourceAgentId(command) || orchestrator?.id || "";
     const run = sessionId
       ? await this.#runIngress.createRun({
           sessionId,
@@ -190,7 +205,12 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
           thinkingLevel,
           ...(attachments.length > 0 ? { attachments } : {}),
           ...(sourceAgentId ? { sourceAgentId } : {}),
+          ...(command.header.sessionId
+            ? { externalSessionId: command.header.sessionId }
+            : {}),
+          parentMessageId: command.header.messageId,
           ...(groupChatRef ? { groupChatRef } : {}),
+          ...(orchestrator ? { orchestrator } : {}),
           ...auth,
         })
       : await this.#runIngress.createSessionRun({
@@ -199,14 +219,19 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
           ...(sessionContext ? { context: sessionContext } : {}),
           ...(attachments.length > 0 ? { attachments } : {}),
           ...(sourceAgentId ? { sourceAgentId } : {}),
+          ...(command.header.sessionId
+            ? { externalSessionId: command.header.sessionId }
+            : {}),
+          parentMessageId: command.header.messageId,
           ...(groupChatRef ? { groupChatRef } : {}),
+          ...(orchestrator ? { orchestrator } : {}),
           ...auth,
         });
     if (this.#sessionBindings) {
       await this.#sessionBindings.bind({
         source: "by-framework",
         userCode: principal.userCode,
-        externalSessionId: command.header.sessionId,
+        externalSessionId: bindingExternalSessionId,
         sessionId: run.sessionId,
         now: Date.now(),
       });
@@ -214,6 +239,14 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       this.#externalSessionBindings.set(bindingKey, run.sessionId);
     }
     this.#activeRuns.set(command.header.messageId, run.id);
+    if (context.executionId) {
+      this.#activeRuns.set(context.executionId, run.id);
+    }
+    const stopCancellationMonitor = this.#monitorPersistedCancellation(
+      command,
+      context,
+      run.id,
+    );
     this.#logger?.info(
       { ...commandLogFields(command), runId: run.id },
       "by-framework 入站任务已创建 Run",
@@ -224,9 +257,19 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         await this.#runService.cancelRun(run.id, "by-framework task cancelled");
         await context.checkCancelled();
       }
-      return await this.#forwardRunEvents(run, principal, context);
+      return await this.#forwardRunEvents(
+        run,
+        principal,
+        context,
+        agentName,
+        sessionContext?.locale,
+      );
     } finally {
+      stopCancellationMonitor();
       this.#activeRuns.delete(command.header.messageId);
+      if (context.executionId) {
+        this.#activeRuns.delete(context.executionId);
+      }
     }
   }
 
@@ -235,7 +278,9 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     if (!(command instanceof CancelTaskCommand)) {
       return;
     }
-    const runId = this.#activeRuns.get(command.targetMessageId);
+    const runId =
+      this.#activeRuns.get(command.targetMessageId) ||
+      this.#activeRuns.get(command.targetExecutionId);
     if (!runId) {
       this.#logger?.warn(
         { targetMessageId: command.targetMessageId },
@@ -250,15 +295,120 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     await this.#runService.cancelRun(runId, command.reason || "by-framework task cancelled");
   }
 
+  /**
+   * 兜底 claim 与 cancel 并发窗口：取消方可能在 Worker 写入 worker_id 前只把
+   * execution 标记为 cancel_requested，因而没有控制消息能触发 onCancelTask。
+   * 运行期间轮询同一 execution 真相，确保这种取消也能进入内部 RunService。
+   */
+  #monitorPersistedCancellation(
+    command: GatewayCommand,
+    context: AgentContext,
+    runId: string,
+  ): () => void {
+    let stopped = false;
+    let checking = false;
+    let cancellationForwarded = false;
+    let warned = false;
+    const check = async () => {
+      if (stopped || checking || cancellationForwarded) {
+        return;
+      }
+      checking = true;
+      try {
+        const execution = await this.#registry.getExecutionByMessageId(
+          command.header.messageId,
+          command.header.sessionId,
+        );
+        warned = false;
+        if (stopped) {
+          return;
+        }
+        const status = String(execution?.status ?? "").toUpperCase();
+        const persistedCancelRequested = String(
+          execution?.cancel_requested ?? "",
+        ).toLowerCase();
+        const cancelRequested =
+          context.isCancelRequested() ||
+          execution?.cancel_requested === true ||
+          persistedCancelRequested === "true" ||
+          persistedCancelRequested === "1" ||
+          status === "CANCELLING" ||
+          status === "CANCELLED";
+        if (!cancelRequested) {
+          return;
+        }
+        const reason =
+          typeof execution?.cancel_reason === "string" &&
+          execution.cancel_reason.trim()
+            ? execution.cancel_reason
+            : "by-framework task cancelled";
+        this.#logger?.info(
+          {
+            runId,
+            messageId: command.header.messageId,
+            executionId: context.executionId,
+            status,
+          },
+          "检测到 by-framework 持久取消状态",
+        );
+        await this.#runService.cancelRun(runId, reason);
+        cancellationForwarded = true;
+      } catch (error) {
+        if (!stopped && !warned) {
+          warned = true;
+          this.#logger?.warn(
+            {
+              runId,
+              messageId: command.header.messageId,
+              error: toError(error).message,
+            },
+            "同步 by-framework 持久取消状态失败",
+          );
+        }
+      } finally {
+        checking = false;
+      }
+    };
+    const timer = setInterval(() => {
+      void check();
+    }, 100);
+    timer.unref?.();
+    void check();
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }
+
   /** 订阅内部事件流，并只输出简化进度与 Leader 最终回答；终态时记录一条业务返回日志。 */
   async #forwardRunEvents(
     run: { id: string; sessionId: string; createdAt: number },
     principal: CallerPrincipal,
     context: AgentContext,
+    agentName: string,
+    locale?: string,
   ): Promise<AgentTaskResult> {
     let reasoningStarted = false;
     let reasoningEnded = false;
     let answer = "";
+    const reasoningMessageId = `${run.id}:reasoning`;
+
+    // 按 byai-channel 协议：未开启或已收尾时先补一条思考开始帧，再写增量。
+    const ensureReasoningOpen = async () => {
+      if (!reasoningStarted || reasoningEnded) {
+        await this.#emitReasoning(
+          run.id,
+          context,
+          reasoningMessageId,
+          "",
+          EventType.REASONING_LOG_START,
+        );
+        reasoningStarted = true;
+        reasoningEnded = false;
+      }
+    };
+
+    await this.#emitReadyTitle(run.id, context, agentName, locale);
 
     for await (const event of this.#runService.streamEvents(run.id)) {
       if (context.isCancelRequested()) {
@@ -266,30 +416,47 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         await context.checkCancelled();
       }
 
-      if (
-        isDelegationReasoningEvent(event) &&
-        (!reasoningStarted || reasoningEnded)
-      ) {
-        await context.emitState("", EventType.REASONING_LOG_START);
-        reasoningStarted = true;
-        reasoningEnded = false;
+      if (isDelegationReasoningEvent(event)) {
+        await ensureReasoningOpen();
       }
       await this.#forwardDelegationEvent(event, context);
       await this.#forwardInteractionEvent(event, context);
 
       const progress = progressMessage(event);
       if (progress) {
-        if (!reasoningStarted || reasoningEnded) {
-          await context.emitState("", EventType.REASONING_LOG_START);
-          reasoningStarted = true;
-          reasoningEnded = false;
+        await ensureReasoningOpen();
+        await this.#emitReasoning(
+          run.id,
+          context,
+          reasoningMessageId,
+          progress,
+          EventType.REASONING_LOG_DELTA,
+        );
+      }
+
+      if (event.type === "leader.reasoning.delta") {
+        await ensureReasoningOpen();
+        const delta = stringData(event.data.text);
+        if (delta) {
+          await this.#emitReasoning(
+            run.id,
+            context,
+            reasoningMessageId,
+            delta,
+            EventType.REASONING_LOG_DELTA,
+          );
         }
-        await context.emitState(progress, EventType.REASONING_LOG_DELTA);
       }
 
       if (event.type === "leader.delta") {
         if (reasoningStarted && !reasoningEnded) {
-          await context.emitState("", EventType.REASONING_LOG_END);
+          await this.#emitReasoning(
+            run.id,
+            context,
+            reasoningMessageId,
+            "",
+            EventType.REASONING_LOG_END,
+          );
           reasoningEnded = true;
         }
         const delta = stringData(event.data.text);
@@ -305,7 +472,15 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
           answer = finalAnswer;
           await context.emitChunk(finalAnswer, EventType.ANSWER_DELTA);
         }
-        await closeReasoning(context, reasoningStarted, reasoningEnded);
+        if (reasoningStarted && !reasoningEnded) {
+          await this.#emitReasoning(
+            run.id,
+            context,
+            reasoningMessageId,
+            "",
+            EventType.REASONING_LOG_END,
+          );
+        }
         this.#logRunFinished(principal, run, "completed", run.createdAt, finalAnswer);
         return new AgentTaskResult({
           status: AgentState.COMPLETED,
@@ -315,7 +490,15 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       }
 
       if (event.type === "run.cancelled") {
-        await closeReasoning(context, reasoningStarted, reasoningEnded);
+        if (reasoningStarted && !reasoningEnded) {
+          await this.#emitReasoning(
+            run.id,
+            context,
+            reasoningMessageId,
+            "",
+            EventType.REASONING_LOG_END,
+          );
+        }
         await context.checkCancelled();
         const reason = stringData(event.data.reason) || "run cancelled";
         this.#logRunFinished(principal, run, "cancelled", run.createdAt, reason);
@@ -327,14 +510,76 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       }
 
       if (event.type === "run.failed") {
-        await closeReasoning(context, reasoningStarted, reasoningEnded);
+        if (reasoningStarted && !reasoningEnded) {
+          await this.#emitReasoning(
+            run.id,
+            context,
+            reasoningMessageId,
+            "",
+            EventType.REASONING_LOG_END,
+          );
+        }
         const error = stringData(event.data.error) || "Run failed";
         this.#logRunFinished(principal, run, "failed", run.createdAt, error);
+        const userMessage = stringData(event.data.userMessage);
+        if (userMessage) {
+          await context.emitChunk(userMessage, EventType.ANSWER_DELTA);
+          return new AgentTaskResult({
+            status: AgentState.COMPLETED,
+            content: userMessage,
+            replyData: { runId: run.id },
+          });
+        }
         throw new Error(error);
       }
     }
 
     throw new Error(`Run event stream ended without a terminal event: ${run.id}`);
+  }
+
+  /** 在 Run 开始时输出与 byai-channel 相同的“智能体已就绪”思考标题。 */
+  async #emitReadyTitle(
+    runId: string,
+    context: AgentContext,
+    agentName: string,
+    locale?: string,
+  ): Promise<void> {
+    await this.#protocolEmitter.emitChunk(
+      context.sessionId,
+      context.traceId,
+      agentReadyTitle(agentName, locale),
+      {
+        eventType: EventType.REASONING_LOG_DELTA,
+        contentType: SseReasonMessageType.think_title,
+        sourceAgentType: this.#agentType,
+        messageId: `${runId}:ready`,
+        parentMessageId: "-1",
+        metadata: { parent_run_id: runId },
+      },
+    );
+  }
+
+  /** 按 byai-channel 的协议把普通文本放入前端思考区，而不是作为 3003 标题原样展示。 */
+  async #emitReasoning(
+    runId: string,
+    context: AgentContext,
+    messageId: string,
+    content: string,
+    eventType: EventType,
+  ): Promise<void> {
+    await this.#protocolEmitter.emitChunk(
+      context.sessionId,
+      context.traceId,
+      content,
+      {
+        eventType,
+        contentType: SseReasonMessageType.think_text,
+        sourceAgentType: this.#agentType,
+        messageId,
+        parentMessageId: "-1",
+        metadata: { parent_run_id: runId },
+      },
+    );
   }
 
   /** 记录 Run 终态，便于在日志中追踪“谁、返回什么、会话维度”。不记录 Token 与凭证。 */
@@ -375,6 +620,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
   ): Promise<void> {
     if (event.type === "delegation.started") {
       await this.#emitDelegationStatus(event, context, "_START_");
+      await this.#emitDelegationDetail(event, context, "start");
       return;
     }
     if (event.type === "delegation.output.delta") {
@@ -386,10 +632,12 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     }
     if (event.type === "delegation.completed") {
       await this.#emitDelegationStatus(event, context, "_DONE_");
+      await this.#emitDelegationDetail(event, context, "result");
       return;
     }
     if (event.type === "delegation.failed") {
       await this.#emitDelegationStatus(event, context, "_ERROR_");
+      await this.#emitDelegationDetail(event, context, "result");
     }
   }
 
@@ -455,7 +703,13 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     }
     const agentId = stringData(event.data.agentId);
     const agentName = stringData(event.data.agentName);
-    const content = `正在调用 Agent：${agentName || agentId || "Agent"}`;
+    const displayName = agentName || agentId || "数字员工";
+    const content =
+      status === "_START_"
+        ? `正在让数字员工处理：${displayName}`
+        : status === "_DONE_"
+          ? `数字员工处理完成：${displayName}`
+          : `数字员工处理失败：${displayName}`;
     await this.#protocolEmitter.emitEvent({
       sessionId: context.sessionId,
       traceId: context.traceId,
@@ -469,14 +723,82 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         contentType: "3009",
         orderId: delegationId,
         parentOrderId: "-1",
-        agentId,
-        agentName,
         objectType: "tool_call",
         status,
       }),
       metadata: {
         parent_run_id: event.runId,
         delegation_id: delegationId,
+        ...(agentId ? { delegated_agent_id: agentId } : {}),
+        ...(agentName ? { delegated_agent_name: agentName } : {}),
+      },
+    });
+  }
+
+  /** 输出挂在 3009 调用节点下的 Input/Output JSON 详情。 */
+  async #emitDelegationDetail(
+    event: RunEvent,
+    context: AgentContext,
+    phase: "start" | "result",
+  ): Promise<void> {
+    const delegationId = stringData(event.data.delegationId);
+    if (!delegationId) {
+      return;
+    }
+    const agentId = stringData(event.data.agentId);
+    const agentName = stringData(event.data.agentName);
+    const error = stringData(event.data.error);
+    const detail =
+      phase === "start"
+        ? {
+            agentId,
+            agentName,
+            task: stringData(event.data.task),
+            ...(stringData(event.data.expectedOutput)
+              ? { expectedOutput: stringData(event.data.expectedOutput) }
+              : {}),
+            ...(Array.isArray(event.data.attachments)
+              ? { attachments: event.data.attachments }
+              : {}),
+          }
+        : {
+            agentId,
+            agentName,
+            status:
+              stringData(event.data.resultStatus) ||
+              stringData(event.data.status) ||
+              (event.type === "delegation.completed" ? "completed" : "failed"),
+            artifactCount:
+              typeof event.data.artifactCount === "number"
+                ? event.data.artifactCount
+                : 0,
+            ...(error ? { error, errorDetail: error } : {}),
+          };
+    const content = JSON.stringify({
+      title: phase === "start" ? "Input" : "Output",
+      json: JSON.stringify(detail, null, 2),
+    });
+    const messageId = `${delegationId}-${phase}`;
+    await this.#protocolEmitter.emitEvent({
+      sessionId: context.sessionId,
+      traceId: context.traceId,
+      eventType: EventType.REASONING_LOG_DELTA,
+      sourceAgentType: this.#agentType,
+      messageId,
+      parentMessageId: delegationId,
+      data: protocolMessage({
+        event: EventType.REASONING_LOG_DELTA,
+        content,
+        contentType: SseReasonMessageType.json_block,
+        orderId: messageId,
+        parentOrderId: delegationId,
+      }),
+      metadata: {
+        parent_run_id: event.runId,
+        delegation_id: delegationId,
+        detail_phase: phase,
+        ...(agentId ? { delegated_agent_id: agentId } : {}),
+        ...(agentName ? { delegated_agent_name: agentName } : {}),
       },
     });
   }
@@ -506,151 +828,13 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         contentType: "1002",
         orderId: `${delegationId}:output`,
         parentOrderId: delegationId,
-        agentId,
-        agentName,
       }),
       metadata: {
         parent_run_id: event.runId,
         delegation_id: delegationId,
+        ...(agentId ? { delegated_agent_id: agentId } : {}),
+        ...(agentName ? { delegated_agent_name: agentName } : {}),
       },
     });
-  }
-}
-
-export interface ByFrameworkWorkerRuntimeOptions {
-  redis: RedisClient;
-  runService: WorkerRunService;
-  runIngress: WorkerRunIngress;
-  sessionBindings?: IngressSessionBindingRepository;
-  agentType: string;
-  workerId?: string;
-  maxConcurrency: number;
-  startupTimeoutMs?: number;
-  logger?: WorkerLogger;
-}
-
-/** 管理 WorkerRunner 的后台循环、在线确认和优雅停止。 */
-export class ByFrameworkWorkerRuntime {
-  readonly workerId: string;
-  readonly agentType: string;
-  readonly #registry: WorkerRegistry;
-  readonly #runner: WorkerRunner;
-  readonly #startupTimeoutMs: number;
-  readonly #logger: WorkerLogger | undefined;
-  #runPromise: Promise<void> | undefined;
-  #runFailure: Error | undefined;
-  #runnerStopped = false;
-  #closing = false;
-
-  /** 创建 Worker 和 Runner，但在 start 调用前不抢占 Worker ID 或消费消息。 */
-  constructor(options: ByFrameworkWorkerRuntimeOptions) {
-    this.workerId = options.workerId ?? defaultWorkerId();
-    this.agentType = options.agentType;
-    this.#registry = new WorkerRegistry(options.redis);
-    const worker = new ByClawSuperGatewayWorker({
-      workerId: this.workerId,
-      agentType: this.agentType,
-      redis: options.redis,
-      registry: this.#registry,
-      runService: options.runService,
-      runIngress: options.runIngress,
-      ...(options.sessionBindings ? { sessionBindings: options.sessionBindings } : {}),
-      ...(options.logger ? { logger: options.logger } : {}),
-    });
-    this.#runner = new WorkerRunner(worker, {
-      redisClient: options.redis,
-      maxConcurrency: options.maxConcurrency,
-    });
-    this.#startupTimeoutMs = options.startupTimeoutMs ?? 10_000;
-    this.#logger = options.logger;
-  }
-
-  /** 在后台启动消费循环，并等待注册中心确认 Worker 已在线。 */
-  async start(): Promise<void> {
-    if (this.#runPromise) {
-      return;
-    }
-    this.#logger?.info(
-      { workerId: this.workerId, agentType: this.agentType },
-      "正在注册 by-framework Worker",
-    );
-    const runPromise = this.#runner.start({ handleSignals: false });
-    this.#runPromise = runPromise;
-    void runPromise.then(
-      () => {
-        this.#runnerStopped = true;
-      },
-      (error: unknown) => {
-        this.#runFailure = toError(error);
-        this.#logger?.error(
-          { workerId: this.workerId, error: this.#runFailure.message },
-          "by-framework Worker 运行失败",
-        );
-      },
-    );
-
-    try {
-      await this.#waitUntilOnline();
-      this.#logger?.info(
-        { workerId: this.workerId, agentType: this.agentType },
-        "by-framework Worker 已注册并在线",
-      );
-    } catch (error) {
-      await this.close();
-      throw error;
-    }
-  }
-
-  /** 查询当前 Worker 是否仍持有在线租约，供 /byclawSuper/ready 聚合。 */
-  async health(): Promise<{ healthy: boolean; message?: string }> {
-    if (this.#runFailure) {
-      return { healthy: false, message: this.#runFailure.message };
-    }
-    if (!this.#runPromise || this.#runnerStopped) {
-      return { healthy: false, message: "by-framework Worker is not running" };
-    }
-    try {
-      const online = await this.#registry.isWorkerOnline(this.workerId);
-      return {
-        healthy: online,
-        ...(online ? {} : { message: "by-framework Worker lease is offline" }),
-      };
-    } catch (error) {
-      return { healthy: false, message: toError(error).message };
-    }
-  }
-
-  /** 幂等停止消费循环，并等待 WorkerRunner 释放心跳和 Worker ID 锁。 */
-  async close(): Promise<void> {
-    if (this.#closing) {
-      return;
-    }
-    this.#closing = true;
-    this.#runner.stop();
-    await this.#runPromise?.catch(() => undefined);
-    this.#logger?.info(
-      { workerId: this.workerId, agentType: this.agentType },
-      "by-framework Worker 已停止",
-    );
-  }
-
-  /** 在限定时间内轮询 Worker 租约，同时提前暴露 Runner 启动异常。 */
-  async #waitUntilOnline(): Promise<void> {
-    const deadline = Date.now() + this.#startupTimeoutMs;
-    while (Date.now() < deadline) {
-      if (this.#runFailure) {
-        throw this.#runFailure;
-      }
-      if (this.#runnerStopped) {
-        throw new Error("by-framework Worker stopped during startup");
-      }
-      if (await this.#registry.isWorkerOnline(this.workerId)) {
-        return;
-      }
-      await delay(50);
-    }
-    throw new Error(
-      `Timed out waiting for by-framework Worker to become online: ${this.workerId}`,
-    );
   }
 }

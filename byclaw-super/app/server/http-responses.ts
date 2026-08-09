@@ -4,7 +4,7 @@ import {
   type Delegation,
   type Run,
 } from "@byclaw/by-conductor";
-import { HTTP_API_PREFIX } from "./http-paths.js";
+import { HTTP_API_PREFIX } from "./http-types.js";
 
 /** 创建 Run 后返回的轻量响应。 */
 export function runResponse(run: Run) {

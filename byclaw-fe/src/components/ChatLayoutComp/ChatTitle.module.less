@@ -52,6 +52,10 @@ nav.chatTitle {
       height: 32px;
       padding: 0;
       border: 0;
+      border-radius: 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       color: #526075;
       box-shadow: none;
 
@@ -61,6 +65,23 @@ nav.chatTitle {
         color: #246bfe;
         background: #f0f5ff;
       }
+    }
+
+    // 资源浮窗打开后才显示浅灰底色，关闭状态保持设计稿中的透明按钮。
+    .projectActionButtonActive {
+      color: #14161a;
+      background: #f1f2f4;
+
+      &:hover,
+      &:focus-visible {
+        color: #14161a;
+        background: #e9ebee;
+      }
+    }
+
+    .resourcePanelToggleIcon {
+      width: 20px;
+      height: 20px;
     }
 
     .btn {

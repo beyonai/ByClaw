@@ -20,10 +20,13 @@ import {
   resolveWebhookContext,
   withActiveSdkRequestEmitMetadata,
 } from "./session-context.js";
-import { consumePendingMessageToolSend } from "./pending-message-tool.js";
+import {
+  deliveredAnswerTextCovers,
+  recordPushedAnswerText,
+} from "./answer-text-ledger.js";
 import { parseSessionIdFromTo } from "./outbound-dedup.js";
 import { EventType } from "@byclaw/by-framework";
-import { emitOutOfBandSdkEvent } from "./utils.js";
+import { emitOutOfBandSdkEvent, generateRandomId } from "./utils.js";
 
 const CHANNEL_ID = "byai-channel" as const;
 
@@ -275,6 +278,15 @@ export const byaiChannelPlugin: ChannelPlugin<ResolvedByaiAccount, ByaiProbe> = 
         messageId: replyToId ?? `byai-${Date.now()}`,
         ok: true,
       };
+      // 抑制时不能伪造 messageId：core 会据此写 transcript 投递镜像并记为已送达。用
+      // 与 extensions/slack/src/send.ts 一致的 "suppressed" 哨兵——它保留 identity（避免
+      // core 把本次 deliver 判成 adapter_returned_no_identity 的模糊态），同时被平台 id
+      // 统计跳过（src/infra/outbound/deliver-results.ts），不会冒充真实平台消息。
+      const suppressedResult = {
+        channel: CHANNEL_ID,
+        messageId: "suppressed",
+        ok: true,
+      };
       if (await emitWebhookText({ to, text, replyToId })) {
         return okResult;
       }
@@ -288,23 +300,32 @@ export const byaiChannelPlugin: ChannelPlugin<ResolvedByaiAccount, ByaiProbe> = 
         await emitOutOfBandSdkText({ to, text });
         return okResult;
       }
-      // in-band：sendText 到来的可能是 ① message 工具 action=send（无 assistant 流，
-      // 必须由 sendText 投递），或 ② agent 回复/汇总的回声（已由 onAgentEvent assistant
-      // 流发过，应抑制）。用 message tool 事件登记的待投递标记区分，不猜内容：
-      //   命中 → message 工具的全新内容 → emit
-      //   未命中 → agent 回复回声 → 抑制
-      if (!consumePendingMessageToolSend(request.sessionKey, text)) {
-        return okResult;
+      // in-band：sendText 送来的既可能是已由 assistant 流推过的文本回声（重复，须抑制），
+      // 也可能是没有对应流式输出的全新可见内容——message 工具 action=send，以及 parent 只回
+      // NO_REPLY 时 core 直投的 subagent 原文。判据是账本而非来源：已推给过前端的才算重复，
+      // 其余一律投递，宁可多发也不丢内容。
+      if (deliveredAnswerTextCovers(request.sessionKey, text)) {
+        return suppressedResult;
       }
       const sdkEmitter = resolveSdkEmitter(resolvedAccountId);
-      if (sdkEmitter) {
-        await emitSdkChunkTracked(request.sessionKey, {
-          emitter: sdkEmitter,
-          sessionId: request.sessionId,
-          traceId: request.traceId,
-          text,
-          options: { eventType: EventType.ANSWER_DELTA },
-        });
+      if (!sdkEmitter) {
+        return suppressedResult;
+      }
+      const emitted = await emitSdkChunkTracked(request.sessionKey, {
+        emitter: sdkEmitter,
+        sessionId: request.sessionId,
+        traceId: request.traceId,
+        text,
+        options: {
+          eventType: EventType.ANSWER_DELTA,
+          parentMessageId: "-1",
+          messageId: generateRandomId(),
+        },
+      });
+      if (emitted) {
+        // 自成一组记账：本条没有对应的流式输出，只有记下来，core 因重试或另一路 deliver 再送
+        // 同一份文本时才会被判成重复。
+        recordPushedAnswerText(request.sessionKey, text);
       }
       return okResult;
     },

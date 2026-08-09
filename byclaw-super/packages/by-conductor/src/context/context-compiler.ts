@@ -4,6 +4,7 @@ import { AuthorizedAgentsProcessor } from "./processors/authorized-agents.js";
 import { ContextCleanupProcessor } from "./processors/cleanup.js";
 import { GroupChatContextProcessor } from "./processors/group-chat-context.js";
 import { SessionContextProcessor } from "./processors/session-context.js";
+import { SessionWorkspaceProcessor } from "./processors/session-workspace.js";
 import { SupervisorPolicyProcessor } from "./processors/supervisor-policy.js";
 import { UserContextProcessor } from "./processors/user-context.js";
 import type {
@@ -12,6 +13,7 @@ import type {
   ContextBuildState,
   ContextProcessor,
   ContextProcessorDiagnostic,
+  SystemContextCompiler,
 } from "./types.js";
 
 /** 为诊断保留具体失败阶段，同时不吞掉原始异常。 */
@@ -31,11 +33,12 @@ export class ContextProcessorError extends Error {
  * 初版只编译 Supervisor 基础规则和 Run 级授权 Agent；后续 Session、Skill、
  * 附件和 Step 状态都应通过新增 processor 扩展，而不是回到 Runtime 中拼字符串。
  */
-export class ContextCompiler {
+export class ContextCompiler implements SystemContextCompiler {
   constructor(
     private readonly processors: readonly ContextProcessor[] = [
       new SupervisorPolicyProcessor(),
       new SessionContextProcessor(),
+      new SessionWorkspaceProcessor(),
       new UserContextProcessor(),
       new GroupChatContextProcessor(),
       new AuthorizedAgentsProcessor(),

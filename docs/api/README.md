@@ -91,6 +91,8 @@ ws.onmessage = (event) => {
 
 - [认证授权](./authentication.md) - JWT 认证流程详解
 - [WebSocket 通信](./websocket.md) - 实时对话接口
+- [项目会话高级搜索](./project-session-search.md) - 按数字员工或聊天内容查找项目会话
+- [门户调用 byclaw-qa 接口总览](./portal-byclaw-qa-integration.md) - 知识库资源的门户调用链、接口映射、权限与调试说明
 
 ## OpenAPI/Swagger
 

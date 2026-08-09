@@ -1,7 +1,6 @@
 import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance, type FastifyLoggerOptions } from "fastify";
-import { HTTP_API_PREFIX } from "./http-paths.js";
-import type { BuildHttpAppOptions } from "./http-types.js";
+import { HTTP_API_PREFIX, type BuildHttpAppOptions } from "./http-types.js";
 import { registerCapabilityRoutes } from "./routes/capability-routes.js";
 import { registerHealthRoutes } from "./routes/health-routes.js";
 import { registerRunRoutes } from "./routes/run-routes.js";
@@ -19,6 +18,9 @@ export async function buildHttpApp(
   const app = Fastify({
     // 生产保持默认 JSON；dev 环境（NODE_ENV !== production）经 pino-pretty 输出单行可读日志。
     logger: buildLogger(options.logger),
+    // 关闭默认的访问日志（每个请求都会打印 "incoming request" / "request completed"），
+    // 消除无意义的逐请求噪声；错误日志走独立的 defaultErrorHandler，不受影响。
+    disableRequestLogging: true,
     // 禁止 Ajv 静默删除额外字段，避免调用方继续误传旧字段。
     ajv: { customOptions: { removeAdditional: false } },
   });

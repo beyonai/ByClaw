@@ -29,6 +29,11 @@ describe("应用配置", () => {
       APP_CONFIG_DEFAULTS.database.maxConnections,
     );
     expect(config.runLeaseMs).toBe(APP_CONFIG_DEFAULTS.run.leaseMs);
+    expect(config.delegationTimeoutMs).toBe(900_000);
+    expect(config.openClaw).toEqual({
+      firstEventTimeoutMs: 300_000,
+      cancelConfirmationTimeoutMs: 30_000,
+    });
     expect(config.piProvider).toBe(APP_CONFIG_DEFAULTS.pi.provider);
     expect(config.piModel).toBe(APP_CONFIG_DEFAULTS.pi.model);
     expect(config.serviceDiscovery).toMatchObject({
@@ -71,23 +76,31 @@ describe("应用配置", () => {
       DB_HOST: "postgres.internal",
       DB_PORT: "6432",
       RUN_LEASE_MS: "45000",
-      PI_PROVIDER: "openai",
-      PI_MODEL: "gpt-test",
-      OPENAI_BASE_URL: "https://model.example.test/v1",
+      PI_PROVIDER: "volcengine-ark",
+      PI_MODEL: "deepseek-test",
       ARK_BASE_URL: "https://ark.example.test/api/v3",
+      ARK_API_KEY: "test-only",
       BYCLAW_SUPER_DISCOVERY_HOST: "byclaw-super.internal",
       BYCLAW_SUPER_DISCOVERY_PORT: "3443",
       BYCLAW_SUPER_DISCOVERY_PROTOCOL: "https",
       BYCLAW_SUPER_DISCOVERY_WEIGHT: "3",
+      DELEGATION_TIMEOUT_MS: "800000",
+      OPENCLAW_FIRST_EVENT_TIMEOUT_MS: "240000",
+      OPENCLAW_CANCEL_CONFIRM_TIMEOUT_MS: "15000",
     });
 
     expect(config.database.host).toBe("postgres.internal");
     expect(config.database.port).toBe(6_432);
     expect(config.runLeaseMs).toBe(45_000);
-    expect(config.piProvider).toBe("openai");
-    expect(config.piModel).toBe("gpt-test");
-    expect(config.openAiBaseUrl).toBe("https://model.example.test/v1");
+    expect(config.delegationTimeoutMs).toBe(800_000);
+    expect(config.openClaw).toEqual({
+      firstEventTimeoutMs: 240_000,
+      cancelConfirmationTimeoutMs: 15_000,
+    });
+    expect(config.piProvider).toBe("volcengine-ark");
+    expect(config.piModel).toBe("deepseek-test");
     expect(config.arkBaseUrl).toBe("https://ark.example.test/api/v3");
+    expect(config.arkApiKey).toBe("test-only");
     expect(config.serviceDiscovery).toMatchObject({
       host: "byclaw-super.internal",
       port: 3_443,
@@ -134,19 +147,15 @@ describe("应用配置", () => {
     ]);
   });
 
-  it("解析三方员工直连灰度和安全配置", () => {
+  it("解析三方员工直连安全配置", () => {
     const config = loadConfig({
       ...required,
-      THIRD_PARTY_AGENT_DIRECT_MODE: "allowlist",
-      THIRD_PARTY_AGENT_ALLOWLIST: "1001, 1002,1001",
       THIRD_PARTY_AGENT_ALLOWED_HOSTS:
         "Vendor.EXAMPLE.com, a2a.example.com",
       THIRD_PARTY_AGENT_REQUEST_TIMEOUT_MS: "45000",
     });
 
     expect(config.thirdPartyAgents).toMatchObject({
-      directMode: "allowlist",
-      allowlist: ["1001", "1002"],
       allowedExternalHosts: [
         "vendor.example.com",
         "a2a.example.com",

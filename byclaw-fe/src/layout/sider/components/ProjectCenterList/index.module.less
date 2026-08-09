@@ -1,0 +1,208 @@
+.projectCenterList {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  // 与会话模块左侧列表保持一致的紧凑留白，给项目卡片留出连续的视觉空间。
+  padding: 8px;
+  box-sizing: border-box;
+  background: #fff;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 0 0 8px;
+
+  :global(.@{antPrefix}-input-affix-wrapper) {
+    min-width: 0;
+    height: 36px;
+    flex: 1;
+  }
+}
+
+// 新建项目入口与会话模块项目下拉框右侧按钮保持一致，避免独占一整行。
+.newProjectButton {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  padding: 0;
+  border: 0;
+  color: #667085;
+  background: transparent;
+  box-shadow: none;
+
+  &:focus,
+  &:active {
+    color: #667085;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  &:hover {
+    color: #246bfe;
+    background: #eaf2ff;
+  }
+}
+
+.loading {
+  min-height: 0;
+  flex: 1;
+}
+
+.list {
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0 0 8px;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.projectItem {
+  width: 100%;
+  box-sizing: border-box;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: #14161a;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.25s, border-color 0.25s, box-shadow 0.25s, transform 0.25s;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    padding: 1px;
+    border-radius: inherit;
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      rgba(36, 107, 254, 0.75) 80deg,
+      transparent 150deg,
+      transparent 360deg
+    );
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+.projectItem:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.projectItemActive {
+  background: #eef4ff !important;
+  border-color: #c8d9ff;
+  box-shadow: 0 4px 12px rgba(36, 107, 254, 0.14);
+
+  &::after {
+    opacity: 1;
+    animation: projectBorderFlow 2.8s linear infinite;
+  }
+
+  .projectIcon {
+    box-shadow: 0 0 0 3px rgba(36, 107, 254, 0.12);
+    transform: scale(1.06);
+  }
+
+  .projectMain strong {
+    color: #1554c5;
+    font-weight: 600;
+  }
+}
+
+@keyframes projectBorderFlow {
+  from {
+    transform: rotate(0deg) scale(1.08);
+  }
+
+  to {
+    transform: rotate(360deg) scale(1.08);
+  }
+}
+
+.projectIcon {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 600;
+  transition: transform 0.25s, box-shadow 0.25s;
+}
+
+.projectMain {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.projectMain strong,
+.projectMain small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projectMain strong {
+  color: #14161a;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.projectMain small {
+  color: #707680;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
+}
+
+.projectNormal {
+  color: #246bfe;
+  background: #eaf2ff;
+}
+
+.projectShared {
+  color: #16835a;
+  background: #eaf8f0;
+}
+
+.projectDevelop {
+  color: #7a3fd1;
+  background: #f3ecff;
+}
+
+.projectOperation {
+  color: #0b7d86;
+  background: #e5f8fa;
+}
+
+.projectDefault {
+  color: #596579;
+  background: #f1f4f8;
+}

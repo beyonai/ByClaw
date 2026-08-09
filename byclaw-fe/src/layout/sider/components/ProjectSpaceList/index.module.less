@@ -17,14 +17,21 @@
 }
 
 .searchInput {
+  position: relative;
+  min-height: 32px;
   display: flex;
   align-items: center;
   gap: 8px;
 
-  // 搜索框和会话列表保持同一套 Antd 默认尺寸，只覆盖透明背景。
+  // 搜索框和会话列表保持同一套 Antd 默认尺寸；详情入口与输入框通过弹性布局同行展示。
   :global {
     .@{antPrefix}-input-affix-wrapper {
+      width: 100%;
       background-color: transparent;
+    }
+
+    .@{antPrefix}-input-prefix .@{antPrefix}-icon {
+      cursor: pointer;
     }
   }
 
@@ -33,7 +40,46 @@
   }
 }
 
-.scopeRow {
+// 详情入口占用独立宽度，搜索输入框填充剩余空间，不再出现按钮遮挡输入内容。
+.searchInputWithDetailShortcut {
+  :global(.@{antPrefix}-input-affix-wrapper) {
+    min-width: 0;
+    flex: 1;
+    width: auto;
+  }
+}
+
+// 高级会话搜索方式收在输入框尾部，保留详情入口的同时也不会遮挡关键词输入区域。
+.sessionSearchModeTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 76px;
+  padding: 0 2px 0 6px;
+  overflow: hidden;
+  border: 0;
+  color: #667085;
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
+
+  &:hover,
+  &:focus-visible {
+    color: #246bfe;
+    outline: 0;
+  }
+
+  :global(.anticon) {
+    font-size: 10px;
+  }
+}
+
+// 项目选择框聚焦后直接接收搜索输入，不再在下拉菜单内额外放置搜索框。
+.scopeInput {
   width: 100%;
   min-width: 0;
   height: 36px;
@@ -48,29 +94,23 @@
   font-size: 14px;
   font-weight: 400;
   text-align: left;
-  cursor: pointer;
+  cursor: text;
   transition: border-color 0.2s, box-shadow 0.2s;
 
   &:hover {
     border-color: #b8cdfd;
   }
-}
 
-.scopeTitle {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
+  :global {
+    .@{antPrefix}-input {
+      min-width: 0;
+      text-overflow: ellipsis;
+    }
 
-.scopeMeta {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: #7b8798;
-  font-size: 14px;
-  font-weight: 400;
+    .@{antPrefix}-input-suffix {
+      color: #7b8798;
+    }
+  }
 }
 
 .scopeDropdown {
@@ -89,6 +129,22 @@
       width: 100%;
     }
   }
+}
+
+.scopeDropdownMenu {
+  min-width: 240px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.scopeDropdownEmpty {
+  margin: 16px 0;
+}
+
+.scopeDropdownLoading {
+  display: flex;
+  justify-content: center;
+  padding: 10px 0;
 }
 
 .scopeMenuLabel {
@@ -118,43 +174,37 @@
   gap: 8px;
 }
 
-// 与员工侧栏“发现数字员工”一致的项目详情快捷入口，保持项目选择器下方的信息层级。
-.enterProjectDetail {
-  width: 100%;
+// 项目详情入口与会话搜索同行：保持常规字重，悬停时仅改变背景。
+.enterProjectDetailShortcut {
+  flex-shrink: 0;
+  height: 32px;
   border: 0;
-  border-radius: 6px;
-  padding: 8px;
+  border-radius: 8px;
+  padding: 0 8px;
   display: flex;
-  flex: 1 1 auto;
   align-items: center;
-  gap: 2px;
-  color: inherit;
+  gap: 6px;
+  color: #1f2633;
   font-family: inherit;
   font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-  background: #f2f6fa;
-}
-
-.enterProjectDetailIcon {
-  flex-shrink: 0;
-  margin-right: 6px;
-  color: inherit;
-  font-size: 16px;
-}
-
-.enterProjectDetailText {
-  // 仅文案使用中等字重，避免右侧箭头随文本变粗。
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.enterProjectDetailArrow {
-  flex-shrink: 0;
-  margin-left: auto;
-  color: inherit;
-  font-size: 16px;
   font-weight: 400;
+  cursor: pointer;
+  background-color: #f2f6fa;
+  transition: background-color 0.2s;
+
+  &:hover,
+  &:focus-visible {
+    background-color: #eaf1ff;
+  }
+
+  :global(.anticon) {
+    color: #1f2633;
+    font-size: 14px;
+  }
+
+  .enterProjectDetailShortcutArrow {
+    font-size: 10px;
+  }
 }
 
 // 新建项目与详情顶部更多入口共用同一图标按钮规格，保持项目侧栏操作样式一致。
@@ -366,6 +416,14 @@
   font-weight: 700;
 }
 
+// 项目标签容器兼容不同项目场景，保持标签与标题之间的稳定布局。
+.projectTagGroup {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .projectHeaderTag {
   margin-left: auto;
 }
@@ -376,10 +434,10 @@
   background: #eaf2ff;
 }
 
-// 共享项目使用绿色标签，便于与个人项目区分。
+// 共享项目沿用统一的浅底标签样式，以绿色区分协作范围。
 .projectTagShared {
-  color: #14865a;
-  background: #e9f8f0;
+  color: #16835a;
+  background: #eaf8f0;
 }
 
 // 默认项目使用中性灰色标签，弱化其系统兜底属性。
@@ -394,10 +452,16 @@
   background: #f3ecff;
 }
 
-// 运营项目沿用原型的青绿色标签，与研发项目和普通共享项目形成稳定区分；标签优先级由 index.tsx 控制。
+// 初始化中标签:橙色带 loading 图标,提示研发项目工作区尚未就绪。
+.projectTagInitializing {
+  color: #d46b08;
+  background: #fff7e6;
+}
+
+// 运营项目沿用统一的浅底标签样式，以青蓝色区别于共享和研发项目。
 .projectTagOperation {
-  color: #0f766e;
-  background: #e6f5f2;
+  color: #1677b8;
+  background: #e8f4fc;
 }
 
 .sessionList {
@@ -607,6 +671,15 @@
       }
     }
   }
+
+  // 研发项目含需求、任务、资源、成员和测试五项页签，统一单行五等分展示。
+  &.projectDetailPanelTabCount5 {
+    :global {
+      .@{antPrefix}-tabs-nav-list {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+      }
+    }
+  }
 }
 
 .detailPanelHeader {
@@ -670,7 +743,9 @@
 // 详情头部项目名称下拉选择器，视觉上替代 h3 标题。
 .detailProjectSelect {
   min-width: 0;
-  max-width: 220px;
+  // 项目详情下拉需要展示较长项目名称，固定宽度后下拉选项会同步使用该宽度。
+  width: 280px;
+  max-width: 100%;
 
   // 选中态文字与原 h3 标题保持一致：14px 加粗。
   :global(.ant-select-selector) {
@@ -713,6 +788,28 @@
 .detailTabsWrap {
   flex-shrink: 0;
   padding: 12px 10px 8px;
+}
+
+// 研发项目 GH_TOKEN 未配置提醒条,贴在 tab 上方,整条文案可点击进入引导弹窗。
+.githubTokenAlert {
+  flex-shrink: 0;
+  margin: 10px 10px 0;
+}
+
+.projectInitAlert {
+  flex-shrink: 0;
+  margin: 10px 10px 0;
+}
+
+.detailProjectInitTag {
+  color: #d46b08;
+  background: #fff7e6;
+}
+
+.githubTokenAlertText {
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .detailCountRow {
@@ -821,6 +918,13 @@
   padding-bottom: 8px;
 }
 
+// 资源 Tab 的统一列表占满详情页剩余高度，文件树和代码变更仅在自身内容区滚动。
+.detailResourcesBodyPanel {
+  display: flex;
+  overflow: hidden;
+  padding-bottom: 8px;
+}
+
 // 成员 Tab 固定搜索工具栏，仅让成员数据列表在内部滚动并支持触底加载。
 .detailMembersBodyPanel {
   display: flex;
@@ -858,8 +962,8 @@
 .detailMemberAddButton,
 .detailManualRequirementAddButton,
 .detailRequirementRefreshButton,
-.detailTaskRefreshButton,
-.detailTaskViewButton {
+// .detailTaskViewButton
+.detailTaskRefreshButton {
   flex: 0 0 28px;
   width: 28px;
   min-width: 28px;
@@ -1337,6 +1441,12 @@
   background: #fff;
 }
 
+// 渠道搜索与新增按钮放在同一工具栏，滚动列表时始终保持可见。
+.detailChannelPanelSearch {
+  height: 34px;
+  width: 220px;
+}
+
 .detailChannelSourceList {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -1613,7 +1723,11 @@
   min-width: 40px;
   height: 26px;
   padding: 0 5px;
+  border: 1px solid transparent;
   border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 12px;
   line-height: 24px;
   white-space: nowrap;
@@ -1661,8 +1775,37 @@
   }
 }
 
+// 待开始任务默认只展示状态；悬停卡片时再用执行按钮替换状态标签，避免操作项长期占位。
+.detailTaskCardActions .detailRequirementStartAction {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 0.2s;
+}
+
+.detailTaskCard:hover .detailTaskCardActions .detailRequirementStartAction,
+.detailTaskCard:focus-within .detailTaskCardActions .detailRequirementStartAction {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.detailTaskCard:hover .detailPendingTaskStatusTag,
+.detailTaskCard:focus-within .detailPendingTaskStatusTag {
+  opacity: 0;
+}
+
+.detailPendingTaskStatusTag {
+  transition: opacity 0.2s;
+}
+
 .detailRequirementStartedAction {
   // 已启动代表不能重复操作，使用浅灰禁用态弱化可点击感。
+  // 状态标签不拦截卡片点击，用户点击标签区域时仍可打开需求详情。
+  pointer-events: none;
+
   &,
   &:disabled,
   &[disabled] {
@@ -1884,6 +2027,15 @@
   line-height: 20px;
 }
 
+// 结构化任务右侧统一承载状态和操作，待开始运营任务的执行入口保持常驻可见。
+.detailTaskCardActions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 // 研发任务的详情入口仅在卡片悬停或下拉菜单展开时展示，避免干扰会话主操作。
 .detailTaskMoreAction {
   position: absolute;
@@ -1913,9 +2065,9 @@
 
 // 任务状态标签与任务视图使用同一状态层级，只在列表内采用紧凑尺寸。
 .detailTaskStatusPending {
-  // 待开始改为浅蓝灰，和任务卡片选中时的中性灰底色拉开层级。
-  color: #52667d;
-  background: #e8eff8;
+  // 待开始使用暖色提示，和进行中的蓝色状态明确区分。
+  color: #ad6800;
+  background: #fff3d6;
 }
 
 .detailTaskStatusRunning {
@@ -2014,9 +2166,68 @@
 }
 
 .detailResourcePanel {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  min-width: 0;
+}
+
+.detailReposEmpty {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.detailRepoSearch {
+  padding: 8px 10px;
+  border-bottom: 1px solid #edf1f7;
+}
+
+.repoChangesButton {
+  position: relative;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #728096;
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+
+  &:hover,
+  &.repoChangesButtonActive {
+    color: #246bfe;
+    background: #eaf2ff;
+  }
+}
+
+.repoChangesCount {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border: 2px solid #f7f9fc;
+  border-radius: 9px;
+  color: #fff;
+  background: #3493b9;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+}
+
+.codeChangeCard.repoCodeChangeCard {
+  border: 0;
+  border-radius: 0;
 }
 
 // 代码变更卡片对齐共享文件空间的边框、标题栏和内容留白，保留 Git 状态信息。
@@ -2025,6 +2236,131 @@
   border-radius: 8px;
   overflow: hidden;
   background: #fff;
+}
+
+// 顶部切换后的资源内容统一承载在一个大列表区，避免共享、会话、代码变更分别形成卡片。
+.resourceViewContent {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.resourceViewTabBar {
+  flex-shrink: 0;
+  min-width: 0;
+  // 资源二级 Tab 沿用 Ant Design 的文字加粗和下划线选中态，不再使用背景色块。
+  padding: 0 0 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+}
+
+.resourceViewTabs {
+  min-width: 0;
+  flex: 1;
+
+  :global {
+    .@{antPrefix}-tabs-nav {
+      width: 100%;
+      margin: 0;
+
+      &::before {
+        border-bottom: 1px solid #e8edf5;
+      }
+    }
+
+    .@{antPrefix}-tabs-nav-wrap {
+      min-width: 0;
+      flex: 1;
+    }
+
+    // 二级分类按可用项数自动等分整行，单项最窄时优先省略文字，避免互相覆盖。
+    .@{antPrefix}-tabs-nav-list {
+      width: 100%;
+      min-width: 0;
+      flex: 1;
+      display: flex !important;
+      padding: 0;
+      border-radius: 0;
+      background: transparent;
+    }
+
+    .@{antPrefix}-tabs-tab {
+      // 每个二级 Tab 至少保留两个中文字符的可用宽度，避免仅显示一个字后立即省略。
+      min-width: 52px;
+      flex: 1;
+      margin: 0 !important;
+      padding: 4px 6px 7px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #6f7c90;
+      background: transparent !important;
+      box-shadow: none !important;
+      font-size: 13px;
+      font-weight: 400;
+      line-height: 20px;
+
+      .@{antPrefix}-tabs-tab-btn {
+        min-width: 2em;
+        max-width: 100%;
+      }
+    }
+
+    .@{antPrefix}-tabs-tab-active {
+      color: #246bfe;
+      font-weight: 400;
+      background: transparent !important;
+      box-shadow: none !important;
+
+      .@{antPrefix}-tabs-tab-btn {
+        color: inherit;
+        font-weight: inherit;
+      }
+    }
+
+    .@{antPrefix}-tabs-ink-bar {
+      height: 2px;
+      border-radius: 2px;
+      display: block;
+      background: #246bfe;
+    }
+  }
+}
+
+.resourceViewTabLabel {
+  width: 2em;
+  min-width: 2em;
+  max-width: 2em;
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.resourceViewRefresh {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #728096;
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+
+  &:hover {
+    color: #246bfe;
+    background: #eaf2ff;
+  }
 }
 
 .codeChangeHeader {
@@ -2098,27 +2434,6 @@
   text-align: right;
 }
 
-.codeChangeRefresh {
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #728096;
-  background: transparent;
-  cursor: pointer;
-  transition: color 0.2s, background-color 0.2s;
-
-  &:hover {
-    color: #246bfe;
-    background: #eaf2ff;
-  }
-}
-
 .codeChangeEmpty {
   min-height: 120px;
   padding: 16px;
@@ -2142,7 +2457,8 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: clamp(120px, 28vh, 320px);
+  flex: 1;
+  max-height: none;
   overflow-y: auto;
   padding: 4px 8px 8px;
 }
@@ -2665,6 +2981,52 @@
   color: #999;
 }
 
+// 仓库标题:仓库名 + 类型标签同行。
+.repoTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+// 已存在工作区时的重复提示,置于类型 radio 下方。
+.repoTypeHint {
+  margin-top: 6px;
+  color: #d46b08;
+  font-size: 12px;
+}
+
+// 仓库行「初始化中」进行态:loading 图标 + 文案同行,与相邻的「重新初始化」链接区分。
+.repoInitProgress {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #999;
+  font-size: 14px;
+}
+
+// 工作区初始化配置弹窗:建索引 + 技能包多选。
+.initConfigBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.initConfigDesc {
+  color: #999;
+  font-size: 13px;
+}
+
+.initConfigField {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.initConfigLabel {
+  color: #333;
+  font-weight: 500;
+}
+
 .manualRequirementModal {
   :global {
     .@{antPrefix}-modal-content {
@@ -2804,9 +3166,16 @@
   pointer-events: none;
 }
 
-.repoModalDivider {
-  margin: 16px 0 12px;
-  border-top: 1px solid #f0f0f0;
+// 仓库列表弹窗头:左侧「已有仓库」标签,右侧「新增仓库」按钮。
+.repoManageHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+
+  label {
+    font-weight: 500;
+  }
 }
 
 .dwsAuthDetail {
@@ -3326,7 +3695,13 @@
   color: #526075;
 }
 
-// 文件 diff modal:标题含文件名+全路径,正文等宽字体逐行渲染 unified diff。
+// 文件 diff 右侧抽屉：标题显示文件名和完整路径，正文等宽字体逐行渲染 unified diff。
+.diffDrawer {
+  :global(.@{antPrefix}-drawer-body) {
+    padding: 16px;
+  }
+}
+
 .diffModalTitle {
   display: flex;
   align-items: baseline;
@@ -3393,4 +3768,23 @@
 
 .diffLineContext {
   color: #444c5a;
+}
+
+.requirementAddMenuItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0;
+  min-width: 160px;
+}
+
+.requirementAddMenuLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1f2329;
+}
+
+.requirementAddMenuDesc {
+  font-size: 12px;
+  color: #8c8c8c;
 }

@@ -25,6 +25,7 @@ import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.OperationTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
+import com.iwhalecloud.byai.manager.domain.resource.model.SkillRelationSource;
 import com.iwhalecloud.byai.manager.domain.resource.service.OperationLogService;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceEventService;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceRuntimeInfoResolver;
@@ -76,6 +77,7 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.staticdata.ByaiSystemConfigList;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.entity.users.Users;
+import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
 import com.iwhalecloud.byai.manager.qo.index.OrgFilterQo;
 import com.iwhalecloud.byai.manager.qo.resource.AgentListQo;
 import com.iwhalecloud.byai.manager.qo.resource.DigitalEmployeeQo;
@@ -94,6 +96,7 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.vo.digitemploy.DebugSessionVo;
 import com.iwhalecloud.byai.manager.vo.digitemploy.SetDefaultDigitalEmployeeResultVo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import jakarta.servlet.http.HttpSession;
@@ -102,6 +105,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -133,7 +137,10 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 /**
- * @author he.duming &#064;date 2025-10-29 00:21:39 &#064;description TODO
+ * 数字员工资源与运行态编排服务。技能组采用安装快照：技能组成员变化不会自动传播；安装只记录当时的
+ * 活跃成员，卸载只移除指定技能组来源，并保留手工或其他技能组来源。
+ *
+ * @author he.duming &#064;date 2025-10-29 00:21:39
  */
 @Service
 public class DigitalEmployeeApplicationService {
@@ -141,6 +148,10 @@ public class DigitalEmployeeApplicationService {
     public static final Logger logger = LoggerFactory.getLogger(DigitalEmployeeApplicationService.class);
 
     private static final String RESOURCE_BIZ_TYPE_SKILL = "SKILL";
+
+    private static final String DIG_EMPLOYEE_SKILL_REL_TYPE = "DIG_EMPLOYEE_SKILL";
+
+    private static final int ACTIVE_REL_STATUS = 1;
 
     /** 对话框 #技能 上传曾直接写入数字员工工作区，解绑时需清理该历史副本。 */
     private static final String SKILL_SOURCE_TYPE_CHAT_UPLOAD = "CHAT_UPLOAD";
@@ -179,6 +190,9 @@ public class DigitalEmployeeApplicationService {
 
     @Autowired
     private SsResourceRelDetailService ssResourceRelDetailService;
+
+    @Autowired
+    private SkillGroupMapper skillGroupMapper;
 
     @Autowired
     private SsResourceCatalogService ssResourceCatalogService;
@@ -662,6 +676,10 @@ public class DigitalEmployeeApplicationService {
         List<Long> relIds = mergeRelSkillIds(digitalEmployeeDTO.getRelIds(), digitalEmployeeDTO.getRelSkills());
         this.compareSsResourceRelDetail(ssResource, relIds, Collections.emptyList(),
             digitalEmployeeDTO.getRelResourceInfoList());
+        List<SsResource> createdRelResources = CollectionUtils.isEmpty(relIds) ? Collections.emptyList()
+            : safeResources(ssResourceService.findByIdList(relIds.stream().filter(Objects::nonNull).distinct()
+                .collect(Collectors.toList())));
+        canonicalizeManualSkillRelations(ssResource.getResourceId(), createdRelResources);
         this.rebuildAndSaveDigitalEmployeeRelSkills(ssResource.getResourceId());
 
         // 暂停生成 RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存,当前运行时改读 DIG_EMPLOYEE_{resourceId}.
@@ -741,7 +759,7 @@ public class DigitalEmployeeApplicationService {
         dto.setCorePersonaDefinition(resourceName);
         dto.setPrologue(this.buildDefaultPersonalAssistantPrologue(resourceName, dataset));
         dto.setImplType(ImplType.ASK_AGENT.getCode());
-        // dto.setWorkerAgentType(WorkerAgentType.BYCLAW_EXE.getCode());
+        dto.setWorkerAgentType(WorkerAgentType.BY_SUPER.getCode());
         if (dataset != null && dataset.getResourceId() != null) {
             dto.setRelIds(List.of(dataset.getResourceId()));
         }
@@ -858,8 +876,8 @@ public class DigitalEmployeeApplicationService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("digemployee.name.duplicate"));
         }
 
-        // 更新资源表
-        SsResource ssResource = ssResourceService.findById(resourceId);
+        // 全量编辑可能改变技能关系，必须与技能组快照安装/卸载串行化。
+        SsResource ssResource = lockDigitalEmployeeForSkillRelationMutation(resourceId);
         validateDigitalEmployeeUpdatePermission(ssResource);
         if (isDefaultPersonalResource(ssResource)) {
             // 默认个人助理始终按助手型运行,避免前端旧参数把 worker_agent_type 覆盖成编码型等其他类型.
@@ -887,7 +905,7 @@ public class DigitalEmployeeApplicationService {
         // 关联资源对比
         List<Long> relIds = mergeRelSkillIds(digitalEmployeeDTO.getRelIds(), digitalEmployeeDTO.getRelSkills());
         List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(resourceId);
-        this.compareSsResourceRelDetail(ssResource, relIds, resourceRelDetails,
+        this.reconcileDigitalEmployeeUpdateRelations(ssResource, relIds, resourceRelDetails,
             digitalEmployeeDTO.getRelResourceInfoList());
         this.rebuildAndSaveDigitalEmployeeRelSkills(resourceId);
         // 暂停生成 RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存,当前运行时改读 DIG_EMPLOYEE_{resourceId}.
@@ -945,12 +963,14 @@ public class DigitalEmployeeApplicationService {
                 I18nUtil.get("digemployee.processor.param.notnull"));
         }
 
-        SsResource ssResource = ssResourceService.findById(digitalEmployeeId);
         List<SsResource> installRelResources = findInstallRelResources(installRelIds);
+        SsResource ssResource;
         if (containsSkillResource(installRelResources)) {
+            ssResource = lockDigitalEmployeeForSkillRelationMutation(digitalEmployeeId);
             validateSkillInstallPermission(ssResource, installRelResources);
         }
         else {
+            ssResource = ssResourceService.findById(digitalEmployeeId);
             validateDigitalEmployeeUpdatePermission(ssResource);
         }
 
@@ -963,16 +983,130 @@ public class DigitalEmployeeApplicationService {
         mergedRelIds.addAll(installRelIds);
 
         this.compareSsResourceRelDetail(ssResource, new ArrayList<>(mergedRelIds), resourceRelDetails, null);
-        this.rebuildAndSaveDigitalEmployeeRelSkills(digitalEmployeeId);
-        // 暂停生成 RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存,当前运行时改读 DIG_EMPLOYEE_{resourceId}.
-        // this.syncDigEmployeeSkillsToRedisQuietly(digitalEmployeeId);
-        this.synOpenClawWorkSpace(digitalEmployeeId);
-        operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
-        this.notifyDigitalEmployeeRuntimeChanged(digitalEmployeeId);
+        canonicalizeManualSkillRelations(digitalEmployeeId, installRelResources);
+        refreshRuntimeAfterSnapshotMutation(ssResource);
 
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(digitalEmployeeId);
         return this.findDetailsById(employeeIdDTO);
+    }
+
+    /**
+     * Installs the supplied current skill-group member IDs as a snapshot. Later membership changes do not propagate.
+     * Existing direct skill relations retain manual and other-group sources; this group source is merged in. The
+     * caller must hold the tenant-scoped digital employee row lock before invoking this mutation method.
+     *
+     * @param digitalEmployee locked digital employee
+     * @param groupId source skill-group ID
+     * @param skillIds validated active member skill IDs in deterministic snapshot order
+     * @return installed and preexisting direct relation IDs
+     */
+    public SkillGroupInstallResultVo installSkillGroupSnapshot(
+        SsResource digitalEmployee, Long groupId, List<Long> skillIds) {
+        List<Long> snapshotSkillIds = normalizeSnapshotSkillIds(digitalEmployee, groupId, skillIds);
+        SkillGroupInstallResultVo result = new SkillGroupInstallResultVo();
+        result.setTotalSkillIds(new ArrayList<>(snapshotSkillIds));
+
+        List<SsResourceRelDetail> existingRelations = skillGroupMapper.selectDigitalEmployeeSkillRelations(
+            digitalEmployee.getResourceId(), snapshotSkillIds);
+        Map<Long, List<SsResourceRelDetail>> relationsBySkillId = groupSkillRelationsByTarget(existingRelations);
+        Date now = new Date();
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        boolean changed = false;
+
+        for (Long skillId : snapshotSkillIds) {
+            List<SsResourceRelDetail> skillRelations = relationsBySkillId.get(skillId);
+            if (CollectionUtils.isEmpty(skillRelations)) {
+                SsResourceRelDetail relation = newDirectSkillRelation(
+                    digitalEmployee, skillId, currentUserId, now);
+                SkillRelationSource groupOnlySource = SkillRelationSource.parse(
+                    "{\"manual\":false,\"sourceGroupIds\":[]}");
+                groupOnlySource.addGroup(groupId);
+                relation.setRelResourceInfo(groupOnlySource.toJson());
+                int inserted = skillGroupMapper.insertDigitalEmployeeSkillIfAbsent(relation);
+                if (inserted == 1) {
+                    result.getInstalledSkillIds().add(skillId);
+                    changed = true;
+                    continue;
+                }
+                if (inserted != 0) {
+                    throw new BaseException("数字员工技能关系新增数量异常");
+                }
+                skillRelations = skillGroupMapper.selectDigitalEmployeeSkillRelations(
+                    digitalEmployee.getResourceId(), List.of(skillId));
+                if (CollectionUtils.isEmpty(skillRelations)) {
+                    throw new BaseException("数字员工技能关系并发新增失败，请重试");
+                }
+            }
+
+            result.getExistingSkillIds().add(skillId);
+            for (SsResourceRelDetail relation : skillRelations) {
+                changed |= addGroupSourceAndCanonicalize(relation, groupId, currentUserId, now);
+            }
+        }
+
+        if (changed) {
+            refreshRuntimeAfterSnapshotMutation(digitalEmployee);
+        }
+        return result;
+    }
+
+    /**
+     * Uninstalls only this skill-group snapshot source. It scans all direct skill relations instead of current group
+     * membership, so skills removed from the group after installation are still handled. Manual and other-group
+     * sources are retained; malformed or legacy metadata is left entirely untouched even when a recoverable group ID
+     * is present. The caller must hold the tenant-scoped digital employee row lock before invoking this mutation.
+     *
+     * @param digitalEmployee locked digital employee
+     * @param groupId source skill-group ID to remove
+     * @return deterministic affected, removed, and retained skill IDs
+     */
+    public SkillGroupInstallResultVo uninstallSkillGroupSnapshot(SsResource digitalEmployee, Long groupId) {
+        validateSnapshotContext(digitalEmployee, groupId);
+        SkillGroupInstallResultVo result = new SkillGroupInstallResultVo();
+        LinkedHashSet<Long> affectedSkillIds = new LinkedHashSet<>();
+        LinkedHashSet<Long> removedSkillIds = new LinkedHashSet<>();
+        LinkedHashSet<Long> retainedSkillIds = new LinkedHashSet<>();
+        List<SsResourceRelDetail> relations = skillGroupMapper.selectDigitalEmployeeSkillRelations(
+            digitalEmployee.getResourceId(), null);
+        Date now = new Date();
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        boolean changed = false;
+
+        for (SsResourceRelDetail relation : safeRelations(relations)) {
+            SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
+            if (source.isMalformed() || !source.hasGroup(groupId)) {
+                continue;
+            }
+            Long skillId = relation.getRelResourceId();
+            affectedSkillIds.add(skillId);
+            source.removeGroup(groupId);
+            if (source.hasAnySource()) {
+                canonicalizeRelation(relation, source, currentUserId, now);
+                if (!ssResourceRelDetailService.updateById(relation)) {
+                    throw new BaseException("数字员工技能关系更新失败");
+                }
+                retainedSkillIds.add(skillId);
+                removedSkillIds.remove(skillId);
+            }
+            else {
+                if (!ssResourceRelDetailService.removeById(relation.getResourceRelDetailId())) {
+                    throw new BaseException("数字员工技能关系删除失败");
+                }
+                if (!retainedSkillIds.contains(skillId)) {
+                    removedSkillIds.add(skillId);
+                }
+            }
+            changed = true;
+        }
+
+        result.setTotalSkillIds(new ArrayList<>(affectedSkillIds));
+        result.setRemovedSkillIds(new ArrayList<>(removedSkillIds));
+        result.setRetainedSkillIds(new ArrayList<>(retainedSkillIds));
+        if (changed) {
+            refreshRuntimeAfterSnapshotMutation(digitalEmployee);
+        }
+        return result;
     }
 
     /**
@@ -991,14 +1125,21 @@ public class DigitalEmployeeApplicationService {
                 I18nUtil.get("digemployee.processor.param.notnull"));
         }
 
-        SsResource ssResource = ssResourceService.findById(digitalEmployeeId);
         List<SsResource> uninstallRelResources = findInstallRelResources(uninstallRelIds);
         if (containsSkillResource(uninstallRelResources)) {
+            SsResource ssResource = lockDigitalEmployeeForSkillRelationMutation(digitalEmployeeId);
             validateSkillUninstallPermission(ssResource);
+            uninstallSkillSourcesAndRequestedNonSkills(
+                ssResource, uninstallRelIds, uninstallRelResources);
+            refreshRuntimeAfterSnapshotMutation(ssResource);
+
+            EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
+            employeeIdDTO.setResourceId(digitalEmployeeId);
+            return this.findDetailsById(employeeIdDTO);
         }
-        else {
-            validateDigitalEmployeeUpdatePermission(ssResource);
-        }
+
+        SsResource ssResource = ssResourceService.findById(digitalEmployeeId);
+        validateDigitalEmployeeUpdatePermission(ssResource);
 
         List<LegacyWorkspaceSkill> legacyWorkspaceSkills = findLegacyWorkspaceSkillsToDelete(ssResource,
             uninstallRelResources);
@@ -1020,6 +1161,78 @@ public class DigitalEmployeeApplicationService {
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(digitalEmployeeId);
         return this.findDetailsById(employeeIdDTO);
+    }
+
+    private void uninstallSkillSourcesAndRequestedNonSkills(
+        SsResource digitalEmployee, List<Long> uninstallRelIds, List<SsResource> uninstallRelResources) {
+        LinkedHashSet<Long> skillIds = uninstallRelResources.stream()
+            .filter(resource -> resource != null
+                && StringUtils.equals(RESOURCE_BIZ_TYPE_SKILL, resource.getResourceBizType()))
+            .map(SsResource::getResourceId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toCollection(LinkedHashSet::new));
+        LinkedHashSet<Long> orderedSkillIds = uninstallRelIds.stream()
+            .filter(skillIds::contains)
+            .collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<Long> nonSkillIds = uninstallRelResources.stream()
+            .filter(resource -> resource != null
+                && !StringUtils.equals(RESOURCE_BIZ_TYPE_SKILL, resource.getResourceBizType()))
+            .map(SsResource::getResourceId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+
+        List<SsResourceRelDetail> skillRelations = skillGroupMapper.selectDigitalEmployeeSkillRelations(
+            digitalEmployee.getResourceId(), new ArrayList<>(orderedSkillIds));
+        LinkedHashSet<Long> deletedSkillIds = new LinkedHashSet<>();
+        LinkedHashSet<Long> preservedSkillIds = new LinkedHashSet<>();
+        Date now = new Date();
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        for (SsResourceRelDetail relation : safeRelations(skillRelations)) {
+            Long skillId = relation.getRelResourceId();
+            SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
+            if (source.isMalformed() || !source.isManual()) {
+                preservedSkillIds.add(skillId);
+                continue;
+            }
+            SkillRelationSource remainingSource = source.withoutManual();
+            if (remainingSource.hasAnySource()) {
+                canonicalizeRelation(relation, remainingSource, currentUserId, now);
+                relation.setComAcctId(digitalEmployee.getComAcctId());
+                if (!ssResourceRelDetailService.updateById(relation)) {
+                    throw new BaseException("数字员工技能关系更新失败");
+                }
+                preservedSkillIds.add(skillId);
+                deletedSkillIds.remove(skillId);
+            }
+            else {
+                if (!ssResourceRelDetailService.removeById(relation.getResourceRelDetailId())) {
+                    throw new BaseException("数字员工技能关系删除失败");
+                }
+                if (!preservedSkillIds.contains(skillId)) {
+                    deletedSkillIds.add(skillId);
+                }
+            }
+        }
+
+        if (!nonSkillIds.isEmpty()) {
+            List<SsResourceRelDetail> allRelations = ssResourceRelDetailService.findByResourceId(
+                digitalEmployee.getResourceId());
+            for (SsResourceRelDetail relation : safeRelations(allRelations)) {
+                if (nonSkillIds.contains(relation.getRelResourceId())
+                    && !ssResourceRelDetailService.removeById(relation.getResourceRelDetailId())) {
+                    throw new BaseException("数字员工关联资源删除失败");
+                }
+            }
+        }
+
+        deletedSkillIds.removeAll(preservedSkillIds);
+        if (!deletedSkillIds.isEmpty()) {
+            List<SsResource> removedSkills = uninstallRelResources.stream()
+                .filter(resource -> resource != null && deletedSkillIds.contains(resource.getResourceId()))
+                .distinct()
+                .collect(Collectors.toList());
+            deleteLegacyWorkspaceSkills(findLegacyWorkspaceSkillsToDelete(digitalEmployee, removedSkills));
+        }
     }
 
     /**
@@ -1122,6 +1335,119 @@ public class DigitalEmployeeApplicationService {
         this.notifyDigitalEmployeeRuntimeChanged(digitalEmployeeId);
     }
 
+    private List<Long> normalizeSnapshotSkillIds(
+        SsResource digitalEmployee, Long groupId, List<Long> skillIds) {
+        validateSnapshotContext(digitalEmployee, groupId);
+        if (CollectionUtils.isEmpty(skillIds) || skillIds.stream().anyMatch(Objects::isNull)) {
+            throw new BaseException("技能组安装快照不能为空");
+        }
+        return new ArrayList<>(new LinkedHashSet<>(skillIds));
+    }
+
+    private void validateSnapshotContext(SsResource digitalEmployee, Long groupId) {
+        if (digitalEmployee == null || digitalEmployee.getResourceId() == null || groupId == null) {
+            throw new BaseException("技能组快照参数不能为空");
+        }
+    }
+
+    private Map<Long, List<SsResourceRelDetail>> groupSkillRelationsByTarget(
+        List<SsResourceRelDetail> relations) {
+        Map<Long, List<SsResourceRelDetail>> relationsBySkillId = new LinkedHashMap<>();
+        for (SsResourceRelDetail relation : safeRelations(relations)) {
+            relationsBySkillId.computeIfAbsent(relation.getRelResourceId(), ignored -> new ArrayList<>()).add(relation);
+        }
+        return relationsBySkillId;
+    }
+
+    private List<SsResourceRelDetail> safeRelations(List<SsResourceRelDetail> relations) {
+        return relations == null ? Collections.emptyList() : relations;
+    }
+
+    private SsResourceRelDetail newDirectSkillRelation(
+        SsResource digitalEmployee, Long skillId, Long currentUserId, Date now) {
+        SsResourceRelDetail relation = new SsResourceRelDetail();
+        relation.setResourceRelDetailId(sequenceService.nextVal());
+        relation.setResourceId(digitalEmployee.getResourceId());
+        relation.setRelResourceId(skillId);
+        relation.setCreateBy(currentUserId);
+        relation.setCreateTime(now);
+        relation.setUpdateBy(currentUserId);
+        relation.setUpdateTime(now);
+        relation.setComAcctId(digitalEmployee.getComAcctId());
+        relation.setRelTypeName(DIG_EMPLOYEE_SKILL_REL_TYPE);
+        relation.setRelStatus(ACTIVE_REL_STATUS);
+        return relation;
+    }
+
+    private boolean addGroupSourceAndCanonicalize(
+        SsResourceRelDetail relation, Long groupId, Long currentUserId, Date now) {
+        SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
+        source.addGroup(groupId);
+        String normalizedSource = source.toJson();
+        boolean changed = !StringUtils.equals(normalizedSource, relation.getRelResourceInfo())
+            || !StringUtils.equals(DIG_EMPLOYEE_SKILL_REL_TYPE, relation.getRelTypeName())
+            || !Objects.equals(ACTIVE_REL_STATUS, relation.getRelStatus());
+        if (!changed) {
+            return false;
+        }
+        canonicalizeRelation(relation, source, currentUserId, now);
+        if (!ssResourceRelDetailService.updateById(relation)) {
+            throw new BaseException("数字员工技能关系更新失败");
+        }
+        return true;
+    }
+
+    private void canonicalizeRelation(
+        SsResourceRelDetail relation, SkillRelationSource source, Long currentUserId, Date now) {
+        relation.setRelResourceInfo(source.toJson());
+        relation.setRelTypeName(DIG_EMPLOYEE_SKILL_REL_TYPE);
+        relation.setRelStatus(ACTIVE_REL_STATUS);
+        relation.setUpdateBy(currentUserId);
+        relation.setUpdateTime(now);
+    }
+
+    private void canonicalizeManualSkillRelations(Long digitalEmployeeId, List<SsResource> installedResources) {
+        List<Long> skillIds = installedResources == null ? Collections.emptyList()
+            : installedResources.stream()
+                .filter(resource -> resource != null
+                    && StringUtils.equals(RESOURCE_BIZ_TYPE_SKILL, resource.getResourceBizType()))
+                .map(SsResource::getResourceId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        if (skillIds.isEmpty()) {
+            return;
+        }
+        Date now = new Date();
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        List<SsResourceRelDetail> relations = skillGroupMapper.selectDigitalEmployeeSkillRelations(
+            digitalEmployeeId, skillIds);
+        for (SsResourceRelDetail relation : safeRelations(relations)) {
+            SkillRelationSource parsed = SkillRelationSource.parse(relation.getRelResourceInfo());
+            SkillRelationSource manualSource = SkillRelationSource.manual();
+            parsed.getSourceGroupIds().forEach(manualSource::addGroup);
+            String normalizedSource = manualSource.toJson();
+            boolean changed = !StringUtils.equals(normalizedSource, relation.getRelResourceInfo())
+                || !StringUtils.equals(DIG_EMPLOYEE_SKILL_REL_TYPE, relation.getRelTypeName())
+                || !Objects.equals(ACTIVE_REL_STATUS, relation.getRelStatus());
+            if (!changed) {
+                continue;
+            }
+            canonicalizeRelation(relation, manualSource, currentUserId, now);
+            if (!ssResourceRelDetailService.updateById(relation)) {
+                throw new BaseException("数字员工技能关系更新失败");
+            }
+        }
+    }
+
+    private void refreshRuntimeAfterSnapshotMutation(SsResource digitalEmployee) {
+        Long digitalEmployeeId = digitalEmployee.getResourceId();
+        this.rebuildAndSaveDigitalEmployeeRelSkills(digitalEmployeeId);
+        this.synOpenClawWorkSpace(digitalEmployeeId);
+        operationLogService.recordOperationLog(digitalEmployee, OperationTypeEnum.UPDATE);
+        this.notifyDigitalEmployeeRuntimeChanged(digitalEmployeeId);
+    }
+
     private void notifyDigitalEmployeeRuntimeChanged(Long digitalEmployeeId) {
         robotChannelRegistryCoordinator.refreshForResource(digitalEmployeeId);
         digEmployeeChangeEventPublisher.publishAfterCommitOrNow(DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED,
@@ -1145,6 +1471,19 @@ public class DigitalEmployeeApplicationService {
     private boolean containsSkillResource(List<SsResource> resources) {
         return resources != null && resources.stream().anyMatch(
             resource -> resource != null && StringUtils.equals(RESOURCE_BIZ_TYPE_SKILL, resource.getResourceBizType()));
+    }
+
+    private SsResource lockDigitalEmployeeForSkillRelationMutation(Long digitalEmployeeId) {
+        Long tenantId = CurrentUserHolder.getEnterpriseId();
+        if (tenantId == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.processor.param.notnull"));
+        }
+        SsResource digitalEmployee = skillGroupMapper.selectDigitalEmployeeForUpdate(digitalEmployeeId, tenantId);
+        if (digitalEmployee == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
+        }
+        return digitalEmployee;
     }
 
     private void validateSkillInstallPermission(SsResource digitalEmployee, List<SsResource> installRelResources) {
@@ -2436,6 +2775,89 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
+     * Reconciles a full editor save while preserving snapshot sources on direct skill relations. Omitted skills lose
+     * only their manual source, included skills gain a manual source, and malformed omitted metadata is left
+     * untouched. Non-skill targets continue through the historical full replacement reconciler.
+     */
+    private void reconcileDigitalEmployeeUpdateRelations(SsResource digitalEmployee, List<Long> relIds,
+        List<SsResourceRelDetail> allRelations, List<RelResourceInfo> relResourceInfoList) {
+        List<Long> requestedRelIds = relIds == null ? Collections.emptyList()
+            : relIds.stream().filter(Objects::nonNull).distinct().collect(Collectors.toList());
+        List<SsResourceRelDetail> skillRelations = safeRelations(
+            skillGroupMapper.selectDigitalEmployeeSkillRelations(digitalEmployee.getResourceId(), null));
+        Set<Long> existingSkillIds = skillRelations.stream().map(SsResourceRelDetail::getRelResourceId)
+            .filter(Objects::nonNull).collect(Collectors.toSet());
+
+        Set<Long> requestedSkillResourceIds = requestedRelIds.isEmpty() ? Collections.emptySet()
+            : safeResources(ssResourceService.findByIdList(requestedRelIds)).stream()
+                .filter(resource -> StringUtils.equals(RESOURCE_BIZ_TYPE_SKILL, resource.getResourceBizType()))
+                .map(SsResource::getResourceId).filter(Objects::nonNull).collect(Collectors.toSet());
+        LinkedHashSet<Long> requestedSkillIds = requestedRelIds.stream()
+            .filter(relId -> existingSkillIds.contains(relId) || requestedSkillResourceIds.contains(relId))
+            .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        List<Long> nonSkillRelIds = requestedRelIds.stream().filter(relId -> !requestedSkillIds.contains(relId))
+            .collect(Collectors.toList());
+        List<SsResourceRelDetail> nonSkillRelations = safeRelations(allRelations).stream()
+            .filter(relation -> !existingSkillIds.contains(relation.getRelResourceId()))
+            .collect(Collectors.toList());
+        compareSsResourceRelDetail(digitalEmployee, nonSkillRelIds, nonSkillRelations, relResourceInfoList);
+        reconcileEditorSkillRelations(digitalEmployee, requestedSkillIds, skillRelations);
+    }
+
+    private List<SsResource> safeResources(List<SsResource> resources) {
+        return resources == null ? Collections.emptyList() : resources;
+    }
+
+    private void reconcileEditorSkillRelations(SsResource digitalEmployee, Set<Long> requestedSkillIds,
+        List<SsResourceRelDetail> skillRelations) {
+        Set<Long> existingSkillIds = new HashSet<>();
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        Date now = new Date();
+        for (SsResourceRelDetail relation : skillRelations) {
+            Long skillId = relation.getRelResourceId();
+            existingSkillIds.add(skillId);
+            SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
+            if (requestedSkillIds.contains(skillId)) {
+                SkillRelationSource manualSource = SkillRelationSource.manual();
+                source.getSourceGroupIds().forEach(manualSource::addGroup);
+                updateCanonicalSkillRelation(digitalEmployee, relation, manualSource, currentUserId, now);
+                continue;
+            }
+            if (source.isMalformed() || !source.isManual()) {
+                continue;
+            }
+            SkillRelationSource remainingSource = source.withoutManual();
+            if (remainingSource.hasAnySource()) {
+                updateCanonicalSkillRelation(digitalEmployee, relation, remainingSource, currentUserId, now);
+            }
+            else if (!ssResourceRelDetailService.removeById(relation.getResourceRelDetailId())) {
+                throw new BaseException("数字员工技能关系删除失败");
+            }
+        }
+
+        for (Long skillId : requestedSkillIds) {
+            if (existingSkillIds.contains(skillId)) {
+                continue;
+            }
+            SsResourceRelDetail relation = newDirectSkillRelation(digitalEmployee, skillId, currentUserId, now);
+            relation.setRelResourceInfo(SkillRelationSource.manual().toJson());
+            if (skillGroupMapper.insertDigitalEmployeeSkillIfAbsent(relation) != 1) {
+                throw new BaseException("数字员工技能关系新增失败");
+            }
+        }
+    }
+
+    private void updateCanonicalSkillRelation(SsResource digitalEmployee, SsResourceRelDetail relation,
+        SkillRelationSource source, Long currentUserId, Date now) {
+        canonicalizeRelation(relation, source, currentUserId, now);
+        relation.setComAcctId(digitalEmployee.getComAcctId());
+        if (!ssResourceRelDetailService.updateById(relation)) {
+            throw new BaseException("数字员工技能关系更新失败");
+        }
+    }
+
+    /**
      * 检查数字员工
      *
      * @return List<EmployeeAuditResult>
@@ -2495,9 +2917,7 @@ public class DigitalEmployeeApplicationService {
             for (SsResourceDTO ssResourceDTO : relResourceList) {
                 String relResourceInfo = ssResourceDTO.getRelResourceInfo();
                 if (StringUtils.isNotBlank(relResourceInfo)) {
-                    // 计算关联可用资源数量
-                    RelResourceInfo relResourceInfoObj = JSON.parseObject(relResourceInfo, RelResourceInfo.class);
-                    ssResourceDTO.setActiveResourceNum(relResourceInfoObj.getActiveResourceIds().size());
+                    ssResourceDTO.setActiveResourceNum(parseActiveResourceCount(relResourceInfo));
                 }
             }
         }
@@ -2530,6 +2950,17 @@ public class DigitalEmployeeApplicationService {
         digitalEmployeeDetailsDTO.setTargetContent(null);
 
         return digitalEmployeeDetailsDTO;
+    }
+
+    private int parseActiveResourceCount(String relResourceInfo) {
+        try {
+            RelResourceInfo parsed = JSON.parseObject(relResourceInfo, RelResourceInfo.class);
+            return parsed == null ? 0 : CollectionUtils.size(parsed.getActiveResourceIds());
+        }
+        catch (Exception e) {
+            logger.warn("解析关联资源明细失败，按无可用子资源处理, ignored. err={}", e.getMessage());
+            return 0;
+        }
     }
 
     /**

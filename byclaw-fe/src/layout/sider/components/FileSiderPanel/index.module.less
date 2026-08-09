@@ -557,12 +557,32 @@
   background: #fff;
 }
 
+// 主文件树与替代视图始终保留节点，只切换可见性，避免返回文件树时丢失展开和输入状态。
+.fileSpacePrimaryContent {
+  display: contents;
+}
+
+.fileSpaceAlternateContent {
+  display: block;
+}
+
+.fileSpaceContentHidden {
+  display: none;
+}
+
 // 任务成果等抽屉场景使用剩余可用高度，文件树内部滚动以保留持续浏览体验。
 .fileSpaceBlockFill {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
+
+  // 项目资源的“全部会话”会渲染多个分组，列表在统一内容区内滚动而不撑破详情页。
+  .fileSpaceGroupList {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
 
   .fileSpaceTreeWrap {
     flex: 1;

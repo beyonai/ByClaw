@@ -169,7 +169,7 @@ public class RouteService {
         ctx.targetAgentType = targetAgentType;
 
         // 处理 content 中的资源占位符替换，如 {{DIG_EMPLOYEE_10812779}} 替换为 @xxxxx
-        content = replaceResourcePlaceholders(content, resourceList);
+        content = replaceResourcePlaceholders(content, resourceList, agentId);
 
         String answerMessageId = StringUtils.isNotEmpty(ctx.assistantChatDto.getResumeMessageId())
             ? ctx.assistantChatDto.getResumeMessageId()
@@ -333,12 +333,15 @@ public class RouteService {
      *
      * @param content 原始内容
      * @param resourceList 资源列表
+     * @param agentId 当前目标数字员工 ID
      * @return 替换后的内容
      */
-    private String replaceResourcePlaceholders(String content, List<ResourceVo> resourceList) {
+    private String replaceResourcePlaceholders(String content, List<ResourceVo> resourceList, Long agentId) {
         if (StringUtils.isBlank(content) || CollectionUtils.isEmpty(resourceList)) {
             return content;
         }
+
+        content = removeLeadingDigitalEmployeePlaceholder(content, resourceList, agentId);
 
         // 检查是否包含占位符格式 {{}}
         java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\{\\{([^}]++)\\}\\}");
@@ -370,6 +373,31 @@ public class RouteService {
         matcher.appendTail(result);
 
         return result.toString();
+    }
+
+    /**
+     * 当前请求只关联一个数字员工时，移除消息开头对应当前目标员工的占位符。
+     */
+    private String removeLeadingDigitalEmployeePlaceholder(String content, List<ResourceVo> resourceList, Long agentId) {
+        if (agentId == null) {
+            return content;
+        }
+
+        int digitalEmployeeCount = 0;
+        for (ResourceVo resource : resourceList) {
+            if (AgentMetaEnum.DIG_EMPLOYEE.equals(resource.getResourceType())) {
+                digitalEmployeeCount++;
+            }
+        }
+        if (digitalEmployeeCount != 1) {
+            return content;
+        }
+
+        String placeholder = "{{" + AgentMetaEnum.DIG_EMPLOYEE.getCode() + "_" + agentId + "}}";
+        if (!content.startsWith(placeholder)) {
+            return content;
+        }
+        return content.substring(placeholder.length());
     }
 
     private String prefixResourcePlaceholder(String replacement) {
@@ -601,9 +629,13 @@ public class RouteService {
             messageContent = contentObjects;
         }
 
+        String actionType = chatDto.getActionType() == null ? ActionType.ASK_AGENT : chatDto.getActionType();
         Map<String, Object> gatewayParams = params == null ? new HashMap<>() : new HashMap<>(params);
-        if (WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(targetAgentType)
-                && ctx != null && ctx.getUserMessageId() != null) {
+        if (ActionType.ASK_AGENT.equals(actionType)
+                && StringUtils.isNotBlank(sessionId)
+                && ctx != null
+                && ctx.getUserMessageId() != null
+                && ctx.getUserMessageId() > 0) {
             Map<String, Object> groupChat = new HashMap<>();
             groupChat.put("schemaVersion", "byclaw.group-chat-ref/v1");
             groupChat.put("conversationKey", sessionId);
@@ -618,7 +650,7 @@ public class RouteService {
                 messageContent,
                 userCode,
                 currentUserName,
-                chatDto.getActionType() == null ? ActionType.ASK_AGENT : chatDto.getActionType(),
+                actionType,
                 "-1",
                 answerMessageId,
                 traceId,

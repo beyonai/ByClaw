@@ -69,6 +69,8 @@ export interface QueryDirAndFileByLevelParams {
   /** 当前所在目录路径，根目录为 "/" */
   directoryPath: string;
   language?: string;
+
+  keyword?: string;
 }
 
 /** queryDirAndFileByLevel 单条记录 */
@@ -218,6 +220,80 @@ export interface FileBuildStatusParams {
 // 查询文件构建状态
 export const getFileBuildStatus = (data: FileBuildStatusParams) =>
   GET<any>('/byaiService/datasetController/fileBuildStatus', data);
+
+export interface KnowledgeBuildResultParams {
+  resourceId: string | number;
+  filePath: string;
+  chunkPage?: number;
+  chunkPageSize?: number;
+  includeMarkdown?: boolean;
+}
+
+export interface KnowledgeBuildChunk {
+  chunkNo: number;
+  startLine: number;
+  endLine: number;
+  content: string;
+  characterCount: number;
+  hasEmbedding: boolean;
+  retrievalIndexed: boolean;
+}
+
+export interface KnowledgeBuildResult {
+  knCode: string;
+  filePath: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  mimeType?: string;
+  build: {
+    status?: string;
+    currentStep?: string;
+    errorMessage?: string;
+    startedAt?: string;
+    finishedAt?: string;
+    durationMs?: number;
+    statusDict?: IBuildResultDictItem[];
+    stepDict?: IBuildResultDictItem[];
+  };
+  markdown: {
+    available: boolean;
+    data?: string | null;
+    lineCount: number;
+    characterCount?: number | null;
+    byteCount?: number | null;
+  };
+  chunks: {
+    data: KnowledgeBuildChunk[];
+    page: number;
+    pageSize: number;
+    total: number;
+    reachedEof: boolean;
+  };
+  embedding: {
+    dimension?: number | null;
+    embeddedChunkCount: number;
+    coverageRate: number;
+  };
+  retrieval: {
+    indexedChunkCount: number;
+    coverageRate: number;
+  };
+}
+
+export interface IBuildResultDictItem {
+  standCode?: string;
+  standDisplayValue?: string;
+  standDisplayValueEn?: string;
+}
+
+// 查询文件构建结果：Markdown、分块、向量与检索索引摘要
+export const getKnowledgeBuildResult = (data: KnowledgeBuildResultParams) =>
+  POST<KnowledgeBuildResult>('/byaiService/datasetController/buildResult', data, {
+    responseCfg: {
+      hideErrorTips: true,
+    },
+  });
 
 export interface KnowledgeUploadItem {
   fileName?: string;

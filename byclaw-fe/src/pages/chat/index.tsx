@@ -8,7 +8,9 @@ import TitleWriter from '@/components/TitleWriter';
 import { agentTypeMap } from '@/constants/agent';
 import useGlobal from '@/hooks/useGlobal';
 import type { IAgentType } from '@/typescript/agent';
+import type { IMessage } from '@/typescript/message';
 import ChatPageLayout from '@/components/ChatPageLayout';
+import CaptureRequirementModal from '@/pages/chat/components/CaptureRequirementModal';
 
 const BottomContent = lazy(() => import('@/pages/chat/components/BottomContent'));
 // 后端使用 -1 标识默认项目；它与正数项目 ID 都是聊天项目上下文的合法值。
@@ -90,12 +92,36 @@ const Chat = () => {
   }, []);
 
   const locationProjectContext = React.useMemo(() => getProjectChatContext(location.state), [location.state]);
+  const autoSendContent = (location.state as { autoSendContent?: string } | null)?.autoSendContent;
+  const targetSessionId = (location.state as { sessionId?: string | number } | null)?.sessionId;
+  const autoSendKeyRef = React.useRef<string | undefined>(undefined);
   const [projectChatContext, setProjectChatContext] = React.useState<ProjectChatContext>(locationProjectContext);
   const pendingSessionProjectContextRef = React.useRef<ProjectChatContext | undefined>(undefined);
   const sessionProjectContextMapRef = React.useRef<Record<string, ProjectChatContext>>({});
   const [sessionProjectContext, setSessionProjectContext] = React.useState<ProjectChatContext>(() =>
     sessionId ? locationProjectContext : {}
   );
+
+  React.useEffect(() => {
+    if (!sessionId || !targetSessionId || `${sessionId}` !== `${targetSessionId}` || !autoSendContent?.trim()) {
+      return undefined;
+    }
+    const sendKey = `${sessionId}:${autoSendContent}`;
+    if (autoSendKeyRef.current === sendKey) return undefined;
+    autoSendKeyRef.current = sendKey;
+    // 等聊天输入组件完成挂载后再触发，确保事件不会早于输入框监听器注册。
+    const timer = window.setTimeout(() => {
+      EventEmitter.emit('queryInput-set-value-and-send', autoSendContent);
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [EventEmitter, autoSendContent, sessionId, targetSessionId]);
+
+  // 沉淀为需求:入口挂在数字员工回答下方(MoreActions),点击后带该条消息发事件到此处打开弹窗。
+  // 弹窗需要项目上下文与仓库列表,由聊天页持有,避免逐层透传到深层消息组件。
+  const [captureOpen, setCaptureOpen] = React.useState(false);
+  const [captureMessages, setCaptureMessages] = React.useState<IMessage[]>([]);
+  // 事件里带来的项目归属优先，回退到当前会话上下文，避免刷新丢失路由态时取不到项目。
+  const [captureProjectId, setCaptureProjectId] = React.useState<number>(0);
 
   React.useEffect(() => {
     setProjectChatContext(locationProjectContext);
@@ -163,6 +189,22 @@ const Chat = () => {
   }, [EventEmitter, sessionId]);
 
   React.useEffect(() => {
+    const handleCaptureRequirement = (payload: { message?: IMessage; projectId?: number }) => {
+      if (!payload?.message) return;
+      const resolvedProjectId = Number(payload.projectId ?? sessionProjectContext.projectId);
+      if (!Number.isFinite(resolvedProjectId) || resolvedProjectId <= 0) return;
+      setCaptureProjectId(resolvedProjectId);
+      setCaptureMessages([payload.message]);
+      setCaptureOpen(true);
+    };
+
+    EventEmitter.on('chat-capture-requirement', handleCaptureRequirement);
+    return () => {
+      EventEmitter.off('chat-capture-requirement', handleCaptureRequirement);
+    };
+  }, [EventEmitter, sessionProjectContext.projectId]);
+
+  React.useEffect(() => {
     if (!sessionId) {
       setSessionProjectContext({});
       return;
@@ -223,7 +265,15 @@ const Chat = () => {
           projectId={sessionProjectContext.projectId}
         />
       }
-    />
+    >
+      <CaptureRequirementModal
+        open={captureOpen}
+        projectId={captureProjectId}
+        projectName={sessionProjectContext.projectName}
+        messages={captureMessages}
+        onClose={() => setCaptureOpen(false)}
+      />
+    </ChatPageLayout>
   );
 };
 

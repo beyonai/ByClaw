@@ -55,6 +55,11 @@ Resume 只完成子 Agent 回调，不会创建重复 Run。同一 owner scope �
 Run 查询、取消与订阅都必须携带 `Beyond-Token`。
 SSE 支持 `Last-Event-ID` 回放，连接断开不会取消任务。
 by-framework AskAgent 使用 `extraPayload.thinkingLevel` 传入同一参数，不从环境变量读取。
+当 AskAgent 带有 `extraPayload.agent_id` 时，每个新 Run 会通过 ByClaw BE
+`/open/api/v1/queryDigEmployeeDetail` 读取该超级助手 `prologue` 中的 `modelId`，再从 Redis
+`byai:aimodel:config` 解析模型运行配置。Run 只持久化模型 ID 和配置指纹，不保存模型密钥；
+同一 Session 的模型 ID 或配置指纹变化时，当前 Run 不受影响，下一 Run 会释放旧 Pi Session，
+并从已提交 checkpoint 恢复到新模型。BE/Redis 临时失败时优先沿用进程内最后一次有效绑定。
 服务会通过 Run 找到 Session，并在存储层按验签 JWT 中的 `userCode` 查询 owner；
 V1 不使用 tenantId、namespace 或 System-Code。不存在或越权统一返回 404。
 对外流式事件使用 ByClaw 的 `reasoningLog*`、`subAgent*`、`answer*` 和
@@ -65,7 +70,7 @@ V1 不使用 tenantId、namespace 或 System-Code。不存在或越权统一返�
 
 - Session owner V1 只使用验签 JWT 的 `userCode`，不接受请求体覆盖；
 - Agent 列表由 ByClaw BE `discover` 接口提供，只保留 `usesPermissions=true` 的记录；
-- 三方员工直连默认关闭；开启后按 `FROM_THIRD + integrationType` 选择专用 Connector，
+- 三方员工按 `discoverMine` 返回的 `FROM_THIRD + integrationType` 自动选择专用 Connector，
   endpoint/header 只通过内部 execution descriptor API 短期获取；
 - ByClaw BE 地址优先读取 Redis `byai_gateway:sd:instances:ByaiService`，没有有效实例时回退 `BYCLAW_BE_BASE_URL`；
 - Pi 的 `delegateAgent` 在执行前仍会服务端校验 Agent ID；

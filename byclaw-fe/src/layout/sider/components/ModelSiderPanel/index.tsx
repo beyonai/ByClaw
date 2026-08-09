@@ -52,7 +52,11 @@ function sortModelList(list: any[], currentModelInfo?: any) {
   });
 }
 
-const ModelSiderPanel: React.FC = () => {
+interface ModelSiderPanelProps {
+  embedded?: boolean;
+}
+
+const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false }) => {
   const intl = useIntl();
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -174,23 +178,27 @@ const ModelSiderPanel: React.FC = () => {
 
   return (
     <div className={styles.container}>
-      <ActiveSiderAgentBar agent={activeSiderAgent} />
-      <div
-        className={styles.router}
-        onClick={() =>
-          navigate(
-            isModelsPage ? { pathname: '/chat' } : '/models',
-            isModelsPage ? { state: { keepSiderActiveKey: 'model' } } : undefined
-          )
-        }
-      >
-        <AntdIcon type="icon-a-Braindanao" />
-        <span className={styles.middle}>{intl.formatMessage({ id: 'personalModel.title' })}</span>
-        <AntdIcon
-          type={isModelsPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
-          style={{ fontSize: 16, marginLeft: 'auto' }}
-        />
-      </div>
+      {!embedded && (
+        <>
+          <ActiveSiderAgentBar agent={activeSiderAgent} />
+          <div
+            className={styles.router}
+            onClick={() =>
+              navigate(
+                isModelsPage ? { pathname: '/chat' } : '/models',
+                isModelsPage ? { state: { keepSiderActiveKey: 'model' } } : undefined
+              )
+            }
+          >
+            <AntdIcon type="icon-a-Braindanao" />
+            <span className={styles.middle}>{intl.formatMessage({ id: 'personalModel.title' })}</span>
+            <AntdIcon
+              type={isModelsPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
+              style={{ fontSize: 16, marginLeft: 'auto' }}
+            />
+          </div>
+        </>
+      )}
 
       <div className={styles.content}>
         <Spin spinning={loading || agentDetailLoading}>
@@ -255,6 +263,8 @@ const ModelSiderPanel: React.FC = () => {
             locale={{ emptyText: intl.formatMessage({ id: 'personalModel.empty' }) }}
             renderItem={(item: any) => {
               const current = isCurrentModel(item, modelInfo);
+              const statusLabelId =
+                item.status === 'ENABLED' ? 'personalModel.action.enable' : 'personalModel.action.disable';
               return (
                 <div className={styles.modelItem} onClick={() => openModelEdit(item)}>
                   <div className={styles.modelHeader}>
@@ -265,12 +275,7 @@ const ModelSiderPanel: React.FC = () => {
                     <Tag className={current || item.status === 'ENABLED' ? styles.currentModelTag : undefined}>
                       {current
                         ? intl.formatMessage({ id: 'fileBrowserEntry.debug.currentModel' })
-                        : intl.formatMessage({
-                          id:
-                              item.status === 'ENABLED'
-                                ? 'personalModel.action.enable'
-                                : 'personalModel.action.disable',
-                        })}
+                        : intl.formatMessage({ id: statusLabelId })}
                     </Tag>
                   </div>
                   <div className={styles.modelCode}>{item.modelCode || '-'}</div>

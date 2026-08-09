@@ -30,7 +30,15 @@ import EasyConfirm from './components/EasyConfirm';
 import type { IState as UseEmployeesIState } from '@/models/useEmployees.ts';
 
 import styles from './index.module.less';
-import { getResponseAgentInfo } from '../MessageList/utils';
+import { getResponseAgentInfo, isMultiAgentResponsePayload, type ResponseMetadataPayload } from '../MessageList/utils';
+import ChatResourceWorkspace from './ChatResourceWorkspace';
+import {
+  DEFAULT_SIDER_CONTENT_WIDTH,
+  HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH,
+  SiderContentContext,
+  type DetailPanelOptions,
+} from '@/layout/sider/siderContentContext';
+import { closeChatResourceTab, upsertChatResourceTab, type ChatResourceTab } from './ChatResourceWorkspace/tabState';
 
 type IProps = {
   sessionId: string;
@@ -86,6 +94,15 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
 
   const [myAgentType, setMyAgentType] = useState<IAgentType>(agentType);
   const [sessionSelectOpen, setSessionSelectOpen] = useState<boolean>(false);
+  const [resourceListOpen, setResourceListOpen] = useState(false);
+  const [resourceTabs, setResourceTabs] = useState<ChatResourceTab[]>([]);
+  const [activeResourceTabKey, setActiveResourceTabKey] = useState('');
+
+  // 工作区状态只属于当前聊天实例，路由刷新后不恢复详情页签，避免复用失效的 React 节点。
+  const resourceTabSequenceRef = useRef(0);
+  const previousResourceSessionIdRef = useRef(sessionId);
+  const resourceWorkspaceOwnedRef = useRef(false);
+  const { setDetailPanel, clearDetailPanel } = React.useContext(SiderContentContext);
 
   const { EventEmitter, setAgentId, platform, agentId } = useGlobal();
   const isPC = platform === Platform.pc;
@@ -158,10 +175,138 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     return Number.isFinite(normalizedProjectId) && normalizedProjectId > 0 ? normalizedProjectId : undefined;
   }, [currentSession?.projectId, projectId]);
 
+  // 旧资源面板仍以单详情节点回调；这里统一补齐稳定身份，才能在多次点击同一资源时复用页签。
+  const openResourceDetail = useCallback(
+    (panel: React.ReactNode, options: DetailPanelOptions = {}) => {
+      const elementProps = React.isValidElement(panel) ? (panel.props as Record<string, any>) : {};
+      const identity =
+        elementProps.resourceId ||
+        elementProps.item?.resourceId ||
+        elementProps.dataset?.resourceId ||
+        elementProps.node?.resourceId ||
+        elementProps.node?.viewCode ||
+        elementProps.node?.objectCode ||
+        elementProps.fileName ||
+        elementProps.title;
+      const elementType = React.isValidElement(panel)
+        ? typeof panel.type === 'string'
+          ? panel.type
+          : panel.type.displayName || panel.type.name || 'detail'
+        : 'detail';
+      const key =
+        options.tabKey || (identity ? `${elementType}:${identity}` : `detail:${++resourceTabSequenceRef.current}`);
+      const title =
+        options.title ||
+        elementProps.title ||
+        elementProps.resourceName ||
+        elementProps.item?.resourceName ||
+        elementProps.dataset?.resourceName ||
+        elementProps.node?.name ||
+        elementProps.fileName ||
+        intl.formatMessage({ id: 'common.detail' });
+
+      setResourceTabs((current) => upsertChatResourceTab(current, { key, title, content: panel }));
+      setActiveResourceTabKey(key);
+    },
+    [intl]
+  );
+
+  /** 文件预览打开后只保留预览页签，自动收起右侧资源列表；预览页签本身不会被关闭。 */
+  const openResourceDetailFromResourceList = useCallback(
+    (panel: React.ReactNode, options: DetailPanelOptions = {}) => {
+      openResourceDetail(panel, options);
+      const tabKey = `${options.tabKey || ''}`;
+      if (tabKey.includes('file:')) {
+        setResourceListOpen(false);
+      }
+    },
+    [openResourceDetail]
+  );
+
+  const closeResourceTab = useCallback(
+    (key: string) => {
+      const next = closeChatResourceTab(resourceTabs, activeResourceTabKey, key);
+      setResourceTabs(next.tabs);
+      setActiveResourceTabKey(next.activeKey);
+      if (!next.tabs.length) setResourceListOpen(true);
+    },
+    [activeResourceTabKey, resourceTabs]
+  );
+
+  const resourceWorkspaceVisible = resourceListOpen || resourceTabs.length > 0;
+
+  // 预览页签栏的列表按钮只负责显示/隐藏资源列表，不能误关已经打开的文件预览。
+  const toggleResourceList = useCallback(() => {
+    setResourceListOpen((open) => !open);
+  }, []);
+
+  useEffect(() => {
+    if (!resourceWorkspaceVisible) {
+      if (resourceWorkspaceOwnedRef.current) {
+        clearDetailPanel?.();
+        resourceWorkspaceOwnedRef.current = false;
+      }
+      return;
+    }
+
+    resourceWorkspaceOwnedRef.current = true;
+    setDetailPanel?.(
+      <ChatResourceWorkspace
+        sessionId={sessionId}
+        projectId={sessionProjectId}
+        listOpen={resourceListOpen}
+        tabs={resourceTabs}
+        activeTabKey={activeResourceTabKey}
+        onToggleList={toggleResourceList}
+        onOpenDetail={openResourceDetailFromResourceList}
+        onActiveTabChange={setActiveResourceTabKey}
+        onCloseTab={closeResourceTab}
+      />,
+      {
+        width: resourceTabs.length ? HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH : DEFAULT_SIDER_CONTENT_WIDTH,
+      }
+    );
+  }, [
+    activeResourceTabKey,
+    clearDetailPanel,
+    closeResourceTab,
+    openResourceDetailFromResourceList,
+    resourceListOpen,
+    resourceTabs,
+    resourceWorkspaceVisible,
+    sessionId,
+    sessionProjectId,
+    setDetailPanel,
+    toggleResourceList,
+  ]);
+
+  useEffect(() => {
+    // 会话切换时关闭旧详情，但保留资源入口，方便在新会话中继续查看对应范围。
+    const previousSessionId = previousResourceSessionIdRef.current;
+    previousResourceSessionIdRef.current = sessionId;
+    if (`${previousSessionId}` === `${sessionId}`) return;
+
+    const workspaceWasOpen = resourceListOpen || resourceTabs.length > 0;
+    setResourceTabs([]);
+    setActiveResourceTabKey('');
+    if (workspaceWasOpen) setResourceListOpen(true);
+  }, [sessionId]);
+
+  useEffect(
+    () => () => {
+      if (resourceWorkspaceOwnedRef.current) clearDetailPanel?.();
+    },
+    [clearDetailPanel]
+  );
+
   const onReceivedChatMessages = useCallback(
-    (payload?: { sessionId?: string; metadata?: string }) => {
+    (payload?: ResponseMetadataPayload) => {
       const { sessionId: sourceSessionId, metadata } = payload || {};
       if (`${sourceSessionId}` !== `${sessionId}`) {
+        return;
+      }
+      if (isMultiAgentResponsePayload(payload)) {
+        // 多员工会话由输入框 mention 决定参与员工，不能用最后完成的单个回答覆盖全局 agentId。
         return;
       }
       const agentInfo = getResponseAgentInfo({ agentList, employeesList }, metadata);
@@ -349,6 +494,10 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 currentSession={currentSession}
                 agentType={myAgentType}
                 projectId={sessionProjectId}
+                // 按钮底色只反映右侧资源小面板状态，文件预览单独打开时保持无底色。
+                resourceWorkspaceOpen={resourceListOpen}
+                // 会话标题和文件预览页签共用同一个列表开关，任何入口都不能清空预览 Tab。
+                onToggleResourceWorkspace={toggleResourceList}
               />
             )}
             {isBottom && (
@@ -359,6 +508,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   hasMore={hasMore}
                   sessionId={sessionId}
                   hideAction={hideAction}
+                  captureRequirementProjectId={sessionProjectId}
                   messageList={messageList}
                   updateMessage={updateMessage}
                   deleteMessage={deleteMessage}
@@ -380,7 +530,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   disabledInput={disabledInput}
                   isBottom={isBottom}
                   cannotAt={cannotAt}
-                  queryInputProps={queryInputProps}
+                  queryInputProps={{ ...queryInputProps, projectId: sessionProjectId }}
                   lastMsg={lastMsg}
                   sessionId={sessionId}
                   onSend={onSend}

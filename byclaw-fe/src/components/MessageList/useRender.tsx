@@ -56,10 +56,12 @@ export default function useRender({
   updateMessage,
   deleteMessage,
   sessionId,
+  captureRequirementProjectId,
 }: {
   updateMessage: (message: IMessage) => IMessage;
   deleteMessage: (message: IMessage) => void;
   sessionId?: string;
+  captureRequirementProjectId?: number;
 }) {
   const { ModalNode, setOpen, setMyContent, setMyTitle } = useModal({});
 
@@ -194,9 +196,8 @@ export default function useRender({
               <MoreActions
                 deleteMessage={deleteMessage}
                 msg={msg}
-                employeesList={employeesList}
-                agentList={agentList}
                 showTroubleshoot
+                captureRequirementProjectId={captureRequirementProjectId}
               />
               {[IMessageState.Done, IMessageState.Cancel].includes(messageState) && (
                 <ThumbUp updateMessage={updateMessage} msg={msg} />
@@ -207,7 +208,7 @@ export default function useRender({
         </div>
       );
     },
-    [deleteMessage, updateMessage, canRefrence, employeesList, agentList]
+    [deleteMessage, updateMessage, canRefrence, captureRequirementProjectId]
   );
 
   const uploadFileRender = useCallback((fileList?: IFile[], msg?: IMessage) => {
@@ -401,8 +402,20 @@ export default function useRender({
       const mentionLeftAgentTitle = canMentionLeftAgent
         ? intl.formatMessage({ id: 'messageList.mentionDigitalEmployee' }, { name: leftName })
         : '';
+      const agentResourceDesc = agentInfo?.resourceDesc?.trim();
+      const mentionLeftAgentTooltip = canMentionLeftAgent ? (
+        <div className={styles.agentMentionTooltipContent}>
+          <div>{mentionLeftAgentTitle}</div>
+          {agentResourceDesc ? (
+            <>
+              <div className={styles.agentMentionTooltipDivider} />
+              <div className={styles.agentMentionTooltipDescription}>{agentResourceDesc}</div>
+            </>
+          ) : null}
+        </div>
+      ) : null;
       const leftNameNode = canMentionLeftAgent ? (
-        <Tooltip title={mentionLeftAgentTitle}>
+        <Tooltip title={mentionLeftAgentTooltip} overlayClassName={styles.agentMentionTooltip}>
           <button
             type="button"
             className={styles.agentMentionTrigger}

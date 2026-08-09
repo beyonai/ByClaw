@@ -9,6 +9,57 @@
   box-sizing: border-box;
 }
 
+// 独立项目工作区直接占据 PC 主内容区，左侧项目列表由系统侧栏提供，避免页面内再嵌套一层 320px 侧栏。
+.page {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px;
+  box-sizing: border-box;
+  background: #f5f7fb;
+}
+
+.detailHost {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(30, 41, 59, 0.06);
+}
+
+.detailSpin {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+
+  :global {
+    .@{antPrefix}-spin-container {
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+    }
+  }
+}
+
+.pageLoading,
+.pageEmpty {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: #fff;
+}
+
 .header {
   display: flex;
   align-items: center;
@@ -118,40 +169,138 @@
 }
 
 .detail {
+  width: 100%;
   height: 100%;
+  min-width: 0;
   border-radius: 12px;
   background: #fff;
   box-shadow: 0 8px 24px rgba(30, 41, 59, 0.06);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .detailHeader {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
   padding: 20px;
-  border-bottom: 1px solid #edf1f7;
 
   h3 {
-    margin: 0 0 6px;
+    margin: 0;
   }
+}
+
+.detailHeading {
+  min-width: 0;
+  flex: 1;
+}
+
+.detailTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.detailProjectMoreButton {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  padding: 0;
+  opacity: 1;
+  pointer-events: auto;
+  transition: background-color 0.2s;
 }
 
 .detailHeaderActions {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
   justify-content: flex-end;
+
+  // 顶部搜索、刷新、新建及 Tab 操作按钮统一高度，避免同一行控件上下错位。
+  :global(.@{antPrefix}-btn) {
+    height: 32px;
+  }
+
+  :global(.@{antPrefix}-select-selector) {
+    height: 36px !important;
+    display: flex;
+    align-items: center;
+  }
+
+  :global(.@{antPrefix}-input-affix-wrapper) {
+    width: 240px;
+    height: 32px;
+  }
+}
+
+.detailTabs {
+  flex: none;
+  padding: 0 20px 12px;
+  border-bottom: 1px solid #edf1f7;
+
+  :global(.@{antPrefix}-segmented) {
+    width: 100%;
+  }
+
+  :global(.@{antPrefix}-segmented-group) {
+    width: 100%;
+  }
+
+  :global(.@{antPrefix}-segmented-item) {
+    flex: 1;
+    text-align: center;
+  }
+}
+
+.projectInitAlert {
+  margin: 0 20px 10px;
 }
 
 .detailBody {
   min-height: 0;
   flex: 1;
+  // 详情内容由页面主体统一承接纵向滚动，避免卡片列表被固定高度截断后无法继续浏览。
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 20px;
+
+  // 详情内容由 Spin 作为纵向 flex 容器承接，各 Tab 列表才能获得确定的可滚动高度。
+  > :global(.@{antPrefix}-spin-nested-loading) {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  > :global(.@{antPrefix}-spin-nested-loading) > :global(.@{antPrefix}-spin-container) {
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+  }
+
+  :global {
+    .@{antPrefix}-spin-nested-loading {
+      height: 100%;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .@{antPrefix}-spin-container {
+      height: 100%;
+      min-height: 0;
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+    }
+  }
 }
 
 .detailEmpty {
@@ -240,6 +389,8 @@
 
 .sessionListWrap {
   min-height: 0;
+  height: 100%;
+  overflow-y: auto;
 }
 
 .sessionToolbar {
@@ -257,4 +408,654 @@
   align-items: center;
   justify-content: center;
   gap: 12px;
+}
+
+// 独立详情 Tab 的统一数据容器:工具栏固定,列表区域随大页面滚动。
+.dataPanel {
+  min-height: 0;
+  height: 100%;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.dataToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: none;
+  margin-bottom: 12px;
+}
+
+.dataToolbar :global(.@{antPrefix}-input-affix-wrapper) {
+  max-width: 360px;
+}
+
+.dataPanel :global(.@{antPrefix}-spin-nested-loading),
+.dataPanel :global(.@{antPrefix}-spin-container) {
+  min-height: 0;
+  flex: 1;
+}
+
+// 列表内容由 dataPanel 承接滚动，Spin 内层需要占满列表区域而不能把高度压成 auto。
+.dataPanel > :global(.@{antPrefix}-spin-nested-loading),
+.dataPanel :global(.@{antPrefix}-spin-container) {
+  min-height: 0;
+  flex: 1 1 auto;
+  height: 100%;
+}
+
+.dataListItem {
+  cursor: default;
+
+  &:hover {
+    background: #f8fafc;
+  }
+}
+
+// 项目详情 Tab 统一使用响应式卡片网格，避免长列表内容挤在单行中。
+.dataCardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.dataCard {
+  min-width: 0;
+  min-height: 132px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  border: 1px solid #e8edf4;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 3px 12px rgba(31, 45, 77, 0.04);
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+
+  &:hover {
+    border-color: #c9d8f5;
+    box-shadow: 0 8px 18px rgba(31, 45, 77, 0.08);
+    transform: translateY(-1px);
+  }
+}
+
+// 成员角色标签作为轻量状态标识固定在卡片右上角，避免占用成员信息行空间。
+.memberRoleTag {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  margin: 0;
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 20px;
+  transition: opacity 0.2s;
+}
+
+.memberCardMore {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  color: #667085;
+  transition: opacity 0.2s;
+}
+
+.dataCard:hover .memberCardMore,
+.dataCard:focus-within .memberCardMore {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dataCard:hover .memberRoleTag,
+.dataCard:focus-within .memberRoleTag {
+  opacity: 0;
+}
+
+.memberAgentOptions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 360px;
+  margin-top: 12px;
+  overflow-y: auto;
+}
+
+.memberAgentOption {
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dataCardHeader,
+.dataCardFooter,
+.memberCardIdentity {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.dataCardHeader {
+  justify-content: space-between;
+
+  :global(.@{antPrefix}-typography) {
+    min-width: 0;
+    flex: 1;
+  }
+}
+
+.taskCardHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.requirementCardActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.requirementCardStatusActions {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.requirementTypeRow {
+  min-height: 22px;
+  margin-top: 4px;
+}
+
+.requirementExecuteButton {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  padding: 0 4px;
+  transition: opacity 0.2s;
+}
+
+.dataCard:hover .requirementExecuteButton,
+.dataCard:focus-within .requirementExecuteButton {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dataCard:hover .requirementStatusTag,
+.dataCard:focus-within .requirementStatusTag {
+  opacity: 0;
+}
+
+.taskExecuteButton {
+  // 待执行任务的入口只在卡片悬停时浮现，脱离文档流，避免未悬停时在右上角留下空白。
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  opacity: 0;
+  pointer-events: none;
+  color: var(--beyond-color-primary);
+  transition: opacity 0.2s;
+}
+
+.taskPendingStatusTag {
+  transition: opacity 0.2s;
+}
+
+.dataCard:hover .taskExecuteButton,
+.dataCard:focus-within .taskExecuteButton {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dataCard:hover .taskPendingStatusTag,
+.dataCard:focus-within .taskPendingStatusTag {
+  opacity: 0;
+}
+
+// 需求和任务的低频操作统一收口到卡片右下角，避免与右上角状态、执行按钮争抢空间。
+.cardMoreAction {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(5px) rotate(90deg);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.dataCard:hover .cardMoreAction,
+.dataCard:focus-within .cardMoreAction {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) rotate(90deg);
+}
+
+.requirementDueTimeWithAction {
+  transition: opacity 0.18s ease;
+}
+
+.requirementDetailContent {
+  :global(.@{antPrefix}-typography) {
+    margin-top: 20px;
+  }
+}
+
+.requirementDetailDescription {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.requirementDetailConfig {
+  max-height: 320px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f6f8fb;
+  color: #475467;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+// 需求卡片右下角操作浮起时隐藏日期，避免两个元素占用同一位置。
+.dataCard:hover .requirementDueTimeWithAction,
+.dataCard:focus-within .requirementDueTimeWithAction {
+  opacity: 0;
+}
+
+// 任务卡片列表自身承接滚动，避免详情页外层 flex/Spin 组合把内容高度锁死。
+.dataPanel,
+.dataPanel > :global(.@{antPrefix}-spin-nested-loading),
+.dataPanel :global(.@{antPrefix}-spin-container) {
+  max-height: 100%;
+}
+
+.requirementMeta {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  font-size: 12px;
+
+  :global(.@{antPrefix}-typography:first-child) {
+    min-width: 0;
+    flex: 1;
+  }
+
+  :global(.@{antPrefix}-typography:last-child) {
+    flex: none;
+  }
+}
+
+// 运营需求拆分弹窗中的任务编辑区，支持新增/删除任务并保持字段间距清晰。
+.splitTaskToolbar,
+.splitTaskHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.splitTaskToolbar {
+  margin: 16px 0 10px;
+}
+
+.splitTaskList {
+  max-height: 52vh;
+  padding: 2px 4px 4px 2px;
+  overflow-y: auto;
+}
+
+.splitTaskCard {
+  padding: 14px;
+  margin-bottom: 12px;
+  border: 1px solid #e7ecf3;
+  border-radius: 10px;
+  background: #fafcff;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+
+  .splitTaskHeader {
+    margin-bottom: 10px;
+  }
+
+  :global(.@{antPrefix}-input),
+  :global(.@{antPrefix}-select) {
+    width: 100%;
+  }
+
+  :global(.@{antPrefix}-input-textarea) {
+    margin-top: 10px;
+  }
+}
+
+.dataCardDescription {
+  min-height: 42px;
+  margin: 10px 0 8px !important;
+  color: #78859a;
+  font-size: 12px;
+  line-height: 21px;
+}
+
+.dataCardFooter {
+  justify-content: space-between;
+  margin-top: auto;
+}
+
+.memberCardIdentity {
+  align-items: flex-start;
+  padding-right: 44px;
+}
+
+.memberCardName {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.memberCardName :global(.@{antPrefix}-typography) {
+  display: block;
+  max-width: 100%;
+}
+
+.loadMoreSentinel {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #98a2b3;
+  font-size: 12px;
+}
+
+.sessionCard {
+  cursor: pointer;
+}
+
+.resourceCardGrid {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  align-content: start;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.resourceCard {
+  min-width: 0;
+  min-height: 72px;
+  padding: 12px;
+  border: 1px solid #e8edf4;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  box-shadow: 0 3px 12px rgba(31, 45, 77, 0.04);
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+
+  &:hover {
+    border-color: #c9d8f5;
+    box-shadow: 0 8px 18px rgba(31, 45, 77, 0.08);
+    transform: translateY(-1px);
+  }
+}
+
+.resourceCategoryCard {
+  min-width: 0;
+  height: 100%;
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #dfe6f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.resourceCategoryGrid {
+  min-height: 0;
+  height: 100%;
+  min-height: 100%;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-content: stretch;
+  align-items: stretch;
+  overflow: visible;
+}
+
+.resourceCardHeader {
+  min-height: 92px;
+  padding: 16px 14px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex: none;
+  border-bottom: 1px solid #e8edf4;
+}
+
+.resourceCardTitleBlock {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  h4 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  :global(.@{antPrefix}-typography) {
+    font-size: 12px;
+  }
+}
+
+.resourceCardIcon {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: 10px;
+  color: #246bfe;
+  background: #eaf2ff;
+  font-size: 20px;
+}
+
+.resourceCardAddButton {
+  flex: none;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  color: #246bfe;
+  background: #f1f6ff;
+}
+
+.resourceCategoryBody {
+  min-height: 0;
+  flex: 1;
+  padding: 12px;
+  overflow: auto;
+
+  :global(.resourceCardGrid) {
+    display: block;
+  }
+}
+
+.resourceSimpleItem {
+  min-width: 0;
+  min-height: 68px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 4px;
+  border-bottom: 1px solid #eef1f5;
+  color: #98a2b3;
+
+  &:hover,
+  &:focus-visible {
+    background: #f7f9fc;
+    cursor: pointer;
+  }
+}
+
+.resourceSimpleIcon {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: 10px;
+  color: #fff;
+  background: #3478ee;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.resourceRepoIcon {
+  color: #344054;
+  background: #f0f2f5;
+  font-size: 18px;
+}
+
+.resourceSimpleMain {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+
+  :global(.@{antPrefix}-typography) {
+    font-size: 12px;
+  }
+
+  :global(.@{antPrefix}-typography strong) {
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 1280px) {
+  .resourceCategoryGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.resourceRepoItem {
+  min-width: 0;
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-bottom: 1px solid #eef1f5;
+  color: #475467;
+
+  & > div {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+.resourceDetailOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(15, 23, 42, 0.12);
+}
+
+.resourceDetailPanel {
+  width: min(50vw, 720px);
+  height: 100%;
+  padding: 16px;
+  overflow: auto;
+  background: #fff;
+  box-shadow: -8px 0 24px rgba(31, 45, 77, 0.12);
+}
+
+.resourceCardAction {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: #7c8798;
+  background: transparent;
+  cursor: pointer;
+
+  &:hover {
+    color: #246bfe;
+    background: #f1f6ff;
+  }
+}
+
+.resourceCardEmpty {
+  grid-column: 1 / -1;
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.taskProgress {
+  width: 180px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  :global(.@{antPrefix}-progress) {
+    flex: 1;
+    min-width: 80px;
+  }
+}
+
+.requirementMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.resourceContentPanel {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.resourceContentPanel :global(.@{antPrefix}-tabs) {
+  flex: none;
+}
+
+.resourceSessionSelect {
+  width: min(360px, 100%);
+  margin-bottom: 10px;
 }

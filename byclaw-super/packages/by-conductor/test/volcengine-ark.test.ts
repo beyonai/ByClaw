@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adaptVolcengineArkResponsesPayload } from "../src/volcengine-ark.js";
+import { adaptVolcengineArkResponsesPayload } from "../src/pi-provider-adapters/volcengine-ark.js";
 
 describe("Volcengine Ark Responses compatibility", () => {
   it("maps OpenAI reasoning parameters to enabled Ark thinking", () => {

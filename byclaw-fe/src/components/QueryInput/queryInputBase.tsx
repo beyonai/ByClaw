@@ -53,6 +53,9 @@ export type IProps = {
   inputDraft?: DefaultValueSchema;
   onInputDraftChange?: (draft: DefaultValueSchema) => void;
   contextUsed?: ContextUsed;
+
+  /** 当前会话所属项目，用于仅在运营项目展示任务模板入口。 */
+  projectId?: number;
 };
 
 export type IState = {
@@ -115,6 +118,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     const { EventEmitter } = this.props.globalContext;
     EventEmitter.on('queryInput-push-fileList', this.pushFileList);
     EventEmitter.on('queryInput-set-value', this.setInputValue);
+    EventEmitter.on('queryInput-set-value-and-send', this.setInputValueAndSend);
     EventEmitter.on('queryInput-set-schema-imme', this.setCommonStateBySchema);
     EventEmitter.on('queryInput-paste-files', this.onPasteFiles);
     EventEmitter.emit('pcLayout-contains-chatLayout', true, { waitForListeners: true });
@@ -122,10 +126,18 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     this.restoreInputDraft();
   }
 
+  componentDidUpdate(prevProps: IProps) {
+    if (`${prevProps.sessionId || ''}` !== `${this.props.sessionId || ''}`) {
+      // 新会话取得真实 sessionId 后重新读取已迁移的草稿，保证所有 @ 员工都恢复到输入框。
+      this.restoreInputDraft();
+    }
+  }
+
   componentWillUnmount() {
     const { EventEmitter } = this.props.globalContext;
     EventEmitter.off('queryInput-push-fileList', this.pushFileList);
     EventEmitter.off('queryInput-set-value', this.setInputValue);
+    EventEmitter.off('queryInput-set-value-and-send', this.setInputValueAndSend);
     EventEmitter.off('queryInput-set-schema-imme', this.setCommonStateBySchema);
     EventEmitter.off('queryInput-paste-files', this.onPasteFiles);
     EventEmitter.emit('pcLayout-contains-chatLayout', false);
@@ -230,8 +242,8 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     this.props.globalContext.setSiderAgentId?.(getLastMentionedDigitalEmployeeId(resourceList));
   };
 
-  getPersistentMentionDraft = (): DefaultValueSchema => {
-    return this.richInputRef.current?.getPersistentMentionDraft() || { text: '', resourceList: [] };
+  getPersistentMentionDraft = (includeQuestion = false): DefaultValueSchema => {
+    return this.richInputRef.current?.getPersistentMentionDraft(includeQuestion) || { text: '', resourceList: [] };
   };
 
   getQuoteAgentIds = (): string[] => {
@@ -352,6 +364,16 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
       }
 
       return newState;
+    });
+  };
+
+  // 外部任务模板入口使用该事件将生成内容写入输入框并直接发送。
+  setInputValueAndSend = (text: string) => {
+    if (!text?.trim()) return;
+    this.richInputRef.current?.setText(text);
+    this.setState({ inputValue: text }, () => {
+      this.onSendQuery();
+      this.richInputRef.current?.clearAfterSend();
     });
   };
 
@@ -629,7 +651,11 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
               inputValue: text,
               connectNet: resourceList.some((item) => `${item.resourceId}` === `${connectNetAgentId}`),
             }));
-            this.props.onInputDraftChange?.({ text, resourceList });
+            // 只要存在数字员工，就保存完整 mention 草稿，防止回答过程中默认 agent 变化后丢失其它员工。
+            const draft = resourceList.some((item) => `${item.resourceType}` === `${ResourceTypeMap.digitalEmployee}`)
+              ? this.getPersistentMentionDraft(true)
+              : { text, resourceList };
+            this.props.onInputDraftChange?.(draft);
             this.syncSiderAgent(resourceList);
             if (!cannotAt && agentId !== currentAgentId) {
               let nextAgentType = agentType;

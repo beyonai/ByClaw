@@ -3,9 +3,23 @@ export type ProjectType = 'normal' | 'operation' | 'develop' | 'default';
 
 export type ProjectShareFlag = 'N' | 'Y';
 
+// 研发项目工作区初始化状态:ready 已就绪(默认/普通项目)、pending 待初始化、initializing 初始化中。
+export type ProjectInitStatus = 'ready' | 'pending' | 'initializing';
+
 export type ProjectMemberRole = 'owner' | 'admin' | 'member';
 
 export type ProjectResourceScope = 'shared' | 'task' | 'session';
+
+export type ProjectBoundResourceType = 'knowledge' | 'digital_employee' | 'ontology';
+
+export interface ProjectBoundResource {
+  id?: string | number;
+  projectId?: string | number;
+  resourceType: ProjectBoundResourceType;
+  resourceId: string | number;
+  resourceName?: string;
+  sortNo?: number;
+}
 
 export interface ProjectMember {
   memberId?: string | number;
@@ -33,6 +47,14 @@ export interface ProjectSession {
   sessionExts?: Array<{ extParamCode: string; extParamValue: any }>;
   taskId?: string;
   fileCount?: number;
+  matchType?: 'DIGITAL_EMPLOYEE' | 'CHAT_CONTENT';
+  matchText?: string;
+  matchedEmployeeId?: string | number;
+  matchedEmployeeName?: string;
+  matchedEmployeeMatchField?: 'NAME' | 'DESCRIPTION';
+  matchedEmployeeMatchText?: string;
+  // 从项目任务模板执行入口进入聊天时，携带模板生成的首条消息并自动发送。
+  initialChatContent?: string;
 }
 
 export interface ProjectSpace {
@@ -43,6 +65,9 @@ export interface ProjectSpace {
   projectType: ProjectType;
   isShare: ProjectShareFlag;
   sharedFlag: boolean;
+  // 研发项目工作区初始化状态:ready 已就绪(默认/普通项目)、pending 待初始化、initializing 初始化中。
+  // 存量与普通项目视为 ready;仅 develop 未 ready 前禁止建需求/启动任务。
+  initStatus?: ProjectInitStatus;
   createBy?: string | number;
   createTime?: string;
   sessionCount?: number;
@@ -52,6 +77,8 @@ export interface ProjectSpace {
   sessions?: ProjectSession[];
   repos?: ProjectRepo[];
   shareTargets?: ProjectShareTarget[];
+  resources?: ProjectBoundResource[];
+  boundResources?: ProjectBoundResource[];
 }
 
 export interface ProjectRepo {

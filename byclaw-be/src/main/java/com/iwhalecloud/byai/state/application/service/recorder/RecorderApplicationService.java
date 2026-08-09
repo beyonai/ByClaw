@@ -116,6 +116,25 @@ public class RecorderApplicationService {
                 return fail(e.getHttpStatus(), e.getCode(), e.getMessage());
             }
         }
+        String targetUrl = stringValue(body, "url");
+        if (targetUrl != null && !targetUrl.isBlank()) {
+            try {
+                // 登录会话需在 awaiting_user_login 状态下直接打开目标平台，供用户在 VNC 页面扫码。
+                data.putAll(browserPort.navigate(session, targetUrl));
+                // 导航可能新建浏览器页，返回值需同步最新目标页，供后续调用复用同一登录页面。
+                data.put("targetId", session.targetId());
+            } catch (RecorderBrowserException e) {
+                session.state(RecorderSessionState.FAILED);
+                // bind 失败时前端拿不到会话 ID，必须在服务端释放已经启动的临时 VNC 资源。
+                try {
+                    vncProvider.stop(session.sessionId());
+                } catch (RuntimeException cleanupException) {
+                    log.warn("Recorder VNC cleanup failed after target navigation error, sessionId={}",
+                        session.sessionId(), cleanupException);
+                }
+                return fail(e.getHttpStatus(), e.getCode(), e.getMessage());
+            }
+        }
         return ok(data);
     }
 

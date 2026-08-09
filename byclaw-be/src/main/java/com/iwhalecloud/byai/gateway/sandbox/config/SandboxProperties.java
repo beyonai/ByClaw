@@ -173,6 +173,9 @@ public class SandboxProperties {
         private String baseUrl;
         private String apiKey;
 
+        /** Port exposed by the sandbox image for the OpenSandbox Execd API. */
+        private int execdPort = 44772;
+
         /**
          * When OpenSandbox endpoint (returned from /endpoints/{port}) is not a full URL,
          * we will prefix it with this scheme when polling.

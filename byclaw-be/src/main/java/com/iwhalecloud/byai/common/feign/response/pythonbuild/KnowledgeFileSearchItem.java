@@ -15,10 +15,11 @@ import lombok.Setter;
 @Setter
 public class KnowledgeFileSearchItem {
 
-    /**
-     * 知识库编码。经门户 Controller 封装后会回映为 ByClaw resourceId。
-     */
+    /** QA 知识库编码。 */
     private String knCode;
+
+    /** 门户知识库资源 ID，由 Controller 根据 knCode 回映。 */
+    private Long resourceId;
 
     private String filePath;
 

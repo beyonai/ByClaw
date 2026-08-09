@@ -1,6 +1,5 @@
 import type { ISandboxesInfo, ISandboxesInfoState } from '@/models/common/useAppStore';
 
-import { isDevelopment } from '@/utils/common';
 import CookieUtil from '@/utils/cookie';
 
 /**
@@ -18,12 +17,8 @@ export function resolveSandboxesInfo(sandboxesInfo: ISandboxesInfoState) {
 export function getVNCUrl(sandboxesInfo: ISandboxesInfo) {
   const { sandboxId } = sandboxesInfo;
 
-  let url = `/v1/sandboxes/${sandboxId}/proxy/8081/?autoconnect=true&resize=scale`;
-  if (isDevelopment()) {
-    url = `${URI_TARGET}${url}`;
-  } else {
-    url = `${window.location.origin}${url}`;
-  }
+  // 生产由 Nginx、本地由 Umi 开发代理转发同一前缀，iframe 和 noVNC WebSocket 始终保持同源。
+  const url = `${window.location.origin}/v1/sandboxes/${sandboxId}/proxy/8081/?autoconnect=true&resize=scale`;
 
   CookieUtil.set('novncUrl', url);
 

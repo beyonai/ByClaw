@@ -6,7 +6,16 @@ export const getArrayData = (response: any): any[] => {
   if (Array.isArray(response?.rows)) return response.rows;
   if (Array.isArray(response?.list)) return response.list;
   if (Array.isArray(response?.data)) return response.data;
+  // 部分项目接口会把分页对象再包在 data 中，统一解包后供大详情各 Tab 复用。
+  if (response?.data && response.data !== response) return getArrayData(response.data);
   return [];
+};
+
+// 分页接口存在直接返回和 data 包裹两种结构，统一提取总数供详情 Tab 判断是否继续加载。
+export const getPageTotal = (response: any, fallback = 0): number => {
+  const total = response?.total ?? response?.data?.total;
+  const normalizedTotal = Number(total);
+  return Number.isFinite(normalizedTotal) ? normalizedTotal : fallback;
 };
 
 const getObjectData = (response: any): any => {
@@ -59,6 +68,8 @@ export const normalizeProject = (item: any): ProjectSpace => ({
   projectType: item?.projectType === 'development' ? 'develop' : item?.projectType || 'normal',
   isShare: item?.isShare === 'Y' || item?.sharedFlag === true ? 'Y' : 'N',
   sharedFlag: item?.isShare === 'Y' || item?.sharedFlag === true,
+  // 存量/普通项目无该字段时按 ready 处理,避免误拦截历史项目建需求/启动任务。
+  initStatus: item?.initStatus || 'ready',
   createBy: item?.createBy,
   createTime: item?.createTime,
   sessionCount: item?.sessionCount ?? item?.sessions?.length ?? 0,
@@ -68,6 +79,9 @@ export const normalizeProject = (item: any): ProjectSpace => ({
   sessions: (item?.sessions || []).map((session: any) => normalizeProjectSession(session, `${item?.projectId || ''}`)),
   repos: Array.isArray(item?.repos) ? item.repos : undefined,
   shareTargets: Array.isArray(item?.shareTargets) ? item.shareTargets.map(normalizeShareTarget) : undefined,
+  resources: Array.isArray(item?.resources) ? item.resources : [],
+  // boundResources 保留别名，兼容早期详情组件对该字段的读取。
+  boundResources: Array.isArray(item?.resources) ? item.resources : [],
 });
 
 export const normalizeProjectDetail = (response: any, fallback?: ProjectSpace): ProjectSpace | undefined => {

@@ -1,0 +1,258 @@
+// 本页是自己的滚动容器(独立 docLayout 下没有外层 header 要避让)。
+// Anchor 通过 getContainer 拿到它定位,别改成 overflow:visible。
+.specPage {
+  display: flex;
+  gap: 24px;
+  width: 96%;
+  max-width: 1100px;
+  min-width: 500px;
+  height: 100%;
+  margin: 0 auto;
+  padding: 24px 0 48px;
+  overflow-y: auto;
+  position: relative;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+}
+
+// 右侧锚点导航:长页里定位章节,窄屏放不下就收起,主内容照常读。
+// sticky 而非 antd affix:affix 按 window 滚动算位置,本页滚动在容器内会停错地方。
+.anchor {
+  flex: 0 0 168px;
+  align-self: flex-start;
+  position: sticky;
+  top: 0;
+  padding-top: 8px;
+
+  :global(.ant-anchor-link-title) {
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 1080px) {
+  .anchor {
+    display: none;
+  }
+}
+
+.pageHeader {
+  margin-bottom: 24px;
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: 20px;
+    font-weight: 600;
+    color: #1c1f23;
+  }
+
+  p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 20px;
+    color: var(--beyond-color-text-tertiary);
+  }
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 32px 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1c1f23;
+  // 与 index.tsx 的 SCROLL_OFFSET 保持一致,兜住原生 hash 定位的场景。
+  scroll-margin-top: 24px;
+}
+
+.sectionIndex {
+  color: var(--beyond-color-primary, #2f6bff);
+}
+
+.sectionIntro {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 21px;
+  color: #526075;
+}
+
+.subTitle {
+  margin: 20px 0 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #1c1f23;
+}
+
+// ---------- 三方职责 ----------
+.roleGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 820px) {
+  .roleGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.roleCard {
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  border: 1px solid #dfe6f0;
+  border-radius: 10px;
+  background: #fbfcfe;
+  color: inherit;
+  transition: border-color 0.2s, box-shadow 0.2s;
+
+  &:hover {
+    border-color: var(--beyond-color-primary, #2f6bff);
+    box-shadow: 0 2px 8px rgb(47 107 255 / 10%);
+  }
+
+  ul {
+    flex: 1;
+    margin: 10px 0;
+    padding-left: 18px;
+
+    li {
+      font-size: 12px;
+      line-height: 20px;
+      color: #526075;
+    }
+  }
+}
+
+.roleHead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  strong {
+    font-size: 14px;
+    color: #1c1f23;
+  }
+
+  span {
+    font-size: 12px;
+    color: #a0aabb;
+  }
+}
+
+.roleFoot {
+  padding-top: 8px;
+  border-top: 1px dashed #dfe6f0;
+  font-size: 12px;
+  color: var(--beyond-color-primary, #2f6bff);
+}
+
+// ---------- demo 下载 ----------
+.demoGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 820px) {
+  .demoGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.demoCard {
+  :global(.ant-card-body) {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: flex-start;
+  }
+}
+
+.demoBody {
+  strong {
+    font-size: 14px;
+    color: #1c1f23;
+  }
+
+  p {
+    margin: 6px 0 8px;
+    font-size: 12px;
+    line-height: 19px;
+    color: #526075;
+  }
+}
+
+.demoRun {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #eef2f8;
+  color: #3d4a5c;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.demoTip {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 19px;
+  color: #a0aabb;
+}
+
+// ---------- 代码块 ----------
+.codeBlock {
+  position: relative;
+
+  pre {
+    margin: 0;
+    padding: 12px 44px 12px 12px;
+    border-radius: 8px;
+    background: #0f172a;
+    color: #e2e8f0;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre;
+    overflow-x: auto;
+  }
+}
+
+.codeCopy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  color: #94a3b8;
+
+  &:hover {
+    color: #fff;
+    background: rgb(255 255 255 / 12%);
+  }
+}
+
+// ---------- 状态枚举 ----------
+.enumList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.enumRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 20px;
+  color: #526075;
+}
+
+.enumCode {
+  flex: 0 0 auto;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+}

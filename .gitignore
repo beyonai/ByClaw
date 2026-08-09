@@ -116,3 +116,7 @@ byclaw-data/.vscode/settings.json
 .worktrees/
 
 .codegraph
+
+.uv-cache/
+
+.pnpm-store/

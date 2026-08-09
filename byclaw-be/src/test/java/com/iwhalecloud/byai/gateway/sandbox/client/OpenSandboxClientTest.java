@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.gateway.sandbox.client;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.OutputStream;
+import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
@@ -12,9 +13,48 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 import com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties;
+import com.iwhalecloud.byai.gateway.sandbox.command.SandboxCommandResult;
 import com.sun.net.httpserver.HttpServer;
 
 class OpenSandboxClientTest {
+
+    @Test
+    void readsBackgroundCommandIdFromNdjsonInitText() throws Exception {
+        OpenSandboxClient client = new OpenSandboxClient(new SandboxProperties());
+        String stream = "{\"type\":\"init\",\"text\":\"90b1315fad0e447b8bb26c77c311e162\","
+            + "\"timestamp\":1785996105659}\n\n"
+            + "{\"type\":\"ping\",\"text\":\"pong\",\"timestamp\":1785996105659}\n\n"
+            + "{\"type\":\"execution_complete\",\"timestamp\":1785996105660}";
+
+        Method parser = OpenSandboxClient.class.getDeclaredMethod("firstCommandId", String.class);
+        parser.setAccessible(true);
+
+        assertThat(parser.invoke(client, stream)).isEqualTo("90b1315fad0e447b8bb26c77c311e162");
+    }
+
+    @Test
+    void parsesRawNdjsonCommandEventsAndPreservesCliError() throws Exception {
+        OpenSandboxClient client = new OpenSandboxClient(new SandboxProperties());
+        String cliError = "{\"ok\":false,\"error\":{\"type\":\"config\","
+            + "\"subtype\":\"not_configured\"}}";
+        String stream = "{\"type\":\"init\",\"text\":\"started\",\"timestamp\":1}\n\n"
+            + "{\"type\":\"stderr\",\"text\":" + quoteJson(cliError) + ",\"timestamp\":2}\n\n"
+            + "{\"type\":\"error\",\"timestamp\":3,\"error\":{"
+            + "\"ename\":\"Error\",\"evalue\":\"Process exited with code 3\",\"traceback\":[]}}";
+
+        Method parser = OpenSandboxClient.class.getDeclaredMethod(
+            "parseCommandStream", String.class, int.class, boolean.class);
+        parser.setAccessible(true);
+        SandboxCommandResult result = (SandboxCommandResult) parser.invoke(client, stream, 4096, false);
+
+        assertThat(result.exitCode()).isEqualTo(3);
+        assertThat(result.stdout()).isEmpty();
+        assertThat(result.stderr()).isEqualTo(cliError);
+    }
+
+    private static String quoteJson(String value) {
+        return '"' + value.replace("\\", "\\\\").replace("\"", "\\\"") + '"';
+    }
 
     @Test
     void listSandboxesByMetadataUsesSingleEncodedMetadataQueryParameter() throws Exception {

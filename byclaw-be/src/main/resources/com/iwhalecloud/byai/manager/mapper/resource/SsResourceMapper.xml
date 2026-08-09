@@ -1155,7 +1155,7 @@
               AND a.catalog_id = #{catalogId}
           </if>
           <if test="keyword != null and keyword != ''">
-              AND a.resource_name LIKE CONCAT('%', #{keyword}, '%')
+              AND UPPER(a.resource_name) LIKE CONCAT('%', UPPER(#{keyword}), '%')
           </if>
         ORDER BY
             CASE WHEN a.resource_biz_type IN ('KG_DOC', 'KG_QA') THEN 0 ELSE 1 END,
@@ -1351,6 +1351,13 @@
             <if test="createBy != null">
                 AND a.create_by = #{createBy}
             </if>
+            <!-- 运营需求的采集知识库仅展示知识库业务类型，其他调用方不传该参数时兼容原查询范围。 -->
+            <if test="resourceBizTypeList != null and resourceBizTypeList.size() > 0">
+                AND a.resource_biz_type IN
+                <foreach collection="resourceBizTypeList" item="resourceBizType" open="(" separator="," close=")">
+                    #{resourceBizType}
+                </foreach>
+            </if>
             <if test="keyword != null and keyword != ''">
                 AND (
                     a.resource_name LIKE CONCAT('%', #{keyword}, '%')
@@ -1375,6 +1382,9 @@
                  join po_users b on a.create_by = b.user_id
         where resource_id = #{resourceId}
           and p_catalog_id = #{pCatalogId}
+          <if test="keyword != null and keyword != ''">
+              and UPPER(a.catalog_name) like CONCAT('%', UPPER(#{keyword}), '%')
+          </if>
         union all
         select a.file_id       as id,
                a.file_name     as name,
@@ -1388,6 +1398,9 @@
                  join po_users b on a.create_by = b.user_id
         where a.dataset_id =#{resourceId}
                   and a.file_collect_id =  #{pCatalogId}
+          <if test="keyword != null and keyword != ''">
+              and UPPER(a.file_name) like CONCAT('%', UPPER(#{keyword}), '%')
+          </if>
     </select>
 
 

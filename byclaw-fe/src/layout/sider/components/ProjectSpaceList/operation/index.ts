@@ -7,6 +7,15 @@ export { default as OperationAgentSelector } from './OperationAgentSelector';
 export type { OperationAgentSelectorProps } from './OperationAgentSelector';
 export { default as OperationTaskFormModal } from './OperationTaskFormModal';
 export type { OperationTaskFormModalProps } from './OperationTaskFormModal';
+export { default as KnowledgeOrganizationModal } from './KnowledgeOrganizationModal';
+export type { KnowledgeOrganizationModalProps } from './KnowledgeOrganizationModal';
+export { default as OperationRequirementStartModal } from './OperationRequirementStartModal';
+export type {
+  OperationRequirementStartModalProps,
+  OperationRequirementStartTask,
+} from './OperationRequirementStartModal';
+export { default as OperationTaskExecuteModal } from './OperationTaskExecuteModal';
+export type { OperationTaskExecuteModalProps } from './OperationTaskExecuteModal';
 export { default as OperationWorkflowTimeline } from './OperationWorkflowTimeline';
 export type { OperationWorkflowTimelineProps } from './OperationWorkflowTimeline';
 export type {
@@ -24,6 +33,7 @@ export type {
   OperationDateRange,
   OperationDirectoryOption,
   OperationIdentifier,
+  OperationKnowledgeOrganization,
   OperationLoginStatus,
   OperationPlatformOption,
   OperationSelectOption,

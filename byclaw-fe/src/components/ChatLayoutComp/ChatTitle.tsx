@@ -14,7 +14,9 @@ import { isAdminVip } from '@/utils/auth';
 import { useSelector, useIntl } from '@umijs/max';
 import VNC from './components/VNC';
 import ProjectSessionActions from './ProjectSessionActions';
+import ResourcePanelToggleIcon from './ChatResourceWorkspace/ResourcePanelToggleIcon';
 import { sessionHandler } from '@/utils/session';
+import { Button } from 'antd';
 
 interface ChatTitleProps {
   sessionId?: string;
@@ -23,6 +25,8 @@ interface ChatTitleProps {
   lastAnswer?: any;
   agentType: IAgentType;
   projectId?: number;
+  resourceWorkspaceOpen?: boolean;
+  onToggleResourceWorkspace?: () => void;
 }
 
 export default function ChatTitle(props: ChatTitleProps) {
@@ -79,6 +83,17 @@ export default function ChatTitle(props: ChatTitleProps) {
                   <AntdIcon type="icon-a-View-grid-listliebiaochakanmoshi" />
                   <span>{intl.formatMessage({ id: 'chatTitle.saveAsTemplate' })}</span>
                 </span>
+              )}
+              {props.onToggleResourceWorkspace && (
+                <Button
+                  type="text"
+                  className={classnames(styles.projectActionButton, {
+                    [styles.projectActionButtonActive]: props.resourceWorkspaceOpen,
+                  })}
+                  icon={<ResourcePanelToggleIcon className={styles.resourcePanelToggleIcon} />}
+                  onClick={props.onToggleResourceWorkspace}
+                  aria-label={intl.formatMessage({ id: 'chatResource.toggleList' })}
+                />
               )}
               {/* {!isSimpleSession && (
                 <span className={styles.btn} onClick={onToggleAchievements}>

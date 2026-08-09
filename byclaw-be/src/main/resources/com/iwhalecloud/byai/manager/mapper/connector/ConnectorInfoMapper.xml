@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.connector.ConnectorInfoMapper">
+
+    <resultMap id="ConnectorListDtoResultMap" type="com.iwhalecloud.byai.manager.dto.connector.ConnectorListDto">
+        <id column="connector_id" property="connectorId"/>
+        <result column="connector_code" property="connectorCode"/>
+        <result column="connector_name" property="connectorName"/>
+        <result column="connector_type" property="connectorType"/>
+        <result column="description" property="description"/>
+        <result column="enable_flag" property="enableFlag"/>
+    </resultMap>
+
+    <select id="selectConnectorListByQo" resultMap="ConnectorListDtoResultMap">
+        SELECT a.connector_id,
+               a.connector_code,
+               a.connector_name,
+               a.connector_type,
+               a.description,
+               CASE
+                   WHEN b.connector_id IS NULL THEN NULL
+                   WHEN b.enable_flag = 'Y' THEN 'Y'
+                   ELSE 'N'
+               END AS enable_flag
+        FROM byai_connector_info a
+                 LEFT JOIN (SELECT connector_id, enable_flag, expire_time
+                            FROM (SELECT connector_id,
+                                         enable_flag,
+                                         expire_time,
+                                         ROW_NUMBER() OVER (
+                                             PARTITION BY connector_id
+                                             ORDER BY CASE
+                                                          WHEN enable_flag = 'Y' THEN 0
+                                                          ELSE 1
+                                                      END,
+                                                      update_time DESC NULLS LAST,
+                                                      create_time DESC,
+                                                      auth_id DESC
+                                         ) AS row_num
+                                  FROM byai_connector_auth
+                                  WHERE user_id = #{userId}
+                                    AND status_cd = '00A') auth
+                            WHERE row_num = 1) b
+                           ON a.connector_id = b.connector_id
+        WHERE a.status_cd = '00A'
+        <if test="qo.keyword != null and qo.keyword != ''">
+            AND a.connector_name LIKE CONCAT('%', #{qo.keyword}, '%')
+        </if>
+        ORDER BY a.sort ASC, a.create_time DESC
+    </select>
+
+    <select id="selectByConnectorCode" resultType="com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo">
+        SELECT *
+        FROM byai_connector_info
+        WHERE connector_code = #{connectorCode}
+          AND status_cd = '00A'
+    </select>
+
+    <select id="selectConnectionsByUserId" resultType="com.iwhalecloud.byai.manager.dto.connector.ConnectorConnectionDto">
+        SELECT i.connector_code AS connector_id,
+               CASE
+                   WHEN a.enable_flag = 'Y' THEN 'connected'
+                   ELSE 'disabled'
+               END AS status,
+               a.auth_name AS account_name
+        FROM byai_connector_info i
+                 JOIN (SELECT connector_id,
+                              auth_name,
+                              enable_flag,
+                              expire_time,
+                                  ROW_NUMBER() OVER (
+                                  PARTITION BY connector_id
+                                  ORDER BY CASE
+                                               WHEN enable_flag = 'Y' THEN 0
+                                               ELSE 1
+                                           END,
+                                           update_time DESC NULLS LAST,
+                                           create_time DESC,
+                                           auth_id DESC
+                            ) AS row_num
+                       FROM byai_connector_auth
+                       WHERE user_id = #{userId}
+                         AND status_cd = '00A') a
+                    ON a.connector_id = i.connector_id
+                       AND a.row_num = 1
+        WHERE i.status_cd = '00A'
+        UNION ALL
+        SELECT i.connector_code AS connector_id,
+               'connected' AS status,
+               NULL AS account_name
+        FROM byai_connector_info i
+        WHERE i.status_cd = '00A'
+          AND i.auth_mode = 'NONE'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM byai_connector_auth a
+              WHERE a.connector_id = i.connector_id
+                AND a.user_id = #{userId}
+                AND a.status_cd = '00A'
+          )
+    </select>
+
+</mapper>

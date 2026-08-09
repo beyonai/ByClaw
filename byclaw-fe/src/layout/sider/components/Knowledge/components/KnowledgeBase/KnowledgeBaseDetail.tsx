@@ -18,7 +18,7 @@ import {
 } from '@/service/fileBrowser';
 import type { FileBrowserItem } from '@/service/fileBrowser';
 import { resolveTreeItemDirectoryPath } from './service';
-import { HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH, SiderContentContext } from '@/layout/sider/siderContentContext';
+import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import {
   checkUploadFileConflicts,
   uploadFiles as uploadKnowledgeFiles,
@@ -313,14 +313,14 @@ function getFileType(name: string): string {
 }
 
 interface FilePreviewPanelProps {
-  blob: Blob | null;
+  data: string | Blob | null;
   fileName: string;
   fileType: string;
   loading: boolean;
   onClose: () => void;
 }
 
-const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ blob, fileName, fileType, loading, onClose }) => (
+const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ data, fileName, fileType, loading, onClose }) => (
   <div className={styles.previewPanel}>
     <div className={styles.previewHeader}>
       <span className={styles.previewTitle}>{fileName}</span>
@@ -330,9 +330,9 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ blob, fileName, fil
     </div>
     <div className={styles.previewBody}>
       <Spin spinning={loading} wrapperClassName={styles.previewSpin}>
-        {blob && (
+        {data && (
           <React.Suspense fallback={null}>
-            <PreViewFile data={blob} type={fileType} title={fileName} className={styles.previewContent} />
+            <PreViewFile data={data} type={fileType} title={fileName} className={styles.previewContent} />
           </React.Suspense>
         )}
       </Spin>
@@ -631,16 +631,21 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
   );
 
   const renderPreviewPanel = useCallback(
-    (item: IKnowledgeDetailTreeItem, options: { blob?: Blob | null; loading: boolean }) => {
+    (item: IKnowledgeDetailTreeItem, options: { data?: string | Blob | null; fileType?: string; loading: boolean }) => {
+      const fileName = String(item.title || item.collectionName || '');
       setDetailPanel?.(
         <FilePreviewPanel
-          blob={options.blob ?? null}
-          fileName={String(item.title || item.collectionName || '')}
-          fileType={getFileType(String(item.title || item.collectionName || ''))}
+          data={options.data ?? null}
+          fileName={fileName}
+          fileType={options.fileType || getFileType(fileName)}
           loading={options.loading}
           onClose={() => clearDetailPanel?.()}
         />,
-        { width: HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH }
+        {
+          overlay: true,
+          tabKey: `knowledge-file:${dataset.resourceId}:${item.id || item.collectionId || fileName}`,
+          title: fileName,
+        }
       );
     },
     [clearDetailPanel, setDetailPanel]
@@ -669,7 +674,7 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
         const rawBlob = getRawBlob(res);
         const mimeType = getMimeType(fileName);
         const blob = mimeType ? new Blob([rawBlob], { type: mimeType }) : rawBlob;
-        renderPreviewPanel(item, { blob, loading: false });
+        renderPreviewPanel(item, { data: blob, loading: false });
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.preview.failed' }));
         clearDetailPanel?.();

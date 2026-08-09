@@ -1,0 +1,381 @@
+.workspace,
+.resourcePanel {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: #fff;
+}
+
+.workspace {
+  display: flex;
+  flex-direction: column;
+}
+
+.workspaceHeader {
+  display: flex;
+  align-items: flex-start;
+  flex: none;
+  height: 42px;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid #eef0f3;
+}
+
+.resourceToggle {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  margin-right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.resourceToggleActive {
+  color: #14161a;
+  background: #f1f2f4;
+  border-radius: 10px;
+
+  &:hover,
+  &:focus-visible {
+    color: #14161a;
+    background: #e9ebee;
+  }
+}
+
+.resourceToggleIcon {
+  width: 20px;
+  height: 20px;
+}
+
+.workspaceTabs {
+  flex: 1;
+  min-width: 0;
+
+  :global {
+    .@{antPrefix}-tabs-nav {
+      margin: 0;
+    }
+
+    .@{antPrefix}-tabs-content-holder {
+      display: none;
+    }
+
+    .@{antPrefix}-tabs-tab {
+      max-width: 180px;
+      height: 34px;
+      padding: 6px 10px !important;
+      border-radius: 6px 6px 0 0 !important;
+      color: #667085;
+    }
+
+    .@{antPrefix}-tabs-tab:hover {
+      color: #344054;
+    }
+
+    .@{antPrefix}-tabs-tab-active {
+      color: #14161a;
+    }
+
+    .@{antPrefix}-tabs-tab-btn {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+}
+
+.workspaceDetail {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #fff;
+}
+
+.workspaceTabPane {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.workspaceTabPaneHidden {
+  display: none;
+}
+
+.floatingResourcePanel {
+  position: absolute;
+  z-index: 20;
+  top: 42px;
+  bottom: 0;
+  left: 0;
+  width: 280px;
+  border-right: 1px solid #e5e8ed;
+  box-shadow: 8px 8px 20px rgba(25, 35, 55, 0.12);
+}
+
+// 文件预览页打开后，资源列表以半高浮窗覆盖在预览区，不再挤压或遮满整个预览页面。
+.floatingResourcePanelHalf {
+  top: 50px;
+  bottom: auto;
+  left: 8px;
+  height: 50%;
+  overflow: hidden;
+  border: 1px solid #e5e8ed;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(25, 35, 55, 0.16);
+}
+
+.floatingResourcePanelHidden {
+  display: none;
+}
+
+.dockedResourcePanel {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.resourcePanel {
+  display: flex;
+  flex-direction: column;
+}
+
+.primaryTabs,
+.secondaryTabs {
+  flex: none;
+  padding: 0 10px;
+
+  :global {
+    .@{antPrefix}-tabs-nav {
+      margin: 0;
+    }
+
+    .@{antPrefix}-tabs-nav::before {
+      display: none;
+    }
+
+    .@{antPrefix}-tabs-nav-list {
+      width: 100%;
+    }
+
+    .@{antPrefix}-tabs-tab {
+      min-width: 0;
+      justify-content: center;
+      flex: 1;
+      padding: 12px 4px 10px;
+      margin: 0 !important;
+      color: #14161a;
+      font-size: 14px;
+      font-weight: 400;
+    }
+
+    .@{antPrefix}-tabs-tab-active {
+      font-weight: 500;
+    }
+
+    .@{antPrefix}-tabs-tab-btn {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .@{antPrefix}-tabs-content-holder {
+      display: none;
+    }
+  }
+}
+
+.primaryTabs {
+  :global {
+    .@{antPrefix}-tabs-ink-bar {
+      display: none;
+    }
+
+    .@{antPrefix}-tabs-tab-btn {
+      padding-bottom: 7px;
+      border-bottom: 2px solid transparent;
+    }
+
+    .@{antPrefix}-tabs-tab-active .@{antPrefix}-tabs-tab-btn {
+      border-bottom-color: #14161a;
+    }
+  }
+}
+
+.secondaryTabs {
+  // 与数字员工“全部 / 我常用的 / 最近添加”筛选条保持一致，使用轻量胶囊块区分选中状态。
+  // 二级筛选仅承担快速切换，缩小上下留白，避免在窄面板中占用过多内容空间。
+  padding: 4px 10px 6px;
+  border-bottom: 1px solid #eef0f3;
+
+  :global(.@{antPrefix}-tabs-tab) {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    justify-content: center;
+    padding: 4px 5px;
+    border: 0;
+    border-radius: 28px;
+    color: rgba(112, 118, 128, 1);
+    background: #f5f5f5;
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 18px;
+
+    &:hover {
+      color: var(--beyond-color-primary);
+    }
+  }
+
+  :global {
+    .@{antPrefix}-tabs-nav-list {
+      display: flex;
+      gap: 8px;
+    }
+
+    .@{antPrefix}-tabs-tab-active {
+      color: var(--beyond-color-primary);
+      background: rgba(22, 93, 255, 0.1);
+      font-weight: 400;
+    }
+
+    .@{antPrefix}-tabs-tab-active .@{antPrefix}-tabs-tab-btn {
+      color: var(--beyond-color-primary);
+    }
+
+    .@{antPrefix}-tabs-ink-bar {
+      display: none;
+    }
+  }
+}
+
+.resourceSpin,
+.detailSpin {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+
+  :global {
+    .@{antPrefix}-spin-container {
+      height: 100%;
+      min-height: 0;
+    }
+  }
+}
+
+.resourceContent {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+
+  & > :global(.@{antPrefix}-empty) {
+    margin-top: 64px;
+  }
+}
+
+.codeList {
+  height: 100%;
+  padding: 8px;
+  overflow: auto;
+}
+
+.codeItem {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 8px !important;
+  cursor: pointer;
+
+  &:hover {
+    background: #f5f7fa;
+  }
+
+  :global(.@{antPrefix}-tag) {
+    flex: none;
+    margin: 0;
+  }
+}
+
+.codeFileName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codeStats {
+  flex: none;
+  color: #707680;
+  font-size: 12px;
+}
+
+// 项目详情代码资源使用卡片网格；会话右侧资源仍保留原紧凑行列表。
+.codeCardList {
+  :global(.@{antPrefix}-list-items) {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    align-content: start;
+    gap: 10px;
+  }
+}
+
+.codeCardItem {
+  min-width: 0;
+  min-height: 74px;
+  padding: 12px !important;
+  border: 1px solid #e8edf4;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 3px 12px rgba(31, 45, 77, 0.04);
+  flex-wrap: wrap;
+
+  &:hover {
+    border-color: #c9d8f5;
+    background: #fff;
+    box-shadow: 0 8px 18px rgba(31, 45, 77, 0.08);
+  }
+
+  .codeFileName {
+    flex-basis: calc(100% - 28px);
+  }
+}
+
+.resourceLoadMoreSentinel {
+  min-height: 20px;
+}
+
+.diffContent {
+  height: 100%;
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  color: #24292f;
+  background: #f7f8fa;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: pre;
+}
+
+.diffAdded {
+  display: inline-block;
+  width: 100%;
+  color: #116329;
+  background: #dafbe1;
+}
+
+.diffRemoved {
+  display: inline-block;
+  width: 100%;
+  color: #82071e;
+  background: #ffebe9;
+}

@@ -57,6 +57,34 @@ function insertDefaultAgentAtStart(editor: Editor, defaultAgentElement: MentionE
   Transforms.insertNodes(editor, defaultAgentElement, { at: [0, 0] });
 }
 
+function removeMatchingInlineAgent(editor: Editor, defaultAgentElement: MentionElementType): void {
+  const defaultAgentIds = new Set(
+    [defaultAgentElement.agentId, defaultAgentElement.resourceCode].filter(Boolean).map((item) => `${item}`)
+  );
+  if (!defaultAgentIds.size) return;
+
+  const matchingNodes = Array.from(
+    Editor.nodes(editor, {
+      at: [],
+      mode: 'lowest',
+      match: (node) => {
+        if (!Element.isElement(node) || node.type !== ELEMENT_MENTION) return false;
+        const mentionNode = node as MentionElementType;
+        const mentionAgentIds = [mentionNode.agentId, mentionNode.resourceCode]
+          .filter(Boolean)
+          .map((item) => `${item}`);
+        return !mentionNode.isDefaultAgent && mentionAgentIds.some((item) => defaultAgentIds.has(item));
+      },
+    })
+  );
+
+  // 同一个员工从普通 mention 升级为默认员工时先删除旧节点，避免发送后显示两个相同员工。
+  for (let i = matchingNodes.length - 1; i >= 0; i -= 1) {
+    const [, path] = matchingNodes[i];
+    Transforms.removeNodes(editor, { at: path });
+  }
+}
+
 /**
  * 删除editor开始位置的defaultAgentElement
  */
@@ -125,6 +153,7 @@ export function updateEditorContent(
   if (shouldShowDefaultAgent && !hasDefaultAgent) {
     updateDefaultAgentSafely(editor, () => {
       removeDefaultAgentFromStart(editor);
+      removeMatchingInlineAgent(editor, defaultAgentElement);
       // 需要显示defaultAgentElement但当前没有，则添加
       insertDefaultAgentAtStart(editor, defaultAgentElement);
     });
@@ -139,6 +168,7 @@ export function updateEditorContent(
       updateDefaultAgentSafely(editor, () => {
         // 需要显示defaultAgentElement但当前有，且不是defaultAgentElement，则删除，再添加
         removeDefaultAgentFromStart(editor);
+        removeMatchingInlineAgent(editor, defaultAgentElement);
         insertDefaultAgentAtStart(editor, defaultAgentElement);
       });
     }

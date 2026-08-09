@@ -28,6 +28,10 @@ function serializeByClawSse(event: RunEvent, state: SerializerState): string {
     appendReasoning(frames, event, state, progress);
   }
 
+  if (event.type === "leader.reasoning.delta") {
+    appendReasoning(frames, event, state, stringData(event.data.text));
+  }
+
   if (event.type === "leader.delta") {
     appendAnswerDelta(frames, event, state, stringData(event.data.text));
   }
@@ -56,7 +60,34 @@ function serializeByClawSse(event: RunEvent, state: SerializerState): string {
     );
   }
 
-  if (event.type === "run.failed" || event.type === "run.cancelled") {
+  if (event.type === "run.failed" && stringData(event.data.userMessage)) {
+    const userMessage = stringData(event.data.userMessage);
+    if (state.reasoningStarted && !state.reasoningEnded) {
+      frames.push(
+        frame(
+          event,
+          "reasoningLogEnd",
+          messagePayload(event, "reasoningLogEnd", ""),
+        ),
+      );
+      state.reasoningEnded = true;
+    }
+    appendAnswerDelta(frames, event, state, userMessage);
+    if (!state.answerEnded) {
+      frames.push(frame(event, "answerEnd", messagePayload(event, "answerEnd", "")));
+      state.answerEnded = true;
+    }
+    frames.push(
+      frame(event, "appStreamResponse", {
+        event: "appStreamResponse",
+        messageId: event.runId,
+        queryMessageId: event.runId,
+        traceId: event.runId,
+        relatedResources: [],
+        relatedQuestions: [],
+      }),
+    );
+  } else if (event.type === "run.failed" || event.type === "run.cancelled") {
     frames.push(
       frame(event, "error", {
         event: "error",

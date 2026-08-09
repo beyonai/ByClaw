@@ -31,6 +31,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.entity.men.MenTask;
+import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorAuthService;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.common.constants.Constants;
@@ -130,6 +131,9 @@ public class ScriptService extends AbstractChatProcess {
 
     @Autowired
     private com.iwhalecloud.byai.common.message.service.ByaiMessageHotService byaiMessageHotService;
+
+    @Autowired
+    private ConnectorAuthService connectorAuthService;
 
     /**
      * 参数准备：生成消息ID、组装请求参数、初始化上下文等。
@@ -600,6 +604,7 @@ public class ScriptService extends AbstractChatProcess {
             .append(String.valueOf(userId));
         metadata.put(Constants.MSG_ROLE, stringBuilder.toString());
         metadata.put("agentId", agentId);
+        metadata.put("authConnectorList", connectorAuthService.findConnectorEnableStates(userId));
         // 放在外面，一定会写的
         metadata.put("mode", assistantChatDto.getMode());
         // 增加智能体，聊天消息等标题，头像信息

@@ -34,18 +34,23 @@ import com.iwhalecloud.byai.manager.dto.devloop.MemberBatchDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberSaveDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectResourceDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileDeleteDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileQueryDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileRenameDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileSaveDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareTargetDTO;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectMember;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
-import com.iwhalecloud.byai.manager.entity.devloop.ScanLogItem;
+import com.iwhalecloud.byai.manager.entity.devloop.ProjectResource;
+import com.iwhalecloud.byai.manager.entity.devloop.ScanRequireItem;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanSource;
 import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
+import com.iwhalecloud.byai.manager.mapper.devloop.ProjectResourceMapper;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
 import com.iwhalecloud.byai.state.domain.file.service.FileService;
@@ -59,6 +64,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.util.UriComponentsBuilder;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -69,7 +75,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 项目管理应用服务。
@@ -83,6 +91,9 @@ public class ProjectApplicationService {
     private static final Logger logger = LoggerFactory.getLogger(ProjectApplicationService.class);
 
     private static final String PROJECT_TYPE_DEFAULT = "default";
+
+    /** 项目名称前后端统一限制为 100 个字符。 */
+    private static final int PROJECT_NAME_MAX_LENGTH = 100;
 
     /** 手工需求复用的内部扫描源类型，仓库关联实际保存于单条需求 JSON。 */
     private static final String MANUAL_SOURCE_TYPE = "manual";
@@ -101,6 +112,9 @@ public class ProjectApplicationService {
 
     @Autowired
     private ProjectRepoMapper projectRepoMapper;
+
+    @Autowired
+    private ProjectResourceMapper projectResourceMapper;
 
     @Autowired
     private ScanSourceService scanSourceService;
@@ -146,6 +160,7 @@ public class ProjectApplicationService {
      * @param dto 项目信息
      * @return 新建项目
      */
+    @Transactional
     public Project createProject(ProjectDTO dto) {
         String projectName = normalizeProjectName(dto.getProjectName());
         if (projectName.isEmpty()) {
@@ -160,14 +175,19 @@ public class ProjectApplicationService {
         project.setProjectName(projectName);
         project.setDescription(dto.getDescription());
         project.setResourceId(dto.getResourceId());
-        project.setProjectType(dto.getProjectType() != null ? dto.getProjectType() : "normal");
+        String projectType = dto.getProjectType() != null ? dto.getProjectType() : "normal";
+        project.setProjectType(projectType);
         project.setIsShare(dto.getIsShare() != null ? dto.getIsShare() : Constants.NO_VALUE_N);
+        // 研发项目须先由架构数字员工初始化工作区,建成前禁止建需求/启动任务;普通项目直接就绪。
+        project.setInitStatus("develop".equals(projectType) ? "pending" : "ready");
+        project.setBuildIndex(Constants.NO_VALUE_N);
         project.setCreateBy(CurrentUserHolder.getCurrentUserId());
         project.setCreateTime(new Date());
         project.setDeleteFlag(DeleteFlag.NORMAL);
         projectService.save(project);
 
         saveProjectRepos(project.getProjectId(), dto.getRepos());
+        saveProjectResources(project.getProjectId(), dto.getResources());
         if (Constants.YES_VALUE_Y.equalsIgnoreCase(project.getIsShare())) {
             this.saveOrUpdateProjectMember(project.getProjectId(), dto.getShareTargets());
         }
@@ -177,6 +197,65 @@ public class ProjectApplicationService {
             MemberRole.OWNER);
 
         return project;
+    }
+
+    /**
+     * 触发研发项目工作区初始化：置为 initializing 并记录建索引/技能包配置。
+     *
+     * @param params 含 projectId、buildIndex(Y/N)、skillPackages(数组)
+     */
+    public void startProjectInit(Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        Project project = requireProject(projectId);
+        boolean buildIndex = Constants.YES_VALUE_Y.equalsIgnoreCase(MapParamUtil.getStringValue(params, "buildIndex"))
+            || Boolean.TRUE.equals(params.get("buildIndex"));
+        Project update = new Project();
+        update.setProjectId(project.getProjectId());
+        update.setInitStatus("initializing");
+        update.setBuildIndex(buildIndex ? Constants.YES_VALUE_Y : Constants.NO_VALUE_N);
+        // 技能包仅建索引时保留;逗号分隔,存量枚举暂由前端约束,后端只落原样。
+        update.setIndexSkills(buildIndex ? joinSkillPackages(params.get("skillPackages")) : "");
+        update.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        update.setUpdateTime(new Date());
+        projectService.update(update);
+    }
+
+    /**
+     * 标记研发项目工作区初始化完成：置为 ready。
+     *
+     * @param projectId 项目 ID
+     */
+    public void completeProjectInit(Long projectId) {
+        Project project = requireProject(projectId);
+        Project update = new Project();
+        update.setProjectId(project.getProjectId());
+        update.setInitStatus("ready");
+        update.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        update.setUpdateTime(new Date());
+        projectService.update(update);
+    }
+
+    private Project requireProject(Long projectId) {
+        if (projectId == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.id.required");
+        }
+        Project project = projectService.findById(projectId);
+        if (project == null || DeleteFlag.DELETED.equals(project.getDeleteFlag())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.not.found");
+        }
+        return project;
+    }
+
+    private String joinSkillPackages(Object raw) {
+        if (!(raw instanceof List<?> list) || list.isEmpty()) {
+            return "";
+        }
+        return list.stream()
+            .filter(Objects::nonNull)
+            .map(Object::toString)
+            .map(String::trim)
+            .filter(item -> !item.isEmpty())
+            .collect(Collectors.joining(","));
     }
 
     /**
@@ -249,6 +328,9 @@ public class ProjectApplicationService {
             projectRepoMapper
                 .delete(new LambdaQueryWrapper<ProjectRepo>().eq(ProjectRepo::getProjectId, dto.getProjectId()));
             saveProjectRepos(dto.getProjectId(), dto.getRepos());
+        }
+        if (dto.getResources() != null) {
+            saveProjectResources(dto.getProjectId(), dto.getResources());
         }
 
         // 如果不分享的，移除分享成员
@@ -323,7 +405,9 @@ public class ProjectApplicationService {
      * @return 成员列表
      */
     public List<ProjectMemberListDto> listProjectMembers(Long projectId, String userName) {
-        return projectMemberService.listProjectMembers(projectId, StringUtils.trimToNull(userName));
+        // 成员列表需要以当前登录用户为第二优先级，排序逻辑由查询 SQL 统一处理。
+        return projectMemberService.listProjectMembers(projectId, StringUtils.trimToNull(userName),
+            CurrentUserHolder.getCurrentUserId());
     }
 
     /**
@@ -461,6 +545,13 @@ public class ProjectApplicationService {
             if (project != null && project.getCreateBy() != null && project.getCreateBy().equals(member.getUserId())) {
                 throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.member.creator.remove.forbidden");
             }
+            Long currentUserId = CurrentUserHolder.getCurrentUserId();
+            boolean isProjectCreator = project != null && Objects.equals(project.getCreateBy(), currentUserId);
+            boolean isRemovingSelf = Objects.equals(member.getUserId(), currentUserId);
+            if (!isProjectCreator && !isRemovingSelf) {
+                // 成员移除接口仅允许创建者管理成员，或普通成员主动退出项目。
+                throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.member.remove.forbidden");
+            }
         }
         projectMemberService.removeMember(memberId);
     }
@@ -519,6 +610,12 @@ public class ProjectApplicationService {
         projectMemberService.bindAgent(memberId, agentId);
     }
 
+    /** 解除项目成员与数字员工的绑定关系。 */
+    public void unbindMemberAgent(Map<String, Object> params) {
+        Long memberId = MapParamUtil.getLongValue(params, "memberId");
+        projectMemberService.unbindAgent(memberId);
+    }
+
     /**
      * 查询项目详情，含仓库与会话。
      *
@@ -533,6 +630,11 @@ public class ProjectApplicationService {
         LambdaQueryWrapper<ProjectRepo> repoWrapper = new LambdaQueryWrapper<>();
         repoWrapper.eq(ProjectRepo::getProjectId, projectId);
         List<ProjectRepo> repos = projectRepoMapper.selectList(repoWrapper);
+        LambdaQueryWrapper<ProjectResource> resourceWrapper = new LambdaQueryWrapper<>();
+        resourceWrapper.eq(ProjectResource::getProjectId, projectId)
+            .and(item -> item.isNull(ProjectResource::getDeleteFlag)
+                .or().ne(ProjectResource::getDeleteFlag, DeleteFlag.DELETED));
+        List<ProjectResource> resources = projectResourceMapper.selectList(resourceWrapper);
         List<ByaiSessionDto> sessions = projectSessionService.listSessionsByProjectId(projectId);
 
         Map<String, Object> map = new HashMap<>();
@@ -542,20 +644,95 @@ public class ProjectApplicationService {
         map.put("resourceId", project.getResourceId());
         map.put("projectType", project.getProjectType());
         map.put("isShare", project.getIsShare());
+        // 研发项目初始化状态与配置:前端据此拦截建需求/启动任务并展示初始化中指示。
+        map.put("initStatus", project.getInitStatus());
+        map.put("buildIndex", project.getBuildIndex());
+        map.put("indexSkills", project.getIndexSkills());
         map.put("repos", repos);
+        map.put("resources", resources);
         map.put("sessions", sessions);
         map.put("sessionCount", sessions.size());
         return map;
     }
 
     /**
+     * 查询项目关联的代码仓库列表。
+     *
+     * @param projectId 项目 ID，必填
+     * @return 项目仓库列表
+     */
+    public List<ProjectRepo> listProjectRepos(Long projectId) {
+        if (projectId == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.id.required");
+        }
+        Project project = projectService.findById(projectId);
+        if (project == null || DeleteFlag.DELETED.equals(project.getDeleteFlag())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.not.found");
+        }
+        LambdaQueryWrapper<ProjectRepo> repoWrapper = new LambdaQueryWrapper<>();
+        repoWrapper.eq(ProjectRepo::getProjectId, projectId);
+        return projectRepoMapper.selectList(repoWrapper);
+    }
+
+    /** 查询项目绑定的知识库、数字员工和本体资源。 */
+    public List<ProjectResource> listProjectResources(Long projectId) {
+        requireProject(projectId);
+        LambdaQueryWrapper<ProjectResource> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ProjectResource::getProjectId, projectId)
+            .and(item -> item.isNull(ProjectResource::getDeleteFlag)
+                .or().ne(ProjectResource::getDeleteFlag, DeleteFlag.DELETED))
+            .orderByAsc(ProjectResource::getResourceType)
+            .orderByAsc(ProjectResource::getSortNo)
+            .orderByAsc(ProjectResource::getId);
+        return projectResourceMapper.selectList(wrapper);
+    }
+
+    /** 全量覆盖项目资源绑定，传空数组表示解除全部绑定。 */
+    @Transactional
+    public void saveProjectResources(Long projectId, List<ProjectResourceDTO> resources) {
+        requireProject(projectId);
+        projectResourceMapper.delete(new LambdaQueryWrapper<ProjectResource>()
+            .eq(ProjectResource::getProjectId, projectId));
+        if (resources == null || resources.isEmpty()) return;
+
+        Set<String> uniqueKeys = new HashSet<>();
+        int nextSortNo = 0;
+        for (ProjectResourceDTO dto : resources) {
+            String resourceType = StringUtils.trimToEmpty(dto.getResourceType()).toLowerCase(Locale.ROOT);
+            String resourceId = StringUtils.trimToEmpty(dto.getResourceId());
+            if (!Set.of("knowledge", "digital_employee", "ontology").contains(resourceType)
+                || resourceId.isEmpty()) {
+                throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.resource.invalid");
+            }
+            if (!uniqueKeys.add(resourceType + ":" + resourceId)) continue;
+
+            ProjectResource entity = new ProjectResource();
+            entity.setId(sequenceService.nextVal());
+            entity.setProjectId(projectId);
+            entity.setResourceType(resourceType);
+            entity.setResourceId(resourceId);
+            entity.setResourceName(StringUtils.trimToNull(dto.getResourceName()));
+            entity.setSortNo(dto.getSortNo() == null ? nextSortNo++ : dto.getSortNo());
+            entity.setCreateBy(CurrentUserHolder.getCurrentUserId());
+            entity.setCreateTime(new Date());
+            entity.setDeleteFlag(DeleteFlag.NORMAL);
+            projectResourceMapper.insert(entity);
+        }
+    }
+
+    /**
      * 规范化项目名称。
      *
      * @param projectName 原始名称
-     * @return 去首尾空格后的名称
+     * @return 校验长度并去除首尾空格后的名称
      */
     private String normalizeProjectName(String projectName) {
-        return projectName == null ? "" : projectName.trim();
+        String normalizedName = projectName == null ? "" : projectName.trim();
+        // 应用层再次校验，确保未经过 @Valid 的内部或开放接口同样受长度限制。
+        if (normalizedName.length() > PROJECT_NAME_MAX_LENGTH) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.max.length");
+        }
+        return normalizedName;
     }
 
     /**
@@ -591,6 +768,12 @@ public class ProjectApplicationService {
         repo.setRepoFullName(repoDto.getRepoFullName().trim());
         repo.setRepoUrl(repoDto.getRepoUrl() != null ? repoDto.getRepoUrl().trim() : null);
         repo.setDefaultBranch(defaultBranch.isEmpty() ? "main" : defaultBranch);
+        // 描述可选,空串归一成 null,避免预拆提示词里出现空的 description= 行。
+        repo.setDescription(StringUtils.trimToNull(repoDto.getDescription()));
+        // 仅接受受支持的仓库类型,其余(含空)按代码仓库处理;工作区唯一性由应用层/前端保证。
+        String repoType = "workspace".equals(repoDto.getRepoType()) ? "workspace" : "code";
+        repo.setRepoType(repoType);
+        repo.setProvider(normalizeProvider(repoDto.getProvider()));
         repo.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
         repo.setCreateTime(new Date());
         projectRepoMapper.insert(repo);
@@ -616,7 +799,18 @@ public class ProjectApplicationService {
         result.put("repoFullName", repo.getRepoFullName());
         result.put("repoUrl", repo.getRepoUrl());
         result.put("defaultBranch", repo.getDefaultBranch());
+        result.put("description", repo.getDescription());
+        result.put("repoType", repo.getRepoType());
+        result.put("provider", repo.getProvider());
         return result;
+    }
+
+    /** 仅接受受支持的代码平台,其余(含空)按 github 处理;与 clone 令牌注入约定保持一致。 */
+    private static String normalizeProvider(String provider) {
+        if ("gitlab".equals(provider) || "gitea".equals(provider)) {
+            return provider;
+        }
+        return "github";
     }
 
     /**
@@ -651,7 +845,7 @@ public class ProjectApplicationService {
             if (!MANUAL_SOURCE_TYPE.equals(source.getSourceType()) || source.getSourceId() == null) {
                 continue;
             }
-            for (ScanLogItem item : scanLogService.listCreatedItemsBySource(source.getSourceId())) {
+            for (ScanRequireItem item : scanLogService.listCreatedItemsBySource(source.getSourceId())) {
                 if (isManualRequirementBoundToRepo(item, repoId)) {
                     count++;
                 }
@@ -663,7 +857,7 @@ public class ProjectApplicationService {
     /**
      * 仅识别带手工需求命名空间的 JSON，历史需求未保存 repoId 时返回 false，保持原有删除行为。
      */
-    private boolean isManualRequirementBoundToRepo(ScanLogItem item, Long repoId) {
+    private boolean isManualRequirementBoundToRepo(ScanRequireItem item, Long repoId) {
         if (item == null || StringUtils.isBlank(item.getContent()) || repoId == null) {
             return false;
         }
@@ -689,6 +883,7 @@ public class ProjectApplicationService {
             return PageHelperUtil.emptyPage(projectSessionQo.getPageNum(), projectSessionQo.getPageSize());
         }
 
+        projectSessionQo.normalizeSearchCondition();
         projectSessionQo.setCreateBy(CurrentUserHolder.getCurrentUserId());
 
         return projectSessionService.listSessionsByProject(projectSessionQo);
@@ -766,6 +961,96 @@ public class ProjectApplicationService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.id.required");
         }
         return projectShareFileService.listSpaceFiles(dto.getProjectId());
+    }
+
+    /**
+     * 修改项目共享文件的展示名称；对象存储路径保持不变，避免重命名影响已有预览链接。
+     *
+     * @param dto 含项目 ID、文件 ID 和新文件名
+     */
+    public void renameShareFile(ProjectShareFileRenameDto dto) {
+        Project project = validateShareFileOperation(dto == null ? null : dto.getProjectId(),
+            dto == null ? null : dto.getFileId());
+        String fileName = StringUtils.trimToEmpty(dto.getFileName());
+        if (fileName.isEmpty() || fileName.contains("/") || fileName.contains("\\")) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.share.file.name.invalid");
+        }
+
+        Files file = fileService.findById(dto.getFileId());
+        if (file == null || !Objects.equals(file.getProjectId(), project.getProjectId())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.share.file.not.found");
+        }
+        // 共享文件通过 fileUrl 预览，名称仅更新文件元数据即可保持已有链接可用。
+        file.setFileName(fileName);
+        file.setConvertFileName(fileName);
+        fileService.update(file);
+    }
+
+    /**
+     * 删除项目共享文件及其文件元数据；仅移除当前项目已关联的文件。
+     *
+     * @param dto 含项目 ID、文件 ID
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteShareFile(ProjectShareFileDeleteDto dto) {
+        Project project = validateShareFileOperation(dto == null ? null : dto.getProjectId(),
+            dto == null ? null : dto.getFileId());
+        Files file = fileService.findById(dto.getFileId());
+        if (file == null || !Objects.equals(file.getProjectId(), project.getProjectId())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.share.file.not.found");
+        }
+
+        deleteShareFileStorage(file);
+        // 存储文件删除成功后，再删除项目关联和文件元数据，避免列表残留已删除文件。
+        projectShareFileService.removeByProjectAndFile(project.getProjectId(), dto.getFileId());
+        fileService.remove(dto.getFileId());
+    }
+
+    /**
+     * 根据共享文件预览地址提取对象存储路径，并删除实际文件。
+     *
+     * @param file 项目共享文件元数据
+     */
+    private void deleteShareFileStorage(Files file) {
+        try {
+            String filePath = UriComponentsBuilder.fromUriString(file.getFileUrl()).build().getQueryParams()
+                .getFirst("filePath");
+            if (StringUtils.isBlank(filePath)) {
+                throw new IllegalArgumentException("project shared file path is empty");
+            }
+            commonFileStorage.delete(commonFilePathResolver.projectShare(filePath));
+        }
+        catch (Exception e) {
+            log.error("Failed to delete project shared file storage, fileId={}", file.getFileId(), e);
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.share.file.delete.failed", e);
+        }
+    }
+
+    /**
+     * 校验共享文件操作参数、文件归属和项目创建者权限。
+     *
+     * @param projectId 项目 ID
+     * @param fileId 文件 ID
+     * @return 已校验项目
+     */
+    private Project validateShareFileOperation(Long projectId, Long fileId) {
+        if (projectId == null || projectId == 0L) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.id.required");
+        }
+        if (fileId == null || fileId == 0L) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.share.file.not.found");
+        }
+        Project project = projectService.findById(projectId);
+        if (project == null || DeleteFlag.DELETED.equals(project.getDeleteFlag())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.not.found");
+        }
+        if (!Objects.equals(project.getCreateBy(), CurrentUserHolder.getCurrentUserId())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.creator.operation.forbidden");
+        }
+        if (!projectShareFileService.existsByProjectAndFile(projectId, fileId)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.share.file.not.found");
+        }
+        return project;
     }
 
 }

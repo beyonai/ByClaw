@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { loadConfig } from "./config/index.js";
-import { createApplication } from "./runtime.js";
+import { createApplication } from "./runtime/index.js";
 
 const config = loadConfig();
 const application = await createApplication(config);

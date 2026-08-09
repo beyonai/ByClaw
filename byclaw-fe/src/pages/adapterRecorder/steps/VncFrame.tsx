@@ -3,7 +3,6 @@
 // 用户在该画面里直接操作容器内 Chromium;停止/状态由 dashboard 自己的 toolbar 驱动(走 useRecorderSession),
 // 不在 iframe 内放工具栏(原生工具栏方案)。无 vncUrl 时显示未就绪提示。
 import { Empty, theme } from 'antd';
-import { isDevelopment } from '@/utils/common';
 
 interface Props {
   /** bind 返回的容器 noVNC 画面 URL(http://127.0.0.1:<宿主端口>/vnc.html)。 */
@@ -11,8 +10,8 @@ interface Props {
 }
 
 export function buildVncFrameSrc(vncUrl: string): string {
-  const baseUrl = isDevelopment() ? URI_TARGET : window.location.origin;
-  const url = new URL(vncUrl, baseUrl);
+  // 相对 VNC 地址统一走页面同源入口，本地开发代理和生产 Nginx 分别负责转发 OpenSandbox 流量。
+  const url = new URL(vncUrl, window.location.origin);
   if (!url.pathname.endsWith('/')) {
     url.pathname += '/';
   }

@@ -20,14 +20,12 @@ export function getDatasetDownloadParamsFromQueryFile(
   if (!qf) return null;
   const resourceId = qf.resourceId ?? qf.datasetId;
   const name = qf.fileName !== null && qf.fileName !== undefined && qf.fileName !== '' ? String(qf.fileName) : '';
-  const directoryPathRaw =
-    qf.directoryPath !== null && qf.directoryPath !== undefined && String(qf.directoryPath).trim() !== ''
-      ? String(qf.directoryPath)
-      : name
-        ? name.startsWith('/')
-          ? name
-          : `/${name}`
-        : '';
+  let directoryPathRaw = '';
+  if (qf.directoryPath !== null && qf.directoryPath !== undefined && String(qf.directoryPath).trim() !== '') {
+    directoryPathRaw = String(qf.directoryPath);
+  } else if (name) {
+    directoryPathRaw = name.startsWith('/') ? name : `/${name}`;
+  }
   if (resourceId === null || resourceId === undefined || `${resourceId}` === '' || !directoryPathRaw) {
     return null;
   }
@@ -75,6 +73,18 @@ export const downloadResourceFile = (params: DownloadDatasetFileParams) =>
     {
       responseType: 'blob',
     }
+  );
+
+/** 关联文件预览专用下载接口，显式携带语言参数以匹配会话资源预览接口。 */
+export const downloadResourceFileForPreview = (params: DownloadDatasetFileParams & { language?: string }) =>
+  GET<any>(
+    '/byaiService/datasetController/download',
+    {
+      resourceId: params.resourceId,
+      directoryPath: normalizeDatasetDirectoryPath(params.directoryPath),
+      language: params.language || 'zh-CN',
+    },
+    { responseType: 'blob' }
   );
 
 export const downloadMinIOFileURL = '/byaiService/commonFile/download';

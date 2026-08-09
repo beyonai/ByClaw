@@ -17,6 +17,12 @@ public class DirAndFileVo {
 
     private Long id;
 
+    /** QA 知识库编码。 */
+    private String knCode;
+
+    /** 门户知识库资源 ID。 */
+    private Long resourceId;
+
     private String name;
 
     private String type;

@@ -272,7 +272,11 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
           onCancel={() => clearDetailPanel?.()}
           onEdit={() => {}}
         />,
-        { width: 350 }
+        {
+          width: 350,
+          tabKey: `knowledge-resource:${item.resourceId}`,
+          title: item.resourceName,
+        }
       );
     },
     [clearDetailPanel, intl, setDetailPanel]

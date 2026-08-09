@@ -1,3 +1,25 @@
+.projectFormModal {
+  :global(.ant-modal) {
+    max-height: calc(100vh - 48px);
+  }
+
+  :global(.ant-modal-content) {
+    max-height: calc(100vh - 48px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  // 项目表单较长时只滚动弹窗主体，避免把项目空间页面整体带着滚动。
+  :global(.ant-modal-body) {
+    min-height: 0;
+    max-height: calc(100vh - 220px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-inline-end: 8px;
+  }
+}
+
 .shareTargetField {
   display: flex;
   flex-direction: column;
@@ -65,4 +87,81 @@
   padding: 0 10px;
   border-radius: 6px;
   font-size: 13px;
+}
+
+.defaultAgentField {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.defaultAgentRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.defaultAgentLabel {
+  flex-shrink: 0;
+  width: 72px;
+  color: #5a6b85;
+  font-size: 13px;
+}
+
+.defaultAgentSelect {
+  flex: 1;
+  min-width: 0;
+}
+
+.projectResourceFields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e4eaf3;
+  border-radius: 10px;
+  background: #f8fafc;
+
+  :global(.ant-select) {
+    width: 100%;
+  }
+}
+
+.projectTypeTabs {
+  display: inline-flex;
+  max-width: 100%;
+  flex-wrap: wrap;
+
+  :global(.ant-radio-button-wrapper) {
+    flex: 0 0 auto;
+    min-width: 0;
+    padding: 5px 14px;
+    text-align: center;
+    white-space: nowrap;
+  }
+}
+
+.projectResourceLabel {
+  margin-bottom: 5px;
+  color: #45546a;
+  font-size: 13px;
+  font-weight: 500;
+
+  &::before {
+    margin-right: 4px;
+    color: #ff4d4f;
+    content: '*';
+  }
+}
+
+.projectResourceFieldError {
+  :global(.ant-select-selector) {
+    border-color: #ff4d4f !important;
+  }
+}
+
+.projectResourceError {
+  margin-top: 4px;
+  color: #ff4d4f;
+  font-size: 12px;
 }

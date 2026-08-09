@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanSource;
 import com.iwhalecloud.byai.manager.mapper.devloop.ScanSourceMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -9,7 +10,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.Date;
+import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 /**
  * 扫描源领域服务
@@ -18,6 +22,19 @@ import java.util.List;
 @Slf4j
 @Service
 public class ScanSourceService {
+
+    /** 运营需求类型直接复用 source_type，不再增加额外记录类型字段。 */
+    public static final String OPERATION_SOURCE_TYPE_COLLECT = "collect";
+
+    /** 运营需求中的知识整理类型，创建阶段只保存目标，启动时再拆解为具体任务。 */
+    public static final String OPERATION_SOURCE_TYPE_KNOWLEDGE = "knowledge";
+
+    public static final String OPERATION_SOURCE_TYPE_PUBLISH = "publish";
+
+    public static final String OPERATION_SOURCE_TYPE_ANALYZE = "analyze";
+
+    public static final Set<String> OPERATION_SOURCE_TYPES = Set.of(OPERATION_SOURCE_TYPE_COLLECT,
+        OPERATION_SOURCE_TYPE_KNOWLEDGE, OPERATION_SOURCE_TYPE_PUBLISH, OPERATION_SOURCE_TYPE_ANALYZE);
 
     @Autowired
     private ScanSourceMapper scanSourceMapper;
@@ -64,6 +81,47 @@ public class ScanSourceService {
                .eq(ScanSource::getDeleteFlag, "0")
                .orderByDesc(ScanSource::getCreateTime);
         return scanSourceMapper.selectList(wrapper);
+    }
+
+    /** 分页查询项目渠道，搜索只匹配渠道名称并排除手工需求使用的内部来源。 */
+    public Page<ScanSource> listByProjectIdPage(Long projectId, String keyword, String excludedSourceType, int pageNum,
+        int pageSize) {
+        return listByProjectIdPage(projectId, keyword,
+            excludedSourceType == null ? Set.of() : Set.of(excludedSourceType), pageNum, pageSize);
+    }
+
+    /** 分页查询渠道，并排除手工来源及运营需求来源，避免共享 source 表后跨模块串数据。 */
+    public Page<ScanSource> listByProjectIdPage(Long projectId, String keyword, Collection<String> excludedSourceTypes,
+        int pageNum, int pageSize) {
+        LambdaQueryWrapper<ScanSource> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ScanSource::getProjectId, projectId).eq(ScanSource::getDeleteFlag, "0");
+        if (excludedSourceTypes != null && !excludedSourceTypes.isEmpty()) {
+            // 保留历史空类型渠道，仅排除明确的内部来源和运营需求来源。
+            wrapper.and(query -> query.isNull(ScanSource::getSourceType).or()
+                .notIn(ScanSource::getSourceType, excludedSourceTypes));
+        }
+        String normalizedKeyword = org.apache.commons.lang3.StringUtils.trimToNull(keyword);
+        if (normalizedKeyword != null) {
+            // PostgreSQL 的 LIKE 区分大小写，渠道名称统一小写后支持大小写混输搜索。
+            wrapper.apply("LOWER(source_name) LIKE {0}", "%" + normalizedKeyword.toLowerCase(Locale.ROOT) + "%");
+        }
+        wrapper.orderByDesc(ScanSource::getCreateTime);
+        return scanSourceMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
+    }
+
+    /** 分页查询项目下的运营需求，需求记录和研发扫描渠道共用 source_id。 */
+    public Page<ScanSource> pageOperationRequirements(Long projectId, String keyword, int pageNum, int pageSize) {
+        LambdaQueryWrapper<ScanSource> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ScanSource::getProjectId, projectId)
+            .eq(ScanSource::getDeleteFlag, "0")
+            .in(ScanSource::getSourceType, OPERATION_SOURCE_TYPES);
+        String normalizedKeyword = org.apache.commons.lang3.StringUtils.trimToNull(keyword);
+        if (normalizedKeyword != null) {
+            // PostgreSQL 的 LIKE 区分大小写，运营需求搜索统一使用小写比较。
+            wrapper.apply("LOWER(source_name) LIKE {0}", "%" + normalizedKeyword.toLowerCase(Locale.ROOT) + "%");
+        }
+        wrapper.orderByDesc(ScanSource::getCreateTime).orderByDesc(ScanSource::getSourceId);
+        return scanSourceMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
     }
 
     /** 查询所有启用且未删除的扫描源，供定时任务使用 */

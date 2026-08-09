@@ -1,12 +1,14 @@
 """Tests for api.py resource-scoped endpoints."""
 
-import os
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from httpx import AsyncClient, ASGITransport
 
-from by_qa.knowledge_base.infrastructure.storage import StorageAuthenticationError
+from by_qa.knowledge_base.infrastructure.storage import (
+    StorageAuthenticationError,
+    StorageOperationError,
+)
 from api import app
 
 
@@ -215,6 +217,176 @@ class TestFileToMarkdownIndexByResourceId:
         assert resp.json()["resultCode"] == "-1"
         _patch_redis_config.assert_not_awaited()
 
+    @pytest.mark.asyncio
+    async def test_resourcefs_operation_error_falls_back_to_redis(
+        self,
+        client,
+        _patch_resourcefs_config,
+        _patch_redis_config,
+    ):
+        _patch_resourcefs_config.side_effect = StorageOperationError("read timeout")
+        _patch_redis_config.return_value = {"resourceCode": "5"}
+        mock_service = AsyncMock()
+        mock_service.create_file_to_markdown_index_task.return_value = "task-1"
+
+        with (
+            patch(
+                "api.resolve_knowledge_item_ingestion_service",
+                return_value=mock_service,
+            ),
+            patch(
+                "api.resolve_document_chunking_service",
+                return_value=AsyncMock(),
+            ),
+        ):
+            resp = await client.post(
+                "/api/v1/fileToMarkdownIndexByResourceId",
+                json={"resourceId": "100", "filePath": "/docs/test.pdf"},
+                headers={"Beyond-Token": "token-123"},
+            )
+
+        assert resp.json()["resultCode"] == "0"
+        _patch_redis_config.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# listDirByResourceId
+# ---------------------------------------------------------------------------
+
+
+class TestListDirByResourceId:
+
+    @pytest.mark.asyncio
+    async def test_success_preserves_kn_code_and_adds_resource_id(
+        self, client, _patch_redis_config
+    ):
+        _patch_redis_config.return_value = {"resourceCode": "155"}
+        mock_item = MagicMock()
+        mock_item.model_dump.return_value = {
+            "knCode": "155",
+            "name": "/门户设计/api.md",
+            "type": "file",
+        }
+        mock_result = MagicMock()
+        mock_result.data = [mock_item]
+        mock_service = AsyncMock()
+        mock_service.list_dir.return_value = mock_result
+
+        with patch("api.resolve_knowledge_base_service", return_value=mock_service):
+            resp = await client.post(
+                "/api/v1/listDirByResourceId",
+                json={"resourceId": "100", "directoryPath": "/"},
+            )
+
+        body = resp.json()
+        assert body["resultCode"] == "0"
+        item = body["resultObject"]["data"][0]
+        assert item["knCode"] == "155"
+        assert item["resourceId"] == "100"
+
+
+# ---------------------------------------------------------------------------
+# readFileByResourceId
+# ---------------------------------------------------------------------------
+
+
+class TestReadFileByResourceId:
+
+    @pytest.mark.asyncio
+    async def test_success_preserves_kn_code_and_adds_resource_id(
+        self, client, _patch_redis_config
+    ):
+        _patch_redis_config.return_value = {"resourceCode": "155"}
+        mock_service = AsyncMock()
+        mock_service.read_file.return_value = {
+            "knCode": "155",
+            "filePath": "/门户设计/api.md",
+            "data": "# api",
+        }
+
+        with patch("api.resolve_knowledge_base_service", return_value=mock_service):
+            resp = await client.post(
+                "/api/v1/readFileByResourceId",
+                json={"resourceId": "100", "filePath": "/门户设计/api.md"},
+            )
+
+        body = resp.json()
+        assert body["resultCode"] == "0"
+        assert body["resultObject"]["knCode"] == "155"
+        assert body["resultObject"]["resourceId"] == "100"
+
+
+# ---------------------------------------------------------------------------
+# buildResultByResourceId
+# ---------------------------------------------------------------------------
+
+class TestBuildResultByResourceId:
+
+    @pytest.mark.asyncio
+    async def test_success_maps_resource_and_returns_build_details(
+        self, client, _patch_redis_config
+    ):
+        from byclaw_userfs_storage import get_byclaw_resource_id
+
+        _patch_redis_config.return_value = {"resourceCode": "155"}
+        mock_service = AsyncMock()
+        captured = {}
+
+        async def build_result(request):
+            captured["resource_id"] = get_byclaw_resource_id()
+            captured["kn_code"] = request.kb_code
+            captured["file_path"] = request.file_path
+            captured["chunk_page"] = request.chunk_page
+            return {
+                "knCode": "155",
+                "filePath": request.file_path,
+                "build": {"status": "complete"},
+                "chunks": {"total": 3, "data": []},
+            }
+
+        mock_service.build_result.side_effect = build_result
+        with patch("api.resolve_knowledge_base_service", return_value=mock_service):
+            resp = await client.post(
+                "/api/v1/buildResultByResourceId",
+                json={
+                    "resourceId": 11029731,
+                    "filePath": "/门户设计/api.pptx",
+                    "chunkPage": 2,
+                    "chunkPageSize": 10,
+                    "includeMarkdown": False,
+                },
+            )
+
+        body = resp.json()
+        assert body["resultCode"] == "0"
+        assert body["resultObject"]["knCode"] == "155"
+        assert body["resultObject"]["resourceId"] == "11029731"
+        assert body["resultObject"]["build"]["status"] == "complete"
+        assert body["resultObject"]["chunks"]["total"] == 3
+        assert captured == {
+            "resource_id": "11029731",
+            "kn_code": "155",
+            "file_path": "/门户设计/api.pptx",
+            "chunk_page": 2,
+        }
+
+    @pytest.mark.asyncio
+    async def test_rejects_invalid_chunk_page(self, client, _patch_redis_config):
+        _patch_redis_config.return_value = {"resourceCode": "155"}
+
+        resp = await client.post(
+            "/api/v1/buildResultByResourceId",
+            json={
+                "resourceId": 11029731,
+                "filePath": "/门户设计/api.pptx",
+                "chunkPage": 0,
+            },
+        )
+
+        body = resp.json()
+        assert body["resultCode"] == "-1"
+        assert body["resultMsg"] == "request validation failed"
+
 
 # ---------------------------------------------------------------------------
 # downloadFileByResourceId
@@ -328,7 +500,8 @@ class TestSearchByResourceId:
         assert body["resultCode"] == "0"
         data = body["resultObject"]["data"]
         assert len(data) == 1
-        assert data[0]["knCode"] == "100"
+        assert data[0]["knCode"] == "1"
+        assert data[0]["resourceId"] == "100"
 
     @pytest.mark.asyncio
     async def test_multiple_resource_ids(self, client, _patch_redis_config):
@@ -358,5 +531,7 @@ class TestSearchByResourceId:
         body = resp.json()
         assert body["resultCode"] == "0"
         data = body["resultObject"]["data"]
-        assert data[0]["knCode"] == "100"
-        assert data[1]["knCode"] == "200"
+        assert data[0]["knCode"] == "1"
+        assert data[0]["resourceId"] == "100"
+        assert data[1]["knCode"] == "2"
+        assert data[1]["resourceId"] == "200"

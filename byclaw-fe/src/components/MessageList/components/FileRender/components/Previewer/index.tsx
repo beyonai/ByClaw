@@ -17,8 +17,10 @@ function Previewer(props: {
   onClosePreviewModal: () => void;
   fileType: string;
   fileName: string;
+  // 调用方本身在弹窗里时才需要传:预览是顶层兄弟节点,拿不到父弹窗的 zIndex 上下文,不抬高会被压在下面。
+  zIndex?: number;
 }) {
-  const { previewInfo, onClosePreviewModal, fileType, fileName } = props;
+  const { previewInfo, onClosePreviewModal, fileType, fileName, zIndex } = props;
   return (
     <Modal
       centered
@@ -26,6 +28,7 @@ function Previewer(props: {
       open={previewInfo.open}
       title=""
       width="90vw"
+      zIndex={zIndex}
       onCancel={onClosePreviewModal}
       footer={null}
       closable={false}

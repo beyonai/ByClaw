@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.state.application.service.session;
 import com.alibaba.fastjson2.JSON;
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.resource.SystemCode;
+import com.iwhalecloud.byai.common.constants.users.UserType;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.storage.UserFS;
@@ -255,7 +256,7 @@ public class ByClawSkillResourceApplicationService {
         if (StringUtils.isBlank(resolvedUserCode)) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.user.code.notempty"));
         }
-        validateDigitalEmployeeSkillManagePermission(resolvedDigId);
+        validateDigitalEmployeeSkillManagePermission(resolvedDigId, SOURCE_TYPE_SKILL_MARKET_INSTALL);
 
         byte[] packageBytes = downloadThirdPartySkillPackage(resolvedDownloadUrl);
         String filename = resolveThirdPartySkillFilename(resolvedDownloadUrl);
@@ -541,12 +542,59 @@ public class ByClawSkillResourceApplicationService {
      * 绑定链路缺少该校验，会出现“提示安装成功但技能并未真正生效/不展示”的问题。</p>
      */
     private SsResource validateDigitalEmployeeSkillManagePermission(Long digitalEmployeeResourceId) {
+        return validateDigitalEmployeeSkillManagePermission(digitalEmployeeResourceId, null);
+    }
+
+    private SsResource validateDigitalEmployeeSkillManagePermission(Long digitalEmployeeResourceId,
+        String operationSource) {
         SsResource digitalEmployee = digitalEmployeeResourceId == null ? null
             : ssResourceService.findById(digitalEmployeeResourceId);
+        boolean detailedLog = StringUtils.equals(operationSource, SOURCE_TYPE_SKILL_MARKET_INSTALL);
         if (digitalEmployee == null) {
+            if (detailedLog) {
+                logger.warn(
+                    "第三方技能安装数字员工权限校验失败，reason=RESOURCE_NOT_FOUND, requestedDigitalEmployeeId={}, "
+                        + "currentUserId={}, currentUserCode={}, defaultDigitalEmployeeId={}, loginInfo={}",
+                    digitalEmployeeResourceId, CurrentUserHolder.getCurrentUserId(),
+                    CurrentUserHolder.getCurrentUserCode(), CurrentUserHolder.getDefaultDigEmployeeId(),
+                    JSON.toJSONString(CurrentUserHolder.getLoginInfo()));
+            }
             throw new IllegalArgumentException(I18nUtil.get("resource.not.found"));
         }
-        if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
+        boolean baseManagePermission = authApplicationService.hasResourceManagePermission(digitalEmployee);
+        boolean managePermission = baseManagePermission;
+        if (detailedLog) {
+            Long currentUserId = CurrentUserHolder.getCurrentUserId();
+            String currentUserCode = CurrentUserHolder.getCurrentUserCode();
+            List<String> currentUserTypes = CurrentUserHolder.getUserTypes();
+            boolean platformAdmin = currentUserTypes.contains(UserType.PLAT_MAN)
+                || currentUserTypes.contains(UserType.PLAT_DEVOPS);
+            boolean organizationAdminRole = currentUserTypes.contains(UserType.ORG_MAN);
+            boolean businessAdmin = currentUserTypes.contains(UserType.BUSINESS_MAN);
+            boolean superAdmin = ADMIN_VIP_USER_CODE.equalsIgnoreCase(currentUserCode);
+            boolean creatorMatched = Objects.equals(currentUserId, digitalEmployee.getCreateBy());
+            boolean defaultDigitalEmployeeMatched = Objects.equals(digitalEmployeeResourceId,
+                CurrentUserHolder.getDefaultDigEmployeeId());
+            boolean personalDefaultOwnerTypeMatched = StringUtils.equals(digitalEmployee.getOwnerType(),
+                OwnerType.PERSONAL_DEFAULT);
+            boolean defaultSuperAssistantCodeMatched = StringUtils.equals(digitalEmployee.getResourceCode(),
+                StringUtils.defaultString(currentUserCode) + "_main");
+            logger.info(
+                "第三方技能安装数字员工权限校验详情，operationSource={}, requestedDigitalEmployeeId={}, "
+                    + "currentUserId={}, currentUserCode={}, currentUserName={}, enterpriseId={}, assistantId={}, "
+                    + "defaultDigitalEmployeeId={}, creatorMatched={}, personalDefaultOwnerTypeMatched={}, "
+                    + "defaultDigitalEmployeeMatched={}, defaultSuperAssistantCodeMatched={}, "
+                    + "baseManagePermission={}, platformAdmin={}, organizationAdminRole={}, businessAdmin={}, "
+                    + "superAdmin={}, userTypes={}, managePermission={}, targetDigitalEmployee={}, loginInfo={}",
+                operationSource, digitalEmployeeResourceId, currentUserId, currentUserCode,
+                CurrentUserHolder.getCurrentUserName(), CurrentUserHolder.getEnterpriseId(),
+                CurrentUserHolder.getAssistantId(), CurrentUserHolder.getDefaultDigEmployeeId(), creatorMatched,
+                personalDefaultOwnerTypeMatched, defaultDigitalEmployeeMatched, defaultSuperAssistantCodeMatched,
+                baseManagePermission, platformAdmin, organizationAdminRole, businessAdmin, superAdmin,
+                currentUserTypes, managePermission, JSON.toJSONString(digitalEmployee),
+                JSON.toJSONString(CurrentUserHolder.getLoginInfo()));
+        }
+        if (!managePermission) {
             throw new IllegalArgumentException(
                 I18nUtil.get("digemployee.skill.install.no.manage.permission", digitalEmployee.getResourceName()));
         }

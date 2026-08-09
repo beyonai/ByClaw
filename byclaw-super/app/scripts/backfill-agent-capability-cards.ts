@@ -3,6 +3,7 @@ import {
   PiLeaderSessionFactory,
   type AgentCapabilityCompileResult,
 } from "@byclaw/by-conductor";
+import { createRedis } from "@byclaw/by-framework";
 import { PostgresDatabase } from "@byclaw/storage-postgres";
 import {
   buildAgentCapabilityBackfillSource,
@@ -10,6 +11,7 @@ import {
   type RelatedCapabilityResource,
 } from "../business/agent-capability-source.js";
 import { loadConfig } from "../config/index.js";
+import { RedisFirstLlmProvider } from "../llm-provider/index.js";
 
 const options = parseArgs(process.argv.slice(2));
 if (options.help) {
@@ -19,6 +21,7 @@ if (options.help) {
 
 const config = loadConfig();
 const database = new PostgresDatabase(config.database);
+const redis = createRedis(config.redis);
 const sourceSchema = safeIdentifier(
   options.sourceSchema ??
     process.env.BYCLAW_SOURCE_SCHEMA ??
@@ -58,13 +61,21 @@ try {
       rows.map((row) => String(row.agent_id)),
     );
     const relationsByAgent = groupRelations(relations);
+    const llmProvider = await new RedisFirstLlmProvider({
+      redis,
+      fallback: {
+        providerId: config.piProvider ?? "volcengine-ark",
+        modelId: config.piModel ?? "deepseek-v4-pro-260425",
+        baseUrl: config.arkBaseUrl ?? "https://ark.cn-beijing.volces.com/api/v3",
+        ...(config.arkApiKey ? { apiKey: config.arkApiKey } : {}),
+      },
+      logger: {
+        info: (message) => console.info(message),
+        warn: (message) => console.warn(message),
+      },
+    }).resolve();
     const compiler = await PiLeaderSessionFactory.create({
-      ...(config.piProvider ? { provider: config.piProvider } : {}),
-      ...(config.piModel ? { model: config.piModel } : {}),
-      ...(config.openAiBaseUrl
-        ? { openAiBaseUrl: config.openAiBaseUrl }
-        : {}),
-      ...(config.arkBaseUrl ? { arkBaseUrl: config.arkBaseUrl } : {}),
+      llmProvider: llmProvider.config,
       instanceId: `${config.instanceId}-capability-backfill`,
       ...(config.piSessionCacheDirectory
         ? { sessionCacheDirectory: config.piSessionCacheDirectory }
@@ -114,6 +125,7 @@ try {
     }
   }
 } finally {
+  await redis.quit();
   if (sourceDatabase !== database) {
     await sourceDatabase.close();
   }

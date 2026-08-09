@@ -27,7 +27,7 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
   const { blockedPaths } = useSelector(({ menu }: any) => menu);
   const { modal } = App.useApp();
 
-  const { ENV, devConfig } = useAppStore();
+  const { ENV, devConfig, setSiderCollapsed } = useAppStore();
   const { token } = theme.useToken();
   const [menuConfig, setMenuConfig] = useState<any[]>(fallbackMenuConfig);
   const [userTypeConfigList, setUserTypeConfigList] = useState<any[]>([]);
@@ -126,6 +126,7 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
       if (key === 'accessToken') {
         navigate('/accessTokenMgmt');
       } else if (key === 'settings') {
+        setSiderCollapsed(true);
         navigate('/settings');
       } else if (key === 'assistantSettings') {
         navigate('/assistantSettings');

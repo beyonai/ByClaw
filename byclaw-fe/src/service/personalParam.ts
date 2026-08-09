@@ -10,6 +10,12 @@ export interface PersonalParam {
   hasValue?: boolean;
   valueLast4?: string;
   updateTime?: string;
+  source?: 'USER' | 'CONNECTOR' | string;
+  sourceRef?: string;
+  managed?: boolean;
+  editable?: boolean;
+  deletable?: boolean;
+  enableable?: boolean;
 }
 
 export interface PersonalParamQuery {

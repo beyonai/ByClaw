@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.iwhalecloud.byai.common.constants.devloop.MemberRole;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectMember;
@@ -111,14 +112,15 @@ public class ProjectMemberService {
     }
 
     /**
-     * 按项目ID联查成员列表，补充用户工号/名称及绑定数字员工名称。
+     * 按项目 ID 联查成员列表，创建者、当前登录用户及其他成员按固定优先级返回。
      *
-     * @param projectId 项目ID
+     * @param projectId 项目 ID
      * @param userName 用户名
+     * @param currentUserId 当前登录用户 ID
      * @return 成员列表 DTO；无成员时返回空列表
      */
-    public List<ProjectMemberListDto> listProjectMembers(Long projectId, String userName) {
-        return memberMapper.listProjectMembers(projectId, userName);
+    public List<ProjectMemberListDto> listProjectMembers(Long projectId, String userName, Long currentUserId) {
+        return memberMapper.listProjectMembers(projectId, userName, currentUserId);
     }
 
     /**
@@ -190,5 +192,12 @@ public class ProjectMemberService {
         member.setMemberId(memberId);
         member.setAgentId(agentId);
         memberMapper.updateById(member);
+    }
+
+    /** 清空成员绑定的数字员工；使用显式 set null，避免 MyBatis-Plus 默认忽略空字段。 */
+    public void unbindAgent(Long memberId) {
+        memberMapper.update(null, new LambdaUpdateWrapper<ProjectMember>()
+            .eq(ProjectMember::getMemberId, memberId)
+            .set(ProjectMember::getAgentId, null));
     }
 }

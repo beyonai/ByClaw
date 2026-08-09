@@ -1,17 +1,15 @@
-"""Tests for the rewritten knowledge-organizer CLI domain service."""
+"""Tests for the knowledge-organizer CLI domain service."""
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import tempfile
-import threading
-import time
 import unittest
-from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import patch
 from pathlib import Path
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).with_name("knowledge_organizer.py")
@@ -22,14 +20,33 @@ SPEC.loader.exec_module(knowledge_organizer)
 
 
 class FakeApi:
-    def list_authorized_resources(self, _employee_resource_id: str, _page: int) -> dict[str, object]:
+    def __init__(self) -> None:
+        self.agent_resource_calls: list[tuple[str, int]] = []
+        self.session_resource_calls: list[str] = []
+        self.saved_object_instances: list[dict[str, object]] = []
+        self.discovery_calls: list[tuple[str, list[str]]] = []
+        self.enrichment_calls: list[tuple[str, list[str]]] = []
+
+    def list_authorized_resources(
+        self, employee_resource_id: str, page: int
+    ) -> dict[str, object]:
+        self.agent_resource_calls.append((employee_resource_id, page))
         return {
             "totalPages": 1,
             "list": [
                 {"resourceBizType": "OBJECT", "resourceCode": "raw_doc"},
                 {"resourceBizType": "OBJECT", "resourceCode": "concept"},
+                {"resourceBizType": "VIEW", "resourceCode": "ignored_view"},
             ],
         }
+
+    def list_session_resources(self, *, session_id: str) -> list[dict[str, object]]:
+        self.session_resource_calls.append(session_id)
+        return [
+            {"objectCode": "raw_doc", "kbDirectory": "/原始资料"},
+            {"objectCode": "concept", "kbDirectory": "/概念"},
+            {"objectCode": "concept", "kbDirectory": "/概念"},
+        ]
 
     def get_object(self, object_code: str) -> dict[str, object]:
         domain = "ods" if object_code == "raw_doc" else "ads"
@@ -42,86 +59,123 @@ class FakeApi:
             "must_not_persist": True,
         }
 
-    def write_document(self, **kwargs: object) -> dict[str, object]:
-        self.write_kwargs = kwargs
-        return {"records": [{"term_id": "ods-term-1"}]}
-
-    def extract_fragments(self, **kwargs: object) -> dict[str, object]:
-        self.extract_kwargs = kwargs
+    def save_object_instance(
+        self, *, payload: dict[str, object]
+    ) -> dict[str, object]:
+        self.saved_object_instances.append(payload)
         return {
-            "fragments": [
-                {
-                    "object_code": "concept",
-                    "entity_name": "智能客服",
-                    "content": "智能客服可以自动响应用户咨询。",
-                    "evidence": "正文",
-                    "confidence": 0.8,
-                },
-                {
-                    "object_code": "concept",
-                    "entity_name": "智能客服",
-                    "content": "智能客服支持多轮对话。",
-                    "evidence": "正文",
-                    "confidence": 0.8,
-                },
-            ]
+            "records": [{"term_id": "term-11041854"}],
+            "total": 1,
+            "meta": {},
         }
 
-    def search_entities(self, *, object_code: str, entity_names: list[str]) -> dict[str, list[dict[str, str]]]:
-        self.search_request = (object_code, entity_names)
-        return {name: getattr(self, "search_hits", {}).get(name, []) for name in entity_names}
-
-    def select_entity_candidates(self, *, ambiguous: list[dict[str, object]]) -> dict[str, str | None]:
-        self.ambiguous = ambiguous
-        return getattr(self, "candidate_choices", {})
-
-    def create_entity(self, *, object_code: str, entity_name: str) -> str:
-        self.created_entity = (object_code, entity_name)
-        return "ads-term-1"
-
-    def create_fragments(self, *, items: list[dict[str, str]]) -> list[dict[str, object]]:
-        self.fragment_items = items
-        return [{"id": index + 1} for index, _item in enumerate(items)]
-
-    def build_object_instances(self, *, instance_ids: list[str], batch_size: int) -> dict[str, str]:
-        self.build_request = (instance_ids, batch_size)
-        return {"status": "accepted"}
-
-
-class ConcurrentFakeApi(FakeApi):
-    def __init__(self) -> None:
-        self.active_extractions = 0
-        self.maximum_active_extractions = 0
-        self.extract_calls: list[str] = []
-        self.failed_contents: set[str] = set()
-        self._lock = threading.Lock()
-
-    def extract_fragments(
-        self, *, content: str, ads_objects: dict[str, object], user_intent: str | None = None
+    def discover_document_objects(
+        self, *, session_id: str, object_codes: list[str]
     ) -> dict[str, object]:
-        with self._lock:
-            self.active_extractions += 1
-            self.maximum_active_extractions = max(self.maximum_active_extractions, self.active_extractions)
-            self.extract_calls.append(content)
-        try:
-            time.sleep(0.03)
-            if content in self.failed_contents:
-                raise ValueError(f"cannot organize {content}")
-            return {
-                "fragments": [
-                    {
-                        "object_code": "concept",
-                        "entity_name": content,
-                        "content": f"关于 {content} 的知识。",
-                    }
-                ]
+        self.discovery_calls.append((session_id, object_codes))
+        return {
+            "sessionId": session_id,
+            "taskType": "documentDiscovery",
+            "accepted": True,
+        }
+
+    def enrich_document_objects(
+        self, *, session_id: str, object_codes: list[str]
+    ) -> dict[str, object]:
+        self.enrichment_calls.append((session_id, object_codes))
+        return {
+            "sessionId": session_id,
+            "taskType": "documentEnrichment",
+            "accepted": True,
+        }
+
+
+class RecordingTransport:
+    def __init__(self, responses: list[object]) -> None:
+        self.responses = responses
+        self.requests: list[dict[str, object]] = []
+
+    def request(self, **kwargs: object) -> object:
+        self.requests.append(kwargs)
+        return self.responses.pop(0)
+
+    def close(self) -> None:
+        return None
+
+
+class RedisConfigAdapterTests(unittest.TestCase):
+    def load_config(self, environment: dict[str, str]) -> dict[str, object]:
+        with patch.dict(os.environ, environment, clear=True):
+            return knowledge_organizer._redis_config_from_env(dict)
+
+    def test_cluster_config_ignores_empty_standalone_values(self) -> None:
+        config = self.load_config(
+            {
+                "REDIS_CLUSTER_HOST": "redis-1:6371, redis-2:6372",
+                "REDIS_USERNAME": "cluster-user",
+                "REDIS_PASSWORD": "cluster-password",
+                "REDIS_HOST": "",
+                "REDIS_PORT": "",
             }
-        finally:
-            with self._lock:
-                self.active_extractions -= 1
+        )
+
+        self.assertEqual(config["mode"], "cluster")
+        self.assertEqual(config["cluster_nodes"], [("redis-1", 6371), ("redis-2", 6372)])
+        self.assertEqual(config["host"], "localhost")
+        self.assertEqual(config["port"], 6379)
+        self.assertEqual(config["username"], "cluster-user")
+        self.assertEqual(config["password"], "cluster-password")
+
+    def test_standard_cluster_config_supports_both_node_variable_names(self) -> None:
+        for variable in ("REDIS_CLUSTER_HOST", "REDIS_CLUSTER_NODES"):
+            with self.subTest(variable=variable):
+                config = self.load_config({variable: "redis-1:6379,redis-2:6380"})
+
+                self.assertEqual(config["mode"], "cluster")
+                self.assertEqual(
+                    config["cluster_nodes"],
+                    [("redis-1", 6379), ("redis-2", 6380)],
+                )
+
+    def test_standalone_config_uses_standard_values(self) -> None:
+        config = self.load_config(
+            {
+                "REDIS_HOST": "redis-single",
+                "REDIS_PORT": "6381",
+                "REDIS_DATABASE": "2",
+                "REDIS_USERNAME": "redis-user",
+                "REDIS_PASSWORD": "redis-password",
+            }
+        )
+
+        self.assertEqual(config["mode"], "standalone")
+        self.assertIsNone(config["cluster_nodes"])
+        self.assertEqual(config["host"], "redis-single")
+        self.assertEqual(config["port"], 6381)
+        self.assertEqual(config["db"], 2)
+        self.assertEqual(config["username"], "redis-user")
+        self.assertEqual(config["password"], "redis-password")
+
+    def test_empty_standalone_config_uses_safe_defaults(self) -> None:
+        config = self.load_config(
+            {
+                "REDIS_HOST": "",
+                "REDIS_PORT": "",
+                "REDIS_DATABASE": "",
+                "REDIS_USERNAME": "",
+                "REDIS_PASSWORD": "",
+            }
+        )
+
+        self.assertEqual(config["mode"], "standalone")
+        self.assertEqual(config["host"], "localhost")
+        self.assertEqual(config["port"], 6379)
+        self.assertEqual(config["db"], 0)
+        self.assertIsNone(config["username"])
+        self.assertEqual(config["password"], "")
 
 
-class KnowledgeOrganizerInitializationTests(unittest.TestCase):
+class KnowledgeOrganizerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.task_dir = Path(self.temp_dir.name) / "语义化任务"
@@ -131,281 +185,383 @@ class KnowledgeOrganizerInitializationTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def test_init_writes_filtered_object_snapshots_by_domain(self) -> None:
-        self.organizer.initialize(self.task_dir, "employee-1")
-
-        ods = json.loads(
-            (self.task_dir / "knowledge-organizer" / "objects" / "ods" / "原始文档.json").read_text(
-                encoding="utf-8"
-            )
+    def initialize_agent_scope(self) -> dict[str, object]:
+        return self.organizer.initialize(
+            self.task_dir,
+            session_id="session-001",
+            employee_resource_id="employee-1",
         )
-        ads = json.loads(
-            (self.task_dir / "knowledge-organizer" / "objects" / "ads" / "概念.json").read_text(
-                encoding="utf-8"
-            )
+
+    def initialize_session_scope(self) -> dict[str, object]:
+        return self.organizer.initialize(
+            self.task_dir,
+            session_id="session-001",
         )
-        self.assertEqual(set(ods), {"objectCode", "objectName", "objectDesc", "properties"})
-        self.assertEqual(ods["objectCode"], "raw_doc")
-        self.assertEqual(ads["objectCode"], "concept")
 
-    def test_cli_exposes_only_the_four_workflow_commands(self) -> None:
-        result = subprocess.run(
-            ["python3", str(SCRIPT), "--help"], check=False, capture_output=True, text=True
+    def test_agent_scope_init_uses_digital_employee_resources(self) -> None:
+        result = self.initialize_agent_scope()
+
+        self.assertEqual(result["resource_scope"], "agent")
+        self.assertEqual(self.api.agent_resource_calls, [("employee-1", 1)])
+        self.assertEqual(self.api.session_resource_calls, [])
+        state = self.organizer._load_state(self.task_dir)
+        self.assertEqual(state["session_id"], "session-001")
+        self.assertEqual(state["employee_resource_id"], "employee-1")
+        self.assertEqual({item["object_code"] for item in state["objects"]}, {"raw_doc", "concept"})
+
+    def test_session_scope_init_uses_only_session_id_and_fetches_object_details(self) -> None:
+        result = self.initialize_session_scope()
+
+        self.assertEqual(result["resource_scope"], "session")
+        self.assertEqual(
+            self.api.session_resource_calls,
+            ["session-001"],
         )
-        self.assertEqual(result.returncode, 0)
-        self.assertIn("{init,ingest,organize,build}", result.stdout)
-        self.assertNotIn("run", result.stdout)
-
-    def test_discovery_transport_runs_concurrent_coroutines_without_sharing_an_event_loop(self) -> None:
-        transport = knowledge_organizer.ByFrameworkDiscoveryTransport()
-
-        async def value_after_wait(value: int) -> tuple[int, int]:
-            await knowledge_organizer.asyncio.sleep(0.02)
-            return value, id(knowledge_organizer.asyncio.get_running_loop())
-
-        try:
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                results = list(executor.map(lambda value: transport.run(value_after_wait(value)), range(4)))
-        finally:
-            transport.close()
-
-        self.assertEqual([value for value, _loop_id in results], [0, 1, 2, 3])
-        self.assertEqual(len({loop_id for _value, loop_id in results}), 1)
-
-    def test_extract_json_object_accepts_prose_and_markdown_fence(self) -> None:
-        value = knowledge_organizer.extract_json_object(
-            "分析完成。\n```json\n{\"fragments\": []}\n```\n以上是结果。"
+        self.assertEqual(self.api.agent_resource_calls, [])
+        state = self.organizer._load_state(self.task_dir)
+        directories = {
+            item["object_code"]: item["kb_directory"] for item in state["objects"]
+        }
+        self.assertEqual(directories["raw_doc"], "/原始资料")
+        self.assertTrue(
+            (
+                self.task_dir
+                / "knowledge-organizer"
+                / "objects"
+                / "ods"
+                / "原始文档.json"
+            ).is_file()
         )
-        self.assertEqual(value, {"fragments": []})
+        self.assertTrue(
+            (
+                self.task_dir
+                / "knowledge-organizer"
+                / "objects"
+                / "ads"
+                / "概念.json"
+            ).is_file()
+        )
 
-    def test_extract_json_object_rejects_response_without_json_object(self) -> None:
-        with self.assertRaisesRegex(ValueError, "JSON"):
-            knowledge_organizer.extract_json_object("模型没有遵循格式")
+    def test_init_no_longer_requires_both_ods_and_ads(self) -> None:
+        class OdsOnlyApi(FakeApi):
+            def list_session_resources(
+                self, *, session_id: str
+            ) -> list[dict[str, object]]:
+                return [{"objectCode": "raw_doc"}]
 
-    def test_validated_fragments_removes_whitespace_from_entity_name(self) -> None:
-        fragments = self.organizer._validated_fragments(
+        organizer = knowledge_organizer.KnowledgeOrganizer(OdsOnlyApi())
+        result = organizer.initialize(
+            self.task_dir,
+            session_id="session-001",
+        )
+
+        self.assertEqual(result["object_codes"], {"ods": ["raw_doc"], "ads": []})
+
+    def test_service_api_uses_documented_backend_contracts(self) -> None:
+        transport = RecordingTransport(
+            [
+                [{"objectCode": "raw_doc"}],
+                {"records": [{"term_id": "term-7"}], "total": 1, "meta": {}},
+            ]
+        )
+        api = knowledge_organizer.ServiceApi(transport)
+
+        resources = api.list_session_resources(session_id="session-001")
+        api.save_object_instance(payload={"objectCode": "raw_doc"})
+
+        self.assertEqual(resources, [{"objectCode": "raw_doc"}])
+
+        self.assertEqual(
+            transport.requests[0],
             {
-                "fragments": [
-                    {
-                        "object_code": "concept",
-                        "entity_name": "智 能\t客 服\u3000实例",
-                        "content": "智能客服实例的说明。",
-                    }
-                ]
+                "service_env": "BE_DOMAINNAME",
+                "method": "POST",
+                "path": "/byaiService/devloop/operation/listObjectById",
+                "payload": {"sessionId": "session-001"},
             },
-            {"concept": {}},
+        )
+        self.assertEqual(
+            transport.requests[1],
+            {
+                "service_env": "BE_DOMAINNAME",
+                "method": "POST",
+                "path": "/devloop/operation/saveObjectInstanceToKb",
+                "payload": {"objectCode": "raw_doc"},
+            },
         )
 
-        self.assertEqual(fragments[0]["entity_name"], "智能客服实例")
-
-    def test_extract_fragments_treats_user_intent_as_a_hard_scope(self) -> None:
-        class RecordingModel:
-            def complete_json(self, *, system_prompt: str, user_message: str) -> dict[str, object]:
-                self.system_prompt = system_prompt
-                self.user_message = user_message
-                return {"fragments": []}
-
-        model = RecordingModel()
-        api = knowledge_organizer.ServiceApi(object(), model)
-
-        api.extract_fragments(
-            content="智能客服与智能外呼的介绍",
-            ads_objects={"concept": {"objectCode": "concept"}},
-            user_intent="只抽取对象实例：智能客服",
-        )
-
-        self.assertIn("只抽取对象实例：智能客服", model.user_message)
-        self.assertIn("只输出直接符合该范围的条目", model.system_prompt)
-
-    def test_ingest_snapshots_file_and_persists_ods_term_id(self) -> None:
-        self.organizer.initialize(self.task_dir, "employee-1")
-        source = Path(self.temp_dir.name) / "notes.md"
-        source.write_text("# 标题\n正文", encoding="utf-8")
+    def test_ingest_snapshots_source_and_saves_object_instance_to_kb(self) -> None:
+        self.initialize_session_scope()
+        source = Path(self.temp_dir.name) / "客户访谈.md"
+        source.write_text("# 客户访谈\n正文", encoding="utf-8")
 
         result = self.organizer.ingest(
             self.task_dir,
             source=source,
             object_code="raw_doc",
-            storage_file_name="客户访谈记录.md",
-            labels={"title": "标题"},
+            storage_file_name="客户访谈.md",
+            ext_content={"source": "interview"},
         )
 
-        self.assertEqual(result["term_id"], "ods-term-1")
-        state = json.loads((self.task_dir / "knowledge-organizer" / "state.json").read_text(encoding="utf-8"))
-        self.assertEqual(state["ingestions"][0]["term_id"], "ods-term-1")
-        self.assertTrue(Path(state["ingestions"][0]["snapshot_path"]).is_file())
-        self.assertEqual(self.api.write_kwargs["object_code"], "raw_doc")
-        self.assertEqual(self.api.write_kwargs["labels"], {"title": "标题"})
+        self.assertEqual(result["term_id"], "term-11041854")
+        payload = self.api.saved_object_instances[0]
+        self.assertEqual(payload["sessionId"], "session-001")
+        self.assertEqual(payload["objectCode"], "raw_doc")
+        self.assertEqual(payload["actionCode"], "write_raw_doc")
+        self.assertEqual(
+            payload["arguments"],
+            {
+                "sourcePath": "/原始资料/客户访谈.md",
+                "content": "# 客户访谈\n正文",
+                "fileDescription": "客户访谈",
+                "labels": {"source": "interview"},
+            },
+        )
+        self.assertEqual(
+            result["ext_content"],
+            {"source": "interview"},
+        )
+        self.assertTrue(Path(result["snapshot_path"]).is_file())
 
-    def test_ingest_rejects_ads_object_and_unknown_label(self) -> None:
-        self.organizer.initialize(self.task_dir, "employee-1")
-        source = Path(self.temp_dir.name) / "notes.txt"
-        source.write_text("正文", encoding="utf-8")
+    def test_ingest_is_idempotent_for_same_content_and_object(self) -> None:
+        self.initialize_agent_scope()
+        source = Path(self.temp_dir.name) / "notes.json"
+        source.write_text('{"title":"test"}', encoding="utf-8")
+
+        first = self.organizer.ingest(
+            self.task_dir,
+            source=source,
+            object_code="raw_doc",
+            storage_file_name="对象资料.json",
+        )
+        second = self.organizer.ingest(
+            self.task_dir,
+            source=source,
+            object_code="raw_doc",
+            storage_file_name="对象资料.json",
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(len(self.api.saved_object_instances), 1)
+
+    def test_ingest_rejects_ads_object(self) -> None:
+        self.initialize_session_scope()
+        source = Path(self.temp_dir.name) / "notes.md"
+        source.write_text("# 标题", encoding="utf-8")
 
         with self.assertRaisesRegex(ValueError, "ODS"):
             self.organizer.ingest(
                 self.task_dir,
                 source=source,
                 object_code="concept",
-                storage_file_name="记录.txt",
-                labels={},
-            )
-        with self.assertRaisesRegex(ValueError, "labels"):
-            self.organizer.ingest(
-                self.task_dir,
-                source=source,
-                object_code="raw_doc",
-                storage_file_name="记录.txt",
-                labels={"unknown": "x"},
+                storage_file_name="对象资料.md",
             )
 
-    def test_organize_creates_missing_entity_and_build_deduplicates_instance_id(self) -> None:
-        self.organizer.initialize(self.task_dir, "employee-1")
+    def test_ingest_succeeds_when_backend_returns_non_empty_records(self) -> None:
+        class RecordWithoutTermIdApi(FakeApi):
+            def save_object_instance(
+                self, *, payload: dict[str, object]
+            ) -> dict[str, object]:
+                return {"records": [{"filePath": "/raw_doc/对象资料.md"}], "total": 1}
+
+        organizer = knowledge_organizer.KnowledgeOrganizer(RecordWithoutTermIdApi())
+        organizer.initialize(self.task_dir, session_id="session-001")
         source = Path(self.temp_dir.name) / "notes.md"
-        source.write_text("# 智能客服\n支持多轮对话", encoding="utf-8")
-        self.organizer.ingest(
+        source.write_text("# 标题", encoding="utf-8")
+
+        result = organizer.ingest(
             self.task_dir,
             source=source,
             object_code="raw_doc",
-            storage_file_name="智能客服说明.md",
-            labels={"title": "智能客服"},
+            storage_file_name="对象资料.md",
         )
 
-        fragments = self.organizer.organize(self.task_dir)
-        builds = self.organizer.build(self.task_dir)
+        self.assertEqual(result["status"], "succeeded")
+        self.assertIsNone(result["term_id"])
 
-        self.assertEqual(len(fragments), 2)
-        self.assertEqual(self.api.created_entity, ("concept", "智能客服"))
+    def test_ingest_records_failure_when_backend_records_are_empty(self) -> None:
+        class EmptyRecordsApi(FakeApi):
+            def save_object_instance(
+                self, *, payload: dict[str, object]
+            ) -> dict[str, object]:
+                return {"records": [], "total": 0}
+
+        organizer = knowledge_organizer.KnowledgeOrganizer(EmptyRecordsApi())
+        organizer.initialize(self.task_dir, session_id="session-001")
+        source = Path(self.temp_dir.name) / "notes.md"
+        source.write_text("# 标题", encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "records"):
+            organizer.ingest(
+                self.task_dir,
+                source=source,
+                object_code="raw_doc",
+                storage_file_name="对象资料.md",
+            )
+
+    def test_organize_defaults_to_all_ads_objects_without_ingest(self) -> None:
+        self.initialize_session_scope()
+
+        result = self.organizer.organize(self.task_dir)
+
+        self.assertEqual(result["status"], "accepted")
         self.assertEqual(
-            self.api.fragment_items,
+            self.api.discovery_calls,
+            [("session-001", ["concept"])],
+        )
+        state = self.organizer._load_state(self.task_dir)
+        self.assertEqual(len(state["ingestions"]), 0)
+        self.assertEqual(state["discoveries"][0]["task_type"], "documentDiscovery")
+
+    def test_build_runs_after_init_without_ingest_or_organize(self) -> None:
+        self.initialize_agent_scope()
+
+        result = self.organizer.build(self.task_dir)
+
+        self.assertEqual(result["status"], "accepted")
+        self.assertEqual(
+            self.api.enrichment_calls,
+            [("session-001", ["concept"])],
+        )
+        state = self.organizer._load_state(self.task_dir)
+        self.assertEqual(len(state["ingestions"]), 0)
+        self.assertEqual(len(state["discoveries"]), 0)
+        self.assertEqual(state["enrichments"][0]["task_type"], "documentEnrichment")
+
+    def test_organize_and_build_reject_ods_objects(self) -> None:
+        self.initialize_session_scope()
+
+        with self.assertRaisesRegex(ValueError, "ADS"):
+            self.organizer.organize(self.task_dir, ["raw_doc"])
+        with self.assertRaisesRegex(ValueError, "ADS"):
+            self.organizer.build(self.task_dir, ["raw_doc"])
+
+    def test_async_datacloud_calls_send_session_header(self) -> None:
+        transport = RecordingTransport(
             [
                 {
-                    "instanceId": "ads-term-1",
-                    "originInstanceId": "ods-term-1",
-                    "content": "智能客服可以自动响应用户咨询。",
+                    "sessionId": "session-001",
+                    "taskType": "documentDiscovery",
+                    "accepted": True,
                 },
                 {
-                    "instanceId": "ads-term-1",
-                    "originInstanceId": "ods-term-1",
-                    "content": "智能客服支持多轮对话。",
+                    "sessionId": "session-001",
+                    "taskType": "documentEnrichment",
+                    "accepted": True,
                 },
-            ],
+            ]
         )
-        self.assertEqual(builds[0]["status"], "accepted")
-        self.assertEqual(self.api.build_request, (["ads-term-1"], 1))
+        api = knowledge_organizer.ServiceApi(transport)
 
-    def test_organize_passes_and_persists_user_intent(self) -> None:
-        self.organizer.initialize(self.task_dir, "employee-1")
-        source = Path(self.temp_dir.name) / "notes.md"
-        source.write_text("# 智能客服", encoding="utf-8")
-        self.organizer.ingest(
-            self.task_dir,
-            source=source,
-            object_code="raw_doc",
-            storage_file_name="智能客服说明.md",
-            labels={"title": "智能客服"},
-        )
-
-        self.organizer.organize(self.task_dir, user_intent="仅抽取智能客服实例")
-
-        self.assertEqual(self.api.extract_kwargs["user_intent"], "仅抽取智能客服实例")
-        state = self.organizer._load_state(self.task_dir)
-        self.assertEqual(state["ingestions"][0]["organize_intent"], "仅抽取智能客服实例")
-
-    def test_organize_uses_one_model_choice_for_multiple_entity_candidates(self) -> None:
-        self.organizer.initialize(self.task_dir, "employee-1")
-        source = Path(self.temp_dir.name) / "notes.md"
-        source.write_text("# 智能客服", encoding="utf-8")
-        self.organizer.ingest(
-            self.task_dir,
-            source=source,
-            object_code="raw_doc",
-            storage_file_name="智能客服说明.md",
-            labels={"title": "智能客服"},
-        )
-        self.api.search_hits = {
-            "智能客服": [{"instance_id": "old-1"}, {"instance_id": "old-2"}],
-        }
-        self.api.candidate_choices = {"concept:智能客服": "old-2"}
-
-        self.organizer.organize(self.task_dir)
-
-        self.assertEqual(len(self.api.ambiguous), 1)
-        self.assertEqual(self.api.fragment_items[0]["instanceId"], "old-2")
-        self.assertFalse(hasattr(self.api, "created_entity"))
-
-    def test_organize_accepts_candidate_choice_key_with_space_after_colon(self) -> None:
-        self.organizer.initialize(self.task_dir, "employee-1")
-        source = Path(self.temp_dir.name) / "notes.md"
-        source.write_text("# 智能客服", encoding="utf-8")
-        self.organizer.ingest(
-            self.task_dir,
-            source=source,
-            object_code="raw_doc",
-            storage_file_name="智能客服说明.md",
-            labels={"title": "智能客服"},
-        )
-        self.api.search_hits = {
-            "智能客服": [{"instance_id": "old-1"}, {"instance_id": "old-2"}],
-        }
-        self.api.candidate_choices = {"concept: 智 能\t客服": "old-2"}
-
-        self.organizer.organize(self.task_dir)
-
-        self.assertEqual(self.api.fragment_items[0]["instanceId"], "old-2")
-        self.assertFalse(hasattr(self.api, "created_entity"))
-
-    def test_organize_runs_at_most_four_files_concurrently_and_saves_each_completion(self) -> None:
-        api = ConcurrentFakeApi()
-        organizer = knowledge_organizer.KnowledgeOrganizer(api)
-        organizer.initialize(self.task_dir, "employee-1")
-        for index in range(5):
-            source = Path(self.temp_dir.name) / f"notes-{index}.md"
-            source.write_text(f"document-{index}", encoding="utf-8")
-            organizer.ingest(
-                self.task_dir,
-                source=source,
-                object_code="raw_doc",
-                storage_file_name=f"文档-{index}.md",
-                labels={"title": f"文档-{index}"},
+        with patch.dict(os.environ, {"USER_CODE": "user-001"}):
+            api.discover_document_objects(
+                session_id="session-001",
+                object_codes=["raw_doc"],
+            )
+            api.enrich_document_objects(
+                session_id="session-001",
+                object_codes=["concept"],
             )
 
-        with patch.object(organizer, "_save_state", wraps=organizer._save_state) as save_state:
-            fragments = organizer.organize(self.task_dir)
+        self.assertEqual(
+            transport.requests[0],
+            {
+                "service_env": "DATACLOUD_DOMAINNAME",
+                "method": "POST",
+                "path": "/api/v1/rpc/kb/discoverDocumentObjectsAsync",
+                "payload": {"params": {"objectCodes": ["raw_doc"]}},
+                "headers": {
+                    "X-Session-Id": "session-001",
+                    "X-User-Code": "user-001",
+                },
+            },
+        )
+        self.assertEqual(
+            transport.requests[1],
+            {
+                "service_env": "DATACLOUD_DOMAINNAME",
+                "method": "POST",
+                "path": "/api/v1/rpc/kb/enrichDocumentObjectsAsync",
+                "payload": {"params": {"objectCodes": ["concept"]}},
+                "headers": {
+                    "X-Session-Id": "session-001",
+                    "X-User-Code": "user-001",
+                },
+            },
+        )
 
-        self.assertEqual(len(fragments), 5)
-        self.assertEqual(api.maximum_active_extractions, 4)
-        self.assertEqual(save_state.call_count, 5)
+    def test_async_datacloud_calls_require_user_code(self) -> None:
+        api = knowledge_organizer.ServiceApi(RecordingTransport([]))
 
-    def test_organize_resume_retries_only_failed_or_unfinished_files(self) -> None:
-        api = ConcurrentFakeApi()
-        organizer = knowledge_organizer.KnowledgeOrganizer(api)
-        organizer.initialize(self.task_dir, "employee-1")
-        for content in ("successful", "retry-me"):
-            source = Path(self.temp_dir.name) / f"{content}.md"
-            source.write_text(content, encoding="utf-8")
-            organizer.ingest(
-                self.task_dir,
-                source=source,
-                object_code="raw_doc",
-                storage_file_name=f"{content}.md",
-                labels={"title": content},
-            )
-        api.failed_contents.add("retry-me")
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ValueError, "USER_CODE"):
+                api.discover_document_objects(
+                    session_id="session-001",
+                    object_codes=["concept"],
+                )
 
-        first = organizer.organize(self.task_dir)
-        second = organizer.organize(self.task_dir)
-        api.failed_contents.clear()
-        resumed = organizer.organize(self.task_dir, resume=True)
+    def test_async_commands_reject_uninitialized_and_unauthorized_objects(self) -> None:
+        with self.assertRaisesRegex(ValueError, "未初始化"):
+            self.organizer.organize(self.task_dir, ["raw_doc"])
 
-        self.assertEqual(len(first), 1)
-        self.assertEqual(second, [])
-        self.assertEqual(len(resumed), 1)
-        self.assertEqual(api.extract_calls.count("successful"), 1)
-        self.assertEqual(api.extract_calls.count("retry-me"), 2)
+        self.initialize_session_scope()
+        with self.assertRaisesRegex(ValueError, "未授权"):
+            self.organizer.build(self.task_dir, ["unknown"])
+
+    def test_async_rejection_is_recorded_as_failure(self) -> None:
+        class RejectingApi(FakeApi):
+            def discover_document_objects(
+                self, *, session_id: str, object_codes: list[str]
+            ) -> dict[str, object]:
+                return {
+                    "sessionId": session_id,
+                    "taskType": "documentDiscovery",
+                    "accepted": False,
+                }
+
+        organizer = knowledge_organizer.KnowledgeOrganizer(RejectingApi())
+        organizer.initialize(
+            self.task_dir,
+            session_id="session-001",
+        )
+
+        with self.assertRaisesRegex(ValueError, "accepted=true"):
+            organizer.organize(self.task_dir, ["concept"])
+
         state = organizer._load_state(self.task_dir)
-        statuses = [ingestion.get("organize_status") for ingestion in state["ingestions"]]
-        self.assertEqual(statuses, ["succeeded", "succeeded"])
+        self.assertEqual(state["discoveries"][0]["status"], "failed")
+        self.assertFalse(state["discoveries"][0]["accepted"])
+
+    def test_cli_exposes_only_four_commands_and_new_arguments(self) -> None:
+        result = subprocess.run(
+            ["python3", str(SCRIPT), "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("{init,ingest,organize,build}", result.stdout)
+
+        init_help = subprocess.run(
+            ["python3", str(SCRIPT), "init", "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertIn("--session-id", init_help.stdout)
+        self.assertNotIn("--item-id", init_help.stdout)
+        self.assertIn("--digital-employee-resource-id", init_help.stdout)
+
+        ingest_help = subprocess.run(
+            ["python3", str(SCRIPT), "ingest", "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertIn("--ext-content-json", ingest_help.stdout)
+        self.assertNotIn("--version", ingest_help.stdout)
+        self.assertNotIn("--status-cd", ingest_help.stdout)
+        self.assertNotIn("--labels-json", ingest_help.stdout)
 
 
 if __name__ == "__main__":

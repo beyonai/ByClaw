@@ -2,14 +2,15 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  // width: 28px;
+  // height: 28px;
   padding: 0;
   color: #666;
   font-size: 18px;
   background: transparent;
   border: 0;
   cursor: pointer;
+  font-size: 17px;
 
   &:hover {
     color: #1677ff;
@@ -17,14 +18,65 @@
 }
 
 .modalTitle {
+  // 按设计稿将标题做成独立的浅蓝色信息条，避免沿用 Antd 默认小标题样式。
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 10px;
+  color: #062b86;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.2;
+  background: linear-gradient(135deg, #e6f4ff 0%, #f4faff 100%);
+  border-radius: 14px;
+  box-sizing: border-box;
+}
+
+.modalTitleIcon {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  color: #1d3f8e;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  color: #2d86f5;
+  font-size: 21px;
+  background: #dceeff;
+  border-radius: 10px;
+
+  // Antd 图标默认字号较小，这里让标题图标跟随设计稿尺寸。
+  :global(.anticon) {
+    font-size: inherit;
+  }
 }
 
 .connectorList {
+  min-height: 198px;
   margin: 0 -8px;
+}
+
+.emptyState {
+  padding: 28px 12px;
+  color: #7a8596;
+  font-size: 14px;
+  text-align: center;
+}
+
+.refreshingIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  color: #8c8c8c;
+}
+
+.connectorAction {
+  display: inline-flex;
+  flex: 0 0 64px;
+  align-items: center;
+  justify-content: center;
 }
 
 .connectorItem {
@@ -102,11 +154,19 @@
 
 .settingsModal {
   :global(.ant-modal-content) {
-    border-radius: 16px;
+    // 设计稿标题条贴近外框，外层仅保留极小安全留白。
+    // Antd 默认内容区有 24px padding，需要提高优先级才能覆盖它。
+    padding: 10px !important;
+    background: #fff;
+    border: 1px solid #e7edf4;
+    border-radius: 26px;
+    box-shadow: 0 8px 24px rgba(31, 41, 55, 16%);
   }
 
   :global(.ant-modal-header) {
-    margin-bottom: 10px;
+    margin-bottom: 8px;
+    padding: 0 !important;
+    background: transparent;
   }
 }
 
@@ -220,7 +280,8 @@
   }
 }
 
-.qrCode {
+.qrCodeImage,
+.authorizationLinkTip {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -228,11 +289,15 @@
   width: 220px;
   height: 220px;
   margin: 14px auto 20px;
+  object-fit: contain;
+}
+
+.authorizationLinkTip {
+  // 后端未返回二维码时，明确提示用户通过真实授权链接完成授权。
   color: #a2adbc;
   background: repeating-linear-gradient(45deg, #fafbfd, #fafbfd 5px, #f3f6fa 5px, #f3f6fa 10px);
   border: 1px dashed #d7dee8;
   border-radius: 12px;
-  cursor: pointer;
 
   :global(.anticon) {
     margin-bottom: 10px;
@@ -245,44 +310,47 @@
 }
 
 .selection {
-  // 已连接状态替换原连接器入口，直接回显已授权的平台图标。
-  display: inline-flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 8px;
-  padding: 0;
-}
-
-.selectionItem {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   padding: 0;
   background: transparent;
   border: 0;
   cursor: pointer;
+}
+
+.selectionGroup {
+  display: inline-flex;
+  align-items: center;
+}
+
+.selectionAvatar {
+  color: #1677ff;
+  background: #edf4ff;
+  border: 2px solid #fff;
+
+  :global(.@{antPrefix}-avatar-string) {
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: normal;
+    transform: none !important;
+  }
 
   .connectorIcon {
-    width: 32px;
-    height: 32px;
-    font-size: 20px;
-    border-radius: 8px;
+    width: auto;
+    height: auto;
+    background: transparent;
+    font-size: 18px;
+    border-radius: 0;
   }
 }
 
-.moreSelection {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
+.selectionMoreAvatar {
   color: #4b5563;
-  font-size: 15px;
+  font-size: 14px !important;
   background: #f0f1f3;
-  border: 0;
-  border-radius: 50%;
-  cursor: pointer;
+  border: 2px solid #fff;
 }
 
 .configurationDrawer {

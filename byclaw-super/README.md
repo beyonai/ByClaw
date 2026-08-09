@@ -12,7 +12,7 @@
 - 只包含 `delegateAgent`、`askUserQuestion` 的安全工具集合；
 - `@byclaw/connector-openclaw-by-framework`；
 - OpenClaw externalRef + Redis Stream cursor 恢复；
-- 三方数字员工 `INTERFACE`、`A2A`、`PAGE` 专用 Connector，支持按 resourceId 灰度直连；
+- 三方数字员工根据 `discoverMine` 返回信息自动选择 `INTERFACE`、`A2A`、`PAGE` 专用 Connector；
 - 专用数据库表短期保存执行凭证，Run 终态立即删除；
 - 默认注册为 by-framework `BY_SUPER` Worker，可通过 by-framework 发起入站任务；
 - HTTP Run API、数据库 SSE 事件回放、超时与级联取消。
@@ -262,8 +262,8 @@ REDIS_PORT=
 REDIS_DATABASE=
 # cluster 模式改填：REDIS_CLUSTER_HOST=redis-1:6379,redis-2:6379
 
-# 默认 Pi 模型的凭证
-OPENAI_API_KEY=
+# Redis 默认 LLM 不可用时的 DeepSeek 兜底凭证
+ARK_API_KEY=
 
 # 只在部署值与代码默认值不同时填写，例如：
 # PORT=10001
@@ -271,9 +271,7 @@ OPENAI_API_KEY=
 # REDIS_PASSWORD=
 # DB_EVENT_LISTEN_ENABLED=false
 # DB_MIGRATE_ON_START=true
-# 三方员工直连默认关闭；生产先使用 allowlist 灰度。
-# THIRD_PARTY_AGENT_DIRECT_MODE=allowlist
-# THIRD_PARTY_AGENT_ALLOWLIST=1001,1002
+# 三方员工根据 discoverMine 返回的 createType 和 integrationType 自动选择直连协议。
 # THIRD_PARTY_AGENT_ALLOWED_HOSTS=vendor.example.com
 ```
 
@@ -293,12 +291,11 @@ Token 调用 ByClaw BE 获取，调用方不再传入这两个字段。
 包含 `userCode`。然后调用 `/byaiService/api/v2/digitEmploy/discover`，只把返回结果中
 `usesPermissions=true` 的数字员工注入本次 Run。
 
-三方员工直连由 `THIRD_PARTY_AGENT_DIRECT_MODE=off|allowlist|all` 控制。只有
-`createType=FROM_THIRD` 且 `integrationType=INTERFACE|A2A|PAGE` 的员工会选择专用
+三方员工直接根据 `discoverMine` 返回的信息路由。`createType=FROM_THIRD` 且
+`integrationType=INTERFACE|A2A|PAGE` 的员工会选择专用
 Connector；其余员工继续走 OpenClaw。直连 Connector 在执行时通过内部 execution descriptor
 API 按 resourceId 重新校验权限并获取短期 endpoint/header，这些字段不会进入 Run、
-Delegation、RunEvent、Pi transcript 或日志。当前默认 `off`，在 ByClaw BE 提供 descriptor
-契约前不得切换为 `all`。
+Delegation、RunEvent、Pi transcript 或日志。
 
 ByClaw BE 地址优先从当前 Redis 读取：
 
@@ -539,6 +536,25 @@ Worker 会复用 HTTP API 的同一条 `RunIngressService` 链路：Token 验签
 `userCode`、查询授权 Agent Catalog、创建内部 Run，再把简化思考进度和 Leader 回答映射为
 by-framework 的 `reasoningLog*`、`answerDelta` 和终态事件。子 Agent 返回的 `Resume`
 只结束原子会话，不会重复创建 Run。
+
+专家团团长继续使用同一个 `BY_SUPER` Worker，但必须在 `extraPayload` 中声明编排者：
+
+```json
+{
+  "orchestrator": {
+    "schemaVersion": "byclaw.orchestrator-ref/v1",
+    "kind": "EXPERT_TEAM",
+    "id": "90001"
+  }
+}
+```
+
+Worker 会携带当前 Beyond-Token 调用
+`POST /byaiService/internal/v1/orchestrators/resolve-runtime`，由 ByClaw BE 原子完成团长权限、
+Prompt、模型和有效团员解析。专家团配置失败时本轮直接失败，不会降级为普通超级助手。
+未传 `orchestrator` 的旧请求继续使用现有 `discoverMine` 和超级助手 Prompt；专家团使用独立的
+最小 Context Pipeline。专家团 binding 额外包含 `kind + id`，同一外部 `sessionId` 不会在不同
+团长或超级助手之间共享 Pi 上下文。
 
 同一个调用者作用域中的 by-framework `sessionId` 会映射到同一个内部 Session，因此连续
 AskAgent 可以保留上下文；binding key 包含 `ownerVersion + userCode`，不同用户即使使用相同

@@ -1,14 +1,13 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { PiLeaderSessionFactory } from "../src/pi-leader.js";
 
 describe("Pi provider registration", () => {
   const tempDirectories: string[] = [];
 
   afterEach(async () => {
-    vi.unstubAllEnvs();
     await Promise.all(
       tempDirectories.splice(0).map((directory) =>
         rm(directory, { recursive: true, force: true }),
@@ -17,14 +16,29 @@ describe("Pi provider registration", () => {
   });
 
   it("selects the Volcengine Ark DeepSeek Responses model", async () => {
-    vi.stubEnv("ARK_API_KEY", "test-only");
     const cacheDirectory = await mkdtemp(join(tmpdir(), "byclaw-ark-provider-"));
     tempDirectories.push(cacheDirectory);
 
     const factory = await PiLeaderSessionFactory.create({
-      provider: "volcengine-ark",
-      model: "deepseek-v4-pro-260425",
-      arkBaseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+      llmProvider: {
+        providerId: "volcengine-ark",
+        providerName: "Volcengine Ark",
+        modelId: "deepseek-v4-pro-260425",
+        modelName: "DeepSeek V4 Pro 260425",
+        baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+        apiKey: "test-only",
+        authHeader: true,
+        protocol: "openai-responses",
+        input: ["text"],
+        contextWindow: 1_000_000,
+        maxTokens: 384_000,
+        reasoning: {
+          enabled: true,
+          capability: "effort",
+          defaultLevel: "medium",
+          supportedEfforts: ["low", "medium", "high"],
+        },
+      },
       instanceId: "ark-provider-test",
       sessionCacheDirectory: cacheDirectory,
     });
@@ -48,5 +62,13 @@ describe("Pi provider registration", () => {
       xhigh: "high",
       max: "high",
     });
+
+    const leader = await factory.create("internal-session-1");
+    const [instanceDirectory] = await readdir(cacheDirectory);
+    expect(instanceDirectory).toBeDefined();
+    await expect(
+      access(join(cacheDirectory, instanceDirectory!, "internal-session-1", "files")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await leader.dispose();
   });
 });

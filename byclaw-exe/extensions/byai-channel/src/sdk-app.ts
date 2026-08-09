@@ -29,7 +29,7 @@ import {
   isBaiyingEnhanceConfigured,
   waitForBaiyingEnhanceColdStartReady,
 } from "./baiying-enhance-readiness.js";
-import { normalizeByaiAgentId } from "./session-key.js";
+import { normalizeByaiAgentId } from "../../shared/src/session-key.js";
 import {
   buildByaiMultiAgentLaneMessages,
   parseByaiLaneMetadata,
@@ -41,6 +41,7 @@ import {
   type RedisClient,
 } from "../../shared/src/redis-compat.js";
 import { releaseCancelledSessionDispatch } from "./session-dispatch-gate.js";
+import { connectorAuthorizationFromMetadata } from "./connector-authorization.js";
 
 export interface ByaiSdkAppOptions {
   account: ResolvedByaiAccount;
@@ -72,6 +73,24 @@ function buildLaneAssignmentLogItem(message: ByaiSdkInboundMessage, index: numbe
     messageId: message.messageId,
     query: message.text,
   };
+}
+
+/** 将扩展上下文按标签包裹后追加到问题文本末尾。 */
+function appendExtraPromptContexts(questionText: string, promptContextList: unknown[]): string {
+  const contextText = promptContextList
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return "";
+      }
+      const context = item as { tag?: unknown; text?: unknown };
+      if (typeof context.tag !== "string" || typeof context.text !== "string") {
+        return "";
+      }
+      return `<${context.tag}>${context.text}</${context.tag}>`;
+    })
+    .filter(Boolean)
+    .join("\n");
+  return contextText ? `${questionText}\n${contextText}` : questionText;
 }
 
 async function getInboundMessageFromByFramework(data: AskAgentCommand) {
@@ -107,6 +126,9 @@ async function getInboundMessageFromByFramework(data: AskAgentCommand) {
       "- If the task is done, NOT spawn this subagent again.",
       "- If the task failed, collect enough information from user, then spawn this subagent again.",
     ].join("\n");
+  }
+  if (Array.isArray(extParams.promptContextList)) {
+    questionText = appendExtraPromptContexts(questionText, extParams.promptContextList);
   }
   if (Array.isArray(data.extraPayload?.resource_list)) {
     const remindTextArr: string[] = [];
@@ -482,6 +504,7 @@ export class ByaiSdkApp {
           | Record<string, unknown>
           | string
           | undefined,
+        authConnectorList: connectorAuthorizationFromMetadata(metadata),
         beyondToken:
           metadata?.["Beyond-Token"] ?? metadata?.request_headers?.["Beyond-Token"] ?? "",
         laneMetadata,

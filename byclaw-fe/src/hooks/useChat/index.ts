@@ -50,6 +50,7 @@ import type { IState as IEmployeesState } from '@/models/useEmployees';
 import type { IState } from '@/models/useEmployees';
 import type { RichInputResourceList } from '@/components/QueryInput/RichInput';
 import type { IMessageInfo } from '@/models/useMessageStore';
+import { getSessionLastAnsMsgMetadata } from './util';
 
 type ISseRes = {
   message: IMessageListItem;
@@ -671,6 +672,12 @@ function useChat(props: IProps) {
                 latestRuntimeInfo?.clientRequestId || runningInfo.clientRequestId,
                 snapshotStreamId
               );
+              EventEmitter.emit(
+                'RECEIVE_SESSION_RECORDS_LAST_METADATA',
+                getSessionLastAnsMsgMetadata(sessionId, answerMsg, queryMsg)
+              );
+              // scrollToMsgOnSessionChanged 消费者已经进行了 requestIdleCallback 处理
+              EventEmitter.emit('scrollToMsgOnSessionChanged', { sessionId });
             }
           }
 
@@ -937,21 +944,22 @@ function useChat(props: IProps) {
     }
 
     if (!isContinuingRunningTrace) {
+      // 多员工并行回答属于同一轮对话，只在左侧会话列表插入一条临时会话。
+      if (isNewProjectSession) {
+        EventEmitter.emit('projectSpace-session-pending', {
+          projectId: `${projectId}`,
+          projectName: get(restPayload, 'projectName'),
+          clientRequestId: primaryEntry.lane.clientRequestId,
+          sessionName: newQueryMsg.text || 'New Chat',
+          sessionContent: newQueryMsg.text || '',
+          updateTime: new Date().toISOString(),
+        });
+      }
+
       laneEntries.forEach((entry) => {
         if (projectId !== undefined) {
           // 会话创建成功后用 clientRequestId 找回所属项目，再用真实 sessionId 建立关系。
           pendingProjectIdByClientRequestRef.current.set(entry.lane.clientRequestId, `${projectId}`);
-          // 首条消息发送后立即在项目会话列表插入临时项，避免等待后端创建会话和绑定关系完成。
-          if (isNewProjectSession) {
-            EventEmitter.emit('projectSpace-session-pending', {
-              projectId: `${projectId}`,
-              projectName: get(restPayload, 'projectName'),
-              clientRequestId: entry.lane.clientRequestId,
-              sessionName: newQueryMsg.text || 'New Chat',
-              sessionContent: newQueryMsg.text || '',
-              updateTime: new Date().toISOString(),
-            });
-          }
         }
         registerPendingChatContext({
           clientRequestId: entry.lane.clientRequestId,

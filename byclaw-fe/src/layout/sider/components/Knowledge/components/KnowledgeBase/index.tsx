@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useContext, useState } from 'react';
 import { IKnowledgeBaseItem, IKnowledgeCollectionItem } from './types';
 import KnowledgeBaseList from './KnowledgeBaseList';
 import KnowledgeBaseDetail from './KnowledgeBaseDetail';
 import { IDragType } from '@/components/QueryInput/withDrag';
+import { SiderContentContext } from '@/layout/sider/siderContentContext';
 
 interface Props {
   editable?: boolean;
@@ -11,13 +12,38 @@ interface Props {
   agentId?: string;
   agentIds?: string;
   activeAgentResourceId?: string;
+  detailInPanel?: boolean;
 }
 
-const KnowledgeBaseTab = ({ editable, onSelect, keyword, agentId, agentIds, activeAgentResourceId }: Props) => {
+const KnowledgeBaseTab = ({
+  editable,
+  onSelect,
+  keyword,
+  agentId,
+  agentIds,
+  activeAgentResourceId,
+  detailInPanel = false,
+}: Props) => {
   const [currentKnowledgeBase, setCurrentKnowledgeBase] = useState<IKnowledgeBaseItem | null>(null);
+  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
 
   // 进入知识库详情
   const handleKnowledgeBaseDetail = (kb: IKnowledgeBaseItem) => {
+    if (detailInPanel) {
+      setDetailPanel?.(
+        <KnowledgeBaseDetail
+          editable={editable}
+          dataset={kb}
+          onGoBack={() => clearDetailPanel?.()}
+          activeAgentResourceId={activeAgentResourceId}
+        />,
+        {
+          tabKey: `knowledge:${kb.resourceId}`,
+          title: kb.resourceName,
+        }
+      );
+      return;
+    }
     setCurrentKnowledgeBase(kb);
   };
 

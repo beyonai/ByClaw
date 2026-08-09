@@ -18,6 +18,17 @@ export interface LaunchSandboxResult {
 }
 
 /**
+ * 通过后端转发采集流程共用的沙箱浏览器导航命令，避免浏览器跨域请求沙箱端口。
+ */
+export async function navigateSandboxBrowser(params: {
+  sandboxId: string;
+  targetUrl: string;
+  sessionKey: string;
+}): Promise<void> {
+  await POST('/byaiService/sandbox/browser/navigate', params);
+}
+
+/**
  * 查询沙箱信息
  */
 export async function getSandboxInfo(params: { userCode?: string; sandboxType?: string }): Promise<SandboxInfo[]> {

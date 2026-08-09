@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.security.SecureRandom;
+import java.util.concurrent.TimeUnit;
 import com.iwhalecloud.byai.manager.entity.men.MenResCom;
 import com.iwhalecloud.byai.manager.entity.men.MenTask;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -32,8 +33,10 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.util.SpanUtil;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
@@ -55,7 +58,6 @@ import com.iwhalecloud.byai.state.domain.session.enums.UserRole;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
-import com.iwhalecloud.byai.state.infrastructure.utils.ChatUtils;
 import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
 import com.iwhalecloud.byai.common.constants.chat.ConversationObjectType;
 import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
@@ -74,6 +76,8 @@ import io.opentelemetry.instrumentation.annotations.WithSpan;
 public class AssistantChatService {
 
     private static final Logger logger = LoggerFactory.getLogger(AssistantChatService.class);
+
+    private static final long CALL_ACP_AGENT_DELEGATION_TTL_SECONDS = 7 * 24 * 60 * 60L;
 
     @Autowired
     private ScriptService scriptService;
@@ -107,6 +111,9 @@ public class AssistantChatService {
 
     @Autowired
     private TargetAgentResolver targetAgentResolver;
+
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
 
     /**
      * 对话处理方法（带首词响应开始时间）
@@ -156,6 +163,7 @@ public class AssistantChatService {
 
             if (assistantChatDto != null) {
                 assistantChatDto.setAgentId(targetAgentResolver.resolveAgentId(assistantChatDto));
+                applyCallAcpAgentDelegation(assistantChatDto);
             }
 
             // 执行聊天处理：Gateway 模式下 handleGatewayMode() 内部阻塞等待 Redis 监听器完成，
@@ -393,6 +401,45 @@ public class AssistantChatService {
     }
 
     /**
+     * 将已委派到外部 ACP agent 的会话继续路由到该 agent，并在每次命中时续期委派记录。
+     */
+    private void applyCallAcpAgentDelegation(AssistantChatDto assistantChatDto) {
+        if (assistantChatDto.getAgentId() == null || assistantChatDto.getSessionId() == null) {
+            return;
+        }
+
+        // Key 格式必须与 TypeScript call-acp-agent-tool.ts 中的 buildCallAcpAgentDelegationRedisKey 保持一致。
+        String key = buildCallAcpAgentDelegationRedisKey(assistantChatDto.getAgentId(), assistantChatDto.getSessionId());
+        try {
+            String delegationValue = (String) redisTemplate.opsForValue().get(key);
+            if (StringUtils.isBlank(delegationValue)) {
+                return;
+            }
+
+            JSONObject delegation = JSON.parseObject(delegationValue);
+            String targetAgentType = delegation.getString("targetAgentType");
+            if (StringUtils.isBlank(targetAgentType)) {
+                logger.warn("call_acp_agent 委派记录缺少 targetAgentType, key: {}", key);
+                return;
+            }
+
+            assistantChatDto.setSourceAgentType(targetAgentType);
+            redisTemplate.expire(key, CALL_ACP_AGENT_DELEGATION_TTL_SECONDS, TimeUnit.SECONDS);
+        }
+        catch (Exception e) {
+            // 委派缓存不可用时沿用原有路由，避免缓存异常阻断正常聊天。
+            logger.warn("读取 call_acp_agent 委派记录失败, key: {}", key, e);
+        }
+    }
+
+    /**
+     * 构造外部 ACP 会话委派记录的 Redis key。
+     */
+    private String buildCallAcpAgentDelegationRedisKey(Long agentId, Long sessionId) {
+        return "byai:call_acp_agent:delegation:" + agentId + ":" + sessionId;
+    }
+
+    /**
      * 处理BdpRuntimeException异常
      */
     private void handleBdpRuntimeException(BdpRuntimeException e, AssistantChatDto assistantChatDto,
@@ -498,7 +545,8 @@ public class AssistantChatService {
 
         String chatContent = assistantChatDto.getChatContent();
         sessionMembersDto
-            .setSessionName(ChatUtils.truncateString(chatContent.replaceAll("\\{\\{[^}]*+\\}\\}", ""), 10));
+            // 任务启动链路只需要截断会话标题，使用已有通用工具避免引入聊天基础设施类加载依赖。
+            .setSessionName(StringUtils.substring(chatContent.replaceAll("\\{\\{[^}]*+\\}\\}", ""), 0, 10));
         sessionMembersDto.setCreatorId(CurrentUserHolder.getCurrentUserId());
         sessionMembersDto.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
         sessionMembersDto.setSessionType(SessionType.H_AS.getCode());

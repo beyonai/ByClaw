@@ -20,7 +20,6 @@ import Icon from '@/components/AntdIcon/icon';
 import Feedback from '../header/components/Feedback';
 import SandboxStatusIndicator from './components/SandboxStatus';
 import useUserDropdown from '../header/useUserDropdown';
-import SiderSearch from './siderSearch';
 import { getDisplayUserNameInChat } from '@/utils/chat';
 import useGlobal from '@/hooks/useGlobal';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
@@ -32,7 +31,18 @@ import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from './siderContent
 
 export const DEF_SIDER = 'sessions';
 
-const CENTER_TAB_KEYS = new Set(['agent', 'model', 'knowledge', 'tool', 'view', 'object', 'ontology', 'skill', 'file']);
+const CENTER_TAB_KEYS = new Set([
+  'agent',
+  'model',
+  'knowledge',
+  'tool',
+  'view',
+  'object',
+  'ontology',
+  'skill',
+  'file',
+  'projectSpace',
+]);
 
 const SIDER_ACTIVE_TAB_BY_PATH: Partial<Record<string, (typeof tabItems)[number]['key']>> = {
   '/dialogueRecord': 'sessions',
@@ -118,6 +128,15 @@ const Sidebar = () => {
 
       if (tab.key === 'sessions') {
         if (!isChatPage && pathname !== tab.navigatePath) {
+          navigate(tab.navigatePath);
+        }
+        return;
+      }
+
+      // 项目是独立工作区，从聊天页点击时也必须切换右侧大页面；
+      // 资源类菜单仍保持聊天上下文不被打断。
+      if (tab.key === 'projectSpace') {
+        if (pathname !== tab.navigatePath) {
           navigate(tab.navigatePath);
         }
         return;
@@ -308,7 +327,6 @@ const Sidebar = () => {
         <div className={styles.logo}>
           <img key="BYAI" alt="BYAI" src={getFaviconIcon} />
         </div>
-        <SiderSearch />
         <Tooltip placement="right" title={intl.formatMessage({ id: 'sider.newChat' })}>
           <div
             className={styles.sideIconWrap}

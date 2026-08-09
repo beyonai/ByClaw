@@ -1,0 +1,116 @@
+.card {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  overflow: hidden;
+  break-inside: avoid;
+  border-radius: 18px;
+  background: transparent;
+  cursor: pointer;
+
+  &:focus-visible {
+    outline: 2px solid var(--ant-color-primary);
+    outline-offset: 2px;
+  }
+}
+
+.cover {
+  position: relative;
+  display: flex;
+  aspect-ratio: 3 / 4;
+  max-height: 480px;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: hidden;
+  background: #0b1530;
+}
+
+.actionButton {
+  position: absolute;
+  z-index: 1;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  color: #fff;
+  background: rgb(0 0 0 / 45%);
+  cursor: pointer;
+
+  &:hover {
+    background: rgb(0 0 0 / 65%);
+  }
+}
+
+.defaultCoverImage,
+.coverImage {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  transition: transform 0.3s ease;
+}
+
+.card:hover .coverImage,
+.card:focus-visible .coverImage,
+.card:hover .defaultCoverImage,
+.card:focus-visible .defaultCoverImage {
+  transform: scale(1.3);
+}
+
+.content {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 16px 14px;
+  border-right: 1px solid var(~'--@{antPrefix}-color-border-secondary');
+  border-bottom: 1px solid var(~'--@{antPrefix}-color-border-secondary');
+  border-left: 1px solid var(~'--@{antPrefix}-color-border-secondary');
+  border-radius: 0 0 18px 18px;
+  background: #fff;
+}
+
+.title,
+.description {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title {
+  color: #1f2937;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.description {
+  display: -webkit-box;
+  min-height: 40px;
+  margin-top: 8px;
+  color: #8b95a5;
+  font-size: 13px;
+  line-height: 20px;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+  color: #9aa3af;
+  font-size: 12px;
+}
+
+.creator {
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

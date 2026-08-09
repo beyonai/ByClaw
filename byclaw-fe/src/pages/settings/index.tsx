@@ -13,7 +13,7 @@ import {
   UserOutlined,
 } from '@ant-design/icons';
 // @ts-ignore
-import { getLocale, setLocale, useIntl, useSelector } from '@umijs/max';
+import { getLocale, setLocale, useIntl, useLocation, useSelector } from '@umijs/max';
 import { Avatar, Button, Card, Collapse, Descriptions, Menu, Modal, Select, Space, Typography } from 'antd';
 
 import useAppStore from '@/models/common/useAppStore';
@@ -60,7 +60,12 @@ const Settings: React.FC = () => {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [theme, setTheme] = useState<string>('light');
   const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [activeMenu, setActiveMenu] = useState<SettingsMenuKey>('general');
+  // 允许外部(如研发项目 GH_TOKEN 提醒)通过路由 state 直达指定设置分区,仅采纳合法 key。
+  const location = useLocation();
+  const requestedTab = (location.state as { tab?: string } | null)?.tab;
+  const initialMenu: SettingsMenuKey =
+    requestedTab === 'personalParams' || requestedTab === 'email' ? requestedTab : 'general';
+  const [activeMenu, setActiveMenu] = useState<SettingsMenuKey>(initialMenu);
   const [versionDetailsOpen, setVersionDetailsOpen] = useState<boolean>(false);
   const termsUrl = `${getPublicPath()}legal/terms/index.html`;
   const privacyUrl = `${getPublicPath()}legal/privacy/index.html`;

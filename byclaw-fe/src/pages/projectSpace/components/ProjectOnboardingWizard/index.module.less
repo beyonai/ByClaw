@@ -1,0 +1,270 @@
+// 研发项目引导向导:三步(基本信息/仓库配置/架构初始化)贯穿一个弹窗,每步落库后可回看。
+.wizard {
+  :global(.ant-modal) {
+    max-height: calc(100vh - 48px);
+  }
+
+  :global(.ant-modal-content) {
+    max-height: calc(100vh - 48px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  // 新建项目内容较长时只滚动弹窗主体，步骤条和底部操作按钮保持固定。
+  :global(.ant-modal-body) {
+    min-height: 0;
+    max-height: calc(100vh - 220px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-top: 8px;
+    padding-inline-end: 8px;
+  }
+}
+
+// 顶部步骤条与主体之间留出呼吸空间,步骤条常驻不随内容滚动。
+.steps {
+  margin-bottom: 20px;
+}
+
+.stepBody {
+  min-height: 320px;
+}
+
+// 每步统一的引导说明条:弱背景 + 左侧信息色,承载"为什么要这一步"。
+.hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f0f7ff;
+  border: 1px solid #d6e8ff;
+  color: #3a5a80;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.hintIcon {
+  margin-top: 2px;
+  color: #1677ff;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+// 仓库分区卡片:工作区(必填)与代码仓库(可多)各占一块,视觉上分离职责。
+.section {
+  position: relative;
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid #eaeaea;
+  border-radius: 10px;
+  background: #fff;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.section:hover {
+  border-color: #d0d0d0;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.sectionTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f1f1f;
+}
+
+.sectionDesc {
+  margin-bottom: 14px;
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+// 必填徽标:红底白字小标签,和可选区块形成对比。
+.requiredBadge {
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  background: #fff1f0;
+  color: #cf1322;
+  border: 1px solid #ffccc7;
+}
+
+.optionalBadge {
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  background: #f6ffed;
+  color: #389e0d;
+  border: 1px solid #b7eb8f;
+}
+
+// 已保存徽标:工作区落库后给出确认态,替换必填提示。
+.savedBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  background: #f6ffed;
+  color: #389e0d;
+  border: 1px solid #b7eb8f;
+}
+
+// 仓库表单:名称/地址/分支/按钮横排,地址占主宽度。
+.repoForm {
+  display: grid;
+  grid-template-columns: 1.3fr 1.5fr 0.8fr auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.repoFormField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.repoFormLabel {
+  font-size: 12px;
+  color: #595959;
+}
+
+// 已配置仓库行:名称/分支/删除,数字与分支用等宽体对齐。
+.repoRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: #fafafa;
+}
+
+.repoRowDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #52c41a;
+  flex-shrink: 0;
+}
+
+.repoRowName {
+  font-weight: 500;
+  color: #1f1f1f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repoRowBranch {
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 12px;
+  color: #8c8c8c;
+  margin-left: auto;
+}
+
+.repoEmpty {
+  padding: 12px;
+  text-align: center;
+  color: #bfbfbf;
+  font-size: 13px;
+}
+
+// step3 初始化面板:居中的状态区,长任务不静默。
+.initPanel {
+  padding: 24px 16px;
+  text-align: center;
+}
+
+.initSpinner {
+  font-size: 32px;
+  color: #1677ff;
+  margin-bottom: 12px;
+}
+
+.initTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1f1f1f;
+  margin-bottom: 6px;
+}
+
+.initDesc {
+  color: #8c8c8c;
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 0 auto 20px;
+  max-width: 420px;
+}
+
+// checklist 固定输出位:左对齐,逐项状态图标 + 文案。
+.checklist {
+  max-width: 380px;
+  margin: 0 auto 20px;
+  padding: 14px 16px;
+  border: 1px solid #f0f0f0;
+  border-radius: 10px;
+  background: #fafafa;
+  text-align: left;
+}
+
+.checkItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 13px;
+  color: #595959;
+}
+
+.checkItemDone {
+  color: #389e0d;
+}
+
+.checkIconDone {
+  color: #52c41a;
+}
+
+.checkIconPending {
+  color: #d9d9d9;
+}
+
+.checkIconActive {
+  color: #1677ff;
+}
+
+// 建索引联动的技能包多选:radio 下方留白,label 与选择器纵向排列。
+.skillField {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+// 初始化未触发态:居中提示 + 开始按钮,与已触发的 loading 面板区分。
+.initReady {
+  padding: 24px 16px;
+  text-align: center;
+}
+
+.initReadyDesc {
+  color: #8c8c8c;
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 0 auto 20px;
+  max-width: 460px;
+}

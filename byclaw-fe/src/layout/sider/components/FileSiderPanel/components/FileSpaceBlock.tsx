@@ -20,6 +20,10 @@ export interface FileSpaceGroup {
 
 interface FileSpaceBlockProps {
   title: React.ReactNode;
+  headerExtra?: React.ReactNode;
+  contentBefore?: React.ReactNode;
+  alternateContent?: React.ReactNode;
+  showAlternateContent?: boolean;
   count?: number;
   loading?: boolean;
   items?: FileBrowserItem[];
@@ -30,6 +34,8 @@ interface FileSpaceBlockProps {
   expandedKeys: Key[];
   switchOptions?: { label: React.ReactNode; value: string }[];
   switchValue?: string;
+  // 外层已有统一工具栏时隐藏自身标题栏，避免同一文件列表重复出现卡片头部。
+  hideHeader?: boolean;
   compactTreePadding?: boolean;
   fillContainer?: boolean;
   resourceEmptyStyle?: boolean;
@@ -53,6 +59,10 @@ export const getFileSpaceFileCount = (items: FileBrowserItem[] = []) =>
 // 文件空间块复用文件模块目录树，供项目资源等只读场景展示会话/共享文件。
 const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   title,
+  headerExtra,
+  contentBefore,
+  alternateContent,
+  showAlternateContent = false,
   count,
   loading = false,
   items = [],
@@ -63,6 +73,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   expandedKeys,
   switchOptions,
   switchValue,
+  hideHeader = false,
   compactTreePadding = false,
   fillContainer = false,
   resourceEmptyStyle = false,
@@ -160,65 +171,76 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
         .filter(Boolean)
         .join(' ')}
     >
-      <div className={styles.fileSpaceHeader}>
-        <span className={styles.fileSpaceTitle}>{title}</span>
-        {!!switchOptions?.length && (
-          <Segmented
-            size="small"
-            value={switchValue}
-            options={switchOptions}
-            className={styles.fileSpaceSegmented}
-            onChange={(value) => onSwitchChange?.(`${value}`)}
-          />
-        )}
-        {typeof count === 'number' && <span className={styles.fileSpaceCount}>{count}</span>}
-        {onRefresh && (
-          <button type="button" className={styles.fileSpaceRefresh} onClick={onRefresh} aria-label="refresh">
-            <ReloadOutlined spin={loading} />
-          </button>
+      {!hideHeader && (
+        <div className={styles.fileSpaceHeader}>
+          <span className={styles.fileSpaceTitle}>{title}</span>
+          {!!switchOptions?.length && (
+            <Segmented
+              size="small"
+              value={switchValue}
+              options={switchOptions}
+              className={styles.fileSpaceSegmented}
+              onChange={(value) => onSwitchChange?.(`${value}`)}
+            />
+          )}
+          {typeof count === 'number' && <span className={styles.fileSpaceCount}>{count}</span>}
+          {headerExtra}
+          {onRefresh && (
+            <button type="button" className={styles.fileSpaceRefresh} onClick={onRefresh} aria-label="refresh">
+              <ReloadOutlined spin={loading} />
+            </button>
+          )}
+        </div>
+      )}
+      <div className={`${styles.fileSpacePrimaryContent} ${showAlternateContent ? styles.fileSpaceContentHidden : ''}`}>
+        {contentBefore}
+        {groups ? (
+          groups.length ? (
+            <div className={styles.fileSpaceGroupList}>
+              {groups.map((group) => {
+                const isCollapsed = collapsedGroupKeys.has(`${group.key}`);
+
+                return (
+                  <div
+                    key={group.key}
+                    className={`${styles.fileSpaceGroup} ${isCollapsed ? styles.fileSpaceGroupCollapsed : ''}`}
+                  >
+                    <div
+                      className={styles.fileSpaceGroupHeader}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => toggleGroup(group.key)}
+                      onKeyDown={(event) => handleGroupKeyDown(group.key, event)}
+                    >
+                      <span className={styles.fileSpaceGroupArrow}>▾</span>
+                      <Tooltip placement="top" title={group.titleText || group.title}>
+                        <span className={styles.fileSpaceGroupTitle}>{group.title}</span>
+                      </Tooltip>
+                      {typeof group.count === 'number' && (
+                        <span className={styles.fileSpaceGroupCount}>{group.count} 个文件</span>
+                      )}
+                    </div>
+                    {!isCollapsed && renderTree(group.items, group.currentPath, !!group.loading, group.emptyText)}
+                  </div>
+                );
+              })}
+            </div>
+          ) : resourceEmptyStyle ? (
+            <div className={styles.fileSpaceEmpty}>
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyText} />
+            </div>
+          ) : (
+            <div className={styles.fileSpaceEmpty}>{emptyText}</div>
+          )
+        ) : (
+          renderTree(items, currentPath, loading, emptyText)
         )}
       </div>
-      {groups ? (
-        groups.length ? (
-          <div className={styles.fileSpaceGroupList}>
-            {groups.map((group) => {
-              const isCollapsed = collapsedGroupKeys.has(`${group.key}`);
-
-              return (
-                <div
-                  key={group.key}
-                  className={`${styles.fileSpaceGroup} ${isCollapsed ? styles.fileSpaceGroupCollapsed : ''}`}
-                >
-                  <div
-                    className={styles.fileSpaceGroupHeader}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => toggleGroup(group.key)}
-                    onKeyDown={(event) => handleGroupKeyDown(group.key, event)}
-                  >
-                    <span className={styles.fileSpaceGroupArrow}>▾</span>
-                    <Tooltip placement="top" title={group.titleText || group.title}>
-                      <span className={styles.fileSpaceGroupTitle}>{group.title}</span>
-                    </Tooltip>
-                    {typeof group.count === 'number' && (
-                      <span className={styles.fileSpaceGroupCount}>{group.count} 个文件</span>
-                    )}
-                  </div>
-                  {!isCollapsed && renderTree(group.items, group.currentPath, !!group.loading, group.emptyText)}
-                </div>
-              );
-            })}
-          </div>
-        ) : resourceEmptyStyle ? (
-          <div className={styles.fileSpaceEmpty}>
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyText} />
-          </div>
-        ) : (
-          <div className={styles.fileSpaceEmpty}>{emptyText}</div>
-        )
-      ) : (
-        renderTree(items, currentPath, loading, emptyText)
-      )}
+      <div
+        className={`${styles.fileSpaceAlternateContent} ${showAlternateContent ? '' : styles.fileSpaceContentHidden}`}
+      >
+        {alternateContent}
+      </div>
     </div>
   );
 };

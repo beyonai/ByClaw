@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Form, Input, Modal, Select, message } from 'antd';
+import { Form, Input, Modal, Radio, message } from 'antd';
 import { useIntl } from '@umijs/max';
 import type { OperationAccount, OperationAccountFormValues, OperationPlatformOption } from './types';
 import styles from './index.module.less';
@@ -38,10 +38,11 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
   // 后端未下发平台配置时使用产品约定的平台集合，保证新增账号的基础表单可用。
   const defaultPlatformOptions = useMemo<OperationPlatformOption[]>(
     () => [
-      { value: 'wechat', label: platformT('wechat') },
-      { value: 'xiaohongshu', label: platformT('xiaohongshu') },
-      { value: 'video', label: platformT('video') },
-      { value: 'douyin', label: platformT('douyin') },
+      // 账号平台统一保存正式编码，历史短编码只在读取和登录适配层兼容。
+      { value: 'WeChatAccount', label: platformT('wechat') },
+      { value: 'Xiaohongshu', label: platformT('xiaohongshu') },
+      { value: 'WeChatChannels', label: platformT('video') },
+      { value: 'Douyin', label: platformT('douyin') },
     ],
     [platformT]
   );
@@ -103,13 +104,20 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
       <Form<OperationAccountFormValues> form={form} layout="vertical">
         <div className={styles.operationFormGrid}>
           <Form.Item
+            className={styles.operationFormFull}
             label={t('field.platform')}
             name="platformId"
             rules={[{ required: true, message: t('validation.platformRequired') }]}
           >
-            <Select options={availablePlatformOptions} placeholder={t('placeholder.platform')} />
+            <Radio.Group
+              className={styles.operationPlatformTabs}
+              optionType="button"
+              buttonStyle="solid"
+              options={availablePlatformOptions}
+            />
           </Form.Item>
           <Form.Item
+            className={styles.operationFormHalf}
             label={t('field.accountName')}
             name="accountName"
             rules={[{ required: true, whitespace: true, message: t('validation.accountNameRequired') }]}
@@ -117,7 +125,7 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
             <Input placeholder={t('placeholder.accountName')} />
           </Form.Item>
           <Form.Item
-            className={styles.operationFormFull}
+            className={styles.operationFormHalf}
             label={t('field.accountId')}
             name="accountId"
             rules={[{ required: true, whitespace: true, message: t('validation.accountIdRequired') }]}

@@ -73,10 +73,12 @@
 | `POST` | `/api/v1/fileToMarkdown` | 上传文件并同步转换为 Markdown 文件流 |
 | `POST` | `/api/v1/fileToMarkdownIndex` | 异步触发知识构建 |
 | `POST` | `/api/v1/fileBuildStatus` | 查询文档构建状态 |
+| `POST` | `/api/v1/buildResult` | 查询文档最新一次构建结果、Markdown 和切片 |
 | `POST` | `/api/v1/knowledgeItems/search` | 知识检索 |
 | `GET` | `/health` | 探活 |
 | `POST` | `/api/v1/knowledgeItems/importByResourceId` | 按资源 ID 上传文档（Agent 工具） |
 | `POST` | `/api/v1/fileToMarkdownIndexByResourceId` | 按资源 ID 触发知识构建（Agent 工具） |
+| `POST` | `/api/v1/buildResultByResourceId` | 按资源 ID 查询文档构建结果（Agent 工具） |
 | `POST` | `/api/v1/knowledgeItems/searchByResourceId` | 按资源 ID 知识检索（Agent 工具） |
 | `POST` | `/api/v1/directories/createByResourceId` | 按资源 ID 创建目录（Agent 工具） |
 | `POST` | `/api/v1/directories/updateByResourceId` | 按资源 ID 修改目录（Agent 工具） |
@@ -860,6 +862,166 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
 }
 ```
 
+### `POST /api/v1/buildResult`
+
+查询指定文件最新一次构建的完整结果，包括构建状态、转换后的 Markdown、切片分页、向量化覆盖率和检索索引覆盖率。
+
+注意：
+
+- 接口查询的是文件最新一次构建任务，不返回历史构建任务列表。
+- 文件必须至少触发过一次知识构建，否则返回 `build task not found`。
+- `includeMarkdown=false` 时不读取 Markdown 正文，适合只查看构建状态和切片统计的场景。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `knCode` | string | 是 | - | 知识库编码 |
+| `filePath` | string | 是 | - | 文件全路径，以 `/` 开头，不包括知识库名称 |
+| `chunkPage` | integer | 否 | `1` | 切片页码，从 `1` 开始 |
+| `chunkPageSize` | integer | 否 | `20` | 每页切片数量，范围为 `1`～`100` |
+| `includeMarkdown` | boolean | 否 | `true` | 是否在响应中返回完整 Markdown 正文 |
+
+请求示例：
+
+```json
+{
+  "knCode": "1",
+  "filePath": "/汇报/年度总结.pptx",
+  "chunkPage": 1,
+  "chunkPageSize": 20,
+  "includeMarkdown": true
+}
+```
+
+成功响应示例：
+
+```json
+{
+  "resultCode": "0",
+  "resultMsg": "success",
+  "resultObject": {
+    "knCode": "1",
+    "filePath": "/汇报/年度总结.pptx",
+    "fileName": "年度总结.pptx",
+    "fileType": "pptx",
+    "fileSize": 859923,
+    "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "build": {
+      "status": "complete",
+      "currentStep": "complete",
+      "errorMessage": null,
+      "startedAt": "2026-08-04T09:56:14.989000+00:00",
+      "finishedAt": "2026-08-04T09:56:16.239000+00:00",
+      "durationMs": 1250,
+      "statusDict": [
+        {
+          "standCode": "complete",
+          "standDisplayValue": "已完成",
+          "standDisplayValueEn": "complete"
+        },
+        {
+          "standCode": "failed",
+          "standDisplayValue": "失败",
+          "standDisplayValueEn": "failed"
+        },
+        {
+          "standCode": "running",
+          "standDisplayValue": "构建中",
+          "standDisplayValueEn": "running"
+        },
+        {
+          "standCode": "unsupported",
+          "standDisplayValue": "不支持构建",
+          "standDisplayValueEn": "unsupported"
+        }
+      ],
+      "stepDict": [
+        {
+          "standCode": "markdown",
+          "standDisplayValue": "原始文件转 Markdown",
+          "standDisplayValueEn": "markdown"
+        },
+        {
+          "standCode": "chunking",
+          "standDisplayValue": "文档切片",
+          "standDisplayValueEn": "chunking"
+        },
+        {
+          "standCode": "vectorizing",
+          "standDisplayValue": "切片向量化",
+          "standDisplayValueEn": "vectorizing"
+        },
+        {
+          "standCode": "complete",
+          "standDisplayValue": "已完成",
+          "standDisplayValueEn": "complete"
+        }
+      ]
+    },
+    "markdown": {
+      "available": true,
+      "data": "# 年度总结\n\n## 第一部分\n...",
+      "lineCount": 128,
+      "characterCount": 4047,
+      "byteCount": 9731
+    },
+    "chunks": {
+      "data": [
+        {
+          "chunkNo": 1,
+          "startLine": 1,
+          "endLine": 18,
+          "content": "# 年度总结\n\n## 第一部分\n...",
+          "characterCount": 526,
+          "hasEmbedding": true,
+          "retrievalIndexed": true
+        }
+      ],
+      "page": 1,
+      "pageSize": 20,
+      "total": 8,
+      "reachedEof": true
+    },
+    "embedding": {
+      "dimension": 1024,
+      "embeddedChunkCount": 8,
+      "coverageRate": 100.0
+    },
+    "retrieval": {
+      "indexedChunkCount": 8,
+      "coverageRate": 100.0
+    }
+  }
+}
+```
+
+主要响应字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `build` | object | 最新构建任务的状态、当前步骤、错误信息、开始/完成时间和耗时 |
+| `markdown.available` | boolean | 是否存在已生成的 Markdown 文件 |
+| `markdown.data` | string/null | Markdown 正文；`includeMarkdown=false` 时为 `null` |
+| `markdown.lineCount` | integer | Markdown 行数 |
+| `markdown.characterCount` | integer/null | Markdown 字符数；未读取正文时为 `null` |
+| `markdown.byteCount` | integer/null | Markdown UTF-8 字节数；未读取正文时为 `null` |
+| `chunks.data` | array[object] | 当前页切片，包含行号、正文、向量和索引状态 |
+| `chunks.total` | integer | 文件切片总数 |
+| `chunks.reachedEof` | boolean | 当前页是否已经到达最后一页 |
+| `embedding.coverageRate` | number | 已生成向量的切片占比，单位为百分比 |
+| `retrieval.coverageRate` | number | 已进入检索索引的切片占比，单位为百分比 |
+
+失败响应示例：
+
+```json
+{
+  "resultCode": "-1",
+  "resultMsg": "build task not found: /汇报/年度总结.pptx",
+  "resultObject": {}
+}
+```
+
 ## 知识检索
 
 ### `POST /api/v1/knowledgeItems/search`
@@ -935,6 +1097,209 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
 }
 ```
 
+## 门户调用 QA 的元数据检索接口
+
+本节定义门户后端对 QA `POST /api/v1/knowledgeItems/metadataSearch` 的两种调用封装。两个门户接口最终调用同一个 QA 接口，区别在于是否执行资源 ID 与知识库编码的映射：
+
+| 门户接口 | 封装方式 | 请求 ID 体系 | 响应 ID 体系 | QA 接口 |
+| --- | --- | --- | --- | --- |
+| `POST /datasetController/knowledgeItems/metadataSearch` | 资源 ID 映射封装 | `resourceIdList` | `data[].knCode` 回映为 `resourceId` | `POST /api/v1/knowledgeItems/metadataSearch` |
+| `POST /datasetController/knowledgeItems/metadataSearchByKnCode` | QA 原始协议透传 | `knCodeList` | 保留 QA 返回的 `knCode` | `POST /api/v1/knowledgeItems/metadataSearch` |
+
+### `POST /datasetController/knowledgeItems/metadataSearch`
+
+按门户知识库资源 ID 执行 Agent DSL 纯元数据检索，只返回文件级结果。门户会查询资源信息、校验当前调用方的知识库读取权限，并将 `resourceIdList` 转换为 QA 所需的 `knCodeList`。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `resourceIdList` | array[integer] | 是 | 门户知识库资源 ID 列表；门户校验读取权限后映射为 QA `knCodeList` |
+| `where` | object | 是 | Agent DSL 过滤 AST，原样传给 QA |
+| `metadataFieldList` | array[string] | 否 | 需要返回的元数据字段，原样传给 QA |
+| `topK` | integer | 否 | 未传 `pageSize` 时作为每页条数，最大 `10000` |
+| `pageNum` | integer | 否 | 页码，从 `1` 开始；未传时由 QA 使用默认值 `1` |
+| `pageSize` | integer | 否 | 每页条数，最大 `10000`；传入时优先于 `topK` |
+
+请求示例：
+
+```json
+{
+  "resourceIdList": [10000003],
+  "where": {
+    "and": [
+      {"eq": {"fieldName": "status", "value": "active"}},
+      {"contains": {"fieldName": "tags", "value": "contract"}}
+    ]
+  },
+  "metadataFieldList": ["status", "tags", "fileSignature"],
+  "pageNum": 1,
+  "pageSize": 20
+}
+```
+
+映射关系：
+
+| 门户请求/响应 | QA 请求/响应 | 映射规则 |
+| --- | --- | --- |
+| `resourceIdList[]` | `knCodeList[]` | 按 `ss_resource.resource_id` 查询 `resource_code`，并校验知识库读取权限 |
+| `where` | `where` | 原样透传 |
+| `metadataFieldList` | `metadataFieldList` | 原样透传 |
+| `topK` | `topK` | 原样透传 |
+| `pageNum` | `pageNum` | 原样透传 |
+| `pageSize` | `pageSize` | 原样透传 |
+| `data[].knCode` | `resultObject.data[].knCode` | QA 返回 `knCode` 后，门户回映为对应的 `resourceId` 字符串 |
+| `data[].filePath`、`data[].metadata` | 同名字段 | 原样返回 |
+| `total`、`pageNum`、`pageSize` | 同名字段 | 原样返回，不改变 QA 排序和分页顺序 |
+
+门户实际发送给 QA 的请求示例：
+
+```json
+{
+  "knCodeList": ["2"],
+  "where": {
+    "and": [
+      {"eq": {"fieldName": "status", "value": "active"}},
+      {"contains": {"fieldName": "tags", "value": "contract"}}
+    ]
+  },
+  "metadataFieldList": ["status", "tags", "fileSignature"],
+  "pageNum": 1,
+  "pageSize": 20
+}
+```
+
+成功响应示例：
+
+```json
+{
+  "code": 0,
+  "msg": "知识库文件语义检索成功",
+  "data": {
+    "data": [
+      {
+        "knCode": "10000003",
+        "filePath": "/制度/人事/续签流程.md",
+        "metadata": {
+          "status": {
+            "valueType": "string",
+            "value": "active"
+          },
+          "tags": {
+            "valueType": "stringList",
+            "value": ["hr", "contract"]
+          }
+        }
+      }
+    ],
+    "total": 1,
+    "pageNum": 1,
+    "pageSize": 20
+  }
+}
+```
+
+说明：响应项仍使用兼容 QA 的字段名 `knCode`，但其值已经由门户转换为 `resourceId`。门户不会重新排序结果，QA 按 `knowledge_fs_entry.updated_at`、文件 `kid` 生成的稳定顺序会被保留。
+
+失败场景：
+
+- `resourceIdList` 为空、包含空值或资源不存在时，门户直接返回参数或资源错误。
+- 当前调用方没有任一知识库的读取权限时，门户不会调用 QA。
+- QA 返回 DSL 校验或检索错误时，门户按统一异常响应格式返回错误信息。
+
+### `POST /datasetController/knowledgeItems/metadataSearchByKnCode`
+
+QA 原始协议透传接口。门户将请求体直接传给 QA，并原样返回 QA 响应；不查询 `ss_resource`，不执行 `resourceId` 与 `knCode` 转换，也不改写 QA 响应信封。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `knCodeList` | array[string] | 否 | QA 知识库编码范围，直接透传 |
+| `where` | object | 是 | Agent DSL 过滤 AST，直接透传 |
+| `metadataFieldList` | array[string] | 否 | 需要返回的元数据字段，直接透传 |
+| `topK` | integer | 否 | 未传 `pageSize` 时作为每页条数，默认 `500`，最大 `10000` |
+| `pageNum` | integer | 否 | 页码，从 `1` 开始，默认 `1` |
+| `pageSize` | integer | 否 | 每页条数，最大 `10000`；传入时优先于 `topK` |
+
+请求示例：
+
+```json
+{
+  "knCodeList": ["2"],
+  "where": {
+    "and": [
+      {"eq": {"fieldName": "status", "value": "active"}},
+      {"contains": {"fieldName": "tags", "value": "contract"}}
+    ]
+  },
+  "metadataFieldList": ["status", "tags", "fileSignature"],
+  "pageNum": 1,
+  "pageSize": 20
+}
+```
+
+映射关系：
+
+| 门户请求/响应 | QA 请求/响应 | 映射规则 |
+| --- | --- | --- |
+| 完整请求体 | 完整请求体 | 字段和值直接透传，不进行 `knCode` 转换 |
+| QA `resultCode` | 门户 `resultCode` | 原样返回 |
+| QA `resultMsg` | 门户 `resultMsg` | 原样返回 |
+| QA `resultObject` | 门户 `resultObject` | 原样返回，包括成功数据及失败时的 `errorCode/errorList` |
+| `resultObject.data[].knCode` | 同名字段 | 保留 QA 原始 `knCode` |
+
+成功响应示例：
+
+```json
+{
+  "resultCode": "0",
+  "resultMsg": "success",
+  "resultObject": {
+    "data": [
+      {
+        "knCode": "2",
+        "filePath": "/制度/人事/续签流程.md",
+        "metadata": {
+          "status": {
+            "valueType": "string",
+            "value": "active"
+          },
+          "tags": {
+            "valueType": "stringList",
+            "value": ["hr", "contract"]
+          }
+        }
+      }
+    ],
+    "total": 1,
+    "pageNum": 1,
+    "pageSize": 20
+  }
+}
+```
+
+失败响应示例：
+
+```json
+{
+  "resultCode": "-1",
+  "resultMsg": "request validation failed",
+  "resultObject": {
+    "errorCode": "DSL_VALIDATION_ERROR",
+    "errorList": [
+      {
+        "path": "where.and[2]",
+        "code": "TOO_MANY_CONDITIONS",
+        "message": "leaf condition count exceeds limit 12"
+      }
+    ]
+  }
+}
+```
+
+结果顺序由 QA 决定，固定按 `knowledge_fs_entry.updated_at` 从旧到新排序；更新时间相同时按文件 `kid` 从小到大排序。门户不进行二次排序。
+
 ## Agent 工具接口
 
 以下接口专门提供给数字员工（Agent）作为工具调用，使用外部资源 ID（`resourceId`）代替内部知识库编码（`knCode`）。系统自动从 MinIO 配置文件读取 `resourceId` 与 `knCode` 的映射关系，调用方无需感知内部编码。
@@ -945,6 +1310,7 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
 | --- | --- | --- |
 | `POST` | `/api/v1/knowledgeItems/importByResourceId` | 按资源 ID 上传文档 |
 | `POST` | `/api/v1/fileToMarkdownIndexByResourceId` | 按资源 ID 触发知识构建 |
+| `POST` | `/api/v1/buildResultByResourceId` | 按资源 ID 查询文档构建结果 |
 | `POST` | `/api/v1/knowledgeItems/searchByResourceId` | 按资源 ID 知识检索 |
 | `POST` | `/api/v1/directories/createByResourceId` | 按资源 ID 创建目录 |
 | `POST` | `/api/v1/directories/updateByResourceId` | 按资源 ID 修改目录 |
@@ -1023,6 +1389,69 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/importByResourceId \
   "resultCode": "0",
   "resultMsg": "success",
   "resultObject": {}
+}
+```
+
+失败响应示例：
+
+```json
+{
+  "resultCode": "-1",
+  "resultMsg": "cannot resolve resourceId: 99999",
+  "resultObject": {}
+}
+```
+
+### `POST /api/v1/buildResultByResourceId`
+
+按资源 ID 查询对应知识库中文件的最新构建结果。系统先将 `resourceId` 映射为内部 `knCode`，再执行构建结果查询。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `resourceId` | string | 是 | - | 知识库资源 ID，系统自动映射为内部 `knCode` |
+| `filePath` | string | 是 | - | 文件全路径，以 `/` 开头，不包括知识库名称 |
+| `chunkPage` | integer | 否 | `1` | 切片页码，从 `1` 开始 |
+| `chunkPageSize` | integer | 否 | `20` | 每页切片数量，范围为 `1`～`100` |
+| `includeMarkdown` | boolean | 否 | `true` | 是否在响应中返回完整 Markdown 正文 |
+
+请求示例：
+
+```json
+{
+  "resourceId": "10000003",
+  "filePath": "/汇报/年度总结.pptx",
+  "chunkPage": 1,
+  "chunkPageSize": 20,
+  "includeMarkdown": true
+}
+```
+
+成功响应结构与 `POST /api/v1/buildResult` 相同，但 `resultObject.knCode` 返回请求中的 `resourceId`。关键字段示例：
+
+```json
+{
+  "resultCode": "0",
+  "resultMsg": "success",
+  "resultObject": {
+    "knCode": "10000003",
+    "filePath": "/汇报/年度总结.pptx",
+    "build": {
+      "status": "complete",
+      "currentStep": "complete"
+    },
+    "markdown": {
+      "available": true,
+      "data": "# 年度总结\n..."
+    },
+    "chunks": {
+      "page": 1,
+      "pageSize": 20,
+      "total": 8,
+      "reachedEof": true
+    }
+  }
 }
 ```
 

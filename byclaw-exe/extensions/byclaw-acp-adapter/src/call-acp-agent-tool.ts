@@ -12,6 +12,7 @@ import {
 } from "../../shared/src/langfuse-tool-observation.js";
 import { executeViaCallAgent } from "../../shared/src/call-agent.js";
 import { getDelegatedTaskToolDetails } from "../../shared/src/delegated-tool-details.js";
+import { createRedisClient } from "../../shared/src/redis-compat.js";
 import type { BaiyingEnhanceLogger } from "../../shared/src/debug-channel.js";
 import type {
   Capability,
@@ -23,6 +24,7 @@ import { CALL_ACP_AGENT, DEFAULTS } from "./constants.js";
 import { createByclawCallAgentDispatch } from "./planner.js";
 import type { ByclawRegistry } from "./registry.js";
 import type { ByclawAcpPlanRequest, ResolvedByclawAcpAdapterConfig } from "./types.js";
+import { resolveByaiAgentIdFromSessionKey } from "../../shared/src/session-key.js";
 
 const callAcpAgentParameters = {
   type: "object",
@@ -87,6 +89,48 @@ function resolveRequesterSessionKey(ctx: unknown): string {
     normalizeText(c.session_id) ||
     CALL_ACP_AGENT.defaultRequesterSessionKey
   );
+}
+
+/**
+ * Delegation is renewed by Java whenever the original agent receives another
+ * message for this session, so inactive delegated sessions expire naturally.
+ */
+const CALL_ACP_AGENT_DELEGATION_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+const CALL_ACP_AGENT_DELEGATION_POLICY = "FOREVER";
+
+type CallAcpAgentDelegation = {
+  targetAgentType: string;
+  requesterSessionKey: string;
+  delegationPolicy: typeof CALL_ACP_AGENT_DELEGATION_POLICY;
+};
+
+/**
+ * Keep this key format synchronized with AssistantChatService#buildCallAcpAgentDelegationRedisKey.
+ */
+function buildCallAcpAgentDelegationRedisKey(agentId: string, sessionId: string): string {
+  return `byai:call_acp_agent:delegation:${agentId}:${sessionId}`;
+}
+
+async function saveCallAcpAgentDelegation(params: {
+  config: ResolvedByclawAcpAdapterConfig;
+  agentId: string;
+  sessionId: string;
+  targetAgentType: string;
+  requesterSessionKey: string;
+}): Promise<void> {
+  const redis = createRedisClient(params.config.redis);
+  const key = buildCallAcpAgentDelegationRedisKey(params.agentId, params.sessionId);
+  const delegation: CallAcpAgentDelegation = {
+    targetAgentType: params.targetAgentType,
+    requesterSessionKey: params.requesterSessionKey,
+    delegationPolicy: CALL_ACP_AGENT_DELEGATION_POLICY,
+  };
+  try {
+    await redis.set(key, JSON.stringify(delegation), "EX", CALL_ACP_AGENT_DELEGATION_TTL_SECONDS);
+  } finally {
+    await redis.quit().catch(() => undefined);
+  }
 }
 
 function withDelegatedAgentYieldDetails(result: ExecutorResponse): ExecutorResponse {
@@ -222,7 +266,8 @@ export function createByclawCallAcpAgentTool(params: CreateByclawCallAcpAgentToo
         request: toolParams,
       });
 
-      const agentId = normalizeText(contextRecord.agentId) || CALL_ACP_AGENT.defaultAgentId;
+      const agentId = resolveByaiAgentIdFromSessionKey(requesterSessionKey);
+      const targetAgentType = CALL_ACP_AGENT.targetAgentTypePrefix + userCode;
       const resourceContext: ResourceContext = {
         root_agent: {
           resourceId: agentId,
@@ -255,7 +300,7 @@ export function createByclawCallAcpAgentTool(params: CreateByclawCallAcpAgentToo
         langfuseTraceId,
         langfuseParentObservationId,
         userCode,
-        targetAgentType: CALL_ACP_AGENT.targetAgentTypePrefix + userCode,
+        targetAgentType,
         parentMessageId: CALL_ACP_AGENT.asyncParentMessageId,
         toolCallId,
         callMode: "async",
@@ -269,6 +314,16 @@ export function createByclawCallAcpAgentTool(params: CreateByclawCallAcpAgentToo
           observationId: syntheticLangfuseToolObservationId,
           output: result,
           logger,
+        });
+      }
+      if (result.success) {
+        // A successful dispatch makes all following messages in this session use the remote agent.
+        await saveCallAcpAgentDelegation({
+          config,
+          agentId,
+          sessionId: channelResolve.sessionId,
+          targetAgentType,
+          requesterSessionKey,
         });
       }
       return withDelegatedAgentYieldDetails(result);

@@ -45,6 +45,7 @@ const PAGE_SIZE = 30;
 
 interface Props {
   resourceType: ResourceSiderType;
+  embedded?: boolean;
 }
 
 const resourceConfigMap: Record<
@@ -153,7 +154,7 @@ interface AuthSaveResponse {
   msg?: string;
 }
 
-const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
+const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false }) => {
   const intl = useIntl();
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -732,7 +733,11 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     const closeDetailPanel = () => clearDetailPanel?.();
 
     if (resourceBizType === PROPERTY_RESOURCE_TYPE) {
-      setDetailPanel?.(<PropertyDetail item={item} onClose={closeDetailPanel} />, { width: 350 });
+      setDetailPanel?.(<PropertyDetail item={item} onClose={closeDetailPanel} />, {
+        width: 350,
+        tabKey: `property:${resourceId}`,
+        title: item.resourceName,
+      });
       return;
     }
 
@@ -750,7 +755,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
             panel
             onClose={closeDetailPanel}
           />,
-          { width: 350 }
+          { width: 350, tabKey: `skill:${resourceId}`, title: item.resourceName }
         );
       }
       return;
@@ -782,7 +787,11 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
             open
             panel
             onClose={closeDetailPanel}
-          />
+          />,
+          {
+            tabKey: `resource:${resourceBizType}:${resourceId}`,
+            title: item.resourceName,
+          }
         );
       }
       return;
@@ -798,7 +807,11 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         onCancel={closeDetailPanel}
         onEdit={() => {}}
       />,
-      { width: 350 }
+      {
+        width: 350,
+        tabKey: `resource:${item.resourceBizType}:${item.resourceId}`,
+        title: item.resourceName,
+      }
     );
   };
 
@@ -1020,12 +1033,19 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
 
   return (
     <div className={styles.container}>
-      <ActiveSiderAgentBar agent={activeSiderAgent} />
-      <div className={styles.router} onClick={() => navigate(navigatePath, navigateState)}>
-        <AntdIcon type={config.icon} />
-        <span className={styles.middle}>{intl.formatMessage({ id: config.centerLabelId })}</span>
-        <AntdIcon type={isResourceCenterPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'} className={styles.routerIcon} />
-      </div>
+      {!embedded && (
+        <>
+          <ActiveSiderAgentBar agent={activeSiderAgent} />
+          <div className={styles.router} onClick={() => navigate(navigatePath, navigateState)}>
+            <AntdIcon type={config.icon} />
+            <span className={styles.middle}>{intl.formatMessage({ id: config.centerLabelId })}</span>
+            <AntdIcon
+              type={isResourceCenterPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
+              className={styles.routerIcon}
+            />
+          </div>
+        </>
+      )}
       {isInDrillDown() && (
         <Breadcrumb className={styles.breadcrumb}>
           <Breadcrumb.Item key="-1">

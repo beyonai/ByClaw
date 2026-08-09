@@ -1,9 +1,21 @@
 import { POST, type ConfigType } from '@/service/common/request';
+import type { IntegrationStage, TestAccount } from '@/layout/sider/components/ProjectSpaceList/Integration/types';
 
 // 默认项目只用于系统内置项目回显和编辑，接口层类型也需要覆盖，避免前端判断 default 时类型不一致。
 type DevloopProjectType = 'normal' | 'operation' | 'develop' | 'default';
 
 type DevloopProjectShareFlag = 'N' | 'Y';
+
+export type ProjectResourceType = 'knowledge' | 'digital_employee' | 'ontology';
+
+export type ProjectResourcePayload = {
+  resourceType: ProjectResourceType;
+  resourceId: string | number;
+  resourceName?: string;
+  sortNo?: number;
+};
+
+export type DevloopProjectSessionSearchMode = 'DIGITAL_EMPLOYEE' | 'CHAT_CONTENT';
 
 type DevloopProjectShareTargetPayload = {
   targetType: string;
@@ -17,6 +29,7 @@ type DevloopProjectPayload = {
   projectType?: DevloopProjectType;
   isShare?: DevloopProjectShareFlag;
   shareTargets?: DevloopProjectShareTargetPayload[];
+  resources?: ProjectResourcePayload[];
 };
 
 type DevloopProjectSessionListPayload = {
@@ -24,6 +37,9 @@ type DevloopProjectSessionListPayload = {
   pageNum?: number;
   pageSize?: number;
   keyword?: string;
+
+  /** 高级会话搜索方式；不传时后端保持标题、摘要搜索兼容逻辑。 */
+  searchMode?: DevloopProjectSessionSearchMode;
 };
 
 export type DevloopTaskListQuery = {
@@ -98,6 +114,7 @@ export type DevloopTaskItem = {
   projectId: number;
   title?: string;
   createBy?: number;
+  canDelete?: boolean;
   createTime?: string;
   updateTime?: string;
   stateAvailable: boolean;
@@ -110,8 +127,12 @@ export type DevloopTaskItem = {
   loopCount?: number;
   stageLoopCount?: number;
   assignee?: string;
+  assigneeId?: string | number;
+  dueTime?: string;
   agentName?: string;
   avatar?: string;
+  description?: string;
+  taskDescription?: string;
   branchName?: string;
   repoFullName?: string;
   requirementTitle?: string;
@@ -135,18 +156,71 @@ export type DevloopProjectSpaceFile = {
   shareLink?: string | null;
 };
 
-// 项目管理
-export const createProject = (data: DevloopProjectPayload) => POST<any>('/byaiService/project/create', data);
+export type OperationTaskTemplateType = 'collect' | 'knowledge' | 'content' | 'publish' | 'analyze';
 
-export const listProjects = (data?: { keyword?: string }, config?: ConfigType) =>
+export type OperationTaskTemplate = {
+  templateId: number;
+  templateType: OperationTaskTemplateType;
+  templateName: string;
+  description?: string;
+  icon?: string;
+  config?: string | Record<string, unknown>;
+  sortNo?: number;
+  isBuiltin?: string;
+};
+
+// 仓库类型:workspace 工作区(单个,承载项目上下文/产出) / code 代码仓库(可多个)。存量数据默认 code。
+export type ProjectRepoType = 'workspace' | 'code';
+
+// 代码平台:决定 clone/push 使用的 host 与令牌注入方式。存量无值按 github 处理。
+export type RepoProvider = 'github' | 'gitlab' | 'gitea';
+
+export type DevloopProjectRepo = {
+  repoId: number;
+  projectId: number;
+  repoFullName: string;
+  repoUrl?: string;
+  defaultBranch?: string;
+  // 人工填写的仓库职责,给后来人和需求 AI 预拆看。
+  description?: string;
+  repoType?: ProjectRepoType;
+  provider?: RepoProvider;
+  createBy?: string;
+  createTime?: string;
+};
+
+// 项目管理
+// 创建项目由页面自行展示业务错误信息，允许调用方关闭请求层的通用错误弹窗。
+export const createProject = (data: DevloopProjectPayload, config?: ConfigType) =>
+  POST<any>('/byaiService/project/create', data, config);
+
+export const listProjects = (data?: { keyword?: string; pageNum?: number; pageSize?: number }, config?: ConfigType) =>
   POST<any>('/byaiService/project/list', data || {}, config);
 
 export const getProject = (projectId: number) => POST<any>('/byaiService/project/get', { projectId });
+
+export const listProjectResources = (projectId: number) =>
+  POST<any>('/byaiService/project/resource/list', { projectId });
+
+export const saveProjectResources = (data: { projectId: number; resources: ProjectResourcePayload[] }) =>
+  POST<void>('/byaiService/project/resource/save', data);
 
 export const updateProject = (data: Partial<DevloopProjectPayload> & { projectId: number }) =>
   POST<any>('/byaiService/project/update', data);
 
 export const deleteProject = (projectId: number) => POST<any>('/byaiService/project/delete', { projectId });
+
+// 研发项目工作区初始化状态:ready 已就绪(默认/普通项目)、pending 待初始化、initializing 初始化中。
+// 仅 develop 项目在未 ready 前禁止建需求/启动任务。
+export type ProjectInitStatus = 'ready' | 'pending' | 'initializing';
+
+// 触发研发项目初始化:置 initializing 并下发建索引/技能包配置。
+export const startProjectInit = (data: { projectId: number; buildIndex: boolean; skillPackages: string[] }) =>
+  POST<any>('/byaiService/project/init/start', data);
+
+// 标记研发项目初始化完成:置 ready,之后方可建需求/启动任务。
+export const completeProjectInit = (projectId: number) =>
+  POST<any>('/byaiService/project/init/complete', { projectId });
 
 // 项目仓库维护：扫描源关联仓库时可即席新增/删除
 export const createProjectRepo = (data: {
@@ -154,7 +228,13 @@ export const createProjectRepo = (data: {
   repoFullName: string;
   repoUrl?: string;
   defaultBranch?: string;
+  description?: string;
+  repoType?: ProjectRepoType;
+  provider?: RepoProvider;
 }) => POST<any>('/byaiService/project/repo/create', data);
+
+export const listProjectRepos = (projectId: number) =>
+  POST<DevloopProjectRepo[]>('/byaiService/project/repo/list', { projectId });
 
 export const deleteProjectRepo = (repoId: number) => POST<any>('/byaiService/project/repo/delete', { repoId });
 
@@ -173,6 +253,14 @@ export const saveProjectFileToSpace = (data: {
   filePath: string;
   fileName: string;
 }) => POST<void>('/byaiService/project/share/saveToSpace', data);
+
+// 共享文件的名称和存储位置由项目维度接口管理，避免误走数字员工文件浏览接口。
+export const renameProjectSpaceFile = (data: { projectId: number; fileId: number; fileName: string }) =>
+  POST<void>('/byaiService/project/share/rename', data);
+
+// 删除项目共享文件时由后端同步清理对象存储、文件元数据和项目关联记录。
+export const deleteProjectSpaceFile = (data: { projectId: number; fileId: number }) =>
+  POST<void>('/byaiService/project/share/delete', data);
 
 // 扫描源管理
 export const createScanSource = (data: {
@@ -199,7 +287,8 @@ export const updateScanSource = (data: {
 
 export const deleteScanSource = (sourceId: number) => POST<any>('/byaiService/devloop/source/delete', { sourceId });
 
-export const listScanSources = (projectId: number) => POST<any>('/byaiService/devloop/source/list', { projectId });
+export const listScanSources = (data: { projectId: number; keyword?: string; pageNum?: number; pageSize?: number }) =>
+  POST<any>('/byaiService/devloop/source/list', data);
 
 export const toggleScanSource = (sourceId: number, enabled: string) =>
   POST<any>('/byaiService/devloop/source/toggle', { sourceId, enabled });
@@ -247,6 +336,144 @@ export const updateManualRequirement = (data: Omit<ManualRequirementPayload, 'pr
 export const deleteManualRequirement = (itemId: number) =>
   POST<any>('/byaiService/devloop/requirement/delete', { itemId });
 
+// 运营需求复用扫描源表，四类需求通过 source_type 区分，差异化执行字段统一收敛到 config。
+export type OperationRequirementPayload = {
+  itemId?: number;
+  projectId?: number;
+  requirementName: string;
+
+  /** 运营需求描述，对应 byai_scan_source.source_description。 */
+  sourceDescription?: string;
+  operationType: 'collect' | 'knowledge' | 'publish' | 'analyze';
+  assignee?: string | number;
+  dueTime?: string;
+  config?: Record<string, any>;
+};
+
+/** 创建运营需求；需求创建与后续执行运营任务分离，避免误走研发任务创建接口。 */
+export const createOperationRequirement = (data: OperationRequirementPayload) =>
+  POST<{ itemId: number; sourceId: number }>('/byaiService/devloop/requirement/createOperationRequirement', data);
+
+/** 修改未启动运营需求；项目归属由后端根据 itemId 反查。 */
+export const updateOperationRequirement = (data: Omit<OperationRequirementPayload, 'projectId'> & { itemId: number }) =>
+  POST<void>('/byaiService/devloop/requirement/updateOperationRequirement', data);
+
+/** 按运营项目分页查询需求，后端负责名称的忽略大小写模糊搜索。 */
+export const listOperationRequirements = (data: {
+  projectId: number;
+  keyword?: string;
+  pageNum?: number;
+  pageSize?: number;
+}) => POST<DevloopTaskPage>('/byaiService/devloop/requirement/operation/list', data);
+
+/** 查询运营需求详情，供后续编辑和执行入口复用。 */
+export const getOperationRequirement = (itemId: number) =>
+  POST<any>('/byaiService/devloop/requirement/operation/get', { itemId });
+
+/** 删除运营需求；后端仅允许需求创建人操作。 */
+export const deleteOperationRequirement = (itemId: number) =>
+  POST<void>('/byaiService/devloop/requirement/operation/delete', { itemId });
+
+// 聊天输入框与运营需求启动入口共用同一套任务模板目录和详情接口。
+export const listOperationTaskTemplates = (templateType?: OperationTaskTemplateType) =>
+  POST<OperationTaskTemplate[]>('/byaiService/devloop/operation/task-template/list', {
+    templateType: templateType || undefined,
+  });
+
+export const getOperationTaskTemplate = (templateId: number) =>
+  POST<OperationTaskTemplate>('/byaiService/devloop/operation/task-template/get', { templateId });
+
+/** 按当前选择的知识库查询可用本体对象。 */
+export const queryObjectsByKnowledge = (data: {
+  kbResourceId: string | number;
+  kbDirectories?: string[];
+  objectName?: string;
+  pageIndex?: number;
+  pageSize?: number;
+}) => POST<any>('/byaiService/devloop/operation/queryObjectsByKnowledge', data);
+
+/** 查询会话或项目关联的本体对象文件；未传 sessionId 时按项目维度查询。 */
+export const listProjectObjectFiles = (data: { projectId?: number | string; sessionId?: number | string }) =>
+  POST<any>('/byaiService/devloop/operation/listProjectObjectFiles', data);
+
+// 运营需求启动后拆解为会话任务，taskId 与 byai_session.session_id 保持一致。
+export type OperationTaskStartItem = {
+  title: string;
+  description?: string;
+  assignee: string | number;
+  dueTime?: string;
+  templateId?: number;
+  config?: Record<string, unknown>;
+};
+
+export const startOperationRequirement = (data: { requirementId: number; tasks: OperationTaskStartItem[] }) =>
+  POST<any[]>('/byaiService/devloop/requirement/operation/start', data);
+
+export const listOperationTasks = (data: {
+  projectId: number;
+  keyword?: string;
+  onlyMine?: boolean;
+  createTimeStart?: string;
+  createTimeEnd?: string;
+  status?: string;
+  pageNum?: number;
+  pageSize?: number;
+}) => POST<DevloopTaskPage>('/byaiService/devloop/operation/task/list', data);
+
+export const getOperationTask = (taskId: number) => POST<any>('/byaiService/devloop/operation/task/get', { taskId });
+
+/** 修改待开始的运营任务。 */
+export const updateOperationTask = (data: {
+  taskId: number;
+  title: string;
+  description?: string;
+  assignee: string | number;
+  dueTime?: string;
+}) => POST<void>('/byaiService/devloop/operation/task/update', data);
+
+/** 删除运营任务；后端仅允许任务创建人操作。 */
+export const deleteOperationTask = (taskId: number) =>
+  POST<void>('/byaiService/devloop/operation/task/delete', { taskId });
+
+// 新流程传承接成员 ID，由后端读取其最新绑定的数字员工；agentIds 保留给旧调用方兼容使用。
+export const executeOperationTask = (data: {
+  taskId: number;
+  assigneeIds?: Array<string | number>;
+  agentIds?: Array<string | number>;
+
+  /** 执行前由任务模板页补充的模板和结构化配置。 */
+  templateId?: number;
+  config?: Record<string, unknown>;
+}) => POST<{ taskId: number; sessionId: number }>('/byaiService/devloop/operation/task/execute', data);
+
+// 运营账号由项目维度独立维护，新增需求表单和账号管理大面板共用此数据源。
+export type OperationAccountPayload = {
+  accountId?: string | number;
+  projectId?: number;
+  platformCode: string;
+  accountCode: string;
+  accountName: string;
+};
+
+export const listOperationAccounts = (projectId: number) =>
+  POST<any[]>('/byaiService/devloop/operation/account/list', { projectId });
+
+export const createOperationAccount = (data: OperationAccountPayload) =>
+  POST<{ accountId: number }>('/byaiService/devloop/operation/account/create', data);
+
+export const updateOperationAccount = (data: OperationAccountPayload & { accountId: string | number }) =>
+  POST<void>('/byaiService/devloop/operation/account/update', data);
+
+export const deleteOperationAccount = (accountId: string | number) =>
+  POST<void>('/byaiService/devloop/operation/account/delete', { accountId });
+
+// UI Agent 登录完成后携带采集沙箱标识确认账号状态，服务端会校验沙箱归属。
+export const loginOperationAccount = (accountId: string | number, sandboxId: string) =>
+  POST<{ accountId: number; loginStatus: string }>('/byaiService/devloop/operation/account/login', {
+    accountId,
+    sandboxId,
+  });
+
 // PAT 管理
 export const saveGitHubPat = (pat: string) => POST<any>('/byaiService/devloop/pat/github', { pat });
 
@@ -277,6 +504,42 @@ export type DevloopTaskCreatePayload = {
 
 export const createTask = (data: DevloopTaskCreatePayload) => POST<any>('/byaiService/devloop/task/create', data);
 
+// 需求拆分为多仓库子任务:每个子任务独立仓库/分支/承接员工,dependsOn 记录需求内 DAG 依赖(rowId 引用同批其他子任务)。
+export type DevloopSplitTaskPayload = {
+  rowId: string;
+  title: string;
+  repoId: number;
+  branch?: string;
+  assigneeId?: string | number;
+  dependsOn: string[];
+};
+
+export type DevloopSplitPayload = {
+  projectId: number;
+  sourceItemId: number;
+  tasks: DevloopSplitTaskPayload[];
+};
+
+export const splitTask = (data: DevloopSplitPayload) => POST<any>('/byaiService/devloop/task/split', data);
+
+// AI 预拆:后端按系统配置的提示词把需求+仓库清单交给大模型,返回草稿任务,不落库。
+// aiSuggested=false 表示模型不可用或输出不可解析,后端已降级为每仓库一行且不猜依赖。
+export type DevloopPresplitResult = {
+  aiSuggested: boolean;
+  degradeReason?: string;
+  tasks: {
+    rowId: string;
+    title: string;
+    repoId?: number;
+    branch: string;
+    dependsOn: string[];
+    reason?: string;
+  }[];
+};
+
+export const presplitRequirement = (data: { projectId: number; sourceItemId: number }) =>
+  POST<DevloopPresplitResult>('/byaiService/devloop/task/presplit', data);
+
 export const listTasks = (query: DevloopTaskListQuery) =>
   POST<DevloopTaskPage>('/byaiService/devloop/task/list', query);
 
@@ -289,6 +552,7 @@ export type DevloopTaskChanges = {
   status: 'ok' | 'no_repo' | 'no_token' | 'branch_not_found' | 'http_error';
   // 变更来源:local=读宿主机工作区 git(含未推送/未提交),remote=GitHub 远程 compare(仅已推送)。
   source?: 'local' | 'remote';
+  repoId?: number;
   repoFullName?: string | null;
   baseBranch?: string | null;
   headBranch?: string | null;
@@ -303,13 +567,14 @@ export type DevloopTaskChanges = {
     deletions: number;
     previousFilename?: string | null;
     blobUrl?: string | null;
+    repoId?: number;
   }[];
 };
 
 export const getTaskChanges = (sessionId: number) =>
   POST<DevloopTaskChanges>('/byaiService/devloop/task/changes', { sessionId });
 
-// 单个文件的本地 diff(unified 文本),供 modal 逐行渲染。status: ok | no_workspace | not_git_repo | git_error。
+// 单个文件的本地 diff（unified 文本），供右侧预览抽屉逐行渲染。status: ok | no_workspace | not_git_repo | git_error。
 export type DevloopTaskFileDiff = {
   status: 'ok' | 'no_workspace' | 'not_git_repo' | 'git_error';
   filename?: string | null;
@@ -317,8 +582,8 @@ export type DevloopTaskFileDiff = {
   message?: string | null;
 };
 
-export const getTaskFileDiff = (sessionId: number, filePath: string) =>
-  POST<DevloopTaskFileDiff>('/byaiService/devloop/task/file-diff', { sessionId, filePath });
+export const getTaskFileDiff = (sessionId: number, filePath: string, repoId?: number) =>
+  POST<DevloopTaskFileDiff>('/byaiService/devloop/task/file-diff', { sessionId, filePath, repoId });
 
 // 任务环节进度：直接读取 self-developed-rules v2 会话状态投影
 export const getTaskPhases = (sessionId: number) =>
@@ -347,6 +612,9 @@ export const removeProjectMember = (memberId: number) => POST<any>('/byaiService
 export const bindMemberAgent = (data: { memberId: number; agentId: number }) =>
   POST<any>('/byaiService/project/member/bindAgent', data);
 
+export const unbindMemberAgent = (memberId: number) =>
+  POST<any>('/byaiService/project/member/unbindAgent', { memberId });
+
 // DWS 钉钉授权
 export const startDwsDeviceAuth = () => POST<any>('/byaiService/devloop/dws/startDeviceAuth', {});
 
@@ -357,3 +625,149 @@ export const checkDwsAuthStatusBySource = (sourceId: number) =>
   POST<any>('/byaiService/devloop/dws/authStatus/bySource', { sourceId });
 
 export const saveDwsToken = (token: string) => POST<any>('/byaiService/devloop/dws/saveToken', { token });
+
+// 集成测试环境
+// stages / testAccounts 前端为结构化数组，落库为JSON字符串，故服务层统一序列化后再发。
+// 定时(cron)与执行员工不在环境里，归属独立测试数字员工配置，避免重复。
+export type IntegrationEnvPayload = {
+  projectId: number;
+  envName: string;
+  address?: string;
+  orchestrator?: 'script' | 'jenkins' | 'k8s' | 'webhook';
+  connProtocol?: 'ssh' | 'local';
+  connHost?: string;
+  connPort?: string;
+  connUser?: string;
+  connAuth?: 'key' | 'password';
+  // 连接凭据key，指向 ~/.openclaw/credentials/，不传明文密码。
+  connCredentialRef?: string;
+  connWorkdir?: string;
+  stages?: IntegrationStage[];
+  testAccounts?: TestAccount[];
+};
+
+// stages/testAccounts 序列化为JSON字符串以匹配后端 IntegrationEnvDTO 的 String 字段。
+const encodeEnvPayload = (data: Partial<IntegrationEnvPayload>) => ({
+  ...data,
+  stages: data.stages !== undefined ? JSON.stringify(data.stages) : undefined,
+  testAccounts: data.testAccounts !== undefined ? JSON.stringify(data.testAccounts) : undefined,
+});
+
+export const createIntegrationEnv = (data: IntegrationEnvPayload) =>
+  POST<any>('/byaiService/devloop/integration/env/create', encodeEnvPayload(data));
+
+export const updateIntegrationEnv = (data: Partial<IntegrationEnvPayload> & { envId: number }) =>
+  POST<any>('/byaiService/devloop/integration/env/update', encodeEnvPayload(data));
+
+export const deleteIntegrationEnv = (envId: number) =>
+  POST<any>('/byaiService/devloop/integration/env/delete', { envId });
+
+export const listIntegrationEnvs = (projectId: number) =>
+  POST<any>('/byaiService/devloop/integration/env/list', { projectId });
+
+// 端到端测试用例集
+// manual 套件的清单(manualCases)不入库,仅登记 manualFile 路径;caseCount 为数字,enabled 落库为 '0'/'1'。
+export type IntegrationSuitePayload = {
+  projectId: number;
+  suiteName: string;
+  runner?: string;
+  sourceType?: string;
+  repoId?: number;
+  source?: string;
+  branch?: string;
+  runCommand?: string;
+  workdir?: string;
+  reportPath?: string;
+  caseCount?: number;
+  enabled?: string;
+  manualFile?: string;
+};
+
+export const createIntegrationSuite = (data: IntegrationSuitePayload) =>
+  POST<any>('/byaiService/devloop/integration/suite/create', data);
+
+export const updateIntegrationSuite = (data: Partial<IntegrationSuitePayload> & { suiteId: number }) =>
+  POST<any>('/byaiService/devloop/integration/suite/update', data);
+
+export const deleteIntegrationSuite = (suiteId: number) =>
+  POST<any>('/byaiService/devloop/integration/suite/delete', { suiteId });
+
+export const toggleIntegrationSuite = (suiteId: number, enabled: string) =>
+  POST<any>('/byaiService/devloop/integration/suite/toggle', { suiteId, enabled });
+
+export const listIntegrationSuites = (projectId: number) =>
+  POST<any>('/byaiService/devloop/integration/suite/list', { projectId });
+
+// ===== 集成测试执行 =====
+// 点「执行测试」秒回 runId,后台异步跑;前端轮询 getIntegrationRun 直到 status 进入终态。
+// executorMode:backend=后端直连环境跑用例并当场解析报告(便于排查);tester=下发独立测试数字员工，
+// run 保持 running 等员工回流。省略则由后端全局配置决定（正式形态 tester）。
+export const startIntegrationRun = (suiteId: number, envId: number, executorMode?: 'backend' | 'tester') =>
+  POST<{ runId: string }>('/byaiService/devloop/integration/run/start', { suiteId, envId, executorMode });
+
+export const getIntegrationRun = (runId: string | number) =>
+  POST<any>('/byaiService/devloop/integration/run/get', { runId });
+
+// 报告原文不落库，点「查看报告」时后端才 SSH 去环境机读；文件已被清掉会直接返回错误。
+export const getIntegrationRunReport = (runId: string | number) =>
+  POST<{ path: string; content: string }>('/byaiService/devloop/integration/run/report', { runId });
+
+export const listIntegrationRuns = (suiteId: number) =>
+  POST<any[]>('/byaiService/devloop/integration/run/list', { suiteId });
+
+export const listIntegrationRunsByEnv = (envId: number) =>
+  POST<any[]>('/byaiService/devloop/integration/run/listByEnv', { envId });
+
+// 需求级集成聚合看板:项目下已拆解需求按「需求→多仓库任务」组装,含就绪状态、最近执行结果与打回记录。
+export const listRequirementIntegrations = (projectId: number) =>
+  POST<any[]>('/byaiService/devloop/integration/requirements', { projectId });
+
+// ===== 默认数字员工 =====
+// 三角色(架构/代码/测试)兜底员工:projectId 缺省=全局默认,>0=项目覆盖。
+export type DefaultAgentConfig = {
+  projectId?: number;
+  architectAgentId?: string;
+  architectAgentName?: string;
+  coderAgentId?: string;
+  coderAgentName?: string;
+  testerAgentId?: string;
+  testerAgentName?: string;
+};
+
+// 查某作用域原始配置(全局或某项目覆盖)。projectId 缺省查全局默认。
+export const getDefaultAgent = (projectId?: number) =>
+  POST<DefaultAgentConfig>('/byaiService/devloop/default-agent/get', { projectId });
+
+// 解析项目各角色生效员工(项目覆盖合并到全局默认之上)。
+export const resolveDefaultAgent = (projectId?: number) =>
+  POST<DefaultAgentConfig>('/byaiService/devloop/default-agent/resolve', { projectId });
+
+// 保存某作用域配置(每作用域唯一,后端 upsert)。
+export const saveDefaultAgent = (data: DefaultAgentConfig) =>
+  POST<void>('/byaiService/devloop/default-agent/save', data);
+
+// ===== 独立测试数字员工配置 =====
+// 需求级集成的定时节流+就绪准入+失败打回策略,每项目一行;执行员工统一取全局测试默认(resolveDefaultAgent)。
+// 结构对齐前端 TesterConfig(enabled/schedule/admission/kickback),后端与扁平列互转。
+export type TesterConfigPayload = {
+  projectId: number;
+  enabled: boolean;
+  schedule: { cron: string; cronLabel: string; timezone: string };
+  admission: { requireAllCoded: boolean; maxConcurrentReqs: number };
+  kickback: { autoAttribute: boolean; createDefectWhenUnclear: boolean; maxRounds: number };
+};
+
+// 查项目配置;后端无记录时回填出厂默认,前端始终拿到完整可编辑配置。
+export const getTesterConfig = (projectId: number) =>
+  POST<TesterConfigPayload>('/byaiService/devloop/tester-config/get', { projectId });
+
+// 保存项目配置(每项目唯一,后端 upsert)。
+export const saveTesterConfig = (data: TesterConfigPayload) =>
+  POST<void>('/byaiService/devloop/tester-config/save', data);
+
+// 手动触发一次项目批量集成:对项目下所有启用用例集 × 指定环境各起一次真实 run,返回 runId 列表。
+export const runTesterBatch = (projectId: number, envId: number) =>
+  POST<{ runIds: Array<string | number>; suiteCount: number }>('/byaiService/devloop/tester-config/run', {
+    projectId,
+    envId,
+  });

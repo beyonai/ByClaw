@@ -5,10 +5,9 @@ import {
   type GroupChatContextV1,
 } from "@byclaw/by-conductor";
 import type { ByClawBeEndpointResolver } from "./endpoint-resolver.js";
+import { normalizeBaseUrl, postByClawBeJson, type FetchLike } from "./byclaw-be-http.js";
 
 const GROUP_CHAT_CONTEXT_PATH = "/byaiService/internal/api/v1/group-chat/context";
-
-type FetchLike = typeof globalThis.fetch;
 
 export interface GroupChatContextProvider {
   /** 使用当前调用者 Token 读取严格早于 beforeMessageId 的可见群聊快照。 */
@@ -62,62 +61,28 @@ export class ByClawBeGroupChatContextProvider
     beyondToken: string;
     systemCode?: string;
   }): Promise<GroupChatContextV1> {
-    const discoveredBaseUrl = await this.#endpointResolver?.resolve();
-    const url = buildGroupChatContextUrl(
-      discoveredBaseUrl
-        ? normalizeBaseUrl(discoveredBaseUrl)
-        : this.#fallbackBaseUrl,
-    );
-    let response: Response;
-    try {
-      response = await this.#fetch(url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "Beyond-Token": input.beyondToken,
-          ...(input.systemCode ? { "System-Code": input.systemCode } : {}),
-        },
-        body: JSON.stringify({
-          conversationKey: input.conversationKey,
-          beforeMessageId: input.beforeMessageId,
-          maxMessages: GROUP_CHAT_CONTEXT_MAX_MESSAGES,
-          maxCharacters: GROUP_CHAT_CONTEXT_MAX_CHARACTERS,
-        }),
-        signal: AbortSignal.timeout(this.#timeoutMs),
-      });
-    } catch (error) {
-      throw new ByClawBeGroupChatContextError(
-        error instanceof Error
-          ? `ByClaw BE group chat request failed: ${error.message}`
-          : "ByClaw BE group chat request failed",
-      );
-    }
-
-    if (!response.ok) {
-      throw new ByClawBeGroupChatContextError(
-        `ByClaw BE group chat returned HTTP ${response.status}`,
-        response.status,
-      );
-    }
-
-    const payload = await parseResponse(response);
-    if (
-      payload.code !== 0 ||
-      payload.success === false ||
-      payload.data === undefined
-    ) {
-      throw new ByClawBeGroupChatContextError(
-        `ByClaw BE group chat returned invalid result${
-          typeof payload.msg === "string" && payload.msg
-            ? `: ${payload.msg}`
-            : ""
-        }`,
-      );
-    }
+    const data = await postByClawBeJson({
+      fetchImpl: this.#fetch,
+      ...(this.#endpointResolver ? { endpointResolver: this.#endpointResolver } : {}),
+      fallbackBaseUrl: this.#fallbackBaseUrl,
+      timeoutMs: this.#timeoutMs,
+      path: GROUP_CHAT_CONTEXT_PATH,
+      beyondToken: input.beyondToken,
+      ...(input.systemCode ? { systemCode: input.systemCode } : {}),
+      body: {
+        conversationKey: input.conversationKey,
+        beforeMessageId: input.beforeMessageId,
+        maxMessages: GROUP_CHAT_CONTEXT_MAX_MESSAGES,
+        maxCharacters: GROUP_CHAT_CONTEXT_MAX_CHARACTERS,
+      },
+      label: "group chat",
+      toError: (message, statusCode) =>
+        new ByClawBeGroupChatContextError(message, statusCode),
+    });
 
     let context: GroupChatContextV1;
     try {
-      context = parseGroupChatContext(payload.data);
+      context = parseGroupChatContext(data);
     } catch (error) {
       throw new ByClawBeGroupChatContextError(
         error instanceof Error
@@ -134,48 +99,5 @@ export class ByClawBeGroupChatContextProvider
       );
     }
     return context;
-  }
-}
-
-/** 校验并标准化 ByClaw BE 根地址，同时保留服务发现返回的 path_prefix。 */
-function normalizeBaseUrl(value: string): URL {
-  const url = new URL(value);
-  url.pathname =
-    url.pathname === "/"
-      ? "/"
-      : `/${url.pathname.replace(/^\/+|\/+$/g, "")}`;
-  url.search = "";
-  url.hash = "";
-  return url;
-}
-
-/** 在环境变量或服务发现根地址后拼接固定的群聊上下文 API 路径。 */
-function buildGroupChatContextUrl(baseUrl: URL): URL {
-  const url = new URL(baseUrl);
-  const prefix =
-    url.pathname === "/" ? "" : url.pathname.replace(/\/$/, "");
-  url.pathname = `${prefix}${GROUP_CHAT_CONTEXT_PATH}`;
-  return url;
-}
-
-async function parseResponse(
-  response: Response,
-): Promise<{
-  code?: number;
-  msg?: string;
-  success?: boolean;
-  data?: unknown;
-}> {
-  try {
-    return (await response.json()) as {
-      code?: number;
-      msg?: string;
-      success?: boolean;
-      data?: unknown;
-    };
-  } catch {
-    throw new ByClawBeGroupChatContextError(
-      "ByClaw BE group chat returned invalid JSON",
-    );
   }
 }

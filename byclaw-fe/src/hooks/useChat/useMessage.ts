@@ -17,6 +17,7 @@ import { getMsgId, hasVisibleMessageContent } from '@/utils/messgae';
 import { getSessionObjectTypeMap } from '@/utils/session';
 import { IMessageState } from '@/constants/message';
 import useGlobal from '../useGlobal';
+import { getSessionLastAnsMsgMetadata } from './util';
 
 // 记录当前会话ID的引用，用于跟踪会话变化
 const curSessionId = {
@@ -302,11 +303,17 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
         for (let i = list.length - 1; i >= 0; i -= 1) {
           const msg = list[i];
           if (msg.fromBeyond) {
+            const queryMessage = msg.queryMsgId
+              ? list.find(
+                (item) =>
+                  !item.fromBeyond && [`${item.msgId || ''}`, `${item.messageId || ''}`].includes(`${msg.queryMsgId}`)
+              )
+              : undefined;
             // 在这里写是因为，只需要每次切换会话查询聊天记录后，找到最后一条fromBeyond的记录
-            EventEmitter.emit('RECEIVE_SESSION_RECORDS_LAST_METADATA', {
-              sessionId,
-              metadata: msg.metadata,
-            });
+            EventEmitter.emit(
+              'RECEIVE_SESSION_RECORDS_LAST_METADATA',
+              getSessionLastAnsMsgMetadata(sessionId, msg, queryMessage)
+            );
             break;
           }
         }

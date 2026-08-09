@@ -156,6 +156,62 @@
   gap: 6px;
 }
 
+.enterpriseSkillTabLabel {
+  display: inline-flex;
+  align-items: center;
+  outline: none;
+
+  &:focus-visible {
+    border-radius: 4px;
+    box-shadow: 0 0 0 2px rgb(22 93 255 / 20%);
+  }
+}
+
+.enterpriseSkillDropdown {
+  :global {
+    .@{antPrefix}-dropdown-menu {
+      min-width: 150px;
+      padding: 6px;
+      border-radius: 10px;
+      box-shadow: 0 12px 28px rgb(22 34 51 / 14%);
+    }
+
+    .@{antPrefix}-dropdown-menu-item {
+      position: relative;
+      display: flex;
+      align-items: center;
+      min-height: 38px;
+      padding: 8px 34px 8px 12px;
+      border-radius: 7px;
+      color: #1f2329;
+      font-size: 14px;
+      font-weight: 500;
+
+      &:hover {
+        background: #f5f8ff;
+      }
+    }
+
+    .@{antPrefix}-dropdown-menu-item-selected {
+      background: #eaf3ff;
+      color: #165dff;
+
+      &:hover {
+        background: #e1efff;
+      }
+
+      &::after {
+        position: absolute;
+        right: 12px;
+        color: #165dff;
+        content: '✓';
+        font-size: 15px;
+        font-weight: 700;
+      }
+    }
+  }
+}
+
 .fullscreenButton {
   display: inline-flex;
   align-items: center;

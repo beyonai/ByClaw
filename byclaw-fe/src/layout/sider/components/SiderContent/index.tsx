@@ -6,6 +6,8 @@ import useVisibleMenuKeys from '../../useVisibleMenuKeys';
 import styles from './index.module.less';
 
 const ProjectSpaceList = lazy(() => import('@/layout/sider/components/ProjectSpaceList'));
+// 项目列表与 SiderContent 同属侧栏组件目录，使用相对路径避免增量编译时别名缓存导致模块解析失败。
+const ProjectCenterList = lazy(() => import('../ProjectCenterList'));
 const EmployeeList = lazy(() => import('@/layout/sider/components/EmployeeList'));
 const Knowledge = lazy(() => import('@/layout/sider/components/Knowledge'));
 const ResourceSiderPanel = lazy(() => import('@/layout/sider/components/ResourceSiderPanel'));
@@ -26,10 +28,21 @@ export const tabItems: any[] = [
     icon: 'icon-cebianlan-duihuajilu',
     activeIcon: 'icon-huihua-fill',
     label: 'sider.session',
-    // 会话入口统一展示按项目归属分组的会话列表，避免与独立项目入口重复。
+    // 会话入口继续按项目归属分组展示会话，项目管理由下方独立项目入口承接。
     ChildComponent: ProjectSpaceList,
     navigatePath: '/chat',
     forceRender: true,
+  },
+  {
+    key: 'projectSpace',
+    icon: 'icon-a-Boxhezioutline',
+    activeIcon: 'icon-a-Boxhezi1',
+    label: 'sider.projectSpace',
+    // 项目入口只展示项目列表；会话入口继续保留原有项目分组和会话操作。
+    ChildComponent: ProjectCenterList,
+    navigatePath: '/projectSpace',
+    // 离开项目菜单时卸载新建弹窗等临时状态，返回时由 URL 恢复当前项目。
+    destroyOnHidden: true,
   },
   {
     key: 'agent',

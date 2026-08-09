@@ -30,12 +30,15 @@ describe("SUPER_ASSISTANT_SYSTEM_PROMPT", () => {
     );
   });
 
-  it("requires attachment ids to be materialized before local file access", () => {
+  it("delegates file reading to a specialist instead of reading attachments locally", () => {
     expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
-      "call downloadAttachment with its exact attachment id",
+      "You have no file-reading capability",
     );
     expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
-      "use the returned relativePath",
+      "delegate the work to a suitable authorized specialist via delegateAgent",
+    );
+    expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
+      "forward the relevant attachment id(s) through attachmentIds",
     );
   });
 

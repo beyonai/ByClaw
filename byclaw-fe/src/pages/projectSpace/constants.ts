@@ -22,11 +22,44 @@ export const DEFAULT_PROJECT_TYPE_OPTION: { label: string; value: ProjectType } 
 
 // 独立项目详情页使用与侧栏详情一致的 Tab 标识，标签文本统一由消费组件国际化。
 export const PROJECT_DETAIL_SECTIONS = [
-  { key: 'sessions', labelId: 'projectSpace.detail.tabs.sessions' },
   { key: 'tasks', labelId: 'projectSpace.detail.tabs.tasks' },
   { key: 'resources', labelId: 'projectSpace.detail.tabs.resources' },
-  { key: 'members', labelId: 'projectSpace.detail.tabs.members' },
   { key: 'requirements', labelId: 'projectSpace.detail.tabs.requirements' },
+  { key: 'digitalAgents', labelId: 'projectSpace.detail.tabs.digitalAgents' },
+  { key: 'members', labelId: 'projectSpace.detail.tabs.members' },
+  { key: 'integration', labelId: 'projectSpace.detail.tabs.integration' },
+  { key: 'accounts', labelId: 'projectSpace.detail.tabs.accounts' },
+  // 非运营项目仍保留会话页，但按产品顺序放在业务管理页签之后。
+  { key: 'sessions', labelId: 'projectSpace.detail.tabs.sessions' },
 ] as const;
 
 export type ProjectDetailSection = (typeof PROJECT_DETAIL_SECTIONS)[number]['key'];
+
+// 当前项目仅持久化 ID，项目列表加载后会根据用户权限再次校验该值。
+export const PROJECT_SCOPE_STORAGE_KEY = 'byclaw.projectSpace.selectedProjectId';
+
+export const getStoredProjectScopeId = () => {
+  if (typeof window === 'undefined') return undefined;
+
+  try {
+    return window.localStorage.getItem(PROJECT_SCOPE_STORAGE_KEY)?.trim() || undefined;
+  } catch {
+    // 浏览器禁用本地存储时不影响当前会话中的项目切换。
+    return undefined;
+  }
+};
+
+export const saveProjectScopeIdToStorage = (projectId?: string | number) => {
+  if (typeof window === 'undefined') return;
+
+  try {
+    const normalizedProjectId = `${projectId ?? ''}`.trim();
+    if (normalizedProjectId) {
+      window.localStorage.setItem(PROJECT_SCOPE_STORAGE_KEY, normalizedProjectId);
+      return;
+    }
+    window.localStorage.removeItem(PROJECT_SCOPE_STORAGE_KEY);
+  } catch {
+    // 浏览器禁用本地存储时不影响当前会话中的项目切换。
+  }
+};

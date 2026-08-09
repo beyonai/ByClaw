@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.capability.AgentCapabilityCardMapper">
+
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.capability.AgentCapabilityCardEntity">
+        <result column="system_code" property="systemCode"/>
+        <result column="agent_id" property="agentId"/>
+        <result column="agent_code" property="agentCode"/>
+        <result column="agent_name" property="agentName"/>
+        <result column="schema_version" property="schemaVersion"/>
+        <result column="generator_version" property="generatorVersion"/>
+        <result column="source_version" property="sourceVersion"/>
+        <result column="source_fingerprint" property="sourceFingerprint"/>
+        <result column="card" property="card"/>
+        <result column="routing_text" property="routingText"/>
+        <result column="quality" property="quality"/>
+        <result column="status" property="status"/>
+        <result column="version" property="version"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <!-- 原子 upsert：使用 OpenGauss 兼容的 MERGE，命中主键时版本自增并刷新产物。 -->
+    <insert id="upsert" parameterType="com.iwhalecloud.byai.manager.entity.capability.AgentCapabilityCardEntity">
+        MERGE INTO byai.byai_super_agent_capability_cards target
+        USING (
+            SELECT CAST(#{entity.systemCode} AS VARCHAR(64)) AS system_code,
+                   CAST(#{entity.agentId} AS VARCHAR(200)) AS agent_id,
+                   CAST(#{entity.agentCode} AS VARCHAR(128)) AS agent_code,
+                   CAST(#{entity.agentName} AS VARCHAR(200)) AS agent_name,
+                   CAST(#{entity.schemaVersion} AS VARCHAR(64)) AS schema_version,
+                   CAST(#{entity.generatorVersion} AS VARCHAR(32)) AS generator_version,
+                   CAST(#{entity.sourceVersion} AS VARCHAR(128)) AS source_version,
+                   CAST(#{entity.sourceFingerprint} AS VARCHAR(128)) AS source_fingerprint,
+                   CAST(#{entity.card} AS TEXT) AS card,
+                   CAST(#{entity.routingText} AS VARCHAR(1024)) AS routing_text,
+                   CAST(#{entity.quality} AS TEXT) AS quality,
+                   COALESCE(CAST(#{entity.status} AS VARCHAR(16)), 'ACTIVE') AS status,
+                   COALESCE(CAST(#{entity.createdAt} AS TIMESTAMP), NOW()) AS created_at,
+                   COALESCE(CAST(#{entity.updatedAt} AS TIMESTAMP), NOW()) AS updated_at
+        ) source
+        ON (target.system_code = source.system_code AND target.agent_id = source.agent_id)
+        WHEN MATCHED THEN UPDATE
+            SET agent_code        = source.agent_code,
+                agent_name        = source.agent_name,
+                schema_version    = source.schema_version,
+                generator_version = source.generator_version,
+                source_version    = source.source_version,
+                source_fingerprint = source.source_fingerprint,
+                card              = source.card,
+                routing_text      = source.routing_text,
+                quality           = source.quality,
+                status            = 'ACTIVE',
+                version           = target.version + 1,
+                updated_at        = source.updated_at
+        WHEN NOT MATCHED THEN INSERT
+            (system_code, agent_id, agent_code, agent_name, schema_version,
+             generator_version, source_version, source_fingerprint, card,
+             routing_text, quality, status, version, created_at, updated_at)
+        VALUES
+            (source.system_code, source.agent_id, source.agent_code, source.agent_name,
+             source.schema_version, source.generator_version, source.source_version,
+             source.source_fingerprint, source.card, source.routing_text, source.quality,
+             source.status, 0, source.created_at, source.updated_at)
+    </insert>
+
+</mapper>

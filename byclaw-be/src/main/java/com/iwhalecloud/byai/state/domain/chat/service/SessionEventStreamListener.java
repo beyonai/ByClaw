@@ -40,6 +40,7 @@ public class SessionEventStreamListener
 
     private static final Logger log = LoggerFactory.getLogger(SessionEventStreamListener.class);
 
+    // 需要和 byclaw-exe/extensions/byai-channel/src/utils.ts 中的 DEFAULT_STREAM_KEY 一致
     static final String DEFAULT_STREAM_KEY = "byai_gateway:session_event:data_stream";
     static final String DEFAULT_CONSUMER_GROUP = "byclaw_session_event_group";
     private static final String CONSUMER_NAME_PREFIX = "byclaw-session-event:";

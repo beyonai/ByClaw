@@ -1,11 +1,14 @@
-import type { AgentProfile, CallerPrincipal } from "../types.js";
-import type { SessionContextV1 } from "../session-context.js";
-import type { GroupChatContextV1 } from "../group-chat-context.js";
+import type { AgentProfile, CallerPrincipal } from "../domain/types.js";
+import type { ExpertTeamRuntimeSnapshotV1 } from "../domain/orchestrator.js";
+import type { SessionContextV1 } from "../domain/session-context.js";
+import type { GroupChatContextV1 } from "../domain/group-chat-context.js";
 
 /** 一次上下文编译所需的原始快照；读取外部数据应在进入编译器之前完成。 */
 export interface ContextBuildInput {
   /** 稳定的 Supervisor 角色与平台规则，始终位于最终 system prompt 最前面。 */
   baseSystemPrompt: string;
+  /** by-framework 入站会话 ID；存在时声明用户可见的规范会话空间。 */
+  externalSessionId?: string;
   /** 当前 Run 冻结的授权 Agent 快照。 */
   authorizedAgents: readonly AgentProfile[];
   /** Agent 目录回源失败；此时授权快照为空不代表用户确实没有可用数字员工。 */
@@ -18,6 +21,8 @@ export interface ContextBuildInput {
   currentTime: number;
   /** 当前调用者身份；缺省时不渲染用户区段。 */
   user?: CallerPrincipal;
+  /** 缺省表示原有超级助手；存在时由编译路由选择独立 Prompt 和上下文策略。 */
+  orchestrator?: ExpertTeamRuntimeSnapshotV1;
 }
 
 /** 动态追加到稳定 system prompt 后面的一个具名上下文区段。 */
@@ -63,4 +68,9 @@ export interface CompiledContext {
 export interface ContextProcessor {
   readonly name: string;
   process(state: ContextBuildState, input: ContextBuildInput): ContextBuildState;
+}
+
+/** Pi Adapter 依赖的最小上下文编译协议，允许按编排类型选择不同流水线。 */
+export interface SystemContextCompiler {
+  compile(input: ContextBuildInput): CompiledContext;
 }

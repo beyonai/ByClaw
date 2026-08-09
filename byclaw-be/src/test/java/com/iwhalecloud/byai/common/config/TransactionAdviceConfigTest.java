@@ -27,6 +27,8 @@ class TransactionAdviceConfigTest {
             .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
         assertThat(resolvePropagation(source, "syncResourceJsonByBizType"))
             .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        assertThat(resolvePropagation(source, "existsResourceJsonByBizType"))
+            .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
         assertThat(resolvePropagation(source, "upsertStandardJsonArtifact"))
             .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
         assertThat(resolvePropagation(source, "prewarmDueCronSandboxes"))
@@ -65,6 +67,9 @@ class TransactionAdviceConfigTest {
         }
 
         public void syncResourceJsonByBizType() {
+        }
+
+        public void existsResourceJsonByBizType() {
         }
 
         public void upsertStandardJsonArtifact() {

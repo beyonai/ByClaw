@@ -85,6 +85,27 @@ export function getResponseAgentInfo(
   }
 }
 
+export type ResponseMetadataPayload = {
+  sessionId?: string;
+  metadata?: string;
+  laneId?: string;
+  turnId?: string;
+  multiAgent?: unknown;
+};
+
+export function isMultiAgentResponsePayload(payload?: ResponseMetadataPayload) {
+  if (payload?.multiAgent || payload?.laneId || payload?.turnId) {
+    return true;
+  }
+  try {
+    const metadata = payload?.metadata ? JSON.parse(payload.metadata) : undefined;
+    // 多员工历史数据可能只在 metadata 中保留 lane 标记，需要同时兼容新旧消息结构。
+    return Boolean(metadata?.multiAgent || metadata?.laneId || metadata?.turnId);
+  } catch {
+    return false;
+  }
+}
+
 export type ResponseAgentInfo = NonNullable<ReturnType<typeof getResponseAgentInfo>>;
 
 type MentionableAgentInfo = Partial<ResponseAgentInfo> & {
@@ -118,7 +139,7 @@ export function getResponseAgentInfoByMessage(
         agentId: `${agentInfo?.agentId || resourceAgentId}`,
         name: inlineDigitalEmployee.resourceName || agentInfo?.name || `${resourceAgentId}`,
         chatAvatar: inlineDigitalEmployee.chatAvatar || agentInfo?.chatAvatar,
-        resourceDesc: agentInfo?.resourceDesc || '',
+        resourceDesc: inlineDigitalEmployee.resourceDesc || agentInfo?.resourceDesc || '',
         resourceCode: inlineDigitalEmployee.resourceCode || agentInfo?.resourceCode,
         isSuperAssistant: agentInfo?.isSuperAssistant || false,
         agentType: agentInfo?.agentType,

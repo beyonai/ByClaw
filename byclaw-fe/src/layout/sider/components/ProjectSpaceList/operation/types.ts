@@ -3,16 +3,16 @@ import type { Dayjs } from 'dayjs';
 // 运营模块中的业务主键均兼容后端数字 ID 与字符串 ID，避免不同资源接口之间发生类型转换错误。
 export type OperationIdentifier = string | number;
 
-// 运营任务、登录状态和工作流状态为前端统一枚举；接口适配层负责兼容后端的历史取值。
-export type OperationTaskType = 'collect' | 'content' | 'analyze';
+// 运营需求按原型拆成四类；接口适配层负责兼容旧版 publish/content 等历史取值。
+export type OperationTaskType = 'collect' | 'knowledge' | 'content' | 'analyze';
 
 export type OperationLoginStatus = 'logged_in' | 'logged_out' | 'expired' | 'unknown';
 
-export type OperationCollectionMode = 'once' | 'periodic';
+export type OperationCollectionMode = 'once' | 'interval' | 'periodic';
+
+export type OperationCollectionPeriod = 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly';
 
 export type OperationAnalysisScope = 'account' | 'works';
-
-export type OperationConfirmationRule = 'manual' | 'auto';
 
 export type OperationWorkflowStatus = 'pending' | 'in_progress' | 'waiting_confirmation' | 'completed' | 'failed';
 
@@ -81,13 +81,52 @@ export interface OperationCollectConfig {
   channel?: string;
   accountOrAddress?: string;
   topic?: string;
+
+  /** 仅用于兼容旧版采集时间范围，编辑历史需求时仍可读取但不再提交。 */
   dateRange?: OperationDateRange;
   knowledgeBaseId?: OperationIdentifier;
   directoryId?: OperationIdentifier;
   mode?: OperationCollectionMode;
+
+  /** 单次采集的计划触发时间，提交前序列化为 yyyy-MM-dd HH:mm:ss。 */
+  onceTime?: Dayjs | null;
+  periodType?: OperationCollectionPeriod;
+  periodWeekdays?: number[];
+  periodMonthDays?: number[];
+  periodMonth?: number;
+  periodDay?: number;
+
+  /** 周期采集每天触发的时分，表单态使用 Dayjs。 */
+  periodTime?: Dayjs | null;
+
+  /** 每年采集在表单中合并选择月、日和时分，提交时再拆回稳定接口字段。 */
+  periodYearDateTime?: Dayjs | null;
+  intervalHours?: number;
+  intervalWeekdays?: number[];
+
+  /** 周期和间隔采集的可选生效日期区间。 */
+  effectiveDateRange?: OperationDateRange;
+
+  /** 旧版间隔字段仅用于历史配置回显。 */
+  intervalValue?: number;
+  intervalUnit?: 'minute' | 'hour';
+
+  /** 周期采集使用的标准五段 Cron，后端保存到 byai_scan_source.cron_expr。 */
+  cronExpr?: string;
   schedule?: string;
   organize?: boolean;
   organizeTemplateId?: OperationIdentifier;
+  // 整理配置既支持引用已有本体，也支持为当前运营需求新建结构化要求。
+  knowledgeOrganization?: OperationKnowledgeOrganization;
+}
+
+// 新建整理模板只归属当前运营需求，结构化要求随需求 config 持久化，避免误写入平台级本体资源。
+export interface OperationKnowledgeOrganization {
+  mode: 'existing' | 'new';
+  templateId?: OperationIdentifier;
+  templateName?: string;
+  request?: string;
+  structure?: string;
 }
 
 export interface OperationContentConfig {
@@ -95,9 +134,7 @@ export interface OperationContentConfig {
   publishChannel?: string;
   publishAccountId?: OperationIdentifier;
   topic?: string;
-  plannedCount?: number;
   publishSchedule?: string;
-  confirmationRule?: OperationConfirmationRule;
 }
 
 export interface OperationAnalyzeConfig {
@@ -105,7 +142,6 @@ export interface OperationAnalyzeConfig {
   accountId?: OperationIdentifier;
   scope?: OperationAnalysisScope;
   workIds?: OperationIdentifier[];
-  dateRange?: OperationDateRange;
 }
 
 export interface OperationTaskFormValues {
@@ -114,16 +150,14 @@ export interface OperationTaskFormValues {
   taskType: OperationTaskType;
   assigneeId?: OperationIdentifier;
   dueTime?: Dayjs | null;
-  agentSelection?: OperationAgentSelection;
   collectConfig?: OperationCollectConfig;
   contentConfig?: OperationContentConfig;
   analyzeConfig?: OperationAnalyzeConfig;
 }
 
-// 任务表单的候选数据全部由容器加载，组件不内置模拟账号、成员或作品数据。
+// 需求表单的候选数据全部由容器加载，组件不内置模拟账号、成员或作品数据。
 export interface OperationTaskFormOptions {
   assignees?: OperationSelectOption[];
-  agents?: OperationAgentOption[];
   collectChannels?: OperationPlatformOption[];
   knowledgeBases?: OperationSelectOption[];
   directories?: OperationDirectoryOption[];

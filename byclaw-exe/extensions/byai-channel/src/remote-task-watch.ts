@@ -16,6 +16,7 @@ import {
   removeActiveSdkDelegatedWork,
 } from "./session-context.js";
 import { byFrameworkRedisKeys } from "../../shared/src/redis-compat.js";
+import { resolveByaiAgentIdFromSessionKey } from "../../shared/src/session-key.js";
 
 type RedisClient = NonNullable<ReturnType<typeof createRedisInstance>>;
 
@@ -558,12 +559,54 @@ function isRemoteTaskGroupReady(tasks: RemoteTaskRecord[]): boolean {
 }
 
 /**
- * 一个 session 分组只能整体投递：先为所有 toolCall 写结果文件，再触发一次 follow-up。
- * 成功时整组同时 delivered；失败时整组共享 attempts/nextAttemptAt，避免部分任务重复回灌。
+ * Keep this key format synchronized with call-acp-agent-tool.ts and
+ * AssistantChatService#buildCallAcpAgentDelegationRedisKey.
+ */
+function buildCallAcpAgentDelegationRedisKey(agentId: string, sessionId: string): string {
+  return `byai:call_acp_agent:delegation:${agentId}:${sessionId}`;
+}
+
+async function isSessionDelegatedToAcpAgent(
+  task: RemoteTaskRecord,
+  redis: RedisClient | undefined,
+): Promise<boolean> {
+  if (!redis) {
+    return false;
+  }
+  const agentId = resolveByaiAgentIdFromSessionKey(task.requesterSessionKey);
+  const sessionId = normalizeText(task.sessionId);
+  if (!agentId || !sessionId) {
+    return false;
+  }
+  const key = buildCallAcpAgentDelegationRedisKey(agentId, sessionId);
+  return (await redis.exists(key)) > 0;
+}
+
+/**
+ * ACP agent 接管后不再唤醒原 OpenClaw 会话，但任务仍需进入终态并释放本地完成门。
+ */
+function consumeTaskGroupWithoutFollowup(tasks: RemoteTaskRecord[]): void {
+  const deliveredAt = Date.now();
+  for (const task of tasks) {
+    removeActiveSdkDelegatedWork({
+      requesterSessionKey: task.requesterSessionKey,
+      toolCallId: task.toolCallId,
+    });
+    task.status = "delivered";
+    task.deliveredAt = deliveredAt;
+    task.updatedAt = deliveredAt;
+    task.lastDeliveryError = undefined;
+    task.nextAttemptAt = undefined;
+  }
+}
+
+/**
+ * 一个 session 分组只能整体投递：先检查 ACP 接管状态，未接管时再写结果文件并触发 follow-up。
+ * 消费或投递成功时整组同时 delivered；失败时整组共享 attempts/nextAttemptAt，避免部分任务重复回灌。
  */
 async function deliverReadyTaskGroup(
   tasks: RemoteTaskRecord[],
-  options: { retryDelayMs: number; maxAttempts: number },
+  options: { retryDelayMs: number; maxAttempts: number; redis?: RedisClient },
 ): Promise<boolean> {
   if (!isRemoteTaskGroupReady(tasks)) {
     return false;
@@ -572,12 +615,23 @@ async function deliverReadyTaskGroup(
   if (tasks.some((task) => task.nextAttemptAt && task.nextAttemptAt > now)) {
     return false;
   }
-  const deliveryAttempts = Math.max(...tasks.map((task) => task.deliveryAttempts), 0) + 1;
-  for (const task of tasks) {
-    task.deliveryAttempts = deliveryAttempts;
-  }
   const representative = tasks[0]!;
+  const deliveryAttempts = Math.max(...tasks.map((task) => task.deliveryAttempts), 0) + 1;
+  let ownedRedis: RedisClient | undefined;
+  let redis = options.redis;
   try {
+    if (!redis) {
+      ownedRedis = createRedisInstance() ?? undefined;
+      redis = ownedRedis;
+    }
+    // 接管判断必须早于结果文件写入和 awaiting 状态切换，避免旧会话产生任何 follow-up 副作用。
+    if (await isSessionDelegatedToAcpAgent(representative, redis)) {
+      consumeTaskGroupWithoutFollowup(tasks);
+      return true;
+    }
+    for (const task of tasks) {
+      task.deliveryAttempts = deliveryAttempts;
+    }
     // Promise.all 完成前不会 dispatch；任一文件写入失败都会进入整组重试分支。
     const followupTasks = await Promise.all(
       tasks.map(async (task) => ({
@@ -642,6 +696,7 @@ async function deliverReadyTaskGroup(
     const message = err instanceof Error ? err.message : String(err);
     const failedAt = Date.now();
     for (const task of tasks) {
+      task.deliveryAttempts = deliveryAttempts;
       task.lastDeliveryError = message;
       task.updatedAt = failedAt;
     }
@@ -664,6 +719,10 @@ async function deliverReadyTaskGroup(
       task.nextAttemptAt = undefined;
     }
     return true;
+  } finally {
+    if (ownedRedis) {
+      await ownedRedis.quit().catch(() => undefined);
+    }
   }
 }
 
@@ -780,7 +839,7 @@ async function runRemoteTaskWatchIterationUnlocked(): Promise<void> {
     // 第二阶段统一按 sessionKey 检查完整性，确保一个分组最多产生一次 follow-up run。
     const groups = groupActiveTasksByRequesterSessionKey(state);
     for (const tasks of groups.values()) {
-      changed = (await deliverReadyTaskGroup(tasks, { retryDelayMs, maxAttempts })) || changed;
+      changed = (await deliverReadyTaskGroup(tasks, { retryDelayMs, maxAttempts, redis })) || changed;
     }
   } finally {
     await redis.quit().catch(() => undefined);

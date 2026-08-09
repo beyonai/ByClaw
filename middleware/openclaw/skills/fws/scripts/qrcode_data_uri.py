@@ -41,41 +41,44 @@ def main() -> int:
     if not args.url.startswith(("http://", "https://")):
         return fail("URL must start with http:// or https://")
 
+    tmp_path = ""
     try:
-        with tempfile.TemporaryDirectory(prefix="fws-qrcode-") as tmp_dir:
-            tmp_dir_path = Path(tmp_dir)
-            tmp_dir_path.chmod(0o700)
-            output_arg = "./qrcode.png"
-            png_path = tmp_dir_path / "qrcode.png"
+        with tempfile.NamedTemporaryFile(prefix="fws-qrcode-", suffix=".png", delete=False) as tmp:
+            tmp_path = tmp.name
 
-            proc = subprocess.run(
-                [args.cli, "auth", "qrcode", args.url, "--output", output_arg],
-                cwd=tmp_dir_path,
-                capture_output=True,
-                text=True,
-                timeout=args.timeout,
-                check=False,
-            )
-            if proc.returncode != 0:
-                return fail("lark-cli auth qrcode failed", stderr=proc.stderr or proc.stdout)
-            if not png_path.exists() or png_path.stat().st_size <= 0:
-                return fail("lark-cli did not create a QR code image", stderr=proc.stderr or proc.stdout)
+        proc = subprocess.run(
+            [args.cli, "auth", "qrcode", args.url, "--output", tmp_path],
+            capture_output=True,
+            text=True,
+            timeout=args.timeout,
+            check=False,
+        )
+        png_path = Path(tmp_path)
+        if proc.returncode != 0:
+            return fail("lark-cli auth qrcode failed", stderr=proc.stderr or proc.stdout)
+        if not png_path.exists() or png_path.stat().st_size <= 0:
+            return fail("lark-cli did not create a QR code image", stderr=proc.stderr or proc.stdout)
 
-            png_path.chmod(0o600)
-            data_uri = "data:image/png;base64," + base64.b64encode(png_path.read_bytes()).decode("ascii")
-            payload = {
-                "ok": True,
-                "dataUri": data_uri,
-                "markdownImage": f"![{args.alt}]({data_uri})",
-            }
-            print(json.dumps(payload, ensure_ascii=False))
-            return 0
+        data_uri = "data:image/png;base64," + base64.b64encode(png_path.read_bytes()).decode("ascii")
+        payload = {
+            "ok": True,
+            "dataUri": data_uri,
+            "markdownImage": f"![{args.alt}]({data_uri})",
+        }
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0
     except subprocess.TimeoutExpired:
         return fail(f"lark-cli auth qrcode timed out after {args.timeout}s")
     except FileNotFoundError:
         return fail(f"Cannot find lark-cli executable: {args.cli}")
     except Exception as exc:  # Defensive: never make the caller render a broken image.
         return fail(str(exc))
+    finally:
+        if tmp_path:
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

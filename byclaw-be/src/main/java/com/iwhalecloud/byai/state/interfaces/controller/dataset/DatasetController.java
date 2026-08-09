@@ -8,6 +8,8 @@ import java.util.stream.Collectors;
 
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeMetadataSearch;
+import com.iwhalecloud.byai.common.feign.response.PythonBuildResponse;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.FileToMarkdownResult;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.feign.request.knowledge.FolderDelete;
@@ -16,10 +18,12 @@ import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetIdDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeBuildResultRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeMetadataSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
@@ -37,9 +41,11 @@ import com.iwhalecloud.byai.state.domain.resource.vo.DatasetDetailVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.KnowledgeCapabilityVo;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBuildResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileUpdateResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileMetadataResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
@@ -369,6 +375,15 @@ public class DatasetController {
     }
 
     /**
+     * 查询知识库文件的构建结果，包括 Markdown、分块和向量检索摘要。
+     */
+    @PostMapping(value = "/buildResult")
+    public ResponseUtil<KnowledgeBuildResult> buildResult(@RequestBody KnowledgeBuildResultRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
+            datasetApplicationService.buildResult(request));
+    }
+
+    /**
      * 查询指定知识库文件已入库的元数据，供技能侧按资源 ID 调用。
      */
     @PostMapping(value = "/knowledgeItems/metadata/get")
@@ -399,6 +414,25 @@ public class DatasetController {
         @RequestBody @Valid KnowledgeFileSearchRequest request) {
         return ResponseUtil.successResponse(I18nUtil.get("dataset.file.search.success"),
             datasetApplicationService.searchKnowledgeFiles(request));
+    }
+
+    /**
+     * Agent DSL 纯元数据检索，只返回文件级结果。
+     */
+    @PostMapping(value = "/knowledgeItems/metadataSearch")
+    public ResponseUtil<KnowledgeMetadataSearchResult> searchKnowledgeMetadata(
+        @RequestBody @Valid KnowledgeMetadataSearchRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.file.search.success"),
+            datasetApplicationService.searchKnowledgeMetadata(request));
+    }
+
+    /**
+     * 面向 ByClaw-datacloud 的 QA 原始协议透传接口，直接接收并返回 knCode 体系数据。
+     */
+    @PostMapping(value = "/knowledgeItems/metadataSearchByKnCode")
+    public PythonBuildResponse<Object> searchKnowledgeMetadataByKnCode(
+        @RequestBody KbKnowledgeMetadataSearch request) {
+        return datasetApplicationService.searchKnowledgeMetadataByKnCode(request);
     }
 
     /**

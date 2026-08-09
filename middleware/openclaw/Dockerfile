@@ -85,14 +85,13 @@ FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 USER root
 
 ARG OPENCLAW_VERSION
-ARG OPENCLI_VERSION=2.1.13
-ARG OPENCLI_EXTENSION_VERSION=2.1.13
 # 与 byclaw-be 预下载包同源同版本(byclaw-be/docker/dws/version.md);amd64 走预下载,arm64 用此版本联网 fallback。
 ARG DWS_VERSION=v1.0.52
 # buildx 目标架构(amd64/arm64),用于选择预下载二进制或 fallback。
 ARG TARGETARCH
+ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG WECOM_CLI_VERSION=0.1.9
-ARG LARKSUITE_CLI_VERSION=1.0.78
+ARG LARKSUITE_CLI_VERSION=1.0.84
 ARG INSTALL_BROWSER_STACK=true
 
 RUN chown root:root /app
@@ -117,8 +116,15 @@ ENV BYCLI_CONFIG_DIR=/by/.bycli \
     BYCLI_BROWSER_RECOVERY_COMMAND=/usr/local/bin/start-chrome.sh \
     BYCLI_DAEMON_HOST=0.0.0.0
 
-ARG OPENCLI_VERSION=2.1.14
-ARG OPENCLI_EXTENSION_VERSION=2.1.14
+RUN npm config set registry "${NPM_REGISTRY}" --global \
+    && npm config set fund false --global \
+    && npm config set audit false --global \
+    && npm config set fetch-retries 5 --global \
+    && npm config set fetch-retry-mintimeout 20000 --global \
+    && npm config set fetch-retry-maxtimeout 120000 --global
+
+ARG OPENCLI_VERSION=2.1.17
+ARG OPENCLI_EXTENSION_VERSION=2.1.16
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources; \

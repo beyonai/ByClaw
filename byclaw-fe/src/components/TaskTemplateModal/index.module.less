@@ -1,0 +1,187 @@
+.modal {
+  :global(.@{antPrefix}-modal-content) {
+    overflow: hidden;
+    border-radius: 12px;
+  }
+
+  :global(.@{antPrefix}-modal-body) {
+    max-height: min(72vh, 720px);
+    // 缩小模板列表与弹窗边缘的留白，给模板卡片保留更多展示空间。
+    padding: 8px 12px 12px;
+    overflow-y: auto;
+  }
+}
+
+.modalTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  > span {
+    min-width: 0;
+  }
+
+  strong,
+  small {
+    display: block;
+  }
+
+  strong {
+    color: #283346;
+    font-size: 16px;
+  }
+
+  small {
+    margin-top: 3px;
+    color: #8c97a7;
+    font-size: 12px;
+    font-weight: 400;
+  }
+}
+
+.templateGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.templateCard {
+  min-width: 0;
+  min-height: 84px;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #e0e6ee;
+  border-radius: 8px;
+  color: inherit;
+  text-align: left;
+  background: #fff;
+  cursor: pointer;
+
+  &:hover {
+    border-color: #9bbcf0;
+    background: #f8faff;
+  }
+
+  > i {
+    width: 48px;
+    height: 48px;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    color: #2868c9;
+    background: #eaf2ff;
+    font-size: 16px;
+    font-style: normal;
+    font-weight: 700;
+  }
+
+  > span {
+    min-width: 0;
+  }
+
+  strong,
+  small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong {
+    color: #303b4c;
+    font-size: 14px;
+  }
+
+  small {
+    margin-top: 5px;
+    color: #8b96a5;
+    font-size: 12px;
+  }
+}
+
+.detailForm {
+  max-width: 100%;
+}
+
+.formGrid,
+.executionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
+
+.sourceMethodRow,
+.storageMethodRow {
+  display: grid;
+  // 两组动态配置字段统一从表单宽度中点开始，保持上下两行对齐。
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+}
+
+.methodField {
+  margin-bottom: 16px;
+
+  > strong {
+    display: block;
+    margin-bottom: 8px;
+    color: #303b4c;
+    font-size: 14px;
+  }
+
+  :global(.@{antPrefix}-radio-group) {
+    display: inline-flex;
+    width: auto;
+  }
+
+  :global(.@{antPrefix}-radio-button-wrapper) {
+    flex: none;
+    width: auto;
+    padding: 0 20px;
+    text-align: center;
+  }
+}
+
+.methodConfigField {
+  margin-bottom: 16px;
+}
+
+.executionSection {
+  padding-top: 16px;
+  border-top: 1px solid #e7ebf1;
+
+  > strong {
+    display: block;
+    margin-bottom: 12px;
+    color: #303b4c;
+    font-size: 14px;
+  }
+}
+
+.executionGrid {
+  // 执行主体与执行方式占左半区，数字员工和执行时间从 50% 位置开始展示。
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+
+  :global(.@{antPrefix}-input-number) {
+    width: 100%;
+  }
+}
+
+// 执行方式从执行主体配置后另起一行；对应的周期/间隔字段紧随其后并保持同一行布局。
+.executionModeField {
+  grid-column: 1;
+}
+
+@media (max-width: 760px) {
+  .templateGrid,
+  .formGrid,
+  .executionGrid,
+  .sourceMethodRow,
+  .storageMethodRow {
+    grid-template-columns: 1fr;
+  }
+}
