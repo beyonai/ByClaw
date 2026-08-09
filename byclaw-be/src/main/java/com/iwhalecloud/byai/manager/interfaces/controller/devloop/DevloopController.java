@@ -542,13 +542,14 @@ public class DevloopController {
         return applicationService.getTaskChanges(sessionId);
     }
 
-    /** 获取任务单个文件的本地 diff(unified 文本),供前端 modal 逐行渲染变更内容 */
+    /** 获取指定代码仓库中单个文件的本地 diff(unified 文本),供前端 modal 逐行渲染变更内容 */
     @PostMapping("/task/file-diff")
     public ResponseUtil<Map<String, Object>> getTaskFileDiff(@RequestBody Map<String, Object> params) {
         Long sessionId = Long.valueOf(
             params.get("sessionId") != null ? params.get("sessionId").toString() : params.get("taskId").toString());
+        Long repoId = params.get("repoId") != null ? Long.valueOf(params.get("repoId").toString()) : null;
         String filePath = params.get("filePath") != null ? params.get("filePath").toString() : "";
-        return applicationService.getTaskFileDiff(sessionId, filePath);
+        return applicationService.getTaskFileDiff(sessionId, repoId, filePath);
     }
 
     // ========== DWS 钉钉授权 ==========

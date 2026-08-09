@@ -552,6 +552,7 @@ export type DevloopTaskChanges = {
   status: 'ok' | 'no_repo' | 'no_token' | 'branch_not_found' | 'http_error';
   // 变更来源:local=读宿主机工作区 git(含未推送/未提交),remote=GitHub 远程 compare(仅已推送)。
   source?: 'local' | 'remote';
+  repoId?: number;
   repoFullName?: string | null;
   baseBranch?: string | null;
   headBranch?: string | null;
@@ -566,6 +567,7 @@ export type DevloopTaskChanges = {
     deletions: number;
     previousFilename?: string | null;
     blobUrl?: string | null;
+    repoId?: number;
   }[];
 };
 
@@ -580,8 +582,8 @@ export type DevloopTaskFileDiff = {
   message?: string | null;
 };
 
-export const getTaskFileDiff = (sessionId: number, filePath: string) =>
-  POST<DevloopTaskFileDiff>('/byaiService/devloop/task/file-diff', { sessionId, filePath });
+export const getTaskFileDiff = (sessionId: number, filePath: string, repoId?: number) =>
+  POST<DevloopTaskFileDiff>('/byaiService/devloop/task/file-diff', { sessionId, filePath, repoId });
 
 // 任务环节进度：直接读取 self-developed-rules v2 会话状态投影
 export const getTaskPhases = (sessionId: number) =>
