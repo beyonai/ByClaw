@@ -50,6 +50,8 @@ export type TaskTemplateFormValues = {
   /** 选中的本体对象列表；提交给后端时为完整对象数组，表单内 Select 使用 objectCode/objectName 作为多选 value */
   ontology?: Array<string | number | OntologyObjectValue>;
   materialSource?: string | number;
+  /** 素材来源为本体数据时选中的来源本体，与整理后的目标本体分开保存。 */
+  sourceOntology?: Array<string | number | OntologyObjectValue>;
   contentType?: string;
   audience?: string;
   platform?: string;
@@ -123,7 +125,7 @@ const DEFAULT_CONFIG: Record<OperationTaskTemplateType, TaskTemplateFormValues> 
   knowledge: {
     title: '整理采集素材并沉淀知识',
     description: '对素材去重、摘要并提炼文章亮点、写法和可复用结构。',
-    materialSource: '当前会话成果',
+    materialSource: '本体数据',
     executorType: 'agent',
     runMode: 'once',
   },
@@ -220,9 +222,22 @@ const resolveInitialOntologyValues = (
   options: TaskTemplateOption[],
   currentValue: TaskTemplateFormValues['ontology']
 ): Array<string | number> | undefined => {
-  const values = getOntologySelectValues(currentValue);
+  const values = (Array.isArray(currentValue) ? currentValue : [currentValue])
+    .flatMap((item) => (typeof item === 'string' ? item.split(',') : [item]))
+    .map((item) => {
+      if (item && typeof item === 'object') return item.objectCode || item.objectName;
+      return item;
+    })
+    .filter((item): item is string | number => item !== undefined && item !== null && `${item}`.trim() !== '');
   if (!options.length) return undefined;
-  const matchedValues = values.filter((value) => options.some((option) => `${option.value}` === `${value}`));
+  const matchedValues = values
+    .map((value) =>
+      options.find(
+        (option) => `${option.value}` === `${value}`.trim() || `${option.label}` === `${value}`.trim()
+      )
+    )
+    .filter((option): option is TaskTemplateOption => !!option)
+    .map((option) => option.value);
   return matchedValues.length ? matchedValues : [options[0].value];
 };
 
@@ -298,6 +313,9 @@ const buildTemplatePrompt = (
   } else if (template.templateType === 'knowledge') {
     detailLines.push(
       `素材来源：${values.materialSource || '-'}`,
+      ...(values.materialSource === '本体数据'
+        ? [`来源本体：${findOptionLabel(options.ontologies, values.sourceOntology)}`]
+        : []),
       `目标本体：${findOptionLabel(options.ontologies, values.ontology)}`
     );
   } else if (template.templateType === 'content') {
@@ -381,6 +399,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
   const sourceKnowledge = Form.useWatch('sourceKnowledge', form);
   const targetKnowledge = Form.useWatch('targetKnowledge', form);
   const storageMode = Form.useWatch('storageMode', form);
+  const materialSource = Form.useWatch('materialSource', form);
   const executorType = Form.useWatch('executorType', form);
   const runMode = Form.useWatch('runMode', form);
   const periodType = Form.useWatch('periodType', form);
@@ -516,11 +535,25 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
               storageMode: 'ontology' as const,
             }
           : {}),
+        // 知识整理类模板打开时统一默认选中素材来源第一项“本体数据”。
+        ...(resolvedTemplate.templateType === 'knowledge' ? { materialSource: '本体数据' } : {}),
         ...(initialTitle ? { title: initialTitle } : {}),
         ...(initialDescription ? { description: initialDescription } : {}),
         sourceKnowledge: resolveInitialOptionValue(resolvedKnowledgeOptions, templateValues.sourceKnowledge),
         targetKnowledge: resolveInitialOptionValue(resolvedKnowledgeOptions, templateValues.targetKnowledge),
-        ontology: resolveInitialOntologyValues(resolvedOntologyOptions, templateValues.ontology),
+        // 知识整理模板沿用 sourceMode/storageMode 保存来源本体和目标本体名称，打开时转换为 Select 值。
+        sourceOntology: resolveInitialOntologyValues(
+          resolvedOntologyOptions,
+          resolvedTemplate.templateType === 'knowledge'
+            ? templateValues.sourceOntology || (templateValues.sourceMode as TaskTemplateFormValues['ontology'])
+            : templateValues.sourceOntology
+        ),
+        ontology: resolveInitialOntologyValues(
+          resolvedOntologyOptions,
+          resolvedTemplate.templateType === 'knowledge'
+            ? templateValues.ontology || (templateValues.storageMode as TaskTemplateFormValues['ontology'])
+            : templateValues.ontology
+        ),
         account: resolveInitialOptionValue(resolvedAccountOptions, templateValues.account),
         agentId: agentOptions[0]?.value || (agentOptionsOnly ? undefined : '当前数字员工'),
         agentGroupId: agentGroupOptions[0]?.value,
@@ -587,6 +620,18 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
     form.setFieldValue('ontology', [availableOntologyOptions[0].value]);
   }, [availableOntologyOptions, form, selectedTemplate, storageMode]);
 
+  useEffect(() => {
+    if (selectedTemplate?.templateType !== 'knowledge') return;
+    const currentValue = form.getFieldValue('sourceOntology');
+    if (materialSource !== '本体数据') {
+      // 切换为其它素材来源时清理隐藏字段，避免提交与当前选择无关的本体配置。
+      if (currentValue !== undefined) form.setFieldValue('sourceOntology', undefined);
+      return;
+    }
+    if (currentValue !== undefined || !availableOntologyOptions.length) return;
+    form.setFieldValue('sourceOntology', [availableOntologyOptions[0].value]);
+  }, [availableOntologyOptions, form, materialSource, selectedTemplate]);
+
   const applyTemplate = async () => {
     if (!selectedTemplate) return;
     setApplyingTemplate(true);
@@ -595,11 +640,30 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
       // 表单 Select 存的是编码/名称，提交给后端时改为完整本体对象数组。
       const submitValues: TaskTemplateFormValues = {
         ...values,
+        sourceOntology:
+          values.materialSource === '本体数据'
+            ? getOntologySelectValues(values.sourceOntology).map((value) => {
+                const ontologyOption = availableOntologyOptions.find(
+                  (option) => `${option.value}` === `${value}`
+                );
+                return normalizeOntologyObjectValue(ontologyOption, value);
+              })
+            : undefined,
         ontology: getOntologySelectValues(values.ontology).map((value) => {
           const ontologyOption = availableOntologyOptions.find((option) => `${option.value}` === `${value}`);
           return normalizeOntologyObjectValue(ontologyOption, value);
         }),
       };
+      if (selectedTemplate.templateType === 'knowledge') {
+        // 后端知识整理配置继续使用 sourceMode/storageMode，值为本体名称，兼容既有任务执行协议。
+        Object.assign(submitValues, {
+          sourceMode:
+            values.materialSource === '本体数据'
+              ? findOptionLabel(availableOntologyOptions, values.sourceOntology, '').replace(/、/g, ',')
+              : undefined,
+          storageMode: findOptionLabel(availableOntologyOptions, values.ontology, '').replace(/、/g, ','),
+        });
+      }
       const prompt = buildTemplatePrompt(selectedTemplate, values, {
         agents: fallbackAgentOptions,
         groups: availableGroupOptions,
@@ -705,9 +769,27 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
         <div className={styles.formGrid}>
           <Form.Item label="素材来源" name="materialSource">
             <Select
-              options={['当前会话成果', '项目共享文件', '指定知识库目录'].map((value) => ({ label: value, value }))}
+              options={['本体数据', '当前会话成果', '项目共享文件', '指定知识库目录'].map((value) => ({
+                label: value,
+                value,
+              }))}
             />
           </Form.Item>
+          {materialSource === '本体数据' && (
+            <Form.Item
+              label="来源本体"
+              name="sourceOntology"
+              rules={[{ required: true, type: 'array', min: 1, message: '请选择来源本体' }]}
+            >
+              <Select
+                mode="multiple"
+                options={availableOntologyOptions}
+                showSearch
+                optionFilterProp="label"
+                placeholder="可多选来源本体"
+              />
+            </Form.Item>
+          )}
           <Form.Item label="目标本体" name="ontology">
             <Select
               mode="multiple"

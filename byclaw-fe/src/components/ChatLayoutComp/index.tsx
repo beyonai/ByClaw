@@ -211,14 +211,11 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     [intl]
   );
 
-  /** 文件预览打开后只保留预览页签，自动收起右侧资源列表；预览页签本身不会被关闭。 */
+  /** 从资源列表打开任意详情页签后自动收起列表，避免浮层遮挡新打开的内容。 */
   const openResourceDetailFromResourceList = useCallback(
     (panel: React.ReactNode, options: DetailPanelOptions = {}) => {
       openResourceDetail(panel, options);
-      const tabKey = `${options.tabKey || ''}`;
-      if (tabKey.includes('file:')) {
-        setResourceListOpen(false);
-      }
+      setResourceListOpen(false);
     },
     [openResourceDetail]
   );
@@ -239,6 +236,17 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   const toggleResourceList = useCallback(() => {
     setResourceListOpen((open) => !open);
   }, []);
+
+  // 会话标题入口是资源工作区总开关：关闭时同时清理列表和全部预览页签。
+  const toggleResourceWorkspaceFromChatTitle = useCallback(() => {
+    if (resourceListOpen || resourceTabs.length > 0) {
+      setResourceListOpen(false);
+      setResourceTabs([]);
+      setActiveResourceTabKey('');
+      return;
+    }
+    setResourceListOpen(true);
+  }, [resourceListOpen, resourceTabs.length]);
 
   useEffect(() => {
     if (!resourceWorkspaceVisible) {
@@ -496,8 +504,8 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 projectId={sessionProjectId}
                 // 按钮底色只反映右侧资源小面板状态，文件预览单独打开时保持无底色。
                 resourceWorkspaceOpen={resourceListOpen}
-                // 会话标题和文件预览页签共用同一个列表开关，任何入口都不能清空预览 Tab。
-                onToggleResourceWorkspace={toggleResourceList}
+                // 会话标题按钮关闭资源工作区时，需要同时关闭列表和全部多 Tab 预览。
+                onToggleResourceWorkspace={toggleResourceWorkspaceFromChatTitle}
               />
             )}
             {isBottom && (

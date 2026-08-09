@@ -24,29 +24,12 @@ delete from byai.byai_ai_prompt where prompt_code in (
 );
 
 INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
-VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMPT_COLLECT', '运营任务启动提示词-资料采集与整理', '运营资料采集与整理任务启动提示词，占位符 ${projectName} ${title} ${requirementName} ${requirementDescription} ${sourceMode} ${sourceValue} ${storageMode} ${storageTarget} ${runMode} ${executionTime}', 'OPLOOP_TASK_START_PROMPT_COLLECT', '请处理以下资料采集与整理任务：
-
-## 关联需求
-- 需求名称：${requirementName}
-- 需求描述：${requirementDescription}
-
-## 运营任务信息
-- 运营项目：${projectName}
-- 任务名称：${title}
-
-## 资料采集配置
-- 采集方式：${sourceMode}
-- 采集来源：${sourceValue}
-- 入库方式：${storageMode}
-- 入库位置：${storageTarget}
-- 执行方式：${runMode}
-- 执行时间：${executionTime}
-
-## 执行要求
-1. 严格依据关联需求和资料采集配置开展工作。
-2. 将采集结果归档到配置的入库位置，并同步关键进度、产出结果和异常情况。
-3. 涉及登录或对外访问时，先核对对应连接器和平台配置。
-', null, 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
+VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMPT_COLLECT', '运营任务启动提示词-资料采集与整理',
+'运营资料采集与整理任务启动提示词，占位符 ${projectName} ${title} ${description} ${requirementName} ${requirementDescription} ${sourceMode} ${sourceValue} ${storageMode} ${storageTarget} ${runMode} ${executionTime}',
+'OPLOOP_TASK_START_PROMPT_COLLECT',
+E'请处理以下资料采集与整理任务：\n\n关联需求\n\n需求名称：${requirementName}\n需求描述：${requirementDescription}\n\n运营任务信息\n\n运营项目：${projectName}\n任务名称：${title}\n任务描述：${description}\n\n资料采集配置\n\n采集方式：${sourceMode}\n采集来源：${sourceValue}\n入库方式：${storageMode}\n入库位置：${storageTarget}\n执行方式：${runMode}\n执行时间：${executionTime}\n\n执行要求\n\n必须使用knowledge-collection技能进行采集。\n严格依据关联需求、任务描述和资料采集配置开展工作。\n将采集结果归档到配置的入库位置，并同步关键进度、产出结果和异常情况。\n涉及登录或对外访问时，先核对对应连接器和平台配置。',
+E'Process the following material collection and organization task:\n\nRelated requirement\n\nRequirement name: ${requirementName}\nRequirement description: ${requirementDescription}\n\nOperation task information\n\nOperation project: ${projectName}\nTask name: ${title}\nTask description: ${description}\n\nMaterial collection configuration\n\nCollection method: ${sourceMode}\nCollection source: ${sourceValue}\nStorage method: ${storageMode}\nStorage destination: ${storageTarget}\nExecution method: ${runMode}\nExecution time: ${executionTime}\n\nExecution requirements\n\nExecute strictly according to the related requirement, task description, and material collection configuration.\nArchive the collected results to the configured destination and report key progress, results, and exceptions.\nBefore logging in or accessing external services, verify the related connector and platform configuration.',
+10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
 
 INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
 VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMPT_PUBLISH', '运营任务启动提示词-内容创作', '运营内容创作与发布任务启动提示词，占位符 ${projectName} ${title} ${requirementName} ${requirementDescription} ${contentType} ${publishChannel} ${publishAccount} ${publishTopic} ${publishSchedule}', 'OPLOOP_TASK_START_PROMPT_PUBLISH', '请处理以下内容创作与发布任务：
@@ -228,10 +211,17 @@ WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -200
 
 INSERT INTO byai.byai_task_template
     (template_id, template_type, template_name, description, icon, config, sort_no, is_builtin, status_cd, delete_flag)
-SELECT -2002, 'knowledge', '知识整理任务模板', '按知识库目录或本体结构完成清洗与整理', '知',
-       '{"title":"整理采集素材并沉淀知识","description":"对素材去重、摘要并提炼文章亮点、写法和可复用结构。","materialSource":"当前会话成果","executorType":"agent","runMode":"once"}',
+SELECT -2002, 'knowledge', '知识整理任务模板', '使用《知识整理》技能，针对采集到的 会议纪要，进行对象实例提取。', '知',
+       '{"title":"整理采集素材并沉淀知识","description":"对素材去重、摘要并提炼文章亮点、写法和可复用结构。","materialSource":"本体数据","sourceMode":"会议纪要","storageMode":"产品,方法论,操作说明,特性,场景,能力,事件","executorType":"agent","runMode":"once"}',
        20, 'Y', '00A', '0'
 WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2002);
+
+INSERT INTO byai.byai_task_template
+    (template_id, template_type, template_name, description, icon, config, sort_no, is_builtin, status_cd, delete_flag)
+SELECT -2006, 'knowledge', '对象发现任务模板', '根据采集的文档和本体对象定义进行对象实例发现', '象',
+       '{"title":"对象发现任务模板","description":"根据采集的文档，根据本体对象定义，进行对象实例发现。","sourceMode":"会议纪要","storageMode":"产品,方法论,操作说明,特性,场景,能力,事件","executorType":"agent","runMode":"once"}',
+       25, 'Y', '00A', '0'
+WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2006);
 
 INSERT INTO byai.byai_task_template
     (template_id, template_type, template_name, description, icon, config, sort_no, is_builtin, status_cd, delete_flag)
@@ -263,11 +253,3 @@ VALUES (nextval('byai.seq_any_table'), 'DEVLOOP_PROMPT', 'DEVLOOP_REQUIREMENT_PR
 E'你是研发拆单助手。输入是一条需求和该项目下的代码仓库清单，请把需求拆成可并行或串行执行的仓库级子任务。\n\n规则：\n1. 只能使用输入中给出的 repoId，不得编造；与需求无关的仓库不要产出任务。\n2. 一个仓库最多一条任务。需求只涉及一个仓库时就只产出一条。\n3. dependsOn 用同批任务的 rowId 表示上游依赖，必须无环；能并行的不要硬串成链。\n4. title 用中文描述该仓库要做的具体改动，不要照抄需求标题。\n5. branch 全批任务保持一致：输入里给了「工作区分支」时必须原样用它，没给时才用 feat/<英文小写短横线短语>。\n6. reason 一句话说明为什么这个仓库要改、为什么有/没有这个依赖。\n\n只输出 JSON，结构为：\n{"tasks":[{"rowId":"row-0","repoId":123,"title":"...","branch":"feat/xxx","dependsOn":[],"reason":"..."}]}',
 E'You split a requirement into repository-level subtasks. Input is one requirement plus the repository list of its project.\n\nRules:\n1. Use only the repoId values given in the input; never invent one. Skip repositories the requirement does not touch.\n2. At most one task per repository. Emit a single task when only one repository is involved.\n3. dependsOn references rowId values from the same batch and must stay acyclic; do not force a chain when tasks can run in parallel.\n4. title describes the concrete change in that repository; do not copy the requirement title.\n5. branch is the same for every task. When the input provides a workspace branch, use it verbatim; only fall back to feat/<lowercase-dashed-phrase> when none is given.\n6. reason is one sentence on why this repository changes and why the dependency exists or not.\n\nOutput JSON only:\n{"tasks":[{"rowId":"row-0","repoId":123,"title":"...","branch":"feat/xxx","dependsOn":[],"reason":"..."}]}',
 'system', now(), now(), null);
-
--- 资料采集模板使用新版任务表单字段；任务执行时由后端按采集/入库方式替换对应占位符。
-UPDATE byai.byai_ai_prompt
-SET prompt_desc = '运营资料采集与整理任务启动提示词，占位符 ${projectName} ${title} ${description} ${requirementName} ${requirementDescription} ${sourceMode} ${sourceValue} ${storageMode} ${storageTarget} ${runMode} ${executionTime}',
-    prompt_zh_template = E'请处理以下资料采集与整理任务：\n\n关联需求\n\n需求名称：${requirementName}\n需求描述：${requirementDescription}\n\n运营任务信息\n\n运营项目：${projectName}\n任务名称：${title}\n任务描述：${description}\n\n资料采集配置\n\n采集方式：${sourceMode}\n采集来源：${sourceValue}\n入库方式：${storageMode}\n入库位置：${storageTarget}\n执行方式：${runMode}\n执行时间：${executionTime}\n\n执行要求\n\n必须使用knowledge-collection技能进行采集。\n严格依据关联需求、任务描述和资料采集配置开展工作。\n将采集结果归档到配置的入库位置，并同步关键进度、产出结果和异常情况。\n涉及登录或对外访问时，先核对对应连接器和平台配置。',
-    prompt_en_template = E'Process the following material collection and organization task:\n\nRelated requirement\n\nRequirement name: ${requirementName}\nRequirement description: ${requirementDescription}\n\nOperation task information\n\nOperation project: ${projectName}\nTask name: ${title}\nTask description: ${description}\n\nMaterial collection configuration\n\nCollection method: ${sourceMode}\nCollection source: ${sourceValue}\nStorage method: ${storageMode}\nStorage destination: ${storageTarget}\nExecution method: ${runMode}\nExecution time: ${executionTime}\n\nExecution requirements\n\nExecute strictly according to the related requirement, task description, and material collection configuration.\nArchive the collected results to the configured destination and report key progress, results, and exceptions.\nBefore logging in or accessing external services, verify the related connector and platform configuration.',
-    update_time = CURRENT_TIMESTAMP
-WHERE prompt_code = 'OPLOOP_TASK_START_PROMPT_COLLECT';
