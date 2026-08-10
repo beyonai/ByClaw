@@ -42,13 +42,12 @@ public class DwsDingtalkAuthorizationProvider
     }
 
     @Override
-    public AuthorizationStatusResult verify(String userId, ConnectorInfo connector) {
-        Long numericUserId = parseUserId(userId);
-        if (numericUserId == null) {
+    public AuthorizationStatusResult verify(Long userId, ConnectorInfo connector) {
+        if (userId == null || userId <= 0) {
             return failedStatus("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential");
         }
         try {
-            DwsCredentialStatus credentialStatus = dwsAuthService.getCredentialStatus(numericUserId);
+            DwsCredentialStatus credentialStatus = dwsAuthService.getCredentialStatus(userId);
             if (credentialStatus.outcome() == DwsCredentialOutcome.TIMEOUT) {
                 return failedStatus(
                     "CONNECTOR_VERIFICATION_TIMEOUT",

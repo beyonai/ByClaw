@@ -14,7 +14,7 @@ const SECRET_TOKEN = "fixture-secret-beyond-token";
 function runHelper(args, env) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [SCRIPT, ...args], {
-      env: { ...process.env, ...env },
+      env: { ...process.env, BEYOND_TOKEN: SECRET_TOKEN, ...env },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -105,7 +105,7 @@ test("rejects unexpected arguments before making a request", async () => {
   assert.equal(result.stderr, "");
 });
 
-test("loads auth privately and sends only the fixed connector request", async (t) => {
+test("does not fall back to session files when the global token is absent", async (t) => {
   const fixture = createFixture();
   const backend = await startServer((_request, response) => {
     response.setHeader("Content-Type", "application/json");
@@ -121,35 +121,27 @@ test("loads auth privately and sends only the fixed connector request", async (t
     OPENCLAW_STATE_DIR: fixture.stateDir,
     REDIS_HOST: "",
     BE_SERVER_PORT: String(backend.port),
+    BEYOND_TOKEN: "",
   });
 
-  assert.equal(result.code, 0, result.stderr || result.stdout);
-  assert.deepEqual(JSON.parse(result.stdout), { connected: true });
-  assert.equal(backend.requests.length, 1);
-  assert.equal(backend.requests[0].method, "POST");
-  assert.equal(backend.requests[0].url, "/byaiService/connector/authorization/skill-complete");
-  assert.deepEqual(backend.requests[0].body, { connectorCode: "lark" });
-  assert.equal(backend.requests[0].headers["beyond-token"], SECRET_TOKEN);
+  assert.equal(result.code, 1);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    connected: false,
+    errorCode: "AUTH_CONTEXT_UNAVAILABLE",
+    retryable: false,
+  });
+  assert.equal(backend.requests.length, 0);
   assert.doesNotMatch(result.stdout, new RegExp(SECRET_TOKEN));
   assert.doesNotMatch(result.stderr, new RegExp(SECRET_TOKEN));
 });
 
-test("uses the registered backend instance instead of a caller URL", async (t) => {
+test("uses only the global ByaiService base URL", async (t) => {
   const fixture = createFixture();
   const backend = await startServer((_request, response) => {
     response.setHeader("Content-Type", "application/json");
     response.end(JSON.stringify({ code: 0, data: { connected: true } }));
   });
-  const redis = await startRedisWithInstance({
-    id: "backend-1",
-    protocol: "http",
-    host: "127.0.0.1",
-    port: backend.port,
-    path_prefix: "byaiService",
-    weight: 1,
-  });
   t.after(() => {
-    redis.server.close();
     backend.server.close();
     fs.rmSync(fixture.root, { recursive: true, force: true });
   });
@@ -157,8 +149,8 @@ test("uses the registered backend instance instead of a caller URL", async (t) =
   const result = await runHelper([], {
     HOME: path.join(fixture.root, "home"),
     OPENCLAW_STATE_DIR: fixture.stateDir,
-    REDIS_HOST: "127.0.0.1",
-    REDIS_PORT: String(redis.port),
+    REDIS_HOST: "",
+    BYAI_SERVICE_BASE_URL: `http://127.0.0.1:${backend.port}/byaiService`,
     HOST: "https://attacker.example",
     BE_SERVER_PORT: "1",
   });
@@ -187,6 +179,7 @@ test("shares one retry budget for retryable backend responses", async (t) => {
     HOME: path.join(fixture.root, "home"),
     OPENCLAW_STATE_DIR: fixture.stateDir,
     REDIS_HOST: "",
+    BYAI_SERVICE_BASE_URL: `http://127.0.0.1:${backend.port}/byaiService`,
     BE_SERVER_PORT: String(backend.port),
   });
 
@@ -195,7 +188,7 @@ test("shares one retry budget for retryable backend responses", async (t) => {
   assert.deepEqual(JSON.parse(result.stdout), { connected: true });
 });
 
-test("authenticates and selects the configured Redis database before discovery", async (t) => {
+test("rejects missing global ByaiService base URL even when legacy discovery is available", async (t) => {
   const fixture = createFixture();
   const backend = await startServer((_request, response) => {
     response.setHeader("Content-Type", "application/json");
@@ -220,10 +213,16 @@ test("authenticates and selects the configured Redis database before discovery",
     REDIS_PORT: String(redis.port),
     REDIS_PASSWORD: "redis-secret",
     REDIS_DATABASE: "2",
+    BYAI_SERVICE_BASE_URL: "",
   });
 
-  assert.equal(result.code, 0, result.stdout);
-  assert.deepEqual(redis.commands, ["AUTH", "SELECT", "HGETALL"]);
+  assert.equal(result.code, 1, result.stdout);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    connected: false,
+    errorCode: "BACKEND_SERVICE_UNAVAILABLE",
+    retryable: true,
+  });
+  assert.deepEqual(redis.commands, []);
   assert.doesNotMatch(`${result.stdout}${result.stderr}`, /redis-secret/);
 });
 
@@ -245,6 +244,7 @@ test("does not retry a non-retryable backend failure", async (t) => {
     HOME: path.join(fixture.root, "home"),
     OPENCLAW_STATE_DIR: fixture.stateDir,
     REDIS_HOST: "",
+    BYAI_SERVICE_BASE_URL: `http://127.0.0.1:${backend.port}/byaiService`,
     BE_SERVER_PORT: String(backend.port),
   });
 
@@ -272,6 +272,7 @@ test("does not retry an unauthorized non-JSON response", async (t) => {
     HOME: path.join(fixture.root, "home"),
     OPENCLAW_STATE_DIR: fixture.stateDir,
     REDIS_HOST: "",
+    BYAI_SERVICE_BASE_URL: `http://127.0.0.1:${backend.port}/byaiService`,
     BE_SERVER_PORT: String(backend.port),
   });
 
@@ -307,6 +308,7 @@ test("retries HTTP 429 once within the shared budget", async (t) => {
     HOME: path.join(fixture.root, "home"),
     OPENCLAW_STATE_DIR: fixture.stateDir,
     REDIS_HOST: "",
+    BYAI_SERVICE_BASE_URL: `http://127.0.0.1:${backend.port}/byaiService`,
     BE_SERVER_PORT: String(backend.port),
   });
 
@@ -337,6 +339,7 @@ test("maps an unrecognized backend error code to the stable public fallback", as
     HOME: path.join(fixture.root, "home"),
     OPENCLAW_STATE_DIR: fixture.stateDir,
     REDIS_HOST: "",
+    BYAI_SERVICE_BASE_URL: `http://127.0.0.1:${backend.port}/byaiService`,
     BE_SERVER_PORT: String(backend.port),
   });
 
@@ -367,6 +370,7 @@ test("retries a malformed success response once and emits no response detail", a
     HOME: path.join(fixture.root, "home"),
     OPENCLAW_STATE_DIR: fixture.stateDir,
     REDIS_HOST: "",
+    BYAI_SERVICE_BASE_URL: `http://127.0.0.1:${backend.port}/byaiService`,
     BE_SERVER_PORT: String(backend.port),
   });
 
@@ -395,6 +399,7 @@ test("uses the sandbox Beyond-Token environment when session files are unavailab
     HOME: home,
     OPENCLAW_STATE_DIR: path.join(home, "state"),
     REDIS_HOST: "",
+    BYAI_SERVICE_BASE_URL: `http://127.0.0.1:${backend.port}/byaiService`,
     BE_SERVER_PORT: String(backend.port),
     BEYOND_TOKEN: "sandbox-environment-token",
   });

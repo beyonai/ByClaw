@@ -7,5 +7,5 @@ public interface ConnectorCredentialVerifier {
 
     String providerCode();
 
-    AuthorizationStatusResult verify(String userId, ConnectorInfo connector);
+    AuthorizationStatusResult verify(Long userId, ConnectorInfo connector);
 }

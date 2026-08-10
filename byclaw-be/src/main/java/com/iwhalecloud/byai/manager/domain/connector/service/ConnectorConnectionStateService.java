@@ -65,9 +65,7 @@ public class ConnectorConnectionStateService {
         } else {
             auth = insertOrUpdateWinner(auth, userId, connector, statusResult, authorizationId, now);
         }
-        if (manifestChanged) {
-            privateParamService.refreshPrivateParamCacheAfterCommit(user.userId(), user.userCode());
-        }
+        scheduleCacheRefresh(manifestChanged, user);
         return auth;
     }
 
@@ -88,9 +86,7 @@ public class ConnectorConnectionStateService {
         auth.setEnableFlag(enabled ? "Y" : "N");
         auth.setUpdateTime(new Date());
         requireSingleAffectedRow(connectorAuthMapper.updateById(auth));
-        if (manifestChanged) {
-            privateParamService.refreshPrivateParamCacheAfterCommit(user.userId(), user.userCode());
-        }
+        scheduleCacheRefresh(manifestChanged, user);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -110,9 +106,7 @@ public class ConnectorConnectionStateService {
         auth.setStatusCd("00X");
         auth.setUpdateTime(new Date());
         requireSingleAffectedRow(connectorAuthMapper.updateById(auth));
-        if (manifestChanged) {
-            privateParamService.refreshPrivateParamCacheAfterCommit(user.userId(), user.userCode());
-        }
+        scheduleCacheRefresh(manifestChanged, user);
     }
 
     public ConnectorAuth findEnabledActiveAuthorization(String userId, Long connectorId) {
@@ -235,6 +229,13 @@ public class ConnectorConnectionStateService {
         if (affectedRows != 1) {
             throw new IllegalStateException("Connector state write did not affect exactly one row");
         }
+    }
+
+    private void scheduleCacheRefresh(boolean manifestChanged, UserIdentity user) {
+        if (!manifestChanged) {
+            return;
+        }
+        privateParamService.refreshPrivateParamCacheAfterCommit(user.userId(), user.userCode());
     }
 
     private record UserIdentity(Long userId, String userCode) {

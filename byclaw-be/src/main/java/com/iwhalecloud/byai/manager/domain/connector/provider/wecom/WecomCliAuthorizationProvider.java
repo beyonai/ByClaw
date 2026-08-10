@@ -197,9 +197,8 @@ public class WecomCliAuthorizationProvider
     }
 
     @Override
-    public AuthorizationStatusResult verify(String userId, ConnectorInfo connector) {
-        Long numericUserId = parseUserId(userId);
-        if (numericUserId == null) {
+    public AuthorizationStatusResult verify(Long userId, ConnectorInfo connector) {
+        if (userId == null || userId <= 0) {
             return credentialVerificationFailure();
         }
         ProviderState providerState;
@@ -210,7 +209,7 @@ public class WecomCliAuthorizationProvider
         }
         ConnectorCliWorkspace workspace;
         try {
-            workspace = workspaceService.resolve(numericUserId, PROVIDER_CODE);
+            workspace = workspaceService.resolve(userId, PROVIDER_CODE);
         } catch (RuntimeException e) {
             return failedStatus(
                 "CREDENTIAL_WORKSPACE_UNAVAILABLE",
