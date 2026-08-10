@@ -335,7 +335,7 @@ const getTaskStatusMeta = (status?: string) => {
   if (['完成', '已完成', 'done', 'completed'].includes(normalizedStatus)) {
     return { labelId: 'task.status.completed', className: 'Done' };
   }
-  if (['进行中', 'doing', 'running', 'in_progress'].includes(normalizedStatus)) {
+  if (['进行中', '运行中', 'doing', 'running', 'in_progress'].includes(normalizedStatus)) {
     return { labelId: 'task.status.inProgress', className: 'Running' };
   }
   if (['暂停', 'paused', 'pause'].includes(normalizedStatus)) {
@@ -346,6 +346,12 @@ const getTaskStatusMeta = (status?: string) => {
   }
   if (['失败', 'failed', 'error'].includes(normalizedStatus)) {
     return { labelId: 'task.status.failed', className: 'Failed' };
+  }
+  if (['部分失败', '混合状态', 'mixed'].includes(normalizedStatus) || normalizedStatus.includes('混合')) {
+    return { labelId: 'task.status.mixed', className: 'Mixed' };
+  }
+  if (['待处理', '待开始', 'pending'].includes(normalizedStatus)) {
+    return { labelId: 'task.status.pending', className: 'Pending' };
   }
   return { labelId: 'task.status.pending', className: 'Pending' };
 };
@@ -1001,11 +1007,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
         .filter((resource) => resource.resourceType === 'ontology')
         .map((resource) => {
           const resourceDetail = resource as typeof resource & Record<string, any>;
-          const code =
-            resourceDetail.objectCode ||
-            resourceDetail.resourceCode ||
-            resourceDetail.code ||
-            '';
+          const code = resourceDetail.objectCode || resourceDetail.resourceCode || resourceDetail.code || '';
           const name = resource.resourceName || resourceDetail.objectName || resourceDetail.name || code;
           const description =
             resourceDetail.objectDesc || resourceDetail.resourceDesc || resourceDetail.description || '';
@@ -2293,9 +2295,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
     ]
   );
 
-  // 运营任务执行入口只打开任务模板页面，不进入研发项目的多仓库拆分流程。
+  // 运营任务执行入口只打开任务模板页面；待处理与部分失败均可再次进入执行。
   const handleOpenOperationTaskExecute = useCallback((task: any) => {
-    if (!task || task.sessionId || task.status !== 'todo') return;
+    if (!task) return;
+    const status = `${task.status || ''}`.trim().toLowerCase();
+    const canExecute =
+      status === 'mixed' || (!task.sessionId && ['todo', 'pending', 'not_started', 'waiting'].includes(status));
+    if (!canExecute) return;
     setDetailTask(null);
     setOperationTaskTemplateTarget(task);
   }, []);
@@ -5529,7 +5535,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 {intl.formatMessage({ id: 'projectSpace.operation.task.detail.viewSession' })}
               </Button>
             )
-          ) : detailTask.status === 'todo' ? (
+          ) : detailTask.status === 'todo' || detailTask.status === 'mixed' ? (
             <Button
               type="primary"
               icon={<PlayCircleOutlined />}
@@ -5716,20 +5722,24 @@ const ProjectDetailPanel: React.FC<Props> = ({
                     rawTaskStatusLabel.includes('运行') ||
                     rawTaskStatusLabel.includes('完成') ||
                     rawTaskStatusLabel.includes('失败') ||
-                    rawTaskStatusLabel.includes('暂停')
+                    rawTaskStatusLabel.includes('暂停') ||
+                    rawTaskStatusLabel.includes('混合') ||
+                    rawTaskStatusLabel.includes('待处理')
                       ? task.statusLabel
                       : task.operationState || task.status || task.taskStatus || task.currentStatus;
                   const taskStatusMeta = getTaskStatusMeta(taskStatusValue);
                   // 下拉菜单展开时维持状态标签的让位，防止悬浮菜单遮挡右侧内容。
                   const isTaskActionOpen = openTaskActionId === `${task.taskId}`;
                   const isTaskSelected = selectedTaskId === `${task.taskId}`;
-                  // 统一按最终展示状态判断，兼容历史数据同时返回 operationState=doing、status=todo 的情况。
+                  // 待处理可首次执行；部分失败（mixed）允许再次进入执行流程。
                   const normalizedOperationTaskStatus = `${taskStatusValue || ''}`.trim().toLowerCase();
                   const canExecuteOperationTask =
                     isOperationProject &&
-                    ['todo', 'pending', 'not_started', 'waiting'].includes(normalizedOperationTaskStatus) &&
-                    taskStatusMeta.className === 'Pending' &&
-                    !task.sessionId;
+                    (taskStatusMeta.className === 'Mixed' ||
+                      normalizedOperationTaskStatus === 'mixed' ||
+                      (['todo', 'pending', 'not_started', 'waiting'].includes(normalizedOperationTaskStatus) &&
+                        taskStatusMeta.className === 'Pending' &&
+                        !task.sessionId));
                   const operationTaskActionItems: MenuProps['items'] = [
                     { key: 'view-detail', label: t('task.viewDetail') },
                   ];

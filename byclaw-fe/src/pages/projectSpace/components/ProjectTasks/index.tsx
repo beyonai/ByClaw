@@ -49,11 +49,12 @@ const PAGE_SIZE = 30;
 
 const normalizeTaskStatus = (task: DevloopTaskItem) => {
   const label = `${task.statusLabel || ''}`.trim().toLowerCase();
+  if (label.includes('混合') || label.includes('部分失败')) return 'mixed';
   if (label.includes('进行中') || label.includes('运行')) return 'in_progress';
   if (label.includes('已完成') || label.includes('完成')) return 'completed';
   if (label.includes('失败')) return 'failed';
   if (label.includes('暂停')) return 'paused';
-  if (label.includes('待开始') || label.includes('待启动')) return 'pending';
+  if (label.includes('待开始') || label.includes('待启动') || label.includes('待处理')) return 'pending';
   // 运营任务列表同时存在 status、operationState、taskStatus、currentStatus 多套历史字段，
   // 统一回退读取，确保待开始任务能够显示启动按钮。
   return `${
@@ -85,6 +86,7 @@ const getTaskStatusLabel = (task: DevloopTaskItem, intl: ReturnType<typeof useIn
     done: 'projectSpace.detail.task.status.completed',
     completed: 'projectSpace.detail.task.status.completed',
     failed: 'projectSpace.detail.task.status.failed',
+    mixed: 'projectSpace.detail.task.status.mixed',
   };
   const messageId = statusMessageId[status];
   return messageId ? intl.formatMessage({ id: messageId }) : task.statusLabel || '';
@@ -95,7 +97,7 @@ const getTaskStatusColor = (task: DevloopTaskItem) => {
   if (['done', 'completed', '完成', '已完成'].includes(status)) return 'success';
   if (['doing', 'running', 'in_progress', '进行中'].includes(status)) return 'processing';
   if (['failed', '失败'].includes(status)) return 'error';
-  if (['paused', '暂停'].includes(status)) return 'warning';
+  if (['paused', 'mixed', '暂停'].includes(status)) return 'warning';
   // 待开始使用橙黄色，进行中使用蓝色，避免两个状态都呈现为蓝色难以区分。
   return 'warning';
 };
@@ -103,18 +105,9 @@ const getTaskStatusColor = (task: DevloopTaskItem) => {
 const getTaskStatusOrder = (task: DevloopTaskItem) => {
   const status = normalizeTaskStatus(task);
   if (
-    [
-      'done',
-      'completed',
-      'finished',
-      'success',
-      'failed',
-      'error',
-      'cancelled',
-      '完成',
-      '已完成',
-      '失败',
-    ].includes(status)
+    ['done', 'completed', 'finished', 'success', 'failed', 'error', 'cancelled', '完成', '已完成', '失败'].includes(
+      status
+    )
   ) {
     return 2;
   }
@@ -125,6 +118,7 @@ const getTaskStatusOrder = (task: DevloopTaskItem) => {
       'in_progress',
       'paused',
       'waiting_confirmation',
+      'mixed',
       'processing',
       'started',
       '进行中',
@@ -187,7 +181,7 @@ const ProjectTasks: React.FC<Props> = ({
     task.canDelete === true ||
     (currentUserId !== undefined && task.createBy !== undefined && `${currentUserId}` === `${task.createBy}`) ||
     // 兼容历史任务未记录创建人的情况，和后端的项目创建人回退规则保持一致。
-    (task.createBy == null &&
+    ((task.createBy === null || task.createBy === undefined) &&
       currentUserId !== undefined &&
       project.createBy !== undefined &&
       `${currentUserId}` === `${project.createBy}`);
@@ -201,14 +195,9 @@ const ProjectTasks: React.FC<Props> = ({
     .filter((resource) => resource.resourceType === 'ontology')
     .map((resource) => {
       const resourceDetail = resource as typeof resource & Record<string, any>;
-      const code =
-        resourceDetail.objectCode ||
-        resourceDetail.resourceCode ||
-        resourceDetail.code ||
-        '';
+      const code = resourceDetail.objectCode || resourceDetail.resourceCode || resourceDetail.code || '';
       const name = resource.resourceName || resourceDetail.objectName || resourceDetail.name || code;
-      const description =
-        resourceDetail.objectDesc || resourceDetail.resourceDesc || resourceDetail.description || '';
+      const description = resourceDetail.objectDesc || resourceDetail.resourceDesc || resourceDetail.description || '';
       return {
         value: resource.resourceId,
         label: name,
@@ -332,8 +321,16 @@ const ProjectTasks: React.FC<Props> = ({
     return (
       project.projectType === 'operation' &&
       !task.sessionId &&
-      ['pending', 'todo', 'not_started', 'waiting', '待开始', '待启动'].includes(status)
+      ['pending', 'todo', 'not_started', 'waiting', '待开始', '待启动', '待处理'].includes(status)
     );
+  };
+
+  // 待处理首次执行，部分失败可再次执行；后者可能已有 sessionId。
+  const isOperationExecutableTask = (task: DevloopTaskItem) => {
+    const status = normalizeTaskStatus(task);
+    if (project.projectType !== 'operation') return false;
+    if (['mixed', '部分失败'].includes(status)) return true;
+    return isOperationPendingTask(task);
   };
 
   const openTaskSession = (task: DevloopTaskItem) => {
@@ -359,9 +356,7 @@ const ProjectTasks: React.FC<Props> = ({
     setEditingTitle(task.title || '');
     setEditingDescription(task.description || task.taskDescription || '');
     setEditingAssignee(task.assigneeId);
-    setEditingDueTime(
-      task.dueTime && dayjs(task.dueTime).isValid() ? dayjs(task.dueTime) : null
-    );
+    setEditingDueTime(task.dueTime && dayjs(task.dueTime).isValid() ? dayjs(task.dueTime) : null);
     if (!project.projectId) return;
     void listProjectMembers(Number(project.projectId))
       .then((response) => {
@@ -450,12 +445,12 @@ const ProjectTasks: React.FC<Props> = ({
                     {getTaskStatusLabel(task, intl) && (
                       <Tag
                         color={getTaskStatusColor(task)}
-                        className={isOperationPendingTask(task) ? styles.taskPendingStatusTag : undefined}
+                        className={isOperationExecutableTask(task) ? styles.taskPendingStatusTag : undefined}
                       >
                         {getTaskStatusLabel(task, intl)}
                       </Tag>
                     )}
-                    {isOperationPendingTask(task) && (
+                    {isOperationExecutableTask(task) && (
                       <Button
                         type="text"
                         size="small"
@@ -635,11 +630,7 @@ const ProjectTasks: React.FC<Props> = ({
           </div>
           <div>
             <Typography.Text>预期时间</Typography.Text>
-            <DatePicker
-              style={{ width: '100%', marginTop: 8 }}
-              value={editingDueTime}
-              onChange={setEditingDueTime}
-            />
+            <DatePicker style={{ width: '100%', marginTop: 8 }} value={editingDueTime} onChange={setEditingDueTime} />
           </div>
         </div>
       </Modal>

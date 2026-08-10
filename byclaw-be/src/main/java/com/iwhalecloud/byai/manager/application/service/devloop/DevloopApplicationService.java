@@ -4009,8 +4009,11 @@ public class DevloopApplicationService {
             result.put("sessionId", task.getSessionId());
             return ResponseUtil.successResponse(result);
         }
-        if (!OperationTaskSessionService.STATUS_PENDING.equals(taskExt.get(OperationTaskSessionService.EXT_STATUS))) {
-            // 仅待执行任务允许创建会话，避免已完成或已取消任务被重复启动。
+        String taskStatus = taskExt.get(OperationTaskSessionService.EXT_STATUS);
+        // 待处理可首次启动；部分失败（mixed）允许重新执行。
+        if (!OperationTaskSessionService.STATUS_PENDING.equals(taskStatus)
+            && !OperationTaskSessionService.STATUS_MIXED.equals(taskStatus)) {
+            // 仅待执行或部分失败任务允许创建会话，避免已完成任务被重复启动。
             return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.execute.forbidden"));
         }
         // 模板执行页允许覆盖待执行任务的模板配置；先落扩展参数，再由统一提示词构造逻辑读取，保证聊天首条消息使用用户确认后的内容。
@@ -5066,6 +5069,7 @@ public class DevloopApplicationService {
             case "doing", "running", "in_progress" -> OperationTaskSessionService.STATUS_RUNNING;
             case "done", "completed" -> OperationTaskSessionService.STATUS_DONE;
             case "failed", "error" -> OperationTaskSessionService.STATUS_FAILED;
+            case "mixed" -> OperationTaskSessionService.STATUS_MIXED;
             default -> null;
         };
     }
@@ -5406,6 +5410,7 @@ public class DevloopApplicationService {
             case OperationTaskSessionService.STATUS_RUNNING -> "doing";
             case OperationTaskSessionService.STATUS_DONE -> "done";
             case OperationTaskSessionService.STATUS_FAILED -> "failed";
+            case OperationTaskSessionService.STATUS_MIXED -> "mixed";
             default -> "todo";
         };
         Long assigneeId = parseOperationLong(ext.get(OperationTaskSessionService.EXT_ASSIGNEE_ID));
