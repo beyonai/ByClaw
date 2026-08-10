@@ -10,6 +10,7 @@ import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
 import FileResourcePanel from './FileResourcePanel';
 import ObjectFilesPanel from './ObjectFilesPanel';
+import CodesTab from '@/layout/sider/components/ProjectSpaceList/CodesTab';
 import ReposTab from '@/layout/sider/components/ProjectSpaceList/ReposTab';
 import { useChatResourceProject } from './useChatResourceProject';
 import styles from './index.module.less';
@@ -93,7 +94,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
       }
       if (secondaryKey === 'code' && showCode) {
         return (
-          <ReposTab
+          <CodesTab
             projectId={Number(project?.projectId || projectId)}
             resourceId={resourceId}
             sessionId={sessionId}
@@ -137,13 +138,11 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
     if (secondaryKey === 'ontology') {
       return <ObjectFilesPanel projectId={project?.projectId || projectId} onOpenDetail={onOpenDetail} />;
     }
-    if (secondaryKey === 'code' && showCode) {
+    if (primaryKey === 'project' && secondaryKey === 'code' && showCode) {
       return (
         <ReposTab
           projectId={Number(project?.projectId || projectId)}
           resourceId={resourceId}
-          sessionId={sessionId}
-          codeChangesEnabled
           onOpenDetail={onOpenDetail}
         />
       );
