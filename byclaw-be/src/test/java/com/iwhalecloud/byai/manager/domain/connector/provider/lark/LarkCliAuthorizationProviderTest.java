@@ -441,6 +441,27 @@ class LarkCliAuthorizationProviderTest {
     }
 
     @Test
+    void verifiedStatusReadsCredentialExpiryFromNestedUserIdentity() {
+        when(cliRunner.run(eq(STATUS), eq(ENVIRONMENT), isNull(), any(Duration.class)))
+            .thenReturn(new CliResult(0, """
+                {"appId":"cli_aaea8dc5d5f81bcf","brand":"feishu","defaultAs":"auto",
+                "identities":{"bot":{"status":"ready","available":true,"verified":true},
+                "user":{"status":"ready","available":true,"verified":true,
+                "userName":"Lark User","tokenStatus":"valid",
+                "expiresAt":"2030-08-10T23:58:47+08:00",
+                "refreshExpiresAt":"2030-08-17T21:58:47+08:00"}},
+                "identity":"user","verified":true}
+                """));
+
+        AuthorizationStatusResult result = provider.queryStatus(sessionContext(AUTHORIZATION_ID, validState()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.accountName()).isEqualTo("Lark User");
+        assertThat(result.credentialExpiresAt())
+            .isEqualTo(Date.from(Instant.parse("2030-08-10T15:58:47Z")));
+    }
+
+    @Test
     void explicitAuthenticatedStatusConnectsTolerantly() {
         when(cliRunner.run(eq(STATUS), eq(ENVIRONMENT), isNull(), any(Duration.class)))
             .thenReturn(new CliResult(0, "{\"loggedIn\":true,\"user_id\":\"u-42\",\"user_name\":\"User\"}"));
