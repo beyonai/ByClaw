@@ -77,12 +77,27 @@ const mockStartConnectorAuthorization = startConnectorAuthorization as jest.Mock
 const mockUpdateConnectorEnable = updateConnectorEnable as jest.MockedFunction<typeof updateConnectorEnable>;
 
 type TerminalErrorClassifier = (authorization: { status: string; errorMessage?: string }) => string | undefined;
+type CredentialExpirationFormatter = (
+  value: string,
+  now: string
+) => { formattedTime: string; expired: boolean } | undefined;
+type CredentialOffsetNormalizer = (value: string) => string;
 
 const getTerminalError = (
   ConnectorControlModule as typeof ConnectorControlModule & {
     getConnectorAuthorizationTerminalError?: TerminalErrorClassifier;
   }
 ).getConnectorAuthorizationTerminalError;
+const getCredentialExpirationDisplay = (
+  ConnectorControlModule as typeof ConnectorControlModule & {
+    getCredentialExpirationDisplay?: CredentialExpirationFormatter;
+  }
+).getCredentialExpirationDisplay;
+const normalizeCredentialExpirationOffset = (
+  ConnectorControlModule as typeof ConnectorControlModule & {
+    normalizeCredentialExpirationOffset?: CredentialOffsetNormalizer;
+  }
+).normalizeCredentialExpirationOffset;
 
 describe('ConnectorControl authorization states', () => {
   beforeEach(() => {
@@ -135,6 +150,176 @@ describe('ConnectorControl authorization states', () => {
     });
   });
 
+  it('keeps the latest connector list when an older request resolves last', async () => {
+    const expiredConnectorPage = {
+      list: [
+        {
+          connectorCode: 'wecom',
+          connectorId: 9,
+          connectorName: '企业微信',
+          connectorType: 'SYSTEM' as const,
+          description: '企业知识库',
+          enableFlag: null,
+          credentialExpiresAt: '2000-01-02T03:04:05+08:00',
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    };
+    const refreshedConnectorPage = {
+      ...expiredConnectorPage,
+      list: [
+        {
+          ...expiredConnectorPage.list[0],
+          credentialExpiresAt: '2999-01-02T03:04:05+08:00',
+        },
+      ],
+    };
+    let resolveOlderRequest!: (page: typeof expiredConnectorPage) => void;
+    let resolveLatestRequest!: (page: typeof refreshedConnectorPage) => void;
+    mockQueryConnectorList
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOlderRequest = resolve;
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveLatestRequest = resolve;
+          })
+      );
+
+    const { unmount } = render(<ConnectorControl canAuthorize value={[]} onChange={jest.fn()} />);
+
+    try {
+      await waitFor(() => expect(mockQueryConnectorList).toHaveBeenCalledTimes(1));
+      fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+      await waitFor(() => expect(mockQueryConnectorList).toHaveBeenCalledTimes(2));
+
+      await act(async () => {
+        resolveLatestRequest(refreshedConnectorPage);
+        await Promise.resolve();
+      });
+      expect(await screen.findByText('授权有效期至 2999-01-02 03:04:05')).toBeInTheDocument();
+
+      await act(async () => {
+        resolveOlderRequest(expiredConnectorPage);
+        await Promise.resolve();
+      });
+      expect(screen.getByText('授权有效期至 2999-01-02 03:04:05')).toBeInTheDocument();
+      expect(screen.queryByText('授权已于 2000-01-02 03:04:05 过期')).not.toBeInTheDocument();
+    } finally {
+      unmount();
+    }
+  });
+
+  it('shows offset credential expiration without overriding the backend enable flag', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorCode: 'dingtalk',
+          connectorId: 1,
+          connectorName: '钉钉',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: 'Y',
+          credentialExpiresAt: '2999-01-02T03:04:05+08:00',
+        },
+        {
+          connectorCode: 'lark',
+          connectorId: 2,
+          connectorName: '飞书',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: 'Y',
+          credentialExpiresAt: '2000-01-02T03:04:05+08:00',
+        },
+        {
+          connectorCode: 'wecom',
+          connectorId: 3,
+          connectorName: '企业微信',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: null,
+          credentialExpiresAt: 'not-a-date',
+        },
+        {
+          connectorCode: 'custom',
+          connectorId: 4,
+          connectorName: '自定义连接器',
+          connectorType: 'CUSTOM',
+          description: '',
+          enableFlag: null,
+          credentialExpiresAt: null,
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 4,
+      totalPages: 1,
+    });
+
+    const { unmount } = render(<ConnectorControl canAuthorize value={[]} onChange={jest.fn()} />);
+
+    try {
+      fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+
+      expect(await screen.findByText('授权有效期至 2999-01-02 03:04:05')).toBeInTheDocument();
+      expect(screen.getByText('授权已于 2000-01-02 03:04:05 过期')).toBeInTheDocument();
+      expect(screen.getAllByText(/授权(?:有效期至|已于)/)).toHaveLength(2);
+      expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
+      expect(screen.getByRole('switch', { name: '停用飞书' })).toBeChecked();
+    } finally {
+      unmount();
+    }
+  });
+
+  it('parses legacy credential expiration in Asia/Shanghai independently of browser timezone', () => {
+    expect(getCredentialExpirationDisplay?.('2026-08-10 08:30:00', '2026-08-10T00:30:01Z')).toEqual({
+      formattedTime: '2026-08-10 08:30:00',
+      expired: true,
+    });
+    expect(getCredentialExpirationDisplay?.('2026-08-10T08:30:00', '2026-08-10T00:29:59Z')).toEqual({
+      formattedTime: '2026-08-10 08:30:00',
+      expired: false,
+    });
+  });
+
+  it.each([
+    ['2026-08-10T00:30:00Z', '2026-08-10T00:29:59Z', false],
+    ['2026-08-10T08:30:00+0800', '2026-08-10T00:30:01Z', true],
+    ['2026-08-09T19:30:00-05:00', '2026-08-10T00:30:01Z', true],
+  ])('compares %s as an absolute instant', (value, now, expired) => {
+    expect(getCredentialExpirationDisplay?.(value, now)).toEqual({
+      formattedTime: '2026-08-10 08:30:00',
+      expired,
+    });
+  });
+
+  it.each([
+    ['2026-08-10T08:30:00+0800', '2026-08-10T08:30:00+08:00'],
+    ['2026-08-10T08:30:00-0500', '2026-08-10T08:30:00-05:00'],
+    ['2026-08-10T00:30:00Z', '2026-08-10T00:30:00Z'],
+    ['2026-08-10T08:30:00+08:00', '2026-08-10T08:30:00+08:00'],
+  ])('normalizes the credential expiration offset in %s', (value, expected) => {
+    expect(normalizeCredentialExpirationOffset?.(value)).toBe(expected);
+  });
+
+  it('rejects an impossible calendar date even when the ISO value has an offset', () => {
+    expect(getCredentialExpirationDisplay?.('2026-02-30T08:30:00+08:00', '2026-01-01T00:00:00Z')).toBeUndefined();
+  });
+
+  it.each(['2026-08-10T08:30:00+14:30', '2026-08-10T08:30:00+08:60'])(
+    'rejects the illegal UTC offset in %s',
+    (value) => {
+      expect(getCredentialExpirationDisplay?.(value, '2026-01-01T00:00:00Z')).toBeUndefined();
+    }
+  );
+
   it('renders selected connectors as an avatar group and opens settings on click', async () => {
     mockQueryConnectorList.mockResolvedValue({
       list: [
@@ -164,6 +349,7 @@ describe('ConnectorControl authorization states', () => {
 
     await waitFor(() => {
       expect(mockQueryConnectorList).toHaveBeenCalledTimes(1);
+      expect(container.querySelector('.ant-avatar-group')).not.toBeNull();
     });
 
     expect(container.querySelector('.ant-avatar-group')).not.toBeNull();
@@ -255,7 +441,7 @@ describe('ConnectorControl authorization states', () => {
     });
 
     render(<ConnectorControl canAuthorize />);
-    fireEvent.click(await screen.findByRole('button', { name: '查看已连接连接器' }));
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
 
     expect(await screen.findByRole('button', { name: '更多钉钉操作' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '更多飞书操作' })).toBeInTheDocument();
@@ -282,10 +468,39 @@ describe('ConnectorControl authorization states', () => {
     });
 
     render(<ConnectorControl canAuthorize />);
-    fireEvent.click(await screen.findByRole('button', { name: '查看已连接连接器' }));
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
     fireEvent.click(await screen.findByRole('button', { name: '更多钉钉操作' }));
     fireEvent.click(await screen.findByText('重新授权'));
 
+    expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
+  });
+
+  it('shows a direct connect action without an account menu for an expired binding', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 1,
+          connectorCode: 'dingtalk',
+          connectorName: '钉钉',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: null,
+          credentialExpiresAt: '2000-01-02T03:04:05+08:00',
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+
+    expect(await screen.findByText('授权已于 2000-01-02 03:04:05 过期')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '更多钉钉操作' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '连接' }));
     expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
   });
 
@@ -317,6 +532,40 @@ describe('ConnectorControl authorization states', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认取消授权' }));
 
     await waitFor(() => expect(mockRevokeConnectorAuthorization).toHaveBeenCalledWith(1));
+  });
+
+  it('clears stale expiration immediately when revocation succeeds and the list refresh fails', async () => {
+    const connectedConnectorPage = {
+      list: [
+        {
+          connectorId: 1,
+          connectorCode: 'dingtalk',
+          connectorName: '钉钉',
+          connectorType: 'SYSTEM' as const,
+          description: '',
+          enableFlag: 'Y' as const,
+          credentialExpiresAt: '2999-01-02T03:04:05+08:00',
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    };
+    mockQueryConnectorList
+      .mockResolvedValueOnce(connectedConnectorPage)
+      .mockResolvedValueOnce(connectedConnectorPage)
+      .mockRejectedValue(new Error('refresh failed'));
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    expect(await screen.findByText('授权有效期至 2999-01-02 03:04:05')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '更多钉钉操作' }));
+    fireEvent.click(await screen.findByText('取消授权'));
+    fireEvent.click(await screen.findByRole('button', { name: '确认取消授权' }));
+
+    await waitFor(() => expect(mockRevokeConnectorAuthorization).toHaveBeenCalledWith(1));
+    expect(screen.queryByText('授权有效期至 2999-01-02 03:04:05')).not.toBeInTheDocument();
   });
 
   it('uses the backend error message when authorization is cancelled', () => {
@@ -507,6 +756,121 @@ describe('ConnectorControl authorization states', () => {
     expect(mockMessageSuccess).toHaveBeenCalledWith('企业微信 已连接');
   });
 
+  it('refreshes authoritative connector metadata after authorization succeeds', async () => {
+    const expiredConnectorPage = {
+      list: [
+        {
+          connectorCode: 'wecom',
+          connectorId: 9,
+          connectorName: '企业微信',
+          connectorType: 'SYSTEM' as const,
+          description: '企业知识库',
+          enableFlag: null,
+          credentialExpiresAt: '2000-01-02T03:04:05+08:00',
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    };
+    const refreshedConnectorPage = {
+      ...expiredConnectorPage,
+      list: [
+        {
+          ...expiredConnectorPage.list[0],
+          enableFlag: 'Y' as const,
+          credentialExpiresAt: '2999-01-02T03:04:05+08:00',
+        },
+      ],
+    };
+    mockQueryConnectorList
+      .mockResolvedValueOnce(expiredConnectorPage)
+      .mockResolvedValueOnce(expiredConnectorPage)
+      .mockResolvedValue(refreshedConnectorPage);
+    mockStartConnectorAuthorization.mockResolvedValue({
+      authorizationId: 'authorization-9',
+      connectorId: 9,
+      status: 'connected',
+      expiresAt: '2000-01-01T00:00:00Z',
+    });
+
+    const { unmount } = render(<ConnectorControl canAuthorize value={[]} onChange={jest.fn()} />);
+
+    try {
+      fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+      expect(await screen.findByText('授权已于 2000-01-02 03:04:05 过期')).toBeInTheDocument();
+      fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+      const callsBeforeAuthorization = mockQueryConnectorList.mock.calls.length;
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '立即前往授权' }));
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(mockQueryConnectorList).toHaveBeenCalledTimes(callsBeforeAuthorization + 1);
+      });
+      expect(screen.queryByText('授权已于 2000-01-02 03:04:05 过期')).not.toBeInTheDocument();
+      expect(screen.getByText('授权有效期至 2999-01-02 03:04:05')).toBeInTheDocument();
+      expect(screen.getByRole('switch', { name: '停用企业微信' })).toBeChecked();
+    } finally {
+      unmount();
+    }
+  });
+
+  it('keeps the connector enabled and clears stale expiration when the post-authorization refresh fails', async () => {
+    const expiredConnectorPage = {
+      list: [
+        {
+          connectorCode: 'wecom',
+          connectorId: 9,
+          connectorName: '企业微信',
+          connectorType: 'SYSTEM' as const,
+          description: '企业知识库',
+          enableFlag: null,
+          credentialExpiresAt: '2000-01-02T03:04:05+08:00',
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    };
+    mockQueryConnectorList
+      .mockResolvedValueOnce(expiredConnectorPage)
+      .mockResolvedValueOnce(expiredConnectorPage)
+      .mockRejectedValue(new Error('refresh failed'));
+    mockStartConnectorAuthorization.mockResolvedValue({
+      authorizationId: 'authorization-9',
+      connectorId: 9,
+      status: 'connected',
+    });
+
+    const { unmount } = render(<ConnectorControl canAuthorize value={[]} onChange={jest.fn()} />);
+
+    try {
+      fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+      expect(await screen.findByText('授权已于 2000-01-02 03:04:05 过期')).toBeInTheDocument();
+      fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+      const callsBeforeAuthorization = mockQueryConnectorList.mock.calls.length;
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '立即前往授权' }));
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(mockQueryConnectorList).toHaveBeenCalledTimes(callsBeforeAuthorization + 1);
+        expect(mockMessageWarning).toHaveBeenCalledWith('连接器已授权，但有效期刷新失败，请稍后重试');
+      });
+      expect(screen.getByRole('switch', { name: '停用企业微信' })).toBeChecked();
+      expect(screen.queryByText('授权已于 2000-01-02 03:04:05 过期')).not.toBeInTheDocument();
+    } finally {
+      unmount();
+    }
+  });
+
   it.each([
     ['failed', '授权未完成，请重新发起连接'],
     ['expired', '授权任务已失效，请重新发起连接'],
@@ -602,6 +966,22 @@ describe('ConnectorControl authorization states', () => {
     fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
     await screen.findByText('企业微信');
     fireEvent.click(screen.getByRole('button', { name: '连接' }));
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorCode: 'wecom',
+          connectorId: 9,
+          connectorName: '企业微信',
+          connectorType: 'SYSTEM',
+          description: '企业知识库',
+          enableFlag: 'Y',
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
     jest.useFakeTimers();
 
     await act(async () => {
@@ -613,6 +993,8 @@ describe('ConnectorControl authorization states', () => {
 
     await act(async () => {
       jest.advanceTimersByTime(3000);
+      await Promise.resolve();
+      await Promise.resolve();
       await Promise.resolve();
     });
 
