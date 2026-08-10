@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.manager.domain.connector.manifest.ConnectorManifestCanonicalizer;
 import com.iwhalecloud.byai.manager.domain.connector.manifest.InvalidConnectorManifestException;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** Parses canonical Runtime Manifest commands into an immutable command catalog. */
@@ -28,6 +29,7 @@ public class ConnectorManifestCommandResolver {
     private final ConnectorManifestCanonicalizer canonicalizer;
     private final Map<String, ManifestCommandCatalog.PlaceholderPolicy> placeholderPolicies;
 
+    @Autowired
     public ConnectorManifestCommandResolver(
             ObjectMapper objectMapper,
             ConnectorManifestCanonicalizer canonicalizer) {
