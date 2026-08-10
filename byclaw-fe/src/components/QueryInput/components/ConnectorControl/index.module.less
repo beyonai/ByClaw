@@ -143,6 +143,19 @@
   }
 }
 
+.credentialExpiration {
+  overflow: hidden;
+  color: #7a8596;
+  font-size: 13px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &.expired {
+    color: #ff4d4f;
+  }
+}
+
 .viewAllButton {
   display: flex;
   align-items: center;
@@ -395,7 +408,7 @@
     grid-template-columns: 1fr;
   }
 
-  .connectorContent span {
+  .connectorContent span:not(.credentialExpiration) {
     white-space: normal;
   }
 }

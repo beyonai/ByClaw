@@ -1,20 +1,30 @@
 package com.iwhalecloud.byai.manager.connector;
 
+import com.alibaba.fastjson.JSON;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.config.JacksonConfig;
+import com.iwhalecloud.byai.manager.dto.connector.ConnectorListDto;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.Date;
 import java.util.Locale;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@DisabledOnOs(OS.WINDOWS)
 class ConnectorSchemaTest {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -34,26 +44,90 @@ class ConnectorSchemaTest {
         """;
 
     @Test
-    void connectorListQueryUsesEnableFlagWithoutExpirationJudgement() throws Exception {
+    void connectorListQueryExposesCredentialExpirationAndDisablesExpiredAuthorizations() throws Exception {
         String sql = read("byclaw-be/src/main/resources/com/iwhalecloud/byai/manager/mapper/connector/ConnectorInfoMapper.xml");
 
         assertThat(sql).contains("row_number() over");
         assertThat(sql).contains("partition by connector_id");
         assertThat(sql).contains("when enable_flag = 'y' then 0 else 1 end");
-        assertThat(sql).contains("then 'y' else 'n' end");
-        assertThat(sql).doesNotContain("expire_time is null or expire_time > current_timestamp");
+        assertThat(sql).contains("<result column=\"credential_expires_at\" property=\"credentialexpiresat\"/>");
+        assertThat(sql).contains("b.expire_time as credential_expires_at");
+        assertThat(sql).contains(
+            "case when b.connector_id is null then null when b.expire_time &lt; current_timestamp then null "
+                + "when b.enable_flag = 'y' then 'y' else 'n' end as enable_flag"
+        );
+        assertThat(connectorAuthorizationSubquery(
+            sql, "left join (", ") b on a.connector_id = b.connector_id"))
+                .contains("select connector_id, enable_flag, expire_time from (select connector_id, enable_flag, expire_time")
+                .doesNotContain("expire_time <", "expire_time >", "expire_time =", "expire_time is");
     }
 
     @Test
-    void enabledConnectorMetadataQueryReturnsOnlyAuthorizedConnectorsWithoutExpirationJudgement() throws Exception {
+    void enabledConnectorMetadataQueryRetainsExpiredAuthorizationsAsDisabled() throws Exception {
         String sql = read("byclaw-be/src/main/java/com/iwhalecloud/byai/manager/mapper/connector/ConnectorAuthMapper.java");
 
         assertThat(sql).contains("inner join (");
         assertThat(sql).doesNotContain("left join (");
-        assertThat(sql).contains("auth.enable_flag = 'y'");
         assertThat(sql).contains("info.skill_code");
         assertThat(sql).doesNotContain("info.runtime_manifest");
-        assertThat(sql).doesNotContain("auth.expire_time");
+        assertThat(sql).contains(
+            "case when auth.expire_time < current_timestamp then false when auth.enable_flag = 'y' then true "
+                + "else false end as enabled"
+        );
+        assertThat(connectorAuthorizationSubquery(
+            sql, "inner join (", ") auth on auth.connector_id = info.connector_id"))
+                .contains(
+                    "select connector_id, enable_flag, expire_time from (",
+                    "select connector_id, enable_flag, expire_time, row_number() over"
+                )
+                .doesNotContain("expire_time <", "expire_time >", "expire_time =", "expire_time is");
+    }
+
+    @Test
+    void connectorListDtoExposesCredentialExpirationAsDate() {
+        Date expiration = new Date(1_000L);
+        ConnectorListDto dto = new ConnectorListDto();
+
+        dto.setCredentialExpiresAt(expiration);
+
+        assertThat(dto.getCredentialExpiresAt()).isEqualTo(expiration);
+    }
+
+    @Test
+    void connectorCredentialExpirationUsesGmt8IsoOffsetWithProjectJacksonConfig() throws Exception {
+        ConnectorListDto dto = connectorListWithFixedExpiration();
+        ObjectMapper objectMapper = new JacksonConfig().objectMapper(new Jackson2ObjectMapperBuilder());
+        objectMapper.setTimeZone(TimeZone.getTimeZone("UTC"));
+
+        JsonNode json = objectMapper.readTree(objectMapper.writeValueAsString(dto));
+
+        assertThat(json.path("credentialExpiresAt").asText()).isEqualTo("2026-08-10T12:30:00+08:00");
+    }
+
+    @Test
+    void connectorCredentialExpirationUsesGmt8IsoOffsetWithFastJson() throws Exception {
+        TimeZone originalTimeZone = JSON.defaultTimeZone;
+        try {
+            JSON.defaultTimeZone = TimeZone.getTimeZone("UTC");
+
+            JsonNode json = OBJECT_MAPPER.readTree(JSON.toJSONString(connectorListWithFixedExpiration()));
+
+            assertThat(json.path("credentialExpiresAt").asText()).isEqualTo("2026-08-10T12:30:00+08:00");
+        }
+        finally {
+            JSON.defaultTimeZone = originalTimeZone;
+        }
+    }
+
+    @Test
+    void connectorCredentialExpirationUsesGmt8IsoOffsetWithFastJson2() throws Exception {
+        com.alibaba.fastjson2.JSONWriter.Context context = com.alibaba.fastjson2.JSONFactory.createWriteContext();
+        context.setZoneId(java.time.ZoneOffset.UTC);
+
+        String serialized = com.alibaba.fastjson2.JSON.toJSONString(connectorListWithFixedExpiration(), context);
+        JsonNode json = OBJECT_MAPPER.readTree(serialized);
+
+        assertThat(json.path("credentialExpiresAt").asText()).isEqualTo("2026-08-10T12:30:00+08:00");
     }
 
     @Test
@@ -294,8 +368,23 @@ class ConnectorSchemaTest {
         return OBJECT_MAPPER.readTree(json);
     }
 
+    private ConnectorListDto connectorListWithFixedExpiration() {
+        ConnectorListDto dto = new ConnectorListDto();
+        dto.setCredentialExpiresAt(Date.from(Instant.parse("2026-08-10T04:30:00Z")));
+        return dto;
+    }
+
     private String read(String relativePath) throws Exception {
         return readPreservingCase(relativePath).toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+    }
+
+    private String connectorAuthorizationSubquery(String sql, String joinPrefix, String joinSuffix) {
+        int start = sql.indexOf(joinPrefix);
+        int end = sql.indexOf(joinSuffix, start);
+
+        assertThat(start).isGreaterThanOrEqualTo(0);
+        assertThat(end).isGreaterThan(start);
+        return sql.substring(start, end);
     }
 
     private String readPreservingCase(String relativePath) throws Exception {
