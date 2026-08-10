@@ -1,5 +1,5 @@
 import { getSkillGroupMemberDiff } from '../editHelpers';
-import { normalizeSkillOptions } from '../skillOptions';
+import { buildSkillGroupCandidateParams, normalizeSkillOptions } from '../skillOptions';
 
 describe('SkillGroupCreateModal edit helpers', () => {
   it('calculates added and removed members from the original selection', () => {
@@ -11,7 +11,7 @@ describe('SkillGroupCreateModal edit helpers', () => {
 });
 
 describe('SkillGroupCreateModal skill options', () => {
-  it('only keeps system built-in skills without requiring resource permissions', () => {
+  it('keeps every candidate returned by the backend regardless of skill type or permissions', () => {
     expect(
       normalizeSkillOptions([
         { resourceId: '1', resourceName: '内置技能', skillType: 'inner', hasUsePermission: false },
@@ -22,6 +22,18 @@ describe('SkillGroupCreateModal skill options', () => {
     ).toEqual([
       { resourceId: '1', resourceName: '内置技能' },
       { resourceId: '2', resourceName: '大写内置技能' },
+      { resourceId: '3', resourceName: '上传技能' },
+      { resourceId: '4', resourceName: '缺少技能类型' },
     ]);
+  });
+
+  it('builds create and edit candidate requests without exposing a creator id', () => {
+    expect(buildSkillGroupCandidateParams()).toEqual({ keyword: '', pageNum: 1, pageSize: 100 });
+    expect(buildSkillGroupCandidateParams('group-1')).toEqual({
+      keyword: '',
+      pageNum: 1,
+      pageSize: 100,
+      groupId: 'group-1',
+    });
   });
 });

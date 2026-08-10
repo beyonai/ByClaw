@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCreateQo;
+import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCandidatePageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupIdQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupInstallQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupMemberChangeQo;
@@ -58,6 +59,8 @@ class SkillGroupContractTest {
         pageQo.setOwnerType("enterprise");
         pageQo.setResourceStatus(1);
         pageQo.setCatalogId(40001L);
+        SkillGroupCandidatePageQo candidatePageQo = new SkillGroupCandidatePageQo();
+        candidatePageQo.setGroupId(20001L);
 
         assertThat(installQo.getDigitalEmployeeId()).isEqualTo(10001L);
         assertThat(installQo.getGroupId()).isEqualTo(20001L);
@@ -69,6 +72,9 @@ class SkillGroupContractTest {
         assertThat(pageQo.getOwnerType()).isEqualTo("enterprise");
         assertThat(pageQo.getResourceStatus()).isEqualTo(1);
         assertThat(pageQo.getCatalogId()).isEqualTo(40001L);
+        assertThat(candidatePageQo.getGroupId()).isEqualTo(20001L);
+        assertThat(candidatePageQo.getPageNum()).isEqualTo(1);
+        assertThat(candidatePageQo.getPageSize()).isEqualTo(10);
     }
 
     @Test
@@ -260,7 +266,25 @@ class SkillGroupContractTest {
                 .contains("member_rel.rel_type_name = 'skill_group_member'")
                 .contains("member_rel.rel_status = 1")
                 .contains("member_resource.resource_biz_type = 'skill'")
+                .contains("member_resource.create_by")
                 .contains("left join ss_res_ext_skill skill_ext");
+    }
+
+    @Test
+    void memberCandidateStatementFiltersOnBackendByTenantOwnerStatusTypeAndOriginalCreator() throws Exception {
+        String candidates = extractBlock(readMapperXml(), "select", "selectmembercandidates");
+
+        assertThat(candidates)
+                .contains("skill_resource.com_acct_id = #{comacctid}")
+                .contains("skill_resource.owner_type = 'enterprise'")
+                .contains("skill_resource.resource_biz_type = 'skill'")
+                .contains("skill_resource.resource_status = 2")
+                .contains("lower(skill_ext.skill_type) = 'inner'")
+                .contains("or skill_resource.create_by = #{creatorid}")
+                .contains("upper(skill_resource.resource_code)")
+                .contains("upper(skill_resource.resource_name)")
+                .contains("skill_resource.update_time desc nulls last")
+                .contains("skill_resource.resource_id desc");
     }
 
     @Test

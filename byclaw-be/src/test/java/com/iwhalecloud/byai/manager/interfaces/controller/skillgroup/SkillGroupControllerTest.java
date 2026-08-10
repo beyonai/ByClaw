@@ -15,12 +15,14 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.application.service.skillgroup.SkillGroupApplicationService;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCreateQo;
+import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCandidatePageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupIdQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupInstallQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupMemberChangeQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupPageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupUpdateQo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupVo;
 import jakarta.validation.Valid;
 import java.lang.reflect.Method;
@@ -41,11 +43,11 @@ class SkillGroupControllerTest {
     private static final Map<String, EndpointContract> ENDPOINTS = endpoints();
 
     @Test
-    void exposesExactlyNineValidatedPostEndpointsWithMutationAuditLogs() throws Exception {
+    void exposesExactlyTenValidatedPostEndpointsWithMutationAuditLogs() throws Exception {
         assertThat(SkillGroupController.class).hasAnnotation(RestController.class);
         assertThat(SkillGroupController.class.getAnnotation(RequestMapping.class).value())
                 .containsExactly("/skillGroup");
-        assertThat(SkillGroupController.class.getDeclaredMethods()).hasSize(9);
+        assertThat(SkillGroupController.class.getDeclaredMethods()).hasSize(10);
 
         for (Map.Entry<String, EndpointContract> entry : ENDPOINTS.entrySet()) {
             Method method = SkillGroupController.class.getDeclaredMethod(
@@ -76,6 +78,7 @@ class SkillGroupControllerTest {
         SkillGroupUpdateQo updateQo = new SkillGroupUpdateQo();
         SkillGroupIdQo idQo = new SkillGroupIdQo();
         SkillGroupPageQo pageQo = new SkillGroupPageQo();
+        SkillGroupCandidatePageQo candidateQo = new SkillGroupCandidatePageQo();
         SkillGroupMemberChangeQo addQo = new SkillGroupMemberChangeQo();
         SkillGroupMemberChangeQo removeQo = new SkillGroupMemberChangeQo();
         SkillGroupInstallQo installQo = new SkillGroupInstallQo();
@@ -85,6 +88,8 @@ class SkillGroupControllerTest {
         SkillGroupVo detail = new SkillGroupVo();
         @SuppressWarnings("unchecked")
         PageInfo<SkillGroupVo> page = mock(PageInfo.class);
+        @SuppressWarnings("unchecked")
+        PageInfo<SkillGroupMemberVo> candidates = mock(PageInfo.class);
         SkillGroupInstallResultVo installed = new SkillGroupInstallResultVo();
         SkillGroupInstallResultVo uninstalled = new SkillGroupInstallResultVo();
         MessageSource originalMessageSource =
@@ -94,6 +99,7 @@ class SkillGroupControllerTest {
         when(service.create(createQo)).thenReturn(created);
         when(service.update(updateQo)).thenReturn(updated);
         when(service.page(pageQo)).thenReturn(page);
+        when(service.pageMemberCandidates(candidateQo)).thenReturn(candidates);
         when(service.detail(idQo)).thenReturn(detail);
         when(service.install(installQo)).thenReturn(installed);
         when(service.uninstall(uninstallQo)).thenReturn(uninstalled);
@@ -106,6 +112,8 @@ class SkillGroupControllerTest {
             assertResponse(controller.update(updateQo), "skillgroup.update.success", updated);
             assertResponse(controller.delete(idQo), "skillgroup.delete.success", null);
             assertResponse(controller.page(pageQo), "skillgroup.page.query.success", page);
+            assertResponse(controller.pageMemberCandidates(candidateQo),
+                    "skillgroup.member.candidates.query.success", candidates);
             assertResponse(controller.detail(idQo), "skillgroup.detail.query.success", detail);
             assertResponse(controller.addMembers(addQo), "skillgroup.member.add.success", null);
             assertResponse(controller.removeMembers(removeQo), "skillgroup.member.remove.success", null);
@@ -120,6 +128,7 @@ class SkillGroupControllerTest {
         verify(service, times(1)).update(updateQo);
         verify(service, times(1)).delete(idQo);
         verify(service, times(1)).page(pageQo);
+        verify(service, times(1)).pageMemberCandidates(candidateQo);
         verify(service, times(1)).detail(idQo);
         verify(service, times(1)).addMembers(addQo);
         verify(service, times(1)).removeMembers(removeQo);
@@ -146,6 +155,8 @@ class SkillGroupControllerTest {
                 "skillgroup.page.query.success"));
         endpoints.put("detail", new EndpointContract("/detail", SkillGroupIdQo.class, false,
                 "skillgroup.detail.query.success"));
+        endpoints.put("pageMemberCandidates", new EndpointContract("/member/candidates",
+                SkillGroupCandidatePageQo.class, false, "skillgroup.member.candidates.query.success"));
         endpoints.put("addMembers", new EndpointContract("/member/add", SkillGroupMemberChangeQo.class, true,
                 "skillgroup.member.add.success"));
         endpoints.put("removeMembers", new EndpointContract("/member/remove", SkillGroupMemberChangeQo.class, true,

@@ -23,6 +23,9 @@ public class SkillGroupMemberVo {
 
     private String ownerType;
 
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long createBy;
+
     private String skillType;
 
     private String sourceType;

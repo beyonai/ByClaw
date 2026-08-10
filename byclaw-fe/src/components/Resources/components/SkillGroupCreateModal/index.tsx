@@ -7,7 +7,7 @@ import {
   addSkillGroupMembers,
   createSkillGroup,
   getSkillGroupDetail,
-  listResourceUseAuth,
+  pageSkillGroupMemberCandidates,
   removeSkillGroupMembers,
   updateSkillGroup,
 } from '@/pages/manager/service/resources';
@@ -17,7 +17,7 @@ import { getFileUrl } from '@/utils/file';
 import styles from './index.module.less';
 import { normalizeSkillGroupCover } from './coverProcessor';
 import { getSkillGroupMemberDiff } from './editHelpers';
-import { normalizeSkillOptions, type SkillOption } from './skillOptions';
+import { buildSkillGroupCandidateParams, normalizeSkillOptions, type SkillOption } from './skillOptions';
 
 interface SkillGroupCreateModalProps {
   visible: boolean;
@@ -101,13 +101,9 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
     }
 
     setSkillsLoading(true);
-    listResourceUseAuth({
-      keyword: '',
-      pageNum: 1,
-      pageSize: 100,
-      ownerType: 'enterprise',
-      resourceBizTypeList: ['SKILL'],
-    })
+    pageSkillGroupMemberCandidates(
+      buildSkillGroupCandidateParams(group?.resourceId ? `${group.resourceId}` : undefined)
+    )
       .then((response: any) => {
         const data = getResponseData(response) || {};
         const rows = data.list || data.rows || [];
@@ -227,7 +223,9 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
       open={visible}
       width={980}
       className={styles.modal}
-      title={intl.formatMessage({ id: isEditMode ? 'resource.skillGroup.editTitle' : 'resource.skillGroup.createTitle' })}
+      title={intl.formatMessage({
+        id: isEditMode ? 'resource.skillGroup.editTitle' : 'resource.skillGroup.createTitle',
+      })}
       okText={intl.formatMessage({ id: 'common.confirm' })}
       cancelText={intl.formatMessage({ id: 'common.cancel' })}
       confirmLoading={saving || processingCover}
