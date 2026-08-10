@@ -424,7 +424,7 @@ public class SkillGroupApplicationService {
 
     private List<Long> normalizeRequiredIds(List<Long> ids) {
         if (ids == null || ids.isEmpty() || ids.stream().anyMatch(Objects::isNull)) {
-            throw new BaseException("成员技能列表不能为空");
+            throw new BaseException("组内技能列表不能为空");
         }
         return new ArrayList<>(new LinkedHashSet<>(ids));
     }
@@ -445,13 +445,13 @@ public class SkillGroupApplicationService {
         for (Long skillId : skillIds) {
             SsResource skill = byId.get(skillId);
             if (skill == null) {
-                throw new BaseException("成员技能不存在：" + skillId);
+                throw new BaseException("组内技能不存在：" + skillId);
             }
             if (!SKILL.equals(skill.getResourceBizType())) {
                 throw new BaseException("成员资源不是普通技能：" + skillId);
             }
             if (!Objects.equals(ResourceStatus.LIST.getNum(), skill.getResourceStatus())) {
-                throw new BaseException("成员技能未上架：" + skillId);
+                throw new BaseException("组内技能未上架：" + skillId);
             }
             SsResExtSkill extSkill = extById.get(skillId);
             if (extSkill == null || !SsResExtSkillService.INNER_SKILL_TYPE.equalsIgnoreCase(extSkill.getSkillType())) {

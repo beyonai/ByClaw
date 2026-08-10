@@ -19,4 +19,8 @@ describe('skill group locale messages', () => {
     expect(enUS[id]).toBeTruthy();
     expect(zhCN[id]).toBeTruthy();
   });
+
+  it('uses the group-specific label for member skills in Chinese', () => {
+    expect(zhCN['resource.memberSkills']).toBe('组内技能');
+  });
 });

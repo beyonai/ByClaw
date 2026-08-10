@@ -508,7 +508,9 @@ class SkillGroupApplicationServiceTest {
         qo.setGroupId(GROUP_ID);
         qo.setSkillIds(null);
 
-        assertThatThrownBy(() -> service.addMembers(qo)).isInstanceOf(BaseException.class);
+        assertThatThrownBy(() -> service.addMembers(qo))
+                .isInstanceOf(BaseException.class)
+                .hasMessage("组内技能列表不能为空");
 
         verifyNoInteractions(resourceService, mapper, relationService, authService, sequenceService);
     }
@@ -583,7 +585,8 @@ class SkillGroupApplicationServiceTest {
         when(authService.hasResourceUsePermission(valid)).thenReturn(true);
 
         assertThatThrownBy(() -> service.addMembers(memberQo(501L, 502L)))
-                .isInstanceOf(BaseException.class);
+                .isInstanceOf(BaseException.class)
+                .hasMessage("组内技能未上架：502");
 
         verify(mapper, never()).selectMemberRelationsIncludingInactive(any(), any());
         verifyNoInteractions(relationService);
@@ -594,7 +597,9 @@ class SkillGroupApplicationServiceTest {
     void addMembersRejectsMissingWrongTypeSelfAndNonInnerSkillBeforeMutation() {
         prepareManagedGroup();
         when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of());
-        assertThatThrownBy(() -> service.addMembers(memberQo(501L))).isInstanceOf(BaseException.class);
+        assertThatThrownBy(() -> service.addMembers(memberQo(501L)))
+                .isInstanceOf(BaseException.class)
+                .hasMessage("组内技能不存在：501");
 
         SsResource wrong = skill(501L);
         wrong.setResourceBizType("TOOL");

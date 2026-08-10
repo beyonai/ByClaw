@@ -101,7 +101,7 @@ export default {
   'resource.skillGroup.memberCount': '{count}个成员',
   'resource.category': '分类',
   'resource.description': '描述',
-  'resource.memberSkills': '成员技能',
+  'resource.memberSkills': '组内技能',
   'resource.installSkillGroup': '安装技能组',
   'resource.installSkillGroupSuccess': '技能组安装成功',
   'resource.installKnowledge': '安装知识',
