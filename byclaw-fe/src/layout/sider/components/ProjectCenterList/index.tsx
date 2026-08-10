@@ -155,17 +155,19 @@ const ProjectCenterList: React.FC = () => {
   );
 
   const handleEnterArchitectChat = useCallback(
-    (projectId: string) => {
+    (projectId: string, initSessionId?: number) => {
       setCreateWizardOpen(false);
       // 与会话模块一致，进入研发架构初始化会话前清理旧会话和员工上下文。
       setAgentId?.('');
       setSessionId?.('');
+      // 带上后端下发初始化时建的会话ID,直达架构助理那条会话;缺省才新开。
       navigate('/chat', {
         state: {
           keepSiderActiveKey: 'sessions',
           from: 'projectSpace',
           projectId,
           projectName: createdProjectNameRef.current,
+          sessionId: initSessionId,
         },
       });
     },

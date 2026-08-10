@@ -13,7 +13,7 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
-import com.iwhalecloud.byai.manager.application.service.project.ProjectInitService;
+import com.iwhalecloud.byai.manager.application.service.devloop.WorkspaceInitService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
@@ -25,8 +25,6 @@ import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileRenameDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileSaveDto;
-import com.iwhalecloud.byai.manager.dto.project.ProjectInitRequest;
-import com.iwhalecloud.byai.manager.dto.project.ProjectInitResponse;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
@@ -49,7 +47,7 @@ public class ProjectController {
     private ProjectApplicationService projectApplicationService;
 
     @Autowired
-    private ProjectInitService projectInitService;
+    private WorkspaceInitService workspaceInitService;
 
     /**
      * 创建项目
@@ -109,30 +107,21 @@ public class ProjectController {
     }
 
     /**
-     * 初始化集成项目
+     * 触发研发项目工作区初始化：下发架构数字员工在沙箱内完成克隆/骨架/技能包/推送。
      *
-     * <p>为指定的 Git 仓库初始化 AI 开发技能包(Trellis 或 Superpower),可选添加子模块。
-     * 支持自动提交和推送到远程仓库。使用 Redis 分布式锁防止并发初始化冲突。
+     * <p>接口只负责下发与置 initializing，真正的完成由 DevloopWorkspaceInitJob 读会话状态文件判定后置 ready。
      *
-     * @param request 初始化请求参数
-     * @return 初始化结果,包含仓库路径、分支、技能包名称、子模块列表、提交哈希等信息
+     * @param params 含 projectId（必填）、buildIndex（是否建索引）、skillPackages（技能包数组）
+     * @return 本次初始化的会话ID，前端可据此跳进架构员工聊天
      */
     @PostMapping("/init/start")
-    public ResponseUtil<ProjectInitResponse> initProject(@Valid @RequestBody ProjectInitRequest request) {
-        ProjectInitResponse response = projectInitService.initProject(request);
-        return ResponseUtil.success(response);
-    }
-
-    /**
-     * 标记研发项目工作区初始化完成：置为 ready，之后方可建需求/启动任务。
-     *
-     * @param params 包含 projectId（必填）
-     */
-    @PostMapping("/init/complete")
-    public ResponseUtil<Void> completeProjectInit(@RequestBody Map<String, Object> params) {
+    public ResponseUtil<Map<String, Object>> initProject(@RequestBody Map<String, Object> params) {
         Long projectId = MapParamUtil.getLongValue(params, "projectId");
-        projectApplicationService.completeProjectInit(projectId);
-        return ResponseUtil.successResponse();
+        boolean buildIndex = Boolean.TRUE.equals(params.get("buildIndex"))
+            || "Y".equalsIgnoreCase(MapParamUtil.getStringValue(params, "buildIndex"));
+        Long sessionId = workspaceInitService.startWorkspaceInit(projectId, buildIndex,
+            params.get("skillPackages"));
+        return ResponseUtil.successResponse(Map.of("sessionId", sessionId));
     }
 
     /**

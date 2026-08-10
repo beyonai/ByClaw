@@ -813,19 +813,20 @@ const ProjectSpaceList: React.FC = () => {
     }
   };
 
-  const handleWizardEnterArchitectChat = (createdProjectId: string) => {
+  const handleWizardEnterArchitectChat = (createdProjectId: string, initSessionId?: number) => {
     const target = mergedProjects.find((project) => `${project.projectId}` === createdProjectId);
     setWizardOpen(false);
     clearDetailPanel?.();
     setAgentId?.('');
     setSessionId?.('');
-    // 复用新建会话入口进入架构员工聊天,首轮对话自动完成项目绑定后进行工作区初始化。
+    // 初始化已由后端下发到架构助理的那条会话,带上 sessionId 直达该会话看进展;缺省才退化为新开会话。
     navigate('/chat', {
       state: {
         keepSiderActiveKey: 'sessions',
         from: 'projectSpace',
         projectId: createdProjectId,
         projectName: target?.projectName,
+        sessionId: initSessionId,
       },
     });
   };

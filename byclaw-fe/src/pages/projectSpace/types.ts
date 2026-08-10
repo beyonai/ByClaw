@@ -68,6 +68,10 @@ export interface ProjectSpace {
   // 研发项目工作区初始化状态:ready 已就绪(默认/普通项目)、pending 待初始化、initializing 初始化中。
   // 存量与普通项目视为 ready;仅 develop 未 ready 前禁止建需求/启动任务。
   initStatus?: ProjectInitStatus;
+  // 初始化会话ID:后端下发初始化时建的那条架构助理会话,用于直达该会话看进展。
+  initSessionId?: number;
+  // 上次初始化失败/超时原因:pending 态回显,避免只显示「未初始化」而看不出为何回退。
+  initFailReason?: string;
   createBy?: string | number;
   createTime?: string;
   sessionCount?: number;

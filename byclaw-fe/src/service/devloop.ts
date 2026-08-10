@@ -214,13 +214,13 @@ export const deleteProject = (projectId: number) => POST<any>('/byaiService/proj
 // 仅 develop 项目在未 ready 前禁止建需求/启动任务。
 export type ProjectInitStatus = 'ready' | 'pending' | 'initializing';
 
-// 触发研发项目初始化:置 initializing 并下发建索引/技能包配置。
-export const startProjectInit = (data: { projectId: number; buildIndex: boolean; skillPackages: string[] }) =>
-  POST<any>('/byaiService/project/init/start', data);
+// initializing 态轮询间隔:后端扫描定时任务本身 30s 一轮,再快也拿不到更新的状态,只是白打接口。
+export const INIT_POLL_INTERVAL_MS = 5000;
 
-// 标记研发项目初始化完成:置 ready,之后方可建需求/启动任务。
-export const completeProjectInit = (projectId: number) =>
-  POST<any>('/byaiService/project/init/complete', { projectId });
+// 下发工作区初始化:后端建一条架构数字员工会话并返回 sessionId,真正的初始化在沙箱里由架构助理执行。
+// 完成与否由后端定时任务读该会话的任务状态文件判定,前端只轮询 initStatus,没有「标记完成」的接口。
+export const startProjectInit = (data: { projectId: number; buildIndex: boolean; skillPackages: string[] }) =>
+  POST<{ sessionId: number }>('/byaiService/project/init/start', data);
 
 // 项目仓库维护：扫描源关联仓库时可即席新增/删除
 export const createProjectRepo = (data: {

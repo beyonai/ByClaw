@@ -3754,7 +3754,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setInitModalOpen(true);
   };
 
-  // 触发工作区初始化:下发建索引/技能包配置,后端置 initializing。成功后关窗并通知父级刷新 initStatus。
+  // 触发工作区初始化:后端建一条架构助理会话并下发提示词,置 initializing。真正干活在沙箱里,
+  // 完成信号由后端定时任务读任务状态文件后落库,所以这里只需关窗并通知父级刷新 initStatus。
   const handleStartInit = async () => {
     if (!projectId) return;
     setInitStarting(true);

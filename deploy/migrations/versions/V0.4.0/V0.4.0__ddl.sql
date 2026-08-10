@@ -480,6 +480,11 @@ ALTER TABLE byai.byai_project ADD COLUMN build_index VARCHAR(4) NOT NULL DEFAULT
 COMMENT ON COLUMN byai.byai_project.build_index IS '初始化是否建索引 Y建立/N不建立(默认)';
 ALTER TABLE byai.byai_project ADD COLUMN index_skills VARCHAR(512);
 COMMENT ON COLUMN byai.byai_project.index_skills IS '建索引所需技能包,逗号分隔(如 trellis,superpowers)';
+-- 初始化交给架构数字员工在沙箱里做:必须记住是哪条会话,轮询才知道该读哪个任务状态文件。
+ALTER TABLE byai.byai_project ADD COLUMN init_session_id BIGINT;
+COMMENT ON COLUMN byai.byai_project.init_session_id IS '工作区初始化会话ID(架构数字员工会话);轮询按此会话读 /by/.acp-runs/sessions/<会话ID>.json 判完成。空表示尚未下发初始化';
+ALTER TABLE byai.byai_project ADD COLUMN init_fail_reason VARCHAR(500);
+COMMENT ON COLUMN byai.byai_project.init_fail_reason IS '上次工作区初始化失败/超时原因;重新下发初始化时清空';
 
 -- 运营任务模板只保存模板目录元数据和默认配置；用户补充的任务参数进入会话提示词，不回写系统模板。
 CREATE TABLE IF NOT EXISTS byai.byai_task_template (

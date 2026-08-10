@@ -332,3 +332,43 @@ E'You split a requirement into repository-level subtasks. Input is one requireme
 -- 用例来源回填:存量环境行加列后为 NULL,按既有行为(用例已在环境机上)显式落 on_env。
 -- 只回填 NULL,保证本段可重跑而不会把新建的 workspace 环境倒回 on_env。
 UPDATE byai.byai_integration_env SET case_source = 'on_env' WHERE case_source IS NULL;
+
+-- 工作区初始化提示词：初始化从后端 Java 流程（ProjectInitService）改为下发架构助理会话，
+-- 由它在沙箱内完成克隆/骨架/技能包/push，并按 self-developed-rules 契约写状态文件，
+-- 后端定时任务读该文件收口。提示词是这条链路的唯一指令来源，故入库为可运营模板。
+-- 幂等：先按 prompt_code 清掉旧行再插入当前模板。
+delete from byai.byai_ai_prompt where prompt_code in ('DEVLOOP_WORKSPACE_INIT_PROMPT');
+
+INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
+VALUES (nextval('byai.seq_any_table'), 'DEVLOOP_PROMPT', 'DEVLOOP_WORKSPACE_INIT_PROMPT', '工作区初始化提示词', '架构数字员工初始化研发项目工作区的提示词，占位符 ${projectName} ${repoFullName} ${repoUrl} ${defaultBranch} ${sessionId} ${skillPackageSection} ${repoCloneHint}', 'DEVLOOP_WORKSPACE_INIT_PROMPT', '请初始化本研发项目的工作区仓库。
+
+## 项目信息
+- 项目：${projectName}
+- 工作区仓库：${repoFullName}
+- 仓库地址：${repoUrl}
+- 默认分支：${defaultBranch}
+- 会话ID：${sessionId}
+
+## 仓库访问说明
+${repoCloneHint}
+
+## 初始化步骤
+1. 把工作区仓库克隆到 /by/.sessions/${sessionId}/{仓库名}/，检出默认分支 ${defaultBranch}。
+   克隆完确认 .git 存在，是个正常的 Git 仓库。
+2. 看一眼仓库现状，判断哪些技能包已经装过。不要覆盖用户已有内容。
+3. ${skillPackageSection}
+4. 有变更就在默认分支 ${defaultBranch} 上提交，提交信息用
+   `chore: init <技能包名，逗号分隔> skill package(s)`；没装任何技能包时用 `chore: update repository`。
+   工作区没有任何变更就跳过提交，不要造空提交。
+5. 有新提交才 push 到远端 ${defaultBranch}；没有新提交不要 push。
+
+## 边界
+- 本次只做上面五步。不要顺手改业务代码、不要生成架构文档或 checklist、不要建仓库里原本没有的目录。
+- push 被拒或没有仓库权限时不要绕路（不要改远端地址、不要 force push），按下面的要求转 paused 报出来。
+
+## 强制要求
+- 启动时必须先调用 skill：self-developed-rules，并按其 JSON 状态契约初始化 trace。
+- 全过程的进展必须打到 /by/.acp-runs/sessions/${sessionId}.json：平台只读这个文件判断初始化是否完成，
+  不写这个文件，项目会一直卡在「初始化中」，用户无法新建需求或启动任务。
+- 五步全部做完（该 push 的已 push）才把任务状态收为 completed；中途遇到不可恢复的问题
+  （无仓库权限、push 被拒、技能包 CLI 缺失等）按契约转 paused 并写清原因，不要静默结束。', null, 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);

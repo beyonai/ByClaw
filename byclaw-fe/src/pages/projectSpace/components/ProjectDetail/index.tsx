@@ -8,7 +8,7 @@ import {
   type OperationSelectOption,
   type OperationTaskFormValues,
 } from '@/layout/sider/components/ProjectSpaceList/operation';
-import { createOperationRequirement, listProjectMembers } from '@/service/devloop';
+import { createOperationRequirement, listProjectMembers, INIT_POLL_INTERVAL_MS } from '@/service/devloop';
 import { PROJECT_DETAIL_SECTIONS, PROJECT_TYPE_MESSAGE_ID, type ProjectDetailSection } from '../../constants';
 import { useProjectSessions } from '../../hooks/useProjectSessions';
 import { useProjectTypeConfig } from '../../hooks/useProjectTypeConfig';
@@ -33,7 +33,8 @@ interface Props {
   loading?: boolean;
   onRefresh?: () => void;
   onOpenSession?: (session: ProjectSession) => void;
-  onNewSession?: () => void;
+  // agentId 可选:工具栏按钮不带,数字员工卡的「去聊天」带上它以预置 @ 该员工。
+  onNewSession?: (agentId?: string) => void;
   onEditProject?: (project: ProjectSpace) => void;
   onDeleteProject?: (project: ProjectSpace) => void;
 }
@@ -184,6 +185,14 @@ const ProjectDetail: React.FC<Props> = ({
     };
   }, [isOperationProject, operationRequirementModalOpen, project?.projectId]);
 
+  // 初始化中轮询详情:架构数字员工在沙箱里干活,完成信号由后端定时任务读任务状态文件后落库。
+  // 不轮询的话横幅要等用户手动刷新才消失,建需求/启动任务也一直是禁用态。到 ready 或回退 pending 即停。
+  useEffect(() => {
+    if (!isDevelopProject || project?.initStatus !== 'initializing' || !onRefresh) return;
+    const timer = setInterval(() => onRefresh(), INIT_POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [isDevelopProject, project?.initStatus, onRefresh]);
+
   useEffect(() => {
     // 运营项目不展示会话页，其他项目隐藏成员或需求页时回退到首个可见分区。
     const currentTabHidden =
@@ -253,7 +262,11 @@ const ProjectDetail: React.FC<Props> = ({
     }
     if (activeSection === 'digitalAgents') {
       return isDevelopProject ? (
-        <ProjectDefaultAgentPanel projectId={Number(project.projectId)} active />
+        <ProjectDefaultAgentPanel
+          projectId={Number(project.projectId)}
+          active
+          onChatWithAgent={onNewSession ? (agentId) => onNewSession(agentId) : undefined}
+        />
       ) : (
         renderSessionList()
       );
@@ -424,8 +437,9 @@ const ProjectDetail: React.FC<Props> = ({
           )}
           {isDevelopProject && <Button onClick={() => setRepositoryManagerOpen(true)}>仓库管理</Button>}
           {activeSection === 'accounts' ? accountToolbar : sectionToolbar}
+          {/* 不直接把 onNewSession 当 onClick:那会把鼠标事件当成 agentId 传下去。 */}
           {onNewSession && (
-            <Button icon={<PlusOutlined />} onClick={onNewSession}>
+            <Button icon={<PlusOutlined />} onClick={() => onNewSession()}>
               {intl.formatMessage({ id: 'projectSpace.newChatName' })}
             </Button>
           )}
@@ -438,10 +452,11 @@ const ProjectDetail: React.FC<Props> = ({
           type="info"
           showIcon
           className={styles.projectInitAlert}
+          // pending 且带失败原因时优先回显原因:否则用户只看到「尚未初始化」,不知道是超时回退还是从未发起。
           message={
             project.initStatus === 'initializing'
-              ? '研发工作区正在初始化，请稍后再创建需求或启动任务。'
-              : '研发工作区尚未初始化，请先在仓库管理中完成初始化。'
+              ? intl.formatMessage({ id: 'projectSpace.detail.initGuard.banner' })
+              : project.initFailReason || intl.formatMessage({ id: 'projectSpace.detail.initGuard.bannerPending' })
           }
         />
       )}
