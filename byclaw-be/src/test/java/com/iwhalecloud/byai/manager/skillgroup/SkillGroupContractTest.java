@@ -190,6 +190,8 @@ class SkillGroupContractTest {
         groupVo.setResourceId(10001L);
         SkillGroupMemberVo memberVo = new SkillGroupMemberVo();
         memberVo.setResourceId(20001L);
+        memberVo.setSystemBuiltIn(true);
+        memberVo.setCreatorOwned(false);
         SkillGroupInstallResultVo resultVo = new SkillGroupInstallResultVo();
         resultVo.getInstalledSkillIds().add(30001L);
         resultVo.getExistingSkillIds().add(30002L);
@@ -205,6 +207,8 @@ class SkillGroupContractTest {
         assertThat(groupJson.path("resourceId").asText()).isEqualTo("10001");
         assertThat(memberJson.path("resourceId").isTextual()).isTrue();
         assertThat(memberJson.path("resourceId").asText()).isEqualTo("20001");
+        assertThat(memberJson.path("systemBuiltIn").asBoolean()).isTrue();
+        assertThat(memberJson.path("creatorOwned").asBoolean()).isFalse();
         assertTextualArrayEntry(resultJson, "installedSkillIds", "30001");
         assertTextualArrayEntry(resultJson, "existingSkillIds", "30002");
         assertTextualArrayEntry(resultJson, "removedSkillIds", "30003");
@@ -281,6 +285,8 @@ class SkillGroupContractTest {
                 .contains("skill_resource.resource_status = 2")
                 .contains("lower(skill_ext.skill_type) = 'inner'")
                 .contains("or skill_resource.create_by = #{creatorid}")
+                .contains("as system_built_in")
+                .contains("as creator_owned")
                 .contains("upper(skill_resource.resource_code)")
                 .contains("upper(skill_resource.resource_name)")
                 .contains("skill_resource.update_time desc nulls last")

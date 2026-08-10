@@ -28,6 +28,10 @@ public class SkillGroupMemberVo {
 
     private String skillType;
 
+    private Boolean systemBuiltIn;
+
+    private Boolean creatorOwned;
+
     private String sourceType;
 
     private String version;

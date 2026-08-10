@@ -27,6 +27,8 @@
         <result column="owner_type" property="ownerType" />
         <result column="create_by" property="createBy" />
         <result column="skill_type" property="skillType" />
+        <result column="system_built_in" property="systemBuiltIn" />
+        <result column="creator_owned" property="creatorOwned" />
         <result column="source_type" property="sourceType" />
         <result column="version" property="version" />
         <result column="skill_url" property="skillUrl" />
@@ -251,6 +253,8 @@
             skill_resource.owner_type,
             skill_resource.create_by,
             skill_ext.skill_type,
+            CASE WHEN LOWER(skill_ext.skill_type) = 'inner' THEN TRUE ELSE FALSE END AS system_built_in,
+            CASE WHEN skill_resource.create_by = #{creatorId} THEN TRUE ELSE FALSE END AS creator_owned,
             skill_ext.source_type,
             skill_ext.version,
             skill_ext.skill_url,

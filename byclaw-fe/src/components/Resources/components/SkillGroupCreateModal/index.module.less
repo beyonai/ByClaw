@@ -21,6 +21,38 @@
   min-width: 0;
 }
 
+.skillTabsHeader {
+  padding: 0 12px;
+  border-bottom: 1px solid #f0f0f0;
+
+  :global {
+    .ant-tabs-nav {
+      margin: 0;
+    }
+
+    .ant-tabs-tab {
+      padding: 12px 0 10px;
+    }
+
+    .ant-tabs-content-holder {
+      display: none;
+    }
+  }
+}
+
+.skillTabCount {
+  margin-left: 6px;
+  color: #8c8c8c;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.skillSelectPopup {
+  :global(.ant-select-item-empty) {
+    padding: 20px 12px;
+  }
+}
+
 .coverUploader {
   :global {
     .ant-upload {

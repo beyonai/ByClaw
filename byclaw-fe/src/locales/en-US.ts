@@ -140,6 +140,8 @@ export default {
   'resource.skillGroup.coverProcessing': 'Generating the 3:4 cover…',
   'resource.skillGroup.coverProcessFailed': 'Cover processing failed. Select the image again.',
   'resource.skillGroup.selectSkills': 'Select at least one skill',
+  'resource.skillGroup.builtInSkills': 'Built-in Skills',
+  'resource.skillGroup.personalSkills': 'Personal Skills',
   'resource.skillGroup.loadSkillsFailed': 'Unable to load skills. Try again later.',
   'resource.skillGroup.coverUploadFailed': 'Cover upload failed. Upload it again and retry.',
   'resource.skillGroup.createFailed': 'Unable to create the skill group. Try again later.',

@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { InboxOutlined } from '@ant-design/icons';
-import { Form, Input, message, Modal, Select, Upload } from 'antd';
+import { Form, Input, message, Modal, Select, Tabs, Upload } from 'antd';
 import type { UploadFile, UploadProps } from 'antd';
 import { useIntl } from '@umijs/max';
 import {
@@ -17,7 +17,15 @@ import { getFileUrl } from '@/utils/file';
 import styles from './index.module.less';
 import { normalizeSkillGroupCover } from './coverProcessor';
 import { getSkillGroupMemberDiff } from './editHelpers';
-import { buildSkillGroupCandidateParams, normalizeSkillOptions, type SkillOption } from './skillOptions';
+import {
+  buildSkillGroupCandidateParams,
+  getSkillOptionLabel,
+  getSkillOptionsForTab,
+  normalizeSkillOptions,
+  partitionSkillOptions,
+  type SkillCandidateTabKey,
+  type SkillOption,
+} from './skillOptions';
 
 interface SkillGroupCreateModalProps {
   visible: boolean;
@@ -46,6 +54,7 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
   const [saving, setSaving] = useState(false);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [skillOptions, setSkillOptions] = useState<SkillOption[]>([]);
+  const [activeSkillTab, setActiveSkillTab] = useState<SkillCandidateTabKey>('builtIn');
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [coverFile, setCoverFile] = useState<File>();
   const [processingCover, setProcessingCover] = useState(false);
@@ -74,6 +83,7 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
       setProcessingCover(false);
       setCoverPreviewUrl('');
       setOriginalSkillIds([]);
+      setActiveSkillTab('builtIn');
       return;
     }
 
@@ -119,6 +129,9 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
       active = false;
     };
   }, [form, group, intl, isEditMode, visible]);
+
+  const { builtInSkills, personalSkills } = useMemo(() => partitionSkillOptions(skillOptions), [skillOptions]);
+  const activeSkillOptions = getSkillOptionsForTab(skillOptions, activeSkillTab);
 
   const uploadProps: UploadProps = {
     accept: 'image/*',
@@ -265,12 +278,46 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
                 mode="multiple"
                 loading={skillsLoading}
                 optionFilterProp="label"
+                popupClassName={styles.skillSelectPopup}
                 placeholder={intl.formatMessage({ id: 'resource.skillGroup.selectSkills' })}
-                options={skillOptions.map((skill) => ({
+                options={activeSkillOptions.map((skill) => ({
                   value: skill.resourceId,
                   label: skill.resourceName,
                   title: skill.resourceDesc,
                 }))}
+                labelRender={({ value, label }) => getSkillOptionLabel(skillOptions, value, label)}
+                popupRender={(menu) => (
+                  <div>
+                    <div className={styles.skillTabsHeader} onMouseDown={(event) => event.preventDefault()}>
+                      <Tabs
+                        animated={false}
+                        activeKey={activeSkillTab}
+                        items={[
+                          {
+                            key: 'builtIn',
+                            label: (
+                              <span>
+                                {intl.formatMessage({ id: 'resource.skillGroup.builtInSkills' })}
+                                <span className={styles.skillTabCount}>{builtInSkills.length}</span>
+                              </span>
+                            ),
+                          },
+                          {
+                            key: 'personal',
+                            label: (
+                              <span>
+                                {intl.formatMessage({ id: 'resource.skillGroup.personalSkills' })}
+                                <span className={styles.skillTabCount}>{personalSkills.length}</span>
+                              </span>
+                            ),
+                          },
+                        ]}
+                        onChange={(key) => setActiveSkillTab(key as SkillCandidateTabKey)}
+                      />
+                    </div>
+                    {menu}
+                  </div>
+                )}
               />
             </Form.Item>
           </div>

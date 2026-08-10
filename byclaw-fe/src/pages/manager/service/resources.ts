@@ -10,6 +10,8 @@ export interface SkillGroupMember {
   ownerType: string;
   createBy: string;
   skillType: string;
+  systemBuiltIn?: boolean;
+  creatorOwned?: boolean;
   sourceType: string;
   version: string;
   skillUrl: string;

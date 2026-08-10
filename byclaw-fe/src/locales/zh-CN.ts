@@ -137,6 +137,8 @@ export default {
   'resource.skillGroup.coverProcessing': '正在生成 3:4 封面…',
   'resource.skillGroup.coverProcessFailed': '封面处理失败，请重新选择图片',
   'resource.skillGroup.selectSkills': '请选择至少一个技能',
+  'resource.skillGroup.builtInSkills': '内置技能',
+  'resource.skillGroup.personalSkills': '个人技能',
   'resource.skillGroup.loadSkillsFailed': '技能列表加载失败，请稍后重试',
   'resource.skillGroup.coverUploadFailed': '封面上传失败，请重新上传后重试',
   'resource.skillGroup.createFailed': '技能组创建失败，请稍后重试',
