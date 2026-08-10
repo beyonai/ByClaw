@@ -13,12 +13,18 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
+import com.iwhalecloud.byai.manager.application.service.devloop.ProjectRepositoryService;
 import com.iwhalecloud.byai.manager.application.service.devloop.WorkspaceInitService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberSaveDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoBranchDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoFileContentDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoFileQueryDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoTreeQueryDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoTreeNodeDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectResourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileDeleteDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
@@ -48,6 +54,9 @@ public class ProjectController {
 
     @Autowired
     private WorkspaceInitService workspaceInitService;
+
+    @Autowired
+    private ProjectRepositoryService projectRepositoryService;
 
     /**
      * 创建项目
@@ -214,6 +223,50 @@ public class ProjectController {
     public ResponseUtil<List<ProjectRepo>> listProjectRepos(@RequestBody Map<String, Object> params) {
         Long projectId = MapParamUtil.getLongValue(params, "projectId");
         return ResponseUtil.successResponse(projectApplicationService.listProjectRepos(projectId));
+    }
+
+    /**
+     * 查询项目仓库目录的直接子节点。
+     *
+     * <p>path 为空查询仓库根目录；展开目录时将返回节点的 path 作为下一次请求的 path，
+     * 因此同一个接口即可按需查询任意层级，避免一次性拉取整个仓库。</p>
+     *
+     * @param query 包含 projectId、repoId；path、ref 可选
+     * @return 当前目录下的文件和目录
+     */
+    @PostMapping("/repo/tree")
+    public ResponseUtil<List<ProjectRepoTreeNodeDTO>> listProjectRepoTree(
+        @RequestBody ProjectRepoTreeQueryDTO query) {
+        return ResponseUtil.successResponse(projectRepositoryService.listTree(query == null ? null : query.getProjectId(),
+            query == null ? null : query.getRepoId(), query == null ? null : query.getPath(),
+            query == null ? null : query.getRef()));
+    }
+
+    /**
+     * 查询仓库的全部远程分支。
+     *
+     * @param params 包含 repoId（必填）
+     * @return 远程分支列表
+     */
+    @PostMapping("/repo/branch/list")
+    public ResponseUtil<List<ProjectRepoBranchDTO>> listProjectRepoBranches(
+        @RequestBody Map<String, Object> params) {
+        Long repoId = MapParamUtil.getLongValue(params, "repoId");
+        return ResponseUtil.successResponse(projectRepositoryService.listBranches(repoId));
+    }
+
+    /**
+     * 查询指定远程分支上的文件内容。
+     *
+     * @param query 包含 repoId、branch、path，path 使用目录接口返回的文件路径
+     * @return 文件内容及元数据
+     */
+    @PostMapping("/repo/file/content")
+    public ResponseUtil<ProjectRepoFileContentDTO> getProjectRepoFileContent(
+        @RequestBody ProjectRepoFileQueryDTO query) {
+        return ResponseUtil.successResponse(projectRepositoryService.getFileContent(
+            query == null ? null : query.getRepoId(), query == null ? null : query.getBranch(),
+            query == null ? null : query.getPath()));
     }
 
     /** 查询项目绑定的知识库、数字员工和本体。 */

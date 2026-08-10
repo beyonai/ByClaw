@@ -705,7 +705,10 @@ public class LarkCliAuthorizationProvider
             String accountName = firstNonBlank(
                 textValue(identity, "name", "displayName", "display_name", "userName", "user_name"),
                 textValue(data, root, "accountName", "account_name", "userName", "user_name", "name"));
-            Date expiresAt = dateValue(data, root);
+            Date expiresAt = dateValue(identity, data);
+            if (expiresAt == null) {
+                expiresAt = dateValue(root, null);
+            }
             return new ConnectedAccount(accountId, accountName, expiresAt);
         } catch (JsonProcessingException | RuntimeException e) {
             return null;

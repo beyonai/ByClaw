@@ -236,6 +236,44 @@ export const createProjectRepo = (data: {
 export const listProjectRepos = (projectId: number) =>
   POST<DevloopProjectRepo[]>('/byaiService/project/repo/list', { projectId });
 
+export type ProjectRepoTreeNode = {
+  name: string;
+  path: string;
+  type: 'directory' | 'file' | string;
+  size?: number;
+  sha?: string;
+  url?: string;
+  hasChildren?: boolean;
+};
+
+export type ProjectRepoBranch = {
+  name: string;
+  sha?: string;
+  protectedBranch?: boolean;
+};
+
+export type ProjectRepoFileContent = {
+  name: string;
+  path: string;
+  branch: string;
+  sha?: string;
+  size?: number;
+  content?: string | null;
+  base64Content?: string | null;
+  binary?: boolean;
+  url?: string;
+  downloadUrl?: string;
+};
+
+export const listProjectRepoTree = (data: { projectId: number; repoId: number; path?: string; ref?: string }) =>
+  POST<ProjectRepoTreeNode[]>('/byaiService/project/repo/tree', data);
+
+export const listProjectRepoBranches = (repoId: number) =>
+  POST<ProjectRepoBranch[]>('/byaiService/project/repo/branch/list', { repoId });
+
+export const getProjectRepoFileContent = (data: { repoId: number; branch: string; path: string }) =>
+  POST<ProjectRepoFileContent>('/byaiService/project/repo/file/content', data);
+
 export const deleteProjectRepo = (repoId: number) => POST<any>('/byaiService/project/repo/delete', { repoId });
 
 // 项目会话列表按项目懒加载，避免项目列表接口一次带出大量会话。

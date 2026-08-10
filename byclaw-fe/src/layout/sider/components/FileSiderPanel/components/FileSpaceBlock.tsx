@@ -43,6 +43,7 @@ interface FileSpaceBlockProps {
   accordionGroups?: boolean;
   groupCollapseResetKey?: Key;
   showActions?: boolean;
+  style?: React.CSSProperties;
   onRefresh?: () => void;
   onSwitchChange?: (value: string) => void;
   onExpand: (keys: Key[]) => void;
@@ -89,6 +90,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   onNodeDoubleClick,
   getActionItems,
   onAction,
+  style,
 }) => {
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(() => new Set());
   const groupKeySignature = (groups || []).map((group) => `${group.key}`).join('\n');
@@ -160,6 +162,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
 
   return (
     <div
+      style={style}
       className={[
         styles.fileSpaceBlock,
         // 成果抽屉需要由文件树承接剩余高度，避免复用组件默认的固定卡片高度。

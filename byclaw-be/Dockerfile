@@ -30,7 +30,7 @@ ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 
 # 安装 Lark/WeCom CLI
 ARG NPM_REGISTRY=https://registry.npmmirror.com
-ARG LARKSUITE_CLI_VERSION=1.0.84
+ARG LARKSUITE_CLI_VERSION=1.0.85
 ARG WECOM_CLI_VERSION=0.1.9
 RUN npm config set registry "${NPM_REGISTRY}" --global \
     && npm config set fund false --global \
