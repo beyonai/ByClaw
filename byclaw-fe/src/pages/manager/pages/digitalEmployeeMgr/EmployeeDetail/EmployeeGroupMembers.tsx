@@ -6,14 +6,29 @@ import { useIntl } from '@umijs/max';
 import { queryEmployeeGroupMemberCandidates } from '@/pages/manager/service/DigitalEmployeeMgr';
 import styles from './EmployeeGroupMembers.module.less';
 
-const normalizeMember = (item, index = 0) => ({
-  ...item,
-  resourceId: `${item?.resourceId ?? item?.id ?? ''}`,
-  name: item?.name || item?.resourceName || '',
-  description: item?.description || item?.resourceDesc || '',
-  teamRole: item?.teamRole || '',
-  sortOrder: index + 1,
-});
+const getMemberRelationInfo = (item) => {
+  const rawInfo = item?.relResourceInfo ?? item?.rel_resource_info;
+  if (!rawInfo) return {};
+  if (typeof rawInfo === 'object') return rawInfo;
+  try {
+    return JSON.parse(rawInfo);
+  } catch (_) {
+    return {};
+  }
+};
+
+const normalizeMember = (item, index = 0) => {
+  const relationInfo = getMemberRelationInfo(item);
+  return {
+    ...item,
+    resourceId: `${item?.resourceId ?? item?.id ?? ''}`,
+    name: item?.name || item?.resourceName || '',
+    description: item?.description || item?.resourceDesc || '',
+    teamRole: item?.teamRole ?? item?.team_role ?? relationInfo?.teamRole ?? relationInfo?.team_role ?? '',
+    sortOrder:
+      Number(item?.sortOrder ?? item?.sort_order ?? relationInfo?.sortOrder ?? relationInfo?.sort_order) || index + 1,
+  };
+};
 
 const unwrapCandidatePage = (response) => {
   if (response?.code !== undefined && Number(response.code) !== 0) {
@@ -201,7 +216,16 @@ export default function EmployeeGroupMembers({ value = [], onChange, disabled = 
             message.error(intl.formatMessage({ id: 'employeeDetail.groupMember.maxExceeded' }));
             return;
           }
-          const next = selectedKeys.map((key) => candidateRegistryRef.current.get(`${key}`)).filter(Boolean);
+          const existingMembers = new Map(members.map((member) => [`${member.resourceId}`, member]));
+          const next = selectedKeys
+            .map((key) => {
+              const candidate = candidateRegistryRef.current.get(`${key}`);
+              const existing = existingMembers.get(`${key}`);
+              if (!candidate) return existing;
+              // 候选列表没有团队角色；重新选择时必须保留已经配置的成员角色。
+              return existing ? { ...candidate, teamRole: existing.teamRole } : candidate;
+            })
+            .filter(Boolean);
           updateMembers(next);
           setOpen(false);
         }}

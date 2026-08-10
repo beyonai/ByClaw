@@ -21,4 +21,11 @@ describe('digital employee group member selector performance', () => {
     expect(source).toContain('const requestController = new AbortController();');
     expect(source).toMatch(/},\s*requestController\s*\)/);
   });
+
+  it('keeps configured team roles when candidates are reloaded', () => {
+    expect(source).toContain(
+      'const existingMembers = new Map(members.map((member) => [`${member.resourceId}`, member]));'
+    );
+    expect(source).toContain('return existing ? { ...candidate, teamRole: existing.teamRole } : candidate;');
+  });
 });

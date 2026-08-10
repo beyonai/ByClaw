@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.when;
 
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.iwhalecloud.byai.common.feign.response.knowledge.ModelDto;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
@@ -15,12 +16,14 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeS
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeGroupMemberDTO;
+import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
 import com.iwhalecloud.byai.manager.dto.orchestrator.OrchestratorRuntimeDTO;
 import com.iwhalecloud.byai.manager.dto.orchestrator.OrchestratorRuntimeRequestDTO;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceVersion;
+import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceVersionMapper;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeePageVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -171,6 +174,31 @@ class DigitalEmployeeGroupApplicationServiceTest {
             assertThat(candidate.getName()).isEqualTo("市场调研专家");
             assertThat(candidate.getWorkerAgentType()).isEqualTo("BYCLAW_EXE");
         });
+    }
+
+    @Test
+    void enrichGroupDetails_returnsSavedMemberTeamRoles() {
+        DigitalEmployeeDetailsDTO details = new DigitalEmployeeDetailsDTO();
+        details.setResourceId(90001L);
+        details.setAgentType("017");
+        details.setResourceRVerid(21L);
+        SsResourceRelDetail relation = new SsResourceRelDetail();
+        relation.setResourceId(90001L);
+        relation.setRelResourceId(20001L);
+        relation.setRelResourceInfo("{\"schemaVersion\":\"byclaw.digital-employee-group-member/v1\","
+            + "\"teamRole\":\"调研分析\",\"sortOrder\":2}");
+
+        when(ssResourceRelDetailService.list(org.mockito.ArgumentMatchers.<Wrapper<SsResourceRelDetail>>any()))
+            .thenReturn(List.of(relation));
+        when(ssResExtDigEmployeeService.findExtDigEmployeeByIds(anyCollection())).thenReturn(List.of(memberResource()));
+
+        service.enrichGroupDetails(details);
+
+        assertThat(details.getEmployeeGroupMembers()).singleElement().satisfies(member -> {
+            assertThat(member.getTeamRole()).isEqualTo("调研分析");
+            assertThat(member.getSortOrder()).isEqualTo(2);
+        });
+        assertThat(details.getConfigVersion()).isEqualTo("21");
     }
 
     private OrchestratorRuntimeRequestDTO request() {
