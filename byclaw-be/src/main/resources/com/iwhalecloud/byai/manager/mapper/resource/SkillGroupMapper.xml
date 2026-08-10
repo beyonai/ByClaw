@@ -253,7 +253,12 @@
             skill_resource.owner_type,
             skill_resource.create_by,
             skill_ext.skill_type,
-            CASE WHEN LOWER(skill_ext.skill_type) = 'inner' THEN TRUE ELSE FALSE END AS system_built_in,
+            CASE
+                WHEN skill_resource.owner_type = 'enterprise'
+                 AND LOWER(skill_ext.skill_type) = 'inner'
+                THEN TRUE
+                ELSE FALSE
+            END AS system_built_in,
             CASE WHEN skill_resource.create_by = #{creatorId} THEN TRUE ELSE FALSE END AS creator_owned,
             skill_ext.source_type,
             skill_ext.version,
@@ -270,12 +275,17 @@
         LEFT JOIN ss_res_ext_skill skill_ext
           ON skill_ext.resource_id = skill_resource.resource_id
         WHERE skill_resource.com_acct_id = #{comAcctId}
-          AND skill_resource.owner_type = 'enterprise'
           AND skill_resource.resource_biz_type = 'SKILL'
           AND skill_resource.resource_status = 2
           AND (
-              LOWER(skill_ext.skill_type) = 'inner'
-              OR skill_resource.create_by = #{creatorId}
+              (
+                  skill_resource.owner_type = 'enterprise'
+                  AND LOWER(skill_ext.skill_type) = 'inner'
+              )
+              OR (
+                  skill_resource.owner_type IN ('enterprise', 'personal')
+                  AND skill_resource.create_by = #{creatorId}
+              )
           )
         <if test="qo.keyword != null and qo.keyword != ''">
             AND (

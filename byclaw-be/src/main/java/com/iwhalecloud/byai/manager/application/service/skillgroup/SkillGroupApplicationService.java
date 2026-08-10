@@ -472,9 +472,6 @@ public class SkillGroupApplicationService {
             if (!Objects.equals(group.getComAcctId(), skill.getComAcctId())) {
                 throw new BaseException("组内技能不属于当前企业：" + skillId);
             }
-            if (!"enterprise".equals(skill.getOwnerType())) {
-                throw new BaseException("技能组成员只能选择企业技能：" + skillId);
-            }
             if (!Objects.equals(ResourceStatus.LIST.getNum(), skill.getResourceStatus())) {
                 throw new BaseException("组内技能未上架：" + skillId);
             }
@@ -483,8 +480,10 @@ public class SkillGroupApplicationService {
                     && SsResExtSkillService.INNER_SKILL_TYPE.equalsIgnoreCase(extSkill.getSkillType());
             boolean creatorOwned = group.getCreateBy() != null
                     && Objects.equals(group.getCreateBy(), skill.getCreateBy());
-            if (!innerSkill && !creatorOwned) {
-                throw new BaseException("技能组成员只能选择系统内置技能或原创建人创建的技能：" + skillId);
+            boolean enterpriseSkill = "enterprise".equals(skill.getOwnerType());
+            boolean supportedCreatorOwner = enterpriseSkill || "personal".equals(skill.getOwnerType());
+            if (!(enterpriseSkill && innerSkill) && !(supportedCreatorOwner && creatorOwned)) {
+                throw new BaseException("技能组成员只能选择系统内置技能或原创建人创建的企业/个人技能：" + skillId);
             }
         }
     }

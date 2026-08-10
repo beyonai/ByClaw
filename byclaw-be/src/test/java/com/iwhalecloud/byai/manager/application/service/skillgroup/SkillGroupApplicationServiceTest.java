@@ -557,22 +557,39 @@ class SkillGroupApplicationServiceTest {
     }
 
     @Test
-    void addMembersRejectsPersonalSkillAndOtherCreatorsNonInnerSkill() {
+    void addMembersRejectsOtherCreatorsPersonalAndEnterpriseNonInnerSkills() {
         prepareManagedGroup();
         SsResource personalSkill = skill(501L);
         personalSkill.setOwnerType("personal");
+        personalSkill.setCreateBy(999L);
         when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(personalSkill));
+        when(extSkillService.findByIds(List.of(501L))).thenReturn(List.of(hubSkill(501L)));
         assertThatThrownBy(() -> service.addMembers(memberQo(501L)))
                 .isInstanceOf(BaseException.class)
-                .hasMessage("技能组成员只能选择企业技能：501");
+                .hasMessage("技能组成员只能选择系统内置技能或原创建人创建的企业/个人技能：501");
 
         SsResource otherCreatorsSkill = skill(501L);
         otherCreatorsSkill.setCreateBy(999L);
         when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(otherCreatorsSkill));
-        when(extSkillService.findByIds(List.of(501L))).thenReturn(List.of(hubSkill(501L)));
         assertThatThrownBy(() -> service.addMembers(memberQo(501L)))
                 .isInstanceOf(BaseException.class)
-                .hasMessage("技能组成员只能选择系统内置技能或原创建人创建的技能：501");
+                .hasMessage("技能组成员只能选择系统内置技能或原创建人创建的企业/个人技能：501");
+
+        verify(mapper, never()).selectMemberRelationsIncludingInactive(any(), any());
+    }
+
+    @Test
+    void addMembersRejectsOtherCreatorsPersonalInnerSkill() {
+        prepareManagedGroup();
+        SsResource personalSkill = skill(501L);
+        personalSkill.setOwnerType("personal");
+        personalSkill.setCreateBy(999L);
+        when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(personalSkill));
+        when(extSkillService.findByIds(List.of(501L))).thenReturn(List.of(innerSkill(501L)));
+
+        assertThatThrownBy(() -> service.addMembers(memberQo(501L)))
+                .isInstanceOf(BaseException.class)
+                .hasMessage("技能组成员只能选择系统内置技能或原创建人创建的企业/个人技能：501");
 
         verify(mapper, never()).selectMemberRelationsIncludingInactive(any(), any());
     }
@@ -587,6 +604,21 @@ class SkillGroupApplicationServiceTest {
         SsResource creatorOwnedSkill = skill(501L);
         creatorOwnedSkill.setCreateBy(999L);
         when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(creatorOwnedSkill));
+        when(extSkillService.findByIds(List.of(501L))).thenReturn(List.of(hubSkill(501L)));
+        when(mapper.selectMemberRelationsIncludingInactive(GROUP_ID, List.of(501L))).thenReturn(List.of());
+        when(sequenceService.nextVal()).thenReturn(11L);
+
+        service.addMembers(memberQo(501L));
+
+        verify(mapper).insertActiveMemberIfAbsent(any(SsResourceRelDetail.class));
+    }
+
+    @Test
+    void addMembersAllowsCreatorOwnedPersonalSkill() {
+        prepareManagedGroup();
+        SsResource personalSkill = skill(501L);
+        personalSkill.setOwnerType("personal");
+        when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(personalSkill));
         when(extSkillService.findByIds(List.of(501L))).thenReturn(List.of(hubSkill(501L)));
         when(mapper.selectMemberRelationsIncludingInactive(GROUP_ID, List.of(501L))).thenReturn(List.of());
         when(sequenceService.nextVal()).thenReturn(11L);
