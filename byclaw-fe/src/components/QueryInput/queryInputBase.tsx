@@ -657,14 +657,15 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
               : { text, resourceList };
             this.props.onInputDraftChange?.(draft);
             this.syncSiderAgent(resourceList);
-            if (!cannotAt && agentId !== currentAgentId) {
+            if (!cannotAt && `${agentId || ''}` !== `${currentAgentId || ''}`) {
               let nextAgentType = agentType;
               if (!currentAgentId && agentId) {
                 // agentId从有到无，意味着，用户在输入框内，主动删除了输入框最左侧的agent数字员工，这个时候，agentType直接转为common
                 nextAgentType = agentTypeMap.common;
               }
               setMyAgentType?.(nextAgentType as IAgentType);
-              setAgentId?.(currentAgentId || '');
+              // 全局会话员工 ID 统一使用字符串，避免 number/string 来回切换触发默认 @ 节点重建。
+              setAgentId?.(currentAgentId ? `${currentAgentId}` : '');
             }
           }}
           onSend={() => {

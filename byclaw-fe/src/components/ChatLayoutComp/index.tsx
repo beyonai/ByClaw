@@ -334,7 +334,8 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
       }
       const agentInfo = getResponseAgentInfo({ agentList, employeesList }, metadata);
       if (agentInfo) {
-        setAgentId?.(agentInfo.agentId);
+        // 会话员工 ID 在不同接口中可能以 number/string 返回，统一成字符串避免输入框默认 @ 节点反复切换。
+        setAgentId?.(`${agentInfo.agentId}`);
         setMyAgentType(agentInfo.agentType);
       }
     },
