@@ -115,8 +115,8 @@ const ProjectDetail: React.FC<Props> = ({
         const order = isDevelopProject
           ? ['requirements', 'tasks', 'resources', 'digitalAgents', 'members', 'integration']
           : isOperationProject
-          ? ['accounts', 'requirements', 'tasks', 'resources', 'members']
-          : ['sessions', 'tasks', 'resources', 'members'];
+            ? ['accounts', 'requirements', 'tasks', 'resources', 'members']
+            : ['sessions', 'tasks', 'resources', 'members'];
         return order.indexOf(left.key) - order.indexOf(right.key);
       }),
     [isDevelopProject, isOperationProject, showMembersSection, showRequirementsSection, showSessionsSection]
@@ -260,19 +260,7 @@ const ProjectDetail: React.FC<Props> = ({
     }
     if (activeSection === 'integration') {
       return isDevelopProject ? (
-        <Integration
-          active
-          projectId={Number(project.projectId)}
-          repos={(project.repos || [])
-            .filter((repo) => repo.repoId !== undefined && repo.repoId !== null)
-            .map((repo) => ({
-              repoId: Number(repo.repoId),
-              repoFullName: repo.repoFullName,
-              repoUrl: repo.repoUrl,
-              defaultBranch: repo.defaultBranch,
-            }))}
-          embedded
-        />
+        <Integration active projectId={Number(project.projectId)} embedded />
       ) : (
         renderSessionList()
       );
@@ -309,24 +297,24 @@ const ProjectDetail: React.FC<Props> = ({
     try {
       const collectConfig = values.collectConfig
         ? {
-            ...values.collectConfig,
-            // 表单态使用 Dayjs，接口保存字符串；生效区间拆成后端校验使用的两个字段。
-            onceTime: values.collectConfig.onceTime?.isValid()
-              ? values.collectConfig.onceTime.format('YYYY-MM-DD HH:mm:ss')
-              : undefined,
-            periodTime: values.collectConfig.periodTime?.isValid()
-              ? values.collectConfig.periodTime.format('HH:mm:ss')
-              : undefined,
-            periodYearDateTime: values.collectConfig.periodYearDateTime?.isValid()
-              ? values.collectConfig.periodYearDateTime.format('YYYY-MM-DD HH:mm:ss')
-              : undefined,
-            effectiveStartDate: values.collectConfig.effectiveDateRange?.[0]?.isValid()
-              ? values.collectConfig.effectiveDateRange[0].format('YYYY-MM-DD')
-              : undefined,
-            effectiveEndDate: values.collectConfig.effectiveDateRange?.[1]?.isValid()
-              ? values.collectConfig.effectiveDateRange[1].format('YYYY-MM-DD')
-              : undefined,
-          }
+          ...values.collectConfig,
+          // 表单态使用 Dayjs，接口保存字符串；生效区间拆成后端校验使用的两个字段。
+          onceTime: values.collectConfig.onceTime?.isValid()
+            ? values.collectConfig.onceTime.format('YYYY-MM-DD HH:mm:ss')
+            : undefined,
+          periodTime: values.collectConfig.periodTime?.isValid()
+            ? values.collectConfig.periodTime.format('HH:mm:ss')
+            : undefined,
+          periodYearDateTime: values.collectConfig.periodYearDateTime?.isValid()
+            ? values.collectConfig.periodYearDateTime.format('YYYY-MM-DD HH:mm:ss')
+            : undefined,
+          effectiveStartDate: values.collectConfig.effectiveDateRange?.[0]?.isValid()
+            ? values.collectConfig.effectiveDateRange[0].format('YYYY-MM-DD')
+            : undefined,
+          effectiveEndDate: values.collectConfig.effectiveDateRange?.[1]?.isValid()
+            ? values.collectConfig.effectiveDateRange[1].format('YYYY-MM-DD')
+            : undefined,
+        }
         : undefined;
       await createOperationRequirement({
         projectId: Number(project.projectId),
@@ -369,12 +357,12 @@ const ProjectDetail: React.FC<Props> = ({
                       : []),
                     ...(onDeleteProject
                       ? [
-                          {
-                            key: 'delete',
-                            danger: true,
-                            label: intl.formatMessage({ id: 'projectSpace.detail.common.delete' }),
-                          },
-                        ]
+                        {
+                          key: 'delete',
+                          danger: true,
+                          label: intl.formatMessage({ id: 'projectSpace.detail.common.delete' }),
+                        },
+                      ]
                       : []),
                   ],
                   onClick: ({ key }) => {

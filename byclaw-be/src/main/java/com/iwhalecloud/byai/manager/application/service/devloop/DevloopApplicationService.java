@@ -476,6 +476,7 @@ public class DevloopApplicationService {
         env.setEnvName(dto.getEnvName());
         env.setAddress(dto.getAddress());
         env.setOrchestrator(dto.getOrchestrator());
+        env.setCaseSource(dto.getCaseSource());
         env.setConnProtocol(dto.getConnProtocol());
         env.setConnHost(dto.getConnHost());
         env.setConnPort(dto.getConnPort());
@@ -578,6 +579,7 @@ public class DevloopApplicationService {
         map.put("envName", e.getEnvName());
         map.put("address", e.getAddress());
         map.put("orchestrator", e.getOrchestrator());
+        map.put("caseSource", e.getCaseSource());
         map.put("connProtocol", e.getConnProtocol());
         map.put("connHost", e.getConnHost());
         map.put("connPort", e.getConnPort());
@@ -682,7 +684,7 @@ public class DevloopApplicationService {
         return map;
     }
 
-    // ========== 默认数字员工 ==========
+    // ========== 默认助理 ==========
 
     /** 查询某作用域(projectId 缺省/0=全局默认,>0=项目覆盖)的原始配置。 */
     public ResponseUtil<Map<String, Object>> getDefaultAgent(Long projectId) {
@@ -690,18 +692,20 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(defaultAgentToVo(entity, projectId));
     }
 
-    /** 查询项目各角色生效的默认员工(项目覆盖合并到全局默认之上)。 */
+    /** 查询项目各角色生效的默认助理(项目覆盖合并到全局默认之上)。 */
     public ResponseUtil<Map<String, Object>> resolveDefaultAgent(Long projectId) {
         DefaultAgent merged = defaultAgentService.resolveForProject(projectId);
         return ResponseUtil.successResponse(defaultAgentToVo(merged, projectId));
     }
 
-    /** 保存某作用域默认员工配置(每作用域唯一,upsert)。 */
+    /** 保存某作用域默认助理配置(每作用域唯一,upsert)。 */
     public ResponseUtil<Void> saveDefaultAgent(DefaultAgentDTO dto) {
         DefaultAgent entity = new DefaultAgent();
         entity.setProjectId(dto.getProjectId());
         entity.setArchitectAgentId(dto.getArchitectAgentId());
         entity.setArchitectAgentName(dto.getArchitectAgentName());
+        entity.setRequirementAgentId(dto.getRequirementAgentId());
+        entity.setRequirementAgentName(dto.getRequirementAgentName());
         entity.setCoderAgentId(dto.getCoderAgentId());
         entity.setCoderAgentName(dto.getCoderAgentName());
         entity.setTesterAgentId(dto.getTesterAgentId());
@@ -716,6 +720,8 @@ public class DevloopApplicationService {
         map.put("projectId", entity != null && entity.getProjectId() != null ? entity.getProjectId() : projectId);
         map.put("architectAgentId", entity == null ? null : entity.getArchitectAgentId());
         map.put("architectAgentName", entity == null ? null : entity.getArchitectAgentName());
+        map.put("requirementAgentId", entity == null ? null : entity.getRequirementAgentId());
+        map.put("requirementAgentName", entity == null ? null : entity.getRequirementAgentName());
         map.put("coderAgentId", entity == null ? null : entity.getCoderAgentId());
         map.put("coderAgentName", entity == null ? null : entity.getCoderAgentName());
         map.put("testerAgentId", entity == null ? null : entity.getTesterAgentId());

@@ -261,7 +261,7 @@ public class DevloopController {
     }
 
     /**
-     * 查询默认数字员工原始配置(某作用域)。
+     * 查询默认助理原始配置(某作用域)。
      *
      * @param params 可含 projectId:缺省/0=全局默认行,>0=该项目覆盖行
      */
@@ -271,7 +271,7 @@ public class DevloopController {
     }
 
     /**
-     * 解析项目各角色生效的默认员工(项目覆盖合并到全局默认之上)。
+     * 解析项目各角色生效的默认助理(项目覆盖合并到全局默认之上)。
      *
      * @param params 可含 projectId;缺省则仅返回全局默认
      */
@@ -281,7 +281,7 @@ public class DevloopController {
     }
 
     /**
-     * 保存默认数字员工配置(每作用域唯一,upsert)。
+     * 保存默认助理配置(每作用域唯一,upsert)。
      *
      * @param dto projectId 缺省/0=全局默认,>0=项目覆盖;各角色 agentId 为空表示不指定
      */

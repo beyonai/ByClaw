@@ -631,12 +631,14 @@ export type IntegrationEnvPayload = {
   projectId: number;
   envName: string;
   address?: string;
-  orchestrator?: 'script' | 'jenkins' | 'k8s' | 'webhook';
   connProtocol?: 'ssh' | 'local';
   connHost?: string;
   connPort?: string;
   connUser?: string;
   connAuth?: 'key' | 'password';
+  // 用例来源:workspace=跟随项目工作区仓库(约定入口 tests/run.sh)/on_env=用例已预置在环境机上。
+  // 后端 IntegrationRunExecutor 只看这个字段判定用例从哪来，用例集里的仓库/分支仅 on_env 时还生效。
+  caseSource?: 'workspace' | 'on_env';
   // 连接凭据key，指向 ~/.openclaw/credentials/，不传明文密码。
   connCredentialRef?: string;
   connWorkdir?: string;
@@ -663,14 +665,12 @@ export const deleteIntegrationEnv = (envId: number) =>
 export const listIntegrationEnvs = (projectId: number) =>
   POST<any>('/byaiService/devloop/integration/env/list', { projectId });
 
-// 端到端测试用例集
-// manual 套件的清单(manualCases)不入库,仅登记 manualFile 路径;caseCount 为数字,enabled 落库为 '0'/'1'。
+// 端到端测试用例集:caseCount 为数字,enabled 落库为 '0'/'1'。
+// 用例来源已上移到环境 caseSource,用例集只登记环境机上的执行入口,所以 source/branch 恒为空;
+// runner 也不再收发——运行命令本身写明了用什么跑。
 export type IntegrationSuitePayload = {
   projectId: number;
   suiteName: string;
-  runner?: string;
-  sourceType?: string;
-  repoId?: number;
   source?: string;
   branch?: string;
   runCommand?: string;
@@ -678,7 +678,6 @@ export type IntegrationSuitePayload = {
   reportPath?: string;
   caseCount?: number;
   enabled?: string;
-  manualFile?: string;
 };
 
 export const createIntegrationSuite = (data: IntegrationSuitePayload) =>
@@ -720,12 +719,14 @@ export const listIntegrationRunsByEnv = (envId: number) =>
 export const listRequirementIntegrations = (projectId: number) =>
   POST<any[]>('/byaiService/devloop/integration/requirements', { projectId });
 
-// ===== 默认数字员工 =====
-// 三角色(架构/代码/测试)兜底员工:projectId 缺省=全局默认,>0=项目覆盖。
+// ===== 默认助理 =====
+// 四角色(架构/需求/研发/测试)兜底员工:projectId 缺省=全局默认,>0=项目覆盖。
 export type DefaultAgentConfig = {
   projectId?: number;
   architectAgentId?: string;
   architectAgentName?: string;
+  requirementAgentId?: string;
+  requirementAgentName?: string;
   coderAgentId?: string;
   coderAgentName?: string;
   testerAgentId?: string;

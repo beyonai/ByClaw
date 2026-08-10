@@ -5,6 +5,9 @@ export interface DigitalEmployeeOption {
   value: string;
   label: string;
   keywords?: string;
+  // 接口原样的头像路径(个人助理走 avatar,企业员工走 resourceLogoUrl),不在这里拼 URL:
+  // 交给 ResourceCard 用它自己的 getFileUrl + 加载失败兜底,避免两套图片降级逻辑。
+  logo?: string;
 }
 
 const pickArray = (...candidates: any[]): any[] => candidates.find((item) => Array.isArray(item)) || [];
@@ -49,6 +52,7 @@ export const useDigitalEmployeeOptions = (enabled: boolean) => {
           value: optionValue,
           label,
           keywords: [agent.agentName, agent.resourceName, agent.name, agent.description].filter(Boolean).join(' '),
+          logo: agent.resourceLogoUrl || agent.avatar || undefined,
         });
       });
       setOptions(Array.from(optionMap.values()));

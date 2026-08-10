@@ -166,8 +166,6 @@ import type { ISession } from '@/typescript/session';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { ResourceTypeMap } from '@/constants/resource';
 import ProjectMemberList from './ProjectMemberList';
-import Integration from './Integration';
-import ProjectDefaultAgentPanel from '@/pages/projectSpace/components/ProjectDefaultAgentPanel';
 import RequirementSplitModal from './RequirementSplitModal';
 import type { SplitTaskDraft } from './RequirementSplitModal/types';
 import ListEndMessage from './ListEndMessage';
@@ -680,7 +678,7 @@ const normalizeOperationIdentifierList = (rawValue: unknown): OperationIdentifie
 const getOperationTaskAgentId = (task: any, operationAgents: OperationAgentOption[] = []) => {
   const rootConfig = parseOperationConfig(task?.operationConfig || task?.config);
   const agentIds = normalizeOperationIdentifierList(
-      task?.agentIds ??
+    task?.agentIds ??
       task?.executorAgentIds ??
       task?.agentId ??
       task?.agentSelection?.executorAgentIds ??
@@ -1279,8 +1277,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
   });
   // 研发项目展示扫描需求；运营项目展示独立运营需求，两者共用需求页签但数据链路隔离。
   const showRequirementsTab = isDevelopProject || isOperationProject;
-  // 集成测试依赖研发仓库和代码任务，运营项目不展示该入口。
-  const showIntegrationTab = isDevelopProject;
   const showMembersTab = isDevelopProject || isOperationProject || !!project?.sharedFlag;
   const canEnterDetailTaskSession = useMemo(
     () => isCurrentUserTaskAssignee(detailTask, userInfo),
@@ -1304,8 +1300,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
             response?.data && typeof response.data === 'object' && !Array.isArray(response.data)
               ? response.data
               : response;
-          const resolvedDetail =
-            detailData?.task && typeof detailData.task === 'object' ? detailData.task : detailData;
+          const resolvedDetail = detailData?.task && typeof detailData.task === 'object' ? detailData.task : detailData;
           if (resolvedDetail && typeof resolvedDetail === 'object') {
             taskDetail = { ...task, ...resolvedDetail };
           }
@@ -3210,12 +3205,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
       // 项目小详情优先展示需求入口，任务和资源依次后置。
       ...(showRequirementsTab ? [{ key: 'requirements', label: t('tabs.requirements') }] : []),
       { key: 'tasks', label: t('tabs.tasks') },
-      // 数字员工与集成测试都是研发闭环能力,仅研发项目可见;数字员工排在成员前。
-      ...(isDevelopProject ? [{ key: 'digitalAgents', label: t('tabs.digitalAgents') }] : []),
       ...(showMembersTab ? [{ key: 'members', label: t('tabs.members') }] : []),
-      ...(showIntegrationTab ? [{ key: 'integration', label: t('tabs.integration') }] : []),
     ],
-    [isDevelopProject, showIntegrationTab, showMembersTab, showRequirementsTab, t]
+    [showMembersTab, showRequirementsTab, t]
   );
 
   const detailPanelTabCountClass = styles[`projectDetailPanelTabCount${tabItems.length}`] || '';
@@ -6020,20 +6012,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
       return renderTasks();
     }
     if (activeTab === 'tasks') {
-      return renderTasks();
-    }
-    if (activeTab === 'digitalAgents') {
-      if (isDevelopProject) {
-        return (
-          <div className={styles.detailEmbeddedContent}>
-            <ProjectDefaultAgentPanel projectId={projectId} active={activeTab === 'digitalAgents'} />
-          </div>
-        );
-      }
-      return renderTasks();
-    }
-    if (activeTab === 'integration') {
-      if (showIntegrationTab) return <Integration active projectId={projectId} repos={repos} />;
       return renderTasks();
     }
     if (activeTab === 'members') {

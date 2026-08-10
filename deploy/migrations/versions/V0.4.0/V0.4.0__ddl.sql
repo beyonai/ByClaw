@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS byai.byai_integration_env (
     env_name            VARCHAR(100)    NOT NULL,
     address             VARCHAR(500),
     orchestrator        VARCHAR(20)     NOT NULL DEFAULT 'script',
+    case_source         VARCHAR(16),
     conn_protocol       VARCHAR(16)     NOT NULL DEFAULT 'ssh',
     conn_host           VARCHAR(200),
     conn_port           VARCHAR(10),
@@ -30,6 +31,13 @@ COMMENT ON COLUMN byai.byai_integration_env.project_id IS '所属研发项目ID 
 COMMENT ON COLUMN byai.byai_integration_env.env_name IS '环境名称';
 COMMENT ON COLUMN byai.byai_integration_env.address IS '环境访问地址(被测应用入口)';
 COMMENT ON COLUMN byai.byai_integration_env.orchestrator IS '编排方式 script脚本/jenkins/k8s/webhook';
+-- 用例来源并入环境配置:用例集不再是用户必填的独立概念。
+-- workspace:用例由测试助理写进工作区仓库(byai_project_repo.repo_type='workspace'),
+-- 按约定路径 tests/run.sh 执行,平台不再要用户填仓库/分支/运行命令。新建环境由后端显式赋这个值。
+-- on_env:用例已由运维预置在环境机上,沿用 byai_integration_suite 的既有配置(界面勾选后联动)。
+-- 不给 DEFAULT:NULL 在运行时按 on_env 解释(见 IntegrationRunExecutor.casesOnEnvMachine),
+-- 让存量环境在"代码已上、回填未跑"的窗口期保住既有行为;新建行由应用层显式赋 workspace。
+COMMENT ON COLUMN byai.byai_integration_env.case_source IS '用例来源 workspace跟随工作区仓库(约定 tests/run.sh)/on_env用例已在环境机上';
 COMMENT ON COLUMN byai.byai_integration_env.conn_protocol IS '连接方式 ssh远程/local本机';
 COMMENT ON COLUMN byai.byai_integration_env.conn_host IS 'SSH主机地址';
 COMMENT ON COLUMN byai.byai_integration_env.conn_port IS 'SSH端口';
@@ -102,6 +110,7 @@ CREATE TABLE IF NOT EXISTS byai.byai_integration_run (
     project_id      BIGINT          NOT NULL,
     suite_id        BIGINT          NOT NULL,
     env_id          BIGINT          NOT NULL,
+    requirement_id  BIGINT,
     status          VARCHAR(16)     NOT NULL DEFAULT 'running',
     branch          VARCHAR(100),
     commit_ref      VARCHAR(100),
@@ -110,9 +119,13 @@ CREATE TABLE IF NOT EXISTS byai.byai_integration_run (
     failed          INT             DEFAULT 0,
     skipped         INT             DEFAULT 0,
     kickback_to     VARCHAR(32),
+    kickback_at     TIMESTAMP,
     reason          VARCHAR(1000),
     result_dir      VARCHAR(500),
     suites_json     TEXT,
+    session_id        BIGINT,
+    tester_agent_id   BIGINT,
+    tester_agent_name VARCHAR(200),
     started_at      TIMESTAMP,
     finished_at     TIMESTAMP,
     duration_sec    INT             DEFAULT 0,
@@ -127,6 +140,7 @@ COMMENT ON COLUMN byai.byai_integration_run.run_id IS '执行ID';
 COMMENT ON COLUMN byai.byai_integration_run.project_id IS '所属研发项目ID';
 COMMENT ON COLUMN byai.byai_integration_run.suite_id IS '被执行的测试用例集ID byai_integration_suite.suite_id';
 COMMENT ON COLUMN byai.byai_integration_run.env_id IS '执行所用集成测试环境ID byai_integration_env.env_id';
+COMMENT ON COLUMN byai.byai_integration_run.requirement_id IS '触发本次执行的研发需求ID byai_scan_log_item.item_id;人工单套件执行可空';
 COMMENT ON COLUMN byai.byai_integration_run.status IS '执行状态 running执行中/passed通过/failed失败/error异常/timeout超时';
 COMMENT ON COLUMN byai.byai_integration_run.branch IS '被测分支(展示用)';
 COMMENT ON COLUMN byai.byai_integration_run.commit_ref IS '被测提交(展示用)';
@@ -135,9 +149,15 @@ COMMENT ON COLUMN byai.byai_integration_run.passed IS '通过数';
 COMMENT ON COLUMN byai.byai_integration_run.failed IS '失败数';
 COMMENT ON COLUMN byai.byai_integration_run.skipped IS '跳过数';
 COMMENT ON COLUMN byai.byai_integration_run.kickback_to IS '打回目标环节(失败时记录,自动回灌dev-loop留V2);成功为空';
+COMMENT ON COLUMN byai.byai_integration_run.kickback_at IS '失败打回引擎处理本次执行的时间;非空表示已处理(驱动重工或建缺陷),幂等去重用';
 COMMENT ON COLUMN byai.byai_integration_run.reason IS '失败/异常原因;成功为空';
 COMMENT ON COLUMN byai.byai_integration_run.result_dir IS '远程结果目录(完整日志/报告/截图落地处)';
 COMMENT ON COLUMN byai.byai_integration_run.suites_json IS 'JUnit解析出的套件结果数组JSON,对齐前端IntegrationRunSuiteResult(含failedCases)';
+-- 集成执行改为「测试数字员工」驱动:run 关联下发给测试员工的会话,结果由 poller 从会话回流,不再 SSH 跑用例命令解析 JUnit。
+-- session_id 为空表示尚未成功下发会话(建 run 失败/无默认测试员工);poller 只回收 status=running 且 session_id 非空的行。
+COMMENT ON COLUMN byai.byai_integration_run.session_id IS '承载本次测试的数字员工会话ID;结果回流 poller 按此会话读 [PHASE] tester 打点与结构化结果文件';
+COMMENT ON COLUMN byai.byai_integration_run.tester_agent_id IS '执行本次测试的测试数字员工ID(下发时由 DefaultAgent 解析并冻结,便于回溯)';
+COMMENT ON COLUMN byai.byai_integration_run.tester_agent_name IS '测试数字员工名称(展示用快照)';
 COMMENT ON COLUMN byai.byai_integration_run.started_at IS '开始时间';
 COMMENT ON COLUMN byai.byai_integration_run.finished_at IS '结束时间';
 COMMENT ON COLUMN byai.byai_integration_run.duration_sec IS '总耗时(秒)';
@@ -147,6 +167,10 @@ COMMENT ON COLUMN byai.byai_integration_run.delete_flag IS '删除标记 0正常
 
 CREATE INDEX IF NOT EXISTS idx_integration_run_suite ON byai.byai_integration_run (suite_id, create_time DESC);
 CREATE INDEX IF NOT EXISTS idx_integration_run_project ON byai.byai_integration_run (project_id);
+-- 需求维度反查:需求级批量的聚合看板与失败打回都按需求拉本批 run。
+CREATE INDEX IF NOT EXISTS idx_integration_run_requirement ON byai.byai_integration_run (requirement_id, create_time DESC);
+-- 环境维度历史查询(用例集/环境卡片「日志」按钮按 env 反查执行列表)。
+CREATE INDEX IF NOT EXISTS idx_integration_run_env ON byai.byai_integration_run (env_id, create_time DESC);
 
 -- run 内每一步(环境stage 或 用例集命令)的执行明细,按 seq 有序;日志截断存尾部,完整日志在远程 result_dir。
 CREATE TABLE IF NOT EXISTS byai.byai_integration_run_step (
@@ -314,15 +338,18 @@ COMMENT ON COLUMN byai_project_account_work.update_by IS '更新人';
 COMMENT ON COLUMN byai_project_account_work.update_time IS '更新时间';
 COMMENT ON COLUMN byai_project_account_work.status_cd IS '状态：00A-有效 / 00X-无效';
 
--- 默认数字员工:三种固定角色(架构/代码/测试)的兜底员工配置。
+-- 默认助理:四种固定角色(架构/需求/研发/测试)的兜底助理配置。
 -- 作用域用 project_id 区分:project_id=0 为全局默认行,>0 为该项目的覆盖行。
 -- 项目某角色列为空 => 该角色回退到全局默认;全局也为空 => 未配置。
 -- 单表两级(global+override)在读取时合并,避免层级表与自关联;冗余存 *_agent_name 供展示,改名不即时失效由上层刷新。
+-- coder_* 列名保留:展示文案从「代码」改为「研发」是纯口径变更,不值得为它做列改名+接口字段联动。
 CREATE TABLE IF NOT EXISTS byai.byai_default_agent (
     id                  BIGINT          NOT NULL,
     project_id          BIGINT          NOT NULL DEFAULT 0,
     architect_agent_id  VARCHAR(64),
     architect_agent_name VARCHAR(200),
+    requirement_agent_id VARCHAR(64),
+    requirement_agent_name VARCHAR(200),
     coder_agent_id      VARCHAR(64),
     coder_agent_name    VARCHAR(200),
     tester_agent_id     VARCHAR(64),
@@ -334,15 +361,17 @@ CREATE TABLE IF NOT EXISTS byai.byai_default_agent (
     delete_flag         CHAR(1)         DEFAULT '0',
     CONSTRAINT pk_byai_default_agent PRIMARY KEY (id)
 );
-COMMENT ON TABLE byai.byai_default_agent IS '默认数字员工表:架构/代码/测试三角色的兜底员工;project_id=0为全局默认,>0为项目覆盖';
+COMMENT ON TABLE byai.byai_default_agent IS '默认助理表:架构/需求/研发/测试四角色的兜底助理;project_id=0为全局默认,>0为项目覆盖';
 COMMENT ON COLUMN byai.byai_default_agent.id IS '主键ID';
 COMMENT ON COLUMN byai.byai_default_agent.project_id IS '作用域:0全局默认行,>0该研发项目覆盖行 byai_project.project_id';
-COMMENT ON COLUMN byai.byai_default_agent.architect_agent_id IS '架构数字员工ID(资源ID);空表示该角色回退全局默认';
-COMMENT ON COLUMN byai.byai_default_agent.architect_agent_name IS '架构数字员工名称(冗余展示)';
-COMMENT ON COLUMN byai.byai_default_agent.coder_agent_id IS '代码数字员工ID(资源ID);空表示该角色回退全局默认';
-COMMENT ON COLUMN byai.byai_default_agent.coder_agent_name IS '代码数字员工名称(冗余展示)';
-COMMENT ON COLUMN byai.byai_default_agent.tester_agent_id IS '测试数字员工ID(资源ID);空表示该角色回退全局默认';
-COMMENT ON COLUMN byai.byai_default_agent.tester_agent_name IS '测试数字员工名称(冗余展示)';
+COMMENT ON COLUMN byai.byai_default_agent.architect_agent_id IS '架构助理ID(资源ID);空表示该角色回退全局默认';
+COMMENT ON COLUMN byai.byai_default_agent.architect_agent_name IS '架构助理名称(冗余展示)';
+COMMENT ON COLUMN byai.byai_default_agent.requirement_agent_id IS '需求助理ID(资源ID);空表示该角色回退全局默认';
+COMMENT ON COLUMN byai.byai_default_agent.requirement_agent_name IS '需求助理名称(冗余展示)';
+COMMENT ON COLUMN byai.byai_default_agent.coder_agent_id IS '研发助理ID(资源ID);空表示该角色回退全局默认';
+COMMENT ON COLUMN byai.byai_default_agent.coder_agent_name IS '研发助理名称(冗余展示)';
+COMMENT ON COLUMN byai.byai_default_agent.tester_agent_id IS '测试助理ID(资源ID);空表示该角色回退全局默认';
+COMMENT ON COLUMN byai.byai_default_agent.tester_agent_name IS '测试助理名称(冗余展示)';
 COMMENT ON COLUMN byai.byai_default_agent.create_by IS '创建人';
 COMMENT ON COLUMN byai.byai_default_agent.create_time IS '创建时间';
 COMMENT ON COLUMN byai.byai_default_agent.update_by IS '更新人';
@@ -428,13 +457,6 @@ COMMENT ON COLUMN byai.byai_scan_item_task.delete_flag IS '删除标记 0正常 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_scan_item_task_req_repo ON byai.byai_scan_item_task (requirement_id, repo_id) WHERE delete_flag = '0';
 CREATE INDEX IF NOT EXISTS idx_scan_item_task_project ON byai.byai_scan_item_task (project_id, create_time DESC);
 CREATE INDEX IF NOT EXISTS idx_scan_item_task_session ON byai.byai_scan_item_task (session_id);
-
--- 集成执行记录挂上需求维度:需求级批量把每个 run 关联到触发它的需求,聚合看板与失败打回按此反查。
-ALTER TABLE byai.byai_integration_run ADD COLUMN requirement_id BIGINT;
-COMMENT ON COLUMN byai.byai_integration_run.requirement_id IS '触发本次执行的研发需求ID byai_scan_log_item.item_id;人工单套件执行可空';
-CREATE INDEX IF NOT EXISTS idx_integration_run_requirement ON byai.byai_integration_run (requirement_id, create_time DESC);
-ALTER TABLE byai.byai_integration_run ADD COLUMN kickback_at TIMESTAMP;
-COMMENT ON COLUMN byai.byai_integration_run.kickback_at IS '失败打回引擎处理本次执行的时间;非空表示已处理(驱动重工或建缺陷),幂等去重用';
 
 -- 仓库区分工作区与代码仓库:研发项目须有且仅有一个 workspace 仓库承载项目上下文/产出,其余为 code 代码仓库。
 -- 存量行默认 code;工作区先行由应用层保证,DB 仅存类型不强约束唯一,避免历史数据迁移期写入失败。
@@ -576,17 +598,6 @@ COMMENT ON COLUMN project_init_audit_log.start_time IS '开始时间 - 操作开
 COMMENT ON COLUMN project_init_audit_log.end_time IS '结束时间 - 操作结束时间';
 COMMENT ON COLUMN project_init_audit_log.created_at IS '创建时间 - 数据库记录创建时间';
 COMMENT ON COLUMN project_init_audit_log.updated_at IS '更新时间 - 数据库记录更新时间';
-
--- 集成执行改为「测试数字员工」驱动:run 关联下发给测试员工的会话,结果由 poller 从会话回流,不再 SSH 跑用例命令解析 JUnit。
--- session_id 为空表示尚未成功下发会话(建 run 失败/无默认测试员工);poller 只回收 status=running 且 session_id 非空的行。
-ALTER TABLE byai.byai_integration_run ADD COLUMN session_id BIGINT;
-COMMENT ON COLUMN byai.byai_integration_run.session_id IS '承载本次测试的数字员工会话ID;结果回流 poller 按此会话读 [PHASE] tester 打点与结构化结果文件';
-ALTER TABLE byai.byai_integration_run ADD COLUMN tester_agent_id BIGINT;
-COMMENT ON COLUMN byai.byai_integration_run.tester_agent_id IS '执行本次测试的测试数字员工ID(下发时由 DefaultAgent 解析并冻结,便于回溯)';
-ALTER TABLE byai.byai_integration_run ADD COLUMN tester_agent_name VARCHAR(200);
-COMMENT ON COLUMN byai.byai_integration_run.tester_agent_name IS '测试数字员工名称(展示用快照)';
--- 环境维度历史查询(用例集/环境卡片「日志」按钮按 env 反查执行列表)。
-CREATE INDEX IF NOT EXISTS idx_integration_run_env ON byai.byai_integration_run (env_id, create_time DESC);
 
 /**项目关联本体对象文件**/
 create table byai_project_object_file
