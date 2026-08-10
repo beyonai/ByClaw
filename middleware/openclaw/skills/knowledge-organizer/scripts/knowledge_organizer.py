@@ -19,6 +19,7 @@ WORKFLOW_DIRECTORY = "knowledge-organizer"
 STATE_FILE = "state.json"
 OBJECT_FIELDS = ("objectCode", "objectName", "objectDesc", "properties")
 SUPPORTED_SOURCE_SUFFIXES = {".md", ".txt", ".json"}
+TASK_STATUSES = {"failed", "done", "mixed"}
 
 
 def _normalize_session_id(value: Any) -> str:
@@ -52,6 +53,8 @@ class OrganizerApi(Protocol):
     def enrich_document_objects(
         self, *, session_id: str, object_codes: list[str]
     ) -> dict[str, Any]: ...
+
+    def update_task_status(self, *, session_id: int, task_status: str) -> None: ...
 
 
 class RpcTransport(Protocol):
@@ -155,6 +158,14 @@ class ServiceApi:
             headers=self._datacloud_headers(session_id),
         )
         return result if isinstance(result, dict) else {}
+
+    def update_task_status(self, *, session_id: int, task_status: str) -> None:
+        self.transport.request(
+            service_env="BE_DOMAINNAME",
+            method="POST",
+            path="/byaiService/devloop/operation/updateTaskStatus",
+            payload={"sessionId": session_id, "taskStatus": task_status},
+        )
 
 
 async def _await_if_needed(value: Any) -> Any:
@@ -542,6 +553,30 @@ class KnowledgeOrganizer:
             submit=self.api.enrich_document_objects,
         )
 
+    def update_task_status(
+        self, *, session_id: str, task_status: str
+    ) -> dict[str, Any]:
+        """Set the terminal status of a non-interactive operation task."""
+        normalized_session_id = _normalize_session_id(session_id)
+        try:
+            numeric_session_id = int(normalized_session_id)
+        except ValueError as exc:
+            raise ValueError("更新任务状态要求数值型 session id") from exc
+        if numeric_session_id <= 0:
+            raise ValueError("更新任务状态要求正数 session id")
+        if task_status not in TASK_STATUSES:
+            allowed = ", ".join(sorted(TASK_STATUSES))
+            raise ValueError(f"任务状态无效，仅支持: {allowed}")
+        self.api.update_task_status(
+            session_id=numeric_session_id,
+            task_status=task_status,
+        )
+        return {
+            "session_id": numeric_session_id,
+            "task_status": task_status,
+            "updated": True,
+        }
+
     def _submit_background_task(
         self,
         task_dir: Path,
@@ -846,6 +881,17 @@ def main(argv: list[str] | None = None) -> int:
     build.add_argument("--task-dir", required=True, type=Path)
     build.add_argument("--object-code", action="append", dest="object_codes")
 
+    update_status = commands.add_parser(
+        "update-task-status",
+        help="更新非交互式运营任务的终态",
+    )
+    update_status.add_argument("--session-id", required=True)
+    update_status.add_argument(
+        "--task-status",
+        required=True,
+        choices=sorted(TASK_STATUSES),
+    )
+
     args = parser.parse_args(argv)
     api = production_api()
     organizer = KnowledgeOrganizer(api)
@@ -874,8 +920,13 @@ def main(argv: list[str] | None = None) -> int:
                 object_codes=args.object_codes,
                 source_object_codes=args.source_object_codes,
             )
-        else:
+        elif args.command == "build":
             result = organizer.build(args.task_dir, args.object_codes)
+        else:
+            result = organizer.update_task_status(
+                session_id=args.session_id,
+                task_status=args.task_status,
+            )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     finally:

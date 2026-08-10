@@ -42,6 +42,8 @@ allowed-tools: read, exec
 | 发现文档所表达的对象 | [`knowledge-organizer-organize/SKILL.md`](knowledge-organizer-organize/SKILL.md) |
 | 丰富或构建对象知识 | [`knowledge-organizer-build/SKILL.md`](knowledge-organizer-build/SKILL.md) |
 
+如果第 1 步已判断为后台任务，还必须阅读 [`knowledge-organizer-update-task-status/SKILL.md`](knowledge-organizer-update-task-status/SKILL.md)，并只按其中的终态矩阵更新状态。普通交互任务不得读取或调用任务状态更新子 Skill。
+
 初始化后，`ingest`、`organize`、`build` 相互独立。一个命令成功不构成执行下一个命令的授权。
 
 ## 确定输入
@@ -63,4 +65,4 @@ allowed-tools: read, exec
 
 说明完成了哪些初始化、登记或提交操作，并列出所选对象和失败项。异步操作只能表述为**已受理/已提交**，不能表述为**已完成**。
 
-CLI 执行失败时，如实报告错误并停止当前操作。不得改用其他命令、切换权限范围、修改任务状态或绕过 CLI 补救。
+CLI 执行失败时，如实报告错误并停止当前操作。不得改用其他命令、切换权限范围或绕过 CLI 补救。后台任务只允许按任务状态更新子 Skill 的规则设置终态；交互任务不得修改任务状态。
