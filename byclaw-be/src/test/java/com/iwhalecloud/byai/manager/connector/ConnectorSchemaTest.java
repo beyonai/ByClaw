@@ -297,7 +297,7 @@ class ConnectorSchemaTest {
 
     @Test
     void wecomSeedPublishesEquivalentCliConfigAndManifestForUpgradeAndFreshInstall() throws Exception {
-        String migrationSql = readPreservingCase("deploy/migrations/versions/V0.5.1/V0.5.1__dml.sql");
+        String migrationSql = readPreservingCase("deploy/migrations/versions/V0.3.1/V0.3.1__dml.sql");
         String initdbSql = readPreservingCase("deploy/middleware/initdb/04_dml.sql");
         ConnectorSeed initdbSeed = extractWecomSeed(initdbSql);
 
@@ -366,14 +366,14 @@ class ConnectorSchemaTest {
 
     @Test
     void connectorCommandUpgradeMigrationConvergesExistingRowsToFreshInstallManifests() throws Exception {
-        String upgradeSql = readPreservingCase("deploy/migrations/versions/V0.5.1/V0.5.1__dml.sql");
+        String upgradeSql = readPreservingCase("deploy/migrations/versions/V0.3.1/V0.3.1__dml.sql");
         String initdbSql = readPreservingCase("deploy/middleware/initdb/04_dml.sql");
 
         assertThat(upgradeSql).contains(
             "UPDATE byai.byai_connector_info",
             "WHERE connector_code IN ('dingtalk', 'lark', 'wecom')"
         );
-        assertThat(initdbSql).contains("V0.5.1 Runtime Manifest 命令执行");
+        assertThat(initdbSql).doesNotContain("V0.5.1 Runtime Manifest 命令执行");
         for (String connectorCode : new String[] {"dingtalk", "lark", "wecom"}) {
             JsonNode upgraded = parseJson(extractUpgradeManifest(upgradeSql, connectorCode));
             JsonNode fresh = parseJson(extractSeedManifest(initdbSql, connectorCode));
