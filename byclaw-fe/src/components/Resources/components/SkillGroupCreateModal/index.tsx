@@ -23,6 +23,7 @@ import {
   getSkillOptionsForTab,
   normalizeSkillOptions,
   partitionSkillOptions,
+  SKILL_CANDIDATE_TABS_SIZE,
   type SkillCandidateTabKey,
   type SkillOption,
 } from './skillOptions';
@@ -292,6 +293,7 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
                       <Tabs
                         animated={false}
                         activeKey={activeSkillTab}
+                        size={SKILL_CANDIDATE_TABS_SIZE}
                         items={[
                           {
                             key: 'builtIn',

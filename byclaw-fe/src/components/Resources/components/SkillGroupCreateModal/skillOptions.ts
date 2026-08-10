@@ -10,6 +10,8 @@ export interface SkillOption {
 
 export type SkillCandidateTabKey = 'builtIn' | 'personal';
 
+export const SKILL_CANDIDATE_TABS_SIZE = 'small' as const;
+
 export const buildSkillGroupCandidateParams = (groupId?: string) => ({
   keyword: '',
   pageNum: 1,
@@ -20,13 +22,25 @@ export const buildSkillGroupCandidateParams = (groupId?: string) => ({
 export const normalizeSkillOptions = (rows: any[]): SkillOption[] =>
   rows
     .filter((item) => item?.resourceId)
-    .map((item) => ({
-      resourceId: `${item.resourceId}`,
-      resourceName: item.resourceName || item.resourceCode || `${item.resourceId}`,
-      systemBuiltIn: Boolean(item.systemBuiltIn),
-      creatorOwned: Boolean(item.creatorOwned),
-      ...(item.resourceDesc || item.description ? { resourceDesc: item.resourceDesc || item.description } : {}),
-    }));
+    .map((item) => {
+      const legacySystemBuiltIn =
+        `${item.skillType || ''}`.trim().toLowerCase() === 'inner' ||
+        `${item.sourceType || ''}`.trim().toUpperCase() === 'SYSTEM_BUILTIN';
+
+      return {
+        resourceId: `${item.resourceId}`,
+        resourceName: item.resourceName || item.resourceCode || `${item.resourceId}`,
+        systemBuiltIn:
+          item.systemBuiltIn === null || item.systemBuiltIn === undefined
+            ? legacySystemBuiltIn
+            : Boolean(item.systemBuiltIn),
+        creatorOwned:
+          item.creatorOwned === null || item.creatorOwned === undefined
+            ? !legacySystemBuiltIn
+            : Boolean(item.creatorOwned),
+        ...(item.resourceDesc || item.description ? { resourceDesc: item.resourceDesc || item.description } : {}),
+      };
+    });
 
 export const partitionSkillOptions = (skills: SkillOption[]) => ({
   builtInSkills: skills.filter((skill) => skill.systemBuiltIn),

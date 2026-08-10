@@ -5,6 +5,7 @@ import {
   getSkillOptionsForTab,
   normalizeSkillOptions,
   partitionSkillOptions,
+  SKILL_CANDIDATE_TABS_SIZE,
 } from '../skillOptions';
 
 describe('SkillGroupCreateModal edit helpers', () => {
@@ -17,19 +18,78 @@ describe('SkillGroupCreateModal edit helpers', () => {
 });
 
 describe('SkillGroupCreateModal skill options', () => {
+  it('uses small tabs in the candidate dropdown', () => {
+    expect(SKILL_CANDIDATE_TABS_SIZE).toBe('small');
+  });
+
   it('keeps every candidate returned by the backend regardless of skill type or permissions', () => {
     expect(
       normalizeSkillOptions([
         { resourceId: '1', resourceName: '内置技能', systemBuiltIn: true, creatorOwned: false },
         { resourceId: '2', resourceName: '个人技能', systemBuiltIn: false, creatorOwned: true },
         { resourceId: '3', resourceName: '重叠技能', systemBuiltIn: true, creatorOwned: true },
-        { resourceId: '4', resourceName: '未分类技能' },
+        { resourceId: '4', resourceName: '旧版个人技能' },
       ])
     ).toEqual([
       { resourceId: '1', resourceName: '内置技能', systemBuiltIn: true, creatorOwned: false },
       { resourceId: '2', resourceName: '个人技能', systemBuiltIn: false, creatorOwned: true },
       { resourceId: '3', resourceName: '重叠技能', systemBuiltIn: true, creatorOwned: true },
-      { resourceId: '4', resourceName: '未分类技能', systemBuiltIn: false, creatorOwned: false },
+      { resourceId: '4', resourceName: '旧版个人技能', systemBuiltIn: false, creatorOwned: true },
+    ]);
+  });
+
+  it('classifies legacy candidates when backend booleans are absent', () => {
+    const options = normalizeSkillOptions([
+      {
+        resourceId: '1',
+        resourceName: '按技能类型识别的内置技能',
+        skillType: ' INNER ',
+      },
+      {
+        resourceId: '2',
+        resourceName: '按来源识别的内置技能',
+        skillType: 'hub',
+        sourceType: ' system_builtin ',
+      },
+      { resourceId: '3', resourceName: '旧版个人技能', skillType: 'hub', sourceType: 'UPLOAD' },
+    ]);
+
+    expect(options).toEqual([
+      {
+        resourceId: '1',
+        resourceName: '按技能类型识别的内置技能',
+        systemBuiltIn: true,
+        creatorOwned: false,
+      },
+      {
+        resourceId: '2',
+        resourceName: '按来源识别的内置技能',
+        systemBuiltIn: true,
+        creatorOwned: false,
+      },
+      { resourceId: '3', resourceName: '旧版个人技能', systemBuiltIn: false, creatorOwned: true },
+    ]);
+  });
+
+  it('keeps explicit backend classification authoritative over legacy metadata', () => {
+    expect(
+      normalizeSkillOptions([
+        {
+          resourceId: '1',
+          resourceName: '显式非内置',
+          skillType: 'inner',
+          sourceType: 'SYSTEM_BUILTIN',
+          systemBuiltIn: false,
+          creatorOwned: false,
+        },
+      ])
+    ).toEqual([
+      {
+        resourceId: '1',
+        resourceName: '显式非内置',
+        systemBuiltIn: false,
+        creatorOwned: false,
+      },
     ]);
   });
 
