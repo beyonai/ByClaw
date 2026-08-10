@@ -1,21 +1,11 @@
 package com.iwhalecloud.byai.manager.connector;
 
-import com.alibaba.fastjson.JSON;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.iwhalecloud.byai.common.config.JacksonConfig;
-import com.iwhalecloud.byai.manager.dto.connector.ConnectorListDto;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.DisabledOnOs;
-import org.junit.jupiter.api.condition.OS;
-import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
-
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Date;
-import java.util.Locale;
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TimeZone;
@@ -23,6 +13,16 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
+
+import com.alibaba.fastjson.JSON;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.config.JacksonConfig;
+import com.iwhalecloud.byai.manager.dto.connector.ConnectorListDto;
 @DisabledOnOs(OS.WINDOWS)
 class ConnectorSchemaTest {
 
@@ -278,7 +278,7 @@ class ConnectorSchemaTest {
         String dockerfile = readPreservingCase("byclaw-be/Dockerfile");
 
         assertThat(dockerfile).contains(
-            "ARG LARKSUITE_CLI_VERSION=1.0.84",
+            "ARG LARKSUITE_CLI_VERSION=1.0.85",
             "ARG WECOM_CLI_VERSION=0.1.9",
             "@larksuite/cli@${LARKSUITE_CLI_VERSION}",
             "@wecom/cli@${WECOM_CLI_VERSION}",
