@@ -3,6 +3,9 @@ package com.iwhalecloud.byai.manager.domain.connector.provider.lark;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -292,10 +295,11 @@ public class LarkSandboxAuthorizationRuntime {
                 return failedStatus("PROVIDER_AUTH_FAILED", "Lark authorization is not active");
             }
             JsonNode identity = data.path("identities").path("user");
+            Date expiresAt = dateValue(identity, data);
             return new AuthorizationStatusResult(AuthorizationStatus.CONNECTED,
                 firstText(identity, "openId", "open_id", "userId", "user_id"),
                 firstText(identity, "name", "displayName", "display_name", "userName", "user_name"),
-                null, null, null, null);
+                expiresAt, null, null, null);
         } catch (JsonProcessingException e) {
             return failedStatus("PROVIDER_PROTOCOL_ERROR", "Lark authorization returned an invalid response");
         }
@@ -419,6 +423,63 @@ public class LarkSandboxAuthorizationRuntime {
             }
         }
         return null;
+    }
+
+    private Date dateValue(JsonNode primary, JsonNode fallback) {
+        JsonNode value = firstValue(primary, "expiresAt", "expires_at", "credentialExpiresAt",
+            "credential_expires_at");
+        if (value == null) {
+            value = firstValue(fallback, "expiresAt", "expires_at", "credentialExpiresAt",
+                "credential_expires_at");
+        }
+        if (value == null) {
+            return null;
+        }
+        if (value.isIntegralNumber() && value.canConvertToLong()) {
+            return epochDate(value.longValue());
+        }
+        if (!value.isTextual() || value.textValue().isBlank()) {
+            return null;
+        }
+        String text = value.textValue().trim();
+        try {
+            return Date.from(Instant.parse(text));
+        } catch (DateTimeParseException e) {
+            try {
+                return Date.from(OffsetDateTime.parse(text).toInstant());
+            } catch (DateTimeParseException ignored) {
+                try {
+                    return epochDate(Long.parseLong(text));
+                } catch (NumberFormatException invalidNumber) {
+                    return null;
+                }
+            }
+        }
+    }
+
+    private JsonNode firstValue(JsonNode node, String... names) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        for (String name : names) {
+            JsonNode value = node.get(name);
+            if (value != null && !value.isNull()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private Date epochDate(long value) {
+        if (value <= 0) {
+            return null;
+        }
+        try {
+            long millis = value < 1_000_000_000_000L ? Math.multiplyExact(value, 1_000L) : value;
+            return new Date(millis);
+        } catch (ArithmeticException e) {
+            return null;
+        }
     }
 
     private String text(JsonNode node, String field) {
