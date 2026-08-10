@@ -1,18 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type Key } from 'react';
-import { Empty, Input, Modal, Spin } from 'antd';
+import { Empty, Input, Modal, Spin, message } from 'antd';
 import { BranchesOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
+import FilePreviewPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FilePreviewPanel';
+import { DragType } from '@/components/QueryInput/withDrag';
+import useGlobal from '@/hooks/useGlobal';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
 import type { FileTreeItem } from '@/layout/sider/components/FileSiderPanel/constants';
 import {
+  canPreviewFile,
   ensureDirectoryPath,
   getSessionFilePath,
   isDirectory,
   isPathIn,
   normalizeFileBrowserPath,
+  normalizeReferenceItem,
   sortFileBrowserItems,
   unwrapListResponse,
 } from '@/layout/sider/components/FileSiderPanel/utils';
+import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import {
   getTaskChanges,
   getTaskFileDiff,
@@ -24,12 +30,18 @@ import {
 import { listFiles, searchFiles, type FileBrowserItem } from '@/service/fileBrowser';
 import styles from '../index.module.less';
 
+// 单击预览与双击引用共用一次鼠标事件序列，延时用于等待可能到来的第二次点击。
+const NODE_CLICK_DELAY = 220;
+
 interface ReposTabProps {
   projectId: number;
   resourceId?: string | number;
   sessionId?: string | number;
   sessionName?: string;
   codeChangesEnabled?: boolean;
+  // 提供详情回调时，仓库文件单击即在工作区页签内预览。
+  onOpenDetail?: (panel: React.ReactNode, options: DetailPanelOptions) => void;
+  // 调用方需要自定义点击行为时覆盖内置的预览逻辑。
   onNodeClick?: (event: React.MouseEvent, node: FileTreeItem) => void;
 }
 
@@ -92,9 +104,11 @@ const ReposTab: React.FC<ReposTabProps> = ({
   sessionId,
   sessionName,
   codeChangesEnabled = false,
+  onOpenDetail,
   onNodeClick,
 }) => {
   const intl = useIntl();
+  const { EventEmitter } = useGlobal();
   const t: ProjectDetailTranslate = useCallback(
     (id, values) => intl.formatMessage({ id: `projectSpace.detail.${id}` }, values),
     [intl]
@@ -113,6 +127,8 @@ const ReposTab: React.FC<ReposTabProps> = ({
   const [diffModalData, setDiffModalData] = useState<DevloopTaskFileDiff | null>(null);
   const [diffModalLoading, setDiffModalLoading] = useState(false);
   const repoRequestSeqRef = useRef<Record<string, number>>({});
+  const clickTimerRef = useRef<number | null>(null);
+  const normalizedResourceId = resourceId === undefined || resourceId === '' ? undefined : `${resourceId}`;
 
   const repoRootPathMap = useMemo(
     () =>
@@ -176,11 +192,12 @@ const ReposTab: React.FC<ReposTabProps> = ({
     setReposLoading(true);
     try {
       const response = await listProjectRepos(projectId);
-      let nextRepos = Array.isArray(response) ? response : [];
-      const workspaceRepoName = nextRepos.find((repo) => repo.repoType === 'workspace')?.repoFullName ?? '';
-      nextRepos = nextRepos.map((repo) => ({ ...repo, workspaceRepoName: getRepoDirectoryName(workspaceRepoName) }));
+      const nextRepos = Array.isArray(response) ? response : [];
+      const workspaceRepo = nextRepos.find((repo) => repo.repoType === 'workspace');
       setRepos(nextRepos);
-      await Promise.all(nextRepos.filter((repo) => repo.repoType !== 'workspace').map((repo) => fetchRepoFiles(repo)));
+      if (workspaceRepo) {
+        await fetchRepoFiles(workspaceRepo);
+      }
     } catch (error) {
       console.error('Failed to load project repositories:', error);
       setRepos([]);
@@ -208,6 +225,13 @@ const ReposTab: React.FC<ReposTabProps> = ({
     void fetchTaskChanges();
   }, [fetchTaskChanges]);
 
+  useEffect(
+    () => () => {
+      if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current);
+    },
+    []
+  );
+
   const loadRepoTreeNode = useCallback(
     async (node: FileTreeItem) => {
       if (!resourceId || !isDirectory(node)) return;
@@ -225,6 +249,65 @@ const ReposTab: React.FC<ReposTabProps> = ({
       }
     },
     [childrenByPath, resourceId]
+  );
+
+  const openFilePreview = useCallback(
+    (item: FileTreeItem) => {
+      if (!onOpenDetail || !normalizedResourceId) return;
+      if (!canPreviewFile(item)) {
+        message.warning(intl.formatMessage({ id: 'fileBrowser.preview.unavailable' }));
+        return;
+      }
+      // 预览挂在资源工作区页签上，同一路径复用同一个页签而不是重复打开。
+      onOpenDetail(
+        <FilePreviewPanel
+          fileName={item.name}
+          resourceId={normalizedResourceId}
+          path={item.path}
+          source="fileBrowser"
+        />,
+        { tabKey: `repo-file:${item.path}`, title: item.name }
+      );
+    },
+    [intl, normalizedResourceId, onOpenDetail]
+  );
+
+  const quoteFile = useCallback(
+    (item: FileTreeItem) => {
+      if (!normalizedResourceId) return;
+      EventEmitter.emit('queryInput-insert-item', {
+        item: normalizeReferenceItem(item, normalizedResourceId),
+        type: isDirectory(item) ? DragType.commonFolder : DragType.commonFile,
+      });
+    },
+    [EventEmitter, normalizedResourceId]
+  );
+
+  const handleNodeClick = useCallback(
+    (event: React.MouseEvent, node: FileTreeItem) => {
+      if (onNodeClick) {
+        onNodeClick(event, node);
+        return;
+      }
+      event.stopPropagation();
+      if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = window.setTimeout(() => {
+        clickTimerRef.current = null;
+        if (!isDirectory(node)) openFilePreview(node);
+      }, NODE_CLICK_DELAY);
+    },
+    [onNodeClick, openFilePreview]
+  );
+
+  const handleNodeDoubleClick = useCallback(
+    (node: FileTreeItem) => {
+      if (clickTimerRef.current !== null) {
+        window.clearTimeout(clickTimerRef.current);
+        clickTimerRef.current = null;
+      }
+      quoteFile(node);
+    },
+    [quoteFile]
   );
 
   const openFileDiff = useCallback(
@@ -501,7 +584,7 @@ const ReposTab: React.FC<ReposTabProps> = ({
   return (
     <div className={styles.detailResourcePanel} style={{ padding: 10 }}>
       {repos.map((repo) => {
-        if (repo.repoType === 'workspace') {
+        if (repo.repoType !== 'workspace') {
           return null;
         }
         const repoKey = `${repo.repoId}`;
@@ -553,7 +636,8 @@ const ReposTab: React.FC<ReposTabProps> = ({
             onRefresh={resourceId && sessionId ? () => void refreshRepo(repo) : undefined}
             onExpand={setExpandedKeys}
             onLoadData={loadRepoTreeNode}
-            onNodeClick={onNodeClick}
+            onNodeClick={handleNodeClick}
+            onNodeDoubleClick={handleNodeDoubleClick}
           />
         );
       })}
