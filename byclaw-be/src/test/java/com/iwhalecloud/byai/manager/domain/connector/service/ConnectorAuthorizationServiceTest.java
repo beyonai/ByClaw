@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import com.alibaba.fastjson.JSON;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationProviderRegistry;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationProgress;
@@ -34,9 +35,11 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorAuthorizationProvider;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorManifestCommandResolver;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.RedisAuthorizationSession;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.RedisAuthorizationSessionRepository;
 import com.iwhalecloud.byai.manager.domain.connector.manifest.InvalidConnectorManifestException;
+import com.iwhalecloud.byai.manager.domain.connector.manifest.ConnectorManifestCanonicalizer;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorAuthorizationDto;
 import com.iwhalecloud.byai.manager.dto.connector.StartConnectorAuthorizationRequest;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
@@ -84,8 +87,10 @@ class ConnectorAuthorizationServiceTest {
     @Test
     void startRoutesLarkProviderAndStoresOnlyEncryptedTemporarySecretsInRedis() {
         ConnectorInfo connector = connector("lark", "lark-cli", "DEVICE_FLOW", "{\"tenant\":\"cn\"}");
+        connector.setRuntimeManifest(larkManifest());
         when(connectorInfoService.findById(CONNECTOR_ID)).thenReturn(connector);
         when(providerRegistry.get("lark-cli")).thenReturn(provider);
+        service = manifestDrivenService();
         Date expiresAt = futureExpiry();
         when(provider.start(any())).thenReturn(new AuthorizationStartResult(
             AuthorizationStatus.PENDING,
@@ -109,6 +114,8 @@ class ConnectorAuthorizationServiceTest {
         assertThat(context.providerCode()).isEqualTo("lark-cli");
         assertThat(context.redirectUrl()).isEqualTo(request().getRedirectUrl());
         assertThat(context.providerConfig()).containsEntry("tenant", "cn");
+        assertThat(context.commandCatalog().command("status", 0))
+            .containsExactly("lark-cli", "auth", "status", "--json", "--verify");
 
         ArgumentCaptor<RedisAuthorizationSession> sessionCaptor = ArgumentCaptor.forClass(RedisAuthorizationSession.class);
         verify(sessionRepository).create(sessionCaptor.capture());
@@ -117,6 +124,7 @@ class ConnectorAuthorizationServiceTest {
         assertThat(session.status()).isEqualTo(AuthorizationStatus.PENDING);
         assertThat(session.providerSessionId()).isEqualTo("provider-session-1");
         assertThat(session.version()).isZero();
+        assertThat(session.manifestDigest()).isEqualTo(context.commandCatalog().digest());
         assertThat(session.expiresAt()).isEqualTo(expiresAt);
         assertThat(session.authorizationUrlCipher()).doesNotContain("SECRET-CODE");
         assertThat(session.providerStateCipher()).doesNotContain("temporary-device-secret");
@@ -128,6 +136,65 @@ class ConnectorAuthorizationServiceTest {
         assertThat(result.getQrCodeUrl()).startsWith("data:image/png;base64,");
         assertThat(result.getExpiresAt()).isEqualTo(expiresAt);
         assertThat(result.getErrorCode()).isNull();
+    }
+
+    @Test
+    void startRejectsInvalidManifestBeforeCallingProvider() {
+        ConnectorInfo connector = connector("lark", "lark-cli", "DEVICE_FLOW", null);
+        connector.setRuntimeManifest("{\"invalid\":true}");
+        when(connectorInfoService.findById(CONNECTOR_ID)).thenReturn(connector);
+        when(providerRegistry.get("lark-cli")).thenReturn(provider);
+        service = manifestDrivenService();
+
+        ConnectorAuthorizationDto result = service.start(request(), USER_ID);
+
+        assertThat(result.getStatus()).isEqualTo("failed");
+        assertThat(result.getErrorCode()).isEqualTo("CONNECTOR_MANIFEST_INVALID");
+        verify(provider, never()).start(any());
+    }
+
+    @Test
+    void statusFailsClosedAndCancelsProviderWhenManifestChangesDuringAuthorization() {
+        ConnectorInfo connector = connector("lark", "lark-cli", "DEVICE_FLOW", null);
+        connector.setRuntimeManifest(larkManifest());
+        ObjectMapper objectMapper = new ObjectMapper();
+        ConnectorManifestCommandResolver resolver = new ConnectorManifestCommandResolver(
+            objectMapper,
+            new ConnectorManifestCanonicalizer(objectMapper)
+        );
+        String digest = resolver.resolve(connector).digest();
+        RedisAuthorizationSession pending = new RedisAuthorizationSession(
+            AUTHORIZATION_ID,
+            USER_ID,
+            CONNECTOR_ID,
+            "lark",
+            "lark-cli",
+            AuthorizationStatus.PENDING,
+            null,
+            Sm4Util.encrypt(AUTHORIZATION_URL),
+            "provider-session-1",
+            Sm4Util.encrypt(PROVIDER_STATE),
+            null,
+            futureExpiry(),
+            null,
+            null,
+            digest,
+            0L
+        );
+        connector.setRuntimeManifest(larkManifest().replace("--verify", "--verify-changed"));
+        when(connectorInfoService.findById(CONNECTOR_ID)).thenReturn(connector);
+        when(providerRegistry.get("lark-cli")).thenReturn(provider);
+        when(sessionRepository.findOwned(AUTHORIZATION_ID, USER_ID)).thenReturn(Optional.of(pending));
+        when(sessionRepository.compareAndSetStatus(
+            eq(AUTHORIZATION_ID), eq(AuthorizationStatus.PENDING), eq(0L), any())).thenReturn(true);
+        service = manifestDrivenService();
+
+        ConnectorAuthorizationDto result = service.status(AUTHORIZATION_ID, USER_ID);
+
+        assertThat(result.getStatus()).isEqualTo("failed");
+        assertThat(result.getErrorCode()).isEqualTo("CONNECTOR_MANIFEST_INVALID");
+        verify(provider).cancel(any(AuthorizationSessionContext.class));
+        verify(provider, never()).queryStatus(any());
     }
 
     @Test
@@ -888,6 +955,39 @@ class ConnectorAuthorizationServiceTest {
 
     private AuthorizationStatusResult statusResult(AuthorizationStatus status) {
         return new AuthorizationStatusResult(status, null, null, null, null, null, null);
+    }
+
+    private ConnectorAuthorizationService manifestDrivenService() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        ConnectorManifestCommandResolver resolver = new ConnectorManifestCommandResolver(
+            objectMapper,
+            new ConnectorManifestCanonicalizer(objectMapper)
+        );
+        return new ConnectorAuthorizationService(
+            connectorInfoService,
+            providerRegistry,
+            sessionRepository,
+            connectorAuthMapper,
+            sequenceService,
+            null,
+            new AuthorizationQrCodeEncoder(),
+            resolver
+        );
+    }
+
+    private String larkManifest() {
+        return """
+            {
+              "schemaVersion":"1.0","id":"lark","version":"1.0.84",
+              "runtime":{"type":"cli","commands":{
+                "login":[["lark-cli","auth","login","--domain","all","--no-wait","--json"]],
+                "status":[["lark-cli","auth","status","--json","--verify"]]
+              }},
+              "authStorage":{"mode":"native-home","nativePath":"/by/.connector-auth/.lark-cli",
+                "environment":{"LARK_HOME":"/by/.connector-auth/.lark-cli"}},
+              "skill":{"code":"fws","source":"system-builtin","installScope":"user","grantScope":"agent"}
+            }
+            """;
     }
 
     private RedisAuthorizationSession session(AuthorizationStatus status, long version) {

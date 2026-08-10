@@ -55,6 +55,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliR
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.ManagedProcess;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService.ConnectorCliWorkspace;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
 class WecomCliAuthorizationProviderTest {
@@ -203,7 +204,8 @@ class WecomCliAuthorizationProviderTest {
             .satisfies(constructor -> assertThat(constructor.getParameterTypes()).containsExactly(
                 ConnectorCliRunner.class,
                 ConnectorCredentialWorkspaceService.class,
-                ObjectMapper.class
+                ObjectMapper.class,
+                com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorManifestCommandResolver.class
             ));
     }
 
@@ -605,13 +607,13 @@ class WecomCliAuthorizationProviderTest {
             "probeCommand", snapshottedProbe
         ));
         stubValidCacheStatus();
-        when(cliRunner.run(snapshottedProbe, ENVIRONMENT, null, Duration.ofSeconds(30)))
+        when(cliRunner.run(PROBE_COMMAND, ENVIRONMENT, null, Duration.ofSeconds(30)))
             .thenReturn(new CliResult(7, "token=secret-value https://private.example.com"));
 
         AuthorizationStatusResult result = provider.queryStatus(sessionContext(authorization.result()));
 
         assertFailedStatus(result, "PROVIDER_PROBE_FAILED", "WeCom authorization probe failed");
-        verify(cliRunner).run(snapshottedProbe, ENVIRONMENT, null, Duration.ofSeconds(30));
+        verify(cliRunner).run(PROBE_COMMAND, ENVIRONMENT, null, Duration.ofSeconds(30));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -1836,7 +1838,8 @@ class WecomCliAuthorizationProviderTest {
             "wecom",
             "wecom-cli",
             null,
-            providerConfig
+            providerConfig,
+            commandCatalog()
         );
     }
 
@@ -2228,7 +2231,8 @@ class WecomCliAuthorizationProviderTest {
             "wecom-cli",
             null,
             null,
-            new Date()
+            new Date(),
+            commandCatalog()
         );
     }
 
@@ -2249,7 +2253,8 @@ class WecomCliAuthorizationProviderTest {
             "wecom-cli",
             null,
             providerState,
-            expiresAt
+            expiresAt,
+            commandCatalog()
         );
     }
 
@@ -2296,7 +2301,20 @@ class WecomCliAuthorizationProviderTest {
             "wecom-cli",
             started.providerSessionId(),
             providerState,
-            started.expiresAt()
+            started.expiresAt(),
+            commandCatalog()
+        );
+    }
+
+    private ManifestCommandCatalog commandCatalog() {
+        return new ManifestCommandCatalog(
+            Map.of(
+                "login", List.of(INIT_COMMAND),
+                "status", List.of(CACHE_STATUS_COMMAND, PROBE_COMMAND),
+                "logout", List.of(CACHE_CLEAR_COMMAND)
+            ),
+            "test-digest",
+            Map.of()
         );
     }
 

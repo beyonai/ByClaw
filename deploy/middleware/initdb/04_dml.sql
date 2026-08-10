@@ -5326,17 +5326,17 @@ FROM (
            'dws' AS skill_code,
            'DEVICE_FLOW' AS auth_mode,
            '{}' AS auth_config,
-           '{"authStorage":{"environment":{"DWS_CONFIG_DIR":"/by/.connector-auth/.dws/config","DWS_DISABLE_KEYCHAIN":"1","DWS_HOME":"/by/.connector-auth/.dws"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.dws","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"dingtalk","runtime":{"authorizeIn":"be-auth-job","commands":{"login":["dws","auth","login","--device","-y"],"logout":["dws","auth","reset","-y"],"status":["dws","auth","status","--format","json"]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"dws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.52"}' AS runtime_manifest,
+           '{"authStorage":{"environment":{"DWS_CONFIG_DIR":"/by/.connector-auth/.dws/config","DWS_DISABLE_KEYCHAIN":"1","DWS_HOME":"/by/.connector-auth/.dws"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.dws","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"dingtalk","runtime":{"authorizeIn":"be-auth-job","commands":{"login":[["dws","auth","login","--device","--no-browser","--recommend","-y"]],"logout":[["dws","auth","reset","-y"]],"status":[["dws","auth","status","--format","json"]]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"dws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.52"}' AS runtime_manifest,
            10 AS sort
     UNION ALL
     SELECT 'lark', '飞书', '通过 lark-cli 连接飞书工作空间', 'lark-cli', 'fws', 'DEVICE_FLOW',
-           '{"domains":["docs","drive","wiki"]}',
-           '{"authStorage":{"environment":{"LARK_HOME":"/by/.connector-auth/.lark-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.lark-cli","owner":"user-sandbox-auth-job","runtimeMutation":"sandbox-native"},"id":"lark","runtime":{"authorizeIn":"user-sandbox","commands":{"login":["lark-cli","auth","login","--domain","all","--no-wait","--json"],"logout":["lark-cli","auth","logout","--json"],"status":["lark-cli","auth","status","--json","--verify"]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"fws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.84"}',
+           '{}',
+           '{"authStorage":{"environment":{"LARK_HOME":"/by/.connector-auth/.lark-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.lark-cli","owner":"user-sandbox-auth-job","runtimeMutation":"sandbox-native"},"id":"lark","runtime":{"authorizeIn":"user-sandbox","commands":{"configCheck":[["lark-cli","config","show"]],"configInitialize":[["lark-cli","config","init","--new","--force-init"]],"contextBind":[["lark-cli","config","bind","--source","openclaw","--identity","user-default","--force"]],"login":[["lark-cli","auth","login","--domain","all","--no-wait","--json"],["lark-cli","auth","login","--device-code","${deviceCode}","--json"]],"logout":[["lark-cli","auth","logout","--json"]],"status":[["lark-cli","auth","status","--json","--verify"]]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"fws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.84"}',
            20
     UNION ALL
     SELECT 'wecom', '企业微信', '通过 wecom-cli 连接企业微信工作空间', 'wecom-cli', 'wecomcli', 'CLI_INIT',
-           '{"authorizationTimeoutSeconds":120,"probeCommand":["wecom-cli","contact","get_userlist","{}"]}' AS auth_config,
-           '{"authStorage":{"environment":{"WECOM_HOME":"/by/.connector-auth/.wecom-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.wecom-cli","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"wecom","runtime":{"authorizeIn":"be-auth-job","commands":{"login":["wecom-cli","init","--noninteractive","--no-open"],"logout":["wecom-cli","cache","clear"],"status":["wecom-cli","cache","status"]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"wecomcli","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"0.1.9"}' AS runtime_manifest,
+           '{"authorizationTimeoutSeconds":120}' AS auth_config,
+           '{"authStorage":{"environment":{"WECOM_HOME":"/by/.connector-auth/.wecom-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.wecom-cli","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"wecom","runtime":{"authorizeIn":"be-auth-job","commands":{"login":[["wecom-cli","init","--noninteractive","--no-open"]],"logout":[["wecom-cli","cache","clear"]],"status":[["wecom-cli","cache","status"],["wecom-cli","contact","get_userlist","{}"]]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"wecomcli","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"0.1.9"}' AS runtime_manifest,
            30
 ) seed
 WHERE NOT EXISTS (
@@ -5363,8 +5363,13 @@ SET provider_code = CASE connector_code
     END,
     auth_config = CASE connector_code
         WHEN 'dingtalk' THEN '{}'
-        WHEN 'lark' THEN '{"domains":["docs","drive","wiki"]}'
-        WHEN 'wecom' THEN '{"authorizationTimeoutSeconds":120,"probeCommand":["wecom-cli","contact","get_userlist","{}"]}'
+        WHEN 'lark' THEN '{}'
+        WHEN 'wecom' THEN '{"authorizationTimeoutSeconds":120}'
+    END,
+    runtime_manifest = CASE connector_code
+        WHEN 'dingtalk' THEN '{"authStorage":{"environment":{"DWS_CONFIG_DIR":"/by/.connector-auth/.dws/config","DWS_DISABLE_KEYCHAIN":"1","DWS_HOME":"/by/.connector-auth/.dws"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.dws","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"dingtalk","runtime":{"authorizeIn":"be-auth-job","commands":{"login":[["dws","auth","login","--device","--no-browser","--recommend","-y"]],"logout":[["dws","auth","reset","-y"]],"status":[["dws","auth","status","--format","json"]]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"dws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.52"}'
+        WHEN 'lark' THEN '{"authStorage":{"environment":{"LARK_HOME":"/by/.connector-auth/.lark-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.lark-cli","owner":"user-sandbox-auth-job","runtimeMutation":"sandbox-native"},"id":"lark","runtime":{"authorizeIn":"user-sandbox","commands":{"configCheck":[["lark-cli","config","show"]],"configInitialize":[["lark-cli","config","init","--new","--force-init"]],"contextBind":[["lark-cli","config","bind","--source","openclaw","--identity","user-default","--force"]],"login":[["lark-cli","auth","login","--domain","all","--no-wait","--json"],["lark-cli","auth","login","--device-code","${deviceCode}","--json"]],"logout":[["lark-cli","auth","logout","--json"]],"status":[["lark-cli","auth","status","--json","--verify"]]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"fws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.84"}'
+        WHEN 'wecom' THEN '{"authStorage":{"environment":{"WECOM_HOME":"/by/.connector-auth/.wecom-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.wecom-cli","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"wecom","runtime":{"authorizeIn":"be-auth-job","commands":{"login":[["wecom-cli","init","--noninteractive","--no-open"]],"logout":[["wecom-cli","cache","clear"]],"status":[["wecom-cli","cache","status"],["wecom-cli","contact","get_userlist","{}"]]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"wecomcli","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"0.1.9"}'
     END,
     request_config = '{}',
     update_time = CURRENT_TIMESTAMP
@@ -5456,3 +5461,19 @@ SET target_content = json_build_object(
 FROM byai.ss_resource r
 WHERE e.resource_id = r.resource_id
   AND r.resource_code IN ('knowledge-collection','bycli');
+
+-- ========== V0.5.1 Runtime Manifest 命令执行（合并到全新初始化脚本） ==========
+-- 与 V0.5.1 增量迁移保持一致，确保历史升级与全新安装收敛到同一终态。
+UPDATE byai.byai_connector_info
+SET auth_config = CASE connector_code
+        WHEN 'dingtalk' THEN '{}'
+        WHEN 'lark' THEN '{}'
+        WHEN 'wecom' THEN '{"authorizationTimeoutSeconds":120}'
+    END,
+    runtime_manifest = CASE connector_code
+        WHEN 'dingtalk' THEN '{"authStorage":{"environment":{"DWS_CONFIG_DIR":"/by/.connector-auth/.dws/config","DWS_DISABLE_KEYCHAIN":"1","DWS_HOME":"/by/.connector-auth/.dws"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.dws","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"dingtalk","runtime":{"authorizeIn":"be-auth-job","commands":{"login":[["dws","auth","login","--device","--no-browser","--recommend","-y"]],"logout":[["dws","auth","reset","-y"]],"status":[["dws","auth","status","--format","json"]]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"dws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.52"}'
+        WHEN 'lark' THEN '{"authStorage":{"environment":{"LARK_HOME":"/by/.connector-auth/.lark-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.lark-cli","owner":"user-sandbox-auth-job","runtimeMutation":"sandbox-native"},"id":"lark","runtime":{"authorizeIn":"user-sandbox","commands":{"configCheck":[["lark-cli","config","show"]],"configInitialize":[["lark-cli","config","init","--new","--force-init"]],"contextBind":[["lark-cli","config","bind","--source","openclaw","--identity","user-default","--force"]],"login":[["lark-cli","auth","login","--domain","all","--no-wait","--json"],["lark-cli","auth","login","--device-code","${deviceCode}","--json"]],"logout":[["lark-cli","auth","logout","--json"]],"status":[["lark-cli","auth","status","--json","--verify"]]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"fws","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"1.0.84"}'
+        WHEN 'wecom' THEN '{"authStorage":{"environment":{"WECOM_HOME":"/by/.connector-auth/.wecom-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.wecom-cli","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"wecom","runtime":{"authorizeIn":"be-auth-job","commands":{"login":[["wecom-cli","init","--noninteractive","--no-open"]],"logout":[["wecom-cli","cache","clear"]],"status":[["wecom-cli","cache","status"],["wecom-cli","contact","get_userlist","{}"]]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"wecomcli","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"0.1.9"}'
+    END,
+    update_time = CURRENT_TIMESTAMP
+WHERE connector_code IN ('dingtalk', 'lark', 'wecom');

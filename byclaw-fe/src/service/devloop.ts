@@ -347,5 +347,3 @@ export const checkDwsAuthStatus = () => POST<any>('/byaiService/devloop/dws/auth
 // 按扫描源查授权状态：查该源创建者的授权，返回 canAuthorize/creatorName，供列表逐源展示与入口控制。
 export const checkDwsAuthStatusBySource = (sourceId: number) =>
   POST<any>('/byaiService/devloop/dws/authStatus/bySource', { sourceId });
-
-export const saveDwsToken = (token: string) => POST<any>('/byaiService/devloop/dws/saveToken', { token });

@@ -34,6 +34,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
 
 /** Lark authorization orchestration backed by OpenSandbox remote processes. */
 @Component
@@ -78,17 +79,17 @@ public class LarkSandboxAuthorizationRuntime {
         log.info("Starting Lark sandbox authorization: userCode={}, executor=sandbox", userCode);
         try {
             UserSandboxContext sandbox = sandboxResolver.resolve(userCode, properties.getSandboxServiceKey());
-            SandboxCommandResult config = executor.run(sandbox.sandboxId(), policy.build(
+            SandboxCommandResult config = executor.run(sandbox.sandboxId(), policy.build(context.commandCatalog(),
                 LarkSandboxCommandPolicy.Action.SHOW_CONFIG, null, COMMAND_TIMEOUT, properties.getMaxOutputBytes()));
             log.debug("Checked Lark sandbox configuration: userCode={}, sandboxId={}, exitCode={}",
                 userCode, sandbox.sandboxId(), config.exitCode());
             if (config.exitCode() == 0) {
-                return startUserAuthorization(sandbox, null);
+                return startUserAuthorization(sandbox, null, context.commandCatalog());
             }
             if (!isNotConfigured(config)) {
                 return failed("APP_CONFIG_CHECK_FAILED", "Unable to check Lark application configuration");
             }
-            SandboxProcessHandle process = executor.start(sandbox.sandboxId(), policy.build(
+            SandboxProcessHandle process = executor.start(sandbox.sandboxId(), policy.build(context.commandCatalog(),
                 LarkSandboxCommandPolicy.Action.INITIALIZE_APP, null, INIT_TIMEOUT, properties.getMaxOutputBytes()));
             log.info("Started Lark app initialization: userCode={}, sandboxId={}, processId={}",
                 userCode, sandbox.sandboxId(), process.processId());
@@ -112,23 +113,23 @@ public class LarkSandboxAuthorizationRuntime {
         }
     }
 
-    public AuthorizationStatusResult verify(String userId) {
+    public AuthorizationStatusResult verify(String userId, ManifestCommandCatalog commandCatalog) {
         String userCode = resolveUserCode(userId);
         log.debug("Verifying Lark authorization in user sandbox: userCode={}", userCode);
         try {
             UserSandboxContext sandbox = sandboxResolver.resolve(userCode,
                 properties.getSandboxServiceKey());
-            return verified(sandbox.sandboxId());
+            return verified(sandbox.sandboxId(), commandCatalog);
         } catch (RuntimeException e) {
             log.warn("Lark sandbox verification unavailable: userCode={}, reason={}", userCode, e.getMessage());
             return failedStatus("LARK_SANDBOX_UNAVAILABLE", "User sandbox is unavailable");
         }
     }
 
-    public void revoke(String userId) {
+    public void revoke(String userId, ManifestCommandCatalog commandCatalog) {
         String userCode = resolveUserCode(userId);
         UserSandboxContext sandbox = sandboxResolver.resolve(userCode, properties.getSandboxServiceKey());
-        SandboxCommandResult result = executor.run(sandbox.sandboxId(), policy.build(
+        SandboxCommandResult result = executor.run(sandbox.sandboxId(), policy.build(commandCatalog,
             LarkSandboxCommandPolicy.Action.LOGOUT, null, COMMAND_TIMEOUT, properties.getMaxOutputBytes()));
         if (result == null || result.exitCode() != 0 || result.truncated() || result.timedOut()) {
             throw new IllegalStateException("Unable to revoke Lark credential");
@@ -145,14 +146,14 @@ public class LarkSandboxAuthorizationRuntime {
             if (APP_PHASE.equals(text(state, "phase"))) {
                 return queryInitialization(session, state, sandboxId);
             }
-            AuthorizationStatusResult verified = verified(sandboxId);
+            AuthorizationStatusResult verified = verified(sandboxId, session.commandCatalog());
             if (verified.status() == AuthorizationStatus.CONNECTED) {
                 return verified;
             }
             JsonNode process = state.get("process");
             if (process == null || !process.isObject()) {
                 String deviceCode = text(state, "deviceCode");
-                SandboxProcessHandle started = executor.start(sandboxId, policy.build(
+                SandboxProcessHandle started = executor.start(sandboxId, policy.build(session.commandCatalog(),
                     LarkSandboxCommandPolicy.Action.COMPLETE_USER_AUTHORIZATION,
                     deviceCode, session.expiresAt() == null ? COMMAND_TIMEOUT : remaining(session.expiresAt()),
                     properties.getMaxOutputBytes()));
@@ -169,7 +170,7 @@ public class LarkSandboxAuthorizationRuntime {
             if (status.state() == SandboxProcessSnapshot.State.NOT_FOUND) {
                 return failedStatus("LARK_SANDBOX_PROCESS_LOST", "Lark authorization process was lost");
             }
-            verified = verified(sandboxId);
+            verified = verified(sandboxId, session.commandCatalog());
             return verified.status() == AuthorizationStatus.CONNECTED
                 ? verified : failedStatus("PROVIDER_AUTH_FAILED", "Unable to complete Lark authorization");
         } catch (RuntimeException | JsonProcessingException e) {
@@ -217,26 +218,29 @@ public class LarkSandboxAuthorizationRuntime {
         if (status.state() != SandboxProcessSnapshot.State.EXITED) {
             return failedStatus("APP_INIT_FAILED", "Unable to initialize Lark application");
         }
-        SandboxCommandResult config = executor.run(sandboxId, policy.build(
+        SandboxCommandResult config = executor.run(sandboxId, policy.build(session.commandCatalog(),
             LarkSandboxCommandPolicy.Action.SHOW_CONFIG, null, COMMAND_TIMEOUT, properties.getMaxOutputBytes()));
         if (config.exitCode() != 0) {
             return progress(session, APP_PHASE, updated);
         }
         UserSandboxContext sandbox = new UserSandboxContext(sandboxId, text(updated, "userCode"),
             text(updated, "sandboxGeneration"), null);
-        AuthorizationStartResult login = startUserAuthorization(sandbox, updated);
+        AuthorizationStartResult login = startUserAuthorization(sandbox, updated, session.commandCatalog());
         return new AuthorizationStatusResult(AuthorizationStatus.PENDING, null, null, null, null, null, null,
             new AuthorizationProgress(USER_PHASE, login.authorizationUrl(), login.providerState(), login.expiresAt()));
     }
 
-    private AuthorizationStartResult startUserAuthorization(UserSandboxContext sandbox, ObjectNode existingState) {
-        SandboxCommandResult login = executor.run(sandbox.sandboxId(), policy.build(
+    private AuthorizationStartResult startUserAuthorization(
+            UserSandboxContext sandbox,
+            ObjectNode existingState,
+            ManifestCommandCatalog commandCatalog) {
+        SandboxCommandResult login = executor.run(sandbox.sandboxId(), policy.build(commandCatalog,
             LarkSandboxCommandPolicy.Action.START_USER_AUTHORIZATION, null, COMMAND_TIMEOUT,
             properties.getMaxOutputBytes()));
         if (isNotConfigured(login)) {
             log.info("Binding Lark CLI to OpenClaw context: sandboxId={}, identity=user-default",
                 sandbox.sandboxId());
-            SandboxCommandResult bind = executor.run(sandbox.sandboxId(), policy.build(
+            SandboxCommandResult bind = executor.run(sandbox.sandboxId(), policy.build(commandCatalog,
                 LarkSandboxCommandPolicy.Action.BIND_OPENCLAW_CONTEXT, null, COMMAND_TIMEOUT,
                 properties.getMaxOutputBytes()));
             if (bind.exitCode() != 0 || isNotConfigured(bind)) {
@@ -245,7 +249,7 @@ public class LarkSandboxAuthorizationRuntime {
                 return failed("PROVIDER_BIND_FAILED", "Unable to bind Lark CLI to OpenClaw context");
             }
             log.info("Bound Lark CLI to OpenClaw context: sandboxId={}", sandbox.sandboxId());
-            login = executor.run(sandbox.sandboxId(), policy.build(
+            login = executor.run(sandbox.sandboxId(), policy.build(commandCatalog,
                 LarkSandboxCommandPolicy.Action.START_USER_AUTHORIZATION, null, COMMAND_TIMEOUT,
                 properties.getMaxOutputBytes()));
         }
@@ -272,8 +276,8 @@ public class LarkSandboxAuthorizationRuntime {
         }
     }
 
-    private AuthorizationStatusResult verified(String sandboxId) {
-        SandboxCommandResult result = executor.run(sandboxId, policy.build(
+    private AuthorizationStatusResult verified(String sandboxId, ManifestCommandCatalog commandCatalog) {
+        SandboxCommandResult result = executor.run(sandboxId, policy.build(commandCatalog,
             LarkSandboxCommandPolicy.Action.VERIFY_AUTHORIZATION, null, COMMAND_TIMEOUT,
             properties.getMaxOutputBytes()));
         if (result.exitCode() != 0 || result.truncated()) {
