@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.times;
 
+import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -168,7 +169,9 @@ class LarkSandboxAuthorizationRuntimeTest {
              "identities":{"bot":{"status":"ready","verified":true,"openId":"ou_bot"},
                            "user":{"status":"ready","verified":true,
                                    "openId":"ou_65c765c074a0098a75f51a15f454313a",
-                                   "userName":"谢逊飞","tokenStatus":"valid"}}}
+                                   "userName":"谢逊飞","tokenStatus":"valid",
+                                   "expiresAt":"2030-08-10T23:58:47+08:00",
+                                   "refreshExpiresAt":"2030-08-17T21:58:47+08:00"}}}
             """, "", false, false));
 
         var result = runtime.verify("42", commandCatalog());
@@ -176,6 +179,8 @@ class LarkSandboxAuthorizationRuntimeTest {
         assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
         assertThat(result.accountId()).isEqualTo("ou_65c765c074a0098a75f51a15f454313a");
         assertThat(result.accountName()).isEqualTo("谢逊飞");
+        assertThat(result.credentialExpiresAt())
+            .isEqualTo(Date.from(Instant.parse("2030-08-10T15:58:47Z")));
     }
 
     private ManifestCommandCatalog commandCatalog() {
