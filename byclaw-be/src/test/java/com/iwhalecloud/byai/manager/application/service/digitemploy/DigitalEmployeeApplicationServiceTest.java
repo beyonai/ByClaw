@@ -29,6 +29,7 @@ import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeInstallResourceDTO;
+import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeGroupMemberDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeIdDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SetDefaultDigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SsResourceDTO;
@@ -98,6 +99,7 @@ class DigitalEmployeeApplicationServiceTest {
     private RobotChannelRegistryCoordinator robotChannelRegistryCoordinator;
     private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
     private DigitalEmployeeRuntimeRefreshService digitalEmployeeRuntimeRefreshService;
+    private DigitalEmployeeGroupApplicationService digitalEmployeeGroupApplicationService;
     private UserService userService;
     private ByClawSkillDeleteApplicationService byClawSkillDeleteApplicationService;
     private ByClawSkillPathResolver byClawSkillPathResolver;
@@ -122,6 +124,7 @@ class DigitalEmployeeApplicationServiceTest {
         robotChannelRegistryCoordinator = mock(RobotChannelRegistryCoordinator.class);
         digEmployeeChangeEventPublisher = mock(DigEmployeeChangeEventPublisher.class);
         digitalEmployeeRuntimeRefreshService = mock(DigitalEmployeeRuntimeRefreshService.class);
+        digitalEmployeeGroupApplicationService = mock(DigitalEmployeeGroupApplicationService.class);
         when(systemConfigService.getStringParamValueByCode(any())).thenReturn("");
         userService = mock(UserService.class);
         byClawSkillDeleteApplicationService = mock(ByClawSkillDeleteApplicationService.class);
@@ -152,6 +155,8 @@ class DigitalEmployeeApplicationServiceTest {
         ReflectionTestUtils.setField(service, "digEmployeeChangeEventPublisher", digEmployeeChangeEventPublisher);
         ReflectionTestUtils.setField(service, "digitalEmployeeRuntimeRefreshService",
             digitalEmployeeRuntimeRefreshService);
+        ReflectionTestUtils.setField(service, "digitalEmployeeGroupApplicationService",
+            digitalEmployeeGroupApplicationService);
         ReflectionTestUtils.setField(service, "userService", userService);
         ReflectionTestUtils.setField(service, "byClawSkillDeleteApplicationService", byClawSkillDeleteApplicationService);
         ReflectionTestUtils.setField(service, "byClawSkillPathResolver", byClawSkillPathResolver);
@@ -526,6 +531,49 @@ class DigitalEmployeeApplicationServiceTest {
 
         assertThat(result.getList()).hasSize(1);
         assertThat(result.getList().get(0).getOwnerType()).isEqualTo(OwnerType.ENTERPRISE);
+    }
+
+    @Test
+    void queryEmployeeGroupMemberCandidates_usesDedicatedPagedQuery() {
+        DigitalEmployeeQo qo = new DigitalEmployeeQo();
+        qo.setPageNum(2);
+        qo.setPageSize(30);
+        qo.setKeyword("市场");
+        PageInfo<EmployeeGroupMemberDTO> expected = new PageInfo<>();
+        when(authApplicationService.isCurrentUserGlobalResourceManager()).thenReturn(false);
+        when(ssResExtDigEmployeeService.selectEmployeeGroupMemberCandidates(any(DigitalEmployeeQo.class)))
+            .thenReturn(expected);
+
+        PageInfo<EmployeeGroupMemberDTO> result = service.queryEmployeeGroupMemberCandidates(qo);
+
+        ArgumentCaptor<DigitalEmployeeQo> qoCaptor = ArgumentCaptor.forClass(DigitalEmployeeQo.class);
+        verify(resourceAuthContextService).setCurrentUserAuthQo(qoCaptor.capture());
+        verify(ssResExtDigEmployeeService).selectEmployeeGroupMemberCandidates(qo);
+        verifyNoInteractions(digitalEmployeeGroupApplicationService);
+        assertThat(result).isSameAs(expected);
+        assertThat(qoCaptor.getValue()).isSameAs(qo);
+        assertThat(qo.getPageNum()).isEqualTo(2);
+        assertThat(qo.getPageSize()).isEqualTo(30);
+        assertThat(qo.getKeyword()).isEqualTo("市场");
+        assertThat(qo.getMemberCandidateEnterpriseId()).isEqualTo(201L);
+        assertThat(qo.getMemberCandidateGlobalManager()).isFalse();
+        assertThat(qo.getMemberCandidateAgentTypes()).containsExactlyInAnyOrder("001", "005", "006", "011");
+        assertThat(qo.getMemberCandidateIntegrationTypes()).containsExactlyInAnyOrder("INTERFACE", "A2A", "PAGE");
+        assertThat(qo.getMemberCandidateStationIds()).isEmpty();
+    }
+
+    @Test
+    void queryEmployeeGroupMemberCandidates_capsOversizedPage() {
+        DigitalEmployeeQo qo = new DigitalEmployeeQo();
+        qo.setPageNum(0);
+        qo.setPageSize(500);
+        when(ssResExtDigEmployeeService.selectEmployeeGroupMemberCandidates(any(DigitalEmployeeQo.class)))
+            .thenReturn(new PageInfo<>());
+
+        service.queryEmployeeGroupMemberCandidates(qo);
+
+        assertThat(qo.getPageNum()).isEqualTo(1);
+        assertThat(qo.getPageSize()).isEqualTo(100);
     }
 
     @Test

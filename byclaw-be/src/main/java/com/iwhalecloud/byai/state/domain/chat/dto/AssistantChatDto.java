@@ -227,4 +227,9 @@ public class AssistantChatDto {
      */
     private Long projectId;
 
+    /**
+     * 编排资源引用。数字员工组由后端根据 agentId 自动补齐；显式传入时必须与资源事实一致。
+     */
+    private Map<String, Object> orchestrator;
+
 }

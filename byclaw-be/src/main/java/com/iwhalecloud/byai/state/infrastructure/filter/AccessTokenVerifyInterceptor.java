@@ -49,6 +49,9 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
     private static final String CONNECTOR_SKILL_COMPLETE_PATH =
         "/connector/authorization/skill-complete";
 
+    private static final String ORCHESTRATOR_RUNTIME_PATH =
+        "/internal/v1/orchestrators/resolve-runtime";
+
     @Value("${byai.access.urlpatterns:}")
     private String urlPattenrs;
 
@@ -165,6 +168,12 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                 }
                 return this.authenticateBeyondTokenOnlyRequest(request, "连接器技能授权同步");
             }
+            if (this.isOrchestratorRuntimeRequest(request)) {
+                if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+                    return true;
+                }
+                return this.authenticateBeyondTokenOnlyRequest(request, "数字员工组运行时解析");
+            }
             if (this.checkUrlByRegex(url)) {
                 return true;
             }
@@ -212,6 +221,9 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
         }
         catch (Exception e) {
             logger.error(e.getMessage(), e);
+            if (this.isOrchestratorRuntimeRequest(request)) {
+                response.setStatus(HttpStatus.UNAUTHORIZED.value());
+            }
             this.setLoginError(response, e.getMessage());
             return false;
         }
@@ -267,6 +279,12 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
         String requestUri = request == null ? null : request.getRequestURI();
         return StringUtils.endsWith(requestUri, CONNECTOR_SKILL_COMPLETE_PATH)
             || StringUtils.endsWith(requestUri, CONNECTOR_SKILL_COMPLETE_PATH + "/");
+    }
+
+    private boolean isOrchestratorRuntimeRequest(HttpServletRequest request) {
+        String requestUri = request == null ? null : request.getRequestURI();
+        return StringUtils.endsWith(requestUri, ORCHESTRATOR_RUNTIME_PATH)
+            || StringUtils.endsWith(requestUri, ORCHESTRATOR_RUNTIME_PATH + "/");
     }
 
     /**

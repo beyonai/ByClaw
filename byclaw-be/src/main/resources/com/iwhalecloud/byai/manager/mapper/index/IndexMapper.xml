@@ -496,6 +496,7 @@
             <!-- 基础过滤条件 -->
             and a.resource_biz_type = 'DIG_EMPLOYEE'
             and a.resource_status = 2
+            and coalesce(b.agent_type, '') != '017'
             <if test="userId !=null">
                 and a.create_by = #{userId}
             </if>
@@ -630,6 +631,14 @@
         <where>
             <!-- 基础过滤条件 -->
             and a.resource_biz_type = 'DIG_EMPLOYEE'
+            <choose>
+                <when test="agentType != null and agentType != ''">
+                    and b.agent_type = #{agentType}
+                </when>
+                <otherwise>
+                    and coalesce(b.agent_type, '') != '017'
+                </otherwise>
+            </choose>
             <choose>
                 <when test="resourceStatus != null">
                     and a.resource_status = #{resourceStatus}

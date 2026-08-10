@@ -39,6 +39,8 @@ export type Resource = {
   field_id?: string;
   field_desc?: string;
   chatAvatar?: string;
+  agentType?: string;
+  isInactiveAgentSelection?: boolean;
 };
 
 export interface PayloadType {

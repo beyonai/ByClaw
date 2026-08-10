@@ -806,13 +806,9 @@ public class AuthApplicationService {
      */
     private boolean hasResourceMemberSettingPermission(SsResource ssResource) {
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
-        boolean hasGlobalAdminRole = CurrentUserHolder.getUsersOrganizations().stream()
-            .anyMatch(item -> StringUtils.equalsAny(item.getUserType(), UserType.PLAT_MAN, UserType.PLAT_DEVOPS,
-                UserType.BUSINESS_MAN));
 
         // 平台管理/运维、业务管理员和超级管理员拥有全局管理权限。
-        if (hasGlobalAdminRole
-            || ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode())) {
+        if (isCurrentUserGlobalResourceManager()) {
             return true;
         }
 
@@ -829,6 +825,17 @@ public class AuthApplicationService {
 
         // 对资源有有效管理权限的人，同样允许维护资源成员。
         return hasEffectiveAllowManagePrivilege(ssResource, currentUserId);
+    }
+
+    /**
+     * 判断当前用户是否拥有不受单资源授权限制的全局资源管理权限。
+     */
+    public boolean isCurrentUserGlobalResourceManager() {
+        boolean hasGlobalAdminRole = CurrentUserHolder.getUsersOrganizations().stream()
+            .anyMatch(item -> StringUtils.equalsAny(item.getUserType(), UserType.PLAT_MAN, UserType.PLAT_DEVOPS,
+                UserType.BUSINESS_MAN));
+        return hasGlobalAdminRole
+            || ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode());
     }
 
     /**

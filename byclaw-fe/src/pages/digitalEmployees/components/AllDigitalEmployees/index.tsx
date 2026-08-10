@@ -67,10 +67,15 @@ function AllDigitalEmployees(
     searchName?: string;
     dropdownParam?: IOnOkParams;
     buildFilterParam?: (activeTab: string, filterParam?: IOnOkParams) => Record<string, any>;
+    mode?: 'employee' | 'group';
   },
   ref: any
 ) {
-  const { searchName, dropdownParam, buildFilterParam } = props;
+  const { searchName, dropdownParam, buildFilterParam, mode = 'employee' } = props;
+  const isEmployeeGroup = mode === 'group';
+  const listTabKey = isEmployeeGroup ? 'group' : 'enterprise';
+  const catalogSearchParamKey = isEmployeeGroup ? 'groupCatalogId' : 'enterpriseCatalogId';
+  const scrollerId = isEmployeeGroup ? 'allDigitalEmployeeGroupsScroller' : 'allDigitalEmployeesScroller';
 
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -85,7 +90,7 @@ function AllDigitalEmployees(
 
   const { employeesTypeList } = useSelector((state: any) => state.employees);
 
-  const [curActiveLink, setCurActiveLink] = useState<string>(() => searchParams.get('enterpriseCatalogId') || '');
+  const [curActiveLink, setCurActiveLink] = useState<string>(() => searchParams.get(catalogSearchParamKey) || '');
   const [list, setList] = useState<IAgentCache[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [authDrawerOpen, setAuthDrawerOpen] = useState(false);
@@ -147,8 +152,9 @@ function AllDigitalEmployees(
         pageNum,
         pageSize: paginationInfo.pageSize,
         keyword,
-        ...(buildFilterParam?.('enterprise', filterParam) || {}),
+        ...(buildFilterParam?.(listTabKey, filterParam) || {}),
         ownerType: 'enterprise',
+        ...(isEmployeeGroup ? { agentType: '017' } : {}),
         orderField: 'updateTime',
         orderBy: 'desc',
       };
@@ -181,7 +187,7 @@ function AllDigitalEmployees(
           console.error(e);
         });
     },
-    [buildFilterParam, paginationInfo.pageSize]
+    [buildFilterParam, isEmployeeGroup, listTabKey, paginationInfo.pageSize]
   );
 
   const getSearch = React.useCallback(
@@ -214,7 +220,7 @@ function AllDigitalEmployees(
     const firstEmployeesType = myEmployeesTypeList[0];
     if (!firstEmployeesType) return;
 
-    const catalogIdFromUrl = searchParams.get('enterpriseCatalogId');
+    const catalogIdFromUrl = searchParams.get(catalogSearchParamKey);
     const catalogIds = myEmployeesTypeList.map((item) => `${item.catalogId}`);
     const validCatalogIdFromUrl = catalogIdFromUrl && catalogIds.includes(catalogIdFromUrl) ? catalogIdFromUrl : '';
     const validCurActiveLink = curActiveLink && catalogIds.includes(curActiveLink) ? curActiveLink : '';
@@ -225,17 +231,17 @@ function AllDigitalEmployees(
       getSearch(searchName || '', dropdownParam, 1, nextCatalogId);
       hasInitializedRef.current = true;
     }
-  }, [curActiveLink, dropdownParam, getSearch, myEmployeesTypeList, searchName, searchParams]);
+  }, [catalogSearchParamKey, curActiveLink, dropdownParam, getSearch, myEmployeesTypeList, searchName, searchParams]);
 
   useEffect(() => {
     if (!curActiveLink) return;
     if (!myEmployeesTypeList.some((item) => `${item.catalogId}` === curActiveLink)) return;
     const nextSearchParams = new URLSearchParams(searchParams);
-    if (nextSearchParams.get('enterpriseCatalogId') !== curActiveLink) {
-      nextSearchParams.set('enterpriseCatalogId', curActiveLink);
+    if (nextSearchParams.get(catalogSearchParamKey) !== curActiveLink) {
+      nextSearchParams.set(catalogSearchParamKey, curActiveLink);
       setSearchParams(nextSearchParams);
     }
-  }, [curActiveLink, myEmployeesTypeList, searchParams, setSearchParams]);
+  }, [catalogSearchParamKey, curActiveLink, myEmployeesTypeList, searchParams, setSearchParams]);
 
   React.useImperativeHandle(
     ref,
@@ -334,8 +340,8 @@ function AllDigitalEmployees(
         setAgentId?.(`${employee.agentId}`);
         setSessionId?.('');
         const nextSearchParams = new URLSearchParams({
-          tab: 'enterprise',
-          enterpriseCatalogId: curActiveLink,
+          tab: listTabKey,
+          [catalogSearchParamKey]: curActiveLink,
         });
         navigate(`${getAgentPath(employee)}?${nextSearchParams.toString()}`);
         return;
@@ -346,6 +352,7 @@ function AllDigitalEmployees(
     },
     [
       curActiveLink,
+      catalogSearchParamKey,
       dispatch,
       intl,
       navigate,
@@ -353,6 +360,7 @@ function AllDigitalEmployees(
       setSessionId,
       showNoUsePermissionWarning,
       trackerEmployeeClick,
+      listTabKey,
     ]
   );
 
@@ -363,12 +371,12 @@ function AllDigitalEmployees(
       const nextSearchParams = new URLSearchParams({
         digitalType: employee?.createType || 'FROM_MANUALLY',
         appId: `${resourceId}`,
-        tab: 'enterprise',
-        enterpriseCatalogId: curActiveLink,
+        tab: listTabKey,
+        [catalogSearchParamKey]: curActiveLink,
       });
       navigate(`/digitalEmployeesCreate?${nextSearchParams.toString()}`);
     },
-    [curActiveLink, navigate]
+    [catalogSearchParamKey, curActiveLink, listTabKey, navigate]
   );
 
   const onDeleteEmployee = React.useCallback(
@@ -450,18 +458,14 @@ function AllDigitalEmployees(
           onChange={(activeKey) => {
             const nextActiveKey = `${activeKey}`;
             const nextSearchParams = new URLSearchParams(searchParams);
-            nextSearchParams.set('enterpriseCatalogId', nextActiveKey);
+            nextSearchParams.set(catalogSearchParamKey, nextActiveKey);
             setCurActiveLink(nextActiveKey);
             setSearchParams(nextSearchParams);
             getSearch(searchName || '', dropdownParam, 1, activeKey);
           }}
         />
       </div>
-      <div
-        className="ub ub-f1 ub-ver overflow-auto hideThumb"
-        style={{ position: 'relative' }}
-        id="allDigitalEmployeesScroller"
-      >
+      <div className="ub ub-f1 ub-ver overflow-auto hideThumb" style={{ position: 'relative' }} id={scrollerId}>
         <div className={classnames(styles.sectionsContainer, 'ub-f1')}>
           <Spin
             wrapperClassName={styles.spinningWrapper}
@@ -490,7 +494,7 @@ function AllDigitalEmployees(
                   </div>
                 }
                 dataLength={list.length}
-                scrollableTarget="allDigitalEmployeesScroller"
+                scrollableTarget={scrollerId}
                 className={classnames(styles.messageRowWrap, { [styles.hasMore]: hasMore })}
                 scrollThreshold="50px"
                 hasChildren={list.length > 0}
