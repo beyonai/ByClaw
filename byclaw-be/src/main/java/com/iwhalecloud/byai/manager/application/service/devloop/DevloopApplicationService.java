@@ -29,6 +29,10 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.*;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorManifestCommandResolver;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
+import com.iwhalecloud.byai.manager.domain.connector.provider.dingtalk.DwsAuthorizationCommandPolicy;
+import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorInfoService;
 import com.iwhalecloud.byai.manager.domain.session.service.ByaiSessionService;
 import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFileDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFilePkIdDto;
@@ -228,6 +232,12 @@ public class DevloopApplicationService {
 
     @Autowired
     private DwsAuthService dwsAuthService;
+
+    @Autowired
+    private ConnectorInfoService connectorInfoService;
+
+    @Autowired
+    private ConnectorManifestCommandResolver connectorManifestCommandResolver;
 
     @Autowired
     private DevloopPatService patService;
@@ -3593,7 +3603,9 @@ public class DevloopApplicationService {
 
     /** 启动设备授权流程（异步启动dws进程，返回userCode和verificationUrl） */
     public ResponseUtil<Map<String, Object>> startDwsDeviceAuth() {
-        Map<String, Object> result = dwsAuthService.startDeviceAuth();
+        Map<String, Object> result = dwsAuthService.startDeviceAuth(
+            DwsAuthorizationCommandPolicy.command(dwsCommandCatalog(), "login", 0, "login")
+        );
         if (Boolean.TRUE.equals(result.get("success"))) {
             return ResponseUtil.successResponse(result);
         }
@@ -3627,7 +3639,10 @@ public class DevloopApplicationService {
 
     /** 构造某用户的 DWS 授权状态视图；旧入口按原响应结构附带 hasToken/savedAt 兼容字段。 */
     private Map<String, Object> buildDwsStatus(Long userId, boolean includeLegacyTokenFields) {
-        Map<String, Object> runtimeStatus = dwsAuthService.getAuthStatus(userId);
+        Map<String, Object> runtimeStatus = dwsAuthService.getAuthStatus(
+            userId,
+            DwsAuthorizationCommandPolicy.command(dwsCommandCatalog(), "status", 0, "status")
+        );
         Map<String, Object> result = new HashMap<>();
         if (includeLegacyTokenFields) {
             result.put("hasToken", Boolean.TRUE.equals(runtimeStatus.get("authenticated")));
@@ -3645,13 +3660,8 @@ public class DevloopApplicationService {
         return result;
     }
 
-    /** 直接使用token授权 */
-    public ResponseUtil<Void> saveDwsToken(String token) {
-        boolean injected = dwsAuthService.injectToken(token);
-        if (!injected) {
-            return ResponseUtil.failRes(I18nUtil.get("devloop.dws.token.invalid"));
-        }
-        return ResponseUtil.successResponse(null);
+    private ManifestCommandCatalog dwsCommandCatalog() {
+        return connectorManifestCommandResolver.resolve(connectorInfoService.findByCode("dingtalk"));
     }
 
     /** 查询可用运营任务模板；模板目录为系统级数据，不受项目类型限制。 */

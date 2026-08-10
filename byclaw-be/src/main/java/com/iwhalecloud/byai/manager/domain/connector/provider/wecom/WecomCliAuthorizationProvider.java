@@ -49,6 +49,8 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCred
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialRevoker;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService.ConnectorCliWorkspace;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorManifestCommandResolver;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
 @Component
@@ -114,6 +116,7 @@ public class WecomCliAuthorizationProvider
     private final Clock clock;
     private final ScheduledExecutorService cleanupExecutor;
     private final ScheduledFuture<?> cleanupFuture;
+    private final ConnectorManifestCommandResolver manifestCommandResolver;
     private final ConcurrentHashMap<String, AuthorizationLifecycle> authorizationLifecycles =
         new ConcurrentHashMap<>();
     private final ReentrantReadWriteLock admissionGate = new ReentrantReadWriteLock(true);
@@ -128,14 +131,24 @@ public class WecomCliAuthorizationProvider
     public WecomCliAuthorizationProvider(
         ConnectorCliRunner cliRunner,
         ConnectorCredentialWorkspaceService workspaceService,
-        ObjectMapper objectMapper) {
+        ObjectMapper objectMapper,
+        ConnectorManifestCommandResolver manifestCommandResolver) {
         this(
             cliRunner,
             workspaceService,
             objectMapper,
             DEFAULT_START_OUTPUT_TIMEOUT,
-            DEFAULT_START_OUTPUT_POLL_INTERVAL
+            DEFAULT_START_OUTPUT_POLL_INTERVAL,
+            manifestCommandResolver
         );
+    }
+
+    public WecomCliAuthorizationProvider(
+        ConnectorCliRunner cliRunner,
+        ConnectorCredentialWorkspaceService workspaceService,
+        ObjectMapper objectMapper) {
+        this(cliRunner, workspaceService, objectMapper, DEFAULT_START_OUTPUT_TIMEOUT,
+            DEFAULT_START_OUTPUT_POLL_INTERVAL, null);
     }
 
     WecomCliAuthorizationProvider(
@@ -144,6 +157,16 @@ public class WecomCliAuthorizationProvider
         ObjectMapper objectMapper,
         Duration startOutputTimeout,
         Duration startOutputPollInterval) {
+        this(cliRunner, workspaceService, objectMapper, startOutputTimeout, startOutputPollInterval, null);
+    }
+
+    WecomCliAuthorizationProvider(
+        ConnectorCliRunner cliRunner,
+        ConnectorCredentialWorkspaceService workspaceService,
+        ObjectMapper objectMapper,
+        Duration startOutputTimeout,
+        Duration startOutputPollInterval,
+        ConnectorManifestCommandResolver manifestCommandResolver) {
         this(
             cliRunner,
             workspaceService,
@@ -151,7 +174,8 @@ public class WecomCliAuthorizationProvider
             startOutputTimeout,
             startOutputPollInterval,
             Clock.systemUTC(),
-            newCleanupExecutor()
+            newCleanupExecutor(),
+            manifestCommandResolver
         );
     }
 
@@ -163,6 +187,19 @@ public class WecomCliAuthorizationProvider
         Duration startOutputPollInterval,
         Clock clock,
         ScheduledExecutorService cleanupExecutor) {
+        this(cliRunner, workspaceService, objectMapper, startOutputTimeout, startOutputPollInterval,
+            clock, cleanupExecutor, null);
+    }
+
+    WecomCliAuthorizationProvider(
+        ConnectorCliRunner cliRunner,
+        ConnectorCredentialWorkspaceService workspaceService,
+        ObjectMapper objectMapper,
+        Duration startOutputTimeout,
+        Duration startOutputPollInterval,
+        Clock clock,
+        ScheduledExecutorService cleanupExecutor,
+        ConnectorManifestCommandResolver manifestCommandResolver) {
         this.cliRunner = Objects.requireNonNull(cliRunner, "cliRunner");
         this.workspaceService = Objects.requireNonNull(workspaceService, "workspaceService");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
@@ -170,6 +207,7 @@ public class WecomCliAuthorizationProvider
         this.startOutputPollIntervalNanos = positiveNanos(startOutputPollInterval, "startOutputPollInterval");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.cleanupExecutor = Objects.requireNonNull(cleanupExecutor, "cleanupExecutor");
+        this.manifestCommandResolver = manifestCommandResolver;
         this.cleanupFuture = cleanupExecutor.scheduleWithFixedDelay(
             this::cleanupExpiredLifecycles,
             LIFECYCLE_CLEANUP_INTERVAL.toMillis(),
@@ -190,7 +228,12 @@ public class WecomCliAuthorizationProvider
             throw new IllegalArgumentException(INVALID_USER_MESSAGE);
         }
         ConnectorCliWorkspace workspace = workspaceService.resolve(numericUserId, PROVIDER_CODE);
-        CliResult result = cliRunner.run(CACHE_CLEAR_COMMAND, workspace.environment(), null, CLI_TIMEOUT);
+        CliResult result = cliRunner.run(
+            command(catalogFor(connector), "logout", 0, "cache", "clear"),
+            workspace.environment(),
+            null,
+            CLI_TIMEOUT
+        );
         if (result == null || result.exitCode() != 0 || result.truncated()) {
             throw new IllegalStateException("Unable to revoke WeCom credential");
         }
@@ -218,7 +261,7 @@ public class WecomCliAuthorizationProvider
         }
         try {
             CliResult cacheResult = cliRunner.run(
-                CACHE_STATUS_COMMAND,
+                command(catalogFor(connector), "status", 0, "cache", "status"),
                 workspace.environment(),
                 null,
                 CLI_TIMEOUT
@@ -230,7 +273,7 @@ public class WecomCliAuthorizationProvider
                 return credentialCacheInvalid();
             }
             CliResult probeResult = cliRunner.run(
-                providerState.probeCommand(),
+                command(catalogFor(connector), "status", 1, "contact", "get_userlist"),
                 workspace.environment(),
                 null,
                 CLI_TIMEOUT
@@ -288,9 +331,11 @@ public class WecomCliAuthorizationProvider
 
         ProviderState providerState;
         String serializedProviderState;
+        List<String> initCommand;
         try {
             providerState = validatedProviderState(context.providerConfig());
             serializedProviderState = objectMapper.writeValueAsString(providerState);
+            initCommand = command(context.commandCatalog(), "login", 0, "init", "--noninteractive");
         } catch (RuntimeException | JsonProcessingException e) {
             return failedStart(PROVIDER_CONFIG_INVALID, PROVIDER_CONFIG_INVALID_MESSAGE);
         }
@@ -329,7 +374,8 @@ public class WecomCliAuthorizationProvider
         AuthorizationStartResult processStartFailure = startAndAttachReservedProcess(
             authorizationId,
             lifecycle,
-            workspace
+            workspace,
+            initCommand
         );
         if (processStartFailure != null) {
             return processStartFailure;
@@ -339,7 +385,8 @@ public class WecomCliAuthorizationProvider
             lifecycle,
             workspace,
             providerState,
-            serializedProviderState
+            serializedProviderState,
+            context.commandCatalog()
         );
     }
 
@@ -449,18 +496,18 @@ public class WecomCliAuthorizationProvider
             return failedStatus(PROVIDER_WORKSPACE_ERROR, PROVIDER_WORKSPACE_ERROR_MESSAGE);
         }
 
-        return runAvailabilityProbes(providerState, workspace, lifecycle, processState);
+        return runAvailabilityProbes(session.commandCatalog(), workspace, lifecycle, processState);
     }
 
     private AuthorizationStatusResult runAvailabilityProbes(
-        ProviderState providerState,
+        ManifestCommandCatalog commandCatalog,
         ConnectorCliWorkspace workspace,
         AuthorizationLifecycle lifecycle,
         ProcessState processState) {
         CliResult cacheResult;
         try {
             cacheResult = cliRunner.run(
-                CACHE_STATUS_COMMAND,
+                command(commandCatalog, "status", 0, "cache", "status"),
                 workspace.environment(),
                 null,
                 CLI_TIMEOUT
@@ -479,7 +526,7 @@ public class WecomCliAuthorizationProvider
         CliResult probeResult;
         try {
             probeResult = cliRunner.run(
-                providerState.probeCommand(),
+                command(commandCatalog, "status", 1, "contact", "get_userlist"),
                 workspace.environment(),
                 null,
                 CLI_TIMEOUT
@@ -545,7 +592,8 @@ public class WecomCliAuthorizationProvider
         AuthorizationLifecycle lifecycle,
         ConnectorCliWorkspace workspace,
         ProviderState providerState,
-        String serializedProviderState) {
+        String serializedProviderState,
+        ManifestCommandCatalog commandCatalog) {
         ManagedProcess process = lifecycle.process();
         if (process == null) {
             return failedStartFromStatus(lifecycleFailureResult(lifecycle));
@@ -586,7 +634,7 @@ public class WecomCliAuthorizationProvider
                     Integer exitCode = process.exitCode();
                     if (exitCode != null && exitCode == 0) {
                         AuthorizationStatusResult probeResult = runAvailabilityProbes(
-                            providerState,
+                            commandCatalog,
                             workspace,
                             lifecycle,
                             ProcessState.SUCCEEDED
@@ -836,7 +884,8 @@ public class WecomCliAuthorizationProvider
     private AuthorizationStartResult startAndAttachReservedProcess(
         String authorizationId,
         AuthorizationLifecycle lifecycle,
-        ConnectorCliWorkspace workspace) {
+        ConnectorCliWorkspace workspace,
+        List<String> initCommand) {
         ReentrantReadWriteLock.ReadLock readLock = admissionGate.readLock();
         readLock.lock();
         try {
@@ -850,7 +899,7 @@ public class WecomCliAuthorizationProvider
 
             ManagedProcess process;
             try {
-                process = cliRunner.start(INIT_COMMAND, workspace.environment(), null);
+                process = cliRunner.start(initCommand, workspace.environment(), null);
             } catch (RuntimeException e) {
                 return failReservedStart(
                     authorizationId,
@@ -1149,6 +1198,40 @@ public class WecomCliAuthorizationProvider
             probeValues.add(value.textValue());
         }
         return new ProviderState(timeoutSeconds, validatedProbeCommand(probeValues));
+    }
+
+    private List<String> command(
+            ManifestCommandCatalog commandCatalog,
+            String action,
+            int index,
+            String commandGroup,
+            String subcommand) {
+        if (commandCatalog == null) {
+            throw new IllegalArgumentException("WeCom manifest commands are unavailable");
+        }
+        List<String> command = commandCatalog.command(action, index);
+        if (command.size() < 3
+                || !"wecom-cli".equals(command.get(0))
+                || !commandGroup.equals(command.get(1))
+                || !subcommand.equals(command.get(2))) {
+            throw new IllegalArgumentException("WeCom manifest command is not allowed");
+        }
+        return command;
+    }
+
+    private ManifestCommandCatalog catalogFor(ConnectorInfo connector) {
+        if (manifestCommandResolver != null) {
+            return manifestCommandResolver.resolve(connector);
+        }
+        return new ManifestCommandCatalog(
+            Map.of(
+                "login", List.of(INIT_COMMAND),
+                "status", List.of(CACHE_STATUS_COMMAND, DEFAULT_PROBE_COMMAND),
+                "logout", List.of(CACHE_CLEAR_COMMAND)
+            ),
+            "legacy-test-catalog",
+            Map.of()
+        );
     }
 
     private ProcessState processState(AuthorizationLifecycle lifecycle) {

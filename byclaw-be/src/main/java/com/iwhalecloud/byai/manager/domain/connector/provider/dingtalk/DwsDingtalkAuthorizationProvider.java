@@ -3,9 +3,11 @@ package com.iwhalecloud.byai.manager.domain.connector.provider.dingtalk;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Date;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationSessionContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartContext;
@@ -15,6 +17,8 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorAuthorizationProvider;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialVerifier;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialRevoker;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorManifestCommandResolver;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService.DwsCredentialOutcome;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService.DwsCredentialStatus;
@@ -31,9 +35,18 @@ public class DwsDingtalkAuthorizationProvider
     private static final String START_FAILED_MESSAGE = "钉钉授权启动失败";
 
     private final DwsAuthService dwsAuthService;
+    private final ConnectorManifestCommandResolver manifestCommandResolver;
+
+    @Autowired
+    public DwsDingtalkAuthorizationProvider(
+            DwsAuthService dwsAuthService,
+            ConnectorManifestCommandResolver manifestCommandResolver) {
+        this.dwsAuthService = dwsAuthService;
+        this.manifestCommandResolver = manifestCommandResolver;
+    }
 
     public DwsDingtalkAuthorizationProvider(DwsAuthService dwsAuthService) {
-        this.dwsAuthService = dwsAuthService;
+        this(dwsAuthService, null);
     }
 
     @Override
@@ -47,7 +60,10 @@ public class DwsDingtalkAuthorizationProvider
             return failedStatus("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential");
         }
         try {
-            DwsCredentialStatus credentialStatus = dwsAuthService.getCredentialStatus(userId);
+            DwsCredentialStatus credentialStatus = dwsAuthService.getCredentialStatus(
+                userId,
+                DwsAuthorizationCommandPolicy.command(catalogFor(connector), "status", 0, "status")
+            );
             if (credentialStatus.outcome() == DwsCredentialOutcome.TIMEOUT) {
                 return failedStatus(
                     "CONNECTOR_VERIFICATION_TIMEOUT",
@@ -88,7 +104,9 @@ public class DwsDingtalkAuthorizationProvider
             return failedStart(INVALID_USER, INVALID_USER_MESSAGE);
         }
         try {
-            Map<String, Object> result = dwsAuthService.startDeviceAuth(userId, context.authorizationId());
+            List<String> command = DwsAuthorizationCommandPolicy.command(
+                context.commandCatalog(), "login", 0, "login");
+            Map<String, Object> result = dwsAuthService.startDeviceAuth(userId, context.authorizationId(), command);
             if (!Boolean.TRUE.equals(result.get("success"))) {
                 return failedStart(PROVIDER_START_FAILED, START_FAILED_MESSAGE);
             }
@@ -117,7 +135,9 @@ public class DwsDingtalkAuthorizationProvider
             return failedStatus(INVALID_USER, INVALID_USER_MESSAGE);
         }
         try {
-            Map<String, Object> status = dwsAuthService.getAuthStatus(userId);
+            List<String> command = DwsAuthorizationCommandPolicy.command(
+                session.commandCatalog(), "status", 0, "status");
+            Map<String, Object> status = dwsAuthService.getAuthStatus(userId, command);
             if (Boolean.TRUE.equals(status.get("tokenValid"))) {
                 return new AuthorizationStatusResult(
                     AuthorizationStatus.CONNECTED,
@@ -149,7 +169,10 @@ public class DwsDingtalkAuthorizationProvider
         if (numericUserId == null) {
             throw new IllegalArgumentException(INVALID_USER_MESSAGE);
         }
-        dwsAuthService.revokeCredential(numericUserId);
+        dwsAuthService.revokeCredential(
+            numericUserId,
+            DwsAuthorizationCommandPolicy.command(catalogFor(connector), "logout", 0, "reset")
+        );
     }
 
     private AuthorizationStartResult failedStart(String errorCode, String errorMessage) {
@@ -204,5 +227,19 @@ public class DwsDingtalkAuthorizationProvider
         } catch (DateTimeParseException e) {
             return null;
         }
+    }
+
+    private ManifestCommandCatalog catalogFor(ConnectorInfo connector) {
+        if (manifestCommandResolver != null) {
+            return manifestCommandResolver.resolve(connector);
+        }
+        return new ManifestCommandCatalog(
+            Map.of(
+                "status", List.of(List.of("dws", "auth", "status", "--format", "json")),
+                "logout", List.of(List.of("dws", "auth", "reset", "-y"))
+            ),
+            "legacy-test-catalog",
+            Map.of()
+        );
     }
 }
