@@ -29,7 +29,7 @@ class ConnectorManifestCanonicalizerTest {
               "version":"1.0.52",
               "id":"dingtalk",
               "schemaVersion":"1.0",
-              "runtime":{"commands":{"status":["dws","auth","status"]},"type":"cli"},
+              "runtime":{"commands":{"status":[["dws","auth","status"]]},"type":"cli"},
               "authStorage":{"nativePath":"/by/.connector-auth/.dws","mode":"native-home",
                 "environment":{"HOME":"/by/.connector-auth/.dws"}},
               "skill":{"code":"dws","source":"system-builtin","installScope":"user","grantScope":"agent"}
@@ -40,11 +40,11 @@ class ConnectorManifestCanonicalizerTest {
              "skill":{"grantScope":"agent","installScope":"user","source":"system-builtin","code":"dws"},
              "authStorage":{"environment":{"HOME":"/by/.connector-auth/.dws"},"mode":"native-home",
                "nativePath":"/by/.connector-auth/.dws"},
-             "runtime":{"type":"cli","commands":{"status":["dws","auth","status"]}}}
+             "runtime":{"type":"cli","commands":{"status":[["dws","auth","status"]]}}}
             """;
         String reorderedCommand = second.replace(
-            "[\"dws\",\"auth\",\"status\"]",
-            "[\"auth\",\"dws\",\"status\"]");
+            "[[\"dws\",\"auth\",\"status\"]]",
+            "[[\"auth\",\"dws\",\"status\"]]");
 
         assertThat(canonicalizer.canonicalize(connector, first))
             .isEqualTo(canonicalizer.canonicalize(connector, second));
@@ -57,7 +57,7 @@ class ConnectorManifestCanonicalizerTest {
         assertThatThrownBy(() -> canonicalizer.canonicalize(connector("dingtalk"), manifest(
             "lark",
             "/by/.connector-auth/.dws",
-            "{\"status\":[\"dws\",\"auth\",\"status\"]}")))
+            "{\"status\":[[\"dws\",\"auth\",\"status\"]]}")))
             .isInstanceOf(InvalidConnectorManifestException.class)
             .hasMessageContaining("id");
     }
@@ -70,7 +70,7 @@ class ConnectorManifestCanonicalizerTest {
         assertThatThrownBy(() -> canonicalizer.canonicalize(connector, manifest(
             "dingtalk",
             "/by/.connector-auth/.dws",
-            "{\"status\":[\"dws\",\"auth\",\"status\"]}")))
+            "{\"status\":[[\"dws\",\"auth\",\"status\"]]}")))
             .isInstanceOf(InvalidConnectorManifestException.class)
             .hasMessageContaining("skill.code");
     }
@@ -80,7 +80,7 @@ class ConnectorManifestCanonicalizerTest {
         assertThatThrownBy(() -> canonicalizer.canonicalize(connector("dingtalk"), manifest(
             "dingtalk",
             "/tmp/shared-home",
-            "{\"status\":[\"dws\",\"auth\",\"status\"]}")))
+            "{\"status\":[[\"dws\",\"auth\",\"status\"]]}")))
             .isInstanceOf(InvalidConnectorManifestException.class)
             .hasMessageContaining("nativePath");
     }
@@ -97,7 +97,7 @@ class ConnectorManifestCanonicalizerTest {
         String withSecret = manifest(
             "dingtalk",
             "/by/.connector-auth/.dws",
-            "{\"status\":[\"dws\",\"auth\",\"status\"]}")
+            "{\"status\":[[\"dws\",\"auth\",\"status\"]]}")
             .replace("\"skill\":", "\"appSecret\":\"secret-value\",\"skill\":");
         assertThatThrownBy(() -> canonicalizer.canonicalize(connector("dingtalk"), withSecret))
             .isInstanceOf(InvalidConnectorManifestException.class)
@@ -108,7 +108,7 @@ class ConnectorManifestCanonicalizerTest {
     void canonicalizeAcceptsUserSandboxAuthorizationOwnership() {
         ConnectorInfo connector = connector("dingtalk");
         String manifest = manifest("dingtalk", "/by/.connector-auth/.dws",
-            "{\"status\":[\"dws\",\"auth\",\"status\"]}")
+            "{\"status\":[[\"dws\",\"auth\",\"status\"]]}")
             .replace("\"runtime\":{\"type\":\"cli\"",
                 "\"runtime\":{\"authorizeIn\":\"user-sandbox\",\"type\":\"cli\"")
             .replace("\"authStorage\":{\"mode\":\"native-home\"",
@@ -124,12 +124,36 @@ class ConnectorManifestCanonicalizerTest {
         String oversized = manifest(
             "dingtalk",
             "/by/.connector-auth/.dws",
-            "{\"status\":[\"dws\",\"auth\",\"status\"]}")
+            "{\"status\":[[\"dws\",\"auth\",\"status\"]]}")
             .replace("\"version\":\"1.0.0\"", "\"version\":\"" + "x".repeat(66_000) + "\"");
 
         assertThatThrownBy(() -> canonicalizer.canonicalize(connector("dingtalk"), oversized))
             .isInstanceOf(InvalidConnectorManifestException.class)
             .hasMessageContaining("64 KiB");
+    }
+
+    @Test
+    void canonicalizeRejectsOneDimensionalAndEmptyCommandGroups() {
+        assertThatThrownBy(() -> canonicalizer.canonicalize(connector("dingtalk"), manifest(
+            "dingtalk",
+            "/by/.connector-auth/.dws",
+            "{\"status\":[\"dws\",\"auth\",\"status\"]}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("two-dimensional");
+
+        assertThatThrownBy(() -> canonicalizer.canonicalize(connector("dingtalk"), manifest(
+            "dingtalk",
+            "/by/.connector-auth/.dws",
+            "{\"status\":[]}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("command group");
+
+        assertThatThrownBy(() -> canonicalizer.canonicalize(connector("dingtalk"), manifest(
+            "dingtalk",
+            "/by/.connector-auth/.dws",
+            "{\"status\":[[]]}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("argv");
     }
 
     @Test
@@ -197,7 +221,7 @@ class ConnectorManifestCanonicalizerTest {
               "schemaVersion":"1.0",
               "id":"dingtalk",
               "version":"1.0.52",
-              "runtime":{"type":"cli","commands":{"status":["dws","auth","status"]}},
+              "runtime":{"type":"cli","commands":{"status":[["dws","auth","status"]]}},
               "authStorage":{"mode":"native-home","nativePath":"/by/.connector-auth/.dws",
                 "environment":%s},
               "skill":{"code":"dws","source":"system-builtin","installScope":"user","grantScope":"agent"}

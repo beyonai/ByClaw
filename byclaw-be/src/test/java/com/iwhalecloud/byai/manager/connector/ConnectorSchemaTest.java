@@ -36,10 +36,10 @@ class ConnectorSchemaTest {
     );
     private static final String EXPECTED_WECOM_DESCRIPTION = "通过 wecom-cli 连接企业微信工作空间";
     private static final String EXPECTED_WECOM_AUTH_CONFIG = """
-        {"authorizationTimeoutSeconds":120,"probeCommand":["wecom-cli","contact","get_userlist","{}"]}
+        {"authorizationTimeoutSeconds":120}
         """;
     private static final String EXPECTED_WECOM_RUNTIME_MANIFEST = """
-        {"authStorage":{"environment":{"WECOM_HOME":"/by/.connector-auth/.wecom-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.wecom-cli","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"wecom","runtime":{"authorizeIn":"be-auth-job","commands":{"login":["wecom-cli","init","--noninteractive","--no-open"],"logout":["wecom-cli","cache","clear"],"status":["wecom-cli","cache","status"]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"wecomcli","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"0.1.9"}
+        {"authStorage":{"environment":{"WECOM_HOME":"/by/.connector-auth/.wecom-cli"},"lock":"exclusive-per-instance","mode":"native-home","nativePath":"/by/.connector-auth/.wecom-cli","owner":"be-auth-job","runtimeMutation":"provider-refresh-only"},"id":"wecom","runtime":{"authorizeIn":"be-auth-job","commands":{"login":[["wecom-cli","init","--noninteractive","--no-open"]],"logout":[["wecom-cli","cache","clear"]],"status":[["wecom-cli","cache","status"],["wecom-cli","contact","get_userlist","{}"]]},"type":"cli"},"schemaVersion":"1.0","skill":{"code":"wecomcli","grantScope":"agent","installScope":"user","source":"system-builtin"},"version":"0.1.9"}
         """;
 
     @Test
@@ -297,16 +297,14 @@ class ConnectorSchemaTest {
 
     @Test
     void wecomSeedPublishesEquivalentCliConfigAndManifestForUpgradeAndFreshInstall() throws Exception {
-        String migrationSql = readPreservingCase("deploy/migrations/versions/V0.3.1/V0.3.1__dml.sql");
+        String migrationSql = readPreservingCase("deploy/migrations/versions/V0.5.1/V0.5.1__dml.sql");
         String initdbSql = readPreservingCase("deploy/middleware/initdb/04_dml.sql");
-        ConnectorSeed migrationSeed = extractWecomSeed(migrationSql);
         ConnectorSeed initdbSeed = extractWecomSeed(initdbSql);
 
-        assertWecomProductionSeed(migrationSeed);
         assertWecomProductionSeed(initdbSeed);
-        assertThat(migrationSeed).isEqualTo(initdbSeed);
+        assertThat(parseJson(extractUpgradeManifest(migrationSql, "wecom")))
+            .isEqualTo(parseJson(initdbSeed.runtimeManifest()));
 
-        assertThat(migrationSql).contains("WHERE existing.connector_code = seed.connector_code");
         assertThat(initdbSql).contains("WHERE existing.connector_code = seed.connector_code");
         assertThat(migrationSql).doesNotContain("企业微信授权能力即将开放", "runtime_manifest = NULL");
         assertThat(initdbSql).doesNotContain("企业微信授权能力即将开放");
@@ -339,6 +337,50 @@ class ConnectorSchemaTest {
         assertThat(initdbSql).doesNotContain("\"environment\":{\"HOME\"");
     }
 
+    @Test
+    void builtInConnectorManifestCommandsAreTwoDimensionalAndCoverProviderStages() throws Exception {
+        String migrationSql = readPreservingCase("deploy/middleware/initdb/04_dml.sql");
+        for (String connectorCode : new String[] {"dingtalk", "lark", "wecom"}) {
+            JsonNode commands = parseJson(extractSeedManifest(migrationSql, connectorCode))
+                .path("runtime").path("commands");
+            commands.fields().forEachRemaining(action -> {
+                assertThat(action.getValue().isArray()).as(action.getKey()).isTrue();
+                assertThat(action.getValue()).as(action.getKey()).isNotEmpty();
+                action.getValue().forEach(argv -> {
+                    assertThat(argv.isArray()).as(action.getKey()).isTrue();
+                    assertThat(argv).as(action.getKey()).isNotEmpty();
+                });
+            });
+        }
+
+        JsonNode larkCommands = parseJson(extractSeedManifest(migrationSql, "lark"))
+            .path("runtime").path("commands");
+        assertThat(larkCommands.path("login")).hasSize(2);
+        assertThat(larkCommands.fieldNames()).toIterable().contains(
+            "configCheck", "configInitialize", "contextBind", "login", "status", "logout");
+
+        JsonNode wecomStatus = parseJson(extractSeedManifest(migrationSql, "wecom"))
+            .path("runtime").path("commands").path("status");
+        assertThat(wecomStatus).hasSize(2);
+    }
+
+    @Test
+    void connectorCommandUpgradeMigrationConvergesExistingRowsToFreshInstallManifests() throws Exception {
+        String upgradeSql = readPreservingCase("deploy/migrations/versions/V0.5.1/V0.5.1__dml.sql");
+        String initdbSql = readPreservingCase("deploy/middleware/initdb/04_dml.sql");
+
+        assertThat(upgradeSql).contains(
+            "UPDATE byai.byai_connector_info",
+            "WHERE connector_code IN ('dingtalk', 'lark', 'wecom')"
+        );
+        assertThat(initdbSql).contains("V0.5.1 Runtime Manifest 命令执行");
+        for (String connectorCode : new String[] {"dingtalk", "lark", "wecom"}) {
+            JsonNode upgraded = parseJson(extractUpgradeManifest(upgradeSql, connectorCode));
+            JsonNode fresh = parseJson(extractSeedManifest(initdbSql, connectorCode));
+            assertThat(upgraded).as(connectorCode).isEqualTo(fresh);
+        }
+    }
+
     private void assertWecomProductionSeed(ConnectorSeed seed) throws Exception {
         assertThat(seed.description()).isEqualTo(EXPECTED_WECOM_DESCRIPTION);
         assertThat(seed.providerCode()).isEqualTo("wecom-cli");
@@ -360,6 +402,17 @@ class ConnectorSchemaTest {
         );
         Matcher matcher = pattern.matcher(sql);
         assertThat(matcher.find()).as(connectorCode + " runtime Manifest seed").isTrue();
+        return matcher.group(1);
+    }
+
+    private String extractUpgradeManifest(String sql, String connectorCode) {
+        int runtimeCase = sql.indexOf("runtime_manifest = CASE connector_code");
+        assertThat(runtimeCase).isGreaterThanOrEqualTo(0);
+        Matcher matcher = Pattern.compile(
+            "WHEN\\s+'" + Pattern.quote(connectorCode) + "'\\s+THEN\\s+'([^']*)'",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL
+        ).matcher(sql.substring(runtimeCase));
+        assertThat(matcher.find()).as(connectorCode + " upgrade Runtime Manifest").isTrue();
         return matcher.group(1);
     }
 

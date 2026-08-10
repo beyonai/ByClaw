@@ -8,6 +8,8 @@ import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.times;
 
 import java.util.Date;
+import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -19,6 +21,7 @@ import com.iwhalecloud.byai.gateway.sandbox.service.UserSandboxResolver;
 import com.iwhalecloud.byai.gateway.sandbox.service.UserSandboxResolver.UserSandboxContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 
@@ -43,7 +46,7 @@ class LarkSandboxAuthorizationRuntimeTest {
             .thenReturn(new UserSandboxContext("sandbox-1", "42", null, new Date()));
         when(executor.run(any(), any())).thenReturn(new SandboxCommandResult(0, "{}", "", false, false));
 
-        runtime.revoke("42");
+        runtime.revoke("42", commandCatalog());
 
         var requestCaptor = org.mockito.ArgumentCaptor.forClass(SandboxCommandRequest.class);
         verify(executor).run(org.mockito.ArgumentMatchers.eq("sandbox-1"), requestCaptor.capture());
@@ -70,7 +73,7 @@ class LarkSandboxAuthorizationRuntimeTest {
                     + "\"device_code\":\"device-1\",\"expires_in\":120}", "", false, false));
 
         var result = runtime.start(new AuthorizationStartContext(
-            "auth-1", "42", 1L, "lark", "lark-cli", "https://localhost/callback", java.util.Map.of()));
+            "auth-1", "42", 1L, "lark", "lark-cli", "https://localhost/callback", Map.of(), commandCatalog()));
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
         assertThat(result.authorizationUrl()).isEqualTo("https://open.feishu.cn/device");
@@ -97,7 +100,7 @@ class LarkSandboxAuthorizationRuntimeTest {
                 "", false, false));
 
         var result = runtime.start(new AuthorizationStartContext(
-            "auth-1", "42", 1L, "lark", "lark-cli", null, java.util.Map.of()));
+            "auth-1", "42", 1L, "lark", "lark-cli", null, Map.of(), commandCatalog()));
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
         var requestCaptor = org.mockito.ArgumentCaptor.forClass(SandboxCommandRequest.class);
@@ -123,7 +126,7 @@ class LarkSandboxAuthorizationRuntimeTest {
                     + "\"device_code\":\"device-1\",\"expires_in\":600}", "", false, false));
 
         var result = runtime.start(new AuthorizationStartContext(
-            "auth-1", "42", 1L, "lark", "lark-cli", null, java.util.Map.of()));
+            "auth-1", "42", 1L, "lark", "lark-cli", null, Map.of(), commandCatalog()));
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
         assertThat(result.authorizationUrl()).isEqualTo(verificationUrl);
@@ -145,7 +148,7 @@ class LarkSandboxAuthorizationRuntimeTest {
                     + "\"device_code\":\"device-1\"}", "", false, false));
 
         var result = runtime.start(new AuthorizationStartContext(
-            "auth-1", "42", 1L, "lark", "lark-cli", null, java.util.Map.of()));
+            "auth-1", "42", 1L, "lark", "lark-cli", null, Map.of(), commandCatalog()));
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
         assertThat(result.errorCode()).isEqualTo("PROVIDER_PROTOCOL_ERROR");
@@ -168,10 +171,28 @@ class LarkSandboxAuthorizationRuntimeTest {
                                    "userName":"谢逊飞","tokenStatus":"valid"}}}
             """, "", false, false));
 
-        var result = runtime.verify("42");
+        var result = runtime.verify("42", commandCatalog());
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
         assertThat(result.accountId()).isEqualTo("ou_65c765c074a0098a75f51a15f454313a");
         assertThat(result.accountName()).isEqualTo("谢逊飞");
+    }
+
+    private ManifestCommandCatalog commandCatalog() {
+        return new ManifestCommandCatalog(
+            Map.of(
+                "configCheck", List.of(List.of("lark-cli", "config", "show")),
+                "configInitialize", List.of(List.of("lark-cli", "config", "init", "--new", "--force-init")),
+                "contextBind", List.of(List.of(
+                    "lark-cli", "config", "bind", "--source", "openclaw", "--identity", "user-default", "--force")),
+                "login", List.of(
+                    List.of("lark-cli", "auth", "login", "--domain", "all", "--no-wait", "--json"),
+                    List.of("lark-cli", "auth", "login", "--device-code", "${deviceCode}", "--json")),
+                "status", List.of(List.of("lark-cli", "auth", "status", "--json", "--verify")),
+                "logout", List.of(List.of("lark-cli", "auth", "logout", "--json"))
+            ),
+            "test-digest",
+            Map.of("deviceCode", ManifestCommandCatalog.PlaceholderPolicy.safeValue(512))
+        );
     }
 }

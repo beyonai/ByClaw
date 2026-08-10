@@ -624,8 +624,6 @@ export const checkDwsAuthStatus = () => POST<any>('/byaiService/devloop/dws/auth
 export const checkDwsAuthStatusBySource = (sourceId: number) =>
   POST<any>('/byaiService/devloop/dws/authStatus/bySource', { sourceId });
 
-export const saveDwsToken = (token: string) => POST<any>('/byaiService/devloop/dws/saveToken', { token });
-
 // 集成测试环境
 // stages / testAccounts 前端为结构化数组，落库为JSON字符串，故服务层统一序列化后再发。
 // 定时(cron)与执行员工不在环境里，归属独立测试数字员工配置，避免重复。
