@@ -44,6 +44,55 @@ public class GitSubmodulePathResolver {
         return Optional.empty();
     }
 
+    /**
+     * 按 .gitmodules 中的实际顺序返回已配置代码仓库对应的子模块目录。
+     * 数据库中存在但 .gitmodules 未声明的仓库不会被当作当前 workspace 的子模块。
+     */
+    public List<ResolvedSubmodule> resolveAll(Path workspaceDir, List<ProjectRepo> codeRepos) {
+        return resolveAllWithStatus(workspaceDir, codeRepos).submodules();
+    }
+
+    /** 返回子模块解析结果及元数据是否成功读取，供上层区分“没有子模块”和“.gitmodules 不可用”。 */
+    public SubmoduleResolution resolveAllWithStatus(Path workspaceDir, List<ProjectRepo> codeRepos) {
+        if (workspaceDir == null || codeRepos == null || codeRepos.isEmpty()) {
+            return new SubmoduleResolution(List.of(), workspaceDir != null);
+        }
+        Path gitmodules = workspaceDir.resolve(".gitmodules");
+        if (!Files.isRegularFile(gitmodules)) {
+            return new SubmoduleResolution(List.of(), false);
+        }
+        try {
+            List<ResolvedSubmodule> resolved = new ArrayList<>();
+            for (SubmoduleEntry entry : parse(Files.readAllLines(gitmodules))) {
+                ProjectRepo repo = findMatchingRepo(entry, codeRepos);
+                if (repo == null) {
+                    continue;
+                }
+                Path path = workspaceDir.resolve(entry.path).normalize();
+                if (path.startsWith(workspaceDir.normalize())) {
+                    resolved.add(new ResolvedSubmodule(repo, path));
+                }
+            }
+            return new SubmoduleResolution(resolved, true);
+        }
+        catch (IOException ignored) {
+            return new SubmoduleResolution(List.of(), false);
+        }
+    }
+
+    private ProjectRepo findMatchingRepo(SubmoduleEntry entry, List<ProjectRepo> codeRepos) {
+        String entryUrl = normalizeUrl(entry.url);
+        String entryName = normalizeRepoName(entry.url);
+        for (ProjectRepo repo : codeRepos) {
+            String repoUrl = normalizeUrl(repo.getRepoUrl());
+            String repoName = normalizeRepoName(repo.getRepoFullName());
+            if ((repoUrl != null && repoUrl.equals(entryUrl)) || (repoName != null && repoName.equals(entryName))) {
+                return repo;
+            }
+        }
+        return null;
+    }
+
     private List<SubmoduleEntry> parse(List<String> lines) {
         List<SubmoduleEntry> entries = new ArrayList<>();
         String path = null;
@@ -111,5 +160,11 @@ public class GitSubmodulePathResolver {
     }
 
     private record SubmoduleEntry(String path, String url) {
+    }
+
+    public record ResolvedSubmodule(ProjectRepo repo, Path path) {
+    }
+
+    public record SubmoduleResolution(List<ResolvedSubmodule> submodules, boolean metadataAvailable) {
     }
 }

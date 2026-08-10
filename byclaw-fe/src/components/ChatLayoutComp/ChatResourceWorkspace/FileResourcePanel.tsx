@@ -23,8 +23,8 @@ import type { ProjectSpace } from '@/pages/projectSpace/types';
 import {
   deleteProjectSpaceFile,
   listProjectSpaceFiles,
-  // listProjectRepos,
-  // type DevloopProjectRepo,
+  listProjectRepos,
+  type DevloopProjectRepo,
   renameProjectSpaceFile,
   saveProjectFileToSpace,
   type DevloopProjectSpaceFile,
@@ -42,7 +42,7 @@ import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import FilePreviewPanel from './FilePreviewPanel';
 import projectStyles from '@/pages/projectSpace/index.module.less';
 import { useInfiniteScroll } from '@/pages/projectSpace/hooks/useInfiniteScroll';
-// import { filterSessionRootItems } from './sessionResourceUtils';
+import { filterSessionRootItems } from './sessionResourceUtils';
 
 type ProjectFileItem = FileBrowserItem & {
   fileId: number;
@@ -121,7 +121,6 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         setItems(sortFileBrowserItems(unwrapListResponse<DevloopProjectSpaceFile>(response).map(normalizeProjectFile)));
       } else {
         // eslint-disable-next-line lines-around-comment
-        /*
         // 文件与仓库并行查询，但等两者都结束后再更新列表，避免仓库目录先闪现后消失。
         const [filesResult, reposResult] = await Promise.allSettled([
           listFiles({ resourceId: resourceId!, path: rootPath }),
@@ -136,9 +135,6 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         }
         const files = unwrapListResponse<FileBrowserItem>(filesResult.value);
         setItems(sortFileBrowserItems(filterSessionRootItems(files, reposResponse)));
-        */
-        const files = unwrapListResponse<FileBrowserItem>(await listFiles({ resourceId: resourceId!, path: rootPath }));
-        setItems(sortFileBrowserItems(files));
       }
     } catch (error) {
       console.error('Failed to load conversation resource files:', error);
