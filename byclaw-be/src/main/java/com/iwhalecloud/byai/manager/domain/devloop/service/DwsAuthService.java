@@ -587,6 +587,23 @@ public class DwsAuthService {
         }
     }
 
+    /** Clears the DWS credential stored in the explicit user's isolated workspace. */
+    public void revokeCredential(Long userId) {
+        Map<String, String> environment = new HashMap<>();
+        if (!applyUserDwsEnv(environment, userId)) {
+            throw new IllegalStateException("Unable to isolate DWS credential workspace");
+        }
+        CliResult result = connectorCliRunner.run(
+            List.of(DWS_BIN, "auth", "reset", "-y"),
+            environment,
+            null,
+            Duration.ofSeconds(30)
+        );
+        if (result == null || result.exitCode() != 0 || result.truncated()) {
+            throw new IllegalStateException("Unable to revoke DWS credential");
+        }
+    }
+
     /**
      * 确保 dws 已认证（定时任务调用前先调用此方法）
      * dws 自身管理 token 持久化和自动刷新，这里只检查状态。

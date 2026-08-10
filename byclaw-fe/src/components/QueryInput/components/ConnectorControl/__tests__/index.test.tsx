@@ -13,6 +13,7 @@ jest.mock('@/service/connector', () => ({
   getConnectorAuthorization: jest.fn(),
   queryConnectorList: jest.fn(),
   queryAllConnectors: jest.fn(),
+  revokeConnectorAuthorization: jest.fn(),
   startConnectorAuthorization: jest.fn(),
   updateConnectorEnable: jest.fn(),
 }));
@@ -34,6 +35,7 @@ import {
   getConnectorAuthorization,
   queryAllConnectors,
   queryConnectorList,
+  revokeConnectorAuthorization,
   startConnectorAuthorization,
   updateConnectorEnable,
   type ConnectorAuthorization,
@@ -48,6 +50,9 @@ const mockGetConnectorAuthorization = getConnectorAuthorization as jest.MockedFu
 >;
 const mockQueryConnectorList = queryConnectorList as jest.MockedFunction<typeof queryConnectorList>;
 const mockQueryAllConnectors = queryAllConnectors as jest.MockedFunction<typeof queryAllConnectors>;
+const mockRevokeConnectorAuthorization = revokeConnectorAuthorization as jest.MockedFunction<
+  typeof revokeConnectorAuthorization
+>;
 const mockStartConnectorAuthorization = startConnectorAuthorization as jest.MockedFunction<
   typeof startConnectorAuthorization
 >;
@@ -67,6 +72,7 @@ describe('ConnectorControl authorization states', () => {
     mockOpenedWindow.opener = window;
     mockWindowOpen.mockReturnValue(mockOpenedWindow);
     mockCancelConnectorAuthorization.mockResolvedValue(true);
+    mockRevokeConnectorAuthorization.mockResolvedValue(true);
     mockUpdateConnectorEnable.mockResolvedValue(true);
     mockQueryAllConnectors.mockImplementation(async () => {
       const response = await mockQueryConnectorList({ pageNum: 1, pageSize: 100, keyword: '' });
@@ -189,6 +195,105 @@ describe('ConnectorControl authorization states', () => {
       expect(screen.getByRole('switch', { name: '停用企业微信' })).toBeChecked();
       expect(container.querySelector('.ant-avatar-group')).not.toBeNull();
     });
+  });
+
+  it('shows account actions for enabled and disabled bindings but not unbound connectors', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 1,
+          connectorCode: 'dingtalk',
+          connectorName: '钉钉',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: 'Y',
+        },
+        {
+          connectorId: 2,
+          connectorCode: 'lark',
+          connectorName: '飞书',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: 'N',
+        },
+        {
+          connectorId: 3,
+          connectorCode: 'wecom',
+          connectorName: '企业微信',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: null,
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 3,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(await screen.findByRole('button', { name: '查看已连接连接器' }));
+
+    expect(await screen.findByRole('button', { name: '更多钉钉操作' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '更多飞书操作' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '更多企业微信操作' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '连接' })).toBeInTheDocument();
+  });
+
+  it('starts the existing authorization flow from the reauthorization menu item', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 1,
+          connectorCode: 'dingtalk',
+          connectorName: '钉钉',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: 'Y',
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(await screen.findByRole('button', { name: '查看已连接连接器' }));
+    fireEvent.click(await screen.findByRole('button', { name: '更多钉钉操作' }));
+    fireEvent.click(await screen.findByText('重新授权'));
+
+    expect(await screen.findByRole('heading', { name: '连接 钉钉 作为 AI 知识库' })).toBeInTheDocument();
+  });
+
+  it('confirms and revokes an existing connector authorization', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 1,
+          connectorCode: 'dingtalk',
+          connectorName: '钉钉',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: 'Y',
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(await screen.findByRole('button', { name: '查看已连接连接器' }));
+    fireEvent.click(await screen.findByRole('button', { name: '更多钉钉操作' }));
+    fireEvent.click(await screen.findByText('取消授权'));
+
+    expect(await screen.findAllByText('取消钉钉授权？')).not.toHaveLength(0);
+    expect(screen.getByText('当前 CLI 登录凭证将被清除，再次使用时需要重新授权。')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '确认取消授权' }));
+
+    await waitFor(() => expect(mockRevokeConnectorAuthorization).toHaveBeenCalledWith(1));
   });
 
   it('uses the backend error message when authorization is cancelled', () => {

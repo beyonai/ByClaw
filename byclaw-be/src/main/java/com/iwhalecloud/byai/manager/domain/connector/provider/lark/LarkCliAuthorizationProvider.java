@@ -38,13 +38,14 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliR
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.CliResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.ManagedProcess;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialVerifier;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialRevoker;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService.ConnectorCliWorkspace;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
 @Component
 public class LarkCliAuthorizationProvider
-        implements ConnectorAuthorizationProvider, ConnectorCredentialVerifier {
+        implements ConnectorAuthorizationProvider, ConnectorCredentialVerifier, ConnectorCredentialRevoker {
 
     private static final String PROVIDER_CODE = "lark-cli";
     private static final long DEFAULT_EXPIRES_IN_SECONDS = 600L;
@@ -60,6 +61,8 @@ public class LarkCliAuthorizationProvider
         List.of("lark-cli", "config", "init", "--new", "--force-init");
     private static final List<String> STATUS_COMMAND =
         List.of("lark-cli", "auth", "status", "--json", "--verify");
+    private static final List<String> LOGOUT_COMMAND =
+        List.of("lark-cli", "auth", "logout", "--json");
 
     private static final String INVALID_USER = "INVALID_USER";
     private static final String PROVIDER_WORKSPACE_ERROR = "PROVIDER_WORKSPACE_ERROR";
@@ -167,6 +170,23 @@ public class LarkCliAuthorizationProvider
                 : connectedStatus(account);
         } catch (RuntimeException e) {
             return failedStatus("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential");
+        }
+    }
+
+    @Override
+    public void revoke(String userId, ConnectorInfo connector) {
+        if (useSandboxExecutor()) {
+            sandboxRuntime.revoke(userId);
+            return;
+        }
+        Long numericUserId = parseUserId(userId);
+        if (numericUserId == null) {
+            throw new IllegalArgumentException(INVALID_USER_MESSAGE);
+        }
+        ConnectorCliWorkspace workspace = workspaceService.resolve(numericUserId, PROVIDER_CODE);
+        CliResult result = cliRunner.run(LOGOUT_COMMAND, workspace.environment(), null, CLI_TIMEOUT);
+        if (result == null || result.exitCode() != 0 || result.truncated()) {
+            throw new IllegalStateException("Unable to revoke Lark credential");
         }
     }
 

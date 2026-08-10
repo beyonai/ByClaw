@@ -33,6 +33,24 @@ class LarkSandboxAuthorizationRuntimeTest {
     }
 
     @Test
+    void revokesCredentialInsideResolvedSandbox() {
+        SandboxCommandExecutor executor = mock(SandboxCommandExecutor.class);
+        UserSandboxResolver resolver = mock(UserSandboxResolver.class);
+        UserService userService = mock(UserService.class);
+        LarkSandboxAuthorizationRuntime runtime = new LarkSandboxAuthorizationRuntime(
+            executor, resolver, new LarkAuthorizationProperties(), new ObjectMapper(), userService);
+        when(resolver.resolve("42", "openclaw"))
+            .thenReturn(new UserSandboxContext("sandbox-1", "42", null, new Date()));
+        when(executor.run(any(), any())).thenReturn(new SandboxCommandResult(0, "{}", "", false, false));
+
+        runtime.revoke("42");
+
+        var requestCaptor = org.mockito.ArgumentCaptor.forClass(SandboxCommandRequest.class);
+        verify(executor).run(org.mockito.ArgumentMatchers.eq("sandbox-1"), requestCaptor.capture());
+        assertThat(requestCaptor.getValue().argv()).containsExactly("lark-cli", "auth", "logout", "--json");
+    }
+
+    @Test
     void startsUserAuthorizationInsideResolvedSandbox() {
         SandboxCommandExecutor executor = mock(SandboxCommandExecutor.class);
         UserSandboxResolver resolver = mock(UserSandboxResolver.class);

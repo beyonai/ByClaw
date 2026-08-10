@@ -14,6 +14,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorAuthorizationProvider;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialVerifier;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialRevoker;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService.DwsCredentialOutcome;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService.DwsCredentialStatus;
@@ -21,7 +22,7 @@ import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
 @Component
 public class DwsDingtalkAuthorizationProvider
-        implements ConnectorAuthorizationProvider, ConnectorCredentialVerifier {
+        implements ConnectorAuthorizationProvider, ConnectorCredentialVerifier, ConnectorCredentialRevoker {
 
     private static final long DEVICE_FLOW_TTL_MILLIS = 900_000L;
     private static final String INVALID_USER = "INVALID_USER";
@@ -141,6 +142,15 @@ public class DwsDingtalkAuthorizationProvider
         if (userId != null) {
             dwsAuthService.cancelDeviceAuth(session.authorizationId(), userId);
         }
+    }
+
+    @Override
+    public void revoke(String userId, ConnectorInfo connector) {
+        Long numericUserId = parseUserId(userId);
+        if (numericUserId == null) {
+            throw new IllegalArgumentException(INVALID_USER_MESSAGE);
+        }
+        dwsAuthService.revokeCredential(numericUserId);
     }
 
     private AuthorizationStartResult failedStart(String errorCode, String errorMessage) {

@@ -96,3 +96,6 @@ export const getConnectorAuthorization = (authorizationId: string) =>
 
 export const cancelConnectorAuthorization = (authorizationId: string) =>
   POST<boolean>('/byaiService/connector/authorization/cancel', { authorizationId });
+
+export const revokeConnectorAuthorization = (connectorId: ConnectorId) =>
+  POST<boolean>('/byaiService/connector/authorization/revoke', { connectorId });
