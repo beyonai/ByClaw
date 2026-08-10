@@ -57,10 +57,10 @@ jest.mock('antd', () => ({
                 role="menuitem"
                 key={item.key}
                 data-selected={menu.selectedKeys?.includes(item.key) || undefined}
-                onClick={() => menu.onClick?.({ key: item.key })}
+                onClick={(event) => menu.onClick?.({ key: item.key, domEvent: event })}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
-                    menu.onClick?.({ key: item.key });
+                    menu.onClick?.({ key: item.key, domEvent: event });
                   }
                 }}
               >
@@ -243,6 +243,19 @@ describe('Resources enterprise skill mode', () => {
     expect(mockSetSearchParams.mock.calls[0][0].get('kind')).toBe('group');
     cleanup();
     renderAt('?tab=enterprise&kind=group');
+    expect(screen.getByTestId('skill-group-list')).toBeTruthy();
+    expect(screen.queryByTestId('resource-list')).toBeNull();
+  });
+
+  it('switches from personal skills to enterprise skill groups when clicking the group menu item', () => {
+    mockSetSearchParams.mockReset();
+    renderAt('?tab=personal');
+
+    fireEvent.focus(screen.getByText('resource.enterpriseSkillSingle'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'resource.skillGroup' }));
+
+    expect(window.location.search).toBe('?tab=enterprise&kind=group');
+    expect(screen.getByText('resource.enterpriseSkillGroup')).toBeTruthy();
     expect(screen.getByTestId('skill-group-list')).toBeTruthy();
     expect(screen.queryByTestId('resource-list')).toBeNull();
   });
