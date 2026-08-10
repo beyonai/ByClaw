@@ -88,7 +88,7 @@ class LarkCliAuthorizationProviderTest {
                  "identities":{"user":{"openId":"ou_42","name":"Lark User"}}}}
                 """));
 
-        AuthorizationStatusResult result = provider.verify("42", new ConnectorInfo());
+        AuthorizationStatusResult result = provider.verify(42L, new ConnectorInfo());
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
         assertThat(result.accountId()).isEqualTo("ou_42");
@@ -113,7 +113,7 @@ class LarkCliAuthorizationProviderTest {
         when(cliRunner.run(eq(STATUS), eq(ENVIRONMENT), isNull(), any(Duration.class)))
             .thenReturn(new CliResult(0, "{\"configured\":true}"));
 
-        AuthorizationStatusResult result = provider.verify("42", new ConnectorInfo());
+        AuthorizationStatusResult result = provider.verify(42L, new ConnectorInfo());
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
         assertThat(result.errorCode()).isEqualTo("CONNECTOR_CREDENTIAL_INVALID");
@@ -127,8 +127,8 @@ class LarkCliAuthorizationProviderTest {
                 new CliResult(0, "{\"authenticated\":true,\"status\":\"connected\"}")
             );
 
-        AuthorizationStatusResult bot = provider.verify("42", new ConnectorInfo());
-        AuthorizationStatusResult ambiguous = provider.verify("42", new ConnectorInfo());
+        AuthorizationStatusResult bot = provider.verify(42L, new ConnectorInfo());
+        AuthorizationStatusResult ambiguous = provider.verify(42L, new ConnectorInfo());
 
         assertThat(bot.status()).isEqualTo(AuthorizationStatus.FAILED);
         assertThat(bot.errorCode()).isEqualTo("CONNECTOR_CREDENTIAL_INVALID");
@@ -141,7 +141,7 @@ class LarkCliAuthorizationProviderTest {
         when(cliRunner.run(eq(STATUS), eq(ENVIRONMENT), isNull(), any(Duration.class)))
             .thenReturn(new CliResult(124, "partial status"));
 
-        AuthorizationStatusResult result = provider.verify("42", new ConnectorInfo());
+        AuthorizationStatusResult result = provider.verify(42L, new ConnectorInfo());
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
         assertThat(result.errorCode()).isEqualTo("CONNECTOR_VERIFICATION_TIMEOUT");

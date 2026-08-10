@@ -66,16 +66,17 @@ class ConnectorSchemaTest {
     void enabledConnectorMetadataQueryRetainsExpiredAuthorizationsAsDisabled() throws Exception {
         String sql = read("byclaw-be/src/main/java/com/iwhalecloud/byai/manager/mapper/connector/ConnectorAuthMapper.java");
 
-        assertThat(sql).contains("inner join (");
-        assertThat(sql).doesNotContain("left join (");
+        assertThat(sql).contains("left join (");
+        assertThat(sql).doesNotContain("inner join (");
         assertThat(sql).contains("info.skill_code");
         assertThat(sql).doesNotContain("info.runtime_manifest");
         assertThat(sql).contains(
-            "case when auth.expire_time < current_timestamp then false when auth.enable_flag = 'y' then true "
+            "case when auth.connector_id is null then false when auth.expire_time < current_timestamp then false "
+                + "when auth.enable_flag = 'y' then true "
                 + "else false end as enabled"
         );
         assertThat(connectorAuthorizationSubquery(
-            sql, "inner join (", ") auth on auth.connector_id = info.connector_id"))
+            sql, "left join (", ") auth on auth.connector_id = info.connector_id"))
                 .contains(
                     "select connector_id, enable_flag, expire_time from (",
                     "select connector_id, enable_flag, expire_time, row_number() over"
@@ -187,6 +188,13 @@ class ConnectorSchemaTest {
         assertThat(sql.indexOf("with ranked_active_authorizations")).isLessThan(
             sql.indexOf("create unique index if not exists uk_byai_connector_auth_active_user_connector")
         );
+    }
+
+    @Test
+    void connectorCacheUsesExistingAuthoritativeTablesWithoutRefreshTaskDdl() throws Exception {
+        String initdbSql = read("deploy/middleware/initdb/02_ddl.sql");
+
+        assertThat(initdbSql).doesNotContain("byai_connector_cache_refresh_task");
     }
 
     @Test

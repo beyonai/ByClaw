@@ -39,7 +39,7 @@ class DwsDingtalkAuthorizationProviderTest {
         when(dwsAuthService.getCredentialStatus(42L))
             .thenReturn(DwsCredentialStatus.completed(connectedStatus()));
 
-        AuthorizationStatusResult result = provider.verify("42", new ConnectorInfo());
+        AuthorizationStatusResult result = provider.verify(42L, new ConnectorInfo());
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
         assertThat(result.accountId()).isEqualTo("ding-user-42");
@@ -52,7 +52,7 @@ class DwsDingtalkAuthorizationProviderTest {
         when(dwsAuthService.getCredentialStatus(42L))
             .thenReturn(DwsCredentialStatus.completed(Map.of("tokenValid", false)));
 
-        AuthorizationStatusResult result = provider.verify("42", new ConnectorInfo());
+        AuthorizationStatusResult result = provider.verify(42L, new ConnectorInfo());
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
         assertThat(result.errorCode()).isEqualTo("CONNECTOR_CREDENTIAL_INVALID");
@@ -63,8 +63,8 @@ class DwsDingtalkAuthorizationProviderTest {
         when(dwsAuthService.getCredentialStatus(42L))
             .thenReturn(DwsCredentialStatus.timeout(), DwsCredentialStatus.workspaceUnavailable());
 
-        AuthorizationStatusResult timeout = provider.verify("42", new ConnectorInfo());
-        AuthorizationStatusResult workspaceFailure = provider.verify("42", new ConnectorInfo());
+        AuthorizationStatusResult timeout = provider.verify(42L, new ConnectorInfo());
+        AuthorizationStatusResult workspaceFailure = provider.verify(42L, new ConnectorInfo());
 
         assertThat(timeout.errorCode()).isEqualTo("CONNECTOR_VERIFICATION_TIMEOUT");
         assertThat(workspaceFailure.errorCode()).isEqualTo("CREDENTIAL_WORKSPACE_UNAVAILABLE");

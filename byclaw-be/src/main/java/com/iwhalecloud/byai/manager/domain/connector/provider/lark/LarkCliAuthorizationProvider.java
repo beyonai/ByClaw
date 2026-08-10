@@ -134,17 +134,16 @@ public class LarkCliAuthorizationProvider
     }
 
     @Override
-    public AuthorizationStatusResult verify(String userId, ConnectorInfo connector) {
-        if (useSandboxExecutor()) {
-            return sandboxRuntime.verify(userId);
-        }
-        Long numericUserId = parseUserId(userId);
-        if (numericUserId == null) {
+    public AuthorizationStatusResult verify(Long userId, ConnectorInfo connector) {
+        if (userId == null || userId <= 0) {
             return failedStatus("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential");
+        }
+        if (useSandboxExecutor()) {
+            return sandboxRuntime.verify(String.valueOf(userId));
         }
         ConnectorCliWorkspace workspace;
         try {
-            workspace = workspaceService.resolve(numericUserId, PROVIDER_CODE);
+            workspace = workspaceService.resolve(userId, PROVIDER_CODE);
         } catch (RuntimeException e) {
             return failedStatus(
                 "CREDENTIAL_WORKSPACE_UNAVAILABLE",
