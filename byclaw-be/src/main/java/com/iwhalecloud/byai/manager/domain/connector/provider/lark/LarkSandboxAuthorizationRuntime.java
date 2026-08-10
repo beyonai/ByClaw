@@ -125,6 +125,16 @@ public class LarkSandboxAuthorizationRuntime {
         }
     }
 
+    public void revoke(String userId) {
+        String userCode = resolveUserCode(userId);
+        UserSandboxContext sandbox = sandboxResolver.resolve(userCode, properties.getSandboxServiceKey());
+        SandboxCommandResult result = executor.run(sandbox.sandboxId(), policy.build(
+            LarkSandboxCommandPolicy.Action.LOGOUT, null, COMMAND_TIMEOUT, properties.getMaxOutputBytes()));
+        if (result == null || result.exitCode() != 0 || result.truncated() || result.timedOut()) {
+            throw new IllegalStateException("Unable to revoke Lark credential");
+        }
+    }
+
     public AuthorizationStatusResult queryStatus(AuthorizationSessionContext session) {
         try {
             JsonNode state = objectMapper.readTree(session.providerState());

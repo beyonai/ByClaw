@@ -60,6 +60,7 @@ class LarkCliAuthorizationProviderTest {
     private static final List<String> CONFIG_INIT_NEW =
         List.of("lark-cli", "config", "init", "--new", "--force-init");
     private static final List<String> STATUS = List.of("lark-cli", "auth", "status", "--json", "--verify");
+    private static final List<String> LOGOUT = List.of("lark-cli", "auth", "logout", "--json");
     private static final List<String> DEFAULT_LOGIN = List.of(
         "lark-cli", "auth", "login", "--domain", "all", "--no-wait", "--json");
     private static final Map<String, String> ENVIRONMENT = Map.of("HOME", "/tmp/lark-cli-test");
@@ -94,6 +95,17 @@ class LarkCliAuthorizationProviderTest {
         assertThat(result.accountName()).isEqualTo("Lark User");
         verify(workspaceService).resolve(42L, "lark-cli");
         verify(cliRunner).run(eq(STATUS), eq(ENVIRONMENT), isNull(), any(Duration.class));
+    }
+
+    @Test
+    void revokesLarkCredentialInIsolatedWorkspace() {
+        when(cliRunner.run(eq(LOGOUT), eq(ENVIRONMENT), isNull(), any(Duration.class)))
+            .thenReturn(new CliResult(0, "{}"));
+
+        provider.revoke("42", new ConnectorInfo());
+
+        verify(workspaceService).resolve(42L, "lark-cli");
+        verify(cliRunner).run(eq(LOGOUT), eq(ENVIRONMENT), isNull(), any(Duration.class));
     }
 
     @Test

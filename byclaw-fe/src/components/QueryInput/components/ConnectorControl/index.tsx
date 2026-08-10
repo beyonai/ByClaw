@@ -3,14 +3,17 @@ import {
   ApiOutlined,
   CheckCircleFilled,
   DatabaseOutlined,
+  DisconnectOutlined,
+  EllipsisOutlined,
   FileTextOutlined,
   GlobalOutlined,
   LinkOutlined,
   LoadingOutlined,
   QrcodeOutlined,
+  ReloadOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
-import { Avatar, Button, Drawer, Empty, Modal, Spin, Switch, Tooltip, message } from 'antd';
+import { Avatar, Button, Drawer, Dropdown, Empty, Modal, Spin, Switch, Tooltip, message } from 'antd';
 import classNames from 'classnames';
 import { useSelector } from '@umijs/max';
 
@@ -19,6 +22,7 @@ import {
   getConnectorAuthorization,
   cancelConnectorAuthorization,
   queryAllConnectors,
+  revokeConnectorAuthorization,
   startConnectorAuthorization,
   updateConnectorEnable,
   type ConnectorAuthorization,
@@ -133,6 +137,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   const [connectors, setConnectors] = useState<Connector[]>([]);
   const [loadingConnectors, setLoadingConnectors] = useState(false);
   const [updatingConnectorIds, setUpdatingConnectorIds] = useState<Set<ConnectorId>>(new Set());
+  const [revokingConnectorIds, setRevokingConnectorIds] = useState<Set<ConnectorId>>(new Set());
   const [startingAuthorization, setStartingAuthorization] = useState(false);
   const [checkingAuthorization, setCheckingAuthorization] = useState(false);
   const activeAuthorizationIdRef = useRef<string | undefined>(undefined);
@@ -327,6 +332,37 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
     void loadAuthorizedConnectors();
   };
 
+  const confirmRevokeAuthorization = (connector: Connector) => {
+    Modal.confirm({
+      title: `取消${connector.name}授权？`,
+      content: '当前 CLI 登录凭证将被清除，再次使用时需要重新授权。',
+      okText: '确认取消授权',
+      okButtonProps: { danger: true },
+      cancelText: '暂不取消',
+      centered: true,
+      onOk: async () => {
+        setRevokingConnectorIds((ids) => new Set([...ids, connector.id]));
+        try {
+          await revokeConnectorAuthorization(connector.id);
+          setConnectors((items) =>
+            items.map((item) => (item.id === connector.id ? { ...item, enableFlag: null } : item))
+          );
+          message.success(`${connector.name}授权已取消`);
+          await loadAuthorizedConnectors();
+        } catch {
+          message.error('取消授权失败，请稍后重试');
+          throw new Error('取消授权失败');
+        } finally {
+          setRevokingConnectorIds((ids) => {
+            const nextIds = new Set(ids);
+            nextIds.delete(connector.id);
+            return nextIds;
+          });
+        }
+      },
+    });
+  };
+
   const beginAuthorization = (connector: Connector) => {
     // 先展示权限说明，再进入对应平台的授权步骤。
     invalidateAuthorizationRequests();
@@ -428,13 +464,39 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
     if (connector.enableFlag === 'Y' || connector.enableFlag === 'N') {
       const switchLabel = connector.enableFlag === 'Y' ? `停用${connector.name}` : `启用${connector.name}`;
       return (
-        <Switch
-          checked={connector.enableFlag === 'Y'}
-          aria-label={switchLabel}
-          loading={updatingConnectorIds.has(connector.id)}
-          onChange={(checked) => void updateConnectorEnableFlag(connector, checked)}
-          // size="small"
-        />
+        <>
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'reauthorize', icon: <ReloadOutlined />, label: '重新授权' },
+                { key: 'revoke', danger: true, icon: <DisconnectOutlined />, label: '取消授权' },
+              ],
+              onClick: ({ key }) => {
+                if (key === 'reauthorize') beginAuthorization(connector);
+                if (key === 'revoke') confirmRevokeAuthorization(connector);
+              },
+            }}
+            placement="bottomRight"
+            trigger={['hover', 'click']}
+          >
+            <Button
+              aria-label={`更多${connector.name}操作`}
+              className={styles.moreActionButton}
+              disabled={revokingConnectorIds.has(connector.id)}
+              loading={revokingConnectorIds.has(connector.id)}
+              icon={<EllipsisOutlined />}
+              type="text"
+            />
+          </Dropdown>
+          <Switch
+            checked={connector.enableFlag === 'Y'}
+            aria-label={switchLabel}
+            disabled={revokingConnectorIds.has(connector.id)}
+            loading={updatingConnectorIds.has(connector.id) || revokingConnectorIds.has(connector.id)}
+            onChange={(checked) => void updateConnectorEnableFlag(connector, checked)}
+            // size="small"
+          />
+        </>
       );
     }
     if (canAuthorize) {

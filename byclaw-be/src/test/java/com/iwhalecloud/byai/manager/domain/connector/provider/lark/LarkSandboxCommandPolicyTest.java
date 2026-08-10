@@ -45,6 +45,16 @@ class LarkSandboxCommandPolicyTest {
     }
 
     @Test
+    void buildsFixedLogoutCommand() {
+        var request = policy.build(LarkSandboxCommandPolicy.Action.LOGOUT);
+
+        assertThat(request.argv()).containsExactly("lark-cli", "auth", "logout", "--json");
+        assertThat(request.environment()).containsEntry("HOME", "/by/.connector-auth/.lark-cli")
+            .containsEntry("LARK_HOME", "/by/.connector-auth/.lark-cli");
+        assertThat(request.background()).isFalse();
+    }
+
+    @Test
     void rejectsControlCharactersAndMissingDeviceCode() {
         assertThatThrownBy(() -> policy.build(
             LarkSandboxCommandPolicy.Action.COMPLETE_USER_AUTHORIZATION,

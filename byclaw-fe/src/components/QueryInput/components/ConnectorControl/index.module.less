@@ -74,9 +74,20 @@
 
 .connectorAction {
   display: inline-flex;
-  flex: 0 0 64px;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
+  gap: 6px;
+}
+
+.moreActionButton {
+  color: #657187;
+
+  &:hover,
+  &:focus-visible {
+    color: #1677ff !important;
+    background: #edf4ff !important;
+  }
 }
 
 .connectorItem {

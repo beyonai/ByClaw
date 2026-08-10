@@ -15,7 +15,8 @@ public final class LarkSandboxCommandPolicy {
         BIND_OPENCLAW_CONTEXT,
         START_USER_AUTHORIZATION,
         COMPLETE_USER_AUTHORIZATION,
-        VERIFY_AUTHORIZATION
+        VERIFY_AUTHORIZATION,
+        LOGOUT
     }
 
     private static final String HOME = "/by/.connector-auth/.lark-cli";
@@ -42,6 +43,7 @@ public final class LarkSandboxCommandPolicy {
             case COMPLETE_USER_AUTHORIZATION -> List.of(
                 "lark-cli", "auth", "login", "--device-code", validateDeviceCode(deviceCode), "--json");
             case VERIFY_AUTHORIZATION -> List.of("lark-cli", "auth", "status", "--json", "--verify");
+            case LOGOUT -> List.of("lark-cli", "auth", "logout", "--json");
         };
         return new SandboxCommandRequest(
             argv,

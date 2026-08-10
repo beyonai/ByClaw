@@ -157,6 +157,13 @@ class DwsDingtalkAuthorizationProviderTest {
     }
 
     @Test
+    void revokesDwsCredentialForExplicitUser() {
+        provider.revoke("42", new ConnectorInfo());
+
+        verify(dwsAuthService).revokeCredential(42L);
+    }
+
+    @Test
     void sanitizesProviderStartFailureDetails() {
         when(dwsAuthService.startDeviceAuth(42L, AUTHORIZATION_ID)).thenReturn(Map.of(
             "success", false,

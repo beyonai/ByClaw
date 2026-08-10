@@ -63,6 +63,8 @@ class WecomCliAuthorizationProviderTest {
         List.of("wecom-cli", "init", "--noninteractive", "--no-open");
     private static final List<String> CACHE_STATUS_COMMAND =
         List.of("wecom-cli", "cache", "status");
+    private static final List<String> CACHE_CLEAR_COMMAND =
+        List.of("wecom-cli", "cache", "clear");
     private static final List<String> PROBE_COMMAND =
         List.of("wecom-cli", "contact", "get_userlist", "{}");
     private static final String VALID_CACHE_OUTPUT = "[{\"account\":\"wecom-user\"}]";
@@ -118,6 +120,19 @@ class WecomCliAuthorizationProviderTest {
     @AfterEach
     void tearDown() {
         provider.shutdown();
+    }
+
+    @Test
+    void revokesWecomCredentialInIsolatedWorkspace() {
+        when(workspaceService.resolve(42L, "wecom-cli")).thenReturn(WORKSPACE);
+        when(cliRunner.run(eq(CACHE_CLEAR_COMMAND), eq(ENVIRONMENT), org.mockito.ArgumentMatchers.isNull(),
+            any(Duration.class))).thenReturn(new CliResult(0, "{}"));
+
+        provider.revoke("42", new ConnectorInfo());
+
+        verify(workspaceService).resolve(42L, "wecom-cli");
+        verify(cliRunner).run(eq(CACHE_CLEAR_COMMAND), eq(ENVIRONMENT), org.mockito.ArgumentMatchers.isNull(),
+            any(Duration.class));
     }
 
     @Test

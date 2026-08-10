@@ -3,6 +3,10 @@ package com.iwhalecloud.byai.manager.domain.devloop.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 
 import java.io.FilterInputStream;
 import java.io.IOException;
@@ -35,6 +39,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.CliResult;
 
 @ExtendWith(MockitoExtension.class)
 class DwsAuthServiceProcessIsolationTest {
@@ -70,6 +76,34 @@ class DwsAuthServiceProcessIsolationTest {
             .containsEntry("DWS_CONFIG_DIR", home.resolve("config").toString());
         assertThat(Files.isDirectory(home)).isTrue();
         assertThat(Files.isDirectory(home.resolve("config"))).isTrue();
+    }
+
+    @Test
+    void revokeCredentialUsesTheExplicitUsersIsolatedWorkspace() {
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserCode("user001");
+        when(loginApplicationService.getLoginInfo(11L)).thenReturn(loginInfo);
+        when(userBucketNamingService.buildUserBucketName("user001")).thenReturn("byclaw-user001");
+        ConnectorCliRunner cliRunner = mock(ConnectorCliRunner.class);
+        when(cliRunner.run(eq(java.util.List.of("dws", "auth", "reset", "-y")), any(), eq(null), any()))
+            .thenReturn(new CliResult(0, ""));
+        DwsAuthService service = new DwsAuthService();
+        ReflectionTestUtils.setField(service, "fileStorageRoot", tempDir.toString());
+        ReflectionTestUtils.setField(service, "loginApplicationService", loginApplicationService);
+        ReflectionTestUtils.setField(service, "userBucketNamingService", userBucketNamingService);
+        ReflectionTestUtils.setField(service, "connectorCliRunner", cliRunner);
+
+        service.revokeCredential(11L);
+
+        Path home = tempDir.toAbsolutePath().resolve("byclaw-user001/by/.connector-auth/.dws");
+        verify(cliRunner).run(
+            eq(java.util.List.of("dws", "auth", "reset", "-y")),
+            eq(Map.of(
+                "HOME", home.toString(),
+                "DWS_CONFIG_DIR", home.resolve("config").toString(),
+                "DWS_DISABLE_KEYCHAIN", "1")),
+            eq(null),
+            eq(java.time.Duration.ofSeconds(30)));
     }
 
     @Test

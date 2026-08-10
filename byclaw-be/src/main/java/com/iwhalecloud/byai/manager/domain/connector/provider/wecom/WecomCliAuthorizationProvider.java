@@ -46,19 +46,22 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliR
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.CliResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.ManagedProcess;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialVerifier;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialRevoker;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService.ConnectorCliWorkspace;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
 @Component
 public class WecomCliAuthorizationProvider
-        implements ConnectorAuthorizationProvider, ConnectorCredentialVerifier {
+        implements ConnectorAuthorizationProvider, ConnectorCredentialVerifier, ConnectorCredentialRevoker {
 
     private static final String PROVIDER_CODE = "wecom-cli";
     private static final List<String> INIT_COMMAND =
         List.of("wecom-cli", "init", "--noninteractive", "--no-open");
     private static final List<String> CACHE_STATUS_COMMAND =
         List.of("wecom-cli", "cache", "status");
+    private static final List<String> CACHE_CLEAR_COMMAND =
+        List.of("wecom-cli", "cache", "clear");
     private static final List<String> DEFAULT_PROBE_COMMAND =
         List.of("wecom-cli", "contact", "get_userlist", "{}");
     private static final Duration CLI_TIMEOUT = Duration.ofSeconds(30);
@@ -178,6 +181,19 @@ public class WecomCliAuthorizationProvider
     @Override
     public String providerCode() {
         return PROVIDER_CODE;
+    }
+
+    @Override
+    public void revoke(String userId, ConnectorInfo connector) {
+        Long numericUserId = parseUserId(userId);
+        if (numericUserId == null) {
+            throw new IllegalArgumentException(INVALID_USER_MESSAGE);
+        }
+        ConnectorCliWorkspace workspace = workspaceService.resolve(numericUserId, PROVIDER_CODE);
+        CliResult result = cliRunner.run(CACHE_CLEAR_COMMAND, workspace.environment(), null, CLI_TIMEOUT);
+        if (result == null || result.exitCode() != 0 || result.truncated()) {
+            throw new IllegalStateException("Unable to revoke WeCom credential");
+        }
     }
 
     @Override
