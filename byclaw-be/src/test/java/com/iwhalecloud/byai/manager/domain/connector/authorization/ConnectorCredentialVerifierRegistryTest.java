@@ -56,7 +56,7 @@ class ConnectorCredentialVerifierRegistryTest {
             }
 
             @Override
-            public AuthorizationStatusResult verify(String userId, ConnectorInfo connector) {
+            public AuthorizationStatusResult verify(Long userId, ConnectorInfo connector) {
                 return null;
             }
         };

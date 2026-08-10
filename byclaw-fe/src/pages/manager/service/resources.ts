@@ -8,7 +8,10 @@ export interface SkillGroupMember {
   avatar: string;
   resourceStatus: number;
   ownerType: string;
+  createBy: string;
   skillType: string;
+  systemBuiltIn?: boolean;
+  creatorOwned?: boolean;
   sourceType: string;
   version: string;
   skillUrl: string;
@@ -64,6 +67,21 @@ export interface SkillGroupPageParams {
   catalogId?: string;
 }
 
+export interface SkillGroupCandidatePageParams {
+  groupId?: string;
+  pageNum: number;
+  pageSize: number;
+  keyword?: string;
+}
+
+export interface SkillGroupMemberPageResult {
+  pageNum: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  list: SkillGroupMember[];
+}
+
 export interface SkillGroupCreateParams {
   resourceName: string;
   resourceDesc?: string;
@@ -90,6 +108,9 @@ export const pageSkillGroups = (params: SkillGroupPageParams) =>
 
 export const getSkillGroupDetail = (params: { groupId: string }) =>
   POST<SkillGroup>('/byaiService/skillGroup/detail', params);
+
+export const pageSkillGroupMemberCandidates = (params: SkillGroupCandidatePageParams) =>
+  POST<SkillGroupMemberPageResult>('/byaiService/skillGroup/member/candidates', params);
 
 export const installSkillGroup = (params: { groupId: string; digitalEmployeeId: string }) =>
   POST<SkillGroupInstallResult>('/byaiService/skillGroup/install', params);

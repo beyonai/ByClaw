@@ -98,6 +98,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
             resourceId={resourceId}
             sessionId={sessionId}
             codeChangesEnabled
+            onOpenDetail={onOpenDetail}
           />
         );
       }
@@ -143,6 +144,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
           resourceId={resourceId}
           sessionId={sessionId}
           codeChangesEnabled
+          onOpenDetail={onOpenDetail}
         />
       );
     }

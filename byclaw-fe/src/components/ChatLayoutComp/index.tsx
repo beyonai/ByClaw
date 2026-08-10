@@ -114,6 +114,8 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   const shouldSkipSessionListCache = Boolean(sendExtraParams?.troubleshootMessageId);
 
   const prevAgentId = useRef(agentId);
+  // 只在会话员工身份变化时同步一次；不能把 agentId 放进 effect 依赖，否则手动 @ 员工会被会话员工反复覆盖。
+  const sessionAgentSyncKeyRef = useRef('');
 
   // 修改ref类型为MessageListRefType
   const messageListCompRef = useRef<MessageListRefType>(null);
@@ -178,7 +180,18 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   useEffect(() => {
     const sessionObjectType = `${currentSession?.objectType || ''}`.toLowerCase();
     const sessionAgentId = currentSession?.objectId;
-    if (sessionObjectType !== 'digemployee' || sessionAgentId === undefined || sessionAgentId === null) return;
+    // 会话切换时列表缓存可能比 sessionId 晚一拍更新，等待目标会话信息到齐，避免先清空旧 @ 标签再立即重建。
+    if (sessionId && !currentSession) return;
+    const syncKey = `${sessionId || ''}:${sessionObjectType}:${sessionAgentId ?? ''}`;
+    if (sessionAgentSyncKeyRef.current === syncKey) return;
+    sessionAgentSyncKeyRef.current = syncKey;
+
+    if (sessionObjectType !== 'digemployee' || sessionAgentId === undefined || sessionAgentId === null) {
+      // 切换到没有会话员工的普通会话时清理上一会话的默认 @ 员工，避免旧标签残留。
+      setAgentId?.('');
+      setMyAgentType(agentType);
+      return;
+    }
 
     const sessionAgentInfo = getResponseAgentInfo(
       { agentList, employeesList },
@@ -186,9 +199,9 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     );
     const nextAgentId = `${sessionAgentInfo?.agentId || sessionAgentId}`;
     // 运营任务进入会话后立即恢复模板所选员工，使输入框默认 @ 该员工并在发送后继续保留。
-    if (`${agentId || ''}` !== nextAgentId) setAgentId?.(nextAgentId);
+    setAgentId?.(nextAgentId);
     setMyAgentType(sessionAgentInfo?.agentType || agentTypeMap.agent);
-  }, [agentId, agentList, currentSession?.objectId, currentSession?.objectType, employeesList, setAgentId]);
+  }, [agentList, agentType, currentSession?.objectId, currentSession?.objectType, employeesList, sessionId, setAgentId]);
 
   // 旧资源面板仍以单详情节点回调；这里统一补齐稳定身份，才能在多次点击同一资源时复用页签。
   const openResourceDetail = useCallback(
@@ -334,12 +347,25 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
       }
       const agentInfo = getResponseAgentInfo({ agentList, employeesList }, metadata);
       if (agentInfo) {
+        // 目标会话缓存尚未到齐时不处理异步历史消息，避免旧会话员工抢先写入全局状态。
+        if (sessionId && !currentSession) return;
+        // 已有会话的 objectId 是详情接口返回的唯一默认员工；历史消息异步回放时不能再用旧响应员工覆盖它。
+        const sessionObjectType = `${currentSession?.objectType || ''}`.toLowerCase();
+        const sessionAgentId = currentSession?.objectId;
+        if (
+          sessionObjectType === 'digemployee' &&
+          sessionAgentId !== undefined &&
+          sessionAgentId !== null &&
+          `${agentInfo.agentId}` !== `${sessionAgentId}`
+        ) {
+          return;
+        }
         // 会话员工 ID 在不同接口中可能以 number/string 返回，统一成字符串避免输入框默认 @ 节点反复切换。
         setAgentId?.(`${agentInfo.agentId}`);
         setMyAgentType(agentInfo.agentType);
       }
     },
-    [agentList, employeesList, sessionId]
+    [agentList, currentSession?.objectId, currentSession?.objectType, employeesList, sessionId]
   );
 
   const {

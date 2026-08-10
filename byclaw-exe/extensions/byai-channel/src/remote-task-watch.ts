@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
-import { createRedisInstance } from "./utils.js";
+import { createRedisInstance, emitOutOfBandSdkEvent } from "./utils.js";
 import {
   classifyRemoteTaskFollowupError,
   dispatchRemoteTaskFollowup,
@@ -17,6 +17,7 @@ import {
 } from "./session-context.js";
 import { byFrameworkRedisKeys } from "../../shared/src/redis-compat.js";
 import { resolveByaiAgentIdFromSessionKey } from "../../shared/src/session-key.js";
+import { EventType, QueueNames } from "@byclaw/by-framework";
 
 type RedisClient = NonNullable<ReturnType<typeof createRedisInstance>>;
 
@@ -588,7 +589,7 @@ async function isSessionDelegatedToAcpAgent(
 function consumeTaskGroupWithoutFollowup(tasks: RemoteTaskRecord[]): void {
   const deliveredAt = Date.now();
   for (const task of tasks) {
-    removeActiveSdkDelegatedWork({
+    const request = removeActiveSdkDelegatedWork({
       requesterSessionKey: task.requesterSessionKey,
       toolCallId: task.toolCallId,
     });
@@ -597,6 +598,29 @@ function consumeTaskGroupWithoutFollowup(tasks: RemoteTaskRecord[]): void {
     task.updatedAt = deliveredAt;
     task.lastDeliveryError = undefined;
     task.nextAttemptAt = undefined;
+    if (!request && task.sessionId) {
+      // 无 request 时，代表 ACP agent 接管后，到投递 finalAnswer 之前，openclaw 重启过
+      // 这里补一个 APP_STREAM_RESPONSE，否则前端会话永远不会结束
+      emitOutOfBandSdkEvent({
+        sessionId: normalizeText(task.sessionId),
+        eventType: EventType.APP_STREAM_RESPONSE,
+        data: {
+          choices: [
+            {
+              index: 0,
+              finish_reason: "",
+              delta: {
+                content: "",
+              }
+            }
+          ]
+        },
+        params: {
+          traceId: task.traceId,
+          dataStreamName: QueueNames.session_data_stream(task.sessionId),
+        }
+      });
+    }
   }
 }
 

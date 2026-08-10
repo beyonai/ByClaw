@@ -456,24 +456,39 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
   return (
     <Modal
       className={styles.wizard}
+      // 禁止 Modal 外层 wrap 滚动，向导内容统一在弹窗主体内滚动。
+      wrapClassName={styles.wizardWrap}
       title={t('titleCreate')}
       open={open}
       width={720}
+      // 与编辑项目弹窗保持一致，始终在当前视口内上下居中展示。
+      centered
       maskClosable={false}
       closable={!closeBlocked}
       onCancel={closeBlocked ? undefined : onCancel}
       footer={renderFooter()}
+      // 限制 body 高度并在弹窗内部滚动，避免页面和 Modal 外层抢滚动。
+      styles={{
+        body: {
+          maxHeight: 'calc(100vh - 220px)',
+          overflowY: 'auto',
+          paddingTop: 8,
+          paddingInlineEnd: 8,
+        },
+      }}
     >
-      {/* 仅研发项目展开多步进度条;非研发 step1 即为全部,不展示步进。 */}
-      {isDevelopProject && (
-        <Steps
-          className={styles.steps}
-          current={step}
-          size="small"
-          items={[{ title: t('step1.title') }, { title: t('step2.title') }, { title: t('step3.titleShort') }]}
-        />
-      )}
-      {stepPanels[step]()}
+      <div className={styles.wizardScroll}>
+        {/* 仅研发项目展开多步进度条;非研发 step1 即为全部,不展示步进。 */}
+        {isDevelopProject && (
+          <Steps
+            className={styles.steps}
+            current={step}
+            size="small"
+            items={[{ title: t('step1.title') }, { title: t('step2.title') }, { title: t('step3.titleShort') }]}
+          />
+        )}
+        {stepPanels[step]()}
+      </div>
     </Modal>
   );
 };

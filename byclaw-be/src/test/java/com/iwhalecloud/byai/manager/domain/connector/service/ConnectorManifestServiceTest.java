@@ -194,7 +194,7 @@ class ConnectorManifestServiceTest {
               "schemaVersion":"1.0",
               "id":"dingtalk",
               "version":"1.0.52",
-              "runtime":{"type":"cli","commands":{"status":["dws","auth","status"]}},
+              "runtime":{"type":"cli","commands":{"status":[["dws","auth","status"]]}},
               "authStorage":{"mode":"native-home","nativePath":"/by/.connector-auth/.dws",
                 "environment":{
                   "DWS_HOME":"/by/.connector-auth/.dws",

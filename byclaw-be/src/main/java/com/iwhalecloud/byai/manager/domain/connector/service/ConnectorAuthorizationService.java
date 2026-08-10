@@ -25,6 +25,8 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorAuthorizationProvider;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorManifestCommandResolver;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.RedisAuthorizationSession;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.RedisAuthorizationSessionRepository;
 import com.iwhalecloud.byai.manager.domain.connector.manifest.InvalidConnectorManifestException;
@@ -60,6 +62,7 @@ public class ConnectorAuthorizationService {
     private final SequenceService sequenceService;
     private final ConnectorConnectionStateService connectionStateService;
     private final AuthorizationQrCodeEncoder qrCodeEncoder;
+    private final ConnectorManifestCommandResolver manifestCommandResolver;
 
     @Autowired
     public ConnectorAuthorizationService(
@@ -69,7 +72,8 @@ public class ConnectorAuthorizationService {
             ConnectorAuthMapper connectorAuthMapper,
             SequenceService sequenceService,
             ConnectorConnectionStateService connectionStateService,
-            AuthorizationQrCodeEncoder qrCodeEncoder) {
+            AuthorizationQrCodeEncoder qrCodeEncoder,
+            ConnectorManifestCommandResolver manifestCommandResolver) {
         this.connectorInfoService = connectorInfoService;
         this.providerRegistry = providerRegistry;
         this.sessionRepository = sessionRepository;
@@ -77,6 +81,27 @@ public class ConnectorAuthorizationService {
         this.sequenceService = sequenceService;
         this.connectionStateService = connectionStateService;
         this.qrCodeEncoder = qrCodeEncoder;
+        this.manifestCommandResolver = manifestCommandResolver;
+    }
+
+    ConnectorAuthorizationService(
+            ConnectorInfoService connectorInfoService,
+            AuthorizationProviderRegistry providerRegistry,
+            RedisAuthorizationSessionRepository sessionRepository,
+            ConnectorAuthMapper connectorAuthMapper,
+            SequenceService sequenceService,
+            ConnectorConnectionStateService connectionStateService,
+            AuthorizationQrCodeEncoder qrCodeEncoder) {
+        this(
+            connectorInfoService,
+            providerRegistry,
+            sessionRepository,
+            connectorAuthMapper,
+            sequenceService,
+            connectionStateService,
+            qrCodeEncoder,
+            null
+        );
     }
 
     /** 仅供不加载 Spring 容器的既有单元测试使用。 */
@@ -93,7 +118,8 @@ public class ConnectorAuthorizationService {
             connectorAuthMapper,
             sequenceService,
             null,
-            new AuthorizationQrCodeEncoder()
+            new AuthorizationQrCodeEncoder(),
+            null
         );
     }
 
@@ -158,6 +184,18 @@ public class ConnectorAuthorizationService {
             String userId,
             ConnectorInfo connector,
             ConnectorAuthorizationProvider provider) {
+        ManifestCommandCatalog commandCatalog;
+        try {
+            commandCatalog = resolveCommandCatalog(connector);
+        } catch (InvalidConnectorManifestException e) {
+            return failed(
+                null,
+                connector.getConnectorId(),
+                CONNECTOR_MANIFEST_INVALID,
+                "连接器运行时配置无效",
+                null
+            );
+        }
         String authorizationId = UUID.randomUUID().toString();
         AuthorizationStartContext context = new AuthorizationStartContext(
             authorizationId,
@@ -166,7 +204,8 @@ public class ConnectorAuthorizationService {
             connector.getConnectorCode(),
             connector.getProviderCode(),
             request.getRedirectUrl(),
-            providerConfig(connector.getAuthConfig())
+            providerConfig(connector.getAuthConfig()),
+            commandCatalog
         );
         AuthorizationStartResult startResult = startProvider(provider, context);
         Date expiresAt = normalizedExpiry(startResult.expiresAt());
@@ -190,13 +229,17 @@ public class ConnectorAuthorizationService {
             expiresAt,
             startResult.errorCode(),
             startResult.errorMessage(),
+            commandCatalog == null ? null : commandCatalog.digest(),
             0L
         );
         try {
             sessionRepository.create(session);
         } catch (RuntimeException e) {
             if (active) {
-                cancelProviderBestEffort(provider, providerContext(session, startResult.providerState()));
+                cancelProviderBestEffort(
+                    provider,
+                    providerContext(session, startResult.providerState(), commandCatalog)
+                );
             }
             return failed(
                 authorizationId,
@@ -281,7 +324,7 @@ public class ConnectorAuthorizationService {
 
         ConnectorAuthorizationProvider provider = findProvider(session.providerCode());
         if (provider != null) {
-            cancelProviderBestEffort(provider, providerContext(session, providerState));
+            cancelProviderBestEffort(provider, providerContext(session, providerState, null));
         }
         sessionRepository.deleteSecrets(authorizationId);
         return true;
@@ -326,7 +369,22 @@ public class ConnectorAuthorizationService {
 
         AuthorizationStatusResult result;
         try {
-            result = provider.queryStatus(providerContext(session, providerState));
+            ManifestCommandCatalog commandCatalog = resolveSessionCommandCatalog(session);
+            result = provider.queryStatus(providerContext(session, providerState, commandCatalog));
+        } catch (InvalidConnectorManifestException e) {
+            cancelProviderBestEffort(provider, providerContext(session, providerState, null));
+            return transitionProviderTerminal(
+                session,
+                new AuthorizationStatusResult(
+                    AuthorizationStatus.FAILED,
+                    null,
+                    null,
+                    null,
+                    null,
+                    CONNECTOR_MANIFEST_INVALID,
+                    "连接器运行时配置无效"
+                )
+            );
         } catch (RuntimeException e) {
             result = null;
         }
@@ -390,6 +448,7 @@ public class ConnectorAuthorizationService {
             boundedProgressExpiry(progress.expiresAt()),
             null,
             null,
+            session.manifestDigest(),
             session.version() + 1L
         );
         if (!sessionRepository.compareAndSetStatus(
@@ -640,11 +699,15 @@ public class ConnectorAuthorizationService {
             source.expiresAt(),
             errorCode,
             errorMessage,
+            source.manifestDigest(),
             source.version() + 1L
         );
     }
 
-    private AuthorizationSessionContext providerContext(RedisAuthorizationSession session, String providerState) {
+    private AuthorizationSessionContext providerContext(
+            RedisAuthorizationSession session,
+            String providerState,
+            ManifestCommandCatalog commandCatalog) {
         return new AuthorizationSessionContext(
             session.authorizationId(),
             session.userId(),
@@ -653,8 +716,29 @@ public class ConnectorAuthorizationService {
             session.providerCode(),
             session.providerSessionId(),
             providerState,
-            session.expiresAt()
+            session.expiresAt(),
+            commandCatalog
         );
+    }
+
+    private ManifestCommandCatalog resolveCommandCatalog(ConnectorInfo connector) {
+        return manifestCommandResolver == null ? null : manifestCommandResolver.resolve(connector);
+    }
+
+    private ManifestCommandCatalog resolveSessionCommandCatalog(RedisAuthorizationSession session) {
+        if (manifestCommandResolver == null) {
+            return null;
+        }
+        ConnectorInfo connector = connectorInfoService.findById(session.connectorId());
+        if (connector == null || !"00A".equals(connector.getStatusCd())) {
+            throw new InvalidConnectorManifestException("Connector is unavailable");
+        }
+        ManifestCommandCatalog commandCatalog = manifestCommandResolver.resolve(connector);
+        if (StringUtils.hasText(session.manifestDigest())
+                && !session.manifestDigest().equals(commandCatalog.digest())) {
+            throw new InvalidConnectorManifestException("Connector Manifest changed during authorization");
+        }
+        return commandCatalog;
     }
 
     private void cancelProviderBestEffort(

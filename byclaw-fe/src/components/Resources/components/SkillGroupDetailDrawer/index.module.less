@@ -42,9 +42,10 @@
 
 .posterFrame {
   display: flex;
-  width: min(72%, 560px);
-  height: min(72vh, 720px);
-  min-height: 320px;
+  width: auto;
+  max-width: min(100%, 560px);
+  height: auto;
+  max-height: min(100%, 720px);
   align-items: center;
   justify-content: center;
   overflow: hidden;
@@ -56,7 +57,7 @@
   width: auto;
   max-width: 100%;
   height: auto;
-  max-height: 100%;
+  max-height: min(72vh, 720px);
   object-fit: contain;
 }
 
@@ -195,9 +196,15 @@
   }
 
   .posterFrame {
-    width: min(74%, 420px);
-    height: 44vh;
-    min-height: 260px;
+    width: auto;
+    max-width: min(74%, 420px);
+    height: auto;
+    max-height: 44vh;
+  }
+
+  .posterDefault,
+  .poster {
+    max-height: 44vh;
   }
 
   .detailPane {

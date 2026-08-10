@@ -644,7 +644,8 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
                   label: intl.formatMessage({ id: 'resource.skillGroup' }),
                 },
               ],
-              onClick: ({ key }: { key: string }) => {
+              onClick: ({ key, domEvent }) => {
+                domEvent.stopPropagation();
                 if (key === 'skill' || key === 'group') {
                   setEnterpriseSkillDropdownOpen(false);
                   handleEnterpriseSkillKindChange(key);

@@ -23,6 +23,7 @@ import {
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import { getStoredProjectScopeId, saveProjectScopeIdToStorage } from '@/pages/projectSpace/constants';
+import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import {
   saveDefaultAgent,
   saveProjectMembers,
@@ -748,6 +749,9 @@ const ProjectSpaceList: React.FC = () => {
 
   // 唯一新建入口:统一向导。step1 是完整项目表单,选研发才展开后续步骤,非研发建完即完成。
   const handleOpenCreateProject = () => {
+    // 会话模块打开新建项目向导时隐藏项目切换下拉，避免下拉菜单残留在弹窗遮罩下方。
+    setProjectScopeDropdownOpen(false);
+    setProjectScopeSearchKeyword('');
     setEditingProject(undefined);
     setWizardOpen(true);
   };
@@ -1236,6 +1240,8 @@ const ProjectSpaceList: React.FC = () => {
     }
 
     clearDetailPanel?.();
+    // 每次打开项目会话都以该会话详情返回的员工为准，清除目标会话上次遗留的多员工输入草稿。
+    clearEasyConfirmInputDraft(session.sessionId);
 
     if (Array.isArray(session.sessionExts) && session.sessionExts.length > 0) {
       dispatch({
@@ -1256,6 +1262,9 @@ const ProjectSpaceList: React.FC = () => {
       sessionId: `${session.sessionId}`,
       sessionName: session.sessionName || t('newChatName'),
       projectId: `${project.projectId}`,
+      // 显式写回空值，避免 Redux 中同 ID 旧缓存的员工字段继续残留。
+      objectId: session.objectId,
+      objectType: session.objectType,
     };
 
     dispatch({
@@ -1270,14 +1279,17 @@ const ProjectSpaceList: React.FC = () => {
     });
 
     // 项目空间只负责切换会话上下文，右侧仍然复用原聊天页。
-    setSessionId?.(`${session.sessionId}`);
     setAgentId?.(session.objectId ? `${session.objectId}` : '');
+    setSessionId?.(`${session.sessionId}`);
     navigate('/chat', {
       state: {
         keepSiderActiveKey: 'sessions',
         projectId: project.projectId,
         projectName: project.projectName,
         from: 'projectSpace',
+        // 聊天页初始化时直接使用本次详情返回的员工，避免等待会话缓存更新期间短暂沿用旧员工。
+        selectedAgentId: session.objectId,
+        selectedAgentObjectType: session.objectType,
       },
     });
   };
@@ -1500,11 +1512,12 @@ const ProjectSpaceList: React.FC = () => {
           <div className={styles.header}>
             <div className={styles.scopeActionRow}>
               <Dropdown
-                // 展开状态仅由项目输入框控制，避免 Dropdown 点击触发与输入框聚焦同时切换导致闪退。
+                // 新建项目时只收起下拉菜单，保留输入框中的当前项目名称。
                 trigger={[]}
-                open={projectScopeDropdownOpen}
+                open={projectScopeDropdownOpen && !wizardOpen}
                 overlayClassName={styles.scopeDropdown}
                 onOpenChange={(open) => {
+                  if (wizardOpen) return;
                   setProjectScopeDropdownOpen(open);
                   if (!open) setProjectScopeSearchKeyword('');
                 }}
@@ -1530,14 +1543,20 @@ const ProjectSpaceList: React.FC = () => {
               >
                 {/* 项目选择框同时作为后端搜索入口，聚焦后直接输入关键词。 */}
                 <Input
-                  allowClear={projectScopeDropdownOpen}
+                  allowClear={projectScopeDropdownOpen && !wizardOpen}
                   className={styles.scopeInput}
-                  placeholder={projectScopeDropdownOpen ? t('projectSearchPlaceholder') : undefined}
+                  placeholder={projectScopeDropdownOpen && !wizardOpen ? t('projectSearchPlaceholder') : undefined}
                   suffix={<DownOutlined />}
-                  value={projectScopeDropdownOpen ? projectScopeSearchKeyword : scopeTitle}
-                  onFocus={() => setProjectScopeDropdownOpen(true)}
-                  onClick={() => setProjectScopeDropdownOpen(true)}
-                  onChange={(event) => setProjectScopeSearchKeyword(event.target.value)}
+                  value={!wizardOpen && projectScopeDropdownOpen ? projectScopeSearchKeyword : scopeTitle}
+                  onFocus={() => {
+                    if (!wizardOpen) setProjectScopeDropdownOpen(true);
+                  }}
+                  onClick={() => {
+                    if (!wizardOpen) setProjectScopeDropdownOpen(true);
+                  }}
+                  onChange={(event) => {
+                    if (!wizardOpen) setProjectScopeSearchKeyword(event.target.value);
+                  }}
                 />
               </Dropdown>
               <Tooltip title={t('createProject')} placement="top">

@@ -1,9 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+vi.mock("../../shared/src/redis-compat.js", () => ({
+  byFrameworkRedisKeys: {
+    serviceInstances: (domainName: string) => `byai_gateway:sd:instances:${domainName}`,
+  },
+  createRedisClient: vi.fn(),
+  hasRedisConnectionConfig: vi.fn(() => false),
+  readRedisConfig: vi.fn(() => ({})),
+}));
 import {
   backendInstanceBaseUrl,
   backendServiceDiscoveryKey,
   parseBackendServiceInstance,
   pickBackendServiceInstance,
+  resolveBackendServiceExecEnv,
 } from "./backend-service-discovery.js";
 
 describe("backend service discovery", () => {
@@ -66,5 +75,13 @@ describe("backend service discovery", () => {
 
     expect(instance?.pathPrefix).toBe("byaiService");
     expect(backendInstanceBaseUrl(instance!)).toBe("http://10.10.168.203:8086/byaiService");
+  });
+
+  it("exposes the configured backend base URL to skill exec environments", async () => {
+    vi.stubEnv("BYAI_SERVICE_BASE_URL", "https://backend.example.com/byaiService/");
+
+    await expect(resolveBackendServiceExecEnv()).resolves.toEqual({
+      BYAI_SERVICE_BASE_URL: "https://backend.example.com/byaiService",
+    });
   });
 });

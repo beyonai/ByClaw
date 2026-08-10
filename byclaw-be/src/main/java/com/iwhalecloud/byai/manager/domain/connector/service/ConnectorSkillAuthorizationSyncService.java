@@ -2,10 +2,18 @@ package com.iwhalecloud.byai.manager.domain.connector.service;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+
+import io.micrometer.core.instrument.Timer;
 
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
@@ -19,7 +27,8 @@ import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 @Service
 public class ConnectorSkillAuthorizationSyncService {
 
-    private static final int LOCK_COUNT = 64;
+    private static final Logger log = LoggerFactory.getLogger(ConnectorSkillAuthorizationSyncService.class);
+    private static final int MAX_RATE_LIMIT_ENTRIES = 4_096;
     private static final Map<String, String> SKILL_CONNECTOR_PROVIDERS = Map.of(
         "dingtalk", "dws-dingtalk",
         "lark", "lark-cli",
@@ -37,20 +46,48 @@ public class ConnectorSkillAuthorizationSyncService {
     private final ConnectorInfoService connectorInfoService;
     private final ConnectorCredentialVerifierRegistry verifierRegistry;
     private final ConnectorConnectionStateService connectionStateService;
-    private final ReentrantLock[] locks = createLocks();
+    private final ConnectorSkillAuthorizationSyncProperties properties;
+    private final ConnectorSkillAuthorizationSyncMetrics metrics;
+    private final Semaphore verificationPermits;
+    private final ConcurrentHashMap<String, ReentrantLock> verificationLocks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, Long> nextAllowedVerificationNanos = new ConcurrentHashMap<>();
 
     public ConnectorSkillAuthorizationSyncService(
             ConnectorInfoService connectorInfoService,
             ConnectorCredentialVerifierRegistry verifierRegistry,
-            ConnectorConnectionStateService connectionStateService) {
+            ConnectorConnectionStateService connectionStateService,
+            ConnectorSkillAuthorizationSyncProperties properties,
+            ConnectorSkillAuthorizationSyncMetrics metrics) {
         this.connectorInfoService = connectorInfoService;
         this.verifierRegistry = verifierRegistry;
         this.connectionStateService = connectionStateService;
+        this.properties = properties;
+        this.metrics = metrics;
+        this.verificationPermits = new Semaphore(properties.maxConcurrentVerifications(), true);
     }
 
     public ConnectorSkillAuthorizationSyncDto sync(String connectorCode, String userId) {
+        Timer.Sample metricSample = metrics.start();
+        long startedNanos = System.nanoTime();
+        try {
+            ConnectorSkillAuthorizationSyncDto result = synchronize(connectorCode, userId);
+            metrics.recordSuccess(metricSample);
+            audit(userId, result.getConnectorCode(), "CONNECTED", startedNanos);
+            return result;
+        } catch (ConnectorSkillAuthorizationSyncException e) {
+            metrics.recordFailure(metricSample, e.getErrorCode());
+            audit(userId, safeConnectorCode(connectorCode), e.getErrorCode(), startedNanos);
+            throw e;
+        } catch (RuntimeException e) {
+            metrics.recordFailure(metricSample, "CONNECTOR_SYNC_INTERNAL_ERROR");
+            audit(userId, safeConnectorCode(connectorCode), "CONNECTOR_SYNC_INTERNAL_ERROR", startedNanos);
+            throw e;
+        }
+    }
+
+    private ConnectorSkillAuthorizationSyncDto synchronize(String connectorCode, String userId) {
         String normalizedCode = normalizeConnectorCode(connectorCode);
-        requireUser(userId);
+        Long numericUserId = requireUser(userId);
         String expectedProviderCode = SKILL_CONNECTOR_PROVIDERS.get(normalizedCode);
         if (expectedProviderCode == null) {
             throw failure("CONNECTOR_NOT_FOUND", "Connector is unavailable", false);
@@ -70,10 +107,8 @@ public class ConnectorSkillAuthorizationSyncService {
             throw failure("CONNECTOR_VERIFIER_NOT_FOUND", "Connector verifier is unavailable", false);
         }
 
-        ReentrantLock lock = lock(userId, connector.getConnectorId());
-        lock.lock();
-        try {
-            AuthorizationStatusResult verification = verify(verifier, userId, connector);
+        try (VerificationAdmission ignored = acquire(numericUserId, connector.getConnectorId())) {
+            AuthorizationStatusResult verification = verify(verifier, numericUserId, connector);
             if (verification == null || verification.status() != AuthorizationStatus.CONNECTED) {
                 throw verificationFailure(verification);
             }
@@ -87,14 +122,12 @@ public class ConnectorSkillAuthorizationSyncService {
                 throw failure("AUTH_BINDING_FAILED", "Unable to synchronize connector state", true);
             }
             return ConnectorSkillAuthorizationSyncDto.connected(normalizedCode);
-        } finally {
-            lock.unlock();
         }
     }
 
     private AuthorizationStatusResult verify(
             ConnectorCredentialVerifier verifier,
-            String userId,
+            Long userId,
             ConnectorInfo connector) {
         try {
             return verifier.verify(userId, connector);
@@ -120,30 +153,100 @@ public class ConnectorSkillAuthorizationSyncService {
         return connectorCode.trim();
     }
 
-    private void requireUser(String userId) {
+    private Long requireUser(String userId) {
         if (!StringUtils.hasText(userId)) {
             throw failure("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential", false);
         }
         try {
-            if (Long.parseLong(userId.trim()) <= 0) {
+            Long numericUserId = Long.parseLong(userId.trim());
+            if (numericUserId <= 0) {
                 throw new NumberFormatException("non-positive");
             }
+            return numericUserId;
         } catch (NumberFormatException e) {
             throw failure("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential", false);
         }
     }
 
-    private ReentrantLock lock(String userId, Long connectorId) {
-        int index = Math.floorMod((userId + ':' + connectorId).hashCode(), locks.length);
-        return locks[index];
+    private VerificationAdmission acquire(Long userId, Long connectorId) {
+        String key = userId + ":" + connectorId;
+        AtomicBoolean lockAcquired = new AtomicBoolean();
+        ReentrantLock lock = verificationLocks.compute(key, (ignored, current) -> {
+            ReentrantLock candidate = current == null ? new ReentrantLock() : current;
+            lockAcquired.set(!candidate.isLocked() && candidate.tryLock());
+            return candidate;
+        });
+        if (!lockAcquired.get()) {
+            throw busy();
+        }
+        if (!verificationPermits.tryAcquire()) {
+            releaseLock(key, lock);
+            throw busy();
+        }
+        if (!acquireUserRateLimit(userId)) {
+            verificationPermits.release();
+            releaseLock(key, lock);
+            throw busy();
+        }
+        return new VerificationAdmission(key, lock);
     }
 
-    private ReentrantLock[] createLocks() {
-        ReentrantLock[] result = new ReentrantLock[LOCK_COUNT];
-        for (int index = 0; index < result.length; index++) {
-            result[index] = new ReentrantLock();
+    private boolean acquireUserRateLimit(Long userId) {
+        long intervalNanos = TimeUnit.MILLISECONDS.toNanos(properties.minUserIntervalMillis());
+        if (intervalNanos == 0) {
+            return true;
         }
-        return result;
+        long now = System.nanoTime();
+        AtomicBoolean acquired = new AtomicBoolean();
+        nextAllowedVerificationNanos.compute(userId, (ignored, nextAllowed) -> {
+            if (nextAllowed == null || now >= nextAllowed) {
+                acquired.set(true);
+                return now + intervalNanos;
+            }
+            return nextAllowed;
+        });
+        if (nextAllowedVerificationNanos.size() > MAX_RATE_LIMIT_ENTRIES) {
+            nextAllowedVerificationNanos.entrySet().removeIf(entry -> now >= entry.getValue());
+        }
+        return acquired.get();
+    }
+
+    private ConnectorSkillAuthorizationSyncException busy() {
+        return failure("CONNECTOR_VERIFICATION_BUSY", "Connector verification capacity is busy", true);
+    }
+
+    private void releaseLock(String key, ReentrantLock lock) {
+        verificationLocks.computeIfPresent(key, (ignored, current) -> {
+            if (current != lock) {
+                return current;
+            }
+            lock.unlock();
+            return null;
+        });
+    }
+
+    private String safeConnectorCode(String connectorCode) {
+        String normalized = connectorCode == null ? "" : connectorCode.trim();
+        return SKILL_CONNECTOR_PROVIDERS.containsKey(normalized) ? normalized : "unknown";
+    }
+
+    private String safeUserId(String userId) {
+        if (userId == null || !userId.trim().matches("[1-9]\\d{0,18}")) {
+            return "unknown";
+        }
+        return userId.trim();
+    }
+
+    private void audit(String userId, String connectorCode, String result, long startedNanos) {
+        long durationMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
+        log.info(
+            "connector_skill_sync userId={} connectorCode={} providerCode={} result={} durationMs={}",
+            safeUserId(userId),
+            connectorCode,
+            SKILL_CONNECTOR_PROVIDERS.getOrDefault(connectorCode, "unknown"),
+            result,
+            durationMillis
+        );
     }
 
     private ConnectorSkillAuthorizationSyncException failure(
@@ -151,5 +254,27 @@ public class ConnectorSkillAuthorizationSyncService {
             String message,
             boolean retryable) {
         return new ConnectorSkillAuthorizationSyncException(errorCode, message, retryable);
+    }
+
+    private final class VerificationAdmission implements AutoCloseable {
+
+        private final String key;
+        private final ReentrantLock lock;
+        private boolean closed;
+
+        private VerificationAdmission(String key, ReentrantLock lock) {
+            this.key = key;
+            this.lock = lock;
+        }
+
+        @Override
+        public void close() {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            verificationPermits.release();
+            releaseLock(key, lock);
+        }
     }
 }

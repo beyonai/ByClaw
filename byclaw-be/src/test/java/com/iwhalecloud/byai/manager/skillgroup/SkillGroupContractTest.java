@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCreateQo;
+import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCandidatePageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupIdQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupInstallQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupMemberChangeQo;
@@ -58,6 +59,8 @@ class SkillGroupContractTest {
         pageQo.setOwnerType("enterprise");
         pageQo.setResourceStatus(1);
         pageQo.setCatalogId(40001L);
+        SkillGroupCandidatePageQo candidatePageQo = new SkillGroupCandidatePageQo();
+        candidatePageQo.setGroupId(20001L);
 
         assertThat(installQo.getDigitalEmployeeId()).isEqualTo(10001L);
         assertThat(installQo.getGroupId()).isEqualTo(20001L);
@@ -69,6 +72,9 @@ class SkillGroupContractTest {
         assertThat(pageQo.getOwnerType()).isEqualTo("enterprise");
         assertThat(pageQo.getResourceStatus()).isEqualTo(1);
         assertThat(pageQo.getCatalogId()).isEqualTo(40001L);
+        assertThat(candidatePageQo.getGroupId()).isEqualTo(20001L);
+        assertThat(candidatePageQo.getPageNum()).isEqualTo(1);
+        assertThat(candidatePageQo.getPageSize()).isEqualTo(10);
     }
 
     @Test
@@ -184,6 +190,8 @@ class SkillGroupContractTest {
         groupVo.setResourceId(10001L);
         SkillGroupMemberVo memberVo = new SkillGroupMemberVo();
         memberVo.setResourceId(20001L);
+        memberVo.setSystemBuiltIn(true);
+        memberVo.setCreatorOwned(false);
         SkillGroupInstallResultVo resultVo = new SkillGroupInstallResultVo();
         resultVo.getInstalledSkillIds().add(30001L);
         resultVo.getExistingSkillIds().add(30002L);
@@ -199,6 +207,8 @@ class SkillGroupContractTest {
         assertThat(groupJson.path("resourceId").asText()).isEqualTo("10001");
         assertThat(memberJson.path("resourceId").isTextual()).isTrue();
         assertThat(memberJson.path("resourceId").asText()).isEqualTo("20001");
+        assertThat(memberJson.path("systemBuiltIn").asBoolean()).isTrue();
+        assertThat(memberJson.path("creatorOwned").asBoolean()).isFalse();
         assertTextualArrayEntry(resultJson, "installedSkillIds", "30001");
         assertTextualArrayEntry(resultJson, "existingSkillIds", "30002");
         assertTextualArrayEntry(resultJson, "removedSkillIds", "30003");
@@ -260,7 +270,28 @@ class SkillGroupContractTest {
                 .contains("member_rel.rel_type_name = 'skill_group_member'")
                 .contains("member_rel.rel_status = 1")
                 .contains("member_resource.resource_biz_type = 'skill'")
+                .contains("member_resource.create_by")
                 .contains("left join ss_res_ext_skill skill_ext");
+    }
+
+    @Test
+    void memberCandidateStatementFiltersOnBackendByTenantOwnerStatusTypeAndOriginalCreator() throws Exception {
+        String candidates = extractBlock(readMapperXml(), "select", "selectmembercandidates");
+
+        assertThat(candidates)
+                .contains("skill_resource.com_acct_id = #{comacctid}")
+                .contains("skill_resource.resource_biz_type = 'skill'")
+                .contains("skill_resource.resource_status = 2")
+                .contains("skill_resource.owner_type = 'enterprise' and lower(skill_ext.skill_type) = 'inner'")
+                .contains("skill_resource.owner_type in ('enterprise', 'personal')")
+                .contains("and skill_resource.create_by = #{creatorid}")
+                .contains("case when skill_resource.owner_type = 'enterprise' and lower(skill_ext.skill_type) = 'inner'")
+                .contains("as system_built_in")
+                .contains("as creator_owned")
+                .contains("upper(skill_resource.resource_code)")
+                .contains("upper(skill_resource.resource_name)")
+                .contains("skill_resource.update_time desc nulls last")
+                .contains("skill_resource.resource_id desc");
     }
 
     @Test

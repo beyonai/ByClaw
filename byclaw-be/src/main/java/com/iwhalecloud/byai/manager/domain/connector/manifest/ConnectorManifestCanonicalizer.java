@@ -93,14 +93,22 @@ public class ConnectorManifestCanonicalizer {
         Iterator<Map.Entry<String, JsonNode>> commandFields = commands.fields();
         while (commandFields.hasNext()) {
             Map.Entry<String, JsonNode> field = commandFields.next();
-            JsonNode command = field.getValue();
-            if (!command.isArray() || command.isEmpty()) {
-                throw invalid("runtime.commands." + field.getKey() + " must be a non-empty argument array");
+            JsonNode commandGroup = field.getValue();
+            if (!commandGroup.isArray() || commandGroup.isEmpty()) {
+                throw invalid("runtime.commands." + field.getKey() + " must be a non-empty command group");
             }
-            for (JsonNode argument : command) {
-                if (!argument.isTextual() || !StringUtils.hasText(argument.textValue())
-                        || containsControlCharacter(argument.textValue())) {
-                    throw invalid("runtime.commands." + field.getKey() + " contains an invalid argument");
+            for (JsonNode command : commandGroup) {
+                if (!command.isArray()) {
+                    throw invalid("runtime.commands." + field.getKey() + " must be two-dimensional");
+                }
+                if (command.isEmpty()) {
+                    throw invalid("runtime.commands." + field.getKey() + " contains an empty argv");
+                }
+                for (JsonNode argument : command) {
+                    if (!argument.isTextual() || !StringUtils.hasText(argument.textValue())
+                            || containsControlCharacter(argument.textValue())) {
+                        throw invalid("runtime.commands." + field.getKey() + " contains an invalid argument");
+                    }
                 }
             }
         }

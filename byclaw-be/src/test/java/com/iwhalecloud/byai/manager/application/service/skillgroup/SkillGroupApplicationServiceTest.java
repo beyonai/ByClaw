@@ -33,6 +33,7 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCreateQo;
+import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCandidatePageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupInstallQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupMemberChangeQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupPageQo;
@@ -427,6 +428,46 @@ class SkillGroupApplicationServiceTest {
     }
 
     @Test
+    void pageMemberCandidatesUsesCurrentUserAsCreatorForNewGroup() {
+        SkillGroupCandidatePageQo qo = new SkillGroupCandidatePageQo();
+        qo.setPageNum(2);
+        qo.setPageSize(5);
+        Page<SkillGroupMemberVo> rows = new Page<>(2, 5);
+        SkillGroupMemberVo candidate = new SkillGroupMemberVo();
+        candidate.setResourceId(501L);
+        rows.add(candidate);
+        rows.setTotal(11);
+        when(mapper.selectMemberCandidates(qo, TENANT_ID, USER_ID)).thenReturn(rows);
+
+        PageInfo<SkillGroupMemberVo> result = service.pageMemberCandidates(qo);
+
+        verify(mapper).selectMemberCandidates(qo, TENANT_ID, USER_ID);
+        assertThat(result.getList()).extracting(SkillGroupMemberVo::getResourceId).containsExactly(501L);
+        assertThat(result.getPageNum()).isEqualTo(2);
+        assertThat(result.getPageSize()).isEqualTo(5);
+        assertThat(result.getTotal()).isEqualTo(11);
+    }
+
+    @Test
+    void pageMemberCandidatesUsesOriginalGroupCreatorForEdit() {
+        long originalCreatorId = 999L;
+        SkillGroupCandidatePageQo qo = new SkillGroupCandidatePageQo();
+        qo.setGroupId(GROUP_ID);
+        SsResource group = group();
+        group.setCreateBy(originalCreatorId);
+        when(resourceService.findById(GROUP_ID)).thenReturn(group);
+        when(authService.hasResourceManagePermission(group)).thenReturn(true);
+        when(mapper.selectMemberCandidates(qo, TENANT_ID, originalCreatorId)).thenReturn(new Page<>(1, 10));
+
+        service.pageMemberCandidates(qo);
+
+        verify(resourceService).findById(GROUP_ID);
+        verify(authService).hasResourceManagePermission(group);
+        verify(mapper).selectMemberCandidates(qo, TENANT_ID, originalCreatorId);
+        verify(mapper, never()).selectGroupForUpdate(any(), any());
+    }
+
+    @Test
     void detailUsesVisibilityQueryAndPopulatesMembersWhileHiddenGroupFails() {
         SkillGroupVo visible = new SkillGroupVo();
         visible.setResourceId(GROUP_ID);
@@ -484,10 +525,9 @@ class SkillGroupApplicationServiceTest {
     }
 
     @Test
-    void addMembersAllowsInnerSkillWithoutUseOrManagePermission() {
+    void addMembersAllowsEnterpriseInnerSkillWithoutUseOrManagePermission() {
         prepareManagedGroup();
         SsResource sharedSkill = skill(501L);
-        sharedSkill.setComAcctId(999L);
         when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(sharedSkill));
         when(mapper.selectMemberRelationsIncludingInactive(GROUP_ID, List.of(501L))).thenReturn(List.of());
         when(sequenceService.nextVal()).thenReturn(11L);
@@ -503,12 +543,100 @@ class SkillGroupApplicationServiceTest {
     }
 
     @Test
+    void addMembersRejectsInnerSkillFromAnotherTenant() {
+        prepareManagedGroup();
+        SsResource crossTenantSkill = skill(501L);
+        crossTenantSkill.setComAcctId(999L);
+        when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(crossTenantSkill));
+
+        assertThatThrownBy(() -> service.addMembers(memberQo(501L)))
+                .isInstanceOf(BaseException.class)
+                .hasMessage("组内技能不属于当前企业：501");
+
+        verify(mapper, never()).selectMemberRelationsIncludingInactive(any(), any());
+    }
+
+    @Test
+    void addMembersRejectsOtherCreatorsPersonalAndEnterpriseNonInnerSkills() {
+        prepareManagedGroup();
+        SsResource personalSkill = skill(501L);
+        personalSkill.setOwnerType("personal");
+        personalSkill.setCreateBy(999L);
+        when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(personalSkill));
+        when(extSkillService.findByIds(List.of(501L))).thenReturn(List.of(hubSkill(501L)));
+        assertThatThrownBy(() -> service.addMembers(memberQo(501L)))
+                .isInstanceOf(BaseException.class)
+                .hasMessage("技能组成员只能选择系统内置技能或原创建人创建的企业/个人技能：501");
+
+        SsResource otherCreatorsSkill = skill(501L);
+        otherCreatorsSkill.setCreateBy(999L);
+        when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(otherCreatorsSkill));
+        assertThatThrownBy(() -> service.addMembers(memberQo(501L)))
+                .isInstanceOf(BaseException.class)
+                .hasMessage("技能组成员只能选择系统内置技能或原创建人创建的企业/个人技能：501");
+
+        verify(mapper, never()).selectMemberRelationsIncludingInactive(any(), any());
+    }
+
+    @Test
+    void addMembersRejectsOtherCreatorsPersonalInnerSkill() {
+        prepareManagedGroup();
+        SsResource personalSkill = skill(501L);
+        personalSkill.setOwnerType("personal");
+        personalSkill.setCreateBy(999L);
+        when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(personalSkill));
+        when(extSkillService.findByIds(List.of(501L))).thenReturn(List.of(innerSkill(501L)));
+
+        assertThatThrownBy(() -> service.addMembers(memberQo(501L)))
+                .isInstanceOf(BaseException.class)
+                .hasMessage("技能组成员只能选择系统内置技能或原创建人创建的企业/个人技能：501");
+
+        verify(mapper, never()).selectMemberRelationsIncludingInactive(any(), any());
+    }
+
+    @Test
+    void addMembersAllowsCreatorOwnedNonInnerSkill() {
+        SsResource group = group();
+        group.setCreateBy(999L);
+        when(mapper.selectGroupForUpdate(GROUP_ID, TENANT_ID)).thenReturn(group);
+        when(authService.hasResourceManagePermission(group)).thenReturn(true);
+        when(mapper.insertActiveMemberIfAbsent(any())).thenReturn(1);
+        SsResource creatorOwnedSkill = skill(501L);
+        creatorOwnedSkill.setCreateBy(999L);
+        when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(creatorOwnedSkill));
+        when(extSkillService.findByIds(List.of(501L))).thenReturn(List.of(hubSkill(501L)));
+        when(mapper.selectMemberRelationsIncludingInactive(GROUP_ID, List.of(501L))).thenReturn(List.of());
+        when(sequenceService.nextVal()).thenReturn(11L);
+
+        service.addMembers(memberQo(501L));
+
+        verify(mapper).insertActiveMemberIfAbsent(any(SsResourceRelDetail.class));
+    }
+
+    @Test
+    void addMembersAllowsCreatorOwnedPersonalSkill() {
+        prepareManagedGroup();
+        SsResource personalSkill = skill(501L);
+        personalSkill.setOwnerType("personal");
+        when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(personalSkill));
+        when(extSkillService.findByIds(List.of(501L))).thenReturn(List.of(hubSkill(501L)));
+        when(mapper.selectMemberRelationsIncludingInactive(GROUP_ID, List.of(501L))).thenReturn(List.of());
+        when(sequenceService.nextVal()).thenReturn(11L);
+
+        service.addMembers(memberQo(501L));
+
+        verify(mapper).insertActiveMemberIfAbsent(any(SsResourceRelDetail.class));
+    }
+
+    @Test
     void addMembersRejectsNullIdsBeforeAnyQueryOrMutation() {
         SkillGroupMemberChangeQo qo = new SkillGroupMemberChangeQo();
         qo.setGroupId(GROUP_ID);
         qo.setSkillIds(null);
 
-        assertThatThrownBy(() -> service.addMembers(qo)).isInstanceOf(BaseException.class);
+        assertThatThrownBy(() -> service.addMembers(qo))
+                .isInstanceOf(BaseException.class)
+                .hasMessage("组内技能列表不能为空");
 
         verifyNoInteractions(resourceService, mapper, relationService, authService, sequenceService);
     }
@@ -583,7 +711,8 @@ class SkillGroupApplicationServiceTest {
         when(authService.hasResourceUsePermission(valid)).thenReturn(true);
 
         assertThatThrownBy(() -> service.addMembers(memberQo(501L, 502L)))
-                .isInstanceOf(BaseException.class);
+                .isInstanceOf(BaseException.class)
+                .hasMessage("组内技能未上架：502");
 
         verify(mapper, never()).selectMemberRelationsIncludingInactive(any(), any());
         verifyNoInteractions(relationService);
@@ -594,7 +723,9 @@ class SkillGroupApplicationServiceTest {
     void addMembersRejectsMissingWrongTypeSelfAndNonInnerSkillBeforeMutation() {
         prepareManagedGroup();
         when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of());
-        assertThatThrownBy(() -> service.addMembers(memberQo(501L))).isInstanceOf(BaseException.class);
+        assertThatThrownBy(() -> service.addMembers(memberQo(501L)))
+                .isInstanceOf(BaseException.class)
+                .hasMessage("组内技能不存在：501");
 
         SsResource wrong = skill(501L);
         wrong.setResourceBizType("TOOL");
@@ -605,6 +736,7 @@ class SkillGroupApplicationServiceTest {
         assertThatThrownBy(() -> service.addMembers(memberQo(GROUP_ID))).isInstanceOf(BaseException.class);
 
         SsResource nonInner = skill(501L);
+        nonInner.setCreateBy(999L);
         when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(nonInner));
         when(extSkillService.findByIds(List.of(501L))).thenReturn(List.of(hubSkill(501L)));
         assertThatThrownBy(() -> service.addMembers(memberQo(501L))).isInstanceOf(BaseException.class);
@@ -818,6 +950,7 @@ class SkillGroupApplicationServiceTest {
         resource.setResourceType("COMBIN");
         resource.setResourceName("Group");
         resource.setComAcctId(TENANT_ID);
+        resource.setCreateBy(USER_ID);
         return resource;
     }
 
@@ -826,6 +959,9 @@ class SkillGroupApplicationServiceTest {
         resource.setResourceId(id);
         resource.setResourceBizType("SKILL");
         resource.setResourceStatus(ResourceStatus.LIST.getNum());
+        resource.setOwnerType("enterprise");
+        resource.setComAcctId(TENANT_ID);
+        resource.setCreateBy(USER_ID);
         return resource;
     }
 

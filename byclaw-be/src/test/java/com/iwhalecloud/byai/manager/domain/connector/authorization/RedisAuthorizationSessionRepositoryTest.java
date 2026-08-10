@@ -110,6 +110,20 @@ class RedisAuthorizationSessionRepositoryTest {
     }
 
     @Test
+    void deserializesLegacySessionWithoutManifestDigest() throws Exception {
+        RedisAuthorizationSession session = objectMapper.readValue("""
+            {"authorizationId":"authorization-1","userId":"user-1","connectorId":42,
+             "connectorCode":"lark","providerCode":"lark-cli","status":"PENDING","phase":null,
+             "authorizationUrlCipher":"cipher-url","providerSessionId":"provider-session",
+             "providerStateCipher":"cipher-state","ownerInstanceId":null,"expiresAt":1893456000000,
+             "errorCode":null,"errorMessage":null,"version":3}
+            """, RedisAuthorizationSession.class);
+
+        assertThat(session.manifestDigest()).isNull();
+        assertThat(session.version()).isEqualTo(3L);
+    }
+
+    @Test
     void activeSessionCheckReadsTheUserConnectorIndex() {
         when(valueOperations.get(USER_INDEX_KEY)).thenReturn(AUTHORIZATION_ID, null);
 

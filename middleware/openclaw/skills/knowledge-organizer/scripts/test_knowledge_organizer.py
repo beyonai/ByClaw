@@ -26,6 +26,7 @@ class FakeApi:
         self.saved_object_instances: list[dict[str, object]] = []
         self.discovery_calls: list[tuple[str, list[str], list[str]]] = []
         self.enrichment_calls: list[tuple[str, list[str]]] = []
+        self.task_status_calls: list[tuple[int, str]] = []
 
     def list_authorized_resources(
         self, employee_resource_id: str, page: int
@@ -92,6 +93,9 @@ class FakeApi:
             "taskType": "documentEnrichment",
             "accepted": True,
         }
+
+    def update_task_status(self, *, session_id: int, task_status: str) -> None:
+        self.task_status_calls.append((session_id, task_status))
 
 
 class RecordingTransport:
@@ -289,12 +293,14 @@ class KnowledgeOrganizerTests(unittest.TestCase):
             [
                 [{"objectCode": "raw_doc"}],
                 {"records": [{"term_id": "term-7"}], "total": 1, "meta": {}},
+                None,
             ]
         )
         api = knowledge_organizer.ServiceApi(transport)
 
         resources = api.list_session_resources(session_id="session-001")
         api.save_object_instance(payload={"objectCode": "raw_doc"})
+        api.update_task_status(session_id=11036157, task_status="done")
 
         self.assertEqual(resources, [{"objectCode": "raw_doc"}])
 
@@ -316,6 +322,49 @@ class KnowledgeOrganizerTests(unittest.TestCase):
                 "payload": {"objectCode": "raw_doc"},
             },
         )
+        self.assertEqual(
+            transport.requests[2],
+            {
+                "service_env": "BE_DOMAINNAME",
+                "method": "POST",
+                "path": "/byaiService/devloop/operation/updateTaskStatus",
+                "payload": {"sessionId": 11036157, "taskStatus": "done"},
+            },
+        )
+
+    def test_update_task_status_accepts_only_supported_terminal_statuses(self) -> None:
+        for task_status in ("failed", "done", "mixed"):
+            with self.subTest(task_status=task_status):
+                result = self.organizer.update_task_status(
+                    session_id='"11036157"',
+                    task_status=task_status,
+                )
+
+                self.assertEqual(result["session_id"], 11036157)
+                self.assertEqual(result["task_status"], task_status)
+
+        self.assertEqual(
+            self.api.task_status_calls,
+            [
+                (11036157, "failed"),
+                (11036157, "done"),
+                (11036157, "mixed"),
+            ],
+        )
+
+    def test_update_task_status_rejects_non_numeric_session_and_other_statuses(self) -> None:
+        with self.assertRaisesRegex(ValueError, "数值型 session id"):
+            self.organizer.update_task_status(
+                session_id="session-001",
+                task_status="done",
+            )
+        with self.assertRaisesRegex(ValueError, "仅支持"):
+            self.organizer.update_task_status(
+                session_id="11036157",
+                task_status="running",
+            )
+
+        self.assertEqual(self.api.task_status_calls, [])
 
     def test_ingest_snapshots_source_and_saves_object_instance_to_kb(self) -> None:
         self.initialize_session_scope()
@@ -585,7 +634,7 @@ class KnowledgeOrganizerTests(unittest.TestCase):
         self.assertEqual(state["discoveries"][0]["status"], "failed")
         self.assertFalse(state["discoveries"][0]["accepted"])
 
-    def test_cli_exposes_only_four_commands_and_new_arguments(self) -> None:
+    def test_cli_exposes_five_commands_and_new_arguments(self) -> None:
         result = subprocess.run(
             ["python3", str(SCRIPT), "--help"],
             check=False,
@@ -593,7 +642,10 @@ class KnowledgeOrganizerTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(result.returncode, 0)
-        self.assertIn("{init,ingest,organize,build}", result.stdout)
+        self.assertIn(
+            "{init,ingest,organize,build,update-task-status}",
+            result.stdout,
+        )
 
         init_help = subprocess.run(
             ["python3", str(SCRIPT), "init", "--help"],
@@ -623,6 +675,16 @@ class KnowledgeOrganizerTests(unittest.TestCase):
             text=True,
         )
         self.assertIn("--source-object-code", organize_help.stdout)
+
+        update_status_help = subprocess.run(
+            ["python3", str(SCRIPT), "update-task-status", "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertIn("--session-id", update_status_help.stdout)
+        self.assertIn("--task-status", update_status_help.stdout)
+        self.assertIn("{done,failed,mixed}", update_status_help.stdout)
 
 
 if __name__ == "__main__":

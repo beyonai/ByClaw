@@ -48,6 +48,8 @@ const ProjectFormModal: React.FC<Props> = ({
   return (
     <Modal
       className={styles.projectFormModal}
+      // 禁止 Modal 外层 wrap 接管滚动，滚动条只保留在弹窗 body 内。
+      wrapClassName={styles.projectFormModalWrap}
       destroyOnClose
       title={title || formT(projectId ? 'editTitle' : 'createTitle')}
       open={open}
@@ -56,6 +58,7 @@ const ProjectFormModal: React.FC<Props> = ({
       // 表单内容较长时只滚动弹窗内容区，避免滚动条落到项目空间页面本身。
       styles={{
         body: {
+          // Modal body 负责滚动，避免额外 flex 层在不同 Antd 版本下把表单压成 0 高度。
           maxHeight: 'calc(100vh - 220px)',
           overflowY: 'auto',
           paddingInlineEnd: 8,
@@ -66,17 +69,19 @@ const ProjectFormModal: React.FC<Props> = ({
       onOk={handleModalOk}
       width={720}
     >
-      <ProjectBasicForm
-        ref={basicRef}
-        open={open}
-        form={form}
-        initialValues={initialValues}
-        projectId={projectId}
-        creatorId={creatorId}
-        projectTypeConfigOptions={projectTypeConfigOptions}
-        projectTypeLoading={projectTypeLoading}
-        onEnterSubmit={handleModalOk}
-      />
+      <div className={styles.projectFormModalScroll}>
+        <ProjectBasicForm
+          ref={basicRef}
+          open={open}
+          form={form}
+          initialValues={initialValues}
+          projectId={projectId}
+          creatorId={creatorId}
+          projectTypeConfigOptions={projectTypeConfigOptions}
+          projectTypeLoading={projectTypeLoading}
+          onEnterSubmit={handleModalOk}
+        />
+      </div>
     </Modal>
   );
 };

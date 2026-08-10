@@ -566,16 +566,6 @@ public class DevloopController {
         return applicationService.checkDwsAuthStatusBySource(sourceId);
     }
 
-    /** 直接使用token授权 */
-    @PostMapping("/dws/saveToken")
-    public ResponseUtil<Void> saveDwsToken(@RequestBody Map<String, Object> params) {
-        String token = params.get("token") != null ? params.get("token").toString() : "";
-        if (token.isEmpty()) {
-            return ResponseUtil.failRes(I18nUtil.get("devloop.dws.token.required"));
-        }
-        return applicationService.saveDwsToken(token);
-    }
-
     /** 查询启用的运营任务模板卡片，可按模板类型筛选。 */
     @PostMapping("/operation/task-template/list")
     public ResponseUtil<List<OperationTaskTemplate>> listOperationTaskTemplates(

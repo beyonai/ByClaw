@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.mapper.resource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupPageQo;
+import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCandidatePageQo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupVo;
 import java.util.List;
@@ -65,6 +66,11 @@ public interface SkillGroupMapper {
             @Param("currentUserId") Long currentUserId);
 
     List<SkillGroupMemberVo> selectActiveMembers(@Param("groupId") Long groupId);
+
+    List<SkillGroupMemberVo> selectMemberCandidates(
+            @Param("qo") SkillGroupCandidatePageQo qo,
+            @Param("comAcctId") Long comAcctId,
+            @Param("creatorId") Long creatorId);
 
     /**
      * Selects active group-member relations, optionally restricted to skill IDs.
