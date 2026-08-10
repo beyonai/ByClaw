@@ -47,8 +47,14 @@
   font-weight: 400;
 }
 
-.skillSelectPopup {
+.skillMenu {
+  overflow: hidden;
+
   :global(.ant-select-item-empty) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
     padding: 20px 12px;
   }
 }

@@ -5,6 +5,7 @@ import {
   getSkillOptionsForTab,
   normalizeSkillOptions,
   partitionSkillOptions,
+  SKILL_CANDIDATE_LIST_HEIGHT,
   SKILL_CANDIDATE_TABS_SIZE,
 } from '../skillOptions';
 
@@ -20,6 +21,10 @@ describe('SkillGroupCreateModal edit helpers', () => {
 describe('SkillGroupCreateModal skill options', () => {
   it('uses small tabs in the candidate dropdown', () => {
     expect(SKILL_CANDIDATE_TABS_SIZE).toBe('small');
+  });
+
+  it('uses a fixed candidate list height', () => {
+    expect(SKILL_CANDIDATE_LIST_HEIGHT).toBe(256);
   });
 
   it('keeps every candidate returned by the backend regardless of skill type or permissions', () => {

@@ -12,6 +12,8 @@ export type SkillCandidateTabKey = 'builtIn' | 'personal';
 
 export const SKILL_CANDIDATE_TABS_SIZE = 'small' as const;
 
+export const SKILL_CANDIDATE_LIST_HEIGHT = 256;
+
 export const buildSkillGroupCandidateParams = (groupId?: string) => ({
   keyword: '',
   pageNum: 1,

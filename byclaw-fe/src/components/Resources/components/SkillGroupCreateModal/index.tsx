@@ -23,6 +23,7 @@ import {
   getSkillOptionsForTab,
   normalizeSkillOptions,
   partitionSkillOptions,
+  SKILL_CANDIDATE_LIST_HEIGHT,
   SKILL_CANDIDATE_TABS_SIZE,
   type SkillCandidateTabKey,
   type SkillOption,
@@ -278,8 +279,8 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
               <Select
                 mode="multiple"
                 loading={skillsLoading}
+                listHeight={SKILL_CANDIDATE_LIST_HEIGHT}
                 optionFilterProp="label"
-                popupClassName={styles.skillSelectPopup}
                 placeholder={intl.formatMessage({ id: 'resource.skillGroup.selectSkills' })}
                 options={activeSkillOptions.map((skill) => ({
                   value: skill.resourceId,
@@ -317,7 +318,9 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
                         onChange={(key) => setActiveSkillTab(key as SkillCandidateTabKey)}
                       />
                     </div>
-                    {menu}
+                    <div className={styles.skillMenu} style={{ height: SKILL_CANDIDATE_LIST_HEIGHT }}>
+                      {menu}
+                    </div>
                   </div>
                 )}
               />
