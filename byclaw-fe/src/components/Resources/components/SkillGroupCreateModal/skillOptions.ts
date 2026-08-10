@@ -4,9 +4,16 @@ export interface SkillOption {
   resourceDesc?: string;
 }
 
+export const buildSkillGroupCandidateParams = (groupId?: string) => ({
+  keyword: '',
+  pageNum: 1,
+  pageSize: 100,
+  ...(groupId ? { groupId } : {}),
+});
+
 export const normalizeSkillOptions = (rows: any[]): SkillOption[] =>
   rows
-    .filter((item) => item?.resourceId && `${item.skillType || ''}`.toLowerCase() === 'inner')
+    .filter((item) => item?.resourceId)
     .map((item) => ({
       resourceId: `${item.resourceId}`,
       resourceName: item.resourceName || item.resourceCode || `${item.resourceId}`,

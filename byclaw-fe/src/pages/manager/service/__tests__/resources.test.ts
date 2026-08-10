@@ -10,6 +10,7 @@ import {
   deleteResource,
   uploadSkillZip,
   pageSkillGroups,
+  pageSkillGroupMemberCandidates,
   getSkillGroupDetail,
   installSkillGroup,
   createSkillGroup,
@@ -49,6 +50,7 @@ const skillGroupResponseFixture: SkillGroup = {
       avatar: 'https://example.com/skill.png',
       resourceStatus: 2,
       ownerType: 'enterprise',
+      createBy: '10001',
       skillType: 'builtin',
       sourceType: 'catalog',
       version: '1.0.0',
@@ -179,6 +181,12 @@ describe('manager resources service', () => {
     const payload = { groupId: '10042909' };
     getSkillGroupDetail(payload);
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/skillGroup/detail', payload);
+  });
+
+  it('should call pageSkillGroupMemberCandidates with the dedicated candidate endpoint', () => {
+    const payload = { groupId: '10042909', pageNum: 1, pageSize: 100, keyword: '' };
+    pageSkillGroupMemberCandidates(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/skillGroup/member/candidates', payload);
   });
 
   it('should call installSkillGroup with the skill group install endpoint', () => {

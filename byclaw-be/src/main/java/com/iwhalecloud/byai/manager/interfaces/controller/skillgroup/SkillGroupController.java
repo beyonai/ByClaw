@@ -6,12 +6,14 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.application.service.skillgroup.SkillGroupApplicationService;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCreateQo;
+import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCandidatePageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupIdQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupInstallQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupMemberChangeQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupPageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupUpdateQo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupVo;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -60,6 +62,14 @@ public class SkillGroupController {
     public ResponseUtil<SkillGroupVo> detail(@Valid @RequestBody SkillGroupIdQo qo) {
         SkillGroupVo result = skillGroupApplicationService.detail(qo);
         return ResponseUtil.successResponse(I18nUtil.get("skillgroup.detail.query.success"), result);
+    }
+
+    @PostMapping("/member/candidates")
+    public ResponseUtil<PageInfo<SkillGroupMemberVo>> pageMemberCandidates(
+            @Valid @RequestBody SkillGroupCandidatePageQo qo) {
+        PageInfo<SkillGroupMemberVo> result = skillGroupApplicationService.pageMemberCandidates(qo);
+        return ResponseUtil.successResponse(
+                I18nUtil.get("skillgroup.member.candidates.query.success"), result);
     }
 
     @PostMapping("/member/add")

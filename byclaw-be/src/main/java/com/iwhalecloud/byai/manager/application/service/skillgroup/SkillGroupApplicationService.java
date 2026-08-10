@@ -20,6 +20,7 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCreateQo;
+import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCandidatePageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupIdQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupInstallQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupMemberChangeQo;
@@ -27,6 +28,7 @@ import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupPageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupUpdateQo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberVo;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.util.ArrayList;
@@ -118,6 +120,17 @@ public class SkillGroupApplicationService {
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
         PageHelper.startPage(qo.getPageNum(), qo.getPageSize());
         List<SkillGroupVo> rows = skillGroupMapper.selectPage(qo, tenantId, currentUserId);
+        return PageHelperUtil.toPageInfo(new com.github.pagehelper.PageInfo<>(rows));
+    }
+
+    public PageInfo<SkillGroupMemberVo> pageMemberCandidates(SkillGroupCandidatePageQo qo) {
+        Long tenantId = requireCurrentTenant();
+        Long creatorId = CurrentUserHolder.getCurrentUserId();
+        if (qo.getGroupId() != null) {
+            creatorId = loadManagedGroup(qo.getGroupId(), tenantId).getCreateBy();
+        }
+        PageHelper.startPage(qo.getPageNum(), qo.getPageSize());
+        List<SkillGroupMemberVo> rows = skillGroupMapper.selectMemberCandidates(qo, tenantId, creatorId);
         return PageHelperUtil.toPageInfo(new com.github.pagehelper.PageInfo<>(rows));
     }
 
@@ -399,6 +412,12 @@ public class SkillGroupApplicationService {
         return group;
     }
 
+    private SsResource loadManagedGroup(Long groupId, Long tenantId) {
+        SsResource group = resourceService.findById(groupId);
+        validateManagedGroup(group, tenantId);
+        return group;
+    }
+
     private void validateManagedGroup(SsResource group, Long tenantId) {
         if (group == null) {
             throw new BaseException("技能组不存在");
@@ -450,12 +469,22 @@ public class SkillGroupApplicationService {
             if (!SKILL.equals(skill.getResourceBizType())) {
                 throw new BaseException("成员资源不是普通技能：" + skillId);
             }
+            if (!Objects.equals(group.getComAcctId(), skill.getComAcctId())) {
+                throw new BaseException("组内技能不属于当前企业：" + skillId);
+            }
+            if (!"enterprise".equals(skill.getOwnerType())) {
+                throw new BaseException("技能组成员只能选择企业技能：" + skillId);
+            }
             if (!Objects.equals(ResourceStatus.LIST.getNum(), skill.getResourceStatus())) {
                 throw new BaseException("组内技能未上架：" + skillId);
             }
             SsResExtSkill extSkill = extById.get(skillId);
-            if (extSkill == null || !SsResExtSkillService.INNER_SKILL_TYPE.equalsIgnoreCase(extSkill.getSkillType())) {
-                throw new BaseException("技能组成员只能选择系统内置技能：" + skillId);
+            boolean innerSkill = extSkill != null
+                    && SsResExtSkillService.INNER_SKILL_TYPE.equalsIgnoreCase(extSkill.getSkillType());
+            boolean creatorOwned = group.getCreateBy() != null
+                    && Objects.equals(group.getCreateBy(), skill.getCreateBy());
+            if (!innerSkill && !creatorOwned) {
+                throw new BaseException("技能组成员只能选择系统内置技能或原创建人创建的技能：" + skillId);
             }
         }
     }
