@@ -1,11 +1,7 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 
-import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
-import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
-import com.iwhalecloud.byai.common.feign.request.datacloud.InvokeActionReq;
 import com.iwhalecloud.byai.common.feign.request.datacloud.Params;
 import com.iwhalecloud.byai.common.feign.request.datacloud.QueryByKnowledgeReq;
-import com.iwhalecloud.byai.common.feign.response.DataCloudResponse;
 import com.iwhalecloud.byai.common.feign.response.datacloud.InvokeActionResp;
 import com.iwhalecloud.byai.common.feign.response.datacloud.QueryByKnowledgeResp;
 import com.iwhalecloud.byai.common.util.StringUtil;
@@ -35,13 +31,13 @@ import com.iwhalecloud.byai.manager.dto.devloop.IntegrationEnvDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationSuiteDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.DefaultAgentDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.TesterConfigDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.UpdateTaskStatusDto;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectObjectFile;
 import com.iwhalecloud.byai.manager.entity.devloop.OperationTaskTemplate;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
-
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -55,9 +51,6 @@ public class DevloopController {
 
     @Autowired
     private DevloopApplicationService applicationService;
-
-    @Autowired
-    private FeignDataCloudService feignDataCloudService;
 
     /**
      * 创建扫描源
@@ -773,6 +766,17 @@ public class DevloopController {
         @RequestBody ListObjectFilePkIdDto listObjectFilePkIdDto) {
         List<Map<String, Object>> resultList = applicationService.listObjectById(listObjectFilePkIdDto);
         return ResponseUtil.successResponse(resultList);
+    }
+
+    /**
+     * 更新运营任务状态
+     *
+     * @param updateTaskStatusDto 更新入参
+     */
+    @PostMapping("/operation/updateTaskStatus")
+    public ResponseUtil<Void> updateTaskStatus(@RequestBody UpdateTaskStatusDto updateTaskStatusDto) {
+        applicationService.updateTaskStatus(updateTaskStatusDto);
+        return ResponseUtil.successResponse();
     }
 
 }

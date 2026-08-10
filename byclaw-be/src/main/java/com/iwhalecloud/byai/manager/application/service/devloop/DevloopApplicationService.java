@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
+import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
 import com.iwhalecloud.byai.common.feign.request.datacloud.InvokeActionReq;
 import com.iwhalecloud.byai.common.feign.request.datacloud.Params;
@@ -27,6 +29,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.*;
+import com.iwhalecloud.byai.manager.domain.session.service.ByaiSessionService;
 import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFileDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFilePkIdDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
@@ -53,6 +56,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.IntegrationResultDto;
 import com.iwhalecloud.byai.manager.dto.devloop.RequirementPresplitDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.RequirementPresplitResultDto;
 import com.iwhalecloud.byai.manager.dto.devloop.RequirementSplitDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.UpdateTaskStatusDto;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.*;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -285,6 +289,9 @@ public class DevloopApplicationService {
 
     @Autowired
     private FeignDataCloudService feignDataCloudService;
+
+    @Autowired
+    private ByaiSessionService byaiSessionService;
 
     /** 创建扫描源 */
     public ResponseUtil<Map<String, Object>> createScanSource(ScanSourceDTO dto) {
@@ -2315,6 +2322,22 @@ public class DevloopApplicationService {
             }
         }
         return null;
+    }
+
+    /**
+     * 更新任务的状态
+     *
+     * @param updateTaskStatusDto 更新入参
+     */
+    public void updateTaskStatus(UpdateTaskStatusDto updateTaskStatusDto) {
+        Long sessionId = updateTaskStatusDto.getSessionId();
+        ByaiSessionExt byaiSessionExt = sessionExtService.findOneByExtParamCode(sessionId, "oploop_task_status");
+        if (byaiSessionExt == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "Task not exists");
+        }
+
+        byaiSessionExt.setExtParamValue(updateTaskStatusDto.getTaskStatus());
+        sessionExtService.update(byaiSessionExt);
     }
 
     /** 手工需求 JSON 包裹中携带的已解析、语言无关的数据。 */
@@ -4694,8 +4717,8 @@ public class DevloopApplicationService {
         // 任务模板把 ontology 放在 config 顶层，优先读取完整对象（支持多选数组）。
         if (value == null && (Arrays.asList(fieldNames).contains("ontology")
             || Arrays.asList(fieldNames).contains("sourceOntology"))) {
-            value = operationConfig.get(Arrays.asList(fieldNames).contains("sourceOntology")
-                ? "sourceOntology" : "ontology");
+            value = operationConfig
+                .get(Arrays.asList(fieldNames).contains("sourceOntology") ? "sourceOntology" : "ontology");
         }
         return getOperationPromptValue(value);
     }
