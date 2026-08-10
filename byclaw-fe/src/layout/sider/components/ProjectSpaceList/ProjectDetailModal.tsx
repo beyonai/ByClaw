@@ -63,6 +63,7 @@ import {
   deleteProjectSpaceFile,
   deleteProjectRepo,
   deleteScanSource,
+  getOperationTask,
   getOperationRequirement,
   getProject,
   getTaskChanges,
@@ -135,6 +136,7 @@ import { DragType } from '@/components/QueryInput/withDrag';
 import useGlobal from '@/hooks/useGlobal';
 import useAppStore from '@/models/common/useAppStore';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
+import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
 import useFilePreviewActions from '@/layout/sider/components/FileSiderPanel/hooks/useFilePreviewActions';
@@ -668,6 +670,37 @@ const normalizeOperationIdentifierList = (rawValue: unknown): OperationIdentifie
     .filter(Boolean);
 };
 
+// 任务详情返回的执行数字员工字段存在多种历史命名，统一取第一个可用 ID 作为会话默认 @ 员工。
+const getOperationTaskAgentId = (task: any, operationAgents: OperationAgentOption[] = []) => {
+  const rootConfig = parseOperationConfig(task?.operationConfig || task?.config);
+  const agentIds = normalizeOperationIdentifierList(
+      task?.agentIds ??
+      task?.executorAgentIds ??
+      task?.agentId ??
+      task?.agentSelection?.executorAgentIds ??
+      rootConfig.agentSelection?.executorAgentIds ??
+      task?.operationAgentIds
+  );
+  if (agentIds.length) return `${agentIds[0]}`;
+
+  const fallbackId =
+    task?.controllerAgentId ?? task?.agentSelection?.controllerAgentId ?? rootConfig.agentSelection?.controllerAgentId;
+  if (fallbackId !== undefined && fallbackId !== null && `${fallbackId}` !== '') return `${fallbackId}`;
+
+  const executorName = Array.isArray(task?.executorAgentNames)
+    ? task.executorAgentNames[0]
+    : task?.executorAgentName || task?.executorName || task?.agentName;
+  const nameMatchedAgentId = operationAgents.find((agent) => agent.label === executorName)?.value;
+  if (nameMatchedAgentId !== undefined && nameMatchedAgentId !== null) return `${nameMatchedAgentId}`;
+
+  // 普通项目/研发任务的列表详情可能只返回会话对象字段，仍按详情中的 DigEmployee 员工兜底。
+  const sessionObjectType = `${task?.objectType || ''}`.toLowerCase();
+  if (sessionObjectType === 'digemployee' && task?.objectId !== undefined && task?.objectId !== null) {
+    return `${task.objectId}`;
+  }
+  return '';
+};
+
 type ResourceFileScope = 'current' | 'all';
 // 资源 Tab 的一级分类统一由顶部切换控制，避免共享文件、会话文件和代码变更被拆成多个卡片。
 type ResourceView = 'shared' | 'sessionCurrent' | 'sessionAll' | 'changes';
@@ -948,7 +981,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
-  const { EventEmitter, sessionId: activeChatSessionId, setSessionId } = useGlobal();
+  const sessionList = useSelector(({ session }: any) => session?.sessionList || []);
+  const { EventEmitter, sessionId: activeChatSessionId, setAgentId, setSessionId } = useGlobal();
   const activeSiderAgent = useActiveSiderAgent();
   const { setDetailPanel, clearDetailPanel } = React.useContext(SiderContentContext);
   const [activeTab, setActiveTab] = useState('tasks');
@@ -1062,6 +1096,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [operationTaskSplitTarget, setOperationTaskSplitTarget] = useState<any>(null);
   const [operationTaskTemplateTarget, setOperationTaskTemplateTarget] = useState<any>(null);
   const [operationTaskExecuting, setOperationTaskExecuting] = useState(false);
+  // 任务会话详情请求可能乱序返回，只允许最后一次点击继续切换会话，避免旧员工覆盖当前会话。
+  const taskSessionOpenVersionRef = useRef(0);
   const [resourceView, setResourceView] = useState<ResourceView>('shared');
   // 会话资源范围由二级 Tab 决定，避免内容区再次出现重复的“当前/全部”筛选。
   const resourceFileScope: ResourceFileScope = resourceView === 'sessionAll' ? 'all' : 'current';
@@ -1250,36 +1286,71 @@ const ProjectDetailPanel: React.FC<Props> = ({
   );
 
   const handleOpenTaskSession = useCallback(
-    (task: any) => {
+    async (task: any) => {
       if (!task?.sessionId) {
         message.warning(t('task.noSession'));
         return;
       }
+      const openVersion = ++taskSessionOpenVersionRef.current;
+
+      // 运营任务列表只返回摘要字段；进入会话前补查详情，确保 @ 员工来源始终是详情接口的 agentIds。
+      let taskDetail = task;
+      if (isOperationProject && task.taskId) {
+        try {
+          const response = await getOperationTask(Number(task.taskId));
+          const detailData =
+            response?.data && typeof response.data === 'object' && !Array.isArray(response.data)
+              ? response.data
+              : response;
+          const resolvedDetail =
+            detailData?.task && typeof detailData.task === 'object' ? detailData.task : detailData;
+          if (resolvedDetail && typeof resolvedDetail === 'object') {
+            taskDetail = { ...task, ...resolvedDetail };
+          }
+        } catch (error) {
+          // 详情接口失败时继续使用列表摘要，避免因为员工信息补查失败而无法打开已有会话。
+          console.warn('Failed to load operation task detail before opening session:', error);
+        }
+      }
+      if (openVersion !== taskSessionOpenVersionRef.current) return;
 
       // 任务列表单击直接进入关联会话，并补齐会话缓存和项目上下文。
-      const normalizedTaskSession = normalizeTaskSession(task, projectId, t);
+      const normalizedTaskSession = normalizeTaskSession(taskDetail, projectId, t);
+      // 研发任务接口只返回员工名称时，从已缓存的会话详情补取 objectId，避免进入会话后没有默认 @。
+      const cachedTaskSession = sessionList.find(
+        (cachedSession: any) => `${cachedSession?.sessionId}` === normalizedTaskSession.sessionId
+      );
+      const taskAgentId =
+        getOperationTaskAgentId(taskDetail, operationAgents) ||
+        getOperationTaskAgentId(cachedTaskSession, operationAgents);
       const taskSessionPayload = {
-        ...task,
+        ...taskDetail,
         sessionId: normalizedTaskSession.sessionId,
         sessionName: normalizedTaskSession.sessionName,
+        // 显式清空旧会话员工字段；详情没有员工时也不能继续沿用上一个任务的员工。
+        objectId: taskAgentId || undefined,
+        objectType: taskAgentId ? 'DigEmployee' : undefined,
       };
       // 新增流程自行计算稳定主题色；二次更新只回填列表解析出的头像，避免 undefined 覆盖默认会话头像。
       const taskSessionUpdatePayload = {
         ...taskSessionPayload,
         avatar: normalizedTaskSession.avatar,
       };
-      const targetProjectId = [projectId, task.projectId]
+      const targetProjectId = [projectId, taskDetail.projectId]
         .map((candidateProjectId) => Number(candidateProjectId))
         .find(
           (candidateProjectId) =>
             Number.isFinite(candidateProjectId) && (candidateProjectId === -1 || candidateProjectId > 0)
         );
 
+      // 任务详情切换时只使用当前任务员工，清除该会话之前残留的多员工输入草稿。
+      clearEasyConfirmInputDraft(normalizedTaskSession.sessionId);
+
       if (targetProjectId !== undefined) {
         EventEmitter.emit('projectSpace-session-context', {
-          sessionId: `${task.sessionId}`,
+          sessionId: normalizedTaskSession.sessionId,
           projectId: targetProjectId,
-          projectName: project?.projectName || task.projectName,
+          projectName: project?.projectName || taskDetail.projectName,
         });
         dispatch({
           type: 'session/addSession',
@@ -1289,13 +1360,16 @@ const ProjectDetailPanel: React.FC<Props> = ({
           type: 'session/updateSession',
           payload: { ...taskSessionUpdatePayload, projectId: targetProjectId },
         });
-        setSessionId?.(String(task.sessionId));
+        setAgentId?.(taskAgentId || '');
+        setSessionId?.(normalizedTaskSession.sessionId);
         navigate('/chat', {
           state: {
             keepSiderActiveKey: 'sessions',
             from: 'projectSpace',
             projectId: targetProjectId,
-            projectName: project?.projectName || task.projectName,
+            projectName: project?.projectName || taskDetail.projectName,
+            selectedAgentId: taskAgentId || undefined,
+            selectedAgentObjectType: taskAgentId ? 'DigEmployee' : undefined,
           },
         });
         return;
@@ -1303,10 +1377,24 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
       dispatch({ type: 'session/addSession', payload: taskSessionPayload });
       dispatch({ type: 'session/updateSession', payload: taskSessionUpdatePayload });
-      setSessionId?.(String(task.sessionId));
+      setAgentId?.(taskAgentId || '');
+      setSessionId?.(normalizedTaskSession.sessionId);
       navigate('/chat');
     },
-    [EventEmitter, dispatch, navigate, project?.projectName, projectId, setSessionId, t]
+    [
+      EventEmitter,
+      dispatch,
+      getOperationTask,
+      isOperationProject,
+      navigate,
+      operationAgents,
+      project?.projectName,
+      projectId,
+      sessionList,
+      setAgentId,
+      setSessionId,
+      t,
+    ]
   );
 
   // 只读查看别人任务的会话:复用全局回放 Drawer 的 preview 机制,有历史消息、无输入框,不能对话。

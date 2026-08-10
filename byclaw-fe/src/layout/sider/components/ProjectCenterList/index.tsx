@@ -5,10 +5,8 @@ import { useIntl, useLocation, useNavigate } from '@umijs/max';
 import classNames from 'classnames';
 import useGlobal from '@/hooks/useGlobal';
 import { createProject, saveDefaultAgent, saveProjectMembers } from '@/service/devloop';
-import ProjectFormModal, {
-  type ProjectFormValues,
-  type ProjectShareMember,
-} from '@/pages/projectSpace/components/ProjectFormModal';
+import ProjectOnboardingWizard from '@/pages/projectSpace/components/ProjectOnboardingWizard';
+import type { ProjectFormValues, ProjectShareMember } from '@/pages/projectSpace/components/ProjectFormModal';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
 import { getStoredProjectScopeId, saveProjectScopeIdToStorage } from '@/pages/projectSpace/constants';
@@ -59,11 +57,12 @@ const ProjectCenterList: React.FC = () => {
   const intl = useIntl();
   const location = useLocation();
   const navigate = useNavigate();
-  const { EventEmitter } = useGlobal();
+  const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const { projects, loading, keyword, setKeyword, fetchProjects } = useProjectList();
   const { projectTypeOptions, projectTypeLoading } = useProjectTypeConfig();
-  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [createWizardOpen, setCreateWizardOpen] = useState(false);
   const [createLoading, setCreateLoading] = useState(false);
+  const createdProjectNameRef = React.useRef('');
   const queryProjectId = useMemo(
     () => new URLSearchParams(location.search).get('projectId') || getStoredProjectScopeId(),
     [location.search]
@@ -91,9 +90,10 @@ const ProjectCenterList: React.FC = () => {
   }, [EventEmitter, fetchProjects]);
 
   const handleCreateProject = useCallback(
-    async (values: ProjectFormValues) => {
-      if (createLoading) return;
+    async (values: ProjectFormValues): Promise<string> => {
+      if (createLoading) return '';
       setCreateLoading(true);
+      createdProjectNameRef.current = values.projectName.trim();
       const isShared = values.projectType === 'develop' || values.projectType === 'operation' || values.sharedFlag;
       try {
         const response = await createProject(
@@ -121,13 +121,11 @@ const ProjectCenterList: React.FC = () => {
         }
 
         message.success(intl.formatMessage({ id: 'projectSpace.message.createSuccess' }));
-        setCreateModalOpen(false);
         // 新建完成后清空项目搜索，确保新项目立即出现在左侧列表并高亮。
         setKeyword('');
         await fetchProjects('');
-        saveProjectScopeIdToStorage(projectId);
         EventEmitter.emit('projectSpace-list-refresh');
-        navigate(`/projectSpace?projectId=${encodeURIComponent(projectId)}`);
+        return projectId;
       } catch (error: any) {
         message.error(
           getProjectMutationErrorMessage(
@@ -135,11 +133,43 @@ const ProjectCenterList: React.FC = () => {
             intl.formatMessage({ id: 'projectSpace.message.createFailed', defaultMessage: '创建项目失败' })
           )
         );
+        return '';
       } finally {
         setCreateLoading(false);
       }
     },
-    [EventEmitter, createLoading, fetchProjects, intl, navigate, setKeyword]
+    [EventEmitter, createLoading, fetchProjects, intl, setKeyword]
+  );
+
+  const handleCreateWizardFinish = useCallback(
+    (projectId: string) => {
+      setCreateWizardOpen(false);
+      saveProjectScopeIdToStorage(projectId);
+      EventEmitter.emit('projectSpace-active-project-change', {
+        projectId,
+        projectName: createdProjectNameRef.current,
+      });
+      navigate(`/projectSpace?projectId=${encodeURIComponent(projectId)}`);
+    },
+    [EventEmitter, navigate]
+  );
+
+  const handleEnterArchitectChat = useCallback(
+    (projectId: string) => {
+      setCreateWizardOpen(false);
+      // 与会话模块一致，进入研发架构初始化会话前清理旧会话和员工上下文。
+      setAgentId?.('');
+      setSessionId?.('');
+      navigate('/chat', {
+        state: {
+          keepSiderActiveKey: 'sessions',
+          from: 'projectSpace',
+          projectId,
+          projectName: createdProjectNameRef.current,
+        },
+      });
+    },
+    [navigate, setAgentId, setSessionId]
   );
 
   return (
@@ -158,7 +188,7 @@ const ProjectCenterList: React.FC = () => {
             className={styles.newProjectButton}
             icon={<PlusOutlined />}
             aria-label={intl.formatMessage({ id: 'projectSpace.createProject' })}
-            onClick={() => setCreateModalOpen(true)}
+            onClick={() => setCreateWizardOpen(true)}
           />
         </Tooltip>
       </div>
@@ -197,13 +227,14 @@ const ProjectCenterList: React.FC = () => {
         </div>
       </Spin>
 
-      <ProjectFormModal
-        open={createModalOpen}
-        loading={createLoading}
+      <ProjectOnboardingWizard
+        open={createWizardOpen}
         projectTypeConfigOptions={projectTypeOptions}
         projectTypeLoading={projectTypeLoading}
-        onCancel={() => setCreateModalOpen(false)}
-        onSubmit={handleCreateProject}
+        onCancel={() => setCreateWizardOpen(false)}
+        onCreateProject={handleCreateProject}
+        onFinish={handleCreateWizardFinish}
+        onEnterArchitectChat={handleEnterArchitectChat}
       />
     </div>
   );

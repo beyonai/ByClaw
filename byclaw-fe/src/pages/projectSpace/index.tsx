@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Empty, Modal, Spin, message } from 'antd';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
+import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import { deleteProject, saveDefaultAgent, saveProjectMembers, saveProjectResources, updateProject } from '@/service/devloop';
 import ProjectFormModal, { type ProjectFormValues } from './components/ProjectFormModal';
 import ProjectDetail from './components/ProjectDetail';
@@ -41,7 +42,7 @@ const ProjectSpacePage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const intl = useIntl();
-  const { EventEmitter, setSessionId } = useGlobal();
+  const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
   const { projects, loading: projectsLoading, fetchProjects } = useProjectList();
   const { projectTypeOptions, projectTypeLoading } = useProjectTypeConfig();
@@ -110,7 +111,10 @@ const ProjectSpacePage: React.FC = () => {
   const handleOpenSession = useCallback(
     (session: ProjectSession) => {
       if (!session.sessionId) return;
+      // 项目详情切换会话时丢弃目标会话遗留的多员工草稿，只使用详情返回的默认员工。
+      clearEasyConfirmInputDraft(session.sessionId);
       // 项目详情页只负责切换全局会话上下文，聊天页仍负责渲染会话内容。
+      setAgentId?.(session.objectId !== undefined && session.objectId !== null ? `${session.objectId}` : '');
       setSessionId?.(session.sessionId);
       navigate('/chat', {
         state: {
@@ -125,7 +129,7 @@ const ProjectSpacePage: React.FC = () => {
         },
       });
     },
-    [activeProject?.projectId, activeProject?.projectName, navigate, setSessionId]
+    [activeProject?.projectId, activeProject?.projectName, navigate, setAgentId, setSessionId]
   );
 
   const handleEditProject = useCallback((project: ProjectSpace) => {

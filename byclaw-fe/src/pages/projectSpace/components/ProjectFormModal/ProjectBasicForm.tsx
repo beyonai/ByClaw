@@ -505,20 +505,23 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
           shareMembersLoaded,
           // 解析为后端入参并冗余带上员工名(展示列);projectId 由父级在保存时补上。
           defaultAgents: assignmentToPayload(projectDefaultAgents, agentLabelById),
-          resources: (Object.entries(selectedResources) as [ProjectResourceType, string[]][]).flatMap(
-            ([resourceType, resourceIds]) =>
-              resourceIds.map((resourceId, index) => ({
-                resourceType,
-                resourceId,
-                resourceName:
-                  (resourceType === 'digital_employee'
-                    ? agentLabelById.get(resourceId)
-                    : resourceType === 'knowledge'
-                      ? knowledgeResourceOptions.find((option) => option.value === resourceId)?.label
-                      : ontologyResourceOptions.find((option) => option.value === resourceId)?.label) || undefined,
-                sortNo: index,
-              }))
-          ),
+          // 绑定项目资源仅属于运营项目；切换为普通/研发项目时不再提交旧的绑定关系。
+          resources: isOperationProject
+            ? (Object.entries(selectedResources) as [ProjectResourceType, string[]][]).flatMap(
+              ([resourceType, resourceIds]) =>
+                resourceIds.map((resourceId, index) => ({
+                  resourceType,
+                  resourceId,
+                  resourceName:
+                      (resourceType === 'digital_employee'
+                        ? agentLabelById.get(resourceId)
+                        : resourceType === 'knowledge'
+                          ? knowledgeResourceOptions.find((option) => option.value === resourceId)?.label
+                          : ontologyResourceOptions.find((option) => option.value === resourceId)?.label) || undefined,
+                  sortNo: index,
+                }))
+            )
+            : [],
         };
       },
       [
@@ -530,6 +533,7 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
         selectedResources,
         selectedShareMembers,
         shareMembersLoaded,
+        isOperationProject,
       ]
     );
 
@@ -537,11 +541,11 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
       ref,
       () => ({
         collectValues: async () => {
-          // 三类绑定资源均为必填；它们由独立状态维护，需要在提交时与 Form 字段一起校验。
-          setResourceValidationTriggered(true);
-          const hasMissingResource = (
-            ['knowledge', 'digital_employee', 'ontology'] as ProjectResourceType[]
-          ).some((resourceType) => selectedResources[resourceType].length === 0);
+          // 绑定资源仅在运营项目必填，其他项目类型隐藏该区域且不触发资源校验。
+          setResourceValidationTriggered(isOperationProject);
+          const hasMissingResource = (['knowledge', 'digital_employee', 'ontology'] as ProjectResourceType[]).some(
+            (resourceType) => isOperationProject && selectedResources[resourceType].length === 0
+          );
           try {
             const values = await form.validateFields();
             if (hasMissingResource) return null;
@@ -552,7 +556,7 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
           }
         },
       }),
-      [buildSubmitValues, form, selectedResources]
+      [buildSubmitValues, form, isOperationProject, selectedResources]
     );
 
     // 未为该角色指定项目覆盖时,占位提示当前生效的全局默认员工(优先冗余名,退选项名,再退id;无则提示未配置)。
@@ -634,80 +638,84 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
               onChange={(event) => handleProjectTypeChange(event.target.value as ProjectSpace['projectType'])}
             />
           </Form.Item>
-          <Form.Item label={formT('field.resources')}>
-            {/* 三类资源共用项目绑定关系表；前端按资源类型分组提交，避免与共享成员混淆。 */}
-            <div className={styles.projectResourceFields}>
-              <div
-                className={
-                  resourceValidationTriggered && !selectedResources.knowledge.length
-                    ? styles.projectResourceFieldError
-                    : undefined
-                }
-              >
-                <div className={styles.projectResourceLabel}>{formT('resource.knowledge')}</div>
-                <Select
-                  mode="multiple"
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                  value={selectedResources.knowledge}
-                  options={knowledgeResourceOptions}
-                  loading={resourceOptionsLoading}
-                  placeholder={formT('resource.knowledgePlaceholder')}
-                  onChange={(value: string[]) => setSelectedResources((prev) => ({ ...prev, knowledge: value }))}
-                />
-                {resourceValidationTriggered && !selectedResources.knowledge.length && (
-                  <div className={styles.projectResourceError}>{formT('validation.knowledgeRequired')}</div>
-                )}
+          {isOperationProject && (
+            <Form.Item label={formT('field.resources')}>
+              {/* 三类资源共用项目绑定关系表；该配置只适用于运营项目。 */}
+              <div className={styles.projectResourceFields}>
+                <div
+                  className={
+                    resourceValidationTriggered && !selectedResources.knowledge.length
+                      ? styles.projectResourceFieldError
+                      : undefined
+                  }
+                >
+                  <div className={styles.projectResourceLabel}>{formT('resource.knowledge')}</div>
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    value={selectedResources.knowledge}
+                    options={knowledgeResourceOptions}
+                    loading={resourceOptionsLoading}
+                    placeholder={formT('resource.knowledgePlaceholder')}
+                    onChange={(value: string[]) => setSelectedResources((prev) => ({ ...prev, knowledge: value }))}
+                  />
+                  {resourceValidationTriggered && !selectedResources.knowledge.length && (
+                    <div className={styles.projectResourceError}>{formT('validation.knowledgeRequired')}</div>
+                  )}
+                </div>
+                <div
+                  className={
+                    resourceValidationTriggered && !selectedResources.digital_employee.length
+                      ? styles.projectResourceFieldError
+                      : undefined
+                  }
+                >
+                  <div className={styles.projectResourceLabel}>{formT('resource.digitalEmployee')}</div>
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    value={selectedResources.digital_employee}
+                    options={agentSelectOptions}
+                    loading={agentOptionsLoading}
+                    placeholder={formT('resource.digitalEmployeePlaceholder')}
+                    onChange={(value: string[]) =>
+                      setSelectedResources((prev) => ({ ...prev, digital_employee: value }))
+                    }
+                  />
+                  {resourceValidationTriggered && !selectedResources.digital_employee.length && (
+                    <div className={styles.projectResourceError}>{formT('validation.digitalEmployeeRequired')}</div>
+                  )}
+                </div>
+                <div
+                  className={
+                    resourceValidationTriggered && !selectedResources.ontology.length
+                      ? styles.projectResourceFieldError
+                      : undefined
+                  }
+                >
+                  <div className={styles.projectResourceLabel}>{formT('resource.ontology')}</div>
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    value={selectedResources.ontology}
+                    options={ontologyResourceOptions}
+                    loading={resourceOptionsLoading}
+                    placeholder={formT('resource.ontologyPlaceholder')}
+                    onChange={(value: string[]) => setSelectedResources((prev) => ({ ...prev, ontology: value }))}
+                  />
+                  {resourceValidationTriggered && !selectedResources.ontology.length && (
+                    <div className={styles.projectResourceError}>{formT('validation.ontologyRequired')}</div>
+                  )}
+                </div>
               </div>
-              <div
-                className={
-                  resourceValidationTriggered && !selectedResources.digital_employee.length
-                    ? styles.projectResourceFieldError
-                    : undefined
-                }
-              >
-                <div className={styles.projectResourceLabel}>{formT('resource.digitalEmployee')}</div>
-                <Select
-                  mode="multiple"
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                  value={selectedResources.digital_employee}
-                  options={agentSelectOptions}
-                  loading={agentOptionsLoading}
-                  placeholder={formT('resource.digitalEmployeePlaceholder')}
-                  onChange={(value: string[]) => setSelectedResources((prev) => ({ ...prev, digital_employee: value }))}
-                />
-                {resourceValidationTriggered && !selectedResources.digital_employee.length && (
-                  <div className={styles.projectResourceError}>{formT('validation.digitalEmployeeRequired')}</div>
-                )}
-              </div>
-              <div
-                className={
-                  resourceValidationTriggered && !selectedResources.ontology.length
-                    ? styles.projectResourceFieldError
-                    : undefined
-                }
-              >
-                <div className={styles.projectResourceLabel}>{formT('resource.ontology')}</div>
-                <Select
-                  mode="multiple"
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                  value={selectedResources.ontology}
-                  options={ontologyResourceOptions}
-                  loading={resourceOptionsLoading}
-                  placeholder={formT('resource.ontologyPlaceholder')}
-                  onChange={(value: string[]) => setSelectedResources((prev) => ({ ...prev, ontology: value }))}
-                />
-                {resourceValidationTriggered && !selectedResources.ontology.length && (
-                  <div className={styles.projectResourceError}>{formT('validation.ontologyRequired')}</div>
-                )}
-              </div>
-            </div>
-          </Form.Item>
+            </Form.Item>
+          )}
           <Form.Item name="sharedFlag" label={formT('field.shared')} valuePropName="checked">
             <Switch
               disabled={isForcedSharedProject || isDefaultProject}
