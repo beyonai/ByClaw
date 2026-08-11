@@ -22,14 +22,11 @@ import {
   type MenuProps,
 } from 'antd';
 import {
-  ApartmentOutlined,
   AppstoreOutlined,
   BarChartOutlined,
-  BugOutlined,
   ClockCircleOutlined,
   CloseOutlined,
   CloudDownloadOutlined,
-  CodeOutlined,
   CommentOutlined,
   DeleteOutlined,
   DingdingOutlined,
@@ -90,6 +87,7 @@ import {
   splitTask,
   startDwsDeviceAuth,
   startProjectInit,
+  startArchitectChat,
   startRequirementClarify,
   startOperationRequirement,
   toggleScanSource,
@@ -112,6 +110,7 @@ import { getSandboxInfo, launchSandboxByUserCode, navigateSandboxBrowser, type S
 import SessionOverviewDrawer from './SessionOverviewDrawer';
 import MarkdownField from './components/MarkdownField';
 import TaskDetailDrawer from './TaskDetailDrawer';
+import { getDevloopTaskTypeIcon, normalizeDevloopTaskType, type DevloopTaskType } from './devloopTaskType';
 import {
   OperationAccountPanel,
   OperationRequirementStartModal,
@@ -470,26 +469,13 @@ const normalizeOperationTaskType = (task: any): OperationTaskType => {
   return 'collect';
 };
 
-// 研发任务的四角色类型对照后端 DevloopTaskType：会话表没有类型列，后端按各创建链路的关联行
-// 反查得出。与上面运营任务的 operationType 是两套独立枚举，不能互相兜底。
-// 类型走左侧图标而非标签：卡片头部右侧已有状态标签和操作入口，再加标签会挤掉任务名。
-const DEVELOP_TASK_TYPES = ['architect', 'requirement', 'coder', 'tester', 'chat'] as const;
-
-type DevelopTaskType = (typeof DEVELOP_TASK_TYPES)[number];
-
 // 四角色各配一组图标配色，与运营任务图标同一套做法；普通会话沿用任务卡默认的绿色。
-const DEVELOP_TASK_TYPE_ICON_CLASSES: Record<DevelopTaskType, string> = {
+const DEVELOP_TASK_TYPE_ICON_CLASSES: Record<DevloopTaskType, string> = {
   architect: styles.detailTaskIconArchitect,
   requirement: styles.detailTaskIconRequirement,
   coder: styles.detailTaskIconCoder,
   tester: styles.detailTaskIconTester,
   chat: styles.detailTaskIconChat,
-};
-
-const normalizeDevelopTaskType = (task: any): DevelopTaskType | undefined => {
-  const taskType = `${task?.taskType || ''}`.trim().toLowerCase();
-  // 未知取值不猜：宁可回退成通用研发图标，也不要把后端新增的类型显示成错的那一类。
-  return DEVELOP_TASK_TYPES.find((type) => type === taskType);
 };
 
 // 工作流的运行状态来源不同，下方统一映射给时间轴的状态枚举。
@@ -1034,6 +1020,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 工作区初始化配置窗:pending 时从仓库管理触发,复用新建向导 step3 的建索引/技能包配置。
   const [initModalOpen, setInitModalOpen] = useState(false);
   const [initStarting, setInitStarting] = useState(false);
+  // 与 initStarting 分开:两段是两个按钮两个接口,共用一个 loading 会让建工作区时「去跟架构聊天」也跟着转。
+  const [architectChatStarting, setArchitectChatStarting] = useState(false);
   const [initBuildIndex, setInitBuildIndex] = useState(false);
   const [initSkillPackages, setInitSkillPackages] = useState<string[]>([]);
   const [requirements, setRequirements] = useState<RequirementItem[]>([]);
@@ -1302,8 +1290,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const isDevelopProject = developProjectEnabled && projectType === 'develop';
   // 研发项目工作区初始化未就绪(pending/initializing)前禁止建需求/启动任务;普通项目与存量(无值)视为就绪。
   const developInitReady = !isDevelopProject || !project?.initStatus || project.initStatus === 'ready';
-  // 区分两种未就绪态:pending 从未触发初始化(引导去仓库管理点初始化),initializing 已触发在后台跑(转圈等待)。
+  // 三种未就绪态:pending 从未触发初始化(引导去仓库管理点初始化);initializing 服务端正在建工作区(转圈);
+  // initialized 工作区已建好,再按有没有会话分「等用户点去聊」与「员工在聊」——下发聊天不换状态,只多一个会话ID,
+  // 状态往回跳会让用户以为初始化退回重来了。
   const developInitPending = isDevelopProject && project?.initStatus === 'pending';
+  const developInitInitialized = isDevelopProject && project?.initStatus === 'initialized';
+  const architectChatting = developInitInitialized && Number(project?.initSessionId || 0) > 0;
+  const developInitWaitingChat = developInitInitialized && !architectChatting;
   // 运营能力与项目类型静态参数共用开关，避免未启用的环境误展示运营工作台。
   const isOperationProject = operationProjectEnabled && projectType === 'operation';
   const fileResourceId = activeSiderAgent.resourceId || (project?.resourceId ? `${project.resourceId}` : '');
@@ -3837,25 +3830,40 @@ const ProjectDetailPanel: React.FC<Props> = ({
     });
   };
 
-  // 触发工作区初始化:后端建一条架构助理会话并下发提示词,置 initializing。真正干活在沙箱里,
-  // 完成信号由后端定时任务读任务状态文件后落库,所以这里关窗、通知父级刷新 initStatus,再跳进那条会话看员工干活。
+  // 第一段:建工作区。后端同步克隆仓库、挂子模块、装技能包并推送,成功即 initialized。这一段不下发数字员工也不跳聊天,
+  // 聊天是第二段的「去跟架构聊天」。同步接口耗时可能到分钟级,靠 initStarting 压住按钮避免重复提交。
   const handleStartInit = async () => {
     if (!projectId) return;
     setInitStarting(true);
     try {
-      const res = await startProjectInit({
+      await startProjectInit({
         projectId,
         buildIndex: initBuildIndex,
         skillPackages: initBuildIndex ? initSkillPackages : [],
       });
-      message.success(t('initConfig.started'));
+      message.success(t('initConfig.finished'));
       setInitModalOpen(false);
       onProjectInitStarted?.(projectId);
-      openArchitectSession(res?.sessionId, res?.architectAgentId, res?.architectAgentName);
     } catch (error: any) {
       message.error(error?.message || t('initConfig.startFailed'));
     } finally {
       setInitStarting(false);
+    }
+  };
+
+  // 第二段:下发架构数字员工把工作区骨架聊完,置 initializing。完成信号由后端定时任务读会话状态文件后落库,
+  // 所以这里只通知父级刷新 initStatus,再跳进那条会话看员工干活。
+  const handleEnterArchitectChat = async () => {
+    if (!projectId) return;
+    setArchitectChatStarting(true);
+    try {
+      const res = await startArchitectChat({ projectId });
+      onProjectInitStarted?.(projectId);
+      openArchitectSession(res?.sessionId, res?.architectAgentId, res?.architectAgentName);
+    } catch (error: any) {
+      message.error(error?.message || t('initConfig.chatFailed'));
+    } finally {
+      setArchitectChatStarting(false);
     }
   };
 
@@ -5969,7 +5977,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                     analyze: operationStyles.operationTaskIconAnalyze,
                   }[operationTaskType];
                   // 研发任务的四角色类型，取值见后端 DevloopTaskType；运营任务走 operationType，两套不通用。
-                  const developTaskType = normalizeDevelopTaskType(task);
+                  const developTaskType = normalizeDevloopTaskType(task);
                   const developTaskTypeLabel = developTaskType ? t(`task.type.${developTaskType}`) : '';
                   const developTaskTypeIconClass = developTaskType
                     ? DEVELOP_TASK_TYPE_ICON_CLASSES[developTaskType]
@@ -6040,19 +6048,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                         // 类型未知时沿用原绿色研发图标，保证老数据和后端新增类型都还有图标可显示。
                         <Tooltip title={developTaskTypeLabel} placement="top">
                           <div className={`${styles.detailTaskIcon} ${developTaskTypeIconClass}`}>
-                            {developTaskType === 'architect' ? (
-                              <ApartmentOutlined />
-                            ) : developTaskType === 'requirement' ? (
-                              <FileTextOutlined />
-                            ) : developTaskType === 'coder' ? (
-                              <CodeOutlined />
-                            ) : developTaskType === 'tester' ? (
-                              <BugOutlined />
-                            ) : developTaskType === 'chat' ? (
-                              <CommentOutlined />
-                            ) : (
-                              <FundProjectionScreenOutlined />
-                            )}
+                            {getDevloopTaskTypeIcon(developTaskType) || <FundProjectionScreenOutlined />}
                           </div>
                         </Tooltip>
                       ) : isOperationProject ? (
@@ -6727,13 +6723,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
             bordered
             dataSource={repos}
             renderItem={(repo) => {
-              // 工作区仓库是初始化对象:研发项目未就绪时,该行给出初始化入口。pending 可点触发,initializing 展示进行中禁用态。
+              // 工作区仓库是初始化对象:研发项目未就绪时,该行给出初始化入口。pending 可点触发;
+              // 建工作区中/员工在聊时展示进行中态,但仍保留「重新初始化」入口——重跑第一段克隆装包,卡住时可覆盖重发。
               const isWorkspaceRepo = repo.repoType === 'workspace';
               const showInitAction = isDevelopProject && isWorkspaceRepo && !developInitReady;
+              const initInProgress = project?.initStatus === 'initializing' || architectChatting;
               const initAction = showInitAction
-                ? project?.initStatus === 'initializing'
+                ? initInProgress
                   ? [
-                    // 初始化中:展示进行中态,但仍保留「重新初始化」入口——后端 startProjectInit 幂等,任务中断/卡住时可覆盖重发,避免死 loading。
                     <span key="init-progress" className={styles.repoInitProgress}>
                       <LoadingOutlined spin />
                       {t('repository.initializing')}
@@ -6750,7 +6747,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                       icon={<ThunderboltOutlined />}
                       onClick={openInitModal}
                     >
-                      {t('repository.initWorkspace')}
+                      {developInitInitialized ? t('repository.reinitWorkspace') : t('repository.initWorkspace')}
                     </Button>,
                   ]
                 : [];
@@ -7069,14 +7066,31 @@ const ProjectDetailPanel: React.FC<Props> = ({
           )}
         </div>
       </div>
-      {/* 工作区初始化未完成时置顶阻塞提示,不能建需求/启动任务。pending 引导去仓库管理点初始化,initializing 转圈等待。 */}
+      {/* 工作区初始化未完成时置顶阻塞提示,不能建需求/启动任务。pending 引导去仓库管理点初始化;
+          initialized 且没会话时,提示下面直接给「去跟架构聊天」按钮走第二段;建工作区中与员工在聊都转圈等待。 */}
       {!developInitReady && (
         <Alert
           className={styles.projectInitAlert}
           type="info"
           showIcon
-          icon={developInitPending ? <ClockCircleOutlined /> : <LoadingOutlined spin />}
-          message={developInitPending ? t('initGuard.bannerPending') : t('initGuard.banner')}
+          icon={developInitPending || developInitWaitingChat ? <ClockCircleOutlined /> : <LoadingOutlined spin />}
+          message={
+            developInitPending
+              ? t('initGuard.bannerPending')
+              : developInitWaitingChat
+                ? t('initGuard.bannerInitialized')
+                : architectChatting
+                  ? t('initGuard.banner')
+                  : t('initGuard.bannerInitializing')
+          }
+          // 按钮跟在提示文案下方而不是右侧:这条提示本身就是「下一步该干什么」,动作贴着它最短路径。
+          description={
+            developInitWaitingChat ? (
+              <Button type="primary" size="small" loading={architectChatStarting} onClick={handleEnterArchitectChat}>
+                {t('initGuard.enterArchitectChat')}
+              </Button>
+            ) : undefined
+          }
         />
       )}
       {/* 研发项目未配置 GH_TOKEN 时贴一条提醒;点击整条打开友好引导弹窗。以提醒为主,可关闭,不阻塞。 */}

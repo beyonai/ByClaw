@@ -4,7 +4,9 @@ export type ProjectType = 'normal' | 'operation' | 'develop' | 'default';
 export type ProjectShareFlag = 'N' | 'Y';
 
 // 研发项目工作区初始化状态:ready 已就绪(默认/普通项目)、pending 待初始化、initializing 初始化中。
-export type ProjectInitStatus = 'ready' | 'pending' | 'initializing';
+// pending 待初始化 →(维护项目仓库里点初始化,后端同步建工作区)initialized →(点「去跟架构聊天」下发员工)initializing
+// →(后端定时任务读会话状态文件报 completed)ready。只有 ready 才放开建需求与启动任务。
+export type ProjectInitStatus = 'ready' | 'pending' | 'initialized' | 'initializing';
 
 export type ProjectMemberRole = 'owner' | 'admin' | 'member';
 

@@ -1556,12 +1556,17 @@ export default {
   'projectSpace.onboarding.step3.status.initializing': '架构数字员工正在初始化工作区',
   'projectSpace.onboarding.step3.status.ready': '工作区初始化已完成',
   'projectSpace.onboarding.step3.status.pending': '工作区初始化未完成',
+  'projectSpace.onboarding.step3.status.initialized': '工作区已初始化',
   'projectSpace.onboarding.step3.statusDesc.initializing':
     '架构数字员工正在沙箱里执行初始化，可能需要几分钟。你可以进入聊天查看进度，或稍后再来。',
   'projectSpace.onboarding.step3.statusDesc.ready': '现在可以新增需求并启动任务了。',
   'projectSpace.onboarding.step3.statusDesc.pending': '初始化未完成，可重新发起。',
+  'projectSpace.onboarding.step3.statusDesc.initialized':
+    '工作区仓库已克隆并装好技能包，还需架构数字员工补齐规范骨架，聊完才能新增需求和启动任务。',
   'projectSpace.onboarding.step3.retry': '重新初始化',
   'projectSpace.onboarding.step3.enterChat': '进入架构员工聊天',
+  'projectSpace.onboarding.step3.enterArchitectChat': '去跟架构聊天',
+  'projectSpace.onboarding.step3.chatFailed': '下发架构数字员工失败，请重试',
   'projectSpace.onboarding.action.cancel': '取消',
   'projectSpace.onboarding.action.create': '创建',
   'projectSpace.onboarding.action.prev': '上一步',
@@ -2582,6 +2587,10 @@ export default {
   'projectSpace.detail.initGuard.banner': '架构数字员工正在初始化工作区，完成后才能新增需求和启动任务',
   'projectSpace.detail.initGuard.bannerPending':
     '工作区尚未初始化，请在“维护项目仓库”中对工作区仓库发起初始化，完成后才能新增需求和启动任务',
+  'projectSpace.detail.initGuard.bannerInitialized':
+    '工作区已初始化，还需架构数字员工补齐规范骨架，完成后才能新增需求和启动任务',
+  'projectSpace.detail.initGuard.bannerInitializing': '正在初始化工作区仓库，完成后才能新增需求和启动任务',
+  'projectSpace.detail.initGuard.enterArchitectChat': '去跟架构聊天',
   'projectSpace.detail.initConfig.title': '初始化工作区',
   'projectSpace.detail.initConfig.desc': '架构数字员工将初始化工作区仓库，可选择是否为代码建立索引及所需技能包。',
   'projectSpace.detail.initConfig.buildIndex': '是否建索引',
@@ -2591,7 +2600,9 @@ export default {
   'projectSpace.detail.initConfig.skillPlaceholder': '选择初始化所需技能包',
   'projectSpace.detail.initConfig.start': '开始初始化',
   'projectSpace.detail.initConfig.started': '已发起工作区初始化',
+  'projectSpace.detail.initConfig.finished': '工作区初始化完成，可以去跟架构数字员工聊了',
   'projectSpace.detail.initConfig.startFailed': '发起初始化失败',
+  'projectSpace.detail.initConfig.chatFailed': '下发架构数字员工失败',
   'projectSpace.detail.requirement.start': '启动',
   'projectSpace.detail.requirement.starting': '启动中',
   'projectSpace.detail.requirement.started': '已启动',

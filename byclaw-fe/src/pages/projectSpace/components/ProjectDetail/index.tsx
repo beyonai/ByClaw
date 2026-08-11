@@ -237,9 +237,12 @@ const ProjectDetail: React.FC<Props> = ({
 
   // 初始化中轮询详情:架构数字员工在沙箱里干活,完成信号由后端定时任务读任务状态文件后落库。
   // 不轮询的话横幅要等用户手动刷新才消失,建需求/启动任务也一直是禁用态。到 ready 或回退 pending 即停。
-  // 封顶后停轮询:后端收不了口时(状态文件读失败等)状态会长期停在 initializing,没有上限就是无限刷 /project/get。
+  // 封顶后停轮询:后端收不了口时(状态文件读失败等)状态会长期停在进行中,没有上限就是无限刷 /project/get。
+  // 员工在聊那段状态一直是 initialized(只多一个会话ID),只判 initializing 会漏掉它,等不到 ready。
+  const architectChatting = project?.initStatus === 'initialized' && Number(project?.initSessionId || 0) > 0;
   useEffect(() => {
-    if (!isDevelopProject || project?.initStatus !== 'initializing' || !onRefresh) return;
+    if (!isDevelopProject || !onRefresh) return;
+    if (project?.initStatus !== 'initializing' && !architectChatting) return;
     let rounds = 0;
     const timer = setInterval(() => {
       rounds += 1;
@@ -250,7 +253,7 @@ const ProjectDetail: React.FC<Props> = ({
       onRefresh();
     }, INIT_POLL_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [isDevelopProject, project?.initStatus, onRefresh]);
+  }, [isDevelopProject, project?.initStatus, architectChatting, onRefresh]);
 
   useEffect(() => {
     // 项目类型切换后若当前 Tab 不可见，则回退到该类型的首个业务分区。
@@ -530,11 +533,21 @@ const ProjectDetail: React.FC<Props> = ({
           type="info"
           showIcon
           className={styles.projectInitAlert}
-          // pending 且带失败原因时优先回显原因:否则用户只看到「尚未初始化」,不知道是超时回退还是从未发起。
+          // 带失败原因时优先回显原因:否则用户只看到「尚未初始化」,不知道是超时回退还是从未发起。
+          // initialized 分两种:有会话=架构员工在聊,没会话=等用户去点「去跟架构聊天」。
+          // 发起入口都在项目详情弹窗,这里只做状态回显。
           message={
             project.initStatus === 'initializing'
-              ? intl.formatMessage({ id: 'projectSpace.detail.initGuard.banner' })
-              : project.initFailReason || intl.formatMessage({ id: 'projectSpace.detail.initGuard.bannerPending' })
+              ? intl.formatMessage({ id: 'projectSpace.detail.initGuard.bannerInitializing' })
+              : architectChatting
+                ? intl.formatMessage({ id: 'projectSpace.detail.initGuard.banner' })
+                : project.initFailReason ||
+                intl.formatMessage({
+                  id:
+                    project.initStatus === 'initialized'
+                      ? 'projectSpace.detail.initGuard.bannerInitialized'
+                      : 'projectSpace.detail.initGuard.bannerPending',
+                })
           }
         />
       )}

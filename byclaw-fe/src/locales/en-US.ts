@@ -1571,12 +1571,17 @@ export default {
   'projectSpace.onboarding.step3.status.initializing': 'The architect agent is initializing the workspace',
   'projectSpace.onboarding.step3.status.ready': 'Workspace initialization is complete',
   'projectSpace.onboarding.step3.status.pending': 'Workspace initialization did not finish',
+  'projectSpace.onboarding.step3.status.initialized': 'Workspace initialized',
   'projectSpace.onboarding.step3.statusDesc.initializing':
     'The architect agent is running the initialization in its sandbox. This may take a few minutes. Enter the chat to follow along, or come back later.',
   'projectSpace.onboarding.step3.statusDesc.ready': 'You can now add requirements and start tasks.',
   'projectSpace.onboarding.step3.statusDesc.pending': 'Initialization did not finish. You can start it again.',
+  'projectSpace.onboarding.step3.statusDesc.initialized':
+    'The workspace repository is cloned and the skill packages are installed. The architect agent still needs to fill in the spec skeleton before you can add requirements and start tasks.',
   'projectSpace.onboarding.step3.retry': 'Reinitialize',
   'projectSpace.onboarding.step3.enterChat': 'Enter architect chat',
+  'projectSpace.onboarding.step3.enterArchitectChat': 'Chat with the architect',
+  'projectSpace.onboarding.step3.chatFailed': 'Failed to dispatch the architect agent, please retry',
   'projectSpace.onboarding.action.cancel': 'Cancel',
   'projectSpace.onboarding.action.create': 'Create',
   'projectSpace.onboarding.action.prev': 'Back',
@@ -2629,6 +2634,11 @@ export default {
     'The architect agent is initializing the workspace. You can add requirements and start tasks once it completes.',
   'projectSpace.detail.initGuard.bannerPending':
     'The workspace is not initialized yet. Start initialization on the workspace repository under "Manage repositories" before you can add requirements and start tasks.',
+  'projectSpace.detail.initGuard.bannerInitialized':
+    'The workspace is initialized. The architect agent still needs to fill in the spec skeleton before you can add requirements and start tasks.',
+  'projectSpace.detail.initGuard.bannerInitializing':
+    'The workspace repository is being initialized. You can add requirements and start tasks once it completes.',
+  'projectSpace.detail.initGuard.enterArchitectChat': 'Chat with the architect',
   'projectSpace.detail.initConfig.title': 'Initialize workspace',
   'projectSpace.detail.initConfig.desc':
     'The architect agent will initialize the workspace repository. Optionally build a code index and choose skill packages.',
@@ -2639,7 +2649,9 @@ export default {
   'projectSpace.detail.initConfig.skillPlaceholder': 'Select skill packages for initialization',
   'projectSpace.detail.initConfig.start': 'Start initialization',
   'projectSpace.detail.initConfig.started': 'Workspace initialization started',
+  'projectSpace.detail.initConfig.finished': 'Workspace initialized. You can chat with the architect agent now.',
   'projectSpace.detail.initConfig.startFailed': 'Failed to start initialization',
+  'projectSpace.detail.initConfig.chatFailed': 'Failed to dispatch the architect agent',
   'projectSpace.detail.requirement.start': 'Start',
   'projectSpace.detail.requirement.starting': 'Starting',
   'projectSpace.detail.requirement.started': 'Started',

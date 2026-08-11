@@ -8,6 +8,7 @@ import {
   listProjectRepos,
   getProject,
   startProjectInit,
+  startArchitectChat,
   INIT_POLL_INTERVAL_MS,
   INIT_POLL_MAX_ROUNDS,
   type DevloopProjectRepo,
@@ -96,12 +97,18 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
   // 初始化需用户显式点击触发:未触发前展示配置,触发后才 loading 且允许关闭。
   const [initStarted, setInitStarted] = useState(false);
   const [initStarting, setInitStarting] = useState(false);
+  // 与 initStarting 分开:两段是两个按钮两个接口,共用一个 loading 会让建工作区时「去跟架构聊天」也跟着转。
+  const [architectChatStarting, setArchitectChatStarting] = useState(false);
   // 架构助理那条会话与员工:进入聊天要用会话ID直达该会话而不是新开一条,员工用于跳过去后默认 @ 到它。
   // 员工只有 /init/start 会回,轮询 getProject 拿不到,所以启动时就存下来。
   const [architectTarget, setArchitectTarget] = useState<ArchitectChatTarget>({});
   // 真实初始化状态由后端定时任务读任务状态文件后落库,这里轮询回显,不再用写死的假进度。
   const [initStatus, setInitStatus] = useState<ProjectInitStatus>('initializing');
   const [initFailReason, setInitFailReason] = useState('');
+
+  // initialized 再按有没有会话分两种:有会话=员工在聊(转圈等 ready),没会话=等用户点「去跟架构聊天」。
+  const architectChatting = initStatus === 'initialized' && !!architectTarget.sessionId;
+  const waitingArchitectChat = initStatus === 'initialized' && !architectTarget.sessionId;
 
   const workspaceRepo = repos.find((repo) => repo.repoType === 'workspace');
   const codeRepos = repos.filter((repo) => repo.repoType !== 'workspace');
@@ -119,6 +126,7 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
     setSkillPackages([]);
     setInitStarted(false);
     setInitStarting(false);
+    setArchitectChatStarting(false);
     setArchitectTarget({});
     setInitStatus('initializing');
     setInitFailReason('');
@@ -200,22 +208,18 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
       },
     });
   };
-  // step3 显式触发初始化:后端建一条架构助理会话并下发提示词,真正的初始化在沙箱里跑,这里转入轮询态。
+  // step3 第一段:后端同步建工作区(克隆/子模块/技能包/推送),返回即 initialized,再由用户点「去跟架构聊天」走第二段。
   const handleStartInit = async () => {
     if (!projectId) return;
     setInitStarting(true);
     try {
-      const res = await startProjectInit({
+      await startProjectInit({
         projectId: Number(projectId),
         buildIndex,
         skillPackages: buildIndex ? skillPackages : [],
       });
-      setArchitectTarget({
-        sessionId: res?.sessionId,
-        agentId: res?.architectAgentId,
-        agentName: res?.architectAgentName,
-      });
-      setInitStatus('initializing');
+      // 同步接口成功即已 initialized,不必等轮询确认;轮询只负责后面 initializing→ready 那一段。
+      setInitStatus('initialized');
       setInitFailReason('');
       setInitStarted(true);
     } catch {
@@ -225,10 +229,33 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
     }
   };
 
+  // step3 第二段:下发架构员工并跳进那条会话。会话与员工只有这个接口会回,轮询 getProject 拿不到员工,所以在这里存下来。
+  const handleEnterArchitectChat = async () => {
+    if (!projectId) return;
+    setArchitectChatStarting(true);
+    try {
+      const res = await startArchitectChat({ projectId: Number(projectId) });
+      const target = {
+        sessionId: res?.sessionId,
+        agentId: res?.architectAgentId,
+        agentName: res?.architectAgentName,
+      };
+      // 状态仍是 initialized:下发聊天不换状态,只多一个会话ID。这里记下会话即代表「在聊」,轮询继续等 ready。
+      setArchitectTarget(target);
+      onEnterArchitectChat(projectId, target);
+    } catch {
+      message.error(t('step3.chatFailed'));
+    } finally {
+      setArchitectChatStarting(false);
+    }
+  };
+
   // 轮询项目 initStatus:架构助理在沙箱里干活,完成信号由后端定时任务读任务状态文件后落库。
   // 到 ready 或超时回退 pending 就停轮询,避免向导开着一直打接口。
+  // architectChatting 也要轮:员工在聊时状态一直是 initialized,只判 initializing 会在下发聊天后立刻停轮询,等不到 ready。
   useEffect(() => {
-    if (!open || !initStarted || !projectId || initStatus !== 'initializing') return;
+    if (!open || !initStarted || !projectId) return;
+    if (initStatus !== 'initializing' && !architectChatting) return;
     let cancelled = false;
     let rounds = 0;
     const timer = setInterval(async () => {
@@ -243,19 +270,21 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
         if (cancelled || !detail) return;
         setInitStatus((detail.initStatus as ProjectInitStatus) || 'initializing');
         setInitFailReason(detail.initFailReason || '');
-        // 只补会话ID,员工保留启动时那份:详情不回架构员工,拿 undefined 覆盖会把 @ 打回「AI 助手」。
-        if (detail.initSessionId) {
-          setArchitectTarget((prev) => ({ ...prev, sessionId: `${detail.initSessionId}` }));
-        }
+        // 只覆盖会话ID,员工保留启动时那份:详情不回架构员工,拿 undefined 覆盖会把 @ 打回「AI 助手」。
+        // 会话为 0/空要跟着清掉:后端聊天超时是「留在 initialized 只清会话」,不清这里就一直转圈,按钮回不来。
+        setArchitectTarget((prev) => ({
+          ...prev,
+          sessionId: Number(detail.initSessionId || 0) > 0 ? `${detail.initSessionId}` : undefined,
+        }));
       } catch {
-        // 轮询失败不打断向导:下一次 tick 再试,状态维持 initializing。
+        // 轮询失败不打断向导:下一次 tick 再试,状态维持不变。
       }
     }, INIT_POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [open, initStarted, projectId, initStatus]);
+  }, [open, initStarted, projectId, initStatus, architectChatting]);
 
   const renderBasicStep = () => (
     <div className={styles.stepBody}>
@@ -428,17 +457,33 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
       {initStarted ? (
         // 已触发初始化:回显轮询到的真实状态,允许关闭(架构助理在沙箱里继续跑)。
         <div className={styles.initPanel}>
+          {/* initialized 分两种:还没下发员工(等用户点去聊)与员工在聊(有会话)。下发聊天不换状态,只多一个会话ID。 */}
           {initStatus === 'ready' && <CheckCircleFilled className={styles.checkIconDone} />}
-          {initStatus === 'initializing' && <LoadingOutlined className={styles.initSpinner} spin />}
-          {initStatus === 'pending' && <InfoCircleFilled className={styles.checkIconPending} />}
-          <div className={styles.initTitle}>{t(`step3.status.${initStatus}`)}</div>
+          {(initStatus === 'initializing' || architectChatting) && (
+            <LoadingOutlined className={styles.initSpinner} spin />
+          )}
+          {(initStatus === 'pending' || waitingArchitectChat) && (
+            <InfoCircleFilled className={styles.checkIconPending} />
+          )}
+          <div className={styles.initTitle}>
+            {architectChatting ? t('step3.status.initializing') : t(`step3.status.${initStatus}`)}
+          </div>
           {/* pending 说明初始化超时回退了,必须把失败原因说清楚,否则用户只看到「待初始化」不知为何。 */}
           <div className={styles.initDesc}>
-            {initStatus === 'pending' && initFailReason ? initFailReason : t(`step3.statusDesc.${initStatus}`)}
+            {initStatus === 'pending' && initFailReason
+              ? initFailReason
+              : architectChatting
+                ? t('step3.statusDesc.initializing')
+                : t(`step3.statusDesc.${initStatus}`)}
           </div>
           {initStatus === 'pending' ? (
             <Button type="primary" loading={initStarting} onClick={handleStartInit}>
               {t('step3.retry')}
+            </Button>
+          ) : waitingArchitectChat ? (
+            // 工作区刚建好,还没下发员工:这里点了才建会话,所以走接口而不是直接跳 architectTarget(此时是空的)。
+            <Button type="primary" loading={architectChatStarting} onClick={handleEnterArchitectChat}>
+              {t('step3.enterArchitectChat')}
             </Button>
           ) : (
             <Button type="primary" ghost onClick={() => onEnterArchitectChat(projectId, architectTarget)}>
