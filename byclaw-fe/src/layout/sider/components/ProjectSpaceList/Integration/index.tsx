@@ -1569,20 +1569,8 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded =
       </div>
       <p className={styles.testerFormHint}>{t('tester.cronHint')}</p>
 
-      <div className={styles.testerFormRow}>
-        <label>{t('tester.requireAllCoded')}</label>
-        <Switch
-          checked={testerDraft.admission.requireAllCoded}
-          onChange={(requireAllCoded) =>
-            setTesterDraft((prev) => ({
-              ...prev,
-              admission: { ...prev.admission, requireAllCoded },
-            }))
-          }
-        />
-      </div>
-      <p className={styles.testerFormHint}>{t('tester.requireAllCodedHint')}</p>
-
+      {/* 「就绪门禁」「自动归因打回」「归因不清建缺陷任务」三个开关前端先不展示,后端字段与默认值仍在,
+          保存时按 testerDraft 里的现值原样回传,不改动这三项的既有配置。 */}
       <div className={styles.integrationConnRow}>
         <div className={parentStyles.formField} style={{ flex: 1 }}>
           <label>{t('tester.maxConcurrent')}</label>
@@ -1616,28 +1604,6 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded =
         </div>
       </div>
 
-      <div className={styles.testerFormRow}>
-        <label>{t('tester.autoAttribute')}</label>
-        <Switch
-          checked={testerDraft.kickback.autoAttribute}
-          onChange={(autoAttribute) =>
-            setTesterDraft((prev) => ({ ...prev, kickback: { ...prev.kickback, autoAttribute } }))
-          }
-        />
-      </div>
-      <div className={styles.testerFormRow}>
-        <label>{t('tester.createDefect')}</label>
-        <Switch
-          checked={testerDraft.kickback.createDefectWhenUnclear}
-          onChange={(createDefectWhenUnclear) =>
-            setTesterDraft((prev) => ({
-              ...prev,
-              kickback: { ...prev.kickback, createDefectWhenUnclear },
-            }))
-          }
-        />
-      </div>
-      <p className={styles.testerFormHint}>{t('tester.kickbackHint')}</p>
     </div>
   );
   // 右侧集成测试配置面板:环境信息 + 测试用例集,空间充足可容纳复杂配置。
@@ -1667,7 +1633,6 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded =
                         全项目只有一条记录,卡片+编辑弹框两层壳没有意义:直接平铺成表单原地编辑。 */}
                     <div className={styles.integrationSection}>
                       <div className={styles.integrationSectionHeader}>
-                        <span className={styles.integrationSectionTitle}>{t('tester.title')}</span>
                         <div className={styles.integrationSectionActions}>
                           <Button
                             type="link"

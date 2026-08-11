@@ -2258,7 +2258,6 @@ export default {
   'projectSpace.detail.reqIntegration.kickback': 'Kicked back to {repo} · {branch}',
   'projectSpace.detail.reqIntegration.kickbackHint':
     'On failure, the dependency graph attributes the failure to the responsible task and kicks the round back to that repo\'s coding phase (round +1). When attribution is unclear, a new "integration defect" task is created instead of forcing it onto a completed task.',
-  'projectSpace.detail.tester.title': 'Independent tester agent',
   'projectSpace.detail.tester.noAgent': 'Unbound',
   'projectSpace.detail.tester.manualTrigger': 'Manual trigger',
   'projectSpace.detail.tester.saveSuccess': 'Configuration saved',
@@ -2281,15 +2280,8 @@ export default {
   'projectSpace.detail.tester.cronLabelPlaceholder': 'e.g. Daily 02:00',
   'projectSpace.detail.tester.cronHint':
     'The schedule throttles how often it checks; at each tick it only batches ready requirements, it does not force a run.',
-  'projectSpace.detail.tester.requireAllCoded': 'Gate: all subtasks coded',
-  'projectSpace.detail.tester.requireAllCodedHint':
-    'When on, a requirement joins the round only after all its subtasks finish coding; turning off risks testing half-built work.',
   'projectSpace.detail.tester.maxConcurrent': 'Max concurrent reqs per round',
   'projectSpace.detail.tester.maxRoundsField': 'Max auto-kickback rounds',
-  'projectSpace.detail.tester.autoAttribute': 'Auto-attribute & kick back by graph',
-  'projectSpace.detail.tester.createDefect': 'Create defect task when unclear',
-  'projectSpace.detail.tester.kickbackHint':
-    'Past the max rounds it escalates to a human instead of looping auto-kickbacks forever.',
   'projectSpace.detail.reqSplit.title': 'Split into multi-repo tasks',
   'projectSpace.detail.reqSplit.subtitle':
     'A requirement may span multiple repos. Confirm how it splits into tasks and who owns each before starting.',

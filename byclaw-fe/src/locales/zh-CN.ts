@@ -2229,7 +2229,6 @@ export default {
   'projectSpace.detail.reqIntegration.kickback': '打回 {repo} · {branch}',
   'projectSpace.detail.reqIntegration.kickbackHint':
     '集成失败时按依赖图归因到责任任务并打回对应仓库的编码环节(轮次 +1);归因不清时新建「集成缺陷」任务,不硬塞给已完成任务。',
-  'projectSpace.detail.tester.title': '独立测试数字员工',
   'projectSpace.detail.tester.noAgent': '未绑定',
   'projectSpace.detail.tester.manualTrigger': '手动触发',
   'projectSpace.detail.tester.saveSuccess': '配置已保存',
@@ -2251,14 +2250,8 @@ export default {
   'projectSpace.detail.tester.cronLabel': '可读标签',
   'projectSpace.detail.tester.cronLabelPlaceholder': '如 每日 02:00',
   'projectSpace.detail.tester.cronHint': '定时是节流,决定「多久看一次」;到点只挑已就绪的需求批量测,不是到点必跑。',
-  'projectSpace.detail.tester.requireAllCoded': '就绪门禁:需求全部子任务已编码',
-  'projectSpace.detail.tester.requireAllCodedHint':
-    '开启后仅当需求下所有子任务都完成编码才纳入本轮;关闭不推荐,易测到半成品。',
   'projectSpace.detail.tester.maxConcurrent': '单轮最大并行需求数',
   'projectSpace.detail.tester.maxRoundsField': '最大自动打回轮次',
-  'projectSpace.detail.tester.autoAttribute': '失败按依赖图自动归因打回',
-  'projectSpace.detail.tester.createDefect': '归因不清时新建集成缺陷任务',
-  'projectSpace.detail.tester.kickbackHint': '超过最大轮次仍失败则升级人工介入,避免无限自动打回死循环。',
   'projectSpace.detail.reqSplit.title': '拆分为多仓库任务',
   'projectSpace.detail.reqSplit.subtitle': '一个需求可能横跨多个仓库,启动前确认拆分成哪些任务、各由谁承接。',
   'projectSpace.detail.reqSplit.reqLabel': '需求',
