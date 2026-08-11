@@ -53,9 +53,16 @@ export type DevloopTaskListQuery = {
 
   /** 任务状态筛选，整体任务视图按状态列分别查询。 */
   status?: 'pending' | 'in_progress' | 'paused' | 'completed';
+
+  /** 任务类型筛选；为空返回全部类型。与 status 同传时两个条件叠加。 */
+  taskType?: DevloopTaskType;
   pageNum?: number;
   pageSize?: number;
 };
+
+// 任务类型对照 byai_default_agent 的架构/需求/研发/测试四角色；chat=项目内直接开聊的普通会话，不属于四角色任务。
+// 会话表没有类型列，后端按各创建链路的关联行反查(架构=项目初始化会话，研发=有仓库子任务行，测试=被集成执行记录引用，需求=需求项回写了会话)。
+export type DevloopTaskType = 'architect' | 'requirement' | 'coder' | 'tester' | 'chat';
 
 export type DevloopTaskCurrentStage = {
   stageId: string;
@@ -131,6 +138,9 @@ export type DevloopTaskItem = {
   dueTime?: string;
   agentName?: string;
   avatar?: string;
+  // 会话绑定的数字员工，进入会话后输入框据此回填默认 @ 员工；只有 agentName 无法回填。
+  objectType?: string;
+  objectId?: number | string;
   description?: string;
   taskDescription?: string;
   branchName?: string;
@@ -138,6 +148,7 @@ export type DevloopTaskItem = {
   requirementTitle?: string;
   requirementOriginId?: string;
   sourceItemId?: number;
+  taskType?: DevloopTaskType;
 };
 
 export type DevloopTaskPage = {

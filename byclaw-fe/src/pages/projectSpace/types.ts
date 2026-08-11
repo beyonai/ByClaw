@@ -44,6 +44,9 @@ export interface ProjectSession {
   objectId?: string | number;
   objectType?: string;
   avatar?: string;
+  // 会话绑定员工的显示名。项目维度的执行员工不在 redux 员工列表里，只给 objectId 会让输入框
+  // 的 useDefaultAgentElement 查不到人而兜底成「AI 助手」，得连名字一起带过去写 agentCache。
+  agentName?: string;
   sessionExts?: Array<{ extParamCode: string; extParamValue: any }>;
   taskId?: string;
   fileCount?: number;

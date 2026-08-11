@@ -2405,6 +2405,8 @@ export default {
     'Runs prep stages on the chosen environment, then dispatches the suite to the standalone tester employee. Results flow back asynchronously and are collected by the scheduled job every minute.',
   'projectSpace.detail.integration.run.noEnv': 'No environment configured yet. Add one under "Environment" first.',
   'projectSpace.detail.integration.run.startFailed': 'Failed to start the run, please retry.',
+  'projectSpace.detail.integration.run.viewSession': 'View session',
+  'projectSpace.detail.integration.session.namePrefix': 'Integration test',
   'projectSpace.detail.integration.specEntry': 'Spec',
   'projectSpace.detail.integration.suiteSpec.calloutTitle':
     'This suite must satisfy 3 rules, or the platform cannot aggregate its results',
@@ -2632,6 +2634,8 @@ export default {
   'projectSpace.detail.requirement.notStarted': 'Not Started',
   'projectSpace.detail.requirement.startSplit': 'Split into multi-repo tasks',
   'projectSpace.detail.requirement.startClarify': 'Finish in chat',
+  'projectSpace.detail.requirement.viewSession': 'View session',
+  'projectSpace.detail.requirement.viewDetail': 'Details',
   'projectSpace.detail.requirement.clarifySuccess': 'Handed to the requirement digital employee',
   'projectSpace.detail.requirement.clarifyFailed': 'Failed to dispatch the requirement digital employee',
   'projectSpace.detail.requirement.createTaskSuccess': 'Task created',

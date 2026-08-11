@@ -533,6 +533,43 @@ public class IntegrationRunExecutor {
     }
 
     /**
+     * tester 模式下先把会话建好并冻结到 run 上,让「执行测试」能当场把 sessionId 回给前端跳转过去看员工干活。
+     * 同步调用(执行体是 @Async,等它建完会话已经晚了几十秒):只做解析员工 + 建会话 + 落三列,
+     * 提示词与凭据仍留在 dispatchTester——那两件事要等环境 stages 跑完才有正确内容。
+     * 未配置测试员工/非 tester 模式返回 null,由 dispatchTester 走原有报错路径,这里不改判定语义。
+     */
+    public Long prepareTesterSession(IntegrationRun run, IntegrationSuite suite, String executorModeOverride) {
+        if (!EXECUTOR_MODE_TESTER.equals(resolveExecutorMode(executorModeOverride))) {
+            return null;
+        }
+        DefaultAgent agent = defaultAgentService.resolveForProject(run.getProjectId());
+        Long testerAgentId = parseAgentId(agent == null ? null : agent.getTesterAgentId());
+        if (testerAgentId == null) {
+            return null;
+        }
+        Long sessionId = createTesterSession(run, suite, testerAgentId);
+        run.setTesterAgentName(agent.getTesterAgentName());
+        integrationRunMapper.updateById(run);
+        return sessionId;
+    }
+
+    /** 建测试员工会话并把 sessionId/testerAgentId 冻结到 run 上(不落库,由调用方决定何时 update)。 */
+    private Long createTesterSession(IntegrationRun run, IntegrationSuite suite, Long testerAgentId) {
+        // 先用套件名建会话让会话名可读,建成拿到 sessionId 后再覆盖为完整提示词。
+        AssistantChatDto chatDto = new AssistantChatDto();
+        chatDto.setSessionId(null);
+        chatDto.setAgentId(testerAgentId);
+        chatDto.setProjectId(run.getProjectId());
+        chatDto.setChatContent("集成测试 - " + StringUtils.defaultString(suite.getSuiteName()));
+        chatDto.setAccessTerminal("DevLoop");
+        chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
+        assistantChatService.createGroupChatSession(chatDto);
+        run.setSessionId(chatDto.getSessionId());
+        run.setTesterAgentId(testerAgentId);
+        return chatDto.getSessionId();
+    }
+
+    /**
      * 下发「测试数字员工」执行本次集成测试:
      * 解析测试员工 → 建独立会话 → 拼提示词(用例仓库克隆说明 + 被测系统地址 + 运行命令 + 结果回流约定)→ 事务外异步 chat。
      * run 保持 running 并冻结 sessionId/testerAgentId/testerAgentName;测试员工完成后由回收 poller 读会话打点与结果文件收尾。
@@ -555,16 +592,16 @@ public class IntegrationRunExecutor {
         // 用例代码从哪来:workspace=工作区仓库 tests/(优先沿用 coder 检出);on_env=登环境机跑预置用例。
         String caseSource = buildCaseSourceSection(run, env, suite);
 
-        // 先用套件名建会话让会话名可读,建成拿到 sessionId 后再覆盖为完整提示词。
+        // 会话通常已由 startRun 同步建好(前端启动即跳转要当场拿到 sessionId),这里只补建漏建的情况:
+        // 复用而不是重建,否则前端已经跳过去的那条会话永远收不到提示词。
         AssistantChatDto chatDto = new AssistantChatDto();
-        chatDto.setSessionId(null);
+        Long sessionId = run.getSessionId() != null ? run.getSessionId()
+            : createTesterSession(run, suite, testerAgentId);
+        chatDto.setSessionId(sessionId);
         chatDto.setAgentId(testerAgentId);
         chatDto.setProjectId(run.getProjectId());
-        chatDto.setChatContent("集成测试 - " + StringUtils.defaultString(suite.getSuiteName()));
         chatDto.setAccessTerminal("DevLoop");
         chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
-        assistantChatService.createGroupChatSession(chatDto);
-        Long sessionId = chatDto.getSessionId();
 
         // 用例在环境机上时员工必须能 ssh 登进去,而凭据不能进提示词(提示词落会话历史)。
         // 故把凭据写成沙箱会话目录下的文件,提示词只出现路径:路径不是秘密,凭据不留痕。

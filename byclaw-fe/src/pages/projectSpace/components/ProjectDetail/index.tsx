@@ -330,19 +330,7 @@ const ProjectDetail: React.FC<Props> = ({
     }
     if (section === 'integration') {
       return isDevelopProject ? (
-        <Integration
-          active
-          projectId={Number(project.projectId)}
-          repos={(project.repos || [])
-            .filter((repo) => repo.repoId !== undefined && repo.repoId !== null)
-            .map((repo) => ({
-              repoId: Number(repo.repoId),
-              repoFullName: repo.repoFullName,
-              repoUrl: repo.repoUrl,
-              defaultBranch: repo.defaultBranch,
-            }))}
-          embedded
-        />
+        <Integration active projectId={Number(project.projectId)} embedded onOpenSession={onOpenSession} />
       ) : null;
     }
     if (section === 'members') {

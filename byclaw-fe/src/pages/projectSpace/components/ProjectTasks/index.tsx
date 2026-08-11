@@ -346,6 +346,13 @@ const ProjectTasks: React.FC<Props> = ({
       taskId: `${task.taskId || task.sessionId}`,
       updateTime: task.updateTime,
       createTime: task.createTime,
+      // 透传会话绑定的员工，handleOpenSession 据此 setAgentId，输入框才能默认 @ 到该员工。
+      objectType: task.objectType,
+      objectId: task.objectId,
+      // 名称/头像与 objectId 同源返回，一并带上:研发任务绑的是项目维度执行员工，不在 redux
+      // 员工列表里，handleOpenSession 要靠这两个字段写 agentCache，否则 @ 会兜底成「AI 助手」。
+      agentName: task.agentName,
+      avatar: task.avatar,
     });
   };
 
@@ -596,6 +603,9 @@ const ProjectTasks: React.FC<Props> = ({
             // 跳转聊天页时同步所选数字员工，输入框可立即恢复默认 @，无需等待消息元数据返回。
             objectId: selectedAgentId,
             objectType: 'DigEmployee',
+            // 模板选的是项目绑定员工,同样不在 redux 员工列表里,名字要从项目资源里反查带上,
+            // 否则 handleOpenSession 写不了 agentCache,@ 会兜底成「AI 助手」。
+            agentName: projectAgentOptions.find((agent) => `${agent.value}` === `${selectedAgentId}`)?.label,
             updateTime: templateTask.updateTime,
             createTime: templateTask.createTime,
           });

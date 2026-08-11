@@ -336,46 +336,24 @@ UPDATE byai.byai_integration_env SET case_source = 'on_env' WHERE case_source IS
 -- 工作区初始化提示词：初始化从后端 Java 流程（ProjectInitService）改为下发架构助理会话，
 -- 由它在沙箱内完成克隆/骨架/技能包/push，并按 self-developed-rules 契约写状态文件，
 -- 后端定时任务读该文件收口。提示词是这条链路的唯一指令来源，故入库为可运营模板。
+-- 正文简化为 /trellis-spec-bootstrap 斜杠命令：初始化步骤由该命令自己定义，提示词不再复述克隆/技能包/commit/push
+-- 五步，避免两处各写一套且互相漂移。ACP 那行必须留：完成状态靠 self-developed-rules 写会话状态文件，
+-- 不调这个 skill 平台读不到 completed，项目会一直卡在「初始化中」。
 -- 幂等：先按 prompt_code 清掉旧行再插入当前模板。
 delete from byai.byai_ai_prompt where prompt_code in ('DEVLOOP_WORKSPACE_INIT_PROMPT');
 
 INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
-VALUES (nextval('byai.seq_any_table'), 'DEVLOOP_PROMPT', 'DEVLOOP_WORKSPACE_INIT_PROMPT', '工作区初始化提示词', '架构数字员工初始化研发项目工作区的提示词，占位符 ${projectName} ${repoFullName} ${repoUrl} ${defaultBranch} ${sessionId} ${skillPackageSection} ${repoCloneHint}', 'DEVLOOP_WORKSPACE_INIT_PROMPT', '请初始化本研发项目的工作区仓库。
+VALUES (nextval('byai.seq_any_table'), 'DEVLOOP_PROMPT', 'DEVLOOP_WORKSPACE_INIT_PROMPT', '工作区初始化提示词', '架构数字员工初始化研发项目工作区的提示词，正文为 /trellis-spec-bootstrap 斜杠命令加 ACP 强制要求；占位符 ${projectName} ${repoFullName} ${repoUrl} ${defaultBranch} ${sessionId} ${skillPackageSection} ${repoCloneHint} 仍可用，当前模板不再使用', 'DEVLOOP_WORKSPACE_INIT_PROMPT', '/trellis-spec-bootstrap 按照逻辑要求初始化trellis项目spec，过程你不需要询问我的意见，按照你推荐的方式进行
 
-## 项目信息
-- 项目：${projectName}
-- 工作区仓库：${repoFullName}
-- 仓库地址：${repoUrl}
-- 默认分支：${defaultBranch}
-- 会话ID：${sessionId}
-
-## 仓库访问说明
-${repoCloneHint}
-
-## 初始化步骤
-1. 把工作区仓库克隆到 /by/.sessions/${sessionId}/{仓库名}/，检出默认分支 ${defaultBranch}。
-   克隆完确认 .git 存在，是个正常的 Git 仓库。
-2. 看一眼仓库现状，判断哪些技能包已经装过。不要覆盖用户已有内容。
-3. ${skillPackageSection}
-4. 有变更就在默认分支 ${defaultBranch} 上提交，提交信息用
-   `chore: init <技能包名，逗号分隔> skill package(s)`；没装任何技能包时用 `chore: update repository`。
-   工作区没有任何变更就跳过提交，不要造空提交。
-5. 有新提交才 push 到远端 ${defaultBranch}；没有新提交不要 push。
-
-## 边界
-- 本次只做上面五步。不要顺手改业务代码、不要生成架构文档或 checklist、不要建仓库里原本没有的目录。
-- push 被拒或没有仓库权限时不要绕路（不要改远端地址、不要 force push），按下面的要求转 paused 报出来。
-
-## 强制要求
-- 启动时必须先调用 skill：self-developed-rules，并按其 JSON 状态契约初始化 trace。
-- 全过程的进展必须打到 /by/.acp-runs/sessions/${sessionId}.json：平台只读这个文件判断初始化是否完成，
-  不写这个文件，项目会一直卡在「初始化中」，用户无法新建需求或启动任务。
-- 五步全部做完（该 push 的已 push）才把任务状态收为 completed；中途遇到不可恢复的问题
-  （无仓库权限、push 被拒、技能包 CLI 缺失等）按契约转 paused 并写清原因，不要静默结束。', null, 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
+acp下发任务告诉对方启动的时候必须要调用skill：self-developed-rules;', null, 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
 
 -- 需求澄清提示词：需求列表「启动」的第二个入口，把需求交给需求数字员工在聊天里聊完成。
--- 正文就是一条斜杠命令 + 需求内容，完成状态由 skill 自己按契约维护，后端本轮不轮询。
+-- 正文就是一条斜杠命令 + 需求内容，澄清步骤由该命令自己定义，提示词不复述。
+-- ACP 那行与初始化提示词同源：启动时必须调用 self-developed-rules，否则完成状态没人写。
+-- 幂等：先按 prompt_code 清掉旧行再插入当前模板。
 delete from byai.byai_ai_prompt where prompt_code in ('DEVLOOP_REQUIREMENT_CLARIFY_PROMPT');
 
 INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
-VALUES (nextval('byai.seq_any_table'), 'DEVLOOP_PROMPT', 'DEVLOOP_REQUIREMENT_CLARIFY_PROMPT', '需求澄清提示词', '需求数字员工澄清需求的提示词，占位符 ${requirementContent}；正文为 /byclaw-requirement-clarification 斜杠命令加需求内容', 'DEVLOOP_REQUIREMENT_CLARIFY_PROMPT', '/byclaw-requirement-clarification ${requirementContent}', null, 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
+VALUES (nextval('byai.seq_any_table'), 'DEVLOOP_PROMPT', 'DEVLOOP_REQUIREMENT_CLARIFY_PROMPT', '需求澄清提示词', '需求数字员工澄清需求的提示词，占位符 ${requirementContent} 替换为原始需求内容；正文为 /byclaw-requirement-clarification 斜杠命令加需求内容，再加 ACP 强制要求', 'DEVLOOP_REQUIREMENT_CLARIFY_PROMPT', '/byclaw-requirement-clarification ${requirementContent}
+
+acp下发任务告诉对方启动的时候必须要调用skill：self-developed-rules;', null, 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
