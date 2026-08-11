@@ -1664,8 +1664,7 @@ public class AuthApplicationService {
                 || !hasEffectivePermissionDelta(compareVo)) {
             return;
         }
-        Set<Long> affectedUserIds = extractInvolvedUserIds(compareVo,
-            authRedBlackDTO.getGrantObjType(), authRedBlackDTO.getGrantObjId());
+        Set<Long> affectedUserIds = extractSkillPermissionDeltaUserIds(compareVo);
         affectedUserIds.remove(null);
         if (affectedUserIds.isEmpty()) {
             return;
@@ -1684,6 +1683,45 @@ public class AuthApplicationService {
             || MapUtils.isNotEmpty(compareVo.getRedDelMap())
             || MapUtils.isNotEmpty(compareVo.getBlackAddMap())
             || MapUtils.isNotEmpty(compareVo.getBlackDelMap());
+    }
+
+    private Set<Long> extractSkillPermissionDeltaUserIds(CompareVo compareVo) {
+        Set<Long> userIds = new HashSet<>();
+        Set<Long> orgIds = new HashSet<>();
+        Set<Long> postIds = new HashSet<>();
+        Set<Long> stationIds = new HashSet<>();
+        extractGrantToInfo(compareVo.getRedAddMap(), userIds, orgIds, postIds, stationIds);
+        extractGrantToInfo(compareVo.getRedDelMap(), userIds, orgIds, postIds, stationIds);
+        extractGrantToInfo(compareVo.getBlackAddMap(), userIds, orgIds, postIds, stationIds);
+        extractGrantToInfo(compareVo.getBlackDelMap(), userIds, orgIds, postIds, stationIds);
+        expandTargetUserIdsStrict(userIds, orgIds, postIds, stationIds);
+        return userIds;
+    }
+
+    private void expandTargetUserIdsStrict(Set<Long> userIds, Set<Long> orgIds, Set<Long> postIds,
+        Set<Long> stationIds) {
+        if (CollectionUtils.isNotEmpty(orgIds)) {
+            List<Long> resolved = usersMapper.findUserIdsByOrgIdListIncludingChildren(new ArrayList<>(orgIds));
+            if (CollectionUtils.isNotEmpty(resolved)) {
+                userIds.addAll(resolved);
+            }
+        }
+        if (CollectionUtils.isNotEmpty(postIds)) {
+            for (Long postId : postIds) {
+                List<Long> resolved = usersMapper.findUserIdsByPostId(postId);
+                if (CollectionUtils.isNotEmpty(resolved)) {
+                    userIds.addAll(resolved);
+                }
+            }
+        }
+        if (CollectionUtils.isNotEmpty(stationIds)) {
+            List<Long> resolved = usersMapper.findUserIdsByStationIdListIncludingChildren(
+                new ArrayList<>(stationIds));
+            if (CollectionUtils.isNotEmpty(resolved)) {
+                userIds.addAll(resolved);
+            }
+        }
+        userIds.remove(null);
     }
 
     private void syncAuthChangedUsersAfterCommit(Set<Long> involvedUserIds, String grantType) {
@@ -1995,7 +2033,9 @@ public class AuthApplicationService {
             PrivilegeGrant privilegeGrant = entry.getValue();
             // 如果不存在权限，数据库新增新增权限
             privilegeGrant.setStatusCd("A");
-            privilegeGrantService.save(privilegeGrant);
+            if (!privilegeGrantService.save(privilegeGrant)) {
+                throw new BaseException("权限新增失败");
+            }
 
             // 授权信息
             String[] splitArray = key.split("\\|");
@@ -2042,7 +2082,9 @@ public class AuthApplicationService {
             PrivilegeGrant privilegeGrant = entry.getValue();
 
             // 如果不存在权限，数据库新增新增权限
-            privilegeGrantService.remove(privilegeGrant);
+            if (!privilegeGrantService.remove(privilegeGrant)) {
+                throw new BaseException("权限删除失败");
+            }
 
             // 授权信息
             String[] splitArray = key.split("\\|");
