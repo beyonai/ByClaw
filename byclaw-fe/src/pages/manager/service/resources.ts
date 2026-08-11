@@ -722,5 +722,9 @@ export const downloadSkillZip = (params: {
  * @returns Promise 删除结果
  */
 export const deleteSkill = (params: { skillPath: string; resourceId?: string | number; userCode?: string }) => {
-  return POST<any>('/byaiService/tool/deleteSkill', params);
+  return POST<any>('/byaiService/tool/deleteSkill', params, {
+    responseCfg: {
+      hideErrorTips: true,
+    },
+  });
 };

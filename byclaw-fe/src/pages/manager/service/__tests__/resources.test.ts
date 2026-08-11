@@ -8,6 +8,7 @@ import {
   queryResourceDetail,
   queryResourceMembers,
   deleteResource,
+  deleteSkill,
   uploadSkillZip,
   pageSkillGroups,
   pageSkillGroupMemberCandidates,
@@ -123,6 +124,16 @@ describe('manager resources service', () => {
     const payload = { resourceId: '10042909' };
     deleteResource(payload);
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/tool/deleteResourceById', payload);
+  });
+
+  it('should let deleteSkill callers handle errors without a duplicate request-level tip', () => {
+    const payload = { skillPath: '/workspace/grill-me', resourceId: '10042909', userCode: 'tester' };
+    deleteSkill(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/tool/deleteSkill', payload, {
+      responseCfg: {
+        hideErrorTips: true,
+      },
+    });
   });
 
   it('should call uploadSkillZip with multipart config', () => {
