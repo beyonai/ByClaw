@@ -19,9 +19,16 @@ RUN apk add --no-cache \
     && rm -rf /var/cache/apk/*
 
 # 安装 Lark/WeCom CLI
-ARG LARKSUITE_CLI_VERSION=1.0.78
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG LARKSUITE_CLI_VERSION=1.0.84
 ARG WECOM_CLI_VERSION=0.1.9
-RUN npm install --global \
+RUN npm config set registry "${NPM_REGISTRY}" --global \
+    && npm config set fund false --global \
+    && npm config set audit false --global \
+    && npm config set fetch-retries 5 --global \
+    && npm config set fetch-retry-mintimeout 20000 --global \
+    && npm config set fetch-retry-maxtimeout 120000 --global \
+    && npm install --global \
         "@larksuite/cli@${LARKSUITE_CLI_VERSION}" \
         "@wecom/cli@${WECOM_CLI_VERSION}" \
     && lark-cli --version \
@@ -40,7 +47,7 @@ RUN mkdir -p /home/appuser/.local/bin \
     && if [ "$TARGETARCH" = "amd64" ]; then \
          tar -xzf /tmp/dws-amd64.tar.gz -C /home/appuser/.local/bin dws; \
        else \
-         curl -fsSL "https://registry.npmjs.org/dingtalk-workspace-cli/-/dingtalk-workspace-cli-${DWS_VERSION}.tgz" -o /tmp/dws-pkg.tgz \
+         curl -fsSL "https://registry.npmmirror.com/dingtalk-workspace-cli/-/dingtalk-workspace-cli-${DWS_VERSION}.tgz" -o /tmp/dws-pkg.tgz \
          && tar -xzf /tmp/dws-pkg.tgz -C /tmp "package/assets/dws-linux-${TARGETARCH}.tar.gz" \
          && tar -xzf "/tmp/package/assets/dws-linux-${TARGETARCH}.tar.gz" -C /home/appuser/.local/bin dws; \
        fi \

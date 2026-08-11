@@ -18,6 +18,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationProviderRegistry;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationProgress;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationQrCodeEncoder;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationSessionContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartResult;
@@ -58,6 +59,7 @@ public class ConnectorAuthorizationService {
     private final ConnectorAuthMapper connectorAuthMapper;
     private final SequenceService sequenceService;
     private final ConnectorConnectionStateService connectionStateService;
+    private final AuthorizationQrCodeEncoder qrCodeEncoder;
 
     @Autowired
     public ConnectorAuthorizationService(
@@ -66,13 +68,15 @@ public class ConnectorAuthorizationService {
             RedisAuthorizationSessionRepository sessionRepository,
             ConnectorAuthMapper connectorAuthMapper,
             SequenceService sequenceService,
-            ConnectorConnectionStateService connectionStateService) {
+            ConnectorConnectionStateService connectionStateService,
+            AuthorizationQrCodeEncoder qrCodeEncoder) {
         this.connectorInfoService = connectorInfoService;
         this.providerRegistry = providerRegistry;
         this.sessionRepository = sessionRepository;
         this.connectorAuthMapper = connectorAuthMapper;
         this.sequenceService = sequenceService;
         this.connectionStateService = connectionStateService;
+        this.qrCodeEncoder = qrCodeEncoder;
     }
 
     /** 仅供不加载 Spring 容器的既有单元测试使用。 */
@@ -88,7 +92,8 @@ public class ConnectorAuthorizationService {
             sessionRepository,
             connectorAuthMapper,
             sequenceService,
-            null
+            null,
+            new AuthorizationQrCodeEncoder()
         );
     }
 
@@ -914,6 +919,7 @@ public class ConnectorAuthorizationService {
         result.setStatus(externalStatus(session.status()));
         result.setPhase(session.phase());
         result.setAuthorizationUrl(authorizationUrl);
+        result.setQrCodeUrl(qrCodeEncoder.encode(authorizationUrl));
         result.setExpiresAt(session.expiresAt());
         result.setErrorCode(session.errorCode());
         result.setErrorMessage(session.errorMessage());

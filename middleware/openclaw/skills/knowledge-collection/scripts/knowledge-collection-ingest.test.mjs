@@ -228,6 +228,8 @@ async function testCanonicalCollectionResultPreservesMarkdownFrontmatter() {
   const markdownPath = path.join(fixtureDir, relativeMarkdownPath);
   const markdown = "---\ncollection_filters:\n  - 茶叶\n---\n\n# Tea collection\n\n龙井";
   fs.mkdirSync(path.dirname(markdownPath), { recursive: true });
+  fs.mkdirSync(path.join(fixtureDir, "markdown"), { recursive: true });
+  fs.writeFileSync(path.join(fixtureDir, "markdown/article.md"), "# Unsafe canonical article");
   fs.writeFileSync(markdownPath, markdown);
   fs.writeFileSync(fixturePath, JSON.stringify({
     schemaVersion: "1.0",
@@ -274,7 +276,9 @@ async function testCanonicalCollectionResultRejectsInvalidContractShapes() {
   const markdownRelativePath = "sanitized/items/article.md";
   const textRelativePath = "sanitized/items/article.txt";
   fs.mkdirSync(path.join(fixtureDir, "sanitized/items"), { recursive: true });
+  fs.mkdirSync(path.join(fixtureDir, "markdown"), { recursive: true });
   fs.writeFileSync(path.join(fixtureDir, markdownRelativePath), "# Canonical article");
+  fs.writeFileSync(path.join(fixtureDir, "markdown/article.md"), "# Unsafe canonical article");
   fs.writeFileSync(path.join(fixtureDir, textRelativePath), "not markdown");
   const cases = [
     {
@@ -298,11 +302,6 @@ async function testCanonicalCollectionResultRejectsInvalidContractShapes() {
       error: /filters.*对象/,
     },
     {
-      name: "empty-items",
-      mutate(value) { value.items = []; },
-      error: /items.*非空数组/,
-    },
-    {
       name: "extra-item-field",
       mutate(value) { value.items[0].localPath = "/tmp/article.md"; },
       error: /items\[0\].*不支持的字段.*localPath/,
@@ -315,6 +314,14 @@ async function testCanonicalCollectionResultRejectsInvalidContractShapes() {
       },
       error: /扩展名为 \.md.*Markdown 文件/,
     },
+    {
+      name: "non-sanitized-artifact",
+      mutate(value) {
+        value.items[0].markdown = "markdown/article.md";
+        value.items[0].fileName = "markdown/article.md";
+      },
+      error: /sanitized\/items/,
+    },
   ];
   try {
     for (const testCase of cases) {
@@ -326,6 +333,20 @@ async function testCanonicalCollectionResultRejectsInvalidContractShapes() {
       assert.equal(result.code, 1, `${testCase.name}: ${result.stderr || result.stdout}`);
       assert.match(String(result.json?.error || ""), testCase.error, testCase.name);
     }
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  }
+}
+
+async function testCanonicalCollectionResultAllowsEmptyMaterializedView() {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-empty-view-"));
+  const fixturePath = path.join(fixtureDir, "collection-result.json");
+  fs.writeFileSync(fixturePath, JSON.stringify(canonicalCollection([])));
+  try {
+    const result = await runCli(["normalize", "--collection-result-file", fixturePath], undefined, 0);
+    assert.equal(result.code, 1, result.stderr || result.stdout);
+    assert.match(String(result.json?.error || ""), /未找到可入库的 Markdown/);
+    assert.doesNotMatch(String(result.json?.error || ""), /items.*非空数组/);
   } finally {
     fs.rmSync(fixtureDir, { recursive: true, force: true });
   }
@@ -386,10 +407,11 @@ async function testCanonicalCollectionResultRejectsUnsafeOrMissingMarkdownPaths(
 async function testCanonicalCollectionResultRejectsMismatchedMarkdownAndFileName() {
   const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-mismatch-"));
   const fixturePath = path.join(fixtureDir, "collection-result.json");
-  fs.writeFileSync(path.join(fixtureDir, "a.md"), "# Preview A");
-  fs.writeFileSync(path.join(fixtureDir, "b.md"), "# Ingest B");
+  fs.mkdirSync(path.join(fixtureDir, "sanitized/items"), { recursive: true });
+  fs.writeFileSync(path.join(fixtureDir, "sanitized/items/a.md"), "# Preview A");
+  fs.writeFileSync(path.join(fixtureDir, "sanitized/items/b.md"), "# Ingest B");
   fs.writeFileSync(fixturePath, JSON.stringify(canonicalCollection([
-    canonicalItem("a.md", "b.md", { title: "Mismatch" }),
+    canonicalItem("sanitized/items/a.md", "sanitized/items/b.md", { title: "Mismatch" }),
   ])));
   try {
     const result = await runCli(["normalize", "--collection-result-file", fixturePath], undefined, 0);
@@ -498,12 +520,12 @@ async function testCanonicalActualIngestKeepsValidatedPathPrivate() {
 async function testCanonicalInputPrecedesLegacyAndLegacyRemainsSupported() {
   const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-precedence-"));
   const canonicalPath = path.join(fixtureDir, "canonical.json");
-  const canonicalMarkdownPath = path.join(fixtureDir, "sanitized/canonical.md");
+  const canonicalMarkdownPath = path.join(fixtureDir, "sanitized/items/canonical.md");
   const legacyPath = path.join(fixtureDir, "legacy.json");
   fs.mkdirSync(path.dirname(canonicalMarkdownPath), { recursive: true });
   fs.writeFileSync(canonicalMarkdownPath, "# Canonical");
   fs.writeFileSync(canonicalPath, JSON.stringify(canonicalCollection([
-    canonicalItem("sanitized/canonical.md", "sanitized/canonical.md", { title: "Canonical" }),
+    canonicalItem("sanitized/items/canonical.md", "sanitized/items/canonical.md", { title: "Canonical" }),
   ])));
   fs.writeFileSync(legacyPath, JSON.stringify({ items: [{ title: "Legacy", markdown: "# Legacy" }] }));
   try {
@@ -1288,6 +1310,7 @@ async function testIngestRejectsSuccessfulManagerExitWithoutJsonContract() {
 await testHelpUsesMigratedIdentityAndCanonicalInputFirst();
 await testCanonicalCollectionResultPreservesMarkdownFrontmatter();
 await testCanonicalCollectionResultRejectsInvalidContractShapes();
+await testCanonicalCollectionResultAllowsEmptyMaterializedView();
 await testCanonicalCollectionResultRejectsUnsafeOrMissingMarkdownPaths();
 await testCanonicalCollectionResultRejectsMismatchedMarkdownAndFileName();
 await testCollectionResultJsonIsExplicitInlineCompatibilityOnly();

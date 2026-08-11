@@ -12,6 +12,7 @@ import {
 } from '@ant-design/icons';
 import { Avatar, Button, Drawer, Empty, Modal, Spin, Switch, Tooltip, message } from 'antd';
 import classNames from 'classnames';
+import { useSelector } from '@umijs/max';
 
 import AntdIcon from '@/components/AntdIcon';
 import {
@@ -119,23 +120,25 @@ const ConnectorSelection = ({ value, onOpen }: { value: Connector[]; onOpen: () 
 };
 
 const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
+  const { userInfo } = useSelector((state: any) => state.user);
+
   // 分别控制设置列表、完整配置、授权说明和真实授权进度的显示状态。
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [configurationOpen, setConfigurationOpen] = useState(false);
   const [catalogRefreshing, setCatalogRefreshing] = useState(false);
-  const [authorizingConnector, setAuthorizingConnector] = useState<Connector>();
+  const [authorizingConnector, setAuthorizingConnector] = useState<Connector | undefined>(undefined);
   // 一次性授权任务由后端创建，包含真实二维码或第三方授权链接。
-  const [authorizationSession, setAuthorizationSession] = useState<ConnectorAuthorization>();
+  const [authorizationSession, setAuthorizationSession] = useState<ConnectorAuthorization | undefined>(undefined);
   // 列表完全由后端返回，避免请求完成前短暂展示静态假数据。
   const [connectors, setConnectors] = useState<Connector[]>([]);
   const [loadingConnectors, setLoadingConnectors] = useState(false);
   const [updatingConnectorIds, setUpdatingConnectorIds] = useState<Set<ConnectorId>>(new Set());
   const [startingAuthorization, setStartingAuthorization] = useState(false);
   const [checkingAuthorization, setCheckingAuthorization] = useState(false);
-  const activeAuthorizationIdRef = useRef<string>();
-  const checkingAuthorizationIdRef = useRef<string>();
+  const activeAuthorizationIdRef = useRef<string | undefined>(undefined);
+  const checkingAuthorizationIdRef = useRef<string | undefined>(undefined);
   const startAuthorizationGenerationRef = useRef(0);
-  const authorizationTimerRef = useRef<number>();
+  const authorizationTimerRef = useRef<number | undefined>(undefined);
   const attemptedAuthorizationOpenKeysRef = useRef<Set<string>>(new Set());
   const cancelledAuthorizationIdsRef = useRef<Set<string>>(new Set());
   const hasLoadedInitialConnectorsRef = useRef(false);
@@ -313,11 +316,11 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   }, [connectors.length]);
 
   useEffect(() => {
-    if (hasLoadedInitialConnectorsRef.current) return;
+    if (hasLoadedInitialConnectorsRef.current || !userInfo?.userId) return;
 
     hasLoadedInitialConnectorsRef.current = true;
     void loadAuthorizedConnectors();
-  }, [loadAuthorizedConnectors]);
+  }, [loadAuthorizedConnectors, userInfo?.userId]);
 
   const openSettings = () => {
     setSettingsOpen(true);
@@ -468,9 +471,13 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
         <ConnectorSelection value={enabledConnectors} onOpen={openSettings} />
       ) : (
         <Tooltip title="连接器">
-          <button className={styles.trigger} type="button" aria-label="连接器设置" onClick={openSettings}>
+          <span
+            className={styles.trigger}
+            role="button"
+            onClick={openSettings}
+          >
             <LinkOutlined />
-          </button>
+          </span>
         </Tooltip>
       )}
 
