@@ -23,7 +23,7 @@ interface ResourceImportProps {
   activeTab: string;
   saveTool: (data: any) => Promise<any>;
   onCancel: () => void;
-  onSuccess: () => void;
+  onSuccess: (result?: ResourceImportResult) => void;
 }
 
 const resourceImportTemplateMap: Record<string, { fileName: string }> = {
@@ -227,9 +227,10 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   };
 
   const handleImportComplete = () => {
+    const completedResult = importResult || undefined;
     setImportResult(null);
     setActiveDiffItem(null);
-    onSuccess();
+    onSuccess(completedResult);
   };
 
   const handleImportSubmit = async () => {
