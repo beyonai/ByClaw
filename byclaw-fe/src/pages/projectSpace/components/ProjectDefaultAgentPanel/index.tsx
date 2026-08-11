@@ -17,12 +17,22 @@ import {
 } from '../../defaultAgents';
 import styles from './index.module.less';
 
+/** 「去聊天」带给输入框的员工信息:光有 agentId 不够,见下方 onChatWithAgent 注释。 */
+export type ChatWithAgentTarget = {
+  agentId: string;
+  name?: string;
+  chatAvatar?: string;
+  agentType?: string;
+};
+
 interface Props {
   projectId: number;
   active: boolean;
-  // 带员工进新会话:与工具栏「新建会话」同一入口,额外把该员工设为会话 agent,
-  // 输入框据此自动预置一个 @ 该员工的 mention(见 RichInput/useDefaultAgentElement)。
-  onChatWithAgent?: (agentId: string) => void;
+  // 带员工进新会话:与工具栏「新建会话」同一入口,额外把该员工设为会话 agent,输入框据此预置 @。
+  // 必须连名字/头像/类型一起给:输入框的 useDefaultAgentElement 只拿 agentId 去 redux 的 employees
+  // 列表里查,而这些员工来自 useDigitalEmployeeOptions 自己拉的两个接口、不在那份列表里,查不到就会
+  // 兜底成「AI 助手」——@ 出来的就不是用户点的那个人了。
+  onChatWithAgent?: (target: ChatWithAgentTarget) => void;
 }
 
 // 角色卡不是资源实体,只借 ResourceCard 的壳:
@@ -85,6 +95,11 @@ const ProjectDefaultAgentPanel: React.FC<Props> = ({ projectId, active, onChatWi
       new Map(
         options.filter((option) => option.chatAvatar).map((option) => [option.value, option.chatAvatar as string])
       ),
+    [options]
+  );
+  const agentTypeById = useMemo(
+    () =>
+      new Map(options.filter((option) => option.agentType).map((option) => [option.value, option.agentType as string])),
     [options]
   );
 
@@ -151,6 +166,18 @@ const ProjectDefaultAgentPanel: React.FC<Props> = ({ projectId, active, onChatWi
     return effectiveId ? avatarById.get(effectiveId) : undefined;
   };
 
+  // 「去聊天」的目标:名字优先选项表,退全局默认那份冗余名,再退 id —— 名字是 @ 出来显示的文本,
+  // 空字符串会让 mention 退化成显示 agentId,所以一路兜到底。
+  const chatTargetOf = (role: DefaultAgentRole): ChatWithAgentTarget => {
+    const agentId = effectiveAgentIdOf(role);
+    return {
+      agentId,
+      name: labelById.get(agentId) || globalDefaults[`${role}AgentName`] || agentId,
+      chatAvatar: avatarById.get(agentId),
+      agentType: agentTypeById.get(agentId),
+    };
+  };
+
   return (
     <div className={styles.panel}>
       <div className={styles.scroll}>
@@ -171,7 +198,7 @@ const ProjectDefaultAgentPanel: React.FC<Props> = ({ projectId, active, onChatWi
                     size="small"
                     icon={<CommentOutlined />}
                     className={styles.roleChatButton}
-                    onClick={() => onChatWithAgent(effectiveAgentIdOf(role))}
+                    onClick={() => onChatWithAgent(chatTargetOf(role))}
                   >
                     {t('projectSpace.defaultAgent.chatWithAgent')}
                   </Button>

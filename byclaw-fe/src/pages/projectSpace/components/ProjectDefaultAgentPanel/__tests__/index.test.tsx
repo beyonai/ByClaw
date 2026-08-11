@@ -192,8 +192,9 @@ describe('ProjectDefaultAgentPanel', () => {
     expect(avatars.every((image) => !image.getAttribute('src')?.includes('oss/agent-1.png'))).toBe(true);
   });
 
-  it('offers 去聊天 for the effective employee and hands the agentId to the chat entry', async () => {
-    // 「去聊天」带的是当前生效的员工 id，父级据此设会话 agent 以预置 @。
+  it('offers 去聊天 for the effective employee and hands the full mention target to the chat entry', async () => {
+    // 「去聊天」带的是当前生效员工的完整信息(id + 名字/头像/类型)，父级据此构造输入框 mention。
+    // 只给 agentId 不够：输入框查不到这些员工，会把 @ 兜底成「AI 助手」。
     mockGetDefaultAgent.mockResolvedValue({ architectAgentId: 'agent-1' });
     const onChatWithAgent = jest.fn();
     const queryClient = new QueryClient({
@@ -211,7 +212,9 @@ describe('ProjectDefaultAgentPanel', () => {
     expect(button.closest('.metaPrimary')).not.toBeNull();
     expect(button.closest('.metaHover')).toBeNull();
     fireEvent.click(button);
-    expect(onChatWithAgent).toHaveBeenCalledWith('agent-1');
+    expect(onChatWithAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: 'agent-1', name: '架构专家', chatAvatar: 'oss/agent-1.png' })
+    );
   });
 
   it('persists immediately on clear without a save button', async () => {

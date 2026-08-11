@@ -28,7 +28,7 @@ import ProjectResources from '../ProjectResources';
 import ProjectChannelConfig from '../ProjectChannelConfig';
 import ProjectSessionList from '../ProjectSessionList';
 import ProjectTasks from '../ProjectTasks';
-import ProjectDefaultAgentPanel from '../ProjectDefaultAgentPanel';
+import ProjectDefaultAgentPanel, { type ChatWithAgentTarget } from '../ProjectDefaultAgentPanel';
 import Integration from '@/layout/sider/components/ProjectSpaceList/Integration';
 import ProjectRepositoryManager from '../ProjectRepositoryManager';
 import styles from '../../index.module.less';
@@ -38,8 +38,9 @@ interface Props {
   loading?: boolean;
   onRefresh?: () => void;
   onOpenSession?: (session: ProjectSession) => void;
-  // agentId 可选:工具栏按钮不带,数字员工卡的「去聊天」带上它以预置 @ 该员工。
-  onNewSession?: (agentId?: string) => void;
+  // 员工信息可选:工具栏按钮不带,数字员工卡的「去聊天」带上它以预置 @ 该员工。
+  // 带的是整个 target 而非只有 agentId —— 输入框查不到这些员工,名字/头像/类型得一路透传。
+  onNewSession?: (target?: ChatWithAgentTarget) => void;
   onEditProject?: (project: ProjectSpace) => void;
   onDeleteProject?: (project: ProjectSpace) => void;
 }
@@ -279,7 +280,7 @@ const ProjectDetail: React.FC<Props> = ({
         <ProjectDefaultAgentPanel
           projectId={Number(project.projectId)}
           active
-          onChatWithAgent={onNewSession ? (agentId) => onNewSession(agentId) : undefined}
+          onChatWithAgent={onNewSession ? (target) => onNewSession(target) : undefined}
         />
       ) : (
         renderSessionList()

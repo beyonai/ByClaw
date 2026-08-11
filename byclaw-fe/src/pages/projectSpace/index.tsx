@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Empty, Modal, Spin, message } from 'antd';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
-import { agentTypeMap } from '@/constants/agent';
 import useGlobal from '@/hooks/useGlobal';
+import { getDigitalEmployeeMentionItem } from '@/components/MessageList/utils';
+import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import { deleteProject, saveDefaultAgent, saveProjectMembers, saveProjectResources, updateProject } from '@/service/devloop';
 import ProjectFormModal, { type ProjectFormValues } from './components/ProjectFormModal';
 import ProjectDetail from './components/ProjectDetail';
+import { type ChatWithAgentTarget } from './components/ProjectDefaultAgentPanel';
 import { useProjectDetail } from './hooks/useProjectDetail';
 import { useProjectList } from './hooks/useProjectList';
 import { useProjectTypeConfig } from './hooks/useProjectTypeConfig';
@@ -230,7 +232,7 @@ const ProjectSpacePage: React.FC = () => {
               project={activeProject}
               onRefresh={refreshProject}
               onOpenSession={handleOpenSession}
-              onNewSession={(agentId?: string) => {
+              onNewSession={(target?: ChatWithAgentTarget) => {
                 setSessionId?.('');
                 navigate('/chat', {
                   state: {
@@ -240,19 +242,30 @@ const ProjectSpacePage: React.FC = () => {
                     projectName: activeProject.projectName,
                   },
                 });
-                // 只有数字员工卡的「去聊天」带 agentId;工具栏「新建会话」不带,行为不变。
-                // 不能在这里直接 setAgentId:聊天页挂载时 ChatLayoutComp 会按「无会话员工」清空一次
-                // (见其 sessionAgentSyncKey 那个 effect),先设的值会被抹掉。改为挂载后发既有的
-                // queryInput-set-schema —— 它的监听会重新 setAgentId + setMyAgentType,而那个清空
-                // effect 依赖里没有 agentId,不会再回头覆盖,输入框据此预置 @ 该员工。
-                if (!agentId) return;
-                window.setTimeout(() => {
-                  EventEmitter.emit('queryInput-set-schema', {
-                    agentId,
-                    agentType: agentTypeMap.agent,
-                    resourceList: [],
+                // 只有数字员工卡的「去聊天」带员工;工具栏「新建会话」不带,行为不变。
+                // 走 queryInput-insert-item(RichInput 直接 insertItem)而不是 queryInput-set-schema:
+                // 后者的落点 setCommonStateBySchema 只认 queryQuestion/inputSchema/mentionItem/payload,
+                // 压根不读 agentId,光发它输入框不会出现 @。
+                // 员工信息整份带过去,不能只给 agentId:输入框的 useDefaultAgentElement 拿 agentId 去
+                // redux employees 列表里查,这些员工不在那份列表里,查不到就兜底成「AI 助手」。
+                if (!target?.agentId) return;
+                const mentionItem = getDigitalEmployeeMentionItem({
+                  agentId: target.agentId,
+                  name: target.name,
+                  chatAvatar: target.chatAvatar,
+                  agentType: target.agentType,
+                } as any);
+                if (!mentionItem) return;
+                // 聊天页此刻还在挂载,RichInput 的监听要等它挂上才存在。用 rAF 双帧让出导航后的首帧渲染,
+                // 比裸 setTimeout(150) 稳:150ms 只是猜的,挂载慢于它事件就整个丢掉。
+                requestAnimationFrame(() => {
+                  requestAnimationFrame(() => {
+                    EventEmitter.emit('queryInput-insert-item', {
+                      item: mentionItem,
+                      type: ResourceType.digitalEmployee,
+                    });
                   });
-                }, 150);
+                });
               }}
               onEditProject={canManageProject ? handleEditProject : undefined}
               onDeleteProject={canManageProject ? handleDeleteProject : undefined}
