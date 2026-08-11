@@ -1071,8 +1071,8 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
                 className={styles.templateCard}
                 onClick={() => void openTemplateDetail(template)}
               >
-                {/* 模板标记直接取名称首字，不再维护无业务含义的数据库 icon 字段。 */}
-                <i>{template.templateName.slice(0, 1)}</i>
+                {/* 模板标记直接取名称前两个字，不再维护无业务含义的数据库 icon 字段。 */}
+                <i>{template.templateName.slice(0, 2)}</i>
                 <span>
                   <strong>{template.templateName}</strong>
                   <small>{template.description}</small>

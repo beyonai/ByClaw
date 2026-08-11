@@ -94,6 +94,9 @@ public class ProjectApplicationService {
     /** 项目名称前后端统一限制为 100 个字符。 */
     private static final int PROJECT_NAME_MAX_LENGTH = 100;
 
+    /** 项目描述业务层统一限制为 500 个字符，数据库使用 TEXT 避免中文存储长度语义差异。 */
+    private static final int PROJECT_DESCRIPTION_MAX_LENGTH = 500;
+
     /** 手工需求复用的内部扫描源类型，仓库关联实际保存于单条需求 JSON。 */
     private static final String MANUAL_SOURCE_TYPE = "manual";
 
@@ -168,6 +171,7 @@ public class ProjectApplicationService {
         if (projectService.existsProjectName(projectName, null)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.duplicate");
         }
+        validateProjectDescription(dto.getDescription());
 
         Project project = new Project();
         project.setProjectId(sequenceService.nextVal());
@@ -243,6 +247,7 @@ public class ProjectApplicationService {
             project.setProjectName(projectName);
         }
         if (dto.getDescription() != null) {
+            validateProjectDescription(dto.getDescription());
             project.setDescription(dto.getDescription());
         }
         if (dto.getResourceId() != null) {
@@ -687,6 +692,17 @@ public class ProjectApplicationService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.max.length");
         }
         return normalizedName;
+    }
+
+    /** 开放接口未统一启用 @Valid，因此应用层也必须拦截超长项目描述。 */
+    private void validateProjectDescription(String description) {
+        if (description == null) {
+            return;
+        }
+        int characterCount = description.codePointCount(0, description.length());
+        if (characterCount > PROJECT_DESCRIPTION_MAX_LENGTH) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.description.too.long");
+        }
     }
 
     /**

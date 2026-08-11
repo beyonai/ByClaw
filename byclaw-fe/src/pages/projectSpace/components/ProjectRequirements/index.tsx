@@ -1,6 +1,5 @@
 import {
   Button,
-  Descriptions,
   Drawer,
   Dropdown,
   Empty,
@@ -32,6 +31,7 @@ import {
 } from '@/layout/sider/components/ProjectSpaceList/operation';
 import RequirementSplitModal from '@/layout/sider/components/ProjectSpaceList/RequirementSplitModal';
 import type { SplitTaskDraft } from '@/layout/sider/components/ProjectSpaceList/RequirementSplitModal/types';
+import detailStyles from '@/layout/sider/components/ProjectSpaceList/index.module.less';
 import type { ProjectRequirement, ProjectSpace } from '../../types';
 import { getArrayData, getPageTotal } from '../../utils';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
@@ -57,6 +57,24 @@ const normalizeRequirementType = (item: Record<string, any>) => {
   return 'collect';
 };
 
+// 运营需求名称前使用单字标签快速区分类型，完整类型名称仍在下一行保留。
+const REQUIREMENT_TYPE_BADGES: Record<string, { label: string; className: string }> = {
+  collect: { label: '采', className: 'requirementTypeBadgeCollect' },
+  knowledge: { label: '整', className: 'requirementTypeBadgeKnowledge' },
+  content: { label: '创', className: 'requirementTypeBadgeContent' },
+  analyze: { label: '析', className: 'requirementTypeBadgeAnalyze' },
+};
+
+const DEVELOP_REQUIREMENT_TYPE_BADGES: Record<string, { label: string; className: string }> = {
+  dingtalk: { label: '钉', className: 'requirementTypeBadgeDingtalk' },
+  dingtalk_group: { label: '钉', className: 'requirementTypeBadgeDingtalk' },
+  dingtalk_group_message: { label: '钉', className: 'requirementTypeBadgeDingtalk' },
+  dingtalk_todo: { label: '钉', className: 'requirementTypeBadgeDingtalk' },
+  github_issue: { label: 'Git', className: 'requirementTypeBadgeGithub' },
+  github_issues: { label: 'Git', className: 'requirementTypeBadgeGithub' },
+  manual: { label: '手', className: 'requirementTypeBadgeManual' },
+};
+
 const getDevelopRequirementTypeLabel = (item: Record<string, any>, intl: ReturnType<typeof useIntl>) => {
   const sourceType = `${item.sourceType || item.operationType || ''}`.trim().toLowerCase();
   const messageIdMap: Record<string, string> = {
@@ -69,25 +87,6 @@ const getDevelopRequirementTypeLabel = (item: Record<string, any>, intl: ReturnT
     manual: 'projectSpace.detail.source.type.default',
   };
   return intl.formatMessage({ id: messageIdMap[sourceType] || 'projectSpace.detail.source.type.default' });
-};
-
-const getRequirementTypeColor = (item: Record<string, any>, operationType: string) => {
-  const sourceType = `${item.sourceType || item.operationType || ''}`.trim().toLowerCase();
-  const colorMap: Record<string, string> = {
-    collect: 'blue',
-    knowledge: 'purple',
-    content: 'cyan',
-    analyze: 'orange',
-    dingtalk: 'blue',
-    dingtalk_group: 'geekblue',
-    dingtalk_group_message: 'geekblue',
-    dingtalk_todo: 'gold',
-    github_issue: 'green',
-    github_issues: 'green',
-    manual: 'default',
-  };
-  const typeKey = item.operationType || item.taskType ? operationType : sourceType;
-  return colorMap[typeKey] || 'default';
 };
 
 const getRequirementStatusLabel = (status: unknown) => {
@@ -153,7 +152,6 @@ const sortRequirements = (items: any[]) =>
 const ProjectRequirements: React.FC<Props> = ({
   project,
   keyword = '',
-  onToolbarChange,
   onRefreshToolbarChange,
   onStarted,
 }) => {
@@ -267,7 +265,7 @@ const ProjectRequirements: React.FC<Props> = ({
     item.canDelete === true ||
     (currentUserId !== undefined && item.createBy !== undefined && `${currentUserId}` === `${item.createBy}`) ||
     // 兼容历史接口未返回需求创建人的数据，后端也会按相同规则回退到项目创建人。
-    (item.createBy == null &&
+    ((item.createBy === null || item.createBy === undefined) &&
       currentUserId !== undefined &&
       project.createBy !== undefined &&
       `${currentUserId}` === `${project.createBy}`);
@@ -496,8 +494,18 @@ const ProjectRequirements: React.FC<Props> = ({
             {requirements.map((requirement: any, index) => {
               const item = requirement as Partial<ProjectRequirement> & Record<string, any>;
               const operationType = normalizeRequirementType(item);
+              const sourceType = `${item.sourceType || item.operationType || ''}`.trim().toLowerCase();
+              const typeBadge =
+                project.projectType === 'operation'
+                  ? REQUIREMENT_TYPE_BADGES[operationType]
+                  : DEVELOP_REQUIREMENT_TYPE_BADGES[sourceType];
               const dueTime = item.dueTime || item.expectedTime || item.deadline;
-              const formattedDueTime = dueTime && dayjs(dueTime).isValid() ? dayjs(dueTime).format('YYYY-MM-DD') : '-';
+              const formattedDueTime =
+                dueTime && dayjs(dueTime).isValid() ? dayjs(dueTime).format('YYYY-MM-DD HH:mm') : '-';
+              const formattedCreateTime =
+                item.createTime && dayjs(item.createTime).isValid()
+                  ? dayjs(item.createTime).format('YYYY-MM-DD HH:mm')
+                  : '-';
               const assignee =
                 item.assigneeName ||
                 item.assigneeUserName ||
@@ -516,6 +524,11 @@ const ProjectRequirements: React.FC<Props> = ({
                   }}
                 >
                   <div className={styles.dataCardHeader}>
+                    {typeBadge && (
+                      <span className={`${styles.requirementTypeBadge} ${styles[typeBadge.className]}`}>
+                        {typeBadge.label}
+                      </span>
+                    )}
                     <Typography.Text
                       strong
                       ellipsis={{ tooltip: item.title || item.requirementName || item.sourceName }}
@@ -578,18 +591,7 @@ const ProjectRequirements: React.FC<Props> = ({
                       )}
                     </div>
                   </div>
-                  <div className={styles.requirementTypeRow}>
-                    {project.projectType === 'operation' ? (
-                      <Tag color={getRequirementTypeColor(item, operationType)}>
-                        {intl.formatMessage({ id: `projectSpace.operation.task.type.${operationType}` })}
-                      </Tag>
-                    ) : item.sourceType || item.operationType ? (
-                      <Tag color={getRequirementTypeColor(item, operationType)}>
-                        {getDevelopRequirementTypeLabel(item, intl)}
-                      </Tag>
-                    ) : null}
-                  </div>
-                  <Typography.Paragraph className={styles.dataCardDescription} ellipsis={{ rows: 3 }}>
+                  <Typography.Paragraph className={styles.dataCardDescription} ellipsis={{ rows: 2 }}>
                     {item.sourceDescription || item.description || item.originalContent || '-'}
                   </Typography.Paragraph>
                   {project.projectType === 'operation' ? (
@@ -609,35 +611,37 @@ const ProjectRequirements: React.FC<Props> = ({
                       </Typography.Text>
                     </div>
                   ) : (
-                    <Typography.Text type="secondary">{item.status || item.action || '-'}</Typography.Text>
+                    <div className={styles.developRequirementMeta}>
+                      <Typography.Text type="secondary">{formattedCreateTime}</Typography.Text>
+                    </div>
                   )}
                   {project.projectType === 'operation' &&
                     (isPendingRequirement(item) || isRequirementCreator(item)) && (
-                      <Dropdown
-                        trigger={['click']}
-                        menu={{
-                          items: [
-                            ...(isPendingRequirement(item) ? [{ key: 'edit', label: '编辑' }] : []),
-                            ...(isRequirementCreator(item) ? [{ key: 'delete', label: '删除', danger: true }] : []),
-                          ],
-                          onClick: ({ key, domEvent }) => {
-                            domEvent.stopPropagation();
-                            if (key === 'edit') setEditingRequirement(item);
-                            if (key === 'delete') handleDeleteRequirement(item);
-                          },
-                        }}
-                      >
-                        {/* 放在状态容器外，绝对定位才能以整张需求卡片为基准落到右下角。 */}
-                        <Button
-                          type="text"
-                          size="small"
-                          className={styles.cardMoreAction}
-                          icon={<MoreOutlined />}
-                          aria-label="需求操作"
-                          onClick={(event) => event.stopPropagation()}
-                        />
-                      </Dropdown>
-                    )}
+                    <Dropdown
+                      trigger={['click']}
+                      menu={{
+                        items: [
+                          ...(isPendingRequirement(item) ? [{ key: 'edit', label: '编辑' }] : []),
+                          ...(isRequirementCreator(item) ? [{ key: 'delete', label: '删除', danger: true }] : []),
+                        ],
+                        onClick: ({ key, domEvent }) => {
+                          domEvent.stopPropagation();
+                          if (key === 'edit') setEditingRequirement(item);
+                          if (key === 'delete') handleDeleteRequirement(item);
+                        },
+                      }}
+                    >
+                      {/* 放在状态容器外，绝对定位才能以整张需求卡片为基准落到右下角。 */}
+                      <Button
+                        type="text"
+                        size="small"
+                        className={styles.cardMoreAction}
+                        icon={<MoreOutlined />}
+                        aria-label="需求操作"
+                        onClick={(event) => event.stopPropagation()}
+                      />
+                    </Dropdown>
+                  )}
                 </article>
               );
             })}
@@ -660,89 +664,130 @@ const ProjectRequirements: React.FC<Props> = ({
       </Spin>
       <Drawer
         open={!!requirementDetail}
-        title={
-          requirementDetail?.title || requirementDetail?.requirementName || requirementDetail?.sourceName || '需求详情'
-        }
-        width={560}
+        title="需求详情"
+        className={detailStyles.requirementDetailDrawer}
+        width={640}
         onClose={() => setRequirementDetail(null)}
         destroyOnClose
       >
         {requirementDetail && (
-          <div className={styles.requirementDetailContent}>
-            <Descriptions bordered size="small" column={1}>
-              <Descriptions.Item label="需求编号">
-                {requirementDetail.itemId || requirementDetail.requirementId || requirementDetail.sourceId || '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label="需求类型">
-                {project.projectType === 'develop'
-                  ? getDevelopRequirementTypeLabel(requirementDetail, intl)
-                  : intl.formatMessage({
-                      id: `projectSpace.operation.task.type.${normalizeRequirementType(requirementDetail)}`,
-                    })}
-              </Descriptions.Item>
-              <Descriptions.Item label="状态">
-                <Tag color={getRequirementStatusColor(requirementDetail.status)}>
-                  {getRequirementStatusLabel(requirementDetail.status)}
-                </Tag>
-              </Descriptions.Item>
-              {(requirementDetail.assignee || requirementDetail.assigneeName) && (
-                <Descriptions.Item label="指定成员">
-                  {requirementDetail.assigneeName || requirementDetail.assignee}
-                </Descriptions.Item>
-              )}
-              {requirementDetail.dueTime && (
-                <Descriptions.Item label="预期时间">
-                  {dayjs(requirementDetail.dueTime).isValid()
-                    ? dayjs(requirementDetail.dueTime).format('YYYY-MM-DD HH:mm')
-                    : requirementDetail.dueTime}
-                </Descriptions.Item>
-              )}
-              {requirementDetail.createTime && (
-                <Descriptions.Item label="创建时间">
-                  {dayjs(requirementDetail.createTime).format('YYYY-MM-DD HH:mm')}
-                </Descriptions.Item>
-              )}
-              {(requirementDetail.createByName || requirementDetail.createBy) && (
-                <Descriptions.Item label="创建人">
-                  {requirementDetail.createByName || requirementDetail.createBy}
-                </Descriptions.Item>
-              )}
-              {requirementDetail.sourceName && (
-                <Descriptions.Item label="需求来源">{requirementDetail.sourceName}</Descriptions.Item>
-              )}
-              {requirementDetail.branch && (
-                <Descriptions.Item label="分支">{requirementDetail.branch}</Descriptions.Item>
-              )}
-              {requirementDetail.priority && (
-                <Descriptions.Item label="优先级">{requirementDetail.priority}</Descriptions.Item>
-              )}
-              {requirementDetail.score !== undefined && requirementDetail.score !== null && (
-                <Descriptions.Item label="评分">{requirementDetail.score}</Descriptions.Item>
-              )}
-            </Descriptions>
-            <Typography.Title level={5}>需求描述</Typography.Title>
-            <Typography.Paragraph className={styles.requirementDetailDescription}>
-              {requirementDetail.sourceDescription ||
-                requirementDetail.description ||
-                requirementDetail.originalContent ||
-                requirementDetail.content ||
-                '-'}
-            </Typography.Paragraph>
+          <div className={detailStyles.requirementDetailDrawerContent}>
+            {/* 与任务详情保持一致：抽屉标题只表达页面类型，业务名称和状态放在内容顶部。 */}
+            <div className={detailStyles.requirementDetailTitleRow}>
+              <div className={detailStyles.requirementDetailTitle}>
+                {requirementDetail.title ||
+                  requirementDetail.requirementName ||
+                  requirementDetail.sourceName ||
+                  '未命名需求'}
+              </div>
+              <Tag color={getRequirementStatusColor(requirementDetail.status)}>
+                {getRequirementStatusLabel(requirementDetail.status)}
+              </Tag>
+            </div>
+
+            <section className={detailStyles.requirementDetailSection}>
+              <h3>基本信息</h3>
+              <div className={detailStyles.requirementDetailInfoGrid}>
+                <div className={detailStyles.requirementDetailInfoItem}>
+                  <label>需求编号</label>
+                  <span>
+                    {requirementDetail.itemId || requirementDetail.requirementId || requirementDetail.sourceId || '-'}
+                  </span>
+                </div>
+                <div className={detailStyles.requirementDetailInfoItem}>
+                  <label>需求类型</label>
+                  <span>
+                    {project.projectType === 'develop'
+                      ? getDevelopRequirementTypeLabel(requirementDetail, intl)
+                      : intl.formatMessage({
+                        id: `projectSpace.operation.task.type.${normalizeRequirementType(requirementDetail)}`,
+                      })}
+                  </span>
+                </div>
+                {(requirementDetail.assignee || requirementDetail.assigneeName) && (
+                  <div className={detailStyles.requirementDetailInfoItem}>
+                    <label>指定成员</label>
+                    <span>{requirementDetail.assigneeName || requirementDetail.assignee}</span>
+                  </div>
+                )}
+                {requirementDetail.dueTime && (
+                  <div className={detailStyles.requirementDetailInfoItem}>
+                    <label>预期时间</label>
+                    <span>
+                      {dayjs(requirementDetail.dueTime).isValid()
+                        ? dayjs(requirementDetail.dueTime).format('YYYY-MM-DD HH:mm')
+                        : requirementDetail.dueTime}
+                    </span>
+                  </div>
+                )}
+                {requirementDetail.createTime && (
+                  <div className={detailStyles.requirementDetailInfoItem}>
+                    <label>创建时间</label>
+                    <span>
+                      {dayjs(requirementDetail.createTime).isValid()
+                        ? dayjs(requirementDetail.createTime).format('YYYY-MM-DD HH:mm')
+                        : requirementDetail.createTime}
+                    </span>
+                  </div>
+                )}
+                {(requirementDetail.createByName || requirementDetail.createBy) && (
+                  <div className={detailStyles.requirementDetailInfoItem}>
+                    <label>创建人</label>
+                    <span>{requirementDetail.createByName || requirementDetail.createBy}</span>
+                  </div>
+                )}
+                {requirementDetail.sourceName && (
+                  <div className={detailStyles.requirementDetailInfoItem}>
+                    <label>需求来源</label>
+                    <span>{requirementDetail.sourceName}</span>
+                  </div>
+                )}
+                {requirementDetail.branch && (
+                  <div className={detailStyles.requirementDetailInfoItem}>
+                    <label>分支</label>
+                    <span>{requirementDetail.branch}</span>
+                  </div>
+                )}
+                {requirementDetail.priority && (
+                  <div className={detailStyles.requirementDetailInfoItem}>
+                    <label>优先级</label>
+                    <span>{requirementDetail.priority}</span>
+                  </div>
+                )}
+                {requirementDetail.score !== undefined && requirementDetail.score !== null && (
+                  <div className={detailStyles.requirementDetailInfoItem}>
+                    <label>评分</label>
+                    <span>{requirementDetail.score}</span>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <section className={detailStyles.requirementDetailSection}>
+              <h3>需求描述</h3>
+              <div className={detailStyles.requirementDetailText}>
+                {requirementDetail.sourceDescription ||
+                  requirementDetail.description ||
+                  requirementDetail.originalContent ||
+                  requirementDetail.content ||
+                  '-'}
+              </div>
+            </section>
             {requirementDetail.productContent && (
-              <>
-                <Typography.Title level={5}>产品补充</Typography.Title>
-                <Typography.Paragraph className={styles.requirementDetailDescription}>
+              <section className={detailStyles.requirementDetailSection}>
+                <h3>产品补充</h3>
+                <div className={detailStyles.requirementDetailText}>
                   {requirementDetail.productContent}
-                </Typography.Paragraph>
-              </>
+                </div>
+              </section>
             )}
             {requirementDetail.config && Object.keys(requirementDetail.config).length > 0 && (
-              <>
-                <Typography.Title level={5}>执行配置</Typography.Title>
-                <pre className={styles.requirementDetailConfig}>
+              <section className={detailStyles.requirementDetailSection}>
+                <h3>执行配置</h3>
+                <div className={detailStyles.requirementDetailText}>
                   {JSON.stringify(requirementDetail.config, null, 2)}
-                </pre>
-              </>
+                </div>
+              </section>
             )}
           </div>
         )}
@@ -789,16 +834,16 @@ const ProjectRequirements: React.FC<Props> = ({
         initialValues={
           editingRequirement
             ? {
-                taskName:
+              taskName:
                   editingRequirement.title ||
                   editingRequirement.requirementName ||
                   editingRequirement.sourceName ||
                   '',
-                description: editingRequirement.sourceDescription || editingRequirement.description || '',
-                taskType: normalizeRequirementType(editingRequirement),
-                assigneeId: editingRequirement.assigneeId,
-                dueTime: editingRequirement.dueTime ? dayjs(editingRequirement.dueTime) : undefined,
-              }
+              description: editingRequirement.sourceDescription || editingRequirement.description || '',
+              taskType: normalizeRequirementType(editingRequirement),
+              assigneeId: editingRequirement.assigneeId,
+              dueTime: editingRequirement.dueTime ? dayjs(editingRequirement.dueTime) : undefined,
+            }
             : undefined
         }
         options={{ assignees: splitAssignees }}

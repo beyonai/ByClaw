@@ -1,4 +1,4 @@
-import { Avatar, Button, Dropdown, Empty, Input, List, Modal, Spin, Tag, Typography, message } from 'antd';
+import { Button, Dropdown, Empty, Input, List, Modal, Spin, Tag, Typography, message } from 'antd';
 import {
   DeleteOutlined,
   DisconnectOutlined,
@@ -7,15 +7,16 @@ import {
   ReloadOutlined,
   RobotOutlined,
   SearchOutlined,
-  UserOutlined,
 } from '@ant-design/icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
+import dayjs from 'dayjs';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import { dataItemTypeMap } from '@/pages/manager/components/PersonnelModel';
 import { bindMemberAgent, listProjectMembers, saveProjectMembers, unbindMemberAgent } from '@/service/devloop';
 import { POST } from '@/service/common/request';
 import { getAgentChatAvatar } from '@/utils/agent';
+import { getDisplayUserNameInChat } from '@/utils/chat';
 import smallDetailStyles from '@/layout/sider/components/ProjectSpaceList/index.module.less';
 import type { ProjectMember, ProjectSpace } from '../../types';
 import { getArrayData } from '../../utils';
@@ -31,6 +32,9 @@ interface Props {
 
 const PAGE_SIZE = 20;
 const AGENT_PAGE_SIZE = 10;
+
+const getMemberAvatarText = (member: ProjectMember) =>
+  getDisplayUserNameInChat(`${member.userName || member.userCode || member.userId || ''}`.trim()) || '?';
 
 const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChange, onRefreshToolbarChange }) => {
   const intl = useIntl();
@@ -446,11 +450,17 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
             <div className={styles.dataCardGrid}>
               {visibleMembers.map((member) => {
                 const isOwner = `${member.role || ''}`.toLowerCase() === 'owner';
-                const canOperate = isProjectCreator || isCurrentUserMember(member);
+                const isCurrentUser = isCurrentUserMember(member);
+                const canOperate = isProjectCreator || isCurrentUser;
+                const memberCreateTime =
+                  member.createTime && dayjs(member.createTime).isValid()
+                    ? dayjs(member.createTime).format('YYYY-MM-DD HH:mm')
+                    : member.createTime || '-';
                 return (
                   <article key={`${member.memberId || member.userId}`} className={styles.dataCard} tabIndex={canOperate ? 0 : -1}>
                     <div className={styles.memberCardIdentity}>
-                      <Avatar src={member.avatar} icon={<UserOutlined />} />
+                      {/* 成员头像复用系统用户头像规则，使用方形主色底并展示姓名后两个字。 */}
+                      <div className={styles.memberUserAvatar}>{getMemberAvatarText(member)}</div>
                       <div className={styles.memberCardName}>
                         <Typography.Text strong ellipsis>
                           {member.userName || member.userCode || `${member.userId}`}
@@ -460,11 +470,22 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
                         </Typography.Text>
                       </div>
                     </div>
-                    <Tag className={styles.memberRoleTag} color={isOwner ? 'gold' : 'default'}>
+                    <Tag className={styles.memberRoleTag} color={isOwner ? 'gold' : isCurrentUser ? 'blue' : 'default'}>
                       {isOwner
                         ? intl.formatMessage({ id: 'projectSpace.members.owner' })
-                        : intl.formatMessage({ id: 'projectSpace.members.member' })}
+                        : isCurrentUser
+                          ? intl.formatMessage({ id: 'projectSpace.members.currentUser' })
+                          : intl.formatMessage({ id: 'projectSpace.members.member' })}
                     </Tag>
+                    <div className={styles.memberCardMeta}>
+                      <Typography.Text className={styles.memberCardAgent} type="secondary" ellipsis>
+                        <span>{member.agentName || '未绑定数字员工'}</span>
+                      </Typography.Text>
+                      {/* 成员创建时间只展示到分钟，悬停操作出现时主动让出右下角空间。 */}
+                      <Typography.Text className={styles.memberCardCreateTime} type="secondary">
+                        {memberCreateTime}
+                      </Typography.Text>
+                    </div>
                     {canOperate && (
                       <Dropdown
                         trigger={['hover']}
@@ -478,13 +499,13 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
                             },
                             ...(member.agentId
                               ? [
-                                  {
-                                    key: 'unbind-agent',
-                                    danger: true,
-                                    icon: <DisconnectOutlined />,
-                                    label: '解绑数字员工',
-                                  },
-                                ]
+                                {
+                                  key: 'unbind-agent',
+                                  danger: true,
+                                  icon: <DisconnectOutlined />,
+                                  label: '解绑数字员工',
+                                },
+                              ]
                               : []),
                             ...(isProjectCreator && !isOwner
                               ? [{ key: 'remove-member', danger: true, icon: <DeleteOutlined />, label: '移除成员' }]

@@ -42,14 +42,7 @@ const getProjectMutationErrorMessage = (error: unknown, fallback: string) => {
 const normalizeMemberId = (member: ProjectShareMember | any) =>
   member?.userId ?? String(member?.id || '').replace(/^user_/, '');
 
-const getProjectTypeClassName = (project: ProjectSpace) => {
-  if (project.projectType === 'develop') return styles.projectDevelop;
-  if (project.projectType === 'operation') return styles.projectOperation;
-  if (project.projectType === 'default') return styles.projectDefault;
-  return project.sharedFlag ? styles.projectShared : styles.projectNormal;
-};
-
-// 项目头像展示项目名称前两个字符，类型仍用于区分头像底色和右侧标签。
+// 项目头像统一展示名称前两个字，项目类型由右侧标签表达，不再使用类型图标区分。
 const getProjectAvatarText = (project: ProjectSpace) =>
   Array.from(`${project.projectName || ''}`.trim()).slice(0, 2).join('') || '项目';
 
@@ -241,27 +234,24 @@ const ProjectCenterList: React.FC = () => {
                   className={classNames(styles.projectItem, isActive && styles.projectItemActive)}
                   onClick={() => selectProject(project)}
                 >
-                  <span className={classNames(styles.projectIcon, getProjectTypeClassName(project))}>
+                  <span
+                    className={classNames(styles.projectIcon, styles[`projectTag${projectScene.classSuffix}`])}
+                  >
                     {getProjectAvatarText(project)}
                   </span>
                   <span className={styles.projectMain}>
                     <span className={styles.projectTitleRow}>
                       <strong>{project.projectName}</strong>
-                      <span className={styles.projectTagGroup}>
-                        <Tag
-                          bordered={false}
-                          className={classNames(
-                            styles.projectTag,
-                            styles[`projectTag${projectScene.classSuffix}`]
-                          )}
-                        >
-                          {intl.formatMessage({ id: projectScene.messageId })}
-                        </Tag>
-                      </span>
                     </span>
-                    <small>
-                      {project.description || intl.formatMessage({ id: 'projectSpace.projectCard.emptyDescription' })}
-                    </small>
+                    <small>{project.description || '-'}</small>
+                  </span>
+                  <span className={styles.projectTagGroup}>
+                    <Tag
+                      bordered={false}
+                      className={classNames(styles.projectTag, styles[`projectTag${projectScene.classSuffix}`])}
+                    >
+                      {intl.formatMessage({ id: projectScene.messageId })}
+                    </Tag>
                   </span>
                 </button>
               );

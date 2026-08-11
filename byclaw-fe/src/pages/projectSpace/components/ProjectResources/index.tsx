@@ -1,4 +1,4 @@
-import { Button, Dropdown, Empty, Modal, Select, Spin, Typography, message } from 'antd';
+import { Button, Drawer, Dropdown, Empty, Modal, Select, Spin, Typography, message } from 'antd';
 import {
   ApartmentOutlined,
   DatabaseOutlined,
@@ -12,8 +12,11 @@ import {
   RightOutlined,
   RobotOutlined,
 } from '@ant-design/icons';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useIntl } from '@umijs/max';
+import { getAgentChatAvatar } from '@/utils/agent';
+import AntdIcon from '@/components/AntdIcon';
+import { getFileIconType } from '@/constants/icon';
 import {
   listProjectRepos,
   listProjectResources,
@@ -27,6 +30,7 @@ import {
 import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import { listOntologyBases, pageOntologyResources } from '@/service/ontology';
 import { ResourceTypeMap } from '@/constants/resource';
+import FilePreviewPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FilePreviewPanel';
 import { useDigitalEmployeeOptions } from '../../hooks/useDigitalEmployeeOptions';
 import type { ProjectBoundResource, ProjectSpace } from '../../types';
 import styles from '../../index.module.less';
@@ -77,11 +81,17 @@ const ProjectResources: React.FC<Props> = ({
   const [resourceOptionsLoading, setResourceOptionsLoading] = useState(false);
   const [resourceSaving, setResourceSaving] = useState(false);
   const [resourceModalOpen, setResourceModalOpen] = useState(false);
+  const [previewFile, setPreviewFile] = useState<DevloopProjectSpaceFile | null>(null);
   const [knowledgeOptions, setKnowledgeOptions] = useState<ResourceOption[]>([]);
   const [ontologyOptions, setOntologyOptions] = useState<ResourceOption[]>([]);
   const [selectedResources, setSelectedResources] = useState<ResourceSelection>(EMPTY_SELECTION);
   const { options: agentOptions, loading: agentOptionsLoading } = useDigitalEmployeeOptions(
     project.projectType === 'operation'
+  );
+  // 项目绑定表只保存资源 ID 和名称，数字员工头像需按 ID 从员工模块数据中补齐。
+  const employeeAvatarMap = useMemo(
+    () => new Map(agentOptions.map((option) => [`${option.value}`, option.chatAvatar])),
+    [agentOptions]
   );
 
   const isDevelopProject = project.projectType === 'develop';
@@ -351,24 +361,32 @@ const ProjectResources: React.FC<Props> = ({
     return (
       <Spin spinning={loadingBoundResources} className={styles.resourceCategoryBody}>
         {items.length
-          ? items.map((resource) => (
-            <div
-              key={`${resourceType}:${resource.resourceId}`}
-              className={`${styles.resourceSimpleItem} ${styles.resourceBoundItem}`}
-            >
-              <span className={`${styles.resourceSimpleIcon} ${styles.resourceBoundIcon} ${iconClassName}`}>
-                {icon}
-              </span>
-              <div className={styles.resourceSimpleMain}>
-                <Typography.Text strong ellipsis={{ tooltip: resource.resourceName }}>
-                  {resource.resourceName || resource.resourceId}
-                </Typography.Text>
-                <Typography.Text type="secondary" ellipsis>
-                  {fallback}
-                </Typography.Text>
+          ? items.map((resource) => {
+            const employeeAvatar =
+              resourceType === 'digital_employee' ? employeeAvatarMap.get(`${resource.resourceId}`) : undefined;
+            const avatarClassName = employeeAvatar ? styles.resourceEmployeeAvatar : '';
+
+            return (
+              <div
+                key={`${resourceType}:${resource.resourceId}`}
+                className={`${styles.resourceSimpleItem} ${styles.resourceBoundItem}`}
+              >
+                <span
+                  className={`${styles.resourceSimpleIcon} ${styles.resourceBoundIcon} ${iconClassName} ${avatarClassName}`}
+                >
+                  {employeeAvatar ? getAgentChatAvatar(employeeAvatar) : icon}
+                </span>
+                <div className={styles.resourceSimpleMain}>
+                  <Typography.Text strong ellipsis={{ tooltip: resource.resourceName }}>
+                    {resource.resourceName || resource.resourceId}
+                  </Typography.Text>
+                  <Typography.Text type="secondary" ellipsis>
+                    {fallback}
+                  </Typography.Text>
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
           : !loadingBoundResources && empty}
       </Spin>
     );
@@ -393,8 +411,20 @@ const ProjectResources: React.FC<Props> = ({
           <Spin spinning={loadingFiles} className={styles.resourceCategoryBody}>
             {files.length
               ? files.map((file) => (
-                <div key={file.fileId} className={styles.resourceSimpleItem}>
-                  <span className={styles.resourceSimpleIcon}>DOC</span>
+                <div
+                  key={file.fileId}
+                  className={styles.resourceSimpleItem}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setPreviewFile(file)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') setPreviewFile(file);
+                  }}
+                >
+                  <AntdIcon
+                    type={`icon-${getFileIconType(file.fileName)}`}
+                    className={styles.resourceFileIcon}
+                  />
                   <div className={styles.resourceSimpleMain}>
                     <Typography.Text strong ellipsis={{ tooltip: file.fileName }}>
                       {file.fileName}
@@ -554,6 +584,27 @@ const ProjectResources: React.FC<Props> = ({
           </Spin>
         </Modal>
       )}
+
+      <Drawer
+        title={previewFile?.fileName || '文件预览'}
+        open={!!previewFile}
+        placement="right"
+        width="50vw"
+        mask={false}
+        destroyOnClose
+        onClose={() => setPreviewFile(null)}
+        styles={{ body: { padding: 0, overflow: 'hidden' } }}
+      >
+        {previewFile && (
+          <FilePreviewPanel
+            fileName={previewFile.fileName}
+            resourceId={project.resourceId ? `${project.resourceId}` : undefined}
+            path={previewFile.fileUrl || `/by/.project/${previewFile.fileName}`}
+            fileUrl={previewFile.fileUrl || undefined}
+            source="fileBrowser"
+          />
+        )}
+      </Drawer>
     </>
   );
 };

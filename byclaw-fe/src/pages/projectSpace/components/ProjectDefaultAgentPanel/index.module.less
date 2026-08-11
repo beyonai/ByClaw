@@ -35,6 +35,19 @@
   gap: 16px;
 }
 
+// 角色卡复用公共 ResourceCard，仅在项目大详情内覆盖为统一的无边框卡片视觉。
+.roleGrid .roleCard {
+  border: 0;
+  background: #f7f9fc;
+  box-shadow: none;
+  transition: background-color 0.2s ease;
+
+  &:hover {
+    background: #edf2f9;
+    box-shadow: none;
+  }
+}
+
 .roleSelect {
   width: 100%;
 }

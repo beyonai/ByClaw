@@ -186,6 +186,7 @@ const ProjectDefaultAgentPanel: React.FC<Props> = ({ projectId, active, onChatWi
           {DEFAULT_AGENT_ROLES.map((role) => (
             <ResourceCard
               key={role}
+              className={styles.roleCard}
               resource={roleCardResource(t(`projectSpace.projectForm.defaultAgent.role.${role}`), agentNameOf(role))}
               description={t(`projectSpace.defaultAgent.roleDesc.${role}`)}
               avatarNode={<div className={styles.roleAvatar}>{getAgentChatAvatar(agentAvatarOf(role))}</div>}

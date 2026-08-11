@@ -7,7 +7,7 @@
   :global(.@{antPrefix}-modal-body) {
     max-height: min(72vh, 720px);
     // 缩小模板列表与弹窗边缘的留白，给模板卡片保留更多展示空间。
-    padding: 8px 12px 12px;
+    padding: 6px 4px 10px;
     overflow-y: auto;
   }
 }
@@ -19,6 +19,11 @@
 
   > span {
     min-width: 0;
+  }
+
+  // 右侧箭头仅作为进入详情的弱提示，降低颜色避免抢占模板名称的视觉层级。
+  > :global(.@{antPrefix}icon) {
+    color: #b8c1ce;
   }
 
   strong,
@@ -42,39 +47,42 @@
 .templateGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-  margin-top: 4px;
+  gap: 15px;
+  margin-top: 2px;
 }
 
 .templateCard {
   min-width: 0;
-  min-height: 84px;
+  min-height: 78px;
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) 18px;
+  grid-template-columns: 42px minmax(0, 1fr) 18px;
   align-items: center;
   gap: 8px;
   padding: 10px;
-  border: 1px solid #e0e6ee;
+  border: 0;
   border-radius: 8px;
   color: inherit;
   text-align: left;
-  background: #fff;
+  // 与项目大详情数据卡片保持一致：默认浅底区分页面，悬停时仅加深背景色。
+  background: #f7f9fc;
   cursor: pointer;
+  transition: background-color 0.2s ease;
 
-  &:hover {
-    border-color: #9bbcf0;
-    background: #f8faff;
+  &:hover,
+  &:focus-visible {
+    background: #edf2f9;
+    outline: none;
   }
 
   > i {
-    width: 48px;
-    height: 48px;
+    width: 42px;
+    height: 42px;
     display: grid;
     place-items: center;
     border-radius: 8px;
     color: #2868c9;
     background: #eaf2ff;
-    font-size: 16px;
+    font-size: 14px;
     font-style: normal;
     font-weight: 700;
   }

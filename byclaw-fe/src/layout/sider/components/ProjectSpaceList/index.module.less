@@ -3498,6 +3498,116 @@
   word-break: break-word;
 }
 
+// 运营任务详情按原型使用“摘要卡 + 纵向配置字段”，不展示研发任务的仓库和阶段信息。
+.operationTaskDetailContent {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.operationTaskSummary {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #dfe7ea;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #f7fbfa;
+}
+
+.operationTaskStatusTag {
+  flex-shrink: 0;
+  margin-inline-end: 0;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.operationTaskSummaryIcon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #246bfe;
+  background: #eaf1ff;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.operationTaskSummaryMain {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+
+  small {
+    color: #8a96a8;
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  strong {
+    overflow: hidden;
+    color: #344056;
+    font-size: 16px;
+    line-height: 24px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  p {
+    margin: 2px 0 0;
+    overflow: hidden;
+    color: #75839a;
+    font-size: 13px;
+    line-height: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.operationTaskConfiguration {
+  h3 {
+    margin: 0 0 14px;
+    color: #1f2633;
+    font-size: 16px;
+    line-height: 24px;
+  }
+
+  dl {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  dl > div {
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr);
+    align-items: start;
+    gap: 14px;
+  }
+
+  dt {
+    color: #8a96a8;
+    font-size: 13px;
+    line-height: 22px;
+  }
+
+  dd {
+    min-width: 0;
+    margin: 0;
+    color: #344056;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 22px;
+    word-break: break-word;
+  }
+}
+
 /* 任务详情 - Agent 执行概览 */
 .taskHero {
   padding: 16px;

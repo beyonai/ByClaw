@@ -85,8 +85,6 @@ function resolveTargetAgentType(
       return "BYCLAW_DATA";
     case "006":
       return "BYCLAW_QA";
-    case "011":
-      return "BYCLAW_CODE";
     default:
       return undefined;
   }
