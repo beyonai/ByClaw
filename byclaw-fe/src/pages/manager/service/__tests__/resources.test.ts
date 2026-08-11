@@ -13,6 +13,8 @@ import {
   pageSkillGroupMemberCandidates,
   getSkillGroupDetail,
   installSkillGroup,
+  preflightInstallSkillGroup,
+  executeInstallSkillGroup,
   createSkillGroup,
   addSkillGroupMembers,
   updateSkillGroup,
@@ -178,7 +180,7 @@ describe('manager resources service', () => {
   });
 
   it('should call getSkillGroupDetail with the skill group detail endpoint', () => {
-    const payload = { groupId: '10042909' };
+    const payload = { groupId: '10042909', digitalEmployeeId: '10042910' };
     getSkillGroupDetail(payload);
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/skillGroup/detail', payload);
   });
@@ -193,6 +195,16 @@ describe('manager resources service', () => {
     const payload = { groupId: '10042909', digitalEmployeeId: '10042910' };
     installSkillGroup(payload);
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/skillGroup/install', payload);
+  });
+
+  it('should call the permission-aware skill group install endpoints', () => {
+    const payload = { groupId: '10042909', digitalEmployeeId: '10042910' };
+
+    preflightInstallSkillGroup(payload);
+    executeInstallSkillGroup(payload);
+
+    expect(mockPOST).toHaveBeenNthCalledWith(1, '/byaiService/skillGroup/install/preflight', payload);
+    expect(mockPOST).toHaveBeenNthCalledWith(2, '/byaiService/skillGroup/install/execute', payload);
   });
 
   it('should call createSkillGroup with the skill group create endpoint', () => {
