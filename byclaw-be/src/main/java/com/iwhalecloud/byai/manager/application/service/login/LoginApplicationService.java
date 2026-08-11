@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Executor;
 
 import org.apache.commons.collections.MapUtils;
@@ -62,11 +63,12 @@ import jakarta.servlet.http.HttpSession;
 public class LoginApplicationService {
 
     private static final Logger logger = LoggerFactory.getLogger(LoginApplicationService.class);
+    private static final String TERMINOLOGY_CONFIG_CODE = "DIGITAL_EMPLOYEE_TERMINOLOGY";
 
     /**
      * 默认开放查询的key值,多个用逗号隔开
      */
-    @Value("${open.dc.query.keys:ENV,beyondLogo,beyondTitle,beyondFavicon,beyondAssistant}")
+    @Value("${open.dc.query.keys:ENV,beyondLogo,beyondTitle,beyondFavicon,beyondAssistant,DIGITAL_EMPLOYEE_TERMINOLOGY}")
     private String openKeys;
 
     @Autowired
@@ -423,7 +425,7 @@ public class LoginApplicationService {
         }
 
         List<String> splitOpenKeys = Arrays.asList(openKeys.split(","));
-        if (splitOpenKeys.contains(paramCode)) {
+        if (splitOpenKeys.contains(paramCode) || TERMINOLOGY_CONFIG_CODE.equals(paramCode)) {
             return systemConfigService.getStringParamValueByCode(paramCode);
         }
         else {
@@ -442,7 +444,9 @@ public class LoginApplicationService {
         }
 
         List<String> splitOpenKeys = Arrays.asList(openKeys.split(","));
-        boolean isContains = new HashSet<>(splitOpenKeys).containsAll(paramCodes);
+        Set<String> allowedKeys = new HashSet<>(splitOpenKeys);
+        allowedKeys.add(TERMINOLOGY_CONFIG_CODE);
+        boolean isContains = allowedKeys.containsAll(paramCodes);
         if (isContains) {
             return systemConfigService.findParamValueMapByCodes(paramCodes);
         }

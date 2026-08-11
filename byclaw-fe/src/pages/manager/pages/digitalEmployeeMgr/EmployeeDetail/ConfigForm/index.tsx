@@ -56,7 +56,7 @@ import RobotModal from './RobotModal';
 import { normalizeCatalogTree } from '@/utils/catalog';
 import { DEFAULT_AGENT_TYPE_OPTIONS, DEFAULT_TEMPLATE_DATA } from '../../constants';
 import Ellipsis from '@/pages/manager/components/Ellipsis';
-import { DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES } from '@/pages/manager/constants/digitalResource';
+import { getDefaultDigitalEmployeeTemplates } from '@/pages/manager/constants/digitalResource';
 
 const { TextArea } = Input;
 
@@ -644,7 +644,7 @@ const ConfigForm = (props) => {
         const templatePrompts =
           Array.isArray(template?.prompts) && template.prompts.length > 0
             ? template.prompts
-            : DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES;
+            : getDefaultDigitalEmployeeTemplates();
         const promptList = mapTemplatePromptsToConfigList(templatePrompts, template?.key);
         const nextTemplateData =
           Array.isArray(promptList) && promptList.length > 0 ? promptList : DEFAULT_TEMPLATE_DATA;

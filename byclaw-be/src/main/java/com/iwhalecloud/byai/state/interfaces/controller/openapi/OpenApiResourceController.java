@@ -20,6 +20,7 @@ import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplication
 import com.iwhalecloud.byai.state.domain.resource.qo.OpenApiDigEmployeeQueryQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.OpenApiDigEmployeeSkillQo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceApplicationService;
+import com.iwhalecloud.byai.state.domain.sys.service.BusinessTerminologyService;
 import io.swagger.v3.oas.annotations.Parameter;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -63,6 +64,9 @@ public class OpenApiResourceController {
     @Autowired
     private FilesApplicationService filesApplicationService;
 
+    @Autowired
+    private BusinessTerminologyService terminologyService;
+
     @PostMapping("/v1/getResourceListByPage")
     @ManageLogAnnotation(name = "会话API调用", description = "分页查询资源列表")
     public ResponseUtil getResourceListByPage(@RequestBody ResourceOperQo resourceQo) {
@@ -83,7 +87,7 @@ public class OpenApiResourceController {
         }
         catch (Exception e) {
             log.error("查询数字员工列表异常", e);
-            return ResponseUtil.fail("查询数字员工列表失败：" + e.getMessage());
+            return ResponseUtil.fail(terminologyService.replaceDigitalEmployeeTerms("查询数字员工列表失败：" + e.getMessage()));
         }
     }
 
@@ -95,18 +99,18 @@ public class OpenApiResourceController {
     public ResponseUtil<DigitalEmployeeDetailsDTO> queryDigEmployeeDetail(@RequestBody OpenApiDigEmployeeSkillQo qo) {
         try {
             if (qo.getResourceId() == null) {
-                return ResponseUtil.fail("数字员工ID不能为空");
+                return ResponseUtil.fail(terminologyService.replaceDigitalEmployeeTerms("数字员工ID不能为空"));
             }
             DigitalEmployeeDetailsDTO detail = resourceApplicationService
                 .queryDigEmployeeDetailForOpenApi(qo.getResourceId());
             if (detail == null) {
-                return ResponseUtil.fail("未找到对应的数字员工");
+                return ResponseUtil.fail(terminologyService.replaceDigitalEmployeeTerms("未找到对应的数字员工"));
             }
             return ResponseUtil.successResponse(detail);
         }
         catch (Exception e) {
             log.error("查询数字员工详情异常, resourceId={}", qo.getResourceId(), e);
-            return ResponseUtil.fail("查询数字员工详情失败：" + e.getMessage());
+            return ResponseUtil.fail(terminologyService.replaceDigitalEmployeeTerms("查询数字员工详情失败：" + e.getMessage()));
         }
     }
 
@@ -119,7 +123,7 @@ public class OpenApiResourceController {
         @RequestBody OpenApiDigEmployeeSkillQo qo) {
         try {
             if (qo.getResourceId() == null) {
-                return ResponseUtil.fail("数字员工ID不能为空");
+                return ResponseUtil.fail(terminologyService.replaceDigitalEmployeeTerms("数字员工ID不能为空"));
             }
             List<SsResourceRelDetailDTO> skills = resourceApplicationService
                 .queryDigEmployeeSkillsForOpenApi(qo.getResourceId(), qo.getResourceBizType());
@@ -127,7 +131,7 @@ public class OpenApiResourceController {
         }
         catch (Exception e) {
             log.error("查询数字员工技能异常, resourceId={}", qo.getResourceId(), e);
-            return ResponseUtil.fail("查询数字员工技能失败：" + e.getMessage());
+            return ResponseUtil.fail(terminologyService.replaceDigitalEmployeeTerms("查询数字员工技能失败：" + e.getMessage()));
         }
     }
 
@@ -171,7 +175,7 @@ public class OpenApiResourceController {
         @Parameter(description = "会话ID，可选") @RequestParam(value = "sessionId", required = false) Long sessionId,
         @Parameter(description = "会话类型，可选") @RequestParam(value = "sessionType", required = false,
             defaultValue = SessionType.SUPER_AGENT) String sessionType,
-        @Parameter(description = "数字员工，可选") @RequestParam(value = "agentId", required = false) Long agentId) {
+        @Parameter(description = "AI资源ID，可选") @RequestParam(value = "agentId", required = false) Long agentId) {
         try {
             UploadResult uploadResult = assistantChatApplicationService.uploadFiles(files, sessionId, sessionType,
                 agentId);

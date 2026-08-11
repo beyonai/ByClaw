@@ -4,6 +4,7 @@ import com.iwhalecloud.byai.manager.domain.memory.service.MemoryLibraryService;
 import com.iwhalecloud.byai.manager.entity.memory.MemoryLibrary;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
+import com.iwhalecloud.byai.state.domain.sys.service.BusinessTerminologyService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +28,9 @@ public class MemoryLibraryController {
 
     @Autowired
     private MemoryLibraryService memoryLibraryService;
+
+    @Autowired
+    private BusinessTerminologyService terminologyService;
 
     /**
      * 查询记忆库ID
@@ -52,7 +56,7 @@ public class MemoryLibraryController {
             }
 
             if (agentId == null) {
-                return ResponseUtil.fail("数字员工ID不能为空");
+                return ResponseUtil.fail(terminologyService.replaceDigitalEmployeeTerms("数字员工ID不能为空"));
             }
 
             MemoryLibrary memoryLibrary = memoryLibraryService.findByUserIdAndAgentId(agentId, libraryType);
@@ -93,4 +97,3 @@ public class MemoryLibraryController {
         return null;
     }
 }
-

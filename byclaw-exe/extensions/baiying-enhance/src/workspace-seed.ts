@@ -5,6 +5,11 @@ import type { AdaptedManagedAgent } from "./agent-adapter.js";
 import type { CorePersonaExtension } from "./core-persona-definition.js";
 import { parseCorePersonaDefinition } from "./core-persona-definition.js";
 import { resolveDefaultManagedWorkspacePath } from "./workspace-paths.js";
+import {
+  DEFAULT_BUSINESS_TERMINOLOGY,
+  replaceBusinessTerminology,
+  type BusinessTerminology,
+} from "./business-terminology.js";
 
 export const MANAGED_SEED_MARKER = "<!-- baiying-enhance: managed seed -->";
 const MARKER = MANAGED_SEED_MARKER;
@@ -284,16 +289,22 @@ export function buildAgentsMd(item: BaiyingAgentItem): string {
   return `${lines.join("\n").trim()}\n`;
 }
 
-function buildIdentityMd(item: BaiyingAgentItem): string {
+function buildIdentityMd(
+  item: BaiyingAgentItem,
+  terminology: BusinessTerminology = DEFAULT_BUSINESS_TERMINOLOGY,
+): string {
   const name = typeof item.name === "string" && item.name.trim() ? item.name.trim() : "Agent";
   const lines = [MARKER, "", `## Name`, "", name, ""];
   if (typeof item.avatar === "string" && item.avatar.trim()) {
     lines.push("## Avatar (source system path)", "", item.avatar.trim(), "");
   }
   if (item.resourceId) {
-    lines.push(`## Digital Employee`, `- digital employee id: \`${item.resourceId}\``);
+    lines.push(
+      `## ${terminology.enUS.singular}`,
+      `- ${terminology.enUS.singular.toLowerCase()} id: \`${item.resourceId}\``,
+    );
     if (item.resourceCode) {
-      lines.push(`- digital employee code: \`${item.resourceCode}\``);
+      lines.push(`- ${terminology.enUS.singular.toLowerCase()} code: \`${item.resourceCode}\``);
     }
   }
   return `${lines.join("\n")}\n`;
@@ -463,6 +474,7 @@ export function resolveAgentWorkspaceDir(api: OpenClawPluginApi, agentId: string
 export async function seedManagedAgentWorkspace(params: {
   api: OpenClawPluginApi;
   adapted: AdaptedManagedAgent;
+  terminology?: BusinessTerminology;
 }): Promise<void> {
   const dir = resolveAgentWorkspaceDir(params.api, params.adapted.agentId);
   await fs.mkdir(dir, { recursive: true });
@@ -481,20 +493,23 @@ export async function seedManagedAgentWorkspace(params: {
   }
 
   const baiying = getFirstAgentItem(raw) ?? getRawDetailItem(raw);
+  const terminology = params.terminology ?? DEFAULT_BUSINESS_TERMINOLOGY;
+  const replaceTerms = (content: string | null) =>
+    content ? replaceBusinessTerminology(content, terminology) : content;
 
   // Determine content for each managed file.
-  const soulContent = baiying
+  const soulContent = replaceTerms(baiying
     ? buildSoul(baiying)
     : params.adapted.systemPrompt?.trim()
       ? `${MARKER}\n\n${params.adapted.systemPrompt.trim()}\n`
-      : null;
+      : null);
 
-  const agentsContent = baiying ? buildAgentsMd(baiying) : null;
-  const identityContent = baiying ? buildIdentityMd(baiying) : null;
-  const userContent = baiying ? buildUserMd(baiying) : null;
-  const toolsContent = baiying ? buildToolsMd(baiying, params.adapted.sourceKey) : null;
+  const agentsContent = replaceTerms(baiying ? buildAgentsMd(baiying) : null);
+  const identityContent = baiying ? buildIdentityMd(baiying, terminology) : null;
+  const userContent = replaceTerms(baiying ? buildUserMd(baiying) : null);
+  const toolsContent = replaceTerms(baiying ? buildToolsMd(baiying, params.adapted.sourceKey) : null);
 
-  const businessExtContent = baiying
+  const businessExtContent = replaceTerms(baiying
     ? buildByaiBusinessExtensionsMd(
         parseCorePersonaDefinition(
           typeof baiying.corePersonaDefinition === "string" && baiying.corePersonaDefinition.trim()
@@ -502,7 +517,7 @@ export async function seedManagedAgentWorkspace(params: {
             : undefined,
         ).extensions,
       )
-    : null;
+    : null);
 
   // For each file: write if missing, or overwrite if the existing file is managed (has marker).
   const writeManagedFile = async (filename: string, content: string | null) => {

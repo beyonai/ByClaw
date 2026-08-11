@@ -14,6 +14,6 @@ public class SetDefaultDigitalEmployeeDTO {
     /**
      * 数字员工资源ID
      */
-    @NotNull(message = "数字员工资源ID不能为空")
+    @NotNull(message = "AI资源ID不能为空")
     private Long resourceId;
 }

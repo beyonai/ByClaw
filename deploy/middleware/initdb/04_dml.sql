@@ -210,6 +210,7 @@ INSERT INTO byai_system_config (param_id,param_type,param_code,param_name,param_
 	 (101,'text','beyondFavicon','默认浏览器页面ICON','beyondFavicon','','默认浏览器页面ICON');
 INSERT INTO byai_system_config (param_id,param_type,param_code,param_name,param_en_name,param_value,param_desc) VALUES
 	 (89,'text','beyondTitle','默认标题','beyondTitle','','beyondtitle'),
+	 (nextval('byai.seq_any_table'),'json','DIGITAL_EMPLOYEE_TERMINOLOGY','AI员工展示称谓','Digital Employee Terminology','{"zh-CN":{"singular":"数字员工","plural":"数字员工","entry":"员工","market":"员工市场"},"en-US":{"singular":"Digital Employee","plural":"Digital Employees","entry":"Employees","market":"Employee Marketplace"}}','配置数字员工及AI员工入口在客户界面的中英文展示称谓；仅影响展示，不改变DIG_EMPLOYEE等内部协议标识'),
 	 (10000145,NULL,'ENABLE_USE_SANDBOX_NUM','允许创建的最大沙箱数量','ENABLE_USE_SANDBOX_NUM','30','允许创建的最大沙箱数量'),
 	 (10863540,'text','DIG_EMPLOYEE_FILE_UPLOAD_CONFIG','数字员工文件上传全局配置','DIG_EMPLOYEE_FILE_UPLOAD_CONFIG','{
 	"enabled": true,

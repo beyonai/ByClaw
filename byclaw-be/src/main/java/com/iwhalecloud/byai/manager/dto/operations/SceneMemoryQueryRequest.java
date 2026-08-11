@@ -30,9 +30,8 @@ public class SceneMemoryQueryRequest implements Serializable {
     /**
      * 数字员工ID
      */
-    @NotNull(message = "数字员工ID不能为空")
-    @Schema(description = "数字员工ID", example = "10815897")
+    @NotNull(message = "AI资源ID不能为空")
+    @Schema(description = "AI资源ID", example = "10815897")
     private Long agentId;
 
 }
-

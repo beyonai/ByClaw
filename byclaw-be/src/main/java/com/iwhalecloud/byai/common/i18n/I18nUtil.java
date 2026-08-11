@@ -1,12 +1,14 @@
 package com.iwhalecloud.byai.common.i18n;
 
+import java.util.Locale;
+import java.util.function.UnaryOperator;
+
 import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.MessageSource;
 import org.springframework.context.i18n.LocaleContextHolder;
-import java.util.Locale;
 
 /**
  * 获取国际化信息
@@ -32,19 +34,10 @@ public final class I18nUtil {
         // 私有化构造器
     }
 
-    private static MessageSource messageSource;
+    private static volatile MessageSource messageSource;
 
     private static final Logger logger = LoggerFactory.getLogger(I18nUtil.class);
-
-    static {
-        try {
-            messageSource = ApplicationContextUtil.getBean(MessageSource.class);
-        }
-        catch (Exception e) {
-            logger.error("Cannot initialize I18nUtil", e);
-            messageSource = null;
-        }
-    }
+    private static volatile UnaryOperator<String> messageTransformer = UnaryOperator.identity();
 
     /**
      * 获取国际化参数，可变参数
@@ -54,7 +47,38 @@ public final class I18nUtil {
      * @return String
      */
     public static String get(String key, Object... args) {
-        return messageSource.getMessage(key, args, LocaleContextHolder.getLocale());
+        String message = getMessageSource().getMessage(key, args, LocaleContextHolder.getLocale());
+        try {
+            return messageTransformer.apply(message);
+        }
+        catch (RuntimeException exception) {
+            logger.warn("Failed to transform i18n message, key={}", key, exception);
+            return message;
+        }
+    }
+
+    /**
+     * Registers a customer-facing terminology transformer without coupling this common utility
+     * to a concrete domain service.
+     *
+     * @param transformer message transformer
+     */
+    public static void registerMessageTransformer(UnaryOperator<String> transformer) {
+        messageTransformer = transformer == null ? UnaryOperator.identity() : transformer;
+    }
+
+    private static MessageSource getMessageSource() {
+        MessageSource current = messageSource;
+        if (current != null) {
+            return current;
+        }
+
+        synchronized (I18nUtil.class) {
+            if (messageSource == null) {
+                messageSource = ApplicationContextUtil.getBean(MessageSource.class);
+            }
+            return messageSource;
+        }
     }
 
     /**

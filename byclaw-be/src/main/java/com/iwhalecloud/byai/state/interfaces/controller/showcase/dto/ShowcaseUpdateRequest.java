@@ -78,7 +78,7 @@ public class ShowcaseUpdateRequest {
     /**
      * 数字员工唯一标识code--byai_tag_relation
      */
-    @Size(max = 128, message = "数字员工唯一标识长度不能超过128字符")
+    @Size(max = 128, message = "AI资源唯一标识长度不能超过128字符")
     private String agentCode;
 
 
@@ -101,5 +101,4 @@ public class ShowcaseUpdateRequest {
     @Size(max = 64, message = "会话模式长度不能超过64字符")
     private String sessionMode;
 }
-
 

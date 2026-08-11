@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 // @ts-ignore
-import { useDispatch, useSelector } from '@umijs/max';
+import { useDispatch, useIntl, useSelector } from '@umijs/max';
 import { Drawer, Button, Tabs, Spin } from 'antd';
 import classnames from 'classnames';
 import { compact, get, head, isEmpty, reduce } from 'lodash';
@@ -46,6 +46,7 @@ export default function EmployeeDrawer(props: IProps) {
   const { open, onClose, searchName = '', applyStatus = emptyApplyStatus } = props;
 
   const dispatch = useDispatch();
+  const intl = useIntl();
 
   const { EventEmitter } = useGlobal();
 
@@ -246,7 +247,9 @@ export default function EmployeeDrawer(props: IProps) {
       <div className="ub ub-ver gap8 full-height">
         <div className={classnames(styles.header, 'ub ub-ac gap8')}>
           <Button icon={<ArrowLeftOutlined style={{ fontSize: '18px' }} />} onClick={onClose} type="text" />
-          <div className={classnames(styles.title, 'ellipsis ub-f1')}>数字员工</div>
+          <div className={classnames(styles.title, 'ellipsis ub-f1')}>
+            {intl.formatMessage({ id: 'common.digitalEmployee' })}
+          </div>
           <Button icon={<SearchOutlined style={{ fontSize: '18px' }} />} type="text" style={{ visibility: 'hidden' }} />
         </div>
         <div className="ub-f1">

@@ -13,10 +13,19 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from enum import Enum
+import json
+from typing import Any
 
 # ContextVar is async-safe: each asyncio.Task inherits a snapshot of the
 # parent context at creation time, and .set() only affects the current task.
 _current_lang: ContextVar[str] = ContextVar("_current_lang", default="zh_CN")
+_DEFAULT_TERMINOLOGY: dict[str, dict[str, str]] = {
+    "zh_CN": {"singular": "数字员工", "plural": "数字员工"},
+    "en_US": {"singular": "Digital Employee", "plural": "Digital Employees"},
+}
+_current_terminology: ContextVar[dict[str, dict[str, str]]] = ContextVar(
+    "_current_terminology", default=_DEFAULT_TERMINOLOGY
+)
 
 
 class Msg(str, Enum):
@@ -48,8 +57,8 @@ class Msg(str, Enum):
 
 MESSAGES: dict[str, dict[Msg, str]] = {
     "zh_CN": {
-        Msg.NO_AGENT: "未指定可用数字员工，无法执行检索。",
-        Msg.NO_RETRIEVAL_CAPABILITY: "当前数字员工未配置检索能力，无法执行检索。",
+        Msg.NO_AGENT: "未指定可用{digital_employee}，无法执行检索。",
+        Msg.NO_RETRIEVAL_CAPABILITY: "当前{digital_employee}未配置检索能力，无法执行检索。",
         Msg.NO_KNOWLEDGE_BASE: "当前未配置可用知识库，无法执行检索。",
         Msg.KB_CODE_NOT_FOUND: "知识库编码不存在：{codes}",
         Msg.REPORT_SAVED: "\n\n报告已保存到：{path}",
@@ -77,8 +86,8 @@ MESSAGES: dict[str, dict[Msg, str]] = {
         Msg.ERR_MODEL_NOT_FOUND: "未找到可用的AI模型，无法执行检索。",
     },
     "en_US": {
-        Msg.NO_AGENT: "No available agent specified; cannot perform search.",
-        Msg.NO_RETRIEVAL_CAPABILITY: "The current agent has no retrieval capability configured.",
+        Msg.NO_AGENT: "No available {digital_employee_lower} specified; cannot perform search.",
+        Msg.NO_RETRIEVAL_CAPABILITY: "The current {digital_employee_lower} has no retrieval capability configured.",
         Msg.NO_KNOWLEDGE_BASE: "No knowledge base is configured for retrieval.",
         Msg.KB_CODE_NOT_FOUND: "Knowledge base code(s) not found: {codes}",
         Msg.REPORT_SAVED: "\n\nReport saved to: {path}",
@@ -119,10 +128,51 @@ def set_lang(lang: str) -> None:
     _current_lang.set(lang)
 
 
+def set_business_terminology(value: Any) -> None:
+    """Set request-local terminology from the system-config Redis hash value."""
+    parsed: Any = value
+    if isinstance(parsed, bytes):
+        parsed = parsed.decode("utf-8")
+    if isinstance(parsed, str):
+        try:
+            parsed = json.loads(parsed)
+        except (TypeError, ValueError):
+            parsed = {}
+
+    if isinstance(parsed, dict) and "paramValue" in parsed:
+        parsed = parsed.get("paramValue")
+        if isinstance(parsed, str):
+            try:
+                parsed = json.loads(parsed)
+            except (TypeError, ValueError):
+                parsed = {}
+
+    result = {locale: dict(terms) for locale, terms in _DEFAULT_TERMINOLOGY.items()}
+    locale_mapping = {"zh_CN": "zh-CN", "en_US": "en-US"}
+    if isinstance(parsed, dict):
+        for locale, config_locale in locale_mapping.items():
+            locale_value = parsed.get(config_locale)
+            if not isinstance(locale_value, dict):
+                continue
+            for field in ("singular", "plural"):
+                configured = locale_value.get(field)
+                normalized = configured.strip() if isinstance(configured, str) else ""
+                if (
+                    0 < len(normalized) <= 40
+                    and not any(character in normalized for character in "{}<>\r\n")
+                ):
+                    result[locale][field] = normalized
+    _current_terminology.set(result)
+
+
 def t(key: Msg) -> str:
     lang = _current_lang.get()
     locale_msgs = MESSAGES.get(lang, MESSAGES["zh_CN"])
-    return locale_msgs.get(key, MESSAGES["zh_CN"].get(key, key))
+    message = locale_msgs.get(key, MESSAGES["zh_CN"].get(key, key))
+    terms = _current_terminology.get().get(lang, _DEFAULT_TERMINOLOGY["zh_CN"])
+    return message.replace("{digital_employee}", terms["singular"]).replace(
+        "{digital_employee_lower}", terms["singular"].lower()
+    )
 
 
 def translate_fallback(text: str) -> str:

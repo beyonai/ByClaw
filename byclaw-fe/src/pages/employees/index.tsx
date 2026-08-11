@@ -201,7 +201,7 @@ const Employees = () => {
             },
           });
         } else {
-          message.error('The digital employee does not exist!');
+          message.error(intl.formatMessage({ id: 'common.digitalEmployeeNotExist' }));
           setAgentId?.('');
           navigate('/chat', {
             replace: true,

@@ -9,8 +9,9 @@ import { getDcSystemConfigValueByCodes } from '@/service/auth';
 import { setUserToken, initAdminVipList } from '@/utils/auth';
 import BeyondBroadcastChannel from '@/utils/broadcastChannel';
 import { getDcSystemConfigValueByCodes as getDcSystemConfigValueByCodesService } from '@/service/layout';
-import { SYSTEM_CONFIG_STORAGE_KEY } from '@/constants/system';
+import { DIGITAL_EMPLOYEE_TERMINOLOGY_PARAM_CODE, SYSTEM_CONFIG_STORAGE_KEY } from '@/constants/system';
 import useGlobalChatRuntime from '@/hooks/useGlobalChatRuntime';
+import { applyBusinessTerminology } from '@/utils/terminology';
 
 function formatImgUrl(url?: string) {
   if (!url) return '';
@@ -38,6 +39,7 @@ const CommonLayout = () => {
 
   const [pageTitle, setPageTitle] = useState(getSystemConfigByStorage().title || '');
   const [favicon, setFavicon] = useState(getSystemConfigByStorage().favicon || getRuntimeActualUrl('/favicon.svg'));
+  const [systemConfigReady, setSystemConfigReady] = useState(false);
 
   useGlobalChatRuntime();
 
@@ -104,11 +106,19 @@ const CommonLayout = () => {
     setSearchParams(searchParams);
 
     getDcSystemConfigValueByCodes({
-      paramCodes: ['beyondLogo', 'beyondTitle', 'beyondFavicon', 'beyondAssistant', 'ENV'],
+      paramCodes: [
+        'beyondLogo',
+        'beyondTitle',
+        'beyondFavicon',
+        'beyondAssistant',
+        'ENV',
+        DIGITAL_EMPLOYEE_TERMINOLOGY_PARAM_CODE,
+      ],
     })
       .then((data) => {
         try {
           const { beyondLogo, beyondTitle, beyondFavicon, beyondAssistant, ENV } = data || {};
+          const terminology = applyBusinessTerminology(data?.[DIGITAL_EMPLOYEE_TERMINOLOGY_PARAM_CODE]);
 
           localStorage.setItem(
             SYSTEM_CONFIG_STORAGE_KEY,
@@ -117,6 +127,7 @@ const CommonLayout = () => {
               title: beyondTitle,
               assistant: formatImgUrl(beyondAssistant),
               favicon: formatImgUrl(beyondFavicon),
+              terminology,
             })
           );
           setPageTitle(beyondTitle);
@@ -135,7 +146,12 @@ const CommonLayout = () => {
           console.error(error);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        applyBusinessTerminology(getSystemConfigByStorage().terminology);
+      })
+      .finally(() => {
+        setSystemConfigReady(true);
+      });
   }, []);
 
   return (
@@ -144,9 +160,7 @@ const CommonLayout = () => {
         {pageTitle && <title>{pageTitle}</title>}
         <link rel="shortcut icon" href={favicon} />
       </Helmet>
-      <QueryClientProvider client={queryClient}>
-        <Outlet />
-      </QueryClientProvider>
+      <QueryClientProvider client={queryClient}>{systemConfigReady && <Outlet />}</QueryClientProvider>
     </div>
   );
 };

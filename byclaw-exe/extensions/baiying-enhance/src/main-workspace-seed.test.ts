@@ -202,6 +202,25 @@ describe("main-workspace-seed", () => {
     expect(routing).toContain("No `baiying-agent-*`");
   });
 
+  it("seedMainAgentAgentsMd applies configured terminology to main prompts", async () => {
+    const ws = await mkdtemp(path.join(tmpdir(), "baiying-main-"));
+    const tpl = path.join(ws, "tpl.md");
+    await writeFile(tpl, "Coordinate digital employees and each Digital Employee.\n", "utf8");
+
+    await seedMainAgentAgentsMd({
+      api: mockApi(ws) as any,
+      pluginConfig: { mainAgentsMdPath: tpl, mainAgentsMdMode: "always" },
+      terminology: {
+        zhCN: { singular: "专家", plural: "专家", entry: "专家", market: "专家市场" },
+        enUS: { singular: "Expert", plural: "Experts", entry: "Experts", market: "Expert Marketplace" },
+      },
+      log: { warn: vi.fn(), info: vi.fn() },
+    });
+
+    const out = await readFile(path.join(ws, "AGENTS.md"), "utf8");
+    expect(out).toContain("Coordinate experts and each Expert.");
+  });
+
   it("resolveMainAgentsTemplatePath prefers mainAgentsMdPath over bundled flag", async () => {
     const p = await resolveMainAgentsTemplatePath({
       mainAgentsMdPath: "/abs/custom.md",

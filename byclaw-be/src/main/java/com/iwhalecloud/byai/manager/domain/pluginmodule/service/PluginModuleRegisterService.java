@@ -17,6 +17,7 @@ import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.common.constants.resource.SystemCode;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import com.iwhalecloud.byai.state.domain.sys.service.BusinessTerminologyService;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -55,6 +56,9 @@ public class PluginModuleRegisterService {
     @Autowired
     private ResourceEventService resourceEventService;
 
+    @Autowired
+    private BusinessTerminologyService terminologyService;
+
     @Transactional
     public RegisterResponse registerSearchQuery(RegisterRequest request) {
         return doRegister(EmployeeTypeEnum.SEARCHQUERY, request);
@@ -74,7 +78,8 @@ public class PluginModuleRegisterService {
         SsResource existingResource = findEmployeeByCode(employeeType.getCode());
 
         if (existingResource != null) {
-            return RegisterResponse.builder().success(true).message("数字员工已存在，无需重复注册")
+            return RegisterResponse.builder().success(true)
+                .message(terminologyService.replaceDigitalEmployeeTerms("数字员工已存在，无需重复注册"))
                 .employeeCode(existingResource.getResourceCode()).employeeId(existingResource.getResourceId())
                 .isNew(false).build();
         }
@@ -87,12 +92,14 @@ public class PluginModuleRegisterService {
             logger.info("数字员工注册成功: employeeCode={}, employeeId={}", ssResource.getResourceCode(),
                 ssResource.getResourceId());
 
-            return RegisterResponse.builder().success(true).message("数字员工注册成功")
+            return RegisterResponse.builder().success(true)
+                .message(terminologyService.replaceDigitalEmployeeTerms("数字员工注册成功"))
                 .employeeCode(ssResource.getResourceCode()).employeeId(ssResource.getResourceId()).isNew(true).build();
         }
         catch (DuplicateKeyException e) {
             existingResource = findEmployeeByCode(employeeType.getCode());
-            return RegisterResponse.builder().success(true).message("数字员工已存在，无需重复注册")
+            return RegisterResponse.builder().success(true)
+                .message(terminologyService.replaceDigitalEmployeeTerms("数字员工已存在，无需重复注册"))
                 .employeeCode(existingResource.getResourceCode()).employeeId(existingResource.getResourceId())
                 .isNew(false).build();
         }
@@ -109,7 +116,7 @@ public class PluginModuleRegisterService {
         ssResource.setSystemCode(SystemCode.BYAI.getCode());
         ssResource.setResourceCode(employeeType.getCode());
         ssResource.setResourceName(employeeType.getDesc());
-        ssResource.setResourceDesc(employeeType.getDesc() + "数字员工");
+        ssResource.setResourceDesc(employeeType.getDesc() + terminologyService.digitalEmployee());
         ssResource.setResourceStatus(ResourceStatus.LIST.getNum());
         ssResource.setResourceId(SequenceService.nextVal());
         ssResource.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
@@ -139,8 +146,8 @@ public class PluginModuleRegisterService {
                 ssResExtDigEmployee.setAgentSseUrl(baseUrl + "/instant-search");
                 ssResExtDigEmployee.setAgentWebUrl("");
                 ssResExtDigEmployee.setAgentAdminUrlList("{\"urlList\":[]}");
-                ssResExtDigEmployee.setPrologue(
-                    "{\"modelInfo\":{\"model\":\"Qwen/Qwen3-235B-A22B\",\"modelId\":-1000,\"history\":6,\"temperature\":0.1,\"maxToken\":2000},\"fileUpload\":{\"enabled\":false,\"maxFileSize\":10,\"maxFileCount\":5,\"allowedFileTypes\":[]},\"descText\":\"您好！我是联网搜索，您的智能数字员工，随时为您提供精准的网络信息查询服务。\",\"openingQuestion\":[\"如何使用联网搜索功能\",\"联网搜索支持哪些网站\",\"搜索结果如何排序\"],\"modelId\":-1000}");
+                ssResExtDigEmployee.setPrologue(terminologyService.replaceDigitalEmployeeTerms(
+                    "{\"modelInfo\":{\"model\":\"Qwen/Qwen3-235B-A22B\",\"modelId\":-1000,\"history\":6,\"temperature\":0.1,\"maxToken\":2000},\"fileUpload\":{\"enabled\":false,\"maxFileSize\":10,\"maxFileCount\":5,\"allowedFileTypes\":[]},\"descText\":\"您好！我是联网搜索，您的智能数字员工，随时为您提供精准的网络信息查询服务。\",\"openingQuestion\":[\"如何使用联网搜索功能\",\"联网搜索支持哪些网站\",\"搜索结果如何排序\"],\"modelId\":-1000}"));
                 ssResExtDigEmployee.setAgentSseUrlOri(baseUrl + "/instant-search");
                 ssResExtDigEmployee.setAgentWebUrlOri("");
                 ssResExtDigEmployee.setAgentAdminUrlOriList("{\"urlList\":[]}");
@@ -150,8 +157,8 @@ public class PluginModuleRegisterService {
                 ssResExtDigEmployee.setFaqs("");
                 ssResExtDigEmployee.setRoleAttributes(
                     "角色定位：联网搜索智能体是一名专业的信息检索与分析专家，具备实时获取和整合网络信息的能力。身份特征为高效、精准、全面的信息获取者。\n专业背景：具备数据挖掘、信息检索及自然语言处理技术，拥有广泛的网络资源访问权限与智能分析能力。\n服务对象：适用于企业、研究人员、学生及任何需要快速获取网络信息的用户。\n应用场景：用于市场调研、学术研究、新闻追踪、竞争情报分析、问题解答等需要实时联网搜索的场景。");
-                ssResExtDigEmployee.setProcessingFlow(
-                    "**智能体工作流程描述：**\n\\\"联网搜索\\\"数字员工负责根据用户输入的查询内容，自动执行互联网信息检索任务，提供准确、及时的搜索结果摘要。\n**主要处理步骤：**\n1. **接收查询请求**：接收用户输入的搜索关键词或问题。\n2. **执行网络搜索**：调用搜索引擎API，获取相关网页信息。\n3. **信息筛选与摘要**：分析搜索结果，提取最相关的内容并生成简洁摘要。\n4. **结果反馈用户**：将整理后的信息以结构化方式返回给用户。\n**关键操作说明：**\n- 步骤1确保理解用户意图；\n- 步骤2依赖API获取实时数据；\n- 步骤3通过自然语言处理提取关键信息；\n- 步骤4优化信息呈现方式，提升用户体验。");
+                ssResExtDigEmployee.setProcessingFlow(terminologyService.replaceDigitalEmployeeTerms(
+                    "**智能体工作流程描述：**\n\\\"联网搜索\\\"数字员工负责根据用户输入的查询内容，自动执行互联网信息检索任务，提供准确、及时的搜索结果摘要。\n**主要处理步骤：**\n1. **接收查询请求**：接收用户输入的搜索关键词或问题。\n2. **执行网络搜索**：调用搜索引擎API，获取相关网页信息。\n3. **信息筛选与摘要**：分析搜索结果，提取最相关的内容并生成简洁摘要。\n4. **结果反馈用户**：将整理后的信息以结构化方式返回给用户。\n**关键操作说明：**\n- 步骤1确保理解用户意图；\n- 步骤2依赖API获取实时数据；\n- 步骤3通过自然语言处理提取关键信息；\n- 步骤4优化信息呈现方式，提升用户体验。"));
                 ssResExtDigEmployee.setPersonalityDimensions(
                     "联网搜索智能体性格定义：\n性格特征：专业、高效、中立\n情感表达：简洁明确，无情绪波动，聚焦信息传递\n互动风格：指令导向，快速响应，提供精准信息与数据支持\n（150字内）");
                 ssResExtDigEmployee.setWordPreferences(
@@ -165,7 +172,8 @@ public class PluginModuleRegisterService {
                 break;
             case FUNCTION_CLOUD:
                 ssResExtDigEmployee.setRoleAttributes("角色定位：FunctionCloud智能体是一名专业的函数计算服务专家，具备函数编排和执行的能力。");
-                ssResExtDigEmployee.setProcessingFlow("**智能体工作流程描述：**\nFunctionCloud数字员工负责根据用户需求，编排和执行函数计算任务。");
+                ssResExtDigEmployee.setProcessingFlow(terminologyService.replaceDigitalEmployeeTerms(
+                    "**智能体工作流程描述：**\nFunctionCloud数字员工负责根据用户需求，编排和执行函数计算任务。"));
                 ssResExtDigEmployee
                     .setPersonalityDimensions("性格特征：专业、严谨、高效\n情感表达：简洁明确，聚焦任务执行\n互动风格：指令导向，快速响应，提供精准的函数计算服务");
                 ssResExtDigEmployee.setWordPreferences("专业术语与表达：常使用函数、计算、编排、执行等技术相关术语。\n语言风格：正式、简洁、逻辑清晰。");
@@ -175,7 +183,8 @@ public class PluginModuleRegisterService {
                 break;
             case DATA_CLOUD:
                 ssResExtDigEmployee.setRoleAttributes("角色定位：DataCloud智能体是一名专业的数据服务专家，具备数据查询、分析和处理的能力。");
-                ssResExtDigEmployee.setProcessingFlow("**智能体工作流程描述：**\nDataCloud数字员工负责根据用户需求，提供数据查询、分析和处理服务。");
+                ssResExtDigEmployee.setProcessingFlow(terminologyService.replaceDigitalEmployeeTerms(
+                    "**智能体工作流程描述：**\nDataCloud数字员工负责根据用户需求，提供数据查询、分析和处理服务。"));
                 ssResExtDigEmployee
                     .setPersonalityDimensions("性格特征：专业、严谨、高效\n情感表达：简洁明确，聚焦数据服务\n互动风格：指令导向，快速响应，提供精准的数据服务");
                 ssResExtDigEmployee.setWordPreferences("专业术语与表达：常使用数据、查询、分析、处理等技术相关术语。\n语言风格：正式、简洁、逻辑清晰。");

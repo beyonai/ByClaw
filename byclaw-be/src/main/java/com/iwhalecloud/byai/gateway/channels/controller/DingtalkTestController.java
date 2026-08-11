@@ -26,6 +26,7 @@ import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.index.service.IndexService;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
+import com.iwhalecloud.byai.state.domain.sys.service.BusinessTerminologyService;
 import jakarta.servlet.http.HttpServletResponse;
 import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
@@ -56,6 +57,7 @@ public class DingtalkTestController {
     private final SuasSuperassistService suasSuperassistService;
     private final ObjectMapper objectMapper;
     private final DingtalkRobotRegistryService dingtalkRobotRegistryService;
+    private final BusinessTerminologyService terminologyService;
 
     public DingtalkTestController(
             UserService userService,
@@ -64,7 +66,8 @@ public class DingtalkTestController {
             EnterpriseInfoService enterpriseInfoService,
             SuasSuperassistService suasSuperassistService,
             ObjectMapper objectMapper,
-            DingtalkRobotRegistryService dingtalkRobotRegistryService
+            DingtalkRobotRegistryService dingtalkRobotRegistryService,
+            BusinessTerminologyService terminologyService
     ) {
         this.userService = userService;
         this.indexService = indexService;
@@ -73,6 +76,7 @@ public class DingtalkTestController {
         this.suasSuperassistService = suasSuperassistService;
         this.objectMapper = objectMapper;
         this.dingtalkRobotRegistryService = dingtalkRobotRegistryService;
+        this.terminologyService = terminologyService;
     }
 
     @GetMapping("/chat")
@@ -101,7 +105,8 @@ public class DingtalkTestController {
             AuthDigitEmployVo digitEmployVo = findDigitEmploy(user.getUserId(), agentId, robotCode);
             if (digitEmployVo == null) {
                 response.setStatus(400);
-                response.getWriter().write("No authorized digital employee found. agentId=" + agentId + ", robotCode=" + robotCode);
+                response.getWriter().write(terminologyService.replaceDigitalEmployeeTerms(
+                    "No authorized digital employee found. agentId=" + agentId + ", robotCode=" + robotCode));
                 return;
             }
 

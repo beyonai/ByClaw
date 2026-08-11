@@ -118,6 +118,42 @@ FILE_STORAGE_LOCAL_PATH=/mnt/byclaw-file
 | `DATACLOUD_DISABLE_ASK_USER_TOOL` | 禁用询问用户工具 | `1` |
 | `DATACLOUD_REACT_MAX_ROUNDS` | 最大推理轮数 | `10` |
 
+## 9. 业务称谓配置
+
+系统配置项 `DIGITAL_EMPLOYEE_TERMINOLOGY` 用于按部署实例统一配置“数字员工”在客户界面的中英文称谓。默认值保持现有产品称谓，不配置时行为不变。
+
+例如，客户要求显示为“专家”时，将该配置项的 `param_value` 设置为：
+
+```json
+{
+  "zh-CN": {
+    "singular": "专家",
+    "plural": "专家",
+    "entry": "专家",
+    "market": "专家市场"
+  },
+  "en-US": {
+    "singular": "Expert",
+    "plural": "Experts",
+    "entry": "Experts",
+    "market": "Expert Marketplace"
+  }
+}
+```
+
+配置含义：
+
+- `singular`：正文、按钮、错误提示和默认 Agent 提示词中的单数称谓。
+- `plural`：英文复数等需要区分单复数的文案。
+- `entry`：侧边栏等 AI 员工短入口称谓。
+- `market`：市场入口称谓。
+
+每个字段必须为 1～40 个字符，且不能包含换行或 `{}`、`<>`；非法或缺失字段会回退到默认称谓。
+
+该配置只改变客户可见文案，不修改 `DIG_EMPLOYEE`、接口路径、数据库表字段、Redis key、OpenClaw `digitalEmployee` 角色标识、埋点编码等内部协议，也不会替换“企业员工”“全公司所有员工”等真人员工语义。配置保存后需确保系统配置缓存已刷新；QA 请求和 OpenClaw 托管工作区种子会从 `byai:SystemConfig:paramCode` 同步读取同一配置。已有的客户自定义提示词不会被回写；OpenClaw 已生成的托管 Markdown 在下次全量重建工作区种子或服务重启后刷新。
+
+如果部署显式覆盖了 `OPEN_DC_QUERY_KEYS`，无需额外加入此配置项；后端会固定允许登录前读取 `DIGITAL_EMPLOYEE_TERMINOLOGY`，该配置中不得存放密钥或其他敏感信息。
+
 ## 最小配置示例
 
 对于快速开始，您只需要配置以下必需项：

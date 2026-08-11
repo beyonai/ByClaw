@@ -64,6 +64,7 @@ import com.iwhalecloud.byai.state.domain.resource.bo.AuthContextBo;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceAuthContextService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
+import com.iwhalecloud.byai.state.domain.sys.service.BusinessTerminologyService;
 import com.iwhalecloud.byai.state.domain.template.enums.DebugModeEnum;
 import com.iwhalecloud.byai.state.infrastructure.agentconnect.handle.CommonHandler;
 import com.iwhalecloud.byai.state.infrastructure.utils.ChatUtils;
@@ -106,6 +107,9 @@ public class ParamService {
     @Autowired
     private ByaiMessageHotService byaiMessageHotService;
 
+    @Autowired
+    private BusinessTerminologyService terminologyService;
+
     /**
      * 请求python的参数拼接
      *
@@ -138,7 +142,8 @@ public class ParamService {
             AgentResourceChatInfoDto resourceAgent = ssSuperassistSubAgentService.getResourceAgent(isDebug,
                 assistantChatDto.getAgentId());
             if (resourceAgent == null) {
-                throw new ManagerRuntimeException("数字员工不存在、未上架或配置不完整");
+                throw new ManagerRuntimeException(
+                    terminologyService.replaceDigitalEmployeeTerms("数字员工不存在、未上架或配置不完整"));
             }
             chatAgentResourceInfo.add(resourceAgent);
         }

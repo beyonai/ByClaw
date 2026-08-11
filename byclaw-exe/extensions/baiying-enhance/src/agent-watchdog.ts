@@ -43,6 +43,7 @@ import {
     skillSignature,
     watchWorkspaceSkillDirs,
 } from "./workspace-skills.js";
+import { loadBusinessTerminology } from "./business-terminology.js";
 
 export type LoadedManagedAgent = AdaptedManagedAgent & {
     /** SHA-256 hash of the source JSON content for change detection. */
@@ -985,6 +986,7 @@ export function createAgentWatchdog(params: {
             }
 
             params.registry.replaceAll(effectiveManaged);
+            const terminology = await loadBusinessTerminology(params.redisJsonStore);
 
             const runMainAgentsSeed =
                 params.pluginConfig.mainWorkspaceAgentsAutoSeed !== false &&
@@ -1011,6 +1013,7 @@ export function createAgentWatchdog(params: {
                         api: params.api,
                         pluginConfig: params.pluginConfig,
                         managedAgents: effectiveManaged,
+                        terminology,
                         log: {
                             warn: (m) => params.api.logger.warn(m),
                             info: (m) => params.api.logger.info(m),
@@ -1142,7 +1145,7 @@ export function createAgentWatchdog(params: {
                 const toSeed = forceFullReseed ? effectiveManaged : [...added, ...updated];
                 for (const m of toSeed) {
                     try {
-                        await seedManagedAgentWorkspace({ api: params.api, adapted: m });
+                        await seedManagedAgentWorkspace({ api: params.api, adapted: m, terminology });
                     } catch (err) {
                         params.api.logger.warn(
                             `baiying-enhance: workspace seed failed for ${m.agentId}: ${

@@ -1,5 +1,7 @@
 // @ts-nocheck
 import { getIntl } from '@umijs/max';
+import { getSystemConfigByStorage } from '@/utils/system';
+import { replaceBusinessTerminologyText } from '@/utils/terminology';
 
 // 资源状态（列表）
 export const resourceStatus = [
@@ -115,3 +117,11 @@ export const DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES = [
     tip: '填写整体工作准则、响应要求与行为边界，约束大模型整体输出风格',
   },
 ];
+
+export const getDefaultDigitalEmployeeTemplates = () => {
+  const terminology = getSystemConfigByStorage()?.terminology;
+  return DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES.map((template) => ({
+    ...template,
+    defaultValue: replaceBusinessTerminologyText(template.defaultValue, terminology),
+  }));
+};

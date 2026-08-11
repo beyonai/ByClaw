@@ -258,6 +258,7 @@ export default {
   'common.previewNoUrl': '该文件暂不支持预览',
   'common.previewFailed': '预览失败，请稍后重试',
   'common.digitalEmployee': '数字员工',
+  'common.digitalEmployeeNotExist': '数字员工不存在！',
   'common.companyEmployee': '企业员工',
   'common.tool': '工具',
   'common.object': '对象',

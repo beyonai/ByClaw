@@ -11,6 +11,11 @@ import type { AdaptedManagedAgent } from "./agent-adapter.js";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
 import { SUBAGENT_ROUTING_FILENAME, buildSubagentRoutingMarkdown, SUBAGENT_ROUTING_MARKER } from "./subagent-routing-seed.js";
 import { resolveAgentWorkspaceDir } from "./workspace-seed.js";
+import {
+  DEFAULT_BUSINESS_TERMINOLOGY,
+  replaceBusinessTerminology,
+  type BusinessTerminology,
+} from "./business-terminology.js";
 
 export const MAIN_AGENTS_MARKER = "<!-- baiying-enhance: main agents template -->";
 
@@ -20,6 +25,7 @@ async function writeSubagentRoutingWithPolicy(params: {
   workspaceDir: string;
   mode: "if_missing" | "if_managed_marker" | "always";
   managedAgents: AdaptedManagedAgent[];
+  terminology: BusinessTerminology;
   log: { warn: (m: string) => void; info?: (m: string) => void };
 }): Promise<void> {
   const routingDest = path.join(params.workspaceDir, SUBAGENT_ROUTING_FILENAME);
@@ -36,7 +42,10 @@ async function writeSubagentRoutingWithPolicy(params: {
   const hasMarker = existing.replace(/^\uFEFF/, "").startsWith(SUBAGENT_ROUTING_MARKER);
 
   const writeContent = async () => {
-    const md = await buildSubagentRoutingMarkdown(params.managedAgents);
+    const md = replaceBusinessTerminology(
+      await buildSubagentRoutingMarkdown(params.managedAgents),
+      params.terminology,
+    );
     await fs.writeFile(routingDest, md, "utf8");
     params.log.info?.(`baiying-enhance: wrote main ${SUBAGENT_ROUTING_FILENAME}: ${routingDest}`);
   };
@@ -164,6 +173,7 @@ export async function seedMainAgentAgentsMd(params: {
   log: { warn: (m: string) => void; info?: (m: string) => void };
   /** Current managed baiying agents; used to generate `SUBAGENT_ROUTING.md`. */
   managedAgents?: AdaptedManagedAgent[];
+  terminology?: BusinessTerminology;
 }): Promise<void> {
   const mainId = params.pluginConfig.mainParentAgentId?.trim() || "main";
   const workspaceDir = resolveAgentWorkspaceDir(params.api, mainId);
@@ -194,7 +204,8 @@ export async function seedMainAgentAgentsMd(params: {
 
   const managedAgents = params.managedAgents ?? [];
 
-  const rawTemplate = loaded.body;
+  const terminology = params.terminology ?? DEFAULT_BUSINESS_TERMINOLOGY;
+  const rawTemplate = replaceBusinessTerminology(loaded.body, terminology);
   const content = ensureMainAgentsMarkerPrefix(rawTemplate);
   params.log.info?.(`baiying-enhance: main workspace dir resolved: ${workspaceDir}`);
   const dest = path.join(workspaceDir, AGENTS_FILENAME);
@@ -221,6 +232,7 @@ export async function seedMainAgentAgentsMd(params: {
         workspaceDir,
         mode,
         managedAgents,
+        terminology,
         log: params.log,
       });
       return;
@@ -231,6 +243,7 @@ export async function seedMainAgentAgentsMd(params: {
       workspaceDir,
       mode,
       managedAgents,
+      terminology,
       log: params.log,
     });
     return;
@@ -244,6 +257,7 @@ export async function seedMainAgentAgentsMd(params: {
         workspaceDir,
         mode,
         managedAgents,
+        terminology,
         log: params.log,
       });
       return;
@@ -255,6 +269,7 @@ export async function seedMainAgentAgentsMd(params: {
         workspaceDir,
         mode,
         managedAgents,
+        terminology,
         log: params.log,
       });
       return;
@@ -273,6 +288,7 @@ export async function seedMainAgentAgentsMd(params: {
           workspaceDir,
           mode,
           managedAgents,
+          terminology,
           log: params.log,
         });
         return;
@@ -288,6 +304,7 @@ export async function seedMainAgentAgentsMd(params: {
       workspaceDir,
       mode,
       managedAgents,
+      terminology,
       log: params.log,
     });
     return;
@@ -300,6 +317,7 @@ export async function seedMainAgentAgentsMd(params: {
       workspaceDir,
       mode,
       managedAgents,
+      terminology,
       log: params.log,
     });
   }

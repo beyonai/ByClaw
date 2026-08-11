@@ -1,4 +1,5 @@
 export const SYSTEM_CONFIG_STORAGE_KEY = '_BYAI_SYSTEM_CONFIG_';
+export const DIGITAL_EMPLOYEE_TERMINOLOGY_PARAM_CODE = 'DIGITAL_EMPLOYEE_TERMINOLOGY';
 
 export const LayoutMode = {
   common: 'common',

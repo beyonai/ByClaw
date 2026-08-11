@@ -28,7 +28,7 @@ from redis_agent_config import (
 from by_framework.core.discovery import DiscoveryClient
 from by_framework.util.discovery_http_client import DiscoveryHttpClient
 from by_framework.util.http_client import RetryConfig
-from i18n import Msg, set_lang, t, translate_fallback
+from i18n import Msg, set_business_terminology, set_lang, t, translate_fallback
 from middleware import build_agent_overrides
 from exceptions import (
     ByclawQAError,
@@ -48,6 +48,8 @@ FINAL_ANSWER_ROLES = {
     "final_answer",
 }
 SEARCH_TOOL_NAME = OPERATION_REGISTRY[OperationType.KNOWLEDGE_SEARCH].tool_name
+SYSTEM_CONFIG_REDIS_KEY = "byai:SystemConfig:paramCode"
+TERMINOLOGY_CONFIG_CODE = "DIGITAL_EMPLOYEE_TERMINOLOGY"
 
 
 def _safe_json_dumps(data: Any) -> str:
@@ -69,6 +71,15 @@ def _summarize_agent_config(agent_config: Any) -> dict[str, Any]:
         "knowledge_base_groups": list(knowledge_bases.keys()),
         "knowledge_base_counts": kb_counts,
     }
+
+
+async def _load_business_terminology(redis_client: Any) -> None:
+    try:
+        raw = await redis_client.hget(SYSTEM_CONFIG_REDIS_KEY, TERMINOLOGY_CONFIG_CODE)
+        set_business_terminology(raw)
+    except Exception as exc:
+        set_business_terminology(None)
+        logger.warning("Failed to load business terminology from Redis: %s", exc)
 
 
 def _summarize_knowledge_bases(
@@ -284,6 +295,7 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
 
         lang = command.header.metadata.get("language", "zh_CN")
         set_lang(lang)
+        await _load_business_terminology(context.redis)
         agent_id = command.extra_payload.get("agent_id", None)
         if agent_id is None:
             message = t(Msg.NO_AGENT)

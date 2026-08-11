@@ -2,6 +2,7 @@ import { getDcSystemConfigListByStandType } from '@/service/auth';
 import { ssoLoginByIframe } from '@/utils/bot';
 import { SYSTEM_CONFIG_STORAGE_KEY } from '@/constants/system';
 import { getPublicPath } from '.';
+import type { BusinessTerminologyConfig } from './terminology';
 
 export const getSsoLoginByIframe = () => {
   getDcSystemConfigListByStandType({
@@ -22,6 +23,7 @@ export const getSystemConfigByStorage = (): {
   title?: string;
   assistant?: string;
   favicon?: string;
+  terminology?: BusinessTerminologyConfig;
 } => {
   const config = localStorage.getItem(SYSTEM_CONFIG_STORAGE_KEY);
   if (!config) return {};

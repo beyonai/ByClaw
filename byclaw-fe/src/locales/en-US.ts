@@ -258,6 +258,7 @@ export default {
   'common.previewNoUrl': 'This file does not support preview',
   'common.previewFailed': 'Preview failed, please try again later',
   'common.digitalEmployee': 'Digital Employee',
+  'common.digitalEmployeeNotExist': 'The digital employee does not exist!',
   'common.companyEmployee': 'Company Employee',
   'common.tool': 'Tool',
   'common.object': 'Object',

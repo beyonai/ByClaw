@@ -38,6 +38,7 @@ import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageFileDto;
 import com.iwhalecloud.byai.state.domain.index.service.IndexService;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
+import com.iwhalecloud.byai.state.domain.sys.service.BusinessTerminologyService;
 import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -77,6 +78,9 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
 
     @Autowired
     private IndexService indexService;
+
+    @Autowired
+    private BusinessTerminologyService terminologyService;
 
     public DingtalkBotListener(
             ObjectMapper objectMapper,
@@ -163,7 +167,8 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
 
             AuthDigitEmployVo digitEmployVo = findAuthorizedDigitEmploy(userInfo.getUserId(), robotCode);
             if (digitEmployVo == null) {
-                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "对不起，您可能没有数字员工的权限");
+                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook,
+                    terminologyService.replaceDigitalEmployeeTerms("对不起，您可能没有数字员工的权限"));
                 return;
             }
 
@@ -191,7 +196,8 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
             logger.error("Failed to reply DingTalk bot message. msgId={}, senderStaffId={}, robotCode={}",
                     msgId, senderStaffId, robotCode, e);
             try {
-                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "消息异常：" + e.getMessage());
+                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook,
+                    terminologyService.replaceDigitalEmployeeTerms("消息异常：" + e.getMessage()));
             } catch (IOException ex) {
                 logger.error("Failed to send error message to DingTalk. msgId={}", msgId, ex);
             }
