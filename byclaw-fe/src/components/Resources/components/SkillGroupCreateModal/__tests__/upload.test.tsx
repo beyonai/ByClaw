@@ -101,21 +101,33 @@ jest.mock('../coverProcessor', () => ({ normalizeSkillGroupCover: jest.fn() }));
 
 let mockImportResult: ResourceImportResult | undefined;
 let mockResourceImportProps: any;
+let mockResourceImportMountCount = 0;
+const mockResourceImportUnmount = jest.fn();
 
-jest.mock('../../ResourceImport', () => (props: any) => {
-  mockResourceImportProps = props;
-  if (!props.visible) return null;
+jest.mock('../../ResourceImport', () => {
+  const ReactModule = jest.requireActual('react');
 
-  return (
-    <div aria-label="personal skill import">
-      <button type="button" onClick={() => props.onSuccess(mockImportResult)}>
-        finish upload
-      </button>
-      <button type="button" onClick={props.onCancel}>
-        cancel upload
-      </button>
-    </div>
-  );
+  return (props: any) => {
+    const [mountId] = ReactModule.useState(() => {
+      mockResourceImportMountCount += 1;
+      return mockResourceImportMountCount;
+    });
+    ReactModule.useEffect(() => () => mockResourceImportUnmount(mountId), [mountId]);
+    mockResourceImportProps = props;
+    if (!props.visible) return null;
+
+    return (
+      <div aria-label="personal skill import">
+        <span>import mount {mountId}</span>
+        <button type="button" onClick={() => props.onSuccess(mockImportResult)}>
+          finish upload
+        </button>
+        <button type="button" onClick={props.onCancel}>
+          cancel upload
+        </button>
+      </div>
+    );
+  };
 });
 
 const mockPageSkillGroupMemberCandidates = pageSkillGroupMemberCandidates as jest.Mock;
@@ -160,6 +172,7 @@ describe('SkillGroupCreateModal personal skill upload', () => {
     mockFormValues = {};
     mockImportResult = undefined;
     mockResourceImportProps = undefined;
+    mockResourceImportMountCount = 0;
     mockPageSkillGroupMemberCandidates.mockResolvedValue(initialCandidates);
     mockGetSkillGroupDetail.mockResolvedValue({ members: [{ resourceId: 'personal-1' }] });
   });
@@ -257,6 +270,19 @@ describe('SkillGroupCreateModal personal skill upload', () => {
     view.rerender(<SkillGroupCreateModal visible={false} group={null} onCancel={jest.fn()} onSuccess={jest.fn()} />);
 
     await waitFor(() => expect(screen.queryByLabelText('personal skill import')).not.toBeInTheDocument());
+  });
+
+  it('unmounts the importer on parent close and remounts a fresh instance', async () => {
+    const view = renderModal();
+    await openPersonalUpload();
+    expect(screen.getByText('import mount 1')).toBeInTheDocument();
+
+    view.rerender(<SkillGroupCreateModal visible={false} group={null} onCancel={jest.fn()} onSuccess={jest.fn()} />);
+
+    await waitFor(() => expect(mockResourceImportUnmount).toHaveBeenCalledWith(1));
+    view.rerender(<SkillGroupCreateModal visible group={null} onCancel={jest.fn()} onSuccess={jest.fn()} />);
+    await openPersonalUpload();
+    expect(screen.getByText('import mount 2')).toBeInTheDocument();
   });
 
   it('does not apply a pending refresh after the parent modal closes', async () => {

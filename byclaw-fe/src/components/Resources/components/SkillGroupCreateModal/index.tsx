@@ -416,17 +416,19 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
         </div>
       </Form>
     </Modal>,
-    <ResourceImport
-      visible={skillImportOpen}
-      resourceName={intl.formatMessage({ id: 'common.skill' })}
-      resourceType="SKILL"
-      catalogId=""
-      catalogList={[]}
-      activeTab="personal"
-      saveTool={async () => undefined}
-      onCancel={() => setSkillImportOpen(false)}
-      onSuccess={(result) => void handleSkillImportSuccess(result)}
-    />
+    visible && skillImportOpen ? (
+      <ResourceImport
+        visible={skillImportOpen}
+        resourceName={intl.formatMessage({ id: 'common.skill' })}
+        resourceType="SKILL"
+        catalogId=""
+        catalogList={[]}
+        activeTab="personal"
+        saveTool={async () => undefined}
+        onCancel={() => setSkillImportOpen(false)}
+        onSuccess={(result) => void handleSkillImportSuccess(result)}
+      />
+    ) : null
   );
 };
 
