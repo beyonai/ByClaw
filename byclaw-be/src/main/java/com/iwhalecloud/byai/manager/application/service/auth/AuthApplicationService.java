@@ -492,7 +492,7 @@ public class AuthApplicationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public UseApplyOutcome applyUseIfNeeded(Long resourceId) {
-        SsResource ssResource = getRequiredResource(resourceId);
+        SsResource ssResource = getRequiredResourceForUpdate(resourceId);
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
         if (currentUserId == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.not.login"));
@@ -509,6 +509,16 @@ public class AuthApplicationService {
         qo.setResourceId(resourceId);
         applyUse(qo);
         return UseApplyOutcome.CREATED;
+    }
+
+    private SsResource getRequiredResourceForUpdate(Long resourceId) {
+        LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(SsResource::getResourceId, resourceId).last("FOR UPDATE");
+        SsResource ssResource = ssResourceMapper.selectOne(queryWrapper);
+        if (ssResource == null) {
+            throw new BaseException(I18nUtil.get("resource.not.found"));
+        }
+        return ssResource;
     }
 
     /**
@@ -1139,8 +1149,7 @@ public class AuthApplicationService {
     public Set<Long> queryCurrentUserPendingUseApplyResourceIds(Collection<Long> resourceIds,
         Collection<String> resourceBizTypes) {
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
-        if (CollectionUtils.isEmpty(resourceIds) || CollectionUtils.isEmpty(resourceBizTypes) || currentUserId == null
-            || privilegeGrantMapper == null) {
+        if (CollectionUtils.isEmpty(resourceIds) || CollectionUtils.isEmpty(resourceBizTypes) || currentUserId == null) {
             return Collections.emptySet();
         }
         LambdaQueryWrapper<PrivilegeGrant> queryWrapper = new LambdaQueryWrapper<>();
@@ -1475,26 +1484,32 @@ public class AuthApplicationService {
                 }
             }
 
-            PrivilegeGrantQo organizationGrantQo = new PrivilegeGrantQo();
-            organizationGrantQo.setGrantType(grantType);
-            organizationGrantQo.setGrantObjTypes(grantObjTypes);
-            organizationGrantQo.setGrantToObjType(GrantToObjType.ORG);
-            organizationGrantQo.setGrantToObjIds(orgIdList);
-            organizationGrantQo.setGrantTypes(grantTypes);
-            List<PrivilegeGrant> organizationGrantList = privilegeGrantService.findPrivilegeByQo(organizationGrantQo);
-            authPrivilegeGrantList.addAll(organizationGrantList);
+            if (CollectionUtils.isNotEmpty(orgIdList)) {
+                PrivilegeGrantQo organizationGrantQo = new PrivilegeGrantQo();
+                organizationGrantQo.setGrantType(grantType);
+                organizationGrantQo.setGrantObjTypes(grantObjTypes);
+                organizationGrantQo.setGrantToObjType(GrantToObjType.ORG);
+                organizationGrantQo.setGrantToObjIds(orgIdList);
+                organizationGrantQo.setGrantTypes(grantTypes);
+                List<PrivilegeGrant> organizationGrantList =
+                    privilegeGrantService.findPrivilegeByQo(organizationGrantQo);
+                authPrivilegeGrantList.addAll(organizationGrantList);
+            }
 
             // 添加用户岗位授权信息
             List<PositionDTO> positionList = positionService.findPositionByUserId(grantToObjId);
-            PrivilegeGrantQo positionGrantQo = new PrivilegeGrantQo();
-            positionGrantQo.setGrantType(grantType);
-            positionGrantQo.setGrantObjTypes(grantObjTypes);
-            positionGrantQo.setGrantToObjType(GrantToObjType.POST);
-            positionGrantQo.setGrantTypes(grantTypes);
-            positionGrantQo
-                .setGrantToObjIds(positionList.stream().map(PositionDTO::getPositionId).collect(Collectors.toList()));
-            List<PrivilegeGrant> positionGrantList = privilegeGrantService.findPrivilegeByQo(positionGrantQo);
-            authPrivilegeGrantList.addAll(positionGrantList);
+            List<Long> positionIds = positionList.stream().map(PositionDTO::getPositionId)
+                .filter(Objects::nonNull).collect(Collectors.toList());
+            if (CollectionUtils.isNotEmpty(positionIds)) {
+                PrivilegeGrantQo positionGrantQo = new PrivilegeGrantQo();
+                positionGrantQo.setGrantType(grantType);
+                positionGrantQo.setGrantObjTypes(grantObjTypes);
+                positionGrantQo.setGrantToObjType(GrantToObjType.POST);
+                positionGrantQo.setGrantTypes(grantTypes);
+                positionGrantQo.setGrantToObjIds(positionIds);
+                List<PrivilegeGrant> positionGrantList = privilegeGrantService.findPrivilegeByQo(positionGrantQo);
+                authPrivilegeGrantList.addAll(positionGrantList);
+            }
 
             // 添加用户驻地授权信息
             Station station = stationService.getStationByUserId(grantToObjId);
@@ -1502,14 +1517,16 @@ public class AuthApplicationService {
                 UserStation userStation = new UserStation();
                 BeanUtils.copyProperties(station, userStation);
                 List<Long> stationIds = CompletionsUtils.getStationIds(userStation);
-                PrivilegeGrantQo stationGrantQo = new PrivilegeGrantQo();
-                stationGrantQo.setGrantType(grantType);
-                stationGrantQo.setGrantObjTypes(grantObjTypes);
-                stationGrantQo.setGrantToObjType(GrantToObjType.STATION);
-                stationGrantQo.setGrantToObjIds(stationIds);
-                stationGrantQo.setGrantTypes(grantTypes);
-                List<PrivilegeGrant> stationGrantList = privilegeGrantService.findPrivilegeByQo(stationGrantQo);
-                authPrivilegeGrantList.addAll(stationGrantList);
+                if (CollectionUtils.isNotEmpty(stationIds)) {
+                    PrivilegeGrantQo stationGrantQo = new PrivilegeGrantQo();
+                    stationGrantQo.setGrantType(grantType);
+                    stationGrantQo.setGrantObjTypes(grantObjTypes);
+                    stationGrantQo.setGrantToObjType(GrantToObjType.STATION);
+                    stationGrantQo.setGrantToObjIds(stationIds);
+                    stationGrantQo.setGrantTypes(grantTypes);
+                    List<PrivilegeGrant> stationGrantList = privilegeGrantService.findPrivilegeByQo(stationGrantQo);
+                    authPrivilegeGrantList.addAll(stationGrantList);
+                }
             }
 
         }
