@@ -604,6 +604,40 @@ class SkillGroupApplicationServiceTest {
     }
 
     @Test
+    void preflightAllowsTenantVisibleEnterpriseGroupWithoutGroupGrant() {
+        SsResource group = group();
+        group.setOwnerType("enterprise");
+        SsResource employee = digitalEmployee(401L);
+        List<SkillGroupMemberVo> members = List.of(statusMember(501L, SkillGroupMemberStatus.INSTALLABLE));
+        when(resourceService.findById(GROUP_ID)).thenReturn(group);
+        when(resourceService.findById(401L)).thenReturn(employee);
+        when(authService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(members);
+        when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(skill(501L)));
+        when(memberStatusService.evaluate(members, 401L)).thenReturn(members);
+
+        SkillGroupMemberStatusSummaryVo result = service.preflightInstall(installQo(401L, GROUP_ID));
+
+        assertThat(result.getInstallable()).isEqualTo(1);
+        verify(authService, never()).hasResourceManagePermission(group);
+        verify(authService, never()).hasResourceUsePermission(group);
+    }
+
+    @Test
+    void preflightStillRequiresExplicitAccessForPersonalGroup() {
+        SsResource group = group();
+        group.setOwnerType("personal");
+        when(resourceService.findById(GROUP_ID)).thenReturn(group);
+
+        assertThatThrownBy(() -> service.preflightInstall(installQo(401L, GROUP_ID)))
+                .isInstanceOf(BaseException.class);
+
+        verify(authService).hasResourceManagePermission(group);
+        verify(authService).hasResourceUsePermission(group);
+        verify(mapper, never()).selectActiveMembers(any());
+    }
+
+    @Test
     void preflightIsReadOnlyAndEvaluatesExactlyOnce() {
         SsResource group = group();
         group.setResourceStatus(ResourceStatus.LIST.getNum());

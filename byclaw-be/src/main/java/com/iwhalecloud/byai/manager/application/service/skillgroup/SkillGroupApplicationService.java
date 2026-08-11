@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.application.service.skillgroup;
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.github.pagehelper.PageHelper;
+import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.page.PageInfo;
@@ -428,6 +429,9 @@ public class SkillGroupApplicationService {
         }
         if (!Objects.equals(tenantId, group.getComAcctId())) {
             throw new BaseException("技能组不属于当前企业");
+        }
+        if (!OwnerType.PERSONAL.equals(group.getOwnerType())) {
+            return;
         }
         boolean accessible = authApplicationService.hasResourceManagePermission(group)
                 || authApplicationService.hasResourceUsePermission(group);

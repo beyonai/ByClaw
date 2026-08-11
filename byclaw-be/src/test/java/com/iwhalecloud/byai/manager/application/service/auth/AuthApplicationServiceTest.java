@@ -1112,6 +1112,33 @@ class AuthApplicationServiceTest {
         assertThat(service.hasResourceUsePermission(resource, null)).isFalse();
     }
 
+    @Test
+    void hasResourceUsePermissionForUser_allowsEffectiveManageGrant() {
+        AuthApplicationService service = newExplicitUserPermissionService(
+            List.of(manageGrant(616L, 3L, GrantToObjType.USER, Color.RED, "A")));
+
+        assertThat(service.hasResourceUsePermission(enterpriseResource(616L, 1L), 3L)).isTrue();
+    }
+
+    @Test
+    void hasResourceUsePermissionForUser_manageBlackOverridesRed() {
+        AuthApplicationService service = newExplicitUserPermissionService(List.of(
+            manageGrant(617L, 3L, GrantToObjType.USER, Color.RED, "A"),
+            manageGrant(617L, 3L, GrantToObjType.USER, Color.BLACK, "A")));
+
+        assertThat(service.hasResourceUsePermission(enterpriseResource(617L, 1L), 3L)).isFalse();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ExplicitGrantSource.class)
+    void hasResourceUsePermissionForUser_allowsInheritedManageGrant(ExplicitGrantSource source) {
+        AuthApplicationService service = newExplicitUserPermissionService(
+            List.of(manageGrant(618L, source.targetId, source.grantToObjType, Color.RED, "A")));
+        configureMembership(service, source);
+
+        assertThat(service.hasResourceUsePermission(enterpriseResource(618L, 1L), 3L)).isTrue();
+    }
+
     @ParameterizedTest
     @EnumSource(value = ExplicitGrantSource.class)
     void hasResourceUsePermissionForUser_allowsInheritedGrant(ExplicitGrantSource source) {
@@ -1187,6 +1214,9 @@ class AuthApplicationServiceTest {
         when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> {
             PrivilegeGrantQo qo = invocation.getArgument(0);
             return grants.stream().filter(grant -> grant.getGrantToObjType().equals(qo.getGrantToObjType()))
+                .filter(grant -> qo.getGrantType() == null || qo.getGrantType().equals(grant.getGrantType()))
+                .filter(grant -> qo.getGrantTypes() == null || qo.getGrantTypes().isEmpty()
+                    || qo.getGrantTypes().contains(grant.getGrantType()))
                 .filter(grant -> qo.getGrantToObjId() == null || qo.getGrantToObjId().equals(grant.getGrantToObjId()))
                 .filter(grant -> qo.getGrantToObjIds() == null || qo.getGrantToObjIds().isEmpty()
                     || qo.getGrantToObjIds().contains(grant.getGrantToObjId()))
@@ -1246,6 +1276,12 @@ class AuthApplicationServiceTest {
         grant.setGrantToType(color);
         grant.setOperType(OperType.READ);
         grant.setStatusCd(status);
+        return grant;
+    }
+
+    private PrivilegeGrant manageGrant(Long resourceId, Long targetId, String targetType, String color, String status) {
+        PrivilegeGrant grant = useGrant(resourceId, targetId, targetType, color, status);
+        grant.setGrantType(GrantType.ALLOW_MANAGE);
         return grant;
     }
 

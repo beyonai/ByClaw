@@ -888,8 +888,7 @@ public class AuthApplicationService {
 
     /**
      * 判断当前登录用户是否具备指定资源的使用权限。
-     * 管理权限不在这里隐式算作使用权限，调用方如果允许“管理或使用”访问，请使用
-     * {@link #hasResourceAccessPermission(SsResource)}。
+     * 有效的显式 ALLOW_MANAGE 授权同时具备使用权限；平台管理员、组织管理员等角色兜底能力不在这里隐式算作使用权限。
      */
     public boolean hasResourceUsePermission(SsResource ssResource) {
         return hasResourceUsePermission(ssResource, CurrentUserHolder.getCurrentUserId());
@@ -911,7 +910,7 @@ public class AuthApplicationService {
         }
         List<PrivilegeGrant> privilegeGrants = listAuthPrivilegeGrant(null,
             List.of(ssResource.getResourceBizType()), GrantToObjType.USER, userId,
-            List.of(GrantType.AVAILABLE_USE, GrantType.FORCE_USE));
+            List.of(GrantType.ALLOW_MANAGE, GrantType.AVAILABLE_USE, GrantType.FORCE_USE));
         if (CollectionUtils.isEmpty(privilegeGrants)) {
             return false;
         }
@@ -919,11 +918,21 @@ public class AuthApplicationService {
             .filter(item -> Objects.equals(ssResource.getResourceId(), item.getGrantObjId()))
             .filter(item -> "A".equalsIgnoreCase(item.getStatusCd()))
             .collect(Collectors.toList());
-        boolean hasBlackGrant = matchingGrants.stream()
+        boolean hasManageBlackGrant = matchingGrants.stream()
+            .filter(item -> GrantType.ALLOW_MANAGE.equals(item.getGrantType()))
             .anyMatch(item -> Color.BLACK.equalsIgnoreCase(item.getGrantToType()));
-        boolean hasRedGrant = matchingGrants.stream()
+        boolean hasManageRedGrant = matchingGrants.stream()
+            .filter(item -> GrantType.ALLOW_MANAGE.equals(item.getGrantType()))
             .anyMatch(item -> Color.RED.equalsIgnoreCase(item.getGrantToType()));
-        return hasRedGrant && !hasBlackGrant;
+        boolean hasUseBlackGrant = matchingGrants.stream()
+            .filter(item -> GrantType.AVAILABLE_USE.equals(item.getGrantType())
+                || GrantType.FORCE_USE.equals(item.getGrantType()))
+            .anyMatch(item -> Color.BLACK.equalsIgnoreCase(item.getGrantToType()));
+        boolean hasUseRedGrant = matchingGrants.stream()
+            .filter(item -> GrantType.AVAILABLE_USE.equals(item.getGrantType())
+                || GrantType.FORCE_USE.equals(item.getGrantType()))
+            .anyMatch(item -> Color.RED.equalsIgnoreCase(item.getGrantToType()));
+        return (hasManageRedGrant && !hasManageBlackGrant) || (hasUseRedGrant && !hasUseBlackGrant);
     }
 
     /**
