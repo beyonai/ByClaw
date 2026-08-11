@@ -24,7 +24,9 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.constants.users.UserType;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
+import com.iwhalecloud.byai.manager.domain.auth.model.UseApplyOutcome;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
+import com.iwhalecloud.byai.manager.domain.skillgroup.model.SkillGroupMemberStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -35,11 +37,13 @@ import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCreateQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCandidatePageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupInstallQo;
+import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupIdQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupMemberChangeQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupPageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupUpdateQo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberStatusSummaryVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
@@ -69,6 +73,7 @@ class SkillGroupApplicationServiceTest {
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
     private SsResExtSkillService extSkillService;
     private ByaiSystemConfigService systemConfigService;
+    private SkillGroupMemberStatusService memberStatusService;
     private SkillGroupApplicationService service;
 
     @BeforeEach
@@ -85,6 +90,8 @@ class SkillGroupApplicationServiceTest {
         digitalEmployeeApplicationService = mock(DigitalEmployeeApplicationService.class);
         extSkillService = mock(SsResExtSkillService.class);
         systemConfigService = mock(ByaiSystemConfigService.class);
+        memberStatusService = mock(SkillGroupMemberStatusService.class);
+        when(memberStatusService.evaluate(any(), any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(extSkillService.findByIds(any())).thenAnswer(invocation -> {
             Iterable<Long> resourceIds = invocation.getArgument(0);
             java.util.ArrayList<SsResExtSkill> result = new java.util.ArrayList<>();
@@ -93,7 +100,7 @@ class SkillGroupApplicationServiceTest {
         });
         service = new SkillGroupApplicationService(
                 resourceService, relationService, mapper, authService, sequenceService,
-                digitalEmployeeApplicationService, extSkillService, systemConfigService);
+                digitalEmployeeApplicationService, extSkillService, systemConfigService, memberStatusService);
         setCurrentUser("ordinary", UserType.ORD_USER);
     }
 
@@ -285,6 +292,9 @@ class SkillGroupApplicationServiceTest {
                 .getMethod("install", SkillGroupInstallQo.class)
                 .isAnnotationPresent(Transactional.class)).isTrue();
         assertThat(SkillGroupApplicationService.class
+                .getMethod("executeInstall", SkillGroupInstallQo.class)
+                .isAnnotationPresent(Transactional.class)).isTrue();
+        assertThat(SkillGroupApplicationService.class
                 .getMethod("uninstall", SkillGroupInstallQo.class)
                 .isAnnotationPresent(Transactional.class)).isTrue();
     }
@@ -300,8 +310,11 @@ class SkillGroupApplicationServiceTest {
         when(authService.hasResourceUsePermission(group)).thenReturn(true);
         when(mapper.selectDigitalEmployeeForUpdate(401L, TENANT_ID)).thenReturn(employee);
         when(authService.hasResourceManagePermission(employee)).thenReturn(true);
-        when(mapper.selectMemberRelations(GROUP_ID, null)).thenReturn(List.of(
-                relation(11L, 502L, 1), relation(12L, 501L, 1), relation(13L, 502L, 1)));
+        List<SkillGroupMemberVo> members = List.of(
+                statusMember(502L, SkillGroupMemberStatus.INSTALLABLE),
+                statusMember(501L, SkillGroupMemberStatus.INSTALLABLE));
+        when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(members);
+        when(memberStatusService.evaluate(members, 401L)).thenReturn(members);
         when(resourceService.findByIdList(List.of(502L, 501L))).thenReturn(List.of(skill501, skill502));
         when(authService.hasResourceUsePermission(skill501)).thenReturn(true);
         when(authService.hasResourceUsePermission(skill502)).thenReturn(true);
@@ -319,7 +332,7 @@ class SkillGroupApplicationServiceTest {
         InOrder order = inOrder(mapper, resourceService, digitalEmployeeApplicationService);
         order.verify(mapper).selectGroupForUpdate(GROUP_ID, TENANT_ID);
         order.verify(mapper).selectDigitalEmployeeForUpdate(401L, TENANT_ID);
-        order.verify(mapper).selectMemberRelations(GROUP_ID, null);
+        order.verify(mapper).selectActiveMembers(GROUP_ID);
         order.verify(resourceService).findByIdList(List.of(502L, 501L));
         order.verify(digitalEmployeeApplicationService)
                 .installSkillGroupSnapshot(employee, GROUP_ID, List.of(502L, 501L));
@@ -333,14 +346,16 @@ class SkillGroupApplicationServiceTest {
         when(authService.hasResourceManagePermission(group)).thenReturn(true);
         when(mapper.selectDigitalEmployeeForUpdate(401L, TENANT_ID)).thenReturn(employee);
         when(authService.hasResourceManagePermission(employee)).thenReturn(true);
-        when(mapper.selectMemberRelations(GROUP_ID, null)).thenReturn(List.of());
+        when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(List.of());
 
         assertThatThrownBy(() -> service.install(installQo(401L, GROUP_ID)))
                 .isInstanceOf(BaseException.class);
 
         SsResource invalid = skill(501L);
         invalid.setResourceStatus(ResourceStatus.REMOVED.getNum());
-        when(mapper.selectMemberRelations(GROUP_ID, null)).thenReturn(List.of(relation(11L, 501L, 1)));
+        List<SkillGroupMemberVo> invalidMembers = List.of(
+                statusMember(501L, SkillGroupMemberStatus.INSTALLABLE));
+        when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(invalidMembers);
         when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(invalid));
         assertThatThrownBy(() -> service.install(installQo(401L, GROUP_ID)))
                 .isInstanceOf(BaseException.class);
@@ -479,8 +494,183 @@ class SkillGroupApplicationServiceTest {
         SkillGroupVo result = service.detail(GROUP_ID);
 
         assertThat(result.getMembers()).extracting(SkillGroupMemberVo::getResourceId).containsExactly(501L);
+        verify(memberStatusService).evaluate(List.of(member), null);
         when(mapper.selectDetail(999L, TENANT_ID, USER_ID)).thenReturn(null);
         assertThatThrownBy(() -> service.detail(999L)).isInstanceOf(BaseException.class);
+    }
+
+    @Test
+    void detailEvaluatesMembersOnceAndValidatesOptionalEmployeeManagement() {
+        SkillGroupVo visible = new SkillGroupVo();
+        visible.setResourceId(GROUP_ID);
+        visible.setCreatorName("Alice");
+        SkillGroupMemberVo member = statusMember(501L, SkillGroupMemberStatus.INSTALLABLE);
+        SsResource employee = digitalEmployee(401L);
+        when(mapper.selectDetail(GROUP_ID, TENANT_ID, USER_ID)).thenReturn(visible);
+        when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(List.of(member));
+        when(resourceService.findById(401L)).thenReturn(employee);
+        when(authService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(memberStatusService.evaluate(any(), eq(401L))).thenReturn(List.of(member));
+        SkillGroupIdQo qo = new SkillGroupIdQo();
+        qo.setGroupId(GROUP_ID);
+        qo.setDigitalEmployeeId(401L);
+
+        SkillGroupVo result = service.detail(qo);
+
+        assertThat(result.getCreatorName()).isEqualTo("Alice");
+        assertThat(result.getMembers()).extracting(SkillGroupMemberVo::getMemberStatus)
+                .containsExactly(SkillGroupMemberStatus.INSTALLABLE);
+        verify(memberStatusService).evaluate(any(), eq(401L));
+
+        employee.setComAcctId(999L);
+        assertThatThrownBy(() -> service.detail(qo)).isInstanceOf(BaseException.class);
+    }
+
+    @Test
+    void detailRejectsWrongTypeAndManageDeniedEmployeeBeforeLoadingMembers() {
+        SkillGroupIdQo qo = new SkillGroupIdQo();
+        qo.setGroupId(GROUP_ID);
+        qo.setDigitalEmployeeId(401L);
+        SsResource wrongType = digitalEmployee(401L);
+        wrongType.setResourceBizType("SKILL");
+        SsResource denied = digitalEmployee(401L);
+        SkillGroupVo visible = new SkillGroupVo();
+        visible.setResourceId(GROUP_ID);
+        when(mapper.selectDetail(GROUP_ID, TENANT_ID, USER_ID)).thenReturn(visible);
+        when(resourceService.findById(401L)).thenReturn(wrongType, denied);
+        when(authService.hasResourceManagePermission(denied)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.detail(qo)).isInstanceOf(BaseException.class);
+        assertThatThrownBy(() -> service.detail(qo)).isInstanceOf(BaseException.class);
+
+        verify(mapper, never()).selectActiveMembers(any());
+        verifyNoInteractions(memberStatusService);
+    }
+
+    @Test
+    void preflightIsReadOnlyAndEvaluatesExactlyOnce() {
+        SsResource group = group();
+        group.setResourceStatus(ResourceStatus.LIST.getNum());
+        SsResource employee = digitalEmployee(401L);
+        List<SkillGroupMemberVo> members = List.of(
+                statusMember(501L, SkillGroupMemberStatus.INSTALLABLE),
+                statusMember(502L, SkillGroupMemberStatus.APPLY_REQUIRED));
+        when(resourceService.findById(GROUP_ID)).thenReturn(group);
+        when(authService.hasResourceUsePermission(group)).thenReturn(true);
+        when(resourceService.findById(401L)).thenReturn(employee);
+        when(authService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(members);
+        when(resourceService.findByIdList(List.of(501L, 502L))).thenReturn(List.of(skill(501L), skill(502L)));
+        when(memberStatusService.evaluate(members, 401L)).thenReturn(members);
+
+        SkillGroupMemberStatusSummaryVo result = service.preflightInstall(installQo(401L, GROUP_ID));
+
+        assertThat(result.getInstallable()).isEqualTo(1);
+        assertThat(result.getApplyRequired()).isEqualTo(1);
+        verify(memberStatusService).evaluate(members, 401L);
+        verify(mapper, never()).selectGroupForUpdate(any(), any());
+        verify(mapper, never()).selectDigitalEmployeeForUpdate(any(), any());
+        verifyNoInteractions(digitalEmployeeApplicationService);
+        verify(authService, never()).applyUseIfNeeded(any());
+    }
+
+    @Test
+    void directInstallRequiresConfirmationForAnyPermissionBarrierWithoutMutation() {
+        prepareInstallLocks(401L);
+        List<SkillGroupMemberVo> members = List.of(
+                statusMember(501L, SkillGroupMemberStatus.INSTALLABLE),
+                statusMember(502L, SkillGroupMemberStatus.APPLY_REQUIRED),
+                statusMember(503L, SkillGroupMemberStatus.APPLY_PENDING),
+                statusMember(504L, SkillGroupMemberStatus.APPLY_UNAVAILABLE));
+        when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(members);
+        when(memberStatusService.evaluate(members, 401L)).thenReturn(members);
+        when(resourceService.findByIdList(List.of(501L, 502L, 503L, 504L)))
+                .thenReturn(List.of(skill(501L), skill(502L), skill(503L), skill(504L)));
+
+        SkillGroupInstallResultVo result = service.install(installQo(401L, GROUP_ID));
+
+        assertThat(result.getConfirmationRequired()).isTrue();
+        assertThat(result.getSummary().getApplyRequired()).isEqualTo(1);
+        assertThat(result.getSummary().getApplyPending()).isEqualTo(1);
+        assertThat(result.getSummary().getUnavailable()).isEqualTo(1);
+        assertThat(result.getPendingSkillIds()).containsExactly(503L);
+        assertThat(result.getUnavailableSkillIds()).containsExactly(504L);
+        verifyNoInteractions(digitalEmployeeApplicationService);
+        verify(authService, never()).applyUseIfNeeded(any());
+    }
+
+    @Test
+    void directInstallWithAllMembersInstalledIsNoOpAndReportsExistingIds() {
+        prepareInstallLocks(401L);
+        List<SkillGroupMemberVo> members = List.of(
+                statusMember(501L, SkillGroupMemberStatus.INSTALLED),
+                statusMember(502L, SkillGroupMemberStatus.INSTALLED));
+        when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(members);
+        when(memberStatusService.evaluate(members, 401L)).thenReturn(members);
+        when(resourceService.findByIdList(List.of(501L, 502L))).thenReturn(List.of(skill(501L), skill(502L)));
+
+        SkillGroupInstallResultVo result = service.install(installQo(401L, GROUP_ID));
+
+        assertThat(result.getConfirmationRequired()).isFalse();
+        assertThat(result.getExistingSkillIds()).containsExactly(501L, 502L);
+        verifyNoInteractions(digitalEmployeeApplicationService);
+    }
+
+    @Test
+    void executeInstallsEligibleAndAppliesRequiredInSortedOrderThenReevaluates() {
+        prepareInstallLocks(401L);
+        List<SkillGroupMemberVo> initial = List.of(
+                statusMember(503L, SkillGroupMemberStatus.APPLY_REQUIRED),
+                statusMember(501L, SkillGroupMemberStatus.INSTALLABLE),
+                statusMember(502L, SkillGroupMemberStatus.APPLY_REQUIRED),
+                statusMember(506L, SkillGroupMemberStatus.APPLY_REQUIRED),
+                statusMember(504L, SkillGroupMemberStatus.APPLY_PENDING),
+                statusMember(505L, SkillGroupMemberStatus.APPLY_UNAVAILABLE));
+        List<SkillGroupMemberVo> finalStates = List.of(
+                statusMember(503L, SkillGroupMemberStatus.APPLY_PENDING),
+                statusMember(501L, SkillGroupMemberStatus.INSTALLED),
+                statusMember(502L, SkillGroupMemberStatus.APPLY_PENDING),
+                statusMember(506L, SkillGroupMemberStatus.APPLY_PENDING),
+                statusMember(504L, SkillGroupMemberStatus.APPLY_PENDING),
+                statusMember(505L, SkillGroupMemberStatus.APPLY_UNAVAILABLE));
+        when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(initial, finalStates);
+        when(memberStatusService.evaluate(initial, 401L)).thenReturn(initial);
+        when(memberStatusService.evaluate(finalStates, 401L)).thenReturn(finalStates);
+        when(resourceService.findByIdList(List.of(503L, 501L, 502L, 506L, 504L, 505L)))
+                .thenReturn(List.of(skill(501L), skill(502L), skill(503L), skill(504L), skill(505L), skill(506L)));
+        when(digitalEmployeeApplicationService.installSkillGroupSnapshot(any(), eq(GROUP_ID), eq(List.of(501L))))
+                .thenReturn(new SkillGroupInstallResultVo());
+        when(authService.applyUseIfNeeded(502L)).thenReturn(UseApplyOutcome.CREATED);
+        when(authService.applyUseIfNeeded(503L)).thenReturn(UseApplyOutcome.UNAVAILABLE);
+        when(authService.applyUseIfNeeded(506L)).thenReturn(UseApplyOutcome.PENDING);
+
+        SkillGroupInstallResultVo result = service.executeInstall(installQo(401L, GROUP_ID));
+
+        verify(digitalEmployeeApplicationService).installSkillGroupSnapshot(any(), eq(GROUP_ID), eq(List.of(501L)));
+        InOrder applyOrder = inOrder(authService);
+        applyOrder.verify(authService).applyUseIfNeeded(502L);
+        applyOrder.verify(authService).applyUseIfNeeded(503L);
+        applyOrder.verify(authService).applyUseIfNeeded(506L);
+        assertThat(result.getAppliedSkillIds()).containsExactly(502L);
+        assertThat(result.getUnavailableSkillIds()).containsExactly(503L, 505L);
+        assertThat(result.getPendingSkillIds()).containsExactly(504L, 506L);
+        assertThat(result.getSummary().getMembers()).containsExactlyElementsOf(finalStates);
+        verify(memberStatusService).evaluate(initial, 401L);
+        verify(memberStatusService).evaluate(finalStates, 401L);
+    }
+
+    @Test
+    void executeInstallLetsUnexpectedApplyExceptionEscape() {
+        prepareInstallLocks(401L);
+        List<SkillGroupMemberVo> members = List.of(statusMember(502L, SkillGroupMemberStatus.APPLY_REQUIRED));
+        when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(members);
+        when(memberStatusService.evaluate(members, 401L)).thenReturn(members);
+        when(resourceService.findByIdList(List.of(502L))).thenReturn(List.of(skill(502L)));
+        when(authService.applyUseIfNeeded(502L)).thenThrow(new IllegalStateException("boom"));
+
+        assertThatThrownBy(() -> service.executeInstall(installQo(401L, GROUP_ID)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("boom");
     }
 
     @Test
@@ -879,6 +1069,16 @@ class SkillGroupApplicationServiceTest {
         when(authService.hasResourceManagePermission(group)).thenReturn(true);
     }
 
+    private void prepareInstallLocks(Long employeeId) {
+        SsResource group = group();
+        group.setResourceStatus(ResourceStatus.LIST.getNum());
+        SsResource employee = digitalEmployee(employeeId);
+        when(mapper.selectGroupForUpdate(GROUP_ID, TENANT_ID)).thenReturn(group);
+        when(authService.hasResourceUsePermission(group)).thenReturn(true);
+        when(mapper.selectDigitalEmployeeForUpdate(employeeId, TENANT_ID)).thenReturn(employee);
+        when(authService.hasResourceManagePermission(employee)).thenReturn(true);
+    }
+
     private void prepareLockedManagedGroup() {
         setCurrentUser("adminvip", UserType.ORD_USER);
         SsResource group = group();
@@ -949,6 +1149,7 @@ class SkillGroupApplicationServiceTest {
         resource.setResourceBizType("SKILL_GROUP");
         resource.setResourceType("COMBIN");
         resource.setResourceName("Group");
+        resource.setResourceStatus(ResourceStatus.LIST.getNum());
         resource.setComAcctId(TENANT_ID);
         resource.setCreateBy(USER_ID);
         return resource;
@@ -971,6 +1172,13 @@ class SkillGroupApplicationServiceTest {
         resource.setResourceBizType("DIG_EMPLOYEE");
         resource.setComAcctId(TENANT_ID);
         return resource;
+    }
+
+    private static SkillGroupMemberVo statusMember(Long id, SkillGroupMemberStatus status) {
+        SkillGroupMemberVo member = new SkillGroupMemberVo();
+        member.setResourceId(id);
+        member.setMemberStatus(status);
+        return member;
     }
 
     private static SsResExtSkill innerSkill(Long resourceId) {

@@ -11,6 +11,7 @@
         <result column="owner_type" property="ownerType" />
         <result column="resource_status" property="resourceStatus" />
         <result column="create_by" property="createBy" />
+        <result column="creator_name" property="creatorName" />
         <result column="create_time" property="createTime" />
         <result column="update_time" property="updateTime" />
         <result column="member_count" property="memberCount" />
@@ -66,6 +67,7 @@
         group_resource.owner_type,
         group_resource.resource_status,
         group_resource.create_by,
+        COALESCE(NULLIF(TRIM(creator.user_name), ''), '-') AS creator_name,
         group_resource.create_time,
         group_resource.update_time,
         (
@@ -182,6 +184,7 @@
         SELECT
         <include refid="SkillGroupColumns" />
         FROM ss_resource group_resource
+        LEFT JOIN po_users creator ON group_resource.create_by = creator.user_id
         WHERE group_resource.resource_biz_type = 'SKILL_GROUP'
           AND <include refid="TenantVisibility" />
         <if test="qo.keyword != null and qo.keyword != ''">
@@ -203,6 +206,7 @@
         SELECT
         <include refid="SkillGroupColumns" />
         FROM ss_resource group_resource
+        LEFT JOIN po_users creator ON group_resource.create_by = creator.user_id
         WHERE group_resource.resource_id = #{groupId}
           AND group_resource.resource_biz_type = 'SKILL_GROUP'
           AND <include refid="TenantVisibility" />

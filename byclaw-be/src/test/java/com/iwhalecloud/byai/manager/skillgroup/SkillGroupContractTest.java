@@ -17,6 +17,7 @@ import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupPageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupUpdateQo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberStatusSummaryVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupVo;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
@@ -49,6 +50,9 @@ class SkillGroupContractTest {
 
     @Test
     void requestObjectsExposeExpectedFieldsAndPageDefaults() {
+        SkillGroupIdQo idQo = new SkillGroupIdQo();
+        idQo.setGroupId(20001L);
+        idQo.setDigitalEmployeeId(10001L);
         SkillGroupInstallQo installQo = new SkillGroupInstallQo();
         installQo.setDigitalEmployeeId(10001L);
         installQo.setGroupId(20001L);
@@ -66,6 +70,7 @@ class SkillGroupContractTest {
         candidatePageQo.setGroupId(20001L);
 
         assertThat(installQo.getDigitalEmployeeId()).isEqualTo(10001L);
+        assertThat(idQo.getDigitalEmployeeId()).isEqualTo(10001L);
         assertThat(installQo.getGroupId()).isEqualTo(20001L);
         assertThat(memberChangeQo.getGroupId()).isEqualTo(20001L);
         assertThat(memberChangeQo.getSkillIds()).containsExactly(30001L, 30002L);
@@ -91,6 +96,9 @@ class SkillGroupContractTest {
         assertThat(resultVo.getRemovedSkillIds()).isEmpty();
         assertThat(resultVo.getRetainedSkillIds()).isEmpty();
         assertThat(resultVo.getTotalSkillIds()).isEmpty();
+        assertThat(resultVo.getAppliedSkillIds()).isEmpty();
+        assertThat(resultVo.getPendingSkillIds()).isEmpty();
+        assertThat(resultVo.getUnavailableSkillIds()).isEmpty();
 
         groupVo.getMembers().add(new SkillGroupMemberVo());
         resultVo.getInstalledSkillIds().add(10001L);
@@ -105,6 +113,33 @@ class SkillGroupContractTest {
         assertThat(resultVo.getRemovedSkillIds()).containsExactly(10003L);
         assertThat(resultVo.getRetainedSkillIds()).containsExactly(10004L);
         assertThat(resultVo.getTotalSkillIds()).containsExactly(10005L);
+    }
+
+    @Test
+    void memberStatusSummaryCountsFiveStatesAndPreservesMemberOrder() {
+        List<SkillGroupMemberVo> members = List.of(
+                member(5L, SkillGroupMemberStatus.APPLY_PENDING),
+                member(2L, SkillGroupMemberStatus.INSTALLED),
+                member(5L, SkillGroupMemberStatus.APPLY_REQUIRED),
+                member(3L, SkillGroupMemberStatus.INSTALLABLE),
+                member(4L, SkillGroupMemberStatus.APPLY_UNAVAILABLE));
+
+        SkillGroupMemberStatusSummaryVo summary = SkillGroupMemberStatusSummaryVo.from(members);
+
+        assertThat(summary.getMembers()).containsExactlyElementsOf(members);
+        assertThat(summary.getTotal()).isEqualTo(5);
+        assertThat(summary.getInstalled()).isEqualTo(1);
+        assertThat(summary.getInstallable()).isEqualTo(1);
+        assertThat(summary.getApplyRequired()).isEqualTo(1);
+        assertThat(summary.getApplyPending()).isEqualTo(1);
+        assertThat(summary.getUnavailable()).isEqualTo(1);
+    }
+
+    private static SkillGroupMemberVo member(Long id, SkillGroupMemberStatus status) {
+        SkillGroupMemberVo member = new SkillGroupMemberVo();
+        member.setResourceId(id);
+        member.setMemberStatus(status);
+        return member;
     }
 
     @Test
@@ -626,7 +661,11 @@ class SkillGroupContractTest {
         assertThat(detailSql)
                 .contains("group_resource.resource_id = ?")
                 .contains("group_resource.com_acct_id = ?")
-                .contains("group_resource.owner_type is null");
+                .contains("group_resource.owner_type is null")
+                .contains("left join po_users creator")
+                .contains("as creator_name")
+                .doesNotContain("cast(group_resource.create_by")
+                .doesNotContain("group_resource.create_by as creator_name");
 
         String memberSql = normalizedBoundSql(configuration, "selectActiveMembers", Map.of("groupId", 10001L))
                 .getSql();

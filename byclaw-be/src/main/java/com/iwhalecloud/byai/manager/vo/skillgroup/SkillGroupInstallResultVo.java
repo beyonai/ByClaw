@@ -9,6 +9,8 @@ import lombok.Data;
 @Data
 public class SkillGroupInstallResultVo {
 
+    private Boolean confirmationRequired;
+
     @JsonSerialize(contentUsing = ToStringSerializer.class)
     private List<Long> installedSkillIds = new ArrayList<>();
 
@@ -23,4 +25,15 @@ public class SkillGroupInstallResultVo {
 
     @JsonSerialize(contentUsing = ToStringSerializer.class)
     private List<Long> totalSkillIds = new ArrayList<>();
+
+    @JsonSerialize(contentUsing = ToStringSerializer.class)
+    private List<Long> appliedSkillIds = new ArrayList<>();
+
+    @JsonSerialize(contentUsing = ToStringSerializer.class)
+    private List<Long> pendingSkillIds = new ArrayList<>();
+
+    @JsonSerialize(contentUsing = ToStringSerializer.class)
+    private List<Long> unavailableSkillIds = new ArrayList<>();
+
+    private SkillGroupMemberStatusSummaryVo summary;
 }
