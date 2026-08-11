@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
 import com.iwhalecloud.byai.manager.domain.skillgroup.model.SkillGroupMemberStatus;
+import com.iwhalecloud.byai.manager.domain.skillgroup.model.SkillGroupUninstallMode;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCreateQo;
@@ -15,10 +16,13 @@ import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupInstallQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupMemberChangeQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupPageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupUpdateQo;
+import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupUninstallQo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberStatusSummaryVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupUninstallPreviewVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupUninstallSkillVo;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -113,6 +117,27 @@ class SkillGroupContractTest {
         assertThat(resultVo.getRemovedSkillIds()).containsExactly(10003L);
         assertThat(resultVo.getRetainedSkillIds()).containsExactly(10004L);
         assertThat(resultVo.getTotalSkillIds()).containsExactly(10005L);
+    }
+
+    @Test
+    void uninstallContractsExposeStableModesAndStringIds() throws Exception {
+        SkillGroupUninstallQo qo = new SkillGroupUninstallQo();
+        qo.setGroupId(7001L);
+        qo.setDigitalEmployeeId(8001L);
+        assertThat(qo.getMode()).isEqualTo(SkillGroupUninstallMode.PRESERVE_SHARED);
+
+        SkillGroupUninstallSkillVo shared = new SkillGroupUninstallSkillVo();
+        shared.setResourceId(9002L);
+        shared.setManualSource(true);
+        shared.setOtherGroupIds(List.of(7002L));
+        SkillGroupUninstallPreviewVo preview = new SkillGroupUninstallPreviewVo();
+        preview.setInstalledByGroup(true);
+        preview.setPreviewToken("token");
+        preview.setSharedSkills(List.of(shared));
+
+        String json = OBJECT_MAPPER.writeValueAsString(preview);
+        assertThat(json).contains("\"resourceId\":\"9002\"");
+        assertThat(json).contains("\"otherGroupIds\":[\"7002\"]");
     }
 
     @Test

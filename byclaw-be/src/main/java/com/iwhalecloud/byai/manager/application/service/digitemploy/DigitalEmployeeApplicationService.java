@@ -27,6 +27,7 @@ import com.iwhalecloud.byai.manager.domain.resource.enums.OperationTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.model.SkillRelationSource;
+import com.iwhalecloud.byai.manager.domain.skillgroup.model.SkillGroupUninstallMode;
 import com.iwhalecloud.byai.manager.domain.resource.service.OperationLogService;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceEventService;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceRuntimeInfoResolver;
@@ -99,12 +100,19 @@ import com.iwhalecloud.byai.manager.vo.digitemploy.DebugSessionVo;
 import com.iwhalecloud.byai.manager.vo.digitemploy.SetDefaultDigitalEmployeeResultVo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupUninstallPreviewVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupUninstallSkillVo;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import jakarta.servlet.http.HttpSession;
 import java.util.ArrayList;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Base64;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -1126,13 +1134,39 @@ public class DigitalEmployeeApplicationService {
      * @return deterministic affected, removed, and retained skill IDs
      */
     public SkillGroupInstallResultVo uninstallSkillGroupSnapshot(SsResource digitalEmployee, Long groupId) {
+        return uninstallSkillGroupSnapshot(
+            digitalEmployee, groupId, SkillGroupUninstallMode.PRESERVE_SHARED, null);
+    }
+
+    public SkillGroupUninstallPreviewVo previewSkillGroupUninstallSnapshot(
+        SsResource digitalEmployee, Long groupId) {
         validateSnapshotContext(digitalEmployee, groupId);
+        List<SsResourceRelDetail> relations = skillGroupMapper.selectDigitalEmployeeSkillRelations(
+            digitalEmployee.getResourceId(), null);
+        return buildUninstallPreview(relations, groupId);
+    }
+
+    public SkillGroupInstallResultVo uninstallSkillGroupSnapshot(
+        SsResource digitalEmployee, Long groupId, SkillGroupUninstallMode mode, String previewToken) {
+        validateSnapshotContext(digitalEmployee, groupId);
+        SkillGroupUninstallMode effectiveMode = mode == null
+            ? SkillGroupUninstallMode.PRESERVE_SHARED : mode;
         SkillGroupInstallResultVo result = new SkillGroupInstallResultVo();
         LinkedHashSet<Long> affectedSkillIds = new LinkedHashSet<>();
         LinkedHashSet<Long> removedSkillIds = new LinkedHashSet<>();
         LinkedHashSet<Long> retainedSkillIds = new LinkedHashSet<>();
+        LinkedHashSet<Long> affectedOtherGroupIds = new LinkedHashSet<>();
         List<SsResourceRelDetail> relations = skillGroupMapper.selectDigitalEmployeeSkillRelations(
             digitalEmployee.getResourceId(), null);
+        if (effectiveMode == SkillGroupUninstallMode.REMOVE_ALL) {
+            SkillGroupUninstallPreviewVo preview = buildUninstallPreview(relations, groupId);
+            if (!Objects.equals(previewToken, preview.getPreviewToken())) {
+                result.setConfirmationRequired(true);
+                result.setInstalledByGroup(preview.getInstalledByGroup());
+                result.setUninstallPreview(preview);
+                return result;
+            }
+        }
         Date now = new Date();
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
         boolean changed = false;
@@ -1144,6 +1178,17 @@ public class DigitalEmployeeApplicationService {
             }
             Long skillId = relation.getRelResourceId();
             affectedSkillIds.add(skillId);
+            if (effectiveMode == SkillGroupUninstallMode.REMOVE_ALL) {
+                source.getSourceGroupIds().stream()
+                    .filter(sourceGroupId -> !Objects.equals(sourceGroupId, groupId))
+                    .forEach(affectedOtherGroupIds::add);
+                if (!ssResourceRelDetailService.removeById(relation.getResourceRelDetailId())) {
+                    throw new BaseException("数字员工技能关系删除失败");
+                }
+                removedSkillIds.add(skillId);
+                changed = true;
+                continue;
+            }
             source.removeGroup(groupId);
             if (source.hasAnySource()) {
                 canonicalizeRelation(relation, source, currentUserId, now);
@@ -1167,10 +1212,98 @@ public class DigitalEmployeeApplicationService {
         result.setTotalSkillIds(new ArrayList<>(affectedSkillIds));
         result.setRemovedSkillIds(new ArrayList<>(removedSkillIds));
         result.setRetainedSkillIds(new ArrayList<>(retainedSkillIds));
+        result.setAffectedOtherGroupIds(affectedOtherGroupIds.stream().sorted().toList());
+        result.setConfirmationRequired(false);
+        result.setInstalledByGroup(false);
         if (changed) {
             refreshRuntimeAfterSnapshotMutation(digitalEmployee);
         }
         return result;
+    }
+
+    private SkillGroupUninstallPreviewVo buildUninstallPreview(
+        List<SsResourceRelDetail> relations, Long groupId) {
+        List<SsResourceRelDetail> affectedRelations = safeRelations(relations).stream()
+            .filter(relation -> SkillRelationSource.parse(relation.getRelResourceInfo()).hasGroup(groupId))
+            .sorted(Comparator.comparing(SsResourceRelDetail::getResourceRelDetailId,
+                Comparator.nullsFirst(Long::compareTo)))
+            .toList();
+        for (SsResourceRelDetail relation : affectedRelations) {
+            if (SkillRelationSource.parse(relation.getRelResourceInfo()).isMalformed()) {
+                throw new BaseException("技能来源数据异常，请修复后重试");
+            }
+        }
+
+        LinkedHashSet<Long> resourceIds = new LinkedHashSet<>();
+        for (SsResourceRelDetail relation : affectedRelations) {
+            resourceIds.add(relation.getRelResourceId());
+            SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
+            source.getSourceGroupIds().stream()
+                .filter(sourceGroupId -> !Objects.equals(sourceGroupId, groupId))
+                .forEach(resourceIds::add);
+        }
+        Map<Long, String> resourceNames = ssResourceService.findByIdList(resourceIds).stream()
+            .collect(Collectors.toMap(SsResource::getResourceId, SsResource::getResourceName, (left, right) -> left));
+
+        SkillGroupUninstallPreviewVo preview = new SkillGroupUninstallPreviewVo();
+        preview.setInstalledByGroup(!affectedRelations.isEmpty());
+        preview.setPreviewToken(uninstallPreviewToken(affectedRelations));
+        Map<Long, SkillGroupUninstallSkillVo> skillsById = new LinkedHashMap<>();
+        Map<Long, LinkedHashSet<Long>> otherGroupsBySkillId = new LinkedHashMap<>();
+        for (SsResourceRelDetail relation : affectedRelations) {
+            SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
+            Long skillId = relation.getRelResourceId();
+            SkillGroupUninstallSkillVo skill = skillsById.computeIfAbsent(skillId, ignored -> {
+                SkillGroupUninstallSkillVo value = new SkillGroupUninstallSkillVo();
+                value.setResourceId(skillId);
+                value.setResourceName(resourceNames.get(skillId));
+                value.setManualSource(false);
+                return value;
+            });
+            skill.setManualSource(Boolean.TRUE.equals(skill.getManualSource()) || source.isManual());
+            LinkedHashSet<Long> otherGroupIds = otherGroupsBySkillId.computeIfAbsent(
+                skillId, ignored -> new LinkedHashSet<>());
+            source.getSourceGroupIds().stream()
+                .filter(sourceGroupId -> !Objects.equals(sourceGroupId, groupId))
+                .sorted()
+                .forEach(otherGroupIds::add);
+        }
+        for (SkillGroupUninstallSkillVo skill : skillsById.values()) {
+            List<Long> otherGroupIds = otherGroupsBySkillId.getOrDefault(
+                skill.getResourceId(), new LinkedHashSet<>()).stream().sorted().toList();
+            skill.setOtherGroupIds(otherGroupIds);
+            skill.setOtherGroupNames(otherGroupIds.stream().map(resourceNames::get)
+                .filter(Objects::nonNull).toList());
+            if (Boolean.TRUE.equals(skill.getManualSource()) || !otherGroupIds.isEmpty()) {
+                preview.getSharedSkills().add(skill);
+            }
+            else {
+                preview.getExclusiveSkills().add(skill);
+            }
+        }
+        Comparator<SkillGroupUninstallSkillVo> byResourceId = Comparator.comparing(
+            SkillGroupUninstallSkillVo::getResourceId, Comparator.nullsFirst(Long::compareTo));
+        preview.getExclusiveSkills().sort(byResourceId);
+        preview.getSharedSkills().sort(byResourceId);
+        preview.setAffectedCount(skillsById.size());
+        return preview;
+    }
+
+    private String uninstallPreviewToken(List<SsResourceRelDetail> relations) {
+        String source = relations.stream().map(relation -> {
+            Date updateTime = relation.getUpdateTime();
+            return String.valueOf(relation.getResourceRelDetailId()) + "|"
+                + relation.getRelResourceId() + "|"
+                + (updateTime == null ? "" : updateTime.getTime()) + "|"
+                + SkillRelationSource.parse(relation.getRelResourceInfo()).toJson();
+        }).collect(Collectors.joining("\n"));
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(source.getBytes(StandardCharsets.UTF_8));
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
+        }
+        catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 unavailable", exception);
+        }
     }
 
     /**

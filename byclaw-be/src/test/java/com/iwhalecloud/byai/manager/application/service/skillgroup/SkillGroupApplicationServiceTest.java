@@ -690,7 +690,7 @@ class SkillGroupApplicationServiceTest {
     }
 
     @Test
-    void directInstallWithAllMembersInstalledIsNoOpAndReportsExistingIds() {
+    void directInstallWithAllMembersInstalledAddsTheGroupSnapshotSource() {
         prepareInstallLocks(401L);
         List<SkillGroupMemberVo> members = List.of(
                 statusMember(501L, SkillGroupMemberStatus.INSTALLED),
@@ -698,12 +698,18 @@ class SkillGroupApplicationServiceTest {
         when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(members);
         when(memberStatusService.evaluate(members, 401L)).thenReturn(members);
         when(resourceService.findByIdList(List.of(501L, 502L))).thenReturn(List.of(skill(501L), skill(502L)));
+        SkillGroupInstallResultVo delegated = new SkillGroupInstallResultVo();
+        delegated.setExistingSkillIds(List.of(501L, 502L));
+        when(digitalEmployeeApplicationService.installSkillGroupSnapshot(
+                any(SsResource.class), eq(GROUP_ID), eq(List.of(501L, 502L)))).thenReturn(delegated);
 
         SkillGroupInstallResultVo result = service.install(installQo(401L, GROUP_ID));
 
         assertThat(result.getConfirmationRequired()).isFalse();
         assertThat(result.getExistingSkillIds()).containsExactly(501L, 502L);
-        verifyNoInteractions(digitalEmployeeApplicationService);
+        assertThat(result.getInstalledByGroup()).isTrue();
+        verify(digitalEmployeeApplicationService).installSkillGroupSnapshot(
+                any(SsResource.class), eq(GROUP_ID), eq(List.of(501L, 502L)));
     }
 
     @Test

@@ -106,6 +106,20 @@ export default {
   'resource.installSkillGroup': 'Install Skill Group',
   'resource.installSkillGroupSuccess': 'Skill group installed successfully',
   'resource.skillGroup.installed': 'Installed',
+  'resource.skillGroup.uninstall': 'Uninstall Skill Group',
+  'resource.skillGroup.uninstallSimpleConfirm':
+    'Uninstall this skill group and all of its exclusive skills from the current digital employee?',
+  'resource.skillGroup.uninstallConfirmTitle': 'Confirm skill group uninstall',
+  'resource.skillGroup.uninstallSharedDescription':
+    'Some skills were installed manually or are referenced by other skill groups. Removing all will remove those sources too.',
+  'resource.skillGroup.uninstallPreserve': 'Only uninstall group-exclusive skills',
+  'resource.skillGroup.uninstallAll': 'Uninstall all skills',
+  'resource.skillGroup.manualSource': 'Manually installed',
+  'resource.skillGroup.otherGroupSource': 'Also from: {groups}',
+  'resource.skillGroup.uninstallSuccess': 'Skill group uninstalled successfully',
+  'resource.skillGroup.uninstallRefreshFailed':
+    'The skill group was uninstalled, but the page could not refresh. Please refresh manually.',
+  'resource.skillGroup.previewExpired': 'Skill sources changed. Please confirm the latest impact.',
   'resource.skillGroup.installProcessed': 'Skill group installation and access requests processed',
   'resource.skillGroup.installConfirmTitle': 'Confirm skill group installation',
   'resource.skillGroup.installConfirmDescription':

@@ -59,13 +59,33 @@ export interface SkillGroup {
   createTime: string;
   updateTime: string;
   memberCount: number;
+  installedByGroup?: boolean;
   members: SkillGroupMember[];
+}
+
+export interface SkillGroupUninstallSkill {
+  resourceId: string;
+  resourceName?: string;
+  manualSource: boolean;
+  otherGroupIds: string[];
+  otherGroupNames: string[];
+}
+
+export interface SkillGroupUninstallPreview {
+  installedByGroup: boolean;
+  previewToken: string;
+  exclusiveSkills: SkillGroupUninstallSkill[];
+  sharedSkills: SkillGroupUninstallSkill[];
+  affectedCount: number;
 }
 
 export type SkillGroupVo = SkillGroup;
 
 export interface SkillGroupInstallResult {
   confirmationRequired?: boolean;
+  installedByGroup?: boolean;
+  uninstallPreview?: SkillGroupUninstallPreview;
+  affectedOtherGroupIds?: string[];
   installedSkillIds: string[];
   existingSkillIds: string[];
   removedSkillIds: string[];
@@ -138,8 +158,20 @@ export interface SkillGroupInstallParams {
   digitalEmployeeId: string;
 }
 
+export type SkillGroupUninstallMode = 'PRESERVE_SHARED' | 'REMOVE_ALL';
+
+export interface SkillGroupUninstallParams extends SkillGroupInstallParams {
+  mode?: SkillGroupUninstallMode;
+  previewToken?: string;
+}
+
 export const getSkillGroupDetail = (params: { groupId: string; digitalEmployeeId?: string }) =>
   POST<SkillGroup>('/byaiService/skillGroup/detail', params);
+
+export const refreshSkillGroupDetail = (params: { groupId: string; digitalEmployeeId?: string }) =>
+  POST<SkillGroup>('/byaiService/skillGroup/detail', params, {
+    responseCfg: { hideErrorTips: true },
+  });
 
 export const pageSkillGroupMemberCandidates = (params: SkillGroupCandidatePageParams) =>
   POST<SkillGroupMemberPageResult>('/byaiService/skillGroup/member/candidates', params);
@@ -152,6 +184,16 @@ export const preflightInstallSkillGroup = (params: SkillGroupInstallParams) =>
 
 export const executeInstallSkillGroup = (params: SkillGroupInstallParams) =>
   POST<SkillGroupInstallResult>('/byaiService/skillGroup/install/execute', params);
+
+export const preflightUninstallSkillGroup = (params: SkillGroupInstallParams) =>
+  POST<SkillGroupUninstallPreview>('/byaiService/skillGroup/uninstall/preflight', params, {
+    responseCfg: { hideErrorTips: true },
+  });
+
+export const uninstallSkillGroup = (params: SkillGroupUninstallParams) =>
+  POST<SkillGroupInstallResult>('/byaiService/skillGroup/uninstall', params, {
+    responseCfg: { hideErrorTips: true },
+  });
 
 export const createSkillGroup = (params: SkillGroupCreateParams) =>
   POST<SkillGroup>('/byaiService/skillGroup/create', params);
