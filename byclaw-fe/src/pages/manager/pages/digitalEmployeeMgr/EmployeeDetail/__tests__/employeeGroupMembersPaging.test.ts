@@ -28,4 +28,10 @@ describe('digital employee group member selector performance', () => {
     );
     expect(source).toContain('return existing ? { ...candidate, teamRole: existing.teamRole } : candidate;');
   });
+
+  it('does not expose member ordering controls', () => {
+    expect(source).not.toContain('ArrowUpOutlined');
+    expect(source).not.toContain('ArrowDownOutlined');
+    expect(source).not.toContain('const move =');
+  });
 });

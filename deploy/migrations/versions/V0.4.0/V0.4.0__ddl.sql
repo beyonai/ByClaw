@@ -655,3 +655,12 @@ CREATE TABLE IF NOT EXISTS byai.byai_project_resource
 
 CREATE INDEX IF NOT EXISTS idx_byai_project_resource_project
     ON byai.byai_project_resource (project_id, resource_type, sort_no);
+
+
+-- 数字员工组功能相关索引
+CREATE UNIQUE INDEX IF NOT EXISTS uk_ss_resource_rel_dig_employee_group_member
+    ON byai.ss_resource_rel_detail (resource_id, rel_resource_id)
+    WHERE rel_type_name = 'DIG_EMPLOYEE_GROUP_MEMBER' AND rel_status = 1;
+
+CREATE INDEX IF NOT EXISTS idx_ss_resource_version_active_resource
+    ON byai.ss_resource_version (resource_id, version_status, resource_version_id);

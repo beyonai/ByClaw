@@ -62,6 +62,12 @@ type IProps = {
   hideAction?: boolean;
   hideChatTitle?: boolean;
   sendExtraParams?: Record<string, unknown>;
+
+  /**
+   * 调试 iframe 中锁定当前资源，避免普通会话同步逻辑将其误清空。
+   * 正常聊天页不传该参数，继续使用全局 agentId。
+   */
+  fixedAgentId?: string;
   projectId?: number;
 };
 
@@ -85,6 +91,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     hideChatTitle = false,
     chatUrl,
     hideAction = false,
+    fixedAgentId,
     projectId,
   } = props;
   const { isBottom, setIsBottom, autoEnterBottomOnMessage = true } = props;
@@ -181,9 +188,17 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   }, [currentSession?.projectId, projectId]);
 
   useEffect(() => {
+    if (fixedAgentId) {
+      // 数字员工编辑页调试没有 session 列表上下文，必须始终保留当前调试资源身份。
+      setAgentId?.(`${fixedAgentId}`);
+      setMyAgentType(agentType);
+      return;
+    }
+
     // 新建会话尚无 sessionId 时，agentId 可能来自员工详情或任务模板选择，不能按“普通会话”误清空；
     // 只有已有会话切换时，才根据会话返回的 objectId 同步默认数字员工。
     if (!sessionId) return;
+
     const sessionObjectType = `${currentSession?.objectType || ''}`.toLowerCase();
     const sessionAgentId = currentSession?.objectId;
     // 会话切换时列表缓存可能比 sessionId 晚一拍更新，等待目标会话信息到齐，避免先清空旧 @ 标签再立即重建。
@@ -207,7 +222,16 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     // 运营任务进入会话后立即恢复模板所选员工，使输入框默认 @ 该员工并在发送后继续保留。
     setAgentId?.(nextAgentId);
     setMyAgentType(sessionAgentInfo?.agentType || agentTypeMap.agent);
-  }, [agentList, agentType, currentSession?.objectId, currentSession?.objectType, employeesList, sessionId, setAgentId]);
+  }, [
+    agentList,
+    agentType,
+    currentSession?.objectId,
+    currentSession?.objectType,
+    employeesList,
+    fixedAgentId,
+    sessionId,
+    setAgentId,
+  ]);
 
   // 旧资源面板仍以单详情节点回调；这里统一补齐稳定身份，才能在多次点击同一资源时复用页签。
   const openResourceDetail = useCallback(
@@ -339,6 +363,9 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
 
   const onReceivedChatMessages = useCallback(
     (payload?: ResponseMetadataPayload) => {
+      if (fixedAgentId) {
+        return;
+      }
       const { sessionId: sourceSessionId, metadata } = payload || {};
       if (`${sourceSessionId}` !== `${sessionId}`) {
         return;
@@ -367,7 +394,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
         setMyAgentType(agentInfo.agentType);
       }
     },
-    [agentList, currentSession?.objectId, currentSession?.objectType, employeesList, sessionId]
+    [agentList, currentSession?.objectId, currentSession?.objectType, employeesList, fixedAgentId, sessionId]
   );
 
   const {
@@ -385,6 +412,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     chatUrl,
     sessionId,
     agentType: myAgentType,
+    fixedAgentId,
     addSession,
     onBeforeSend,
   });
