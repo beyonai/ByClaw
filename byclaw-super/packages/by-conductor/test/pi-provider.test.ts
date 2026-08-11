@@ -1,7 +1,7 @@
 import { access, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PiLeaderSessionFactory } from "../src/pi-leader.js";
 import { buildPiRuntimeProviderConfig } from "../src/pi-model-provider.js";
 
@@ -121,4 +121,69 @@ describe("Pi provider registration", () => {
     });
   });
 
+  it("removes developer from the final Leader provider request", async () => {
+    let capturedPayload: Record<string, unknown> | undefined;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (request, init) => {
+        const body =
+          init?.body ??
+          (request instanceof Request ? await request.clone().text() : undefined);
+        capturedPayload = JSON.parse(String(body)) as Record<string, unknown>;
+        return new Response(JSON.stringify({ error: { message: "request captured" } }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    );
+
+    try {
+      const cacheDirectory = await mkdtemp(join(tmpdir(), "byclaw-role-provider-"));
+      tempDirectories.push(cacheDirectory);
+      const factory = await PiLeaderSessionFactory.create({
+        llmProvider: {
+          providerId: "custom-responses",
+          providerName: "Custom Responses",
+          modelId: "reasoning-model",
+          modelName: "Reasoning Model",
+          baseUrl: "https://provider.example.test/v1",
+          apiKey: "test-only",
+          authHeader: true,
+          protocol: "openai-responses",
+          input: ["text"],
+          contextWindow: 128_000,
+          maxTokens: 8_192,
+          reasoning: { enabled: true },
+        },
+        instanceId: "role-provider-test",
+        sessionCacheDirectory: cacheDirectory,
+      });
+      const leader = await factory.create("internal-session-role-test");
+
+      await expect(
+        leader.run({
+          message: "hello",
+          attachments: [],
+          thinkingLevel: "medium",
+          agents: [],
+          sessionContext: { schemaVersion: 1 },
+          currentTime: Date.now(),
+          signal: new AbortController().signal,
+          onDelta: () => undefined,
+          delegate: async () => {
+            throw new Error("not used");
+          },
+          askUser: async () => {
+            throw new Error("not used");
+          },
+        }),
+      ).rejects.toThrow("Leader model call failed");
+
+      const input = capturedPayload?.input;
+      expect(Array.isArray(input) ? input[0] : undefined).toMatchObject({ role: "system" });
+      expect(JSON.stringify(capturedPayload)).not.toContain('"role":"developer"');
+      await leader.dispose();
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
 });

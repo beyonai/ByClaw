@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { adaptVolcengineArkResponsesPayload } from "../pi-provider-adapters/volcengine-ark.js";
+import { adaptByclawMessageRoles } from "../pi-provider-adapters/byclaw-message-roles.js";
 
 const SCHEMA_VERSION = "byclaw.agent-capability-card/v1";
 const GENERATOR_VERSION = "1.0.0";
@@ -187,9 +188,12 @@ ${jsonForPrompt(input.agent)}
           timeoutMs: this.timeoutMs,
           signal: AbortSignal.timeout(this.timeoutMs),
           maxRetries: 1,
-          ...(this.model.provider === "volcengine-ark"
-            ? { onPayload: adaptVolcengineArkResponsesPayload }
-            : {}),
+          onPayload: (payload) => {
+            const roleSafePayload = adaptByclawMessageRoles(payload);
+            return this.model.provider === "volcengine-ark"
+              ? adaptVolcengineArkResponsesPayload(roleSafePayload)
+              : roleSafePayload;
+          },
         },
       );
     } catch (cause) {
