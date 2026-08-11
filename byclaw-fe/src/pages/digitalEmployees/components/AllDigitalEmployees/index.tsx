@@ -20,7 +20,7 @@ import ResourceCard from '@/components/Resources/components/ResourceCard';
 import { IAgentCache, IAgent } from '@/typescript/agent';
 import styles from './index.module.less';
 import useGlobal from '@/hooks/useGlobal';
-import { getAgentChatAvatar, getAgentPath } from '@/utils/agent';
+import { getAgentChatAvatar } from '@/utils/agent';
 import useTracker from '@/hooks/useTracker';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
@@ -330,20 +330,29 @@ function AllDigitalEmployees(
       }
 
       if (employee.agentId) {
-        trackerEmployeeClick(employee, 'marketAgentRedirect');
+        const normalizedEmployee = agentHandler(employee);
+        trackerEmployeeClick(normalizedEmployee, 'marketAgentRedirect');
         dispatch({
           type: 'employees/updateEmployee',
           payload: {
-            employee,
+            employee: normalizedEmployee,
           },
         });
-        setAgentId?.(`${employee.agentId}`);
+        setAgentId?.(`${normalizedEmployee.agentId}`);
         setSessionId?.('');
         const nextSearchParams = new URLSearchParams({
           tab: listTabKey,
           [catalogSearchParamKey]: curActiveLink,
         });
-        navigate(`${getAgentPath(employee)}?${nextSearchParams.toString()}`);
+        // 员工模块内统一打开员工详情，查询参数仅用于返回时恢复企业员工列表位置。
+        navigate(`/employees?${nextSearchParams.toString()}`, {
+          // 路由状态保留本次点击目标，避免返回列表后历史 agentId 覆盖新选择。
+          state: {
+            keepSiderActiveKey: 'agent',
+            selectedAgentId: `${normalizedEmployee.agentId}`,
+            selectedEmployee: normalizedEmployee,
+          },
+        });
         return;
       }
 

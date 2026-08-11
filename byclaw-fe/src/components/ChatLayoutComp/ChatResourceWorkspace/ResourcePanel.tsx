@@ -116,9 +116,11 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
     }
 
     if (primaryKey === 'employee') {
-      if (secondaryKey === 'knowledge') return <Knowledge embedded />;
-      if (secondaryKey === 'skill') return <ResourceSiderPanel resourceType="SKILL" embedded />;
-      if (secondaryKey === 'ontology') return <OntologySiderPanel embedded />;
+      // 右侧资源面板保留与左侧小面板一致的中心入口，但不重复展示当前数字员工栏。
+      if (secondaryKey === 'knowledge') return <Knowledge embedded showRouter />;
+      if (secondaryKey === 'skill') return <ResourceSiderPanel resourceType="SKILL" embedded showRouter />;
+      if (secondaryKey === 'ontology') return <OntologySiderPanel embedded showRouter />;
+      // 模型主菜单已移除，右侧模型列表不再提供“模型中心”跳转入口。
       if (secondaryKey === 'model') return <ModelSiderPanel embedded />;
       return empty;
     }

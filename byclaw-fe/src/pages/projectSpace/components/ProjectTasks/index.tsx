@@ -19,6 +19,7 @@ import dayjs from 'dayjs';
 import {
   deleteOperationTask,
   executeOperationTask,
+  getOperationTask,
   listOperationTasks,
   listProjectMembers,
   listTasks,
@@ -165,6 +166,7 @@ const ProjectTasks: React.FC<Props> = ({
   const [loadingMore, setLoadingMore] = useState(false);
   const [taskBoardOpen, setTaskBoardOpen] = useState(false);
   const requestingRef = useRef(false);
+  const taskDetailRequestIdRef = useRef(0);
   const initialLoadKeyRef = useRef<string | null>(null);
   const [templateTask, setTemplateTask] = useState<DevloopTaskItem | null>(null);
   const [onlyMine, setOnlyMine] = useState(project.projectType === 'develop');
@@ -349,6 +351,19 @@ const ProjectTasks: React.FC<Props> = ({
 
   const openTaskDetail = (task: DevloopTaskItem) => {
     setDetailTask(task);
+    if (project.projectType !== 'operation') return;
+
+    const taskId = Number(task.taskId || task.sessionId);
+    if (!Number.isFinite(taskId)) return;
+    const requestId = ++taskDetailRequestIdRef.current;
+    // 运营任务列表只返回摘要，打开抽屉后补查完整配置，并防止快速切换时旧请求覆盖新任务。
+    void getOperationTask(taskId)
+      .then((response: any) => {
+        if (requestId !== taskDetailRequestIdRef.current) return;
+        const detail = response?.data ?? response;
+        if (detail) setDetailTask({ ...task, ...detail });
+      })
+      .catch(() => undefined);
   };
 
   const openTaskEdit = (task: DevloopTaskItem) => {
@@ -647,6 +662,7 @@ const ProjectTasks: React.FC<Props> = ({
       />
       <TaskDetailDrawer
         task={detailTask}
+        operationProject={project.projectType === 'operation'}
         onClose={() => setDetailTask(null)}
         canEnterSession={detailTask ? isCurrentUserTaskAssignee(detailTask, userInfo) : false}
         onEnterSession={(task) => {

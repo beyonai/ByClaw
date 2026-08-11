@@ -50,6 +50,9 @@ type IProps = {
   isBottom: boolean;
   setIsBottom?: React.Dispatch<React.SetStateAction<boolean>>;
 
+  /** 是否在恢复到消息列表时自动进入聊天态，员工详情页切换员工时需要关闭。 */
+  autoEnterBottomOnMessage?: boolean;
+
   queryInputProps?: Record<string, unknown>;
 
   /** 自定义聊天地址 */
@@ -84,7 +87,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     hideAction = false,
     projectId,
   } = props;
-  const { isBottom, setIsBottom } = props;
+  const { isBottom, setIsBottom, autoEnterBottomOnMessage = true } = props;
   const { sessionId, queryInputProps = {}, readOnly } = props;
   const { cannotAt = !sessionId && !isRootPage() } = props;
 
@@ -178,6 +181,9 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   }, [currentSession?.projectId, projectId]);
 
   useEffect(() => {
+    // 新建会话尚无 sessionId 时，agentId 可能来自员工详情或任务模板选择，不能按“普通会话”误清空；
+    // 只有已有会话切换时，才根据会话返回的 objectId 同步默认数字员工。
+    if (!sessionId) return;
     const sessionObjectType = `${currentSession?.objectType || ''}`.toLowerCase();
     const sessionAgentId = currentSession?.objectId;
     // 会话切换时列表缓存可能比 sessionId 晚一拍更新，等待目标会话信息到齐，避免先清空旧 @ 标签再立即重建。
@@ -328,12 +334,8 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     if (workspaceWasOpen) setResourceListOpen(true);
   }, [sessionId]);
 
-  useEffect(
-    () => () => {
-      if (resourceWorkspaceOwnedRef.current) clearDetailPanel?.();
-    },
-    [clearDetailPanel]
-  );
+  // 路由切换时由 PCLayout 统一决定是否清理详情面板；资源中心入口带 preserveDetailPanel 标记时，
+  // 即使聊天组件卸载，也要保留右侧资源工作区显示在资源中心页面旁边。
 
   const onReceivedChatMessages = useCallback(
     (payload?: ResponseMetadataPayload) => {
@@ -473,10 +475,12 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   }, [agentId]);
 
   useEffect(() => {
+    // 员工详情页可能短暂恢复上一员工的消息，不能因此隐藏当前员工的介绍区域。
+    if (!autoEnterBottomOnMessage) return;
     setIsBottom?.((prev) => {
       return prev || !!lastMsg;
     });
-  }, [lastMsg]);
+  }, [autoEnterBottomOnMessage, lastMsg, setIsBottom]);
 
   useEffect(() => {
     return () => {

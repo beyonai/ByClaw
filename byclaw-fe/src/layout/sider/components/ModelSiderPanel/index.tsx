@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, Descriptions, List, Progress, Spin, Tag } from 'antd';
-import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
+import { useIntl, useNavigate, useSelector } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
 import ActiveSiderAgentBar, { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
+import useResourceCenterRouter from '@/layout/sider/components/useResourceCenterRouter';
 import useGlobal from '@/hooks/useGlobal';
 import { getMyModels, getMyQuota } from '@/pages/models/service';
 import { getCompositeAppInfo } from '@/service/digitalEmployees';
@@ -54,15 +55,16 @@ function sortModelList(list: any[], currentModelInfo?: any) {
 
 interface ModelSiderPanelProps {
   embedded?: boolean;
+  // 嵌入右侧资源面板时仅展示模型中心入口，不重复展示当前数字员工栏。
+  showRouter?: boolean;
 }
 
-const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false }) => {
+const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false, showRouter = false }) => {
   const intl = useIntl();
   const navigate = useNavigate();
-  const { pathname } = useLocation();
   const { EventEmitter } = useGlobal();
   const activeSiderAgent = useActiveSiderAgent();
-  const isModelsPage = pathname.startsWith('/models');
+  const { isCenterPage: isModelsPage, toggleCenter } = useResourceCenterRouter('/models', 'model', showRouter);
   const { defaultDigEmployeeId, userInfo } = useSelector(({ employees, user }: any) => ({
     defaultDigEmployeeId: employees?.defaultDigEmployeeId,
     userInfo: user?.userInfo,
@@ -178,24 +180,29 @@ const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false }) =
 
   return (
     <div className={styles.container}>
-      {!embedded && (
+      {(!embedded || showRouter) && (
         <>
-          <ActiveSiderAgentBar agent={activeSiderAgent} />
+          {!embedded && <ActiveSiderAgentBar agent={activeSiderAgent} />}
           <div
-            className={styles.router}
-            onClick={() =>
-              navigate(
-                isModelsPage ? { pathname: '/chat' } : '/models',
-                isModelsPage ? { state: { keepSiderActiveKey: 'model' } } : undefined
-              )
-            }
+            className={[styles.router, showRouter ? styles.routerSplit : ''].filter(Boolean).join(' ')}
+            onClick={toggleCenter}
           >
-            <AntdIcon type="icon-a-Braindanao" />
-            <span className={styles.middle}>{intl.formatMessage({ id: 'personalModel.title' })}</span>
-            <AntdIcon
-              type={isModelsPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
-              style={{ fontSize: 16, marginLeft: 'auto' }}
-            />
+            {showRouter && (
+              <AntdIcon
+                type={isModelsPage ? 'icon-a-Rightyou' : 'icon-a-Leftzuo'}
+                className={styles.routerBackIcon}
+              />
+            )}
+            <div className={styles.routerMain}>
+              <AntdIcon type="icon-a-Braindanao" />
+              <span className={styles.middle}>{intl.formatMessage({ id: 'personalModel.title' })}</span>
+            </div>
+            {!showRouter && (
+              <AntdIcon
+                type={isModelsPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
+                style={{ fontSize: 16, marginLeft: 'auto' }}
+              />
+            )}
           </div>
         </>
       )}

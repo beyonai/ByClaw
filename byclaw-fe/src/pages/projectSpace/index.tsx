@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Empty, Modal, Spin, message } from 'antd';
-import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
+import { useIntl, useNavigate, useSelector } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
 import { getDigitalEmployeeMentionItem } from '@/components/MessageList/utils';
 import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
@@ -11,8 +11,8 @@ import ProjectDetail from './components/ProjectDetail';
 import { type ChatWithAgentTarget } from './components/ProjectDefaultAgentPanel';
 import { useProjectDetail } from './hooks/useProjectDetail';
 import { useProjectList } from './hooks/useProjectList';
+import { useProjectScopeId } from './hooks/useProjectScopeId';
 import { useProjectTypeConfig } from './hooks/useProjectTypeConfig';
-import { getStoredProjectScopeId, saveProjectScopeIdToStorage } from './constants';
 import type { ProjectSession, ProjectSpace } from './types';
 import styles from './index.module.less';
 
@@ -39,25 +39,19 @@ const getProjectFormInitialValues = (project?: ProjectSpace): Partial<ProjectFor
   };
 };
 
-// 项目页面使用 URL 作为唯一的选中状态来源，
-// 左侧小列表和浏览器刷新都能稳定恢复当前详情。
+// 项目大详情与会话模块共用同一份当前项目状态，不再通过 URL 查询参数重复维护选中值。
 const ProjectSpacePage: React.FC = () => {
-  const location = useLocation();
   const navigate = useNavigate();
   const intl = useIntl();
   const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
-  const { projects, loading: projectsLoading, fetchProjects } = useProjectList();
+  const { projects, loading: projectsLoading, fetchProjects, hasMore, loadMoreProjects } = useProjectList();
   const { projectTypeOptions, projectTypeLoading } = useProjectTypeConfig();
-  const [selectedProjectId, setSelectedProjectId] = useState<string>();
+  const [selectedProjectId, setSelectedProjectId] = useProjectScopeId();
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectSpace>();
   const [editLoading, setEditLoading] = useState(false);
 
-  const urlProjectId = useMemo(
-    () => new URLSearchParams(location.search).get('projectId') || undefined,
-    [location.search]
-  );
   const { activeProject, loading: detailLoading, refreshProject } = useProjectDetail(projects, selectedProjectId);
   const canManageProject = useMemo(() => {
     const currentUserId = userInfo.userId ?? userInfo.id;
@@ -79,32 +73,28 @@ const ProjectSpacePage: React.FC = () => {
   }, [EventEmitter, fetchProjects]);
 
   useEffect(() => {
-    if (!projects.length) {
-      setSelectedProjectId(undefined);
+    if (projectsLoading) return;
+    // 首次请求前列表也为空，不能因此清除会话模块已经保存的当前项目。
+    if (!projects.length) return;
+
+    const storedProject =
+      selectedProjectId && projects.find((project) => getProjectId(project.projectId) === selectedProjectId);
+    if (selectedProjectId && !storedProject) {
+      if (hasMore) void loadMoreProjects();
+      // 另一模块可能刚创建或切换项目，列表刷新完成前保留共享值，不能回退覆盖。
       return;
     }
-
-    const storedProjectId = getStoredProjectScopeId();
-    const requestedProject =
-      urlProjectId && projects.find((project) => getProjectId(project.projectId) === urlProjectId);
-    const storedProject =
-      storedProjectId && projects.find((project) => getProjectId(project.projectId) === storedProjectId);
     const fallbackProject =
-      requestedProject || storedProject || projects.find((project) => project.projectType === 'default') || projects[0];
+      storedProject || projects.find((project) => project.projectType === 'default') || projects[0];
     const nextProjectId = getProjectId(fallbackProject?.projectId);
     if (!nextProjectId) return;
 
-    setSelectedProjectId(nextProjectId);
-    saveProjectScopeIdToStorage(nextProjectId);
-    if (urlProjectId !== nextProjectId) {
-      navigate(`/projectSpace?projectId=${encodeURIComponent(nextProjectId)}`, { replace: true });
-    }
-  }, [navigate, projects, urlProjectId]);
+    if (selectedProjectId !== nextProjectId) setSelectedProjectId(nextProjectId);
+  }, [hasMore, loadMoreProjects, projects, projectsLoading, selectedProjectId, setSelectedProjectId]);
 
   useEffect(() => {
     if (!activeProject?.projectId) return;
     const projectId = getProjectId(activeProject.projectId);
-    saveProjectScopeIdToStorage(projectId);
     EventEmitter.emit('projectSpace-active-project-change', {
       projectId,
       projectName: activeProject.projectName,
@@ -200,17 +190,16 @@ const ProjectSpacePage: React.FC = () => {
           try {
             await deleteProject(Number(project.projectId));
             message.success(intl.formatMessage({ id: 'projectSpace.message.deleteSuccess' }));
-            saveProjectScopeIdToStorage();
+            setSelectedProjectId(undefined);
             await fetchProjects();
             EventEmitter.emit('projectSpace-list-refresh');
-            navigate('/projectSpace');
           } catch (error: any) {
             message.error(error?.message || intl.formatMessage({ id: 'projectSpace.message.deleteFailed' }));
           }
         },
       });
     },
-    [EventEmitter, fetchProjects, intl, navigate]
+    [EventEmitter, fetchProjects, intl, setSelectedProjectId]
   );
 
   return (

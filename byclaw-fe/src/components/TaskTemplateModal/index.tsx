@@ -94,6 +94,8 @@ export interface TaskTemplateModalProps {
   agentOptionsOnly?: boolean;
   agentGroupOptions?: Array<{ label: string; value: string | number }>;
   initialTemplateType?: OperationTaskTemplateType;
+  /** 会话入口展示当前项目分类，运营任务启动入口可继续使用默认标题。 */
+  categoryLabel?: string;
   initialTitle?: string;
   onCancel: () => void;
   onApply: (result: TaskTemplateApplyResult) => void | Promise<void>;
@@ -392,6 +394,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
   agentOptionsOnly = false,
   agentGroupOptions = [],
   initialTemplateType,
+  categoryLabel,
   initialTitle,
   onCancel,
   onApply,
@@ -587,7 +590,11 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
     }
   };
 
-  const title = selectedTemplate ? selectedTemplate.templateName : '选择任务模板';
+  const title = selectedTemplate
+    ? selectedTemplate.templateName
+    : categoryLabel
+      ? `${categoryLabel} · 选择任务模板`
+      : '选择任务模板';
   const subtitle = selectedTemplate ? '完善结构化任务信息和执行配置' : '用结构化信息精准描述任务，数字员工会据此执行';
   const fallbackAgentOptions = useMemo(
     () =>
