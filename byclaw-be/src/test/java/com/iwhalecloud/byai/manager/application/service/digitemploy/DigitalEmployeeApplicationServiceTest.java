@@ -5,6 +5,7 @@ import com.iwhalecloud.byai.common.constants.resource.DigitalEmployType;
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.page.PageInfo;
@@ -53,6 +54,9 @@ import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.MessageSource;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -741,6 +745,22 @@ class DigitalEmployeeApplicationServiceTest {
             assertThat(source.getGroupInstallers()).containsExactlyEntriesOf(Map.of(700L, Set.of(1L)));
         });
         verifySnapshotRefresh(snapshotService, employee, 1);
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(longs = {0L, -1L})
+    void installSkillGroupSnapshotRejectsInvalidInstallerIdentityBeforeAnyMutation(Long currentUserId) {
+        DigitalEmployeeApplicationService snapshotService = snapshotServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        CurrentUserHolder.getLoginInfo().setUserId(currentUserId);
+
+        assertThatThrownBy(() -> snapshotService.installSkillGroupSnapshot(employee, 700L, List.of(301L)))
+            .isInstanceOf(BaseException.class)
+            .hasMessage("digemployee.default.set.user.not.login");
+
+        verifyNoInteractions(skillGroupMapper, sequenceService, ssResourceRelDetailService);
+        verifySnapshotRefresh(snapshotService, employee, 0);
     }
 
     @Test

@@ -1067,6 +1067,7 @@ public class DigitalEmployeeApplicationService {
      */
     public SkillGroupInstallResultVo installSkillGroupSnapshot(
         SsResource digitalEmployee, Long groupId, List<Long> skillIds) {
+        Long currentUserId = requireCurrentUserId();
         List<Long> snapshotSkillIds = normalizeSnapshotSkillIds(digitalEmployee, groupId, skillIds);
         SkillGroupInstallResultVo result = new SkillGroupInstallResultVo();
         result.setTotalSkillIds(new ArrayList<>(snapshotSkillIds));
@@ -1075,7 +1076,6 @@ public class DigitalEmployeeApplicationService {
             digitalEmployee.getResourceId(), snapshotSkillIds);
         Map<Long, List<SsResourceRelDetail>> relationsBySkillId = groupSkillRelationsByTarget(existingRelations);
         Date now = new Date();
-        Long currentUserId = CurrentUserHolder.getCurrentUserId();
         boolean changed = false;
 
         for (Long skillId : snapshotSkillIds) {
