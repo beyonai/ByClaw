@@ -14,12 +14,18 @@ public interface GitRepositoryProvider {
     /** provider 标识，例如 github。 */
     String providerType();
 
-    /** 查询指定仓库 ref 下的目录节点。 */
-    List<ProjectRepoTreeNodeDTO> listTree(String repoFullName, String path, String ref, String accessToken);
+    /** 查询指定仓库 ref 下的目录节点；provider 应优先使用 repoUrl，repoFullName 仅作兼容兜底。 */
+    List<ProjectRepoTreeNodeDTO> listTree(String repoUrl, String repoFullName, String path, String ref,
+        String accessToken);
 
-    /** 查询仓库全部远程分支。 */
-    List<ProjectRepoBranchDTO> listBranches(String repoFullName, String accessToken);
+    /** 按指定 ref 搜索仓库文件名和路径。 */
+    List<ProjectRepoTreeNodeDTO> searchTree(String repoUrl, String repoFullName, String keyword, String ref,
+        String accessToken);
 
-    /** 查询指定分支上的文件内容。 */
-    ProjectRepoFileContentDTO getFileContent(String repoFullName, String branch, String path, String accessToken);
+    /** 查询仓库全部远程分支；provider 应优先使用 repoUrl，repoFullName 仅作兼容兜底。 */
+    List<ProjectRepoBranchDTO> listBranches(String repoUrl, String repoFullName, String accessToken);
+
+    /** 查询指定分支上的文件内容；provider 应优先使用 repoUrl，repoFullName 仅作兼容兜底。 */
+    ProjectRepoFileContentDTO getFileContent(String repoUrl, String repoFullName, String branch, String path,
+        String accessToken);
 }

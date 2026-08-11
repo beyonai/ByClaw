@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState, type Key } from 'react';
-import { Dropdown, Empty, message } from 'antd';
-import { BranchesOutlined } from '@ant-design/icons';
+import { Button, Dropdown, Empty, Input, message } from 'antd';
+import { BranchesOutlined, DownOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import { DragType } from '@/components/QueryInput/withDrag';
 import useGlobal from '@/hooks/useGlobal';
@@ -17,6 +17,7 @@ import {
   listProjectRepoBranches,
   listProjectRepoTree,
   listProjectRepos,
+  searchProjectRepoTree,
   type DevloopProjectRepo,
   type ProjectRepoBranch,
   type ProjectRepoTreeNode,
@@ -32,10 +33,13 @@ interface ReposTabProps {
 
 const toFileBrowserItem = (node: ProjectRepoTreeNode) => ({
   name: node.name,
-  path: node.path,
+  // FileTreeList 使用 path 作为目录缓存键；统一补齐根斜杠，保证根节点与懒加载子节点使用同一套键格式。
+  path: normalizeFileBrowserPath(node.path),
   isDir: node.type === 'directory',
   size: node.size,
 });
+
+const formatBranchLabel = (branch: string) => (branch.length > 10 ? `${branch.substring(0, 10)}...` : branch);
 
 const RemoteFileContent: React.FC<{ name: string; content: string; binary?: boolean }> = ({
   name,
@@ -62,6 +66,7 @@ const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail
   const [branchesMap, setBranchesMap] = useState<Record<string, ProjectRepoBranch[]>>({});
   const [branchMap, setBranchMap] = useState<Record<string, string>>({});
   const [branchLoadingMap, setBranchLoadingMap] = useState<Record<string, boolean>>({});
+  const [repoSearchValueMap, setRepoSearchValueMap] = useState<Record<string, string>>({});
   const requestSeqRef = useRef<Record<string, number>>({});
 
   const fetchRepoTree = useCallback(
@@ -134,8 +139,47 @@ const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail
     setExpandedKeysMap({});
     setBranchesMap({});
     setBranchMap({});
+    setRepoSearchValueMap({});
     void fetchRepos();
   }, [fetchRepos]);
+
+  const searchRepoFiles = useCallback(
+    async (repo: DevloopProjectRepo, keyword: string, branch?: string) => {
+      const repoKey = `${repo.repoId}`;
+      const selectedBranch = branch || branchMap[repoKey] || repo.defaultBranch || 'main';
+      const normalizedKeyword = keyword.trim();
+      if (!normalizedKeyword) {
+        await fetchRepoTree(repo, selectedBranch);
+        return;
+      }
+      const requestSeq = (requestSeqRef.current[repoKey] || 0) + 1;
+      requestSeqRef.current[repoKey] = requestSeq;
+      setRepoLoadingMap((current) => ({ ...current, [repoKey]: true }));
+      try {
+        const response = await searchProjectRepoTree({
+          projectId,
+          repoId: repo.repoId,
+          keyword: normalizedKeyword,
+          ref: selectedBranch,
+        });
+        if (requestSeq === requestSeqRef.current[repoKey]) {
+          setRepoFilesMap((current) => ({ ...current, [repoKey]: (response || []).map(toFileBrowserItem) }));
+          setChildrenByRepoPath((current) => ({ ...current, [repoKey]: {} }));
+          setExpandedKeysMap((current) => ({ ...current, [repoKey]: [] }));
+        }
+      } catch (error) {
+        console.error('Failed to search remote repository files:', error);
+        if (requestSeq === requestSeqRef.current[repoKey]) {
+          setRepoFilesMap((current) => ({ ...current, [repoKey]: [] }));
+        }
+      } finally {
+        if (requestSeq === requestSeqRef.current[repoKey]) {
+          setRepoLoadingMap((current) => ({ ...current, [repoKey]: false }));
+        }
+      }
+    },
+    [branchMap, fetchRepoTree, projectId]
+  );
 
   const loadRepoTreeNode = useCallback(
     async (repo: DevloopProjectRepo, node: FileTreeItem) => {
@@ -200,9 +244,10 @@ const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail
       const repoKey = `${repo.repoId}`;
       setChildrenByRepoPath((current) => ({ ...current, [repoKey]: {} }));
       setExpandedKeysMap((current) => ({ ...current, [repoKey]: [] }));
-      await fetchRepoTree(repo, branchMap[repoKey] || repo.defaultBranch || 'main');
+      const keyword = repoSearchValueMap[repoKey] || '';
+      await searchRepoFiles(repo, keyword, branchMap[repoKey] || repo.defaultBranch || 'main');
     },
-    [branchMap, fetchRepoTree]
+    [branchMap, repoSearchValueMap, searchRepoFiles]
   );
 
   const changeBranch = useCallback(
@@ -211,9 +256,9 @@ const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail
       setBranchMap((current) => ({ ...current, [repoKey]: branch }));
       setChildrenByRepoPath((current) => ({ ...current, [repoKey]: {} }));
       setExpandedKeysMap((current) => ({ ...current, [repoKey]: [] }));
-      await fetchRepoTree(repo, branch);
+      await searchRepoFiles(repo, repoSearchValueMap[repoKey] || '', branch);
     },
-    [fetchRepoTree]
+    [repoSearchValueMap, searchRepoFiles]
   );
 
   if (!repos.length) {
@@ -248,12 +293,34 @@ const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail
             fillContainer={fillContainer}
             style={idx > 0 ? { marginTop: 10 } : undefined}
             headerExtra={
-              <Dropdown menu={{ items: branchItems }} trigger={['click']}>
-                <button type="button" className={styles.repoChangesButton} disabled={!!branchLoadingMap[repoKey]}>
+              <Dropdown menu={{ items: branchItems }} trigger={['click']} overlayClassName={styles.repoBranchDropdown}>
+                <Button
+                  type="text"
+                  loading={!!branchLoadingMap[repoKey]}
+                  icon={<DownOutlined />}
+                  iconPosition="end"
+                  title={branch}
+                  style={{ paddingInline: 5 }}
+                >
                   <BranchesOutlined />
-                  <span>{branch}</span>
-                </button>
+                  <span>{formatBranchLabel(branch)}</span>
+                </Button>
               </Dropdown>
+            }
+            contentBefore={
+              <div className={styles.detailRepoSearch}>
+                <Input.Search
+                  allowClear
+                  value={repoSearchValueMap[repoKey] || ''}
+                  placeholder={intl.formatMessage({ id: 'projectSpace.detail.repo.searchPlaceholder' })}
+                  loading={!!repoLoadingMap[repoKey]}
+                  onChange={(event) =>
+                    setRepoSearchValueMap((current) => ({ ...current, [repoKey]: event.target.value }))
+                  }
+                  onSearch={(value) => void searchRepoFiles(repo, value, branch)}
+                  onClear={() => void searchRepoFiles(repo, '', branch)}
+                />
+              </div>
             }
             loading={!!repoLoadingMap[repoKey]}
             items={repoFilesMap[repoKey] || []}

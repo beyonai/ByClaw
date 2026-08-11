@@ -3793,3 +3793,11 @@
   font-size: 12px;
   color: #8c8c8c;
 }
+
+// 分支数量较多时限制下拉高度，避免菜单超出资源面板可视区域。
+.repoBranchDropdown {
+  :global(.@{antPrefix}-dropdown-menu) {
+    max-height: 320px;
+    overflow-y: auto;
+  }
+}

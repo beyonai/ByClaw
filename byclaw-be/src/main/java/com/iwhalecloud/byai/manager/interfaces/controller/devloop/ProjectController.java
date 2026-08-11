@@ -243,6 +243,20 @@ public class ProjectController {
     }
 
     /**
+     * 按指定分支搜索仓库文件名和路径。
+     *
+     * @param query 包含 projectId、repoId、keyword；ref 可选
+     * @return 匹配的文件和目录
+     */
+    @PostMapping("/repo/tree/search")
+    public ResponseUtil<List<ProjectRepoTreeNodeDTO>> searchProjectRepoTree(
+        @RequestBody ProjectRepoTreeQueryDTO query) {
+        return ResponseUtil.successResponse(projectRepositoryService.searchTree(
+            query == null ? null : query.getProjectId(), query == null ? null : query.getRepoId(),
+            query == null ? null : query.getKeyword(), query == null ? null : query.getRef()));
+    }
+
+    /**
      * 查询仓库的全部远程分支。
      *
      * @param params 包含 repoId（必填）

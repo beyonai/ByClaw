@@ -284,6 +284,9 @@ export type ProjectRepoFileContent = {
 export const listProjectRepoTree = (data: { projectId: number; repoId: number; path?: string; ref?: string }) =>
   POST<ProjectRepoTreeNode[]>('/byaiService/project/repo/tree', data);
 
+export const searchProjectRepoTree = (data: { projectId: number; repoId: number; keyword: string; ref?: string }) =>
+  POST<ProjectRepoTreeNode[]>('/byaiService/project/repo/tree/search', data);
+
 export const listProjectRepoBranches = (repoId: number) =>
   POST<ProjectRepoBranch[]>('/byaiService/project/repo/branch/list', { repoId });
 
