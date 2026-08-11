@@ -1,4 +1,4 @@
-// 项目详情「数字员工」tab:角色卡(复用 ResourceCard 样式)网格排布,底部固定保存。
+// 项目详情「数字员工」tab:角色卡(复用 ResourceCard 样式)网格排布,更换/清除即时落库。
 .panel {
   min-height: 0;
   flex: 1;
@@ -39,7 +39,14 @@
   width: 100%;
 }
 
-// 下拉项:头像 + 名称一行,头像取接口返回的员工图标,缺图时用名称首字兜底。
+// 卡片头像容器:尺寸对齐「数字员工」页的 .employeeAvatar(56px),
+// getAgentChatAvatar 返回的 img 是 100% 宽高,尺寸由这个容器定。
+.roleAvatar {
+  width: 56px;
+  height: 56px;
+}
+
+// 下拉项:头像 + 名称一行,头像同样走 getAgentChatAvatar(缺图时它自己回落默认头像)。
 .roleOption {
   display: flex;
   align-items: center;
@@ -47,22 +54,13 @@
   min-width: 0;
 }
 
-.roleOptionLogo,
-.roleOptionLogoFallback {
+.roleOptionLogo {
   flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-  object-fit: cover;
-}
-
-.roleOptionLogoFallback {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #246bfe;
-  background: #eaf2ff;
-  font-size: 11px;
+  width: 20px;
+  height: 20px;
 }
 
 .roleOptionLabel {
@@ -79,16 +77,10 @@
   gap: 8px;
 }
 
-.footer {
-  flex-shrink: 0;
-  display: flex;
-  justify-content: flex-end;
-  padding-top: 12px;
-  margin-top: 4px;
-  border-top: 1px solid #edf1f7;
-}
-
-.saveButton {
-  height: 28px;
-  padding: 0 14px;
+// 「去聊天」占的是卡片底部原本放创建者的那一格(metaNode):
+// link 型按钮去掉内边距,文字基线才和创建者行一致。
+.roleChatButton {
+  height: auto;
+  padding: 0;
+  font-size: 12px;
 }

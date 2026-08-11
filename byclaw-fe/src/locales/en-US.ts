@@ -1617,7 +1617,7 @@ export default {
   'projectSpace.defaultAgent.changeAgent': 'Change assistant',
   'projectSpace.defaultAgent.clearAgent': 'Clear assignment',
   'projectSpace.defaultAgent.noAgent': 'No assistants available',
-  'projectSpace.defaultAgent.save': 'Save',
+  'projectSpace.defaultAgent.chatWithAgent': 'Chat',
   'projectSpace.defaultAgent.saveSuccess': 'Default assistants saved',
   'projectSpace.defaultAgent.saveFailed': 'Failed to save default assistants',
   'projectSpace.enterProjectDetail': 'Open project details',

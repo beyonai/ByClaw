@@ -5,9 +5,10 @@ export interface DigitalEmployeeOption {
   value: string;
   label: string;
   keywords?: string;
-  // 接口原样的头像路径(个人助理走 avatar,企业员工走 resourceLogoUrl),不在这里拼 URL:
-  // 交给 ResourceCard 用它自己的 getFileUrl + 加载失败兜底,避免两套图片降级逻辑。
-  logo?: string;
+  // 接口原样的头像值,不在这里拼 URL:渲染侧统一走 getAgentChatAvatar,
+  // 与「数字员工」页两个 Tab 用同一条管道(圆形头像、icon- 字体图标、默认头像兜底)。
+  // chatAvatar 优先(两个列表接口都返回它),缺失才退企业/个人列表各自的图片字段。
+  chatAvatar?: string;
 }
 
 const pickArray = (...candidates: any[]): any[] => candidates.find((item) => Array.isArray(item)) || [];
@@ -52,7 +53,7 @@ export const useDigitalEmployeeOptions = (enabled: boolean) => {
           value: optionValue,
           label,
           keywords: [agent.agentName, agent.resourceName, agent.name, agent.description].filter(Boolean).join(' '),
-          logo: agent.resourceLogoUrl || agent.avatar || undefined,
+          chatAvatar: agent.chatAvatar || agent.resourceLogoUrl || agent.avatar || undefined,
         });
       });
       setOptions(Array.from(optionMap.values()));

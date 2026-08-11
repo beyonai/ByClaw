@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Empty, Modal, Spin, message } from 'antd';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
+import { agentTypeMap } from '@/constants/agent';
 import useGlobal from '@/hooks/useGlobal';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import { deleteProject, saveDefaultAgent, saveProjectMembers, saveProjectResources, updateProject } from '@/service/devloop';
@@ -229,7 +230,7 @@ const ProjectSpacePage: React.FC = () => {
               project={activeProject}
               onRefresh={refreshProject}
               onOpenSession={handleOpenSession}
-              onNewSession={() => {
+              onNewSession={(agentId?: string) => {
                 setSessionId?.('');
                 navigate('/chat', {
                   state: {
@@ -239,6 +240,19 @@ const ProjectSpacePage: React.FC = () => {
                     projectName: activeProject.projectName,
                   },
                 });
+                // 只有数字员工卡的「去聊天」带 agentId;工具栏「新建会话」不带,行为不变。
+                // 不能在这里直接 setAgentId:聊天页挂载时 ChatLayoutComp 会按「无会话员工」清空一次
+                // (见其 sessionAgentSyncKey 那个 effect),先设的值会被抹掉。改为挂载后发既有的
+                // queryInput-set-schema —— 它的监听会重新 setAgentId + setMyAgentType,而那个清空
+                // effect 依赖里没有 agentId,不会再回头覆盖,输入框据此预置 @ 该员工。
+                if (!agentId) return;
+                window.setTimeout(() => {
+                  EventEmitter.emit('queryInput-set-schema', {
+                    agentId,
+                    agentType: agentTypeMap.agent,
+                    resourceList: [],
+                  });
+                }, 150);
               }}
               onEditProject={canManageProject ? handleEditProject : undefined}
               onDeleteProject={canManageProject ? handleDeleteProject : undefined}

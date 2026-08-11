@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Empty, Modal, Select, message } from 'antd';
-import { DeleteOutlined, SwapOutlined } from '@ant-design/icons';
+import { CommentOutlined, DeleteOutlined, SwapOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import { getDefaultAgent, saveDefaultAgent, type DefaultAgentConfig } from '@/service/devloop';
-import { getFileUrl } from '@/utils/file';
+import { getAgentChatAvatar } from '@/utils/agent';
 import ResourceCard, { type IResourceCardItem } from '@/components/Resources/components/ResourceCard';
 import { useDigitalEmployeeOptions } from '../../hooks/useDigitalEmployeeOptions';
 import {
@@ -20,29 +20,28 @@ import styles from './index.module.less';
 interface Props {
   projectId: number;
   active: boolean;
+  // 带员工进新会话:与工具栏「新建会话」同一入口,额外把该员工设为会话 agent,
+  // 输入框据此自动预置一个 @ 该员工的 mention(见 RichInput/useDefaultAgentElement)。
+  onChatWithAgent?: (agentId: string) => void;
 }
 
 // 角色卡不是资源实体,只借 ResourceCard 的壳:
 // - 不给 resourceId,ResourceCard 的权限查询会整段跳过,角色卡不打无效请求;
 // - 菜单走 actionConfig.extraMenuItems(不过权限校验),这样右下角三个点才会出现 ——
-//   ResourceCard 仅在菜单非空时渲染那个按钮;
-// - 头像给 resourceLogoUrl 原始路径,由 ResourceCard 自己 getFileUrl 并处理加载失败,
-//   不传 avatarNode(那会顶掉它的图片分支)。
-const roleCardResource = (roleLabel: string, agentName?: string, logo?: string): IResourceCardItem => ({
+//   ResourceCard 仅在菜单非空时渲染那个按钮。
+const roleCardResource = (roleLabel: string, agentName?: string): IResourceCardItem => ({
   resourceName: agentName || '',
   tagName: roleLabel,
-  resourceLogoUrl: logo,
 });
 
 // 项目详情「数字员工」tab:维护该项目四角色(架构/需求/研发/测试)的兜底助理覆盖。
 // 未为某角色指定=占位提示全局默认,回退到全局(合并在后端 resolve 完成);保存写项目作用域覆盖。
-const ProjectDefaultAgentPanel: React.FC<Props> = ({ projectId, active }) => {
+const ProjectDefaultAgentPanel: React.FC<Props> = ({ projectId, active, onChatWithAgent }) => {
   const intl = useIntl();
   const t = (id: string, values?: Record<string, string | number>) => intl.formatMessage({ id }, values);
   const { options, loading } = useDigitalEmployeeOptions(active);
   const [draft, setDraft] = useState<DefaultAgentAssignment>(emptyAssignment());
   const [globalDefaults, setGlobalDefaults] = useState<DefaultAgentConfig>({});
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!active || !projectId) return;
@@ -73,11 +72,7 @@ const ProjectDefaultAgentPanel: React.FC<Props> = ({ projectId, active }) => {
         title: option.label,
         label: (
           <span className={styles.roleOption}>
-            {option.logo ? (
-              <img className={styles.roleOptionLogo} src={getFileUrl(option.logo)} alt="" />
-            ) : (
-              <span className={styles.roleOptionLogoFallback}>{option.label.slice(0, 1)}</span>
-            )}
+            <span className={styles.roleOptionLogo}>{getAgentChatAvatar(option.chatAvatar)}</span>
             <span className={styles.roleOptionLabel}>{option.label}</span>
           </span>
         ),
@@ -85,8 +80,11 @@ const ProjectDefaultAgentPanel: React.FC<Props> = ({ projectId, active }) => {
     [options]
   );
   const labelById = useMemo(() => new Map(options.map((option) => [option.value, option.label])), [options]);
-  const logoById = useMemo(
-    () => new Map(options.filter((option) => option.logo).map((option) => [option.value, option.logo as string])),
+  const avatarById = useMemo(
+    () =>
+      new Map(
+        options.filter((option) => option.chatAvatar).map((option) => [option.value, option.chatAvatar as string])
+      ),
     [options]
   );
 
@@ -102,6 +100,23 @@ const ProjectDefaultAgentPanel: React.FC<Props> = ({ projectId, active }) => {
   const [editingRole, setEditingRole] = useState<DefaultAgentRole | null>(null);
   const [editingValue, setEditingValue] = useState<string | undefined>(undefined);
 
+  // 当前对该角色真正生效的员工:项目覆盖优先,未指定则是全局默认那位。
+  // 标题、头像、「去聊天」都以它为准,三处保持同一个人。
+  const effectiveAgentIdOf = (role: DefaultAgentRole) => draft[role] || globalDefaults[`${role}AgentId`] || '';
+
+  // 改完即落库:取消底部保存按钮后,更换/清除各自是一次完整提交。
+  // 失败回滚到提交前的草稿,避免界面显示未真正保存的值。
+  const persistAssignment = async (next: DefaultAgentAssignment, previous: DefaultAgentAssignment) => {
+    setDraft(next);
+    try {
+      await saveDefaultAgent(assignmentToPayload(next, labelById, projectId));
+      message.success(t('projectSpace.defaultAgent.saveSuccess'));
+    } catch (error: any) {
+      setDraft(previous);
+      message.error(error?.message || t('projectSpace.defaultAgent.saveFailed'));
+    }
+  };
+
   const openRoleEditor = (role: DefaultAgentRole) => {
     setEditingRole(role);
     setEditingValue(draft[role] || undefined);
@@ -114,13 +129,13 @@ const ProjectDefaultAgentPanel: React.FC<Props> = ({ projectId, active }) => {
 
   const confirmRoleEditor = () => {
     if (!editingRole) return;
-    setDraft((prev) => ({ ...prev, [editingRole]: editingValue || '' }));
     closeRoleEditor();
+    void persistAssignment({ ...draft, [editingRole]: editingValue || '' }, draft);
   };
 
-  // 清除只回到「沿用全局默认」,不是删配置;仍需点保存才落库,与更换保持一致。
+  // 清除只回到「沿用全局默认」,不是删配置;与更换一样即时落库。
   const clearRole = (role: DefaultAgentRole) => {
-    setDraft((prev) => ({ ...prev, [role]: '' }));
+    void persistAssignment({ ...draft, [role]: '' }, draft);
   };
 
   // 卡片标题:优先本项目已选员工名(选项表里查,退 id),未指定则显示全局默认提示。
@@ -129,23 +144,11 @@ const ProjectDefaultAgentPanel: React.FC<Props> = ({ projectId, active }) => {
     return picked ? labelById.get(picked) || picked : globalPlaceholder(role);
   };
 
-  // 头像跟着「当前生效的那个员工」走:项目覆盖优先,未指定则用全局默认那位的头像,
-  // 与标题展示的员工保持一致;拿不到头像时 ResourceCard 自己回落默认图标。
-  const agentLogoOf = (role: DefaultAgentRole) => {
-    const effectiveId = draft[role] || globalDefaults[`${role}AgentId`] || '';
-    return effectiveId ? logoById.get(effectiveId) : undefined;
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await saveDefaultAgent(assignmentToPayload(draft, labelById, projectId));
-      message.success(t('projectSpace.defaultAgent.saveSuccess'));
-    } catch (error: any) {
-      message.error(error?.message || t('projectSpace.defaultAgent.saveFailed'));
-    } finally {
-      setSaving(false);
-    }
+  // 头像走 chatAvatar + getAgentChatAvatar,与「数字员工」页两个 Tab 同一条管道:
+  // 圆形、支持 icon- 字体图标、加载失败回落默认头像。
+  const agentAvatarOf = (role: DefaultAgentRole) => {
+    const effectiveId = effectiveAgentIdOf(role);
+    return effectiveId ? avatarById.get(effectiveId) : undefined;
   };
 
   return (
@@ -156,12 +159,24 @@ const ProjectDefaultAgentPanel: React.FC<Props> = ({ projectId, active }) => {
           {DEFAULT_AGENT_ROLES.map((role) => (
             <ResourceCard
               key={role}
-              resource={roleCardResource(
-                t(`projectSpace.projectForm.defaultAgent.role.${role}`),
-                agentNameOf(role),
-                agentLogoOf(role)
-              )}
+              resource={roleCardResource(t(`projectSpace.projectForm.defaultAgent.role.${role}`), agentNameOf(role))}
               description={t(`projectSpace.defaultAgent.roleDesc.${role}`)}
+              avatarNode={<div className={styles.roleAvatar}>{getAgentChatAvatar(agentAvatarOf(role))}</div>}
+              // 走 metaNode 顶掉创建者那一格(角色卡没有创建者可言),而不是 hoverExtra:
+              // hoverExtra 靠右贴边,会和 ResourceCard 绝对定位在右下角的三个点按钮叠在一起。
+              metaNode={
+                onChatWithAgent && effectiveAgentIdOf(role) ? (
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<CommentOutlined />}
+                    className={styles.roleChatButton}
+                    onClick={() => onChatWithAgent(effectiveAgentIdOf(role))}
+                  >
+                    {t('projectSpace.defaultAgent.chatWithAgent')}
+                  </Button>
+                ) : undefined
+              }
               actionConfig={{
                 extraMenuItems: [
                   {
@@ -191,11 +206,6 @@ const ProjectDefaultAgentPanel: React.FC<Props> = ({ projectId, active }) => {
             />
           ))}
         </div>
-      </div>
-      <div className={styles.footer}>
-        <Button className={styles.saveButton} size="small" type="primary" loading={saving} onClick={handleSave}>
-          {t('projectSpace.defaultAgent.save')}
-        </Button>
       </div>
       <Modal
         open={Boolean(editingRole)}

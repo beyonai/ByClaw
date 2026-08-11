@@ -1600,7 +1600,7 @@ export default {
   'projectSpace.defaultAgent.changeAgent': '更换助理',
   'projectSpace.defaultAgent.clearAgent': '清除指定',
   'projectSpace.defaultAgent.noAgent': '暂无可选助理',
-  'projectSpace.defaultAgent.save': '保存',
+  'projectSpace.defaultAgent.chatWithAgent': '去聊天',
   'projectSpace.defaultAgent.saveSuccess': '默认助理已保存',
   'projectSpace.defaultAgent.saveFailed': '默认助理保存失败',
   'projectSpace.enterProjectDetail': '进入项目详情',
