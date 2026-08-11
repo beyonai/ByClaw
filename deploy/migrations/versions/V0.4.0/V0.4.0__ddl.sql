@@ -479,7 +479,7 @@ COMMENT ON COLUMN byai.byai_project.description IS '项目描述,前后端限制
 
 -- 研发项目工作区初始化状态:架构数字员工建成工作区前禁止建需求/启动任务。
 ALTER TABLE byai.byai_project ADD COLUMN init_status VARCHAR(16);
-COMMENT ON COLUMN byai.byai_project.init_status IS '研发项目初始化状态 ready已就绪/pending待初始化/initializing初始化中;仅 develop 未 ready 前禁用建需求与启动任务。无列默认值,应用层建项目时显式赋值';
+COMMENT ON COLUMN byai.byai_project.init_status IS '研发项目初始化状态 pending待初始化/initialized工作区已建好待架构员工/initializing架构员工进行中/ready已就绪;仅 develop 未 ready 前禁用建需求与启动任务。无列默认值,应用层建项目时显式赋值';
 ALTER TABLE byai.byai_project ADD COLUMN build_index VARCHAR(4) NOT NULL DEFAULT 'N';
 COMMENT ON COLUMN byai.byai_project.build_index IS '初始化是否建索引 Y建立/N不建立(默认)';
 ALTER TABLE byai.byai_project ADD COLUMN index_skills VARCHAR(512);

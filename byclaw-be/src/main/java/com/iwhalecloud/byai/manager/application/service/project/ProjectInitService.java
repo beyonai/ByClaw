@@ -332,12 +332,17 @@ public class ProjectInitService {
 
         try {
             // 6. 更新项目状态为 initializing（仅研发项目）
+            // 同时把 init_session_id 清成 0：这一段是服务端建工作区，没有会话。上一轮架构员工聊天可能留了个旧会话ID，
+            // 不清掉的话 DevloopWorkspaceInitJob 会按「initializing + 有会话」把这个项目捞去读那条废会话的状态文件，
+            // 读到 completed 就在工作区还没建完时把项目提前置 ready。
             log.debug("[Step 6/14] Updating project status to 'initializing'");
             if ("develop".equals(project.getProjectType())) {
                 try {
                     Project projectUpdate = new Project();
                     projectUpdate.setProjectId(project.getProjectId());
                     projectUpdate.setInitStatus("initializing");
+                    projectUpdate.setInitSessionId(0L);
+                    projectUpdate.setInitFailReason("");
                     projectUpdate.setUpdateBy(CurrentUserHolder.getCurrentUserId());
                     projectUpdate.setUpdateTime(new java.util.Date());
                     projectService.update(projectUpdate);
@@ -498,22 +503,24 @@ public class ProjectInitService {
                 }
             }
 
-            // 13. 更新项目初始化状态为 ready
-            log.debug("[Step 13/14] Updating project status to 'ready'");
+            // 13. 更新项目初始化状态为 initialized
+            // 到这里只代表工作区建好了，还不是 ready：ready 要等架构数字员工把骨架聊完，由 DevloopWorkspaceInitJob
+            // 读会话状态文件报 completed 才置。中间这个 initialized 态就是前端「去跟架构聊天」按钮的出现条件。
+            log.debug("[Step 13/14] Updating project status to 'initialized'");
             try {
                 if (project != null && "develop".equals(project.getProjectType())) {
                     Project projectUpdate = new Project();
                     projectUpdate.setProjectId(project.getProjectId());
-                    projectUpdate.setInitStatus("ready");
+                    projectUpdate.setInitStatus("initialized");
                     projectUpdate.setUpdateBy(CurrentUserHolder.getCurrentUserId());
                     projectUpdate.setUpdateTime(new java.util.Date());
                     projectService.update(projectUpdate);
-                    log.info("[Step 13/14] Project init_status updated to 'ready': projectId={}", request.getProjectId());
+                    log.info("[Step 13/14] Project init_status updated to 'initialized': projectId={}", request.getProjectId());
                 } else {
                     log.debug("[Step 13/14] Skipping status update - project type is not 'develop'");
                 }
             } catch (Exception e) {
-                log.error("[Step 13/14] Failed to update project init_status to 'ready': projectId={}",
+                log.error("[Step 13/14] Failed to update project init_status to 'initialized': projectId={}",
                     request.getProjectId(), e);
                 // 不抛出异常，因为初始化本身已成功，只是状态更新失败
             }
