@@ -16,56 +16,56 @@ Action 脚本由 `ScriptExecutor` 以 `execute(params: dict) -> dict` 形式执�
 
 ## ⚠️ 对象编码、Mapper 和实体类命名（必须使用完整编码）
 
-对象编码通常以当前用户工号结尾，例如：
+对象编码来自工作区状态。新工作区使用后台生成的 `workspace_code` 前缀，历史工作区继续使用用户编码后缀，例如：
 
 ```text
-employee_0027029322
-leave_record_0027029322
-leave_balance_0027029322
+新工作区：w7k3m9p2x_employee、w7k3m9p2x_leave_record
+历史工作区：employee_0027029322、leave_record_0027029322
 ```
 
-`ScriptExecutor` 使用**完整的 `entity_code`**生成注入变量。工号后缀是对象编码的一部分，生成 Action 脚本时不得删除、缩写、替换或只保留业务名前缀。
+`ScriptExecutor` 使用**完整的 `entity_code`**生成注入变量。v2 的工作区前缀和历史工作区的用户编码后缀都是对象编码的一部分，生成 Action 脚本时不得删除、缩写、替换或只保留业务编码。
 
 ### 固定转换规则
 
 给定完整对象编码：
 
 ```text
-entity_code = leave_record_0027029322
+entity_code = w7k3m9p2x_leave_record
 ```
 
 注入名称为：
 
 ```text
-Mapper 变量：leave_record_0027029322_mapper
-实体类：     LeaveRecord0027029322
-字段常量：   LeaveRecord0027029322.F.<property_code>
-SDK 文件：   leave_record_0027029322_sdk.py
+Mapper 变量：w7k3m9p2x_leave_record_mapper
+实体类：     W7k3m9p2xLeaveRecord
+字段常量：   W7k3m9p2xLeaveRecord.F.<property_code>
+SDK 文件：   w7k3m9p2x_leave_record_sdk.py
 ```
 
 转换算法：
 
 1. **Mapper**：完整 `entity_code` 原样保留，再拼接 `_mapper`
 2. **实体类**：按 `_` 拆分完整 `entity_code`，每段首字母大写后直接连接；纯数字段原样保留
-3. **不得去掉数字后缀**：`0027029322` 必须同时出现在 mapper 变量和实体类中
+3. **不得去掉编码组成部分**：`workspace_code` 前缀或历史用户编码后缀必须同时出现在 mapper 变量和实体类中
 
 | 完整 entity_code | 正确 Mapper | 正确实体类 |
 |------------------|-------------|------------|
+| `w7k3m9p2x_employee` | `w7k3m9p2x_employee_mapper` | `W7k3m9p2xEmployee` |
+| `w7k3m9p2x_leave_record` | `w7k3m9p2x_leave_record_mapper` | `W7k3m9p2xLeaveRecord` |
 | `employee_0027029322` | `employee_0027029322_mapper` | `Employee0027029322` |
 | `leave_record_0027029322` | `leave_record_0027029322_mapper` | `LeaveRecord0027029322` |
-| `travel_application_u001` | `travel_application_u001_mapper` | `TravelApplicationU001` |
 
 ### 正确与错误示例
 
 ```python
-# ✅ 正确：完整对象编码为 leave_record_0027029322
-record = await leave_record_0027029322_mapper.select_by_id(record_id)
-await leave_record_0027029322_mapper.update_by_id(
-    LeaveRecord0027029322(id=record_id, status="已通过")
+# ✅ 正确：完整对象编码为 w7k3m9p2x_leave_record
+record = await w7k3m9p2x_leave_record_mapper.select_by_id(record_id)
+await w7k3m9p2x_leave_record_mapper.update_by_id(
+    W7k3m9p2xLeaveRecord(id=record_id, status="已通过")
 )
-status_field = LeaveRecord0027029322.F.status
+status_field = W7k3m9p2xLeaveRecord.F.status
 
-# ❌ 错误：擅自删除工号后缀，运行时会 NameError
+# ❌ 错误：擅自删除工作区前缀，运行时会 NameError
 record = await leave_record_mapper.select_by_id(record_id)
 await leave_record_mapper.update_by_id(
     LeaveRecord(id=record_id, status="已通过")
@@ -79,14 +79,14 @@ await leave_record_mapper.update_by_id(
 1. 从当前工作区对象定义或 `get_workspace.py` / `get_object.py` 的结果读取完整 `entity_code`
 2. 若工作区已有 SDK，优先读取 `sdk/<entity_code>_sdk.py`，以其中实际类名为最终依据
 3. 列出脚本访问的所有对象及其“完整编码 → mapper → 实体类”映射
-4. 检查脚本中每个 `*_mapper` 和实体类是否都包含应有的用户编码后缀
+4. 检查脚本中每个 `*_mapper` 和实体类是否都保留当前工作区版本要求的完整编码
 5. `collect_action.py` 的 `object_references` 也必须填写其他对象的完整 `entity_code`
 
 禁止根据中文对象名、业务简称或记忆猜测注入名称。如果没有取得完整 `entity_code`，不得开始编写脚本。
 
-例：工作区含 `travel_application_0027029322` 和 `travel_expense_0027029322` 时，注入：
-`Q`、`A`、`context`、`travel_application_0027029322_mapper`、`TravelApplication0027029322`、
-`travel_expense_0027029322_mapper`、`TravelExpense0027029322`。
+例：工作区含 `w7k3m9p2x_travel_application` 和 `w7k3m9p2x_travel_expense` 时，注入：
+`Q`、`A`、`context`、`w7k3m9p2x_travel_application_mapper`、`W7k3m9p2xTravelApplication`、
+`w7k3m9p2x_travel_expense_mapper`、`W7k3m9p2xTravelExpense`。
 
 ### context（当前用户信息）
 
@@ -174,6 +174,32 @@ return {
 ---
 
 ### 基础 CRUD
+
+#### 对象型 LIST_TERM 参数
+
+父对象实际生效的 `term_sync.term_code_field` 决定下拉 code 的含义；Action 查询字段必须等于 `term_code_field`，子表关联字段也必须保存同一个值。
+
+当 `term_code_field=id`（含缺失/空值的默认情况）时，参数声明为 integer，并使用主键方法：
+
+```python
+parent_id = int(params["parent_id"])
+parent = await parent_mapper.select_by_id(parent_id)
+if parent is None:
+    return {"records": [{"success": False, "error": "关联对象不存在"}], "total": 1,
+            "meta": {"columns": [{"name": "success"}, {"name": "error"}], "total": 1}}
+
+child = await child_mapper.insert(ChildEntity(parent_id=parent_id))
+```
+
+当 `term_code_field=parent_code` 时，参数类型与该字段一致，并查询同一字段：
+
+```python
+parent_code = params["parent_code"]
+rows = await parent_mapper.select(Q.eq(Parent.F.parent_code, parent_code).limit(1))
+child = await child_mapper.insert(ChildEntity(parent_code=parent_code))
+```
+
+禁止 `term_code_field=id` 却按业务编码字段查询，也禁止 `term_code_field=parent_code` 却调用 `select_by_id`。
 
 ```python
 # 按主键查询，不存在返回 None
