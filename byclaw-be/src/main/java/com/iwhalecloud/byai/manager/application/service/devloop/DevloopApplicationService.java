@@ -2687,8 +2687,14 @@ public class DevloopApplicationService {
         return template.replace("${requirementContent}", requirementContent);
     }
 
-    private static final String DEFAULT_REQUIREMENT_CLARIFY_PROMPT_TEMPLATE =
-        "/byclaw-requirement-clarification ${requirementContent}";
+    /**
+     * 兜底模板：DB 未配置 DEVLOOP_REQUIREMENT_CLARIFY_PROMPT 时使用，与 V0.4.0 DML 中的模板保持一致。
+     * ACP 那行不能删：完成状态靠 self-developed-rules 写会话状态文件，不调这个 skill 平台读不到 completed。
+     */
+    private static final String DEFAULT_REQUIREMENT_CLARIFY_PROMPT_TEMPLATE = """
+        /byclaw-requirement-clarification ${requirementContent}
+
+        acp下发任务告诉对方启动的时候必须要调用skill：self-developed-rules;""";
 
     /** 依赖 rowId 列表翻译成真实 taskId 逗号串;映射不到的 rowId(用户误引用/已删)跳过,不存悬空ID。 */
     private String translateDeps(List<String> depRowIds, Map<String, Long> taskIdByRow) {
