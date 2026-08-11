@@ -2371,6 +2371,9 @@ export default {
     '将连上所选环境执行准备阶段，然后下发给独立测试数字员工执行用例。结果由员工回流，定时任务每分钟回收一次，不会当场出终态。',
   'projectSpace.detail.integration.run.noEnv': '尚未配置集成测试环境，请先在「环境信息」新增一个环境。',
   'projectSpace.detail.integration.run.startFailed': '触发执行失败，请稍后重试。',
+  // 测试员工模式的执行过程都在会话里,启动即跳会话,历史行也给这颗按钮回看。
+  'projectSpace.detail.integration.run.viewSession': '查看会话',
+  'projectSpace.detail.integration.session.namePrefix': '集成测试',
   'projectSpace.detail.integration.specEntry': '规范',
   'projectSpace.detail.integration.suiteSpec.calloutTitle': '本套件必须满足 3 条，否则平台无法汇总结果',
   'projectSpace.detail.integration.suiteSpec.rule.report':
@@ -2584,6 +2587,9 @@ export default {
   'projectSpace.detail.requirement.notStarted': '未启动',
   'projectSpace.detail.requirement.startSplit': '拆分为多仓库任务',
   'projectSpace.detail.requirement.startClarify': '去聊天完成需求',
+  'projectSpace.detail.requirement.viewSession': '查看会话',
+  // 左侧列表行按钮位窄,且点整行本来就是看详情,这里用「详情」;详情抽屉里已在详情内,才叫「查看会话」。
+  'projectSpace.detail.requirement.viewDetail': '详情',
   'projectSpace.detail.requirement.clarifySuccess': '已交给需求数字员工',
   'projectSpace.detail.requirement.clarifyFailed': '下发需求数字员工失败',
   'projectSpace.detail.requirement.createTaskSuccess': '任务已创建',

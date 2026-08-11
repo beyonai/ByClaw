@@ -32,6 +32,9 @@ public class DevloopTaskListQueryDto {
     /** 任务状态筛选，支持 pending、in_progress、paused、completed。 */
     private String status;
 
+    /** 任务类型筛选，支持 architect、requirement、coder、tester、chat；为空返回全部类型。 */
+    private String taskType;
+
     private Integer pageNum;
     private Integer pageSize;
 

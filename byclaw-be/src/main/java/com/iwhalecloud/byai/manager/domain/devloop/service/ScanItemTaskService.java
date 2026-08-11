@@ -8,9 +8,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 研发需求子任务领域服务。
@@ -48,6 +52,22 @@ public class ScanItemTaskService {
                .eq(ScanItemTask::getDeleteFlag, "0")
                .orderByAsc(ScanItemTask::getCreateTime);
         return scanItemTaskMapper.selectList(wrapper);
+    }
+
+    /**
+     * 给定会话中属于研发子任务的那些 sessionId。任务列表按当页会话批量判类型,不能逐行 findBySession。
+     * 不过滤 delete_flag:子任务软删不会带走会话,会话仍是研发任务,过滤会让它误判成普通会话。
+     */
+    public Set<Long> filterSubtaskSessionIds(Collection<Long> sessionIds) {
+        if (sessionIds == null || sessionIds.isEmpty()) {
+            return Collections.emptySet();
+        }
+        LambdaQueryWrapper<ScanItemTask> wrapper = new LambdaQueryWrapper<>();
+        wrapper.select(ScanItemTask::getSessionId).in(ScanItemTask::getSessionId, sessionIds);
+        return scanItemTaskMapper.selectList(wrapper).stream()
+               .map(ScanItemTask::getSessionId)
+               .filter(Objects::nonNull)
+               .collect(Collectors.toSet());
     }
 
     /** 反查会话对应的子任务;打回引擎按失败 run 的会话定位责任子任务。 */

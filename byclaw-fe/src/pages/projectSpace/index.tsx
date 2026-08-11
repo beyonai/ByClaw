@@ -2,10 +2,18 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Empty, Modal, Spin, message } from 'antd';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
-import { getDigitalEmployeeMentionItem } from '@/components/MessageList/utils';
+import { setAgentCache } from '@/components/QueryInput/RichInput/agentCache';
+import getElementData from '@/components/QueryInput/RichInput/utils/getElementData';
 import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
+import { agentTypeMap } from '@/constants/agent';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
-import { deleteProject, saveDefaultAgent, saveProjectMembers, saveProjectResources, updateProject } from '@/service/devloop';
+import {
+  deleteProject,
+  saveDefaultAgent,
+  saveProjectMembers,
+  saveProjectResources,
+  updateProject,
+} from '@/service/devloop';
 import ProjectFormModal, { type ProjectFormValues } from './components/ProjectFormModal';
 import ProjectDetail from './components/ProjectDetail';
 import { type ChatWithAgentTarget } from './components/ProjectDefaultAgentPanel';
@@ -116,6 +124,20 @@ const ProjectSpacePage: React.FC = () => {
       if (!session.sessionId) return;
       // 项目详情切换会话时丢弃目标会话遗留的多员工草稿，只使用详情返回的默认员工。
       clearEasyConfirmInputDraft(session.sessionId);
+      // 研发任务会话绑的是项目维度执行员工，不在 redux employeesList/agentList 里,
+      // useDefaultAgentElement 查不到就兜底成「AI 助手」。agentCache 在那个 hook 里优先于 redux 查表,
+      // 所以带了名字就先把整份员工写进去。只在有 agentName 时写:会话列表那条路没有这个字段,
+      // 写个没名字的条目反而会盖掉 redux 里查得到的正确员工。
+      if (session.agentName && session.objectId !== undefined && session.objectId !== null) {
+        setAgentCache(
+          getElementData(ResourceType.digitalEmployee, {
+            agentId: `${session.objectId}`,
+            name: session.agentName,
+            chatAvatar: session.avatar,
+            agentType: agentTypeMap.agent,
+          })
+        );
+      }
       // 项目详情页只负责切换全局会话上下文，聊天页仍负责渲染会话内容。
       setAgentId?.(session.objectId !== undefined && session.objectId !== null ? `${session.objectId}` : '');
       setSessionId?.(session.sessionId);
@@ -234,37 +256,31 @@ const ProjectSpacePage: React.FC = () => {
               onOpenSession={handleOpenSession}
               onNewSession={(target?: ChatWithAgentTarget) => {
                 setSessionId?.('');
+                // 只有数字员工卡的「去聊天」带员工;工具栏「新建会话」不带,行为不变。
+                // 面板员工可能不在 redux employeesList 里(个人创建的员工走 queryMyCreated),
+                // 光给 agentId 会让 useDefaultAgentElement 查不到人而兜底成「AI 助手」。
+                // 先把整份员工写进 agentCache,它在那个 hook 里优先于 redux 查表。
+                if (target?.agentId) {
+                  setAgentCache(
+                    getElementData(ResourceType.digitalEmployee, {
+                      agentId: `${target.agentId}`,
+                      name: target.name,
+                      chatAvatar: target.chatAvatar,
+                      agentType: target.agentType,
+                    })
+                  );
+                }
                 navigate('/chat', {
                   state: {
                     keepSiderActiveKey: 'sessions',
                     from: 'projectSpace',
                     projectId: activeProject.projectId,
                     projectName: activeProject.projectName,
+                    // 聊天页据此在挂载后恢复 @ 员工。不能在这里直接 setAgentId:
+                    // ChatLayoutComp 挂载时会按「无会话员工」清空一次,早设的值会被抹掉。
+                    selectedAgentId: target?.agentId,
+                    selectedAgentObjectType: target?.agentId ? 'DigEmployee' : undefined,
                   },
-                });
-                // 只有数字员工卡的「去聊天」带员工;工具栏「新建会话」不带,行为不变。
-                // 走 queryInput-insert-item(RichInput 直接 insertItem)而不是 queryInput-set-schema:
-                // 后者的落点 setCommonStateBySchema 只认 queryQuestion/inputSchema/mentionItem/payload,
-                // 压根不读 agentId,光发它输入框不会出现 @。
-                // 员工信息整份带过去,不能只给 agentId:输入框的 useDefaultAgentElement 拿 agentId 去
-                // redux employees 列表里查,这些员工不在那份列表里,查不到就兜底成「AI 助手」。
-                if (!target?.agentId) return;
-                const mentionItem = getDigitalEmployeeMentionItem({
-                  agentId: target.agentId,
-                  name: target.name,
-                  chatAvatar: target.chatAvatar,
-                  agentType: target.agentType,
-                } as any);
-                if (!mentionItem) return;
-                // 聊天页此刻还在挂载,RichInput 的监听要等它挂上才存在。用 rAF 双帧让出导航后的首帧渲染,
-                // 比裸 setTimeout(150) 稳:150ms 只是猜的,挂载慢于它事件就整个丢掉。
-                requestAnimationFrame(() => {
-                  requestAnimationFrame(() => {
-                    EventEmitter.emit('queryInput-insert-item', {
-                      item: mentionItem,
-                      type: ResourceType.digitalEmployee,
-                    });
-                  });
                 });
               }}
               onEditProject={canManageProject ? handleEditProject : undefined}

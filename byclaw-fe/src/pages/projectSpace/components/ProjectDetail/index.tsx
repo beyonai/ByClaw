@@ -288,7 +288,7 @@ const ProjectDetail: React.FC<Props> = ({
     }
     if (activeSection === 'integration') {
       return isDevelopProject ? (
-        <Integration active projectId={Number(project.projectId)} embedded />
+        <Integration active projectId={Number(project.projectId)} embedded onOpenSession={onOpenSession} />
       ) : (
         renderSessionList()
       );

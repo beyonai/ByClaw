@@ -12,8 +12,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 集成测试执行编排领域服务(同步入口 + 查询)。
@@ -89,9 +94,29 @@ public class IntegrationRunService {
         run.setDeleteFlag("0");
         integrationRunMapper.insert(run);
 
+        // tester 模式先同步把员工会话建出来:执行体是 @Async 且要先跑完环境 stages,
+        // 等它建会话调用方早就返回了,前端「启动即跳会话」就拿不到 sessionId。
+        integrationRunExecutor.prepareTesterSession(run, suite, executorModeOverride);
+
         // 后台执行:createBy 已带在 run 上,executor 用它解密该用户的凭据。
         integrationRunExecutor.executeRun(run, env, suite, executorModeOverride);
         return run;
+    }
+
+    /**
+     * 给定会话中由测试员工承接的那些 sessionId。任务列表按当页会话批量判类型,不能逐行反查。
+     * 不过滤 delete_flag:执行记录软删不会带走会话,会话仍是测试任务,过滤会让它误判成普通会话。
+     */
+    public Set<Long> filterTesterSessionIds(Collection<Long> sessionIds) {
+        if (sessionIds == null || sessionIds.isEmpty()) {
+            return Collections.emptySet();
+        }
+        LambdaQueryWrapper<IntegrationRun> wrapper = new LambdaQueryWrapper<>();
+        wrapper.select(IntegrationRun::getSessionId).in(IntegrationRun::getSessionId, sessionIds);
+        return integrationRunMapper.selectList(wrapper).stream()
+               .map(IntegrationRun::getSessionId)
+               .filter(Objects::nonNull)
+               .collect(Collectors.toSet());
     }
 
     /** 查询单次执行主记录。 */

@@ -84,6 +84,7 @@ import type {
   TestAccount,
   TesterConfig,
 } from './types';
+import type { ProjectSession } from '@/pages/projectSpace/types';
 
 // 用例来源上移到环境级 caseSource 后,这里不再让用户挑仓库(workspace 由后端定位工作区仓库,
 // on_env 根本不涉及仓库),故不再需要项目仓库列表。
@@ -91,6 +92,9 @@ type IntegrationProps = {
   active: boolean;
   projectId: number;
   embedded?: boolean;
+  // 跳测试员工会话复用项目详情页那套 handleOpenSession(会话上下文 + agentCache + 全局 sessionId + 路由),
+  // 集成面板自己再实现一遍必然漏步。未传(将来非详情页挂载)时按钮不显示,不做半截跳转。
+  onOpenSession?: (session: ProjectSession) => void;
 };
 
 // 后端集成环境VO:与 IntegrationEnvService.integrationEnvToVo 对齐。stages/testAccounts 落库为JSON字符串,取回后解析。
@@ -147,9 +151,14 @@ type IntegrationRunHistoryVo = {
   durationSec?: number;
   time?: string;
   createByName?: string;
+  // 测试员工会话三列:只有测试员工模式跑的 run 才有,backend 直跑与旧记录为空,
+  // 「查看会话」按钮据此显示与否。testerAgentName 要一并带上,跳过去输入框才能默认 @ 到该员工。
+  sessionId?: string;
+  testerAgentId?: string;
+  testerAgentName?: string;
 };
 
-const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded = false }) => {
+const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded = false, onOpenSession }) => {
   const intl = useIntl();
   // 项目详情的所有固定界面文案统一从 detail 命名空间读取。
   const t = React.useCallback(
@@ -548,6 +557,24 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded =
     setRunEnvSelectOpen(true);
   };
 
+  // 跳到这次执行的测试员工会话看它实时干活/回看历史过程。
+  // 走详情页的 handleOpenSession:它负责补齐会话上下文、写 agentCache、置全局 sessionId 并路由,
+  // 少任何一步右侧标题或输入框默认 @ 就对不上。agentName 必须带,否则 @ 会兜底成「AI 助手」。
+  const openTesterSession = (
+    run: Pick<IntegrationRunHistoryVo, 'sessionId' | 'suiteId' | 'testerAgentId' | 'testerAgentName'>
+  ) => {
+    if (!run.sessionId || !onOpenSession) return;
+    const suiteName = integrationSuiteList.find((s) => s.suiteId === run.suiteId)?.suiteName;
+    onOpenSession({
+      sessionId: run.sessionId,
+      sessionName: `${t('integration.session.namePrefix')} - ${suiteName || `#${run.suiteId}`}`,
+      projectId: `${projectId}`,
+      objectId: run.testerAgentId,
+      objectType: 'DigEmployee',
+      agentName: run.testerAgentName,
+    });
+  };
+
   // 触发执行 → 打开结果弹框并开始轮询。
   const handleStartRun = async () => {
     if (!runTargetSuite || !runSelectedEnvId) return;
@@ -555,6 +582,9 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded =
     try {
       const res = (await startIntegrationRun(runTargetSuite.suiteId, runSelectedEnvId, runExecutorMode)) as {
         runId: string;
+        sessionId?: string;
+        testerAgentId?: string;
+        testerAgentName?: string;
       } | null;
       const runId = res?.runId;
       if (!runId) {
@@ -562,6 +592,18 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded =
         return;
       }
       setRunEnvSelectOpen(false);
+      // 测试员工模式:执行过程就在会话里,直接跳过去看员工干活,不再开结果弹框轮询
+      // (那套轮询是 backend 直跑当场出终态用的,员工模式要等结果回流,弹窗只会一直转)。
+      if (res?.sessionId && onOpenSession) {
+        openTesterSession({
+          sessionId: res.sessionId,
+          suiteId: runTargetSuite.suiteId,
+          testerAgentId: res.testerAgentId,
+          testerAgentName: res.testerAgentName,
+        });
+        void loadIntegrationRuns(integrationSuiteList);
+        return;
+      }
       setIntegrationResult(null);
       setIntegrationResultOpen(true);
       // 轮询交给 runningRunId 的 effect:置起点后立刻拉一次并按退避续轮。
@@ -1360,14 +1402,20 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded =
     {
       title: t('runBoard.col.action'),
       key: 'action',
-      // 两个 link 按钮并排,88 会把「测试报告」挤到换行。
-      width: 150,
+      // 三个 link 按钮并排;「查看会话」只在测试员工模式的 run 上出现,故按最宽情况给宽度。
+      width: 220,
       fixed: 'right',
       render: (_: unknown, row) => (
         <>
           <Button type="link" size="small" onClick={() => openIntegrationResult(row.runId)}>
             {t('integration.log.viewDetail')}
           </Button>
+          {/* 测试员工模式才有会话可回看;backend 直跑与旧记录没有 sessionId,不显示这颗按钮。 */}
+          {row.sessionId && onOpenSession ? (
+            <Button type="link" size="small" onClick={() => openTesterSession(row)}>
+              {t('integration.run.viewSession')}
+            </Button>
+          ) : null}
           {/* 报告直达:不必先开结果弹窗再展开套件明细。执行中还没有报告,禁用。 */}
           <Button
             type="link"
@@ -2646,6 +2694,14 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded =
                   <Button key="view" type="link" size="small" onClick={() => openIntegrationResult(item.runId)}>
                     {t('integration.log.viewDetail')}
                   </Button>,
+                  // 与运行记录表同一条件:只有测试员工模式跑的 run 才有会话可回看。
+                  ...(item.sessionId && onOpenSession
+                    ? [
+                      <Button key="session" type="link" size="small" onClick={() => openTesterSession(item)}>
+                        {t('integration.run.viewSession')}
+                      </Button>,
+                    ]
+                    : []),
                 ]}
               >
                 <List.Item.Meta

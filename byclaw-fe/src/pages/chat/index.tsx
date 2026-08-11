@@ -119,11 +119,14 @@ const Chat = () => {
     return () => window.clearTimeout(timer);
   }, [EventEmitter, autoSendContent, sessionId, targetSessionId]);
 
+  // 带员工进入已有会话要等会话对齐；带员工开新会话没有 sessionId 可对齐，两者都要能恢复 @ 员工。
+  const selectedAgentSessionReady = targetSessionId
+    ? !!sessionId && `${sessionId}` === `${targetSessionId}`
+    : !sessionId;
+
   React.useEffect(() => {
     if (
-      !sessionId ||
-      !targetSessionId ||
-      `${sessionId}` !== `${targetSessionId}` ||
+      !selectedAgentSessionReady ||
       `${selectedAgentObjectType || ''}`.toLowerCase() !== 'digemployee' ||
       selectedAgentId === undefined ||
       selectedAgentId === null
@@ -139,7 +142,7 @@ const Chat = () => {
       });
     }, 150);
     return () => window.clearTimeout(timer);
-  }, [EventEmitter, selectedAgentId, selectedAgentObjectType, sessionId, targetSessionId]);
+  }, [EventEmitter, selectedAgentId, selectedAgentObjectType, selectedAgentSessionReady]);
 
   // 沉淀为需求:入口挂在数字员工回答下方(MoreActions),点击后带该条消息发事件到此处打开弹窗。
   // 弹窗需要项目上下文与仓库列表,由聊天页持有,避免逐层透传到深层消息组件。
