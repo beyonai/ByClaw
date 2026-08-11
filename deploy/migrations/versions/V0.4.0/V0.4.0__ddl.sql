@@ -473,6 +473,10 @@ COMMENT ON COLUMN byai.byai_project_repo.provider IS '代码平台 github/gitlab
 ALTER TABLE byai.byai_project_repo ADD COLUMN description TEXT;
 COMMENT ON COLUMN byai.byai_project_repo.description IS '仓库用途描述,人工填写;供需求AI预拆判断职责归属与人工理解';
 
+-- 项目描述仍由前后端限制最多500个字符；存储改为TEXT，避免不同数据库对中文VARCHAR长度语义不一致。
+ALTER TABLE byai.byai_project ALTER COLUMN description TYPE TEXT;
+COMMENT ON COLUMN byai.byai_project.description IS '项目描述,前后端限制最多500个字符';
+
 -- 研发项目工作区初始化状态:架构数字员工建成工作区前禁止建需求/启动任务。
 ALTER TABLE byai.byai_project ADD COLUMN init_status VARCHAR(16);
 COMMENT ON COLUMN byai.byai_project.init_status IS '研发项目初始化状态 ready已就绪/pending待初始化/initializing初始化中;仅 develop 未 ready 前禁用建需求与启动任务。无列默认值,应用层建项目时显式赋值';

@@ -135,6 +135,7 @@ export type DevloopTaskItem = {
   stageLoopCount?: number;
   assignee?: string;
   assigneeId?: string | number;
+  assigneeName?: string;
   dueTime?: string;
   agentName?: string;
   avatar?: string;

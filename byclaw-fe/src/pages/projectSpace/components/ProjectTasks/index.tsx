@@ -163,6 +163,11 @@ const getTaskCreateTime = (task: DevloopTaskItem) => {
   return parsed.isValid() ? parsed.valueOf() : 0;
 };
 
+const formatTaskCreateTime = (task: DevloopTaskItem) => {
+  const timestamp = getTaskCreateTime(task);
+  return timestamp ? dayjs(timestamp).format('YYYY-MM-DD HH:mm') : '-';
+};
+
 const sortTasks = (items: DevloopTaskItem[]) =>
   [...items].sort((left, right) => {
     const statusDifference = getTaskStatusOrder(left) - getTaskStatusOrder(right);
@@ -557,19 +562,26 @@ const ProjectTasks: React.FC<Props> = ({
                     task.statusLabel ||
                     '-'}
                 </Typography.Paragraph>
-                {task.sessionId && !isOperationPendingTask(task) && (
-                  <Button
-                    type="link"
-                    size="small"
-                    icon={<MessageOutlined />}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openTaskSession(task);
-                    }}
+                <div className={styles.taskMeta}>
+                  <Typography.Text
+                    type="secondary"
+                    ellipsis={{ tooltip: task.assignee || '-' }}
                   >
-                    {intl.formatMessage({ id: 'projectSpace.tasks.openSession' })}
-                  </Button>
-                )}
+                    {task.assignee || '-'}
+                  </Typography.Text>
+                  <Typography.Text
+                    type="secondary"
+                    title="任务创建时间"
+                    className={
+                      project.projectType === 'operation' &&
+                      (isOperationPendingTask(task) || isTaskCreator(task))
+                        ? styles.taskCreateTimeWithAction
+                        : undefined
+                    }
+                  >
+                    {formatTaskCreateTime(task)}
+                  </Typography.Text>
+                </div>
               </article>
             ))}
           </div>

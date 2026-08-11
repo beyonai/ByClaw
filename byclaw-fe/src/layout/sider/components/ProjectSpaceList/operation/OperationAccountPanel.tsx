@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Empty, Modal, Select, Segmented, Spin, Tag } from 'antd';
+import { Button, Dropdown, Empty, Modal, Select, Segmented, Spin, Tag } from 'antd';
 import {
   ArrowLeftOutlined,
   DeleteOutlined,
   EditOutlined,
   LoginOutlined,
+  MoreOutlined,
   PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
@@ -333,6 +334,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
                 'Douyin',
                 'douyin',
               ].includes(account.platformId);
+              const canEditAccount = canSaveAccount && account.canEdit !== false;
               return (
                 <article
                   key={String(account.id)}
@@ -348,8 +350,39 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
                       <strong title={account.accountName}>{account.accountName}</strong>
                       <span title={account.accountId}>{account.accountId}</span>
                     </div>
-                    <Tag color={ACCOUNT_STATUS_COLOR[status]}>{t(`status.${status}`)}</Tag>
+                    <Tag className={styles.accountStatusTag} color={ACCOUNT_STATUS_COLOR[status]}>
+                      {t(`status.${status}`)}
+                    </Tag>
                   </div>
+                  {canEditAccount && (
+                    <Dropdown
+                      trigger={['hover']}
+                      menu={{
+                        items: [
+                          { key: 'edit', icon: <EditOutlined />, label: t('edit') },
+                          ...(onDeleteAccount
+                            ? [{ key: 'delete', danger: true, icon: <DeleteOutlined />, label: t('delete') }]
+                            : []),
+                        ],
+                        onClick: ({ key, domEvent }) => {
+                          domEvent.stopPropagation();
+                          if (key === 'edit') openEditAccountModal(account);
+                          if (key === 'delete') handleDeleteAccount(account);
+                        },
+                      }}
+                    >
+                      {/* 编辑和删除收进悬停菜单，避免常驻按钮挤占账号信息区域。 */}
+                      <Button
+                        type="text"
+                        size="small"
+                        className={styles.accountCardMoreAction}
+                        icon={<MoreOutlined />}
+                        loading={`${deletingAccountId ?? ''}` === `${account.id}`}
+                        aria-label="账号操作"
+                        onClick={(event) => event.stopPropagation()}
+                      />
+                    </Dropdown>
+                  )}
                   <div className={styles.accountPlatformName}>{platformLabel}</div>
                   {/* 当前版本暂不展示账号指标和近 30 天统计，仅保留账号操作按钮。 */}
                   <div className={styles.accountCardFooter}>
@@ -374,35 +407,6 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
                           }}
                         >
                           {t(status === 'logged_in' ? 'relogin' : 'login')}
-                        </Button>
-                      )}
-                      {canSaveAccount && account.canEdit !== false && (
-                        <Button
-                          type="link"
-                          size="small"
-                          icon={<EditOutlined />}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openEditAccountModal(account);
-                          }}
-                        >
-                          {t('edit')}
-                        </Button>
-                      )}
-                      {canSaveAccount && onDeleteAccount && account.canEdit !== false && (
-                        <Button
-                          danger
-                          type="link"
-                          size="small"
-                          icon={<DeleteOutlined />}
-                          loading={`${deletingAccountId ?? ''}` === `${account.id}`}
-                          disabled={deletingAccountId !== undefined && deletingAccountId !== null}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleDeleteAccount(account);
-                          }}
-                        >
-                          {t('delete')}
                         </Button>
                       )}
                     </div>

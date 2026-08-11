@@ -1,4 +1,4 @@
-import { Alert, Button, Dropdown, Input, Modal, Segmented, Spin, Tag, Typography, message } from 'antd';
+import { Alert, Button, Dropdown, Input, Modal, Segmented, Tag, Typography, message } from 'antd';
 import { LoadingOutlined, MoreOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
@@ -14,7 +14,7 @@ import {
   INIT_POLL_INTERVAL_MS,
   INIT_POLL_MAX_ROUNDS,
 } from '@/service/devloop';
-import { PROJECT_DETAIL_SECTIONS, PROJECT_TYPE_MESSAGE_ID, type ProjectDetailSection } from '../../constants';
+import { PROJECT_DETAIL_SECTIONS, type ProjectDetailSection } from '../../constants';
 import { useProjectTypeConfig } from '../../hooks/useProjectTypeConfig';
 import { checkGitHubPat, saveGitHubPat, type DevloopProjectRepo } from '@/service/devloop';
 import type { ProjectSession, ProjectSpace } from '../../types';
@@ -33,7 +33,6 @@ import styles from '../../index.module.less';
 
 interface Props {
   project?: ProjectSpace;
-  loading?: boolean;
   onRefresh?: () => void;
   onOpenSession?: (session: ProjectSession) => void;
   // 员工信息可选:工具栏按钮不带,数字员工卡的「去聊天」带上它以预置 @ 该员工。
@@ -46,7 +45,6 @@ interface Props {
 // 项目主菜单使用独立详情页；会话侧栏仍由 ProjectDetailModal 维护，两者不共享详情布局和状态。
 const ProjectDetail: React.FC<Props> = ({
   project,
-  loading,
   onRefresh,
   onOpenSession,
   onNewSession,
@@ -279,6 +277,23 @@ const ProjectDetail: React.FC<Props> = ({
     return <div className={styles.detailEmpty}>{intl.formatMessage({ id: 'projectSpace.selectProject' })}</div>;
   }
 
+  // 大详情项目标签与左侧小列表使用同一套分类和短文案，普通项目继续区分个人、共享。
+  const projectTagMeta = (() => {
+    if (project.projectType === 'default') {
+      return { className: styles.detailProjectTagDefault, messageId: 'projectSpace.scene.default' };
+    }
+    if (project.projectType === 'develop') {
+      return { className: styles.detailProjectTagDevelopment, messageId: 'projectSpace.scene.development' };
+    }
+    if (project.projectType === 'operation') {
+      return { className: styles.detailProjectTagOperation, messageId: 'projectSpace.scene.operation' };
+    }
+    if (project.sharedFlag) {
+      return { className: styles.detailProjectTagShared, messageId: 'projectSpace.scene.shared' };
+    }
+    return { className: styles.detailProjectTagPersonal, messageId: 'projectSpace.scene.personal' };
+  })();
+
   const renderSectionContent = (section: ProjectDetailSection) => {
     const sectionKeyword = sectionKeywordMap[section] || '';
     if (section === 'accounts') {
@@ -410,6 +425,9 @@ const ProjectDetail: React.FC<Props> = ({
             <Typography.Title level={3} ellipsis={{ tooltip: project.projectName }}>
               {project.projectName}
             </Typography.Title>
+            <Tag bordered={false} className={`${styles.detailProjectTag} ${projectTagMeta.className}`}>
+              {intl.formatMessage({ id: projectTagMeta.messageId })}
+            </Tag>
             {isDevelopProject && project.initStatus && project.initStatus !== 'ready' && (
               <Tag bordered={false} icon={<LoadingOutlined spin />} className={styles.detailInitializingTag}>
                 {intl.formatMessage({ id: 'projectSpace.scene.initializing' })}
@@ -449,12 +467,7 @@ const ProjectDetail: React.FC<Props> = ({
               </Dropdown>
             )}
           </div>
-          <Tag
-            color={project.projectType === 'develop' ? 'purple' : project.projectType === 'operation' ? 'cyan' : 'blue'}
-          >
-            {intl.formatMessage({ id: PROJECT_TYPE_MESSAGE_ID[project.projectType] })}
-          </Tag>
-          <Typography.Text type="secondary">
+          <Typography.Text type="secondary" className={styles.detailDescription}>
             {project.description || intl.formatMessage({ id: 'projectSpace.projectCard.emptyDescription' })}
           </Typography.Text>
         </div>
@@ -545,7 +558,7 @@ const ProjectDetail: React.FC<Props> = ({
         />
       </div>
       <div className={styles.detailBody}>
-        <Spin spinning={!!loading}>
+        <div className={styles.detailBodyContent}>
           {detailSections
             .filter((section) => visitedSections.includes(section.key))
             .map((section) => (
@@ -557,7 +570,7 @@ const ProjectDetail: React.FC<Props> = ({
                 {renderSectionContent(section.key)}
               </div>
             ))}
-        </Spin>
+        </div>
       </div>
       <OperationTaskFormModal
         open={operationRequirementModalOpen}
