@@ -87,6 +87,7 @@ import {
   splitTask,
   startDwsDeviceAuth,
   startProjectInit,
+  startRequirementClarify,
   startOperationRequirement,
   toggleScanSource,
   triggerScan,
@@ -3894,6 +3895,66 @@ const ProjectDetailPanel: React.FC<Props> = ({
     }
   };
 
+  // 需求的第二个启动入口:后端先建会话并下发需求数字员工,前端拿到 sessionId 直接进这个会话继续聊。
+  // 与拆单入口二选一 —— 回写的是同一个需求 sessionId,启动后两个入口都变「已启动」,后端闸门兜底防并发双击。
+  const handleStartRequirementClarify = async (requirement: RequirementItem) => {
+    if (!projectId) {
+      message.warning(t('message.selectProjectFirst'));
+      return;
+    }
+    const requirementId = requirement.itemId;
+    if (startingRequirementIdsRef.current.has(requirementId)) return;
+    startingRequirementIdsRef.current.add(requirementId);
+    setStartingRequirementIds((prev) => new Set(prev).add(requirementId));
+    try {
+      const res = await startRequirementClarify({ projectId, sourceItemId: Number(requirementId) });
+      const clarifySessionId = res?.sessionId;
+      if (!clarifySessionId) {
+        message.error(t('requirement.clarifyFailed'));
+        return;
+      }
+      setRequirements((prev) =>
+        prev.map((item) => (item.itemId === requirementId ? { ...item, sessionId: clarifySessionId } : item))
+      );
+      setDetailReq(null);
+      message.success(t('requirement.clarifySuccess'));
+      // 会话已落库并绑好项目,进会话前补齐会话缓存与项目上下文,否则右侧标题/归属要等下一次列表刷新才对。
+      const sessionIdText = String(clarifySessionId);
+      EventEmitter.emit('projectSpace-session-context', {
+        sessionId: sessionIdText,
+        projectId,
+        projectName: project?.projectName,
+      });
+      dispatch({
+        type: 'session/addSession',
+        payload: { sessionId: sessionIdText, sessionName: requirement.title, projectId },
+      });
+      setSessionId?.(sessionIdText);
+      navigate('/chat', {
+        state: {
+          keepSiderActiveKey: 'sessions',
+          from: 'projectSpace',
+          projectId,
+          projectName: project?.projectName,
+        },
+      });
+    } catch (error: any) {
+      const errorMessage = error?.message || t('requirement.clarifyFailed');
+      message.error(errorMessage);
+      // 已被另一入口占住时列表里的「未启动」是脏的,重拉一次让按钮立刻反映真实状态。
+      if (errorMessage.includes('重复启动')) {
+        void fetchRequirements(sources, requirementSearchKeyword.trim());
+      }
+    } finally {
+      startingRequirementIdsRef.current.delete(requirementId);
+      setStartingRequirementIds((prev) => {
+        const next = new Set(prev);
+        next.delete(requirementId);
+        return next;
+      });
+    }
+  };
+
   const handleGroupSearch = (value: string) => {
     if (!value || value.length < 2) {
       setGroupOptions([]);
@@ -4355,15 +4416,22 @@ const ProjectDetailPanel: React.FC<Props> = ({
           <Button disabled>{t('requirement.started')}</Button>
         ) : (
           <Tooltip title={developInitReady ? '' : t('initGuard.task')} placement="top">
-            <Button
+            {/* 主按钮保持原行为(拆单窗),第二入口收进下拉:两条路二选一,并列会让人以为可以都点。 */}
+            <Dropdown.Button
               type="primary"
               loading={isStarting}
               disabled={isStarting || !developInitReady}
               // V2:同样先弹拆单窗确认多仓库任务,确认后再启动。
               onClick={() => setSplitRequirement(requirement)}
+              menu={{
+                items: [{ key: 'clarify', label: t('requirement.startClarify') }],
+                onClick: ({ key }) => {
+                  if (key === 'clarify') void handleStartRequirementClarify(requirement);
+                },
+              }}
             >
               {t(isStarting ? 'requirement.starting' : 'requirement.start')}
-            </Button>
+            </Dropdown.Button>
           </Tooltip>
         )}
       </div>
@@ -5102,19 +5170,28 @@ const ProjectDetailPanel: React.FC<Props> = ({
                           </Button>
                         ) : (
                           <Tooltip title={developInitReady ? '' : t('initGuard.task')} placement="top">
-                            <Button
-                              size="small"
-                              className={`${styles.detailRequirementAction} ${styles.detailRequirementStartAction}`}
-                              loading={isStarting}
-                              disabled={isStarting || !developInitReady}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                // V2:先弹拆单窗确认多仓库任务,确认后再启动。
-                                setSplitRequirement(item);
-                              }}
-                            >
-                              {t(isStarting ? 'requirement.starting' : 'requirement.start')}
-                            </Button>
+                            {/* 整行点击会打开需求详情抽屉:下拉面板挂在 body 上,但触发按钮的事件仍从这里冒泡,
+                                所以外层 span 也要拦一次,否则点「去聊天完成需求」会顺带弹出抽屉。 */}
+                            <span onClick={(event) => event.stopPropagation()}>
+                              <Dropdown.Button
+                                size="small"
+                                className={`${styles.detailRequirementAction} ${styles.detailRequirementStartAction}`}
+                                loading={isStarting}
+                                disabled={isStarting || !developInitReady}
+                                onClick={() => {
+                                  // V2:先弹拆单窗确认多仓库任务,确认后再启动。
+                                  setSplitRequirement(item);
+                                }}
+                                menu={{
+                                  items: [{ key: 'clarify', label: t('requirement.startClarify') }],
+                                  onClick: ({ key }) => {
+                                    if (key === 'clarify') void handleStartRequirementClarify(item);
+                                  },
+                                }}
+                              >
+                                {t(isStarting ? 'requirement.starting' : 'requirement.start')}
+                              </Dropdown.Button>
+                            </span>
                           </Tooltip>
                         )}
                         {canOperateManualRequirement && (

@@ -217,6 +217,11 @@ export type ProjectInitStatus = 'ready' | 'pending' | 'initializing';
 // initializing 态轮询间隔:后端扫描定时任务本身 30s 一轮,再快也拿不到更新的状态,只是白打接口。
 export const INIT_POLL_INTERVAL_MS = 5000;
 
+// 轮询次数上限(约 10 分钟)。后端超时线是 2 小时,页面开着不该陪着打两小时接口;
+// 更要紧的是后端一旦收不了口(状态文件读失败、状态被卡住),没有封顶就是无限刷同一个 /project/get。
+// 停轮询只影响自动消横幅,用户切项目或重进页面即重新开始轮询。
+export const INIT_POLL_MAX_ROUNDS = 120;
+
 // 下发工作区初始化:后端建一条架构数字员工会话并返回 sessionId,真正的初始化在沙箱里由架构助理执行。
 // 完成与否由后端定时任务读该会话的任务状态文件判定,前端只轮询 initStatus,没有「标记完成」的接口。
 export const startProjectInit = (data: { projectId: number; buildIndex: boolean; skillPackages: string[] }) =>
@@ -559,6 +564,11 @@ export type DevloopSplitPayload = {
 };
 
 export const splitTask = (data: DevloopSplitPayload) => POST<any>('/byaiService/devloop/task/split', data);
+
+// 需求的第二个启动入口:交给需求数字员工在聊天里聊完成,不拆子任务。
+// 与 splitTask 二选一 —— 两条入口写同一个需求 sessionId,启动其一另一条即被后端闸门挡掉。
+export const startRequirementClarify = (data: { projectId: number; sourceItemId: number }) =>
+  POST<{ sessionId: number }>('/byaiService/devloop/requirement/clarify', data);
 
 // AI 预拆:后端按系统配置的提示词把需求+仓库清单交给大模型,返回草稿任务,不落库。
 // aiSuggested=false 表示模型不可用或输出不可解析,后端已降级为每仓库一行且不猜依赖。
