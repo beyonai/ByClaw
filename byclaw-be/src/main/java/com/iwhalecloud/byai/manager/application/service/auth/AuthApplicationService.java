@@ -16,6 +16,7 @@ import com.iwhalecloud.byai.manager.domain.auth.enums.GrantType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.GrantTypeRangeMapping;
 import com.iwhalecloud.byai.manager.domain.auth.enums.OperType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.ResourceTypeValueMapping;
+import com.iwhalecloud.byai.manager.domain.auth.model.UseApplyOutcome;
 import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationService;
 import com.iwhalecloud.byai.manager.domain.position.service.PositionService;
@@ -487,6 +488,30 @@ public class AuthApplicationService {
     }
 
     /**
+     * Idempotently submits a use application for the current user.
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public UseApplyOutcome applyUseIfNeeded(Long resourceId) {
+        SsResource ssResource = getRequiredResource(resourceId);
+        validateResourceUseApplyAllowed(ssResource);
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        if (currentUserId == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.not.login"));
+        }
+        if (getPendingUseApplyPrivilege(ssResource, currentUserId) != null) {
+            return UseApplyOutcome.PENDING;
+        }
+        if (Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum())
+            || !checkCanApplyUse(ssResource)) {
+            return UseApplyOutcome.UNAVAILABLE;
+        }
+        ResourceUseApplyQo qo = new ResourceUseApplyQo();
+        qo.setResourceId(resourceId);
+        applyUse(qo);
+        return UseApplyOutcome.CREATED;
+    }
+
+    /**
      * 查询资源待审核使用申请列表。
      * 仅资源管理人可查看。
      * @author qin.guoquan
@@ -857,25 +882,38 @@ public class AuthApplicationService {
      * {@link #hasResourceAccessPermission(SsResource)}。
      */
     public boolean hasResourceUsePermission(SsResource ssResource) {
+        return hasResourceUsePermission(ssResource, CurrentUserHolder.getCurrentUserId());
+    }
+
+    /**
+     * 判断指定用户是否具备资源使用权限，不修改当前登录用户上下文。
+     */
+    public boolean hasResourceUsePermission(SsResource ssResource, Long userId) {
         if (ssResource == null || ssResource.getResourceId() == null
             || StringUtils.isBlank(ssResource.getResourceBizType())
-            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum())) {
+            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum()) || userId == null) {
             return false;
         }
-        Long currentUserId = CurrentUserHolder.getCurrentUserId();
-        if (currentUserId == null) {
-            return false;
-        }
-        if (currentUserId.equals(ssResource.getCreateBy()) || isCurrentUserBoundDefaultPersonalResource(ssResource)) {
+        if (userId.equals(ssResource.getCreateBy())
+            || (userId.equals(CurrentUserHolder.getCurrentUserId())
+                && isCurrentUserBoundDefaultPersonalResource(ssResource))) {
             return true;
         }
-
-        List<Long> resourceIds = List.of(ssResource.getResourceId());
-        List<String> resourceBizTypes = List.of(ssResource.getResourceBizType());
-        if (queryCurrentUserUseBlacklistedResourceIds(resourceIds, resourceBizTypes).contains(ssResource.getResourceId())) {
+        List<PrivilegeGrant> privilegeGrants = listAuthPrivilegeGrant(null,
+            List.of(ssResource.getResourceBizType()), GrantToObjType.USER, userId,
+            List.of(GrantType.AVAILABLE_USE, GrantType.FORCE_USE));
+        if (CollectionUtils.isEmpty(privilegeGrants)) {
             return false;
         }
-        return queryCurrentUserUsePermittedResourceIds(resourceIds, resourceBizTypes).contains(ssResource.getResourceId());
+        List<PrivilegeGrant> matchingGrants = privilegeGrants.stream()
+            .filter(item -> Objects.equals(ssResource.getResourceId(), item.getGrantObjId()))
+            .filter(item -> "A".equalsIgnoreCase(item.getStatusCd()))
+            .collect(Collectors.toList());
+        boolean hasBlackGrant = matchingGrants.stream()
+            .anyMatch(item -> Color.BLACK.equalsIgnoreCase(item.getGrantToType()));
+        boolean hasRedGrant = matchingGrants.stream()
+            .anyMatch(item -> Color.RED.equalsIgnoreCase(item.getGrantToType()));
+        return hasRedGrant && !hasBlackGrant;
     }
 
     /**
@@ -1101,7 +1139,8 @@ public class AuthApplicationService {
     public Set<Long> queryCurrentUserPendingUseApplyResourceIds(Collection<Long> resourceIds,
         Collection<String> resourceBizTypes) {
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
-        if (CollectionUtils.isEmpty(resourceIds) || CollectionUtils.isEmpty(resourceBizTypes) || currentUserId == null) {
+        if (CollectionUtils.isEmpty(resourceIds) || CollectionUtils.isEmpty(resourceBizTypes) || currentUserId == null
+            || privilegeGrantMapper == null) {
             return Collections.emptySet();
         }
         LambdaQueryWrapper<PrivilegeGrant> queryWrapper = new LambdaQueryWrapper<>();
@@ -2808,8 +2847,11 @@ public class AuthApplicationService {
             hasResourceMemberSettingPermission(ssResource, currentUserId, managePrivilegeIds, organizationManageCache);
         boolean hasUsePermission =
             hasResourceUsePermission(ssResource, currentUserId, useBlacklistedIds, usePermittedIds);
+        boolean useApplyPending = !hasUsePermission && pendingUseApplyIds != null
+            && pendingUseApplyIds.contains(resourceId);
         vo.setHasManagePermission(canManage);
         vo.setHasUsePermission(hasUsePermission);
+        vo.setUseApplyPending(useApplyPending);
         vo.setCanViewDetail(!isResourceRemoved && (canManage || hasUsePermission));
 
         if (isResourceRemoved) {
@@ -2963,8 +3005,14 @@ public class AuthApplicationService {
         boolean isResourceRemoved = Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum());
         boolean canManage = hasResourceManagePermission(ssResource);
         boolean hasUsePermission = hasResourceUsePermission(ssResource);
+        Set<Long> pendingUseApplyIds = queryCurrentUserPendingUseApplyResourceIds(List.of(resourceId),
+            StringUtils.isBlank(ssResource.getResourceBizType())
+                ? Collections.emptyList()
+                : List.of(ssResource.getResourceBizType()));
+        boolean useApplyPending = !hasUsePermission && pendingUseApplyIds.contains(resourceId);
         vo.setHasManagePermission(canManage);
         vo.setHasUsePermission(hasUsePermission);
+        vo.setUseApplyPending(useApplyPending);
         vo.setCanViewDetail(!isResourceRemoved && (canManage || hasUsePermission));
 
         // 如果资源已注销，只允许恢复操作，其他操作全部禁用
