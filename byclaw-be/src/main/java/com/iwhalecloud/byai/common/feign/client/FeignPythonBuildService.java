@@ -5,7 +5,6 @@ import java.io.SequenceInputStream;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -28,7 +27,6 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbBuildResult;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbGlob;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbListDir;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.Data;
-import com.iwhalecloud.byai.common.feign.response.pythonbuild.DirOrFile;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.FileToMarkdownResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
 import com.iwhalecloud.byai.common.util.OkHttpUtil;
@@ -255,17 +253,6 @@ public class FeignPythonBuildService {
         }, resourceId);
     }
 
-    /**
-     * 导入文件到知识库（multipart/form-data）。
-     *
-     * @param kbFileImport 导入参数
-     * @return 成功时含 KbImportResult
-     * @throws BaseException 调用失败
-     */
-    public PythonBuildResponse<KbImportResult> importKnowledgeItem(KbFileImport kbFileImport) {
-        return importKnowledgeItem(kbFileImport, null);
-    }
-
     public PythonBuildResponse<KbImportResult> importKnowledgeItem(KbFileImport kbFileImport, Long resourceId) {
         try {
 
@@ -278,6 +265,8 @@ public class FeignPythonBuildService {
             Map<String, String> formFields = new HashMap<>();
             formFields.put("knCode", kbFileImport.getKnCode());
             formFields.put("filePath", kbFileImport.getFilePath());
+            formFields.put("skipIfDuplicate", String.valueOf(kbFileImport.isSkipIfDuplicate()));
+
             if (kbFileImport.getFileDescription() != null) {
                 formFields.put("fileDescription", kbFileImport.getFileDescription());
             }
@@ -434,8 +423,8 @@ public class FeignPythonBuildService {
         return knowledgeItemReferences(request, null);
     }
 
-    public PythonBuildResponse<KnowledgeItemReferencesResult> knowledgeItemReferences(
-        KbKnowledgeItemReferences request, Long resourceId) {
+    public PythonBuildResponse<KnowledgeItemReferencesResult> knowledgeItemReferences(KbKnowledgeItemReferences request,
+        Long resourceId) {
         return post(KnowledgeServiceOperation.KNOWLEDGE_ITEM_REFERENCES, request,
             new TypeReference<PythonBuildResponse<KnowledgeItemReferencesResult>>() {
             }, resourceId);
@@ -495,7 +484,8 @@ public class FeignPythonBuildService {
         try {
             String requestPath = resolvePath(null, KnowledgeServiceOperation.FILE_TO_MARKDOWN);
             KnowledgeServiceEndpoint endpoint = resolveRoute(null);
-            String baseUrl = endpoint.isDirectUrl() ? endpoint.getBaseUrl() : resolveDiscoveryBaseUrl(endpoint.getServiceName());
+            String baseUrl = endpoint.isDirectUrl() ? endpoint.getBaseUrl()
+                : resolveDiscoveryBaseUrl(endpoint.getServiceName());
             return uploadFileToMarkdown(baseUrl, requestPath, multipartFile);
         }
         catch (BaseException e) {
@@ -518,8 +508,7 @@ public class FeignPythonBuildService {
         return fileToMarkdownIndex(kbFileToMarkdownIndex, null);
     }
 
-    public PythonBuildResponse<Void> fileToMarkdownIndex(KbFileToMarkdownIndex kbFileToMarkdownIndex,
-        Long resourceId) {
+    public PythonBuildResponse<Void> fileToMarkdownIndex(KbFileToMarkdownIndex kbFileToMarkdownIndex, Long resourceId) {
         return post(KnowledgeServiceOperation.KNOWLEDGE_BUILD, kbFileToMarkdownIndex,
             new TypeReference<PythonBuildResponse<Void>>() {
             }, resourceId);
@@ -564,8 +553,7 @@ public class FeignPythonBuildService {
     }
 
     /**
-     * QA 下载失败时可能返回统一 JSON 信封。小响应先完整检查，避免将错误 JSON 当作文件流输出；
-     * 大文件只缓存固定前缀后继续流式转发。
+     * QA 下载失败时可能返回统一 JSON 信封。小响应先完整检查，避免将错误 JSON 当作文件流输出； 大文件只缓存固定前缀后继续流式转发。
      */
     private InputStream validateDownloadResponse(InputStream inputStream, String requestPath) {
         if (inputStream == null) {
@@ -587,8 +575,8 @@ public class FeignPythonBuildService {
                     if (resultCode != null && !PythonBuildResponse.RESPONSE_SUCCESS.equals(resultCode)) {
                         inputStream.close();
                         String resultMsg = responseJson.getString("resultMsg");
-                        throw new BaseException(StringUtil.isEmpty(resultMsg)
-                            ? "调用 Python 构建服务下载接口失败: " + requestPath : resultMsg);
+                        throw new BaseException(
+                            StringUtil.isEmpty(resultMsg) ? "调用 Python 构建服务下载接口失败: " + requestPath : resultMsg);
                     }
                 }
                 inputStream.close();
@@ -637,7 +625,7 @@ public class FeignPythonBuildService {
      */
     private <T> PythonBuildResponse<T> post(KnowledgeServiceOperation operation, Object payload,
         TypeReference<PythonBuildResponse<T>> type) {
-        return post(operation, payload, type, (Long)null);
+        return post(operation, payload, type, (Long) null);
     }
 
     private <T> PythonBuildResponse<T> post(KnowledgeServiceOperation operation, Object payload,
@@ -872,8 +860,9 @@ public class FeignPythonBuildService {
                 ResponseBody errorBody = response.body();
                 String errorText = errorBody == null ? null : errorBody.string();
                 String resultMsg = extractQaResultMessage(errorText);
-                throw new BaseException(StringUtil.isEmpty(resultMsg)
-                    ? "调用第三方知识库下载接口失败: " + path + ", status=" + response.code() : resultMsg);
+                throw new BaseException(
+                    StringUtil.isEmpty(resultMsg) ? "调用第三方知识库下载接口失败: " + path + ", status=" + response.code()
+                        : resultMsg);
             }
             ResponseBody body = response.body();
             if (body == null) {
@@ -923,9 +912,8 @@ public class FeignPythonBuildService {
             byte[] bytes = body == null ? new byte[0] : body.bytes();
             if (!response.isSuccessful()) {
                 String errorBody = new String(bytes, StandardCharsets.UTF_8);
-                throw new BaseException(
-                    String.format("调用 Python 构建服务文件转Markdown接口失败: %s, status=%s, body=%s", path,
-                        response.code(), errorBody));
+                throw new BaseException(String.format("调用 Python 构建服务文件转Markdown接口失败: %s, status=%s, body=%s", path,
+                    response.code(), errorBody));
             }
             if (bytes.length == 0) {
                 throw new BaseException("调用 Python 构建服务文件转Markdown接口失败，响应体为空: " + path);

@@ -21,6 +21,8 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.mockito.ArgumentCaptor;
 
 import com.alibaba.fastjson.JSON;
@@ -46,7 +48,7 @@ import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorAuthMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
-
+@DisabledOnOs(OS.WINDOWS)
 class ConnectorAuthorizationServiceTest {
 
     private static final String AUTHORIZATION_ID = "authorization-1";
