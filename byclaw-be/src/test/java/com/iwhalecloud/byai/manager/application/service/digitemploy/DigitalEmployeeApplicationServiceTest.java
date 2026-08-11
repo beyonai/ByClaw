@@ -866,6 +866,30 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
+    void installSkillGroupSnapshotMergesCurrentUserIntoExistingGroupInstallersThenBecomesIdempotent() {
+        DigitalEmployeeApplicationService snapshotService = snapshotServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResourceRelDetail relation = directSkillRelation(901L, 301L,
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[700],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"700\":[2]}}");
+        when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, List.of(301L)))
+            .thenReturn(List.of(relation));
+        when(ssResourceRelDetailService.updateById(relation)).thenReturn(true);
+
+        snapshotService.installSkillGroupSnapshot(employee, 700L, List.of(301L));
+        snapshotService.installSkillGroupSnapshot(employee, 700L, List.of(301L));
+
+        SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
+        assertThat(source.getLegacySourceGroupIds()).isEmpty();
+        assertThat(source.getGroupInstallers()).containsExactlyEntriesOf(Map.of(700L, Set.of(1L, 2L)));
+        assertThat(relation.getRelResourceInfo()).isEqualTo(
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[700],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"700\":[1,2]}}");
+        verify(ssResourceRelDetailService).updateById(relation);
+        verifySnapshotRefresh(snapshotService, employee, 1);
+    }
+
+    @Test
     void uninstallSkillGroupSnapshotRemovesOnlyGroupSourceAndIgnoresMalformedMetadata() {
         DigitalEmployeeApplicationService snapshotService = snapshotServiceSpy();
         SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
@@ -980,6 +1004,36 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(objectRelation.getRelTypeName()).isNull();
         assertThat(objectRelation.getRelStatus()).isNull();
         assertThat(objectRelation.getRelResourceInfo()).isNull();
+    }
+
+    @Test
+    void ordinaryDirectSkillInstallPreservesV2LegacyAndAttributedSourcesWhenMarkingManual() {
+        DigitalEmployeeApplicationService installService = snapshotServiceSpy();
+        DigitalEmployeeInstallResourceDTO dto = new DigitalEmployeeInstallResourceDTO();
+        dto.setDigitalEmployeeId(100L);
+        dto.setRelIds(List.of(301L));
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResource skill = buildSkillResource(301L, 2L);
+        SsResourceRelDetail relation = directSkillRelation(901L, 301L,
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[600,700],"
+                + "\"legacySourceGroupIds\":[600],\"groupInstallers\":{\"700\":[2,3]}}");
+        when(ssResourceService.findById(100L)).thenReturn(employee);
+        when(skillGroupMapper.selectDigitalEmployeeForUpdate(100L, 201L)).thenReturn(employee);
+        when(ssResourceService.findByIdList(List.of(301L))).thenReturn(List.of(skill));
+        when(authApplicationService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authApplicationService.hasResourceUsePermission(skill)).thenReturn(true);
+        when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of(relation));
+        when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, List.of(301L)))
+            .thenReturn(List.of(relation));
+        when(ssResourceRelDetailService.updateById(relation)).thenReturn(true);
+        doReturn(new DigitalEmployeeDetailsDTO()).when(installService).findDetailsById(any(EmployeeIdDTO.class));
+
+        installService.installDigitalEmployeeRelResources(dto);
+
+        SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
+        assertThat(source.isManual()).isTrue();
+        assertThat(source.getLegacySourceGroupIds()).containsExactly(600L);
+        assertThat(source.getGroupInstallers()).containsExactlyEntriesOf(Map.of(700L, Set.of(2L, 3L)));
     }
 
     @Test
