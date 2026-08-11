@@ -109,11 +109,13 @@ public interface SkillGroupMapper {
      * return no rows; callers must also skip the query when no IDs need evaluation.
      *
      * @param digitalEmployeeId digital-employee resource ID
+     * @param tenantId current tenant ID
      * @param skillIds exact skill IDs to check
      * @return distinct installed skill IDs
      */
     List<Long> selectInstalledSkillIds(
             @Param("digitalEmployeeId") Long digitalEmployeeId,
+            @Param("tenantId") Long tenantId,
             @Param("skillIds") List<Long> skillIds);
 
     /**

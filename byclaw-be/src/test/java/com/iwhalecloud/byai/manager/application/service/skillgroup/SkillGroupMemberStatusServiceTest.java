@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.skillgroup;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
@@ -10,6 +11,9 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import com.iwhalecloud.byai.common.exception.BaseException;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.domain.skillgroup.model.SkillGroupMemberStatus;
 import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
@@ -19,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -29,6 +34,7 @@ class SkillGroupMemberStatusServiceTest {
 
     private static final Long EMPLOYEE_ID = 100L;
     private static final Long SKILL_ID = 200L;
+    private static final Long TENANT_ID = 300L;
 
     private AuthApplicationService authApplicationService;
     private SkillGroupMapper skillGroupMapper;
@@ -39,6 +45,14 @@ class SkillGroupMemberStatusServiceTest {
         authApplicationService = mock(AuthApplicationService.class);
         skillGroupMapper = mock(SkillGroupMapper.class);
         service = new SkillGroupMemberStatusService(authApplicationService, skillGroupMapper);
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setEnterpriseId(TENANT_ID);
+        CurrentUserHolder.setLoginInfo(loginInfo);
+    }
+
+    @AfterEach
+    void tearDown() {
+        CurrentUserHolder.clearLoginInfo();
     }
 
     @ParameterizedTest
@@ -53,7 +67,7 @@ class SkillGroupMemberStatusServiceTest {
         SkillGroupMemberVo member = member(SKILL_ID);
         when(authApplicationService.queryResourceOperationPermissionsBatch(List.of(SKILL_ID)))
                 .thenReturn(Map.of(SKILL_ID, permissions(hasUsePermission, canApplyUse, useApplyPending)));
-        when(skillGroupMapper.selectInstalledSkillIds(EMPLOYEE_ID, List.of(SKILL_ID)))
+        when(skillGroupMapper.selectInstalledSkillIds(EMPLOYEE_ID, TENANT_ID, List.of(SKILL_ID)))
                 .thenReturn(relationExists ? List.of(SKILL_ID) : List.of());
 
         List<SkillGroupMemberVo> result = service.evaluate(List.of(member), EMPLOYEE_ID);
@@ -78,12 +92,13 @@ class SkillGroupMemberStatusServiceTest {
     @Test
     void nullEmployeeSkipsRelationsAndAuthorizedMemberIsInstallable() {
         SkillGroupMemberVo member = member(SKILL_ID);
+        CurrentUserHolder.clearLoginInfo();
         when(authApplicationService.queryResourceOperationPermissionsBatch(List.of(SKILL_ID)))
                 .thenReturn(Map.of(SKILL_ID, permissions(true, false, false)));
 
         service.evaluate(List.of(member), null);
 
-        verify(skillGroupMapper, never()).selectInstalledSkillIds(any(), anyList());
+        verify(skillGroupMapper, never()).selectInstalledSkillIds(any(), any(), anyList());
         assertThat(member.getInstalled()).isFalse();
         assertThat(member.getMemberStatus()).isEqualTo(SkillGroupMemberStatus.INSTALLABLE);
     }
@@ -93,7 +108,8 @@ class SkillGroupMemberStatusServiceTest {
         SkillGroupMemberVo member = member(SKILL_ID);
         when(authApplicationService.queryResourceOperationPermissionsBatch(List.of(SKILL_ID)))
                 .thenReturn(Map.of());
-        when(skillGroupMapper.selectInstalledSkillIds(EMPLOYEE_ID, List.of(SKILL_ID))).thenReturn(List.of(SKILL_ID));
+        when(skillGroupMapper.selectInstalledSkillIds(EMPLOYEE_ID, TENANT_ID, List.of(SKILL_ID)))
+                .thenReturn(List.of(SKILL_ID));
 
         service.evaluate(List.of(member), EMPLOYEE_ID);
 
@@ -114,7 +130,7 @@ class SkillGroupMemberStatusServiceTest {
                 .thenReturn(Map.of(
                         201L, permissions(true, false, false),
                         202L, permissions(false, true, false)));
-        when(skillGroupMapper.selectInstalledSkillIds(EMPLOYEE_ID, List.of(201L, 202L)))
+        when(skillGroupMapper.selectInstalledSkillIds(EMPLOYEE_ID, TENANT_ID, List.of(201L, 202L)))
                 .thenReturn(List.of(201L));
 
         List<SkillGroupMemberVo> result = service.evaluate(input, EMPLOYEE_ID);
@@ -130,15 +146,55 @@ class SkillGroupMemberStatusServiceTest {
         ArgumentCaptor<Collection<Long>> ids = ArgumentCaptor.forClass(Collection.class);
         verify(authApplicationService).queryResourceOperationPermissionsBatch(ids.capture());
         assertThat(ids.getValue()).containsExactly(201L, 202L);
-        verify(skillGroupMapper).selectInstalledSkillIds(EMPLOYEE_ID, List.of(201L, 202L));
+        verify(skillGroupMapper).selectInstalledSkillIds(EMPLOYEE_ID, TENANT_ID, List.of(201L, 202L));
     }
 
     @Test
     void nullAndEmptyMembersReturnEmptyWithoutQueries() {
+        List<SkillGroupMemberVo> empty = List.of();
+
         assertThat(service.evaluate(null, EMPLOYEE_ID)).isEmpty();
-        assertThat(service.evaluate(List.of(), EMPLOYEE_ID)).isEmpty();
+        assertThat(service.evaluate(empty, EMPLOYEE_ID)).isSameAs(empty);
 
         verifyNoInteractions(authApplicationService, skillGroupMapper);
+    }
+
+    @Test
+    void missingTenantFailsClosedBeforeAnyInstalledRelationQuery() {
+        CurrentUserHolder.clearLoginInfo();
+
+        assertThatThrownBy(() -> service.evaluate(List.of(member(SKILL_ID)), EMPLOYEE_ID))
+                .isInstanceOf(BaseException.class)
+                .hasMessage("当前用户企业信息缺失");
+
+        verifyNoInteractions(authApplicationService, skillGroupMapper);
+    }
+
+    @Test
+    void nullPermissionMapFailsClosedWithoutThrowing() {
+        SkillGroupMemberVo member = member(SKILL_ID);
+        when(authApplicationService.queryResourceOperationPermissionsBatch(List.of(SKILL_ID))).thenReturn(null);
+        when(skillGroupMapper.selectInstalledSkillIds(EMPLOYEE_ID, TENANT_ID, List.of(SKILL_ID)))
+                .thenReturn(List.of());
+
+        service.evaluate(List.of(member), EMPLOYEE_ID);
+
+        assertThat(member.getMemberStatus()).isEqualTo(SkillGroupMemberStatus.APPLY_UNAVAILABLE);
+        assertThat(member.getHasUsePermission()).isFalse();
+    }
+
+    @Test
+    void nullInstalledIdResultIsTreatedAsNoRelation() {
+        SkillGroupMemberVo member = member(SKILL_ID);
+        when(authApplicationService.queryResourceOperationPermissionsBatch(List.of(SKILL_ID)))
+                .thenReturn(Map.of(SKILL_ID, permissions(true, false, false)));
+        when(skillGroupMapper.selectInstalledSkillIds(EMPLOYEE_ID, TENANT_ID, List.of(SKILL_ID)))
+                .thenReturn(null);
+
+        service.evaluate(List.of(member), EMPLOYEE_ID);
+
+        assertThat(member.getInstalled()).isFalse();
+        assertThat(member.getMemberStatus()).isEqualTo(SkillGroupMemberStatus.INSTALLABLE);
     }
 
     private static SkillGroupMemberVo member(Long resourceId) {

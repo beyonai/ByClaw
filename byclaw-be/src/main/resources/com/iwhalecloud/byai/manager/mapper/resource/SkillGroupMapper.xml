@@ -354,7 +354,11 @@
     <select id="selectInstalledSkillIds" resultType="java.lang.Long">
         SELECT DISTINCT relation.rel_resource_id
         FROM ss_resource_rel_detail relation
+        JOIN ss_resource employee
+          ON employee.resource_id = relation.resource_id
         WHERE relation.resource_id = #{digitalEmployeeId}
+          AND employee.com_acct_id = #{tenantId}
+          AND employee.resource_biz_type = 'DIG_EMPLOYEE'
           AND relation.rel_type_name = 'DIG_EMPLOYEE_SKILL'
           AND relation.rel_status = 1
         <choose>

@@ -36,6 +36,8 @@ import org.apache.ibatis.io.Resources;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class SkillGroupContractTest {
 
@@ -185,15 +187,17 @@ class SkillGroupContractTest {
         assertInvalidProperties(updateQo, "resourceName", "resourceDesc", "avatar");
     }
 
-    @Test
-    void resourceIdsAndInstallResultIdsSerializeAsJsonStrings() throws Exception {
+    @ParameterizedTest
+    @EnumSource(SkillGroupMemberStatus.class)
+    void resourceIdsAndMemberStatusesSerializeWithStableWireValues(SkillGroupMemberStatus memberStatus)
+            throws Exception {
         SkillGroupVo groupVo = new SkillGroupVo();
         groupVo.setResourceId(10001L);
         SkillGroupMemberVo memberVo = new SkillGroupMemberVo();
         memberVo.setResourceId(20001L);
         memberVo.setSystemBuiltIn(true);
         memberVo.setCreatorOwned(false);
-        memberVo.setMemberStatus(SkillGroupMemberStatus.APPLY_PENDING);
+        memberVo.setMemberStatus(memberStatus);
         memberVo.setStatusReason("reason");
         memberVo.setInstalled(true);
         memberVo.setHasUsePermission(false);
@@ -214,7 +218,7 @@ class SkillGroupContractTest {
         assertThat(memberJson.path("resourceId").asText()).isEqualTo("20001");
         assertThat(memberJson.path("systemBuiltIn").asBoolean()).isTrue();
         assertThat(memberJson.path("creatorOwned").asBoolean()).isFalse();
-        assertThat(memberJson.path("memberStatus").asText()).isEqualTo("APPLY_PENDING");
+        assertThat(memberJson.path("memberStatus").asText()).isEqualTo(memberStatus.name());
         assertThat(memberJson.path("statusReason").asText()).isEqualTo("reason");
         assertThat(memberJson.path("installed").asBoolean()).isTrue();
         assertThat(memberJson.path("hasUsePermission").asBoolean()).isFalse();
@@ -388,7 +392,11 @@ class SkillGroupContractTest {
         String statement = extractBlock(readMapperXml(), "select", "selectinstalledskillids");
         assertThat(statement)
                 .contains("select distinct relation.rel_resource_id")
+                .contains("join ss_resource employee")
+                .contains("employee.resource_id = relation.resource_id")
                 .contains("relation.resource_id = #{digitalemployeeid}")
+                .contains("employee.com_acct_id = #{tenantid}")
+                .contains("employee.resource_biz_type = 'dig_employee'")
                 .contains("relation.rel_type_name = 'dig_employee_skill'")
                 .contains("relation.rel_status = 1")
                 .contains("relation.rel_resource_id in")
@@ -399,6 +407,7 @@ class SkillGroupContractTest {
         Configuration configuration = buildMapperConfiguration();
         Map<String, Object> parameters = new HashMap<>();
         parameters.put("digitalEmployeeId", 30001L);
+        parameters.put("tenantId", 60001L);
         parameters.put("skillIds", null);
         assertThat(normalizedBoundSql(configuration, "selectInstalledSkillIds", parameters).getSql())
                 .contains("1 = 0");
@@ -410,7 +419,7 @@ class SkillGroupContractTest {
         parameters.put("skillIds", List.of(20001L, 20002L));
         BoundSql populated = normalizedBoundSql(configuration, "selectInstalledSkillIds", parameters);
         assertThat(populated.getSql()).containsPattern("relation\\.rel_resource_id in \\( \\? , \\? \\)");
-        assertThat(populated.getParameterMappings()).hasSize(3);
+        assertThat(populated.getParameterMappings()).hasSize(4);
     }
 
     @Test

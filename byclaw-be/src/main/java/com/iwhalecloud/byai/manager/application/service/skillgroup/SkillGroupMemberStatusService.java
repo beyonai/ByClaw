@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.skillgroup;
 
+import com.iwhalecloud.byai.common.exception.BaseException;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.skillgroup.model.SkillGroupMemberStatus;
 import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
@@ -28,8 +30,11 @@ public class SkillGroupMemberStatusService {
     }
 
     public List<SkillGroupMemberVo> evaluate(List<SkillGroupMemberVo> members, Long digitalEmployeeId) {
-        if (members == null || members.isEmpty()) {
+        if (members == null) {
             return Collections.emptyList();
+        }
+        if (members.isEmpty()) {
+            return members;
         }
 
         List<Long> memberIds = members.stream()
@@ -37,6 +42,10 @@ public class SkillGroupMemberStatusService {
                 .map(SkillGroupMemberVo::getResourceId)
                 .distinct()
                 .collect(Collectors.toList());
+        Long tenantId = null;
+        if (digitalEmployeeId != null && !memberIds.isEmpty()) {
+            tenantId = requireCurrentTenant();
+        }
         Map<Long, ResourceOperationPermissionsVo> permissionsById = memberIds.isEmpty()
                 ? Collections.emptyMap()
                 : authApplicationService.queryResourceOperationPermissionsBatch(memberIds);
@@ -46,7 +55,7 @@ public class SkillGroupMemberStatusService {
 
         Set<Long> installedIds = Collections.emptySet();
         if (digitalEmployeeId != null && !memberIds.isEmpty()) {
-            List<Long> selectedIds = skillGroupMapper.selectInstalledSkillIds(digitalEmployeeId, memberIds);
+            List<Long> selectedIds = skillGroupMapper.selectInstalledSkillIds(digitalEmployeeId, tenantId, memberIds);
             if (selectedIds != null && !selectedIds.isEmpty()) {
                 installedIds = new LinkedHashSet<>(selectedIds);
             }
@@ -79,5 +88,13 @@ public class SkillGroupMemberStatusService {
             }
         }
         return members;
+    }
+
+    private Long requireCurrentTenant() {
+        Long tenantId = CurrentUserHolder.getEnterpriseId();
+        if (tenantId == null) {
+            throw new BaseException("当前用户企业信息缺失");
+        }
+        return tenantId;
     }
 }
