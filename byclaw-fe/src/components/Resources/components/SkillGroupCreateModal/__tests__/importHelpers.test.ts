@@ -34,6 +34,8 @@ describe('getSuccessfulImportedSkillIds', () => {
         createImportItem('failed-skill', false),
         createImportItem(undefined),
         createImportItem(null as unknown as string),
+        createImportItem(''),
+        createImportItem('   '),
       ],
     });
 

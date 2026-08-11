@@ -8,6 +8,7 @@ export const getSuccessfulImportedSkillIds = (result?: ResourceImportResult): st
       items
         .filter((item) => item.success === true && item.resourceId !== undefined && item.resourceId !== null)
         .map((item) => String(item.resourceId))
+        .filter((resourceId) => resourceId.trim().length > 0)
     )
   );
 };
