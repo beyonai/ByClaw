@@ -7,15 +7,19 @@ I/O 协议：stdin JSON → stdout JSON
     {
         "workspace_name": "travel_reimbursement",   # 必填，snake_case
         "description":    "差旅报销业务模块",          # 可选（映射到 workspace_desc）
-        "objects": ["travel_application", "travel_itinerary"]  # 可选，预声明对象列表
+        "objects": []  # 可选；新工作区建议初始化后再按返回的编码版本收集对象
     }
 
 出参（stdout JSON）:
     {
         "ok": true,
         "workspace_name": "travel_reimbursement",
-        "objects": {"travel_application": {"status": "draft"}, ...},
-        "views": {}
+        "state": {
+            "workspace_code": "w7k3m9p2x",
+            "entity_code_version": "v2",
+            "objects": {},
+            "views": {}
+        }
     }
 """
 
