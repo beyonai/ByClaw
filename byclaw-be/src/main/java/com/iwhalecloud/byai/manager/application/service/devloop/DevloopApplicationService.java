@@ -2589,6 +2589,95 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(result);
     }
 
+    /**
+     * 需求的第二个启动入口：把需求交给需求数字员工在聊天里聊完成，不拆多仓库任务、不建子任务。
+     *
+     * <p>与「拆分为多仓库任务」二选一：两条入口都写同一列 {@code byai_scan_log_item.session_id}，谁先启动谁占住，
+     * 另一条随即被同一道闸门挡掉。共用一列是有意的——需求「是否已启动」只应有一个真相，多加一列就要在
+     * 列表、详情、去重、回写四处同步两种已启动语义。
+     *
+     * <p>完成状态由 skill 自己按 self-developed-rules 契约维护，本轮后端不轮询：拆分任务那条链路要靠会话状态推进
+     * 子任务，而澄清只需要人在聊天里看结果，加定时扫描等于给没有消费者的状态建管道。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Map<String, Object>> startRequirementClarify(Long projectId, Long sourceItemId) {
+        if (projectId == null || sourceItemId == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.split.tasks.required"));
+        }
+        ScanRequireItem sourceItem = scanRequireItemMapper.selectById(sourceItemId);
+        if (sourceItem == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.repository.not.found"));
+        }
+        if (sourceItem.getSessionId() != null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.requirement.already.started"));
+        }
+        Long requirementAgentId = resolveRequirementAgentId(projectId);
+        if (requirementAgentId == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.requirement.clarify.agent.required"));
+        }
+        LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
+        if (loginInfo == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.login.required"));
+        }
+
+        String requirementContent = StringUtils.defaultIfBlank(getRequirementContent(sourceItem),
+            StringUtils.defaultString(sourceItem.getTitle()));
+
+        // 先用可读标题建会话：会话得先落库，异步 chat 线程才读得到；建完再把正文换成提示词。
+        AssistantChatDto chatDto = new AssistantChatDto();
+        chatDto.setSessionId(null);
+        chatDto.setAgentId(requirementAgentId);
+        chatDto.setProjectId(projectId);
+        chatDto.setChatContent(StringUtils.defaultString(sourceItem.getTitle()));
+        chatDto.setAccessTerminal("DevLoop");
+        chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
+        assistantChatService.createGroupChatSession(chatDto);
+        Long sessionId = chatDto.getSessionId();
+        chatDto.setChatContent(buildRequirementClarifyPrompt(requirementContent));
+
+        ScanRequireItem update = new ScanRequireItem();
+        update.setItemId(sourceItemId);
+        update.setSessionId(sessionId);
+        scanRequireItemMapper.updateById(update);
+
+        submitTaskChatAfterCommit(chatDto, loginInfo, sessionId);
+        log.info("[需求澄清] 已下发需求员工, projectId={}, sourceItemId={}, sessionId={}, agentId={}", projectId, sourceItemId,
+            sessionId, requirementAgentId);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("sessionId", sessionId);
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 需求员工ID：DefaultAgent 存的是字符串，脏值(手工改库/历史空串)按未绑定处理，不让 NumberFormatException 冒到接口。 */
+    private Long resolveRequirementAgentId(Long projectId) {
+        DefaultAgent agent = defaultAgentService.resolveForProject(projectId);
+        String raw = agent == null ? null : agent.getRequirementAgentId();
+        if (StringUtils.isBlank(raw)) {
+            return null;
+        }
+        try {
+            return Long.valueOf(raw.trim());
+        }
+        catch (NumberFormatException e) {
+            log.warn("[需求澄清] 需求员工ID非法, projectId={}, raw={}", projectId, StringUtils.abbreviate(raw, 40));
+            return null;
+        }
+    }
+
+    /** 澄清提示词：模板可运营(byai_ai_prompt)，缺失时兜底内置，保证入口永远可下发。 */
+    private String buildRequirementClarifyPrompt(String requirementContent) {
+        String template = aiPromptService.findTemplateByCode("DEVLOOP_REQUIREMENT_CLARIFY_PROMPT",
+            getCurrentRequestLanguage());
+        if (StringUtils.isBlank(template)) {
+            template = DEFAULT_REQUIREMENT_CLARIFY_PROMPT_TEMPLATE;
+        }
+        return template.replace("${requirementContent}", requirementContent);
+    }
+
+    private static final String DEFAULT_REQUIREMENT_CLARIFY_PROMPT_TEMPLATE =
+        "/byclaw-requirement-clarification ${requirementContent}";
+
     /** 依赖 rowId 列表翻译成真实 taskId 逗号串;映射不到的 rowId(用户误引用/已删)跳过,不存悬空ID。 */
     private String translateDeps(List<String> depRowIds, Map<String, Long> taskIdByRow) {
         if (depRowIds == null || depRowIds.isEmpty()) {

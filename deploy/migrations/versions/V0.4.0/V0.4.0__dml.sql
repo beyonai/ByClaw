@@ -372,3 +372,10 @@ ${repoCloneHint}
   不写这个文件，项目会一直卡在「初始化中」，用户无法新建需求或启动任务。
 - 五步全部做完（该 push 的已 push）才把任务状态收为 completed；中途遇到不可恢复的问题
   （无仓库权限、push 被拒、技能包 CLI 缺失等）按契约转 paused 并写清原因，不要静默结束。', null, 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
+
+-- 需求澄清提示词：需求列表「启动」的第二个入口，把需求交给需求数字员工在聊天里聊完成。
+-- 正文就是一条斜杠命令 + 需求内容，完成状态由 skill 自己按契约维护，后端本轮不轮询。
+delete from byai.byai_ai_prompt where prompt_code in ('DEVLOOP_REQUIREMENT_CLARIFY_PROMPT');
+
+INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
+VALUES (nextval('byai.seq_any_table'), 'DEVLOOP_PROMPT', 'DEVLOOP_REQUIREMENT_CLARIFY_PROMPT', '需求澄清提示词', '需求数字员工澄清需求的提示词，占位符 ${requirementContent}；正文为 /byclaw-requirement-clarification 斜杠命令加需求内容', 'DEVLOOP_REQUIREMENT_CLARIFY_PROMPT', '/byclaw-requirement-clarification ${requirementContent}', null, 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);

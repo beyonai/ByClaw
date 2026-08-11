@@ -505,6 +505,16 @@ public class DevloopController {
         return applicationService.splitTask(dto);
     }
 
+    /** 需求交给需求数字员工在聊天里聊完成(与 /task/split 二选一,共用需求 sessionId 闸门) */
+    @PostMapping("/requirement/clarify")
+    public ResponseUtil<Map<String, Object>> startRequirementClarify(@RequestBody Map<String, Object> params) {
+        Object projectId = params.get("projectId");
+        Object sourceItemId = params.get("sourceItemId");
+        return applicationService.startRequirementClarify(
+            projectId == null ? null : Long.valueOf(projectId.toString()),
+            sourceItemId == null ? null : Long.valueOf(sourceItemId.toString()));
+    }
+
     /** 查询项目任务列表 */
     @PostMapping("/task/list")
     public ResponseUtil<PageInfo<DevloopTaskViewDto>> listTasks(@RequestBody DevloopTaskListQueryDto query) {
