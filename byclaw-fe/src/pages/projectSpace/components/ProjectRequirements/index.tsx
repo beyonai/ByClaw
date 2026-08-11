@@ -499,9 +499,6 @@ const ProjectRequirements: React.FC<Props> = ({
                 project.projectType === 'operation'
                   ? REQUIREMENT_TYPE_BADGES[operationType]
                   : DEVELOP_REQUIREMENT_TYPE_BADGES[sourceType];
-              const dueTime = item.dueTime || item.expectedTime || item.deadline;
-              const formattedDueTime =
-                dueTime && dayjs(dueTime).isValid() ? dayjs(dueTime).format('YYYY-MM-DD HH:mm') : '-';
               const formattedCreateTime =
                 item.createTime && dayjs(item.createTime).isValid()
                   ? dayjs(item.createTime).format('YYYY-MM-DD HH:mm')
@@ -536,7 +533,12 @@ const ProjectRequirements: React.FC<Props> = ({
                       {item.title || item.requirementName || item.sourceName || '-'}
                     </Typography.Text>
                     <div className={styles.requirementCardStatusActions}>
-                      <Tag className={styles.requirementStatusTag} color={getRequirementStatusColor(item.status)}>
+                      <Tag
+                        className={`${styles.requirementStatusTag} ${
+                          isPendingRequirement(item) ? styles.requirementStatusTagWithAction : ''
+                        }`}
+                        color={getRequirementStatusColor(item.status)}
+                      >
                         {getRequirementStatusLabel(item.status)}
                       </Tag>
                       {project.projectType === 'operation' && isPendingRequirement(item) && (
@@ -607,7 +609,7 @@ const ProjectRequirements: React.FC<Props> = ({
                             : undefined
                         }
                       >
-                        {formattedDueTime}
+                        {formattedCreateTime}
                       </Typography.Text>
                     </div>
                   ) : (
@@ -853,7 +855,7 @@ const ProjectRequirements: React.FC<Props> = ({
       />
       <Modal
         open={!!startTarget}
-        title="拆分运营需求"
+        title="拆分任务"
         width={760}
         okText="确定"
         confirmLoading={starting}

@@ -51,7 +51,8 @@ export interface OperationAccountPanelProps {
 // 登录状态使用固定颜色，避免接口中不同平台的状态文案直接影响视觉语义。
 const ACCOUNT_STATUS_COLOR: Record<NonNullable<OperationAccount['loginStatus']>, string> = {
   logged_in: 'success',
-  logged_out: 'default',
+  // 未登录需要提醒用户完成平台登录，使用黄色警示色与已登录状态拉开差异。
+  logged_out: 'warning',
   expired: 'warning',
   unknown: 'default',
 };

@@ -472,16 +472,19 @@ const ProjectDetail: React.FC<Props> = ({
           </Typography.Text>
         </div>
         <div className={styles.detailHeaderActions}>
-          <Input
-            allowClear
-            value={sectionKeywordMap[activeSection] || ''}
-            prefix={<SearchOutlined />}
-            placeholder={intl.formatMessage({ id: 'projectSpace.searchPlaceholder' })}
-            onChange={(event) => {
-              const value = event.target.value;
-              setSectionKeywordMap((current) => ({ ...current, [activeSection]: value }));
-            }}
-          />
+          {/* 资源 Tab 由各资源分栏直接展示完整数据，不提供无实际过滤能力的顶部搜索框。 */}
+          {activeSection !== 'resources' && (
+            <Input
+              allowClear
+              value={sectionKeywordMap[activeSection] || ''}
+              prefix={<SearchOutlined />}
+              placeholder={intl.formatMessage({ id: 'projectSpace.searchPlaceholder' })}
+              onChange={(event) => {
+                const value = event.target.value;
+                setSectionKeywordMap((current) => ({ ...current, [activeSection]: value }));
+              }}
+            />
+          )}
           {/* 运营项目只在需求 tab 显示新增需求入口，切换到其它 tab 后隐藏。 */}
           {isOperationProject && activeSection === 'requirements' && (
             <Button icon={<PlusOutlined />} onClick={() => setOperationRequirementModalOpen(true)}>

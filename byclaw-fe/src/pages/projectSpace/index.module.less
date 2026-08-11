@@ -751,8 +751,9 @@
   pointer-events: auto;
 }
 
-.dataCard:hover .requirementStatusTag,
-.dataCard:focus-within .requirementStatusTag {
+// 只有待开始状态需要在悬停时为执行按钮让位，进行中及其它状态标签始终保持显示。
+.dataCard:hover .requirementStatusTagWithAction,
+.dataCard:focus-within .requirementStatusTagWithAction {
   opacity: 0;
 }
 

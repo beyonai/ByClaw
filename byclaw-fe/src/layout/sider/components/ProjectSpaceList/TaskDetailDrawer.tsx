@@ -81,13 +81,25 @@ const getOperationConfig = (task: any, taskType: string) => {
   return parseOperationConfig(task?.[configKey] || rootConfig[configKey] || rootConfig);
 };
 
+const DETAIL_DATE_TIME_PATTERN =
+  /\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})?/g;
+
+// 详情字段可能是完整 ISO 时间，也可能嵌在“单次执行 · 时间”文案中，统一转换到分钟并保留纯日期原样。
+const formatDateTimeText = (value: unknown) =>
+  `${value ?? ''}`.replace(DETAIL_DATE_TIME_PATTERN, (matched) => {
+    const parsed = dayjs(matched);
+    return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm') : matched;
+  });
+
 const formatOperationSchedule = (config: Record<string, any>) => {
   const directSchedule =
     config.publishSchedule || config.collectSchedule || config.scheduleLabel || config.schedule || config.cronExpr;
-  if (directSchedule) return `${directSchedule}`;
+  if (directSchedule) return formatDateTimeText(directSchedule);
 
   const runMode = `${config.runMode || config.mode || ''}`.toLowerCase();
-  if (runMode === 'once') return config.onceTime ? `单次执行 · ${config.onceTime}` : '单次执行';
+  if (runMode === 'once') {
+    return config.onceTime ? `单次执行 · ${formatDateTimeText(config.onceTime)}` : '单次执行';
+  }
   if (runMode === 'interval') {
     return config.intervalHours ? `按间隔执行 · 每 ${config.intervalHours} 小时` : '按间隔执行';
   }
@@ -120,28 +132,52 @@ const formatDetailValue = (value: unknown): string => {
       '-'
     }`;
   }
-  return `${value}`;
+  return formatDateTimeText(value);
 };
 
-const getOperationStatusMeta = (task: any) => {
+// 运营任务详情复用任务列表的状态优先级和文案，避免 statusLabel 的历史原文导致两处显示不一致。
+const getOperationStatusMeta = (task: any, intl: ReturnType<typeof useIntl>) => {
   const rawStatus = `${
     task?.statusLabel || task?.status || task?.operationState || task?.taskStatus || task?.currentStatus || ''
   }`.trim();
   const status = rawStatus.toLowerCase();
-  const localizedLabel = (fallback: string) => (/[一-鿿]/.test(rawStatus) ? rawStatus : fallback);
-  if (status.includes('完成') || ['done', 'completed', 'success'].includes(status)) {
-    return { label: localizedLabel('已完成'), color: 'success' as const };
+  const statusMeta: Record<string, { labelId: string; color: 'success' | 'processing' | 'warning' | 'error' }> = {
+    completed: { labelId: 'projectSpace.detail.task.status.completed', color: 'success' },
+    in_progress: { labelId: 'projectSpace.detail.task.status.inProgress', color: 'processing' },
+    paused: { labelId: 'projectSpace.detail.task.status.paused', color: 'warning' },
+    waiting_confirmation: { labelId: 'projectSpace.detail.task.status.waitingConfirmation', color: 'warning' },
+    failed: { labelId: 'projectSpace.detail.task.status.failed', color: 'error' },
+    mixed: { labelId: 'projectSpace.detail.task.status.mixed', color: 'warning' },
+    pending: { labelId: 'projectSpace.detail.task.status.pending', color: 'warning' },
+  };
+  let normalizedStatus = status;
+  if (status.includes('混合') || status.includes('部分失败')) normalizedStatus = 'mixed';
+  else if (status.includes('进行中') || status.includes('运行') || ['doing', 'running', 'in_progress'].includes(status)) {
+    normalizedStatus = 'in_progress';
   }
-  if (status.includes('失败') || ['failed', 'error'].includes(status)) {
-    return { label: localizedLabel('失败'), color: 'error' as const };
+  else if (status.includes('已完成') || status.includes('完成') || ['done', 'completed', 'success'].includes(status)) {
+    normalizedStatus = 'completed';
+  } else if (status.includes('失败') || ['failed', 'error'].includes(status)) {
+    normalizedStatus = 'failed';
+  } else if (status.includes('暂停') || ['paused'].includes(status)) {
+    normalizedStatus = 'paused';
+  } else if (status.includes('待确认') || status === 'waiting_confirmation') {
+    normalizedStatus = 'waiting_confirmation';
+  } else if (
+    status.includes('待开始') ||
+    status.includes('待启动') ||
+    status.includes('待处理') ||
+    ['todo', 'pending', 'not_started', 'waiting'].includes(status)
+  ) {
+    normalizedStatus = 'pending';
   }
-  if (status.includes('进行') || ['doing', 'running', 'in_progress'].includes(status)) {
-    return { label: localizedLabel('进行中'), color: 'processing' as const };
-  }
-  if (status.includes('暂停') || ['paused', 'waiting_confirmation'].includes(status)) {
-    return { label: localizedLabel('暂停'), color: 'warning' as const };
-  }
-  return { label: localizedLabel('待开始'), color: 'warning' as const };
+  const meta = statusMeta[normalizedStatus] || statusMeta.pending;
+  return {
+    label: statusMeta[normalizedStatus]
+      ? intl.formatMessage({ id: meta.labelId })
+      : rawStatus || intl.formatMessage({ id: meta.labelId }),
+    color: meta.color,
+  };
 };
 
 const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
@@ -207,7 +243,7 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
   const rootOperationConfig = parseOperationConfig(task?.operationConfig || task?.config);
   const operationConfig = { ...rootOperationConfig, ...getOperationConfig(task, operationTaskType) };
   const operationTaskTypeLabel = t(`projectSpace.operation.task.type.${operationTaskType}`);
-  const operationStatusMeta = getOperationStatusMeta(task);
+  const operationStatusMeta = getOperationStatusMeta(task, intl);
   const platformCode =
     operationConfig.channel ||
     operationConfig.publishChannel ||
@@ -263,8 +299,7 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
     { label: '负责成员', value: task?.assigneeName || task?.assignee },
     {
       label: '完成时间',
-      value:
-        task?.dueTime && dayjs(task.dueTime).isValid() ? dayjs(task.dueTime).format('YYYY-MM-DD') : task?.dueTime,
+      value: task?.dueTime ? formatDateTimeText(task.dueTime) : task?.dueTime,
     },
     {
       label: '创建时间',
