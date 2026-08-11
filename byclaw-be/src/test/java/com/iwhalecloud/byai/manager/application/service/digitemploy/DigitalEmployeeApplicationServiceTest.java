@@ -737,6 +737,8 @@ class DigitalEmployeeApplicationServiceTest {
             SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
             assertThat(source.isManual()).isFalse();
             assertThat(source.getSourceGroupIds()).containsExactly(700L);
+            assertThat(source.getLegacySourceGroupIds()).isEmpty();
+            assertThat(source.getGroupInstallers()).containsExactlyEntriesOf(Map.of(700L, Set.of(1L)));
         });
         verifySnapshotRefresh(snapshotService, employee, 1);
     }
@@ -764,8 +766,10 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(result.getExistingSkillIds()).containsExactly(301L, 302L, 303L);
         assertThat(SkillRelationSource.parse(manual.getRelResourceInfo()).isManual()).isTrue();
         assertThat(SkillRelationSource.parse(manual.getRelResourceInfo()).getSourceGroupIds()).containsExactly(700L);
-        assertThat(SkillRelationSource.parse(otherGroup.getRelResourceInfo()).getSourceGroupIds())
-            .containsExactly(600L, 700L);
+        SkillRelationSource otherGroupSource = SkillRelationSource.parse(otherGroup.getRelResourceInfo());
+        assertThat(otherGroupSource.getLegacySourceGroupIds()).containsExactly(600L);
+        assertThat(otherGroupSource.getGroupInstallers()).containsExactlyEntriesOf(Map.of(700L, Set.of(1L)));
+        assertThat(otherGroupSource.getSourceGroupIds()).containsExactly(600L, 700L);
         assertThat(SkillRelationSource.parse(malformedLegacy.getRelResourceInfo()).isManual()).isTrue();
         assertThat(SkillRelationSource.parse(malformedLegacy.getRelResourceInfo()).isMalformed()).isFalse();
         assertThat(SkillRelationSource.parse(malformedLegacy.getRelResourceInfo()).getSourceGroupIds())
@@ -775,6 +779,37 @@ class DigitalEmployeeApplicationServiceTest {
             assertThat(relation.getRelStatus()).isEqualTo(1);
         });
         verify(ssResourceRelDetailService, times(3)).updateById(any());
+        verifySnapshotRefresh(snapshotService, employee, 1);
+    }
+
+    @Test
+    void installSkillGroupSnapshotPreservesManualAndExistingV2Installers() {
+        DigitalEmployeeApplicationService snapshotService = snapshotServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResourceRelDetail manual = directSkillRelation(901L, 301L,
+            "{\"version\":2,\"manual\":true,\"sourceGroupIds\":[700],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"700\":[1]}}");
+        SsResourceRelDetail otherInstaller = directSkillRelation(902L, 302L,
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[600],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"600\":[2]}}");
+        when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, List.of(301L, 302L)))
+            .thenReturn(List.of(manual, otherInstaller));
+        when(ssResourceRelDetailService.updateById(any())).thenReturn(true);
+
+        snapshotService.installSkillGroupSnapshot(employee, 701L, List.of(301L, 302L));
+
+        SkillRelationSource manualSource = SkillRelationSource.parse(manual.getRelResourceInfo());
+        assertThat(manualSource.isManual()).isTrue();
+        assertThat(manualSource.getLegacySourceGroupIds()).isEmpty();
+        assertThat(manualSource.getGroupInstallers()).hasSize(2)
+            .containsEntry(700L, Set.of(1L))
+            .containsEntry(701L, Set.of(1L));
+        SkillRelationSource otherInstallerSource = SkillRelationSource.parse(otherInstaller.getRelResourceInfo());
+        assertThat(otherInstallerSource.getLegacySourceGroupIds()).isEmpty();
+        assertThat(otherInstallerSource.getGroupInstallers()).hasSize(2)
+            .containsEntry(600L, Set.of(2L))
+            .containsEntry(701L, Set.of(1L));
+        verify(ssResourceRelDetailService, times(2)).updateById(any());
         verifySnapshotRefresh(snapshotService, employee, 1);
     }
 
@@ -804,6 +839,10 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(inserted.getValue().getRelResourceId()).isEqualTo(302L);
         assertThat(SkillRelationSource.parse(inserted.getValue().getRelResourceInfo()).getSourceGroupIds())
             .containsExactly(700L);
+        assertThat(SkillRelationSource.parse(inserted.getValue().getRelResourceInfo()).getLegacySourceGroupIds())
+            .isEmpty();
+        assertThat(SkillRelationSource.parse(inserted.getValue().getRelResourceInfo()).getGroupInstallers())
+            .containsExactlyEntriesOf(Map.of(700L, Set.of(1L)));
         verify(ssResourceRelDetailService).updateById(existing);
         verifySnapshotRefresh(snapshotService, employee, 1);
     }
@@ -813,7 +852,8 @@ class DigitalEmployeeApplicationServiceTest {
         DigitalEmployeeApplicationService snapshotService = snapshotServiceSpy();
         SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
         SsResourceRelDetail relation = directSkillRelation(901L, 301L,
-            "{\"manual\":false,\"sourceGroupIds\":[700]}");
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[700],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"700\":[1]}}");
         when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, List.of(301L)))
             .thenReturn(List.of(relation));
 
@@ -836,7 +876,8 @@ class DigitalEmployeeApplicationServiceTest {
         SsResourceRelDetail other = directSkillRelation(903L, 303L,
             "{\"manual\":false,\"sourceGroupIds\":[600,700]}");
         SsResourceRelDetail manualOther = directSkillRelation(904L, 304L,
-            "{\"manual\":true,\"sourceGroupIds\":[600,700]}");
+            "{\"version\":2,\"manual\":true,\"sourceGroupIds\":[600,700],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"600\":[2],\"700\":[1,2]}}");
         SsResourceRelDetail malformed = directSkillRelation(905L, 305L, "{not-json");
         when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, null))
             .thenReturn(List.of(groupOnly, manual, other, manualOther, malformed));
@@ -854,6 +895,9 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(SkillRelationSource.parse(other.getRelResourceInfo()).getSourceGroupIds()).containsExactly(600L);
         assertThat(SkillRelationSource.parse(manualOther.getRelResourceInfo()).getSourceGroupIds())
             .containsExactly(600L);
+        assertThat(SkillRelationSource.parse(manualOther.getRelResourceInfo()).getLegacySourceGroupIds()).isEmpty();
+        assertThat(SkillRelationSource.parse(manualOther.getRelResourceInfo()).getGroupInstallers())
+            .containsExactlyEntriesOf(Map.of(600L, Set.of(2L)));
         assertThat(malformed.getRelResourceInfo()).isEqualTo("{not-json");
         verifySnapshotRefresh(snapshotService, employee, 1);
     }
@@ -1486,7 +1530,8 @@ class DigitalEmployeeApplicationServiceTest {
         SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
         SsResource skill = buildSkillResource(301L, 2L);
         SsResourceRelDetail relation = directSkillRelation(901L, 301L,
-            "{\"manual\":false,\"sourceGroupIds\":[700]}");
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[700],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"700\":[2]}}");
         prepareFullUpdate(employee, List.of(relation), List.of(relation));
         when(ssResourceService.findByIdList(List.of(301L))).thenReturn(List.of(skill));
         when(ssResourceRelDetailService.updateById(relation)).thenReturn(true);
@@ -1496,6 +1541,8 @@ class DigitalEmployeeApplicationServiceTest {
         SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
         assertThat(source.isManual()).isTrue();
         assertThat(source.getSourceGroupIds()).containsExactly(700L);
+        assertThat(source.getLegacySourceGroupIds()).isEmpty();
+        assertThat(source.getGroupInstallers()).containsExactlyEntriesOf(Map.of(700L, Set.of(2L)));
         assertThat(relation.getRelTypeName()).isEqualTo("DIG_EMPLOYEE_SKILL");
         assertThat(relation.getRelStatus()).isEqualTo(1);
         verify(ssResourceRelDetailService).updateById(relation);

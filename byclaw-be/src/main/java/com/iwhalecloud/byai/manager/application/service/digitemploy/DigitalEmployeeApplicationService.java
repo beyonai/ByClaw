@@ -1085,7 +1085,7 @@ public class DigitalEmployeeApplicationService {
                     digitalEmployee, skillId, currentUserId, now);
                 SkillRelationSource groupOnlySource = SkillRelationSource.parse(
                     "{\"manual\":false,\"sourceGroupIds\":[]}");
-                groupOnlySource.addGroup(groupId);
+                groupOnlySource.addGroupInstaller(groupId, currentUserId);
                 relation.setRelResourceInfo(groupOnlySource.toJson());
                 int inserted = skillGroupMapper.insertDigitalEmployeeSkillIfAbsent(relation);
                 if (inserted == 1) {
@@ -1449,7 +1449,7 @@ public class DigitalEmployeeApplicationService {
     private boolean addGroupSourceAndCanonicalize(
         SsResourceRelDetail relation, Long groupId, Long currentUserId, Date now) {
         SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
-        source.addGroup(groupId);
+        source.addGroupInstaller(groupId, currentUserId);
         String normalizedSource = source.toJson();
         boolean changed = !StringUtils.equals(normalizedSource, relation.getRelResourceInfo())
             || !StringUtils.equals(DIG_EMPLOYEE_SKILL_REL_TYPE, relation.getRelTypeName())
@@ -1491,8 +1491,7 @@ public class DigitalEmployeeApplicationService {
             digitalEmployeeId, skillIds);
         for (SsResourceRelDetail relation : safeRelations(relations)) {
             SkillRelationSource parsed = SkillRelationSource.parse(relation.getRelResourceInfo());
-            SkillRelationSource manualSource = SkillRelationSource.manual();
-            parsed.getSourceGroupIds().forEach(manualSource::addGroup);
+            SkillRelationSource manualSource = parsed.withManual();
             String normalizedSource = manualSource.toJson();
             boolean changed = !StringUtils.equals(normalizedSource, relation.getRelResourceInfo())
                 || !StringUtils.equals(DIG_EMPLOYEE_SKILL_REL_TYPE, relation.getRelTypeName())
@@ -2893,8 +2892,7 @@ public class DigitalEmployeeApplicationService {
             existingSkillIds.add(skillId);
             SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
             if (requestedSkillIds.contains(skillId)) {
-                SkillRelationSource manualSource = SkillRelationSource.manual();
-                source.getSourceGroupIds().forEach(manualSource::addGroup);
+                SkillRelationSource manualSource = source.withManual();
                 updateCanonicalSkillRelation(digitalEmployee, relation, manualSource, currentUserId, now);
                 continue;
             }
