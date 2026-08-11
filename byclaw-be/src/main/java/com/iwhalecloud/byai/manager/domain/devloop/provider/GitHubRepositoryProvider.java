@@ -13,6 +13,8 @@ import okhttp3.Response;
 import org.springframework.stereotype.Service;
 
 import java.net.URLEncoder;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
@@ -21,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 
 /** GitHub Contents API 目录读取实现。 */
 @Slf4j
@@ -36,10 +39,11 @@ public class GitHubRepositoryProvider implements GitRepositoryProvider {
     }
 
     @Override
-    public List<ProjectRepoTreeNodeDTO> listTree(String repoFullName, String path, String ref, String accessToken) {
-        validateRepoName(repoFullName);
+    public List<ProjectRepoTreeNodeDTO> listTree(String repoUrl, String repoFullName, String path, String ref,
+        String accessToken) {
+        String resolvedRepoFullName = resolveRepoFullName(repoUrl, repoFullName);
         requireToken(accessToken);
-        String url = buildContentsUrl(repoFullName, path, ref);
+        String url = buildContentsUrl(resolvedRepoFullName, path, ref);
         try (Response response = OkHttpUtil.getRequest(url, jsonHeaders(accessToken))) {
             if (response == null || response.body() == null) {
                 throw new BaseException(50500, "devloop.github.no.response");
@@ -72,19 +76,64 @@ public class GitHubRepositoryProvider implements GitRepositoryProvider {
         } catch (BaseException e) {
             throw e;
         } catch (Exception e) {
-            log.error("GitHub repository tree query failed: repo={}, path={}, ref={}", repoFullName, path, ref, e);
+            log.error("GitHub repository tree query failed: repo={}, path={}, ref={}", resolvedRepoFullName, path, ref, e);
             throw new BaseException(50500, "devloop.github.tree.query.failed");
         }
     }
 
     @Override
-    public List<ProjectRepoBranchDTO> listBranches(String repoFullName, String accessToken) {
-        validateRepoName(repoFullName);
+    public List<ProjectRepoTreeNodeDTO> searchTree(String repoUrl, String repoFullName, String keyword, String ref,
+        String accessToken) {
+        String resolvedRepoFullName = resolveRepoFullName(repoUrl, repoFullName);
+        requireToken(accessToken);
+        if (ref == null || ref.trim().isEmpty()) {
+            throw new BaseException(50500, "project.repo.branch.required");
+        }
+        String normalizedKeyword = keyword == null ? "" : keyword.trim().toLowerCase(Locale.ROOT);
+        if (normalizedKeyword.isEmpty()) {
+            throw new BaseException(50500, "project.repo.search.keyword.required");
+        }
+        String url = API_BASE + "/repos/" + resolvedRepoFullName + "/git/trees/" + encode(ref.trim())
+            + "?recursive=1";
+        try (Response response = OkHttpUtil.getRequest(url, jsonHeaders(accessToken))) {
+            JsonNode root = readSuccessfulJson(response, "devloop.github.tree.search.failed");
+            if (root.path("truncated").asBoolean(false)) {
+                log.warn("GitHub recursive tree response was truncated: repo={}, ref={}", resolvedRepoFullName, ref);
+            }
+            List<ProjectRepoTreeNodeDTO> nodes = new ArrayList<>();
+            for (JsonNode item : root.path("tree")) {
+                String itemPath = item.path("path").asText("");
+                if (!itemPath.toLowerCase(Locale.ROOT).contains(normalizedKeyword)) continue;
+                ProjectRepoTreeNodeDTO node = new ProjectRepoTreeNodeDTO();
+                int separatorIndex = itemPath.lastIndexOf('/');
+                node.setName(separatorIndex >= 0 ? itemPath.substring(separatorIndex + 1) : itemPath);
+                node.setPath(itemPath);
+                node.setType("tree".equals(item.path("type").asText()) ? "directory" : "file");
+                node.setSize(item.has("size") ? item.path("size").asLong() : null);
+                node.setSha(item.path("sha").asText(null));
+                node.setHasChildren("directory".equals(node.getType()));
+                nodes.add(node);
+            }
+            nodes.sort(Comparator.comparing(ProjectRepoTreeNodeDTO::getType)
+                .thenComparing(ProjectRepoTreeNodeDTO::getPath, String.CASE_INSENSITIVE_ORDER));
+            return nodes;
+        } catch (BaseException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("GitHub repository tree search failed: repo={}, ref={}, keyword={}", resolvedRepoFullName, ref,
+                keyword, e);
+            throw new BaseException(50500, "devloop.github.tree.search.failed");
+        }
+    }
+
+    @Override
+    public List<ProjectRepoBranchDTO> listBranches(String repoUrl, String repoFullName, String accessToken) {
+        String resolvedRepoFullName = resolveRepoFullName(repoUrl, repoFullName);
         requireToken(accessToken);
         List<ProjectRepoBranchDTO> branches = new ArrayList<>();
         int page = 1;
         while (true) {
-            String url = API_BASE + "/repos/" + repoFullName.trim() + "/branches?per_page=100&page=" + page;
+            String url = API_BASE + "/repos/" + resolvedRepoFullName + "/branches?per_page=100&page=" + page;
             try (Response response = OkHttpUtil.getRequest(url, jsonHeaders(accessToken))) {
                 JsonNode root = readSuccessfulJson(response, "devloop.github.branches.query.failed");
                 if (!root.isArray()) {
@@ -102,7 +151,7 @@ public class GitHubRepositoryProvider implements GitRepositoryProvider {
             } catch (BaseException e) {
                 throw e;
             } catch (Exception e) {
-                log.error("GitHub branches query failed: repo={}, page={}", repoFullName, page, e);
+                log.error("GitHub branches query failed: repo={}, page={}", resolvedRepoFullName, page, e);
                 throw new BaseException(50500, "devloop.github.branches.query.failed");
             }
         }
@@ -110,9 +159,9 @@ public class GitHubRepositoryProvider implements GitRepositoryProvider {
     }
 
     @Override
-    public ProjectRepoFileContentDTO getFileContent(String repoFullName, String branch, String path,
+    public ProjectRepoFileContentDTO getFileContent(String repoUrl, String repoFullName, String branch, String path,
         String accessToken) {
-        validateRepoName(repoFullName);
+        String resolvedRepoFullName = resolveRepoFullName(repoUrl, repoFullName);
         requireToken(accessToken);
         if (branch == null || branch.trim().isEmpty()) {
             throw new BaseException(50500, "project.repo.branch.required");
@@ -120,7 +169,7 @@ public class GitHubRepositoryProvider implements GitRepositoryProvider {
         if (path == null || path.trim().isEmpty()) {
             throw new BaseException(50500, "project.repo.file.path.required");
         }
-        String url = buildContentsUrl(repoFullName, path, branch);
+        String url = buildContentsUrl(resolvedRepoFullName, path, branch);
         try (Response response = OkHttpUtil.getRequest(url, jsonHeaders(accessToken))) {
             JsonNode root = readSuccessfulJson(response, "devloop.github.file.query.failed");
             if (!"file".equals(root.path("type").asText())) {
@@ -144,7 +193,7 @@ public class GitHubRepositoryProvider implements GitRepositoryProvider {
         } catch (BaseException e) {
             throw e;
         } catch (Exception e) {
-            log.error("GitHub file query failed: repo={}, branch={}, path={}", repoFullName, branch, path, e);
+            log.error("GitHub file query failed: repo={}, branch={}, path={}", resolvedRepoFullName, branch, path, e);
             throw new BaseException(50500, "devloop.github.file.query.failed");
         }
     }
@@ -216,9 +265,44 @@ public class GitHubRepositoryProvider implements GitRepositoryProvider {
         }
     }
 
-    private void validateRepoName(String repoFullName) {
-        if (repoFullName == null || !repoFullName.matches("[^/\\s]+/[^/\\s]+")) {
-            throw new BaseException(50500, "project.repo.name.invalid");
+    /**
+     * 优先从远程 URL 解析 owner/repository，避免人工填写的 repoFullName 影响 API 定位。
+     * 支持 HTTPS、SSH 和 GitHub API URL；没有 URL 时才回退到 repoFullName。
+     */
+    private String resolveRepoFullName(String repoUrl, String repoFullName) {
+        if (repoUrl == null || repoUrl.trim().isEmpty()) {
+            if (repoFullName == null || !repoFullName.trim().matches("[^/\\s]+/[^/\\s]+")) {
+                throw new BaseException(50500, "project.repo.name.invalid");
+            }
+            return repoFullName.trim();
         }
+
+        String value = repoUrl.trim();
+        String path;
+        try {
+            if (value.startsWith("git@github.com:")) {
+                path = value.substring("git@github.com:".length());
+            } else {
+                URI uri = new URI(value);
+                String host = uri.getHost();
+                if (host == null || !("github.com".equalsIgnoreCase(host)
+                    || "www.github.com".equalsIgnoreCase(host) || "api.github.com".equalsIgnoreCase(host))) {
+                    throw new IllegalArgumentException("not a GitHub repository URL");
+                }
+                path = uri.getPath();
+                if ("api.github.com".equalsIgnoreCase(host) && path != null && path.startsWith("/repos/")) {
+                    path = path.substring("/repos/".length());
+                }
+            }
+        } catch (URISyntaxException | IllegalArgumentException e) {
+            throw new BaseException(50500, "project.repo.url.invalid");
+        }
+
+        path = path == null ? "" : path.replace('\\', '/').replaceAll("^/+|/+$", "");
+        if (path.endsWith(".git")) path = path.substring(0, path.length() - 4);
+        if (!path.matches("[^/\\s]+/[^/\\s]+")) {
+            throw new BaseException(50500, "project.repo.url.invalid");
+        }
+        return path;
     }
 }
