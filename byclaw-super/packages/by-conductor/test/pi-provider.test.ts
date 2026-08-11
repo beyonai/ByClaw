@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { PiLeaderSessionFactory } from "../src/pi-leader.js";
+import { buildPiRuntimeProviderConfig } from "../src/pi-model-provider.js";
 
 describe("Pi provider registration", () => {
   const tempDirectories: string[] = [];
@@ -70,5 +71,54 @@ describe("Pi provider registration", () => {
       access(join(cacheDirectory, instanceDirectory!, "internal-session-1", "files")),
     ).rejects.toMatchObject({ code: "ENOENT" });
     await leader.dispose();
+  });
+
+  it("uses system instead of developer for Ark Responses compatibility", () => {
+    const provider = buildPiRuntimeProviderConfig({
+      providerId: "volcengine-ark",
+      providerName: "Volcengine Ark",
+      modelId: "deepseek-v4-pro-260425",
+      modelName: "DeepSeek V4 Pro 260425",
+      baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+      apiKey: "test-only",
+      authHeader: true,
+      protocol: "openai-responses",
+      input: ["text"],
+      contextWindow: 1_000_000,
+      maxTokens: 384_000,
+      reasoning: {
+        enabled: true,
+        capability: "effort",
+        defaultLevel: "medium",
+      },
+    });
+
+    expect(provider.provider.models[0]?.compat).toMatchObject({
+      supportsDeveloperRole: false,
+    });
+  });
+
+  it("allows overriding developer-role compatibility for Responses providers", () => {
+    const provider = buildPiRuntimeProviderConfig({
+      providerId: "custom-responses",
+      providerName: "Custom Responses",
+      modelId: "model",
+      modelName: "Model",
+      baseUrl: "https://example.test/v1",
+      apiKey: "test-only",
+      authHeader: true,
+      protocol: "openai-responses",
+      input: ["text"],
+      contextWindow: 128_000,
+      maxTokens: 8_192,
+      reasoning: {
+        enabled: true,
+        supportsDeveloperRole: false,
+      },
+    });
+
+    expect(provider.provider.models[0]?.compat).toMatchObject({
+      supportsDeveloperRole: false,
+    });
   });
 });
