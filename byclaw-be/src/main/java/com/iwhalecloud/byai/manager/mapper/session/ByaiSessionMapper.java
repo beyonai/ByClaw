@@ -8,7 +8,9 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.qo.searchask.RecentlySearchAskQo;
 import com.iwhalecloud.byai.manager.qo.session.ByaiSessionQo;
 import com.iwhalecloud.byai.manager.vo.searchask.RecentlySearchAskVo;
+import org.apache.ibatis.annotations.Param;
 
+import java.util.Date;
 import java.util.List;
 
 /**
@@ -41,4 +43,18 @@ public interface ByaiSessionMapper extends BaseMapper<ByaiSession> {
      * @return List
      */
     List<RecentlySearchAskVo> queryRecentlySearchAsk(RecentlySearchAskQo recentlySessionQo);
+
+    /**
+     * 当会话仍带有指定扩展状态时更新会话名称。
+     *
+     * @param sessionId 会话标识
+     * @param sessionName 新会话名称
+     * @param extParamCode 扩展参数编码
+     * @param updateBy 更新人
+     * @param updateTime 更新时间
+     * @return 更新记录数
+     */
+    int updateSessionNameWhenExtExists(@Param("sessionId") Long sessionId,
+        @Param("sessionName") String sessionName, @Param("extParamCode") String extParamCode,
+        @Param("updateBy") Long updateBy, @Param("updateTime") Date updateTime);
 }

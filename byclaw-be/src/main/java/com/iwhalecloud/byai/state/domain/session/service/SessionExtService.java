@@ -64,4 +64,17 @@ public class SessionExtService {
         return byaiSessionExtMapper.selectOne(queryWrapper);
     }
 
+    /**
+     * 删除会话的指定扩展参数。
+     *
+     * @param sessionId 会话标识
+     * @param paramCode 参数编码
+     */
+    public void deleteBySessionIdAndParamCode(Long sessionId, String paramCode) {
+        LambdaQueryWrapper<ByaiSessionExt> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(ByaiSessionExt::getSessionId, sessionId);
+        queryWrapper.eq(ByaiSessionExt::getExtParamCode, paramCode);
+        byaiSessionExtMapper.delete(queryWrapper);
+    }
+
 }

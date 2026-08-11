@@ -67,10 +67,20 @@ function useHandler(props: IProps) {
 
       chatSessionRuntimeManager.bindSession(sseMsg.clientRequestId, newSessionId);
 
-      addSession({
-        ...(sseRes as ISession),
-        sessionId: newSessionId,
-      });
+      if (sseMsg.event === 'sessionTitleUpdated') {
+        dispatch({
+          type: 'session/updateSession',
+          payload: {
+            ...pick(sseRes, ['sessionName', 'updateTime']),
+            sessionId: newSessionId,
+          },
+        });
+      } else {
+        addSession({
+          ...(sseRes as ISession),
+          sessionId: newSessionId,
+        });
+      }
 
       if (!curSessioneRef.current) {
         // 设置当前会话ID

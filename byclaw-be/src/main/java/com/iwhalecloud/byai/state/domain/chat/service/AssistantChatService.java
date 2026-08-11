@@ -52,6 +52,7 @@ import com.iwhalecloud.byai.state.domain.session.enums.MemObjType;
 import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
 import com.iwhalecloud.byai.state.domain.session.enums.UserRole;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionTitleService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
 import com.iwhalecloud.byai.state.infrastructure.utils.ChatUtils;
@@ -79,6 +80,9 @@ public class AssistantChatService {
 
     @Autowired
     private SessionService sessionService;
+
+    @Autowired
+    private SessionTitleService sessionTitleService;
 
     @Autowired
     private SequenceService sequenceService;
@@ -452,6 +456,12 @@ public class AssistantChatService {
         else {
             // sessionId不为空时，检查当前用户是否在群成员列表中
             checkUserMembershipInGroup(assistantChatDto.getSessionId(), currentUserId, assistantChatDto);
+            ByaiSession updatedSession = sessionTitleService.resolveInitialTitle(assistantChatDto.getSessionId(),
+                assistantChatDto.getChatContent());
+            if (updatedSession != null) {
+                CompletionsUtils.responseWrite(outputStream, SseResponseEventEnum.sessionTitleUpdated,
+                    JSON.toJSONString(updatedSession), updatedSession.getSessionId());
+            }
         }
     }
 

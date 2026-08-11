@@ -195,4 +195,18 @@
         </where>
     </select>
 
+    <update id="updateSessionNameWhenExtExists">
+        UPDATE byai_session
+        SET session_name = #{sessionName},
+            update_by = #{updateBy},
+            update_time = #{updateTime}
+        WHERE session_id = #{sessionId}
+          AND EXISTS (
+              SELECT 1
+              FROM byai_session_ext
+              WHERE byai_session_ext.session_id = byai_session.session_id
+                AND byai_session_ext.ext_param_code = #{extParamCode}
+          )
+    </update>
+
 </mapper>

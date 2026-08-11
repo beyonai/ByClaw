@@ -35,6 +35,11 @@ public class SseResponseEventEnum {
     public static final String createSession = "createSession";
 
     /**
+     * 会话标题更新事件
+     */
+    public static final String sessionTitleUpdated = "sessionTitleUpdated";
+
+    /**
      * 清空数据
      */
     public static final String initMessage = "initMessage";

@@ -15,7 +15,7 @@ type IProps = {
   onCreate: (fileItem: IFile) => void;
   onUpdate: (fileItem: IFile) => void;
   onRemove: (fileItem: IFile) => void;
-  setSessionId: (sessionId: string, file: any) => void;
+  setSessionId: (sessionId: string, sessionName?: string) => void;
   disabled?: boolean;
 };
 
@@ -54,16 +54,17 @@ function UploadFile(props: IProps) {
         try {
           const data: {
             sessionId?: string;
+            sessionName?: string;
             sessionDatasetid?: string;
             rebuildFileList?: IQueryFile[];
             uploadItems?: Partial<IQueryFile>[];
           } = await uploadFiles(formData);
 
-          const { rebuildFileList = [], uploadItems = [], sessionId } = data || {};
+          const { rebuildFileList = [], uploadItems = [], sessionId, sessionName } = data || {};
           const uploadedFileList = !isEmpty(rebuildFileList) ? rebuildFileList : uploadItems;
 
           if (sessionId) {
-            setSessionId(sessionId, file);
+            setSessionId(sessionId, sessionName);
           }
 
           if (!isEmpty(uploadedFileList)) {

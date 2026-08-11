@@ -80,10 +80,41 @@ describe('hooks/useChat/useHandler', () => {
         extParams: { k: 'v' },
       },
     });
-    expect(addSession).toHaveBeenCalledWith({ sessionId: 's1', sessionExts: [{ extParamCode: 'k', extParamValue: 'v' }] });
+    expect(addSession).toHaveBeenCalledWith({
+      sessionId: 's1',
+      sessionExts: [{ extParamCode: 'k', extParamValue: 'v' }],
+    });
     expect(setSessionId).toHaveBeenCalledWith('s1');
     expect(next.newQueryMsg.sessionId).toBe('s1');
     expect(next.newAnswerMsg.sessionId).toBe('s1');
+  });
+
+  it('sessionInfoHandler updates an existing session title without adding another session', () => {
+    const dispatch = mockUseDispatch.mock.results[0]?.value || mockUseDispatch();
+    const addSession = jest.fn();
+    const { result } = renderHook(() => useHandler({ addSession, setSessionId: jest.fn() }));
+
+    result.current.sessionInfoHandler({
+      sseRes: {
+        sessionId: 's1',
+        sessionName: '第一条用户文字',
+        updateTime: '2026-08-11 14:30:25',
+      },
+      sseMsg: { event: 'sessionTitleUpdated' },
+      newQueryMsg: {},
+      newAnswerMsg: {},
+      messageList: [],
+    } as any);
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: 'session/updateSession',
+      payload: {
+        sessionId: 's1',
+        sessionName: '第一条用户文字',
+        updateTime: '2026-08-11 14:30:25',
+      },
+    });
+    expect(addSession).not.toHaveBeenCalled();
   });
 
   it('messageIdHandler initializes answer/query messages on initMessage', () => {
