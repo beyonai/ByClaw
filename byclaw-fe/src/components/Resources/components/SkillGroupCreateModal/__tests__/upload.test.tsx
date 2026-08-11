@@ -160,9 +160,9 @@ const renderModal = (group: any = null) =>
 
 const openPersonalUpload = async () => {
   await screen.findByText('Built-in skill');
-  expect(screen.queryByRole('button', { name: 'resource.skillGroup.uploadPersonalSkill' })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: /resource.skillGroup.personalSkills/ }));
-  fireEvent.click(screen.getByRole('button', { name: 'resource.skillGroup.uploadPersonalSkill' }));
+  const uploadButton = screen.getByRole('button', { name: 'resource.skillGroup.uploadPersonalSkill' });
+  await waitFor(() => expect(uploadButton).toBeEnabled());
+  fireEvent.click(uploadButton);
   expect(screen.getByLabelText('personal skill import')).toBeInTheDocument();
 };
 
@@ -177,17 +177,17 @@ describe('SkillGroupCreateModal personal skill upload', () => {
     mockGetSkillGroupDetail.mockResolvedValue({ members: [{ resourceId: 'personal-1' }] });
   });
 
-  it('shows the upload action only on the personal tab', async () => {
+  it('keeps the upload action visible beside the skill field regardless of the active tab', async () => {
     renderModal();
 
     await screen.findByText('Built-in skill');
-    expect(screen.queryByRole('button', { name: 'resource.skillGroup.uploadPersonalSkill' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'resource.skillGroup.uploadPersonalSkill' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /resource.skillGroup.personalSkills/ }));
     expect(screen.getByRole('button', { name: 'resource.skillGroup.uploadPersonalSkill' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /resource.skillGroup.builtInSkills/ }));
-    expect(screen.queryByRole('button', { name: 'resource.skillGroup.uploadPersonalSkill' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'resource.skillGroup.uploadPersonalSkill' })).toBeInTheDocument();
   });
 
   it.each([
@@ -353,6 +353,7 @@ describe('SkillGroupCreateModal personal skill upload', () => {
     fireEvent.click(screen.getByRole('button', { name: 'finish upload' }));
 
     await waitFor(() => expect(message.error).toHaveBeenCalledWith('resource.skillGroup.uploadRefreshFailed'));
+    fireEvent.click(screen.getByRole('button', { name: /resource.skillGroup.personalSkills/ }));
     expect(screen.getByText('Existing personal')).toBeInTheDocument();
     expect(mockForm.setFieldValue).not.toHaveBeenCalledWith('skillIds', expect.anything());
   });
