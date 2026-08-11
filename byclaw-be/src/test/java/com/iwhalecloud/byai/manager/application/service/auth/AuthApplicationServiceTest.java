@@ -941,6 +941,50 @@ class AuthApplicationServiceTest {
     }
 
     @Test
+    void applyUseIfNeeded_returnsPendingForPersonalResourceWithoutMutation() {
+        AuthApplicationService service = spy(new AuthApplicationService());
+        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
+        PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        SsResource resource = enterpriseResource(610L, 1L);
+        resource.setOwnerType(OwnerType.PERSONAL);
+        resource.setResourceBizType(ResourceBizTypeEnum.OBJECT.name());
+        when(ssResourceMapper.selectById(610L)).thenReturn(resource);
+        when(privilegeGrantMapper.selectOne(any())).thenReturn(
+            useGrant(610L, 2L, GrantToObjType.USER, Color.RED, "P"));
+
+        assertThat(service.applyUseIfNeeded(610L)).isEqualTo(UseApplyOutcome.PENDING);
+
+        verify(service, never()).applyUse(any());
+        verify(privilegeGrantService, never()).save(any());
+    }
+
+    @Test
+    void applyUseIfNeeded_returnsUnavailableForPersonalResourceWithoutMutation() {
+        AuthApplicationService service = spy(new AuthApplicationService());
+        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
+        PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        SsResource resource = enterpriseResource(611L, 1L);
+        resource.setOwnerType(OwnerType.PERSONAL);
+        resource.setResourceBizType(ResourceBizTypeEnum.OBJECT.name());
+        when(ssResourceMapper.selectById(611L)).thenReturn(resource);
+
+        assertThat(service.applyUseIfNeeded(611L)).isEqualTo(UseApplyOutcome.UNAVAILABLE);
+
+        verify(service, never()).applyUse(any());
+        verify(privilegeGrantService, never()).save(any());
+    }
+
+    @Test
     void applyUseIfNeeded_returnsUnavailableWithoutMutation() {
         AuthApplicationService service = spy(new AuthApplicationService());
         SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);

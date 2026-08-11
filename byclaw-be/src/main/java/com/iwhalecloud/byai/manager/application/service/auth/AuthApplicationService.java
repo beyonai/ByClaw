@@ -493,7 +493,6 @@ public class AuthApplicationService {
     @Transactional(rollbackFor = Exception.class)
     public UseApplyOutcome applyUseIfNeeded(Long resourceId) {
         SsResource ssResource = getRequiredResource(resourceId);
-        validateResourceUseApplyAllowed(ssResource);
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
         if (currentUserId == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.not.login"));
@@ -501,7 +500,8 @@ public class AuthApplicationService {
         if (getPendingUseApplyPrivilege(ssResource, currentUserId) != null) {
             return UseApplyOutcome.PENDING;
         }
-        if (Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum())
+        if (isPersonalResourceUseApplyUnsupported(ssResource)
+            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum())
             || !checkCanApplyUse(ssResource)) {
             return UseApplyOutcome.UNAVAILABLE;
         }
