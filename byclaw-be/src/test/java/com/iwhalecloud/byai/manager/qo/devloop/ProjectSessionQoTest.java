@@ -93,6 +93,24 @@ class ProjectSessionQoTest {
             .doesNotContain("LOWER(a.session_name) LIKE");
     }
 
+    @Test
+    void digitalEmployeeSessionSearchAlsoMatchesDigitalEmployeeGroups() {
+        ProjectSessionQo employeeSearch = new ProjectSessionQo();
+        employeeSearch.setProjectId(1L);
+        employeeSearch.setKeyword("交付专家组");
+        employeeSearch.setSearchMode(ProjectSessionQo.SEARCH_MODE_DIGITAL_EMPLOYEE);
+        employeeSearch.normalizeSearchCondition();
+
+        String employeeSql = normalizeSql(resolveProjectSessionSql(employeeSearch));
+        assertThat(employeeSql)
+            .contains("employee.resource_biz_type = 'DIG_EMPLOYEE'")
+            .contains("employee.resource_id = a.object_id")
+            .contains("member.mem_obj_type = 'AGENT'")
+            .contains("member.mem_obj_id = employee.resource_id")
+            .doesNotContain("agent_type")
+            .doesNotContain("017");
+    }
+
     private String resolveProjectSessionSql(ProjectSessionQo qo) {
         Configuration configuration = new Configuration();
         String resource = "com/iwhalecloud/byai/manager/mapper/session/ByaiSessionMapper.xml";

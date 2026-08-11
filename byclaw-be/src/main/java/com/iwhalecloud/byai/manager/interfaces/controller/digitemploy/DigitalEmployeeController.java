@@ -37,6 +37,7 @@ import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeInstallResourceDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeIdDTO;
+import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeGroupMemberDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SetDefaultDigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.qo.resource.DigitalEmployeeQo;
@@ -81,6 +82,14 @@ public class DigitalEmployeeController {
         @RequestBody DigitalEmployeeQo employeeQo) {
         PageInfo<DigitalEmployeeVo> pageVO = digitalEmployeeApplicationService.queryAllDigitalEmployeeList(employeeQo);
         return ResponseUtil.successResponse(I18nUtil.get("digemployee.all.list.query.success"), pageVO);
+    }
+
+    /** 查询当前用户可管理的数字员工组成员候选。 */
+    @PostMapping("/queryEmployeeGroupMemberCandidates")
+    public ResponseUtil<PageInfo<EmployeeGroupMemberDTO>> queryEmployeeGroupMemberCandidates(
+        @RequestBody DigitalEmployeeQo employeeQo) {
+        return ResponseUtil.successResponse(
+            digitalEmployeeApplicationService.queryEmployeeGroupMemberCandidates(employeeQo));
     }
 
     /**

@@ -10,8 +10,15 @@ import ProjectFormModal, {
   type ProjectFormValues,
   type ProjectShareMember,
 } from '@/pages/projectSpace/components/ProjectFormModal';
-import ProjectOnboardingWizard from '@/pages/projectSpace/components/ProjectOnboardingWizard';
+import ProjectOnboardingWizard, {
+  type ArchitectChatTarget,
+} from '@/pages/projectSpace/components/ProjectOnboardingWizard';
+import { setAgentCache } from '@/components/QueryInput/RichInput/agentCache';
+import getElementData from '@/components/QueryInput/RichInput/utils/getElementData';
+import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
+import { agentTypeMap } from '@/constants/agent';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
+import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
 import {
   createProject,
@@ -22,7 +29,7 @@ import {
 } from '@/pages/projectSpace/service';
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
-import { getStoredProjectScopeId, saveProjectScopeIdToStorage } from '@/pages/projectSpace/constants';
+import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import {
   saveDefaultAgent,
   saveProjectMembers,
@@ -271,7 +278,7 @@ const ProjectSpaceList: React.FC = () => {
   // 项目类型配置决定研发、运营能力是否开放，侧栏表单和详情使用同一份结果。
   const { projectTypeOptions, projectTypeLoading, isDevelopProjectEnabled, isOperationProjectEnabled } =
     useProjectTypeConfig();
-  const [projectScopeId, setProjectScopeId] = useState<string | undefined>(() => getStoredProjectScopeId());
+  const [projectScopeId, updateProjectScopeId] = useProjectScopeId();
   const [projectScopeDropdownOpen, setProjectScopeDropdownOpen] = useState(false);
   const [sessionKeyword, setSessionKeyword] = useState('');
   const [sessionSearchMode, setSessionSearchMode] = useState<DevloopProjectSessionSearchMode>('CHAT_CONTENT');
@@ -290,15 +297,6 @@ const ProjectSpaceList: React.FC = () => {
   const sessionSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 新建项目的列表响应可能稍后才返回，期间保留待选 ID，避免被无效本地存储回退逻辑提前清除。
   const pendingCreatedProjectIdRef = useRef<string>();
-  // 首次进入项目空间时自动展开项目详情，避免用户每次都需要手动点击"进入项目详情"。
-  const hasAutoOpenedDetailRef = useRef(false);
-
-  const updateProjectScopeId = useCallback((projectId?: string | number) => {
-    const normalizedProjectId = `${projectId ?? ''}`.trim();
-    // 选中项目与本地存储同步更新，刷新浏览器后可以恢复上次的项目上下文。
-    setProjectScopeId(normalizedProjectId || undefined);
-    saveProjectScopeIdToStorage(normalizedProjectId);
-  }, []);
 
   const visibleProjects = useMemo(
     () => projects.filter((project) => !inaccessibleProjectIds.has(`${project.projectId}`)),
@@ -472,8 +470,6 @@ const ProjectSpaceList: React.FC = () => {
 
   useEffect(() => {
     if (!visibleProjects.length) {
-      // 无可见项目时仅在状态实际有内容时清理，避免空对象触发 effect 重复更新。
-      setProjectScopeId((current) => current || undefined);
       setProjectSessionPageMap((current) => (Object.keys(current).length ? {} : current));
       setSessionMoreLoadingMap((current) => (Object.keys(current).length ? {} : current));
       return;
@@ -491,8 +487,15 @@ const ProjectSpaceList: React.FC = () => {
         // 新项目尚未进入列表时继续等待下一次列表刷新，暂不写入或删除本地存储。
         return;
       }
-      // 本地保存的项目已删除或无访问权限时清除旧值，随后自动回退到默认项目。
-      updateProjectScopeId();
+      if (projectScopeSearchKeyword.trim()) {
+        // 搜索结果不代表完整项目权限范围，不能据此清除其它模块刚同步过来的当前项目。
+        return;
+      }
+      if (hasMoreProjects) {
+        void loadMoreProjects();
+        return;
+      }
+      // 其它模块可能先更新共享值、后刷新列表；未命中时保留该值，删除和退出项目会显式清理。
       return;
     }
 
@@ -515,8 +518,11 @@ const ProjectSpaceList: React.FC = () => {
     void fetchProjectSessions(firstProject, { force: true, keyword: '', searchMode: sessionSearchMode });
   }, [
     fetchProjectSessions,
+    hasMoreProjects,
     inaccessibleProjectIds,
+    loadMoreProjects,
     projectScopeId,
+    projectScopeSearchKeyword,
     projectSessionPageMap,
     sessionSearchMode,
     updateProjectScopeId,
@@ -748,6 +754,9 @@ const ProjectSpaceList: React.FC = () => {
 
   // 唯一新建入口:统一向导。step1 是完整项目表单,选研发才展开后续步骤,非研发建完即完成。
   const handleOpenCreateProject = () => {
+    // 会话模块打开新建项目向导时隐藏项目切换下拉，避免下拉菜单残留在弹窗遮罩下方。
+    setProjectScopeDropdownOpen(false);
+    setProjectScopeSearchKeyword('');
     setEditingProject(undefined);
     setWizardOpen(true);
   };
@@ -809,19 +818,37 @@ const ProjectSpaceList: React.FC = () => {
     }
   };
 
-  const handleWizardEnterArchitectChat = (createdProjectId: string) => {
+  const handleWizardEnterArchitectChat = (createdProjectId: string, architect?: ArchitectChatTarget) => {
     const target = mergedProjects.find((project) => `${project.projectId}` === createdProjectId);
     setWizardOpen(false);
     clearDetailPanel?.();
-    setAgentId?.('');
-    setSessionId?.('');
-    // 复用新建会话入口进入架构员工聊天,首轮对话自动完成项目绑定后进行工作区初始化。
+    // 架构员工是项目维度的,不在 redux 员工列表里,useDefaultAgentElement 查不到就兜底成「AI 助手」。
+    // agentCache 在那个 hook 里优先于 redux 查表,所以先把整份员工写进去再跳。
+    if (architect?.agentId && architect.agentName) {
+      setAgentCache(
+        getElementData(ResourceType.digitalEmployee, {
+          agentId: architect.agentId,
+          name: architect.agentName,
+          agentType: agentTypeMap.agent,
+        })
+      );
+    }
+    // 与项目详情页「查看会话」同一套:置全局会话上下文才是真正打开那条会话。
+    // 置空会落到空白新会话,且聊天页的 @ 恢复要等全局会话与 state.sessionId 对上才触发。
+    setAgentId?.(architect?.agentId || '');
+    setSessionId?.(architect?.sessionId || '');
+    // 初始化已由后端下发到架构助理的那条会话,带上 sessionId 直达该会话看进展;缺省才退化为新开会话。
     navigate('/chat', {
       state: {
         keepSiderActiveKey: 'sessions',
         from: 'projectSpace',
         projectId: createdProjectId,
         projectName: target?.projectName,
+        sessionId: architect?.sessionId,
+        // 聊天页据此在挂载后恢复 @ 员工。不能在这里直接 setAgentId:
+        // ChatLayoutComp 挂载时会按「无会话员工」清空一次,早设的值会被抹掉。
+        selectedAgentId: architect?.agentId,
+        selectedAgentObjectType: architect?.agentId ? 'DigEmployee' : undefined,
       },
     });
   };
@@ -892,18 +919,6 @@ const ProjectSpaceList: React.FC = () => {
       handleOpenProjectDetail(target);
     }
   };
-
-  useEffect(() => {
-    // 研发项目首次进入项目空间时自动展开项目详情，避免用户每次都需要手动点击"进入项目详情"。
-    // ref 保证仅在组件挂载后首次选中研发项目时触发，之后用户主动返回会话列表不会被重新拉回。
-    if (hasAutoOpenedDetailRef.current || !activeScopeProject || activeScopeProject.projectType !== 'develop') return;
-    hasAutoOpenedDetailRef.current = true;
-    setDetailProject(activeScopeProject);
-    void fetchProjectFullDetail(activeScopeProject, true).then((detail) => {
-      const targetProjectId = `${activeScopeProject.projectId}`;
-      setDetailProject((current) => (`${current?.projectId || ''}` === targetProjectId ? detail : current));
-    });
-  }, [activeScopeProject, fetchProjectFullDetail]);
 
   const handleProjectSharedChange = useCallback(
     (projectId: string | number) => {
@@ -1208,9 +1223,9 @@ const ProjectSpaceList: React.FC = () => {
         if (createdProject) {
           updateProjectScopeId(selectedProjectId);
         } else {
-          // 列表尚未返回新项目时仅保留当前会话选择，待项目可见后由 effect 写入本地存储。
+          // 列表尚未返回新项目时先同步共享项目值，待列表刷新后再完成可见性校验。
           pendingCreatedProjectIdRef.current = selectedProjectId;
-          setProjectScopeId(selectedProjectId);
+          updateProjectScopeId(selectedProjectId);
         }
         setSessionKeyword('');
         EventEmitter.emit('projectSpace-active-project-change', {
@@ -1236,6 +1251,8 @@ const ProjectSpaceList: React.FC = () => {
     }
 
     clearDetailPanel?.();
+    // 每次打开项目会话都以该会话详情返回的员工为准，清除目标会话上次遗留的多员工输入草稿。
+    clearEasyConfirmInputDraft(session.sessionId);
 
     if (Array.isArray(session.sessionExts) && session.sessionExts.length > 0) {
       dispatch({
@@ -1256,6 +1273,9 @@ const ProjectSpaceList: React.FC = () => {
       sessionId: `${session.sessionId}`,
       sessionName: session.sessionName || t('newChatName'),
       projectId: `${project.projectId}`,
+      // 显式写回空值，避免 Redux 中同 ID 旧缓存的员工字段继续残留。
+      objectId: session.objectId,
+      objectType: session.objectType,
     };
 
     dispatch({
@@ -1270,14 +1290,17 @@ const ProjectSpaceList: React.FC = () => {
     });
 
     // 项目空间只负责切换会话上下文，右侧仍然复用原聊天页。
-    setSessionId?.(`${session.sessionId}`);
     setAgentId?.(session.objectId ? `${session.objectId}` : '');
+    setSessionId?.(`${session.sessionId}`);
     navigate('/chat', {
       state: {
         keepSiderActiveKey: 'sessions',
         projectId: project.projectId,
         projectName: project.projectName,
         from: 'projectSpace',
+        // 聊天页初始化时直接使用本次详情返回的员工，避免等待会话缓存更新期间短暂沿用旧员工。
+        selectedAgentId: session.objectId,
+        selectedAgentObjectType: session.objectType,
       },
     });
   };
@@ -1500,11 +1523,12 @@ const ProjectSpaceList: React.FC = () => {
           <div className={styles.header}>
             <div className={styles.scopeActionRow}>
               <Dropdown
-                // 展开状态仅由项目输入框控制，避免 Dropdown 点击触发与输入框聚焦同时切换导致闪退。
+                // 新建项目时只收起下拉菜单，保留输入框中的当前项目名称。
                 trigger={[]}
-                open={projectScopeDropdownOpen}
+                open={projectScopeDropdownOpen && !wizardOpen}
                 overlayClassName={styles.scopeDropdown}
                 onOpenChange={(open) => {
+                  if (wizardOpen) return;
                   setProjectScopeDropdownOpen(open);
                   if (!open) setProjectScopeSearchKeyword('');
                 }}
@@ -1530,14 +1554,20 @@ const ProjectSpaceList: React.FC = () => {
               >
                 {/* 项目选择框同时作为后端搜索入口，聚焦后直接输入关键词。 */}
                 <Input
-                  allowClear={projectScopeDropdownOpen}
+                  allowClear={projectScopeDropdownOpen && !wizardOpen}
                   className={styles.scopeInput}
-                  placeholder={projectScopeDropdownOpen ? t('projectSearchPlaceholder') : undefined}
+                  placeholder={projectScopeDropdownOpen && !wizardOpen ? t('projectSearchPlaceholder') : undefined}
                   suffix={<DownOutlined />}
-                  value={projectScopeDropdownOpen ? projectScopeSearchKeyword : scopeTitle}
-                  onFocus={() => setProjectScopeDropdownOpen(true)}
-                  onClick={() => setProjectScopeDropdownOpen(true)}
-                  onChange={(event) => setProjectScopeSearchKeyword(event.target.value)}
+                  value={!wizardOpen && projectScopeDropdownOpen ? projectScopeSearchKeyword : scopeTitle}
+                  onFocus={() => {
+                    if (!wizardOpen) setProjectScopeDropdownOpen(true);
+                  }}
+                  onClick={() => {
+                    if (!wizardOpen) setProjectScopeDropdownOpen(true);
+                  }}
+                  onChange={(event) => {
+                    if (!wizardOpen) setProjectScopeSearchKeyword(event.target.value);
+                  }}
                 />
               </Dropdown>
               <Tooltip title={t('createProject')} placement="top">

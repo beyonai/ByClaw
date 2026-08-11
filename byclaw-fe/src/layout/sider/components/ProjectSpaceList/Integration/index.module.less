@@ -583,10 +583,7 @@
   border: 1px solid #e5eaf2;
   background: #fff;
   overflow: hidden;
-  transition:
-    box-shadow 0.2s ease,
-    border-color 0.2s ease,
-    transform 0.2s ease;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
 
 // 左侧 3px 语义强调条:泳道里一眼扫出该卡状态,不必逐张读右上角 Tag。
@@ -1033,59 +1030,6 @@
   font-size: 12px;
 }
 
-.manualRunProgress {
-  margin-bottom: 12px;
-  font-weight: 600;
-  color: #1f2d3d;
-}
-
-.manualRunCase {
-  border: 1px solid #dfe6f0;
-  border-radius: 10px;
-  padding: 12px 14px;
-  margin-bottom: 12px;
-  background: #fbfcfe;
-}
-
-.manualRunCaseTitle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  font-size: 14px;
-}
-
-.manualRunCaseMeta {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-
-.manualRunLabel {
-  display: block;
-  color: #8a93a2;
-  font-size: 12px;
-  margin-bottom: 2px;
-}
-
-.manualRunSteps {
-  margin: 0;
-  white-space: pre-wrap;
-  font-family: inherit;
-  font-size: 13px;
-  color: #3a4a5f;
-}
-
-.manualRunExpected {
-  font-size: 13px;
-  color: #3a4a5f;
-}
-
-.manualRunShots {
-  margin-top: 10px;
-}
-
 .integrationStageCard {
   border: 1px solid #dfe6f0;
   border-radius: 10px;
@@ -1135,17 +1079,22 @@
   font-size: 12px;
 }
 
-// 独立测试员工卡片说明脚注:接在三条 field 之后,与卡片 body 内边距对齐。
-.testerNote {
-  margin-top: 4px;
-  padding-top: 10px;
-  border-top: 1px dashed #e2e8f2;
-  font-size: 12px;
-  line-height: 1.6;
-  color: #7c8798;
+// 独立测试员工配置:全项目一条记录,平铺成表单原地编辑,给个卡片外观承载表单行。
+.testerForm {
+  padding: 16px;
+  border: 1px solid #e2e8f2;
+  border-radius: 8px;
+  background: #fff;
 }
 
-// 弹框里的开关行:标签在左、Switch 在右。
+// 分区标题右侧的动作区(立即执行 / 保存)。
+.integrationSectionActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+// 开关行:标签在左、Switch 在右。
 .testerFormRow {
   display: flex;
   align-items: center;

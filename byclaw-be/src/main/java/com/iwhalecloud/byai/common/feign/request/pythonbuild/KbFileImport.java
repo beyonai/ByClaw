@@ -27,4 +27,9 @@ public class KbFileImport {
 
     /** 文件二进制内容（multipart 中的 {@code fileContent} 部分），必填 */
     private MultipartFile multipartFile;
+
+    /**
+     * 是否检查同一知识库内的文件 checksum；默认 false。为 true 且已存在相同 checksum 时跳过导入，并在错误信息中返回已存在文件路径
+     */
+    private boolean skipIfDuplicate = false;
 }

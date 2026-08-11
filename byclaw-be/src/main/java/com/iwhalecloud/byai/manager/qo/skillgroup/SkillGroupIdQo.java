@@ -8,4 +8,6 @@ public class SkillGroupIdQo {
 
     @NotNull
     private Long groupId;
+
+    private Long digitalEmployeeId;
 }

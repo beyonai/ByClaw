@@ -4,6 +4,7 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.connector.ConnectorApplicationService;
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorAuthorizationService;
+import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorAuthorizationRevocationService;
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorAuthService;
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorSkillAuthorizationSyncException;
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorSkillAuthorizationSyncService;
@@ -14,6 +15,7 @@ import com.iwhalecloud.byai.manager.dto.connector.ConnectorConnectionDto;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorListDto;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorSkillAuthorizationSyncDto;
 import com.iwhalecloud.byai.manager.dto.connector.StartConnectorAuthorizationRequest;
+import com.iwhalecloud.byai.manager.dto.connector.RevokeConnectorAuthorizationRequest;
 import com.iwhalecloud.byai.manager.dto.connector.UpdateConnectorEnableRequest;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.connector.ConnectorQo;
@@ -40,6 +42,9 @@ public class ConnectorController {
 
     @Autowired
     private ConnectorAuthorizationService connectorAuthorizationService;
+
+    @Autowired
+    private ConnectorAuthorizationRevocationService connectorAuthorizationRevocationService;
 
     @Autowired
     private ConnectorAuthService connectorAuthService;
@@ -81,6 +86,15 @@ public class ConnectorController {
             throw new IllegalArgumentException("authorizationId不能为空");
         }
         return ResponseUtil.successResponse(connectorAuthorizationService.cancel(request.getAuthorizationId(), currentUserId()));
+    }
+
+    @PostMapping("/authorization/revoke")
+    public ResponseUtil<Boolean> revokeAuthorization(@RequestBody RevokeConnectorAuthorizationRequest request) {
+        if (request == null || request.getConnectorId() == null) {
+            throw new IllegalArgumentException("connectorId不能为空");
+        }
+        connectorAuthorizationRevocationService.revoke(request.getConnectorId(), currentUserId());
+        return ResponseUtil.successResponse(true);
     }
 
     @PostMapping("/authorization/skill-complete")

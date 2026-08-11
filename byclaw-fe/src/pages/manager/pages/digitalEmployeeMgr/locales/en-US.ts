@@ -208,6 +208,7 @@ export default {
 
   // EmployeeDetail
   'employeeDetail.digitalEmployee': 'Digital Employee',
+  'employeeDetail.digitalEmployeeGroup': 'Digital Employee Group',
   'employeeDetail.inputPlaceholder': 'Please enter the question you want to know',
   'employeeDetail.quickCreateTooltip': 'Please enter the name and description first',
   'employeeDetail.config': 'Config',
@@ -252,6 +253,9 @@ export default {
   'employeeDetail.digitalEmployeeDesc': 'Digital Employee Description',
   'employeeDetail.digitalEmployeeDescRequired': 'Please enter digital employee description',
   'employeeDetail.digitalEmployeeDescPlaceholder': 'Please enter digital employee description',
+  'employeeDetail.digitalEmployeeGroupDesc': 'Digital Employee Group Description',
+  'employeeDetail.digitalEmployeeGroupDescRequired': 'Please enter digital employee group description',
+  'employeeDetail.digitalEmployeeGroupDescPlaceholder': 'Please enter digital employee group description',
   'employeeDetail.fieldMaxLength': '{field} cannot exceed {max} characters. Current length: {current}',
   'employeeDetail.coreAbility': 'Core Ability',
   'employeeDetail.example': 'Example',
@@ -328,6 +332,7 @@ export default {
   'employeeDetail.personalAssistant': 'Personal Assistant',
   'employeeDetail.thirdParty': 'Third Party',
   'employeeDetail.employeeType': 'Digital Employee Type',
+  'employeeDetail.employeeGroupType': 'Digital Employee Group Type',
   'employeeDetail.advancedSettings.title': 'Advanced Settings',
   'employeeDetail.advancedSettings.settingNamePlaceholder': 'Please enter setting name',
   'employeeDetail.advancedSettings.settingDescPlaceholder': 'Please enter setting description',

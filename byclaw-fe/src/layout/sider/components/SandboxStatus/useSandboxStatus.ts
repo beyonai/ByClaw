@@ -4,7 +4,10 @@ import { getSandboxInfo, removeSandbox, launchSandboxByUserCode, type SandboxInf
 
 type SandboxStatus = 'running' | 'transitioning' | 'stopped';
 
-const POLL_INTERVAL = 5000; // 5秒轮询一次
+// 稳定态（RUNNING/stopped）30 秒足够；过渡态（RELEASING）压到 5 秒，否则状态点最长要等 30 秒才跟上。
+// 过渡态由后端同一请求内闭环，且元数据缓存 TTL 兜底，不会长期停在快档。
+const POLL_INTERVAL_STABLE = 30000;
+const POLL_INTERVAL_TRANSITIONING = 5000;
 
 function calculateStatus(sandboxes: SandboxInfo[]): SandboxStatus {
   if (!sandboxes || sandboxes.length === 0) {
@@ -31,7 +34,8 @@ export default function useSandboxStatus(userCode: string) {
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['sandboxStatus', userCode],
     queryFn: () => getSandboxInfo({ userCode }),
-    refetchInterval: POLL_INTERVAL,
+    refetchInterval: (latest) =>
+      calculateStatus(latest ?? []) === 'transitioning' ? POLL_INTERVAL_TRANSITIONING : POLL_INTERVAL_STABLE,
     enabled: !!userCode,
   });
 

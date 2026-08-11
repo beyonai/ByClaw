@@ -1,11 +1,7 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 
-import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
-import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
-import com.iwhalecloud.byai.common.feign.request.datacloud.InvokeActionReq;
 import com.iwhalecloud.byai.common.feign.request.datacloud.Params;
 import com.iwhalecloud.byai.common.feign.request.datacloud.QueryByKnowledgeReq;
-import com.iwhalecloud.byai.common.feign.response.DataCloudResponse;
 import com.iwhalecloud.byai.common.feign.response.datacloud.InvokeActionResp;
 import com.iwhalecloud.byai.common.feign.response.datacloud.QueryByKnowledgeResp;
 import com.iwhalecloud.byai.common.util.StringUtil;
@@ -35,13 +31,13 @@ import com.iwhalecloud.byai.manager.dto.devloop.IntegrationEnvDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationSuiteDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.DefaultAgentDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.TesterConfigDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.UpdateTaskStatusDto;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectObjectFile;
 import com.iwhalecloud.byai.manager.entity.devloop.OperationTaskTemplate;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
-
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -55,9 +51,6 @@ public class DevloopController {
 
     @Autowired
     private DevloopApplicationService applicationService;
-
-    @Autowired
-    private FeignDataCloudService feignDataCloudService;
 
     /**
      * 创建扫描源
@@ -268,7 +261,7 @@ public class DevloopController {
     }
 
     /**
-     * 查询默认数字员工原始配置(某作用域)。
+     * 查询默认助理原始配置(某作用域)。
      *
      * @param params 可含 projectId:缺省/0=全局默认行,>0=该项目覆盖行
      */
@@ -278,7 +271,7 @@ public class DevloopController {
     }
 
     /**
-     * 解析项目各角色生效的默认员工(项目覆盖合并到全局默认之上)。
+     * 解析项目各角色生效的默认助理(项目覆盖合并到全局默认之上)。
      *
      * @param params 可含 projectId;缺省则仅返回全局默认
      */
@@ -288,7 +281,7 @@ public class DevloopController {
     }
 
     /**
-     * 保存默认数字员工配置(每作用域唯一,upsert)。
+     * 保存默认助理配置(每作用域唯一,upsert)。
      *
      * @param dto projectId 缺省/0=全局默认,>0=项目覆盖;各角色 agentId 为空表示不指定
      */
@@ -512,6 +505,16 @@ public class DevloopController {
         return applicationService.splitTask(dto);
     }
 
+    /** 需求交给需求数字员工在聊天里聊完成(与 /task/split 二选一,共用需求 sessionId 闸门) */
+    @PostMapping("/requirement/clarify")
+    public ResponseUtil<Map<String, Object>> startRequirementClarify(@RequestBody Map<String, Object> params) {
+        Object projectId = params.get("projectId");
+        Object sourceItemId = params.get("sourceItemId");
+        return applicationService.startRequirementClarify(
+            projectId == null ? null : Long.valueOf(projectId.toString()),
+            sourceItemId == null ? null : Long.valueOf(sourceItemId.toString()));
+    }
+
     /** 查询项目任务列表 */
     @PostMapping("/task/list")
     public ResponseUtil<PageInfo<DevloopTaskViewDto>> listTasks(@RequestBody DevloopTaskListQueryDto query) {
@@ -571,16 +574,6 @@ public class DevloopController {
     public ResponseUtil<Map<String, Object>> checkDwsAuthStatusBySource(@RequestBody Map<String, Object> params) {
         Long sourceId = Long.valueOf(params.get("sourceId").toString());
         return applicationService.checkDwsAuthStatusBySource(sourceId);
-    }
-
-    /** 直接使用token授权 */
-    @PostMapping("/dws/saveToken")
-    public ResponseUtil<Void> saveDwsToken(@RequestBody Map<String, Object> params) {
-        String token = params.get("token") != null ? params.get("token").toString() : "";
-        if (token.isEmpty()) {
-            return ResponseUtil.failRes(I18nUtil.get("devloop.dws.token.required"));
-        }
-        return applicationService.saveDwsToken(token);
     }
 
     /** 查询启用的运营任务模板卡片，可按模板类型筛选。 */
@@ -773,6 +766,17 @@ public class DevloopController {
         @RequestBody ListObjectFilePkIdDto listObjectFilePkIdDto) {
         List<Map<String, Object>> resultList = applicationService.listObjectById(listObjectFilePkIdDto);
         return ResponseUtil.successResponse(resultList);
+    }
+
+    /**
+     * 更新运营任务状态
+     *
+     * @param updateTaskStatusDto 更新入参
+     */
+    @PostMapping("/operation/updateTaskStatus")
+    public ResponseUtil<Void> updateTaskStatus(@RequestBody UpdateTaskStatusDto updateTaskStatusDto) {
+        applicationService.updateTaskStatus(updateTaskStatusDto);
+        return ResponseUtil.successResponse();
     }
 
 }

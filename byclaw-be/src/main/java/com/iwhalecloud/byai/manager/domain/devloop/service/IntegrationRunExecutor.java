@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
 import com.alibaba.fastjson.JSON;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
@@ -59,7 +60,8 @@ import java.util.concurrent.Executor;
  * 全流程:解密连接凭据/测试账号 → 按 seq 跑环境 stages 把被测系统部署起来 → 按 executorMode 分流执行用例。
  * tester(默认):拼提示词调起「测试数字员工」克隆并跑用例,run 保持 running,结果由回收 poller 从会话回流。
  * backend(自测用):后端 SSH 克隆用例仓库 → 跑套件命令 → 解析 JUnit,run 当场出终态、不写 sessionId。
- * 两种模式的用例代码都来自套件的仓库配置(同一事实源),也都落在用户桶的 /by/.sessions/{key}/ 会话工作区
+ * 用例从哪来只看环境级 case_source(同一事实源):workspace 跟随项目工作区仓库、按约定 tests/run.sh 执行;
+ * on_env 用例已在环境机上,沿用用例集里的既有配置。workspace 模式的用例落在用户桶的 /by/.sessions/{key}/ 会话工作区
  * (见 SessionWorkspacePathResolver),环境 stages 只负责部署被测系统。
  * backend 模式的会话路径按后端宿主机的 NFS 挂载点算却在 env 连接上执行,因此要求环境机挂载同一份存储
  * 且挂载点路径与后端一致;clone 前先探桶根,不成立就当场失败,不让 mkdir -p 造出与用户桶无关的假目录树。
@@ -88,14 +90,22 @@ public class IntegrationRunExecutor {
     /** 按需读取报告的体积上限:整份原文要过 HTTP 回前端预览,超限直接拒绝而不是截断出坏 XML。 */
     private static final int REPORT_MAX_BYTES = 5 * 1024 * 1024;
 
-    /** 用例来源:沿用开发已检出目录,免克隆。 */
-    private static final String SOURCE_CODE = "code";
+    /**
+     * 环境级用例来源(byai_integration_env.case_source):跟随工作区仓库。
+     * 用例由测试助理写进工作区仓库(repo_type=workspace),按下面的约定路径执行,用户不填任何用例配置。
+     */
+    public static final String CASE_SOURCE_WORKSPACE = "workspace";
 
-    /** 用例来源:克隆指定的独立用例仓库。 */
-    private static final String SOURCE_STANDALONE = "standalone";
+    /** 环境级用例来源:用例已在环境机上,沿用套件里的既有配置(界面勾选后联动出用例集表单)。 */
+    public static final String CASE_SOURCE_ON_ENV = "on_env";
 
-    /** 用例来源:用例已在环境机上(运维预置/镜像自带),跳过全部克隆,直接按环境连接方式登录执行。 */
-    private static final String SOURCE_ON_ENV = "env";
+    /**
+     * workspace 模式的约定入口:工作区仓库根目录下的 tests/run.sh。
+     * 平台不再让用户填运行命令——约定死才能让集成测试面板退化成"选环境即可"。
+     */
+    private static final String WORKSPACE_TESTS_DIR = "tests";
+
+    private static final String WORKSPACE_ENTRY_SCRIPT = "tests/run.sh";
 
     /** 没有前序 coder 会话时用的会话键前缀:仍落在用户桶的 .sessions 下,靠前缀与真实会话 id 区分开。 */
     private static final String RUN_SESSION_KEY_PREFIX = "integration-run-";
@@ -197,7 +207,7 @@ public class IntegrationRunExecutor {
             // 1) 按 seq 跑环境 stages:非 continueOnError 的 stage 失败即整 run 失败并停止后续。
             List<StageDef> stages = parseStages(env.getStages());
             for (StageDef stage : stages) {
-                StepOutcome outcome = runStage(run, env, connSecret, injectedEnv, stage, suite, seq++);
+                StepOutcome outcome = runStage(run, env, connSecret, injectedEnv, stage, seq++);
                 if (!STATUS_PASSED.equals(outcome.status) && !stage.continueOnError) {
                     finishByStepFailure(run, outcome, "环境阶段失败: " + stage.name, startMs);
                     return;
@@ -220,8 +230,7 @@ public class IntegrationRunExecutor {
 
     /** 跑单个环境 stage:高危闸门 → 变量替换 → 构建命令 → 执行 → 写一条 run_step。 */
     private StepOutcome runStage(IntegrationRun run, IntegrationEnv env, String connSecret,
-                                 Map<String, String> injectedEnv, StageDef stage, IntegrationSuite suite,
-                                 int seq) throws Exception {
+                                 Map<String, String> injectedEnv, StageDef stage, int seq) throws Exception {
         // 运行时再过一遍高危闸门:防止绕过保存 API 直接改库注入危险脚本。命中即拦,不执行。
         // 先于变量替换执行:替换值来自仓库地址等配置,不该成为绕过闸门的入口。
         String blocked = dangerousScriptGuard.detect(stage.name, stage.script);
@@ -235,7 +244,7 @@ public class IntegrationRunExecutor {
         stageEnv.put("WORKDIR", StringUtils.defaultString(workdir));
         CommandExecSpec spec = baseSpec(env, connSecret, stageEnv);
         spec.setWorkdir(workdir);
-        spec.setCommand(buildStageCommand(expandStageVars(stage, run, env, suite)));
+        spec.setCommand(buildStageCommand(expandStageVars(stage, run, env)));
         spec.setTimeoutSec(stage.timeoutSec);
         return execAndRecord(run, seq, STEP_STAGE, stage.name, spec);
     }
@@ -272,13 +281,14 @@ public class IntegrationRunExecutor {
     }
 
     /**
-     * 解析用例仓库检出信息:与 tester 模式共用套件的仓库配置(code=关联项目仓库,standalone=独立用例仓库地址)。
+     * 解析用例检出信息。判定读环境级 case_source(唯一事实源),套件不再决定用例从哪来:
+     * on_env=用例已在环境机上,不涉及仓库;workspace=跟随工作区仓库,按约定 tests/run.sh 执行。
      * 令牌单独返回并只经 env 注入,绝不拼进命令正文,避免落库到 run_step.logText 或打进日志。
      */
     private CaseCheckout resolveCaseCheckout(IntegrationRun run, IntegrationEnv env, IntegrationSuite suite) {
         CaseCheckout checkout = new CaseCheckout();
-        // env:用例已在环境机上(运维预置/镜像自带),不涉及任何仓库,基目录取环境的连接工作目录。
-        if (SOURCE_ON_ENV.equalsIgnoreCase(StringUtils.defaultString(suite.getSourceType()))) {
+        // on_env:用例已在环境机上(运维预置/镜像自带),不涉及任何仓库,基目录取环境的连接工作目录。
+        if (casesOnEnvMachine(env)) {
             checkout.onEnv = true;
             checkout.caseDir = StringUtils.defaultString(env.getConnWorkdir()).trim();
             if (checkout.caseDir.isEmpty()) {
@@ -286,26 +296,24 @@ public class IntegrationRunExecutor {
             }
             return checkout;
         }
-        boolean standalone = SOURCE_STANDALONE.equalsIgnoreCase(suite.getSourceType());
-        if (standalone) {
-            checkout.repoUrl = StringUtils.defaultString(suite.getSource()).trim();
-            checkout.provider = null;
-        } else {
-            ProjectRepo repo = suite.getRepoId() == null ? null : projectRepoMapper.selectById(suite.getRepoId());
-            if (repo == null) {
-                checkout.error = "套件未关联代码仓库:请在测试用例集中选择用例所在仓库后重试";
-                return checkout;
-            }
-            checkout.provider = repo.getProvider();
-            checkout.repoUrl = resolveRepoUrl(repo);
-        }
-        if (StringUtils.isBlank(checkout.repoUrl)) {
-            checkout.error = "用例仓库地址缺失:请在测试用例集中填写用例仓库地址后重试";
+        ProjectRepo repo = findWorkspaceRepo(env.getProjectId());
+        if (repo == null) {
+            checkout.error = "项目没有工作区仓库:测试用例按约定放在工作区仓库的 " + WORKSPACE_ENTRY_SCRIPT
+                + ",请先为项目配置工作区仓库,或把环境的用例来源改为「用例已在环境机上」";
             return checkout;
         }
-        checkout.branch = StringUtils.defaultString(suite.getBranch()).trim();
-        checkout.repoName = repoNameOf(checkout.repoUrl);
-        resolveCaseDir(run, suite, standalone, checkout);
+        checkout.provider = repo.getProvider();
+        checkout.repoUrl = resolveRepoUrl(repo);
+        if (StringUtils.isBlank(checkout.repoUrl)) {
+            checkout.error = "工作区仓库地址缺失:请在项目仓库配置里补全工作区仓库地址后重试";
+            return checkout;
+        }
+        // 工作区仓库跟自己的默认分支,不再让用户在用例集里另填分支:两处分支不一致时没人能说清跑的是哪份用例。
+        checkout.branch = StringUtils.defaultString(repo.getDefaultBranch()).trim();
+        // 目录名按 repoFullName 取,与 coder 检出目录的算法(DevloopApplicationService 会话工作区)对齐;
+        // 用 URL 尾段算会在"仓库名与 URL 尾段不同"时指到一个不存在的兄弟目录,沿用检出当场失败。
+        checkout.repoName = repoDirNameOf(repo, checkout.repoUrl);
+        resolveWorkspaceCaseDir(run, env, checkout);
         if (checkout.error != null) {
             return checkout;
         }
@@ -319,36 +327,27 @@ public class IntegrationRunExecutor {
     }
 
     /**
-     * 用例代码的落地目录,必须落在用户桶的会话工作区里({nfs根}/{bucket}/by/.sessions/{key}/{repoName}),
+     * workspace 用例的落地目录,必须落在用户桶的会话工作区里({nfs根}/{bucket}/by/.sessions/{key}/{repoName}),
      * 与测试数字员工在沙箱里看到的 /by/.sessions/{key}/ 是同一份 NFS 数据。不允许用 /tmp:那样后端跑的代码
      * 与员工侧分叉,产物也不在用户桶里、前端会话空间与本地 git 变更都读不到。
-     * code 来源优先复用 coder 的会话目录,和 tester 提示词里"直接进开发已检出目录、不要重新克隆"完全同一路径;
-     * 没有前序 coder(手动触发)或独立用例仓库时,退化为 run 独占的会话键,避免并发 run 互相覆盖。
+     * 有前序 coder 时直接进它的检出目录:工作区仓库就是 coder 检出的那个根(业务代码是其 submodule),
+     * 用例正是这一轮开发刚写进去的,重新克隆反而拿到未合并的旧版本。
+     * 没有前序 coder(手动触发/定时回归)时退化为 run 独占的会话键克隆,避免并发 run 互相覆盖。
      */
-    private void resolveCaseDir(IntegrationRun run, IntegrationSuite suite, boolean standalone, CaseCheckout checkout) {
-        if (!standalone) {
-            // sourceType=code 是"沿用开发代码,免克隆"的硬承诺:定位不到开发检出目录就当场失败,
-            // 不退化成克隆。否则用户显式选了免克隆却看到 clone 步骤、还可能撞上执行机不通外网。
-            CoderSession coder = findCoderSession(run, suite.getRepoId());
-            if (coder.sessionId == null) {
-                checkout.error = "沿用开发代码失败:" + coder.missReason
-                    + "。请改用「克隆指定仓库」,或从需求发起集成测试以便沿用开发检出目录";
-                return;
-            }
+    private void resolveWorkspaceCaseDir(IntegrationRun run, IntegrationEnv env, CaseCheckout checkout) {
+        CoderSession coder = findCoderSession(run, null);
+        if (coder.sessionId != null) {
             // 桶按人隔离,须用会话创建者解析,用触发人会指到别人的桶。
             Long sessionOwnerId = findSessionCreatorId(coder.sessionId);
             String coderDir = sessionOwnerId == null ? null
                 : sessionWorkspacePathResolver.resolveSessionDir(sessionOwnerId, coder.sessionId);
-            if (coderDir == null) {
-                checkout.error = "沿用开发代码失败:无法解析开发会话 " + coder.sessionId
-                    + " 的工作区目录,请确认该会话所属用户已初始化个人存储桶";
+            if (coderDir != null) {
+                checkout.parentDir = coderDir;
+                checkout.caseDir = coderDir + "/" + checkout.repoName;
+                checkout.bucketDir = sessionWorkspacePathResolver.resolveBucketDir(sessionOwnerId);
+                checkout.reuseCoderCheckout = true;
                 return;
             }
-            checkout.parentDir = coderDir;
-            checkout.caseDir = coderDir + "/" + checkout.repoName;
-            checkout.bucketDir = sessionWorkspacePathResolver.resolveBucketDir(sessionOwnerId);
-            checkout.reuseCoderCheckout = true;
-            return;
         }
         String runDir = sessionWorkspacePathResolver.resolveSessionDir(run.getCreateBy(),
             RUN_SESSION_KEY_PREFIX + run.getRunId());
@@ -359,6 +358,29 @@ public class IntegrationRunExecutor {
         checkout.parentDir = runDir;
         checkout.caseDir = runDir + "/" + checkout.repoName;
         checkout.bucketDir = sessionWorkspacePathResolver.resolveBucketDir(run.getCreateBy());
+    }
+
+    /**
+     * 用例来源判定的唯一入口:环境级 case_source。
+     * 空值只可能出现在"代码已上、迁移未跑"的窗口期(列有 DEFAULT 'workspace',新建又显式赋值),
+     * 此时按 on_env 处理保住存量环境的既有行为:反过来当 workspace 会去工作区仓库找还不存在的
+     * tests/run.sh,把本来跑得通的环境机套件当场打断。
+     */
+    private static boolean casesOnEnvMachine(IntegrationEnv env) {
+        String caseSource = StringUtils.trimToEmpty(env.getCaseSource());
+        return caseSource.isEmpty() || CASE_SOURCE_ON_ENV.equalsIgnoreCase(caseSource);
+    }
+
+    /** 项目的工作区仓库(repo_type=workspace),一个项目一条;用例按约定放在它根下的 tests/。 */
+    private ProjectRepo findWorkspaceRepo(Long projectId) {
+        if (projectId == null) {
+            return null;
+        }
+        return projectRepoMapper.selectOne(new LambdaQueryWrapper<ProjectRepo>()
+            .eq(ProjectRepo::getProjectId, projectId)
+            .eq(ProjectRepo::getRepoType, "workspace")
+            .orderByAsc(ProjectRepo::getRepoId)
+            .last("limit 1"));
     }
 
     /** 会话创建者 id,用于解析该会话工作区所在的用户桶;会话不存在时返回 null 走 run 独占目录兜底。 */
@@ -414,8 +436,14 @@ public class IntegrationRunExecutor {
         return execAndRecord(run, seq, STEP_CLONE, "克隆用例仓库 " + checkout.repoName, spec);
     }
 
-    /** 套件命令的工作目录:克隆出的用例目录为根,套件 workdir 视为其内相对子目录。 */
+    /**
+     * 套件命令的工作目录:克隆出的用例目录为根,套件 workdir 视为其内相对子目录。
+     * workspace 模式用户不填任何用例配置,工作目录恒为工作区仓库根(约定入口 tests/run.sh 相对它)。
+     */
     private String resolveSuiteWorkdir(CaseCheckout checkout, IntegrationSuite suite) {
+        if (!checkout.onEnv) {
+            return checkout.caseDir;
+        }
         String suiteWorkdir = StringUtils.defaultString(suite.getWorkdir()).trim();
         if (StringUtils.isBlank(suiteWorkdir) || ".".equals(suiteWorkdir)) {
             return checkout.caseDir;
@@ -427,8 +455,31 @@ public class IntegrationRunExecutor {
         return checkout.caseDir + "/" + StringUtils.removeStart(suiteWorkdir, "./");
     }
 
+    /**
+     * 本次要跑的命令。workspace 模式是约定入口而非用户配置:面板退化成"选环境即可",
+     * 用例集里的 runCommand 此时可能为空或是历史遗留值,读它会跑错甚至跑空。
+     * on_env 仍读用例集配置:那些用例由运维预置在环境机上,平台不知道它的入口。
+     */
+    private String resolveRunCommand(IntegrationEnv env, IntegrationSuite suite) {
+        return casesOnEnvMachine(env) ? StringUtils.defaultString(suite.getRunCommand())
+            : "bash " + WORKSPACE_ENTRY_SCRIPT;
+    }
+
+    /**
+     * 仓库在会话工作区里的目录名:repoFullName 去掉 owner/ 前缀,与 coder 检出目录同一算法。
+     * repoFullName 缺失时回退到 clone 地址尾段(仅新克隆场景成立,此时没有既有目录要对齐)。
+     */
+    private static String repoDirNameOf(ProjectRepo repo, String repoUrl) {
+        String fullName = StringUtils.defaultString(repo.getRepoFullName()).trim();
+        if (!fullName.isEmpty()) {
+            String tail = StringUtils.substringAfterLast(fullName, "/");
+            return StringUtils.isBlank(tail) ? fullName : tail;
+        }
+        return repoNameOf(repoUrl);
+    }
+
     /** 从 clone 地址取仓库名做目录名;取不到时用 cases 兜底,避免拼出空目录。 */
-    private String repoNameOf(String repoUrl) {
+    private static String repoNameOf(String repoUrl) {
         String tail = StringUtils.substringAfterLast(StringUtils.removeEnd(repoUrl, "/"), "/");
         String name = StringUtils.removeEnd(tail, ".git");
         return StringUtils.isBlank(name) ? "cases" : name;
@@ -438,13 +489,14 @@ public class IntegrationRunExecutor {
     private StepOutcome runSuiteCommand(IntegrationRun run, IntegrationEnv env, String connSecret,
                                         Map<String, String> injectedEnv, IntegrationSuite suite,
                                         String workdir, int seq) throws Exception {
-        String blocked = dangerousScriptGuard.detect("套件命令", suite.getRunCommand());
+        String runCommand = resolveRunCommand(env, suite);
+        String blocked = dangerousScriptGuard.detect("套件命令", runCommand);
         if (blocked != null) {
             return recordBlockedStep(run, seq, STEP_SUITE, suite.getSuiteName(), blocked);
         }
         CommandExecSpec spec = baseSpec(env, connSecret, injectedEnv);
         spec.setWorkdir(workdir);
-        spec.setCommand(suite.getRunCommand());
+        spec.setCommand(runCommand);
         spec.setTimeoutSec(DEFAULT_SUITE_TIMEOUT_SEC);
         return execAndRecord(run, seq, STEP_SUITE, suite.getSuiteName(), spec);
     }
@@ -481,6 +533,43 @@ public class IntegrationRunExecutor {
     }
 
     /**
+     * tester 模式下先把会话建好并冻结到 run 上,让「执行测试」能当场把 sessionId 回给前端跳转过去看员工干活。
+     * 同步调用(执行体是 @Async,等它建完会话已经晚了几十秒):只做解析员工 + 建会话 + 落三列,
+     * 提示词与凭据仍留在 dispatchTester——那两件事要等环境 stages 跑完才有正确内容。
+     * 未配置测试员工/非 tester 模式返回 null,由 dispatchTester 走原有报错路径,这里不改判定语义。
+     */
+    public Long prepareTesterSession(IntegrationRun run, IntegrationSuite suite, String executorModeOverride) {
+        if (!EXECUTOR_MODE_TESTER.equals(resolveExecutorMode(executorModeOverride))) {
+            return null;
+        }
+        DefaultAgent agent = defaultAgentService.resolveForProject(run.getProjectId());
+        Long testerAgentId = parseAgentId(agent == null ? null : agent.getTesterAgentId());
+        if (testerAgentId == null) {
+            return null;
+        }
+        Long sessionId = createTesterSession(run, suite, testerAgentId);
+        run.setTesterAgentName(agent.getTesterAgentName());
+        integrationRunMapper.updateById(run);
+        return sessionId;
+    }
+
+    /** 建测试员工会话并把 sessionId/testerAgentId 冻结到 run 上(不落库,由调用方决定何时 update)。 */
+    private Long createTesterSession(IntegrationRun run, IntegrationSuite suite, Long testerAgentId) {
+        // 先用套件名建会话让会话名可读,建成拿到 sessionId 后再覆盖为完整提示词。
+        AssistantChatDto chatDto = new AssistantChatDto();
+        chatDto.setSessionId(null);
+        chatDto.setAgentId(testerAgentId);
+        chatDto.setProjectId(run.getProjectId());
+        chatDto.setChatContent("集成测试 - " + StringUtils.defaultString(suite.getSuiteName()));
+        chatDto.setAccessTerminal("DevLoop");
+        chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
+        assistantChatService.createGroupChatSession(chatDto);
+        run.setSessionId(chatDto.getSessionId());
+        run.setTesterAgentId(testerAgentId);
+        return chatDto.getSessionId();
+    }
+
+    /**
      * 下发「测试数字员工」执行本次集成测试:
      * 解析测试员工 → 建独立会话 → 拼提示词(用例仓库克隆说明 + 被测系统地址 + 运行命令 + 结果回流约定)→ 事务外异步 chat。
      * run 保持 running 并冻结 sessionId/testerAgentId/testerAgentName;测试员工完成后由回收 poller 读会话打点与结果文件收尾。
@@ -500,23 +589,23 @@ public class IntegrationRunExecutor {
             return;
         }
 
-        // 用例代码从哪来:code=沿用开发已检出目录(免克隆);standalone=克隆指定的独立用例仓库。
+        // 用例代码从哪来:workspace=工作区仓库 tests/(优先沿用 coder 检出);on_env=登环境机跑预置用例。
         String caseSource = buildCaseSourceSection(run, env, suite);
 
-        // 先用套件名建会话让会话名可读,建成拿到 sessionId 后再覆盖为完整提示词。
+        // 会话通常已由 startRun 同步建好(前端启动即跳转要当场拿到 sessionId),这里只补建漏建的情况:
+        // 复用而不是重建,否则前端已经跳过去的那条会话永远收不到提示词。
         AssistantChatDto chatDto = new AssistantChatDto();
-        chatDto.setSessionId(null);
+        Long sessionId = run.getSessionId() != null ? run.getSessionId()
+            : createTesterSession(run, suite, testerAgentId);
+        chatDto.setSessionId(sessionId);
         chatDto.setAgentId(testerAgentId);
         chatDto.setProjectId(run.getProjectId());
-        chatDto.setChatContent("集成测试 - " + StringUtils.defaultString(suite.getSuiteName()));
         chatDto.setAccessTerminal("DevLoop");
         chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
-        assistantChatService.createGroupChatSession(chatDto);
-        Long sessionId = chatDto.getSessionId();
 
         // 用例在环境机上时员工必须能 ssh 登进去,而凭据不能进提示词(提示词落会话历史)。
         // 故把凭据写成沙箱会话目录下的文件,提示词只出现路径:路径不是秘密,凭据不留痕。
-        boolean onEnv = SOURCE_ON_ENV.equalsIgnoreCase(StringUtils.defaultString(suite.getSourceType()));
+        boolean onEnv = casesOnEnvMachine(env);
         boolean keyAuth = !"password".equalsIgnoreCase(StringUtils.defaultString(env.getConnAuth()));
         if (onEnv && !writeTesterSshCredential(loginInfo.getUserCode(), sessionId, connSecret, keyAuth)) {
             finishError(run, "无法向沙箱下发环境机登录凭据:请重试,或改用后端直跑模式执行本套件", startMs);
@@ -671,13 +760,13 @@ public class IntegrationRunExecutor {
     }
 
     /**
-     * 用例代码获取方式段:决定测试员工要不要克隆。
-     * code=沿用开发已检出的代码:能定位到本需求该仓库的 coder 会话时,直接进那个目录跑命令,免克隆;
-     * 定位不到(如人工触发无需求上下文)则退化为克隆同一仓库,行为等价只是多一次克隆。
-     * standalone=用例在另一个仓库,必须先克隆它。
+     * 用例代码获取方式段:决定测试员工要不要克隆。判定读环境级 case_source。
+     * on_env=用例已在环境机上,登环境机执行,不克隆任何仓库。
+     * workspace=用例在工作区仓库的 tests/ 下:有前序 coder 时直接进它的检出目录(用例正是这轮开发写进去的,
+     * 重新克隆会拿到未合并的旧版本);没有前序 coder 时克隆工作区仓库兜底。
      */
     private String buildCaseSourceSection(IntegrationRun run, IntegrationEnv env, IntegrationSuite suite) {
-        if (SOURCE_ON_ENV.equalsIgnoreCase(StringUtils.defaultString(suite.getSourceType()))) {
+        if (casesOnEnvMachine(env)) {
             // 用例在环境机上,沙箱本地没有这份代码;员工须按环境连接方式登上去执行,不要克隆任何仓库。
             return "用例已预置在集成测试环境机上,不要克隆任何仓库,也不要在沙箱本地找用例:\n"
                 + "- 目标环境机:" + StringUtils.defaultString(env.getConnUser()) + "@"
@@ -686,27 +775,19 @@ public class IntegrationRunExecutor {
                 + "- 用例所在目录(环境机上的路径):" + StringUtils.defaultString(env.getConnWorkdir()) + "\n"
                 + "- 请用 ssh 登录该环境机,cd 到上述目录后执行运行命令。";
         }
-        if (SOURCE_STANDALONE.equalsIgnoreCase(suite.getSourceType())) {
-            String repoUrl = StringUtils.defaultString(suite.getSource());
-            // 独立用例仓库无平台/令牌上下文,直用填写地址;私有仓库令牌由测试员工环境自备。
-            return "用例在独立仓库,需先克隆它:\n"
-                + DevloopApplicationService.buildRepoCloneHint(null, repoUrl, "");
-        }
-        ProjectRepo repo = suite.getRepoId() == null ? null : projectRepoMapper.selectById(suite.getRepoId());
+        ProjectRepo repo = findWorkspaceRepo(env.getProjectId());
         String repoFullName = repo != null && repo.getRepoFullName() != null ? repo.getRepoFullName() : "";
-        Long coderSessionId = findCoderSession(run, suite.getRepoId()).sessionId;
-        if (coderSessionId != null) {
-            return "用例与被测代码同仓,开发环节已把该仓库检出到本沙箱,不要重新克隆:\n"
-                + "- 直接进入开发已检出的目录:/by/.sessions/" + coderSessionId + "/(仓库 " + repoFullName + " 的子目录)\n"
-                + "- 若该目录确实不存在,再按下述方式克隆兜底:\n"
-                + DevloopApplicationService.buildRepoCloneHint(
-                    repo != null ? repo.getProvider() : null,
-                    repo != null && repo.getRepoUrl() != null ? repo.getRepoUrl() : repoFullName, repoFullName);
-        }
-        String repoUrl = repo != null && repo.getRepoUrl() != null ? repo.getRepoUrl() : repoFullName;
+        String repoUrl = repo != null && StringUtils.isNotBlank(repo.getRepoUrl()) ? repo.getRepoUrl() : repoFullName;
         String provider = repo != null ? repo.getProvider() : null;
-        // 无开发会话可沿用(人工触发/未起开发任务):按普通克隆处理。
-        return "未找到可沿用的开发检出目录,请克隆该仓库后运行:\n"
+        Long coderSessionId = findCoderSession(run, null).sessionId;
+        if (coderSessionId != null) {
+            return "用例在工作区仓库的 " + WORKSPACE_TESTS_DIR + "/ 下,开发环节已把工作区仓库检出到本沙箱,不要重新克隆:\n"
+                + "- 直接进入开发已检出的目录:/by/.sessions/" + coderSessionId + "/(工作区仓库 " + repoFullName + " 的子目录)\n"
+                + "- 若该目录确实不存在,再按下述方式克隆兜底:\n"
+                + DevloopApplicationService.buildRepoCloneHint(provider, repoUrl, repoFullName);
+        }
+        // 无开发会话可沿用(人工触发/定时回归):克隆工作区仓库,用例就在它的 tests/ 下。
+        return "用例在工作区仓库的 " + WORKSPACE_TESTS_DIR + "/ 下,未找到可沿用的开发检出目录,请克隆该仓库后运行:\n"
             + DevloopApplicationService.buildRepoCloneHint(provider, repoUrl, repoFullName);
     }
 
@@ -750,15 +831,14 @@ public class IntegrationRunExecutor {
      */
     private String buildTesterPrompt(Long sessionId, IntegrationEnv env, IntegrationSuite suite, String caseSource,
                                      boolean keyAuth) {
-        boolean onEnv = SOURCE_ON_ENV.equalsIgnoreCase(StringUtils.defaultString(suite.getSourceType()));
-        String branch = StringUtils.defaultString(suite.getBranch());
-        String runCommand = StringUtils.defaultString(suite.getRunCommand());
+        boolean onEnv = casesOnEnvMachine(env);
+        String runCommand = resolveRunCommand(env, suite);
         String address = StringUtils.defaultString(env.getAddress());
         return "请执行以下集成/回归测试任务:\n"
             + "## 测试任务信息\n"
             + "- 测试用例集:" + StringUtils.defaultString(suite.getSuiteName()) + "\n"
-            // 用例在环境机上时没有克隆动作,分支无意义。
-            + (onEnv ? "" : "- 用例分支:" + branch + "\n")
+            // workspace 模式不给分支:沿用 coder 检出时跑的就是这轮开发所在分支,另给一个分支只会让员工去切错。
+            + (onEnv ? "" : "- 用例约定入口:工作区仓库根目录下的 " + WORKSPACE_ENTRY_SCRIPT + "\n")
             + "- 被测系统访问地址(环境已部署就绪,直接对其发起测试):" + address + "\n\n"
             + "## 用例代码从哪来\n" + caseSource + "\n\n"
             // onEnv 必须登环境机:沙箱默认没有 ssh 客户端,凭据也只在文件里,两者都要明确给出,
@@ -867,8 +947,8 @@ public class IntegrationRunExecutor {
      * 返回副本:StageDef 由 parseStages 每次重建,但替换后的脚本不该回写进原对象被别处误用。
      * 无对应数据时替换为空串而非留着 ${...}:留着会被 shell 当字面量执行,报错更难懂。
      */
-    private StageDef expandStageVars(StageDef stage, IntegrationRun run, IntegrationEnv env, IntegrationSuite suite) {
-        return expandStageVars(stage, run.getBranch(), run.getCommitRef(), stageRepoUrl(suite), env.getAddress());
+    private StageDef expandStageVars(StageDef stage, IntegrationRun run, IntegrationEnv env) {
+        return expandStageVars(stage, run.getBranch(), run.getCommitRef(), stageRepoUrl(env), env.getAddress());
     }
 
     /** 纯替换逻辑,与仓库查询解耦便于测试;取值来源见上面的重载。 */
@@ -889,17 +969,14 @@ public class IntegrationRunExecutor {
     }
 
     /**
-     * stage 脚本里 ${repoUrl} 的取值:standalone 套件直接用 source,关联仓库的取仓库地址。
-     * sourceType=env(用例预置在环境机)没有仓库概念,返回空串。
+     * stage 脚本里 ${repoUrl} 的取值:workspace 取工作区仓库地址(用例所在仓库)。
+     * on_env(用例预置在环境机)没有仓库概念,返回空串。
      */
-    private String stageRepoUrl(IntegrationSuite suite) {
-        if (suite == null || SOURCE_ON_ENV.equalsIgnoreCase(StringUtils.defaultString(suite.getSourceType()))) {
+    private String stageRepoUrl(IntegrationEnv env) {
+        if (env == null || casesOnEnvMachine(env)) {
             return "";
         }
-        if (SOURCE_STANDALONE.equalsIgnoreCase(suite.getSourceType())) {
-            return StringUtils.defaultString(suite.getSource()).trim();
-        }
-        ProjectRepo repo = suite.getRepoId() == null ? null : projectRepoMapper.selectById(suite.getRepoId());
+        ProjectRepo repo = findWorkspaceRepo(env.getProjectId());
         return repo == null ? "" : StringUtils.defaultString(resolveRepoUrl(repo));
     }
 

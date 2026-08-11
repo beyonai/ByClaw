@@ -6,12 +6,15 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.application.service.skillgroup.SkillGroupApplicationService;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCreateQo;
+import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCandidatePageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupIdQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupInstallQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupMemberChangeQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupPageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupUpdateQo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberStatusSummaryVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupVo;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -62,6 +65,14 @@ public class SkillGroupController {
         return ResponseUtil.successResponse(I18nUtil.get("skillgroup.detail.query.success"), result);
     }
 
+    @PostMapping("/member/candidates")
+    public ResponseUtil<PageInfo<SkillGroupMemberVo>> pageMemberCandidates(
+            @Valid @RequestBody SkillGroupCandidatePageQo qo) {
+        PageInfo<SkillGroupMemberVo> result = skillGroupApplicationService.pageMemberCandidates(qo);
+        return ResponseUtil.successResponse(
+                I18nUtil.get("skillgroup.member.candidates.query.success"), result);
+    }
+
     @PostMapping("/member/add")
     @ManageLogAnnotation(name = "技能组", description = "添加技能组成员")
     public ResponseUtil<String> addMembers(@Valid @RequestBody SkillGroupMemberChangeQo qo) {
@@ -80,6 +91,20 @@ public class SkillGroupController {
     @ManageLogAnnotation(name = "技能组", description = "安装技能组")
     public ResponseUtil<SkillGroupInstallResultVo> install(@Valid @RequestBody SkillGroupInstallQo qo) {
         SkillGroupInstallResultVo result = skillGroupApplicationService.install(qo);
+        return ResponseUtil.successResponse(I18nUtil.get("skillgroup.install.success"), result);
+    }
+
+    @PostMapping("/install/preflight")
+    public ResponseUtil<SkillGroupMemberStatusSummaryVo> preflightInstall(
+            @Valid @RequestBody SkillGroupInstallQo qo) {
+        SkillGroupMemberStatusSummaryVo result = skillGroupApplicationService.preflightInstall(qo);
+        return ResponseUtil.successResponse(I18nUtil.get("skillgroup.install.success"), result);
+    }
+
+    @PostMapping("/install/execute")
+    @ManageLogAnnotation(name = "技能组", description = "确认安装技能组")
+    public ResponseUtil<SkillGroupInstallResultVo> executeInstall(@Valid @RequestBody SkillGroupInstallQo qo) {
+        SkillGroupInstallResultVo result = skillGroupApplicationService.executeInstall(qo);
         return ResponseUtil.successResponse(I18nUtil.get("skillgroup.install.success"), result);
     }
 

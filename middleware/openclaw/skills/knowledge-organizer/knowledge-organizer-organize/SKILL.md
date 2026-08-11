@@ -39,3 +39,7 @@ python3 <技能目录>/scripts/knowledge_organizer.py organize \
 ## 完成标准
 
 只有命令确认受理时，才算提交成功。分别汇报来源对象和目标对象，并明确说明发现任务**已提交**。不要声称后台发现已经完成，也不要自动执行知识丰富。
+
+- 后台任务未能成功提交时，使用 `knowledge-organizer-update-task-status` 将状态设置为 `failed`。
+- 后台任务确认受理后，不得更新任务状态；后续状态由异步任务维护。
+- 普通交互任务不得更新任务状态。

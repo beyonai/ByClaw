@@ -19,6 +19,7 @@ import useTracker from '@/hooks/useTracker';
 import { ISession } from '@/typescript/session';
 import { IAgentCache } from '@/typescript/agent';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
+import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 
 import styles from './index.module.less';
 
@@ -342,6 +343,8 @@ const DialogueCard = ({
 
         if (editingSessionId === sessionId) return;
         clearDetailPanel?.();
+        // 普通会话列表切换时也清除目标会话旧草稿，输入框只保留当前会话详情对应的默认员工。
+        clearEasyConfirmInputDraft(sessionId);
 
         if (Array.isArray(item.sessionExts) && item.sessionExts.length > 0) {
           dispatch({

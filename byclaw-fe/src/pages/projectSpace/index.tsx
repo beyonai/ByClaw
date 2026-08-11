@@ -1,14 +1,26 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Empty, Modal, Spin, message } from 'antd';
-import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
+import { useIntl, useNavigate, useSelector } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
-import { deleteProject, saveDefaultAgent, saveProjectMembers, saveProjectResources, updateProject } from '@/service/devloop';
+import { setAgentCache } from '@/components/QueryInput/RichInput/agentCache';
+import getElementData from '@/components/QueryInput/RichInput/utils/getElementData';
+import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
+import { agentTypeMap } from '@/constants/agent';
+import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
+import {
+  deleteProject,
+  saveDefaultAgent,
+  saveProjectMembers,
+  saveProjectResources,
+  updateProject,
+} from '@/service/devloop';
 import ProjectFormModal, { type ProjectFormValues } from './components/ProjectFormModal';
 import ProjectDetail from './components/ProjectDetail';
+import { type ChatWithAgentTarget } from './components/ProjectDefaultAgentPanel';
 import { useProjectDetail } from './hooks/useProjectDetail';
 import { useProjectList } from './hooks/useProjectList';
+import { useProjectScopeId } from './hooks/useProjectScopeId';
 import { useProjectTypeConfig } from './hooks/useProjectTypeConfig';
-import { getStoredProjectScopeId, saveProjectScopeIdToStorage } from './constants';
 import type { ProjectSession, ProjectSpace } from './types';
 import styles from './index.module.less';
 
@@ -35,25 +47,19 @@ const getProjectFormInitialValues = (project?: ProjectSpace): Partial<ProjectFor
   };
 };
 
-// 项目页面使用 URL 作为唯一的选中状态来源，
-// 左侧小列表和浏览器刷新都能稳定恢复当前详情。
+// 项目大详情与会话模块共用同一份当前项目状态，不再通过 URL 查询参数重复维护选中值。
 const ProjectSpacePage: React.FC = () => {
-  const location = useLocation();
   const navigate = useNavigate();
   const intl = useIntl();
-  const { EventEmitter, setSessionId } = useGlobal();
+  const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
-  const { projects, loading: projectsLoading, fetchProjects } = useProjectList();
+  const { projects, loading: projectsLoading, fetchProjects, hasMore, loadMoreProjects } = useProjectList();
   const { projectTypeOptions, projectTypeLoading } = useProjectTypeConfig();
-  const [selectedProjectId, setSelectedProjectId] = useState<string>();
+  const [selectedProjectId, setSelectedProjectId] = useProjectScopeId();
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectSpace>();
   const [editLoading, setEditLoading] = useState(false);
 
-  const urlProjectId = useMemo(
-    () => new URLSearchParams(location.search).get('projectId') || undefined,
-    [location.search]
-  );
   const { activeProject, loading: detailLoading, refreshProject } = useProjectDetail(projects, selectedProjectId);
   const canManageProject = useMemo(() => {
     const currentUserId = userInfo.userId ?? userInfo.id;
@@ -75,32 +81,28 @@ const ProjectSpacePage: React.FC = () => {
   }, [EventEmitter, fetchProjects]);
 
   useEffect(() => {
-    if (!projects.length) {
-      setSelectedProjectId(undefined);
+    if (projectsLoading) return;
+    // 首次请求前列表也为空，不能因此清除会话模块已经保存的当前项目。
+    if (!projects.length) return;
+
+    const storedProject =
+      selectedProjectId && projects.find((project) => getProjectId(project.projectId) === selectedProjectId);
+    if (selectedProjectId && !storedProject) {
+      if (hasMore) void loadMoreProjects();
+      // 另一模块可能刚创建或切换项目，列表刷新完成前保留共享值，不能回退覆盖。
       return;
     }
-
-    const storedProjectId = getStoredProjectScopeId();
-    const requestedProject =
-      urlProjectId && projects.find((project) => getProjectId(project.projectId) === urlProjectId);
-    const storedProject =
-      storedProjectId && projects.find((project) => getProjectId(project.projectId) === storedProjectId);
     const fallbackProject =
-      requestedProject || storedProject || projects.find((project) => project.projectType === 'default') || projects[0];
+      storedProject || projects.find((project) => project.projectType === 'default') || projects[0];
     const nextProjectId = getProjectId(fallbackProject?.projectId);
     if (!nextProjectId) return;
 
-    setSelectedProjectId(nextProjectId);
-    saveProjectScopeIdToStorage(nextProjectId);
-    if (urlProjectId !== nextProjectId) {
-      navigate(`/projectSpace?projectId=${encodeURIComponent(nextProjectId)}`, { replace: true });
-    }
-  }, [navigate, projects, urlProjectId]);
+    if (selectedProjectId !== nextProjectId) setSelectedProjectId(nextProjectId);
+  }, [hasMore, loadMoreProjects, projects, projectsLoading, selectedProjectId, setSelectedProjectId]);
 
   useEffect(() => {
     if (!activeProject?.projectId) return;
     const projectId = getProjectId(activeProject.projectId);
-    saveProjectScopeIdToStorage(projectId);
     EventEmitter.emit('projectSpace-active-project-change', {
       projectId,
       projectName: activeProject.projectName,
@@ -110,7 +112,24 @@ const ProjectSpacePage: React.FC = () => {
   const handleOpenSession = useCallback(
     (session: ProjectSession) => {
       if (!session.sessionId) return;
+      // 项目详情切换会话时丢弃目标会话遗留的多员工草稿，只使用详情返回的默认员工。
+      clearEasyConfirmInputDraft(session.sessionId);
+      // 研发任务会话绑的是项目维度执行员工，不在 redux employeesList/agentList 里,
+      // useDefaultAgentElement 查不到就兜底成「AI 助手」。agentCache 在那个 hook 里优先于 redux 查表,
+      // 所以带了名字就先把整份员工写进去。只在有 agentName 时写:会话列表那条路没有这个字段,
+      // 写个没名字的条目反而会盖掉 redux 里查得到的正确员工。
+      if (session.agentName && session.objectId !== undefined && session.objectId !== null) {
+        setAgentCache(
+          getElementData(ResourceType.digitalEmployee, {
+            agentId: `${session.objectId}`,
+            name: session.agentName,
+            chatAvatar: session.avatar,
+            agentType: agentTypeMap.agent,
+          })
+        );
+      }
       // 项目详情页只负责切换全局会话上下文，聊天页仍负责渲染会话内容。
+      setAgentId?.(session.objectId !== undefined && session.objectId !== null ? `${session.objectId}` : '');
       setSessionId?.(session.sessionId);
       navigate('/chat', {
         state: {
@@ -125,7 +144,7 @@ const ProjectSpacePage: React.FC = () => {
         },
       });
     },
-    [activeProject?.projectId, activeProject?.projectName, navigate, setSessionId]
+    [activeProject?.projectId, activeProject?.projectName, navigate, setAgentId, setSessionId]
   );
 
   const handleEditProject = useCallback((project: ProjectSpace) => {
@@ -193,17 +212,16 @@ const ProjectSpacePage: React.FC = () => {
           try {
             await deleteProject(Number(project.projectId));
             message.success(intl.formatMessage({ id: 'projectSpace.message.deleteSuccess' }));
-            saveProjectScopeIdToStorage();
+            setSelectedProjectId(undefined);
             await fetchProjects();
             EventEmitter.emit('projectSpace-list-refresh');
-            navigate('/projectSpace');
           } catch (error: any) {
             message.error(error?.message || intl.formatMessage({ id: 'projectSpace.message.deleteFailed' }));
           }
         },
       });
     },
-    [EventEmitter, fetchProjects, intl, navigate]
+    [EventEmitter, fetchProjects, intl, setSelectedProjectId]
   );
 
   return (
@@ -225,14 +243,32 @@ const ProjectSpacePage: React.FC = () => {
               project={activeProject}
               onRefresh={refreshProject}
               onOpenSession={handleOpenSession}
-              onNewSession={() => {
+              onNewSession={(target?: ChatWithAgentTarget) => {
                 setSessionId?.('');
+                // 只有数字员工卡的「去聊天」带员工;工具栏「新建会话」不带,行为不变。
+                // 面板员工可能不在 redux employeesList 里(个人创建的员工走 queryMyCreated),
+                // 光给 agentId 会让 useDefaultAgentElement 查不到人而兜底成「AI 助手」。
+                // 先把整份员工写进 agentCache,它在那个 hook 里优先于 redux 查表。
+                if (target?.agentId) {
+                  setAgentCache(
+                    getElementData(ResourceType.digitalEmployee, {
+                      agentId: `${target.agentId}`,
+                      name: target.name,
+                      chatAvatar: target.chatAvatar,
+                      agentType: target.agentType,
+                    })
+                  );
+                }
                 navigate('/chat', {
                   state: {
                     keepSiderActiveKey: 'sessions',
                     from: 'projectSpace',
                     projectId: activeProject.projectId,
                     projectName: activeProject.projectName,
+                    // 聊天页据此在挂载后恢复 @ 员工。不能在这里直接 setAgentId:
+                    // ChatLayoutComp 挂载时会按「无会话员工」清空一次,早设的值会被抹掉。
+                    selectedAgentId: target?.agentId,
+                    selectedAgentObjectType: target?.agentId ? 'DigEmployee' : undefined,
                   },
                 });
               }}

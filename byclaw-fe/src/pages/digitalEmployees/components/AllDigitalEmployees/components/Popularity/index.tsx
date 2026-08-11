@@ -8,7 +8,7 @@ import { message } from 'antd';
 import useGlobal from '@/hooks/useGlobal';
 
 import useTracker from '@/hooks/useTracker';
-import { getAgentChatAvatar, agentHandler, getAgentPath, canJumpAgent } from '@/utils/agent';
+import { getAgentChatAvatar, agentHandler, canJumpAgent } from '@/utils/agent';
 import { queryPopular } from '@/service/digitalEmployees';
 
 import RenderRightBottom from '@/pages/digitalEmployees/components/AllDigitalEmployees/RenderRightBottom';
@@ -54,7 +54,14 @@ const Popularity = ({ disableActionList }: { disableActionList?: IAvatarCardItem
 
         setAgentId?.(`${employee.agentId}`);
         setSessionId?.('');
-        navigate(getAgentPath(employee));
+        // 热门员工也属于员工模块，点击后统一进入员工详情页。
+        navigate('/employees', {
+          state: {
+            keepSiderActiveKey: 'agent',
+            selectedAgentId: `${employee.agentId}`,
+            selectedEmployee: employee,
+          },
+        });
       } else {
         message.destroy();
         message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));

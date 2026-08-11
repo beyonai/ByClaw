@@ -106,17 +106,26 @@ function resolveReasoning(config: LlmProviderConfig): {
     map[level] = explicitMap[level] ?? supportedLevel;
   }
   const format = inferThinkingFormat(config.reasoning, config);
-  const compat =
-    config.protocol === "openai-completions"
+  const compat = {
+    ...(config.protocol === "openai-completions"
       ? {
           supportsUsageInStreaming: true,
           supportsReasoningEffort: capability === "effort",
           ...(format ? { thinkingFormat: format } : {}),
         }
-      : undefined;
+      : {}),
+    ...(config.protocol === "openai-responses"
+      ? {
+          // byclaw-super only uses system instructions. The underlying Pi
+          // SDK defaults reasoning-enabled Responses models to `developer`,
+          // which is not part of this service's message-role contract.
+          supportsDeveloperRole: false,
+        }
+      : {}),
+  };
   return {
     thinkingLevelMap: isVolcengineArk(config) ? deepSeekThinkingLevelMap() : map,
-    ...(compat ? { compat } : {}),
+    ...(Object.keys(compat).length > 0 ? { compat } : {}),
     ...(config.reasoning.budgets
       ? { thinkingBudgets: config.reasoning.budgets }
       : {}),

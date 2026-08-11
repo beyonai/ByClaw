@@ -23,8 +23,12 @@ import { IMessageState } from '@/constants/message';
 
 const inputDraftMap = new Map<string, DefaultValueSchema>();
 
-export const clearEasyConfirmInputDraft = () => {
-  inputDraftMap.clear();
+export const clearEasyConfirmInputDraft = (sessionId?: string | number) => {
+  if (sessionId === undefined || sessionId === null || `${sessionId}` === '') {
+    inputDraftMap.clear();
+    return;
+  }
+  inputDraftMap.delete(`${sessionId}`);
 };
 
 type IProps = {
@@ -176,6 +180,9 @@ const EasyConfirm = (props: IProps) => {
         data-isbottom={isBottom}
       >
         <QueryInput
+          // 每个会话使用独立的 Slate 编辑器实例，切换详情时避免沿用上一会话的默认 @ 员工节点。
+          // 会话草稿仍由 inputDraftMap 按 sessionId 恢复，不会丢失用户已输入内容。
+          key={inputDraftKey}
           messageState={messageState}
           onCancel={onCancel}
           myAgentType={myAgentType}

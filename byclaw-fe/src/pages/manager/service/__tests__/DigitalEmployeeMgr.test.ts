@@ -13,6 +13,7 @@ import {
   importToolJson,
   publishApp,
   queryAgentByPage,
+  queryEmployeeGroupMemberCandidates,
   queryResourcesByPage,
   saveDigitalEmployee,
   selectDigitalEmployeeByQo,
@@ -45,6 +46,22 @@ describe('manager/service/DigitalEmployeeMgr', () => {
         customHandle: true,
       },
     });
+  });
+
+  it('queryEmployeeGroupMemberCandidates posts to the group candidate endpoint', () => {
+    const payload = { keyword: 'research', pageNum: 1, pageSize: 30 };
+    const cancelToken = new AbortController();
+    queryEmployeeGroupMemberCandidates(payload, cancelToken);
+    expect(mockPOST).toHaveBeenCalledWith(
+      '/byaiService/digitalEmployeeController/queryEmployeeGroupMemberCandidates',
+      payload,
+      {
+        cancelToken,
+        responseCfg: {
+          customHandle: true,
+        },
+      }
+    );
   });
 
   it('createDigitalEmployee posts with customHandle config', () => {

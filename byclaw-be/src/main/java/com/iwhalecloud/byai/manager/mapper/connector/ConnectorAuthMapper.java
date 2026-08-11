@@ -20,13 +20,19 @@ public interface ConnectorAuthMapper extends BaseMapper<ConnectorAuth> {
     @Select("""
         SELECT info.connector_code,
                info.skill_code,
-               CASE WHEN auth.enable_flag = 'Y' THEN TRUE ELSE FALSE END AS enabled
+               CASE
+                   WHEN auth.connector_id IS NULL THEN FALSE
+                   WHEN auth.expire_time < CURRENT_TIMESTAMP THEN FALSE
+                   WHEN auth.enable_flag = 'Y' THEN TRUE
+                   ELSE FALSE
+               END AS enabled
         FROM byai_connector_info info
-        INNER JOIN (
-            SELECT connector_id, enable_flag
+        LEFT JOIN (
+            SELECT connector_id, enable_flag, expire_time
             FROM (
                 SELECT connector_id,
                        enable_flag,
+                       expire_time,
                        ROW_NUMBER() OVER (
                            PARTITION BY connector_id
                            ORDER BY CASE WHEN enable_flag = 'Y' THEN 0 ELSE 1 END,

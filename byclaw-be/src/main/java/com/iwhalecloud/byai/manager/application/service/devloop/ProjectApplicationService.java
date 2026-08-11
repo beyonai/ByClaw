@@ -77,7 +77,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * 项目管理应用服务。
@@ -199,42 +198,6 @@ public class ProjectApplicationService {
         return project;
     }
 
-    /**
-     * 触发研发项目工作区初始化：置为 initializing 并记录建索引/技能包配置。
-     *
-     * @param params 含 projectId、buildIndex(Y/N)、skillPackages(数组)
-     */
-    public void startProjectInit(Map<String, Object> params) {
-        Long projectId = MapParamUtil.getLongValue(params, "projectId");
-        Project project = requireProject(projectId);
-        boolean buildIndex = Constants.YES_VALUE_Y.equalsIgnoreCase(MapParamUtil.getStringValue(params, "buildIndex"))
-            || Boolean.TRUE.equals(params.get("buildIndex"));
-        Project update = new Project();
-        update.setProjectId(project.getProjectId());
-        update.setInitStatus("initializing");
-        update.setBuildIndex(buildIndex ? Constants.YES_VALUE_Y : Constants.NO_VALUE_N);
-        // 技能包仅建索引时保留;逗号分隔,存量枚举暂由前端约束,后端只落原样。
-        update.setIndexSkills(buildIndex ? joinSkillPackages(params.get("skillPackages")) : "");
-        update.setUpdateBy(CurrentUserHolder.getCurrentUserId());
-        update.setUpdateTime(new Date());
-        projectService.update(update);
-    }
-
-    /**
-     * 标记研发项目工作区初始化完成：置为 ready。
-     *
-     * @param projectId 项目 ID
-     */
-    public void completeProjectInit(Long projectId) {
-        Project project = requireProject(projectId);
-        Project update = new Project();
-        update.setProjectId(project.getProjectId());
-        update.setInitStatus("ready");
-        update.setUpdateBy(CurrentUserHolder.getCurrentUserId());
-        update.setUpdateTime(new Date());
-        projectService.update(update);
-    }
-
     private Project requireProject(Long projectId) {
         if (projectId == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.id.required");
@@ -244,18 +207,6 @@ public class ProjectApplicationService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.not.found");
         }
         return project;
-    }
-
-    private String joinSkillPackages(Object raw) {
-        if (!(raw instanceof List<?> list) || list.isEmpty()) {
-            return "";
-        }
-        return list.stream()
-            .filter(Objects::nonNull)
-            .map(Object::toString)
-            .map(String::trim)
-            .filter(item -> !item.isEmpty())
-            .collect(Collectors.joining(","));
     }
 
     /**
@@ -648,6 +599,9 @@ public class ProjectApplicationService {
         map.put("initStatus", project.getInitStatus());
         map.put("buildIndex", project.getBuildIndex());
         map.put("indexSkills", project.getIndexSkills());
+        // 初始化会话ID供前端直达架构助理会话；失败原因让 pending 态能说明为何回退，而不是只显示「未初始化」。
+        map.put("initSessionId", project.getInitSessionId());
+        map.put("initFailReason", project.getInitFailReason());
         map.put("repos", repos);
         map.put("resources", resources);
         map.put("sessions", sessions);
@@ -796,6 +750,45 @@ public class ProjectApplicationService {
         ProjectRepo repo = insertProjectRepo(dto.getProjectId(), dto);
         Map<String, Object> result = new HashMap<>();
         result.put("repoId", repo.getRepoId());
+        result.put("repoFullName", repo.getRepoFullName());
+        result.put("repoUrl", repo.getRepoUrl());
+        result.put("defaultBranch", repo.getDefaultBranch());
+        result.put("description", repo.getDescription());
+        result.put("repoType", repo.getRepoType());
+        result.put("provider", repo.getProvider());
+        return result;
+    }
+
+    /**
+     * 更新单个项目仓库。
+     *
+     * <p>编辑直接更新原记录，不采用删除后重建，避免需求、任务或扫描源中保存的 repoId 失效。</p>
+     */
+    public Map<String, Object> updateProjectRepo(ProjectRepoDTO dto) {
+        if (dto == null || dto.getRepoId() == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.id.required");
+        }
+        if (dto.getProjectId() == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.id.required");
+        }
+        if (dto.getRepoFullName() == null || dto.getRepoFullName().trim().isEmpty()) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.name.required");
+        }
+        ProjectRepo repo = projectRepoMapper.selectById(dto.getRepoId());
+        if (repo == null || !dto.getProjectId().equals(repo.getProjectId())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.not.found");
+        }
+        repo.setRepoFullName(dto.getRepoFullName().trim());
+        repo.setRepoUrl(StringUtils.trimToNull(dto.getRepoUrl()));
+        String defaultBranch = dto.getDefaultBranch() == null ? "" : dto.getDefaultBranch().trim();
+        repo.setDefaultBranch(defaultBranch.isEmpty() ? "main" : defaultBranch);
+        repo.setDescription(StringUtils.trimToNull(dto.getDescription()));
+        repo.setRepoType("workspace".equals(dto.getRepoType()) ? "workspace" : "code");
+        repo.setProvider(normalizeProvider(dto.getProvider()));
+        projectRepoMapper.updateById(repo);
+        Map<String, Object> result = new HashMap<>();
+        result.put("repoId", repo.getRepoId());
+        result.put("projectId", repo.getProjectId());
         result.put("repoFullName", repo.getRepoFullName());
         result.put("repoUrl", repo.getRepoUrl());
         result.put("defaultBranch", repo.getDefaultBranch());

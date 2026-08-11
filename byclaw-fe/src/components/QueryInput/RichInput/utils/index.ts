@@ -25,7 +25,10 @@ export function getChatResourceId(resourceId: any, resourceType: IResourceType) 
   return `${resourceType}_${resourceId}`;
 }
 
-export function getNodeResourceData(node: MentionElementType | ResourceElementType): Resource {
+export function getNodeResourceData(
+  node: MentionElementType | ResourceElementType,
+  includeAgentSelectionState = false
+): Resource {
   const { resourceType } = node;
   const resourceId = isMentionElement(node) ? node.agentId || node.userId : node.id;
   let id: string;
@@ -37,7 +40,7 @@ export function getNodeResourceData(node: MentionElementType | ResourceElementTy
   } else {
     id = getChatResourceId(resourceId, resourceType);
   }
-  return {
+  const resource: Resource = {
     id,
     resourceType,
     resourceId: `${resourceId}`,
@@ -50,9 +53,14 @@ export function getNodeResourceData(node: MentionElementType | ResourceElementTy
     // 冗余chatAvatar
     chatAvatar: node.chatAvatar,
   };
+  if (includeAgentSelectionState) {
+    resource.agentType = node.agentType;
+    resource.isInactiveAgentSelection = node.isInactiveAgentSelection;
+  }
+  return resource;
 }
 
-export function getInputText(value: Descendant[]) {
+export function getInputText(value: Descendant[], includeInactiveAgentSelections = false) {
   const getTextFromNodes = (nodes: Descendant[], level: number) => {
     let text = '';
     let displayText = '';
@@ -74,6 +82,9 @@ export function getInputText(value: Descendant[]) {
           text += realText;
           displayText += realText;
         } else if (isMentionElement(node) || isResourceElement(node)) {
+          if (node.isInactiveAgentSelection && !includeInactiveAgentSelections) {
+            continue;
+          }
           if (isResourceElement(node) || !node.isDefaultAgent) {
             // isDefaultAgent不参与text的拼接
             displayText += getTextFromNodes(node.children, level + 1).displayText;
@@ -130,34 +141,45 @@ export const handleMentionCompositionStart = (editor: Editor, isComposingRef: { 
   isComposingRef.current = true;
 };
 
-export function getResourceList(value: Descendant[]): Resource[] {
+export function getResourceList(value: Descendant[], includeInactiveAgentSelections = false): Resource[] {
   const getDataFromNodes = (nodes: Descendant[]): Resource[] => {
     const resourceList: Resource[] = [];
     for (const node of nodes) {
       if (Element.isElement(node)) {
         if (isMentionElement(node) || isResourceElement(node)) {
+          if (node.isInactiveAgentSelection && !includeInactiveAgentSelections) {
+            continue;
+          }
           const { resourceType } = node;
           if (resourceType) {
             if (isResourceElement(node) && node.isAgentTool) {
               resourceList.push(
-                getNodeResourceData({
-                  type: ELEMENT_MENTION,
-                  resourceType: ResourceType.digitalEmployee,
-                  chatAvatar: node.chatAvatar,
-                  name: node.agentName!,
-                  agentId: node.agentId,
-                  children: [],
-                })
+                getNodeResourceData(
+                  {
+                    type: ELEMENT_MENTION,
+                    resourceType: ResourceType.digitalEmployee,
+                    chatAvatar: node.chatAvatar,
+                    name: node.agentName!,
+                    agentId: node.agentId,
+                    agentType: node.agentType,
+                    isInactiveAgentSelection: node.isInactiveAgentSelection,
+                    children: [],
+                  },
+                  includeInactiveAgentSelections
+                )
               );
               resourceList.push(
-                getNodeResourceData({
-                  ...node,
-                  isAgentTool: false,
-                  name: node.resourceName,
-                })
+                getNodeResourceData(
+                  {
+                    ...node,
+                    isAgentTool: false,
+                    name: node.resourceName,
+                  },
+                  includeInactiveAgentSelections
+                )
               );
             } else {
-              resourceList.push(getNodeResourceData(node));
+              resourceList.push(getNodeResourceData(node, includeInactiveAgentSelections));
             }
           }
         } else if (node.children) {
@@ -194,6 +216,9 @@ export function getDefaultAgentElementByValue(value: Descendant[]) {
       return null;
     }
     if (item.type === ELEMENT_MENTION && item.isDefaultAgent) {
+      if (item.isInactiveAgentSelection) {
+        continue;
+      }
       return item;
     }
   }
@@ -443,10 +468,13 @@ export function getDescendantValueByDefaultValue(defaultValue: DefaultValueSchem
         userId: res.resourceId,
         name: res.resourceName,
         agentId: res.resourceId,
-        agentType: res.resourceType,
+        agentType: res.agentType || res.resourceType,
         chatAvatar: res.chatAvatar,
       };
-      return getElementData(res.resourceType, fullData);
+      return {
+        ...getElementData(res.resourceType, fullData),
+        isInactiveAgentSelection: res.isInactiveAgentSelection,
+      };
     };
 
     const createResourceNode = (res: Resource) => {
@@ -456,6 +484,8 @@ export function getDescendantValueByDefaultValue(defaultValue: DefaultValueSchem
         id: res.resourceId,
         name: res.resourceName,
         resourceCode: res.resourceCode,
+        agentType: res.agentType,
+        isInactiveAgentSelection: res.isInactiveAgentSelection,
         children: [
           {
             text: getElementDisplayText({
@@ -479,8 +509,9 @@ export function getDescendantValueByDefaultValue(defaultValue: DefaultValueSchem
         resourceCode: toolRes.resourceCode,
         id: toolRes.resourceId,
         agentId: agentRes.resourceId,
-        agentType: agentRes.resourceType,
+        agentType: agentRes.agentType || agentRes.resourceType,
         agentName: agentRes.resourceName,
+        isInactiveAgentSelection: agentRes.isInactiveAgentSelection || toolRes.isInactiveAgentSelection,
         children: [
           {
             text: getElementDisplayText({

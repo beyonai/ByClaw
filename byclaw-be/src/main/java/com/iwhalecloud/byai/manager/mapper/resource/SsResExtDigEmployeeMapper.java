@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.mapper.resource;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto;
+import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeGroupMemberDTO;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import com.iwhalecloud.byai.manager.qo.resource.DigEmployeeExtQo;
 import com.iwhalecloud.byai.manager.qo.resource.DigitalEmployeeQo;
@@ -26,6 +27,14 @@ public interface SsResExtDigEmployeeMapper extends BaseMapper<SsResExtDigEmploye
      * @return List<DigitalEmployeeVo>
      */
     List<DigitalEmployeePageVo> selectDigitalEmployeeByQo(DigitalEmployeeQo digitalEmployeeQo);
+
+    /**
+     * 分页查询当前用户可管理且配置完整的数字员工组成员候选。
+     *
+     * @param digitalEmployeeQo 查询条件及当前用户权限上下文
+     * @return 数字员工组成员候选
+     */
+    List<EmployeeGroupMemberDTO> selectEmployeeGroupMemberCandidates(DigitalEmployeeQo digitalEmployeeQo);
 
     /**
      * 查询个人归属数字员工列表。

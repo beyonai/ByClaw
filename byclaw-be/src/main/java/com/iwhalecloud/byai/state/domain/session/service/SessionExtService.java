@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.session.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionExtMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +30,15 @@ public class SessionExtService {
     }
 
     /**
+     * 保存会话成员
+     *
+     * @param byaiSessionExt 会话信息
+     */
+    public void update(ByaiSessionExt byaiSessionExt) {
+        byaiSessionExtMapper.updateById(byaiSessionExt);
+    }
+
+    /**
      * 创建会话
      *
      * @param sessionId 会话信息
@@ -41,7 +51,7 @@ public class SessionExtService {
 
     /**
      * 根据会话查询
-     * 
+     *
      * @param sessionId 会话标识
      * @return List
      */
@@ -53,6 +63,7 @@ public class SessionExtService {
 
     /**
      * 根据参数编码和参数值查询
+     *
      * @param paramCode 参数编码
      * @param paramValue 参数值
      * @return ByaiSessionExt
@@ -66,6 +77,7 @@ public class SessionExtService {
 
     /**
      * 根据参数编码和参数值查询列表
+     *
      * @param paramCode 参数编码
      * @param paramValue 参数值
      * @return List
@@ -75,6 +87,21 @@ public class SessionExtService {
         queryWrapper.eq(ByaiSessionExt::getExtParamCode, paramCode);
         queryWrapper.eq(ByaiSessionExt::getExtParamValue, paramValue);
         return byaiSessionExtMapper.selectList(queryWrapper);
+    }
+
+    /**
+     * 查找扩展会话信息
+     *
+     * @param sessionId 会话
+     * @param extParamCode 编码
+     * @return ByaiSessionExt
+     */
+    public ByaiSessionExt findOneByExtParamCode(Long sessionId, String extParamCode) {
+        LambdaQueryWrapper<ByaiSessionExt> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(ByaiSessionExt::getSessionId, sessionId);
+        queryWrapper.eq(ByaiSessionExt::getExtParamCode, extParamCode);
+        List<ByaiSessionExt> byaiSessionExts = byaiSessionExtMapper.selectList(queryWrapper);
+        return ListUtil.isNotEmpty(byaiSessionExts) ? byaiSessionExts.getFirst() : null;
     }
 
 }

@@ -17,8 +17,6 @@
 .cover {
   position: relative;
   display: flex;
-  aspect-ratio: 3 / 4;
-  max-height: 480px;
   align-items: flex-start;
   justify-content: center;
   overflow: hidden;
@@ -49,7 +47,7 @@
 .defaultCoverImage,
 .coverImage {
   width: 100%;
-  height: 100%;
+  height: auto;
   display: block;
   object-fit: cover;
   transition: transform 0.3s ease;

@@ -46,7 +46,7 @@ public class GitWorkspaceConfig {
      *
      * 在 Spring Bean 初始化后执行，确保配置的根目录存在且可访问
      */
-    @PostConstruct
+    //@PostConstruct
     public void validate() {
         // 初始化 root
         getRoot();

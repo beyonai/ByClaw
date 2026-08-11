@@ -86,6 +86,7 @@ const PCLayout = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const { pathname } = location;
+  const preserveDetailPanel = Boolean((location.state as { preserveDetailPanel?: boolean } | null)?.preserveDetailPanel);
 
   // 检查当前路由是否需要隐藏侧边栏
   const [siderContentWidth, setSiderContentWidth] = React.useState(DEFAULT_SIDER_CONTENT_WIDTH);
@@ -104,9 +105,14 @@ const PCLayout = () => {
   }, []);
 
   React.useEffect(() => {
-    clearDetailPanel();
+    // 从右侧资源入口进入中心页时，主内容切换但保留当前资源工作区。
+    if (!preserveDetailPanel) {
+      clearDetailPanel();
+    }
     // 参考 sider 组件的逻辑，检查当前路径是否需要隐藏侧边栏
-    const currentTab = tabItems.find((item) => item.navigatePath === pathname);
+    const currentTab = tabItems.find(
+      (item) => item.navigatePath && (item.navigatePath === pathname || pathname.startsWith(`${item.navigatePath}/`))
+    );
 
     // 检查 tabItems 中的 hideSider 属性
     if (currentTab?.hideSider || isPcHideSiderContentRoute(pathname)) {
@@ -114,7 +120,7 @@ const PCLayout = () => {
     } else {
       setSiderContentWidth(DEFAULT_SIDER_CONTENT_WIDTH);
     }
-  }, [clearDetailPanel, pathname]);
+  }, [clearDetailPanel, pathname, preserveDetailPanel]);
 
   React.useEffect(() => {
     const handleMainDriverOpen = (payload: any) => {
@@ -199,7 +205,12 @@ const PCLayout = () => {
 
   const curAgentInfo = React.useMemo(() => {
     return [...(agentList || []), ...(employeesList || [])].find(
-      (item) => `${item.id}` === `${agentId}` || `${item.resourceCode}` === `${agentId}`
+      // 不同员工接口分别返回 id、resourceId、resourceCode 或 agentId，详情页需统一兼容。
+      (item) =>
+        `${item.agentId}` === `${agentId}` ||
+        `${item.resourceId}` === `${agentId}` ||
+        `${item.id}` === `${agentId}` ||
+        `${item.resourceCode}` === `${agentId}`
     );
   }, [agentList, employeesList, agentId]);
 

@@ -18,6 +18,11 @@ import lombok.Setter;
 public class DiscoverQo extends AuthQo {
 
     /**
+     * 数字员工类型。017 表示数字员工组；未传时保持历史接口语义并排除 017。
+     */
+    private String agentType;
+
+    /**
      * 目录id
      */
     private Long catalogId;

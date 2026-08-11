@@ -293,6 +293,7 @@ const RenderContent = (props: ResourceCardProps) => {
     description,
     headerExtra,
     hoverExtra,
+    metaNode,
     resourceType,
     variant = 'default',
   } = props;
@@ -907,7 +908,9 @@ const RenderContent = (props: ResourceCardProps) => {
                   [styles.metaPrimaryWithHover]: !!hoverExtra,
                 })}
               >
-                <ResourceInfo resource={resource} />
+                {/* 卡片底部这行默认是创建者。metaNode 让调用方换成对该卡更有意义的信息
+                    (如角色卡的配置来源);不传则保持创建者,现有调用方行为不变。 */}
+                {metaNode ?? <ResourceInfo resource={resource} />}
               </div>
               {hoverExtra ? (
                 <div

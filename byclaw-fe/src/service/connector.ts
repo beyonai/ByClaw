@@ -15,8 +15,9 @@ export interface ConnectorListItem {
   connectorName: string;
   connectorType: 'SYSTEM' | 'CUSTOM';
   description: string;
-  // Y=当前用户已连接，N=已连接但关闭，null=当前用户未绑定。
+  // Y=当前用户已连接，N=已连接但关闭，null=当前用户未绑定或凭证已过期。
   enableFlag: 'Y' | 'N' | null;
+  credentialExpiresAt?: string | null;
 }
 
 export interface ConnectorListPage {
@@ -96,3 +97,6 @@ export const getConnectorAuthorization = (authorizationId: string) =>
 
 export const cancelConnectorAuthorization = (authorizationId: string) =>
   POST<boolean>('/byaiService/connector/authorization/cancel', { authorizationId });
+
+export const revokeConnectorAuthorization = (connectorId: ConnectorId) =>
+  POST<boolean>('/byaiService/connector/authorization/revoke', { connectorId });

@@ -44,6 +44,9 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
     private static final String CONNECTOR_SKILL_COMPLETE_PATH =
         "/connector/authorization/skill-complete";
 
+    private static final String ORCHESTRATOR_RUNTIME_PATH =
+        "/internal/v1/orchestrators/resolve-runtime";
+
 
     public static final String HEADER_SIGNATURE = "x-signature-value";
 
@@ -80,6 +83,12 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
         // OpenClaw connector Skills authenticate with the current user's Beyond-Token and do not
         // possess the portal's generic request-signing secret. Login authentication remains mandatory.
         if (this.isConnectorSkillComplete(request)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+        // Super 仅持有当前用户 Beyond-Token，不持有门户通用请求签名密钥。
+        // 此处只跳过通用签名防重放，登录与资源权限仍由 AccessTokenVerifyInterceptor 强制校验。
+        if (this.isOrchestratorRuntime(request)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -163,6 +172,12 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
         return endsWithPath(request.getRequestURI(), CONNECTOR_SKILL_COMPLETE_PATH)
             || endsWithPath(request.getServletPath(), CONNECTOR_SKILL_COMPLETE_PATH)
             || endsWithPath(request.getPathInfo(), CONNECTOR_SKILL_COMPLETE_PATH);
+    }
+
+    private boolean isOrchestratorRuntime(HttpServletRequest request) {
+        return endsWithPath(request.getRequestURI(), ORCHESTRATOR_RUNTIME_PATH)
+            || endsWithPath(request.getServletPath(), ORCHESTRATOR_RUNTIME_PATH)
+            || endsWithPath(request.getPathInfo(), ORCHESTRATOR_RUNTIME_PATH);
     }
 
     private boolean endsWithFeishuBotEventPath(String path) {

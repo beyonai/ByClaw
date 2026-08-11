@@ -8,7 +8,10 @@ export interface SkillGroupMember {
   avatar: string;
   resourceStatus: number;
   ownerType: string;
+  createBy: string;
   skillType: string;
+  systemBuiltIn?: boolean;
+  creatorOwned?: boolean;
   sourceType: string;
   version: string;
   skillUrl: string;
@@ -20,6 +23,28 @@ export interface SkillGroupMember {
   syncStatus: string;
   syncError: string;
   lastSyncTime: string;
+  memberStatus?: SkillGroupMemberStatus;
+  statusReason?: string;
+  installed?: boolean;
+  hasUsePermission?: boolean;
+}
+
+export type SkillGroupMemberStatus =
+  | 'INSTALLED'
+  | 'INSTALLABLE'
+  | 'APPLY_REQUIRED'
+  | 'APPLY_PENDING'
+  | 'APPLY_UNAVAILABLE';
+
+export interface SkillGroupMemberStatusSummary {
+  members: SkillGroupMember[];
+  installed: number;
+  installable: number;
+  applyRequired: number;
+  applyPending: number;
+  unavailable: number;
+  total?: number;
+  hasPermissionBarrier?: boolean;
 }
 
 export interface SkillGroup {
@@ -40,11 +65,16 @@ export interface SkillGroup {
 export type SkillGroupVo = SkillGroup;
 
 export interface SkillGroupInstallResult {
+  confirmationRequired?: boolean;
   installedSkillIds: string[];
   existingSkillIds: string[];
   removedSkillIds: string[];
   retainedSkillIds: string[];
   totalSkillIds: string[];
+  appliedSkillIds?: string[];
+  pendingSkillIds?: string[];
+  unavailableSkillIds?: string[];
+  summary?: SkillGroupMemberStatusSummary;
 }
 
 export interface SkillGroupPageResult {
@@ -62,6 +92,21 @@ export interface SkillGroupPageParams {
   ownerType?: string;
   resourceStatus?: number | string;
   catalogId?: string;
+}
+
+export interface SkillGroupCandidatePageParams {
+  groupId?: string;
+  pageNum: number;
+  pageSize: number;
+  keyword?: string;
+}
+
+export interface SkillGroupMemberPageResult {
+  pageNum: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  list: SkillGroupMember[];
 }
 
 export interface SkillGroupCreateParams {
@@ -88,11 +133,25 @@ export interface SkillGroupUpdateParams {
 export const pageSkillGroups = (params: SkillGroupPageParams) =>
   POST<SkillGroupPageResult>('/byaiService/skillGroup/page', params);
 
-export const getSkillGroupDetail = (params: { groupId: string }) =>
+export interface SkillGroupInstallParams {
+  groupId: string;
+  digitalEmployeeId: string;
+}
+
+export const getSkillGroupDetail = (params: { groupId: string; digitalEmployeeId?: string }) =>
   POST<SkillGroup>('/byaiService/skillGroup/detail', params);
 
-export const installSkillGroup = (params: { groupId: string; digitalEmployeeId: string }) =>
+export const pageSkillGroupMemberCandidates = (params: SkillGroupCandidatePageParams) =>
+  POST<SkillGroupMemberPageResult>('/byaiService/skillGroup/member/candidates', params);
+
+export const installSkillGroup = (params: SkillGroupInstallParams) =>
   POST<SkillGroupInstallResult>('/byaiService/skillGroup/install', params);
+
+export const preflightInstallSkillGroup = (params: SkillGroupInstallParams) =>
+  POST<SkillGroupMemberStatusSummary>('/byaiService/skillGroup/install/preflight', params);
+
+export const executeInstallSkillGroup = (params: SkillGroupInstallParams) =>
+  POST<SkillGroupInstallResult>('/byaiService/skillGroup/install/execute', params);
 
 export const createSkillGroup = (params: SkillGroupCreateParams) =>
   POST<SkillGroup>('/byaiService/skillGroup/create', params);

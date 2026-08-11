@@ -65,9 +65,7 @@ public class ConnectorConnectionStateService {
         } else {
             auth = insertOrUpdateWinner(auth, userId, connector, statusResult, authorizationId, now);
         }
-        if (manifestChanged) {
-            privateParamService.refreshPrivateParamCacheAfterCommit(user.userId(), user.userCode());
-        }
+        scheduleCacheRefresh(manifestChanged, user);
         return auth;
     }
 
@@ -88,9 +86,27 @@ public class ConnectorConnectionStateService {
         auth.setEnableFlag(enabled ? "Y" : "N");
         auth.setUpdateTime(new Date());
         requireSingleAffectedRow(connectorAuthMapper.updateById(auth));
-        if (manifestChanged) {
-            privateParamService.refreshPrivateParamCacheAfterCommit(user.userId(), user.userCode());
+        scheduleCacheRefresh(manifestChanged, user);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void revokeAuthorization(String userId, Long connectorId) {
+        UserIdentity user = requireUser(userId);
+        ConnectorAuth auth = findActiveAuthorization(userId, connectorId);
+        if (auth == null) {
+            throw new IllegalArgumentException("连接器授权记录不存在");
         }
+        ConnectorInfo connector = connectorInfoMapper.selectById(connectorId);
+        if (connector == null || !"00A".equals(connector.getStatusCd())) {
+            throw new IllegalArgumentException("连接器不存在或已失效");
+        }
+
+        boolean manifestChanged = manifestService.disable(user.userId(), connector);
+        auth.setEnableFlag("N");
+        auth.setStatusCd("00X");
+        auth.setUpdateTime(new Date());
+        requireSingleAffectedRow(connectorAuthMapper.updateById(auth));
+        scheduleCacheRefresh(manifestChanged, user);
     }
 
     public ConnectorAuth findEnabledActiveAuthorization(String userId, Long connectorId) {
@@ -131,7 +147,7 @@ public class ConnectorConnectionStateService {
         return winner;
     }
 
-    private ConnectorAuth findActiveAuthorization(String userId, Long connectorId) {
+    public ConnectorAuth findActiveAuthorization(String userId, Long connectorId) {
         return connectorAuthMapper.selectOne(new LambdaQueryWrapper<ConnectorAuth>()
             .eq(ConnectorAuth::getUserId, userId)
             .eq(ConnectorAuth::getConnectorId, connectorId)
@@ -213,6 +229,13 @@ public class ConnectorConnectionStateService {
         if (affectedRows != 1) {
             throw new IllegalStateException("Connector state write did not affect exactly one row");
         }
+    }
+
+    private void scheduleCacheRefresh(boolean manifestChanged, UserIdentity user) {
+        if (!manifestChanged) {
+            return;
+        }
+        privateParamService.refreshPrivateParamCacheAfterCommit(user.userId(), user.userCode());
     }
 
     private record UserIdentity(Long userId, String userCode) {

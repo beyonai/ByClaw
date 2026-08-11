@@ -168,4 +168,60 @@ class AccessTokenVerifyInterceptorTest {
         assertThat(response.getStatus()).isEqualTo(401);
         verifyNoInteractions(jwtTokenFilter, sessionFilter);
     }
+
+    @Test
+    void orchestratorRuntimeForcesBeyondTokenIdentityOverCookieSession() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        JwtTokenFilter jwtTokenFilter = mock(JwtTokenFilter.class);
+        SessionFilter sessionFilter = mock(SessionFilter.class);
+        LoginApplicationService loginApplicationService = mock(LoginApplicationService.class);
+        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwtTokenFilter);
+        ReflectionTestUtils.setField(interceptor, "sessionFilter", sessionFilter);
+        ReflectionTestUtils.setField(interceptor, "loginApplicationService", loginApplicationService);
+        interceptor.init();
+        LoginInfo tokenLoginInfo = new LoginInfo();
+        tokenLoginInfo.setUserId(10058L);
+        tokenLoginInfo.setUserCode("runtime-user");
+        LoginInfo localLoginInfo = new LoginInfo();
+        localLoginInfo.setUserId(66L);
+        localLoginInfo.setUserCode("runtime-user");
+        when(jwtTokenFilter.doFilter("SUPER", "runtime-token")).thenAnswer(invocation -> {
+            CurrentUserHolder.setLoginInfo(tokenLoginInfo);
+            return true;
+        });
+        when(loginApplicationService.getLoginInfo("runtime-user")).thenReturn(localLoginInfo);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST",
+            "/byaiService/internal/v1/orchestrators/resolve-runtime");
+        request.addHeader("System-Code", "SUPER");
+        request.addHeader("Beyond-Token", "runtime-token");
+        MockHttpSession cookieSession = new MockHttpSession();
+        cookieSession.setAttribute("USER_CODE", "cookie-user");
+        request.setSession(cookieSession);
+
+        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
+        assertThat(CurrentUserHolder.getCurrentUserId()).isEqualTo(66L);
+        verify(jwtTokenFilter).doFilter("SUPER", "runtime-token");
+        verify(loginApplicationService).getLoginInfo("runtime-user");
+        verifyNoInteractions(sessionFilter);
+    }
+
+    @Test
+    void orchestratorRuntimeRejectsMissingBeyondTokenDespiteCookieSession() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        JwtTokenFilter jwtTokenFilter = mock(JwtTokenFilter.class);
+        SessionFilter sessionFilter = mock(SessionFilter.class);
+        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwtTokenFilter);
+        ReflectionTestUtils.setField(interceptor, "sessionFilter", sessionFilter);
+        interceptor.init();
+        MockHttpServletRequest request = new MockHttpServletRequest("POST",
+            "/byaiService/internal/v1/orchestrators/resolve-runtime");
+        MockHttpSession cookieSession = new MockHttpSession();
+        cookieSession.setAttribute("USER_CODE", "cookie-user");
+        request.setSession(cookieSession);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        assertFalse(interceptor.preHandle(request, response, new Object()));
+        assertThat(response.getStatus()).isEqualTo(401);
+        verifyNoInteractions(jwtTokenFilter, sessionFilter);
+    }
 }

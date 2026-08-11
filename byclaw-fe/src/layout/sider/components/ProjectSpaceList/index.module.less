@@ -1978,6 +1978,33 @@
   background: #eaf8f0;
 }
 
+// 研发任务按四角色分色，取值见后端 DevloopTaskType；卡片右侧已有状态标签，类型只靠图标表达。
+.detailTaskIconArchitect {
+  color: #7c4cb0;
+  background: #f3ecff;
+}
+
+.detailTaskIconRequirement {
+  color: #2563b8;
+  background: #e8f1ff;
+}
+
+.detailTaskIconCoder {
+  color: #0f766e;
+  background: #e6f7f4;
+}
+
+.detailTaskIconTester {
+  color: #a8556a;
+  background: #fbeef2;
+}
+
+// 普通会话不属于四角色任务，用中性灰弱化，避免跟真正的任务抢注意力。
+.detailTaskIconChat {
+  color: #64748b;
+  background: #f1f5f9;
+}
+
 .detailTaskCardHeader {
   min-width: 0;
   width: 100%;
@@ -2088,6 +2115,11 @@
 .detailTaskStatusDone {
   color: #16835b;
   background: #e9f8f0;
+}
+
+.detailTaskStatusMixed {
+  color: #ad6800;
+  background: #fff7e6;
 }
 
 .detailTaskDescription {
@@ -3494,6 +3526,21 @@
   }
 }
 
+// 运营任务沿用研发任务的员工概览卡，仅以状态标签替代研发进度条。
+.operationTaskHero {
+  .taskHeroAgent {
+    margin-bottom: 0;
+  }
+
+  .operationTaskStatusTag {
+    flex-shrink: 0;
+    margin-inline-start: auto;
+    margin-inline-end: 0;
+    font-size: 12px;
+    line-height: 20px;
+  }
+}
+
 .taskHeroAvatar {
   flex-shrink: 0;
   width: 40px;
@@ -3787,4 +3834,12 @@
 .requirementAddMenuDesc {
   font-size: 12px;
   color: #8c8c8c;
+}
+
+// 分支数量较多时限制下拉高度，避免菜单超出资源面板可视区域。
+.repoBranchDropdown {
+  :global(.@{antPrefix}-dropdown-menu) {
+    max-height: 320px;
+    overflow-y: auto;
+  }
 }

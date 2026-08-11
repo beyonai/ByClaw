@@ -3,6 +3,9 @@ package com.iwhalecloud.byai.manager.domain.connector.provider.lark;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -34,6 +37,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
 
 /** Lark authorization orchestration backed by OpenSandbox remote processes. */
 @Component
@@ -78,17 +82,17 @@ public class LarkSandboxAuthorizationRuntime {
         log.info("Starting Lark sandbox authorization: userCode={}, executor=sandbox", userCode);
         try {
             UserSandboxContext sandbox = sandboxResolver.resolve(userCode, properties.getSandboxServiceKey());
-            SandboxCommandResult config = executor.run(sandbox.sandboxId(), policy.build(
+            SandboxCommandResult config = executor.run(sandbox.sandboxId(), policy.build(context.commandCatalog(),
                 LarkSandboxCommandPolicy.Action.SHOW_CONFIG, null, COMMAND_TIMEOUT, properties.getMaxOutputBytes()));
             log.debug("Checked Lark sandbox configuration: userCode={}, sandboxId={}, exitCode={}",
                 userCode, sandbox.sandboxId(), config.exitCode());
             if (config.exitCode() == 0) {
-                return startUserAuthorization(sandbox, null);
+                return startUserAuthorization(sandbox, null, context.commandCatalog());
             }
             if (!isNotConfigured(config)) {
                 return failed("APP_CONFIG_CHECK_FAILED", "Unable to check Lark application configuration");
             }
-            SandboxProcessHandle process = executor.start(sandbox.sandboxId(), policy.build(
+            SandboxProcessHandle process = executor.start(sandbox.sandboxId(), policy.build(context.commandCatalog(),
                 LarkSandboxCommandPolicy.Action.INITIALIZE_APP, null, INIT_TIMEOUT, properties.getMaxOutputBytes()));
             log.info("Started Lark app initialization: userCode={}, sandboxId={}, processId={}",
                 userCode, sandbox.sandboxId(), process.processId());
@@ -112,16 +116,26 @@ public class LarkSandboxAuthorizationRuntime {
         }
     }
 
-    public AuthorizationStatusResult verify(String userId) {
+    public AuthorizationStatusResult verify(String userId, ManifestCommandCatalog commandCatalog) {
         String userCode = resolveUserCode(userId);
         log.debug("Verifying Lark authorization in user sandbox: userCode={}", userCode);
         try {
             UserSandboxContext sandbox = sandboxResolver.resolve(userCode,
                 properties.getSandboxServiceKey());
-            return verified(sandbox.sandboxId());
+            return verified(sandbox.sandboxId(), commandCatalog);
         } catch (RuntimeException e) {
             log.warn("Lark sandbox verification unavailable: userCode={}, reason={}", userCode, e.getMessage());
             return failedStatus("LARK_SANDBOX_UNAVAILABLE", "User sandbox is unavailable");
+        }
+    }
+
+    public void revoke(String userId, ManifestCommandCatalog commandCatalog) {
+        String userCode = resolveUserCode(userId);
+        UserSandboxContext sandbox = sandboxResolver.resolve(userCode, properties.getSandboxServiceKey());
+        SandboxCommandResult result = executor.run(sandbox.sandboxId(), policy.build(commandCatalog,
+            LarkSandboxCommandPolicy.Action.LOGOUT, null, COMMAND_TIMEOUT, properties.getMaxOutputBytes()));
+        if (result == null || result.exitCode() != 0 || result.truncated() || result.timedOut()) {
+            throw new IllegalStateException("Unable to revoke Lark credential");
         }
     }
 
@@ -135,14 +149,14 @@ public class LarkSandboxAuthorizationRuntime {
             if (APP_PHASE.equals(text(state, "phase"))) {
                 return queryInitialization(session, state, sandboxId);
             }
-            AuthorizationStatusResult verified = verified(sandboxId);
+            AuthorizationStatusResult verified = verified(sandboxId, session.commandCatalog());
             if (verified.status() == AuthorizationStatus.CONNECTED) {
                 return verified;
             }
             JsonNode process = state.get("process");
             if (process == null || !process.isObject()) {
                 String deviceCode = text(state, "deviceCode");
-                SandboxProcessHandle started = executor.start(sandboxId, policy.build(
+                SandboxProcessHandle started = executor.start(sandboxId, policy.build(session.commandCatalog(),
                     LarkSandboxCommandPolicy.Action.COMPLETE_USER_AUTHORIZATION,
                     deviceCode, session.expiresAt() == null ? COMMAND_TIMEOUT : remaining(session.expiresAt()),
                     properties.getMaxOutputBytes()));
@@ -159,7 +173,7 @@ public class LarkSandboxAuthorizationRuntime {
             if (status.state() == SandboxProcessSnapshot.State.NOT_FOUND) {
                 return failedStatus("LARK_SANDBOX_PROCESS_LOST", "Lark authorization process was lost");
             }
-            verified = verified(sandboxId);
+            verified = verified(sandboxId, session.commandCatalog());
             return verified.status() == AuthorizationStatus.CONNECTED
                 ? verified : failedStatus("PROVIDER_AUTH_FAILED", "Unable to complete Lark authorization");
         } catch (RuntimeException | JsonProcessingException e) {
@@ -207,26 +221,29 @@ public class LarkSandboxAuthorizationRuntime {
         if (status.state() != SandboxProcessSnapshot.State.EXITED) {
             return failedStatus("APP_INIT_FAILED", "Unable to initialize Lark application");
         }
-        SandboxCommandResult config = executor.run(sandboxId, policy.build(
+        SandboxCommandResult config = executor.run(sandboxId, policy.build(session.commandCatalog(),
             LarkSandboxCommandPolicy.Action.SHOW_CONFIG, null, COMMAND_TIMEOUT, properties.getMaxOutputBytes()));
         if (config.exitCode() != 0) {
             return progress(session, APP_PHASE, updated);
         }
         UserSandboxContext sandbox = new UserSandboxContext(sandboxId, text(updated, "userCode"),
             text(updated, "sandboxGeneration"), null);
-        AuthorizationStartResult login = startUserAuthorization(sandbox, updated);
+        AuthorizationStartResult login = startUserAuthorization(sandbox, updated, session.commandCatalog());
         return new AuthorizationStatusResult(AuthorizationStatus.PENDING, null, null, null, null, null, null,
             new AuthorizationProgress(USER_PHASE, login.authorizationUrl(), login.providerState(), login.expiresAt()));
     }
 
-    private AuthorizationStartResult startUserAuthorization(UserSandboxContext sandbox, ObjectNode existingState) {
-        SandboxCommandResult login = executor.run(sandbox.sandboxId(), policy.build(
+    private AuthorizationStartResult startUserAuthorization(
+            UserSandboxContext sandbox,
+            ObjectNode existingState,
+            ManifestCommandCatalog commandCatalog) {
+        SandboxCommandResult login = executor.run(sandbox.sandboxId(), policy.build(commandCatalog,
             LarkSandboxCommandPolicy.Action.START_USER_AUTHORIZATION, null, COMMAND_TIMEOUT,
             properties.getMaxOutputBytes()));
         if (isNotConfigured(login)) {
             log.info("Binding Lark CLI to OpenClaw context: sandboxId={}, identity=user-default",
                 sandbox.sandboxId());
-            SandboxCommandResult bind = executor.run(sandbox.sandboxId(), policy.build(
+            SandboxCommandResult bind = executor.run(sandbox.sandboxId(), policy.build(commandCatalog,
                 LarkSandboxCommandPolicy.Action.BIND_OPENCLAW_CONTEXT, null, COMMAND_TIMEOUT,
                 properties.getMaxOutputBytes()));
             if (bind.exitCode() != 0 || isNotConfigured(bind)) {
@@ -235,7 +252,7 @@ public class LarkSandboxAuthorizationRuntime {
                 return failed("PROVIDER_BIND_FAILED", "Unable to bind Lark CLI to OpenClaw context");
             }
             log.info("Bound Lark CLI to OpenClaw context: sandboxId={}", sandbox.sandboxId());
-            login = executor.run(sandbox.sandboxId(), policy.build(
+            login = executor.run(sandbox.sandboxId(), policy.build(commandCatalog,
                 LarkSandboxCommandPolicy.Action.START_USER_AUTHORIZATION, null, COMMAND_TIMEOUT,
                 properties.getMaxOutputBytes()));
         }
@@ -262,8 +279,8 @@ public class LarkSandboxAuthorizationRuntime {
         }
     }
 
-    private AuthorizationStatusResult verified(String sandboxId) {
-        SandboxCommandResult result = executor.run(sandboxId, policy.build(
+    private AuthorizationStatusResult verified(String sandboxId, ManifestCommandCatalog commandCatalog) {
+        SandboxCommandResult result = executor.run(sandboxId, policy.build(commandCatalog,
             LarkSandboxCommandPolicy.Action.VERIFY_AUTHORIZATION, null, COMMAND_TIMEOUT,
             properties.getMaxOutputBytes()));
         if (result.exitCode() != 0 || result.truncated()) {
@@ -278,10 +295,11 @@ public class LarkSandboxAuthorizationRuntime {
                 return failedStatus("PROVIDER_AUTH_FAILED", "Lark authorization is not active");
             }
             JsonNode identity = data.path("identities").path("user");
+            Date expiresAt = dateValue(identity, data);
             return new AuthorizationStatusResult(AuthorizationStatus.CONNECTED,
                 firstText(identity, "openId", "open_id", "userId", "user_id"),
                 firstText(identity, "name", "displayName", "display_name", "userName", "user_name"),
-                null, null, null, null);
+                expiresAt, null, null, null);
         } catch (JsonProcessingException e) {
             return failedStatus("PROVIDER_PROTOCOL_ERROR", "Lark authorization returned an invalid response");
         }
@@ -405,6 +423,63 @@ public class LarkSandboxAuthorizationRuntime {
             }
         }
         return null;
+    }
+
+    private Date dateValue(JsonNode primary, JsonNode fallback) {
+        JsonNode value = firstValue(primary, "expiresAt", "expires_at", "credentialExpiresAt",
+            "credential_expires_at");
+        if (value == null) {
+            value = firstValue(fallback, "expiresAt", "expires_at", "credentialExpiresAt",
+                "credential_expires_at");
+        }
+        if (value == null) {
+            return null;
+        }
+        if (value.isIntegralNumber() && value.canConvertToLong()) {
+            return epochDate(value.longValue());
+        }
+        if (!value.isTextual() || value.textValue().isBlank()) {
+            return null;
+        }
+        String text = value.textValue().trim();
+        try {
+            return Date.from(Instant.parse(text));
+        } catch (DateTimeParseException e) {
+            try {
+                return Date.from(OffsetDateTime.parse(text).toInstant());
+            } catch (DateTimeParseException ignored) {
+                try {
+                    return epochDate(Long.parseLong(text));
+                } catch (NumberFormatException invalidNumber) {
+                    return null;
+                }
+            }
+        }
+    }
+
+    private JsonNode firstValue(JsonNode node, String... names) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        for (String name : names) {
+            JsonNode value = node.get(name);
+            if (value != null && !value.isNull()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private Date epochDate(long value) {
+        if (value <= 0) {
+            return null;
+        }
+        try {
+            long millis = value < 1_000_000_000_000L ? Math.multiplyExact(value, 1_000L) : value;
+            return new Date(millis);
+        } catch (ArithmeticException e) {
+            return null;
+        }
     }
 
     private String text(JsonNode node, String field) {

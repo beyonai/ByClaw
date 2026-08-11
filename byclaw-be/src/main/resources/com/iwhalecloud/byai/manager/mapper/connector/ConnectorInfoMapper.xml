@@ -9,6 +9,7 @@
         <result column="connector_type" property="connectorType"/>
         <result column="description" property="description"/>
         <result column="enable_flag" property="enableFlag"/>
+        <result column="credential_expires_at" property="credentialExpiresAt"/>
     </resultMap>
 
     <select id="selectConnectorListByQo" resultMap="ConnectorListDtoResultMap">
@@ -17,8 +18,10 @@
                a.connector_name,
                a.connector_type,
                a.description,
+               b.expire_time AS credential_expires_at,
                CASE
                    WHEN b.connector_id IS NULL THEN NULL
+                   WHEN b.expire_time &lt; CURRENT_TIMESTAMP THEN NULL
                    WHEN b.enable_flag = 'Y' THEN 'Y'
                    ELSE 'N'
                END AS enable_flag

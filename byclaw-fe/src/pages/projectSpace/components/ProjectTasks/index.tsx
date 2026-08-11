@@ -9,16 +9,27 @@ import {
   Select,
   Spin,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd';
-import { AppstoreOutlined, MessageOutlined, MoreOutlined, ReloadOutlined } from '@ant-design/icons';
+import {
+  ApartmentOutlined,
+  AppstoreOutlined,
+  BugOutlined,
+  CodeOutlined,
+  FileTextOutlined,
+  MessageOutlined,
+  MoreOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
 import {
   deleteOperationTask,
   executeOperationTask,
+  getOperationTask,
   listOperationTasks,
   listProjectMembers,
   listTasks,
@@ -49,11 +60,12 @@ const PAGE_SIZE = 30;
 
 const normalizeTaskStatus = (task: DevloopTaskItem) => {
   const label = `${task.statusLabel || ''}`.trim().toLowerCase();
+  if (label.includes('混合') || label.includes('部分失败')) return 'mixed';
   if (label.includes('进行中') || label.includes('运行')) return 'in_progress';
   if (label.includes('已完成') || label.includes('完成')) return 'completed';
   if (label.includes('失败')) return 'failed';
   if (label.includes('暂停')) return 'paused';
-  if (label.includes('待开始') || label.includes('待启动')) return 'pending';
+  if (label.includes('待开始') || label.includes('待启动') || label.includes('待处理')) return 'pending';
   // 运营任务列表同时存在 status、operationState、taskStatus、currentStatus 多套历史字段，
   // 统一回退读取，确保待开始任务能够显示启动按钮。
   return `${
@@ -85,17 +97,32 @@ const getTaskStatusLabel = (task: DevloopTaskItem, intl: ReturnType<typeof useIn
     done: 'projectSpace.detail.task.status.completed',
     completed: 'projectSpace.detail.task.status.completed',
     failed: 'projectSpace.detail.task.status.failed',
+    mixed: 'projectSpace.detail.task.status.mixed',
   };
   const messageId = statusMessageId[status];
   return messageId ? intl.formatMessage({ id: messageId }) : task.statusLabel || '';
 };
+
+// 任务类型由后端按创建链路反查返回(架构/需求/研发/测试，四角色都不命中为普通会话)。
+// 只有研发项目的任务接口回这个字段，运营任务走 operationType，拿不到就不显示图标。
+// 类型用标题前的图标表达而非标签：卡片头部右侧已有状态标签和操作入口，再塞标签会挤掉任务名。
+const TASK_TYPE_ICONS: Record<string, { icon: React.ReactNode; className: string }> = {
+  architect: { icon: <ApartmentOutlined />, className: 'taskTypeIconArchitect' },
+  requirement: { icon: <FileTextOutlined />, className: 'taskTypeIconRequirement' },
+  coder: { icon: <CodeOutlined />, className: 'taskTypeIconCoder' },
+  tester: { icon: <BugOutlined />, className: 'taskTypeIconTester' },
+  chat: { icon: <MessageOutlined />, className: 'taskTypeIconChat' },
+};
+
+// 未知取值不猜：宁可不显示图标，也不要把后端新增的类型显示成错的那一类。
+const getTaskTypeMeta = (task: DevloopTaskItem) => TASK_TYPE_ICONS[`${task.taskType || ''}`.trim().toLowerCase()];
 
 const getTaskStatusColor = (task: DevloopTaskItem) => {
   const status = normalizeTaskStatus(task);
   if (['done', 'completed', '完成', '已完成'].includes(status)) return 'success';
   if (['doing', 'running', 'in_progress', '进行中'].includes(status)) return 'processing';
   if (['failed', '失败'].includes(status)) return 'error';
-  if (['paused', '暂停'].includes(status)) return 'warning';
+  if (['paused', 'mixed', '暂停'].includes(status)) return 'warning';
   // 待开始使用橙黄色，进行中使用蓝色，避免两个状态都呈现为蓝色难以区分。
   return 'warning';
 };
@@ -103,18 +130,9 @@ const getTaskStatusColor = (task: DevloopTaskItem) => {
 const getTaskStatusOrder = (task: DevloopTaskItem) => {
   const status = normalizeTaskStatus(task);
   if (
-    [
-      'done',
-      'completed',
-      'finished',
-      'success',
-      'failed',
-      'error',
-      'cancelled',
-      '完成',
-      '已完成',
-      '失败',
-    ].includes(status)
+    ['done', 'completed', 'finished', 'success', 'failed', 'error', 'cancelled', '完成', '已完成', '失败'].includes(
+      status
+    )
   ) {
     return 2;
   }
@@ -125,6 +143,7 @@ const getTaskStatusOrder = (task: DevloopTaskItem) => {
       'in_progress',
       'paused',
       'waiting_confirmation',
+      'mixed',
       'processing',
       'started',
       '进行中',
@@ -171,6 +190,7 @@ const ProjectTasks: React.FC<Props> = ({
   const [loadingMore, setLoadingMore] = useState(false);
   const [taskBoardOpen, setTaskBoardOpen] = useState(false);
   const requestingRef = useRef(false);
+  const taskDetailRequestIdRef = useRef(0);
   const initialLoadKeyRef = useRef<string | null>(null);
   const [templateTask, setTemplateTask] = useState<DevloopTaskItem | null>(null);
   const [onlyMine, setOnlyMine] = useState(project.projectType === 'develop');
@@ -187,7 +207,7 @@ const ProjectTasks: React.FC<Props> = ({
     task.canDelete === true ||
     (currentUserId !== undefined && task.createBy !== undefined && `${currentUserId}` === `${task.createBy}`) ||
     // 兼容历史任务未记录创建人的情况，和后端的项目创建人回退规则保持一致。
-    (task.createBy == null &&
+    ((task.createBy === null || task.createBy === undefined) &&
       currentUserId !== undefined &&
       project.createBy !== undefined &&
       `${currentUserId}` === `${project.createBy}`);
@@ -201,14 +221,9 @@ const ProjectTasks: React.FC<Props> = ({
     .filter((resource) => resource.resourceType === 'ontology')
     .map((resource) => {
       const resourceDetail = resource as typeof resource & Record<string, any>;
-      const code =
-        resourceDetail.objectCode ||
-        resourceDetail.resourceCode ||
-        resourceDetail.code ||
-        '';
+      const code = resourceDetail.objectCode || resourceDetail.resourceCode || resourceDetail.code || '';
       const name = resource.resourceName || resourceDetail.objectName || resourceDetail.name || code;
-      const description =
-        resourceDetail.objectDesc || resourceDetail.resourceDesc || resourceDetail.description || '';
+      const description = resourceDetail.objectDesc || resourceDetail.resourceDesc || resourceDetail.description || '';
       return {
         value: resource.resourceId,
         label: name,
@@ -332,8 +347,16 @@ const ProjectTasks: React.FC<Props> = ({
     return (
       project.projectType === 'operation' &&
       !task.sessionId &&
-      ['pending', 'todo', 'not_started', 'waiting', '待开始', '待启动'].includes(status)
+      ['pending', 'todo', 'not_started', 'waiting', '待开始', '待启动', '待处理'].includes(status)
     );
+  };
+
+  // 待处理首次执行，部分失败可再次执行；后者可能已有 sessionId。
+  const isOperationExecutableTask = (task: DevloopTaskItem) => {
+    const status = normalizeTaskStatus(task);
+    if (project.projectType !== 'operation') return false;
+    if (['mixed', '部分失败'].includes(status)) return true;
+    return isOperationPendingTask(task);
   };
 
   const openTaskSession = (task: DevloopTaskItem) => {
@@ -347,11 +370,31 @@ const ProjectTasks: React.FC<Props> = ({
       taskId: `${task.taskId || task.sessionId}`,
       updateTime: task.updateTime,
       createTime: task.createTime,
+      // 透传会话绑定的员工，handleOpenSession 据此 setAgentId，输入框才能默认 @ 到该员工。
+      objectType: task.objectType,
+      objectId: task.objectId,
+      // 名称/头像与 objectId 同源返回，一并带上:研发任务绑的是项目维度执行员工，不在 redux
+      // 员工列表里，handleOpenSession 要靠这两个字段写 agentCache，否则 @ 会兜底成「AI 助手」。
+      agentName: task.agentName,
+      avatar: task.avatar,
     });
   };
 
   const openTaskDetail = (task: DevloopTaskItem) => {
     setDetailTask(task);
+    if (project.projectType !== 'operation') return;
+
+    const taskId = Number(task.taskId || task.sessionId);
+    if (!Number.isFinite(taskId)) return;
+    const requestId = ++taskDetailRequestIdRef.current;
+    // 运营任务列表只返回摘要，打开抽屉后补查完整配置，并防止快速切换时旧请求覆盖新任务。
+    void getOperationTask(taskId)
+      .then((response: any) => {
+        if (requestId !== taskDetailRequestIdRef.current) return;
+        const detail = response?.data ?? response;
+        if (detail) setDetailTask({ ...task, ...detail });
+      })
+      .catch(() => undefined);
   };
 
   const openTaskEdit = (task: DevloopTaskItem) => {
@@ -359,9 +402,7 @@ const ProjectTasks: React.FC<Props> = ({
     setEditingTitle(task.title || '');
     setEditingDescription(task.description || task.taskDescription || '');
     setEditingAssignee(task.assigneeId);
-    setEditingDueTime(
-      task.dueTime && dayjs(task.dueTime).isValid() ? dayjs(task.dueTime) : null
-    );
+    setEditingDueTime(task.dueTime && dayjs(task.dueTime).isValid() ? dayjs(task.dueTime) : null);
     if (!project.projectId) return;
     void listProjectMembers(Number(project.projectId))
       .then((response) => {
@@ -443,6 +484,18 @@ const ProjectTasks: React.FC<Props> = ({
                 }}
               >
                 <div className={styles.dataCardHeader}>
+                  {getTaskTypeMeta(task) && (
+                    <Tooltip
+                      title={intl.formatMessage({
+                        id: `projectSpace.detail.task.type.${`${task.taskType}`.trim().toLowerCase()}`,
+                      })}
+                      placement="top"
+                    >
+                      <span className={`${styles.taskTypeIcon} ${styles[getTaskTypeMeta(task)!.className]}`}>
+                        {getTaskTypeMeta(task)!.icon}
+                      </span>
+                    </Tooltip>
+                  )}
                   <Typography.Text strong ellipsis={{ tooltip: task.title }}>
                     {task.title || intl.formatMessage({ id: 'projectSpace.tasks.unnamed' })}
                   </Typography.Text>
@@ -450,12 +503,12 @@ const ProjectTasks: React.FC<Props> = ({
                     {getTaskStatusLabel(task, intl) && (
                       <Tag
                         color={getTaskStatusColor(task)}
-                        className={isOperationPendingTask(task) ? styles.taskPendingStatusTag : undefined}
+                        className={isOperationExecutableTask(task) ? styles.taskPendingStatusTag : undefined}
                       >
                         {getTaskStatusLabel(task, intl)}
                       </Tag>
                     )}
-                    {isOperationPendingTask(task) && (
+                    {isOperationExecutableTask(task) && (
                       <Button
                         type="text"
                         size="small"
@@ -586,6 +639,9 @@ const ProjectTasks: React.FC<Props> = ({
             // 跳转聊天页时同步所选数字员工，输入框可立即恢复默认 @，无需等待消息元数据返回。
             objectId: selectedAgentId,
             objectType: 'DigEmployee',
+            // 模板选的是项目绑定员工,同样不在 redux 员工列表里,名字要从项目资源里反查带上,
+            // 否则 handleOpenSession 写不了 agentCache,@ 会兜底成「AI 助手」。
+            agentName: projectAgentOptions.find((agent) => `${agent.value}` === `${selectedAgentId}`)?.label,
             updateTime: templateTask.updateTime,
             createTime: templateTask.createTime,
           });
@@ -635,11 +691,7 @@ const ProjectTasks: React.FC<Props> = ({
           </div>
           <div>
             <Typography.Text>预期时间</Typography.Text>
-            <DatePicker
-              style={{ width: '100%', marginTop: 8 }}
-              value={editingDueTime}
-              onChange={setEditingDueTime}
-            />
+            <DatePicker style={{ width: '100%', marginTop: 8 }} value={editingDueTime} onChange={setEditingDueTime} />
           </div>
         </div>
       </Modal>
@@ -656,6 +708,7 @@ const ProjectTasks: React.FC<Props> = ({
       />
       <TaskDetailDrawer
         task={detailTask}
+        operationProject={project.projectType === 'operation'}
         onClose={() => setDetailTask(null)}
         canEnterSession={detailTask ? isCurrentUserTaskAssignee(detailTask, userInfo) : false}
         onEnterSession={(task) => {

@@ -87,6 +87,9 @@ type IProps = {
   chatUrl?: string;
   sessionId?: string;
   agentType?: IAgentType;
+
+  /** 编辑页调试时锁定的数字员工资源 ID。 */
+  fixedAgentId?: string;
   addSession: (newSession: ISession) => void;
 
   onBeforeSend?: () => void;
@@ -183,7 +186,7 @@ const getAgentLaneIdentity = (resource: RichInputResourceList[number]) => {
  * @returns {object} 聊天相关方法和状态
  */
 function useChat(props: IProps) {
-  const { sessionId, agentType, addSession, onBeforeSend = noop, chatUrl } = props;
+  const { sessionId, agentType, fixedAgentId, addSession, onBeforeSend = noop, chatUrl } = props;
 
   const messageListRef = useRef<IMessage[]>([]);
   const pendingProjectIdByClientRequestRef = useRef(new Map<string, string>());
@@ -752,7 +755,7 @@ function useChat(props: IProps) {
     await onBeforeSend?.();
 
     let _queryQuestion = queryQuestion;
-    let _agentId = (get(restPayload, 'agentId') || agentId) as string | undefined;
+    let _agentId = (fixedAgentId || get(restPayload, 'agentId') || agentId) as string | undefined;
     let _agentType = (get(restPayload, 'agentType') || agentType) as IAgentType | undefined;
 
     if (inheritQryMsgId) {
@@ -790,7 +793,7 @@ function useChat(props: IProps) {
     const digitalEmployeeResources = getDigitalEmployeeResources(resourceList);
     const singleInlineAgent =
       digitalEmployeeResources.length === 1 ? getAgentLaneIdentity(digitalEmployeeResources[0]) : null;
-    if (singleInlineAgent?.agentKey) {
+    if (!fixedAgentId && singleInlineAgent?.agentKey) {
       _agentId = singleInlineAgent.agentKey;
     }
 

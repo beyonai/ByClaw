@@ -268,6 +268,8 @@ function CreateTemplate(props: IProps) {
               cannotAt={false}
               cannotSend
               cannotSTT
+              // 模板编辑器里的输入框不是会话输入框，不展示按项目分类的任务模板入口。
+              enableTaskTemplate={false}
               sessionId=""
               queryInputRef={queryInputRef}
             />

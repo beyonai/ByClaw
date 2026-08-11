@@ -74,9 +74,20 @@
 
 .connectorAction {
   display: inline-flex;
-  flex: 0 0 64px;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
+  gap: 6px;
+}
+
+.moreActionButton {
+  color: #657187;
+
+  &:hover,
+  &:focus-visible {
+    color: #1677ff !important;
+    background: #edf4ff !important;
+  }
 }
 
 .connectorItem {
@@ -129,6 +140,19 @@
     line-height: 20px;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+}
+
+.credentialExpiration {
+  overflow: hidden;
+  color: #7a8596;
+  font-size: 13px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &.expired {
+    color: #ff4d4f;
   }
 }
 
@@ -384,7 +408,7 @@
     grid-template-columns: 1fr;
   }
 
-  .connectorContent span {
+  .connectorContent span:not(.credentialExpiration) {
     white-space: normal;
   }
 }

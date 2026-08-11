@@ -3,15 +3,18 @@ package com.iwhalecloud.byai.manager.application.service.skillgroup;
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.github.pagehelper.PageHelper;
+import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
+import com.iwhalecloud.byai.manager.domain.auth.model.UseApplyOutcome;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.model.SkillRelationSource;
+import com.iwhalecloud.byai.manager.domain.skillgroup.model.SkillGroupMemberStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -20,6 +23,7 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCreateQo;
+import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCandidatePageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupIdQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupInstallQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupMemberChangeQo;
@@ -27,6 +31,8 @@ import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupPageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupUpdateQo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberStatusSummaryVo;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.util.ArrayList;
@@ -62,6 +68,7 @@ public class SkillGroupApplicationService {
     private final DigitalEmployeeApplicationService digitalEmployeeApplicationService;
     private final SsResExtSkillService extSkillService;
     private final ByaiSystemConfigService systemConfigService;
+    private final SkillGroupMemberStatusService memberStatusService;
 
     public SkillGroupApplicationService(
             SsResourceService resourceService,
@@ -71,7 +78,8 @@ public class SkillGroupApplicationService {
             SequenceService sequenceService,
             DigitalEmployeeApplicationService digitalEmployeeApplicationService,
             SsResExtSkillService extSkillService,
-            ByaiSystemConfigService systemConfigService) {
+            ByaiSystemConfigService systemConfigService,
+            SkillGroupMemberStatusService memberStatusService) {
         this.resourceService = resourceService;
         this.relationService = relationService;
         this.skillGroupMapper = skillGroupMapper;
@@ -80,6 +88,7 @@ public class SkillGroupApplicationService {
         this.digitalEmployeeApplicationService = digitalEmployeeApplicationService;
         this.extSkillService = extSkillService;
         this.systemConfigService = systemConfigService;
+        this.memberStatusService = memberStatusService;
     }
 
     public SkillGroupVo create(SkillGroupCreateQo qo) {
@@ -121,18 +130,52 @@ public class SkillGroupApplicationService {
         return PageHelperUtil.toPageInfo(new com.github.pagehelper.PageInfo<>(rows));
     }
 
+    public PageInfo<SkillGroupMemberVo> pageMemberCandidates(SkillGroupCandidatePageQo qo) {
+        Long tenantId = requireCurrentTenant();
+        Long creatorId = CurrentUserHolder.getCurrentUserId();
+        if (qo.getGroupId() != null) {
+            creatorId = loadManagedGroup(qo.getGroupId(), tenantId).getCreateBy();
+        }
+        PageHelper.startPage(qo.getPageNum(), qo.getPageSize());
+        List<SkillGroupMemberVo> rows = skillGroupMapper.selectMemberCandidates(qo, tenantId, creatorId);
+        return PageHelperUtil.toPageInfo(new com.github.pagehelper.PageInfo<>(rows));
+    }
+
     public SkillGroupVo detail(SkillGroupIdQo qo) {
-        return detail(qo.getGroupId());
+        return detail(qo.getGroupId(), qo.getDigitalEmployeeId());
     }
 
     public SkillGroupVo detail(Long groupId) {
+        return detail(groupId, null);
+    }
+
+    private SkillGroupVo detail(Long groupId, Long digitalEmployeeId) {
+        Long tenantId = requireCurrentTenant();
         SkillGroupVo group = skillGroupMapper.selectDetail(
-                groupId, requireCurrentTenant(), CurrentUserHolder.getCurrentUserId());
+                groupId, tenantId, CurrentUserHolder.getCurrentUserId());
         if (group == null) {
             throw new BaseException("技能组不存在或当前用户不可访问");
         }
-        group.setMembers(skillGroupMapper.selectActiveMembers(groupId));
+        if (digitalEmployeeId != null) {
+            SsResource digitalEmployee = resourceService.findById(digitalEmployeeId);
+            validateManagedDigitalEmployee(digitalEmployee, tenantId, null);
+            validateActiveDigitalEmployee(digitalEmployee);
+        }
+        List<SkillGroupMemberVo> members = skillGroupMapper.selectActiveMembers(groupId);
+        group.setMembers(memberStatusService.evaluate(members, digitalEmployeeId));
         return group;
+    }
+
+    public SkillGroupMemberStatusSummaryVo preflightInstall(SkillGroupInstallQo qo) {
+        validateInstallRequest(qo);
+        Long tenantId = requireCurrentTenant();
+        SsResource group = loadAccessibleGroup(qo.getGroupId(), tenantId);
+        validateActiveGroup(group);
+        SsResource digitalEmployee = resourceService.findById(qo.getDigitalEmployeeId());
+        validateManagedDigitalEmployee(digitalEmployee, tenantId, group);
+        validateActiveDigitalEmployee(digitalEmployee);
+        List<SkillGroupMemberVo> members = loadAndValidateActiveMembers(group, false);
+        return SkillGroupMemberStatusSummaryVo.from(memberStatusService.evaluate(members, qo.getDigitalEmployeeId()));
     }
 
     /**
@@ -147,27 +190,91 @@ public class SkillGroupApplicationService {
         validateInstallRequest(qo);
         Long tenantId = requireCurrentTenant();
         SsResource group = loadAccessibleGroupForSnapshot(qo.getGroupId(), tenantId);
+        validateActiveGroup(group);
         SsResource digitalEmployee = loadManagedDigitalEmployeeForSnapshot(
                 qo.getDigitalEmployeeId(), tenantId, group);
+        validateActiveDigitalEmployee(digitalEmployee);
 
-        List<SsResourceRelDetail> memberRelations =
-                skillGroupMapper.selectMemberRelations(group.getResourceId(), null);
-        List<Long> skillIds = memberRelations == null ? List.of() : memberRelations.stream()
-                .map(SsResourceRelDetail::getRelResourceId)
-                .filter(Objects::nonNull)
-                .distinct()
+        List<SkillGroupMemberVo> members = loadAndValidateActiveMembers(group, true);
+        SkillGroupMemberStatusSummaryVo summary = SkillGroupMemberStatusSummaryVo.from(
+                memberStatusService.evaluate(members, digitalEmployee.getResourceId()));
+        SkillGroupInstallResultVo result = new SkillGroupInstallResultVo();
+        result.setSummary(summary);
+        result.setTotalSkillIds(memberIds(summary.getMembers()));
+        result.setExistingSkillIds(idsWithStatus(summary.getMembers(), SkillGroupMemberStatus.INSTALLED));
+        result.setPendingSkillIds(idsWithStatus(summary.getMembers(), SkillGroupMemberStatus.APPLY_PENDING));
+        result.setUnavailableSkillIds(idsWithStatus(summary.getMembers(), SkillGroupMemberStatus.APPLY_UNAVAILABLE));
+        if (summary.hasPermissionBarrier()) {
+            result.setConfirmationRequired(true);
+            return result;
+        }
+        result.setConfirmationRequired(false);
+        List<Long> installableIds = idsWithStatus(summary.getMembers(), SkillGroupMemberStatus.INSTALLABLE);
+        if (!installableIds.isEmpty()) {
+            SkillGroupInstallResultVo delegated = digitalEmployeeApplicationService.installSkillGroupSnapshot(
+                    digitalEmployee, group.getResourceId(), installableIds);
+            if (delegated == null) {
+                throw new BaseException("技能组安装结果异常");
+            }
+            copySnapshotResult(delegated, result);
+            List<SkillGroupMemberVo> finalMembers = skillGroupMapper.selectActiveMembers(group.getResourceId());
+            result.setSummary(SkillGroupMemberStatusSummaryVo.from(
+                    memberStatusService.evaluate(finalMembers, digitalEmployee.getResourceId())));
+        }
+        return result;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public SkillGroupInstallResultVo executeInstall(SkillGroupInstallQo qo) {
+        validateInstallRequest(qo);
+        Long tenantId = requireCurrentTenant();
+        SsResource group = loadAccessibleGroupForSnapshot(qo.getGroupId(), tenantId);
+        validateActiveGroup(group);
+        SsResource digitalEmployee = loadManagedDigitalEmployeeForSnapshot(
+                qo.getDigitalEmployeeId(), tenantId, group);
+        validateActiveDigitalEmployee(digitalEmployee);
+        List<SkillGroupMemberVo> members = loadAndValidateActiveMembers(group, true);
+        List<SkillGroupMemberVo> evaluated = memberStatusService.evaluate(members, digitalEmployee.getResourceId());
+
+        SkillGroupInstallResultVo result = new SkillGroupInstallResultVo();
+        result.setConfirmationRequired(false);
+        result.setTotalSkillIds(memberIds(evaluated));
+        result.setExistingSkillIds(idsWithStatus(evaluated, SkillGroupMemberStatus.INSTALLED));
+        List<Long> installableIds = idsWithStatus(evaluated, SkillGroupMemberStatus.INSTALLABLE);
+        if (!installableIds.isEmpty()) {
+            SkillGroupInstallResultVo delegated = digitalEmployeeApplicationService.installSkillGroupSnapshot(
+                    digitalEmployee, group.getResourceId(), installableIds);
+            if (delegated == null) {
+                throw new BaseException("技能组安装结果异常");
+            }
+            copySnapshotResult(delegated, result);
+        }
+
+        LinkedHashSet<Long> appliedIds = new LinkedHashSet<>();
+        LinkedHashSet<Long> pendingIds = new LinkedHashSet<>(
+                idsWithStatus(evaluated, SkillGroupMemberStatus.APPLY_PENDING));
+        LinkedHashSet<Long> unavailableIds = new LinkedHashSet<>(
+                idsWithStatus(evaluated, SkillGroupMemberStatus.APPLY_UNAVAILABLE));
+        List<Long> applyRequiredIds = idsWithStatus(evaluated, SkillGroupMemberStatus.APPLY_REQUIRED).stream()
+                .sorted()
                 .toList();
-        if (skillIds.isEmpty()) {
-            throw new BaseException("技能组没有可安装的活跃成员");
+        for (Long skillId : applyRequiredIds) {
+            UseApplyOutcome outcome = authApplicationService.applyUseIfNeeded(skillId);
+            switch (outcome) {
+                case CREATED -> appliedIds.add(skillId);
+                case PENDING -> pendingIds.add(skillId);
+                case UNAVAILABLE -> unavailableIds.add(skillId);
+            }
         }
-        validateMemberSkills(group, skillIds);
-
-        SkillGroupInstallResultVo result = digitalEmployeeApplicationService.installSkillGroupSnapshot(
-                digitalEmployee, group.getResourceId(), skillIds);
-        if (result == null) {
-            throw new BaseException("技能组安装结果异常");
-        }
-        result.setTotalSkillIds(new ArrayList<>(skillIds));
+        result.setAppliedSkillIds(appliedIds.stream().sorted()
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new)));
+        result.setPendingSkillIds(pendingIds.stream().sorted()
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new)));
+        result.setUnavailableSkillIds(unavailableIds.stream().sorted()
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new)));
+        List<SkillGroupMemberVo> finalMembers = skillGroupMapper.selectActiveMembers(group.getResourceId());
+        result.setSummary(SkillGroupMemberStatusSummaryVo.from(
+                memberStatusService.evaluate(finalMembers, digitalEmployee.getResourceId())));
         return result;
     }
 
@@ -303,6 +410,17 @@ public class SkillGroupApplicationService {
 
     private SsResource loadAccessibleGroupForSnapshot(Long groupId, Long tenantId) {
         SsResource group = skillGroupMapper.selectGroupForUpdate(groupId, tenantId);
+        validateAccessibleGroup(group, tenantId);
+        return group;
+    }
+
+    private SsResource loadAccessibleGroup(Long groupId, Long tenantId) {
+        SsResource group = resourceService.findById(groupId);
+        validateAccessibleGroup(group, tenantId);
+        return group;
+    }
+
+    private void validateAccessibleGroup(SsResource group, Long tenantId) {
         if (group == null) {
             throw new BaseException("技能组不存在");
         }
@@ -312,17 +430,30 @@ public class SkillGroupApplicationService {
         if (!Objects.equals(tenantId, group.getComAcctId())) {
             throw new BaseException("技能组不属于当前企业");
         }
+        if (!OwnerType.PERSONAL.equals(group.getOwnerType())) {
+            return;
+        }
         boolean accessible = authApplicationService.hasResourceManagePermission(group)
                 || authApplicationService.hasResourceUsePermission(group);
         if (!accessible) {
             throw new BaseException("当前用户没有技能组访问权限");
         }
-        return group;
+    }
+
+    private void validateActiveGroup(SsResource group) {
+        if (!Objects.equals(ResourceStatus.LIST.getNum(), group.getResourceStatus())) {
+            throw new BaseException("技能组未上架");
+        }
     }
 
     private SsResource loadManagedDigitalEmployeeForSnapshot(
             Long digitalEmployeeId, Long tenantId, SsResource group) {
         SsResource digitalEmployee = skillGroupMapper.selectDigitalEmployeeForUpdate(digitalEmployeeId, tenantId);
+        validateManagedDigitalEmployee(digitalEmployee, tenantId, group);
+        return digitalEmployee;
+    }
+
+    private void validateManagedDigitalEmployee(SsResource digitalEmployee, Long tenantId, SsResource group) {
         if (digitalEmployee == null) {
             throw new BaseException("数字员工不存在或不属于当前企业");
         }
@@ -330,13 +461,70 @@ public class SkillGroupApplicationService {
             throw new BaseException("安装目标不是数字员工");
         }
         if (!Objects.equals(tenantId, digitalEmployee.getComAcctId())
-                || !Objects.equals(group.getComAcctId(), digitalEmployee.getComAcctId())) {
+                || (group != null && !Objects.equals(group.getComAcctId(), digitalEmployee.getComAcctId()))) {
             throw new BaseException("数字员工与技能组不属于同一企业");
         }
         if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
             throw new BaseException("当前用户没有数字员工管理权限");
         }
-        return digitalEmployee;
+    }
+
+    private void validateActiveDigitalEmployee(SsResource digitalEmployee) {
+        if (!Objects.equals(ResourceStatus.LIST.getNum(), digitalEmployee.getResourceStatus())) {
+            throw new BaseException("数字员工未上架");
+        }
+    }
+
+    private List<SkillGroupMemberVo> loadAndValidateActiveMembers(SsResource group, boolean lockSkills) {
+        List<SkillGroupMemberVo> members = skillGroupMapper.selectActiveMembers(group.getResourceId());
+        List<Long> skillIds = memberIds(members);
+        if (skillIds.isEmpty()) {
+            throw new BaseException("技能组没有可安装的活跃成员");
+        }
+        if (lockSkills) {
+            List<Long> sortedSkillIds = skillIds.stream().sorted().toList();
+            List<SsResource> lockedSkills = skillGroupMapper.selectActiveSkillsForUpdate(
+                    sortedSkillIds, group.getComAcctId());
+            validateMemberSkills(group, sortedSkillIds, lockedSkills);
+        }
+        else {
+            validateMemberSkills(group, skillIds);
+        }
+        return members;
+    }
+
+    private List<Long> memberIds(List<SkillGroupMemberVo> members) {
+        if (members == null) {
+            return new ArrayList<>();
+        }
+        return members.stream()
+                .filter(Objects::nonNull)
+                .map(SkillGroupMemberVo::getResourceId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+    }
+
+    private List<Long> idsWithStatus(List<SkillGroupMemberVo> members, SkillGroupMemberStatus status) {
+        if (members == null) {
+            return new ArrayList<>();
+        }
+        return members.stream()
+                .filter(Objects::nonNull)
+                .filter(member -> status == member.getMemberStatus())
+                .map(SkillGroupMemberVo::getResourceId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+    }
+
+    private void copySnapshotResult(SkillGroupInstallResultVo source, SkillGroupInstallResultVo target) {
+        target.setInstalledSkillIds(new ArrayList<>(source.getInstalledSkillIds()));
+        LinkedHashSet<Long> existingIds = new LinkedHashSet<>(target.getExistingSkillIds());
+        existingIds.addAll(source.getExistingSkillIds());
+        target.setExistingSkillIds(new ArrayList<>(existingIds));
+        target.setRemovedSkillIds(new ArrayList<>(source.getRemovedSkillIds()));
+        target.setRetainedSkillIds(new ArrayList<>(source.getRetainedSkillIds()));
     }
 
     private void requireAdminVipCreatePermission() {
@@ -399,6 +587,12 @@ public class SkillGroupApplicationService {
         return group;
     }
 
+    private SsResource loadManagedGroup(Long groupId, Long tenantId) {
+        SsResource group = resourceService.findById(groupId);
+        validateManagedGroup(group, tenantId);
+        return group;
+    }
+
     private void validateManagedGroup(SsResource group, Long tenantId) {
         if (group == null) {
             throw new BaseException("技能组不存在");
@@ -424,18 +618,21 @@ public class SkillGroupApplicationService {
 
     private List<Long> normalizeRequiredIds(List<Long> ids) {
         if (ids == null || ids.isEmpty() || ids.stream().anyMatch(Objects::isNull)) {
-            throw new BaseException("成员技能列表不能为空");
+            throw new BaseException("组内技能列表不能为空");
         }
         return new ArrayList<>(new LinkedHashSet<>(ids));
     }
 
     private void validateMemberSkills(SsResource group, List<Long> skillIds) {
+        validateMemberSkills(group, skillIds, resourceService.findByIdList(skillIds));
+    }
+
+    private void validateMemberSkills(SsResource group, List<Long> skillIds, List<SsResource> resources) {
         if (skillIds.contains(group.getResourceId())) {
             throw new BaseException("技能组不能将自身添加为成员");
         }
-        List<SsResource> resources = resourceService.findByIdList(skillIds);
         Map<Long, SsResource> byId = new LinkedHashMap<>();
-        for (SsResource resource : resources) {
+        for (SsResource resource : resources == null ? List.<SsResource>of() : resources) {
             byId.put(resource.getResourceId(), resource);
         }
         Map<Long, SsResExtSkill> extById = new LinkedHashMap<>();
@@ -445,17 +642,26 @@ public class SkillGroupApplicationService {
         for (Long skillId : skillIds) {
             SsResource skill = byId.get(skillId);
             if (skill == null) {
-                throw new BaseException("成员技能不存在：" + skillId);
+                throw new BaseException("组内技能不存在：" + skillId);
             }
             if (!SKILL.equals(skill.getResourceBizType())) {
                 throw new BaseException("成员资源不是普通技能：" + skillId);
             }
+            if (!Objects.equals(group.getComAcctId(), skill.getComAcctId())) {
+                throw new BaseException("组内技能不属于当前企业：" + skillId);
+            }
             if (!Objects.equals(ResourceStatus.LIST.getNum(), skill.getResourceStatus())) {
-                throw new BaseException("成员技能未上架：" + skillId);
+                throw new BaseException("组内技能未上架：" + skillId);
             }
             SsResExtSkill extSkill = extById.get(skillId);
-            if (extSkill == null || !SsResExtSkillService.INNER_SKILL_TYPE.equalsIgnoreCase(extSkill.getSkillType())) {
-                throw new BaseException("技能组成员只能选择系统内置技能：" + skillId);
+            boolean innerSkill = extSkill != null
+                    && SsResExtSkillService.INNER_SKILL_TYPE.equalsIgnoreCase(extSkill.getSkillType());
+            boolean creatorOwned = group.getCreateBy() != null
+                    && Objects.equals(group.getCreateBy(), skill.getCreateBy());
+            boolean enterpriseSkill = "enterprise".equals(skill.getOwnerType());
+            boolean supportedCreatorOwner = enterpriseSkill || "personal".equals(skill.getOwnerType());
+            if (!(enterpriseSkill && innerSkill) && !(supportedCreatorOwner && creatorOwned)) {
+                throw new BaseException("技能组成员只能选择系统内置技能或原创建人创建的企业/个人技能：" + skillId);
             }
         }
     }
@@ -493,6 +699,7 @@ public class SkillGroupApplicationService {
         vo.setOwnerType(resource.getOwnerType());
         vo.setResourceStatus(resource.getResourceStatus());
         vo.setCreateBy(resource.getCreateBy());
+        vo.setCreatorName("-");
         vo.setCreateTime(resource.getCreateTime());
         vo.setUpdateTime(resource.getUpdateTime());
         return vo;
