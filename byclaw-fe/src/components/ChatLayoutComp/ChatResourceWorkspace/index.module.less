@@ -143,6 +143,60 @@
   flex-direction: column;
 }
 
+// 当前会话和当前项目的文件空间标题下展示统一入口路径，方便直接复制给数字员工使用。
+.fileSpaceHeading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.fileSpaceHeadingTitle {
+  color: #1f2533;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.fileSpacePathRow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.fileSpacePath {
+  min-width: 0;
+  color: #8a94a6;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileSpacePathCopy {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #8a94a6;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--beyond-color-primary, #1677ff);
+    outline: none;
+  }
+}
+
 .primaryTabs,
 .secondaryTabs {
   flex: none;

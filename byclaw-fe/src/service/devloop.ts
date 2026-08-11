@@ -53,9 +53,16 @@ export type DevloopTaskListQuery = {
 
   /** 任务状态筛选，整体任务视图按状态列分别查询。 */
   status?: 'pending' | 'in_progress' | 'paused' | 'completed';
+
+  /** 任务类型筛选；为空返回全部类型。与 status 同传时两个条件叠加。 */
+  taskType?: DevloopTaskType;
   pageNum?: number;
   pageSize?: number;
 };
+
+// 任务类型对照 byai_default_agent 的架构/需求/研发/测试四角色；chat=项目内直接开聊的普通会话，不属于四角色任务。
+// 会话表没有类型列，后端按各创建链路的关联行反查(架构=项目初始化会话，研发=有仓库子任务行，测试=被集成执行记录引用，需求=需求项回写了会话)。
+export type DevloopTaskType = 'architect' | 'requirement' | 'coder' | 'tester' | 'chat';
 
 export type DevloopTaskCurrentStage = {
   stageId: string;
@@ -131,6 +138,9 @@ export type DevloopTaskItem = {
   dueTime?: string;
   agentName?: string;
   avatar?: string;
+  // 会话绑定的数字员工，进入会话后输入框据此回填默认 @ 员工；只有 agentName 无法回填。
+  objectType?: string;
+  objectId?: number | string;
   description?: string;
   taskDescription?: string;
   branchName?: string;
@@ -138,6 +148,7 @@ export type DevloopTaskItem = {
   requirementTitle?: string;
   requirementOriginId?: string;
   sourceItemId?: number;
+  taskType?: DevloopTaskType;
 };
 
 export type DevloopTaskPage = {
@@ -156,17 +167,21 @@ export type DevloopProjectSpaceFile = {
   shareLink?: string | null;
 };
 
-export type OperationTaskTemplateType = 'collect' | 'knowledge' | 'content' | 'publish' | 'analyze';
+export type OperationTaskTemplateType =
+  | 'collect'
+  | 'knowledge'
+  | 'object_discovery'
+  | 'content'
+  | 'publish'
+  | 'analyze';
 
 export type OperationTaskTemplate = {
   templateId: number;
   templateType: OperationTaskTemplateType;
   templateName: string;
   description?: string;
-  icon?: string;
   config?: string | Record<string, unknown>;
   sortNo?: number;
-  isBuiltin?: string;
 };
 
 // 仓库类型:workspace 工作区(单个,承载项目上下文/产出) / code 代码仓库(可多个)。存量数据默认 code。
@@ -224,8 +239,13 @@ export const INIT_POLL_MAX_ROUNDS = 120;
 
 // 下发工作区初始化:后端建一条架构数字员工会话并返回 sessionId,真正的初始化在沙箱里由架构助理执行。
 // 完成与否由后端定时任务读该会话的任务状态文件判定,前端只轮询 initStatus,没有「标记完成」的接口。
+// 回架构员工而不只回会话ID:项目维度员工不在前端员工列表里,跳进会话时要靠这两个字段写 agentCache,
+// 否则聊天输入框的 @ 查不到人会兜底成「AI 助手」。ID 是字符串——雪花 ID 超过 JS 安全整数。
 export const startProjectInit = (data: { projectId: number; buildIndex: boolean; skillPackages: string[] }) =>
-  POST<{ sessionId: number }>('/byaiService/project/init/start', data);
+  POST<{ sessionId: string; architectAgentId: string; architectAgentName: string }>(
+    '/byaiService/project/init/start',
+    data
+  );
 
 // 项目仓库维护：扫描源关联仓库时可即席新增/删除
 export const createProjectRepo = (data: {
@@ -237,6 +257,18 @@ export const createProjectRepo = (data: {
   repoType?: ProjectRepoType;
   provider?: RepoProvider;
 }) => POST<any>('/byaiService/project/repo/create', data);
+
+/** 更新项目仓库，沿用原 repoId 保持已有任务和扫描源的关联不变。 */
+export const updateProjectRepo = (data: {
+  repoId: number;
+  projectId: number;
+  repoFullName: string;
+  repoUrl?: string;
+  defaultBranch?: string;
+  description?: string;
+  repoType?: ProjectRepoType;
+  provider?: RepoProvider;
+}) => POST<any>('/byaiService/project/repo/update', data);
 
 export const listProjectRepos = (projectId: number) =>
   POST<DevloopProjectRepo[]>('/byaiService/project/repo/list', { projectId });
@@ -272,6 +304,9 @@ export type ProjectRepoFileContent = {
 
 export const listProjectRepoTree = (data: { projectId: number; repoId: number; path?: string; ref?: string }) =>
   POST<ProjectRepoTreeNode[]>('/byaiService/project/repo/tree', data);
+
+export const searchProjectRepoTree = (data: { projectId: number; repoId: number; keyword: string; ref?: string }) =>
+  POST<ProjectRepoTreeNode[]>('/byaiService/project/repo/tree/search', data);
 
 export const listProjectRepoBranches = (repoId: number) =>
   POST<ProjectRepoBranch[]>('/byaiService/project/repo/branch/list', { repoId });

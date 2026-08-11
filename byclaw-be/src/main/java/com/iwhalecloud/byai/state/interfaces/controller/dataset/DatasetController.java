@@ -274,12 +274,13 @@ public class DatasetController {
         @RequestPart("resourceId") Long resourceId, @RequestPart(value = "directoryPath") String directoryPath,
         @RequestPart(value = "fileDescription", required = false) String fileDescription,
         @RequestPart(value = "processFrontMatter", required = false) String processFrontMatter,
-        @RequestPart(value = "overwrite", required = false) String overwrite) {
+        @RequestPart(value = "overwrite", required = false) String overwrite,
+        @RequestPart(value = "skipIfDuplicate", required = false) boolean skipIfDuplicate) {
         try {
 
             directoryPath = new String(directoryPath.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
             UploadResult uploadResult = datasetApplicationService.uploadFiles(files, resourceId, directoryPath,
-                fileDescription, parseOptionalBoolean(processFrontMatter), Boolean.valueOf(overwrite));
+                fileDescription, parseOptionalBoolean(processFrontMatter), Boolean.valueOf(overwrite), skipIfDuplicate);
             return ResponseUtil.successResponse(I18nUtil.get("dataset.file.upload.success"), uploadResult);
         }
         catch (Exception e) {
@@ -311,10 +312,8 @@ public class DatasetController {
         try {
             FileToMarkdownResult result = datasetApplicationService.fileToMarkdown(fileContent);
             StreamingResponseBody responseBody = outputStream -> outputStream.write(result.getContent());
-            return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(result.getContentType()))
-                .header("Content-Disposition", buildContentDisposition(result.getFileName()))
-                .body(responseBody);
+            return ResponseEntity.ok().contentType(MediaType.parseMediaType(result.getContentType()))
+                .header("Content-Disposition", buildContentDisposition(result.getFileName())).body(responseBody);
         }
         catch (Exception e) {
             logger.error("文件转Markdown失败", e);
@@ -340,9 +339,8 @@ public class DatasetController {
         @RequestParam(value = "docName", required = false) String docName, @RequestParam("doc") String doc,
         @RequestParam(value = "language", required = false, defaultValue = "zh-CN") String language) {
         try {
-            return ResponseEntity.ok(
-                openClawKnowledgeDocumentService.buildKnowledgeFromDoc(resourceId, directoryPath, docName, doc,
-                    language));
+            return ResponseEntity.ok(openClawKnowledgeDocumentService.buildKnowledgeFromDoc(resourceId, directoryPath,
+                docName, doc, language));
         }
         catch (Exception e) {
             logger.error("OpenClaw文档构建知识库失败", e);
@@ -430,8 +428,7 @@ public class DatasetController {
      * 面向 ByClaw-datacloud 的 QA 原始协议透传接口，直接接收并返回 knCode 体系数据。
      */
     @PostMapping(value = "/knowledgeItems/metadataSearchByKnCode")
-    public PythonBuildResponse<Object> searchKnowledgeMetadataByKnCode(
-        @RequestBody KbKnowledgeMetadataSearch request) {
+    public PythonBuildResponse<Object> searchKnowledgeMetadataByKnCode(@RequestBody KbKnowledgeMetadataSearch request) {
         return datasetApplicationService.searchKnowledgeMetadataByKnCode(request);
     }
 
@@ -471,7 +468,8 @@ public class DatasetController {
     @PostMapping(value = "/importDatasetJson", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseUtil<ObjectZipImportResult> importDatasetJson(
         @RequestParam(value = "ownerType", required = false) String ownerType,
-        @RequestParam(value = "catalogId", required = false) Long catalogId, @RequestPart("file") MultipartFile[] file) {
+        @RequestParam(value = "catalogId", required = false) Long catalogId,
+        @RequestPart("file") MultipartFile[] file) {
         if (file != null && file.length > 1) {
             return ResponseUtil.successResponse(I18nUtil.get("dataset.import.success"),
                 importDatasetJsonBatch(ownerType, catalogId, file));

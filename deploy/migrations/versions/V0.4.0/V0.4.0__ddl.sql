@@ -492,11 +492,8 @@ CREATE TABLE IF NOT EXISTS byai.byai_task_template (
     template_type  VARCHAR(32)  NOT NULL,
     template_name  VARCHAR(100) NOT NULL,
     description    VARCHAR(500),
-    icon           VARCHAR(16),
     config         TEXT,
     sort_no        INT          DEFAULT 0,
-    is_builtin     CHAR(1)      DEFAULT 'N',
-    status_cd      VARCHAR(8)   DEFAULT '00A',
     create_by      BIGINT,
     create_time    TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
     update_by      BIGINT,
@@ -507,18 +504,15 @@ CREATE TABLE IF NOT EXISTS byai.byai_task_template (
 
 COMMENT ON TABLE byai.byai_task_template IS '运营任务模板表';
 COMMENT ON COLUMN byai.byai_task_template.template_id IS '模板ID';
-COMMENT ON COLUMN byai.byai_task_template.template_type IS '模板类型 collect/knowledge/content/publish/analyze';
+COMMENT ON COLUMN byai.byai_task_template.template_type IS '模板类型 collect/knowledge/object_discovery/content/publish/analyze';
 COMMENT ON COLUMN byai.byai_task_template.template_name IS '模板名称';
 COMMENT ON COLUMN byai.byai_task_template.description IS '模板卡片说明';
-COMMENT ON COLUMN byai.byai_task_template.icon IS '模板卡片首字标记';
 COMMENT ON COLUMN byai.byai_task_template.config IS '模板默认配置 JSON';
 COMMENT ON COLUMN byai.byai_task_template.sort_no IS '展示顺序';
-COMMENT ON COLUMN byai.byai_task_template.is_builtin IS '是否系统内置 Y/N';
-COMMENT ON COLUMN byai.byai_task_template.status_cd IS '状态 00A有效/00X失效';
 COMMENT ON COLUMN byai.byai_task_template.delete_flag IS '删除标记 0正常/1删除';
 
 CREATE INDEX IF NOT EXISTS idx_task_template_type
-    ON byai.byai_task_template (template_type, status_cd, delete_flag, sort_no);
+    ON byai.byai_task_template (template_type, delete_flag, sort_no);
 -- 技能组资源类型及成员关系索引。
 COMMENT ON COLUMN byai.ss_resource.resource_biz_type IS '资源类型：DIG_EMPLOYEE=数字员工，AGENT=智能体，KG_DOC=文档知识库，KG_DB=数据知识库，KG_QA=问答知识库，KG_TERM=术语知识库，TOOLKIT=插件，MCP=MCP服务，TOOL=工具，MCP_TOOL=MCP工具，OBJECT=对象，ONTOLOGY_BASE=本体库，SCENE=场景，VIEW=视图，ACTION=动作，TAG=标签资源，MAN_USER=管理用户资源，MAN_ORG=管理组织资源，SKILL=技能，SKILL_GROUP=技能组';
 
@@ -655,3 +649,12 @@ CREATE TABLE IF NOT EXISTS byai.byai_project_resource
 
 CREATE INDEX IF NOT EXISTS idx_byai_project_resource_project
     ON byai.byai_project_resource (project_id, resource_type, sort_no);
+
+
+-- 数字员工组功能相关索引
+CREATE UNIQUE INDEX IF NOT EXISTS uk_ss_resource_rel_dig_employee_group_member
+    ON byai.ss_resource_rel_detail (resource_id, rel_resource_id)
+    WHERE rel_type_name = 'DIG_EMPLOYEE_GROUP_MEMBER' AND rel_status = 1;
+
+CREATE INDEX IF NOT EXISTS idx_ss_resource_version_active_resource
+    ON byai.ss_resource_version (resource_id, version_status, resource_version_id);

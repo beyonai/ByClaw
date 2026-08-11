@@ -1,7 +1,10 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import org.apache.commons.lang3.StringUtils;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -128,9 +131,15 @@ public class ProjectController {
         Long projectId = MapParamUtil.getLongValue(params, "projectId");
         boolean buildIndex = Boolean.TRUE.equals(params.get("buildIndex"))
             || "Y".equalsIgnoreCase(MapParamUtil.getStringValue(params, "buildIndex"));
-        Long sessionId = workspaceInitService.startWorkspaceInit(projectId, buildIndex,
-            params.get("skillPackages"));
-        return ResponseUtil.successResponse(Map.of("sessionId", sessionId));
+        WorkspaceInitService.WorkspaceInitStarted started = workspaceInitService.startWorkspaceInit(projectId,
+            buildIndex, params.get("skillPackages"));
+        // 架构员工与会话一起回：项目维度员工不在前端员工列表里，只给会话ID跳过去 @ 会兜底成「AI 助手」。
+        // ID 转字符串：雪花 ID 超过 JS 安全整数，给数字前端会截断。
+        Map<String, Object> result = new HashMap<>();
+        result.put("sessionId", String.valueOf(started.sessionId()));
+        result.put("architectAgentId", String.valueOf(started.architectAgentId()));
+        result.put("architectAgentName", StringUtils.defaultString(started.architectAgentName()));
+        return ResponseUtil.successResponse(result);
     }
 
     /**
@@ -213,6 +222,12 @@ public class ProjectController {
         return ResponseUtil.successResponse(projectApplicationService.createProjectRepo(dto));
     }
 
+    /** 更新项目仓库配置，保留仓库主键以避免已有任务关联失效。 */
+    @PostMapping("/repo/update")
+    public ResponseUtil<Map<String, Object>> updateProjectRepo(@RequestBody ProjectRepoDTO dto) {
+        return ResponseUtil.successResponse(projectApplicationService.updateProjectRepo(dto));
+    }
+
     /**
      * 查询项目关联的代码仓库列表。
      *
@@ -240,6 +255,20 @@ public class ProjectController {
         return ResponseUtil.successResponse(projectRepositoryService.listTree(query == null ? null : query.getProjectId(),
             query == null ? null : query.getRepoId(), query == null ? null : query.getPath(),
             query == null ? null : query.getRef()));
+    }
+
+    /**
+     * 按指定分支搜索仓库文件名和路径。
+     *
+     * @param query 包含 projectId、repoId、keyword；ref 可选
+     * @return 匹配的文件和目录
+     */
+    @PostMapping("/repo/tree/search")
+    public ResponseUtil<List<ProjectRepoTreeNodeDTO>> searchProjectRepoTree(
+        @RequestBody ProjectRepoTreeQueryDTO query) {
+        return ResponseUtil.successResponse(projectRepositoryService.searchTree(
+            query == null ? null : query.getProjectId(), query == null ? null : query.getRepoId(),
+            query == null ? null : query.getKeyword(), query == null ? null : query.getRef()));
     }
 
     /**

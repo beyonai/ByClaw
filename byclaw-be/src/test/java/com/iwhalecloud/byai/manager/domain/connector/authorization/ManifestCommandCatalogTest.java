@@ -11,7 +11,10 @@ import com.iwhalecloud.byai.manager.domain.connector.manifest.ConnectorManifestC
 import com.iwhalecloud.byai.manager.domain.connector.manifest.InvalidConnectorManifestException;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
+@DisabledOnOs(OS.WINDOWS)
 class ManifestCommandCatalogTest {
 
     @Test

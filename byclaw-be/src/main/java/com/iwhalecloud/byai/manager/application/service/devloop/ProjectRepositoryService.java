@@ -55,13 +55,33 @@ public class ProjectRepositoryService {
             throw new BaseException(50500, "project.repo.not.found");
         }
         String branch = ref == null || ref.trim().isEmpty() ? repo.getDefaultBranch() : ref.trim();
-        return resolveProvider(repo).listTree(repo.getRepoFullName(), normalizePath(path), branch, currentUserToken());
+        return resolveProvider(repo).listTree(repo.getRepoUrl(), repo.getRepoFullName(), normalizePath(path), branch,
+            currentUserToken());
+    }
+
+    /** 按指定分支搜索仓库文件名和路径。 */
+    public List<ProjectRepoTreeNodeDTO> searchTree(Long projectId, Long repoId, String keyword, String ref) {
+        requireProject(projectId);
+        if (repoId == null) {
+            throw new BaseException(50500, "project.repo.id.required");
+        }
+        if (keyword == null || keyword.trim().isEmpty()) {
+            throw new BaseException(50500, "project.repo.search.keyword.required");
+        }
+        ProjectRepo repo = projectRepoMapper.selectOne(new LambdaQueryWrapper<ProjectRepo>()
+            .eq(ProjectRepo::getRepoId, repoId).eq(ProjectRepo::getProjectId, projectId));
+        if (repo == null) {
+            throw new BaseException(50500, "project.repo.not.found");
+        }
+        String branch = ref == null || ref.trim().isEmpty() ? repo.getDefaultBranch() : ref.trim();
+        return resolveProvider(repo).searchTree(repo.getRepoUrl(), repo.getRepoFullName(), keyword.trim(), branch,
+            currentUserToken());
     }
 
     /** 查询指定仓库的全部远程分支。 */
     public List<ProjectRepoBranchDTO> listBranches(Long repoId) {
         ProjectRepo repo = requireRepo(repoId);
-        return resolveProvider(repo).listBranches(repo.getRepoFullName(), currentUserToken());
+        return resolveProvider(repo).listBranches(repo.getRepoUrl(), repo.getRepoFullName(), currentUserToken());
     }
 
     /** 查询指定远程分支上的文件内容。 */
@@ -74,8 +94,8 @@ public class ProjectRepositoryService {
         if (normalizedPath == null) {
             throw new BaseException(50500, "project.repo.file.path.required");
         }
-        return resolveProvider(repo).getFileContent(repo.getRepoFullName(), branch.trim(), normalizedPath,
-            currentUserToken());
+        return resolveProvider(repo).getFileContent(repo.getRepoUrl(), repo.getRepoFullName(), branch.trim(),
+            normalizedPath, currentUserToken());
     }
 
     private ProjectRepo requireRepo(Long repoId) {

@@ -372,4 +372,24 @@ describe('hooks/useChat/index', () => {
       agentName: 'Agent B',
     });
   });
+
+  it('keeps the fixed debug employee instead of falling back to the global agent', async () => {
+    const { result } = renderHook(() =>
+      useChat({
+        sessionId: '',
+        fixedAgentId: '90001',
+        addSession: jest.fn(),
+      } as any)
+    );
+
+    await act(async () => {
+      await result.current.sendQuery({ queryQuestion: '调试数字员工组' });
+    });
+
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    expect(mockSend.mock.calls[0]?.[1]).toMatchObject({
+      agentId: '90001',
+      agentCode: null,
+    });
+  });
 });

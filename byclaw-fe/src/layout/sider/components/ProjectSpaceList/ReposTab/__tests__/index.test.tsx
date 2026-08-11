@@ -6,6 +6,7 @@ import {
   listProjectRepoBranches,
   listProjectRepoTree,
   listProjectRepos,
+  searchProjectRepoTree,
 } from '@/service/devloop';
 import ReposTab from '../index';
 
@@ -14,6 +15,7 @@ jest.mock('@/service/devloop', () => ({
   listProjectRepoBranches: jest.fn(),
   listProjectRepoTree: jest.fn(),
   listProjectRepos: jest.fn(),
+  searchProjectRepoTree: jest.fn(),
 }));
 
 jest.mock('@umijs/max', () => ({
@@ -29,11 +31,18 @@ jest.mock('@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock', 
   <section data-testid={`repo-${props.title}`}>
     <h2>{props.title}</h2>
     {props.headerExtra}
+    {props.contentBefore}
     <button type="button" onClick={props.onRefresh}>
       refresh
     </button>
     <div data-testid={`repo-files-${props.title}`}>
       {props.items.map((item: { name: string }) => item.name).join(',')}
+    </div>
+    <div data-testid={`repo-children-${props.title}`}>
+      {Object.values(props.childrenByPath || {})
+        .flat()
+        .map((item: any) => item.name)
+        .join(',')}
     </div>
     <button
       type="button"
@@ -74,6 +83,7 @@ const mockListProjectRepoTree = listProjectRepoTree as jest.MockedFunction<typeo
 const mockGetProjectRepoFileContent = getProjectRepoFileContent as jest.MockedFunction<
   typeof getProjectRepoFileContent
 >;
+const mockSearchProjectRepoTree = searchProjectRepoTree as jest.MockedFunction<typeof searchProjectRepoTree>;
 
 describe('ReposTab', () => {
   beforeEach(() => {
@@ -97,6 +107,9 @@ describe('ReposTab', () => {
       content: '# demo',
       binary: false,
     });
+    mockSearchProjectRepoTree.mockResolvedValue([
+      { name: 'SearchResult.tsx', path: 'src/SearchResult.tsx', type: 'file' },
+    ]);
   });
 
   it('loads every project repository using its default branch', async () => {
@@ -130,6 +143,7 @@ describe('ReposTab', () => {
         ref: 'feature/demo',
       })
     );
+    expect(within(repoBlock).getByTestId('repo-children-acme/one')).toHaveTextContent('App.tsx');
 
     fireEvent.click(within(repoBlock).getByRole('button', { name: 'open-file' }));
     await waitFor(() => {
@@ -140,5 +154,34 @@ describe('ReposTab', () => {
       });
       expect(onOpenDetail).toHaveBeenCalled();
     });
+  });
+
+  it('searches the selected branch and repeats the search after switching branches', async () => {
+    render(<ReposTab projectId={203} onOpenDetail={jest.fn()} />);
+    const repoBlock = await screen.findByTestId('repo-acme/one');
+    const searchInput = within(repoBlock).getByPlaceholderText('projectSpace.detail.repo.searchPlaceholder');
+
+    fireEvent.change(searchInput, { target: { value: 'SearchResult' } });
+    fireEvent.keyDown(searchInput, { key: 'Enter', code: 'Enter' });
+    await waitFor(() =>
+      expect(mockSearchProjectRepoTree).toHaveBeenCalledWith({
+        projectId: 203,
+        repoId: 1,
+        keyword: 'SearchResult',
+        ref: 'main',
+      })
+    );
+
+    fireEvent.click(within(repoBlock).getByRole('button', { name: /main/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'feature/demo' }));
+    await waitFor(() =>
+      expect(mockSearchProjectRepoTree).toHaveBeenCalledWith({
+        projectId: 203,
+        repoId: 1,
+        keyword: 'SearchResult',
+        ref: 'feature/demo',
+      })
+    );
+    expect(within(repoBlock).getByRole('button', { name: /feature\/de\.\.\./ })).toBeInTheDocument();
   });
 });

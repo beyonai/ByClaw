@@ -22,11 +22,14 @@ import {
   type MenuProps,
 } from 'antd';
 import {
+  ApartmentOutlined,
   AppstoreOutlined,
   BarChartOutlined,
+  BugOutlined,
   ClockCircleOutlined,
   CloseOutlined,
   CloudDownloadOutlined,
+  CodeOutlined,
   CommentOutlined,
   DeleteOutlined,
   DingdingOutlined,
@@ -166,6 +169,10 @@ import { sessionHandler } from '@/utils/session';
 import type { ISession } from '@/typescript/session';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { ResourceTypeMap } from '@/constants/resource';
+import { setAgentCache } from '@/components/QueryInput/RichInput/agentCache';
+import getElementData from '@/components/QueryInput/RichInput/utils/getElementData';
+import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
+import { agentTypeMap } from '@/constants/agent';
 import ProjectMemberList from './ProjectMemberList';
 import RequirementSplitModal from './RequirementSplitModal';
 import type { SplitTaskDraft } from './RequirementSplitModal/types';
@@ -448,12 +455,41 @@ const normalizeOperationAccounts = (detail?: OperationProjectDetailData | null):
 // 列表和详情需兼容后端的旧枚举值，前端统一显示原型中的四类运营需求。
 const normalizeOperationTaskType = (task: any): OperationTaskType => {
   const taskType = `${task?.taskType || task?.operationType || task?.type || ''}`.trim().toLowerCase();
+  if (
+    ['object_discovery', 'object-discovery', 'object discovery', 'objectdiscovery'].includes(taskType) ||
+    `${task?.templateName || ''}`.includes('对象发现') ||
+    `${task?.templateId || ''}` === '-2006'
+  ) {
+    return 'object_discovery';
+  }
   if (['knowledge', 'knowledge_organization', 'knowledge_organize', 'knowledge整理', '知识整理'].includes(taskType)) {
     return 'knowledge';
   }
   if (['content', 'publish', 'content_creation', 'content_publish'].includes(taskType)) return 'content';
   if (['analyze', 'analysis', 'analytics', 'data_analysis'].includes(taskType)) return 'analyze';
   return 'collect';
+};
+
+// 研发任务的四角色类型对照后端 DevloopTaskType：会话表没有类型列，后端按各创建链路的关联行
+// 反查得出。与上面运营任务的 operationType 是两套独立枚举，不能互相兜底。
+// 类型走左侧图标而非标签：卡片头部右侧已有状态标签和操作入口，再加标签会挤掉任务名。
+const DEVELOP_TASK_TYPES = ['architect', 'requirement', 'coder', 'tester', 'chat'] as const;
+
+type DevelopTaskType = (typeof DEVELOP_TASK_TYPES)[number];
+
+// 四角色各配一组图标配色，与运营任务图标同一套做法；普通会话沿用任务卡默认的绿色。
+const DEVELOP_TASK_TYPE_ICON_CLASSES: Record<DevelopTaskType, string> = {
+  architect: styles.detailTaskIconArchitect,
+  requirement: styles.detailTaskIconRequirement,
+  coder: styles.detailTaskIconCoder,
+  tester: styles.detailTaskIconTester,
+  chat: styles.detailTaskIconChat,
+};
+
+const normalizeDevelopTaskType = (task: any): DevelopTaskType | undefined => {
+  const taskType = `${task?.taskType || ''}`.trim().toLowerCase();
+  // 未知取值不猜：宁可回退成通用研发图标，也不要把后端新增的类型显示成错的那一类。
+  return DEVELOP_TASK_TYPES.find((type) => type === taskType);
 };
 
 // 工作流的运行状态来源不同，下方统一映射给时间轴的状态枚举。
@@ -3755,13 +3791,59 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setInitModalOpen(true);
   };
 
+  // 跳进架构员工那条初始化会话。与需求/测试会话入口同一套动作,少任何一步都会出问题:
+  // agentCache 决定输入框的 @ 能不能查到人(项目维度员工不在 redux 员工列表里,查不到会兜底成「AI 助手」);
+  // addSession + 会话上下文让右侧标题与项目归属当场正确;setSessionId 才是真正打开这条会话;
+  // state 里的 selectedAgentId 供聊天页挂载后恢复 @(不能在这里直接 setAgentId,挂载时会被清一次)。
+  const openArchitectSession = (sessionId?: string, agentId?: string, agentName?: string) => {
+    if (!sessionId || !projectId) return;
+    const sessionIdText = String(sessionId);
+    clearEasyConfirmInputDraft(sessionIdText);
+    if (agentId && agentName) {
+      setAgentCache(
+        getElementData(ResourceType.digitalEmployee, {
+          agentId,
+          name: agentName,
+          agentType: agentTypeMap.agent,
+        })
+      );
+    }
+    EventEmitter.emit('projectSpace-session-context', {
+      sessionId: sessionIdText,
+      projectId,
+      projectName: project?.projectName,
+    });
+    dispatch({
+      type: 'session/addSession',
+      payload: {
+        sessionId: sessionIdText,
+        sessionName: `${t('initConfig.title')} - ${project?.projectName || projectId}`,
+        projectId,
+        objectId: agentId || undefined,
+        objectType: agentId ? 'DigEmployee' : undefined,
+      },
+    });
+    setSessionId?.(sessionIdText);
+    navigate('/chat', {
+      state: {
+        keepSiderActiveKey: 'sessions',
+        from: 'projectSpace',
+        projectId,
+        projectName: project?.projectName,
+        sessionId: sessionIdText,
+        selectedAgentId: agentId,
+        selectedAgentObjectType: agentId ? 'DigEmployee' : undefined,
+      },
+    });
+  };
+
   // 触发工作区初始化:后端建一条架构助理会话并下发提示词,置 initializing。真正干活在沙箱里,
-  // 完成信号由后端定时任务读任务状态文件后落库,所以这里只需关窗并通知父级刷新 initStatus。
+  // 完成信号由后端定时任务读任务状态文件后落库,所以这里关窗、通知父级刷新 initStatus,再跳进那条会话看员工干活。
   const handleStartInit = async () => {
     if (!projectId) return;
     setInitStarting(true);
     try {
-      await startProjectInit({
+      const res = await startProjectInit({
         projectId,
         buildIndex: initBuildIndex,
         skillPackages: initBuildIndex ? initSkillPackages : [],
@@ -3769,6 +3851,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       message.success(t('initConfig.started'));
       setInitModalOpen(false);
       onProjectInitStarted?.(projectId);
+      openArchitectSession(res?.sessionId, res?.architectAgentId, res?.architectAgentName);
     } catch (error: any) {
       message.error(error?.message || t('initConfig.startFailed'));
     } finally {
@@ -3893,6 +3976,40 @@ const ProjectDetailPanel: React.FC<Props> = ({
         return next;
       });
     }
+  };
+
+  // 已启动的需求跳回它自己那条会话看历史消息。走的是启动时回写的 requirement.sessionId,
+  // 与任务卡的 handleOpenTaskSession 同一套补齐动作(会话上下文 + 会话缓存 + 全局 sessionId),
+  // 少任何一步右侧标题/项目归属就要等下一次列表刷新才对得上。
+  // 不设 agentId:需求会话的员工由后端建会话时定,这里再塞一遍只会覆盖成空。
+  const handleOpenRequirementSession = (requirement: RequirementItem) => {
+    if (!requirement.sessionId) {
+      message.warning(t('task.noSession'));
+      return;
+    }
+    const sessionIdText = String(requirement.sessionId);
+    // 进历史会话前清掉该会话遗留的多员工输入草稿,避免上一次退出时的半截输入又冒出来。
+    clearEasyConfirmInputDraft(sessionIdText);
+    if (projectId) {
+      EventEmitter.emit('projectSpace-session-context', {
+        sessionId: sessionIdText,
+        projectId,
+        projectName: project?.projectName,
+      });
+    }
+    dispatch({
+      type: 'session/addSession',
+      payload: { sessionId: sessionIdText, sessionName: requirement.title, projectId },
+    });
+    setSessionId?.(sessionIdText);
+    navigate('/chat', {
+      state: {
+        keepSiderActiveKey: 'sessions',
+        from: 'projectSpace',
+        projectId,
+        projectName: project?.projectName,
+      },
+    });
   };
 
   // 需求的第二个启动入口:后端先建会话并下发需求数字员工,前端拿到 sessionId 直接进这个会话继续聊。
@@ -4413,25 +4530,22 @@ const ProjectDetailPanel: React.FC<Props> = ({
     return (
       <div className={styles.requirementDetailFooter}>
         {isStarted ? (
-          <Button disabled>{t('requirement.started')}</Button>
+          // 已启动后这里是唯一能回到那条需求会话的入口,所以给成可点的主按钮而不是禁用态标签。
+          <Button type="primary" icon={<CommentOutlined />} onClick={() => handleOpenRequirementSession(requirement)}>
+            {t('requirement.viewSession')}
+          </Button>
         ) : (
           <Tooltip title={developInitReady ? '' : t('initGuard.task')} placement="top">
-            {/* 主按钮保持原行为(拆单窗),第二入口收进下拉:两条路二选一,并列会让人以为可以都点。 */}
-            <Dropdown.Button
+            {/* 当前只放「去聊天完成需求」这一条路。拆单入口(setSplitRequirement + 拆单窗 + handleConfirmSplit)
+                整套代码保留未删,想放回来就是把这里换回 Dropdown.Button 并把 onClick 接回 setSplitRequirement。 */}
+            <Button
               type="primary"
               loading={isStarting}
               disabled={isStarting || !developInitReady}
-              // V2:同样先弹拆单窗确认多仓库任务,确认后再启动。
-              onClick={() => setSplitRequirement(requirement)}
-              menu={{
-                items: [{ key: 'clarify', label: t('requirement.startClarify') }],
-                onClick: ({ key }) => {
-                  if (key === 'clarify') void handleStartRequirementClarify(requirement);
-                },
-              }}
+              onClick={() => void handleStartRequirementClarify(requirement)}
             >
               {t(isStarting ? 'requirement.starting' : 'requirement.start')}
-            </Dropdown.Button>
+            </Button>
           </Tooltip>
         )}
       </div>
@@ -4446,7 +4560,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
     const sourceLabel = getSourceLabel(detailReq.manualSourceType || detailReq.sourceType, t);
     const scored = detailReq.score !== null && detailReq.score !== undefined;
     const createTime = detailReq.createTime ? dayjs(detailReq.createTime).format('YYYY-MM-DD HH:mm') : '-';
-    const productContent = detail.summary || detailReq.productContent || t('common.emptyValue');
     const originalContent =
       detailReq.originalContent ||
       detailReq.content ||
@@ -4511,11 +4624,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 </div>
               )}
             </div>
-          </section>
-
-          <section className={styles.requirementDetailSection}>
-            <h3>{t('requirement.detail.productContent')}</h3>
-            <div className={styles.requirementDetailText}>{productContent}</div>
           </section>
 
           <section className={styles.requirementDetailSection}>
@@ -5160,38 +5268,34 @@ const ProjectDetailPanel: React.FC<Props> = ({
                         }`}
                       >
                         {isStarted ? (
+                          // 已启动的行不再显示启动按钮,给一颗「详情」开抽屉:跳会话那颗放在抽屉里,
+                          // 列表这一层不直接跳走,避免误点整行/按钮就离开项目页。
+                          // 整行点击本来也开抽屉,这里 stopPropagation 只是避免抽屉被开两次。
                           <Button
                             size="small"
                             className={`${styles.detailRequirementAction} ${styles.detailRequirementStartedAction}`}
-                            disabled
-                            onClick={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setDetailReq(item);
+                            }}
                           >
-                            {t('requirement.started')}
+                            {t('requirement.viewDetail')}
                           </Button>
                         ) : (
                           <Tooltip title={developInitReady ? '' : t('initGuard.task')} placement="top">
-                            {/* 整行点击会打开需求详情抽屉:下拉面板挂在 body 上,但触发按钮的事件仍从这里冒泡,
-                                所以外层 span 也要拦一次,否则点「去聊天完成需求」会顺带弹出抽屉。 */}
-                            <span onClick={(event) => event.stopPropagation()}>
-                              <Dropdown.Button
-                                size="small"
-                                className={`${styles.detailRequirementAction} ${styles.detailRequirementStartAction}`}
-                                loading={isStarting}
-                                disabled={isStarting || !developInitReady}
-                                onClick={() => {
-                                  // V2:先弹拆单窗确认多仓库任务,确认后再启动。
-                                  setSplitRequirement(item);
-                                }}
-                                menu={{
-                                  items: [{ key: 'clarify', label: t('requirement.startClarify') }],
-                                  onClick: ({ key }) => {
-                                    if (key === 'clarify') void handleStartRequirementClarify(item);
-                                  },
-                                }}
-                              >
-                                {t(isStarting ? 'requirement.starting' : 'requirement.start')}
-                              </Dropdown.Button>
-                            </span>
+                            {/* 当前只放「去聊天完成需求」这一条路;拆单入口代码保留未删,见详情页脚同处注释。 */}
+                            <Button
+                              size="small"
+                              className={`${styles.detailRequirementAction} ${styles.detailRequirementStartAction}`}
+                              loading={isStarting}
+                              disabled={isStarting || !developInitReady}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleStartRequirementClarify(item);
+                              }}
+                            >
+                              {t(isStarting ? 'requirement.starting' : 'requirement.start')}
+                            </Button>
                           </Tooltip>
                         )}
                         {canOperateManualRequirement && (
@@ -5864,6 +5968,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
                     content: operationStyles.operationTaskIconContent,
                     analyze: operationStyles.operationTaskIconAnalyze,
                   }[operationTaskType];
+                  // 研发任务的四角色类型，取值见后端 DevloopTaskType；运营任务走 operationType，两套不通用。
+                  const developTaskType = normalizeDevelopTaskType(task);
+                  const developTaskTypeLabel = developTaskType ? t(`task.type.${developTaskType}`) : '';
+                  const developTaskTypeIconClass = developTaskType
+                    ? DEVELOP_TASK_TYPE_ICON_CLASSES[developTaskType]
+                    : '';
                   const showStructuredTaskMeta = isDevelopProject || isOperationProject;
                   // 优先按用户 ID 判断处理人；历史数据缺失 ID 时再用用户名兜底，避免同名用户误判。
                   const isCurrentUserAssignee = isCurrentUserTaskAssignee(task, userInfo);
@@ -5927,10 +6037,24 @@ const ProjectDetailPanel: React.FC<Props> = ({
                       }}
                     >
                       {isDevelopProject ? (
-                        <div className={styles.detailTaskIcon}>
-                          {/* 研发任务保持绿色研发图标，区别于普通会话。 */}
-                          <FundProjectionScreenOutlined />
-                        </div>
+                        // 类型未知时沿用原绿色研发图标，保证老数据和后端新增类型都还有图标可显示。
+                        <Tooltip title={developTaskTypeLabel} placement="top">
+                          <div className={`${styles.detailTaskIcon} ${developTaskTypeIconClass}`}>
+                            {developTaskType === 'architect' ? (
+                              <ApartmentOutlined />
+                            ) : developTaskType === 'requirement' ? (
+                              <FileTextOutlined />
+                            ) : developTaskType === 'coder' ? (
+                              <CodeOutlined />
+                            ) : developTaskType === 'tester' ? (
+                              <BugOutlined />
+                            ) : developTaskType === 'chat' ? (
+                              <CommentOutlined />
+                            ) : (
+                              <FundProjectionScreenOutlined />
+                            )}
+                          </div>
+                        </Tooltip>
                       ) : isOperationProject ? (
                         <Tooltip title={operationTaskTypeLabel} placement="top">
                           <div className={`${operationStyles.operationTaskIcon} ${operationTaskIconClass}`}>

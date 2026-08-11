@@ -1,15 +1,21 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Empty, Input, Spin, Tooltip, message } from 'antd';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Button, Empty, Input, Spin, Tag, Tooltip, message } from 'antd';
 import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
-import { useIntl, useLocation, useNavigate } from '@umijs/max';
+import { useIntl, useNavigate } from '@umijs/max';
 import classNames from 'classnames';
 import useGlobal from '@/hooks/useGlobal';
 import { createProject, saveDefaultAgent, saveProjectMembers } from '@/service/devloop';
-import ProjectOnboardingWizard from '@/pages/projectSpace/components/ProjectOnboardingWizard';
+import ProjectOnboardingWizard, {
+  type ArchitectChatTarget,
+} from '@/pages/projectSpace/components/ProjectOnboardingWizard';
+import { setAgentCache } from '@/components/QueryInput/RichInput/agentCache';
+import getElementData from '@/components/QueryInput/RichInput/utils/getElementData';
+import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
+import { agentTypeMap } from '@/constants/agent';
 import type { ProjectFormValues, ProjectShareMember } from '@/pages/projectSpace/components/ProjectFormModal';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
+import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
-import { getStoredProjectScopeId, saveProjectScopeIdToStorage } from '@/pages/projectSpace/constants';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import styles from './index.module.less';
 
@@ -43,19 +49,27 @@ const getProjectTypeClassName = (project: ProjectSpace) => {
   return project.sharedFlag ? styles.projectShared : styles.projectNormal;
 };
 
-// 项目头像直接展示业务类型，研发和运营项目优先于共享属性，普通共享项目显示“共享”。
-const getProjectTypeAvatarText = (project: ProjectSpace) => {
-  if (project.projectType === 'develop') return '研发';
-  if (project.projectType === 'operation') return '运营';
-  if (project.sharedFlag) return '共享';
-  return '普通';
+// 项目头像展示项目名称前两个字符，类型仍用于区分头像底色和右侧标签。
+const getProjectAvatarText = (project: ProjectSpace) =>
+  Array.from(`${project.projectName || ''}`.trim()).slice(0, 2).join('') || '项目';
+
+// 与会话模块项目标签保持同一优先级：业务类型优先于共享属性，普通项目再区分个人和共享。
+const getProjectScene = (project: ProjectSpace) => {
+  if (project.projectType === 'default') return { classSuffix: 'Default', messageId: 'projectSpace.scene.default' };
+  if (project.projectType === 'develop') {
+    return { classSuffix: 'Development', messageId: 'projectSpace.scene.development' };
+  }
+  if (project.projectType === 'operation') {
+    return { classSuffix: 'Operation', messageId: 'projectSpace.scene.operation' };
+  }
+  if (project.sharedFlag) return { classSuffix: 'Shared', messageId: 'projectSpace.scene.shared' };
+  return { classSuffix: 'Personal', messageId: 'projectSpace.scene.personal' };
 };
 
 // 项目主菜单的左侧列表只负责项目切换和新建；
 // 原会话菜单的项目分组与会话操作保持不变。
 const ProjectCenterList: React.FC = () => {
   const intl = useIntl();
-  const location = useLocation();
   const navigate = useNavigate();
   const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const { projects, loading, keyword, setKeyword, fetchProjects } = useProjectList();
@@ -63,22 +77,18 @@ const ProjectCenterList: React.FC = () => {
   const [createWizardOpen, setCreateWizardOpen] = useState(false);
   const [createLoading, setCreateLoading] = useState(false);
   const createdProjectNameRef = React.useRef('');
-  const queryProjectId = useMemo(
-    () => new URLSearchParams(location.search).get('projectId') || getStoredProjectScopeId(),
-    [location.search]
-  );
+  const [projectScopeId, updateProjectScopeId] = useProjectScopeId();
 
   const selectProject = useCallback(
     (project: ProjectSpace) => {
       const projectId = `${project.projectId}`;
-      saveProjectScopeIdToStorage(projectId);
+      updateProjectScopeId(projectId);
       EventEmitter.emit('projectSpace-active-project-change', {
         projectId,
         projectName: project.projectName,
       });
-      navigate(`/projectSpace?projectId=${encodeURIComponent(projectId)}`);
     },
-    [EventEmitter, navigate]
+    [EventEmitter, updateProjectScopeId]
   );
 
   useEffect(() => {
@@ -121,6 +131,13 @@ const ProjectCenterList: React.FC = () => {
         }
 
         message.success(intl.formatMessage({ id: 'projectSpace.message.createSuccess' }));
+        // 创建接口返回项目 ID 后立即切换当前项目；研发项目后续即使仍停留在仓库/初始化步骤，
+        // 关闭向导时也会保持选中新项目，不再回落到创建前的项目。
+        updateProjectScopeId(projectId);
+        EventEmitter.emit('projectSpace-active-project-change', {
+          projectId,
+          projectName: createdProjectNameRef.current,
+        });
         // 新建完成后清空项目搜索，确保新项目立即出现在左侧列表并高亮。
         setKeyword('');
         await fetchProjects('');
@@ -138,28 +155,39 @@ const ProjectCenterList: React.FC = () => {
         setCreateLoading(false);
       }
     },
-    [EventEmitter, createLoading, fetchProjects, intl, setKeyword]
+    [EventEmitter, createLoading, fetchProjects, intl, setKeyword, updateProjectScopeId]
   );
 
   const handleCreateWizardFinish = useCallback(
     (projectId: string) => {
       setCreateWizardOpen(false);
-      saveProjectScopeIdToStorage(projectId);
+      updateProjectScopeId(projectId);
       EventEmitter.emit('projectSpace-active-project-change', {
         projectId,
         projectName: createdProjectNameRef.current,
       });
-      navigate(`/projectSpace?projectId=${encodeURIComponent(projectId)}`);
     },
-    [EventEmitter, navigate]
+    [EventEmitter, updateProjectScopeId]
   );
 
   const handleEnterArchitectChat = useCallback(
-    (projectId: string, initSessionId?: number) => {
+    (projectId: string, architect?: ArchitectChatTarget) => {
       setCreateWizardOpen(false);
-      // 与会话模块一致，进入研发架构初始化会话前清理旧会话和员工上下文。
-      setAgentId?.('');
-      setSessionId?.('');
+      // 架构员工是项目维度的,不在 redux 员工列表里,useDefaultAgentElement 查不到就兜底成「AI 助手」。
+      // agentCache 在那个 hook 里优先于 redux 查表,所以先把整份员工写进去再跳。
+      if (architect?.agentId && architect.agentName) {
+        setAgentCache(
+          getElementData(ResourceType.digitalEmployee, {
+            agentId: architect.agentId,
+            name: architect.agentName,
+            agentType: agentTypeMap.agent,
+          })
+        );
+      }
+      // 与项目详情页「查看会话」同一套:置全局会话上下文才是真正打开那条会话。
+      // 置空会落到空白新会话,且聊天页的 @ 恢复要等全局会话与 state.sessionId 对上才触发。
+      setAgentId?.(architect?.agentId || '');
+      setSessionId?.(architect?.sessionId || '');
       // 带上后端下发初始化时建的会话ID,直达架构助理那条会话;缺省才新开。
       navigate('/chat', {
         state: {
@@ -167,7 +195,11 @@ const ProjectCenterList: React.FC = () => {
           from: 'projectSpace',
           projectId,
           projectName: createdProjectNameRef.current,
-          sessionId: initSessionId,
+          sessionId: architect?.sessionId,
+          // 聊天页据此在挂载后恢复 @ 员工。不能在这里直接 setAgentId:
+          // ChatLayoutComp 挂载时会按「无会话员工」清空一次,早设的值会被抹掉。
+          selectedAgentId: architect?.agentId,
+          selectedAgentObjectType: architect?.agentId ? 'DigEmployee' : undefined,
         },
       });
     },
@@ -200,7 +232,8 @@ const ProjectCenterList: React.FC = () => {
           {projects.length ? (
             projects.map((project) => {
               const projectId = `${project.projectId}`;
-              const isActive = projectId === queryProjectId;
+              const isActive = projectId === projectScopeId;
+              const projectScene = getProjectScene(project);
               return (
                 <button
                   type="button"
@@ -209,10 +242,23 @@ const ProjectCenterList: React.FC = () => {
                   onClick={() => selectProject(project)}
                 >
                   <span className={classNames(styles.projectIcon, getProjectTypeClassName(project))}>
-                    {getProjectTypeAvatarText(project)}
+                    {getProjectAvatarText(project)}
                   </span>
                   <span className={styles.projectMain}>
-                    <strong>{project.projectName}</strong>
+                    <span className={styles.projectTitleRow}>
+                      <strong>{project.projectName}</strong>
+                      <span className={styles.projectTagGroup}>
+                        <Tag
+                          bordered={false}
+                          className={classNames(
+                            styles.projectTag,
+                            styles[`projectTag${projectScene.classSuffix}`]
+                          )}
+                        >
+                          {intl.formatMessage({ id: projectScene.messageId })}
+                        </Tag>
+                      </span>
+                    </span>
                     <small>
                       {project.description || intl.formatMessage({ id: 'projectSpace.projectCard.emptyDescription' })}
                     </small>

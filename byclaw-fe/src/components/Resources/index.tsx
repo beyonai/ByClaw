@@ -1,6 +1,6 @@
 import React, { useCallback, useContext, useState, useEffect, useRef } from 'react';
 import { UploadOutlined, SearchOutlined, PlusOutlined, FullscreenOutlined } from '@ant-design/icons';
-import { useIntl, useSelector, useNavigate, useSearchParams } from '@umijs/max';
+import { useIntl, useLocation, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
 import { Button, Dropdown, Empty, Input, Space, Spin, Tooltip, message, Tabs } from 'antd';
 import classnames from 'classnames';
@@ -118,6 +118,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const knowledgeCapabilityDisabledTip = intl.formatMessage({ id: 'resource.thirdPartyKnowledgeBaseMode' });
   const noPermissionDisabledTip = intl.formatMessage({ id: 'common.noPermissionOperation' });
   const navigate = useNavigate();
+  const location = useLocation();
   const { placeholder: skillDetailDrawerHolder, show: showSkillDetailDrawer } = useSkillDetailDrawer();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -289,7 +290,8 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         setDebouncedSearchValue('');
         setDropdownParam(getDefaultParams());
         setActiveTab('personal');
-        setSearchParams(nextSearchParams);
+        // 中心页内部筛选只更新查询参数，需保留从右侧资源面板带来的返回位置和面板保持状态。
+        setSearchParams(nextSearchParams, { state: location.state });
       }
       refreshList();
     };
@@ -298,7 +300,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     return () => {
       EventEmitter.off('beyond-resourceList-resourceType-reload', handleResourceTypeReload);
     };
-  }, [EventEmitter, refreshList, resourceType, searchParams, setSearchParams]);
+  }, [EventEmitter, location.state, refreshList, resourceType, searchParams, setSearchParams]);
 
   // 防抖定时器
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
@@ -525,7 +527,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     setSearchValue('');
     setDebouncedSearchValue('');
     setDropdownParam(getDefaultParams());
-    setSearchParams(nextSearchParams);
+    setSearchParams(nextSearchParams, { state: location.state });
   };
   const tabBarExtraContent = (
     <Space>
@@ -758,7 +760,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
           setDebouncedSearchValue('');
           setDropdownParam(getDefaultParams());
           setActiveTab(nextTab);
-          setSearchParams(nextSearchParams);
+          setSearchParams(nextSearchParams, { state: location.state });
         }}
       />
       {resourceType === 'SKILL' && activeTab === 'marketplace' ? (

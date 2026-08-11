@@ -29,6 +29,7 @@ function AgentIframe(props: IProps) {
   const { sessionId } = useGlobal();
 
   const [isLoading, setIsLoading] = React.useState(true);
+  const fileCacheKey = React.useMemo(() => JSON.stringify(nextSessionIFileCache || []), [nextSessionIFileCache]);
 
   const onLoadedCb = React.useCallback(() => {}, []);
   const onClose = React.useCallback(() => {}, []);
@@ -49,7 +50,8 @@ function AgentIframe(props: IProps) {
     uuidRef.current = u.searchParams.get('uuid') || '';
 
     return myUrl;
-  }, [agent, sessionId, nextSessionIFileCache]);
+    // iframe 地址会附带随机 UUID，只能在实际地址参数变化时重新生成，不能跟随员工对象引用刷新。
+  }, [agent.agentHomeUrl, agent.id, agent.resourceCode, fileCacheKey, sessionId]);
 
   React.useEffect(() => {
     setIsLoading(true);

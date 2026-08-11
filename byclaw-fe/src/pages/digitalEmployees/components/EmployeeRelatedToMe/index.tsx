@@ -15,7 +15,7 @@ import InfiniteScroll from '@/components/InfiniteScroll';
 import ResourceCard from '@/components/Resources/components/ResourceCard';
 import { IAgentCache } from '@/typescript/agent';
 import useGlobal from '@/hooks/useGlobal';
-import { getAgentChatAvatar, getAgentPath } from '@/utils/agent';
+import { getAgentChatAvatar } from '@/utils/agent';
 import useTracker from '@/hooks/useTracker';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
@@ -269,20 +269,29 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
   const onClickEmployee = React.useCallback(
     (employee: IAgentCache) => {
       if (employee.agentId) {
-        trackerEmployeeClick(employee, 'marketAgentRedirect');
+        const normalizedEmployee = agentHandler(employee);
+        trackerEmployeeClick(normalizedEmployee, 'marketAgentRedirect');
         dispatch({
           type: 'employees/updateEmployee',
           payload: {
-            employee,
+            employee: normalizedEmployee,
           },
         });
-        setAgentId?.(`${employee.agentId}`);
+        setAgentId?.(`${normalizedEmployee.agentId}`);
         setSessionId?.('');
         const nextSearchParams = new URLSearchParams({
           tab: 'personal',
           personalCatalogId: curActiveLink,
         });
-        navigate(`${getAgentPath(employee)}?${nextSearchParams.toString()}`);
+        // 员工模块内统一打开员工详情，查询参数仅用于返回时恢复个人员工列表位置。
+        navigate(`/employees?${nextSearchParams.toString()}`, {
+          // 路由状态保留本次点击目标，避免返回列表后历史 agentId 覆盖新选择。
+          state: {
+            keepSiderActiveKey: 'agent',
+            selectedAgentId: `${normalizedEmployee.agentId}`,
+            selectedEmployee: normalizedEmployee,
+          },
+        });
         return;
       }
 

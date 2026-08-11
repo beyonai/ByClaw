@@ -1,5 +1,5 @@
 import { Alert, Button, Dropdown, Input, Modal, Segmented, Spin, Tag, Typography, message } from 'antd';
-import { MoreOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
+import { LoadingOutlined, MoreOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
@@ -15,9 +15,8 @@ import {
   INIT_POLL_MAX_ROUNDS,
 } from '@/service/devloop';
 import { PROJECT_DETAIL_SECTIONS, PROJECT_TYPE_MESSAGE_ID, type ProjectDetailSection } from '../../constants';
-import { useProjectSessions } from '../../hooks/useProjectSessions';
 import { useProjectTypeConfig } from '../../hooks/useProjectTypeConfig';
-import { checkGitHubPat, saveGitHubPat } from '@/service/devloop';
+import { checkGitHubPat, saveGitHubPat, type DevloopProjectRepo } from '@/service/devloop';
 import type { ProjectSession, ProjectSpace } from '../../types';
 import { getArrayData } from '../../utils';
 import ProjectAccounts from '../ProjectAccounts';
@@ -26,7 +25,6 @@ import ProjectMembers from '../ProjectMembers';
 import ProjectRequirements from '../ProjectRequirements';
 import ProjectResources from '../ProjectResources';
 import ProjectChannelConfig from '../ProjectChannelConfig';
-import ProjectSessionList from '../ProjectSessionList';
 import ProjectTasks from '../ProjectTasks';
 import ProjectDefaultAgentPanel, { type ChatWithAgentTarget } from '../ProjectDefaultAgentPanel';
 import Integration from '@/layout/sider/components/ProjectSpaceList/Integration';
@@ -57,27 +55,36 @@ const ProjectDetail: React.FC<Props> = ({
 }) => {
   const intl = useIntl();
   const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
-  const [activeSection, setActiveSection] = useState<ProjectDetailSection>('sessions');
-  const [keyword, setKeyword] = useState('');
+  const [activeSection, setActiveSection] = useState<ProjectDetailSection>('tasks');
+  // 搜索条件跟随各自 Tab 缓存，避免在当前 Tab 搜索时触发其它已挂载 Tab 的接口请求。
+  const [sectionKeywordMap, setSectionKeywordMap] = useState<Partial<Record<ProjectDetailSection, string>>>({});
   const [operationRequirementModalOpen, setOperationRequirementModalOpen] = useState(false);
   const [operationRequirementSaving, setOperationRequirementSaving] = useState(false);
   const [operationAssignees, setOperationAssignees] = useState<OperationSelectOption[]>([]);
   const [operationAssigneesLoading, setOperationAssigneesLoading] = useState(false);
   const [requirementsRefreshVersion, setRequirementsRefreshVersion] = useState(0);
   const [manualRequirementModalOpen, setManualRequirementModalOpen] = useState(false);
-  const [accountToolbar, setAccountToolbar] = useState<React.ReactNode>(null);
-  const [accountRefreshToolbar, setAccountRefreshToolbar] = useState<React.ReactNode>(null);
-  // 各详情 Tab 自己提供刷新按钮，统一挂到详情页右上角，避免内容区重复放置工具栏。
-  const [sectionToolbar, setSectionToolbar] = useState<React.ReactNode>(null);
-  const [sectionRefreshToolbar, setSectionRefreshToolbar] = useState<React.ReactNode>(null);
+  // 已访问 Tab 保持挂载以缓存列表数据；切换项目时只保留默认任务 Tab，避免复用上一个项目的数据。
+  const [sectionCache, setSectionCache] = useState<{ projectId: string; sections: ProjectDetailSection[] }>({
+    projectId: '',
+    sections: ['tasks'],
+  });
+  // 各 Tab 常驻后工具栏也要按 Tab 分开缓存，否则隐藏 Tab 的 effect 会覆盖当前 Tab 的按钮。
+  const [sectionToolbarMap, setSectionToolbarMap] = useState<Partial<Record<ProjectDetailSection, React.ReactNode>>>(
+    {}
+  );
+  const [sectionRefreshToolbarMap, setSectionRefreshToolbarMap] = useState<
+    Partial<Record<ProjectDetailSection, React.ReactNode>>
+  >({});
   const [channelConfigOpen, setChannelConfigOpen] = useState(false);
   const [repositoryManagerOpen, setRepositoryManagerOpen] = useState(false);
+  const [editingRepository, setEditingRepository] = useState<DevloopProjectRepo>();
+  const [repositoryRefreshVersion, setRepositoryRefreshVersion] = useState(0);
   const [githubPatOpen, setGithubPatOpen] = useState(false);
   const [githubPat, setGithubPat] = useState('');
   const [githubPatSaved, setGithubPatSaved] = useState(true);
   const [githubPatLoading, setGithubPatLoading] = useState(false);
   const taskFallbackProjectRef = useRef<string | null>(null);
-  const { sessions, total } = useProjectSessions(project);
   const { isDevelopProjectEnabled, isOperationProjectEnabled } = useProjectTypeConfig();
   // 研发和运营能力均以静态参数为准，避免未启用环境误展示对应的业务分区。
   const isDevelopProject = isDevelopProjectEnabled && project?.projectType === 'develop';
@@ -87,10 +94,56 @@ const ProjectDetail: React.FC<Props> = ({
   const defaultRequirementAssignee = operationAssignees.find(
     (option) => currentUserId !== undefined && `${option.value}` === `${currentUserId}`
   )?.value;
-  // 运营项目和研发项目都需要需求入口；普通共享项目仍可查看成员但不显示需求管理。
+  // 运营项目和研发项目保留业务扩展页；默认、普通项目固定只展示任务和资源。
   const showRequirementsSection = isDevelopProject || isOperationProject;
-  const showMembersSection = isDevelopProject || isOperationProject || !!project?.sharedFlag;
-  const showSessionsSection = !isOperationProject && !isDevelopProject;
+  const showMembersSection = isDevelopProject || isOperationProject;
+  const projectCacheKey = `${project?.projectId ?? ''}`;
+  const visitedSections =
+    sectionCache.projectId === projectCacheKey ? sectionCache.sections : (['tasks'] as ProjectDetailSection[]);
+
+  const updateSectionToolbar = useCallback((section: ProjectDetailSection, toolbar: React.ReactNode) => {
+    setSectionToolbarMap((current) => (current[section] === toolbar ? current : { ...current, [section]: toolbar }));
+  }, []);
+
+  const updateSectionRefreshToolbar = useCallback((section: ProjectDetailSection, toolbar: React.ReactNode) => {
+    setSectionRefreshToolbarMap((current) =>
+      current[section] === toolbar ? current : { ...current, [section]: toolbar }
+    );
+  }, []);
+
+  const toolbarHandlers = useMemo(
+    () => ({
+      accounts: (toolbar: React.ReactNode) => updateSectionToolbar('accounts', toolbar),
+      tasks: (toolbar: React.ReactNode) => updateSectionToolbar('tasks', toolbar),
+      members: (toolbar: React.ReactNode) => updateSectionToolbar('members', toolbar),
+    }),
+    [updateSectionToolbar]
+  );
+
+  const refreshToolbarHandlers = useMemo(
+    () => ({
+      accounts: (toolbar: React.ReactNode) => updateSectionRefreshToolbar('accounts', toolbar),
+      requirements: (toolbar: React.ReactNode) => updateSectionRefreshToolbar('requirements', toolbar),
+      tasks: (toolbar: React.ReactNode) => updateSectionRefreshToolbar('tasks', toolbar),
+      resources: (toolbar: React.ReactNode) => updateSectionRefreshToolbar('resources', toolbar),
+      members: (toolbar: React.ReactNode) => updateSectionRefreshToolbar('members', toolbar),
+    }),
+    [updateSectionRefreshToolbar]
+  );
+
+  const activateSection = useCallback(
+    (section: ProjectDetailSection) => {
+      // 首次访问才加入挂载集合；再次切换只显示缓存组件，不重新触发首屏接口。
+      setSectionCache((current) => {
+        const sections = current.projectId === projectCacheKey ? current.sections : [];
+        if (sections.includes(section))
+          return current.projectId === projectCacheKey ? current : { projectId: projectCacheKey, sections };
+        return { projectId: projectCacheKey, sections: [...sections, section] };
+      });
+      setActiveSection(section);
+    },
+    [projectCacheKey]
+  );
 
   useEffect(() => {
     if (!isDevelopProject) {
@@ -114,7 +167,7 @@ const ProjectDetail: React.FC<Props> = ({
       PROJECT_DETAIL_SECTIONS.filter((item) => {
         if (item.key === 'accounts') return isOperationProject;
         if (item.key === 'digitalAgents' || item.key === 'integration') return isDevelopProject;
-        if (item.key === 'sessions') return showSessionsSection;
+        if (item.key === 'sessions') return false;
         if (item.key === 'members') return showMembersSection;
         if (item.key === 'requirements') return showRequirementsSection;
         return true;
@@ -123,23 +176,22 @@ const ProjectDetail: React.FC<Props> = ({
           ? ['requirements', 'tasks', 'resources', 'digitalAgents', 'members', 'integration']
           : isOperationProject
             ? ['accounts', 'requirements', 'tasks', 'resources', 'members']
-            : ['sessions', 'tasks', 'resources', 'members'];
+            : ['tasks', 'resources'];
         return order.indexOf(left.key) - order.indexOf(right.key);
       }),
-    [isDevelopProject, isOperationProject, showMembersSection, showRequirementsSection, showSessionsSection]
+    [isDevelopProject, isOperationProject, showMembersSection, showRequirementsSection]
   );
 
   useEffect(() => {
     // 仅在真正切换项目时初始化 Tab；能力配置异步完成或刷新项目详情时不应覆盖用户当前 Tab。
     setActiveSection('tasks');
+    setSectionCache({ projectId: projectCacheKey, sections: ['tasks'] });
     taskFallbackProjectRef.current = null;
-    setKeyword('');
+    setSectionKeywordMap({});
     setOperationRequirementModalOpen(false);
-    setAccountToolbar(null);
-    setAccountRefreshToolbar(null);
-    setSectionToolbar(null);
-    setSectionRefreshToolbar(null);
-  }, [project?.projectId, project?.projectType]);
+    setSectionToolbarMap({});
+    setSectionRefreshToolbarMap({});
+  }, [project?.projectId, project?.projectType, projectCacheKey]);
 
   const handleTasksInitialLoad = useCallback(
     (hasTasks: boolean) => {
@@ -155,16 +207,10 @@ const ProjectDetail: React.FC<Props> = ({
       }
       // 每个项目只在首次打开且任务首屏为空时自动回退一次，避免刷新空列表时反复抢占用户选择。
       taskFallbackProjectRef.current = projectKey;
-      setActiveSection('requirements');
+      activateSection('requirements');
     },
-    [activeSection, project?.projectId, showRequirementsSection]
+    [activateSection, activeSection, project?.projectId, showRequirementsSection]
   );
-
-  useEffect(() => {
-    // 切换 Tab 时先清空上一个 Tab 的工具栏，待新 Tab 挂载后重新注册。
-    setSectionToolbar(null);
-    setSectionRefreshToolbar(null);
-  }, [activeSection]);
 
   useEffect(() => {
     if (!operationRequirementModalOpen || !isOperationProject || !project?.projectId) return;
@@ -209,114 +255,103 @@ const ProjectDetail: React.FC<Props> = ({
   }, [isDevelopProject, project?.initStatus, onRefresh]);
 
   useEffect(() => {
-    // 运营项目不展示会话页，其他项目隐藏成员或需求页时回退到首个可见分区。
+    // 项目类型切换后若当前 Tab 不可见，则回退到该类型的首个业务分区。
     const currentTabHidden =
-      (!showSessionsSection && activeSection === 'sessions') ||
+      activeSection === 'sessions' ||
       (!isOperationProject && activeSection === 'accounts') ||
       (!isDevelopProject && (activeSection === 'digitalAgents' || activeSection === 'integration')) ||
       (!showMembersSection && activeSection === 'members') ||
       (!showRequirementsSection && activeSection === 'requirements');
     if (currentTabHidden) {
       // 运营项目按“账号、需求、任务、资源、成员”展示，并默认进入账号管理。
-      setActiveSection(isDevelopProject ? 'requirements' : isOperationProject ? 'accounts' : 'sessions');
+      activateSection(isDevelopProject ? 'requirements' : isOperationProject ? 'accounts' : 'tasks');
     }
   }, [
+    activateSection,
     activeSection,
     isDevelopProject,
     isOperationProject,
     showMembersSection,
     showRequirementsSection,
-    showSessionsSection,
   ]);
 
   if (!project) {
     return <div className={styles.detailEmpty}>{intl.formatMessage({ id: 'projectSpace.selectProject' })}</div>;
   }
 
-  const renderSessionList = () => (
-    <ProjectSessionList
-      projectId={project.projectId}
-      sessions={sessions}
-      loading={loading}
-      keyword={keyword}
-      onRefresh={onRefresh}
-      onOpenSession={onOpenSession}
-    />
-  );
-
-  const renderContent = () => {
-    if (activeSection === 'accounts') {
+  const renderSectionContent = (section: ProjectDetailSection) => {
+    const sectionKeyword = sectionKeywordMap[section] || '';
+    if (section === 'accounts') {
       return isOperationProject ? (
         <ProjectAccounts
           project={project}
-          keyword={keyword}
-          onToolbarChange={setAccountToolbar}
-          onRefreshToolbarChange={setAccountRefreshToolbar}
+          keyword={sectionKeyword}
+          onToolbarChange={toolbarHandlers.accounts}
+          onRefreshToolbarChange={refreshToolbarHandlers.accounts}
         />
-      ) : (
-        renderSessionList()
-      );
+      ) : null;
     }
-    if (activeSection === 'sessions') {
-      return renderSessionList();
+    if (section === 'sessions') {
+      return null;
     }
-    if (activeSection === 'tasks') {
+    if (section === 'tasks') {
       return (
         <ProjectTasks
           project={project}
-          keyword={keyword}
+          keyword={sectionKeyword}
           onOpenSession={onOpenSession}
-          onToolbarChange={setSectionToolbar}
-          onRefreshToolbarChange={setSectionRefreshToolbar}
+          onToolbarChange={toolbarHandlers.tasks}
+          onRefreshToolbarChange={refreshToolbarHandlers.tasks}
           onInitialLoad={handleTasksInitialLoad}
         />
       );
     }
-    if (activeSection === 'resources') {
-      return <ProjectResources project={project} onRefreshToolbarChange={setSectionRefreshToolbar} />;
+    if (section === 'resources') {
+      return (
+        <ProjectResources
+          project={project}
+          onRefreshToolbarChange={refreshToolbarHandlers.resources}
+          repositoryRefreshVersion={repositoryRefreshVersion}
+          onOpenRepositoryManager={(repo) => {
+            setEditingRepository(repo);
+            setRepositoryManagerOpen(true);
+          }}
+        />
+      );
     }
-    if (activeSection === 'digitalAgents') {
+    if (section === 'digitalAgents') {
       return isDevelopProject ? (
         <ProjectDefaultAgentPanel
           projectId={Number(project.projectId)}
           active
           onChatWithAgent={onNewSession ? (target) => onNewSession(target) : undefined}
         />
-      ) : (
-        renderSessionList()
-      );
+      ) : null;
     }
-    if (activeSection === 'integration') {
+    if (section === 'integration') {
       return isDevelopProject ? (
-        <Integration active projectId={Number(project.projectId)} embedded />
-      ) : (
-        renderSessionList()
-      );
+        <Integration active projectId={Number(project.projectId)} embedded onOpenSession={onOpenSession} />
+      ) : null;
     }
-    if (activeSection === 'members') {
+    if (section === 'members') {
       return showMembersSection ? (
         <ProjectMembers
           project={project}
-          keyword={keyword}
-          onToolbarChange={setSectionToolbar}
-          onRefreshToolbarChange={setSectionRefreshToolbar}
+          keyword={sectionKeyword}
+          onToolbarChange={toolbarHandlers.members}
+          onRefreshToolbarChange={refreshToolbarHandlers.members}
         />
-      ) : (
-        renderSessionList()
-      );
+      ) : null;
     }
     return showRequirementsSection ? (
       <ProjectRequirements
         key={requirementsRefreshVersion}
         project={project}
-        keyword={keyword}
-        onToolbarChange={setSectionToolbar}
-        onRefreshToolbarChange={setSectionRefreshToolbar}
-        onStarted={() => setActiveSection('tasks')}
+        keyword={sectionKeyword}
+        onRefreshToolbarChange={refreshToolbarHandlers.requirements}
+        onStarted={() => activateSection('tasks')}
       />
-    ) : (
-      renderSessionList()
-    );
+    ) : null;
   };
 
   const handleCreateOperationRequirement = async (values: OperationTaskFormValues) => {
@@ -357,7 +392,7 @@ const ProjectDetail: React.FC<Props> = ({
       message.success(intl.formatMessage({ id: 'projectSpace.operation.requirement.createSuccess' }));
       setOperationRequirementModalOpen(false);
       // 新增需求完成后保持在需求 Tab，避免项目详情刷新或子组件重建跳回账号 Tab。
-      setActiveSection('requirements');
+      activateSection('requirements');
       // 创建成功后重建需求列表组件，确保从第一页读取最新数据并重置滚动状态。
       setRequirementsRefreshVersion((current) => current + 1);
     } catch (error: any) {
@@ -375,6 +410,11 @@ const ProjectDetail: React.FC<Props> = ({
             <Typography.Title level={3} ellipsis={{ tooltip: project.projectName }}>
               {project.projectName}
             </Typography.Title>
+            {isDevelopProject && project.initStatus && project.initStatus !== 'ready' && (
+              <Tag bordered={false} icon={<LoadingOutlined spin />} className={styles.detailInitializingTag}>
+                {intl.formatMessage({ id: 'projectSpace.scene.initializing' })}
+              </Tag>
+            )}
             {(onEditProject || onDeleteProject) && (
               <Dropdown
                 trigger={['click']}
@@ -416,21 +456,18 @@ const ProjectDetail: React.FC<Props> = ({
           </Tag>
           <Typography.Text type="secondary">
             {project.description || intl.formatMessage({ id: 'projectSpace.projectCard.emptyDescription' })}
-            {showSessionsSection && (
-              <>
-                {' · '}
-                {intl.formatMessage({ id: 'projectSpace.projectCard.sessionCount' }, { count: total })}
-              </>
-            )}
           </Typography.Text>
         </div>
         <div className={styles.detailHeaderActions}>
           <Input
             allowClear
-            value={keyword}
+            value={sectionKeywordMap[activeSection] || ''}
             prefix={<SearchOutlined />}
             placeholder={intl.formatMessage({ id: 'projectSpace.searchPlaceholder' })}
-            onChange={(event) => setKeyword(event.target.value)}
+            onChange={(event) => {
+              const value = event.target.value;
+              setSectionKeywordMap((current) => ({ ...current, [activeSection]: value }));
+            }}
           />
           {/* 运营项目只在需求 tab 显示新增需求入口，切换到其它 tab 后隐藏。 */}
           {isOperationProject && activeSection === 'requirements' && (
@@ -450,16 +487,26 @@ const ProjectDetail: React.FC<Props> = ({
               </Button>
             </>
           )}
-          {isDevelopProject && <Button onClick={() => setRepositoryManagerOpen(true)}>仓库管理</Button>}
-          {activeSection === 'accounts' ? accountToolbar : sectionToolbar}
-          {/* 不直接把 onNewSession 当 onClick:那会把鼠标事件当成 agentId 传下去。 */}
+          {/* 新增仓库属于研发项目资源维护操作，仅在资源 Tab 展示。 */}
+          {isDevelopProject && activeSection === 'resources' && (
+            <Button
+              onClick={() => {
+                setEditingRepository(undefined);
+                setRepositoryManagerOpen(true);
+              }}
+            >
+              新增仓库
+            </Button>
+          )}
+          {sectionToolbarMap[activeSection]}
           {onNewSession && (
+            // 不直接把 onNewSession 当 onClick，否则鼠标事件会被误当成数字员工参数传入。
             <Button icon={<PlusOutlined />} onClick={() => onNewSession()}>
               {intl.formatMessage({ id: 'projectSpace.newChatName' })}
             </Button>
           )}
           {/* 各 Tab 的顺序为业务操作、新建会话、刷新；账号 Tab 由账号筛选和新增账号组成业务操作。 */}
-          {activeSection === 'accounts' ? accountRefreshToolbar : sectionRefreshToolbar}
+          {sectionRefreshToolbarMap[activeSection]}
         </div>
       </div>
       {isDevelopProject && project.initStatus && project.initStatus !== 'ready' && (
@@ -494,11 +541,23 @@ const ProjectDetail: React.FC<Props> = ({
             label: intl.formatMessage({ id: item.labelId }),
             value: item.key,
           }))}
-          onChange={(value) => setActiveSection(value as ProjectDetailSection)}
+          onChange={(value) => activateSection(value as ProjectDetailSection)}
         />
       </div>
       <div className={styles.detailBody}>
-        <Spin spinning={!!loading}>{renderContent()}</Spin>
+        <Spin spinning={!!loading}>
+          {detailSections
+            .filter((section) => visitedSections.includes(section.key))
+            .map((section) => (
+              <div
+                key={section.key}
+                // display: contents 不增加额外布局层，隐藏时仍保留子组件状态和已请求的数据。
+                style={{ display: activeSection === section.key ? 'contents' : 'none' }}
+              >
+                {renderSectionContent(section.key)}
+              </div>
+            ))}
+        </Spin>
       </div>
       <OperationTaskFormModal
         open={operationRequirementModalOpen}
@@ -524,8 +583,15 @@ const ProjectDetail: React.FC<Props> = ({
         <ProjectRepositoryManager
           project={project}
           open={repositoryManagerOpen}
-          onClose={() => setRepositoryManagerOpen(false)}
-          onChanged={() => void onRefresh?.()}
+          editingRepo={editingRepository}
+          onClose={() => {
+            setRepositoryManagerOpen(false);
+            setEditingRepository(undefined);
+          }}
+          onChanged={() => {
+            setRepositoryRefreshVersion((current) => current + 1);
+            void onRefresh?.();
+          }}
         />
       )}
       <Modal

@@ -117,9 +117,9 @@ public class WorkspaceInitService {
      * @param projectId 研发项目ID
      * @param buildIndex 是否建代码索引
      * @param skillPackages 建索引所需技能包，前端传数组，落库前拼成逗号分隔
-     * @return 本次初始化的会话ID
+     * @return 本次初始化的会话与架构员工
      */
-    public Long startWorkspaceInit(Long projectId, boolean buildIndex, Object skillPackages) {
+    public WorkspaceInitStarted startWorkspaceInit(Long projectId, boolean buildIndex, Object skillPackages) {
         Project project = requireProject(projectId);
         if (!PROJECT_TYPE_DEVELOP.equals(project.getProjectType())) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.init.developOnly");
@@ -128,7 +128,8 @@ public class WorkspaceInitService {
         if (workspaceRepo == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.init.workspaceRepoRequired");
         }
-        Long architectAgentId = resolveArchitectAgentId(projectId);
+        DefaultAgent defaultAgent = defaultAgentService.resolveForProject(projectId);
+        Long architectAgentId = parseArchitectAgentId(projectId, defaultAgent);
         if (architectAgentId == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.init.architectRequired");
         }
@@ -172,7 +173,14 @@ public class WorkspaceInitService {
         });
         log.info("[WorkspaceInit] 已下发架构员工初始化, projectId={}, sessionId={}, architectAgentId={}", projectId, sessionId,
             architectAgentId);
-        return sessionId;
+        return new WorkspaceInitStarted(sessionId, architectAgentId, defaultAgent.getArchitectAgentName());
+    }
+
+    /**
+     * 初始化下发结果：会话ID加架构员工。员工要一起回给前端——项目维度员工不在前端员工列表里，
+     * 只给会话ID跳过去，聊天输入框的 @ 查不到人会兜底成「AI 助手」。
+     */
+    public record WorkspaceInitStarted(Long sessionId, Long architectAgentId, String architectAgentName) {
     }
 
     /**
@@ -268,8 +276,7 @@ public class WorkspaceInitService {
     }
 
     /** 架构助理来自项目默认员工（项目覆盖优先，回退全局）；字符串存储，空或非法都按未配置处理。 */
-    private Long resolveArchitectAgentId(Long projectId) {
-        DefaultAgent agent = defaultAgentService.resolveForProject(projectId);
+    private Long parseArchitectAgentId(Long projectId, DefaultAgent agent) {
         String raw = agent == null ? null : agent.getArchitectAgentId();
         if (StringUtils.isBlank(raw)) {
             return null;
@@ -350,41 +357,14 @@ public class WorkspaceInitService {
 
     /**
      * 提示词兜底：DB 未配置 DEVLOOP_WORKSPACE_INIT_PROMPT 时使用，与 V0.4.0 DML 中的模板保持一致。
-     * 步骤照搬旧 ProjectInitService 实际做的四件事：克隆 -> 装技能包 -> commit -> push，不要另加骨架生成之类它没做的事。
+     * 初始化步骤由 /trellis-spec-bootstrap 自己定义，这里不再复述克隆/技能包/commit/push，否则两处必然漂移。
+     * ACP 那行不能删：完成状态靠 self-developed-rules 写 /by/.acp-runs/sessions/&lt;会话ID&gt;.json，
+     * 不调这个 skill 平台读不到 completed，项目会一直卡在「初始化中」。
      */
     private static final String DEFAULT_WORKSPACE_INIT_PROMPT_TEMPLATE = """
-        请初始化本研发项目的工作区仓库。
+        /trellis-spec-bootstrap 按照逻辑要求初始化trellis项目spec，过程你不需要询问我的意见，按照你推荐的方式进行
 
-        ## 项目信息
-        - 项目：${projectName}
-        - 工作区仓库：${repoFullName}
-        - 仓库地址：${repoUrl}
-        - 默认分支：${defaultBranch}
-        - 会话ID：${sessionId}
-
-        ## 仓库访问说明
-        ${repoCloneHint}
-
-        ## 初始化步骤
-        1. 把工作区仓库克隆到 /by/.sessions/${sessionId}/{仓库名}/，检出默认分支 ${defaultBranch}。
-           克隆完确认 .git 存在，是个正常的 Git 仓库。
-        2. 看一眼仓库现状，判断哪些技能包已经装过。不要覆盖用户已有内容。
-        3. ${skillPackageSection}
-        4. 有变更就在默认分支 ${defaultBranch} 上提交，提交信息用
-           `chore: init <技能包名，逗号分隔> skill package(s)`；没装任何技能包时用 `chore: update repository`。
-           工作区没有任何变更就跳过提交，不要造空提交。
-        5. 有新提交才 push 到远端 ${defaultBranch}；没有新提交不要 push。
-
-        ## 边界
-        - 本次只做上面五步。不要顺手改业务代码、不要生成架构文档或 checklist、不要建仓库里原本没有的目录。
-        - push 被拒或没有仓库权限时不要绕路（不要改远端地址、不要 force push），按下面的要求转 paused 报出来。
-
-        ## 强制要求
-        - 启动时必须先调用 skill：self-developed-rules，并按其 JSON 状态契约初始化 trace。
-        - 全过程的进展必须打到 /by/.acp-runs/sessions/${sessionId}.json：平台只读这个文件判断初始化是否完成，
-          不写这个文件，项目会一直卡在「初始化中」，用户无法新建需求或启动任务。
-        - 五步全部做完（该 push 的已 push）才把任务状态收为 completed；中途遇到不可恢复的问题
-          （无仓库权限、push 被拒、技能包 CLI 缺失等）按契约转 paused 并写清原因，不要静默结束。""";
+        acp下发任务告诉对方启动的时候必须要调用skill：self-developed-rules;""";
 
     /** 提示词语言取当前请求上下文；异步/定时无上下文时回退中文，与研发任务提示词同一口径。 */
     private String currentLanguage() {

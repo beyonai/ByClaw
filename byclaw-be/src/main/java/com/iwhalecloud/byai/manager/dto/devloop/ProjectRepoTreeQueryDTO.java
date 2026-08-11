@@ -18,4 +18,7 @@ public class ProjectRepoTreeQueryDTO {
 
     /** 分支或 tag；为空时使用项目仓库配置的默认分支。 */
     private String ref;
+
+    /** 文件名或仓库内路径搜索词。 */
+    private String keyword;
 }
