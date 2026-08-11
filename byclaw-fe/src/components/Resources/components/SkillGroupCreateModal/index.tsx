@@ -316,80 +316,78 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
                 placeholder={intl.formatMessage({ id: 'resource.skillGroup.descPlaceholder' })}
               />
             </Form.Item>
-            <Form.Item
-              label={intl.formatMessage({ id: 'resource.memberSkills' })}
-              name="skillIds"
-              rules={[
-                {
-                  required: true,
-                  type: 'array',
-                  min: 1,
-                  message: intl.formatMessage({ id: 'resource.skillGroup.selectSkills' }),
-                },
-              ]}
-            >
-              <Select
-                mode="multiple"
-                loading={skillsLoading}
-                listHeight={SKILL_CANDIDATE_LIST_HEIGHT}
-                optionFilterProp="label"
-                placeholder={intl.formatMessage({ id: 'resource.skillGroup.selectSkills' })}
-                options={activeSkillOptions.map((skill) => ({
-                  value: skill.resourceId,
-                  label: skill.resourceName,
-                  title: skill.resourceDesc,
-                }))}
-                labelRender={({ value, label }) => getSkillOptionLabel(skillOptions, value, label)}
-                popupRender={(menu) => (
-                  <div>
-                    <div className={styles.skillTabsHeader} onMouseDown={(event) => event.preventDefault()}>
-                      <Tabs
-                        animated={false}
-                        activeKey={activeSkillTab}
-                        size={SKILL_CANDIDATE_TABS_SIZE}
-                        items={[
-                          {
-                            key: 'builtIn',
-                            label: (
-                              <span>
-                                {intl.formatMessage({ id: 'resource.skillGroup.builtInSkills' })}
-                                <span className={styles.skillTabCount}>{builtInSkills.length}</span>
-                              </span>
-                            ),
-                          },
-                          {
-                            key: 'personal',
-                            label: (
-                              <span>
-                                {intl.formatMessage({ id: 'resource.skillGroup.personalSkills' })}
-                                <span className={styles.skillTabCount}>{personalSkills.length}</span>
-                              </span>
-                            ),
-                          },
-                        ]}
-                        onChange={(key) => setActiveSkillTab(key as SkillCandidateTabKey)}
-                      />
-                    </div>
-                    {activeSkillTab === 'personal' ? (
-                      <div className={styles.personalSkillToolbar}>
-                        <Button
-                          type="link"
-                          size="small"
-                          icon={<UploadOutlined />}
-                          disabled={skillsLoading}
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => setSkillImportOpen(true)}
-                        >
-                          {intl.formatMessage({ id: 'resource.skillGroup.uploadPersonalSkill' })}
-                        </Button>
+            <Form.Item label={intl.formatMessage({ id: 'resource.memberSkills' })} required>
+              <div className={styles.skillFieldRow}>
+                <Form.Item
+                  className={styles.skillSelectorItem}
+                  name="skillIds"
+                  rules={[
+                    {
+                      required: true,
+                      type: 'array',
+                      min: 1,
+                      message: intl.formatMessage({ id: 'resource.skillGroup.selectSkills' }),
+                    },
+                  ]}
+                >
+                  <Select
+                    mode="multiple"
+                    loading={skillsLoading}
+                    listHeight={SKILL_CANDIDATE_LIST_HEIGHT}
+                    optionFilterProp="label"
+                    placeholder={intl.formatMessage({ id: 'resource.skillGroup.selectSkills' })}
+                    options={activeSkillOptions.map((skill) => ({
+                      value: skill.resourceId,
+                      label: skill.resourceName,
+                      title: skill.resourceDesc,
+                    }))}
+                    labelRender={({ value, label }) => getSkillOptionLabel(skillOptions, value, label)}
+                    popupRender={(menu) => (
+                      <div>
+                        <div className={styles.skillTabsHeader} onMouseDown={(event) => event.preventDefault()}>
+                          <Tabs
+                            animated={false}
+                            activeKey={activeSkillTab}
+                            size={SKILL_CANDIDATE_TABS_SIZE}
+                            items={[
+                              {
+                                key: 'builtIn',
+                                label: (
+                                  <span>
+                                    {intl.formatMessage({ id: 'resource.skillGroup.builtInSkills' })}
+                                    <span className={styles.skillTabCount}>{builtInSkills.length}</span>
+                                  </span>
+                                ),
+                              },
+                              {
+                                key: 'personal',
+                                label: (
+                                  <span>
+                                    {intl.formatMessage({ id: 'resource.skillGroup.personalSkills' })}
+                                    <span className={styles.skillTabCount}>{personalSkills.length}</span>
+                                  </span>
+                                ),
+                              },
+                            ]}
+                            onChange={(key) => setActiveSkillTab(key as SkillCandidateTabKey)}
+                          />
+                        </div>
+                        <div className={styles.skillMenu} style={{ height: SKILL_CANDIDATE_LIST_HEIGHT }}>
+                          {menu}
+                        </div>
                       </div>
-                    ) : null}
-                    <div className={styles.skillMenu} style={{ height: SKILL_CANDIDATE_LIST_HEIGHT }}>
-                      {menu}
-                    </div>
-                  </div>
-                )}
-              />
+                    )}
+                  />
+                </Form.Item>
+                <Button
+                  className={styles.uploadPersonalSkillButton}
+                  icon={<UploadOutlined />}
+                  disabled={skillsLoading}
+                  onClick={() => setSkillImportOpen(true)}
+                >
+                  {intl.formatMessage({ id: 'resource.skillGroup.uploadPersonalSkill' })}
+                </Button>
+              </div>
             </Form.Item>
           </div>
           <div className={styles.coverColumn}>
