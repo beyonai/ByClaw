@@ -50,6 +50,8 @@ nav.chatTitle {
     .projectActionButton {
       width: 32px;
       height: 32px;
+      min-width: 32px;
+      min-height: 32px;
       padding: 0;
       border: 0;
       border-radius: 10px;
@@ -57,7 +59,25 @@ nav.chatTitle {
       align-items: center;
       justify-content: center;
       color: #526075;
+      line-height: 1;
       box-shadow: none;
+
+      // Ant Design 图标和自定义 SVG 共用固定图标槽，确保两个标题按钮的视觉尺寸和垂直位置一致。
+      :global(.@{antPrefix}-btn-icon) {
+        width: 20px;
+        height: 20px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0;
+        line-height: 1;
+      }
+
+      svg {
+        width: 20px;
+        height: 20px;
+        display: block;
+      }
 
       // 鼠标点击不保留高亮，键盘聚焦时仍提供清晰的可访问性反馈。
       &:hover,

@@ -161,6 +161,13 @@
   flex-direction: column;
 }
 
+.projectTitleRow {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .projectMain strong,
 .projectMain small {
   overflow: hidden;
@@ -169,6 +176,8 @@
 }
 
 .projectMain strong {
+  min-width: 0;
+  flex: 1;
   color: #14161a;
   font-size: 13px;
   font-weight: 500;
@@ -205,4 +214,49 @@
 .projectDefault {
   color: #596579;
   background: #f1f4f8;
+}
+
+// 项目类型标签与会话模块保持相同尺寸、圆角和颜色，放在项目名称行最右侧。
+.projectTag {
+  height: 18px;
+  line-height: 18px;
+  flex-shrink: 0;
+  margin-inline-end: 0;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.projectTagGroup {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.projectTagPersonal {
+  color: #246bfe;
+  background: #eaf2ff;
+}
+
+.projectTagShared {
+  color: #16835a;
+  background: #eaf8f0;
+}
+
+.projectTagDefault {
+  color: #596579;
+  background: #f1f4f8;
+}
+
+.projectTagDevelopment {
+  color: #7a3fd1;
+  background: #f3ecff;
+}
+
+.projectTagOperation {
+  color: #1677b8;
+  background: #e8f4fc;
 }

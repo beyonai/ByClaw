@@ -23,6 +23,7 @@ import type { IAgentFileUploadConf } from '../../hooks/useAgentUploadFileConfig'
 import type { DefaultValueSchema } from './RichInput/types';
 import type { ContextUsed } from '@/hooks/useContextUsed';
 import { getLastMentionedDigitalEmployeeId } from './utils/mention';
+import TaskTemplateEntry from '@/components/TaskTemplateModal/TaskTemplateEntry';
 
 export type IProps = {
   getMessageList?: () => Array<IMessage>;
@@ -54,8 +55,10 @@ export type IProps = {
   onInputDraftChange?: (draft: DefaultValueSchema) => void;
   contextUsed?: ContextUsed;
 
-  /** 当前会话所属项目，用于仅在运营项目展示任务模板入口。 */
+  /** 当前会话所属项目，用于自动选择普通、研发或运营任务模板。 */
   projectId?: number;
+  /** 仅会话输入框开启公共任务模板入口，避免通知等复用输入框误展示。 */
+  enableTaskTemplate?: boolean;
 };
 
 export type IState = {
@@ -460,7 +463,16 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
             },
           }}
         >
-          <Space>{this.bottomLeftRender()}</Space>
+          <Space>
+            {/* 会话输入框默认始终展示入口，仅模板编辑器等明确传 false 的非会话场景隐藏。 */}
+            {this.props.enableTaskTemplate !== false && (
+              <TaskTemplateEntry
+                projectId={this.props.projectId}
+                onApply={(prompt) => this.setInputValue({ inputTxt: prompt, isInsert: false })}
+              />
+            )}
+            {this.bottomLeftRender()}
+          </Space>
         </ConfigProvider>
         <Space className={styles.toolsRight}>
           {BottomRightRender}

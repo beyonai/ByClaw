@@ -357,3 +357,14 @@ INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prom
 VALUES (nextval('byai.seq_any_table'), 'DEVLOOP_PROMPT', 'DEVLOOP_REQUIREMENT_CLARIFY_PROMPT', '需求澄清提示词', '需求数字员工澄清需求的提示词，占位符 ${requirementContent} 替换为原始需求内容；正文为 /byclaw-requirement-clarification 斜杠命令加需求内容，再加 ACP 强制要求', 'DEVLOOP_REQUIREMENT_CLARIFY_PROMPT', '/byclaw-requirement-clarification ${requirementContent}
 
 acp下发任务告诉对方启动的时候必须要调用skill：self-developed-rules;', null, 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
+
+
+-- 数字员工组类型字典（OpenGauss，可重复执行）。
+DELETE FROM byai.byai_system_config_list WHERE param_group_code = 'DIG_EMPLOYEE_AGENT_TYPE' AND param_value = '017';
+
+INSERT INTO byai.byai_system_config_list
+(param_id, param_group_code, param_group_name, param_name, param_en_name,
+ param_value, param_desc, param_seq)
+VALUES
+    (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_AGENT_TYPE', '数字员工类型',
+     '数字员工组', 'Digital Employee Group', '017', '数字员工组', 6);

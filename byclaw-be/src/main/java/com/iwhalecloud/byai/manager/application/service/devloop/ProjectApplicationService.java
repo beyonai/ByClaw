@@ -759,6 +759,45 @@ public class ProjectApplicationService {
         return result;
     }
 
+    /**
+     * 更新单个项目仓库。
+     *
+     * <p>编辑直接更新原记录，不采用删除后重建，避免需求、任务或扫描源中保存的 repoId 失效。</p>
+     */
+    public Map<String, Object> updateProjectRepo(ProjectRepoDTO dto) {
+        if (dto == null || dto.getRepoId() == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.id.required");
+        }
+        if (dto.getProjectId() == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.id.required");
+        }
+        if (dto.getRepoFullName() == null || dto.getRepoFullName().trim().isEmpty()) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.name.required");
+        }
+        ProjectRepo repo = projectRepoMapper.selectById(dto.getRepoId());
+        if (repo == null || !dto.getProjectId().equals(repo.getProjectId())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.not.found");
+        }
+        repo.setRepoFullName(dto.getRepoFullName().trim());
+        repo.setRepoUrl(StringUtils.trimToNull(dto.getRepoUrl()));
+        String defaultBranch = dto.getDefaultBranch() == null ? "" : dto.getDefaultBranch().trim();
+        repo.setDefaultBranch(defaultBranch.isEmpty() ? "main" : defaultBranch);
+        repo.setDescription(StringUtils.trimToNull(dto.getDescription()));
+        repo.setRepoType("workspace".equals(dto.getRepoType()) ? "workspace" : "code");
+        repo.setProvider(normalizeProvider(dto.getProvider()));
+        projectRepoMapper.updateById(repo);
+        Map<String, Object> result = new HashMap<>();
+        result.put("repoId", repo.getRepoId());
+        result.put("projectId", repo.getProjectId());
+        result.put("repoFullName", repo.getRepoFullName());
+        result.put("repoUrl", repo.getRepoUrl());
+        result.put("defaultBranch", repo.getDefaultBranch());
+        result.put("description", repo.getDescription());
+        result.put("repoType", repo.getRepoType());
+        result.put("provider", repo.getProvider());
+        return result;
+    }
+
     /** 仅接受受支持的代码平台,其余(含空)按 github 处理;与 clone 令牌注入约定保持一致。 */
     private static String normalizeProvider(String provider) {
         if ("gitlab".equals(provider) || "gitea".equals(provider)) {

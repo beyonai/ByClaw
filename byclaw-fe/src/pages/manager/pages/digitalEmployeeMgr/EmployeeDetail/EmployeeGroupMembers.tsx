@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { Button, Input, message, Modal, Table, Typography } from 'antd';
 import { useIntl } from '@umijs/max';
 import { queryEmployeeGroupMemberCandidates } from '@/pages/manager/service/DigitalEmployeeMgr';
@@ -114,14 +114,6 @@ export default function EmployeeGroupMembers({ value = [], onChange, disabled = 
     onChange?.(next.map((item, index) => ({ ...item, sortOrder: index + 1 })));
   };
 
-  const move = (index, offset) => {
-    const target = index + offset;
-    if (target < 0 || target >= members.length) return;
-    const next = [...members];
-    [next[index], next[target]] = [next[target], next[index]];
-    updateMembers(next);
-  };
-
   const openSelector = () => {
     setKeyword('');
     setSearchValue('');
@@ -178,20 +170,6 @@ export default function EmployeeGroupMembers({ value = [], onChange, disabled = 
               />
               {!disabled && (
                 <div className={styles.actions}>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<ArrowUpOutlined />}
-                    disabled={index === 0}
-                    onClick={() => move(index, -1)}
-                  />
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<ArrowDownOutlined />}
-                    disabled={index === members.length - 1}
-                    onClick={() => move(index, 1)}
-                  />
                   <Button
                     type="text"
                     size="small"

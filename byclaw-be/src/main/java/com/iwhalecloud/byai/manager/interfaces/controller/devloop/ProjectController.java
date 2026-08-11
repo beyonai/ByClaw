@@ -222,6 +222,12 @@ public class ProjectController {
         return ResponseUtil.successResponse(projectApplicationService.createProjectRepo(dto));
     }
 
+    /** 更新项目仓库配置，保留仓库主键以避免已有任务关联失效。 */
+    @PostMapping("/repo/update")
+    public ResponseUtil<Map<String, Object>> updateProjectRepo(@RequestBody ProjectRepoDTO dto) {
+        return ResponseUtil.successResponse(projectApplicationService.updateProjectRepo(dto));
+    }
+
     /**
      * 查询项目关联的代码仓库列表。
      *

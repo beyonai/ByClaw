@@ -16,7 +16,8 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  padding: 12px;
+  // 系统主内容区已经统一提供外边距，项目大面板不再额外缩进，与会话、员工页面保持一致。
+  padding: 0;
   box-sizing: border-box;
   background: #f5f7fb;
 }
@@ -198,10 +199,28 @@
 }
 
 .detailTitleRow {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
   margin-bottom: 6px;
+
+  h3 {
+    min-width: 0;
+  }
+}
+
+.detailInitializingTag {
+  height: 20px;
+  line-height: 20px;
+  flex-shrink: 0;
+  margin-inline-end: 0;
+  padding: 0 6px;
+  border-radius: 6px;
+  color: #d46b08;
+  background: #fff7e6;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .detailProjectMoreButton {
@@ -875,7 +894,7 @@
   height: 100%;
   min-height: 100%;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   align-content: stretch;
   align-items: stretch;
@@ -932,6 +951,18 @@
   background: #f1f6ff;
 }
 
+.projectResourceBindingModal {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  > div {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+}
+
 .resourceCategoryBody {
   min-height: 0;
   flex: 1;
@@ -958,6 +989,60 @@
     background: #f7f9fc;
     cursor: pointer;
   }
+}
+
+.resourceBoundItem {
+  min-height: 68px;
+  margin-bottom: 0;
+  padding: 10px 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transition: none;
+
+  &:hover,
+  &:focus-visible {
+    background: transparent;
+    box-shadow: none;
+    cursor: default;
+    transform: none;
+  }
+}
+
+.resourceBoundIcon {
+  font-size: 18px;
+}
+
+.resourceKnowledgeIcon {
+  color: #246bfe;
+  background: #eaf2ff;
+}
+
+.resourceEmployeeIcon {
+  color: #7a4ce0;
+  background: #f2edff;
+}
+
+.resourceOntologyIcon {
+  color: #0d9488;
+  background: #e7f8f5;
+}
+
+.resourceMoreButton {
+  flex: none;
+  color: #98a2b3;
+  opacity: 0;
+  transition: opacity 0.2s, color 0.2s;
+
+  &:hover {
+    color: #246bfe;
+  }
+}
+
+.resourceSimpleItem:hover .resourceMoreButton,
+.resourceSimpleItem:focus-within .resourceMoreButton {
+  opacity: 1;
 }
 
 .resourceSimpleIcon {
@@ -993,12 +1078,6 @@
 
   :global(.@{antPrefix}-typography strong) {
     font-size: 13px;
-  }
-}
-
-@media (max-width: 1280px) {
-  .resourceCategoryGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

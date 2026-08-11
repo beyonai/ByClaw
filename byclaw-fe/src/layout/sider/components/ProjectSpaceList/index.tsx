@@ -18,6 +18,7 @@ import getElementData from '@/components/QueryInput/RichInput/utils/getElementDa
 import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
 import { agentTypeMap } from '@/constants/agent';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
+import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
 import {
   createProject,
@@ -28,7 +29,6 @@ import {
 } from '@/pages/projectSpace/service';
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
-import { getStoredProjectScopeId, saveProjectScopeIdToStorage } from '@/pages/projectSpace/constants';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import {
   saveDefaultAgent,
@@ -278,7 +278,7 @@ const ProjectSpaceList: React.FC = () => {
   // 项目类型配置决定研发、运营能力是否开放，侧栏表单和详情使用同一份结果。
   const { projectTypeOptions, projectTypeLoading, isDevelopProjectEnabled, isOperationProjectEnabled } =
     useProjectTypeConfig();
-  const [projectScopeId, setProjectScopeId] = useState<string | undefined>(() => getStoredProjectScopeId());
+  const [projectScopeId, updateProjectScopeId] = useProjectScopeId();
   const [projectScopeDropdownOpen, setProjectScopeDropdownOpen] = useState(false);
   const [sessionKeyword, setSessionKeyword] = useState('');
   const [sessionSearchMode, setSessionSearchMode] = useState<DevloopProjectSessionSearchMode>('CHAT_CONTENT');
@@ -297,15 +297,6 @@ const ProjectSpaceList: React.FC = () => {
   const sessionSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 新建项目的列表响应可能稍后才返回，期间保留待选 ID，避免被无效本地存储回退逻辑提前清除。
   const pendingCreatedProjectIdRef = useRef<string>();
-  // 首次进入项目空间时自动展开项目详情，避免用户每次都需要手动点击"进入项目详情"。
-  const hasAutoOpenedDetailRef = useRef(false);
-
-  const updateProjectScopeId = useCallback((projectId?: string | number) => {
-    const normalizedProjectId = `${projectId ?? ''}`.trim();
-    // 选中项目与本地存储同步更新，刷新浏览器后可以恢复上次的项目上下文。
-    setProjectScopeId(normalizedProjectId || undefined);
-    saveProjectScopeIdToStorage(normalizedProjectId);
-  }, []);
 
   const visibleProjects = useMemo(
     () => projects.filter((project) => !inaccessibleProjectIds.has(`${project.projectId}`)),
@@ -479,8 +470,6 @@ const ProjectSpaceList: React.FC = () => {
 
   useEffect(() => {
     if (!visibleProjects.length) {
-      // 无可见项目时仅在状态实际有内容时清理，避免空对象触发 effect 重复更新。
-      setProjectScopeId((current) => current || undefined);
       setProjectSessionPageMap((current) => (Object.keys(current).length ? {} : current));
       setSessionMoreLoadingMap((current) => (Object.keys(current).length ? {} : current));
       return;
@@ -498,8 +487,15 @@ const ProjectSpaceList: React.FC = () => {
         // 新项目尚未进入列表时继续等待下一次列表刷新，暂不写入或删除本地存储。
         return;
       }
-      // 本地保存的项目已删除或无访问权限时清除旧值，随后自动回退到默认项目。
-      updateProjectScopeId();
+      if (projectScopeSearchKeyword.trim()) {
+        // 搜索结果不代表完整项目权限范围，不能据此清除其它模块刚同步过来的当前项目。
+        return;
+      }
+      if (hasMoreProjects) {
+        void loadMoreProjects();
+        return;
+      }
+      // 其它模块可能先更新共享值、后刷新列表；未命中时保留该值，删除和退出项目会显式清理。
       return;
     }
 
@@ -522,8 +518,11 @@ const ProjectSpaceList: React.FC = () => {
     void fetchProjectSessions(firstProject, { force: true, keyword: '', searchMode: sessionSearchMode });
   }, [
     fetchProjectSessions,
+    hasMoreProjects,
     inaccessibleProjectIds,
+    loadMoreProjects,
     projectScopeId,
+    projectScopeSearchKeyword,
     projectSessionPageMap,
     sessionSearchMode,
     updateProjectScopeId,
@@ -921,18 +920,6 @@ const ProjectSpaceList: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    // 研发项目首次进入项目空间时自动展开项目详情，避免用户每次都需要手动点击"进入项目详情"。
-    // ref 保证仅在组件挂载后首次选中研发项目时触发，之后用户主动返回会话列表不会被重新拉回。
-    if (hasAutoOpenedDetailRef.current || !activeScopeProject || activeScopeProject.projectType !== 'develop') return;
-    hasAutoOpenedDetailRef.current = true;
-    setDetailProject(activeScopeProject);
-    void fetchProjectFullDetail(activeScopeProject, true).then((detail) => {
-      const targetProjectId = `${activeScopeProject.projectId}`;
-      setDetailProject((current) => (`${current?.projectId || ''}` === targetProjectId ? detail : current));
-    });
-  }, [activeScopeProject, fetchProjectFullDetail]);
-
   const handleProjectSharedChange = useCallback(
     (projectId: string | number) => {
       const targetProjectId = `${projectId || ''}`;
@@ -1236,9 +1223,9 @@ const ProjectSpaceList: React.FC = () => {
         if (createdProject) {
           updateProjectScopeId(selectedProjectId);
         } else {
-          // 列表尚未返回新项目时仅保留当前会话选择，待项目可见后由 effect 写入本地存储。
+          // 列表尚未返回新项目时先同步共享项目值，待列表刷新后再完成可见性校验。
           pendingCreatedProjectIdRef.current = selectedProjectId;
-          setProjectScopeId(selectedProjectId);
+          updateProjectScopeId(selectedProjectId);
         }
         setSessionKeyword('');
         EventEmitter.emit('projectSpace-active-project-change', {

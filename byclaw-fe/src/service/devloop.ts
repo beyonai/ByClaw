@@ -254,6 +254,18 @@ export const createProjectRepo = (data: {
   provider?: RepoProvider;
 }) => POST<any>('/byaiService/project/repo/create', data);
 
+/** 更新项目仓库，沿用原 repoId 保持已有任务和扫描源的关联不变。 */
+export const updateProjectRepo = (data: {
+  repoId: number;
+  projectId: number;
+  repoFullName: string;
+  repoUrl?: string;
+  defaultBranch?: string;
+  description?: string;
+  repoType?: ProjectRepoType;
+  provider?: RepoProvider;
+}) => POST<any>('/byaiService/project/repo/update', data);
+
 export const listProjectRepos = (projectId: number) =>
   POST<DevloopProjectRepo[]>('/byaiService/project/repo/list', { projectId });
 
