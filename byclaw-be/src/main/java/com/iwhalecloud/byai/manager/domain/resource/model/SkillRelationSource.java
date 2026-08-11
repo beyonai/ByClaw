@@ -48,7 +48,7 @@ public final class SkillRelationSource {
             if (root.containsKey("version")) {
                 return Long.valueOf(VERSION_2).equals(strictLong(root.get("version")))
                     ? parseVersion2(root)
-                    : malformedManual();
+                    : malformedManual(root);
             }
 
             boolean hasManual = root.containsKey("manual");
@@ -99,24 +99,24 @@ public final class SkillRelationSource {
             || !(root.get("sourceGroupIds") instanceof JSONArray sourceGroupIdsValue)
             || !(root.get("legacySourceGroupIds") instanceof JSONArray legacySourceGroupIdsValue)
             || !(root.get("groupInstallers") instanceof JSONObject groupInstallersValue)) {
-            return malformedManual();
+            return malformedManual(root);
         }
 
         LinkedHashSet<Long> sourceGroupIds = strictLongSet(sourceGroupIdsValue);
         LinkedHashSet<Long> legacySourceGroupIds = strictLongSet(legacySourceGroupIdsValue);
         if (sourceGroupIds == null || legacySourceGroupIds == null) {
-            return malformedManual();
+            return malformedManual(root);
         }
 
         LinkedHashMap<Long, LinkedHashSet<Long>> groupInstallers = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : groupInstallersValue.entrySet()) {
             Long groupId = strictLongKey(entry.getKey());
             if (groupId == null || !(entry.getValue() instanceof JSONArray installerValues)) {
-                return malformedManual();
+                return malformedManual(root);
             }
             LinkedHashSet<Long> installerIds = strictLongSet(installerValues);
             if (installerIds == null || installerIds.isEmpty()) {
-                return malformedManual();
+                return malformedManual(root);
             }
             groupInstallers.put(groupId, installerIds);
         }
@@ -124,7 +124,7 @@ public final class SkillRelationSource {
         LinkedHashSet<Long> compatibilityGroupIds = new LinkedHashSet<>(legacySourceGroupIds);
         compatibilityGroupIds.addAll(groupInstallers.keySet());
         if (!sourceGroupIds.equals(compatibilityGroupIds)) {
-            return malformedManual();
+            return malformedManual(root);
         }
 
         SkillRelationSource source = new SkillRelationSource(manualValue, false, true);
@@ -139,6 +139,37 @@ public final class SkillRelationSource {
 
     private static SkillRelationSource malformedManual() {
         return new SkillRelationSource(true, true, false);
+    }
+
+    private static SkillRelationSource malformedManual(JSONObject root) {
+        SkillRelationSource source = malformedManual();
+        recoverPositiveLongs(root.get("sourceGroupIds"), source.legacySourceGroupIds);
+        if (!source.legacySourceGroupIds.isEmpty()) {
+            return source;
+        }
+
+        recoverPositiveLongs(root.get("legacySourceGroupIds"), source.legacySourceGroupIds);
+        if (root.get("groupInstallers") instanceof JSONObject groupInstallersValue) {
+            for (String groupIdValue : groupInstallersValue.keySet()) {
+                Long groupId = strictLongKey(groupIdValue);
+                if (groupId != null && groupId > 0) {
+                    source.legacySourceGroupIds.add(groupId);
+                }
+            }
+        }
+        return source;
+    }
+
+    private static void recoverPositiveLongs(Object value, Set<Long> recoveredIds) {
+        if (!(value instanceof JSONArray values)) {
+            return;
+        }
+        for (Object candidate : values) {
+            Long recoveredId = strictLong(candidate);
+            if (recoveredId != null && recoveredId > 0) {
+                recoveredIds.add(recoveredId);
+            }
+        }
     }
 
     public boolean isManual() {

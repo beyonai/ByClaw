@@ -239,34 +239,78 @@ class SkillRelationSourceTest {
             "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[],"
                 + "\"legacySourceGroupIds\":[],\"groupInstallers\":{},\"unknown\":true}"
         ));
-        assertMalformedManual(SkillRelationSource.parse(
+        assertMalformedManualWithGroups(SkillRelationSource.parse(
             "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[7001],"
                 + "\"legacySourceGroupIds\":[\"7001\"],\"groupInstallers\":{}}"
-        ));
-        assertMalformedManual(SkillRelationSource.parse(
+        ), 7001L);
+        assertMalformedManualWithGroups(SkillRelationSource.parse(
             "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[7001],"
                 + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"group\":[10001]}}"
-        ));
-        assertMalformedManual(SkillRelationSource.parse(
+        ), 7001L);
+        assertMalformedManualWithGroups(SkillRelationSource.parse(
             "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[7001],"
                 + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"7001\":[\"10001\"]}}"
-        ));
-        assertMalformedManual(SkillRelationSource.parse(
+        ), 7001L);
+        assertMalformedManualWithGroups(SkillRelationSource.parse(
             "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[7001],"
                 + "\"legacySourceGroupIds\":[],\"groupInstallers\":{}}"
-        ));
+        ), 7001L);
     }
 
     @Test
     void parse_rejectsDeclaredUnsupportedOrNonIntegralVersions() {
-        assertMalformedManual(SkillRelationSource.parse(
+        assertMalformedManualWithGroups(SkillRelationSource.parse(
             "{\"version\":3,\"manual\":false,\"sourceGroupIds\":[7001],"
                 + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"7001\":[10001]}}"
-        ));
-        assertMalformedManual(SkillRelationSource.parse(
+        ), 7001L);
+        assertMalformedManualWithGroups(SkillRelationSource.parse(
             "{\"version\":2.0,\"manual\":false,\"sourceGroupIds\":[7001],"
                 + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"7001\":[10001]}}"
-        ));
+        ), 7001L);
+    }
+
+    @Test
+    void parse_malformedV2RetainsCompatibilityGroupsWhenInstallerValueIsInvalid() {
+        SkillRelationSource source = SkillRelationSource.parse(
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[7001],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"7001\":\"invalid\"}}"
+        );
+
+        assertMalformedManualWithGroups(source, 7001L);
+        assertThat(source.getLegacySourceGroupIds()).containsExactly(7001L);
+        assertThat(source.getGroupInstallers()).isEmpty();
+    }
+
+    @Test
+    void parse_unsupportedFutureVersionRetainsCompatibilityGroups() {
+        SkillRelationSource source = SkillRelationSource.parse(
+            "{\"version\":3,\"manual\":false,\"sourceGroupIds\":[7002],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{}}"
+        );
+
+        assertMalformedManualWithGroups(source, 7002L);
+    }
+
+    @Test
+    void parse_malformedV2RetainsOnlyPositiveIntegralCompatibilityGroups() {
+        SkillRelationSource source = SkillRelationSource.parse(
+            "{\"version\":2,\"manual\":false,"
+                + "\"sourceGroupIds\":[7001,\"7002\",-1,0,null,7003.5,7004],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{}}"
+        );
+
+        assertMalformedManualWithGroups(source, 7001L, 7004L);
+    }
+
+    @Test
+    void parse_malformedV2FallsBackToLegacyGroupsAndCanonicalInstallerKeys() {
+        SkillRelationSource source = SkillRelationSource.parse(
+            "{\"version\":2,\"manual\":false,"
+                + "\"legacySourceGroupIds\":[7101,\"7102\",null,-1],"
+                + "\"groupInstallers\":{\"7102\":\"invalid\",\"07103\":[10001],\"invalid\":[10002]}}"
+        );
+
+        assertMalformedManualWithGroups(source, 7101L, 7102L);
     }
 
     private static void assertManual(SkillRelationSource source) {
@@ -280,6 +324,13 @@ class SkillRelationSourceTest {
         assertThat(source.isManual()).isTrue();
         assertThat(source.isMalformed()).isTrue();
         assertThat(source.getSourceGroupIds()).isEmpty();
+        assertThat(source.hasAnySource()).isTrue();
+    }
+
+    private static void assertMalformedManualWithGroups(SkillRelationSource source, Long... groupIds) {
+        assertThat(source.isManual()).isTrue();
+        assertThat(source.isMalformed()).isTrue();
+        assertThat(source.getSourceGroupIds()).containsExactly(groupIds);
         assertThat(source.hasAnySource()).isTrue();
     }
 }
