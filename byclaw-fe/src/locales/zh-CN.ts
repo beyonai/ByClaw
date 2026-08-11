@@ -145,7 +145,7 @@ export default {
   'resource.skillGroup.namePlaceholder': '请输入技能组名称',
   'resource.skillGroup.descPlaceholder': '请输入技能组描述',
   'resource.skillGroup.cover': '技能组封面',
-  'resource.skillGroup.coverHint': '上传任意比例图片，自动生成 3:4 封面',
+  'resource.skillGroup.coverHint': '1:1 图片保持原图，其他比例自动生成 3:4 封面',
   'resource.skillGroup.coverProcessing': '正在生成 3:4 封面…',
   'resource.skillGroup.coverProcessFailed': '封面处理失败，请重新选择图片',
   'resource.skillGroup.selectSkills': '请选择至少一个技能',

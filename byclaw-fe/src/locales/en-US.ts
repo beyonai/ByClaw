@@ -149,7 +149,7 @@ export default {
   'resource.skillGroup.namePlaceholder': 'Enter a skill group name',
   'resource.skillGroup.descPlaceholder': 'Enter a skill group description',
   'resource.skillGroup.cover': 'Skill Group Cover',
-  'resource.skillGroup.coverHint': 'Upload any image to generate a 3:4 cover automatically',
+  'resource.skillGroup.coverHint': 'Keep 1:1 images unchanged; other ratios are converted to a 3:4 cover',
   'resource.skillGroup.coverProcessing': 'Generating the 3:4 cover…',
   'resource.skillGroup.coverProcessFailed': 'Cover processing failed. Select the image again.',
   'resource.skillGroup.selectSkills': 'Select at least one skill',

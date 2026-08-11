@@ -24,6 +24,7 @@ const skillGroupLocaleIds = [
   'resource.skillGroup.editTitle',
   'resource.skillGroup.updateSuccess',
   'resource.skillGroup.edit',
+  'resource.skillGroup.coverHint',
   'resource.skillGroup.uploadPersonalSkill',
   'resource.skillGroup.uploadRefreshFailed',
 ] as const;
@@ -41,5 +42,12 @@ describe('skill group locale messages', () => {
   it('uses the expected personal skill upload messages in Chinese', () => {
     expect(zhCN['resource.skillGroup.uploadPersonalSkill']).toBe('上传个人技能');
     expect(zhCN['resource.skillGroup.uploadRefreshFailed']).toBe('技能上传成功，但技能列表刷新失败，请重试');
+  });
+
+  it('explains the square cover passthrough behavior', () => {
+    expect(zhCN['resource.skillGroup.coverHint']).toBe('1:1 图片保持原图，其他比例自动生成 3:4 封面');
+    expect(enUS['resource.skillGroup.coverHint']).toBe(
+      'Keep 1:1 images unchanged; other ratios are converted to a 3:4 cover'
+    );
   });
 });

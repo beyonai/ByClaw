@@ -374,7 +374,7 @@ describe('SkillGroupCard', () => {
 
     expect(screen.getByTestId('skill-group-default-cover')).toHaveAttribute(
       'src',
-      '/assets/skill-groups/default-skill-group-cover-3x4.png'
+      '/assets/skill-groups/default-skill-group-cover-1x1.png'
     );
 
     const card = screen.getByRole('button', { name: /Group One/ });
@@ -415,9 +415,10 @@ describe('SkillGroupCard', () => {
     expect(listStyles).not.toMatch(/column-count:/);
     expect(listStyles).not.toMatch(/@container/);
     expect(cardStyles).toMatch(/break-inside:\s*avoid/);
-    expect(cardStyles).toMatch(/\.cover\s*{[\s\S]*aspect-ratio:\s*3\s*\/\s*4/);
+    expect(cardStyles).not.toMatch(/aspect-ratio:\s*3\s*\/\s*4/);
     expect(cardStyles).toMatch(/max-width:\s*360px/);
-    expect(cardStyles).toMatch(/max-height:\s*480px/);
+    expect(cardStyles).toMatch(/\.coverImage[\s\S]*height:\s*auto/);
+    expect(cardStyles).toMatch(/\.defaultCoverImage[\s\S]*height:\s*auto/);
     expect(cardStyles).toMatch(/\.coverImage[\s\S]*object-fit:\s*cover/);
     expect(cardStyles).toMatch(/\.content\s*{[\s\S]*border-right:/);
     expect(cardStyles).toMatch(/\.content\s*{[\s\S]*border-bottom:/);

@@ -109,7 +109,7 @@ describe('SkillGroupDetailDrawer', () => {
 
     expect(await screen.findByTestId('skill-group-detail-default-cover')).toHaveAttribute(
       'src',
-      '/assets/skill-groups/default-skill-group-cover-3x4.png'
+      '/assets/skill-groups/default-skill-group-cover-1x1.png'
     );
   });
 
