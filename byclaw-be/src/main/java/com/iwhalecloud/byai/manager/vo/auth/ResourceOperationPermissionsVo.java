@@ -88,6 +88,12 @@ public class ResourceOperationPermissionsVo {
     private Boolean canApplyUse;
 
     /**
+     * 当前用户是否已有待审核的使用申请。
+     */
+    @Schema(description = "是否已有待审核的使用申请")
+    private Boolean useApplyPending;
+
+    /**
      * 是否可审核使用申请。
      */
     @Schema(description = "是否可审核使用申请")

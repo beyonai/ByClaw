@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
+import com.iwhalecloud.byai.manager.domain.skillgroup.model.SkillGroupMemberStatus;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCreateQo;
@@ -16,6 +17,7 @@ import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupPageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupUpdateQo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberStatusSummaryVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupVo;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
@@ -35,6 +37,8 @@ import org.apache.ibatis.io.Resources;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class SkillGroupContractTest {
 
@@ -46,6 +50,9 @@ class SkillGroupContractTest {
 
     @Test
     void requestObjectsExposeExpectedFieldsAndPageDefaults() {
+        SkillGroupIdQo idQo = new SkillGroupIdQo();
+        idQo.setGroupId(20001L);
+        idQo.setDigitalEmployeeId(10001L);
         SkillGroupInstallQo installQo = new SkillGroupInstallQo();
         installQo.setDigitalEmployeeId(10001L);
         installQo.setGroupId(20001L);
@@ -63,6 +70,7 @@ class SkillGroupContractTest {
         candidatePageQo.setGroupId(20001L);
 
         assertThat(installQo.getDigitalEmployeeId()).isEqualTo(10001L);
+        assertThat(idQo.getDigitalEmployeeId()).isEqualTo(10001L);
         assertThat(installQo.getGroupId()).isEqualTo(20001L);
         assertThat(memberChangeQo.getGroupId()).isEqualTo(20001L);
         assertThat(memberChangeQo.getSkillIds()).containsExactly(30001L, 30002L);
@@ -88,6 +96,9 @@ class SkillGroupContractTest {
         assertThat(resultVo.getRemovedSkillIds()).isEmpty();
         assertThat(resultVo.getRetainedSkillIds()).isEmpty();
         assertThat(resultVo.getTotalSkillIds()).isEmpty();
+        assertThat(resultVo.getAppliedSkillIds()).isEmpty();
+        assertThat(resultVo.getPendingSkillIds()).isEmpty();
+        assertThat(resultVo.getUnavailableSkillIds()).isEmpty();
 
         groupVo.getMembers().add(new SkillGroupMemberVo());
         resultVo.getInstalledSkillIds().add(10001L);
@@ -102,6 +113,33 @@ class SkillGroupContractTest {
         assertThat(resultVo.getRemovedSkillIds()).containsExactly(10003L);
         assertThat(resultVo.getRetainedSkillIds()).containsExactly(10004L);
         assertThat(resultVo.getTotalSkillIds()).containsExactly(10005L);
+    }
+
+    @Test
+    void memberStatusSummaryCountsFiveStatesAndPreservesMemberOrder() {
+        List<SkillGroupMemberVo> members = List.of(
+                member(5L, SkillGroupMemberStatus.APPLY_PENDING),
+                member(2L, SkillGroupMemberStatus.INSTALLED),
+                member(5L, SkillGroupMemberStatus.APPLY_REQUIRED),
+                member(3L, SkillGroupMemberStatus.INSTALLABLE),
+                member(4L, SkillGroupMemberStatus.APPLY_UNAVAILABLE));
+
+        SkillGroupMemberStatusSummaryVo summary = SkillGroupMemberStatusSummaryVo.from(members);
+
+        assertThat(summary.getMembers()).containsExactlyElementsOf(members);
+        assertThat(summary.getTotal()).isEqualTo(5);
+        assertThat(summary.getInstalled()).isEqualTo(1);
+        assertThat(summary.getInstallable()).isEqualTo(1);
+        assertThat(summary.getApplyRequired()).isEqualTo(1);
+        assertThat(summary.getApplyPending()).isEqualTo(1);
+        assertThat(summary.getUnavailable()).isEqualTo(1);
+    }
+
+    private static SkillGroupMemberVo member(Long id, SkillGroupMemberStatus status) {
+        SkillGroupMemberVo member = new SkillGroupMemberVo();
+        member.setResourceId(id);
+        member.setMemberStatus(status);
+        return member;
     }
 
     @Test
@@ -184,14 +222,20 @@ class SkillGroupContractTest {
         assertInvalidProperties(updateQo, "resourceName", "resourceDesc", "avatar");
     }
 
-    @Test
-    void resourceIdsAndInstallResultIdsSerializeAsJsonStrings() throws Exception {
+    @ParameterizedTest
+    @EnumSource(SkillGroupMemberStatus.class)
+    void resourceIdsAndMemberStatusesSerializeWithStableWireValues(SkillGroupMemberStatus memberStatus)
+            throws Exception {
         SkillGroupVo groupVo = new SkillGroupVo();
         groupVo.setResourceId(10001L);
         SkillGroupMemberVo memberVo = new SkillGroupMemberVo();
         memberVo.setResourceId(20001L);
         memberVo.setSystemBuiltIn(true);
         memberVo.setCreatorOwned(false);
+        memberVo.setMemberStatus(memberStatus);
+        memberVo.setStatusReason("reason");
+        memberVo.setInstalled(true);
+        memberVo.setHasUsePermission(false);
         SkillGroupInstallResultVo resultVo = new SkillGroupInstallResultVo();
         resultVo.getInstalledSkillIds().add(30001L);
         resultVo.getExistingSkillIds().add(30002L);
@@ -209,6 +253,10 @@ class SkillGroupContractTest {
         assertThat(memberJson.path("resourceId").asText()).isEqualTo("20001");
         assertThat(memberJson.path("systemBuiltIn").asBoolean()).isTrue();
         assertThat(memberJson.path("creatorOwned").asBoolean()).isFalse();
+        assertThat(memberJson.path("memberStatus").asText()).isEqualTo(memberStatus.name());
+        assertThat(memberJson.path("statusReason").asText()).isEqualTo("reason");
+        assertThat(memberJson.path("installed").asBoolean()).isTrue();
+        assertThat(memberJson.path("hasUsePermission").asBoolean()).isFalse();
         assertTextualArrayEntry(resultJson, "installedSkillIds", "30001");
         assertTextualArrayEntry(resultJson, "existingSkillIds", "30002");
         assertTextualArrayEntry(resultJson, "removedSkillIds", "30003");
@@ -375,6 +423,62 @@ class SkillGroupContractTest {
     }
 
     @Test
+    void installedSkillIdStatementIsDistinctActiveEmployeeScopedAndSafeForEmptyIds() throws Exception {
+        String statement = extractBlock(readMapperXml(), "select", "selectinstalledskillids");
+        assertThat(statement)
+                .contains("select distinct relation.rel_resource_id")
+                .contains("join ss_resource employee")
+                .contains("employee.resource_id = relation.resource_id")
+                .contains("relation.resource_id = #{digitalemployeeid}")
+                .contains("employee.com_acct_id = #{tenantid}")
+                .contains("employee.resource_biz_type = 'dig_employee'")
+                .contains("join ss_resource skill_resource")
+                .contains("skill_resource.com_acct_id = #{tenantid}")
+                .contains("skill_resource.resource_biz_type = 'skill'")
+                .contains("relation.rel_type_name = 'dig_employee_skill' or relation.rel_type_name is null")
+                .contains("relation.rel_status = 1 or relation.rel_status is null")
+                .contains("relation.rel_resource_id in")
+                .contains("<foreach collection=\"skillids\"")
+                .contains("<otherwise>")
+                .contains("1 = 0");
+
+        Configuration configuration = buildMapperConfiguration();
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("digitalEmployeeId", 30001L);
+        parameters.put("tenantId", 60001L);
+        parameters.put("skillIds", null);
+        assertThat(normalizedBoundSql(configuration, "selectInstalledSkillIds", parameters).getSql())
+                .contains("1 = 0");
+
+        parameters.put("skillIds", List.of());
+        assertThat(normalizedBoundSql(configuration, "selectInstalledSkillIds", parameters).getSql())
+                .contains("1 = 0");
+
+        parameters.put("skillIds", List.of(20001L, 20002L));
+        BoundSql populated = normalizedBoundSql(configuration, "selectInstalledSkillIds", parameters);
+        assertThat(populated.getSql()).containsPattern("relation\\.rel_resource_id in \\( \\? , \\? \\)");
+        assertThat(populated.getParameterMappings()).hasSize(5);
+    }
+
+    @Test
+    void activeSkillBatchLockIsTenantTypeStatusGuardedSortedAndForUpdate() throws Exception {
+        Configuration configuration = buildMapperConfiguration();
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("skillIds", List.of(20002L, 20001L));
+        parameters.put("comAcctId", 60001L);
+
+        String sql = normalizedBoundSql(configuration, "selectActiveSkillsForUpdate", parameters).getSql();
+
+        assertThat(sql)
+                .contains("skill_resource.resource_id in ( ? , ? )")
+                .contains("skill_resource.com_acct_id = ?")
+                .contains("skill_resource.resource_biz_type = 'skill'")
+                .contains("skill_resource.resource_status = 2")
+                .contains("order by skill_resource.resource_id asc")
+                .endsWith("for update");
+    }
+
+    @Test
     void groupLockAndScopedUpdateBoundSqlAreTenantAndTypeGuarded() throws Exception {
         Configuration configuration = buildMapperConfiguration();
         String lockSql = normalizedBoundSql(configuration, "selectGroupForUpdate", Map.of(
@@ -537,11 +641,13 @@ class SkillGroupContractTest {
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectActiveMembers")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectMemberRelations")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectDigitalEmployeeSkillRelations")).isTrue();
+        assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectInstalledSkillIds")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectSkillRelationsWithSourceInfo")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectSkillRelationsWithSourceInfoByTenant")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectMemberRelationsIncludingInactive")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectGroupForUpdate")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectDigitalEmployeeForUpdate")).isTrue();
+        assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectActiveSkillsForUpdate")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "updateGroupFields")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "insertActiveMemberIfAbsent")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "insertDigitalEmployeeSkillIfAbsent")).isTrue();
@@ -577,7 +683,11 @@ class SkillGroupContractTest {
         assertThat(detailSql)
                 .contains("group_resource.resource_id = ?")
                 .contains("group_resource.com_acct_id = ?")
-                .contains("group_resource.owner_type is null");
+                .contains("group_resource.owner_type is null")
+                .contains("left join po_users creator")
+                .contains("as creator_name")
+                .doesNotContain("cast(group_resource.create_by")
+                .doesNotContain("group_resource.create_by as creator_name");
 
         String memberSql = normalizedBoundSql(configuration, "selectActiveMembers", Map.of("groupId", 10001L))
                 .getSql();

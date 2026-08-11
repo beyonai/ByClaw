@@ -12,6 +12,7 @@ import com.iwhalecloud.byai.manager.domain.auth.enums.GrantToObjType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.GrantType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.Color;
 import com.iwhalecloud.byai.manager.domain.auth.enums.OperType;
+import com.iwhalecloud.byai.manager.domain.auth.model.UseApplyOutcome;
 import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationService;
 import com.iwhalecloud.byai.manager.domain.position.service.PositionService;
@@ -24,15 +25,18 @@ import com.iwhalecloud.byai.manager.dto.auth.AuthRedBlackDTO;
 import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
 import com.iwhalecloud.byai.manager.entity.organization.Organization;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.entity.station.Station;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.manager.mapper.users.UsersMapper;
 import com.iwhalecloud.byai.manager.qo.auth.AuthDetailQo;
+import com.iwhalecloud.byai.manager.qo.auth.PrivilegeGrantQo;
 import com.iwhalecloud.byai.manager.qo.auth.ResourceMemberQueryQo;
 import com.iwhalecloud.byai.manager.qo.auth.ResourceUseApplyApproveQo;
 import com.iwhalecloud.byai.manager.qo.auth.ResourceUseApplyQo;
 import com.iwhalecloud.byai.manager.qo.auth.ResourceMemberSettingQo;
+import com.iwhalecloud.byai.manager.dto.position.PositionDTO;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceMemberItemVo;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceMemberQueryResultVo;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
@@ -48,6 +52,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 
 import java.util.List;
 import java.util.Locale;
@@ -61,11 +66,15 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 class AuthApplicationServiceTest {
 
@@ -100,6 +109,9 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "organizationService", organizationService);
         ReflectionTestUtils.setField(service, "positionService", positionService);
         ReflectionTestUtils.setField(service, "stationService", stationService);
+        if (ReflectionTestUtils.getField(service, "privilegeGrantMapper") == null) {
+            ReflectionTestUtils.setField(service, "privilegeGrantMapper", mock(PrivilegeGrantMapper.class));
+        }
         when(privilegeGrantService.findPrivilegeByQo(any())).thenReturn(new ArrayList<>());
         when(organizationService.findOrganizationByUserId(any())).thenReturn(List.of());
         when(positionService.findPositionByUserId(any())).thenReturn(List.of());
@@ -293,6 +305,7 @@ class AuthApplicationServiceTest {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceService ssResourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", mock(PrivilegeGrantMapper.class));
         ReflectionTestUtils.setField(service, "datasetSystem", "WHALE_AGENT");
 
         LoginInfo loginInfo = new LoginInfo();
@@ -865,5 +878,388 @@ class AuthApplicationServiceTest {
 
         verify(privilegeGrantService, never()).save(any(PrivilegeGrant.class));
         verify(privilegeGrantService).update(eq(pendingApply));
+    }
+
+    @Test
+    void queryResourceOperationPermissions_exposesPendingUseApplication() {
+        AuthApplicationService service = new AuthApplicationService();
+        SsResourceService ssResourceService = mock(SsResourceService.class);
+        PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
+        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
+        mockEmptyUsePermissionDependencies(service);
+        LoginInfo loginInfo = loginInfo(2L);
+        CurrentUserHolder.setLoginInfo(loginInfo);
+        SsResource resource = enterpriseResource(600L, 1L);
+        when(ssResourceService.findById(600L)).thenReturn(resource);
+        PrivilegeGrant pending = useGrant(600L, 2L, GrantToObjType.USER, Color.RED, "P");
+        when(privilegeGrantMapper.selectList(any())).thenReturn(List.of(pending));
+
+        ResourceOperationPermissionsVo result = service.queryResourceOperationPermissions(600L);
+
+        assertThat(result.getUseApplyPending()).isTrue();
+        assertThat(result.getCanApplyUse()).isFalse();
+        assertThat(result.getHasUsePermission()).isFalse();
+    }
+
+    @Test
+    void queryResourceOperationPermissionsBatch_exposesPendingAndUnavailableWithoutPerResourcePendingQueries() {
+        AuthApplicationService service = new AuthApplicationService();
+        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
+        PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
+        mockEmptyUsePermissionDependencies(service);
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        SsResource pendingResource = enterpriseResource(601L, 1L);
+        SsResource unavailableResource = enterpriseResource(602L, 1L);
+        unavailableResource.setPublishPortal(0);
+        when(ssResourceMapper.selectBatchIds(any())).thenReturn(List.of(pendingResource, unavailableResource));
+        when(privilegeGrantMapper.selectList(any())).thenReturn(
+            List.of(useGrant(601L, 2L, GrantToObjType.USER, Color.RED, "P")));
+
+        Map<Long, ResourceOperationPermissionsVo> result =
+            service.queryResourceOperationPermissionsBatch(List.of(601L, 602L));
+
+        assertThat(result.get(601L).getUseApplyPending()).isTrue();
+        assertThat(result.get(601L).getCanApplyUse()).isFalse();
+        assertThat(result.get(602L).getUseApplyPending()).isFalse();
+        assertThat(result.get(602L).getCanApplyUse()).isFalse();
+        verify(privilegeGrantMapper, times(1)).selectList(any());
+    }
+
+    @Test
+    void applyUseIfNeeded_returnsPendingWithoutMutation() {
+        AuthApplicationService service = spy(new AuthApplicationService());
+        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
+        PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        SsResource resource = enterpriseResource(603L, 1L);
+        when(ssResourceMapper.selectOne(any())).thenReturn(resource);
+        when(privilegeGrantMapper.selectOne(any())).thenReturn(
+            useGrant(603L, 2L, GrantToObjType.USER, Color.RED, "P"));
+
+        assertThat(service.applyUseIfNeeded(603L)).isEqualTo(UseApplyOutcome.PENDING);
+
+        verify(service, never()).applyUse(any());
+        verify(privilegeGrantService, never()).save(any());
+    }
+
+    @Test
+    void applyUseIfNeeded_returnsPendingForPersonalResourceWithoutMutation() {
+        AuthApplicationService service = spy(new AuthApplicationService());
+        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
+        PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        SsResource resource = enterpriseResource(610L, 1L);
+        resource.setOwnerType(OwnerType.PERSONAL);
+        resource.setResourceBizType(ResourceBizTypeEnum.OBJECT.name());
+        when(ssResourceMapper.selectOne(any())).thenReturn(resource);
+        when(privilegeGrantMapper.selectOne(any())).thenReturn(
+            useGrant(610L, 2L, GrantToObjType.USER, Color.RED, "P"));
+
+        assertThat(service.applyUseIfNeeded(610L)).isEqualTo(UseApplyOutcome.PENDING);
+
+        verify(service, never()).applyUse(any());
+        verify(privilegeGrantService, never()).save(any());
+    }
+
+    @Test
+    void applyUseIfNeeded_returnsUnavailableForPersonalResourceWithoutMutation() {
+        AuthApplicationService service = spy(new AuthApplicationService());
+        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
+        PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        SsResource resource = enterpriseResource(611L, 1L);
+        resource.setOwnerType(OwnerType.PERSONAL);
+        resource.setResourceBizType(ResourceBizTypeEnum.OBJECT.name());
+        when(ssResourceMapper.selectOne(any())).thenReturn(resource);
+
+        assertThat(service.applyUseIfNeeded(611L)).isEqualTo(UseApplyOutcome.UNAVAILABLE);
+
+        verify(service, never()).applyUse(any());
+        verify(privilegeGrantService, never()).save(any());
+    }
+
+    @Test
+    void applyUseIfNeeded_returnsUnavailableWithoutMutation() {
+        AuthApplicationService service = spy(new AuthApplicationService());
+        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
+        PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        SsResource resource = enterpriseResource(604L, 2L);
+        when(ssResourceMapper.selectOne(any())).thenReturn(resource);
+
+        assertThat(service.applyUseIfNeeded(604L)).isEqualTo(UseApplyOutcome.UNAVAILABLE);
+
+        verify(service, never()).applyUse(any());
+        verify(privilegeGrantService, never()).save(any());
+    }
+
+    @Test
+    void applyUseIfNeeded_locksBeforePendingCheck() {
+        AuthApplicationService service = new AuthApplicationService();
+        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
+        PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        SsResource resource = enterpriseResource(605L, 1L);
+        when(ssResourceMapper.selectOne(any())).thenReturn(resource);
+        when(privilegeGrantMapper.selectOne(any())).thenReturn(
+            useGrant(605L, 2L, GrantToObjType.USER, Color.RED, "P"));
+
+        assertThat(service.applyUseIfNeeded(605L)).isEqualTo(UseApplyOutcome.PENDING);
+
+        ArgumentCaptor<LambdaQueryWrapper<SsResource>> lockCaptor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        InOrder order = inOrder(ssResourceMapper, privilegeGrantMapper);
+        order.verify(ssResourceMapper).selectOne(lockCaptor.capture());
+        order.verify(privilegeGrantMapper).selectOne(any());
+        assertThat(String.valueOf(ReflectionTestUtils.getField(lockCaptor.getValue(), "lastSql")))
+            .containsIgnoringCase("FOR UPDATE");
+        verify(privilegeGrantService, never()).save(any());
+    }
+
+    @Test
+    void applyUseIfNeeded_createsRealPendingGrantOnceThenReturnsPending() {
+        AuthApplicationService service = new AuthApplicationService();
+        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
+        PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
+        mockEmptyUsePermissionDependencies(service);
+        PrivilegeGrantService privilegeGrantService =
+            (PrivilegeGrantService) ReflectionTestUtils.getField(service, "privilegeGrantService");
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        SsResource resource = enterpriseResource(612L, 1L);
+        when(ssResourceMapper.selectOne(any())).thenReturn(resource);
+        when(ssResourceMapper.selectById(612L)).thenReturn(resource);
+        PrivilegeGrant pending = useGrant(612L, 2L, GrantToObjType.USER, Color.RED, "P");
+        when(privilegeGrantMapper.selectOne(any())).thenReturn(null, pending);
+
+        assertThat(service.applyUseIfNeeded(612L)).isEqualTo(UseApplyOutcome.CREATED);
+        assertThat(service.applyUseIfNeeded(612L)).isEqualTo(UseApplyOutcome.PENDING);
+
+        ArgumentCaptor<PrivilegeGrant> grantCaptor = ArgumentCaptor.forClass(PrivilegeGrant.class);
+        verify(privilegeGrantService, times(1)).save(grantCaptor.capture());
+        PrivilegeGrant saved = grantCaptor.getValue();
+        assertThat(saved.getGrantObjId()).isEqualTo(612L);
+        assertThat(saved.getGrantObjType()).isEqualTo(ResourceBizTypeEnum.AGENT.name());
+        assertThat(saved.getGrantType()).isEqualTo(GrantType.AVAILABLE_USE);
+        assertThat(saved.getGrantToObjId()).isEqualTo(2L);
+        assertThat(saved.getGrantToObjType()).isEqualTo(GrantToObjType.USER);
+        assertThat(saved.getGrantToType()).isEqualTo(Color.RED);
+        assertThat(saved.getOperType()).isEqualTo(OperType.READ);
+        assertThat(saved.getStatusCd()).isEqualTo("P");
+    }
+
+    @Test
+    void applyUseIfNeeded_missingLockedResourceThrowsWithoutPendingLookupOrSave() {
+        AuthApplicationService service = new AuthApplicationService();
+        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
+        PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        when(ssResourceMapper.selectOne(any())).thenReturn(null);
+
+        assertThatThrownBy(() -> service.applyUseIfNeeded(613L)).isInstanceOf(BaseException.class);
+
+        verify(privilegeGrantMapper, never()).selectOne(any());
+        verify(privilegeGrantService, never()).save(any());
+    }
+
+    @Test
+    void hasResourceUsePermissionForUser_appliesDirectBlackOverDirectRedAndPreservesCurrentUser() {
+        AuthApplicationService service = newExplicitUserPermissionService(List.of(
+            useGrant(606L, 3L, GrantToObjType.USER, Color.RED, "A"),
+            useGrant(606L, 3L, GrantToObjType.USER, Color.BLACK, "A")));
+        CurrentUserHolder.setLoginInfo(loginInfo(2L));
+        SsResource resource = enterpriseResource(606L, 1L);
+
+        assertThat(service.hasResourceUsePermission(resource, 3L)).isFalse();
+        assertThat(CurrentUserHolder.getCurrentUserId()).isEqualTo(2L);
+        assertThat(service.hasResourceUsePermission(resource)).isFalse();
+    }
+
+    @Test
+    void hasResourceUsePermissionForUser_allowsDirectRedAndFailsClosedForInvalidUser() {
+        AuthApplicationService service = newExplicitUserPermissionService(
+            List.of(useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A")));
+        SsResource resource = enterpriseResource(607L, 1L);
+
+        assertThat(service.hasResourceUsePermission(resource, 3L)).isTrue();
+        assertThat(service.hasResourceUsePermission(resource, null)).isFalse();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ExplicitGrantSource.class)
+    void hasResourceUsePermissionForUser_allowsInheritedGrant(ExplicitGrantSource source) {
+        AuthApplicationService service = newExplicitUserPermissionService(
+            List.of(useGrant(608L, source.targetId, source.grantToObjType, Color.RED, "A")));
+        configureMembership(service, source);
+
+        assertThat(service.hasResourceUsePermission(enterpriseResource(608L, 1L), 3L)).isTrue();
+    }
+
+    @Test
+    void hasResourceUsePermissionForUser_deniesUserWithoutGrant() {
+        AuthApplicationService service = newExplicitUserPermissionService(List.of());
+
+        assertThat(service.hasResourceUsePermission(enterpriseResource(609L, 1L), 3L)).isFalse();
+    }
+
+    @Test
+    void hasResourceUsePermissionForUser_skipsInheritedQueriesForEmptyMemberships() {
+        AuthApplicationService service = newExplicitUserPermissionService(List.of(
+            useGrant(614L, 30L, GrantToObjType.ORG, Color.RED, "A"),
+            useGrant(614L, 31L, GrantToObjType.POST, Color.RED, "A"),
+            useGrant(614L, 32L, GrantToObjType.STATION, Color.RED, "A")));
+        PrivilegeGrantService privilegeGrantService =
+            (PrivilegeGrantService) ReflectionTestUtils.getField(service, "privilegeGrantService");
+
+        assertThat(service.hasResourceUsePermission(enterpriseResource(614L, 1L), 3L)).isFalse();
+        verify(privilegeGrantService, never()).findPrivilegeByQo(argThat(qo ->
+            GrantToObjType.ORG.equals(qo.getGrantToObjType())
+                || GrantToObjType.POST.equals(qo.getGrantToObjType())
+                || GrantToObjType.STATION.equals(qo.getGrantToObjType())));
+    }
+
+    @Test
+    void hasResourceUsePermissionForUser_doesNotInheritNonmatchingMembershipGrants() {
+        AuthApplicationService service = newExplicitUserPermissionService(List.of(
+            useGrant(615L, 999L, GrantToObjType.ORG, Color.RED, "A"),
+            useGrant(615L, 998L, GrantToObjType.POST, Color.RED, "A")));
+        Organization organization = new Organization();
+        organization.setPathCode("30");
+        PositionDTO position = new PositionDTO();
+        position.setPositionId(31L);
+        OrganizationService organizationService =
+            (OrganizationService) ReflectionTestUtils.getField(service, "organizationService");
+        PositionService positionService = (PositionService) ReflectionTestUtils.getField(service, "positionService");
+        PrivilegeGrantService privilegeGrantService =
+            (PrivilegeGrantService) ReflectionTestUtils.getField(service, "privilegeGrantService");
+        when(organizationService.findOrganizationByUserId(3L)).thenReturn(List.of(organization));
+        when(positionService.findPositionByUserId(3L)).thenReturn(List.of(position));
+
+        assertThat(service.hasResourceUsePermission(enterpriseResource(615L, 1L), 3L)).isFalse();
+
+        ArgumentCaptor<PrivilegeGrantQo> qoCaptor = ArgumentCaptor.forClass(PrivilegeGrantQo.class);
+        verify(privilegeGrantService, times(3)).findPrivilegeByQo(qoCaptor.capture());
+        PrivilegeGrantQo orgQo = qoCaptor.getAllValues().stream()
+            .filter(qo -> GrantToObjType.ORG.equals(qo.getGrantToObjType())).findFirst().orElseThrow();
+        PrivilegeGrantQo postQo = qoCaptor.getAllValues().stream()
+            .filter(qo -> GrantToObjType.POST.equals(qo.getGrantToObjType())).findFirst().orElseThrow();
+        assertThat(orgQo.getGrantToObjIds()).containsExactly(30L);
+        assertThat(postQo.getGrantToObjIds()).containsExactly(31L);
+    }
+
+    private AuthApplicationService newExplicitUserPermissionService(List<PrivilegeGrant> grants) {
+        AuthApplicationService service = new AuthApplicationService();
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        OrganizationService organizationService = mock(OrganizationService.class);
+        PositionService positionService = mock(PositionService.class);
+        StationService stationService = mock(StationService.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "organizationService", organizationService);
+        ReflectionTestUtils.setField(service, "positionService", positionService);
+        ReflectionTestUtils.setField(service, "stationService", stationService);
+        when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> {
+            PrivilegeGrantQo qo = invocation.getArgument(0);
+            return grants.stream().filter(grant -> grant.getGrantToObjType().equals(qo.getGrantToObjType()))
+                .filter(grant -> qo.getGrantToObjId() == null || qo.getGrantToObjId().equals(grant.getGrantToObjId()))
+                .filter(grant -> qo.getGrantToObjIds() == null || qo.getGrantToObjIds().isEmpty()
+                    || qo.getGrantToObjIds().contains(grant.getGrantToObjId()))
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        });
+        when(organizationService.findOrganizationByUserId(any())).thenReturn(List.of());
+        when(positionService.findPositionByUserId(any())).thenReturn(List.of());
+        when(stationService.getStationByUserId(any())).thenReturn(null);
+        return service;
+    }
+
+    private void configureMembership(AuthApplicationService service, ExplicitGrantSource source) {
+        if (source == ExplicitGrantSource.ORGANIZATION) {
+            Organization organization = new Organization();
+            organization.setPathCode(String.valueOf(source.targetId));
+            OrganizationService organizationService =
+                (OrganizationService) ReflectionTestUtils.getField(service, "organizationService");
+            when(organizationService.findOrganizationByUserId(3L)).thenReturn(List.of(organization));
+        }
+        else if (source == ExplicitGrantSource.POST) {
+            PositionDTO position = new PositionDTO();
+            position.setPositionId(source.targetId);
+            PositionService positionService = (PositionService) ReflectionTestUtils.getField(service, "positionService");
+            when(positionService.findPositionByUserId(3L)).thenReturn(List.of(position));
+        }
+        else {
+            Station station = new Station();
+            station.setStationIdPath(String.valueOf(source.targetId));
+            StationService stationService = (StationService) ReflectionTestUtils.getField(service, "stationService");
+            when(stationService.getStationByUserId(3L)).thenReturn(station);
+        }
+    }
+
+    private LoginInfo loginInfo(Long userId) {
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserId(userId);
+        return loginInfo;
+    }
+
+    private SsResource enterpriseResource(Long resourceId, Long createBy) {
+        SsResource resource = new SsResource();
+        resource.setResourceId(resourceId);
+        resource.setResourceBizType(ResourceBizTypeEnum.AGENT.name());
+        resource.setOwnerType(OwnerType.ENTERPRISE);
+        resource.setCreateBy(createBy);
+        resource.setPublishPortal(1);
+        return resource;
+    }
+
+    private PrivilegeGrant useGrant(Long resourceId, Long targetId, String targetType, String color, String status) {
+        PrivilegeGrant grant = new PrivilegeGrant();
+        grant.setGrantObjId(resourceId);
+        grant.setGrantObjType(ResourceBizTypeEnum.AGENT.name());
+        grant.setGrantType(GrantType.AVAILABLE_USE);
+        grant.setGrantToObjType(targetType);
+        grant.setGrantToObjId(targetId);
+        grant.setGrantToType(color);
+        grant.setOperType(OperType.READ);
+        grant.setStatusCd(status);
+        return grant;
+    }
+
+    private enum ExplicitGrantSource {
+        ORGANIZATION(GrantToObjType.ORG, 30L),
+        POST(GrantToObjType.POST, 31L),
+        STATION(GrantToObjType.STATION, 32L);
+
+        private final String grantToObjType;
+        private final Long targetId;
+
+        ExplicitGrantSource(String grantToObjType, Long targetId) {
+            this.grantToObjType = grantToObjType;
+            this.targetId = targetId;
+        }
     }
 }

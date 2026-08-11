@@ -38,6 +38,17 @@ public interface SkillGroupMapper {
             @Param("comAcctId") Long comAcctId);
 
     /**
+     * Locks active tenant-owned skill rows in ascending resource-ID order.
+     *
+     * @param skillIds exact skill IDs to lock
+     * @param comAcctId current tenant ID
+     * @return matching locked active skills ordered by resource ID
+     */
+    List<SsResource> selectActiveSkillsForUpdate(
+            @Param("skillIds") List<Long> skillIds,
+            @Param("comAcctId") Long comAcctId);
+
+    /**
      * Updates only editable skill-group columns and audit fields under ID, tenant, and SKILL_GROUP guards.
      *
      * @param group values to persist
@@ -102,6 +113,20 @@ public interface SkillGroupMapper {
      */
     List<SsResourceRelDetail> selectDigitalEmployeeSkillRelations(
             @Param("digitalEmployeeId") Long digitalEmployeeId,
+            @Param("skillIds") List<Long> skillIds);
+
+    /**
+     * Selects the distinct active skill IDs installed for one digital employee. Null or empty skill IDs deliberately
+     * return no rows; callers must also skip the query when no IDs need evaluation.
+     *
+     * @param digitalEmployeeId digital-employee resource ID
+     * @param tenantId current tenant ID
+     * @param skillIds exact skill IDs to check
+     * @return distinct installed skill IDs
+     */
+    List<Long> selectInstalledSkillIds(
+            @Param("digitalEmployeeId") Long digitalEmployeeId,
+            @Param("tenantId") Long tenantId,
             @Param("skillIds") List<Long> skillIds);
 
     /**
