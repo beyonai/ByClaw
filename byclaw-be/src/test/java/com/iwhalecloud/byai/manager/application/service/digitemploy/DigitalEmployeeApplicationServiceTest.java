@@ -16,6 +16,7 @@ import com.iwhalecloud.byai.manager.application.service.template.TemplateRuleInf
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.OperationTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
+import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.model.SkillRelationSource;
 import com.iwhalecloud.byai.manager.domain.resource.service.OperationLogService;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceRuntimeInfoResolver;
@@ -1296,7 +1297,12 @@ class DigitalEmployeeApplicationServiceTest {
         verify(skillGroupMapper, never()).selectDigitalEmployeeForUpdate(any(), any());
         verify(skillGroupMapper, never()).selectDigitalEmployeeSkillRelations(any(), any());
         verify(ssResourceRelDetailService).removeById(901L);
-        verifySnapshotRefresh(uninstallService, employee, 1);
+        verify(uninstallService).rebuildAndSaveDigitalEmployeeRelSkills(100L);
+        verify(uninstallService).synOpenClawWorkSpace(100L);
+        verify(operationLogService).recordOperationLog(employee, OperationTypeEnum.UPDATE);
+        verify(robotChannelRegistryCoordinator).refreshForResource(100L);
+        verify(digEmployeeChangeEventPublisher).publishAfterCommitOrNow(any(), eq(100L));
+        verifyNoInteractions(digitalEmployeeRuntimeRefreshService);
     }
 
     @Test
@@ -1939,11 +1945,12 @@ class DigitalEmployeeApplicationServiceTest {
     private void verifySnapshotRefresh(
         DigitalEmployeeApplicationService snapshotService, SsResource employee, int count) {
         verify(snapshotService, times(count)).rebuildAndSaveDigitalEmployeeRelSkills(employee.getResourceId());
-        verify(snapshotService, times(count)).synOpenClawWorkSpace(employee.getResourceId());
         verify(operationLogService, times(count)).recordOperationLog(employee, OperationTypeEnum.UPDATE);
-        verify(robotChannelRegistryCoordinator, times(count)).refreshForResource(employee.getResourceId());
-        verify(digEmployeeChangeEventPublisher, times(count)).publishAfterCommitOrNow(any(),
-            eq(employee.getResourceId()));
+        verify(digitalEmployeeRuntimeRefreshService, times(count))
+            .scheduleSkillRuntimeRefreshAfterCommit(List.of(employee.getResourceId()));
+        verify(snapshotService, never()).synOpenClawWorkSpace(employee.getResourceId());
+        verify(robotChannelRegistryCoordinator, never()).refreshForResource(employee.getResourceId());
+        verify(digEmployeeChangeEventPublisher, never()).publishAfterCommitOrNow(any(), eq(employee.getResourceId()));
     }
 
     private SsResourceRelDetail directSkillRelation(Long relationId, Long skillId, String sourceInfo) {
@@ -1961,6 +1968,7 @@ class DigitalEmployeeApplicationServiceTest {
         SsResource resource = new SsResource();
         resource.setResourceId(resourceId);
         resource.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        resource.setResourceStatus(ResourceStatus.LIST.getNum());
         resource.setOwnerType(ownerType);
         resource.setCreateBy(createBy);
         return resource;

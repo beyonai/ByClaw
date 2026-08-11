@@ -132,6 +132,28 @@
         FOR UPDATE
     </select>
 
+    <select id="selectActiveSkillsForUpdate"
+            resultType="com.iwhalecloud.byai.manager.entity.resource.SsResource">
+        SELECT skill_resource.*
+        FROM ss_resource skill_resource
+        WHERE skill_resource.com_acct_id = #{comAcctId}
+          AND skill_resource.resource_biz_type = 'SKILL'
+          AND skill_resource.resource_status = 2
+        <choose>
+            <when test="skillIds != null and skillIds.size() > 0">
+                AND skill_resource.resource_id IN
+                <foreach collection="skillIds" item="skillId" open="(" separator="," close=")">
+                    #{skillId}
+                </foreach>
+            </when>
+            <otherwise>
+                AND 1 = 0
+            </otherwise>
+        </choose>
+        ORDER BY skill_resource.resource_id ASC
+        FOR UPDATE
+    </select>
+
     <update id="updateGroupFields">
         UPDATE ss_resource
         SET resource_name = #{group.resourceName},
@@ -360,11 +382,15 @@
         FROM ss_resource_rel_detail relation
         JOIN ss_resource employee
           ON employee.resource_id = relation.resource_id
+        JOIN ss_resource skill_resource
+          ON skill_resource.resource_id = relation.rel_resource_id
         WHERE relation.resource_id = #{digitalEmployeeId}
           AND employee.com_acct_id = #{tenantId}
           AND employee.resource_biz_type = 'DIG_EMPLOYEE'
-          AND relation.rel_type_name = 'DIG_EMPLOYEE_SKILL'
-          AND relation.rel_status = 1
+          AND skill_resource.com_acct_id = #{tenantId}
+          AND skill_resource.resource_biz_type = 'SKILL'
+          AND (relation.rel_type_name = 'DIG_EMPLOYEE_SKILL' OR relation.rel_type_name IS NULL)
+          AND (relation.rel_status = 1 OR relation.rel_status IS NULL)
         <choose>
             <when test="skillIds != null and skillIds.size() > 0">
                 AND relation.rel_resource_id IN

@@ -92,6 +92,10 @@ class SkillGroupApplicationServiceTest {
         systemConfigService = mock(ByaiSystemConfigService.class);
         memberStatusService = mock(SkillGroupMemberStatusService.class);
         when(memberStatusService.evaluate(any(), any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(mapper.selectActiveSkillsForUpdate(any(), eq(TENANT_ID))).thenAnswer(invocation -> {
+            List<Long> ids = invocation.getArgument(0);
+            return ids.stream().map(SkillGroupApplicationServiceTest::skill).toList();
+        });
         when(extSkillService.findByIds(any())).thenAnswer(invocation -> {
             Iterable<Long> resourceIds = invocation.getArgument(0);
             java.util.ArrayList<SsResExtSkill> result = new java.util.ArrayList<>();
@@ -329,13 +333,31 @@ class SkillGroupApplicationServiceTest {
         assertThat(result.getTotalSkillIds()).containsExactly(502L, 501L);
         assertThat(result.getInstalledSkillIds()).containsExactly(502L);
         assertThat(result.getExistingSkillIds()).containsExactly(501L);
-        InOrder order = inOrder(mapper, resourceService, digitalEmployeeApplicationService);
+        InOrder order = inOrder(mapper, memberStatusService, digitalEmployeeApplicationService);
         order.verify(mapper).selectGroupForUpdate(GROUP_ID, TENANT_ID);
         order.verify(mapper).selectDigitalEmployeeForUpdate(401L, TENANT_ID);
         order.verify(mapper).selectActiveMembers(GROUP_ID);
-        order.verify(resourceService).findByIdList(List.of(502L, 501L));
+        order.verify(mapper).selectActiveSkillsForUpdate(List.of(501L, 502L), TENANT_ID);
+        order.verify(memberStatusService).evaluate(members, 401L);
         order.verify(digitalEmployeeApplicationService)
                 .installSkillGroupSnapshot(employee, GROUP_ID, List.of(502L, 501L));
+    }
+
+    @Test
+    void installRejectsMissingLockedMemberBeforeEvaluationOrMutation() {
+        prepareInstallLocks(401L);
+        List<SkillGroupMemberVo> members = List.of(
+                statusMember(502L, SkillGroupMemberStatus.INSTALLABLE),
+                statusMember(501L, SkillGroupMemberStatus.INSTALLABLE));
+        when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(members);
+        when(mapper.selectActiveSkillsForUpdate(List.of(501L, 502L), TENANT_ID))
+                .thenReturn(List.of(skill(501L)));
+
+        assertThatThrownBy(() -> service.install(installQo(401L, GROUP_ID)))
+                .isInstanceOf(BaseException.class)
+                .hasMessageContaining("502");
+
+        verifyNoInteractions(memberStatusService, digitalEmployeeApplicationService);
     }
 
     @Test
@@ -357,6 +379,7 @@ class SkillGroupApplicationServiceTest {
                 statusMember(501L, SkillGroupMemberStatus.INSTALLABLE));
         when(mapper.selectActiveMembers(GROUP_ID)).thenReturn(invalidMembers);
         when(resourceService.findByIdList(List.of(501L))).thenReturn(List.of(invalid));
+        when(mapper.selectActiveSkillsForUpdate(List.of(501L), TENANT_ID)).thenReturn(List.of(invalid));
         assertThatThrownBy(() -> service.install(installQo(401L, GROUP_ID)))
                 .isInstanceOf(BaseException.class);
 
@@ -384,9 +407,10 @@ class SkillGroupApplicationServiceTest {
     }
 
     @Test
-    void uninstallLocksGroupAndEmployeeThenDelegatesWithoutReadingCurrentMembers() {
+    void uninstallAllowsRemovedEmployeeAndDelegatesWithoutReadingCurrentMembers() {
         SsResource group = group();
         SsResource employee = digitalEmployee(401L);
+        employee.setResourceStatus(ResourceStatus.REMOVED.getNum());
         when(mapper.selectGroupForUpdate(GROUP_ID, TENANT_ID)).thenReturn(group);
         when(authService.hasResourceManagePermission(group)).thenReturn(true);
         when(mapper.selectDigitalEmployeeForUpdate(401L, TENANT_ID)).thenReturn(employee);
@@ -545,6 +569,38 @@ class SkillGroupApplicationServiceTest {
 
         verify(mapper, never()).selectActiveMembers(any());
         verifyNoInteractions(memberStatusService);
+    }
+
+    @Test
+    void inactiveEmployeeIsRejectedByDetailPreflightInstallAndExecuteBeforeEvaluation() {
+        SsResource inactiveEmployee = digitalEmployee(401L);
+        inactiveEmployee.setResourceStatus(ResourceStatus.REMOVED.getNum());
+        SkillGroupVo visible = new SkillGroupVo();
+        visible.setResourceId(GROUP_ID);
+        when(mapper.selectDetail(GROUP_ID, TENANT_ID, USER_ID)).thenReturn(visible);
+        when(resourceService.findById(401L)).thenReturn(inactiveEmployee);
+        SkillGroupIdQo detailQo = new SkillGroupIdQo();
+        detailQo.setGroupId(GROUP_ID);
+        detailQo.setDigitalEmployeeId(401L);
+
+        assertThatThrownBy(() -> service.detail(detailQo)).isInstanceOf(BaseException.class);
+
+        SsResource group = group();
+        when(resourceService.findById(GROUP_ID)).thenReturn(group);
+        when(authService.hasResourceUsePermission(group)).thenReturn(true);
+        when(mapper.selectGroupForUpdate(GROUP_ID, TENANT_ID)).thenReturn(group);
+        when(mapper.selectDigitalEmployeeForUpdate(401L, TENANT_ID)).thenReturn(inactiveEmployee);
+        when(authService.hasResourceManagePermission(inactiveEmployee)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.preflightInstall(installQo(401L, GROUP_ID)))
+                .isInstanceOf(BaseException.class);
+        assertThatThrownBy(() -> service.install(installQo(401L, GROUP_ID)))
+                .isInstanceOf(BaseException.class);
+        assertThatThrownBy(() -> service.executeInstall(installQo(401L, GROUP_ID)))
+                .isInstanceOf(BaseException.class);
+
+        verify(mapper, never()).selectActiveMembers(any());
+        verifyNoInteractions(memberStatusService, digitalEmployeeApplicationService);
     }
 
     @Test
@@ -1170,6 +1226,7 @@ class SkillGroupApplicationServiceTest {
         SsResource resource = new SsResource();
         resource.setResourceId(id);
         resource.setResourceBizType("DIG_EMPLOYEE");
+        resource.setResourceStatus(ResourceStatus.LIST.getNum());
         resource.setComAcctId(TENANT_ID);
         return resource;
     }

@@ -1509,9 +1509,8 @@ public class DigitalEmployeeApplicationService {
     private void refreshRuntimeAfterSnapshotMutation(SsResource digitalEmployee) {
         Long digitalEmployeeId = digitalEmployee.getResourceId();
         this.rebuildAndSaveDigitalEmployeeRelSkills(digitalEmployeeId);
-        this.synOpenClawWorkSpace(digitalEmployeeId);
         operationLogService.recordOperationLog(digitalEmployee, OperationTypeEnum.UPDATE);
-        this.notifyDigitalEmployeeRuntimeChanged(digitalEmployeeId);
+        digitalEmployeeRuntimeRefreshService.scheduleSkillRuntimeRefreshAfterCommit(List.of(digitalEmployeeId));
     }
 
     private void notifyDigitalEmployeeRuntimeChanged(Long digitalEmployeeId) {

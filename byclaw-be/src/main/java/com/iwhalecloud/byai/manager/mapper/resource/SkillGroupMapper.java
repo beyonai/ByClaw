@@ -38,6 +38,17 @@ public interface SkillGroupMapper {
             @Param("comAcctId") Long comAcctId);
 
     /**
+     * Locks active tenant-owned skill rows in ascending resource-ID order.
+     *
+     * @param skillIds exact skill IDs to lock
+     * @param comAcctId current tenant ID
+     * @return matching locked active skills ordered by resource ID
+     */
+    List<SsResource> selectActiveSkillsForUpdate(
+            @Param("skillIds") List<Long> skillIds,
+            @Param("comAcctId") Long comAcctId);
+
+    /**
      * Updates only editable skill-group columns and audit fields under ID, tenant, and SKILL_GROUP guards.
      *
      * @param group values to persist

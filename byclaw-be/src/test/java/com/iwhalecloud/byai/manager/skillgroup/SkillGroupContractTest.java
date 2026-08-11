@@ -432,8 +432,11 @@ class SkillGroupContractTest {
                 .contains("relation.resource_id = #{digitalemployeeid}")
                 .contains("employee.com_acct_id = #{tenantid}")
                 .contains("employee.resource_biz_type = 'dig_employee'")
-                .contains("relation.rel_type_name = 'dig_employee_skill'")
-                .contains("relation.rel_status = 1")
+                .contains("join ss_resource skill_resource")
+                .contains("skill_resource.com_acct_id = #{tenantid}")
+                .contains("skill_resource.resource_biz_type = 'skill'")
+                .contains("relation.rel_type_name = 'dig_employee_skill' or relation.rel_type_name is null")
+                .contains("relation.rel_status = 1 or relation.rel_status is null")
                 .contains("relation.rel_resource_id in")
                 .contains("<foreach collection=\"skillids\"")
                 .contains("<otherwise>")
@@ -454,7 +457,25 @@ class SkillGroupContractTest {
         parameters.put("skillIds", List.of(20001L, 20002L));
         BoundSql populated = normalizedBoundSql(configuration, "selectInstalledSkillIds", parameters);
         assertThat(populated.getSql()).containsPattern("relation\\.rel_resource_id in \\( \\? , \\? \\)");
-        assertThat(populated.getParameterMappings()).hasSize(4);
+        assertThat(populated.getParameterMappings()).hasSize(5);
+    }
+
+    @Test
+    void activeSkillBatchLockIsTenantTypeStatusGuardedSortedAndForUpdate() throws Exception {
+        Configuration configuration = buildMapperConfiguration();
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("skillIds", List.of(20002L, 20001L));
+        parameters.put("comAcctId", 60001L);
+
+        String sql = normalizedBoundSql(configuration, "selectActiveSkillsForUpdate", parameters).getSql();
+
+        assertThat(sql)
+                .contains("skill_resource.resource_id in ( ? , ? )")
+                .contains("skill_resource.com_acct_id = ?")
+                .contains("skill_resource.resource_biz_type = 'skill'")
+                .contains("skill_resource.resource_status = 2")
+                .contains("order by skill_resource.resource_id asc")
+                .endsWith("for update");
     }
 
     @Test
@@ -626,6 +647,7 @@ class SkillGroupContractTest {
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectMemberRelationsIncludingInactive")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectGroupForUpdate")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectDigitalEmployeeForUpdate")).isTrue();
+        assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectActiveSkillsForUpdate")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "updateGroupFields")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "insertActiveMemberIfAbsent")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "insertDigitalEmployeeSkillIfAbsent")).isTrue();
