@@ -142,6 +142,9 @@ export default {
   'resource.skillGroup.selectSkills': 'Select at least one skill',
   'resource.skillGroup.builtInSkills': 'Built-in Skills',
   'resource.skillGroup.personalSkills': 'Personal Skills',
+  'resource.skillGroup.uploadPersonalSkill': 'Upload Personal Skill',
+  'resource.skillGroup.uploadRefreshFailed':
+    'The skill was uploaded, but the skill list could not be refreshed. Try again.',
   'resource.skillGroup.loadSkillsFailed': 'Unable to load skills. Try again later.',
   'resource.skillGroup.coverUploadFailed': 'Cover upload failed. Upload it again and retry.',
   'resource.skillGroup.createFailed': 'Unable to create the skill group. Try again later.',

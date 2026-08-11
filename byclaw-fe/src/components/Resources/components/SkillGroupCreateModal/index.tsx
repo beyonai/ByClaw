@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { InboxOutlined } from '@ant-design/icons';
-import { Form, Input, message, Modal, Select, Tabs, Upload } from 'antd';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { InboxOutlined, UploadOutlined } from '@ant-design/icons';
+import { Button, Form, Input, message, Modal, Select, Tabs, Upload } from 'antd';
 import type { UploadFile, UploadProps } from 'antd';
 import { useIntl } from '@umijs/max';
 import {
@@ -11,12 +11,19 @@ import {
   removeSkillGroupMembers,
   updateSkillGroup,
 } from '@/pages/manager/service/resources';
-import type { SkillGroup } from '@/pages/manager/service/resources';
+import type {
+  ResourceImportResult,
+  SkillGroup,
+  SkillGroupMember,
+  SkillGroupMemberPageResult,
+} from '@/pages/manager/service/resources';
 import { callDomainServiceByMultipart } from '@/service/file';
 import { getFileUrl } from '@/utils/file';
+import ResourceImport from '../ResourceImport';
 import styles from './index.module.less';
 import { normalizeSkillGroupCover } from './coverProcessor';
 import { getSkillGroupMemberDiff } from './editHelpers';
+import { getSuccessfulImportedSkillIds, mergeSelectedSkillIds } from './importHelpers';
 import {
   buildSkillGroupCandidateParams,
   getSkillOptionLabel,
@@ -57,6 +64,7 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [skillOptions, setSkillOptions] = useState<SkillOption[]>([]);
   const [activeSkillTab, setActiveSkillTab] = useState<SkillCandidateTabKey>('builtIn');
+  const [skillImportOpen, setSkillImportOpen] = useState(false);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [coverFile, setCoverFile] = useState<File>();
   const [processingCover, setProcessingCover] = useState(false);
@@ -64,7 +72,18 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
   const [coverPreviewUrl, setCoverPreviewUrl] = useState('');
   const [originalSkillIds, setOriginalSkillIds] = useState<string[]>([]);
   const coverProcessGenerationRef = useRef(0);
+  const modalGenerationRef = useRef(0);
   const isEditMode = Boolean(group?.resourceId);
+
+  const loadSkillOptions = useCallback(async (): Promise<SkillOption[]> => {
+    const response = await pageSkillGroupMemberCandidates(
+      buildSkillGroupCandidateParams(group?.resourceId ? `${group.resourceId}` : undefined)
+    );
+    const data = (getResponseData(response) || {}) as Partial<SkillGroupMemberPageResult> & {
+      rows?: SkillGroupMember[];
+    };
+    return normalizeSkillOptions(data.list || data.rows || []);
+  }, [group?.resourceId]);
 
   useEffect(
     () => () => {
@@ -76,6 +95,7 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
   );
 
   useEffect(() => {
+    modalGenerationRef.current += 1;
     if (!visible) {
       coverProcessGenerationRef.current += 1;
       form.resetFields();
@@ -86,6 +106,8 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
       setCoverPreviewUrl('');
       setOriginalSkillIds([]);
       setActiveSkillTab('builtIn');
+      setSkillImportOpen(false);
+      setSkillsLoading(false);
       return;
     }
 
@@ -106,34 +128,62 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
           if (!active) return;
           const detail = getResponseData(response) || {};
           const detailSkillIds = (detail.members || []).map((member: any) => `${member.resourceId}`);
+          const currentSkillIds = form.getFieldValue('skillIds') || [];
+          const { addedSkillIds, removedSkillIds } = getSkillGroupMemberDiff(initialSkillIds, currentSkillIds);
+          const removedSkillIdSet = new Set(removedSkillIds);
+          const reconciledSkillIds = mergeSelectedSkillIds(
+            detailSkillIds.filter((skillId: string) => !removedSkillIdSet.has(skillId)),
+            addedSkillIds
+          );
           setOriginalSkillIds(detailSkillIds);
-          form.setFieldValue('skillIds', detailSkillIds);
+          form.setFieldValue('skillIds', reconciledSkillIds);
         })
         .catch(() => undefined);
     }
 
     setSkillsLoading(true);
-    pageSkillGroupMemberCandidates(
-      buildSkillGroupCandidateParams(group?.resourceId ? `${group.resourceId}` : undefined)
-    )
-      .then((response: any) => {
-        const data = getResponseData(response) || {};
-        const rows = data.list || data.rows || [];
-        setSkillOptions(normalizeSkillOptions(rows));
+    loadSkillOptions()
+      .then((options) => {
+        if (active) setSkillOptions(options);
       })
       .catch(() => {
+        if (!active) return;
         setSkillOptions([]);
         message.error(intl.formatMessage({ id: 'resource.skillGroup.loadSkillsFailed' }));
       })
-      .finally(() => setSkillsLoading(false));
+      .finally(() => {
+        if (active) setSkillsLoading(false);
+      });
 
     return () => {
       active = false;
     };
-  }, [form, group, intl, isEditMode, visible]);
+  }, [form, group, intl, isEditMode, loadSkillOptions, visible]);
 
   const { builtInSkills, personalSkills } = useMemo(() => partitionSkillOptions(skillOptions), [skillOptions]);
   const activeSkillOptions = getSkillOptionsForTab(skillOptions, activeSkillTab);
+
+  const handleSkillImportSuccess = async (result?: ResourceImportResult) => {
+    setSkillImportOpen(false);
+    const importedSkillIds = getSuccessfulImportedSkillIds(result);
+    if (!importedSkillIds.length) return;
+
+    const generation = modalGenerationRef.current;
+    setSkillsLoading(true);
+    try {
+      const nextSkillOptions = await loadSkillOptions();
+      if (generation !== modalGenerationRef.current) return;
+      const currentSkillIds = form.getFieldValue('skillIds') || [];
+      setSkillOptions(nextSkillOptions);
+      form.setFieldValue('skillIds', mergeSelectedSkillIds(currentSkillIds, importedSkillIds));
+      setActiveSkillTab('personal');
+    } catch {
+      if (generation !== modalGenerationRef.current) return;
+      message.error(intl.formatMessage({ id: 'resource.skillGroup.uploadRefreshFailed' }));
+    } finally {
+      if (generation === modalGenerationRef.current) setSkillsLoading(false);
+    }
+  };
 
   const uploadProps: UploadProps = {
     accept: 'image/*',
@@ -232,7 +282,9 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
     }
   };
 
-  return (
+  return React.createElement(
+    React.Fragment,
+    null,
     <Modal
       destroyOnClose
       open={visible}
@@ -318,6 +370,20 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
                         onChange={(key) => setActiveSkillTab(key as SkillCandidateTabKey)}
                       />
                     </div>
+                    {activeSkillTab === 'personal' ? (
+                      <div className={styles.personalSkillToolbar}>
+                        <Button
+                          type="link"
+                          size="small"
+                          icon={<UploadOutlined />}
+                          disabled={skillsLoading}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => setSkillImportOpen(true)}
+                        >
+                          {intl.formatMessage({ id: 'resource.skillGroup.uploadPersonalSkill' })}
+                        </Button>
+                      </div>
+                    ) : null}
                     <div className={styles.skillMenu} style={{ height: SKILL_CANDIDATE_LIST_HEIGHT }}>
                       {menu}
                     </div>
@@ -349,7 +415,20 @@ const SkillGroupCreateModal: React.FC<SkillGroupCreateModalProps> = ({ visible, 
           </div>
         </div>
       </Form>
-    </Modal>
+    </Modal>,
+    visible && skillImportOpen ? (
+      <ResourceImport
+        visible={skillImportOpen}
+        resourceName={intl.formatMessage({ id: 'common.skill' })}
+        resourceType="SKILL"
+        catalogId=""
+        catalogList={[]}
+        activeTab="personal"
+        saveTool={async () => undefined}
+        onCancel={() => setSkillImportOpen(false)}
+        onSuccess={(result) => void handleSkillImportSuccess(result)}
+      />
+    ) : null
   );
 };
 
