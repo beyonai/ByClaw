@@ -139,6 +139,8 @@ export default {
   'resource.skillGroup.selectSkills': '请选择至少一个技能',
   'resource.skillGroup.builtInSkills': '内置技能',
   'resource.skillGroup.personalSkills': '个人技能',
+  'resource.skillGroup.uploadPersonalSkill': '上传个人技能',
+  'resource.skillGroup.uploadRefreshFailed': '技能上传成功，但技能列表刷新失败，请重试',
   'resource.skillGroup.loadSkillsFailed': '技能列表加载失败，请稍后重试',
   'resource.skillGroup.coverUploadFailed': '封面上传失败，请重新上传后重试',
   'resource.skillGroup.createFailed': '技能组创建失败，请稍后重试',

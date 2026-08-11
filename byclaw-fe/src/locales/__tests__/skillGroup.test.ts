@@ -12,6 +12,8 @@ const skillGroupLocaleIds = [
   'resource.skillGroup.editTitle',
   'resource.skillGroup.updateSuccess',
   'resource.skillGroup.edit',
+  'resource.skillGroup.uploadPersonalSkill',
+  'resource.skillGroup.uploadRefreshFailed',
 ] as const;
 
 describe('skill group locale messages', () => {
@@ -22,5 +24,10 @@ describe('skill group locale messages', () => {
 
   it('uses the group-specific label for member skills in Chinese', () => {
     expect(zhCN['resource.memberSkills']).toBe('组内技能');
+  });
+
+  it('uses the expected personal skill upload messages in Chinese', () => {
+    expect(zhCN['resource.skillGroup.uploadPersonalSkill']).toBe('上传个人技能');
+    expect(zhCN['resource.skillGroup.uploadRefreshFailed']).toBe('技能上传成功，但技能列表刷新失败，请重试');
   });
 });
