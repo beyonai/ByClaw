@@ -50,6 +50,7 @@ import com.iwhalecloud.byai.state.domain.file.service.ConversationFileStorage;
 import com.iwhalecloud.byai.state.domain.file.service.ConversationStoragePathResolver;
 import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionTitleService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.template.enums.DebugModeEnum;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
@@ -84,6 +85,9 @@ public class AssistantChatApplicationService {
 
     @Autowired
     private SessionService sessionService;
+
+    @Autowired
+    private SessionTitleService sessionTitleService;
 
     @Autowired
     private FilesService filesService;
@@ -317,21 +321,29 @@ public class AssistantChatApplicationService {
         this.checkUploadInfo(multipartFiles, agentId);
 
         // 创建会话
+        ByaiSession session;
         if (sessionId == null || sessionId <= 0) {
-            String sessionName = "File Upload " + DateUtils.getFormatedDate(new Date());
+            String sessionName = sessionTitleService.buildFileUploadTitle(new Date());
 
             String objectType = agentId == null ? ConversationObjectType.SUPER_ASSISTANT
                 : ConversationObjectType.DIGITAL_EMPLOYEES;
 
-            ByaiSession byaiSession = sessionService.createSession(sessionName, SessionType.H_AS.getCode(), agentId,
+            session = sessionService.createSession(sessionName, SessionType.H_AS.getCode(), agentId,
                 objectType, DebugModeEnum.DEBUG_0.getNum());
 
-            sessionId = byaiSession.getSessionId();
+            sessionId = session.getSessionId();
+            sessionTitleService.markInitialTitlePending(sessionId);
+        }
+        else {
+            session = sessionService.findById(sessionId);
         }
 
         // 封装参数返回
         SessionUploadResult sessionUploadResult = new SessionUploadResult();
         sessionUploadResult.setSessionId(sessionId);
+        if (session != null) {
+            sessionUploadResult.setSessionName(session.getSessionName());
+        }
 
         for (MultipartFile multipartFile : multipartFiles) {
 
