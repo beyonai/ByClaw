@@ -1,7 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.auth;
 
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
-import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.users.UserType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -19,7 +18,6 @@ import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationServ
 import com.iwhalecloud.byai.manager.domain.position.service.PositionService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
-import com.iwhalecloud.byai.manager.domain.skillgroup.event.SkillUsePermissionChangedEvent;
 import com.iwhalecloud.byai.manager.domain.station.service.StationService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.auth.AuthDTO;
@@ -49,7 +47,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.MessageSource;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.SetOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -80,287 +77,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
 class AuthApplicationServiceTest {
-
-    @ParameterizedTest
-    @ValueSource(strings = {Color.RED, Color.BLACK})
-    void handleAuth_publishesExactSkillUsePermissionEventForPersistedRedOrBlackChange(String color) {
-        mockRedisSetWrite();
-        AuthApplicationService service = new AuthApplicationService();
-        PrivilegeGrantService grants = mock(PrivilegeGrantService.class);
-        PrivilegeGrantMapper grantMapper = mock(PrivilegeGrantMapper.class);
-        SsResourceMapper resources = mock(SsResourceMapper.class);
-        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
-        ReflectionTestUtils.setField(service, "privilegeGrantService", grants);
-        ReflectionTestUtils.setField(service, "privilegeGrantMapper", grantMapper);
-        ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
-        ReflectionTestUtils.setField(service, "eventPublisher", publisher);
-        ReflectionTestUtils.setField(service, "authRedisSyncService", mock(AuthRedisSyncService.class));
-        when(grants.findPrivilegeGrant(anyString(), anyString(), eq(301L), anyString())).thenReturn(List.of());
-        when(grants.save(any())).thenReturn(true);
-        SsResource skill = new SsResource();
-        skill.setResourceId(301L);
-        skill.setComAcctId(201L);
-        skill.setResourceBizType(ResourceBizTypeEnum.SKILL.name());
-        when(resources.selectById(301L)).thenReturn(skill);
-
-        AuthDTO user = new AuthDTO();
-        user.setGrantToObjType(GrantToObjType.USER);
-        user.setGrantToObjId(11L);
-        AuthRedBlackDTO dto = new AuthRedBlackDTO();
-        dto.setGrantType(GrantType.AVAILABLE_USE);
-        dto.setGrantObjType(ResourceBizTypeEnum.SKILL.name());
-        dto.setGrantObjId(301L);
-        dto.setRedList(Color.RED.equals(color) ? List.of(user) : List.of());
-        dto.setBlackList(Color.BLACK.equals(color) ? List.of(user) : List.of());
-
-        service.handleAuth(dto);
-
-        verify(publisher).publishEvent(org.mockito.ArgumentMatchers.<Object>argThat(
-            event -> event instanceof SkillUsePermissionChangedEvent changed
-            && changed.skillResourceId().equals(301L)
-            && changed.comAcctId().equals(201L)
-            && changed.affectedUserIds().equals(java.util.Set.of(11L))));
-    }
-
-    @Test
-    void handleAuth_eventContainsOnlyAddDeleteUsersWhenAnotherUserHasUpdateOnlyDelta() {
-        mockRedisSetWrite();
-        AuthApplicationService service = eventPublishingService(301L);
-        PrivilegeGrantService grants = (PrivilegeGrantService)ReflectionTestUtils.getField(service,
-            "privilegeGrantService");
-        PrivilegeGrant updateOnly = grant(301L, 22L, Color.RED);
-        updateOnly.setAllowUnsubscribe(Constants.ALLOW_UNSUBSCRIBE);
-        when(grants.findPrivilegeGrant(GrantType.AVAILABLE_USE, ResourceBizTypeEnum.SKILL.name(), 301L, Color.RED))
-            .thenReturn(List.of(updateOnly));
-        when(grants.findPrivilegeGrant(GrantType.AVAILABLE_USE, ResourceBizTypeEnum.SKILL.name(), 301L, Color.BLACK))
-            .thenReturn(List.of());
-        when(grants.save(any())).thenReturn(true);
-
-        AuthDTO added = authUser(11L);
-        AuthDTO updated = authUser(22L);
-        AuthRedBlackDTO dto = skillUseDto(301L);
-        dto.setAllowUnSubscribe(false);
-        dto.setRedList(List.of(added, updated));
-
-        service.handleAuth(dto);
-
-        ApplicationEventPublisher publisher = (ApplicationEventPublisher)ReflectionTestUtils.getField(service,
-            "eventPublisher");
-        verify(publisher).publishEvent(org.mockito.ArgumentMatchers.<Object>argThat(
-            event -> event instanceof SkillUsePermissionChangedEvent changed
-                && changed.affectedUserIds().equals(java.util.Set.of(11L))));
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {GrantToObjType.ORG, GrantToObjType.POST, GrantToObjType.STATION})
-    void handleAuth_strictTargetResolutionFailurePropagatesWithoutPublishing(String targetType) {
-        mockRedisSetWrite();
-        AuthApplicationService service = eventPublishingService(301L);
-        PrivilegeGrantService grants = (PrivilegeGrantService)ReflectionTestUtils.getField(service,
-            "privilegeGrantService");
-        UsersMapper usersMapper = mock(UsersMapper.class);
-        ReflectionTestUtils.setField(service, "usersMapper", usersMapper);
-        when(grants.findPrivilegeGrant(anyString(), anyString(), eq(301L), anyString())).thenReturn(List.of());
-        when(grants.save(any())).thenReturn(true);
-        if (GrantToObjType.ORG.equals(targetType)) {
-            when(usersMapper.findUserIdsByOrgIdListIncludingChildren(any())).thenThrow(new IllegalStateException("org"));
-        } else if (GrantToObjType.POST.equals(targetType)) {
-            when(usersMapper.findUserIdsByPostId(88L)).thenThrow(new IllegalStateException("post"));
-        } else {
-            when(usersMapper.findUserIdsByStationIdListIncludingChildren(any()))
-                .thenThrow(new IllegalStateException("station"));
-        }
-        AuthDTO target = new AuthDTO();
-        target.setGrantToObjType(targetType);
-        target.setGrantToObjId(88L);
-        AuthRedBlackDTO dto = skillUseDto(301L);
-        dto.setRedList(List.of(target));
-
-        assertThatThrownBy(() -> service.handleAuth(dto)).isInstanceOf(IllegalStateException.class);
-
-        ApplicationEventPublisher publisher = (ApplicationEventPublisher)ReflectionTestUtils.getField(service,
-            "eventPublisher");
-        verify(publisher, never()).publishEvent(any());
-    }
-
-    @Test
-    void handleAuth_saveFailureThrowsAndDoesNotPublish() {
-        mockRedisSetWrite();
-        AuthApplicationService service = eventPublishingService(301L);
-        PrivilegeGrantService grants = (PrivilegeGrantService)ReflectionTestUtils.getField(service,
-            "privilegeGrantService");
-        when(grants.findPrivilegeGrant(anyString(), anyString(), eq(301L), anyString())).thenReturn(List.of());
-        when(grants.save(any())).thenReturn(false);
-        AuthRedBlackDTO dto = skillUseDto(301L);
-        dto.setRedList(List.of(authUser(11L)));
-
-        assertThatThrownBy(() -> service.handleAuth(dto)).isInstanceOf(BaseException.class);
-        ApplicationEventPublisher publisher = (ApplicationEventPublisher)ReflectionTestUtils.getField(service,
-            "eventPublisher");
-        verify(publisher, never()).publishEvent(any());
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {Color.RED, Color.BLACK})
-    void handleAuth_publishesExactEventForSuccessfulDelete(String color) {
-        mockRedisSetWrite();
-        AuthApplicationService service = eventPublishingService(301L);
-        PrivilegeGrantService grants = (PrivilegeGrantService)ReflectionTestUtils.getField(service,
-            "privilegeGrantService");
-        when(grants.findPrivilegeGrant(GrantType.AVAILABLE_USE, ResourceBizTypeEnum.SKILL.name(), 301L, color))
-            .thenReturn(List.of(grant(301L, 11L, color)));
-        when(grants.findPrivilegeGrant(GrantType.AVAILABLE_USE, ResourceBizTypeEnum.SKILL.name(), 301L,
-            Color.RED.equals(color) ? Color.BLACK : Color.RED)).thenReturn(List.of());
-        when(grants.remove(any())).thenReturn(true);
-
-        service.handleAuth(skillUseDto(301L));
-
-        ApplicationEventPublisher publisher = (ApplicationEventPublisher)ReflectionTestUtils.getField(service,
-            "eventPublisher");
-        verify(publisher).publishEvent(org.mockito.ArgumentMatchers.<Object>argThat(
-            event -> event instanceof SkillUsePermissionChangedEvent changed
-                && changed.affectedUserIds().equals(java.util.Set.of(11L))));
-    }
-
-    @Test
-    void handleAuth_removeFailureThrowsAndDoesNotPublish() {
-        mockRedisSetWrite();
-        AuthApplicationService service = eventPublishingService(301L);
-        PrivilegeGrantService grants = (PrivilegeGrantService)ReflectionTestUtils.getField(service,
-            "privilegeGrantService");
-        when(grants.findPrivilegeGrant(GrantType.AVAILABLE_USE, ResourceBizTypeEnum.SKILL.name(), 301L, Color.RED))
-            .thenReturn(List.of(grant(301L, 11L, Color.RED)));
-        when(grants.findPrivilegeGrant(GrantType.AVAILABLE_USE, ResourceBizTypeEnum.SKILL.name(), 301L, Color.BLACK))
-            .thenReturn(List.of());
-        when(grants.remove(any())).thenReturn(false);
-
-        assertThatThrownBy(() -> service.handleAuth(skillUseDto(301L))).isInstanceOf(BaseException.class);
-        ApplicationEventPublisher publisher = (ApplicationEventPublisher)ReflectionTestUtils.getField(service,
-            "eventPublisher");
-        verify(publisher, never()).publishEvent(any());
-    }
-
-    private AuthApplicationService eventPublishingService(Long resourceId) {
-        AuthApplicationService service = new AuthApplicationService();
-        ReflectionTestUtils.setField(service, "privilegeGrantService", mock(PrivilegeGrantService.class));
-        ReflectionTestUtils.setField(service, "privilegeGrantMapper", mock(PrivilegeGrantMapper.class));
-        SsResourceMapper resources = mock(SsResourceMapper.class);
-        ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
-        ReflectionTestUtils.setField(service, "eventPublisher", mock(ApplicationEventPublisher.class));
-        ReflectionTestUtils.setField(service, "authRedisSyncService", mock(AuthRedisSyncService.class));
-        SsResource skill = new SsResource();
-        skill.setResourceId(resourceId);
-        skill.setComAcctId(201L);
-        skill.setResourceBizType(ResourceBizTypeEnum.SKILL.name());
-        when(resources.selectById(resourceId)).thenReturn(skill);
-        return service;
-    }
-
-    private AuthRedBlackDTO skillUseDto(Long resourceId) {
-        AuthRedBlackDTO dto = new AuthRedBlackDTO();
-        dto.setGrantType(GrantType.AVAILABLE_USE);
-        dto.setGrantObjType(ResourceBizTypeEnum.SKILL.name());
-        dto.setGrantObjId(resourceId);
-        dto.setRedList(List.of());
-        dto.setBlackList(List.of());
-        return dto;
-    }
-
-    private AuthDTO authUser(Long userId) {
-        AuthDTO user = new AuthDTO();
-        user.setGrantToObjType(GrantToObjType.USER);
-        user.setGrantToObjId(userId);
-        return user;
-    }
-
-    private PrivilegeGrant grant(Long resourceId, Long userId, String color) {
-        PrivilegeGrant grant = new PrivilegeGrant();
-        grant.setGrantType(GrantType.AVAILABLE_USE);
-        grant.setGrantObjType(ResourceBizTypeEnum.SKILL.name());
-        grant.setGrantObjId(resourceId);
-        grant.setGrantToObjType(GrantToObjType.USER);
-        grant.setGrantToObjId(userId);
-        grant.setGrantToType(color);
-        grant.setOperType(OperType.READ);
-        return grant;
-    }
-
-    @Test
-    void handleAuth_doesNotPublishForNonSkillManageNoChangeOrNoAffectedUsers() {
-        AuthApplicationService service = new AuthApplicationService();
-        PrivilegeGrantService grants = mock(PrivilegeGrantService.class);
-        PrivilegeGrantMapper grantMapper = mock(PrivilegeGrantMapper.class);
-        SsResourceMapper resources = mock(SsResourceMapper.class);
-        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
-        ReflectionTestUtils.setField(service, "privilegeGrantService", grants);
-        ReflectionTestUtils.setField(service, "privilegeGrantMapper", grantMapper);
-        ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
-        ReflectionTestUtils.setField(service, "eventPublisher", publisher);
-        ReflectionTestUtils.setField(service, "authRedisSyncService", mock(AuthRedisSyncService.class));
-        when(grants.findPrivilegeGrant(anyString(), anyString(), any(), anyString())).thenReturn(List.of());
-        when(grants.save(any())).thenReturn(true);
-        when(grants.remove(any())).thenReturn(true);
-
-        AuthRedBlackDTO noChange = new AuthRedBlackDTO();
-        noChange.setGrantType(GrantType.AVAILABLE_USE);
-        noChange.setGrantObjType(ResourceBizTypeEnum.SKILL.name());
-        noChange.setGrantObjId(301L);
-        noChange.setRedList(List.of());
-        noChange.setBlackList(List.of());
-        service.handleAuth(noChange);
-
-        AuthDTO user = new AuthDTO();
-        user.setGrantToObjType(GrantToObjType.USER);
-        user.setGrantToObjId(11L);
-        AuthRedBlackDTO nonSkill = new AuthRedBlackDTO();
-        nonSkill.setGrantType(GrantType.AVAILABLE_USE);
-        nonSkill.setGrantObjType(ResourceBizTypeEnum.AGENT.name());
-        nonSkill.setGrantObjId(302L);
-        nonSkill.setRedList(List.of(user));
-        service.handleAuth(nonSkill);
-
-        UsersMapper usersMapper = mock(UsersMapper.class);
-        ReflectionTestUtils.setField(service, "usersMapper", usersMapper);
-        SsResource skill = new SsResource();
-        skill.setResourceId(303L);
-        skill.setComAcctId(201L);
-        skill.setResourceBizType(ResourceBizTypeEnum.SKILL.name());
-        when(resources.selectById(303L)).thenReturn(skill);
-        AuthDTO emptyOrg = new AuthDTO();
-        emptyOrg.setGrantToObjType(GrantToObjType.ORG);
-        emptyOrg.setGrantToObjId(88L);
-        AuthRedBlackDTO noAffectedUsers = new AuthRedBlackDTO();
-        noAffectedUsers.setGrantType(GrantType.AVAILABLE_USE);
-        noAffectedUsers.setGrantObjType(ResourceBizTypeEnum.SKILL.name());
-        noAffectedUsers.setGrantObjId(303L);
-        noAffectedUsers.setRedList(List.of(emptyOrg));
-        service.handleAuth(noAffectedUsers);
-
-        SsResource managedSkill = new SsResource();
-        managedSkill.setResourceId(304L);
-        managedSkill.setComAcctId(201L);
-        managedSkill.setResourceBizType(ResourceBizTypeEnum.SKILL.name());
-        when(resources.selectById(304L)).thenReturn(managedSkill);
-        PrivilegeGrant oldManage = new PrivilegeGrant();
-        oldManage.setGrantType(GrantType.ALLOW_MANAGE);
-        oldManage.setGrantObjType(ResourceBizTypeEnum.SKILL.name());
-        oldManage.setGrantObjId(304L);
-        oldManage.setGrantToObjType(GrantToObjType.USER);
-        oldManage.setGrantToObjId(11L);
-        oldManage.setGrantToType(Color.RED);
-        oldManage.setOperType(OperType.READ);
-        when(grants.findPrivilegeGrant(GrantType.ALLOW_MANAGE, ResourceBizTypeEnum.SKILL.name(), 304L, Color.RED))
-            .thenReturn(List.of(oldManage));
-        AuthRedBlackDTO manageOnly = new AuthRedBlackDTO();
-        manageOnly.setGrantType(GrantType.ALLOW_MANAGE);
-        manageOnly.setGrantObjType(ResourceBizTypeEnum.SKILL.name());
-        manageOnly.setGrantObjId(304L);
-        manageOnly.setRedList(List.of());
-        manageOnly.setBlackList(List.of());
-        service.handleAuth(manageOnly);
-
-        verify(publisher, never()).publishEvent(any());
-    }
 
     @AfterEach
     void tearDown() {
@@ -837,7 +553,6 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
-        when(privilegeGrantService.save(any())).thenReturn(true);
 
         SsResource resource = new SsResource();
         resource.setResourceId(601L);

@@ -75,27 +75,25 @@ public class PrivilegeGrantService {
      * 保存权限
      *
      * @param privilegeGrant 权限操作
-     * @return {@code true} when exactly one grant row was inserted
      */
-    public boolean save(PrivilegeGrant privilegeGrant) {
+    public void save(PrivilegeGrant privilegeGrant) {
         privilegeGrant.setPrivilegeGrantId(SequenceService.nextVal());
         privilegeGrant.setCreateDate(new Date());
         privilegeGrant.setEffDate(new Date());
         privilegeGrant.setCreateStaff(CurrentUserHolder.getCurrentUserId());
-        return privilegeGrantMapper.insert(privilegeGrant) == 1;
+        privilegeGrantMapper.insert(privilegeGrant);
     }
 
     /**
      * 移除权限
      *
      * @param privilegeGrant 权限信息
-     * @return {@code true} when exactly one grant row was updated
      */
-    public boolean remove(PrivilegeGrant privilegeGrant) {
+    public void remove(PrivilegeGrant privilegeGrant) {
         privilegeGrant.setStatusCd("X");
         privilegeGrant.setUpdateStaff(CurrentUserHolder.getCurrentUserId());
         privilegeGrant.setUpdateDate(new Date());
-        return privilegeGrantMapper.updateById(privilegeGrant) == 1;
+        privilegeGrantMapper.updateById(privilegeGrant);
     }
 
     /**

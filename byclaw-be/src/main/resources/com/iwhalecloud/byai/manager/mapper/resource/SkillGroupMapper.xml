@@ -377,25 +377,6 @@
         ORDER BY relation.create_time, relation.resource_rel_detail_id
     </select>
 
-    <select id="selectActiveEmployeeSkillRelationsBySkill" resultMap="ResourceRelationResultMap">
-        SELECT
-        <include refid="ResourceRelationColumns" />
-        FROM ss_resource_rel_detail relation
-        JOIN ss_resource employee
-          ON employee.resource_id = relation.resource_id
-        JOIN ss_resource skill_resource
-          ON skill_resource.resource_id = relation.rel_resource_id
-        WHERE relation.rel_resource_id = #{skillId}
-          AND relation.rel_type_name = 'DIG_EMPLOYEE_SKILL'
-          AND relation.rel_status = 1
-          AND employee.resource_biz_type = 'DIG_EMPLOYEE'
-          AND employee.com_acct_id = #{comAcctId}
-          AND skill_resource.resource_biz_type = 'SKILL'
-          AND skill_resource.resource_status = 2
-          AND skill_resource.com_acct_id = #{comAcctId}
-        ORDER BY relation.resource_id ASC, relation.resource_rel_detail_id ASC
-    </select>
-
     <select id="selectInstalledSkillIds" resultType="java.lang.Long">
         SELECT DISTINCT relation.rel_resource_id
         FROM ss_resource_rel_detail relation

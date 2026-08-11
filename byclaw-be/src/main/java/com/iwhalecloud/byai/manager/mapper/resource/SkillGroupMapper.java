@@ -115,10 +115,6 @@ public interface SkillGroupMapper {
             @Param("digitalEmployeeId") Long digitalEmployeeId,
             @Param("skillIds") List<Long> skillIds);
 
-    List<SsResourceRelDetail> selectActiveEmployeeSkillRelationsBySkill(
-            @Param("skillId") Long skillId,
-            @Param("comAcctId") Long comAcctId);
-
     /**
      * Selects the distinct active skill IDs installed for one digital employee. Null or empty skill IDs deliberately
      * return no rows; callers must also skip the query when no IDs need evaluation.

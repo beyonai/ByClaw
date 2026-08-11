@@ -30,7 +30,6 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtToolService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtViewService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SuperassistSubAgentService;
 import com.iwhalecloud.byai.manager.domain.station.service.StationService;
-import com.iwhalecloud.byai.manager.domain.skillgroup.event.SkillUsePermissionChangedEvent;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.auth.AuthDTO;
 import com.iwhalecloud.byai.manager.dto.auth.AuthManOrgDTO;
@@ -79,7 +78,6 @@ import com.iwhalecloud.byai.common.login.bean.UserStation;
 import com.iwhalecloud.byai.manager.mapper.users.UsersMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
-import org.springframework.context.ApplicationEventPublisher;
 import com.iwhalecloud.byai.manager.vo.auth.AuthVo;
 import com.iwhalecloud.byai.manager.vo.auth.CompareVo;
 import com.iwhalecloud.byai.manager.vo.auth.FixedEntryOperationCapabilityVo;
@@ -135,9 +133,6 @@ public class AuthApplicationService {
 
     @Autowired
     private PrivilegeGrantMapper privilegeGrantMapper;
-
-    @Autowired
-    private ApplicationEventPublisher eventPublisher;
 
     @Autowired
     private PrivilegeGrantService privilegeGrantService;
@@ -1630,8 +1625,6 @@ public class AuthApplicationService {
         this.handleUpdate(grantType, compareVo.getBlackUpdateMap());
         this.handleDel(grantType, compareVo.getBlackDelMap());
 
-        publishSkillUsePermissionChangedEvent(authRedBlackDTO, compareVo);
-
         if (GrantType.SHARE_USE.equalsIgnoreCase(grantType)) {
             // grantObjId为文档库objId
             this.writeRedisForShareUse(compareVo, grantObjId);
@@ -1654,74 +1647,6 @@ public class AuthApplicationService {
         catch (Exception e) {
             logger.error("同步用户权限到Redis失败", e);
         }
-    }
-
-    private void publishSkillUsePermissionChangedEvent(AuthRedBlackDTO authRedBlackDTO, CompareVo compareVo) {
-        if (authRedBlackDTO == null || compareVo == null
-                || !ResourceBizTypeEnum.SKILL.name().equals(authRedBlackDTO.getGrantObjType())
-                || !(GrantType.AVAILABLE_USE.equals(authRedBlackDTO.getGrantType())
-                    || GrantType.FORCE_USE.equals(authRedBlackDTO.getGrantType()))
-                || !hasEffectivePermissionDelta(compareVo)) {
-            return;
-        }
-        Set<Long> affectedUserIds = extractSkillPermissionDeltaUserIds(compareVo);
-        affectedUserIds.remove(null);
-        if (affectedUserIds.isEmpty()) {
-            return;
-        }
-        SsResource skill = ssResourceMapper.selectById(authRedBlackDTO.getGrantObjId());
-        if (skill == null || !ResourceBizTypeEnum.SKILL.name().equals(skill.getResourceBizType())
-                || skill.getComAcctId() == null) {
-            return;
-        }
-        eventPublisher.publishEvent(new SkillUsePermissionChangedEvent(skill.getResourceId(), skill.getComAcctId(),
-            affectedUserIds, CurrentUserHolder.getCurrentUserId()));
-    }
-
-    private boolean hasEffectivePermissionDelta(CompareVo compareVo) {
-        return MapUtils.isNotEmpty(compareVo.getRedAddMap())
-            || MapUtils.isNotEmpty(compareVo.getRedDelMap())
-            || MapUtils.isNotEmpty(compareVo.getBlackAddMap())
-            || MapUtils.isNotEmpty(compareVo.getBlackDelMap());
-    }
-
-    private Set<Long> extractSkillPermissionDeltaUserIds(CompareVo compareVo) {
-        Set<Long> userIds = new HashSet<>();
-        Set<Long> orgIds = new HashSet<>();
-        Set<Long> postIds = new HashSet<>();
-        Set<Long> stationIds = new HashSet<>();
-        extractGrantToInfo(compareVo.getRedAddMap(), userIds, orgIds, postIds, stationIds);
-        extractGrantToInfo(compareVo.getRedDelMap(), userIds, orgIds, postIds, stationIds);
-        extractGrantToInfo(compareVo.getBlackAddMap(), userIds, orgIds, postIds, stationIds);
-        extractGrantToInfo(compareVo.getBlackDelMap(), userIds, orgIds, postIds, stationIds);
-        expandTargetUserIdsStrict(userIds, orgIds, postIds, stationIds);
-        return userIds;
-    }
-
-    private void expandTargetUserIdsStrict(Set<Long> userIds, Set<Long> orgIds, Set<Long> postIds,
-        Set<Long> stationIds) {
-        if (CollectionUtils.isNotEmpty(orgIds)) {
-            List<Long> resolved = usersMapper.findUserIdsByOrgIdListIncludingChildren(new ArrayList<>(orgIds));
-            if (CollectionUtils.isNotEmpty(resolved)) {
-                userIds.addAll(resolved);
-            }
-        }
-        if (CollectionUtils.isNotEmpty(postIds)) {
-            for (Long postId : postIds) {
-                List<Long> resolved = usersMapper.findUserIdsByPostId(postId);
-                if (CollectionUtils.isNotEmpty(resolved)) {
-                    userIds.addAll(resolved);
-                }
-            }
-        }
-        if (CollectionUtils.isNotEmpty(stationIds)) {
-            List<Long> resolved = usersMapper.findUserIdsByStationIdListIncludingChildren(
-                new ArrayList<>(stationIds));
-            if (CollectionUtils.isNotEmpty(resolved)) {
-                userIds.addAll(resolved);
-            }
-        }
-        userIds.remove(null);
     }
 
     private void syncAuthChangedUsersAfterCommit(Set<Long> involvedUserIds, String grantType) {
@@ -2033,9 +1958,7 @@ public class AuthApplicationService {
             PrivilegeGrant privilegeGrant = entry.getValue();
             // 如果不存在权限，数据库新增新增权限
             privilegeGrant.setStatusCd("A");
-            if (!privilegeGrantService.save(privilegeGrant)) {
-                throw new BaseException("权限新增失败");
-            }
+            privilegeGrantService.save(privilegeGrant);
 
             // 授权信息
             String[] splitArray = key.split("\\|");
@@ -2082,9 +2005,7 @@ public class AuthApplicationService {
             PrivilegeGrant privilegeGrant = entry.getValue();
 
             // 如果不存在权限，数据库新增新增权限
-            if (!privilegeGrantService.remove(privilegeGrant)) {
-                throw new BaseException("权限删除失败");
-            }
+            privilegeGrantService.remove(privilegeGrant);
 
             // 授权信息
             String[] splitArray = key.split("\\|");
