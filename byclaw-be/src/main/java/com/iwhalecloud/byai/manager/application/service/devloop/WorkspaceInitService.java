@@ -205,11 +205,22 @@ public class WorkspaceInitService {
             return;
         }
         // 状态文件缺失是正常态（员工还没写第一笔），不能据此判失败；只有超时才收口。
-        Date updateTime = project.getUpdateTime();
-        long startedMs = updateTime != null ? updateTime.getTime() : System.currentTimeMillis();
+        // 超时起点取初始化会话的创建时间，不取 project.updateTime：后者会被任何无关的项目更新（改名、绑资源）推后，
+        // 时钟一被推后就等于永不超时，项目卡死在 initializing。会话建完即不再变，是这次初始化的真实起点。
+        long startedMs = resolveInitStartedMs(project);
         if (System.currentTimeMillis() - startedMs >= INIT_TIMEOUT_MS) {
             applyInitResult(project, INIT_STATUS_PENDING, "架构数字员工初始化超时未完成，请重新发起初始化");
         }
+    }
+
+    /** 初始化起点：优先会话创建时间，会话查不到再退回项目更新时间；两者都缺按「刚开始」处理，等下一轮。 */
+    private long resolveInitStartedMs(Project project) {
+        ByaiSession session = byaiSessionMapper.selectById(project.getInitSessionId());
+        if (session != null && session.getCreateTime() != null) {
+            return session.getCreateTime().getTime();
+        }
+        Date updateTime = project.getUpdateTime();
+        return updateTime != null ? updateTime.getTime() : System.currentTimeMillis();
     }
 
     /** 落初始化终态。退回 pending 时清掉会话ID：那条会话已判超时，下轮不该再被读。 */
@@ -228,7 +239,13 @@ public class WorkspaceInitService {
             failReason);
     }
 
-    /** 读会话状态文件。UserFS 按用户隔离，故要先由会话创建人解析出 userCode，与 coder 任务读投影同一路径。 */
+    /**
+     * 读会话状态文件。UserFS 按用户隔离，故要先由会话创建人解析出 userCode，与 coder 任务读投影同一路径。
+     *
+     * <p>读不到一律返回 null 当「员工还没写」：reader 的 read() 在文件缺失时抛 IllegalStateException（不同于
+     * readIntegrationResult/readE2eStatus 那两个返回 null 的兄弟方法）。异常若冒到 sweep 的 catch，
+     * recoverInitResult 里的超时判断就永远执行不到，项目会永久停在 initializing，前端跟着无限轮询详情接口。
+     */
     private DevloopTaskStateDto readInitState(Long sessionId) {
         ByaiSession session = byaiSessionMapper.selectById(sessionId);
         if (session == null || session.getCreatorId() == null) {
@@ -240,7 +257,14 @@ public class WorkspaceInitService {
             log.warn("[WorkspaceInit] 无法解析初始化会话创建者, sessionId={}", sessionId);
             return null;
         }
-        return taskStateReader.read(owner.getUserCode(), sessionId);
+        try {
+            return taskStateReader.read(owner.getUserCode(), sessionId);
+        }
+        catch (Exception e) {
+            // 缺失是正常态，无需噪声日志；文件损坏/schema 不符也走这里，同样交由超时收口，不能让项目卡死。
+            log.debug("[WorkspaceInit] 初始化状态文件不可读, sessionId={}, reason={}", sessionId, e.getMessage());
+            return null;
+        }
     }
 
     /** 架构助理来自项目默认员工（项目覆盖优先，回退全局）；字符串存储，空或非法都按未配置处理。 */

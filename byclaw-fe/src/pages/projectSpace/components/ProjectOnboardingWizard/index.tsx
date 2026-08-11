@@ -9,6 +9,7 @@ import {
   getProject,
   startProjectInit,
   INIT_POLL_INTERVAL_MS,
+  INIT_POLL_MAX_ROUNDS,
   type DevloopProjectRepo,
   type ProjectInitStatus,
   type ProjectRepoType,
@@ -216,7 +217,14 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
   useEffect(() => {
     if (!open || !initStarted || !projectId || initStatus !== 'initializing') return;
     let cancelled = false;
+    let rounds = 0;
     const timer = setInterval(async () => {
+      // 与详情页同一道封顶:后端收不了口时不能让向导无限打 /project/get。
+      rounds += 1;
+      if (rounds > INIT_POLL_MAX_ROUNDS) {
+        clearInterval(timer);
+        return;
+      }
       try {
         const detail = await getProject(Number(projectId));
         if (cancelled || !detail) return;

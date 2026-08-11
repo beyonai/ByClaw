@@ -8,7 +8,12 @@ import {
   type OperationSelectOption,
   type OperationTaskFormValues,
 } from '@/layout/sider/components/ProjectSpaceList/operation';
-import { createOperationRequirement, listProjectMembers, INIT_POLL_INTERVAL_MS } from '@/service/devloop';
+import {
+  createOperationRequirement,
+  listProjectMembers,
+  INIT_POLL_INTERVAL_MS,
+  INIT_POLL_MAX_ROUNDS,
+} from '@/service/devloop';
 import { PROJECT_DETAIL_SECTIONS, PROJECT_TYPE_MESSAGE_ID, type ProjectDetailSection } from '../../constants';
 import { useProjectSessions } from '../../hooks/useProjectSessions';
 import { useProjectTypeConfig } from '../../hooks/useProjectTypeConfig';
@@ -187,9 +192,18 @@ const ProjectDetail: React.FC<Props> = ({
 
   // 初始化中轮询详情:架构数字员工在沙箱里干活,完成信号由后端定时任务读任务状态文件后落库。
   // 不轮询的话横幅要等用户手动刷新才消失,建需求/启动任务也一直是禁用态。到 ready 或回退 pending 即停。
+  // 封顶后停轮询:后端收不了口时(状态文件读失败等)状态会长期停在 initializing,没有上限就是无限刷 /project/get。
   useEffect(() => {
     if (!isDevelopProject || project?.initStatus !== 'initializing' || !onRefresh) return;
-    const timer = setInterval(() => onRefresh(), INIT_POLL_INTERVAL_MS);
+    let rounds = 0;
+    const timer = setInterval(() => {
+      rounds += 1;
+      if (rounds > INIT_POLL_MAX_ROUNDS) {
+        clearInterval(timer);
+        return;
+      }
+      onRefresh();
+    }, INIT_POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [isDevelopProject, project?.initStatus, onRefresh]);
 
