@@ -30,6 +30,7 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtToolService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtViewService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SuperassistSubAgentService;
 import com.iwhalecloud.byai.manager.domain.station.service.StationService;
+import com.iwhalecloud.byai.manager.domain.skillgroup.event.SkillUsePermissionChangedEvent;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.auth.AuthDTO;
 import com.iwhalecloud.byai.manager.dto.auth.AuthManOrgDTO;
@@ -78,6 +79,7 @@ import com.iwhalecloud.byai.common.login.bean.UserStation;
 import com.iwhalecloud.byai.manager.mapper.users.UsersMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.context.ApplicationEventPublisher;
 import com.iwhalecloud.byai.manager.vo.auth.AuthVo;
 import com.iwhalecloud.byai.manager.vo.auth.CompareVo;
 import com.iwhalecloud.byai.manager.vo.auth.FixedEntryOperationCapabilityVo;
@@ -133,6 +135,9 @@ public class AuthApplicationService {
 
     @Autowired
     private PrivilegeGrantMapper privilegeGrantMapper;
+
+    @Autowired
+    private ApplicationEventPublisher eventPublisher;
 
     @Autowired
     private PrivilegeGrantService privilegeGrantService;
@@ -1625,6 +1630,8 @@ public class AuthApplicationService {
         this.handleUpdate(grantType, compareVo.getBlackUpdateMap());
         this.handleDel(grantType, compareVo.getBlackDelMap());
 
+        publishSkillUsePermissionChangedEvent(authRedBlackDTO, compareVo);
+
         if (GrantType.SHARE_USE.equalsIgnoreCase(grantType)) {
             // grantObjId为文档库objId
             this.writeRedisForShareUse(compareVo, grantObjId);
@@ -1647,6 +1654,36 @@ public class AuthApplicationService {
         catch (Exception e) {
             logger.error("同步用户权限到Redis失败", e);
         }
+    }
+
+    private void publishSkillUsePermissionChangedEvent(AuthRedBlackDTO authRedBlackDTO, CompareVo compareVo) {
+        if (authRedBlackDTO == null || compareVo == null
+                || !ResourceBizTypeEnum.SKILL.name().equals(authRedBlackDTO.getGrantObjType())
+                || !(GrantType.AVAILABLE_USE.equals(authRedBlackDTO.getGrantType())
+                    || GrantType.FORCE_USE.equals(authRedBlackDTO.getGrantType()))
+                || !hasEffectivePermissionDelta(compareVo)) {
+            return;
+        }
+        Set<Long> affectedUserIds = extractInvolvedUserIds(compareVo,
+            authRedBlackDTO.getGrantObjType(), authRedBlackDTO.getGrantObjId());
+        affectedUserIds.remove(null);
+        if (affectedUserIds.isEmpty()) {
+            return;
+        }
+        SsResource skill = ssResourceMapper.selectById(authRedBlackDTO.getGrantObjId());
+        if (skill == null || !ResourceBizTypeEnum.SKILL.name().equals(skill.getResourceBizType())
+                || skill.getComAcctId() == null) {
+            return;
+        }
+        eventPublisher.publishEvent(new SkillUsePermissionChangedEvent(skill.getResourceId(), skill.getComAcctId(),
+            affectedUserIds, CurrentUserHolder.getCurrentUserId()));
+    }
+
+    private boolean hasEffectivePermissionDelta(CompareVo compareVo) {
+        return MapUtils.isNotEmpty(compareVo.getRedAddMap())
+            || MapUtils.isNotEmpty(compareVo.getRedDelMap())
+            || MapUtils.isNotEmpty(compareVo.getBlackAddMap())
+            || MapUtils.isNotEmpty(compareVo.getBlackDelMap());
     }
 
     private void syncAuthChangedUsersAfterCommit(Set<Long> involvedUserIds, String grantType) {

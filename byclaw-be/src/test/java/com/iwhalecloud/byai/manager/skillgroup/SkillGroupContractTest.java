@@ -541,6 +541,23 @@ class SkillGroupContractTest {
                 .doesNotContain("::jsonb")
                 .doesNotContain("cast(");
 
+        String targetedRelations = normalizedBoundSql(configuration,
+                "selectActiveEmployeeSkillRelationsBySkill",
+                Map.of("skillId", 30001L, "comAcctId", 60001L)).getSql();
+        assertThat(targetedRelations)
+                .contains("relation.rel_resource_id = ?")
+                .contains("join ss_resource employee")
+                .contains("employee.resource_biz_type = 'dig_employee'")
+                .contains("employee.com_acct_id = ?")
+                .contains("join ss_resource skill_resource")
+                .contains("skill_resource.resource_biz_type = 'skill'")
+                .contains("skill_resource.resource_status = 2")
+                .contains("skill_resource.com_acct_id = ?")
+                .contains("relation.rel_type_name = 'dig_employee_skill'")
+                .contains("relation.rel_status = 1")
+                .contains("order by relation.resource_id asc, relation.resource_rel_detail_id asc")
+                .doesNotContain("for update");
+
         SsResourceRelDetail relation = new SsResourceRelDetail();
         relation.setResourceRelDetailId(90001L);
         relation.setResourceId(30001L);
@@ -641,6 +658,7 @@ class SkillGroupContractTest {
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectActiveMembers")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectMemberRelations")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectDigitalEmployeeSkillRelations")).isTrue();
+        assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectActiveEmployeeSkillRelationsBySkill")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectInstalledSkillIds")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectSkillRelationsWithSourceInfo")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectSkillRelationsWithSourceInfoByTenant")).isTrue();
