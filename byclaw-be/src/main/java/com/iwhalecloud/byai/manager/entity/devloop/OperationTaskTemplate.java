@@ -18,24 +18,17 @@ public class OperationTaskTemplate {
     @TableId(value = "template_id", type = IdType.INPUT)
     private Long templateId;
 
-    /** collect/knowledge/content/publish/analyze。 */
+    /** collect/knowledge/object_discovery/content/publish/analyze。 */
     private String templateType;
 
     private String templateName;
 
     private String description;
 
-    /** 卡片首字标记，避免模板目录依赖图片资源。 */
-    private String icon;
-
     /** 模板默认值和扩展字段，使用 JSON 字符串保存。 */
     private String config;
 
     private Integer sortNo;
-
-    private String isBuiltin;
-
-    private String statusCd;
 
     private Long createBy;
 

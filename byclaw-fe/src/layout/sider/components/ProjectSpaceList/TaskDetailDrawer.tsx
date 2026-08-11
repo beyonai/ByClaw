@@ -51,11 +51,18 @@ const parseOperationConfig = (value: unknown): Record<string, any> => {
   }
 };
 
-type OperationTaskType = 'collect' | 'knowledge' | 'content' | 'analyze';
+type OperationTaskType = 'collect' | 'knowledge' | 'object_discovery' | 'content' | 'analyze';
 
 const normalizeOperationTaskType = (task: any): OperationTaskType => {
   const taskType = `${task?.taskType || task?.operationType || task?.type || ''}`.trim().toLowerCase();
   if (['content', 'publish', 'creation'].includes(taskType)) return 'content';
+  if (
+    ['object_discovery', 'object-discovery', 'object discovery'].includes(taskType) ||
+    `${task?.templateName || ''}`.includes('对象发现') ||
+    `${task?.templateId || ''}` === '-2006'
+  ) {
+    return 'object_discovery';
+  }
   if (['knowledge', 'organize', 'knowledge_organization'].includes(taskType)) return 'knowledge';
   if (['analyze', 'analysis', 'analytics', 'data_analysis'].includes(taskType)) return 'analyze';
   return 'collect';
@@ -67,6 +74,7 @@ const getOperationConfig = (task: any, taskType: string) => {
     collect: 'collectConfig',
     content: 'contentConfig',
     knowledge: 'knowledgeConfig',
+    object_discovery: 'knowledgeConfig',
     analyze: 'analyzeConfig',
   };
   const configKey = configKeyMap[taskType];
@@ -199,7 +207,6 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
   const rootOperationConfig = parseOperationConfig(task?.operationConfig || task?.config);
   const operationConfig = { ...rootOperationConfig, ...getOperationConfig(task, operationTaskType) };
   const operationTaskTypeLabel = t(`projectSpace.operation.task.type.${operationTaskType}`);
-  const operationIcon = { collect: '采', knowledge: '知', content: '创', analyze: '析' }[operationTaskType];
   const operationStatusMeta = getOperationStatusMeta(task);
   const platformCode =
     operationConfig.channel ||
@@ -357,31 +364,56 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
       {task && (
         <Spin spinning={phaseLoading}>
           {operationProject ? (
-            <div className={styles.operationTaskDetailContent}>
-              <div className={styles.operationTaskSummary}>
-                <span className={styles.operationTaskSummaryIcon}>{operationIcon}</span>
-                <div className={styles.operationTaskSummaryMain}>
-                  <small>
-                    {[operationTaskTypeLabel, operationPlatform].filter(Boolean).join(' · ')}
-                  </small>
-                  <strong>{task.title || task.taskName || t('projectTaskDetail.defaultTaskName')}</strong>
-                  <p>{task.description || task.taskDescription || '-'}</p>
-                </div>
-                <Tag color={operationStatusMeta.color} className={styles.operationTaskStatusTag}>
-                  {operationStatusMeta.label}
-                </Tag>
+            <div className={styles.taskDetailDrawerContent}>
+              <div className={styles.taskDetailTitle}>
+                {task.title || task.taskName || t('projectTaskDetail.defaultTaskName')}
               </div>
 
-              <section className={styles.operationTaskConfiguration}>
-                <h3>{t('projectSpace.operation.task.detail.configuration')}</h3>
-                <dl>
+              <div className={`${styles.taskHero} ${styles.operationTaskHero}`}>
+                <div className={styles.taskHeroAgent}>
+                  <span className={styles.taskHeroAvatar}>{getAgentChatAvatar(agentAvatar)}</span>
+                  <div>
+                    <small>{t('projectTaskDetail.currentAgent')}</small>
+                    <strong>{agentName}</strong>
+                  </div>
+                  <Tag color={operationStatusMeta.color} className={styles.operationTaskStatusTag}>
+                    {operationStatusMeta.label}
+                  </Tag>
+                </div>
+              </div>
+
+              <section className={styles.phaseSection}>
+                <h3 className={styles.phaseSectionTitle}>{t('projectSpace.operation.task.detail.overview')}</h3>
+                <div className={styles.taskContextGrid}>
+                  <div className={styles.taskContextItem}>
+                    <label>{t('projectSpace.operation.taskForm.field.type')}</label>
+                    <strong>{operationTaskTypeLabel}</strong>
+                  </div>
+                  {operationPlatform && (
+                    <div className={styles.taskContextItem}>
+                      <label>{t('projectSpace.operation.task.detail.platform')}</label>
+                      <strong>{operationPlatform}</strong>
+                    </div>
+                  )}
+                  <div className={`${styles.taskContextItem} ${styles.taskContextItemFull}`}>
+                    <label>{t('projectSpace.operation.task.detail.description')}</label>
+                    <strong>{task.description || task.taskDescription || '-'}</strong>
+                  </div>
+                </div>
+              </section>
+
+              <section className={styles.phaseSection}>
+                <h3 className={styles.phaseSectionTitle}>
+                  {t('projectSpace.operation.task.detail.configuration')}
+                </h3>
+                <div className={styles.taskContextGrid}>
                   {operationDetailFields.map((field) => (
-                    <div key={field.label}>
-                      <dt>{field.label}</dt>
-                      <dd>{formatDetailValue(field.value)}</dd>
+                    <div key={field.label} className={styles.taskContextItem}>
+                      <label>{field.label}</label>
+                      <strong>{formatDetailValue(field.value)}</strong>
                     </div>
                   ))}
-                </dl>
+                </div>
               </section>
             </div>
           ) : (

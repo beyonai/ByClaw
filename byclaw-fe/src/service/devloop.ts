@@ -167,17 +167,21 @@ export type DevloopProjectSpaceFile = {
   shareLink?: string | null;
 };
 
-export type OperationTaskTemplateType = 'collect' | 'knowledge' | 'content' | 'publish' | 'analyze';
+export type OperationTaskTemplateType =
+  | 'collect'
+  | 'knowledge'
+  | 'object_discovery'
+  | 'content'
+  | 'publish'
+  | 'analyze';
 
 export type OperationTaskTemplate = {
   templateId: number;
   templateType: OperationTaskTemplateType;
   templateName: string;
   description?: string;
-  icon?: string;
   config?: string | Record<string, unknown>;
   sortNo?: number;
-  isBuiltin?: string;
 };
 
 // 仓库类型:workspace 工作区(单个,承载项目上下文/产出) / code 代码仓库(可多个)。存量数据默认 code。

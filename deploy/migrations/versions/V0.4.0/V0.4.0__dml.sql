@@ -1,7 +1,7 @@
 
 /**百应运营渠道**/
 -- 运营闭环：按运营需求类型配置独立启动提示词，避免不同类型任务携带无关字段。
--- 后端按 operationType 分别读取采集、知识整理、发布和分析提示词，避免不同任务类型混用字段。
+-- 后端按 operationType 分别读取采集、知识整理、对象发现、发布和分析提示词，避免不同任务类型混用字段。
 delete from byai.byai_system_config where param_code in (
     'OPLOOP_TASK_START_PROMPT',
     'OPLOOP_COLLECT_TASK_START_PROMPT',
@@ -9,6 +9,7 @@ delete from byai.byai_system_config where param_code in (
     'OPLOOP_ANALYZE_TASK_START_PROMPT',
     'OPLOOP_TASK_START_PROMPT_COLLECT',
     'OPLOOP_TASK_START_PROMPT_KNOWLEDGE',
+    'OPLOOP_TASK_START_PROMPT_OBJECT_DISCOVERY',
     'OPLOOP_TASK_START_PROMPT_PUBLISH',
     'OPLOOP_TASK_START_PROMPT_ANALYZE'
 );
@@ -21,6 +22,7 @@ delete from byai.byai_ai_prompt where prompt_code in (
     'OPLOOP_ANALYZE_TASK_START_PROMPT',
     'OPLOOP_TASK_START_PROMPT_COLLECT',
     'OPLOOP_TASK_START_PROMPT_KNOWLEDGE',
+    'OPLOOP_TASK_START_PROMPT_OBJECT_DISCOVERY',
     'OPLOOP_TASK_START_PROMPT_PUBLISH',
     'OPLOOP_TASK_START_PROMPT_ANALYZE'
 );
@@ -109,6 +111,48 @@ VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMP
 ## Execution requirements
 1. Confirm the knowledge structure, clean the content, and ingest the result according to the task description and configuration.
 2. Preserve source accuracy and traceability, and report key progress, results, and exceptions.
+',
+10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
+
+INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code)
+VALUES (nextval('byai.seq_any_table'), 'OPLOOP_PROMPT', 'OPLOOP_TASK_START_PROMPT_OBJECT_DISCOVERY', '运营任务启动提示词-对象发现',
+'运营对象发现任务启动提示词，占位符 ${projectName} ${title} ${description} ${sourceMode} ${storageMode} ${runMode} ${executionTime}',
+'OPLOOP_TASK_START_PROMPT_OBJECT_DISCOVERY',
+'请处理以下对象发现任务：
+
+## 运营任务信息
+- 运营项目：${projectName}
+- 任务名称：${title}
+- 任务描述：${description}
+
+## 对象发现配置
+- 来源本体：${sourceMode}
+- 发现对象本体：${storageMode}
+- 执行方式：${runMode}
+- 执行时间：${executionTime}
+
+## 执行要求
+1. 根据采集文档和本体对象定义识别并提取对象实例。
+2. 按照对象字段定义补充实例属性，保留来源依据。
+3. 将发现结果保存到目标本体，并同步关键进度、产出结果和异常情况。
+',
+'Process the following object discovery task:
+
+## Operation task information
+- Operation project: ${projectName}
+- Task name: ${title}
+- Task description: ${description}
+
+## Object discovery configuration
+- Source ontology: ${sourceMode}
+- Discovery target ontology: ${storageMode}
+- Execution method: ${runMode}
+- Execution time: ${executionTime}
+
+## Execution requirements
+1. Identify and extract object instances from collected documents according to ontology definitions.
+2. Complete instance attributes according to object fields and preserve source evidence.
+3. Save discovery results to the target ontology and report key progress, results, and exceptions.
 ',
 10001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, null);
 
@@ -278,45 +322,45 @@ WHERE i.session_id IS NOT NULL
 
 -- 内置运营任务模板采用固定负数 ID，重复执行迁移时不会重复插入。
 INSERT INTO byai.byai_task_template
-    (template_id, template_type, template_name, description, icon, config, sort_no, is_builtin, status_cd, delete_flag)
-SELECT -2001, 'collect', '素材采集任务模板', '从知识库、连接器或互联网采集素材并归档', '采',
+    (template_id, template_type, template_name, description, config, sort_no, delete_flag)
+SELECT -2001, 'collect', '素材采集任务模板', '从知识库、连接器或互联网采集素材并归档',
        '{"title":"采集 AI Agent 行业案例","description":"采集近期企业级 AI Agent 的落地案例，提炼来源、核心场景和可复用亮点。","sourceMode":"knowledge","storageMode":"knowledge","executorType":"agent","runMode":"once"}',
-       10, 'Y', '00A', '0'
+       10, '0'
 WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2001);
 
 INSERT INTO byai.byai_task_template
-    (template_id, template_type, template_name, description, icon, config, sort_no, is_builtin, status_cd, delete_flag)
-SELECT -2002, 'knowledge', '知识整理任务模板', '使用《知识整理》技能，针对采集到的 会议纪要，进行对象实例提取。', '知',
+    (template_id, template_type, template_name, description, config, sort_no, delete_flag)
+SELECT -2002, 'knowledge', '知识整理任务模板', '使用《知识整理》技能，针对采集到的 会议纪要，进行对象实例提取。',
        '{"title":"整理采集素材并沉淀知识","description":"对素材去重、摘要并提炼文章亮点、写法和可复用结构。","materialSource":"本体数据","sourceMode":"会议纪要","storageMode":"产品,方法论,操作说明,特性,场景,能力,事件","executorType":"agent","runMode":"once"}',
-       20, 'Y', '00A', '0'
+       20, '0'
 WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2002);
 
 INSERT INTO byai.byai_task_template
-    (template_id, template_type, template_name, description, icon, config, sort_no, is_builtin, status_cd, delete_flag)
-SELECT -2006, 'knowledge', '对象发现任务模板', '根据采集的文档和本体对象定义进行对象实例发现', '象',
+    (template_id, template_type, template_name, description, config, sort_no, delete_flag)
+SELECT -2006, 'object_discovery', '对象发现任务模板', '根据采集的文档和本体对象定义进行对象实例发现',
        '{"title":"对象发现任务模板","description":"根据采集的文档，根据本体对象定义，进行对象实例发现。","sourceMode":"会议纪要","storageMode":"产品,方法论,操作说明,特性,场景,能力,事件","executorType":"agent","runMode":"once"}',
-       25, 'Y', '00A', '0'
+       25, '0'
 WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2006);
 
 INSERT INTO byai.byai_task_template
-    (template_id, template_type, template_name, description, icon, config, sort_no, is_builtin, status_cd, delete_flag)
-SELECT -2003, 'content', '内容创作任务模板', '结构化描述主题、内容形态、受众与表达要求', '创',
+    (template_id, template_type, template_name, description, config, sort_no, delete_flag)
+SELECT -2003, 'content', '内容创作任务模板', '结构化描述主题、内容形态、受众与表达要求',
        '{"title":"创作 BeyondAI 实验室公众号文章","description":"围绕企业 AI Agent 实践创作一篇面向企业管理者的深度文章，包含案例与行动建议。","contentType":"公众号文章","audience":"企业管理者与 AI 产品负责人","executorType":"agent","runMode":"once"}',
-       30, 'Y', '00A', '0'
+       30, '0'
 WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2003);
 
 INSERT INTO byai.byai_task_template
-    (template_id, template_type, template_name, description, icon, config, sort_no, is_builtin, status_cd, delete_flag)
-SELECT -2004, 'publish', '内容发布任务模板', '选择账号、发布时间与审核规则完成发布', '发',
+    (template_id, template_type, template_name, description, config, sort_no, delete_flag)
+SELECT -2004, 'publish', '内容发布任务模板', '选择账号、发布时间与审核规则完成发布',
        '{"title":"发布已审核内容","description":"将已审核内容发布到指定账号，发布前再次检查标题、封面和品牌口径。","platform":"微信公众号","executorType":"agent","runMode":"once"}',
-       40, 'Y', '00A', '0'
+       40, '0'
 WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2004);
 
 INSERT INTO byai.byai_task_template
-    (template_id, template_type, template_name, description, icon, config, sort_no, is_builtin, status_cd, delete_flag)
-SELECT -2005, 'analyze', '数据分析任务模板', '围绕账号或作品数据生成复盘与优化建议', '析',
+    (template_id, template_type, template_name, description, config, sort_no, delete_flag)
+SELECT -2005, 'analyze', '数据分析任务模板', '围绕账号或作品数据生成复盘与优化建议',
        '{"title":"运营数据分析与优化","description":"分析近 30 天账号与作品表现，识别高表现内容并输出下一周期优化建议。","analysisScope":"账号整体分析","range":"近 30 天","executorType":"agent","runMode":"once"}',
-       50, 'Y', '00A', '0'
+       50, '0'
 WHERE NOT EXISTS (SELECT 1 FROM byai.byai_task_template WHERE template_id = -2005);
 
 -- 需求 AI 预拆提示词：需求 + 项目仓库清单 → 仓库级子任务草稿（含仓库间依赖）。

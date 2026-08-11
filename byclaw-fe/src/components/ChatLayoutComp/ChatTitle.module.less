@@ -41,20 +41,20 @@ nav.chatTitle {
     flex-direction: row;
 
     .projectSessionActions {
-      // 两个项目会话操作单独留出更清晰的点击间距，不影响右侧其他标题操作。
+      // 项目会话操作保持独立容器，尺寸调整不影响右侧资源按钮。
       gap: 10px;
       display: inline-flex;
       align-items: center;
     }
 
     .projectActionButton {
-      width: 32px;
-      height: 32px;
-      min-width: 32px;
-      min-height: 32px;
+      width: 28px;
+      height: 28px;
+      min-width: 28px;
+      min-height: 28px;
       padding: 0;
       border: 0;
-      border-radius: 10px;
+      border-radius: 8px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -64,8 +64,8 @@ nav.chatTitle {
 
       // Ant Design 图标和自定义 SVG 共用固定图标槽，确保两个标题按钮的视觉尺寸和垂直位置一致。
       :global(.@{antPrefix}-btn-icon) {
-        width: 20px;
-        height: 20px;
+        width: 16px;
+        height: 16px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -74,8 +74,8 @@ nav.chatTitle {
       }
 
       svg {
-        width: 20px;
-        height: 20px;
+        width: 16px;
+        height: 16px;
         display: block;
       }
 
@@ -99,9 +99,18 @@ nav.chatTitle {
       }
     }
 
-    .resourcePanelToggleIcon {
-      width: 20px;
-      height: 20px;
+    .projectActionButton.resourcePanelToggleButton :global(.@{antPrefix}-btn-icon) {
+      // Ant Design 默认图标槽为 16px；同步调整槽位，避免 19px SVG 被 flex 自动压缩。
+      width: 19px;
+      height: 19px;
+      flex: 0 0 19px;
+    }
+
+    .projectActionButton .resourcePanelToggleIcon {
+      // 资源列表图形线条较疏，单独放大图标以保持与任务进度图标的视觉重量一致。
+      width: 19px;
+      height: 19px;
+      flex: 0 0 19px;
     }
 
     .btn {

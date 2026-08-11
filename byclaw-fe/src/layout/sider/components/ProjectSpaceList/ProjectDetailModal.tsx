@@ -455,6 +455,13 @@ const normalizeOperationAccounts = (detail?: OperationProjectDetailData | null):
 // 列表和详情需兼容后端的旧枚举值，前端统一显示原型中的四类运营需求。
 const normalizeOperationTaskType = (task: any): OperationTaskType => {
   const taskType = `${task?.taskType || task?.operationType || task?.type || ''}`.trim().toLowerCase();
+  if (
+    ['object_discovery', 'object-discovery', 'object discovery', 'objectdiscovery'].includes(taskType) ||
+    `${task?.templateName || ''}`.includes('对象发现') ||
+    `${task?.templateId || ''}` === '-2006'
+  ) {
+    return 'object_discovery';
+  }
   if (['knowledge', 'knowledge_organization', 'knowledge_organize', 'knowledge整理', '知识整理'].includes(taskType)) {
     return 'knowledge';
   }

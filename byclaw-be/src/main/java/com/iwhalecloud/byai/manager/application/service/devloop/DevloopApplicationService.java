@@ -4639,9 +4639,15 @@ public class DevloopApplicationService {
     private String buildOperationTaskPrompt(ByaiSession session, Map<String, String> taskExt,
         List<ResourceVo> mentionedAgents) {
         String operationType = taskExt.get(OperationTaskSessionService.EXT_OPERATION_TYPE);
+        // 兼容对象发现模板改为独立类型前已经创建的任务记录。
+        if ("knowledge".equals(operationType)
+            && "-2006".equals(taskExt.get(OperationTaskSessionService.EXT_TEMPLATE_ID))) {
+            operationType = "object_discovery";
+        }
         String operationTypeLabel = switch (operationType == null ? "" : operationType) {
             case "collect" -> I18nUtil.get("devloop.operationTask.type.collect");
             case "knowledge" -> I18nUtil.get("devloop.operationTask.type.knowledge");
+            case "object_discovery" -> I18nUtil.get("devloop.operationTask.type.objectDiscovery");
             case "publish", "content" -> I18nUtil.get("devloop.operationTask.type.publish");
             case "analyze" -> I18nUtil.get("devloop.operationTask.type.analyze");
             default -> I18nUtil.get("devloop.operationTask.type.default");
@@ -4660,6 +4666,11 @@ public class DevloopApplicationService {
     private String buildOperationTaskStartPrompt(ByaiSession session, Map<String, String> taskExt, String projectName,
         String taskType) {
         String operationType = taskExt.get(OperationTaskSessionService.EXT_OPERATION_TYPE);
+        // 历史对象发现任务曾以 knowledge 保存，按模板 ID 恢复为独立类型。
+        if ("knowledge".equals(operationType)
+            && "-2006".equals(taskExt.get(OperationTaskSessionService.EXT_TEMPLATE_ID))) {
+            operationType = "object_discovery";
+        }
         String promptConfigCode = getOperationTaskPromptConfigCode(operationType);
         // 未识别的历史类型没有专属参数码，直接使用国际化默认模板，避免查询已废弃的通用配置。
         // 运营提示词与研发提示词统一从 byai_ai_prompt 读取，并按当前语言选择模板。
@@ -4685,10 +4696,10 @@ public class DevloopApplicationService {
             : StringUtils.defaultString(requirement.getSourceName());
         String requirementDescription = requirement == null ? taskExt.get(OperationTaskSessionService.EXT_DESCRIPTION)
             : StringUtils.defaultString(requirement.getSourceDescription());
-        String sourceModeValue = "knowledge".equalsIgnoreCase(operationType)
+        String sourceModeValue = isKnowledgeOrganizationTask(operationType)
             ? getOperationKnowledgeOrganizationValue(operationConfigMap, "sourceOntology", "sourceMode")
             : getOperationSourceModeLabel(findOperationConfigValue(operationConfigMap, "sourceMode"));
-        String storageModeValue = "knowledge".equalsIgnoreCase(operationType)
+        String storageModeValue = isKnowledgeOrganizationTask(operationType)
             ? getOperationKnowledgeOrganizationValue(operationConfigMap, "ontology", "storageMode")
             : getOperationStorageModeLabel(findOperationConfigValue(operationConfigMap, "storageMode"));
         return template.replace("${projectName}", StringUtils.defaultString(projectName))
@@ -4759,11 +4770,16 @@ public class DevloopApplicationService {
             .replace("${operationConfig}", JSON.toJSONString(operationConfigMap));
     }
 
+    private boolean isKnowledgeOrganizationTask(String operationType) {
+        return "knowledge".equalsIgnoreCase(operationType) || "object_discovery".equalsIgnoreCase(operationType);
+    }
+
     /** 运营需求类型与启动提示词参数一一对应；content 是发布类型的历史兼容值。 */
     private String getOperationTaskPromptConfigCode(String operationType) {
         return switch (operationType == null ? "" : operationType) {
             case "collect" -> "OPLOOP_TASK_START_PROMPT_COLLECT";
             case "knowledge" -> "OPLOOP_TASK_START_PROMPT_KNOWLEDGE";
+            case "object_discovery" -> "OPLOOP_TASK_START_PROMPT_OBJECT_DISCOVERY";
             case "publish", "content" -> "OPLOOP_TASK_START_PROMPT_PUBLISH";
             case "analyze" -> "OPLOOP_TASK_START_PROMPT_ANALYZE";
             // 未识别类型使用国际化默认模板，不再依赖已废弃的通用参数码。
@@ -4776,6 +4792,7 @@ public class DevloopApplicationService {
         return switch (operationType == null ? "" : operationType) {
             case "collect" -> "devloop.operationTask.prompt.collect.default";
             case "knowledge" -> "devloop.operationTask.prompt.knowledge.default";
+            case "object_discovery" -> "devloop.operationTask.prompt.objectDiscovery.default";
             case "publish", "content" -> "devloop.operationTask.prompt.publish.default";
             case "analyze" -> "devloop.operationTask.prompt.analyze.default";
             default -> "devloop.operationTask.prompt.default";
@@ -5695,7 +5712,12 @@ public class DevloopApplicationService {
         result.put("projectId", task.getProjectId());
         result.put("title", task.getSessionName());
         result.put("description", ext.get(OperationTaskSessionService.EXT_DESCRIPTION));
-        result.put("operationType", ext.get(OperationTaskSessionService.EXT_OPERATION_TYPE));
+        String operationType = ext.get(OperationTaskSessionService.EXT_OPERATION_TYPE);
+        if ("knowledge".equals(operationType)
+            && "-2006".equals(ext.get(OperationTaskSessionService.EXT_TEMPLATE_ID))) {
+            operationType = "object_discovery";
+        }
+        result.put("operationType", operationType);
         result.put("status", status);
         result.put("assigneeId", assigneeId);
         result.put("assignee", resolveUserName(assigneeId));
