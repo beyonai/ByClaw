@@ -17,8 +17,6 @@ export interface LlmReasoningConfig {
     high?: number;
   };
   compatFormat?: string;
-  /** Some OpenAI-compatible Responses endpoints reject the developer role. */
-  supportsDeveloperRole?: boolean;
 }
 
 /** Composition Root 传入编排层的中立模型描述，不暴露任何 Pi SDK 类型。 */

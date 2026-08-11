@@ -116,10 +116,10 @@ function resolveReasoning(config: LlmProviderConfig): {
       : {}),
     ...(config.protocol === "openai-responses"
       ? {
-          // OpenAI supports `developer`, but several compatible Responses
-          // endpoints (including Ark) only accept `system`.
-          supportsDeveloperRole:
-            config.reasoning.supportsDeveloperRole ?? !isVolcengineArk(config),
+          // byclaw-super only uses system instructions. The underlying Pi
+          // SDK defaults reasoning-enabled Responses models to `developer`,
+          // which is not part of this service's message-role contract.
+          supportsDeveloperRole: false,
         }
       : {}),
   };

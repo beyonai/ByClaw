@@ -98,7 +98,7 @@ describe("Pi provider registration", () => {
     });
   });
 
-  it("allows overriding developer-role compatibility for Responses providers", () => {
+  it("uses system by default for every Responses provider", () => {
     const provider = buildPiRuntimeProviderConfig({
       providerId: "custom-responses",
       providerName: "Custom Responses",
@@ -113,7 +113,6 @@ describe("Pi provider registration", () => {
       maxTokens: 8_192,
       reasoning: {
         enabled: true,
-        supportsDeveloperRole: false,
       },
     });
 
@@ -121,4 +120,5 @@ describe("Pi provider registration", () => {
       supportsDeveloperRole: false,
     });
   });
+
 });

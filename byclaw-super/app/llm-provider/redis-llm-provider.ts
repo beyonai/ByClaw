@@ -37,7 +37,6 @@ type ReasoningConfig = {
   supportedEfforts?: unknown;
   effortMap?: unknown;
   budgets?: unknown;
-  supportsDeveloperRole?: unknown;
 };
 
 export class RedisFirstLlmProvider {
@@ -237,9 +236,6 @@ function resolveReasoning(
     ...(budgets ? { budgets } : {}),
     ...(nonEmptyString(config.compatFormat)
       ? { compatFormat: nonEmptyString(config.compatFormat).toLowerCase() }
-      : {}),
-    ...(typeof config.supportsDeveloperRole === "boolean"
-      ? { supportsDeveloperRole: config.supportsDeveloperRole }
       : {}),
   };
 }
