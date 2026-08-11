@@ -22,6 +22,9 @@ jest.mock('@umijs/max', () => ({
   useSelector: (selector: (state: any) => any) =>
     selector({ user: { userInfo: {} }, employees: { defaultDigEmployeeId: 'employee-1' } }),
   useNavigate: () => jest.fn(),
+  // 组件只读 location.state（透传给 setSearchParams），给个空路由对象即可；漏掉这个 mock 会整套用例报
+  // useLocation is not a function。
+  useLocation: () => ({ pathname: '/', search: '', hash: '', state: undefined, key: 'test' }),
   useSearchParams: () => {
     const [query, setQuery] = require('react').useState(globalThis.location.search);
     const params = new URLSearchParams(query);
