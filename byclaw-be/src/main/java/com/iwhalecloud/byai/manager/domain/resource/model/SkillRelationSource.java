@@ -144,10 +144,6 @@ public final class SkillRelationSource {
     private static SkillRelationSource malformedManual(JSONObject root) {
         SkillRelationSource source = malformedManual();
         recoverPositiveLongs(root.get("sourceGroupIds"), source.legacySourceGroupIds);
-        if (!source.legacySourceGroupIds.isEmpty()) {
-            return source;
-        }
-
         recoverPositiveLongs(root.get("legacySourceGroupIds"), source.legacySourceGroupIds);
         if (root.get("groupInstallers") instanceof JSONObject groupInstallersValue) {
             for (String groupIdValue : groupInstallersValue.keySet()) {

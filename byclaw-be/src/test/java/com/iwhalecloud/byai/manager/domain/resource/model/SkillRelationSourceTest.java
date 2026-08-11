@@ -313,6 +313,21 @@ class SkillRelationSourceTest {
         assertMalformedManualWithGroups(source, 7101L, 7102L);
     }
 
+    @Test
+    void parse_malformedV2UnionsRecoverableGroupsFromAllRepresentations() {
+        SkillRelationSource source = SkillRelationSource.parse(
+            "{\"version\":2,\"manual\":false,"
+                + "\"sourceGroupIds\":[7001,\"invalid\",null,-1,0],"
+                + "\"legacySourceGroupIds\":[7002,\"invalid\",null,-2,0],"
+                + "\"groupInstallers\":{\"7003\":[\"invalid\"],\"07004\":[10001],"
+                + "\"invalid\":[10002],\"-5\":[10003],\"0\":[10004]}}"
+        );
+
+        assertMalformedManualWithGroups(source, 7001L, 7002L, 7003L);
+        assertThat(source.getLegacySourceGroupIds()).containsExactly(7001L, 7002L, 7003L);
+        assertThat(source.getGroupInstallers()).isEmpty();
+    }
+
     private static void assertManual(SkillRelationSource source) {
         assertThat(source.isManual()).isTrue();
         assertThat(source.isMalformed()).isFalse();
