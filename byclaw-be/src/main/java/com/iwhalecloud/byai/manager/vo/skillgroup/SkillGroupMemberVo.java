@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.vo.skillgroup;
 
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+import com.iwhalecloud.byai.manager.domain.skillgroup.model.SkillGroupMemberStatus;
 import java.time.LocalDateTime;
 import lombok.Data;
 
@@ -53,4 +54,12 @@ public class SkillGroupMemberVo {
     private String syncError;
 
     private LocalDateTime lastSyncTime;
+
+    private SkillGroupMemberStatus memberStatus;
+
+    private String statusReason;
+
+    private Boolean installed;
+
+    private Boolean hasUsePermission;
 }

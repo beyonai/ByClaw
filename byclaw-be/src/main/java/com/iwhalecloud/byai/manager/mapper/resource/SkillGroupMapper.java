@@ -105,6 +105,18 @@ public interface SkillGroupMapper {
             @Param("skillIds") List<Long> skillIds);
 
     /**
+     * Selects the distinct active skill IDs installed for one digital employee. Null or empty skill IDs deliberately
+     * return no rows; callers must also skip the query when no IDs need evaluation.
+     *
+     * @param digitalEmployeeId digital-employee resource ID
+     * @param skillIds exact skill IDs to check
+     * @return distinct installed skill IDs
+     */
+    List<Long> selectInstalledSkillIds(
+            @Param("digitalEmployeeId") Long digitalEmployeeId,
+            @Param("skillIds") List<Long> skillIds);
+
+    /**
      * Inserts a canonical direct employee-skill relation and tolerates any database uniqueness conflict. Callers
      * must hold {@link #selectDigitalEmployeeForUpdate(Long, Long)} because historical deployments do not have a
      * dedicated employee-skill unique constraint.

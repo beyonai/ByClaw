@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
+import com.iwhalecloud.byai.manager.domain.skillgroup.model.SkillGroupMemberStatus;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCreateQo;
@@ -192,6 +193,10 @@ class SkillGroupContractTest {
         memberVo.setResourceId(20001L);
         memberVo.setSystemBuiltIn(true);
         memberVo.setCreatorOwned(false);
+        memberVo.setMemberStatus(SkillGroupMemberStatus.APPLY_PENDING);
+        memberVo.setStatusReason("reason");
+        memberVo.setInstalled(true);
+        memberVo.setHasUsePermission(false);
         SkillGroupInstallResultVo resultVo = new SkillGroupInstallResultVo();
         resultVo.getInstalledSkillIds().add(30001L);
         resultVo.getExistingSkillIds().add(30002L);
@@ -209,6 +214,10 @@ class SkillGroupContractTest {
         assertThat(memberJson.path("resourceId").asText()).isEqualTo("20001");
         assertThat(memberJson.path("systemBuiltIn").asBoolean()).isTrue();
         assertThat(memberJson.path("creatorOwned").asBoolean()).isFalse();
+        assertThat(memberJson.path("memberStatus").asText()).isEqualTo("APPLY_PENDING");
+        assertThat(memberJson.path("statusReason").asText()).isEqualTo("reason");
+        assertThat(memberJson.path("installed").asBoolean()).isTrue();
+        assertThat(memberJson.path("hasUsePermission").asBoolean()).isFalse();
         assertTextualArrayEntry(resultJson, "installedSkillIds", "30001");
         assertTextualArrayEntry(resultJson, "existingSkillIds", "30002");
         assertTextualArrayEntry(resultJson, "removedSkillIds", "30003");
@@ -375,6 +384,36 @@ class SkillGroupContractTest {
     }
 
     @Test
+    void installedSkillIdStatementIsDistinctActiveEmployeeScopedAndSafeForEmptyIds() throws Exception {
+        String statement = extractBlock(readMapperXml(), "select", "selectinstalledskillids");
+        assertThat(statement)
+                .contains("select distinct relation.rel_resource_id")
+                .contains("relation.resource_id = #{digitalemployeeid}")
+                .contains("relation.rel_type_name = 'dig_employee_skill'")
+                .contains("relation.rel_status = 1")
+                .contains("relation.rel_resource_id in")
+                .contains("<foreach collection=\"skillids\"")
+                .contains("<otherwise>")
+                .contains("1 = 0");
+
+        Configuration configuration = buildMapperConfiguration();
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("digitalEmployeeId", 30001L);
+        parameters.put("skillIds", null);
+        assertThat(normalizedBoundSql(configuration, "selectInstalledSkillIds", parameters).getSql())
+                .contains("1 = 0");
+
+        parameters.put("skillIds", List.of());
+        assertThat(normalizedBoundSql(configuration, "selectInstalledSkillIds", parameters).getSql())
+                .contains("1 = 0");
+
+        parameters.put("skillIds", List.of(20001L, 20002L));
+        BoundSql populated = normalizedBoundSql(configuration, "selectInstalledSkillIds", parameters);
+        assertThat(populated.getSql()).containsPattern("relation\\.rel_resource_id in \\( \\? , \\? \\)");
+        assertThat(populated.getParameterMappings()).hasSize(3);
+    }
+
+    @Test
     void groupLockAndScopedUpdateBoundSqlAreTenantAndTypeGuarded() throws Exception {
         Configuration configuration = buildMapperConfiguration();
         String lockSql = normalizedBoundSql(configuration, "selectGroupForUpdate", Map.of(
@@ -537,6 +576,7 @@ class SkillGroupContractTest {
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectActiveMembers")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectMemberRelations")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectDigitalEmployeeSkillRelations")).isTrue();
+        assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectInstalledSkillIds")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectSkillRelationsWithSourceInfo")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectSkillRelationsWithSourceInfoByTenant")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectMemberRelationsIncludingInactive")).isTrue();

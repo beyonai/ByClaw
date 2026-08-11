@@ -351,6 +351,25 @@
         ORDER BY relation.create_time, relation.resource_rel_detail_id
     </select>
 
+    <select id="selectInstalledSkillIds" resultType="java.lang.Long">
+        SELECT DISTINCT relation.rel_resource_id
+        FROM ss_resource_rel_detail relation
+        WHERE relation.resource_id = #{digitalEmployeeId}
+          AND relation.rel_type_name = 'DIG_EMPLOYEE_SKILL'
+          AND relation.rel_status = 1
+        <choose>
+            <when test="skillIds != null and skillIds.size() > 0">
+                AND relation.rel_resource_id IN
+                <foreach collection="skillIds" item="skillId" open="(" separator="," close=")">
+                    #{skillId}
+                </foreach>
+            </when>
+            <otherwise>
+                AND 1 = 0
+            </otherwise>
+        </choose>
+    </select>
+
     <insert id="insertDigitalEmployeeSkillIfAbsent">
         MERGE INTO ss_resource_rel_detail target
         USING (
