@@ -235,8 +235,13 @@ export const INIT_POLL_MAX_ROUNDS = 120;
 
 // 下发工作区初始化:后端建一条架构数字员工会话并返回 sessionId,真正的初始化在沙箱里由架构助理执行。
 // 完成与否由后端定时任务读该会话的任务状态文件判定,前端只轮询 initStatus,没有「标记完成」的接口。
+// 回架构员工而不只回会话ID:项目维度员工不在前端员工列表里,跳进会话时要靠这两个字段写 agentCache,
+// 否则聊天输入框的 @ 查不到人会兜底成「AI 助手」。ID 是字符串——雪花 ID 超过 JS 安全整数。
 export const startProjectInit = (data: { projectId: number; buildIndex: boolean; skillPackages: string[] }) =>
-  POST<{ sessionId: number }>('/byaiService/project/init/start', data);
+  POST<{ sessionId: string; architectAgentId: string; architectAgentName: string }>(
+    '/byaiService/project/init/start',
+    data
+  );
 
 // 项目仓库维护：扫描源关联仓库时可即席新增/删除
 export const createProjectRepo = (data: {

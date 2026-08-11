@@ -22,11 +22,14 @@ import {
   type MenuProps,
 } from 'antd';
 import {
+  ApartmentOutlined,
   AppstoreOutlined,
   BarChartOutlined,
+  BugOutlined,
   ClockCircleOutlined,
   CloseOutlined,
   CloudDownloadOutlined,
+  CodeOutlined,
   CommentOutlined,
   DeleteOutlined,
   DingdingOutlined,
@@ -454,6 +457,28 @@ const normalizeOperationTaskType = (task: any): OperationTaskType => {
   if (['content', 'publish', 'content_creation', 'content_publish'].includes(taskType)) return 'content';
   if (['analyze', 'analysis', 'analytics', 'data_analysis'].includes(taskType)) return 'analyze';
   return 'collect';
+};
+
+// 研发任务的四角色类型对照后端 DevloopTaskType：会话表没有类型列，后端按各创建链路的关联行
+// 反查得出。与上面运营任务的 operationType 是两套独立枚举，不能互相兜底。
+// 类型走左侧图标而非标签：卡片头部右侧已有状态标签和操作入口，再加标签会挤掉任务名。
+const DEVELOP_TASK_TYPES = ['architect', 'requirement', 'coder', 'tester', 'chat'] as const;
+
+type DevelopTaskType = (typeof DEVELOP_TASK_TYPES)[number];
+
+// 四角色各配一组图标配色，与运营任务图标同一套做法；普通会话沿用任务卡默认的绿色。
+const DEVELOP_TASK_TYPE_ICON_CLASSES: Record<DevelopTaskType, string> = {
+  architect: styles.detailTaskIconArchitect,
+  requirement: styles.detailTaskIconRequirement,
+  coder: styles.detailTaskIconCoder,
+  tester: styles.detailTaskIconTester,
+  chat: styles.detailTaskIconChat,
+};
+
+const normalizeDevelopTaskType = (task: any): DevelopTaskType | undefined => {
+  const taskType = `${task?.taskType || ''}`.trim().toLowerCase();
+  // 未知取值不猜：宁可回退成通用研发图标，也不要把后端新增的类型显示成错的那一类。
+  return DEVELOP_TASK_TYPES.find((type) => type === taskType);
 };
 
 // 工作流的运行状态来源不同，下方统一映射给时间轴的状态枚举。
@@ -5885,6 +5910,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
                     content: operationStyles.operationTaskIconContent,
                     analyze: operationStyles.operationTaskIconAnalyze,
                   }[operationTaskType];
+                  // 研发任务的四角色类型，取值见后端 DevloopTaskType；运营任务走 operationType，两套不通用。
+                  const developTaskType = normalizeDevelopTaskType(task);
+                  const developTaskTypeLabel = developTaskType ? t(`task.type.${developTaskType}`) : '';
+                  const developTaskTypeIconClass = developTaskType
+                    ? DEVELOP_TASK_TYPE_ICON_CLASSES[developTaskType]
+                    : '';
                   const showStructuredTaskMeta = isDevelopProject || isOperationProject;
                   // 优先按用户 ID 判断处理人；历史数据缺失 ID 时再用用户名兜底，避免同名用户误判。
                   const isCurrentUserAssignee = isCurrentUserTaskAssignee(task, userInfo);
@@ -5948,10 +5979,24 @@ const ProjectDetailPanel: React.FC<Props> = ({
                       }}
                     >
                       {isDevelopProject ? (
-                        <div className={styles.detailTaskIcon}>
-                          {/* 研发任务保持绿色研发图标，区别于普通会话。 */}
-                          <FundProjectionScreenOutlined />
-                        </div>
+                        // 类型未知时沿用原绿色研发图标，保证老数据和后端新增类型都还有图标可显示。
+                        <Tooltip title={developTaskTypeLabel} placement="top">
+                          <div className={`${styles.detailTaskIcon} ${developTaskTypeIconClass}`}>
+                            {developTaskType === 'architect' ? (
+                              <ApartmentOutlined />
+                            ) : developTaskType === 'requirement' ? (
+                              <FileTextOutlined />
+                            ) : developTaskType === 'coder' ? (
+                              <CodeOutlined />
+                            ) : developTaskType === 'tester' ? (
+                              <BugOutlined />
+                            ) : developTaskType === 'chat' ? (
+                              <CommentOutlined />
+                            ) : (
+                              <FundProjectionScreenOutlined />
+                            )}
+                          </div>
+                        </Tooltip>
                       ) : isOperationProject ? (
                         <Tooltip title={operationTaskTypeLabel} placement="top">
                           <div className={`${operationStyles.operationTaskIcon} ${operationTaskIconClass}`}>

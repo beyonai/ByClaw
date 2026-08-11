@@ -552,6 +552,45 @@
   }
 }
 
+// 研发任务按四角色分色，取值见后端 DevloopTaskType。类型只靠标题前的图标表达：
+// 卡片头部右侧的状态标签和操作入口已经很挤，再加类型标签会把任务名压到只剩几个字。
+.taskTypeIcon {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.taskTypeIconArchitect {
+  color: #7c4cb0;
+  background: #f3ecff;
+}
+
+.taskTypeIconRequirement {
+  color: #2563b8;
+  background: #e8f1ff;
+}
+
+.taskTypeIconCoder {
+  color: #0f766e;
+  background: #e6f7f4;
+}
+
+.taskTypeIconTester {
+  color: #a8556a;
+  background: #fbeef2;
+}
+
+// 普通会话不属于四角色任务，用中性灰弱化，避免跟真正的任务抢注意力。
+.taskTypeIconChat {
+  color: #64748b;
+  background: #f1f5f9;
+}
+
 .taskCardHeaderActions {
   display: inline-flex;
   align-items: center;

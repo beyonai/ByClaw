@@ -9,10 +9,20 @@ import {
   Select,
   Spin,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd';
-import { AppstoreOutlined, MessageOutlined, MoreOutlined, ReloadOutlined } from '@ant-design/icons';
+import {
+  ApartmentOutlined,
+  AppstoreOutlined,
+  BugOutlined,
+  CodeOutlined,
+  FileTextOutlined,
+  MessageOutlined,
+  MoreOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
@@ -91,6 +101,20 @@ const getTaskStatusLabel = (task: DevloopTaskItem, intl: ReturnType<typeof useIn
   const messageId = statusMessageId[status];
   return messageId ? intl.formatMessage({ id: messageId }) : task.statusLabel || '';
 };
+
+// 任务类型由后端按创建链路反查返回(架构/需求/研发/测试，四角色都不命中为普通会话)。
+// 只有研发项目的任务接口回这个字段，运营任务走 operationType，拿不到就不显示图标。
+// 类型用标题前的图标表达而非标签：卡片头部右侧已有状态标签和操作入口，再塞标签会挤掉任务名。
+const TASK_TYPE_ICONS: Record<string, { icon: React.ReactNode; className: string }> = {
+  architect: { icon: <ApartmentOutlined />, className: 'taskTypeIconArchitect' },
+  requirement: { icon: <FileTextOutlined />, className: 'taskTypeIconRequirement' },
+  coder: { icon: <CodeOutlined />, className: 'taskTypeIconCoder' },
+  tester: { icon: <BugOutlined />, className: 'taskTypeIconTester' },
+  chat: { icon: <MessageOutlined />, className: 'taskTypeIconChat' },
+};
+
+// 未知取值不猜：宁可不显示图标，也不要把后端新增的类型显示成错的那一类。
+const getTaskTypeMeta = (task: DevloopTaskItem) => TASK_TYPE_ICONS[`${task.taskType || ''}`.trim().toLowerCase()];
 
 const getTaskStatusColor = (task: DevloopTaskItem) => {
   const status = normalizeTaskStatus(task);
@@ -445,6 +469,18 @@ const ProjectTasks: React.FC<Props> = ({
                 }}
               >
                 <div className={styles.dataCardHeader}>
+                  {getTaskTypeMeta(task) && (
+                    <Tooltip
+                      title={intl.formatMessage({
+                        id: `projectSpace.detail.task.type.${`${task.taskType}`.trim().toLowerCase()}`,
+                      })}
+                      placement="top"
+                    >
+                      <span className={`${styles.taskTypeIcon} ${styles[getTaskTypeMeta(task)!.className]}`}>
+                        {getTaskTypeMeta(task)!.icon}
+                      </span>
+                    </Tooltip>
+                  )}
                   <Typography.Text strong ellipsis={{ tooltip: task.title }}>
                     {task.title || intl.formatMessage({ id: 'projectSpace.tasks.unnamed' })}
                   </Typography.Text>

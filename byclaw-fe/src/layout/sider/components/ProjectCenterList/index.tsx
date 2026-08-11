@@ -5,7 +5,13 @@ import { useIntl, useLocation, useNavigate } from '@umijs/max';
 import classNames from 'classnames';
 import useGlobal from '@/hooks/useGlobal';
 import { createProject, saveDefaultAgent, saveProjectMembers } from '@/service/devloop';
-import ProjectOnboardingWizard from '@/pages/projectSpace/components/ProjectOnboardingWizard';
+import ProjectOnboardingWizard, {
+  type ArchitectChatTarget,
+} from '@/pages/projectSpace/components/ProjectOnboardingWizard';
+import { setAgentCache } from '@/components/QueryInput/RichInput/agentCache';
+import getElementData from '@/components/QueryInput/RichInput/utils/getElementData';
+import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
+import { agentTypeMap } from '@/constants/agent';
 import type { ProjectFormValues, ProjectShareMember } from '@/pages/projectSpace/components/ProjectFormModal';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
@@ -155,11 +161,23 @@ const ProjectCenterList: React.FC = () => {
   );
 
   const handleEnterArchitectChat = useCallback(
-    (projectId: string, initSessionId?: number) => {
+    (projectId: string, architect?: ArchitectChatTarget) => {
       setCreateWizardOpen(false);
-      // 与会话模块一致，进入研发架构初始化会话前清理旧会话和员工上下文。
-      setAgentId?.('');
-      setSessionId?.('');
+      // 架构员工是项目维度的,不在 redux 员工列表里,useDefaultAgentElement 查不到就兜底成「AI 助手」。
+      // agentCache 在那个 hook 里优先于 redux 查表,所以先把整份员工写进去再跳。
+      if (architect?.agentId && architect.agentName) {
+        setAgentCache(
+          getElementData(ResourceType.digitalEmployee, {
+            agentId: architect.agentId,
+            name: architect.agentName,
+            agentType: agentTypeMap.agent,
+          })
+        );
+      }
+      // 与项目详情页「查看会话」同一套:置全局会话上下文才是真正打开那条会话。
+      // 置空会落到空白新会话,且聊天页的 @ 恢复要等全局会话与 state.sessionId 对上才触发。
+      setAgentId?.(architect?.agentId || '');
+      setSessionId?.(architect?.sessionId || '');
       // 带上后端下发初始化时建的会话ID,直达架构助理那条会话;缺省才新开。
       navigate('/chat', {
         state: {
@@ -167,7 +185,11 @@ const ProjectCenterList: React.FC = () => {
           from: 'projectSpace',
           projectId,
           projectName: createdProjectNameRef.current,
-          sessionId: initSessionId,
+          sessionId: architect?.sessionId,
+          // 聊天页据此在挂载后恢复 @ 员工。不能在这里直接 setAgentId:
+          // ChatLayoutComp 挂载时会按「无会话员工」清空一次,早设的值会被抹掉。
+          selectedAgentId: architect?.agentId,
+          selectedAgentObjectType: architect?.agentId ? 'DigEmployee' : undefined,
         },
       });
     },

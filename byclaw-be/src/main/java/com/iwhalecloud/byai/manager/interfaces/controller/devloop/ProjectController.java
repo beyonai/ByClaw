@@ -1,7 +1,10 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import org.apache.commons.lang3.StringUtils;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -128,9 +131,15 @@ public class ProjectController {
         Long projectId = MapParamUtil.getLongValue(params, "projectId");
         boolean buildIndex = Boolean.TRUE.equals(params.get("buildIndex"))
             || "Y".equalsIgnoreCase(MapParamUtil.getStringValue(params, "buildIndex"));
-        Long sessionId = workspaceInitService.startWorkspaceInit(projectId, buildIndex,
-            params.get("skillPackages"));
-        return ResponseUtil.successResponse(Map.of("sessionId", sessionId));
+        WorkspaceInitService.WorkspaceInitStarted started = workspaceInitService.startWorkspaceInit(projectId,
+            buildIndex, params.get("skillPackages"));
+        // 架构员工与会话一起回：项目维度员工不在前端员工列表里，只给会话ID跳过去 @ 会兜底成「AI 助手」。
+        // ID 转字符串：雪花 ID 超过 JS 安全整数，给数字前端会截断。
+        Map<String, Object> result = new HashMap<>();
+        result.put("sessionId", String.valueOf(started.sessionId()));
+        result.put("architectAgentId", String.valueOf(started.architectAgentId()));
+        result.put("architectAgentName", StringUtils.defaultString(started.architectAgentName()));
+        return ResponseUtil.successResponse(result);
     }
 
     /**

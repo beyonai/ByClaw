@@ -30,8 +30,16 @@ interface Props {
   onCreateProject: (values: ProjectFormValues) => Promise<string>;
   // 完成:进入该项目详情(非研发项目建完即调,研发项目走完 step3 后调)。
   onFinish: (projectId: string) => void;
-  // step3 进入架构数字员工聊天看初始化过程;sessionId 为后端下发初始化时建的那条会话,缺省则新开会话。
-  onEnterArchitectChat: (projectId: string, sessionId?: number) => void;
+  // step3 进入架构数字员工聊天看初始化过程;target 为后端下发初始化时建的那条会话与架构员工,缺省则新开会话。
+  onEnterArchitectChat: (projectId: string, target?: ArchitectChatTarget) => void;
+}
+
+// 跳架构员工会话所需的最小信息:会话ID加员工。员工名必须带上——项目维度员工不在前端员工列表里,
+// 只给 ID 会让聊天输入框的 @ 查不到人而兜底成「AI 助手」。
+export interface ArchitectChatTarget {
+  sessionId?: string;
+  agentId?: string;
+  agentName?: string;
 }
 
 const REPO_BRANCH_DEFAULT = 'main';
@@ -88,8 +96,9 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
   // 初始化需用户显式点击触发:未触发前展示配置,触发后才 loading 且允许关闭。
   const [initStarted, setInitStarted] = useState(false);
   const [initStarting, setInitStarting] = useState(false);
-  // 架构助理那条会话的 ID:进入聊天要用它直达该会话,而不是新开一条。
-  const [initSessionId, setInitSessionId] = useState<number>();
+  // 架构助理那条会话与员工:进入聊天要用会话ID直达该会话而不是新开一条,员工用于跳过去后默认 @ 到它。
+  // 员工只有 /init/start 会回,轮询 getProject 拿不到,所以启动时就存下来。
+  const [architectTarget, setArchitectTarget] = useState<ArchitectChatTarget>({});
   // 真实初始化状态由后端定时任务读任务状态文件后落库,这里轮询回显,不再用写死的假进度。
   const [initStatus, setInitStatus] = useState<ProjectInitStatus>('initializing');
   const [initFailReason, setInitFailReason] = useState('');
@@ -110,7 +119,7 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
     setSkillPackages([]);
     setInitStarted(false);
     setInitStarting(false);
-    setInitSessionId(undefined);
+    setArchitectTarget({});
     setInitStatus('initializing');
     setInitFailReason('');
   }, [open]);
@@ -201,7 +210,11 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
         buildIndex,
         skillPackages: buildIndex ? skillPackages : [],
       });
-      setInitSessionId(res?.sessionId);
+      setArchitectTarget({
+        sessionId: res?.sessionId,
+        agentId: res?.architectAgentId,
+        agentName: res?.architectAgentName,
+      });
       setInitStatus('initializing');
       setInitFailReason('');
       setInitStarted(true);
@@ -230,7 +243,10 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
         if (cancelled || !detail) return;
         setInitStatus((detail.initStatus as ProjectInitStatus) || 'initializing');
         setInitFailReason(detail.initFailReason || '');
-        if (detail.initSessionId) setInitSessionId(Number(detail.initSessionId));
+        // 只补会话ID,员工保留启动时那份:详情不回架构员工,拿 undefined 覆盖会把 @ 打回「AI 助手」。
+        if (detail.initSessionId) {
+          setArchitectTarget((prev) => ({ ...prev, sessionId: `${detail.initSessionId}` }));
+        }
       } catch {
         // 轮询失败不打断向导:下一次 tick 再试,状态维持 initializing。
       }
@@ -425,7 +441,7 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
               {t('step3.retry')}
             </Button>
           ) : (
-            <Button type="primary" ghost onClick={() => onEnterArchitectChat(projectId, initSessionId)}>
+            <Button type="primary" ghost onClick={() => onEnterArchitectChat(projectId, architectTarget)}>
               {t('step3.enterChat')}
             </Button>
           )}

@@ -117,9 +117,9 @@ public class WorkspaceInitService {
      * @param projectId 研发项目ID
      * @param buildIndex 是否建代码索引
      * @param skillPackages 建索引所需技能包，前端传数组，落库前拼成逗号分隔
-     * @return 本次初始化的会话ID
+     * @return 本次初始化的会话与架构员工
      */
-    public Long startWorkspaceInit(Long projectId, boolean buildIndex, Object skillPackages) {
+    public WorkspaceInitStarted startWorkspaceInit(Long projectId, boolean buildIndex, Object skillPackages) {
         Project project = requireProject(projectId);
         if (!PROJECT_TYPE_DEVELOP.equals(project.getProjectType())) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.init.developOnly");
@@ -128,7 +128,8 @@ public class WorkspaceInitService {
         if (workspaceRepo == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.init.workspaceRepoRequired");
         }
-        Long architectAgentId = resolveArchitectAgentId(projectId);
+        DefaultAgent defaultAgent = defaultAgentService.resolveForProject(projectId);
+        Long architectAgentId = parseArchitectAgentId(projectId, defaultAgent);
         if (architectAgentId == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.init.architectRequired");
         }
@@ -172,7 +173,14 @@ public class WorkspaceInitService {
         });
         log.info("[WorkspaceInit] 已下发架构员工初始化, projectId={}, sessionId={}, architectAgentId={}", projectId, sessionId,
             architectAgentId);
-        return sessionId;
+        return new WorkspaceInitStarted(sessionId, architectAgentId, defaultAgent.getArchitectAgentName());
+    }
+
+    /**
+     * 初始化下发结果：会话ID加架构员工。员工要一起回给前端——项目维度员工不在前端员工列表里，
+     * 只给会话ID跳过去，聊天输入框的 @ 查不到人会兜底成「AI 助手」。
+     */
+    public record WorkspaceInitStarted(Long sessionId, Long architectAgentId, String architectAgentName) {
     }
 
     /**
@@ -268,8 +276,7 @@ public class WorkspaceInitService {
     }
 
     /** 架构助理来自项目默认员工（项目覆盖优先，回退全局）；字符串存储，空或非法都按未配置处理。 */
-    private Long resolveArchitectAgentId(Long projectId) {
-        DefaultAgent agent = defaultAgentService.resolveForProject(projectId);
+    private Long parseArchitectAgentId(Long projectId, DefaultAgent agent) {
         String raw = agent == null ? null : agent.getArchitectAgentId();
         if (StringUtils.isBlank(raw)) {
             return null;
