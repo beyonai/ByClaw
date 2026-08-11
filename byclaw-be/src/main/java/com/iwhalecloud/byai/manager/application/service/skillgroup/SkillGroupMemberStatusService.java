@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.application.service.skillgroup;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.skillgroup.model.SkillGroupMemberStatus;
 import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
@@ -68,7 +69,8 @@ public class SkillGroupMemberStatusService {
             Long memberId = member.getResourceId();
             ResourceOperationPermissionsVo permissions = memberId == null ? null : permissionsById.get(memberId);
             boolean installed = memberId != null && installedIds.contains(memberId);
-            boolean hasUsePermission = permissions != null
+            boolean systemBuiltIn = SsResExtSkillService.INNER_SKILL_TYPE.equalsIgnoreCase(member.getSkillType());
+            boolean hasUsePermission = systemBuiltIn || permissions != null
                     && Boolean.TRUE.equals(permissions.getHasUsePermission());
 
             member.setInstalled(installed);
