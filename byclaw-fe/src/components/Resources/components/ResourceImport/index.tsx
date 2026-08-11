@@ -55,6 +55,7 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   const [curlForm] = Form.useForm();
   const [currentStep, setCurrentStep] = useState('import'); // 'import' or 'curlConfig'
   const [importResult, setImportResult] = useState<ResourceImportResult | null>(null);
+  const [completedImportResult, setCompletedImportResult] = useState<ResourceImportResult | null>(null);
   const [activeDiffItem, setActiveDiffItem] = useState<ResourceImportItem | null>(null);
   const invalidFileMessageShownRef = useRef(false);
 
@@ -106,6 +107,7 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
       setParsedCurlData({});
       setSelectedCatalogId(catalogId || undefined);
       setImportResult(null);
+      setCompletedImportResult(null);
       setActiveDiffItem(null);
       curlForm.resetFields();
     }
@@ -227,8 +229,9 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   };
 
   const handleImportComplete = () => {
-    const completedResult = importResult || undefined;
+    const completedResult = completedImportResult || undefined;
     setImportResult(null);
+    setCompletedImportResult(null);
     setActiveDiffItem(null);
     onSuccess(completedResult);
   };
@@ -252,6 +255,7 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
           const conflictFailedItems = (conflictData?.items || []).filter((item) => !item.success);
           if (conflictFailedItems.length) {
             setImportResult(conflictData || null);
+            setCompletedImportResult(null);
             setActiveDiffItem(null);
             return;
           }
@@ -272,6 +276,7 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
             (importData.items || []).length > 1)
         ) {
           setImportResult(importData);
+          setCompletedImportResult(importData);
           setActiveDiffItem(null);
           return;
         }

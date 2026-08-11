@@ -163,13 +163,66 @@ describe('ResourceImport', () => {
     expect(onSuccess).toHaveBeenCalledTimes(1);
   });
 
-  it('invokes onCancel without invoking onSuccess', () => {
+  it('does not return a failed SKILL preflight summary as a completed import result', async () => {
+    const preflightResult: ResourceImportResult = {
+      total: 1,
+      success: 0,
+      failed: 1,
+      items: [
+        {
+          resourceCode: 'invalid-skill',
+          resourceName: '无效技能',
+          updated: false,
+          success: false,
+          message: '技能包校验失败',
+        },
+      ],
+    };
+    const onSuccess = jest.fn();
+    mockCheckSkillImportConflicts.mockResolvedValue(preflightResult);
+
+    render(<ResourceImport {...defaultProps} onCancel={jest.fn()} onSuccess={onSuccess} />);
+
+    fireEvent.change(screen.getByLabelText('skill zip'), {
+      target: { files: [new File(['invalid bundle'], 'invalid.zip', { type: 'application/zip' })] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'knowledgeCenter.import.confirm' }));
+
+    await screen.findByRole('button', { name: 'resource.import.finish' });
+    expect(mockImportResource).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'resource.import.finish' }));
+
+    expect(onSuccess).toHaveBeenCalledWith(undefined);
+    expect(onSuccess).not.toHaveBeenCalledWith(preflightResult);
+  });
+
+  it('cancels a failed SKILL preflight summary without invoking onSuccess', async () => {
+    mockCheckSkillImportConflicts.mockResolvedValue({
+      total: 1,
+      success: 0,
+      failed: 1,
+      items: [
+        {
+          resourceCode: 'invalid-skill',
+          resourceName: '无效技能',
+          updated: false,
+          success: false,
+          message: '技能包校验失败',
+        },
+      ],
+    } satisfies ResourceImportResult);
     const onCancel = jest.fn();
     const onSuccess = jest.fn();
 
     render(<ResourceImport {...defaultProps} onCancel={onCancel} onSuccess={onSuccess} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'close import' }));
+    fireEvent.change(screen.getByLabelText('skill zip'), {
+      target: { files: [new File(['invalid bundle'], 'invalid.zip', { type: 'application/zip' })] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'knowledgeCenter.import.confirm' }));
+
+    await screen.findByRole('button', { name: 'resource.import.finish' });
+    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
 
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onSuccess).not.toHaveBeenCalled();
