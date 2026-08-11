@@ -106,17 +106,26 @@ function resolveReasoning(config: LlmProviderConfig): {
     map[level] = explicitMap[level] ?? supportedLevel;
   }
   const format = inferThinkingFormat(config.reasoning, config);
-  const compat =
-    config.protocol === "openai-completions"
+  const compat = {
+    ...(config.protocol === "openai-completions"
       ? {
           supportsUsageInStreaming: true,
           supportsReasoningEffort: capability === "effort",
           ...(format ? { thinkingFormat: format } : {}),
         }
-      : undefined;
+      : {}),
+    ...(config.protocol === "openai-responses"
+      ? {
+          // OpenAI supports `developer`, but several compatible Responses
+          // endpoints (including Ark) only accept `system`.
+          supportsDeveloperRole:
+            config.reasoning.supportsDeveloperRole ?? !isVolcengineArk(config),
+        }
+      : {}),
+  };
   return {
     thinkingLevelMap: isVolcengineArk(config) ? deepSeekThinkingLevelMap() : map,
-    ...(compat ? { compat } : {}),
+    ...(Object.keys(compat).length > 0 ? { compat } : {}),
     ...(config.reasoning.budgets
       ? { thinkingBudgets: config.reasoning.budgets }
       : {}),
