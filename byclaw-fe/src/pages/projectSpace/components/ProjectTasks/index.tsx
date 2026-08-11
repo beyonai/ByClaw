@@ -13,16 +13,7 @@ import {
   Typography,
   message,
 } from 'antd';
-import {
-  ApartmentOutlined,
-  AppstoreOutlined,
-  BugOutlined,
-  CodeOutlined,
-  FileTextOutlined,
-  MessageOutlined,
-  MoreOutlined,
-  ReloadOutlined,
-} from '@ant-design/icons';
+import { AppstoreOutlined, MoreOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
@@ -42,6 +33,12 @@ import { getArrayData, getPageTotal } from '../../utils';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
 import styles from '../../index.module.less';
 import SessionOverviewDrawer from '@/layout/sider/components/ProjectSpaceList/SessionOverviewDrawer';
+import {
+  getDevloopTaskTypeIcon,
+  getDevloopTaskTypeLabelId,
+  normalizeDevloopTaskType,
+  type DevloopTaskType,
+} from '@/layout/sider/components/ProjectSpaceList/devloopTaskType';
 import TaskDetailDrawer from '@/layout/sider/components/ProjectSpaceList/TaskDetailDrawer';
 import { isCurrentUserTaskAssignee } from '@/layout/sider/components/ProjectSpaceList/taskAccess';
 
@@ -103,19 +100,14 @@ const getTaskStatusLabel = (task: DevloopTaskItem, intl: ReturnType<typeof useIn
   return messageId ? intl.formatMessage({ id: messageId }) : task.statusLabel || '';
 };
 
-// 任务类型由后端按创建链路反查返回(架构/需求/研发/测试，四角色都不命中为普通会话)。
-// 只有研发项目的任务接口回这个字段，运营任务走 operationType，拿不到就不显示图标。
-// 类型用标题前的图标表达而非标签：卡片头部右侧已有状态标签和操作入口，再塞标签会挤掉任务名。
-const TASK_TYPE_ICONS: Record<string, { icon: React.ReactNode; className: string }> = {
-  architect: { icon: <ApartmentOutlined />, className: 'taskTypeIconArchitect' },
-  requirement: { icon: <FileTextOutlined />, className: 'taskTypeIconRequirement' },
-  coder: { icon: <CodeOutlined />, className: 'taskTypeIconCoder' },
-  tester: { icon: <BugOutlined />, className: 'taskTypeIconTester' },
-  chat: { icon: <MessageOutlined />, className: 'taskTypeIconChat' },
+// 四角色各配一组图标配色，与项目详情弹窗的任务卡同一套色值。
+const TASK_TYPE_ICON_CLASSES: Record<DevloopTaskType, string> = {
+  architect: styles.taskTypeIconArchitect,
+  requirement: styles.taskTypeIconRequirement,
+  coder: styles.taskTypeIconCoder,
+  tester: styles.taskTypeIconTester,
+  chat: styles.taskTypeIconChat,
 };
-
-// 未知取值不猜：宁可不显示图标，也不要把后端新增的类型显示成错的那一类。
-const getTaskTypeMeta = (task: DevloopTaskItem) => TASK_TYPE_ICONS[`${task.taskType || ''}`.trim().toLowerCase()];
 
 const getTaskStatusColor = (task: DevloopTaskItem) => {
   const status = normalizeTaskStatus(task);
@@ -477,113 +469,108 @@ const ProjectTasks: React.FC<Props> = ({
       <Spin spinning={loading}>
         {tasks.length ? (
           <div className={styles.dataCardGrid}>
-            {tasks.map((task) => (
-              <article
-                key={`${task.taskId || task.sessionId}`}
-                className={styles.dataCard}
-                role="button"
-                tabIndex={0}
-                onClick={() => openTaskDetail(task)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') openTaskDetail(task);
-                }}
-              >
-                <div className={styles.dataCardHeader}>
-                  {getTaskTypeMeta(task) && (
-                    <Tooltip
-                      title={intl.formatMessage({
-                        id: `projectSpace.detail.task.type.${`${task.taskType}`.trim().toLowerCase()}`,
-                      })}
-                      placement="top"
-                    >
-                      <span className={`${styles.taskTypeIcon} ${styles[getTaskTypeMeta(task)!.className]}`}>
-                        {getTaskTypeMeta(task)!.icon}
-                      </span>
-                    </Tooltip>
-                  )}
-                  <Typography.Text strong ellipsis={{ tooltip: task.title }}>
-                    {task.title || intl.formatMessage({ id: 'projectSpace.tasks.unnamed' })}
-                  </Typography.Text>
-                  <div className={styles.taskCardHeaderActions}>
-                    {getTaskStatusLabel(task, intl) && (
-                      <Tag
-                        color={getTaskStatusColor(task)}
-                        className={isOperationExecutableTask(task) ? styles.taskPendingStatusTag : undefined}
-                      >
-                        {getTaskStatusLabel(task, intl)}
-                      </Tag>
+            {tasks.map((task) => {
+              const taskType = normalizeDevloopTaskType(task);
+              return (
+                <article
+                  key={`${task.taskId || task.sessionId}`}
+                  className={styles.dataCard}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openTaskDetail(task)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') openTaskDetail(task);
+                  }}
+                >
+                  <div className={styles.dataCardHeader}>
+                    {taskType && (
+                      <Tooltip title={intl.formatMessage({ id: getDevloopTaskTypeLabelId(taskType) })} placement="top">
+                        <span className={`${styles.taskTypeIcon} ${TASK_TYPE_ICON_CLASSES[taskType]}`}>
+                          {getDevloopTaskTypeIcon(taskType)}
+                        </span>
+                      </Tooltip>
                     )}
-                    {isOperationExecutableTask(task) && (
-                      <Button
-                        type="text"
-                        size="small"
-                        className={styles.taskExecuteButton}
-                        aria-label="执行任务"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setTemplateTask(task);
-                        }}
-                      >
-                        {intl.formatMessage({ id: 'projectSpace.operation.execute.action' })}
-                      </Button>
-                    )}
-                    {project.projectType === 'operation' && (isOperationPendingTask(task) || isTaskCreator(task)) && (
-                      <Dropdown
-                        trigger={['click']}
-                        menu={{
-                          items: [
-                            ...(isOperationPendingTask(task) ? [{ key: 'edit', label: '编辑' }] : []),
-                            ...(isTaskCreator(task) ? [{ key: 'delete', label: '删除', danger: true }] : []),
-                          ],
-                          onClick: ({ key, domEvent }) => {
-                            domEvent.stopPropagation();
-                            if (key === 'edit') openTaskEdit(task);
-                            if (key === 'delete') handleDeleteTask(task);
-                          },
-                        }}
-                      >
+                    <Typography.Text strong ellipsis={{ tooltip: task.title }}>
+                      {task.title || intl.formatMessage({ id: 'projectSpace.tasks.unnamed' })}
+                    </Typography.Text>
+                    <div className={styles.taskCardHeaderActions}>
+                      {getTaskStatusLabel(task, intl) && (
+                        <Tag
+                          color={getTaskStatusColor(task)}
+                          className={isOperationExecutableTask(task) ? styles.taskPendingStatusTag : undefined}
+                        >
+                          {getTaskStatusLabel(task, intl)}
+                        </Tag>
+                      )}
+                      {isOperationExecutableTask(task) && (
                         <Button
                           type="text"
                           size="small"
-                          className={styles.cardMoreAction}
-                          icon={<MoreOutlined />}
-                          aria-label="任务操作"
-                          onClick={(event) => event.stopPropagation()}
-                        />
-                      </Dropdown>
-                    )}
+                          className={styles.taskExecuteButton}
+                          aria-label="执行任务"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setTemplateTask(task);
+                          }}
+                        >
+                          {intl.formatMessage({ id: 'projectSpace.operation.execute.action' })}
+                        </Button>
+                      )}
+                      {project.projectType === 'operation' && (isOperationPendingTask(task) || isTaskCreator(task)) && (
+                        <Dropdown
+                          trigger={['click']}
+                          menu={{
+                            items: [
+                              ...(isOperationPendingTask(task) ? [{ key: 'edit', label: '编辑' }] : []),
+                              ...(isTaskCreator(task) ? [{ key: 'delete', label: '删除', danger: true }] : []),
+                            ],
+                            onClick: ({ key, domEvent }) => {
+                              domEvent.stopPropagation();
+                              if (key === 'edit') openTaskEdit(task);
+                              if (key === 'delete') handleDeleteTask(task);
+                            },
+                          }}
+                        >
+                          <Button
+                            type="text"
+                            size="small"
+                            className={styles.cardMoreAction}
+                            icon={<MoreOutlined />}
+                            aria-label="任务操作"
+                            onClick={(event) => event.stopPropagation()}
+                          />
+                        </Dropdown>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <Typography.Paragraph className={styles.dataCardDescription} ellipsis={{ rows: 2 }}>
-                  {task.description ||
-                    task.taskDescription ||
-                    task.requirementTitle ||
-                    task.agentName ||
-                    task.statusLabel ||
-                    '-'}
-                </Typography.Paragraph>
-                <div className={styles.taskMeta}>
-                  <Typography.Text
-                    type="secondary"
-                    ellipsis={{ tooltip: task.assignee || '-' }}
-                  >
-                    {task.assignee || '-'}
-                  </Typography.Text>
-                  <Typography.Text
-                    type="secondary"
-                    title="任务创建时间"
-                    className={
-                      project.projectType === 'operation' &&
-                      (isOperationPendingTask(task) || isTaskCreator(task))
-                        ? styles.taskCreateTimeWithAction
-                        : undefined
-                    }
-                  >
-                    {formatTaskCreateTime(task)}
-                  </Typography.Text>
-                </div>
-              </article>
-            ))}
+                  <Typography.Paragraph className={styles.dataCardDescription} ellipsis={{ rows: 2 }}>
+                    {task.description ||
+                      task.taskDescription ||
+                      task.requirementTitle ||
+                      task.agentName ||
+                      task.statusLabel ||
+                      '-'}
+                  </Typography.Paragraph>
+                  {/* 卡片底部只放负责人与创建时间：查看会话入口收到任务详情抽屉里，卡片本身整块可点即进详情。 */}
+                  <div className={styles.taskMeta}>
+                    <Typography.Text type="secondary" ellipsis={{ tooltip: task.assignee || '-' }}>
+                      {task.assignee || '-'}
+                    </Typography.Text>
+                    <Typography.Text
+                      type="secondary"
+                      title="任务创建时间"
+                      className={
+                        project.projectType === 'operation' && (isOperationPendingTask(task) || isTaskCreator(task))
+                          ? styles.taskCreateTimeWithAction
+                          : undefined
+                      }
+                    >
+                      {formatTaskCreateTime(task)}
+                    </Typography.Text>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         ) : (
           !loading && (

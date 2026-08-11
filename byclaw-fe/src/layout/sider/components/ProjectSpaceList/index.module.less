@@ -3413,6 +3413,8 @@
 
 .kanbanCardTitle {
   display: -webkit-box;
+  // 作为卡片头部的 flex 子项占满标签以外的剩余宽度，min-width 让两行截断生效而不是撑破卡片。
+  flex: 1;
   min-width: 0;
   font-size: 14px;
   font-weight: 500;
@@ -3424,6 +3426,52 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
+}
+
+// 标题占满剩余宽度，类型标签固定在右上角。用 flex-start 对齐，让标签跟标题首行齐平而非垂直居中。
+.kanbanCardHeader {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+// 类型标签不参与压缩，宽度由中文字数决定，标题让位而不是把标签挤掉。
+.kanbanCardTypeTag {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  // 与标题 20px 行高对齐，保证标签和首行文字视觉齐平。
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+// 四角色配色与项目详情任务卡 detailTaskIcon* 保持同一套色值。
+.kanbanCardTypeTagArchitect {
+  color: #7c4cb0;
+  background: #f3ecff;
+}
+
+.kanbanCardTypeTagRequirement {
+  color: #2563b8;
+  background: #e8f1ff;
+}
+
+.kanbanCardTypeTagCoder {
+  color: #0f766e;
+  background: #e6f7f4;
+}
+
+.kanbanCardTypeTagTester {
+  color: #a8556a;
+  background: #fbeef2;
+}
+
+// 普通会话不属于四角色任务，用中性灰弱化，避免跟真正的任务抢注意力。
+.kanbanCardTypeTagChat {
+  color: #64748b;
+  background: #f1f5f9;
 }
 
 .kanbanCardMeta {

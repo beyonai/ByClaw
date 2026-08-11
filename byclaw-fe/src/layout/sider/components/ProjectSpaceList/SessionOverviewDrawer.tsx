@@ -4,6 +4,7 @@ import { useIntl } from '@umijs/max';
 import dayjs from 'dayjs';
 import { listOperationTasks, listTasks, type DevloopTaskItem } from '@/service/devloop';
 import TaskDetailDrawer from './TaskDetailDrawer';
+import { getDevloopTaskTypeLabelId, normalizeDevloopTaskType, type DevloopTaskType } from './devloopTaskType';
 import { getTaskDateRangePresets, type TaskDateRange } from './taskDatePresets';
 import styles from './index.module.less';
 
@@ -51,6 +52,15 @@ const OPERATION_TASK_STATUS_BY_COLUMN: Record<TaskColumnKey, 'todo' | 'doing' | 
   running: 'doing',
   paused: 'pendingReview',
   done: 'done',
+};
+
+// 四角色各配一组标签配色，与项目详情任务卡的类型图标同一套色值，两个入口看同一个任务时颜色一致。
+const TASK_TYPE_TAG_CLASSES: Record<DevloopTaskType, string> = {
+  architect: styles.kanbanCardTypeTagArchitect,
+  requirement: styles.kanbanCardTypeTagRequirement,
+  coder: styles.kanbanCardTypeTagCoder,
+  tester: styles.kanbanCardTypeTagTester,
+  chat: styles.kanbanCardTypeTagChat,
 };
 
 // 四个状态列各自保存分页进度，筛选条件变化时统一从第一页重新查询。
@@ -316,29 +326,41 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
                     {columnState.tasks.length === 0 ? (
                       <Empty description="" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                     ) : (
-                      columnState.tasks.map((task) => (
-                        <div
-                          key={task.sessionId || task.taskId}
-                          className={styles.kanbanCard}
-                          onClick={() => setDetailTask(task)}
-                        >
-                          <h4 className={styles.kanbanCardTitle}>
-                            {task.title || t('projectSpace.taskBoard.unnamedTask')}
-                          </h4>
-                          {task.currentStage?.stageName && (
-                            <div className={styles.kanbanCardMeta}>
-                              <Tag className={styles.kanbanPhaseTag} color="blue">
-                                {task.currentStage.stageName}
-                              </Tag>
-                              <span>{t('projectSpace.taskBoard.progress', { progress: task.progress || 0 })}</span>
+                      columnState.tasks.map((task) => {
+                        // 运营任务接口回的是 operationType，这里只给研发任务的四角色类型打标签。
+                        const taskType = operationProject ? undefined : normalizeDevloopTaskType(task);
+                        return (
+                          <div
+                            key={task.sessionId || task.taskId}
+                            className={styles.kanbanCard}
+                            onClick={() => setDetailTask(task)}
+                          >
+                            <div className={styles.kanbanCardHeader}>
+                              <h4 className={styles.kanbanCardTitle}>
+                                {task.title || t('projectSpace.taskBoard.unnamedTask')}
+                              </h4>
+                              {taskType && (
+                                // 类型标签固定在右上角不参与压缩，标题在左侧自行两行截断。
+                                <span className={`${styles.kanbanCardTypeTag} ${TASK_TYPE_TAG_CLASSES[taskType]}`}>
+                                  {t(getDevloopTaskTypeLabelId(taskType))}
+                                </span>
+                              )}
                             </div>
-                          )}
-                          <div className={styles.kanbanCardFooter}>
-                            <span>{task.assignee || task.agentName || '-'}</span>
-                            <span>{task.createTime ? dayjs(task.createTime).format('M/D HH:mm') : ''}</span>
+                            {task.currentStage?.stageName && (
+                              <div className={styles.kanbanCardMeta}>
+                                <Tag className={styles.kanbanPhaseTag} color="blue">
+                                  {task.currentStage.stageName}
+                                </Tag>
+                                <span>{t('projectSpace.taskBoard.progress', { progress: task.progress || 0 })}</span>
+                              </div>
+                            )}
+                            <div className={styles.kanbanCardFooter}>
+                              <span>{task.assignee || task.agentName || '-'}</span>
+                              <span>{task.createTime ? dayjs(task.createTime).format('M/D HH:mm') : ''}</span>
+                            </div>
                           </div>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                     {columnState.loading && columnState.tasks.length > 0 && (
                       <div className={styles.kanbanColumnLoadingMore}>
