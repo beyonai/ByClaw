@@ -327,7 +327,7 @@ class ConnectorSchemaTest {
             "DWS_NO_SKILLS=1",
             "DWS_DISABLE_KEYCHAIN=1"
         );
-        assertThat(dockerfile).containsOnlyOnce("RUN npm install --global");
+        assertThat(dockerfile).containsOnlyOnce("npm install --global");
     }
 
     @Test
