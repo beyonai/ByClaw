@@ -30,6 +30,20 @@ node skills/fws/scripts/connector-auth-sync.mjs
 - 同步失败不得重新启动 Device Flow，不得复用旧 `device_code`，不得因本地 status 成功而绕过 API 或继续业务命令。
 - 禁止读取、显示或要求用户提供认证文件、Token、请求 Header、服务发现信息或内部路径。
 
+## 业务懒刷新后的平台元数据回写（最高优先级）
+
+user 身份业务命令前，先在同一个隔离 HOME 执行 `HOME="$LARK_HOME" lark-cli auth status --json`，只读取本地
+`identities.user.tokenStatus`；该预检不得增加 `--verify`，不得把短期 access token 到期误判为授权失效。
+
+- 仅当预检明确返回 `needs_refresh` 或 `refresh_needed`，并且随后 user 身份业务命令成功后，才原样执行一次
+  `node skills/fws/scripts/connector-auth-sync.mjs`，让后端从同一 native-home 回读并保存刷新后的生命周期元数据。
+- 业务命令未成功、预检状态为 `valid` 或未知时不执行该业务后回写；未知状态继续按现有错误处理流程判断，禁止猜测。
+- 回写成功以 helper 退出码为 0 且 `connected=true` 为准。回写失败不得改变已经成功的飞书业务结果，不得重试业务
+  命令、重新授权或再次调用 helper；应保留业务结果，并补充说明“业务已完成，但平台连接状态同步暂时失败”。
+- bot 身份不使用 user refresh token，因此不执行该业务后回写，也不为此增加 `auth status` 预检。
+- 本节是 fws 对 Lark CLI 懒刷新行为的显式 opt-in；不得把该流程扩展到 DWS、WeCom 或未来新增连接器。其他连接器
+  只有在自身 Skill 明确声明同类能力和回写契约后才能接入。
+
 ## 严格禁止 (NEVER DO)
 
 - 不要使用 `lark-cli` 以外的方式操作飞书资源；禁止自行 `curl`、手写 HTTP 客户端、浏览器点 UI。

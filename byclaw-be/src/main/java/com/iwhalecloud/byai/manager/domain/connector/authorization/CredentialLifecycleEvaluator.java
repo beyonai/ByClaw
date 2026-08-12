@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.domain.connector.authorization;
 
 import java.time.Duration;
 import java.util.Date;
+import java.util.Locale;
 
 /** Central lifecycle mapping for refresh-aware CLI credential status. */
 public final class CredentialLifecycleEvaluator {
@@ -17,17 +18,27 @@ public final class CredentialLifecycleEvaluator {
             Date refreshExpiresAt,
             Date now) {
         Date comparisonTime = now == null ? new Date() : now;
-        boolean accessValid = "valid".equalsIgnoreCase(tokenStatus);
-        boolean accessInvalid = "invalid".equalsIgnoreCase(tokenStatus)
-            || "expired".equalsIgnoreCase(tokenStatus);
+        String normalizedTokenStatus = tokenStatus == null
+            ? ""
+            : tokenStatus.trim().toLowerCase(Locale.ROOT).replace('-', '_');
+        boolean accessValid = "valid".equals(normalizedTokenStatus);
+        boolean accessInvalid = "invalid".equals(normalizedTokenStatus)
+            || "expired".equals(normalizedTokenStatus);
+        boolean accessRefreshNeeded = "needs_refresh".equals(normalizedTokenStatus)
+            || "refresh_needed".equals(normalizedTokenStatus);
         boolean refreshExpired = Boolean.FALSE.equals(refreshTokenValid)
             || refreshExpiresAt != null && !refreshExpiresAt.after(comparisonTime);
+        boolean refreshUsable = Boolean.TRUE.equals(refreshTokenValid)
+            || refreshExpiresAt != null && refreshExpiresAt.after(comparisonTime);
 
         if (refreshExpired) {
             return CredentialState.REAUTH_REQUIRED;
         }
+        if (accessRefreshNeeded) {
+            return refreshUsable ? CredentialState.REFRESH_NEEDED : CredentialState.UNKNOWN;
+        }
         if (accessInvalid) {
-            return Boolean.TRUE.equals(refreshTokenValid) || refreshExpiresAt != null
+            return refreshUsable
                 ? CredentialState.REFRESH_NEEDED
                 : CredentialState.REAUTH_REQUIRED;
         }

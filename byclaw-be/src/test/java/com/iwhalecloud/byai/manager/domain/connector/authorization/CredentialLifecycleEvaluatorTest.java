@@ -26,6 +26,24 @@ class CredentialLifecycleEvaluatorTest {
             .isEqualTo(CredentialState.UNKNOWN);
     }
 
+    @Test
+    void mapsLazyRefreshStatusesOnlyWhenRefreshEvidenceIsUsable() {
+        assertThat(CredentialLifecycleEvaluator.evaluate("needs_refresh", null, future(30), NOW))
+            .isEqualTo(CredentialState.REFRESH_NEEDED);
+        assertThat(CredentialLifecycleEvaluator.evaluate(" REFRESH_NEEDED ", true, null, NOW))
+            .isEqualTo(CredentialState.REFRESH_NEEDED);
+        assertThat(CredentialLifecycleEvaluator.evaluate("needs_refresh", null, null, NOW))
+            .isEqualTo(CredentialState.UNKNOWN);
+        assertThat(CredentialLifecycleEvaluator.evaluate("needs_refresh", null, future(-1), NOW))
+            .isEqualTo(CredentialState.REAUTH_REQUIRED);
+    }
+
+    @Test
+    void keepsUnknownProviderStatusesConservative() {
+        assertThat(CredentialLifecycleEvaluator.evaluate("provider_specific_state", true, future(30), NOW))
+            .isEqualTo(CredentialState.UNKNOWN);
+    }
+
     private Date future(long days) {
         return new Date(NOW.getTime() + Duration.ofDays(days).toMillis());
     }

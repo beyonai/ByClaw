@@ -621,6 +621,10 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
     if (connector.credentialState === 'REAUTH_REQUIRED') {
       credentialLifecycleText = '授权已失效，请重新连接';
       credentialLifecycleExpired = true;
+    } else if (connector.credentialState === 'REFRESH_NEEDED') {
+      credentialLifecycleText = credentialExpiration
+        ? `将在下次使用时自动续期，预计授权有效至 ${credentialExpiration.formattedTime}`
+        : '将在下次使用时自动续期';
     } else if (usesLifecycleMetadata && credentialExpiration) {
       credentialLifecycleText =
         connector.credentialState === 'EXPIRING'
