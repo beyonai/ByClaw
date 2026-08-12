@@ -321,11 +321,18 @@
     padding: 0 12px;
     line-height: 32px;
   }
-
 }
 
 .projectInitAlert {
   margin: 0 20px 10px;
+  // 初始化引导为次要提示，弱化字号与图标突出度，避免抢占详情主内容视觉重心。
+  :global {
+    .@{antPrefix}-alert-message {
+      font-size: 12px;
+      line-height: 18px;
+      color: rgba(0, 0, 0, 0.65);
+    }
+  }
 }
 
 .detailBody {
