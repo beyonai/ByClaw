@@ -159,10 +159,9 @@ public class ResourceAuthApplicationService {
 
         List<UsersOrganization> orgList = organizationService.findUsersOrganizationByUserId(users.getUserId());
 
-        Set<Long> userOrgIds = new HashSet<>();
+        Set<Long> userOrgIds = organizationService.findEffectiveOrganizationIdsByUserId(users.getUserId());
         Set<Long> userPositionIds = new HashSet<>();
         for (UsersOrganization usersOrganization : orgList) {
-            userOrgIds.add(usersOrganization.getOrgId());
             userPositionIds.add(usersOrganization.getPositionId());
         }
 

@@ -28,6 +28,7 @@ import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.manager.qo.auth.AuthDetailQo;
+import com.iwhalecloud.byai.manager.qo.auth.PrivilegeGrantQo;
 import com.iwhalecloud.byai.manager.qo.auth.ResourceUseApplyApproveQo;
 import com.iwhalecloud.byai.manager.qo.auth.ResourceUseApplyQo;
 import com.iwhalecloud.byai.manager.qo.auth.ResourceMemberSettingQo;
@@ -48,6 +49,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.ArrayList;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -96,7 +98,7 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "positionService", positionService);
         ReflectionTestUtils.setField(service, "stationService", stationService);
         when(privilegeGrantService.findPrivilegeByQo(any())).thenReturn(new ArrayList<>());
-        when(organizationService.findOrganizationByUserId(any())).thenReturn(List.of());
+        when(organizationService.findEffectiveOrganizationIdsByUserId(any())).thenReturn(Set.of());
         when(positionService.findPositionByUserId(any())).thenReturn(List.of());
         when(stationService.getStationByUserId(any())).thenReturn(null);
     }
@@ -710,5 +712,78 @@ class AuthApplicationServiceTest {
 
         verify(privilegeGrantService, never()).save(any(PrivilegeGrant.class));
         verify(privilegeGrantService).update(eq(pendingApply));
+    }
+
+    @Test
+    void buildUserAuthResources_inheritsParentOrganizationAuthorization() {
+        AuthApplicationService service = new AuthApplicationService();
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        OrganizationService organizationService = mock(OrganizationService.class);
+        PositionService positionService = mock(PositionService.class);
+        StationService stationService = mock(StationService.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "organizationService", organizationService);
+        ReflectionTestUtils.setField(service, "positionService", positionService);
+        ReflectionTestUtils.setField(service, "stationService", stationService);
+
+        when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of(10L, 20L));
+        when(positionService.findPositionByUserId(1001L)).thenReturn(List.of());
+        when(stationService.getStationByUserId(1001L)).thenReturn(null);
+
+        PrivilegeGrant parentOrgGrant = new PrivilegeGrant();
+        parentOrgGrant.setGrantObjId(500L);
+        parentOrgGrant.setGrantObjType(ResourceBizTypeEnum.AGENT.name());
+        parentOrgGrant.setGrantToObjType(GrantToObjType.ORG);
+        parentOrgGrant.setGrantToObjId(10L);
+        parentOrgGrant.setGrantToType(Color.RED);
+        when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> {
+            PrivilegeGrantQo qo = invocation.getArgument(0);
+            return GrantToObjType.ORG.equals(qo.getGrantToObjType()) ? List.of(parentOrgGrant) : List.of();
+        });
+
+        Map<String, String> resources = service.buildUserAuthResources(1001L);
+
+        assertThat(resources).containsEntry("500", ResourceBizTypeEnum.AGENT.name());
+        verify(privilegeGrantService).findPrivilegeByQo(argThat(qo -> GrantToObjType.ORG.equals(qo.getGrantToObjType())
+            && qo.getGrantToObjIds().containsAll(Set.of(10L, 20L))));
+    }
+
+    @Test
+    void buildUserAuthResources_descendantOrganizationBlacklistOverridesParentAuthorization() {
+        AuthApplicationService service = new AuthApplicationService();
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        OrganizationService organizationService = mock(OrganizationService.class);
+        PositionService positionService = mock(PositionService.class);
+        StationService stationService = mock(StationService.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "organizationService", organizationService);
+        ReflectionTestUtils.setField(service, "positionService", positionService);
+        ReflectionTestUtils.setField(service, "stationService", stationService);
+
+        when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of(10L, 20L));
+        when(positionService.findPositionByUserId(1001L)).thenReturn(List.of());
+        when(stationService.getStationByUserId(1001L)).thenReturn(null);
+
+        PrivilegeGrant parentOrgGrant = new PrivilegeGrant();
+        parentOrgGrant.setGrantObjId(500L);
+        parentOrgGrant.setGrantObjType(ResourceBizTypeEnum.AGENT.name());
+        parentOrgGrant.setGrantToObjType(GrantToObjType.ORG);
+        parentOrgGrant.setGrantToObjId(10L);
+        parentOrgGrant.setGrantToType(Color.RED);
+        PrivilegeGrant childOrgBlacklist = new PrivilegeGrant();
+        childOrgBlacklist.setGrantObjId(500L);
+        childOrgBlacklist.setGrantObjType(ResourceBizTypeEnum.AGENT.name());
+        childOrgBlacklist.setGrantToObjType(GrantToObjType.ORG);
+        childOrgBlacklist.setGrantToObjId(20L);
+        childOrgBlacklist.setGrantToType(Color.BLACK);
+        when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> {
+            PrivilegeGrantQo qo = invocation.getArgument(0);
+            return GrantToObjType.ORG.equals(qo.getGrantToObjType())
+                ? List.of(parentOrgGrant, childOrgBlacklist) : List.of();
+        });
+
+        Map<String, String> resources = service.buildUserAuthResources(1001L);
+
+        assertThat(resources).doesNotContainKey("500");
     }
 }
