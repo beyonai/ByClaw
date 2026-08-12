@@ -159,32 +159,49 @@
 .enterpriseSkillTabLabel {
   display: inline-flex;
   align-items: center;
+  gap: 7px;
   outline: none;
+  cursor: pointer;
 
   &:focus-visible {
-    border-radius: 4px;
+    border-radius: 6px;
     box-shadow: 0 0 0 2px rgb(22 93 255 / 20%);
   }
+}
+
+.enterpriseSkillTabChevron {
+  color: #646a73;
+  font-size: 13px;
+  transition: color 160ms ease, transform 160ms ease;
+}
+
+.enterpriseSkillTabLabel:hover .enterpriseSkillTabChevron,
+.enterpriseSkillTabLabelOpen .enterpriseSkillTabChevron {
+  color: #165dff;
+}
+
+.enterpriseSkillTabLabelOpen .enterpriseSkillTabChevron {
+  transform: rotate(180deg);
 }
 
 .enterpriseSkillDropdown {
   :global {
     .@{antPrefix}-dropdown-menu {
-      min-width: 150px;
-      padding: 6px;
-      border-radius: 10px;
-      box-shadow: 0 12px 28px rgb(22 34 51 / 14%);
+      min-width: 190px;
+      padding: 7px;
+      border: 1px solid rgb(31 35 41 / 7%);
+      border-radius: 12px;
+      box-shadow: 0 14px 38px rgb(22 34 51 / 14%);
     }
 
     .@{antPrefix}-dropdown-menu-item {
-      position: relative;
       display: flex;
       align-items: center;
-      min-height: 38px;
-      padding: 8px 34px 8px 12px;
-      border-radius: 7px;
+      min-height: 44px;
+      padding: 0 12px;
+      border-radius: 8px;
       color: #1f2329;
-      font-size: 14px;
+      font-size: 15px;
       font-weight: 500;
 
       &:hover {
@@ -199,17 +216,21 @@
       &:hover {
         background: #e1efff;
       }
-
-      &::after {
-        position: absolute;
-        right: 12px;
-        color: #165dff;
-        content: '✓';
-        font-size: 15px;
-        font-weight: 700;
-      }
     }
   }
+}
+
+.enterpriseSkillMenuItem {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.enterpriseSkillMenuCheck {
+  color: #165dff;
+  font-size: 14px;
 }
 
 .fullscreenButton {

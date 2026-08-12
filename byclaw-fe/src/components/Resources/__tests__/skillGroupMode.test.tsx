@@ -46,12 +46,19 @@ jest.mock('antd', () => ({
       {children}
     </button>
   ),
-  Dropdown: ({ children, menu }: any) => {
-    const [open, setOpen] = require('react').useState(false);
-    const show = () => setOpen(true);
+  Dropdown: ({ children, menu, open, onOpenChange, trigger = [] }: any) => {
+    const React = require('react');
+    const triggerChild = React.cloneElement(children, {
+      onClick: (event: React.MouseEvent) => {
+        children.props.onClick?.(event);
+        if (trigger.includes('click')) {
+          onOpenChange?.(!open);
+        }
+      },
+    });
     return (
-      <span onMouseEnter={show} onFocus={show} onClick={show} tabIndex={0}>
-        {children}
+      <>
+        {triggerChild}
         {open ? (
           <div role="menu">
             {menu.items.map((item: any) => (
@@ -72,7 +79,7 @@ jest.mock('antd', () => ({
             ))}
           </div>
         ) : null}
-      </span>
+      </>
     );
   },
   Empty: () => <div data-testid="empty" />,
@@ -217,28 +224,29 @@ describe('Resources enterprise skill mode', () => {
 
   it('marks the current enterprise skill type as selected in the menu', () => {
     const singleView = renderAt('?tab=enterprise');
-    fireEvent.focus(screen.getByText('resource.enterpriseSkillSingle'));
+    fireEvent.click(screen.getByTestId('enterprise-skill-tab-trigger'));
 
     expect(screen.getByRole('menuitem', { name: 'resource.skillSingle' })).toHaveAttribute('data-selected', 'true');
     expect(screen.getByRole('menuitem', { name: 'resource.skillGroup' })).not.toHaveAttribute('data-selected');
 
     singleView.unmount();
     renderAt('?tab=enterprise&kind=group');
-    fireEvent.focus(screen.getByText('resource.enterpriseSkillGroup'));
+    fireEvent.click(screen.getByTestId('enterprise-skill-tab-trigger'));
 
     expect(screen.getByRole('menuitem', { name: 'resource.skillSingle' })).not.toHaveAttribute('data-selected');
     expect(screen.getByRole('menuitem', { name: 'resource.skillGroup' })).toHaveAttribute('data-selected', 'true');
   });
 
-  it('opens the enterprise skill menu from keyboard focus and switches to groups', async () => {
+  it('opens the enterprise skill menu from the keyboard and switches to groups', async () => {
     mockSetSearchParams.mockReset();
     renderAt('?tab=enterprise');
 
-    const enterpriseSkillTab = screen.getByText('resource.enterpriseSkillSingle');
+    const enterpriseSkillTab = screen.getByTestId('enterprise-skill-tab-trigger');
     fireEvent.focus(enterpriseSkillTab);
-    expect(screen.getByText('resource.skillGroup')).toBeTruthy();
+    expect(screen.queryByRole('menu')).toBeNull();
 
     fireEvent.keyDown(enterpriseSkillTab, { key: 'ArrowDown' });
+    expect(screen.getByRole('menu')).toBeTruthy();
     fireEvent.keyDown(screen.getByRole('menuitem', { name: 'resource.skillGroup' }), { key: 'Enter' });
 
     expect(window.location.search).toContain('tab=enterprise');
@@ -254,13 +262,35 @@ describe('Resources enterprise skill mode', () => {
     mockSetSearchParams.mockReset();
     renderAt('?tab=personal');
 
-    fireEvent.focus(screen.getByText('resource.enterpriseSkillSingle'));
+    fireEvent.click(screen.getByTestId('enterprise-skill-tab-trigger'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'resource.skillGroup' }));
 
     expect(window.location.search).toBe('?tab=enterprise&kind=group');
     expect(screen.getByText('resource.enterpriseSkillGroup')).toBeTruthy();
     expect(screen.getByTestId('skill-group-list')).toBeTruthy();
     expect(screen.queryByTestId('resource-list')).toBeNull();
+  });
+
+  it('uses a click-only trigger with explicit expanded state and closes on a second click', () => {
+    renderAt('?tab=personal');
+
+    const enterpriseSkillTab = screen.getByTestId('enterprise-skill-tab-trigger');
+    expect(enterpriseSkillTab).toHaveAttribute('aria-haspopup', 'menu');
+    expect(enterpriseSkillTab).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByTestId('enterprise-skill-dropdown-chevron')).toBeTruthy();
+
+    fireEvent.mouseEnter(enterpriseSkillTab);
+    fireEvent.focus(enterpriseSkillTab);
+    expect(screen.queryByRole('menu')).toBeNull();
+
+    fireEvent.click(enterpriseSkillTab);
+    expect(screen.getByRole('menu')).toBeTruthy();
+    expect(enterpriseSkillTab).toHaveAttribute('aria-expanded', 'true');
+    expect(window.location.search).toBe('?tab=personal');
+
+    fireEvent.click(enterpriseSkillTab);
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(enterpriseSkillTab).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('renders the group mode label and keeps single-skill mode for personal skills', () => {

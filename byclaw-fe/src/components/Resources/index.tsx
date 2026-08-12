@@ -1,5 +1,12 @@
 import React, { useCallback, useContext, useState, useEffect, useRef } from 'react';
-import { UploadOutlined, SearchOutlined, PlusOutlined, FullscreenOutlined } from '@ant-design/icons';
+import {
+  CheckOutlined,
+  DownOutlined,
+  FullscreenOutlined,
+  PlusOutlined,
+  SearchOutlined,
+  UploadOutlined,
+} from '@ant-design/icons';
 import { useIntl, useLocation, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
 import { Button, Dropdown, Empty, Input, Space, Spin, Tooltip, message, Tabs } from 'antd';
@@ -628,22 +635,36 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
       label:
         resourceType === 'SKILL' ? (
           <Dropdown
-            trigger={['hover', 'click']}
+            trigger={['click']}
             open={enterpriseSkillDropdownOpen}
             onOpenChange={setEnterpriseSkillDropdownOpen}
             placement="bottomLeft"
-            align={{ offset: [0, 6] }}
+            align={{ offset: [0, 8] }}
             overlayClassName={styles.enterpriseSkillDropdown}
             menu={{
               selectedKeys: [enterpriseSkillKind],
               items: [
                 {
                   key: 'skill',
-                  label: intl.formatMessage({ id: 'resource.skillSingle' }),
+                  label: (
+                    <span className={styles.enterpriseSkillMenuItem}>
+                      {intl.formatMessage({ id: 'resource.skillSingle' })}
+                      {enterpriseSkillKind === 'skill' ? (
+                        <CheckOutlined className={styles.enterpriseSkillMenuCheck} aria-hidden />
+                      ) : null}
+                    </span>
+                  ),
                 },
                 {
                   key: 'group',
-                  label: intl.formatMessage({ id: 'resource.skillGroup' }),
+                  label: (
+                    <span className={styles.enterpriseSkillMenuItem}>
+                      {intl.formatMessage({ id: 'resource.skillGroup' })}
+                      {enterpriseSkillKind === 'group' ? (
+                        <CheckOutlined className={styles.enterpriseSkillMenuCheck} aria-hidden />
+                      ) : null}
+                    </span>
+                  ),
                 },
               ],
               onClick: ({ key, domEvent }) => {
@@ -656,13 +677,19 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
             }}
           >
             <span
-              className={styles.enterpriseSkillTabLabel}
+              className={classnames(styles.enterpriseSkillTabLabel, {
+                [styles.enterpriseSkillTabLabelOpen]: enterpriseSkillDropdownOpen,
+              })}
+              data-testid="enterprise-skill-tab-trigger"
               tabIndex={0}
               role="button"
-              onFocus={() => setEnterpriseSkillDropdownOpen(true)}
+              aria-haspopup="menu"
+              aria-expanded={enterpriseSkillDropdownOpen}
+              onClick={(event) => event.stopPropagation()}
               onKeyDown={(event) => {
                 if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();
+                  event.stopPropagation();
                   setEnterpriseSkillDropdownOpen(true);
                 }
               }}
@@ -671,6 +698,11 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
                 id:
                   enterpriseSkillKind === 'group' ? 'resource.enterpriseSkillGroup' : 'resource.enterpriseSkillSingle',
               })}
+              <DownOutlined
+                className={styles.enterpriseSkillTabChevron}
+                data-testid="enterprise-skill-dropdown-chevron"
+                aria-hidden
+              />
             </span>
           </Dropdown>
         ) : (
