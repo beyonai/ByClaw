@@ -55,9 +55,15 @@ SET credential_state = COALESCE(credential_state, 'UNKNOWN'),
 WHERE credential_state IS NULL OR renewal_mode IS NULL;
 
 ALTER TABLE byai.byai_connector_auth
-    ALTER COLUMN credential_state SET DEFAULT 'UNKNOWN',
-    ALTER COLUMN credential_state SET NOT NULL,
-    ALTER COLUMN renewal_mode SET DEFAULT 'NONE',
+    ALTER COLUMN credential_state SET DEFAULT 'UNKNOWN';
+
+ALTER TABLE byai.byai_connector_auth
+    ALTER COLUMN credential_state SET NOT NULL;
+
+ALTER TABLE byai.byai_connector_auth
+    ALTER COLUMN renewal_mode SET DEFAULT 'NONE';
+
+ALTER TABLE byai.byai_connector_auth
     ALTER COLUMN renewal_mode SET NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_byai_connector_auth_user_state
