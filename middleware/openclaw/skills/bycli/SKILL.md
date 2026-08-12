@@ -1,6 +1,6 @@
 ---
 name: bycli
-description: Use when a task has already been routed to byCLI, the user explicitly asks for byCLI, Adapter, or browser execution, or a login-required or dynamic website needs a browser-backed executor.
+description: Use when a task opens, reads, searches within, collects from, scrapes, or operates any concrete website, webpage, or URL; when a task has already been routed to byCLI; or when the user explicitly asks for byCLI, Adapter, or browser execution.
 allowed-tools: Bash(bycli:*), Bash(openclaw browser:*), Bash(gh:*), Bash(node:*), Read, Edit, Write, Grep
 metadata:
   openclaw:
@@ -23,12 +23,13 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 
 ## Agent Reach 边界
 
-- 公共互联网调研、搜索或读取先由 `agent-reach` skill 选择可用渠道和上游工具，不因 byCLI 也能访问网页而抢占入口。
-- Agent Reach 可以把任何需要网站执行的任务委派给 byCLI，包括 generic public webpage 读取；byCLI 是执行器，不是公共互联网任务的默认路由器。
+- 公共互联网调研、搜索或读取先由 `agent-reach` skill 做意图路由；Exa、`gh` CLI、RSS、视频字幕等不打开或读取具体网页的渠道可继续使用其专用后端。
+- 任何网站、网页或 URL 的打开、读取、站内搜索、采集、抓取或操作任务，包括 generic public webpage 读取，`agent-reach` 必须无条件选择并加载 `bycli` skill；公开静态页、服务端渲染页、SPA、raw URL、纯文本、Markdown 和无需登录的页面均无例外。
+- byCLI 是所有具体网页任务的唯一网站执行器，不是公共互联网非网页渠道的默认路由器。Agent Reach 选择 byCLI 必须发生在获取网页内容之前，不能先调用 `web_fetch`、Jina Reader、Web Reader MCP、直接 HTTP 或其他网页工具试读。
 - 用户显式要求 byCLI、Adapter、浏览器操作、登录态网站，或 Agent Reach 选择 byCLI 作为浏览器执行层时，进入本 skill。
 - Agent Reach 选择 byCLI 后，浏览器启动、Adapter 发现、授权与执行仍完全遵守本 skill。
 - `byclaw-capability-doctor` 只是被动诊断；被动诊断不得启动 Chrome，其 `available_on_demand` 状态也不得触发 Chrome。只有实际任务需要浏览器时才执行下方冷启动流程。
-- 本边界优先于下文对“所有网页任务”的一般性表述；下文规则仅约束已经路由到 byCLI 的任务。
+- byCLI 无法完成网页任务时必须停止并报告，不得回退到 `web_fetch`、Jina Reader、Web Reader MCP、`curl`、`wget`、`requests`、原站直连或其他网页获取工具。
 
 ## 委派所有权边界
 
@@ -61,7 +62,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 不要在 repo 根目录 / `clis/<site>/` 留临时 dump 文件（`.dbg-*.html` / `raw-*.json`）
 - AUTH_REQUIRED（exit 77）/ BROWSER_CONNECT（exit 69）/ CAPTCHA / 限流 → 不修改代码，报告用户
 - 不要把 token、SESSION、Cookie、凭据写入技能文件、命令参数或对话回复
-- 对本 skill 覆盖的网页读取、搜索、采集、抓取、网站操作或打开 URL 任务，禁止使用 `web_fetch`、通用 `browser`、`curl`、`wget`、`requests` 或其他直接 HTTP 客户端绕过 byCLI。公开可读、静态页面、raw URL、纯文本或 Markdown 内容均不是例外
+- 对任何网站、网页或 URL 的读取、站内搜索、采集、抓取或操作任务，禁止使用 `web_fetch`、Jina Reader、Web Reader MCP、通用 `browser`、`curl`、`wget`、`requests`、原站直连或其他网页获取工具绕过 byCLI。公开可读、静态页面、raw URL、纯文本或 Markdown 内容均不是例外
 - 不要因“直接 HTTP 更快”“无需登录”“不需要渲染”或类似效率判断跳过 `bycli list -f json`、现成 adapter 或 `bycli browser` 降级路径
 - 不要把 `bycli browser <session> open <url>` 或 `state` 当作浏览器冷启动、桥接健康检查或 adapter 预热命令；它们会申请 TAB 租约，缺少租约时可创建 `about:blank` TAB
 - 不要用 `bycli browser <session> ...` 检查或操作 adapter 打开的 TAB；`browser` 与 `adapter` 是不同 surface，即使 session 字符串相同也不共享 TAB 租约
@@ -100,7 +101,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 没有 adapter 且需要复用 → 写新 adapter
 - 现有 adapter 报错 → AutoFix
 
-收到已路由到本 skill 的**搜索 / 采集 / 抓取 / 网站操作**类任务时，按本决策树选择执行路径。网页相关任务在 adapter 缺失时必须使用 `bycli browser`，不得降级到通用网页工具。只有 byCLI 已明确报告该任务不支持或当前无法执行，且 agent 已先向用户说明 byCLI 的具体结果与无法继续的原因，才可在用户确认后使用其他工具；不得因“内容公开”“静态”“纯 Markdown”或“更高效”自行触发此例外。
+收到已路由到本 skill 的**搜索 / 采集 / 抓取 / 网站操作**类任务时，按本决策树选择执行路径。网页相关任务在 adapter 缺失时必须使用 `bycli browser`，不得降级到通用网页工具。byCLI 已明确报告该任务不支持或当前无法执行时，必须说明具体结果与无法继续的原因并停止；即使用户确认，也不得在本任务中改用 `web_fetch`、Jina Reader、Web Reader MCP 或直接 HTTP 工具。不得因“内容公开”“静态”“纯 Markdown”或“更高效”自行触发例外。
 
 ### 适配器缺失降级（强制）
 

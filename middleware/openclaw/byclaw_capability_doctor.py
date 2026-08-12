@@ -145,9 +145,14 @@ def check_agent_reach(command_runner: CommandRunner, timeout_seconds: float) -> 
             continue
         diagnostic_backend = raw.get("active_backend")
         available_backends = raw.get("backends", [])
-        effective_backend = resolve_agent_reach_effective_backend(
-            diagnostic_backend,
-            available_backends,
+        channel_id_text = str(channel_id)
+        effective_backend = (
+            "bycli"
+            if channel_id_text.casefold() == "web"
+            else resolve_agent_reach_effective_backend(
+                diagnostic_backend,
+                available_backends,
+            )
         )
         normalized = {
             "status": STATUS_MAP.get(str(raw.get("status")), "unavailable"),
@@ -160,7 +165,7 @@ def check_agent_reach(command_runner: CommandRunner, timeout_seconds: float) -> 
             # Compatibility alias for consumers written before effectiveBackend existed.
             "activeBackend": effective_backend,
         }
-        channels[str(channel_id)] = {key: value for key, value in normalized.items() if value is not None}
+        channels[channel_id_text] = {key: value for key, value in normalized.items() if value is not None}
 
     if not channels:
         return error_result("invalid_probe_output", "agent-reach doctor returned no channels")

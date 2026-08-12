@@ -1,6 +1,6 @@
 ---
 name: agent-reach
-description: Use when the goal is to READ or LOOK UP something on the public internet for an immediate answer - research, search, or read a webpage, GitHub, YouTube, Bilibili, V2EX, Twitter/X, Reddit, Xiaohongshu, LinkedIn, podcasts, RSS, jobs, code, or social-platform content. This is the public-internet channel router only; it picks a channel and executor and does not archive results. If the user wants material collected, crawled in batch, archived, or ingested into a knowledge base, use knowledge-collection instead.
+description: Use when the goal is to READ or LOOK UP something on the public internet for an immediate answer - research, search, or read a webpage, GitHub, YouTube, Bilibili, V2EX, Twitter/X, Reddit, Xiaohongshu, LinkedIn, podcasts, RSS, jobs, code, or social-platform content. This is the public-internet channel router only; it picks a channel and executor and does not archive results. Any task that opens, reads, searches within, collects from, scrapes, or operates a concrete website, webpage, or URL must route to byCLI before acquisition. If the user wants material collected, crawled in batch, archived, or ingested into a knowledge base, use knowledge-collection instead.
 ---
 
 # Agent Reach — 互联网能力路由器
@@ -15,17 +15,25 @@ description: Use when the goal is to READ or LOOK UP something on the public int
 角色名称固定如下：路由器：`agent-reach`；网站执行器：`bycli`；采集编排器：`knowledge-collection`；
 直接查询所有者：根 Agent。以下规则始终使用这些名称确定结果与交互的所有权。
 
+**网页路由全局不变量：**任何网站、网页或 URL 的打开、读取、站内搜索、采集、抓取或操作任务，路由器在获取内容前
+必须无条件选择并加载 `bycli` skill。不得先尝试 `web_fetch`、Jina Reader、Web Reader MCP、`curl`、`wget`、`requests`、
+原站直连或其他网页获取工具，再根据结果决定是否委派 byCLI。公开静态页、服务端渲染页、SPA、raw URL、纯文本、Markdown
+和无需登录的页面均无例外。byCLI 无法完成时必须停止并报告，不得回退到其他网页获取工具。Exa 全网搜索、`gh` CLI、RSS
+和视频字幕等不打开或读取具体网页的非网页渠道不受此规则影响。
+
 1. 使用 `byclaw-capability-doctor` 进行初始化、选后端和故障后的被动检查。读取
    `providers.agentReach.channels.<channel>` 时，`diagnosticBackend` 是 Agent Reach 上游探测值，`effectiveBackend` 是应用 ByClaw
    覆盖规则后的实际执行后端，`activeBackend` 是 `effectiveBackend` 的兼容别名。只执行 `effectiveBackend`；不得直接执行 `diagnosticBackend`。
-   其中 Jina Reader 和 OpenCLI 均映射为 `bycli`；当上游未给出 `active_backend`，但候选 `backends` 包含 Jina Reader 或 OpenCLI 时，
-   `effectiveBackend` 仍为 `bycli`。此时渠道 `status` 只表示上游诊断状态，以 `providers.bycli.status` 判断执行就绪度。
+   `web` 渠道无论上游报告何种后端，`effectiveBackend` 始终为 `bycli`。此外，Jina Reader 和 OpenCLI 均映射为 `bycli`；当上游未给出
+   `active_backend`，但候选 `backends` 包含 Jina Reader 或 OpenCLI 时，`effectiveBackend` 仍为 `bycli`。此时渠道 `status` 只表示
+   上游诊断状态，以 `providers.bycli.status` 判断执行就绪度。
 2. 不得用 `bycli doctor` 替代聚合被动检查；被动检查不得调用 `/v1/browser/recover` 或任何浏览器启动命令。daemon 运行但 Extension
    未连接是正常冷状态，`available_on_demand` 不得启动 Chrome。
 3. 本项目只提供 byCLI，不提供 OpenCLI。官方主体或 references 中的任何 `opencli` 路径均视为不可用：不得安装
    OpenCLI、不得创建 `opencli` 别名，也不得执行 Agent Reach 的 OpenCLI 安装路径。
    Do not install OpenCLI. Do not create an `opencli` alias.
-4. 当 `effectiveBackend` 为 `bycli`，或官方路由要求 OpenCLI、登录态或浏览器后端时，路由器加载并遵循 `bycli` skill；网站执行器用
+4. 任何网站、网页或 URL 任务，以及 `effectiveBackend` 为 `bycli`、官方路由要求 OpenCLI、登录态或浏览器后端时，路由器加载并遵循
+   `bycli` skill；网站执行器用
    `bycli list -f json` 发现 Adapter，遵守其浏览器生命周期、授权、执行与验证规则，并把结果返回当前任务所有者。直接查询时由根 Agent
    负责最终回复；委派采集时由采集编排器负责统一持久化、产物协议、后处理与入库或知识整理。
 5. 禁止使用 Jina Reader 或访问 `r.jina.ai`。所有官方 Jina 路径，包括官方 `references/web.md` 的通用网页读取和

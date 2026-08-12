@@ -68,6 +68,23 @@ class CapabilityDoctorTest(unittest.TestCase):
         self.assertEqual("gh", github["effectiveBackend"])
         self.assertEqual("gh", github["activeBackend"])
 
+    def test_agent_reach_web_channel_always_uses_bycli(self):
+        payload = {
+            "web": {"status": "ok", "active_backend": "Web Reader MCP"},
+            "github": {"status": "ok", "active_backend": "gh"},
+        }
+
+        result = doctor.check_agent_reach(
+            lambda argv, timeout: doctor.CommandResult(0, json.dumps(payload), ""),
+            1.0,
+        )
+
+        web = result["channels"]["web"]
+        self.assertEqual("Web Reader MCP", web["diagnosticBackend"])
+        self.assertEqual("bycli", web["effectiveBackend"])
+        self.assertEqual("bycli", web["activeBackend"])
+        self.assertEqual("gh", result["channels"]["github"]["effectiveBackend"])
+
     def test_agent_reach_invalid_json_is_isolated(self):
         result = doctor.check_agent_reach(
             lambda argv, timeout: doctor.CommandResult(0, "not-json", ""),

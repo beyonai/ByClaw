@@ -138,6 +138,22 @@ class AgentReachSkillContractTest(unittest.TestCase):
         ):
             self.assertIn(phrase, override)
 
+    def test_byclaw_override_routes_every_concrete_webpage_to_bycli_before_acquisition(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        override, separator, _ = skill.partition(OFFICIAL_BODY_HEADING)
+
+        self.assertEqual(OFFICIAL_BODY_HEADING, separator)
+        for phrase in (
+            "任何网站、网页或 URL",
+            "必须无条件选择并加载 `bycli` skill",
+            "不得先尝试",
+            "`web_fetch`",
+            "Web Reader MCP",
+            "byCLI 无法完成时必须停止并报告",
+            "不得回退到其他网页获取工具",
+        ):
+            self.assertIn(phrase, override)
+
     def test_byclaw_override_supersedes_upstream_workspace_rules_for_delegated_collection(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
@@ -190,6 +206,9 @@ class AgentReachSkillContractTest(unittest.TestCase):
         self.assertIn("## Agent Reach 边界", skill)
         self.assertIn("公共互联网调研、搜索或读取", skill)
         self.assertIn("Agent Reach 选择 byCLI", skill)
+        self.assertIn("任何网站、网页或 URL", skill)
+        self.assertIn("必须无条件选择并加载 `bycli` skill", skill)
+        self.assertNotIn("下文规则仅约束已经路由到 byCLI 的任务", skill)
         self.assertIn("被动诊断不得启动 Chrome", skill)
 
     def test_bycli_is_presented_as_an_executor_not_a_collection_orchestrator(self):
