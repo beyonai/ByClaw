@@ -180,68 +180,71 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
     }
   }, []);
 
-  const loadAgentOptions = useCallback(async (page = 1, keyword = '', append = false) => {
-    if (append && agentLoadingMoreRef.current) return;
+  const loadAgentOptions = useCallback(
+    async (page = 1, keyword = '', append = false) => {
+      if (append && agentLoadingMoreRef.current) return;
 
-    // 与小详情一致，使用查询版本和追加锁避免旧搜索结果覆盖新关键字。
-    const queryVersion = append ? agentQueryVersionRef.current : agentQueryVersionRef.current + 1;
-    if (append) {
-      agentLoadingMoreRef.current = true;
-    } else {
-      agentQueryVersionRef.current = queryVersion;
-      agentLoadingMoreRef.current = false;
-    }
-
-    setAgentLoading(true);
-    try {
-      const response = await POST<any>('/byaiService/api/v2/digitEmploy/discover', {
-        keyword: keyword.trim(),
-        pageNum: page,
-        pageSize: AGENT_PAGE_SIZE,
-      });
-      if (queryVersion !== agentQueryVersionRef.current) return;
-
-      const list = response?.data?.list || response?.list || response?.data || [];
-      const nextPageList = Array.isArray(list) ? list : [];
-      const rawTotal = response?.data?.total ?? response?.total;
-      const total = Number(rawTotal);
-      const hasValidTotal = rawTotal !== undefined && rawTotal !== null && rawTotal !== '' && Number.isFinite(total);
-      setAgentOptions((currentList) => {
-        if (!append) return nextPageList;
-        const agentIds = new Set(
-          currentList.map((agent) => `${agent.resourceId || agent.agentId || agent.id || agent.resourceCode || ''}`)
-        );
-        return currentList.concat(
-          nextPageList.filter((agent) => {
-            const agentId = `${agent.resourceId || agent.agentId || agent.id || agent.resourceCode || ''}`;
-            if (!agentId || !agentIds.has(agentId)) {
-              if (agentId) agentIds.add(agentId);
-              return true;
-            }
-            return false;
-          })
-        );
-      });
-      setAgentPage(page);
-      setHasMoreAgents(
-        nextPageList.length > 0 &&
-          (hasValidTotal ? page * AGENT_PAGE_SIZE < total : nextPageList.length === AGENT_PAGE_SIZE)
-      );
-    } catch (error: any) {
-      if (queryVersion === agentQueryVersionRef.current) {
-        if (!append) setAgentOptions([]);
-        setHasMoreAgents(false);
-        message.error(error?.message || '数字员工加载失败');
-      }
-    } finally {
-      if (append && queryVersion === agentQueryVersionRef.current) {
+      // 与小详情一致，使用查询版本和追加锁避免旧搜索结果覆盖新关键字。
+      const queryVersion = append ? agentQueryVersionRef.current : agentQueryVersionRef.current + 1;
+      if (append) {
+        agentLoadingMoreRef.current = true;
+      } else {
+        agentQueryVersionRef.current = queryVersion;
         agentLoadingMoreRef.current = false;
       }
-      if (queryVersion === agentQueryVersionRef.current) {
-        setAgentLoading(false);
+
+      setAgentLoading(true);
+      try {
+        const response = await POST<any>('/byaiService/api/v2/digitEmploy/discover', {
+          keyword: keyword.trim(),
+          pageNum: page,
+          pageSize: AGENT_PAGE_SIZE,
+        });
+        if (queryVersion !== agentQueryVersionRef.current) return;
+
+        const list = response?.data?.list || response?.list || response?.data || [];
+        const nextPageList = Array.isArray(list) ? list : [];
+        const rawTotal = response?.data?.total ?? response?.total;
+        const total = Number(rawTotal);
+        const hasValidTotal = rawTotal !== undefined && rawTotal !== null && rawTotal !== '' && Number.isFinite(total);
+        setAgentOptions((currentList) => {
+          if (!append) return nextPageList;
+          const agentIds = new Set(
+            currentList.map((agent) => `${agent.resourceId || agent.agentId || agent.id || agent.resourceCode || ''}`)
+          );
+          return currentList.concat(
+            nextPageList.filter((agent) => {
+              const agentId = `${agent.resourceId || agent.agentId || agent.id || agent.resourceCode || ''}`;
+              if (!agentId || !agentIds.has(agentId)) {
+                if (agentId) agentIds.add(agentId);
+                return true;
+              }
+              return false;
+            })
+          );
+        });
+        setAgentPage(page);
+        setHasMoreAgents(
+          nextPageList.length > 0 &&
+            (hasValidTotal ? page * AGENT_PAGE_SIZE < total : nextPageList.length === AGENT_PAGE_SIZE)
+        );
+      } catch (error: any) {
+        if (queryVersion === agentQueryVersionRef.current) {
+          if (!append) setAgentOptions([]);
+          setHasMoreAgents(false);
+          message.error(error?.message || intl.formatMessage({ id: 'projectSpace.members.agentLoadFailed' }));
+        }
+      } finally {
+        if (append && queryVersion === agentQueryVersionRef.current) {
+          agentLoadingMoreRef.current = false;
+        }
+        if (queryVersion === agentQueryVersionRef.current) {
+          setAgentLoading(false);
+        }
       }
-    }
-  }, []);
+    },
+    [intl]
+  );
 
   const handleAgentKeywordChange = useCallback(
     (keyword: string) => {
@@ -342,47 +345,53 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
     (member: ProjectMember) => {
       if (!member.memberId || !member.agentId) return;
       Modal.confirm({
-        title: '解绑数字员工',
-        content: `确定解除“${member.userName || member.userCode || member.userId}”当前绑定的数字员工吗？`,
-        okText: '确定解绑',
-        cancelText: '取消',
+        title: intl.formatMessage({ id: 'projectSpace.members.unbindAgent' }),
+        content: intl.formatMessage(
+          { id: 'projectSpace.members.unbindConfirm' },
+          { name: member.userName || member.userCode || member.userId }
+        ),
+        okText: intl.formatMessage({ id: 'projectSpace.members.confirmUnbind' }),
+        cancelText: intl.formatMessage({ id: 'common.cancel' }),
         okButtonProps: { danger: true },
         onOk: async () => {
           try {
             await unbindMemberAgent(Number(member.memberId));
-            message.success('数字员工解绑成功');
+            message.success(intl.formatMessage({ id: 'projectSpace.members.unbindSuccess' }));
             await loadMembers();
           } catch (error: any) {
-            message.error(error?.message || '数字员工解绑失败');
+            message.error(error?.message || intl.formatMessage({ id: 'projectSpace.members.unbindFailed' }));
           }
         },
       });
     },
-    [loadMembers]
+    [intl, loadMembers]
   );
 
   const handleRemoveMember = useCallback(
     (member: ProjectMember) => {
       if (!isProjectCreator || `${member.userId}` === `${project.createBy}`) {
-        message.warning('项目创建者不能被移除');
+        message.warning(intl.formatMessage({ id: 'projectSpace.members.creatorCannotRemove' }));
         return;
       }
       Modal.confirm({
-        title: '移除项目成员',
-        content: `确定移除成员“${member.userName || member.userId}”吗？`,
-        okText: '移除',
+        title: intl.formatMessage({ id: 'projectSpace.members.removeMember' }),
+        content: intl.formatMessage(
+          { id: 'projectSpace.members.removeConfirm' },
+          { name: member.userName || member.userId }
+        ),
+        okText: intl.formatMessage({ id: 'projectSpace.members.remove' }),
         okButtonProps: { danger: true },
         onOk: async () => {
           const remaining = allMembers
             .filter((item) => `${item.userId}` !== `${member.userId}`)
             .map((item) => item.userId);
           await saveProjectMembers({ projectId: Number(project.projectId), userIds: remaining });
-          message.success('成员已移除');
+          message.success(intl.formatMessage({ id: 'projectSpace.members.removeSuccess' }));
           await loadMembers();
         },
       });
     },
-    [allMembers, isProjectCreator, loadMembers, project.createBy, project.projectId]
+    [allMembers, intl, isProjectCreator, loadMembers, project.createBy, project.projectId]
   );
 
   useEffect(() => {
@@ -457,7 +466,11 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
                     ? dayjs(member.createTime).format('YYYY-MM-DD HH:mm')
                     : member.createTime || '-';
                 return (
-                  <article key={`${member.memberId || member.userId}`} className={styles.dataCard} tabIndex={canOperate ? 0 : -1}>
+                  <article
+                    key={`${member.memberId || member.userId}`}
+                    className={styles.dataCard}
+                    tabIndex={canOperate ? 0 : -1}
+                  >
                     <div className={styles.memberCardIdentity}>
                       {/* 成员头像复用系统用户头像规则，使用方形主色底并展示姓名后两个字。 */}
                       <div className={styles.memberUserAvatar}>{getMemberAvatarText(member)}</div>
@@ -479,7 +492,9 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
                     </Tag>
                     <div className={styles.memberCardMeta}>
                       <Typography.Text className={styles.memberCardAgent} type="secondary" ellipsis>
-                        <span>{member.agentName || '未绑定数字员工'}</span>
+                        <span>
+                          {member.agentName || intl.formatMessage({ id: 'projectSpace.members.unboundAgent' })}
+                        </span>
                       </Typography.Text>
                       {/* 成员创建时间只展示到分钟，悬停操作出现时主动让出右下角空间。 */}
                       <Typography.Text className={styles.memberCardCreateTime} type="secondary">
@@ -495,7 +510,11 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
                             {
                               key: 'bind-agent',
                               icon: <RobotOutlined />,
-                              label: member.agentId ? '更换数字员工' : '绑定数字员工',
+                              label: intl.formatMessage({
+                                id: member.agentId
+                                  ? 'projectSpace.members.changeAgent'
+                                  : 'projectSpace.members.bindAgent',
+                              }),
                             },
                             ...(member.agentId
                               ? [
@@ -503,12 +522,19 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
                                   key: 'unbind-agent',
                                   danger: true,
                                   icon: <DisconnectOutlined />,
-                                  label: '解绑数字员工',
+                                  label: intl.formatMessage({ id: 'projectSpace.members.unbindAgent' }),
                                 },
                               ]
                               : []),
                             ...(isProjectCreator && !isOwner
-                              ? [{ key: 'remove-member', danger: true, icon: <DeleteOutlined />, label: '移除成员' }]
+                              ? [
+                                {
+                                  key: 'remove-member',
+                                  danger: true,
+                                  icon: <DeleteOutlined />,
+                                  label: intl.formatMessage({ id: 'projectSpace.members.removeMember' }),
+                                },
+                              ]
                               : []),
                           ],
                           onClick: ({ key }) => {
@@ -591,9 +617,7 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
                     <List.Item.Meta
                       avatar={
                         <div className={smallDetailStyles.agentListAvatar}>
-                          {getAgentChatAvatar(
-                            agent.chatAvatar || agent.avatar || agent.icon || agent.resourceLogoUrl
-                          )}
+                          {getAgentChatAvatar(agent.chatAvatar || agent.avatar || agent.icon || agent.resourceLogoUrl)}
                         </div>
                       }
                       title={agent.resourceName || agent.name || agent.agentName}

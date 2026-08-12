@@ -1,16 +1,4 @@
-import {
-  Button,
-  Drawer,
-  Dropdown,
-  Empty,
-  Input,
-  Modal,
-  Select,
-  Spin,
-  Tag,
-  Typography,
-  message,
-} from 'antd';
+import { Button, Drawer, Dropdown, Empty, Input, Modal, Select, Spin, Tag, Typography, message } from 'antd';
 import { DeleteOutlined, MoreOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
@@ -57,22 +45,25 @@ const normalizeRequirementType = (item: Record<string, any>) => {
   return 'collect';
 };
 
-// 运营需求名称前使用单字标签快速区分类型，完整类型名称仍在下一行保留。
-const REQUIREMENT_TYPE_BADGES: Record<string, { label: string; className: string }> = {
-  collect: { label: '采', className: 'requirementTypeBadgeCollect' },
-  knowledge: { label: '整', className: 'requirementTypeBadgeKnowledge' },
-  content: { label: '创', className: 'requirementTypeBadgeContent' },
-  analyze: { label: '析', className: 'requirementTypeBadgeAnalyze' },
+// 单字类型标签也使用语言键，避免英文环境混入中文缩写。
+const REQUIREMENT_TYPE_BADGES: Record<string, { labelId: string; className: string }> = {
+  collect: { labelId: 'projectSpace.requirements.badge.collect', className: 'requirementTypeBadgeCollect' },
+  knowledge: { labelId: 'projectSpace.requirements.badge.knowledge', className: 'requirementTypeBadgeKnowledge' },
+  content: { labelId: 'projectSpace.requirements.badge.content', className: 'requirementTypeBadgeContent' },
+  analyze: { labelId: 'projectSpace.requirements.badge.analyze', className: 'requirementTypeBadgeAnalyze' },
 };
 
-const DEVELOP_REQUIREMENT_TYPE_BADGES: Record<string, { label: string; className: string }> = {
-  dingtalk: { label: '钉', className: 'requirementTypeBadgeDingtalk' },
-  dingtalk_group: { label: '钉', className: 'requirementTypeBadgeDingtalk' },
-  dingtalk_group_message: { label: '钉', className: 'requirementTypeBadgeDingtalk' },
-  dingtalk_todo: { label: '钉', className: 'requirementTypeBadgeDingtalk' },
-  github_issue: { label: 'Git', className: 'requirementTypeBadgeGithub' },
-  github_issues: { label: 'Git', className: 'requirementTypeBadgeGithub' },
-  manual: { label: '手', className: 'requirementTypeBadgeManual' },
+const DEVELOP_REQUIREMENT_TYPE_BADGES: Record<string, { labelId: string; className: string }> = {
+  dingtalk: { labelId: 'projectSpace.requirements.badge.dingtalk', className: 'requirementTypeBadgeDingtalk' },
+  dingtalk_group: { labelId: 'projectSpace.requirements.badge.dingtalk', className: 'requirementTypeBadgeDingtalk' },
+  dingtalk_group_message: {
+    labelId: 'projectSpace.requirements.badge.dingtalk',
+    className: 'requirementTypeBadgeDingtalk',
+  },
+  dingtalk_todo: { labelId: 'projectSpace.requirements.badge.dingtalk', className: 'requirementTypeBadgeDingtalk' },
+  github_issue: { labelId: 'projectSpace.requirements.badge.github', className: 'requirementTypeBadgeGithub' },
+  github_issues: { labelId: 'projectSpace.requirements.badge.github', className: 'requirementTypeBadgeGithub' },
+  manual: { labelId: 'projectSpace.requirements.badge.manual', className: 'requirementTypeBadgeManual' },
 };
 
 const getDevelopRequirementTypeLabel = (item: Record<string, any>, intl: ReturnType<typeof useIntl>) => {
@@ -89,12 +80,21 @@ const getDevelopRequirementTypeLabel = (item: Record<string, any>, intl: ReturnT
   return intl.formatMessage({ id: messageIdMap[sourceType] || 'projectSpace.detail.source.type.default' });
 };
 
-const getRequirementStatusLabel = (status: unknown) => {
+const getRequirementStatusLabel = (status: unknown, intl: ReturnType<typeof useIntl>) => {
   const value = `${status || ''}`.trim().toLowerCase();
-  if (value === 'todo' || value === 'pending') return '待开始';
-  if (value === 'launched' || value === 'doing' || value === 'running') return '进行中';
-  if (value === 'done' || value === 'completed') return '已完成';
-  return `${status || '待开始'}`;
+  if (!value || ['todo', 'pending', 'created', 'not_started', 'waiting', '待开始'].includes(value)) {
+    return intl.formatMessage({ id: 'projectSpace.requirements.status.pending' });
+  }
+  if (['launched', 'doing', 'running', 'in_progress', 'processing', '进行中'].includes(value)) {
+    return intl.formatMessage({ id: 'projectSpace.requirements.status.running' });
+  }
+  if (['done', 'completed', 'finished', '已完成'].includes(value)) {
+    return intl.formatMessage({ id: 'projectSpace.requirements.status.completed' });
+  }
+  if (['failed', 'error', '失败'].includes(value)) {
+    return intl.formatMessage({ id: 'projectSpace.requirements.status.failed' });
+  }
+  return `${status}`;
 };
 
 const getRequirementStatusColor = (status: unknown) => {
@@ -114,7 +114,11 @@ const isPendingRequirement = (item: Record<string, any>) =>
 
 const getRequirementStatusOrder = (item: Record<string, any>) => {
   const status = `${item.status || item.action || ''}`.trim().toLowerCase();
-  if (['done', 'completed', 'finished', 'closed', 'failed', 'error', 'cancelled', '已完成', '完成', '失败'].includes(status)) {
+  if (
+    ['done', 'completed', 'finished', 'closed', 'failed', 'error', 'cancelled', '已完成', '完成', '失败'].includes(
+      status
+    )
+  ) {
     return 2;
   }
   if (
@@ -149,12 +153,7 @@ const sortRequirements = (items: any[]) =>
     );
   });
 
-const ProjectRequirements: React.FC<Props> = ({
-  project,
-  keyword = '',
-  onRefreshToolbarChange,
-  onStarted,
-}) => {
+const ProjectRequirements: React.FC<Props> = ({ project, keyword = '', onRefreshToolbarChange, onStarted }) => {
   const intl = useIntl();
   const [requirements, setRequirements] = useState<any[]>([]);
   const [page, setPage] = useState(0);
@@ -280,7 +279,7 @@ const ProjectRequirements: React.FC<Props> = ({
       developSplitTarget.itemId ?? developSplitTarget.sourceId ?? developSplitTarget.requirementId
     );
     if (!Number.isFinite(sourceItemId) || !tasks.length) {
-      message.error('当前需求缺少有效编号，无法启动');
+      message.error(intl.formatMessage({ id: 'projectSpace.requirements.invalidIdStart' }));
       return;
     }
     setDevelopSplitConfirming(true);
@@ -297,12 +296,12 @@ const ProjectRequirements: React.FC<Props> = ({
           dependsOn: task.dependsOn,
         })),
       });
-      message.success('需求已拆分并启动');
+      message.success(intl.formatMessage({ id: 'projectSpace.requirements.splitSuccess' }));
       setDevelopSplitTarget(null);
       await loadRequirements(keyword, 1);
       onStarted?.();
     } catch (error: any) {
-      message.error(error?.message || '需求拆分失败');
+      message.error(error?.message || intl.formatMessage({ id: 'projectSpace.requirements.splitFailed' }));
     } finally {
       setDevelopSplitConfirming(false);
     }
@@ -351,7 +350,7 @@ const ProjectRequirements: React.FC<Props> = ({
     if (!startTarget || starting) return;
     const requirementId = Number(startTarget.itemId ?? startTarget.sourceId ?? startTarget.requirementId);
     if (!Number.isFinite(requirementId) || !splitTasks.every((task) => task.title.trim() && task.assignee)) {
-      message.error('当前需求缺少负责人，无法启动');
+      message.error(intl.formatMessage({ id: 'projectSpace.requirements.missingAssignee' }));
       return;
     }
     setStarting(true);
@@ -365,14 +364,14 @@ const ProjectRequirements: React.FC<Props> = ({
           dueTime: startTarget.dueTime,
         })),
       });
-      message.success('需求已启动');
+      message.success(intl.formatMessage({ id: 'projectSpace.requirements.startSuccess' }));
       setStartTarget(null);
       setSplitTasks([]);
       await loadRequirements(keyword, 1);
       // 运营需求拆分成功后，任务列表是下一步操作入口，自动切回任务 tab。
       onStarted?.();
     } catch (error: any) {
-      message.error(error?.message || '需求启动失败');
+      message.error(error?.message || intl.formatMessage({ id: 'projectSpace.requirements.startFailed' }));
     } finally {
       setStarting(false);
     }
@@ -380,12 +379,18 @@ const ProjectRequirements: React.FC<Props> = ({
 
   const handleAddSplitTask = () => {
     const requirementTitle =
-      startTarget?.title || startTarget?.requirementName || startTarget?.sourceName || '运营需求';
+      startTarget?.title ||
+      startTarget?.requirementName ||
+      startTarget?.sourceName ||
+      intl.formatMessage({ id: 'projectSpace.requirements.operationRequirement' });
     const defaultAssignee = startTarget?.assigneeId ?? startTarget?.assignee;
     setSplitTasks((current) => [
       ...current,
       {
-        title: `${requirementTitle} - 任务${current.length + 1}`,
+        title: intl.formatMessage(
+          { id: 'projectSpace.requirements.generatedTaskName' },
+          { requirement: requirementTitle, index: current.length + 1 }
+        ),
         description: '',
         assignee: defaultAssignee,
       },
@@ -394,13 +399,15 @@ const ProjectRequirements: React.FC<Props> = ({
 
   const handleRemoveSplitTask = (index: number) => {
     if (splitTasks.length <= 1) return;
-    const taskName = splitTasks[index]?.title?.trim() || `任务${index + 1}`;
+    const taskName =
+      splitTasks[index]?.title?.trim() ||
+      intl.formatMessage({ id: 'projectSpace.requirements.taskIndex' }, { index: index + 1 });
     // 删除拆分任务会直接移除当前草稿，先二次确认避免误操作。
     Modal.confirm({
-      title: '确认删除任务？',
-      content: `删除“${taskName}”后无法恢复，是否继续？`,
-      okText: '删除',
-      cancelText: '取消',
+      title: intl.formatMessage({ id: 'projectSpace.requirements.deleteTaskTitle' }),
+      content: intl.formatMessage({ id: 'projectSpace.requirements.deleteTaskContent' }, { name: taskName }),
+      okText: intl.formatMessage({ id: 'common.delete' }),
+      cancelText: intl.formatMessage({ id: 'common.cancel' }),
       okButtonProps: { danger: true },
       onOk: () => {
         setSplitTasks((current) =>
@@ -412,11 +419,9 @@ const ProjectRequirements: React.FC<Props> = ({
 
   const handleUpdateRequirement = async (values: OperationTaskFormValues) => {
     if (!editingRequirement || requirementSaving) return;
-    const itemId = Number(
-      editingRequirement.itemId ?? editingRequirement.sourceId ?? editingRequirement.requirementId
-    );
+    const itemId = Number(editingRequirement.itemId ?? editingRequirement.sourceId ?? editingRequirement.requirementId);
     if (!Number.isFinite(itemId)) {
-      message.error('需求缺少有效编号，无法编辑');
+      message.error(intl.formatMessage({ id: 'projectSpace.requirements.invalidIdEdit' }));
       return;
     }
     setRequirementSaving(true);
@@ -431,11 +436,11 @@ const ProjectRequirements: React.FC<Props> = ({
         // 简化需求表单不修改执行配置，保留原需求已有配置，防止编辑基础信息时清空历史字段。
         config: editingRequirement.config,
       });
-      message.success('需求已更新');
+      message.success(intl.formatMessage({ id: 'projectSpace.requirements.updateSuccess' }));
       setEditingRequirement(null);
       await loadRequirements(keyword, 1);
     } catch (error: any) {
-      message.error(error?.message || '需求更新失败');
+      message.error(error?.message || intl.formatMessage({ id: 'projectSpace.requirements.updateFailed' }));
     } finally {
       setRequirementSaving(false);
     }
@@ -444,29 +449,33 @@ const ProjectRequirements: React.FC<Props> = ({
   const handleDeleteRequirement = (item: Record<string, any>) => {
     const itemId = Number(item.itemId ?? item.sourceId ?? item.requirementId);
     if (!Number.isFinite(itemId)) {
-      message.error('需求缺少有效编号，无法删除');
+      message.error(intl.formatMessage({ id: 'projectSpace.requirements.invalidIdDelete' }));
       return;
     }
-    const title = item.title || item.requirementName || item.sourceName || '当前需求';
+    const title =
+      item.title ||
+      item.requirementName ||
+      item.sourceName ||
+      intl.formatMessage({ id: 'projectSpace.requirements.currentRequirement' });
     const status = `${item.status || item.action || ''}`.trim().toLowerCase();
     const isRunningRequirement = ['launched', 'doing', 'running', 'in_progress', 'processing', '进行中'].includes(
       status
     );
     Modal.confirm({
-      title: '确认删除需求？',
-      content: `删除“${title}”后将不再展示其关联任务，是否继续？`,
-      okText: '删除',
-      cancelText: '取消',
+      title: intl.formatMessage({ id: 'projectSpace.requirements.deleteTitle' }),
+      content: intl.formatMessage({ id: 'projectSpace.requirements.deleteContent' }, { name: title }),
+      okText: intl.formatMessage({ id: 'common.delete' }),
+      cancelText: intl.formatMessage({ id: 'common.cancel' }),
       okButtonProps: { danger: true },
       onOk: async () => {
         if (isRunningRequirement) {
           // 进行中的需求可能仍有任务在执行，删除前增加第二次强确认，降低误删风险。
           const confirmed = await new Promise<boolean>((resolve) => {
             Modal.confirm({
-              title: '再次确认删除进行中的需求？',
-              content: `“${title}”仍在进行中，删除后关联任务也将从项目列表隐藏，请再次确认。`,
-              okText: '确认删除',
-              cancelText: '取消',
+              title: intl.formatMessage({ id: 'projectSpace.requirements.deleteRunningTitle' }),
+              content: intl.formatMessage({ id: 'projectSpace.requirements.deleteRunningContent' }, { name: title }),
+              okText: intl.formatMessage({ id: 'projectSpace.requirements.confirmDelete' }),
+              cancelText: intl.formatMessage({ id: 'common.cancel' }),
               okButtonProps: { danger: true },
               onOk: () => resolve(true),
               onCancel: () => resolve(false),
@@ -476,11 +485,11 @@ const ProjectRequirements: React.FC<Props> = ({
         }
         try {
           await deleteOperationRequirement(itemId);
-          message.success('需求已删除');
+          message.success(intl.formatMessage({ id: 'projectSpace.requirements.deleteSuccess' }));
           setRequirementDetail(null);
           await loadRequirements(keyword, 1);
         } catch (error: any) {
-          message.error(error?.message || '需求删除失败');
+          message.error(error?.message || intl.formatMessage({ id: 'projectSpace.requirements.deleteFailed' }));
         }
       },
     });
@@ -499,6 +508,14 @@ const ProjectRequirements: React.FC<Props> = ({
                 project.projectType === 'operation'
                   ? REQUIREMENT_TYPE_BADGES[operationType]
                   : DEVELOP_REQUIREMENT_TYPE_BADGES[sourceType];
+              const canStartDevelopRequirement =
+                project.projectType === 'develop' &&
+                developInitReady &&
+                !item.sessionId &&
+                !item.taskId &&
+                ['todo', 'pending', '待开始', ''].includes(`${item.status || ''}`.toLowerCase());
+              const canShowRequirementActions =
+                project.projectType === 'operation' && (isPendingRequirement(item) || isRequirementCreator(item));
               const formattedCreateTime =
                 item.createTime && dayjs(item.createTime).isValid()
                   ? dayjs(item.createTime).format('YYYY-MM-DD HH:mm')
@@ -523,7 +540,7 @@ const ProjectRequirements: React.FC<Props> = ({
                   <div className={styles.dataCardHeader}>
                     {typeBadge && (
                       <span className={`${styles.requirementTypeBadge} ${styles[typeBadge.className]}`}>
-                        {typeBadge.label}
+                        {intl.formatMessage({ id: typeBadge.labelId })}
                       </span>
                     )}
                     <Typography.Text
@@ -539,7 +556,7 @@ const ProjectRequirements: React.FC<Props> = ({
                         }`}
                         color={getRequirementStatusColor(item.status)}
                       >
-                        {getRequirementStatusLabel(item.status)}
+                        {getRequirementStatusLabel(item.status, intl)}
                       </Tag>
                       {project.projectType === 'operation' && isPendingRequirement(item) && (
                         <Button
@@ -550,35 +567,52 @@ const ProjectRequirements: React.FC<Props> = ({
                             event.stopPropagation();
                             const defaultAssignee = item.assigneeId ?? item.assignee;
                             const requirementTitle =
-                              item.title || item.requirementName || item.sourceName || '运营需求';
+                              item.title ||
+                              item.requirementName ||
+                              item.sourceName ||
+                              intl.formatMessage({ id: 'projectSpace.requirements.operationRequirement' });
                             setStartTarget(item);
                             setSplitTasks([
                               {
-                                title: `${requirementTitle} - 素材采集`,
-                                description: `围绕“${requirementTitle}”采集相关素材并保留来源信息。`,
+                                title: intl.formatMessage(
+                                  { id: 'projectSpace.requirements.defaultTask.collectTitle' },
+                                  { requirement: requirementTitle }
+                                ),
+                                description: intl.formatMessage(
+                                  { id: 'projectSpace.requirements.defaultTask.collectDescription' },
+                                  { requirement: requirementTitle }
+                                ),
                                 assignee: defaultAssignee,
                               },
                               {
-                                title: `${requirementTitle} - 素材整理`,
-                                description: `对“${requirementTitle}”采集素材完成去重、摘要和要点提炼。`,
+                                title: intl.formatMessage(
+                                  { id: 'projectSpace.requirements.defaultTask.organizeTitle' },
+                                  { requirement: requirementTitle }
+                                ),
+                                description: intl.formatMessage(
+                                  { id: 'projectSpace.requirements.defaultTask.organizeDescription' },
+                                  { requirement: requirementTitle }
+                                ),
                                 assignee: defaultAssignee,
                               },
                               {
-                                title: `${requirementTitle} - 知识归档`,
-                                description: `将“${requirementTitle}”整理结果归档到指定知识库。`,
+                                title: intl.formatMessage(
+                                  { id: 'projectSpace.requirements.defaultTask.archiveTitle' },
+                                  { requirement: requirementTitle }
+                                ),
+                                description: intl.formatMessage(
+                                  { id: 'projectSpace.requirements.defaultTask.archiveDescription' },
+                                  { requirement: requirementTitle }
+                                ),
                                 assignee: defaultAssignee,
                               },
                             ]);
                           }}
                         >
-                          拆分任务
+                          {intl.formatMessage({ id: 'projectSpace.requirements.splitTasks' })}
                         </Button>
                       )}
-                      {project.projectType === 'develop' &&
-                        developInitReady &&
-                        !item.sessionId &&
-                        !item.taskId &&
-                        ['todo', 'pending', '待开始', ''].includes(`${item.status || ''}`.toLowerCase()) && (
+                      {canStartDevelopRequirement && (
                         <Button
                           type="link"
                           size="small"
@@ -588,7 +622,7 @@ const ProjectRequirements: React.FC<Props> = ({
                             setDevelopSplitTarget(item);
                           }}
                         >
-                          启动
+                          {intl.formatMessage({ id: 'projectSpace.requirements.start' })}
                         </Button>
                       )}
                     </div>
@@ -617,14 +651,17 @@ const ProjectRequirements: React.FC<Props> = ({
                       <Typography.Text type="secondary">{formattedCreateTime}</Typography.Text>
                     </div>
                   )}
-                  {project.projectType === 'operation' &&
-                    (isPendingRequirement(item) || isRequirementCreator(item)) && (
+                  {canShowRequirementActions && (
                     <Dropdown
                       trigger={['click']}
                       menu={{
                         items: [
-                          ...(isPendingRequirement(item) ? [{ key: 'edit', label: '编辑' }] : []),
-                          ...(isRequirementCreator(item) ? [{ key: 'delete', label: '删除', danger: true }] : []),
+                          ...(isPendingRequirement(item)
+                            ? [{ key: 'edit', label: intl.formatMessage({ id: 'common.edit' }) }]
+                            : []),
+                          ...(isRequirementCreator(item)
+                            ? [{ key: 'delete', label: intl.formatMessage({ id: 'common.delete' }), danger: true }]
+                            : []),
                         ],
                         onClick: ({ key, domEvent }) => {
                           domEvent.stopPropagation();
@@ -639,7 +676,7 @@ const ProjectRequirements: React.FC<Props> = ({
                         size="small"
                         className={styles.cardMoreAction}
                         icon={<MoreOutlined />}
-                        aria-label="需求操作"
+                        aria-label={intl.formatMessage({ id: 'projectSpace.requirements.actions' })}
                         onClick={(event) => event.stopPropagation()}
                       />
                     </Dropdown>
@@ -666,7 +703,7 @@ const ProjectRequirements: React.FC<Props> = ({
       </Spin>
       <Drawer
         open={!!requirementDetail}
-        title="需求详情"
+        title={intl.formatMessage({ id: 'projectSpace.requirements.detailTitle' })}
         className={detailStyles.requirementDetailDrawer}
         width={640}
         onClose={() => setRequirementDetail(null)}
@@ -680,24 +717,24 @@ const ProjectRequirements: React.FC<Props> = ({
                 {requirementDetail.title ||
                   requirementDetail.requirementName ||
                   requirementDetail.sourceName ||
-                  '未命名需求'}
+                  intl.formatMessage({ id: 'projectSpace.requirements.unnamed' })}
               </div>
               <Tag color={getRequirementStatusColor(requirementDetail.status)}>
-                {getRequirementStatusLabel(requirementDetail.status)}
+                {getRequirementStatusLabel(requirementDetail.status, intl)}
               </Tag>
             </div>
 
             <section className={detailStyles.requirementDetailSection}>
-              <h3>基本信息</h3>
+              <h3>{intl.formatMessage({ id: 'projectSpace.requirements.basicInfo' })}</h3>
               <div className={detailStyles.requirementDetailInfoGrid}>
                 <div className={detailStyles.requirementDetailInfoItem}>
-                  <label>需求编号</label>
+                  <label>{intl.formatMessage({ id: 'projectSpace.requirements.id' })}</label>
                   <span>
                     {requirementDetail.itemId || requirementDetail.requirementId || requirementDetail.sourceId || '-'}
                   </span>
                 </div>
                 <div className={detailStyles.requirementDetailInfoItem}>
-                  <label>需求类型</label>
+                  <label>{intl.formatMessage({ id: 'projectSpace.requirements.type' })}</label>
                   <span>
                     {project.projectType === 'develop'
                       ? getDevelopRequirementTypeLabel(requirementDetail, intl)
@@ -708,13 +745,13 @@ const ProjectRequirements: React.FC<Props> = ({
                 </div>
                 {(requirementDetail.assignee || requirementDetail.assigneeName) && (
                   <div className={detailStyles.requirementDetailInfoItem}>
-                    <label>指定成员</label>
+                    <label>{intl.formatMessage({ id: 'projectSpace.requirements.assignee' })}</label>
                     <span>{requirementDetail.assigneeName || requirementDetail.assignee}</span>
                   </div>
                 )}
                 {requirementDetail.dueTime && (
                   <div className={detailStyles.requirementDetailInfoItem}>
-                    <label>预期时间</label>
+                    <label>{intl.formatMessage({ id: 'projectSpace.requirements.dueTime' })}</label>
                     <span>
                       {dayjs(requirementDetail.dueTime).isValid()
                         ? dayjs(requirementDetail.dueTime).format('YYYY-MM-DD HH:mm')
@@ -724,7 +761,7 @@ const ProjectRequirements: React.FC<Props> = ({
                 )}
                 {requirementDetail.createTime && (
                   <div className={detailStyles.requirementDetailInfoItem}>
-                    <label>创建时间</label>
+                    <label>{intl.formatMessage({ id: 'projectSpace.requirements.createTime' })}</label>
                     <span>
                       {dayjs(requirementDetail.createTime).isValid()
                         ? dayjs(requirementDetail.createTime).format('YYYY-MM-DD HH:mm')
@@ -734,31 +771,31 @@ const ProjectRequirements: React.FC<Props> = ({
                 )}
                 {(requirementDetail.createByName || requirementDetail.createBy) && (
                   <div className={detailStyles.requirementDetailInfoItem}>
-                    <label>创建人</label>
+                    <label>{intl.formatMessage({ id: 'projectSpace.requirements.creator' })}</label>
                     <span>{requirementDetail.createByName || requirementDetail.createBy}</span>
                   </div>
                 )}
                 {requirementDetail.sourceName && (
                   <div className={detailStyles.requirementDetailInfoItem}>
-                    <label>需求来源</label>
+                    <label>{intl.formatMessage({ id: 'projectSpace.requirements.source' })}</label>
                     <span>{requirementDetail.sourceName}</span>
                   </div>
                 )}
                 {requirementDetail.branch && (
                   <div className={detailStyles.requirementDetailInfoItem}>
-                    <label>分支</label>
+                    <label>{intl.formatMessage({ id: 'projectSpace.requirements.branch' })}</label>
                     <span>{requirementDetail.branch}</span>
                   </div>
                 )}
                 {requirementDetail.priority && (
                   <div className={detailStyles.requirementDetailInfoItem}>
-                    <label>优先级</label>
+                    <label>{intl.formatMessage({ id: 'projectSpace.requirements.priority' })}</label>
                     <span>{requirementDetail.priority}</span>
                   </div>
                 )}
                 {requirementDetail.score !== undefined && requirementDetail.score !== null && (
                   <div className={detailStyles.requirementDetailInfoItem}>
-                    <label>评分</label>
+                    <label>{intl.formatMessage({ id: 'projectSpace.requirements.score' })}</label>
                     <span>{requirementDetail.score}</span>
                   </div>
                 )}
@@ -766,7 +803,7 @@ const ProjectRequirements: React.FC<Props> = ({
             </section>
 
             <section className={detailStyles.requirementDetailSection}>
-              <h3>需求描述</h3>
+              <h3>{intl.formatMessage({ id: 'projectSpace.requirements.description' })}</h3>
               <div className={detailStyles.requirementDetailText}>
                 {requirementDetail.sourceDescription ||
                   requirementDetail.description ||
@@ -777,15 +814,13 @@ const ProjectRequirements: React.FC<Props> = ({
             </section>
             {requirementDetail.productContent && (
               <section className={detailStyles.requirementDetailSection}>
-                <h3>产品补充</h3>
-                <div className={detailStyles.requirementDetailText}>
-                  {requirementDetail.productContent}
-                </div>
+                <h3>{intl.formatMessage({ id: 'projectSpace.requirements.productContent' })}</h3>
+                <div className={detailStyles.requirementDetailText}>{requirementDetail.productContent}</div>
               </section>
             )}
             {requirementDetail.config && Object.keys(requirementDetail.config).length > 0 && (
               <section className={detailStyles.requirementDetailSection}>
-                <h3>执行配置</h3>
+                <h3>{intl.formatMessage({ id: 'projectSpace.requirements.executionConfig' })}</h3>
                 <div className={detailStyles.requirementDetailText}>
                   {JSON.stringify(requirementDetail.config, null, 2)}
                 </div>
@@ -803,7 +838,7 @@ const ProjectRequirements: React.FC<Props> = ({
                   developSplitTarget.title ||
                   developSplitTarget.requirementName ||
                   developSplitTarget.sourceName ||
-                  '研发需求',
+                  intl.formatMessage({ id: 'projectSpace.requirements.developRequirement' }),
               description:
                   developSplitTarget.description ||
                   developSplitTarget.sourceDescription ||
@@ -837,10 +872,7 @@ const ProjectRequirements: React.FC<Props> = ({
           editingRequirement
             ? {
               taskName:
-                  editingRequirement.title ||
-                  editingRequirement.requirementName ||
-                  editingRequirement.sourceName ||
-                  '',
+                  editingRequirement.title || editingRequirement.requirementName || editingRequirement.sourceName || '',
               description: editingRequirement.sourceDescription || editingRequirement.description || '',
               taskType: normalizeRequirementType(editingRequirement),
               assigneeId: editingRequirement.assigneeId,
@@ -855,9 +887,9 @@ const ProjectRequirements: React.FC<Props> = ({
       />
       <Modal
         open={!!startTarget}
-        title="拆分任务"
+        title={intl.formatMessage({ id: 'projectSpace.requirements.splitTasks' })}
         width={760}
-        okText="确定"
+        okText={intl.formatMessage({ id: 'common.confirm' })}
         confirmLoading={starting}
         onCancel={() => {
           setStartTarget(null);
@@ -866,31 +898,39 @@ const ProjectRequirements: React.FC<Props> = ({
         onOk={() => void handleStartRequirement()}
       >
         <Typography.Paragraph type="secondary">
-          系统已按需求生成 3 个任务，可修改任务名称和描述，负责人沿用需求负责人。
+          {intl.formatMessage({ id: 'projectSpace.requirements.splitHint' })}
         </Typography.Paragraph>
         <div className={styles.splitTaskToolbar}>
-          <Typography.Text strong>任务列表</Typography.Text>
+          <Typography.Text strong>{intl.formatMessage({ id: 'projectSpace.requirements.taskList' })}</Typography.Text>
           <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={handleAddSplitTask}>
-            新增任务
+            {intl.formatMessage({ id: 'projectSpace.requirements.addTask' })}
           </Button>
         </div>
         <div className={styles.splitTaskList}>
           {splitTasks.map((task, index) => (
             <div key={index} className={styles.splitTaskCard}>
               <div className={styles.splitTaskHeader}>
-                <Typography.Text strong>任务 {index + 1}</Typography.Text>
+                <Typography.Text strong>
+                  {intl.formatMessage({ id: 'projectSpace.requirements.taskIndex' }, { index: index + 1 })}
+                </Typography.Text>
                 <Button
                   type="text"
                   danger
                   size="small"
                   icon={<DeleteOutlined />}
                   disabled={splitTasks.length <= 1}
-                  aria-label={`删除任务${index + 1}`}
+                  aria-label={intl.formatMessage(
+                    { id: 'projectSpace.requirements.deleteTaskAria' },
+                    { index: index + 1 }
+                  )}
                   onClick={() => handleRemoveSplitTask(index)}
                 />
               </div>
               <Input
-                addonBefore={`${index + 1}. 任务名称`}
+                addonBefore={intl.formatMessage(
+                  { id: 'projectSpace.requirements.taskNameIndex' },
+                  { index: index + 1 }
+                )}
                 value={task.title}
                 onChange={(event) =>
                   setSplitTasks((current) =>
@@ -904,7 +944,7 @@ const ProjectRequirements: React.FC<Props> = ({
                 style={{ marginTop: 10 }}
                 rows={2}
                 value={task.description}
-                placeholder="任务描述"
+                placeholder={intl.formatMessage({ id: 'projectSpace.requirements.taskDescription' })}
                 onChange={(event) =>
                   setSplitTasks((current) =>
                     current.map((item, itemIndex) =>
@@ -915,7 +955,7 @@ const ProjectRequirements: React.FC<Props> = ({
               />
               <Select
                 style={{ width: '100%', marginTop: 10 }}
-                placeholder="请选择负责人"
+                placeholder={intl.formatMessage({ id: 'projectSpace.requirements.assigneePlaceholder' })}
                 value={task.assignee}
                 options={splitAssignees}
                 onChange={(value) =>

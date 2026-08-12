@@ -144,6 +144,7 @@ export type DevloopTaskItem = {
   objectId?: number | string;
   description?: string;
   taskDescription?: string;
+  sessionContent?: string;
   branchName?: string;
   repoFullName?: string;
   requirementTitle?: string;

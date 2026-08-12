@@ -118,11 +118,11 @@ const ProjectResources: React.FC<Props> = ({
       setRepos((await listProjectRepos(Number(project.projectId))) || []);
     } catch (error: any) {
       setRepos([]);
-      message.error(error?.message || '仓库加载失败');
+      message.error(error?.message || intl.formatMessage({ id: 'projectSpace.resources.loadReposFailed' }));
     } finally {
       setLoadingRepos(false);
     }
-  }, [isDevelopProject, project.projectId]);
+  }, [intl, isDevelopProject, project.projectId]);
 
   const loadBoundResources = useCallback(async () => {
     if (!isOperationProject) return;
@@ -170,27 +170,33 @@ const ProjectResources: React.FC<Props> = ({
         ],
         resourceStatus: '2',
       };
-      const [knowledgePersonal, knowledgeEnterprise, ontologyPersonal, ontologyEnterprise, ontologyResourcePersonal, ontologyResourceEnterprise] =
-        await Promise.all([
-          listResourceUseAuth({ ...knowledgeQuery, ownerType: 'personal', permission: '' }),
-          listResourceUseAuth({ ...knowledgeQuery, ownerType: 'enterprise', permission: '', belong: 'ALL' }),
-          listOntologyBases({ ownerType: 'personal' }),
-          listOntologyBases({ ownerType: 'enterprise' }),
-          pageOntologyResources({
-            ownerType: 'personal',
-            resourceBizTypeList: ['VIEW', 'OBJECT'],
-            statusList: [0, 1, 2, 3, 4, 5],
-            pageNum: 1,
-            pageSize: 1000,
-          }),
-          pageOntologyResources({
-            ownerType: 'enterprise',
-            resourceBizTypeList: ['VIEW', 'OBJECT'],
-            statusList: [0, 1, 2, 3, 4, 5],
-            pageNum: 1,
-            pageSize: 1000,
-          }),
-        ]);
+      const [
+        knowledgePersonal,
+        knowledgeEnterprise,
+        ontologyPersonal,
+        ontologyEnterprise,
+        ontologyResourcePersonal,
+        ontologyResourceEnterprise,
+      ] = await Promise.all([
+        listResourceUseAuth({ ...knowledgeQuery, ownerType: 'personal', permission: '' }),
+        listResourceUseAuth({ ...knowledgeQuery, ownerType: 'enterprise', permission: '', belong: 'ALL' }),
+        listOntologyBases({ ownerType: 'personal' }),
+        listOntologyBases({ ownerType: 'enterprise' }),
+        pageOntologyResources({
+          ownerType: 'personal',
+          resourceBizTypeList: ['VIEW', 'OBJECT'],
+          statusList: [0, 1, 2, 3, 4, 5],
+          pageNum: 1,
+          pageSize: 1000,
+        }),
+        pageOntologyResources({
+          ownerType: 'enterprise',
+          resourceBizTypeList: ['VIEW', 'OBJECT'],
+          statusList: [0, 1, 2, 3, 4, 5],
+          pageNum: 1,
+          pageSize: 1000,
+        }),
+      ]);
 
       const knowledgeMap = new Map<string, ResourceOption>();
       [knowledgePersonal, knowledgeEnterprise].flatMap(getResourceRows).forEach((item: any) => {
@@ -200,16 +206,13 @@ const ProjectResources: React.FC<Props> = ({
       });
 
       const ontologyMap = new Map<string, ResourceOption>();
-      [
-        ontologyPersonal,
-        ontologyEnterprise,
-        ontologyResourcePersonal,
-        ontologyResourceEnterprise,
-      ].flatMap(getResourceRows).forEach((item: any) => {
-        const value = item.baseId ?? item.resourceId ?? item.id;
-        const label = item.displayName || item.resourceName || item.name;
-        if (value !== undefined && value !== null && label) ontologyMap.set(`${value}`, { value: `${value}`, label });
-      });
+      [ontologyPersonal, ontologyEnterprise, ontologyResourcePersonal, ontologyResourceEnterprise]
+        .flatMap(getResourceRows)
+        .forEach((item: any) => {
+          const value = item.baseId ?? item.resourceId ?? item.id;
+          const label = item.displayName || item.resourceName || item.name;
+          if (value !== undefined && value !== null && label) ontologyMap.set(`${value}`, { value: `${value}`, label });
+        });
 
       setKnowledgeOptions(Array.from(knowledgeMap.values()));
       setOntologyOptions(Array.from(ontologyMap.values()));
@@ -273,11 +276,9 @@ const ProjectResources: React.FC<Props> = ({
     if (resourceSaving) return;
     setResourceSaving(true);
     try {
-      const optionLabelMap = new Map<string, string>([
-        ...knowledgeOptions,
-        ...ontologyOptions,
-        ...agentOptions,
-      ].map((option) => [`${option.value}`, option.label]));
+      const optionLabelMap = new Map<string, string>(
+        [...knowledgeOptions, ...ontologyOptions, ...agentOptions].map((option) => [`${option.value}`, option.label])
+      );
       const previousNameMap = new Map(
         boundResources.map((resource) => [`${resource.resourceType}:${resource.resourceId}`, resource.resourceName])
       );
@@ -292,11 +293,11 @@ const ProjectResources: React.FC<Props> = ({
           }))
       );
       await saveProjectResources({ projectId: Number(project.projectId), resources });
-      message.success('项目共享资源已更新');
+      message.success(intl.formatMessage({ id: 'projectSpace.resources.saveSuccess' }));
       setResourceModalOpen(false);
       await loadBoundResources();
     } catch (error: any) {
-      message.error(error?.message || '项目共享资源保存失败');
+      message.error(error?.message || intl.formatMessage({ id: 'projectSpace.resources.saveFailed' }));
     } finally {
       setResourceSaving(false);
     }
@@ -305,16 +306,19 @@ const ProjectResources: React.FC<Props> = ({
   const handleDeleteRepository = (repo: DevloopProjectRepo) => {
     if (repo.repoId === undefined || repo.repoId === null) return;
     Modal.confirm({
-      title: '删除项目仓库',
-      content: `确定删除“${repo.repoFullName || repo.repoUrl || repo.repoId}”吗？`,
+      title: intl.formatMessage({ id: 'projectSpace.resources.deleteRepoTitle' }),
+      content: intl.formatMessage(
+        { id: 'projectSpace.resources.deleteRepoContent' },
+        { repo: repo.repoFullName || repo.repoUrl || repo.repoId }
+      ),
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
           await deleteProjectRepo(Number(repo.repoId));
-          message.success('仓库已删除');
+          message.success(intl.formatMessage({ id: 'projectSpace.resources.deleteRepoSuccess' }));
           await loadRepos();
         } catch (error: any) {
-          message.error(error?.message || '仓库删除失败');
+          message.error(error?.message || intl.formatMessage({ id: 'projectSpace.resources.deleteRepoFailed' }));
         }
       },
     });
@@ -324,12 +328,7 @@ const ProjectResources: React.FC<Props> = ({
     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'chatResource.empty' })} />
   );
 
-  const renderCardHeader = (
-    icon: React.ReactNode,
-    title: string,
-    description: string,
-    onAdd?: () => void
-  ) => (
+  const renderCardHeader = (icon: React.ReactNode, title: string, description: string, onAdd?: () => void) => (
     <header className={styles.resourceCardHeader}>
       <div className={styles.resourceCardTitleBlock}>
         <span className={styles.resourceCardIcon}>{icon}</span>
@@ -339,7 +338,13 @@ const ProjectResources: React.FC<Props> = ({
         </div>
       </div>
       {onAdd && (
-        <Button type="text" size="small" icon={<PlusOutlined />} className={styles.resourceCardAddButton} onClick={onAdd}>
+        <Button
+          type="text"
+          size="small"
+          icon={<PlusOutlined />}
+          className={styles.resourceCardAddButton}
+          onClick={onAdd}
+        >
           {intl.formatMessage({ id: 'common.add' })}
         </Button>
       )}
@@ -358,36 +363,35 @@ const ProjectResources: React.FC<Props> = ({
       ontology: styles.resourceOntologyIcon,
     }[resourceType];
 
+    const resourceItems = items.map((resource) => {
+      const employeeAvatar =
+        resourceType === 'digital_employee' ? employeeAvatarMap.get(`${resource.resourceId}`) : undefined;
+      const avatarClassName = employeeAvatar ? styles.resourceEmployeeAvatar : '';
+      return (
+        <div
+          key={`${resourceType}:${resource.resourceId}`}
+          className={`${styles.resourceSimpleItem} ${styles.resourceBoundItem}`}
+        >
+          <span
+            className={`${styles.resourceSimpleIcon} ${styles.resourceBoundIcon} ${iconClassName} ${avatarClassName}`}
+          >
+            {employeeAvatar ? getAgentChatAvatar(employeeAvatar) : icon}
+          </span>
+          <div className={styles.resourceSimpleMain}>
+            <Typography.Text strong ellipsis={{ tooltip: resource.resourceName }}>
+              {resource.resourceName || resource.resourceId}
+            </Typography.Text>
+            <Typography.Text type="secondary" ellipsis>
+              {fallback}
+            </Typography.Text>
+          </div>
+        </div>
+      );
+    });
+
     return (
       <Spin spinning={loadingBoundResources} className={styles.resourceCategoryBody}>
-        {items.length
-          ? items.map((resource) => {
-            const employeeAvatar =
-              resourceType === 'digital_employee' ? employeeAvatarMap.get(`${resource.resourceId}`) : undefined;
-            const avatarClassName = employeeAvatar ? styles.resourceEmployeeAvatar : '';
-
-            return (
-              <div
-                key={`${resourceType}:${resource.resourceId}`}
-                className={`${styles.resourceSimpleItem} ${styles.resourceBoundItem}`}
-              >
-                <span
-                  className={`${styles.resourceSimpleIcon} ${styles.resourceBoundIcon} ${iconClassName} ${avatarClassName}`}
-                >
-                  {employeeAvatar ? getAgentChatAvatar(employeeAvatar) : icon}
-                </span>
-                <div className={styles.resourceSimpleMain}>
-                  <Typography.Text strong ellipsis={{ tooltip: resource.resourceName }}>
-                    {resource.resourceName || resource.resourceId}
-                  </Typography.Text>
-                  <Typography.Text type="secondary" ellipsis>
-                    {fallback}
-                  </Typography.Text>
-                </div>
-              </div>
-            );
-          })
-          : !loadingBoundResources && empty}
+        {items.length ? resourceItems : !loadingBoundResources && empty}
       </Spin>
     );
   };
@@ -421,10 +425,7 @@ const ProjectResources: React.FC<Props> = ({
                     if (event.key === 'Enter' || event.key === ' ') setPreviewFile(file);
                   }}
                 >
-                  <AntdIcon
-                    type={`icon-${getFileIconType(file.fileName)}`}
-                    className={styles.resourceFileIcon}
-                  />
+                  <AntdIcon type={`icon-${getFileIconType(file.fileName)}`} className={styles.resourceFileIcon} />
                   <div className={styles.resourceSimpleMain}>
                     <Typography.Text strong ellipsis={{ tooltip: file.fileName }}>
                       {file.fileName}
@@ -467,8 +468,13 @@ const ProjectResources: React.FC<Props> = ({
                       trigger={['hover']}
                       menu={{
                         items: [
-                          { key: 'edit', icon: <EditOutlined />, label: '编辑' },
-                          { key: 'delete', danger: true, icon: <DeleteOutlined />, label: '删除' },
+                          { key: 'edit', icon: <EditOutlined />, label: intl.formatMessage({ id: 'common.edit' }) },
+                          {
+                            key: 'delete',
+                            danger: true,
+                            icon: <DeleteOutlined />,
+                            label: intl.formatMessage({ id: 'common.delete' }),
+                          },
                         ],
                         onClick: ({ key }) => {
                           if (key === 'edit') onOpenRepositoryManager?.(repo);
@@ -497,7 +503,12 @@ const ProjectResources: React.FC<Props> = ({
               intl.formatMessage({ id: 'projectSpace.resources.sharedKnowledgeDescription' }),
               openResourceModal
             )}
-            {renderBoundResources(boundKnowledge, 'knowledge', <DatabaseOutlined />, '当前项目绑定知识库')}
+            {renderBoundResources(
+              boundKnowledge,
+              'knowledge',
+              <DatabaseOutlined />,
+              intl.formatMessage({ id: 'projectSpace.resources.boundKnowledge' })
+            )}
           </section>
         ) : null}
 
@@ -505,11 +516,16 @@ const ProjectResources: React.FC<Props> = ({
           <section className={styles.resourceCategoryCard}>
             {renderCardHeader(
               <RobotOutlined />,
-              '共享数字员工',
-              '绑定的数字员工',
+              intl.formatMessage({ id: 'projectSpace.resources.sharedEmployee' }),
+              intl.formatMessage({ id: 'projectSpace.resources.sharedEmployeeDescription' }),
               openResourceModal
             )}
-            {renderBoundResources(boundEmployees, 'digital_employee', <RobotOutlined />, '当前项目绑定数字员工')}
+            {renderBoundResources(
+              boundEmployees,
+              'digital_employee',
+              <RobotOutlined />,
+              intl.formatMessage({ id: 'projectSpace.resources.boundEmployee' })
+            )}
           </section>
         )}
 
@@ -521,7 +537,12 @@ const ProjectResources: React.FC<Props> = ({
               intl.formatMessage({ id: 'projectSpace.resources.sharedOntologyDescription' }),
               openResourceModal
             )}
-            {renderBoundResources(boundOntologies, 'ontology', <ApartmentOutlined />, '当前项目绑定本体')}
+            {renderBoundResources(
+              boundOntologies,
+              'ontology',
+              <ApartmentOutlined />,
+              intl.formatMessage({ id: 'projectSpace.resources.boundOntology' })
+            )}
           </section>
         )}
       </div>
@@ -529,7 +550,7 @@ const ProjectResources: React.FC<Props> = ({
       {isOperationProject && (
         <Modal
           open={resourceModalOpen}
-          title="绑定项目资源"
+          title={intl.formatMessage({ id: 'projectSpace.resources.bindingTitle' })}
           width={640}
           centered
           destroyOnClose
@@ -540,7 +561,9 @@ const ProjectResources: React.FC<Props> = ({
           <Spin spinning={resourceOptionsLoading || agentOptionsLoading || loadingBoundResources}>
             <div className={styles.projectResourceBindingModal}>
               <div>
-                <Typography.Text strong>知识库</Typography.Text>
+                <Typography.Text strong>
+                  {intl.formatMessage({ id: 'projectSpace.resources.knowledge' })}
+                </Typography.Text>
                 <Select
                   mode="multiple"
                   value={selectedResources.knowledge}
@@ -548,12 +571,14 @@ const ProjectResources: React.FC<Props> = ({
                   loading={resourceOptionsLoading}
                   showSearch
                   optionFilterProp="label"
-                  placeholder="请选择项目知识库"
+                  placeholder={intl.formatMessage({ id: 'projectSpace.resources.knowledgePlaceholder' })}
                   onChange={(value) => setSelectedResources((current) => ({ ...current, knowledge: value }))}
                 />
               </div>
               <div>
-                <Typography.Text strong>数字员工</Typography.Text>
+                <Typography.Text strong>
+                  {intl.formatMessage({ id: 'projectSpace.resources.employee' })}
+                </Typography.Text>
                 <Select
                   mode="multiple"
                   value={selectedResources.digital_employee}
@@ -561,14 +586,14 @@ const ProjectResources: React.FC<Props> = ({
                   loading={agentOptionsLoading}
                   showSearch
                   optionFilterProp="label"
-                  placeholder="请选择项目数字员工"
-                  onChange={(value) =>
-                    setSelectedResources((current) => ({ ...current, digital_employee: value }))
-                  }
+                  placeholder={intl.formatMessage({ id: 'projectSpace.resources.employeePlaceholder' })}
+                  onChange={(value) => setSelectedResources((current) => ({ ...current, digital_employee: value }))}
                 />
               </div>
               <div>
-                <Typography.Text strong>本体</Typography.Text>
+                <Typography.Text strong>
+                  {intl.formatMessage({ id: 'projectSpace.resources.ontology' })}
+                </Typography.Text>
                 <Select
                   mode="multiple"
                   value={selectedResources.ontology}
@@ -576,7 +601,7 @@ const ProjectResources: React.FC<Props> = ({
                   loading={resourceOptionsLoading}
                   showSearch
                   optionFilterProp="label"
-                  placeholder="请选择项目本体"
+                  placeholder={intl.formatMessage({ id: 'projectSpace.resources.ontologyPlaceholder' })}
                   onChange={(value) => setSelectedResources((current) => ({ ...current, ontology: value }))}
                 />
               </div>
@@ -586,7 +611,7 @@ const ProjectResources: React.FC<Props> = ({
       )}
 
       <Drawer
-        title={previewFile?.fileName || '文件预览'}
+        title={previewFile?.fileName || intl.formatMessage({ id: 'projectSpace.resources.filePreview' })}
         open={!!previewFile}
         placement="right"
         width="50vw"

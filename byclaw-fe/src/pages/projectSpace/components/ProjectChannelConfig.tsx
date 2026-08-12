@@ -1,6 +1,7 @@
 import { Button, Empty, Form, Input, List, Modal, Select, Spin, Switch, Tag, message } from 'antd';
 import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useEffect, useState } from 'react';
+import { useIntl } from '@umijs/max';
 import {
   createScanSource,
   deleteScanSource,
@@ -19,6 +20,7 @@ interface Props {
 
 // 新版大详情复用旧版渠道列表接口，先保证研发项目可以从需求页进入渠道配置查看入口。
 const ProjectChannelConfig: React.FC<Props> = ({ open, projectId, canManage = false, onClose }) => {
+  const intl = useIntl();
   const [loading, setLoading] = useState(false);
   const [sources, setSources] = useState<any[]>([]);
   const [editingSource, setEditingSource] = useState<any | null>(null);
@@ -33,15 +35,13 @@ const ProjectChannelConfig: React.FC<Props> = ({ open, projectId, canManage = fa
     if (!open || !projectId) return;
     setLoading(true);
     void listScanSources({ projectId: Number(projectId), pageNum: 1, pageSize: 100 })
-      .then((response: any) =>
-        setSources(normalizeRows(response))
-      )
+      .then((response: any) => setSources(normalizeRows(response)))
       .catch((error: any) => {
-        message.error(error?.message || '渠道配置加载失败');
+        message.error(error?.message || intl.formatMessage({ id: 'projectSpace.channel.loadFailed' }));
         setSources([]);
       })
       .finally(() => setLoading(false));
-  }, [open, projectId]);
+  }, [intl, open, projectId]);
 
   const reload = async () => {
     if (!projectId) return;
@@ -50,7 +50,7 @@ const ProjectChannelConfig: React.FC<Props> = ({ open, projectId, canManage = fa
       const response: any = await listScanSources({ projectId: Number(projectId), pageNum: 1, pageSize: 100 });
       setSources(normalizeRows(response));
     } catch (error: any) {
-      message.error(error?.message || '渠道配置加载失败');
+      message.error(error?.message || intl.formatMessage({ id: 'projectSpace.channel.loadFailed' }));
     } finally {
       setLoading(false);
     }
@@ -79,41 +79,51 @@ const ProjectChannelConfig: React.FC<Props> = ({ open, projectId, canManage = fa
       } else {
         await createScanSource({ projectId: Number(projectId), ...payload });
       }
-      message.success('渠道配置已保存');
+      message.success(intl.formatMessage({ id: 'projectSpace.channel.saveSuccess' }));
       setEditingSource(null);
       form.resetFields();
       await reload();
     } catch (error: any) {
-      message.error(error?.message || '渠道配置保存失败');
+      message.error(error?.message || intl.formatMessage({ id: 'projectSpace.channel.saveFailed' }));
     }
   };
 
   const handleDelete = (source: any) => {
     Modal.confirm({
-      title: '删除需求渠道',
-      content: `确定删除“${source.sourceName || source.name || source.sourceId}”吗？`,
+      title: intl.formatMessage({ id: 'projectSpace.channel.deleteTitle' }),
+      content: intl.formatMessage(
+        { id: 'projectSpace.channel.deleteContent' },
+        { name: source.sourceName || source.name || source.sourceId }
+      ),
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
           await deleteScanSource(Number(source.sourceId));
           await reload();
         } catch (error: any) {
-          message.error(error?.message || '渠道删除失败');
+          message.error(error?.message || intl.formatMessage({ id: 'projectSpace.channel.deleteFailed' }));
         }
       },
     });
   };
 
   return (
-    <Modal open={open} title="需求渠道配置" footer={null} width={720} onCancel={onClose} destroyOnClose>
+    <Modal
+      open={open}
+      title={intl.formatMessage({ id: 'projectSpace.channel.title' })}
+      footer={null}
+      width={720}
+      onCancel={onClose}
+      destroyOnClose
+    >
       <Spin spinning={loading}>
         {canManage && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 12 }}>
             <Button icon={<ReloadOutlined />} onClick={() => void reload()}>
-              刷新
+              {intl.formatMessage({ id: 'projectSpace.detail.refresh' })}
             </Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>
-              新增渠道
+              {intl.formatMessage({ id: 'projectSpace.channel.add' })}
             </Button>
           </div>
         )}
@@ -123,7 +133,11 @@ const ProjectChannelConfig: React.FC<Props> = ({ open, projectId, canManage = fa
             renderItem={(source: any) => (
               <List.Item>
                 <List.Item.Meta
-                  title={source.sourceName || source.name || `渠道 ${source.sourceId || ''}`}
+                  title={
+                    source.sourceName ||
+                    source.name ||
+                    intl.formatMessage({ id: 'projectSpace.channel.defaultName' }, { id: source.sourceId || '' })
+                  }
                   description={source.sourceDescription || source.description || source.sourceType || '-'}
                 />
                 {/* 渠道操作组件声明在文件末尾，避免把管理逻辑分散到列表渲染中。 */}
@@ -139,40 +153,55 @@ const ProjectChannelConfig: React.FC<Props> = ({ open, projectId, canManage = fa
                   }}
                   onTrigger={async () => {
                     await triggerScan(Number(source.sourceId));
-                    message.success('扫描任务已触发');
+                    message.success(intl.formatMessage({ id: 'projectSpace.channel.triggerSuccess' }));
                   }}
                 />
               </List.Item>
             )}
           />
         ) : (
-          !loading && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无需求渠道" />
+          !loading && (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={intl.formatMessage({ id: 'projectSpace.channel.empty' })}
+            />
+          )
         )}
       </Spin>
       <Modal
         open={editingSource !== null}
-        title={editingSource?.sourceId ? '编辑需求渠道' : '新增需求渠道'}
+        title={intl.formatMessage({
+          id: editingSource?.sourceId ? 'projectSpace.channel.edit' : 'projectSpace.channel.addTitle',
+        })}
         onCancel={() => setEditingSource(null)}
         onOk={() => form.submit()}
         destroyOnClose
       >
         <Form form={form} layout="vertical" onFinish={(values) => void saveSource(values)}>
-          <Form.Item name="sourceName" label="渠道名称" rules={[{ required: true, message: '请输入渠道名称' }]}>
+          <Form.Item
+            name="sourceName"
+            label={intl.formatMessage({ id: 'projectSpace.channel.name' })}
+            rules={[{ required: true, message: intl.formatMessage({ id: 'projectSpace.channel.nameRequired' }) }]}
+          >
             <Input />
           </Form.Item>
-          <Form.Item name="sourceType" label="渠道类型" rules={[{ required: true }]}>
+          <Form.Item
+            name="sourceType"
+            label={intl.formatMessage({ id: 'projectSpace.channel.type' })}
+            rules={[{ required: true }]}
+          >
             <Select
               options={[
                 { value: 'github_issue', label: 'GitHub Issue' },
-                { value: 'dingtalk', label: '钉钉群' },
-                { value: 'dingtalk_todo', label: '钉钉待办' },
+                { value: 'dingtalk', label: intl.formatMessage({ id: 'projectSpace.channel.dingtalk' }) },
+                { value: 'dingtalk_todo', label: intl.formatMessage({ id: 'projectSpace.channel.dingtalkTodo' }) },
               ]}
             />
           </Form.Item>
-          <Form.Item name="cronExpr" label="扫描频率">
+          <Form.Item name="cronExpr" label={intl.formatMessage({ id: 'projectSpace.channel.cron' })}>
             <Input placeholder="0 */1 * * * ?" />
           </Form.Item>
-          <Form.Item name="config" label="渠道配置(JSON)">
+          <Form.Item name="config" label={intl.formatMessage({ id: 'projectSpace.channel.config' })}>
             <Input.TextArea rows={5} />
           </Form.Item>
         </Form>
@@ -196,11 +225,15 @@ function SpaceActions({
   onToggle: (enabled: boolean) => Promise<void>;
   onTrigger: () => Promise<void>;
 }) {
+  const intl = useIntl();
   const enabled = source.enabled === '1' || source.enabled === 1 || source.enabled === true;
-  if (!canManage) return <Tag color={enabled ? 'success' : 'default'}>{enabled ? '已启用' : '已停用'}</Tag>;
+  const statusText = intl.formatMessage({
+    id: enabled ? 'projectSpace.channel.enabled' : 'projectSpace.channel.disabled',
+  });
+  if (!canManage) return <Tag color={enabled ? 'success' : 'default'}>{statusText}</Tag>;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <Tag color={enabled ? 'success' : 'default'}>{enabled ? '已启用' : '已停用'}</Tag>
+      <Tag color={enabled ? 'success' : 'default'}>{statusText}</Tag>
       <Switch size="small" checked={enabled} onChange={(value) => void onToggle(value)} />
       <Button type="text" size="small" icon={<ThunderboltOutlined />} onClick={() => void onTrigger()} />
       <Button type="text" size="small" icon={<EditOutlined />} onClick={onEdit} />

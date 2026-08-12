@@ -104,7 +104,8 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
 
   const [myAgentType, setMyAgentType] = useState<IAgentType>(agentType);
   const [sessionSelectOpen, setSessionSelectOpen] = useState<boolean>(false);
-  const [resourceListOpen, setResourceListOpen] = useState(false);
+  // 进入已有会话详情时默认展开右侧资源列表；用户关闭后保持关闭，直到进入另一个会话详情。
+  const [resourceListOpen, setResourceListOpen] = useState(() => Boolean(sessionId));
   const [resourceTabs, setResourceTabs] = useState<ChatResourceTab[]>([]);
   const [activeResourceTabKey, setActiveResourceTabKey] = useState('');
 
@@ -347,15 +348,14 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   ]);
 
   useEffect(() => {
-    // 会话切换时关闭旧详情，但保留资源入口，方便在新会话中继续查看对应范围。
+    // 每次进入另一个已有会话详情时关闭旧预览并默认打开资源列表；新建会话尚无 sessionId 时不展示。
     const previousSessionId = previousResourceSessionIdRef.current;
     previousResourceSessionIdRef.current = sessionId;
     if (`${previousSessionId}` === `${sessionId}`) return;
 
-    const workspaceWasOpen = resourceListOpen || resourceTabs.length > 0;
     setResourceTabs([]);
     setActiveResourceTabKey('');
-    if (workspaceWasOpen) setResourceListOpen(true);
+    setResourceListOpen(Boolean(sessionId));
   }, [sessionId]);
 
   // 路由切换时由 PCLayout 统一决定是否清理详情面板；资源中心入口带 preserveDetailPanel 标记时，
