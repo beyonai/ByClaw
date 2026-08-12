@@ -170,28 +170,37 @@
 }
 
 .enterpriseSkillTabChevron {
-  color: #646a73;
+  color: #1f2329;
   font-size: 13px;
-  transition: color 160ms ease, transform 160ms ease;
-}
+  transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 
-.enterpriseSkillTabLabel:hover .enterpriseSkillTabChevron,
-.enterpriseSkillTabLabelOpen .enterpriseSkillTabChevron {
-  color: #165dff;
+  svg {
+    stroke: currentcolor;
+    stroke-width: 0;
+    stroke-linejoin: round;
+    transition: stroke-width 120ms ease;
+  }
 }
 
 .enterpriseSkillTabLabelOpen .enterpriseSkillTabChevron {
   transform: rotate(180deg);
 }
 
+.enterpriseSkillTabLabel:hover .enterpriseSkillTabChevron svg {
+  stroke-width: 40;
+}
+
 .enterpriseSkillDropdown {
+  border-radius: 6px 6px 12px 12px;
+  box-shadow: 0 14px 38px rgb(22 34 51 / 14%);
+
   :global {
     .@{antPrefix}-dropdown-menu {
       min-width: 190px;
       padding: 7px;
       border: 1px solid rgb(31 35 41 / 7%);
-      border-radius: 12px;
-      box-shadow: 0 14px 38px rgb(22 34 51 / 14%);
+      border-radius: 6px 6px 12px 12px;
+      box-shadow: none;
     }
 
     .@{antPrefix}-dropdown-menu-item {
@@ -216,6 +225,43 @@
       &:hover {
         background: #e1efff;
       }
+    }
+  }
+}
+
+:global {
+  .enterprise-skill-dropdown-motion-enter,
+  .enterprise-skill-dropdown-motion-appear {
+    opacity: 0;
+  }
+
+  .enterprise-skill-dropdown-motion-enter-active,
+  .enterprise-skill-dropdown-motion-appear-active {
+    opacity: 1;
+    transition: opacity 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .enterprise-skill-dropdown-motion-leave {
+    opacity: 1;
+  }
+
+  .enterprise-skill-dropdown-motion-leave-active {
+    opacity: 0;
+    transition: opacity 100ms ease-out;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enterpriseSkillTabChevron,
+  .enterpriseSkillTabChevron svg {
+    transition: none;
+  }
+
+  :global {
+    .enterprise-skill-dropdown-motion-enter-active,
+    .enterprise-skill-dropdown-motion-appear-active,
+    .enterprise-skill-dropdown-motion-leave-active {
+      transition: none;
     }
   }
 }

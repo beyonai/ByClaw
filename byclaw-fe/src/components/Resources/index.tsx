@@ -635,11 +635,14 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
       label:
         resourceType === 'SKILL' ? (
           <Dropdown
-            trigger={['click']}
+            trigger={['hover']}
             open={enterpriseSkillDropdownOpen}
             onOpenChange={setEnterpriseSkillDropdownOpen}
+            mouseEnterDelay={0.12}
+            mouseLeaveDelay={0.1}
+            transitionName="enterprise-skill-dropdown-motion"
             placement="bottomLeft"
-            align={{ offset: [0, 8] }}
+            align={{ offset: [0, 5] }}
             overlayClassName={styles.enterpriseSkillDropdown}
             menu={{
               selectedKeys: [enterpriseSkillKind],
@@ -685,7 +688,6 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
               role="button"
               aria-haspopup="menu"
               aria-expanded={enterpriseSkillDropdownOpen}
-              onClick={(event) => event.stopPropagation()}
               onKeyDown={(event) => {
                 if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();

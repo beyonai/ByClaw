@@ -46,13 +46,37 @@ jest.mock('antd', () => ({
       {children}
     </button>
   ),
-  Dropdown: ({ children, menu, open, onOpenChange, trigger = [] }: any) => {
+  Dropdown: ({
+    children,
+    menu,
+    mouseEnterDelay,
+    mouseLeaveDelay,
+    open,
+    onOpenChange,
+    transitionName,
+    trigger = [],
+  }: any) => {
     const React = require('react');
     const triggerChild = React.cloneElement(children, {
+      'data-mouse-enter-delay': mouseEnterDelay,
+      'data-mouse-leave-delay': mouseLeaveDelay,
+      'data-transition-name': transitionName,
       onClick: (event: React.MouseEvent) => {
         children.props.onClick?.(event);
         if (trigger.includes('click')) {
           onOpenChange?.(!open);
+        }
+      },
+      onMouseEnter: (event: React.MouseEvent) => {
+        children.props.onMouseEnter?.(event);
+        if (trigger.includes('hover')) {
+          onOpenChange?.(true);
+        }
+      },
+      onMouseLeave: (event: React.MouseEvent) => {
+        children.props.onMouseLeave?.(event);
+        if (trigger.includes('hover')) {
+          onOpenChange?.(false);
         }
       },
     });
@@ -224,14 +248,14 @@ describe('Resources enterprise skill mode', () => {
 
   it('marks the current enterprise skill type as selected in the menu', () => {
     const singleView = renderAt('?tab=enterprise');
-    fireEvent.click(screen.getByTestId('enterprise-skill-tab-trigger'));
+    fireEvent.mouseEnter(screen.getByTestId('enterprise-skill-tab-trigger'));
 
     expect(screen.getByRole('menuitem', { name: 'resource.skillSingle' })).toHaveAttribute('data-selected', 'true');
     expect(screen.getByRole('menuitem', { name: 'resource.skillGroup' })).not.toHaveAttribute('data-selected');
 
     singleView.unmount();
     renderAt('?tab=enterprise&kind=group');
-    fireEvent.click(screen.getByTestId('enterprise-skill-tab-trigger'));
+    fireEvent.mouseEnter(screen.getByTestId('enterprise-skill-tab-trigger'));
 
     expect(screen.getByRole('menuitem', { name: 'resource.skillSingle' })).not.toHaveAttribute('data-selected');
     expect(screen.getByRole('menuitem', { name: 'resource.skillGroup' })).toHaveAttribute('data-selected', 'true');
@@ -262,7 +286,7 @@ describe('Resources enterprise skill mode', () => {
     mockSetSearchParams.mockReset();
     renderAt('?tab=personal');
 
-    fireEvent.click(screen.getByTestId('enterprise-skill-tab-trigger'));
+    fireEvent.mouseEnter(screen.getByTestId('enterprise-skill-tab-trigger'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'resource.skillGroup' }));
 
     expect(window.location.search).toBe('?tab=enterprise&kind=group');
@@ -271,24 +295,30 @@ describe('Resources enterprise skill mode', () => {
     expect(screen.queryByTestId('resource-list')).toBeNull();
   });
 
-  it('uses a click-only trigger with explicit expanded state and closes on a second click', () => {
+  it('opens on hover with a short delay without opening on click or focus', () => {
     renderAt('?tab=personal');
 
     const enterpriseSkillTab = screen.getByTestId('enterprise-skill-tab-trigger');
     expect(enterpriseSkillTab).toHaveAttribute('aria-haspopup', 'menu');
     expect(enterpriseSkillTab).toHaveAttribute('aria-expanded', 'false');
+    expect(enterpriseSkillTab).toHaveAttribute('data-mouse-enter-delay', '0.12');
+    expect(enterpriseSkillTab).toHaveAttribute('data-mouse-leave-delay', '0.1');
+    expect(enterpriseSkillTab).toHaveAttribute('data-transition-name', 'enterprise-skill-dropdown-motion');
     expect(screen.getByTestId('enterprise-skill-dropdown-chevron')).toBeTruthy();
 
-    fireEvent.mouseEnter(enterpriseSkillTab);
     fireEvent.focus(enterpriseSkillTab);
     expect(screen.queryByRole('menu')).toBeNull();
 
     fireEvent.click(enterpriseSkillTab);
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(enterpriseSkillTab).toHaveAttribute('aria-expanded', 'false');
+    expect(window.location.search).toBe('?tab=enterprise');
+
+    fireEvent.mouseEnter(enterpriseSkillTab);
     expect(screen.getByRole('menu')).toBeTruthy();
     expect(enterpriseSkillTab).toHaveAttribute('aria-expanded', 'true');
-    expect(window.location.search).toBe('?tab=personal');
 
-    fireEvent.click(enterpriseSkillTab);
+    fireEvent.mouseLeave(enterpriseSkillTab);
     expect(screen.queryByRole('menu')).toBeNull();
     expect(enterpriseSkillTab).toHaveAttribute('aria-expanded', 'false');
   });
