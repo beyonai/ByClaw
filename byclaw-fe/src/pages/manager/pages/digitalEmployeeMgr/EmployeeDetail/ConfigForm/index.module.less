@@ -331,7 +331,7 @@
       transition: max-height 0.3s ease, padding 0.3s ease;
 
       &.expanded {
-        max-height: 1000px;
+        max-height: 5000px;
       }
 
       .knowledgeCard {
@@ -419,6 +419,47 @@
               &:hover {
                 color: #165dff;
                 background-color: #f0f8ff;
+              }
+            }
+          }
+        }
+
+        .knowledgeSearchConfig {
+          margin-top: 16px;
+          padding-top: 12px;
+          border-top: 1px solid #f0f0f0;
+
+          .knowledgeSearchRow {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+
+            & + .knowledgeSearchRow {
+              margin-top: 10px;
+            }
+          }
+
+          .knowledgeSearchLabel {
+            width: 104px;
+            flex-shrink: 0;
+            color: #4e5969;
+            font-size: 13px;
+          }
+
+          .knowledgeSearchControl {
+            display: flex;
+            flex: 1;
+            align-items: center;
+            gap: 12px;
+
+            :global {
+              .@{antPrefix}-slider {
+                flex: 1;
+                margin: 10px 6px;
+              }
+
+              .@{antPrefix}-input-number {
+                width: 76px;
               }
             }
           }

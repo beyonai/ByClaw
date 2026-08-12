@@ -12,6 +12,7 @@ export interface KnowledgeCapability {
   allowKnowledgeBaseEdit: boolean;
   allowKnowledgeBaseDelete: boolean;
   allowKnowledgeImport: boolean;
+  allowKnowledgeSearchConfig: boolean;
 }
 
 // 查询我创建的文档库列表

@@ -9,6 +9,7 @@ import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.state.domain.resource.vo.KnowledgeCapabilityVo;
 import java.util.Locale;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -95,6 +96,25 @@ class DatasetApplicationServiceTest {
 
         verify(authApplicationService, never()).hasResourceManagePermission(any());
         verify(feignPythonBuildService, never()).deleteKnowledgeBase(any());
+    }
+
+    @Test
+    void queryKnowledgeCapability_enablesSearchConfigOnlyForWhaleAgent() {
+        ReflectionTestUtils.setField(service, "datasetSystem", "WHALE_AGENT");
+
+        KnowledgeCapabilityVo capability = service.queryKnowledgeCapability();
+
+        assertThat(capability.getAllowKnowledgeSearchConfig()).isTrue();
+        assertThat(capability.getKnowledgeMode()).isEqualTo("THIRD_PARTY");
+    }
+
+    @Test
+    void queryKnowledgeCapability_disablesSearchConfigForOtherModes() {
+        assertThat(service.queryKnowledgeCapability().getAllowKnowledgeSearchConfig()).isFalse();
+
+        ReflectionTestUtils.setField(service, "datasetSystem", "OTHER_DATASET");
+
+        assertThat(service.queryKnowledgeCapability().getAllowKnowledgeSearchConfig()).isFalse();
     }
 
     private SsResource defaultPersonalDataset() {

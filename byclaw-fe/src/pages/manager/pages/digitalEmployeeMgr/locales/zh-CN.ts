@@ -98,6 +98,8 @@ export default {
   'employeeDetail.configureKnowledge': '配置知识',
   'employeeDetail.qaKnowledge': '问答对知识库',
   'employeeDetail.documentKnowledge': '文档知识库',
+  'employeeDetail.minimumSimilarity': '最小匹配度',
+  'employeeDetail.maximumRecall': '最大召回数量',
   'employeeDetail.tagSearchPlaceholder': '新增标签,按回车完成',
   'employeeDetail.skillType.agent': '智能体',
   'employeeDetail.skillType.toolkit': '工具集',

@@ -33,6 +33,30 @@ export function rootAgentContext(rc: ResourceContext | undefined | null): Dict {
   return isRecord(rc?.root_agent) ? (rc!.root_agent as Dict) : {};
 }
 
+export function extractKnowledgeSearchConfig(detail: Dict): { similarity?: number; topK?: number } | null {
+  let raw = detail.knowledgeSearchConfig;
+  if (!isRecord(raw) && typeof detail.relResourceInfo === "string") {
+    try {
+      const parsed = JSON.parse(detail.relResourceInfo);
+      raw = isRecord(parsed) ? parsed.knowledgeSearchConfig : undefined;
+    } catch {
+      raw = undefined;
+    }
+  }
+  if (!isRecord(raw)) return null;
+
+  const config: { similarity?: number; topK?: number } = {};
+  const similarity = Number(raw.similarity);
+  if (Number.isFinite(similarity) && similarity >= 0 && similarity <= 1) {
+    config.similarity = similarity;
+  }
+  const topK = Number(raw.topK);
+  if (Number.isInteger(topK) && topK >= 1 && topK <= 100) {
+    config.topK = topK;
+  }
+  return Object.keys(config).length > 0 ? config : null;
+}
+
 export function getResourceContext(payload: Dict | undefined | null): ResourceContext {
   if (!isRecord(payload)) return {};
   const rc = payload.resource_context;
@@ -217,6 +241,10 @@ export function mergeResourceContextIntoCapability(
     const rc = asString(selected.resourceCode);
     if (rc && !asString(capability.metadata.resource_code)) {
       capability.metadata.resource_code = rc;
+    }
+    const knowledgeSearchConfig = extractKnowledgeSearchConfig(selected);
+    if (knowledgeSearchConfig) {
+      capability.metadata.knowledge_search_config = knowledgeSearchConfig;
     }
   }
   if (normalizedType === "agent") {
@@ -645,6 +673,10 @@ export function buildCapabilityFromResourceContext(
       const selRc = asString(selected.resourceCode) || asString(selected.resource_code);
       if (selRc) {
         capability.metadata.resource_code = selRc;
+      }
+      const knowledgeSearchConfig = extractKnowledgeSearchConfig(selected);
+      if (knowledgeSearchConfig) {
+        capability.metadata.knowledge_search_config = knowledgeSearchConfig;
       }
       return capability;
     }

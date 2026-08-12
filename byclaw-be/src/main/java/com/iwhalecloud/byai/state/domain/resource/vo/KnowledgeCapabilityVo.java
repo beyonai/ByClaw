@@ -26,4 +26,10 @@ public class KnowledgeCapabilityVo {
     private Boolean allowKnowledgeBaseDelete;
 
     private Boolean allowKnowledgeImport;
+
+    /**
+     * 是否允许为数字员工关联的每个知识库配置检索参数。
+     * 仅 DATASET_SYSTEM=WHALE_AGENT 时开启。
+     */
+    private Boolean allowKnowledgeSearchConfig;
 }

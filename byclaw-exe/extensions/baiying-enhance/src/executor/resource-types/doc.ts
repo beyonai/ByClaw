@@ -50,6 +50,21 @@ export function resolveDocBackend(parameters: Dict): DocBackend {
   return "sdk";
 }
 
+export function resolveWhaleAgentKnowledgeSearchConfig(capability: Capability): {
+  similarity: number;
+  topK: number;
+} {
+  const raw = isRecord(capability.metadata?.knowledge_search_config)
+    ? (capability.metadata.knowledge_search_config as Dict)
+    : {};
+  const similarity = Number(raw.similarity);
+  const topK = Number(raw.topK);
+  return {
+    similarity: Number.isFinite(similarity) && similarity >= 0 && similarity <= 1 ? similarity : 0.6,
+    topK: Number.isInteger(topK) && topK >= 1 && topK <= 100 ? topK : 20,
+  };
+}
+
 /**
  * Mirror of `BaiYingExecutor._execute_doc`.
  *
@@ -309,11 +324,14 @@ async function executeDocViaKnowledgeApi(
     const defaultKnCode = asString(input.capability.metadata?.resource_code) || input.datasetId;
     knCodeList.push(defaultKnCode);
   }
+  const searchConfig = resolveWhaleAgentKnowledgeSearchConfig(input.capability);
   const payload: Dict = {
     query: input.query,
     knCodeList,
+    topK: searchConfig.topK,
+    similarity: searchConfig.similarity,
   };
-  for (const key of ["topK", "pageIndex", "pageSize", "similarity", "searchMode", "fileTypeList"] as const) {
+  for (const key of ["pageIndex", "pageSize", "searchMode", "fileTypeList"] as const) {
     if (input.parameters[key] !== undefined) {
       payload[key] = input.parameters[key];
     }

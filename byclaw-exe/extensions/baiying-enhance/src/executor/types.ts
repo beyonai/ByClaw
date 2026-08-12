@@ -19,6 +19,10 @@ export type CapabilityMetadata = {
   default_headers?: Record<string, string>;
   impl_type?: string;
   prologue?: string;
+  knowledge_search_config?: {
+    similarity?: number;
+    topK?: number;
+  };
   [key: string]: unknown;
 };
 

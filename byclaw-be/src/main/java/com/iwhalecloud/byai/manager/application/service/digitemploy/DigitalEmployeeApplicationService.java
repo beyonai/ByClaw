@@ -1402,12 +1402,16 @@ public class DigitalEmployeeApplicationService {
      */
     private void compareSsResourceRelDetail(SsResource ssResource, List<Long> relIds,
         List<SsResourceRelDetail> resourceRelDetails, List<RelResourceInfo> relResourceInfoList) {
-        Map<String, List<String>> relResourceInfoListMap = new HashMap<>(10);
+        Map<String, RelResourceInfo> relResourceInfoListMap = new HashMap<>(10);
         if (CollectionUtils.isNotEmpty(relResourceInfoList)) {
-            relResourceInfoListMap = relResourceInfoList.stream().collect(
-                Collectors.toMap(RelResourceInfo::getRelId, RelResourceInfo::getActiveResourceIds, (v1, v2) -> v2 // 键重复时的合并规则：覆盖
-                ));
+            for (RelResourceInfo relResourceInfo : relResourceInfoList) {
+                if (relResourceInfo != null && StringUtils.isNotBlank(relResourceInfo.getRelId())) {
+                    relResourceInfoListMap.put(relResourceInfo.getRelId(), relResourceInfo);
+                }
+            }
         }
+
+        Set<Long> knowledgeResourceIds = findKnowledgeResourceIds(relIds);
 
         // 集合转换
         Map<Long, SsResourceRelDetail> resourceRelDetailMap = new HashMap<>(10);
@@ -1419,30 +1423,23 @@ public class DigitalEmployeeApplicationService {
         // 对比，存在的修改，不存在的新增
         for (int i = 0; relIds != null && i < relIds.size(); i++) {
             Long relResourceId = relIds.get(i);
-            // 关联子资源的信息（可用状态）
-            List<String> relActiveChildResourceIds = relResourceInfoListMap.get(String.valueOf(relResourceId));
+            RelResourceInfo requestedRelInfo = relResourceInfoListMap.get(String.valueOf(relResourceId));
+            RelResourceInfo normalizedRelInfo = normalizeRelResourceInfo(relResourceId, requestedRelInfo,
+                knowledgeResourceIds.contains(relResourceId));
             SsResourceRelDetail ssResourceRelDetail = resourceRelDetailMap.remove(relResourceId);
 
             if (ssResourceRelDetail != null) {
                 ssResourceRelDetail.setUpdateBy(CurrentUserHolder.getCurrentUserId());
                 ssResourceRelDetail.setUpdateTime(new Date());
-                // 关联子资源的信息（可用状态）
-                if (CollectionUtils.isNotEmpty(relActiveChildResourceIds)) {
-                    RelResourceInfo relResourceInfo = new RelResourceInfo();
-                    relResourceInfo.setRelId(String.valueOf(relResourceId));
-                    relResourceInfo.setActiveResourceIds(relActiveChildResourceIds);
-                    ssResourceRelDetail.setRelResourceInfo(JSON.toJSONString(relResourceInfo));
+                if (normalizedRelInfo != null) {
+                    ssResourceRelDetail.setRelResourceInfo(JSON.toJSONString(normalizedRelInfo));
                 }
                 ssResourceRelDetailService.updateById(ssResourceRelDetail);
             }
             else {
                 ssResourceRelDetail = new SsResourceRelDetail();
-                // 关联子资源的信息（可用状态）
-                if (CollectionUtils.isNotEmpty(relActiveChildResourceIds)) {
-                    RelResourceInfo relResourceInfo = new RelResourceInfo();
-                    relResourceInfo.setRelId(String.valueOf(relResourceId));
-                    relResourceInfo.setActiveResourceIds(relActiveChildResourceIds);
-                    ssResourceRelDetail.setRelResourceInfo(JSON.toJSONString(relResourceInfo));
+                if (normalizedRelInfo != null) {
+                    ssResourceRelDetail.setRelResourceInfo(JSON.toJSONString(normalizedRelInfo));
                 }
                 ssResourceRelDetail.setResourceRelDetailId(sequenceService.nextVal());
                 ssResourceRelDetail.setResourceId(ssResource.getResourceId());
@@ -1458,6 +1455,73 @@ public class DigitalEmployeeApplicationService {
         for (SsResourceRelDetail ssResourceRelDetail : resourceRelDetailMap.values()) {
             ssResourceRelDetailService.removeById(ssResourceRelDetail.getResourceRelDetailId());
         }
+    }
+
+    /**
+     * WHALE_AGENT 模式下识别本次关联的知识库资源，确保逐库检索配置不会误写到工具、对象等其他关系。
+     */
+    private Set<Long> findKnowledgeResourceIds(List<Long> relIds) {
+        if (!isWhaleAgentDatasetSystem() || CollectionUtils.isEmpty(relIds)) {
+            return Collections.emptySet();
+        }
+        List<SsResource> resources = ssResourceService.findByIdList(relIds);
+        if (CollectionUtils.isEmpty(resources)) {
+            return Collections.emptySet();
+        }
+        return resources.stream()
+            .filter(Objects::nonNull)
+            .filter(resource -> StringUtils.startsWithIgnoreCase(resource.getResourceBizType(), "KG_"))
+            .map(SsResource::getResourceId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+    }
+
+    /**
+     * 规范化关联关系 JSON。知识库配置仅在 WHALE_AGENT 模式下保留，历史关系缺少配置时补默认值。
+     */
+    private RelResourceInfo normalizeRelResourceInfo(Long relResourceId, RelResourceInfo requestedRelInfo,
+        boolean knowledgeResource) {
+        boolean hasActiveResourceIds = requestedRelInfo != null
+            && CollectionUtils.isNotEmpty(requestedRelInfo.getActiveResourceIds());
+        boolean shouldSaveKnowledgeConfig = isWhaleAgentDatasetSystem() && knowledgeResource;
+        if (!hasActiveResourceIds && !shouldSaveKnowledgeConfig) {
+            return null;
+        }
+
+        RelResourceInfo normalized = new RelResourceInfo();
+        normalized.setRelId(String.valueOf(relResourceId));
+        if (hasActiveResourceIds) {
+            normalized.setActiveResourceIds(new ArrayList<>(requestedRelInfo.getActiveResourceIds()));
+        }
+        if (shouldSaveKnowledgeConfig) {
+            RelResourceInfo.KnowledgeSearchConfig requestedConfig = requestedRelInfo == null
+                ? null : requestedRelInfo.getKnowledgeSearchConfig();
+            normalized.setKnowledgeSearchConfig(normalizeKnowledgeSearchConfig(requestedConfig));
+        }
+        return normalized;
+    }
+
+    private RelResourceInfo.KnowledgeSearchConfig normalizeKnowledgeSearchConfig(
+        RelResourceInfo.KnowledgeSearchConfig requestedConfig) {
+        double similarity = requestedConfig == null || requestedConfig.getSimilarity() == null
+            ? RelResourceInfo.DEFAULT_SIMILARITY : requestedConfig.getSimilarity();
+        int topK = requestedConfig == null || requestedConfig.getTopK() == null
+            ? RelResourceInfo.DEFAULT_TOP_K : requestedConfig.getTopK();
+        if (!Double.isFinite(similarity) || similarity < 0D || similarity > 1D) {
+            throw new IllegalArgumentException("similarity must be between 0 and 1");
+        }
+        if (topK < 1 || topK > 100) {
+            throw new IllegalArgumentException("topK must be between 1 and 100");
+        }
+
+        RelResourceInfo.KnowledgeSearchConfig normalized = new RelResourceInfo.KnowledgeSearchConfig();
+        normalized.setSimilarity(similarity);
+        normalized.setTopK(topK);
+        return normalized;
+    }
+
+    private boolean isWhaleAgentDatasetSystem() {
+        return SystemCode.WHAGE_AGENT.getCode().equalsIgnoreCase(StringUtils.trimToEmpty(datasetSystem));
     }
 
     /**
@@ -1519,10 +1583,17 @@ public class DigitalEmployeeApplicationService {
             relIds = relResourceList.stream().map(SsResource::getResourceId).collect(Collectors.toList());
             for (SsResourceDTO ssResourceDTO : relResourceList) {
                 String relResourceInfo = ssResourceDTO.getRelResourceInfo();
+                RelResourceInfo relResourceInfoObj = null;
                 if (StringUtils.isNotBlank(relResourceInfo)) {
-                    // 计算关联可用资源数量
-                    RelResourceInfo relResourceInfoObj = JSON.parseObject(relResourceInfo, RelResourceInfo.class);
-                    ssResourceDTO.setActiveResourceNum(relResourceInfoObj.getActiveResourceIds().size());
+                    relResourceInfoObj = JSON.parseObject(relResourceInfo, RelResourceInfo.class);
+                    if (CollectionUtils.isNotEmpty(relResourceInfoObj.getActiveResourceIds())) {
+                        ssResourceDTO.setActiveResourceNum(relResourceInfoObj.getActiveResourceIds().size());
+                    }
+                }
+                if (isWhaleAgentDatasetSystem()
+                    && StringUtils.startsWithIgnoreCase(ssResourceDTO.getResourceBizType(), "KG_")) {
+                    ssResourceDTO.setKnowledgeSearchConfig(normalizeKnowledgeSearchConfig(
+                        relResourceInfoObj == null ? null : relResourceInfoObj.getKnowledgeSearchConfig()));
                 }
             }
         }

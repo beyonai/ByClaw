@@ -154,6 +154,15 @@ FILE_STORAGE_LOCAL_PATH=/mnt/byclaw-file
 
 如果部署显式覆盖了 `OPEN_DC_QUERY_KEYS`，无需额外加入此配置项；后端会固定允许登录前读取 `DIGITAL_EMPLOYEE_TERMINOLOGY`，该配置中不得存放密钥或其他敏感信息。
 
+## 10. WHALE_AGENT 知识检索参数
+
+当后端配置 `DATASET_SYSTEM=WHALE_AGENT` 时，数字员工配置页会为每个已关联知识库显示以下检索参数：
+
+- `similarity`：最小匹配度，范围为 `0～1`，默认值为 `0.6`。
+- `topK`：最大召回数量，范围为 `1～100`，默认值为 `20`。
+
+参数保存在数字员工与知识库的关联关系中，并由 OpenClaw 在调用 WHALE_AGENT 知识检索接口时传递。历史关联关系无需执行数据库迁移，读取和下次保存时会使用默认值。其他 `DATASET_SYSTEM` 模式及 `CALL_AGENT` 检索链路不使用这两个关联参数。
+
 ## 最小配置示例
 
 对于快速开始，您只需要配置以下必需项：

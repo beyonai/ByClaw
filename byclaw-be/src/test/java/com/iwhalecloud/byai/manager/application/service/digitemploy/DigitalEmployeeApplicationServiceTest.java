@@ -24,9 +24,12 @@ import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistSe
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeIdDTO;
+import com.iwhalecloud.byai.manager.dto.digitemploy.RelResourceInfo;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SetDefaultDigitalEmployeeDTO;
+import com.iwhalecloud.byai.manager.dto.digitemploy.SsResourceDTO;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.qo.resource.DigitalEmployeeQo;
 import com.iwhalecloud.byai.manager.vo.digitemploy.SetDefaultDigitalEmployeeResultVo;
@@ -109,6 +112,7 @@ class DigitalEmployeeApplicationServiceTest {
         ReflectionTestUtils.setField(service, "resourceAuthContextService", resourceAuthContextService);
         ReflectionTestUtils.setField(service, "dingtalkRobotRegistryService", dingtalkRobotRegistryService);
         ReflectionTestUtils.setField(service, "digEmployeeChangeEventPublisher", digEmployeeChangeEventPublisher);
+        ReflectionTestUtils.setField(service, "datasetSystem", "");
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(1L);
@@ -319,6 +323,65 @@ class DigitalEmployeeApplicationServiceTest {
         List<SsResExtDigEmployee> savedExtList = extCaptor.getAllValues();
         assertThat(savedExtList).extracting(SsResExtDigEmployee::getTagName)
             .containsExactly(null, null, null, null, null);
+    }
+
+    @Test
+    void saveDigitalEmployee_persistsPerKnowledgeSearchConfigInWhaleAgentMode() {
+        ReflectionTestUtils.setField(service, "datasetSystem", "WHALE_AGENT");
+        when(sequenceService.nextVal()).thenReturn(501L, 502L);
+        when(ssResourceService.countResource("检索专家", ResourceBizTypeEnum.DIG_EMPLOYEE.name(), null)).thenReturn(0L);
+        when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        SsResource knowledge = new SsResource();
+        knowledge.setResourceId(900L);
+        knowledge.setResourceBizType(ResourceBizTypeEnum.KG_DOC.name());
+        when(ssResourceService.findByIdList(List.of(900L))).thenReturn(List.of(knowledge));
+
+        RelResourceInfo.KnowledgeSearchConfig searchConfig = new RelResourceInfo.KnowledgeSearchConfig();
+        searchConfig.setSimilarity(0.75D);
+        searchConfig.setTopK(12);
+        RelResourceInfo relInfo = new RelResourceInfo();
+        relInfo.setRelId("900");
+        relInfo.setKnowledgeSearchConfig(searchConfig);
+
+        DigitalEmployeeDTO dto = new DigitalEmployeeDTO();
+        dto.setResourceName("检索专家");
+        dto.setOwnerType(OwnerType.PERSONAL);
+        dto.setAgentType(DigitalEmployType.AGENT_TYPE_ASSISTANT.getCode());
+        dto.setRelIds(List.of(900L));
+        dto.setRelResourceInfoList(List.of(relInfo));
+
+        service.saveDigitalEmployee(dto);
+
+        ArgumentCaptor<SsResourceRelDetail> captor = ArgumentCaptor.forClass(SsResourceRelDetail.class);
+        verify(ssResourceRelDetailService).save(captor.capture());
+        RelResourceInfo saved = com.alibaba.fastjson2.JSON.parseObject(captor.getValue().getRelResourceInfo(),
+            RelResourceInfo.class);
+        assertThat(saved.getKnowledgeSearchConfig().getSimilarity()).isEqualTo(0.75D);
+        assertThat(saved.getKnowledgeSearchConfig().getTopK()).isEqualTo(12);
+    }
+
+    @Test
+    void saveDigitalEmployee_ignoresKnowledgeSearchConfigOutsideWhaleAgentMode() {
+        when(sequenceService.nextVal()).thenReturn(601L, 602L);
+        when(ssResourceService.countResource("普通专家", ResourceBizTypeEnum.DIG_EMPLOYEE.name(), null)).thenReturn(0L);
+        when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        RelResourceInfo relInfo = new RelResourceInfo();
+        relInfo.setRelId("901");
+        relInfo.setKnowledgeSearchConfig(new RelResourceInfo.KnowledgeSearchConfig());
+        DigitalEmployeeDTO dto = new DigitalEmployeeDTO();
+        dto.setResourceName("普通专家");
+        dto.setOwnerType(OwnerType.PERSONAL);
+        dto.setAgentType(DigitalEmployType.AGENT_TYPE_ASSISTANT.getCode());
+        dto.setRelIds(List.of(901L));
+        dto.setRelResourceInfoList(List.of(relInfo));
+
+        service.saveDigitalEmployee(dto);
+
+        ArgumentCaptor<SsResourceRelDetail> captor = ArgumentCaptor.forClass(SsResourceRelDetail.class);
+        verify(ssResourceRelDetailService).save(captor.capture());
+        assertThat(captor.getValue().getRelResourceInfo()).isNull();
     }
 
     @Test
@@ -585,6 +648,29 @@ class DigitalEmployeeApplicationServiceTest {
         DigitalEmployeeDetailsDTO result = service.findDetailsById(dto);
 
         assertThat(result.getRelTools()).containsExactly("tool-a", "tool-b");
+    }
+
+    @Test
+    void findDetailsById_returnsDefaultKnowledgeSearchConfigForHistoricalWhaleAgentRelation() {
+        ReflectionTestUtils.setField(service, "datasetSystem", "WHALE_AGENT");
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(100L);
+
+        DigitalEmployeeDetailsDTO detailsDTO = new DigitalEmployeeDetailsDTO();
+        detailsDTO.setResourceId(100L);
+        detailsDTO.setPrologue("{}");
+        SsResourceDTO knowledge = new SsResourceDTO();
+        knowledge.setResourceId(900L);
+        knowledge.setResourceBizType(ResourceBizTypeEnum.KG_DOC.name());
+
+        when(ssResExtDigEmployeeService.findDetailsById(100L)).thenReturn(detailsDTO);
+        when(ssResourceService.findRelResource(100L)).thenReturn(List.of(knowledge));
+        when(templateRuleInfoApplicationService.findMemoryConfigsByResourceIdAndUserId(100L, 1L)).thenReturn(List.of());
+
+        DigitalEmployeeDetailsDTO result = service.findDetailsById(dto);
+
+        assertThat(result.getRelResourceList().get(0).getKnowledgeSearchConfig().getSimilarity()).isEqualTo(0.6D);
+        assertThat(result.getRelResourceList().get(0).getKnowledgeSearchConfig().getTopK()).isEqualTo(20);
     }
 
     @Test

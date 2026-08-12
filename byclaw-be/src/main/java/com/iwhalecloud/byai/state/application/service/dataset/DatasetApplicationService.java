@@ -150,12 +150,15 @@ public class DatasetApplicationService {
      */
     public KnowledgeCapabilityVo queryKnowledgeCapability() {
         boolean thirdPartyMode = StringUtils.isNotBlank(StringUtils.trimToEmpty(datasetSystem));
+        boolean whaleAgentMode = SystemCode.WHAGE_AGENT.getCode()
+            .equalsIgnoreCase(StringUtils.trimToEmpty(datasetSystem));
         KnowledgeCapabilityVo capabilityVo = new KnowledgeCapabilityVo();
         capabilityVo.setKnowledgeMode(thirdPartyMode ? "THIRD_PARTY" : "BYAI");
         capabilityVo.setAllowKnowledgeBaseCreate(!thirdPartyMode);
         capabilityVo.setAllowKnowledgeBaseEdit(!thirdPartyMode);
         capabilityVo.setAllowKnowledgeBaseDelete(!thirdPartyMode);
         capabilityVo.setAllowKnowledgeImport(Boolean.TRUE);
+        capabilityVo.setAllowKnowledgeSearchConfig(whaleAgentMode);
         return capabilityVo;
     }
 

@@ -23,6 +23,7 @@ import { agentHandler } from '@/pages/manager/utils/agent';
 import useGlobal from '@/pages/manager/hooks/useGlobal';
 import BaseListModal from '../components/BaseListModal';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
+import { queryKnowledgeCapability } from '@/service/knowledgeCenter';
 import PublishModal from '../components/PublishModal';
 import RefineModal from '../components/RefineModal';
 import LogInfoDrawer from './components/LogInfoDrawer';
@@ -34,6 +35,32 @@ import Manage from './Manage';
 import Operation from './Operation';
 
 const PREVIEW_HOST = `${window.location.origin}${window.routerBase === '/' ? '/' : window.routerBase}`;
+
+const DEFAULT_KNOWLEDGE_SEARCH_CONFIG = {
+  similarity: 0.6,
+  topK: 20,
+};
+
+const normalizeKnowledgeSearchConfig = (resource = {}) => {
+  let config = resource?.knowledgeSearchConfig;
+  if (!config && resource?.relResourceInfo) {
+    try {
+      config = JSON.parse(resource.relResourceInfo)?.knowledgeSearchConfig;
+    } catch (error) {
+      console.error('parse knowledgeSearchConfig error', error);
+    }
+  }
+
+  const similarity = Number(config?.similarity);
+  const topK = Number(config?.topK);
+  return {
+    similarity:
+      Number.isFinite(similarity) && similarity >= 0 && similarity <= 1
+        ? similarity
+        : DEFAULT_KNOWLEDGE_SEARCH_CONFIG.similarity,
+    topK: Number.isInteger(topK) && topK >= 1 && topK <= 100 ? topK : DEFAULT_KNOWLEDGE_SEARCH_CONFIG.topK,
+  };
+};
 
 export const skillHandler = (it) => {
   const resourceType = it.grantResourceType || it.resourceBizType;
@@ -311,6 +338,26 @@ const EmployeeDetail = ({ loading }) => {
       items: [],
     },
   ]);
+  const [knowledgeSearchConfigEnabled, setKnowledgeSearchConfigEnabled] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    queryKnowledgeCapability()
+      .then((res) => {
+        if (!mounted) return;
+        const capability = res?.data || res;
+        setKnowledgeSearchConfigEnabled(capability?.allowKnowledgeSearchConfig === true);
+      })
+      .catch(() => {
+        if (mounted) {
+          setKnowledgeSearchConfigEnabled(false);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const [managementAddresses, setManagementAddresses] = useState([]);
 
@@ -859,6 +906,7 @@ const EmployeeDetail = ({ loading }) => {
                       ...rel,
                       grantResourceType: rel.grantResourceType || rel.resourceBizType || it.id,
                       description: rel.description ?? rel.resourceDesc ?? rel.remark ?? '',
+                      knowledgeSearchConfig: normalizeKnowledgeSearchConfig(rel),
                     })),
                 }))
               );
@@ -1070,6 +1118,12 @@ const EmployeeDetail = ({ loading }) => {
         knowledgeBases.forEach((it) => {
           it.items.forEach((i) => {
             relIds.push(`${i.resourceId}`);
+            if (knowledgeSearchConfigEnabled) {
+              relResourceInfoList.push({
+                relId: `${i.resourceId}`,
+                knowledgeSearchConfig: normalizeKnowledgeSearchConfig(i),
+              });
+            }
           });
         });
 
@@ -1259,6 +1313,7 @@ const EmployeeDetail = ({ loading }) => {
       questionList,
       selectedTools,
       knowledgeBases,
+      knowledgeSearchConfigEnabled,
       avatar,
       managementAddresses,
       memoryRules,
@@ -1539,6 +1594,7 @@ const EmployeeDetail = ({ loading }) => {
                 setSelectedTools={setSelectedTools}
                 knowledgeBases={knowledgeBases}
                 setKnowledgeBases={setKnowledgeBases}
+                knowledgeSearchConfigEnabled={knowledgeSearchConfigEnabled}
                 tagOptions={tagOptions}
                 setTagOptions={setTagOptions}
                 managementAddresses={managementAddresses}
@@ -1708,6 +1764,7 @@ const EmployeeDetail = ({ loading }) => {
                 ...item,
                 grantResourceType: item.grantResourceType || item.resourceBizType,
                 description: item.description ?? item.resourceDesc ?? item.remark ?? '',
+                knowledgeSearchConfig: normalizeKnowledgeSearchConfig(item),
               };
               setKnowledgeBases(
                 knowledgeBases.map((it) => ({

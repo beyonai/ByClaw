@@ -95,6 +95,8 @@ export default {
   'employeeDetail.configureKnowledge': 'Configure Knowledge',
   'employeeDetail.qaKnowledge': 'Q&A Knowledge Base',
   'employeeDetail.documentKnowledge': 'Document Knowledge Base',
+  'employeeDetail.minimumSimilarity': 'Minimum similarity',
+  'employeeDetail.maximumRecall': 'Maximum recall count',
   'employeeDetail.tagSearchPlaceholder': 'Add tags, press Enter to complete',
   'employeeDetail.skillType.agent': 'Agent',
   'employeeDetail.skillType.toolkit': 'Toolkit',

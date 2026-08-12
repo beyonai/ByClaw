@@ -21,6 +21,10 @@ public class SsResourceDTO extends SsResource {
      */
     private Integer activeResourceNum;
 
+    /**
+     * 当前数字员工与知识库关联关系上的检索配置。
+     */
+    private RelResourceInfo.KnowledgeSearchConfig knowledgeSearchConfig;
 
     private Long relDetailId;
 

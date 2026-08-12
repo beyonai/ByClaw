@@ -896,6 +896,12 @@
                           "minimum": 1,
                           "description": "最终返回条数，必须大于0"
                         },
+                        "similarity": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1,
+                          "description": "最小匹配度，取值范围0到1"
+                        },
                         "fileTypeList": {
                           "type": "array",
                           "items": {

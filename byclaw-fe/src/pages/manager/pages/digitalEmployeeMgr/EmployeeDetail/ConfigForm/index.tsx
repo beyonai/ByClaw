@@ -12,8 +12,10 @@ import {
   Empty,
   Form,
   Input,
+  InputNumber,
   Radio,
   Select,
+  Slider,
   Space,
   Spin,
   Table,
@@ -267,6 +269,7 @@ const ConfigForm = (props) => {
     setSelectedTools,
     knowledgeBases,
     setKnowledgeBases,
+    knowledgeSearchConfigEnabled = false,
     tagOptions,
     setTagOptions,
     managementAddresses,
@@ -315,6 +318,34 @@ const ConfigForm = (props) => {
   const formOwnerType = Form.useWatch('ownerType', form, { form, preserve: true });
   const effectiveOwnerType = formOwnerType || ownerType;
   const selectedSkills = Form.useWatch('bundledSkills', { form, preserve: true }) || [];
+
+  const updateKnowledgeSearchConfig = useCallback(
+    (categoryId, resourceId, values) => {
+      setKnowledgeBases((prev) =>
+        prev.map((category) =>
+          category.id === categoryId
+            ? {
+                ...category,
+                items: category.items.map((item) =>
+                  item.resourceId === resourceId
+                    ? {
+                        ...item,
+                        knowledgeSearchConfig: {
+                          similarity: 0.6,
+                          topK: 20,
+                          ...item.knowledgeSearchConfig,
+                          ...values,
+                        },
+                      }
+                    : item
+                ),
+              }
+            : category
+        )
+      );
+    },
+    [setKnowledgeBases]
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -1953,6 +1984,76 @@ const ConfigForm = (props) => {
                                     />
                                   )}
                                 </div>
+                                {knowledgeSearchConfigEnabled && (
+                                  <div className={styles.knowledgeSearchConfig}>
+                                    <div className={styles.knowledgeSearchRow}>
+                                      <span className={styles.knowledgeSearchLabel}>
+                                        {intl.formatMessage({ id: 'employeeDetail.minimumSimilarity' })}
+                                      </span>
+                                      <div className={styles.knowledgeSearchControl}>
+                                        <Slider
+                                          min={0}
+                                          max={1}
+                                          step={0.01}
+                                          value={item.knowledgeSearchConfig?.similarity ?? 0.6}
+                                          disabled={isReadOnly}
+                                          onChange={(value) =>
+                                            updateKnowledgeSearchConfig(category.id, item.resourceId, {
+                                              similarity: value,
+                                            })
+                                          }
+                                        />
+                                        <InputNumber
+                                          min={0}
+                                          max={1}
+                                          step={0.01}
+                                          precision={2}
+                                          value={item.knowledgeSearchConfig?.similarity ?? 0.6}
+                                          disabled={isReadOnly}
+                                          onChange={(value) => {
+                                            if (value !== null) {
+                                              updateKnowledgeSearchConfig(category.id, item.resourceId, {
+                                                similarity: value,
+                                              });
+                                            }
+                                          }}
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className={styles.knowledgeSearchRow}>
+                                      <span className={styles.knowledgeSearchLabel}>
+                                        {intl.formatMessage({ id: 'employeeDetail.maximumRecall' })}
+                                      </span>
+                                      <div className={styles.knowledgeSearchControl}>
+                                        <Slider
+                                          min={1}
+                                          max={100}
+                                          step={1}
+                                          value={item.knowledgeSearchConfig?.topK ?? 20}
+                                          disabled={isReadOnly}
+                                          onChange={(value) =>
+                                            updateKnowledgeSearchConfig(category.id, item.resourceId, { topK: value })
+                                          }
+                                        />
+                                        <InputNumber
+                                          min={1}
+                                          max={100}
+                                          step={1}
+                                          precision={0}
+                                          value={item.knowledgeSearchConfig?.topK ?? 20}
+                                          disabled={isReadOnly}
+                                          onChange={(value) => {
+                                            if (value !== null) {
+                                              updateKnowledgeSearchConfig(category.id, item.resourceId, {
+                                                topK: value,
+                                              });
+                                            }
+                                          }}
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
                               </Card>
                             ))
                           : null}
