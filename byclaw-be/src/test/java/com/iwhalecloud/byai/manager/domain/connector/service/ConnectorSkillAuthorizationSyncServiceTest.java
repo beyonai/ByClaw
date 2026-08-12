@@ -22,6 +22,8 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialVerifier;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialVerifierRegistry;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialRenewalMode;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState;
 import com.iwhalecloud.byai.manager.domain.connector.manifest.InvalidConnectorManifestException;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorSkillAuthorizationSyncDto;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
@@ -130,6 +132,28 @@ class ConnectorSkillAuthorizationSyncServiceTest {
             "CONNECTOR_CREDENTIAL_INVALID",
             () -> service.sync("dingtalk", "42")
         );
+
+        verifyNoInteractions(connectionStateService);
+    }
+
+    @Test
+    void reauthorizationRequiredResultNeverWritesConnectorState() {
+        ConnectorInfo connector = activeConnector();
+        AuthorizationStatusResult reauthorizationRequired = AuthorizationStatusResult.connected(
+            "account-42",
+            "Ding User",
+            CredentialState.REAUTH_REQUIRED,
+            CredentialRenewalMode.REFRESH_TOKEN,
+            null,
+            null,
+            new java.util.Date(),
+            null
+        );
+        when(connectorInfoService.findByCode("dingtalk")).thenReturn(connector);
+        when(verifierRegistry.get("dws-dingtalk")).thenReturn(verifier);
+        when(verifier.verify(42L, connector)).thenReturn(reauthorizationRequired);
+
+        assertSyncError("CONNECTOR_CREDENTIAL_INVALID", () -> service.sync("dingtalk", "42"));
 
         verifyNoInteractions(connectionStateService);
     }

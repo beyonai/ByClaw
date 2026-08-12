@@ -43,26 +43,32 @@ class ConnectorSchemaTest {
         """;
 
     @Test
-    void connectorListQueryExposesCredentialExpirationAndDisablesExpiredAuthorizations() throws Exception {
+    void connectorListQueryExposesCredentialLifecycleWithoutDisablingExpiredAccessTokens() throws Exception {
         String sql = read("byclaw-be/src/main/resources/com/iwhalecloud/byai/manager/mapper/connector/ConnectorInfoMapper.xml");
 
         assertThat(sql).contains("row_number() over");
         assertThat(sql).contains("partition by connector_id");
         assertThat(sql).contains("when enable_flag = 'y' then 0 else 1 end");
         assertThat(sql).contains("<result column=\"credential_expires_at\" property=\"credentialexpiresat\"/>");
-        assertThat(sql).contains("b.expire_time as credential_expires_at");
+        assertThat(sql).contains("<result column=\"credential_state\" property=\"credentialstate\"/>");
+        assertThat(sql).contains("<result column=\"renewal_mode\" property=\"renewalmode\"/>");
+        assertThat(sql).contains("<result column=\"access_expires_at\" property=\"accessexpiresat\"/>");
+        assertThat(sql).contains("<result column=\"refresh_expires_at\" property=\"refreshexpiresat\"/>");
+        assertThat(sql).contains("<result column=\"last_verified_at\" property=\"lastverifiedat\"/>");
+        assertThat(sql).contains("b.access_expire_time as credential_expires_at");
         assertThat(sql).contains(
-            "case when b.connector_id is null then null when b.expire_time &lt; current_timestamp then null "
-                + "when b.enable_flag = 'y' then 'y' else 'n' end as enable_flag"
+            "case when b.connector_id is null then null when b.enable_flag = 'y' "
+                + "and coalesce(b.credential_state, 'unknown') "
+                + "in ('ready', 'refresh_needed', 'expiring', 'unknown') then 'y' else 'n' end as enable_flag"
         );
         assertThat(connectorAuthorizationSubquery(
             sql, "left join (", ") b on a.connector_id = b.connector_id"))
-                .contains("select connector_id, enable_flag, expire_time from (select connector_id, enable_flag, expire_time")
-                .doesNotContain("expire_time <", "expire_time >", "expire_time =", "expire_time is");
+                .contains("credential_state", "renewal_mode", "access_expire_time", "refresh_expire_time", "last_verified_at")
+                .doesNotContain("expire_time <", "access_expire_time <", "refresh_expire_time <");
     }
 
     @Test
-    void enabledConnectorMetadataQueryRetainsExpiredAuthorizationsAsDisabled() throws Exception {
+    void enabledConnectorMetadataQueryUsesCredentialStateInsteadOfAccessExpiration() throws Exception {
         String sql = read("byclaw-be/src/main/java/com/iwhalecloud/byai/manager/mapper/connector/ConnectorAuthMapper.java");
 
         assertThat(sql).contains("left join (");
@@ -70,17 +76,18 @@ class ConnectorSchemaTest {
         assertThat(sql).contains("info.skill_code");
         assertThat(sql).doesNotContain("info.runtime_manifest");
         assertThat(sql).contains(
-            "case when auth.connector_id is null then false when auth.expire_time < current_timestamp then false "
-                + "when auth.enable_flag = 'y' then true "
+            "case when auth.connector_id is null then false when auth.enable_flag = 'y' "
+                + "and coalesce(auth.credential_state, 'unknown') "
+                + "in ('ready', 'refresh_needed', 'expiring', 'unknown') then true "
                 + "else false end as enabled"
         );
         assertThat(connectorAuthorizationSubquery(
             sql, "left join (", ") auth on auth.connector_id = info.connector_id"))
                 .contains(
-                    "select connector_id, enable_flag, expire_time from (",
-                    "select connector_id, enable_flag, expire_time, row_number() over"
+                    "select connector_id, enable_flag, credential_state from (",
+                    "select connector_id, enable_flag, credential_state, row_number() over"
                 )
-                .doesNotContain("expire_time <", "expire_time >", "expire_time =", "expire_time is");
+                .doesNotContain("expire_time <", "access_expire_time <", "refresh_expire_time <");
     }
 
     @Test
@@ -89,8 +96,37 @@ class ConnectorSchemaTest {
         ConnectorListDto dto = new ConnectorListDto();
 
         dto.setCredentialExpiresAt(expiration);
+        dto.setAccessExpiresAt(expiration);
+        dto.setRefreshExpiresAt(expiration);
+        dto.setCredentialState("READY");
+        dto.setRenewalMode("REFRESH_TOKEN");
+        dto.setLastVerifiedAt(expiration);
 
         assertThat(dto.getCredentialExpiresAt()).isEqualTo(expiration);
+        assertThat(dto.getAccessExpiresAt()).isEqualTo(expiration);
+        assertThat(dto.getRefreshExpiresAt()).isEqualTo(expiration);
+        assertThat(dto.getCredentialState()).isEqualTo("READY");
+        assertThat(dto.getRenewalMode()).isEqualTo("REFRESH_TOKEN");
+        assertThat(dto.getLastVerifiedAt()).isEqualTo(expiration);
+    }
+
+    @Test
+    void connectorCredentialLifecycleMigrationAddsMetadataWithoutPersistingTokens() throws Exception {
+        String sql = read("deploy/migrations/versions/V0.3.2/V0.3.2__ddl.sql");
+
+        assertThat(sql).contains(
+            "'access_expire_time', 'timestamp'",
+            "'refresh_expire_time', 'timestamp'",
+            "'credential_state', 'varchar(32)'",
+            "'renewal_mode', 'varchar(32)'",
+            "'last_verified_at', 'timestamp'",
+            "set access_expire_time = expire_time"
+        );
+        assertThat(sql).doesNotContain(
+            "'byai_connector_auth', 'access_token'",
+            "'byai_connector_auth', 'refresh_token'"
+        );
+        assertThat(sql).doesNotContain("when 'lark-cli' then 'refresh_token'");
     }
 
     @Test

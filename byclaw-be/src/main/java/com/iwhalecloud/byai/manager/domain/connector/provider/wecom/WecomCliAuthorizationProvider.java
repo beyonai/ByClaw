@@ -1000,13 +1000,14 @@ public class WecomCliAuthorizationProvider
     }
 
     private AuthorizationStatusResult connectedStatus() {
-        return new AuthorizationStatusResult(
-            AuthorizationStatus.CONNECTED,
+        return AuthorizationStatusResult.connected(
             null,
             null,
+            com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState.READY,
+            com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialRenewalMode.PROBE_ONLY,
             null,
             null,
-            null,
+            new Date(),
             null
         );
     }

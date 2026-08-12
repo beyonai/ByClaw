@@ -40,6 +40,24 @@ public class ConnectorAuth {
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private Date expireTime;
 
+    /** 当前 access token 或等价短期凭证的到期时间 */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private Date accessExpireTime;
+
+    /** refresh token 或等价长期续期能力的到期时间 */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private Date refreshExpireTime;
+
+    /** READY、REFRESH_NEEDED、EXPIRING、REAUTH_REQUIRED、UNKNOWN */
+    private String credentialState;
+
+    /** REFRESH_TOKEN、CREDENTIAL_REISSUE、PROBE_ONLY、NONE */
+    private String renewalMode;
+
+    /** Provider 最近一次权威验证时间 */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private Date lastVerifiedAt;
+
     /** 连接启用标识：Y=开启连接，N=关闭连接，新建默认关闭 */
     private String enableFlag;
 
