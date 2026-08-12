@@ -642,6 +642,9 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
         inputText={mentionPopoverData.inputText}
         onClose={handleCloseMention}
         chatMode={chatMode}
+        excludedAgentIds={getResourceList(value, true)
+          .filter((resource) => resource.resourceType === ResourceType.digitalEmployee)
+          .flatMap((resource) => [resource.resourceId, resource.resourceCode].filter(Boolean).map((item) => `${item}`))}
         resourceAgentIds={props.resourceAgentIds}
       />
     </div>

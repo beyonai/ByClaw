@@ -75,9 +75,11 @@ const Employees = () => {
   // const [taskListRefreshKey, setTaskListRefreshKey] = useState(0);
 
   const searchParamAgentId = searchParams.get('agentId') || '';
-  const routeState = location.state as
-    | { selectedAgentId?: string; selectedEmployee?: IAgentCache; keepSiderActiveKey?: string }
-    | null;
+  const routeState = location.state as {
+    selectedAgentId?: string;
+    selectedEmployee?: IAgentCache;
+    keepSiderActiveKey?: string;
+  } | null;
   const routeStateAgentId = `${routeState?.selectedAgentId || ''}`;
   const routeStateEmployee = routeState?.selectedEmployee;
   const previousRouteSelectionRef = useRef('');
@@ -447,6 +449,9 @@ const Employees = () => {
                 queryInputProps={{
                   placeholder: '',
                 }}
+                // 员工详情固定与当前数字员工聊天，不显示 @ 入口，也不恢复任何历史输入草稿。
+                cannotAt
+                disableInputDraft
                 isBottom={isBottom}
                 setIsBottom={setIsBottom}
                 // 打开或切换员工时保持详情态；只有当前员工发送成功后才进入聊天态。

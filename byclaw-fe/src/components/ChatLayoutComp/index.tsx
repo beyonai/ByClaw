@@ -55,6 +55,9 @@ type IProps = {
 
   queryInputProps?: Record<string, unknown>;
 
+  /** 禁用输入框草稿缓存与恢复，员工详情等固定聊天对象场景使用。 */
+  disableInputDraft?: boolean;
+
   /** 自定义聊天地址 */
   chatUrl?: string;
   cannotAt?: boolean;
@@ -95,7 +98,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     projectId,
   } = props;
   const { isBottom, setIsBottom, autoEnterBottomOnMessage = true } = props;
-  const { sessionId, queryInputProps = {}, readOnly } = props;
+  const { sessionId, queryInputProps = {}, readOnly, disableInputDraft = false } = props;
   const { cannotAt = !sessionId && !isRootPage() } = props;
 
   const [notificationMessage, contextHolder] = notification.useNotification({
@@ -612,6 +615,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   disabledInput={disabledInput}
                   isBottom={isBottom}
                   cannotAt={cannotAt}
+                  disableInputDraft={disableInputDraft}
                   queryInputProps={{ ...queryInputProps, projectId: sessionProjectId }}
                   lastMsg={lastMsg}
                   sessionId={sessionId}

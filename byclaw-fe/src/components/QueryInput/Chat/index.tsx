@@ -318,6 +318,11 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
             chatMode={chatModeMap.expert}
             agentId={agentId}
             sessionId={sessionId}
+            excludedAgentIds={(this.state.resourceList || [])
+              .filter((resource) => `${resource.resourceType}` === `${ResourceTypeMap.digitalEmployee}`)
+              .flatMap((resource) =>
+                [resource.resourceId, resource.resourceCode].filter(Boolean).map((item) => `${item}`)
+              )}
             onSelect={this.onSelectMentionPopoverItem}
             popoverPos={showMentionPopoverType === '@' ? staticEmptyObject : undefined}
             onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}

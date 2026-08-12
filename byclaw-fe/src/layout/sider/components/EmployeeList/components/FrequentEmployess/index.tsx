@@ -23,7 +23,12 @@ import { agentHandler } from '@/utils/agent';
 import { getDefaultPagination, paginationReducer } from '@/utils/pageInfo';
 import useGlobal from '@/hooks/useGlobal';
 import EmptyTips from '@/components/EmptyTips';
-import { EmployeeListProps, EmployeeListContext, isInputMode } from '@/layout/sider/components/EmployeeList';
+import {
+  EmployeeListProps,
+  EmployeeListContext,
+  isExcludedEmployee,
+  isInputMode,
+} from '@/layout/sider/components/EmployeeList';
 import { sortBySuperHelperFirst, updateDefaultEmployee } from '@/layout/sider/components/EmployeeList/util';
 
 import pStyles from '@/layout/sider/components/EmployeeList/index.module.less';
@@ -277,7 +282,7 @@ const FrequentEmployees = (props: IProps, ref: any) => {
           >
             <List
               className={pStyles.employeesList}
-              dataSource={employeesList}
+              dataSource={employeesList.filter((employee) => !isExcludedEmployee(employee, props.excludedAgentIds))}
               split={false}
               renderItem={(item: any) => {
                 const canDrag = true;
