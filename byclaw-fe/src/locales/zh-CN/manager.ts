@@ -512,6 +512,7 @@ export default {
   'auth.authObjects': '授权对象',
   'auth.including': '包括',
   'auth.excludeObjects': '排除以下对象',
+  'auth.organizationIncludesDescendants': '对组织授权或排除时，将同时作用于该组织下的所有子组织。',
   'auth.excluding': '不包括',
   'auth.applicants': '申请人员',
   'auth.addAuthObject': '新增授权对象',
