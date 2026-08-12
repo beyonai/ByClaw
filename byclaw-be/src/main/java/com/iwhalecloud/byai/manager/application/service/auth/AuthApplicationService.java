@@ -1473,25 +1473,14 @@ public class AuthApplicationService {
         privilegeGrantQo.setGrantObjTypes(grantObjTypes);
         privilegeGrantQo.setGrantToObjType(grantToObjType);
         privilegeGrantQo.setGrantToObjId(grantToObjId);
-        List<PrivilegeGrant> authPrivilegeGrantList = privilegeGrantService.findPrivilegeByQo(privilegeGrantQo);
+        List<PrivilegeGrant> authPrivilegeGrantList =
+            new ArrayList<>(privilegeGrantService.findPrivilegeByQo(privilegeGrantQo));
 
         // 如果是用户类型授权，还要查询用户所在的组织和岗位授权信息
         if (GrantToObjType.USER.equalsIgnoreCase(grantToObjType)) {
 
-            // 添加用户组织授权信息
-            List<Organization> organizationList = organizationService.findOrganizationByUserId(grantToObjId);
-
-            // 用户所在组织的上下级关系，也一并查询
-            Set<Long> orgIdList = new HashSet<>(100);
-            for (Organization organization : organizationList) {
-                String pathCode = organization.getPathCode();
-                if (StringUtil.isEmpty(pathCode)) {
-                    continue;
-                }
-                for (String orgIdStr : pathCode.split("\\.")) {
-                    orgIdList.add(Long.parseLong(orgIdStr));
-                }
-            }
+            // 添加用户直接所属组织及其全部上级组织的授权信息
+            Set<Long> orgIdList = organizationService.findEffectiveOrganizationIdsByUserId(grantToObjId);
 
             if (CollectionUtils.isNotEmpty(orgIdList)) {
                 PrivilegeGrantQo organizationGrantQo = new PrivilegeGrantQo();

@@ -14,6 +14,8 @@
 完整文章清单全部写入 `sanitized/metadata.json`，但最多预存 10 个正文到 `sanitized/items/`。`collection-result.json.items`
 只列出当前实际存在的已物化正文，可为空数组。向用户返回已有正文的可点击预览文件链接，并明确展示完整、`partial`、
 缺失正文或失败状态；预览不得掩盖缺失正文。
+canonical view 不携带 `sourceSkill` 或 `itemId`；这些字段以及物化路径的归属只由 metadata inventory 保存，状态脚本按
+`itemId` 和旧 `sanitizedPath` 更新 view，避免同 URL 的不同来源互相删除。
 
 ## 后处理选择
 
@@ -81,6 +83,7 @@
 状态与清理必须通过 `scripts/knowledge-collection-post-processing.mjs`，不得由 Agent 手工修改 JSON 或猜测关联文件：
 
 ```text
+node scripts/knowledge-collection-post-processing.mjs init-session --session-dir <dir> --metadata-input-file <metadata> --collection-result-input-file <result>
 node scripts/knowledge-collection-post-processing.mjs inspect --session-dir <dir>
 node scripts/knowledge-collection-post-processing.mjs mark-materialized --session-dir <dir> --item-json-file <file>
 node scripts/knowledge-collection-post-processing.mjs record-run --session-dir <dir> --run-json-file <file>
@@ -145,6 +148,11 @@ node scripts/knowledge-collection-post-processing.mjs rewrite-image-links --sess
 
 改写只针对 `images/` 开头的相对链接，远程 URL 与其他形式一律保留。图片文件缺失、不是普通文件、含 `..` 穿越或
 超出正文所在目录时，保留原链接并返回告警，不得改写成无法访问的 URL。改写是幂等的：已经是下载 URL 的链接不再匹配。
+
+`init-session` 是没有自带会话 writer 的来源执行器进入正式会话的通用受控入口：它创建 `0700` 会话骨架、以 `0600`
+写入 canonical view 和 `sanitized/metadata.json`，并在成功前校验 schema。自带受测 runner 的来源执行器可以一次性生成
+完整会话，但必须执行相同的权限、schema、canonical-inventory 一致性与秘密扫描校验；会话建立后，Agent 不得直接修改
+正式 metadata，新增或替换正文物化必须通过 `mark-materialized` 登记。
 
 `mark-materialized` 与 `record-run` 的一次性输入文件必须放在会话 `.post-processing-inputs/` 中，并使用
 `"schemaVersion": "1.0"`。文件必须是普通 JSON，不能是符号链接。命令成功持久化正式状态后删除对应输入文件；

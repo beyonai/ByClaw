@@ -65,6 +65,7 @@ export function formatStreamPayload(eventName: string, res: any) {
 
   switch (eventName) {
     case 'createSession':
+    case 'sessionTitleUpdated':
     case 'initMessage':
     case 'initialization': {
       Object.assign(payload, { ...res });

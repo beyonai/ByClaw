@@ -37,6 +37,9 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialRenewalMode;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialLifecycleEvaluator;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
 
 /** Lark authorization orchestration backed by OpenSandbox remote processes. */
@@ -296,10 +299,23 @@ public class LarkSandboxAuthorizationRuntime {
             }
             JsonNode identity = data.path("identities").path("user");
             Date expiresAt = dateValue(identity, data);
-            return new AuthorizationStatusResult(AuthorizationStatus.CONNECTED,
+            Date refreshExpiresAt = dateValue(identity, data, "refreshExpiresAt", "refresh_expires_at");
+            String tokenStatus = firstText(identity, "tokenStatus", "token_status");
+            CredentialState state = CredentialLifecycleEvaluator.evaluate(
+                tokenStatus,
+                null,
+                refreshExpiresAt,
+                new Date()
+            );
+            return AuthorizationStatusResult.connected(
                 firstText(identity, "openId", "open_id", "userId", "user_id"),
                 firstText(identity, "name", "displayName", "display_name", "userName", "user_name"),
-                expiresAt, null, null, null);
+                state,
+                refreshExpiresAt == null ? CredentialRenewalMode.NONE : CredentialRenewalMode.REFRESH_TOKEN,
+                expiresAt,
+                refreshExpiresAt,
+                new Date(),
+                null);
         } catch (JsonProcessingException e) {
             return failedStatus("PROVIDER_PROTOCOL_ERROR", "Lark authorization returned an invalid response");
         }
@@ -426,11 +442,14 @@ public class LarkSandboxAuthorizationRuntime {
     }
 
     private Date dateValue(JsonNode primary, JsonNode fallback) {
-        JsonNode value = firstValue(primary, "expiresAt", "expires_at", "credentialExpiresAt",
+        return dateValue(primary, fallback, "expiresAt", "expires_at", "credentialExpiresAt",
             "credential_expires_at");
+    }
+
+    private Date dateValue(JsonNode primary, JsonNode fallback, String... names) {
+        JsonNode value = firstValue(primary, names);
         if (value == null) {
-            value = firstValue(fallback, "expiresAt", "expires_at", "credentialExpiresAt",
-                "credential_expires_at");
+            value = firstValue(fallback, names);
         }
         if (value == null) {
             return null;

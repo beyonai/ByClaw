@@ -1,6 +1,7 @@
 import { Button, Empty, Spin, Tag, Typography } from 'antd';
 import { MessageOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useIntl } from '@umijs/max';
 import { listProjectSessionsByQo } from '@/service/devloop';
 import type { ProjectSession } from '../../types';
 import { getArrayData, getPageTotal, normalizeProjectSession } from '../../utils';
@@ -26,6 +27,7 @@ const ProjectSessionList: React.FC<Props> = ({
   onRefresh,
   onOpenSession,
 }) => {
+  const intl = useIntl();
   const [sessionItems, setSessionItems] = useState(sessions);
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(sessions.length);
@@ -76,9 +78,12 @@ const ProjectSessionList: React.FC<Props> = ({
   if (!sessionItems.length) {
     return (
       <div className={styles.sessionEmpty}>
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无会话" />
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={intl.formatMessage({ id: 'projectSpace.sessions.empty' })}
+        />
         <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void loadSessions(1).then(onRefresh)}>
-          刷新
+          {intl.formatMessage({ id: 'projectSpace.detail.refresh' })}
         </Button>
       </div>
     );
@@ -87,14 +92,16 @@ const ProjectSessionList: React.FC<Props> = ({
   return (
     <div className={styles.sessionListWrap}>
       <div className={styles.sessionToolbar}>
-        <Typography.Text type="secondary">共 {total || sessionItems.length} 个会话</Typography.Text>
+        <Typography.Text type="secondary">
+          {intl.formatMessage({ id: 'projectSpace.sessions.total' }, { count: total || sessionItems.length })}
+        </Typography.Text>
         <Button
           size="small"
           icon={<ReloadOutlined />}
           loading={loading}
           onClick={() => void loadSessions(1).then(onRefresh)}
         >
-          刷新
+          {intl.formatMessage({ id: 'projectSpace.detail.refresh' })}
         </Button>
       </div>
       <div className={styles.dataCardGrid}>
@@ -108,13 +115,17 @@ const ProjectSessionList: React.FC<Props> = ({
               <Typography.Text strong ellipsis={{ tooltip: session.sessionName }}>
                 {session.sessionName}
               </Typography.Text>
-              {session.taskId ? <Tag bordered={false}>任务会话</Tag> : null}
+              {session.taskId ? (
+                <Tag bordered={false}>{intl.formatMessage({ id: 'projectSpace.sessions.taskSession' })}</Tag>
+              ) : null}
             </div>
             <Typography.Paragraph className={styles.dataCardDescription} ellipsis={{ rows: 2 }}>
-              {session.sessionContent || '暂无会话摘要'}
+              {session.sessionContent || intl.formatMessage({ id: 'projectSpace.sessions.noSummary' })}
             </Typography.Paragraph>
             <div className={styles.dataCardFooter}>
-              <Tag bordered={false}>{session.fileCount || 0} 文件</Tag>
+              <Tag bordered={false}>
+                {intl.formatMessage({ id: 'projectSpace.sessions.fileCount' }, { count: session.fileCount || 0 })}
+              </Tag>
               <Button
                 type="link"
                 size="small"
@@ -124,7 +135,7 @@ const ProjectSessionList: React.FC<Props> = ({
                   onOpenSession?.(session);
                 }}
               >
-                打开会话
+                {intl.formatMessage({ id: 'projectSpace.sessions.open' })}
               </Button>
             </div>
           </article>

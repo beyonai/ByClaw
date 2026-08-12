@@ -21,6 +21,8 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialRenewalMode;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService.DwsCredentialStatus;
@@ -102,11 +104,14 @@ class DwsDingtalkAuthorizationProviderTest {
     @Test
     void mapsValidDwsStatusToConnectedAccount() {
         String expiresAt = "2026-08-01T12:30:00+08:00";
+        String refreshExpiresAt = "2026-09-01T12:30:00+08:00";
         when(dwsAuthService.getAuthStatus(42L, STATUS_COMMAND)).thenReturn(Map.of(
             "tokenValid", true,
+            "refreshTokenValid", true,
             "userId", "ding-user-42",
             "userName", "Ding User",
-            "expiresAt", expiresAt
+            "expiresAt", expiresAt,
+            "refreshExpiresAt", refreshExpiresAt
         ));
 
         AuthorizationStatusResult result = provider.queryStatus(sessionContext("42"));
@@ -116,10 +121,71 @@ class DwsDingtalkAuthorizationProviderTest {
         assertThat(result.accountName()).isEqualTo("Ding User");
         assertThat(result.credentialExpiresAt())
             .isEqualTo(Date.from(OffsetDateTime.parse(expiresAt).toInstant()));
+        assertThat(result.refreshExpiresAt())
+            .isEqualTo(Date.from(OffsetDateTime.parse(refreshExpiresAt).toInstant()));
+        assertThat(result.credentialState()).isEqualTo(CredentialState.READY);
+        assertThat(result.renewalMode()).isEqualTo(CredentialRenewalMode.REFRESH_TOKEN);
+        assertThat(result.lastVerifiedAt()).isNotNull();
         assertThat(result.credentialReference()).isNull();
         assertThat(result.errorCode()).isNull();
         assertThat(result.errorMessage()).isNull();
         verify(dwsAuthService).getAuthStatus(42L, STATUS_COMMAND);
+    }
+
+    @Test
+    void mapsRefreshableDwsStatusToRefreshNeeded() {
+        when(dwsAuthService.getAuthStatus(42L, STATUS_COMMAND)).thenReturn(Map.of(
+            "tokenValid", false,
+            "refreshTokenValid", true,
+            "userId", "ding-user-42"
+        ));
+
+        AuthorizationStatusResult result = provider.queryStatus(sessionContext("42"));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.credentialState()).isEqualTo(CredentialState.REFRESH_NEEDED);
+        assertThat(result.renewalMode()).isEqualTo(CredentialRenewalMode.REFRESH_TOKEN);
+    }
+
+    @Test
+    void mapsExplicitlyInvalidDwsRefreshTokenToReauthorizationRequired() {
+        when(dwsAuthService.getAuthStatus(42L, STATUS_COMMAND)).thenReturn(Map.of(
+            "tokenValid", true,
+            "refreshTokenValid", false,
+            "userId", "ding-user-42"
+        ));
+
+        AuthorizationStatusResult result = provider.queryStatus(sessionContext("42"));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.credentialState()).isEqualTo(CredentialState.REAUTH_REQUIRED);
+    }
+
+    @Test
+    void keepsLegacyDwsStatusWithoutRefreshFlagBackwardCompatible() {
+        when(dwsAuthService.getAuthStatus(42L, STATUS_COMMAND)).thenReturn(Map.of(
+            "tokenValid", true,
+            "userId", "ding-user-42"
+        ));
+
+        AuthorizationStatusResult result = provider.queryStatus(sessionContext("42"));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.credentialState()).isEqualTo(CredentialState.READY);
+    }
+
+    @Test
+    void mapsBothInvalidDwsTokensToReauthorizationRequired() {
+        when(dwsAuthService.getAuthStatus(42L, STATUS_COMMAND)).thenReturn(Map.of(
+            "tokenValid", false,
+            "refreshTokenValid", false,
+            "userId", "ding-user-42"
+        ));
+
+        AuthorizationStatusResult result = provider.queryStatus(sessionContext("42"));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.credentialState()).isEqualTo(CredentialState.REAUTH_REQUIRED);
     }
 
     @Test

@@ -1,15 +1,34 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 
 const scriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'knowledge-collection-post-processing.mjs');
+const ingestScriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'knowledge-collection-ingest.mjs');
 
 function runCli(args) {
   return new Promise((resolveRun) => {
     const child = spawn(process.execPath, [scriptPath, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('close', (code) => {
+      let json;
+      try { json = JSON.parse(stdout); } catch { json = undefined; }
+      resolveRun({ code, stdout, stderr, json });
+    });
+  });
+}
+
+function runIngestCli(args) {
+  return new Promise((resolveRun) => {
+    const child = spawn(process.execPath, [ingestScriptPath, ...args], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, REDIS_HOST: '' },
+    });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk; });
@@ -145,7 +164,12 @@ function runRecord(runId, itemStatuses, overrides = {}) {
 }
 
 async function testInspectMigratesLegacyMetadataAndPreservesSourceFields() {
-  const root = await createSession(['a'], { storageFallback: true, partial: false, backendCliVersion: '1.2.3' });
+  const root = await createSession(['a'], {
+    storageFallback: true,
+    partial: false,
+    backendCliVersion: '1.2.3',
+    access_token: 'legacy-secret',
+  });
   try {
     const result = await runCli(['inspect', '--session-dir', root]);
     assert.equal(result.code, 0, result.stderr || result.stdout);
@@ -154,6 +178,7 @@ async function testInspectMigratesLegacyMetadataAndPreservesSourceFields() {
     assert.equal(result.json.metadata.collection.items.length, 1);
     assert.equal(result.json.metadata.collection.items[0].materialization.status, 'materialized');
     assert.equal(result.json.metadata.sourceMetadata.backendCliVersion, '1.2.3');
+    assert.equal(result.json.metadata.sourceMetadata.access_token, undefined);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -180,6 +205,14 @@ async function testMarkMaterializedUpdatesInventoryAndCanonicalView() {
     assert.equal(persistedMetadata.collection.items[0].materialization.status, 'materialized');
     assert.equal(collection.items.length, 1);
     assert.equal(collection.items[0].fileName, 'sanitized/items/a.md');
+    assert.deepEqual(Object.keys(collection.items[0]).sort(), [
+      'author', 'fileName', 'markdown', 'publishTime', 'title', 'url',
+    ]);
+    const normalized = await runIngestCli([
+      'normalize', '--collection-result-file', join(root, 'collection-result.json'),
+    ]);
+    assert.equal(normalized.code, 0, normalized.stderr || normalized.stdout);
+    assert.equal(normalized.json?.payloads?.collectionResult?.items?.length, 1);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -941,6 +974,41 @@ async function testRetentionCanBeUpdatedThroughStateCommand() {
   }
 }
 
+async function testRewriteImageLinksRemainsAvailableWithStateMachine() {
+  const help = await runCli(['--help']);
+  assert.equal(help.code, 0, help.stderr || help.stdout);
+  assert.equal(
+    help.json?.commands?.['rewrite-image-links'],
+    '把 sanitized 正文里的本地图片相对链接改写为 fileBrowser 下载 URL',
+  );
+
+  const root = await createSession(['a']);
+  try {
+    await writeFile(
+      join(root, 'sanitized/items/a.md'),
+      '# Article a\n\n![封面](images/img_001.png)\n\n![未映射](images/img_002.png)\n',
+    );
+    const mapFile = join(root, '.post-processing-inputs/image-link-map.json');
+    await writeFile(mapFile, JSON.stringify({
+      linkMap: {
+        'images/img_001.png': '/byaiService/datasetController/download?resourceId=42&directoryPath=%2Fimg_001.png',
+      },
+    }));
+
+    const result = await runCli([
+      'rewrite-image-links', '--session-dir', root, '--link-map-file', mapFile,
+    ]);
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json.mode, 'link-map');
+    assert.equal(result.json.rewritten, 1);
+    const rewritten = await readFile(join(root, 'sanitized/items/a.md'), 'utf8');
+    assert.match(rewritten, /!\[封面\]\(\/byaiService\/datasetController\/download\?/);
+    assert.match(rewritten, /!\[未映射\]\(images\/img_002\.png\)/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 async function testRewriteImageLinksBuildsFileBrowserUrls() {
   const root = await createSession(['a']);
   try {
@@ -961,7 +1029,6 @@ async function testRewriteImageLinksBuildsFileBrowserUrls() {
       rewritten,
       /!\[封面\]\(\/byaiService\/fileBrowser\/download\?resourceId=20000385&path=%2Fsanitized%2Fitems%2Fimages%2Fimg_001\.png&language=zh-CN\)/,
     );
-    // 远程链接不属于本地图片，必须原样保留。
     assert.match(rewritten, /!\[远程\]\(https:\/\/cdn\.example\.com\/x\.png\)/);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -987,46 +1054,12 @@ async function testRewriteImageLinksKeepsLinkWhenImageMissing() {
   }
 }
 
-async function testRewriteImageLinksSupportsLinkMapMode() {
-  const root = await createSession(['a']);
-  try {
-    // 映射模式不读图片文件：图片已上传到知识库，会话里的原图可以不存在。
-    await writeFile(
-      join(root, 'sanitized/items/a.md'),
-      '# Article a\n\n![封面](images/img_001.png)\n\n![未映射](images/img_002.png)\n',
-    );
-    const mapFile = join(root, 'link-map.json');
-    await writeFile(mapFile, JSON.stringify({
-      linkMap: {
-        'images/img_001.png':
-          'http://123.56.153.229:8080/byaiService/datasetController/download?resourceId=42&directoryPath=%2Fimages%2Fimg_001.png',
-      },
-    }));
-    const result = await runCli([
-      'rewrite-image-links', '--session-dir', root, '--link-map-file', mapFile,
-    ]);
-    assert.equal(result.code, 0, result.stderr || result.stdout);
-    assert.equal(result.json.mode, 'link-map');
-    assert.equal(result.json.rewritten, 1);
-    // 映射模式不使用会话空间参数，避免误导调用者。
-    assert.equal(result.json.resourceId, undefined);
-    assert.equal(result.json.workspaceRoot, undefined);
-    const rewritten = await readFile(join(root, 'sanitized/items/a.md'), 'utf8');
-    assert.match(rewritten, /!\[封面\]\(http:\/\/123\.56\.153\.229:8080\/byaiService\/datasetController\/download\?/);
-    // 映射缺失的链接保留原样并告警，不生成死链。
-    assert.match(rewritten, /!\[未映射\]\(images\/img_002\.png\)/);
-    assert.ok(result.json.warnings.some((warning) => warning.includes('链接映射缺失')));
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-}
-
 async function testRewriteImageLinksRejectsUnsafeLinkMap() {
   const root = await createSession(['a']);
   try {
     const original = '# Article a\n\n![封面](images/img_001.png)\n';
     await writeFile(join(root, 'sanitized/items/a.md'), original);
-    const mapFile = join(root, 'link-map.json');
+    const mapFile = join(root, '.post-processing-inputs/link-map.json');
     const cases = [
       [JSON.stringify({ 'images/img_001.png': 'images/other.png' }), /http\/https URL 或站内绝对路径/],
       [JSON.stringify({ 'images/img_001.png': 'javascript:alert(1)' }), /http\/https URL 或站内绝对路径/],
@@ -1067,7 +1100,6 @@ async function testRewriteImageLinksSupportsAbsoluteBaseUrl() {
       rewritten,
       /!\[封面\]\(http:\/\/123\.56\.153\.229:8080\/byaiService\/fileBrowser\/download\?resourceId=20000385&/,
     );
-    // 已是绝对下载 URL 的链接不再匹配，重跑保持幂等。
     const again = await runCli([
       'rewrite-image-links', '--session-dir', root,
       '--resource-id', '20000385', '--workspace-root', root,
@@ -1104,7 +1136,6 @@ async function testRewriteImageLinksRejectsUnsafeBaseUrl() {
       assert.equal(rejected.code, 1, `${value} 应被拒绝`);
       assert.match(rejected.json.error, expected);
     }
-    // 任何一次拒绝都不得改动正文。
     assert.equal(await readFile(join(root, 'sanitized/items/a.md'), 'utf8'), original);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -1211,6 +1242,153 @@ async function testMalformedMetadataFailsClosedBeforeCleanup() {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  }
+}
+
+async function testMalformedV1MetadataIsNotRebuiltFromCanonicalView() {
+  const value = metadata([inventoryItem('a'), inventoryItem('b')]);
+  const root = await createSession(['a'], value);
+  const original = JSON.stringify(value);
+  try {
+    const persisted = await readJson(join(root, 'sanitized/metadata.json'));
+    delete persisted.postProcessing;
+    await writeFile(join(root, 'sanitized/metadata.json'), JSON.stringify(persisted));
+    const result = await runCli(['inspect', '--session-dir', root]);
+    assert.equal(result.code, 1, result.stdout);
+    assert.match(String(result.json?.error || ''), /metadata.*postProcessing|postProcessing/);
+    const after = await readJson(join(root, 'sanitized/metadata.json'));
+    assert.equal(after.collection.items.length, 2);
+    assert.notEqual(JSON.stringify(after), original);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testInventoryRequiresRecoverableSourceIdentity() {
+  const value = metadata([inventoryItem('a', 'pending')]);
+  value.collection.items[0].sourceUrl = '';
+  const root = await createSession([], value);
+  try {
+    const result = await runCli(['inspect', '--session-dir', root]);
+    assert.equal(result.code, 1, result.stdout);
+    assert.match(String(result.json?.error || ''), /sourceUrl|source identity/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testInitSessionCreatesAValidatedPrivateSession() {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'knowledge-collection-init-'));
+  const sessionDir = join(tempRoot, 'session');
+  const metadataPath = join(tempRoot, 'metadata.json');
+  const collectionPath = join(tempRoot, 'collection-result.json');
+  await writeFile(metadataPath, JSON.stringify(metadata([inventoryItem('a', 'pending')])));
+  await writeFile(collectionPath, JSON.stringify({
+    schemaVersion: '1.0',
+    title: 'Collection',
+    source: 'public-internet',
+    backend: 'bycli',
+    url: 'https://example.com',
+    filters: {},
+    items: [],
+  }));
+  try {
+    const result = await runCli([
+      'init-session', '--session-dir', sessionDir,
+      '--metadata-input-file', metadataPath,
+      '--collection-result-input-file', collectionPath,
+    ]);
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json?.action, 'init-session');
+    assert.equal((await readJson(join(sessionDir, 'sanitized/metadata.json'))).collection.items.length, 1);
+    assert.deepEqual((await readJson(join(sessionDir, 'collection-result.json'))).items, []);
+    assert.equal((await stat(join(sessionDir, '.post-processing-inputs'))).isDirectory(), true);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+}
+
+async function testMetadataRejectsSensitiveKeys() {
+  const value = metadata([inventoryItem('a', 'pending')], { sourceMetadata: { access_token: 'secret' } });
+  const root = await createSession([], value);
+  try {
+    const result = await runCli(['inspect', '--session-dir', root]);
+    assert.equal(result.code, 1, result.stdout);
+    assert.match(String(result.json?.error || ''), /敏感字段|access_token/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testCanonicalViewMustReferenceMaterializedInventoryItem() {
+  const root = await createSession(['a']);
+  try {
+    const collection = await readJson(join(root, 'collection-result.json'));
+    collection.items[0].markdown = 'sanitized/items/unknown.md';
+    collection.items[0].fileName = 'sanitized/items/unknown.md';
+    await writeFile(join(root, 'sanitized/items/unknown.md'), '# Unknown');
+    await writeFile(join(root, 'collection-result.json'), JSON.stringify(collection));
+    const result = await runCli(['inspect', '--session-dir', root]);
+    assert.equal(result.code, 1, result.stdout);
+    assert.match(String(result.json?.error || ''), /canonical|inventory|materialized/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testEveryMaterializedInventoryItemMustAppearInCanonicalView() {
+  const root = await createSession(['a'], metadata([inventoryItem('a'), inventoryItem('b')]));
+  try {
+    await writeFile(join(root, 'markdown/b.md'), '# B');
+    await writeFile(join(root, 'sanitized/items/b.md'), '# B');
+    const result = await runCli(['inspect', '--session-dir', root]);
+    assert.equal(result.code, 1, result.stdout);
+    assert.match(String(result.json?.error || ''), /materialized inventory|canonical view/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testMaterializedInventoryPathsMustBeUnique() {
+  const value = metadata([inventoryItem('a'), inventoryItem('b')]);
+  value.collection.items[1].materialization.markdownPath = 'markdown/a.md';
+  value.collection.items[1].materialization.sanitizedPath = 'sanitized/items/a.md';
+  const root = await createSession(['a', 'b'], value);
+  try {
+    const result = await runCli(['inspect', '--session-dir', root]);
+    assert.equal(result.code, 1, result.stdout);
+    assert.match(String(result.json?.error || ''), /工作副本路径重复/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testInitSessionEnforcesPreMaterializationLimit() {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'knowledge-collection-init-limit-'));
+  const sessionDir = join(tempRoot, 'session');
+  const metadataPath = join(tempRoot, 'metadata.json');
+  const collectionPath = join(tempRoot, 'collection-result.json');
+  const ids = Array.from({ length: 11 }, (_, index) => `item-${index + 1}`);
+  await writeFile(metadataPath, JSON.stringify(metadata(ids.map((id) => inventoryItem(id, 'pending')))));
+  await writeFile(collectionPath, JSON.stringify({
+    schemaVersion: '1.0',
+    title: 'Collection',
+    source: 'public-internet',
+    backend: 'bycli',
+    url: 'https://example.com',
+    filters: {},
+    items: ids.map(canonicalItem),
+  }));
+  try {
+    const result = await runCli([
+      'init-session', '--session-dir', sessionDir,
+      '--metadata-input-file', metadataPath,
+      '--collection-result-input-file', collectionPath,
+    ]);
+    assert.equal(result.code, 1, result.stdout);
+    assert.match(String(result.json?.error || ''), /最多允许预物化 10/);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
   }
 }
 
@@ -1564,6 +1742,45 @@ fs.readFileSync = function readFileSyncPatched(path, ...rest) {
   }
 }
 
+async function testStaleLockRecoveryRestoresOwnerChangedAtRename() {
+  const root = await createSession(['a']);
+  const lockPath = join(root, '.knowledge-collection-post-processing.lock');
+  await writeFile(lockPath, JSON.stringify({
+    pid: 99999999,
+    createdAt: new Date(0).toISOString(),
+    ownerId: 'legacy-dead',
+    command: 'cleanup',
+  }));
+  const preloadPath = join(root, 'replace-lock-at-rename.cjs');
+  await writeFile(preloadPath, `
+const fs = require('node:fs');
+const originalRenameSync = fs.renameSync;
+const lockPath = ${JSON.stringify(lockPath)};
+let replaced = false;
+fs.renameSync = function renameSyncPatched(source, target) {
+  if (!replaced && source === lockPath) {
+    replaced = true;
+    fs.writeFileSync(lockPath, JSON.stringify({
+      pid: process.pid,
+      createdAt: new Date(0).toISOString(),
+      ownerId: 'current-live',
+      command: 'record-run',
+    }));
+  }
+  return originalRenameSync.call(this, source, target);
+};
+`);
+  try {
+    const result = await runCliWithPreload(preloadPath, ['inspect', '--session-dir', root]);
+    assert.equal(result.code, 1, result.stdout);
+    assert.match(String(result.json?.error || ''), /仍存活/);
+    const restored = JSON.parse(await readFile(lockPath, 'utf8'));
+    assert.equal(restored.ownerId, 'current-live');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 async function testFullScopeSuccessRemovesSession() {
   const root = await createSession();
   const runFile = await writeRun(root, 'run.json', runRecord('run-1', [['a', 'success'], ['b', 'success']]));
@@ -1723,15 +1940,23 @@ await testSuccessfulPayloadIsDeletedAndHelpPublishesSchema();
 await testSubsetSuccessKeepsSessionAndUnselectedItem();
 await testRetentionPreventsCleanup();
 await testRetentionCanBeUpdatedThroughStateCommand();
+await testRewriteImageLinksRemainsAvailableWithStateMachine();
 await testRewriteImageLinksBuildsFileBrowserUrls();
 await testRewriteImageLinksKeepsLinkWhenImageMissing();
 await testRewriteImageLinksRejectsMissingResourceIdAndSupportsDryRun();
 await testRewriteImageLinksSupportsAbsoluteBaseUrl();
 await testRewriteImageLinksRejectsUnsafeBaseUrl();
-await testRewriteImageLinksSupportsLinkMapMode();
 await testRewriteImageLinksRejectsUnsafeLinkMap();
 await testNewRunSupersedesSkippedRetentionCleanupOwnership();
 await testMalformedMetadataFailsClosedBeforeCleanup();
+await testMalformedV1MetadataIsNotRebuiltFromCanonicalView();
+await testInventoryRequiresRecoverableSourceIdentity();
+await testInitSessionCreatesAValidatedPrivateSession();
+await testMetadataRejectsSensitiveKeys();
+await testCanonicalViewMustReferenceMaterializedInventoryItem();
+await testEveryMaterializedInventoryItemMustAppearInCanonicalView();
+await testMaterializedInventoryPathsMustBeUnique();
+await testInitSessionEnforcesPreMaterializationLimit();
 await testInvalidMaterializationDowngradesWithoutDeletingFiles();
 await testInvalidMaterializationKeepsCurrentPathFromPendingCleanup();
 await testMarkMaterializedUsesSourceSkillIdentityWhenReplacingCanonical();
@@ -1740,6 +1965,7 @@ await testLegacyGlobalStageMigrationIsConservative();
 await testLegacyRunSelectionAndItemsFieldsAutoMigrateOnInspect();
 await testCurrentEnvelopeWithLegacyItemFieldsAutoMigratesOnInspect();
 await testStaleLockRecoverySkipsIfLockChangedDuringRecovery();
+await testStaleLockRecoveryRestoresOwnerChangedAtRename();
 await testFullScopeSuccessRemovesSession();
 await testCleanupRejectsTraversalAndSymlinkEscape();
 await testLiveLockCannotBeStolen();

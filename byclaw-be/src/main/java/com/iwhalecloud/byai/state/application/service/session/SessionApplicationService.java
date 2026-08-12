@@ -15,6 +15,7 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.qo.session.ByaiSessionQo;
 import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionTitleService;
 import com.iwhalecloud.byai.state.domain.template.enums.DebugModeEnum;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -61,6 +62,9 @@ public class SessionApplicationService {
 
     @Autowired
     private ScanLogService scanLogService;
+
+    @Autowired
+    private SessionTitleService sessionTitleService;
 
     @Autowired
     private SessionExtService sessionExtService;
@@ -173,6 +177,10 @@ public class SessionApplicationService {
      * @return ResponseUtil 操作结果响应对象
      */
     public ByaiSession updateConversation(SessionOpeartorDto sessionOpeartorDto) {
+
+        if (StringUtils.isNotBlank(sessionOpeartorDto.getSessionName())) {
+            sessionTitleService.cancelInitialTitle(sessionOpeartorDto.getSessionId());
+        }
 
         // 创建会话对象用于更新
         ByaiSession byaiSession = new ByaiSession();

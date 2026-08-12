@@ -171,7 +171,21 @@ public class ConnectorConnectionStateService {
         auth.setEnableFlag("Y");
         auth.setStatusCd("00A");
         auth.setLastSyncTime(now);
-        auth.setExpireTime(statusResult == null ? null : statusResult.credentialExpiresAt());
+        applyCredentialLifecycle(auth, statusResult);
+    }
+
+    private void applyCredentialLifecycle(ConnectorAuth auth, AuthorizationStatusResult statusResult) {
+        if (statusResult == null) {
+            auth.setCredentialState("UNKNOWN");
+            auth.setRenewalMode("NONE");
+            return;
+        }
+        auth.setExpireTime(statusResult.accessExpiresAt());
+        auth.setAccessExpireTime(statusResult.accessExpiresAt());
+        auth.setRefreshExpireTime(statusResult.refreshExpiresAt());
+        auth.setCredentialState(statusResult.credentialState().name());
+        auth.setRenewalMode(statusResult.renewalMode().name());
+        auth.setLastVerifiedAt(statusResult.lastVerifiedAt());
     }
 
     private String buildCredential(

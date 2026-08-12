@@ -58,6 +58,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.ArrayList;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -113,7 +114,7 @@ class AuthApplicationServiceTest {
             ReflectionTestUtils.setField(service, "privilegeGrantMapper", mock(PrivilegeGrantMapper.class));
         }
         when(privilegeGrantService.findPrivilegeByQo(any())).thenReturn(new ArrayList<>());
-        when(organizationService.findOrganizationByUserId(any())).thenReturn(List.of());
+        when(organizationService.findEffectiveOrganizationIdsByUserId(any())).thenReturn(Set.of());
         when(positionService.findPositionByUserId(any())).thenReturn(List.of());
         when(stationService.getStationByUserId(any())).thenReturn(null);
     }
@@ -194,7 +195,7 @@ class AuthApplicationServiceTest {
         resource.setCreateBy(1L);
         resource.setManOrgId(100L);
         when(organizationService.isOrganizationManManager(100L)).thenReturn(false);
-        when(organizationService.findOrganizationByUserId(2L)).thenReturn(List.of());
+        when(organizationService.findEffectiveOrganizationIdsByUserId(2L)).thenReturn(Set.of());
         when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> new ArrayList<>());
         when(positionService.findPositionByUserId(2L)).thenReturn(List.of());
         when(stationService.getStationByUserId(2L)).thenReturn(null);
@@ -1177,8 +1178,6 @@ class AuthApplicationServiceTest {
         AuthApplicationService service = newExplicitUserPermissionService(List.of(
             useGrant(615L, 999L, GrantToObjType.ORG, Color.RED, "A"),
             useGrant(615L, 998L, GrantToObjType.POST, Color.RED, "A")));
-        Organization organization = new Organization();
-        organization.setPathCode("30");
         PositionDTO position = new PositionDTO();
         position.setPositionId(31L);
         OrganizationService organizationService =
@@ -1186,7 +1185,7 @@ class AuthApplicationServiceTest {
         PositionService positionService = (PositionService) ReflectionTestUtils.getField(service, "positionService");
         PrivilegeGrantService privilegeGrantService =
             (PrivilegeGrantService) ReflectionTestUtils.getField(service, "privilegeGrantService");
-        when(organizationService.findOrganizationByUserId(3L)).thenReturn(List.of(organization));
+        when(organizationService.findEffectiveOrganizationIdsByUserId(3L)).thenReturn(Set.of(30L));
         when(positionService.findPositionByUserId(3L)).thenReturn(List.of(position));
 
         assertThat(service.hasResourceUsePermission(enterpriseResource(615L, 1L), 3L)).isFalse();
@@ -1199,6 +1198,79 @@ class AuthApplicationServiceTest {
             .filter(qo -> GrantToObjType.POST.equals(qo.getGrantToObjType())).findFirst().orElseThrow();
         assertThat(orgQo.getGrantToObjIds()).containsExactly(30L);
         assertThat(postQo.getGrantToObjIds()).containsExactly(31L);
+    }
+
+    @Test
+    void buildUserAuthResources_inheritsParentOrganizationAuthorization() {
+        AuthApplicationService service = new AuthApplicationService();
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        OrganizationService organizationService = mock(OrganizationService.class);
+        PositionService positionService = mock(PositionService.class);
+        StationService stationService = mock(StationService.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "organizationService", organizationService);
+        ReflectionTestUtils.setField(service, "positionService", positionService);
+        ReflectionTestUtils.setField(service, "stationService", stationService);
+
+        when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of(10L, 20L));
+        when(positionService.findPositionByUserId(1001L)).thenReturn(List.of());
+        when(stationService.getStationByUserId(1001L)).thenReturn(null);
+
+        PrivilegeGrant parentOrgGrant = new PrivilegeGrant();
+        parentOrgGrant.setGrantObjId(500L);
+        parentOrgGrant.setGrantObjType(ResourceBizTypeEnum.AGENT.name());
+        parentOrgGrant.setGrantToObjType(GrantToObjType.ORG);
+        parentOrgGrant.setGrantToObjId(10L);
+        parentOrgGrant.setGrantToType(Color.RED);
+        when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> {
+            PrivilegeGrantQo qo = invocation.getArgument(0);
+            return GrantToObjType.ORG.equals(qo.getGrantToObjType()) ? List.of(parentOrgGrant) : List.of();
+        });
+
+        Map<String, String> resources = service.buildUserAuthResources(1001L);
+
+        assertThat(resources).containsEntry("500", ResourceBizTypeEnum.AGENT.name());
+        verify(privilegeGrantService).findPrivilegeByQo(argThat(qo -> GrantToObjType.ORG.equals(qo.getGrantToObjType())
+            && qo.getGrantToObjIds().containsAll(Set.of(10L, 20L))));
+    }
+
+    @Test
+    void buildUserAuthResources_descendantOrganizationBlacklistOverridesParentAuthorization() {
+        AuthApplicationService service = new AuthApplicationService();
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        OrganizationService organizationService = mock(OrganizationService.class);
+        PositionService positionService = mock(PositionService.class);
+        StationService stationService = mock(StationService.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "organizationService", organizationService);
+        ReflectionTestUtils.setField(service, "positionService", positionService);
+        ReflectionTestUtils.setField(service, "stationService", stationService);
+
+        when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of(10L, 20L));
+        when(positionService.findPositionByUserId(1001L)).thenReturn(List.of());
+        when(stationService.getStationByUserId(1001L)).thenReturn(null);
+
+        PrivilegeGrant parentOrgGrant = new PrivilegeGrant();
+        parentOrgGrant.setGrantObjId(500L);
+        parentOrgGrant.setGrantObjType(ResourceBizTypeEnum.AGENT.name());
+        parentOrgGrant.setGrantToObjType(GrantToObjType.ORG);
+        parentOrgGrant.setGrantToObjId(10L);
+        parentOrgGrant.setGrantToType(Color.RED);
+        PrivilegeGrant childOrgBlacklist = new PrivilegeGrant();
+        childOrgBlacklist.setGrantObjId(500L);
+        childOrgBlacklist.setGrantObjType(ResourceBizTypeEnum.AGENT.name());
+        childOrgBlacklist.setGrantToObjType(GrantToObjType.ORG);
+        childOrgBlacklist.setGrantToObjId(20L);
+        childOrgBlacklist.setGrantToType(Color.BLACK);
+        when(privilegeGrantService.findPrivilegeByQo(any())).thenAnswer(invocation -> {
+            PrivilegeGrantQo qo = invocation.getArgument(0);
+            return GrantToObjType.ORG.equals(qo.getGrantToObjType())
+                ? List.of(parentOrgGrant, childOrgBlacklist) : List.of();
+        });
+
+        Map<String, String> resources = service.buildUserAuthResources(1001L);
+
+        assertThat(resources).doesNotContainKey("500");
     }
 
     private AuthApplicationService newExplicitUserPermissionService(List<PrivilegeGrant> grants) {
@@ -1222,7 +1294,7 @@ class AuthApplicationServiceTest {
                     || qo.getGrantToObjIds().contains(grant.getGrantToObjId()))
                 .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
         });
-        when(organizationService.findOrganizationByUserId(any())).thenReturn(List.of());
+        when(organizationService.findEffectiveOrganizationIdsByUserId(any())).thenReturn(Set.of());
         when(positionService.findPositionByUserId(any())).thenReturn(List.of());
         when(stationService.getStationByUserId(any())).thenReturn(null);
         return service;
@@ -1230,11 +1302,9 @@ class AuthApplicationServiceTest {
 
     private void configureMembership(AuthApplicationService service, ExplicitGrantSource source) {
         if (source == ExplicitGrantSource.ORGANIZATION) {
-            Organization organization = new Organization();
-            organization.setPathCode(String.valueOf(source.targetId));
             OrganizationService organizationService =
                 (OrganizationService) ReflectionTestUtils.getField(service, "organizationService");
-            when(organizationService.findOrganizationByUserId(3L)).thenReturn(List.of(organization));
+            when(organizationService.findEffectiveOrganizationIdsByUserId(3L)).thenReturn(Set.of(source.targetId));
         }
         else if (source == ExplicitGrantSource.POST) {
             PositionDTO position = new PositionDTO();

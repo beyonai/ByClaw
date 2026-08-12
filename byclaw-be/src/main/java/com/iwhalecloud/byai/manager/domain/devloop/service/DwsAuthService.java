@@ -491,7 +491,9 @@ public class DwsAuthService {
             Map<String, Object> result = new HashMap<>();
             result.put("authenticated", node.path("authenticated").asBoolean(false));
             result.put("tokenValid", node.path("token_valid").asBoolean(false));
-            result.put("refreshTokenValid", node.path("refresh_token_valid").asBoolean(false));
+            if (node.has("refresh_token_valid") && !node.get("refresh_token_valid").isNull()) {
+                result.put("refreshTokenValid", node.get("refresh_token_valid").asBoolean(false));
+            }
             result.put("expiresAt", node.path("expires_at").asText(""));
             result.put("refreshExpiresAt", node.path("refresh_expires_at").asText(""));
             result.put("corpId", node.path("corp_id").asText(""));
@@ -531,8 +533,11 @@ public class DwsAuthService {
             Map<String, Object> status = new HashMap<>();
             status.put("authenticated", node.path("authenticated").asBoolean(false));
             status.put("tokenValid", node.path("token_valid").asBoolean(false));
-            status.put("refreshTokenValid", node.path("refresh_token_valid").asBoolean(false));
+            if (node.has("refresh_token_valid") && !node.get("refresh_token_valid").isNull()) {
+                status.put("refreshTokenValid", node.get("refresh_token_valid").asBoolean(false));
+            }
             status.put("expiresAt", node.path("expires_at").asText(""));
+            status.put("refreshExpiresAt", node.path("refresh_expires_at").asText(""));
             status.put("userId", node.path("user_id").asText(""));
             status.put("userName", node.path("user_name").asText(""));
             return DwsCredentialStatus.completed(status);

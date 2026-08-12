@@ -672,6 +672,7 @@ const OntologySiderPanel: React.FC<OntologySiderPanelProps> = ({ embedded = fals
         );
       }
       const menuItems = [
+        { key: 'quote', label: intl.formatMessage({ id: 'common.quote' }) },
         { key: 'detail', label: intl.formatMessage({ id: 'common.detail' }) },
         ...bizItems,
         { key: 'unbind', label: intl.formatMessage({ id: 'ontologySider.unbind' }) },
@@ -717,6 +718,7 @@ const OntologySiderPanel: React.FC<OntologySiderPanelProps> = ({ embedded = fals
               items: menuItems,
               onClick: ({ key, domEvent }) => {
                 domEvent.stopPropagation();
+                if (key === 'quote') quoteLeafToChat(node.leaf);
                 if (key === 'detail') openLeafDetail(node.leaf);
                 if (key === 'objects') showViewObjects(node.leaf);
                 if (key === 'actions') showObjectActions(node.leaf);
@@ -741,6 +743,7 @@ const OntologySiderPanel: React.FC<OntologySiderPanelProps> = ({ embedded = fals
       handleUnbind,
       intl,
       openLeafDetail,
+      quoteLeafToChat,
       showObjectActions,
       showObjectRelations,
       showViewObjects,

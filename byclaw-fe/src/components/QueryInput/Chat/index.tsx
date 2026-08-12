@@ -375,14 +375,14 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
               }}
               onUpdate={this.onUpdateFile}
               onRemove={this.onRemoveFile}
-              setSessionId={(mySessionId: string, file: any) => {
+              setSessionId={(mySessionId: string, sessionName?: string) => {
                 if (`${mySessionId}` === `${sessionId}`) return;
                 setSessionId?.(mySessionId);
                 dispatch({
                   type: 'session/addSession',
                   payload: {
                     sessionId: mySessionId,
-                    sessionName: file?.name,
+                    sessionName,
                   },
                 });
               }}

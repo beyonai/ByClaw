@@ -159,7 +159,8 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
             createTimeStart,
             createTimeEnd,
             status: OPERATION_TASK_STATUS_BY_COLUMN[columnKey],
-            onlyMine: false,
+            // 运营和研发任务看板共用“只看我的”，运营接口已支持按当前负责人筛选。
+            onlyMine: queryState.onlyMine || undefined,
             pageNum,
             pageSize: TASK_PAGE_SIZE,
           })
@@ -218,7 +219,7 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
       const queryState = { ...queryRef.current, ...overrides };
       queryRef.current = queryState;
       setDateRange(queryState.dateRange);
-      setOnlyMine(operationProject ? false : queryState.onlyMine);
+      setOnlyMine(queryState.onlyMine);
       loadFailedShownRef.current = false;
       const requestVersion = requestVersionRef.current + 1;
       requestVersionRef.current = requestVersion;
@@ -235,9 +236,9 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
 
   useEffect(() => {
     if (!open) return;
-    // 每次打开重置为默认视图：研发任务默认只看我的，运营任务默认查看全部项目任务。
+    // 每次打开重置为默认视图：运营和研发任务均默认只看当前登录用户负责的任务。
     setDatePreset(DEFAULT_PRESET);
-    reloadBoard({ dateRange: getPresetRange('week'), onlyMine: !operationProject });
+    reloadBoard({ dateRange: getPresetRange('week'), onlyMine: true });
   }, [open, operationProject, reloadBoard]);
 
   const handlePresetChange = useCallback(
@@ -298,16 +299,14 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
               reloadBoard({ dateRange: nextDateRange });
             }}
           />
-          {!operationProject && (
-            <Checkbox
-              checked={onlyMine}
-              onChange={(e) => {
-                reloadBoard({ onlyMine: e.target.checked });
-              }}
-            >
-              {t('projectSpace.taskBoard.onlyMine')}
-            </Checkbox>
-          )}
+          <Checkbox
+            checked={onlyMine}
+            onChange={(e) => {
+              reloadBoard({ onlyMine: e.target.checked });
+            }}
+          >
+            {t('projectSpace.taskBoard.onlyMine')}
+          </Checkbox>
         </div>
         <div className={styles.kanbanBoard}>
           {COLUMNS.map((column) => {

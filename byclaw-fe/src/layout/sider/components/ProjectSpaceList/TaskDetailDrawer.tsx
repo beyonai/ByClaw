@@ -11,6 +11,7 @@ interface TaskDetailDrawerProps {
   task: any;
   onClose: () => void;
   operationProject?: boolean;
+  simpleProject?: boolean;
   canEnterSession?: boolean;
   onEnterSession?: (task: any) => void;
   // 只读查看会话:非处理人可看别人任务的会话消息(无输入框,不能对话)。
@@ -81,8 +82,7 @@ const getOperationConfig = (task: any, taskType: string) => {
   return parseOperationConfig(task?.[configKey] || rootConfig[configKey] || rootConfig);
 };
 
-const DETAIL_DATE_TIME_PATTERN =
-  /\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})?/g;
+const DETAIL_DATE_TIME_PATTERN = /\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})?/g;
 
 // 详情字段可能是完整 ISO 时间，也可能嵌在“单次执行 · 时间”文案中，统一转换到分钟并保留纯日期原样。
 const formatDateTimeText = (value: unknown) =>
@@ -115,7 +115,13 @@ const hasDetailValue = (value: unknown) => {
 
 const formatDetailValue = (value: unknown): string => {
   if (!hasDetailValue(value)) return '-';
-  if (Array.isArray(value)) return value.map(formatDetailValue).filter((item) => item !== '-').join('、') || '-';
+  if (Array.isArray(value))
+    return (
+      value
+        .map(formatDetailValue)
+        .filter((item) => item !== '-')
+        .join('、') || '-'
+    );
   if (value && typeof value === 'object') {
     const record = value as Record<string, any>;
     return `${
@@ -152,10 +158,17 @@ const getOperationStatusMeta = (task: any, intl: ReturnType<typeof useIntl>) => 
   };
   let normalizedStatus = status;
   if (status.includes('混合') || status.includes('部分失败')) normalizedStatus = 'mixed';
-  else if (status.includes('进行中') || status.includes('运行') || ['doing', 'running', 'in_progress'].includes(status)) {
+  else if (
+    status.includes('进行中') ||
+    status.includes('运行') ||
+    ['doing', 'running', 'in_progress'].includes(status)
+  ) {
     normalizedStatus = 'in_progress';
-  }
-  else if (status.includes('已完成') || status.includes('完成') || ['done', 'completed', 'success'].includes(status)) {
+  } else if (
+    status.includes('已完成') ||
+    status.includes('完成') ||
+    ['done', 'completed', 'success'].includes(status)
+  ) {
     normalizedStatus = 'completed';
   } else if (status.includes('失败') || ['failed', 'error'].includes(status)) {
     normalizedStatus = 'failed';
@@ -184,6 +197,7 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
   task,
   onClose,
   operationProject = false,
+  simpleProject = false,
   canEnterSession,
   onEnterSession,
   onViewSession,
@@ -195,7 +209,7 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
 
   // 打开抽屉时按 sessionId 定点读取 v2 会话状态投影。
   useEffect(() => {
-    if (operationProject || !task?.sessionId || task?.stateAvailable === false) {
+    if (operationProject || simpleProject || !task?.sessionId || task?.stateAvailable === false) {
       setSnapshot(null);
       setPhaseLoading(false);
       return;
@@ -218,7 +232,7 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [operationProject, task?.sessionId, task?.stateAvailable]);
+  }, [operationProject, simpleProject, task?.sessionId, task?.stateAvailable]);
 
   const phases = snapshot?.stages || [];
   const currentPhase = snapshot?.currentStage?.stageId;
@@ -316,7 +330,8 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
     },
     {
       label: '采集方式',
-      value: sourceModeLabelMap[operationConfig.sourceMode] || operationConfig.collectMethod || operationConfig.sourceMode,
+      value:
+        sourceModeLabelMap[operationConfig.sourceMode] || operationConfig.collectMethod || operationConfig.sourceMode,
     },
     { label: '来源知识库', value: operationConfig.sourceKnowledgeName || operationConfig.sourceKnowledge },
     { label: '连接器', value: operationConfig.connectorName || operationConfig.connector },
@@ -347,10 +362,7 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
     {
       label: '数字员工',
       value:
-        task?.agentName ||
-        operationConfig.agentName ||
-        operationConfig.executorAgentName ||
-        operationConfig.agentId,
+        task?.agentName || operationConfig.agentName || operationConfig.executorAgentName || operationConfig.agentId,
     },
     { label: '员工组', value: operationConfig.agentGroupName || operationConfig.agentGroupId },
     { label: '执行方式', value: runModeLabelMap[operationConfig.runMode] || operationConfig.runMode },
@@ -370,6 +382,22 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
         !operationConfig.publishSchedule && !operationConfig.collectSchedule && operationSchedule !== '-'
           ? operationSchedule
           : undefined,
+    },
+  ].filter((field) => hasDetailValue(field.value));
+  const simpleDetailFields = [
+    { label: t('projectTaskDetail.simple.taskId'), value: task?.taskId },
+    { label: t('projectTaskDetail.simple.sessionId'), value: task?.sessionId },
+    { label: t('projectTaskDetail.simple.taskType'), value: task?.taskType },
+    { label: t('projectTaskDetail.simple.owner'), value: task?.assignee },
+    { label: t('projectTaskDetail.simple.agent'), value: task?.agentName },
+    { label: t('projectTaskDetail.simple.objectType'), value: task?.objectType },
+    {
+      label: t('projectTaskDetail.simple.createdAt'),
+      value: task?.createTime ? formatDateTimeText(task.createTime) : task?.createTime,
+    },
+    {
+      label: t('projectTaskDetail.simple.updatedAt'),
+      value: task?.updateTime ? formatDateTimeText(task.updateTime) : task?.updateTime,
     },
   ].filter((field) => hasDetailValue(field.value));
 
@@ -398,7 +426,37 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
     >
       {task && (
         <Spin spinning={phaseLoading}>
-          {operationProject ? (
+          {simpleProject ? (
+            <div className={styles.taskDetailDrawerContent}>
+              <div className={styles.taskDetailTitle}>
+                {task.title || task.taskName || t('projectTaskDetail.defaultTaskName')}
+              </div>
+              <div className={styles.taskHero}>
+                <div className={styles.taskHeroAgent}>
+                  <span className={styles.taskHeroAvatar}>{getAgentChatAvatar(agentAvatar)}</span>
+                  <div>
+                    <small>{t('projectTaskDetail.currentAgent')}</small>
+                    <strong>{agentName}</strong>
+                  </div>
+                </div>
+              </div>
+              <section className={styles.phaseSection}>
+                <h3 className={styles.phaseSectionTitle}>{t('projectTaskDetail.simple.content')}</h3>
+                <div className={styles.taskDetailText}>{task.sessionContent || task.description || '-'}</div>
+              </section>
+              <section className={styles.phaseSection}>
+                <h3 className={styles.phaseSectionTitle}>{t('projectTaskDetail.simple.basicInfo')}</h3>
+                <div className={styles.taskContextGrid}>
+                  {simpleDetailFields.map((field) => (
+                    <div key={field.label} className={styles.taskContextItem}>
+                      <label>{field.label}</label>
+                      <strong>{formatDetailValue(field.value)}</strong>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+          ) : operationProject ? (
             <div className={styles.taskDetailDrawerContent}>
               <div className={styles.taskDetailTitle}>
                 {task.title || task.taskName || t('projectTaskDetail.defaultTaskName')}
@@ -438,9 +496,7 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
               </section>
 
               <section className={styles.phaseSection}>
-                <h3 className={styles.phaseSectionTitle}>
-                  {t('projectSpace.operation.task.detail.configuration')}
-                </h3>
+                <h3 className={styles.phaseSectionTitle}>{t('projectSpace.operation.task.detail.configuration')}</h3>
                 <div className={styles.taskContextGrid}>
                   {operationDetailFields.map((field) => (
                     <div key={field.label} className={styles.taskContextItem}>

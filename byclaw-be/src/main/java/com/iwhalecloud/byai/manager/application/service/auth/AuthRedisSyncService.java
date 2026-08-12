@@ -7,6 +7,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
+
+import com.iwhalecloud.byai.manager.domain.event.user.UserOrganizationChangedEvent;
 
 import java.util.Collection;
 import java.util.Map;
@@ -23,6 +27,8 @@ import java.util.Set;
 public class AuthRedisSyncService {
 
     private static final Logger logger = LoggerFactory.getLogger(AuthRedisSyncService.class);
+
+    private static final String USER_ORGANIZATION_CHANGED_HINT = "USER_ORGANIZATION_CHANGED";
 
 
     @Autowired
@@ -113,6 +119,18 @@ public class AuthRedisSyncService {
         } catch (Exception e) {
             logger.error("授权变更用户权限异步同步失败，变更类型：{}，错误：{}", hint, e.getMessage());
         }
+    }
+
+    /**
+     * 用户组织关系变化后重新计算其继承得到的资源权限。
+     */
+    @Async(AuthRedisSyncAsyncConfig.AUTH_REDIS_SYNC_EXECUTOR)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void handleUserOrganizationChanged(UserOrganizationChangedEvent event) {
+        if (event == null || event.getUserIds().isEmpty()) {
+            return;
+        }
+        asyncSyncAuthChangedUsers(event.getUserIds(), USER_ORGANIZATION_CHANGED_HINT);
     }
 
 }

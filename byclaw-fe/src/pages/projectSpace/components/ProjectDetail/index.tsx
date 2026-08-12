@@ -1,5 +1,12 @@
 import { Alert, Button, Dropdown, Input, Modal, Segmented, Tag, Typography, message } from 'antd';
-import { LoadingOutlined, MoreOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
+import {
+  LoadingOutlined,
+  MoreOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+  SettingOutlined,
+} from '@ant-design/icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
@@ -82,13 +89,28 @@ const ProjectDetail: React.FC<Props> = ({
   const [githubPat, setGithubPat] = useState('');
   const [githubPatSaved, setGithubPatSaved] = useState(true);
   const [githubPatLoading, setGithubPatLoading] = useState(false);
-  const taskFallbackProjectRef = useRef<string | null>(null);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { isDevelopProjectEnabled, isOperationProjectEnabled } = useProjectTypeConfig();
   // 研发和运营能力均以静态参数为准，避免未启用环境误展示对应的业务分区。
   const isDevelopProject = isDevelopProjectEnabled && project?.projectType === 'develop';
   const isOperationProject = isOperationProjectEnabled && project?.projectType === 'operation';
   const developInitReady = !isDevelopProject || !project?.initStatus || project.initStatus === 'ready';
   const currentUserId = userInfo.userId ?? userInfo.id;
+  const handleRefreshProject = useCallback(() => {
+    // 顶部刷新按钮做轻量防抖，避免连续点击造成详情接口并发请求和旧数据覆盖新数据。
+    if (refreshTimerRef.current) return;
+    refreshTimerRef.current = setTimeout(() => {
+      refreshTimerRef.current = null;
+    }, 500);
+    void onRefresh?.();
+  }, [onRefresh]);
+
+  useEffect(
+    () => () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    },
+    []
+  );
   const defaultRequirementAssignee = operationAssignees.find(
     (option) => currentUserId !== undefined && `${option.value}` === `${currentUserId}`
   )?.value;
@@ -184,31 +206,11 @@ const ProjectDetail: React.FC<Props> = ({
     // 仅在真正切换项目时初始化 Tab；能力配置异步完成或刷新项目详情时不应覆盖用户当前 Tab。
     setActiveSection('tasks');
     setSectionCache({ projectId: projectCacheKey, sections: ['tasks'] });
-    taskFallbackProjectRef.current = null;
     setSectionKeywordMap({});
     setOperationRequirementModalOpen(false);
     setSectionToolbarMap({});
     setSectionRefreshToolbarMap({});
   }, [project?.projectId, project?.projectType, projectCacheKey]);
-
-  const handleTasksInitialLoad = useCallback(
-    (hasTasks: boolean) => {
-      const projectKey = `${project?.projectId ?? ''}`;
-      if (
-        hasTasks ||
-        !projectKey ||
-        !showRequirementsSection ||
-        activeSection !== 'tasks' ||
-        taskFallbackProjectRef.current === projectKey
-      ) {
-        return;
-      }
-      // 每个项目只在首次打开且任务首屏为空时自动回退一次，避免刷新空列表时反复抢占用户选择。
-      taskFallbackProjectRef.current = projectKey;
-      activateSection('requirements');
-    },
-    [activateSection, activeSection, project?.projectId, showRequirementsSection]
-  );
 
   useEffect(() => {
     if (!operationRequirementModalOpen || !isOperationProject || !project?.projectId) return;
@@ -320,7 +322,6 @@ const ProjectDetail: React.FC<Props> = ({
           onOpenSession={onOpenSession}
           onToolbarChange={toolbarHandlers.tasks}
           onRefreshToolbarChange={refreshToolbarHandlers.tasks}
-          onInitialLoad={handleTasksInitialLoad}
         />
       );
     }
@@ -496,7 +497,9 @@ const ProjectDetail: React.FC<Props> = ({
           )}
           {isDevelopProject && activeSection === 'requirements' && (
             <>
-              <Button onClick={() => setChannelConfigOpen(true)}>需求渠道配置</Button>
+              <Button icon={<SettingOutlined />} onClick={() => setChannelConfigOpen(true)}>
+                {intl.formatMessage({ id: 'projectSpace.channel.title' })}
+              </Button>
               <Button
                 icon={<PlusOutlined />}
                 disabled={!developInitReady}
@@ -509,12 +512,13 @@ const ProjectDetail: React.FC<Props> = ({
           {/* 新增仓库属于研发项目资源维护操作，仅在资源 Tab 展示。 */}
           {isDevelopProject && activeSection === 'resources' && (
             <Button
+              icon={<PlusOutlined />}
               onClick={() => {
                 setEditingRepository(undefined);
                 setRepositoryManagerOpen(true);
               }}
             >
-              新增仓库
+              {intl.formatMessage({ id: 'projectSpace.repository.add' })}
             </Button>
           )}
           {sectionToolbarMap[activeSection]}
@@ -525,7 +529,11 @@ const ProjectDetail: React.FC<Props> = ({
             </Button>
           )}
           {/* 各 Tab 的顺序为业务操作、新建会话、刷新；账号 Tab 由账号筛选和新增账号组成业务操作。 */}
-          {sectionRefreshToolbarMap[activeSection]}
+          {sectionRefreshToolbarMap[activeSection] || (
+            <Button size="small" icon={<ReloadOutlined />} onClick={handleRefreshProject}>
+              {intl.formatMessage({ id: 'projectSpace.detail.refresh' })}
+            </Button>
+          )}
         </div>
       </div>
       {isDevelopProject && project.initStatus && project.initStatus !== 'ready' && (
@@ -558,7 +566,7 @@ const ProjectDetail: React.FC<Props> = ({
           className={styles.projectInitAlert}
           message={
             <Button type="link" size="small" onClick={() => setGithubPatOpen(true)}>
-              未配置 GitHub Token，点击配置后才能读取代码仓库和变更。
+              {intl.formatMessage({ id: 'projectSpace.github.notConfigured' })}
             </Button>
           }
         />
@@ -625,8 +633,8 @@ const ProjectDetail: React.FC<Props> = ({
       )}
       <Modal
         open={githubPatOpen}
-        title="配置 GitHub Token"
-        okText="保存"
+        title={intl.formatMessage({ id: 'projectSpace.github.configure' })}
+        okText={intl.formatMessage({ id: 'common.save' })}
         confirmLoading={githubPatLoading}
         onCancel={() => setGithubPatOpen(false)}
         onOk={async () => {
@@ -634,12 +642,12 @@ const ProjectDetail: React.FC<Props> = ({
           setGithubPatLoading(true);
           try {
             await saveGitHubPat(githubPat.trim());
-            message.success('GitHub Token 已保存');
+            message.success(intl.formatMessage({ id: 'projectSpace.github.saveSuccess' }));
             setGithubPatSaved(true);
             setGithubPat('');
             setGithubPatOpen(false);
           } catch (error: any) {
-            message.error(error?.message || 'GitHub Token 保存失败');
+            message.error(error?.message || intl.formatMessage({ id: 'projectSpace.github.saveFailed' }));
           } finally {
             setGithubPatLoading(false);
           }
@@ -647,7 +655,7 @@ const ProjectDetail: React.FC<Props> = ({
       >
         <Input.Password
           value={githubPat}
-          placeholder="请输入 GitHub Personal Access Token"
+          placeholder={intl.formatMessage({ id: 'projectSpace.github.placeholder' })}
           onChange={(event) => setGithubPat(event.target.value)}
         />
       </Modal>

@@ -10,6 +10,11 @@
         <result column="description" property="description"/>
         <result column="enable_flag" property="enableFlag"/>
         <result column="credential_expires_at" property="credentialExpiresAt"/>
+        <result column="credential_state" property="credentialState"/>
+        <result column="renewal_mode" property="renewalMode"/>
+        <result column="access_expires_at" property="accessExpiresAt"/>
+        <result column="refresh_expires_at" property="refreshExpiresAt"/>
+        <result column="last_verified_at" property="lastVerifiedAt"/>
     </resultMap>
 
     <select id="selectConnectorListByQo" resultMap="ConnectorListDtoResultMap">
@@ -18,18 +23,29 @@
                a.connector_name,
                a.connector_type,
                a.description,
-               b.expire_time AS credential_expires_at,
+               b.access_expire_time AS credential_expires_at,
+               b.credential_state,
+               b.renewal_mode,
+               b.access_expire_time AS access_expires_at,
+               b.refresh_expire_time AS refresh_expires_at,
+               b.last_verified_at,
                CASE
                    WHEN b.connector_id IS NULL THEN NULL
-                   WHEN b.expire_time &lt; CURRENT_TIMESTAMP THEN NULL
-                   WHEN b.enable_flag = 'Y' THEN 'Y'
+                   WHEN b.enable_flag = 'Y'
+                       AND COALESCE(b.credential_state, 'UNKNOWN')
+                           IN ('READY', 'REFRESH_NEEDED', 'EXPIRING', 'UNKNOWN') THEN 'Y'
                    ELSE 'N'
                END AS enable_flag
         FROM byai_connector_info a
-                 LEFT JOIN (SELECT connector_id, enable_flag, expire_time
+                 LEFT JOIN (SELECT connector_id, enable_flag, credential_state, renewal_mode,
+                                   access_expire_time, refresh_expire_time, last_verified_at
                             FROM (SELECT connector_id,
                                          enable_flag,
-                                         expire_time,
+                                         credential_state,
+                                         renewal_mode,
+                                         access_expire_time,
+                                         refresh_expire_time,
+                                         last_verified_at,
                                          ROW_NUMBER() OVER (
                                              PARTITION BY connector_id
                                              ORDER BY CASE
@@ -62,15 +78,26 @@
     <select id="selectConnectionsByUserId" resultType="com.iwhalecloud.byai.manager.dto.connector.ConnectorConnectionDto">
         SELECT i.connector_code AS connector_id,
                CASE
-                   WHEN a.enable_flag = 'Y' THEN 'connected'
+                   WHEN a.enable_flag = 'Y'
+                       AND COALESCE(a.credential_state, 'UNKNOWN')
+                           IN ('READY', 'REFRESH_NEEDED', 'EXPIRING', 'UNKNOWN') THEN 'connected'
                    ELSE 'disabled'
                END AS status,
-               a.auth_name AS account_name
+               a.auth_name AS account_name,
+               a.credential_state,
+               a.renewal_mode,
+               a.access_expire_time AS access_expires_at,
+               a.refresh_expire_time AS refresh_expires_at,
+               a.last_verified_at
         FROM byai_connector_info i
                  JOIN (SELECT connector_id,
                               auth_name,
                               enable_flag,
-                              expire_time,
+                              credential_state,
+                              renewal_mode,
+                              access_expire_time,
+                              refresh_expire_time,
+                              last_verified_at,
                                   ROW_NUMBER() OVER (
                                   PARTITION BY connector_id
                                   ORDER BY CASE
@@ -90,7 +117,12 @@
         UNION ALL
         SELECT i.connector_code AS connector_id,
                'connected' AS status,
-               NULL AS account_name
+               NULL AS account_name,
+               'READY' AS credential_state,
+               'NONE' AS renewal_mode,
+               NULL AS access_expires_at,
+               NULL AS refresh_expires_at,
+               NULL AS last_verified_at
         FROM byai_connector_info i
         WHERE i.status_cd = '00A'
           AND i.auth_mode = 'NONE'

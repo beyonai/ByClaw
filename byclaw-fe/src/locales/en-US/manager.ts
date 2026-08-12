@@ -523,6 +523,8 @@ export default {
   'auth.authObjects': 'Authorization Objects',
   'auth.including': 'Including',
   'auth.excludeObjects': 'Exclude Objects',
+  'auth.organizationIncludesDescendants':
+    'Authorizing or excluding an organization also applies to all of its descendant organizations.',
   'auth.excluding': 'Excluding',
   'auth.applicants': 'Applicants',
   'auth.addAuthObject': 'Add Authorization Object',

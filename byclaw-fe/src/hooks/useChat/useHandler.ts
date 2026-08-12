@@ -68,19 +68,29 @@ function useHandler(props: IProps) {
 
       chatSessionRuntimeManager.bindSession(sseMsg.clientRequestId, newSessionId);
 
-      const createdSession = {
-        ...(sseRes as ISession),
-        sessionId: newSessionId,
-      };
-      addSession(createdSession);
-
-      if (sseMsg.event === 'createSession') {
-        // 将创建事件中的会话数据一并传出，项目侧栏可直接写入缓存而无需重新请求列表。
-        onSessionCreated?.({
-          sessionId: newSessionId,
-          clientRequestId: sseMsg.clientRequestId,
-          session: createdSession,
+      if (sseMsg.event === 'sessionTitleUpdated') {
+        dispatch({
+          type: 'session/updateSession',
+          payload: {
+            ...pick(sseRes, ['sessionName', 'updateTime']),
+            sessionId: newSessionId,
+          },
         });
+      } else {
+        const createdSession = {
+          ...(sseRes as ISession),
+          sessionId: newSessionId,
+        };
+        addSession(createdSession);
+
+        if (sseMsg.event === 'createSession') {
+          // 将创建事件中的会话数据一并传出，项目侧栏可直接写入缓存而无需重新请求列表。
+          onSessionCreated?.({
+            sessionId: newSessionId,
+            clientRequestId: sseMsg.clientRequestId,
+            session: createdSession,
+          });
+        }
       }
 
       if (!curSessioneRef.current) {

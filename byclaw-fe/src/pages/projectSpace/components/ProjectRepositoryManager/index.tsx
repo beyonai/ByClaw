@@ -1,5 +1,6 @@
 import { Form, Input, Modal, Radio, Select, Space, message } from 'antd';
 import { useEffect, useState } from 'react';
+import { useIntl } from '@umijs/max';
 import {
   createProjectRepo,
   updateProjectRepo,
@@ -28,6 +29,7 @@ type RepoFormValues = {
 
 // 研发资源 Tab 的仓库入口只负责新增/编辑，仓库列表直接展示在资源卡片中。
 const ProjectRepositoryManager: React.FC<Props> = ({ project, open, onClose, onChanged, editingRepo }) => {
+  const intl = useIntl();
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm<RepoFormValues>();
 
@@ -55,16 +57,21 @@ const ProjectRepositoryManager: React.FC<Props> = ({ project, open, onClose, onC
       const payload = { projectId: Number(project.projectId), ...values };
       if (editingRepo?.repoId !== undefined && editingRepo?.repoId !== null) {
         await updateProjectRepo({ repoId: Number(editingRepo.repoId), ...payload });
-        message.success('仓库已保存');
+        message.success(intl.formatMessage({ id: 'projectSpace.repository.saveSuccess' }));
       } else {
         await createProjectRepo(payload);
-        message.success('仓库已添加');
+        message.success(intl.formatMessage({ id: 'projectSpace.repository.addSuccess' }));
       }
       form.resetFields();
       onChanged?.();
       onClose();
     } catch (error: any) {
-      message.error(error?.message || (editingRepo ? '仓库保存失败' : '仓库添加失败'));
+      message.error(
+        error?.message ||
+          intl.formatMessage({
+            id: editingRepo ? 'projectSpace.repository.saveFailed' : 'projectSpace.repository.addFailed',
+          })
+      );
     } finally {
       setSaving(false);
     }
@@ -74,10 +81,10 @@ const ProjectRepositoryManager: React.FC<Props> = ({ project, open, onClose, onC
   return (
     <Modal
       open={open}
-      title={editingRepo ? '编辑仓库' : '新增仓库'}
+      title={intl.formatMessage({ id: editingRepo ? 'projectSpace.repository.edit' : 'projectSpace.repository.add' })}
       width={760}
-      okText="保存"
-      cancelText="取消"
+      okText={intl.formatMessage({ id: 'common.save' })}
+      cancelText={intl.formatMessage({ id: 'common.cancel' })}
       confirmLoading={saving}
       destroyOnClose
       onCancel={onClose}
@@ -90,16 +97,25 @@ const ProjectRepositoryManager: React.FC<Props> = ({ project, open, onClose, onC
         onFinish={(values) => void handleCreate(values)}
         style={{ marginTop: 18 }}
       >
-        <Form.Item label="仓库类型" name="repoType" rules={[{ required: true }]}>
+        <Form.Item
+          label={intl.formatMessage({ id: 'projectSpace.repository.type' })}
+          name="repoType"
+          rules={[{ required: true }]}
+        >
           <Radio.Group
             options={[
-              { value: 'workspace', label: '工作区' },
-              { value: 'code', label: '代码仓库' },
+              { value: 'workspace', label: intl.formatMessage({ id: 'projectSpace.repository.type.workspace' }) },
+              { value: 'code', label: intl.formatMessage({ id: 'projectSpace.repository.type.code' }) },
             ]}
           />
         </Form.Item>
         <Space.Compact block>
-          <Form.Item label="代码平台" name="provider" rules={[{ required: true }]} style={{ width: '30%' }}>
+          <Form.Item
+            label={intl.formatMessage({ id: 'projectSpace.repository.provider' })}
+            name="provider"
+            rules={[{ required: true }]}
+            style={{ width: '30%' }}
+          >
             <Select
               options={[
                 { value: 'github', label: 'GitHub' },
@@ -108,17 +124,22 @@ const ProjectRepositoryManager: React.FC<Props> = ({ project, open, onClose, onC
               ]}
             />
           </Form.Item>
-          <Form.Item label="仓库名称" name="repoFullName" rules={[{ required: true }]} style={{ width: '70%' }}>
+          <Form.Item
+            label={intl.formatMessage({ id: 'projectSpace.repository.name' })}
+            name="repoFullName"
+            rules={[{ required: true }]}
+            style={{ width: '70%' }}
+          >
             <Input placeholder="owner/repository" />
           </Form.Item>
         </Space.Compact>
-        <Form.Item label="仓库地址" name="repoUrl">
+        <Form.Item label={intl.formatMessage({ id: 'projectSpace.repository.url' })} name="repoUrl">
           <Input />
         </Form.Item>
-        <Form.Item label="默认分支" name="defaultBranch">
+        <Form.Item label={intl.formatMessage({ id: 'projectSpace.repository.defaultBranch' })} name="defaultBranch">
           <Input />
         </Form.Item>
-        <Form.Item label="仓库职责" name="description">
+        <Form.Item label={intl.formatMessage({ id: 'projectSpace.repository.description' })} name="description">
           <Input.TextArea rows={2} />
         </Form.Item>
       </Form>

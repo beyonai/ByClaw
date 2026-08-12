@@ -3791,6 +3791,15 @@
   }
 }
 
+// 普通/默认项目任务详情中的会话内容保留换行，长文本在抽屉内自然换行展示。
+.taskDetailText {
+  color: #526075;
+  font-size: 13px;
+  line-height: 22px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 // 关联需求跨越两列，其余上下文字段仍保持两列各占 50% 的布局。
 .taskContextItemFull {
   grid-column: 1 / -1;
