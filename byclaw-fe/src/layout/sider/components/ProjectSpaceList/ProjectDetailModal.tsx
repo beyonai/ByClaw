@@ -7074,22 +7074,26 @@ const ProjectDetailPanel: React.FC<Props> = ({
           type="info"
           showIcon
           icon={developInitPending || developInitWaitingChat ? <ClockCircleOutlined /> : <LoadingOutlined spin />}
+          // 按钮塞在 message 里而不是走 Alert 的 description:一旦传 description,antd 会切到
+          // .ant-alert-with-description,那条规则把 message 顶成 16px 加粗,盖掉这里的 12px 弱化样式。
+          // 按钮仍在文案下方——这条提示就是「下一步该干什么」,动作贴着它最短路径。
           message={
-            developInitPending
-              ? t('initGuard.bannerPending')
-              : developInitWaitingChat
-                ? t('initGuard.bannerInitialized')
-                : architectChatting
-                  ? t('initGuard.banner')
-                  : t('initGuard.bannerInitializing')
-          }
-          // 按钮跟在提示文案下方而不是右侧:这条提示本身就是「下一步该干什么」,动作贴着它最短路径。
-          description={
-            developInitWaitingChat ? (
-              <Button type="primary" size="small" loading={architectChatStarting} onClick={handleEnterArchitectChat}>
-                {t('initGuard.enterArchitectChat')}
-              </Button>
-            ) : undefined
+            <div className={styles.projectInitAlertBody}>
+              <span>
+                {developInitPending
+                  ? t('initGuard.bannerPending')
+                  : developInitWaitingChat
+                    ? t('initGuard.bannerInitialized')
+                    : architectChatting
+                      ? t('initGuard.banner')
+                      : t('initGuard.bannerInitializing')}
+              </span>
+              {developInitWaitingChat && (
+                <Button type="primary" size="small" loading={architectChatStarting} onClick={handleEnterArchitectChat}>
+                  {t('initGuard.enterArchitectChat')}
+                </Button>
+              )}
+            </div>
           }
         />
       )}
