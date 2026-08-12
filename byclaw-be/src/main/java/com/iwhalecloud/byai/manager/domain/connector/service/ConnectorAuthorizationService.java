@@ -24,6 +24,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorAuthorizationProvider;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorManifestCommandResolver;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
@@ -407,7 +408,20 @@ public class ConnectorAuthorizationService {
                 ? toDto(session, authorizationUrl)
                 : transitionPendingProgress(session, result.progress());
             case FINALIZING -> toDto(session, authorizationUrl);
-            case CONNECTED -> finalizeConnected(session, result);
+            case CONNECTED -> result.credentialState() == CredentialState.REAUTH_REQUIRED
+                ? transitionProviderTerminal(
+                    session,
+                    new AuthorizationStatusResult(
+                        AuthorizationStatus.FAILED,
+                        null,
+                        null,
+                        null,
+                        null,
+                        "CONNECTOR_CREDENTIAL_INVALID",
+                        "连接器凭证需要重新授权"
+                    )
+                )
+                : finalizeConnected(session, result);
             case FAILED, EXPIRED, CANCELLED -> transitionProviderTerminal(session, result);
         };
     }
@@ -843,7 +857,21 @@ public class ConnectorAuthorizationService {
         auth.setEnableFlag("Y");
         auth.setStatusCd("00A");
         auth.setLastSyncTime(now);
-        auth.setExpireTime(statusResult == null ? null : statusResult.credentialExpiresAt());
+        applyCredentialLifecycle(auth, statusResult);
+    }
+
+    private void applyCredentialLifecycle(ConnectorAuth auth, AuthorizationStatusResult statusResult) {
+        if (statusResult == null) {
+            auth.setCredentialState("UNKNOWN");
+            auth.setRenewalMode("NONE");
+            return;
+        }
+        auth.setExpireTime(statusResult.accessExpiresAt());
+        auth.setAccessExpireTime(statusResult.accessExpiresAt());
+        auth.setRefreshExpireTime(statusResult.refreshExpiresAt());
+        auth.setCredentialState(statusResult.credentialState().name());
+        auth.setRenewalMode(statusResult.renewalMode().name());
+        auth.setLastVerifiedAt(statusResult.lastVerifiedAt());
     }
 
     private void requireSingleAffectedRow(int affectedRows) {

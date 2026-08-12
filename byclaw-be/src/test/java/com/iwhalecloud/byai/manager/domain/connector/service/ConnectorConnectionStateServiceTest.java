@@ -92,6 +92,22 @@ class ConnectorConnectionStateServiceTest {
     }
 
     @Test
+    void saveNoneAuthorizationWritesNonNullLifecycleDefaults() {
+        ConnectorInfo connector = connector();
+        connector.setAuthMode("NONE");
+        connector.setProviderCode(null);
+        when(connectorAuthMapper.selectOne(any())).thenReturn(null);
+        when(sequenceService.nextVal()).thenReturn(8002L);
+        when(manifestService.upsertAndEnable(1001L, connector)).thenReturn(false);
+
+        ConnectorAuth binding = service.saveEnabledAuthorization(USER_ID, connector, null, null);
+
+        assertThat(binding.getCredentialState()).isEqualTo("UNKNOWN");
+        assertThat(binding.getRenewalMode()).isEqualTo("NONE");
+        assertThat(binding.getAuthCredential()).isNull();
+    }
+
+    @Test
     void saveEnabledAuthorizationUpdatesConcurrentWinnerWhenInsertIsIgnored() {
         ConnectorInfo connector = connector();
         ConnectorAuth winner = activeAuth();

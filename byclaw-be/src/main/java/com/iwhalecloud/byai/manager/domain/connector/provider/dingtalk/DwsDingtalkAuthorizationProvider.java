@@ -17,6 +17,9 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorAuthorizationProvider;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialVerifier;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialRevoker;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialRenewalMode;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialLifecycleEvaluator;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorManifestCommandResolver;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService;
@@ -80,16 +83,8 @@ public class DwsDingtalkAuthorizationProvider
                 return failedStatus("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential");
             }
             Map<String, Object> status = credentialStatus.status();
-            if (status != null && Boolean.TRUE.equals(status.get("tokenValid"))) {
-                return new AuthorizationStatusResult(
-                    AuthorizationStatus.CONNECTED,
-                    stringValue(status.get("userId")),
-                    stringValue(status.get("userName")),
-                    parseDate(status.get("expiresAt")),
-                    null,
-                    null,
-                    null
-                );
+            if (hasCredentialLifecycleStatus(status)) {
+                return connectedStatus(status);
             }
             return failedStatus("CONNECTOR_CREDENTIAL_INVALID", "Connector credential is invalid");
         } catch (RuntimeException e) {
@@ -138,16 +133,8 @@ public class DwsDingtalkAuthorizationProvider
             List<String> command = DwsAuthorizationCommandPolicy.command(
                 session.commandCatalog(), "status", 0, "status");
             Map<String, Object> status = dwsAuthService.getAuthStatus(userId, command);
-            if (Boolean.TRUE.equals(status.get("tokenValid"))) {
-                return new AuthorizationStatusResult(
-                    AuthorizationStatus.CONNECTED,
-                    stringValue(status.get("userId")),
-                    stringValue(status.get("userName")),
-                    parseDate(status.get("expiresAt")),
-                    null,
-                    null,
-                    null
-                );
+            if (hasCredentialLifecycleStatus(status)) {
+                return connectedStatus(status);
             }
         } catch (RuntimeException e) {
             // A transient CLI status failure remains pending until the authorization session expires.
@@ -197,6 +184,34 @@ public class DwsDingtalkAuthorizationProvider
             errorCode,
             errorMessage
         );
+    }
+
+    private AuthorizationStatusResult connectedStatus(Map<String, Object> status) {
+        boolean tokenValid = Boolean.TRUE.equals(status.get("tokenValid"));
+        boolean refreshStatusKnown = status.containsKey("refreshTokenValid");
+        boolean refreshTokenValid = Boolean.TRUE.equals(status.get("refreshTokenValid"));
+        Date refreshExpiresAt = parseDate(status.get("refreshExpiresAt"));
+        CredentialState credentialState = CredentialLifecycleEvaluator.evaluate(
+            tokenValid ? "valid" : "expired",
+            refreshStatusKnown ? refreshTokenValid : null,
+            refreshExpiresAt,
+            new Date()
+        );
+        return AuthorizationStatusResult.connected(
+            stringValue(status.get("userId")),
+            stringValue(status.get("userName")),
+            credentialState,
+            CredentialRenewalMode.REFRESH_TOKEN,
+            parseDate(status.get("expiresAt")),
+            refreshExpiresAt,
+            new Date(),
+            null
+        );
+    }
+
+    private boolean hasCredentialLifecycleStatus(Map<String, Object> status) {
+        return status != null
+            && (Boolean.TRUE.equals(status.get("tokenValid")) || status.containsKey("refreshTokenValid"));
     }
 
     private Long parseUserId(String value) {

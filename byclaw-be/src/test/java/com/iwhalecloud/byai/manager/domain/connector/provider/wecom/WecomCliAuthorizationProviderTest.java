@@ -147,6 +147,11 @@ class WecomCliAuthorizationProviderTest {
         AuthorizationStatusResult result = provider.verify(42L, connector(VALID_PROVIDER_STATE));
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.credentialState().name()).isEqualTo("READY");
+        assertThat(result.renewalMode().name()).isEqualTo("PROBE_ONLY");
+        assertThat(result.accessExpiresAt()).isNull();
+        assertThat(result.refreshExpiresAt()).isNull();
+        assertThat(result.lastVerifiedAt()).isNotNull();
         verify(workspaceService).resolve(42L, "wecom-cli");
         verify(cliRunner).run(eq(PROBE_COMMAND), eq(ENVIRONMENT), eq(null), any(Duration.class));
     }

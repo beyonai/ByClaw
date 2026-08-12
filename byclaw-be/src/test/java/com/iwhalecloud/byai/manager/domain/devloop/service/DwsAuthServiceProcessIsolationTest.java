@@ -107,6 +107,24 @@ class DwsAuthServiceProcessIsolationTest {
     }
 
     @Test
+    void credentialStatusPreservesMissingRefreshValidityField() {
+        ConnectorCliRunner cliRunner = mock(ConnectorCliRunner.class);
+        when(cliRunner.run(eq(java.util.List.of("dws", "auth", "status", "--format", "json")),
+                any(), eq(null), any()))
+            .thenReturn(new CliResult(0, "{\"authenticated\":true,\"token_valid\":true}"));
+        DwsAuthService service = isolatedService(builder -> {
+            throw new AssertionError("process launcher should not be used");
+        }, true);
+        ReflectionTestUtils.setField(service, "connectorCliRunner", cliRunner);
+
+        DwsAuthService.DwsCredentialStatus result = service.getCredentialStatus(
+            11L, java.util.List.of("dws", "auth", "status", "--format", "json"));
+
+        assertThat(result.status()).containsEntry("tokenValid", true);
+        assertThat(result.status()).doesNotContainKey("refreshTokenValid");
+    }
+
+    @Test
     void deviceFlowSuppressesCliBrowserLaunch() throws Exception {
         FakeProcess process = FakeProcess.deviceFlow("CODE-1");
         AtomicReference<java.util.List<String>> command = new AtomicReference<>();

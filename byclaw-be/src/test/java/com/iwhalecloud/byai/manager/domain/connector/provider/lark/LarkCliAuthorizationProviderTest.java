@@ -459,6 +459,11 @@ class LarkCliAuthorizationProviderTest {
         assertThat(result.accountName()).isEqualTo("Lark User");
         assertThat(result.credentialExpiresAt())
             .isEqualTo(Date.from(Instant.parse("2030-08-10T15:58:47Z")));
+        assertThat(result.refreshExpiresAt())
+            .isEqualTo(Date.from(Instant.parse("2030-08-17T13:58:47Z")));
+        assertThat(result.credentialState().name()).isEqualTo("READY");
+        assertThat(result.renewalMode().name()).isEqualTo("REFRESH_TOKEN");
+        assertThat(result.lastVerifiedAt()).isNotNull();
     }
 
     @Test
