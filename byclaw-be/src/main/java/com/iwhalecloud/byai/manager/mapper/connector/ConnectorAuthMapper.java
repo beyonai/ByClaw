@@ -144,7 +144,7 @@ public interface ConnectorAuthMapper extends BaseMapper<ConnectorAuth> {
         "WHERE user_id = #{userId}",
         "AND status_cd = '00A'",
         "AND resource_id IN",
-        "<foreach collection='resourceIds' item='resourceId' open='(' separator=',' close=')>",
+        "<foreach collection='resourceIds' item='resourceId' open='(' separator=',' close=')'>",
         "#{resourceId}",
         "</foreach>",
         "</script>"
