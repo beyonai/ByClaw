@@ -1,5 +1,18 @@
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
-import { Button, DatePicker, Empty, Form, Input, InputNumber, Modal, Radio, Select, Spin, TimePicker, message } from 'antd';
+import {
+  Button,
+  DatePicker,
+  Empty,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Radio,
+  Select,
+  Spin,
+  TimePicker,
+  message,
+} from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
 import {
@@ -192,8 +205,7 @@ const getOntologySelectValues = (ontology: TaskTemplateFormValues['ontology']): 
     .map((item) => {
       if (item && typeof item === 'object') {
         // 历史配置可能只保存本体 ID、code 或名称，统一提取可用于 Select 回显的标识。
-        return (
-          item.objectId ||
+        return (item.objectId ||
           item.resourceId ||
           item.id ||
           item.baseId ||
@@ -202,8 +214,7 @@ const getOntologySelectValues = (ontology: TaskTemplateFormValues['ontology']): 
           item.code ||
           item.objectName ||
           item.resourceName ||
-          item.name
-        ) as string | number | undefined;
+          item.name) as string | number | undefined;
       }
       return item;
     })
@@ -639,12 +650,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
     [fetchedKnowledgeOptions, knowledgeOptions, knowledgeOptionsOnly]
   );
   const availableOntologyOptions = useMemo(
-    () =>
-      ontologyOptionsOnly
-        ? ontologyOptions
-        : ontologyOptions.length
-          ? ontologyOptions
-          : fetchedOntologyOptions,
+    () => (ontologyOptionsOnly ? ontologyOptions : ontologyOptions.length ? ontologyOptions : fetchedOntologyOptions),
     [fetchedOntologyOptions, ontologyOptions, ontologyOptionsOnly]
   );
   const availableAccountOptions = useMemo(
@@ -660,10 +666,9 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
     const currentValue = form.getFieldValue('ontology');
     if (currentValue !== undefined && currentValue !== null) return;
     // 本体列表晚于模板详情返回时，优先按模板 storageMode 回显目标本体，不能直接覆盖为第一项。
-    const configuredTarget =
-      isKnowledgeTemplate(selectedTemplate?.templateType)
-        ? (form.getFieldValue('storageMode') as TaskTemplateFormValues['ontology'])
-        : undefined;
+    const configuredTarget = isKnowledgeTemplate(selectedTemplate?.templateType)
+      ? (form.getFieldValue('storageMode') as TaskTemplateFormValues['ontology'])
+      : undefined;
     form.setFieldValue(
       'ontology',
       resolveInitialOntologyValues(availableOntologyOptions, configuredTarget) || [availableOntologyOptions[0].value]
@@ -698,9 +703,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
         sourceOntology:
           values.materialSource === '本体数据'
             ? getOntologySelectValues(values.sourceOntology).map((value) => {
-              const ontologyOption = availableOntologyOptions.find(
-                (option) => `${option.value}` === `${value}`
-              );
+              const ontologyOption = availableOntologyOptions.find((option) => `${option.value}` === `${value}`);
               return normalizeOntologyObjectValue(ontologyOption, value);
             })
             : undefined,
@@ -1007,7 +1010,11 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
                 )}
                 {runMode === 'periodic' && (
                   <>
-                    <Form.Item label="周期类型" name="periodType" rules={[{ required: true, message: '请选择周期类型' }]}>
+                    <Form.Item
+                      label="周期类型"
+                      name="periodType"
+                      rules={[{ required: true, message: '请选择周期类型' }]}
+                    >
                       <Select
                         options={[
                           { label: '每天', value: 'daily' },
@@ -1019,21 +1026,37 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
                       />
                     </Form.Item>
                     {periodType === 'yearly' ? (
-                      <Form.Item label="月日时分" name="periodYearDateTime" rules={[{ required: true, message: '请选择月日时分' }]}>
+                      <Form.Item
+                        label="月日时分"
+                        name="periodYearDateTime"
+                        rules={[{ required: true, message: '请选择月日时分' }]}
+                      >
                         <DatePicker showTime={{ format: 'HH:mm' }} format="MM-DD HH:mm" style={{ width: '100%' }} />
                       </Form.Item>
                     ) : (
-                      <Form.Item label="执行时分" name="periodTime" rules={[{ required: true, message: '请选择执行时分' }]}>
+                      <Form.Item
+                        label="执行时分"
+                        name="periodTime"
+                        rules={[{ required: true, message: '请选择执行时分' }]}
+                      >
                         <TimePicker format="HH:mm" style={{ width: '100%' }} />
                       </Form.Item>
                     )}
                     {(periodType === 'weekly' || periodType === 'biweekly') && (
-                      <Form.Item label="执行日" name="periodWeekdays" rules={[{ required: true, type: 'array', min: 1, message: '请选择执行日' }]}>
+                      <Form.Item
+                        label="执行日"
+                        name="periodWeekdays"
+                        rules={[{ required: true, type: 'array', min: 1, message: '请选择执行日' }]}
+                      >
                         <Select mode="multiple" options={WEEKDAY_OPTIONS} />
                       </Form.Item>
                     )}
                     {periodType === 'monthly' && (
-                      <Form.Item label="执行日期" name="periodMonthDays" rules={[{ required: true, type: 'array', min: 1, message: '请选择执行日期' }]}>
+                      <Form.Item
+                        label="执行日期"
+                        name="periodMonthDays"
+                        rules={[{ required: true, type: 'array', min: 1, message: '请选择执行日期' }]}
+                      >
                         <Select mode="multiple" options={MONTH_DAY_OPTIONS} />
                       </Form.Item>
                     )}
@@ -1044,7 +1067,11 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
                 )}
                 {runMode === 'interval' && (
                   <>
-                    <Form.Item label="每几小时" name="intervalHours" rules={[{ required: true, message: '请输入间隔小时数' }]}>
+                    <Form.Item
+                      label="每几小时"
+                      name="intervalHours"
+                      rules={[{ required: true, message: '请输入间隔小时数' }]}
+                    >
                       <InputNumber min={1} precision={0} style={{ width: '100%' }} />
                     </Form.Item>
                     <Form.Item
@@ -1077,7 +1104,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
                   <strong>{template.templateName}</strong>
                   <small>{template.description}</small>
                 </span>
-                <RightOutlined />
+                <RightOutlined style={{ color: '#b8c1ce' }} />
               </button>
             ))}
           </div>

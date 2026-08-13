@@ -143,6 +143,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
   const isFirstAutoOnChange = useRef(true);
   const editorWrapRef = useRef<HTMLDivElement>(null);
   const lastChatModeRef = useRef(chatMode);
+  const insertItemRef = useRef<RichInputRef['insertItem']>(() => undefined);
   const { EventEmitter } = useGlobal();
 
   /**
@@ -294,10 +295,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
       Editor.nodes(editor, {
         at: [],
         mode: 'lowest',
-        match: (node) =>
-          Element.isElement(node) &&
-          node.type === ELEMENT_MENTION &&
-          node.resourceType === ResourceType.digitalEmployee,
+        match: (node) => isDigitalEmployeeMentionNode(node),
       })
     )
       .map(([node]) => node)
@@ -524,17 +522,20 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
     handleCloseMention();
   };
 
+  insertItemRef.current = insertItem;
+
   useEffect(() => {
     const handleInsertItem = ({ item, type }: { item: any; type: IResourceType }) => {
-      insertItem(item, type);
+      insertItemRef.current(item, type);
     };
 
+    // 会话持续输出会触发输入框频繁渲染，引用监听保持常驻，确保右侧资源列表始终可以操作和引用。
     EventEmitter.on('queryInput-insert-item', handleInsertItem);
 
     return () => {
       EventEmitter.off('queryInput-insert-item', handleInsertItem);
     };
-  });
+  }, [EventEmitter]);
 
   const onDrop = (e: React.DragEvent) => {
     // 原有的内部数据拖拽逻辑

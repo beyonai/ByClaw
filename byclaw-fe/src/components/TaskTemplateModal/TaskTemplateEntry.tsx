@@ -131,12 +131,31 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, onApply }) => {
     message.success(projectType === 'normal' ? '推荐问题已填入对话框' : '模板内容已生成到对话框，可继续修改后发送');
   };
 
+  const loadingModal = (
+    <Modal
+      open={visible}
+      width={760}
+      centered
+      destroyOnClose
+      footer={null}
+      className={styles.modal}
+      title="选择任务模板"
+      onCancel={() => setVisible(false)}
+    >
+      <div className={styles.projectLoading}>
+        <Spin />
+      </div>
+    </Modal>
+  );
+
   return (
     <>
-      <Button icon={<AppstoreOutlined />} disabled={projectLoading} onClick={() => setVisible(true)}>
+      <Button icon={<AppstoreOutlined />} onClick={() => setVisible(true)}>
         任务模板
       </Button>
-      {projectType === 'operation' ? (
+      {projectLoading && !project ? (
+        loadingModal
+      ) : projectType === 'operation' ? (
         <TaskTemplateModal
           key={`task-template-${effectiveProjectId || 'default'}`}
           open={visible}
@@ -176,7 +195,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, onApply }) => {
                       <strong>{item.title}</strong>
                       <small>{item.description}</small>
                     </span>
-                    <RightOutlined />
+                    <RightOutlined style={{ color: '#b8c1ce' }} />
                   </button>
                 ))}
               </div>

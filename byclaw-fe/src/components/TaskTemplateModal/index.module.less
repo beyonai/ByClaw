@@ -12,6 +12,12 @@
   }
 }
 
+.projectLoading {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+}
+
 .modalTitle {
   display: flex;
   align-items: center;
@@ -89,6 +95,11 @@
 
   > span {
     min-width: 0;
+  }
+
+  // 列表卡片右侧箭头仅用于提示可进入详情，使用浅色降低视觉权重。
+  > :global(.@{antPrefix}-icon) {
+    color: #b8c1ce;
   }
 
   strong,

@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.github.pagehelper.PageHelper;
@@ -24,6 +25,7 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.manager.domain.file.service.CommonFilePathResolver;
 import com.iwhalecloud.byai.manager.domain.file.service.CommonFileStorage;
+import com.iwhalecloud.byai.manager.dto.system.SystemFeedbackStatusUpdateDTO;
 import com.iwhalecloud.byai.manager.qo.system.SystemFeedbackQueryQo;
 import com.iwhalecloud.byai.manager.vo.system.SystemFeedbackAttachmentVo;
 import com.iwhalecloud.byai.manager.vo.system.SystemFeedbackManageVo;
@@ -78,6 +80,23 @@ public class SystemFeedbackApplicationService {
 
     private static final int MAX_EXPORT_COUNT = 10000;
 
+    private static final String STATUS_PENDING = "pending";
+
+    private static final String STATUS_PROCESSING = "processing";
+
+    private static final String STATUS_RESOLVED = "resolved";
+
+    private static final String STATUS_CLOSED = "closed";
+
+    private static final Set<String> FEEDBACK_STATUSES =
+        Set.of(STATUS_PENDING, STATUS_PROCESSING, STATUS_RESOLVED, STATUS_CLOSED);
+
+    private static final Map<String, Set<String>> STATUS_TRANSITIONS = Map.of(
+        STATUS_PENDING, Set.of(STATUS_PROCESSING, STATUS_CLOSED),
+        STATUS_PROCESSING, Set.of(STATUS_RESOLVED, STATUS_CLOSED),
+        STATUS_RESOLVED, Set.of(STATUS_PROCESSING, STATUS_CLOSED),
+        STATUS_CLOSED, Collections.emptySet());
+
     @Autowired
     private SequenceService sequenceService;
 
@@ -106,7 +125,7 @@ public class SystemFeedbackApplicationService {
         systemFeedback.setId(sequenceService.nextVal());
         systemFeedback.setUserId(CurrentUserHolder.getCurrentUserId());
         systemFeedback.setCreateDate(new Date());
-        systemFeedback.setStatus("pending");
+        systemFeedback.setStatus(STATUS_PENDING);
         systemFeedback.setIpAddress(IpUtil.getIpAddress(request));
         systemFeedback.setDeviceInfo(request.getHeader("User-Agent"));
         systemFeedback.setContactInfo(CurrentUserHolder.getEmail());
@@ -204,6 +223,47 @@ public class SystemFeedbackApplicationService {
         List<AttachFile> files = attachFileService.findFeedbackAttachments(Collections.singleton(feedbackId));
         feedback.setAttachments(files.stream().map(this::toAttachmentVo).toList());
         return feedback;
+    }
+
+    /**
+     * 按约定的状态机流转反馈状态，并记录本次处理信息。
+     *
+     * @param dto 状态流转参数
+     * @return 更新后的反馈详情
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public SystemFeedbackManageVo updateManageStatus(SystemFeedbackStatusUpdateDTO dto) {
+        ensureFeedbackManagePermission();
+        SystemFeedbackManageVo existing = systemFeedbackService.selectManageDetail(dto.getFeedbackId());
+        if (existing == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("systemfeedback.manage.notfound"));
+        }
+
+        String currentStatus = StringUtils.defaultIfBlank(existing.getStatus(), STATUS_PENDING).toLowerCase();
+        String targetStatus = StringUtils.trimToEmpty(dto.getStatus()).toLowerCase();
+        if (!FEEDBACK_STATUSES.contains(targetStatus)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("systemfeedback.manage.status.invalid"));
+        }
+        if (!STATUS_TRANSITIONS.getOrDefault(currentStatus, Collections.emptySet()).contains(targetStatus)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("systemfeedback.manage.status.transition.invalid"));
+        }
+
+        Date processDate = new Date();
+        SystemFeedback update = new SystemFeedback();
+        update.setId(existing.getId());
+        update.setStatus(targetStatus);
+        update.setProcessUserId(CurrentUserHolder.getCurrentUserId());
+        update.setProcessDate(processDate);
+        update.setUpdateDate(processDate);
+        update.setProcessComment(StringUtils.trimToNull(dto.getProcessComment()));
+        if (!systemFeedbackService.updateById(update)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("systemfeedback.manage.status.update.failed"));
+        }
+        return queryManageDetail(existing.getId());
     }
 
     /**
@@ -406,8 +466,9 @@ public class SystemFeedbackApplicationService {
         if (StringUtils.isBlank(status)) {
             return "";
         }
-        if ("pending".equalsIgnoreCase(status)) {
-            return I18nUtil.get("systemfeedback.manage.status.pending");
+        String normalized = status.toLowerCase();
+        if (FEEDBACK_STATUSES.contains(normalized)) {
+            return I18nUtil.get("systemfeedback.manage.status." + normalized);
         }
         return status;
     }

@@ -28,6 +28,32 @@ describe('RichInput', () => {
     jest.clearAllMocks();
   });
 
+  it('keeps the resource quote listener stable while the input rerenders', async () => {
+    const inputRef = createRef<RichInputRef>();
+    const view = render(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote />);
+    const listener = mockEventEmitter.on.mock.calls.find(([eventName]) => eventName === 'queryInput-insert-item')?.[1];
+
+    expect(listener).toEqual(expect.any(Function));
+    expect(mockEventEmitter.on).toHaveBeenCalledTimes(1);
+
+    view.rerender(
+      <RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote defaultPlaceholder="Answering..." />
+    );
+
+    expect(mockEventEmitter.on).toHaveBeenCalledTimes(1);
+    expect(mockEventEmitter.off).not.toHaveBeenCalled();
+
+    await act(async () => {
+      listener({ item: { agentId: 'agent-1', name: 'Employee One' }, type: ResourceType.digitalEmployee });
+    });
+
+    await waitFor(() => {
+      expect(inputRef.current?.getPayload().resourceList).toEqual([
+        expect.objectContaining({ resourceId: 'agent-1', resourceName: 'Employee One' }),
+      ]);
+    });
+  });
+
   it('inserts a selected employee skill without switching or duplicating the employee', async () => {
     const inputRef = createRef<RichInputRef>();
 

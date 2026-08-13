@@ -82,6 +82,7 @@ const ProjectResources: React.FC<Props> = ({
   const [resourceSaving, setResourceSaving] = useState(false);
   const [resourceModalOpen, setResourceModalOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<DevloopProjectSpaceFile | null>(null);
+  const [detailRepo, setDetailRepo] = useState<DevloopProjectRepo | null>(null);
   const [knowledgeOptions, setKnowledgeOptions] = useState<ResourceOption[]>([]);
   const [ontologyOptions, setOntologyOptions] = useState<ResourceOption[]>([]);
   const [selectedResources, setSelectedResources] = useState<ResourceSelection>(EMPTY_SELECTION);
@@ -400,6 +401,89 @@ const ProjectResources: React.FC<Props> = ({
   const boundEmployees = boundResources.filter((resource) => resource.resourceType === 'digital_employee');
   const boundOntologies = boundResources.filter((resource) => resource.resourceType === 'ontology');
 
+  const renderSharedFile = (file: DevloopProjectSpaceFile) => (
+    <div
+      key={file.fileId}
+      className={styles.resourceSimpleItem}
+      role="button"
+      tabIndex={0}
+      onClick={() => setPreviewFile(file)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') setPreviewFile(file);
+      }}
+    >
+      <AntdIcon type={`icon-${getFileIconType(file.fileName)}`} className={styles.resourceFileIcon} />
+      <div className={styles.resourceSimpleMain}>
+        <Typography.Text strong ellipsis={{ tooltip: file.fileName }}>
+          {file.fileName}
+        </Typography.Text>
+        <Typography.Text type="secondary" ellipsis>
+          {file.fileUrl || intl.formatMessage({ id: 'projectSpace.detail.resource.sharedSpace' })}
+        </Typography.Text>
+      </div>
+      <RightOutlined />
+    </div>
+  );
+
+  const renderRepository = (repo: DevloopProjectRepo) => (
+    <div
+      key={`${repo.repoId || repo.repoFullName}`}
+      className={styles.resourceSimpleItem}
+      role="button"
+      tabIndex={0}
+      onClick={() => setDetailRepo(repo)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          setDetailRepo(repo);
+        }
+      }}
+    >
+      <span className={`${styles.resourceSimpleIcon} ${styles.resourceRepoIcon}`}>
+        <GithubOutlined />
+      </span>
+      <div className={styles.resourceSimpleMain}>
+        <Typography.Text strong ellipsis={{ tooltip: repo.repoFullName }}>
+          {repo.repoFullName || repo.repoUrl || repo.repoId}
+        </Typography.Text>
+        <Typography.Text type="secondary" ellipsis>
+          {[repo.repoUrl, repo.defaultBranch, repo.description].filter(Boolean).join(' · ') || '-'}
+        </Typography.Text>
+      </div>
+      <Dropdown
+        trigger={['hover']}
+        onOpenChange={() => undefined}
+        menu={{
+          items: [
+            { key: 'edit', icon: <EditOutlined />, label: intl.formatMessage({ id: 'common.edit' }) },
+            {
+              key: 'delete',
+              danger: true,
+              icon: <DeleteOutlined />,
+              label: intl.formatMessage({ id: 'common.delete' }),
+            },
+          ],
+          onClick: ({ key, domEvent }) => {
+            domEvent.stopPropagation();
+            setDetailRepo(null);
+            if (key === 'edit') onOpenRepositoryManager?.(repo);
+            if (key === 'delete') handleDeleteRepository(repo);
+          },
+        }}
+      >
+        <span onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+          <Button
+            type="text"
+            size="small"
+            className={styles.resourceMoreButton}
+            icon={<MoreOutlined />}
+            onClick={(event) => event.stopPropagation()}
+          />
+        </span>
+      </Dropdown>
+    </div>
+  );
+
   return (
     <>
       <div
@@ -413,31 +497,7 @@ const ProjectResources: React.FC<Props> = ({
             intl.formatMessage({ id: 'projectSpace.resources.sharedFilesDescription' })
           )}
           <Spin spinning={loadingFiles} className={styles.resourceCategoryBody}>
-            {files.length
-              ? files.map((file) => (
-                <div
-                  key={file.fileId}
-                  className={styles.resourceSimpleItem}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setPreviewFile(file)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') setPreviewFile(file);
-                  }}
-                >
-                  <AntdIcon type={`icon-${getFileIconType(file.fileName)}`} className={styles.resourceFileIcon} />
-                  <div className={styles.resourceSimpleMain}>
-                    <Typography.Text strong ellipsis={{ tooltip: file.fileName }}>
-                      {file.fileName}
-                    </Typography.Text>
-                    <Typography.Text type="secondary" ellipsis>
-                      {file.fileUrl || intl.formatMessage({ id: 'projectSpace.detail.resource.sharedSpace' })}
-                    </Typography.Text>
-                  </div>
-                  <RightOutlined />
-                </div>
-              ))
-              : !loadingFiles && empty}
+            {files.length ? files.map(renderSharedFile) : !loadingFiles && empty}
           </Spin>
         </section>
 
@@ -450,49 +510,7 @@ const ProjectResources: React.FC<Props> = ({
               onOpenRepositoryManager ? () => onOpenRepositoryManager() : undefined
             )}
             <Spin spinning={loadingRepos} className={styles.resourceCategoryBody}>
-              {repos.length
-                ? repos.map((repo) => (
-                  <div key={`${repo.repoId || repo.repoFullName}`} className={styles.resourceSimpleItem}>
-                    <span className={`${styles.resourceSimpleIcon} ${styles.resourceRepoIcon}`}>
-                      <GithubOutlined />
-                    </span>
-                    <div className={styles.resourceSimpleMain}>
-                      <Typography.Text strong ellipsis={{ tooltip: repo.repoFullName }}>
-                        {repo.repoFullName || repo.repoUrl || repo.repoId}
-                      </Typography.Text>
-                      <Typography.Text type="secondary" ellipsis>
-                        {[repo.repoUrl, repo.defaultBranch, repo.description].filter(Boolean).join(' · ') || '-'}
-                      </Typography.Text>
-                    </div>
-                    <Dropdown
-                      trigger={['hover']}
-                      menu={{
-                        items: [
-                          { key: 'edit', icon: <EditOutlined />, label: intl.formatMessage({ id: 'common.edit' }) },
-                          {
-                            key: 'delete',
-                            danger: true,
-                            icon: <DeleteOutlined />,
-                            label: intl.formatMessage({ id: 'common.delete' }),
-                          },
-                        ],
-                        onClick: ({ key }) => {
-                          if (key === 'edit') onOpenRepositoryManager?.(repo);
-                          if (key === 'delete') handleDeleteRepository(repo);
-                        },
-                      }}
-                    >
-                      <Button
-                        type="text"
-                        size="small"
-                        className={styles.resourceMoreButton}
-                        icon={<MoreOutlined />}
-                        onClick={(event) => event.stopPropagation()}
-                      />
-                    </Dropdown>
-                  </div>
-                ))
-                : !loadingRepos && empty}
+              {repos.length ? repos.map(renderRepository) : !loadingRepos && empty}
             </Spin>
           </section>
         ) : isOperationProject ? (
@@ -628,6 +646,77 @@ const ProjectResources: React.FC<Props> = ({
             fileUrl={previewFile.fileUrl || undefined}
             source="fileBrowser"
           />
+        )}
+      </Drawer>
+
+      <Drawer
+        title={
+          detailRepo?.repoFullName || detailRepo?.repoUrl || intl.formatMessage({ id: 'projectSpace.repository.add' })
+        }
+        open={!!detailRepo}
+        placement="right"
+        width={420}
+        destroyOnClose
+        onClose={() => setDetailRepo(null)}
+      >
+        {detailRepo && (
+          <>
+            <div className={styles.projectResourceBindingModal}>
+              <div>
+                <Typography.Text type="secondary">
+                  {intl.formatMessage({ id: 'projectSpace.repository.type' })}
+                </Typography.Text>
+                <Typography.Paragraph>
+                  {detailRepo.repoType === 'workspace'
+                    ? intl.formatMessage({ id: 'projectSpace.repository.type.workspace' })
+                    : intl.formatMessage({ id: 'projectSpace.repository.type.code' })}
+                </Typography.Paragraph>
+              </div>
+              <div>
+                <Typography.Text type="secondary">
+                  {intl.formatMessage({ id: 'projectSpace.repository.provider' })}
+                </Typography.Text>
+                <Typography.Paragraph>{detailRepo.provider || '-'}</Typography.Paragraph>
+              </div>
+              <div>
+                <Typography.Text type="secondary">
+                  {intl.formatMessage({ id: 'projectSpace.repository.name' })}
+                </Typography.Text>
+                <Typography.Paragraph>{detailRepo.repoFullName || '-'}</Typography.Paragraph>
+              </div>
+              <div>
+                <Typography.Text type="secondary">
+                  {intl.formatMessage({ id: 'projectSpace.repository.url' })}
+                </Typography.Text>
+                <Typography.Paragraph>{detailRepo.repoUrl || '-'}</Typography.Paragraph>
+              </div>
+              <div>
+                <Typography.Text type="secondary">
+                  {intl.formatMessage({ id: 'projectSpace.repository.defaultBranch' })}
+                </Typography.Text>
+                <Typography.Paragraph>{detailRepo.defaultBranch || '-'}</Typography.Paragraph>
+              </div>
+              <div>
+                <Typography.Text type="secondary">
+                  {intl.formatMessage({ id: 'projectSpace.repository.description' })}
+                </Typography.Text>
+                <Typography.Paragraph>{detailRepo.description || '-'}</Typography.Paragraph>
+              </div>
+            </div>
+            {onOpenRepositoryManager && (
+              <Button
+                type="primary"
+                icon={<EditOutlined />}
+                onClick={() => {
+                  const repository = detailRepo;
+                  setDetailRepo(null);
+                  onOpenRepositoryManager(repository);
+                }}
+              >
+                {intl.formatMessage({ id: 'common.edit' })}
+              </Button>
+            )}
+          </>
         )}
       </Drawer>
     </>

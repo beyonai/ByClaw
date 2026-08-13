@@ -30,6 +30,16 @@ public class SystemFeedbackService {
     }
 
     /**
+     * 更新系统反馈。
+     *
+     * @param systemFeedback 待更新反馈
+     * @return 是否更新成功
+     */
+    public boolean updateById(SystemFeedback systemFeedback) {
+        return systemFeedbackMapper.updateById(systemFeedback) > 0;
+    }
+
+    /**
      * 查询系统反馈管理列表。
      *
      * @param qo 查询条件

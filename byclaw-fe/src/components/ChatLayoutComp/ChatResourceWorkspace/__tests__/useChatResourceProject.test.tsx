@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { getProject, listProjects } from '@/pages/projectSpace/service';
-import { useChatResourceProject } from '../useChatResourceProject';
+import { clearChatResourceProjectCache, useChatResourceProject } from '../useChatResourceProject';
 
 jest.mock('@/pages/projectSpace/service', () => ({
   getProject: jest.fn(),
@@ -13,6 +13,45 @@ const mockListProjects = listProjects as jest.MockedFunction<typeof listProjects
 describe('useChatResourceProject', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    clearChatResourceProjectCache();
+  });
+
+  it('reuses the cached project when another conversation belongs to the same project', async () => {
+    mockGetProject.mockResolvedValue({
+      projectId: 12,
+      projectName: '运营项目',
+      projectType: 'operation',
+    } as any);
+
+    const first = renderHook(() => useChatResourceProject(12));
+    await waitFor(() => expect(first.result.current.loading).toBe(false));
+    first.unmount();
+
+    const second = renderHook(() => useChatResourceProject(12));
+
+    expect(second.result.current.loading).toBe(false);
+    expect(second.result.current.project).toMatchObject({ projectId: '12', projectType: 'operation' });
+    expect(mockGetProject).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares one pending request between project consumers', async () => {
+    let resolveProject: (value: any) => void = () => undefined;
+    mockGetProject.mockReturnValue(
+      new Promise((resolve) => {
+        resolveProject = resolve;
+      }) as any
+    );
+
+    const first = renderHook(() => useChatResourceProject(12));
+    const second = renderHook(() => useChatResourceProject(12));
+
+    expect(mockGetProject).toHaveBeenCalledTimes(1);
+    resolveProject({ projectId: 12, projectName: '研发项目', projectType: 'develop' });
+
+    await waitFor(() => {
+      expect(first.result.current.loading).toBe(false);
+      expect(second.result.current.loading).toBe(false);
+    });
   });
 
   it('loads the conversation project when a project id exists', async () => {

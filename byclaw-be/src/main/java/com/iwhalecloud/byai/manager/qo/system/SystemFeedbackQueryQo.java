@@ -20,6 +20,16 @@ public class SystemFeedbackQueryQo extends QueryObject {
     private String feedbackType;
 
     /**
+     * 反馈状态。
+     */
+    private String status;
+
+    /**
+     * 标题或描述关键词。
+     */
+    private String keyword;
+
+    /**
      * 反馈标题。
      */
     private String title;

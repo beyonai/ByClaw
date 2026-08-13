@@ -27,7 +27,7 @@ import {
   listProjectSessionsByQo,
   updateProject,
 } from '@/pages/projectSpace/service';
-import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
+import type { ProjectMember, ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import {
@@ -237,6 +237,22 @@ const normalizeProjectMember = (member: ProjectShareMember | any): ProjectShareM
   };
 };
 
+const normalizeProjectMemberRole = (role?: string): ProjectMember['role'] => {
+  const normalizedRole = `${role || ''}`.toLowerCase();
+  if (['owner', 'creator'].includes(normalizedRole)) return 'owner';
+  if (normalizedRole === 'admin') return 'admin';
+  return 'member';
+};
+
+const normalizeProjectMembers = (members: ProjectShareMember[]): ProjectMember[] =>
+  members.map((member) => {
+    const normalizedMember = normalizeProjectMember(member);
+    return {
+      ...normalizedMember,
+      role: normalizeProjectMemberRole(normalizedMember.role),
+    };
+  });
+
 const syncProjectShareMembers = async (projectId: string | number, desiredMembers: ProjectShareMember[] = []) => {
   const desiredMemberMap = new Map<string, ProjectShareMember>();
 
@@ -280,6 +296,7 @@ const ProjectSpaceList: React.FC = () => {
     useProjectTypeConfig();
   const [projectScopeId, updateProjectScopeId] = useProjectScopeId();
   const [projectScopeDropdownOpen, setProjectScopeDropdownOpen] = useState(false);
+  const projectScopeTriggerRef = useRef<HTMLDivElement>(null);
   const [sessionKeyword, setSessionKeyword] = useState('');
   const [sessionSearchMode, setSessionSearchMode] = useState<DevloopProjectSessionSearchMode>('CHAT_CONTENT');
   const [projectDetailMap, setProjectDetailMap] = useState<Record<string, ProjectSpace>>({});
@@ -296,7 +313,7 @@ const ProjectSpaceList: React.FC = () => {
   const projectSavingRef = useRef(false);
   const sessionSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 新建项目的列表响应可能稍后才返回，期间保留待选 ID，避免被无效本地存储回退逻辑提前清除。
-  const pendingCreatedProjectIdRef = useRef<string>();
+  const pendingCreatedProjectIdRef = useRef<string | undefined>(undefined);
 
   const visibleProjects = useMemo(
     () => projects.filter((project) => !inaccessibleProjectIds.has(`${project.projectId}`)),
@@ -352,6 +369,30 @@ const ProjectSpaceList: React.FC = () => {
       ),
     }));
   }, [mergedProjects, t]);
+
+  useEffect(() => {
+    if (!projectScopeDropdownOpen || wizardOpen) return undefined;
+
+    const isProjectScopeElement = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) return false;
+      return Boolean(
+        projectScopeTriggerRef.current?.contains(target) || target.closest('[data-project-scope-dropdown="true"]')
+      );
+    };
+    const closeOnOutsideInteraction = (event: Event) => {
+      if (isProjectScopeElement(event.target)) return;
+      setProjectScopeDropdownOpen(false);
+      setProjectScopeSearchKeyword('');
+    };
+
+    // 项目选择器使用受控 open，补充点击和键盘失焦时的外部收起逻辑。
+    document.addEventListener('pointerdown', closeOnOutsideInteraction);
+    document.addEventListener('focusin', closeOnOutsideInteraction);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideInteraction);
+      document.removeEventListener('focusin', closeOnOutsideInteraction);
+    };
+  }, [projectScopeDropdownOpen, setProjectScopeSearchKeyword, wizardOpen]);
 
   const projectFormInitialValues = useMemo(() => {
     if (!editingProject) return undefined;
@@ -782,6 +823,7 @@ const ProjectSpaceList: React.FC = () => {
       values.projectType === 'default'
         ? false
         : submitIsDevelopProject || submitIsOperationProject || values.sharedFlag;
+    const submitIsShare = submitSharedFlag ? ('Y' as const) : ('N' as const);
     const shareMembers = submitSharedFlag ? values.shareMembers || [] : [];
     try {
       const res = await createProject(
@@ -789,7 +831,7 @@ const ProjectSpaceList: React.FC = () => {
           projectName,
           description: values.description?.trim(),
           projectType: values.projectType,
-          isShare: submitSharedFlag ? 'Y' : 'N',
+          isShare: submitIsShare,
           shareTargets: [],
         },
         { responseCfg: { hideErrorTips: true } }
@@ -1135,16 +1177,17 @@ const ProjectSpaceList: React.FC = () => {
       values.projectType === 'default'
         ? false
         : submitIsDevelopProject || submitIsOperationProject || values.sharedFlag;
+    const submitIsShare = submitSharedFlag ? ('Y' as const) : ('N' as const);
     const shareMembers = submitSharedFlag ? values.shareMembers || [] : [];
     let createdProjectId = '';
     try {
       if (editingProject) {
-        const updatePayload = {
+        const updatePayload: Parameters<typeof updateProject>[0] = {
           projectId: Number(editingProject.projectId),
           projectName,
           description: values.description?.trim(),
           projectType: values.projectType,
-          isShare: submitSharedFlag ? 'Y' : 'N',
+          isShare: submitIsShare,
           shareTargets: [],
           resources: values.resources || [],
         };
@@ -1164,11 +1207,11 @@ const ProjectSpaceList: React.FC = () => {
             projectName,
             description: values.description?.trim(),
             projectType: values.projectType,
-            isShare: submitSharedFlag ? 'Y' : 'N',
+            isShare: submitIsShare,
             sharedFlag: submitSharedFlag,
             members:
               submitSharedFlag && values.shareMembersLoaded
-                ? shareMembers.map(normalizeProjectMember)
+                ? normalizeProjectMembers(shareMembers)
                 : prev[editingProject.projectId]?.members,
             resources: values.resources || [],
             shareTargets: [],
@@ -1182,7 +1225,7 @@ const ProjectSpaceList: React.FC = () => {
             projectName,
             description: values.description?.trim(),
             projectType: values.projectType,
-            isShare: submitSharedFlag ? 'Y' : 'N',
+            isShare: submitIsShare,
             sharedFlag: submitSharedFlag,
             resources: values.resources || [],
           };
@@ -1194,7 +1237,7 @@ const ProjectSpaceList: React.FC = () => {
             description: values.description?.trim(),
             // 新增项目空间只提交当前表单字段。
             projectType: values.projectType,
-            isShare: submitSharedFlag ? 'Y' : 'N',
+            isShare: submitIsShare,
             shareTargets: [],
             resources: values.resources || [],
           },
@@ -1522,54 +1565,60 @@ const ProjectSpaceList: React.FC = () => {
         <>
           <div className={styles.header}>
             <div className={styles.scopeActionRow}>
-              <Dropdown
-                // 新建项目时只收起下拉菜单，保留输入框中的当前项目名称。
-                trigger={[]}
-                open={projectScopeDropdownOpen && !wizardOpen}
-                overlayClassName={styles.scopeDropdown}
-                onOpenChange={(open) => {
-                  if (wizardOpen) return;
-                  setProjectScopeDropdownOpen(open);
-                  if (!open) setProjectScopeSearchKeyword('');
-                }}
-                menu={{
-                  items: projectScopeMenuItems,
-                  selectedKeys: projectScopeId ? [projectScopeId] : [],
-                  onClick: handleSelectProjectScope,
-                }}
-                dropdownRender={(menu) => (
-                  <div className={styles.scopeDropdownMenu} onScroll={handleProjectScopeMenuScroll}>
-                    {projectScopeMenuItems.length ? (
-                      menu
-                    ) : !loading ? (
-                      <Empty
-                        className={styles.scopeDropdownEmpty}
-                        image={Empty.PRESENTED_IMAGE_SIMPLE}
-                        description={t('projectSearchEmpty')}
-                      />
-                    ) : null}
-                    {loading && <Spin className={styles.scopeDropdownLoading} size="small" />}
-                  </div>
-                )}
-              >
-                {/* 项目选择框同时作为后端搜索入口，聚焦后直接输入关键词。 */}
-                <Input
-                  allowClear={projectScopeDropdownOpen && !wizardOpen}
-                  className={styles.scopeInput}
-                  placeholder={projectScopeDropdownOpen && !wizardOpen ? t('projectSearchPlaceholder') : undefined}
-                  suffix={<DownOutlined />}
-                  value={!wizardOpen && projectScopeDropdownOpen ? projectScopeSearchKeyword : scopeTitle}
-                  onFocus={() => {
-                    if (!wizardOpen) setProjectScopeDropdownOpen(true);
+              <div ref={projectScopeTriggerRef} className={styles.scopeDropdownTrigger}>
+                <Dropdown
+                  // 新建项目时只收起下拉菜单，保留输入框中的当前项目名称。
+                  trigger={[]}
+                  open={projectScopeDropdownOpen && !wizardOpen}
+                  overlayClassName={styles.scopeDropdown}
+                  onOpenChange={(open) => {
+                    if (wizardOpen) return;
+                    setProjectScopeDropdownOpen(open);
+                    if (!open) setProjectScopeSearchKeyword('');
                   }}
-                  onClick={() => {
-                    if (!wizardOpen) setProjectScopeDropdownOpen(true);
+                  menu={{
+                    items: projectScopeMenuItems,
+                    selectedKeys: projectScopeId ? [projectScopeId] : [],
+                    onClick: handleSelectProjectScope,
                   }}
-                  onChange={(event) => {
-                    if (!wizardOpen) setProjectScopeSearchKeyword(event.target.value);
-                  }}
-                />
-              </Dropdown>
+                  dropdownRender={(menu) => (
+                    <div
+                      className={styles.scopeDropdownMenu}
+                      data-project-scope-dropdown="true"
+                      onScroll={handleProjectScopeMenuScroll}
+                    >
+                      {projectScopeMenuItems.length ? (
+                        menu
+                      ) : !loading ? (
+                        <Empty
+                          className={styles.scopeDropdownEmpty}
+                          image={Empty.PRESENTED_IMAGE_SIMPLE}
+                          description={t('projectSearchEmpty')}
+                        />
+                      ) : null}
+                      {loading && <Spin className={styles.scopeDropdownLoading} size="small" />}
+                    </div>
+                  )}
+                >
+                  {/* 项目选择框同时作为后端搜索入口，聚焦后直接输入关键词。 */}
+                  <Input
+                    allowClear={projectScopeDropdownOpen && !wizardOpen}
+                    className={styles.scopeInput}
+                    placeholder={projectScopeDropdownOpen && !wizardOpen ? t('projectSearchPlaceholder') : undefined}
+                    suffix={<DownOutlined />}
+                    value={!wizardOpen && projectScopeDropdownOpen ? projectScopeSearchKeyword : scopeTitle}
+                    onFocus={() => {
+                      if (!wizardOpen) setProjectScopeDropdownOpen(true);
+                    }}
+                    onClick={() => {
+                      if (!wizardOpen) setProjectScopeDropdownOpen(true);
+                    }}
+                    onChange={(event) => {
+                      if (!wizardOpen) setProjectScopeSearchKeyword(event.target.value);
+                    }}
+                  />
+                </Dropdown>
+              </div>
               <Tooltip title={t('createProject')} placement="top">
                 {/* 唯一新建入口:统一向导。step1 完整表单,选研发才展开后续步骤。 */}
                 <Button className={styles.newProjectButton} icon={<PlusOutlined />} onClick={handleOpenCreateProject} />
