@@ -1,0 +1,34 @@
+{
+  "name": "byclaw-desktop",
+  "version": "0.1.0",
+  "description": "ByClaw 桌面端 —— 完整门户 + 本地 Agent",
+  "main": "main.mjs",
+  "type": "module",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --linux deb AppImage"
+  },
+  "dependencies": {
+    "http-proxy": "1.18.1"
+  },
+  "devDependencies": {
+    "electron": "33.4.11",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.byclaw.desktop",
+    "productName": "ByClaw",
+    "files": [
+      "main.mjs",
+      "preload.cjs",
+      "lib/**/*",
+      "renderer/**/*"
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility"
+    }
+  }
+}

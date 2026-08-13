@@ -1,0 +1,20 @@
+--- a/dist/runner.js	2026-08-13 17:48:51.686847589 +0800
++++ b/dist/runner.js	2026-08-13 17:48:51.690847648 +0800
+@@ -293,7 +293,7 @@
+         if (streamNames.length === 0)
+             return [];
+         const count = options.count || this.fetchCount;
+-        const block = options.block || 2000;
++        const block = options.block ?? Number(process.env.BY_FRAMEWORK_READ_BLOCK_MS || 2000);
+         const firstPass = await Promise.all(streamNames.map(streamName => this.readStream(streamName, count)));
+         const firstResults = this.parseXreadgroupBatches(firstPass);
+         if (firstResults.length > 0)
+@@ -518,7 +518,7 @@
+             }
+         })();
+     }
+-    async runControlOnce(block = 2000) {
++    async runControlOnce(block = Number(process.env.BY_FRAMEWORK_READ_BLOCK_MS || 2000)) {
+         const streamName = constants_1.QueueNames.worker_ctrl_stream(this.worker.workerId);
+         const result = (await this.controlReadRedis.xreadgroup('GROUP', this.groupName, this.consumerName, 'COUNT', 10, 'BLOCK', block, 'STREAMS', streamName, '>'));
+         if (!result) {

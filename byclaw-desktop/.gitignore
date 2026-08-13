@@ -1,0 +1,19 @@
+# 运行产物与敏感信息（不提交）
+node_modules/
+renderer/
+dist/
+extensions/
+runtime/
+logs/
+*.log
+
+# 真实配置（含密钥）——只提交 .example 模板
+config.json
+online.env
+.env
+.env.*
+!*.example
+
+# 备份/补丁中间文件
+*.orig
+*.bak

@@ -1,0 +1,55 @@
+{
+  "plugins": {
+    "load": {
+      "paths": [
+        "<LOCAL_ROOT>/extensions/baiying-enhance",
+        "<LOCAL_ROOT>/extensions/byai-channel",
+        "<LOCAL_ROOT>/extensions/byclaw-sqlite"
+      ]
+    },
+    "entries": {
+      "baiying-enhance": {
+        "enabled": true,
+        "hooks": {
+          "allowConversationAccess": true
+        }
+      },
+      "byai-channel": {
+        "enabled": true,
+        "hooks": {
+          "allowConversationAccess": true
+        }
+      },
+      "byclaw-sqlite": {
+        "enabled": true
+      }
+    }
+  },
+  "channels": {
+    "byai-channel": {
+      "enabled": true,
+      "webhookPath": "/webhook/byai-channel",
+      "streamEnabled": true,
+      "sessionKeyPerSessionId": false,
+      "dmPolicy": "open",
+      "allowFrom": ["*"],
+      "telemetry": {
+        "enabled": true,
+        "consoleEnabled": true,
+        "redisEnabled": true,
+        "logIntervalMs": 30000
+      }
+    }
+  },
+  "secrets": {
+    "providers": {
+      "baiying-aimodel-redis": {
+        "source": "exec",
+        "command": "<NODE_BIN>",
+        "args": [
+          "<LOCAL_ROOT>/extensions/baiying-enhance/dist/aimodel-secret-resolver-cli.js"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "apiBaseUrl": "http://<线上网关地址>:8080",
+  "userCode": "<用户编码，如 0027028723>",
+  "redis": {
+    "host": "<线上 Redis 地址>",
+    "port": 6379,
+    "password": "<Redis 密码>",
+    "mode": "standalone",
+    "keySchemaVersion": "v1"
+  },
+  "worker": {
+    "script": "",
+    "localRoot": "",
+    "readBlockMs": 100,
+    "groupChatContextBaseUrl": ""
+  },
+  "auth": {
+    "username": "",
+    "password": "",
+    "token": "",
+    "sessionId": ""
+  },
+  "env": {}
+}
