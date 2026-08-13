@@ -7,7 +7,7 @@
  *   - 桌面端 sidecar：由 main.mjs spawn（传入配置派生 env 覆盖）
  *   - 独立调试：npm run worker（自动读 ~/.config/byclaw/config.json）
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 import os from "node:os";
@@ -31,15 +31,37 @@ function loadConfig() {
   }
 }
 
-// ── openclaw CLI 定位（本地依赖；package.json 有 exports 限制，按包结构定位）──
+// ── openclaw CLI 定位（回退链：本地依赖 → OPENCLAW_CLI → npm root -g → PATH）──
+// 打包版 asar 不含 openclaw（files 排除），必须能回退到全局安装
 function resolveOpenClawCli() {
-  const entry = require.resolve("openclaw"); // <pkg>/dist/index.js（exports "." 允许）
-  const pkgRoot = path.dirname(path.dirname(entry)); // <pkg>/
-  const cli = path.join(pkgRoot, "openclaw.mjs"); // bin.openclaw
-  if (!fs.existsSync(cli)) {
-    throw new Error(`openclaw CLI 未找到: ${cli}（请先 npm install）`);
+  // 1. 本地依赖（开发模式）
+  try {
+    const entry = require.resolve("openclaw"); // <pkg>/dist/index.js（exports "." 允许）
+    const cli = path.join(path.dirname(path.dirname(entry)), "openclaw.mjs"); // bin.openclaw
+    if (fs.existsSync(cli)) return cli;
+  } catch { /* 打包版无本地依赖，走回退 */ }
+  // 2. 环境变量显式指定
+  if (process.env.OPENCLAW_CLI && fs.existsSync(process.env.OPENCLAW_CLI)) {
+    return process.env.OPENCLAW_CLI;
   }
-  return cli;
+  // 3. 全局安装（用探测到的 nodeBin 对应的 npm，避免 PATH 里其他 node/npm 的全局目录）
+  try {
+    const nodeBin = resolveNodeBin();
+    const npmCli = path.join(path.dirname(nodeBin), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js");
+    const args = fs.existsSync(npmCli)
+      ? [npmCli, "root", "-g"]
+      : null;
+    if (args) {
+      const r = spawnSync(nodeBin, args, { encoding: "utf8" });
+      if (r.status === 0 && r.stdout) {
+        const cli = path.join(r.stdout.trim(), "openclaw", "openclaw.mjs");
+        if (fs.existsSync(cli)) return cli;
+      }
+    }
+  } catch { /* 忽略 */ }
+  throw new Error(
+    "openclaw CLI 未找到：请安装（npm install -g openclaw@2026.6.6）或设置 OPENCLAW_CLI 环境变量",
+  );
 }
 
 // ── node 可执行文件定位（openclaw 要求 >=22.19）────────
