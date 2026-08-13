@@ -184,7 +184,7 @@ w7k3m9p2x_travel_expense
 
 | 规则 ID | 需求来源 | 业务规则 | 对象/字段 | Action | 验收用例 |
 |--------|----------|----------|-----------|--------|----------|
-| R-01 | 设计文档 4.5.3 | 上午到次日下午计 2 天 | leave_record.leave_days | submit_leave | TC-R01-01 |
+| R-01 | 设计文档 4.5.3 | 上午到次日下午计 2 天 | leave_record.leave_days | leave_record_submit | TC-R01-01 |
 | R-02 | 系统关联约束 | 员工对象关联统一存 employee.id | leave_record.employee_id | 所有关联 Action | TC-R02-01 |
 
 每条核心规则必须至少落实到一个字段、Action 或明确标记为“仅展示/非本体范围”；每个有业务逻辑的 Action 必须能追溯到规则和验收用例。
@@ -498,21 +498,35 @@ python3 scripts/collect_object.py '{
 根据「{对象名}」的字段特征，我推荐以下 Action，请确认哪些需要开发：
 
 ✅ 已选（建议）：
-  1. create_{entity_code}   — 新建{对象名}（主数据类必备）
-  2. submit_{entity_code}   — 提交申请（状态流转：草稿 → 已提交）
-  3. approve_{entity_code}  — 审批通过（状态流转：审批中 → 已批准）
-  4. reject_{entity_code}   — 审批拒绝（状态流转：审批中 → 已拒绝）
-  5. get_my_{entity_code}   — 查询我提交的记录
-  6. get_{entity_code}_detail — 查询详情（按 id）
+  1. {entity_code}_create   — 新建{对象名}（主数据类必备）
+  2. {entity_code}_submit   — 提交申请（状态流转：草稿 → 已提交）
+  3. {entity_code}_approve  — 审批通过（状态流转：审批中 → 已批准）
+  4. {entity_code}_reject   — 审批拒绝（状态流转：审批中 → 已拒绝）
+  5. {entity_code}_get_my   — 查询我提交的记录
+  6. {entity_code}_get_detail — 查询详情（按 id）
 
 ⬜ 可选：
-  7. revoke_{entity_code}   — 撤回申请（已提交 → 草稿）
-  8. sum_{entity_code}_amount — 统计金额汇总
+  7. {entity_code}_revoke   — 撤回申请（已提交 → 草稿）
+  8. {entity_code}_sum_amount — 统计金额汇总
 
 请告诉我哪些要开发、哪些不需要，或者补充其他 Action。
 ```
 
-> 推导的 Action code 使用 `snake_case`，命名规范：`<verb>_<entity_code>` 或 `<verb>_<business_term>`。状态流转 Action 的名称要明确体现操作语义，不要用模糊的 `update_status`。
+> 推导的 Action code 使用 `snake_case`，命名规范：**对象编码作前缀**，格式为 `<entity_code>_<verb>`（对象完整编码在前、动词语义在后）。对象编码作前缀便于按对象聚合检索 Action，也避免多个对象出现同名动词（如都叫 `submit`）时互相冲突。
+>
+> 正确示例（对象编码 `leave_record`）：
+> - `leave_record_submit` — 提交申请
+> - `leave_record_approve` — 审批通过
+> - `leave_record_reject` — 审批拒绝
+> - `leave_record_get_my` — 查询我提交的记录
+> - `leave_record_get_detail` — 查询详情
+>
+> 错误示例：
+> - `submit_leave_record` — 动词在前，对象编码未作前缀
+> - `leave_submit` — 使用对象名称而非对象编码
+> - `update_status` — 语义模糊，未体现具体状态流转操作
+>
+> 状态流转 Action 的名称必须明确体现操作语义（提交/通过/拒绝/撤回），不要用模糊的 `update_status`。
 
 **Action 开发完整性检查（每个对象 Action 开发结束时执行）：**
 
@@ -549,7 +563,7 @@ python3 scripts/collect_object.py '{
 **Action 业务契约格式：**
 
 ```text
-Action：submit_leave（提交请假）
+Action：leave_record_submit（提交请假）
 需求来源：R-01、R-03、设计文档 4.5.3/4.5.4/4.5.6
 执行角色：当前登录员工
 Action 类型：OPERATION
@@ -937,7 +951,7 @@ Action 入参：
 - 优先复用已经业务验收通过的 QUERY Action
 - 没有合适查询入口时，可以创建仅用于调试的只读验证 Action，按明确 id/业务键返回待断言字段
 - 验证 Action 自身不得修改数据，不得复用待测试 Action 的计算函数来生成“实际值”
-- 临时验证 Action 使用明显的 `_debug_verify_` 前缀，完成全部验收后调用 `delete_action.py` 删除，不得随工作区提交
+- 临时验证 Action 同样遵循对象名称前缀规范，使用明显的 `{entity_code}_debug_verify_` 前缀，完成全部验收后调用 `delete_action.py` 删除，不得随工作区提交
 - 仅通过待测试 Action 自己返回的内容，不能替代独立的数据库状态查询
 
 调用格式：
@@ -1019,12 +1033,12 @@ python3 scripts/run_action.py '{...}'
 以下 Action 业务验收情况汇总：
 
 {对象名1}：
-  🟢 create_xxx — 已展示完整脚本，用户已审阅；4/4 用例通过，12/12 断言通过
-  🟢 submit_xxx — 已展示完整脚本，用户已审阅；9/9 用例通过，37/37 断言通过
-  🔴 approve_xxx — 业务验收失败：退回后 locked_days 未释放
+  🟢 xxx_create — 已展示完整脚本，用户已审阅；4/4 用例通过，12/12 断言通过
+  🟢 xxx_submit — 已展示完整脚本，用户已审阅；9/9 用例通过，37/37 断言通过
+  🔴 xxx_approve — 业务验收失败：退回后 locked_days 未释放
 
 {对象名2}：
-  🟡 get_my_xxx — 完整脚本尚未向用户展示，禁止调试或提交
+  🟡 xxx_get_my — 完整脚本尚未向用户展示，禁止调试或提交
 
 跨 Action 场景：
   🔴 请假完整流程 — 终审扣减断言失败
@@ -1073,9 +1087,9 @@ python3 scripts/run_action.py '{...}'
 对象：travel_application_u001、travel_expense_u001（共 2 个）
 Action：
   travel_application_u001：
-    create_application、submit_application、approve_application
+    travel_application_u001_create、travel_application_u001_submit、travel_application_u001_approve
   travel_expense_u001：
-    create_expense、list_expenses
+    travel_expense_u001_create、travel_expense_u001_list
   共 5 个，均已业务验收通过
 
 目标发布归属：企业（enterprise）

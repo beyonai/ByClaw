@@ -7,7 +7,7 @@ I/O 协议：stdin JSON → stdout JSON
     {
         "workspace_name":   "travel_reimbursement",   # 必填
         "entity_code":      "travel_application",     # 必填
-        "action_code":      "submit_application",     # 必填，snake_case
+        "action_code":      "travel_application_submit",     # 必填，snake_case，对象编码作前缀
         "action_name":      "提交申请",                 # 必填
         "action_type":      "OPERATION",                # 必填，QUERY（查询类）或 OPERATION（操作类）
         "action_desc":      "汇总费用、校验审批人、更新状态为已提交",  # 可选
@@ -40,8 +40,8 @@ I/O 协议：stdin JSON → stdout JSON
 出参（stdout JSON）:
     {
         "ok":          true,
-        "action_code": "submit_application",
-        "file":        "objects/travel_application/actions/submit_application.py"
+        "action_code": "travel_application_submit",
+        "file":        "objects/travel_application/actions/travel_application_submit.py"
     }
 
 同一 action_code 多次调用直接覆盖，用于调试后修正脚本。

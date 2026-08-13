@@ -7,11 +7,11 @@ I/O 协议：stdin JSON → stdout JSON
     {
         "workspace_name": "travel_reimbursement",   # 必填
         "entity_code":    "travel_application",     # 必填
-        "action_code":    "submit_application"      # 必填
+        "action_code":    "travel_application_submit"      # 必填
     }
 
 出参（stdout JSON）:
-    {"ok": true, "action_code": "submit_application", "existed": true}
+    {"ok": true, "action_code": "travel_application_submit", "existed": true}
 """
 
 from __future__ import annotations
