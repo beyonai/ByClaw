@@ -34,13 +34,20 @@ node skills/dws/scripts/connector-auth-sync.mjs
 
 ## 业务懒刷新后的平台元数据回写（最高优先级）
 
-user 身份业务命令前，先在同一个隔离 HOME 执行 `HOME="$DWS_HOME" dws auth status --format json`，只读取本地
-`tokenValid`/`token_valid` 与 `refreshTokenValid`/`refresh_token_valid`；该预检不得触发登录、清理缓存或修改凭证。
+user 身份业务命令前，先记录预检时间，再在同一个隔离 HOME 执行
+`HOME="$DWS_HOME" dws profile list --format json`，读取本次业务身份的 token 生命周期快照。`profile list` 只用于读取
+快照；不得使用 `dws auth status` 做预检，因为该命令可能触发 access token 刷新并覆盖业务调用前的状态。
 
-- 仅当预检明确返回 `tokenValid=false`（或 `token_valid=false`）且 `refreshTokenValid=true`（或
-  `refresh_token_valid=true`），并且随后 user 身份业务命令成功后，才原样执行一次
+- 必须从顶层 `profiles` 列表解析与业务命令相同的 profile。业务命令带单个 `--profile` 时，只允许在列表项的 `corpId`
+  或 `corpName` 中精确匹配唯一项；解析项的 `corpId` 还必须等于顶层 `currentProfile`，且 `isCurrent=true`。未带
+  `--profile` 时，只选择 `corpId` 等于 `currentProfile` 且 `isCurrent=true` 的唯一列表项。
+- 多个 `--profile` 选择器（包括 CSV 多选）、匹配不到、匹配多个、非当前 profile，或当前项不唯一时，状态视为未知，
+  禁止猜测、切换 profile 或执行平台回写，避免把一个组织的刷新状态写入另一个连接器绑定。
+- 仅当目标列表项的 `expiresAt` 和 `refreshExpAt` 都是可解析的绝对时间，且 `expiresAt` 早于或等于预检时间、
+  `refreshExpAt` 晚于预检时间，并且随后 user 身份业务命令成功后，才原样执行一次
   `node skills/dws/scripts/connector-auth-sync.mjs`，让后端从同一 native-home 回读并保存刷新后的生命周期元数据。
-- 业务命令未成功、access token 仍有效或状态未知时不执行该业务后回写；未知状态继续按现有错误处理流程判断，禁止猜测。
+- 业务命令未成功、access token 在预检时仍有效、refresh token 在预检时已过期，或任一所需字段缺失/不可解析时，
+  不执行该业务后回写；未知状态继续按现有错误处理流程判断，禁止猜测。
 - 回写成功以 helper 退出码为 0 且 `connected=true` 为准。回写失败不得改变已经成功的钉钉业务结果，不得重试业务命令、
   重新授权或再次调用 helper；应保留业务结果，并补充说明“业务已完成，但平台连接状态同步暂时失败”。
 - 本节是 dws 对 DWS CLI 懒刷新行为的显式 opt-in；不得把该流程扩展到飞书、企微或未来新增的其他连接器。其他连接器
