@@ -33,6 +33,7 @@
   "build": {
     "appId": "com.byclaw.desktop",
     "productName": "ByClaw",
+    "npmRebuild": false,
     "files": [
       "main.mjs",
       "preload.cjs",
