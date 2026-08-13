@@ -147,12 +147,8 @@ const server = http.createServer((req, res) => {
 
 server.on("upgrade", (req, socket, head) => {
   const url = req.url || "";
-  // 线上 Nginx 未配置 WebSocket 转发（502/挂起），快速失败让前端重连，避免 read ETIMEDOUT 长时间挂住
-  if (url.startsWith("/byaiService/ws")) {
-    socket.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
-    socket.destroy();
-    return;
-  }
+  // 前端对话走 WebSocket（/byaiService/ws，sendMessageWhenReady），线上 WS 已实测可用（101）
+  // 必须转发，不能快速失败（曾误判线上 WS 502 导致对话消息发不出去）
   if (url.startsWith("/byaiService") || url.startsWith("/v1/sandboxes")) {
     proxy.ws(req, socket, head);
   } else {
