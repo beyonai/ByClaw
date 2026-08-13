@@ -52,6 +52,17 @@ npm run worker
 npm run dist
 ```
 
+## 目录布局（XDG 标准，全平台一致）
+
+```
+~/.config/byclaw/config.json     ← 配置（唯一来源，严格模式；XDG_CONFIG_HOME 可重定向）
+~/.local/share/byclaw/           ← 运行数据（XDG_DATA_HOME 可重定向）
+  ├── runtime/                   ← OpenClaw 状态 / workspace / 会话历史
+  ├── extensions/                ← 构建产物（npm run deploy 生成）
+  ├── config/openclaw.json       ← OpenClaw 插件/通道配置（模板渲染）
+  └── logs/                      ← 桌面端/worker 日志
+```
+
 ## 配置说明（~/.config/byclaw/config.json）
 
 | 字段 | 说明 |
