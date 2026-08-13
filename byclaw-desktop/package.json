@@ -7,11 +7,12 @@
   "scripts": {
     "start": "electron .",
     "worker": "node worker/worker-launcher.mjs",
-    "build:renderer": "bash scripts/build-renderer.sh",
-    "dist": "bash scripts/build-renderer.sh && electron-builder",
-    "dist:linux": "bash scripts/build-renderer.sh && electron-builder --linux",
-    "dist:win": "bash scripts/build-renderer.sh && electron-builder --win",
-    "dist:mac": "bash scripts/build-renderer.sh && electron-builder --mac"
+    "build:renderer": "node scripts/build-renderer.mjs",
+    "deploy": "node scripts/deploy-local.mjs",
+    "dist": "node scripts/build-renderer.mjs && electron-builder",
+    "dist:linux": "node scripts/build-renderer.mjs && electron-builder --linux",
+    "dist:win": "node scripts/build-renderer.mjs && electron-builder --win",
+    "dist:mac": "node scripts/build-renderer.mjs && electron-builder --mac"
   },
   "dependencies": {
     "http-proxy": "1.18.1",

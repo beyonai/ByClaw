@@ -38,7 +38,7 @@ byclaw-desktop/
 npm install
 
 # 2. 一键部署（构建前端 + 扩展 + 生成配置模板）
-bash scripts/deploy-local.sh
+npm run deploy
 
 # 3. 填写用户配置（业界惯例：用户配置目录，可被 XDG_CONFIG_HOME 重定向）
 #    ~/.config/byclaw/config.json
