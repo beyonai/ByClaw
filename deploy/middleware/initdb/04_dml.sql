@@ -4163,7 +4163,7 @@ INSERT INTO "byai"."sandbox_service_spec" ("service_key", "spec_json", "template
     '{"mcp": {"servers": {"env": {"GBRAIN_HOME": "/by/.openclaw/gbrain"}, "gbrain": {"args": ["serve"], "command": "gbrain"}}}, "meta": {"lastTouchedAt": "2026-03-27T08:46:51.148Z", "lastTouchedVersion": "2026.3.28"}, "hooks": {"internal": {"enabled": true, "entries": {"boot-md": {"enabled": false}, "session-memory": {"enabled": true}}}}, "tools": {"web": {"search": {"enabled": false}}, "profile": "full"}, "agents": {"list": [{"id": "main", "skills": [], "default": true, "workspace": "${OPENCLAW_STATE_DIR}/workspace"}, {"id": "ui-skill-tester", "name": "UI技能测试", "identity": {"name": "UI技能测试"}, "workspace": "/by/.openclaw/workspace-ui-skill-tester"}, {"id": "ui-skill-creator", "name": "UI技能创建", "model": {"primary": "byclaw/kimi-k2.6"}, "tools": {"deny": ["image", "image_generate", "music_generate", "video_generate", "tts", "canvas", "browser", "agents_list", "update_plan", "code_execution", "cron", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "sessions_yield", "subagents", "session_status", "exec", "x_search", "process", "nodes", "gateway", "message", "write", "edit", "memory_search", "memory_get"], "profile": "full", "alsoAllow": ["ui-skill-modeler", "jarvis_run_flow", "read"]}, "identity": {"name": "UI技能创建"}, "workspace": "/by/.openclaw/workspace-ui-skill-creator"}], "defaults": {"model": {"primary": "byclaw/${MODEL_ID}"}, "models": {"byclaw/kimi-k2.5": {"alias": "kimi-k2.5"}}, "subagents": {"maxConcurrent": 8}, "compaction": {"mode": "safeguard"}, "maxConcurrent": 4, "skipBootstrap": true, "verboseDefault": "full", "thinkingDefault": "high", "bootstrapMaxChars": 15000, "blockStreamingBreak": "text_end", "blockStreamingDefault": "on"}}, "models": {"providers": {"byclaw": {"api": "openai-completions", "apiKey": "${MODEL_API_KEY}", "models": [{"id": "${MODEL_ID}", "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "name": "${MODEL_NAME}", "input": ["text"], "maxTokens": 8192, "reasoning": true, "contextWindow": 128000}, {"id": "kimi-k2.5", "api": "openai-completions", "cost": {"input": 4, "output": 21, "cacheRead": 0.7, "cacheWrite": 0}, "name": "kimi-k2.5", "input": ["text", "image"], "maxTokens": 32000, "reasoning": true, "contextWindow": 256000}], "baseUrl": "${MODEL_BASE_URL}"}}}, "skills": {"load": {"watch": true, "watchDebounceMs": 5000}, "install": {"nodeManager": "pnpm"}}, "wizard": {"lastRunAt": "2026-02-03T07:41:55.092Z", "lastRunMode": "local", "lastRunCommand": "configure", "lastRunVersion": "2026.1.30"}, "browser": {"enabled": true, "headless": false, "profiles": {"work": {"color": "#0066CC", "cdpPort": 18801}, "chrome": {"color": "#00AA00", "cdpUrl": "http://127.0.0.1:18792"}, "openclaw": {"color": "#FF4500", "cdpUrl": "http://localhost:9222"}}, "attachOnly": false, "ssrfPolicy": {"dangerouslyAllowPrivateNetwork": true}, "defaultProfile": "openclaw", "executablePath": "/usr/bin/google-chrome"}, "gateway": {"auth": {"mode": "token", "token": "${OPENCLAW_GATEWAY_TOKEN}"}, "bind": "lan", "mode": "local", "port": 8080, "nodes": {"browser": {"mode": "off"}}, "controlUi": {"allowedOrigins": ["*"], "allowInsecureAuth": true, "dangerouslyDisableDeviceAuth": true, "dangerouslyAllowHostHeaderOriginFallback": true}, "tailscale": {"mode": "off", "resetOnExit": false}}, "plugins": {"load": {"paths": ["/app/dist-runtime/extensions/baiying-enhance", "/app/dist-runtime/extensions/byai-channel", "/app/dist-runtime/extensions/byclaw-sqlite", "/app/custom-plugins/foundry", "/app/custom-plugins/runtime"]}, "allow": ["browser", "byai-channel", "baiying-enhance", "byclaw-sqlite", "diagnostics-otel", "memory-core", "ui-skill-foundry", "pincer-runtime"], "slots": {"memory": "none", "contextEngine": "modeler-image-cleaner"}, "enabled": true, "entries": {"xai": {"enabled": false}, "browser": {"enabled": true}, "byai-channel": {"enabled": true}, "byclaw-sqlite": {"enabled": true}, "pincer-runtime": {"config": {"identifyPageUrl": "http://127.0.0.1:8005"}, "enabled": true}, "baiying-enhance": {"config": {"watchDebounceMs": 500, "mainParentAgentId": "main", "workspaceAutoSeed": true, "embedApiKeysFromJson": true, "mergeAllowSpawnForMain": true}, "enabled": true}, "diagnostics-otel": {"enabled": true}, "ui-skill-foundry": {"config": {"identifyPageUrl": "http://127.0.0.1:8005"}, "enabled": true}}}, "channels": {"byai-channel": {"enabled": true, "dmPolicy": "open", "allowFrom": ["*"], "webhookPath": "/webhook/byai-channel", "streamEnabled": true, "blockStreaming": true, "sessionKeyPerSessionId": true}}, "commands": {"native": "auto", "restart": true, "nativeSkills": "auto", "ownerDisplay": "raw"}, "diagnostics": {"otel": {"logs": false, "traces": true, "enabled": true, "headers": {"Authorization": "Basic cGstbGYtMmVlYzQ2YTUtMWZiZi00MDNiLWI0NzAtMTlkMjdlZmZlNDRlOnNrLWxmLTc3MDc4MjE1LTg5YmQtNDViNy1hZmIyLWUyYjEzZjc5YWYxMw==", "x-langfuse-ingestion-version": "4"}, "metrics": false, "endpoint": "https://us.cloud.langfuse.com/api/public/otel", "protocol": "http/protobuf", "sampleRate": 1, "serviceName": "openclaw-gateway", "captureContent": {"enabled": true, "toolInputs": true, "toolOutputs": true, "systemPrompt": true, "inputMessages": true, "outputMessages": true, "toolDefinitions": true}, "flushIntervalMs": 5000}, "enabled": true}}',
     '2026-06-17 17:57:57.666');
 
--- 重建全新环境的 OpenClaw 内置 Skill 清单，并纳入 knowledge-collection、agent-reach 与独立 bycli。
+-- 重建全新环境的 OpenClaw 内置 Skill 清单，并纳入 knowledge-collection、By-Reach（技术代码 agent-reach）与独立 bycli。
 delete from byai.byai_system_config where param_code in('OPENCLAW_BUNDLED_SKILLS');
 INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc) VALUES (nextval('byai.seq_any_table'), 'text', 'OPENCLAW_BUNDLED_SKILLS', 'OpenClaw内置Skill清单', 'OPENCLAW_BUNDLED_SKILLS', '[{
 		"skillName": "1password",
@@ -4496,10 +4496,10 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
 		"skillDescEn": "Orchestrate knowledge collection across public internet and enterprise platforms, including canonical artifacts, post-processing, and knowledge-base ingestion or organization."
 	},
 	{
-		"skillName": "agent-reach",
+		"skillName": "By-Reach",
 		"skillCode": "agent-reach",
-		"skillDescZh": "路由公开互联网渠道能力，并按 ByClaw 覆盖规则选择 byCLI 等执行器。",
-		"skillDescEn": "Route public-internet channels and select executors such as byCLI according to ByClaw override rules."
+		"skillDescZh": "路由公共互联网渠道，并按 By-Reach v2 策略选择已批准的执行器。",
+		"skillDescEn": "Route public-internet channels and select approved By-Reach v2 executors."
 	},
 	{
 		"skillName": "bycli",
@@ -5044,7 +5044,7 @@ WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
 -- 补充公开互联网渠道路由 Skill，已存在同名 skillCode 时不重复追加。
 UPDATE byai.byai_system_config c
 SET param_value = left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1)
-    || ',{"skillName":"agent-reach","skillCode":"agent-reach","skillDescZh":"路由公开互联网渠道能力，并按 ByClaw 覆盖规则选择 byCLI 等执行器。","skillDescEn":"Route public-internet channels and select executors such as byCLI according to ByClaw override rules."}]'
+    || ',{"skillName":"By-Reach","skillCode":"agent-reach","skillDescZh":"路由公共互联网渠道，并按 By-Reach v2 策略选择已批准的执行器。","skillDescEn":"Route public-internet channels and select approved By-Reach v2 executors."}]'
 WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
   AND regexp_replace(c.param_value, '\s', '', 'g')
       NOT LIKE '%"skillCode":"agent-reach"%';
@@ -5177,7 +5177,7 @@ WHERE g.grant_obj_id = knowledge_collection.resource_id
         AND existing.grant_to_obj_type = g.grant_to_obj_type
   );
 
--- 注册 agent-reach 为可被资源授权接口查询的内置 Skill。
+-- 注册技术代码为 agent-reach、对用户展示为 By-Reach 的内置 Skill。
 -- resource_id 由序列生成，避免依赖固定 ID；各步骤均按 resource_code 幂等执行。
 INSERT INTO byai.ss_resource (
     resource_id, system_code, resource_biz_type, resource_type, resource_name,
@@ -5188,8 +5188,8 @@ INSERT INTO byai.ss_resource (
     owner_type, impl_type, worker_agent_type
 )
 SELECT
-    nextval('byai.seq_any_table'), 'BYAI', 'SKILL', 'ATOM', 'agent-reach',
-    '路由公开互联网渠道能力，并按 ByClaw 覆盖规则选择 byCLI 等执行器。',
+    nextval('byai.seq_any_table'), 'BYAI', 'SKILL', 'ATOM', 'By-Reach',
+    '路由公共互联网渠道，并按 By-Reach v2 策略选择已批准的执行器。',
     '1.0', 'hosted', 10, -1, '10001', 10001, CURRENT_TIMESTAMP,
     10001, CURRENT_TIMESTAMP, 1, 2, -1, -1, 'agent-reach',
     CURRENT_TIMESTAMP, 'passed', 1, -1, 'publish', 'enterprise', 'SKILL', 'NONE'

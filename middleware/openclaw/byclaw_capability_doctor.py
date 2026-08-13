@@ -47,7 +47,6 @@ BYCLI_ERROR_CODES = {
     "invalid_daemon_config",
     "invalid_arguments",
 }
-BYCLI_OVERRIDDEN_AGENT_REACH_BACKENDS = {"jina reader", "opencli"}
 
 
 def run_command(argv: list[str], timeout_seconds: float) -> CommandResult:
@@ -75,25 +74,6 @@ def degraded_result(code: str, message: str) -> dict[str, object]:
     }
 
 
-def resolve_agent_reach_effective_backend(
-    diagnostic_backend: object,
-    available_backends: object,
-) -> object:
-    if (
-        isinstance(diagnostic_backend, str)
-        and diagnostic_backend.strip().casefold() in BYCLI_OVERRIDDEN_AGENT_REACH_BACKENDS
-    ):
-        return "bycli"
-    if diagnostic_backend is None and isinstance(available_backends, list):
-        for backend in available_backends:
-            if (
-                isinstance(backend, str)
-                and backend.strip().casefold() in BYCLI_OVERRIDDEN_AGENT_REACH_BACKENDS
-            ):
-                return "bycli"
-    return diagnostic_backend
-
-
 def check_cli_version(
     command_runner: CommandRunner,
     binary: str,
@@ -119,25 +99,25 @@ def check_cli_version(
     return {"status": "ready", "version": result.stdout.strip()}
 
 
-def check_agent_reach(command_runner: CommandRunner, timeout_seconds: float) -> dict[str, object]:
+def check_by_reach(command_runner: CommandRunner, timeout_seconds: float) -> dict[str, object]:
     try:
-        result = command_runner(["agent-reach", "doctor", "--json"], timeout_seconds)
+        result = command_runner(["by-reach", "doctor", "--json"], timeout_seconds)
     except FileNotFoundError:
-        return error_result("binary_missing", "agent-reach is not installed")
+        return error_result("binary_missing", "by-reach is not installed")
     except subprocess.TimeoutExpired:
-        return error_result("check_timeout", "agent-reach doctor timed out")
+        return error_result("check_timeout", "by-reach doctor timed out")
     except OSError:
-        return error_result("doctor_failed", "agent-reach doctor could not be executed")
+        return error_result("doctor_failed", "by-reach doctor could not be executed")
 
     if result.returncode != 0:
-        return error_result("doctor_failed", "agent-reach doctor returned a non-zero exit code")
+        return error_result("doctor_failed", "by-reach doctor returned a non-zero exit code")
 
     try:
         raw_channels = json.loads(result.stdout)
     except (json.JSONDecodeError, TypeError):
-        return error_result("invalid_probe_output", "agent-reach doctor returned invalid JSON")
+        return error_result("invalid_probe_output", "by-reach doctor returned invalid JSON")
     if not isinstance(raw_channels, dict):
-        return error_result("invalid_probe_output", "agent-reach doctor JSON must be an object")
+        return error_result("invalid_probe_output", "by-reach doctor JSON must be an object")
 
     channels: dict[str, dict[str, object]] = {}
     for channel_id, raw in raw_channels.items():
@@ -146,26 +126,16 @@ def check_agent_reach(command_runner: CommandRunner, timeout_seconds: float) -> 
         diagnostic_backend = raw.get("active_backend")
         available_backends = raw.get("backends", [])
         channel_id_text = str(channel_id)
-        is_web_channel = channel_id_text.casefold() == "web"
-        effective_backend = (
-            "bycli"
-            if is_web_channel
-            else resolve_agent_reach_effective_backend(
-                diagnostic_backend,
-                available_backends,
-            )
-        )
+        effective_backend = diagnostic_backend
         normalized = {
             "status": STATUS_MAP.get(str(raw.get("status")), "unavailable"),
             "name": raw.get("name"),
             "message": (
-                "Concrete webpage access is restricted to bycli"
-                if is_web_channel
-                else raw.get("message")
+                raw.get("message")
             ),
             "tier": raw.get("tier"),
-            "backends": ["bycli"] if is_web_channel else available_backends,
-            "diagnosticBackend": "disabled_by_policy" if is_web_channel else diagnostic_backend,
+            "backends": available_backends,
+            "diagnosticBackend": diagnostic_backend,
             "effectiveBackend": effective_backend,
             # Compatibility alias for consumers written before effectiveBackend existed.
             "activeBackend": effective_backend,
@@ -173,7 +143,7 @@ def check_agent_reach(command_runner: CommandRunner, timeout_seconds: float) -> 
         channels[channel_id_text] = {key: value for key, value in normalized.items() if value is not None}
 
     if not channels:
-        return error_result("invalid_probe_output", "agent-reach doctor returned no channels")
+        return error_result("invalid_probe_output", "by-reach doctor returned no channels")
 
     mandatory_channels = [channel for channel in channels.values() if channel.get("tier") == 0]
     health_channels = mandatory_channels or list(channels.values())
@@ -499,19 +469,19 @@ def check_dws(command_runner: CommandRunner, timeout_seconds: float) -> dict[str
 
 
 def build_report(
-    agent_reach: dict[str, object],
+    by_reach: dict[str, object],
     bycli: dict[str, object],
     wecom: dict[str, object],
     lark: dict[str, object],
     dws: dict[str, object],
 ) -> dict[str, object]:
-    enabled_states = [str(agent_reach.get("status")), str(bycli.get("status"))]
-    agent_channels = agent_reach.get("channels")
-    optional_configuration_required = isinstance(agent_channels, dict) and any(
+    enabled_states = [str(by_reach.get("status")), str(bycli.get("status"))]
+    by_reach_channels = by_reach.get("channels")
+    optional_configuration_required = isinstance(by_reach_channels, dict) and any(
         isinstance(channel, dict)
         and channel.get("tier") != 0
         and channel.get("status") == "configuration_required"
-        for channel in agent_channels.values()
+        for channel in by_reach_channels.values()
     )
     if all(state == "ready" for state in enabled_states) and not optional_configuration_required:
         overall_status = "ready"
@@ -523,10 +493,11 @@ def build_report(
         overall_status = "degraded"
 
     return {
+        "schemaVersion": 2,
         "overallStatus": overall_status,
         "checkedAt": datetime.now().astimezone().isoformat(timespec="seconds"),
         "providers": {
-            "agentReach": agent_reach,
+            "byReach": by_reach,
             "bycli": bycli,
             "wecom": wecom,
             "lark": lark,
@@ -536,14 +507,14 @@ def build_report(
 
 
 def collect_report(
-    agent_reach_check: Callable[[], dict[str, object]],
+    by_reach_check: Callable[[], dict[str, object]],
     bycli_check: Callable[[], dict[str, object]],
     wecom_check: Callable[[], dict[str, object]],
     lark_check: Callable[[], dict[str, object]],
     dws_check: Callable[[], dict[str, object]],
 ) -> dict[str, object]:
     checks = {
-        "agentReach": agent_reach_check,
+        "byReach": by_reach_check,
         "bycli": bycli_check,
         "wecom": wecom_check,
         "lark": lark_check,
@@ -561,7 +532,7 @@ def collect_report(
                     f"{name} capability check failed unexpectedly",
                 )
     return build_report(
-        results["agentReach"],
+        results["byReach"],
         results["bycli"],
         results["wecom"],
         results["lark"],
@@ -599,7 +570,7 @@ def main() -> int:
         return 0
 
     report = collect_report(
-        lambda: check_agent_reach(run_command, timeout_seconds),
+        lambda: check_by_reach(run_command, timeout_seconds),
         lambda: check_bycli(run_command, timeout_seconds),
         lambda: check_wecom(run_command, timeout_seconds),
         lambda: check_lark(run_command, timeout_seconds),

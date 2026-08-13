@@ -3,27 +3,28 @@ from pathlib import Path
 
 
 OPENCLAW_ROOT = Path(__file__).parents[1]
-DOCKERFILES = (OPENCLAW_ROOT / "Dockerfile",)
+DOCKERFILES = (OPENCLAW_ROOT / "Dockerfile", OPENCLAW_ROOT / "Dockerfile.byclaw")
 
 
-class AgentReachImageWiringTest(unittest.TestCase):
-    def test_production_images_pin_and_verify_agent_reach(self):
+class ByReachImageWiringTest(unittest.TestCase):
+    def test_production_images_pin_and_verify_by_reach(self):
         for dockerfile in DOCKERFILES:
             with self.subTest(dockerfile=dockerfile.name):
                 content = dockerfile.read_text(encoding="utf-8")
-                self.assertIn("ARG AGENT_REACH_VERSION=1.5.0", content)
+                self.assertIn("ARG BY_REACH_VERSION=2.0.0b1", content)
                 self.assertIn(
-                    "ARG AGENT_REACH_COMMIT=f65526cbaaad3879473acc1ba6dbefd195caf2be",
+                    "ARG BY_REACH_COMMIT=9d4cc902195c180767d283787b980438f80871ad",
                     content,
                 )
                 self.assertIn(
-                    "ARG AGENT_REACH_SHA256=456a3ab86e56366ba665dc4bade5c0839c3043266e2a192efa09f4fdec415e20",
+                    "ARG BY_REACH_SHA256=d4b3404ffdbf1247a07c45f85d21a645463cb9968673bbb3cfa048a21d37cb35",
                     content,
                 )
-                self.assertIn("Agent-Reach/archive/${AGENT_REACH_COMMIT}.tar.gz", content)
-                self.assertIn('echo "${AGENT_REACH_SHA256}  /tmp/agent-reach.tar.gz" | sha256sum -c -', content)
-                self.assertIn("-c /tmp/agent-reach/constraints.txt", content)
-                self.assertIn("agent-reach --version", content)
+                self.assertIn("sovovs/By-Reach/archive/${BY_REACH_COMMIT}.tar.gz", content)
+                self.assertIn('echo "${BY_REACH_SHA256}  /tmp/by-reach.tar.gz" | sha256sum -c -', content)
+                self.assertIn("-c /tmp/by-reach/constraints.txt", content)
+                self.assertIn("by-reach --version", content)
+                self.assertNotIn("AGENT_REACH_", content)
 
     def test_production_images_install_aggregate_doctor(self):
         for dockerfile in DOCKERFILES:

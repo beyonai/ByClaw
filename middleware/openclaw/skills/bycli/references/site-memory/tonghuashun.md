@@ -40,7 +40,7 @@
 4. **`<code>` 格式 `hs_600000`**：hs 是上海，sz 是深圳；港美股前缀不同
 5. **数据中心接口有日期快照切换**：`date=YYYYMMDD` 参数默认当天，历史日期要显式传
 6. **限频特别严**：连续 10 次会跳风控页，adapter 层 1s 间隔起
-7. **响应 gzip 强制**：某些接口不带 Accept-Encoding 会 406，`fetch` 默认 OK，node 原生 http 要显式加
+7. **响应 gzip 强制**：某些接口不带 Accept-Encoding 会 406；由 byCLI 管理的 Adapter 请求实现需要显式处理该 header
 
 ## 可参考的 adapter
 

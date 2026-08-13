@@ -136,7 +136,7 @@ WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
 -- 补充公开互联网渠道路由 Skill，已存在同名 skillCode 时不重复追加。
 UPDATE byai.byai_system_config c
 SET param_value = left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1)
-    || ',{"skillName":"agent-reach","skillCode":"agent-reach","skillDescZh":"路由公开互联网渠道能力，并按 ByClaw 覆盖规则选择 byCLI 等执行器。","skillDescEn":"Route public-internet channels and select executors such as byCLI according to ByClaw override rules."}]'
+    || ',{"skillName":"By-Reach","skillCode":"agent-reach","skillDescZh":"路由公共互联网渠道，并按 By-Reach v2 策略选择已批准的执行器。","skillDescEn":"Route public-internet channels and select approved By-Reach v2 executors."}]'
 WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
   AND regexp_replace(c.param_value, '\s', '', 'g')
       NOT LIKE '%"skillCode":"agent-reach"%';
@@ -269,7 +269,7 @@ WHERE g.grant_obj_id = knowledge_collection.resource_id
         AND existing.grant_to_obj_type = g.grant_to_obj_type
   );
 
--- 注册 agent-reach 为可被资源授权接口查询的内置 Skill。
+-- 注册技术代码为 agent-reach、对用户展示为 By-Reach 的内置 Skill。
 -- resource_id 由序列生成，避免依赖固定 ID；各步骤均按 resource_code 幂等执行。
 INSERT INTO byai.ss_resource (
     resource_id, system_code, resource_biz_type, resource_type, resource_name,
@@ -280,8 +280,8 @@ INSERT INTO byai.ss_resource (
     owner_type, impl_type, worker_agent_type
 )
 SELECT
-    nextval('byai.seq_any_table'), 'BYAI', 'SKILL', 'ATOM', 'agent-reach',
-    '路由公开互联网渠道能力，并按 ByClaw 覆盖规则选择 byCLI 等执行器。',
+    nextval('byai.seq_any_table'), 'BYAI', 'SKILL', 'ATOM', 'By-Reach',
+    '路由公共互联网渠道，并按 By-Reach v2 策略选择已批准的执行器。',
     '1.0', 'hosted', 10, -1, '10001', 10001, CURRENT_TIMESTAMP,
     10001, CURRENT_TIMESTAMP, 1, 2, -1, -1, 'agent-reach',
     CURRENT_TIMESTAMP, 'passed', 1, -1, 'publish', 'enterprise', 'SKILL', 'NONE'

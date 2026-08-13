@@ -1,4 +1,4 @@
 interface:
-  display_name: "Agent Reach"
+  display_name: "By-Reach"
   short_description: "Look up and read internet content (no archiving)"
-  default_prompt: "Use $agent-reach to research this request with the available ByClaw providers."
+  default_prompt: "Use $agent-reach (By-Reach) to research this request with the available ByClaw providers."
