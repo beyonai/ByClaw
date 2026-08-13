@@ -111,7 +111,13 @@ function buildEnv(overrides = {}) {
   if (!env.BYAI_GROUP_CHAT_CONTEXT_BASE_URL) {
     env.BYAI_GROUP_CHAT_CONTEXT_BASE_URL = worker.groupChatContextBaseUrl || cfg.apiBaseUrl || "";
   }
-  const localRoot = worker.localRoot || path.join(path.dirname(new URL(import.meta.url).pathname), "..");
+  // 本地根目录：配置优先，否则用标准 XDG 数据目录（~/.local/share/byclaw）
+  const localRoot =
+    worker.localRoot ||
+    path.join(
+      process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"),
+      "byclaw",
+    );
   if (!env.OPENCLAW_STATE_DIR) env.OPENCLAW_STATE_DIR = path.join(localRoot, "runtime");
   if (!env.OPENCLAW_CONFIG_PATH) env.OPENCLAW_CONFIG_PATH = path.join(localRoot, "config", "openclaw.json");
   for (const [k, v] of Object.entries(cfg.env || {})) {
