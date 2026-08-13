@@ -2,6 +2,7 @@
 name: dws
 description: 管理钉钉产品能力(AI表格/日历/通讯录/群聊与机器人/待办/审批/考勤/日志/DING消息/开放平台文档/钉钉文档/钉钉云盘/AI听记/邮箱等)。当用户需要操作表格数据、管理日程会议、查询通讯录、管理群聊、机器人发消息、创建待办、提交审批、查看考勤、提交日报周报（钉钉日志模版）、读写钉钉文档、上传下载云盘文件、查询听记纪要、收发邮件时使用。
 cli_version: ">=1.0.15"
+byclaw_managed: true
 ---
 
 # 钉钉全产品 Skill
@@ -30,6 +31,20 @@ node skills/dws/scripts/connector-auth-sync.mjs
 - helper 已独占完整的一次重试预算；Skill 不得再次调用 helper。凭证无效、连接器/Verifier 不存在等业务错误不得重试。
 - 同步仍失败时报告“CLI 授权可能已完成，但平台连接状态同步失败”，停止业务命令；不得重新发起设备登录，也不得用本地成功绕过同步失败。
 - 禁止读取、显示或要求用户提供认证文件、Token、请求 Header、服务发现信息或内部路径。
+
+## 业务懒刷新后的平台元数据回写（最高优先级）
+
+user 身份业务命令前，先在同一个隔离 HOME 执行 `HOME="$DWS_HOME" dws auth status --format json`，只读取本地
+`tokenValid`/`token_valid` 与 `refreshTokenValid`/`refresh_token_valid`；该预检不得触发登录、清理缓存或修改凭证。
+
+- 仅当预检明确返回 `tokenValid=false`（或 `token_valid=false`）且 `refreshTokenValid=true`（或
+  `refresh_token_valid=true`），并且随后 user 身份业务命令成功后，才原样执行一次
+  `node skills/dws/scripts/connector-auth-sync.mjs`，让后端从同一 native-home 回读并保存刷新后的生命周期元数据。
+- 业务命令未成功、access token 仍有效或状态未知时不执行该业务后回写；未知状态继续按现有错误处理流程判断，禁止猜测。
+- 回写成功以 helper 退出码为 0 且 `connected=true` 为准。回写失败不得改变已经成功的钉钉业务结果，不得重试业务命令、
+  重新授权或再次调用 helper；应保留业务结果，并补充说明“业务已完成，但平台连接状态同步暂时失败”。
+- 本节是 dws 对 DWS CLI 懒刷新行为的显式 opt-in；不得把该流程扩展到飞书、企微或未来新增的其他连接器。其他连接器
+  只有在自身 Skill 明确声明同类能力和回写契约后才能接入。
 
 ## 严格禁止 (NEVER DO)
 - 不要使用 dws 命令以外的方式操作（禁止 curl、HTTP API、浏览器）

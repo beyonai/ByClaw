@@ -126,7 +126,6 @@ class ConnectorSchemaTest {
             "'byai_connector_auth', 'access_token'",
             "'byai_connector_auth', 'refresh_token'"
         );
-        assertThat(sql).doesNotContain("when 'lark-cli' then 'refresh_token'");
     }
 
     @Test
@@ -223,6 +222,31 @@ class ConnectorSchemaTest {
         assertThat(sql.indexOf("with ranked_active_authorizations")).isLessThan(
             sql.indexOf("create unique index if not exists uk_byai_connector_auth_active_user_connector")
         );
+    }
+
+    @Test
+    void refreshLifecycleDdlRepairsLegacyActiveDuplicatesBeforeReassertingTheUniqueIndex() throws Exception {
+        String sql = read("deploy/migrations/versions/V0.3.2/V0.3.2__ddl.sql").toLowerCase(Locale.ROOT);
+
+        assertThat(sql).contains(
+            "with ranked_active_authorizations",
+            "partition by user_id, connector_id",
+            "update byai.byai_connector_auth as duplicate_auth",
+            "set status_cd = '00x',",
+            "ranked.row_num > 1",
+            "create unique index if not exists uk_byai_connector_auth_active_user_connector",
+            "where status_cd = '00a'"
+        );
+        assertThat(sql.indexOf("with ranked_active_authorizations")).isLessThan(
+            sql.indexOf("create unique index if not exists uk_byai_connector_auth_active_user_connector")
+        );
+    }
+
+    @Test
+    void refreshLifecycleDdlBackfillsLarkAsARefreshTokenConnector() throws Exception {
+        String sql = read("deploy/migrations/versions/V0.3.2/V0.3.2__ddl.sql").toLowerCase(Locale.ROOT);
+
+        assertThat(sql).contains("when 'lark-cli' then 'refresh_token'");
     }
 
     @Test

@@ -9,7 +9,17 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "connector-auth-sync.mjs");
+const SKILL = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "SKILL.md");
 const SECRET_TOKEN = "fixture-secret-beyond-token";
+
+test("requires conditional best-effort metadata sync after a lazy user refresh", () => {
+  const skill = fs.readFileSync(SKILL, "utf8");
+
+  assert.match(skill, /业务命令前.*dws auth status --format json/s);
+  assert.match(skill, /tokenValid.*false.*refreshTokenValid.*true.*业务命令成功后.*connector-auth-sync\.mjs/s);
+  assert.match(skill, /回写失败不得改变已经成功的钉钉业务结果/);
+  assert.match(skill, /不得把该流程扩展到.*其他连接器/);
+});
 
 function runHelper(args, env) {
   return new Promise((resolve, reject) => {

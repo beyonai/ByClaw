@@ -37,17 +37,20 @@ WHERE access_expire_time IS NULL
 
 UPDATE byai.byai_connector_auth AS auth
 SET credential_state = COALESCE(auth.credential_state, 'UNKNOWN'),
-    renewal_mode = COALESCE(
-        auth.renewal_mode,
-        CASE info.provider_code
-            WHEN 'dws-dingtalk' THEN 'REFRESH_TOKEN'
-            WHEN 'wecom-cli' THEN 'PROBE_ONLY'
-            ELSE 'NONE'
-        END
-    )
+    renewal_mode = CASE info.provider_code
+        WHEN 'dws-dingtalk' THEN 'REFRESH_TOKEN'
+        WHEN 'lark-cli' THEN 'REFRESH_TOKEN'
+        WHEN 'wecom-cli' THEN 'PROBE_ONLY'
+        ELSE COALESCE(auth.renewal_mode, 'NONE')
+    END
 FROM byai.byai_connector_info AS info
 WHERE info.connector_id = auth.connector_id
-  AND (auth.credential_state IS NULL OR auth.renewal_mode IS NULL);
+  AND (
+      auth.credential_state IS NULL
+      OR auth.renewal_mode IS NULL
+      OR (info.provider_code IN ('dws-dingtalk', 'lark-cli') AND auth.renewal_mode <> 'REFRESH_TOKEN')
+      OR (info.provider_code = 'wecom-cli' AND auth.renewal_mode <> 'PROBE_ONLY')
+  );
 
 UPDATE byai.byai_connector_auth
 SET credential_state = COALESCE(credential_state, 'UNKNOWN'),
@@ -65,6 +68,31 @@ ALTER TABLE byai.byai_connector_auth
 
 ALTER TABLE byai.byai_connector_auth
     ALTER COLUMN renewal_mode SET NOT NULL;
+
+-- V0.3.1 的唯一索引可能在旧环境中已经被标记执行但实际未落库；本版本再次以幂等方式修复历史重复有效绑定。
+WITH ranked_active_authorizations AS (
+    SELECT auth_id,
+           ROW_NUMBER() OVER (
+               PARTITION BY user_id, connector_id
+               ORDER BY CASE WHEN enable_flag = 'Y' THEN 0 ELSE 1 END ASC,
+                        update_time DESC NULLS LAST,
+                        create_time DESC NULLS LAST,
+                        auth_id DESC NULLS LAST
+           ) AS row_num
+    FROM byai.byai_connector_auth
+    WHERE status_cd = '00A'
+)
+UPDATE byai.byai_connector_auth AS duplicate_auth
+SET status_cd = '00X',
+    enable_flag = 'N',
+    update_time = CURRENT_TIMESTAMP
+FROM ranked_active_authorizations AS ranked
+WHERE duplicate_auth.auth_id = ranked.auth_id
+  AND ranked.row_num > 1;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_byai_connector_auth_active_user_connector
+    ON byai.byai_connector_auth (user_id, connector_id)
+    WHERE status_cd = '00A';
 
 CREATE INDEX IF NOT EXISTS idx_byai_connector_auth_user_state
     ON byai.byai_connector_auth (user_id, connector_id, status_cd, enable_flag, credential_state);

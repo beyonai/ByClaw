@@ -366,10 +366,34 @@ describe('ConnectorControl authorization states', () => {
           accessExpiresAt: '2000-01-02T03:04:05+08:00',
           refreshExpiresAt: null,
         },
+        {
+          connectorCode: 'dingtalk-sync-pending',
+          connectorId: 8,
+          connectorName: '钉钉状态同步中',
+          connectorType: 'CUSTOM',
+          description: '',
+          enableFlag: 'Y',
+          credentialState: 'UNKNOWN',
+          renewalMode: 'REFRESH_TOKEN',
+          accessExpiresAt: null,
+          refreshExpiresAt: null,
+        },
+        {
+          connectorCode: 'generic-sync-pending',
+          connectorId: 9,
+          connectorName: '普通连接器状态同步中',
+          connectorType: 'CUSTOM',
+          description: '',
+          enableFlag: 'Y',
+          credentialState: 'UNKNOWN',
+          renewalMode: 'NONE',
+          accessExpiresAt: null,
+          refreshExpiresAt: null,
+        },
       ],
       pageNum: 1,
       pageSize: 100,
-      total: 7,
+      total: 9,
       totalPages: 1,
     });
 
@@ -388,6 +412,8 @@ describe('ConnectorControl authorization states', () => {
 
       expect(await screen.findAllByText('授权即将失效，预计有效至 2998-01-02 03:04:05')).not.toHaveLength(0);
       expect(screen.getAllByText('最近验证于 2026-08-12 03:04:05')).not.toHaveLength(0);
+      expect(screen.getByText('自动续期，授权有效期同步中')).toBeInTheDocument();
+      expect(screen.getByText('授权状态待同步')).toBeInTheDocument();
       expect(screen.queryByText(/企微探测连接器.*授权有效期至/)).not.toBeInTheDocument();
     } finally {
       unmount();
