@@ -33,8 +33,9 @@ function run(cmd, args, opts = {}) {
 
 console.log(">>> 构建 byclaw-fe...");
 // 注意：--no-audit/--no-fund 是 npm 的 flag，pnpm 不支持（会报 Unknown options）
-run("pnpm", ["install"]);
-run("pnpm", ["run", "build"]);
+// 必须在 byclaw-fe 目录下执行（cwd）
+run("pnpm", ["install"], { cwd: feDir });
+run("pnpm", ["run", "build"], { cwd: feDir });
 
 console.log(`>>> 拷贝产物 -> ${outDir}`);
 fs.rmSync(outDir, { recursive: true, force: true });
