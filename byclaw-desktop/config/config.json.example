@@ -10,14 +10,11 @@
   },
   "worker": {
     "localRoot": "",
-    "readBlockMs": 100,
-    "groupChatContextBaseUrl": ""
+    "readBlockMs": 100
   },
   "auth": {
     "username": "",
-    "password": "",
-    "token": "",
-    "sessionId": ""
+    "password": ""
   },
   "env": {}
 }

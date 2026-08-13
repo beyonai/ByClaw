@@ -70,11 +70,10 @@ npm run dist
 | `apiBaseUrl` | 线上网关（如 `http://<host>:8080`，API 前缀 `/byaiService`） |
 | `userCode` | 用户编码（worker 注册 agentType `BYCLAW_EXE_<userCode>`） |
 | `redis` | 线上 Redis（host/port/password/mode/keySchemaVersion） |
-| `worker.script` / `worker.localRoot` | 本地 Agent 脚本与根目录（默认按部署位置推导） |
+| `worker.localRoot` | 本地数据根目录（默认 `~/.local/share/byclaw`，XDG_DATA_HOME 可重定向） |
 | `worker.readBlockMs` | 任务消费灵敏度（默认 100ms） |
-| `worker.groupChatContextBaseUrl` | 群聊上下文查询直连地址（默认 apiBaseUrl；避免服务发现指向内网不可达导致 10s 超时） |
-| `auth` | 登录账号/密码（login.mjs 用）、token/sessionId（已登录态） |
-| `env` | 附加环境变量（透传给 worker） |
+| `auth` | 登录账号/密码（仅 `login.mjs` 换 token 用；token 不落配置——凭证最小化） |
+| `env` | 附加环境变量（可选，透传给 worker） |
 
 ## 运维
 

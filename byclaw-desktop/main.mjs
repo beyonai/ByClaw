@@ -27,10 +27,6 @@ const FE_DIST =
   process.env.BYCLAW_FE_DIST ||
   path.join(__dirname, "renderer");
 const LOCAL_PORT = Number(process.env.BYCLAW_DESKTOP_PORT || 38080);
-const WORKER_SCRIPT =
-  process.env.BYCLAW_WORKER_SCRIPT ||
-  CFG.worker.script ||
-  path.join(__dirname, "..", "worker", "start-worker.sh");
 const WORKER_ONLINE_KEY =
   process.env.BYCLAW_WORKER_ONLINE_KEY ||
   `byai_gateway:registry:worker:online:byai-channel-worker-${CFG.userCode}`;
