@@ -45,6 +45,7 @@ let tray = null;
 let workerProc = null;
 let agentOnline = false;
 let workerManaged = false; // 当前 worker 是否由桌面端托管（spawn 的）
+let lastSpawnAt = 0; // 上次 spawn 时刻（78 冷却用）
 let isQuitting = false;
 
 // ── 代理 ──────────────────────────────────────────────
