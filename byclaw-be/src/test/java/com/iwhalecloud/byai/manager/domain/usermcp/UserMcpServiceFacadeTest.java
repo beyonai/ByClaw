@@ -62,6 +62,23 @@ class UserMcpServiceFacadeTest {
     }
 
     @Test
+    void validateDefaultsPreviewedToolsToRead() {
+        UserMcpPublicConfig config = config("fingerprint-a", UserMcpAuthMode.NONE, null);
+        UserMcpServiceRequest request = new UserMcpServiceRequest(
+            "personal-search", "Personal Search", "description", "{\"public\":true}", null);
+        when(configParser.parse(request.sourceContent())).thenReturn(config);
+        when(configParser.toJson(config)).thenReturn("{\"public\":true}");
+        when(discoveryService.preview(config, null)).thenReturn(List.of(
+            new UserMcpRemoteClient.RemoteTool("search", "Search", "{\"type\":\"object\"}")
+        ));
+
+        var result = facade.validate(request);
+
+        assertThat(result.tools()).extracting(UserMcpToolDiscoveryService.ToolView::riskLevel)
+            .containsExactly("READ");
+    }
+
+    @Test
     void createPersistsOnlyCanonicalPublicConfigAfterSuccessfulPreview() {
         UserMcpPublicConfig config = config("fingerprint-a", UserMcpAuthMode.STATIC_HEADER, "BEARER_TOKEN");
         UserMcpServiceRequest request = new UserMcpServiceRequest(
@@ -84,7 +101,7 @@ class UserMcpServiceFacadeTest {
         });
         when(discoveryService.snapshot(99L, 1L, "fingerprint-a", remoteTools))
             .thenReturn(new UserMcpToolDiscoveryService.DiscoveryResult(700L, List.of(
-                new UserMcpToolDiscoveryService.ToolView("search", "Search", "{\"type\":\"object\"}", "UNKNOWN")
+                new UserMcpToolDiscoveryService.ToolView("search", "Search", "{\"type\":\"object\"}", "READ")
             )));
 
         var result = facade.create(request, 42L);

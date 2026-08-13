@@ -5473,7 +5473,7 @@ FROM byai.ss_resource r
 WHERE e.resource_id = r.resource_id
   AND r.resource_code IN ('knowledge-collection','bycli');
 
--- User MCP administrator policies. Values are maintained in 参数配置管理 -> 参数管理.
+-- User MCP administrator endpoint policy. Value is maintained in 参数配置管理 -> 参数管理.
 INSERT INTO byai.byai_system_config
     (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc)
 SELECT nextval('byai.seq_any_table'), 'text', 'BYAI_MCP_ALLOWED_ADDRESSES', '用户 MCP 公网 IP 白名单',
@@ -5482,10 +5482,10 @@ WHERE NOT EXISTS (
     SELECT 1 FROM byai.byai_system_config WHERE param_code = 'BYAI_MCP_ALLOWED_ADDRESSES'
 );
 
-INSERT INTO byai.byai_system_config
-    (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc)
-SELECT nextval('byai.seq_any_table'), 'text', 'BYAI_MCP_READ_TOOL_RULES', '用户 MCP 只读工具规则',
-       'User MCP read-only tool rules', '', '逗号分隔的 endpointFingerprint:toolName 精确规则'
-WHERE NOT EXISTS (
-    SELECT 1 FROM byai.byai_system_config WHERE param_code = 'BYAI_MCP_READ_TOOL_RULES'
-);
+DELETE FROM byai.byai_system_config
+WHERE param_code = 'BYAI_MCP_READ_TOOL_RULES';
+
+UPDATE byai.byai_user_mcp_tool_snapshot
+SET risk_level = 'READ',
+    risk_source = 'SYSTEM_DEFAULT'
+WHERE status_cd = '00A';

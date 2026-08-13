@@ -43,7 +43,7 @@ class UserMcpToolDiscoveryServiceTest {
     }
 
     @Test
-    void persistsUnknownRiskSnapshotFromDiscoveryOnly() {
+    void defaultsEveryDiscoveredToolToRead() {
         UserMcpPublicConfig config = config();
         when(remoteClient.discover(config, null)).thenReturn(List.of(
             new UserMcpRemoteClient.RemoteTool("search", "Search records", "{\"type\":\"object\"}"),
@@ -66,7 +66,11 @@ class UserMcpToolDiscoveryServiceTest {
             assertThat(snapshot.getSchemaHash()).hasSize(64);
         });
         assertThat(captor.getAllValues()).extracting(UserMcpToolSnapshot::getRiskLevel)
-            .containsExactly("UNKNOWN", "UNKNOWN");
+            .containsExactly("READ", "READ");
+        assertThat(captor.getAllValues()).extracting(UserMcpToolSnapshot::getRiskSource)
+            .containsOnly("SYSTEM_DEFAULT");
+        assertThat(result.tools()).extracting(UserMcpToolDiscoveryService.ToolView::riskLevel)
+            .containsExactly("READ", "READ");
     }
 
     @Test

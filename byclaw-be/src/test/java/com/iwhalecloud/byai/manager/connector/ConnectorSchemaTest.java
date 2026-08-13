@@ -146,13 +146,18 @@ class ConnectorSchemaTest {
             "unique (resource_id, snapshot_version, tool_name)",
             "alter table byai.ss_res_ext_mcp"
         );
+        assertThat(ddl).containsPattern("risk_level\\s+varchar\\(16\\)\\s+not null default 'read'");
         assertThat(dml).contains(
             "'user-mcp'",
             "'instance_defined'",
             "'byai_mcp_allowed_addresses'",
-            "'byai_mcp_read_tool_rules'",
+            "delete from byai.byai_system_config",
+            "update byai.byai_user_mcp_tool_snapshot",
+            "set risk_level = 'read',",
+            "risk_source = 'system_default'",
             "where not exists"
         );
+        assertThat(dml).doesNotContain("'byai_mcp_read_tool_rules', '用户 mcp 只读工具规则'");
         assertThat(ddl).doesNotContain("access_token", "refresh_token");
         assertThat(dml).doesNotContain("authorization", "cookie", "api_key");
         assertThat(Files.exists(repoPath("deploy/migrations/versions/V0.6.1"))).isFalse();

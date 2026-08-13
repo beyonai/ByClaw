@@ -244,7 +244,7 @@ public class UserMcpServiceFacade {
     private List<UserMcpToolDiscoveryService.ToolView> toViews(List<UserMcpRemoteClient.RemoteTool> tools) {
         return tools.stream()
             .map(tool -> new UserMcpToolDiscoveryService.ToolView(
-                tool.name(), tool.description(), tool.inputSchema(), "UNKNOWN"))
+                tool.name(), tool.description(), tool.inputSchema(), "READ"))
             .toList();
     }
 
