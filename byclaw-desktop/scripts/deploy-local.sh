@@ -12,7 +12,15 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 DESKTOP_DIR="$(dirname "$SCRIPT_DIR")"
 LOCAL_ROOT="${BYCLAW_LOCAL_ROOT:-$HOME/.local/share/byclaw}"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/byclaw"
-NODE_BIN="$(command -v node || true)"
+# 优先使用 nvm 的 node（>=22.19，与 openclaw/byclaw 兼容；conda 等环境 node 可能版本不符）
+NODE_BIN=""
+for cand in "$HOME/.nvm/versions/node/v22.23.1/bin/node" "$HOME/.nvm/versions/node/v22.19.0/bin/node" "$(command -v node || true)"; do
+  if [ -n "$cand" ] && [ -x "$cand" ]; then
+    NODE_BIN="$cand"
+    break
+  fi
+done
+[ -n "$NODE_BIN" ] || NODE_BIN="node"
 
 echo "=== ByClaw 桌面端部署 ==="
 echo "  本地根目录: $LOCAL_ROOT"
@@ -37,11 +45,10 @@ chmod +x "$LOCAL_ROOT/worker/start-worker.sh"
 
 # 3. 渲染 openclaw.json
 echo ">>> 生成 openclaw.json"
+mkdir -p "$LOCAL_ROOT/config"
 sed -e "s|<LOCAL_ROOT>|$LOCAL_ROOT|g" \
     -e "s|<NODE_BIN>|$NODE_BIN|g" \
-    "$DESKTOP_DIR/config/openclaw.json.example" > "$LOCAL_ROOT/config/openclaw.json" 2>/dev/null \
-  || cp "$DESKTOP_DIR/config/openclaw.json.example" "$LOCAL_ROOT/config/openclaw.json"
-mkdir -p "$LOCAL_ROOT/config"
+    "$DESKTOP_DIR/config/openclaw.json.example" > "$LOCAL_ROOT/config/openclaw.json"
 
 # 4. 用户配置（首次生成模板）
 if [ ! -f "$CONFIG_DIR/config.json" ]; then
