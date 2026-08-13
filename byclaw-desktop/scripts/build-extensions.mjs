@@ -82,6 +82,8 @@ for (const ext of EXTENSIONS) {
     continue;
   }
   run("npm", ["install", "--no-audit", "--no-fund"], { cwd: src });
+  // 自愈：esbuild 等二进制可能因安装/复制丢失执行位（Permission denied / exit 126）
+  ensureExecutable(path.join(src, "node_modules", ".bin"));
   run("npm", ["run", "build"], { cwd: src });
   const dest = path.join(outDir, ext);
   fs.cpSync(src, dest, { recursive: true });
@@ -113,16 +115,17 @@ function chmodWritableRecursive(dir) {
   } catch { /* 忽略权限错误 */ }
 }
 
-/** 确保 .bin 下的可执行 shim 都有执行位（esbuild 等） */
+/** 确保 .bin 下的可执行 shim 都有执行位（esbuild 等；npm 安装后二进制可能为 644） */
 function ensureExecutable(binDir) {
   if (process.platform === "win32" || !fs.existsSync(binDir)) return;
   try {
     for (const name of fs.readdirSync(binDir)) {
       const p = path.join(binDir, name);
-      const st = fs.lstatSync(p);
-      if (st.isSymbolicLink() || st.isFile()) {
-        fs.chmodSync(p, 0o755);
-      }
+      try {
+        // 符号链接先解析真实路径（chmod 符号链接本身不可靠）
+        const target = fs.realpathSync(p);
+        if (fs.existsSync(target)) fs.chmodSync(target, 0o755);
+      } catch { /* 悬空链接忽略 */ }
     }
   } catch { /* 忽略 */ }
 }
