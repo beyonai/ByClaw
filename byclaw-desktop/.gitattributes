@@ -1,0 +1,8 @@
+# 多平台分发：确保脚本类文件在 Windows checkout 后仍是 LF（防 CRLF 破坏）
+*.sh text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

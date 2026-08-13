@@ -12,7 +12,7 @@ Electron 桌面客户端 + 本地 Agent 执行体，连接线上 ByClaw 平台�
 ```
 本地机器 ────────────────┐
  ① Electron 桌面端（门户+代理+托盘+sidecar）
- ② OpenClaw worker（byai-channel / baiying-enhance 扩展）
+ ② OpenClaw worker（纯 JS 启动器 worker-launcher.mjs + openclaw 本地依赖）
  └──── Redis Stream（BYCLAW_EXE_<userCode>）────┐
 线上平台（byclaw-be / byclaw-super / 数据层）──────┘
 ```
@@ -23,7 +23,7 @@ Electron 桌面客户端 + 本地 Agent 执行体，连接线上 ByClaw 平台�
 byclaw-desktop/
 ├── main.mjs / preload.cjs     # Electron 主进程（配置化、worker 托管、代理加固）
 ├── lib/                       # config.mjs（配置加载）、icons.mjs（托盘图标）
-├── worker/                    # start-worker.sh（Agent 启动）、login.mjs（登录换 token）
+├── worker/                    # worker-launcher.mjs（纯 JS 启动器）、login.mjs（登录换 token）
 ├── config/                    # 配置模板（config.json.example / openclaw.json.example / local-agent spec）
 ├── patches/                   # by-framework 补丁（任务消费灵敏度）
 └── scripts/                   # 构建与部署脚本
@@ -31,20 +31,25 @@ byclaw-desktop/
 
 ## 快速开始
 
-前置：Node.js ≥ 22.19、全局 `openclaw@2026.6.6`（`npm install -g openclaw@2026.6.6`）
+前置：Node.js ≥ 22.19（worker 由 launcher 自动探测 nvm node）
 
 ```bash
-# 1. 一键部署（构建前端 + 扩展 + 生成配置模板）
+# 1. 安装依赖（含 openclaw@2026.6.6 本地依赖）
+npm install
+
+# 2. 一键部署（构建前端 + 扩展 + 生成配置模板）
 bash scripts/deploy-local.sh
 
-# 2. 填写用户配置（业界惯例：用户配置目录，可被 XDG_CONFIG_HOME 重定向）
+# 3. 填写用户配置（业界惯例：用户配置目录，可被 XDG_CONFIG_HOME 重定向）
 #    ~/.config/byclaw/config.json
 #    { apiBaseUrl, userCode, redis{host,port,password}, auth{username,password} }
 
-# 3. 启动桌面端（Agent 自动跟随上线）
-npx electron .
-# 或打包分发
-npx electron-builder --linux AppImage
+# 4. 启动桌面端（Agent 自动跟随上线）
+npm start
+# 或独立启动 worker 调试
+npm run worker
+# 或打包分发（全平台 target，GitHub Releases 发布）
+npm run dist
 ```
 
 ## 配置说明（~/.config/byclaw/config.json）
@@ -66,6 +71,14 @@ npx electron-builder --linux AppImage
 - 重启 Agent：托盘 → 重启本地 Agent（崩溃 3s 自动拉起）
 - 本地独占执行：管理页建 `local-agent` 沙箱规格（spec 模板见 `config/`），并设用户首选 serviceKey——云端容器不再注册 worker，任务全部由本地执行
 - 清理残留：`rm -f /tmp/openclaw-1000/gateway.*.lock` + `DEL byai_gateway:registry:worker:agent_types:byai-channel-worker-*`
+
+## 多平台分发（lobehub 同款模式）
+
+- **构建**：electron-builder 三平台 target（win: nsis/portable、mac: dmg/zip、linux: AppImage/deb），`npm run dist:win|dist:mac|dist:linux`
+- **CI**：GitHub Actions 三平台矩阵（macos/windows/ubuntu），tag 触发发布
+- **分发**：GitHub Releases（`build.publish` 已配置 github provider），electron-updater 自动更新
+- **签名**：macOS 需 Developer ID + 公证；Windows 建议代码签名证书
+- **worker 跨平台**：纯 JS 启动器（worker-launcher.mjs），openclaw 为本地依赖；Windows 无需 nvm PATH 注入
 
 ## 已知边界
 

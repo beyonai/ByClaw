@@ -9,11 +9,11 @@ import http from "node:http";
 import net from "node:net";
 import path from "node:path";
 import fs from "node:fs";
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import httpProxy from "http-proxy";
 import { makeDotIcon, STATUS_COLORS } from "./lib/icons.mjs";
 import { loadConfig } from "./lib/config.mjs";
+import { startWorker as launchWorker } from "./worker/worker-launcher.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -189,9 +189,15 @@ function checkAgentOnline() {
 async function refreshAgentStatus() {
   const online = await checkAgentOnline();
   if (online !== agentOnline) {
+    const wasOnline = agentOnline;
     agentOnline = online;
     updateTray();
     console.log(`[desktop] agent status: ${online ? "ONLINE" : "OFFLINE"}`);
+    // 外部 worker 掉线（含启动时残留 key 过期）→ 桌面端接管拉起
+    if (wasOnline && !online && !workerManaged && !workerProc) {
+      console.log("[desktop] external worker went offline, taking over…");
+      startWorker();
+    }
   }
   // 托管的 worker 进程死了但 Redis 还在线（心跳窗口期）→ 重启
   if (online && workerManaged && workerProc && workerProc.exitCode !== null) {
@@ -220,10 +226,8 @@ function startWorker() {
   if (workerProc && workerProc.exitCode === null) return;
   workerManaged = true;
   console.log("[desktop] starting local agent worker…");
-  // 从配置派生 worker 环境（worker 脚本内同名 env 已存在时不会覆盖）
-  const workerEnv = {
-    ...process.env,
-    PATH: process.env.PATH,
+  // 纯 JS 启动器（worker-launcher.mjs）：配置派生 env + node 跑 openclaw CLI（跨平台）
+  workerProc = launchWorker({
     USER_CODE: CFG.userCode,
     REDIS_HOST: CFG.redis.host,
     REDIS_PORT: String(CFG.redis.port ?? 6379),
@@ -232,18 +236,12 @@ function startWorker() {
     REDIS_KEY_SCHEMA_VERSION: CFG.redis.keySchemaVersion || "v1",
     BY_FRAMEWORK_READ_BLOCK_MS: String(CFG.worker.readBlockMs ?? 100),
     BYAI_GROUP_CHAT_CONTEXT_BASE_URL: CFG.worker.groupChatContextBaseUrl || CFG.apiBaseUrl,
-  };
-  if (CFG.worker.localRoot) {
-    workerEnv.OPENCLAW_STATE_DIR = path.join(CFG.worker.localRoot, "runtime");
-    workerEnv.OPENCLAW_CONFIG_PATH = path.join(CFG.worker.localRoot, "config", "openclaw.json");
-  }
-  for (const [k, v] of Object.entries(CFG.env || {})) {
-    if (v !== undefined && v !== null) workerEnv[k] = String(v);
-  }
-  workerProc = spawn("bash", [WORKER_SCRIPT], {
-    detached: false,
-    stdio: ["ignore", "pipe", "pipe"],
-    env: workerEnv,
+    ...(CFG.worker.localRoot
+      ? {
+          OPENCLAW_STATE_DIR: path.join(CFG.worker.localRoot, "runtime"),
+          OPENCLAW_CONFIG_PATH: path.join(CFG.worker.localRoot, "config", "openclaw.json"),
+        }
+      : {}),
   });
   workerProc.stdout.on("data", (d) => {
     const s = d.toString().trim();
@@ -383,6 +381,15 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+
+app.on("window-all-closed", () => {
+  // 托盘驻留，不退出
+});
+
+app.on("before-quit", () => {
+  isQuitting = true;
+});
+
 
 app.on("window-all-closed", () => {
   // 托盘驻留，不退出

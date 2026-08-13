@@ -9,7 +9,6 @@
     "keySchemaVersion": "v1"
   },
   "worker": {
-    "script": "",
     "localRoot": "",
     "readBlockMs": 100,
     "groupChatContextBaseUrl": ""

@@ -38,10 +38,8 @@ else
   echo ">>> 跳过构建（BYCLAW_SKIP_BUILD=1）"
 fi
 
-# 2. 复制 worker 脚本
-echo ">>> 部署 worker 脚本"
-cp "$DESKTOP_DIR/worker/start-worker.sh" "$DESKTOP_DIR/worker/login.mjs" "$LOCAL_ROOT/worker/"
-chmod +x "$LOCAL_ROOT/worker/start-worker.sh"
+# 2. 部署说明（worker 为纯 JS 启动器，随仓库运行，无需复制）
+echo ">>> worker 启动器（worker/worker-launcher.mjs，随仓库 npm install 即可）"
 
 # 3. 渲染 openclaw.json
 echo ">>> 生成 openclaw.json"

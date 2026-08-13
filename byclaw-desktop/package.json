@@ -1,16 +1,21 @@
 {
   "name": "byclaw-desktop",
   "version": "0.1.0",
-  "description": "ByClaw 桌面端 —— 完整门户 + 本地 Agent",
+  "description": "ByClaw 桌面端 —— 完整门户 + 本地 Agent（跨平台）",
   "main": "main.mjs",
   "type": "module",
   "scripts": {
     "start": "electron .",
+    "worker": "node worker/worker-launcher.mjs",
     "build:renderer": "bash scripts/build-renderer.sh",
-    "dist": "bash scripts/build-renderer.sh && electron-builder --linux AppImage"
+    "dist": "bash scripts/build-renderer.sh && electron-builder",
+    "dist:linux": "bash scripts/build-renderer.sh && electron-builder --linux",
+    "dist:win": "bash scripts/build-renderer.sh && electron-builder --win",
+    "dist:mac": "bash scripts/build-renderer.sh && electron-builder --mac"
   },
   "dependencies": {
-    "http-proxy": "1.18.1"
+    "http-proxy": "1.18.1",
+    "openclaw": "2026.6.6"
   },
   "devDependencies": {
     "electron": "33.4.11",
@@ -23,13 +28,28 @@
       "main.mjs",
       "preload.cjs",
       "lib/**/*",
-      "renderer/**/*"
+      "worker/**/*",
+      "renderer/**/*",
+      "!node_modules/openclaw/**/*"
     ],
+    "win": {
+      "target": ["nsis", "portable"],
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+    },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "category": "public.app-category.productivity",
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
+    },
     "linux": {
-      "target": [
-        "AppImage"
-      ],
-      "category": "Utility"
+      "target": ["AppImage", "deb"],
+      "category": "Utility",
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "beyonai",
+      "repo": "ByClaw"
     }
   }
 }
