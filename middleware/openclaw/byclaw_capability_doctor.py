@@ -146,9 +146,10 @@ def check_agent_reach(command_runner: CommandRunner, timeout_seconds: float) -> 
         diagnostic_backend = raw.get("active_backend")
         available_backends = raw.get("backends", [])
         channel_id_text = str(channel_id)
+        is_web_channel = channel_id_text.casefold() == "web"
         effective_backend = (
             "bycli"
-            if channel_id_text.casefold() == "web"
+            if is_web_channel
             else resolve_agent_reach_effective_backend(
                 diagnostic_backend,
                 available_backends,
@@ -157,10 +158,14 @@ def check_agent_reach(command_runner: CommandRunner, timeout_seconds: float) -> 
         normalized = {
             "status": STATUS_MAP.get(str(raw.get("status")), "unavailable"),
             "name": raw.get("name"),
-            "message": raw.get("message"),
+            "message": (
+                "Concrete webpage access is restricted to bycli"
+                if is_web_channel
+                else raw.get("message")
+            ),
             "tier": raw.get("tier"),
-            "backends": available_backends,
-            "diagnosticBackend": diagnostic_backend,
+            "backends": ["bycli"] if is_web_channel else available_backends,
+            "diagnosticBackend": "disabled_by_policy" if is_web_channel else diagnostic_backend,
             "effectiveBackend": effective_backend,
             # Compatibility alias for consumers written before effectiveBackend existed.
             "activeBackend": effective_backend,

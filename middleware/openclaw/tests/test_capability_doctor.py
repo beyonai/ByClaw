@@ -49,7 +49,9 @@ class CapabilityDoctorTest(unittest.TestCase):
         )
 
         web = result["channels"]["web"]
-        self.assertEqual("Jina Reader", web["diagnosticBackend"])
+        self.assertEqual("disabled_by_policy", web["diagnosticBackend"])
+        self.assertEqual(["bycli"], web["backends"])
+        self.assertEqual("Concrete webpage access is restricted to bycli", web["message"])
         self.assertEqual("bycli", web["effectiveBackend"])
         self.assertEqual("bycli", web["activeBackend"])
 
@@ -80,7 +82,9 @@ class CapabilityDoctorTest(unittest.TestCase):
         )
 
         web = result["channels"]["web"]
-        self.assertEqual("Web Reader MCP", web["diagnosticBackend"])
+        self.assertEqual("disabled_by_policy", web["diagnosticBackend"])
+        self.assertEqual(["bycli"], web["backends"])
+        self.assertEqual("Concrete webpage access is restricted to bycli", web["message"])
         self.assertEqual("bycli", web["effectiveBackend"])
         self.assertEqual("bycli", web["activeBackend"])
         self.assertEqual("gh", result["channels"]["github"]["effectiveBackend"])

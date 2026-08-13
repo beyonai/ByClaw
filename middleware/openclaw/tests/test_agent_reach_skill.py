@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -7,16 +8,11 @@ from pathlib import Path
 SKILL_ROOT = Path(__file__).parents[1] / "skills" / "agent-reach"
 BYCLI_SKILL = Path(__file__).parents[1] / "skills" / "bycli" / "SKILL.md"
 UPSTREAM_REFERENCE_HASHES = {
-    "career.md": "e70badf6c860a55cc049c15cc5cef31ca0fa2a2ae9ae1f72ade24b91844c1a2f",
     "dev.md": "f6f91107557eacf1d28a023d597eb5a61353a8a6ede286c3c0a4888d274df9fe",
     "search.md": "8eabfb645505148ea32e22e372c6d5a48615fba2e2f00eb8590e07464833851b",
-    "social.md": "4226d43a3c1b3d6c9ab312e86d08b93da4493cc6232ffacc308596582a0abc48",
-    "video.md": "f4b58c88f877b53e259fecbedc5ac5e111dd3403afebd1f86c45027af3fe099f",
-    "web.md": "2495c2e290508b5b98337db679d5b2ff30314aa5b20243c7ff44486a72c3eff2",
     "LICENSE.agent-reach.txt": "e94c131ac1c2f78cfd8f7e69da354c0ff58e4e54071697703d56856c036de402",
 }
-OFFICIAL_BODY_HEADING = "## Agent Reach 官方主体（v1.5.0）"
-OFFICIAL_BODY_SHA256 = "465e909d6491305b2d40e443fa5c922fdf0fd6415105488e1a1389bdb24a6f39"
+ADAPTED_BODY_HEADING = "## Agent Reach ByClaw 适配主体（基于 v1.5.0）"
 
 
 class AgentReachSkillContractTest(unittest.TestCase):
@@ -36,21 +32,22 @@ class AgentReachSkillContractTest(unittest.TestCase):
 
     def test_byclaw_override_executes_only_the_effective_backend(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        override, separator, _ = skill.partition(OFFICIAL_BODY_HEADING)
+        override, separator, _ = skill.partition(ADAPTED_BODY_HEADING)
 
-        self.assertEqual(OFFICIAL_BODY_HEADING, separator)
+        self.assertEqual(ADAPTED_BODY_HEADING, separator)
         self.assertIn("diagnosticBackend", override)
         self.assertIn("effectiveBackend", override)
         self.assertIn("`activeBackend` 是 `effectiveBackend` 的兼容别名", override)
         self.assertIn("只执行 `effectiveBackend`", override)
         self.assertIn("不得直接执行 `diagnosticBackend`", override)
-        self.assertIn("Jina Reader 和 OpenCLI 均映射为 `bycli`", override)
-        self.assertIn("候选 `backends` 包含 Jina Reader 或 OpenCLI", override)
+        self.assertIn("`diagnosticBackend` 固定为 `disabled_by_policy`", override)
+        self.assertIn("`backends`、`effectiveBackend` 和 `activeBackend` 均只呈现 `bycli`", override)
+        self.assertIn("不得向用户推荐或解释被策略禁用的上游网页后端", override)
         self.assertIn("以 `providers.bycli.status` 判断执行就绪度", override)
 
     def test_byclaw_override_names_every_actor_and_result_owner(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        override, _, _ = skill.partition(OFFICIAL_BODY_HEADING)
+        override, _, _ = skill.partition(ADAPTED_BODY_HEADING)
 
         for phrase in (
             "路由器：`agent-reach`",
@@ -94,7 +91,7 @@ class AgentReachSkillContractTest(unittest.TestCase):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
         override_heading = "## ByClaw 覆盖规则（最高优先级）"
-        upstream_heading = "## Agent Reach 官方主体（v1.5.0）"
+        upstream_heading = ADAPTED_BODY_HEADING
         self.assertIn("f65526cbaaad3879473acc1ba6dbefd195caf2be", skill)
         self.assertIn(override_heading, skill)
         self.assertIn(upstream_heading, skill)
@@ -103,7 +100,7 @@ class AgentReachSkillContractTest(unittest.TestCase):
         self.assertIn("全网调研类任务", skill)
         self.assertIn("## 路由表", skill)
         self.assertIn("## 零配置快速命令", skill)
-        self.assertIn("官方主体及其 references 与覆盖规则冲突时，以本节为准", skill)
+        self.assertNotIn("随附 references 和许可证保持上游原文", skill)
 
     def test_knowledge_collection_delegation_keeps_agent_reach_acquisition_only(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -122,17 +119,16 @@ class AgentReachSkillContractTest(unittest.TestCase):
 
     def test_byclaw_override_routes_every_jina_reader_path_to_bycli(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        override, separator, _ = skill.partition(OFFICIAL_BODY_HEADING)
+        override, separator, _ = skill.partition(ADAPTED_BODY_HEADING)
 
-        self.assertEqual(OFFICIAL_BODY_HEADING, separator)
+        self.assertEqual(ADAPTED_BODY_HEADING, separator)
         for phrase in (
             "禁止使用 Jina Reader",
             "`r.jina.ai`",
             "加载并遵循 `bycli` skill",
             "`bycli list -f json`",
             "`bycli web read --url <URL>`",
-            "官方 `references/web.md` 的通用网页读取",
-            "`references/career.md` 的 LinkedIn fallback",
+            "通用网页读取和 LinkedIn fallback",
             "不得回退到 `web_fetch`、Jina Reader、Web Reader MCP、`curl`、`wget`、`requests` 或原站直连",
             "公开可读、静态页面、raw URL、纯文本或 Markdown 内容均不是例外",
         ):
@@ -140,9 +136,9 @@ class AgentReachSkillContractTest(unittest.TestCase):
 
     def test_byclaw_override_routes_every_concrete_webpage_to_bycli_before_acquisition(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        override, separator, _ = skill.partition(OFFICIAL_BODY_HEADING)
+        override, separator, _ = skill.partition(ADAPTED_BODY_HEADING)
 
-        self.assertEqual(OFFICIAL_BODY_HEADING, separator)
+        self.assertEqual(ADAPTED_BODY_HEADING, separator)
         for phrase in (
             "任何网站、网页或 URL",
             "必须无条件选择并加载 `bycli` skill",
@@ -158,7 +154,7 @@ class AgentReachSkillContractTest(unittest.TestCase):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
         override_heading = "## ByClaw 覆盖规则（最高优先级）"
-        upstream_heading = "## Agent Reach 官方主体（v1.5.0）"
+        upstream_heading = ADAPTED_BODY_HEADING
         delegated_override = "此时本覆盖规则取代官方 `/tmp/` 工作区规则"
         browser_execution_rule = (
             "遵守其浏览器生命周期、授权、执行与验证规则，并把结果返回当前任务所有者"
@@ -173,7 +169,7 @@ class AgentReachSkillContractTest(unittest.TestCase):
         self.assertNotIn("采集落盘和清理规则", skill[: skill.index(upstream_heading)])
         self.assertNotIn("byCLI 任务的文件存放规则优先", skill[: skill.index(upstream_heading)])
 
-    def test_official_v1_5_0_references_are_vendored_verbatim(self):
+    def test_untouched_v1_5_0_references_remain_vendored_verbatim(self):
         reference_root = SKILL_ROOT / "references"
 
         for filename, expected_hash in UPSTREAM_REFERENCE_HASHES.items():
@@ -181,16 +177,23 @@ class AgentReachSkillContractTest(unittest.TestCase):
                 content = (reference_root / filename).read_bytes()
                 self.assertEqual(expected_hash, hashlib.sha256(content).hexdigest())
 
-    def test_official_v1_5_0_body_is_vendored_verbatim(self):
-        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        boundary = f"{OFFICIAL_BODY_HEADING}\n"
+    def test_active_skill_tree_contains_no_forbidden_web_executor_instructions(self):
+        markdown_files = [SKILL_ROOT / "SKILL.md", *sorted((SKILL_ROOT / "references").glob("*.md"))]
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in markdown_files)
 
-        self.assertEqual(1, skill.count(boundary))
-        _, separator, official_body = skill.partition(boundary)
-        self.assertEqual(boundary, separator)
-        self.assertTrue(official_body.startswith("\n13 平台、多后端"))
-        actual_hash = hashlib.sha256(official_body.encode("utf-8")).hexdigest()
-        self.assertEqual(OFFICIAL_BODY_SHA256, actual_hash)
+        self.assertNotIn("https://r.jina.ai/", combined)
+        self.assertNotIn("web-reader.webReader", combined)
+        self.assertNotRegex(combined, re.compile(r"(?m)^\s*opencli\s+"))
+        self.assertNotRegex(combined, re.compile(r"(?m)^\s*curl\s+.*https?://"))
+
+    def test_web_reference_routes_concrete_urls_only_to_bycli(self):
+        web = (SKILL_ROOT / "references" / "web.md").read_text(encoding="utf-8")
+
+        self.assertIn("所有网站、网页或 URL", web)
+        self.assertIn("`bycli list -f json`", web)
+        self.assertIn("`bycli browser`", web)
+        self.assertIn("byCLI 无法完成时停止并报告", web)
+        self.assertIn("不得使用 `web_fetch`", web)
 
     def test_skill_has_openclaw_ui_metadata(self):
         metadata = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
