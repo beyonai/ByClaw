@@ -123,8 +123,8 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
     && npm config set fetch-retry-mintimeout 20000 --global \
     && npm config set fetch-retry-maxtimeout 120000 --global
 
-ARG OPENCLI_VERSION=2.1.17
-ARG OPENCLI_EXTENSION_VERSION=2.1.16
+ARG OPENCLI_VERSION=2.1.19
+ARG OPENCLI_EXTENSION_VERSION=2.1.17
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources; \
@@ -195,7 +195,7 @@ RUN set -eux; \
         npm install -g "@sovovs/bycli@${OPENCLI_VERSION}"; \
         mkdir -p /opt/opencli/extension; \
         curl -fsSL -o /tmp/opencli-extension.zip \
-            "https://github.com/sovovs/byCLI/releases/download/v${OPENCLI_EXTENSION_VERSION}/bycli-extension-v${OPENCLI_EXTENSION_VERSION}.zip"; \
+            "https://github.com/sovovs/byCLI/releases/download/v${OPENCLI_VERSION}/bycli-extension-v${OPENCLI_EXTENSION_VERSION}.zip"; \
         unzip -q /tmp/opencli-extension.zip -d /opt/opencli/extension; \
         rm -f /tmp/opencli-extension.zip; \
         chromium --version; \
