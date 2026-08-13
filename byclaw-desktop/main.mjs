@@ -48,13 +48,16 @@ let workerManaged = false; // 当前 worker 是否由桌面端托管（spawn 的
 let isQuitting = false;
 
 // ── 代理 ──────────────────────────────────────────────
-// 上游连接复用（keep-alive）：避免高频轮询时每次新建 TCP，降低公网 connect 超时概率
+// 上游连接复用（keep-alive）：高频轮询不再反复建连；
+// freeSocketTimeout 15s：空闲连接及时销毁，避免复用被线上 Nginx 断开的死连接导致请求挂起
+// timeout 120s：SSE 流式长连接留足余量（LLM 首词前可能长时间无数据）
 const upstreamAgent = new http.Agent({
   keepAlive: true,
   maxSockets: 64,
   keepAliveMsecs: 5000,
   maxFreeSockets: 16,
-  timeout: 30000,
+  freeSocketTimeout: 15000,
+  timeout: 120000,
 });
 
 const proxy = httpProxy.createProxyServer({
@@ -63,8 +66,8 @@ const proxy = httpProxy.createProxyServer({
   ws: true,
   xfwd: true,
   agent: upstreamAgent,
-  timeout: 30000,
-  proxyTimeout: 30000,
+  timeout: 120000,
+  proxyTimeout: 120000,
 });
 
 proxy.on("error", (err, req, res) => {
