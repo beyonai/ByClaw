@@ -4,6 +4,7 @@
   "description": "ByClaw 桌面端 —— 完整门户 + 本地 Agent（跨平台）",
   "main": "main.mjs",
   "type": "module",
+  "packageManager": "pnpm@10.34.5",
   "scripts": {
     "start": "electron .",
     "worker": "node worker/worker-launcher.mjs",

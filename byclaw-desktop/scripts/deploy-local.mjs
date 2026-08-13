@@ -55,9 +55,9 @@ if (!fs.existsSync(userCfg)) {
   console.log(`>>> 用户配置已存在: ${userCfg}`);
 }
 
-// 4. 桌面端依赖
-console.log(">>> 安装桌面端依赖");
-run("npm", ["install", "--no-audit", "--no-fund"], { cwd: desktopDir });
+// 4. 桌面端依赖（与仓库惯例统一 pnpm；lockfile 已入库，可复现构建）
+console.log(">>> 安装桌面端依赖（pnpm）");
+run("pnpm", ["install"], { cwd: desktopDir });
 
 console.log("");
 console.log("=== 部署完成 ===");
