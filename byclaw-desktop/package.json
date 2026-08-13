@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --linux deb AppImage"
+    "build:renderer": "bash scripts/build-renderer.sh",
+    "dist": "bash scripts/build-renderer.sh && electron-builder --linux AppImage"
   },
   "dependencies": {
     "http-proxy": "1.18.1"

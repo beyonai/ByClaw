@@ -104,6 +104,11 @@ function serveStatic(req, res) {
   }
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     file = path.join(FE_DIST, "index.html");
+    if (!fs.existsSync(file)) {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Not Found：门户页面缺失（renderer 未构建？请先运行 npm run build:renderer）");
+      return;
+    }
   }
   const ext = path.extname(file).toLowerCase();
   res.writeHead(200, {
@@ -112,6 +117,21 @@ function serveStatic(req, res) {
   });
   fs.createReadStream(file).pipe(res);
 }
+
+// ── 全局错误捕获（落盘，便于无终端/弹窗不可复制场景排查）──
+function logError(scope, err) {
+  const line = `[${new Date().toISOString()}] [${scope}] ${err?.stack || err}`;
+  try {
+    if (CFG.worker.localRoot) {
+      const logDir = path.join(CFG.worker.localRoot, "logs");
+      fs.mkdirSync(logDir, { recursive: true });
+      fs.appendFileSync(path.join(logDir, "desktop.log"), line + "\n");
+    }
+  } catch { /* 日志失败不阻塞 */ }
+  console.error(line);
+}
+process.on("uncaughtException", (e) => logError("uncaughtException", e));
+process.on("unhandledRejection", (e) => logError("unhandledRejection", e));
 
 const server = http.createServer((req, res) => {
   const url = req.url || "/";
