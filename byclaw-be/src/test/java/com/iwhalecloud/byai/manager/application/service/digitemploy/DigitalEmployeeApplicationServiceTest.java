@@ -18,6 +18,7 @@ import com.iwhalecloud.byai.manager.domain.resource.enums.OperationTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.model.SkillRelationSource;
+import com.iwhalecloud.byai.manager.domain.skillgroup.model.SkillGroupUninstallMode;
 import com.iwhalecloud.byai.manager.domain.resource.service.OperationLogService;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceRuntimeInfoResolver;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceEventService;
@@ -47,6 +48,7 @@ import com.iwhalecloud.byai.manager.vo.digitemploy.SetDefaultDigitalEmployeeResu
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeePageVo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupUninstallPreviewVo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceAuthContextService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillDeleteApplicationService;
@@ -981,6 +983,66 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(malformed.getRelResourceInfo()).isEqualTo(malformedSource);
         verify(ssResourceRelDetailService, never()).removeById(any());
         verify(ssResourceRelDetailService, never()).updateById(any());
+        verifySnapshotRefresh(snapshotService, employee, 0);
+    }
+
+    @Test
+    void uninstallPreviewClassifiesExclusiveAndSharedSnapshotSources() {
+        DigitalEmployeeApplicationService snapshotService = snapshotServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResourceRelDetail exclusive = directSkillRelation(901L, 301L,
+            "{\"manual\":false,\"sourceGroupIds\":[700]}");
+        SsResourceRelDetail manual = directSkillRelation(902L, 302L,
+            "{\"manual\":true,\"sourceGroupIds\":[700]}");
+        SsResourceRelDetail otherGroup = directSkillRelation(903L, 303L,
+            "{\"manual\":false,\"sourceGroupIds\":[700,701]}");
+        when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, null))
+            .thenReturn(List.of(exclusive, manual, otherGroup));
+
+        SkillGroupUninstallPreviewVo preview = snapshotService.previewSkillGroupUninstallSnapshot(employee, 700L);
+
+        assertThat(preview.getInstalledByGroup()).isTrue();
+        assertThat(preview.getExclusiveSkills()).extracting("resourceId").containsExactly(301L);
+        assertThat(preview.getSharedSkills()).extracting("resourceId").containsExactly(302L, 303L);
+        assertThat(preview.getSharedSkills().get(0).getManualSource()).isTrue();
+        assertThat(preview.getSharedSkills().get(1).getOtherGroupIds()).containsExactly(701L);
+        assertThat(preview.getPreviewToken()).isNotBlank();
+    }
+
+    @Test
+    void removeAllRequiresCurrentPreviewAndDeletesSharedRelations() {
+        DigitalEmployeeApplicationService snapshotService = snapshotServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResourceRelDetail shared = directSkillRelation(902L, 302L,
+            "{\"manual\":true,\"sourceGroupIds\":[700,701]}");
+        when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, null)).thenReturn(List.of(shared));
+        when(ssResourceRelDetailService.removeById(902L)).thenReturn(true);
+        String token = snapshotService.previewSkillGroupUninstallSnapshot(employee, 700L).getPreviewToken();
+
+        SkillGroupInstallResultVo result = snapshotService.uninstallSkillGroupSnapshot(
+            employee, 700L, SkillGroupUninstallMode.REMOVE_ALL, token);
+
+        assertThat(result.getConfirmationRequired()).isFalse();
+        assertThat(result.getRemovedSkillIds()).containsExactly(302L);
+        assertThat(result.getAffectedOtherGroupIds()).containsExactly(701L);
+        verify(ssResourceRelDetailService).removeById(902L);
+        verifySnapshotRefresh(snapshotService, employee, 1);
+    }
+
+    @Test
+    void removeAllReturnsLatestPreviewForStaleTokenWithoutMutation() {
+        DigitalEmployeeApplicationService snapshotService = snapshotServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResourceRelDetail relation = directSkillRelation(902L, 302L,
+            "{\"manual\":true,\"sourceGroupIds\":[700]}");
+        when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, null)).thenReturn(List.of(relation));
+
+        SkillGroupInstallResultVo result = snapshotService.uninstallSkillGroupSnapshot(
+            employee, 700L, SkillGroupUninstallMode.REMOVE_ALL, "stale");
+
+        assertThat(result.getConfirmationRequired()).isTrue();
+        assertThat(result.getUninstallPreview().getSharedSkills()).hasSize(1);
+        verify(ssResourceRelDetailService, never()).removeById(any());
         verifySnapshotRefresh(snapshotService, employee, 0);
     }
 

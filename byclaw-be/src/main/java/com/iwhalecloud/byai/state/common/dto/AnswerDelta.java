@@ -15,6 +15,12 @@ public class AnswerDelta {
     // 内容类型：文本(a2a的text-part)、卡片(a2a的data-part)、视频/图像/文件（a2a的file-part）等
     private String contentType;
 
+    /** Cross-channel sequence of the coalesced rendering segment. */
+    private Long seq;
+
+    /** Source stream event used to keep adjacent rendering segments distinct. */
+    private String eventType;
+
     private Long messageId;
 
     private Long taskId;

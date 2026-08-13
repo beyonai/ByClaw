@@ -135,6 +135,7 @@ export type DevloopTaskItem = {
   stageLoopCount?: number;
   assignee?: string;
   assigneeId?: string | number;
+  assigneeName?: string;
   dueTime?: string;
   agentName?: string;
   avatar?: string;
@@ -143,6 +144,7 @@ export type DevloopTaskItem = {
   objectId?: number | string;
   description?: string;
   taskDescription?: string;
+  sessionContent?: string;
   branchName?: string;
   repoFullName?: string;
   requirementTitle?: string;
@@ -225,9 +227,9 @@ export const updateProject = (data: Partial<DevloopProjectPayload> & { projectId
 
 export const deleteProject = (projectId: number) => POST<any>('/byaiService/project/delete', { projectId });
 
-// 研发项目工作区初始化状态:ready 已就绪(默认/普通项目)、pending 待初始化、initializing 初始化中。
-// 仅 develop 项目在未 ready 前禁止建需求/启动任务。
-export type ProjectInitStatus = 'ready' | 'pending' | 'initializing';
+// 研发项目工作区初始化状态。状态机与含义见 pages/projectSpace/types.ts 那份定义,这里只做转出,
+// 不再各写一份枚举——两处漂移过一次(新增 initialized 时只改到其中一处)。
+export type { ProjectInitStatus } from '@/pages/projectSpace/types';
 
 // initializing 态轮询间隔:后端扫描定时任务本身 30s 一轮,再快也拿不到更新的状态,只是白打接口。
 export const INIT_POLL_INTERVAL_MS = 5000;
@@ -237,13 +239,19 @@ export const INIT_POLL_INTERVAL_MS = 5000;
 // 停轮询只影响自动消横幅,用户切项目或重进页面即重新开始轮询。
 export const INIT_POLL_MAX_ROUNDS = 120;
 
-// 下发工作区初始化:后端建一条架构数字员工会话并返回 sessionId,真正的初始化在沙箱里由架构助理执行。
+// 第一段:初始化工作区。后端同步克隆工作区仓库、挂子模块、装技能包并推送,成功即 initStatus=initialized。
+// 同步接口没有返回值也没有会话:这一段不下发数字员工,聊天在第二段。耗时可能到分钟级,前端要给 loading。
+export const startProjectInit = (data: { projectId: number; buildIndex: boolean; skillPackages: string[] }) =>
+  POST<void>('/byaiService/project/init/start', data);
+
+// 第二段:下发架构数字员工聊天,置 initStatus=initializing。真正干活在沙箱里,
 // 完成与否由后端定时任务读该会话的任务状态文件判定,前端只轮询 initStatus,没有「标记完成」的接口。
 // 回架构员工而不只回会话ID:项目维度员工不在前端员工列表里,跳进会话时要靠这两个字段写 agentCache,
 // 否则聊天输入框的 @ 查不到人会兜底成「AI 助手」。ID 是字符串——雪花 ID 超过 JS 安全整数。
-export const startProjectInit = (data: { projectId: number; buildIndex: boolean; skillPackages: string[] }) =>
+// 建索引配置不用再传:第一段已落在项目行上,后端自己读回来拼提示词。
+export const startArchitectChat = (data: { projectId: number }) =>
   POST<{ sessionId: string; architectAgentId: string; architectAgentName: string }>(
-    '/byaiService/project/init/start',
+    '/byaiService/project/init/chat',
     data
   );
 

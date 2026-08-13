@@ -30,9 +30,11 @@ import {
   startConnectorAuthorization,
   updateConnectorEnable,
   type ConnectorAuthorization,
+  type ConnectorCredentialState,
   type ConnectorEnableFlag,
   type ConnectorId,
   type ConnectorListItem,
+  type ConnectorRenewalMode,
 } from '@/service/connector';
 
 import styles from './index.module.less';
@@ -106,6 +108,11 @@ export type Connector = {
   authType: 'qrcode' | 'oauth';
   icon: React.ReactNode;
   enableFlag: ConnectorEnableFlag;
+  credentialState?: ConnectorCredentialState | null;
+  renewalMode?: ConnectorRenewalMode | null;
+  accessExpiresAt?: string | null;
+  refreshExpiresAt?: string | null;
+  lastVerifiedAt?: string | null;
   credentialExpiresAt?: string | null;
 };
 
@@ -134,6 +141,11 @@ const mapConnectorListItem = (item: ConnectorListItem): Connector => ({
   authType: 'oauth',
   icon: getConnectorIcon(item.connectorCode),
   enableFlag: item.enableFlag,
+  credentialState: item.credentialState,
+  renewalMode: item.renewalMode,
+  accessExpiresAt: item.accessExpiresAt,
+  refreshExpiresAt: item.refreshExpiresAt,
+  lastVerifiedAt: item.lastVerifiedAt,
   credentialExpiresAt: item.credentialExpiresAt,
 });
 
@@ -597,9 +609,40 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   };
 
   const renderConnectorItem = (connector: Connector, compact = false) => {
-    const credentialExpiration = connector.credentialExpiresAt
-      ? getCredentialExpirationDisplay(connector.credentialExpiresAt)
+    const usesLifecycleMetadata = Boolean(connector.credentialState);
+    const displayExpiration = usesLifecycleMetadata ? connector.refreshExpiresAt : connector.credentialExpiresAt;
+    const credentialExpiration = displayExpiration ? getCredentialExpirationDisplay(displayExpiration) : undefined;
+    const lastVerifiedAt = connector.lastVerifiedAt
+      ? getCredentialExpirationDisplay(connector.lastVerifiedAt)
       : undefined;
+    let credentialLifecycleText: string | undefined;
+    let credentialLifecycleExpired = false;
+
+    if (connector.credentialState === 'REAUTH_REQUIRED') {
+      credentialLifecycleText = '授权已失效，请重新连接';
+      credentialLifecycleExpired = true;
+    } else if (connector.credentialState === 'UNKNOWN') {
+      credentialLifecycleText =
+        connector.renewalMode === 'REFRESH_TOKEN' ? '自动续期，授权有效期同步中' : '授权状态待同步';
+    } else if (connector.credentialState === 'REFRESH_NEEDED') {
+      credentialLifecycleText = credentialExpiration
+        ? `将在下次使用时自动续期，预计授权有效至 ${credentialExpiration.formattedTime}`
+        : '将在下次使用时自动续期';
+    } else if (usesLifecycleMetadata && credentialExpiration) {
+      credentialLifecycleText =
+        connector.credentialState === 'EXPIRING'
+          ? `授权即将失效，预计有效至 ${credentialExpiration.formattedTime}`
+          : `预计授权有效至 ${credentialExpiration.formattedTime}`;
+    } else if (usesLifecycleMetadata && connector.renewalMode === 'REFRESH_TOKEN') {
+      credentialLifecycleText = '自动续期';
+    } else if (usesLifecycleMetadata && connector.renewalMode === 'PROBE_ONLY' && lastVerifiedAt) {
+      credentialLifecycleText = `最近验证于 ${lastVerifiedAt.formattedTime}`;
+    } else if (credentialExpiration) {
+      credentialLifecycleText = credentialExpiration.expired
+        ? `授权已于 ${credentialExpiration.formattedTime} 过期`
+        : `授权有效期至 ${credentialExpiration.formattedTime}`;
+      credentialLifecycleExpired = credentialExpiration.expired;
+    }
 
     return (
       <div className={classNames(styles.connectorItem, { [styles.compactItem]: compact })} key={connector.id}>
@@ -607,15 +650,13 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
         <div className={styles.connectorContent}>
           <strong>{connector.name}</strong>
           <span>{connector.description}</span>
-          {credentialExpiration && (
+          {credentialLifecycleText && (
             <span
               className={classNames(styles.credentialExpiration, {
-                [styles.expired]: credentialExpiration.expired,
+                [styles.expired]: credentialLifecycleExpired,
               })}
             >
-              {credentialExpiration.expired ? '授权已于 ' : '授权有效期至 '}
-              {credentialExpiration.formattedTime}
-              {credentialExpiration.expired ? ' 过期' : ''}
+              {credentialLifecycleText}
             </span>
           )}
         </div>

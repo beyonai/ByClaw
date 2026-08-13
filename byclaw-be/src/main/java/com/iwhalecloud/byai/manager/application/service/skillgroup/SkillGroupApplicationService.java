@@ -29,10 +29,12 @@ import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupInstallQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupMemberChangeQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupPageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupUpdateQo;
+import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupUninstallQo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberStatusSummaryVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupUninstallPreviewVo;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.util.ArrayList;
@@ -160,6 +162,10 @@ public class SkillGroupApplicationService {
             SsResource digitalEmployee = resourceService.findById(digitalEmployeeId);
             validateManagedDigitalEmployee(digitalEmployee, tenantId, null);
             validateActiveDigitalEmployee(digitalEmployee);
+            SkillGroupUninstallPreviewVo uninstallPreview = digitalEmployeeApplicationService
+                .previewSkillGroupUninstallSnapshot(digitalEmployee, groupId);
+            group.setInstalledByGroup(uninstallPreview != null && Boolean.TRUE.equals(
+                uninstallPreview.getInstalledByGroup()));
         }
         List<SkillGroupMemberVo> members = skillGroupMapper.selectActiveMembers(groupId);
         group.setMembers(memberStatusService.evaluate(members, digitalEmployeeId));
@@ -176,6 +182,17 @@ public class SkillGroupApplicationService {
         validateActiveDigitalEmployee(digitalEmployee);
         List<SkillGroupMemberVo> members = loadAndValidateActiveMembers(group, false);
         return SkillGroupMemberStatusSummaryVo.from(memberStatusService.evaluate(members, qo.getDigitalEmployeeId()));
+    }
+
+    public SkillGroupUninstallPreviewVo preflightUninstall(SkillGroupInstallQo qo) {
+        validateInstallRequest(qo);
+        Long tenantId = requireCurrentTenant();
+        SsResource group = loadAccessibleGroup(qo.getGroupId(), tenantId);
+        SsResource digitalEmployee = resourceService.findById(qo.getDigitalEmployeeId());
+        validateManagedDigitalEmployee(digitalEmployee, tenantId, group);
+        validateActiveDigitalEmployee(digitalEmployee);
+        return digitalEmployeeApplicationService.previewSkillGroupUninstallSnapshot(
+            digitalEmployee, group.getResourceId());
     }
 
     /**
@@ -206,13 +223,16 @@ public class SkillGroupApplicationService {
         result.setUnavailableSkillIds(idsWithStatus(summary.getMembers(), SkillGroupMemberStatus.APPLY_UNAVAILABLE));
         if (summary.hasPermissionBarrier()) {
             result.setConfirmationRequired(true);
+            result.setInstalledByGroup(false);
             return result;
         }
         result.setConfirmationRequired(false);
         List<Long> installableIds = idsWithStatus(summary.getMembers(), SkillGroupMemberStatus.INSTALLABLE);
-        if (!installableIds.isEmpty()) {
+        LinkedHashSet<Long> snapshotIds = new LinkedHashSet<>(result.getExistingSkillIds());
+        snapshotIds.addAll(installableIds);
+        if (!snapshotIds.isEmpty()) {
             SkillGroupInstallResultVo delegated = digitalEmployeeApplicationService.installSkillGroupSnapshot(
-                    digitalEmployee, group.getResourceId(), installableIds);
+                    digitalEmployee, group.getResourceId(), new ArrayList<>(snapshotIds));
             if (delegated == null) {
                 throw new BaseException("技能组安装结果异常");
             }
@@ -221,6 +241,7 @@ public class SkillGroupApplicationService {
             result.setSummary(SkillGroupMemberStatusSummaryVo.from(
                     memberStatusService.evaluate(finalMembers, digitalEmployee.getResourceId())));
         }
+        result.setInstalledByGroup(true);
         return result;
     }
 
@@ -241,9 +262,11 @@ public class SkillGroupApplicationService {
         result.setTotalSkillIds(memberIds(evaluated));
         result.setExistingSkillIds(idsWithStatus(evaluated, SkillGroupMemberStatus.INSTALLED));
         List<Long> installableIds = idsWithStatus(evaluated, SkillGroupMemberStatus.INSTALLABLE);
-        if (!installableIds.isEmpty()) {
+        LinkedHashSet<Long> snapshotIds = new LinkedHashSet<>(result.getExistingSkillIds());
+        snapshotIds.addAll(installableIds);
+        if (!snapshotIds.isEmpty()) {
             SkillGroupInstallResultVo delegated = digitalEmployeeApplicationService.installSkillGroupSnapshot(
-                    digitalEmployee, group.getResourceId(), installableIds);
+                    digitalEmployee, group.getResourceId(), new ArrayList<>(snapshotIds));
             if (delegated == null) {
                 throw new BaseException("技能组安装结果异常");
             }
@@ -275,6 +298,7 @@ public class SkillGroupApplicationService {
         List<SkillGroupMemberVo> finalMembers = skillGroupMapper.selectActiveMembers(group.getResourceId());
         result.setSummary(SkillGroupMemberStatusSummaryVo.from(
                 memberStatusService.evaluate(finalMembers, digitalEmployee.getResourceId())));
+        result.setInstalledByGroup(true);
         return result;
     }
 
@@ -286,14 +310,35 @@ public class SkillGroupApplicationService {
      * @return 卸载前受影响、已移除和仍保留的技能标识
      */
     @Transactional(rollbackFor = Exception.class)
-    public SkillGroupInstallResultVo uninstall(SkillGroupInstallQo qo) {
-        validateInstallRequest(qo);
+    public SkillGroupInstallResultVo uninstall(SkillGroupUninstallQo qo) {
+        validateUninstallRequest(qo);
         Long tenantId = requireCurrentTenant();
         SsResource group = loadAccessibleGroupForSnapshot(qo.getGroupId(), tenantId);
         SsResource digitalEmployee = loadManagedDigitalEmployeeForSnapshot(
                 qo.getDigitalEmployeeId(), tenantId, group);
         SkillGroupInstallResultVo result = digitalEmployeeApplicationService.uninstallSkillGroupSnapshot(
-                digitalEmployee, group.getResourceId());
+                digitalEmployee, group.getResourceId(), qo.getMode(), qo.getPreviewToken());
+        if (result == null) {
+            throw new BaseException("技能组卸载结果异常");
+        }
+        if (!Boolean.TRUE.equals(result.getConfirmationRequired())) {
+            List<SkillGroupMemberVo> finalMembers = skillGroupMapper.selectActiveMembers(group.getResourceId());
+            result.setSummary(SkillGroupMemberStatusSummaryVo.from(
+                memberStatusService.evaluate(finalMembers, digitalEmployee.getResourceId())));
+            result.setInstalledByGroup(false);
+        }
+        return result;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public SkillGroupInstallResultVo uninstall(SkillGroupInstallQo qo) {
+        validateInstallRequest(qo);
+        Long tenantId = requireCurrentTenant();
+        SsResource group = loadAccessibleGroupForSnapshot(qo.getGroupId(), tenantId);
+        SsResource digitalEmployee = loadManagedDigitalEmployeeForSnapshot(
+            qo.getDigitalEmployeeId(), tenantId, group);
+        SkillGroupInstallResultVo result = digitalEmployeeApplicationService.uninstallSkillGroupSnapshot(
+            digitalEmployee, group.getResourceId());
         if (result == null) {
             throw new BaseException("技能组卸载结果异常");
         }
@@ -403,6 +448,12 @@ public class SkillGroupApplicationService {
     }
 
     private void validateInstallRequest(SkillGroupInstallQo qo) {
+        if (qo == null || qo.getGroupId() == null || qo.getDigitalEmployeeId() == null) {
+            throw new BaseException("数字员工和技能组标识不能为空");
+        }
+    }
+
+    private void validateUninstallRequest(SkillGroupUninstallQo qo) {
         if (qo == null || qo.getGroupId() == null || qo.getDigitalEmployeeId() == null) {
             throw new BaseException("数字员工和技能组标识不能为空");
         }

@@ -9,7 +9,20 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "connector-auth-sync.mjs");
+const SKILL = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "SKILL.md");
 const SECRET_TOKEN = "fixture-secret-beyond-token";
+
+test("uses a non-refreshing profile snapshot before lazy refresh metadata sync", () => {
+  const skill = fs.readFileSync(SKILL, "utf8");
+
+  assert.match(skill, /业务命令前.*dws profile list --format json/s);
+  assert.match(skill, /不得使用.*dws auth status.*预检.*触发.*刷新/s);
+  assert.match(skill, /profiles.*--profile.*corpId.*corpName.*精确匹配.*currentProfile.*isCurrent.*true/s);
+  assert.match(skill, /多个.*--profile.*状态视为未知/s);
+  assert.match(skill, /expiresAt.*早于或等于.*预检时间.*refreshExpAt.*晚于.*预检时间.*业务命令成功后.*connector-auth-sync\.mjs/s);
+  assert.match(skill, /回写失败不得改变已经成功的钉钉业务结果/);
+  assert.match(skill, /不得把该流程扩展到.*其他连接器/);
+});
 
 function runHelper(args, env) {
   return new Promise((resolve, reject) => {

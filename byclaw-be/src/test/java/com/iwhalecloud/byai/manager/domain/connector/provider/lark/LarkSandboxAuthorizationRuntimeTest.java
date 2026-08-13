@@ -181,6 +181,29 @@ class LarkSandboxAuthorizationRuntimeTest {
         assertThat(result.accountName()).isEqualTo("谢逊飞");
         assertThat(result.credentialExpiresAt())
             .isEqualTo(Date.from(Instant.parse("2030-08-10T15:58:47Z")));
+        assertThat(result.refreshExpiresAt())
+            .isEqualTo(Date.from(Instant.parse("2030-08-17T13:58:47Z")));
+        assertThat(result.renewalMode().name()).isEqualTo("REFRESH_TOKEN");
+    }
+
+    @Test
+    void verifyMapsExplicitlyExpiredUserTokenWithoutRefreshMetadataToReauthorizationRequired() {
+        SandboxCommandExecutor executor = mock(SandboxCommandExecutor.class);
+        UserSandboxResolver resolver = mock(UserSandboxResolver.class);
+        UserService userService = mock(UserService.class);
+        LarkSandboxAuthorizationRuntime runtime = new LarkSandboxAuthorizationRuntime(
+            executor, resolver, new LarkAuthorizationProperties(), new ObjectMapper(), userService);
+        when(resolver.resolve("42", "openclaw"))
+            .thenReturn(new UserSandboxContext("sandbox-1", "42", null, new Date()));
+        when(executor.run(any(), any())).thenReturn(new SandboxCommandResult(0, """
+            {"identity":"user","verified":true,
+             "identities":{"user":{"openId":"ou_expired","tokenStatus":"expired"}}}
+            """, "", false, false));
+
+        var result = runtime.verify("42", commandCatalog());
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.credentialState().name()).isEqualTo("REAUTH_REQUIRED");
     }
 
     private ManifestCommandCatalog commandCatalog() {

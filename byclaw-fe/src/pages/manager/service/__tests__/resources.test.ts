@@ -8,13 +8,17 @@ import {
   queryResourceDetail,
   queryResourceMembers,
   deleteResource,
+  deleteSkill,
   uploadSkillZip,
   pageSkillGroups,
   pageSkillGroupMemberCandidates,
   getSkillGroupDetail,
+  refreshSkillGroupDetail,
   installSkillGroup,
   preflightInstallSkillGroup,
   executeInstallSkillGroup,
+  preflightUninstallSkillGroup,
+  uninstallSkillGroup,
   createSkillGroup,
   addSkillGroupMembers,
   updateSkillGroup,
@@ -125,6 +129,16 @@ describe('manager resources service', () => {
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/tool/deleteResourceById', payload);
   });
 
+  it('should let deleteSkill callers handle errors without a duplicate request-level tip', () => {
+    const payload = { skillPath: '/workspace/grill-me', resourceId: '10042909', userCode: 'tester' };
+    deleteSkill(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/tool/deleteSkill', payload, {
+      responseCfg: {
+        hideErrorTips: true,
+      },
+    });
+  });
+
   it('should call uploadSkillZip with multipart config', () => {
     const payload = new FormData();
     uploadSkillZip(payload);
@@ -185,6 +199,14 @@ describe('manager resources service', () => {
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/skillGroup/detail', payload);
   });
 
+  it('should refresh skill group detail without request-layer error tips', () => {
+    const payload = { groupId: '10042909', digitalEmployeeId: '20001' };
+    refreshSkillGroupDetail(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/skillGroup/detail', payload, {
+      responseCfg: { hideErrorTips: true },
+    });
+  });
+
   it('should call pageSkillGroupMemberCandidates with the dedicated candidate endpoint', () => {
     const payload = { groupId: '10042909', pageNum: 1, pageSize: 100, keyword: '' };
     pageSkillGroupMemberCandidates(payload);
@@ -205,6 +227,22 @@ describe('manager resources service', () => {
 
     expect(mockPOST).toHaveBeenNthCalledWith(1, '/byaiService/skillGroup/install/preflight', payload);
     expect(mockPOST).toHaveBeenNthCalledWith(2, '/byaiService/skillGroup/install/execute', payload);
+  });
+
+  it('should call source-aware uninstall endpoints without duplicate request-layer tips', () => {
+    const payload = { groupId: '10042909', digitalEmployeeId: '20001' };
+    preflightUninstallSkillGroup(payload);
+    uninstallSkillGroup({ ...payload, mode: 'REMOVE_ALL', previewToken: 'token' });
+
+    expect(mockPOST).toHaveBeenNthCalledWith(1, '/byaiService/skillGroup/uninstall/preflight', payload, {
+      responseCfg: { hideErrorTips: true },
+    });
+    expect(mockPOST).toHaveBeenNthCalledWith(
+      2,
+      '/byaiService/skillGroup/uninstall',
+      { ...payload, mode: 'REMOVE_ALL', previewToken: 'token' },
+      { responseCfg: { hideErrorTips: true } }
+    );
   });
 
   it('should call createSkillGroup with the skill group create endpoint', () => {

@@ -171,7 +171,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, onApply }) => {
                     className={styles.templateCard}
                     onClick={() => applyPrompt(item.prompt)}
                   >
-                    <i>{item.title.slice(0, 1)}</i>
+                    <i>{item.title.slice(0, 2)}</i>
                     <span>
                       <strong>{item.title}</strong>
                       <small>{item.description}</small>

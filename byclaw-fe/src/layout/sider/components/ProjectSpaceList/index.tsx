@@ -179,7 +179,7 @@ const getProjectScenes = (project: ProjectSpace, t: ProjectSpaceTranslate) => {
   return [{ classSuffix: 'Personal', text: t('scene.personal') }];
 };
 
-// 研发项目未完成初始化(pending/initializing)时展示初始化中标签,提示尚不能建需求/启动任务。
+// 研发项目未完成初始化(pending/initialized/initializing)时展示初始化中标签,提示尚不能建需求/启动任务。
 const isProjectInitializing = (project: ProjectSpace) =>
   project.projectType === 'develop' && !!project.initStatus && project.initStatus !== 'ready';
 

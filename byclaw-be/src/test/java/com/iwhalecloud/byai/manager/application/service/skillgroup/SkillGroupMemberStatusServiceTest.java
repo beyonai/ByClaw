@@ -14,6 +14,7 @@ import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationServ
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.skillgroup.model.SkillGroupMemberStatus;
 import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
@@ -28,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 class SkillGroupMemberStatusServiceTest {
@@ -87,6 +89,25 @@ class SkillGroupMemberStatusServiceTest {
                 Arguments.of(true, false, true, false, SkillGroupMemberStatus.APPLY_REQUIRED, null),
                 Arguments.of(true, false, false, false, SkillGroupMemberStatus.APPLY_UNAVAILABLE,
                         SkillGroupMemberStatusService.APPLY_UNAVAILABLE_REASON));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void innerSkillIsInstallableOrInstalledWithoutUsePermission(boolean relationExists) {
+        SkillGroupMemberVo member = member(SKILL_ID);
+        member.setSkillType(SsResExtSkillService.INNER_SKILL_TYPE);
+        when(authApplicationService.queryResourceOperationPermissionsBatch(List.of(SKILL_ID)))
+                .thenReturn(Map.of(SKILL_ID, permissions(false, true, true)));
+        when(skillGroupMapper.selectInstalledSkillIds(EMPLOYEE_ID, TENANT_ID, List.of(SKILL_ID)))
+                .thenReturn(relationExists ? List.of(SKILL_ID) : List.of());
+
+        service.evaluate(List.of(member), EMPLOYEE_ID);
+
+        assertThat(member.getHasUsePermission()).isTrue();
+        assertThat(member.getMemberStatus()).isEqualTo(relationExists
+                ? SkillGroupMemberStatus.INSTALLED
+                : SkillGroupMemberStatus.INSTALLABLE);
+        assertThat(member.getStatusReason()).isNull();
     }
 
     @Test

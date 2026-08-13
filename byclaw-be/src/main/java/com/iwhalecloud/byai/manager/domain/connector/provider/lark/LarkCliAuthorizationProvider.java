@@ -37,6 +37,9 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliR
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.ManagedProcess;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialVerifier;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialRevoker;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialRenewalMode;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialLifecycleEvaluator;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService.ConnectorCliWorkspace;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
@@ -709,7 +712,14 @@ public class LarkCliAuthorizationProvider
             if (expiresAt == null) {
                 expiresAt = dateValue(root, null);
             }
-            return new ConnectedAccount(accountId, accountName, expiresAt);
+            Date refreshExpiresAt = dateValue(identity, data, "refreshExpiresAt", "refresh_expires_at");
+            if (refreshExpiresAt == null) {
+                refreshExpiresAt = dateValue(root, null, "refreshExpiresAt", "refresh_expires_at");
+            }
+            String tokenStatus = firstNonBlank(
+                textValue(identity, "tokenStatus", "token_status"),
+                textValue(data, root, "tokenStatus", "token_status"));
+            return new ConnectedAccount(accountId, accountName, expiresAt, refreshExpiresAt, tokenStatus);
         } catch (JsonProcessingException | RuntimeException e) {
             return null;
         }
@@ -876,13 +886,15 @@ public class LarkCliAuthorizationProvider
     }
 
     private Date dateValue(JsonNode primary, JsonNode fallback) {
+        return dateValue(primary, fallback, "expiresAt", "expires_at", "credentialExpiresAt",
+            "credential_expires_at");
+    }
+
+    private Date dateValue(JsonNode primary, JsonNode fallback, String... names) {
         JsonNode value = fieldValue(
             primary,
             fallback,
-            "expiresAt",
-            "expires_at",
-            "credentialExpiresAt",
-            "credential_expires_at");
+            names);
         if (value == null) {
             return null;
         }
@@ -999,7 +1011,7 @@ public class LarkCliAuthorizationProvider
             return null;
         }
         return switch (terminalResult.state()) {
-            case CONNECTED -> connectedStatus(new ConnectedAccount(null, null, null));
+            case CONNECTED -> connectedStatus(new ConnectedAccount(null, null, null, null, null));
             case FAILED -> failedStatus(PROVIDER_AUTH_FAILED, PROVIDER_AUTH_FAILED_MESSAGE);
             case CANCELLED -> failedStatus(PROVIDER_AUTH_CANCELLED, PROVIDER_AUTH_CANCELLED_MESSAGE);
         };
@@ -1109,15 +1121,24 @@ public class LarkCliAuthorizationProvider
     }
 
     private AuthorizationStatusResult connectedStatus(ConnectedAccount account) {
-        return new AuthorizationStatusResult(
-            AuthorizationStatus.CONNECTED,
+        CredentialState state = credentialState(account.tokenStatus(), account.refreshExpiresAt());
+        CredentialRenewalMode renewalMode = account.refreshExpiresAt() == null
+            ? CredentialRenewalMode.NONE
+            : CredentialRenewalMode.REFRESH_TOKEN;
+        return AuthorizationStatusResult.connected(
             account.accountId(),
             account.accountName(),
+            state,
+            renewalMode,
             account.expiresAt(),
-            null,
-            null,
+            account.refreshExpiresAt(),
+            new Date(),
             null
         );
+    }
+
+    private CredentialState credentialState(String tokenStatus, Date refreshExpiresAt) {
+        return CredentialLifecycleEvaluator.evaluate(tokenStatus, null, refreshExpiresAt, new Date());
     }
 
     private AuthorizationStatusResult failedStatus(String errorCode, String errorMessage) {
@@ -1155,7 +1176,12 @@ public class LarkCliAuthorizationProvider
     private record DeviceAuthorization(String verificationUrl, String deviceCode, long expiresInSeconds) {
     }
 
-    private record ConnectedAccount(String accountId, String accountName, Date expiresAt) {
+    private record ConnectedAccount(
+        String accountId,
+        String accountName,
+        Date expiresAt,
+        Date refreshExpiresAt,
+        String tokenStatus) {
     }
 
     private record CompletionTerminalResult(CompletionTerminalState state, long expiresAtMillis) {

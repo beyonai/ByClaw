@@ -278,6 +278,148 @@ describe('ConnectorControl authorization states', () => {
     }
   });
 
+  it('uses refresh-aware lifecycle metadata instead of presenting access token expiry as authorization expiry', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorCode: 'dingtalk',
+          connectorId: 1,
+          connectorName: '钉钉',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: 'Y',
+          credentialState: 'READY',
+          renewalMode: 'REFRESH_TOKEN',
+          accessExpiresAt: '2000-01-02T03:04:05+08:00',
+          refreshExpiresAt: '2999-01-02T03:04:05+08:00',
+        },
+        {
+          connectorCode: 'lark',
+          connectorId: 2,
+          connectorName: '飞书',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: 'Y',
+          credentialState: 'READY',
+          renewalMode: 'REFRESH_TOKEN',
+          accessExpiresAt: '2000-01-02T03:04:05+08:00',
+          refreshExpiresAt: null,
+        },
+        {
+          connectorCode: 'wecom',
+          connectorId: 3,
+          connectorName: '企业微信',
+          connectorType: 'SYSTEM',
+          description: '',
+          enableFlag: 'N',
+          credentialState: 'REAUTH_REQUIRED',
+          renewalMode: 'PROBE_ONLY',
+          accessExpiresAt: null,
+          refreshExpiresAt: null,
+        },
+        {
+          connectorCode: 'custom',
+          connectorId: 4,
+          connectorName: '临期连接器',
+          connectorType: 'CUSTOM',
+          description: '',
+          enableFlag: 'Y',
+          credentialState: 'EXPIRING',
+          renewalMode: 'REFRESH_TOKEN',
+          accessExpiresAt: null,
+          refreshExpiresAt: '2998-01-02T03:04:05+08:00',
+        },
+        {
+          connectorCode: 'wecom-probe',
+          connectorId: 5,
+          connectorName: '企微探测连接器',
+          connectorType: 'CUSTOM',
+          description: '',
+          enableFlag: 'Y',
+          credentialState: 'READY',
+          renewalMode: 'PROBE_ONLY',
+          accessExpiresAt: null,
+          refreshExpiresAt: null,
+          lastVerifiedAt: '2026-08-12T03:04:05+08:00',
+        },
+        {
+          connectorCode: 'lark-refresh-with-expiry',
+          connectorId: 6,
+          connectorName: '飞书待续期',
+          connectorType: 'CUSTOM',
+          description: '',
+          enableFlag: 'Y',
+          credentialState: 'REFRESH_NEEDED',
+          renewalMode: 'REFRESH_TOKEN',
+          accessExpiresAt: '2000-01-02T03:04:05+08:00',
+          refreshExpiresAt: '2999-01-02T03:04:05+08:00',
+        },
+        {
+          connectorCode: 'lark-refresh-without-expiry',
+          connectorId: 7,
+          connectorName: '飞书待续期未知时间',
+          connectorType: 'CUSTOM',
+          description: '',
+          enableFlag: 'Y',
+          credentialState: 'REFRESH_NEEDED',
+          renewalMode: 'REFRESH_TOKEN',
+          accessExpiresAt: '2000-01-02T03:04:05+08:00',
+          refreshExpiresAt: null,
+        },
+        {
+          connectorCode: 'dingtalk-sync-pending',
+          connectorId: 8,
+          connectorName: '钉钉状态同步中',
+          connectorType: 'CUSTOM',
+          description: '',
+          enableFlag: 'Y',
+          credentialState: 'UNKNOWN',
+          renewalMode: 'REFRESH_TOKEN',
+          accessExpiresAt: null,
+          refreshExpiresAt: null,
+        },
+        {
+          connectorCode: 'generic-sync-pending',
+          connectorId: 9,
+          connectorName: '普通连接器状态同步中',
+          connectorType: 'CUSTOM',
+          description: '',
+          enableFlag: 'Y',
+          credentialState: 'UNKNOWN',
+          renewalMode: 'NONE',
+          accessExpiresAt: null,
+          refreshExpiresAt: null,
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 9,
+      totalPages: 1,
+    });
+
+    const { unmount } = render(<ConnectorControl canAuthorize value={[]} onChange={jest.fn()} />);
+
+    try {
+      fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+      fireEvent.click(await screen.findByRole('button', { name: /查看全部连接器/ }));
+
+      expect(await screen.findByText('将在下次使用时自动续期，预计授权有效至 2999-01-02 03:04:05')).toBeInTheDocument();
+      expect(screen.getByText('将在下次使用时自动续期')).toBeInTheDocument();
+      expect(screen.getAllByText('预计授权有效至 2999-01-02 03:04:05')).not.toHaveLength(0);
+      expect(screen.getAllByText('自动续期')).not.toHaveLength(0);
+      expect(screen.getAllByText('授权已失效，请重新连接')).not.toHaveLength(0);
+      expect(screen.queryByText('授权已于 2000-01-02 03:04:05 过期')).not.toBeInTheDocument();
+
+      expect(await screen.findAllByText('授权即将失效，预计有效至 2998-01-02 03:04:05')).not.toHaveLength(0);
+      expect(screen.getAllByText('最近验证于 2026-08-12 03:04:05')).not.toHaveLength(0);
+      expect(screen.getByText('自动续期，授权有效期同步中')).toBeInTheDocument();
+      expect(screen.getByText('授权状态待同步')).toBeInTheDocument();
+      expect(screen.queryByText(/企微探测连接器.*授权有效期至/)).not.toBeInTheDocument();
+    } finally {
+      unmount();
+    }
+  });
+
   it('parses legacy credential expiration in Asia/Shanghai independently of browser timezone', () => {
     expect(getCredentialExpirationDisplay?.('2026-08-10 08:30:00', '2026-08-10T00:30:01Z')).toEqual({
       formattedTime: '2026-08-10 08:30:00',

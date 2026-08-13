@@ -12,10 +12,12 @@ import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupInstallQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupMemberChangeQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupPageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupUpdateQo;
+import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupUninstallQo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberStatusSummaryVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupUninstallPreviewVo;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -110,8 +112,15 @@ public class SkillGroupController {
 
     @PostMapping("/uninstall")
     @ManageLogAnnotation(name = "技能组", description = "卸载技能组")
-    public ResponseUtil<SkillGroupInstallResultVo> uninstall(@Valid @RequestBody SkillGroupInstallQo qo) {
+    public ResponseUtil<SkillGroupInstallResultVo> uninstall(@Valid @RequestBody SkillGroupUninstallQo qo) {
         SkillGroupInstallResultVo result = skillGroupApplicationService.uninstall(qo);
         return ResponseUtil.successResponse(I18nUtil.get("skillgroup.uninstall.success"), result);
+    }
+
+    @PostMapping("/uninstall/preflight")
+    public ResponseUtil<SkillGroupUninstallPreviewVo> preflightUninstall(
+            @Valid @RequestBody SkillGroupInstallQo qo) {
+        SkillGroupUninstallPreviewVo result = skillGroupApplicationService.preflightUninstall(qo);
+        return ResponseUtil.successResponse(I18nUtil.get("skillgroup.detail.query.success"), result);
     }
 }

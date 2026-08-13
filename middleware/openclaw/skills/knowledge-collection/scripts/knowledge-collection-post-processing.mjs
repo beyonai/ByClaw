@@ -12,6 +12,7 @@ const GLOBAL_STAGE_STATUSES = new Set(['not-required', 'pending', 'success', 'fa
 const SESSION_STATUSES = new Set(['success', 'partial', 'failed', 'unknown']);
 const SELECTION_MODES = new Set(['all', 'items']);
 const METADATA_VERSION = '1.0';
+const SENSITIVE_METADATA_KEY = /(token|cookie|secret|password|authorization|credential|device[_-]?code)/i;
 
 // 会话空间根。沙箱把宿主机 <BYCLAW_SANDBOX_FILE_VOLUME_ROOT>/byclaw-<userCode>/by 挂到 /by，
 // 所以 /by 下的绝对路径去掉该前缀就是 fileBrowser 的 path 参数。
@@ -70,6 +71,15 @@ function readJson(filePath, label = filePath) {
   } catch (error) {
     throw new Error(`${label} 不是合法 JSON: ${error.message}`);
   }
+}
+
+function readStandaloneJson(rawFilePath, label) {
+  const filePath = path.resolve(requireString(rawFilePath, label));
+  const stat = fs.lstatSync(filePath);
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error(`${label} 必须是普通 JSON 文件且不能是符号链接`);
+  }
+  return readJson(filePath, label);
 }
 
 function atomicWriteJson(filePath, value) {
@@ -251,6 +261,26 @@ function quarantineStaleLock(paths, lock) {
     if (quarantineStat.isSymbolicLink() || !quarantineStat.isFile()) {
       throw new Error('锁文件损坏: 归档路径类型异常');
     }
+    let quarantinedLock;
+    try {
+      quarantinedLock = assertLockShape(JSON.parse(fs.readFileSync(quarantine, 'utf8')));
+    } catch (error) {
+      throw new Error(`锁文件损坏: 归档内容无效: ${error.message}`);
+    }
+    if (!sameLock(expected, quarantinedLock)) {
+      // Another stale-lock reclaimer moved a newer owner between our check and rename.
+      // Restore it without overwriting a lock that may have been created meanwhile.
+      try {
+        fs.linkSync(quarantine, paths.lock);
+      } catch (error) {
+        if (error.code === 'EEXIST') {
+          throw new Error('锁状态在回收期间发生变化，请稍后重试');
+        }
+        throw error;
+      }
+      fs.rmSync(quarantine, { force: true });
+      return false;
+    }
     fs.rmSync(quarantine, { force: true });
     return true;
   } catch (error) {
@@ -352,17 +382,36 @@ function stableItemId(item) {
   return `item-${crypto.createHash('sha256').update(identity).digest('hex').slice(0, 16)}`;
 }
 
-function articleIdentity({ sourceSkill = '', sourceUrl = '' } = {}) {
-  return `${String(sourceSkill)}\n${String(sourceUrl)}`;
+function sanitizeMetadataValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeMetadataValue);
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !SENSITIVE_METADATA_KEY.test(key))
+    .map(([key, item]) => [key, sanitizeMetadataValue(item)]));
 }
 
-function collectionCanonicalIdentity(item, fallbackSourceSkill = '') {
-  return articleIdentity({
-    sourceSkill: typeof item?.sourceSkill === 'string' && item.sourceSkill
-      ? item.sourceSkill
-      : fallbackSourceSkill,
-    sourceUrl: item?.url,
-  });
+function assertNoSensitiveMetadataKeys(value, currentPath = 'sanitized/metadata.json') {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoSensitiveMetadataKeys(item, `${currentPath}[${index}]`));
+    return;
+  }
+  if (!value || typeof value !== 'object') {
+    return;
+  }
+  for (const [key, item] of Object.entries(value)) {
+    if (SENSITIVE_METADATA_KEY.test(key)) {
+      throw new Error(`${currentPath}.${key} 包含禁止持久化的敏感字段`);
+    }
+    assertNoSensitiveMetadataKeys(item, `${currentPath}.${key}`);
+  }
+}
+
+function articleIdentity({ sourceSkill = '', sourceUrl = '' } = {}) {
+  return `${String(sourceSkill)}\n${String(sourceUrl)}`;
 }
 
 function materializationFromCanonical(root, item) {
@@ -378,19 +427,16 @@ function materializationFromCanonical(root, item) {
 }
 
 function migrateMetadata(root, rawMetadata, collectionResult) {
-  if (
-    rawMetadata?.schemaVersion === METADATA_VERSION
-    && rawMetadata.storage
-    && rawMetadata.collection
-    && rawMetadata.retention
-    && rawMetadata.postProcessing
-  ) {
+  if (rawMetadata?.schemaVersion === METADATA_VERSION) {
     return rawMetadata;
   }
-  const knownLegacy = new Set(['storageFallback', 'partial', 'audit_required', 'auditRequired', 'userRequested']);
-  const sourceMetadata = Object.fromEntries(
+  const knownLegacy = new Set([
+    'schemaVersion', 'storage', 'collection', 'retention', 'postProcessing', 'sourceMetadata',
+    'storageFallback', 'partial', 'audit_required', 'auditRequired', 'userRequested',
+  ]);
+  const sourceMetadata = sanitizeMetadataValue(Object.fromEntries(
     Object.entries(rawMetadata || {}).filter(([key]) => !knownLegacy.has(key)),
-  );
+  ));
   return {
     schemaVersion: METADATA_VERSION,
     storage: { fallback: Boolean(rawMetadata?.storageFallback) },
@@ -628,6 +674,7 @@ function normalizeMaterializations(paths, metadata) {
   let changed = false;
   let recovered = false;
   const warnings = [];
+  const invalidSanitizedPaths = new Set();
   const invalidSourceUrls = new Set();
   for (const item of metadata?.collection?.items || []) {
     const materialization = item?.materialization;
@@ -685,21 +732,21 @@ function normalizeMaterializations(paths, metadata) {
     }
 
     materialization.status = 'pending';
+    if (typeof materialization.sanitizedPath === 'string' && materialization.sanitizedPath) {
+      invalidSanitizedPaths.add(materialization.sanitizedPath);
+    }
+    if (typeof item.sourceUrl === 'string' && item.sourceUrl) {
+      invalidSourceUrls.add(item.sourceUrl);
+    }
     materialization.markdownPath = null;
     materialization.sanitizedPath = null;
     materialization.pendingArtifactCleanup = [...materialization.pendingArtifactCleanup];
     materialization.reason = 'materialization-invalid';
     warnings.push(`inventory ${item.itemId} materialization 无效，已降级为 pending`);
-    if (typeof item.sourceUrl === 'string') {
-      invalidSourceUrls.add(articleIdentity({
-        sourceSkill: item.sourceSkill,
-        sourceUrl: item.sourceUrl,
-      }));
-    }
     changed = true;
     recovered = true;
   }
-  return { changed, recovered, warnings, invalidSourceUrls };
+  return { changed, recovered, warnings, invalidSanitizedPaths, invalidSourceUrls };
 }
 
 function drainPendingArtifactCleanup(paths, metadata) {
@@ -770,20 +817,36 @@ function loadSession(paths, { persistMigration = false } = {}) {
   const metadata = normalized.metadata;
   const materializations = normalizeMaterializations(paths, metadata);
   let collectionResultChanged = false;
-  if (materializations.invalidSourceUrls.size) {
+  if (Array.isArray(collectionResult.items)) {
+    const canonicalItems = collectionResult.items.map(canonicalViewItem);
+    collectionResultChanged = JSON.stringify(canonicalItems) !== JSON.stringify(collectionResult.items);
+    collectionResult.items = canonicalItems;
+  }
+  if (materializations.invalidSanitizedPaths.size) {
     const previousItems = Array.isArray(collectionResult.items) ? collectionResult.items : [];
-    const fallbackSourceSkill = String(collectionResult.backend || '');
-    collectionResult.items = previousItems.filter((item) => !materializations.invalidSourceUrls.has(
-      collectionCanonicalIdentity(item, fallbackSourceSkill),
+    collectionResult.items = previousItems.filter((item) => !materializations.invalidSanitizedPaths.has(
+      item.fileName,
     ));
     collectionResultChanged = collectionResult.items.length !== previousItems.length;
   }
+  if (materializations.invalidSourceUrls.size) {
+    const materializedSourceUrls = new Set(metadata.collection.items
+      .filter((item) => item.materialization.status === 'materialized')
+      .map((item) => item.sourceUrl));
+    const previousItems = Array.isArray(collectionResult.items) ? collectionResult.items : [];
+    collectionResult.items = previousItems.filter((item) => !(
+      materializations.invalidSourceUrls.has(item.url)
+      && !materializedSourceUrls.has(item.url)
+    ));
+    collectionResultChanged = collectionResultChanged || collectionResult.items.length !== previousItems.length;
+  }
   validateMetadata(metadata);
+  validateCanonicalView(paths.root, collectionResult, metadata);
   const metadataChanged = migratedMetadata !== rawMetadata || normalized.changed || materializations.changed;
   if ((persistMigration && metadataChanged) || materializations.recovered) {
     atomicWriteJson(paths.metadata, metadata);
   }
-  if ((persistMigration && collectionResultChanged) || (materializations.recovered && collectionResultChanged)) {
+  if (collectionResultChanged || materializations.recovered) {
     atomicWriteJson(paths.collectionResult, collectionResult);
   }
   return {
@@ -797,6 +860,7 @@ function loadSession(paths, { persistMigration = false } = {}) {
 }
 
 function validateMetadata(metadata) {
+  assertNoSensitiveMetadataKeys(metadata);
   if (metadata?.schemaVersion !== METADATA_VERSION) {
     throw new Error(`sanitized/metadata.json schemaVersion 必须是 ${METADATA_VERSION}`);
   }
@@ -817,13 +881,16 @@ function validateMetadata(metadata) {
   }
   const seen = new Set();
   const seenArticleIdentities = new Set();
+  const seenWorkCopyPaths = new Set();
   for (const item of metadata.collection.items) {
     const itemId = requireString(item?.itemId, 'inventory itemId');
     if (seen.has(itemId)) {
       throw new Error(`inventory itemId 重复: ${itemId}`);
     }
     seen.add(itemId);
-    const identity = articleIdentity({ sourceSkill: item.sourceSkill, sourceUrl: item.sourceUrl });
+    const sourceSkill = requireString(item?.sourceSkill, `inventory ${itemId} sourceSkill`);
+    const sourceUrl = requireString(item?.sourceUrl, `inventory ${itemId} sourceUrl`);
+    const identity = articleIdentity({ sourceSkill, sourceUrl });
     if (seenArticleIdentities.has(identity)) {
       throw new Error(`inventory sourceSkill + sourceUrl 重复: ${identity.replace('\n', ' / ')}`);
     }
@@ -847,6 +914,15 @@ function validateMetadata(metadata) {
     if (shouldHavePaths !== hasBothPaths) {
       throw new Error(`inventory ${itemId} materialization 状态与路径不一致`);
     }
+    if (shouldHavePaths) {
+      for (const field of ['markdownPath', 'sanitizedPath']) {
+        const workCopyPath = item.materialization[field];
+        if (seenWorkCopyPaths.has(workCopyPath)) {
+          throw new Error(`inventory 工作副本路径重复: ${workCopyPath}`);
+        }
+        seenWorkCopyPaths.add(workCopyPath);
+      }
+    }
     if (!Array.isArray(item.rawArtifacts) || item.rawArtifacts.some((artifact) => typeof artifact !== 'string')) {
       throw new Error(`inventory ${itemId} rawArtifacts 必须是字符串数组`);
     }
@@ -868,6 +944,37 @@ function validateMetadata(metadata) {
   }
 }
 
+function validateCanonicalView(root, collectionResult, metadata) {
+  const materializedByPath = new Map(metadata.collection.items
+    .filter((item) => item.materialization.status === 'materialized')
+    .map((item) => [item.materialization.sanitizedPath, item]));
+  const seenPaths = new Set();
+  for (const [index, item] of (Array.isArray(collectionResult.items) ? collectionResult.items : []).entries()) {
+    if (!item || typeof item !== 'object' || typeof item.fileName !== 'string' || typeof item.markdown !== 'string') {
+      throw new Error(`collection-result.json items[${index}] canonical view 条目无效`);
+    }
+    if (item.fileName !== item.markdown) {
+      throw new Error(`collection-result.json items[${index}] markdown 与 fileName 不一致`);
+    }
+    if (seenPaths.has(item.fileName)) {
+      throw new Error(`collection-result.json canonical view 路径重复: ${item.fileName}`);
+    }
+    seenPaths.add(item.fileName);
+    const inventory = materializedByPath.get(item.fileName);
+    if (!inventory) {
+      throw new Error(`collection-result.json canonical view 路径未对应 materialized inventory: ${item.fileName}`);
+    }
+    if (item.url !== inventory.sourceUrl) {
+      throw new Error(`collection-result.json canonical view URL 与 inventory 不一致: ${item.fileName}`);
+    }
+    validateMarkdownPath(root, item.fileName, `collection-result.json items[${index}].fileName`);
+  }
+  const hiddenMaterializedPaths = [...materializedByPath.keys()].filter((sanitizedPath) => !seenPaths.has(sanitizedPath));
+  if (hiddenMaterializedPaths.length) {
+    throw new Error(`materialized inventory 未出现在 collection-result.json canonical view: ${hiddenMaterializedPaths.join(', ')}`);
+  }
+}
+
 function validateCanonicalItem(item, sanitizedPath) {
   if (!item || typeof item !== 'object' || Array.isArray(item)) {
     throw new Error('canonicalItem 必须是对象');
@@ -883,6 +990,13 @@ function validateCanonicalItem(item, sanitizedPath) {
   if (item.markdown !== sanitizedPath || item.fileName !== sanitizedPath) {
     throw new Error('canonicalItem.markdown 与 fileName 必须等于 sanitizedPath');
   }
+}
+
+function canonicalViewItem(item) {
+  const keys = ['title', 'url', 'author', 'publishTime', 'markdown', 'fileName'];
+  return Object.fromEntries(keys
+    .filter((key) => Object.hasOwn(item || {}, key))
+    .map((key) => [key, item[key]]));
 }
 
 function markMaterialized(paths, args) {
@@ -904,14 +1018,11 @@ function markMaterialized(paths, args) {
     if (update.canonicalItem.url !== inventory.sourceUrl) {
       throw new Error('canonicalItem.url 必须与 inventory.sourceUrl 一致');
     }
-  const previousMaterialization = {
+    const previousMaterialization = {
       ...inventory.materialization,
       pendingArtifactCleanup: [...(inventory.materialization.pendingArtifactCleanup || [])],
     };
-    const persistedCanonicalItem = {
-      ...update.canonicalItem,
-      sourceSkill: inventory.sourceSkill,
-    };
+    const persistedCanonicalItem = canonicalViewItem(update.canonicalItem);
     const changedPreviousPaths = [
       previousMaterialization.markdownPath,
       previousMaterialization.sanitizedPath,
@@ -932,15 +1043,11 @@ function markMaterialized(paths, args) {
       ])],
       reason: null,
     };
-    const items = Array.isArray(collectionResult.items) ? collectionResult.items : [];
-    const previousSourceIdentity = articleIdentity(inventory);
+    const items = (Array.isArray(collectionResult.items) ? collectionResult.items : [])
+      .map(canonicalViewItem);
     const previousSanitizedPath = String(previousMaterialization.sanitizedPath || '');
     collectionResult.items = [
-      ...items.filter((item) => (
-        item.url !== inventory.sourceUrl
-        || (collectionCanonicalIdentity(item, collectionResult.backend) !== previousSourceIdentity
-          && item.fileName !== previousSanitizedPath)
-      )),
+      ...items.filter((item) => item.fileName !== previousSanitizedPath && item.fileName !== sanitizedPath),
       persistedCanonicalItem,
     ];
     atomicWriteJson(paths.collectionResult, collectionResult);
@@ -1623,15 +1730,15 @@ function rewriteImageLinks(paths, args) {
           warnings.push(`inventory ${inventory.itemId} 图片超出正文所在目录，已保留原链接: ${relativeLink}`);
           return match;
         }
-        let stat;
+        let imageStat;
         try {
-          stat = fs.lstatSync(absoluteImage);
+          imageStat = fs.lstatSync(absoluteImage);
         } catch {
           missing += 1;
           warnings.push(`inventory ${inventory.itemId} 图片文件不存在，已保留原链接: ${relativeLink}`);
           return match;
         }
-        if (!stat.isFile()) {
+        if (!imageStat.isFile()) {
           missing += 1;
           warnings.push(`inventory ${inventory.itemId} 图片不是普通文件，已保留原链接: ${relativeLink}`);
           return match;
@@ -1708,6 +1815,7 @@ function help() {
       },
     },
     commands: {
+      'init-session': '创建并校验私有采集会话骨架，写入 canonical view 与 inventory metadata',
       inspect: '读取并迁移后处理状态，检测相同 operation + target 的续跑选择',
       'mark-materialized': '登记原始执行器生成的 Markdown 与 sanitized 正文',
       'record-run': '追加或更新一次 post-processing run',
@@ -1719,10 +1827,79 @@ function help() {
   };
 }
 
+function validateInitialCollectionResult(collectionResult) {
+  if (!collectionResult || typeof collectionResult !== 'object' || Array.isArray(collectionResult)) {
+    throw new Error('collection-result.json 根节点必须是对象');
+  }
+  const allowed = new Set(['schemaVersion', 'title', 'source', 'backend', 'url', 'filters', 'items']);
+  const unexpected = Object.keys(collectionResult).filter((key) => !allowed.has(key));
+  if (unexpected.length) {
+    throw new Error(`collection-result.json 包含不支持的字段: ${unexpected.join(', ')}`);
+  }
+  if (collectionResult.schemaVersion !== METADATA_VERSION) {
+    throw new Error(`collection-result.json schemaVersion 必须是 ${METADATA_VERSION}`);
+  }
+  for (const key of ['title', 'source', 'backend', 'url']) {
+    requireString(collectionResult[key], `collection-result.json.${key}`);
+  }
+  if (!collectionResult.filters || typeof collectionResult.filters !== 'object' || Array.isArray(collectionResult.filters)) {
+    throw new Error('collection-result.json filters 必须是对象');
+  }
+  if (!Array.isArray(collectionResult.items)) {
+    throw new Error('collection-result.json items 必须是数组');
+  }
+  if (collectionResult.items.length > 10) {
+    throw new Error('init-session 最多允许预物化 10 篇正文');
+  }
+}
+
+function initSession(args) {
+  const root = path.resolve(requireString(args['session-dir'], '--session-dir'));
+  const metadataInput = readStandaloneJson(args['metadata-input-file'], '--metadata-input-file');
+  const collectionResult = readStandaloneJson(
+    args['collection-result-input-file'],
+    '--collection-result-input-file',
+  );
+  validateInitialCollectionResult(collectionResult);
+  if (fs.existsSync(root)) {
+    if (!fs.statSync(root).isDirectory() || fs.readdirSync(root).length > 0) {
+      throw new Error(`目标 session 目录必须不存在或为空: ${root}`);
+    }
+  }
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  for (const directory of ['raw', 'markdown', 'sanitized', path.join('sanitized', 'items'), '.post-processing-inputs']) {
+    fs.mkdirSync(path.join(root, directory), { recursive: true, mode: 0o700 });
+    fs.chmodSync(path.join(root, directory), 0o700);
+  }
+  try {
+    atomicWriteJson(path.join(root, 'collection-result.json'), collectionResult);
+    atomicWriteJson(path.join(root, 'sanitized', 'metadata.json'), metadataInput);
+    const paths = sessionPaths(root);
+    const loaded = loadSession(paths, { persistMigration: true });
+    if (loaded.materializationRecovered) {
+      throw new Error('初始化 metadata 包含无效 materialization');
+    }
+    return {
+      ok: true,
+      action: 'init-session',
+      sessionDir: root,
+      metadata: loaded.metadata,
+      collectionResult: loaded.collectionResult,
+    };
+  } catch (error) {
+    fs.rmSync(root, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 function main() {
   const { command, args } = parseArgs(process.argv.slice(2));
   if (!command || command === '--help' || command === 'help') {
     render(help());
+    return;
+  }
+  if (command === 'init-session') {
+    render(initSession(args));
     return;
   }
   const paths = sessionPaths(args['session-dir']);

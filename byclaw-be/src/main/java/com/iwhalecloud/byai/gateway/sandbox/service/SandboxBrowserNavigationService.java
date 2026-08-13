@@ -1,14 +1,5 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
-import com.iwhalecloud.byai.gateway.sandbox.service.ingress.SandboxIngressRuntimeResolver;
-import okhttp3.HttpUrl;
-import org.apache.commons.lang3.StringUtils;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -20,6 +11,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.stereotype.Service;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
+import com.iwhalecloud.byai.gateway.sandbox.service.ingress.SandboxIngressRuntimeResolver;
+
+import lombok.extern.slf4j.Slf4j;
+import okhttp3.HttpUrl;
 
 /**
  * 复用采集链路的沙箱浏览器导航能力，避免前端跨域直连 byCLI 服务。

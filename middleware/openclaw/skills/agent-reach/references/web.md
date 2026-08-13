@@ -1,33 +1,15 @@
 # 网页阅读
 
-通用网页、RSS。
+通用网页和 RSS。
 
-## 通用网页 (Jina Reader)
+## 通用网页（byCLI）
 
-```bash
-# 读取任意网页内容
-curl -s "https://r.jina.ai/URL"
+所有网站、网页或 URL 的打开、读取、站内搜索、采集、抓取或操作只能交给 `bycli` skill。先运行
+`bycli list -f json` 动态发现站点 Adapter；存在专用 Adapter 时优先使用，缺失时按 `bycli` skill 的 `bycli browser`
+流程执行。公开静态页、SPA、raw URL、纯文本、Markdown 和无需登录的页面均不是例外。
 
-# 示例
-curl -s "https://r.jina.ai/https://example.com/article"
-```
-
-**适用场景**: 大多数网页可以直接用 Jina Reader 读取。
-
-## Web Reader (MCP)
-
-```bash
-# 读取网页内容 (Markdown 格式)
-mcporter call 'web-reader.webReader(url: "https://example.com")'
-
-# 保留图片
-mcporter call 'web-reader.webReader(url: "https://example.com", retain_images: true)'
-
-# 纯文本格式
-mcporter call 'web-reader.webReader(url: "https://example.com", return_format: "text")'
-```
-
-**适用场景**: 需要更精确控制输出格式时使用。
+不得使用 `web_fetch`、Jina Reader、Web Reader MCP、通用 `browser`、直接 HTTP 客户端或原站直连试读。byCLI 无法完成时停止并报告，
+不得切换到其他网页读取后端。
 
 ## RSS (feedparser)
 
@@ -45,6 +27,6 @@ for e in feedparser.parse('FEED_URL').entries[:5]:
 
 | 场景 | 推荐工具 |
 |-----|---------|
-| 通用网页 | Jina Reader (`curl r.jina.ai`) |
-| 需要图片/格式控制 | web-reader MCP |
+| 通用网页 | byCLI Adapter；缺失时使用 `bycli browser` |
+| 需要图片/格式控制 | byCLI Adapter 或 `bycli browser` |
 | RSS 订阅 | feedparser |

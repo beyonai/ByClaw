@@ -51,6 +51,9 @@ wecom-cli doc smartpage_get_export_result '{"task_id":"<returned-task-id>"}'
 首次命令返回真实 `task_id` 后轮询第二个命令，直到 `task_done=true`。未完成、超时或分页中断时保留成功响应，在
 `sanitized/metadata.json` 设置 `collection.status: partial`，并把非敏感 task ID/失败位置写入 `sourceMetadata`；完成后只使用返回的 `content` 生成正文，
 不得补造内容。
+本地 enterprise runner 使用 `KNOWLEDGE_COLLECTION_MAX_WECOM_POLLS`、`KNOWLEDGE_COLLECTION_CLI_TIMEOUT_MS` 和输出大小上限；
+轮询超时仍必须留下可由 `inspect` 续跑的 partial session，首次 CLI 失败留下 failed session，raw 写入前先完成秘密扫描。
+`--output-dir` 必须是尚不存在的新目录，runner 不得覆盖或混用已有会话。
 
 ## 私有产物
 

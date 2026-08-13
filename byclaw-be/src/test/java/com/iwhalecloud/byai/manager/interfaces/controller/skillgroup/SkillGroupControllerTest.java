@@ -18,6 +18,7 @@ import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCreateQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupCandidatePageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupIdQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupInstallQo;
+import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupUninstallQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupMemberChangeQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupPageQo;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupUpdateQo;
@@ -25,6 +26,7 @@ import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupMemberStatusSummaryVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupUninstallPreviewVo;
 import jakarta.validation.Valid;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
@@ -44,11 +46,11 @@ class SkillGroupControllerTest {
     private static final Map<String, EndpointContract> ENDPOINTS = endpoints();
 
     @Test
-    void exposesExactlyTwelveValidatedPostEndpointsWithMutationAuditLogs() throws Exception {
+    void exposesExactlyThirteenValidatedPostEndpointsWithMutationAuditLogs() throws Exception {
         assertThat(SkillGroupController.class).hasAnnotation(RestController.class);
         assertThat(SkillGroupController.class.getAnnotation(RequestMapping.class).value())
                 .containsExactly("/skillGroup");
-        assertThat(SkillGroupController.class.getDeclaredMethods()).hasSize(12);
+        assertThat(SkillGroupController.class.getDeclaredMethods()).hasSize(13);
 
         for (Map.Entry<String, EndpointContract> entry : ENDPOINTS.entrySet()) {
             Method method = SkillGroupController.class.getDeclaredMethod(
@@ -83,7 +85,8 @@ class SkillGroupControllerTest {
         SkillGroupMemberChangeQo addQo = new SkillGroupMemberChangeQo();
         SkillGroupMemberChangeQo removeQo = new SkillGroupMemberChangeQo();
         SkillGroupInstallQo installQo = new SkillGroupInstallQo();
-        SkillGroupInstallQo uninstallQo = new SkillGroupInstallQo();
+        SkillGroupUninstallQo uninstallQo = new SkillGroupUninstallQo();
+        SkillGroupInstallQo uninstallPreflightQo = new SkillGroupInstallQo();
         SkillGroupInstallQo preflightQo = new SkillGroupInstallQo();
         SkillGroupInstallQo executeQo = new SkillGroupInstallQo();
         SkillGroupVo created = new SkillGroupVo();
@@ -95,6 +98,7 @@ class SkillGroupControllerTest {
         PageInfo<SkillGroupMemberVo> candidates = mock(PageInfo.class);
         SkillGroupInstallResultVo installed = new SkillGroupInstallResultVo();
         SkillGroupInstallResultVo uninstalled = new SkillGroupInstallResultVo();
+        SkillGroupUninstallPreviewVo uninstallPreview = new SkillGroupUninstallPreviewVo();
         SkillGroupMemberStatusSummaryVo preflight = new SkillGroupMemberStatusSummaryVo();
         SkillGroupInstallResultVo executed = new SkillGroupInstallResultVo();
         MessageSource originalMessageSource =
@@ -108,6 +112,7 @@ class SkillGroupControllerTest {
         when(service.detail(idQo)).thenReturn(detail);
         when(service.install(installQo)).thenReturn(installed);
         when(service.uninstall(uninstallQo)).thenReturn(uninstalled);
+        when(service.preflightUninstall(uninstallPreflightQo)).thenReturn(uninstallPreview);
         when(service.preflightInstall(preflightQo)).thenReturn(preflight);
         when(service.executeInstall(executeQo)).thenReturn(executed);
         when(messageSource.getMessage(anyString(), any(Object[].class), any(Locale.class)))
@@ -128,6 +133,8 @@ class SkillGroupControllerTest {
             assertResponse(controller.preflightInstall(preflightQo), "skillgroup.install.success", preflight);
             assertResponse(controller.executeInstall(executeQo), "skillgroup.install.success", executed);
             assertResponse(controller.uninstall(uninstallQo), "skillgroup.uninstall.success", uninstalled);
+            assertResponse(controller.preflightUninstall(uninstallPreflightQo),
+                    "skillgroup.detail.query.success", uninstallPreview);
         }
         finally {
             ReflectionTestUtils.setField(I18nUtil.class, "messageSource", originalMessageSource);
@@ -145,6 +152,7 @@ class SkillGroupControllerTest {
         verify(service, times(1)).preflightInstall(preflightQo);
         verify(service, times(1)).executeInstall(executeQo);
         verify(service, times(1)).uninstall(uninstallQo);
+        verify(service, times(1)).preflightUninstall(uninstallPreflightQo);
         verifyNoMoreInteractions(service);
     }
 
@@ -178,8 +186,10 @@ class SkillGroupControllerTest {
                 "skillgroup.install.success"));
         endpoints.put("executeInstall", new EndpointContract("/install/execute", SkillGroupInstallQo.class, true,
                 "skillgroup.install.success"));
-        endpoints.put("uninstall", new EndpointContract("/uninstall", SkillGroupInstallQo.class, true,
+        endpoints.put("uninstall", new EndpointContract("/uninstall", SkillGroupUninstallQo.class, true,
                 "skillgroup.uninstall.success"));
+        endpoints.put("preflightUninstall", new EndpointContract("/uninstall/preflight",
+                SkillGroupInstallQo.class, false, "skillgroup.detail.query.success"));
         return endpoints;
     }
 

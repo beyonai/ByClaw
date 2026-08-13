@@ -67,6 +67,7 @@ jest.mock('../useGlobal', () => ({
   __esModule: true,
   default: jest.fn(() => ({
     agentId: 'agent-1',
+    EventEmitter: { emit: jest.fn() },
   })),
 }));
 
@@ -86,6 +87,7 @@ import { useDispatch, useSelector } from '@umijs/max';
 import useAppStore from '@/models/common/useAppStore';
 import { getChatRunningSnapshot, getChatRunningStatus } from '@/service/message';
 import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
+import { IMessageState, SSEMessageType } from '@/constants/message';
 import { clearChatRuntime } from '../useChat/chatRuntime';
 
 import useChat from '../useChat';
@@ -178,6 +180,56 @@ describe('hooks/useChat/index', () => {
       expect.objectContaining({
         messageId: 'answer-1',
         sessionId: 's1',
+      }),
+      { isAssign: true }
+    );
+  });
+
+  it('restores a v2 running snapshot with its active thinking block open', async () => {
+    mockGetChatRunningStatus.mockResolvedValue([
+      {
+        sessionId: 's1',
+        running: true,
+        traceId: 'trace-1',
+        clientRequestId: 'client-1',
+        modelAnswerMessageId: 'answer-1',
+        userMessageId: 'query-1',
+      },
+    ] as any);
+    mockGetChatRunningSnapshot.mockResolvedValue({
+      sessionId: 's1',
+      messageId: 'answer-1',
+      traceId: 'trace-1',
+      metadata: JSON.stringify({ messageRenderVersion: 'v2' }),
+      inferLog: JSON.stringify([
+        {
+          seq: 3,
+          contentType: SSEMessageType.thinkText,
+          orderId: 'reasoning',
+          parentOrderId: '-1',
+          choices: [{ delta: { content: '思考中' } }],
+        },
+      ]),
+      messageStruct: JSON.stringify([]),
+      snapshotStreamId: '3-0',
+    } as any);
+
+    renderHook(() => useChat({ sessionId: 's1', addSession: jest.fn() } as any));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockUpdateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: 'answer-1',
+        messageState: IMessageState.Answer,
+        thinkDone: false,
+        _v2NextSeq: 4,
+        _v2LastChannel: 'thinkList',
       }),
       { isAssign: true }
     );

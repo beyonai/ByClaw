@@ -60,7 +60,7 @@ const ProjectSpacePage: React.FC = () => {
   const [editingProject, setEditingProject] = useState<ProjectSpace>();
   const [editLoading, setEditLoading] = useState(false);
 
-  const { activeProject, loading: detailLoading, refreshProject } = useProjectDetail(projects, selectedProjectId);
+  const { activeProject, refreshProject } = useProjectDetail(projects, selectedProjectId);
   const canManageProject = useMemo(() => {
     const currentUserId = userInfo.userId ?? userInfo.id;
     return Boolean(
@@ -236,46 +236,43 @@ const ProjectSpacePage: React.FC = () => {
         </div>
       ) : (
         <div className={styles.detailHost}>
-          {/* Spin 的包裹层必须占满详情宿主，内部 Tab 才能获得确定高度并正常纵向滚动。 */}
-          <Spin spinning={detailLoading} wrapperClassName={styles.detailSpin}>
-            {/* 主菜单项目页使用独立的大详情组件，不复用会话侧栏的项目小详情面板。 */}
-            <ProjectDetail
-              project={activeProject}
-              onRefresh={refreshProject}
-              onOpenSession={handleOpenSession}
-              onNewSession={(target?: ChatWithAgentTarget) => {
-                setSessionId?.('');
-                // 只有数字员工卡的「去聊天」带员工;工具栏「新建会话」不带,行为不变。
-                // 面板员工可能不在 redux employeesList 里(个人创建的员工走 queryMyCreated),
-                // 光给 agentId 会让 useDefaultAgentElement 查不到人而兜底成「AI 助手」。
-                // 先把整份员工写进 agentCache,它在那个 hook 里优先于 redux 查表。
-                if (target?.agentId) {
-                  setAgentCache(
-                    getElementData(ResourceType.digitalEmployee, {
-                      agentId: `${target.agentId}`,
-                      name: target.name,
-                      chatAvatar: target.chatAvatar,
-                      agentType: target.agentType,
-                    })
-                  );
-                }
-                navigate('/chat', {
-                  state: {
-                    keepSiderActiveKey: 'sessions',
-                    from: 'projectSpace',
-                    projectId: activeProject.projectId,
-                    projectName: activeProject.projectName,
-                    // 聊天页据此在挂载后恢复 @ 员工。不能在这里直接 setAgentId:
-                    // ChatLayoutComp 挂载时会按「无会话员工」清空一次,早设的值会被抹掉。
-                    selectedAgentId: target?.agentId,
-                    selectedAgentObjectType: target?.agentId ? 'DigEmployee' : undefined,
-                  },
-                });
-              }}
-              onEditProject={canManageProject ? handleEditProject : undefined}
-              onDeleteProject={canManageProject ? handleDeleteProject : undefined}
-            />
-          </Spin>
+          {/* 详情数据静默更新，由当前 Tab 独立展示 loading，避免打开项目时出现两层加载图标。 */}
+          <ProjectDetail
+            project={activeProject}
+            onRefresh={refreshProject}
+            onOpenSession={handleOpenSession}
+            onNewSession={(target?: ChatWithAgentTarget) => {
+              setSessionId?.('');
+              // 只有数字员工卡的「去聊天」带员工;工具栏「新建会话」不带,行为不变。
+              // 面板员工可能不在 redux employeesList 里(个人创建的员工走 queryMyCreated),
+              // 光给 agentId 会让 useDefaultAgentElement 查不到人而兜底成「AI 助手」。
+              // 先把整份员工写进 agentCache,它在那个 hook 里优先于 redux 查表。
+              if (target?.agentId) {
+                setAgentCache(
+                  getElementData(ResourceType.digitalEmployee, {
+                    agentId: `${target.agentId}`,
+                    name: target.name,
+                    chatAvatar: target.chatAvatar,
+                    agentType: target.agentType,
+                  })
+                );
+              }
+              navigate('/chat', {
+                state: {
+                  keepSiderActiveKey: 'sessions',
+                  from: 'projectSpace',
+                  projectId: activeProject.projectId,
+                  projectName: activeProject.projectName,
+                  // 聊天页据此在挂载后恢复 @ 员工。不能在这里直接 setAgentId:
+                  // ChatLayoutComp 挂载时会按「无会话员工」清空一次,早设的值会被抹掉。
+                  selectedAgentId: target?.agentId,
+                  selectedAgentObjectType: target?.agentId ? 'DigEmployee' : undefined,
+                },
+              });
+            }}
+            onEditProject={canManageProject ? handleEditProject : undefined}
+            onDeleteProject={canManageProject ? handleDeleteProject : undefined}
+          />
         </div>
       )}
 

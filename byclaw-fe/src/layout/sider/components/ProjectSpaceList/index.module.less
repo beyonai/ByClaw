@@ -799,6 +799,23 @@
 .projectInitAlert {
   flex-shrink: 0;
   margin: 10px 10px 0;
+  // 初始化引导为次要提示，弱化字号与图标突出度，避免抢占详情主内容视觉重心。
+  :global {
+    .@{antPrefix}-alert-message {
+      font-size: 12px;
+      line-height: 18px;
+      color: rgba(0, 0, 0, 0.65);
+    }
+  }
+}
+
+// 「去跟架构聊天」按钮跟在提示文案下方。按钮不放 Alert 的 description，那会触发
+// .ant-alert-with-description 把上面的 message 字号顶成 16px 加粗。
+.projectInitAlertBody {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 .detailProjectInitTag {
@@ -3413,6 +3430,8 @@
 
 .kanbanCardTitle {
   display: -webkit-box;
+  // 作为卡片头部的 flex 子项占满标签以外的剩余宽度，min-width 让两行截断生效而不是撑破卡片。
+  flex: 1;
   min-width: 0;
   font-size: 14px;
   font-weight: 500;
@@ -3424,6 +3443,52 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
+}
+
+// 标题占满剩余宽度，类型标签固定在右上角。用 flex-start 对齐，让标签跟标题首行齐平而非垂直居中。
+.kanbanCardHeader {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+// 类型标签不参与压缩，宽度由中文字数决定，标题让位而不是把标签挤掉。
+.kanbanCardTypeTag {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  // 与标题 20px 行高对齐，保证标签和首行文字视觉齐平。
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+// 四角色配色与项目详情任务卡 detailTaskIcon* 保持同一套色值。
+.kanbanCardTypeTagArchitect {
+  color: #7c4cb0;
+  background: #f3ecff;
+}
+
+.kanbanCardTypeTagRequirement {
+  color: #2563b8;
+  background: #e8f1ff;
+}
+
+.kanbanCardTypeTagCoder {
+  color: #0f766e;
+  background: #e6f7f4;
+}
+
+.kanbanCardTypeTagTester {
+  color: #a8556a;
+  background: #fbeef2;
+}
+
+// 普通会话不属于四角色任务，用中性灰弱化，避免跟真正的任务抢注意力。
+.kanbanCardTypeTagChat {
+  color: #64748b;
+  background: #f1f5f9;
 }
 
 .kanbanCardMeta {
@@ -3496,6 +3561,116 @@
   font-weight: 600;
   line-height: 24px;
   word-break: break-word;
+}
+
+// 运营任务详情按原型使用“摘要卡 + 纵向配置字段”，不展示研发任务的仓库和阶段信息。
+.operationTaskDetailContent {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.operationTaskSummary {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #dfe7ea;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #f7fbfa;
+}
+
+.operationTaskStatusTag {
+  flex-shrink: 0;
+  margin-inline-end: 0;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.operationTaskSummaryIcon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #246bfe;
+  background: #eaf1ff;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.operationTaskSummaryMain {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+
+  small {
+    color: #8a96a8;
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  strong {
+    overflow: hidden;
+    color: #344056;
+    font-size: 16px;
+    line-height: 24px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  p {
+    margin: 2px 0 0;
+    overflow: hidden;
+    color: #75839a;
+    font-size: 13px;
+    line-height: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.operationTaskConfiguration {
+  h3 {
+    margin: 0 0 14px;
+    color: #1f2633;
+    font-size: 16px;
+    line-height: 24px;
+  }
+
+  dl {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  dl > div {
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr);
+    align-items: start;
+    gap: 14px;
+  }
+
+  dt {
+    color: #8a96a8;
+    font-size: 13px;
+    line-height: 22px;
+  }
+
+  dd {
+    min-width: 0;
+    margin: 0;
+    color: #344056;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 22px;
+    word-break: break-word;
+  }
 }
 
 /* 任务详情 - Agent 执行概览 */
@@ -3614,6 +3789,15 @@
     color: #344056;
     word-break: break-word;
   }
+}
+
+// 普通/默认项目任务详情中的会话内容保留换行，长文本在抽屉内自然换行展示。
+.taskDetailText {
+  color: #526075;
+  font-size: 13px;
+  line-height: 22px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 // 关联需求跨越两列，其余上下文字段仍保持两列各占 50% 的布局。

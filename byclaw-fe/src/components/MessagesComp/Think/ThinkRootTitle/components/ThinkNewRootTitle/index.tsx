@@ -1,6 +1,6 @@
 import React, { useRef, useState, useMemo, Suspense } from 'react';
 
-import { CheckCircleFilled, DownOutlined, InfoCircleFilled, UpOutlined } from '@ant-design/icons';
+import { CheckCircleFilled, DownOutlined, InfoCircleFilled, RightOutlined } from '@ant-design/icons';
 import classnames from 'classnames';
 import { get, isBoolean, isEmpty, size } from 'lodash';
 import { SSEMessageType } from '@/constants/message';
@@ -98,7 +98,7 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = React.memo(
           {HeaderComp}
           {hasChildren && (
             <div className={classnames(styles.collapseIcon, 'ub ub-ac ub-pc')}>
-              {isParentCollapsed ? <DownOutlined /> : <UpOutlined />}
+              {isParentCollapsed ? <RightOutlined /> : <DownOutlined />}
             </div>
           )}
         </div>
@@ -192,7 +192,7 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
             }}
           />
           {hasChildren && (
-            <div className={styles.itemCollapseIcon}>{isCollapsed ? <DownOutlined /> : <UpOutlined />}</div>
+            <div className={styles.itemCollapseIcon}>{isCollapsed ? <RightOutlined /> : <DownOutlined />}</div>
           )}
         </div>
         {needsGradient && (

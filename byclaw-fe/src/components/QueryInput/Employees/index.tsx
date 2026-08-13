@@ -18,6 +18,7 @@ import type { IChatSettingValue } from '@/typescript/cloud';
 import type { IFile, IQueryFile } from '@/typescript/file';
 
 import { chatModeMap } from '@/constants/query';
+import { ResourceTypeMap } from '@/constants/resource';
 import { getDownloadOpenClawFileUrl, isOpenClawAgent, uploadFileToOpenClaw } from '@/utils/openClaw/utils';
 import queryStyles from '../index.module.less';
 import MentionPopover from '../RichInput/mentionPopover';
@@ -202,6 +203,7 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
       dispatch,
       globalContext: { agentId, setSessionId },
       chatMode,
+      cannotAt,
     } = this.props;
     const { showMentionPopoverType } = this.state;
 
@@ -214,33 +216,40 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
         <Space size={14} className={styles.bottomRight}>
           {/* 连接器控制组件直接管理用户级全局开关，消息 payload 不再携带连接器 ID。 */}
           <ConnectorControl canAuthorize={!!this.props.userInfo} />
-          {/* 多员工模式下 @ 入口始终保留，用于继续追加数字员工。 */}
-          <MentionPopover
-            type="@"
-            chatMode={chatModeMap.expert}
-            agentId={agentId}
-            sessionId={sessionId}
-            onSelect={this.onSelectMentionPopoverItem}
-            popoverPos={showMentionPopoverType === '@' ? staticEmptyObject : undefined}
-            onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}
-          >
-            <Tooltip title={mentionDigitalEmployeeTip}>
-              <span
-                aria-label={mentionDigitalEmployeeTip}
-                className={styles.attachment}
-                role="button"
-                tabIndex={0}
-                onClick={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '@' }))}
-                onKeyDown={(event) => {
-                  if (event.key !== 'Enter' && event.key !== ' ') return;
-                  event.preventDefault();
-                  this.setState((prev) => ({ ...prev, showMentionPopoverType: '@' }));
-                }}
-              >
-                @
-              </span>
-            </Tooltip>
-          </MentionPopover>
+          {/* 员工详情已固定当前聊天对象，不展示追加 @ 数字员工入口。 */}
+          {!cannotAt && (
+            <MentionPopover
+              type="@"
+              chatMode={chatModeMap.expert}
+              agentId={agentId}
+              sessionId={sessionId}
+              excludedAgentIds={(this.state.resourceList || [])
+                .filter((resource) => `${resource.resourceType}` === `${ResourceTypeMap.digitalEmployee}`)
+                .flatMap((resource) =>
+                  [resource.resourceId, resource.resourceCode].filter(Boolean).map((item) => `${item}`)
+                )}
+              onSelect={this.onSelectMentionPopoverItem}
+              popoverPos={showMentionPopoverType === '@' ? staticEmptyObject : undefined}
+              onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}
+            >
+              <Tooltip title={mentionDigitalEmployeeTip}>
+                <span
+                  aria-label={mentionDigitalEmployeeTip}
+                  className={styles.attachment}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '@' }))}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                    event.preventDefault();
+                    this.setState((prev) => ({ ...prev, showMentionPopoverType: '@' }));
+                  }}
+                >
+                  @
+                </span>
+              </Tooltip>
+            </MentionPopover>
+          )}
           {canQuote && (
             <MentionPopover
               type="#"
@@ -277,14 +286,14 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
               }}
               onUpdate={this.onUpdateFile}
               onRemove={this.onRemoveFile}
-              setSessionId={(mySessionId: string, file: any) => {
+              setSessionId={(mySessionId: string, sessionName?: string) => {
                 if (`${mySessionId}` === `${sessionId}`) return;
                 setSessionId?.(mySessionId);
                 dispatch({
                   type: 'session/addSession',
                   payload: {
                     sessionId: mySessionId,
-                    sessionName: file?.name,
+                    sessionName,
                   },
                 });
               }}

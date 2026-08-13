@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { message } from 'antd';
+import { useIntl } from '@umijs/max';
 import { listProjects } from '../service';
 import type { ProjectSpace } from '../types';
 import { getArrayData, normalizeProject } from '../utils';
@@ -7,6 +8,7 @@ import { getArrayData, normalizeProject } from '../utils';
 const PROJECT_PAGE_SIZE = 30;
 
 export const useProjectList = () => {
+  const intl = useIntl();
   const [projects, setProjects] = useState<ProjectSpace[]>([]);
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
@@ -54,7 +56,10 @@ export const useProjectList = () => {
       } catch (error) {
         if (requestId !== latestProjectRequestIdRef.current) return [] as ProjectSpace[];
         // 左侧小列表需要就地提示，避免接口失败时只结束 loading 但界面没有反馈。
-        const errorMessage = typeof error === 'string' && error.trim() ? error : '项目列表加载失败';
+        const errorMessage =
+          typeof error === 'string' && error.trim()
+            ? error
+            : intl.formatMessage({ id: 'projectSpace.message.loadFailed' });
         console.error('Failed to load project list:', error);
         message.error(errorMessage);
         return [] as ProjectSpace[];
@@ -64,7 +69,7 @@ export const useProjectList = () => {
         }
       }
     },
-    [keyword]
+    [intl, keyword]
   );
 
   useEffect(() => {

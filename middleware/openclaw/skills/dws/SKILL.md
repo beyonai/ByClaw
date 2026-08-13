@@ -2,6 +2,7 @@
 name: dws
 description: 管理钉钉产品能力(AI表格/日历/通讯录/群聊与机器人/待办/审批/考勤/日志/DING消息/开放平台文档/钉钉文档/钉钉云盘/AI听记/邮箱等)。当用户需要操作表格数据、管理日程会议、查询通讯录、管理群聊、机器人发消息、创建待办、提交审批、查看考勤、提交日报周报（钉钉日志模版）、读写钉钉文档、上传下载云盘文件、查询听记纪要、收发邮件时使用。
 cli_version: ">=1.0.15"
+byclaw_managed: true
 ---
 
 # 钉钉全产品 Skill
@@ -30,6 +31,27 @@ node skills/dws/scripts/connector-auth-sync.mjs
 - helper 已独占完整的一次重试预算；Skill 不得再次调用 helper。凭证无效、连接器/Verifier 不存在等业务错误不得重试。
 - 同步仍失败时报告“CLI 授权可能已完成，但平台连接状态同步失败”，停止业务命令；不得重新发起设备登录，也不得用本地成功绕过同步失败。
 - 禁止读取、显示或要求用户提供认证文件、Token、请求 Header、服务发现信息或内部路径。
+
+## 业务懒刷新后的平台元数据回写（最高优先级）
+
+user 身份业务命令前，先记录预检时间，再在同一个隔离 HOME 执行
+`HOME="$DWS_HOME" dws profile list --format json`，读取本次业务身份的 token 生命周期快照。`profile list` 只用于读取
+快照；不得使用 `dws auth status` 做预检，因为该命令可能触发 access token 刷新并覆盖业务调用前的状态。
+
+- 必须从顶层 `profiles` 列表解析与业务命令相同的 profile。业务命令带单个 `--profile` 时，只允许在列表项的 `corpId`
+  或 `corpName` 中精确匹配唯一项；解析项的 `corpId` 还必须等于顶层 `currentProfile`，且 `isCurrent=true`。未带
+  `--profile` 时，只选择 `corpId` 等于 `currentProfile` 且 `isCurrent=true` 的唯一列表项。
+- 多个 `--profile` 选择器（包括 CSV 多选）、匹配不到、匹配多个、非当前 profile，或当前项不唯一时，状态视为未知，
+  禁止猜测、切换 profile 或执行平台回写，避免把一个组织的刷新状态写入另一个连接器绑定。
+- 仅当目标列表项的 `expiresAt` 和 `refreshExpAt` 都是可解析的绝对时间，且 `expiresAt` 早于或等于预检时间、
+  `refreshExpAt` 晚于预检时间，并且随后 user 身份业务命令成功后，才原样执行一次
+  `node skills/dws/scripts/connector-auth-sync.mjs`，让后端从同一 native-home 回读并保存刷新后的生命周期元数据。
+- 业务命令未成功、access token 在预检时仍有效、refresh token 在预检时已过期，或任一所需字段缺失/不可解析时，
+  不执行该业务后回写；未知状态继续按现有错误处理流程判断，禁止猜测。
+- 回写成功以 helper 退出码为 0 且 `connected=true` 为准。回写失败不得改变已经成功的钉钉业务结果，不得重试业务命令、
+  重新授权或再次调用 helper；应保留业务结果，并补充说明“业务已完成，但平台连接状态同步暂时失败”。
+- 本节是 dws 对 DWS CLI 懒刷新行为的显式 opt-in；不得把该流程扩展到飞书、企微或未来新增的其他连接器。其他连接器
+  只有在自身 Skill 明确声明同类能力和回写契约后才能接入。
 
 ## 严格禁止 (NEVER DO)
 - 不要使用 dws 命令以外的方式操作（禁止 curl、HTTP API、浏览器）

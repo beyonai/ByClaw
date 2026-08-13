@@ -189,6 +189,87 @@ describe('utils/messgae', () => {
     expect(message.extParams).toEqual({ foo: 'bar' });
   });
 
+  it('fetchMessageHandler preserves v2 inferLog segment boundaries', () => {
+    const message = fetchMessageHandler({
+      creatorId: 'u2',
+      usage: '2',
+      messageId: 'm-v2',
+      metadata: JSON.stringify({ messageRenderVersion: 'v2' }),
+      inferLog: JSON.stringify([
+        {
+          mockMessage: {
+            seq: 1,
+            contentType: SSEMessageType.thinkText,
+            content: { substance: 'thought-1' },
+          },
+        },
+        {
+          mockMessage: {
+            seq: 3,
+            contentType: SSEMessageType.thinkText,
+            content: { substance: 'thought-2' },
+          },
+        },
+      ]),
+      messageStruct: JSON.stringify([
+        {
+          mockMessage: {
+            seq: 2,
+            contentType: SSEMessageType.text,
+            content: { substance: 'answer' },
+          },
+        },
+      ]),
+    });
+
+    expect(message.thinkList).toHaveLength(2);
+    expect(message.thinkList?.map((item) => item.seq)).toEqual([1, 3]);
+    expect(message.messageList?.map((item) => item.seq)).toEqual([2]);
+  });
+
+  it('fetchMessageHandler folds v2 tool call updates into their first answer segment', () => {
+    const message = fetchMessageHandler({
+      creatorId: 'u2',
+      usage: '2',
+      messageId: 'm-tool',
+      metadata: JSON.stringify({ messageRenderVersion: 'v2' }),
+      messageStruct: JSON.stringify([
+        {
+          mockMessage: {
+            seq: 1,
+            contentType: SSEMessageType.toolCall,
+            status: SSEEventStatus.start,
+            content: { orderId: 'tool-A', substance: { title: 'Bash', input: 'uname -m' } },
+          },
+        },
+        {
+          mockMessage: {
+            seq: 2,
+            contentType: SSEMessageType.text,
+            content: { substance: 'between' },
+          },
+        },
+        {
+          mockMessage: {
+            seq: 1,
+            contentType: SSEMessageType.toolCall,
+            status: SSEEventStatus.done,
+            content: { orderId: 'tool-A', substance: { output: 'arm64' } },
+          },
+        },
+      ]),
+    });
+
+    expect(message.messageList).toHaveLength(2);
+    expect(message.messageList?.[0]).toMatchObject({
+      seq: 1,
+      status: SSEEventStatus.done,
+      content: {
+        substance: { title: 'Bash', input: 'uname -m', output: 'arm64' },
+      },
+    });
+  });
+
   it('getMessageText prefers text field and falls back to messageList text content', () => {
     expect(getMessageText({ text: 'hello', messageList: [] } as any)).toBe('hello');
     expect(

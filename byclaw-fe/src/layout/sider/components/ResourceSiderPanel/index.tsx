@@ -931,8 +931,27 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
   /**
    * 渲染资源详情下拉菜单
    */
+  const getQuoteType = (): IDragType => {
+    if (resourceType === 'TOOL') return DragType.tool;
+    if (resourceType === 'SKILL') return DragType.SKILL;
+    return DragType.OBJECT;
+  };
+
+  const handleQuoteResource = (item: ResourceItem) => {
+    EventEmitter.emit('queryInput-insert-item', {
+      item: { ...item, isFromResourceModule: true },
+      type: getQuoteType(),
+    });
+  };
+
   const renderDetailDropdown = (item: ResourceItem) => {
     const menuItems: { key: string; label: React.ReactNode }[] = [];
+    if (!item.quoteDisabled) {
+      menuItems.push({
+        key: 'quote',
+        label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.quote' })}</div>,
+      });
+    }
     menuItems.push({
       key: 'detail',
       label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.detail' })}</div>,
@@ -962,6 +981,10 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
           onClick: ({ key, domEvent }) => {
             domEvent.preventDefault();
             domEvent.stopPropagation();
+            if (key === 'quote') {
+              handleQuoteResource(item);
+              return;
+            }
             if (key === 'share') {
               void handleShare(item);
               return;
@@ -984,19 +1007,6 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
         </span>
       </Dropdown>
     );
-  };
-
-  const getQuoteType = (): IDragType => {
-    if (resourceType === 'TOOL') return DragType.tool;
-    if (resourceType === 'SKILL') return DragType.SKILL;
-    return DragType.OBJECT;
-  };
-
-  const handleQuoteResource = (item: ResourceItem) => {
-    EventEmitter.emit('queryInput-insert-item', {
-      item: { ...item, isFromResourceModule: true },
-      type: getQuoteType(),
-    });
   };
 
   const clearItemClickTimer = useCallback(() => {

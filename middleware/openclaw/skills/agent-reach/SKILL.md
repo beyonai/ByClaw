@@ -1,35 +1,42 @@
 ---
 name: agent-reach
-description: Use when the goal is to READ or LOOK UP something on the public internet for an immediate answer - research, search, or read a webpage, GitHub, YouTube, Bilibili, V2EX, Twitter/X, Reddit, Xiaohongshu, LinkedIn, podcasts, RSS, jobs, code, or social-platform content. This is the public-internet channel router only; it picks a channel and executor and does not archive results. If the user wants material collected, crawled in batch, archived, or ingested into a knowledge base, use knowledge-collection instead.
+description: Use when the goal is to READ or LOOK UP something on the public internet for an immediate answer - research, search, or read a webpage, GitHub, YouTube, Bilibili, V2EX, Twitter/X, Reddit, Xiaohongshu, LinkedIn, podcasts, RSS, jobs, code, or social-platform content. This is the public-internet channel router only; it picks a channel and executor and does not archive results. Any task that opens, reads, searches within, collects from, scrapes, or operates a concrete website, webpage, or URL must route to byCLI before acquisition. If the user wants material collected, crawled in batch, archived, or ingested into a knowledge base, use knowledge-collection instead.
 ---
 
 # Agent Reach — 互联网能力路由器
 
-本文件以 Agent Reach `v1.5.0` 官方 Skill 为主体，并在前方增加 ByClaw 运行时覆盖规则。官方来源固定为提交
-`f65526cbaaad3879473acc1ba6dbefd195caf2be`，随附 references 和许可证保持上游原文。
+本文件基于 Agent Reach `v1.5.0` 官方 Skill，按 ByClaw 的唯一网页执行器策略完成适配。官方来源固定为提交
+`f65526cbaaad3879473acc1ba6dbefd195caf2be`，许可证保持上游原文；会与 ByClaw 路由冲突的正文和 references 已改写，不能作为上游原文使用。
 
 ## ByClaw 覆盖规则（最高优先级）
 
-官方主体及其 references 与覆盖规则冲突时，以本节为准。
+后续适配主体及其 references 必须与本节一致；发现冲突时立即停止，不得执行冲突路径。
 
 角色名称固定如下：路由器：`agent-reach`；网站执行器：`bycli`；采集编排器：`knowledge-collection`；
 直接查询所有者：根 Agent。以下规则始终使用这些名称确定结果与交互的所有权。
 
+**网页路由全局不变量：**任何网站、网页或 URL 的打开、读取、站内搜索、采集、抓取或操作任务，路由器在获取内容前
+必须无条件选择并加载 `bycli` skill。不得先尝试 `web_fetch`、Jina Reader、Web Reader MCP、`curl`、`wget`、`requests`、
+原站直连或其他网页获取工具，再根据结果决定是否委派 byCLI。公开静态页、服务端渲染页、SPA、raw URL、纯文本、Markdown
+和无需登录的页面均无例外。byCLI 无法完成时必须停止并报告，不得回退到其他网页获取工具。Exa 全网搜索、`gh` CLI、RSS
+和视频字幕等不打开或读取具体网页的非网页渠道不受此规则影响。
+
 1. 使用 `byclaw-capability-doctor` 进行初始化、选后端和故障后的被动检查。读取
-   `providers.agentReach.channels.<channel>` 时，`diagnosticBackend` 是 Agent Reach 上游探测值，`effectiveBackend` 是应用 ByClaw
+   `providers.agentReach.channels.<channel>` 时，`diagnosticBackend` 是诊断信息，`effectiveBackend` 是应用 ByClaw
    覆盖规则后的实际执行后端，`activeBackend` 是 `effectiveBackend` 的兼容别名。只执行 `effectiveBackend`；不得直接执行 `diagnosticBackend`。
-   其中 Jina Reader 和 OpenCLI 均映射为 `bycli`；当上游未给出 `active_backend`，但候选 `backends` 包含 Jina Reader 或 OpenCLI 时，
-   `effectiveBackend` 仍为 `bycli`。此时渠道 `status` 只表示上游诊断状态，以 `providers.bycli.status` 判断执行就绪度。
+   `web` 渠道的 `diagnosticBackend` 固定为 `disabled_by_policy`，`backends`、`effectiveBackend` 和 `activeBackend` 均只呈现 `bycli`；
+   不得向用户推荐或解释被策略禁用的上游网页后端。以 `providers.bycli.status` 判断执行就绪度。
 2. 不得用 `bycli doctor` 替代聚合被动检查；被动检查不得调用 `/v1/browser/recover` 或任何浏览器启动命令。daemon 运行但 Extension
    未连接是正常冷状态，`available_on_demand` 不得启动 Chrome。
 3. 本项目只提供 byCLI，不提供 OpenCLI。官方主体或 references 中的任何 `opencli` 路径均视为不可用：不得安装
    OpenCLI、不得创建 `opencli` 别名，也不得执行 Agent Reach 的 OpenCLI 安装路径。
    Do not install OpenCLI. Do not create an `opencli` alias.
-4. 当 `effectiveBackend` 为 `bycli`，或官方路由要求 OpenCLI、登录态或浏览器后端时，路由器加载并遵循 `bycli` skill；网站执行器用
+4. 任何网站、网页或 URL 任务，以及 `effectiveBackend` 为 `bycli`、官方路由要求 OpenCLI、登录态或浏览器后端时，路由器加载并遵循
+   `bycli` skill；网站执行器用
    `bycli list -f json` 发现 Adapter，遵守其浏览器生命周期、授权、执行与验证规则，并把结果返回当前任务所有者。直接查询时由根 Agent
    负责最终回复；委派采集时由采集编排器负责统一持久化、产物协议、后处理与入库或知识整理。
-5. 禁止使用 Jina Reader 或访问 `r.jina.ai`。所有官方 Jina 路径，包括官方 `references/web.md` 的通用网页读取和
-   `references/career.md` 的 LinkedIn fallback，均加载并遵循 `bycli` skill：先执行 `bycli list -f json` 动态发现 Adapter；
+5. 禁止使用 Jina Reader 或访问 `r.jina.ai`。通用网页读取和 LinkedIn fallback 均加载并遵循 `bycli` skill：
+   先执行 `bycli list -f json` 动态发现 Adapter；
    通用网页存在 `web/read` 时执行 `bycli web read --url <URL>`，站点专用 Adapter 存在时优先使用专用 Adapter，缺失时按 byCLI
    Browser 降级规则处理。不得回退到 `web_fetch`、Jina Reader、Web Reader MCP、`curl`、`wget`、`requests` 或原站直连。
    公开可读、静态页面、raw URL、纯文本或 Markdown 内容均不是例外，也不得因「直接 HTTP 更快」「无需登录」「不需要渲染」跳过 byCLI。
@@ -51,14 +58,14 @@ description: Use when the goal is to READ or LOOK UP something on the public int
     采集桥接，再委派 `wecomcli` 或 `fws`。路由器只完成该交接与被动诊断，不得作为公共互联网任务交给 `bycli`，
     不得自行执行企业 CLI、管理采集产物、凭据或后处理。
 
-## Agent Reach 官方主体（v1.5.0）
+## Agent Reach ByClaw 适配主体（基于 v1.5.0）
 
 13 平台、多后端。**本 skill 存在时必须用它访问这些平台，不要自己发明方案。**
 
 ## 常驻规则（全程适用）
 
-1. **动手前先体检**：多后端平台（小红书/Reddit/B站/Twitter）先跑
-   `agent-reach doctor --json`，按各平台 `active_backend` 字段选命令组。
+1. **动手前先体检**：运行 `byclaw-capability-doctor`，只按 `effectiveBackend` 选择命令组；不得直接运行或依据
+   `agent-reach doctor --json` 的网页后端建议。
 2. **声明你在用什么**：开始干活前说一句「使用 agent-reach 的 X 平台 / Y 后端」。
 3. **失败按 references 里的重试链处理**，不要瞎猜命令。
 4. **全网调研类任务**：组合多平台（Exa 搜索 + Twitter/Reddit 看讨论 + 小红书/B站看中文场景），并行收集再汇总。
@@ -85,8 +92,8 @@ description: Use when the goal is to READ or LOOK UP something on the public int
 # Exa 网页搜索
 mcporter call 'exa.web_search_exa(query: "query", numResults: 5)'
 
-# 通用网页阅读
-curl -s "https://r.jina.ai/URL"
+# 通用网页阅读：进入 byCLI skill 后动态发现 Adapter
+bycli list -f json
 
 # GitHub 搜索
 gh search repos "query" --sort stars --limit 10
@@ -94,32 +101,24 @@ gh search repos "query" --sort stars --limit 10
 # YouTube 字幕（注意：B站不要用 yt-dlp，见 video.md）
 yt-dlp --write-sub --skip-download -o "/tmp/%(id)s" "URL"
 
-# V2EX 热门
-curl -s "https://www.v2ex.com/api/topics/hot.json" -H "User-Agent: agent-reach/1.0"
+# V2EX：进入 byCLI skill 后动态发现 v2ex Adapter
+bycli list -f json
 
-# B站搜索（bili-cli，无需登录）
-bili search "query" --type video -n 5
+# 视频字幕等不打开具体网页的媒体任务见 references/video.md
 ```
 
-## 需登录态的平台（按 doctor 的 active_backend 选命令）
+## 需登录态的平台
 
 ```bash
-# Twitter 搜索（twitter-cli 首选；失败重试链见 social.md）
-twitter search "query" -n 10
-
-# Reddit（无零配置路径：OpenCLI 或 rdt-cli，必须登录态）
-opencli reddit search "query" -f yaml   # 桌面
-rdt search "query" --limit 10            # 存量/服务器
-
-# 小红书（桌面首选 OpenCLI）
-opencli xiaohongshu search "query" -f yaml
+# Twitter、Reddit、小红书和其他网站：统一进入 byCLI skill 动态发现 Adapter
+bycli list -f json
 ```
 
 ## 环境检查
 
 ```bash
-# 检查可用 channel 与每个平台当前激活的后端
-agent-reach doctor --json
+# 检查可用 channel 与 ByClaw 生效后端
+byclaw-capability-doctor
 ```
 
 ## 工作区规则
@@ -134,7 +133,7 @@ agent-reach doctor --json
 - [社交媒体](references/social.md) — 小红书, Twitter, B站, V2EX, Reddit（多后端命令组）
 - [职场招聘](references/career.md) — LinkedIn
 - [开发工具](references/dev.md) — GitHub CLI
-- [网页阅读](references/web.md) — Jina Reader, RSS
+- [网页阅读](references/web.md) — byCLI, RSS
 - [视频播客](references/video.md) — YouTube, B站, 小宇宙
 
 ## 配置渠道

@@ -1,22 +1,43 @@
-import { chatModeMap, IChatModeType } from '@/constants/query';
-import { ConfigProvider, Popover, PopoverProps } from 'antd';
-import { TooltipRef } from 'antd/es/tooltip';
+import { chatModeMap } from '@/constants/query';
+import type { IChatModeType } from '@/constants/query';
+import { ConfigProvider, Popover } from 'antd';
+import type { PopoverProps } from 'antd';
+import type { TooltipRef } from 'antd/es/tooltip';
 import classNames from 'classnames';
 import React, { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import styles from './index.module.less';
 import ResourceTabs from './resourceTabsCompact';
 import { ResourceType } from '../utils/constants';
-import { IResourceType } from '../types';
+import type { IResourceType } from '../types';
 import EmployeeList from '@/layout/sider/components/EmployeeList';
 import useTracker from '@/hooks/useTracker';
-import { IAgentCache } from '@/typescript/agent';
+import type { IAgentCache } from '@/typescript/agent';
 import AntdIcon from '@/components/AntdIcon';
 import { useIntl, useSelector } from '@umijs/max';
 import type { IState as UseEmployeesIState } from '@/models/useEmployees.ts';
 import { getAgentChatAvatar } from '@/utils/agent';
 import { ResourceTypeMap } from '@/constants/resource';
 
-const MentionPopover = ({
+interface MentionPopoverProps {
+  type?: '@' | '#';
+  onSelect: (item: any, type: IResourceType) => void;
+  popoverPos?: React.CSSProperties;
+  onClose: () => void;
+  chatMode?: IChatModeType;
+  inputText?: string;
+  agentId?: string;
+  sessionId?: string;
+
+  /** # 引用可用的数字员工 ID，使用逗号分隔。 */
+  resourceAgentIds?: string;
+
+  /** 输入框中已经 @ 的数字员工标识，候选列表需要排除。 */
+  excludedAgentIds?: string[];
+  children?: React.ReactNode;
+  placement?: PopoverProps['placement'];
+}
+
+const MentionPopover: React.FC<MentionPopoverProps> = ({
   type,
   onSelect,
   popoverPos,
@@ -26,20 +47,9 @@ const MentionPopover = ({
   agentId,
   sessionId,
   resourceAgentIds,
+  excludedAgentIds,
   children,
   placement,
-}: {
-  type?: '@' | '#';
-  onSelect: (item: any, type: IResourceType) => void;
-  popoverPos?: React.CSSProperties;
-  onClose: () => void;
-  chatMode?: IChatModeType;
-  inputText?: string;
-  agentId?: string;
-  sessionId?: string;
-  resourceAgentIds?: string; // 用逗号分隔
-  children?: React.ReactNode;
-  placement?: PopoverProps['placement'];
 }) => {
   const { trackerEmployeeClick } = useTracker();
   const intl = useIntl();
@@ -111,7 +121,7 @@ const MentionPopover = ({
             resourceId: item.resourceId,
             resourceName: item.resourceName,
             resourceCode: item.resourceCode,
-            resourceBizType: item.resourceBizType || ResourceTypeMap.file,
+            resourceBizType: item.resourceBizType || ResourceTypeMap.commonFile,
             agentId: currentAgent.agentId,
             agentName: currentAgent.name,
             agentType: currentAgent.agentType,
@@ -235,6 +245,7 @@ const MentionPopover = ({
                           <EmployeeList
                             chatMode={chatMode}
                             keyword={inputText}
+                            excludedAgentIds={excludedAgentIds}
                             onSelect={onSelectAtMention}
                             renderActionIcon={renderActionIcon}
                           />

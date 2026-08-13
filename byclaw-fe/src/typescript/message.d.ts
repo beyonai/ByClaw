@@ -31,6 +31,10 @@ export type IMessageListItem = {
   uuid: string;
   orginContent: string;
   resumeMessageId?: string;
+  /** Cross-channel rendering segment sequence, assigned by the v2 stream aggregator. */
+  seq?: number;
+  /** Original stream event name, used to keep coalescing channel-aware. */
+  eventType?: string;
 };
 
 export type IResComIdsListItem = {

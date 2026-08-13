@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.devloop;
 
 import java.io.ByteArrayOutputStream;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -26,10 +27,12 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
+import com.iwhalecloud.byai.manager.application.service.project.ProjectInitService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiPromptService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DefaultAgentService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
+import com.iwhalecloud.byai.manager.dto.project.ProjectInitRequest;
 import com.iwhalecloud.byai.manager.entity.devloop.DefaultAgent;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
@@ -54,8 +57,20 @@ public class WorkspaceInitService {
 
     private static final Logger log = LoggerFactory.getLogger(WorkspaceInitService.class);
 
-    /** 项目初始化状态机：pending 待初始化 → initializing 初始化中 → ready 已就绪；失败/超时退回 pending 让用户可重发。 */
+    /**
+     * 项目初始化状态机：pending 待初始化 → initializing 服务端建工作区中（ProjectInitService） → initialized 工作区已建好
+     * → ready 已就绪（定时任务读会话状态文件报 completed）。
+     *
+     * <p>下发架构员工聊天不换状态，仍是 initialized，只多一个 init_session_id：工作区已经建好这个事实没有变，
+     * 状态往回跳到 initializing 会让用户以为初始化退回重来了。「员工在聊」与「还没开始聊」用 init_session_id 区分——
+     * 有会话就是在聊（前端转圈、定时任务收口），会话为 0 就是等用户点「去跟架构聊天」。
+     *
+     * <p>两段分开是因为失败恢复动作不同：工作区没建起来要重跑克隆/技能包，聊天没聊完只需重新下发员工。
+     * 所以聊天超时只清会话退回可重发，不退到 pending，不让用户白跑一遍克隆。
+     */
     static final String INIT_STATUS_PENDING = "pending";
+
+    static final String INIT_STATUS_INITIALIZED = "initialized";
 
     static final String INIT_STATUS_INITIALIZING = "initializing";
 
@@ -109,25 +124,68 @@ public class WorkspaceInitService {
     @Autowired
     private DevloopTaskStateReader taskStateReader;
 
+    /** 第一段的克隆/技能包/提交推送仍走原有服务端流程，这里只负责落配置与状态机衔接。 */
+    @Autowired
+    private ProjectInitService projectInitService;
+
     /**
-     * 触发工作区初始化：解析架构助理 → 建会话 → 拼提示词 → 置 initializing 并冻结会话ID → 异步下发。
+     * 第一段：建工作区。落建索引配置后交给 {@link ProjectInitService} 在服务端克隆/装技能包/提交推送，成功即置 initialized。
      *
-     * <p>幂等由「重发即覆盖」保证：initializing 态再次调用会换成新会话，用于员工卡死时人工重试；旧会话的状态文件不再被读。
+     * <p>建索引配置在这一段落库而不是随聊天入参传：第二段「去跟架构聊天」只有 projectId，提示词里的技能包段要从项目行读回来。
      *
      * @param projectId 研发项目ID
      * @param buildIndex 是否建代码索引
      * @param skillPackages 建索引所需技能包，前端传数组，落库前拼成逗号分隔
+     */
+    public void initWorkspace(Long projectId, boolean buildIndex, Object skillPackages) {
+        Project project = requireProject(projectId);
+        requireDevelopWorkspace(project);
+        String indexSkills = buildIndex ? joinSkillPackages(skillPackages) : "";
+
+        Project update = new Project();
+        update.setProjectId(projectId);
+        update.setBuildIndex(buildIndex ? Constants.YES_VALUE_Y : Constants.NO_VALUE_N);
+        // 技能包仅建索引时保留；updateById 跳过 null，故清空要写空串而不是 null。
+        update.setIndexSkills(indexSkills);
+        update.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        update.setUpdateTime(new Date());
+        projectService.update(update);
+
+        ProjectInitRequest request = new ProjectInitRequest();
+        request.setProjectId(projectId);
+        request.setSkillPackages(buildIndex ? splitIndexSkills(indexSkills) : List.of());
+        try {
+            projectInitService.initProject(request);
+        }
+        catch (RuntimeException e) {
+            // 失败必须退回 pending：initProject 内部已把状态推到 initializing 且会话ID为 0，而 sweep 只捞「有会话」的项目，
+            // 不退回就没人再收口，项目永久停在 initializing，前端一直禁用建需求/启动任务。
+            applyInitResult(project, INIT_STATUS_PENDING,
+                StringUtils.defaultIfBlank(e.getMessage(), "工作区初始化失败，请重新发起初始化"));
+            throw e;
+        }
+    }
+
+    /**
+     * 第二段：下发架构员工聊天。解析架构助理 → 建会话 → 拼提示词 → 置 initializing 并冻结会话ID → 异步下发。
+     *
+     * <p>要求 initialized 起步：提示词让员工在工作区里补骨架，工作区还没建好时聊天只会白跑。ready 也放行，
+     * 用于已就绪项目回去找架构员工继续聊。
+     *
+     * <p>不改状态，只换会话ID：状态往回跳会让用户以为初始化退回重来了。幂等由「重发即覆盖」保证——
+     * 已有会话时再次调用换成新会话，用于员工卡死时人工重试；旧会话的状态文件不再被读。
+     *
+     * @param projectId 研发项目ID
      * @return 本次初始化的会话与架构员工
      */
-    public WorkspaceInitStarted startWorkspaceInit(Long projectId, boolean buildIndex, Object skillPackages) {
+    public WorkspaceInitStarted startArchitectChat(Long projectId) {
         Project project = requireProject(projectId);
-        if (!PROJECT_TYPE_DEVELOP.equals(project.getProjectType())) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.init.developOnly");
+        ProjectRepo workspaceRepo = requireDevelopWorkspace(project);
+        if (!INIT_STATUS_INITIALIZED.equals(project.getInitStatus())
+            && !INIT_STATUS_READY.equals(project.getInitStatus())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.init.workspaceNotInitialized");
         }
-        ProjectRepo workspaceRepo = findWorkspaceRepo(projectId);
-        if (workspaceRepo == null) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.init.workspaceRepoRequired");
-        }
+        boolean buildIndex = Constants.YES_VALUE_Y.equals(project.getBuildIndex());
         DefaultAgent defaultAgent = defaultAgentService.resolveForProject(projectId);
         Long architectAgentId = parseArchitectAgentId(projectId, defaultAgent);
         if (architectAgentId == null) {
@@ -148,15 +206,15 @@ public class WorkspaceInitService {
         chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
         assistantChatService.createGroupChatSession(chatDto);
         Long sessionId = chatDto.getSessionId();
-        chatDto.setChatContent(buildInitPrompt(project, workspaceRepo, sessionId, buildIndex, skillPackages));
+        // 技能包取项目行里第一段落的那份，不再由聊天入参带：入参只有 projectId。
+        chatDto.setChatContent(buildInitPrompt(project, workspaceRepo, sessionId, buildIndex,
+            splitIndexSkills(project.getIndexSkills())));
 
+        // 状态保持 initialized，只冻结会话ID：工作区已经建好这件事没变，往回跳 initializing 用户会以为初始化退回重来了。
+        // 「在聊」由 init_session_id > 0 表达，定时任务据此收口。
         Project update = new Project();
         update.setProjectId(projectId);
-        update.setInitStatus(INIT_STATUS_INITIALIZING);
         update.setInitSessionId(sessionId);
-        update.setBuildIndex(buildIndex ? Constants.YES_VALUE_Y : Constants.NO_VALUE_N);
-        // 技能包仅建索引时保留；updateById 跳过 null，故清空要写空串而不是 null。
-        update.setIndexSkills(buildIndex ? joinSkillPackages(skillPackages) : "");
         update.setInitFailReason("");
         update.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         update.setUpdateTime(new Date());
@@ -184,15 +242,17 @@ public class WorkspaceInitService {
     }
 
     /**
-     * 轮询所有 initializing 项目：状态文件报完成置 ready，超时退回 pending 并记原因，其余留待下轮。
+     * 轮询所有「架构员工在聊」的项目：状态文件报完成置 ready，超时清会话让用户可重发，其余留待下轮。
      *
-     * <p>只查 develop + initializing + 有会话ID 的项目，量级等于「正在初始化的研发项目数」，通常个位数；每个项目一次定点文件读。
+     * <p>捞取条件是 initialized + 会话ID > 0，不是某个「进行中」状态：下发聊天不换状态，在聊与没在聊只由会话ID区分。
+     * 量级等于「正在初始化的研发项目数」，通常个位数；每个项目一次定点文件读。
      */
     public void sweepInitializingProjects() {
         List<Project> initializing = projectMapper.selectList(new LambdaQueryWrapper<Project>()
             .eq(Project::getProjectType, PROJECT_TYPE_DEVELOP)
-            .eq(Project::getInitStatus, INIT_STATUS_INITIALIZING)
-            .isNotNull(Project::getInitSessionId)
+            .eq(Project::getInitStatus, INIT_STATUS_INITIALIZED)
+            // 会话ID要 > 0：没下发过聊天与已收口的都写 0（updateById 跳过 null），isNotNull 会把它们捞回来读不存在的会话。
+            .gt(Project::getInitSessionId, 0L)
             .eq(Project::getDeleteFlag, DeleteFlag.NORMAL));
         for (Project project : initializing) {
             try {
@@ -217,7 +277,9 @@ public class WorkspaceInitService {
         // 时钟一被推后就等于永不超时，项目卡死在 initializing。会话建完即不再变，是这次初始化的真实起点。
         long startedMs = resolveInitStartedMs(project);
         if (System.currentTimeMillis() - startedMs >= INIT_TIMEOUT_MS) {
-            applyInitResult(project, INIT_STATUS_PENDING, "架构数字员工初始化超时未完成，请重新发起初始化");
+            // 留在 initialized 只清会话：工作区已经由第一段建好了，这里只是聊天没聊完，重发聊天即可，不必重跑克隆。
+            // 会话清成 0 后本轮不再被捞，前端也从「在聊」回到可点「去跟架构聊天」。
+            applyInitResult(project, INIT_STATUS_INITIALIZED, "架构数字员工初始化超时未完成，请重新发起「去跟架构聊天」");
         }
     }
 
@@ -231,13 +293,13 @@ public class WorkspaceInitService {
         return updateTime != null ? updateTime.getTime() : System.currentTimeMillis();
     }
 
-    /** 落初始化终态。退回 pending 时清掉会话ID：那条会话已判超时，下轮不该再被读。 */
+    /** 落初始化终态。非 ready 收口要清掉会话ID：那条会话已判超时，下轮 sweep 不该再读到它。 */
     private void applyInitResult(Project project, String initStatus, String failReason) {
         Project update = new Project();
         update.setProjectId(project.getProjectId());
         update.setInitStatus(initStatus);
         update.setInitFailReason(failReason);
-        if (INIT_STATUS_PENDING.equals(initStatus)) {
+        if (!INIT_STATUS_READY.equals(initStatus)) {
             // updateById 跳过 null，清列只能靠 0；0 与真实会话ID不冲突（会话ID取自序列，恒 > 0）。
             update.setInitSessionId(0L);
         }
@@ -394,6 +456,26 @@ public class WorkspaceInitService {
     }
 
     /** 技能包来自 HTTP Map 入参，类型不可信；非数组或空元素一律按未选处理，落库统一逗号分隔。 */
+    /** 两段初始化的公共前置：只有带 workspace 仓库的研发项目能初始化。返回那个仓库，第二段拼提示词要用。 */
+    private ProjectRepo requireDevelopWorkspace(Project project) {
+        if (!PROJECT_TYPE_DEVELOP.equals(project.getProjectType())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.init.developOnly");
+        }
+        ProjectRepo workspaceRepo = findWorkspaceRepo(project.getProjectId());
+        if (workspaceRepo == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.init.workspaceRepoRequired");
+        }
+        return workspaceRepo;
+    }
+
+    /** 落库的技能包是逗号分隔串，提示词那侧按 List 处理，这里还原回去。 */
+    private List<String> splitIndexSkills(String indexSkills) {
+        if (StringUtils.isBlank(indexSkills)) {
+            return List.of();
+        }
+        return Arrays.stream(indexSkills.split(",")).map(String::trim).filter(item -> !item.isEmpty()).toList();
+    }
+
     private String joinSkillPackages(Object raw) {
         if (!(raw instanceof List<?> list) || list.isEmpty()) {
             return "";

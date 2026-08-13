@@ -418,6 +418,14 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
               menu={{
                 items: [
                   {
+                    key: 'quote',
+                    label: (
+                      <div className={employeeStyles.dropdownMenuItem}>
+                        {intl.formatMessage({ id: 'common.quote' })}
+                      </div>
+                    ),
+                  },
+                  {
                     key: 'detail',
                     label: (
                       <div className={employeeStyles.dropdownMenuItem}>
@@ -437,6 +445,10 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
                 onClick: ({ key, domEvent }) => {
                   domEvent.preventDefault();
                   domEvent.stopPropagation();
+                  if (key === 'quote') {
+                    handleQuoteKnowledgeBase(item);
+                    return;
+                  }
                   if (key === 'share') {
                     void handleShare(item);
                     return;

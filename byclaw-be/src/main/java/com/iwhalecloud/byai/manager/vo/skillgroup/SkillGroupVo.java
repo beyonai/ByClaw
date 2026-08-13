@@ -40,5 +40,7 @@ public class SkillGroupVo {
 
     private Long memberCount;
 
+    private Boolean installedByGroup;
+
     private List<SkillGroupMemberVo> members = new ArrayList<>();
 }

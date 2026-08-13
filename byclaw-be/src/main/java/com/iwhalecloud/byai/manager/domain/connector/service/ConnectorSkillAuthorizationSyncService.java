@@ -19,6 +19,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialVerifier;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialVerifierRegistry;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState;
 import com.iwhalecloud.byai.manager.domain.connector.manifest.InvalidConnectorManifestException;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorSkillAuthorizationSyncDto;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
@@ -109,7 +110,9 @@ public class ConnectorSkillAuthorizationSyncService {
 
         try (VerificationAdmission ignored = acquire(numericUserId, connector.getConnectorId())) {
             AuthorizationStatusResult verification = verify(verifier, numericUserId, connector);
-            if (verification == null || verification.status() != AuthorizationStatus.CONNECTED) {
+            if (verification == null
+                    || verification.status() != AuthorizationStatus.CONNECTED
+                    || verification.credentialState() == CredentialState.REAUTH_REQUIRED) {
                 throw verificationFailure(verification);
             }
             try {
@@ -138,7 +141,7 @@ public class ConnectorSkillAuthorizationSyncService {
 
     private ConnectorSkillAuthorizationSyncException verificationFailure(AuthorizationStatusResult result) {
         String errorCode = result == null ? null : result.errorCode();
-        if (!PUBLIC_VERIFICATION_ERRORS.contains(errorCode)) {
+        if (errorCode == null || !PUBLIC_VERIFICATION_ERRORS.contains(errorCode)) {
             errorCode = "CONNECTOR_CREDENTIAL_INVALID";
         }
         boolean retryable = "CONNECTOR_VERIFICATION_TIMEOUT".equals(errorCode)

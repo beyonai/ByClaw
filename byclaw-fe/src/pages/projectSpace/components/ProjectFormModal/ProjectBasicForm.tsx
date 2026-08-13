@@ -612,7 +612,11 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
           >
             <Input maxLength={100} showCount placeholder={formT('placeholder.projectName')} />
           </Form.Item>
-          <Form.Item name="description" label={formT('field.description')}>
+          <Form.Item
+            name="description"
+            label={formT('field.description')}
+            rules={[{ max: 500, message: formT('validation.descriptionMaxLength') }]}
+          >
             {/* 项目描述限制 500 字，默认展示两行，避免新建项目弹窗被描述字段撑高。 */}
             <Input.TextArea rows={2} maxLength={500} showCount placeholder={formT('placeholder.description')} />
           </Form.Item>

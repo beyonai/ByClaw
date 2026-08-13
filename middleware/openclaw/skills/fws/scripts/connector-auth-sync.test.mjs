@@ -9,7 +9,17 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "connector-auth-sync.mjs");
+const SKILL = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "SKILL.md");
 const SECRET_TOKEN = "fixture-secret-beyond-token";
+
+test("requires conditional best-effort metadata sync after a lazy user refresh", () => {
+  const skill = fs.readFileSync(SKILL, "utf8");
+
+  assert.match(skill, /业务命令前.*auth status --json.*不得增加 `--verify`/s);
+  assert.match(skill, /仅当.*needs_refresh.*user 身份业务命令成功后.*connector-auth-sync\.mjs/s);
+  assert.match(skill, /回写失败不得改变已经成功的飞书业务结果/);
+  assert.match(skill, /bot 身份.*不执行该业务后回写/);
+});
 
 function runHelper(args, env) {
   return new Promise((resolve, reject) => {

@@ -1,0 +1,13 @@
+{
+  "sourceTimeoutMs": 8000,
+  "totalTimeoutMs": 20000,
+  "cacheTtlMs": 1800000,
+  "sources": [
+    { "id": "clawhub", "kinds": ["skill"], "enabled": true },
+    { "id": "skills-sh", "kinds": ["skill"], "enabled": true },
+    { "id": "findskills-cn", "kinds": ["skill"], "enabled": true },
+    { "id": "smithery", "kinds": ["skill", "mcp"], "enabled": true },
+    { "id": "glama", "kinds": ["mcp"], "enabled": true },
+    { "id": "github", "kinds": ["skill"], "enabled": true, "unverified": true }
+  ]
+}

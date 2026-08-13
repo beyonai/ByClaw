@@ -119,20 +119,34 @@ public class ProjectController {
     }
 
     /**
-     * 触发研发项目工作区初始化：下发架构数字员工在沙箱内完成克隆/骨架/技能包/推送。
+     * 第一段：初始化研发项目工作区。服务端克隆工作区仓库、挂子模块、装技能包并提交推送，成功后项目置 initialized。
      *
-     * <p>接口只负责下发与置 initializing，真正的完成由 DevloopWorkspaceInitJob 读会话状态文件判定后置 ready。
+     * <p>同步执行：前端拿到成功响应即代表工作区已建好，随后展示「去跟架构聊天」按钮走第二段。
      *
      * @param params 含 projectId（必填）、buildIndex（是否建索引）、skillPackages（技能包数组）
-     * @return 本次初始化的会话ID，前端可据此跳进架构员工聊天
      */
     @PostMapping("/init/start")
-    public ResponseUtil<Map<String, Object>> initProject(@RequestBody Map<String, Object> params) {
+    public ResponseUtil<Void> initProject(@RequestBody Map<String, Object> params) {
         Long projectId = MapParamUtil.getLongValue(params, "projectId");
         boolean buildIndex = Boolean.TRUE.equals(params.get("buildIndex"))
             || "Y".equalsIgnoreCase(MapParamUtil.getStringValue(params, "buildIndex"));
-        WorkspaceInitService.WorkspaceInitStarted started = workspaceInitService.startWorkspaceInit(projectId,
-            buildIndex, params.get("skillPackages"));
+        workspaceInitService.initWorkspace(projectId, buildIndex, params.get("skillPackages"));
+        return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 第二段：下发架构数字员工聊天，把工作区骨架聊完，项目置 initializing。
+     *
+     * <p>接口只负责下发与置 initializing，真正的完成由 DevloopWorkspaceInitJob 读会话状态文件判定后置 ready。
+     * 建索引配置不再随入参传，取第一段落在项目行上的那份。
+     *
+     * @param params 含 projectId（必填）
+     * @return 本次初始化的会话与架构员工，前端据此跳进聊天并默认 @ 到该员工
+     */
+    @PostMapping("/init/chat")
+    public ResponseUtil<Map<String, Object>> startArchitectChat(@RequestBody Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        WorkspaceInitService.WorkspaceInitStarted started = workspaceInitService.startArchitectChat(projectId);
         // 架构员工与会话一起回：项目维度员工不在前端员工列表里，只给会话ID跳过去 @ 会兜底成「AI 助手」。
         // ID 转字符串：雪花 ID 超过 JS 安全整数，给数字前端会截断。
         Map<String, Object> result = new HashMap<>();

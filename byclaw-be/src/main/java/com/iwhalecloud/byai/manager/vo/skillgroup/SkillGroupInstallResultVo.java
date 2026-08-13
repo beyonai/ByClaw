@@ -11,6 +11,13 @@ public class SkillGroupInstallResultVo {
 
     private Boolean confirmationRequired;
 
+    private Boolean installedByGroup;
+
+    private SkillGroupUninstallPreviewVo uninstallPreview;
+
+    @JsonSerialize(contentUsing = ToStringSerializer.class)
+    private List<Long> affectedOtherGroupIds = new ArrayList<>();
+
     @JsonSerialize(contentUsing = ToStringSerializer.class)
     private List<Long> installedSkillIds = new ArrayList<>();
 

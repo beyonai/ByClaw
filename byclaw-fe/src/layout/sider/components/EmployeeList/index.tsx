@@ -36,7 +36,17 @@ export interface EmployeeListProps {
   onSelect?: (employee: any) => void;
   keyword?: string;
   renderActionIcon?: (employee: IAgentCache) => React.ReactNode;
+
+  /** 输入框中已 @ 的数字员工标识，候选列表不再重复展示。 */
+  excludedAgentIds?: string[];
 }
+
+export const isExcludedEmployee = (employee: IAgentCache, excludedAgentIds: string[] = []) => {
+  const excludedIds = new Set(excludedAgentIds.filter(Boolean).map((item) => `${item}`));
+  return [employee.agentId, employee.resourceId, employee.resourceCode, employee.id]
+    .filter(Boolean)
+    .some((item) => excludedIds.has(`${item}`));
+};
 
 const getSelectItems = (intl: ReturnType<typeof useIntl>) => [
   {
