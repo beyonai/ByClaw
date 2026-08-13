@@ -15,7 +15,7 @@ I/O 协议：stdin JSON → stdout JSON
         "entity_code": "travel_application",
         "actions": [
             {
-                "action_code": "submit_application",
+                "action_code": "travel_application_submit",
                 "action_name": "提交申请",
                 "action_desc": "...",
                 "permission_roles": ["employee"]

@@ -7,13 +7,13 @@ I/O 协议：stdin JSON → stdout JSON
     {
         "workspace_name": "travel_reimbursement",   # 必填
         "entity_code":    "travel_application",     # 必填
-        "action_code":    "submit_application"      # 必填
+        "action_code":    "travel_application_submit"      # 必填
     }
 
 出参（stdout JSON）:
     {
         "ok":          true,
-        "action_code": "submit_application",
+        "action_code": "travel_application_submit",
         "action_name": "提交申请",
         "action_desc": "...",
         "script":      "def execute(params: dict) -> dict:\n    ...",
