@@ -227,6 +227,7 @@ async function ensureWorker() {
 // ── Worker sidecar ────────────────────────────────────
 function startWorker() {
   if (workerProc && workerProc.exitCode === null) return;
+  lastSpawnAt = Date.now();
   workerManaged = true;
   console.log("[desktop] starting local agent worker…");
   // 纯 JS 启动器（worker-launcher.mjs）：配置派生 env + node 跑 openclaw CLI（跨平台）
@@ -384,6 +385,15 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+
+app.on("window-all-closed", () => {
+  // 托盘驻留，不退出
+});
+
+app.on("before-quit", () => {
+  isQuitting = true;
+});
+
 
 app.on("window-all-closed", () => {
   // 托盘驻留，不退出
