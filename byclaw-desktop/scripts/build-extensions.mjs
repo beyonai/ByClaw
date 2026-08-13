@@ -67,6 +67,10 @@ function applyPatch(targetFile, patchText) {
   return { applied: false, reason: "无变更" };
 }
 
+// 删除旧产物：旧版脚本（bash）部署的目录可能是只读（chmod -R a-w），先放开写权限
+if (fs.existsSync(outDir)) {
+  chmodWritableRecursive(outDir);
+}
 fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(outDir, { recursive: true });
 
