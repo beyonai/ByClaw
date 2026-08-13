@@ -32,7 +32,8 @@ function run(cmd, args, opts = {}) {
 }
 
 console.log(">>> 构建 byclaw-fe...");
-run("pnpm", ["install", "--no-audit", "--no-fund"]);
+// 注意：--no-audit/--no-fund 是 npm 的 flag，pnpm 不支持（会报 Unknown options）
+run("pnpm", ["install"]);
 run("pnpm", ["run", "build"]);
 
 console.log(`>>> 拷贝产物 -> ${outDir}`);
