@@ -185,7 +185,7 @@ instance.interceptors.request.use(
       const data = config.data || {};
       const params = config.params || {};
 
-      const signatureHeaders = generateSignature(method, method === 'POST' ? data : params);
+      const signatureHeaders = generateSignature(method, ['POST', 'PUT'].includes(method) ? data : params);
       Object.assign(config.headers, signatureHeaders);
     } catch (error) {
       console.error('接口签名失败:', error);
@@ -379,9 +379,9 @@ export function POST<T = undefined>(url: string, data = {}, config: ConfigType =
 }
 
 export function PUT<T = undefined>(url: string, data = {}, config: ConfigType = {}): Promise<T> {
-  return request(url, data, config, 'POST');
+  return request(url, data, config, 'PUT');
 }
 
 export function DELETE<T = undefined>(url: string, data = {}, config: ConfigType = {}): Promise<T> {
-  return request(url, data, config, 'POST');
+  return request(url, data, config, 'DELETE');
 }

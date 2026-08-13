@@ -22,6 +22,7 @@ import utc from 'dayjs/plugin/utc';
 import { useSelector } from '@umijs/max';
 
 import AntdIcon from '@/components/AntdIcon';
+import UserMcpManager from '@/components/QueryInput/components/UserMcpManager';
 import {
   getConnectorAuthorization,
   cancelConnectorAuthorization,
@@ -269,7 +270,10 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
     if (!canAuthorize) closeLocalAuthorization();
   }, [canAuthorize, closeLocalAuthorization]);
 
-  const enabledConnectors = useMemo(() => connectors.filter((connector) => connector.enableFlag === 'Y'), [connectors]);
+  const enabledConnectors = useMemo(
+    () => connectors.filter((connector) => connector.code !== 'user-mcp' && connector.enableFlag === 'Y'),
+    [connectors]
+  );
   const previewConnectors = useMemo(() => connectors.slice(0, 3), [connectors]);
 
   const loadAuthorizedConnectors = useCallback(
@@ -547,6 +551,20 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   if (!CONNECTOR_ENTRY_VISIBLE || !canAuthorize) return null;
 
   const renderConnectorAction = (connector: Connector) => {
+    if (connector.code === 'user-mcp') {
+      return (
+        <Button
+          type="text"
+          style={{ color: 'var(--beyond-color-primary)' }}
+          onClick={() => {
+            setSettingsOpen(false);
+            setConfigurationOpen(true);
+          }}
+        >
+          管理
+        </Button>
+      );
+    }
     if (catalogRefreshing) {
       return (
         <span aria-label={`${connector.name}状态刷新中`} className={styles.refreshingIcon} role="status">
@@ -822,7 +840,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
         )}
       </Modal>
 
-      {/* 完整配置面板预留给后续连接器管理能力。 */}
+      {/* 自定义 MCP 作为连接器模板嵌套管理多个用户实例，不再使用独立页面。 */}
       <Drawer
         className={styles.configurationDrawer}
         open={configurationOpen}
@@ -832,9 +850,17 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
       >
         <Spin spinning={loadingConnectors}>
           <div className={styles.configurationGrid}>
-            {connectors.length
-              ? connectors.map((connector) => renderConnectorItem(connector, true))
-              : !loadingConnectors && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无连接器" />}
+            {connectors.map((connector) => (
+              <React.Fragment key={connector.id}>
+                {renderConnectorItem(connector, true)}
+                {connector.code === 'user-mcp' && (
+                  <UserMcpManager active={configurationOpen} connectorId={connector.id} />
+                )}
+              </React.Fragment>
+            ))}
+            {!connectors.length && !loadingConnectors && (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无连接器" />
+            )}
           </div>
         </Spin>
       </Drawer>

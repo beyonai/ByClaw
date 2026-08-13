@@ -33,6 +33,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.RedisAuthoriz
 import com.iwhalecloud.byai.manager.domain.connector.manifest.InvalidConnectorManifestException;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorAuthorizationDto;
 import com.iwhalecloud.byai.manager.dto.connector.StartConnectorAuthorizationRequest;
+import com.iwhalecloud.byai.manager.domain.usermcp.UserMcpInstanceAuthorizationService;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorAuthMapper;
@@ -64,6 +65,9 @@ public class ConnectorAuthorizationService {
     private final ConnectorConnectionStateService connectionStateService;
     private final AuthorizationQrCodeEncoder qrCodeEncoder;
     private final ConnectorManifestCommandResolver manifestCommandResolver;
+
+    @Autowired(required = false)
+    private UserMcpInstanceAuthorizationService userMcpInstanceAuthorizationService;
 
     @Autowired
     public ConnectorAuthorizationService(
@@ -130,6 +134,24 @@ public class ConnectorAuthorizationService {
         if (connector == null || !"00A".equals(connector.getStatusCd())) {
             return failed(null, request.getConnectorId(), CONNECTOR_NOT_FOUND, "连接器不存在或已失效", null);
         }
+        if ("INSTANCE_DEFINED".equals(connector.getAuthMode())) {
+            if (userMcpInstanceAuthorizationService == null || !"user-mcp".equals(connector.getConnectorCode())) {
+                return failed(null, connector.getConnectorId(), PROVIDER_NOT_CONFIGURED,
+                    "MCP实例授权服务未配置", null);
+            }
+            try {
+                userMcpInstanceAuthorizationService.authorize(
+                    request.getResourceId(), userId, connector, request.getCredentialInput());
+                return connected(UUID.randomUUID().toString(), connector.getConnectorId(), null);
+            } catch (SecurityException e) {
+                return failed(null, connector.getConnectorId(), "MCP_RESOURCE_FORBIDDEN", "MCP资源无访问权限", null);
+            } catch (IllegalArgumentException e) {
+                return failed(null, connector.getConnectorId(), "MCP_CONFIG_INVALID", "MCP配置或凭证无效", null);
+            } catch (RuntimeException e) {
+                return failed(null, connector.getConnectorId(), "MCP_AUTH_REQUIRED", "MCP连接验证失败", null);
+            }
+        }
+        validateRedirectUrl(request.getRedirectUrl());
         if ("NONE".equals(connector.getAuthMode())) {
             try {
                 saveEnabledAuthorization(userId, connector, null, null);
@@ -960,10 +982,13 @@ public class ConnectorAuthorizationService {
         if (request == null || request.getConnectorId() == null) {
             throw new IllegalArgumentException("connectorId不能为空");
         }
-        if (!StringUtils.hasText(request.getRedirectUrl())) {
+    }
+
+    private void validateRedirectUrl(String redirectUrl) {
+        if (!StringUtils.hasText(redirectUrl)) {
             throw new IllegalArgumentException("redirectUrl不能为空");
         }
-        URI redirectUri = URI.create(request.getRedirectUrl());
+        URI redirectUri = URI.create(redirectUrl);
         if (!"http".equalsIgnoreCase(redirectUri.getScheme())
                 && !"https".equalsIgnoreCase(redirectUri.getScheme())) {
             throw new IllegalArgumentException("redirectUrl必须使用HTTP或HTTPS");

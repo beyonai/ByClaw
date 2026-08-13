@@ -84,4 +84,27 @@ class SsResourceServiceTest {
         assertThat(query.getParamNameValuePairs().values())
             .containsExactlyInAnyOrder("BYCLAW", "KG_DOC", "824794494620293");
     }
+
+    @Test
+    void personalMcpCreateChecksCodeWithinOwnerInsteadOfGlobally() {
+        when(sequenceService.nextVal()).thenReturn(1003L);
+        when(ssResourceMapper.selectOne(any())).thenReturn(null);
+        when(ssResourceMapper.insert(any(SsResource.class))).thenReturn(1);
+        SsResource resource = new SsResource();
+        resource.setSystemCode("BYAI");
+        resource.setResourceBizType("MCP");
+        resource.setResourceCode("shared-code");
+        resource.setResourceName("Personal MCP");
+        resource.setOwnerType("personal");
+        resource.setCreateBy(11L);
+
+        service.saveResource(resource);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<QueryWrapper<SsResource>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(ssResourceMapper).selectOne(captor.capture());
+        assertThat(captor.getValue().getSqlSegment()).contains("create_by", "owner_type", "resource_biz_type", "resource_code");
+        assertThat(captor.getValue().getParamNameValuePairs().values())
+            .contains(11L, "personal", "MCP", "shared-code");
+    }
 }

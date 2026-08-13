@@ -122,7 +122,9 @@ CREATE TABLE byai.ss_res_ext_ontology (resource_id bigint, pid character varying
 CREATE TABLE byai.ss_res_ext_test_set (test_set_id bigint, resource_id bigint, batch_id character varying(100), file_id character varying(100), file_name character varying(100), file_url character varying(500), process_status smallint, fail_reason character varying(1000), test_set_accuracy numeric(5,2), test_set_intent_recognition_accuracy numeric(5,2), create_by character varying(100), create_time timestamp without time zone, update_time timestamp without time zone);
 CREATE TABLE byai.ss_res_ext_tool (resource_id bigint, input_schema text, output_schema text, url character varying(2000), url_ori character varying(2000), method character varying(255), path_schema text, query_schema text, tool_add_type character varying(50), source_content text, target_content text);
 CREATE TABLE byai.ss_res_ext_toolkit (resource_id bigint, headers text,source_content text,target_content text);
-CREATE TABLE byai.ss_res_ext_mcp (resource_id INT8,source_content TEXT,target_content TEXT);
+CREATE TABLE byai.ss_res_ext_mcp (resource_id INT8,source_content TEXT,target_content TEXT,definition_revision BIGINT NOT NULL DEFAULT 1,endpoint_fingerprint VARCHAR(128));
+CREATE TABLE IF NOT EXISTS byai.byai_user_mcp_tool_snapshot (snapshot_id BIGINT NOT NULL PRIMARY KEY,resource_id BIGINT NOT NULL,definition_revision BIGINT NOT NULL,snapshot_version BIGINT NOT NULL,tool_name VARCHAR(255) NOT NULL,description TEXT,input_schema TEXT NOT NULL,schema_hash VARCHAR(128) NOT NULL,risk_level VARCHAR(16) NOT NULL DEFAULT 'UNKNOWN',risk_source VARCHAR(32) NOT NULL DEFAULT 'SYSTEM_DEFAULT',status_cd VARCHAR(3) NOT NULL DEFAULT '00A',create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,CONSTRAINT uk_byai_user_mcp_tool_snapshot UNIQUE (resource_id,snapshot_version,tool_name));
+CREATE INDEX IF NOT EXISTS idx_byai_user_mcp_tool_snapshot_current ON byai.byai_user_mcp_tool_snapshot (resource_id,definition_revision,snapshot_version,status_cd);
 CREATE TABLE byai.ss_res_ext_view (resource_id bigint, mcp_server_url character varying(200), mcp_transfer_type character varying(20), source_content text, target_content text);
 CREATE TABLE byai.ss_res_position_relation (resource_position_rel_id bigint, position_id bigint, resource_id bigint, status smallint, create_by character varying(100), approver character varying(100), on_job_time timestamp without time zone, approval_reason character varying(500), create_time timestamp without time zone, update_by character varying(100), update_time timestamp without time zone);
 CREATE TABLE byai.ss_resource (resource_id bigint, system_code character varying(32), resource_source_pk_id bigint, resource_biz_type character varying(20), resource_type character varying(10), resource_name character varying(300), resource_desc character varying(4000), avatar character varying(1024), sample text, tags text, resource_version_id character varying(20), host_type character varying(10), catalog_id bigint, man_org_id bigint, man_user_id character varying(500), index_list text, create_by bigint, create_time timestamp without time zone, update_by bigint, update_time timestamp without time zone, com_acct_id bigint, resource_status integer, resource_d_verid bigint, resource_r_verid bigint, resource_code character varying(255), publish_time timestamp without time zone, shelf_time timestamp without time zone, unshelf_time timestamp without time zone, auth_status character varying(10), publish_portal smallint, parent_resource_id bigint DEFAULT (-1), publish_type character varying(10), owner_type character varying(20), impl_type character varying(20), worker_agent_type character varying(20) );
@@ -1792,6 +1794,10 @@ CREATE TABLE IF NOT EXISTS byai.byai_connector_auth
     auth_id          BIGINT      NOT NULL PRIMARY KEY,
     user_id          VARCHAR(64) NOT NULL,
     connector_id     BIGINT      NOT NULL,
+    resource_id      BIGINT,
+    instance_key     VARCHAR(160) NOT NULL DEFAULT 'default',
+    definition_revision BIGINT,
+    endpoint_fingerprint VARCHAR(128),
     auth_name        VARCHAR(128),
     auth_mode        VARCHAR(32),
     auth_credential  TEXT,
@@ -1822,15 +1828,26 @@ $$;
 CREATE INDEX IF NOT EXISTS idx_byai_connector_auth_user_connector
     ON byai.byai_connector_auth (user_id, connector_id, status_cd, enable_flag, expire_time);
 
--- 部分唯一索引保证同一用户、同一连接器最多只有一条有效授权记录。
-CREATE UNIQUE INDEX IF NOT EXISTS uk_byai_connector_auth_active_user_connector
-    ON byai.byai_connector_auth (user_id, connector_id)
+-- 部分唯一索引保证同一用户、同一连接器实例最多只有一条有效授权记录。
+CREATE UNIQUE INDEX IF NOT EXISTS uk_byai_connector_auth_active_user_connector_instance
+    ON byai.byai_connector_auth (user_id, connector_id, instance_key)
     WHERE status_cd = '00A';
+
+CREATE INDEX IF NOT EXISTS idx_byai_connector_auth_resource
+    ON byai.byai_connector_auth (resource_id, user_id, status_cd);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_ss_resource_personal_mcp_owner_code
+    ON byai.ss_resource (create_by, resource_biz_type, resource_code)
+    WHERE owner_type = 'personal' AND resource_biz_type = 'MCP' AND resource_status <> 3;
 
 COMMENT ON TABLE byai.byai_connector_auth IS '用户连接器授权绑定记录';
 COMMENT ON COLUMN byai.byai_connector_auth.auth_id IS '主键，Long类型授权记录ID，业务层生成';
 COMMENT ON COLUMN byai.byai_connector_auth.user_id IS '归属用户ID';
 COMMENT ON COLUMN byai.byai_connector_auth.connector_id IS '关联byai_connector_info.connector_id';
+COMMENT ON COLUMN byai.byai_connector_auth.resource_id IS 'MCP资源实例ID；旧连接器为空';
+COMMENT ON COLUMN byai.byai_connector_auth.instance_key IS '实例键；MCP为resource:{resourceId}，旧连接器为default';
+COMMENT ON COLUMN byai.byai_connector_auth.definition_revision IS '授权绑定的MCP定义版本';
+COMMENT ON COLUMN byai.byai_connector_auth.endpoint_fingerprint IS '授权绑定的MCP规范化端点摘要';
 COMMENT ON COLUMN byai.byai_connector_auth.auth_name IS '用户自定义授权账号别名';
 COMMENT ON COLUMN byai.byai_connector_auth.auth_mode IS '授权方式（冗余，与连接器模板保持一致）：NONE、OAUTH2、AK_SK、PASSWORD、TOKEN、DEVICE_FLOW、CLI_INIT，允许为空';
 COMMENT ON COLUMN byai.byai_connector_auth.auth_credential IS '加密后的授权凭证JSON，禁止明文存储密钥';

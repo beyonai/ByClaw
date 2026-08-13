@@ -33,4 +33,10 @@ public class SsResExtMcp implements Serializable {
      * 增加 resourceId 首节点后的 JSON 内容
      */
     private String targetContent;
+
+    /** Public definition revision used for optimistic concurrency checks. */
+    private Long definitionRevision;
+
+    /** SHA-256 digest of the canonical endpoint, transport and public auth mode. */
+    private String endpointFingerprint;
 }

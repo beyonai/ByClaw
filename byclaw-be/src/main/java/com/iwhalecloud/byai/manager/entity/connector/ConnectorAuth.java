@@ -27,6 +27,18 @@ public class ConnectorAuth {
     /** 关联 byai_connector_info.connector_id */
     private Long connectorId;
 
+    /** MCP resource instance; null for legacy non-instance connectors. */
+    private Long resourceId;
+
+    /** Server-derived instance key: resource:{resourceId}, or default for legacy connectors. */
+    private String instanceKey;
+
+    /** MCP definition revision this binding was verified against. */
+    private Long definitionRevision;
+
+    /** MCP endpoint fingerprint this binding was verified against. */
+    private String endpointFingerprint;
+
     /** 用户自定义授权账号别名 */
     private String authName;
 

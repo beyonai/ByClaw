@@ -10,5 +10,9 @@ public class StartConnectorAuthorizationRequest {
 
     private Long connectorId;
 
+    private Long resourceId;
+
+    private McpCredentialInput credentialInput;
+
     private String redirectUrl;
 }

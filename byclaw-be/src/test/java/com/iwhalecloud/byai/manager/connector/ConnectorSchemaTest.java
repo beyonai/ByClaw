@@ -129,6 +129,36 @@ class ConnectorSchemaTest {
     }
 
     @Test
+    void userMcpMigrationAddsInstanceRevisionAndSnapshotContracts() throws Exception {
+        String ddl = read("deploy/migrations/versions/V0.4.0/V0.4.0__ddl.sql").toLowerCase(Locale.ROOT);
+        String dml = read("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql").toLowerCase(Locale.ROOT);
+
+        assertThat(ddl).contains(
+            "'resource_id', 'bigint'",
+            "'instance_key', 'varchar(160) default ''default'' not null'",
+            "'definition_revision', 'bigint default 1 not null'",
+            "'endpoint_fingerprint', 'varchar(128)'",
+            "drop index if exists byai.uk_byai_connector_auth_active_user_connector",
+            "on byai.byai_connector_auth (user_id, connector_id, instance_key)",
+            "where status_cd = '00a'",
+            "uk_ss_resource_personal_mcp_owner_code",
+            "create table if not exists byai.byai_user_mcp_tool_snapshot",
+            "unique (resource_id, snapshot_version, tool_name)",
+            "alter table byai.ss_res_ext_mcp"
+        );
+        assertThat(dml).contains(
+            "'user-mcp'",
+            "'instance_defined'",
+            "'byai_mcp_allowed_addresses'",
+            "'byai_mcp_read_tool_rules'",
+            "where not exists"
+        );
+        assertThat(ddl).doesNotContain("access_token", "refresh_token");
+        assertThat(dml).doesNotContain("authorization", "cookie", "api_key");
+        assertThat(Files.exists(repoPath("deploy/migrations/versions/V0.6.1"))).isFalse();
+    }
+
+    @Test
     void connectorCredentialExpirationUsesGmt8IsoOffsetWithProjectJacksonConfig() throws Exception {
         ConnectorListDto dto = connectorListWithFixedExpiration();
         ObjectMapper objectMapper = new JacksonConfig().objectMapper(new Jackson2ObjectMapperBuilder());
@@ -510,13 +540,16 @@ class ConnectorSchemaTest {
     }
 
     private String readPreservingCase(String relativePath) throws Exception {
+        return Files.readString(repoPath(relativePath));
+    }
+
+    private Path repoPath(String relativePath) {
         Path repoRoot = Path.of("").toAbsolutePath();
         while (repoRoot != null && !Files.exists(repoRoot.resolve("deploy/migrations/versions"))) {
             repoRoot = repoRoot.getParent();
         }
         assertThat(repoRoot).isNotNull();
-        Path path = repoRoot.resolve(relativePath);
-        return Files.readString(path);
+        return repoRoot.resolve(relativePath);
     }
 
     private record ConnectorSeed(

@@ -136,4 +136,10 @@ fix(be): correct pagination boundary
 - Do not add a `.ai/` directory; agent config lives in this file and `AGENTS.md`.
 - Root docs in English; module-internal docs follow the module's existing language (often Chinese).
 
+## Delivery workflow preference
+
+- For an explicitly approved feature implementation, work in an isolated `codex/*` worktree branch, consolidate the
+  finished change into one Conventional Commit, fast-forward it into `develop`, then remove the temporary worktree and
+  branch after verification. Preserve unrelated files and local changes in the primary workspace throughout.
+
 @RTK.md

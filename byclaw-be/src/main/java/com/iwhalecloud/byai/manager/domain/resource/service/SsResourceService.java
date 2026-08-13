@@ -266,11 +266,16 @@ public class SsResourceService {
             || StringUtil.isEmpty(ssResource.getResourceBizType()) || StringUtil.isEmpty(ssResource.getResourceCode())) {
             return;
         }
-        SsResource existing = findUniqueBySystemCodeAndBizTypeAndResourceCode(ssResource.getSystemCode(),
-            ssResource.getResourceBizType(), ssResource.getResourceCode());
+        boolean personalMcp = "personal".equals(ssResource.getOwnerType())
+            && "MCP".equals(ssResource.getResourceBizType()) && ssResource.getCreateBy() != null;
+        SsResource existing = personalMcp
+            ? findPersonalMcpByCreatorAndCode(ssResource.getCreateBy(), ssResource.getResourceCode())
+            : findUniqueBySystemCodeAndBizTypeAndResourceCode(ssResource.getSystemCode(),
+                ssResource.getResourceBizType(), ssResource.getResourceCode());
         if (existing != null) {
-            throw new BaseException("资源已存在：" + ssResource.getSystemCode() + "/" + ssResource.getResourceBizType()
-                + "/" + ssResource.getResourceCode());
+            throw new BaseException(personalMcp ? "当前用户的 MCP 服务已存在：" + ssResource.getResourceCode()
+                : "资源已存在：" + ssResource.getSystemCode() + "/" + ssResource.getResourceBizType() + "/"
+                    + ssResource.getResourceCode());
         }
     }
 
@@ -441,6 +446,32 @@ public class SsResourceService {
             .eq("resource_biz_type", resourceBizType)
             .eq("resource_code", resourceCode);
         return ssResourceMapper.selectOne(queryWrapper);
+    }
+
+    public SsResource findPersonalMcpByCreatorAndCode(Long createBy, String resourceCode) {
+        if (createBy == null || StringUtil.isEmpty(resourceCode)) {
+            return null;
+        }
+        QueryWrapper<SsResource> query = new QueryWrapper<>();
+        query.eq("create_by", createBy)
+            .eq("owner_type", "personal")
+            .eq("resource_biz_type", "MCP")
+            .eq("resource_code", resourceCode)
+            .ne("resource_status", ResourceStatus.REMOVED.getNum());
+        return ssResourceMapper.selectOne(query);
+    }
+
+    public List<SsResource> findPersonalMcpsByCreator(Long createBy) {
+        if (createBy == null) {
+            return Collections.emptyList();
+        }
+        LambdaQueryWrapper<SsResource> query = new LambdaQueryWrapper<>();
+        query.eq(SsResource::getCreateBy, createBy)
+            .eq(SsResource::getOwnerType, "personal")
+            .eq(SsResource::getResourceBizType, "MCP")
+            .ne(SsResource::getResourceStatus, ResourceStatus.REMOVED.getNum())
+            .orderByDesc(SsResource::getUpdateTime);
+        return ssResourceMapper.selectList(query);
     }
 
     /**

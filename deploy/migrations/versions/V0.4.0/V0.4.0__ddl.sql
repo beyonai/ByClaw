@@ -662,3 +662,87 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_ss_resource_rel_dig_employee_group_member
 
 CREATE INDEX IF NOT EXISTS idx_ss_resource_version_active_resource
     ON byai.ss_resource_version (resource_id, version_status, resource_version_id);
+
+-- V0.4.0: user-managed remote MCP service instances.
+SET search_path TO byai;
+
+CREATE OR REPLACE FUNCTION byai.add_column_if_missing(
+    p_schema_name TEXT,
+    p_table_name TEXT,
+    p_column_name TEXT,
+    p_column_definition TEXT
+) RETURNS VOID AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = p_schema_name
+          AND table_name = p_table_name
+          AND column_name = p_column_name
+    ) THEN
+        EXECUTE 'ALTER TABLE ' || quote_ident(p_schema_name) || '.' || quote_ident(p_table_name)
+            || ' ADD COLUMN ' || quote_ident(p_column_name) || ' ' || p_column_definition;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'resource_id', 'BIGINT');
+SELECT byai.add_column_if_missing(
+    'byai', 'byai_connector_auth', 'instance_key', 'VARCHAR(160) DEFAULT ''default'' NOT NULL'
+);
+SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'definition_revision', 'BIGINT');
+SELECT byai.add_column_if_missing('byai', 'byai_connector_auth', 'endpoint_fingerprint', 'VARCHAR(128)');
+
+ALTER TABLE byai.byai_connector_auth
+    ALTER COLUMN instance_key SET DEFAULT 'default';
+ALTER TABLE byai.byai_connector_auth
+    ALTER COLUMN instance_key SET NOT NULL;
+
+DROP INDEX IF EXISTS byai.uk_byai_connector_auth_active_user_connector;
+CREATE UNIQUE INDEX IF NOT EXISTS uk_byai_connector_auth_active_user_connector_instance
+    ON byai.byai_connector_auth (user_id, connector_id, instance_key)
+    WHERE status_cd = '00A';
+CREATE INDEX IF NOT EXISTS idx_byai_connector_auth_resource
+    ON byai.byai_connector_auth (resource_id, user_id, status_cd);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_ss_resource_personal_mcp_owner_code
+    ON byai.ss_resource (create_by, resource_biz_type, resource_code)
+    WHERE owner_type = 'personal' AND resource_biz_type = 'MCP' AND resource_status <> 3;
+
+SELECT byai.add_column_if_missing(
+    'byai', 'ss_res_ext_mcp', 'definition_revision', 'BIGINT DEFAULT 1 NOT NULL'
+);
+SELECT byai.add_column_if_missing('byai', 'ss_res_ext_mcp', 'endpoint_fingerprint', 'VARCHAR(128)');
+
+ALTER TABLE byai.ss_res_ext_mcp
+    ALTER COLUMN definition_revision SET DEFAULT 1;
+ALTER TABLE byai.ss_res_ext_mcp
+    ALTER COLUMN definition_revision SET NOT NULL;
+
+CREATE TABLE IF NOT EXISTS byai.byai_user_mcp_tool_snapshot
+(
+    snapshot_id          BIGINT       NOT NULL PRIMARY KEY,
+    resource_id          BIGINT       NOT NULL,
+    definition_revision BIGINT       NOT NULL,
+    snapshot_version     BIGINT       NOT NULL,
+    tool_name            VARCHAR(255) NOT NULL,
+    description          TEXT,
+    input_schema         TEXT         NOT NULL,
+    schema_hash          VARCHAR(128) NOT NULL,
+    risk_level           VARCHAR(16)  NOT NULL DEFAULT 'UNKNOWN',
+    risk_source          VARCHAR(32)  NOT NULL DEFAULT 'SYSTEM_DEFAULT',
+    status_cd            VARCHAR(3)   NOT NULL DEFAULT '00A',
+    create_time          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_byai_user_mcp_tool_snapshot UNIQUE (resource_id, snapshot_version, tool_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_byai_user_mcp_tool_snapshot_current
+    ON byai.byai_user_mcp_tool_snapshot (resource_id, definition_revision, snapshot_version, status_cd);
+
+COMMENT ON COLUMN byai.byai_connector_auth.resource_id IS 'MCP资源实例ID；旧连接器为空';
+COMMENT ON COLUMN byai.byai_connector_auth.instance_key IS '实例键；MCP为resource:{resourceId}，旧连接器为default';
+COMMENT ON COLUMN byai.byai_connector_auth.definition_revision IS '授权绑定的MCP定义版本';
+COMMENT ON COLUMN byai.byai_connector_auth.endpoint_fingerprint IS '授权绑定的MCP规范化端点摘要';
+COMMENT ON COLUMN byai.ss_res_ext_mcp.definition_revision IS 'MCP公开定义版本';
+COMMENT ON COLUMN byai.ss_res_ext_mcp.endpoint_fingerprint IS 'MCP规范化端点与认证模式摘要';
+COMMENT ON TABLE byai.byai_user_mcp_tool_snapshot IS '用户MCP版本化工具快照';

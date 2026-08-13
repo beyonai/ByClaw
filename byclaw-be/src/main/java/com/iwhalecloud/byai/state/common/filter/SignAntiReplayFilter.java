@@ -117,7 +117,7 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
             throw new BadCredentialsException(I18nUtil.get("sign.anti.replay.filter.prohibit.requesting.replay"));
         }
 
-        //校验body签名  暂时只针对get  post请求
+        // 校验 query/body 签名；包含状态变更的 PUT 必须与 POST 一样校验请求体。
         this.checkSignature(request, signature, nonce, timestamp);
         filterChain.doFilter(request, response);
     }
@@ -208,7 +208,7 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
     }
 
     /**
-     * 校验签名，GET用queryString，POST(form-data这个没有)用body，POST需支持多次读取
+     * 校验签名，GET 用 queryString，POST/PUT（不含 form-data）用 body，并支持多次读取。
      *
      * @param request   HttpServletRequest
      * @param signature 前端传递签名
@@ -220,7 +220,7 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
         String contentType = request.getContentType();
         String body = "";
         try {
-            if ("POST".equalsIgnoreCase(method)) {
+            if ("POST".equalsIgnoreCase(method) || "PUT".equalsIgnoreCase(method)) {
                 body = extractPostBody(request, contentType);
                 if (body == null) {
                     // form-data暂时不操作
