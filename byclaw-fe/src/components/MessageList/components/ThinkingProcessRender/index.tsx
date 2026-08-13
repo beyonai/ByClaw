@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect } from 'react';
 // @ts-ignore
-import { DownOutlined, UpOutlined } from '@ant-design/icons';
+import { DownOutlined, RightOutlined } from '@ant-design/icons';
 // @ts-ignore
 import ThinkNewRootTitle from '@/components/MessagesComp/Think/ThinkRootTitle/components/ThinkNewRootTitle';
 import { IMessageState } from '@/constants/message';
@@ -76,30 +76,27 @@ function ThinkingProcessRender(props: IProps) {
     <>
       <p style={{ color: '##707680' }}>
         {isThinkDone && (
-          <span className="ub ub-ac">
+          <span
+            className="ub ub-ac pointer"
+            onClick={() => {
+              setMyThinkCollapse((prevState) => {
+                updateMessage({
+                  ...msg,
+                  thinkCollapse: !prevState,
+                });
+                return !prevState;
+              });
+            }}
+          >
             {intl.formatMessage({ id: 'thinkingProcess.done' })}
             {!myThinkCollapse && (
-              <UpOutlined
-                style={{ fontSize: '12px', marginLeft: '12px' }}
-                onClick={() => {
-                  updateMessage({
-                    ...msg,
-                    thinkCollapse: true,
-                  });
-                  setMyThinkCollapse(true);
-                }}
+              <DownOutlined
+                style={{ fontSize: '12px', marginLeft: '12px', color: 'var(--beyond-color-text-tertiary)' }}
               />
             )}
             {myThinkCollapse && (
-              <DownOutlined
-                style={{ fontSize: '12px', marginLeft: '12px' }}
-                onClick={() => {
-                  updateMessage({
-                    ...msg,
-                    thinkCollapse: false,
-                  });
-                  setMyThinkCollapse(false);
-                }}
+              <RightOutlined
+                style={{ fontSize: '12px', marginLeft: '12px', color: 'var(--beyond-color-text-tertiary)' }}
               />
             )}
           </span>

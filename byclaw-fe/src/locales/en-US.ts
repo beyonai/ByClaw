@@ -976,6 +976,10 @@ export default {
   'thinkingProcess.thinking': 'Thinking...',
   'thinkingProcess.foundReferences': 'Found {count} references',
 
+  'toolCall.input': 'Input',
+  'toolCall.output': 'Output',
+  'toolCall.collapse': 'Collapse details',
+
   quote: 'Quote',
   'ai-assistant': 'AI Assistant',
 

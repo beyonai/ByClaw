@@ -140,6 +140,9 @@ public class MemoryMessageService {
         else {
             byaiMessageHotDto.setMetadata(assistantChatDto.getMetadata());
         }
+        if (hasOrderedSegments(messageStruct)) {
+            byaiMessageHotDto.setMetadata(withV2RenderMetadata(byaiMessageHotDto.getMetadata()));
+        }
         byaiMessageHotDto.setCreateTime(new Date());
         byaiMessageHotDto.setCreatorId(CurrentUserHolder.getCurrentUserId());
         MessageResourceDto messageResourceDto = new MessageResourceDto();
@@ -230,6 +233,9 @@ public class MemoryMessageService {
 
             byaiMessageHotDto.setMessageStruct(JSON.toJSONString(messageStructList));
             byaiMessageHotDto.setInferLog(JSON.toJSONString(inferLogList));
+            if (hasOrderedSegments(messageStruct)) {
+                byaiMessageHotDto.setMetadata(withV2RenderMetadata(byaiMessageHotDto.getMetadata()));
+            }
 
             // 设置完整的最终答案
             StringBuilder content = new StringBuilder();
@@ -250,6 +256,28 @@ public class MemoryMessageService {
         catch (Exception e) {
             throw MemoryRuntimeException.messageRuntimeException(e);
         }
+    }
+
+    private String withV2RenderMetadata(String metadata) {
+        JSONObject metadataObject;
+        try {
+            metadataObject = StringUtils.isBlank(metadata) ? new JSONObject() : JSON.parseObject(metadata);
+        }
+        catch (Exception e) {
+            metadataObject = new JSONObject();
+        }
+        metadataObject.put("messageRenderVersion", "v2");
+        return metadataObject.toJSONString();
+    }
+
+    private boolean hasOrderedSegments(MessageContext messageContext) {
+        return hasOrderedSegments(messageContext.getAnswerMessageList())
+            || hasOrderedSegments(messageContext.getReasonMessageList());
+    }
+
+    private boolean hasOrderedSegments(List<AnswerDelta> segments) {
+        return CollectionUtils.isNotEmpty(segments)
+            && segments.stream().anyMatch(segment -> segment != null && segment.getSeq() != null);
     }
 
     /**

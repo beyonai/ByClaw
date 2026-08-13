@@ -12,6 +12,8 @@ import { getVNCUrl, resolveSandboxesInfo } from '@/utils/chat';
 import { isTextContentType } from '@/utils/messgae';
 
 import { substanceHandler } from '@/hooks/useChat/util';
+import { updateExistingMessage } from '@/utils/messageItemUpdate';
+import { hydrateV2RuntimeState } from '@/utils/messageV2Runtime';
 import useGlobal from '@/hooks/useGlobal';
 
 import { IMessageListItem } from '@/typescript/message';
@@ -35,6 +37,88 @@ function useHandler(props: IProps) {
 
   const curAgentCodeRef = useRef<string | undefined>('');
   const curSessioneRef = useRef<string | undefined>('');
+
+  const isV2 = (message: any) => {
+    try {
+      const metadata = typeof message?.metadata === 'string' ? JSON.parse(message.metadata) : message?.metadata;
+      return metadata?.messageRenderVersion === 'v2';
+    } catch (error) {
+      return false;
+    }
+  };
+
+  const appendV2Message = (newAnswerMsg: any, message: IMessageListItem, event: string) => {
+    const channel = event.startsWith('reasoningLog') ? 'thinkList' : 'messageList';
+    if (!get(newAnswerMsg, '_v2LastSegment')) {
+      hydrateV2RuntimeState(newAnswerMsg);
+    }
+    const current = ((get(newAnswerMsg, channel, []) as IMessageListItem[]) || []).map((item) => ({
+      ...item,
+      content: { ...item.content },
+    }));
+    if (updateExistingMessage(current, message)) {
+      set(newAnswerMsg, channel, current);
+      return;
+    }
+    const previous = get(newAnswerMsg, '_v2LastSegment') as IMessageListItem | undefined;
+    const previousChannel = get(newAnswerMsg, '_v2LastChannel');
+    const incomingSeq = Number(message.seq);
+    const existingSeqIndex = Number.isFinite(incomingSeq)
+      ? current.findIndex((item) => Number(item.seq) === incomingSeq)
+      : -1;
+    const sameSegment =
+      previous &&
+      previousChannel === channel &&
+      previous.eventType === event &&
+      `${previous.contentType}` === `${message.contentType}` &&
+      `${get(previous, 'content.orderId') || ''}` === `${get(message, 'content.orderId') || ''}`;
+    if (existingSeqIndex >= 0 || sameSegment) {
+      const targetIndex = existingSeqIndex >= 0 ? existingSeqIndex : current.length - 1;
+      const target = current[targetIndex];
+      if (target) {
+        const oldSubstance = get(target, 'content.substance');
+        const nextSubstance =
+          isString(oldSubstance) && isString(get(message, 'content.substance'))
+            ? `${oldSubstance}${get(message, 'content.substance')}`
+            : get(message, 'content.substance');
+        set(target, 'content.substance', nextSubstance);
+        set(target, 'status', message.status);
+        set(target, 'eventType', event);
+        set(newAnswerMsg, channel, current);
+        if (targetIndex === current.length - 1) {
+          set(newAnswerMsg, '_v2LastSegment', target);
+          set(newAnswerMsg, '_v2LastChannel', channel);
+        }
+        return;
+      }
+    }
+    const nextSeq = Number(get(newAnswerMsg, '_v2NextSeq', 1));
+    const nextItem = { ...message, seq: Number.isFinite(message.seq) ? message.seq : nextSeq, eventType: event };
+    current.push(nextItem);
+    set(newAnswerMsg, channel, current);
+    set(newAnswerMsg, '_v2NextSeq', Math.max(nextSeq, Number(nextItem.seq) + 1));
+    set(newAnswerMsg, '_v2LastSegment', nextItem);
+    set(newAnswerMsg, '_v2LastChannel', channel);
+  };
+
+  const latchV2Metadata = (sseRes: any, newAnswerMsg: any) => {
+    if (sseRes?.messageRenderVersion !== 'v2' && !`${sseRes?.metadata || ''}`.includes('messageRenderVersion')) return;
+    let metadata: Record<string, unknown> = {};
+    try {
+      metadata =
+        typeof newAnswerMsg.metadata === 'string'
+          ? JSON.parse(newAnswerMsg.metadata || '{}')
+          : newAnswerMsg.metadata || {};
+      const incoming =
+        typeof sseRes.metadata === 'string' ? JSON.parse(sseRes.metadata || '{}') : sseRes.metadata || {};
+      metadata = { ...metadata, ...incoming };
+    } catch (error) {
+      metadata = {};
+    }
+    if (sseRes.messageRenderVersion === 'v2' || metadata.messageRenderVersion === 'v2') {
+      newAnswerMsg.metadata = JSON.stringify({ ...metadata, messageRenderVersion: 'v2' });
+    }
+  };
 
   useEffect(() => {
     curAgentCodeRef.current = agentInfo?.resourceCode;
@@ -116,6 +200,18 @@ function useHandler(props: IProps) {
     }
 
     newAnswerMsg.messageId = `${sseRes.messageId}`;
+    if (sseRes.messageRenderVersion === 'v2') {
+      let metadata: Record<string, unknown> = {};
+      try {
+        metadata =
+          typeof newAnswerMsg.metadata === 'string'
+            ? JSON.parse(newAnswerMsg.metadata || '{}')
+            : newAnswerMsg.metadata || {};
+      } catch (error) {
+        metadata = {};
+      }
+      newAnswerMsg.metadata = JSON.stringify({ ...metadata, messageRenderVersion: 'v2' });
+    }
 
     return onionsProps;
   }, []);
@@ -145,7 +241,26 @@ function useHandler(props: IProps) {
     const { message } = sseRes;
     const { event } = sseMsg;
 
+    latchV2Metadata(sseRes, newAnswerMsg);
+
+    if (isV2(newAnswerMsg) && event.startsWith('reasoningLog')) {
+      set(newAnswerMsg, 'thinkDone', event === 'reasoningLogEnd');
+    }
+
     if (!message) return onionsProps;
+
+    if (
+      isV2(newAnswerMsg) &&
+      ['reasoningLogStart', 'reasoningLogDelta', 'reasoningLogEnd', 'answerStart', 'answerDelta', 'answerEnd'].includes(
+        event
+      )
+    ) {
+      if (event === 'reasoningLogStart' || event === 'reasoningLogEnd') return onionsProps;
+      if (!isTextContentType(message.contentType)) return onionsProps;
+      newAnswerMsg.messageState = IMessageState.Answer;
+      appendV2Message(newAnswerMsg, message, event);
+      return onionsProps;
+    }
 
     const isThinkMsg = ['reasoningLogStart', 'reasoningLogDelta', 'reasoningLogEnd'].includes(event);
 
@@ -180,6 +295,12 @@ function useHandler(props: IProps) {
     (onionsProps: IOnionsProps) => {
       const { sseRes, sseMsg, newAnswerMsg } = onionsProps;
 
+      latchV2Metadata(sseRes, newAnswerMsg);
+
+      if (isV2(newAnswerMsg) && sseMsg.event.startsWith('reasoningLog')) {
+        set(newAnswerMsg, 'thinkDone', sseMsg.event === 'reasoningLogEnd');
+      }
+
       if (sseRes.traceId) {
         newAnswerMsg.traceId = sseRes.traceId;
         if (sseMsg.clientRequestId) {
@@ -194,6 +315,24 @@ function useHandler(props: IProps) {
 
       const { message } = sseRes;
       const { event } = sseMsg;
+
+      if (
+        isV2(newAnswerMsg) &&
+        [
+          'reasoningLogStart',
+          'reasoningLogDelta',
+          'reasoningLogEnd',
+          'answerStart',
+          'answerDelta',
+          'answerEnd',
+        ].includes(event)
+      ) {
+        if (event === 'reasoningLogStart' || event === 'reasoningLogEnd') return onionsProps;
+        newAnswerMsg.messageState = IMessageState.Answer;
+        if (isTextContentType(sseRes.message.contentType)) return onionsProps;
+        if (sseRes.message) appendV2Message(newAnswerMsg, sseRes.message, event);
+        return onionsProps;
+      }
 
       // 设置回答消息状态为"正在回答"
       newAnswerMsg.messageState = IMessageState.Answer;

@@ -21,6 +21,7 @@ import { ISessionState } from '@/models/session';
 import useAppStore from '@/models/common/useAppStore';
 
 import { createMessage, fetchMessageHandler } from '@/utils/messgae';
+import { hydrateV2RuntimeState } from '@/utils/messageV2Runtime';
 import { getFileTypeByName } from '@/utils/file';
 
 import useHandler from './useHandler';
@@ -325,6 +326,7 @@ function useChat(props: IProps) {
     const answerMsg = createMessage(fetchMessageHandler(snapshot));
     set(answerMsg, 'msgId', getAnswerClientMsgId(runningInfo.clientRequestId));
     set(answerMsg, 'messageState', IMessageState.Answer);
+    set(answerMsg, 'thinkDone', false);
     set(answerMsg, 'traceId', snapshot?.traceId || runningInfo.traceId);
     set(answerMsg, 'snapshotStreamId', snapshot?.snapshotStreamId);
     set(answerMsg, 'streamId', snapshot?.snapshotStreamId);
@@ -343,6 +345,7 @@ function useChat(props: IProps) {
     if (!answerMsg.metadata && runningInfo.agentId) {
       set(answerMsg, 'metadata', JSON.stringify({ agentId: runningInfo.agentId }));
     }
+    hydrateV2RuntimeState(answerMsg);
     return answerMsg;
   });
 

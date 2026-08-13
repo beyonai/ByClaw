@@ -7,6 +7,18 @@ import { SSEEventStatus, SSEMessageType } from '@/constants/message';
 import type { IMessageListItem, IResComIdsListItem } from '@/typescript/message';
 import { isJSON } from '@/utils/json';
 
+const setOrderId = (sseDataObj: any, payload: any) => {
+  const orderId = get(sseDataObj, 'orderId') || '';
+  const parentOrderId = get(sseDataObj, 'parentOrderId') || '';
+
+  if (orderId && isPlainObject(get(payload, 'message.content'))) {
+    set(payload, 'message.content.orderId', `${orderId}`);
+  }
+  if (parentOrderId && isPlainObject(get(payload, 'message.content'))) {
+    set(payload, 'message.content.parentOrderId', `${parentOrderId}`);
+  }
+};
+
 const textHandler = (sseDataObj: any, msgEvent?: string) => {
   const content = get(sseDataObj, 'choices.0.delta.content', '');
 
@@ -242,6 +254,28 @@ function thinkStatusTitleHandler(sseDataObj: any) {
   return payload;
 }
 
+function toolCallHandler(sseDataObj: any) {
+  const contentType = get(sseDataObj, 'contentType');
+  const content = get(sseDataObj, 'choices.0.delta.content', '');
+  let status = get(sseDataObj, 'status');
+  let substance: unknown = content;
+  try {
+    substance = JSON.parse(content);
+    ({ status } = substance as { status: string });
+  } catch (e) {
+    // A non-JSON terminal payload is still a useful tool output.
+    substance = { output: content };
+  }
+
+  return {
+    message: {
+      contentType,
+      content: { substance },
+      status,
+    },
+  };
+}
+
 // eslint-disable-next-line
 const sseTypeHandlerMap = new Map<string, (sseDataObj: any, msgEvent?: string) => any>([
   [`${SSEMessageType.text}`, textHandler],
@@ -255,6 +289,7 @@ const sseTypeHandlerMap = new Map<string, (sseDataObj: any, msgEvent?: string) =
   [`${SSEMessageType.thinkRewriteQuestion}`, thinkRewriteQuestionHandler],
   [`${SSEMessageType.jsonBlock}`, jsonBlockHandler],
   [`${SSEMessageType.thinkStatusTitle}`, thinkStatusTitleHandler],
+  [`${SSEMessageType.toolCall}`, toolCallHandler],
 ]);
 
 const isResumeContentType = (contentType: SSEMessageType) => {
@@ -288,6 +323,12 @@ export const answerDeltaHandler = (sseDataObj: any, msgEvent?: string): { messag
     uuid: get(sseDataObj, 'id'),
     orginContent: get(sseDataObj, 'choices.0.delta.content', ''),
   });
+  const seq = get(sseDataObj, 'seq');
+  if (seq !== undefined && seq !== null) {
+    Object.assign(res.message, { seq, eventType: msgEvent });
+  }
+
+  setOrderId(sseDataObj, res);
   setResumeMessageId(sseDataObj, res.message);
   return res;
 };
@@ -304,7 +345,7 @@ export const reasoningLogHandler = (sseDataObj: any, msgEvent?: string) => {
     set(mySseDataObj, 'contentType', `${SSEMessageType.thinkText}`);
   }
 
-  const payload = answerDeltaHandler(mySseDataObj);
+  const payload = answerDeltaHandler(mySseDataObj, msgEvent);
 
   switch (msgEvent) {
     case 'reasoningLogStart':

@@ -11,6 +11,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
@@ -193,7 +194,10 @@ public class RunningChatSnapshotService {
         snapshot.setTaskId(ctx.taskId);
         snapshot.setUsage(ChatUseageEnum.SYSTEM_RESPONSE.getCode());
         snapshot.setCreatorId(ctx.userId);
-        snapshot.setMetadata(ctx.assistantChatDto == null ? null : ctx.assistantChatDto.getMetadata());
+        snapshot.setMetadata(messageContext.getAnswerMessageList().stream().anyMatch(item -> item.getSeq() != null)
+            || messageContext.getReasonMessageList().stream().anyMatch(item -> item.getSeq() != null)
+                ? withV2RenderMetadata(ctx.assistantChatDto == null ? null : ctx.assistantChatDto.getMetadata())
+                : ctx.assistantChatDto == null ? null : ctx.assistantChatDto.getMetadata());
         snapshot.setCreateTime(new Date());
         snapshot.setMessageContent(messageContext.returnAnswerText());
         snapshot.setResComIds(messageContext.getResComIds());
@@ -213,6 +217,17 @@ public class RunningChatSnapshotService {
         return snapshot;
     }
 
+    private String withV2RenderMetadata(String metadata) {
+        JSONObject value;
+        try {
+            value = StringUtils.isBlank(metadata) ? new JSONObject() : JSON.parseObject(metadata);
+        }
+        catch (Exception e) {
+            value = new JSONObject();
+        }
+        value.put("messageRenderVersion", "v2");
+        return value.toJSONString();
+    }
     private String findBySession(Long sessionId) {
         String pattern = KEY_PREFIX + sessionId + ":*";
         try {

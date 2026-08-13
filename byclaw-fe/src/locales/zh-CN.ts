@@ -977,6 +977,10 @@ export default {
   'thinkingProcess.thinking': '深度思考中...',
   'thinkingProcess.foundReferences': '找到 {count} 篇参考资料',
 
+  'toolCall.input': '输入',
+  'toolCall.output': '输出',
+  'toolCall.collapse': '收起详情',
+
   quote: '引用',
   'ai-assistant': 'AI助手',
 

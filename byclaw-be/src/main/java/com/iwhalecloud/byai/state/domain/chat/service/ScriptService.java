@@ -230,9 +230,34 @@ public class ScriptService extends AbstractChatProcess {
 
         ctx.messageContext = new MessageContext(AgentTypeEnum.getNameCode(ctx.assistantChatDto.getAgentType()),
             ctx.modelAnswerMessageId, ctx.taskId);
+        restoreTaskSegmentCursor(ctx);
 
         // 请求python参数
         ctx.params = paramService.getParams(ctx);
+    }
+
+    private void restoreTaskSegmentCursor(ChatProcessContext ctx) {
+        if (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
+            || CollectionUtils.isEmpty(ctx.taskHistoryMessages) || ctx.taskHistoryMessages.size() < 2) {
+            return;
+        }
+        ByaiMessageHotDto historyMessage = ctx.taskHistoryMessages.get(1);
+        List<AnswerDelta> reasonMessages = parseSegments(historyMessage.getInferLog());
+        List<AnswerDelta> answerMessages = parseSegments(historyMessage.getMessageStruct());
+        ctx.messageContext.restoreSegmentCursor(reasonMessages, answerMessages);
+    }
+
+    private List<AnswerDelta> parseSegments(String value) {
+        if (StringUtils.isBlank(value)) {
+            return List.of();
+        }
+        try {
+            return JSON.parseArray(value, AnswerDelta.class);
+        }
+        catch (Exception e) {
+            log.warn("恢复任务消息渲染序号失败，历史结构无法解析", e);
+            return List.of();
+        }
     }
 
     private void resolveRunningTraceState(ChatProcessContext ctx) {

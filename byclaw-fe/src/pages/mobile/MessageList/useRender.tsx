@@ -18,6 +18,8 @@ import CopyComp from '@/components/MessageList/components/AnswerActions/Copy';
 import MoreActions from '@/components/MessageList/components/AnswerActions/MoreActions';
 import ThumbUp from '@/components/MessageList/components/AnswerActions/ThumbUp';
 import MsgRenderer from '@/components/MessageList/components/MsgRenderer';
+import MsgRendererV2 from '@/components/MessageList/components/MsgRendererV2';
+import { isV2Message } from '@/components/MessageList/components/MsgRendererV2/ordered';
 
 import useModal from '@/hooks/useModal';
 import useGlobal from '@/hooks/useGlobal';
@@ -370,7 +372,11 @@ export default function useRender({
                 [styles.pureText]: fromOtherUser && usage !== '4',
               })}
             >
-              <MsgRenderer msg={msg} updateMessage={updateMessage} hideThinking={param?.hideThinking} />
+              {isV2Message(msg) ? (
+                <MsgRendererV2 msg={msg} updateMessage={updateMessage} hideThinking={param?.hideThinking} />
+              ) : (
+                <MsgRenderer msg={msg} updateMessage={updateMessage} hideThinking={param?.hideThinking} />
+              )}
               {messageState === IMessageState.Query && <DualBallLoading style={{ width: 32, height: 32 }} />}
             </div>
             {fromBeyond && messageState === IMessageState.Error && (

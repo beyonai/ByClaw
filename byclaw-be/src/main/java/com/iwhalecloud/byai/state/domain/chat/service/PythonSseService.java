@@ -117,7 +117,7 @@ public class PythonSseService {
             }
             messageContext.recordAnswerText(value);
             messageContext.recordStreamAnswerText(value);
-            messageContext.recordAnswerStruct(value);
+            value = messageContext.recordAnswerStruct(value);
         }
 
         if (SseResponseEventEnum.answerDelta.equals(key)) {
@@ -138,7 +138,7 @@ public class PythonSseService {
             CompletionsUtils.responseWrite(res, key, value, ctx != null ? ctx.sessionId : null);
         }
         else if (SseResponseEventEnum.reasoningLogDelta.equals(key)) {
-            messageContext.recordInferLog(value);
+            value = messageContext.recordInferLog(value);
             CompletionsUtils.responseWrite(res, key, value, ctx != null ? ctx.sessionId : null);
         }
         else if (SseResponseEventEnum.reasoningLogEnd.equals(key)) {
