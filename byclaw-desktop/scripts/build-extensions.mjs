@@ -104,10 +104,25 @@ console.log(`完成: ${outDir}`);
 function chmodWritableRecursive(dir) {
   if (process.platform === "win32") return; // Windows 无权限位概念
   try {
+    fs.chmodSync(dir, 0o755); // 目录自身也要放开（删文件需要父目录写权限）
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const p = path.join(dir, entry.name);
       if (entry.isDirectory()) chmodWritableRecursive(p);
       else fs.chmodSync(p, 0o644);
     }
   } catch { /* 忽略权限错误 */ }
+}
+
+/** 确保 .bin 下的可执行 shim 都有执行位（esbuild 等） */
+function ensureExecutable(binDir) {
+  if (process.platform === "win32" || !fs.existsSync(binDir)) return;
+  try {
+    for (const name of fs.readdirSync(binDir)) {
+      const p = path.join(binDir, name);
+      const st = fs.lstatSync(p);
+      if (st.isSymbolicLink() || st.isFile()) {
+        fs.chmodSync(p, 0o755);
+      }
+    }
+  } catch { /* 忽略 */ }
 }
