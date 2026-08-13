@@ -10,7 +10,14 @@ WORKDIR /workspace
 COPY byclaw-data /workspace/byclaw-data
 
 WORKDIR /workspace/byclaw-data
-RUN uv sync --frozen --no-dev
+
+RUN set -- packages/by_datacloud-*.whl; \
+    if [ -f "$1" ]; then \
+      uv sync --frozen --no-dev --no-install-package by-datacloud; \
+      uv pip install --python .venv/bin/python "$1"; \
+    else \
+      uv sync --frozen --no-dev; \
+    fi
 
 # 构建信息
 ARG BUILD_VERSION=unknown
