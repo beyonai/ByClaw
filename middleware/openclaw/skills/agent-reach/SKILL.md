@@ -1,144 +1,90 @@
 ---
 name: agent-reach
-description: Use when the goal is to READ or LOOK UP something on the public internet for an immediate answer - research, search, or read a webpage, GitHub, YouTube, Bilibili, V2EX, Twitter/X, Reddit, Xiaohongshu, LinkedIn, podcasts, RSS, jobs, code, or social-platform content. This is the public-internet channel router only; it picks a channel and executor and does not archive results. Any task that opens, reads, searches within, collects from, scrapes, or operates a concrete website, webpage, or URL must route to byCLI before acquisition. If the user wants material collected, crawled in batch, archived, or ingested into a knowledge base, use knowledge-collection instead.
+description: Use when the user asks to research, search, look up, read, collect, or summarize public-internet content; gives a URL; or mentions Twitter/X, Reddit, Bilibili, XiaoHongShu, Facebook, Instagram, LinkedIn, YouTube, GitHub, V2EX, Xueqiu, RSS, Xiaoyuzhou, or Exa. Route concrete webpages through byCLI before acquiring content. For persistent collection artifacts, use knowledge-collection.
 ---
 
-# Agent Reach — 互联网能力路由器
+# By-Reach
 
-本文件基于 Agent Reach `v1.5.0` 官方 Skill，按 ByClaw 的唯一网页执行器策略完成适配。官方来源固定为提交
-`f65526cbaaad3879473acc1ba6dbefd195caf2be`，许可证保持上游原文；会与 ByClaw 路由冲突的正文和 references 已改写，不能作为上游原文使用。
+By-Reach v2 is the public-internet router bundled with ByClaw. Its technical
+Skill identifier and invocation remain `agent-reach` / `$agent-reach`; its
+product name, CLI, configuration directory, and diagnostic provider are
+By-Reach, `by-reach`, `~/.by-reach/`, and `providers.byReach`.
 
-## ByClaw 覆盖规则（最高优先级）
+Use this Skill to select an approved read-only executor. Do not post, comment,
+like, authenticate, or otherwise write to a public platform. When the user
+explicitly requests collection, crawling, archiving, ingestion, or knowledge
+organization, load `knowledge-collection`; this router only selects the source
+executor and returns its result.
 
-后续适配主体及其 references 必须与本节一致；发现冲突时立即停止，不得执行冲突路径。
+## Non-negotiable webpage rule
 
-角色名称固定如下：路由器：`agent-reach`；网站执行器：`bycli`；采集编排器：`knowledge-collection`；
-直接查询所有者：根 Agent。以下规则始终使用这些名称确定结果与交互的所有权。
+For **任何网站、网页或 URL** that must be opened, read, searched within,
+collected from, scraped, or operated, before acquiring content the router
+**必须无条件选择并加载 `bycli` skill**. This includes public static pages,
+server-rendered pages, SPAs, raw URLs, Markdown, plain text, and pages without
+login.
 
-**网页路由全局不变量：**任何网站、网页或 URL 的打开、读取、站内搜索、采集、抓取或操作任务，路由器在获取内容前
-必须无条件选择并加载 `bycli` skill。不得先尝试 `web_fetch`、Jina Reader、Web Reader MCP、`curl`、`wget`、`requests`、
-原站直连或其他网页获取工具，再根据结果决定是否委派 byCLI。公开静态页、服务端渲染页、SPA、raw URL、纯文本、Markdown
-和无需登录的页面均无例外。byCLI 无法完成时必须停止并报告，不得回退到其他网页获取工具。Exa 全网搜索、`gh` CLI、RSS
-和视频字幕等不打开或读取具体网页的非网页渠道不受此规则影响。
-
-1. 使用 `byclaw-capability-doctor` 进行初始化、选后端和故障后的被动检查。读取
-   `providers.agentReach.channels.<channel>` 时，`diagnosticBackend` 是诊断信息，`effectiveBackend` 是应用 ByClaw
-   覆盖规则后的实际执行后端，`activeBackend` 是 `effectiveBackend` 的兼容别名。只执行 `effectiveBackend`；不得直接执行 `diagnosticBackend`。
-   `web` 渠道的 `diagnosticBackend` 固定为 `disabled_by_policy`，`backends`、`effectiveBackend` 和 `activeBackend` 均只呈现 `bycli`；
-   不得向用户推荐或解释被策略禁用的上游网页后端。以 `providers.bycli.status` 判断执行就绪度。
-2. 不得用 `bycli doctor` 替代聚合被动检查；被动检查不得调用 `/v1/browser/recover` 或任何浏览器启动命令。daemon 运行但 Extension
-   未连接是正常冷状态，`available_on_demand` 不得启动 Chrome。
-3. 本项目只提供 byCLI，不提供 OpenCLI。官方主体或 references 中的任何 `opencli` 路径均视为不可用：不得安装
-   OpenCLI、不得创建 `opencli` 别名，也不得执行 Agent Reach 的 OpenCLI 安装路径。
-   Do not install OpenCLI. Do not create an `opencli` alias.
-4. 任何网站、网页或 URL 任务，以及 `effectiveBackend` 为 `bycli`、官方路由要求 OpenCLI、登录态或浏览器后端时，路由器加载并遵循
-   `bycli` skill；网站执行器用
-   `bycli list -f json` 发现 Adapter，遵守其浏览器生命周期、授权、执行与验证规则，并把结果返回当前任务所有者。直接查询时由根 Agent
-   负责最终回复；委派采集时由采集编排器负责统一持久化、产物协议、后处理与入库或知识整理。
-5. 禁止使用 Jina Reader 或访问 `r.jina.ai`。通用网页读取和 LinkedIn fallback 均加载并遵循 `bycli` skill：
-   先执行 `bycli list -f json` 动态发现 Adapter；
-   通用网页存在 `web/read` 时执行 `bycli web read --url <URL>`，站点专用 Adapter 存在时优先使用专用 Adapter，缺失时按 byCLI
-   Browser 降级规则处理。不得回退到 `web_fetch`、Jina Reader、Web Reader MCP、`curl`、`wget`、`requests` 或原站直连。
-   公开可读、静态页面、raw URL、纯文本或 Markdown 内容均不是例外，也不得因「直接 HTTP 更快」「无需登录」「不需要渲染」跳过 byCLI。
-6. 只有用户的实际任务需要浏览器时，才执行 `bycli` skill 规定的主动桥接检查和恢复流程。
-7. Agent Reach 已由镜像固定安装，不在运行时执行 `agent-reach install`、`uninstall` 或自动更新；可以报告
-   `check-update` 结果，但不得自行升级。
-8. 当采集编排器 `knowledge-collection` 发起委派时，路由器 `agent-reach` 只负责渠道与后端选择、按需委派网站执行器 `bycli`，
-   并将采集结果返回采集编排器。采集编排器负责统一持久化、产物协议、后处理、入库或知识整理。此时本覆盖规则取代官方 `/tmp/` 工作区规则；
-   路由器与网站执行器不得询问 `入库 / 知识整理 / 跳过`，不得执行通用落盘、入库或知识整理，
-   不得规定统一产物目录、文件名或保留策略，也不得反向加载 `knowledge-collection`。
-9. 聚合诊断对企业 CLI 只做被动检查：WeCom 仅检查 `wecom-cli --version`，授权状态保持
-   `not_checked`；Lark 额外检查 `lark-cli auth status`；DWS 检查 `dws auth status --format json`。不得输出企业身份原始内容。
-   三者均不参与 `overallStatus`，实际业务仍使用各自专用能力。
-10. 企业协作业务必须交给专用 Skill：飞书/Lark 的消息、通讯录、日历、文档、任务、授权等请求，加载并遵循 `fws` skill；
-   企业微信/WeCom 的对应请求，加载并遵循 `wecomcli` skill，再由其选择具体业务能力；钉钉/DingTalk 的对应请求，
-   加载并遵循 `dws` skill。`byclaw-capability-doctor` 中已有的 provider 状态仅用于被动诊断，
-   不能替代业务 Skill 的意图路由、授权与调用流程。
-11. 企业来源的采集、归档、批量搜索或入库请求交给采集编排器 `knowledge-collection`；其按来源加载 WeCom 或 Feishu
-    采集桥接，再委派 `wecomcli` 或 `fws`。路由器只完成该交接与被动诊断，不得作为公共互联网任务交给 `bycli`，
-    不得自行执行企业 CLI、管理采集产物、凭据或后处理。
-
-## Agent Reach ByClaw 适配主体（基于 v1.5.0）
-
-13 平台、多后端。**本 skill 存在时必须用它访问这些平台，不要自己发明方案。**
-
-## 常驻规则（全程适用）
-
-1. **动手前先体检**：运行 `byclaw-capability-doctor`，只按 `effectiveBackend` 选择命令组；不得直接运行或依据
-   `agent-reach doctor --json` 的网页后端建议。
-2. **声明你在用什么**：开始干活前说一句「使用 agent-reach 的 X 平台 / Y 后端」。
-3. **失败按 references 里的重试链处理**，不要瞎猜命令。
-4. **全网调研类任务**：组合多平台（Exa 搜索 + Twitter/Reddit 看讨论 + 小红书/B站看中文场景），并行收集再汇总。
-5. **替用户盯版本**：完成一次较大的调研/多平台任务后，顺手跑
-   `agent-reach check-update`（很快，一个 API 调用）。有新版就在收尾汇报里附一句：
-   「Agent Reach 有新版 vX.Y.Z，复制这句话给我即可更新：帮我更新 Agent Reach：
-   https://raw.githubusercontent.com/Panniantong/agent-reach/main/docs/update.md」。
-   不要中断当前任务去更新，也不要重复提醒同一个版本。
-
-## 路由表
-
-| 用户意图 | 分类 | 详细文档 |
-|---------|------|---------|
-| 网页搜索/代码搜索 | search | [references/search.md](references/search.md) |
-| 小红书/推特/B站/V2EX/Reddit | social | [references/social.md](references/social.md) |
-| 招聘/职位/LinkedIn | career | [references/career.md](references/career.md) |
-| GitHub/代码 | dev | [references/dev.md](references/dev.md) |
-| 网页/文章/RSS | web | [references/web.md](references/web.md) |
-| YouTube/B站/播客字幕 | video | [references/video.md](references/video.md) |
-
-## 零配置快速命令
+The only generic webpage read command is:
 
 ```bash
-# Exa 网页搜索
-mcporter call 'exa.web_search_exa(query: "query", numResults: 5)'
-
-# 通用网页阅读：进入 byCLI skill 后动态发现 Adapter
-bycli list -f json
-
-# GitHub 搜索
-gh search repos "query" --sort stars --limit 10
-
-# YouTube 字幕（注意：B站不要用 yt-dlp，见 video.md）
-yt-dlp --write-sub --skip-download -o "/tmp/%(id)s" "URL"
-
-# V2EX：进入 byCLI skill 后动态发现 v2ex Adapter
-bycli list -f json
-
-# 视频字幕等不打开具体网页的媒体任务见 references/video.md
+bycli web read --url <URL> --stdout
 ```
 
-## 需登录态的平台
+Do not pre-read, probe, or fall back to a fetcher, reader proxy, direct HTTP
+client, legacy adapter, generic browser, or another webpage tool. byCLI
+failure means **byCLI 无法完成时必须停止并报告**; **不得回退到其他网页获取工具**.
 
-```bash
-# Twitter、Reddit、小红书和其他网站：统一进入 byCLI skill 动态发现 Adapter
-bycli list -f json
-```
+Run `byclaw-capability-doctor` for passive diagnostics when availability is
+unclear. It exposes `schemaVersion: 2`; use
+`providers.byReach.channels.<channel>.effectiveBackend` for the selected
+executor and `diagnosticBackend` only as observed health information. A
+diagnostic check must not start Chrome or recover a browser. For direct CLI
+diagnostics, use `by-reach doctor --json`; do not install, uninstall, or update
+By-Reach during a task.
 
-## 环境检查
+## Approved routing table
 
-```bash
-# 检查可用 channel 与 ByClaw 生效后端
-byclaw-capability-doctor
-```
+| Target | First executor | One permitted fallback |
+| --- | --- | --- |
+| Generic webpage / URL | `bycli web read --url <URL> --stdout` | none |
+| Twitter / X | `twitter-cli` | `bycli twitter search` |
+| Reddit | `rdt-cli` | `bycli reddit search` |
+| Bilibili | `bili-cli` | `bycli bilibili search` |
+| YouTube | `yt-dlp` | `bycli youtube search` |
+| V2EX | packaged V2EX API channel | `bycli v2ex hot` |
+| Xueqiu | packaged Xueqiu API channel | `bycli xueqiu search` |
+| Facebook / Instagram / LinkedIn / XiaoHongShu | byCLI | none |
+| GitHub | `gh` CLI | none |
+| RSS | `feedparser` | none |
+| Exa search | `mcporter` with `exa.web_search_exa` | none |
+| Xiaoyuzhou audio | By-Reach transcription | none |
 
-## 工作区规则
+For a row with a fallback, execute the first executor once. Only failed,
+empty, challenge-shaped, malformed, or non-meaningful output permits **只允许一次 byCLI 兜底**.
+After that attempt fails, stop and report it. Never substitute a
+different CLI or generic webpage mechanism.
 
-**不要在 agent workspace 创建文件。** 使用 `/tmp/` 存放临时输出，`~/.agent-reach/` 存放持久数据。
+## Ownership and enterprise boundaries
 
-## 详细文档
+The named actors are: router `agent-reach` (By-Reach), webpage executor
+`bycli`, collection orchestrator `knowledge-collection`, and direct-query
+owner (the root Agent). In delegated collection mode, `knowledge-collection`
+owns persistence, artifact contracts, post-processing, ingestion, and user
+follow-up. By-Reach and byCLI only return acquisition results and must not ask
+about "入库 / 知识整理 / 跳过".
 
-根据用户需求，阅读对应的详细文档：
+直接查询时由根 Agent 负责最终回复；委派采集时由采集编排器
+`knowledge-collection` 负责统一持久化、后处理和入库或知识整理。
 
-- [搜索工具](references/search.md) — Exa AI 搜索
-- [社交媒体](references/social.md) — 小红书, Twitter, B站, V2EX, Reddit（多后端命令组）
-- [职场招聘](references/career.md) — LinkedIn
-- [开发工具](references/dev.md) — GitHub CLI
-- [网页阅读](references/web.md) — byCLI, RSS
-- [视频播客](references/video.md) — YouTube, B站, 小宇宙
+企业来源的采集、归档、批量搜索或入库请求交给采集编排器 `knowledge-collection`，并按来源加载 `dws`、`fws` 或 `wecomcli`。不得作为公共互联网任务交给 `bycli`。企业业务请求不使用本公共互联网路由器；其 provider
+诊断只是被动信息，不能替代这些业务 Skills。
 
-## 配置渠道
+Keep temporary output in `/tmp/` and persistent By-Reach state in
+`~/.by-reach/`. Read a focused reference only when its platform is needed:
 
-如果某个 channel 需要配置，获取安装指南：
-https://raw.githubusercontent.com/Panniantong/agent-reach/main/docs/install.md
-
-用户只需提供 cookies，其他配置由 agent 完成。
+- [web](references/web.md) — generic URLs and RSS
+- [social](references/social.md) — social and community channels
+- [video](references/video.md) — YouTube, Bilibili, Xiaoyuzhou
+- [dev](references/dev.md) — GitHub
+- [search](references/search.md) — Exa
+- [career](references/career.md) — LinkedIn

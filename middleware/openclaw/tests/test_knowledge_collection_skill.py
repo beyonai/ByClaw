@@ -19,7 +19,7 @@ DESCRIPTION = (
     "Use when the goal is to COLLECT and keep material rather than just get an answer - collect, crawl, scrape, "
     "batch-search, archive, ingest, or organize content from internet or enterprise sources, or store "
     "already-collected files in a knowledge base. This is the collection orchestrator and owns collection artifacts, "
-    "post-processing, and knowledge-base ingestion; prefer it over agent-reach whenever collection intent is explicit, "
+    "post-processing, and knowledge-base ingestion; prefer it over By-Reach whenever collection intent is explicit, "
     "even for a single page or result."
 )
 INTERFACE = {
@@ -198,7 +198,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "不得使用 `web_fetch`、`curl`、`wget`、`requests` 或其他直接 HTTP 客户端绕过来源执行器",
             skill,
         )
-        self.assertIn("Agent Reach 直接后端与 `bycli` 后端返回的结果", skill)
+        self.assertIn("By-Reach 的首选执行器与 `bycli` 兜底返回的结果", skill)
         self.assertIn("必须统一进入同一套 collection contract", skill)
         self.assertIn("不得按执行后端分叉产物协议", skill)
 
@@ -212,7 +212,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
     def test_bycli_route_is_selected_by_router_or_explicit_execution_intent(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertIn("`agent-reach` 选择 `bycli`", skill)
+        self.assertIn("By-Reach 选择 `bycli`", skill)
         self.assertIn("用户显式要求 byCLI、浏览器或 Adapter", skill)
         self.assertNotIn("浏览器或 adapter 返回的结果：", skill)
 

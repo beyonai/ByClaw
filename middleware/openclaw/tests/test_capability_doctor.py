@@ -15,7 +15,7 @@ SPEC.loader.exec_module(doctor)
 
 
 class CapabilityDoctorTest(unittest.TestCase):
-    def test_agent_reach_maps_channel_statuses(self):
+    def test_by_reach_maps_channel_statuses(self):
         payload = {
             "github": {"status": "ok", "active_backend": "gh", "message": "available"},
             "twitter": {"status": "warn", "message": "limited"},
@@ -23,7 +23,7 @@ class CapabilityDoctorTest(unittest.TestCase):
             "rss": {"status": "error", "message": "broken"},
         }
 
-        result = doctor.check_agent_reach(
+        result = doctor.check_by_reach(
             lambda argv, timeout: doctor.CommandResult(0, json.dumps(payload), ""),
             1.0,
         )
@@ -35,62 +35,60 @@ class CapabilityDoctorTest(unittest.TestCase):
         self.assertEqual("unavailable", result["channels"]["rss"]["status"])
         self.assertEqual("gh", result["channels"]["github"]["activeBackend"])
 
-    def test_agent_reach_separates_diagnostic_and_effective_backends(self):
+    def test_by_reach_separates_diagnostic_and_effective_backends(self):
         payload = {
-            "web": {"status": "ok", "active_backend": "Jina Reader"},
-            "xiaohongshu": {"status": "ok", "active_backend": "OpenCLI"},
-            "reddit": {"status": "off", "backends": ["OpenCLI", "rdt-cli"]},
+            "web": {"status": "ok", "backends": ["bycli"], "active_backend": "bycli"},
+            "xiaohongshu": {"status": "ok", "active_backend": "bycli"},
+            "reddit": {"status": "off", "backends": ["rdt-cli", "bycli"]},
             "github": {"status": "ok", "active_backend": "gh"},
         }
 
-        result = doctor.check_agent_reach(
+        result = doctor.check_by_reach(
             lambda argv, timeout: doctor.CommandResult(0, json.dumps(payload), ""),
             1.0,
         )
 
         web = result["channels"]["web"]
-        self.assertEqual("disabled_by_policy", web["diagnosticBackend"])
+        self.assertEqual("bycli", web["diagnosticBackend"])
         self.assertEqual(["bycli"], web["backends"])
-        self.assertEqual("Concrete webpage access is restricted to bycli", web["message"])
         self.assertEqual("bycli", web["effectiveBackend"])
         self.assertEqual("bycli", web["activeBackend"])
 
         xiaohongshu = result["channels"]["xiaohongshu"]
-        self.assertEqual("OpenCLI", xiaohongshu["diagnosticBackend"])
+        self.assertEqual("bycli", xiaohongshu["diagnosticBackend"])
         self.assertEqual("bycli", xiaohongshu["effectiveBackend"])
         self.assertEqual("bycli", xiaohongshu["activeBackend"])
 
         reddit = result["channels"]["reddit"]
         self.assertNotIn("diagnosticBackend", reddit)
-        self.assertEqual("bycli", reddit["effectiveBackend"])
-        self.assertEqual("bycli", reddit["activeBackend"])
+        self.assertNotIn("effectiveBackend", reddit)
+        self.assertNotIn("activeBackend", reddit)
 
         github = result["channels"]["github"]
         self.assertEqual("gh", github["diagnosticBackend"])
         self.assertEqual("gh", github["effectiveBackend"])
         self.assertEqual("gh", github["activeBackend"])
 
-    def test_agent_reach_web_channel_always_uses_bycli(self):
+    def test_by_reach_preserves_the_web_executor_reported_by_v2(self):
         payload = {
-            "web": {"status": "ok", "active_backend": "Web Reader MCP"},
+            "web": {"status": "ok", "backends": ["bycli"], "active_backend": "bycli"},
             "github": {"status": "ok", "active_backend": "gh"},
         }
 
-        result = doctor.check_agent_reach(
+        result = doctor.check_by_reach(
             lambda argv, timeout: doctor.CommandResult(0, json.dumps(payload), ""),
             1.0,
         )
 
         web = result["channels"]["web"]
-        self.assertEqual("disabled_by_policy", web["diagnosticBackend"])
+        self.assertEqual("bycli", web["diagnosticBackend"])
         self.assertEqual(["bycli"], web["backends"])
-        self.assertEqual("Concrete webpage access is restricted to bycli", web["message"])
         self.assertEqual("bycli", web["effectiveBackend"])
         self.assertEqual("bycli", web["activeBackend"])
         self.assertEqual("gh", result["channels"]["github"]["effectiveBackend"])
 
-    def test_agent_reach_invalid_json_is_isolated(self):
-        result = doctor.check_agent_reach(
+    def test_by_reach_invalid_json_is_isolated(self):
+        result = doctor.check_by_reach(
             lambda argv, timeout: doctor.CommandResult(0, "not-json", ""),
             1.0,
         )
@@ -98,17 +96,17 @@ class CapabilityDoctorTest(unittest.TestCase):
         self.assertEqual("unavailable", result["status"])
         self.assertEqual("invalid_probe_output", result["error"]["code"])
 
-    def test_agent_reach_timeout_is_isolated(self):
+    def test_by_reach_timeout_is_isolated(self):
         def timeout(argv, timeout):
             raise subprocess.TimeoutExpired(argv, timeout)
 
-        result = doctor.check_agent_reach(timeout, 1.0)
+        result = doctor.check_by_reach(timeout, 1.0)
 
         self.assertEqual("unavailable", result["status"])
         self.assertEqual("check_timeout", result["error"]["code"])
 
-    def test_agent_reach_nonzero_exit_is_isolated(self):
-        result = doctor.check_agent_reach(
+    def test_by_reach_nonzero_exit_is_isolated(self):
+        result = doctor.check_by_reach(
             lambda argv, timeout: doctor.CommandResult(1, "", "failed"),
             1.0,
         )
@@ -116,14 +114,14 @@ class CapabilityDoctorTest(unittest.TestCase):
         self.assertEqual("unavailable", result["status"])
         self.assertEqual("doctor_failed", result["error"]["code"])
 
-    def test_optional_unconfigured_channels_do_not_degrade_agent_reach(self):
+    def test_optional_unconfigured_channels_do_not_degrade_by_reach(self):
         payload = {
             "web": {"status": "ok", "tier": 0, "message": "available"},
             "github": {"status": "ok", "tier": 0, "message": "available"},
             "reddit": {"status": "off", "tier": 2, "message": "not configured"},
         }
 
-        result = doctor.check_agent_reach(
+        result = doctor.check_by_reach(
             lambda argv, timeout: doctor.CommandResult(0, json.dumps(payload), ""),
             1.0,
         )
@@ -622,7 +620,7 @@ class CapabilityDoctorTest(unittest.TestCase):
         )
 
         self.assertEqual("degraded", report["overallStatus"])
-        self.assertEqual("internal_check_failed", report["providers"]["agentReach"]["error"]["code"])
+        self.assertEqual("internal_check_failed", report["providers"]["byReach"]["error"]["code"])
         self.assertEqual("ready", report["providers"]["bycli"]["status"])
 
     def test_report_includes_enterprise_probes_without_changing_overall_status(self):
@@ -635,6 +633,9 @@ class CapabilityDoctorTest(unittest.TestCase):
         )
 
         self.assertEqual("available", result["overallStatus"])
+        self.assertEqual(2, result["schemaVersion"])
+        self.assertIn("byReach", result["providers"])
+        self.assertNotIn("agentReach", result["providers"])
         self.assertEqual("installed", result["providers"]["wecom"]["status"])
         self.assertEqual("authorization_required", result["providers"]["lark"]["status"])
         self.assertEqual("ready", result["providers"]["dws"]["status"])

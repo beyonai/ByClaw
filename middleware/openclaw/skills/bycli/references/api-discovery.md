@@ -14,14 +14,14 @@
 
 `bycli browser analyze <url>` 的 `anti_bot` 字段给答案；手查看 cookies 也行：
 
-| cookie / body 信号 | 厂商 | 裸 Node fetch / curl 结果 | 策略 |
+| cookie / body 信号 | 厂商 | byCLI 浏览器上下文探测结果 | 策略 |
 |------------------|------|-----|-----|
-| `acw_sc__v2` / `acw_tc` / `ssxmod_itna`；body 含 `arg1 = '32-HEX'` 或 `/ntc_captcha/` | **Aliyun WAF** | 返回 slider HTML，不是真数据 | 先在浏览器上下文里验证 endpoint；HTML 型 COOKIE adapter 最终仍走 Node-side fetch + `page.getCookies()` |
-| `__cf_bm` / `cf_clearance` / `__cfduid`；body 含 `Cloudflare Ray ID` / `Checking your browser` | **Cloudflare** | TLS 指纹被标记，失败 | 同上：先 browser-context probe，最终 adapter 仍按模板选 fetch 路线 |
+| `acw_sc__v2` / `acw_tc` / `ssxmod_itna`；body 含 `arg1 = '32-HEX'` 或 `/ntc_captcha/` | **Aliyun WAF** | 返回 slider HTML，不是真数据 | 先在 byCLI 浏览器上下文里验证 endpoint；HTML 型 COOKIE adapter 的请求实现遵循 `adapter-template.md` |
+| `__cf_bm` / `cf_clearance` / `__cfduid`；body 含 `Cloudflare Ray ID` / `Checking your browser` | **Cloudflare** | TLS 指纹被标记，失败 | 同上：先 byCLI 浏览器上下文探测，最终由 byCLI Adapter 按模板执行 |
 | `_abck` / `bm_sz` / `bm_sv` | **Akamai** | 即使带 cookie 也常被挡 | 同上 |
 | body 含 `geetest` / `gt_captcha` | **Geetest** | 滑块/拼图，程序无解 | 超出 skill 范围，放弃或 UI 策略 |
 
-**规则**：看到上面四种任一个，先不要拿**裸** Node fetch 做 endpoint 验证。先用 browser-context probe 或目标 origin 页面确认接口能通；最终 adapter 的 fetch 路线仍按 `adapter-template.md` 选，HTML 型 COOKIE adapter 继续走 Node-side fetch + `page.getCookies()`。
+**规则**：看到上面四种任一个，不得在 byCLI 外直接做 HTTP endpoint 验证。先用 byCLI browser-context probe 或目标 origin 页面确认接口能通；最终 Adapter 的请求实现仍按 `adapter-template.md`，由 byCLI 执行。
 
 ### 0.2 跨 subdomain = CORS 默认关
 

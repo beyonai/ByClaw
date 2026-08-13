@@ -1,12 +1,12 @@
 ---
 name: knowledge-collection
-description: Use when the goal is to COLLECT and keep material rather than just get an answer - collect, crawl, scrape, batch-search, archive, ingest, or organize content from internet or enterprise sources, or store already-collected files in a knowledge base. This is the collection orchestrator and owns collection artifacts, post-processing, and knowledge-base ingestion; prefer it over agent-reach whenever collection intent is explicit, even for a single page or result.
+description: Use when the goal is to COLLECT and keep material rather than just get an answer - collect, crawl, scrape, batch-search, archive, ingest, or organize content from internet or enterprise sources, or store already-collected files in a knowledge base. This is the collection orchestrator and owns collection artifacts, post-processing, and knowledge-base ingestion; prefer it over By-Reach whenever collection intent is explicit, even for a single page or result.
 ---
 
 # Knowledge Collection
 
 这是面向用户的默认知识采集编排 Skill。采集编排器 `knowledge-collection` 判断采集意图、选择来源执行器，并衔接后处理；
-路由器 `agent-reach` 负责公共互联网渠道选择，网站执行器 `bycli` 或其他来源执行器负责取得内容。
+路由器 `agent-reach`（By-Reach）负责公共互联网渠道选择，网站执行器 `bycli` 或其他来源执行器负责取得内容。
 
 **取内容前先读这一条**：采集编排器自身永不取内容。任何一次取内容都必须先按下面的「来源路由」委派来源执行器，
 不得使用 `web_fetch`、`curl`、`wget`、`requests` 或其他直接 HTTP 客户端自行抓取。已经用直连拿到内容时，
@@ -20,9 +20,9 @@ description: Use when the goal is to COLLECT and keep material rather than just 
 
 ## 来源路由
 
-- 公共互联网：加载并遵循 `agent-reach` skill。公开网页、微信公众号文章、静态页面或 raw URL 均走这条路径，
+- 公共互联网：加载并遵循 `agent-reach` skill（By-Reach）。公开网页、微信公众号文章、静态页面或 raw URL 均走这条路径，
   不得因「一个链接」「内容公开可读」「直接抓更快」跳过路由。
-- `agent-reach` 选择 `bycli`，或用户显式要求 byCLI、浏览器或 Adapter 执行：加载并遵循 `bycli` skill。
+- By-Reach 选择 `bycli`，或用户显式要求 byCLI、浏览器或 Adapter 执行：加载并遵循 `bycli` skill。
 - 钉钉/DingTalk：加载并遵循 `dws` skill，并遵循 [DingTalk DWS 采集桥接](references/sources/dingtalk-dws.md)。
 - 飞书/Lark：加载并遵循 `fws` skill，并遵循 [Feishu 采集桥接](references/sources/feishu-fws.md)。
 - 企业微信/WeCom：加载并遵循 `wecomcli` skill，并遵循 [WeCom 采集桥接](references/sources/wecom-wecomcli.md)。
@@ -30,7 +30,7 @@ description: Use when the goal is to COLLECT and keep material rather than just 
 采集编排器自身不取内容，取内容一律委派来源执行器：不得使用 `web_fetch`、`curl`、`wget`、`requests` 或其他直接 HTTP 客户端绕过来源执行器。
 公开可读、静态页面、raw URL、纯文本或 Markdown 内容均不是例外。
 
-Agent Reach 直接后端与 `bycli` 后端返回的结果必须统一进入同一套 collection contract，不得按执行后端分叉产物协议。
+By-Reach 的首选执行器与 `bycli` 兜底返回的结果必须统一进入同一套 collection contract，不得按执行后端分叉产物协议。
 
 委派来源执行器时，采集编排器明确声明当前调用采用“委派采集模式”。该模式的契约是：
 
