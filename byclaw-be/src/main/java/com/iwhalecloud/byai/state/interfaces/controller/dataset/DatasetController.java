@@ -275,12 +275,13 @@ public class DatasetController {
         @RequestPart(value = "fileDescription", required = false) String fileDescription,
         @RequestPart(value = "processFrontMatter", required = false) String processFrontMatter,
         @RequestPart(value = "overwrite", required = false) String overwrite,
-        @RequestPart(value = "skipIfDuplicate", required = false) boolean skipIfDuplicate) {
+        @RequestPart(value = "skipIfDuplicate", required = false) String skipIfDuplicate) {
         try {
 
             directoryPath = new String(directoryPath.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
             UploadResult uploadResult = datasetApplicationService.uploadFiles(files, resourceId, directoryPath,
-                fileDescription, parseOptionalBoolean(processFrontMatter), Boolean.valueOf(overwrite), skipIfDuplicate);
+                fileDescription, parseOptionalBoolean(processFrontMatter), Boolean.parseBoolean(overwrite),
+                Boolean.parseBoolean(skipIfDuplicate));
             return ResponseUtil.successResponse(I18nUtil.get("dataset.file.upload.success"), uploadResult);
         }
         catch (Exception e) {
