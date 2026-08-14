@@ -1,4 +1,4 @@
-import { DELETE, GET, POST, PUT } from '@/service/common/request';
+import { GET, POST } from '@/service/common/request';
 
 // 连接器 ID 直接使用列表接口返回的数值，避免前端维护一份不完整的平台白名单。
 export type ConnectorId = number;
@@ -57,45 +57,7 @@ export type ConnectorEnableFlag = ConnectorListItem['enableFlag'];
 export interface StartConnectorAuthorizationPayload {
   connectorId: ConnectorId;
   // 后端在授权完成后回跳前端时使用，实际换取 token 的回调仍由后端完成。
-  redirectUrl?: string;
-  resourceId?: number;
-  credentialInput?: McpCredentialInput;
-}
-
-export interface McpCredentialInput {
-  type: 'BEARER_TOKEN' | 'API_KEY' | 'COOKIE';
-  value: string;
-}
-
-export interface UserMcpTool {
-  name: string;
-  description?: string;
-  inputSchema: string;
-  riskLevel: 'READ' | 'WRITE' | 'UNKNOWN';
-}
-
-export interface UserMcpService {
-  resourceId: number;
-  resourceCode: string;
-  resourceName: string;
-  resourceDesc?: string;
-  sourceContent: string;
-  definitionRevision: number;
-  endpointFingerprint: string;
-  snapshotVersion?: number;
-  tools: UserMcpTool[];
-  enableFlag: 'Y' | 'N' | null;
-  credentialState?: ConnectorCredentialState | null;
-  connected: boolean;
-  lastVerifiedAt?: string | null;
-}
-
-export interface UserMcpServicePayload {
-  resourceCode: string;
-  resourceName: string;
-  resourceDesc?: string;
-  sourceContent: string;
-  credentialInput?: McpCredentialInput;
+  redirectUrl: string;
 }
 
 export interface ConnectorAuthorization {
@@ -152,20 +114,3 @@ export const cancelConnectorAuthorization = (authorizationId: string) =>
 
 export const revokeConnectorAuthorization = (connectorId: ConnectorId) =>
   POST<boolean>('/byaiService/connector/authorization/revoke', { connectorId });
-
-export const queryUserMcpServices = () => GET<UserMcpService[]>('/byaiService/connector/mcp-services');
-
-export const validateUserMcpService = (data: UserMcpServicePayload) =>
-  POST<UserMcpService>('/byaiService/connector/mcp-services/validate', data);
-
-export const createUserMcpService = (data: UserMcpServicePayload) =>
-  POST<UserMcpService>('/byaiService/connector/mcp-services', data);
-
-export const updateUserMcpService = (resourceId: number, data: UserMcpServicePayload) =>
-  PUT<UserMcpService>(`/byaiService/connector/mcp-services/${resourceId}`, data);
-
-export const deleteUserMcpService = (resourceId: number) =>
-  DELETE<boolean>(`/byaiService/connector/mcp-services/${resourceId}`);
-
-export const updateUserMcpServiceEnabled = (resourceId: number, enabled: boolean) =>
-  PUT<boolean>(`/byaiService/connector/mcp-services/${resourceId}/enabled`, { enabled });

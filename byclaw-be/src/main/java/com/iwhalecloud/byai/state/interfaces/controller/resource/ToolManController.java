@@ -1686,7 +1686,6 @@ public class ToolManController {
      */
     @PostMapping("/mcp/listTools")
     public ResponseUtil<McpSchema.ListToolsResult> listTools(@RequestBody ResourceIdDto resourceIdDto) {
-        rejectPersonalMcpLegacyAccess(resourceIdDto.getResourceId());
         McpSchema.ListToolsResult listToolsResult = ssResExtMcpService.listTools(resourceIdDto);
         return ResponseUtil.success(listToolsResult);
     }
@@ -1699,16 +1698,7 @@ public class ToolManController {
      */
     @PostMapping("/mcp/callToolRequest")
     public ResponseUtil<McpSchema.CallToolResult> callToolRequest(@RequestBody CallMcpParamsDto callMcpParamsDto) {
-        rejectPersonalMcpLegacyAccess(callMcpParamsDto.getResourceId());
         McpSchema.CallToolResult callToolResult = ssResExtMcpService.callToolRequest(callMcpParamsDto);
         return ResponseUtil.success(callToolResult);
-    }
-
-    private void rejectPersonalMcpLegacyAccess(Long resourceId) {
-        SsResource resource = ssResourceService.findById(resourceId);
-        if (resource != null && "MCP".equals(resource.getResourceBizType())
-                && "personal".equals(resource.getOwnerType())) {
-            throw new SecurityException("Personal MCP resources must use the instance-aware MCP gateway");
-        }
     }
 }

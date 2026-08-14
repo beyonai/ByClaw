@@ -14,7 +14,6 @@ jest.mock('@umijs/max', () => ({
 }));
 
 jest.mock('@/components/AntdIcon', () => () => null);
-jest.mock('@/components/QueryInput/components/UserMcpManager', () => () => null);
 jest.mock('@/service/connector', () => ({
   cancelConnectorAuthorization: jest.fn(),
   getConnectorAuthorization: jest.fn(),
@@ -547,35 +546,6 @@ describe('ConnectorControl authorization states', () => {
       expect(screen.getByRole('switch', { name: '停用企业微信' })).toBeChecked();
       expect(container.querySelector('.ant-avatar-group')).not.toBeNull();
     });
-  });
-
-  it('uses a management entry instead of the generic switch for the user MCP template', async () => {
-    mockQueryConnectorList.mockResolvedValue({
-      list: [
-        {
-          connectorCode: 'user-mcp',
-          connectorId: 19,
-          connectorName: '自定义 MCP',
-          connectorType: 'SYSTEM',
-          description: '管理用户 MCP 服务',
-          enableFlag: 'Y',
-        },
-      ],
-      pageNum: 1,
-      pageSize: 100,
-      total: 1,
-      totalPages: 1,
-    });
-
-    render(<ConnectorControl canAuthorize />);
-    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
-
-    const manageButton = await screen.findByRole('button', { name: '管理' });
-    expect(screen.queryByRole('switch', { name: '停用自定义 MCP' })).not.toBeInTheDocument();
-    fireEvent.click(manageButton);
-
-    expect(await screen.findByText('连接器配置')).toBeInTheDocument();
-    expect(mockUpdateConnectorEnable).not.toHaveBeenCalled();
   });
 
   it('shows account actions for enabled and disabled bindings but not unbound connectors', async () => {

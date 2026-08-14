@@ -5374,18 +5374,6 @@ SET provider_code = CASE connector_code
     request_config = '{}',
     update_time = CURRENT_TIMESTAMP
 WHERE connector_code IN ('dingtalk', 'lark', 'wecom');
-
--- 通用用户 MCP 模板；具体认证方式由每个资源实例定义。
-INSERT INTO byai.byai_connector_info (
-    connector_id, connector_code, connector_name, description, connector_type,
-    provider_code, skill_code, auth_mode, auth_config, request_config,
-    runtime_manifest, sort, status_cd, create_by, create_time
-)
-SELECT nextval('byai.seq_any_table'), 'user-mcp', '自定义 MCP', '连接用户保存的远程 MCP 服务', 'SYSTEM',
-       'user-mcp', NULL, 'INSTANCE_DEFINED', '{}', '{}', NULL, 40, '00A', 'system', CURRENT_TIMESTAMP
-WHERE NOT EXISTS (
-    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'user-mcp'
-);
 -- ========== V0.5.0 增量数据（合并到全新初始化脚本） ==========
 -- 与 V0.5.0 增量 DML 保持一致；全新初始化已是终态，本段为幂等空操作。
 -- V0.5.0 增量数据：修复 knowledge-collection / bycli 资源未落库的历史状态
@@ -5472,20 +5460,3 @@ SET target_content = json_build_object(
 FROM byai.ss_resource r
 WHERE e.resource_id = r.resource_id
   AND r.resource_code IN ('knowledge-collection','bycli');
-
--- User MCP administrator policies. Values are maintained in 参数配置管理 -> 参数管理.
-INSERT INTO byai.byai_system_config
-    (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc)
-SELECT nextval('byai.seq_any_table'), 'text', 'BYAI_MCP_ALLOWED_ADDRESSES', '用户 MCP 公网 IP 白名单',
-       'User MCP allowed public IP addresses', '', '逗号分隔的公网 IP；仅允许 HTTPS 443，证书须覆盖该 IP'
-WHERE NOT EXISTS (
-    SELECT 1 FROM byai.byai_system_config WHERE param_code = 'BYAI_MCP_ALLOWED_ADDRESSES'
-);
-
-INSERT INTO byai.byai_system_config
-    (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc)
-SELECT nextval('byai.seq_any_table'), 'text', 'BYAI_MCP_READ_TOOL_RULES', '用户 MCP 只读工具规则',
-       'User MCP read-only tool rules', '', '逗号分隔的 endpointFingerprint:toolName 精确规则'
-WHERE NOT EXISTS (
-    SELECT 1 FROM byai.byai_system_config WHERE param_code = 'BYAI_MCP_READ_TOOL_RULES'
-);

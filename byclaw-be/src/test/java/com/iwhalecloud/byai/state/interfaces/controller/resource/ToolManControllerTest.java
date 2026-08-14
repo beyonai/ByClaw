@@ -5,37 +5,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.state.domain.resource.qo.ThirdPartySkillInstallQo;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
-import com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto;
-import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpSession;
-import org.springframework.test.util.ReflectionTestUtils;
-
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 class ToolManControllerTest {
-
-    @Test
-    void legacyMcpEndpointRejectsPersonalResourceBeforeNetworkAccess() {
-        ToolManController controller = new ToolManController();
-        SsResourceService resourceService = mock(SsResourceService.class);
-        SsResource resource = new SsResource();
-        resource.setResourceBizType("MCP");
-        resource.setOwnerType("personal");
-        when(resourceService.findById(9L)).thenReturn(resource);
-        ReflectionTestUtils.setField(controller, "ssResourceService", resourceService);
-        ResourceIdDto request = new ResourceIdDto();
-        request.setResourceId(9L);
-
-        assertThatThrownBy(() -> controller.listTools(request))
-            .isInstanceOf(SecurityException.class)
-            .hasMessageContaining("instance-aware");
-    }
 
     @AfterEach
     void tearDown() {

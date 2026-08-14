@@ -7,9 +7,6 @@ import com.iwhalecloud.byai.manager.dto.resource.CallMcpParamsDto;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtMcp;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResExtMcpMapper;
-import com.iwhalecloud.byai.manager.domain.usermcp.UserMcpPublicConfig;
-import com.iwhalecloud.byai.manager.domain.usermcp.UserMcpRemoteClient;
-import com.iwhalecloud.byai.manager.domain.usermcp.McpEndpointPolicy;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientSseClientTransport;
@@ -22,12 +19,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
-import java.io.IOException;
-import java.net.Proxy;
-import java.net.ProxySelector;
-import java.net.SocketAddress;
-import java.net.URI;
-import java.net.http.HttpClient;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -38,7 +29,7 @@ import java.util.Set;
  * MCP扩展服务
  */
 @Service
-public class SsResExtMcpService implements UserMcpRemoteClient {
+public class SsResExtMcpService {
 
     private static final Logger logger = LoggerFactory.getLogger(SsResExtMcpService.class);
 
@@ -53,23 +44,8 @@ public class SsResExtMcpService implements UserMcpRemoteClient {
         "insert", "modify", "edit", "publish", "send", "submit", "upload", "download", "import", "export", "sync",
         "bind", "unbind", "grant", "revoke", "approve", "reject");
 
-    private static final ProxySelector NO_PROXY = new ProxySelector() {
-        @Override
-        public List<Proxy> select(URI uri) {
-            return List.of(Proxy.NO_PROXY);
-        }
-
-        @Override
-        public void connectFailed(URI uri, SocketAddress socketAddress, IOException exception) {
-            // No proxy is selected, so there is no proxy failure to report.
-        }
-    };
-
     @Autowired
     private SsResExtMcpMapper ssResExtMcpMapper;
-
-    @Autowired
-    private McpEndpointPolicy mcpEndpointPolicy;
 
     public void save(SsResExtMcp ssResExtMcp) {
         ssResExtMcpMapper.insert(ssResExtMcp);
@@ -85,16 +61,6 @@ public class SsResExtMcpService implements UserMcpRemoteClient {
 
     public SsResExtMcp findById(Long resourceId) {
         return ssResExtMcpMapper.selectById(resourceId);
-    }
-
-    public SsResExtMcp findByIdForUpdate(Long resourceId) {
-        return ssResExtMcpMapper.selectByIdForUpdate(resourceId);
-    }
-
-    public void updateDefinitionIfRevision(SsResExtMcp ext, Long expectedRevision) {
-        if (ssResExtMcpMapper.updateDefinitionIfRevision(ext, expectedRevision) != 1) {
-            throw new IllegalStateException("MCP_DEFINITION_CHANGED");
-        }
     }
 
     /**
@@ -173,87 +139,12 @@ public class SsResExtMcpService implements UserMcpRemoteClient {
             return HttpClientStreamableHttpTransport.builder(domainURL).connectTimeout(MCP_VALIDATION_CONNECT_TIMEOUT)
                 .endpoint(mcpServerUrl).openConnectionOnStartup(false).resumableStreams(false)
                 .httpRequestCustomizer((builder, method, uri, body, context) -> {
-                    Set<Map.Entry<String, Object>> entrySet = safeHeaders.entrySet();
+                    Set<Map.Entry<String, Object>> entrySet = headers.entrySet();
                     for (Map.Entry<String, Object> entry : entrySet) {
                         builder.header(entry.getKey(), String.valueOf(entry.getValue()));
                     }
                 }).build();
         }
-    }
-
-    @Override
-    public List<RemoteTool> discover(UserMcpPublicConfig config, Map<String, String> credentialHeaders) {
-        McpClientTransport transport = buildUserMcpTransport(config, credentialHeaders);
-        Duration timeout = Duration.ofSeconds(config.timeoutSeconds());
-        try (McpSyncClient client = McpClient.sync(transport)
-            .initializationTimeout(timeout).requestTimeout(timeout).build()) {
-            client.initialize();
-            McpSchema.ListToolsResult result = client.listTools();
-            if (result == null || result.tools() == null) {
-                return List.of();
-            }
-            return result.tools().stream()
-                .map(tool -> new RemoteTool(
-                    tool.name(),
-                    tool.description(),
-                    JSON.toJSONString(tool.inputSchema())))
-                .toList();
-        } catch (Exception e) {
-            throw new IllegalArgumentException("MCP initialize/tools-list failed", e);
-        }
-    }
-
-    @Override
-    public String call(
-            UserMcpPublicConfig config,
-            Map<String, String> credentialHeaders,
-            String toolName,
-            Map<String, Object> arguments) {
-        McpClientTransport transport = buildUserMcpTransport(config, credentialHeaders);
-        Duration timeout = Duration.ofSeconds(config.timeoutSeconds());
-        try (McpSyncClient client = McpClient.sync(transport)
-            .initializationTimeout(timeout).requestTimeout(timeout).build()) {
-            client.initialize();
-            McpSchema.CallToolResult result = client.callTool(
-                new McpSchema.CallToolRequest(toolName, arguments == null ? Map.of() : Map.copyOf(arguments)));
-            if (result == null || Boolean.TRUE.equals(result.isError())) {
-                throw new IllegalStateException("MCP tool returned an error");
-            }
-            String json = JSON.toJSONString(result);
-            if (json.length() > 1_048_576) {
-                throw new IllegalStateException("MCP tool response is too large");
-            }
-            return json;
-        } catch (RuntimeException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new IllegalStateException("MCP tool call failed", e);
-        }
-    }
-
-    private McpClientTransport buildUserMcpTransport(
-            UserMcpPublicConfig config,
-            Map<String, String> credentialHeaders) {
-        Map<String, String> safeHeaders = credentialHeaders == null ? Map.of() : Map.copyOf(credentialHeaders);
-        Duration timeout = Duration.ofSeconds(config.timeoutSeconds());
-        if (config.transport() == UserMcpPublicConfig.Transport.SSE) {
-            return HttpClientSseClientTransport.builder(config.domainUrl()).connectTimeout(timeout)
-                .customizeClient(builder -> builder.proxy(NO_PROXY).followRedirects(HttpClient.Redirect.NEVER))
-                .sseEndpoint(config.serverPath())
-                .httpRequestCustomizer((builder, method, uri, body, context) -> {
-                    mcpEndpointPolicy.validate(config.domainUrl(), config.serverPath());
-                    safeHeaders.forEach(builder::header);
-                })
-                .build();
-        }
-        return HttpClientStreamableHttpTransport.builder(config.domainUrl()).connectTimeout(timeout)
-            .customizeClient(builder -> builder.proxy(NO_PROXY).followRedirects(HttpClient.Redirect.NEVER))
-            .endpoint(config.serverPath()).openConnectionOnStartup(false).resumableStreams(false)
-            .httpRequestCustomizer((builder, method, uri, body, context) -> {
-                mcpEndpointPolicy.validate(config.domainUrl(), config.serverPath());
-                safeHeaders.forEach(builder::header);
-            })
-            .build();
     }
 
     /**

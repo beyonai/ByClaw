@@ -327,10 +327,6 @@ public class ToolManService {
         if (StringUtils.isEmpty(ownerType)) {
             ownerType = root.getString("ownerType");
         }
-        if (StringUtils.equals(resourceBizType, ResourceBizType.MCP.getCode())
-                && StringUtils.equals(ownerType, "personal")) {
-            throw new IllegalArgumentException("Personal MCP must use /connector/mcp-services");
-        }
 
         // 5. 以 systemCode + resourceBizType + resourceCode 作为幂等键：存在则更新，不存在则新增。
         SsResource existing = ssResourceService.findByImportIdentity(systemCode, resourceBizType, resourceCode);
