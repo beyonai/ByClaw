@@ -636,6 +636,9 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "正文",
             "fileName",
             "可点击预览",
+            "必须串行执行",
+            "精确 URL + `--date`",
+            "Chrome 下载事件",
         ):
             self.assertIn(phrase, weixin)
         for phrase in (

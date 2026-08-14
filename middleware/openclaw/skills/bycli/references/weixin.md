@@ -25,6 +25,12 @@ Use IDs from the corresponding list command: `accounts` supplies the `fakeid` fo
 
 `download-publish-data` accepts an exact article URL or title. If a title matches multiple records, do not guess: rerun with the complete URL or add `--date YYYY-MM-DD` using a user-provided or already-known publication date.
 
+## Published-data spreadsheet downloads
+
+- When `published` has already returned an article URL and publication date, use **精确 URL + `--date`**; do not replace it with a title. A title is only a fallback when the URL is unavailable.
+- For multiple `download-publish-data` requests in the same authenticated browser session, commands 必须串行执行. Wait for each command to return `status: downloaded` and a readable `path` before starting the next; never use parallel shell jobs, `Promise.all`, or another concurrent batch mechanism. Persistent Weixin adapter commands share an adapter-managed TAB.
+- A `download-publish-data` timeout after the trace confirms navigation to `appmsganalysis?action=detailpage` is a download-observation failure, not a login timeout. Preserve the trace and report that no matching Chrome 下载事件 was observed; inspect the OpenClaw browser's installed byCLI extension version, `downloads` permission, and Chrome download state before changing adapter code or retrying with different queries.
+
 ## Browser session
 
 - Use browser authentication by default. Every browser-backed Weixin command must include `--site-session persistent --keep-tab true`.
@@ -51,7 +57,7 @@ Omit optional placeholders and their flags rather than passing empty strings. `-
 
 ## Login and verification gate
 
-After the adapter's post-navigation check, treat login `AUTH_REQUIRED` / exit code 77, legacy or outer login `TIMEOUT` / exit code 75, anti-bot prompts, CAPTCHAs, sliders, SMS/security checks, and WeChat environment-verification pages as a required human gate. This includes “环境异常，完成验证后即可继续访问” and its “去验证” button. These are not Adapter defects; do not enter AutoFix or modify Adapter code.
+After the adapter's post-navigation check, treat login `AUTH_REQUIRED` / exit code 77, a login `TIMEOUT` / exit code 75, anti-bot prompts, CAPTCHAs, sliders, SMS/security checks, and WeChat environment-verification pages as a required human gate. This includes “环境异常，完成验证后即可继续访问” and its “去验证” button. These are not Adapter defects; do not enter AutoFix or modify Adapter code. A download-observation timeout follows the published-data spreadsheet rule above instead of this gate.
 
 1. Stop all tool execution immediately. Do not click, bypass, refresh, retry, navigate, focus another page, switch authentication source, or use another acquisition method.
 2. Freeze the current browser context. Do not issue another Weixin, raw browser, doctor, daemon, or browser-lifecycle command; keep the current tab and processes available for the user.
