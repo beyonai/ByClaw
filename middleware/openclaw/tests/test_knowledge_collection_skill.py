@@ -216,6 +216,20 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn("用户显式要求 byCLI、浏览器或 Adapter", skill)
         self.assertNotIn("浏览器或 adapter 返回的结果：", skill)
 
+    def test_owned_weixin_backend_collection_routes_directly_to_bycli(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "我的公众号",
+            "后台数据",
+            "`bycli` skill",
+            "`published`",
+            "`download-publish-data`",
+            "不得询问公众号名称、原始 ID 或“数据明细”的含义",
+            "登录、验证码或环境验证",
+        ):
+            self.assertIn(phrase, skill)
+
     def test_skill_has_exact_openclaw_ui_metadata(self):
         metadata_text = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
         interface = parse_interface(metadata_text)
