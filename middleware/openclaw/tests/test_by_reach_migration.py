@@ -25,6 +25,7 @@ class ByReachMigrationTest(unittest.TestCase):
         self.assertIn("'agent-reach'", v031)
         self.assertIn("By-Reach v2", v040)
         self.assertIn("OPENCLAW_BUNDLED_SKILLS", v040)
+        self.assertIn("regexp_replace(c.param_value, '\\s', '', 'g')", v040)
         self.assertIn("resource_code = 'agent-reach'", v040)
 
     def test_production_image_pins_and_verifies_by_reach_v2(self):

@@ -475,13 +475,24 @@ WHERE status_cd = '00A';
 -- By-Reach v2 产品面迁移：保留 agent-reach 技术代码，将显示名称和说明升级为 By-Reach。
 -- V0.3.1 已发布，不能重写；本版本仅更新已有数据，且可重复执行。
 UPDATE byai.byai_system_config c
-SET param_value = replace(
-    c.param_value,
-    '{"skillName":"agent-reach","skillCode":"agent-reach","skillDescZh":"路由公开互联网渠道能力，并按 ByClaw 覆盖规则选择 byCLI 等执行器。","skillDescEn":"Route public-internet channels and select executors such as byCLI according to ByClaw override rules."}',
-    '{"skillName":"By-Reach","skillCode":"agent-reach","skillDescZh":"路由公共互联网渠道，并按 By-Reach v2 策略选择已批准的执行器。","skillDescEn":"Route public-internet channels and select approved By-Reach v2 executors."}'
+SET param_value = regexp_replace(
+    regexp_replace(
+        regexp_replace(
+            c.param_value,
+            '"skillName"[[:space:]]*:[[:space:]]*"agent-reach"',
+            '"skillName":"By-Reach"',
+            'g'
+        ),
+        '"skillDescZh"[[:space:]]*:[[:space:]]*"路由公开互联网渠道能力，并按 ByClaw 覆盖规则选择 byCLI 等执行器。"',
+        '"skillDescZh":"路由公共互联网渠道，并按 By-Reach v2 策略选择已批准的执行器。"',
+        'g'
+    ),
+    '"skillDescEn"[[:space:]]*:[[:space:]]*"Route public-internet channels and select executors such as byCLI according to ByClaw override rules\."',
+    '"skillDescEn":"Route public-internet channels and select approved By-Reach v2 executors."',
+    'g'
 )
 WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
-  AND c.param_value LIKE '%"skillCode":"agent-reach"%';
+  AND regexp_replace(c.param_value, '\s', '', 'g') LIKE '%"skillCode":"agent-reach"%';
 
 UPDATE byai.ss_resource
 SET resource_name = 'By-Reach',
