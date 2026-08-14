@@ -2,7 +2,7 @@
 
 Load this reference for every `bycli weixin` command; `--auth-source`; `WECHAT_TOKEN`, `WECHAT_COOKIE`, or `WECHAT_FINGERPRINT`; and authentication or verification failures from `mp.weixin.qq.com`.
 
-This reference tracks the Weixin command surface in `@sovovs/bycli` 2.1.19. Treat `bycli weixin --help -f yaml` and `bycli weixin <command> --help -f yaml` as the source of truth when the installed version differs. This reference only defines Weixin command execution, authentication gates, session handling, and returned records. When a caller delegates the task, return all requested records, bodies, and file metadata to that caller without choosing a canonical artifact name or storage layout.
+This reference tracks the Weixin command surface in `@sovovs/bycli` 2.1.21. Treat `bycli weixin --help -f yaml` and `bycli weixin <command> --help -f yaml` as the source of truth when the installed version differs. This reference only defines Weixin command execution, authentication gates, session handling, and returned records. When a caller delegates the task, return all requested records, bodies, and file metadata to that caller without choosing a canonical artifact name or storage layout.
 
 ## Command selection
 
@@ -16,7 +16,7 @@ This reference tracks the Weixin command surface in `@sovovs/bycli` 2.1.19. Trea
 | `published [query]` | read | List published records and engagement metrics; optional title or URL substring filter. Defaults: `--limit 10 --max-pages 5 --timeout 30`. |
 | `download --url <article-url>` | read | Save one article as Markdown; returns title, author, publish time, status, size, and saved path. Defaults: `--output ./weixin-articles --download-images true`. |
 | `save-articles <fakeid>` | write | Save account articles as Markdown; returns per-record status, stage, path, error, and URL. Supports `--name`, `--output`, `--limit`, and `--max-pages`. |
-| `download-publish-data <query>` | write | Match an exact article URL or title and download its detail spreadsheet; returns title, publication time, URL, status, path, and size. Defaults: `--output ./weixin-publish-data --max-pages 5 --timeout 60`. |
+| `download-publish-data <query>` | write | Match an exact article URL or title and save its content-analysis Markdown report and associated data file; returns title, publication time, URL, status, `markdownPath`, `dataPath`, size, and error. Defaults: `--output ./weixin-publish-data --max-pages 5 --timeout 60`. |
 | `create-draft <content>` | write | Create a Weixin article draft; requires `--title`, supports `--author`, `--cover-image`, `--summary`, and `--timeout` (default 180), and returns `status` and `detail`. |
 
 Use IDs from the corresponding list command: `accounts` supplies the `fakeid` for `articles` and `save-articles`; `collections` supplies the `collectionId` for `collection-detail`.
@@ -28,8 +28,8 @@ Use IDs from the corresponding list command: `accounts` supplies the `fakeid` fo
 ## Published-data spreadsheet downloads
 
 - When `published` has already returned an article URL and publication date, use **精确 URL + `--date`**; do not replace it with a title. A title is only a fallback when the URL is unavailable.
-- For multiple `download-publish-data` requests in the same authenticated browser session, commands 必须串行执行. Wait for each command to return `status: downloaded` and a readable `path` before starting the next; never use parallel shell jobs, `Promise.all`, or another concurrent batch mechanism. Persistent Weixin adapter commands share an adapter-managed TAB.
-- A `download-publish-data` timeout after the trace confirms navigation to `appmsganalysis?action=detailpage` is a download-observation failure, not a login timeout. Preserve the trace and report that no matching Chrome 下载事件 was observed; inspect the OpenClaw browser's installed byCLI extension version, `downloads` permission, and Chrome download state before changing adapter code or retrying with different queries.
+- For multiple `download-publish-data` requests in the same authenticated browser session, commands 必须串行执行. Wait for each command to return `status: downloaded` and readable `markdownPath` and `dataPath` values before starting the next; never use parallel shell jobs, `Promise.all`, or another concurrent batch mechanism. Persistent Weixin adapter commands share an adapter-managed TAB.
+- On a `download-publish-data` timeout, rerun the identical command once with `--trace retain-on-failure`; do not change its query or other options. If that trace confirms navigation to `appmsganalysis?action=detailpage`, classify it as a download-observation failure rather than a login timeout. Preserve the trace and report that no matching Chrome 下载事件 was observed; inspect the OpenClaw browser's installed byCLI extension version, `downloads` permission, and Chrome download state before changing adapter code or retrying with different queries.
 
 ## Browser session
 
@@ -49,7 +49,8 @@ bycli weixin drafts --limit <n> --timeout 60 --site-session persistent --keep-ta
 bycli weixin published '<optional title or URL>' --limit <n> --max-pages <n> --timeout 30 --site-session persistent --keep-tab true -f json
 bycli weixin download --url '<article-url>' --output '<directory>' --download-images true --site-session persistent --keep-tab true -f json
 bycli weixin save-articles '<fakeid>' --limit <n> --max-pages <n> --output '<directory>' --auth-source browser --site-session persistent --keep-tab true -f json
-bycli weixin download-publish-data '<exact URL or title>' --date YYYY-MM-DD --output '<directory>' --max-pages <n> --timeout 60 --site-session persistent --keep-tab true -f json
+bycli weixin download-publish-data '<exact article URL>' --date YYYY-MM-DD --output '<directory>' --max-pages <n> --timeout 60 --site-session persistent --keep-tab true -f json
+bycli weixin download-publish-data '<exact article title>' --output '<directory>' --max-pages <n> --timeout 60 --site-session persistent --keep-tab true -f json
 bycli weixin create-draft '<content>' --title '<title>' --author '<author>' --cover-image '<local path>' --summary '<summary>' --timeout 180 --site-session persistent --keep-tab true -f json
 ```
 
@@ -72,10 +73,10 @@ On the first login `TIMEOUT`, follow this gate immediately. Do not change `BYCLI
 
 - Preserve the complete structured output for the requested scope; do not silently discard fields that are not displayed in the default table format.
 - Preserve partial successes. Return completed records and identify each failed or incomplete record with its original Adapter `status`, `stage`, and `error` where available.
-- For local-file commands, return the resolved `saved` or `path`, `size`, and status alongside the corresponding record. Never claim a file exists unless the returned path is readable.
+- For local-file commands, return the resolved `saved`, `path`, `markdownPath`, or `dataPath`, together with `size` and status, alongside the corresponding record. Never claim a file exists unless every returned path relevant to that record is readable.
 - For `articles`, return the 完整文章索引 for the requested `--limit` / `--max-pages` scope. Preserve title, URL, author, digest, and publish time.
 - For `save-articles`, return the saved 正文 and each `path` (the current equivalent of legacy `fileName` metadata) alongside the corresponding record. Do not redownload records already returned with a readable saved file.
-- For a requested article that has not been saved, use `weixin download --url '<article-url>'`, then return its body and file metadata.
+- For a requested article that has not been saved, use `weixin download --url '<article-url>'`. Only after the returned `saved` path is readable, read that Markdown file and return its body together with the file metadata.
 - `collection-detail` serializes nested settings and items into `settingsJson` and `itemsJson`. Parse these JSON strings before summarizing them, but also preserve the original values in delegated results.
 - `published` returns `notified`, `failed`, `reads`, `likes`, `shares`, `recommends`, `comments`, `underlines`, and `reprints`. Keep zero values; do not treat them as missing.
 - `drafts` exposes only `Index`, `Title`, and `Time`; do not imply that draft body or edit URL was returned.
