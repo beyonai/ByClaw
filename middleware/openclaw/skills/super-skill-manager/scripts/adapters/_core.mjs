@@ -32,12 +32,23 @@ function parse(result, source, started) {
   if (!result?.ok) return { error: errorEnvelope({ source, code: errorCode(result), message: safeMessage(result?.stderr), elapsedMs: elapsed(started) }) };
   try { return { value: JSON.parse(result.stdout) }; } catch { return { error: errorEnvelope({ source, code: 'PARSE_ERROR', message: 'byCLI returned invalid JSON.', elapsedMs: elapsed(started) }) }; }
 }
+function currentCapability(entry) {
+  return entry && typeof entry === 'object' && !Array.isArray(entry) && typeof entry.command === 'string' && entry.command &&
+    typeof entry.site === 'string' && entry.site && typeof entry.name === 'string' && entry.name;
+}
 function capabilities(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || !Array.isArray(value.capabilities) ||
-    !value.capabilities.every((entry) => entry && typeof entry === 'object' && typeof entry.id === 'string' && entry.id)) return null;
+  if (Array.isArray(value)) {
+    return value.length && value.every(currentCapability) ? value : null;
+  }
+  if (!value || typeof value !== 'object' || !Array.isArray(value.capabilities) ||
+    !value.capabilities.every((entry) => entry && typeof entry === 'object' && !Array.isArray(entry) && typeof entry.id === 'string' && entry.id)) return null;
   return value.capabilities;
 }
-function available(entries, id) { return entries.some((entry) => entry?.id === id || entry?.name === id || entry?.command?.includes(id)); }
+function available(entries, id, command) {
+  return entries.some((entry) => currentCapability(entry)
+    ? command ? entry.command === command : entry.command.split('/', 1)[0] === id
+    : entry?.id === id || entry?.name === id || entry?.command?.includes(id));
+}
 function records(value) {
   const list = Array.isArray(value) ? value : (Array.isArray(value?.data) ? value.data : (Array.isArray(value?.items) ? value.items : null));
   return Array.isArray(list) && list.every((entry) => entry && typeof entry === 'object' && !Array.isArray(entry) &&
@@ -113,7 +124,7 @@ export function createAdapter({ id, kinds, domains, clawhub = false, github = fa
       }
       command = 'openclaw';
       args = ['skills', 'search', query, '--json', '--limit', String(limit)];
-    } else if (github && available(caps, 'gh')) { command = 'bycli'; args = ['gh', 'search', query, '-f', 'json', '--limit', String(limit)]; }
+    } else if (github && available(caps, 'gh', 'gh/search')) { command = 'bycli'; args = ['gh', 'search', query, '-f', 'json', '--limit', String(limit)]; }
     else if (!github && available(caps, id)) { command = 'bycli'; args = [id, 'search', query, '-f', 'json', '--limit', String(limit)]; }
     else if (!github && available(caps, 'search-engine')) { command = 'bycli'; args = ['search-engine', 'search', `site:${domains[0]} ${query}`, '-f', 'json', '--limit', String(limit)]; }
     else if (!github && (available(caps, 'browser') || available(caps, 'web'))) { command = 'bycli'; args = ['web', 'read', `https://${domains[0]}/search?q=${encodeURIComponent(query)}`, '-f', 'json']; }

@@ -231,6 +231,91 @@ test('github only uses bycli gh and adapter normalizers return shared records', 
   assert.equal(normalized.provenance.provider, 'github');
 });
 
+test('github routes through bycli gh when bycli list returns current capability arrays', async () => {
+  const calls = [];
+  const result = await github.search({
+    queries: ['review'], limit: 1,
+    runner: runnerFrom({
+      bycli: { ok: true, stdout: JSON.stringify([{ command: 'gh/search', site: 'github', name: 'search' }]) },
+      'bycli gh search review -f json --limit 1': { ok: true, stdout: JSON.stringify([{ id: 'a', name: 'Review' }]) },
+    }, calls), deadline: 8_000,
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, [
+    ['bycli', ['list', '-f', 'json']],
+    ['bycli', ['gh', 'search', 'review', '-f', 'json', '--limit', '1']],
+  ]);
+});
+
+test('github fails closed when a current capability array entry is missing name', async () => {
+  const calls = [];
+  const result = await github.search({
+    queries: ['review'], limit: 1,
+    runner: runnerFrom({
+      bycli: { ok: true, stdout: JSON.stringify([{ command: 'gh/search', site: 'github' }]) },
+    }, calls), deadline: 8_000,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'PARSE_ERROR');
+  assert.deepEqual(calls, [['bycli', ['list', '-f', 'json']]]);
+});
+
+test('github fails closed for an empty current capability array', async () => {
+  const calls = [];
+  const result = await github.search({
+    queries: ['review'], limit: 1,
+    runner: runnerFrom({ bycli: { ok: true, stdout: '[]' } }, calls), deadline: 8_000,
+  });
+  assert.equal(result.error.code, 'PARSE_ERROR');
+  assert.deepEqual(calls, [['bycli', ['list', '-f', 'json']]]);
+});
+
+test('github fails closed for mixed current and legacy capability entries', async () => {
+  const calls = [];
+  const result = await github.search({
+    queries: ['review'], limit: 1,
+    runner: runnerFrom({
+      bycli: { ok: true, stdout: JSON.stringify([{ command: 'gh/search', site: 'github', name: 'search' }, { id: 'gh' }]) },
+    }, calls), deadline: 8_000,
+  });
+  assert.equal(result.error.code, 'PARSE_ERROR');
+  assert.deepEqual(calls, [['bycli', ['list', '-f', 'json']]]);
+});
+
+test('github permits an empty legacy capability list', async () => {
+  const calls = [];
+  const result = await github.search({
+    queries: ['review'], limit: 1,
+    runner: runnerFrom({ bycli: { ok: true, stdout: JSON.stringify({ capabilities: [] }) } }, calls), deadline: 8_000,
+  });
+  assert.equal(result.error.code, 'BROWSER_CONNECT');
+  assert.deepEqual(calls, [['bycli', ['list', '-f', 'json']]]);
+});
+
+test('github does not match current commands that only contain gh as a substring', async () => {
+  const calls = [];
+  const result = await github.search({
+    queries: ['review'], limit: 1,
+    runner: runnerFrom({
+      bycli: { ok: true, stdout: JSON.stringify([{ command: 'not-gh/search', site: 'github', name: 'search' }]) },
+    }, calls), deadline: 8_000,
+  });
+  assert.equal(result.error.code, 'BROWSER_CONNECT');
+  assert.deepEqual(calls, [['bycli', ['list', '-f', 'json']]]);
+});
+
+test('github requires the exact current gh search command', async () => {
+  const calls = [];
+  const result = await github.search({
+    queries: ['review'], limit: 1,
+    runner: runnerFrom({
+      bycli: { ok: true, stdout: JSON.stringify([{ command: 'gh/not-search', site: 'github', name: 'not-search' }]) },
+    }, calls), deadline: 8_000,
+  });
+  assert.equal(result.error.code, 'BROWSER_CONNECT');
+  assert.deepEqual(calls, [['bycli', ['list', '-f', 'json']]]);
+});
+
 test('adapters surface parse, auth, timeout, and browser stop errors structurally', async () => {
   const cases = [
     [{ ok: true, stdout: '{' }, 'PARSE_ERROR'],
