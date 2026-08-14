@@ -3,10 +3,7 @@ package com.iwhalecloud.byai.manager.domain.usermcp;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.net.InetAddress;
 import java.net.URI;
-import java.util.List;
-import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import com.iwhalecloud.byai.manager.domain.staticdata.service.SystemConfigService;
@@ -16,8 +13,8 @@ import static org.mockito.Mockito.when;
 class McpEndpointPolicyTest {
 
     @Test
-    void canonicalizesValidatedHttpsEndpoint() throws Exception {
-        McpEndpointPolicy policy = policy(address(93, 184, 216, 34));
+    void canonicalizesValidatedHttpsEndpoint() {
+        McpEndpointPolicy policy = new McpEndpointPolicy("mcp.example.com");
 
         URI endpoint = policy.validate("https://mcp.example.com/", "/api/../mcp");
 
@@ -25,23 +22,8 @@ class McpEndpointPolicyTest {
     }
 
     @Test
-    void rejectsPrivateReservedAndMappedAddresses() throws Exception {
-        for (InetAddress blocked : List.of(
-                address(127, 0, 0, 1),
-                address(10, 0, 0, 1),
-                address(169, 254, 1, 1),
-                address(192, 168, 1, 1),
-                InetAddress.getByName("::1"),
-                InetAddress.getByName("::ffff:127.0.0.1"))) {
-            McpEndpointPolicy policy = policy(blocked);
-            assertThatThrownBy(() -> policy.validate("https://mcp.example.com", "/mcp"))
-                .isInstanceOf(IllegalArgumentException.class);
-        }
-    }
-
-    @Test
-    void rejectsHttpCustomPortsCrossOriginAndProtocolRelativeEndpoints() throws Exception {
-        McpEndpointPolicy policy = policy(address(93, 184, 216, 34));
+    void rejectsHttpCustomPortsCrossOriginAndProtocolRelativeEndpoints() {
+        McpEndpointPolicy policy = new McpEndpointPolicy("mcp.example.com");
 
         assertThatThrownBy(() -> policy.validate("http://mcp.example.com", "/mcp"))
             .isInstanceOf(IllegalArgumentException.class);
@@ -54,22 +36,29 @@ class McpEndpointPolicyTest {
     }
 
     @Test
-    void productionPolicyRejectsAllowlistedDnsNamesToPreventDnsRebinding() {
-        McpEndpointPolicy policy = new McpEndpointPolicy("mcp.example.com");
+    void productionPolicyAcceptsExactAllowlistedDomainAndTrustedInternalHosts() {
+        SystemConfigService systemConfigService = mock(SystemConfigService.class);
+        when(systemConfigService.getStringParamValueByCode("BYAI_MCP_ALLOWED_ADDRESSES"))
+            .thenReturn("mcp.deepwiki.com,127.0.0.1,localhost,10.10.2.15");
+        McpEndpointPolicy policy = new McpEndpointPolicy(systemConfigService);
 
-        assertThatThrownBy(() -> policy.validate("https://mcp.example.com", "/mcp"))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("public IP literal");
+        assertThat(policy.validate("https://mcp.deepwiki.com", "/mcp")).isNotNull();
+        assertThat(policy.validate("https://127.0.0.1", "/mcp")).isNotNull();
+        assertThat(policy.validate("https://localhost", "/mcp")).isNotNull();
+        assertThat(policy.validate("https://10.10.2.15", "/mcp")).isNotNull();
     }
 
     @Test
-    void productionPolicyAcceptsAnAllowlistedPublicIpLiteral() {
+    void productionPolicyRejectsUnlistedSubdomainAndWildcardEntry() {
         SystemConfigService systemConfigService = mock(SystemConfigService.class);
-        when(systemConfigService.getStringParamValueByCode("BYAI_MCP_ALLOWED_ADDRESSES")).thenReturn("8.8.8.8");
+        when(systemConfigService.getStringParamValueByCode("BYAI_MCP_ALLOWED_ADDRESSES"))
+            .thenReturn("mcp.deepwiki.com,*.example.com");
         McpEndpointPolicy policy = new McpEndpointPolicy(systemConfigService);
 
-        assertThat(policy.validate("https://8.8.8.8", "/mcp").toString())
-            .isEqualTo("https://8.8.8.8/mcp");
+        assertThatThrownBy(() -> policy.validate("https://api.mcp.deepwiki.com", "/mcp"))
+            .hasMessageContaining("not approved");
+        assertThatThrownBy(() -> policy.validate("https://api.example.com", "/mcp"))
+            .hasMessageContaining("not approved");
     }
 
     @Test
@@ -83,13 +72,5 @@ class McpEndpointPolicyTest {
         assertThatThrownBy(() -> policy.validate("https://8.8.8.8", "/mcp"))
             .hasMessageContaining("not approved");
         assertThat(policy.validate("https://1.1.1.1", "/mcp")).isNotNull();
-    }
-
-    private McpEndpointPolicy policy(InetAddress address) {
-        return new McpEndpointPolicy(host -> List.of(address), Set.of(443));
-    }
-
-    private InetAddress address(int a, int b, int c, int d) throws Exception {
-        return InetAddress.getByAddress(new byte[] {(byte) a, (byte) b, (byte) c, (byte) d});
     }
 }

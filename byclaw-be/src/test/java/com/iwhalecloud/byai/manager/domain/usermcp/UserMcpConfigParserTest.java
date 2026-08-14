@@ -3,10 +3,6 @@ package com.iwhalecloud.byai.manager.domain.usermcp;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.net.InetAddress;
-import java.util.List;
-import java.util.Set;
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -17,9 +13,8 @@ class UserMcpConfigParserTest {
     private UserMcpConfigParser parser;
 
     @BeforeEach
-    void setUp() throws Exception {
-        InetAddress publicAddress = InetAddress.getByAddress("mcp.example.com", new byte[] {93, (byte) 184, (byte) 216, 34});
-        McpEndpointPolicy endpointPolicy = new McpEndpointPolicy(host -> List.of(publicAddress), Set.of(443));
+    void setUp() {
+        McpEndpointPolicy endpointPolicy = new McpEndpointPolicy("mcp.example.com");
         parser = new UserMcpConfigParser(new ObjectMapper(), endpointPolicy);
     }
 

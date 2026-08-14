@@ -600,9 +600,11 @@ resource.ownerType = personal AND resource.createBy = currentUserId
 静态 Header 使用 AES-GCM 信封加密，部署时必须通过 `BYAI_MCP_CREDENTIAL_KEY` 提供 Base64 编码的
 32 字节密钥；该值是部署级秘密，只能由环境变量注入，不得放入代码、数据库或管理端参数；未配置时 `NONE` 仍可使用，
 `STATIC_HEADER` 授权会安全失败。
-`BYAI_MCP_ALLOWED_ADDRESSES` 存放在管理端“参数配置管理 → 参数管理”，值为逗号分隔的公网 IP 字面量 allowlist，
-默认为空并拒绝所有出站 MCP；策略在每次端点决策时读取最新系统参数，管理员保存后无需重启应用；
-阶段一不接受域名，避免 JDK MCP transport 的 DNS 检查—使用竞态；HTTPS 证书必须覆盖该 IP。
+`BYAI_MCP_ALLOWED_ADDRESSES` 存放在管理端“参数配置管理 → 参数管理”，值为逗号分隔的精确受信任主机 allowlist，
+可填写域名、内网 IP 或 `localhost`，不支持通配符；默认为空并拒绝所有出站 MCP。策略在每次端点决策时读取最新
+系统参数，管理员保存后无需重启应用；用户 URL 的主机必须与某个条目精确匹配（忽略大小写），HTTPS 证书仍按 URL
+中的原始主机校验。该参数是高权限出站目标清单，生产环境应在网络层限制实际 egress 范围；仅靠应用层域名匹配不能
+消除后续 DNS 变更风险。
 当前阶段不提供工具只读规则参数，所有发现工具统一保存为 `READ/SYSTEM_DEFAULT` 并可进入调用网关。
 这是临时兼容策略，会放行远端服务暴露的写操作工具；阶段二必须恢复风险分类和单次 Grant 后才能视为完整安全闭环。
 
