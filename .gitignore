@@ -79,6 +79,8 @@ byclaw-data/resource/import_package_owl_onto_bak/
 .playwright-mcp/
 .superpowers/
 docs/superpowers/
+docs/connectors/
+docs/bycli-recorder/
 .claude/settings.local.json
 .neuralmemory/
 .rtk/
