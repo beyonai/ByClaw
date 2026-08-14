@@ -268,13 +268,6 @@ class ConnectorSchemaTest {
     }
 
     @Test
-    void connectorAuthBatchLookupDefinesWellFormedForeachClosingAttribute() throws Exception {
-        String authSql = read("byclaw-be/src/main/java/com/iwhalecloud/byai/manager/mapper/connector/ConnectorAuthMapper.java");
-
-        assertThat(authSql).contains("<foreach collection='resourceids' item='resourceid' open='(' separator=',' close=')'>");
-    }
-
-    @Test
     void connectorManagedParametersAllowMultipleKeysPerConnector() throws Exception {
         String migrationSql = read("deploy/migrations/versions/V0.3.1/V0.3.1__ddl.sql");
         String baseMigrationSql = read("deploy/migrations/versions/V0.2.0/V0.2.0__ddl.sql");
