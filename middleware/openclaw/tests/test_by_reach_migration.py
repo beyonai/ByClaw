@@ -5,14 +5,28 @@ from pathlib import Path
 
 
 OPENCLAW_ROOT = Path(__file__).parents[1]
+REPO_ROOT = OPENCLAW_ROOT.parents[1]
 MODULE_PATH = OPENCLAW_ROOT / "byclaw_capability_doctor.py"
 SPEC = importlib.util.spec_from_file_location("byclaw_capability_doctor", MODULE_PATH)
 doctor = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(doctor)
 
+V031_DML = REPO_ROOT / "deploy" / "migrations" / "versions" / "V0.3.1" / "V0.3.1__dml.sql"
+V040_DML = REPO_ROOT / "deploy" / "migrations" / "versions" / "V0.4.0" / "V0.4.0__dml.sql"
+
 
 class ByReachMigrationTest(unittest.TestCase):
+    def test_by_reach_display_metadata_upgrade_is_versioned_as_v040(self):
+        v031 = V031_DML.read_text(encoding="utf-8")
+        v040 = V040_DML.read_text(encoding="utf-8")
+
+        self.assertNotIn("By-Reach v2", v031)
+        self.assertIn("'agent-reach'", v031)
+        self.assertIn("By-Reach v2", v040)
+        self.assertIn("OPENCLAW_BUNDLED_SKILLS", v040)
+        self.assertIn("resource_code = 'agent-reach'", v040)
+
     def test_production_image_pins_and_verifies_by_reach_v2(self):
         dockerfile = (OPENCLAW_ROOT / "Dockerfile").read_text(encoding="utf-8")
 

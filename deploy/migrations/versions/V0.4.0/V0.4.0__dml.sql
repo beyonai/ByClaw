@@ -471,3 +471,46 @@ UPDATE byai.byai_user_mcp_tool_snapshot
 SET risk_level = 'READ',
     risk_source = 'SYSTEM_DEFAULT'
 WHERE status_cd = '00A';
+
+-- By-Reach v2 产品面迁移：保留 agent-reach 技术代码，将显示名称和说明升级为 By-Reach。
+-- V0.3.1 已发布，不能重写；本版本仅更新已有数据，且可重复执行。
+UPDATE byai.byai_system_config c
+SET param_value = replace(
+    c.param_value,
+    '{"skillName":"agent-reach","skillCode":"agent-reach","skillDescZh":"路由公开互联网渠道能力，并按 ByClaw 覆盖规则选择 byCLI 等执行器。","skillDescEn":"Route public-internet channels and select executors such as byCLI according to ByClaw override rules."}',
+    '{"skillName":"By-Reach","skillCode":"agent-reach","skillDescZh":"路由公共互联网渠道，并按 By-Reach v2 策略选择已批准的执行器。","skillDescEn":"Route public-internet channels and select approved By-Reach v2 executors."}'
+)
+WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
+  AND c.param_value LIKE '%"skillCode":"agent-reach"%';
+
+UPDATE byai.ss_resource
+SET resource_name = 'By-Reach',
+    resource_desc = '路由公共互联网渠道，并按 By-Reach v2 策略选择已批准的执行器。',
+    update_time = CURRENT_TIMESTAMP
+WHERE resource_code = 'agent-reach';
+
+-- 资源扩展记录保存了资源字段快照，名称变更后同步重建，避免 API 返回旧展示信息。
+UPDATE byai.ss_res_ext_skill e
+SET target_content = json_build_object(
+    'resourceId', r.resource_id,
+    'resourceCode', r.resource_code,
+    'resourceName', r.resource_name,
+    'resourceDesc', r.resource_desc,
+    'resourceBizType', r.resource_biz_type,
+    'resourceType', r.resource_type,
+    'ownerType', r.owner_type,
+    'sourceType', e.source_type,
+    'skillType', e.skill_type,
+    'skillUrl', e.skill_url,
+    'version', e.version,
+    'skillPackageFormat', e.skill_package_format,
+    'skillOriginalFilename', e.skill_original_filename,
+    'skillPackageSize', e.skill_package_size,
+    'skillPackageHash', e.skill_package_hash,
+    'syncStatus', e.sync_status,
+    'syncError', e.sync_error,
+    'lastSyncTime', to_char(e.last_sync_time, 'YYYY-MM-DD HH24:MI:SS')
+)::text
+FROM byai.ss_resource r
+WHERE e.resource_id = r.resource_id
+  AND r.resource_code = 'agent-reach';
