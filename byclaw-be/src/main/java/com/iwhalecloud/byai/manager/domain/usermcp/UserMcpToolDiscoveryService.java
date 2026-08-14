@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -30,14 +31,25 @@ public class UserMcpToolDiscoveryService {
     private final UserMcpRemoteClient remoteClient;
     private final UserMcpToolSnapshotMapper snapshotMapper;
     private final SequenceService sequenceService;
+    private final UserMcpToolRiskPolicy riskPolicy;
 
+    @Autowired
     public UserMcpToolDiscoveryService(
             UserMcpRemoteClient remoteClient,
             UserMcpToolSnapshotMapper snapshotMapper,
-            SequenceService sequenceService) {
+            SequenceService sequenceService,
+            UserMcpToolRiskPolicy riskPolicy) {
         this.remoteClient = remoteClient;
         this.snapshotMapper = snapshotMapper;
         this.sequenceService = sequenceService;
+        this.riskPolicy = riskPolicy;
+    }
+
+    UserMcpToolDiscoveryService(
+            UserMcpRemoteClient remoteClient,
+            UserMcpToolSnapshotMapper snapshotMapper,
+            SequenceService sequenceService) {
+        this(remoteClient, snapshotMapper, sequenceService, new UserMcpToolRiskPolicy(""));
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -95,15 +107,16 @@ public class UserMcpToolDiscoveryService {
             snapshot.setDescription(tool.description());
             snapshot.setInputSchema(tool.inputSchema());
             snapshot.setSchemaHash(sha256(tool.inputSchema()));
-            snapshot.setRiskLevel("READ");
-            snapshot.setRiskSource("SYSTEM_DEFAULT");
+            String riskLevel = riskPolicy.classify(endpointFingerprint, tool.name());
+            snapshot.setRiskLevel(riskLevel);
+            snapshot.setRiskSource("READ".equals(riskLevel) ? "ADMIN_RULE" : "SYSTEM_DEFAULT");
             snapshot.setStatusCd("00A");
             snapshot.setCreateTime(now);
             snapshotMapper.insert(snapshot);
         }
         List<ToolView> views = tools.stream()
             .map(tool -> new ToolView(
-                tool.name(), tool.description(), tool.inputSchema(), "READ"))
+                tool.name(), tool.description(), tool.inputSchema(), riskPolicy.classify(endpointFingerprint, tool.name())))
             .toList();
         return new DiscoveryResult(snapshotVersion, views);
     }

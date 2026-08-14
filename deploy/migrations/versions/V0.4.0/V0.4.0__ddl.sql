@@ -729,7 +729,7 @@ CREATE TABLE IF NOT EXISTS byai.byai_user_mcp_tool_snapshot
     description          TEXT,
     input_schema         TEXT         NOT NULL,
     schema_hash          VARCHAR(128) NOT NULL,
-    risk_level           VARCHAR(16)  NOT NULL DEFAULT 'READ',
+    risk_level           VARCHAR(16)  NOT NULL DEFAULT 'UNKNOWN',
     risk_source          VARCHAR(32)  NOT NULL DEFAULT 'SYSTEM_DEFAULT',
     status_cd            VARCHAR(3)   NOT NULL DEFAULT '00A',
     create_time          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,

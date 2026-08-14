@@ -309,8 +309,8 @@ const UserMcpManager: React.FC<UserMcpManagerProps> = ({ active, connectorId }) 
           <Form.Item name="resourceDesc" label="说明">
             <Input.TextArea maxLength={4000} rows={2} />
           </Form.Item>
-          <Form.Item name="domainUrl" label="HTTPS 地址" rules={[{ required: true, type: 'url' }]}>
-            <Input placeholder="https://mcp.example.com（需管理员加入允许列表）" />
+          <Form.Item name="domainUrl" label="HTTPS 公网 IP" rules={[{ required: true, type: 'url' }]}>
+            <Input placeholder="https://8.8.8.8（需管理员加入允许列表）" />
           </Form.Item>
           <Space.Compact block>
             <Form.Item name="transport" label="传输协议" rules={[{ required: true }]} className={styles.halfField}>

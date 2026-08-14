@@ -455,7 +455,7 @@ WHERE NOT EXISTS (
     WHERE connector_code = 'user-mcp'
 );
 
--- User MCP administrator endpoint policy. Value is maintained in 参数配置管理 -> 参数管理.
+-- User MCP administrator policies. Values are maintained in 参数配置管理 -> 参数管理.
 INSERT INTO byai.byai_system_config
     (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc)
 SELECT nextval('byai.seq_any_table'), 'text', 'BYAI_MCP_ALLOWED_ADDRESSES', '用户 MCP 公网 IP 白名单',
