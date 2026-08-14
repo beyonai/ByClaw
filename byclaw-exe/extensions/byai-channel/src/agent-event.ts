@@ -50,6 +50,7 @@ import {
   buildToolStartTitle as buildLocalizedToolStartTitle,
 } from "./i18n.js";
 import { DELEGATED_TASK_STATUS } from "../../shared/src/delegated-tool-details.js"; 
+import { getToolCallUIDescription } from "./toolCallUIDescription.js";
 
 type AgentStreamState = {
   seq: number;
@@ -163,7 +164,30 @@ async function handleToolEvent(
 
   const thinkDetailMessageId = `${toolCallId}-${phase}`;
 
+  const renderAsToolCallUI = data.name !== "baiying_call";
+  // 暂时还没在 by-framework 定义该 contentType，前端已经实现(SSEMessageType.toolCall)。后续在 by-framework 定义好了，可以直接切换。
+  const toolCallContentType = "3015";
+
   if (phase === "start") {
+    const args = extractToolStartArgs(data) || "{}";
+
+    if (renderAsToolCallUI) {
+      const toolCallDesc = getToolCallUIDescription(data);
+      // sessions_spawn 继续沿用 派生子agent 这种描述
+      const displayToolName = data.name === "sessions_spawn" ? buildToolStartTitle(request, data) : data.name;
+      await emitSdkChunk(request, JSON.stringify({
+        title: displayToolName,
+        description: toolCallDesc,
+        input: args,
+      }), {
+        messageId: toolCallId,
+        parentMessageId: "-1",
+        eventType: EventType.REASONING_LOG_DELTA,
+        contentType: toolCallContentType,
+        objectType: "tool_call",
+      });
+      return;
+    }
     if (toolCallId && data?.args && typeof data.args === "object") {
       toolStartArgsByCallId.set(toolCallId, data.args);
     }
@@ -177,10 +201,9 @@ async function handleToolEvent(
       objectType: "tool_call",
       status: "_START_",
     });
-    const args = extractToolStartArgs(data);
     await emitSdkChunk(request, JSON.stringify({
       title: "Input",
-      json: args || "{}",
+      json: args,
     }), {
       messageId: thinkDetailMessageId,
       parentMessageId: toolCallId,
@@ -188,7 +211,22 @@ async function handleToolEvent(
       contentType: SseReasonMessageType.json_block,
     });
   } else if (phase === "result") {
-    const result = extractToolResultText(data?.result);
+    const result = extractToolResultText(data?.result) || "{}";
+    const status = data.isError ? "_ERROR_" : "_DONE_";
+
+    if (renderAsToolCallUI) {
+      await emitSdkChunk(request, JSON.stringify({
+        output: result,
+        status,
+      }), {
+        messageId: toolCallId,
+        parentMessageId: "-1",
+        eventType: EventType.REASONING_LOG_DELTA,
+        contentType: toolCallContentType,
+        objectType: "tool_call",
+      });
+      return;
+    }
     const title = buildToolResultTitle(request, data);
     if (toolCallId) {
       toolStartArgsByCallId.delete(toolCallId);
@@ -199,11 +237,11 @@ async function handleToolEvent(
       eventType: EventType.REASONING_LOG_DELTA,
       contentType: SseReasonMessageType.think_status_title,
       objectType: "tool_call",
-      status: data.isError ? "_ERROR_" : "_DONE_",
+      status,
     });
     await emitSdkChunk(request, JSON.stringify({
       title: "Output",
-      json: result || "{}"
+      json: result,
     }), {
       messageId: thinkDetailMessageId,
       parentMessageId: toolCallId,
