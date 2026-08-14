@@ -515,20 +515,55 @@ function useHandler(props: IProps) {
       if (newAnswerMsg?.sessionId !== curSessioneRef.current) return onionsProps;
       if (!sseRes) return onionsProps;
 
-      if ([`${SSEMessageType.jsonBlock}`].includes(`${sseRes?.message?.contentType}`)) {
+      const isByCliCommand = (inputBody: unknown) => {
+        let body: Record<string, unknown>;
+        if (typeof inputBody === 'string') {
+          try {
+            body = JSON.parse(inputBody);
+          } catch (error) {
+            return false;
+          }
+        } else {
+          body = inputBody as Record<string, unknown>;
+        }
+        if ('command' in body && typeof body?.command === 'string') {
+          return body?.command?.startsWith('bycli');
+        }
+        return false;
+      };
+      const isBrowserToolName = (toolName: string) => {
+        return toolName.includes('jarvis_run_flow') || toolName.includes('browser');
+      };
+
+      if (`${SSEMessageType.toolCall}` === `${sseRes?.message?.contentType}`) {
+        const substance = get(sseRes, 'message.content.substance');
+        try {
+          let input: unknown;
+          let title: string;
+          let body: { title: string; input: unknown };
+          if (typeof substance === 'string') {
+            body = JSON.parse(substance);
+          } else {
+            body = substance as { title: string; input: unknown };
+          }
+          ({ title, input } = body);
+          if (!isBrowserToolName(title) && !isByCliCommand(input)) {
+            return onionsProps;
+          }
+        } catch (error) {
+          return onionsProps;
+        }
+      } else if ([`${SSEMessageType.jsonBlock}`].includes(`${sseRes?.message?.contentType}`)) {
         const jsonStr = get(sseRes, 'message.content.substance.json', '');
         try {
           const jsonObj = JSON.parse(jsonStr);
-          if (!jsonObj?.command?.startsWith('bycli')) return onionsProps;
+          if (!isByCliCommand(jsonObj)) return onionsProps;
         } catch (error) {
           return onionsProps;
         }
       } else if ([`${SSEMessageType.thinkStatusTitle}`].includes(`${sseRes?.message?.contentType}`)) {
         const toolTitle = get(sseRes, 'message.content.substance.title') || '';
-        if (
-          sseRes?.message?.objectType !== IObjectType.toolCall ||
-          (!toolTitle.includes('jarvis_run_flow') && !toolTitle.includes('browser'))
-        ) {
+        if (sseRes?.message?.objectType !== IObjectType.toolCall || !isBrowserToolName(toolTitle)) {
           return onionsProps;
         }
       } else {
