@@ -26,6 +26,18 @@ import com.iwhalecloud.byai.manager.dto.connector.ConnectorListDto;
 @DisabledOnOs(OS.WINDOWS)
 class ConnectorSchemaTest {
 
+    @Test
+    void oauth2MigrationDefinesEncryptedCredentialTableAndGithubTemplateWithoutSecrets() throws Exception {
+        String ddl = read("deploy/migrations/versions/V0.4.0/V0.4.0__ddl.sql");
+        String dml = read("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql");
+
+        assertThat(ddl).contains("byai_connector_credential_secret", "access_token_cipher",
+            "refresh_token_cipher", "credential_reference");
+        assertThat(dml).contains("'github'", "'github-oauth2'", "github_oauth_client_id",
+            "github_oauth_client_secret", "\"type\":\"oauth2\"", "\"mode\":\"credential-reference\"");
+        assertThat(dml).doesNotContain("clientsecret\":");
+    }
+
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final Pattern WECOM_SEED_ROW = Pattern.compile(
         "SELECT\\s+'wecom'\\s*,\\s*'企业微信'\\s*,\\s*'([^']*)'\\s*,\\s*'([^']*)'\\s*,\\s*'([^']*)'\\s*,"

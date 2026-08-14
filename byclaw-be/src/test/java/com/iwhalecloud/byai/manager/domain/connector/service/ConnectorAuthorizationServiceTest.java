@@ -12,6 +12,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 import java.time.Duration;
 import java.util.Date;
@@ -30,6 +31,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationProviderRegistry;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationProgress;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationCallback;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationQrCodeEncoder;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationSessionContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartContext;
@@ -37,6 +39,8 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorAuthorizationProvider;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorProvisionalCredentialCleaner;
+import com.iwhalecloud.byai.manager.domain.connector.provider.oauth2.OAuth2State;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorManifestCommandResolver;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.RedisAuthorizationSession;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.RedisAuthorizationSessionRepository;
@@ -50,6 +54,146 @@ import com.iwhalecloud.byai.manager.mapper.connector.ConnectorAuthMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 @DisabledOnOs(OS.WINDOWS)
 class ConnectorAuthorizationServiceTest {
+
+    @Test
+    void callbackUsesOwnedPendingSessionAndFinalizesProviderResult() {
+        String authorizationId = java.util.UUID.randomUUID().toString();
+        String state = OAuth2State.create(authorizationId);
+        ConnectorInfo connector = connector("github", "github-oauth2", "OAUTH2", null);
+        RedisAuthorizationSession pending = new RedisAuthorizationSession(
+            authorizationId, USER_ID, CONNECTOR_ID, "github", "github-oauth2", AuthorizationStatus.PENDING,
+            null, Sm4Util.encrypt("https://github.com/login/oauth/authorize"), "github-session",
+            Sm4Util.encrypt("{\\\"state\\\":\\\"" + state + "\\\"}"), null, futureExpiry(), null, null, 0L
+        );
+        when(sessionRepository.findOwned(authorizationId, USER_ID)).thenReturn(Optional.of(pending));
+        when(sessionRepository.tryAcquireStatusLock(eq(authorizationId), any(Duration.class)))
+            .thenReturn(Optional.of("callback-lock"));
+        when(providerRegistry.get("github-oauth2")).thenReturn(provider);
+        when(provider.handleCallback(any(), any())).thenReturn(new AuthorizationStatusResult(
+            AuthorizationStatus.CONNECTED, "42", "octocat", null, "credential-ref", null, null
+        ));
+        when(sessionRepository.compareAndSetStatus(eq(authorizationId), eq(AuthorizationStatus.PENDING), eq(0L), any()))
+            .thenReturn(true);
+        when(sessionRepository.compareAndSetStatus(eq(authorizationId), eq(AuthorizationStatus.FINALIZING), eq(1L), any()))
+            .thenReturn(true);
+        when(connectorInfoService.findById(CONNECTOR_ID)).thenReturn(connector);
+        when(connectorAuthMapper.selectOne(any())).thenReturn(null);
+        when(sequenceService.nextVal()).thenReturn(901L);
+
+        ConnectorAuthorizationDto result = service.callback("github-oauth2", new AuthorizationCallback("code", state, null, null), USER_ID);
+
+        assertThat(result.getStatus()).isEqualTo("connected");
+        verify(provider).handleCallback(any(AuthorizationSessionContext.class), any(AuthorizationCallback.class));
+    }
+
+    @Test
+    void callbackConvertsProviderExceptionToStableProtocolFailure() {
+        String authorizationId = java.util.UUID.randomUUID().toString();
+        String state = OAuth2State.create(authorizationId);
+        RedisAuthorizationSession pending = new RedisAuthorizationSession(
+            authorizationId, USER_ID, CONNECTOR_ID, "github", "github-oauth2", AuthorizationStatus.PENDING,
+            null, Sm4Util.encrypt("https://github.com/login/oauth/authorize"), state,
+            Sm4Util.encrypt("invalid-state"), null, futureExpiry(), null, null, 0L
+        );
+        when(sessionRepository.findOwned(authorizationId, USER_ID)).thenReturn(Optional.of(pending));
+        when(sessionRepository.tryAcquireStatusLock(eq(authorizationId), any(Duration.class)))
+            .thenReturn(Optional.of("callback-lock"));
+        when(providerRegistry.get("github-oauth2")).thenReturn(provider);
+        when(provider.handleCallback(any(), any())).thenThrow(new IllegalStateException("secret platform detail"));
+        when(sessionRepository.compareAndSetStatus(eq(authorizationId), eq(AuthorizationStatus.PENDING), eq(0L), any()))
+            .thenReturn(true);
+
+        ConnectorAuthorizationDto result = service.callback(
+            "github-oauth2", new AuthorizationCallback("code", state, null, null), USER_ID);
+
+        assertThat(result.getStatus()).isEqualTo("failed");
+        assertThat(result.getErrorCode()).isEqualTo("PROVIDER_PROTOCOL_ERROR");
+        assertThat(result.getErrorMessage()).doesNotContain("secret platform detail");
+    }
+
+    @Test
+    void callbackCleansProvisionalCredentialWhenBindingFails() {
+        String authorizationId = java.util.UUID.randomUUID().toString();
+        String state = OAuth2State.create(authorizationId);
+        RedisAuthorizationSession pending = new RedisAuthorizationSession(
+            authorizationId, USER_ID, CONNECTOR_ID, "github", "github-oauth2", AuthorizationStatus.PENDING,
+            null, Sm4Util.encrypt("https://github.com/login/oauth/authorize"), "github-session",
+            Sm4Util.encrypt("{\"state\":\"" + state + "\"}"), null, futureExpiry(), null, null, 0L
+        );
+        provider = mock(ConnectorAuthorizationProvider.class,
+            withSettings().extraInterfaces(ConnectorProvisionalCredentialCleaner.class));
+        when(sessionRepository.findOwned(authorizationId, USER_ID)).thenReturn(Optional.of(pending));
+        when(sessionRepository.tryAcquireStatusLock(eq(authorizationId), any(Duration.class)))
+            .thenReturn(Optional.of("callback-lock"));
+        when(providerRegistry.get("github-oauth2")).thenReturn(provider);
+        when(provider.handleCallback(any(), any())).thenReturn(new AuthorizationStatusResult(
+            AuthorizationStatus.CONNECTED, "42", "octocat", null, "credential-ref", null, null
+        ));
+        when(sessionRepository.compareAndSetStatus(eq(authorizationId), eq(AuthorizationStatus.PENDING), eq(0L), any()))
+            .thenReturn(true);
+        when(sessionRepository.compareAndSetStatus(eq(authorizationId), eq(AuthorizationStatus.FINALIZING), eq(1L), any()))
+            .thenReturn(true);
+        ConnectorInfo connector = connector("github", "github-oauth2", "OAUTH2", null);
+        when(connectorInfoService.findById(CONNECTOR_ID)).thenReturn(connector);
+        when(connectorAuthMapper.selectOne(any())).thenThrow(new IllegalStateException("database unavailable"));
+
+        ConnectorAuthorizationDto result = service.callback(
+            "github-oauth2", new AuthorizationCallback("code", state, null, null), USER_ID);
+
+        assertThat(result.getStatus()).isEqualTo("failed");
+        verify((ConnectorProvisionalCredentialCleaner) provider)
+            .cleanupProvisionalCredential(any(AuthorizationSessionContext.class), eq("credential-ref"));
+    }
+
+    @Test
+    void callbackExpiresStaleSessionWithoutCallingProvider() {
+        String authorizationId = java.util.UUID.randomUUID().toString();
+        String state = OAuth2State.create(authorizationId);
+        RedisAuthorizationSession pending = new RedisAuthorizationSession(
+            authorizationId, USER_ID, CONNECTOR_ID, "github", "github-oauth2", AuthorizationStatus.PENDING,
+            null, Sm4Util.encrypt("https://github.com/login/oauth/authorize"), "github-session",
+            Sm4Util.encrypt("{\"state\":\"" + state + "\"}"), null,
+            new Date(System.currentTimeMillis() - 1_000L), null, null, 0L
+        );
+        when(sessionRepository.findOwned(authorizationId, USER_ID)).thenReturn(Optional.of(pending));
+        when(sessionRepository.tryAcquireStatusLock(eq(authorizationId), any(Duration.class)))
+            .thenReturn(Optional.of("callback-lock"));
+        when(sessionRepository.compareAndSetStatus(eq(authorizationId), eq(AuthorizationStatus.PENDING), eq(0L), any()))
+            .thenReturn(true);
+
+        ConnectorAuthorizationDto result = service.callback(
+            "github-oauth2", new AuthorizationCallback("code", state, null, null), USER_ID);
+
+        assertThat(result.getStatus()).isEqualTo("expired");
+        assertThat(result.getErrorCode()).isEqualTo("OAUTH_CALLBACK_EXPIRED");
+        verifyNoInteractions(providerRegistry);
+    }
+
+    @Test
+    void duplicateCallbackRechecksSessionAfterLockAndDoesNotCallProviderAgain() {
+        String authorizationId = java.util.UUID.randomUUID().toString();
+        String state = OAuth2State.create(authorizationId);
+        RedisAuthorizationSession pending = new RedisAuthorizationSession(
+            authorizationId, USER_ID, CONNECTOR_ID, "github", "github-oauth2", AuthorizationStatus.PENDING,
+            null, Sm4Util.encrypt("https://github.com/login/oauth/authorize"), "github-session",
+            Sm4Util.encrypt("{\"state\":\"" + state + "\"}"), null, futureExpiry(), null, null, 0L
+        );
+        RedisAuthorizationSession connected = new RedisAuthorizationSession(
+            authorizationId, USER_ID, CONNECTOR_ID, "github", "github-oauth2", AuthorizationStatus.CONNECTED,
+            null, null, "github-session", null, null, futureExpiry(), null, null, 1L
+        );
+        when(sessionRepository.findOwned(authorizationId, USER_ID))
+            .thenReturn(Optional.of(pending), Optional.of(connected));
+        when(sessionRepository.tryAcquireStatusLock(eq(authorizationId), any(Duration.class)))
+            .thenReturn(Optional.of("callback-lock"));
+
+        ConnectorAuthorizationDto result = service.callback(
+            "github-oauth2", new AuthorizationCallback("code", state, null, null), USER_ID);
+
+        assertThat(result.getStatus()).isEqualTo("connected");
+        verify(sessionRepository, times(2)).findOwned(authorizationId, USER_ID);
+        verifyNoInteractions(providerRegistry);
+    }
 
     private static final String AUTHORIZATION_ID = "authorization-1";
     private static final String USER_ID = "1001";

@@ -22,6 +22,8 @@ class ConnectorControllerContractTest {
             .containsExactly("/authorization/start");
         assertThat(findMethod("getAuthorizationStatus").getAnnotation(GetMapping.class).value())
             .containsExactly("/authorization/status");
+        assertThat(findMethod("handleAuthorizationCallback").getAnnotation(GetMapping.class).value())
+            .containsExactly("/authorization/callback/{providerCode}");
         assertThat(findMethod("completeSkillAuthorization").getAnnotation(PostMapping.class).value())
             .containsExactly("/authorization/skill-complete");
         assertThat(findMethod("revokeAuthorization").getAnnotation(PostMapping.class).value())

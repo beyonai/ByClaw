@@ -662,3 +662,36 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_ss_resource_rel_dig_employee_group_member
 
 CREATE INDEX IF NOT EXISTS idx_ss_resource_version_active_resource
     ON byai.ss_resource_version (resource_id, version_status, resource_version_id);
+
+-- OAuth2 真实凭证与连接器授权绑定分离：本表只保存 SM4 密文，绝不保存明文 token 或 client secret。
+CREATE TABLE IF NOT EXISTS byai.byai_connector_credential_secret (
+    credential_id             BIGINT       NOT NULL,
+    credential_reference      VARCHAR(64)  NOT NULL,
+    provider_code             VARCHAR(64)  NOT NULL,
+    user_id                   VARCHAR(64)  NOT NULL,
+    connector_id              BIGINT       NOT NULL,
+    access_token_cipher       TEXT         NOT NULL,
+    refresh_token_cipher      TEXT,
+    token_type                VARCHAR(32),
+    granted_scopes            TEXT,
+    access_expire_time        TIMESTAMP,
+    refresh_expire_time       TIMESTAMP,
+    status_cd                 CHAR(3)      NOT NULL DEFAULT '00A',
+    create_time               TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time               TIMESTAMP,
+    CONSTRAINT pk_byai_connector_credential_secret PRIMARY KEY (credential_id),
+    CONSTRAINT uk_byai_connector_credential_secret_reference UNIQUE (credential_reference)
+);
+
+CREATE INDEX IF NOT EXISTS idx_byai_connector_credential_secret_active
+    ON byai.byai_connector_credential_secret (user_id, connector_id, provider_code)
+    WHERE status_cd = '00A';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_byai_connector_credential_secret_active
+    ON byai.byai_connector_credential_secret (user_id, connector_id, provider_code)
+    WHERE status_cd = '00A';
+
+COMMENT ON TABLE byai.byai_connector_credential_secret IS '连接器 OAuth2 等真实凭证密文；授权绑定表仅保存 credential_reference';
+COMMENT ON COLUMN byai.byai_connector_credential_secret.credential_reference IS '随机 UUID 凭证引用，不含 token';
+COMMENT ON COLUMN byai.byai_connector_credential_secret.access_token_cipher IS 'SM4 加密的 access token，禁止写入日志或响应';
+COMMENT ON COLUMN byai.byai_connector_credential_secret.refresh_token_cipher IS 'SM4 加密的 refresh token，允许为空';

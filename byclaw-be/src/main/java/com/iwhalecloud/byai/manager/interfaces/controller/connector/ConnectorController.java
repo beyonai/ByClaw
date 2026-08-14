@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorAuthorizat
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorAuthService;
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorSkillAuthorizationSyncException;
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorSkillAuthorizationSyncService;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationCallback;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorAuthorizationDto;
 import com.iwhalecloud.byai.manager.dto.connector.CancelConnectorAuthorizationRequest;
 import com.iwhalecloud.byai.manager.dto.connector.CompleteSkillAuthorizationRequest;
@@ -78,6 +79,20 @@ public class ConnectorController {
     public ResponseUtil<ConnectorAuthorizationDto> getAuthorizationStatus(
         @RequestParam(value = "authorizationId", required = false) String authorizationId) {
         return ResponseUtil.successResponse(connectorAuthorizationService.status(authorizationId, currentUserId()));
+    }
+
+    @GetMapping("/authorization/callback/{providerCode}")
+    public ResponseUtil<ConnectorAuthorizationDto> handleAuthorizationCallback(
+            @org.springframework.web.bind.annotation.PathVariable String providerCode,
+            @RequestParam(value = "code", required = false) String code,
+            @RequestParam(value = "state", required = false) String state,
+            @RequestParam(value = "error", required = false) String error,
+            @RequestParam(value = "error_description", required = false) String errorDescription) {
+        return ResponseUtil.successResponse(connectorAuthorizationService.callback(
+            providerCode,
+            new AuthorizationCallback(code, state, error, errorDescription),
+            currentUserId()
+        ));
     }
 
     @PostMapping("/authorization/cancel")

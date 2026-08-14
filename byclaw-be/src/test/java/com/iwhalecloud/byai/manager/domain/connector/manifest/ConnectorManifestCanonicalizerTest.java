@@ -14,6 +14,24 @@ import org.junit.jupiter.api.condition.OS;
 @DisabledOnOs(OS.WINDOWS)
 class ConnectorManifestCanonicalizerTest {
 
+    @Test
+    void acceptsOAuth2ManifestWithoutCliCommandsOrNativeHome() {
+        ConnectorInfo connector = new ConnectorInfo();
+        connector.setConnectorCode("github");
+        connector.setSkillCode("github");
+        String manifest = """
+            {"schemaVersion":"1.0","id":"github","version":"1.0.0",
+             "runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},
+             "authStorage":{"mode":"credential-reference","owner":"be-auth-job",
+                 "runtimeMutation":"provider-refresh-only","environment":{}},
+             "skill":{"code":"github","source":"system-builtin","installScope":"user","grantScope":"agent"}}
+            """;
+
+        String canonical = new ConnectorManifestCanonicalizer(new ObjectMapper()).canonicalize(connector, manifest);
+
+        assertThat(canonical).contains("\"type\":\"oauth2\"", "\"mode\":\"credential-reference\"");
+    }
+
     private ConnectorManifestCanonicalizer canonicalizer;
 
     @BeforeEach

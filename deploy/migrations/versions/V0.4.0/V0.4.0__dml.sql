@@ -1,4 +1,29 @@
 
+-- GitHub OAuth2 连接器。仅记录部署环境变量名，Client Secret 不进入数据库或 Runtime Manifest。
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort
+)
+SELECT nextval('byai.seq_any_table'), 'github', 'GitHub', '通过 OAuth2 连接 GitHub 用户账号', 'SYSTEM',
+       'github-oauth2', 'github', 'OAUTH2',
+       '{"clientIdEnv":"GITHUB_OAUTH_CLIENT_ID","clientSecretEnv":"GITHUB_OAUTH_CLIENT_SECRET","redirectUriEnv":"GITHUB_OAUTH_REDIRECT_URI","scope":"read:user repo"}',
+       '{}',
+       '{"schemaVersion":"1.0","id":"github","version":"1.0.0","runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},"authStorage":{"mode":"credential-reference","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","environment":{}},"skill":{"code":"github","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+       40
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'github'
+);
+
+UPDATE byai.byai_connector_info
+SET provider_code = 'github-oauth2',
+    skill_code = 'github',
+    auth_mode = 'OAUTH2',
+    auth_config = '{"clientIdEnv":"GITHUB_OAUTH_CLIENT_ID","clientSecretEnv":"GITHUB_OAUTH_CLIENT_SECRET","redirectUriEnv":"GITHUB_OAUTH_REDIRECT_URI","scope":"read:user repo"}',
+    request_config = '{}',
+    runtime_manifest = '{"schemaVersion":"1.0","id":"github","version":"1.0.0","runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},"authStorage":{"mode":"credential-reference","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","environment":{}},"skill":{"code":"github","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+    update_time = CURRENT_TIMESTAMP
+WHERE connector_code = 'github';
+
 /**百应运营渠道**/
 -- 运营闭环：按运营需求类型配置独立启动提示词，避免不同类型任务携带无关字段。
 -- 后端按 operationType 分别读取采集、知识整理、对象发现、发布和分析提示词，避免不同任务类型混用字段。
