@@ -451,7 +451,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn(f"]({relative_path})", skill)
         self.assertTrue(ingest_path.is_file(), relative_path)
         for phrase in (
-            "scripts/knowledge-collection-ingest.mjs",
+            "scripts/ingest.mjs",
             "list-kb",
             "normalize",
             "ingest",
@@ -492,23 +492,25 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
         for phrase in (
             "建立或加载正式会话",
-            "`init-session`",
+            "`init`",
             "`inspect`",
             "`itemResults`",
-            "`record-run`",
+            "`run`",
             "`cleanup`",
             "不得直接修改正式 metadata",
         ):
             self.assertIn(phrase, skill)
 
     def test_post_processing_state_helper_is_discoverable(self):
-        script = SKILL_ROOT / "scripts" / "knowledge-collection-post-processing.mjs"
+        script = SKILL_ROOT / "scripts" / "collection-state.mjs"
+        cli = SKILL_ROOT / "scripts" / "knowledge-collection.mjs"
         processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
 
         self.assertTrue(script.is_file())
-        for command in ("inspect", "mark-materialized", "record-run", "cleanup", "unlock-stale"):
+        self.assertTrue(cli.is_file())
+        for command in ("inspect", "collect", "run", "cleanup", "unlock-stale"):
             self.assertIn(command, script.read_text(encoding="utf-8"))
-        self.assertIn("scripts/knowledge-collection-post-processing.mjs", processing)
+        self.assertIn("scripts/collection-state.mjs", processing)
         for phrase in (
             '"schemaVersion": "1.0"',
             "discardUnselectedConfirmed",
