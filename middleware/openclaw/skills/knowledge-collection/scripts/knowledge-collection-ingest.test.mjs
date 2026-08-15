@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
-const SCRIPT = path.join(TEST_DIR, "knowledge-collection-ingest.mjs");
+const SCRIPT = path.join(TEST_DIR, "ingest.mjs");
 const KNOWLEDGE_MANAGER_SCRIPT = path.resolve(
   TEST_DIR,
   "../../by-knowledge-manager/scripts/by-knowledge-manager.mjs",

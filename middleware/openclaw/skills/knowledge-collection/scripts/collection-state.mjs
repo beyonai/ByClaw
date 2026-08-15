@@ -1,8 +1,31 @@
 #!/usr/bin/env node
 
+/**
+ * collection-state.mjs — 采集物化与后处理状态机(原 knowledge-collection-post-processing.mjs)。
+ *
+ * 状态持久化已迁移到一体化单文件 <session-dir>/session.json(collection 子树,
+ * 形状与旧 sanitized/metadata.json 完全一致,校验逻辑不变)。
+ * sanitized/metadata.json 与 collection-result.json 由 export-views 生成/维护,
+ * 作为兼容导出视图;旧会话(只有 collection-result.json + sanitized/metadata.json)
+ * 首次读写自动迁移为 session.json。
+ */
+
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  requireString,
+  requireNullableString,
+  readJson,
+  readStandaloneJson,
+  atomicWriteJson,
+  isInside,
+  sessionPaths,
+  loadSession as sessionLoad,
+  persistCollection,
+  withSessionLock,
+} from './session.mjs';
+
 
 const ITEM_STATUSES = new Set(['success', 'failed', 'pending', 'unknown']);
 const RUN_STATUSES = new Set(['success', 'partial', 'failed', 'unknown']);
@@ -21,361 +44,6 @@ const IMAGE_DOWNLOAD_ENDPOINT = '/byaiService/fileBrowser/download';
 const DEFAULT_IMAGE_LINK_LANGUAGE = 'zh-CN';
 // bycli 把下载的图片统一写进文章目录下的 images/，Markdown 里是 images/img_001.png 这种相对链接。
 const LOCAL_IMAGE_LINK_PATTERN = /!\[([^\]]*)\]\(\s*(images\/[^)\s]+?)\s*\)/g;
-
-function render(value) {
-  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
-}
-
-function parseArgs(argv) {
-  const command = argv[0];
-  const args = {};
-  for (let index = 1; index < argv.length; index += 1) {
-    const token = argv[index];
-    if (!token.startsWith('--')) {
-      throw new Error(`无法识别的参数: ${token}`);
-    }
-    const key = token.slice(2);
-    const value = argv[index + 1];
-    if (value === undefined || value.startsWith('--')) {
-      args[key] = true;
-    } else {
-      args[key] = value;
-      index += 1;
-    }
-  }
-  return { command, args };
-}
-
-function requireString(value, label) {
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`${label} 必须是非空字符串`);
-  }
-  return value.trim();
-}
-
-function requireNullableString(value, label) {
-  if (value !== null && typeof value !== 'string') {
-    throw new Error(`${label} 必须是字符串或 null`);
-  }
-}
-
-function readJson(filePath, label = filePath) {
-  let raw;
-  try {
-    raw = fs.readFileSync(filePath, 'utf8');
-  } catch (error) {
-    throw new Error(`${label} 读取失败: ${error.message}`);
-  }
-  try {
-    return JSON.parse(raw);
-  } catch (error) {
-    throw new Error(`${label} 不是合法 JSON: ${error.message}`);
-  }
-}
-
-function readStandaloneJson(rawFilePath, label) {
-  const filePath = path.resolve(requireString(rawFilePath, label));
-  const stat = fs.lstatSync(filePath);
-  if (stat.isSymbolicLink() || !stat.isFile()) {
-    throw new Error(`${label} 必须是普通 JSON 文件且不能是符号链接`);
-  }
-  return readJson(filePath, label);
-}
-
-function atomicWriteJson(filePath, value) {
-  const dir = path.dirname(filePath);
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const tempPath = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${crypto.randomUUID()}.tmp`);
-  try {
-    fs.writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-    fs.chmodSync(tempPath, 0o600);
-    fs.renameSync(tempPath, filePath);
-  } finally {
-    fs.rmSync(tempPath, { force: true });
-  }
-}
-
-function isInside(root, candidate) {
-  const relative = path.relative(root, candidate);
-  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
-}
-
-function sessionPaths(rawSessionDir) {
-  const root = path.resolve(requireString(rawSessionDir, '--session-dir'));
-  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
-    throw new Error(`采集会话目录不存在: ${root}`);
-  }
-  const collectionResult = path.join(root, 'collection-result.json');
-  const metadata = path.join(root, 'sanitized', 'metadata.json');
-  if (!fs.existsSync(collectionResult) || !fs.existsSync(metadata)) {
-    throw new Error('采集会话必须包含 collection-result.json 与 sanitized/metadata.json');
-  }
-  return {
-    root,
-    collectionResult,
-    metadata,
-    inputDir: path.join(root, '.post-processing-inputs'),
-    lock: path.join(root, '.knowledge-collection-post-processing.lock'),
-  };
-}
-
-function readLock(paths) {
-  let stat;
-  try {
-    stat = fs.lstatSync(paths.lock);
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return null;
-    }
-    throw error;
-  }
-  if (stat.isSymbolicLink() || !stat.isFile()) {
-    throw new Error('锁文件损坏: 必须是普通文件且不能是符号链接');
-  }
-  let lock;
-  try {
-    lock = JSON.parse(fs.readFileSync(paths.lock, 'utf8'));
-  } catch (error) {
-    throw new Error(`锁文件损坏: ${error.message}`);
-  }
-  if (
-    !Number.isInteger(lock?.pid)
-    || lock.pid <= 0
-    || typeof lock.createdAt !== 'string'
-    || typeof lock.ownerId !== 'string'
-    || !lock.ownerId
-    || typeof lock.command !== 'string'
-    || !lock.command
-  ) {
-    throw new Error('锁文件损坏: 缺少合法 pid、createdAt、ownerId 或 command');
-  }
-  return lock;
-}
-
-function sameLock(left, right) {
-  return left?.pid === right?.pid
-    && left?.createdAt === right?.createdAt
-    && left?.ownerId === right?.ownerId
-    && left?.command === right?.command;
-}
-
-function assertLockShape(rawLock) {
-  if (
-    !Number.isInteger(rawLock?.pid)
-    || rawLock.pid <= 0
-    || typeof rawLock.createdAt !== 'string'
-    || typeof rawLock.ownerId !== 'string'
-    || !rawLock.ownerId
-    || typeof rawLock.command !== 'string'
-    || !rawLock.command
-  ) {
-    throw new Error('锁文件损坏: 缺少合法 pid、createdAt、ownerId 或 command');
-  }
-  return {
-    pid: rawLock.pid,
-    createdAt: rawLock.createdAt,
-    ownerId: rawLock.ownerId,
-    command: rawLock.command,
-  };
-}
-
-function loadAndValidateLock(paths) {
-  let content;
-  try {
-    content = fs.readFileSync(paths.lock, 'utf8');
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return null;
-    }
-    throw error;
-  }
-  try {
-    return assertLockShape(JSON.parse(content));
-  } catch (error) {
-    if (error.message.startsWith('锁文件损坏')) {
-      throw error;
-    }
-    throw new Error(`锁文件损坏: ${error.message}`);
-  }
-}
-
-function isProcessAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if (error.code === 'ESRCH') {
-      return false;
-    }
-    if (error.code === 'EPERM') {
-      return true;
-    }
-    throw error;
-  }
-}
-
-function quarantineStaleLock(paths, lock) {
-  const expected = assertLockShape(lock);
-  let expectedStat;
-  try {
-    expectedStat = fs.lstatSync(paths.lock);
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return false;
-    }
-    throw error;
-  }
-  if (!expectedStat.isFile()) {
-    return false;
-  }
-  const current = loadAndValidateLock(paths);
-  if (!current || !sameLock(expected, current)) {
-    return false;
-  }
-  const quarantine = `${paths.lock}.stale.${lock.ownerId}.${crypto.randomUUID()}`;
-  try {
-    fs.renameSync(paths.lock, quarantine);
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return false;
-    }
-    if (error.code === 'EACCES' || error.code === 'EPERM' || error.code === 'EBUSY') {
-      return false;
-    }
-    throw error;
-  }
-  try {
-    const currentAfterRename = fs.lstatSync(paths.lock);
-    if (currentAfterRename.isSymbolicLink() || !currentAfterRename.isFile()) {
-      throw new Error('锁文件损坏: 遭到不受信任篡改');
-    }
-    fs.rmSync(quarantine, { force: true });
-    return false;
-  } catch (error) {
-    if (error.code !== 'ENOENT') {
-      throw error;
-    }
-  }
-  try {
-    const quarantineStat = fs.lstatSync(quarantine);
-    if (quarantineStat.isSymbolicLink() || !quarantineStat.isFile()) {
-      throw new Error('锁文件损坏: 归档路径类型异常');
-    }
-    let quarantinedLock;
-    try {
-      quarantinedLock = assertLockShape(JSON.parse(fs.readFileSync(quarantine, 'utf8')));
-    } catch (error) {
-      throw new Error(`锁文件损坏: 归档内容无效: ${error.message}`);
-    }
-    if (!sameLock(expected, quarantinedLock)) {
-      // Another stale-lock reclaimer moved a newer owner between our check and rename.
-      // Restore it without overwriting a lock that may have been created meanwhile.
-      try {
-        fs.linkSync(quarantine, paths.lock);
-      } catch (error) {
-        if (error.code === 'EEXIST') {
-          throw new Error('锁状态在回收期间发生变化，请稍后重试');
-        }
-        throw error;
-      }
-      fs.rmSync(quarantine, { force: true });
-      return false;
-    }
-    fs.rmSync(quarantine, { force: true });
-    return true;
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return true;
-    }
-    throw error;
-  }
-}
-
-function removeLockByIdentity(paths, identity) {
-  if (!identity) {
-    return false;
-  }
-  try {
-    const current = fs.lstatSync(paths.lock);
-    if (current.isSymbolicLink() || !current.isFile()
-      || current.dev !== identity.dev || current.ino !== identity.ino) {
-      return false;
-    }
-    fs.unlinkSync(paths.lock);
-    return true;
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return false;
-    }
-    throw error;
-  }
-}
-
-function acquireSessionLock(paths, command) {
-  const ownerId = crypto.randomUUID();
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    let descriptor;
-    let createdIdentity;
-    try {
-      descriptor = fs.openSync(paths.lock, 'wx', 0o600);
-      const created = fs.fstatSync(descriptor);
-      createdIdentity = { dev: created.dev, ino: created.ino };
-      try {
-        fs.writeFileSync(descriptor, `${JSON.stringify({
-          pid: process.pid,
-          createdAt: new Date().toISOString(),
-          ownerId,
-          command,
-        })}\n`);
-      } catch (error) {
-        try { fs.closeSync(descriptor); } catch {}
-        descriptor = undefined;
-        removeLockByIdentity(paths, createdIdentity);
-        throw error;
-      }
-      return { descriptor, ownerId };
-    } catch (error) {
-      if (descriptor !== undefined) {
-        try { fs.closeSync(descriptor); } catch {}
-        removeLockByIdentity(paths, createdIdentity);
-      }
-      if (error.code !== 'EEXIST') {
-        throw error;
-      }
-      const existing = readLock(paths);
-      if (!existing) {
-        continue;
-      }
-      if (isProcessAlive(existing.pid)) {
-        throw new Error(`当前采集会话锁持有进程仍存活: pid=${existing.pid}, command=${existing.command}`);
-      }
-      const recovered = quarantineStaleLock(paths, existing);
-      if (!recovered) {
-        continue;
-      }
-    }
-  }
-  throw new Error('无法取得采集会话后处理锁');
-}
-
-function releaseSessionLock(paths, ownerId) {
-  try {
-    const current = readLock(paths);
-    if (current?.ownerId === ownerId) {
-      fs.unlinkSync(paths.lock);
-    }
-  } catch {}
-}
-
-function withSessionLock(paths, command, callback) {
-  const { descriptor, ownerId } = acquireSessionLock(paths, command);
-  try {
-    return callback();
-  } finally {
-    try { fs.closeSync(descriptor); } catch {}
-    releaseSessionLock(paths, ownerId);
-  }
-}
 
 function stableItemId(item) {
   const identity = [item.url, item.title, item.fileName].filter(Boolean).join('\n');
@@ -809,9 +477,22 @@ function readPayload(paths, rawFilePath, label) {
   return { filePath, payload };
 }
 
-function loadSession(paths, { persistMigration = false } = {}) {
-  const collectionResult = readJson(paths.collectionResult, 'collection-result.json');
-  const rawMetadata = readJson(paths.metadata, 'sanitized/metadata.json');
+function loadSession(paths, { persistMigration = false, skipCanonicalValidation = false } = {}) {
+  const { session, migrated } = sessionLoad(paths);
+  const rawMetadata = session.collection;
+  let collectionResult;
+  try {
+    collectionResult = readJson(paths.collectionResult, 'collection-result.json');
+  } catch (error) {
+    if (String(error.message).startsWith('collection-result.json 读取失败') && !fs.existsSync(paths.collectionResult)) {
+      // 研究先行阶段尚无采集产物: 以空 canonical view 参与校验(有 materialized inventory 时仍会报错)
+      collectionResult = {
+        schemaVersion: '1.0', title: '', source: '', backend: '', url: '', filters: {}, items: [],
+      };
+    } else {
+      throw error;
+    }
+  }
   const migratedMetadata = migrateMetadata(paths.root, rawMetadata, collectionResult);
   const normalized = normalizeCurrentMetadata(migratedMetadata);
   const metadata = normalized.metadata;
@@ -841,10 +522,13 @@ function loadSession(paths, { persistMigration = false } = {}) {
     collectionResultChanged = collectionResultChanged || collectionResult.items.length !== previousItems.length;
   }
   validateMetadata(metadata);
-  validateCanonicalView(paths.root, collectionResult, metadata);
-  const metadataChanged = migratedMetadata !== rawMetadata || normalized.changed || materializations.changed;
-  if ((persistMigration && metadataChanged) || materializations.recovered) {
-    atomicWriteJson(paths.metadata, metadata);
+  if (!skipCanonicalValidation) {
+    validateCanonicalView(paths.root, collectionResult, metadata);
+  }
+  const metadataChanged = migratedMetadata !== rawMetadata || normalized.changed || materializations.changed || migrated;
+  if ((persistMigration && metadataChanged) || materializations.recovered || migrated
+    || session.collection?.schemaVersion !== '1.0') {
+    persistCollection(paths, session, metadata);
   }
   if (collectionResultChanged || materializations.recovered) {
     atomicWriteJson(paths.collectionResult, collectionResult);
@@ -856,8 +540,10 @@ function loadSession(paths, { persistMigration = false } = {}) {
     collectionResultChanged,
     materializationRecovered: materializations.recovered,
     warnings: [...normalized.warnings, ...materializations.warnings],
+    session,
   };
 }
+
 
 function validateMetadata(metadata) {
   assertNoSensitiveMetadataKeys(metadata);
@@ -1002,7 +688,7 @@ function canonicalViewItem(item) {
 function markMaterialized(paths, args) {
   const { payload: update } = readPayload(paths, args['item-json-file'], '--item-json-file');
   return withSessionLock(paths, 'mark-materialized', () => {
-    const { metadata, collectionResult } = loadSession(paths);
+    const { metadata, collectionResult, session } = loadSession(paths);
     const itemId = requireString(update.itemId, 'itemId');
     const inventory = metadata.collection.items.find((item) => item.itemId === itemId);
     if (!inventory) {
@@ -1051,10 +737,10 @@ function markMaterialized(paths, args) {
       persistedCanonicalItem,
     ];
     atomicWriteJson(paths.collectionResult, collectionResult);
-    atomicWriteJson(paths.metadata, metadata);
+    persistCollection(paths, session, metadata);
     const drained = drainPendingArtifactCleanup(paths, metadata);
     if (drained.changed) {
-      atomicWriteJson(paths.metadata, metadata);
+      persistCollection(paths, session, metadata);
     }
     return {
       ok: true,
@@ -1246,7 +932,7 @@ function recordRun(paths, args) {
   const { payload: run } = readPayload(paths, args['run-json-file'], '--run-json-file');
   return withSessionLock(paths, 'record-run', () => {
     const loaded = loadSession(paths);
-    const { metadata } = loaded;
+    const { metadata, session } = loaded;
     if (loaded.materializationRecovered) {
       throw new Error('检测到无效 materialization，已安全降级为 pending；请先由原始执行器重新物化');
     }
@@ -1304,7 +990,7 @@ function recordRun(paths, args) {
         items: mergedItems,
       };
     }
-    atomicWriteJson(paths.metadata, metadata);
+    persistCollection(paths, session, metadata);
     return { ok: true, action: 'record-run', runId: run.runId, metadata };
   });
 }
@@ -1326,13 +1012,13 @@ function sameTarget(left, right) {
 function inspect(paths, args) {
   return withSessionLock(paths, 'inspect', () => {
     const loaded = loadSession(paths, { persistMigration: true });
-    const { metadata, collectionResult } = loaded;
+    const { metadata, collectionResult, session } = loaded;
     const warnings = [...loaded.warnings];
     if (!loaded.materializationRecovered) {
       const drained = drainPendingArtifactCleanup(paths, metadata);
       warnings.push(...drained.warnings);
       if (drained.changed) {
-        atomicWriteJson(paths.metadata, metadata);
+        persistCollection(paths, session, metadata);
       }
     }
     let matchingRun;
@@ -1402,9 +1088,9 @@ function cleanup(paths, args) {
   const runId = requireString(args['run-id'], '--run-id');
   return withSessionLock(paths, 'cleanup', () => {
     const loaded = loadSession(paths);
-    const { metadata, collectionResult } = loaded;
+    const { metadata, collectionResult, session } = loaded;
     if (loaded.materializationRecovered) {
-      atomicWriteJson(paths.metadata, metadata);
+      persistCollection(paths, session, metadata);
       if (loaded.collectionResultChanged) {
         atomicWriteJson(paths.collectionResult, collectionResult);
       }
@@ -1431,7 +1117,7 @@ function cleanup(paths, args) {
       for (const item of successful) {
         item.cleanupStatus = 'skipped-retention';
       }
-      atomicWriteJson(paths.metadata, metadata);
+      persistCollection(paths, session, metadata);
       return { ok: true, action: 'cleanup', runId, retention: true, removedSession: false, metadata };
     }
 
@@ -1452,7 +1138,7 @@ function cleanup(paths, args) {
     for (const item of successful) {
       item.cleanupStatus = 'pending';
     }
-    atomicWriteJson(paths.metadata, metadata);
+    persistCollection(paths, session, metadata);
 
     const deletedSanitized = new Set();
     for (const runItem of successful) {
@@ -1514,7 +1200,7 @@ function cleanup(paths, args) {
     collectionResult.items = (Array.isArray(collectionResult.items) ? collectionResult.items : [])
       .filter((item) => !deletedSanitized.has(item.fileName));
     atomicWriteJson(paths.collectionResult, collectionResult);
-    atomicWriteJson(paths.metadata, metadata);
+    persistCollection(paths, session, metadata);
     return { ok: true, action: 'cleanup', runId, retention: false, removedSession: false, metadata, collectionResult };
   });
 }
@@ -1545,7 +1231,7 @@ function setRetention(paths, args) {
       throw new Error('检测到无效 materialization，已安全降级为 pending；请先由原始执行器重新物化');
     }
     loaded.metadata.retention.userRequested = rawKeep === 'true';
-    atomicWriteJson(paths.metadata, loaded.metadata);
+    persistCollection(paths, loaded.session, loaded.metadata);
     return {
       ok: true,
       action: 'set-retention',
@@ -1784,168 +1470,177 @@ function rewriteImageLinks(paths, args) {
   });
 }
 
-function help() {
+// ── 一体化命令(由 knowledge-collection.mjs 分派) ──
+
+/**
+ * collect — 绑定命令: 登记执行器抓取结果(集合物化)。
+ * 输入 --item-json-file 位于 .post-processing-inputs/: 单个物化载荷
+ * (原 mark-materialized 格式)或 { items: [ ... ] } 批量载荷。
+ * inventory 中缺失的 itemId 依据 canonicalItem + collection-result.json 自动补登,
+ * 因此执行器输出产物后无需预先 init 登记。
+ */
+export function cmdCollect(paths, args) {
+  const payloadPath = path.resolve(requireString(args['item-json-file'], '--item-json-file'));
+  const { payload } = readPayload(paths, payloadPath, '--item-json-file');
+  const items = Array.isArray(payload.items) ? payload.items : [payload];
+  if (!items.length) {
+    throw new Error('--item-json-file 未提供任何条目');
+  }
+  return withSessionLock(paths, 'collect', () => {
+    const loaded = loadSession(paths, { skipCanonicalValidation: true });
+    if (loaded.materializationRecovered) {
+      throw new Error('检测到无效 materialization，已安全降级为 pending；请先由原始执行器重新物化');
+    }
+    const { metadata, collectionResult, session } = loaded;
+    const results = [];
+    for (const update of items) {
+      results.push(markOneMaterialized(paths, session, metadata, collectionResult, update));
+    }
+    // 登记完成后执行严格校验(与旧 init-session 后置校验语义一致)
+    validateMetadata(metadata);
+    validateCanonicalView(paths.root, collectionResult, metadata);
+    persistCollection(paths, session, metadata);
+    atomicWriteJson(paths.collectionResult, collectionResult);
+    const drained = drainPendingArtifactCleanup(paths, metadata);
+    if (drained.changed) {
+      persistCollection(paths, session, metadata);
+    }
+    return { ok: true, action: 'collect', items: results, warnings: drained.warnings };
+  });
+}
+
+/** 单条物化登记(原 mark-materialized 主体,inventory 缺失时按 canonicalItem 补登)。 */
+function markOneMaterialized(paths, session, metadata, collectionResult, update) {
+  const itemId = requireString(update.itemId, 'itemId');
+  let inventory = metadata.collection.items.find((item) => item.itemId === itemId);
+  if (!inventory) {
+    const canonical = update.canonicalItem && typeof update.canonicalItem === 'object' ? update.canonicalItem : {};
+    const sourceUrl = typeof canonical.url === 'string' ? canonical.url : '';
+    if (!sourceUrl) {
+      throw new Error('inventory 中不存在 itemId 且 canonicalItem.url 缺失: ' + itemId);
+    }
+    const backend = String(collectionResult.backend || '');
+    inventory = {
+      itemId,
+      title: String(canonical.title || ''),
+      sourceUrl,
+      sourceItemId: null,
+      sourceSkill: backend,
+      backend,
+      collectionFilters: collectionResult.filters && typeof collectionResult.filters === 'object' ? collectionResult.filters : {},
+      rawArtifacts: [],
+      materialization: {
+        status: 'pending',
+        markdownPath: null,
+        sanitizedPath: null,
+        pendingArtifactCleanup: [],
+        reason: null,
+      },
+    };
+    metadata.collection.items.push(inventory);
+  }
+  const markdownPath = requireString(update.markdownPath, 'markdownPath');
+  const sanitizedPath = requireString(update.sanitizedPath, 'sanitizedPath');
+  validateMarkdownPath(paths.root, markdownPath, 'markdownPath');
+  validateMarkdownPath(paths.root, sanitizedPath, 'sanitizedPath');
+  validatePathPrefix(paths.root, markdownPath, 'markdown', 'markdownPath');
+  validatePathPrefix(paths.root, sanitizedPath, path.join('sanitized', 'items'), 'sanitizedPath');
+  validateCanonicalItem(update.canonicalItem, sanitizedPath);
+  if (update.canonicalItem.url !== inventory.sourceUrl) {
+    throw new Error('canonicalItem.url 必须与 inventory.sourceUrl 一致');
+  }
+  const previousMaterialization = {
+    ...inventory.materialization,
+    pendingArtifactCleanup: [...(inventory.materialization.pendingArtifactCleanup || [])],
+  };
+  const persistedCanonicalItem = canonicalViewItem(update.canonicalItem);
+  const changedPreviousPaths = [
+    previousMaterialization.markdownPath,
+    previousMaterialization.sanitizedPath,
+  ].filter((previousPath) => (
+    typeof previousPath === 'string'
+    && previousPath
+    && previousPath !== markdownPath
+    && previousPath !== sanitizedPath
+    && allowedWorkCopyPath(paths, previousPath)
+  ));
+  inventory.materialization = {
+    status: 'materialized',
+    markdownPath,
+    sanitizedPath,
+    pendingArtifactCleanup: [...new Set([
+      ...previousMaterialization.pendingArtifactCleanup,
+      ...changedPreviousPaths,
+    ])],
+    reason: null,
+  };
+  const items = (Array.isArray(collectionResult.items) ? collectionResult.items : [])
+    .map(canonicalViewItem);
+  const previousSanitizedPath = String(previousMaterialization.sanitizedPath || '');
+  collectionResult.items = [
+    ...items.filter((item) => item.fileName !== previousSanitizedPath && item.fileName !== sanitizedPath),
+    persistedCanonicalItem,
+  ];
   return {
-    name: 'knowledge-collection-post-processing',
-    inputDirectory: '.post-processing-inputs/',
-    schemaVersion: METADATA_VERSION,
-    cleanupStatuses: [...CLEANUP_STATUSES],
-    targets: {
-      ingest: { kind: 'knowledge-base', id: 'resource-id', path: '/confirmed-directory' },
-      organize: { kind: 'knowledge-organization', id: 'organization-run-key' },
-      external: { kind: 'external', id: 'stable-task-key' },
-    },
-    payloads: {
-      'mark-materialized': {
-        schemaVersion: METADATA_VERSION,
-        itemId: 'inventory-item-id',
-        markdownPath: 'markdown/item.md',
-        sanitizedPath: 'sanitized/items/item.md',
-        persistedMaterializationFields: [
-          'status', 'markdownPath', 'sanitizedPath', 'pendingArtifactCleanup', 'reason',
-        ],
-        canonicalItem: ['title', 'url', 'author', 'publishTime', 'markdown', 'fileName'],
-      },
-      'record-run': {
-        schemaVersion: METADATA_VERSION,
-        fields: ['runId', 'operation', 'target', 'selection', 'status', 'sessionStatus', 'globalStage', 'items'],
-        selection: ['mode', 'itemIds', 'discardUnselected', 'discardUnselectedConfirmed'],
-        selectionModes: [...SELECTION_MODES],
-        sessionStatuses: [...SESSION_STATUSES],
-      },
-    },
+    itemId,
+    materialization: inventory.materialization,
+    canonicalItem: persistedCanonicalItem,
+  };
+}
+
+/** export-views — 由 session.json 生成兼容导出视图(sanitized/metadata.json + collection-result.json)。 */
+export function cmdExportViews(paths) {
+  return withSessionLock(paths, 'export-views', () => {
+    const loaded = loadSession(paths, { persistMigration: true });
+    const { metadata, collectionResult, session } = loaded;
+    if (loaded.metadataChanged || loaded.collectionResultChanged) {
+      persistCollection(paths, session, metadata);
+      atomicWriteJson(paths.collectionResult, collectionResult);
+    }
+    atomicWriteJson(paths.metadata, metadata);
+    return {
+      ok: true,
+      action: 'export-views',
+      metadata,
+      collectionResult,
+      warnings: loaded.warnings,
+    };
+  });
+}
+
+/** collectionStatus — 供统一 status 命令汇总采集维度。 */
+export function collectionStatus(paths) {
+  const loaded = loadSession(paths);
+  const { metadata, collectionResult } = loaded;
+  return {
+    collectionStatus: metadata.collection.status,
+    items: metadata.collection.items.length,
+    materialized: metadata.collection.items
+      .filter((item) => item.materialization?.status === 'materialized').length,
+    runs: metadata.postProcessing.runs.length,
+    retention: metadata.retention,
+    canonicalItems: Array.isArray(collectionResult.items) ? collectionResult.items.length : 0,
+  };
+}
+
+// 旧命令名导出(兼容别名,由统一 CLI 使用)
+export const cmdInspect = inspect;
+export const cmdRun = recordRun;
+export const cmdCleanup = cleanup;
+export const cmdUnlockStale = unlockStale;
+export const cmdSetRetention = setRetention;
+export const cmdRewriteImageLinks = rewriteImageLinks;
+export function collectionHelp() {
+  return {
     commands: {
-      'init-session': '创建并校验私有采集会话骨架，写入 canonical view 与 inventory metadata',
-      inspect: '读取并迁移后处理状态，检测相同 operation + target 的续跑选择',
-      'mark-materialized': '登记原始执行器生成的 Markdown 与 sanitized 正文',
-      'record-run': '追加或更新一次 post-processing run',
+      collect: '登记执行器抓取结果(集合物化;inventory 缺失时自动补登)',
+      inspect: '读取并迁移后处理状态,检测相同 operation + target 的续跑选择',
+      run: '追加或更新一次 post-processing run(ingest / organize / external)',
       cleanup: '按 run 状态执行完整会话或部分工作副本清理',
       'unlock-stale': '仅在锁持有 PID 已不存在时安全回收残留锁',
       'set-retention': '设置是否保留本次会话工作副本',
       'rewrite-image-links': '把 sanitized 正文里的本地图片相对链接改写为 fileBrowser 下载 URL',
+      'export-views': '由 session.json 生成 sanitized/metadata.json 与 collection-result.json 导出视图',
     },
   };
-}
-
-function validateInitialCollectionResult(collectionResult) {
-  if (!collectionResult || typeof collectionResult !== 'object' || Array.isArray(collectionResult)) {
-    throw new Error('collection-result.json 根节点必须是对象');
-  }
-  const allowed = new Set(['schemaVersion', 'title', 'source', 'backend', 'url', 'filters', 'items']);
-  const unexpected = Object.keys(collectionResult).filter((key) => !allowed.has(key));
-  if (unexpected.length) {
-    throw new Error(`collection-result.json 包含不支持的字段: ${unexpected.join(', ')}`);
-  }
-  if (collectionResult.schemaVersion !== METADATA_VERSION) {
-    throw new Error(`collection-result.json schemaVersion 必须是 ${METADATA_VERSION}`);
-  }
-  for (const key of ['title', 'source', 'backend', 'url']) {
-    requireString(collectionResult[key], `collection-result.json.${key}`);
-  }
-  if (!collectionResult.filters || typeof collectionResult.filters !== 'object' || Array.isArray(collectionResult.filters)) {
-    throw new Error('collection-result.json filters 必须是对象');
-  }
-  if (!Array.isArray(collectionResult.items)) {
-    throw new Error('collection-result.json items 必须是数组');
-  }
-  if (collectionResult.items.length > 10) {
-    throw new Error('init-session 最多允许预物化 10 篇正文');
-  }
-}
-
-function initSession(args) {
-  const root = path.resolve(requireString(args['session-dir'], '--session-dir'));
-  const metadataInput = readStandaloneJson(args['metadata-input-file'], '--metadata-input-file');
-  const collectionResult = readStandaloneJson(
-    args['collection-result-input-file'],
-    '--collection-result-input-file',
-  );
-  validateInitialCollectionResult(collectionResult);
-  if (fs.existsSync(root)) {
-    if (!fs.statSync(root).isDirectory() || fs.readdirSync(root).length > 0) {
-      throw new Error(`目标 session 目录必须不存在或为空: ${root}`);
-    }
-  }
-  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
-  for (const directory of ['raw', 'markdown', 'sanitized', path.join('sanitized', 'items'), '.post-processing-inputs']) {
-    fs.mkdirSync(path.join(root, directory), { recursive: true, mode: 0o700 });
-    fs.chmodSync(path.join(root, directory), 0o700);
-  }
-  try {
-    atomicWriteJson(path.join(root, 'collection-result.json'), collectionResult);
-    atomicWriteJson(path.join(root, 'sanitized', 'metadata.json'), metadataInput);
-    const paths = sessionPaths(root);
-    const loaded = loadSession(paths, { persistMigration: true });
-    if (loaded.materializationRecovered) {
-      throw new Error('初始化 metadata 包含无效 materialization');
-    }
-    return {
-      ok: true,
-      action: 'init-session',
-      sessionDir: root,
-      metadata: loaded.metadata,
-      collectionResult: loaded.collectionResult,
-    };
-  } catch (error) {
-    fs.rmSync(root, { recursive: true, force: true });
-    throw error;
-  }
-}
-
-function main() {
-  const { command, args } = parseArgs(process.argv.slice(2));
-  if (!command || command === '--help' || command === 'help') {
-    render(help());
-    return;
-  }
-  if (command === 'init-session') {
-    render(initSession(args));
-    return;
-  }
-  const paths = sessionPaths(args['session-dir']);
-  const inputFile = command === 'mark-materialized'
-    ? path.resolve(requireString(args['item-json-file'], '--item-json-file'))
-    : command === 'record-run'
-      ? path.resolve(requireString(args['run-json-file'], '--run-json-file'))
-      : null;
-  let result;
-  try {
-    if (command === 'inspect') {
-      result = inspect(paths, args);
-    } else if (command === 'mark-materialized') {
-      result = markMaterialized(paths, args);
-    } else if (command === 'record-run') {
-      result = recordRun(paths, args);
-    } else if (command === 'cleanup') {
-      result = cleanup(paths, args);
-    } else if (command === 'unlock-stale') {
-      result = unlockStale(paths);
-    } else if (command === 'set-retention') {
-      result = setRetention(paths, args);
-    } else if (command === 'rewrite-image-links') {
-      result = rewriteImageLinks(paths, args);
-    } else {
-      throw new Error(`未知命令: ${command}`);
-    }
-    if (inputFile) {
-      fs.unlinkSync(inputFile);
-    }
-  } catch (error) {
-    if (inputFile && error instanceof Error) {
-      error.inputFile = inputFile;
-    }
-    throw error;
-  }
-  render(result);
-}
-
-try {
-  main();
-} catch (error) {
-  render({
-    ok: false,
-    error: error instanceof Error ? error.message : String(error),
-    ...(error instanceof Error && typeof error.inputFile === 'string' ? { inputFile: error.inputFile } : {}),
-  });
-  process.exitCode = 1;
 }
