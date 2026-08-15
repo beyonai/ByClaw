@@ -86,7 +86,7 @@ export function isInside(root, candidate) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-function assertNoSensitiveKeys(value, currentPath = 'session.json') {
+export function assertNoSensitiveKeys(value, currentPath = 'session.json') {
   if (Array.isArray(value)) {
     value.forEach((item, index) => assertNoSensitiveKeys(item, `${currentPath}[${index}]`));
     return;
@@ -139,14 +139,20 @@ export function newSession(task = {}) {
     schemaVersion: SESSION_SCHEMA_VERSION,
     task: {
       query: '',
+      mode: 'collection',
       breadth: 3,
       depth: 2,
       concurrency: 2,
       maxContextWords: 25000,
-      startedAt: null,
+      deadlineMinutes: null,
+      maxBranches: null,
+      maxSourcesPerBranch: null,
+      maxSearchRounds: null,
+      startedAt: new Date().toISOString(),
       initialSearch: [],
       followups: [],
       combinedQuery: null,
+      stopReason: null,
       status: 'initialized',
       ...task,
     },
@@ -214,10 +220,19 @@ function assertLockShape(rawLock) {
   ) {
     throw new Error('锁文件损坏: 缺少合法 pid、createdAt、ownerId 或 command');
   }
-  return { pid: rawLock.pid, createdAt: rawLock.createdAt, ownerId: rawLock.ownerId, command: rawLock.command };
+  if (rawLock.processStartTime !== undefined && typeof rawLock.processStartTime !== 'number') {
+    throw new Error('锁文件损坏: processStartTime 必须是数字');
+  }
+  return {
+    pid: rawLock.pid,
+    createdAt: rawLock.createdAt,
+    ownerId: rawLock.ownerId,
+    command: rawLock.command,
+    processStartTime: rawLock.processStartTime,
+  };
 }
 
-function readLock(paths) {
+export function readLock(paths) {
   let stat;
   try {
     stat = fs.lstatSync(paths.lock);
@@ -243,13 +258,26 @@ function sameLock(left, right) {
   return left?.pid === right?.pid
     && left?.createdAt === right?.createdAt
     && left?.ownerId === right?.ownerId
-    && left?.command === right?.command;
+    && left?.command === right?.command
+    && left?.processStartTime === right?.processStartTime;
 }
 
-function isProcessAlive(pid) {
+function linuxProcessStartTime(pid) {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const commEnd = stat.lastIndexOf(')');
+    const fields = stat.slice(commEnd + 2).trim().split(/\s+/);
+    // /proc/<pid>/stat: field 22 is starttime;after comm+state it is fields[19].
+    const value = Number(fields[19]);
+    return Number.isFinite(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function isProcessAlive(pid, expectedStartTime) {
   try {
     process.kill(pid, 0);
-    return true;
   } catch (error) {
     if (error.code === 'ESRCH') {
       return false;
@@ -259,6 +287,13 @@ function isProcessAlive(pid) {
     }
     throw error;
   }
+  if (expectedStartTime !== undefined && process.platform === 'linux') {
+    const actual = linuxProcessStartTime(pid);
+    if (actual !== undefined && actual !== expectedStartTime) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function quarantineStaleLock(paths, lock) {
@@ -364,6 +399,7 @@ export function acquireSessionLock(paths, command) {
         fs.writeFileSync(descriptor, `${JSON.stringify({
           pid: process.pid,
           createdAt: new Date().toISOString(),
+          processStartTime: linuxProcessStartTime(process.pid),
           ownerId,
           command,
         })}\n`);
@@ -386,7 +422,7 @@ export function acquireSessionLock(paths, command) {
       if (!existing) {
         continue;
       }
-      if (isProcessAlive(existing.pid)) {
+      if (isProcessAlive(existing.pid, existing.processStartTime)) {
         throw new Error(`当前采集会话锁持有进程仍存活: pid=${existing.pid}, command=${existing.command}`);
       }
       const recovered = quarantineStaleLock(paths, existing);

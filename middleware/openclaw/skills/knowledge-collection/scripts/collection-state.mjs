@@ -24,6 +24,8 @@ import {
   loadSession as sessionLoad,
   persistCollection,
   withSessionLock,
+  isProcessAlive,
+  readLock,
 } from './session.mjs';
 
 
@@ -477,21 +479,17 @@ function readPayload(paths, rawFilePath, label) {
   return { filePath, payload };
 }
 
-function loadSession(paths, { persistMigration = false, skipCanonicalValidation = false } = {}) {
+function loadSession(paths, { persistMigration = false, skipCanonicalValidation = false, persistRecovery = true } = {}) {
   const { session, migrated } = sessionLoad(paths);
   const rawMetadata = session.collection;
   let collectionResult;
-  try {
+  if (fs.existsSync(paths.collectionResult)) {
     collectionResult = readJson(paths.collectionResult, 'collection-result.json');
-  } catch (error) {
-    if (String(error.message).startsWith('collection-result.json 读取失败') && !fs.existsSync(paths.collectionResult)) {
-      // 研究先行阶段尚无采集产物: 以空 canonical view 参与校验(有 materialized inventory 时仍会报错)
-      collectionResult = {
-        schemaVersion: '1.0', title: '', source: '', backend: '', url: '', filters: {}, items: [],
-      };
-    } else {
-      throw error;
-    }
+  } else {
+    // 研究先行阶段尚无采集产物: 以空 canonical view 参与校验(有 materialized inventory 时仍会报错)
+    collectionResult = {
+      schemaVersion: '1.0', title: '', source: '', backend: '', url: '', filters: {}, items: [],
+    };
   }
   const migratedMetadata = migrateMetadata(paths.root, rawMetadata, collectionResult);
   const normalized = normalizeCurrentMetadata(migratedMetadata);
@@ -526,11 +524,12 @@ function loadSession(paths, { persistMigration = false, skipCanonicalValidation 
     validateCanonicalView(paths.root, collectionResult, metadata);
   }
   const metadataChanged = migratedMetadata !== rawMetadata || normalized.changed || materializations.changed || migrated;
-  if ((persistMigration && metadataChanged) || materializations.recovered || migrated
-    || session.collection?.schemaVersion !== '1.0') {
+  const recoveryNeeded = materializations.recovered || migrated
+    || session.collection?.schemaVersion !== '1.0';
+  if (persistRecovery && ((persistMigration && metadataChanged) || recoveryNeeded)) {
     persistCollection(paths, session, metadata);
   }
-  if (collectionResultChanged || materializations.recovered) {
+  if (persistRecovery && (collectionResultChanged || materializations.recovered)) {
     atomicWriteJson(paths.collectionResult, collectionResult);
   }
   return {
@@ -683,6 +682,181 @@ function canonicalViewItem(item) {
   return Object.fromEntries(keys
     .filter((key) => Object.hasOwn(item || {}, key))
     .map((key) => [key, item[key]]));
+}
+
+
+function metadataSummary(metadata) {
+  const runs = (metadata.postProcessing?.runs || []).map((run) => runSummary(run));
+  return {
+    schemaVersion: metadata.schemaVersion,
+    collectionStatus: metadata.collection?.status,
+    items: metadata.collection?.items?.length || 0,
+    materialized: (metadata.collection?.items || []).filter((item) => item.materialization?.status === 'materialized').length,
+    pending: (metadata.collection?.items || []).filter((item) => item.materialization?.status === 'pending').length,
+    failed: (metadata.collection?.items || []).filter((item) => item.materialization?.status === 'failed').length,
+    retention: metadata.retention,
+    runs,
+  };
+}
+
+function runSummary(run) {
+  if (!run || typeof run !== 'object') {
+    return null;
+  }
+  const count = (status) => run.items?.filter((item) => item.status === status).length || 0;
+  return {
+    runId: run.runId,
+    operation: run.operation,
+    target: run.target,
+    status: run.status,
+    sessionStatus: run.sessionStatus,
+    selection: run.selection,
+    items: {
+      total: run.items?.length || 0,
+      success: count('success'),
+      failed: count('failed'),
+      pending: count('pending'),
+      unknown: count('unknown'),
+    },
+    globalStage: run.globalStage,
+  };
+}
+
+function selectedItemIds(args, metadata) {
+  const ids = new Set();
+  if (typeof args['item-ids'] === 'string' && args['item-ids'].trim()) {
+    for (const raw of args['item-ids'].split(',')) {
+      const itemId = raw.trim();
+      if (itemId) {
+        ids.add(itemId);
+      }
+    }
+  }
+  for (const value of Array.isArray(args['item-id']) ? args['item-id'] : (args['item-id'] ? [args['item-id']] : [])) {
+    if (typeof value === 'string' && value.trim()) {
+      ids.add(value.trim());
+    }
+  }
+  if (!ids.size) {
+    return null;
+  }
+  const inventoryIds = new Set((metadata.collection?.items || []).map((item) => item.itemId));
+  for (const itemId of ids) {
+    if (!inventoryIds.has(itemId)) {
+      throw new Error(`rewrite-image-links 指定了不在 inventory 中的 itemId: ${itemId}`);
+    }
+  }
+  return ids;
+}
+
+function deletePayloadInput(filePath) {
+  let stat;
+  try {
+    stat = fs.lstatSync(filePath);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    return `输入文件类型异常,保留未删除: ${filePath}`;
+  }
+  try {
+    fs.unlinkSync(filePath);
+    return null;
+  } catch (error) {
+    return `输入文件删除失败,已保留: ${filePath} (${error.message})`;
+  }
+}
+
+function quarantineRelativePath(paths, relativePath, label) {
+  const candidate = validateRelativePath(paths.root, relativePath, label, { allowMissing: true });
+  if (!fs.existsSync(candidate)) {
+    return null;
+  }
+  const realCandidate = fs.realpathSync(candidate);
+  const realRoot = fs.realpathSync(paths.root);
+  if (!isInside(realRoot, realCandidate)) {
+    throw new Error(`${label} 符号链接越出采集根目录`);
+  }
+  if (!fs.statSync(candidate).isFile()) {
+    throw new Error(`${label} 必须指向普通文件`);
+  }
+  const quarantine = `${candidate}.trash-${crypto.randomUUID()}`;
+  fs.renameSync(candidate, quarantine);
+  return { original: candidate, quarantine };
+}
+
+function rollbackQuarantine(moved) {
+  const failures = [];
+  for (const { original, quarantine } of [...moved].reverse()) {
+    try {
+      if (!fs.existsSync(original) && fs.existsSync(quarantine)) {
+        fs.renameSync(quarantine, original);
+      }
+    } catch (error) {
+      failures.push(`${original}: ${error.message}`);
+    }
+  }
+  return failures;
+}
+
+function deleteQuarantined(moved) {
+  const warnings = [];
+  for (const { original, quarantine } of moved) {
+    try {
+      fs.rmSync(quarantine, { force: true, maxRetries: 2, retryDelay: 50 });
+    } catch (error) {
+      warnings.push(`待删除文件残留: ${quarantine} (${error.message});原始路径 ${original} 已释放`);
+    }
+  }
+  return warnings;
+}
+
+function archiveDeliverables(paths, session) {
+  const deliverables = [
+    session?.research?.reportPath,
+    path.join(paths.root, 'research-tree.md'),
+  ].filter((filePath) => typeof filePath === 'string' && filePath && fs.existsSync(filePath));
+  if (!deliverables.length) {
+    return null;
+  }
+  const archive = path.join(path.dirname(paths.root), `${path.basename(paths.root)}.delivered`);
+  fs.mkdirSync(archive, { recursive: true, mode: 0o700 });
+  const copied = [];
+  for (const filePath of deliverables) {
+    const target = path.join(archive, path.basename(filePath));
+    fs.copyFileSync(filePath, target);
+    copied.push(target);
+  }
+  return archive;
+}
+
+function removeSessionRootTransactional(paths, runId) {
+  const root = paths.root;
+  const trash = path.join(
+    path.dirname(root),
+    `.${path.basename(root)}.trash-${runId}-${crypto.randomUUID()}`,
+  );
+  fs.renameSync(root, trash);
+  try {
+    fs.rmSync(trash, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    return { removedSession: true, removedPath: root, trashPath: trash };
+  } catch (error) {
+    throw new Error(`会话已整体移入待删除目录 ${trash},但递归删除失败: ${error.message}。请手工检查并清理该目录`);
+  }
+}
+
+function researchReportPending(session) {
+  if (session?.task?.mode === 'collection') {
+    return false;
+  }
+  const complete = session?.task?.status === 'complete'
+    && typeof session?.research?.reportPath === 'string'
+    && session.research.reportPath.trim()
+    && fs.existsSync(session.research.reportPath);
+  return !complete;
 }
 
 function markMaterialized(paths, args) {
@@ -929,7 +1103,8 @@ function deriveSessionStatus(run, inventoryIds) {
 }
 
 function recordRun(paths, args) {
-  const { payload: run } = readPayload(paths, args['run-json-file'], '--run-json-file');
+  const payloadPath = path.resolve(requireString(args['run-json-file'], '--run-json-file'));
+  const { payload: run } = readPayload(paths, payloadPath, '--run-json-file');
   return withSessionLock(paths, 'record-run', () => {
     const loaded = loadSession(paths);
     const { metadata, session } = loaded;
@@ -937,6 +1112,17 @@ function recordRun(paths, args) {
       throw new Error('检测到无效 materialization，已安全降级为 pending；请先由原始执行器重新物化');
     }
     validateRun(run, new Set(metadata.collection.items.map((item) => item.itemId)));
+    const dryRun = args['dry-run'] === true || args['dry-run'] === 'true';
+    if (dryRun) {
+      return {
+        ok: true,
+        action: 'record-run',
+        dryRun: true,
+        runId: run.runId,
+        summary: runSummary(run),
+        note: '校验通过;未持久化',
+      };
+    }
     const index = metadata.postProcessing.runs.findIndex((item) => item.runId === run.runId);
     if (index === -1) {
       const selectedIdentities = new Set(run.selection.itemIds.map((itemId) => {
@@ -991,7 +1177,15 @@ function recordRun(paths, args) {
       };
     }
     persistCollection(paths, session, metadata);
-    return { ok: true, action: 'record-run', runId: run.runId, metadata };
+    const warning = deletePayloadInput(payloadPath);
+    const full = args.full === true || args.full === 'true';
+    return {
+      ok: true,
+      action: 'record-run',
+      runId: run.runId,
+      ...(warning ? { warning } : {}),
+      ...(full ? { metadata } : { summary: runSummary(run) }),
+    };
   });
 }
 
@@ -1011,10 +1205,11 @@ function sameTarget(left, right) {
 
 function inspect(paths, args) {
   return withSessionLock(paths, 'inspect', () => {
-    const loaded = loadSession(paths, { persistMigration: true });
+    const loaded = loadSession(paths, { persistMigration: false, persistRecovery: false });
     const { metadata, collectionResult, session } = loaded;
     const warnings = [...loaded.warnings];
-    if (!loaded.materializationRecovered) {
+    const drainPending = args['drain-pending'] === true || args['drain-pending'] === 'true';
+    if (drainPending && !loaded.materializationRecovered) {
       const drained = drainPendingArtifactCleanup(paths, metadata);
       warnings.push(...drained.warnings);
       if (drained.changed) {
@@ -1052,18 +1247,27 @@ function inspect(paths, args) {
       matchingRun?.globalStage?.required
       && ['failed', 'pending', 'unknown'].includes(matchingRun.globalStage.status),
     );
-    return {
-      ok: true,
+    const full = args.full === true || args.full === 'true';
+    const summary = {
       action: 'inspect',
-      metadata,
-      collectionResult,
-      matchingRun: matchingRun || null,
+      collection: metadataSummary(metadata),
+      matchingRun: matchingRun ? runSummary(matchingRun) : null,
       requiresResumeChoice,
       resumeChoices: requiresResumeChoice ? ['all', 'failed-only'] : [],
       failedItemIds,
       requiresGlobalStageRetry,
+      drainedPendingArtifacts: drainPending,
       warnings,
     };
+    if (full) {
+      return {
+        ok: true,
+        metadata,
+        collectionResult,
+        ...summary,
+      };
+    }
+    return { ok: true, ...summary };
   });
 }
 
@@ -1112,15 +1316,8 @@ function cleanup(paths, args) {
     if (requiresRematerialization) {
       throw new Error('成功项缺少有效 materialization；请先由原始执行器重新物化');
     }
-    const retention = Boolean(metadata.retention?.auditRequired || metadata.retention?.userRequested);
-    if (retention) {
-      for (const item of successful) {
-        item.cleanupStatus = 'skipped-retention';
-      }
-      persistCollection(paths, session, metadata);
-      return { ok: true, action: 'cleanup', runId, retention: true, removedSession: false, metadata };
-    }
-
+    const reportPending = researchReportPending(session);
+    const retention = Boolean(metadata.retention?.auditRequired || metadata.retention?.userRequested) || reportPending;
     const inventoryIds = new Set(metadata.collection.items.map((item) => item.itemId));
     const selectedIds = new Set(run.selection.itemIds);
     const coversInventory = run.selection.discardUnselected === true
@@ -1129,10 +1326,55 @@ function cleanup(paths, args) {
       && run.items.length === selectedIds.size
       && run.items.every((item) => item.status === 'success')
       && run.items.every((item) => !['completed', 'superseded'].includes(item.cleanupStatus));
-    if (coversInventory && selectedAllSuccess) {
-      const removedPath = paths.root;
-      fs.rmSync(paths.root, { recursive: true, force: true });
-      return { ok: true, action: 'cleanup', runId, removedSession: true, removedPath };
+    const fullRemoval = coversInventory && selectedAllSuccess;
+    const dryRun = args['dry-run'] === true || args['dry-run'] === 'true';
+    const full = args.full === true || args.full === 'true';
+    if (dryRun) {
+      return {
+        ok: true,
+        action: 'cleanup',
+        dryRun: true,
+        runId,
+        plan: retention
+          ? { action: 'retain-session', reason: reportPending ? 'research-report-pending' : 'retention-policy' }
+          : fullRemoval
+            ? { action: 'remove-session', path: paths.root }
+            : {
+              action: 'partial-cleanup',
+              itemIds: successful.map((item) => item.itemId),
+              keepRaw: true,
+              note: '仅删除成功项工作副本,保留 raw/ 与未完成项',
+            },
+        summary: runSummary(run),
+      };
+    }
+    if (retention) {
+      for (const item of successful) {
+        item.cleanupStatus = 'skipped-retention';
+      }
+      persistCollection(paths, session, metadata);
+      return {
+        ok: true,
+        action: 'cleanup',
+        runId,
+        retention: true,
+        reason: reportPending ? 'research-report-pending' : 'retention-policy',
+        removedSession: false,
+        summary: metadataSummary(metadata),
+      };
+    }
+
+    if (fullRemoval) {
+      const shouldArchiveDeliverables = args['archive-deliverables'] === true || args['archive-deliverables'] === 'true';
+      const archivePath = shouldArchiveDeliverables ? archiveDeliverables(paths, session) : null;
+      return {
+        ok: true,
+        action: 'cleanup',
+        runId,
+        ...(archivePath ? { archiveDeliverables: archivePath } : {}),
+        ...removeSessionRootTransactional(paths, runId),
+        summary: runSummary(run),
+      };
     }
 
     for (const item of successful) {
@@ -1141,6 +1383,7 @@ function cleanup(paths, args) {
     persistCollection(paths, session, metadata);
 
     const deletedSanitized = new Set();
+    const warnings = [];
     for (const runItem of successful) {
       const inventory = metadata.collection.items.find((item) => item.itemId === runItem.itemId);
       if (!inventory) {
@@ -1150,58 +1393,56 @@ function cleanup(paths, args) {
         ['markdownPath', inventory.materialization.markdownPath],
         ['sanitizedPath', inventory.materialization.sanitizedPath],
       ].filter(([, relativePath]) => typeof relativePath === 'string' && relativePath);
-      for (const [field, relativePath] of artifacts) {
-        validateRelativePath(paths.root, relativePath, `${runItem.itemId}.${field}`, { allowMissing: true });
-      }
-      const cleanedArtifacts = [];
-      const failedArtifacts = [];
-      let failed = false;
-      for (const [field, relativePath] of artifacts) {
-        try {
-          deleteArtifact(paths, relativePath, `${runItem.itemId}.${field}`);
-          cleanedArtifacts.push(relativePath);
-          if (field === 'sanitizedPath') {
-            deletedSanitized.add(relativePath);
+      const moved = [];
+      try {
+        for (const [field, relativePath] of artifacts) {
+          validateRelativePath(paths.root, relativePath, `${runItem.itemId}.${field}`, { allowMissing: true });
+          const quarantined = quarantineRelativePath(paths, relativePath, `${runItem.itemId}.${field}`);
+          if (quarantined) {
+            moved.push({ ...quarantined, relativePath });
           }
-        } catch (error) {
-          failed = true;
-          failedArtifacts.push(relativePath);
-          runItem.reason = runItem.reason || error.message;
         }
+      } catch (error) {
+        const rollbackWarnings = rollbackQuarantine(moved);
+        warnings.push(...rollbackWarnings.map((text) => `${runItem.itemId} 回滚警告: ${text}`));
+        runItem.cleanupStatus = 'failed';
+        runItem.reason = runItem.reason || `${error.message}
+${error.stack}`;
+        continue;
       }
-      runItem.cleanedArtifacts = [...new Set([...(runItem.cleanedArtifacts || []), ...cleanedArtifacts])];
+
+      const originalArtifacts = artifacts.map(([, relativePath]) => relativePath);
+      const sanitizedArtifact = inventory.materialization.sanitizedPath;
       const previousPending = Array.isArray(inventory.materialization.pendingArtifactCleanup)
         ? inventory.materialization.pendingArtifactCleanup
         : [];
-      if (failed) {
-        inventory.materialization.pendingArtifactCleanup = [
-          ...new Set([
-            ...previousPending,
-            ...failedArtifacts,
-          ]),
-        ].filter((artifact) => typeof artifact === 'string' && artifact.length > 0);
-        runItem.cleanupStatus = 'failed';
-        inventory.materialization.status = 'pending';
-        inventory.materialization.reason = runItem.reason || 'cleanup-failed';
-        inventory.materialization.markdownPath = null;
-        inventory.materialization.sanitizedPath = null;
-      } else {
-        for (const [field] of artifacts) {
-          inventory.materialization[field] = null;
-        }
-        runItem.cleanupStatus = 'completed';
-        if (!inventory.materialization.markdownPath && !inventory.materialization.sanitizedPath) {
-          inventory.materialization.status = 'pending';
-          inventory.materialization.reason = null;
-          inventory.materialization.pendingArtifactCleanup = previousPending;
+      runItem.cleanedArtifacts = [...new Set([...(runItem.cleanedArtifacts || []), ...originalArtifacts])];
+      inventory.materialization.markdownPath = null;
+      inventory.materialization.sanitizedPath = null;
+      inventory.materialization.status = 'pending';
+      inventory.materialization.reason = null;
+      inventory.materialization.pendingArtifactCleanup = previousPending.filter((item) => !originalArtifacts.includes(item));
+      runItem.cleanupStatus = 'completed';
+      for (const artifact of originalArtifacts) {
+        if (artifact === sanitizedArtifact || artifact.startsWith(`${path.join('sanitized', 'items').split(path.sep).join('/')}/`)) {
+          deletedSanitized.add(artifact);
         }
       }
+      warnings.push(...deleteQuarantined(moved));
     }
     collectionResult.items = (Array.isArray(collectionResult.items) ? collectionResult.items : [])
       .filter((item) => !deletedSanitized.has(item.fileName));
     atomicWriteJson(paths.collectionResult, collectionResult);
     persistCollection(paths, session, metadata);
-    return { ok: true, action: 'cleanup', runId, retention: false, removedSession: false, metadata, collectionResult };
+    return {
+      ok: true,
+      action: 'cleanup',
+      runId,
+      retention: false,
+      removedSession: false,
+      warnings,
+      ...(full ? { metadata, collectionResult } : { summary: metadataSummary(metadata) }),
+    };
   });
 }
 
@@ -1210,7 +1451,7 @@ function unlockStale(paths) {
   if (!lock) {
     return { ok: true, action: 'unlock-stale', removed: false, previousLock: null };
   }
-  if (isProcessAlive(lock.pid)) {
+  if (isProcessAlive(lock.pid, lock.processStartTime)) {
     throw new Error(`当前采集会话锁持有进程仍存活: pid=${lock.pid}, command=${lock.command}`);
   }
   const removed = quarantineStaleLock(paths, lock);
@@ -1230,13 +1471,18 @@ function setRetention(paths, args) {
     if (loaded.materializationRecovered) {
       throw new Error('检测到无效 materialization，已安全降级为 pending；请先由原始执行器重新物化');
     }
-    loaded.metadata.retention.userRequested = rawKeep === 'true';
-    persistCollection(paths, loaded.session, loaded.metadata);
+    const nextValue = rawKeep === 'true';
+    const dryRun = args['dry-run'] === true || args['dry-run'] === 'true';
+    if (!dryRun) {
+      loaded.metadata.retention.userRequested = nextValue;
+      persistCollection(paths, loaded.session, loaded.metadata);
+    }
     return {
       ok: true,
       action: 'set-retention',
-      userRequested: loaded.metadata.retention.userRequested,
-      metadata: loaded.metadata,
+      dryRun,
+      userRequested: dryRun ? nextValue : loaded.metadata.retention.userRequested,
+      ...(dryRun ? { note: '未持久化;去掉 --dry-run 后写入' } : { metadata: loaded.metadata }),
     };
   });
 }
@@ -1364,10 +1610,12 @@ function rewriteImageLinks(paths, args) {
   const dryRun = args['dry-run'] === true || args['dry-run'] === 'true';
   return withSessionLock(paths, 'rewrite-image-links', () => {
     const { metadata } = loadSession(paths, { persistMigration: true });
+    const selected = selectedItemIds(args, metadata);
     const warnings = [];
     const items = [];
     let rewrittenTotal = 0;
-    for (const inventory of metadata.collection.items) {
+    const scopedItems = metadata.collection.items.filter((inventory) => !selected || selected.has(inventory.itemId));
+    for (const inventory of scopedItems) {
       const sanitizedPath = inventory.materialization?.sanitizedPath;
       if (inventory.materialization?.status !== 'materialized' || typeof sanitizedPath !== 'string') {
         items.push({ itemId: inventory.itemId, status: 'skipped', reason: 'not-materialized', rewritten: 0 });
@@ -1458,6 +1706,7 @@ function rewriteImageLinks(paths, args) {
       action: 'rewrite-image-links',
       dryRun,
       mode: linkMap ? 'link-map' : 'workspace-path',
+      selection: selected ? [...selected] : 'all',
       resourceId: linkMap ? undefined : resourceId,
       language: linkMap ? undefined : language,
       workspaceRoot: linkMap ? undefined : workspaceRoot,
@@ -1492,6 +1741,7 @@ export function cmdCollect(paths, args) {
       throw new Error('检测到无效 materialization，已安全降级为 pending；请先由原始执行器重新物化');
     }
     const { metadata, collectionResult, session } = loaded;
+    const dryRun = args['dry-run'] === true || args['dry-run'] === 'true';
     const results = [];
     for (const update of items) {
       results.push(markOneMaterialized(paths, session, metadata, collectionResult, update));
@@ -1499,15 +1749,31 @@ export function cmdCollect(paths, args) {
     // 登记完成后执行严格校验(与旧 init-session 后置校验语义一致)
     validateMetadata(metadata);
     validateCanonicalView(paths.root, collectionResult, metadata);
+    if (dryRun) {
+      return {
+        ok: true,
+        action: 'collect',
+        dryRun: true,
+        items: results,
+        note: '校验通过;未持久化',
+      };
+    }
     persistCollection(paths, session, metadata);
     atomicWriteJson(paths.collectionResult, collectionResult);
     const drained = drainPendingArtifactCleanup(paths, metadata);
     if (drained.changed) {
       persistCollection(paths, session, metadata);
     }
-    return { ok: true, action: 'collect', items: results, warnings: drained.warnings };
+    const warning = deletePayloadInput(payloadPath);
+    return {
+      ok: true,
+      action: 'collect',
+      items: results,
+      warnings: [...(warning ? [warning] : []), ...drained.warnings],
+    };
   });
 }
+
 
 /** 单条物化登记(原 mark-materialized 主体,inventory 缺失时按 canonicalItem 补登)。 */
 function markOneMaterialized(paths, session, metadata, collectionResult, update) {
@@ -1610,7 +1876,8 @@ export function cmdExportViews(paths) {
 
 /** collectionStatus — 供统一 status 命令汇总采集维度。 */
 export function collectionStatus(paths) {
-  const loaded = loadSession(paths);
+  // status 只写迁移/修复类恢复;正常 schema 2.0 读取不落盘。
+  const loaded = loadSession(paths, { persistRecovery: true });
   const { metadata, collectionResult } = loaded;
   return {
     collectionStatus: metadata.collection.status,
@@ -1620,6 +1887,7 @@ export function collectionStatus(paths) {
     runs: metadata.postProcessing.runs.length,
     retention: metadata.retention,
     canonicalItems: Array.isArray(collectionResult.items) ? collectionResult.items.length : 0,
+    warnings: loaded.warnings || [],
   };
 }
 
