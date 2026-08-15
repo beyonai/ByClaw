@@ -37,7 +37,7 @@ canonical view 不携带 `sourceSkill` 或 `itemId`；这些字段以及物化�
 1. 优先使用关联 `rawArtifacts` 重新转换、净化。
 2. raw 不完整或没有正文时，通过同一原始执行器按 `sourceItemId` 或 `sourceUrl` 补采并净化。
 3. 不得切换执行器、改变用户筛选，也不得回退使用 `markdown/*.md` 作为下游正文。
-4. 成功后使用 `mark-materialized` 登记文件；仍失败则记录原因、跳过该文章并告知用户。
+4. 成功后使用 `collect` 登记文件；仍失败则记录原因、跳过该文章并告知用户。
 
 已有 materialization 的路径错误、文件缺失或状态与路径矛盾时，不删除任何所指文件；脚本把该文章安全降级为 `pending`、
 移出 canonical view 并要求原始执行器重新物化。成功 run 不得建立在该无效物化状态上。
@@ -78,20 +78,32 @@ canonical view 不携带 `sourceSkill` 或 `itemId`；这些字段以及物化�
 只选择部分文章时，未选文章在会话层面仍为 pending。只有覆盖完整 inventory 且全部成功，或用户明确放弃未选文章时，
 才能清理整个会话。
 
+
+## 一体化生命周期(研究任务 ⊃ 采集批 ⊃ 后处理 run)
+
+自一体化改造起,会话状态由 `session.json` 单文件承载(task + research + collection 三部分)。
+生命周期语义如下:
+
+- 深化研究任务(init/plan/branch/aggregate/report)与采集物化(collect)共享同一会话与同一锁;
+- 每层分支的抓取结果经 `collect` 登记物化后,`cleanup` 默认不会清理 —— 研究任务完成(report)且
+  后处理 run 全部记录完成之前,脚本自动保持 `retention.auditRequired` 语义,跨轮次复用物化产物;
+- 完整成功清理会话只发生在: 后处理 run 记录成功、报告已交付、且无保留策略(见「清理」章节);
+- `run`(ingest / organize / external)是后处理运行的唯一写入入口,`itemId` 是逐篇结果与 inventory 的对账键。
+
 ## 状态脚本与续跑
 
-状态与清理必须通过 `scripts/knowledge-collection-post-processing.mjs`，不得由 Agent 手工修改 JSON 或猜测关联文件：
+状态与清理必须通过 `scripts/knowledge-collection.mjs`（物化/生命周期逻辑在 `scripts/collection-state.mjs`，旧名 `knowledge-collection-post-processing.mjs`），不得由 Agent 手工修改 JSON 或猜测关联文件：
 
 ```text
-node scripts/knowledge-collection-post-processing.mjs init-session --session-dir <dir> --metadata-input-file <metadata> --collection-result-input-file <result>
-node scripts/knowledge-collection-post-processing.mjs inspect --session-dir <dir>
-node scripts/knowledge-collection-post-processing.mjs mark-materialized --session-dir <dir> --item-json-file <file>
-node scripts/knowledge-collection-post-processing.mjs record-run --session-dir <dir> --run-json-file <file>
-node scripts/knowledge-collection-post-processing.mjs cleanup --session-dir <dir> --run-id <id>
-node scripts/knowledge-collection-post-processing.mjs unlock-stale --session-dir <dir>
-node scripts/knowledge-collection-post-processing.mjs set-retention --session-dir <dir> --keep true|false
-node scripts/knowledge-collection-post-processing.mjs rewrite-image-links --session-dir <dir> --link-map-file <file>
-node scripts/knowledge-collection-post-processing.mjs rewrite-image-links --session-dir <dir> --resource-id <数字员工资源ID>
+node scripts/knowledge-collection.mjs init --session-dir <dir> --query "<研究问题>" [--collection-result-input-file <result>]
+node scripts/knowledge-collection.mjs inspect --session-dir <dir>
+node scripts/knowledge-collection.mjs collect --session-dir <dir> --item-json-file <file>
+node scripts/knowledge-collection.mjs run --session-dir <dir> --run-json-file <file>
+node scripts/knowledge-collection.mjs cleanup --session-dir <dir> --run-id <id>
+node scripts/knowledge-collection.mjs unlock-stale --session-dir <dir>
+node scripts/knowledge-collection.mjs set-retention --session-dir <dir> --keep true|false
+node scripts/knowledge-collection.mjs rewrite-image-links --session-dir <dir> --link-map-file <file>
+node scripts/knowledge-collection.mjs rewrite-image-links --session-dir <dir> --resource-id <数字员工资源ID>
 ```
 
 ## 图片链接改写
@@ -111,7 +123,7 @@ node scripts/knowledge-collection-ingest.mjs upload-images \
   --knowledge-base-resource-id <知识库资源ID> --directory-path <已确认目录> \
   [--base-url http://<host>:<port>] > <会话目录>/.post-processing-inputs/image-link-map.json
 
-node scripts/knowledge-collection-post-processing.mjs rewrite-image-links \
+node scripts/knowledge-collection.mjs rewrite-image-links \
   --session-dir <dir> --link-map-file <会话目录>/.post-processing-inputs/image-link-map.json
 ```
 
@@ -135,7 +147,7 @@ node scripts/knowledge-collection-post-processing.mjs rewrite-image-links \
 用 `--base-url` 追加绝对前缀：
 
 ```text
-node scripts/knowledge-collection-post-processing.mjs rewrite-image-links --session-dir <dir> \
+node scripts/knowledge-collection.mjs rewrite-image-links --session-dir <dir> \
   --resource-id <数字员工资源ID> --base-url http://<host>:<port>
 ```
 
@@ -149,14 +161,14 @@ node scripts/knowledge-collection-post-processing.mjs rewrite-image-links --sess
 改写只针对 `images/` 开头的相对链接，远程 URL 与其他形式一律保留。图片文件缺失、不是普通文件、含 `..` 穿越或
 超出正文所在目录时，保留原链接并返回告警，不得改写成无法访问的 URL。改写是幂等的：已经是下载 URL 的链接不再匹配。
 
-`init-session` 是没有自带会话 writer 的来源执行器进入正式会话的通用受控入口：它创建 `0700` 会话骨架、以 `0600`
-写入 canonical view 和 `sanitized/metadata.json`，并在成功前校验 schema。自带受测 runner 的来源执行器可以一次性生成
+`init` 是没有自带会话 writer 的来源执行器进入正式会话的通用受控入口：它创建 `0700` 会话骨架、写入 `session.json`
+（并可选预置 canonical view），随后由 `collect` 登记物化，脚本在成功前校验 schema。自带受测 runner 的来源执行器可以一次性生成
 完整会话，但必须执行相同的权限、schema、canonical-inventory 一致性与秘密扫描校验；会话建立后，Agent 不得直接修改
-正式 metadata，新增或替换正文物化必须通过 `mark-materialized` 登记。
+正式 metadata，新增或替换正文物化必须通过 `collect` 登记。
 
-`mark-materialized` 与 `record-run` 的一次性输入文件必须放在会话 `.post-processing-inputs/` 中，并使用
+`collect` 与 `run` 的一次性输入文件必须放在会话 `.post-processing-inputs/` 中，并使用
 `"schemaVersion": "1.0"`。文件必须是普通 JSON，不能是符号链接。命令成功持久化正式状态后删除对应输入文件；
-命令失败时保留输入文件并返回其路径。唯一正式状态仍是 `sanitized/metadata.json`，Agent 不得直接修改它。
+命令失败时保留输入文件并返回其路径。唯一正式状态是 `session.json`（`sanitized/metadata.json` 与 `collection-result.json` 由 `export-views` 生成的导出视图），Agent 不得直接修改它。
 
 `set-retention` 在会话锁内更新 `retention.userRequested`，`--keep` 只能是 `true` 或 `false`；用于用户在采集完成后
 要求保留或允许默认清理。`retention.auditRequired` 仍只能由审计保留策略控制。

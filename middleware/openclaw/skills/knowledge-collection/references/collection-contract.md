@@ -1,5 +1,34 @@
 # Collection Contract
 
+## 单一状态文件 session.json
+
+自一体化改造起,会话的**权威状态**是 `<session-dir>/session.json`(schemaVersion 2.0),
+由 `scripts/knowledge-collection.mjs` 统一读写。其结构:
+
+```jsonc
+{
+  "schemaVersion": "2.0",
+  "task": { "query": "", "breadth": 3, "depth": 2, "concurrency": 2,
+            "maxContextWords": 25000, "startedAt": null,
+            "initialSearch": [], "followups": [], "combinedQuery": null, "status": "initialized" },
+  "research": { "branches": [], "learnings": [], "citations": {},
+                "context": [], "visitedUrls": [], "reportPath": null },
+  "collection": { "schemaVersion": "1.0", "storage": { "fallback": false },
+                  "collection": { "status": "complete", "items": [] },
+                  "retention": { "auditRequired": false, "userRequested": false },
+                  "postProcessing": { "runs": [] } }
+}
+```
+
+- `task` / `research`: 深化研究状态(研究问题、计划、分支、learnings、citations、context);
+- `collection`: 采集状态,字段与本文档其余章节描述的 metadata 完全一致(见下);
+- session.json 只能由脚本命令修改,禁止手工编辑;任何层级出现敏感字段名(token/Cookie/secrets 等)时拒绝持久化。
+
+`collection-result.json` 与 `sanitized/metadata.json` 现在是 **`export-views` 生成的兼容导出视图**:
+- `collection-result.json` 同时是执行器的产物输入契约(执行器写入 → `collect` 登记);
+- `sanitized/metadata.json` 供 fileBrowser 预览与旧消费者读取,由 `export-views` 从 session.json 重新生成;
+- 旧会话(仅有 collection-result.json + sanitized/metadata.json,无 session.json)首次读写自动迁移为 session.json,不删除旧文件。
+
 所有来源执行器都将采集结果规范化为同一套新写入格式。根目录必须包含 `collection-result.json`，其结构固定如下：
 
 ```json

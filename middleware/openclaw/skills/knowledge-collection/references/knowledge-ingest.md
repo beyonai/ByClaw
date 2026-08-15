@@ -1,7 +1,7 @@
 # Knowledge-base ingest
 
 采集编排器 `knowledge-collection` 拥有入库编排与确认边界；`by-knowledge-manager` 是底层入库执行器。通过 `knowledge-collection` 内的
-`scripts/knowledge-collection-ingest.mjs` 调用它，不得把入库所有权移回 `bycli`。
+`scripts/ingest.mjs` 调用它，不得把入库所有权移回 `bycli`。
 
 ## 调用边界
 
@@ -43,7 +43,7 @@
 
 脚本路径均相对 `knowledge-collection` Skill 根目录：
 
-`node scripts/knowledge-collection-ingest.mjs <command> ...`
+`node scripts/ingest.mjs <command> ...`
 
 - `list-kb`：发现个人知识库候选，供用户选择目标。
 - `normalize`：在需要时规范化规范的 `collection-result.json`（使用
@@ -68,6 +68,6 @@
   `--confirmed-knowledge-base-resource-id` 与 `--confirmed-directory-path`。批量文档同样可重复传入
   `--item-id`，返回 `itemResults`；未能证明上传和 build 对应关系的文档只能记为 `unknown`。
 
-具体参数以 `node scripts/knowledge-collection-ingest.mjs --help` 为准。命令和示例中只使用资源 ID、
+具体参数以 `node scripts/ingest.mjs --help` 为准。命令和示例中只使用资源 ID、
 目录与本地文件路径等非敏感占位值。后端请求受 `KNOWLEDGE_COLLECTION_BACKEND_TIMEOUT_MS` 截止时间约束；超时或
 无法证明逐篇结果时必须保守保留工作副本并记为 `unknown`。
