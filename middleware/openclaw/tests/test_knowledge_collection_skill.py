@@ -653,6 +653,29 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         ):
             self.assertNotIn(phrase, weixin)
 
+    def test_weixin_reference_documents_resolved_download_urls_and_dual_publish_artifacts(self):
+        weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "`source_url`",
+            "`resolved_url`",
+            "搜狗 `/link`",
+            "无效 URL 会返回参数或执行错误",
+            "`markdownSize`",
+            "`dataSize`",
+            "`status: downloaded`",
+            "`status: partial`",
+            "`status: failed`",
+            "`freq control`",
+            "不是认证失败",
+            "不得立即重试",
+            "`/wxamp/`",
+            "Mini Program",
+            "Official Account",
+        ):
+            self.assertIn(phrase, weixin)
+        self.assertNotIn("status: invalid URL", weixin)
+
 
 if __name__ == "__main__":
     unittest.main()
