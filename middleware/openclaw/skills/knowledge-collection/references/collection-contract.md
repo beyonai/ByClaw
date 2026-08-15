@@ -8,9 +8,11 @@
 ```jsonc
 {
   "schemaVersion": "2.0",
-  "task": { "query": "", "breadth": 3, "depth": 2, "concurrency": 2,
-            "maxContextWords": 25000, "startedAt": null,
-            "initialSearch": [], "followups": [], "combinedQuery": null, "status": "initialized" },
+  "task": { "query": "", "mode": "collection", "breadth": 3, "depth": 2, "concurrency": 2,
+            "maxContextWords": 25000, "deadlineMinutes": null, "maxBranches": null,
+            "maxSourcesPerBranch": null, "maxSearchRounds": null,
+            "startedAt": "<iso-time>", "initialSearch": [], "followups": [],
+            "combinedQuery": null, "stopReason": null, "status": "initialized" },
   "research": { "branches": [], "learnings": [], "citations": {},
                 "context": [], "visitedUrls": [], "reportPath": null },
   "collection": { "schemaVersion": "1.0", "storage": { "fallback": false },
@@ -20,7 +22,8 @@
 }
 ```
 
-- `task` / `research`: 深化研究状态(研究问题、计划、分支、learnings、citations、context);
+- `task` / `research`: 深化研究状态(研究问题、计划、分支、learnings、citations、context)。
+  `task.mode=research` 时 cleanup 要求 report 已交付;`mode=collection` 用于单步采集。
 - `collection`: 采集状态,字段与本文档其余章节描述的 metadata 完全一致(见下);
 - session.json 只能由脚本命令修改,禁止手工编辑;任何层级出现敏感字段名(token/Cookie/secrets 等)时拒绝持久化。
 

@@ -33,20 +33,24 @@
 
 开始前必须确认或建立:
 
-- 当前日期/时间(用于时间敏感研究的锚点)。
+- 当前日期/时间(用于时间敏感研究的锚点;`init` 缺省会把 `startedAt` 设为当前 ISO 时间)。
 - `breadth`: 每层子问题数量,默认 3。
 - `depth`: 最大递归层数,默认 2。
 - `concurrency`: 同一层并行研究上限,默认 2。
-- `maxContextWords`: 最终上下文词数上限,默认 25000。
-- 会话目录与 `session.json`(由 `init` 创建)。
+- `maxContextWords`: 最终上下文词数上限,默认 25000;中文按 `Intl.Segmenter` 分词统计。
+- `deadlineMinutes`: 可选时间预算;超时后 `branch` 只允许登记 `failed` 分支。
+- `maxBranches` / `maxSourcesPerBranch` / `maxSearchRounds`: 可选分支/来源/检索轮预算。
+- 会话目录与 `session.json`(由 `init --mode research` 创建)。
 
-如果用户没有指定参数,使用默认值,并在最终报告中说明所用参数。
+如果用户没有指定参数,使用默认值,并在最终报告中说明所用参数。研究类会话必须显式使用 `--mode research`;
+默认 `--mode collection` 用于单步采集,不强制 report 后才能清理。
 
 ## 分步流程
 
 ### Step 1: 框架与初始定位(init / plan)
 
-1. 用 `init --session-dir <dir> --query "..." [--breadth N] [--depth N]` 创建会话。
+1. 用 `init --mode research --session-dir <dir> --query "..." [--breadth N] [--depth N]
+   [--deadline-minutes M] [--max-branches N] [--max-sources-per-branch N] [--max-search-rounds N]` 创建会话。
 2. 做一次初步检索,覆盖多个角度,委派**双信源互补检索**:
    - `agent-reach`(By-Reach 路由器): Exa 搜索、gh、RSS、站内搜索等渠道;
    - `online_search`(searxng 多引擎技能): 时间窗(`--time-range day/week/month/year`)、
@@ -65,7 +69,12 @@
 3. 采集产物登记: 执行器写出的 `collection-result.json` + raw/markdown/sanitized 产物,
    经 `collect --item-json-file` 登记并物化;`sourceSkill + sourceUrl` 去重,learnings/citations 引用 `itemId`。
 4. 用 `branch --level N --query "..." --research-goal "..." --learnings "[...]" --citations "{...}"
-   --followups "[...]" --sources "[...]" --context "[...]" --status done|failed` 登记该分支,并说明失败原因。
+   --followups "[...]" --sources "[...]" --search-queries "[...]" --context "[...]" --status done|pending|failed [--reason ...]`
+   登记该分支,并说明失败原因。
+   - `sources` 必须已经出现在 collection inventory 的 `sourceUrl` 或此前的 `visitedUrls` 中;
+   - `citations` 的 value 必须是 inventory `itemId` 或已登记 `sourceUrl`,否则脚本拒绝登记;
+   - `status=done` 至少要求一条 learning、一条 citation 和一个 source;`failed` 必须给 `--reason`;
+   - 可选 `--search-queries` 记录每次检索的 query/skill/engine/resultCount/status,用于研究树审计。
 5. 如果当前 `depth > 1`: 对成功分支用 `researchGoal + followUpQuestions` 构造下一层 query,
    `new_breadth = max(2, breadth // 2)`,递归进入下一层。
 6. 某一层所有分支都失败: 停止递归,在报告中写明停止原因。
@@ -90,10 +99,12 @@ online_search 只负责发现 URL,不得直接抓取网页:
 
 ### Step 4: 输出报告(report)
 
-1. 基于 learnings/context 写最终报告(写入会话目录 `report.md`)。
+1. 基于 learnings/context 写最终报告(写入会话目录 `report.md`,默认路径)。
 2. 每个事实性结论尽量带引用(引用 inventory `itemId`,并可回溯 `sourceUrl`)。
 3. 没有可靠来源时明确写“未找到/缺口”。
 4. 用 `report --report-path <dir>/report.md` 标记完成;脚本自动生成 `research-tree.md`(递归轨迹,Agent 不得手工编辑)。
+   - 零 branch 时禁止 report;未达到配置 `depth` 时必须提供 `--stop-reason` 或 `--allow-incomplete`;
+   - report 文件必须在会话目录内、非空且不能是符号链接。
 
 最终报告结构(用户未指定结构时):
 
@@ -117,24 +128,22 @@ online_search 只负责发现 URL,不得直接抓取网页:
 ## Level 1
 - Query: ...
   - researchGoal: ...
+  - Citations: key -> itemId/sourceUrl
   - followUpQuestions: ...
   - sources: ...
-
-## Level 2
-- Query: ...
-  - researchGoal: ...
-  - followUpQuestions: ...
-  - sources: ...
+  - searchQueries: skill: query (resultCount)
+  - status: done|pending|failed
+  - reason: ...(失败时)
 ```
 
-如果某层没有继续递归,必须写明停止原因(脚本按配置深度自动生成)。
+如果某层没有继续递归,必须写明停止原因(`--stop-reason` 或脚本按配置深度自动生成)。
 
 ## 失败与恢复
 
 - 单个分支失败: `branch --status failed` 记录失败原因,继续其他分支。
 - 某一层全部失败: 停止递归,并在报告中说明。
 - 命令/工具失败: 如实报告,不伪造成功。
-- 恢复时: 读取 `session.json`(用 `status` 查看),从失败分支继续,不重复已完成分支。
+- 恢复时: 读取 `session.json`(用 `status` 查看;所有命令支持 `<command> --help`),从失败分支继续,不重复已完成分支。
 - 如果 session.json 损坏或未初始化,重新 `init` 或从备份恢复,禁止手工修补 JSON。
 
 ## 交付物

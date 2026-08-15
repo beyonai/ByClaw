@@ -35,15 +35,16 @@
 入库结果必须逐篇映射回 inventory `itemId`。只有文章上传成功且对应 build 请求被接受时才记为 success；不等待异步
 索引完成。批量失败且无法确认逐篇结果时记为 unknown，不得清理对应工作副本。结果通过后处理状态脚本写入 run。
 调用脚本时可按 Markdown 输入顺序重复传入 `--item-id <inventory-item-id>`；返回的 `itemResults` 是唯一允许回写
-`record-run` 的逐篇结果。只有输入文件名在批次内唯一、上传结果能唯一对应该文件名，并且 build 精确引用该上传结果路径时，
+`run`(旧名 `record-run`)的逐篇结果。只有输入文件名在批次内唯一、上传结果能唯一对应该文件名，并且 build 精确引用该上传结果路径时，
 才可机械映射为 success；任一条件不满足必须返回 `unknown`，不得用模糊文件名匹配猜测 success。`ingest` 将该数组同时放在
 顶层 `itemResults` 和知识库上传结果中，`upload-doc` 直接在顶层返回。
 
 ## 命令路由
 
-脚本路径均相对 `knowledge-collection` Skill 根目录：
+脚本路径均相对 `knowledge-collection` Skill 根目录。两个入口等价，平台命令不要求采集会话：
 
 `node scripts/ingest.mjs <command> ...`
+`node scripts/knowledge-collection.mjs <command> ...`
 
 - `list-kb`：发现个人知识库候选，供用户选择目标。
 - `normalize`：在需要时规范化规范的 `collection-result.json`（使用

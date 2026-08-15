@@ -23,6 +23,7 @@ description: Use when the goal is to COLLECT and keep material rather than just 
 本技能把「研究深化」与「采集执行」整合为一条链路。复杂、多面、需要多轮检索或带引用的任务，默认按
 [references/research-methodology.md](references/research-methodology.md) 的递归研究流程执行：
 先框架问题（breadth/depth/起始 query），逐层拆分为分支，每个分支完成一次「检索 → 抓取 → 登记 → 提炼」，再聚合去重、输出报告。
+深化研究会话必须用 `init --mode research` 创建；`mode=research` 会强制 `report` 交付后才允许 `cleanup` 整体清理。
 
 - 深化研究的每次「检索」：委派**双检索信源**确定哪些网页相关 —— 路由器 `agent-reach`（Exa 搜索、gh、RSS、站内搜索等渠道）
   与 `online_search`（SearXNG 元搜索 CLI，时间窗/学术/中文多引擎，见 [references/online-search.md](references/online-search.md)）；
@@ -48,8 +49,11 @@ description: Use when the goal is to COLLECT and keep material rather than just 
 - 研究维度：`init` / `plan` / `branch` / `aggregate` / `report`；
 - 采集维度：`collect`（登记执行器抓取结果并物化，inventory 缺失自动补登）/ `inspect` / `run` / `cleanup` /
   `unlock-stale` / `set-retention` / `rewrite-image-links` / `export-views`；
-- 平台维度：`list-kb` / `upload-doc` / `upload-images` / `upload-resource` / `normalize` / `store`；
+- 平台维度：`list-kb` / `upload-doc` / `upload-images` / `upload-resource` / `normalize` / `ingest`(`store` 已废弃)；
 - 汇总：`status`。
+
+所有命令都支持 `<command> --help` 查看参数、示例与 payload 说明；`help` 显示分组总览。
+平台命令不要求 `--session-dir`(门面会直接委派 `ingest.mjs`)。
 
 `collection-result.json` 与 `sanitized/metadata.json` 由 `export-views` 生成的兼容导出视图；旧会话（仅有
 collection-result.json + sanitized/metadata.json）首次读写自动迁移为 session.json。
@@ -88,10 +92,14 @@ By-Reach 的首选执行器与 `bycli` 兜底返回的结果必须统一进入�
 ## 闭环执行顺序
 
 1. 来源执行器返回结果后，先建立或加载正式会话。没有自带受测会话 writer 时必须调用 `init`；不得直接修改正式 metadata。
+   公共网页执行器（bycli 等）只返回原始结果时，先经 `normalize` 生成规范的 `collection-result.json` 与 `sanitized/items/*.md`，
+   再进入会话登记；不得跳过 normalize 手工伪造契约文件。
 2. 每层深化研究的抓取结果经 `collect` 登记并物化；未物化正文缺失时，按 inventory 恢复描述重新物化，并通过 `collect` 重新登记。
+   `collect` 成功后脚本会删除 `.post-processing-inputs/` 中的输入 payload，失败时保留。
 3. 一次只执行一种后处理。入库只采用 ingest 返回的顶层 `itemResults`；知识整理和外部消费也必须生成可按 `itemId` 验证的逐篇结果。
 4. 将本次选择、目标、逐篇结果和运行级状态通过 `run` 原子回写。无法证明的结果记为 `unknown`，不得猜测成功。
 5. 仅在 run 已成功记录后调用 `cleanup`。partial、failed、unknown、跳过或保留策略生效时，按后处理契约保留会话并从 `inspect` 续跑。
+   `cleanup` 默认只读计划可用 `--dry-run` 预览；研究模式未 `report` 时清理会安全保留会话并返回 `reason=research-report-pending`。
 
 采集结果只选择一种后处理：入库 / 知识整理 / 跳过。用户已明确指定外部消费时直接执行该任务，不再询问默认三选一。
 每次后处理运行只能执行一种操作，不得自动串联入库、知识整理或外部消费；会话仍保留时，用户后续明确发起的其他操作创建新的运行；完整成功清理会话后该批次终止，后续操作必须重新采集。
