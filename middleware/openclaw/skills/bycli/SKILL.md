@@ -79,7 +79,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 修复 adapter 时仅修改 trace `summary.md` 里 `adapterSourcePath` 指向的文件
 - 修复预算：每次失败最多 3 轮 trace → fix → retry
 - 写 adapter 后必须 `bycli browser verify` 通过 + 字段值与网页肉眼比对
-- 微信公众平台 `weixin accounts/articles/save-articles/download`、`--auth-source`、`WECHAT_TOKEN` / `WECHAT_COOKIE` / `WECHAT_FINGERPRINT` 或 `mp.weixin.qq.com` 登录、认证或环境验证任务，必须读取 [references/weixin.md](./references/weixin.md)；其微信登录/验证规则优先于本文件的通用错误处理、AutoFix 和 cleanup 规则
+- 每个 `bycli weixin` 命令（包括 `accounts/articles/sougousearch/save-articles/download`）、`--auth-source`、`WECHAT_TOKEN` / `WECHAT_COOKIE` / `WECHAT_FINGERPRINT`，以及 `mp.weixin.qq.com` 或 `weixin.sogou.com` 的登录、认证或环境验证任务，都必须读取 [references/weixin.md](./references/weixin.md)；其微信登录/验证规则优先于本文件的通用错误处理、AutoFix 和 cleanup 规则
 - 浏览器 session 结束后仅清理当前任务创建或独占拥有的资源；任务开始前已经运行或由其他任务共享的资源保持不变
 - Login/Auth/人工验证页面例外：不关闭 session、TAB、daemon 或浏览器，报告命令结果中**已知的** session name 与 URL 后立即结束本轮并等待用户下一条明确确认；若结果未返回 URL，明确说明 URL 未提供，不得为补齐信息再检查页面。等待期间不得自行检查、重试或继续任务
 
@@ -89,7 +89,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 |---------|--------|---------|
 | "bycli 有什么命令" / 不知道怎么用 | 基础用法（见下方内联） | — |
 | 运行 bycli 命令 / 单次查数据 / 执行操作 | 基础用法 | — |
-| 微信公众平台账号搜索、历史文章、批量保存或认证失败 | weixin 认证与凭据 | [references/weixin.md](./references/weixin.md) |
+| 微信公众号账号/文章搜索、历史文章、批量保存或认证失败 | weixin 检索、认证与凭据 | [references/weixin.md](./references/weixin.md) |
 | 驱动浏览器完成一次性任务 / 填表 / 爬数据 | Browser 驱动 | [browser.md](./references/browser.md) |
 | bycli 命令报错 / adapter 坏了 / 网站改版 | AutoFix 修复 | [autofix.md](./references/autofix.md) |
 | 给新站点写 adapter / 新增命令 | Adapter 编写 | [adapter-author.md](./references/adapter-author.md) |
@@ -303,7 +303,7 @@ openclaw browser --browser-profile openclaw stop
 | 文件 | 何时加载 |
 |------|---------|
 | [references/browser.md](./references/browser.md) | 需要浏览器驱动命令参考时 |
-| [references/weixin.md](./references/weixin.md) | 运行 `weixin accounts/articles/save-articles/download`、选择 `--auth-source`、处理微信 token/Cookie/fingerprint 或 `AUTH_REQUIRED` 时 |
+| [references/weixin.md](./references/weixin.md) | 运行任意 `bycli weixin` 命令、选择 `--auth-source`、处理微信 token/Cookie/fingerprint 或 `AUTH_REQUIRED` 时 |
 | [references/autofix.md](./references/autofix.md) | adapter 修复完整流程 |
 | [references/adapter-author.md](./references/adapter-author.md) | 写新 adapter 完整流程 |
 | [references/adapter-template.md](./references/adapter-template.md) | adapter 文件结构模板 |

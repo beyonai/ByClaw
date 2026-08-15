@@ -1,8 +1,8 @@
 # byCLI Weixin executor rules
 
-Load this reference for every `bycli weixin` command; `--auth-source`; `WECHAT_TOKEN`, `WECHAT_COOKIE`, or `WECHAT_FINGERPRINT`; and authentication or verification failures from `mp.weixin.qq.com`.
+Load this reference for every `bycli weixin` command; `--auth-source`; `WECHAT_TOKEN`, `WECHAT_COOKIE`, or `WECHAT_FINGERPRINT`; and authentication or verification failures from `mp.weixin.qq.com` or `weixin.sogou.com`.
 
-This reference tracks the Weixin command surface in `@sovovs/bycli` 2.1.21. Treat `bycli weixin --help -f yaml` and `bycli weixin <command> --help -f yaml` as the source of truth when the installed version differs. This reference only defines Weixin command execution, authentication gates, session handling, and returned records. When a caller delegates the task, return all requested records, bodies, and file metadata to that caller without choosing a canonical artifact name or storage layout.
+This reference tracks the Weixin command surface in `@sovovs/bycli` 2.1.23. Treat `bycli weixin --help -f yaml` and `bycli weixin <command> --help -f yaml` as the source of truth when the installed version differs. This reference only defines Weixin command execution, authentication gates, session handling, and returned records. When a caller delegates the task, return all requested records, bodies, and file metadata to that caller without choosing a canonical artifact name or storage layout.
 
 ## Command selection
 
@@ -10,39 +10,58 @@ This reference tracks the Weixin command surface in `@sovovs/bycli` 2.1.21. Trea
 |---|---|---|
 | `accounts <query>` | read | Search official accounts; returns `nickname`, `fakeid`, and `alias`. Default `--limit` is 10. |
 | `articles <fakeid>` | read | List account articles; returns `title`, `author`, `digest`, `publishedAt`, and `url`. Supports `--name`, `--limit`, and `--max-pages`. |
+| `sougousearch <query>` | read | Search Sogou Weixin for articles; returns `rank`, `page`, `title`, `account`, `url`, `summary`, and `publish_time`. Defaults: `--page 1 --limit 10`; maximum `--limit` is 10. |
 | `collections` | read | List content collections; returns IDs, type, item/view counts, update/payment flags, timestamps, and `coverUrl`. Defaults: `--limit 20 --max-pages 5`. |
 | `collection-detail <collectionId>` | read | Return one collection's metadata, `settingsJson`, and `itemsJson`. Default `--max-pages` is 5. |
 | `drafts` | read | List draft titles and times. Defaults: `--limit 10 --timeout 60`. |
 | `published [query]` | read | List published records and engagement metrics; optional title or URL substring filter. Defaults: `--limit 10 --max-pages 5 --timeout 30`. |
-| `download --url <article-url>` | read | Save one article as Markdown; returns title, author, publish time, status, size, and saved path. Defaults: `--output ./weixin-articles --download-images true`. |
+| `download --url <article-url>` | read | Save one article as Markdown from either a direct WeChat article URL or a Sogou `/link` result; returns title, author, publish time, status, size, saved path, `source_url`, and `resolved_url`. Defaults: `--output ./weixin-articles --download-images true`. |
 | `save-articles <fakeid>` | write | Save account articles as Markdown; returns per-record status, stage, path, error, and URL. Supports `--name`, `--output`, `--limit`, and `--max-pages`. |
-| `download-publish-data <query>` | write | Match an exact article URL or title and save its content-analysis Markdown report and associated data file; returns title, publication time, URL, status, `markdownPath`, `dataPath`, size, and error. Defaults: `--output ./weixin-publish-data --max-pages 5 --timeout 60`. |
+| `download-publish-data <query>` | write | Match an exact article URL or title and save both its Excel data and Markdown analysis; returns title, publication time, URL, status, `markdownPath`, `markdownSize`, `dataPath`, `dataSize`, and error. Defaults: `--output ./weixin-publish-data --max-pages 5 --timeout 60`. |
 | `create-draft <content>` | write | Create a Weixin article draft; requires `--title`, supports `--author`, `--cover-image`, `--summary`, and `--timeout` (default 180), and returns `status` and `detail`. |
 
 Use IDs from the corresponding list command: `accounts` supplies the `fakeid` for `articles` and `save-articles`; `collections` supplies the `collectionId` for `collection-detail`.
+
+## Official-account and article discovery
+
+Use this closed workflow for requests that search for an official account, search an account's articles, or search articles by topic. A direct article URL, an already selected `fakeid`, and requests for drafts, collections, or the authenticated account's own published data bypass this discovery workflow and use their corresponding command directly.
+
+1. Derive one `searchQuery` from the user's request: use the supplied account name or alias when an account is explicitly named; otherwise use the user's article title or topic keywords. Exclude conversational action text such as “查找公众号” or “搜索文章”. Run `accounts '<searchQuery>' --limit 10` first in both cases; do not call `sougousearch` first.
+2. Normalize `searchQuery` and each returned `nickname` and non-empty `alias` by trimming surrounding whitespace and applying case-insensitive comparison. De-duplicate records by `fakeid`. A record is an exact match only when its normalized `nickname` or `alias` equals normalized `searchQuery`; substring, token, semantic, and rank similarity are not exact matches.
+3. Branch on the number of exact matches:
+   - **One exact match:** Select that record. Return the account record when the user only asked to identify the account; for article listing or saving, continue with the existing `articles` or `save-articles` flow using its `fakeid`. Do not also call `sougousearch`.
+   - **Multiple exact matches:** Do not select one. For each exact candidate, run `articles '<fakeid>' --limit 3 --max-pages 1` sequentially as a bounded disambiguation preview. Return a numbered list containing `nickname`, `alias` when present, and up to three recent article titles with publication times. Preserve candidates whose non-authentication preview fails and mark the preview unavailable with its original error. An authentication or verification gate stops all remaining previews immediately while preserving previews already returned. Stop and wait for the user to choose a candidate; after selection, resume the originally requested account, article-listing, or saving action with that candidate's `fakeid`.
+   - **No exact match:** Treat the first three records from the original `accounts` response, in returned order, as fuzzy account suggestions; do not rerun `accounts`. Then run `sougousearch '<searchQuery>' --page 1 --limit 3`. Return two separately labelled numbered lists: up to three account suggestions with `nickname` and `alias`, and up to three Sogou article results with `title`, `account`, `url`, `summary`, and `publish_time`. Empty lists must be reported explicitly.
+4. After the no-match recommendations, stop automatic discovery. Do not select an account, call `articles`, or download an article until the user chooses a numbered account or article. A chosen account resumes the originally requested action with its retained `fakeid`; a chosen Sogou article passes its returned 搜狗 `/link` URL directly to `download` without manually resolving it, and its Markdown body is returned only after the `saved` path is readable.
+5. Failure is not a no-match result. If `accounts` fails, follow the normal Adapter error or authentication gate and do not call `sougousearch`. If `accounts` succeeds but `sougousearch` fails, return the account suggestions already obtained plus the original Sogou failure, then stop without retrying or switching acquisition methods. Authentication, CAPTCHA, anti-bot, and environment-verification results always retain their STOP behavior below.
 
 `create-draft` mutates the official account. Execute it only when the user explicitly requests draft creation and has supplied or approved the final title and body. A returned `save attempted, check browser to confirm` status is not confirmation that the draft was saved; report that status exactly and ask the user to verify the open browser.
 
 `download-publish-data` accepts an exact article URL or title. If a title matches multiple records, do not guess: rerun with the complete URL or add `--date YYYY-MM-DD` using a user-provided or already-known publication date.
 
+`download` accepts only a trusted `https://mp.weixin.qq.com/s...` article URL or `https://weixin.sogou.com/link?...` result URL. Preserve both returned `source_url` and `resolved_url`; the former records what the user or search supplied and the latter is the trusted WeChat article actually downloaded. 无效 URL 会返回参数或执行错误；never treat an “invalid URL” row as a successful result.
+
 ## Published-data spreadsheet downloads
 
 - When `published` has already returned an article URL and publication date, use **精确 URL + `--date`**; do not replace it with a title. A title is only a fallback when the URL is unavailable.
-- For multiple `download-publish-data` requests in the same authenticated browser session, commands 必须串行执行. Wait for each command to return `status: downloaded` and readable `markdownPath` and `dataPath` values before starting the next; never use parallel shell jobs, `Promise.all`, or another concurrent batch mechanism. Persistent Weixin adapter commands share an adapter-managed TAB.
+- Interpret `download-publish-data` terminal status exactly: `status: downloaded` means both `markdownPath`/`markdownSize` and `dataPath`/`dataSize` were returned; `status: partial` means exactly one artifact succeeded and its path/size must be preserved with the other artifact's error; `status: failed` means neither artifact was produced. Check every non-null returned path for readability, but do not claim a missing artifact exists.
+- For multiple `download-publish-data` requests in the same authenticated browser session, commands 必须串行执行. Wait for each command to return one terminal status and verify every returned non-null artifact path before starting the next; never use parallel shell jobs, `Promise.all`, or another concurrent batch mechanism. Persistent Weixin adapter commands share an adapter-managed TAB.
 - On a `download-publish-data` timeout, rerun the identical command once with `--trace retain-on-failure`; do not change its query or other options. If that trace confirms navigation to `appmsganalysis?action=detailpage`, classify it as a download-observation failure rather than a login timeout. Preserve the trace and report that no matching Chrome 下载事件 was observed; inspect the OpenClaw browser's installed byCLI extension version, `downloads` permission, and Chrome download state before changing adapter code or retrying with different queries.
 
 ## Browser session
 
 - Use browser authentication by default. Every browser-backed Weixin command must include `--site-session persistent --keep-tab true`.
-- Before browser commands, complete the main skill's `doctor` and `daemon status` checks. Reuse the Chrome session for `mp.weixin.qq.com`.
-- A newly leased adapter tab may begin at `about:blank`. The adapter navigates to `mp.weixin.qq.com` and then re-reads page state. If existing cookies redirect it to an authenticated `/cgi-bin/` URL with a non-empty token, continue the command; do not reproduce this check with `bycli browser`.
+- Before browser commands, complete the main skill's `doctor` and `daemon status` checks. Reuse the Chrome session for `mp.weixin.qq.com` and `weixin.sogou.com`.
+- A newly leased adapter tab may begin at `about:blank`. An `mp.weixin.qq.com`-backed command navigates there and then re-reads page state; if existing cookies redirect it to an authenticated `/cgi-bin/` URL with a non-empty token, continue the command. `sougousearch` navigates to `weixin.sogou.com` instead. Do not reproduce either check with `bycli browser`.
+- If navigation reaches an authenticated `/wxamp/` URL, the connected session is a Mini Program account, not the Official Account backend required by these commands. Report the account-type mismatch and ask the user to switch to an Official Account in the same browser profile; do not call it an unauthenticated QR-login state or invoke an Official Account data endpoint.
 - Only `accounts`, `articles`, and `save-articles` support `--auth-source env`. All other Weixin commands require Browser Bridge and the logged-in browser session.
-- Pass only options shown by that command's structured help. In particular, `accounts`, `articles`, `collections`, `collection-detail`, `download`, and `save-articles` do not support `--timeout`; never add a generic `--timeout 180` to them.
+- Pass only options shown by that command's structured help. In particular, `accounts`, `articles`, `sougousearch`, `collections`, `collection-detail`, `download`, and `save-articles` do not support `--timeout`; never add a generic `--timeout 180` to them.
 - Do not ask the user to extract credentials when browser authentication can satisfy the request. Do not silently switch to environment authentication after a browser, login, or verification failure.
 
 ```bash
 bycli weixin accounts "<account name>" --auth-source browser --site-session persistent --keep-tab true -f json
 bycli weixin articles '<fakeid>' --limit <n> --max-pages <n> --auth-source browser --site-session persistent --keep-tab true -f json
+bycli weixin sougousearch '<query>' --page 1 --limit <n> --site-session persistent --keep-tab true -f json
 bycli weixin collections --limit <n> --max-pages <n> --site-session persistent --keep-tab true -f json
 bycli weixin collection-detail '<collectionId>' --max-pages <n> --site-session persistent --keep-tab true -f json
 bycli weixin drafts --limit <n> --timeout 60 --site-session persistent --keep-tab true -f json
@@ -57,6 +76,8 @@ bycli weixin create-draft '<content>' --title '<title>' --author '<author>' --co
 Omit optional placeholders and their flags rather than passing empty strings. `--author` is limited to 8 characters and `--title` to 64 characters. `--cover-image` must be a readable local image path; the adapter uploads it into the article body before selecting it as the cover. Failure to select the uploaded image as the cover can be non-fatal, so report the returned draft detail rather than claiming the cover was set.
 
 ## Login and verification gate
+
+An article-index `COMMAND_EXEC` error that reports `freq control` or “rate limited” is 微信限频，不是认证失败. Preserve the error and trace, stop the affected article-list/save flow, and tell the user to wait before trying again. 不得立即重试, refresh repeatedly, switch authentication sources, or ask the user to log in again solely because of frequency control.
 
 After the adapter's post-navigation check, treat login `AUTH_REQUIRED` / exit code 77, a login `TIMEOUT` / exit code 75, anti-bot prompts, CAPTCHAs, sliders, SMS/security checks, and WeChat environment-verification pages as a required human gate. This includes “环境异常，完成验证后即可继续访问” and its “去验证” button. These are not Adapter defects; do not enter AutoFix or modify Adapter code. A download-observation timeout follows the published-data spreadsheet rule above instead of this gate.
 
@@ -73,10 +94,11 @@ On the first login `TIMEOUT`, follow this gate immediately. Do not change `BYCLI
 
 - Preserve the complete structured output for the requested scope; do not silently discard fields that are not displayed in the default table format.
 - Preserve partial successes. Return completed records and identify each failed or incomplete record with its original Adapter `status`, `stage`, and `error` where available.
-- For local-file commands, return the resolved `saved`, `path`, `markdownPath`, or `dataPath`, together with `size` and status, alongside the corresponding record. Never claim a file exists unless every returned path relevant to that record is readable.
+- For local-file commands, return the resolved `saved`, `path`, `markdownPath`, or `dataPath`, together with its corresponding `size`, `markdownSize`, or `dataSize` and status, alongside the record. Never claim a file exists unless every non-null returned path relevant to that record is readable.
 - For `articles`, return the 完整文章索引 for the requested `--limit` / `--max-pages` scope. Preserve title, URL, author, digest, and publish time.
+- For `sougousearch`, preserve `rank`, `page`, `title`, `account`, `url`, `summary`, and `publish_time`. Its records are article search results, not official-account identity records; never treat `account` as a substitute for an `accounts` result or invent a `fakeid` from it.
 - For `save-articles`, return the saved 正文 and each `path` (the current equivalent of legacy `fileName` metadata) alongside the corresponding record. Do not redownload records already returned with a readable saved file.
-- For a requested article that has not been saved, use `weixin download --url '<article-url>'`. Only after the returned `saved` path is readable, read that Markdown file and return its body together with the file metadata.
+- For a requested article that has not been saved, use `weixin download --url '<article-url>'`; this may be a direct WeChat URL or the Sogou `/link` URL returned by `sougousearch`. Preserve `source_url` and `resolved_url`. Only after the returned `saved` path is readable, read that Markdown file and return its body together with the file metadata.
 - `collection-detail` serializes nested settings and items into `settingsJson` and `itemsJson`. Parse these JSON strings before summarizing them, but also preserve the original values in delegated results.
 - `published` returns `notified`, `failed`, `reads`, `likes`, `shares`, `recommends`, `comments`, `underlines`, and `reprints`. Keep zero values; do not treat them as missing.
 - `drafts` exposes only `Index`, `Title`, and `Time`; do not imply that draft body or edit URL was returned.
@@ -99,7 +121,7 @@ Use `--auth-source env` only when the user explicitly requests it or Browser Bri
 | `articles`, `save-articles` | `WECHAT_TOKEN` + `WECHAT_COOKIE` |
 | `accounts` | `WECHAT_TOKEN` + `WECHAT_COOKIE` + `WECHAT_FINGERPRINT` |
 
-Never use environment authentication for `collections`, `collection-detail`, `drafts`, `published`, `download`, `download-publish-data`, or `create-draft`; those commands do not expose `--auth-source`.
+Never use environment authentication for `sougousearch`, `collections`, `collection-detail`, `drafts`, `published`, `download`, `download-publish-data`, or `create-draft`; those commands do not expose `--auth-source`.
 
 Never mix browser-derived and environment-derived values. If variables are missing, name them without displaying their values. If all variables exist but authentication fails, ask the user to replace the complete same-session set because it may be expired or mixed across sessions.
 
