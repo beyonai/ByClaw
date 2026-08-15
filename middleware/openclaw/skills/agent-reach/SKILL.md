@@ -5,6 +5,11 @@ description: Use when the user asks to research, search, look up, read, collect,
 
 # By-Reach
 
+> **入口与使用前提（必读）**：被调用时，若本会话尚未读过本文件，**必须先打开完整通读本文**
+> （含路由表、non-negotiable webpage rule 与 bycli 铁律），再按其中命令面执行；
+> 禁止把技能名当作平台工具名调用（如直接调 `agent-reach` 工具会报 "Tool not found"）。
+> 检索只负责发现；取网页内容一律委派 `bycli`，**禁止 `web_fetch` / `curl` / `requests` 等直连**。
+
 By-Reach v2 is the public-internet router bundled with ByClaw. Its technical
 Skill identifier and invocation remain `agent-reach` / `$agent-reach`; its
 product name, CLI, configuration directory, and diagnostic provider are
