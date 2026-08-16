@@ -9,14 +9,14 @@ This reference tracks the Weixin command surface in `@sovovs/bycli` 2.1.23. Trea
 | Command | Access | Purpose and important output |
 |---|---|---|
 | `accounts <query>` | read | Search official accounts; returns `nickname`, `fakeid`, and `alias`. Default `--limit` is 10. |
-| `articles <fakeid>` | read | List account articles; returns `title`, `author`, `digest`, `publishedAt`, and `url`. Supports `--name`, `--limit`, and `--max-pages`. |
+| `articles <fakeid>` | read | List account articles; returns `title`, `author`, `digest`, `publishedAt`, `url`, `source`, and `coverage`. Supports `--name`, `--limit`, and `--max-pages`. |
 | `sougousearch <query>` | read | Search Sogou Weixin for articles; returns `rank`, `page`, `title`, `account`, `url`, `summary`, and `publish_time`. Defaults: `--page 1 --limit 10`; maximum `--limit` is 10. |
 | `collections` | read | List content collections; returns IDs, type, item/view counts, update/payment flags, timestamps, and `coverUrl`. Defaults: `--limit 20 --max-pages 5`. |
 | `collection-detail <collectionId>` | read | Return one collection's metadata, `settingsJson`, and `itemsJson`. Default `--max-pages` is 5. |
 | `drafts` | read | List draft titles and times. Defaults: `--limit 10 --timeout 60`. |
 | `published [query]` | read | List published records and engagement metrics; optional title or URL substring filter. Defaults: `--limit 10 --max-pages 5 --timeout 30`. |
 | `download --url <article-url>` | read | Save one article as Markdown from either a direct WeChat article URL or a Sogou `/link` result; returns title, author, publish time, status, size, saved path, `source_url`, and `resolved_url`. Defaults: `--output ./weixin-articles --download-images true`. |
-| `save-articles <fakeid>` | write | Save account articles as Markdown; returns per-record status, stage, path, error, and URL. Supports `--name`, `--output`, `--limit`, and `--max-pages`. |
+| `save-articles <fakeid>` | write | Save account articles as Markdown; returns per-record status, stage, path, error, URL, `source`, and `coverage`. Supports `--name`, `--output`, `--limit`, and `--max-pages`. |
 | `download-publish-data <query>` | write | Match an exact article URL or title and save both its Excel data and Markdown analysis; returns title, publication time, URL, status, `markdownPath`, `markdownSize`, `dataPath`, `dataSize`, and error. Defaults: `--output ./weixin-publish-data --max-pages 5 --timeout 60`. |
 | `create-draft <content>` | write | Create a Weixin article draft; requires `--title`, supports `--author`, `--cover-image`, `--summary`, and `--timeout` (default 180), and returns `status` and `detail`. |
 
@@ -29,11 +29,15 @@ Use this closed workflow for requests that search for an official account, searc
 1. Derive one `searchQuery` from the user's request: use the supplied account name or alias when an account is explicitly named; otherwise use the user's article title or topic keywords. Exclude conversational action text such as “查找公众号” or “搜索文章”. Run `accounts '<searchQuery>' --limit 10` first in both cases; do not call `sougousearch` first.
 2. Normalize `searchQuery` and each returned `nickname` and non-empty `alias` by trimming surrounding whitespace and applying case-insensitive comparison. De-duplicate records by `fakeid`. A record is an exact match only when its normalized `nickname` or `alias` equals normalized `searchQuery`; substring, token, semantic, and rank similarity are not exact matches.
 3. Branch on the number of exact matches:
-   - **One exact match:** Select that record. Return the account record when the user only asked to identify the account; for article listing or saving, continue with the existing `articles` or `save-articles` flow using its `fakeid`. Do not also call `sougousearch`.
+   - **One exact match:** Select that record. Return the account record when the user only asked to identify the account; for article listing or saving, continue with the existing `articles` or `save-articles` flow using its `fakeid` and exact `nickname` as `--name`. Do not separately call `sougousearch`; those commands own their eligible internal fallback.
    - **Multiple exact matches:** Do not select one. For each exact candidate, run `articles '<fakeid>' --limit 3 --max-pages 1` sequentially as a bounded disambiguation preview. Return a numbered list containing `nickname`, `alias` when present, and up to three recent article titles with publication times. Preserve candidates whose non-authentication preview fails and mark the preview unavailable with its original error. An authentication or verification gate stops all remaining previews immediately while preserving previews already returned. Stop and wait for the user to choose a candidate; after selection, resume the originally requested account, article-listing, or saving action with that candidate's `fakeid`.
    - **No exact match:** Treat the first three records from the original `accounts` response, in returned order, as fuzzy account suggestions; do not rerun `accounts`. Then run `sougousearch '<searchQuery>' --page 1 --limit 3`. Return two separately labelled numbered lists: up to three account suggestions with `nickname` and `alias`, and up to three Sogou article results with `title`, `account`, `url`, `summary`, and `publish_time`. Empty lists must be reported explicitly.
 4. After the no-match recommendations, stop automatic discovery. Do not select an account, call `articles`, or download an article until the user chooses a numbered account or article. A chosen account resumes the originally requested action with its retained `fakeid`; a chosen Sogou article passes its returned 搜狗 `/link` URL directly to `download` without manually resolving it, and its Markdown body is returned only after the `saved` path is readable.
 5. Failure is not a no-match result. If `accounts` fails, follow the normal Adapter error or authentication gate and do not call `sougousearch`. If `accounts` succeeds but `sougousearch` fails, return the account suggestions already obtained plus the original Sogou failure, then stop without retrying or switching acquisition methods. Authentication, CAPTCHA, anti-bot, and environment-verification results always retain their STOP behavior below.
+
+`articles` and `save-articles` have a separate adapter-owned fallback after a `fakeid` has already been selected. It runs only for browser-authenticated primary `COMMAND_EXEC` or `EMPTY_RESULT` outcomes and only when `--name` is non-empty. It never runs for `AUTH_REQUIRED`, login/CAPTCHA/environment verification, argument errors, interruption, unknown errors, or `--auth-source env`. Sogou result `account` must equal the trimmed `--name` case-insensitively; substring, alias, punctuation, internal-whitespace, and fuzzy variants are excluded.
+
+The internal fallback scans sequentially until an explicit empty page, an explicit `--max-pages`, or the default 50-page bound. It collects the bounded set before deduplication, descending publication-time sorting, and final `--limit` selection. `coverage: search-exhausted` means Sogou returned an explicit empty page; `coverage: max-pages-reached` means the result is capped and must not be described as complete official-account history. `articles` requires every selected Sogou link to resolve to a trusted WeChat article URL; `save-articles` instead preserves non-authentication link failures as `status: failed`, `stage: resolve` rows while keeping other readable Markdown files.
 
 `create-draft` mutates the official account. Execute it only when the user explicitly requests draft creation and has supplied or approved the final title and body. The command validates title, body, author, and any requested cover before browser navigation. If a requested cover cannot be set or the editor does not expose a positive save confirmation, it returns `COMMAND_EXEC` and no success record. Only `status: draft saved` confirms success.
 
@@ -60,14 +64,14 @@ Use this closed workflow for requests that search for an official account, searc
 
 ```bash
 bycli weixin accounts "<account name>" --auth-source browser --site-session persistent --keep-tab true -f json
-bycli weixin articles '<fakeid>' --limit <n> --max-pages <n> --auth-source browser --site-session persistent --keep-tab true -f json
+bycli weixin articles '<fakeid>' --name '<exact account name>' --limit <n> --max-pages <n> --auth-source browser --site-session persistent --keep-tab true -f json
 bycli weixin sougousearch '<query>' --page 1 --limit <n> --site-session persistent --keep-tab true -f json
 bycli weixin collections --limit <n> --max-pages <n> --site-session persistent --keep-tab true -f json
 bycli weixin collection-detail '<collectionId>' --max-pages <n> --site-session persistent --keep-tab true -f json
 bycli weixin drafts --limit <n> --timeout 60 --site-session persistent --keep-tab true -f json
 bycli weixin published '<optional title or URL>' --limit <n> --max-pages <n> --timeout 30 --site-session persistent --keep-tab true -f json
 bycli weixin download --url '<article-url>' --output '<directory>' --download-images true --site-session persistent --keep-tab true -f json
-bycli weixin save-articles '<fakeid>' --limit <n> --max-pages <n> --output '<directory>' --auth-source browser --site-session persistent --keep-tab true -f json
+bycli weixin save-articles '<fakeid>' --name '<exact account name>' --limit <n> --max-pages <n> --output '<directory>' --auth-source browser --site-session persistent --keep-tab true -f json
 bycli weixin download-publish-data '<exact article URL>' --date YYYY-MM-DD --output '<directory>' --max-pages <n> --timeout 60 --site-session persistent --keep-tab true -f json
 bycli weixin download-publish-data '<exact article title>' --output '<directory>' --max-pages <n> --timeout 60 --site-session persistent --keep-tab true -f json
 bycli weixin create-draft '<content>' --title '<title>' --author '<author>' --cover-image '<local path>' --summary '<summary>' --timeout 180 --site-session persistent --keep-tab true -f json
@@ -77,7 +81,7 @@ Omit optional placeholders and their flags rather than passing empty strings. `-
 
 ## Login and verification gate
 
-An article-index `COMMAND_EXEC` error that reports `freq control` or “rate limited” is 微信限频，不是认证失败. Preserve the error and trace, stop the affected article-list/save flow, and tell the user to wait before trying again. 不得立即重试, refresh repeatedly, switch authentication sources, or ask the user to log in again solely because of frequency control.
+An article-index `COMMAND_EXEC` error that reports `freq control` or “rate limited” is 微信限频，不是认证失败. With browser authentication and an exact `--name`, `articles` and `save-articles` may perform their single built-in Sogou fallback as part of the same command; outside that adapter-owned fallback, the executor 不得立即重试, independently call `sougousearch`, refresh, or switch authentication sources. If the command still returns the rate-limit error (including combined primary/fallback context), preserve it and stop the affected flow.
 
 After the adapter's post-navigation check, treat login `AUTH_REQUIRED` / exit code 77, a login `TIMEOUT` / exit code 75, anti-bot prompts, CAPTCHAs, sliders, SMS/security checks, and WeChat environment-verification pages as a required human gate. This includes “环境异常，完成验证后即可继续访问” and its “去验证” button. These are not Adapter defects; do not enter AutoFix or modify Adapter code. A download-observation timeout follows the published-data spreadsheet rule above instead of this gate.
 
@@ -95,9 +99,9 @@ On the first login `TIMEOUT`, follow this gate immediately. Do not change `BYCLI
 - Preserve the complete structured output for the requested scope; do not silently discard fields that are not displayed in the default table format.
 - Preserve partial successes. Return completed records and identify each failed or incomplete record with its original Adapter `status`, `stage`, and `error` where available.
 - For local-file commands, return the resolved `saved`, `path`, `markdownPath`, or `dataPath`, together with its corresponding `size`, `markdownSize`, or `dataSize` and status, alongside the record. Never claim a file exists unless every non-null returned path relevant to that record is readable.
-- For `articles`, return the 完整文章索引 for the requested `--limit` / `--max-pages` scope. Preserve title, URL, author, digest, and publish time.
+- For `articles`, return the 完整文章索引 for the requested `--limit` / `--max-pages` scope. Preserve title, URL, author, digest, publish time, `source`, and `coverage`. `source: sogou` means the authenticated index failed or was empty and the adapter used exact-account Sogou fallback. `coverage: max-pages-reached` is bounded coverage, not a complete-history claim.
 - For `sougousearch`, preserve `rank`, `page`, `title`, `account`, `url`, `summary`, and `publish_time`. Its records are article search results, not official-account identity records; never treat `account` as a substitute for an `accounts` result or invent a `fakeid` from it.
-- For `save-articles`, return the saved 正文 and each `path` (the current equivalent of legacy `fileName` metadata) alongside the corresponding record. Do not redownload records already returned with a readable saved file.
+- For `save-articles`, return the saved 正文, each `path` (the current equivalent of legacy `fileName` metadata), `source`, and `coverage` alongside the corresponding record. Preserve `stage: resolve` failures from Sogou links and all readable files from successful rows. Do not redownload records already returned with a readable saved file.
 - For a requested article that has not been saved, use `weixin download --url '<article-url>'`; this may be a direct WeChat URL or the Sogou `/link` URL returned by `sougousearch`. Preserve `source_url` and `resolved_url`. Only after the returned `saved` path is readable, read that Markdown file and return its body together with the file metadata.
 - `collection-detail` serializes nested settings and items into `settingsJson` and `itemsJson`. Parse these JSON strings before summarizing them, but also preserve the original values in delegated results.
 - `published` returns `notified`, `failed`, `reads`, `likes`, `shares`, `recommends`, `comments`, `underlines`, and `reprints`. Keep zero values; do not treat them as missing.
