@@ -673,6 +673,10 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn("Explicit account identity or account-history intent starts with `accounts`", discovery)
         self.assertIn("Article-title or topic intent starts with `sougousearch`", discovery)
         self.assertIn("reinterpret it as topic intent", discovery)
+        self.assertIn(
+            "When a bare phrase has no explicit account-history or article-title/topic cue, ask one clarification question",
+            discovery,
+        )
 
         for phrase in (
             "nickname-scoped public results, not `fakeid`-proven account history",
@@ -696,6 +700,11 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "from `download-publish-data`",
             "login `TIMEOUT` / exit code 75",
             "already determined not to be a login or verification timeout",
+            "absent, unverified, mismatched, or ambiguous",
+            "diagnostic retry budget has already been consumed",
+            "diagnostic retry budget is unused",
+            "login-gate rerun has already been consumed",
+            "single post-confirmation login-gate rerun",
         ):
             self.assertIn(phrase, terminal)
         self.assertLess(
@@ -710,13 +719,36 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             terminal.index("`status: partial` or `status: failed`"),
             terminal.index("Top-level `TIMEOUT`"),
         )
+        self.assertLess(
+            terminal.index("diagnostic retry budget has already been consumed"),
+            terminal.index("diagnostic retry budget is unused"),
+        )
+        self.assertLess(
+            terminal.index("diagnostic retry budget has already been consumed"),
+            terminal.index("login `TIMEOUT` / exit code 75"),
+        )
+        self.assertLess(
+            terminal.index("login-gate rerun has already been consumed"),
+            terminal.index("login `TIMEOUT` / exit code 75"),
+        )
 
         self.assertIn("no terminal item row or artifact metadata", downloads)
         self.assertIn("rerun exactly once with `--trace retain-on-failure`", downloads)
         self.assertIn("at most once per original command", downloads)
         self.assertIn("consumes that command's retry budget", downloads)
         self.assertIn("including another top-level `TIMEOUT`, is terminal", downloads)
+        self.assertIn("Backend-only examples omit `--name`", weixin)
+        self.assertIn(
+            "Only after `accounts` proves one unique nickname-to-`fakeid` binding",
+            weixin,
+        )
+        self.assertIn("Verified for byCLI 2.1.25", login)
+        self.assertNotIn("2.1.25 and later", login)
         self.assertIn("`create-draft` session failures return `AUTH_REQUIRED`", login)
+        self.assertIn(
+            "An authentication outcome from an already-consumed diagnostic rerun follows terminal priority 1",
+            login,
+        )
 
     def test_weixin_reference_documents_resolved_download_urls_and_dual_publish_artifacts(self):
         weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")

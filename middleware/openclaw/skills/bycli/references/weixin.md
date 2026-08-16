@@ -24,7 +24,7 @@ Use IDs from the corresponding list command: `accounts` supplies the `fakeid` fo
 
 ## Official-account and article discovery
 
-Classify discovery intent before choosing a command. A direct article URL, an already selected `fakeid`, and requests for drafts, collections, or the authenticated account's own published data bypass discovery and use their corresponding command directly.
+Classify discovery intent before choosing a command. A direct article URL, an already selected `fakeid`, and requests for drafts, collections, or the authenticated account's own published data bypass discovery and use their corresponding command directly. When a bare phrase has no explicit account-history or article-title/topic cue, ask one clarification question before running either discovery command; do not infer intent from text equality, search ranking, or a speculative first search.
 
 1. **Explicit account identity or account-history intent starts with `accounts`.** This includes a supplied nickname, account name, alias, original ID, or a request for one account's historical posts. Derive `searchQuery` from that identity and run `accounts '<searchQuery>' --limit 10`.
 2. Normalize `searchQuery` and each returned `nickname` and non-empty `alias` by trimming surrounding whitespace and applying case-insensitive comparison. De-duplicate records by `fakeid`. A record is exact only when normalized `nickname` or `alias` equals normalized `searchQuery`; substring, token, semantic, and rank similarity are not exact matches.
@@ -59,14 +59,16 @@ Apply the first matching row from top to bottom. These Weixin-specific terminal 
 
 | Priority | Observed state | Required action |
 |---:|---|---|
-| 1 | `AUTH_REQUIRED`, login `TIMEOUT` / exit code 75, login page, CAPTCHA, or environment verification | Freeze the workflow and wait for the user under the login gate below. |
-| 2 | Public fallback is requested but the exact nickname is absent or known ambiguous | Ask for identity clarification, or keep a selected duplicate nickname backend-only. Do not guess or merge. |
-| 3 | Valid `EMPTY_RESULT` | Report the completed empty scope. Do not enter AutoFix, change intent, or switch acquisition methods. |
-| 4 | `download-publish-data` returned `status: partial` or `status: failed` | Preserve all returned artifact metadata and errors; the row is terminal, so do not retry automatically. |
-| 5 | Top-level `TIMEOUT` with no terminal item row or artifact metadata from `download-publish-data`, already determined not to be a login or verification timeout | Report the uncertain outcome and offer one diagnostic retry only after explicit user approval. |
-| 6 | Another typed byCLI failure | Follow its existing typed-error mapping; use AutoFix only when that mapping explicitly permits it. |
+| 1 | An approved `download-publish-data` diagnostic rerun returned any non-success outcome, or the original command's diagnostic retry budget has already been consumed | Preserve every returned row, artifact, error, and retained trace. The rerun result is terminal; do not offer or perform another retry. For an authentication or verification outcome, freeze the browser context and report the human gate, but do not resume the original command after confirmation. |
+| 2 | The login-gate rerun has already been consumed: the single post-confirmation login-gate rerun returned `AUTH_REQUIRED`, login `TIMEOUT` / exit code 75, a login page, CAPTCHA, or environment verification | Preserve the browser context, report the exact authentication or verification outcome, and stop. Do not ask for another confirmation or rerun the command again. |
+| 3 | `AUTH_REQUIRED`, login `TIMEOUT` / exit code 75, login page, CAPTCHA, or environment verification from an execution whose diagnostic retry and login-gate rerun budgets are both unused | Freeze the workflow and wait for the user under the login gate below. |
+| 4 | Public fallback is requested but the exact nickname is absent, unverified, mismatched, or ambiguous | Ask for identity clarification and validate it with `accounts`, or keep the command backend-only. Do not guess, merge, or classify the identity failure as an empty result. |
+| 5 | Valid `EMPTY_RESULT` | Report the completed empty scope. Do not enter AutoFix, change intent, or switch acquisition methods. |
+| 6 | `download-publish-data` returned `status: partial` or `status: failed` | Preserve all returned artifact metadata and errors; the row is terminal, so do not retry automatically. |
+| 7 | Top-level `TIMEOUT` with no terminal item row or artifact metadata from `download-publish-data`, already determined not to be a login or verification timeout, and its diagnostic retry budget is unused | Report the uncertain outcome and offer one diagnostic retry only after explicit user approval. If approval is declined or absent, report the original timeout as terminal and stop. |
+| 8 | Another typed byCLI failure | Follow its existing typed-error mapping; use AutoFix only when that mapping explicitly permits it. |
 
-An `EMPTY_RESULT` in this table is the final command result after any eligible adapter-owned fallback has already run. Public fallback identity requirements take precedence over an empty backend result only when the user has requested that fallback; otherwise the empty result remains terminal.
+An `EMPTY_RESULT` in this table is the final command result after any eligible adapter-owned fallback has already run. Public fallback identity requirements take precedence over an empty backend result only when the user has requested that fallback; otherwise the empty result remains terminal. Track diagnostic and login-gate rerun budgets per original command, not per shell invocation. Apply priorities 1 and 2 before the general authentication gate at priority 3 or the diagnostic retry offer at priority 7.
 
 ## Published-data spreadsheet downloads
 
@@ -74,7 +76,7 @@ An `EMPTY_RESULT` in this table is the final command result after any eligible a
 - Interpret `download-publish-data` terminal status exactly: `status: downloaded` means both `markdownPath`/`markdownSize` and `dataPath`/`dataSize` passed the command's readable, non-empty regular-file validation; `status: partial` means exactly one artifact passed validation and its path/size must be preserved with the other artifact's error; `status: failed` means neither artifact passed validation. Check every non-null returned path for readability, but do not claim a missing artifact exists.
 - For multiple `download-publish-data` requests in the same authenticated browser session, commands 必须串行执行. Wait for each command to return one terminal status and verify every returned non-null artifact path before starting the next; never use parallel shell jobs, `Promise.all`, or another concurrent batch mechanism. Persistent Weixin adapter commands share an adapter-managed TAB.
 - A returned `status: partial` or `status: failed` row is terminal even when its `error` mentions a timeout. Preserve every returned path, size, and error and do not rerun it automatically; rerunning can create duplicate artifacts.
-- Only a top-level `TIMEOUT` that returns no terminal item row or artifact metadata is retry-eligible. Report that the outcome is uncertain and ask for explicit user approval. After approval, rerun exactly once with `--trace retain-on-failure`, preserving the identical query and all other options. This diagnostic retry is allowed at most once per original command and consumes that command's retry budget; every result from it, including another top-level `TIMEOUT`, is terminal and must not offer or perform another retry. If the trace reaches `appmsganalysis?action=detailpage`, classify it as a download-observation failure rather than a login timeout, retain the trace, and report that no matching Chrome 下载事件 was observed. Inspect the OpenClaw browser's installed byCLI extension version, `downloads` permission, and Chrome download state before proposing adapter changes; do not try a different query.
+- Only a top-level `TIMEOUT` that returns no terminal item row or artifact metadata is retry-eligible while the original command's diagnostic retry budget is unused. Report that the outcome is uncertain and ask for explicit user approval. If approval is declined or absent, report the original timeout as terminal and stop. After approval and before launching the rerun, mark the original command's diagnostic retry budget as consumed, then rerun exactly once with `--trace retain-on-failure`, preserving the identical query and all other options. This diagnostic retry is allowed at most once per original command and consumes that command's retry budget; every result from it, including another top-level `TIMEOUT`, is terminal and must not offer or perform another retry. If the trace reaches `appmsganalysis?action=detailpage`, classify it as a download-observation failure rather than a login timeout, retain the trace, and report that no matching Chrome 下载事件 was observed. Inspect the OpenClaw browser's installed byCLI extension version, `downloads` permission, and Chrome download state before proposing adapter changes; do not try a different query.
 
 ## Browser session
 
@@ -86,19 +88,28 @@ An `EMPTY_RESULT` in this table is the final command result after any eligible a
 - Pass only options shown by that command's structured help. In particular, `accounts`, `articles`, `sougousearch`, `collections`, `collection-detail`, `download`, and `save-articles` do not support `--timeout`; never add a generic `--timeout 180` to them.
 - Do not ask the user to extract credentials when browser authentication can satisfy the request. Do not silently switch to environment authentication after a browser, login, or verification failure.
 
+Backend-only examples omit `--name` unless the unique identity proof described below is complete:
+
 ```bash
 bycli weixin accounts "<account name>" --auth-source browser --site-session persistent --keep-tab true -f json
-bycli weixin articles '<fakeid>' --name '<exact account name>' --limit <n> --max-pages <n> --auth-source browser --site-session persistent --keep-tab true -f json
+bycli weixin articles '<fakeid>' --limit <n> --max-pages <n> --auth-source browser --site-session persistent --keep-tab true -f json
 bycli weixin sougousearch '<query>' --page 1 --limit <n> --site-session persistent --keep-tab true -f json
 bycli weixin collections --limit <n> --max-pages <n> --site-session persistent --keep-tab true -f json
 bycli weixin collection-detail '<collectionId>' --max-pages <n> --site-session persistent --keep-tab true -f json
 bycli weixin drafts --limit <n> --timeout 60 --site-session persistent --keep-tab true -f json
 bycli weixin published '<optional title or URL>' --limit <n> --max-pages <n> --timeout 30 --site-session persistent --keep-tab true -f json
 bycli weixin download --url '<article-url>' --output '<directory>' --download-images true --site-session persistent --keep-tab true -f json
-bycli weixin save-articles '<fakeid>' --name '<exact account name>' --limit <n> --max-pages <n> --output '<directory>' --auth-source browser --site-session persistent --keep-tab true -f json
+bycli weixin save-articles '<fakeid>' --limit <n> --max-pages <n> --output '<directory>' --auth-source browser --site-session persistent --keep-tab true -f json
 bycli weixin download-publish-data '<exact article URL>' --date YYYY-MM-DD --output '<directory>' --max-pages <n> --timeout 60 --site-session persistent --keep-tab true -f json
 bycli weixin download-publish-data '<exact article title>' --output '<directory>' --max-pages <n> --timeout 60 --site-session persistent --keep-tab true -f json
 bycli weixin create-draft '<content>' --title '<title>' --author '<author>' --cover-image '<local path>' --summary '<summary>' --timeout 180 --site-session persistent --keep-tab true -f json
+```
+
+Only after `accounts` proves one unique nickname-to-`fakeid` binding for the selected `fakeid` may the corresponding account-history command include `--name` and enable the adapter-owned public fallback:
+
+```bash
+bycli weixin articles '<fakeid>' --name '<proven exact account name>' --limit <n> --max-pages <n> --auth-source browser --site-session persistent --keep-tab true -f json
+bycli weixin save-articles '<fakeid>' --name '<proven exact account name>' --limit <n> --max-pages <n> --output '<directory>' --auth-source browser --site-session persistent --keep-tab true -f json
 ```
 
 Omit optional placeholders and their flags rather than passing empty strings. `--author` is limited to 8 Unicode characters and `--title` to 64 Unicode characters; oversized values return `ARGUMENT` before browser navigation. `--cover-image` must be a readable, non-empty jpg, jpeg, png, gif, or webp file. The adapter uploads it into the article body before selecting it as the cover, and failure to confirm that requested cover returns `COMMAND_EXEC`.
@@ -109,13 +120,15 @@ An article-index `COMMAND_EXEC` error that reports `freq control` or “rate lim
 
 After the adapter's post-navigation check, treat login `AUTH_REQUIRED` / exit code 77, a login `TIMEOUT` / exit code 75, anti-bot prompts, CAPTCHAs, sliders, SMS/security checks, and WeChat environment-verification pages as a required human gate. This includes “环境异常，完成验证后即可继续访问” and its “去验证” button. These are not Adapter defects; do not enter AutoFix or modify Adapter code. A download-observation timeout follows the published-data spreadsheet rule above instead of this gate.
 
-With byCLI 2.1.25 and later, `create-draft` session failures return `AUTH_REQUIRED`: both a missing backend token and an editor page that indicates an expired session enter this gate. Field, cover, and save-confirmation failures remain `COMMAND_EXEC` and follow their typed execution-error path.
+An authentication outcome from an already-consumed diagnostic rerun follows terminal priority 1: freeze and preserve the browser context for the user, but do not rerun the original `download-publish-data` command after confirmation. A later execution requires a new explicit user request and starts a new original-command state; it is not a continuation of the consumed diagnostic retry.
+
+Verified for byCLI 2.1.25: `create-draft` session failures return `AUTH_REQUIRED`; both a missing backend token and an editor page that indicates an expired session enter this gate. For another installed version, follow its structured command help and typed output rather than assuming forward compatibility. Field, cover, and save-confirmation failures remain `COMMAND_EXEC` and follow their typed execution-error path.
 
 1. Stop all tool execution immediately. Do not click, bypass, refresh, retry, navigate, focus another page, switch authentication source, or use another acquisition method.
 2. Freeze the current browser context. Do not issue another Weixin, raw browser, doctor, daemon, or browser-lifecycle command; keep the current tab and processes available for the user.
 3. Ask the user to complete verification in the already open tab and explicitly confirm completion. The user—not the agent—clicks “去验证”. End the current turn.
 4. While waiting, do not inspect page state or run a status check.
-5. After the user's next explicit confirmation, rerun the interrupted command exactly once with `--site-session persistent --keep-tab true`; do not perform a preflight check.
+5. After the user's next explicit confirmation and before launching the rerun, mark the original command's login-gate rerun budget as consumed. Then rerun the interrupted command exactly once with `--site-session persistent --keep-tab true`; do not perform a preflight check.
 6. If that single rerun still returns an authentication error, report the exact error and stop.
 
 On the first login `TIMEOUT`, follow this gate immediately. Do not change `BYCLI_BROWSER_COMMAND_TIMEOUT`, open a second login page, inspect a retained `about:blank` tab, or issue another command before confirmation. After confirmation, the rerun reads the token from the authenticated backend URL and obtains domain cookies, including HttpOnly cookies, through Browser Bridge.
