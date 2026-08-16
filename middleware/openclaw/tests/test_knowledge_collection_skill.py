@@ -672,9 +672,15 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "`/wxamp/`",
             "Mini Program",
             "Official Account",
+            "Only `status: draft saved` confirms success",
+            "title substrings are not matches",
+            "readable, non-empty regular-file validation",
+            "oversized values return `ARGUMENT` before browser navigation",
+            "failure to confirm that requested cover returns `COMMAND_EXEC`",
         ):
             self.assertIn(phrase, weixin)
         self.assertNotIn("status: invalid URL", weixin)
+        self.assertNotIn("save attempted, check browser to confirm", weixin)
 
 
 if __name__ == "__main__":
