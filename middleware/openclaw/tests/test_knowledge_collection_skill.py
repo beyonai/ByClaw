@@ -80,6 +80,14 @@ def parse_interface(text):
     return interface
 
 
+def markdown_section(text, heading):
+    marker = f"## {heading}\n"
+    _before, separator, remainder = text.partition(marker)
+    if not separator:
+        raise AssertionError(f"missing Markdown section: {heading}")
+    return remainder.split("\n## ", 1)[0]
+
+
 
 
 class KnowledgeCollectionSkillContractTest(unittest.TestCase):
@@ -652,6 +660,63 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "加载 `knowledge-collection`",
         ):
             self.assertNotIn(phrase, weixin)
+
+    def test_weixin_reference_closes_executor_terminal_states(self):
+        weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
+        discovery = markdown_section(weixin, "Official-account and article discovery")
+        fallback = markdown_section(weixin, "Adapter-owned Sogou fallback identity")
+        terminal = markdown_section(weixin, "Terminal-state precedence")
+        downloads = markdown_section(weixin, "Published-data spreadsheet downloads")
+        login = markdown_section(weixin, "Login and verification gate")
+
+        self.assertIn("@sovovs/bycli` 2.1.25", weixin)
+        self.assertIn("Explicit account identity or account-history intent starts with `accounts`", discovery)
+        self.assertIn("Article-title or topic intent starts with `sougousearch`", discovery)
+        self.assertIn("reinterpret it as topic intent", discovery)
+
+        for phrase in (
+            "nickname-scoped public results, not `fakeid`-proven account history",
+            "omit `--name` and keep the command backend-only",
+            "ask for the exact nickname before offering public fallback",
+            "must not be merged",
+            "Only an exact nickname from one unique `accounts` result",
+            "whose `fakeid` equals the selected `fakeid`",
+            "A user-supplied nickname beside a direct `fakeid` is not identity proof",
+        ):
+            self.assertIn(phrase, fallback)
+
+        for phrase in (
+            "Valid `EMPTY_RESULT`",
+            "Do not enter AutoFix",
+            "`status: partial` or `status: failed`",
+            "do not retry automatically",
+            "Top-level `TIMEOUT` with no terminal item row",
+            "explicit user approval",
+            "final command result after any eligible adapter-owned fallback",
+            "from `download-publish-data`",
+            "login `TIMEOUT` / exit code 75",
+            "already determined not to be a login or verification timeout",
+        ):
+            self.assertIn(phrase, terminal)
+        self.assertLess(
+            terminal.index("login `TIMEOUT` / exit code 75"),
+            terminal.index("Top-level `TIMEOUT`"),
+        )
+        self.assertLess(
+            terminal.index("Public fallback is requested"),
+            terminal.index("Valid `EMPTY_RESULT`"),
+        )
+        self.assertLess(
+            terminal.index("`status: partial` or `status: failed`"),
+            terminal.index("Top-level `TIMEOUT`"),
+        )
+
+        self.assertIn("no terminal item row or artifact metadata", downloads)
+        self.assertIn("rerun exactly once with `--trace retain-on-failure`", downloads)
+        self.assertIn("at most once per original command", downloads)
+        self.assertIn("consumes that command's retry budget", downloads)
+        self.assertIn("including another top-level `TIMEOUT`, is terminal", downloads)
+        self.assertIn("`create-draft` session failures return `AUTH_REQUIRED`", login)
 
     def test_weixin_reference_documents_resolved_download_urls_and_dual_publish_artifacts(self):
         weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
