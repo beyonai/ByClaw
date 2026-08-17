@@ -12,6 +12,11 @@ import java.util.List;
 public class ByaiSessionDto extends ByaiSession {
 
     /**
+     * 项目名称
+     */
+    private String projectName;
+
+    /**
      * 图标
      */
     private String avatar;
