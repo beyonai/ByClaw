@@ -593,7 +593,6 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   hasMore={hasMore}
                   sessionId={sessionId}
                   hideAction={hideAction}
-                  captureRequirementProjectId={sessionProjectId}
                   messageList={messageList}
                   updateMessage={updateMessage}
                   deleteMessage={deleteMessage}

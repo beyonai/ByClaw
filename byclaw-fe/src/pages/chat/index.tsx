@@ -8,9 +8,7 @@ import TitleWriter from '@/components/TitleWriter';
 import { agentTypeMap } from '@/constants/agent';
 import useGlobal from '@/hooks/useGlobal';
 import type { IAgentType } from '@/typescript/agent';
-import type { IMessage } from '@/typescript/message';
 import ChatPageLayout from '@/components/ChatPageLayout';
-import CaptureRequirementModal from '@/pages/chat/components/CaptureRequirementModal';
 
 const BottomContent = lazy(() => import('@/pages/chat/components/BottomContent'));
 // 后端使用 -1 标识默认项目；它与正数项目 ID 都是聊天项目上下文的合法值。
@@ -144,13 +142,6 @@ const Chat = () => {
     return () => window.clearTimeout(timer);
   }, [EventEmitter, selectedAgentId, selectedAgentObjectType, selectedAgentSessionReady]);
 
-  // 沉淀为需求:入口挂在数字员工回答下方(MoreActions),点击后带该条消息发事件到此处打开弹窗。
-  // 弹窗需要项目上下文与仓库列表,由聊天页持有,避免逐层透传到深层消息组件。
-  const [captureOpen, setCaptureOpen] = React.useState(false);
-  const [captureMessages, setCaptureMessages] = React.useState<IMessage[]>([]);
-  // 事件里带来的项目归属优先，回退到当前会话上下文，避免刷新丢失路由态时取不到项目。
-  const [captureProjectId, setCaptureProjectId] = React.useState<number>(0);
-
   React.useEffect(() => {
     setProjectChatContext(locationProjectContext);
   }, [locationProjectContext.projectId, locationProjectContext.projectName]);
@@ -217,22 +208,6 @@ const Chat = () => {
   }, [EventEmitter, sessionId]);
 
   React.useEffect(() => {
-    const handleCaptureRequirement = (payload: { message?: IMessage; projectId?: number }) => {
-      if (!payload?.message) return;
-      const resolvedProjectId = Number(payload.projectId ?? sessionProjectContext.projectId);
-      if (!Number.isFinite(resolvedProjectId) || resolvedProjectId <= 0) return;
-      setCaptureProjectId(resolvedProjectId);
-      setCaptureMessages([payload.message]);
-      setCaptureOpen(true);
-    };
-
-    EventEmitter.on('chat-capture-requirement', handleCaptureRequirement);
-    return () => {
-      EventEmitter.off('chat-capture-requirement', handleCaptureRequirement);
-    };
-  }, [EventEmitter, sessionProjectContext.projectId]);
-
-  React.useEffect(() => {
     if (!sessionId) {
       setSessionProjectContext({});
       return;
@@ -293,15 +268,7 @@ const Chat = () => {
           projectId={sessionProjectContext.projectId}
         />
       }
-    >
-      <CaptureRequirementModal
-        open={captureOpen}
-        projectId={captureProjectId}
-        projectName={sessionProjectContext.projectName}
-        messages={captureMessages}
-        onClose={() => setCaptureOpen(false)}
-      />
-    </ChatPageLayout>
+    />
   );
 };
 
