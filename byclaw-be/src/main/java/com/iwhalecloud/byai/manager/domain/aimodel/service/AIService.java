@@ -481,6 +481,7 @@ public class AIService {
         if (!enabled || "unsupported".equals(capability) || "off".equals(defaultLevel)) {
             requestBody.put("enable_thinking", false);
             requestBody.put("chat_template_kwargs", Map.of("enable_thinking", false));
+            requestBody.put("thinking", Map.of("type", "disabled"));
             return;
         }
 

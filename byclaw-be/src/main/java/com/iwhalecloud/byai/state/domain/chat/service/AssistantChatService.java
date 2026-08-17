@@ -622,7 +622,9 @@ public class AssistantChatService {
         // 生成提示描述信息
         String prompt = promptTemplate.replace("${chatContent}", chatContent);
         try {
-            return aiService.generateText(prompt, aiPrompt.getModelCode());
+            String promptResult = aiService.generateText(prompt, aiPrompt.getModelCode());
+            // 还是要做超长处理
+            return StringUtils.substring(promptResult, 0, 255);
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
             // 兜底策略
