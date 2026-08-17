@@ -705,6 +705,14 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "diagnostic retry budget is unused",
             "login-gate rerun has already been consumed",
             "single post-confirmation login-gate rerun",
+            "`RATE_LIMITED`",
+            "legacy `COMMAND_EXEC`",
+            "`freq control` or `rate limited`",
+            "Do not run a trace rerun",
+            "do not enter AutoFix",
+            "changing `--limit` or `--max-pages`",
+            "same command invocation",
+            "`ret=200013` alone is not sufficient",
         ):
             self.assertIn(phrase, terminal)
         self.assertLess(
@@ -730,6 +738,10 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertLess(
             terminal.index("login-gate rerun has already been consumed"),
             terminal.index("login `TIMEOUT` / exit code 75"),
+        )
+        self.assertLess(
+            terminal.index("`RATE_LIMITED`"),
+            terminal.index("Another typed byCLI failure"),
         )
 
         self.assertIn("no terminal item row or artifact metadata", downloads)
