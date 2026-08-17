@@ -4,6 +4,7 @@ import { getAllDigitalEmployeesV2, queryMyCreated } from '@/service/digitalEmplo
 export interface DigitalEmployeeOption {
   value: string;
   label: string;
+  description?: string;
   keywords?: string;
   // 接口原样的头像值,不在这里拼 URL:渲染侧统一走 getAgentChatAvatar,
   // 与「数字员工」页两个 Tab 用同一条管道(圆形头像、icon- 字体图标、默认头像兜底)。
@@ -56,7 +57,10 @@ export const useDigitalEmployeeOptions = (enabled: boolean) => {
         optionMap.set(optionValue, {
           value: optionValue,
           label,
-          keywords: [agent.agentName, agent.resourceName, agent.name, agent.description].filter(Boolean).join(' '),
+          description: agent.resourceDesc || agent.description || agent.desc || agent.intro || '',
+          keywords: [agent.agentName, agent.resourceName, agent.name, agent.resourceDesc, agent.description, agent.desc]
+            .filter(Boolean)
+            .join(' '),
           chatAvatar: agent.chatAvatar || agent.resourceLogoUrl || agent.avatar || undefined,
           agentType: agent.agentType || undefined,
         });

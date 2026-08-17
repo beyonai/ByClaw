@@ -43,6 +43,7 @@ import {
 import { IMessageState } from '@/constants/message';
 import { agentTypeMap, ROOT_AGENT_ID } from '@/constants/agent';
 import { ResourceTypeMap } from '@/constants/resource';
+import { getStoredProjectScopeId } from '@/pages/projectSpace/constants';
 
 import type { IAgentCache, IAgentType } from '@/typescript/agent';
 import type { IExtParams, IMessage, IMessageListItem } from '@/typescript/message';
@@ -753,7 +754,17 @@ function useChat(props: IProps) {
     let { resourceList } = sendProps;
 
     const myExtParams = get(payload, 'extParams');
-    const restPayload = omit(payload, ['extParams']);
+    const selectedProjectId = !sessionId
+      ? getProjectNumber(get(payload, 'selectedProjectId')) ?? getProjectNumber(getStoredProjectScopeId())
+      : undefined;
+    const selectedProjectName = !sessionId ? get(payload, 'selectedProjectName') : undefined;
+    const restPayload = omit(payload, ['extParams', 'selectedProjectId', 'selectedProjectName']);
+
+    // 新建会话以输入框当前明确选择的项目为准，本地存储只作为首次加载时的兜底。
+    if (selectedProjectId !== undefined) {
+      set(restPayload, 'projectId', selectedProjectId);
+      if (selectedProjectName) set(restPayload, 'projectName', selectedProjectName);
+    }
 
     await onBeforeSend?.();
 

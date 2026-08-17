@@ -1,9 +1,8 @@
 .layout {
   position: relative;
   flex-direction: row;
-  & > * {
-    border-radius: 12px;
-  }
+  margin: 0;
+  padding: 0;
 }
 
 .siderBox {
@@ -12,16 +11,15 @@
 
 .content {
   flex: 1;
-  // margin-left: var(--layout-gap);
   background: #fff;
-  // height: 100vh;
   position: relative;
   overflow: hidden;
-  // width: auto;
   min-width: 0;
   height: 100%;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
   opacity: 1;
-  // border-right: 0.5px var(--beyond-color-border) solid;
 
   // 默认无动画
   &.opening {
@@ -38,8 +36,10 @@
   flex: 1;
   min-width: 0;
   height: 100%;
-  margin-left: var(--layout-gap);
+  margin: 0;
   overflow: hidden;
+  border: 0;
+  border-radius: 0;
   background: #fff;
 }
 
@@ -47,15 +47,14 @@
   position: absolute;
   // 覆盖聊天输入框等底部浮层，保证项目渠道配置面板真正盖住右侧会话区。
   z-index: 1000;
-  top: 8px;
-  right: 8px;
-  bottom: 8px;
-  left: calc(56px + var(--sider-content-width) + var(--layout-gap));
-  margin-left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: var(--sider-content-width);
+  margin: 0;
   width: auto;
   height: auto;
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(28, 48, 90, 0.12);
+  box-shadow: none;
 }
 
 .dragBox {

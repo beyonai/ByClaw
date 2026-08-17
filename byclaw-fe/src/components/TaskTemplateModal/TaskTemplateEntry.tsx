@@ -1,17 +1,24 @@
-import { AppstoreOutlined, RightOutlined } from '@ant-design/icons';
-import { Button, Empty, Modal, Spin, message } from 'antd';
+import { AppstoreOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
+import { Button, Divider, Empty, Modal, Select, Spin, message } from 'antd';
 import { getLocale } from '@umijs/max';
 import { useEffect, useMemo, useState } from 'react';
 import { getDcSystemConfigListByStandType } from '@/service/auth';
+import { createProject, saveDefaultAgent, saveProjectMembers } from '@/service/devloop';
 import { useChatResourceProject } from '@/components/ChatLayoutComp/ChatResourceWorkspace/useChatResourceProject';
+import useGlobal from '@/hooks/useGlobal';
+import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
-import type { ProjectType } from '@/pages/projectSpace/types';
+import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
+import ProjectFormModal, { type ProjectFormValues } from '@/pages/projectSpace/components/ProjectFormModal';
+import type { ProjectSpace, ProjectType } from '@/pages/projectSpace/types';
 import TaskTemplateModal from '.';
 import styles from './index.module.less';
 
 interface Props {
   projectId?: number;
+  sessionId?: string;
   onApply: (prompt: string) => void;
+  onProjectChange?: (project: { projectId: string; projectName: string }) => void;
 }
 
 type RecommendedQuestionTemplate = {
@@ -20,6 +27,8 @@ type RecommendedQuestionTemplate = {
   description: string;
   prompt: string;
 };
+
+type ProjectOption = Pick<ProjectSpace, 'projectId' | 'projectName'>;
 
 const normalizeProjectType = (projectType?: ProjectType): Exclude<ProjectType, 'default'> => {
   // 默认项目按普通项目处理；会话没有项目归属时 useChatResourceProject 也会解析到默认项目。
@@ -34,14 +43,57 @@ const PROJECT_TYPE_TITLE: Record<Exclude<ProjectType, 'default'>, string> = {
   operation: '运营项目 · 选择任务模板',
 };
 
+const getSavedProjectId = (response: any) =>
+  `${response?.projectId || response?.id || response?.data?.projectId || response?.data?.id || ''}`;
+
 // 公共会话输入框统一使用该入口，再按当前会话所属项目类型切换对应模板数据。
-const TaskTemplateEntry: React.FC<Props> = ({ projectId, onApply }) => {
+const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onProjectChange }) => {
+  const { EventEmitter } = useGlobal();
   const [visible, setVisible] = useState(false);
+  const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [createProjectLoading, setCreateProjectLoading] = useState(false);
   const [recommendedQuestions, setRecommendedQuestions] = useState<RecommendedQuestionTemplate[]>([]);
   const [recommendedLoading, setRecommendedLoading] = useState(false);
-  const [selectedProjectId] = useProjectScopeId();
-  // 任务模板使用会话、项目模块共用的当前项目；没有项目空间选择时再回退到当前会话归属。
-  const sharedProjectId = Number(selectedProjectId);
+  const [createdProjectOption, setCreatedProjectOption] = useState<ProjectOption>();
+  const [selectedProjectOverride, setSelectedProjectOverride] = useState<string>();
+  const [selectedProjectId, updateProjectScopeId] = useProjectScopeId();
+  const { projects, loading: projectsLoading, fetchProjects } = useProjectList();
+  const { projectTypeOptions, projectTypeLoading } = useProjectTypeConfig();
+
+  const projectOptions = useMemo(() => {
+    const projectMap = new Map<string, ProjectOption>(projects.map((project) => [project.projectId, project]));
+    if (createdProjectOption && !projectMap.has(createdProjectOption.projectId)) {
+      projectMap.set(createdProjectOption.projectId, createdProjectOption);
+    }
+    return Array.from(projectMap.values());
+  }, [createdProjectOption, projects]);
+  const selectedProjectValue = selectedProjectOverride || selectedProjectId;
+
+  useEffect(() => {
+    if (sessionId || !selectedProjectValue) return;
+    const selectedProject = projectOptions.find((project) => `${project.projectId}` === `${selectedProjectValue}`);
+    if (selectedProject) {
+      onProjectChange?.({
+        projectId: `${selectedProject.projectId}`,
+        projectName: selectedProject.projectName,
+      });
+    }
+  }, [onProjectChange, projectOptions, selectedProjectValue, sessionId]);
+
+  useEffect(() => {
+    if (!projectOptions.length) return;
+
+    const storedProject = selectedProjectValue
+      ? projectOptions.find((project) => `${project.projectId}` === `${selectedProjectValue}`)
+      : undefined;
+    const nextProject = storedProject || projectOptions[0];
+    if (nextProject && `${nextProject.projectId}` !== `${selectedProjectValue || ''}`) {
+      updateProjectScopeId(nextProject.projectId);
+    }
+  }, [projectOptions, selectedProjectValue, updateProjectScopeId]);
+
+  // 任务模板使用会话、项目模块共用的当前项目；项目选择器负责首次默认和本地恢复。
+  const sharedProjectId = Number(selectedProjectValue);
   const effectiveProjectId = Number.isFinite(sharedProjectId) && sharedProjectId !== 0 ? sharedProjectId : projectId;
   const { project, loading: projectLoading } = useChatResourceProject(effectiveProjectId);
   const projectType = normalizeProjectType(project?.projectType);
@@ -131,6 +183,61 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, onApply }) => {
     message.success(projectType === 'normal' ? '推荐问题已填入对话框' : '模板内容已生成到对话框，可继续修改后发送');
   };
 
+  const handleCreateProject = async (values: ProjectFormValues) => {
+    if (createProjectLoading) return;
+
+    setCreateProjectLoading(true);
+    try {
+      const sharedFlag = values.projectType === 'develop' || values.projectType === 'operation' || values.sharedFlag;
+      const response = await createProject(
+        {
+          projectName: values.projectName.trim(),
+          description: values.description?.trim(),
+          projectType: values.projectType,
+          isShare: sharedFlag ? 'Y' : 'N',
+          shareTargets: [],
+          resources: values.resources || [],
+        },
+        { responseCfg: { hideErrorTips: true } }
+      );
+      const savedProjectId = getSavedProjectId(response);
+      if (!savedProjectId) throw new Error('项目创建失败');
+
+      await saveProjectMembers({
+        projectId: Number(savedProjectId),
+        userIds: sharedFlag
+          ? (values.shareMembers || [])
+            .map((member) => member.userId)
+            .filter((userId): userId is string | number => Boolean(userId))
+          : [],
+      });
+      if (values.projectType === 'develop' && values.defaultAgents) {
+        await saveDefaultAgent({ ...values.defaultAgents, projectId: Number(savedProjectId) });
+      }
+
+      const refreshedProjects = await fetchProjects();
+      const refreshedProject = refreshedProjects.find((project) => `${project.projectId}` === savedProjectId);
+      const createdProject = refreshedProject || {
+        projectId: savedProjectId,
+        projectName: values.projectName.trim(),
+      };
+      setCreatedProjectOption(createdProject);
+      setSelectedProjectOverride(savedProjectId);
+      updateProjectScopeId(savedProjectId);
+      onProjectChange?.({
+        projectId: `${createdProject.projectId}`,
+        projectName: createdProject.projectName,
+      });
+      EventEmitter.emit('projectSpace-list-refresh', { projectId: savedProjectId });
+      setCreateProjectOpen(false);
+      message.success('项目创建成功');
+    } catch (error: any) {
+      message.error(error?.message || '项目创建失败');
+    } finally {
+      setCreateProjectLoading(false);
+    }
+  };
+
   const loadingModal = (
     <Modal
       open={visible}
@@ -150,9 +257,60 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, onApply }) => {
 
   return (
     <>
-      <Button icon={<AppstoreOutlined />} onClick={() => setVisible(true)}>
-        任务模板
-      </Button>
+      <div className={styles.taskTemplateTools}>
+        {!sessionId && (
+          <Select
+            className={styles.projectSelect}
+            showSearch
+            loading={projectsLoading}
+            value={selectedProjectValue || undefined}
+            placeholder="选择项目"
+            optionFilterProp="label"
+            options={projectOptions.map((item) => ({
+              value: `${item.projectId}`,
+              label: item.projectName || '未命名项目',
+            }))}
+            onChange={(value) => {
+              setSelectedProjectOverride(`${value}`);
+              updateProjectScopeId(value);
+              const selectedProject = projectOptions.find((project) => `${project.projectId}` === `${value}`);
+              if (selectedProject) {
+                onProjectChange?.({
+                  projectId: `${selectedProject.projectId}`,
+                  projectName: selectedProject.projectName,
+                });
+              }
+            }}
+            aria-label="选择项目"
+            dropdownRender={(menu) => (
+              <>
+                {menu}
+                <Divider className={styles.projectSelectDivider} />
+                <Button
+                  type="text"
+                  className={styles.createProjectButton}
+                  icon={<PlusOutlined />}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => setCreateProjectOpen(true)}
+                >
+                  新建项目
+                </Button>
+              </>
+            )}
+          />
+        )}
+        <Button icon={<AppstoreOutlined />} onClick={() => setVisible(true)}>
+          任务模板
+        </Button>
+      </div>
+      <ProjectFormModal
+        open={createProjectOpen}
+        loading={createProjectLoading}
+        projectTypeConfigOptions={projectTypeOptions}
+        projectTypeLoading={projectTypeLoading}
+        onCancel={() => setCreateProjectOpen(false)}
+        onSubmit={handleCreateProject}
+      />
       {projectLoading && !project ? (
         loadingModal
       ) : projectType === 'operation' ? (

@@ -94,7 +94,19 @@ const Employees = () => {
   if (searchParamAgentId) routeAgentIdRef.current = searchParamAgentId;
   // 卡片点击路由状态优先于浏览器历史中的全局 agentId，避免返回列表后旧员工覆盖本次新选择。
   const myAgentId = searchParamAgentId || routeStateAgentId || agentId || routeAgentIdRef.current;
-  const detailAgentInfo = routeStateEmployee || agentInfo;
+  const detailAgentInfo = useMemo(() => {
+    const selectedEmployee = routeStateEmployee || agentInfo;
+    if (!selectedEmployee) {
+      return selectedEmployee;
+    }
+
+    // 左侧小列表只返回员工摘要；将资源详情的创建者补回，保证两个入口展示一致。
+    return {
+      ...selectedEmployee,
+      creatorName: selectedEmployee.creatorName || appInfo?.creatorName || appInfo?.createUserName,
+      createUserName: selectedEmployee.createUserName || appInfo?.createUserName || appInfo?.creatorName,
+    };
+  }, [agentInfo, appInfo?.createUserName, appInfo?.creatorName, routeStateEmployee]);
   const employeeTab = searchParams.get('tab');
   const employeeResourceId = `${detailAgentInfo?.resourceId || detailAgentInfo?.id || ''}`;
 

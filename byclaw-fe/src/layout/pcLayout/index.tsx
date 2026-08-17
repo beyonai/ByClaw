@@ -10,15 +10,13 @@ import { EventEmitter$Cls } from '@/utils/eventEmitter';
 import Auth from '../auth';
 import AntdProvider from '../components/provider/antd';
 import Header from '../header';
-import Sider from '../sider';
 import {
   SiderContentContext,
   DEFAULT_SIDER_CONTENT_WIDTH,
   HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH,
-  SIDER_BAR_WIDTH,
   type DetailPanelOptions,
 } from '../sider/siderContentContext';
-import { tabItems } from '../sider/components/SiderContent';
+import WorkspaceSider from '../sider/components/WorkspaceSider';
 
 import PasswordModal from '@/pages/settings/components/PasswordModal';
 
@@ -50,9 +48,7 @@ const pcUnShowLayoutRoute: Record<string, boolean> = {
   '/digitalEmployeesCreate': true,
 };
 
-const pcHideSiderContentRoute: Record<string, boolean> = {
-  '/settings': true,
-};
+const pcHideSiderContentRoute: Record<string, boolean> = {};
 
 function isPcUnShowLayoutRoute(pathname: string) {
   let path = pathname;
@@ -86,7 +82,9 @@ const PCLayout = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const { pathname } = location;
-  const preserveDetailPanel = Boolean((location.state as { preserveDetailPanel?: boolean } | null)?.preserveDetailPanel);
+  const preserveDetailPanel = Boolean(
+    (location.state as { preserveDetailPanel?: boolean } | null)?.preserveDetailPanel
+  );
 
   // 检查当前路由是否需要隐藏侧边栏
   const [siderContentWidth, setSiderContentWidth] = React.useState(DEFAULT_SIDER_CONTENT_WIDTH);
@@ -109,13 +107,8 @@ const PCLayout = () => {
     if (!preserveDetailPanel) {
       clearDetailPanel();
     }
-    // 参考 sider 组件的逻辑，检查当前路径是否需要隐藏侧边栏
-    const currentTab = tabItems.find(
-      (item) => item.navigatePath && (item.navigatePath === pathname || pathname.startsWith(`${item.navigatePath}/`))
-    );
-
-    // 检查 tabItems 中的 hideSider 属性
-    if (currentTab?.hideSider || isPcHideSiderContentRoute(pathname)) {
+    // 新侧栏是全局工作区导航，资源中心和设置页都保留它；只有明确配置的页面才隐藏侧栏。
+    if (isPcHideSiderContentRoute(pathname)) {
       setSiderContentWidth(0);
     } else {
       setSiderContentWidth(DEFAULT_SIDER_CONTENT_WIDTH);
@@ -150,16 +143,19 @@ const PCLayout = () => {
   const dragFileEventHandlerRef = useRef<DragFileEventHandler>(null);
   const layoutRef = useRef<HTMLElement>(null);
   const [layoutWidth, setLayoutWidth] = useState(0);
-  const mainContentHalfWidth =
-    layoutWidth > 0 ? Math.max(280, Math.floor((layoutWidth - SIDER_BAR_WIDTH - siderContentWidth - 16) / 2)) : 450;
-  const detailPanelBasis =
-    detailPanelWidth === undefined
-      ? undefined
-      : typeof detailPanelWidth === 'number'
-        ? `${detailPanelWidth}px`
-        : detailPanelWidth === HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH
-          ? `${mainContentHalfWidth}px`
-          : detailPanelWidth;
+  const mainContentHalfWidth = layoutWidth > 0 ? Math.max(280, Math.floor((layoutWidth - siderContentWidth) / 2)) : 450;
+  const detailPanelBasis = (() => {
+    if (detailPanelWidth === undefined) return undefined;
+    if (typeof detailPanelWidth === 'number') return `${detailPanelWidth}px`;
+    if (detailPanelWidth === HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH) return `${mainContentHalfWidth}px`;
+    return detailPanelWidth;
+  })();
+  const detailPanelStyle = detailPanelBasis
+    ? {
+      flex: '0 0 auto',
+      width: detailPanelBasis,
+    }
+    : undefined;
 
   React.useEffect(() => {
     if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined') return;
@@ -344,7 +340,7 @@ const PCLayout = () => {
                 style={
                   {
                     '--user-fill-color': '#F2F6FA',
-                    '--layout-gap': '8px',
+                    '--layout-gap': '0px',
                   } as React.CSSProperties
                 }
               >
@@ -354,8 +350,7 @@ const PCLayout = () => {
                   className={classNames('full-width full-height ub-f1', styles.layout)}
                   style={
                     {
-                      // 用gap实现起来很难搞，因为在没有展开drawer的情况下，也占了8px的位置，因此采用了--layout-gap这种方式来做一个margin处理
-                      padding: userInfo ? '8px 8px 8px 0' : 0,
+                      padding: 0,
                       '--sider-content-width': `${siderContentWidth}px`,
                     } as React.CSSProperties
                   }
@@ -369,7 +364,7 @@ const PCLayout = () => {
                       clearDetailPanel,
                     }}
                   >
-                    <Sider />
+                    {userInfo && siderContentWidth > 0 && <WorkspaceSider />}
                     <MinorDrawer />
                     <Content
                       id={pcLayoutContentId}
@@ -377,7 +372,6 @@ const PCLayout = () => {
                         [styles.opening]: !isClose,
                         [styles.closing]: isClose,
                       })}
-                      style={{ marginLeft: userInfo ? 'var(--layout-gap)' : 0 }}
                     >
                       <Outlet />
                     </Content>
@@ -388,17 +382,7 @@ const PCLayout = () => {
                         </aside>
                       ) : (
                         <Resizable left limit={{ minWidth: 360, maxWidth: '70vw' }}>
-                          <aside
-                            className={styles.detailPanel}
-                            style={
-                              detailPanelBasis
-                                ? {
-                                  flex: '0 0 auto',
-                                  width: detailPanelBasis,
-                                }
-                                : undefined
-                            }
-                          >
+                          <aside className={styles.detailPanel} style={detailPanelStyle}>
                             {detailPanel}
                           </aside>
                         </Resizable>

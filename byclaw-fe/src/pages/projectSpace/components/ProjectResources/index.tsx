@@ -46,7 +46,7 @@ interface Props {
   repositoryRefreshVersion?: number;
 }
 
-type ResourceOption = { value: string; label: string };
+type ResourceOption = { value: string; label: string; description?: string };
 type ResourceSelection = Record<ProjectResourceType, string[]>;
 
 const EMPTY_SELECTION: ResourceSelection = {
@@ -203,7 +203,10 @@ const ProjectResources: React.FC<Props> = ({
       [knowledgePersonal, knowledgeEnterprise].flatMap(getResourceRows).forEach((item: any) => {
         const value = item.resourceId ?? item.resourceSourcePkId ?? item.datasetId ?? item.id;
         const label = item.resourceName || item.datasetName || item.name;
-        if (value !== undefined && value !== null && label) knowledgeMap.set(`${value}`, { value: `${value}`, label });
+        const description = item.resourceDesc || item.datasetDesc || item.description || item.desc || '';
+        if (value !== undefined && value !== null && label) {
+          knowledgeMap.set(`${value}`, { value: `${value}`, label, description });
+        }
       });
 
       const ontologyMap = new Map<string, ResourceOption>();
@@ -212,7 +215,11 @@ const ProjectResources: React.FC<Props> = ({
         .forEach((item: any) => {
           const value = item.baseId ?? item.resourceId ?? item.id;
           const label = item.displayName || item.resourceName || item.name;
-          if (value !== undefined && value !== null && label) ontologyMap.set(`${value}`, { value: `${value}`, label });
+          const description =
+            item.resourceDesc || item.baseDesc || item.objectDesc || item.description || item.desc || '';
+          if (value !== undefined && value !== null && label) {
+            ontologyMap.set(`${value}`, { value: `${value}`, label, description });
+          }
         });
 
       setKnowledgeOptions(Array.from(knowledgeMap.values()));
@@ -227,8 +234,9 @@ const ProjectResources: React.FC<Props> = ({
   }, [isOperationProject]);
 
   useEffect(() => {
-    if (resourceModalOpen) void loadResourceOptions();
-  }, [loadResourceOptions, resourceModalOpen]);
+    // 资源列表也需要展示描述，因此运营项目打开详情时就加载资源元数据。
+    if (isOperationProject) void loadResourceOptions();
+  }, [isOperationProject, loadResourceOptions]);
 
   useEffect(() => {
     // 资源 Tab 的刷新入口统一放到项目详情顶部，同时刷新各资源列表。
@@ -355,8 +363,7 @@ const ProjectResources: React.FC<Props> = ({
   const renderBoundResources = (
     items: ProjectBoundResource[],
     resourceType: ProjectResourceType,
-    icon: React.ReactNode,
-    fallback: string
+    icon: React.ReactNode
   ) => {
     const iconClassName = {
       knowledge: styles.resourceKnowledgeIcon,
@@ -364,10 +371,23 @@ const ProjectResources: React.FC<Props> = ({
       ontology: styles.resourceOntologyIcon,
     }[resourceType];
 
+    const descriptionMap = new Map<string, string>(
+      [
+        ...knowledgeOptions.map((option) => [`knowledge:${option.value}`, option.description]),
+        ...agentOptions.map((option) => [`digital_employee:${option.value}`, option.description]),
+        ...ontologyOptions.map((option) => [`ontology:${option.value}`, option.description]),
+      ].filter((item): item is [string, string] => Boolean(item[1]))
+    );
     const resourceItems = items.map((resource) => {
       const employeeAvatar =
         resourceType === 'digital_employee' ? employeeAvatarMap.get(`${resource.resourceId}`) : undefined;
       const avatarClassName = employeeAvatar ? styles.resourceEmployeeAvatar : '';
+      const description =
+        resource.resourceDesc ||
+        resource.description ||
+        resource.desc ||
+        descriptionMap.get(`${resourceType}:${resource.resourceId}`) ||
+        '-';
       return (
         <div
           key={`${resourceType}:${resource.resourceId}`}
@@ -382,8 +402,8 @@ const ProjectResources: React.FC<Props> = ({
             <Typography.Text strong ellipsis={{ tooltip: resource.resourceName }}>
               {resource.resourceName || resource.resourceId}
             </Typography.Text>
-            <Typography.Text type="secondary" ellipsis>
-              {fallback}
+            <Typography.Text type="secondary" ellipsis={{ tooltip: description }}>
+              {description}
             </Typography.Text>
           </div>
         </div>
@@ -521,12 +541,7 @@ const ProjectResources: React.FC<Props> = ({
               intl.formatMessage({ id: 'projectSpace.resources.sharedKnowledgeDescription' }),
               openResourceModal
             )}
-            {renderBoundResources(
-              boundKnowledge,
-              'knowledge',
-              <DatabaseOutlined />,
-              intl.formatMessage({ id: 'projectSpace.resources.boundKnowledge' })
-            )}
+            {renderBoundResources(boundKnowledge, 'knowledge', <DatabaseOutlined />)}
           </section>
         ) : null}
 
@@ -538,12 +553,7 @@ const ProjectResources: React.FC<Props> = ({
               intl.formatMessage({ id: 'projectSpace.resources.sharedEmployeeDescription' }),
               openResourceModal
             )}
-            {renderBoundResources(
-              boundEmployees,
-              'digital_employee',
-              <RobotOutlined />,
-              intl.formatMessage({ id: 'projectSpace.resources.boundEmployee' })
-            )}
+            {renderBoundResources(boundEmployees, 'digital_employee', <RobotOutlined />)}
           </section>
         )}
 
@@ -555,12 +565,7 @@ const ProjectResources: React.FC<Props> = ({
               intl.formatMessage({ id: 'projectSpace.resources.sharedOntologyDescription' }),
               openResourceModal
             )}
-            {renderBoundResources(
-              boundOntologies,
-              'ontology',
-              <ApartmentOutlined />,
-              intl.formatMessage({ id: 'projectSpace.resources.boundOntology' })
-            )}
+            {renderBoundResources(boundOntologies, 'ontology', <ApartmentOutlined />)}
           </section>
         )}
       </div>

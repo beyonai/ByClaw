@@ -188,7 +188,8 @@ const ProjectTasks: React.FC<Props> = ({
   const taskDetailRequestIdRef = useRef(0);
   const initialLoadKeyRef = useRef<string | null>(null);
   const [templateTask, setTemplateTask] = useState<DevloopTaskItem | null>(null);
-  const [onlyMine, setOnlyMine] = useState(project.projectType === 'develop');
+  // 研发项目和运营项目都支持按当前登录用户筛选任务，默认保持只看我的视图。
+  const [onlyMine, setOnlyMine] = useState(project.projectType === 'develop' || project.projectType === 'operation');
   const [detailTask, setDetailTask] = useState<DevloopTaskItem | null>(null);
   const [editingTask, setEditingTask] = useState<DevloopTaskItem | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
@@ -198,6 +199,11 @@ const ProjectTasks: React.FC<Props> = ({
   const [taskSaving, setTaskSaving] = useState(false);
   const [memberOptions, setMemberOptions] = useState<Array<{ label: string; value: string | number }>>([]);
   const currentUserId = userInfo.userId ?? userInfo.id;
+  useEffect(() => {
+    // 切换项目类型时同步筛选开关，避免沿用上一个项目的任务筛选状态。
+    setOnlyMine(project.projectType === 'develop' || project.projectType === 'operation');
+  }, [project.projectType]);
+
   const isTaskCreator = (task: DevloopTaskItem) =>
     task.canDelete === true ||
     (currentUserId !== undefined && task.createBy !== undefined && `${currentUserId}` === `${task.createBy}`) ||
@@ -261,6 +267,7 @@ const ProjectTasks: React.FC<Props> = ({
           response = await listOperationTasks({
             projectId: Number(project.projectId),
             keyword: keyword.trim() || undefined,
+            onlyMine,
             pageNum: nextPage,
             pageSize: PAGE_SIZE,
           });
@@ -313,7 +320,7 @@ const ProjectTasks: React.FC<Props> = ({
   useEffect(() => {
     onToolbarChange?.(
       <div className={styles.headerActions}>
-        {project.projectType === 'develop' && (
+        {(project.projectType === 'develop' || project.projectType === 'operation') && (
           <Checkbox checked={onlyMine} onChange={(event) => setOnlyMine(event.target.checked)}>
             {intl.formatMessage({ id: 'projectSpace.tasks.onlyMine' })}
           </Checkbox>
@@ -720,19 +727,21 @@ const ProjectTasks: React.FC<Props> = ({
               onChange={(event) => setEditingDescription(event.target.value)}
             />
           </div>
-          <div>
-            <Typography.Text>{intl.formatMessage({ id: 'projectSpace.tasks.field.assignee' })}</Typography.Text>
-            <Select
-              style={{ width: '100%', marginTop: 8 }}
-              value={editingAssignee}
-              options={memberOptions}
-              placeholder={intl.formatMessage({ id: 'projectSpace.tasks.field.assigneePlaceholder' })}
-              onChange={setEditingAssignee}
-            />
-          </div>
-          <div>
-            <Typography.Text>{intl.formatMessage({ id: 'projectSpace.tasks.field.dueTime' })}</Typography.Text>
-            <DatePicker style={{ width: '100%', marginTop: 8 }} value={editingDueTime} onChange={setEditingDueTime} />
+          <div className={styles.taskEditRow}>
+            <div>
+              <Typography.Text>{intl.formatMessage({ id: 'projectSpace.tasks.field.assignee' })}</Typography.Text>
+              <Select
+                style={{ width: '100%', marginTop: 8 }}
+                value={editingAssignee}
+                options={memberOptions}
+                placeholder={intl.formatMessage({ id: 'projectSpace.tasks.field.assigneePlaceholder' })}
+                onChange={setEditingAssignee}
+              />
+            </div>
+            <div>
+              <Typography.Text>{intl.formatMessage({ id: 'projectSpace.tasks.field.dueTime' })}</Typography.Text>
+              <DatePicker style={{ width: '100%', marginTop: 8 }} value={editingDueTime} onChange={setEditingDueTime} />
+            </div>
           </div>
         </div>
       </Modal>

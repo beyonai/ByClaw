@@ -17,6 +17,13 @@ export interface LaunchSandboxResult {
   instanceEndpoints?: Record<string, string>;
 }
 
+// 重启流程由上层统一展示失败提示，避免公共请求层和页面重复弹出错误消息。
+const silentErrorConfig = {
+  responseCfg: {
+    hideErrorTips: true,
+  },
+};
+
 /**
  * 通过后端转发采集流程共用的沙箱浏览器导航命令，避免浏览器跨域请求沙箱端口。
  */
@@ -39,7 +46,7 @@ export async function getSandboxInfo(params: { userCode?: string; sandboxType?: 
  * 释放沙箱
  */
 export async function removeSandbox(params: { userCode: string; resourceId?: number | null }): Promise<void> {
-  return POST('/byaiService/sandbox/removeSandbox', params);
+  return POST('/byaiService/sandbox/removeSandbox', params, silentErrorConfig);
 }
 
 /**
@@ -49,7 +56,7 @@ export async function launchSandboxByUserCode(params: {
   userCode: string;
   serviceKey?: string;
 }): Promise<LaunchSandboxResult> {
-  return POST('/byaiService/sandbox/launchByUserCode', params);
+  return POST('/byaiService/sandbox/launchByUserCode', params, silentErrorConfig);
 }
 
 /**

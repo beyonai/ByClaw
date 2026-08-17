@@ -57,6 +57,7 @@ export type IProps = {
 
   /** 当前会话所属项目，用于自动选择普通、研发或运营任务模板。 */
   projectId?: number;
+
   /** 仅会话输入框开启公共任务模板入口，避免通知等复用输入框误展示。 */
   enableTaskTemplate?: boolean;
 };
@@ -88,6 +89,12 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   autoSendRunner: NodeJS.Timeout | null = null;
 
   uploadFileRef = React.createRef<UploadFileRef>();
+
+  selectedProject?: { projectId: string; projectName: string };
+
+  handleProjectChange = (project: { projectId: string; projectName: string }) => {
+    this.selectedProject = project;
+  };
 
   constructor(props: P & IProps) {
     super(props);
@@ -400,6 +407,12 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   // 所有子类的onSend都从父类这里触发，这里需要额外加一些公共的参数
   finallySendQuery = (data: any) => {
+    // Chat、Employees 等输入框会覆盖 getSendPayload，项目选择必须在公共发送出口统一补入。
+    if (!this.props.sessionId && this.selectedProject) {
+      set(data, 'payload.selectedProjectId', this.selectedProject.projectId);
+      set(data, 'payload.selectedProjectName', this.selectedProject.projectName);
+    }
+
     let { resourceList = [] } = this.state;
     const currentInputPayload = this.getCurrentInputPayload();
     if (currentInputPayload?.resourceList) {
@@ -464,10 +477,12 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           }}
         >
           <Space>
-            {/* 会话输入框默认始终展示入口，仅模板编辑器等明确传 false 的非会话场景隐藏。 */}
-            {this.props.enableTaskTemplate !== false && (
+            {/* 未登录用户不展示任务模板入口，登录后仍遵循调用方的显式开关。 */}
+            {this.props.userInfo && this.props.enableTaskTemplate !== false && (
               <TaskTemplateEntry
                 projectId={this.props.projectId}
+                sessionId={this.props.sessionId}
+                onProjectChange={this.handleProjectChange}
                 onApply={(prompt) => this.setInputValue({ inputTxt: prompt, isInsert: false })}
               />
             )}

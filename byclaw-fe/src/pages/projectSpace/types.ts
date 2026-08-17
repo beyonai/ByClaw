@@ -20,6 +20,11 @@ export interface ProjectBoundResource {
   resourceType: ProjectBoundResourceType;
   resourceId: string | number;
   resourceName?: string;
+
+  /** 资源详情描述；绑定表历史数据可能没有这些字段，由资源接口补齐。 */
+  description?: string;
+  resourceDesc?: string;
+  desc?: string;
   sortNo?: number;
 }
 

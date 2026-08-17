@@ -1,13 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Empty, Modal, Spin, message } from 'antd';
-import { useIntl, useNavigate, useSelector } from '@umijs/max';
+import { Button, Dropdown, Empty, Input, Modal, Spin, message } from 'antd';
+import {
+  ShareAltOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  MoreOutlined,
+  PlusOutlined,
+  SearchOutlined,
+} from '@ant-design/icons';
+import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
+import dayjs from 'dayjs';
 import useGlobal from '@/hooks/useGlobal';
 import { setAgentCache } from '@/components/QueryInput/RichInput/agentCache';
 import getElementData from '@/components/QueryInput/RichInput/utils/getElementData';
 import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
 import { agentTypeMap } from '@/constants/agent';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
+import { getPublicPath } from '@/utils';
 import {
+  createProject,
   deleteProject,
   saveDefaultAgent,
   saveProjectMembers,
@@ -15,6 +26,7 @@ import {
   updateProject,
 } from '@/service/devloop';
 import ProjectFormModal, { type ProjectFormValues } from './components/ProjectFormModal';
+import ProjectOnboardingWizard, { type ArchitectChatTarget } from './components/ProjectOnboardingWizard';
 import ProjectDetail from './components/ProjectDetail';
 import { type ChatWithAgentTarget } from './components/ProjectDefaultAgentPanel';
 import { useProjectDetail } from './hooks/useProjectDetail';
@@ -25,6 +37,27 @@ import type { ProjectSession, ProjectSpace } from './types';
 import styles from './index.module.less';
 
 const getProjectId = (value?: string | number) => `${value ?? ''}`.trim();
+
+const formatProjectCreateTime = (value?: string) => {
+  if (!value) return '';
+  const normalizedValue = /^\d+$/.test(value) ? Number(value) : value;
+  const createTime = dayjs(normalizedValue);
+  return createTime.isValid() ? createTime.format('YYYY-MM-DD') : '';
+};
+
+const getProjectIdFromSaveResponse = (response: any) =>
+  getProjectId(response?.projectId || response?.id || response?.data?.projectId || response?.data?.id);
+
+const isProjectCreator = (project: ProjectSpace | undefined, userInfo: any) => {
+  const currentUserId = userInfo.userId ?? userInfo.id;
+  return Boolean(
+    project?.createBy !== undefined &&
+      project?.createBy !== null &&
+      currentUserId !== undefined &&
+      currentUserId !== null &&
+      `${project.createBy}` === `${currentUserId}`
+  );
+};
 
 const getProjectFormInitialValues = (project?: ProjectSpace): Partial<ProjectFormValues> | undefined => {
   if (!project) return undefined;
@@ -50,27 +83,38 @@ const getProjectFormInitialValues = (project?: ProjectSpace): Partial<ProjectFor
 // 项目大详情与会话模块共用同一份当前项目状态，不再通过 URL 查询参数重复维护选中值。
 const ProjectSpacePage: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const intl = useIntl();
   const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
-  const { projects, loading: projectsLoading, fetchProjects, hasMore, loadMoreProjects } = useProjectList();
+  const {
+    projects,
+    loading: projectsLoading,
+    keyword: projectKeyword,
+    setKeyword: setProjectKeyword,
+    fetchProjects,
+    hasMore,
+    loadMoreProjects,
+  } = useProjectList();
   const { projectTypeOptions, projectTypeLoading } = useProjectTypeConfig();
   const [selectedProjectId, setSelectedProjectId] = useProjectScopeId();
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectSpace>();
   const [editLoading, setEditLoading] = useState(false);
+  const [renameProject, setRenameProject] = useState<ProjectSpace>();
+  const [renameValue, setRenameValue] = useState('');
+  const [renameLoading, setRenameLoading] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [showProjectList, setShowProjectList] = useState(true);
+
+  useEffect(() => {
+    if ((location.state as { openProjectList?: boolean } | null)?.openProjectList) {
+      setShowProjectList(true);
+    }
+  }, [location.key, location.state]);
 
   const { activeProject, refreshProject } = useProjectDetail(projects, selectedProjectId);
-  const canManageProject = useMemo(() => {
-    const currentUserId = userInfo.userId ?? userInfo.id;
-    return Boolean(
-      activeProject?.createBy !== undefined &&
-        activeProject?.createBy !== null &&
-        currentUserId !== undefined &&
-        currentUserId !== null &&
-        `${activeProject.createBy}` === `${currentUserId}`
-    );
-  }, [activeProject?.createBy, userInfo.id, userInfo.userId]);
+  const canManageProject = useMemo(() => isProjectCreator(activeProject, userInfo), [activeProject, userInfo]);
 
   useEffect(() => {
     const refresh = () => {
@@ -152,51 +196,162 @@ const ProjectSpacePage: React.FC = () => {
     setEditModalOpen(true);
   }, []);
 
-  const handleUpdateProject = useCallback(
+  const handleCreateProject = useCallback(() => {
+    setProjectKeyword('');
+    setEditingProject(undefined);
+    setWizardOpen(true);
+  }, [setProjectKeyword]);
+
+  const handleSaveProject = useCallback(
     async (values: ProjectFormValues) => {
-      if (!editingProject?.projectId || editLoading) return;
+      if (editLoading) return '';
+      const projectName = values.projectName.trim();
+      if (!projectName) {
+        message.warning(intl.formatMessage({ id: 'projectSpace.message.projectNameRequired' }));
+        return '';
+      }
+      const duplicateProject = projects.some(
+        (project) =>
+          getProjectId(project.projectId) !== getProjectId(editingProject?.projectId) &&
+          project.projectName.trim().toLocaleLowerCase() === projectName.toLocaleLowerCase()
+      );
+      if (duplicateProject) {
+        message.warning(intl.formatMessage({ id: 'projectSpace.message.projectNameDuplicate' }));
+        return '';
+      }
+
       setEditLoading(true);
       try {
-        await updateProject({
-          projectId: Number(editingProject.projectId),
-          projectName: values.projectName.trim(),
-          description: values.description?.trim(),
-          projectType: values.projectType,
-          isShare: values.sharedFlag ? 'Y' : 'N',
-          shareTargets: [],
-          resources: values.resources || [],
-        });
-        await saveProjectResources({
-          projectId: Number(editingProject.projectId),
-          resources: values.resources || [],
-        });
-        // 编辑项目沿用新建表单的成员和研发默认员工配置，
-        // 避免页面级入口只更新基本信息。
-        // 共享开关关闭时也要提交空成员集合，及时清理旧授权；开启时保存当前最终成员列表。
+        const sharedFlag =
+          values.projectType === 'default'
+            ? false
+            : values.projectType === 'develop' || values.projectType === 'operation' || values.sharedFlag;
+        const resources = values.resources || [];
+        let savedProjectId = getProjectId(editingProject?.projectId);
+
+        if (editingProject?.projectId) {
+          await updateProject({
+            projectId: Number(editingProject.projectId),
+            projectName,
+            description: values.description?.trim(),
+            projectType: values.projectType,
+            isShare: sharedFlag ? 'Y' : 'N',
+            shareTargets: [],
+            resources,
+          });
+          await saveProjectResources({
+            projectId: Number(editingProject.projectId),
+            resources,
+          });
+        } else {
+          const response = await createProject(
+            {
+              projectName,
+              description: values.description?.trim(),
+              projectType: values.projectType,
+              isShare: sharedFlag ? 'Y' : 'N',
+              shareTargets: [],
+              resources,
+            },
+            { responseCfg: { hideErrorTips: true } }
+          );
+          savedProjectId = getProjectIdFromSaveResponse(response);
+          if (!savedProjectId) throw new Error(intl.formatMessage({ id: 'projectSpace.message.createFailed' }));
+        }
+
         await saveProjectMembers({
-          projectId: Number(editingProject.projectId),
-          userIds: values.sharedFlag
+          projectId: Number(savedProjectId),
+          userIds: sharedFlag
             ? (values.shareMembers || [])
               .map((member) => member.userId)
               .filter((userId): userId is string | number => Boolean(userId))
             : [],
         });
         if (values.projectType === 'develop' && values.defaultAgents) {
-          await saveDefaultAgent({ ...values.defaultAgents, projectId: Number(editingProject.projectId) });
+          await saveDefaultAgent({ ...values.defaultAgents, projectId: Number(savedProjectId) });
         }
-        message.success(intl.formatMessage({ id: 'projectSpace.message.updateSuccess' }));
+
+        message.success(
+          intl.formatMessage({
+            id: editingProject ? 'projectSpace.message.updateSuccess' : 'projectSpace.message.createSuccess',
+          })
+        );
         setEditModalOpen(false);
-        await fetchProjects();
-        await refreshProject();
+        setEditingProject(undefined);
+        const refreshedProjects = await fetchProjects();
+        if (!editingProject && savedProjectId) {
+          const createdProject = refreshedProjects.find(
+            (project) => getProjectId(project.projectId) === savedProjectId
+          );
+          setSelectedProjectId(getProjectId(createdProject?.projectId || savedProjectId));
+        } else {
+          await refreshProject();
+        }
         EventEmitter.emit('projectSpace-list-refresh');
+        return savedProjectId;
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'projectSpace.message.updateFailed' }));
+        message.error(
+          error?.message ||
+            intl.formatMessage({
+              id: editingProject ? 'projectSpace.message.updateFailed' : 'projectSpace.message.createFailed',
+            })
+        );
+        return '';
       } finally {
         setEditLoading(false);
       }
     },
-    [EventEmitter, editLoading, editingProject?.projectId, fetchProjects, intl, refreshProject]
+    [EventEmitter, editLoading, editingProject, fetchProjects, intl, projects, refreshProject, setSelectedProjectId]
   );
+
+  const handleOpenRenameProject = useCallback((project: ProjectSpace) => {
+    setRenameProject(project);
+    setRenameValue(project.projectName || '');
+  }, []);
+
+  const handleRenameProject = useCallback(async () => {
+    if (!renameProject?.projectId || renameLoading) return;
+    const projectName = renameValue.trim();
+    if (!projectName) {
+      message.warning(intl.formatMessage({ id: 'projectSpace.message.projectNameRequired' }));
+      return;
+    }
+    const duplicateProject = projects.some(
+      (project) =>
+        getProjectId(project.projectId) !== getProjectId(renameProject.projectId) &&
+        project.projectName.trim().toLocaleLowerCase() === projectName.toLocaleLowerCase()
+    );
+    if (duplicateProject) {
+      message.warning(intl.formatMessage({ id: 'projectSpace.message.projectNameDuplicate' }));
+      return;
+    }
+
+    setRenameLoading(true);
+    try {
+      await updateProject({ projectId: Number(renameProject.projectId), projectName });
+      message.success(intl.formatMessage({ id: 'projectSpace.message.updateSuccess' }));
+      setRenameProject(undefined);
+      await fetchProjects();
+      if (getProjectId(activeProject?.projectId) === getProjectId(renameProject.projectId)) {
+        await refreshProject();
+      }
+      EventEmitter.emit('projectSpace-list-refresh');
+    } catch (error: any) {
+      message.error(error?.message || intl.formatMessage({ id: 'projectSpace.message.updateFailed' }));
+    } finally {
+      setRenameLoading(false);
+    }
+  }, [
+    EventEmitter,
+    activeProject?.projectId,
+    fetchProjects,
+    intl,
+    projects,
+    refreshProject,
+    renameLoading,
+    renameProject,
+    renameValue,
+  ]);
 
   const handleDeleteProject = useCallback(
     (project: ProjectSpace) => {
@@ -224,12 +379,182 @@ const ProjectSpacePage: React.FC = () => {
     [EventEmitter, fetchProjects, intl, setSelectedProjectId]
   );
 
+  const handleProjectCardClick = useCallback(
+    (project: ProjectSpace) => {
+      const projectId = getProjectId(project.projectId);
+      if (!projectId) return;
+      setSelectedProjectId(projectId);
+      EventEmitter.emit('projectSpace-active-project-change', {
+        projectId,
+        projectName: project.projectName,
+      });
+      setShowProjectList(false);
+    },
+    [EventEmitter, setSelectedProjectId]
+  );
+
+  const handleWizardFinish = useCallback(
+    (projectId: string) => {
+      setWizardOpen(false);
+      setSelectedProjectId(projectId);
+      setShowProjectList(false);
+    },
+    [setSelectedProjectId]
+  );
+
+  const handleWizardEnterArchitectChat = useCallback(
+    (projectId: string, target?: ArchitectChatTarget) => {
+      const project = projects.find((item) => getProjectId(item.projectId) === projectId);
+      setWizardOpen(false);
+      if (target?.agentId && target.agentName) {
+        setAgentCache(
+          getElementData(ResourceType.digitalEmployee, {
+            agentId: target.agentId,
+            name: target.agentName,
+            agentType: agentTypeMap.agent,
+          })
+        );
+      }
+      setAgentId?.(target?.agentId || '');
+      setSessionId?.(target?.sessionId || '');
+      navigate('/chat', {
+        state: {
+          keepSiderActiveKey: 'sessions',
+          from: 'projectSpace',
+          projectId,
+          projectName: project?.projectName,
+          sessionId: target?.sessionId,
+          selectedAgentId: target?.agentId,
+          selectedAgentObjectType: target?.agentId ? 'DigEmployee' : undefined,
+        },
+      });
+    },
+    [navigate, projects, setAgentId, setSessionId]
+  );
+
+  const renderProjectCards = () => {
+    return (
+      <div className={styles.projectListPage}>
+        <div className={styles.projectHero}>
+          <div className={styles.projectHeroContent}>
+            <h1>{intl.formatMessage({ id: 'sider.projectSpace' })}</h1>
+            <p>{intl.formatMessage({ id: 'projectSpace.heroSubtitle' })}</p>
+            <Button className={styles.projectCreateButton} icon={<PlusOutlined />} onClick={handleCreateProject}>
+              {intl.formatMessage({ id: 'projectSpace.createProject' })}
+            </Button>
+          </div>
+          <div className={styles.projectHeroIllustration} aria-hidden="true">
+            <img src={`${getPublicPath()}beyond/emptyBg.png`} alt="" />
+          </div>
+        </div>
+        <div className={styles.projectListHeader}>
+          <h2>{intl.formatMessage({ id: 'projectSpace.myProjects' })}</h2>
+          <Input
+            allowClear
+            className={styles.projectSearchInput}
+            prefix={<SearchOutlined />}
+            placeholder={intl.formatMessage({ id: 'projectSpace.projectSearchPlaceholder' })}
+            value={projectKeyword}
+            onChange={(event) => setProjectKeyword(event.target.value)}
+          />
+        </div>
+        {projectsLoading && !projects.length ? (
+          <div className={styles.projectListFeedback}>
+            <Spin />
+          </div>
+        ) : !projects.length ? (
+          <div className={styles.projectListFeedback}>
+            <Empty
+              description={
+                projectKeyword
+                  ? intl.formatMessage({ id: 'projectSpace.projectSearchEmpty' })
+                  : intl.formatMessage({ id: 'projectSpace.selectProject' })
+              }
+            />
+          </div>
+        ) : (
+          <div className={styles.projectCardGrid}>
+            {projects.map((project) => {
+              const canManageCard = isProjectCreator(project, userInfo);
+              const createTime = formatProjectCreateTime(project.createTime);
+              return (
+                <div
+                  key={getProjectId(project.projectId)}
+                  className={styles.projectListCard}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleProjectCardClick(project)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      handleProjectCardClick(project);
+                    }
+                  }}
+                >
+                  <span className={styles.projectCardIcon}>
+                    <ShareAltOutlined />
+                  </span>
+                  <span className={styles.projectCardBody}>
+                    <strong>{project.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' })}</strong>
+                    <small>
+                      {createTime
+                        ? intl.formatMessage({ id: 'projectSpace.projectCard.createdAt' }, { time: createTime })
+                        : project.description ||
+                          intl.formatMessage({ id: 'projectSpace.projectCard.emptyDescription' })}
+                    </small>
+                  </span>
+                  {canManageCard && (
+                    <Dropdown
+                      trigger={['click']}
+                      menu={{
+                        items: [
+                          {
+                            key: 'rename',
+                            icon: <EditOutlined />,
+                            label: intl.formatMessage({ id: 'common.rename' }),
+                          },
+                          ...(project.projectType === 'default'
+                            ? []
+                            : [
+                              {
+                                key: 'delete',
+                                icon: <DeleteOutlined />,
+                                label: intl.formatMessage({ id: 'common.delete' }),
+                                danger: true,
+                              },
+                            ]),
+                        ],
+                        onClick: ({ key, domEvent }) => {
+                          domEvent.stopPropagation();
+                          if (key === 'rename') handleOpenRenameProject(project);
+                          if (key === 'delete') handleDeleteProject(project);
+                        },
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className={styles.projectCardMore}
+                        aria-label={intl.formatMessage({ id: 'common.more' })}
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => event.stopPropagation()}
+                      >
+                        <MoreOutlined />
+                      </button>
+                    </Dropdown>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <main className={styles.page}>
-      {projectsLoading && !projects.length ? (
-        <div className={styles.pageLoading}>
-          <Spin />
-        </div>
+      {showProjectList ? (
+        renderProjectCards()
       ) : !activeProject ? (
         <div className={styles.pageEmpty}>
           <Empty description={intl.formatMessage({ id: 'projectSpace.selectProject' })} />
@@ -239,6 +564,7 @@ const ProjectSpacePage: React.FC = () => {
           {/* 详情数据静默更新，由当前 Tab 独立展示 loading，避免打开项目时出现两层加载图标。 */}
           <ProjectDetail
             project={activeProject}
+            onBack={() => setShowProjectList(true)}
             onRefresh={refreshProject}
             onOpenSession={handleOpenSession}
             onNewSession={(target?: ChatWithAgentTarget) => {
@@ -284,9 +610,41 @@ const ProjectSpacePage: React.FC = () => {
         initialValues={getProjectFormInitialValues(editingProject)}
         projectTypeConfigOptions={projectTypeOptions}
         projectTypeLoading={projectTypeLoading}
-        onCancel={() => setEditModalOpen(false)}
-        onSubmit={handleUpdateProject}
+        onCancel={() => {
+          setEditModalOpen(false);
+          setEditingProject(undefined);
+        }}
+        onSubmit={handleSaveProject}
       />
+
+      <ProjectOnboardingWizard
+        open={wizardOpen}
+        projectTypeConfigOptions={projectTypeOptions}
+        projectTypeLoading={projectTypeLoading}
+        onCancel={() => setWizardOpen(false)}
+        onCreateProject={handleSaveProject}
+        onFinish={handleWizardFinish}
+        onEnterArchitectChat={handleWizardEnterArchitectChat}
+      />
+
+      <Modal
+        open={Boolean(renameProject)}
+        title={intl.formatMessage({ id: 'common.rename' })}
+        confirmLoading={renameLoading}
+        okText={intl.formatMessage({ id: 'common.confirm' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
+        onCancel={() => setRenameProject(undefined)}
+        onOk={() => void handleRenameProject()}
+        destroyOnClose
+      >
+        <Input
+          autoFocus
+          maxLength={100}
+          value={renameValue}
+          onChange={(event) => setRenameValue(event.target.value)}
+          onPressEnter={() => void handleRenameProject()}
+        />
+      </Modal>
     </main>
   );
 };

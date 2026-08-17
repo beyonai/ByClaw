@@ -12,6 +12,37 @@
   }
 }
 
+.taskTemplateTools {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.projectSelect {
+  width: 190px;
+
+  :global(.@{antPrefix}-select-selector) {
+    height: 32px !important;
+    display: flex;
+    align-items: center;
+  }
+
+  :global(.@{antPrefix}-select-selection-item),
+  :global(.@{antPrefix}-select-item-option-selected) {
+    font-weight: 400;
+  }
+}
+
+.projectSelectDivider {
+  margin: 6px 0;
+}
+
+.createProjectButton {
+  width: 100%;
+  justify-content: flex-start;
+  padding-inline: 10px;
+}
+
 .projectLoading {
   min-height: 180px;
   display: grid;

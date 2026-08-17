@@ -1,7 +1,8 @@
 import { Alert, Button, Dropdown, Input, Modal, Segmented, Tag, Typography, message } from 'antd';
 import {
+  ArrowLeftOutlined,
   LoadingOutlined,
-  MoreOutlined,
+  EllipsisOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -40,6 +41,7 @@ import styles from '../../index.module.less';
 
 interface Props {
   project?: ProjectSpace;
+  onBack: () => void;
   onRefresh?: () => void;
   onOpenSession?: (session: ProjectSession) => void;
   // 员工信息可选:工具栏按钮不带,数字员工卡的「去聊天」带上它以预置 @ 该员工。
@@ -52,6 +54,7 @@ interface Props {
 // 项目主菜单使用独立详情页；会话侧栏仍由 ProjectDetailModal 维护，两者不共享详情布局和状态。
 const ProjectDetail: React.FC<Props> = ({
   project,
+  onBack,
   onRefresh,
   onOpenSession,
   onNewSession,
@@ -426,6 +429,9 @@ const ProjectDetail: React.FC<Props> = ({
       <div className={styles.detailHeader}>
         <div className={styles.detailHeading}>
           <div className={styles.detailTitleRow}>
+            <Button type="text" className={styles.detailBackButton} icon={<ArrowLeftOutlined />} onClick={onBack}>
+              {intl.formatMessage({ id: 'projectSpace.backToList' })}
+            </Button>
             <Typography.Title level={3} ellipsis={{ tooltip: project.projectName }}>
               {project.projectName}
             </Typography.Title>
@@ -465,7 +471,7 @@ const ProjectDetail: React.FC<Props> = ({
                 <Button
                   type="text"
                   className={styles.detailProjectMoreButton}
-                  icon={<MoreOutlined />}
+                  icon={<EllipsisOutlined />}
                   aria-label={intl.formatMessage({ id: 'common.more' })}
                 />
               </Dropdown>
