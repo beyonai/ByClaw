@@ -490,3 +490,22 @@ SET target_content = json_build_object(
 FROM byai.ss_resource r
 WHERE e.resource_id = r.resource_id
   AND r.resource_code = 'agent-reach';
+
+delete from byai.byai_ai_prompt where prompt_group_code in('SUMMARY_CHAT_CONTENT') and prompt_code in('SUMMARY_CHAT_CONTENT');
+INSERT INTO byai.byai_ai_prompt (prompt_id, prompt_group_code, prompt_code, prompt_name, prompt_desc, prompt_filed_code, prompt_zh_template, prompt_en_template, create_by, create_time, update_time, model_code) VALUES (nextval('byai.seq_any_table'), 'SUMMARY_CHAT_CONTENT', 'SUMMARY_CHAT_CONTENT', '会话总结提示词', '会话总结提示词模板，占位符 ${chatContent}', 'chatContent', '基于下面用户输入内容生成会话标题
+用户输入原文：${chatContent}
+要求：
+1. 标题长度2-30字，直观体现本次会话核心主题
+2. 提炼核心需求、问题或讨论对象，避免空话
+3. 禁止加多余说明、序号、引号、表情，只输出标题文本
+4. 优先名词+动作结构，适合作为聊天会话列表标题
+5. 【强制】禁止输出标签、禁止输出任何内部思考/推理过程，只返回最终标题
+', 'Generate a conversation title based on the user input below
+Original user input: ${chatContent}
+Requirements:
+1. The title should be 2–30 characters long and directly reflect the core topic of this conversation
+2. Extract the core requirement, question or discussion subject; avoid vague content
+3. No extra explanations, serial numbers, quotation marks or emojis. Output only the title text
+4. Prefer noun + verb structure, suitable for chat conversation list titles
+5. [Mandatory] Do not output tags, internal thinking or reasoning. Return only the final title', 10001, '2026-08-07 11:15:33', '2026-08-07 11:15:33', null);
+
