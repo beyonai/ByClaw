@@ -270,6 +270,7 @@
                a.update_time,
                a.state,
                a.project_id,
+               b.project_name,
                r.avatar
         <choose>
             <when test="digitalEmployeeSearch">
