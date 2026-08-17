@@ -1,8 +1,13 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.superassist.SuasSuperassistApplicationService;
+import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
+import com.iwhalecloud.byai.manager.domain.aimodel.service.AiPromptService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.entity.aimodel.AiPrompt;
 import jakarta.servlet.ServletOutputStream;
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
@@ -16,6 +21,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.security.SecureRandom;
 import java.util.concurrent.TimeUnit;
+
 import com.iwhalecloud.byai.manager.entity.men.MenResCom;
 import com.iwhalecloud.byai.manager.entity.men.MenTask;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -119,12 +125,20 @@ public class AssistantChatService {
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
+
+    @Autowired
+    private AIService aiService;
+
+    @Autowired
+    private AiPromptService aiPromptService;
+
+
     /**
      * 对话处理方法（带首词响应开始时间）
      *
      * @param assistantChatDto 对话请求参数
-     * @param outputStream 输出流
-     * @param userInfo 用户信息
+     * @param outputStream     输出流
+     * @param userInfo         用户信息
      * @throws IOException IO异常
      */
     @WithSpan(value = "chat", inheritContext = false)
@@ -173,14 +187,11 @@ public class AssistantChatService {
             // 执行聊天处理：Gateway 模式下 handleGatewayMode() 内部阻塞等待 Redis 监听器完成，
             // 返回后即可安全执行 storeMessage/afterProcess，最终由 finally 关闭流
             executeChat(assistantChatDto, outputStream, firstTextStartTime);
-        }
-        catch (BdpRuntimeException e) {
+        } catch (BdpRuntimeException e) {
             handleBdpRuntimeException(e, assistantChatDto, outputStream);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             handleGeneralException(e, outputStream);
-        }
-        finally {
+        } finally {
             cleanupResources(userInfo, outputStream);
         }
     }
@@ -189,7 +200,7 @@ public class AssistantChatService {
      * 处理固化记
      *
      * @param assistantChatDto 会话入参
-     * @param outputStream 注
+     * @param outputStream     注
      */
     private void handleFixMemory(AssistantChatDto assistantChatDto, OutputStream outputStream) {
 
@@ -339,8 +350,8 @@ public class AssistantChatService {
      * 保存数据库任务
      *
      * @param assistantChatDto 助手聊天信息
-     * @param newTaskId 新建任务标识
-     * @param newResComId 新建卡片标识
+     * @param newTaskId        新建任务标识
+     * @param newResComId      新建卡片标识
      * @return MessageTaskDto
      */
     private MessageTaskDto saveMessageTask(AssistantChatDto assistantChatDto, Long newTaskId, Long newResComId) {
@@ -429,8 +440,7 @@ public class AssistantChatService {
 
             assistantChatDto.setSourceAgentType(targetAgentType);
             redisTemplate.expire(key, CALL_ACP_AGENT_DELEGATION_TTL_SECONDS, TimeUnit.SECONDS);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             // 委派缓存不可用时沿用原有路由，避免缓存异常阻断正常聊天。
             logger.warn("读取 call_acp_agent 委派记录失败, key: {}", key, e);
         }
@@ -447,7 +457,7 @@ public class AssistantChatService {
      * 处理BdpRuntimeException异常
      */
     private void handleBdpRuntimeException(BdpRuntimeException e, AssistantChatDto assistantChatDto,
-        OutputStream outputStream) {
+                                           OutputStream outputStream) {
         logger.error(e.toString(), e);
 
         // 特殊处理用户被移除群聊的情况
@@ -485,8 +495,7 @@ public class AssistantChatService {
         if (outputStream instanceof ServletOutputStream) {
             try {
                 outputStream.close();
-            }
-            catch (IOException e) {
+            } catch (IOException e) {
                 logger.error("Failed to close output stream", e);
             }
         }
@@ -505,8 +514,7 @@ public class AssistantChatService {
             SessionMembersDto membersDto = createGroupChatSession(assistantChatDto);
             CompletionsUtils.responseWrite(outputStream, SseResponseEventEnum.createSession,
                 JSON.toJSONString(membersDto));
-        }
-        else {
+        } else {
             // sessionId不为空时，检查当前用户是否在群成员列表中
             checkUserMembershipInGroup(assistantChatDto.getSessionId(), currentUserId, assistantChatDto);
             ByaiSession updatedSession = sessionTitleService.resolveInitialTitle(assistantChatDto.getSessionId(),
@@ -554,9 +562,7 @@ public class AssistantChatService {
         sessionMembersDto.setObjectId(assistantChatDto.getAgentId());
 
         String chatContent = assistantChatDto.getChatContent();
-        sessionMembersDto
-            // 任务启动链路只需要截断会话标题，使用已有通用工具避免引入聊天基础设施类加载依赖。
-            .setSessionName(StringUtils.substring(chatContent.replaceAll("\\{\\{[^}]*+\\}\\}", ""), 0, 10));
+        sessionMembersDto.setSessionName(this.summaryChatContent(chatContent));
         sessionMembersDto.setCreatorId(CurrentUserHolder.getCurrentUserId());
         sessionMembersDto.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
         sessionMembersDto.setSessionType(SessionType.H_AS.getCode());
@@ -592,10 +598,43 @@ public class AssistantChatService {
     }
 
     /**
+     * 总结会话内容，如果有异常，原来格式截取返回
+     *
+     * @param chatContent 会话内容
+     * @return 会话内容总结
+     */
+    private String summaryChatContent(String chatContent) {
+
+        AiPrompt aiPrompt = aiPromptService.findFirst("SUMMARY_CHAT_CONTENT");
+        if (aiPrompt == null) {
+            // 任务启动链路只需要截断会话标题，使用已有通用工具避免引入聊天基础设施类加载依赖。
+            return StringUtils.substring(chatContent.replaceAll("\\{\\{[^}]*+\\}\\}", ""), 0, 10);
+        }
+
+        String promptTemplate = aiPrompt.getPromptZhTemplate();
+
+
+        String language = CurrentUserHolder.getLanguage();
+        if (I18nUtil.ENGLISH.equalsIgnoreCase(language)) {
+            promptTemplate = aiPrompt.getPromptEnTemplate();
+        }
+
+        // 生成提示描述信息
+        String prompt = promptTemplate.replace("${chatContent}", chatContent);
+        try {
+            return aiService.generateText(prompt, aiPrompt.getModelCode());
+        } catch (Exception e) {
+            logger.error(e.getMessage(), e);
+            // 兜底策略
+            return StringUtils.substring(chatContent.replaceAll("\\{\\{[^}]*+\\}\\}", ""), 0, 10);
+        }
+    }
+
+    /**
      * 创建数字助理的成员对象
      *
      * @param sessionId 会话ID
-     * @param agentId 数字助理ID
+     * @param agentId   数字助理ID
      * @return SessionMemberDto
      */
     private ByaiSessionMember createAgentMember(Long sessionId, Long agentId) {
@@ -626,8 +665,8 @@ public class AssistantChatService {
     /**
      * 检查用户是否在群成员列表中 增强版本：先判断sessionType，只有群聊类型(hs_as)才需要检查群成员关系
      *
-     * @param sessionId 会话ID
-     * @param userId 用户ID
+     * @param sessionId        会话ID
+     * @param userId           用户ID
      * @param assistantChatDto 对话请求参数，可能包含sessionType
      */
     private void checkUserMembershipInGroup(Long sessionId, Long userId, AssistantChatDto assistantChatDto) {
@@ -639,8 +678,7 @@ public class AssistantChatService {
             if (StringUtils.isBlank(sessionType)) {
                 logger.debug("请求参数中没有sessionType，通过feign调用获取 - sessionId: {}", sessionId);
                 sessionType = getSessionType(sessionId);
-            }
-            else {
+            } else {
                 logger.debug("使用请求参数中的sessionType: {} - sessionId: {}", sessionType, sessionId);
             }
 
@@ -663,12 +701,10 @@ public class AssistantChatService {
 
             logger.debug("用户 {} 在会话 {} 中的群成员检查通过", userId, sessionId);
 
-        }
-        catch (BdpRuntimeException e) {
+        } catch (BdpRuntimeException e) {
             logger.error("检查用户群成员关系失败 - sessionId: {}, userId: {}", sessionId, userId, e);
             throw e;
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error("检查用户群成员关系失败 - sessionId: {}, userId: {}", sessionId, userId, e);
             throw new BdpRuntimeException(I18nUtil.get("chat.check.group.member.failed"), e);
         }
@@ -696,8 +732,8 @@ public class AssistantChatService {
      * 处理用户被移除群聊的逻辑 通过输出流返回友好提示信息
      *
      * @param outputStream 输出流
-     * @param sessionId 会话ID
-     * @param userId 用户ID
+     * @param sessionId    会话ID
+     * @param userId       用户ID
      */
     private void handleUserRemovedFromGroup(OutputStream outputStream, Long sessionId, Long userId) {
         try {
@@ -711,8 +747,7 @@ public class AssistantChatService {
 
             logger.info("已向用户 {} 发送群聊权限提示信息", userId);
 
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error("发送用户群聊权限提示失败 - sessionId: {}, userId: {}", sessionId, userId, e);
         }
     }
@@ -726,8 +761,7 @@ public class AssistantChatService {
             // 转换为无符号 32 位整数（0 ~ 2^32-1）
             long unsigned = randomInt & 0xFFFFFFFFL;
             return Long.toString(unsigned);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             // 降级方案：时间戳反转取前 10 位
             String timestamp = Long.toString(System.currentTimeMillis());
             String reversed = new StringBuilder(timestamp).reverse().toString();

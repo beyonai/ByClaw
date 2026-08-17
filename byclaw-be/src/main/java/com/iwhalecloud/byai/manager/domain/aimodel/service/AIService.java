@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.feign.response.knowledge.ModelDto;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -76,12 +77,16 @@ public class AIService {
         return generateText(systemPrompt, userPrompt, model, null, maxTokens, false).content();
     }
 
-    /** Requests OpenAI-compatible JSON-object output for callers that require machine-readable results. */
+    /**
+     * Requests OpenAI-compatible JSON-object output for callers that require machine-readable results.
+     */
     public String generateJsonObject(String systemPrompt, String userPrompt, ModelDto model, int maxTokens) {
         return generateJsonObjectWithMetadata(systemPrompt, userPrompt, model, maxTokens).content();
     }
 
-    /** Requests a JSON object and preserves the upstream completion reason for operational diagnostics. */
+    /**
+     * Requests a JSON object and preserves the upstream completion reason for operational diagnostics.
+     */
     public GeneratedText generateJsonObjectWithMetadata(String systemPrompt, String userPrompt, ModelDto model, int maxTokens) {
         return generateText(systemPrompt, userPrompt, model, null, maxTokens, true);
     }
@@ -134,8 +139,7 @@ public class AIService {
             if (jsonObject) {
                 requestBody.put("response_format", Map.of("type", "json_object"));
                 requestBody.putAll(jsonPolicy.requestParams());
-            }
-            else {
+            } else {
                 applyThinkingParams(requestBody, defaultModel);
             }
 
@@ -165,14 +169,13 @@ public class AIService {
                 }
             }
             throw new BaseException(I18nUtil.get("ai.openai.api.request.failed", response.getStatusCode()));
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             throw new BaseException(I18nUtil.get("ai.openai.api.call.failed", e.getMessage()), e);
         }
     }
 
     public String generateTextStream(String systemPrompt, String userPrompt, String modelCode, int maxTokens,
-        TextChunkHandler chunkHandler) {
+                                     TextChunkHandler chunkHandler) {
         ModelDto defaultModel = getDefaultModel();
         String apiUrl = defaultModel.getUrl() + "/chat/completions";
         String apiKey = defaultModel.getAuthToken();
@@ -263,12 +266,10 @@ public class AIService {
                 throw new BaseException(I18nUtil.get("ai.openai.api.call.failed", error.getMessage()), error);
             }
             return fullContent.toString();
-        }
-        catch (InterruptedException e) {
+        } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new BaseException(I18nUtil.get("ai.openai.api.call.failed", e.getMessage()), e);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             throw new BaseException(I18nUtil.get("ai.openai.api.call.failed", e.getMessage()), e);
         }
     }
@@ -399,7 +400,7 @@ public class AIService {
     }
 
     private boolean isProviderOrUnambiguousModel(String provider, String model, String providerToken,
-        String modelToken) {
+                                                 String modelToken) {
         return provider.contains(providerToken) || model.contains(modelToken);
     }
 
@@ -505,8 +506,7 @@ public class AIService {
             case "anthropic":
                 if ("adaptive".equals(defaultLevel)) {
                     requestBody.put("thinking", Map.of("type", "adaptive", "display", "summarized"));
-                }
-                else {
+                } else {
                     Object budget = getThinkingBudget(reasoningConfig, defaultLevel);
                     requestBody.put("thinking",
                         budget instanceof Number ? Map.of("type", "enabled", "budget_tokens", budget)
@@ -543,7 +543,7 @@ public class AIService {
 
     @SuppressWarnings("unchecked")
     private void putThinkingBudget(Map<String, Object> requestBody, Map<String, Object> reasoningConfig,
-        String defaultLevel) {
+                                   String defaultLevel) {
         Object rawBudgets = reasoningConfig.get("budgets");
         if (!(rawBudgets instanceof Map)) {
             return;

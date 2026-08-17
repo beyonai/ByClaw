@@ -1,10 +1,12 @@
 package com.iwhalecloud.byai.manager.domain.aimodel.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.manager.entity.aimodel.AiPrompt;
 import com.iwhalecloud.byai.manager.mapper.aimodel.AiPromptMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+
 import java.util.List;
 
 /**
@@ -30,6 +32,18 @@ public class AiPromptService {
         queryWrapper.eq(AiPrompt::getPromptGroupCode, promptGroupCode);
         return aiPromptMapper.selectList(queryWrapper);
     }
+
+    /**
+     * 根据提示词分组查询提示词列表,只查询第一条
+     *
+     * @param promptGroupCode 提示词分组编码
+     * @return 提示词列表
+     */
+    public AiPrompt findFirst(String promptGroupCode) {
+        List<AiPrompt> promptGroupCodes = this.findPromptGroupCode(promptGroupCode);
+        return ListUtil.isNotEmpty(promptGroupCodes) ? promptGroupCodes.getFirst() : null;
+    }
+
 
     /**
      * 按 prompt_code 取提示词模板：language 传 "en" 取英文模板，其余(含 null/空)默认中文。

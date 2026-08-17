@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.common.login.auth;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -381,5 +382,16 @@ public final class CurrentUserHolder {
         LoginInfo loginInfo = getLoginInfo();
         return loginInfo == null ? null : loginInfo.getDefaultDigEmployeeId();
     }
+
+    /**
+     * 获取当前会话的语言
+     *
+     * @return String
+     */
+    public static String getLanguage() {
+        LoginInfo loginInfo = getLoginInfo();
+        return loginInfo == null ? null : loginInfo.getLanguage();
+    }
+
 
 }
