@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.route;
 
+import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -88,6 +89,9 @@ public class RouteService {
 
     @Autowired
     private A2aRouteService a2aRouteService;
+
+    @Autowired
+    private ProjectApplicationService projectApplicationService;
 
     /**
      * 判断是否为接口集成类型
@@ -614,6 +618,12 @@ public class RouteService {
         Map<String, String> channelExtension = chatDto.getChannelExtension();
         if (channelExtension != null && !channelExtension.isEmpty()) {
             metadata.put("channelExtension", channelExtension);
+        }
+        if (chatDto.getProjectId() != null) {
+            JSONObject projectInfo = new JSONObject();
+            projectInfo.put("project_id", chatDto.getProjectId());
+            projectInfo.put("workspace", projectApplicationService.getProjectWorkspacePath(chatDto.getProjectId()));
+            metadata.put("project_info", projectInfo);
         }
 
         List<MessageFileDto> files = chatDto.getFiles();

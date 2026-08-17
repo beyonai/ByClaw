@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.project;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -11,6 +12,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -51,6 +53,9 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 public class ProjectInitService {
 
+    @Value("${file.storage.local.path}")
+    private String fileStorageLocalPath;
+
     @Autowired
     private GitWorkspaceConfig gitWorkspaceConfig;
 
@@ -83,6 +88,23 @@ public class ProjectInitService {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    /**
+     * 初始化项目工作目录。
+     *
+     * @param projectId 项目 ID
+     * @return 项目工作目录
+     */
+    public Path initProjectWorkspace(Long projectId) {
+        Path projectWorkspace = Paths.get(fileStorageLocalPath, "projects", String.valueOf(projectId));
+        try {
+            Files.createDirectories(projectWorkspace);
+            return projectWorkspace;
+        }
+        catch (IOException e) {
+            throw new IllegalStateException("Failed to create project workspace: " + projectWorkspace, e);
+        }
+    }
 
     /**
      * 同步初始化（原有方法，保持向后兼容）
@@ -569,8 +591,8 @@ public class ProjectInitService {
     /**
      * 构建 workspace 仓库的本地路径
      *
-     * 路径规则：{git.workspace.root}/project_{projectId}/{workspace_repo_name}
-     * 示例：/data/git-repos/project_11038149/ByClaw-Workspace
+     * 路径规则：{file.storage.local.path}/projects/{projectId}/repos/{workspace_repo_name}
+     * 示例：/data/projects/11038149/repos/ByClaw-Workspace
      *
      * @param repo ProjectRepo 实体（workspace 类型仓库）
      * @return 本地仓库路径
@@ -580,10 +602,13 @@ public class ProjectInitService {
         // 1. 提取仓库名称（repoFullName 的最后一部分）
         String repoName = extractRepoName(repo);
 
-        // 2. 构建路径：{root}/project_{projectId}/{repoName}
-        Path root = Paths.get(gitWorkspaceConfig.getRoot()).toAbsolutePath().normalize();
-        String projectDir = "project_" + repo.getProjectId();
-        return root.resolve(projectDir).resolve(repoName).normalize();
+        // Git 根目录按项目隔离，避免不同项目的工作区仓库互相覆盖。
+        Path root = Paths.get(gitWorkspaceConfig.getRoot(repo.getProjectId())).toAbsolutePath().normalize();
+        Path repositoryPath = root.resolve(repoName).normalize();
+        if (!root.equals(repositoryPath.getParent())) {
+            throw new BaseException(50400, "Invalid repository name: " + repoName);
+        }
+        return repositoryPath;
     }
 
     /**

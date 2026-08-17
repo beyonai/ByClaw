@@ -19,6 +19,7 @@ import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService;
+import com.iwhalecloud.byai.manager.application.service.project.ProjectInitService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
@@ -66,6 +67,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.util.UriComponentsBuilder;
 import java.io.InputStream;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
@@ -145,6 +147,9 @@ public class ProjectApplicationService {
     @Autowired
     private UserBucketNamingService userBucketNamingService;
 
+    @Autowired
+    private ProjectInitService projectInitService;
+
     /**
      * 分页查询用户可见项目
      *
@@ -199,7 +204,20 @@ public class ProjectApplicationService {
         projectMemberService.addMember(project.getProjectId(), CurrentUserHolder.getCurrentUserId(),
             MemberRole.OWNER);
 
+        // 工作目录属于项目创建结果的一部分，初始化失败时由事务回滚项目数据库记录。
+        projectInitService.initProjectWorkspace(project.getProjectId());
+
         return project;
+    }
+
+    /**
+     * 获取项目工作目录，目录不存在时自动创建。
+     *
+     * @param projectId 项目 ID
+     * @return 项目工作目录
+     */
+    public Path getProjectWorkspacePath(Long projectId) {
+        return projectInitService.initProjectWorkspace(projectId);
     }
 
     private Project requireProject(Long projectId) {
