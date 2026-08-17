@@ -254,4 +254,23 @@ describe('SessionOverviewDrawer', () => {
     const operationHeader = (await screen.findByText('运营采集任务')).closest('.kanbanCardHeader') as HTMLElement;
     expect(operationHeader.querySelector('.kanbanCardTypeTag')).not.toBeInTheDocument();
   });
+
+  // 任务 Tab 的「视图」模式内嵌同一份看板：不能再套 Drawer，否则内容被塞进浮层。
+  it('renders the board without a drawer shell when embedded', async () => {
+    const { container } = render(<SessionOverviewDrawer embedded open projectId={10000811} />);
+
+    expect(await screen.findByText('当天待开始任务')).toBeInTheDocument();
+    expect(container.querySelector('.taskBoardEmbedded')).toBeInTheDocument();
+    expect(document.querySelector('.ant-drawer')).not.toBeInTheDocument();
+    // 内嵌与抽屉共用同一套查询：四个状态列照样各查一次。
+    expect(mockListTasks).toHaveBeenCalledTimes(4);
+  });
+
+  // 内嵌时 open=false 表示父级切回了列表模式，看板要整体消失且不再发请求。
+  it('renders nothing when embedded and closed', () => {
+    const { container } = render(<SessionOverviewDrawer embedded open={false} projectId={10000811} />);
+
+    expect(container.querySelector('.taskBoardEmbedded')).not.toBeInTheDocument();
+    expect(mockListTasks).not.toHaveBeenCalled();
+  });
 });

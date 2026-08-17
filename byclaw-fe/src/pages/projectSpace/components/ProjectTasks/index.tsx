@@ -6,6 +6,7 @@ import {
   Empty,
   Input,
   Modal,
+  Segmented,
   Select,
   Spin,
   Tag,
@@ -13,7 +14,7 @@ import {
   Typography,
   message,
 } from 'antd';
-import { AppstoreOutlined, MoreOutlined, ReloadOutlined } from '@ant-design/icons';
+import { MoreOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
@@ -183,7 +184,11 @@ const ProjectTasks: React.FC<Props> = ({
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [taskBoardOpen, setTaskBoardOpen] = useState(false);
+  // 任务 Tab 两种模式：list 是卡片列表，board 就是原来右上角「任务视图」的看板，默认进看板。
+  // 仅研发/运营项目有看板（看板按四状态分列查询），普通项目只有列表。
+  const [taskViewMode, setTaskViewMode] = useState<'list' | 'board'>(
+    project.projectType === 'develop' || project.projectType === 'operation' ? 'board' : 'list'
+  );
   const requestingRef = useRef(false);
   const taskDetailRequestIdRef = useRef(0);
   const initialLoadKeyRef = useRef<string | null>(null);
@@ -320,15 +325,22 @@ const ProjectTasks: React.FC<Props> = ({
   useEffect(() => {
     onToolbarChange?.(
       <div className={styles.headerActions}>
-        {(project.projectType === 'develop' || project.projectType === 'operation') && (
+        {/* 看板自带一份「只看我的」，两处同时出现会让人以为要一起勾，所以列表模式才显示这个。 */}
+        {taskViewMode === 'list' && (project.projectType === 'develop' || project.projectType === 'operation') && (
           <Checkbox checked={onlyMine} onChange={(event) => setOnlyMine(event.target.checked)}>
             {intl.formatMessage({ id: 'projectSpace.tasks.onlyMine' })}
           </Checkbox>
         )}
         {(project.projectType === 'develop' || project.projectType === 'operation') && (
-          <Button size="small" icon={<AppstoreOutlined />} onClick={() => setTaskBoardOpen(true)}>
-            {intl.formatMessage({ id: 'projectSpace.tasks.taskView' })}
-          </Button>
+          <Segmented
+            size="small"
+            value={taskViewMode}
+            options={[
+              { label: intl.formatMessage({ id: 'projectSpace.tasks.mode.list' }), value: 'list' },
+              { label: intl.formatMessage({ id: 'projectSpace.tasks.mode.board' }), value: 'board' },
+            ]}
+            onChange={(value) => setTaskViewMode(value as 'list' | 'board')}
+          />
         )}
       </div>
     );
@@ -341,7 +353,7 @@ const ProjectTasks: React.FC<Props> = ({
       onToolbarChange?.(null);
       onRefreshToolbarChange?.(null);
     };
-  }, [intl, loadTasks, loading, onRefreshToolbarChange, onToolbarChange, onlyMine, project.projectType]);
+  }, [intl, loadTasks, loading, onRefreshToolbarChange, onToolbarChange, onlyMine, project.projectType, taskViewMode]);
 
   const hasMore = total > tasks.length || (total === 0 && tasks.length === PAGE_SIZE);
   const sentinelRef = useInfiniteScroll(() => {
@@ -505,6 +517,24 @@ const ProjectTasks: React.FC<Props> = ({
       },
     });
   };
+
+  // 看板模式整块替掉列表：它自带筛选、分页和任务详情，列表的 Spin/无限滚动都不参与。
+  if (taskViewMode === 'board') {
+    return (
+      <div className={styles.dataPanel}>
+        <SessionOverviewDrawer
+          embedded
+          open
+          projectId={project.projectId}
+          operationProject={project.projectType === 'operation'}
+          canEnterSession={(task) => Boolean(task.sessionId)}
+          onEnterSession={(task) => {
+            if (task.sessionId) openTaskSession(task);
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className={styles.dataPanel}>
@@ -745,17 +775,6 @@ const ProjectTasks: React.FC<Props> = ({
           </div>
         </div>
       </Modal>
-      <SessionOverviewDrawer
-        open={taskBoardOpen}
-        onClose={() => setTaskBoardOpen(false)}
-        projectId={project.projectId}
-        operationProject={project.projectType === 'operation'}
-        canEnterSession={(task) => Boolean(task.sessionId)}
-        onEnterSession={(task) => {
-          if (task.sessionId) openTaskSession(task);
-          setTaskBoardOpen(false);
-        }}
-      />
       <TaskDetailDrawer
         task={detailTask}
         operationProject={project.projectType === 'operation'}

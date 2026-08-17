@@ -3277,6 +3277,29 @@
   }
 }
 
+// 内嵌进任务 Tab 时没有 Drawer 撑高度，自己占满父容器并接住列的纵向滚动，
+// 否则 kanbanBoard 的 flex:1 会算在 auto 高度上、四列全被压成一行。
+.taskBoardEmbedded {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+// 内嵌模式左右留白由任务 Tab 容器给，看板自己不再补 20px。
+.taskBoardEmbedded .kanbanToolbar,
+.taskBoardEmbedded .kanbanBoard {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.taskBoardEmbedded .kanbanToolbar {
+  border-bottom: 0;
+  padding-top: 0;
+}
+
 .kanbanToolbar {
   display: flex;
   align-items: center;
