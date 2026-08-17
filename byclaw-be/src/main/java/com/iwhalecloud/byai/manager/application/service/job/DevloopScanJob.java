@@ -50,6 +50,8 @@ public class DevloopScanJob {
     /** 运营资料采集与研发渠道共用扫描调度器，但进入独立的运营任务生成链路。 */
     private static final String SOURCE_TYPE_OPERATION_COLLECT = ScanSourceService.OPERATION_SOURCE_TYPE_COLLECT;
 
+    private static final String SOURCE_TYPE_CHAT = ScanSourceService.SOURCE_TYPE_CHAT;
+
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -129,6 +131,10 @@ public class DevloopScanJob {
             case SOURCE_TYPE_OPERATION_COLLECT:
                 // 运营采集到点后生成待执行会话，不进入研发需求的拆分、评分和自动派生链路。
                 devloopApplicationService.executeOperationSourceSchedule(source);
+                return;
+            case SOURCE_TYPE_CHAT:
+                // 定时聊天没有外部数据源，到点直接按存好的 chat 入参发起会话。
+                devloopApplicationService.executeChatSourceSchedule(source);
                 return;
             case SOURCE_TYPE_GITHUB_ISSUE:
                 String pat = patService.getGitHubPat(source.getCreateBy());

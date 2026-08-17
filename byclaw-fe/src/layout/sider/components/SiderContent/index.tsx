@@ -22,6 +22,17 @@ const SkillSiderPanel = () => <ResourceSiderPanel resourceType="SKILL" />;
 
 export const tabItems: any[] = [
   {
+    key: 'automation',
+    // iconfont 现有 452 个字形里没有自动化语义的图标，也没有对应 fill 变体，
+    // 暂借九点连接（节点编排）并让选中态复用同一码，等 iconfont 补正式图标再换。
+    icon: 'icon-a-Nine-points-connectedjiudianlianjie',
+    activeIcon: 'icon-a-Nine-points-connectedjiudianlianjie',
+    label: 'sider.automation',
+    // 自动化是应用级大页面，跨项目展示渠道，不跟随项目作用域，也不需要左侧小面板。
+    navigatePath: '/automation',
+    hideSider: true,
+  },
+  {
     key: 'sessions',
     icon: 'icon-cebianlan-duihuajilu',
     activeIcon: 'icon-huihua-fill',

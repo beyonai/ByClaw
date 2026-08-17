@@ -42,6 +42,8 @@ const CENTER_TAB_KEYS = new Set([
 ]);
 // 资源菜单点击后直接进入全局中心页，不再打开当前数字员工关联的小列表。
 const RESOURCE_CENTER_TAB_KEYS = new Set(['knowledge', 'tool', 'view', 'object', 'ontology', 'skill', 'file']);
+// 独立工作区页面：无论当前在聊天页还是中心页，点击都要切换右侧大页面。
+const WORKSPACE_TAB_KEYS = new Set(['projectSpace', 'automation']);
 
 const SIDER_ACTIVE_TAB_BY_PATH: Partial<Record<string, (typeof tabItems)[number]['key']>> = {
   '/dialogueRecord': 'sessions',
@@ -71,7 +73,9 @@ const Sidebar = () => {
   const { pathname } = location;
   const keepSiderActiveKey = (location.state as { keepSiderActiveKey?: (typeof tabItems)[number]['key'] } | null)
     ?.keepSiderActiveKey;
-  const preserveDetailPanel = Boolean((location.state as { preserveDetailPanel?: boolean } | null)?.preserveDetailPanel);
+  const preserveDetailPanel = Boolean(
+    (location.state as { preserveDetailPanel?: boolean } | null)?.preserveDetailPanel
+  );
 
   const { isSiderCollapsed, setSiderCollapsed } = useAppStore();
   const { EventEmitter } = useGlobal();
@@ -134,8 +138,9 @@ const Sidebar = () => {
         return;
       }
 
-      // 项目是独立工作区，从聊天页点击时也必须切换右侧大页面。
-      if (tab.key === 'projectSpace') {
+      // 项目和自动化都是独立工作区，从聊天页点击时也必须切换右侧大页面；
+      // 它们不属于资源中心，下面两个白名单都不覆盖，必须在此提前导航。
+      if (WORKSPACE_TAB_KEYS.has(tab.key)) {
         if (pathname !== tab.navigatePath) {
           navigate(tab.navigatePath);
         }
@@ -342,9 +347,7 @@ const Sidebar = () => {
           </div>
         </Tooltip>
         <Divider type="horizontal" />
-        <div className={styles.tabsContainer}>
-          {contextTabItems.map(renderTabItem)}
-        </div>
+        <div className={styles.tabsContainer}>{contextTabItems.map(renderTabItem)}</div>
         <Feedback
           userId={userInfo.userId}
           className={classnames(styles.smallIconWrap)}

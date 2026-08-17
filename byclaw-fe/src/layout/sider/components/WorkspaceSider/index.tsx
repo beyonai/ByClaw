@@ -12,6 +12,7 @@ import {
   ReloadOutlined,
   RightOutlined,
   RobotOutlined,
+  ThunderboltOutlined,
   ToolOutlined,
 } from '@ant-design/icons';
 // @ts-ignore
@@ -462,6 +463,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   const projectActive = isSameOrChildPath(location.pathname, '/projectSpace');
   const employeeActive =
     isSameOrChildPath(location.pathname, '/digitalEmployees') || isSameOrChildPath(location.pathname, '/employees');
+  const automationActive = isSameOrChildPath(location.pathname, '/automation');
 
   const handleNewSession = useCallback(() => {
     clearDetailPanel?.();
@@ -742,6 +744,14 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
         >
           <RobotOutlined className={styles.primaryIcon} />
           <span>{intl.formatMessage({ id: 'workspaceSider.digitalEmployee' })}</span>
+        </button>
+        <button
+          type="button"
+          className={classNames(styles.primaryItem, automationActive && styles.primaryItemActive)}
+          onClick={() => navigate('/automation')}
+        >
+          <ThunderboltOutlined className={styles.primaryIcon} />
+          <span>{intl.formatMessage({ id: 'sider.automation' })}</span>
         </button>
         <div
           ref={resourceMenuRef}

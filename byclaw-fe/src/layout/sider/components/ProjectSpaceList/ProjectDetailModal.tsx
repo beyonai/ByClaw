@@ -3107,11 +3107,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
       setLastLog(null);
     }
     void fetchDetailData().then((initialTasks) => {
-      if (!showRequirementsTab || !Array.isArray(initialTasks) || initialTasks.length > 0) return;
+      // 研发项目已没有需求页签，空任务时不能再自动跳转；运营项目仍保留需求页。
+      if (!isOperationProject || !Array.isArray(initialTasks) || initialTasks.length > 0) return;
       // 仅在用户仍停留在默认任务页签时自动跳转，避免覆盖用户加载期间的主动切换。
       setActiveTab((currentTab) => (currentTab === 'tasks' ? 'requirements' : currentTab));
     });
-  }, [EventEmitter, fetchDetailData, isDevelopProject, showRequirementsTab]);
+  }, [EventEmitter, fetchDetailData, isDevelopProject, isOperationProject]);
 
   useEffect(() => {
     // 切换项目后默认回到共享文件，避免运营项目沿用研发项目的代码变更视图。
@@ -3232,12 +3233,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const tabItems = useMemo(
     () => [
-      // 项目小详情优先展示需求入口，任务和资源依次后置。
-      ...(showRequirementsTab ? [{ key: 'requirements', label: t('tabs.requirements') }] : []),
+      // 研发项目的需求入口已迁到应用级「自动化」页；运营项目的账号面板与运营需求表单仍以需求页为宿主，故保留。
+      ...(isOperationProject ? [{ key: 'requirements', label: t('tabs.requirements') }] : []),
       { key: 'tasks', label: t('tabs.tasks') },
       ...(showMembersTab ? [{ key: 'members', label: t('tabs.members') }] : []),
     ],
-    [showMembersTab, showRequirementsTab, t]
+    [isOperationProject, showMembersTab, t]
   );
 
   const detailPanelTabCountClass = styles[`projectDetailPanelTabCount${tabItems.length}`] || '';
@@ -3256,11 +3257,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
     sourceRepoDefaultedRef.current = false;
     resetSourceForm(type);
     setSourceModalOpen(true);
-  };
-
-  const handleHeaderAdd = () => {
-    if (!showRequirementsTab) return;
-    openAddSourceModal();
   };
 
   const handleRefreshRequirements = useCallback(async () => {
@@ -6959,8 +6955,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   );
 
   const detailActionItems: MenuProps['items'] = [
-    // 运营项目通过“新增需求”维护运营需求，不提供研发扫描渠道入口。
-    ...(showRequirementsTab && !isOperationProject ? [{ key: 'add-source', label: t('source.addTitle') }] : []),
+    // 研发扫描渠道统一由应用级「自动化」页维护，项目详情不再提供重复入口。
     // 运营项目的常用新增入口集中到详情右上角更多菜单，和需求页内入口使用同一套打开逻辑。
     ...(isOperationProject
       ? [
@@ -6983,10 +6978,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
   ];
 
   const handleDetailAction = ({ key }: { key: string }) => {
-    if (key === 'add-source') {
-      handleHeaderAdd();
-      return;
-    }
     if (key === 'add-operation-account') {
       handleOpenOperationAccountPanel(true);
       return;

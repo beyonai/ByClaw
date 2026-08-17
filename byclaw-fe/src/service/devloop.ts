@@ -349,8 +349,9 @@ export const deleteProjectSpaceFile = (data: { projectId: number; fileId: number
   POST<void>('/byaiService/project/share/delete', data);
 
 // 扫描源管理
+// 应用级自动化（chat）不挂项目，projectId 省略即入库为空；渠道类扫描源仍需归属项目。
 export const createScanSource = (data: {
-  projectId: number;
+  projectId?: number;
   sourceName: string;
   sourceType: string;
   config: string;
@@ -373,7 +374,8 @@ export const updateScanSource = (data: {
 
 export const deleteScanSource = (sourceId: number) => POST<any>('/byaiService/devloop/source/delete', { sourceId });
 
-export const listScanSources = (data: { projectId: number; keyword?: string; pageNum?: number; pageSize?: number }) =>
+// 不传 projectId 表示应用级自动化页跨项目查询，后端按条件拼接 where。
+export const listScanSources = (data: { projectId?: number; keyword?: string; pageNum?: number; pageSize?: number }) =>
   POST<any>('/byaiService/devloop/source/list', data);
 
 export const toggleScanSource = (sourceId: number, enabled: string) =>

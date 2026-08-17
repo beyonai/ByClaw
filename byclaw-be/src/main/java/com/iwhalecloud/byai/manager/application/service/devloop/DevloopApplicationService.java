@@ -114,6 +114,7 @@ import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.Executor;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -407,6 +408,7 @@ public class DevloopApplicationService {
         result.setTotalPages((int) sourcePage.getPages());
         List<Map<String, Object>> sourceList = sourcePage.getRecords().stream().map(this::scanSourceToVo)
             .collect(java.util.stream.Collectors.toList());
+        fillProjectNames(sourceList);
         result.setList(sourceList);
         return ResponseUtil.successResponse(result);
     }
@@ -424,10 +426,31 @@ public class DevloopApplicationService {
         map.put("confirmMode", s.getConfirmMode());
         map.put("scoreThreshold", s.getScoreThreshold());
         map.put("lastScanTime", s.getLastScanTime());
+        // 应用级自动化页跨项目展示，必须带项目归属；项目名由列表方法批量补齐，避免逐行查库。
+        map.put("projectId", s.getProjectId());
         // 创建者信息:前端据此判断"当前用户是否创建者",控制授权/编辑/删除入口;createByName 供展示。
         map.put("createBy", s.getCreateBy());
         map.put("createByName", resolveUserName(parseUserId(s.getCreateBy())));
         return map;
+    }
+
+    /**
+     * 给渠道列表批量补项目名称。跨项目查询时同一项目会出现在多行，
+     * 逐行查 projectMapper 会把查询次数放大到行数，这里一次 IN 查询后按 id 归并。
+     */
+    private void fillProjectNames(List<Map<String, Object>> sourceList) {
+        Set<Long> projectIds = sourceList.stream().map(item -> (Long) item.get("projectId")).filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        if (projectIds.isEmpty()) {
+            return;
+        }
+        Map<Long, String> nameById = projectMapper.selectBatchIds(projectIds).stream()
+            .filter(project -> project.getProjectId() != null)
+            .collect(HashMap::new, (map, project) -> map.put(project.getProjectId(), project.getProjectName()),
+                HashMap::putAll);
+        for (Map<String, Object> item : sourceList) {
+            item.put("projectName", nameById.get((Long) item.get("projectId")));
+        }
     }
 
     // ========== 集成测试环境 ==========
@@ -1799,6 +1822,13 @@ public class DevloopApplicationService {
             if (items == null) {
                 return ResponseUtil.failRes(I18nUtil.get("devloop.dingtalk.todo.scan.failed"));
             }
+        }
+        else if (ScanSourceService.SOURCE_TYPE_CHAT.equals(type)) {
+            // 手动触发与定时同一条执行路径；聊天型没有需求条目，createdCount 恒为 0。
+            executeChatSourceSchedule(source);
+            Map<String, Object> chatResult = new HashMap<>();
+            chatResult.put("createdCount", 0);
+            return ResponseUtil.successResponse(chatResult);
         }
         else {
             return ResponseUtil.failRes(I18nUtil.get("devloop.source.type.unsupported", type));
@@ -4472,6 +4502,122 @@ public class DevloopApplicationService {
         }
         return ssResourceMapper.selectOne(
             new LambdaQueryWrapper<SsResource>().eq(SsResource::getResourceCode, resourceCode).last("LIMIT 1"));
+    }
+
+    /**
+     * 定时聊天型自动化到点执行：把 config 里存的 chat 入参还原成 AssistantChatDto 发起一次会话。
+     * 每次触发新建会话（sessionId=null），这样历史轮次互不污染上下文。
+     * 身份用创建者：定时任务线程没有登录上下文，chat 内部要靠 LoginInfo 取权限与用户信息。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void executeChatSourceSchedule(ScanSource source) {
+        if (source == null || !ScanSourceService.SOURCE_TYPE_CHAT.equals(source.getSourceType())) {
+            return;
+        }
+        ChatAutomationConfig chatConfig = parseChatAutomationConfig(source.getConfig());
+        if (chatConfig == null) {
+            log.warn("[ChatAutomation] 自动化 {} 的提示词为空或未 @ 数字员工，跳过本次执行", source.getSourceId());
+            return;
+        }
+        Long creatorId = parseOperationLong(source.getCreateBy());
+        LoginInfo loginInfo = creatorId != null ? loginApplicationService.getLoginInfo(creatorId) : null;
+        if (loginInfo == null) {
+            log.warn("[ChatAutomation] 自动化 {} 无法加载创建者 {} 的登录信息，跳过本次执行", source.getSourceId(), creatorId);
+            return;
+        }
+
+        AssistantChatDto chatDto = buildChatDtoFromConfig(chatConfig, source);
+        assistantChatService.createGroupChatSession(chatDto);
+        // 建会话用简短标题让会话名可读，真正发给模型的是配置里的完整聊天内容。
+        chatDto.setChatContent(chatConfig.chatContent());
+        scanSourceService.updateLastScanTime(source.getSourceId());
+        // 事务提交后再异步 chat：确保异步线程能读到本事务已建的 session。
+        submitTaskChatAfterCommit(chatDto, loginInfo, chatDto.getSessionId());
+        log.info("[ChatAutomation] 已触发定时聊天，sourceId={}, sessionId={}", source.getSourceId(), chatDto.getSessionId());
+    }
+
+    /**
+     * chat 自动化配置：就是 /chat 输入框存下来的东西——提示词原文加 @ 出来的资源清单。
+     * 承接员工不单独存字段，由 resourceList 里最后一次 @ 的数字员工决定，与前端 mention.ts 同一规则。
+     */
+    private record ChatAutomationConfig(String chatContent, List<ResourceVo> resourceList, Long agentId) {
+    }
+
+    /** config 解析失败或缺必填项都返回 null，由调用方记日志跳过，不抛异常打断整轮调度。 */
+    private ChatAutomationConfig parseChatAutomationConfig(String config) {
+        if (StringUtils.isBlank(config)) {
+            return null;
+        }
+        JSONObject json;
+        try {
+            json = JSON.parseObject(config);
+        }
+        catch (Exception exception) {
+            return null;
+        }
+        if (json == null) {
+            return null;
+        }
+        String chatContent = json.getString("chatContent");
+        if (StringUtils.isBlank(chatContent)) {
+            return null;
+        }
+        List<ResourceVo> resourceList = parseChatResourceList(json.getJSONArray("resourceList"));
+        Long agentId = resolveMentionedAgentId(resourceList);
+        // 没 @ 到数字员工就没有承接人，建会话也没人应答，当成无效配置跳过。
+        if (agentId == null) {
+            return null;
+        }
+        return new ChatAutomationConfig(chatContent, resourceList, agentId);
+    }
+
+    /** 单个资源解析失败不能废掉整条提示词，坏项跳过即可；顺序必须保持，@ 命中规则依赖它。 */
+    private List<ResourceVo> parseChatResourceList(JSONArray array) {
+        List<ResourceVo> resourceList = new ArrayList<>();
+        if (array == null) {
+            return resourceList;
+        }
+        for (int index = 0; index < array.size(); index++) {
+            try {
+                ResourceVo resource = array.getObject(index, ResourceVo.class);
+                if (resource != null) {
+                    resourceList.add(resource);
+                }
+            }
+            catch (Exception exception) {
+                log.warn("[ChatAutomation] 忽略无法解析的资源项，index={}", index);
+            }
+        }
+        return resourceList;
+    }
+
+    /** 倒序取第一个数字员工：resourceList 保持输入顺序，最后一次 @ 的员工才是用户想要的承接人。 */
+    private Long resolveMentionedAgentId(List<ResourceVo> resourceList) {
+        for (int index = resourceList.size() - 1; index >= 0; index--) {
+            ResourceVo resource = resourceList.get(index);
+            if (resource == null || AgentMetaEnum.DIG_EMPLOYEE != resource.getResourceType()) {
+                continue;
+            }
+            Long agentId = parseOperationLong(resource.getResourceId());
+            if (agentId != null) {
+                return agentId;
+            }
+        }
+        return null;
+    }
+
+    private AssistantChatDto buildChatDtoFromConfig(ChatAutomationConfig chatConfig, ScanSource source) {
+        AssistantChatDto chatDto = new AssistantChatDto();
+        chatDto.setSessionId(null);
+        chatDto.setAgentId(chatConfig.agentId());
+        chatDto.setProjectId(source.getProjectId());
+        // 会话名取自动化名称，便于在会话列表里对上是哪条自动化触发的。
+        chatDto.setChatContent(StringUtils.defaultIfBlank(source.getSourceName(), chatConfig.chatContent()));
+        chatDto.setAccessTerminal("DevLoop");
+        chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
+        // 资源清单原样带上：提示词里的 @ 引用要跟到模型侧，否则引用形同虚设。
+        chatDto.setResourceList(chatConfig.resourceList());
+        return chatDto;
     }
 
     /**

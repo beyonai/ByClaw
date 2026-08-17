@@ -163,6 +163,11 @@ export default [
             component: './files',
           },
           {
+            path: '/automation',
+            name: 'automation',
+            component: './automation',
+          },
+          {
             path: '/models',
             name: 'models',
             component: './models',

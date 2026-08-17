@@ -92,7 +92,9 @@ public class DevloopController {
      */
     @PostMapping("/source/list")
     public ResponseUtil<PageInfo<Map<String, Object>>> listScanSources(@RequestBody Map<String, Object> params) {
-        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        // 单参 getLongValue 缺省返回 0L，会被下游当成「项目 0」过滤掉全部数据；
+        // 自动化页不传 projectId 表示跨项目查询，必须显式把缺省值给成 null。
+        Long projectId = MapParamUtil.getLongValue(params, "projectId", null);
         String keyword = MapParamUtil.getStringValue(params, "keyword");
         int pageNum = Math.max(1, MapParamUtil.getIntValue(params, "pageNum", 1));
         int pageSize = Math.max(1, MapParamUtil.getIntValue(params, "pageSize", 30));

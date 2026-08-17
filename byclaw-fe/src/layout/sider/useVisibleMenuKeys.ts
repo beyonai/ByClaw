@@ -8,7 +8,7 @@ const defaultVisibleKeys = getVisibleMenuKeysFromConfig(DEFAULT_MENU_CONFIG);
 // 视图/对象入口暂时保留中心页代码但不展示；项目空间已恢复为独立主菜单入口。
 const TEMP_HIDDEN_MENU_KEYS = new Set(['view', 'object']);
 // 新增菜单在旧配置未下发时也要可见。
-const NEW_DEFAULT_VISIBLE_KEYS = ['projectSpace', 'skill', 'file', 'model', 'ontology'];
+const NEW_DEFAULT_VISIBLE_KEYS = ['automation', 'projectSpace', 'skill', 'file', 'model', 'ontology'];
 
 const hideTemporaryMenuKeys = (visibleKeys: string[]) => visibleKeys.filter((key) => !TEMP_HIDDEN_MENU_KEYS.has(key));
 

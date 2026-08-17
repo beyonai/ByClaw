@@ -209,9 +209,12 @@ ALTER TABLE byai.byai_scan_source ALTER COLUMN source_name TYPE VARCHAR(500);
 ALTER TABLE byai.byai_scan_source ADD COLUMN IF NOT EXISTS source_description TEXT;
 ALTER TABLE byai.byai_scan_source ADD COLUMN IF NOT EXISTS assignee BIGINT;
 ALTER TABLE byai.byai_scan_source ADD COLUMN IF NOT EXISTS due_time TIMESTAMP;
+-- chat 型自动化是应用级的，不归属任何项目，所以 project_id 必须允许为空。
+ALTER TABLE byai.byai_scan_source ALTER COLUMN project_id DROP NOT NULL;
 
+COMMENT ON COLUMN byai.byai_scan_source.project_id IS '所属项目ID；应用级自动化(chat)为空';
 COMMENT ON COLUMN byai.byai_scan_source.source_name IS '扫描源或运营需求名称，运营需求最长500字';
-COMMENT ON COLUMN byai.byai_scan_source.source_type IS '类型：研发渠道dingtalk/github_issue/dingtalk_todo/manual；运营需求collect/publish/analyze';
+COMMENT ON COLUMN byai.byai_scan_source.source_type IS '类型：研发渠道dingtalk/github_issue/dingtalk_todo/manual；运营需求collect/publish/analyze；应用级自动化chat';
 COMMENT ON COLUMN byai.byai_scan_source.source_description IS '运营需求描述，研发扫描源为空';
 COMMENT ON COLUMN byai.byai_scan_source.assignee IS '运营需求负责人用户ID，研发扫描源为空';
 COMMENT ON COLUMN byai.byai_scan_source.due_time IS '运营需求计划完成时间，研发扫描源为空';

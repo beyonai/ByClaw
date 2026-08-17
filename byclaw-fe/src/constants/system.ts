@@ -106,9 +106,19 @@ export const DEFAULT_MENU_CONFIG = [
     paramDesc: '模型',
     paramSeq: 11,
   },
+  {
+    paramId: 10001675,
+    paramGroupCode: 'MENU_ICON_SHOW_TAB',
+    paramName: '自动化',
+    paramEnName: 'Automation',
+    paramValue: 'true',
+    paramDesc: '自动化',
+    paramSeq: 12,
+  },
 ];
 
 export const MENU_NAME_TO_KEY_MAP: Record<string, string> = {
+  自动化: 'automation',
   会话: 'sessions',
   项目: 'projectSpace',
   项目空间: 'projectSpace',

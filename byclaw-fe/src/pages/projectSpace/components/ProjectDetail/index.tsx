@@ -6,7 +6,6 @@ import {
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
-  SettingOutlined,
 } from '@ant-design/icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
@@ -28,11 +27,9 @@ import { checkGitHubPat, saveGitHubPat, type DevloopProjectRepo } from '@/servic
 import type { ProjectSession, ProjectSpace } from '../../types';
 import { getArrayData } from '../../utils';
 import ProjectAccounts from '../ProjectAccounts';
-import ManualRequirementModal from '../ManualRequirementModal';
 import ProjectMembers from '../ProjectMembers';
 import ProjectRequirements from '../ProjectRequirements';
 import ProjectResources from '../ProjectResources';
-import ProjectChannelConfig from '../ProjectChannelConfig';
 import ProjectTasks from '../ProjectTasks';
 import ProjectDefaultAgentPanel, { type ChatWithAgentTarget } from '../ProjectDefaultAgentPanel';
 import Integration from '@/layout/sider/components/ProjectSpaceList/Integration';
@@ -71,7 +68,6 @@ const ProjectDetail: React.FC<Props> = ({
   const [operationAssignees, setOperationAssignees] = useState<OperationSelectOption[]>([]);
   const [operationAssigneesLoading, setOperationAssigneesLoading] = useState(false);
   const [requirementsRefreshVersion, setRequirementsRefreshVersion] = useState(0);
-  const [manualRequirementModalOpen, setManualRequirementModalOpen] = useState(false);
   // 已访问 Tab 保持挂载以缓存列表数据；切换项目时只保留默认任务 Tab，避免复用上一个项目的数据。
   const [sectionCache, setSectionCache] = useState<{ projectId: string; sections: ProjectDetailSection[] }>({
     projectId: '',
@@ -84,7 +80,6 @@ const ProjectDetail: React.FC<Props> = ({
   const [sectionRefreshToolbarMap, setSectionRefreshToolbarMap] = useState<
     Partial<Record<ProjectDetailSection, React.ReactNode>>
   >({});
-  const [channelConfigOpen, setChannelConfigOpen] = useState(false);
   const [repositoryManagerOpen, setRepositoryManagerOpen] = useState(false);
   const [editingRepository, setEditingRepository] = useState<DevloopProjectRepo>();
   const [repositoryRefreshVersion, setRepositoryRefreshVersion] = useState(0);
@@ -97,7 +92,6 @@ const ProjectDetail: React.FC<Props> = ({
   // 研发和运营能力均以静态参数为准，避免未启用环境误展示对应的业务分区。
   const isDevelopProject = isDevelopProjectEnabled && project?.projectType === 'develop';
   const isOperationProject = isOperationProjectEnabled && project?.projectType === 'operation';
-  const developInitReady = !isDevelopProject || !project?.initStatus || project.initStatus === 'ready';
   const currentUserId = userInfo.userId ?? userInfo.id;
   const handleRefreshProject = useCallback(() => {
     // 顶部刷新按钮做轻量防抖，避免连续点击造成详情接口并发请求和旧数据覆盖新数据。
@@ -118,7 +112,8 @@ const ProjectDetail: React.FC<Props> = ({
     (option) => currentUserId !== undefined && `${option.value}` === `${currentUserId}`
   )?.value;
   // 运营项目和研发项目保留业务扩展页；默认、普通项目固定只展示任务和资源。
-  const showRequirementsSection = isDevelopProject || isOperationProject;
+  // 研发需求入口已迁到应用级「自动化」页；运营需求仍以本页需求页签为宿主，故只对运营项目保留。
+  const showRequirementsSection = isOperationProject;
   const showMembersSection = isDevelopProject || isOperationProject;
   const projectCacheKey = `${project?.projectId ?? ''}`;
   const visitedSections =
@@ -196,7 +191,7 @@ const ProjectDetail: React.FC<Props> = ({
         return true;
       }).sort((left, right) => {
         const order = isDevelopProject
-          ? ['requirements', 'tasks', 'resources', 'digitalAgents', 'members', 'integration']
+          ? ['tasks', 'resources', 'digitalAgents', 'members', 'integration']
           : isOperationProject
             ? ['accounts', 'requirements', 'tasks', 'resources', 'members']
             : ['tasks', 'resources'];
@@ -501,20 +496,7 @@ const ProjectDetail: React.FC<Props> = ({
               {intl.formatMessage({ id: 'projectSpace.operation.requirement.new' })}
             </Button>
           )}
-          {isDevelopProject && activeSection === 'requirements' && (
-            <>
-              <Button icon={<SettingOutlined />} onClick={() => setChannelConfigOpen(true)}>
-                {intl.formatMessage({ id: 'projectSpace.channel.title' })}
-              </Button>
-              <Button
-                icon={<PlusOutlined />}
-                disabled={!developInitReady}
-                onClick={() => setManualRequirementModalOpen(true)}
-              >
-                {intl.formatMessage({ id: 'projectSpace.manualRequirement.button' })}
-              </Button>
-            </>
-          )}
+          {/* 研发项目的渠道配置与新增需求已迁到应用级「自动化」页，这里不再提供入口。 */}
           {/* 新增仓库属于研发项目资源维护操作，仅在资源 Tab 展示。 */}
           {isDevelopProject && activeSection === 'resources' && (
             <Button
@@ -616,12 +598,6 @@ const ProjectDetail: React.FC<Props> = ({
         onCancel={() => setOperationRequirementModalOpen(false)}
         onSubmit={handleCreateOperationRequirement}
       />
-      <ProjectChannelConfig
-        open={channelConfigOpen}
-        projectId={project.projectId}
-        canManage={Boolean(onEditProject)}
-        onClose={() => setChannelConfigOpen(false)}
-      />
       {isDevelopProject && (
         <ProjectRepositoryManager
           project={project}
@@ -665,15 +641,6 @@ const ProjectDetail: React.FC<Props> = ({
           onChange={(event) => setGithubPat(event.target.value)}
         />
       </Modal>
-      <ManualRequirementModal
-        project={project}
-        open={manualRequirementModalOpen}
-        onCancel={() => setManualRequirementModalOpen(false)}
-        onCreated={() => {
-          setManualRequirementModalOpen(false);
-          setRequirementsRefreshVersion((current) => current + 1);
-        }}
-      />
     </section>
   );
 };
