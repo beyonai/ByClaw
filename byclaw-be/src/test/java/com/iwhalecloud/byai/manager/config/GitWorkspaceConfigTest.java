@@ -21,9 +21,9 @@ class GitWorkspaceConfigTest {
         GitWorkspaceConfig config = new GitWorkspaceConfig();
         ReflectionTestUtils.setField(config, "fileStorageLocalPath", tempDir.toString());
 
-        String root = config.getRoot(1001L);
+        String root = config.getRoot(1001L, "byclaw-user001");
 
-        assertThat(Path.of(root)).isEqualTo(tempDir.resolve("projects/1001/repos"));
+        assertThat(Path.of(root)).isEqualTo(tempDir.resolve("byclaw-user001/by/projects/1001/repos"));
         assertThat(Path.of(root)).isDirectory();
     }
 
@@ -31,9 +31,11 @@ class GitWorkspaceConfigTest {
     void reportsProjectReposCreationFailure() throws IOException {
         GitWorkspaceConfig config = new GitWorkspaceConfig();
         ReflectionTestUtils.setField(config, "fileStorageLocalPath", tempDir.toString());
-        Files.createFile(tempDir.resolve("projects"));
+        Files.createDirectories(tempDir.resolve("byclaw-user001"));
+        Files.createDirectories(tempDir.resolve("byclaw-user001/by"));
+        Files.createFile(tempDir.resolve("byclaw-user001/by/projects"));
 
-        assertThatThrownBy(() -> config.getRoot(1001L))
+        assertThatThrownBy(() -> config.getRoot(1001L, "byclaw-user001"))
             .isInstanceOf(IllegalStateException.class)
             .hasMessageContaining("Failed to create git workspace root")
             .hasCauseInstanceOf(IOException.class);

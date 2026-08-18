@@ -13,10 +13,10 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
  * @author qin.guoquan
  * @date 2026-05-21
  */
-final class ByClawUserWorkspacePaths {
+public final class ByClawUserWorkspacePaths {
 
     /** UserFS 对外 objectKey 的根前缀。 */
-    static final String USER_FS_OBJECT_KEY_ROOT_PREFIX = "/by";
+    public static final String USER_FS_OBJECT_KEY_ROOT_PREFIX = "/by";
 
     /** 超级助手 skills 根目录前缀。 */
     static final String WORKSPACE_SKILL_ROOT_PREFIX = "/.openclaw/workspace/skills/";

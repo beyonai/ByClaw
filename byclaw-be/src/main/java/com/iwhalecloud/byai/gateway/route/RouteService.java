@@ -1,6 +1,6 @@
 package com.iwhalecloud.byai.gateway.route;
 
-import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -20,7 +20,6 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhaleai.byai.framework.client.GatewayClient;
 import com.iwhaleai.byai.framework.core.protocol.ActionType;
 import com.iwhaleai.byai.framework.core.protocol.ExecutionStatus;
-import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.feign.request.manager.AgentResourceChatInfoDto;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -53,6 +52,7 @@ import com.iwhalecloud.byai.state.infrastructure.utils.ChatUtils;
 import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
 import static com.iwhalecloud.byai.gateway.sandbox.service.SandboxService.WORKER_READY_TIMEOUT_MS;
 import lombok.extern.slf4j.Slf4j;
+import com.iwhalecloud.byai.state.application.service.session.ByClawUserWorkspacePaths;
 
 @Slf4j
 @Service
@@ -89,9 +89,6 @@ public class RouteService {
 
     @Autowired
     private A2aRouteService a2aRouteService;
-
-    @Autowired
-    private ProjectApplicationService projectApplicationService;
 
     /**
      * 判断是否为接口集成类型
@@ -622,7 +619,7 @@ public class RouteService {
         if (chatDto.getProjectId() != null) {
             JSONObject projectInfo = new JSONObject();
             projectInfo.put("project_id", chatDto.getProjectId());
-            projectInfo.put("workspace", projectApplicationService.getProjectWorkspacePath(chatDto.getProjectId()));
+            projectInfo.put("workspace", Paths.get(ByClawUserWorkspacePaths.USER_FS_OBJECT_KEY_ROOT_PREFIX, "projects", String.valueOf(chatDto.getProjectId())));
             metadata.put("project_info", projectInfo);
         }
 
