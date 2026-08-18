@@ -514,23 +514,23 @@ Requirements:
 -- 2026-08-18: agent-reach skill 已合并为 knowledge-collection/references/source-routing.md
 -- ============================================================================
 
--- 1. 从 OPENCLAW_BUNDLED_SKILLS 配置中移除 agent-reach 条目
+-- 1. 从 OPENCLAW_BUNDLED_SKILLS 配置中移除 agent-reach 条目。
+--    先按空白归一化再整体替换，避免依赖交替分组等复杂正则特性。
 UPDATE byai.byai_system_config
 SET param_value = regexp_replace(
-    param_value,
-    ',?\s*\{"skillName":"(By-Reach|agent-reach)","skillCode":"agent-reach","skillDesc(Zh|En)":[^}]+\}',
+    regexp_replace(param_value, '\s', '', 'g'),
+    ',?\{"skillName":"[^"]*","skillCode":"agent-reach","skillDescZh":"[^"]*","skillDescEn":"[^"]*"\}',
     '',
     'g'
-),
-    update_time = CURRENT_TIMESTAMP
+)
 WHERE param_code = 'OPENCLAW_BUNDLED_SKILLS'
   AND regexp_replace(param_value, '\s', '', 'g') LIKE '%"skillCode":"agent-reach"%';
 
--- 2. 清理配置 JSON 可能出现的语法问题（首尾多余逗号）
+-- 2. 清理配置 JSON 可能出现的语法问题（数组首尾多余逗号）
 UPDATE byai.byai_system_config
 SET param_value = regexp_replace(
-    regexp_replace(param_value, '\[\s*,', '[', 'g'),
-    ',\s*\]', ']', 'g'
+    regexp_replace(param_value, '\[,', '[', 'g'),
+    ',\]', ']', 'g'
 )
 WHERE param_code = 'OPENCLAW_BUNDLED_SKILLS';
 
