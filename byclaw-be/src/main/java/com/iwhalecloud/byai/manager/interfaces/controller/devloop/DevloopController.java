@@ -98,7 +98,9 @@ public class DevloopController {
         String keyword = MapParamUtil.getStringValue(params, "keyword");
         int pageNum = Math.max(1, MapParamUtil.getIntValue(params, "pageNum", 1));
         int pageSize = Math.max(1, MapParamUtil.getIntValue(params, "pageSize", 30));
-        return applicationService.listScanSources(projectId, keyword, pageNum, pageSize);
+        // 自动化页传 onlyMine=true 只看自己建的；项目渠道页不传，保持原有全项目可见口径。
+        boolean onlyMine = Boolean.parseBoolean(String.valueOf(params.get("onlyMine")));
+        return applicationService.listScanSources(projectId, keyword, onlyMine, pageNum, pageSize);
     }
 
     /**
@@ -136,6 +138,20 @@ public class DevloopController {
         Long sourceId = Long.valueOf(params.get("sourceId").toString());
         int limit = params.containsKey("limit") ? Integer.parseInt(params.get("limit").toString()) : 20;
         return applicationService.listScanLogs(sourceId, limit);
+    }
+
+    /**
+     * 分页查询当前用户自动化的运行记录
+     *
+     * @param params 包含 status（可选，success/failed）、pageNum、pageSize
+     * @return 按扫描时间倒序的运行记录分页
+     */
+    @PostMapping("/automation/run/list")
+    public ResponseUtil<PageInfo<Map<String, Object>>> listMyAutomationRuns(@RequestBody Map<String, Object> params) {
+        String status = MapParamUtil.getStringValue(params, "status");
+        int pageNum = Math.max(1, MapParamUtil.getIntValue(params, "pageNum", 1));
+        int pageSize = Math.max(1, MapParamUtil.getIntValue(params, "pageSize", 20));
+        return applicationService.listMyAutomationRuns(status, pageNum, pageSize);
     }
 
     /**

@@ -212,6 +212,11 @@ ALTER TABLE byai.byai_scan_source ADD COLUMN IF NOT EXISTS due_time TIMESTAMP;
 -- chat 型自动化是应用级的，不归属任何项目，所以 project_id 必须允许为空。
 ALTER TABLE byai.byai_scan_source ALTER COLUMN project_id DROP NOT NULL;
 
+-- 应用级自动化每次执行都写一条运行记录，但它没有项目归属，所以日志表的 project_id 同样要允许为空。
+ALTER TABLE byai.byai_scan_log ALTER COLUMN project_id DROP NOT NULL;
+COMMENT ON COLUMN byai.byai_scan_log.project_id IS '项目ID；应用级自动化(chat)为空';
+COMMENT ON COLUMN byai.byai_scan_log.status IS '状态 success成功/failed失败/running进行中';
+
 COMMENT ON COLUMN byai.byai_scan_source.project_id IS '所属项目ID；应用级自动化(chat)为空';
 COMMENT ON COLUMN byai.byai_scan_source.source_name IS '扫描源或运营需求名称，运营需求最长500字';
 COMMENT ON COLUMN byai.byai_scan_source.source_type IS '类型：研发渠道dingtalk/github_issue/dingtalk_todo/manual；运营需求collect/publish/analyze；应用级自动化chat';

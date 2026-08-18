@@ -393,14 +393,27 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(list);
     }
 
-    /** 渠道配置大面板按名称后端搜索并分页返回，手工来源和运营需求源均不计入研发渠道总数。 */
-    public ResponseUtil<PageInfo<Map<String, Object>>> listScanSources(Long projectId, String keyword, int pageNum,
-        int pageSize) {
+    /**
+     * 渠道配置大面板按名称后端搜索并分页返回，手工来源和运营需求源均不计入研发渠道总数。
+     * onlyMine=true 只返回当前登录用户创建的行：自动化页跨项目查询，编辑与删除本来就只有创建者可用（requireSourceCreator），
+     * 列表也按同一条轴收窄，别人的自动化不该出现在我的列表里。
+     */
+    public ResponseUtil<PageInfo<Map<String, Object>>> listScanSources(Long projectId, String keyword, boolean onlyMine,
+        int pageNum, int pageSize) {
         // 研发渠道页排除全部运营需求类型，避免新增的知识整理需求混入研发资源列表。
         Set<String> excludedSourceTypes = new HashSet<>(ScanSourceService.OPERATION_SOURCE_TYPES);
         excludedSourceTypes.add(MANUAL_SOURCE_TYPE);
+        Long currentUserId = onlyMine ? CurrentUserHolder.getCurrentUserId() : null;
+        // 取不到登录用户就返回空页，而不是退化成查全部：宁可少给也不越权多给。
+        if (onlyMine && currentUserId == null) {
+            PageInfo<Map<String, Object>> empty = new PageInfo<>();
+            empty.setPageNum(pageNum);
+            empty.setPageSize(pageSize);
+            empty.setList(new ArrayList<>());
+            return ResponseUtil.successResponse(empty);
+        }
         Page<ScanSource> sourcePage = scanSourceService.listByProjectIdPage(projectId, keyword, excludedSourceTypes,
-            pageNum, pageSize);
+            currentUserId == null ? null : String.valueOf(currentUserId), pageNum, pageSize);
         PageInfo<Map<String, Object>> result = new PageInfo<>();
         result.setPageNum((int) sourcePage.getCurrent());
         result.setPageSize((int) sourcePage.getSize());
@@ -1858,6 +1871,52 @@ public class DevloopApplicationService {
             list.add(map);
         }
         return ResponseUtil.successResponse(list);
+    }
+
+    /**
+     * 分页查询「我的自动化」运行记录，可按状态筛选。 作用域是当前登录用户创建的 chat 自动化，与自动化列表同一条口径；
+     * 用户没有自动化时直接返回空页，不去查全表。
+     */
+    public ResponseUtil<PageInfo<Map<String, Object>>> listMyAutomationRuns(String status, int pageNum, int pageSize) {
+        PageInfo<Map<String, Object>> result = new PageInfo<>();
+        result.setPageNum(pageNum);
+        result.setPageSize(pageSize);
+        result.setList(new ArrayList<>());
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        if (currentUserId == null) {
+            return ResponseUtil.successResponse(result);
+        }
+        List<ScanSource> sources = scanSourceService.listByCreateByAndType(String.valueOf(currentUserId),
+            ScanSourceService.SOURCE_TYPE_CHAT);
+        if (sources.isEmpty()) {
+            return ResponseUtil.successResponse(result);
+        }
+        Map<Long, String> nameBySourceId = new HashMap<>();
+        List<Long> sourceIds = new ArrayList<>();
+        for (ScanSource source : sources) {
+            sourceIds.add(source.getSourceId());
+            nameBySourceId.put(source.getSourceId(), source.getSourceName());
+        }
+        Page<ScanLog> logPage = scanLogService.pageBySourceIds(sourceIds, StringUtils.trimToNull(status), pageNum,
+            pageSize);
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (ScanLog runLog : logPage.getRecords()) {
+            Map<String, Object> map = new HashMap<>();
+            map.put("logId", runLog.getLogId());
+            map.put("sourceId", runLog.getSourceId());
+            // 记录里带上自动化名称：运行记录跨自动化混排，只有 sourceId 用户认不出是哪条。
+            map.put("sourceName", nameBySourceId.get(runLog.getSourceId()));
+            map.put("scanTime", runLog.getScanTime());
+            map.put("status", runLog.getStatus());
+            map.put("errorMsg", runLog.getErrorMsg());
+            list.add(map);
+        }
+        result.setPageNum((int) logPage.getCurrent());
+        result.setPageSize((int) logPage.getSize());
+        result.setTotal(logPage.getTotal());
+        result.setTotalPages((int) logPage.getPages());
+        result.setList(list);
+        return ResponseUtil.successResponse(result);
     }
 
     /** 查询单次扫描的详细条目 */
@@ -4514,26 +4573,44 @@ public class DevloopApplicationService {
         if (source == null || !ScanSourceService.SOURCE_TYPE_CHAT.equals(source.getSourceType())) {
             return;
         }
+        // 每次执行都留一条运行记录：跳过和失败也要能在自动化页查到原因，否则用户只看到「没反应」。
+        // 只写 byai_scan_log，不写 byai_scan_log_item：条目表被按 session_id 直查当需求用
+        // (getTaskChanges/resolveTaskRepo/TaskTypeIndex)，塞进聊天会话会被误认成研发需求。
         ChatAutomationConfig chatConfig = parseChatAutomationConfig(source.getConfig());
         if (chatConfig == null) {
             log.warn("[ChatAutomation] 自动化 {} 的提示词为空或未 @ 数字员工，跳过本次执行", source.getSourceId());
+            scanLogService.recordRun(source.getSourceId(), source.getProjectId(), "failed",
+                I18nUtil.get("devloop.automation.run.config.invalid"));
             return;
         }
         Long creatorId = parseOperationLong(source.getCreateBy());
         LoginInfo loginInfo = creatorId != null ? loginApplicationService.getLoginInfo(creatorId) : null;
         if (loginInfo == null) {
             log.warn("[ChatAutomation] 自动化 {} 无法加载创建者 {} 的登录信息，跳过本次执行", source.getSourceId(), creatorId);
+            scanLogService.recordRun(source.getSourceId(), source.getProjectId(), "failed",
+                I18nUtil.get("devloop.automation.run.creator.missing"));
             return;
         }
 
-        AssistantChatDto chatDto = buildChatDtoFromConfig(chatConfig, source);
-        assistantChatService.createGroupChatSession(chatDto);
-        // 建会话用简短标题让会话名可读，真正发给模型的是配置里的完整聊天内容。
-        chatDto.setChatContent(chatConfig.chatContent());
-        scanSourceService.updateLastScanTime(source.getSourceId());
-        // 事务提交后再异步 chat：确保异步线程能读到本事务已建的 session。
-        submitTaskChatAfterCommit(chatDto, loginInfo, chatDto.getSessionId());
-        log.info("[ChatAutomation] 已触发定时聊天，sourceId={}, sessionId={}", source.getSourceId(), chatDto.getSessionId());
+        try {
+            AssistantChatDto chatDto = buildChatDtoFromConfig(chatConfig, source);
+            assistantChatService.createGroupChatSession(chatDto);
+            // 建会话用简短标题让会话名可读，真正发给模型的是配置里的完整聊天内容。
+            chatDto.setChatContent(chatConfig.chatContent());
+            scanSourceService.updateLastScanTime(source.getSourceId());
+            // 事务提交后再异步 chat：确保异步线程能读到本事务已建的 session。
+            submitTaskChatAfterCommit(chatDto, loginInfo, chatDto.getSessionId());
+            // success 表示「已成功下发会话」，不代表数字员工已答完：后续对话结果在会话里看，运行记录只管调度这一段。
+            scanLogService.recordRun(source.getSourceId(), source.getProjectId(), "success", null);
+            log.info("[ChatAutomation] 已触发定时聊天，sourceId={}, sessionId={}", source.getSourceId(),
+                chatDto.getSessionId());
+        }
+        catch (Exception exception) {
+            // 本方法带事务，异常会回滚已建会话，所以运行记录走 REQUIRES_NEW 独立事务，回滚后仍留得住失败原因。
+            log.error("[ChatAutomation] 自动化 {} 下发会话失败", source.getSourceId(), exception);
+            scanLogService.recordRun(source.getSourceId(), source.getProjectId(), "failed", exception.getMessage());
+            throw exception;
+        }
     }
 
     /**
@@ -4565,6 +4642,7 @@ public class DevloopApplicationService {
         List<ResourceVo> resourceList = parseChatResourceList(json.getJSONArray("resourceList"));
         Long agentId = resolveMentionedAgentId(resourceList);
         // 没 @ 到数字员工就没有承接人，建会话也没人应答，当成无效配置跳过。
+        // 执行方法 chatConfig == null 分支会用 devloop.automation.run.config.invalid 记一条失败运行记录。
         if (agentId == null) {
             return null;
         }
