@@ -87,6 +87,11 @@ USER root
 ARG OPENCLAW_VERSION
 ARG OPENCLI_VERSION=2.1.13
 ARG OPENCLI_EXTENSION_VERSION=2.1.13
+ARG HYPERFRAMES_VERSION=0.8.1
+ARG REMOTION_VERSION=4.0.512
+ARG PATCHRIGHT_VERSION=1.62.1
+ARG BY_FRAMEWORK_TS_VERSION=1.5.2
+ARG BY_FRAMEWORK_PY_VERSION=0.2.2.dev10
 # 与 byclaw-be 预下载包同源同版本(byclaw-be/docker/dws/version.md);amd64 走预下载,arm64 用此版本联网 fallback。
 ARG DWS_VERSION=v1.0.52
 # buildx 目标架构(amd64/arm64),用于选择预下载二进制或 fallback。
@@ -111,7 +116,8 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
     OPENCLAW_BUNDLED_PLUGINS_DIR=/app/dist/extensions \
     OPENCLAW_STATE_DIR=/by/.openclaw \
     OPENCLAW_VNC_WEB_PORT=8081 \
-    OPENCLAW_VNC_PORT=5901
+    OPENCLAW_VNC_PORT=5901 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # bycli dashboard相关系统配置
 ENV BYCLI_CONFIG_DIR=/by/.bycli \
@@ -123,7 +129,11 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
     && npm config set audit false --global \
     && npm config set fetch-retries 5 --global \
     && npm config set fetch-retry-mintimeout 20000 --global \
-    && npm config set fetch-retry-maxtimeout 120000 --global
+    && npm config set fetch-retry-maxtimeout 120000 --global \
+    && npm install -g \
+        "hyperframes@${HYPERFRAMES_VERSION}" \
+        "@remotion/cli@${REMOTION_VERSION}" \
+        "@byclaw/by-framework@${BY_FRAMEWORK_TS_VERSION}"
 
 ARG OPENCLI_VERSION=2.1.14
 ARG OPENCLI_EXTENSION_VERSION=2.1.14
@@ -232,7 +242,9 @@ RUN set -eux; \
     python3 -m pip install --no-cache-dir \
         redis \
         websockify \
-        by-framework==0.2.2.dev10; \
+        "by-framework==${BY_FRAMEWORK_PY_VERSION}" \
+        "patchright==${PATCHRIGHT_VERSION}"; \
+    patchright install chromium; \
     python3 -m pip install --no-cache-dir \
         -c /tmp/agent-reach/constraints.txt \
         /tmp/agent-reach; \
@@ -241,6 +253,10 @@ RUN set -eux; \
     rm -f /usr/bin/websockify; \
     ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
     websockify --help >/dev/null
+
+COPY middleware/openclaw/verify-runtime-toolchain.sh /usr/local/bin/verify-runtime-toolchain
+RUN chmod +x /usr/local/bin/verify-runtime-toolchain \
+    && /usr/local/bin/verify-runtime-toolchain
 
 COPY --from=ext-builder /build/out/ /app/dist-runtime/extensions/
 
