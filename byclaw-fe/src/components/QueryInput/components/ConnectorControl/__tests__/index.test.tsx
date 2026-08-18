@@ -8,6 +8,9 @@ const mockOpenedWindow = { opener: window } as unknown as Window;
 const mockWindowOpen = jest.spyOn(window, 'open');
 
 jest.mock('@/components/AntdIcon', () => () => null);
+jest.mock('@umijs/max', () => ({
+  useSelector: (selector: (state: any) => unknown) => selector({ user: { userInfo: { userId: 1 } } }),
+}));
 jest.mock('@/service/connector', () => ({
   cancelConnectorAuthorization: jest.fn(),
   getConnectorAuthorization: jest.fn(),

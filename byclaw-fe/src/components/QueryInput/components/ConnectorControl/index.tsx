@@ -471,11 +471,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
         <ConnectorSelection value={enabledConnectors} onOpen={openSettings} />
       ) : (
         <Tooltip title="连接器">
-          <span
-            className={styles.trigger}
-            role="button"
-            onClick={openSettings}
-          >
+          <span aria-label="连接器设置" className={styles.trigger} role="button" onClick={openSettings}>
             <LinkOutlined />
           </span>
         </Tooltip>

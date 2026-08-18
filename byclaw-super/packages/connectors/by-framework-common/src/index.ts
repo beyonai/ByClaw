@@ -24,6 +24,7 @@ import type {
 import {
   abortError,
   extractContent,
+  extractDisplayEvent,
   extractError,
   extractUserInput,
   jsonString,
@@ -92,8 +93,7 @@ export class ByFrameworkConnector implements AgentConnector {
     this.#readBlockMs = options.readBlockMs ?? 1_000;
     this.#sourceAgentType = options.sourceAgentType ?? "BY_SUPER";
     this.#firstEventTimeoutMs = options.firstEventTimeoutMs ?? 300_000;
-    this.#cancelConfirmationTimeoutMs =
-      options.cancelConfirmationTimeoutMs ?? 30_000;
+    this.#cancelConfirmationTimeoutMs = options.cancelConfirmationTimeoutMs ?? 30_000;
   }
 
   /**
@@ -112,13 +112,9 @@ export class ByFrameworkConnector implements AgentConnector {
     // /by/.sessions/maestro:.../。HTTP 等非 by-framework 入口仍保留隔离子会话。
     const childSessionId =
       request.externalSessionId ??
-      [
-        "maestro",
-        request.userCode,
-        request.sessionId,
-        request.runId,
-        request.delegationId,
-      ].join(":");
+      ["maestro", request.userCode, request.sessionId, request.runId, request.delegationId].join(
+        ":",
+      );
     const targetAgentType = this.#targetAgentTypeResolver(request);
     const extraPayload: Record<string, unknown> = {
       agent_id: request.agent.execution.targetId,
@@ -141,11 +137,7 @@ export class ByFrameworkConnector implements AgentConnector {
       // 并提示子 agent 落盘位置；该后缀只进入 wire payload，request.task 本身不变
       //（它是委派幂等/恢复的匹配键）。
       content: buildByFrameworkContent(
-        withSessionWorkspaceReminder(
-          request.task,
-          request.externalSessionId,
-          request.attachments,
-        ),
+        withSessionWorkspaceReminder(request.task, request.externalSessionId, request.attachments),
         request.attachments,
       ),
       userCode: request.userCode,
@@ -156,22 +148,18 @@ export class ByFrameworkConnector implements AgentConnector {
       // 稳定 ID 让外部执行记录可按 Delegation 定位；真正重连仍走 resume，不重复 send。
       messageId: request.delegationId,
       traceId: request.delegationId,
-      ...(request.parentMessageId
-        ? { parentMessageId: request.parentMessageId }
-        : {}),
+      ...(request.parentMessageId ? { parentMessageId: request.parentMessageId } : {}),
     };
     const response = await this.#client.sendMessage(params);
     if (!response.success) {
       throw new Error(
-        `by-framework dispatch failed${response.error_code ? ` (${response.error_code})` : ""}: ${response.error ?? response.status}`,
+        `by-framework dispatch failed${response.error_code ? ` (${response.error_code})` : ""}: ${
+          response.error ?? response.status
+        }`,
       );
     }
 
-    const cancel = this.#createCancel(
-      response.message_id,
-      childSessionId,
-      targetAgentType,
-    );
+    const cancel = this.#createCancel(response.message_id, childSessionId, targetAgentType);
     if (context.signal.aborted) {
       await cancel("aborted before event stream started");
       throw abortError(context.signal.reason);
@@ -190,22 +178,10 @@ export class ByFrameworkConnector implements AgentConnector {
     };
     return {
       ref,
-      events: this.#readEvents(
-        childSessionId,
-        response.trace_id,
-        "0-0",
-        context.signal,
-        cancel,
-      ),
+      events: this.#readEvents(childSessionId, response.trace_id, "0-0", context.signal, cancel),
       cancel,
       respondToInput: (interactionId, response, resumeToken) =>
-        this.#resumeUserInput(
-          ref,
-          interactionId,
-          response,
-          resumeToken,
-          request.metadata,
-        ),
+        this.#resumeUserInput(ref, interactionId, response, resumeToken, request.metadata),
     };
   }
 
@@ -240,13 +216,7 @@ export class ByFrameworkConnector implements AgentConnector {
       ),
       cancel,
       respondToInput: (interactionId, response, resumeToken) =>
-        this.#resumeUserInput(
-          ref,
-          interactionId,
-          response,
-          resumeToken,
-          context.metadata,
-        ),
+        this.#resumeUserInput(ref, interactionId, response, resumeToken, context.metadata),
     };
   }
 
@@ -270,8 +240,8 @@ export class ByFrameworkConnector implements AgentConnector {
       response.action === "submit"
         ? response.text || JSON.stringify(response.answers ?? {})
         : response.action === "skip"
-          ? "User skipped this question."
-          : "User cancelled this interaction.";
+        ? "User skipped this question."
+        : "User cancelled this interaction.";
     const result = await this.#client.sendMessage({
       actionType: ActionType.RESUME,
       sourceAgentType: this.#sourceAgentType,
@@ -304,7 +274,8 @@ export class ByFrameworkConnector implements AgentConnector {
       const response = await this.#redis.ping();
       return {
         healthy: response === "PONG",
-        message: response === "PONG" ? "Redis is reachable" : `Unexpected Redis response: ${response}`,
+        message:
+          response === "PONG" ? "Redis is reachable" : `Unexpected Redis response: ${response}`,
       };
     } catch (error) {
       return {
@@ -329,12 +300,7 @@ export class ByFrameworkConnector implements AgentConnector {
   ): (reason: string) => Promise<void> {
     let cancelPromise: Promise<void> | undefined;
     return async (reason: string): Promise<void> => {
-      cancelPromise ??= this.#cancelAndConfirm(
-        messageId,
-        sessionId,
-        targetAgentType,
-        reason,
-      );
+      cancelPromise ??= this.#cancelAndConfirm(messageId, sessionId, targetAgentType, reason);
       await cancelPromise;
     };
   }
@@ -359,7 +325,9 @@ export class ByFrameworkConnector implements AgentConnector {
     }
     if (!response.success || response.status !== "CANCEL_REQUESTED") {
       throw new Error(
-        `by-framework cancellation failed: status=${response.status}, error=${response.error ?? "unknown"}`,
+        `by-framework cancellation failed: status=${response.status}, error=${
+          response.error ?? "unknown"
+        }`,
       );
     }
     if (!this.#registry) {
@@ -368,10 +336,7 @@ export class ByFrameworkConnector implements AgentConnector {
 
     const deadline = Date.now() + this.#cancelConfirmationTimeoutMs;
     while (Date.now() < deadline) {
-      const execution = await this.#registry.getExecutionByMessageId(
-        messageId,
-        sessionId,
-      );
+      const execution = await this.#registry.getExecutionByMessageId(messageId, sessionId);
       const status = String(execution?.status ?? "");
       if (TERMINAL_EXECUTION_STATUSES.has(status)) {
         return;
@@ -397,6 +362,7 @@ export class ByFrameworkConnector implements AgentConnector {
     const stream = QueueNames.session_data_stream(sessionId);
     let cursor = startCursor;
     let output = "";
+    const toolNames = new Map<string, string>();
     let firstEventReceived = false;
     const firstEventDeadline = Date.now() + this.#firstEventTimeoutMs;
     while (!signal.aborted) {
@@ -421,10 +387,7 @@ export class ByFrameworkConnector implements AgentConnector {
       }
       const blockMs = firstEventReceived
         ? this.#readBlockMs
-        : Math.min(
-            this.#readBlockMs,
-            Math.max(1, firstEventDeadline - Date.now()),
-          );
+        : Math.min(this.#readBlockMs, Math.max(1, firstEventDeadline - Date.now()));
       const rows = await this.#redis.xread(
         "COUNT",
         50,
@@ -441,6 +404,12 @@ export class ByFrameworkConnector implements AgentConnector {
           continue;
         }
         firstEventReceived = true;
+        if (
+          message.event_type === EventType.REASONING_LOG_START ||
+          message.event_type === EventType.REASONING_LOG_END
+        ) {
+          continue;
+        }
         if (message.event_type === EventType.ANSWER_DELTA) {
           const text = extractContent(message.data);
           if (text) {
@@ -470,12 +439,6 @@ export class ByFrameworkConnector implements AgentConnector {
           }
           continue;
         }
-        if (
-          message.event_type === EventType.REASONING_LOG_START ||
-          message.event_type === EventType.REASONING_LOG_END
-        ) {
-          continue;
-        }
         if (message.event_type === EventType.REASONING_LOG_DELTA) {
           const input = extractUserInput(message);
           if (input) {
@@ -486,6 +449,35 @@ export class ByFrameworkConnector implements AgentConnector {
               resumeToken: input.resumeToken,
               cursor,
             };
+            continue;
+          }
+          const displayEvent = extractDisplayEvent(message);
+          if (displayEvent) {
+            if (displayEvent.type === "tool_started") {
+              toolNames.set(displayEvent.callId, displayEvent.toolName);
+            }
+            if (displayEvent.type === "tool_detail" && !displayEvent.toolName) {
+              const toolName = toolNames.get(displayEvent.callId);
+              yield {
+                ...displayEvent,
+                ...(toolName ? { toolName } : {}),
+                cursor,
+              };
+              continue;
+            }
+            if (
+              (displayEvent.type === "tool_completed" || displayEvent.type === "tool_failed") &&
+              !displayEvent.toolName
+            ) {
+              const toolName = toolNames.get(displayEvent.callId);
+              yield {
+                ...displayEvent,
+                ...(toolName ? { toolName } : {}),
+                cursor,
+              };
+              continue;
+            }
+            yield { ...displayEvent, cursor };
           }
           continue;
         }
@@ -555,18 +547,12 @@ function withSessionWorkspaceReminder(
  * 挂在 `/by` 下，故读取路径 = `/by` + 该 key。非会话工作区 key 一律忽略。仅向子 agent
  * 提示读取位置。
  */
-function sessionWorkspaceReadPaths(
-  attachments: readonly RunAttachment[],
-): string[] {
+function sessionWorkspaceReadPaths(attachments: readonly RunAttachment[]): string[] {
   const seen = new Set<string>();
   const paths: string[] = [];
   for (const attachment of attachments) {
     const objectKey = attachment.path?.trim();
-    if (
-      !objectKey ||
-      !objectKey.startsWith("/.sessions/") ||
-      objectKey.includes("..")
-    ) {
+    if (!objectKey || !objectKey.startsWith("/.sessions/") || objectKey.includes("..")) {
       continue;
     }
     const readPath = `/by${objectKey}`;
@@ -608,9 +594,7 @@ function buildByFrameworkContent(
  * 把 RunAttachment 映射回 byclaw-be 的 MessageFileDto 字段（白名单）。
  * 不生成 fileIp；Beyond-Token 不混入文件对象，仍只走 metadata。
  */
-function toByFrameworkFiles(
-  attachments: readonly RunAttachment[],
-): Record<string, unknown>[] {
+function toByFrameworkFiles(attachments: readonly RunAttachment[]): Record<string, unknown>[] {
   return attachments.map((attachment) => ({
     fileId: attachment.id,
     fileName: attachment.name,

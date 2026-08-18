@@ -37,6 +37,44 @@ describe("createByClawSseSerializer", () => {
     expect(output).not.toContain("sensitive provider response");
     expect(output).not.toContain("event: error");
   });
+
+  it("serializes child tool events without emitting child lifecycle as outer lifecycle", () => {
+    const serialize = createByClawSseSerializer();
+    const start = serialize(
+      event(1, "delegation.tool.started", {
+        delegationId: "delegation-1",
+        agentId: "agent-1",
+        agentName: "需求侦探",
+        callId: "call-1",
+        toolName: "read",
+      }),
+    );
+    const detail = serialize(
+      event(2, "delegation.tool.detail", {
+        delegationId: "delegation-1",
+        callId: "call-1",
+        toolName: "read",
+        phase: "input",
+        value: { path: "/tmp/data" },
+      }),
+    );
+    const end = serialize(
+      event(3, "delegation.tool.completed", {
+        delegationId: "delegation-1",
+        callId: "call-1",
+        toolName: "read",
+      }),
+    );
+
+    expect(start).toContain("event: subAgentToolStart");
+    expect(start).toContain('"status":"_START_"');
+    expect(detail).toContain("event: subAgentToolDetail");
+    expect(detail).toContain('"phase":"input"');
+    expect(end).toContain("event: subAgentToolEnd");
+    expect(end).toContain('"status":"_DONE_"');
+    expect(`${start}${detail}${end}`).not.toContain("reasoningLogEnd");
+    expect(`${start}${detail}${end}`).not.toContain("appStreamResponse");
+  });
 });
 
 function event(eventId: number, type: RunEvent["type"], data: RunEvent["data"]): RunEvent {
