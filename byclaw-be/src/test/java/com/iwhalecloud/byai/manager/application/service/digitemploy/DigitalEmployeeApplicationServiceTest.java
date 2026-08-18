@@ -861,6 +861,41 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
+    void findDetailsById_populatesImageModelIdFromTargetContent() {
+        DigitalEmployeeDetailsDTO result = findDetailsWithTargetContent("{\"imageModelId\":\"42\"}");
+
+        assertThat(result.getImageModelId()).isEqualTo("42");
+    }
+
+    @Test
+    void findDetailsById_returnsNullImageModelIdForLegacyTargetContent() {
+        DigitalEmployeeDetailsDTO result = findDetailsWithTargetContent("{\"relTools\":[\"tool-a\"]}");
+
+        assertThat(result.getImageModelId()).isNull();
+    }
+
+    @Test
+    void findDetailsById_returnsNullImageModelIdForJsonNull() {
+        DigitalEmployeeDetailsDTO result = findDetailsWithTargetContent("{\"imageModelId\":null}");
+
+        assertThat(result.getImageModelId()).isNull();
+    }
+
+    @Test
+    void findDetailsById_normalizesBlankImageModelIdToNull() {
+        DigitalEmployeeDetailsDTO result = findDetailsWithTargetContent("{\"imageModelId\":\"   \"}");
+
+        assertThat(result.getImageModelId()).isNull();
+    }
+
+    @Test
+    void findDetailsById_returnsNullImageModelIdForMalformedTargetContent() {
+        DigitalEmployeeDetailsDTO result = findDetailsWithTargetContent("{not-json");
+
+        assertThat(result.getImageModelId()).isNull();
+    }
+
+    @Test
     void applyInputRuntimeFieldsForResponse_allowsClearingRelPromptAndOverridingRelTools() {
         DigitalEmployeeDetailsDTO detailsDTO = new DigitalEmployeeDetailsDTO();
         detailsDTO.setRelPrompt("old-prompt");
@@ -874,6 +909,22 @@ class DigitalEmployeeApplicationServiceTest {
 
         assertThat(detailsDTO.getRelPrompt()).isEmpty();
         assertThat(detailsDTO.getRelTools()).isEmpty();
+    }
+
+    private DigitalEmployeeDetailsDTO findDetailsWithTargetContent(String targetContent) {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(100L);
+
+        DigitalEmployeeDetailsDTO detailsDTO = new DigitalEmployeeDetailsDTO();
+        detailsDTO.setResourceId(100L);
+        detailsDTO.setPrologue("{}");
+        detailsDTO.setTargetContent(targetContent);
+
+        when(ssResExtDigEmployeeService.findDetailsById(100L)).thenReturn(detailsDTO);
+        when(ssResourceService.findRelResource(100L)).thenReturn(List.of());
+        when(templateRuleInfoApplicationService.findMemoryConfigsByResourceIdAndUserId(100L, 1L)).thenReturn(List.of());
+
+        return service.findDetailsById(dto);
     }
 
     // generateV3 moved to MetaPromptService — see MetaPromptServiceTest

@@ -21,6 +21,7 @@ public interface ByaiAimodelMapper extends BaseMapper<ByaiAimodel> {
      * 按条件查询模型列表（不分页；配合 PageHelper.startPage 使用，由 PageHelper 自动分页）
      *
      * @param status 状态（API: ENABLED/DISABLED/TESTING 或 DB: OOA/OOX/OOD）
+     * @param modelType 模型类型
      * @param ability 能力（匹配 in_params）
      * @param system 系统（匹配 in_params）
      * @param modelId 模型ID
@@ -28,9 +29,10 @@ public interface ByaiAimodelMapper extends BaseMapper<ByaiAimodel> {
      * @param keyword 关键字（displayName/modelCode/providerName）
      * @return 列表
      */
-    List<ByaiAimodel> selectByCondition(@Param("status") String status, @Param("ability") Long ability,
-        @Param("system") String system, @Param("modelId") Long modelId, @Param("modelName") String modelName,
-        @Param("keyword") String keyword, @Param("createBy") Long createBy, @Param("ownerType") String ownerType);
+    List<ByaiAimodel> selectByCondition(@Param("status") String status, @Param("modelType") String modelType,
+        @Param("ability") Long ability, @Param("system") String system, @Param("modelId") Long modelId,
+        @Param("modelName") String modelName, @Param("keyword") String keyword, @Param("createBy") Long createBy,
+        @Param("ownerType") String ownerType);
 
     /**
      * 统计符合条件的总数

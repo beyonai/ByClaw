@@ -72,4 +72,14 @@ class DigitalEmployeeDtoJacksonTest {
 
         assertThat(dto.getRelSkills()).hasSize(1);
     }
+
+    @Test
+    void imageModelId_serializesAsStringWithoutPrecisionLoss() throws Exception {
+        DigitalEmployeeDTO dto = new DigitalEmployeeDTO();
+        dto.setImageModelId("9007199254740993");
+
+        String json = objectMapper.writeValueAsString(dto);
+
+        assertThat(objectMapper.readTree(json).path("imageModelId").asText()).isEqualTo("9007199254740993");
+    }
 }

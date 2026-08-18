@@ -90,4 +90,14 @@ class TargetAgentResolverTest {
 
         assertThat(targetAgentType).isEqualTo(WorkerAgentType.BY_SUPER.getCode());
     }
+
+    @Test
+    void resolveAgentType_canRouteBySuperToCurrentUsersLocalOpenClawWorker() {
+        ReflectionTestUtils.setField(targetAgentResolver, "routeBySuperToUserSandbox", true);
+
+        String targetAgentType = targetAgentResolver.resolveAgentType(
+            WorkerAgentType.BY_SUPER.getCode(), 11001912L, null, "0027024710");
+
+        assertThat(targetAgentType).isEqualTo("BYCLAW_EXE_0027024710");
+    }
 }

@@ -141,6 +141,12 @@ public class DigitalEmployeeDTO extends SsResExtDigEmployee {
     private List<String> relTools;
 
     /**
+     * 文生图模型标识（运行期字段，不新增 DB 独立列）。保存时写入标准 JSON 与 target_content，详情查询时再从 target_content 回填。
+     * 使用字符串避免超出 JavaScript 安全整数范围的模型标识发生精度损失。
+     */
+    private String imageModelId;
+
+    /**
      * 提示词文本（运行期字段，不入 DB 独立列）：取自前端入参 corePersonaDefinition， 在 doSyncOpenClawWorkSpace 阶段被透传到标准 JSON 与 target_content；
      * findDetailsById 回显时也从 target_content 反序列化拿回，保证保存→编辑→保存的循环不丢数据。 注意：corePersonaDefinition 仍按既有逻辑落
      * ss_res_ext_dig_employee.core_persona_definition 列， relPrompt 只是它在 JSON 视角下的别名节点，避免 DB 列与 JSON 节点的命名漂移。
