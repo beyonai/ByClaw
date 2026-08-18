@@ -535,14 +535,14 @@ SET param_value = regexp_replace(
 WHERE param_code = 'OPENCLAW_BUNDLED_SKILLS';
 
 -- 3. 删除 agent-reach 资源的所有授权记录
-DELETE FROM byai.ss_grant g
-WHERE g.grant_obj_id = (
+DELETE FROM byai.au_privilege_grant
+WHERE grant_obj_id IN (
     SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'agent-reach'
 );
 
 -- 4. 删除 agent-reach 的资源扩展记录（skill 元数据）
-DELETE FROM byai.ss_res_ext_skill e
-WHERE e.resource_id = (
+DELETE FROM byai.ss_res_ext_skill
+WHERE resource_id IN (
     SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'agent-reach'
 );
 
@@ -550,9 +550,11 @@ WHERE e.resource_id = (
 DELETE FROM byai.ss_resource
 WHERE resource_code = 'agent-reach';
 
--- 验证查询（migration 执行后应返回 0 行）
+-- 验证查询（migration 执行后应各返回 0 行）
 -- SELECT * FROM byai.ss_resource WHERE resource_code = 'agent-reach';
 -- SELECT * FROM byai.byai_system_config WHERE param_code = 'OPENCLAW_BUNDLED_SKILLS' AND param_value LIKE '%agent-reach%';
+-- SELECT g.* FROM byai.au_privilege_grant g JOIN byai.ss_resource r ON r.resource_id = g.grant_obj_id WHERE r.resource_code = 'agent-reach';
+-- SELECT e.* FROM byai.ss_res_ext_skill e JOIN byai.ss_resource r ON r.resource_id = e.resource_id WHERE r.resource_code = 'agent-reach';
 
 -- ============================================================================
 -- by-skill-installer 内置技能注册
