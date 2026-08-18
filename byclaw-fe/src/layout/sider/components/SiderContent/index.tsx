@@ -13,8 +13,6 @@ const Knowledge = lazy(() => import('@/layout/sider/components/Knowledge'));
 const ResourceSiderPanel = lazy(() => import('@/layout/sider/components/ResourceSiderPanel'));
 const SearchAndQuery = lazy(() => import('@/layout/sider/components/SearchAndQuery'));
 const FileSiderPanel = lazy(() => import('@/layout/sider/components/FileSiderPanel'));
-const ModelSiderPanel = lazy(() => import('@/layout/sider/components/ModelSiderPanel'));
-
 const OntologySiderPanel = lazy(() => import('@/layout/sider/components/OntologySiderPanel'));
 
 const ToolSiderPanel = () => <ResourceSiderPanel resourceType="TOOL" />;
@@ -23,6 +21,17 @@ const ObjectSiderPanel = () => <ResourceSiderPanel resourceType="OBJECT" />;
 const SkillSiderPanel = () => <ResourceSiderPanel resourceType="SKILL" />;
 
 export const tabItems: any[] = [
+  {
+    key: 'automation',
+    // iconfont 现有 452 个字形里没有自动化语义的图标，也没有对应 fill 变体，
+    // 暂借九点连接（节点编排）并让选中态复用同一码，等 iconfont 补正式图标再换。
+    icon: 'icon-a-Nine-points-connectedjiudianlianjie',
+    activeIcon: 'icon-a-Nine-points-connectedjiudianlianjie',
+    label: 'sider.automation',
+    // 自动化是应用级大页面，跨项目展示渠道，不跟随项目作用域，也不需要左侧小面板。
+    navigatePath: '/automation',
+    hideSider: true,
+  },
   {
     key: 'sessions',
     icon: 'icon-cebianlan-duihuajilu',
@@ -41,7 +50,7 @@ export const tabItems: any[] = [
     // 项目入口只展示项目列表；会话入口继续保留原有项目分组和会话操作。
     ChildComponent: ProjectCenterList,
     navigatePath: '/projectSpace',
-    // 离开项目菜单时卸载新建弹窗等临时状态，返回时由 URL 恢复当前项目。
+    // 离开项目菜单时卸载新建弹窗等临时状态，返回时由会话与项目模块共用的存储值恢复当前项目。
     destroyOnHidden: true,
   },
   {
@@ -63,11 +72,11 @@ export const tabItems: any[] = [
   },
   {
     key: 'model',
-    icon: 'icon-a-Braindanao',
-    activeIcon: 'icon-brain-filled',
     label: 'common.model',
-    ChildComponent: ModelSiderPanel,
     navigatePath: '/models',
+    // 模型中心保留路由识别，但不再显示左侧菜单和小面板。
+    hideMenu: true,
+    hideSider: true,
   },
   {
     key: 'knowledge',
@@ -76,7 +85,8 @@ export const tabItems: any[] = [
     label: 'sider.knowledge',
     ChildComponent: Knowledge,
     navigatePath: '/knowledgeCenter',
-    // hideSider: true,
+    // 全局知识中心不再展示当前数字员工绑定的小列表。
+    hideSider: true,
   },
   {
     key: 'tool',
@@ -85,7 +95,7 @@ export const tabItems: any[] = [
     label: 'common.tool',
     ChildComponent: ToolSiderPanel,
     navigatePath: '/toolCenter',
-    // hideSider: true,
+    hideSider: true,
   },
   {
     key: 'view',
@@ -94,7 +104,7 @@ export const tabItems: any[] = [
     label: 'common.resourceType.view',
     ChildComponent: ViewSiderPanel,
     navigatePath: '/viewCenter',
-    // hideSider: true,
+    hideSider: true,
   },
   {
     key: 'object',
@@ -103,7 +113,7 @@ export const tabItems: any[] = [
     label: 'common.resourceType.object',
     ChildComponent: ObjectSiderPanel,
     navigatePath: '/objectCenter',
-    // hideSider: true,
+    hideSider: true,
   },
   {
     key: 'ontology',
@@ -112,6 +122,7 @@ export const tabItems: any[] = [
     label: 'sider.ontology',
     ChildComponent: OntologySiderPanel,
     navigatePath: '/ontologyCenter',
+    hideSider: true,
   },
   {
     key: 'skill',
@@ -120,7 +131,7 @@ export const tabItems: any[] = [
     label: 'common.skill',
     ChildComponent: SkillSiderPanel,
     navigatePath: '/skillCenter',
-    // hideSider: true,
+    hideSider: true,
   },
   {
     key: 'file',
@@ -129,6 +140,7 @@ export const tabItems: any[] = [
     label: 'common.file',
     ChildComponent: FileSiderPanel,
     navigatePath: '/files',
+    hideSider: true,
   },
 ] as const;
 
@@ -146,7 +158,7 @@ const SiderContent = (props: IProps) => {
   const items = useMemo(
     () =>
       tabItems
-        .filter((pageItem) => visibleKeys.includes(pageItem.key))
+        .filter((pageItem) => !pageItem.hideMenu && visibleKeys.includes(pageItem.key))
         .map((pageItem) => {
           const { key, ChildComponent, destroyOnHidden = false, disabled, forceRender = false } = pageItem;
           return {

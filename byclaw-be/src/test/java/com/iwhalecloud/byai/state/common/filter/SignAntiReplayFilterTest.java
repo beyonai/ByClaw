@@ -43,4 +43,20 @@ class SignAntiReplayFilterTest {
 
         assertThat(filterChain.getRequest()).isSameAs(request);
     }
+
+    @Test
+    void letsOrchestratorRuntimeUseBeyondTokenWithoutCommonRequestSignature() throws Exception {
+        SignAntiReplayFilter filter = new SignAntiReplayFilter();
+        SignAntiReplayConfig config = new SignAntiReplayConfig();
+        config.setEnabled(true);
+        ReflectionTestUtils.setField(filter, "signProperties", config);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST",
+            "/byaiService/internal/v1/orchestrators/resolve-runtime");
+        request.setServletPath("/internal/v1/orchestrators/resolve-runtime");
+        MockFilterChain filterChain = new MockFilterChain();
+
+        filter.doFilter(request, new MockHttpServletResponse(), filterChain);
+
+        assertThat(filterChain.getRequest()).isSameAs(request);
+    }
 }

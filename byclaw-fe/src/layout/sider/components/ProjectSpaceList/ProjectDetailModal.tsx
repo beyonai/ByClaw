@@ -63,6 +63,7 @@ import {
   deleteProjectSpaceFile,
   deleteProjectRepo,
   deleteScanSource,
+  getOperationTask,
   getOperationRequirement,
   getProject,
   getTaskChanges,
@@ -86,6 +87,8 @@ import {
   splitTask,
   startDwsDeviceAuth,
   startProjectInit,
+  startArchitectChat,
+  startRequirementClarify,
   startOperationRequirement,
   toggleScanSource,
   triggerScan,
@@ -107,6 +110,7 @@ import { getSandboxInfo, launchSandboxByUserCode, navigateSandboxBrowser, type S
 import SessionOverviewDrawer from './SessionOverviewDrawer';
 import MarkdownField from './components/MarkdownField';
 import TaskDetailDrawer from './TaskDetailDrawer';
+import { getDevloopTaskTypeIcon, normalizeDevloopTaskType, type DevloopTaskType } from './devloopTaskType';
 import {
   OperationAccountPanel,
   OperationRequirementStartModal,
@@ -135,6 +139,7 @@ import { DragType } from '@/components/QueryInput/withDrag';
 import useGlobal from '@/hooks/useGlobal';
 import useAppStore from '@/models/common/useAppStore';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
+import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
 import useFilePreviewActions from '@/layout/sider/components/FileSiderPanel/hooks/useFilePreviewActions';
@@ -163,9 +168,11 @@ import { sessionHandler } from '@/utils/session';
 import type { ISession } from '@/typescript/session';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { ResourceTypeMap } from '@/constants/resource';
+import { setAgentCache } from '@/components/QueryInput/RichInput/agentCache';
+import getElementData from '@/components/QueryInput/RichInput/utils/getElementData';
+import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
+import { agentTypeMap } from '@/constants/agent';
 import ProjectMemberList from './ProjectMemberList';
-import Integration from './Integration';
-import ProjectDefaultAgentPanel from '@/pages/projectSpace/components/ProjectDefaultAgentPanel';
 import RequirementSplitModal from './RequirementSplitModal';
 import type { SplitTaskDraft } from './RequirementSplitModal/types';
 import ListEndMessage from './ListEndMessage';
@@ -335,7 +342,7 @@ const getTaskStatusMeta = (status?: string) => {
   if (['完成', '已完成', 'done', 'completed'].includes(normalizedStatus)) {
     return { labelId: 'task.status.completed', className: 'Done' };
   }
-  if (['进行中', 'doing', 'running', 'in_progress'].includes(normalizedStatus)) {
+  if (['进行中', '运行中', 'doing', 'running', 'in_progress'].includes(normalizedStatus)) {
     return { labelId: 'task.status.inProgress', className: 'Running' };
   }
   if (['暂停', 'paused', 'pause'].includes(normalizedStatus)) {
@@ -346,6 +353,12 @@ const getTaskStatusMeta = (status?: string) => {
   }
   if (['失败', 'failed', 'error'].includes(normalizedStatus)) {
     return { labelId: 'task.status.failed', className: 'Failed' };
+  }
+  if (['部分失败', '混合状态', 'mixed'].includes(normalizedStatus) || normalizedStatus.includes('混合')) {
+    return { labelId: 'task.status.mixed', className: 'Mixed' };
+  }
+  if (['待处理', '待开始', 'pending'].includes(normalizedStatus)) {
+    return { labelId: 'task.status.pending', className: 'Pending' };
   }
   return { labelId: 'task.status.pending', className: 'Pending' };
 };
@@ -441,12 +454,28 @@ const normalizeOperationAccounts = (detail?: OperationProjectDetailData | null):
 // 列表和详情需兼容后端的旧枚举值，前端统一显示原型中的四类运营需求。
 const normalizeOperationTaskType = (task: any): OperationTaskType => {
   const taskType = `${task?.taskType || task?.operationType || task?.type || ''}`.trim().toLowerCase();
+  if (
+    ['object_discovery', 'object-discovery', 'object discovery', 'objectdiscovery'].includes(taskType) ||
+    `${task?.templateName || ''}`.includes('对象发现') ||
+    `${task?.templateId || ''}` === '-2006'
+  ) {
+    return 'object_discovery';
+  }
   if (['knowledge', 'knowledge_organization', 'knowledge_organize', 'knowledge整理', '知识整理'].includes(taskType)) {
     return 'knowledge';
   }
   if (['content', 'publish', 'content_creation', 'content_publish'].includes(taskType)) return 'content';
   if (['analyze', 'analysis', 'analytics', 'data_analysis'].includes(taskType)) return 'analyze';
   return 'collect';
+};
+
+// 四角色各配一组图标配色，与运营任务图标同一套做法；普通会话沿用任务卡默认的绿色。
+const DEVELOP_TASK_TYPE_ICON_CLASSES: Record<DevloopTaskType, string> = {
+  architect: styles.detailTaskIconArchitect,
+  requirement: styles.detailTaskIconRequirement,
+  coder: styles.detailTaskIconCoder,
+  tester: styles.detailTaskIconTester,
+  chat: styles.detailTaskIconChat,
 };
 
 // 工作流的运行状态来源不同，下方统一映射给时间轴的状态枚举。
@@ -666,6 +695,37 @@ const normalizeOperationIdentifierList = (rawValue: unknown): OperationIdentifie
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean);
+};
+
+// 任务详情返回的执行数字员工字段存在多种历史命名，统一取第一个可用 ID 作为会话默认 @ 员工。
+const getOperationTaskAgentId = (task: any, operationAgents: OperationAgentOption[] = []) => {
+  const rootConfig = parseOperationConfig(task?.operationConfig || task?.config);
+  const agentIds = normalizeOperationIdentifierList(
+    task?.agentIds ??
+      task?.executorAgentIds ??
+      task?.agentId ??
+      task?.agentSelection?.executorAgentIds ??
+      rootConfig.agentSelection?.executorAgentIds ??
+      task?.operationAgentIds
+  );
+  if (agentIds.length) return `${agentIds[0]}`;
+
+  const fallbackId =
+    task?.controllerAgentId ?? task?.agentSelection?.controllerAgentId ?? rootConfig.agentSelection?.controllerAgentId;
+  if (fallbackId !== undefined && fallbackId !== null && `${fallbackId}` !== '') return `${fallbackId}`;
+
+  const executorName = Array.isArray(task?.executorAgentNames)
+    ? task.executorAgentNames[0]
+    : task?.executorAgentName || task?.executorName || task?.agentName;
+  const nameMatchedAgentId = operationAgents.find((agent) => agent.label === executorName)?.value;
+  if (nameMatchedAgentId !== undefined && nameMatchedAgentId !== null) return `${nameMatchedAgentId}`;
+
+  // 普通项目/研发任务的列表详情可能只返回会话对象字段，仍按详情中的 DigEmployee 员工兜底。
+  const sessionObjectType = `${task?.objectType || ''}`.toLowerCase();
+  if (sessionObjectType === 'digemployee' && task?.objectId !== undefined && task?.objectId !== null) {
+    return `${task.objectId}`;
+  }
+  return '';
 };
 
 type ResourceFileScope = 'current' | 'all';
@@ -948,7 +1008,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
-  const { EventEmitter, sessionId: activeChatSessionId, setSessionId } = useGlobal();
+  const sessionList = useSelector(({ session }: any) => session?.sessionList || []);
+  const { EventEmitter, sessionId: activeChatSessionId, setAgentId, setSessionId } = useGlobal();
   const activeSiderAgent = useActiveSiderAgent();
   const { setDetailPanel, clearDetailPanel } = React.useContext(SiderContentContext);
   const [activeTab, setActiveTab] = useState('tasks');
@@ -959,6 +1020,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 工作区初始化配置窗:pending 时从仓库管理触发,复用新建向导 step3 的建索引/技能包配置。
   const [initModalOpen, setInitModalOpen] = useState(false);
   const [initStarting, setInitStarting] = useState(false);
+  // 与 initStarting 分开:两段是两个按钮两个接口,共用一个 loading 会让建工作区时「去跟架构聊天」也跟着转。
+  const [architectChatStarting, setArchitectChatStarting] = useState(false);
   const [initBuildIndex, setInitBuildIndex] = useState(false);
   const [initSkillPackages, setInitSkillPackages] = useState<string[]>([]);
   const [requirements, setRequirements] = useState<RequirementItem[]>([]);
@@ -999,10 +1062,34 @@ const ProjectDetailPanel: React.FC<Props> = ({
     () =>
       (project?.resources || project?.boundResources || [])
         .filter((resource) => resource.resourceType === 'ontology')
-        .map((resource) => ({
-          value: resource.resourceId,
-          label: resource.resourceName || `${resource.resourceId}`,
-        })),
+        .map((resource) => {
+          const resourceDetail = resource as typeof resource & Record<string, any>;
+          const code = resourceDetail.objectCode || resourceDetail.resourceCode || resourceDetail.code || '';
+          const name = resource.resourceName || resourceDetail.objectName || resourceDetail.name || code;
+          const description =
+            resourceDetail.objectDesc || resourceDetail.resourceDesc || resourceDetail.description || '';
+          return {
+            value: resource.resourceId,
+            label: name,
+            // 绑定资源接口有时只返回 ID/名称，保留标准字段，避免提交时 code 退化为 resourceId。
+            raw: {
+              ...resourceDetail,
+              id: resourceDetail.id,
+              objectId: resourceDetail.objectId,
+              resourceId: resource.resourceId,
+              baseId: resourceDetail.baseId,
+              code,
+              objectCode: resourceDetail.objectCode || code,
+              resourceCode: resourceDetail.resourceCode || code,
+              name,
+              objectName: resourceDetail.objectName || name,
+              resourceName: resource.resourceName || name,
+              description,
+              objectDesc: resourceDetail.objectDesc || description,
+              resourceDesc: resourceDetail.resourceDesc || description,
+            },
+          };
+        }),
     [project?.boundResources, project?.resources]
   );
   const boundProjectAgents = useMemo<OperationSelectOption[]>(
@@ -1034,6 +1121,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [operationTaskSplitTarget, setOperationTaskSplitTarget] = useState<any>(null);
   const [operationTaskTemplateTarget, setOperationTaskTemplateTarget] = useState<any>(null);
   const [operationTaskExecuting, setOperationTaskExecuting] = useState(false);
+  // 任务会话详情请求可能乱序返回，只允许最后一次点击继续切换会话，避免旧员工覆盖当前会话。
+  const taskSessionOpenVersionRef = useRef(0);
   const [resourceView, setResourceView] = useState<ResourceView>('shared');
   // 会话资源范围由二级 Tab 决定，避免内容区再次出现重复的“当前/全部”筛选。
   const resourceFileScope: ResourceFileScope = resourceView === 'sessionAll' ? 'all' : 'current';
@@ -1201,8 +1290,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const isDevelopProject = developProjectEnabled && projectType === 'develop';
   // 研发项目工作区初始化未就绪(pending/initializing)前禁止建需求/启动任务;普通项目与存量(无值)视为就绪。
   const developInitReady = !isDevelopProject || !project?.initStatus || project.initStatus === 'ready';
-  // 区分两种未就绪态:pending 从未触发初始化(引导去仓库管理点初始化),initializing 已触发在后台跑(转圈等待)。
+  // 三种未就绪态:pending 从未触发初始化(引导去仓库管理点初始化);initializing 服务端正在建工作区(转圈);
+  // initialized 工作区已建好,再按有没有会话分「等用户点去聊」与「员工在聊」——下发聊天不换状态,只多一个会话ID,
+  // 状态往回跳会让用户以为初始化退回重来了。
   const developInitPending = isDevelopProject && project?.initStatus === 'pending';
+  const developInitInitialized = isDevelopProject && project?.initStatus === 'initialized';
+  const architectChatting = developInitInitialized && Number(project?.initSessionId || 0) > 0;
+  const developInitWaitingChat = developInitInitialized && !architectChatting;
   // 运营能力与项目类型静态参数共用开关，避免未启用的环境误展示运营工作台。
   const isOperationProject = operationProjectEnabled && projectType === 'operation';
   const fileResourceId = activeSiderAgent.resourceId || (project?.resourceId ? `${project.resourceId}` : '');
@@ -1213,8 +1307,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
   });
   // 研发项目展示扫描需求；运营项目展示独立运营需求，两者共用需求页签但数据链路隔离。
   const showRequirementsTab = isDevelopProject || isOperationProject;
-  // 集成测试依赖研发仓库和代码任务，运营项目不展示该入口。
-  const showIntegrationTab = isDevelopProject;
   const showMembersTab = isDevelopProject || isOperationProject || !!project?.sharedFlag;
   const canEnterDetailTaskSession = useMemo(
     () => isCurrentUserTaskAssignee(detailTask, userInfo),
@@ -1222,36 +1314,70 @@ const ProjectDetailPanel: React.FC<Props> = ({
   );
 
   const handleOpenTaskSession = useCallback(
-    (task: any) => {
+    async (task: any) => {
       if (!task?.sessionId) {
         message.warning(t('task.noSession'));
         return;
       }
+      const openVersion = ++taskSessionOpenVersionRef.current;
+
+      // 运营任务列表只返回摘要字段；进入会话前补查详情，确保 @ 员工来源始终是详情接口的 agentIds。
+      let taskDetail = task;
+      if (isOperationProject && task.taskId) {
+        try {
+          const response = await getOperationTask(Number(task.taskId));
+          const detailData =
+            response?.data && typeof response.data === 'object' && !Array.isArray(response.data)
+              ? response.data
+              : response;
+          const resolvedDetail = detailData?.task && typeof detailData.task === 'object' ? detailData.task : detailData;
+          if (resolvedDetail && typeof resolvedDetail === 'object') {
+            taskDetail = { ...task, ...resolvedDetail };
+          }
+        } catch (error) {
+          // 详情接口失败时继续使用列表摘要，避免因为员工信息补查失败而无法打开已有会话。
+          console.warn('Failed to load operation task detail before opening session:', error);
+        }
+      }
+      if (openVersion !== taskSessionOpenVersionRef.current) return;
 
       // 任务列表单击直接进入关联会话，并补齐会话缓存和项目上下文。
-      const normalizedTaskSession = normalizeTaskSession(task, projectId, t);
+      const normalizedTaskSession = normalizeTaskSession(taskDetail, projectId, t);
+      // 研发任务接口只返回员工名称时，从已缓存的会话详情补取 objectId，避免进入会话后没有默认 @。
+      const cachedTaskSession = sessionList.find(
+        (cachedSession: any) => `${cachedSession?.sessionId}` === normalizedTaskSession.sessionId
+      );
+      const taskAgentId =
+        getOperationTaskAgentId(taskDetail, operationAgents) ||
+        getOperationTaskAgentId(cachedTaskSession, operationAgents);
       const taskSessionPayload = {
-        ...task,
+        ...taskDetail,
         sessionId: normalizedTaskSession.sessionId,
         sessionName: normalizedTaskSession.sessionName,
+        // 显式清空旧会话员工字段；详情没有员工时也不能继续沿用上一个任务的员工。
+        objectId: taskAgentId || undefined,
+        objectType: taskAgentId ? 'DigEmployee' : undefined,
       };
       // 新增流程自行计算稳定主题色；二次更新只回填列表解析出的头像，避免 undefined 覆盖默认会话头像。
       const taskSessionUpdatePayload = {
         ...taskSessionPayload,
         avatar: normalizedTaskSession.avatar,
       };
-      const targetProjectId = [projectId, task.projectId]
+      const targetProjectId = [projectId, taskDetail.projectId]
         .map((candidateProjectId) => Number(candidateProjectId))
         .find(
           (candidateProjectId) =>
             Number.isFinite(candidateProjectId) && (candidateProjectId === -1 || candidateProjectId > 0)
         );
 
+      // 任务详情切换时只使用当前任务员工，清除该会话之前残留的多员工输入草稿。
+      clearEasyConfirmInputDraft(normalizedTaskSession.sessionId);
+
       if (targetProjectId !== undefined) {
         EventEmitter.emit('projectSpace-session-context', {
-          sessionId: `${task.sessionId}`,
+          sessionId: normalizedTaskSession.sessionId,
           projectId: targetProjectId,
-          projectName: project?.projectName || task.projectName,
+          projectName: project?.projectName || taskDetail.projectName,
         });
         dispatch({
           type: 'session/addSession',
@@ -1261,13 +1387,16 @@ const ProjectDetailPanel: React.FC<Props> = ({
           type: 'session/updateSession',
           payload: { ...taskSessionUpdatePayload, projectId: targetProjectId },
         });
-        setSessionId?.(String(task.sessionId));
+        setAgentId?.(taskAgentId || '');
+        setSessionId?.(normalizedTaskSession.sessionId);
         navigate('/chat', {
           state: {
             keepSiderActiveKey: 'sessions',
             from: 'projectSpace',
             projectId: targetProjectId,
-            projectName: project?.projectName || task.projectName,
+            projectName: project?.projectName || taskDetail.projectName,
+            selectedAgentId: taskAgentId || undefined,
+            selectedAgentObjectType: taskAgentId ? 'DigEmployee' : undefined,
           },
         });
         return;
@@ -1275,10 +1404,24 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
       dispatch({ type: 'session/addSession', payload: taskSessionPayload });
       dispatch({ type: 'session/updateSession', payload: taskSessionUpdatePayload });
-      setSessionId?.(String(task.sessionId));
+      setAgentId?.(taskAgentId || '');
+      setSessionId?.(normalizedTaskSession.sessionId);
       navigate('/chat');
     },
-    [EventEmitter, dispatch, navigate, project?.projectName, projectId, setSessionId, t]
+    [
+      EventEmitter,
+      dispatch,
+      getOperationTask,
+      isOperationProject,
+      navigate,
+      operationAgents,
+      project?.projectName,
+      projectId,
+      sessionList,
+      setAgentId,
+      setSessionId,
+      t,
+    ]
   );
 
   // 只读查看别人任务的会话:复用全局回放 Drawer 的 preview 机制,有历史消息、无输入框,不能对话。
@@ -2265,9 +2408,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
     ]
   );
 
-  // 运营任务执行入口只打开任务模板页面，不进入研发项目的多仓库拆分流程。
+  // 运营任务执行入口只打开任务模板页面；待处理与部分失败均可再次进入执行。
   const handleOpenOperationTaskExecute = useCallback((task: any) => {
-    if (!task || task.sessionId || task.status !== 'todo') return;
+    if (!task) return;
+    const status = `${task.status || ''}`.trim().toLowerCase();
+    const canExecute =
+      status === 'mixed' || (!task.sessionId && ['todo', 'pending', 'not_started', 'waiting'].includes(status));
+    if (!canExecute) return;
     setDetailTask(null);
     setOperationTaskTemplateTarget(task);
   }, []);
@@ -2960,11 +3107,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
       setLastLog(null);
     }
     void fetchDetailData().then((initialTasks) => {
-      if (!showRequirementsTab || !Array.isArray(initialTasks) || initialTasks.length > 0) return;
+      // 研发项目已没有需求页签，空任务时不能再自动跳转；运营项目仍保留需求页。
+      if (!isOperationProject || !Array.isArray(initialTasks) || initialTasks.length > 0) return;
       // 仅在用户仍停留在默认任务页签时自动跳转，避免覆盖用户加载期间的主动切换。
       setActiveTab((currentTab) => (currentTab === 'tasks' ? 'requirements' : currentTab));
     });
-  }, [EventEmitter, fetchDetailData, isDevelopProject, showRequirementsTab]);
+  }, [EventEmitter, fetchDetailData, isDevelopProject, isOperationProject]);
 
   useEffect(() => {
     // 切换项目后默认回到共享文件，避免运营项目沿用研发项目的代码变更视图。
@@ -3085,15 +3233,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const tabItems = useMemo(
     () => [
-      // 项目小详情优先展示需求入口，任务和资源依次后置。
-      ...(showRequirementsTab ? [{ key: 'requirements', label: t('tabs.requirements') }] : []),
+      // 研发项目的需求入口已迁到应用级「自动化」页；运营项目的账号面板与运营需求表单仍以需求页为宿主，故保留。
+      ...(isOperationProject ? [{ key: 'requirements', label: t('tabs.requirements') }] : []),
       { key: 'tasks', label: t('tabs.tasks') },
-      // 数字员工与集成测试都是研发闭环能力,仅研发项目可见;数字员工排在成员前。
-      ...(isDevelopProject ? [{ key: 'digitalAgents', label: t('tabs.digitalAgents') }] : []),
       ...(showMembersTab ? [{ key: 'members', label: t('tabs.members') }] : []),
-      ...(showIntegrationTab ? [{ key: 'integration', label: t('tabs.integration') }] : []),
     ],
-    [isDevelopProject, showIntegrationTab, showMembersTab, showRequirementsTab, t]
+    [isOperationProject, showMembersTab, t]
   );
 
   const detailPanelTabCountClass = styles[`projectDetailPanelTabCount${tabItems.length}`] || '';
@@ -3112,11 +3257,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
     sourceRepoDefaultedRef.current = false;
     resetSourceForm(type);
     setSourceModalOpen(true);
-  };
-
-  const handleHeaderAdd = () => {
-    if (!showRequirementsTab) return;
-    openAddSourceModal();
   };
 
   const handleRefreshRequirements = useCallback(async () => {
@@ -3640,7 +3780,54 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setInitModalOpen(true);
   };
 
-  // 触发工作区初始化:下发建索引/技能包配置,后端置 initializing。成功后关窗并通知父级刷新 initStatus。
+  // 跳进架构员工那条初始化会话。与需求/测试会话入口同一套动作,少任何一步都会出问题:
+  // agentCache 决定输入框的 @ 能不能查到人(项目维度员工不在 redux 员工列表里,查不到会兜底成「AI 助手」);
+  // addSession + 会话上下文让右侧标题与项目归属当场正确;setSessionId 才是真正打开这条会话;
+  // state 里的 selectedAgentId 供聊天页挂载后恢复 @(不能在这里直接 setAgentId,挂载时会被清一次)。
+  const openArchitectSession = (sessionId?: string, agentId?: string, agentName?: string) => {
+    if (!sessionId || !projectId) return;
+    const sessionIdText = String(sessionId);
+    clearEasyConfirmInputDraft(sessionIdText);
+    if (agentId && agentName) {
+      setAgentCache(
+        getElementData(ResourceType.digitalEmployee, {
+          agentId,
+          name: agentName,
+          agentType: agentTypeMap.agent,
+        })
+      );
+    }
+    EventEmitter.emit('projectSpace-session-context', {
+      sessionId: sessionIdText,
+      projectId,
+      projectName: project?.projectName,
+    });
+    dispatch({
+      type: 'session/addSession',
+      payload: {
+        sessionId: sessionIdText,
+        sessionName: `${t('initConfig.title')} - ${project?.projectName || projectId}`,
+        projectId,
+        objectId: agentId || undefined,
+        objectType: agentId ? 'DigEmployee' : undefined,
+      },
+    });
+    setSessionId?.(sessionIdText);
+    navigate('/chat', {
+      state: {
+        keepSiderActiveKey: 'sessions',
+        from: 'projectSpace',
+        projectId,
+        projectName: project?.projectName,
+        sessionId: sessionIdText,
+        selectedAgentId: agentId,
+        selectedAgentObjectType: agentId ? 'DigEmployee' : undefined,
+      },
+    });
+  };
+
+  // 第一段:建工作区。后端同步克隆仓库、挂子模块、装技能包并推送,成功即 initialized。这一段不下发数字员工也不跳聊天,
+  // 聊天是第二段的「去跟架构聊天」。同步接口耗时可能到分钟级,靠 initStarting 压住按钮避免重复提交。
   const handleStartInit = async () => {
     if (!projectId) return;
     setInitStarting(true);
@@ -3650,13 +3837,29 @@ const ProjectDetailPanel: React.FC<Props> = ({
         buildIndex: initBuildIndex,
         skillPackages: initBuildIndex ? initSkillPackages : [],
       });
-      message.success(t('initConfig.started'));
+      message.success(t('initConfig.finished'));
       setInitModalOpen(false);
       onProjectInitStarted?.(projectId);
     } catch (error: any) {
       message.error(error?.message || t('initConfig.startFailed'));
     } finally {
       setInitStarting(false);
+    }
+  };
+
+  // 第二段:下发架构数字员工把工作区骨架聊完,置 initializing。完成信号由后端定时任务读会话状态文件后落库,
+  // 所以这里只通知父级刷新 initStatus,再跳进那条会话看员工干活。
+  const handleEnterArchitectChat = async () => {
+    if (!projectId) return;
+    setArchitectChatStarting(true);
+    try {
+      const res = await startArchitectChat({ projectId });
+      onProjectInitStarted?.(projectId);
+      openArchitectSession(res?.sessionId, res?.architectAgentId, res?.architectAgentName);
+    } catch (error: any) {
+      message.error(error?.message || t('initConfig.chatFailed'));
+    } finally {
+      setArchitectChatStarting(false);
     }
   };
 
@@ -3767,6 +3970,100 @@ const ProjectDetailPanel: React.FC<Props> = ({
       const errorMessage = error?.message || t('requirement.createTaskFailed');
       message.error(errorMessage);
       if (errorMessage.includes('重复启动') || errorMessage.includes('已有进行中的任务')) {
+        void fetchRequirements(sources, requirementSearchKeyword.trim());
+      }
+    } finally {
+      startingRequirementIdsRef.current.delete(requirementId);
+      setStartingRequirementIds((prev) => {
+        const next = new Set(prev);
+        next.delete(requirementId);
+        return next;
+      });
+    }
+  };
+
+  // 已启动的需求跳回它自己那条会话看历史消息。走的是启动时回写的 requirement.sessionId,
+  // 与任务卡的 handleOpenTaskSession 同一套补齐动作(会话上下文 + 会话缓存 + 全局 sessionId),
+  // 少任何一步右侧标题/项目归属就要等下一次列表刷新才对得上。
+  // 不设 agentId:需求会话的员工由后端建会话时定,这里再塞一遍只会覆盖成空。
+  const handleOpenRequirementSession = (requirement: RequirementItem) => {
+    if (!requirement.sessionId) {
+      message.warning(t('task.noSession'));
+      return;
+    }
+    const sessionIdText = String(requirement.sessionId);
+    // 进历史会话前清掉该会话遗留的多员工输入草稿,避免上一次退出时的半截输入又冒出来。
+    clearEasyConfirmInputDraft(sessionIdText);
+    if (projectId) {
+      EventEmitter.emit('projectSpace-session-context', {
+        sessionId: sessionIdText,
+        projectId,
+        projectName: project?.projectName,
+      });
+    }
+    dispatch({
+      type: 'session/addSession',
+      payload: { sessionId: sessionIdText, sessionName: requirement.title, projectId },
+    });
+    setSessionId?.(sessionIdText);
+    navigate('/chat', {
+      state: {
+        keepSiderActiveKey: 'sessions',
+        from: 'projectSpace',
+        projectId,
+        projectName: project?.projectName,
+      },
+    });
+  };
+
+  // 需求的第二个启动入口:后端先建会话并下发需求数字员工,前端拿到 sessionId 直接进这个会话继续聊。
+  // 与拆单入口二选一 —— 回写的是同一个需求 sessionId,启动后两个入口都变「已启动」,后端闸门兜底防并发双击。
+  const handleStartRequirementClarify = async (requirement: RequirementItem) => {
+    if (!projectId) {
+      message.warning(t('message.selectProjectFirst'));
+      return;
+    }
+    const requirementId = requirement.itemId;
+    if (startingRequirementIdsRef.current.has(requirementId)) return;
+    startingRequirementIdsRef.current.add(requirementId);
+    setStartingRequirementIds((prev) => new Set(prev).add(requirementId));
+    try {
+      const res = await startRequirementClarify({ projectId, sourceItemId: Number(requirementId) });
+      const clarifySessionId = res?.sessionId;
+      if (!clarifySessionId) {
+        message.error(t('requirement.clarifyFailed'));
+        return;
+      }
+      setRequirements((prev) =>
+        prev.map((item) => (item.itemId === requirementId ? { ...item, sessionId: clarifySessionId } : item))
+      );
+      setDetailReq(null);
+      message.success(t('requirement.clarifySuccess'));
+      // 会话已落库并绑好项目,进会话前补齐会话缓存与项目上下文,否则右侧标题/归属要等下一次列表刷新才对。
+      const sessionIdText = String(clarifySessionId);
+      EventEmitter.emit('projectSpace-session-context', {
+        sessionId: sessionIdText,
+        projectId,
+        projectName: project?.projectName,
+      });
+      dispatch({
+        type: 'session/addSession',
+        payload: { sessionId: sessionIdText, sessionName: requirement.title, projectId },
+      });
+      setSessionId?.(sessionIdText);
+      navigate('/chat', {
+        state: {
+          keepSiderActiveKey: 'sessions',
+          from: 'projectSpace',
+          projectId,
+          projectName: project?.projectName,
+        },
+      });
+    } catch (error: any) {
+      const errorMessage = error?.message || t('requirement.clarifyFailed');
+      message.error(errorMessage);
+      // 已被另一入口占住时列表里的「未启动」是脏的,重拉一次让按钮立刻反映真实状态。
+      if (errorMessage.includes('重复启动')) {
         void fetchRequirements(sources, requirementSearchKeyword.trim());
       }
     } finally {
@@ -4237,15 +4534,19 @@ const ProjectDetailPanel: React.FC<Props> = ({
     return (
       <div className={styles.requirementDetailFooter}>
         {isStarted ? (
-          <Button disabled>{t('requirement.started')}</Button>
+          // 已启动后这里是唯一能回到那条需求会话的入口,所以给成可点的主按钮而不是禁用态标签。
+          <Button type="primary" icon={<CommentOutlined />} onClick={() => handleOpenRequirementSession(requirement)}>
+            {t('requirement.viewSession')}
+          </Button>
         ) : (
           <Tooltip title={developInitReady ? '' : t('initGuard.task')} placement="top">
+            {/* 当前只放「去聊天完成需求」这一条路。拆单入口(setSplitRequirement + 拆单窗 + handleConfirmSplit)
+                整套代码保留未删,想放回来就是把这里换回 Dropdown.Button 并把 onClick 接回 setSplitRequirement。 */}
             <Button
               type="primary"
               loading={isStarting}
               disabled={isStarting || !developInitReady}
-              // V2:同样先弹拆单窗确认多仓库任务,确认后再启动。
-              onClick={() => setSplitRequirement(requirement)}
+              onClick={() => void handleStartRequirementClarify(requirement)}
             >
               {t(isStarting ? 'requirement.starting' : 'requirement.start')}
             </Button>
@@ -4263,7 +4564,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
     const sourceLabel = getSourceLabel(detailReq.manualSourceType || detailReq.sourceType, t);
     const scored = detailReq.score !== null && detailReq.score !== undefined;
     const createTime = detailReq.createTime ? dayjs(detailReq.createTime).format('YYYY-MM-DD HH:mm') : '-';
-    const productContent = detail.summary || detailReq.productContent || t('common.emptyValue');
     const originalContent =
       detailReq.originalContent ||
       detailReq.content ||
@@ -4328,11 +4628,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 </div>
               )}
             </div>
-          </section>
-
-          <section className={styles.requirementDetailSection}>
-            <h3>{t('requirement.detail.productContent')}</h3>
-            <div className={styles.requirementDetailText}>{productContent}</div>
           </section>
 
           <section className={styles.requirementDetailSection}>
@@ -4977,16 +5272,22 @@ const ProjectDetailPanel: React.FC<Props> = ({
                         }`}
                       >
                         {isStarted ? (
+                          // 已启动的行不再显示启动按钮,给一颗「详情」开抽屉:跳会话那颗放在抽屉里,
+                          // 列表这一层不直接跳走,避免误点整行/按钮就离开项目页。
+                          // 整行点击本来也开抽屉,这里 stopPropagation 只是避免抽屉被开两次。
                           <Button
                             size="small"
                             className={`${styles.detailRequirementAction} ${styles.detailRequirementStartedAction}`}
-                            disabled
-                            onClick={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setDetailReq(item);
+                            }}
                           >
-                            {t('requirement.started')}
+                            {t('requirement.viewDetail')}
                           </Button>
                         ) : (
                           <Tooltip title={developInitReady ? '' : t('initGuard.task')} placement="top">
+                            {/* 当前只放「去聊天完成需求」这一条路;拆单入口代码保留未删,见详情页脚同处注释。 */}
                             <Button
                               size="small"
                               className={`${styles.detailRequirementAction} ${styles.detailRequirementStartAction}`}
@@ -4994,8 +5295,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                               disabled={isStarting || !developInitReady}
                               onClick={(event) => {
                                 event.stopPropagation();
-                                // V2:先弹拆单窗确认多仓库任务,确认后再启动。
-                                setSplitRequirement(item);
+                                void handleStartRequirementClarify(item);
                               }}
                             >
                               {t(isStarting ? 'requirement.starting' : 'requirement.start')}
@@ -5501,7 +5801,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 {intl.formatMessage({ id: 'projectSpace.operation.task.detail.viewSession' })}
               </Button>
             )
-          ) : detailTask.status === 'todo' ? (
+          ) : detailTask.status === 'todo' || detailTask.status === 'mixed' ? (
             <Button
               type="primary"
               icon={<PlayCircleOutlined />}
@@ -5672,6 +5972,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
                     content: operationStyles.operationTaskIconContent,
                     analyze: operationStyles.operationTaskIconAnalyze,
                   }[operationTaskType];
+                  // 研发任务的四角色类型，取值见后端 DevloopTaskType；运营任务走 operationType，两套不通用。
+                  const developTaskType = normalizeDevloopTaskType(task);
+                  const developTaskTypeLabel = developTaskType ? t(`task.type.${developTaskType}`) : '';
+                  const developTaskTypeIconClass = developTaskType
+                    ? DEVELOP_TASK_TYPE_ICON_CLASSES[developTaskType]
+                    : '';
                   const showStructuredTaskMeta = isDevelopProject || isOperationProject;
                   // 优先按用户 ID 判断处理人；历史数据缺失 ID 时再用用户名兜底，避免同名用户误判。
                   const isCurrentUserAssignee = isCurrentUserTaskAssignee(task, userInfo);
@@ -5688,20 +5994,24 @@ const ProjectDetailPanel: React.FC<Props> = ({
                     rawTaskStatusLabel.includes('运行') ||
                     rawTaskStatusLabel.includes('完成') ||
                     rawTaskStatusLabel.includes('失败') ||
-                    rawTaskStatusLabel.includes('暂停')
+                    rawTaskStatusLabel.includes('暂停') ||
+                    rawTaskStatusLabel.includes('混合') ||
+                    rawTaskStatusLabel.includes('待处理')
                       ? task.statusLabel
                       : task.operationState || task.status || task.taskStatus || task.currentStatus;
                   const taskStatusMeta = getTaskStatusMeta(taskStatusValue);
                   // 下拉菜单展开时维持状态标签的让位，防止悬浮菜单遮挡右侧内容。
                   const isTaskActionOpen = openTaskActionId === `${task.taskId}`;
                   const isTaskSelected = selectedTaskId === `${task.taskId}`;
-                  // 统一按最终展示状态判断，兼容历史数据同时返回 operationState=doing、status=todo 的情况。
+                  // 待处理可首次执行；部分失败（mixed）允许再次进入执行流程。
                   const normalizedOperationTaskStatus = `${taskStatusValue || ''}`.trim().toLowerCase();
                   const canExecuteOperationTask =
                     isOperationProject &&
-                    ['todo', 'pending', 'not_started', 'waiting'].includes(normalizedOperationTaskStatus) &&
-                    taskStatusMeta.className === 'Pending' &&
-                    !task.sessionId;
+                    (taskStatusMeta.className === 'Mixed' ||
+                      normalizedOperationTaskStatus === 'mixed' ||
+                      (['todo', 'pending', 'not_started', 'waiting'].includes(normalizedOperationTaskStatus) &&
+                        taskStatusMeta.className === 'Pending' &&
+                        !task.sessionId));
                   const operationTaskActionItems: MenuProps['items'] = [
                     { key: 'view-detail', label: t('task.viewDetail') },
                   ];
@@ -5731,10 +6041,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
                       }}
                     >
                       {isDevelopProject ? (
-                        <div className={styles.detailTaskIcon}>
-                          {/* 研发任务保持绿色研发图标，区别于普通会话。 */}
-                          <FundProjectionScreenOutlined />
-                        </div>
+                        // 类型未知时沿用原绿色研发图标，保证老数据和后端新增类型都还有图标可显示。
+                        <Tooltip title={developTaskTypeLabel} placement="top">
+                          <div className={`${styles.detailTaskIcon} ${developTaskTypeIconClass}`}>
+                            {getDevloopTaskTypeIcon(developTaskType) || <FundProjectionScreenOutlined />}
+                          </div>
+                        </Tooltip>
                       ) : isOperationProject ? (
                         <Tooltip title={operationTaskTypeLabel} placement="top">
                           <div className={`${operationStyles.operationTaskIcon} ${operationTaskIconClass}`}>
@@ -5894,20 +6206,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
       return renderTasks();
     }
     if (activeTab === 'tasks') {
-      return renderTasks();
-    }
-    if (activeTab === 'digitalAgents') {
-      if (isDevelopProject) {
-        return (
-          <div className={styles.detailEmbeddedContent}>
-            <ProjectDefaultAgentPanel projectId={projectId} active={activeTab === 'digitalAgents'} />
-          </div>
-        );
-      }
-      return renderTasks();
-    }
-    if (activeTab === 'integration') {
-      if (showIntegrationTab) return <Integration active projectId={projectId} repos={repos} />;
       return renderTasks();
     }
     if (activeTab === 'members') {
@@ -6421,13 +6719,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
             bordered
             dataSource={repos}
             renderItem={(repo) => {
-              // 工作区仓库是初始化对象:研发项目未就绪时,该行给出初始化入口。pending 可点触发,initializing 展示进行中禁用态。
+              // 工作区仓库是初始化对象:研发项目未就绪时,该行给出初始化入口。pending 可点触发;
+              // 建工作区中/员工在聊时展示进行中态,但仍保留「重新初始化」入口——重跑第一段克隆装包,卡住时可覆盖重发。
               const isWorkspaceRepo = repo.repoType === 'workspace';
               const showInitAction = isDevelopProject && isWorkspaceRepo && !developInitReady;
+              const initInProgress = project?.initStatus === 'initializing' || architectChatting;
               const initAction = showInitAction
-                ? project?.initStatus === 'initializing'
+                ? initInProgress
                   ? [
-                    // 初始化中:展示进行中态,但仍保留「重新初始化」入口——后端 startProjectInit 幂等,任务中断/卡住时可覆盖重发,避免死 loading。
                     <span key="init-progress" className={styles.repoInitProgress}>
                       <LoadingOutlined spin />
                       {t('repository.initializing')}
@@ -6444,7 +6743,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                       icon={<ThunderboltOutlined />}
                       onClick={openInitModal}
                     >
-                      {t('repository.initWorkspace')}
+                      {developInitInitialized ? t('repository.reinitWorkspace') : t('repository.initWorkspace')}
                     </Button>,
                   ]
                 : [];
@@ -6656,8 +6955,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   );
 
   const detailActionItems: MenuProps['items'] = [
-    // 运营项目通过“新增需求”维护运营需求，不提供研发扫描渠道入口。
-    ...(showRequirementsTab && !isOperationProject ? [{ key: 'add-source', label: t('source.addTitle') }] : []),
+    // 研发扫描渠道统一由应用级「自动化」页维护，项目详情不再提供重复入口。
     // 运营项目的常用新增入口集中到详情右上角更多菜单，和需求页内入口使用同一套打开逻辑。
     ...(isOperationProject
       ? [
@@ -6680,10 +6978,6 @@ const ProjectDetailPanel: React.FC<Props> = ({
   ];
 
   const handleDetailAction = ({ key }: { key: string }) => {
-    if (key === 'add-source') {
-      handleHeaderAdd();
-      return;
-    }
     if (key === 'add-operation-account') {
       handleOpenOperationAccountPanel(true);
       return;
@@ -6763,14 +7057,35 @@ const ProjectDetailPanel: React.FC<Props> = ({
           )}
         </div>
       </div>
-      {/* 工作区初始化未完成时置顶阻塞提示,不能建需求/启动任务。pending 引导去仓库管理点初始化,initializing 转圈等待。 */}
+      {/* 工作区初始化未完成时置顶阻塞提示,不能建需求/启动任务。pending 引导去仓库管理点初始化;
+          initialized 且没会话时,提示下面直接给「去跟架构聊天」按钮走第二段;建工作区中与员工在聊都转圈等待。 */}
       {!developInitReady && (
         <Alert
           className={styles.projectInitAlert}
           type="info"
           showIcon
-          icon={developInitPending ? <ClockCircleOutlined /> : <LoadingOutlined spin />}
-          message={developInitPending ? t('initGuard.bannerPending') : t('initGuard.banner')}
+          icon={developInitPending || developInitWaitingChat ? <ClockCircleOutlined /> : <LoadingOutlined spin />}
+          // 按钮塞在 message 里而不是走 Alert 的 description:一旦传 description,antd 会切到
+          // .ant-alert-with-description,那条规则把 message 顶成 16px 加粗,盖掉这里的 12px 弱化样式。
+          // 按钮仍在文案下方——这条提示就是「下一步该干什么」,动作贴着它最短路径。
+          message={
+            <div className={styles.projectInitAlertBody}>
+              <span>
+                {developInitPending
+                  ? t('initGuard.bannerPending')
+                  : developInitWaitingChat
+                    ? t('initGuard.bannerInitialized')
+                    : architectChatting
+                      ? t('initGuard.banner')
+                      : t('initGuard.bannerInitializing')}
+              </span>
+              {developInitWaitingChat && (
+                <Button type="primary" size="small" loading={architectChatStarting} onClick={handleEnterArchitectChat}>
+                  {t('initGuard.enterArchitectChat')}
+                </Button>
+              )}
+            </div>
+          }
         />
       )}
       {/* 研发项目未配置 GH_TOKEN 时贴一条提醒;点击整条打开友好引导弹窗。以提醒为主,可关闭,不阻塞。 */}
@@ -6846,7 +7161,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
             return;
           }
           setOperationTaskTemplateTarget(null);
-          handleOpenTaskSession({ ...task, sessionId, status: 'doing' });
+          handleOpenTaskSession({
+            ...task,
+            sessionId,
+            status: 'doing',
+            // 任务会话携带模板中选中的数字员工，聊天输入框据此保留默认 @ 对象。
+            objectId: selectedAgentId,
+            objectType: 'DigEmployee',
+          });
         }}
       />
       <RequirementSplitModal

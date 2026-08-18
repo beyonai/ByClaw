@@ -83,7 +83,6 @@ export const fallbackMenuConfig = [
     name: '沙箱配置管理',
     localeId: 'menu.systemParams.sandbox',
     icon: CodeSandboxOutlined,
-    adminVipOnly: true,
   },
   {
     path: '/manager/notification',

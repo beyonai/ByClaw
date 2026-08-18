@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.route;
 
+import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -89,6 +90,9 @@ public class RouteService {
     @Autowired
     private A2aRouteService a2aRouteService;
 
+    @Autowired
+    private ProjectApplicationService projectApplicationService;
+
     /**
      * 判断是否为接口集成类型
      */
@@ -169,7 +173,9 @@ public class RouteService {
         ctx.targetAgentType = targetAgentType;
 
         // 处理 content 中的资源占位符替换，如 {{DIG_EMPLOYEE_10812779}} 替换为 @xxxxx
-        content = replaceResourcePlaceholders(content, resourceList, agentId);
+        // 运营任务自动发送时保留开头的员工引用，普通单员工聊天仍沿用原有的占位符精简逻辑。
+        Long placeholderAgentId = chatDto.isPreserveLeadingDigitalEmployeeMention() ? null : agentId;
+        content = replaceResourcePlaceholders(content, resourceList, placeholderAgentId);
 
         String answerMessageId = StringUtils.isNotEmpty(ctx.assistantChatDto.getResumeMessageId())
             ? ctx.assistantChatDto.getResumeMessageId()
@@ -612,6 +618,12 @@ public class RouteService {
         Map<String, String> channelExtension = chatDto.getChannelExtension();
         if (channelExtension != null && !channelExtension.isEmpty()) {
             metadata.put("channelExtension", channelExtension);
+        }
+        if (chatDto.getProjectId() != null) {
+            JSONObject projectInfo = new JSONObject();
+            projectInfo.put("project_id", chatDto.getProjectId());
+            projectInfo.put("workspace", projectApplicationService.getProjectWorkspacePath(chatDto.getProjectId()));
+            metadata.put("project_info", projectInfo);
         }
 
         List<MessageFileDto> files = chatDto.getFiles();

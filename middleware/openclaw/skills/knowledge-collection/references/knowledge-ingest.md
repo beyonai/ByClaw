@@ -1,7 +1,7 @@
 # Knowledge-base ingest
 
 采集编排器 `knowledge-collection` 拥有入库编排与确认边界；`by-knowledge-manager` 是底层入库执行器。通过 `knowledge-collection` 内的
-`scripts/knowledge-collection-ingest.mjs` 调用它，不得把入库所有权移回 `bycli`。
+`scripts/ingest.mjs` 调用它，不得把入库所有权移回 `bycli`。
 
 ## 调用边界
 
@@ -16,7 +16,7 @@
   （如 `/20260728_211755/`），使同一批采集产物落在同一个知识库目录下、与会话目录一一对应。时间戳来自
   `--session-dir`（或 `--output-dir`）的路径片段而非当前时间：确认值必须与解析结果完全相等，现取时间戳
   两次不会一致。无法从路径推导出时间戳时回退到根目录 `/`。默认值由脚本解析，先跑 `--dry-run` 读取
-  `confirmation.requiredArguments` 即可拿到该次要回传的确认值，不要自行拼接时间戳。
+  `confirmation.requiredArguments` 即可拿到该次要回传的确认值，不要自行拼接时间戳；默认 `/` 也必须展示并确认。
 - 处理当前采集批次时，`ingest` 之前必须先按 [post-processing.md](post-processing.md) 改写选中正文里的 `images/`
   相对链接；相对链接在知识库侧无法解析。入库必须使用持久化模式：目标确认后先用 `upload-images` 把图片上传到
   同一知识库同一目录，把返回的 `linkMap` 写入会话 `.post-processing-inputs/`，再用
@@ -34,17 +34,22 @@
 
 入库结果必须逐篇映射回 inventory `itemId`。只有文章上传成功且对应 build 请求被接受时才记为 success；不等待异步
 索引完成。批量失败且无法确认逐篇结果时记为 unknown，不得清理对应工作副本。结果通过后处理状态脚本写入 run。
+调用脚本时可按 Markdown 输入顺序重复传入 `--item-id <inventory-item-id>`；返回的 `itemResults` 是唯一允许回写
+`run`(旧名 `record-run`)的逐篇结果。只有输入文件名在批次内唯一、上传结果能唯一对应该文件名，并且 build 精确引用该上传结果路径时，
+才可机械映射为 success；任一条件不满足必须返回 `unknown`，不得用模糊文件名匹配猜测 success。`ingest` 将该数组同时放在
+顶层 `itemResults` 和知识库上传结果中，`upload-doc` 直接在顶层返回。
 
 ## 命令路由
 
-脚本路径均相对 `knowledge-collection` Skill 根目录：
+脚本路径均相对 `knowledge-collection` Skill 根目录。两个入口等价，平台命令不要求采集会话：
 
-`node scripts/knowledge-collection-ingest.mjs <command> ...`
+`node scripts/ingest.mjs <command> ...`
+`node scripts/knowledge-collection.mjs <command> ...`
 
 - `list-kb`：发现个人知识库候选，供用户选择目标。
 - `normalize`：在需要时规范化规范的 `collection-result.json`（使用
   `--collection-result-file`）或旧输入。旧参数 `--bycli-json-file`、`--bycli-json` 仅作只读兼容；
-  新产物仍写规范格式。
+  新产物仍写规范格式。规范 collection result 的 `items: []` 会返回 `needsMaterialization: true`，不再被当作损坏 JSON。
 - `ingest`：将用户选中的 Markdown 文件、Markdown 目录或规范化采集结果交给
   `by-knowledge-manager` 执行 upload/build；知识库目标使用 `--knowledge-base-resource-id`，也兼容
   `--knowledge-base-id`（脚本会通过 `list-kb` 将旧数据集 ID 解析为实际资源 ID），目录使用
@@ -61,7 +66,9 @@
 - `upload-doc`：仅在用户选中受支持的文档时直传。脚本支持
   `pdf/docx/pptx/xlsx/csv/txt/md`；知识库目标必须使用 `--knowledge-base-resource-id`，目录使用
   `--directory-path`，并且必须先按上方边界获得用户确认，再传入对应的
-  `--confirmed-knowledge-base-resource-id` 与 `--confirmed-directory-path`。
+  `--confirmed-knowledge-base-resource-id` 与 `--confirmed-directory-path`。批量文档同样可重复传入
+  `--item-id`，返回 `itemResults`；未能证明上传和 build 对应关系的文档只能记为 `unknown`。
 
-具体参数以 `node scripts/knowledge-collection-ingest.mjs --help` 为准。命令和示例中只使用资源 ID、
-目录与本地文件路径等非敏感占位值。
+具体参数以 `node scripts/ingest.mjs --help` 为准。命令和示例中只使用资源 ID、
+目录与本地文件路径等非敏感占位值。后端请求受 `KNOWLEDGE_COLLECTION_BACKEND_TIMEOUT_MS` 截止时间约束；超时或
+无法证明逐篇结果时必须保守保留工作副本并记为 `unknown`。

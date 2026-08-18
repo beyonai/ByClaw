@@ -4,7 +4,7 @@ import type { Dayjs } from 'dayjs';
 export type OperationIdentifier = string | number;
 
 // 运营需求按原型拆成四类；接口适配层负责兼容旧版 publish/content 等历史取值。
-export type OperationTaskType = 'collect' | 'knowledge' | 'content' | 'analyze';
+export type OperationTaskType = 'collect' | 'knowledge' | 'object_discovery' | 'content' | 'analyze';
 
 export type OperationLoginStatus = 'logged_in' | 'logged_out' | 'expired' | 'unknown';
 

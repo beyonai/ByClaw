@@ -19,7 +19,6 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@byclaw/by-conductor": "workspace:*",
-    "@byclaw/by-framework": "1.5.1"
+    "@byclaw/connector-by-framework-common": "workspace:*"
   }
 }

@@ -244,6 +244,7 @@ export class DelegationService {
         }
         execution = await connector.resume(delegation.externalRef, {
           signal: controller.signal,
+          metadata: input.metadata,
           ...(delegation.connectorCursor
             ? { cursor: delegation.connectorCursor }
             : {}),

@@ -1,6 +1,6 @@
 ---
 name: structured-ontology-manager
-description: "开发结构化业务本体模块：选择或新建本体开发工作区，通过多轮对话定义多个结构化本体对象字段，编写跨对象 Action 脚本（脚本通过自动生成的 Mapper SDK 操作服务端数据），本地调试验证后统一提交，发布挂载。适用于从零开发新业务对象和业务 Action，也可续接已有本体开发工作区继续开发。"
+description: "开发结构化业务本体模块：选择或新建本体开发工作区，通过多轮对话定义多个结构化本体对象字段，编写跨对象 Action 脚本（脚本通过自动生成的 Mapper SDK 操作服务端数据）；全部对象与 Action 完成开发和调试验收后，由用户明确选择个人或企业归属并最终确认，才统一提交和发布挂载。适用于从零开发新业务对象和业务 Action，也可续接已有本体开发工作区继续开发。"
 ---
 
 # 本体开发助手
@@ -13,12 +13,12 @@ description: "开发结构化业务本体模块：选择或新建本体开发工
 2. 每次操作前读取 `references/field-rules.md`
 3. 脚本返回 `ok:false` 时，原文告知用户，不猜测原因
 4. `missing` 非空时根据字段列表追问，不填充默认值
-5. **字段 collect 完成（missing 为空）后不 submit**，继续开发其他对象/Action
-6. **`batch_submit.py` 只在用户明确说"提交"时才执行，禁止主动或自动触发提交**
-7. **提交前必须确认所有 Action 均已向用户交付完整说明、获得用户审阅确认并业务验收通过**；有未展示脚本、用户未确认、未测试、仅技术执行通过或业务验收失败的 Action，必须先补齐，不得跳过直接提交
+5. **字段 collect 完成（missing 为空）后不 submit**，继续开发其他对象/Action；全部对象尚未完成时也不得提前引导提交
+6. **`batch_submit.py` 只能在全部对象、Action 开发完成并调试验收通过，且用户完成“发起提交 → 选择发布归属 → 核对清单后最终确认”后执行**。提交就绪不等于提交授权，禁止主动、自动或根据上下文推断触发提交
+7. **提交前必须确认所有对象定义完整，所有 Action 均已向用户交付完整说明、获得用户审阅确认并业务验收通过**；有对象未完成、未展示脚本、用户未确认、未测试、仅技术执行通过或业务验收失败的 Action，必须先补齐，不得跳过直接提交
 8. Action 脚本只通过注入的 mapper 实例操作数据，禁止在脚本内拼接 HTTP 请求
 9. 工作区数量可能很多，**每次会话开始前必须先列出工作区，让用户明确选择目标**
-10. **对象编码必须以用户编码结尾**：格式为 `<business_name>_<user_code>`，其中 `user_code` 从环境变量 `USER_CODE` 读取。例如用户编码为 `u001`，对象业务名为 `travel_application`，则 `entity_code` 为 `travel_application_u001`。**工作区名称（`workspace_name`）不需要拼接用户编码。** 生成编码前必须先获取 `USER_CODE`，不得使用占位符。
+10. **对象编码必须服从工作区返回的版本，且创建后不可修改**：调用 `init_workspace.py` 或 `get_workspace.py` 读取 `entity_code_version`、`workspace_code` 和已有对象完整编码。新工作区 `entity_code_version=v2` 时使用 `<workspace_code>_<business_code>`；历史工作区版本缺失或为空时使用 `<business_code>_<user_code>`，其中 `user_code` 从 `USER_CODE` 读取。模型负责生成并在所有对象、Mapper、实体类、`object_references`、View 和 Relation 中复用最终完整编码，但不得自行生成或改写 `workspace_code`。完整编码只允许 ASCII 字母、数字、下划线，以字母开头且不超过 63 字符；超长时缩短 `business_code`，禁止截断已生成编码。`workspace_name` 不拼接用户编码，工作区始终由 `user_code + workspace_name` 定位。
 11. **Action 参数的术语绑定必须与对应对象字段保持一致**：若参数对应某字段，该字段有 `term_type_code` 则参数也必须绑定相同的 `term_type_code`，字段有 `term_values` 则参数也必须引用相同的枚举（`term_type_code: "<entity_code>_<property_code>"`），不得遗漏或另起一套。
 12. **先定义业务契约，再创建对象和 Action**：无论需求来自上传的设计文档、表格、DDL，还是用户自然语言描述，都必须先整理出需求来源、业务对象、字段语义、对象关系、业务规则、状态机和验收示例；不得直接根据零散关键词生成脚本。
 13. **需求明确时主动推进，需求不明确时精准追问**：可从上下文可靠推断的内容应给出建议并请用户确认；会影响数据模型、计算结果、状态流转、权限或数据安全的歧义必须逐项追问，禁止自行补默认业务规则。
@@ -30,6 +30,10 @@ description: "开发结构化业务本体模块：选择或新建本体开发工
 19. **需求冲突不得静默选择**：文档内部、文档与用户口述、不同轮次对话之间出现冲突时，列出冲突来源、影响和推荐口径，请用户确认后再继续；用户最新明确确认的口径优先，并记录为当前业务契约。
 20. **没有验收证据不得提交**：提交前每个保留的 Action 必须有测试用例、实际结果和断言结论；“已运行”“返回 success”“没有 traceback”均不能作为已调试通过的证据。
 21. **Action 保存后必须向用户交付脚本说明和完整代码**：每次 `collect_action.py` 返回成功后，必须立即在对话中展示该 Action 的入参、出参、处理逻辑、涉及对象及读写操作、异常分支和本次实际保存的完整脚本源码，并请用户确认。完成展示和确认前，禁止开始调试、禁止开发下一个 Action、禁止只回复“Action 已保存”或“开发成功”。
+22. **发布归属必须由用户明确选择**：`batch_submit.py` 为兼容直接调用，在 `owner_type` 为空时默认 `personal`，但 Skill 不得依赖该默认值，也不得从历史发布、工作区状态、请求 Header 或环境变量推断归属。调用前必须明确告诉用户本次将提交到“个人”还是“企业”，并显式传入 `owner_type`；选择发布归属不等于确认提交，选择后仍需展示最终批次清单并单独获得执行确认。
+23. **模糊推进语句不是提交授权**：用户说“继续、完成、可以、下一步、好的、没问题”等，只能用于当前开发或确认语境；在尚未展示明确的最终提交确认问题时，不得解释为提交授权，也不得调用 `batch_submit.py`。
+24. **确认只对当前快照有效**：最终确认后如果对象、字段、Action、View、Relation、发布归属或提交范围发生变化，原确认立即失效，必须重新检查就绪状态、重新展示完整清单并再次确认。
+25. **术语同步字段与表关联字段必须一致**：`term_sync.term_code_field` 是关联键的唯一事实来源。对象型 `LIST_TERM` 的下拉返回值、关系的父表目标字段、子表关联字段、Action 参数类型、父表查询字段和子表落库值必须全部对齐实际生效的 `term_code_field`。禁止术语同步使用系统 `id`，关系或 Action 却使用模型自建业务字段；反向混用同样禁止。未配置或为空时按默认 `id` 处理。
 
 ---
 
@@ -71,30 +75,36 @@ B) 新建工作区
 
 - 有待提交的对象字段未完善（`missing` 非空）→ 提示用户补全字段
 - 有 Action 未达到业务验收通过 → 继续生成/执行验收用例，不得以“脚本能运行”为由跳过
-- 有未提交的对象 → 提示可执行 `batch_submit.py`
+- 有未提交对象，但对象或 Action 尚未全部完成、审阅和调试验收 → 继续开发或验收；此时不得提示或执行 `batch_submit.py`
+- 有未提交对象，且全部对象、Action 及跨 Action 场景均已完成并验收通过 → 仅标记为“已具备提交条件”，进入 Step 4；不得自动执行提交
 - 全部已提交 → 询问是否要添加新对象/Action，或挂载到数字员工
 
 ---
 
 ### Step 1：初始化工作区（新建时）
 
-**首先获取当前用户编码（后续所有对象编码都需要用到）：**
+收集 `workspace_name`（英文 snake_case，不拼接用户编码）和描述，先初始化空工作区。不要在第一次初始化请求中猜测对象编码：
 
 ```bash
-echo $USER_CODE
+python3 scripts/init_workspace.py '{"workspace_name":"<n>","description":"<d>"}'
 ```
 
-收集 `workspace_name`（英文 snake_case，不拼接用户编码）、描述、初始对象列表。**对象编码在业务名后拼接用户编码**：`<business_name>_<user_code>`。
+服务端返回工作区状态后，按以下确定性规则生成每个对象的最终完整编码：
 
-例如用户编码为 `u001`：
-- 工作区名：`travel_reimbursement`（不拼接）
-- 对象编码：`travel_application_u001`、`travel_expense_u001`
-
-```bash
-python3 scripts/init_workspace.py '{"workspace_name":"<n>","workspace_desc":"<d>","objects":["<code1>_<user_code>","<code2>_<user_code>"]}'
+```text
+entity_code_version = "v2"：<workspace_code>_<business_code>
+entity_code_version 缺失/空：<business_code>_<USER_CODE>
+其他版本：停止并原文告知用户不支持该版本
 ```
 
-将返回的内容写入 `workspace/<name>/workspace.json`，创建对应目录骨架。
+例如新工作区返回 `workspace_code=w7k3m9p2x`，业务编码为 `travel_application`、`travel_expense`，则完整编码为：
+
+```text
+w7k3m9p2x_travel_application
+w7k3m9p2x_travel_expense
+```
+
+续接历史工作区时先执行 `get_workspace.py`；若版本字段为空且 `USER_CODE=u001`，则仍使用 `travel_application_u001`。已有对象必须直接读取并复用其 `entity_code`，禁止重新推导。服务端共享工作区文件是唯一事实来源，不在 Skill 本地另存一份 `active.json` 或工作区状态。
 
 ---
 
@@ -129,15 +139,16 @@ python3 scripts/init_workspace.py '{"workspace_name":"<n>","workspace_desc":"<d>
 二、建议对象
   1. employee — 员工
      用途：员工主数据
-     主标识：employee_id（工号）
+     系统主键：id（平台自动生成，不在 fields 中重复创建）
+     业务标识：employee_code（工号）
      是否被其他对象引用：是
 
   2. leave_record — 请假记录
      用途：保存一次请假申请及当前状态
-     归属字段：applicant → employee.employee_id
+     归属字段：employee_id（INTEGER）→ employee.id
 
 三、对象关系
-  leave_record.applicant → employee.employee_id
+  leave_record.employee_id → employee.id
   approval_record.leave_record_id → leave_record.id
 
 四、核心业务规则
@@ -150,7 +161,7 @@ python3 scripts/init_workspace.py '{"workspace_name":"<n>","workspace_desc":"<d>
                      ↘ 已退回
 
 六、待确认项
-  Q-01 关联员工时存 employee.id 还是 employee_id？
+  Q-01 employee 被删除时，关联的 leave_record 是否应禁止删除或保留历史引用？
   Q-02 supervisor 为空时拒绝提交还是跳过审批？
 ```
 
@@ -158,7 +169,7 @@ python3 scripts/init_workspace.py '{"workspace_name":"<n>","workspace_desc":"<d>
 
 只追问会改变业务结果的问题，优先一次提出同一主题下的少量问题：
 
-- 标识与关联：存对象自增 id、业务编码还是名称
+- 标识与关联：对象关联固定存父对象实际生效的 `term_sync.term_code_field` 值（未配置或为空时为系统 `id`）；只追问关联是否必填、删除策略和展示字段。若用户明确要求改用业务字段，必须先修改父对象 `term_code_field`，再同步修改关系、Action 和落库字段
 - 时间与计算：自然日/工作日、首尾是否包含、半天/舍入规则
 - 状态与流程：允许哪些状态流转、谁可以执行、失败后是否回滚
 - 数据边界：是否允许空值、重复值、负数、跨年、跨部门
@@ -173,8 +184,8 @@ python3 scripts/init_workspace.py '{"workspace_name":"<n>","workspace_desc":"<d>
 
 | 规则 ID | 需求来源 | 业务规则 | 对象/字段 | Action | 验收用例 |
 |--------|----------|----------|-----------|--------|----------|
-| R-01 | 设计文档 4.5.3 | 上午到次日下午计 2 天 | leave_record.leave_days | submit_leave | TC-R01-01 |
-| R-02 | 用户确认 | 员工关联统一存工号 | applicant/approver/employee | 所有关联 Action | TC-R02-01 |
+| R-01 | 设计文档 4.5.3 | 上午到次日下午计 2 天 | leave_record.leave_days | leave_record_submit | TC-R01-01 |
+| R-02 | 系统关联约束 | 员工对象关联统一存 employee.id | leave_record.employee_id | 所有关联 Action | TC-R02-01 |
 
 每条核心规则必须至少落实到一个字段、Action 或明确标记为“仅展示/非本体范围”；每个有业务逻辑的 Action 必须能追溯到规则和验收用例。
 
@@ -202,8 +213,8 @@ python3 scripts/get_object_fields.py '{"workspace_name": "<name>", "entity_code"
 4. **字段语义识别 → 主动引导术语绑定**（见下方规则，每个字段推断后必须执行）
 5. 枚举值用 `term_values` 内联；确认绑定系统术语后调 `list_term_types.py` 验证类型存在
 6. 将新字段追加到内存字段列表，调 `collect_object.py` 传入**完整字段列表**（已有字段 + 新增字段）；`missing` 非空时追问，直到 `missing` 为空
-7. 收集与其他对象的关联关系，明确记录 `source_field_code`、目标对象、目标字段、实际存储值和展示值，禁止笼统写成“关联员工/关联申请”
-8. **外键 → 术语同步联动**：发现某对象有外键字段指向另一个对象（父表）时，主动判断父表是否已配置 `term_sync`；若未配置，提示用户为父表启用 `term_sync`，并协助确定 `term_name_field`（通常是父表的名称/标题字段）。父表配置 `term_sync` 后，子表的外键字段可用 `term_type_code: "<parent_entity_code>_<term_name_field>"` 绑定，实现下拉选择父表记录。
+7. 收集与其他对象的关联关系时，先读取父对象实际生效的 `term_code_field`，再明确记录 `source_field_code`、父对象完整编码、目标字段、参数/外键数据类型、实际存储值和展示字段；禁止笼统写成“关联员工/关联申请”，也禁止自行选择另一个父字段
+8. **外键 → 术语同步联动**：发现子对象字段指向父对象时，先读取父对象 `term_sync`；若未配置，提示用户启用并确定 `term_name_field` 和 `term_code_field`，其中 `term_code_field` 未提供时默认 `id`。子表字段绑定 `term_type_code: "<parent_entity_code>_<term_name_field>"` 后，下拉展示 `term_name_field`、返回 `term_code_field`，子表必须保存同一个返回值。
 9. **字段收集完成后（`missing` 为空），主动询问是否需要为该对象启用术语同步**（见下方「对象术语同步引导」）
 10. 对照需求追踪表执行对象完整性检查，确认无遗漏后切换下一个对象
 
@@ -212,19 +223,20 @@ python3 scripts/get_object_fields.py '{"workspace_name": "<name>", "entity_code"
 ```text
 对象：leave_record（请假记录）
 职责：保存一笔请假申请的输入、计算结果和审批状态
-业务主键/唯一键：flow_id
-归属主体：applicant，实际存 employee.employee_id，界面展示员工姓名
+系统主键：id（平台自动生成，不在 fields 中重复创建）
+业务主键/唯一键：flow_no
+归属主体：employee_id，实际存 employee.id，界面展示员工姓名
 
 字段：
-  applicant      STRING  必填  申请人工号  来源 R-02
+  employee_id    INTEGER 必填  申请人系统 id，绑定 employee 术语  来源 R-02
   start_date     DATE    必填  开始日期    来源 R-01
   start_period   STRING  必填  上午/下午   来源 R-01
   leave_days     FLOAT   必填  系统计算，不接受调用方直接指定
   status         STRING  必填  状态枚举
 
 关联：
-  applicant → employee.employee_id
-  存储值：工号；展示值：员工姓名
+  employee_id → employee.id
+  存储值：employee.id；展示值：员工姓名
 
 状态：
   一级审批中 / 二级审批中 / 已通过 / 已退回 / 已撤销
@@ -239,14 +251,66 @@ python3 scripts/get_object_fields.py '{"workspace_name": "<name>", "entity_code"
 
 对象定义中必须区分：
 
-- **系统主键**：平台自增 `id`
-- **业务主键**：如工号、申请编号、流程号
+- **系统主键**：平台自动生成的 `id`，所有对象固定存在，不在自定义字段中再次创建
+- **业务标识**：如工号、申请编号、流程号；业务标识使用 `*_code`、`*_no` 或明确业务名称，不得命名为 `id`，也不得冒充系统主键
+- **对象关联字段**：字段名和类型跟随父对象 `term_code_field`；默认 `id` 时使用 `<relation>_id` + `INTEGER`，明确使用业务字段时使用对应业务语义名称和相同数据类型
 - **存储值**：数据库真正保存的值
 - **展示值**：用户界面展示的名称
 - **输入值**：Action 或导入文件接收的原始值
-- **转换规则**：例如“CSV 姓名 → 查询 employee → 存 employee_id”
+- **转换规则**：例如“CSV 姓名 → 查询 employee → 取得 employee.id → 存 leave_record.employee_id”
 
 上述内容任一不明确且会影响关联查询时，不得开始编写相关 Action。
+
+#### 术语同步字段与对象关联不变量（不得改写）
+
+对象之间通过术语下拉建立关联时，固定遵守以下链路；`term_sync.term_code_field` 是关联键的唯一事实来源：
+
+```text
+父对象实际生效的 term_sync.term_code_field
+→ 关系的父表目标字段
+→ 对象型 LIST_TERM 的 code / 下拉返回值
+→ 相同数据类型的 Action 入参
+→ 使用同一父字段查询
+→ 子对象关联字段保存同一个 value
+```
+
+- 系统主键固定为平台自动生成的 `id`；模型不得在 `fields` 中再创建 `id`，也不得把自建字段标为系统主键。
+- 创建关系、Action 或调试用例前，必须先读取父对象实际生效的 `term_code_field`；未配置或为空时按默认 `id` 处理，不得根据字段名猜测。
+- `term_code_field=id` 时，下拉返回系统 `id`，关系目标字段是 `id`，子表字段与 Action 参数为 INTEGER，父对象必须使用 `select_by_id(int(value))` 查询。
+- `term_code_field=<business_field>` 时，下拉返回该业务字段值，关系目标字段必须是同一个 `<business_field>`，子表字段和 Action 参数类型必须与其一致，父对象使用 `Q.eq(Parent.F.<business_field>, value)` 查询。
+- 术语同步字段、关系目标字段、Action 查询字段、参数类型和外键落库值必须保持完全一致。任何两处不一致都必须在创建 Action 前停止并修正。
+- 业务标识使用 `*_code`、`*_no` 或明确业务名称，例如 `employee_code`、`event_code`、`application_no`；只有当它被明确配置为 `term_code_field` 时，才可承接该对象型下拉值。
+- `user_name`、`dept_name` 等系统术语不属于“对象型 LIST_TERM”，仍按各自术语定义返回工号、姓名、部门编码或部门名称。
+
+#### 关联键一致性卡（每个对象关联必须填写）
+
+创建关系或关联 Action 前，必须基于父对象当前定义生成并检查以下卡片；所有项目一致才允许继续，**不一致时禁止创建关系或 Action**：
+
+| 检查项 | 必须填写的实际值 |
+|--------|------------------|
+| 父对象 | `<parent_entity_code>` |
+| 对象术语类型 | `<parent_entity_code>` 对应的 `term_type_code` |
+| 实际术语编码字段 | 父对象实际生效的 `term_sync.term_code_field`；为空写 `id（默认）` |
+| 下拉返回值及类型 | `<term_code_field>` 的值和字段类型 |
+| 关系父表目标字段 | `parent.<term_code_field>` |
+| 子对象关联字段及类型 | 保存同一个值，类型与 `<term_code_field>` 完全一致 |
+| Action 参数及类型 | 接收同一个下拉值，类型与 `<term_code_field>` 完全一致 |
+| Action 查询方式 | `id` 使用 `select_by_id`；业务字段使用该字段的 `Q.eq` |
+| Action 落库值 | 原样保存同一个已校验的关联键值 |
+
+不得只比较字段名称。即使子字段名含 `_id`，也必须核对它实际保存的是系统 `id` 还是业务编码；术语同步配置变化后，所有引用该对象的关系和 Action 都必须重新生成一致性卡并重新调试。
+
+正确示例：
+
+```text
+`event` 对象：业务标识 `event_code`（STRING），系统主键仍为隐式 `id`
+`event.term_sync`：term_name_field=`event_title`，term_code_field=`id`
+`registration.event_id`：INTEGER 外键，绑定 event 术语，保存 event.id
+`register_event.event_id`：integer + LIST_TERM，下拉返回 event.id
+Action：event_mapper.select_by_id(int(params["event_id"]))，随后写 registration.event_id
+```
+
+如果明确配置 `term_code_field=event_code`，则关系目标字段、`registration.event_code`、Action 字符串参数和 `Q.eq(Event.F.event_code, value)` 必须全部改用 `event_code`。禁止 `term_code_field=id`，关系或 Action 却按 `event_code` 关联；反向混用同样禁止。
 
 **字段语义识别规则（每个字段推断后必须执行）：**
 
@@ -272,15 +336,15 @@ python3 scripts/list_term_types.py '{"keyword": "user"}'
 
 若返回结果中确认 `user_name` 类型存在，则在字段中配置 `term_type_code: "user_name"`；若不存在，告知用户该环境暂无此术语类型，改用 `term_values` 内联或跳过绑定。
 
-**外键字段处理流程（字段值来自另一个对象的 id）：**
+**外键字段处理流程（字段值来自另一个对象的术语编码）：**
 
 发现外键字段时，必须按以下步骤处理，不能跳过：
 
-1. **确认父表是否已启用 `term_sync`**：检查工作区中父表对象的 `definition.json`，或直接询问用户
+1. **读取父表 `term_sync`**：检查工作区中父表对象的 `definition.json`，不得仅凭字段名或记忆推断。取得实际 `term_name_field` 与 `term_code_field`；后者缺失或为空时按默认 `id` 处理
 
 2. **父表未启用 `term_sync` → 主动引导启用**：
    - 询问用户："「{父表名}」的记录需要在下拉框中展示吗？如果需要，我来为它配置术语同步（`term_sync`），这样在填写「{子表字段名}」时可以通过搜索选择对应的{父表名}记录。"
-   - 确认后询问："`term_name_field` 用哪个字段作为展示名称？"（通常是名称/标题字段）
+   - 确认后询问："`term_name_field` 用哪个字段作为展示名称？`term_code_field` 用哪个字段作为下拉返回值和关联键？"（编码字段未指定时默认系统 `id`）
    - 调用 `collect_object.py` 为父表写入 `term_sync` 配置：
      ```bash
      python3 scripts/collect_object.py '{
@@ -295,9 +359,11 @@ python3 scripts/list_term_types.py '{"keyword": "user"}'
      }'
      ```
 
-3. **父表已启用 `term_sync` → 子表外键字段直接绑定**：
+3. **父表已启用 `term_sync` → 按实际编码字段绑定子表关联字段**：
    - 自动推导 `term_type_code = <parent_entity_code>_<term_name_field>`
-   - 子表外键字段配置：
+   - 读取 `term_code_field` 的字段类型；默认 `id` 对应 INTEGER，业务字段使用其实际数据类型
+   - 关系的父表目标字段必须等于 `term_code_field`，子表关联字段的数据类型必须相同
+   - 默认 `term_code_field=id` 时，子表外键字段配置：
      ```json
      {
        "property_code": "<fk_field>",
@@ -309,7 +375,7 @@ python3 scripts/list_term_types.py '{"keyword": "user"}'
      }
      ```
 
-> 外键场景固定用 `rel_term_codeorname: "code"`（字段存 `id`，按编码匹配）。
+> 对象关联场景固定用 `rel_term_codeorname: "code"`，字段存术语 code。术语 code 的业务含义由父对象实际 `term_code_field` 决定：默认是系统 `id`，显式配置时也可以是 `event_code`、`employee_code` 等业务字段。关系和 Action 必须使用同一含义。
 
 ```bash
 python3 scripts/collect_object.py '{
@@ -327,7 +393,7 @@ python3 scripts/collect_object.py '{
 }'
 ```
 
-> `term_sync` 仅适用于 DYNAMIC_TABLE 类型的对象。启用后，脚本执行 insert / update / delete 时会自动将记录同步到术语库，`term_name_field` 对应的字段值将作为术语名称写入，`term_code_field`（默认 `id`）作为术语编码。
+> `term_sync` 仅适用于 DYNAMIC_TABLE 类型的对象。启用后，脚本执行 insert / update / delete 时会自动将记录同步到术语库，`term_name_field` 对应的字段值作为术语名称，实际生效的 `term_code_field` 对应值作为术语 code。对象型下拉选择后传给 Action 的正是这个 code，而不是模型另外选择的关联字段。
 
 **对象术语同步引导（字段收集完成后必须执行）：**
 
@@ -345,6 +411,7 @@ python3 scripts/collect_object.py '{
   效果：其他对象的外键字段可以通过下拉搜索选择本对象的记录
   示例：「项目」对象启用术语同步后，「报销单」中的「所属项目」字段可下拉选择项目列表
   配置：term_name_field = 用于展示的名称字段（如 project_name）
+        term_code_field = 下拉返回值和对象关联键（未指定时为系统 id）
 
 【场景 B：让本对象字段的枚举值动态来自自身记录】
   适用：该对象本身就是枚举字典表（如城市、供应商、物料类型等）
@@ -360,6 +427,7 @@ python3 scripts/collect_object.py '{
 
 用户确认需要后，询问：
 - `term_name_field`：哪个字段作为下拉展示名称？（通常是名称或标题字段）
+- `term_code_field`：哪个字段作为下拉返回值和表关联键？未指定时使用系统 `id`；若选择业务字段，后续关系、参数、查询和落库必须全部使用该字段
 - `sync_on`：默认 `["insert", "update", "delete"]`，一般无需修改
 
 然后调用 `collect_object.py` 写入 `term_sync` 配置（字段不重复提交，仅补充 `term_sync`）：
@@ -430,21 +498,35 @@ python3 scripts/collect_object.py '{
 根据「{对象名}」的字段特征，我推荐以下 Action，请确认哪些需要开发：
 
 ✅ 已选（建议）：
-  1. create_{entity_code}   — 新建{对象名}（主数据类必备）
-  2. submit_{entity_code}   — 提交申请（状态流转：草稿 → 已提交）
-  3. approve_{entity_code}  — 审批通过（状态流转：审批中 → 已批准）
-  4. reject_{entity_code}   — 审批拒绝（状态流转：审批中 → 已拒绝）
-  5. get_my_{entity_code}   — 查询我提交的记录
-  6. get_{entity_code}_detail — 查询详情（按 id）
+  1. {entity_code}_create   — 新建{对象名}（主数据类必备）
+  2. {entity_code}_submit   — 提交申请（状态流转：草稿 → 已提交）
+  3. {entity_code}_approve  — 审批通过（状态流转：审批中 → 已批准）
+  4. {entity_code}_reject   — 审批拒绝（状态流转：审批中 → 已拒绝）
+  5. {entity_code}_get_my   — 查询我提交的记录
+  6. {entity_code}_get_detail — 查询详情（按 id）
 
 ⬜ 可选：
-  7. revoke_{entity_code}   — 撤回申请（已提交 → 草稿）
-  8. sum_{entity_code}_amount — 统计金额汇总
+  7. {entity_code}_revoke   — 撤回申请（已提交 → 草稿）
+  8. {entity_code}_sum_amount — 统计金额汇总
 
 请告诉我哪些要开发、哪些不需要，或者补充其他 Action。
 ```
 
-> 推导的 Action code 使用 `snake_case`，命名规范：`<verb>_<entity_code>` 或 `<verb>_<business_term>`。状态流转 Action 的名称要明确体现操作语义，不要用模糊的 `update_status`。
+> 推导的 Action code 使用 `snake_case`，命名规范：**对象编码作前缀**，格式为 `<entity_code>_<verb>`（对象完整编码在前、动词语义在后）。对象编码作前缀便于按对象聚合检索 Action，也避免多个对象出现同名动词（如都叫 `submit`）时互相冲突。
+>
+> 正确示例（对象编码 `leave_record`）：
+> - `leave_record_submit` — 提交申请
+> - `leave_record_approve` — 审批通过
+> - `leave_record_reject` — 审批拒绝
+> - `leave_record_get_my` — 查询我提交的记录
+> - `leave_record_get_detail` — 查询详情
+>
+> 错误示例：
+> - `submit_leave_record` — 动词在前，对象编码未作前缀
+> - `leave_submit` — 使用对象名称而非对象编码
+> - `update_status` — 语义模糊，未体现具体状态流转操作
+>
+> 状态流转 Action 的名称必须明确体现操作语义（提交/通过/拒绝/撤回），不要用模糊的 `update_status`。
 
 **Action 开发完整性检查（每个对象 Action 开发结束时执行）：**
 
@@ -455,6 +537,7 @@ python3 scripts/collect_object.py '{
 - [ ] 是否有「查询」入口（查详情 或 查列表，至少一个）
 - [ ] 有子表关联时，是否有关联查询 Action
 - [ ] 所有参数的术语绑定是否正确（见下方术语绑定规则）
+- [ ] 每个对象型 `LIST_TERM` 是否满足“实际 `term_code_field` → 同目标字段/类型参数 → 同字段查询 → 同值落库”的端到端一致性
 
 如有缺口，提示用户："「{对象名}」目前缺少 XXX Action，是否需要补充？"
 
@@ -466,7 +549,7 @@ python3 scripts/collect_object.py '{
 4. 向用户展示业务契约和验收用例；需求明确时请用户一次确认，存在歧义时只追问影响业务结果的项目
 5. 用户确认后生成 `execute(params)` Python 脚本，规则：
    - 访问当前对象：使用**完整对象编码**生成的 `<entity_code>_mapper`（如对象为 `travel_application_0027029322`，则必须使用 `travel_application_0027029322_mapper`）
-   - 访问其他对象：使用完整 `<other_entity_code>_mapper`，不得去掉用户编码后缀
+   - 访问其他对象：使用完整 `<other_entity_code>_mapper`，不得去掉工作区前缀或历史用户编码后缀
    - 构造新实体：使用完整对象编码转换的实体类（如 `TravelApplication0027029322(...)`）
    - 字段名用 `EntityClass.F.field_name` 常量，不写裸字符串
    - 条件查询用 `Q.eq(...).gte(...)...`，聚合用 `A.sum(...).group_by(...)...`
@@ -480,7 +563,7 @@ python3 scripts/collect_object.py '{
 **Action 业务契约格式：**
 
 ```text
-Action：submit_leave（提交请假）
+Action：leave_record_submit（提交请假）
 需求来源：R-01、R-03、设计文档 4.5.3/4.5.4/4.5.6
 执行角色：当前登录员工
 Action 类型：OPERATION
@@ -520,7 +603,7 @@ Action 类型：OPERATION
   leave_record、approval_record、leave_balance 的写入必须原子完成
 ```
 
-业务契约必须描述“失败时哪些数据不得变化”。只描述成功步骤的 Action 不能进入调试。
+业务契约必须描述“失败时哪些数据不得变化”。只描述成功步骤的 Action 不能进入调试。对象型下拉参数还必须在契约中写明“下拉值语义”：父对象实际 `term_code_field`、返回值类型、父表查询字段和子表落库字段。
 
 **Action 参数术语绑定规则（定义 params 时必须执行，不得遗漏）：**
 
@@ -528,12 +611,14 @@ Action 类型：OPERATION
 
 | 参数对应字段的情况 | 参数必须配置 |
 |-------------------|------------|
-| 字段有 `term_type_code`（如绑定 `user_name`、`dept_name` 或父表术语） | 参数加 `"term_type_code": "<同字段的 term_type_code>"` + `"term_data_type": "LIST_TERM"` |
+| 对象关联字段绑定父对象术语，父对象 `term_code_field: "id"` 或为空 | 参数 `type: "integer"`，加 `"term_type_code": "<同字段的 term_type_code>"` + `"term_data_type": "LIST_TERM"`；用 `select_by_id` 查询并保存系统 `id` |
+| 对象关联字段绑定父对象术语，父对象 `term_code_field: "<business_field>"` | 参数类型与该业务字段一致，加相同 `term_type_code` + `LIST_TERM`；用 `Q.eq` 查询同一个业务字段并保存同一个值 |
+| 字段绑定系统术语（如 `user_name`、`dept_name`） | 参数加 `"term_type_code": "<同字段的 term_type_code>"` + `"term_data_type": "LIST_TERM"`，并保持该系统术语的 code/name 语义 |
 | 字段有 `term_values`（内联枚举） | 参数加 `"term_type_code": "<entity_code>_<property_code>"` + `"term_data_type": "DICT_TERM"` |
 | 参数不对应任何字段，但取值有限固定 | 参数直接加 `"term_values": [...]`，系统自动推导 `term_type_code = <action_code>_<param_code>` |
 | 参数不对应任何字段，且无固定枚举 | 无需绑定，不加 `term_type_code` |
 
-> **核心原则：字段绑定了什么，对应的 Action 参数就绑定什么，不得另起一套，也不得遗漏。**
+> **核心原则：字段绑定了什么，对应的 Action 参数就绑定什么，并同时对齐“显示名称、`term_code_field`、返回值、参数类型、查询字段、落库字段”。不得另起一套，也不得遗漏。**
 > `DICT_TERM` = 有限固定枚举（状态、分类等）；`LIST_TERM` = 动态增长列表（用户、关联记录等）。
 
 ```bash
@@ -579,10 +664,10 @@ python3 scripts/collect_action.py '{
 }'
 ```
 
-> `object_references`：脚本中访问了哪些其他对象的 mapper，就在这里列出对应的**完整 `entity_code`**。例如 `travel_application_0027029322` 的 Action 脚本里使用了 `travel_expense_0027029322_mapper` 和 `travel_itinerary_0027029322_mapper`，则填写 `["travel_expense_0027029322", "travel_itinerary_0027029322"]`。**不得删除工号后缀；未声明或编码不完整的对象在调试和生产执行时均不可用。**
+> `object_references`：脚本中访问了哪些其他对象的 mapper，就在这里列出对应的**完整 `entity_code`**。例如 `w7k3m9p2x_travel_application` 的 Action 脚本里使用了 `w7k3m9p2x_travel_expense_mapper` 和 `w7k3m9p2x_travel_itinerary_mapper`，则填写 `["w7k3m9p2x_travel_expense", "w7k3m9p2x_travel_itinerary"]`。**不得删除 v2 工作区前缀或历史工作区的用户编码后缀；未声明或编码不完整的对象在调试和生产执行时均不可用。**
 
 > - `status` 字段有 `term_values: ["草稿","已提交",...]`，固定枚举 → 引用字段已生成的 `term_type_code`
-> - `app_id` 是外键字段，绑定父表动态列表 → `LIST_TERM`
+> - `app_id` 是默认 id 关联的对象外键字段，绑定父表动态列表 → `LIST_TERM`；下拉展示申请单名称，返回父对象系统 `id`，Action 使用 `select_by_id(int(app_id))`。若父对象显式用业务字段作为 `term_code_field`，参数名、类型和查询字段也必须同步改变
 > - `decision` 不对应任何字段，但审批意见有限枚举 → 参数上直接写 `term_values`，自动推导 `term_type_code = <action_code>_decision`
 > - `success` 是布尔型无术语绑定，不加 `term_type_code`
 
@@ -621,6 +706,38 @@ async def execute(params: dict) -> dict:
     return {"records": [{"success": True, "id": new_record.id}],
             "total": 1, "meta": {"columns": [{"name": "success"}, {"name": "id"}], "total": 1}}
 ```
+
+对象型下拉关联的查询和落库必须按父对象实际 `term_code_field` 二选一，不得混用：
+
+`term_code_field=id`（含未配置/空值的默认情况）：
+
+```python
+parent_id = int(params["parent_id"])
+parent = await <parent_entity_code>_mapper.select_by_id(parent_id)
+if parent is None:
+    return {"records": [{"success": False, "error": "关联对象不存在"}],
+            "total": 1, "meta": {"columns": [{"name": "success"}, {"name": "error"}], "total": 1}}
+new_child = await <child_entity_code>_mapper.insert(
+    <ChildEntityClass>(parent_id=parent_id, other_field=params.get("other_field"))
+)
+```
+
+`term_code_field=<business_field>`：
+
+```python
+value = params["parent_code"]  # 类型与 term_code_field 对应字段一致
+rows = await <parent_entity_code>_mapper.select(
+    Q.eq(<ParentEntityClass>.F.<business_field>, value).limit(1)
+)
+if not rows.get("records", []):
+    return {"records": [{"success": False, "error": "关联对象不存在"}],
+            "total": 1, "meta": {"columns": [{"name": "success"}, {"name": "error"}], "total": 1}}
+new_child = await <child_entity_code>_mapper.insert(
+    <ChildEntityClass>(parent_code=value, other_field=params.get("other_field"))
+)
+```
+
+查询字段必须等于 `term_code_field`。禁止父对象术语同步使用 `id`，Action 却查询 `parent_code`；也禁止术语同步使用业务字段，Action 却调用 `select_by_id`。
 
 **读取会话空间文件（Action 脚本中需要获取文件内容时使用）：**
 
@@ -728,6 +845,8 @@ Action「{action_name}」已保存。
 
 不得使用 `test`、`string1`、随意的 `123`、无约束随机日期等无业务意义的值。每组参数都必须说明它验证哪条业务规则。
 
+对象型 `LIST_TERM` 参数必须使用真实术语 code 调试：先读取父对象实际 `term_code_field`，再从真实父记录取得该字段值作为 Action 入参。默认字段为 `id` 时使用系统整数 id；显式业务字段时使用该字段的真实值。不得自行换成另一个更易读的字段。
+
 每个 Action 至少生成：
 
 - **正常主路径**：合法输入和标准业务流程
@@ -738,9 +857,17 @@ Action「{action_name}」已保存。
 
 简单 CRUD 可合并无意义的类别，但必须说明为何不适用；计算、状态机、余额/库存/金额和跨对象写入不得减少上述覆盖。
 
+涉及对象型下拉关联时，必须记录并核对 `term_code_field、下拉返回值、参数类型、查询字段、外键落库值`，并至少补充以下三项断言：
+
+- 使用真实 `term_code_field` 值调试，Action 能通过同一个父字段找到父对象
+- 子对象关联字段实际保存值等于下拉返回的术语 code
+- 增加一个不一致用例：传入另一个候选字段的值时不得被误当作当前术语 code 查询成功
+
 #### 3.5.2 运行前锁定测试契约
 
 每个用例在调用 `run_action.py` 前必须展示并固定：
+
+对任何绑定术语的入参，契约中必须单列“下拉值语义”：对象型 `LIST_TERM` 写明父对象 `term_code_field`、返回值类型和查询字段，例如“父对象系统 `id`（INTEGER）”或“父对象 `event_code`（STRING）”；系统术语写明工号、姓名、部门编码或部门名称。只写“活动ID”“员工ID”等含糊名称不得进入执行。
 
 ```text
 用例 ID：TC-R01-01
@@ -824,7 +951,7 @@ Action 入参：
 - 优先复用已经业务验收通过的 QUERY Action
 - 没有合适查询入口时，可以创建仅用于调试的只读验证 Action，按明确 id/业务键返回待断言字段
 - 验证 Action 自身不得修改数据，不得复用待测试 Action 的计算函数来生成“实际值”
-- 临时验证 Action 使用明显的 `_debug_verify_` 前缀，完成全部验收后调用 `delete_action.py` 删除，不得随工作区提交
+- 临时验证 Action 同样遵循对象名称前缀规范，使用明显的 `{entity_code}_debug_verify_` 前缀，完成全部验收后调用 `delete_action.py` 删除，不得随工作区提交
 - 仅通过待测试 Action 自己返回的内容，不能替代独立的数据库状态查询
 
 调用格式：
@@ -906,12 +1033,12 @@ python3 scripts/run_action.py '{...}'
 以下 Action 业务验收情况汇总：
 
 {对象名1}：
-  🟢 create_xxx — 已展示完整脚本，用户已审阅；4/4 用例通过，12/12 断言通过
-  🟢 submit_xxx — 已展示完整脚本，用户已审阅；9/9 用例通过，37/37 断言通过
-  🔴 approve_xxx — 业务验收失败：退回后 locked_days 未释放
+  🟢 xxx_create — 已展示完整脚本，用户已审阅；4/4 用例通过，12/12 断言通过
+  🟢 xxx_submit — 已展示完整脚本，用户已审阅；9/9 用例通过，37/37 断言通过
+  🔴 xxx_approve — 业务验收失败：退回后 locked_days 未释放
 
 {对象名2}：
-  🟡 get_my_xxx — 完整脚本尚未向用户展示，禁止调试或提交
+  🟡 xxx_get_my — 完整脚本尚未向用户展示，禁止调试或提交
 
 跨 Action 场景：
   🔴 请假完整流程 — 终审扣减断言失败
@@ -919,7 +1046,7 @@ python3 scripts/run_action.py '{...}'
 ⚠️ 存在未完成或失败的业务验收，请修复并复测后再提交。
 ```
 
-- 所有 Action 均已展示完整脚本、获得用户审阅确认，且所有 Action 和跨 Action 场景均为 🟢 后，提示用户：“所有 Action 已完成用户审阅和业务验收，可以进行提交。请告诉我下一步。”
+- 所有对象定义完整，所有 Action 均已展示完整脚本、获得用户审阅确认，且所有 Action 和跨 Action 场景均为 🟢 后，只报告：“全部对象和 Action 已完成开发、审阅及调试验收，目前尚未提交。如需发布，请明确说‘开始提交’，我会先请您选择提交到个人还是企业，并在展示最终清单后再次请您确认。”此时处于 `READY_NOT_AUTHORIZED`，不得调用 `batch_submit.py`。
 - 有 ⚪/🟡/🔴 时，**不推进到提交**：
   - ⚪：生成测试契约并执行
   - 🟡：补全业务、副作用、边界、权限或流程用例
@@ -931,38 +1058,86 @@ python3 scripts/run_action.py '{...}'
 
 ---
 
-### Step 5：统一提交（只有用户明确说"提交"才执行）
+### Step 5：统一提交（严格确认状态机）
 
-**触发条件：用户明确说出"提交"、"提交工作区"、"batch submit"等明确提交意图。** 开发完成、业务验收通过完成等情况均不自动触发提交。
+`batch_submit.py` 是发布写操作，必须严格按以下状态顺序推进，禁止跳级：
 
-**提交前最终检查（执行 batch_submit.py 前必须确认）：**
+1. **`NOT_READY` — 尚未就绪**
+   - 任一对象定义不完整，或任一保留 Action 未交付、未获用户审阅、未完成调试验收，或跨 Action 场景未通过时均属于此状态。
+   - 即使用户说“提交”，也不得调用 `batch_submit.py`；应列出阻塞项并继续完成开发和验收。
+2. **`READY_NOT_AUTHORIZED` — 已就绪但未授权**
+   - Step 4 全部通过后进入此状态，只能报告已具备提交条件，不能自动提交。
+   - 只有用户明确说“开始提交”“提交工作区”“发布这些内容”或“batch submit”等明确发布意图，才进入下一状态。
+   - “继续、完成、可以、下一步、好的、没问题”以及仅确认对象/Action 内容正确，都不得解释为提交授权。
+3. **`TARGET_SELECTED` — 用户选择发布归属**
+   - 明确询问：“请选择本次发布归属：1）个人；2）企业。选择归属只确定目标，不代表授权执行提交。”
+   - 用户必须明确选择 `personal`（个人）或 `enterprise`（企业）；不得根据历史发布、当前活动版本、Header、环境变量或脚本默认值推断。虽然脚本在 `owner_type` 为空时兼容性默认个人，Skill 正常调用仍必须显式传入用户所选值。
+   - 企业发布不得向用户询问、展示或要求输入 `tenant_id`，调用 `batch_submit.py` 时也不传 `tenant_id`，由服务端使用默认租户。数据库类型同样由服务端部署环境决定，禁止由 Skill 参数指定。
+4. **`FINAL_CONFIRM_PENDING` — 最终清单待确认**
+   - 重新执行提交就绪检查，并列出本批次的全部对象、Action、View、Relation、当前活动发布归属（如有）、目标发布归属、提交范围及已知的数据影响；清单中不得出现租户信息。
+   - 明确提问“确认提交到个人？”或“确认提交到企业？”。选择发布归属不等于确认提交；必须等待用户针对这份清单作出最终确认。
+5. **`AUTHORIZED` — 当前快照已获最终授权**
+   - 只有用户在 `FINAL_CONFIRM_PENDING` 之后明确回复确认，才可进入此状态并调用一次 `batch_submit.py`。
+   - 若用户修改任何发布内容、归属或范围，立即退回 `READY_NOT_AUTHORIZED`，重新检查、选择并确认。
 
-1. 所有保留的 Action 均已展示处理逻辑和完整脚本并获得用户确认；相关 Action 和跨 Action 场景均已业务验收通过（参考 Step 4 汇总，有未审阅或 ⚪/🟡/🔴 则拒绝提交并引导补全）
-2. 明确说明 `batch_submit.py` 会提交对象及其已收集的 Action，并列出即将提交的对象、Action，请用户二次确认：
+**最终清单格式：**
 
 ```
 准备提交以下内容：
 对象：travel_application_u001、travel_expense_u001（共 2 个）
 Action：
   travel_application_u001：
-    create_application、submit_application、approve_application
+    travel_application_u001_create、travel_application_u001_submit、travel_application_u001_approve
   travel_expense_u001：
-    create_expense、list_expenses
+    travel_expense_u001_create、travel_expense_u001_list
   共 5 个，均已业务验收通过
 
-确认提交？
+目标发布归属：企业（enterprise）
+当前活动发布归属：个人（personal；没有时显示“无”）
+
+确认提交到企业？
 ```
 
-用户确认后执行：
+只有用户针对上述清单明确确认后才执行。个人发布：
 
 ```bash
-python3 scripts/batch_submit.py '{"workspace_name": "<name>"}'
+python3 scripts/batch_submit.py '{"workspace_name": "<name>", "owner_type": "personal"}'
 ```
 
-只提交部分（失败重试）：
+企业发布：
 
 ```bash
-python3 scripts/batch_submit.py '{"workspace_name": "<name>", "only": ["<entity_code>", "<view_code>"]}'
+python3 scripts/batch_submit.py '{"workspace_name": "<name>", "owner_type": "enterprise"}'
+```
+
+只提交部分（仅限失败重试或用户明确要求的局部发布，仍需重新展示范围并确认）：
+
+```bash
+python3 scripts/batch_submit.py '{"workspace_name": "<name>", "owner_type": "personal", "only": ["<entity_code>", "<view_code>"]}'
+```
+
+`only` 只用于失败重试或明确的局部发布；正常发布必须包含工作区本批次的全部对象和视图。所有条目共享响应中的 `publish_id`。只有全部对象、Action、View、Relation 均成功时，服务端才更新工作区 `publications/active.json`。
+
+**处理归属转换确认：**
+
+若响应 `code=SCOPE_CONVERSION_CONFIRMATION_REQUIRED`，之前的提交确认不包含该额外数据影响，必须暂停并重新确认：
+
+1. 告知用户当前活动版本与目标归属不同。
+2. 明确说明来源表保留、不迁移实例数据；目标端会创建空表。
+3. 用户明确确认归属转换后复用响应中的 `publish_id`，传 `confirm_scope_conversion: true` 重试；不得自动重试。
+
+```bash
+python3 scripts/batch_submit.py '{"workspace_name":"<name>","owner_type":"enterprise","publish_id":"<publish_id>","confirm_scope_conversion":true}'
+```
+
+企业提交始终由服务端解析默认租户；Skill 不展示租户，也不构造租户 Header。若服务端返回租户相关配置错误，只转述为“企业发布目标配置不可用”，不得暴露具体租户值。
+
+**处理目标表删除重建确认：**
+
+若响应 `code=DROP_TARGET_TABLE_CONFIRMATION_REQUIRED`，之前的确认不包含删表影响。列出 `target_tables`，明确说明操作只删除目标端同名表、随后创建空表，不删除来源表也不迁移数据。用户明确确认删除这些目标表后，才可复用 `publish_id` 并传 `confirm_drop_target_tables: true`；不得自动重试：
+
+```bash
+python3 scripts/batch_submit.py '{"workspace_name":"<name>","owner_type":"enterprise","publish_id":"<publish_id>","confirm_scope_conversion":true,"confirm_drop_target_tables":true}'
 ```
 
 **处理删列确认（`need_confirm: true`）：**
@@ -982,10 +1157,10 @@ python3 scripts/batch_submit.py '{"workspace_name": "<name>", "only": ["<entity_
 收到此响应后：
 1. 告知用户哪些字段将被永久删除，**删除后该列所有数据不可恢复**
 2. 同时提示用户检查是否有 Action 脚本引用了这些字段名
-3. 用户确认后，带 `confirm_drop_columns: true` 重新提交：
+3. 用户明确确认删除这些字段后，才可带 `confirm_drop_columns: true` 重新提交；不得自动重试：
 
 ```bash
-python3 scripts/batch_submit.py '{"workspace_name": "<name>", "only": ["travel_expense"], "confirm_drop_columns": true}'
+python3 scripts/batch_submit.py '{"workspace_name": "<name>", "owner_type": "personal", "only": ["travel_expense"], "confirm_drop_columns": true}'
 ```
 
 提交成功后，SDK 参考文件自动写入 `workspace/<name>/sdk/<entity_code>_sdk.py`，可用于查阅字段名和方法签名，但不影响 Action 的运行——平台在执行时从本体元数据动态构建 mapper 和实体类。
@@ -1021,7 +1196,7 @@ python3 scripts/mount_resource.py '{"agent_id": <id>, "resource_code": "<actual_
 | 查询 Action 脚本详情 | `get_action.py` |
 | 删除 Action（⚠️ 二次确认） | `delete_action.py` |
 | 调试 Action | `run_action.py` |
-| 统一提交 | `batch_submit.py` |
+| 明确发起统一提交 | 先进入 Step 5，检查就绪状态并询问个人/企业；只有最终清单获确认后才执行 `batch_submit.py` |
 | 重新获取 SDK 文件 | `get_sdk.py` |
 | 挂载 | `mount_resource.py` |
 | 查询可绑定术语类型 | `list_term_types.py` |

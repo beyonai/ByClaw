@@ -23,6 +23,7 @@ import type { IAgentFileUploadConf } from '../../hooks/useAgentUploadFileConfig'
 import type { DefaultValueSchema } from './RichInput/types';
 import type { ContextUsed } from '@/hooks/useContextUsed';
 import { getLastMentionedDigitalEmployeeId } from './utils/mention';
+import TaskTemplateEntry from '@/components/TaskTemplateModal/TaskTemplateEntry';
 
 export type IProps = {
   getMessageList?: () => Array<IMessage>;
@@ -54,8 +55,11 @@ export type IProps = {
   onInputDraftChange?: (draft: DefaultValueSchema) => void;
   contextUsed?: ContextUsed;
 
-  /** 当前会话所属项目，用于仅在运营项目展示任务模板入口。 */
+  /** 当前会话所属项目，用于自动选择普通、研发或运营任务模板。 */
   projectId?: number;
+
+  /** 仅会话输入框开启公共任务模板入口，避免通知等复用输入框误展示。 */
+  enableTaskTemplate?: boolean;
 };
 
 export type IState = {
@@ -85,6 +89,12 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   autoSendRunner: NodeJS.Timeout | null = null;
 
   uploadFileRef = React.createRef<UploadFileRef>();
+
+  selectedProject?: { projectId: string; projectName: string };
+
+  handleProjectChange = (project: { projectId: string; projectName: string }) => {
+    this.selectedProject = project;
+  };
 
   constructor(props: P & IProps) {
     super(props);
@@ -397,6 +407,12 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   // 所有子类的onSend都从父类这里触发，这里需要额外加一些公共的参数
   finallySendQuery = (data: any) => {
+    // Chat、Employees 等输入框会覆盖 getSendPayload，项目选择必须在公共发送出口统一补入。
+    if (!this.props.sessionId && this.selectedProject) {
+      set(data, 'payload.selectedProjectId', this.selectedProject.projectId);
+      set(data, 'payload.selectedProjectName', this.selectedProject.projectName);
+    }
+
     let { resourceList = [] } = this.state;
     const currentInputPayload = this.getCurrentInputPayload();
     if (currentInputPayload?.resourceList) {
@@ -460,7 +476,18 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
             },
           }}
         >
-          <Space>{this.bottomLeftRender()}</Space>
+          <Space>
+            {/* 未登录用户不展示任务模板入口，登录后仍遵循调用方的显式开关。 */}
+            {this.props.userInfo && this.props.enableTaskTemplate !== false && (
+              <TaskTemplateEntry
+                projectId={this.props.projectId}
+                sessionId={this.props.sessionId}
+                onProjectChange={this.handleProjectChange}
+                onApply={(prompt) => this.setInputValue({ inputTxt: prompt, isInsert: false })}
+              />
+            )}
+            {this.bottomLeftRender()}
+          </Space>
         </ConfigProvider>
         <Space className={styles.toolsRight}>
           {BottomRightRender}
@@ -657,14 +684,15 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
               : { text, resourceList };
             this.props.onInputDraftChange?.(draft);
             this.syncSiderAgent(resourceList);
-            if (!cannotAt && agentId !== currentAgentId) {
+            if (!cannotAt && `${agentId || ''}` !== `${currentAgentId || ''}`) {
               let nextAgentType = agentType;
               if (!currentAgentId && agentId) {
                 // agentId从有到无，意味着，用户在输入框内，主动删除了输入框最左侧的agent数字员工，这个时候，agentType直接转为common
                 nextAgentType = agentTypeMap.common;
               }
               setMyAgentType?.(nextAgentType as IAgentType);
-              setAgentId?.(currentAgentId || '');
+              // 全局会话员工 ID 统一使用字符串，避免 number/string 来回切换触发默认 @ 节点重建。
+              setAgentId?.(currentAgentId ? `${currentAgentId}` : '');
             }
           }}
           onSend={() => {

@@ -16,6 +16,7 @@ export const agentTypeMap = {
   searchAndQuery: '014',
   functionCloud: '015',
   dataCloud: '016',
+  employeeGroup: '017', // 数字员工组
 } as const;
 
 export const specialAgentType = [agentTypeMap.searchAndQuery, agentTypeMap.functionCloud];

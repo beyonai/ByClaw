@@ -12,6 +12,7 @@ export type ResourceElementType = {
   chatAvatar?: string;
   agentId?: string;
   agentName?: string;
+  agentType?: string;
   resourceName: string;
   resourceCode?: string;
   field_code?: string;
@@ -20,6 +21,7 @@ export type ResourceElementType = {
   field_desc?: string;
   resourceType: IResourceType;
   isAgentTool?: boolean;
+  isInactiveAgentSelection?: boolean;
   isFromResourceModule?: boolean;
   showQuotePrefix?: boolean;
   children: { text: string }[];
@@ -42,7 +44,11 @@ const ResourceElement = ({ attributes, children, element }: RenderElementProps) 
   }, [chatAvatar]);
 
   return (
-    <span {...attributes} className={styles.mention}>
+    <span
+      {...attributes}
+      data-inactive-agent-selection={el.isInactiveAgentSelection ? 'true' : undefined}
+      className={`${styles.mention} ${el.isInactiveAgentSelection ? styles.inactiveAgentSelection : ''}`.trim()}
+    >
       <span contentEditable={false}>
         {prefix}
         {(el.showQuotePrefix ||

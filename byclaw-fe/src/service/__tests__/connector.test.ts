@@ -1,4 +1,4 @@
-import { queryAllConnectors, queryConnectorList } from '../connector';
+import { queryAllConnectors, queryConnectorList, revokeConnectorAuthorization } from '../connector';
 
 jest.mock('@/service/common/request', () => ({
   GET: jest.fn(),
@@ -19,6 +19,12 @@ describe('connector service', () => {
     queryConnectorList(query);
 
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/connector/listAll', query);
+  });
+
+  it('revokes a connector authorization through the dedicated endpoint', () => {
+    revokeConnectorAuthorization(9);
+
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/connector/authorization/revoke', { connectorId: 9 });
   });
 
   it('loads every connector page and removes duplicate connector ids', async () => {

@@ -12,6 +12,8 @@ import { getVNCUrl, resolveSandboxesInfo } from '@/utils/chat';
 import { isTextContentType } from '@/utils/messgae';
 
 import { substanceHandler } from '@/hooks/useChat/util';
+import { updateExistingMessage } from '@/utils/messageItemUpdate';
+import { hydrateV2RuntimeState } from '@/utils/messageV2Runtime';
 import useGlobal from '@/hooks/useGlobal';
 
 import { IMessageListItem } from '@/typescript/message';
@@ -36,6 +38,88 @@ function useHandler(props: IProps) {
 
   const curAgentCodeRef = useRef<string | undefined>('');
   const curSessioneRef = useRef<string | undefined>('');
+
+  const isV2 = (message: any) => {
+    try {
+      const metadata = typeof message?.metadata === 'string' ? JSON.parse(message.metadata) : message?.metadata;
+      return metadata?.messageRenderVersion === 'v2';
+    } catch (error) {
+      return false;
+    }
+  };
+
+  const appendV2Message = (newAnswerMsg: any, message: IMessageListItem, event: string) => {
+    const channel = event.startsWith('reasoningLog') ? 'thinkList' : 'messageList';
+    if (!get(newAnswerMsg, '_v2LastSegment')) {
+      hydrateV2RuntimeState(newAnswerMsg);
+    }
+    const current = ((get(newAnswerMsg, channel, []) as IMessageListItem[]) || []).map((item) => ({
+      ...item,
+      content: { ...item.content },
+    }));
+    if (updateExistingMessage(current, message)) {
+      set(newAnswerMsg, channel, current);
+      return;
+    }
+    const previous = get(newAnswerMsg, '_v2LastSegment') as IMessageListItem | undefined;
+    const previousChannel = get(newAnswerMsg, '_v2LastChannel');
+    const incomingSeq = Number(message.seq);
+    const existingSeqIndex = Number.isFinite(incomingSeq)
+      ? current.findIndex((item) => Number(item.seq) === incomingSeq)
+      : -1;
+    const sameSegment =
+      previous &&
+      previousChannel === channel &&
+      previous.eventType === event &&
+      `${previous.contentType}` === `${message.contentType}` &&
+      `${get(previous, 'content.orderId') || ''}` === `${get(message, 'content.orderId') || ''}`;
+    if (existingSeqIndex >= 0 || sameSegment) {
+      const targetIndex = existingSeqIndex >= 0 ? existingSeqIndex : current.length - 1;
+      const target = current[targetIndex];
+      if (target) {
+        const oldSubstance = get(target, 'content.substance');
+        const nextSubstance =
+          isString(oldSubstance) && isString(get(message, 'content.substance'))
+            ? `${oldSubstance}${get(message, 'content.substance')}`
+            : get(message, 'content.substance');
+        set(target, 'content.substance', nextSubstance);
+        set(target, 'status', message.status);
+        set(target, 'eventType', event);
+        set(newAnswerMsg, channel, current);
+        if (targetIndex === current.length - 1) {
+          set(newAnswerMsg, '_v2LastSegment', target);
+          set(newAnswerMsg, '_v2LastChannel', channel);
+        }
+        return;
+      }
+    }
+    const nextSeq = Number(get(newAnswerMsg, '_v2NextSeq', 1));
+    const nextItem = { ...message, seq: Number.isFinite(message.seq) ? message.seq : nextSeq, eventType: event };
+    current.push(nextItem);
+    set(newAnswerMsg, channel, current);
+    set(newAnswerMsg, '_v2NextSeq', Math.max(nextSeq, Number(nextItem.seq) + 1));
+    set(newAnswerMsg, '_v2LastSegment', nextItem);
+    set(newAnswerMsg, '_v2LastChannel', channel);
+  };
+
+  const latchV2Metadata = (sseRes: any, newAnswerMsg: any) => {
+    if (sseRes?.messageRenderVersion !== 'v2' && !`${sseRes?.metadata || ''}`.includes('messageRenderVersion')) return;
+    let metadata: Record<string, unknown> = {};
+    try {
+      metadata =
+        typeof newAnswerMsg.metadata === 'string'
+          ? JSON.parse(newAnswerMsg.metadata || '{}')
+          : newAnswerMsg.metadata || {};
+      const incoming =
+        typeof sseRes.metadata === 'string' ? JSON.parse(sseRes.metadata || '{}') : sseRes.metadata || {};
+      metadata = { ...metadata, ...incoming };
+    } catch (error) {
+      metadata = {};
+    }
+    if (sseRes.messageRenderVersion === 'v2' || metadata.messageRenderVersion === 'v2') {
+      newAnswerMsg.metadata = JSON.stringify({ ...metadata, messageRenderVersion: 'v2' });
+    }
+  };
 
   useEffect(() => {
     curAgentCodeRef.current = agentInfo?.resourceCode;
@@ -68,19 +152,29 @@ function useHandler(props: IProps) {
 
       chatSessionRuntimeManager.bindSession(sseMsg.clientRequestId, newSessionId);
 
-      const createdSession = {
-        ...(sseRes as ISession),
-        sessionId: newSessionId,
-      };
-      addSession(createdSession);
-
-      if (sseMsg.event === 'createSession') {
-        // 将创建事件中的会话数据一并传出，项目侧栏可直接写入缓存而无需重新请求列表。
-        onSessionCreated?.({
-          sessionId: newSessionId,
-          clientRequestId: sseMsg.clientRequestId,
-          session: createdSession,
+      if (sseMsg.event === 'sessionTitleUpdated') {
+        dispatch({
+          type: 'session/updateSession',
+          payload: {
+            ...pick(sseRes, ['sessionName', 'updateTime']),
+            sessionId: newSessionId,
+          },
         });
+      } else {
+        const createdSession = {
+          ...(sseRes as ISession),
+          sessionId: newSessionId,
+        };
+        addSession(createdSession);
+
+        if (sseMsg.event === 'createSession') {
+          // 将创建事件中的会话数据一并传出，项目侧栏可直接写入缓存而无需重新请求列表。
+          onSessionCreated?.({
+            sessionId: newSessionId,
+            clientRequestId: sseMsg.clientRequestId,
+            session: createdSession,
+          });
+        }
       }
 
       if (!curSessioneRef.current) {
@@ -127,6 +221,18 @@ function useHandler(props: IProps) {
     }
 
     newAnswerMsg.messageId = `${sseRes.messageId}`;
+    if (sseRes.messageRenderVersion === 'v2') {
+      let metadata: Record<string, unknown> = {};
+      try {
+        metadata =
+          typeof newAnswerMsg.metadata === 'string'
+            ? JSON.parse(newAnswerMsg.metadata || '{}')
+            : newAnswerMsg.metadata || {};
+      } catch (error) {
+        metadata = {};
+      }
+      newAnswerMsg.metadata = JSON.stringify({ ...metadata, messageRenderVersion: 'v2' });
+    }
 
     return onionsProps;
   }, []);
@@ -156,7 +262,26 @@ function useHandler(props: IProps) {
     const { message } = sseRes;
     const { event } = sseMsg;
 
+    latchV2Metadata(sseRes, newAnswerMsg);
+
+    if (isV2(newAnswerMsg) && event.startsWith('reasoningLog')) {
+      set(newAnswerMsg, 'thinkDone', event === 'reasoningLogEnd');
+    }
+
     if (!message) return onionsProps;
+
+    if (
+      isV2(newAnswerMsg) &&
+      ['reasoningLogStart', 'reasoningLogDelta', 'reasoningLogEnd', 'answerStart', 'answerDelta', 'answerEnd'].includes(
+        event
+      )
+    ) {
+      if (event === 'reasoningLogStart' || event === 'reasoningLogEnd') return onionsProps;
+      if (!isTextContentType(message.contentType)) return onionsProps;
+      newAnswerMsg.messageState = IMessageState.Answer;
+      appendV2Message(newAnswerMsg, message, event);
+      return onionsProps;
+    }
 
     const isThinkMsg = ['reasoningLogStart', 'reasoningLogDelta', 'reasoningLogEnd'].includes(event);
 
@@ -191,6 +316,12 @@ function useHandler(props: IProps) {
     (onionsProps: IOnionsProps) => {
       const { sseRes, sseMsg, newAnswerMsg } = onionsProps;
 
+      latchV2Metadata(sseRes, newAnswerMsg);
+
+      if (isV2(newAnswerMsg) && sseMsg.event.startsWith('reasoningLog')) {
+        set(newAnswerMsg, 'thinkDone', sseMsg.event === 'reasoningLogEnd');
+      }
+
       if (sseRes.traceId) {
         newAnswerMsg.traceId = sseRes.traceId;
         if (sseMsg.clientRequestId) {
@@ -202,6 +333,24 @@ function useHandler(props: IProps) {
 
       const { message } = sseRes;
       const { event } = sseMsg;
+
+      if (
+        isV2(newAnswerMsg) &&
+        [
+          'reasoningLogStart',
+          'reasoningLogDelta',
+          'reasoningLogEnd',
+          'answerStart',
+          'answerDelta',
+          'answerEnd',
+        ].includes(event)
+      ) {
+        if (event === 'reasoningLogStart' || event === 'reasoningLogEnd') return onionsProps;
+        newAnswerMsg.messageState = IMessageState.Answer;
+        if (isTextContentType(sseRes.message.contentType)) return onionsProps;
+        if (sseRes.message) appendV2Message(newAnswerMsg, sseRes.message, event);
+        return onionsProps;
+      }
 
       // 设置回答消息状态为"正在回答"
       newAnswerMsg.messageState = IMessageState.Answer;
@@ -366,20 +515,55 @@ function useHandler(props: IProps) {
       if (newAnswerMsg?.sessionId !== curSessioneRef.current) return onionsProps;
       if (!sseRes) return onionsProps;
 
-      if ([`${SSEMessageType.jsonBlock}`].includes(`${sseRes?.message?.contentType}`)) {
+      const isByCliCommand = (inputBody: unknown) => {
+        let body: Record<string, unknown>;
+        if (typeof inputBody === 'string') {
+          try {
+            body = JSON.parse(inputBody);
+          } catch (error) {
+            return false;
+          }
+        } else {
+          body = inputBody as Record<string, unknown>;
+        }
+        if ('command' in body && typeof body?.command === 'string') {
+          return body?.command?.startsWith('bycli');
+        }
+        return false;
+      };
+      const isBrowserToolName = (toolName: string) => {
+        return toolName.includes('jarvis_run_flow') || toolName.includes('browser');
+      };
+
+      if (`${SSEMessageType.toolCall}` === `${sseRes?.message?.contentType}`) {
+        const substance = get(sseRes, 'message.content.substance');
+        try {
+          let input: unknown;
+          let title: string;
+          let body: { title: string; input: unknown };
+          if (typeof substance === 'string') {
+            body = JSON.parse(substance);
+          } else {
+            body = substance as { title: string; input: unknown };
+          }
+          ({ title, input } = body);
+          if (!isBrowserToolName(title) && !isByCliCommand(input)) {
+            return onionsProps;
+          }
+        } catch (error) {
+          return onionsProps;
+        }
+      } else if ([`${SSEMessageType.jsonBlock}`].includes(`${sseRes?.message?.contentType}`)) {
         const jsonStr = get(sseRes, 'message.content.substance.json', '');
         try {
           const jsonObj = JSON.parse(jsonStr);
-          if (!jsonObj?.command?.startsWith('bycli')) return onionsProps;
+          if (!isByCliCommand(jsonObj)) return onionsProps;
         } catch (error) {
           return onionsProps;
         }
       } else if ([`${SSEMessageType.thinkStatusTitle}`].includes(`${sseRes?.message?.contentType}`)) {
         const toolTitle = get(sseRes, 'message.content.substance.title') || '';
-        if (
-          sseRes?.message?.objectType !== IObjectType.toolCall ||
-          (!toolTitle.includes('jarvis_run_flow') && !toolTitle.includes('browser'))
-        ) {
+        if (sseRes?.message?.objectType !== IObjectType.toolCall || !isBrowserToolName(toolTitle)) {
           return onionsProps;
         }
       } else {

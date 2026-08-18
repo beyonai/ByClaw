@@ -19,7 +19,8 @@ public enum DigitalEmployType {
     AGENT_TYPE_DATA("005", "问数型"),
     AGENT_TYPE_QA("006", "问答型"),
     AGENT_TYPE_DEBUG("010", "调试型"),
-    AGENT_TYPE_CODE("011", "编码型");
+    AGENT_TYPE_CODE("011", "编码型"),
+    AGENT_TYPE_GROUP("017", "数字员工组");
 
     private final String code;
     private final String desc;

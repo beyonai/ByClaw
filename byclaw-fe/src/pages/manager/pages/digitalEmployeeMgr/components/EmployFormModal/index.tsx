@@ -29,7 +29,7 @@ const EmployFormModal = (props) => {
 
   const defaultAgentTypeOptionsWithLabels = React.useMemo(
     () =>
-      DEFAULT_AGENT_TYPE_OPTIONS.map((item) => ({
+      DEFAULT_AGENT_TYPE_OPTIONS.filter((item) => item.paramValue !== '017').map((item) => ({
         value: item.paramValue,
         label: isEN ? item.paramEnName : item.paramName,
       })),
@@ -60,10 +60,12 @@ const EmployFormModal = (props) => {
       if (!Array.isArray(options) || options.length === 0) {
         options = defaultAgentTypeOptionsWithLabels;
       } else {
-        options = options.map((item) => ({
-          value: item.paramValue,
-          label: isEN ? item.paramEnName : item.paramName,
-        }));
+        options = options
+          .filter((item) => item.paramValue !== '017')
+          .map((item) => ({
+            value: item.paramValue,
+            label: isEN ? item.paramEnName : item.paramName,
+          }));
       }
       setAgentTypeOptions(options);
     } catch (error) {

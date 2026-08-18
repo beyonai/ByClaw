@@ -32,7 +32,6 @@ type IProps = {
 
   hideAction?: boolean;
   showToBottomBtn?: boolean;
-  captureRequirementProjectId?: number;
   updateMessage: (message: IMessage) => IMessage;
   deleteMessage: (message: IMessage) => void;
 };
@@ -58,7 +57,6 @@ function MessageList(props: IProps, ref: any) {
     hasMore = false,
     inverse = true,
     showToBottomBtn = true,
-    captureRequirementProjectId,
     updateMessage,
     deleteMessage,
     sessionId,
@@ -73,7 +71,6 @@ function MessageList(props: IProps, ref: any) {
     updateMessage,
     deleteMessage,
     sessionId,
-    captureRequirementProjectId,
   });
   const { toBottomBtnVisable, setToBottomBtnVisable } = useToBottomBtn({
     messageList,

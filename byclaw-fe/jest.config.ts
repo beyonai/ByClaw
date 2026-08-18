@@ -15,10 +15,12 @@ const config: Config = {
     ],
   },
   moduleNameMapper: {
+    // Jest 只应用第一条匹配规则；样式规则要放在 @ 别名之前，
+    // 否则 '@/xxx.module.less' 会先被路径别名展开并被当作 JS 解析。
+    '\\.(less|css|scss)$': 'identity-obj-proxy',
     '^@/(.*)$': '<rootDir>/src/$1',
     '^@beyond/(.*)$': '<rootDir>/src/$1',
     '^canvas$': '<rootDir>/src/__mocks__/canvasMock.js',
-    '\\.(less|css|scss)$': 'identity-obj-proxy',
     '\\.(png|jpg|jpeg|gif|svg|webp|ico)$': '<rootDir>/src/__mocks__/fileMock.js',
   },
   transformIgnorePatterns: [

@@ -10,6 +10,7 @@ import java.lang.reflect.Field;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.iwhalecloud.byai.manager.dto.connector.CompleteSkillAuthorizationRequest;
+import com.iwhalecloud.byai.manager.dto.connector.RevokeConnectorAuthorizationRequest;
 
 class ConnectorControllerContractTest {
 
@@ -21,8 +22,12 @@ class ConnectorControllerContractTest {
             .containsExactly("/authorization/start");
         assertThat(findMethod("getAuthorizationStatus").getAnnotation(GetMapping.class).value())
             .containsExactly("/authorization/status");
+        assertThat(findMethod("handleAuthorizationCallback").getAnnotation(GetMapping.class).value())
+            .containsExactly("/authorization/callback/{providerCode}");
         assertThat(findMethod("completeSkillAuthorization").getAnnotation(PostMapping.class).value())
             .containsExactly("/authorization/skill-complete");
+        assertThat(findMethod("revokeAuthorization").getAnnotation(PostMapping.class).value())
+            .containsExactly("/authorization/revoke");
     }
 
     @Test
@@ -30,6 +35,13 @@ class ConnectorControllerContractTest {
         assertThat(java.util.Arrays.stream(CompleteSkillAuthorizationRequest.class.getDeclaredFields())
             .map(Field::getName))
             .containsExactly("connectorCode");
+    }
+
+    @Test
+    void revocationRequestAcceptsOnlyConnectorId() {
+        assertThat(java.util.Arrays.stream(RevokeConnectorAuthorizationRequest.class.getDeclaredFields())
+            .map(Field::getName))
+            .containsExactly("connectorId");
     }
 
     private Method findMethod(String name) {

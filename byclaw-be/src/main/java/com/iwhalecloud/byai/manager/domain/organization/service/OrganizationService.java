@@ -7,8 +7,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -286,6 +288,36 @@ public class OrganizationService {
      */
     public List<Organization> findOrganizationByUserId(Long userId) {
         return organizationMapper.findOrganizationByUserId(userId);
+    }
+
+    /**
+     * 查询用户有效组织范围，包括用户直接所属组织及其全部上级组织。
+     *
+     * @param userId 用户标识
+     * @return 有效组织标识集合
+     */
+    public Set<Long> findEffectiveOrganizationIdsByUserId(Long userId) {
+        if (userId == null) {
+            return Collections.emptySet();
+        }
+        Set<Long> organizationIds = new LinkedHashSet<>();
+        List<Organization> organizations = findOrganizationByUserId(userId);
+        if (organizations == null) {
+            return organizationIds;
+        }
+        for (Organization organization : organizations) {
+            if (organization == null) {
+                continue;
+            }
+            if (organization.getOrgId() != null) {
+                organizationIds.add(organization.getOrgId());
+            }
+            if (StringUtils.isBlank(organization.getPathCode())) {
+                continue;
+            }
+            organizationIds.addAll(StringUtil.splitLong(organization.getPathCode(), "\\."));
+        }
+        return organizationIds;
     }
 
     /**

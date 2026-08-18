@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.domain.resource.model;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class SkillRelationSourceTest {
@@ -134,6 +135,199 @@ class SkillRelationSourceTest {
         assertMalformedManual(SkillRelationSource.parse("{\"manual\":false,\"sourceGroupIds\":null}"));
     }
 
+    @Test
+    void parse_v1MapsGroupsToLegacyAndRetainsCanonicalV1Json() {
+        SkillRelationSource source = SkillRelationSource.parse(
+            "{\"manual\":false,\"sourceGroupIds\":[7002,7001]}"
+        );
+
+        assertThat(source.getLegacySourceGroupIds()).containsExactly(7002L, 7001L);
+        assertThat(source.getGroupInstallers()).isEmpty();
+        assertThat(source.getSourceGroupIds()).containsExactly(7002L, 7001L);
+        assertThat(source.toJson()).isEqualTo("{\"manual\":false,\"sourceGroupIds\":[7001,7002]}");
+    }
+
+    @Test
+    void v2TracksInstallersAndSerializesDeterministically() {
+        SkillRelationSource source = SkillRelationSource.parse(
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[7001,7002],"
+                + "\"legacySourceGroupIds\":[7001],\"groupInstallers\":{\"7002\":[10002,10001]}}"
+        );
+
+        assertThat(source.hasGroupInstaller(7002L, 10001L)).isTrue();
+        source.removeGroupInstaller(7002L, 10001L);
+        source.addGroupInstaller(7003L, 10004L);
+        source.addGroupInstaller(7003L, 10003L);
+
+        assertThat(source.getSourceGroupIds()).containsExactly(7001L, 7002L, 7003L);
+        assertThat(source.toJson()).isEqualTo(
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[7001,7002,7003],"
+                + "\"legacySourceGroupIds\":[7001],"
+                + "\"groupInstallers\":{\"7002\":[10002],\"7003\":[10003,10004]}}"
+        );
+    }
+
+    @Test
+    void introducingInstallerAttributionPermanentlyUpgradesV1SourceToV2() {
+        SkillRelationSource source = SkillRelationSource.parse(
+            "{\"manual\":false,\"sourceGroupIds\":[7001]}"
+        );
+
+        source.addGroupInstaller(7002L, 10001L);
+        source.removeGroupInstaller(7002L, 10001L);
+
+        assertThat(source.toJson()).isEqualTo(
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[7001],"
+                + "\"legacySourceGroupIds\":[7001],\"groupInstallers\":{}}"
+        );
+    }
+
+    @Test
+    void manualCopiesAndFullGroupRemovalPreserveV2AttributionSemantics() {
+        SkillRelationSource source = SkillRelationSource.parse(
+            "{\"version\":2,\"manual\":true,\"sourceGroupIds\":[7001,7002],"
+                + "\"legacySourceGroupIds\":[7001],\"groupInstallers\":{\"7001\":[10001],\"7002\":[10002]}}"
+        );
+
+        SkillRelationSource withoutManual = source.withoutManual();
+        SkillRelationSource withManual = withoutManual.withManual();
+        withoutManual.removeGroup(7001L);
+
+        assertThat(withoutManual.isManual()).isFalse();
+        assertThat(withoutManual.getLegacySourceGroupIds()).isEmpty();
+        assertThat(withoutManual.getGroupInstallers()).containsOnlyKeys(7002L);
+        assertThat(withoutManual.getSourceGroupIds()).containsExactly(7002L);
+        assertThat(withManual.isManual()).isTrue();
+        assertThat(withManual.getLegacySourceGroupIds()).containsExactly(7001L);
+        assertThat(withManual.getGroupInstallers()).containsOnlyKeys(7001L, 7002L);
+    }
+
+    @Test
+    void removeInstallerFromAllGroupsRemovesOnlyThatUserAndDropsEmptyGroups() {
+        SkillRelationSource source = SkillRelationSource.parse(
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[7001,7002,7003],"
+                + "\"legacySourceGroupIds\":[7003],"
+                + "\"groupInstallers\":{\"7001\":[10001],\"7002\":[10001,10002]}}"
+        );
+
+        source.removeInstallerFromAllGroups(10001L);
+
+        assertThat(source.getGroupInstallers()).containsOnlyKeys(7002L);
+        assertThat(source.getGroupInstallers().get(7002L)).containsExactly(10002L);
+        assertThat(source.getSourceGroupIds()).containsExactly(7003L, 7002L);
+    }
+
+    @Test
+    void exposedV2CollectionsCannotMutateInternalState() {
+        SkillRelationSource source = SkillRelationSource.parse(
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[7001],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"7001\":[10001]}}"
+        );
+
+        assertThatThrownBy(() -> source.getLegacySourceGroupIds().add(7002L))
+            .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> source.getGroupInstallers().put(7002L, Set.of(10002L)))
+            .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> source.getGroupInstallers().get(7001L).add(10002L))
+            .isInstanceOf(UnsupportedOperationException.class);
+        assertThat(source.hasGroupInstaller(7001L, 10002L)).isFalse();
+    }
+
+    @Test
+    void parse_v2RejectsUnknownKeysInvalidArraysAndInconsistentCompatibilityView() {
+        assertMalformedManual(SkillRelationSource.parse(
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{},\"unknown\":true}"
+        ));
+        assertMalformedManualWithGroups(SkillRelationSource.parse(
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[7001],"
+                + "\"legacySourceGroupIds\":[\"7001\"],\"groupInstallers\":{}}"
+        ), 7001L);
+        assertMalformedManualWithGroups(SkillRelationSource.parse(
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[7001],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"group\":[10001]}}"
+        ), 7001L);
+        assertMalformedManualWithGroups(SkillRelationSource.parse(
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[7001],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"7001\":[\"10001\"]}}"
+        ), 7001L);
+        assertMalformedManualWithGroups(SkillRelationSource.parse(
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[7001],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{}}"
+        ), 7001L);
+    }
+
+    @Test
+    void parse_rejectsDeclaredUnsupportedOrNonIntegralVersions() {
+        assertMalformedManualWithGroups(SkillRelationSource.parse(
+            "{\"version\":3,\"manual\":false,\"sourceGroupIds\":[7001],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"7001\":[10001]}}"
+        ), 7001L);
+        assertMalformedManualWithGroups(SkillRelationSource.parse(
+            "{\"version\":2.0,\"manual\":false,\"sourceGroupIds\":[7001],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"7001\":[10001]}}"
+        ), 7001L);
+    }
+
+    @Test
+    void parse_malformedV2RetainsCompatibilityGroupsWhenInstallerValueIsInvalid() {
+        SkillRelationSource source = SkillRelationSource.parse(
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[7001],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"7001\":\"invalid\"}}"
+        );
+
+        assertMalformedManualWithGroups(source, 7001L);
+        assertThat(source.getLegacySourceGroupIds()).containsExactly(7001L);
+        assertThat(source.getGroupInstallers()).isEmpty();
+    }
+
+    @Test
+    void parse_unsupportedFutureVersionRetainsCompatibilityGroups() {
+        SkillRelationSource source = SkillRelationSource.parse(
+            "{\"version\":3,\"manual\":false,\"sourceGroupIds\":[7002],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{}}"
+        );
+
+        assertMalformedManualWithGroups(source, 7002L);
+    }
+
+    @Test
+    void parse_malformedV2RetainsOnlyPositiveIntegralCompatibilityGroups() {
+        SkillRelationSource source = SkillRelationSource.parse(
+            "{\"version\":2,\"manual\":false,"
+                + "\"sourceGroupIds\":[7001,\"7002\",-1,0,null,7003.5,7004],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{}}"
+        );
+
+        assertMalformedManualWithGroups(source, 7001L, 7004L);
+    }
+
+    @Test
+    void parse_malformedV2FallsBackToLegacyGroupsAndCanonicalInstallerKeys() {
+        SkillRelationSource source = SkillRelationSource.parse(
+            "{\"version\":2,\"manual\":false,"
+                + "\"legacySourceGroupIds\":[7101,\"7102\",null,-1],"
+                + "\"groupInstallers\":{\"7102\":\"invalid\",\"07103\":[10001],\"invalid\":[10002]}}"
+        );
+
+        assertMalformedManualWithGroups(source, 7101L, 7102L);
+    }
+
+    @Test
+    void parse_malformedV2UnionsRecoverableGroupsFromAllRepresentations() {
+        SkillRelationSource source = SkillRelationSource.parse(
+            "{\"version\":2,\"manual\":false,"
+                + "\"sourceGroupIds\":[7001,\"invalid\",null,-1,0],"
+                + "\"legacySourceGroupIds\":[7002,\"invalid\",null,-2,0],"
+                + "\"groupInstallers\":{\"7003\":[\"invalid\"],\"07004\":[10001],"
+                + "\"invalid\":[10002],\"-5\":[10003],\"0\":[10004]}}"
+        );
+
+        assertMalformedManualWithGroups(source, 7001L, 7002L, 7003L);
+        assertThat(source.getLegacySourceGroupIds()).containsExactly(7001L, 7002L, 7003L);
+        assertThat(source.getGroupInstallers()).isEmpty();
+    }
+
     private static void assertManual(SkillRelationSource source) {
         assertThat(source.isManual()).isTrue();
         assertThat(source.isMalformed()).isFalse();
@@ -145,6 +339,13 @@ class SkillRelationSourceTest {
         assertThat(source.isManual()).isTrue();
         assertThat(source.isMalformed()).isTrue();
         assertThat(source.getSourceGroupIds()).isEmpty();
+        assertThat(source.hasAnySource()).isTrue();
+    }
+
+    private static void assertMalformedManualWithGroups(SkillRelationSource source, Long... groupIds) {
+        assertThat(source.isManual()).isTrue();
+        assertThat(source.isMalformed()).isTrue();
+        assertThat(source.getSourceGroupIds()).containsExactly(groupIds);
         assertThat(source.hasAnySource()).isTrue();
     }
 }

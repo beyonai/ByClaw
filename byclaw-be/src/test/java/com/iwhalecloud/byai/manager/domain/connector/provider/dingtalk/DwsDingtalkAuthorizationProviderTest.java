@@ -11,6 +11,7 @@ import java.time.OffsetDateTime;
 import java.time.Instant;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -20,6 +21,9 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialRenewalMode;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService.DwsCredentialStatus;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
@@ -27,6 +31,10 @@ import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 class DwsDingtalkAuthorizationProviderTest {
 
     private static final String AUTHORIZATION_ID = "auth-dws-1";
+    private static final List<String> LOGIN_COMMAND =
+        List.of("dws", "auth", "login", "--device", "--no-browser", "--recommend", "-y");
+    private static final List<String> STATUS_COMMAND = List.of("dws", "auth", "status", "--format", "json");
+    private static final List<String> LOGOUT_COMMAND = List.of("dws", "auth", "reset", "-y");
     private static final String VERIFICATION_URL =
         "https://login.dingtalk.com/oauth2/device/verify.htm?user_code=SECRET-CODE";
 
@@ -36,23 +44,23 @@ class DwsDingtalkAuthorizationProviderTest {
 
     @Test
     void verifiesExistingValidDwsCredentialAsConnected() {
-        when(dwsAuthService.getCredentialStatus(42L))
+        when(dwsAuthService.getCredentialStatus(42L, STATUS_COMMAND))
             .thenReturn(DwsCredentialStatus.completed(connectedStatus()));
 
-        AuthorizationStatusResult result = provider.verify("42", new ConnectorInfo());
+        AuthorizationStatusResult result = provider.verify(42L, new ConnectorInfo());
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
         assertThat(result.accountId()).isEqualTo("ding-user-42");
         assertThat(result.accountName()).isEqualTo("Ding User");
-        verify(dwsAuthService).getCredentialStatus(42L);
+        verify(dwsAuthService).getCredentialStatus(42L, STATUS_COMMAND);
     }
 
     @Test
     void rejectsExistingInvalidDwsCredential() {
-        when(dwsAuthService.getCredentialStatus(42L))
+        when(dwsAuthService.getCredentialStatus(42L, STATUS_COMMAND))
             .thenReturn(DwsCredentialStatus.completed(Map.of("tokenValid", false)));
 
-        AuthorizationStatusResult result = provider.verify("42", new ConnectorInfo());
+        AuthorizationStatusResult result = provider.verify(42L, new ConnectorInfo());
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
         assertThat(result.errorCode()).isEqualTo("CONNECTOR_CREDENTIAL_INVALID");
@@ -60,11 +68,11 @@ class DwsDingtalkAuthorizationProviderTest {
 
     @Test
     void mapsDwsCredentialTimeoutAndWorkspaceFailure() {
-        when(dwsAuthService.getCredentialStatus(42L))
+        when(dwsAuthService.getCredentialStatus(42L, STATUS_COMMAND))
             .thenReturn(DwsCredentialStatus.timeout(), DwsCredentialStatus.workspaceUnavailable());
 
-        AuthorizationStatusResult timeout = provider.verify("42", new ConnectorInfo());
-        AuthorizationStatusResult workspaceFailure = provider.verify("42", new ConnectorInfo());
+        AuthorizationStatusResult timeout = provider.verify(42L, new ConnectorInfo());
+        AuthorizationStatusResult workspaceFailure = provider.verify(42L, new ConnectorInfo());
 
         assertThat(timeout.errorCode()).isEqualTo("CONNECTOR_VERIFICATION_TIMEOUT");
         assertThat(workspaceFailure.errorCode()).isEqualTo("CREDENTIAL_WORKSPACE_UNAVAILABLE");
@@ -72,7 +80,7 @@ class DwsDingtalkAuthorizationProviderTest {
 
     @Test
     void startsPendingAuthorizationWithExplicitUserAndAuthorizationId() {
-        when(dwsAuthService.startDeviceAuth(42L, AUTHORIZATION_ID)).thenReturn(Map.of(
+        when(dwsAuthService.startDeviceAuth(42L, AUTHORIZATION_ID, LOGIN_COMMAND)).thenReturn(Map.of(
             "success", true,
             "userCode", "SECRET-CODE",
             "verificationUrl", VERIFICATION_URL
@@ -90,18 +98,20 @@ class DwsDingtalkAuthorizationProviderTest {
         assertThat(result.providerState()).isNull();
         assertThat(result.errorCode()).isNull();
         assertThat(result.errorMessage()).isNull();
-        verify(dwsAuthService).startDeviceAuth(42L, AUTHORIZATION_ID);
-        verify(dwsAuthService, never()).startDeviceAuth();
+        verify(dwsAuthService).startDeviceAuth(42L, AUTHORIZATION_ID, LOGIN_COMMAND);
     }
 
     @Test
     void mapsValidDwsStatusToConnectedAccount() {
         String expiresAt = "2026-08-01T12:30:00+08:00";
-        when(dwsAuthService.getAuthStatus(42L)).thenReturn(Map.of(
+        String refreshExpiresAt = "2026-09-01T12:30:00+08:00";
+        when(dwsAuthService.getAuthStatus(42L, STATUS_COMMAND)).thenReturn(Map.of(
             "tokenValid", true,
+            "refreshTokenValid", true,
             "userId", "ding-user-42",
             "userName", "Ding User",
-            "expiresAt", expiresAt
+            "expiresAt", expiresAt,
+            "refreshExpiresAt", refreshExpiresAt
         ));
 
         AuthorizationStatusResult result = provider.queryStatus(sessionContext("42"));
@@ -111,15 +121,76 @@ class DwsDingtalkAuthorizationProviderTest {
         assertThat(result.accountName()).isEqualTo("Ding User");
         assertThat(result.credentialExpiresAt())
             .isEqualTo(Date.from(OffsetDateTime.parse(expiresAt).toInstant()));
+        assertThat(result.refreshExpiresAt())
+            .isEqualTo(Date.from(OffsetDateTime.parse(refreshExpiresAt).toInstant()));
+        assertThat(result.credentialState()).isEqualTo(CredentialState.READY);
+        assertThat(result.renewalMode()).isEqualTo(CredentialRenewalMode.REFRESH_TOKEN);
+        assertThat(result.lastVerifiedAt()).isNotNull();
         assertThat(result.credentialReference()).isNull();
         assertThat(result.errorCode()).isNull();
         assertThat(result.errorMessage()).isNull();
-        verify(dwsAuthService).getAuthStatus(42L);
+        verify(dwsAuthService).getAuthStatus(42L, STATUS_COMMAND);
+    }
+
+    @Test
+    void mapsRefreshableDwsStatusToRefreshNeeded() {
+        when(dwsAuthService.getAuthStatus(42L, STATUS_COMMAND)).thenReturn(Map.of(
+            "tokenValid", false,
+            "refreshTokenValid", true,
+            "userId", "ding-user-42"
+        ));
+
+        AuthorizationStatusResult result = provider.queryStatus(sessionContext("42"));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.credentialState()).isEqualTo(CredentialState.REFRESH_NEEDED);
+        assertThat(result.renewalMode()).isEqualTo(CredentialRenewalMode.REFRESH_TOKEN);
+    }
+
+    @Test
+    void mapsExplicitlyInvalidDwsRefreshTokenToReauthorizationRequired() {
+        when(dwsAuthService.getAuthStatus(42L, STATUS_COMMAND)).thenReturn(Map.of(
+            "tokenValid", true,
+            "refreshTokenValid", false,
+            "userId", "ding-user-42"
+        ));
+
+        AuthorizationStatusResult result = provider.queryStatus(sessionContext("42"));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.credentialState()).isEqualTo(CredentialState.REAUTH_REQUIRED);
+    }
+
+    @Test
+    void keepsLegacyDwsStatusWithoutRefreshFlagBackwardCompatible() {
+        when(dwsAuthService.getAuthStatus(42L, STATUS_COMMAND)).thenReturn(Map.of(
+            "tokenValid", true,
+            "userId", "ding-user-42"
+        ));
+
+        AuthorizationStatusResult result = provider.queryStatus(sessionContext("42"));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.credentialState()).isEqualTo(CredentialState.READY);
+    }
+
+    @Test
+    void mapsBothInvalidDwsTokensToReauthorizationRequired() {
+        when(dwsAuthService.getAuthStatus(42L, STATUS_COMMAND)).thenReturn(Map.of(
+            "tokenValid", false,
+            "refreshTokenValid", false,
+            "userId", "ding-user-42"
+        ));
+
+        AuthorizationStatusResult result = provider.queryStatus(sessionContext("42"));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.credentialState()).isEqualTo(CredentialState.REAUTH_REQUIRED);
     }
 
     @Test
     void mapsInvalidOrUnparseableDwsStatusToPendingWithoutSecrets() {
-        when(dwsAuthService.getAuthStatus(42L)).thenReturn(Map.of(
+        when(dwsAuthService.getAuthStatus(42L, STATUS_COMMAND)).thenReturn(Map.of(
             "tokenValid", false,
             "expiresAt", "not-a-date"
         ));
@@ -157,8 +228,15 @@ class DwsDingtalkAuthorizationProviderTest {
     }
 
     @Test
+    void revokesDwsCredentialForExplicitUser() {
+        provider.revoke("42", new ConnectorInfo());
+
+        verify(dwsAuthService).revokeCredential(42L, LOGOUT_COMMAND);
+    }
+
+    @Test
     void sanitizesProviderStartFailureDetails() {
-        when(dwsAuthService.startDeviceAuth(42L, AUTHORIZATION_ID)).thenReturn(Map.of(
+        when(dwsAuthService.startDeviceAuth(42L, AUTHORIZATION_ID, LOGIN_COMMAND)).thenReturn(Map.of(
             "success", false,
             "message", "full output with SECRET-CODE and temporary-token"
         ));
@@ -175,10 +253,10 @@ class DwsDingtalkAuthorizationProviderTest {
 
     @Test
     void rejectsSuccessfulStartWithoutVerificationUrl() {
-        when(dwsAuthService.startDeviceAuth(42L, AUTHORIZATION_ID)).thenReturn(Map.of("success", true));
+        when(dwsAuthService.startDeviceAuth(42L, AUTHORIZATION_ID, LOGIN_COMMAND)).thenReturn(Map.of("success", true));
 
         AuthorizationStartResult nullUrl = provider.start(startContext("42"));
-        when(dwsAuthService.startDeviceAuth(42L, AUTHORIZATION_ID)).thenReturn(Map.of(
+        when(dwsAuthService.startDeviceAuth(42L, AUTHORIZATION_ID, LOGIN_COMMAND)).thenReturn(Map.of(
             "success", true,
             "verificationUrl", "   "
         ));
@@ -194,7 +272,7 @@ class DwsDingtalkAuthorizationProviderTest {
     void connectedStatusTreatsBlankAndInvalidExpiryAsUnknown() {
         Map<String, Object> status = connectedStatus();
         status.put("expiresAt", "   ");
-        when(dwsAuthService.getAuthStatus(42L)).thenReturn(status);
+        when(dwsAuthService.getAuthStatus(42L, STATUS_COMMAND)).thenReturn(status);
         AuthorizationStatusResult blankExpiry = provider.queryStatus(sessionContext("42"));
 
         status.put("expiresAt", "not-a-date");
@@ -211,7 +289,7 @@ class DwsDingtalkAuthorizationProviderTest {
         Date expiresAt = new Date(1_800_000_000_000L);
         Map<String, Object> status = connectedStatus();
         status.put("expiresAt", expiresAt);
-        when(dwsAuthService.getAuthStatus(42L)).thenReturn(status);
+        when(dwsAuthService.getAuthStatus(42L, STATUS_COMMAND)).thenReturn(status);
 
         AuthorizationStatusResult result = provider.queryStatus(sessionContext("42"));
 
@@ -222,7 +300,7 @@ class DwsDingtalkAuthorizationProviderTest {
     void connectedStatusParsesUtcZExpiry() {
         Map<String, Object> status = connectedStatus();
         status.put("expiresAt", "2026-08-01T04:30:00Z");
-        when(dwsAuthService.getAuthStatus(42L)).thenReturn(status);
+        when(dwsAuthService.getAuthStatus(42L, STATUS_COMMAND)).thenReturn(status);
 
         AuthorizationStatusResult result = provider.queryStatus(sessionContext("42"));
 
@@ -231,10 +309,11 @@ class DwsDingtalkAuthorizationProviderTest {
 
     @Test
     void nullOrExceptionalStatusRemainsPending() {
-        when(dwsAuthService.getAuthStatus(42L)).thenReturn(null);
+        when(dwsAuthService.getAuthStatus(42L, STATUS_COMMAND)).thenReturn(null);
         AuthorizationStatusResult nullStatus = provider.queryStatus(sessionContext("42"));
 
-        when(dwsAuthService.getAuthStatus(42L)).thenThrow(new IllegalStateException("temporary-token"));
+        when(dwsAuthService.getAuthStatus(42L, STATUS_COMMAND))
+            .thenThrow(new IllegalStateException("temporary-token"));
         AuthorizationStatusResult exceptionalStatus = provider.queryStatus(sessionContext("42"));
 
         assertThat(nullStatus.status()).isEqualTo(AuthorizationStatus.PENDING);
@@ -258,7 +337,8 @@ class DwsDingtalkAuthorizationProviderTest {
             "dingtalk",
             "dws-dingtalk",
             null,
-            Map.of()
+            Map.of(),
+            commandCatalog()
         );
     }
 
@@ -271,7 +351,20 @@ class DwsDingtalkAuthorizationProviderTest {
             "dws-dingtalk",
             null,
             null,
-            new Date(System.currentTimeMillis() + 900_000L)
+            new Date(System.currentTimeMillis() + 900_000L),
+            commandCatalog()
+        );
+    }
+
+    private ManifestCommandCatalog commandCatalog() {
+        return new ManifestCommandCatalog(
+            Map.of(
+                "login", List.of(LOGIN_COMMAND),
+                "status", List.of(STATUS_COMMAND),
+                "logout", List.of(LOGOUT_COMMAND)
+            ),
+            "test-digest",
+            Map.of()
         );
     }
 }

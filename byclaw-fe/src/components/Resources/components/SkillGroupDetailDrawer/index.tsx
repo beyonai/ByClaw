@@ -1,10 +1,27 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Button, Empty, Spin, message } from 'antd';
+import { Button, Empty, Modal, Popconfirm, Spin, message } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
-import { getSkillGroupDetail, installSkillGroup } from '@/pages/manager/service/resources';
-import type { SkillGroup, SkillGroupInstallResult } from '@/pages/manager/service/resources';
+import {
+  executeInstallSkillGroup,
+  getSkillGroupDetail,
+  preflightInstallSkillGroup,
+  preflightUninstallSkillGroup,
+  refreshSkillGroupDetail,
+  uninstallSkillGroup,
+} from '@/pages/manager/service/resources';
+import type {
+  SkillGroup,
+  SkillGroupInstallParams,
+  SkillGroupInstallResult,
+  SkillGroupMember,
+  SkillGroupMemberStatus,
+  SkillGroupMemberStatusSummary,
+  SkillGroupUninstallMode,
+  SkillGroupUninstallPreview,
+  SkillGroupUninstallSkill,
+} from '@/pages/manager/service/resources';
 import type { IMessage } from '@/typescript/message';
 import { getFileUrl } from '@/utils/file';
 import { getSkillGroupDefaultCover } from '../skillGroupCover';
@@ -29,18 +46,40 @@ type SkillGroupDetail = SkillGroup & {
   description?: string;
 };
 
-const getResponseData = (response: any): SkillGroupDetail | null =>
+const getResponseData = (response: any): any =>
   response && Object.prototype.hasOwnProperty.call(response, 'data') ? response.data : response || null;
+
+const memberStatusMessageIds: Record<SkillGroupMemberStatus, string> = {
+  INSTALLED: 'resource.skillGroup.memberStatus.installed',
+  INSTALLABLE: 'resource.skillGroup.memberStatus.installable',
+  APPLY_REQUIRED: 'resource.skillGroup.memberStatus.applyRequired',
+  APPLY_PENDING: 'resource.skillGroup.memberStatus.applyPending',
+  APPLY_UNAVAILABLE: 'resource.skillGroup.memberStatus.unavailable',
+};
+
+const memberStatusClassNames: Record<SkillGroupMemberStatus, string> = {
+  INSTALLED: 'statusInstalled',
+  INSTALLABLE: 'statusInstallable',
+  APPLY_REQUIRED: 'statusApplyRequired',
+  APPLY_PENDING: 'statusApplyPending',
+  APPLY_UNAVAILABLE: 'statusUnavailable',
+};
 
 const SkillGroupDetailDrawer: React.FC<SkillGroupDetailDrawerProps> = ({ groupId, digitalEmployeeId, onClose }) => {
   const intl = useIntl();
+  const operationFailedMessage = intl.formatMessage({ id: 'common.operationFailed' });
   const { EventEmitter } = useGlobal();
   const [detail, setDetail] = useState<SkillGroupDetail | null>(null);
   const [loading, setLoading] = useState(Boolean(groupId));
   const [error, setError] = useState(false);
   const [installing, setInstalling] = useState(false);
+  const [confirmSummary, setConfirmSummary] = useState<SkillGroupMemberStatusSummary | null>(null);
   const [installError, setInstallError] = useState(false);
   const [posterError, setPosterError] = useState(false);
+  const [uninstallPreview, setUninstallPreview] = useState<SkillGroupUninstallPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [uninstalling, setUninstalling] = useState(false);
+  const [uninstallModalOpen, setUninstallModalOpen] = useState(false);
   const mountedRef = useRef(true);
   const installIdentityRef = useRef({ groupId, digitalEmployeeId });
 
@@ -48,7 +87,38 @@ const SkillGroupDetailDrawer: React.FC<SkillGroupDetailDrawerProps> = ({ groupId
     installIdentityRef.current = { groupId, digitalEmployeeId };
     setInstalling(false);
     setInstallError(false);
+    setConfirmSummary(null);
+    setUninstallPreview(null);
+    setUninstallModalOpen(false);
+    setUninstalling(false);
   }, [digitalEmployeeId, groupId]);
+
+  useEffect(() => {
+    let active = true;
+    if (!groupId || !digitalEmployeeId || !detail?.installedByGroup) {
+      setUninstallPreview(null);
+      setPreviewLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    setPreviewLoading(true);
+    void preflightUninstallSkillGroup({ groupId, digitalEmployeeId })
+      .then((response: any) => {
+        if (active) setUninstallPreview(getResponseData(response) as SkillGroupUninstallPreview | null);
+      })
+      .catch(() => {
+        if (active) message.error(operationFailedMessage);
+      })
+      .finally(() => {
+        if (active) setPreviewLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [detail?.installedByGroup, digitalEmployeeId, groupId, operationFailedMessage]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -72,7 +142,7 @@ const SkillGroupDetailDrawer: React.FC<SkillGroupDetailDrawerProps> = ({ groupId
 
     setLoading(true);
     setError(false);
-    void getSkillGroupDetail({ groupId })
+    void getSkillGroupDetail({ groupId, digitalEmployeeId })
       .then((response) => {
         if (!active) return;
         setDetail(getResponseData(response));
@@ -87,45 +157,152 @@ const SkillGroupDetailDrawer: React.FC<SkillGroupDetailDrawerProps> = ({ groupId
     return () => {
       active = false;
     };
-  }, [groupId]);
+  }, [digitalEmployeeId, groupId]);
 
   useEffect(() => {
     setPosterError(false);
   }, [detail?.avatar]);
 
-  const handleInstall = async () => {
-    if (!groupId || !digitalEmployeeId || installing) return;
+  const isCurrentInstall = (installIdentity: SkillGroupInstallParams) =>
+    mountedRef.current &&
+    installIdentityRef.current.groupId === installIdentity.groupId &&
+    installIdentityRef.current.digitalEmployeeId === installIdentity.digitalEmployeeId;
 
-    const installIdentity = { groupId, digitalEmployeeId };
-    const isCurrentInstall = () =>
-      mountedRef.current &&
-      installIdentityRef.current.groupId === installIdentity.groupId &&
-      installIdentityRef.current.digitalEmployeeId === installIdentity.digitalEmployeeId;
+  const applyInstallResult = (result: SkillGroupInstallResult) => {
+    if (result.summary?.members) {
+      const summaryMembers = result.summary.members;
+      setDetail((currentDetail) => {
+        if (!currentDetail) return currentDetail;
+        return {
+          ...currentDetail,
+          members: summaryMembers,
+          installedByGroup: result.installedByGroup ?? currentDetail.installedByGroup,
+        };
+      });
+    }
 
+    const installedSkillIds = Array.isArray(result.installedSkillIds) ? result.installedSkillIds : [];
+    const existingSkillIds = Array.isArray(result.existingSkillIds) ? result.existingSkillIds : [];
+
+    EventEmitter.emit('beyond-resourceList-resourceType-reload', {
+      resourceType: 'SKILL',
+      resetSkillFilters: false,
+    });
+    [...installedSkillIds, ...existingSkillIds].forEach((resourceId) => {
+      window.dispatchEvent(new CustomEvent('digitalEmployeeResourceInstalled', { detail: { resourceId } }));
+    });
+
+    const summaryMembers = result.summary?.members || [];
+    const allInstalled =
+      summaryMembers.length > 0 && summaryMembers.every((member) => member.memberStatus === 'INSTALLED');
+    message.success(
+      intl.formatMessage({
+        id: allInstalled ? 'resource.installSkillGroupSuccess' : 'resource.skillGroup.installProcessed',
+      })
+    );
+  };
+
+  const executeInstall = async (installIdentity: SkillGroupInstallParams) => {
     setInstalling(true);
     setInstallError(false);
+    setConfirmSummary(null);
     try {
-      const result: SkillGroupInstallResult = await installSkillGroup({ groupId, digitalEmployeeId });
-      if (!isCurrentInstall()) return;
+      const result = await executeInstallSkillGroup(installIdentity);
+      if (!isCurrentInstall(installIdentity)) return;
 
-      const installedSkillIds = Array.isArray(result.installedSkillIds) ? result.installedSkillIds : [];
-      const existingSkillIds = Array.isArray(result.existingSkillIds) ? result.existingSkillIds : [];
-
-      EventEmitter.emit('beyond-resourceList-resourceType-reload', {
-        resourceType: 'SKILL',
-        resetSkillFilters: false,
-      });
-      [...installedSkillIds, ...existingSkillIds].forEach((resourceId) => {
-        window.dispatchEvent(new CustomEvent('digitalEmployeeResourceInstalled', { detail: { resourceId } }));
-      });
-      message.success(intl.formatMessage({ id: 'resource.installSkillGroupSuccess' }));
+      applyInstallResult(result);
     } catch {
-      if (!isCurrentInstall()) return;
+      if (!isCurrentInstall(installIdentity)) return;
 
       setInstallError(true);
       message.error(intl.formatMessage({ id: 'common.operationFailed' }));
     } finally {
-      if (isCurrentInstall()) setInstalling(false);
+      if (isCurrentInstall(installIdentity)) setInstalling(false);
+    }
+  };
+
+  const handleInstall = async () => {
+    if (!groupId || !digitalEmployeeId || installing || uninstalling) return;
+
+    const installIdentity = { groupId, digitalEmployeeId };
+
+    setInstalling(true);
+    setInstallError(false);
+    try {
+      const summary = await preflightInstallSkillGroup(installIdentity);
+      if (!isCurrentInstall(installIdentity)) return;
+
+      if (summary.applyRequired > 0 || summary.applyPending > 0 || summary.unavailable > 0) {
+        setConfirmSummary(summary);
+        return;
+      }
+      await executeInstall(installIdentity);
+    } catch {
+      if (!isCurrentInstall(installIdentity)) return;
+
+      setInstallError(true);
+      message.error(intl.formatMessage({ id: 'common.operationFailed' }));
+    } finally {
+      if (isCurrentInstall(installIdentity)) setInstalling(false);
+    }
+  };
+
+  const executeUninstall = async (mode: SkillGroupUninstallMode) => {
+    if (!groupId || !digitalEmployeeId || uninstalling || !uninstallPreview) return;
+    const uninstallIdentity = { groupId, digitalEmployeeId };
+    setUninstalling(true);
+    try {
+      const result = await uninstallSkillGroup({
+        ...uninstallIdentity,
+        mode,
+        previewToken: mode === 'REMOVE_ALL' ? uninstallPreview.previewToken : undefined,
+      });
+      if (!isCurrentInstall(uninstallIdentity)) return;
+      if (result.confirmationRequired && result.uninstallPreview) {
+        setUninstallPreview(result.uninstallPreview);
+        setUninstallModalOpen(true);
+        message.warning(intl.formatMessage({ id: 'resource.skillGroup.previewExpired' }));
+        return;
+      }
+
+      let refreshedDetail: SkillGroupDetail | null = null;
+      let refreshFailed = false;
+      try {
+        const refreshed = await refreshSkillGroupDetail(uninstallIdentity);
+        refreshedDetail = getResponseData(refreshed);
+      } catch {
+        refreshFailed = true;
+      }
+      if (!isCurrentInstall(uninstallIdentity)) return;
+      setDetail((currentDetail) => {
+        if (refreshedDetail) return refreshedDetail;
+        if (!currentDetail) return currentDetail;
+        return {
+          ...currentDetail,
+          installedByGroup: false,
+          members: result.summary?.members || currentDetail.members,
+        };
+      });
+      setUninstallPreview(null);
+      setUninstallModalOpen(false);
+      EventEmitter.emit('beyond-resourceList-resourceType-reload', {
+        resourceType: 'SKILL',
+        resetSkillFilters: false,
+      });
+      (result.removedSkillIds || []).forEach((resourceId) => {
+        window.dispatchEvent(new CustomEvent('digitalEmployeeResourceUninstalled', { detail: { resourceId } }));
+      });
+      if (refreshFailed) {
+        message.warning(intl.formatMessage({ id: 'resource.skillGroup.uninstallRefreshFailed' }));
+      } else {
+        message.success(intl.formatMessage({ id: 'resource.skillGroup.uninstallSuccess' }));
+      }
+    } catch {
+      if (isCurrentInstall(uninstallIdentity)) {
+        message.error(intl.formatMessage({ id: 'common.operationFailed' }));
+      }
+    } finally {
+      if (isCurrentInstall(uninstallIdentity)) setUninstalling(false);
     }
   };
 
@@ -158,6 +335,50 @@ const SkillGroupDetailDrawer: React.FC<SkillGroupDetailDrawerProps> = ({ groupId
   const category = detail.catalogName || detail.catalogId;
   const description = detail.resourceDesc || detail.description;
   const members = Array.isArray(detail.members) ? detail.members : [];
+  const allMembersInstalled = members.length > 0 && members.every((member) => member.memberStatus === 'INSTALLED');
+  const installedByGroup = allMembersInstalled && detail.installedByGroup === true;
+  const hasSharedSkills = Boolean(uninstallPreview?.sharedSkills?.length);
+
+  const renderMemberStatus = (member: SkillGroupMember) => {
+    if (!member.memberStatus) return null;
+
+    return (
+      <span className={`${styles.memberStatus} ${styles[memberStatusClassNames[member.memberStatus]]}`}>
+        {intl.formatMessage({ id: memberStatusMessageIds[member.memberStatus] })}
+      </span>
+    );
+  };
+
+  const renderConfirmMembers = (statuses: SkillGroupMemberStatus[]) => {
+    const matchedMembers = confirmSummary?.members.filter(
+      (member) => member.memberStatus && statuses.includes(member.memberStatus)
+    );
+    if (!matchedMembers?.length) return null;
+
+    return (
+      <ul className={styles.confirmMemberList}>
+        {matchedMembers.map((member) => (
+          <li key={member.resourceId}>
+            <span>{member.resourceName}</span>
+            {renderMemberStatus(member)}
+          </li>
+        ))}
+      </ul>
+    );
+  };
+
+  const renderSharedSkillSources = (skill: SkillGroupUninstallSkill) => {
+    const sources: string[] = [];
+    if (skill.manualSource) {
+      sources.push(intl.formatMessage({ id: 'resource.skillGroup.manualSource' }));
+    }
+    if (skill.otherGroupNames.length) {
+      sources.push(
+        intl.formatMessage({ id: 'resource.skillGroup.otherGroupSource' }, { groups: skill.otherGroupNames.join('、') })
+      );
+    }
+    return sources.join('；');
+  };
 
   return (
     <div className={styles.drawer}>
@@ -197,15 +418,39 @@ const SkillGroupDetailDrawer: React.FC<SkillGroupDetailDrawerProps> = ({ groupId
             <i />
             <span>{category || intl.formatMessage({ id: 'common.none' })}</span>
           </div>
-          <Button
-            className={styles.installButton}
-            type="primary"
-            disabled={!digitalEmployeeId || installing}
-            loading={installing}
-            onClick={handleInstall}
-          >
-            {intl.formatMessage({ id: 'resource.installSkillGroup' })}
-          </Button>
+          <div className={styles.actionRow}>
+            <Button
+              className={styles.installButton}
+              type="primary"
+              disabled={!digitalEmployeeId || installing || uninstalling || installedByGroup}
+              loading={installing}
+              onClick={handleInstall}
+            >
+              {intl.formatMessage({
+                id: installedByGroup ? 'resource.skillGroup.installed' : 'resource.installSkillGroup',
+              })}
+            </Button>
+            {installedByGroup ? (
+              <Popconfirm
+                title={intl.formatMessage({ id: 'resource.skillGroup.uninstallSimpleConfirm' })}
+                disabled={hasSharedSkills || !uninstallPreview}
+                onConfirm={() => void executeUninstall('PRESERVE_SHARED')}
+                okText={intl.formatMessage({ id: 'common.confirm' })}
+                cancelText={intl.formatMessage({ id: 'common.cancel' })}
+              >
+                <Button
+                  danger
+                  loading={uninstalling || previewLoading}
+                  disabled={installing || uninstalling || previewLoading || !uninstallPreview}
+                  onClick={() => {
+                    if (hasSharedSkills) setUninstallModalOpen(true);
+                  }}
+                >
+                  {intl.formatMessage({ id: 'resource.skillGroup.uninstall' })}
+                </Button>
+              </Popconfirm>
+            ) : null}
+          </div>
           {installError ? (
             <div className={styles.installError} data-testid="skill-group-detail-install-error">
               {intl.formatMessage({ id: 'common.operationFailed' })}
@@ -227,7 +472,10 @@ const SkillGroupDetailDrawer: React.FC<SkillGroupDetailDrawerProps> = ({ groupId
             <ul className={styles.memberList}>
               {members.map((member) => (
                 <li key={member.resourceId}>
-                  <span>{member.resourceName}</span>
+                  <div className={styles.memberHeader}>
+                    <span className={styles.memberName}>{member.resourceName}</span>
+                    {renderMemberStatus(member)}
+                  </div>
                   {member.resourceDesc ? <small>{member.resourceDesc}</small> : null}
                 </li>
               ))}
@@ -237,6 +485,82 @@ const SkillGroupDetailDrawer: React.FC<SkillGroupDetailDrawerProps> = ({ groupId
           )}
         </section>
       </main>
+
+      <Modal
+        open={Boolean(confirmSummary)}
+        title={intl.formatMessage({ id: 'resource.skillGroup.installConfirmTitle' })}
+        okText={intl.formatMessage({ id: 'common.confirm' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
+        confirmLoading={installing}
+        onCancel={() => setConfirmSummary(null)}
+        onOk={() => {
+          if (groupId && digitalEmployeeId) void executeInstall({ groupId, digitalEmployeeId });
+        }}
+        destroyOnHidden
+      >
+        {confirmSummary ? (
+          <div className={styles.confirmContent}>
+            <p>{intl.formatMessage({ id: 'resource.skillGroup.installConfirmDescription' })}</p>
+            <div className={styles.confirmStats}>
+              <strong>
+                {intl.formatMessage(
+                  { id: 'resource.skillGroup.installableCount' },
+                  { count: confirmSummary.installable }
+                )}
+              </strong>
+              <strong>
+                {intl.formatMessage(
+                  { id: 'resource.skillGroup.applyRequiredCount' },
+                  { count: confirmSummary.applyRequired + confirmSummary.applyPending }
+                )}
+              </strong>
+              <strong>
+                {intl.formatMessage(
+                  { id: 'resource.skillGroup.unavailableCount' },
+                  { count: confirmSummary.unavailable }
+                )}
+              </strong>
+            </div>
+            {renderConfirmMembers(['INSTALLABLE'])}
+            {renderConfirmMembers(['APPLY_REQUIRED', 'APPLY_PENDING'])}
+            {renderConfirmMembers(['APPLY_UNAVAILABLE'])}
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={uninstallModalOpen}
+        title={intl.formatMessage({ id: 'resource.skillGroup.uninstallConfirmTitle' })}
+        onCancel={() => setUninstallModalOpen(false)}
+        footer={[
+          <Button key="cancel" disabled={uninstalling} onClick={() => setUninstallModalOpen(false)}>
+            {intl.formatMessage({ id: 'common.cancel' })}
+          </Button>,
+          <Button key="preserve" disabled={uninstalling} onClick={() => void executeUninstall('PRESERVE_SHARED')}>
+            {intl.formatMessage({ id: 'resource.skillGroup.uninstallPreserve' })}
+          </Button>,
+          <Button
+            key="all"
+            danger
+            type="primary"
+            loading={uninstalling}
+            onClick={() => void executeUninstall('REMOVE_ALL')}
+          >
+            {intl.formatMessage({ id: 'resource.skillGroup.uninstallAll' })}
+          </Button>,
+        ]}
+        destroyOnHidden
+      >
+        <p>{intl.formatMessage({ id: 'resource.skillGroup.uninstallSharedDescription' })}</p>
+        <ul className={styles.sharedSkillList}>
+          {(uninstallPreview?.sharedSkills || []).map((skill) => (
+            <li key={skill.resourceId}>
+              <strong>{skill.resourceName || skill.resourceId}</strong>
+              <span>{renderSharedSkillSources(skill)}</span>
+            </li>
+          ))}
+        </ul>
+      </Modal>
     </div>
   );
 };

@@ -71,6 +71,11 @@ public class DigitalEmployeeDTO extends SsResExtDigEmployee {
      */
     private String resourceVersionId;
 
+    /** 数字员工组草稿/在用配置快照标识。 */
+    private Long resourceDVerid;
+
+    private Long resourceRVerid;
+
     /**
      * 服务模式:hosted:远程，local:本地
      */
@@ -146,5 +151,10 @@ public class DigitalEmployeeDTO extends SsResExtDigEmployee {
      * ss_res_ext_dig_employee.core_persona_definition 列， relPrompt 只是它在 JSON 视角下的别名节点，避免 DB 列与 JSON 节点的命名漂移。
      */
     private String relPrompt;
+
+    /**
+     * agentType=017 时的组成员配置，顺序即调度展示顺序。
+     */
+    private List<EmployeeGroupMemberDTO> employeeGroupMembers = new ArrayList<>();
 
 }

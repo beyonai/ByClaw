@@ -17,7 +17,17 @@ export interface ConnectorListItem {
   description: string;
   // Y=当前用户已连接，N=已连接但关闭，null=当前用户未绑定。
   enableFlag: 'Y' | 'N' | null;
+  credentialState?: ConnectorCredentialState | null;
+  renewalMode?: ConnectorRenewalMode | null;
+  accessExpiresAt?: string | null;
+  refreshExpiresAt?: string | null;
+  lastVerifiedAt?: string | null;
+  // 兼容旧版后端，值等同于 accessExpiresAt。
+  credentialExpiresAt?: string | null;
 }
+
+export type ConnectorCredentialState = 'READY' | 'REFRESH_NEEDED' | 'EXPIRING' | 'REAUTH_REQUIRED' | 'UNKNOWN';
+export type ConnectorRenewalMode = 'REFRESH_TOKEN' | 'CREDENTIAL_REISSUE' | 'PROBE_ONLY' | 'NONE';
 
 export interface ConnectorListPage {
   list: ConnectorListItem[];
@@ -35,6 +45,11 @@ export interface ConnectorConnection {
   connectorId: ConnectorId;
   status: ConnectorConnectionStatus;
   accountName?: string;
+  credentialState?: ConnectorCredentialState | null;
+  renewalMode?: ConnectorRenewalMode | null;
+  accessExpiresAt?: string | null;
+  refreshExpiresAt?: string | null;
+  lastVerifiedAt?: string | null;
 }
 
 export type ConnectorEnableFlag = ConnectorListItem['enableFlag'];
@@ -96,3 +111,6 @@ export const getConnectorAuthorization = (authorizationId: string) =>
 
 export const cancelConnectorAuthorization = (authorizationId: string) =>
   POST<boolean>('/byaiService/connector/authorization/cancel', { authorizationId });
+
+export const revokeConnectorAuthorization = (connectorId: ConnectorId) =>
+  POST<boolean>('/byaiService/connector/authorization/revoke', { connectorId });

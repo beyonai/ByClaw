@@ -213,6 +213,7 @@ public class IndexApplicationServiceV2 {
             case AGENT_TYPE_QA -> "digemployee.tag.agent.qa";
             case AGENT_TYPE_DEBUG -> "digemployee.tag.agent.debug";
             case AGENT_TYPE_CODE -> "digemployee.tag.agent.code";
+            case AGENT_TYPE_GROUP -> "digemployee.tag.agent.group";
         };
     }
 

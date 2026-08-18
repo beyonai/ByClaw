@@ -33,6 +33,7 @@ import {
 import { exportPiSessionCheckpoint } from "./pi-session-checkpoint.js";
 import { shouldPreflightCompact } from "./pi-compaction.js";
 import type { PiRuntimeProviderConfig } from "./pi-model-provider.js";
+import { adaptByclawMessageRoles } from "./pi-provider-adapters/byclaw-message-roles.js";
 import { adaptVolcengineArkResponsesPayload } from "./pi-provider-adapters/volcengine-ark.js";
 import type {
   LeaderRunInput,
@@ -294,16 +295,17 @@ export class PiLeaderSession implements LeaderSession {
           },
         },
         {
-          name: "byclaw-volcengine-ark-responses",
+          name: "byclaw-provider-request",
           factory: (pi) => {
             pi.on("before_provider_request", (event, context) => {
+              const roleSafePayload = adaptByclawMessageRoles(event.payload);
               if (
                 requestAdapter !== "volcengine-ark-responses" ||
                 context.model?.provider !== model.provider
               ) {
-                return undefined;
+                return roleSafePayload === event.payload ? undefined : roleSafePayload;
               }
-              return adaptVolcengineArkResponsesPayload(event.payload);
+              return adaptVolcengineArkResponsesPayload(roleSafePayload);
             });
           },
         },

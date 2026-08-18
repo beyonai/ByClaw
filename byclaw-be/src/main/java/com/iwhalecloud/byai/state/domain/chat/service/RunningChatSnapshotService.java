@@ -138,6 +138,7 @@ public class RunningChatSnapshotService {
                     messageContext.setReasonList(textList);
                 }
             }
+            messageContext.restoreSegmentCursor();
             if (StringUtils.isNotBlank(snapshot.getRelatedResources())) {
                 MessageResourceDto resourceDto = JSON.parseObject(snapshot.getRelatedResources(),
                     new TypeReference<MessageResourceDto>() {});
@@ -281,7 +282,10 @@ public class RunningChatSnapshotService {
         snapshot.setTaskId(ctx.taskId);
         snapshot.setUsage(ChatUseageEnum.SYSTEM_RESPONSE.getCode());
         snapshot.setCreatorId(ctx.userId);
-        snapshot.setMetadata(ctx.assistantChatDto == null ? null : ctx.assistantChatDto.getMetadata());
+        snapshot.setMetadata(messageContext.getAnswerMessageList().stream().anyMatch(item -> item.getSeq() != null)
+            || messageContext.getReasonMessageList().stream().anyMatch(item -> item.getSeq() != null)
+                ? withV2RenderMetadata(ctx.assistantChatDto == null ? null : ctx.assistantChatDto.getMetadata())
+                : ctx.assistantChatDto == null ? null : ctx.assistantChatDto.getMetadata());
         snapshot.setCreateTime(
             messageContext.getFirstResponseTime() == null ? new Date() : messageContext.getFirstResponseTime());
         snapshot.setMessageContent(messageContext.returnAnswerText());
@@ -300,6 +304,18 @@ public class RunningChatSnapshotService {
         messageResourceDto.setResources(messageContext.getChatRelatedResource());
         snapshot.setRelatedResources(JSON.toJSONString(messageResourceDto));
         return snapshot;
+    }
+
+    private String withV2RenderMetadata(String metadata) {
+        JSONObject value;
+        try {
+            value = StringUtils.isBlank(metadata) ? new JSONObject() : JSON.parseObject(metadata);
+        }
+        catch (Exception e) {
+            value = new JSONObject();
+        }
+        value.put("messageRenderVersion", "v2");
+        return value.toJSONString();
     }
 
     private Long resolveSnapshotMessageId(ChatProcessContext ctx, String traceId, MessageContext messageContext) {

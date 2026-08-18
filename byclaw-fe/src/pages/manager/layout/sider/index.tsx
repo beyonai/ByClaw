@@ -65,6 +65,7 @@ const Sider: React.FC = () => {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [openKeys, setOpenKeys] = useState<string[]>([]);
   const [menuConfig, setMenuConfig] = useState<any[]>(fallbackMenuConfig);
+  const [menuConfigReady, setMenuConfigReady] = useState(false);
 
   useEffect(() => {
     if (!userInfo) {
@@ -72,17 +73,18 @@ const Sider: React.FC = () => {
     }
 
     let mounted = true;
+    setMenuConfigReady(false);
 
     getManagerMenuConfig({ refresh: true })
       .then((menus) => {
-        if (mounted && menus.length > 0) {
-          setMenuConfig(menus.filter((item) => item.routePath));
-        }
+        if (!mounted) return;
+        if (menus.length > 0) setMenuConfig(menus.filter((item) => item.routePath));
+        setMenuConfigReady(true);
       })
       .catch(() => {
-        if (mounted) {
-          setMenuConfig(fallbackMenuConfig);
-        }
+        if (!mounted) return;
+        setMenuConfig(fallbackMenuConfig);
+        setMenuConfigReady(true);
       });
 
     return () => {
@@ -127,7 +129,8 @@ const Sider: React.FC = () => {
 
   // Update selected/open keys based on current pathname
   useEffect(() => {
-    if (filteredMenus.length === 0) return;
+    // 动态菜单返回前不能用旧兜底权限判断当前路由，否则沙箱等合法页面会被提前重定向到第一个菜单。
+    if (!menuConfigReady || filteredMenus.length === 0) return;
 
     const hiddenDetailPages = ['/manager/resource/employeeDetail'];
     const isHiddenDetailPage = hiddenDetailPages.some((page) => pathname === page || pathname.startsWith(`${page}/`));
@@ -150,7 +153,7 @@ const Sider: React.FC = () => {
         navigate(first.path, { replace: true });
       }
     }
-  }, [pathname, flatMenuItems, filteredMenus]);
+  }, [pathname, flatMenuItems, filteredMenus, menuConfigReady]);
 
   // Initialize open keys when menus load
   useEffect(() => {

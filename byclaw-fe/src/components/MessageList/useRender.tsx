@@ -20,6 +20,8 @@ import CopyComp from './components/AnswerActions/Copy';
 import MoreActions from './components/AnswerActions/MoreActions';
 import ThumbUp from './components/AnswerActions/ThumbUp';
 import MsgRenderer from './components/MsgRenderer';
+import MsgRendererV2 from './components/MsgRendererV2';
+import { isV2Message } from './components/MsgRendererV2/ordered';
 import UserInfoModal from '@/components/OrgUserSelector/components/UserInfoModal';
 // import Memory from './components/Memory';
 
@@ -56,12 +58,10 @@ export default function useRender({
   updateMessage,
   deleteMessage,
   sessionId,
-  captureRequirementProjectId,
 }: {
   updateMessage: (message: IMessage) => IMessage;
   deleteMessage: (message: IMessage) => void;
   sessionId?: string;
-  captureRequirementProjectId?: number;
 }) {
   const { ModalNode, setOpen, setMyContent, setMyTitle } = useModal({});
 
@@ -193,12 +193,7 @@ export default function useRender({
                   {/* <Memory msg={msg} /> */}
                 </>
               )}
-              <MoreActions
-                deleteMessage={deleteMessage}
-                msg={msg}
-                showTroubleshoot
-                captureRequirementProjectId={captureRequirementProjectId}
-              />
+              <MoreActions deleteMessage={deleteMessage} msg={msg} showTroubleshoot />
               {[IMessageState.Done, IMessageState.Cancel].includes(messageState) && (
                 <ThumbUp updateMessage={updateMessage} msg={msg} />
               )}
@@ -208,7 +203,7 @@ export default function useRender({
         </div>
       );
     },
-    [deleteMessage, updateMessage, canRefrence, captureRequirementProjectId]
+    [deleteMessage, updateMessage, canRefrence]
   );
 
   const uploadFileRender = useCallback((fileList?: IFile[], msg?: IMessage) => {
@@ -471,7 +466,11 @@ export default function useRender({
                 [styles.pureText]: fromOtherUser && usage !== '4',
               })}
             >
-              <MsgRenderer msg={msg} updateMessage={updateMessage} hideThinking={param?.hideThinking} />
+              {isV2Message(msg) ? (
+                <MsgRendererV2 msg={msg} updateMessage={updateMessage} hideThinking={param?.hideThinking} />
+              ) : (
+                <MsgRenderer msg={msg} updateMessage={updateMessage} hideThinking={param?.hideThinking} />
+              )}
               {messageState === IMessageState.Query && <DualBallLoading style={{ width: 32, height: 32 }} />}
             </div>
             {fromBeyond && messageState === IMessageState.Error && (

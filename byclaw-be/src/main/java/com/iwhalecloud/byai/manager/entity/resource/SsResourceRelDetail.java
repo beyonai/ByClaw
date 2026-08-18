@@ -5,6 +5,7 @@ import java.io.Serializable;
 import java.util.Date;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
@@ -43,7 +44,8 @@ public class SsResourceRelDetail implements Serializable {
     /**
      * 关联子资源的信息
      */
-     private String relResourceInfo;
+    @TableField("rel_resource_info")
+    private String relResourceInfo;
 
     /**
      * 创建人ID
@@ -81,4 +83,3 @@ public class SsResourceRelDetail implements Serializable {
     private Integer relStatus;
 
 }
-

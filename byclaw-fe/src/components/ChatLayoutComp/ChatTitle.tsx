@@ -87,7 +87,7 @@ export default function ChatTitle(props: ChatTitleProps) {
               {props.onToggleResourceWorkspace && (
                 <Button
                   type="text"
-                  className={classnames(styles.projectActionButton, {
+                  className={classnames(styles.projectActionButton, styles.resourcePanelToggleButton, {
                     [styles.projectActionButtonActive]: props.resourceWorkspaceOpen,
                   })}
                   icon={<ResourcePanelToggleIcon className={styles.resourcePanelToggleIcon} />}

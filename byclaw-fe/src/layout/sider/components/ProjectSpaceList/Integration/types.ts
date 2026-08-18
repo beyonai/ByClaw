@@ -59,38 +59,6 @@ export type TestAccount = {
   hasCredential?: boolean;
 };
 
-// 手动测试用例:无法自动化的场景由人工按步骤执行、逐条记录结果。
-export type ManualCase = {
-  id: string;
-  title: string;
-  steps: string; // 操作步骤(多行)
-  expected: string; // 预期结果
-};
-
-// 端到端测试用例集:自动化套件是独立工程(pytest/playwright/jest…),按运行命令执行、按报告路径收结果;
-// manual 套件是人工检查清单,由测试人执行并逐条记录,平台把记录汇总成与自动化一致的套件结果。
-export type TestSuite = {
-  id: string;
-  name: string;
-  runner: 'pytest' | 'playwright' | 'jest' | 'vitest' | 'custom' | 'manual';
-  // code: 用例随代码仓库(选项目关联仓库,与被测代码同仓),沿用开发已检出目录,免克隆;
-  // standalone: 用例存于独立 git 仓库单独维护,执行前克隆它;
-  // env: 用例已预置在集成测试环境机上(运维放好/镜像自带),跳过全部克隆,按环境连接方式登录后直接执行。
-  // manual 套件不需要来源仓库。
-  sourceType: 'code' | 'standalone' | 'env';
-  source: string;
-  branch: string;
-  runCommand: string;
-  workdir: string;
-  // 结果解析:自动化套件产出 JUnit XML,后端统一读该文件汇总通过率;manual 套件由平台按人工记录生成同构结果。
-  reportPath: string;
-  caseCount: number;
-  enabled: boolean;
-  // 仅 manual 套件:V2 下清单不入库,登记仓库内清单文件路径;manualCases 是平台读取该文件后解析出的预览(只读)。
-  manualFile?: string;
-  manualCases?: ManualCase[];
-};
-
 // 一次 E2E 运行的结果详情:对应 status.json + 各套件 JUnit + artifacts,供"查看结果"页展示。
 export type IntegrationRunSuiteResult = {
   suiteId: string;

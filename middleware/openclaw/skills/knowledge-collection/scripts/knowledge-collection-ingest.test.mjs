@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
-const SCRIPT = path.join(TEST_DIR, "knowledge-collection-ingest.mjs");
+const SCRIPT = path.join(TEST_DIR, "ingest.mjs");
 const KNOWLEDGE_MANAGER_SCRIPT = path.resolve(
   TEST_DIR,
   "../../by-knowledge-manager/scripts/by-knowledge-manager.mjs",
@@ -17,6 +17,7 @@ const KNOWLEDGE_MANAGER_SCRIPT = path.resolve(
 
 function createServer() {
   const requests = [];
+  let responseDelayMs = 0;
   const server = http.createServer((req, res) => {
     const chunks = [];
     req.on("data", (chunk) => chunks.push(chunk));
@@ -113,7 +114,7 @@ function createServer() {
 
       if (req.url === "/byaiService/spaceDir/listPersonalKb") {
         res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({
+        const body = JSON.stringify({
           code: 0,
           data: {
             selectedKbs: [],
@@ -124,7 +125,12 @@ function createServer() {
               total: 1,
             },
           },
-        }));
+        });
+        if (responseDelayMs > 0) {
+          setTimeout(() => res.end(body), responseDelayMs);
+        } else {
+          res.end(body);
+        }
         return;
       }
 
@@ -156,6 +162,9 @@ function createServer() {
 
   return {
     requests,
+    setDelay(milliseconds) {
+      responseDelayMs = milliseconds;
+    },
     listen() {
       return new Promise((resolve) => {
         server.listen(0, "127.0.0.1", () => resolve(server.address().port));
@@ -339,6 +348,11 @@ async function testCanonicalCollectionResultRejectsInvalidContractShapes() {
       },
       error: /sanitized\/items/,
     },
+    {
+      name: "duplicate-canonical-path",
+      mutate(value) { value.items.push({ ...value.items[0], title: "Duplicate" }); },
+      error: /canonical Markdown 路径重复/,
+    },
   ];
   try {
     for (const testCase of cases) {
@@ -361,9 +375,11 @@ async function testCanonicalCollectionResultAllowsEmptyMaterializedView() {
   fs.writeFileSync(fixturePath, JSON.stringify(canonicalCollection([])));
   try {
     const result = await runCli(["normalize", "--collection-result-file", fixturePath], undefined, 0);
-    assert.equal(result.code, 1, result.stderr || result.stdout);
-    assert.match(String(result.json?.error || ""), /未找到可入库的 Markdown/);
-    assert.doesNotMatch(String(result.json?.error || ""), /items.*非空数组/);
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json?.action, "normalize");
+    assert.equal(result.json?.needsMaterialization, true);
+    assert.equal(result.json?.summary?.markdownCount, 0);
+    assert.deepEqual(result.json?.payloads?.collectionResult?.items, []);
   } finally {
     fs.rmSync(fixtureDir, { recursive: true, force: true });
   }
@@ -734,6 +750,23 @@ async function testMarkdownIngestListsKnowledgeBasesBeforeImport() {
     assert.equal(result.json?.knowledgeBases?.[0]?.name, "个人默认知识库");
     assert.equal(server.requests.filter((request) => request.url === "/byaiService/spaceDir/listPersonalKb").length, 1);
     assert.equal(server.requests.some((request) => request.url?.includes("/ecosystemCollection/ingestion/")), false);
+  } finally {
+    await server.close();
+  }
+}
+
+async function testBackendRequestsHaveADeadline() {
+  const server = createServer();
+  const port = await server.listen();
+  server.setDelay(200);
+  try {
+    const started = Date.now();
+    const result = await runCli(["list-kb"], {}, port, {
+      KNOWLEDGE_COLLECTION_BACKEND_TIMEOUT_MS: "50",
+    });
+    assert.equal(result.code, 1, result.stderr || result.stdout);
+    assert.match(String(result.json?.error || ""), /超时|timeout/i);
+    assert.ok(Date.now() - started < 500, `backend timeout took ${Date.now() - started}ms`);
   } finally {
     await server.close();
   }
@@ -1417,6 +1450,32 @@ async function testUploadDocAcceptsUppercaseExtension() {
   }
 }
 
+async function testUploadDocReturnsPerItemPartialResults() {
+  const server = createServer();
+  const port = await server.listen();
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-doc-item-results-"));
+  const first = path.join(fixtureDir, "doc.pdf");
+  const second = path.join(fixtureDir, "second.pdf");
+  fs.writeFileSync(first, "pdf-one");
+  fs.writeFileSync(second, "pdf-two");
+  try {
+    const result = await runCli([
+      "upload-doc", "--file-path", first, "--file-path", second,
+      "--item-id", "item-a", "--item-id", "item-b",
+      "--knowledge-base-resource-id", "90001",
+      "--confirmed-knowledge-base-resource-id", "90001", "--confirmed-directory-path", "/",
+    ], {}, port);
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.deepEqual(result.json?.itemResults, [
+      { itemId: "item-a", status: "success", reason: null },
+      { itemId: "item-b", status: "unknown", reason: "upload-result-unmapped" },
+    ]);
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+    await server.close();
+  }
+}
+
 async function testIngestRequiresConfirmedTargetBeforeWrite() {
   const server = createServer();
   const port = await server.listen();
@@ -1550,6 +1609,60 @@ process.stdout.write(JSON.stringify(command === "update-file" ? {
   }
 }
 
+async function testIngestChecksMarkdownConflictBeforeUploadingMediaAndDoesNotReplayIt() {
+  const server = createServer();
+  const port = await server.listen();
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-media-conflict-"));
+  const managerPath = path.join(fixtureDir, "manager.mjs");
+  fs.writeFileSync(managerPath, `
+const command = process.argv[2];
+const checking = process.argv.includes("--check-conflicts");
+process.stdout.write(JSON.stringify(command === "update-file" ? {
+  ok: true,
+  action: "update-file",
+  uploaded: { uploadItems: [{ fileName: "Conflict-article.md", filePath: "/imports/Conflict-article.md" }] },
+  builds: [{ filePath: "/imports/Conflict-article.md" }],
+} : checking ? {
+  ok: true,
+  action: "upload",
+  conflict: true,
+  needsOverwriteConfirmation: true,
+  overwritePaths: ["/imports/Conflict-article.md"],
+} : { ok: true, action: "upload" }));
+`);
+  const mediaUrl = `http://127.0.0.1:${port}/asset.png`;
+  let continuationFiles = [];
+  try {
+    const first = await runCli([
+      "ingest", "--check-conflicts", "--allow-private-resource",
+      "--image-url", mediaUrl,
+      "--knowledge-manager-script", managerPath,
+      "--knowledge-base-resource-id", "90001", "--directory-path", "/imports",
+      "--confirmed-knowledge-base-resource-id", "90001", "--confirmed-directory-path", "/imports",
+    ], "# Conflict article", port);
+    assert.equal(first.code, 0, first.stderr || first.stdout);
+    assert.equal(first.json?.action, "confirm-overwrite");
+    assert.equal(server.requests.filter((request) => request.url === "/byaiService/chat/uploadFiles").length, 0);
+    continuationFiles = first.json?.continuation?.markdownFilePaths || [];
+    const resumed = await runCli([
+      "ingest", "--allow-private-resource", "--image-url", mediaUrl,
+      "--knowledge-manager-script", managerPath,
+      "--markdown-file", continuationFiles[0],
+      "--knowledge-base-resource-id", "90001", "--directory-path", "/imports",
+      "--confirmed-knowledge-base-resource-id", "90001", "--confirmed-directory-path", "/imports",
+      "--confirmed-overwrite-path", "/imports/Conflict-article.md",
+    ], undefined, port);
+    assert.equal(resumed.code, 0, resumed.stderr || resumed.stdout);
+    assert.equal(server.requests.filter((request) => request.url === "/byaiService/chat/uploadFiles").length, 1);
+  } finally {
+    for (const filePath of continuationFiles) {
+      fs.rmSync(path.dirname(filePath), { recursive: true, force: true });
+    }
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+    await server.close();
+  }
+}
+
 async function testIngestRejectsSuccessfulManagerExitWithoutJsonContract() {
   const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-empty-manager-"));
   const managerPath = path.join(fixtureDir, "manager.mjs");
@@ -1573,6 +1686,76 @@ async function testIngestRejectsSuccessfulManagerExitWithoutJsonContract() {
   }
 }
 
+async function testIngestReturnsConservativePerItemResultsWhenBatchOutcomeIsUnmapped() {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-item-results-"));
+  const managerPath = path.join(fixtureDir, "manager.mjs");
+  fs.writeFileSync(managerPath, "process.stdout.write(JSON.stringify({ ok: true, action: 'upload' }));\n");
+  try {
+    const result = await runCli(
+      [
+        "ingest",
+        "--knowledge-manager-script", managerPath,
+        "--knowledge-base-resource-id", "90001",
+        "--confirmed-knowledge-base-resource-id", "90001",
+        "--confirmed-directory-path", "/",
+        "--item-id", "item-a",
+        "--item-id", "item-b",
+      ],
+      { items: [{ title: "A", content: "# A" }, { title: "B", content: "# B" }] },
+      0,
+    );
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.deepEqual(result.json?.uploaded?.itemResults, [
+      { itemId: "item-a", status: "unknown", reason: "manager-result-unmapped" },
+      { itemId: "item-b", status: "unknown", reason: "manager-result-unmapped" },
+    ]);
+    assert.deepEqual(result.json?.itemResults, result.json?.uploaded?.itemResults);
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  }
+}
+
+async function testIngestRequiresBuildToReferenceExactUploadedPath() {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-item-paths-"));
+  const managerPath = path.join(fixtureDir, "manager.mjs");
+  fs.writeFileSync(managerPath, `process.stdout.write(JSON.stringify({
+    ok: true,
+    action: 'upload',
+    uploaded: { uploadItems: [{ fileName: 'a.md', filePath: '/uploaded/a.md' }] },
+    builds: [{ filePath: '/different/a.md', built: { ok: true } }]
+  }));\n`);
+  try {
+    const result = await runCli(
+      [
+        "ingest",
+        "--knowledge-manager-script", managerPath,
+        "--knowledge-base-resource-id", "90001",
+        "--confirmed-knowledge-base-resource-id", "90001",
+        "--confirmed-directory-path", "/",
+        "--item-id", "item-a",
+      ],
+      { items: [{ title: "A", fileName: "a.md", content: "# A" }] },
+      0,
+    );
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.deepEqual(result.json?.uploaded?.itemResults, [
+      { itemId: "item-a", status: "unknown", reason: "manager-result-unmapped" },
+    ]);
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  }
+}
+
+async function testItemIdCountMustMatchMarkdownSelection() {
+  const result = await runCli(
+    ["normalize", "--item-id", "item-a", "--item-id", "item-b"],
+    { items: [{ title: "Only one", content: "# One" }] },
+    0,
+  );
+  assert.equal(result.code, 1, result.stderr || result.stdout);
+  assert.match(String(result.json?.error || ""), /item-id.*数量|item-id/);
+}
+
 await testHelpUsesMigratedIdentityAndCanonicalInputFirst();
 await testCanonicalCollectionResultPreservesMarkdownFrontmatter();
 await testCanonicalCollectionResultRejectsInvalidContractShapes();
@@ -1590,6 +1773,7 @@ await testRemoteResourceLimitsRedirects();
 await testRemoteResourceEnforcesTimeoutAndSizeLimits();
 await testLocalResourceEnforcesFileAndBatchLimits();
 await testMarkdownIngestListsKnowledgeBasesBeforeImport();
+await testBackendRequestsHaveADeadline();
 await testLegacyKnowledgeBaseIdResolvesToResourceId();
 await testImageUrlUploadsToChatFilesAndStops();
 await testVideoUrlUploadsToChatFilesAndStops();
@@ -1615,9 +1799,14 @@ await testIngestInlineMarkdownUploadsThroughManager();
 await testUploadResourceFileKindGoesToChatFiles();
 await testUploadDocEmptyUploadItemsErrors();
 await testUploadDocAcceptsUppercaseExtension();
+await testUploadDocReturnsPerItemPartialResults();
 await testIngestRequiresConfirmedTargetBeforeWrite();
 await testBareResourceIdFlagsCannotConfirmTarget();
 await testUploadDocRequiresConfirmedTargetBeforeWrite();
 await testIngestPropagatesOverwriteConfirmationAsNonTerminalState();
+await testIngestChecksMarkdownConflictBeforeUploadingMediaAndDoesNotReplayIt();
 await testIngestRejectsSuccessfulManagerExitWithoutJsonContract();
+await testIngestReturnsConservativePerItemResultsWhenBatchOutcomeIsUnmapped();
+await testIngestRequiresBuildToReferenceExactUploadedPath();
+await testItemIdCountMustMatchMarkdownSelection();
 console.log("knowledge-collection-ingest tests passed");

@@ -65,6 +65,7 @@ const compMap: Record<string, React.LazyExoticComponent<any>> = {
   [`${SSEMessageType.dataCloudLogin}`]: lazy(() => import('@/components/MessagesComp/DataCloud/login')),
   [`${SSEMessageType.commonCard}`]: lazy(() => import('@/components/MessagesComp/Card')),
   [`${SSEMessageType.jsonBlock}`]: lazy(() => import('@/components/MessagesComp/JsonBlock')),
+  [`${SSEMessageType.toolCall}`]: lazy(() => import('@/components/MessagesComp/ToolCall')),
   [`${SSEMessageType.compaction}`]: lazy(() => import('@/components/MessagesComp/Compaction')),
 };
 

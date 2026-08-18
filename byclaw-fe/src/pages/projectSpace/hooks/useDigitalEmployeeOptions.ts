@@ -4,7 +4,16 @@ import { getAllDigitalEmployeesV2, queryMyCreated } from '@/service/digitalEmplo
 export interface DigitalEmployeeOption {
   value: string;
   label: string;
+  description?: string;
   keywords?: string;
+  // 接口原样的头像值,不在这里拼 URL:渲染侧统一走 getAgentChatAvatar,
+  // 与「数字员工」页两个 Tab 用同一条管道(圆形头像、icon- 字体图标、默认头像兜底)。
+  // chatAvatar 优先(两个列表接口都返回它),缺失才退企业/个人列表各自的图片字段。
+  chatAvatar?: string;
+  // 接口原样的 agentType。「去聊天」构造输入框 mention 时要用真实类型:
+  // 这两个列表接口的员工不在 redux 的 employees 列表里,输入框查不到就会兜底成「AI 助手」,
+  // 所以名字/头像/类型都得由这里带过去,不能让渲染侧自己去查。
+  agentType?: string;
 }
 
 const pickArray = (...candidates: any[]): any[] => candidates.find((item) => Array.isArray(item)) || [];
@@ -48,7 +57,12 @@ export const useDigitalEmployeeOptions = (enabled: boolean) => {
         optionMap.set(optionValue, {
           value: optionValue,
           label,
-          keywords: [agent.agentName, agent.resourceName, agent.name, agent.description].filter(Boolean).join(' '),
+          description: agent.resourceDesc || agent.description || agent.desc || agent.intro || '',
+          keywords: [agent.agentName, agent.resourceName, agent.name, agent.resourceDesc, agent.description, agent.desc]
+            .filter(Boolean)
+            .join(' '),
+          chatAvatar: agent.chatAvatar || agent.resourceLogoUrl || agent.avatar || undefined,
+          agentType: agent.agentType || undefined,
         });
       });
       setOptions(Array.from(optionMap.values()));

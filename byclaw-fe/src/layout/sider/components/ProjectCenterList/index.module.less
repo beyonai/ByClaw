@@ -82,28 +82,7 @@
   color: #14161a;
   text-align: left;
   cursor: pointer;
-  transition: background-color 0.25s, border-color 0.25s, box-shadow 0.25s, transform 0.25s;
-
-  &::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    padding: 1px;
-    border-radius: inherit;
-    background: conic-gradient(
-      from 0deg,
-      transparent 0deg,
-      rgba(36, 107, 254, 0.75) 80deg,
-      transparent 150deg,
-      transparent 360deg
-    );
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    mask-composite: exclude;
-    opacity: 0;
-    pointer-events: none;
-  }
+  transition: background-color 0.25s, border-color 0.25s, box-shadow 0.25s;
 }
 
 .projectItem:hover {
@@ -112,17 +91,25 @@
 
 .projectItemActive {
   background: #eef4ff !important;
-  border-color: #c8d9ff;
-  box-shadow: 0 4px 12px rgba(36, 107, 254, 0.14);
+  border-color: transparent;
+  box-shadow: none;
 
-  &::after {
-    opacity: 1;
-    animation: projectBorderFlow 2.8s linear infinite;
+  // 选中项使用低对比度光带从左向右流动，卡片自身的 overflow 会将动画限制在圆角内。
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 0;
+    width: 48%;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.12) 20%, rgba(91, 143, 249, 0.18) 50%, rgba(255, 255, 255, 0.12) 80%, transparent 100%);
+    transform: translateX(-110%);
+    animation: projectActiveFlow 2.4s ease-in-out infinite;
   }
 
-  .projectIcon {
-    box-shadow: 0 0 0 3px rgba(36, 107, 254, 0.12);
-    transform: scale(1.06);
+  > * {
+    position: relative;
+    z-index: 1;
   }
 
   .projectMain strong {
@@ -131,13 +118,19 @@
   }
 }
 
-@keyframes projectBorderFlow {
+@keyframes projectActiveFlow {
   from {
-    transform: rotate(0deg) scale(1.08);
+    transform: translateX(-110%);
   }
 
   to {
-    transform: rotate(360deg) scale(1.08);
+    transform: translateX(220%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .projectItemActive::before {
+    animation: none;
   }
 }
 
@@ -145,13 +138,16 @@
   width: 32px;
   height: 32px;
   flex: 0 0 32px;
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  border: 1px solid transparent;
   border-radius: 50%;
+  color: #246bfe;
+  background: linear-gradient(145deg, #f5f9ff 0%, #e5efff 100%);
   font-size: 12px;
   font-weight: 600;
-  transition: transform 0.25s, box-shadow 0.25s;
 }
 
 .projectMain {
@@ -159,6 +155,13 @@
   flex: 1;
   display: flex;
   flex-direction: column;
+}
+
+.projectTitleRow {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .projectMain strong,
@@ -169,6 +172,8 @@
 }
 
 .projectMain strong {
+  min-width: 0;
+  flex: 1;
   color: #14161a;
   font-size: 13px;
   font-weight: 500;
@@ -182,27 +187,96 @@
   line-height: 20px;
 }
 
-.projectNormal {
+// 项目类型标签与会话模块保持相同尺寸、圆角和颜色，放在项目名称行最右侧。
+.projectTag {
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-inline-end: 0;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.projectTagGroup {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.projectTagPersonal {
   color: #246bfe;
   background: #eaf2ff;
 }
 
-.projectShared {
+.projectTagShared {
   color: #16835a;
   background: #eaf8f0;
 }
 
-.projectDevelop {
+.projectTagDefault {
+  color: #596579;
+  background: #f1f4f8;
+}
+
+.projectTagDevelopment {
   color: #7a3fd1;
   background: #f3ecff;
 }
 
-.projectOperation {
-  color: #0b7d86;
-  background: #e5f8fa;
+.projectTagOperation {
+  color: #1677b8;
+  background: #e8f4fc;
 }
 
-.projectDefault {
+// 项目类型标签与会话模块保持相同尺寸、圆角和颜色，放在项目名称行最右侧。
+.projectTag {
+  height: 18px;
+  line-height: 18px;
+  flex-shrink: 0;
+  margin-inline-end: 0;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.projectTagGroup {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.projectTagPersonal {
+  color: #246bfe;
+  background: #eaf2ff;
+}
+
+.projectTagShared {
+  color: #16835a;
+  background: #eaf8f0;
+}
+
+.projectTagDefault {
   color: #596579;
   background: #f1f4f8;
+}
+
+.projectTagDevelopment {
+  color: #7a3fd1;
+  background: #f3ecff;
+}
+
+.projectTagOperation {
+  color: #1677b8;
+  background: #e8f4fc;
 }

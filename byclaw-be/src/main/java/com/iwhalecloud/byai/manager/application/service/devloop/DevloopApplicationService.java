@@ -5,6 +5,9 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.constants.devloop.DevloopTaskType;
+import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
+import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
 import com.iwhalecloud.byai.common.feign.request.datacloud.InvokeActionReq;
 import com.iwhalecloud.byai.common.feign.request.datacloud.Params;
@@ -27,6 +30,11 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.*;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorManifestCommandResolver;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
+import com.iwhalecloud.byai.manager.domain.connector.provider.dingtalk.DwsAuthorizationCommandPolicy;
+import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorInfoService;
+import com.iwhalecloud.byai.manager.domain.session.service.ByaiSessionService;
 import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFileDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFilePkIdDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
@@ -53,6 +61,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.IntegrationResultDto;
 import com.iwhalecloud.byai.manager.dto.devloop.RequirementPresplitDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.RequirementPresplitResultDto;
 import com.iwhalecloud.byai.manager.dto.devloop.RequirementSplitDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.UpdateTaskStatusDto;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.*;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -105,6 +114,7 @@ import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.Executor;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -226,6 +236,12 @@ public class DevloopApplicationService {
     private DwsAuthService dwsAuthService;
 
     @Autowired
+    private ConnectorInfoService connectorInfoService;
+
+    @Autowired
+    private ConnectorManifestCommandResolver connectorManifestCommandResolver;
+
+    @Autowired
     private DevloopPatService patService;
 
     @Autowired
@@ -285,6 +301,9 @@ public class DevloopApplicationService {
 
     @Autowired
     private FeignDataCloudService feignDataCloudService;
+
+    @Autowired
+    private ByaiSessionService byaiSessionService;
 
     /** 创建扫描源 */
     public ResponseUtil<Map<String, Object>> createScanSource(ScanSourceDTO dto) {
@@ -389,6 +408,7 @@ public class DevloopApplicationService {
         result.setTotalPages((int) sourcePage.getPages());
         List<Map<String, Object>> sourceList = sourcePage.getRecords().stream().map(this::scanSourceToVo)
             .collect(java.util.stream.Collectors.toList());
+        fillProjectNames(sourceList);
         result.setList(sourceList);
         return ResponseUtil.successResponse(result);
     }
@@ -406,10 +426,31 @@ public class DevloopApplicationService {
         map.put("confirmMode", s.getConfirmMode());
         map.put("scoreThreshold", s.getScoreThreshold());
         map.put("lastScanTime", s.getLastScanTime());
+        // 应用级自动化页跨项目展示，必须带项目归属；项目名由列表方法批量补齐，避免逐行查库。
+        map.put("projectId", s.getProjectId());
         // 创建者信息:前端据此判断"当前用户是否创建者",控制授权/编辑/删除入口;createByName 供展示。
         map.put("createBy", s.getCreateBy());
         map.put("createByName", resolveUserName(parseUserId(s.getCreateBy())));
         return map;
+    }
+
+    /**
+     * 给渠道列表批量补项目名称。跨项目查询时同一项目会出现在多行，
+     * 逐行查 projectMapper 会把查询次数放大到行数，这里一次 IN 查询后按 id 归并。
+     */
+    private void fillProjectNames(List<Map<String, Object>> sourceList) {
+        Set<Long> projectIds = sourceList.stream().map(item -> (Long) item.get("projectId")).filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        if (projectIds.isEmpty()) {
+            return;
+        }
+        Map<Long, String> nameById = projectMapper.selectBatchIds(projectIds).stream()
+            .filter(project -> project.getProjectId() != null)
+            .collect(HashMap::new, (map, project) -> map.put(project.getProjectId(), project.getProjectName()),
+                HashMap::putAll);
+        for (Map<String, Object> item : sourceList) {
+            item.put("projectName", nameById.get((Long) item.get("projectId")));
+        }
     }
 
     // ========== 集成测试环境 ==========
@@ -459,6 +500,7 @@ public class DevloopApplicationService {
         env.setEnvName(dto.getEnvName());
         env.setAddress(dto.getAddress());
         env.setOrchestrator(dto.getOrchestrator());
+        env.setCaseSource(dto.getCaseSource());
         env.setConnProtocol(dto.getConnProtocol());
         env.setConnHost(dto.getConnHost());
         env.setConnPort(dto.getConnPort());
@@ -561,6 +603,7 @@ public class DevloopApplicationService {
         map.put("envName", e.getEnvName());
         map.put("address", e.getAddress());
         map.put("orchestrator", e.getOrchestrator());
+        map.put("caseSource", e.getCaseSource());
         map.put("connProtocol", e.getConnProtocol());
         map.put("connHost", e.getConnHost());
         map.put("connPort", e.getConnPort());
@@ -665,7 +708,7 @@ public class DevloopApplicationService {
         return map;
     }
 
-    // ========== 默认数字员工 ==========
+    // ========== 默认助理 ==========
 
     /** 查询某作用域(projectId 缺省/0=全局默认,>0=项目覆盖)的原始配置。 */
     public ResponseUtil<Map<String, Object>> getDefaultAgent(Long projectId) {
@@ -673,18 +716,20 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(defaultAgentToVo(entity, projectId));
     }
 
-    /** 查询项目各角色生效的默认员工(项目覆盖合并到全局默认之上)。 */
+    /** 查询项目各角色生效的默认助理(项目覆盖合并到全局默认之上)。 */
     public ResponseUtil<Map<String, Object>> resolveDefaultAgent(Long projectId) {
         DefaultAgent merged = defaultAgentService.resolveForProject(projectId);
         return ResponseUtil.successResponse(defaultAgentToVo(merged, projectId));
     }
 
-    /** 保存某作用域默认员工配置(每作用域唯一,upsert)。 */
+    /** 保存某作用域默认助理配置(每作用域唯一,upsert)。 */
     public ResponseUtil<Void> saveDefaultAgent(DefaultAgentDTO dto) {
         DefaultAgent entity = new DefaultAgent();
         entity.setProjectId(dto.getProjectId());
         entity.setArchitectAgentId(dto.getArchitectAgentId());
         entity.setArchitectAgentName(dto.getArchitectAgentName());
+        entity.setRequirementAgentId(dto.getRequirementAgentId());
+        entity.setRequirementAgentName(dto.getRequirementAgentName());
         entity.setCoderAgentId(dto.getCoderAgentId());
         entity.setCoderAgentName(dto.getCoderAgentName());
         entity.setTesterAgentId(dto.getTesterAgentId());
@@ -699,6 +744,8 @@ public class DevloopApplicationService {
         map.put("projectId", entity != null && entity.getProjectId() != null ? entity.getProjectId() : projectId);
         map.put("architectAgentId", entity == null ? null : entity.getArchitectAgentId());
         map.put("architectAgentName", entity == null ? null : entity.getArchitectAgentName());
+        map.put("requirementAgentId", entity == null ? null : entity.getRequirementAgentId());
+        map.put("requirementAgentName", entity == null ? null : entity.getRequirementAgentName());
         map.put("coderAgentId", entity == null ? null : entity.getCoderAgentId());
         map.put("coderAgentName", entity == null ? null : entity.getCoderAgentName());
         map.put("testerAgentId", entity == null ? null : entity.getTesterAgentId());
@@ -840,7 +887,7 @@ public class DevloopApplicationService {
             ProjectRepo repo = task.getRepoId() != null ? repoById.get(task.getRepoId()) : null;
             String repoName = repo != null && repo.getRepoFullName() != null ? repo.getRepoFullName() : "";
             String branch = task.getSessionId() != null
-                ? buildBranchName(detectTaskType(item, item.getTitle()), task.getSessionId())
+                ? buildBranchName(detectBranchKind(item, item.getTitle()), task.getSessionId())
                 : "";
             boolean coded = isPhaseDone(snap, "coder");
             allCoded = allCoded && coded;
@@ -1107,8 +1154,7 @@ public class DevloopApplicationService {
         // 算不平以分项之和为准,规则由 Totals.reconciledTotal 单点持有(说明见那里)。
         int sum = passed + failed + skipped;
         if (total != sum) {
-            logger.warn("[IntegrationResult] runId={} 结果算不平, total={} 分项和={},以分项和为准", run.getRunId(),
-                total, sum);
+            logger.warn("[IntegrationResult] runId={} 结果算不平, total={} 分项和={},以分项和为准", run.getRunId(), total, sum);
             total = sum;
         }
         run.setTotal(total);
@@ -1132,8 +1178,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * status.json 版 suites 拼装:比旧结果文件多带失败摘要、截图路径与报告/日志路径,
-     * 结果详情弹窗因此能显示"为什么挂"而不只是"哪条挂"。artifacts 是相对结果根目录的路径。
+     * status.json 版 suites 拼装:比旧结果文件多带失败摘要、截图路径与报告/日志路径, 结果详情弹窗因此能显示"为什么挂"而不只是"哪条挂"。artifacts 是相对结果根目录的路径。
      */
     private String buildSuitesJsonFromStatus(IntegrationRun run, String status, E2eStatusDto e2eStatus) {
         IntegrationSuite suite = integrationSuiteService.findById(run.getSuiteId());
@@ -1162,8 +1207,8 @@ public class DevloopApplicationService {
             JSONObject suiteResult = new JSONObject(true);
             suiteResult.put("suiteId", StringUtils.defaultIfBlank(s.getId(), String.valueOf(run.getSuiteId())));
             suiteResult.put("name", suiteName);
-            suiteResult.put("status", StringUtils.defaultIfBlank(s.getStatus(),
-                "passed".equals(status) ? "passed" : "failed"));
+            suiteResult.put("status",
+                StringUtils.defaultIfBlank(s.getStatus(), "passed".equals(status) ? "passed" : "failed"));
             suiteResult.put("total", nvl(run.getTotal()));
             suiteResult.put("passed", nvl(run.getPassed()));
             suiteResult.put("failed", nvl(run.getFailed()));
@@ -1209,8 +1254,7 @@ public class DevloopApplicationService {
     private static final Set<String> E2E_TERMINAL_STATUS = Set.of("passed", "failed", "error", "timeout", "cancelled");
 
     /**
-     * 用 status.json 细化打点得出的终态。打点是收尾闸门(员工是否干完),这里只在员工明确写了
-     * 终态且与打点不同时采信文件——典型是打点 REJECT 但实际是 error(构建/环境错,没跑到用例)。
+     * 用 status.json 细化打点得出的终态。打点是收尾闸门(员工是否干完),这里只在员工明确写了 终态且与打点不同时采信文件——典型是打点 REJECT 但实际是 error(构建/环境错,没跑到用例)。
      * 超时收尾不细化:那是平台判的,员工没写完文件,采信它会把超时说成通过。
      */
     private String refineStatus(String markerStatus, E2eStatusDto e2eStatus, IntegrationRun run) {
@@ -1535,14 +1579,19 @@ public class DevloopApplicationService {
     // ========== 集成测试执行 ==========
 
     /**
-     * 触发一次「执行测试」:秒回 runId,后台异步跑 stages + 套件命令并轮询。
-     * executorMode 由前端弹框按次指定(默认 backend 直跑,便于人工调试);传空走全局配置的正式形态。
+     * 触发一次「执行测试」:秒回 runId,后台异步跑 stages + 套件命令并轮询。 executorMode 由前端弹框按次指定(默认 backend 直跑,便于人工调试);传空走全局配置的正式形态。
      */
     public ResponseUtil<Map<String, Object>> startIntegrationRun(Long suiteId, Long envId, String executorMode) {
-        IntegrationRun run = integrationRunService.startRun(suiteId, envId,
-            CurrentUserHolder.getCurrentUserId(), null, executorMode);
+        IntegrationRun run = integrationRunService.startRun(suiteId, envId, CurrentUserHolder.getCurrentUserId(), null,
+            executorMode);
         Map<String, Object> result = new HashMap<>();
         result.put("runId", run.getRunId());
+        // tester 模式的会话已在 startRun 同步建好,回给前端直接跳过去看员工执行;
+        // 员工名一起回,聊天输入框才能默认 @ 到测试员工(项目维度员工不在前端员工列表里)。
+        // ID 一律转字符串:雪花 ID 超过 JS 安全整数,给数字前端会截断成跳不过去的会话。
+        result.put("sessionId", run.getSessionId() == null ? null : String.valueOf(run.getSessionId()));
+        result.put("testerAgentId", run.getTesterAgentId() == null ? null : String.valueOf(run.getTesterAgentId()));
+        result.put("testerAgentName", StringUtils.defaultString(run.getTesterAgentName()));
         return ResponseUtil.successResponse(result);
     }
 
@@ -1557,8 +1606,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 按需读取该次执行的报告原文,供前端下载/在线预览。原文不落库,每次查看重新去环境机取。
-     * 方法名以 get 开头,保证 SSH 往返期间不占用写事务与数据库连接。
+     * 按需读取该次执行的报告原文,供前端下载/在线预览。原文不落库,每次查看重新去环境机取。 方法名以 get 开头,保证 SSH 往返期间不占用写事务与数据库连接。
      */
     public ResponseUtil<Map<String, Object>> getIntegrationRunReport(Long runId) {
         // tester 模式的报告已由员工拷进沙箱结果目录,直接读;读不到才回退 SSH 去环境机取
@@ -1578,8 +1626,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 从沙箱结果目录读报告。路径取 status.json 里该套件的 report 字段(相对结果根目录),
-     * 不猜路径:员工可能按不同套件ID命名。取不到返回 null 让调用方走 SSH 回退。
+     * 从沙箱结果目录读报告。路径取 status.json 里该套件的 report 字段(相对结果根目录), 不猜路径:员工可能按不同套件ID命名。取不到返回 null 让调用方走 SSH 回退。
      */
     private Map<String, Object> trySandboxReport(Long runId) {
         try {
@@ -1691,6 +1738,11 @@ public class DevloopApplicationService {
         map.put("durationSec", run.getDurationSec());
         map.put("time", formatDateTime(run.getCreateTime()));
         map.put("createByName", resolveUserName(run.getCreateBy()));
+        // 会话三列决定历史行上「查看会话」是否出现:backend 直跑与旧记录三列都是空,按钮不该显示。
+        // sessionId 转字符串:雪花 ID 超过 JS 安全整数,直接给数字前端会截断成跳不过去的会话。
+        map.put("sessionId", run.getSessionId() == null ? null : String.valueOf(run.getSessionId()));
+        map.put("testerAgentId", run.getTesterAgentId() == null ? null : String.valueOf(run.getTesterAgentId()));
+        map.put("testerAgentName", StringUtils.defaultString(run.getTesterAgentName()));
         return map;
     }
 
@@ -1770,6 +1822,13 @@ public class DevloopApplicationService {
             if (items == null) {
                 return ResponseUtil.failRes(I18nUtil.get("devloop.dingtalk.todo.scan.failed"));
             }
+        }
+        else if (ScanSourceService.SOURCE_TYPE_CHAT.equals(type)) {
+            // 手动触发与定时同一条执行路径；聊天型没有需求条目，createdCount 恒为 0。
+            executeChatSourceSchedule(source);
+            Map<String, Object> chatResult = new HashMap<>();
+            chatResult.put("createdCount", 0);
+            return ResponseUtil.successResponse(chatResult);
         }
         else {
             return ResponseUtil.failRes(I18nUtil.get("devloop.source.type.unsupported", type));
@@ -2275,15 +2334,35 @@ public class DevloopApplicationService {
      * @param listObjectFilePkIdDto 查询入参
      * @return ResponseUtil
      */
-    public Object listObjectById(ListObjectFilePkIdDto listObjectFilePkIdDto) {
+    public List<Map<String, Object>> listObjectById(ListObjectFilePkIdDto listObjectFilePkIdDto) {
         Long sessionId = listObjectFilePkIdDto.getSessionId();
         List<ByaiSessionExt> byaiSessionExts = sessionExtService.selectBySessionId(sessionId);
         String oploopTaskConfig = this.getOploopTaskConfig(byaiSessionExts);
         if (StringUtil.isEmpty(oploopTaskConfig)) {
             return null;
         }
+
         Map<String, Object> oploopTaskConfigMap = JSON.parseObject(oploopTaskConfig, Map.class);
-        return oploopTaskConfigMap.get("ontology");
+
+        List<Map<String, Object>> resultList = new ArrayList<>();
+        // 来源
+        List<Map<String, Object>> sourceList = (List<Map<String, Object>>) oploopTaskConfigMap.get("sourceOntology");
+        for (int i = 0; sourceList != null && i < sourceList.size(); i++) {
+            // 查询接口与执行接口使用同一套本体字段归一化，避免返回结构因入口不同而不一致。
+            Map<String, Object> ontologyMap = enrichOperationTaskOntology(sourceList.get(i));
+            ontologyMap.put("ontologyConfigType", "source");
+            resultList.add(ontologyMap);
+        }
+
+        // 目标
+        List<Map<String, Object>> targetList = (List<Map<String, Object>>) oploopTaskConfigMap.get("ontology");
+        for (int i = 0; targetList != null && i < targetList.size(); i++) {
+            Map<String, Object> ontologyMap = enrichOperationTaskOntology(targetList.get(i));
+            ontologyMap.put("ontologyConfigType", "target");
+            resultList.add(ontologyMap);
+        }
+
+        return resultList;
     }
 
     /**
@@ -2301,6 +2380,22 @@ public class DevloopApplicationService {
             }
         }
         return null;
+    }
+
+    /**
+     * 更新任务的状态
+     *
+     * @param updateTaskStatusDto 更新入参
+     */
+    public void updateTaskStatus(UpdateTaskStatusDto updateTaskStatusDto) {
+        Long sessionId = updateTaskStatusDto.getSessionId();
+        ByaiSessionExt byaiSessionExt = sessionExtService.findOneByExtParamCode(sessionId, "oploop_task_status");
+        if (byaiSessionExt == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "Task not exists");
+        }
+
+        byaiSessionExt.setExtParamValue(updateTaskStatusDto.getTaskStatus());
+        sessionExtService.update(byaiSessionExt);
     }
 
     /** 手工需求 JSON 包裹中携带的已解析、语言无关的数据。 */
@@ -2422,8 +2517,7 @@ public class DevloopApplicationService {
     // ========== 研发任务 ==========
 
     /**
-     * 需求 AI 预拆:查需求正文与项目仓库清单,交给模型产出子任务草稿,只读不落库。
-     * 前端拿到草稿后允许编辑,点启动才调 {@link #splitTask} 一次性建会话,预拆与落库分离。
+     * 需求 AI 预拆:查需求正文与项目仓库清单,交给模型产出子任务草稿,只读不落库。 前端拿到草稿后允许编辑,点启动才调 {@link #splitTask} 一次性建会话,预拆与落库分离。
      */
     public ResponseUtil<RequirementPresplitResultDto> getRequirementPresplit(RequirementPresplitDTO dto) {
         if (dto == null || dto.getProjectId() == null || dto.getSourceItemId() == null) {
@@ -2475,7 +2569,7 @@ public class DevloopApplicationService {
 
         Long operatorId = CurrentUserHolder.getCurrentUserId();
         LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
-        String taskType = detectTaskType(sourceItem, sourceItem.getTitle());
+        String branchKind = detectBranchKind(sourceItem, sourceItem.getTitle());
         String projectDesc = StringUtils.isNotBlank(sourceItem.getContent()) ? getRequirementContent(sourceItem)
             : sourceItem.getTitle();
 
@@ -2506,7 +2600,7 @@ public class DevloopApplicationService {
         for (ResolvedSplitTask item : resolved) {
             RequirementSplitDTO.SplitTask task = item.task();
             ProjectRepo repo = item.repo();
-            SessionStart started = startOneSession(item.agentId(), projectId, item.title(), projectDesc, taskType, repo,
+            SessionStart started = startOneSession(item.agentId(), projectId, item.title(), projectDesc, branchKind, repo,
                 task.getBranch(), loginInfo);
             if (firstSessionId == null) {
                 firstSessionId = started.sessionId();
@@ -2536,6 +2630,101 @@ public class DevloopApplicationService {
         result.put("tasks", created);
         return ResponseUtil.successResponse(result);
     }
+
+    /**
+     * 需求的第二个启动入口：把需求交给需求数字员工在聊天里聊完成，不拆多仓库任务、不建子任务。
+     *
+     * <p>与「拆分为多仓库任务」二选一：两条入口都写同一列 {@code byai_scan_log_item.session_id}，谁先启动谁占住，
+     * 另一条随即被同一道闸门挡掉。共用一列是有意的——需求「是否已启动」只应有一个真相，多加一列就要在
+     * 列表、详情、去重、回写四处同步两种已启动语义。
+     *
+     * <p>完成状态由 skill 自己按 self-developed-rules 契约维护，本轮后端不轮询：拆分任务那条链路要靠会话状态推进
+     * 子任务，而澄清只需要人在聊天里看结果，加定时扫描等于给没有消费者的状态建管道。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Map<String, Object>> startRequirementClarify(Long projectId, Long sourceItemId) {
+        if (projectId == null || sourceItemId == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.split.tasks.required"));
+        }
+        ScanRequireItem sourceItem = scanRequireItemMapper.selectById(sourceItemId);
+        if (sourceItem == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.repository.not.found"));
+        }
+        if (sourceItem.getSessionId() != null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.requirement.already.started"));
+        }
+        Long requirementAgentId = resolveRequirementAgentId(projectId);
+        if (requirementAgentId == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.requirement.clarify.agent.required"));
+        }
+        LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
+        if (loginInfo == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.login.required"));
+        }
+
+        String requirementContent = StringUtils.defaultIfBlank(getRequirementContent(sourceItem),
+            StringUtils.defaultString(sourceItem.getTitle()));
+
+        // 先用可读标题建会话：会话得先落库，异步 chat 线程才读得到；建完再把正文换成提示词。
+        AssistantChatDto chatDto = new AssistantChatDto();
+        chatDto.setSessionId(null);
+        chatDto.setAgentId(requirementAgentId);
+        chatDto.setProjectId(projectId);
+        chatDto.setChatContent(StringUtils.defaultString(sourceItem.getTitle()));
+        chatDto.setAccessTerminal("DevLoop");
+        chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
+        assistantChatService.createGroupChatSession(chatDto);
+        Long sessionId = chatDto.getSessionId();
+        chatDto.setChatContent(buildRequirementClarifyPrompt(requirementContent));
+
+        ScanRequireItem update = new ScanRequireItem();
+        update.setItemId(sourceItemId);
+        update.setSessionId(sessionId);
+        scanRequireItemMapper.updateById(update);
+
+        submitTaskChatAfterCommit(chatDto, loginInfo, sessionId);
+        log.info("[需求澄清] 已下发需求员工, projectId={}, sourceItemId={}, sessionId={}, agentId={}", projectId, sourceItemId,
+            sessionId, requirementAgentId);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("sessionId", sessionId);
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 需求员工ID：DefaultAgent 存的是字符串，脏值(手工改库/历史空串)按未绑定处理，不让 NumberFormatException 冒到接口。 */
+    private Long resolveRequirementAgentId(Long projectId) {
+        DefaultAgent agent = defaultAgentService.resolveForProject(projectId);
+        String raw = agent == null ? null : agent.getRequirementAgentId();
+        if (StringUtils.isBlank(raw)) {
+            return null;
+        }
+        try {
+            return Long.valueOf(raw.trim());
+        }
+        catch (NumberFormatException e) {
+            log.warn("[需求澄清] 需求员工ID非法, projectId={}, raw={}", projectId, StringUtils.abbreviate(raw, 40));
+            return null;
+        }
+    }
+
+    /** 澄清提示词：模板可运营(byai_ai_prompt)，缺失时兜底内置，保证入口永远可下发。 */
+    private String buildRequirementClarifyPrompt(String requirementContent) {
+        String template = aiPromptService.findTemplateByCode("DEVLOOP_REQUIREMENT_CLARIFY_PROMPT",
+            getCurrentRequestLanguage());
+        if (StringUtils.isBlank(template)) {
+            template = DEFAULT_REQUIREMENT_CLARIFY_PROMPT_TEMPLATE;
+        }
+        return template.replace("${requirementContent}", requirementContent);
+    }
+
+    /**
+     * 兜底模板：DB 未配置 DEVLOOP_REQUIREMENT_CLARIFY_PROMPT 时使用，与 V0.4.0 DML 中的模板保持一致。
+     * ACP 那行不能删：完成状态靠 self-developed-rules 写会话状态文件，不调这个 skill 平台读不到 completed。
+     */
+    private static final String DEFAULT_REQUIREMENT_CLARIFY_PROMPT_TEMPLATE = """
+        /byclaw-requirement-clarification ${requirementContent}
+
+        acp下发任务告诉对方启动的时候必须要调用skill：self-developed-rules;""";
 
     /** 依赖 rowId 列表翻译成真实 taskId 逗号串;映射不到的 rowId(用户误引用/已删)跳过,不存悬空ID。 */
     private String translateDeps(List<String> depRowIds, Map<String, Long> taskIdByRow) {
@@ -2591,7 +2780,7 @@ public class DevloopApplicationService {
         String description = sourceItem != null && StringUtils.isNotBlank(sourceItem.getContent())
             ? getRequirementContent(sourceItem)
             : title;
-        String taskType = detectTaskType(sourceItem, title);
+        String branchKind = detectBranchKind(sourceItem, title);
 
         // 手工需求优先使用其 JSON 内的 repoId，不修改项目共用 manual 来源，避免影响其他手工需求。
         ProjectRepo repo = resolveTaskRepo(projectId, sourceItem);
@@ -2601,7 +2790,8 @@ public class DevloopApplicationService {
 
         // 会话即任务:建会话+算分支+写提示词+登记事务后异步 chat,单任务与拆分共用 startOneSession。
         // 分支名由后端按会话ID生成(单任务无用户自定义分支入口),故 explicitBranch 传 null。
-        SessionStart started = startOneSession(agentId, projectId, title, description, taskType, repo, null, loginInfo);
+        SessionStart started = startOneSession(agentId, projectId, title, description, branchKind, repo, null,
+            loginInfo);
         Long sessionId = started.sessionId();
 
         // 需求项回写 sessionId，标记“已启动”并支持跳转会话
@@ -2635,7 +2825,7 @@ public class DevloopApplicationService {
      * 不落库需求/子任务,由调用方按单任务或拆分各自登记,保持本方法只管"起一个会话"。
      */
     private SessionStart startOneSession(Long agentId, Long projectId, String title, String description,
-        String taskType, ProjectRepo repo, String explicitBranch, LoginInfo loginInfo) {
+        String branchKind, ProjectRepo repo, String explicitBranch, LoginInfo loginInfo) {
         // 先用 title 作会话内容让会话名可读,建成后再覆盖为完整提示词供异步 chat 使用。
         AssistantChatDto chatDto = new AssistantChatDto();
         chatDto.setSessionId(null);
@@ -2648,10 +2838,11 @@ public class DevloopApplicationService {
         Long sessionId = chatDto.getSessionId();
 
         String branchName = StringUtils.isNotBlank(explicitBranch) ? explicitBranch.trim()
-            : buildBranchName(taskType, sessionId);
+            : buildBranchName(branchKind, sessionId);
         Project project = projectMapper.selectById(projectId);
         String projectName = project != null ? project.getProjectName() : "";
-        chatDto.setChatContent(buildTaskPrompt(projectName, repo, branchName, taskType, title, description));
+        // 提示词里的「任务类型」讲的就是 bug/需求 这层分支类别，与四角色的 taskType 不是同一概念。
+        chatDto.setChatContent(buildTaskPrompt(projectName, repo, branchName, branchKind, title, description));
 
         // 事务提交后再异步触发 chat：确保异步线程能读到本事务已建的 session。
         submitTaskChatAfterCommit(chatDto, loginInfo, sessionId);
@@ -2878,8 +3069,10 @@ public class DevloopApplicationService {
         }
     }
 
-    /** 判定任务类型：需求项含 bug/缺陷 标记归为 bug，否则为需求 */
-    private String detectTaskType(ScanRequireItem item, String title) {
+    /**
+     * 判定分支类别：需求项含 bug/缺陷 标记归为 bug，否则为需求。 只决定分支前缀与提示词里的「任务类型」文案，与四角色的 DevloopTaskType 无关。
+     */
+    private String detectBranchKind(ScanRequireItem item, String title) {
         String haystack = ((item != null && item.getTitle() != null ? item.getTitle() : "") + " "
             + getRequirementContent(item) + " " + (item != null && item.getAction() != null ? item.getAction() : "")
             + " " + (title != null ? title : "")).toLowerCase();
@@ -2890,8 +3083,8 @@ public class DevloopApplicationService {
     }
 
     /** 分支名策略：bug -> fix/task-{id}，其余 -> feat/task-{id} */
-    private String buildBranchName(String taskType, Long taskId) {
-        String prefix = "bug".equals(taskType) ? "fix" : "feat";
+    private String buildBranchName(String branchKind, Long taskId) {
+        String prefix = "bug".equals(branchKind) ? "fix" : "feat";
         return prefix + "/task-" + taskId;
     }
 
@@ -2994,13 +3187,14 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 在 http(s):// 之后插入令牌前缀,得到带令牌的 clone 地址(令牌以 $VAR 形式留给 shell 展开,不含明文)。
-     * 必须手工拼接:前缀含 $GH_TOKEN 之类的 $,走 replaceFirst 会被当成分组引用直接抛 IllegalArgumentException。
-     * 非 http(s) 地址(如 git@ SSH)原样返回,令牌注入对它无意义。
+     * 在 http(s):// 之后插入令牌前缀,得到带令牌的 clone 地址(令牌以 $VAR 形式留给 shell 展开,不含明文)。 必须手工拼接:前缀含 $GH_TOKEN 之类的 $,走 replaceFirst
+     * 会被当成分组引用直接抛 IllegalArgumentException。 非 http(s) 地址(如 git@ SSH)原样返回,令牌注入对它无意义。
      */
     public static String tokenizedRepoCloneUrl(String provider, String repoUrl) {
         String prefix = repoProviderSpec(provider).cloneUrlPrefix();
-        for (String scheme : new String[] {"https://", "http://"}) {
+        for (String scheme : new String[] {
+            "https://", "http://"
+        }) {
             if (StringUtils.startsWithIgnoreCase(repoUrl, scheme)) {
                 return "https://" + prefix + repoUrl.substring(scheme.length());
             }
@@ -3037,9 +3231,11 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes(I18nUtil.get("project.id.required"));
         }
         final String taskStatus;
+        final String taskType;
         try {
             query.normalizeAndValidate();
             taskStatus = normalizeTaskStatusFilter(query.getStatus());
+            taskType = normalizeTaskTypeFilter(query.getTaskType());
         }
         catch (IllegalArgumentException e) {
             // DTO 可能在无 Spring 上下文的场景执行，接口返回前统一把校验文案转换为当前语言。
@@ -3064,16 +3260,17 @@ public class DevloopApplicationService {
         }
         wrapper.orderByDesc(ByaiSession::getCreateTime).orderByDesc(ByaiSession::getSessionId);
 
-        if (taskStatus != null) {
-            return listTasksByStatus(query, wrapper, taskStatus);
+        if (taskStatus != null || taskType != null) {
+            return listTasksFiltered(query, wrapper, taskStatus, taskType);
         }
         Page<ByaiSession> sessionPage = byaiSessionMapper
             .selectPage(new Page<>(query.getPageNum(), query.getPageSize()), wrapper);
 
+        TaskTypeIndex typeIndex = buildTaskTypeIndex(query.getProjectId(), sessionPage.getRecords());
         List<DevloopTaskViewDto> tasks = new ArrayList<>();
         for (ByaiSession session : sessionPage.getRecords()) {
             DevloopTaskStateDto state = tryReadTaskState(session);
-            tasks.add(sessionAsTask(session, state, resolveTaskContext(session)));
+            tasks.add(sessionAsTask(session, state, resolveTaskContext(session, typeIndex)));
         }
 
         PageInfo<DevloopTaskViewDto> result = new PageInfo<>();
@@ -3086,22 +3283,27 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 任务状态保存在会话状态投影中，数据库没有可直接过滤的状态列。 因此状态看板查询需先读取状态投影，再对每个状态列独立分页，保证四列总数和加载更多结果准确。
+     * 状态在会话状态投影文件里、类型在关联行里，两者数据库都没有可直接过滤的列。 因此按状态或类型筛选时先取全量会话、逐条判定，再在内存里分页，保证总数与「加载更多」准确。
+     * taskStatus/taskType 任一为空表示该维度不筛。
      */
-    private ResponseUtil<PageInfo<DevloopTaskViewDto>> listTasksByStatus(DevloopTaskListQueryDto query,
-        LambdaQueryWrapper<ByaiSession> wrapper, String taskStatus) {
+    private ResponseUtil<PageInfo<DevloopTaskViewDto>> listTasksFiltered(DevloopTaskListQueryDto query,
+        LambdaQueryWrapper<ByaiSession> wrapper, String taskStatus, String taskType) {
         List<ByaiSession> sessions = byaiSessionMapper.selectList(wrapper);
+        TaskTypeIndex typeIndex = buildTaskTypeIndex(query.getProjectId(), sessions);
         List<DevloopTaskViewDto> tasks = new ArrayList<>();
         int matchedCount = 0;
         int offset = (query.getPageNum() - 1) * query.getPageSize();
 
         for (ByaiSession session : sessions) {
             DevloopTaskStateDto state = tryReadTaskState(session);
-            if (!taskStatus.equals(resolveTaskStatusForFilter(state))) {
+            if (taskStatus != null && !taskStatus.equals(resolveTaskStatusForFilter(state))) {
+                continue;
+            }
+            if (taskType != null && !taskType.equals(typeIndex.resolve(session))) {
                 continue;
             }
             if (matchedCount >= offset && tasks.size() < query.getPageSize()) {
-                tasks.add(sessionAsTask(session, state, resolveTaskContext(session)));
+                tasks.add(sessionAsTask(session, state, resolveTaskContext(session, typeIndex)));
             }
             matchedCount++;
         }
@@ -3137,6 +3339,24 @@ public class DevloopApplicationService {
         }
     }
 
+    /** 任务类型筛选值校验；空表示不按类型筛选。 */
+    private String normalizeTaskTypeFilter(String taskType) {
+        if (StringUtils.isBlank(taskType)) {
+            return null;
+        }
+        String normalized = taskType.trim().toLowerCase(Locale.ROOT);
+        switch (normalized) {
+            case DevloopTaskType.ARCHITECT:
+            case DevloopTaskType.REQUIREMENT:
+            case DevloopTaskType.CODER:
+            case DevloopTaskType.TESTER:
+            case DevloopTaskType.CHAT:
+                return normalized;
+            default:
+                throw new IllegalArgumentException(I18nUtil.get("devloop.task.type.invalid"));
+        }
+    }
+
     /** 状态投影缺失时沿用前端展示口径，归类到待开始列。 */
     private String resolveTaskStatusForFilter(DevloopTaskStateDto state) {
         String status = state == null ? null : normalizeTaskStatusFilter(state.getStatus());
@@ -3149,8 +3369,9 @@ public class DevloopApplicationService {
         if (session == null) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.task.session.not.found"));
         }
-        return ResponseUtil
-            .successResponse(sessionAsTask(session, tryReadTaskState(session), resolveTaskContext(session)));
+        TaskTypeIndex typeIndex = buildTaskTypeIndex(session.getProjectId(), List.of(session));
+        return ResponseUtil.successResponse(
+            sessionAsTask(session, tryReadTaskState(session), resolveTaskContext(session, typeIndex)));
     }
 
     /** 直接按 sessionId 读取 v2 会话状态投影，不再解析消息或访问 session_ext。 */
@@ -3172,8 +3393,8 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 查询任务代码变更:本地优先,远程兜底。 本地=直接读宿主机会话工作区的 git 仓库跑 git diff,含未 push/未 commit 的最新改动; 工作区不存在或不是 git 仓库时,回退到
-     * GitHubCompareService 的远程 compare(仅覆盖已 push 分支)。 base=仓库 defaultBranch(默认 main),head=任务分支(与详情同口径 buildBranchName)。
+     * 查询任务代码变更:workspace 架构采集 workspace 自身及 .gitmodules 中的实际子模块；无 workspace 时采集项目全部仓库。
+     * 每个仓库均本地优先、远程兜底，最终扁平合并文件列表，并在文件项上标记所属 repoId。
      */
     public ResponseUtil<Map<String, Object>> getTaskChanges(Long sessionId) {
         if (sessionId == null) {
@@ -3191,84 +3412,9 @@ public class DevloopApplicationService {
                 .eq(ProjectRepo::getProjectId, s.getProjectId()).orderByAsc(ProjectRepo::getRepoId));
             ProjectRepo workspaceRepo = projectRepos.stream()
                 .filter(candidate -> "workspace".equalsIgnoreCase(candidate.getRepoType())).findFirst().orElse(null);
-
-            // 子任务表记录的是实际业务 code 仓库，拆分任务必须优先按 sessionId 反查，不能只靠需求主表的一对一会话。
-            ScanItemTask sessionTask = scanItemTaskService.findBySession(sessionId);
-            ProjectRepo codeRepo = null;
-            if (sessionTask != null && sessionTask.getRepoId() != null) {
-                codeRepo = projectRepos.stream().filter(candidate -> sessionTask.getRepoId().equals(candidate.getRepoId()))
-                    .filter(candidate -> !"workspace".equalsIgnoreCase(candidate.getRepoType())).findFirst()
-                    .orElse(null);
-                if (codeRepo == null) {
-                    ProjectRepo candidate = projectRepoMapper.selectById(sessionTask.getRepoId());
-                    if (candidate != null && s.getProjectId().equals(candidate.getProjectId())
-                        && !"workspace".equalsIgnoreCase(candidate.getRepoType())) {
-                        codeRepo = candidate;
-                    }
-                }
-            }
-            if (codeRepo == null) {
-                ProjectRepo candidate = resolveTaskRepo(s.getProjectId(), item);
-                if (candidate != null && !"workspace".equalsIgnoreCase(candidate.getRepoType())) {
-                    codeRepo = candidate;
-                }
-            }
-            if (codeRepo == null) {
-                codeRepo = projectRepos.stream()
-                    .filter(candidate -> !"workspace".equalsIgnoreCase(candidate.getRepoType())).findFirst()
-                    .orElse(null);
-            }
-
-            String repoFullName = codeRepo != null ? codeRepo.getRepoFullName() : null;
-            String baseBranch = codeRepo != null && StringUtils.isNotBlank(codeRepo.getDefaultBranch())
-                ? codeRepo.getDefaultBranch()
-                : "main";
-            String headBranch = buildBranchName(detectTaskType(item, s.getSessionName()), sessionId);
-
-            Path workspaceDir = resolveCodeRepoWorkspace(s, workspaceRepo, codeRepo);
-            if (workspaceDir != null) {
-                try {
-                    LocalGitChangeService.LocalChangeResult local = localGitChangeService.collectChanges(workspaceDir,
-                        baseBranch);
-                    if (local.getStatus() == LocalGitChangeService.LocalStatus.OK) {
-                        Map<String, Object> changes = localResultToMap(local, repoFullName);
-                        changes.put("repoId", codeRepo != null ? codeRepo.getRepoId() : null);
-                        Object files = changes.get("files");
-                        if (files instanceof List<?> fileChanges) {
-                            for (Object fileChange : fileChanges) {
-                                if (fileChange instanceof Map<?, ?>) {
-                                    @SuppressWarnings("unchecked")
-                                    Map<String, Object> file = (Map<String, Object>) fileChange;
-                                    file.put("repoId", codeRepo != null ? codeRepo.getRepoId() : null);
-                                }
-                            }
-                        }
-                        return ResponseUtil.successResponse(changes);
-                    }
-                    log.info("[Devloop] 本地工作区变更不可用({}),回退远程 compare, sessionId={}", local.getStatus(), sessionId);
-                }
-                catch (Exception e) {
-                    log.warn("[Devloop] 本地 git 变更采集异常,回退远程 compare, sessionId={}", sessionId, e);
-                }
-            }
-
-            // 兜底:远程 compare,需要任务创建者的 GitHub PAT。
-            String pat = patService.getGitHubPat(s.getCreatorId() != null ? String.valueOf(s.getCreatorId()) : null);
-            GitHubCompareService.CompareResult result = gitHubCompareService.compare(repoFullName, baseBranch,
-                headBranch, pat);
-            Map<String, Object> changes = compareResultToMap(result);
-            changes.put("repoId", codeRepo != null ? codeRepo.getRepoId() : null);
-            Object files = changes.get("files");
-            if (files instanceof List<?> fileChanges) {
-                for (Object fileChange : fileChanges) {
-                    if (fileChange instanceof Map<?, ?>) {
-                        @SuppressWarnings("unchecked")
-                        Map<String, Object> file = (Map<String, Object>) fileChange;
-                        file.put("repoId", codeRepo != null ? codeRepo.getRepoId() : null);
-                    }
-                }
-            }
-            return ResponseUtil.successResponse(changes);
+            String headBranch = buildBranchName(detectBranchKind(item, s.getSessionName()), sessionId);
+            List<RepoWorkspace> repoWorkspaces = resolveTaskRepoWorkspaces(s, workspaceRepo, projectRepos);
+            return ResponseUtil.successResponse(collectTaskChanges(s, repoWorkspaces, headBranch));
         }
         catch (Exception e) {
             // 兜底:任何未预期异常都吞掉,返回 http_error 空态,前端照常渲染"暂时无法获取代码变更"。
@@ -3298,27 +3444,28 @@ public class DevloopApplicationService {
             if (s == null) {
                 return ResponseUtil.failRes(I18nUtil.get("devloop.task.session.not.found"));
             }
-            ProjectRepo codeRepo;
+            ProjectRepo repo;
             if (repoId != null) {
-                codeRepo = projectRepoMapper.selectById(repoId);
+                repo = projectRepoMapper.selectById(repoId);
             }
             else {
                 // 兼容旧调用方：未指定仓库时，沿用任务关联需求、扫描源和项目首仓库的既有解析顺序。
                 ScanRequireItem item = scanRequireItemMapper.selectOne(new LambdaQueryWrapper<ScanRequireItem>()
                     .eq(ScanRequireItem::getSessionId, sessionId).last("limit 1"));
-                codeRepo = resolveTaskRepo(s.getProjectId(), item);
+                repo = resolveTaskRepo(s.getProjectId(), item);
             }
-            if (codeRepo == null || !s.getProjectId().equals(codeRepo.getProjectId())
-                || "workspace".equalsIgnoreCase(codeRepo.getRepoType())) {
+            if (repo == null || !s.getProjectId().equals(repo.getProjectId())) {
                 return ResponseUtil.failRes(I18nUtil.get("devloop.task.repository.not.found"));
             }
             List<ProjectRepo> projectRepos = projectRepoMapper.selectList(new LambdaQueryWrapper<ProjectRepo>()
                 .eq(ProjectRepo::getProjectId, s.getProjectId()).orderByAsc(ProjectRepo::getRepoId));
             ProjectRepo workspaceRepo = projectRepos.stream()
                 .filter(candidate -> "workspace".equalsIgnoreCase(candidate.getRepoType())).findFirst().orElse(null);
-            String baseBranch = StringUtils.isNotBlank(codeRepo.getDefaultBranch()) ? codeRepo.getDefaultBranch()
+            String baseBranch = StringUtils.isNotBlank(repo.getDefaultBranch()) ? repo.getDefaultBranch()
                 : "main";
-            Path workspaceDir = resolveCodeRepoWorkspace(s, workspaceRepo, codeRepo);
+            Path workspaceDir = "workspace".equalsIgnoreCase(repo.getRepoType())
+                ? resolveSessionWorkspace(s, repo.getRepoFullName())
+                : resolveCodeRepoWorkspace(s, workspaceRepo, repo);
 
             LocalGitChangeService.FileDiffResult result = localGitChangeService.fileDiff(workspaceDir, baseBranch,
                 filePath);
@@ -3351,6 +3498,136 @@ public class DevloopApplicationService {
             return new GitSubmodulePathResolver().resolve(workspaceRoot, codeRepo).orElse(null);
         }
         return resolveSessionWorkspace(session, codeRepo.getRepoFullName());
+    }
+
+    /** 按实际仓库布局生成本次变更查询目标；workspace 自身始终排在其子模块之前。 */
+    private List<RepoWorkspace> resolveTaskRepoWorkspaces(ByaiSession session, ProjectRepo workspaceRepo,
+        List<ProjectRepo> projectRepos) {
+        List<RepoWorkspace> resolved = new ArrayList<>();
+        if (workspaceRepo == null) {
+            for (ProjectRepo repo : projectRepos) {
+                resolved.add(new RepoWorkspace(repo, resolveSessionWorkspace(session, repo.getRepoFullName())));
+            }
+            return resolved;
+        }
+
+        Path workspaceRoot = resolveSessionWorkspace(session, workspaceRepo.getRepoFullName());
+        resolved.add(new RepoWorkspace(workspaceRepo, workspaceRoot));
+        List<ProjectRepo> codeRepos = projectRepos.stream()
+            .filter(repo -> !"workspace".equalsIgnoreCase(repo.getRepoType())).toList();
+        GitSubmodulePathResolver.SubmoduleResolution submoduleResolution = new GitSubmodulePathResolver()
+            .resolveAllWithStatus(workspaceRoot, codeRepos);
+        for (GitSubmodulePathResolver.ResolvedSubmodule submodule : submoduleResolution.submodules()) {
+            resolved.add(new RepoWorkspace(submodule.repo(), submodule.path()));
+        }
+        // workspace 尚未克隆或 .gitmodules 不可读时无法按实际文件枚举；仅此时回退配置仓库，保留远程 compare 能力。
+        if (!submoduleResolution.metadataAvailable()) {
+            for (ProjectRepo codeRepo : codeRepos) {
+                resolved.add(new RepoWorkspace(codeRepo, null));
+            }
+        }
+        return resolved;
+    }
+
+    /** 汇总多个仓库的变更列表；顶层不再携带单一 repoId，每个文件使用自身仓库的 repoId。 */
+    private Map<String, Object> collectTaskChanges(ByaiSession session, List<RepoWorkspace> repoWorkspaces,
+        String headBranch) {
+        Map<String, Object> aggregate = null;
+        List<Map<String, Object>> files = new ArrayList<>();
+        boolean hasLocalChanges = false;
+        boolean usedRemote = false;
+        String pat = null;
+        boolean patLoaded = false;
+
+        if (repoWorkspaces.isEmpty()) {
+            Map<String, Object> noRepo = new HashMap<>();
+            noRepo.put("status", "no_repo");
+            noRepo.put("files", files);
+            noRepo.put("fileCount", 0);
+            noRepo.put("headBranch", headBranch);
+            return noRepo;
+        }
+
+        for (RepoWorkspace repoWorkspace : repoWorkspaces) {
+            ProjectRepo repo = repoWorkspace.repo();
+            String baseBranch = StringUtils.isNotBlank(repo.getDefaultBranch()) ? repo.getDefaultBranch() : "main";
+            Map<String, Object> repoChanges = null;
+            try {
+                LocalGitChangeService.LocalChangeResult local = localGitChangeService
+                    .collectChanges(repoWorkspace.path(), baseBranch);
+                if (local.getStatus() == LocalGitChangeService.LocalStatus.OK) {
+                    repoChanges = localResultToMap(local, repo.getRepoFullName());
+                    hasLocalChanges = true;
+                }
+                else {
+                    log.info("[Devloop] 本地工作区变更不可用({}),回退远程 compare, sessionId={}, repoId={}",
+                        local.getStatus(), session.getSessionId(), repo.getRepoId());
+                }
+            }
+            catch (Exception e) {
+                log.warn("[Devloop] 本地 git 变更采集异常,回退远程 compare, sessionId={}, repoId={}",
+                    session.getSessionId(), repo.getRepoId(), e);
+            }
+
+            if (repoChanges == null) {
+                if (!patLoaded) {
+                    pat = patService.getGitHubPat(
+                        session.getCreatorId() != null ? String.valueOf(session.getCreatorId()) : null);
+                    patLoaded = true;
+                }
+                GitHubCompareService.CompareResult remote = gitHubCompareService.compare(repo.getRepoFullName(),
+                    baseBranch, headBranch, pat);
+                repoChanges = compareResultToMap(remote);
+                usedRemote = true;
+            }
+            if (aggregate == null || "ok".equals(repoChanges.get("status"))) {
+                aggregate = new HashMap<>(repoChanges);
+            }
+            appendRepoFiles(files, repoChanges.get("files"), repo.getRepoId(), (String) repoChanges.get("source"));
+        }
+
+        if (aggregate == null) {
+            aggregate = errorChangesMap();
+        }
+        aggregate.remove("repoId");
+        aggregate.put("files", files);
+        aggregate.put("fileCount", files.size());
+        aggregate.put("headBranch", headBranch);
+        if (!files.isEmpty()) {
+            aggregate.put("status", "ok");
+        }
+        if (hasLocalChanges) {
+            aggregate.put("source", "local");
+        }
+        else if (usedRemote) {
+            aggregate.put("source", "remote");
+        }
+        if (repoWorkspaces.size() > 1) {
+            aggregate.remove("repoFullName");
+            aggregate.remove("baseBranch");
+            aggregate.remove("aheadBy");
+            aggregate.remove("compareUrl");
+            aggregate.remove("message");
+        }
+        return aggregate;
+    }
+
+    private void appendRepoFiles(List<Map<String, Object>> target, Object source, Long repoId, String changeSource) {
+        if (!(source instanceof List<?> fileChanges)) {
+            return;
+        }
+        for (Object fileChange : fileChanges) {
+            if (fileChange instanceof Map<?, ?>) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> file = new HashMap<>((Map<String, Object>) fileChange);
+                file.put("repoId", repoId);
+                file.put("source", changeSource);
+                target.add(file);
+            }
+        }
+    }
+
+    private record RepoWorkspace(ProjectRepo repo, Path path) {
     }
 
     /**
@@ -3458,16 +3735,75 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 实时解析任务上下文：不落库，按需从关联链路查。需求/仓库优先级为：手工需求 JSON.repoId、扫描源 repoId、项目仓库； agent：session.objectId(数字员工resourceId) ->
-     * 资源名；负责人：session.creatorId -> 用户名； 分支：由 taskType(据需求内容判定) + sessionId 确定性重算。关联信息变化后展示随之更新。
+     * 一批会话的任务类型判据快照。会话表没有类型列，四种角色任务各由自己的创建链路留下关联行， 一次查全后按会话查表，避免逐行反查三张表。
+     *
+     * @param initSessionId     项目工作区初始化会话，架构任务只有这一条
+     * @param coderSessionIds   有研发子任务行的会话
+     * @param testerSessionIds  被集成测试执行记录引用的会话
+     * @param requirementBySession 会话 -> 回写了该会话的需求项，兼作任务上下文的需求来源
      */
-    private Map<String, Object> resolveTaskContext(ByaiSession s) {
+    private record TaskTypeIndex(Long initSessionId, Set<Long> coderSessionIds, Set<Long> testerSessionIds,
+        Map<Long, ScanRequireItem> requirementBySession) {
+
+        /**
+         * 判定优先级：架构 > 研发 > 测试 > 需求 > 普通会话。 研发必须先于需求判：拆解入口会把首个子任务会话同时回写到需求项，
+         * 两个判据都命中时它是研发任务，不是需求澄清任务。
+         */
+        String resolve(ByaiSession session) {
+            Long sessionId = session.getSessionId();
+            if (sessionId == null) {
+                return DevloopTaskType.CHAT;
+            }
+            if (sessionId.equals(initSessionId)) {
+                return DevloopTaskType.ARCHITECT;
+            }
+            if (coderSessionIds.contains(sessionId)) {
+                return DevloopTaskType.CODER;
+            }
+            if (testerSessionIds.contains(sessionId)) {
+                return DevloopTaskType.TESTER;
+            }
+            if (requirementBySession.containsKey(sessionId)) {
+                return DevloopTaskType.REQUIREMENT;
+            }
+            return DevloopTaskType.CHAT;
+        }
+    }
+
+    /** 按会话批量取回四种类型的判据；sessions 为空时不查库。 */
+    private TaskTypeIndex buildTaskTypeIndex(Long projectId, List<ByaiSession> sessions) {
+        if (sessions == null || sessions.isEmpty()) {
+            return new TaskTypeIndex(null, Collections.emptySet(), Collections.emptySet(), Collections.emptyMap());
+        }
+        List<Long> sessionIds = sessions.stream().map(ByaiSession::getSessionId).filter(Objects::nonNull).toList();
+        if (sessionIds.isEmpty()) {
+            return new TaskTypeIndex(null, Collections.emptySet(), Collections.emptySet(), Collections.emptyMap());
+        }
+
+        Project project = projectId == null ? null : projectMapper.selectById(projectId);
+        Map<Long, ScanRequireItem> requirementBySession = new HashMap<>();
+        List<ScanRequireItem> items = scanRequireItemMapper
+            .selectList(new LambdaQueryWrapper<ScanRequireItem>().in(ScanRequireItem::getSessionId, sessionIds));
+        for (ScanRequireItem item : items) {
+            // 一条会话最多对应一个需求项；重复行按先到先得，与原先 limit 1 的口径一致。
+            requirementBySession.putIfAbsent(item.getSessionId(), item);
+        }
+        return new TaskTypeIndex(project == null ? null : project.getInitSessionId(),
+            scanItemTaskService.filterSubtaskSessionIds(sessionIds),
+            integrationRunService.filterTesterSessionIds(sessionIds), requirementBySession);
+    }
+
+    /**
+     * 实时解析任务上下文：不落库，按需从关联链路查。需求/仓库优先级为：手工需求 JSON.repoId、扫描源 repoId、项目仓库； agent：session.objectId(数字员工resourceId) ->
+     * 资源名；负责人：session.creatorId -> 用户名； 分支：由分支类别(据需求内容判定) + sessionId 确定性重算。关联信息变化后展示随之更新。
+     */
+    private Map<String, Object> resolveTaskContext(ByaiSession s, TaskTypeIndex typeIndex) {
         Map<String, Object> ctx = new HashMap<>();
         Long sessionId = s.getSessionId();
 
         // 派生任务会把 sessionId 回写到需求项；据此还原需求与仓库。手动任务无此行，走项目兜底仓库。
-        ScanRequireItem item = scanRequireItemMapper.selectOne(
-            new LambdaQueryWrapper<ScanRequireItem>().eq(ScanRequireItem::getSessionId, sessionId).last("limit 1"));
+        // 需求项已由 TaskTypeIndex 按整页批量取回，这里只做查表，不再逐行访问数据库。
+        ScanRequireItem item = typeIndex.requirementBySession().get(sessionId);
         if (item != null) {
             ctx.put("requirementTitle", item.getTitle());
             ctx.put("requirementOriginId", item.getOriginId());
@@ -3476,8 +3812,8 @@ public class DevloopApplicationService {
         ProjectRepo repo = resolveTaskRepo(s.getProjectId(), item);
         ctx.put("repoFullName", repo != null ? repo.getRepoFullName() : null);
 
-        String taskType = detectTaskType(item, s.getSessionName());
-        ctx.put("branchName", buildBranchName(taskType, sessionId));
+        ctx.put("taskType", typeIndex.resolve(s));
+        ctx.put("branchName", buildBranchName(detectBranchKind(item, s.getSessionName()), sessionId));
 
         // 同一次资源查询同时补齐任务详情所需的数字员工名称和头像，避免重复访问资源表。
         SsResource agentResource = resolveAgentResource(s.getObjectId());
@@ -3541,11 +3877,16 @@ public class DevloopApplicationService {
         task.setAgentName(context != null ? (String) context.get("agentName") : null);
         // 数字员工头像与名称同源返回，前端任务详情无需再次查询资源接口。
         task.setAvatar(context != null ? (String) context.get("agentAvatar") : null);
+        // 只回名称不足以回填输入框的默认 @ 员工，会话绑定的类型与员工 ID 必须一并返回。
+        task.setObjectType(session.getObjectType());
+        task.setObjectId(session.getObjectId());
         task.setBranchName(context != null ? (String) context.get("branchName") : null);
         task.setRepoFullName(context != null ? (String) context.get("repoFullName") : null);
         task.setRequirementTitle(context != null ? (String) context.get("requirementTitle") : null);
         task.setRequirementOriginId(context != null ? (String) context.get("requirementOriginId") : null);
         task.setSourceItemId(context != null ? (Long) context.get("sourceItemId") : null);
+        // 前端按类型给任务分组/打标，四角色之外的普通会话回 chat，不留空值让前端猜。
+        task.setTaskType(context != null ? (String) context.get("taskType") : DevloopTaskType.CHAT);
         return task;
     }
 
@@ -3555,7 +3896,9 @@ public class DevloopApplicationService {
 
     /** 启动设备授权流程（异步启动dws进程，返回userCode和verificationUrl） */
     public ResponseUtil<Map<String, Object>> startDwsDeviceAuth() {
-        Map<String, Object> result = dwsAuthService.startDeviceAuth();
+        Map<String, Object> result = dwsAuthService.startDeviceAuth(
+            DwsAuthorizationCommandPolicy.command(dwsCommandCatalog(), "login", 0, "login")
+        );
         if (Boolean.TRUE.equals(result.get("success"))) {
             return ResponseUtil.successResponse(result);
         }
@@ -3589,7 +3932,10 @@ public class DevloopApplicationService {
 
     /** 构造某用户的 DWS 授权状态视图；旧入口按原响应结构附带 hasToken/savedAt 兼容字段。 */
     private Map<String, Object> buildDwsStatus(Long userId, boolean includeLegacyTokenFields) {
-        Map<String, Object> runtimeStatus = dwsAuthService.getAuthStatus(userId);
+        Map<String, Object> runtimeStatus = dwsAuthService.getAuthStatus(
+            userId,
+            DwsAuthorizationCommandPolicy.command(dwsCommandCatalog(), "status", 0, "status")
+        );
         Map<String, Object> result = new HashMap<>();
         if (includeLegacyTokenFields) {
             result.put("hasToken", Boolean.TRUE.equals(runtimeStatus.get("authenticated")));
@@ -3607,13 +3953,8 @@ public class DevloopApplicationService {
         return result;
     }
 
-    /** 直接使用token授权 */
-    public ResponseUtil<Void> saveDwsToken(String token) {
-        boolean injected = dwsAuthService.injectToken(token);
-        if (!injected) {
-            return ResponseUtil.failRes(I18nUtil.get("devloop.dws.token.invalid"));
-        }
-        return ResponseUtil.successResponse(null);
+    private ManifestCommandCatalog dwsCommandCatalog() {
+        return connectorManifestCommandResolver.resolve(connectorInfoService.findByCode("dingtalk"));
     }
 
     /** 查询可用运营任务模板；模板目录为系统级数据，不受项目类型限制。 */
@@ -3971,8 +4312,11 @@ public class DevloopApplicationService {
             result.put("sessionId", task.getSessionId());
             return ResponseUtil.successResponse(result);
         }
-        if (!OperationTaskSessionService.STATUS_PENDING.equals(taskExt.get(OperationTaskSessionService.EXT_STATUS))) {
-            // 仅待执行任务允许创建会话，避免已完成或已取消任务被重复启动。
+        String taskStatus = taskExt.get(OperationTaskSessionService.EXT_STATUS);
+        // 待处理可首次启动；部分失败（mixed）允许重新执行。
+        if (!OperationTaskSessionService.STATUS_PENDING.equals(taskStatus)
+            && !OperationTaskSessionService.STATUS_MIXED.equals(taskStatus)) {
+            // 仅待执行或部分失败任务允许创建会话，避免已完成任务被重复启动。
             return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.execute.forbidden"));
         }
         // 模板执行页允许覆盖待执行任务的模板配置；先落扩展参数，再由统一提示词构造逻辑读取，保证聊天首条消息使用用户确认后的内容。
@@ -4011,6 +4355,8 @@ public class DevloopApplicationService {
         chatDto.setProjectId(task.getProjectId());
         chatDto.setSessionId(task.getSessionId());
         chatDto.setResourceList(mentionedAgents);
+        // 运营任务首条消息需要在聊天记录中明确展示模板页面选中的数字员工。
+        chatDto.setPreserveLeadingDigitalEmployeeMention(true);
         // 运营任务复用研发任务的 DevLoop 聊天通道，确保首条任务指令按统一链路持久化并触发数字员工。
         chatDto.setAccessTerminal("DevLoop");
         chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
@@ -4022,6 +4368,7 @@ public class DevloopApplicationService {
             chatDto.setExtParams(buildOperationTaskMultiAgentExtParams(task.getSessionId(), agentIds));
         }
         task.setObjectId(primaryAgentId);
+        task.setObjectType("DigEmployee");
         task.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         byaiSessionMapper.updateById(task);
         LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
@@ -4052,17 +4399,23 @@ public class DevloopApplicationService {
     /** 补全任务模板配置中的本体对象；前端字段不完整时优先从资源表读取真实元数据。 */
     private Map<String, Object> enrichOperationTaskOntologyConfig(Map<String, Object> config) {
         Map<String, Object> enrichedConfig = new LinkedHashMap<>(config);
-        Object ontology = config.get("ontology");
-        if (ontology == null) {
-            return enrichedConfig;
-        }
-        List<?> ontologyValues = ontology instanceof List<?> list ? list : List.of(ontology);
-        List<Map<String, Object>> enrichedOntologies = new ArrayList<>();
-        for (Object value : ontologyValues) {
-            enrichedOntologies.add(enrichOperationTaskOntology(value));
-        }
-        enrichedConfig.put("ontology", enrichedOntologies);
+        // 目标本体和来源本体都统一补全为包含 ID/code/name 的对象，供执行器和提示词共同使用。
+        enrichOperationTaskOntologyField(enrichedConfig, "ontology");
+        enrichOperationTaskOntologyField(enrichedConfig, "sourceOntology");
         return enrichedConfig;
+    }
+
+    private void enrichOperationTaskOntologyField(Map<String, Object> config, String fieldName) {
+        Object value = config.get(fieldName);
+        if (value == null) {
+            return;
+        }
+        List<?> values = value instanceof List<?> list ? list : List.of(value);
+        List<Map<String, Object>> enrichedValues = new ArrayList<>();
+        for (Object item : values) {
+            enrichedValues.add(enrichOperationTaskOntology(item));
+        }
+        config.put(fieldName, enrichedValues);
     }
 
     /** 将单个本体值归一为同时兼容资源、本体对象和通用详情字段的结构。 */
@@ -4072,22 +4425,24 @@ public class DevloopApplicationService {
             valueMap.forEach((key, itemValue) -> result.put(String.valueOf(key), itemValue));
         }
         else if (value != null) {
-            result.put("id", value);
+            // 仅提交数字/字符串时，前端 Select 的值约定为 resourceId，不把它误当 objectId。
+            result.put("resourceId", value);
         }
 
-        Object requestedId = firstOperationOntologyValue(result, "objectId", "resourceId", "id", "baseId");
+        Object requestedObjectId = firstOperationOntologyValue(result, "objectId", "id");
+        Object requestedResourceId = firstOperationOntologyValue(result, "resourceId");
+        Object requestedId = requestedResourceId != null ? requestedResourceId : requestedObjectId;
         String requestedCode = operationOntologyText(
             firstOperationOntologyValue(result, "objectCode", "resourceCode", "code"));
         SsResource resource = findOperationOntologyResource(requestedId, requestedCode);
-        Object id = resource != null && resource.getResourceId() != null ? resource.getResourceId()
-            : requestedId != null ? requestedId : requestedCode;
+        Object resourceId = resource != null && resource.getResourceId() != null ? resource.getResourceId()
+            : requestedResourceId;
+        Object objectId = requestedObjectId != null ? requestedObjectId : resourceId;
+        Object id = objectId != null ? objectId : requestedId;
         String code = resource != null && StringUtils.isNotBlank(resource.getResourceCode())
-            ? resource.getResourceCode() : requestedCode;
-        if (StringUtils.isBlank(code) && id != null) {
-            code = String.valueOf(id);
-        }
-        String name = operationOntologyText(
-            firstOperationOntologyValue(result, "objectName", "resourceName", "name"));
+            ? resource.getResourceCode()
+            : requestedCode;
+        String name = operationOntologyText(firstOperationOntologyValue(result, "objectName", "resourceName", "name"));
         if (StringUtils.isBlank(name) && resource != null) {
             name = resource.getResourceName();
         }
@@ -4098,10 +4453,10 @@ public class DevloopApplicationService {
         }
 
         result.put("id", id);
-        result.put("objectId", id);
-        result.put("resourceId", id);
+        result.put("objectId", objectId);
+        result.put("resourceId", resourceId != null ? resourceId : id);
         Object baseId = firstOperationOntologyValue(result, "baseId");
-        result.put("baseId", baseId == null ? id : baseId);
+        result.put("baseId", baseId);
         result.put("code", StringUtils.defaultString(code));
         result.put("objectCode", StringUtils.defaultString(code));
         result.put("resourceCode", StringUtils.defaultString(code));
@@ -4145,8 +4500,124 @@ public class DevloopApplicationService {
         if (StringUtils.isBlank(resourceCode)) {
             return null;
         }
-        return ssResourceMapper.selectOne(new LambdaQueryWrapper<SsResource>()
-            .eq(SsResource::getResourceCode, resourceCode).last("LIMIT 1"));
+        return ssResourceMapper.selectOne(
+            new LambdaQueryWrapper<SsResource>().eq(SsResource::getResourceCode, resourceCode).last("LIMIT 1"));
+    }
+
+    /**
+     * 定时聊天型自动化到点执行：把 config 里存的 chat 入参还原成 AssistantChatDto 发起一次会话。
+     * 每次触发新建会话（sessionId=null），这样历史轮次互不污染上下文。
+     * 身份用创建者：定时任务线程没有登录上下文，chat 内部要靠 LoginInfo 取权限与用户信息。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void executeChatSourceSchedule(ScanSource source) {
+        if (source == null || !ScanSourceService.SOURCE_TYPE_CHAT.equals(source.getSourceType())) {
+            return;
+        }
+        ChatAutomationConfig chatConfig = parseChatAutomationConfig(source.getConfig());
+        if (chatConfig == null) {
+            log.warn("[ChatAutomation] 自动化 {} 的提示词为空或未 @ 数字员工，跳过本次执行", source.getSourceId());
+            return;
+        }
+        Long creatorId = parseOperationLong(source.getCreateBy());
+        LoginInfo loginInfo = creatorId != null ? loginApplicationService.getLoginInfo(creatorId) : null;
+        if (loginInfo == null) {
+            log.warn("[ChatAutomation] 自动化 {} 无法加载创建者 {} 的登录信息，跳过本次执行", source.getSourceId(), creatorId);
+            return;
+        }
+
+        AssistantChatDto chatDto = buildChatDtoFromConfig(chatConfig, source);
+        assistantChatService.createGroupChatSession(chatDto);
+        // 建会话用简短标题让会话名可读，真正发给模型的是配置里的完整聊天内容。
+        chatDto.setChatContent(chatConfig.chatContent());
+        scanSourceService.updateLastScanTime(source.getSourceId());
+        // 事务提交后再异步 chat：确保异步线程能读到本事务已建的 session。
+        submitTaskChatAfterCommit(chatDto, loginInfo, chatDto.getSessionId());
+        log.info("[ChatAutomation] 已触发定时聊天，sourceId={}, sessionId={}", source.getSourceId(), chatDto.getSessionId());
+    }
+
+    /**
+     * chat 自动化配置：就是 /chat 输入框存下来的东西——提示词原文加 @ 出来的资源清单。
+     * 承接员工不单独存字段，由 resourceList 里最后一次 @ 的数字员工决定，与前端 mention.ts 同一规则。
+     */
+    private record ChatAutomationConfig(String chatContent, List<ResourceVo> resourceList, Long agentId) {
+    }
+
+    /** config 解析失败或缺必填项都返回 null，由调用方记日志跳过，不抛异常打断整轮调度。 */
+    private ChatAutomationConfig parseChatAutomationConfig(String config) {
+        if (StringUtils.isBlank(config)) {
+            return null;
+        }
+        JSONObject json;
+        try {
+            json = JSON.parseObject(config);
+        }
+        catch (Exception exception) {
+            return null;
+        }
+        if (json == null) {
+            return null;
+        }
+        String chatContent = json.getString("chatContent");
+        if (StringUtils.isBlank(chatContent)) {
+            return null;
+        }
+        List<ResourceVo> resourceList = parseChatResourceList(json.getJSONArray("resourceList"));
+        Long agentId = resolveMentionedAgentId(resourceList);
+        // 没 @ 到数字员工就没有承接人，建会话也没人应答，当成无效配置跳过。
+        if (agentId == null) {
+            return null;
+        }
+        return new ChatAutomationConfig(chatContent, resourceList, agentId);
+    }
+
+    /** 单个资源解析失败不能废掉整条提示词，坏项跳过即可；顺序必须保持，@ 命中规则依赖它。 */
+    private List<ResourceVo> parseChatResourceList(JSONArray array) {
+        List<ResourceVo> resourceList = new ArrayList<>();
+        if (array == null) {
+            return resourceList;
+        }
+        for (int index = 0; index < array.size(); index++) {
+            try {
+                ResourceVo resource = array.getObject(index, ResourceVo.class);
+                if (resource != null) {
+                    resourceList.add(resource);
+                }
+            }
+            catch (Exception exception) {
+                log.warn("[ChatAutomation] 忽略无法解析的资源项，index={}", index);
+            }
+        }
+        return resourceList;
+    }
+
+    /** 倒序取第一个数字员工：resourceList 保持输入顺序，最后一次 @ 的员工才是用户想要的承接人。 */
+    private Long resolveMentionedAgentId(List<ResourceVo> resourceList) {
+        for (int index = resourceList.size() - 1; index >= 0; index--) {
+            ResourceVo resource = resourceList.get(index);
+            if (resource == null || AgentMetaEnum.DIG_EMPLOYEE != resource.getResourceType()) {
+                continue;
+            }
+            Long agentId = parseOperationLong(resource.getResourceId());
+            if (agentId != null) {
+                return agentId;
+            }
+        }
+        return null;
+    }
+
+    private AssistantChatDto buildChatDtoFromConfig(ChatAutomationConfig chatConfig, ScanSource source) {
+        AssistantChatDto chatDto = new AssistantChatDto();
+        chatDto.setSessionId(null);
+        chatDto.setAgentId(chatConfig.agentId());
+        chatDto.setProjectId(source.getProjectId());
+        // 会话名取自动化名称，便于在会话列表里对上是哪条自动化触发的。
+        chatDto.setChatContent(StringUtils.defaultIfBlank(source.getSourceName(), chatConfig.chatContent()));
+        chatDto.setAccessTerminal("DevLoop");
+        chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
+        // 资源清单原样带上：提示词里的 @ 引用要跟到模型侧，否则引用形同虚设。
+        chatDto.setResourceList(chatConfig.resourceList());
+        return chatDto;
     }
 
     /**
@@ -4224,8 +4695,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 模板页面已显式选择项目绑定数字员工时优先使用 agentIds，不再校验负责人是否绑定数字员工。
-     * 仅兼容未提交 agentIds 的历史调用时，才按 assigneeIds 查询成员绑定关系。
+     * 模板页面已显式选择项目绑定数字员工时优先使用 agentIds，不再校验负责人是否绑定数字员工。 仅兼容未提交 agentIds 的历史调用时，才按 assigneeIds 查询成员绑定关系。
      */
     private List<Long> resolveOperationTaskAgentIds(OperationTaskDTO dto, Long projectId) {
         LinkedHashSet<Long> explicitAgentIds = new LinkedHashSet<>();
@@ -4315,9 +4785,15 @@ public class DevloopApplicationService {
     private String buildOperationTaskPrompt(ByaiSession session, Map<String, String> taskExt,
         List<ResourceVo> mentionedAgents) {
         String operationType = taskExt.get(OperationTaskSessionService.EXT_OPERATION_TYPE);
+        // 兼容对象发现模板改为独立类型前已经创建的任务记录。
+        if ("knowledge".equals(operationType)
+            && "-2006".equals(taskExt.get(OperationTaskSessionService.EXT_TEMPLATE_ID))) {
+            operationType = "object_discovery";
+        }
         String operationTypeLabel = switch (operationType == null ? "" : operationType) {
             case "collect" -> I18nUtil.get("devloop.operationTask.type.collect");
             case "knowledge" -> I18nUtil.get("devloop.operationTask.type.knowledge");
+            case "object_discovery" -> I18nUtil.get("devloop.operationTask.type.objectDiscovery");
             case "publish", "content" -> I18nUtil.get("devloop.operationTask.type.publish");
             case "analyze" -> I18nUtil.get("devloop.operationTask.type.analyze");
             default -> I18nUtil.get("devloop.operationTask.type.default");
@@ -4336,6 +4812,11 @@ public class DevloopApplicationService {
     private String buildOperationTaskStartPrompt(ByaiSession session, Map<String, String> taskExt, String projectName,
         String taskType) {
         String operationType = taskExt.get(OperationTaskSessionService.EXT_OPERATION_TYPE);
+        // 历史对象发现任务曾以 knowledge 保存，按模板 ID 恢复为独立类型。
+        if ("knowledge".equals(operationType)
+            && "-2006".equals(taskExt.get(OperationTaskSessionService.EXT_TEMPLATE_ID))) {
+            operationType = "object_discovery";
+        }
         String promptConfigCode = getOperationTaskPromptConfigCode(operationType);
         // 未识别的历史类型没有专属参数码，直接使用国际化默认模板，避免查询已废弃的通用配置。
         // 运营提示词与研发提示词统一从 byai_ai_prompt 读取，并按当前语言选择模板。
@@ -4361,6 +4842,12 @@ public class DevloopApplicationService {
             : StringUtils.defaultString(requirement.getSourceName());
         String requirementDescription = requirement == null ? taskExt.get(OperationTaskSessionService.EXT_DESCRIPTION)
             : StringUtils.defaultString(requirement.getSourceDescription());
+        String sourceModeValue = isKnowledgeOrganizationTask(operationType)
+            ? getOperationKnowledgeOrganizationValue(operationConfigMap, "sourceOntology", "sourceMode")
+            : getOperationSourceModeLabel(findOperationConfigValue(operationConfigMap, "sourceMode"));
+        String storageModeValue = isKnowledgeOrganizationTask(operationType)
+            ? getOperationKnowledgeOrganizationValue(operationConfigMap, "ontology", "storageMode")
+            : getOperationStorageModeLabel(findOperationConfigValue(operationConfigMap, "storageMode"));
         return template.replace("${projectName}", StringUtils.defaultString(projectName))
             .replace("${taskType}", StringUtils.defaultString(taskType))
             .replace("${title}", StringUtils.defaultString(session.getSessionName()))
@@ -4371,11 +4858,9 @@ public class DevloopApplicationService {
                 StringUtils.defaultString(
                     resolveUserName(parseOperationLong(taskExt.get(OperationTaskSessionService.EXT_ASSIGNEE_ID)))))
             .replace("${dueTime}", StringUtils.defaultString(taskExt.get(OperationTaskSessionService.EXT_DUE_TIME)))
-            .replace("${sourceMode}",
-                getOperationSourceModeLabel(findOperationConfigValue(operationConfigMap, "sourceMode")))
+            .replace("${sourceMode}", sourceModeValue)
             .replace("${sourceValue}", getOperationCollectionSource(operationConfigMap))
-            .replace("${storageMode}",
-                getOperationStorageModeLabel(findOperationConfigValue(operationConfigMap, "storageMode")))
+            .replace("${storageMode}", storageModeValue)
             .replace("${storageTarget}", getOperationStorageTarget(operationConfigMap))
             .replace("${runMode}",
                 getOperationRunModeLabel(
@@ -4431,10 +4916,16 @@ public class DevloopApplicationService {
             .replace("${operationConfig}", JSON.toJSONString(operationConfigMap));
     }
 
+    private boolean isKnowledgeOrganizationTask(String operationType) {
+        return "knowledge".equalsIgnoreCase(operationType) || "object_discovery".equalsIgnoreCase(operationType);
+    }
+
     /** 运营需求类型与启动提示词参数一一对应；content 是发布类型的历史兼容值。 */
     private String getOperationTaskPromptConfigCode(String operationType) {
         return switch (operationType == null ? "" : operationType) {
             case "collect" -> "OPLOOP_TASK_START_PROMPT_COLLECT";
+            case "knowledge" -> "OPLOOP_TASK_START_PROMPT_KNOWLEDGE";
+            case "object_discovery" -> "OPLOOP_TASK_START_PROMPT_OBJECT_DISCOVERY";
             case "publish", "content" -> "OPLOOP_TASK_START_PROMPT_PUBLISH";
             case "analyze" -> "OPLOOP_TASK_START_PROMPT_ANALYZE";
             // 未识别类型使用国际化默认模板，不再依赖已废弃的通用参数码。
@@ -4447,6 +4938,7 @@ public class DevloopApplicationService {
         return switch (operationType == null ? "" : operationType) {
             case "collect" -> "devloop.operationTask.prompt.collect.default";
             case "knowledge" -> "devloop.operationTask.prompt.knowledge.default";
+            case "object_discovery" -> "devloop.operationTask.prompt.objectDiscovery.default";
             case "publish", "content" -> "devloop.operationTask.prompt.publish.default";
             case "analyze" -> "devloop.operationTask.prompt.analyze.default";
             default -> "devloop.operationTask.prompt.default";
@@ -4521,8 +5013,8 @@ public class DevloopApplicationService {
             case "internet" -> getOperationPromptValue(config, "internetScope");
             case "knowledge" -> resolveOperationResourceName(findOperationConfigValue(config, "sourceKnowledge"));
             // 历史配置没有 sourceMode 时继续读取旧来源字段，避免已有任务丢失信息。
-            default -> getOperationPromptValue(config, "connector", "internetScope", "sourceKnowledge",
-                "collectSource", "channel");
+            default -> getOperationPromptValue(config, "connector", "internetScope", "sourceKnowledge", "collectSource",
+                "channel");
         };
     }
 
@@ -4580,8 +5072,7 @@ public class DevloopApplicationService {
                 ? I18nUtil.get("devloop.operationTask.intervalUnit.hour")
                 : I18nUtil.get("devloop.operationTask.intervalUnit.minute");
             String weekdays = getOperationPromptList(config.get("intervalWeekdays"));
-            return interval + " " + unitLabel
-                + (StringUtils.isBlank(weekdays) ? "" : " / " + weekdays);
+            return interval + " " + unitLabel + (StringUtils.isBlank(weekdays) ? "" : " / " + weekdays);
         }
         if ("periodic".equalsIgnoreCase(mode)) {
             String periodType = StringUtils.defaultString(getOperationConfigText(config, "periodType"));
@@ -4663,8 +5154,10 @@ public class DevloopApplicationService {
             value = operationConfig.get("organizeTemplateId");
         }
         // 任务模板把 ontology 放在 config 顶层，优先读取完整对象（支持多选数组）。
-        if (value == null && Arrays.asList(fieldNames).contains("ontology")) {
-            value = operationConfig.get("ontology");
+        if (value == null && (Arrays.asList(fieldNames).contains("ontology")
+            || Arrays.asList(fieldNames).contains("sourceOntology"))) {
+            value = operationConfig
+                .get(Arrays.asList(fieldNames).contains("sourceOntology") ? "sourceOntology" : "ontology");
         }
         return getOperationPromptValue(value);
     }
@@ -5012,6 +5505,7 @@ public class DevloopApplicationService {
             case "doing", "running", "in_progress" -> OperationTaskSessionService.STATUS_RUNNING;
             case "done", "completed" -> OperationTaskSessionService.STATUS_DONE;
             case "failed", "error" -> OperationTaskSessionService.STATUS_FAILED;
+            case "mixed" -> OperationTaskSessionService.STATUS_MIXED;
             default -> null;
         };
     }
@@ -5352,6 +5846,7 @@ public class DevloopApplicationService {
             case OperationTaskSessionService.STATUS_RUNNING -> "doing";
             case OperationTaskSessionService.STATUS_DONE -> "done";
             case OperationTaskSessionService.STATUS_FAILED -> "failed";
+            case OperationTaskSessionService.STATUS_MIXED -> "mixed";
             default -> "todo";
         };
         Long assigneeId = parseOperationLong(ext.get(OperationTaskSessionService.EXT_ASSIGNEE_ID));
@@ -5363,7 +5858,12 @@ public class DevloopApplicationService {
         result.put("projectId", task.getProjectId());
         result.put("title", task.getSessionName());
         result.put("description", ext.get(OperationTaskSessionService.EXT_DESCRIPTION));
-        result.put("operationType", ext.get(OperationTaskSessionService.EXT_OPERATION_TYPE));
+        String operationType = ext.get(OperationTaskSessionService.EXT_OPERATION_TYPE);
+        if ("knowledge".equals(operationType)
+            && "-2006".equals(ext.get(OperationTaskSessionService.EXT_TEMPLATE_ID))) {
+            operationType = "object_discovery";
+        }
+        result.put("operationType", operationType);
         result.put("status", status);
         result.put("assigneeId", assigneeId);
         result.put("assignee", resolveUserName(assigneeId));

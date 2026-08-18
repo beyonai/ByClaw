@@ -23,8 +23,6 @@ import useUserDropdown from '../header/useUserDropdown';
 import { getDisplayUserNameInChat } from '@/utils/chat';
 import useGlobal from '@/hooks/useGlobal';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
-import { EMPLOYEE_RESOURCE_TAB_KEYS } from './employeeResourceTabs';
-import { useActiveSiderAgent } from './components/ActiveSiderAgentBar';
 
 import type { IState as IEmployeesState } from '@/models/useEmployees';
 import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from './siderContentContext';
@@ -33,7 +31,6 @@ export const DEF_SIDER = 'sessions';
 
 const CENTER_TAB_KEYS = new Set([
   'agent',
-  'model',
   'knowledge',
   'tool',
   'view',
@@ -43,15 +40,19 @@ const CENTER_TAB_KEYS = new Set([
   'file',
   'projectSpace',
 ]);
+// 资源菜单点击后直接进入全局中心页，不再打开当前数字员工关联的小列表。
+const RESOURCE_CENTER_TAB_KEYS = new Set(['knowledge', 'tool', 'view', 'object', 'ontology', 'skill', 'file']);
+// 独立工作区页面：无论当前在聊天页还是中心页，点击都要切换右侧大页面。
+const WORKSPACE_TAB_KEYS = new Set(['projectSpace', 'automation']);
 
 const SIDER_ACTIVE_TAB_BY_PATH: Partial<Record<string, (typeof tabItems)[number]['key']>> = {
   '/dialogueRecord': 'sessions',
+  // 数字员工详情属于“员工”菜单，不能因详情路由不是列表路由而回退到“会话”。
+  '/employees': 'agent',
   '/knowledgeDetail': 'knowledge',
 };
 
 const CHAT_PANEL_PATHS = ['/chat', '/dialogueRecord', '/employees', '/searchAndQuery', '/functionCloud', '/sandbox'];
-const MAX_EMPLOYEE_RESOURCE_AGENT_NAME_LENGTH = 15;
-
 const isSameOrChildPath = (pathname: string, path: string) => pathname === path || pathname.startsWith(`${path}/`);
 
 const isChatPanelPath = (pathname: string) => CHAT_PANEL_PATHS.some((path) => isSameOrChildPath(pathname, path));
@@ -72,6 +73,9 @@ const Sidebar = () => {
   const { pathname } = location;
   const keepSiderActiveKey = (location.state as { keepSiderActiveKey?: (typeof tabItems)[number]['key'] } | null)
     ?.keepSiderActiveKey;
+  const preserveDetailPanel = Boolean(
+    (location.state as { preserveDetailPanel?: boolean } | null)?.preserveDetailPanel
+  );
 
   const { isSiderCollapsed, setSiderCollapsed } = useAppStore();
   const { EventEmitter } = useGlobal();
@@ -93,7 +97,6 @@ const Sidebar = () => {
   const { totalUnread } = unreadInfo;
   const { token } = theme.useToken();
   const intl = useIntl();
-  const activeSiderAgent = useActiveSiderAgent();
   const currentTab = React.useMemo(() => getCurrentTabByPathname(pathname), [pathname]);
   const [activeKey, setActiveKey] = React.useState<(typeof tabItems)[number]['key']>(
     () => currentTab?.key ?? DEF_SIDER
@@ -101,8 +104,9 @@ const Sidebar = () => {
   const [manualSiderOpenKey, setManualSiderOpenKey] = React.useState<(typeof tabItems)[number]['key']>();
   const pathnameRef = React.useRef(pathname);
   const shouldHideSiderContent = React.useMemo(() => {
-    return Boolean(currentTab?.hideSider && manualSiderOpenKey !== activeKey);
-  }, [activeKey, currentTab, manualSiderOpenKey]);
+    // 资源中心统一使用大页面，旧事件和路由状态都不能再强制展开对应左侧小面板。
+    return Boolean(currentTab?.hideSider);
+  }, [currentTab]);
   const [siderContentWidth, setSiderContentWidth] = React.useState(() => {
     if (currentTab?.hideSider) {
       return 0;
@@ -118,7 +122,8 @@ const Sidebar = () => {
       // 左侧主菜单切换时，最右侧详情面板要及时关闭；即使重复点击当前菜单也要生效。
       clearDetailPanel?.();
       setActiveKey(tab.key);
-      setManualSiderOpenKey(tab.key);
+      // 隐藏型中心菜单不打开左侧小列表，仅展示右侧主内容页面。
+      setManualSiderOpenKey(tab.hideSider ? undefined : tab.key);
       setSiderCollapsed(false);
       EventEmitter.emit('sider-menu-tab-click-refresh', { key: tab.key });
 
@@ -133,17 +138,20 @@ const Sidebar = () => {
         return;
       }
 
-      // 项目是独立工作区，从聊天页点击时也必须切换右侧大页面；
-      // 资源类菜单仍保持聊天上下文不被打断。
-      if (tab.key === 'projectSpace') {
+      // 项目和自动化都是独立工作区，从聊天页点击时也必须切换右侧大页面；
+      // 它们不属于资源中心，下面两个白名单都不覆盖，必须在此提前导航。
+      if (WORKSPACE_TAB_KEYS.has(tab.key)) {
         if (pathname !== tab.navigatePath) {
           navigate(tab.navigatePath);
         }
         return;
       }
 
-      // 会话面板打开时，点击资源类菜单只切换左侧栏，不打断右侧当前会话。
+      // 资源类菜单直接进入全局中心页，不再在会话页打开员工绑定列表。
       if (isChatPage) {
+        if (RESOURCE_CENTER_TAB_KEYS.has(tab.key)) {
+          navigate(tab.navigatePath);
+        }
         return;
       }
 
@@ -167,6 +175,9 @@ const Sidebar = () => {
     const visibleKeySet = new Set(visibleKeys);
     return compact(
       tabItems.map((tab) => {
+        if (tab.hideMenu) {
+          return null;
+        }
         if (!visibleKeySet.has(tab.key)) {
           return null;
         }
@@ -187,34 +198,8 @@ const Sidebar = () => {
       })
     );
   }, [totalUnread, showSearchAndQueryTab, visibleKeys]);
-  const contextTabItems = React.useMemo(
-    () => myTabItems.filter((tab) => !EMPLOYEE_RESOURCE_TAB_KEYS.has(tab.key)),
-    [myTabItems]
-  );
-  const employeeResourceTabItems = React.useMemo(
-    () => myTabItems.filter((tab) => EMPLOYEE_RESOURCE_TAB_KEYS.has(tab.key)),
-    [myTabItems]
-  );
-  const isEmployeeResourceActive = EMPLOYEE_RESOURCE_TAB_KEYS.has(activeKey);
-  const employeeResourceGroupLabel = React.useMemo(() => {
-    const label = intl.formatMessage({
-      id: 'sider.employeeResourceGroup.label',
-    });
-    if (!activeSiderAgent.name) {
-      return label;
-    }
-    const displayName =
-      activeSiderAgent.name.length > MAX_EMPLOYEE_RESOURCE_AGENT_NAME_LENGTH
-        ? `${activeSiderAgent.name.slice(0, MAX_EMPLOYEE_RESOURCE_AGENT_NAME_LENGTH)}...`
-        : activeSiderAgent.name;
-    return `${displayName} · ${label}`;
-  }, [activeSiderAgent.name, intl]);
-  const employeeResourceGroupTitle = React.useMemo(() => {
-    const label = intl.formatMessage({
-      id: 'sider.employeeResourceGroup.label',
-    });
-    return activeSiderAgent.name ? `${activeSiderAgent.name} · ${label}` : label;
-  }, [activeSiderAgent.name, intl]);
+  // 所有资源入口都作为普通主菜单展示，与当前数字员工解除联动。
+  const contextTabItems = myTabItems;
 
   const { userDropdownItems, onUserDropdownClick, userDropdownRender } = useUserDropdown(userInfo);
 
@@ -226,9 +211,13 @@ const Sidebar = () => {
   // 新手指引时，需要点击左侧菜单
   React.useEffect(() => {
     const handleSetSiderActiveKey = (key: string) => {
+      const targetTab = tabItems.find((tab) => tab.key === key);
       setActiveKey(key);
-      setManualSiderOpenKey(key);
+      setManualSiderOpenKey(RESOURCE_CENTER_TAB_KEYS.has(key) || key === 'model' ? undefined : key);
       setSiderCollapsed(false); // 确保侧边栏展开
+      if ((RESOURCE_CENTER_TAB_KEYS.has(key) || key === 'model') && targetTab?.navigatePath) {
+        navigate(targetTab.navigatePath);
+      }
     };
 
     EventEmitter.on('set-sider-active-key', handleSetSiderActiveKey);
@@ -236,7 +225,7 @@ const Sidebar = () => {
     return () => {
       EventEmitter.off('set-sider-active-key', handleSetSiderActiveKey);
     };
-  }, [EventEmitter, setSiderCollapsed]);
+  }, [EventEmitter, navigate, setSiderCollapsed]);
 
   React.useEffect(() => {
     const handleOntologyBindSaved = (event: Event) => {
@@ -245,9 +234,11 @@ const Sidebar = () => {
       const refreshDetail = { ...detail, receivedAt: Date.now() };
       (window as any).__latestOntologyBindSaved = refreshDetail;
       setActiveKey('ontology');
-      setManualSiderOpenKey('ontology');
+      setManualSiderOpenKey(undefined);
       setSiderCollapsed(false);
-      setSiderContentWidth(DEFAULT_SIDER_CONTENT_WIDTH);
+      setSiderContentWidth(0);
+      // 绑定完成后进入本体大页面；若事件来自右侧资源面板，也保留该面板。
+      navigate('/ontologyCenter', { state: { preserveDetailPanel: true } });
       window.setTimeout(() => {
         window.dispatchEvent(new CustomEvent('ontologySiderRefresh', { detail: refreshDetail }));
       }, 0);
@@ -255,12 +246,14 @@ const Sidebar = () => {
 
     window.addEventListener('ontologyBindSaved', handleOntologyBindSaved);
     return () => window.removeEventListener('ontologyBindSaved', handleOntologyBindSaved);
-  }, [setSiderCollapsed]);
+  }, [navigate, setSiderCollapsed]);
 
   React.useEffect(() => {
     setSiderContentWidth(shouldHideSiderContent ? 0 : DEFAULT_SIDER_CONTENT_WIDTH);
-    clearDetailPanel?.();
-  }, [activeKey, shouldHideSiderContent]);
+    if (!preserveDetailPanel) {
+      clearDetailPanel?.();
+    }
+  }, [activeKey, clearDetailPanel, preserveDetailPanel, shouldHideSiderContent]);
 
   React.useEffect(() => {
     const hasKey = myTabItems.find((tab) => tab.key === activeKey);
@@ -272,7 +265,11 @@ const Sidebar = () => {
   React.useEffect(() => {
     const hasKey = myTabItems.find((tab) => tab.key === currentTab?.key);
     const pathnameChanged = pathnameRef.current !== pathname;
-    const keepSiderActiveTab = keepSiderActiveKey && myTabItems.find((tab) => tab.key === keepSiderActiveKey);
+    const keepSiderActiveTab =
+      keepSiderActiveKey &&
+      !RESOURCE_CENTER_TAB_KEYS.has(keepSiderActiveKey) &&
+      keepSiderActiveKey !== 'model' &&
+      myTabItems.find((tab) => tab.key === keepSiderActiveKey);
 
     if (pathnameChanged && keepSiderActiveTab) {
       pathnameRef.current = pathname;
@@ -283,14 +280,14 @@ const Sidebar = () => {
     }
 
     const shouldSyncActiveKey = Boolean(currentTab && hasKey && (pathnameChanged || !manualSiderOpenKey));
-    const nextActiveKey = shouldSyncActiveKey ? currentTab?.key : activeKey;
-    const nextManualSiderOpenKey = pathnameChanged ? undefined : manualSiderOpenKey;
-    const nextShouldHideSiderContent = Boolean(currentTab?.hideSider && nextManualSiderOpenKey !== nextActiveKey);
+    const nextShouldHideSiderContent = Boolean(currentTab?.hideSider);
 
     if (pathnameChanged) {
       pathnameRef.current = pathname;
       setManualSiderOpenKey(undefined);
-      clearDetailPanel?.();
+      if (!preserveDetailPanel) {
+        clearDetailPanel?.();
+      }
     }
 
     setSiderContentWidth(nextShouldHideSiderContent ? 0 : DEFAULT_SIDER_CONTENT_WIDTH);
@@ -298,7 +295,16 @@ const Sidebar = () => {
     if (shouldSyncActiveKey && currentTab) {
       setActiveKey(currentTab.key);
     }
-  }, [activeKey, currentTab, keepSiderActiveKey, manualSiderOpenKey, myTabItems, pathname]);
+  }, [
+    activeKey,
+    clearDetailPanel,
+    currentTab,
+    keepSiderActiveKey,
+    manualSiderOpenKey,
+    myTabItems,
+    pathname,
+    preserveDetailPanel,
+  ]);
 
   if (!userInfo) return null;
 
@@ -341,29 +347,7 @@ const Sidebar = () => {
           </div>
         </Tooltip>
         <Divider type="horizontal" />
-        <div className={styles.tabsContainer}>
-          {contextTabItems.map(renderTabItem)}
-          {employeeResourceTabItems.length > 0 && (
-            <Tooltip
-              placement="right"
-              title={intl.formatMessage({
-                id: 'sider.employeeResourceGroup.tooltip',
-              })}
-            >
-              <div
-                className={classnames(
-                  styles.employeeResourceGroup,
-                  isEmployeeResourceActive && styles.employeeResourceGroupActive
-                )}
-              >
-                <span className={styles.employeeResourceGroupLabel} title={employeeResourceGroupTitle}>
-                  {employeeResourceGroupLabel}
-                </span>
-                <div className={styles.employeeResourceGroupItems}>{employeeResourceTabItems.map(renderTabItem)}</div>
-              </div>
-            </Tooltip>
-          )}
-        </div>
+        <div className={styles.tabsContainer}>{contextTabItems.map(renderTabItem)}</div>
         <Feedback
           userId={userInfo.userId}
           className={classnames(styles.smallIconWrap)}

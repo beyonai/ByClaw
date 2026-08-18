@@ -20,13 +20,20 @@ public interface ConnectorAuthMapper extends BaseMapper<ConnectorAuth> {
     @Select("""
         SELECT info.connector_code,
                info.skill_code,
-               CASE WHEN auth.enable_flag = 'Y' THEN TRUE ELSE FALSE END AS enabled
+               CASE
+                   WHEN auth.connector_id IS NULL THEN FALSE
+                   WHEN auth.enable_flag = 'Y'
+                       AND COALESCE(auth.credential_state, 'UNKNOWN')
+                           IN ('READY', 'REFRESH_NEEDED', 'EXPIRING', 'UNKNOWN') THEN TRUE
+                   ELSE FALSE
+               END AS enabled
         FROM byai_connector_info info
-        INNER JOIN (
-            SELECT connector_id, enable_flag
+        LEFT JOIN (
+            SELECT connector_id, enable_flag, credential_state
             FROM (
                 SELECT connector_id,
                        enable_flag,
+                       credential_state,
                        ROW_NUMBER() OVER (
                            PARTITION BY connector_id
                            ORDER BY CASE WHEN enable_flag = 'Y' THEN 0 ELSE 1 END,
@@ -57,6 +64,11 @@ public interface ConnectorAuthMapper extends BaseMapper<ConnectorAuth> {
                 #{auth.authMode} AS auth_mode,
                 #{auth.authCredential} AS auth_credential,
                 #{auth.expireTime} AS expire_time,
+                #{auth.accessExpireTime} AS access_expire_time,
+                #{auth.refreshExpireTime} AS refresh_expire_time,
+                #{auth.credentialState} AS credential_state,
+                #{auth.renewalMode} AS renewal_mode,
+                #{auth.lastVerifiedAt} AS last_verified_at,
                 #{auth.enableFlag} AS enable_flag,
                 #{auth.statusCd} AS status_cd,
                 #{auth.lastSyncTime} AS last_sync_time,
@@ -71,10 +83,13 @@ public interface ConnectorAuthMapper extends BaseMapper<ConnectorAuth> {
         )
         WHEN NOT MATCHED THEN INSERT (
             auth_id, user_id, connector_id, auth_name, auth_mode, auth_credential,
-            expire_time, enable_flag, status_cd, last_sync_time, create_by, create_time, update_time
+            expire_time, access_expire_time, refresh_expire_time, credential_state, renewal_mode,
+            last_verified_at, enable_flag, status_cd, last_sync_time, create_by, create_time, update_time
         ) VALUES (
             source.auth_id, source.user_id, source.connector_id, source.auth_name, source.auth_mode,
-            source.auth_credential, source.expire_time, source.enable_flag, source.status_cd,
+            source.auth_credential, source.expire_time, source.access_expire_time, source.refresh_expire_time,
+            source.credential_state, source.renewal_mode, source.last_verified_at,
+            source.enable_flag, source.status_cd,
             source.last_sync_time, source.create_by, source.create_time, source.update_time
         )
         """)

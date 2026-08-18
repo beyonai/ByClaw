@@ -28,4 +28,13 @@ class ResourceRuntimeInfoResolverTest {
         assertThat(result.getImplType()).isEqualTo(ImplType.ASK_AGENT.getCode());
         assertThat(result.getWorkerAgentType()).isEqualTo(WorkerAgentType.BYCLAW_EXE.getCode());
     }
+
+    @Test
+    void resolveDigitalEmployee_routesEmployeeGroupToBySuper() {
+        ResourceRuntimeInfo result = resolver.resolveDigitalEmployee(
+            DigitalEmployType.AGENT_TYPE_GROUP.getCode(), 1003L, "employee_group_1003");
+
+        assertThat(result.getImplType()).isEqualTo(ImplType.ASK_AGENT.getCode());
+        assertThat(result.getWorkerAgentType()).isEqualTo(WorkerAgentType.BY_SUPER.getCode());
+    }
 }

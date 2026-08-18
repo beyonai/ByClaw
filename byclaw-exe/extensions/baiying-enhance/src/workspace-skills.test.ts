@@ -157,6 +157,95 @@ describe("workspace-skills", () => {
     ]);
   });
 
+  it("refreshes an explicitly managed bundled connector skill before enabling a stale workspace copy", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "baiying-managed-connector-workspace-"));
+    const stateDir = await mkdtemp(path.join(tmpdir(), "baiying-managed-connector-state-"));
+    const bundledSkillsDir = await mkdtemp(path.join(tmpdir(), "baiying-bundled-skills-"));
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+
+    const workspaceSkillDir = path.join(workspace, "skills", "dws");
+    const bundledSkillDir = path.join(bundledSkillsDir, "dws");
+    await mkdir(path.join(workspaceSkillDir, "scripts"), { recursive: true });
+    await mkdir(path.join(bundledSkillDir, "scripts"), { recursive: true });
+    await writeFile(path.join(workspaceSkillDir, "SKILL.md"), "---\nname: dws\n---\n# stale\n", "utf8");
+    await writeFile(path.join(workspaceSkillDir, "scripts", "connector-auth-sync.mjs"), "// stale\n", "utf8");
+    await writeFile(path.join(workspaceSkillDir, "scripts", "removed-legacy-helper.mjs"), "// obsolete\n", "utf8");
+    await writeFile(
+      path.join(bundledSkillDir, "SKILL.md"),
+      "---\nname: dws\nbyclaw_managed: true\n---\n# current\n",
+      "utf8",
+    );
+    await writeFile(path.join(bundledSkillDir, "scripts", "connector-auth-sync.mjs"), "// current\n", "utf8");
+
+    const api = {
+      runtime: {
+        config: {
+          loadConfig: () => ({ agents: { list: [{ id: "baiying-agent-1", workspace }] } }),
+        },
+      },
+    } as any;
+
+    const input = {
+      api,
+      managed: [
+        {
+          agentId: "baiying-agent-1",
+          listEntry: { id: "baiying-agent-1", skills: ["dws"] },
+        },
+      ],
+      includeMainShared: false,
+      mainParentAgentId: "main",
+      bundledSkillsDir,
+    };
+    const copySpy = vi.spyOn(fs, "cp");
+
+    await mergeWorkspaceSkillsIntoManagedAgents(input);
+    await mergeWorkspaceSkillsIntoManagedAgents(input);
+
+    await expect(fs.readFile(path.join(workspaceSkillDir, "SKILL.md"), "utf8")).resolves.toContain("# current");
+    await expect(
+      fs.readFile(path.join(workspaceSkillDir, "scripts", "connector-auth-sync.mjs"), "utf8"),
+    ).resolves.toContain("// current");
+    await expect(fs.access(path.join(workspaceSkillDir, "scripts", "removed-legacy-helper.mjs"))).rejects.toThrow();
+    expect(copySpy).toHaveBeenCalledTimes(1);
+    copySpy.mockRestore();
+  });
+
+  it("leaves ordinary and future connector skills untouched unless the bundled skill explicitly opts in", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "baiying-unmanaged-connector-workspace-"));
+    const stateDir = await mkdtemp(path.join(tmpdir(), "baiying-unmanaged-connector-state-"));
+    const bundledSkillsDir = await mkdtemp(path.join(tmpdir(), "baiying-unmanaged-bundled-skills-"));
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    const workspaceSkillDir = path.join(workspace, "skills", "future-connector");
+    const bundledSkillDir = path.join(bundledSkillsDir, "future-connector");
+    await mkdir(workspaceSkillDir, { recursive: true });
+    await mkdir(bundledSkillDir, { recursive: true });
+    await writeFile(path.join(workspaceSkillDir, "SKILL.md"), "---\nname: future-connector\n---\n# user copy\n", "utf8");
+    await writeFile(path.join(bundledSkillDir, "SKILL.md"), "---\nname: future-connector\n---\n# bundled copy\n", "utf8");
+
+    const api = {
+      runtime: {
+        config: {
+          loadConfig: () => ({ agents: { list: [{ id: "baiying-agent-2", workspace }] } }),
+        },
+      },
+    } as any;
+
+    await mergeWorkspaceSkillsIntoManagedAgents({
+      api,
+      managed: [{
+        agentId: "baiying-agent-2",
+        listEntry: { id: "baiying-agent-2", skills: [] },
+        extraSkillPaths: [workspaceSkillDir],
+      }],
+      includeMainShared: false,
+      mainParentAgentId: "main",
+      bundledSkillsDir,
+    });
+
+    await expect(fs.readFile(path.join(workspaceSkillDir, "SKILL.md"), "utf8")).resolves.toContain("# user copy");
+  });
+
   it("resolves declared skill codes against OPENCLAW_STATE_DIR/plugin-skills", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "baiying-plugin-skills-workspace-"));
     const stateDir = await mkdtemp(path.join(tmpdir(), "baiying-plugin-skills-state-"));

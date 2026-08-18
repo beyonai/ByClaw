@@ -19,6 +19,18 @@ WORKFLOW_DIRECTORY = "knowledge-organizer"
 STATE_FILE = "state.json"
 OBJECT_FIELDS = ("objectCode", "objectName", "objectDesc", "properties")
 SUPPORTED_SOURCE_SUFFIXES = {".md", ".txt", ".json"}
+TASK_STATUSES = {"failed", "done", "mixed"}
+
+
+def _normalize_session_id(value: Any) -> str:
+    session_id = str(value or "").strip()
+    while (
+        len(session_id) >= 2
+        and session_id[0] in {"'", '"'}
+        and session_id[-1] == session_id[0]
+    ):
+        session_id = session_id[1:-1].strip()
+    return session_id
 
 
 class OrganizerApi(Protocol):
@@ -31,12 +43,18 @@ class OrganizerApi(Protocol):
     def save_object_instance(self, *, payload: dict[str, Any]) -> dict[str, Any]: ...
 
     def discover_document_objects(
-        self, *, session_id: str, object_codes: list[str]
+        self,
+        *,
+        session_id: str,
+        source_object_codes: list[str],
+        object_codes: list[str],
     ) -> dict[str, Any]: ...
 
     def enrich_document_objects(
         self, *, session_id: str, object_codes: list[str]
     ) -> dict[str, Any]: ...
+
+    def update_task_status(self, *, session_id: int, task_status: str) -> None: ...
 
 
 class RpcTransport(Protocol):
@@ -109,13 +127,22 @@ class ServiceApi:
         return {"X-Session-Id": session_id, "X-User-Code": user_code}
 
     def discover_document_objects(
-        self, *, session_id: str, object_codes: list[str]
+        self,
+        *,
+        session_id: str,
+        source_object_codes: list[str],
+        object_codes: list[str],
     ) -> dict[str, Any]:
         result = self.transport.request(
             service_env="DATACLOUD_DOMAINNAME",
             method="POST",
             path="/api/v1/rpc/kb/discoverDocumentObjectsAsync",
-            payload={"params": {"objectCodes": object_codes}},
+            payload={
+                "params": {
+                    "sourceObjectCodes": source_object_codes,
+                    "objectCodes": object_codes,
+                }
+            },
             headers=self._datacloud_headers(session_id),
         )
         return result if isinstance(result, dict) else {}
@@ -131,6 +158,14 @@ class ServiceApi:
             headers=self._datacloud_headers(session_id),
         )
         return result if isinstance(result, dict) else {}
+
+    def update_task_status(self, *, session_id: int, task_status: str) -> None:
+        self.transport.request(
+            service_env="BE_DOMAINNAME",
+            method="POST",
+            path="/byaiService/devloop/operation/updateTaskStatus",
+            payload={"sessionId": session_id, "taskStatus": task_status},
+        )
 
 
 async def _await_if_needed(value: Any) -> Any:
@@ -337,7 +372,7 @@ class KnowledgeOrganizer:
         if (workflow_dir / STATE_FILE).exists():
             raise ValueError(f"任务已初始化: {task_dir}")
 
-        session_id = session_id.strip()
+        session_id = _normalize_session_id(session_id)
         employee_resource_id = employee_resource_id.strip() if employee_resource_id else None
         if not session_id:
             raise ValueError("session id is required")
@@ -443,7 +478,7 @@ class KnowledgeOrganizer:
         except UnicodeDecodeError as exc:
             raise ValueError("源文件必须使用 UTF-8 编码") from exc
         payload = {
-            "sessionId": str(state["session_id"]),
+            "sessionId": _normalize_session_id(state["session_id"]),
             "objectCode": object_code,
             "actionCode": f"write_{object_code}",
             "arguments": {
@@ -488,13 +523,18 @@ class KnowledgeOrganizer:
         return record
 
     def organize(
-        self, task_dir: Path, object_codes: list[str] | None = None
+        self,
+        task_dir: Path,
+        object_codes: list[str] | None = None,
+        source_object_codes: list[str] | None = None,
     ) -> dict[str, Any]:
         """Submit a document-object discovery task for background processing."""
         return self._submit_background_task(
             task_dir,
             object_codes=object_codes,
             required_domain="ads",
+            source_object_codes=source_object_codes,
+            required_source_domain="ods",
             state_key="discoveries",
             expected_task_type="documentDiscovery",
             submit=self.api.discover_document_objects,
@@ -513,6 +553,30 @@ class KnowledgeOrganizer:
             submit=self.api.enrich_document_objects,
         )
 
+    def update_task_status(
+        self, *, session_id: str, task_status: str
+    ) -> dict[str, Any]:
+        """Set the terminal status of a non-interactive operation task."""
+        normalized_session_id = _normalize_session_id(session_id)
+        try:
+            numeric_session_id = int(normalized_session_id)
+        except ValueError as exc:
+            raise ValueError("更新任务状态要求数值型 session id") from exc
+        if numeric_session_id <= 0:
+            raise ValueError("更新任务状态要求正数 session id")
+        if task_status not in TASK_STATUSES:
+            allowed = ", ".join(sorted(TASK_STATUSES))
+            raise ValueError(f"任务状态无效，仅支持: {allowed}")
+        self.api.update_task_status(
+            session_id=numeric_session_id,
+            task_status=task_status,
+        )
+        return {
+            "session_id": numeric_session_id,
+            "task_status": task_status,
+            "updated": True,
+        }
+
     def _submit_background_task(
         self,
         task_dir: Path,
@@ -522,6 +586,8 @@ class KnowledgeOrganizer:
         state_key: str,
         expected_task_type: str,
         submit: Any,
+        source_object_codes: list[str] | None = None,
+        required_source_domain: str | None = None,
     ) -> dict[str, Any]:
         task_dir = task_dir.resolve()
         state = self._load_state(task_dir)
@@ -530,11 +596,26 @@ class KnowledgeOrganizer:
             object_codes,
             required_domain=required_domain,
         )
-        session_id = str(state.get("session_id") or "").strip()
+        normalized_source_codes = (
+            self._validated_object_codes(
+                state,
+                source_object_codes,
+                required_domain=required_source_domain,
+            )
+            if required_source_domain is not None
+            else None
+        )
+        session_id = _normalize_session_id(state.get("session_id"))
         if not session_id:
             raise ValueError("任务状态缺少 session id")
         try:
-            response = submit(session_id=session_id, object_codes=normalized_codes)
+            submit_arguments = {
+                "session_id": session_id,
+                "object_codes": normalized_codes,
+            }
+            if normalized_source_codes is not None:
+                submit_arguments["source_object_codes"] = normalized_source_codes
+            response = submit(**submit_arguments)
             if not isinstance(response, dict) or response.get("accepted") is not True:
                 raise ValueError("后台任务响应未确认 accepted=true")
             response_session_id = response.get("sessionId")
@@ -550,6 +631,8 @@ class KnowledgeOrganizer:
                 "accepted": True,
                 "status": "accepted",
             }
+            if normalized_source_codes is not None:
+                record["source_object_codes"] = normalized_source_codes
         except Exception as exc:
             record = {
                 "session_id": session_id,
@@ -559,6 +642,8 @@ class KnowledgeOrganizer:
                 "status": "failed",
                 "error": str(exc),
             }
+            if normalized_source_codes is not None:
+                record["source_object_codes"] = normalized_source_codes
             state[state_key].append(record)
             self._save_state(task_dir, state)
             raise
@@ -785,11 +870,27 @@ def main(argv: list[str] | None = None) -> int:
 
     organize = commands.add_parser("organize", help="提交异步文档对象发现任务")
     organize.add_argument("--task-dir", required=True, type=Path)
+    organize.add_argument(
+        "--source-object-code",
+        action="append",
+        dest="source_object_codes",
+    )
     organize.add_argument("--object-code", action="append", dest="object_codes")
 
     build = commands.add_parser("build", help="提交异步文档对象整理融合任务")
     build.add_argument("--task-dir", required=True, type=Path)
     build.add_argument("--object-code", action="append", dest="object_codes")
+
+    update_status = commands.add_parser(
+        "update-task-status",
+        help="更新非交互式运营任务的终态",
+    )
+    update_status.add_argument("--session-id", required=True)
+    update_status.add_argument(
+        "--task-status",
+        required=True,
+        choices=sorted(TASK_STATUSES),
+    )
 
     args = parser.parse_args(argv)
     api = production_api()
@@ -814,9 +915,18 @@ def main(argv: list[str] | None = None) -> int:
                 ),
             )
         elif args.command == "organize":
-            result = organizer.organize(args.task_dir, args.object_codes)
-        else:
+            result = organizer.organize(
+                args.task_dir,
+                object_codes=args.object_codes,
+                source_object_codes=args.source_object_codes,
+            )
+        elif args.command == "build":
             result = organizer.build(args.task_dir, args.object_codes)
+        else:
+            result = organizer.update_task_status(
+                session_id=args.session_id,
+                task_status=args.task_status,
+            )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     finally:

@@ -25,6 +25,37 @@ describe('skill group cover processing geometry', () => {
     });
   });
 
+  it('returns an exact 1:1 source file unchanged', async () => {
+    const createElement = jest.spyOn(document, 'createElement');
+    const createObjectURL = jest.fn(() => 'blob:square-cover');
+    const revokeObjectURL = jest.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
+
+    class MockSquareImage {
+      naturalHeight = 1080;
+      naturalWidth = 1080;
+      onerror: (() => void) | null = null;
+      onload: (() => void) | null = null;
+
+      set src(_value: string) {
+        this.onload?.();
+      }
+    }
+    const originalImage = global.Image;
+    Object.defineProperty(global, 'Image', { configurable: true, value: MockSquareImage });
+    const source = new File(['square'], 'square.jpg', { type: 'image/jpeg', lastModified: 123 });
+
+    try {
+      await expect(normalizeSkillGroupCover(source)).resolves.toBe(source);
+      expect(createElement).not.toHaveBeenCalledWith('canvas');
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:square-cover');
+    } finally {
+      createElement.mockRestore();
+      Object.defineProperty(global, 'Image', { configurable: true, value: originalImage });
+    }
+  });
+
   it('renders a blurred background and complete foreground into a 3:4 PNG file', async () => {
     const drawImage = jest.fn();
     const context = {

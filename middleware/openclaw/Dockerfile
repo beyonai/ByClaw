@@ -91,7 +91,7 @@ ARG DWS_VERSION=v1.0.52
 ARG TARGETARCH
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG WECOM_CLI_VERSION=0.1.9
-ARG LARKSUITE_CLI_VERSION=1.0.84
+ARG LARKSUITE_CLI_VERSION=1.0.85
 ARG INSTALL_BROWSER_STACK=true
 
 RUN chown root:root /app
@@ -123,8 +123,8 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
     && npm config set fetch-retry-mintimeout 20000 --global \
     && npm config set fetch-retry-maxtimeout 120000 --global
 
-ARG OPENCLI_VERSION=2.1.17
-ARG OPENCLI_EXTENSION_VERSION=2.1.16
+ARG OPENCLI_VERSION=2.1.28
+ARG OPENCLI_EXTENSION_VERSION=2.1.18
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources; \
@@ -195,7 +195,7 @@ RUN set -eux; \
         npm install -g "@sovovs/bycli@${OPENCLI_VERSION}"; \
         mkdir -p /opt/opencli/extension; \
         curl -fsSL -o /tmp/opencli-extension.zip \
-            "https://github.com/sovovs/byCLI/releases/download/v${OPENCLI_EXTENSION_VERSION}/bycli-extension-v${OPENCLI_EXTENSION_VERSION}.zip"; \
+            "https://github.com/sovovs/byCLI/releases/download/v${OPENCLI_VERSION}/bycli-extension-v${OPENCLI_EXTENSION_VERSION}.zip"; \
         unzip -q /tmp/opencli-extension.zip -d /opt/opencli/extension; \
         rm -f /tmp/opencli-extension.zip; \
         chromium --version; \
@@ -212,9 +212,9 @@ COPY --from=python312 /usr/local/bin/python3.12 /usr/local/bin/pip3.12 /usr/loca
 COPY --from=python312 /usr/local/lib/libpython3.12.so* /usr/local/lib/
 COPY --from=python312 /usr/local/lib/python3.12 /usr/local/lib/python3.12
 
-ARG AGENT_REACH_VERSION=1.5.0
-ARG AGENT_REACH_COMMIT=f65526cbaaad3879473acc1ba6dbefd195caf2be
-ARG AGENT_REACH_SHA256=456a3ab86e56366ba665dc4bade5c0839c3043266e2a192efa09f4fdec415e20
+ARG BY_REACH_VERSION=2.0.0b1
+ARG BY_REACH_COMMIT=9d4cc902195c180767d283787b980438f80871ad
+ARG BY_REACH_SHA256=d4b3404ffdbf1247a07c45f85d21a645463cb9968673bbb3cfa048a21d37cb35
 RUN set -eux; \
     ln -sf /usr/local/bin/python3.12 /usr/local/bin/python3; \
     ln -sf /usr/local/bin/python3.12 /usr/bin/python3; \
@@ -222,20 +222,20 @@ RUN set -eux; \
     python3 -m pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
     python3 -m pip config --global set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
     curl -fsSL \
-        "https://github.com/Panniantong/Agent-Reach/archive/${AGENT_REACH_COMMIT}.tar.gz" \
-        -o /tmp/agent-reach.tar.gz; \
-    echo "${AGENT_REACH_SHA256}  /tmp/agent-reach.tar.gz" | sha256sum -c -; \
-    mkdir -p /tmp/agent-reach; \
-    tar -xzf /tmp/agent-reach.tar.gz --strip-components=1 -C /tmp/agent-reach; \
+        "https://github.com/sovovs/By-Reach/archive/${BY_REACH_COMMIT}.tar.gz" \
+        -o /tmp/by-reach.tar.gz; \
+    echo "${BY_REACH_SHA256}  /tmp/by-reach.tar.gz" | sha256sum -c -; \
+    mkdir -p /tmp/by-reach; \
+    tar -xzf /tmp/by-reach.tar.gz --strip-components=1 -C /tmp/by-reach; \
     python3 -m pip install --no-cache-dir \
         redis \
         websockify \
         by-framework==0.2.2.dev10; \
     python3 -m pip install --no-cache-dir \
-        -c /tmp/agent-reach/constraints.txt \
-        /tmp/agent-reach; \
-    agent-reach --version | grep -q "${AGENT_REACH_VERSION}"; \
-    rm -rf /tmp/agent-reach /tmp/agent-reach.tar.gz; \
+        -c /tmp/by-reach/constraints.txt \
+        /tmp/by-reach; \
+    by-reach --version | grep -q "${BY_REACH_VERSION}"; \
+    rm -rf /tmp/by-reach /tmp/by-reach.tar.gz; \
     rm -f /usr/bin/websockify; \
     ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
     websockify --help >/dev/null

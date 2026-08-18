@@ -1,50 +1,16 @@
-# 网页阅读
+# 网页与 RSS
 
-通用网页、RSS。
-
-## 通用网页 (Jina Reader)
+所有网站、网页或 URL 的打开、读取、站内搜索、采集、抓取或操作，先加载并遵循 `bycli` skill，再执行：
 
 ```bash
-# 读取任意网页内容
-curl -s "https://r.jina.ai/URL"
-
-# 示例
-curl -s "https://r.jina.ai/https://example.com/article"
+bycli web read --url <URL> --stdout
 ```
 
-**适用场景**: 大多数网页可以直接用 Jina Reader 读取。
+这是唯一的通用网页路径。静态页、SPA、raw URL、纯文本、Markdown 和无需登录页面均无例外。byCLI 失败即停止并报告；不得使用其他网页读取工具。
 
-## Web Reader (MCP)
-
-```bash
-# 读取网页内容 (Markdown 格式)
-mcporter call 'web-reader.webReader(url: "https://example.com")'
-
-# 保留图片
-mcporter call 'web-reader.webReader(url: "https://example.com", retain_images: true)'
-
-# 纯文本格式
-mcporter call 'web-reader.webReader(url: "https://example.com", return_format: "text")'
-```
-
-**适用场景**: 需要更精确控制输出格式时使用。
-
-## RSS (feedparser)
+RSS 不是具体网页读取时可用 `feedparser`：
 
 ```python
-python3 -c "
 import feedparser
-for e in feedparser.parse('FEED_URL').entries[:5]:
-    print(f'{e.title} — {e.link}')
-"
+feedparser.parse("FEED_URL")
 ```
-
-**适用场景**: 订阅博客、新闻源、播客等 RSS feed。
-
-## 选择指南
-
-| 场景 | 推荐工具 |
-|-----|---------|
-| 通用网页 | Jina Reader (`curl r.jina.ai`) |
-| 需要图片/格式控制 | web-reader MCP |
-| RSS 订阅 | feedparser |

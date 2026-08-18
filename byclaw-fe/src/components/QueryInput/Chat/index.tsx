@@ -23,7 +23,6 @@ import styles from './index.module.less';
 import MentionPopover from '../RichInput/mentionPopover';
 import { IChatSettingValue } from '@/typescript/cloud';
 import { agentTypeMap } from '@/constants/agent';
-import TaskTemplateEntry from '@/components/TaskTemplateModal/TaskTemplateEntry';
 
 type IState = {
   deepThink: boolean;
@@ -279,11 +278,6 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
     return (
       <>
         {this.renderContextUsed()}
-        <TaskTemplateEntry
-          projectId={this.props.projectId}
-          employees={this.props.employeesList as Array<Record<string, any>>}
-          onApply={(result) => this.setInputValue({ inputTxt: result.prompt, isInsert: false })}
-        />
         {showOnlineSearch && (
           <Button
             aria-label={getIntl().formatMessage({ id: 'queryInput.onlineSearch' })}
@@ -324,6 +318,11 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
             chatMode={chatModeMap.expert}
             agentId={agentId}
             sessionId={sessionId}
+            excludedAgentIds={(this.state.resourceList || [])
+              .filter((resource) => `${resource.resourceType}` === `${ResourceTypeMap.digitalEmployee}`)
+              .flatMap((resource) =>
+                [resource.resourceId, resource.resourceCode].filter(Boolean).map((item) => `${item}`)
+              )}
             onSelect={this.onSelectMentionPopoverItem}
             popoverPos={showMentionPopoverType === '@' ? staticEmptyObject : undefined}
             onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}
@@ -381,14 +380,14 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
               }}
               onUpdate={this.onUpdateFile}
               onRemove={this.onRemoveFile}
-              setSessionId={(mySessionId: string, file: any) => {
+              setSessionId={(mySessionId: string, sessionName?: string) => {
                 if (`${mySessionId}` === `${sessionId}`) return;
                 setSessionId?.(mySessionId);
                 dispatch({
                   type: 'session/addSession',
                   payload: {
                     sessionId: mySessionId,
-                    sessionName: file?.name,
+                    sessionName,
                   },
                 });
               }}

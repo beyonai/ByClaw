@@ -6,19 +6,23 @@ import {
   Empty,
   Input,
   Modal,
+  Segmented,
   Select,
   Spin,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd';
-import { AppstoreOutlined, MessageOutlined, MoreOutlined, ReloadOutlined } from '@ant-design/icons';
+import { MoreOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
+import useGlobal from '@/hooks/useGlobal';
 import dayjs from 'dayjs';
 import {
   deleteOperationTask,
   executeOperationTask,
+  getOperationTask,
   listOperationTasks,
   listProjectMembers,
   listTasks,
@@ -31,6 +35,12 @@ import { getArrayData, getPageTotal } from '../../utils';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
 import styles from '../../index.module.less';
 import SessionOverviewDrawer from '@/layout/sider/components/ProjectSpaceList/SessionOverviewDrawer';
+import {
+  getDevloopTaskTypeIcon,
+  getDevloopTaskTypeLabelId,
+  normalizeDevloopTaskType,
+  type DevloopTaskType,
+} from '@/layout/sider/components/ProjectSpaceList/devloopTaskType';
 import TaskDetailDrawer from '@/layout/sider/components/ProjectSpaceList/TaskDetailDrawer';
 import { isCurrentUserTaskAssignee } from '@/layout/sider/components/ProjectSpaceList/taskAccess';
 
@@ -40,20 +50,18 @@ interface Props {
   onOpenSession?: (session: ProjectSession) => void;
   onToolbarChange?: (toolbar: React.ReactNode | null) => void;
   onRefreshToolbarChange?: (toolbar: React.ReactNode | null) => void;
-
-  /** 首屏任务加载完成后通知详情页，用于空列表时切换到需求 tab。 */
-  onInitialLoad?: (hasTasks: boolean) => void;
 }
 
 const PAGE_SIZE = 30;
 
 const normalizeTaskStatus = (task: DevloopTaskItem) => {
   const label = `${task.statusLabel || ''}`.trim().toLowerCase();
+  if (label.includes('混合') || label.includes('部分失败')) return 'mixed';
   if (label.includes('进行中') || label.includes('运行')) return 'in_progress';
   if (label.includes('已完成') || label.includes('完成')) return 'completed';
   if (label.includes('失败')) return 'failed';
   if (label.includes('暂停')) return 'paused';
-  if (label.includes('待开始') || label.includes('待启动')) return 'pending';
+  if (label.includes('待开始') || label.includes('待启动') || label.includes('待处理')) return 'pending';
   // 运营任务列表同时存在 status、operationState、taskStatus、currentStatus 多套历史字段，
   // 统一回退读取，确保待开始任务能够显示启动按钮。
   return `${
@@ -85,9 +93,19 @@ const getTaskStatusLabel = (task: DevloopTaskItem, intl: ReturnType<typeof useIn
     done: 'projectSpace.detail.task.status.completed',
     completed: 'projectSpace.detail.task.status.completed',
     failed: 'projectSpace.detail.task.status.failed',
+    mixed: 'projectSpace.detail.task.status.mixed',
   };
   const messageId = statusMessageId[status];
   return messageId ? intl.formatMessage({ id: messageId }) : task.statusLabel || '';
+};
+
+// 四角色各配一组图标配色，与项目详情弹窗的任务卡同一套色值。
+const TASK_TYPE_ICON_CLASSES: Record<DevloopTaskType, string> = {
+  architect: styles.taskTypeIconArchitect,
+  requirement: styles.taskTypeIconRequirement,
+  coder: styles.taskTypeIconCoder,
+  tester: styles.taskTypeIconTester,
+  chat: styles.taskTypeIconChat,
 };
 
 const getTaskStatusColor = (task: DevloopTaskItem) => {
@@ -95,7 +113,7 @@ const getTaskStatusColor = (task: DevloopTaskItem) => {
   if (['done', 'completed', '完成', '已完成'].includes(status)) return 'success';
   if (['doing', 'running', 'in_progress', '进行中'].includes(status)) return 'processing';
   if (['failed', '失败'].includes(status)) return 'error';
-  if (['paused', '暂停'].includes(status)) return 'warning';
+  if (['paused', 'mixed', '暂停'].includes(status)) return 'warning';
   // 待开始使用橙黄色，进行中使用蓝色，避免两个状态都呈现为蓝色难以区分。
   return 'warning';
 };
@@ -103,18 +121,9 @@ const getTaskStatusColor = (task: DevloopTaskItem) => {
 const getTaskStatusOrder = (task: DevloopTaskItem) => {
   const status = normalizeTaskStatus(task);
   if (
-    [
-      'done',
-      'completed',
-      'finished',
-      'success',
-      'failed',
-      'error',
-      'cancelled',
-      '完成',
-      '已完成',
-      '失败',
-    ].includes(status)
+    ['done', 'completed', 'finished', 'success', 'failed', 'error', 'cancelled', '完成', '已完成', '失败'].includes(
+      status
+    )
   ) {
     return 2;
   }
@@ -125,6 +134,7 @@ const getTaskStatusOrder = (task: DevloopTaskItem) => {
       'in_progress',
       'paused',
       'waiting_confirmation',
+      'mixed',
       'processing',
       'started',
       '进行中',
@@ -144,6 +154,11 @@ const getTaskCreateTime = (task: DevloopTaskItem) => {
   return parsed.isValid() ? parsed.valueOf() : 0;
 };
 
+const formatTaskCreateTime = (task: DevloopTaskItem) => {
+  const timestamp = getTaskCreateTime(task);
+  return timestamp ? dayjs(timestamp).format('YYYY-MM-DD HH:mm') : '-';
+};
+
 const sortTasks = (items: DevloopTaskItem[]) =>
   [...items].sort((left, right) => {
     const statusDifference = getTaskStatusOrder(left) - getTaskStatusOrder(right);
@@ -160,20 +175,26 @@ const ProjectTasks: React.FC<Props> = ({
   onOpenSession,
   onToolbarChange,
   onRefreshToolbarChange,
-  onInitialLoad,
 }) => {
   const intl = useIntl();
+  const { EventEmitter } = useGlobal();
   const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
   const [tasks, setTasks] = useState<DevloopTaskItem[]>([]);
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [taskBoardOpen, setTaskBoardOpen] = useState(false);
+  // 任务 Tab 两种模式：list 是卡片列表，board 就是原来右上角「任务视图」的看板，默认进看板。
+  // 仅研发/运营项目有看板（看板按四状态分列查询），普通项目只有列表。
+  const [taskViewMode, setTaskViewMode] = useState<'list' | 'board'>(
+    project.projectType === 'develop' || project.projectType === 'operation' ? 'board' : 'list'
+  );
   const requestingRef = useRef(false);
+  const taskDetailRequestIdRef = useRef(0);
   const initialLoadKeyRef = useRef<string | null>(null);
   const [templateTask, setTemplateTask] = useState<DevloopTaskItem | null>(null);
-  const [onlyMine, setOnlyMine] = useState(project.projectType === 'develop');
+  // 研发项目和运营项目都支持按当前登录用户筛选任务，默认保持只看我的视图。
+  const [onlyMine, setOnlyMine] = useState(project.projectType === 'develop' || project.projectType === 'operation');
   const [detailTask, setDetailTask] = useState<DevloopTaskItem | null>(null);
   const [editingTask, setEditingTask] = useState<DevloopTaskItem | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
@@ -183,11 +204,16 @@ const ProjectTasks: React.FC<Props> = ({
   const [taskSaving, setTaskSaving] = useState(false);
   const [memberOptions, setMemberOptions] = useState<Array<{ label: string; value: string | number }>>([]);
   const currentUserId = userInfo.userId ?? userInfo.id;
+  useEffect(() => {
+    // 切换项目类型时同步筛选开关，避免沿用上一个项目的任务筛选状态。
+    setOnlyMine(project.projectType === 'develop' || project.projectType === 'operation');
+  }, [project.projectType]);
+
   const isTaskCreator = (task: DevloopTaskItem) =>
     task.canDelete === true ||
     (currentUserId !== undefined && task.createBy !== undefined && `${currentUserId}` === `${task.createBy}`) ||
     // 兼容历史任务未记录创建人的情况，和后端的项目创建人回退规则保持一致。
-    (task.createBy == null &&
+    ((task.createBy === null || task.createBy === undefined) &&
       currentUserId !== undefined &&
       project.createBy !== undefined &&
       `${currentUserId}` === `${project.createBy}`);
@@ -201,24 +227,19 @@ const ProjectTasks: React.FC<Props> = ({
     .filter((resource) => resource.resourceType === 'ontology')
     .map((resource) => {
       const resourceDetail = resource as typeof resource & Record<string, any>;
-      const code =
-        resourceDetail.objectCode ||
-        resourceDetail.resourceCode ||
-        resourceDetail.code ||
-        `${resource.resourceId}`;
+      const code = resourceDetail.objectCode || resourceDetail.resourceCode || resourceDetail.code || '';
       const name = resource.resourceName || resourceDetail.objectName || resourceDetail.name || code;
-      const description =
-        resourceDetail.objectDesc || resourceDetail.resourceDesc || resourceDetail.description || '';
+      const description = resourceDetail.objectDesc || resourceDetail.resourceDesc || resourceDetail.description || '';
       return {
         value: resource.resourceId,
         label: name,
         // 项目绑定记录可能只保留 ID、名称；先补齐标准字段，模板提交时还会统一归一化别名。
         raw: {
           ...resourceDetail,
-          id: resourceDetail.id || resource.resourceId,
-          objectId: resourceDetail.objectId || resource.resourceId,
+          id: resourceDetail.id,
+          objectId: resourceDetail.objectId,
           resourceId: resource.resourceId,
-          baseId: resourceDetail.baseId || `${resource.resourceId}`,
+          baseId: resourceDetail.baseId,
           code,
           objectCode: resourceDetail.objectCode || code,
           resourceCode: resourceDetail.resourceCode || code,
@@ -245,28 +266,31 @@ const ProjectTasks: React.FC<Props> = ({
       if (nextPage === 1) setLoading(true);
       else setLoadingMore(true);
       try {
-        const response =
-          project.projectType === 'operation'
-            ? await listOperationTasks({
-              projectId: Number(project.projectId),
-              keyword: keyword.trim() || undefined,
-              pageNum: nextPage,
-              pageSize: PAGE_SIZE,
-            })
-            : await listTasks({
-              projectId: Number(project.projectId),
-              pageNum: nextPage,
-              pageSize: PAGE_SIZE,
-              onlyMine: project.projectType === 'develop' ? onlyMine : false,
-              taskName: keyword.trim() || undefined,
-            });
+        // 分支请求单独书写，避免条件表达式内对象缩进同时触发 ESLint 与 Prettier 的冲突提示。
+        let response;
+        if (project.projectType === 'operation') {
+          response = await listOperationTasks({
+            projectId: Number(project.projectId),
+            keyword: keyword.trim() || undefined,
+            onlyMine,
+            pageNum: nextPage,
+            pageSize: PAGE_SIZE,
+          });
+        } else {
+          response = await listTasks({
+            projectId: Number(project.projectId),
+            pageNum: nextPage,
+            pageSize: PAGE_SIZE,
+            onlyMine: project.projectType === 'develop' ? onlyMine : false,
+            taskName: keyword.trim() || undefined,
+          });
+        }
         const rows = getArrayData(response) as DevloopTaskItem[];
         setTasks((current) => sortTasks(nextPage === 1 ? rows : [...current, ...rows]));
         setPage(nextPage);
         const loadedCount = (nextPage - 1) * PAGE_SIZE + rows.length;
         // 部分环境不返回 total，满页时保留一个未知余量，确保底部哨兵仍会请求下一页。
         setTotal(getPageTotal(response, loadedCount + (rows.length === PAGE_SIZE ? 1 : 0)));
-        if (nextPage === 1) onInitialLoad?.(rows.length > 0);
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'projectSpace.tasks.loadFailed' }));
         if (nextPage === 1) setTasks([]);
@@ -276,7 +300,7 @@ const ProjectTasks: React.FC<Props> = ({
         else setLoadingMore(false);
       }
     },
-    [intl, keyword, onlyMine, onInitialLoad, project.projectId, project.projectType]
+    [intl, keyword, onlyMine, project.projectId, project.projectType]
   );
   const loadTasksRef = useRef(loadTasks);
 
@@ -301,14 +325,23 @@ const ProjectTasks: React.FC<Props> = ({
   useEffect(() => {
     onToolbarChange?.(
       <div className={styles.headerActions}>
-        {project.projectType === 'develop' && (
+        {/* 看板自带一份「只看我的」，两处同时出现会让人以为要一起勾，所以列表模式才显示这个。 */}
+        {taskViewMode === 'list' && (project.projectType === 'develop' || project.projectType === 'operation') && (
           <Checkbox checked={onlyMine} onChange={(event) => setOnlyMine(event.target.checked)}>
-            只看我的任务
+            {intl.formatMessage({ id: 'projectSpace.tasks.onlyMine' })}
           </Checkbox>
         )}
-        <Button size="small" icon={<AppstoreOutlined />} onClick={() => setTaskBoardOpen(true)}>
-          任务视图
-        </Button>
+        {(project.projectType === 'develop' || project.projectType === 'operation') && (
+          <Segmented
+            size="small"
+            value={taskViewMode}
+            options={[
+              { label: intl.formatMessage({ id: 'projectSpace.tasks.mode.list' }), value: 'list' },
+              { label: intl.formatMessage({ id: 'projectSpace.tasks.mode.board' }), value: 'board' },
+            ]}
+            onChange={(value) => setTaskViewMode(value as 'list' | 'board')}
+          />
+        )}
       </div>
     );
     onRefreshToolbarChange?.(
@@ -320,7 +353,7 @@ const ProjectTasks: React.FC<Props> = ({
       onToolbarChange?.(null);
       onRefreshToolbarChange?.(null);
     };
-  }, [intl, loadTasks, loading, onRefreshToolbarChange, onToolbarChange, onlyMine, project.projectType]);
+  }, [intl, loadTasks, loading, onRefreshToolbarChange, onToolbarChange, onlyMine, project.projectType, taskViewMode]);
 
   const hasMore = total > tasks.length || (total === 0 && tasks.length === PAGE_SIZE);
   const sentinelRef = useInfiniteScroll(() => {
@@ -332,8 +365,16 @@ const ProjectTasks: React.FC<Props> = ({
     return (
       project.projectType === 'operation' &&
       !task.sessionId &&
-      ['pending', 'todo', 'not_started', 'waiting', '待开始', '待启动'].includes(status)
+      ['pending', 'todo', 'not_started', 'waiting', '待开始', '待启动', '待处理'].includes(status)
     );
+  };
+
+  // 待处理首次执行，部分失败可再次执行；后者可能已有 sessionId。
+  const isOperationExecutableTask = (task: DevloopTaskItem) => {
+    const status = normalizeTaskStatus(task);
+    if (project.projectType !== 'operation') return false;
+    if (['mixed', '部分失败'].includes(status)) return true;
+    return isOperationPendingTask(task);
   };
 
   const openTaskSession = (task: DevloopTaskItem) => {
@@ -347,11 +388,61 @@ const ProjectTasks: React.FC<Props> = ({
       taskId: `${task.taskId || task.sessionId}`,
       updateTime: task.updateTime,
       createTime: task.createTime,
+      // 透传会话绑定的员工，handleOpenSession 据此 setAgentId，输入框才能默认 @ 到该员工。
+      objectType: task.objectType,
+      objectId: task.objectId,
+      // 名称/头像与 objectId 同源返回，一并带上:研发任务绑的是项目维度执行员工，不在 redux
+      // 员工列表里，handleOpenSession 要靠这两个字段写 agentCache，否则 @ 会兜底成「AI 助手」。
+      agentName: task.agentName,
+      avatar: task.avatar,
     });
   };
 
   const openTaskDetail = (task: DevloopTaskItem) => {
     setDetailTask(task);
+    if (project.projectType !== 'operation') return;
+
+    const taskId = Number(task.taskId || task.sessionId);
+    if (!Number.isFinite(taskId)) return;
+    const requestId = ++taskDetailRequestIdRef.current;
+    // 运营任务列表只返回摘要，打开抽屉后补查完整配置，并防止快速切换时旧请求覆盖新任务。
+    void getOperationTask(taskId)
+      .then((response: any) => {
+        if (requestId !== taskDetailRequestIdRef.current) return;
+        const detail = response?.data ?? response;
+        if (detail) setDetailTask({ ...task, ...detail });
+      })
+      .catch(() => undefined);
+  };
+
+  const handleTaskCardOpen = (task: DevloopTaskItem) => {
+    // 普通/默认项目先查看会话任务详情；结构化项目仅允许当前负责人直接进入自己的任务会话。
+    if (project.projectType === 'normal' || project.projectType === 'default') {
+      openTaskDetail(task);
+      return;
+    }
+    if (isCurrentUserTaskAssignee(task, userInfo)) {
+      openTaskSession(task);
+      return;
+    }
+    openTaskDetail(task);
+  };
+
+  const openReadonlyTaskSession = (task: DevloopTaskItem) => {
+    if (!task.sessionId) {
+      message.warning(intl.formatMessage({ id: 'projectSpace.detail.task.noSession' }));
+      return;
+    }
+    const sessionName = task.title || intl.formatMessage({ id: 'projectSpace.tasks.unnamed' });
+    // 非负责人沿用小详情的只读会话抽屉，不切换当前聊天上下文。
+    EventEmitter.emit('beyond-fullabsolute-driver-open-type', {
+      drawerType: 'readonlysession',
+      canClose: true,
+      title: sessionName,
+    });
+    EventEmitter.emit('beyond-fullabsolute-driver-message', {
+      sessionInfo: { sessionId: `${task.sessionId}`, sessionName },
+    });
   };
 
   const openTaskEdit = (task: DevloopTaskItem) => {
@@ -359,9 +450,7 @@ const ProjectTasks: React.FC<Props> = ({
     setEditingTitle(task.title || '');
     setEditingDescription(task.description || task.taskDescription || '');
     setEditingAssignee(task.assigneeId);
-    setEditingDueTime(
-      task.dueTime && dayjs(task.dueTime).isValid() ? dayjs(task.dueTime) : null
-    );
+    setEditingDueTime(task.dueTime && dayjs(task.dueTime).isValid() ? dayjs(task.dueTime) : null);
     if (!project.projectId) return;
     void listProjectMembers(Number(project.projectId))
       .then((response) => {
@@ -378,7 +467,7 @@ const ProjectTasks: React.FC<Props> = ({
   const handleUpdateTask = async () => {
     const taskId = Number(editingTask?.taskId || editingTask?.sessionId);
     if (!Number.isFinite(taskId) || !editingTitle.trim() || editingAssignee === undefined) {
-      message.warning('请填写任务名称并选择负责人');
+      message.warning(intl.formatMessage({ id: 'projectSpace.tasks.editValidation' }));
       return;
     }
     setTaskSaving(true);
@@ -390,12 +479,12 @@ const ProjectTasks: React.FC<Props> = ({
         assignee: editingAssignee,
         dueTime: editingDueTime?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
       });
-      message.success('任务已更新');
+      message.success(intl.formatMessage({ id: 'projectSpace.tasks.updateSuccess' }));
       setEditingTask(null);
       setDetailTask(null);
       await loadTasks(1);
     } catch (error: any) {
-      message.error(error?.message || '任务更新失败');
+      message.error(error?.message || intl.formatMessage({ id: 'projectSpace.tasks.updateFailed' }));
     } finally {
       setTaskSaving(false);
     }
@@ -404,121 +493,163 @@ const ProjectTasks: React.FC<Props> = ({
   const handleDeleteTask = (task: DevloopTaskItem) => {
     const taskId = Number(task.taskId || task.sessionId);
     if (!Number.isFinite(taskId)) {
-      message.error('任务缺少有效编号，无法删除');
+      message.error(intl.formatMessage({ id: 'projectSpace.tasks.deleteInvalidId' }));
       return;
     }
     Modal.confirm({
-      title: '确认删除任务？',
-      content: `删除“${task.title || '当前任务'}”后将不再在项目任务中展示，是否继续？`,
-      okText: '删除',
-      cancelText: '取消',
+      title: intl.formatMessage({ id: 'projectSpace.tasks.deleteConfirmTitle' }),
+      content: intl.formatMessage(
+        { id: 'projectSpace.tasks.deleteConfirmContent' },
+        { task: task.title || intl.formatMessage({ id: 'projectSpace.tasks.currentTask' }) }
+      ),
+      okText: intl.formatMessage({ id: 'common.delete' }),
+      cancelText: intl.formatMessage({ id: 'common.cancel' }),
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
           await deleteOperationTask(taskId);
-          message.success('任务已删除');
+          message.success(intl.formatMessage({ id: 'projectSpace.tasks.deleteSuccess' }));
           setDetailTask(null);
           await loadTasks(1);
         } catch (error: any) {
-          message.error(error?.message || '任务删除失败');
+          message.error(error?.message || intl.formatMessage({ id: 'projectSpace.tasks.deleteFailed' }));
         }
       },
     });
   };
+
+  // 看板模式整块替掉列表：它自带筛选、分页和任务详情，列表的 Spin/无限滚动都不参与。
+  if (taskViewMode === 'board') {
+    return (
+      <div className={styles.dataPanel}>
+        <SessionOverviewDrawer
+          embedded
+          open
+          projectId={project.projectId}
+          operationProject={project.projectType === 'operation'}
+          canEnterSession={(task) => Boolean(task.sessionId)}
+          onEnterSession={(task) => {
+            if (task.sessionId) openTaskSession(task);
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className={styles.dataPanel}>
       <Spin spinning={loading}>
         {tasks.length ? (
           <div className={styles.dataCardGrid}>
-            {tasks.map((task) => (
-              <article
-                key={`${task.taskId || task.sessionId}`}
-                className={styles.dataCard}
-                role="button"
-                tabIndex={0}
-                onClick={() => openTaskDetail(task)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') openTaskDetail(task);
-                }}
-              >
-                <div className={styles.dataCardHeader}>
-                  <Typography.Text strong ellipsis={{ tooltip: task.title }}>
-                    {task.title || intl.formatMessage({ id: 'projectSpace.tasks.unnamed' })}
-                  </Typography.Text>
-                  <div className={styles.taskCardHeaderActions}>
-                    {getTaskStatusLabel(task, intl) && (
-                      <Tag
-                        color={getTaskStatusColor(task)}
-                        className={isOperationPendingTask(task) ? styles.taskPendingStatusTag : undefined}
-                      >
-                        {getTaskStatusLabel(task, intl)}
-                      </Tag>
+            {tasks.map((task) => {
+              const taskType = normalizeDevloopTaskType(task);
+              const taskMenuItems = [
+                ...(isOperationPendingTask(task)
+                  ? [{ key: 'edit', label: intl.formatMessage({ id: 'common.edit' }) }]
+                  : []),
+                ...(isTaskCreator(task)
+                  ? [{ key: 'delete', label: intl.formatMessage({ id: 'common.delete' }), danger: true }]
+                  : []),
+              ];
+              return (
+                <article
+                  key={`${task.taskId || task.sessionId}`}
+                  className={styles.dataCard}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleTaskCardOpen(task)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') handleTaskCardOpen(task);
+                  }}
+                >
+                  <div className={styles.dataCardHeader}>
+                    {taskType && (
+                      <Tooltip title={intl.formatMessage({ id: getDevloopTaskTypeLabelId(taskType) })} placement="top">
+                        <span className={`${styles.taskTypeIcon} ${TASK_TYPE_ICON_CLASSES[taskType]}`}>
+                          {getDevloopTaskTypeIcon(taskType)}
+                        </span>
+                      </Tooltip>
                     )}
-                    {isOperationPendingTask(task) && (
-                      <Button
-                        type="text"
-                        size="small"
-                        className={styles.taskExecuteButton}
-                        aria-label="执行任务"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setTemplateTask(task);
-                        }}
-                      >
-                        {intl.formatMessage({ id: 'projectSpace.operation.execute.action' })}
-                      </Button>
-                    )}
-                    {project.projectType === 'operation' && (isOperationPendingTask(task) || isTaskCreator(task)) && (
-                      <Dropdown
-                        trigger={['click']}
-                        menu={{
-                          items: [
-                            ...(isOperationPendingTask(task) ? [{ key: 'edit', label: '编辑' }] : []),
-                            ...(isTaskCreator(task) ? [{ key: 'delete', label: '删除', danger: true }] : []),
-                          ],
-                          onClick: ({ key, domEvent }) => {
-                            domEvent.stopPropagation();
-                            if (key === 'edit') openTaskEdit(task);
-                            if (key === 'delete') handleDeleteTask(task);
-                          },
-                        }}
-                      >
+                    <Typography.Text strong ellipsis={{ tooltip: task.title }}>
+                      {task.title || intl.formatMessage({ id: 'projectSpace.tasks.unnamed' })}
+                    </Typography.Text>
+                    <div className={styles.taskCardHeaderActions}>
+                      {getTaskStatusLabel(task, intl) && (
+                        <Tag
+                          color={getTaskStatusColor(task)}
+                          className={isOperationExecutableTask(task) ? styles.taskPendingStatusTag : undefined}
+                        >
+                          {getTaskStatusLabel(task, intl)}
+                        </Tag>
+                      )}
+                      {isOperationExecutableTask(task) && (
                         <Button
                           type="text"
                           size="small"
-                          className={styles.cardMoreAction}
-                          icon={<MoreOutlined />}
-                          aria-label="任务操作"
-                          onClick={(event) => event.stopPropagation()}
-                        />
-                      </Dropdown>
-                    )}
+                          className={styles.taskExecuteButton}
+                          aria-label={intl.formatMessage({ id: 'projectSpace.tasks.executeAriaLabel' })}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setTemplateTask(task);
+                          }}
+                        >
+                          {intl.formatMessage({ id: 'projectSpace.operation.execute.action' })}
+                        </Button>
+                      )}
+                      {project.projectType === 'operation' && (isOperationPendingTask(task) || isTaskCreator(task)) && (
+                        <Dropdown
+                          trigger={['click']}
+                          menu={{
+                            items: taskMenuItems,
+                            onClick: ({ key, domEvent }) => {
+                              domEvent.stopPropagation();
+                              if (key === 'edit') openTaskEdit(task);
+                              if (key === 'delete') handleDeleteTask(task);
+                            },
+                          }}
+                        >
+                          <Button
+                            type="text"
+                            size="small"
+                            className={styles.cardMoreAction}
+                            icon={<MoreOutlined />}
+                            aria-label={intl.formatMessage({ id: 'projectSpace.tasks.actionsAriaLabel' })}
+                            onClick={(event) => event.stopPropagation()}
+                          />
+                        </Dropdown>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <Typography.Paragraph className={styles.dataCardDescription} ellipsis={{ rows: 2 }}>
-                  {task.description ||
-                    task.taskDescription ||
-                    task.requirementTitle ||
-                    task.agentName ||
-                    task.statusLabel ||
-                    '-'}
-                </Typography.Paragraph>
-                {task.sessionId && !isOperationPendingTask(task) && (
-                  <Button
-                    type="link"
-                    size="small"
-                    icon={<MessageOutlined />}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openTaskSession(task);
-                    }}
-                  >
-                    {intl.formatMessage({ id: 'projectSpace.tasks.openSession' })}
-                  </Button>
-                )}
-              </article>
-            ))}
+                  <Typography.Paragraph className={styles.dataCardDescription} ellipsis={{ rows: 2 }}>
+                    {project.projectType === 'normal' || project.projectType === 'default'
+                      ? task.sessionContent || task.description || task.taskDescription || '-'
+                      : task.description ||
+                        task.taskDescription ||
+                        task.requirementTitle ||
+                        task.agentName ||
+                        task.statusLabel ||
+                        '-'}
+                  </Typography.Paragraph>
+                  {/* 卡片底部只放负责人与创建时间：查看会话入口收到任务详情抽屉里，卡片本身整块可点即进详情。 */}
+                  <div className={styles.taskMeta}>
+                    <Typography.Text type="secondary" ellipsis={{ tooltip: task.assignee || '-' }}>
+                      {task.assignee || '-'}
+                    </Typography.Text>
+                    <Typography.Text
+                      type="secondary"
+                      title={intl.formatMessage({ id: 'projectSpace.tasks.createTime' })}
+                      className={
+                        project.projectType === 'operation' && (isOperationPendingTask(task) || isTaskCreator(task))
+                          ? styles.taskCreateTimeWithAction
+                          : undefined
+                      }
+                    >
+                      {formatTaskCreateTime(task)}
+                    </Typography.Text>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         ) : (
           !loading && (
@@ -546,17 +677,17 @@ const ProjectTasks: React.FC<Props> = ({
         knowledgeOptionsOnly
         ontologyOptions={projectOntologyOptions}
         ontologyOptionsOnly
-        applyText="确定"
+        applyText={intl.formatMessage({ id: 'common.confirm' })}
         onCancel={() => setTemplateTask(null)}
         onApply={async (result: TaskTemplateApplyResult) => {
           const taskId = Number(templateTask?.taskId || templateTask?.sessionId);
           if (!Number.isFinite(taskId) || taskId <= 0) {
-            message.error('任务缺少有效编号，无法执行');
+            message.error(intl.formatMessage({ id: 'projectSpace.tasks.executeInvalidId' }));
             return;
           }
           const selectedAgentId = Number(result.values.agentId);
           if (!Number.isFinite(selectedAgentId) || selectedAgentId <= 0) {
-            message.error('请选择当前项目绑定的数字员工');
+            message.error(intl.formatMessage({ id: 'projectSpace.tasks.agentRequired' }));
             return;
           }
           // 先把模板提示词和结构化字段交给后端，后端提交事务后发送首条消息，避免跳转到空会话。
@@ -574,7 +705,7 @@ const ProjectTasks: React.FC<Props> = ({
           });
           const sessionId = executeResult?.sessionId || templateTask?.sessionId || templateTask?.taskId;
           if (!sessionId) {
-            message.error('任务执行后未返回会话，无法打开聊天');
+            message.error(intl.formatMessage({ id: 'projectSpace.tasks.executeSessionMissing' }));
             return;
           }
           onOpenSession?.({
@@ -583,6 +714,12 @@ const ProjectTasks: React.FC<Props> = ({
             sessionContent: templateTask.statusLabel || '',
             projectId: `${project.projectId}`,
             taskId: `${templateTask.taskId || sessionId}`,
+            // 跳转聊天页时同步所选数字员工，输入框可立即恢复默认 @，无需等待消息元数据返回。
+            objectId: selectedAgentId,
+            objectType: 'DigEmployee',
+            // 模板选的是项目绑定员工,同样不在 redux 员工列表里,名字要从项目资源里反查带上,
+            // 否则 handleOpenSession 写不了 agentCache,@ 会兜底成「AI 助手」。
+            agentName: projectAgentOptions.find((agent) => `${agent.value}` === `${selectedAgentId}`)?.label,
             updateTime: templateTask.updateTime,
             createTime: templateTask.createTime,
           });
@@ -592,8 +729,8 @@ const ProjectTasks: React.FC<Props> = ({
       />
       <Modal
         open={!!editingTask}
-        title="编辑任务"
-        okText="确定"
+        title={intl.formatMessage({ id: 'projectSpace.tasks.editTitle' })}
+        okText={intl.formatMessage({ id: 'common.confirm' })}
         confirmLoading={taskSaving}
         onCancel={() => setEditingTask(null)}
         onOk={() => void handleUpdateTask()}
@@ -601,7 +738,7 @@ const ProjectTasks: React.FC<Props> = ({
       >
         <div style={{ display: 'grid', gap: 16 }}>
           <div>
-            <Typography.Text>任务名称</Typography.Text>
+            <Typography.Text>{intl.formatMessage({ id: 'projectSpace.tasks.field.name' })}</Typography.Text>
             <Input
               style={{ marginTop: 8 }}
               maxLength={255}
@@ -610,7 +747,7 @@ const ProjectTasks: React.FC<Props> = ({
             />
           </div>
           <div>
-            <Typography.Text>任务描述</Typography.Text>
+            <Typography.Text>{intl.formatMessage({ id: 'projectSpace.tasks.field.description' })}</Typography.Text>
             <Input.TextArea
               style={{ marginTop: 8 }}
               rows={3}
@@ -620,47 +757,42 @@ const ProjectTasks: React.FC<Props> = ({
               onChange={(event) => setEditingDescription(event.target.value)}
             />
           </div>
-          <div>
-            <Typography.Text>负责人</Typography.Text>
-            <Select
-              style={{ width: '100%', marginTop: 8 }}
-              value={editingAssignee}
-              options={memberOptions}
-              placeholder="请选择负责人"
-              onChange={setEditingAssignee}
-            />
-          </div>
-          <div>
-            <Typography.Text>预期时间</Typography.Text>
-            <DatePicker
-              style={{ width: '100%', marginTop: 8 }}
-              value={editingDueTime}
-              onChange={setEditingDueTime}
-            />
+          <div className={styles.taskEditRow}>
+            <div>
+              <Typography.Text>{intl.formatMessage({ id: 'projectSpace.tasks.field.assignee' })}</Typography.Text>
+              <Select
+                style={{ width: '100%', marginTop: 8 }}
+                value={editingAssignee}
+                options={memberOptions}
+                placeholder={intl.formatMessage({ id: 'projectSpace.tasks.field.assigneePlaceholder' })}
+                onChange={setEditingAssignee}
+              />
+            </div>
+            <div>
+              <Typography.Text>{intl.formatMessage({ id: 'projectSpace.tasks.field.dueTime' })}</Typography.Text>
+              <DatePicker style={{ width: '100%', marginTop: 8 }} value={editingDueTime} onChange={setEditingDueTime} />
+            </div>
           </div>
         </div>
       </Modal>
-      <SessionOverviewDrawer
-        open={taskBoardOpen}
-        onClose={() => setTaskBoardOpen(false)}
-        projectId={project.projectId}
-        operationProject={project.projectType === 'operation'}
-        canEnterSession={(task) => Boolean(task.sessionId)}
-        onEnterSession={(task) => {
-          if (task.sessionId) openTaskSession(task);
-          setTaskBoardOpen(false);
-        }}
-      />
       <TaskDetailDrawer
         task={detailTask}
+        operationProject={project.projectType === 'operation'}
+        simpleProject={project.projectType === 'normal' || project.projectType === 'default'}
         onClose={() => setDetailTask(null)}
-        canEnterSession={detailTask ? isCurrentUserTaskAssignee(detailTask, userInfo) : false}
+        canEnterSession={
+          detailTask
+            ? project.projectType === 'normal' || project.projectType === 'default'
+              ? Boolean(detailTask.sessionId)
+              : isCurrentUserTaskAssignee(detailTask, userInfo)
+            : false
+        }
         onEnterSession={(task) => {
           openTaskSession(task as DevloopTaskItem);
           setDetailTask(null);
         }}
         onViewSession={(task) => {
-          openTaskSession(task as DevloopTaskItem);
+          openReadonlyTaskSession(task as DevloopTaskItem);
           setDetailTask(null);
         }}
       />

@@ -49,6 +49,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliR
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.ManagedProcess;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService.ConnectorCliWorkspace;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
 class LarkCliAuthorizationProviderTest {
@@ -60,6 +61,7 @@ class LarkCliAuthorizationProviderTest {
     private static final List<String> CONFIG_INIT_NEW =
         List.of("lark-cli", "config", "init", "--new", "--force-init");
     private static final List<String> STATUS = List.of("lark-cli", "auth", "status", "--json", "--verify");
+    private static final List<String> LOGOUT = List.of("lark-cli", "auth", "logout", "--json");
     private static final List<String> DEFAULT_LOGIN = List.of(
         "lark-cli", "auth", "login", "--domain", "all", "--no-wait", "--json");
     private static final Map<String, String> ENVIRONMENT = Map.of("HOME", "/tmp/lark-cli-test");
@@ -87,7 +89,7 @@ class LarkCliAuthorizationProviderTest {
                  "identities":{"user":{"openId":"ou_42","name":"Lark User"}}}}
                 """));
 
-        AuthorizationStatusResult result = provider.verify("42", new ConnectorInfo());
+        AuthorizationStatusResult result = provider.verify(42L, new ConnectorInfo());
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
         assertThat(result.accountId()).isEqualTo("ou_42");
@@ -97,11 +99,22 @@ class LarkCliAuthorizationProviderTest {
     }
 
     @Test
+    void revokesLarkCredentialInIsolatedWorkspace() {
+        when(cliRunner.run(eq(LOGOUT), eq(ENVIRONMENT), isNull(), any(Duration.class)))
+            .thenReturn(new CliResult(0, "{}"));
+
+        provider.revoke("42", new ConnectorInfo());
+
+        verify(workspaceService).resolve(42L, "lark-cli");
+        verify(cliRunner).run(eq(LOGOUT), eq(ENVIRONMENT), isNull(), any(Duration.class));
+    }
+
+    @Test
     void rejectsConfiguredButUnauthenticatedLarkWorkspace() {
         when(cliRunner.run(eq(STATUS), eq(ENVIRONMENT), isNull(), any(Duration.class)))
             .thenReturn(new CliResult(0, "{\"configured\":true}"));
 
-        AuthorizationStatusResult result = provider.verify("42", new ConnectorInfo());
+        AuthorizationStatusResult result = provider.verify(42L, new ConnectorInfo());
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
         assertThat(result.errorCode()).isEqualTo("CONNECTOR_CREDENTIAL_INVALID");
@@ -115,8 +128,8 @@ class LarkCliAuthorizationProviderTest {
                 new CliResult(0, "{\"authenticated\":true,\"status\":\"connected\"}")
             );
 
-        AuthorizationStatusResult bot = provider.verify("42", new ConnectorInfo());
-        AuthorizationStatusResult ambiguous = provider.verify("42", new ConnectorInfo());
+        AuthorizationStatusResult bot = provider.verify(42L, new ConnectorInfo());
+        AuthorizationStatusResult ambiguous = provider.verify(42L, new ConnectorInfo());
 
         assertThat(bot.status()).isEqualTo(AuthorizationStatus.FAILED);
         assertThat(bot.errorCode()).isEqualTo("CONNECTOR_CREDENTIAL_INVALID");
@@ -129,7 +142,7 @@ class LarkCliAuthorizationProviderTest {
         when(cliRunner.run(eq(STATUS), eq(ENVIRONMENT), isNull(), any(Duration.class)))
             .thenReturn(new CliResult(124, "partial status"));
 
-        AuthorizationStatusResult result = provider.verify("42", new ConnectorInfo());
+        AuthorizationStatusResult result = provider.verify(42L, new ConnectorInfo());
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
         assertThat(result.errorCode()).isEqualTo("CONNECTOR_VERIFICATION_TIMEOUT");
@@ -177,10 +190,8 @@ class LarkCliAuthorizationProviderTest {
         assertThat(result.phase()).isEqualTo("app_initialization");
         assertThat(result.authorizationUrl()).isEqualTo(
             "https://open.feishu.cn/page/cli?user_code=temporary-init-code");
-        assertThat(result.providerState()).contains(
-            "\"phase\":\"app_initialization\"",
-            "\"loginCommand\":[\"lark-cli\",\"auth\",\"login\",\"--domain\",\"all\",\"--no-wait\",\"--json\"]"
-        );
+        assertThat(result.providerState()).contains("\"phase\":\"app_initialization\"")
+            .doesNotContain("loginCommand");
         verify(cliRunner).run(eq(CONFIG_SHOW), eq(ENVIRONMENT), isNull(), any(Duration.class));
         verify(cliRunner).start(eq(CONFIG_INIT_NEW), eq(ENVIRONMENT), isNull());
     }
@@ -277,42 +288,40 @@ class LarkCliAuthorizationProviderTest {
 
     @Test
     void domainsAreDeduplicatedAndRenderedAsRepeatedArguments() {
-        List<String> expected = List.of(
-            "lark-cli", "auth", "login", "--domain", "d1", "--domain", "d2", "--no-wait", "--json");
-        stubConfiguredLogin(expected);
+        stubConfiguredLogin(DEFAULT_LOGIN);
 
         AuthorizationStartResult result = provider.start(startContext(Map.of(
             "domains", List.of("d1", "d1", "d2"))));
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
-        verify(cliRunner).run(eq(expected), eq(ENVIRONMENT), isNull(), any(Duration.class));
+        verify(cliRunner).run(eq(DEFAULT_LOGIN), eq(ENVIRONMENT), isNull(), any(Duration.class));
     }
 
     @Test
     void scopesAreDeduplicatedAndRenderedAsOneCommaSeparatedArgument() {
-        List<String> expected = List.of(
-            "lark-cli", "auth", "login", "--scope", "scope-a,scope-b", "--no-wait", "--json");
-        stubConfiguredLogin(expected);
+        stubConfiguredLogin(DEFAULT_LOGIN);
 
         AuthorizationStartResult result = provider.start(startContext(Map.of(
             "scopes", List.of("scope-a", "scope-a", "scope-b"))));
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
-        verify(cliRunner).run(eq(expected), eq(ENVIRONMENT), isNull(), any(Duration.class));
+        verify(cliRunner).run(eq(DEFAULT_LOGIN), eq(ENVIRONMENT), isNull(), any(Duration.class));
     }
 
     @Test
     void rejectsSimultaneousDomainsAndScopesBeforeRunningCli() {
+        stubConfiguredLogin(DEFAULT_LOGIN);
         AuthorizationStartResult result = provider.start(startContext(Map.of(
             "domains", List.of("d1"),
             "scopes", List.of("scope-a"))));
 
-        assertFailedStart(result, "PROVIDER_CONFIG_INVALID");
-        verifyNoInteractions(cliRunner);
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
+        verify(cliRunner).run(eq(DEFAULT_LOGIN), eq(ENVIRONMENT), isNull(), any(Duration.class));
     }
 
     @Test
     void rejectsMalformedProviderConfigElementsBeforeRunningCli() {
+        stubConfiguredLogin(DEFAULT_LOGIN);
         Map<String, Object> config = new HashMap<>();
         config.put("domains", List.of("d1", " "));
 
@@ -322,10 +331,10 @@ class LarkCliAuthorizationProviderTest {
         config.put("domains", "d1");
         AuthorizationStartResult nonList = provider.start(startContext(config));
 
-        assertFailedStart(blank, "PROVIDER_CONFIG_INVALID");
-        assertFailedStart(nonString, "PROVIDER_CONFIG_INVALID");
-        assertFailedStart(nonList, "PROVIDER_CONFIG_INVALID");
-        verifyNoInteractions(cliRunner);
+        assertThat(blank.status()).isEqualTo(AuthorizationStatus.PENDING);
+        assertThat(nonString.status()).isEqualTo(AuthorizationStatus.PENDING);
+        assertThat(nonList.status()).isEqualTo(AuthorizationStatus.PENDING);
+        verify(cliRunner, times(3)).run(eq(DEFAULT_LOGIN), eq(ENVIRONMENT), isNull(), any(Duration.class));
     }
 
     @Test
@@ -429,6 +438,32 @@ class LarkCliAuthorizationProviderTest {
         assertThat(result.credentialExpiresAt()).isEqualTo(Date.from(Instant.parse("2026-08-01T04:30:00Z")));
         assertThat(result.errorCode()).isNull();
         verify(cliRunner, never()).start(anyList(), any(), any());
+    }
+
+    @Test
+    void verifiedStatusReadsCredentialExpiryFromNestedUserIdentity() {
+        when(cliRunner.run(eq(STATUS), eq(ENVIRONMENT), isNull(), any(Duration.class)))
+            .thenReturn(new CliResult(0, """
+                {"appId":"cli_aaea8dc5d5f81bcf","brand":"feishu","defaultAs":"auto",
+                "identities":{"bot":{"status":"ready","available":true,"verified":true},
+                "user":{"status":"ready","available":true,"verified":true,
+                "userName":"Lark User","tokenStatus":"valid",
+                "expiresAt":"2030-08-10T23:58:47+08:00",
+                "refreshExpiresAt":"2030-08-17T21:58:47+08:00"}},
+                "identity":"user","verified":true}
+                """));
+
+        AuthorizationStatusResult result = provider.queryStatus(sessionContext(AUTHORIZATION_ID, validState()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.accountName()).isEqualTo("Lark User");
+        assertThat(result.credentialExpiresAt())
+            .isEqualTo(Date.from(Instant.parse("2030-08-10T15:58:47Z")));
+        assertThat(result.refreshExpiresAt())
+            .isEqualTo(Date.from(Instant.parse("2030-08-17T13:58:47Z")));
+        assertThat(result.credentialState().name()).isEqualTo("READY");
+        assertThat(result.renewalMode().name()).isEqualTo("REFRESH_TOKEN");
+        assertThat(result.lastVerifiedAt()).isNotNull();
     }
 
     @Test
@@ -869,7 +904,8 @@ class LarkCliAuthorizationProviderTest {
             "lark",
             "lark-cli",
             null,
-            providerConfig
+            providerConfig,
+            commandCatalog(providerConfig)
         );
     }
 
@@ -898,7 +934,25 @@ class LarkCliAuthorizationProviderTest {
             "lark-cli",
             null,
             providerState,
-            expiresAt
+            expiresAt,
+            commandCatalog(Map.of())
+        );
+    }
+
+    private ManifestCommandCatalog commandCatalog(Map<String, Object> providerConfig) {
+        return new ManifestCommandCatalog(
+            Map.of(
+                "configCheck", List.of(CONFIG_SHOW),
+                "configInitialize", List.of(CONFIG_INIT_NEW),
+                "contextBind", List.of(List.of(
+                    "lark-cli", "config", "bind", "--source", "openclaw", "--identity", "user-default", "--force")),
+                "login", List.of(DEFAULT_LOGIN, List.of(
+                    "lark-cli", "auth", "login", "--device-code", "${deviceCode}", "--json")),
+                "status", List.of(STATUS),
+                "logout", List.of(LOGOUT)
+            ),
+            "test-digest",
+            Map.of("deviceCode", ManifestCommandCatalog.PlaceholderPolicy.safeValue(512))
         );
     }
 

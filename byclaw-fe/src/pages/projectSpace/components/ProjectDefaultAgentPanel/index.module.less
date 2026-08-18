@@ -1,4 +1,4 @@
-// 项目详情左侧窄面板(~280px):竖排角色卡片,每张卡一个下拉,底部固定保存。
+// 项目详情「数字员工」tab:角色卡(复用 ResourceCard 样式)网格排布,更换/清除即时落库。
 .panel {
   min-height: 0;
   flex: 1;
@@ -12,7 +12,8 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
-  padding: 2px;
+  // 留出 ResourceCard hover 阴影的余量,否则会被这个滚动容器的 overflow 裁掉。
+  padding: 4px 6px 8px;
 
   &::-webkit-scrollbar {
     display: none;
@@ -26,54 +27,73 @@
   line-height: 1.6;
 }
 
-.roleCard {
-  border: 1px solid #dfe6f0;
-  border-radius: 12px;
-  background: #fff;
-  padding: 12px;
-  margin-bottom: 10px;
+// 角色卡走 ResourceCard(卡片自带 150px 固定高)。auto-fill 而不是固定三列:
+// 这个面板既出现在项目详情全宽区,也出现在弹框里,列数得跟着可用宽度走。
+.roleGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
 }
 
-.roleHeader {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-}
+// 角色卡复用公共 ResourceCard，仅在项目大详情内覆盖为统一的无边框卡片视觉。
+.roleGrid .roleCard {
+  border: 0;
+  background: #f7f9fc;
+  box-shadow: none;
+  transition: background-color 0.2s ease;
 
-.roleIcon {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #246bfe;
-  background: #eaf2ff;
-  flex-shrink: 0;
-  font-size: 14px;
-}
-
-.roleName {
-  color: #1f2633;
-  font-size: 13px;
-  font-weight: 600;
+  &:hover {
+    background: #edf2f9;
+    box-shadow: none;
+  }
 }
 
 .roleSelect {
   width: 100%;
 }
 
-.footer {
-  flex-shrink: 0;
-  display: flex;
-  justify-content: flex-end;
-  padding-top: 12px;
-  margin-top: 4px;
-  border-top: 1px solid #edf1f7;
+// 卡片头像容器:尺寸对齐「数字员工」页的 .employeeAvatar(56px),
+// getAgentChatAvatar 返回的 img 是 100% 宽高,尺寸由这个容器定。
+.roleAvatar {
+  width: 56px;
+  height: 56px;
 }
 
-.saveButton {
-  height: 28px;
-  padding: 0 14px;
+// 下拉项:头像 + 名称一行,头像同样走 getAgentChatAvatar(缺图时它自己回落默认头像)。
+.roleOption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.roleOptionLogo {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+}
+
+.roleOptionLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// extraMenuItems 拿不到 ResourceCard 的私有 BuildMenuLabel(未导出),
+// 这里对齐它的图标+文字排版,免得这两项和内置项看起来不是一套。
+.roleMenuItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+// 「去聊天」占的是卡片底部原本放创建者的那一格(metaNode):
+// link 型按钮去掉内边距,文字基线才和创建者行一致。
+.roleChatButton {
+  height: auto;
+  padding: 0;
+  font-size: 12px;
 }

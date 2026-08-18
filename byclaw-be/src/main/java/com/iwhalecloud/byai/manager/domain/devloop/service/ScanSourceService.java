@@ -36,6 +36,14 @@ public class ScanSourceService {
     public static final Set<String> OPERATION_SOURCE_TYPES = Set.of(OPERATION_SOURCE_TYPE_COLLECT,
         OPERATION_SOURCE_TYPE_KNOWLEDGE, OPERATION_SOURCE_TYPE_PUBLISH, OPERATION_SOURCE_TYPE_ANALYZE);
 
+    /**
+     * 定时聊天型自动化：config 存的是 AssistantChatDto 入参本身（agentId/chatContent 等），
+     * 到点直接发起一次 chat，不扫外部渠道、不进拆分评分与自动派生链路。
+     * 与 github_issue/dingtalk 的区别在于「没有外部数据源」，所以 config 语义完全不同，
+     * 各扫描服务按 source_type 各读自己的键，不共享 schema。
+     */
+    public static final String SOURCE_TYPE_CHAT = "chat";
+
     @Autowired
     private ScanSourceMapper scanSourceMapper;
 
@@ -94,7 +102,9 @@ public class ScanSourceService {
     public Page<ScanSource> listByProjectIdPage(Long projectId, String keyword, Collection<String> excludedSourceTypes,
         int pageNum, int pageSize) {
         LambdaQueryWrapper<ScanSource> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(ScanSource::getProjectId, projectId).eq(ScanSource::getDeleteFlag, "0");
+        // projectId 为空表示应用级自动化页跨项目查询；这里必须用条件重载，
+        // 否则 eq(null) 会生成 project_id = NULL，一条都匹配不到。
+        wrapper.eq(projectId != null, ScanSource::getProjectId, projectId).eq(ScanSource::getDeleteFlag, "0");
         if (excludedSourceTypes != null && !excludedSourceTypes.isEmpty()) {
             // 保留历史空类型渠道，仅排除明确的内部来源和运营需求来源。
             wrapper.and(query -> query.isNull(ScanSource::getSourceType).or()

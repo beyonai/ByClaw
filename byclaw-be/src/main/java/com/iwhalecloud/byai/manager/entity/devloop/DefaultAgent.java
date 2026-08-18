@@ -9,7 +9,7 @@ import lombok.Setter;
 import java.util.Date;
 
 /**
- * 默认数字员工:架构/代码/测试三角色的兜底员工。
+ * 默认助理:架构/需求/研发/测试四角色的兜底助理。
  * project_id=0 为全局默认行,>0 为该项目覆盖行;项目某角色为空则回退全局默认。
  */
 @Getter
@@ -26,6 +26,10 @@ public class DefaultAgent {
     private String architectAgentId;
 
     private String architectAgentName;
+
+    private String requirementAgentId;
+
+    private String requirementAgentName;
 
     private String coderAgentId;
 

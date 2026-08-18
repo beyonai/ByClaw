@@ -1,20 +1,18 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Form, Input, Modal, Radio, Select, Steps, message } from 'antd';
-import {
-  CheckCircleFilled,
-  ClockCircleOutlined,
-  DeleteOutlined,
-  InfoCircleFilled,
-  LoadingOutlined,
-  PlusOutlined,
-} from '@ant-design/icons';
+import { CheckCircleFilled, DeleteOutlined, InfoCircleFilled, LoadingOutlined, PlusOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import {
   createProjectRepo,
   deleteProjectRepo,
   listProjectRepos,
+  getProject,
   startProjectInit,
+  startArchitectChat,
+  INIT_POLL_INTERVAL_MS,
+  INIT_POLL_MAX_ROUNDS,
   type DevloopProjectRepo,
+  type ProjectInitStatus,
   type ProjectRepoType,
 } from '@/service/devloop';
 import ProjectBasicForm, {
@@ -33,8 +31,16 @@ interface Props {
   onCreateProject: (values: ProjectFormValues) => Promise<string>;
   // 完成:进入该项目详情(非研发项目建完即调,研发项目走完 step3 后调)。
   onFinish: (projectId: string) => void;
-  // step3 进入架构数字员工聊天做初始化。
-  onEnterArchitectChat: (projectId: string) => void;
+  // step3 进入架构数字员工聊天看初始化过程;target 为后端下发初始化时建的那条会话与架构员工,缺省则新开会话。
+  onEnterArchitectChat: (projectId: string, target?: ArchitectChatTarget) => void;
+}
+
+// 跳架构员工会话所需的最小信息:会话ID加员工。员工名必须带上——项目维度员工不在前端员工列表里,
+// 只给 ID 会让聊天输入框的 @ 查不到人而兜底成「AI 助手」。
+export interface ArchitectChatTarget {
+  sessionId?: string;
+  agentId?: string;
+  agentName?: string;
 }
 
 const REPO_BRANCH_DEFAULT = 'main';
@@ -91,6 +97,18 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
   // 初始化需用户显式点击触发:未触发前展示配置,触发后才 loading 且允许关闭。
   const [initStarted, setInitStarted] = useState(false);
   const [initStarting, setInitStarting] = useState(false);
+  // 与 initStarting 分开:两段是两个按钮两个接口,共用一个 loading 会让建工作区时「去跟架构聊天」也跟着转。
+  const [architectChatStarting, setArchitectChatStarting] = useState(false);
+  // 架构助理那条会话与员工:进入聊天要用会话ID直达该会话而不是新开一条,员工用于跳过去后默认 @ 到它。
+  // 员工只有 /init/start 会回,轮询 getProject 拿不到,所以启动时就存下来。
+  const [architectTarget, setArchitectTarget] = useState<ArchitectChatTarget>({});
+  // 真实初始化状态由后端定时任务读任务状态文件后落库,这里轮询回显,不再用写死的假进度。
+  const [initStatus, setInitStatus] = useState<ProjectInitStatus>('initializing');
+  const [initFailReason, setInitFailReason] = useState('');
+
+  // initialized 再按有没有会话分两种:有会话=员工在聊(转圈等 ready),没会话=等用户点「去跟架构聊天」。
+  const architectChatting = initStatus === 'initialized' && !!architectTarget.sessionId;
+  const waitingArchitectChat = initStatus === 'initialized' && !architectTarget.sessionId;
 
   const workspaceRepo = repos.find((repo) => repo.repoType === 'workspace');
   const codeRepos = repos.filter((repo) => repo.repoType !== 'workspace');
@@ -108,6 +126,10 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
     setSkillPackages([]);
     setInitStarted(false);
     setInitStarting(false);
+    setArchitectChatStarting(false);
+    setArchitectTarget({});
+    setInitStatus('initializing');
+    setInitFailReason('');
   }, [open]);
 
   const refreshRepos = useCallback(async (id: string) => {
@@ -186,7 +208,7 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
       },
     });
   };
-  // step3 显式触发初始化:调用后端标记 initializing 并下发建索引/技能包配置,成功后进入 loading 态。
+  // step3 第一段:后端同步建工作区(克隆/子模块/技能包/推送),返回即 initialized,再由用户点「去跟架构聊天」走第二段。
   const handleStartInit = async () => {
     if (!projectId) return;
     setInitStarting(true);
@@ -196,6 +218,9 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
         buildIndex,
         skillPackages: buildIndex ? skillPackages : [],
       });
+      // 同步接口成功即已 initialized,不必等轮询确认;轮询只负责后面 initializing→ready 那一段。
+      setInitStatus('initialized');
+      setInitFailReason('');
       setInitStarted(true);
     } catch {
       message.error(t('step3.startFailed'));
@@ -203,6 +228,63 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
       setInitStarting(false);
     }
   };
+
+  // step3 第二段:下发架构员工并跳进那条会话。会话与员工只有这个接口会回,轮询 getProject 拿不到员工,所以在这里存下来。
+  const handleEnterArchitectChat = async () => {
+    if (!projectId) return;
+    setArchitectChatStarting(true);
+    try {
+      const res = await startArchitectChat({ projectId: Number(projectId) });
+      const target = {
+        sessionId: res?.sessionId,
+        agentId: res?.architectAgentId,
+        agentName: res?.architectAgentName,
+      };
+      // 状态仍是 initialized:下发聊天不换状态,只多一个会话ID。这里记下会话即代表「在聊」,轮询继续等 ready。
+      setArchitectTarget(target);
+      onEnterArchitectChat(projectId, target);
+    } catch {
+      message.error(t('step3.chatFailed'));
+    } finally {
+      setArchitectChatStarting(false);
+    }
+  };
+
+  // 轮询项目 initStatus:架构助理在沙箱里干活,完成信号由后端定时任务读任务状态文件后落库。
+  // 到 ready 或超时回退 pending 就停轮询,避免向导开着一直打接口。
+  // architectChatting 也要轮:员工在聊时状态一直是 initialized,只判 initializing 会在下发聊天后立刻停轮询,等不到 ready。
+  useEffect(() => {
+    if (!open || !initStarted || !projectId) return;
+    if (initStatus !== 'initializing' && !architectChatting) return;
+    let cancelled = false;
+    let rounds = 0;
+    const timer = setInterval(async () => {
+      // 与详情页同一道封顶:后端收不了口时不能让向导无限打 /project/get。
+      rounds += 1;
+      if (rounds > INIT_POLL_MAX_ROUNDS) {
+        clearInterval(timer);
+        return;
+      }
+      try {
+        const detail = await getProject(Number(projectId));
+        if (cancelled || !detail) return;
+        setInitStatus((detail.initStatus as ProjectInitStatus) || 'initializing');
+        setInitFailReason(detail.initFailReason || '');
+        // 只覆盖会话ID,员工保留启动时那份:详情不回架构员工,拿 undefined 覆盖会把 @ 打回「AI 助手」。
+        // 会话为 0/空要跟着清掉:后端聊天超时是「留在 initialized 只清会话」,不清这里就一直转圈,按钮回不来。
+        setArchitectTarget((prev) => ({
+          ...prev,
+          sessionId: Number(detail.initSessionId || 0) > 0 ? `${detail.initSessionId}` : undefined,
+        }));
+      } catch {
+        // 轮询失败不打断向导:下一次 tick 再试,状态维持不变。
+      }
+    }, INIT_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [open, initStarted, projectId, initStatus, architectChatting]);
 
   const renderBasicStep = () => (
     <div className={styles.stepBody}>
@@ -373,28 +455,41 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
       </div>
 
       {initStarted ? (
-        // 已触发初始化:展示 loading 与进度,允许关闭(耗时任务在后台继续)。
+        // 已触发初始化:回显轮询到的真实状态,允许关闭(架构助理在沙箱里继续跑)。
         <div className={styles.initPanel}>
-          <LoadingOutlined className={styles.initSpinner} spin />
-          <div className={styles.initTitle}>{t('step3.title')}</div>
-          <div className={styles.initDesc}>{t('step3.desc')}</div>
-          <div className={styles.checklist}>
-            <div className={`${styles.checkItem} ${styles.checkItemDone}`}>
-              <CheckCircleFilled className={styles.checkIconDone} />
-              {t('step3.check.repo')}
-            </div>
-            <div className={styles.checkItem}>
-              <LoadingOutlined className={styles.checkIconActive} spin />
-              {t('step3.check.model')}
-            </div>
-            <div className={styles.checkItem}>
-              <ClockCircleOutlined className={styles.checkIconPending} />
-              {t('step3.check.push')}
-            </div>
+          {/* initialized 分两种:还没下发员工(等用户点去聊)与员工在聊(有会话)。下发聊天不换状态,只多一个会话ID。 */}
+          {initStatus === 'ready' && <CheckCircleFilled className={styles.checkIconDone} />}
+          {(initStatus === 'initializing' || architectChatting) && (
+            <LoadingOutlined className={styles.initSpinner} spin />
+          )}
+          {(initStatus === 'pending' || waitingArchitectChat) && (
+            <InfoCircleFilled className={styles.checkIconPending} />
+          )}
+          <div className={styles.initTitle}>
+            {architectChatting ? t('step3.status.initializing') : t(`step3.status.${initStatus}`)}
           </div>
-          <Button type="primary" ghost onClick={() => onEnterArchitectChat(projectId)}>
-            {t('step3.enterChat')}
-          </Button>
+          {/* pending 说明初始化超时回退了,必须把失败原因说清楚,否则用户只看到「待初始化」不知为何。 */}
+          <div className={styles.initDesc}>
+            {initStatus === 'pending' && initFailReason
+              ? initFailReason
+              : architectChatting
+                ? t('step3.statusDesc.initializing')
+                : t(`step3.statusDesc.${initStatus}`)}
+          </div>
+          {initStatus === 'pending' ? (
+            <Button type="primary" loading={initStarting} onClick={handleStartInit}>
+              {t('step3.retry')}
+            </Button>
+          ) : waitingArchitectChat ? (
+            // 工作区刚建好,还没下发员工:这里点了才建会话,所以走接口而不是直接跳 architectTarget(此时是空的)。
+            <Button type="primary" loading={architectChatStarting} onClick={handleEnterArchitectChat}>
+              {t('step3.enterArchitectChat')}
+            </Button>
+          ) : (
+            <Button type="primary" ghost onClick={() => onEnterArchitectChat(projectId, architectTarget)}>
+              {t('step3.enterChat')}
+            </Button>
+          )}
         </div>
       ) : (
         // 未触发:仅展示配置,需用户显式点击「开始初始化」才启动耗时任务。
@@ -456,24 +551,39 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
   return (
     <Modal
       className={styles.wizard}
+      // 禁止 Modal 外层 wrap 滚动，向导内容统一在弹窗主体内滚动。
+      wrapClassName={styles.wizardWrap}
       title={t('titleCreate')}
       open={open}
       width={720}
+      // 与编辑项目弹窗保持一致，始终在当前视口内上下居中展示。
+      centered
       maskClosable={false}
       closable={!closeBlocked}
       onCancel={closeBlocked ? undefined : onCancel}
       footer={renderFooter()}
+      // 限制 body 高度并在弹窗内部滚动，避免页面和 Modal 外层抢滚动。
+      styles={{
+        body: {
+          maxHeight: 'calc(100vh - 220px)',
+          overflowY: 'auto',
+          paddingTop: 8,
+          paddingInlineEnd: 8,
+        },
+      }}
     >
-      {/* 仅研发项目展开多步进度条;非研发 step1 即为全部,不展示步进。 */}
-      {isDevelopProject && (
-        <Steps
-          className={styles.steps}
-          current={step}
-          size="small"
-          items={[{ title: t('step1.title') }, { title: t('step2.title') }, { title: t('step3.titleShort') }]}
-        />
-      )}
-      {stepPanels[step]()}
+      <div className={styles.wizardScroll}>
+        {/* 仅研发项目展开多步进度条;非研发 step1 即为全部,不展示步进。 */}
+        {isDevelopProject && (
+          <Steps
+            className={styles.steps}
+            current={step}
+            size="small"
+            items={[{ title: t('step1.title') }, { title: t('step2.title') }, { title: t('step3.titleShort') }]}
+          />
+        )}
+        {stepPanels[step]()}
+      </div>
     </Modal>
   );
 };

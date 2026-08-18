@@ -1,0 +1,32 @@
+[
+  {
+    "kind": "skill",
+    "name": "Review Pro",
+    "repository": "https://github.com/Acme/review-pro.git",
+    "path": "./skills/review",
+    "sources": [{ "source": "skills-sh", "url": "https://skills.sh/acme/review-pro" }],
+    "metrics": { "skills-sh": { "installs": 1200, "popularityPercentile": 0.91 } },
+    "security": { "status": "pass", "reasons": [] },
+    "provenance": { "provider": "skills-sh", "retrievedAt": "2026-08-11T00:00:00.000Z", "rawId": "skills:1" }
+  },
+  {
+    "kind": "skill",
+    "name": "review-pro",
+    "repository": "github.com/acme/review-pro",
+    "path": "skills/review/",
+    "sources": [{ "source": "findskills-cn", "url": "https://findskills.cn/acme/review-pro" }],
+    "metrics": { "findskills-cn": { "installs": 700, "popularityPercentile": 0.87 } },
+    "security": { "status": "caution", "reasons": ["unsigned"] },
+    "provenance": { "provider": "findskills-cn", "retrievedAt": "2026-08-11T00:01:00.000Z", "rawId": "find:9" }
+  },
+  {
+    "kind": "skill",
+    "name": "review-pro",
+    "repository": "https://github.com/other/review-pro",
+    "path": "skills/review",
+    "sources": [{ "source": "clawhub", "url": "https://clawhub.ai/other/review-pro" }],
+    "metrics": { "clawhub": { "installs": 50, "popularityPercentile": 0.42 } },
+    "security": { "status": "unknown", "reasons": [] },
+    "provenance": { "provider": "clawhub", "retrievedAt": "2026-08-11T00:02:00.000Z", "rawId": "claw:3" }
+  }
+]

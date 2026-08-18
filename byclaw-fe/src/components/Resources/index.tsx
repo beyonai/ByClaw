@@ -1,6 +1,13 @@
 import React, { useCallback, useContext, useState, useEffect, useRef } from 'react';
-import { UploadOutlined, SearchOutlined, PlusOutlined, FullscreenOutlined } from '@ant-design/icons';
-import { useIntl, useSelector, useNavigate, useSearchParams } from '@umijs/max';
+import {
+  CheckOutlined,
+  DownOutlined,
+  FullscreenOutlined,
+  PlusOutlined,
+  SearchOutlined,
+  UploadOutlined,
+} from '@ant-design/icons';
+import { useIntl, useLocation, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
 import { Button, Dropdown, Empty, Input, Space, Spin, Tooltip, message, Tabs } from 'antd';
 import classnames from 'classnames';
@@ -118,6 +125,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const knowledgeCapabilityDisabledTip = intl.formatMessage({ id: 'resource.thirdPartyKnowledgeBaseMode' });
   const noPermissionDisabledTip = intl.formatMessage({ id: 'common.noPermissionOperation' });
   const navigate = useNavigate();
+  const location = useLocation();
   const { placeholder: skillDetailDrawerHolder, show: showSkillDetailDrawer } = useSkillDetailDrawer();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -289,7 +297,8 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         setDebouncedSearchValue('');
         setDropdownParam(getDefaultParams());
         setActiveTab('personal');
-        setSearchParams(nextSearchParams);
+        // 中心页内部筛选只更新查询参数，需保留从右侧资源面板带来的返回位置和面板保持状态。
+        setSearchParams(nextSearchParams, { state: location.state });
       }
       refreshList();
     };
@@ -298,7 +307,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     return () => {
       EventEmitter.off('beyond-resourceList-resourceType-reload', handleResourceTypeReload);
     };
-  }, [EventEmitter, refreshList, resourceType, searchParams, setSearchParams]);
+  }, [EventEmitter, location.state, refreshList, resourceType, searchParams, setSearchParams]);
 
   // 防抖定时器
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
@@ -525,7 +534,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     setSearchValue('');
     setDebouncedSearchValue('');
     setDropdownParam(getDefaultParams());
-    setSearchParams(nextSearchParams);
+    setSearchParams(nextSearchParams, { state: location.state });
   };
   const tabBarExtraContent = (
     <Space>
@@ -626,25 +635,43 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
       label:
         resourceType === 'SKILL' ? (
           <Dropdown
-            trigger={['hover', 'click']}
+            trigger={['hover']}
             open={enterpriseSkillDropdownOpen}
             onOpenChange={setEnterpriseSkillDropdownOpen}
+            mouseEnterDelay={0.12}
+            mouseLeaveDelay={0.1}
+            transitionName="enterprise-skill-dropdown-motion"
             placement="bottomLeft"
-            align={{ offset: [0, 6] }}
+            align={{ offset: [0, 5] }}
             overlayClassName={styles.enterpriseSkillDropdown}
             menu={{
               selectedKeys: [enterpriseSkillKind],
               items: [
                 {
                   key: 'skill',
-                  label: intl.formatMessage({ id: 'resource.skillSingle' }),
+                  label: (
+                    <span className={styles.enterpriseSkillMenuItem}>
+                      {intl.formatMessage({ id: 'resource.skillSingle' })}
+                      {enterpriseSkillKind === 'skill' ? (
+                        <CheckOutlined className={styles.enterpriseSkillMenuCheck} aria-hidden />
+                      ) : null}
+                    </span>
+                  ),
                 },
                 {
                   key: 'group',
-                  label: intl.formatMessage({ id: 'resource.skillGroup' }),
+                  label: (
+                    <span className={styles.enterpriseSkillMenuItem}>
+                      {intl.formatMessage({ id: 'resource.skillGroup' })}
+                      {enterpriseSkillKind === 'group' ? (
+                        <CheckOutlined className={styles.enterpriseSkillMenuCheck} aria-hidden />
+                      ) : null}
+                    </span>
+                  ),
                 },
               ],
-              onClick: ({ key }: { key: string }) => {
+              onClick: ({ key, domEvent }) => {
+                domEvent.stopPropagation();
                 if (key === 'skill' || key === 'group') {
                   setEnterpriseSkillDropdownOpen(false);
                   handleEnterpriseSkillKindChange(key);
@@ -653,13 +680,18 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
             }}
           >
             <span
-              className={styles.enterpriseSkillTabLabel}
+              className={classnames(styles.enterpriseSkillTabLabel, {
+                [styles.enterpriseSkillTabLabelOpen]: enterpriseSkillDropdownOpen,
+              })}
+              data-testid="enterprise-skill-tab-trigger"
               tabIndex={0}
               role="button"
-              onFocus={() => setEnterpriseSkillDropdownOpen(true)}
+              aria-haspopup="menu"
+              aria-expanded={enterpriseSkillDropdownOpen}
               onKeyDown={(event) => {
                 if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();
+                  event.stopPropagation();
                   setEnterpriseSkillDropdownOpen(true);
                 }
               }}
@@ -668,6 +700,11 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
                 id:
                   enterpriseSkillKind === 'group' ? 'resource.enterpriseSkillGroup' : 'resource.enterpriseSkillSingle',
               })}
+              <DownOutlined
+                className={styles.enterpriseSkillTabChevron}
+                data-testid="enterprise-skill-dropdown-chevron"
+                aria-hidden
+              />
             </span>
           </Dropdown>
         ) : (
@@ -757,7 +794,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
           setDebouncedSearchValue('');
           setDropdownParam(getDefaultParams());
           setActiveTab(nextTab);
-          setSearchParams(nextSearchParams);
+          setSearchParams(nextSearchParams, { state: location.state });
         }}
       />
       {resourceType === 'SKILL' && activeTab === 'marketplace' ? (

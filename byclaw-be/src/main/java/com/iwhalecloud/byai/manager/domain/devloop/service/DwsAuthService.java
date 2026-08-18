@@ -48,7 +48,6 @@ import lombok.extern.slf4j.Slf4j;
 public class DwsAuthService {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private static final String DWS_BIN = "dws";
     /**
      * 关闭 keychain,改用 file-DEK 后端把登录态加密落到 DWS_CONFIG_DIR。
      * 这是 per-user 目录隔离生效的前提:默认 keychain 模式下 token 存系统钥匙串,DWS_CONFIG_DIR 换目录也读到同一份(全局共享)。
@@ -228,15 +227,15 @@ public class DwsAuthService {
      * 进程在后台继续轮询等待用户扫码。
      * 前端拿到 URL 后 window.open() 让用户授权，然后轮询 /dws/authStatus 等成功。
      */
-    public Map<String, Object> startDeviceAuth() {
+    public Map<String, Object> startDeviceAuth(List<String> command) {
         Long userId = CurrentUserHolder.getCurrentUserId();
-        return startDeviceAuth(userId, legacyAuthorizationId(userId));
+        return startDeviceAuth(userId, legacyAuthorizationId(userId), command);
     }
 
     /**
      * 为指定用户和授权任务启动 Device Flow 认证。
      */
-    public Map<String, Object> startDeviceAuth(Long userId, String authorizationId) {
+    public Map<String, Object> startDeviceAuth(Long userId, String authorizationId, List<String> command) {
         if (!isValidUserId(userId) || StringUtils.isBlank(authorizationId)) {
             return Map.of("success", false, "message", "Invalid user or authorization id");
         }
@@ -245,13 +244,13 @@ public class DwsAuthService {
         final String authId = authorizationId.trim();
         DeviceFlowStartLock startLock = acquireStartLock(authId);
         try {
-            return startDeviceAuthLocked(authUserId, authId);
+            return startDeviceAuthLocked(authUserId, authId, List.copyOf(command));
         } finally {
             releaseStartLock(authId, startLock);
         }
     }
 
-    private Map<String, Object> startDeviceAuthLocked(Long authUserId, String authId) {
+    private Map<String, Object> startDeviceAuthLocked(Long authUserId, String authId, List<String> command) {
         DeviceFlowRegistration existing = deviceFlowRegistrations.get(authId);
         if (existing != null && existing.process() != null && existing.process().isAlive()) {
             return Map.of("success", false, "message", "Authorization is already in progress");
@@ -264,11 +263,9 @@ public class DwsAuthService {
         BufferedReader reader = null;
         boolean drainStarted = false;
         try {
-            List<String> cmd = List.of(
-                DWS_BIN, "auth", "login", "--device", "--no-browser", "--recommend", "-y");
             log.info("[DwsAuth] starting device flow, authorizationId={}, userId={}", authId, authUserId);
 
-            ProcessBuilder pb = newDwsProcess(authUserId, cmd);
+            ProcessBuilder pb = newDwsProcess(authUserId, command);
             Process process = processLauncher.start(pb);
             registration = new DeviceFlowRegistration(authUserId, process);
             deviceFlowRegistrations.put(authId, registration);
@@ -467,53 +464,11 @@ public class DwsAuthService {
     }
 
     /**
-     * 直接用 token 登录（用于用户手动输入 token 的场景）
-     */
-    public boolean injectToken(String accessToken) {
-        Long userId = CurrentUserHolder.getCurrentUserId();
-        try {
-            List<String> cmd = List.of(DWS_BIN, "auth", "login", "--token", accessToken, "-y", "--format", "json");
-            ProcessBuilder pb = newDwsProcess(userId, cmd);
-            Process process = pb.start();
-
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line);
-                }
-            }
-
-            boolean finished = process.waitFor(15, TimeUnit.SECONDS);
-            if (!finished) {
-                process.destroyForcibly();
-                return false;
-            }
-
-            log.debug("[DwsAuth] injectToken result: exitCode={}", process.exitValue());
-            return process.exitValue() == 0;
-        } catch (Exception e) {
-            log.error("[DwsAuth] injectToken failed", e);
-            return false;
-        }
-    }
-
-    /**
      * 获取 dws auth 状态（包含完整认证信息）
      */
-    public Map<String, Object> getAuthStatus() {
-        return getAuthStatus(CurrentUserHolder.getCurrentUserId());
-    }
-
-    /**
-     * 查询指定用户的 dws 授权状态:严格用该用户 bucket 下的 DWS_CONFIG_DIR。
-     * 关键:解析不出该用户专属目录时,直接判定未授权,【绝不回退全局 ~/.dws】——
-     * 否则会读到别人授权过的 token,误报该用户"已授权"(如非创建者看别人的源)。
-     */
-    public Map<String, Object> getAuthStatus(Long userId) {
+    public Map<String, Object> getAuthStatus(Long userId, List<String> command) {
         try {
-            List<String> cmd = List.of(DWS_BIN, "auth", "status", "--format", "json");
-            ProcessBuilder pb = new ProcessBuilder(cmd);
+            ProcessBuilder pb = new ProcessBuilder(List.copyOf(command));
             pb.redirectErrorStream(true);
             // 严格按用户隔离(禁 keychain + 专属 HOME + DWS_CONFIG_DIR);解析不出该用户目录则判未授权,绝不冒用全局。
             if (!applyUserDwsEnv(pb.environment(), userId)) {
@@ -536,7 +491,9 @@ public class DwsAuthService {
             Map<String, Object> result = new HashMap<>();
             result.put("authenticated", node.path("authenticated").asBoolean(false));
             result.put("tokenValid", node.path("token_valid").asBoolean(false));
-            result.put("refreshTokenValid", node.path("refresh_token_valid").asBoolean(false));
+            if (node.has("refresh_token_valid") && !node.get("refresh_token_valid").isNull()) {
+                result.put("refreshTokenValid", node.get("refresh_token_valid").asBoolean(false));
+            }
             result.put("expiresAt", node.path("expires_at").asText(""));
             result.put("refreshExpiresAt", node.path("refresh_expires_at").asText(""));
             result.put("corpId", node.path("corp_id").asText(""));
@@ -551,14 +508,14 @@ public class DwsAuthService {
     }
 
     /** Bounded, read-only status query used by connector synchronization. */
-    public DwsCredentialStatus getCredentialStatus(Long userId) {
+    public DwsCredentialStatus getCredentialStatus(Long userId, List<String> command) {
         Map<String, String> environment = new HashMap<>();
         if (!applyUserDwsEnv(environment, userId)) {
             return DwsCredentialStatus.workspaceUnavailable();
         }
         try {
             CliResult result = connectorCliRunner.run(
-                List.of(DWS_BIN, "auth", "status", "--format", "json"),
+                List.copyOf(command),
                 environment,
                 null,
                 Duration.ofSeconds(10)
@@ -576,8 +533,11 @@ public class DwsAuthService {
             Map<String, Object> status = new HashMap<>();
             status.put("authenticated", node.path("authenticated").asBoolean(false));
             status.put("tokenValid", node.path("token_valid").asBoolean(false));
-            status.put("refreshTokenValid", node.path("refresh_token_valid").asBoolean(false));
+            if (node.has("refresh_token_valid") && !node.get("refresh_token_valid").isNull()) {
+                status.put("refreshTokenValid", node.get("refresh_token_valid").asBoolean(false));
+            }
             status.put("expiresAt", node.path("expires_at").asText(""));
+            status.put("refreshExpiresAt", node.path("refresh_expires_at").asText(""));
             status.put("userId", node.path("user_id").asText(""));
             status.put("userName", node.path("user_name").asText(""));
             return DwsCredentialStatus.completed(status);
@@ -587,37 +547,21 @@ public class DwsAuthService {
         }
     }
 
-    /**
-     * 确保 dws 已认证（定时任务调用前先调用此方法）
-     * dws 自身管理 token 持久化和自动刷新，这里只检查状态。
-     * 如果 token 失效（refresh_token 过期），返回 false，需要用户重新走 device flow。
-     */
-    public boolean ensureAuthenticated(String userId) {
-        // 按需求来源创建者查其专属 dws 目录的授权状态,不再共用全局。
-        Long uid = null;
-        try {
-            uid = userId != null ? Long.valueOf(userId) : null;
+    /** Clears the DWS credential stored in the explicit user's isolated workspace. */
+    public void revokeCredential(Long userId, List<String> command) {
+        Map<String, String> environment = new HashMap<>();
+        if (!applyUserDwsEnv(environment, userId)) {
+            throw new IllegalStateException("Unable to isolate DWS credential workspace");
         }
-        catch (NumberFormatException e) {
-            log.warn("[DwsAuth] invalid userId for ensureAuthenticated: {}", userId);
+        CliResult result = connectorCliRunner.run(
+            List.copyOf(command),
+            environment,
+            null,
+            Duration.ofSeconds(30)
+        );
+        if (result == null || result.exitCode() != 0 || result.truncated()) {
+            throw new IllegalStateException("Unable to revoke DWS credential");
         }
-        Map<String, Object> status = getAuthStatus(uid);
-        if (Boolean.TRUE.equals(status.get("tokenValid"))) {
-            return true;
-        }
-
-        log.warn("[DwsAuth] DWS token invalid/expired for user: {}, re-authorization needed via device flow", userId);
-        return false;
     }
 
-    /**
-     * 兼容旧 Service 调用：hasToken 表示用户 native-home 当前存在 DWS 认证状态，savedAt 保留为空字符串。
-     * 凭证只由 dws 写入用户 native-home，不再读取或生成 DWS_TOKEN 数据库记录。
-     */
-    public Map<String, Object> checkDwsToken() {
-        Long userId = CurrentUserHolder.getCurrentUserId();
-        Map<String, Object> runtimeStatus = getAuthStatus(userId);
-        boolean hasToken = Boolean.TRUE.equals(runtimeStatus.get("authenticated"));
-        return Map.of("hasToken", hasToken, "savedAt", "");
-    }
 }

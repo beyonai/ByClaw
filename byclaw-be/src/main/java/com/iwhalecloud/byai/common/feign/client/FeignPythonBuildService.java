@@ -1,16 +1,27 @@
 package com.iwhalecloud.byai.common.feign.client;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.SequenceInputStream;
+import java.lang.reflect.Method;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
+
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.TypeReference;
@@ -25,58 +36,47 @@ import com.iwhalecloud.byai.common.constants.resource.SystemCode;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.FileBuildStatus;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbBuildResult;
-import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbGlob;
-import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbListDir;
-import com.iwhalecloud.byai.common.feign.response.pythonbuild.Data;
-import com.iwhalecloud.byai.common.feign.response.pythonbuild.DirOrFile;
-import com.iwhalecloud.byai.common.feign.response.pythonbuild.FileToMarkdownResult;
-import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
-import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryDelete;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDelete;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDownload;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileImport;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataGet;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileUpdate;
-import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileSearch;
-import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeMetadataSearch;
-import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemReferences;
-import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeSearch;
-import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemsMove;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbGlob;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeDelete;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileSearch;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemReferences;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemsMove;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeMetadataSearch;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeUpdate;
-import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDelete;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbListDir;
 import com.iwhalecloud.byai.common.feign.response.PythonBuildResponse;
-import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
-import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbImportResult;
-import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileUpdateResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.Data;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.FileToMarkdownResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileMetadataResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileUpdateResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbImportResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBaseInfo;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBuildResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
-import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
-import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataSearchResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
 import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import jakarta.annotation.PostConstruct;
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.lang.reflect.Method;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
 import okhttp3.MediaType;
 import okhttp3.MultipartBody;
 import okhttp3.Request;
@@ -255,17 +255,6 @@ public class FeignPythonBuildService {
         }, resourceId);
     }
 
-    /**
-     * 导入文件到知识库（multipart/form-data）。
-     *
-     * @param kbFileImport 导入参数
-     * @return 成功时含 KbImportResult
-     * @throws BaseException 调用失败
-     */
-    public PythonBuildResponse<KbImportResult> importKnowledgeItem(KbFileImport kbFileImport) {
-        return importKnowledgeItem(kbFileImport, null);
-    }
-
     public PythonBuildResponse<KbImportResult> importKnowledgeItem(KbFileImport kbFileImport, Long resourceId) {
         try {
 
@@ -278,6 +267,8 @@ public class FeignPythonBuildService {
             Map<String, String> formFields = new HashMap<>();
             formFields.put("knCode", kbFileImport.getKnCode());
             formFields.put("filePath", kbFileImport.getFilePath());
+            formFields.put("skipIfDuplicate", String.valueOf(kbFileImport.isSkipIfDuplicate()));
+
             if (kbFileImport.getFileDescription() != null) {
                 formFields.put("fileDescription", kbFileImport.getFileDescription());
             }
@@ -293,7 +284,8 @@ public class FeignPythonBuildService {
                     });
             }
             HttpResponse httpResponse = discoveryHttpClient.upload(endpoint.getServiceName(), requestPath,
-                originalFilename, "fileContent", streamSupplier, this.buildUploadHeaders(resourceId), formFields).get();
+                originalFilename, "fileContent", streamSupplier, this.buildUploadHeaders(resourceId), formFields)
+                .get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
 
             return this.parseResponse(httpResponse, new TypeReference<PythonBuildResponse<KbImportResult>>() {
             }, requestPath);
@@ -341,7 +333,8 @@ public class FeignPythonBuildService {
                     });
             }
             HttpResponse httpResponse = discoveryHttpClient.upload(endpoint.getServiceName(), requestPath,
-                originalFilename, "fileContent", streamSupplier, this.buildUploadHeaders(resourceId), formFields).get();
+                originalFilename, "fileContent", streamSupplier, this.buildUploadHeaders(resourceId), formFields)
+                .get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
             return this.parseResponse(httpResponse, new TypeReference<PythonBuildResponse<KbFileUpdateResult>>() {
             }, requestPath);
         }
@@ -434,8 +427,8 @@ public class FeignPythonBuildService {
         return knowledgeItemReferences(request, null);
     }
 
-    public PythonBuildResponse<KnowledgeItemReferencesResult> knowledgeItemReferences(
-        KbKnowledgeItemReferences request, Long resourceId) {
+    public PythonBuildResponse<KnowledgeItemReferencesResult> knowledgeItemReferences(KbKnowledgeItemReferences request,
+        Long resourceId) {
         return post(KnowledgeServiceOperation.KNOWLEDGE_ITEM_REFERENCES, request,
             new TypeReference<PythonBuildResponse<KnowledgeItemReferencesResult>>() {
             }, resourceId);
@@ -495,7 +488,8 @@ public class FeignPythonBuildService {
         try {
             String requestPath = resolvePath(null, KnowledgeServiceOperation.FILE_TO_MARKDOWN);
             KnowledgeServiceEndpoint endpoint = resolveRoute(null);
-            String baseUrl = endpoint.isDirectUrl() ? endpoint.getBaseUrl() : resolveDiscoveryBaseUrl(endpoint.getServiceName());
+            String baseUrl = endpoint.isDirectUrl() ? endpoint.getBaseUrl()
+                : resolveDiscoveryBaseUrl(endpoint.getServiceName());
             return uploadFileToMarkdown(baseUrl, requestPath, multipartFile);
         }
         catch (BaseException e) {
@@ -518,8 +512,7 @@ public class FeignPythonBuildService {
         return fileToMarkdownIndex(kbFileToMarkdownIndex, null);
     }
 
-    public PythonBuildResponse<Void> fileToMarkdownIndex(KbFileToMarkdownIndex kbFileToMarkdownIndex,
-        Long resourceId) {
+    public PythonBuildResponse<Void> fileToMarkdownIndex(KbFileToMarkdownIndex kbFileToMarkdownIndex, Long resourceId) {
         return post(KnowledgeServiceOperation.KNOWLEDGE_BUILD, kbFileToMarkdownIndex,
             new TypeReference<PythonBuildResponse<Void>>() {
             }, resourceId);
@@ -551,8 +544,8 @@ public class FeignPythonBuildService {
             }
             CompletableFuture<InputStream> completableFuture = discoveryHttpClient.download("POST",
                 endpoint.getServiceName(), requestPath, this.buildHeaders(resourceId), null, kbFileDownload, null);
-            // 提取文件流
-            return validateDownloadResponse(completableFuture.get(), requestPath);
+            // 提取文件流，设置超时时间与 post 请求一致
+            return validateDownloadResponse(completableFuture.get(this.gatewaySecondTimeOut, TimeUnit.SECONDS), requestPath);
         }
         catch (BaseException e) {
             throw e;
@@ -564,8 +557,7 @@ public class FeignPythonBuildService {
     }
 
     /**
-     * QA 下载失败时可能返回统一 JSON 信封。小响应先完整检查，避免将错误 JSON 当作文件流输出；
-     * 大文件只缓存固定前缀后继续流式转发。
+     * QA 下载失败时可能返回统一 JSON 信封。小响应先完整检查，避免将错误 JSON 当作文件流输出； 大文件只缓存固定前缀后继续流式转发。
      */
     private InputStream validateDownloadResponse(InputStream inputStream, String requestPath) {
         if (inputStream == null) {
@@ -587,8 +579,8 @@ public class FeignPythonBuildService {
                     if (resultCode != null && !PythonBuildResponse.RESPONSE_SUCCESS.equals(resultCode)) {
                         inputStream.close();
                         String resultMsg = responseJson.getString("resultMsg");
-                        throw new BaseException(StringUtil.isEmpty(resultMsg)
-                            ? "调用 Python 构建服务下载接口失败: " + requestPath : resultMsg);
+                        throw new BaseException(
+                            StringUtil.isEmpty(resultMsg) ? "调用 Python 构建服务下载接口失败: " + requestPath : resultMsg);
                     }
                 }
                 inputStream.close();
@@ -637,7 +629,7 @@ public class FeignPythonBuildService {
      */
     private <T> PythonBuildResponse<T> post(KnowledgeServiceOperation operation, Object payload,
         TypeReference<PythonBuildResponse<T>> type) {
-        return post(operation, payload, type, (Long)null);
+        return post(operation, payload, type, (Long) null);
     }
 
     private <T> PythonBuildResponse<T> post(KnowledgeServiceOperation operation, Object payload,
@@ -872,8 +864,9 @@ public class FeignPythonBuildService {
                 ResponseBody errorBody = response.body();
                 String errorText = errorBody == null ? null : errorBody.string();
                 String resultMsg = extractQaResultMessage(errorText);
-                throw new BaseException(StringUtil.isEmpty(resultMsg)
-                    ? "调用第三方知识库下载接口失败: " + path + ", status=" + response.code() : resultMsg);
+                throw new BaseException(
+                    StringUtil.isEmpty(resultMsg) ? "调用第三方知识库下载接口失败: " + path + ", status=" + response.code()
+                        : resultMsg);
             }
             ResponseBody body = response.body();
             if (body == null) {
@@ -923,9 +916,8 @@ public class FeignPythonBuildService {
             byte[] bytes = body == null ? new byte[0] : body.bytes();
             if (!response.isSuccessful()) {
                 String errorBody = new String(bytes, StandardCharsets.UTF_8);
-                throw new BaseException(
-                    String.format("调用 Python 构建服务文件转Markdown接口失败: %s, status=%s, body=%s", path,
-                        response.code(), errorBody));
+                throw new BaseException(String.format("调用 Python 构建服务文件转Markdown接口失败: %s, status=%s, body=%s", path,
+                    response.code(), errorBody));
             }
             if (bytes.length == 0) {
                 throw new BaseException("调用 Python 构建服务文件转Markdown接口失败，响应体为空: " + path);

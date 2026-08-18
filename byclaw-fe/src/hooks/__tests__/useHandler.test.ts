@@ -28,7 +28,7 @@ import { renderHook } from '@testing-library/react';
 import { useDispatch, useSelector } from '@umijs/max';
 import useGlobal from '../useGlobal';
 import useHandler from '../useChat/useHandler';
-import { SSEEventStatus, SSEMessageType } from '@/constants/message';
+import { IMessageState, SSEEventStatus, SSEMessageType } from '@/constants/message';
 
 const mockUseDispatch = useDispatch as jest.Mock;
 const mockUseSelector = useSelector as jest.Mock;
@@ -80,10 +80,41 @@ describe('hooks/useChat/useHandler', () => {
         extParams: { k: 'v' },
       },
     });
-    expect(addSession).toHaveBeenCalledWith({ sessionId: 's1', sessionExts: [{ extParamCode: 'k', extParamValue: 'v' }] });
+    expect(addSession).toHaveBeenCalledWith({
+      sessionId: 's1',
+      sessionExts: [{ extParamCode: 'k', extParamValue: 'v' }],
+    });
     expect(setSessionId).toHaveBeenCalledWith('s1');
     expect(next.newQueryMsg.sessionId).toBe('s1');
     expect(next.newAnswerMsg.sessionId).toBe('s1');
+  });
+
+  it('sessionInfoHandler updates an existing session title without adding another session', () => {
+    const dispatch = mockUseDispatch.mock.results[0]?.value || mockUseDispatch();
+    const addSession = jest.fn();
+    const { result } = renderHook(() => useHandler({ addSession, setSessionId: jest.fn() }));
+
+    result.current.sessionInfoHandler({
+      sseRes: {
+        sessionId: 's1',
+        sessionName: '第一条用户文字',
+        updateTime: '2026-08-11 14:30:25',
+      },
+      sseMsg: { event: 'sessionTitleUpdated' },
+      newQueryMsg: {},
+      newAnswerMsg: {},
+      messageList: [],
+    } as any);
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: 'session/updateSession',
+      payload: {
+        sessionId: 's1',
+        sessionName: '第一条用户文字',
+        updateTime: '2026-08-11 14:30:25',
+      },
+    });
+    expect(addSession).not.toHaveBeenCalled();
   });
 
   it('messageIdHandler initializes answer/query messages on initMessage', () => {
@@ -140,6 +171,121 @@ describe('hooks/useChat/useHandler', () => {
     result.current.textHandler(onionsProps);
 
     expect(onionsProps.newAnswerMsg.thinkList).toHaveLength(1);
+    expect(onionsProps.newAnswerMsg.thinkDone).toBe(true);
+  });
+
+  it('marks a v2 answer as streaming when the first reasoning text arrives', () => {
+    const { result } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
+    const onionsProps = {
+      sseRes: {
+        metadata: JSON.stringify({ messageRenderVersion: 'v2' }),
+        message: {
+          contentType: SSEMessageType.thinkText,
+          status: SSEEventStatus.start,
+          content: { substance: 'thinking' },
+        },
+      },
+      sseMsg: { event: 'reasoningLogDelta' },
+      newAnswerMsg: {
+        messageState: IMessageState.Query,
+        thinkList: [],
+      },
+    } as any;
+
+    result.current.textHandler(onionsProps);
+
+    expect(onionsProps.newAnswerMsg.messageState).toBe(IMessageState.Answer);
+    expect(onionsProps.newAnswerMsg.thinkDone).toBe(false);
+  });
+
+  it('processes a v2 non-text reasoning chunk only once across the handler pipeline', () => {
+    const { result } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
+    const title = '周伯通的超级助手 智能体已就绪';
+    const onionsProps = {
+      sseRes: {
+        metadata: JSON.stringify({ messageRenderVersion: 'v2' }),
+        message: {
+          contentType: SSEMessageType.thinkTitle,
+          status: SSEEventStatus.query,
+          content: {
+            orderId: 'ready',
+            parentOrderId: '-1',
+            substance: title,
+          },
+        },
+      },
+      sseMsg: { event: 'reasoningLogDelta' },
+      newAnswerMsg: {
+        messageState: IMessageState.Query,
+        thinkList: [],
+      },
+    } as any;
+
+    result.current.textHandler(onionsProps);
+    result.current.messageHandler(onionsProps);
+
+    expect(onionsProps.newAnswerMsg.thinkList).toHaveLength(1);
+    expect(onionsProps.newAnswerMsg.thinkList[0].content.substance).toBe(title);
+  });
+
+  it('continues the last restored v2 segment without mutating the existing list reference', () => {
+    const { result } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
+    const originalThinkList = [
+      {
+        seq: 3,
+        eventType: 'reasoningLogDelta',
+        contentType: SSEMessageType.thinkText,
+        status: SSEEventStatus.query,
+        content: { orderId: 'reasoning', parentOrderId: '-1', substance: '已有' },
+      },
+    ];
+    const newAnswerMsg = {
+      metadata: JSON.stringify({ messageRenderVersion: 'v2' }),
+      messageState: IMessageState.Answer,
+      thinkDone: true,
+      thinkList: originalThinkList,
+      messageList: [],
+    } as any;
+    const onionsProps = {
+      sseRes: {
+        message: {
+          seq: 3,
+          eventType: 'reasoningLogDelta',
+          contentType: SSEMessageType.thinkText,
+          status: SSEEventStatus.query,
+          content: { orderId: 'reasoning', parentOrderId: '-1', substance: '增量' },
+        },
+      },
+      sseMsg: { event: 'reasoningLogDelta' },
+      newAnswerMsg,
+    } as any;
+
+    result.current.textHandler(onionsProps);
+
+    expect(newAnswerMsg.thinkList).not.toBe(originalThinkList);
+    expect(newAnswerMsg.thinkList).toHaveLength(1);
+    expect(newAnswerMsg.thinkList[0].seq).toBe(3);
+    expect(newAnswerMsg.thinkList[0].content.substance).toBe('已有增量');
+    expect(newAnswerMsg._v2NextSeq).toBe(4);
+    expect(newAnswerMsg.thinkDone).toBe(false);
+  });
+
+  it('ends the active v2 thinking block when reasoning ends', () => {
+    const { result } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
+    const onionsProps = {
+      sseRes: {
+        metadata: JSON.stringify({ messageRenderVersion: 'v2' }),
+      },
+      sseMsg: { event: 'reasoningLogEnd' },
+      newAnswerMsg: {
+        messageState: IMessageState.Answer,
+        thinkDone: false,
+        thinkList: [],
+      },
+    } as any;
+
+    result.current.textHandler(onionsProps);
+
     expect(onionsProps.newAnswerMsg.thinkDone).toBe(true);
   });
 

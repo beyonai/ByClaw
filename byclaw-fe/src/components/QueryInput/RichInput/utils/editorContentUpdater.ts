@@ -10,7 +10,9 @@ function isMentionElementEqual(element1: any, element2: any): boolean {
   if (!element1 || !element2) return false;
   if (element1.type !== element2.type) return false;
   if (element1.type === ELEMENT_MENTION) {
-    return element1.agentId === element2.agentId;
+    // 会话切换时后端对象 ID 可能是 number，输入框草稿/全局状态中则是 string；
+    // 统一按字符串比较，避免每次渲染都误判为不同员工而反复删插 @ 节点导致闪烁。
+    return `${element1.agentId ?? ''}` === `${element2.agentId ?? ''}`;
   }
   return false;
 }

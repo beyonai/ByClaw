@@ -5,6 +5,7 @@ import com.iwhalecloud.byai.common.constants.resource.DigitalEmployType;
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.page.PageInfo;
@@ -15,7 +16,9 @@ import com.iwhalecloud.byai.manager.application.service.template.TemplateRuleInf
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.OperationTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
+import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.model.SkillRelationSource;
+import com.iwhalecloud.byai.manager.domain.skillgroup.model.SkillGroupUninstallMode;
 import com.iwhalecloud.byai.manager.domain.resource.service.OperationLogService;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceRuntimeInfoResolver;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceEventService;
@@ -29,6 +32,7 @@ import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeInstallResourceDTO;
+import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeGroupMemberDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeIdDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SetDefaultDigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SsResourceDTO;
@@ -44,6 +48,7 @@ import com.iwhalecloud.byai.manager.vo.digitemploy.SetDefaultDigitalEmployeeResu
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeePageVo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
 import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupInstallResultVo;
+import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupUninstallPreviewVo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceAuthContextService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillDeleteApplicationService;
@@ -52,6 +57,9 @@ import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.MessageSource;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -98,6 +106,7 @@ class DigitalEmployeeApplicationServiceTest {
     private RobotChannelRegistryCoordinator robotChannelRegistryCoordinator;
     private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
     private DigitalEmployeeRuntimeRefreshService digitalEmployeeRuntimeRefreshService;
+    private DigitalEmployeeGroupApplicationService digitalEmployeeGroupApplicationService;
     private UserService userService;
     private ByClawSkillDeleteApplicationService byClawSkillDeleteApplicationService;
     private ByClawSkillPathResolver byClawSkillPathResolver;
@@ -122,6 +131,7 @@ class DigitalEmployeeApplicationServiceTest {
         robotChannelRegistryCoordinator = mock(RobotChannelRegistryCoordinator.class);
         digEmployeeChangeEventPublisher = mock(DigEmployeeChangeEventPublisher.class);
         digitalEmployeeRuntimeRefreshService = mock(DigitalEmployeeRuntimeRefreshService.class);
+        digitalEmployeeGroupApplicationService = mock(DigitalEmployeeGroupApplicationService.class);
         when(systemConfigService.getStringParamValueByCode(any())).thenReturn("");
         userService = mock(UserService.class);
         byClawSkillDeleteApplicationService = mock(ByClawSkillDeleteApplicationService.class);
@@ -152,6 +162,8 @@ class DigitalEmployeeApplicationServiceTest {
         ReflectionTestUtils.setField(service, "digEmployeeChangeEventPublisher", digEmployeeChangeEventPublisher);
         ReflectionTestUtils.setField(service, "digitalEmployeeRuntimeRefreshService",
             digitalEmployeeRuntimeRefreshService);
+        ReflectionTestUtils.setField(service, "digitalEmployeeGroupApplicationService",
+            digitalEmployeeGroupApplicationService);
         ReflectionTestUtils.setField(service, "userService", userService);
         ReflectionTestUtils.setField(service, "byClawSkillDeleteApplicationService", byClawSkillDeleteApplicationService);
         ReflectionTestUtils.setField(service, "byClawSkillPathResolver", byClawSkillPathResolver);
@@ -529,6 +541,49 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
+    void queryEmployeeGroupMemberCandidates_usesDedicatedPagedQuery() {
+        DigitalEmployeeQo qo = new DigitalEmployeeQo();
+        qo.setPageNum(2);
+        qo.setPageSize(30);
+        qo.setKeyword("市场");
+        PageInfo<EmployeeGroupMemberDTO> expected = new PageInfo<>();
+        when(authApplicationService.isCurrentUserGlobalResourceManager()).thenReturn(false);
+        when(ssResExtDigEmployeeService.selectEmployeeGroupMemberCandidates(any(DigitalEmployeeQo.class)))
+            .thenReturn(expected);
+
+        PageInfo<EmployeeGroupMemberDTO> result = service.queryEmployeeGroupMemberCandidates(qo);
+
+        ArgumentCaptor<DigitalEmployeeQo> qoCaptor = ArgumentCaptor.forClass(DigitalEmployeeQo.class);
+        verify(resourceAuthContextService).setCurrentUserAuthQo(qoCaptor.capture());
+        verify(ssResExtDigEmployeeService).selectEmployeeGroupMemberCandidates(qo);
+        verifyNoInteractions(digitalEmployeeGroupApplicationService);
+        assertThat(result).isSameAs(expected);
+        assertThat(qoCaptor.getValue()).isSameAs(qo);
+        assertThat(qo.getPageNum()).isEqualTo(2);
+        assertThat(qo.getPageSize()).isEqualTo(30);
+        assertThat(qo.getKeyword()).isEqualTo("市场");
+        assertThat(qo.getMemberCandidateEnterpriseId()).isEqualTo(201L);
+        assertThat(qo.getMemberCandidateGlobalManager()).isFalse();
+        assertThat(qo.getMemberCandidateAgentTypes()).containsExactlyInAnyOrder("001", "005", "006", "011");
+        assertThat(qo.getMemberCandidateIntegrationTypes()).containsExactlyInAnyOrder("INTERFACE", "A2A", "PAGE");
+        assertThat(qo.getMemberCandidateStationIds()).isEmpty();
+    }
+
+    @Test
+    void queryEmployeeGroupMemberCandidates_capsOversizedPage() {
+        DigitalEmployeeQo qo = new DigitalEmployeeQo();
+        qo.setPageNum(0);
+        qo.setPageSize(500);
+        when(ssResExtDigEmployeeService.selectEmployeeGroupMemberCandidates(any(DigitalEmployeeQo.class)))
+            .thenReturn(new PageInfo<>());
+
+        service.queryEmployeeGroupMemberCandidates(qo);
+
+        assertThat(qo.getPageNum()).isEqualTo(1);
+        assertThat(qo.getPageSize()).isEqualTo(100);
+    }
+
+    @Test
     void setDefaultDigitalEmployee_returnsImmediatelyWhenDefaultIdIsAlreadyConsistent() {
         SetDefaultDigitalEmployeeDTO dto = new SetDefaultDigitalEmployeeDTO();
         dto.setResourceId(100L);
@@ -689,8 +744,26 @@ class DigitalEmployeeApplicationServiceTest {
             SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
             assertThat(source.isManual()).isFalse();
             assertThat(source.getSourceGroupIds()).containsExactly(700L);
+            assertThat(source.getLegacySourceGroupIds()).isEmpty();
+            assertThat(source.getGroupInstallers()).containsExactlyEntriesOf(Map.of(700L, Set.of(1L)));
         });
         verifySnapshotRefresh(snapshotService, employee, 1);
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(longs = {0L, -1L})
+    void installSkillGroupSnapshotRejectsInvalidInstallerIdentityBeforeAnyMutation(Long currentUserId) {
+        DigitalEmployeeApplicationService snapshotService = snapshotServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        CurrentUserHolder.getLoginInfo().setUserId(currentUserId);
+
+        assertThatThrownBy(() -> snapshotService.installSkillGroupSnapshot(employee, 700L, List.of(301L)))
+            .isInstanceOf(BaseException.class)
+            .hasMessage("digemployee.default.set.user.not.login");
+
+        verifyNoInteractions(skillGroupMapper, sequenceService, ssResourceRelDetailService);
+        verifySnapshotRefresh(snapshotService, employee, 0);
     }
 
     @Test
@@ -716,8 +789,10 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(result.getExistingSkillIds()).containsExactly(301L, 302L, 303L);
         assertThat(SkillRelationSource.parse(manual.getRelResourceInfo()).isManual()).isTrue();
         assertThat(SkillRelationSource.parse(manual.getRelResourceInfo()).getSourceGroupIds()).containsExactly(700L);
-        assertThat(SkillRelationSource.parse(otherGroup.getRelResourceInfo()).getSourceGroupIds())
-            .containsExactly(600L, 700L);
+        SkillRelationSource otherGroupSource = SkillRelationSource.parse(otherGroup.getRelResourceInfo());
+        assertThat(otherGroupSource.getLegacySourceGroupIds()).containsExactly(600L);
+        assertThat(otherGroupSource.getGroupInstallers()).containsExactlyEntriesOf(Map.of(700L, Set.of(1L)));
+        assertThat(otherGroupSource.getSourceGroupIds()).containsExactly(600L, 700L);
         assertThat(SkillRelationSource.parse(malformedLegacy.getRelResourceInfo()).isManual()).isTrue();
         assertThat(SkillRelationSource.parse(malformedLegacy.getRelResourceInfo()).isMalformed()).isFalse();
         assertThat(SkillRelationSource.parse(malformedLegacy.getRelResourceInfo()).getSourceGroupIds())
@@ -727,6 +802,37 @@ class DigitalEmployeeApplicationServiceTest {
             assertThat(relation.getRelStatus()).isEqualTo(1);
         });
         verify(ssResourceRelDetailService, times(3)).updateById(any());
+        verifySnapshotRefresh(snapshotService, employee, 1);
+    }
+
+    @Test
+    void installSkillGroupSnapshotPreservesManualAndExistingV2Installers() {
+        DigitalEmployeeApplicationService snapshotService = snapshotServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResourceRelDetail manual = directSkillRelation(901L, 301L,
+            "{\"version\":2,\"manual\":true,\"sourceGroupIds\":[700],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"700\":[1]}}");
+        SsResourceRelDetail otherInstaller = directSkillRelation(902L, 302L,
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[600],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"600\":[2]}}");
+        when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, List.of(301L, 302L)))
+            .thenReturn(List.of(manual, otherInstaller));
+        when(ssResourceRelDetailService.updateById(any())).thenReturn(true);
+
+        snapshotService.installSkillGroupSnapshot(employee, 701L, List.of(301L, 302L));
+
+        SkillRelationSource manualSource = SkillRelationSource.parse(manual.getRelResourceInfo());
+        assertThat(manualSource.isManual()).isTrue();
+        assertThat(manualSource.getLegacySourceGroupIds()).isEmpty();
+        assertThat(manualSource.getGroupInstallers()).hasSize(2)
+            .containsEntry(700L, Set.of(1L))
+            .containsEntry(701L, Set.of(1L));
+        SkillRelationSource otherInstallerSource = SkillRelationSource.parse(otherInstaller.getRelResourceInfo());
+        assertThat(otherInstallerSource.getLegacySourceGroupIds()).isEmpty();
+        assertThat(otherInstallerSource.getGroupInstallers()).hasSize(2)
+            .containsEntry(600L, Set.of(2L))
+            .containsEntry(701L, Set.of(1L));
+        verify(ssResourceRelDetailService, times(2)).updateById(any());
         verifySnapshotRefresh(snapshotService, employee, 1);
     }
 
@@ -756,6 +862,10 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(inserted.getValue().getRelResourceId()).isEqualTo(302L);
         assertThat(SkillRelationSource.parse(inserted.getValue().getRelResourceInfo()).getSourceGroupIds())
             .containsExactly(700L);
+        assertThat(SkillRelationSource.parse(inserted.getValue().getRelResourceInfo()).getLegacySourceGroupIds())
+            .isEmpty();
+        assertThat(SkillRelationSource.parse(inserted.getValue().getRelResourceInfo()).getGroupInstallers())
+            .containsExactlyEntriesOf(Map.of(700L, Set.of(1L)));
         verify(ssResourceRelDetailService).updateById(existing);
         verifySnapshotRefresh(snapshotService, employee, 1);
     }
@@ -765,7 +875,8 @@ class DigitalEmployeeApplicationServiceTest {
         DigitalEmployeeApplicationService snapshotService = snapshotServiceSpy();
         SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
         SsResourceRelDetail relation = directSkillRelation(901L, 301L,
-            "{\"manual\":false,\"sourceGroupIds\":[700]}");
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[700],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"700\":[1]}}");
         when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, List.of(301L)))
             .thenReturn(List.of(relation));
 
@@ -775,6 +886,30 @@ class DigitalEmployeeApplicationServiceTest {
         verify(ssResourceRelDetailService, never()).updateById(any());
         verify(skillGroupMapper, never()).insertDigitalEmployeeSkillIfAbsent(any());
         verifySnapshotRefresh(snapshotService, employee, 0);
+    }
+
+    @Test
+    void installSkillGroupSnapshotMergesCurrentUserIntoExistingGroupInstallersThenBecomesIdempotent() {
+        DigitalEmployeeApplicationService snapshotService = snapshotServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResourceRelDetail relation = directSkillRelation(901L, 301L,
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[700],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"700\":[2]}}");
+        when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, List.of(301L)))
+            .thenReturn(List.of(relation));
+        when(ssResourceRelDetailService.updateById(relation)).thenReturn(true);
+
+        snapshotService.installSkillGroupSnapshot(employee, 700L, List.of(301L));
+        snapshotService.installSkillGroupSnapshot(employee, 700L, List.of(301L));
+
+        SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
+        assertThat(source.getLegacySourceGroupIds()).isEmpty();
+        assertThat(source.getGroupInstallers()).containsExactlyEntriesOf(Map.of(700L, Set.of(1L, 2L)));
+        assertThat(relation.getRelResourceInfo()).isEqualTo(
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[700],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"700\":[1,2]}}");
+        verify(ssResourceRelDetailService).updateById(relation);
+        verifySnapshotRefresh(snapshotService, employee, 1);
     }
 
     @Test
@@ -788,7 +923,8 @@ class DigitalEmployeeApplicationServiceTest {
         SsResourceRelDetail other = directSkillRelation(903L, 303L,
             "{\"manual\":false,\"sourceGroupIds\":[600,700]}");
         SsResourceRelDetail manualOther = directSkillRelation(904L, 304L,
-            "{\"manual\":true,\"sourceGroupIds\":[600,700]}");
+            "{\"version\":2,\"manual\":true,\"sourceGroupIds\":[600,700],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"600\":[2],\"700\":[1,2]}}");
         SsResourceRelDetail malformed = directSkillRelation(905L, 305L, "{not-json");
         when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, null))
             .thenReturn(List.of(groupOnly, manual, other, manualOther, malformed));
@@ -806,6 +942,9 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(SkillRelationSource.parse(other.getRelResourceInfo()).getSourceGroupIds()).containsExactly(600L);
         assertThat(SkillRelationSource.parse(manualOther.getRelResourceInfo()).getSourceGroupIds())
             .containsExactly(600L);
+        assertThat(SkillRelationSource.parse(manualOther.getRelResourceInfo()).getLegacySourceGroupIds()).isEmpty();
+        assertThat(SkillRelationSource.parse(manualOther.getRelResourceInfo()).getGroupInstallers())
+            .containsExactlyEntriesOf(Map.of(600L, Set.of(2L)));
         assertThat(malformed.getRelResourceInfo()).isEqualTo("{not-json");
         verifySnapshotRefresh(snapshotService, employee, 1);
     }
@@ -844,6 +983,66 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(malformed.getRelResourceInfo()).isEqualTo(malformedSource);
         verify(ssResourceRelDetailService, never()).removeById(any());
         verify(ssResourceRelDetailService, never()).updateById(any());
+        verifySnapshotRefresh(snapshotService, employee, 0);
+    }
+
+    @Test
+    void uninstallPreviewClassifiesExclusiveAndSharedSnapshotSources() {
+        DigitalEmployeeApplicationService snapshotService = snapshotServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResourceRelDetail exclusive = directSkillRelation(901L, 301L,
+            "{\"manual\":false,\"sourceGroupIds\":[700]}");
+        SsResourceRelDetail manual = directSkillRelation(902L, 302L,
+            "{\"manual\":true,\"sourceGroupIds\":[700]}");
+        SsResourceRelDetail otherGroup = directSkillRelation(903L, 303L,
+            "{\"manual\":false,\"sourceGroupIds\":[700,701]}");
+        when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, null))
+            .thenReturn(List.of(exclusive, manual, otherGroup));
+
+        SkillGroupUninstallPreviewVo preview = snapshotService.previewSkillGroupUninstallSnapshot(employee, 700L);
+
+        assertThat(preview.getInstalledByGroup()).isTrue();
+        assertThat(preview.getExclusiveSkills()).extracting("resourceId").containsExactly(301L);
+        assertThat(preview.getSharedSkills()).extracting("resourceId").containsExactly(302L, 303L);
+        assertThat(preview.getSharedSkills().get(0).getManualSource()).isTrue();
+        assertThat(preview.getSharedSkills().get(1).getOtherGroupIds()).containsExactly(701L);
+        assertThat(preview.getPreviewToken()).isNotBlank();
+    }
+
+    @Test
+    void removeAllRequiresCurrentPreviewAndDeletesSharedRelations() {
+        DigitalEmployeeApplicationService snapshotService = snapshotServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResourceRelDetail shared = directSkillRelation(902L, 302L,
+            "{\"manual\":true,\"sourceGroupIds\":[700,701]}");
+        when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, null)).thenReturn(List.of(shared));
+        when(ssResourceRelDetailService.removeById(902L)).thenReturn(true);
+        String token = snapshotService.previewSkillGroupUninstallSnapshot(employee, 700L).getPreviewToken();
+
+        SkillGroupInstallResultVo result = snapshotService.uninstallSkillGroupSnapshot(
+            employee, 700L, SkillGroupUninstallMode.REMOVE_ALL, token);
+
+        assertThat(result.getConfirmationRequired()).isFalse();
+        assertThat(result.getRemovedSkillIds()).containsExactly(302L);
+        assertThat(result.getAffectedOtherGroupIds()).containsExactly(701L);
+        verify(ssResourceRelDetailService).removeById(902L);
+        verifySnapshotRefresh(snapshotService, employee, 1);
+    }
+
+    @Test
+    void removeAllReturnsLatestPreviewForStaleTokenWithoutMutation() {
+        DigitalEmployeeApplicationService snapshotService = snapshotServiceSpy();
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResourceRelDetail relation = directSkillRelation(902L, 302L,
+            "{\"manual\":true,\"sourceGroupIds\":[700]}");
+        when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, null)).thenReturn(List.of(relation));
+
+        SkillGroupInstallResultVo result = snapshotService.uninstallSkillGroupSnapshot(
+            employee, 700L, SkillGroupUninstallMode.REMOVE_ALL, "stale");
+
+        assertThat(result.getConfirmationRequired()).isTrue();
+        assertThat(result.getUninstallPreview().getSharedSkills()).hasSize(1);
+        verify(ssResourceRelDetailService, never()).removeById(any());
         verifySnapshotRefresh(snapshotService, employee, 0);
     }
 
@@ -888,6 +1087,36 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(objectRelation.getRelTypeName()).isNull();
         assertThat(objectRelation.getRelStatus()).isNull();
         assertThat(objectRelation.getRelResourceInfo()).isNull();
+    }
+
+    @Test
+    void ordinaryDirectSkillInstallPreservesV2LegacyAndAttributedSourcesWhenMarkingManual() {
+        DigitalEmployeeApplicationService installService = snapshotServiceSpy();
+        DigitalEmployeeInstallResourceDTO dto = new DigitalEmployeeInstallResourceDTO();
+        dto.setDigitalEmployeeId(100L);
+        dto.setRelIds(List.of(301L));
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResource skill = buildSkillResource(301L, 2L);
+        SsResourceRelDetail relation = directSkillRelation(901L, 301L,
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[600,700],"
+                + "\"legacySourceGroupIds\":[600],\"groupInstallers\":{\"700\":[2,3]}}");
+        when(ssResourceService.findById(100L)).thenReturn(employee);
+        when(skillGroupMapper.selectDigitalEmployeeForUpdate(100L, 201L)).thenReturn(employee);
+        when(ssResourceService.findByIdList(List.of(301L))).thenReturn(List.of(skill));
+        when(authApplicationService.hasResourceManagePermission(employee)).thenReturn(true);
+        when(authApplicationService.hasResourceUsePermission(skill)).thenReturn(true);
+        when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of(relation));
+        when(skillGroupMapper.selectDigitalEmployeeSkillRelations(100L, List.of(301L)))
+            .thenReturn(List.of(relation));
+        when(ssResourceRelDetailService.updateById(relation)).thenReturn(true);
+        doReturn(new DigitalEmployeeDetailsDTO()).when(installService).findDetailsById(any(EmployeeIdDTO.class));
+
+        installService.installDigitalEmployeeRelResources(dto);
+
+        SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
+        assertThat(source.isManual()).isTrue();
+        assertThat(source.getLegacySourceGroupIds()).containsExactly(600L);
+        assertThat(source.getGroupInstallers()).containsExactlyEntriesOf(Map.of(700L, Set.of(2L, 3L)));
     }
 
     @Test
@@ -1130,7 +1359,12 @@ class DigitalEmployeeApplicationServiceTest {
         verify(skillGroupMapper, never()).selectDigitalEmployeeForUpdate(any(), any());
         verify(skillGroupMapper, never()).selectDigitalEmployeeSkillRelations(any(), any());
         verify(ssResourceRelDetailService).removeById(901L);
-        verifySnapshotRefresh(uninstallService, employee, 1);
+        verify(uninstallService).rebuildAndSaveDigitalEmployeeRelSkills(100L);
+        verify(uninstallService).synOpenClawWorkSpace(100L);
+        verify(operationLogService).recordOperationLog(employee, OperationTypeEnum.UPDATE);
+        verify(robotChannelRegistryCoordinator).refreshForResource(100L);
+        verify(digEmployeeChangeEventPublisher).publishAfterCommitOrNow(any(), eq(100L));
+        verifyNoInteractions(digitalEmployeeRuntimeRefreshService);
     }
 
     @Test
@@ -1438,7 +1672,8 @@ class DigitalEmployeeApplicationServiceTest {
         SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
         SsResource skill = buildSkillResource(301L, 2L);
         SsResourceRelDetail relation = directSkillRelation(901L, 301L,
-            "{\"manual\":false,\"sourceGroupIds\":[700]}");
+            "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[700],"
+                + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"700\":[2]}}");
         prepareFullUpdate(employee, List.of(relation), List.of(relation));
         when(ssResourceService.findByIdList(List.of(301L))).thenReturn(List.of(skill));
         when(ssResourceRelDetailService.updateById(relation)).thenReturn(true);
@@ -1448,6 +1683,8 @@ class DigitalEmployeeApplicationServiceTest {
         SkillRelationSource source = SkillRelationSource.parse(relation.getRelResourceInfo());
         assertThat(source.isManual()).isTrue();
         assertThat(source.getSourceGroupIds()).containsExactly(700L);
+        assertThat(source.getLegacySourceGroupIds()).isEmpty();
+        assertThat(source.getGroupInstallers()).containsExactlyEntriesOf(Map.of(700L, Set.of(2L)));
         assertThat(relation.getRelTypeName()).isEqualTo("DIG_EMPLOYEE_SKILL");
         assertThat(relation.getRelStatus()).isEqualTo(1);
         verify(ssResourceRelDetailService).updateById(relation);
@@ -1770,11 +2007,12 @@ class DigitalEmployeeApplicationServiceTest {
     private void verifySnapshotRefresh(
         DigitalEmployeeApplicationService snapshotService, SsResource employee, int count) {
         verify(snapshotService, times(count)).rebuildAndSaveDigitalEmployeeRelSkills(employee.getResourceId());
-        verify(snapshotService, times(count)).synOpenClawWorkSpace(employee.getResourceId());
         verify(operationLogService, times(count)).recordOperationLog(employee, OperationTypeEnum.UPDATE);
-        verify(robotChannelRegistryCoordinator, times(count)).refreshForResource(employee.getResourceId());
-        verify(digEmployeeChangeEventPublisher, times(count)).publishAfterCommitOrNow(any(),
-            eq(employee.getResourceId()));
+        verify(digitalEmployeeRuntimeRefreshService, times(count))
+            .scheduleSkillRuntimeRefreshAfterCommit(List.of(employee.getResourceId()));
+        verify(snapshotService, never()).synOpenClawWorkSpace(employee.getResourceId());
+        verify(robotChannelRegistryCoordinator, never()).refreshForResource(employee.getResourceId());
+        verify(digEmployeeChangeEventPublisher, never()).publishAfterCommitOrNow(any(), eq(employee.getResourceId()));
     }
 
     private SsResourceRelDetail directSkillRelation(Long relationId, Long skillId, String sourceInfo) {
@@ -1792,6 +2030,7 @@ class DigitalEmployeeApplicationServiceTest {
         SsResource resource = new SsResource();
         resource.setResourceId(resourceId);
         resource.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        resource.setResourceStatus(ResourceStatus.LIST.getNum());
         resource.setOwnerType(ownerType);
         resource.setCreateBy(createBy);
         return resource;

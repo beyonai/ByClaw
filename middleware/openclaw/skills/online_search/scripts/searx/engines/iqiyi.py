@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""iQiyi: A search engine for retrieving videos from iQiyi."""
+
+import typing
+
+from urllib.parse import urlencode
+from datetime import datetime, timedelta
+
+from searx.exceptions import SearxEngineAPIException
+
+about = {
+    "website": "https://www.iqiyi.com/",
+    "wikidata_id": "Q15913890",
+    "use_official_api": False,
+    "require_api_key": False,
+    "results": "JSON",
+}
+
+language = "zh"
+paging = True
+time_range_support = True
+categories = ["videos"]
+
+time_range_dict = {'day': '1', 'week': '2', 'month': '3'}
+
+base_url = "https://mesh.if.iqiyi.com"
+
+
+def request(query, params):
+    query_params = {"key": query, "pageNum": params["pageno"], "pageSize": 25}
+
+    if time_range_dict.get(params['time_range']):
+        query_params["sitePublishDate"] = time_range_dict[params['time_range']]
+
+    params["url"] = f"{base_url}/portal/lw/search/homePageV3?{urlencode(query_params)}"
+    return params
+
+
+def _result(video: dict[str, typing.Any], album_info: dict[str, typing.Any]):
+    length = timedelta(milliseconds=video.get("duration", 0))
+
+    published_date = None
+    release_time = album_info.get("releaseTime", {}).get("value")
+    if release_time:
+        try:
+            published_date = datetime.fromisoformat(release_time)
+        except (ValueError, TypeError):
+            pass
+
+    return {
+        'url': video.get("pageUrl", "").replace("http://", "https://"),
+        'title': video.get("title", ""),
+        'content': album_info.get("brief", {}).get("value", ""),
+        'template': 'videos.html',
+        'length': length,
+        'publishedDate': published_date,
+        'thumbnail': album_info.get("img", ""),
+    }
+
+
+def response(resp):
+    try:
+        data = resp.json()
+    except Exception as e:
+        raise SearxEngineAPIException(f"Invalid response: {e}") from e
+    results = []
+
+    if "data" not in data or "templates" not in data["data"]:
+        raise SearxEngineAPIException("Invalid response")
+
+    for entry in data["data"]["templates"]:
+        album_info = entry.get("albumInfo", {})
+        if "videos" in album_info:
+            for video in album_info["videos"]:
+                results.append(_result(video, album_info))
+        else:
+            # album only contains a single video
+            results.append(_result(album_info, album_info))
+
+    return results

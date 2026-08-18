@@ -628,7 +628,10 @@ export class RunService {
           await this.#finishFailed(run, "EXECUTION_CREDENTIAL_EXPIRED");
           return;
         }
-        metadata = { "Beyond-Token": credential.secret };
+        metadata = {
+          ...metadata,
+          "Beyond-Token": credential.secret,
+        };
       }
       if (this.events.appendForClaim) {
         await this.events.appendForClaim(

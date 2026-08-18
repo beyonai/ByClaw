@@ -129,8 +129,8 @@ class DatasetApplicationServiceTest {
 
         service.createFolder(folder);
 
-        ArgumentCaptor<com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate> captor =
-            ArgumentCaptor.forClass(com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate.class);
+        ArgumentCaptor<com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate> captor = ArgumentCaptor
+            .forClass(com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate.class);
         verify(feignPythonBuildService).createDirectory(captor.capture(), eq(100L));
         assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
         assertThat(captor.getValue().getDirectoryPath()).isEqualTo("/2026/reports");
@@ -141,8 +141,7 @@ class DatasetApplicationServiceTest {
         SsResource resource = defaultPersonalDataset();
         when(ssResourceService.findById(100L)).thenReturn(resource);
 
-        assertThatThrownBy(() -> service.deleteDataset(100L))
-            .isInstanceOf(IllegalArgumentException.class)
+        assertThatThrownBy(() -> service.deleteDataset(100L)).isInstanceOf(IllegalArgumentException.class)
             .hasMessage("dataset.default.personal.delete.not.allowed");
 
         verify(authApplicationService, never()).hasResourceManagePermission(any());
@@ -218,8 +217,7 @@ class DatasetApplicationServiceTest {
 
         KnowledgeMetadataSearchResult result = service.searchKnowledgeMetadata(request);
 
-        ArgumentCaptor<KbKnowledgeMetadataSearch> captor =
-            ArgumentCaptor.forClass(KbKnowledgeMetadataSearch.class);
+        ArgumentCaptor<KbKnowledgeMetadataSearch> captor = ArgumentCaptor.forClass(KbKnowledgeMetadataSearch.class);
         verify(feignPythonBuildService).searchKnowledgeMetadata(captor.capture());
         assertThat(captor.getValue().getKnCodeList()).containsExactly("personal-kb");
         assertThat(captor.getValue().getWhere()).isEqualTo(request.getWhere());
@@ -242,8 +240,7 @@ class DatasetApplicationServiceTest {
         KnowledgeMetadataSearchRequest request = new KnowledgeMetadataSearchRequest();
         request.setResourceIdList(Collections.singletonList(null));
 
-        assertThatThrownBy(() -> service.searchKnowledgeMetadata(request))
-            .isInstanceOf(BaseException.class)
+        assertThatThrownBy(() -> service.searchKnowledgeMetadata(request)).isInstanceOf(BaseException.class)
             .hasMessage("Knowledge base resource identifier cannot be empty");
 
         verifyNoInteractions(ssResourceService, authApplicationService, feignPythonBuildService);
@@ -263,8 +260,7 @@ class DatasetApplicationServiceTest {
         request.setResourceIdList(List.of(100L));
         request.setWhere(Map.of("eq", Map.of("fieldName", "status", "value", "active")));
 
-        assertThatThrownBy(() -> service.searchKnowledgeMetadata(request))
-            .isInstanceOf(BaseException.class)
+        assertThatThrownBy(() -> service.searchKnowledgeMetadata(request)).isInstanceOf(BaseException.class)
             .hasMessage("Search knowledge base file metadata failed: remote validation failed");
     }
 
@@ -277,9 +273,8 @@ class DatasetApplicationServiceTest {
         request.setPageNum(1);
         request.setPageSize(20);
 
-        Map<String, Object> qaError = Map.of(
-            "errorCode", "DSL_VALIDATION_ERROR",
-            "errorList", List.of(Map.of("path", "where.and[2]", "code", "TOO_MANY_CONDITIONS")));
+        Map<String, Object> qaError = Map.of("errorCode", "DSL_VALIDATION_ERROR", "errorList",
+            List.of(Map.of("path", "where.and[2]", "code", "TOO_MANY_CONDITIONS")));
         PythonBuildResponse<Object> response = new PythonBuildResponse<>();
         response.setResultCode("-1");
         response.setResultMsg("request validation failed");
@@ -417,9 +412,12 @@ class DatasetApplicationServiceTest {
         response.setResultObject(qaResult);
         when(feignPythonBuildService.importKnowledgeItem(any(), eq(100L))).thenReturn(response);
 
-        MockMultipartFile zip = new MockMultipartFile("files", "制度.zip", "application/zip",
-            new byte[] {1, 2, 3});
-        UploadResult result = service.uploadFiles(new MockMultipartFile[] {zip}, 100L, "/制度", null, null, false);
+        MockMultipartFile zip = new MockMultipartFile("files", "制度.zip", "application/zip", new byte[] {
+            1, 2, 3
+        });
+        UploadResult result = service.uploadFiles(new MockMultipartFile[] {
+            zip
+        }, 100L, "/制度", null, null, false, false);
 
         ArgumentCaptor<KbFileImport> captor = ArgumentCaptor.forClass(KbFileImport.class);
         verify(feignPythonBuildService).importKnowledgeItem(captor.capture(), eq(100L));
@@ -451,8 +449,7 @@ class DatasetApplicationServiceTest {
         response.setResultObject(qaResult);
         when(feignPythonBuildService.updateKnowledgeItem(any(), eq(100L))).thenReturn(response);
 
-        MockMultipartFile file = new MockMultipartFile("fileContent", "请假.md", "text/markdown",
-            "# 请假制度".getBytes());
+        MockMultipartFile file = new MockMultipartFile("fileContent", "请假.md", "text/markdown", "# 请假制度".getBytes());
         KbFileUpdateResult result = service.updateKnowledgeFile(100L, "制度/请假.md", "", true, file);
 
         ArgumentCaptor<KbFileUpdate> captor = ArgumentCaptor.forClass(KbFileUpdate.class);

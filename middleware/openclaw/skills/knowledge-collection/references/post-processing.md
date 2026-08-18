@@ -14,6 +14,8 @@
 完整文章清单全部写入 `sanitized/metadata.json`，但最多预存 10 个正文到 `sanitized/items/`。`collection-result.json.items`
 只列出当前实际存在的已物化正文，可为空数组。向用户返回已有正文的可点击预览文件链接，并明确展示完整、`partial`、
 缺失正文或失败状态；预览不得掩盖缺失正文。
+canonical view 不携带 `sourceSkill` 或 `itemId`；这些字段以及物化路径的归属只由 metadata inventory 保存，状态脚本按
+`itemId` 和旧 `sanitizedPath` 更新 view，避免同 URL 的不同来源互相删除。
 
 ## 后处理选择
 
@@ -35,7 +37,7 @@
 1. 优先使用关联 `rawArtifacts` 重新转换、净化。
 2. raw 不完整或没有正文时，通过同一原始执行器按 `sourceItemId` 或 `sourceUrl` 补采并净化。
 3. 不得切换执行器、改变用户筛选，也不得回退使用 `markdown/*.md` 作为下游正文。
-4. 成功后使用 `mark-materialized` 登记文件；仍失败则记录原因、跳过该文章并告知用户。
+4. 成功后使用 `collect` 登记文件；仍失败则记录原因、跳过该文章并告知用户。
 
 已有 materialization 的路径错误、文件缺失或状态与路径矛盾时，不删除任何所指文件；脚本把该文章安全降级为 `pending`、
 移出 canonical view 并要求原始执行器重新物化。成功 run 不得建立在该无效物化状态上。
@@ -45,6 +47,7 @@
 选中正文全部物化后、把正文交给任何下游操作之前，必须先改写图片链接。入库、知识整理和外部消费三条路径都消费同一批
 `sanitized/items/*.md`，都无法解析 `images/` 相对链接，因此该步骤对三者一律必要，不是入库专属。补采或重新物化产生
 新正文后必须再次运行；命令幂等，已改写的正文不受影响。
+改写默认作用于全部 materialized 条目;只处理本次选中的条目时用 `--item-ids <id1,id2>`(或重复 `--item-id`)。
 
 改写有两种模式，按图片需要存活多久选择：
 
@@ -64,6 +67,17 @@
 外部任务全部成功后视为本次运行成功；失败或结果不明确时保留对应工作副本。部分成功时只删除成功文章的工作副本。
 进入外部消费后，不再询问 `入库 / 知识整理 / 跳过`。部分成功会保留会话以便续跑；完整成功清理会话后，该批次终止，后续操作必须重新采集。
 
+## knowledge-organizer → run 映射（临时适配）
+
+`knowledge-organizer` 当前不返回 `itemId` / `runId` / `globalStage`，因此知识整理完成后必须由采集编排器按以下规则
+机械映射为 `run` payload，禁止凭模糊文件名猜测成功：
+
+- `run.operation` 固定 `organize`，`target.kind` 固定 `knowledge-organization`，`target.id` 使用本次知识整理任务目录或任务 ID；
+- `selection.itemIds` 只能来自本次整理实际提交的 inventory `itemId`；
+- 逐篇成功且下游给出可对应证据时记 `status=success, stage=ads-organized`；无法逐篇证明时记 `unknown`；
+- `globalStage` 必须为 `{name: 'build', required: true, status: ...}`，并单独记录 build 结果；
+- 若下游接口无逐篇字段，宁可整批 `unknown` 并保留会话，不得全部猜成 success。
+
 ## 逐篇状态
 
 每个选中条目记录 `success`、`failed`、`pending` 或 `unknown`：
@@ -76,19 +90,35 @@
 只选择部分文章时，未选文章在会话层面仍为 pending。只有覆盖完整 inventory 且全部成功，或用户明确放弃未选文章时，
 才能清理整个会话。
 
+
+## 一体化生命周期(研究任务 ⊃ 采集批 ⊃ 后处理 run)
+
+自一体化改造起,会话状态由 `session.json` 单文件承载(task + research + collection 三部分)。
+生命周期语义如下:
+
+- 深化研究任务(init/plan/branch/aggregate/report)与采集物化(collect)共享同一会话与同一锁;
+- 每层分支的抓取结果经 `collect` 登记物化后,`cleanup` 默认不会清理 —— 研究任务完成(report)且
+  后处理 run 全部记录完成之前,脚本自动保持 `retention.auditRequired` 语义,跨轮次复用物化产物;
+- 完整成功清理会话只发生在: 后处理 run 记录成功、报告已交付、且无保留策略(见「清理」章节);
+- `run`(ingest / organize / external)是后处理运行的唯一写入入口,`itemId` 是逐篇结果与 inventory 的对账键。
+
 ## 状态脚本与续跑
 
-状态与清理必须通过 `scripts/knowledge-collection-post-processing.mjs`，不得由 Agent 手工修改 JSON 或猜测关联文件：
+状态与清理必须通过 `scripts/knowledge-collection.mjs`（物化/生命周期逻辑在 `scripts/collection-state.mjs`，旧名 `knowledge-collection-post-processing.mjs`），不得由 Agent 手工修改 JSON 或猜测关联文件：
 
 ```text
-node scripts/knowledge-collection-post-processing.mjs inspect --session-dir <dir>
-node scripts/knowledge-collection-post-processing.mjs mark-materialized --session-dir <dir> --item-json-file <file>
-node scripts/knowledge-collection-post-processing.mjs record-run --session-dir <dir> --run-json-file <file>
-node scripts/knowledge-collection-post-processing.mjs cleanup --session-dir <dir> --run-id <id>
-node scripts/knowledge-collection-post-processing.mjs unlock-stale --session-dir <dir>
-node scripts/knowledge-collection-post-processing.mjs set-retention --session-dir <dir> --keep true|false
-node scripts/knowledge-collection-post-processing.mjs rewrite-image-links --session-dir <dir> --link-map-file <file>
-node scripts/knowledge-collection-post-processing.mjs rewrite-image-links --session-dir <dir> --resource-id <数字员工资源ID>
+node scripts/knowledge-collection.mjs init --mode research --session-dir <dir> --query "<研究问题>" [--collection-result-input-file <result>]
+node scripts/knowledge-collection.mjs init --mode collection --session-dir <dir> --query "<采集任务>" [--collection-result-input-file <result>]
+node scripts/knowledge-collection.mjs <command> --help   # 每个命令都有参数说明与示例
+node scripts/knowledge-collection.mjs inspect --session-dir <dir>            # 默认只读
+node scripts/knowledge-collection.mjs inspect --session-dir <dir> --drain-pending  # 显式清理待删工作副本
+node scripts/knowledge-collection.mjs collect --session-dir <dir> --item-json-file <file> [--dry-run]
+node scripts/knowledge-collection.mjs run --session-dir <dir> --run-json-file <file> [--dry-run] [--full]
+node scripts/knowledge-collection.mjs cleanup --session-dir <dir> --run-id <id> [--dry-run] [--full] [--archive-deliverables]
+node scripts/knowledge-collection.mjs unlock-stale --session-dir <dir>
+node scripts/knowledge-collection.mjs set-retention --session-dir <dir> --keep true|false [--dry-run]
+node scripts/knowledge-collection.mjs rewrite-image-links --session-dir <dir> --link-map-file <file> [--item-ids id1,id2]
+node scripts/knowledge-collection.mjs rewrite-image-links --session-dir <dir> --resource-id <数字员工资源ID> [--item-ids id1,id2]
 ```
 
 ## 图片链接改写
@@ -108,7 +138,7 @@ node scripts/knowledge-collection-ingest.mjs upload-images \
   --knowledge-base-resource-id <知识库资源ID> --directory-path <已确认目录> \
   [--base-url http://<host>:<port>] > <会话目录>/.post-processing-inputs/image-link-map.json
 
-node scripts/knowledge-collection-post-processing.mjs rewrite-image-links \
+node scripts/knowledge-collection.mjs rewrite-image-links \
   --session-dir <dir> --link-map-file <会话目录>/.post-processing-inputs/image-link-map.json
 ```
 
@@ -132,7 +162,7 @@ node scripts/knowledge-collection-post-processing.mjs rewrite-image-links \
 用 `--base-url` 追加绝对前缀：
 
 ```text
-node scripts/knowledge-collection-post-processing.mjs rewrite-image-links --session-dir <dir> \
+node scripts/knowledge-collection.mjs rewrite-image-links --session-dir <dir> \
   --resource-id <数字员工资源ID> --base-url http://<host>:<port>
 ```
 
@@ -146,14 +176,20 @@ node scripts/knowledge-collection-post-processing.mjs rewrite-image-links --sess
 改写只针对 `images/` 开头的相对链接，远程 URL 与其他形式一律保留。图片文件缺失、不是普通文件、含 `..` 穿越或
 超出正文所在目录时，保留原链接并返回告警，不得改写成无法访问的 URL。改写是幂等的：已经是下载 URL 的链接不再匹配。
 
-`mark-materialized` 与 `record-run` 的一次性输入文件必须放在会话 `.post-processing-inputs/` 中，并使用
+`init` 是没有自带会话 writer 的来源执行器进入正式会话的通用受控入口：它创建 `0700` 会话骨架、写入 `session.json`
+（并可选预置 canonical view），随后由 `collect` 登记物化，脚本在成功前校验 schema。自带受测 runner 的来源执行器可以一次性生成
+完整会话，但必须执行相同的权限、schema、canonical-inventory 一致性与秘密扫描校验；会话建立后，Agent 不得直接修改
+正式 metadata，新增或替换正文物化必须通过 `collect` 登记。
+
+`collect` 与 `run` 的一次性输入文件必须放在会话 `.post-processing-inputs/` 中，并使用
 `"schemaVersion": "1.0"`。文件必须是普通 JSON，不能是符号链接。命令成功持久化正式状态后删除对应输入文件；
-命令失败时保留输入文件并返回其路径。唯一正式状态仍是 `sanitized/metadata.json`，Agent 不得直接修改它。
+删除失败时命令仍成功但返回 `warning`。命令失败时保留输入文件并返回其路径。唯一正式状态是 `session.json`
+（`sanitized/metadata.json` 与 `collection-result.json` 由 `export-views` 生成的导出视图），Agent 不得直接修改它。
 
 `set-retention` 在会话锁内更新 `retention.userRequested`，`--keep` 只能是 `true` 或 `false`；用于用户在采集完成后
 要求保留或允许默认清理。`retention.auditRequired` 仍只能由审计保留策略控制。
 
-`mark-materialized` 输入：
+`collect` payload 输入（旧名 `mark-materialized` 仍作为兼容别名）：
 
 ```json
 {
@@ -172,7 +208,7 @@ node scripts/knowledge-collection-post-processing.mjs rewrite-image-links --sess
 }
 ```
 
-`record-run` 输入必须包含 `runId`、`operation`、`target`、`selection`、`status`、`sessionStatus`、
+`run` payload 输入（旧名 `record-run` 仍作为兼容别名）必须包含 `runId`、`operation`、`target`、`selection`、`status`、`sessionStatus`、
 `globalStage` 和与 selection 一一对应的 `items`。`selection` 包含 `mode`、`itemIds`、
 `discardUnselected` 与 `discardUnselectedConfirmed`；只有用户明确确认放弃未选文章时，后两项才可同时为 true。
 `selection.mode` 只能是 `all` 或 `items`：`all` 必须覆盖完整 inventory，`items` 表示显式子集，包括仅失败项续跑；
@@ -180,7 +216,7 @@ node scripts/knowledge-collection-post-processing.mjs rewrite-image-links --sess
 
 `sessionStatus` 固定为 `success`、`partial`、`failed` 或 `unknown`。脚本重新计算并校验 `sessionStatus`：完整 inventory
 成功或未选项已明确放弃时为 success；完整范围明确失败时为 failed；完整范围无法确认时为 unknown；子集、pending 或混合结果
-为 partial。采集编排器提交的值与计算结果不一致时，`record-run` 拒绝写入并保留输入文件。
+为 partial。采集编排器提交的值与计算结果不一致时，`run` 拒绝写入并保留输入文件。
 
 固定 target 结构为：
 
@@ -200,6 +236,9 @@ node scripts/knowledge-collection-post-processing.mjs rewrite-image-links --sess
 
 再次处理同一批次时，且会话尚未因完整成功被清理，先用 `inspect` 按相同 operation + target 查找最近的部分运行：
 
+- `inspect` 是只读命令;迁移/规范化写入会通过 `warnings` 披露。清理 `pendingArtifactCleanup` 不再是 inspect 的默认副作用,
+  必须显式传 `--drain-pending`。
+
 - 只要匹配 run 的 `status` 或 `sessionStatus` 不是 `success`，或选择范围是未覆盖完整 inventory 的成功子集，
   就必须让用户确认“全部文章重新执行”或“仅失败/待处理文章”。
 - `failedItemIds` 同时包含 run 中的失败/待处理/未知项，以及未被本次子集选中的 inventory 项。
@@ -214,14 +253,18 @@ node scripts/knowledge-collection-post-processing.mjs rewrite-image-links --sess
 
 ## 清理
 
-- 完整范围全部成功：默认清理整个临时会话目录；清理后该批次终止，不能再基于原会话创建新 run。
+- 完整范围全部成功：默认清理整个临时会话目录；清理前可用 `--archive-deliverables` 把 `report.md` / `research-tree.md`
+  复制到 `<session>.delivered/`，避免交付物随会话一起消失。清理后该批次终止，不能再基于原会话创建新 run。
+- `mode=research` 的会话在 `report` 完成并写入 `reportPath` 之前，`cleanup` 不会删除任何工作副本，
+  返回 `retention=true, reason=research-report-pending`。`mode=collection` 不要求 report。
 - 部分成功或只选择部分文章：只删除成功文章的工作副本，保留共享 `raw/`、metadata、失败/待处理/未知文章和未选文章。
 - 全部失败或 unknown：不删除文章工作副本。
 - 失败或跳过时保留恢复所需会话产物。
 - `retention.auditRequired=true`（只读兼容 `audit_required=true`）或用户要求保留时，不执行任何默认清理。
 
 工作副本只指 inventory 明确记录的 `materialization.markdownPath` 与 `sanitizedPath`。脚本使用会话锁、根目录路径校验、
-写前 `cleanupStatus: pending` 和幂等删除；成功后置为 completed，删除失败置为 failed，保留策略生效时置为 skipped-retention。
+写前 `cleanupStatus: pending`、逐项 quarantine(先原子 rename 再删除)和回滚；成功后置为 completed，删除失败置为 failed，
+保留策略生效时置为 skipped-retention。整体删除会话时先把根目录原子 rename 到 `.trash-*` 再递归删除,避免半删除状态。
 `cleanupStatus: completed` 或 `superseded` 再次 cleanup 时直接返回，不读取或删除文章当前路径。
 
 同一文章重新物化但文件名变化时，先提交新路径，并把旧工作副本写入 `pendingArtifactCleanup`。旧文件删除成功后移出数组；

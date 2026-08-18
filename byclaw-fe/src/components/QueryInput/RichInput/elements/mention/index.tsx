@@ -21,6 +21,7 @@ export type MentionElementType = {
   chatAvatar?: string;
   agentType?: string;
   isDefaultAgent?: boolean; // 是否为最左侧的技能，例如慧笔、问数
+  isInactiveAgentSelection?: boolean; // 被数字员工组互斥替换，仅保留展示，不参与本轮调度
   resourceType: IResourceType;
   resourceCode?: string;
   field_code?: string;
@@ -32,7 +33,7 @@ export type MentionElementType = {
 
 const MentionElement = ({ attributes, children, element }: RenderElementProps) => {
   const el = element as MentionElementType;
-  const { name, chatAvatar, resourceType, isDefaultAgent } = el;
+  const { name, chatAvatar, resourceType, isDefaultAgent, isInactiveAgentSelection } = el;
   const editor = useSlateStatic();
 
   const prefix = useMemo(() => {
@@ -61,10 +62,12 @@ const MentionElement = ({ attributes, children, element }: RenderElementProps) =
   const ele = (
     <span
       {...attributes}
+      data-inactive-agent-selection={isInactiveAgentSelection ? 'true' : undefined}
       className={classNames(styles.mention, {
         // 这个类名需要在别的地方querySelector获取，因此用global的方式
         'default-agent': isDefaultAgent,
         [styles.removableMention]: isRemovableAgent,
+        [styles.inactiveAgentSelection]: isInactiveAgentSelection,
       })}
     >
       <span

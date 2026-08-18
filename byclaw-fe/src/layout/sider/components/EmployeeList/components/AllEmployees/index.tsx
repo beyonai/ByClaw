@@ -24,7 +24,12 @@ import { agentHandler } from '@/utils/agent';
 import { getDefaultPagination, paginationReducer } from '@/utils/pageInfo';
 import useGlobal from '@/hooks/useGlobal';
 import EmptyTips from '@/components/EmptyTips';
-import { EmployeeListProps, EmployeeListContext, isInputMode } from '@/layout/sider/components/EmployeeList';
+import {
+  EmployeeListProps,
+  EmployeeListContext,
+  isExcludedEmployee,
+  isInputMode,
+} from '@/layout/sider/components/EmployeeList';
 import { Platform } from '@/layout/components/provider/global';
 import { agentTypeMap } from '@/constants/agent';
 import { sortBySuperHelperFirst } from '@/layout/sider/components/EmployeeList/util';
@@ -289,7 +294,7 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
           >
             <List
               className={pStyles.employeesList}
-              dataSource={employeesList}
+              dataSource={employeesList.filter((employee) => !isExcludedEmployee(employee, props.excludedAgentIds))}
               split={false}
               renderItem={(item) => {
                 const canDrag = true;

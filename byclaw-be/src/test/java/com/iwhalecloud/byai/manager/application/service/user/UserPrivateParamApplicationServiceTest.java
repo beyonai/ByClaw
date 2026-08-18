@@ -3,14 +3,19 @@ package com.iwhalecloud.byai.manager.application.service.user;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.dto.users.UserPrivateParamDTO;
 import com.iwhalecloud.byai.manager.entity.users.UserPrivateParam;
+import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.users.UserPrivateParamMapper;
 import com.iwhalecloud.byai.manager.vo.users.UserPrivateParamVO;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -19,6 +24,9 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class UserPrivateParamApplicationServiceTest {
@@ -103,6 +111,64 @@ class UserPrivateParamApplicationServiceTest {
 
         assertThat(saved.getKey()).isEqualTo("CONNECTOR_LARK_MANIFEST");
         assertThat(saved.getSource()).isEqualTo("USER");
+    }
+
+    @Test
+    @SuppressWarnings({ "rawtypes", "unchecked" })
+    void versionedRefreshAtomicallyRejectsOlderRedisWrites() {
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        ReflectionTestUtils.setField(service, "stringRedisTemplate", redisTemplate);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(mapper.selectList(any())).thenReturn(List.of());
+        when(redisTemplate.execute(
+            any(RedisScript.class),
+            org.mockito.ArgumentMatchers.<List<String>>any(),
+            any(Object.class),
+            any(Object.class)
+        )).thenReturn(1L);
+
+        assertThat(service.refreshPrivateParamCacheNow(1001L, "tester", 9001L)).isTrue();
+
+        ArgumentCaptor<RedisScript> script = ArgumentCaptor.forClass(RedisScript.class);
+        verify(redisTemplate).execute(
+            script.capture(),
+            eq(List.of("byai:user:private_params:tester")),
+            eq("9001"),
+            contains("\"version\":9001")
+        );
+        assertThat(script.getValue().getScriptAsString())
+            .contains("tonumber(decoded['version']) > tonumber(ARGV[1])");
+    }
+
+    @Test
+    @SuppressWarnings({ "rawtypes", "unchecked" })
+    void reconciliationScansConnectorManagedUsersInBatchesAndRebuildsCurrentSnapshots() {
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        ReflectionTestUtils.setField(service, "stringRedisTemplate", redisTemplate);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        Users first = user(1001L, "first");
+        Users second = user(1002L, "second");
+        when(mapper.selectConnectorManagedUsersAfter(0L, 2)).thenReturn(List.of(first, second));
+        when(mapper.selectConnectorManagedUsersAfter(1002L, 2)).thenReturn(List.of());
+        when(mapper.selectList(any())).thenReturn(List.of());
+        when(redisTemplate.execute(
+            any(RedisScript.class),
+            org.mockito.ArgumentMatchers.<List<String>>any(),
+            any(Object.class),
+            any(Object.class)
+        )).thenReturn(1L);
+
+        assertThat(service.reconcileConnectorManagedCaches(2)).isEqualTo(2);
+
+        verify(mapper).selectConnectorManagedUsersAfter(0L, 2);
+        verify(mapper).selectConnectorManagedUsersAfter(1002L, 2);
+    }
+
+    private Users user(Long userId, String userCode) {
+        Users user = new Users();
+        user.setUserId(userId);
+        user.setUserCode(userCode);
+        return user;
     }
 
     private UserPrivateParam managedParam() {

@@ -53,9 +53,16 @@ export type DevloopTaskListQuery = {
 
   /** 任务状态筛选，整体任务视图按状态列分别查询。 */
   status?: 'pending' | 'in_progress' | 'paused' | 'completed';
+
+  /** 任务类型筛选；为空返回全部类型。与 status 同传时两个条件叠加。 */
+  taskType?: DevloopTaskType;
   pageNum?: number;
   pageSize?: number;
 };
+
+// 任务类型对照 byai_default_agent 的架构/需求/研发/测试四角色；chat=项目内直接开聊的普通会话，不属于四角色任务。
+// 会话表没有类型列，后端按各创建链路的关联行反查(架构=项目初始化会话，研发=有仓库子任务行，测试=被集成执行记录引用，需求=需求项回写了会话)。
+export type DevloopTaskType = 'architect' | 'requirement' | 'coder' | 'tester' | 'chat';
 
 export type DevloopTaskCurrentStage = {
   stageId: string;
@@ -128,16 +135,22 @@ export type DevloopTaskItem = {
   stageLoopCount?: number;
   assignee?: string;
   assigneeId?: string | number;
+  assigneeName?: string;
   dueTime?: string;
   agentName?: string;
   avatar?: string;
+  // 会话绑定的数字员工，进入会话后输入框据此回填默认 @ 员工；只有 agentName 无法回填。
+  objectType?: string;
+  objectId?: number | string;
   description?: string;
   taskDescription?: string;
+  sessionContent?: string;
   branchName?: string;
   repoFullName?: string;
   requirementTitle?: string;
   requirementOriginId?: string;
   sourceItemId?: number;
+  taskType?: DevloopTaskType;
 };
 
 export type DevloopTaskPage = {
@@ -156,17 +169,21 @@ export type DevloopProjectSpaceFile = {
   shareLink?: string | null;
 };
 
-export type OperationTaskTemplateType = 'collect' | 'knowledge' | 'content' | 'publish' | 'analyze';
+export type OperationTaskTemplateType =
+  | 'collect'
+  | 'knowledge'
+  | 'object_discovery'
+  | 'content'
+  | 'publish'
+  | 'analyze';
 
 export type OperationTaskTemplate = {
   templateId: number;
   templateType: OperationTaskTemplateType;
   templateName: string;
   description?: string;
-  icon?: string;
   config?: string | Record<string, unknown>;
   sortNo?: number;
-  isBuiltin?: string;
 };
 
 // 仓库类型:workspace 工作区(单个,承载项目上下文/产出) / code 代码仓库(可多个)。存量数据默认 code。
@@ -210,17 +227,33 @@ export const updateProject = (data: Partial<DevloopProjectPayload> & { projectId
 
 export const deleteProject = (projectId: number) => POST<any>('/byaiService/project/delete', { projectId });
 
-// 研发项目工作区初始化状态:ready 已就绪(默认/普通项目)、pending 待初始化、initializing 初始化中。
-// 仅 develop 项目在未 ready 前禁止建需求/启动任务。
-export type ProjectInitStatus = 'ready' | 'pending' | 'initializing';
+// 研发项目工作区初始化状态。状态机与含义见 pages/projectSpace/types.ts 那份定义,这里只做转出,
+// 不再各写一份枚举——两处漂移过一次(新增 initialized 时只改到其中一处)。
+export type { ProjectInitStatus } from '@/pages/projectSpace/types';
 
-// 触发研发项目初始化:置 initializing 并下发建索引/技能包配置。
+// initializing 态轮询间隔:后端扫描定时任务本身 30s 一轮,再快也拿不到更新的状态,只是白打接口。
+export const INIT_POLL_INTERVAL_MS = 5000;
+
+// 轮询次数上限(约 10 分钟)。后端超时线是 2 小时,页面开着不该陪着打两小时接口;
+// 更要紧的是后端一旦收不了口(状态文件读失败、状态被卡住),没有封顶就是无限刷同一个 /project/get。
+// 停轮询只影响自动消横幅,用户切项目或重进页面即重新开始轮询。
+export const INIT_POLL_MAX_ROUNDS = 120;
+
+// 第一段:初始化工作区。后端同步克隆工作区仓库、挂子模块、装技能包并推送,成功即 initStatus=initialized。
+// 同步接口没有返回值也没有会话:这一段不下发数字员工,聊天在第二段。耗时可能到分钟级,前端要给 loading。
 export const startProjectInit = (data: { projectId: number; buildIndex: boolean; skillPackages: string[] }) =>
-  POST<any>('/byaiService/project/init/start', data);
+  POST<void>('/byaiService/project/init/start', data);
 
-// 标记研发项目初始化完成:置 ready,之后方可建需求/启动任务。
-export const completeProjectInit = (projectId: number) =>
-  POST<any>('/byaiService/project/init/complete', { projectId });
+// 第二段:下发架构数字员工聊天,置 initStatus=initializing。真正干活在沙箱里,
+// 完成与否由后端定时任务读该会话的任务状态文件判定,前端只轮询 initStatus,没有「标记完成」的接口。
+// 回架构员工而不只回会话ID:项目维度员工不在前端员工列表里,跳进会话时要靠这两个字段写 agentCache,
+// 否则聊天输入框的 @ 查不到人会兜底成「AI 助手」。ID 是字符串——雪花 ID 超过 JS 安全整数。
+// 建索引配置不用再传:第一段已落在项目行上,后端自己读回来拼提示词。
+export const startArchitectChat = (data: { projectId: number }) =>
+  POST<{ sessionId: string; architectAgentId: string; architectAgentName: string }>(
+    '/byaiService/project/init/chat',
+    data
+  );
 
 // 项目仓库维护：扫描源关联仓库时可即席新增/删除
 export const createProjectRepo = (data: {
@@ -233,8 +266,61 @@ export const createProjectRepo = (data: {
   provider?: RepoProvider;
 }) => POST<any>('/byaiService/project/repo/create', data);
 
+/** 更新项目仓库，沿用原 repoId 保持已有任务和扫描源的关联不变。 */
+export const updateProjectRepo = (data: {
+  repoId: number;
+  projectId: number;
+  repoFullName: string;
+  repoUrl?: string;
+  defaultBranch?: string;
+  description?: string;
+  repoType?: ProjectRepoType;
+  provider?: RepoProvider;
+}) => POST<any>('/byaiService/project/repo/update', data);
+
 export const listProjectRepos = (projectId: number) =>
   POST<DevloopProjectRepo[]>('/byaiService/project/repo/list', { projectId });
+
+export type ProjectRepoTreeNode = {
+  name: string;
+  path: string;
+  type: 'directory' | 'file' | string;
+  size?: number;
+  sha?: string;
+  url?: string;
+  hasChildren?: boolean;
+};
+
+export type ProjectRepoBranch = {
+  name: string;
+  sha?: string;
+  protectedBranch?: boolean;
+};
+
+export type ProjectRepoFileContent = {
+  name: string;
+  path: string;
+  branch: string;
+  sha?: string;
+  size?: number;
+  content?: string | null;
+  base64Content?: string | null;
+  binary?: boolean;
+  url?: string;
+  downloadUrl?: string;
+};
+
+export const listProjectRepoTree = (data: { projectId: number; repoId: number; path?: string; ref?: string }) =>
+  POST<ProjectRepoTreeNode[]>('/byaiService/project/repo/tree', data);
+
+export const searchProjectRepoTree = (data: { projectId: number; repoId: number; keyword: string; ref?: string }) =>
+  POST<ProjectRepoTreeNode[]>('/byaiService/project/repo/tree/search', data);
+
+export const listProjectRepoBranches = (repoId: number) =>
+  POST<ProjectRepoBranch[]>('/byaiService/project/repo/branch/list', { repoId });
+
+export const getProjectRepoFileContent = (data: { repoId: number; branch: string; path: string }) =>
+  POST<ProjectRepoFileContent>('/byaiService/project/repo/file/content', data);
 
 export const deleteProjectRepo = (repoId: number) => POST<any>('/byaiService/project/repo/delete', { repoId });
 
@@ -263,8 +349,9 @@ export const deleteProjectSpaceFile = (data: { projectId: number; fileId: number
   POST<void>('/byaiService/project/share/delete', data);
 
 // 扫描源管理
+// 应用级自动化（chat）不挂项目，projectId 省略即入库为空；渠道类扫描源仍需归属项目。
 export const createScanSource = (data: {
-  projectId: number;
+  projectId?: number;
   sourceName: string;
   sourceType: string;
   config: string;
@@ -287,7 +374,8 @@ export const updateScanSource = (data: {
 
 export const deleteScanSource = (sourceId: number) => POST<any>('/byaiService/devloop/source/delete', { sourceId });
 
-export const listScanSources = (data: { projectId: number; keyword?: string; pageNum?: number; pageSize?: number }) =>
+// 不传 projectId 表示应用级自动化页跨项目查询，后端按条件拼接 where。
+export const listScanSources = (data: { projectId?: number; keyword?: string; pageNum?: number; pageSize?: number }) =>
   POST<any>('/byaiService/devloop/source/list', data);
 
 export const toggleScanSource = (sourceId: number, enabled: string) =>
@@ -522,6 +610,11 @@ export type DevloopSplitPayload = {
 
 export const splitTask = (data: DevloopSplitPayload) => POST<any>('/byaiService/devloop/task/split', data);
 
+// 需求的第二个启动入口:交给需求数字员工在聊天里聊完成,不拆子任务。
+// 与 splitTask 二选一 —— 两条入口写同一个需求 sessionId,启动其一另一条即被后端闸门挡掉。
+export const startRequirementClarify = (data: { projectId: number; sourceItemId: number }) =>
+  POST<{ sessionId: number }>('/byaiService/devloop/requirement/clarify', data);
+
 // AI 预拆:后端按系统配置的提示词把需求+仓库清单交给大模型,返回草稿任务,不落库。
 // aiSuggested=false 表示模型不可用或输出不可解析,后端已降级为每仓库一行且不猜依赖。
 export type DevloopPresplitResult = {
@@ -624,8 +717,6 @@ export const checkDwsAuthStatus = () => POST<any>('/byaiService/devloop/dws/auth
 export const checkDwsAuthStatusBySource = (sourceId: number) =>
   POST<any>('/byaiService/devloop/dws/authStatus/bySource', { sourceId });
 
-export const saveDwsToken = (token: string) => POST<any>('/byaiService/devloop/dws/saveToken', { token });
-
 // 集成测试环境
 // stages / testAccounts 前端为结构化数组，落库为JSON字符串，故服务层统一序列化后再发。
 // 定时(cron)与执行员工不在环境里，归属独立测试数字员工配置，避免重复。
@@ -633,12 +724,14 @@ export type IntegrationEnvPayload = {
   projectId: number;
   envName: string;
   address?: string;
-  orchestrator?: 'script' | 'jenkins' | 'k8s' | 'webhook';
   connProtocol?: 'ssh' | 'local';
   connHost?: string;
   connPort?: string;
   connUser?: string;
   connAuth?: 'key' | 'password';
+  // 用例来源:workspace=跟随项目工作区仓库(约定入口 tests/run.sh)/on_env=用例已预置在环境机上。
+  // 后端 IntegrationRunExecutor 只看这个字段判定用例从哪来，用例集里的仓库/分支仅 on_env 时还生效。
+  caseSource?: 'workspace' | 'on_env';
   // 连接凭据key，指向 ~/.openclaw/credentials/，不传明文密码。
   connCredentialRef?: string;
   connWorkdir?: string;
@@ -665,14 +758,12 @@ export const deleteIntegrationEnv = (envId: number) =>
 export const listIntegrationEnvs = (projectId: number) =>
   POST<any>('/byaiService/devloop/integration/env/list', { projectId });
 
-// 端到端测试用例集
-// manual 套件的清单(manualCases)不入库,仅登记 manualFile 路径;caseCount 为数字,enabled 落库为 '0'/'1'。
+// 端到端测试用例集:caseCount 为数字,enabled 落库为 '0'/'1'。
+// 用例来源已上移到环境 caseSource,用例集只登记环境机上的执行入口,所以 source/branch 恒为空;
+// runner 也不再收发——运行命令本身写明了用什么跑。
 export type IntegrationSuitePayload = {
   projectId: number;
   suiteName: string;
-  runner?: string;
-  sourceType?: string;
-  repoId?: number;
   source?: string;
   branch?: string;
   runCommand?: string;
@@ -680,7 +771,6 @@ export type IntegrationSuitePayload = {
   reportPath?: string;
   caseCount?: number;
   enabled?: string;
-  manualFile?: string;
 };
 
 export const createIntegrationSuite = (data: IntegrationSuitePayload) =>
@@ -722,12 +812,14 @@ export const listIntegrationRunsByEnv = (envId: number) =>
 export const listRequirementIntegrations = (projectId: number) =>
   POST<any[]>('/byaiService/devloop/integration/requirements', { projectId });
 
-// ===== 默认数字员工 =====
-// 三角色(架构/代码/测试)兜底员工:projectId 缺省=全局默认,>0=项目覆盖。
+// ===== 默认助理 =====
+// 四角色(架构/需求/研发/测试)兜底员工:projectId 缺省=全局默认,>0=项目覆盖。
 export type DefaultAgentConfig = {
   projectId?: number;
   architectAgentId?: string;
   architectAgentName?: string;
+  requirementAgentId?: string;
+  requirementAgentName?: string;
   coderAgentId?: string;
   coderAgentName?: string;
   testerAgentId?: string;

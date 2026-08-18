@@ -18,6 +18,9 @@ public class IntegrationEnvDTO {
 
     private String orchestrator;
 
+    /** 用例来源 workspace跟随工作区仓库/on_env用例已在环境机上 */
+    private String caseSource;
+
     private String connProtocol;
 
     private String connHost;

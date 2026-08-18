@@ -92,6 +92,22 @@ class ConnectorConnectionStateServiceTest {
     }
 
     @Test
+    void saveNoneAuthorizationWritesNonNullLifecycleDefaults() {
+        ConnectorInfo connector = connector();
+        connector.setAuthMode("NONE");
+        connector.setProviderCode(null);
+        when(connectorAuthMapper.selectOne(any())).thenReturn(null);
+        when(sequenceService.nextVal()).thenReturn(8002L);
+        when(manifestService.upsertAndEnable(1001L, connector)).thenReturn(false);
+
+        ConnectorAuth binding = service.saveEnabledAuthorization(USER_ID, connector, null, null);
+
+        assertThat(binding.getCredentialState()).isEqualTo("UNKNOWN");
+        assertThat(binding.getRenewalMode()).isEqualTo("NONE");
+        assertThat(binding.getAuthCredential()).isNull();
+    }
+
+    @Test
     void saveEnabledAuthorizationUpdatesConcurrentWinnerWhenInsertIsIgnored() {
         ConnectorInfo connector = connector();
         ConnectorAuth winner = activeAuth();
@@ -170,6 +186,24 @@ class ConnectorConnectionStateServiceTest {
         assertThatThrownBy(() -> service.updateEnableFlag(USER_ID, CONNECTOR_ID, true))
             .isInstanceOf(InvalidConnectorManifestException.class);
         assertThat(auth.getEnableFlag()).isEqualTo("N");
+    }
+
+    @Test
+    void revokeAuthorizationSoftInvalidatesBindingAndDisablesManifest() {
+        ConnectorInfo connector = connector();
+        ConnectorAuth auth = activeAuth();
+        auth.setEnableFlag("Y");
+        when(connectorAuthMapper.selectOne(any())).thenReturn(auth);
+        when(connectorInfoMapper.selectById(CONNECTOR_ID)).thenReturn(connector);
+        when(manifestService.disable(1001L, connector)).thenReturn(true);
+
+        service.revokeAuthorization(USER_ID, CONNECTOR_ID);
+
+        assertThat(auth.getStatusCd()).isEqualTo("00X");
+        assertThat(auth.getEnableFlag()).isEqualTo("N");
+        verify(manifestService).disable(1001L, connector);
+        verify(connectorAuthMapper).updateById(auth);
+        verify(privateParamService).refreshPrivateParamCacheAfterCommit(1001L, "tester");
     }
 
     private ConnectorInfo connector() {

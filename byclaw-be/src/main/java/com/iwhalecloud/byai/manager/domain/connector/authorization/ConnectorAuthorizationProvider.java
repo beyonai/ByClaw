@@ -8,6 +8,12 @@ public interface ConnectorAuthorizationProvider {
 
     AuthorizationStatusResult queryStatus(AuthorizationSessionContext session);
 
+    default AuthorizationStatusResult handleCallback(
+            AuthorizationSessionContext session,
+            AuthorizationCallback callback) {
+        throw new UnsupportedOperationException("callback is not supported");
+    }
+
     default void cancel(AuthorizationSessionContext session) {
     }
 }

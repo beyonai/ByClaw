@@ -1,29 +1,3 @@
 # 职场招聘
 
-LinkedIn。
-
-## LinkedIn
-
-```bash
-# 获取个人资料
-mcporter call 'linkedin-scraper.get_person_profile(linkedin_url: "https://linkedin.com/in/username")'
-
-# 搜索人才
-mcporter call 'linkedin-scraper.search_people(keyword: "AI engineer", limit: 10)'
-
-# 获取公司资料
-mcporter call 'linkedin-scraper.get_company_profile(linkedin_url: "https://linkedin.com/company/xxx")'
-
-# 搜索职位
-mcporter call 'linkedin-scraper.search_jobs(keyword: "software engineer", limit: 10)'
-```
-
-> **需要登录**: LinkedIn scraper 需要有效的登录态。
-
-### Fallback 方案
-
-如果 MCP 不可用，可以用 Jina Reader：
-
-```bash
-curl -s "https://r.jina.ai/https://linkedin.com/in/username"
-```
+LinkedIn、招聘站和职位详情都是具体网页任务。加载并遵循 `bycli` skill，按其 Adapter 发现与浏览器生命周期规则执行。任何页面读取都不能使用其他网页执行器；登录、人工验证、验证码或限流时停止并报告。

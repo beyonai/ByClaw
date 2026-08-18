@@ -41,6 +41,14 @@ public class Project {
     /** 建索引所需技能包，逗号分隔(如 trellis,superpowers)。 */
     private String indexSkills;
 
+    /**
+     * 工作区初始化会话ID：架构数字员工的那条会话。 轮询按此会话读 /by/.acp-runs/sessions/&lt;会话ID&gt;.json 判完成，没有它就不知道该读哪个状态文件。
+     */
+    private Long initSessionId;
+
+    /** 上次初始化失败/超时原因：pending 态回显给用户，重新下发初始化时清空。 */
+    private String initFailReason;
+
     private Long createBy;
 
     @JSONField(format = "yyyy-MM-dd HH:mm:ss")

@@ -47,6 +47,7 @@ import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.common.util.UrlUtil;
 import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import com.iwhalecloud.byai.manager.application.service.resource.AgentResourceService;
+import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGroupApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.men.MenResCom;
@@ -97,6 +98,9 @@ public class ParamService {
     private SsResourceService ssResourceService;
 
     @Autowired
+    private DigitalEmployeeGroupApplicationService digitalEmployeeGroupApplicationService;
+
+    @Autowired
     private MenResComService menResComService;
 
     @Autowired
@@ -133,6 +137,26 @@ public class ParamService {
         params.put("agent_id", assistantChatDto.getAgentId());
         params.put("ext_params", assistantChatDto.getExtParams());
         params.put("worker_agent_type", resolveWorkerAgentType(assistantChatDto.getAgentId()));
+
+        if (assistantChatDto.getAgentId() != null
+            && digitalEmployeeGroupApplicationService.isGroup(assistantChatDto.getAgentId())) {
+            SsResource group = ssResourceService.findById(assistantChatDto.getAgentId());
+            if (group == null) {
+                throw new ManagerRuntimeException("数字员工组不存在或已停用");
+            }
+            validateOrchestratorRef(assistantChatDto.getOrchestrator(), group.getResourceId());
+            Map<String, Object> orchestrator = new HashMap<>();
+            orchestrator.put("schemaVersion", "byclaw.orchestrator-ref/v1");
+            orchestrator.put("kind", "EXPERT_TEAM");
+            orchestrator.put("id", String.valueOf(group.getResourceId()));
+            params.put("orchestrator", orchestrator);
+            params.put("worker_agent_type", WorkerAgentType.BY_SUPER.getCode());
+            params.put("agent_code", group.getResourceCode());
+            params.put("agent_name", group.getResourceName());
+            params.put("agent_type", DigitalEmployeeGroupApplicationService.GROUP_AGENT_TYPE);
+            params.put("agent_list", Collections.emptyList());
+            return params;
+        }
 
         if (assistantChatDto.getAgentId() != null) {
             AgentResourceChatInfoDto resourceAgent = ssSuperassistSubAgentService.getResourceAgent(isDebug,
@@ -204,6 +228,19 @@ public class ParamService {
         }
 
         return params;
+    }
+
+    private void validateOrchestratorRef(Map<String, Object> orchestrator, Long groupId) {
+        if (orchestrator == null || orchestrator.isEmpty()) {
+            return;
+        }
+        String schemaVersion = String.valueOf(orchestrator.get("schemaVersion"));
+        String kind = String.valueOf(orchestrator.get("kind"));
+        String id = String.valueOf(orchestrator.get("id"));
+        if (!"byclaw.orchestrator-ref/v1".equals(schemaVersion) || !"EXPERT_TEAM".equals(kind)
+            || !String.valueOf(groupId).equals(id)) {
+            throw new ManagerRuntimeException("orchestrator 与当前数字员工组不一致");
+        }
     }
 
     /**

@@ -9,6 +9,8 @@ import classnames from 'classnames';
 import DualBallLoading from '@/components/Loading/DualBallLoading';
 import WaveBallLoading from '@/components/Loading/WaveBallLoading';
 import MsgRenderer from './components/MsgRenderer';
+import MsgRendererV2 from '@/components/MessageList/components/MsgRendererV2';
+import { isV2Message } from '@/components/MessageList/components/MsgRendererV2/ordered';
 import AntdIcon from '@/components/AntdIcon';
 
 import useModal from '@/hooks/useModal';
@@ -78,7 +80,11 @@ export default function useRender({ updateMessage }: { updateMessage: (message: 
                 [styles.pureText]: fromOtherUser && usage !== '4',
               })}
             >
-              <MsgRenderer msg={msg} updateMessage={updateMessage} />
+              {isV2Message(msg) ? (
+                <MsgRendererV2 msg={msg} updateMessage={updateMessage} />
+              ) : (
+                <MsgRenderer msg={msg} updateMessage={updateMessage} />
+              )}
               {messageState === IMessageState.Query && <DualBallLoading style={{ width: 32, height: 32 }} />}
             </div>
             {fromBeyond && messageState === IMessageState.Error && (

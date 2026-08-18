@@ -16,9 +16,10 @@
     margin-left: 0;
   }
 
-  // 多 @ 员工的普通 mention 也可以点击退出，但保留原有标签底色。
+  // 所有 @ 数字员工统一使用默认员工的无背景样式，仅在悬停时显示操作底色。
   &.removableMention {
     cursor: pointer;
+    background: initial;
   }
 
   &:global(.default-agent):hover,
@@ -28,6 +29,14 @@
     .deleteIcon {
       opacity: 1;
     }
+  }
+
+  &.inactiveAgentSelection,
+  &.inactiveAgentSelection:hover {
+    color: var(~'--@{antPrefix}-color-text-quaternary', #00000040);
+    background: var(~'--@{antPrefix}-color-fill-tertiary', #0000000f) !important;
+    text-decoration: line-through;
+    opacity: 0.72;
   }
 }
 

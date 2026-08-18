@@ -689,22 +689,25 @@
 
 .accountCard {
   min-width: 0;
+  position: relative;
   padding: 16px;
-  border: 1px solid #e5eaf2;
+  border: 0;
   border-radius: 12px;
-  background: #fff;
-  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+  // 与需求卡片统一使用无描边浅底卡片，悬停时只加深底色，不产生上浮抖动。
+  background: #f7f9fc;
+  transition: background-color 0.2s ease;
+
+  &:hover {
+    background: #edf2f9;
+  }
 }
 
 .accountCardClickable {
   cursor: pointer;
 
-  &:hover,
   &:focus-visible {
-    border-color: #b9cdfd;
+    background: #edf2f9;
     outline: none;
-    box-shadow: 0 8px 20px rgba(31, 45, 77, 0.08);
-    transform: translateY(-1px);
   }
 }
 
@@ -720,6 +723,41 @@
       margin-inline-end: 0;
     }
   }
+}
+
+.accountStatusTag {
+  transition: opacity 0.2s ease;
+}
+
+.accountCardMoreAction {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  color: #667085;
+  transform: rotate(90deg);
+  transition: opacity 0.2s ease, background-color 0.2s ease;
+}
+
+// 项目大详情账号卡片将更多操作固定到右下角，避免遮挡右上角登录状态标签。
+.accountPanelCompact .accountCardMoreAction {
+  top: auto;
+  right: 8px;
+  bottom: 8px;
+}
+
+// 卡片悬停后以更多菜单替换状态标签，菜单展开时不会挤动账号名称和底部操作区域。
+.accountCard:hover .accountCardMoreAction,
+.accountCard:focus-within .accountCardMoreAction {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.accountPanel:not(.accountPanelCompact) .accountCard:hover .accountStatusTag,
+.accountPanel:not(.accountPanelCompact) .accountCard:focus-within .accountStatusTag {
+  opacity: 0;
 }
 
 .accountPlatformMark {

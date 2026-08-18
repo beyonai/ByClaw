@@ -45,6 +45,7 @@ public class OperationTaskSessionService {
     public static final String STATUS_RUNNING = "running";
     public static final String STATUS_DONE = "done";
     public static final String STATUS_FAILED = "failed";
+    public static final String STATUS_MIXED = "mixed";
 
     @Autowired
     private ByaiSessionMapper byaiSessionMapper;

@@ -71,6 +71,7 @@ interface ResourceListProps {
 }
 
 const PAGE_SIZE_DEFAULT = 30;
+const WIDE_CARD_RESOURCE_TYPES = new Set(['KG_DOC', 'TOOL']);
 
 const normalizeResponseData = (response: any) => response?.data ?? response;
 
@@ -139,6 +140,8 @@ const ResourceList: React.FC<ResourceListProps> = ({
   const loadedResourcedCount = useMemo(() => list.filter((item) => !isWorkspaceSkill(item)).length, [list]);
   const hasMore = pageInfo.total > loadedResourcedCount;
   const isSkillPosterMode = resourceType === 'SKILL' && skillCardViewMode === 'new';
+  // 知识和工具卡片信息较多，尤其右侧资源面板打开时，需要减少列数以保证名称和描述可读。
+  const useWideCardLayout = WIDE_CARD_RESOURCE_TYPES.has(resourceType);
 
   const getList = useCallback(
     async (params?: Record<string, any>, append = false) => {
@@ -344,7 +347,15 @@ const ResourceList: React.FC<ResourceListProps> = ({
             }}
           >
             <div className={styles.categorySection}>
-              <div className={isSkillPosterMode ? styles.skillPosterList : styles.employeeList}>
+              <div
+                className={
+                  isSkillPosterMode
+                    ? styles.skillPosterList
+                    : [styles.employeeList, useWideCardLayout ? styles.wideResourceList : '']
+                        .filter(Boolean)
+                        .join(' ')
+                }
+              >
                 {list.map((item) => renderResourceCard(item))}
               </div>
             </div>

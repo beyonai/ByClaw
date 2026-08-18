@@ -50,7 +50,13 @@ type IProps = {
   isBottom: boolean;
   setIsBottom?: React.Dispatch<React.SetStateAction<boolean>>;
 
+  /** 是否在恢复到消息列表时自动进入聊天态，员工详情页切换员工时需要关闭。 */
+  autoEnterBottomOnMessage?: boolean;
+
   queryInputProps?: Record<string, unknown>;
+
+  /** 禁用输入框草稿缓存与恢复，员工详情等固定聊天对象场景使用。 */
+  disableInputDraft?: boolean;
 
   /** 自定义聊天地址 */
   chatUrl?: string;
@@ -59,6 +65,12 @@ type IProps = {
   hideAction?: boolean;
   hideChatTitle?: boolean;
   sendExtraParams?: Record<string, unknown>;
+
+  /**
+   * 调试 iframe 中锁定当前资源，避免普通会话同步逻辑将其误清空。
+   * 正常聊天页不传该参数，继续使用全局 agentId。
+   */
+  fixedAgentId?: string;
   projectId?: number;
 };
 
@@ -82,10 +94,11 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     hideChatTitle = false,
     chatUrl,
     hideAction = false,
+    fixedAgentId,
     projectId,
   } = props;
-  const { isBottom, setIsBottom } = props;
-  const { sessionId, queryInputProps = {}, readOnly } = props;
+  const { isBottom, setIsBottom, autoEnterBottomOnMessage = true } = props;
+  const { sessionId, queryInputProps = {}, readOnly, disableInputDraft = false } = props;
   const { cannotAt = !sessionId && !isRootPage() } = props;
 
   const [notificationMessage, contextHolder] = notification.useNotification({
@@ -94,7 +107,8 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
 
   const [myAgentType, setMyAgentType] = useState<IAgentType>(agentType);
   const [sessionSelectOpen, setSessionSelectOpen] = useState<boolean>(false);
-  const [resourceListOpen, setResourceListOpen] = useState(false);
+  // 进入已有会话详情时默认展开右侧资源列表；用户关闭后保持关闭，直到进入另一个会话详情。
+  const [resourceListOpen, setResourceListOpen] = useState(() => Boolean(sessionId));
   const [resourceTabs, setResourceTabs] = useState<ChatResourceTab[]>([]);
   const [activeResourceTabKey, setActiveResourceTabKey] = useState('');
 
@@ -114,6 +128,8 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   const shouldSkipSessionListCache = Boolean(sendExtraParams?.troubleshootMessageId);
 
   const prevAgentId = useRef(agentId);
+  // 只在会话员工身份变化时同步一次；不能把 agentId 放进 effect 依赖，否则手动 @ 员工会被会话员工反复覆盖。
+  const sessionAgentSyncKeyRef = useRef('');
 
   // 修改ref类型为MessageListRefType
   const messageListCompRef = useRef<MessageListRefType>(null);
@@ -175,6 +191,52 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     return Number.isFinite(normalizedProjectId) && normalizedProjectId > 0 ? normalizedProjectId : undefined;
   }, [currentSession?.projectId, projectId]);
 
+  useEffect(() => {
+    if (fixedAgentId) {
+      // 数字员工编辑页调试没有 session 列表上下文，必须始终保留当前调试资源身份。
+      setAgentId?.(`${fixedAgentId}`);
+      setMyAgentType(agentType);
+      return;
+    }
+
+    // 新建会话尚无 sessionId 时，agentId 可能来自员工详情或任务模板选择，不能按“普通会话”误清空；
+    // 只有已有会话切换时，才根据会话返回的 objectId 同步默认数字员工。
+    if (!sessionId) return;
+
+    const sessionObjectType = `${currentSession?.objectType || ''}`.toLowerCase();
+    const sessionAgentId = currentSession?.objectId;
+    // 会话切换时列表缓存可能比 sessionId 晚一拍更新，等待目标会话信息到齐，避免先清空旧 @ 标签再立即重建。
+    if (sessionId && !currentSession) return;
+    const syncKey = `${sessionId || ''}:${sessionObjectType}:${sessionAgentId ?? ''}`;
+    if (sessionAgentSyncKeyRef.current === syncKey) return;
+    sessionAgentSyncKeyRef.current = syncKey;
+
+    if (sessionObjectType !== 'digemployee' || sessionAgentId === undefined || sessionAgentId === null) {
+      // 切换到没有会话员工的普通会话时清理上一会话的默认 @ 员工，避免旧标签残留。
+      setAgentId?.('');
+      setMyAgentType(agentType);
+      return;
+    }
+
+    const sessionAgentInfo = getResponseAgentInfo(
+      { agentList, employeesList },
+      JSON.stringify({ agentId: sessionAgentId })
+    );
+    const nextAgentId = `${sessionAgentInfo?.agentId || sessionAgentId}`;
+    // 运营任务进入会话后立即恢复模板所选员工，使输入框默认 @ 该员工并在发送后继续保留。
+    setAgentId?.(nextAgentId);
+    setMyAgentType(sessionAgentInfo?.agentType || agentTypeMap.agent);
+  }, [
+    agentList,
+    agentType,
+    currentSession?.objectId,
+    currentSession?.objectType,
+    employeesList,
+    fixedAgentId,
+    sessionId,
+    setAgentId,
+  ]);
+
   // 旧资源面板仍以单详情节点回调；这里统一补齐稳定身份，才能在多次点击同一资源时复用页签。
   const openResourceDetail = useCallback(
     (panel: React.ReactNode, options: DetailPanelOptions = {}) => {
@@ -211,14 +273,11 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     [intl]
   );
 
-  /** 文件预览打开后只保留预览页签，自动收起右侧资源列表；预览页签本身不会被关闭。 */
+  /** 从资源列表打开任意详情页签后自动收起列表，避免浮层遮挡新打开的内容。 */
   const openResourceDetailFromResourceList = useCallback(
     (panel: React.ReactNode, options: DetailPanelOptions = {}) => {
       openResourceDetail(panel, options);
-      const tabKey = `${options.tabKey || ''}`;
-      if (tabKey.includes('file:')) {
-        setResourceListOpen(false);
-      }
+      setResourceListOpen(false);
     },
     [openResourceDetail]
   );
@@ -239,6 +298,17 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   const toggleResourceList = useCallback(() => {
     setResourceListOpen((open) => !open);
   }, []);
+
+  // 会话标题入口是资源工作区总开关：关闭时同时清理列表和全部预览页签。
+  const toggleResourceWorkspaceFromChatTitle = useCallback(() => {
+    if (resourceListOpen || resourceTabs.length > 0) {
+      setResourceListOpen(false);
+      setResourceTabs([]);
+      setActiveResourceTabKey('');
+      return;
+    }
+    setResourceListOpen(true);
+  }, [resourceListOpen, resourceTabs.length]);
 
   useEffect(() => {
     if (!resourceWorkspaceVisible) {
@@ -281,26 +351,24 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   ]);
 
   useEffect(() => {
-    // 会话切换时关闭旧详情，但保留资源入口，方便在新会话中继续查看对应范围。
+    // 每次进入另一个已有会话详情时关闭旧预览并默认打开资源列表；新建会话尚无 sessionId 时不展示。
     const previousSessionId = previousResourceSessionIdRef.current;
     previousResourceSessionIdRef.current = sessionId;
     if (`${previousSessionId}` === `${sessionId}`) return;
 
-    const workspaceWasOpen = resourceListOpen || resourceTabs.length > 0;
     setResourceTabs([]);
     setActiveResourceTabKey('');
-    if (workspaceWasOpen) setResourceListOpen(true);
+    setResourceListOpen(Boolean(sessionId));
   }, [sessionId]);
 
-  useEffect(
-    () => () => {
-      if (resourceWorkspaceOwnedRef.current) clearDetailPanel?.();
-    },
-    [clearDetailPanel]
-  );
+  // 路由切换时由 PCLayout 统一决定是否清理详情面板；资源中心入口带 preserveDetailPanel 标记时，
+  // 即使聊天组件卸载，也要保留右侧资源工作区显示在资源中心页面旁边。
 
   const onReceivedChatMessages = useCallback(
     (payload?: ResponseMetadataPayload) => {
+      if (fixedAgentId) {
+        return;
+      }
       const { sessionId: sourceSessionId, metadata } = payload || {};
       if (`${sourceSessionId}` !== `${sessionId}`) {
         return;
@@ -311,11 +379,25 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
       }
       const agentInfo = getResponseAgentInfo({ agentList, employeesList }, metadata);
       if (agentInfo) {
-        setAgentId?.(agentInfo.agentId);
+        // 目标会话缓存尚未到齐时不处理异步历史消息，避免旧会话员工抢先写入全局状态。
+        if (sessionId && !currentSession) return;
+        // 已有会话的 objectId 是详情接口返回的唯一默认员工；历史消息异步回放时不能再用旧响应员工覆盖它。
+        const sessionObjectType = `${currentSession?.objectType || ''}`.toLowerCase();
+        const sessionAgentId = currentSession?.objectId;
+        if (
+          sessionObjectType === 'digemployee' &&
+          sessionAgentId !== undefined &&
+          sessionAgentId !== null &&
+          `${agentInfo.agentId}` !== `${sessionAgentId}`
+        ) {
+          return;
+        }
+        // 会话员工 ID 在不同接口中可能以 number/string 返回，统一成字符串避免输入框默认 @ 节点反复切换。
+        setAgentId?.(`${agentInfo.agentId}`);
         setMyAgentType(agentInfo.agentType);
       }
     },
-    [agentList, employeesList, sessionId]
+    [agentList, currentSession?.objectId, currentSession?.objectType, employeesList, fixedAgentId, sessionId]
   );
 
   const {
@@ -333,6 +415,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     chatUrl,
     sessionId,
     agentType: myAgentType,
+    fixedAgentId,
     addSession,
     onBeforeSend,
   });
@@ -423,10 +506,12 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   }, [agentId]);
 
   useEffect(() => {
+    // 员工详情页可能短暂恢复上一员工的消息，不能因此隐藏当前员工的介绍区域。
+    if (!autoEnterBottomOnMessage) return;
     setIsBottom?.((prev) => {
       return prev || !!lastMsg;
     });
-  }, [lastMsg]);
+  }, [autoEnterBottomOnMessage, lastMsg, setIsBottom]);
 
   useEffect(() => {
     return () => {
@@ -496,8 +581,8 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 projectId={sessionProjectId}
                 // 按钮底色只反映右侧资源小面板状态，文件预览单独打开时保持无底色。
                 resourceWorkspaceOpen={resourceListOpen}
-                // 会话标题和文件预览页签共用同一个列表开关，任何入口都不能清空预览 Tab。
-                onToggleResourceWorkspace={toggleResourceList}
+                // 会话标题按钮关闭资源工作区时，需要同时关闭列表和全部多 Tab 预览。
+                onToggleResourceWorkspace={toggleResourceWorkspaceFromChatTitle}
               />
             )}
             {isBottom && (
@@ -508,7 +593,6 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   hasMore={hasMore}
                   sessionId={sessionId}
                   hideAction={hideAction}
-                  captureRequirementProjectId={sessionProjectId}
                   messageList={messageList}
                   updateMessage={updateMessage}
                   deleteMessage={deleteMessage}
@@ -530,6 +614,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   disabledInput={disabledInput}
                   isBottom={isBottom}
                   cannotAt={cannotAt}
+                  disableInputDraft={disableInputDraft}
                   queryInputProps={{ ...queryInputProps, projectId: sessionProjectId }}
                   lastMsg={lastMsg}
                   sessionId={sessionId}

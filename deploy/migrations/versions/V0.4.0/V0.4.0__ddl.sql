@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS byai.byai_integration_env (
     env_name            VARCHAR(100)    NOT NULL,
     address             VARCHAR(500),
     orchestrator        VARCHAR(20)     NOT NULL DEFAULT 'script',
+    case_source         VARCHAR(16),
     conn_protocol       VARCHAR(16)     NOT NULL DEFAULT 'ssh',
     conn_host           VARCHAR(200),
     conn_port           VARCHAR(10),
@@ -30,6 +31,13 @@ COMMENT ON COLUMN byai.byai_integration_env.project_id IS '所属研发项目ID 
 COMMENT ON COLUMN byai.byai_integration_env.env_name IS '环境名称';
 COMMENT ON COLUMN byai.byai_integration_env.address IS '环境访问地址(被测应用入口)';
 COMMENT ON COLUMN byai.byai_integration_env.orchestrator IS '编排方式 script脚本/jenkins/k8s/webhook';
+-- 用例来源并入环境配置:用例集不再是用户必填的独立概念。
+-- workspace:用例由测试助理写进工作区仓库(byai_project_repo.repo_type='workspace'),
+-- 按约定路径 tests/run.sh 执行,平台不再要用户填仓库/分支/运行命令。新建环境由后端显式赋这个值。
+-- on_env:用例已由运维预置在环境机上,沿用 byai_integration_suite 的既有配置(界面勾选后联动)。
+-- 不给 DEFAULT:NULL 在运行时按 on_env 解释(见 IntegrationRunExecutor.casesOnEnvMachine),
+-- 让存量环境在"代码已上、回填未跑"的窗口期保住既有行为;新建行由应用层显式赋 workspace。
+COMMENT ON COLUMN byai.byai_integration_env.case_source IS '用例来源 workspace跟随工作区仓库(约定 tests/run.sh)/on_env用例已在环境机上';
 COMMENT ON COLUMN byai.byai_integration_env.conn_protocol IS '连接方式 ssh远程/local本机';
 COMMENT ON COLUMN byai.byai_integration_env.conn_host IS 'SSH主机地址';
 COMMENT ON COLUMN byai.byai_integration_env.conn_port IS 'SSH端口';
@@ -102,6 +110,7 @@ CREATE TABLE IF NOT EXISTS byai.byai_integration_run (
     project_id      BIGINT          NOT NULL,
     suite_id        BIGINT          NOT NULL,
     env_id          BIGINT          NOT NULL,
+    requirement_id  BIGINT,
     status          VARCHAR(16)     NOT NULL DEFAULT 'running',
     branch          VARCHAR(100),
     commit_ref      VARCHAR(100),
@@ -110,9 +119,13 @@ CREATE TABLE IF NOT EXISTS byai.byai_integration_run (
     failed          INT             DEFAULT 0,
     skipped         INT             DEFAULT 0,
     kickback_to     VARCHAR(32),
+    kickback_at     TIMESTAMP,
     reason          VARCHAR(1000),
     result_dir      VARCHAR(500),
     suites_json     TEXT,
+    session_id        BIGINT,
+    tester_agent_id   BIGINT,
+    tester_agent_name VARCHAR(200),
     started_at      TIMESTAMP,
     finished_at     TIMESTAMP,
     duration_sec    INT             DEFAULT 0,
@@ -127,6 +140,7 @@ COMMENT ON COLUMN byai.byai_integration_run.run_id IS '执行ID';
 COMMENT ON COLUMN byai.byai_integration_run.project_id IS '所属研发项目ID';
 COMMENT ON COLUMN byai.byai_integration_run.suite_id IS '被执行的测试用例集ID byai_integration_suite.suite_id';
 COMMENT ON COLUMN byai.byai_integration_run.env_id IS '执行所用集成测试环境ID byai_integration_env.env_id';
+COMMENT ON COLUMN byai.byai_integration_run.requirement_id IS '触发本次执行的研发需求ID byai_scan_log_item.item_id;人工单套件执行可空';
 COMMENT ON COLUMN byai.byai_integration_run.status IS '执行状态 running执行中/passed通过/failed失败/error异常/timeout超时';
 COMMENT ON COLUMN byai.byai_integration_run.branch IS '被测分支(展示用)';
 COMMENT ON COLUMN byai.byai_integration_run.commit_ref IS '被测提交(展示用)';
@@ -135,9 +149,15 @@ COMMENT ON COLUMN byai.byai_integration_run.passed IS '通过数';
 COMMENT ON COLUMN byai.byai_integration_run.failed IS '失败数';
 COMMENT ON COLUMN byai.byai_integration_run.skipped IS '跳过数';
 COMMENT ON COLUMN byai.byai_integration_run.kickback_to IS '打回目标环节(失败时记录,自动回灌dev-loop留V2);成功为空';
+COMMENT ON COLUMN byai.byai_integration_run.kickback_at IS '失败打回引擎处理本次执行的时间;非空表示已处理(驱动重工或建缺陷),幂等去重用';
 COMMENT ON COLUMN byai.byai_integration_run.reason IS '失败/异常原因;成功为空';
 COMMENT ON COLUMN byai.byai_integration_run.result_dir IS '远程结果目录(完整日志/报告/截图落地处)';
 COMMENT ON COLUMN byai.byai_integration_run.suites_json IS 'JUnit解析出的套件结果数组JSON,对齐前端IntegrationRunSuiteResult(含failedCases)';
+-- 集成执行改为「测试数字员工」驱动:run 关联下发给测试员工的会话,结果由 poller 从会话回流,不再 SSH 跑用例命令解析 JUnit。
+-- session_id 为空表示尚未成功下发会话(建 run 失败/无默认测试员工);poller 只回收 status=running 且 session_id 非空的行。
+COMMENT ON COLUMN byai.byai_integration_run.session_id IS '承载本次测试的数字员工会话ID;结果回流 poller 按此会话读 [PHASE] tester 打点与结构化结果文件';
+COMMENT ON COLUMN byai.byai_integration_run.tester_agent_id IS '执行本次测试的测试数字员工ID(下发时由 DefaultAgent 解析并冻结,便于回溯)';
+COMMENT ON COLUMN byai.byai_integration_run.tester_agent_name IS '测试数字员工名称(展示用快照)';
 COMMENT ON COLUMN byai.byai_integration_run.started_at IS '开始时间';
 COMMENT ON COLUMN byai.byai_integration_run.finished_at IS '结束时间';
 COMMENT ON COLUMN byai.byai_integration_run.duration_sec IS '总耗时(秒)';
@@ -147,6 +167,10 @@ COMMENT ON COLUMN byai.byai_integration_run.delete_flag IS '删除标记 0正常
 
 CREATE INDEX IF NOT EXISTS idx_integration_run_suite ON byai.byai_integration_run (suite_id, create_time DESC);
 CREATE INDEX IF NOT EXISTS idx_integration_run_project ON byai.byai_integration_run (project_id);
+-- 需求维度反查:需求级批量的聚合看板与失败打回都按需求拉本批 run。
+CREATE INDEX IF NOT EXISTS idx_integration_run_requirement ON byai.byai_integration_run (requirement_id, create_time DESC);
+-- 环境维度历史查询(用例集/环境卡片「日志」按钮按 env 反查执行列表)。
+CREATE INDEX IF NOT EXISTS idx_integration_run_env ON byai.byai_integration_run (env_id, create_time DESC);
 
 -- run 内每一步(环境stage 或 用例集命令)的执行明细,按 seq 有序;日志截断存尾部,完整日志在远程 result_dir。
 CREATE TABLE IF NOT EXISTS byai.byai_integration_run_step (
@@ -185,9 +209,12 @@ ALTER TABLE byai.byai_scan_source ALTER COLUMN source_name TYPE VARCHAR(500);
 ALTER TABLE byai.byai_scan_source ADD COLUMN IF NOT EXISTS source_description TEXT;
 ALTER TABLE byai.byai_scan_source ADD COLUMN IF NOT EXISTS assignee BIGINT;
 ALTER TABLE byai.byai_scan_source ADD COLUMN IF NOT EXISTS due_time TIMESTAMP;
+-- chat 型自动化是应用级的，不归属任何项目，所以 project_id 必须允许为空。
+ALTER TABLE byai.byai_scan_source ALTER COLUMN project_id DROP NOT NULL;
 
+COMMENT ON COLUMN byai.byai_scan_source.project_id IS '所属项目ID；应用级自动化(chat)为空';
 COMMENT ON COLUMN byai.byai_scan_source.source_name IS '扫描源或运营需求名称，运营需求最长500字';
-COMMENT ON COLUMN byai.byai_scan_source.source_type IS '类型：研发渠道dingtalk/github_issue/dingtalk_todo/manual；运营需求collect/publish/analyze';
+COMMENT ON COLUMN byai.byai_scan_source.source_type IS '类型：研发渠道dingtalk/github_issue/dingtalk_todo/manual；运营需求collect/publish/analyze；应用级自动化chat';
 COMMENT ON COLUMN byai.byai_scan_source.source_description IS '运营需求描述，研发扫描源为空';
 COMMENT ON COLUMN byai.byai_scan_source.assignee IS '运营需求负责人用户ID，研发扫描源为空';
 COMMENT ON COLUMN byai.byai_scan_source.due_time IS '运营需求计划完成时间，研发扫描源为空';
@@ -314,15 +341,18 @@ COMMENT ON COLUMN byai_project_account_work.update_by IS '更新人';
 COMMENT ON COLUMN byai_project_account_work.update_time IS '更新时间';
 COMMENT ON COLUMN byai_project_account_work.status_cd IS '状态：00A-有效 / 00X-无效';
 
--- 默认数字员工:三种固定角色(架构/代码/测试)的兜底员工配置。
+-- 默认助理:四种固定角色(架构/需求/研发/测试)的兜底助理配置。
 -- 作用域用 project_id 区分:project_id=0 为全局默认行,>0 为该项目的覆盖行。
 -- 项目某角色列为空 => 该角色回退到全局默认;全局也为空 => 未配置。
 -- 单表两级(global+override)在读取时合并,避免层级表与自关联;冗余存 *_agent_name 供展示,改名不即时失效由上层刷新。
+-- coder_* 列名保留:展示文案从「代码」改为「研发」是纯口径变更,不值得为它做列改名+接口字段联动。
 CREATE TABLE IF NOT EXISTS byai.byai_default_agent (
     id                  BIGINT          NOT NULL,
     project_id          BIGINT          NOT NULL DEFAULT 0,
     architect_agent_id  VARCHAR(64),
     architect_agent_name VARCHAR(200),
+    requirement_agent_id VARCHAR(64),
+    requirement_agent_name VARCHAR(200),
     coder_agent_id      VARCHAR(64),
     coder_agent_name    VARCHAR(200),
     tester_agent_id     VARCHAR(64),
@@ -334,15 +364,17 @@ CREATE TABLE IF NOT EXISTS byai.byai_default_agent (
     delete_flag         CHAR(1)         DEFAULT '0',
     CONSTRAINT pk_byai_default_agent PRIMARY KEY (id)
 );
-COMMENT ON TABLE byai.byai_default_agent IS '默认数字员工表:架构/代码/测试三角色的兜底员工;project_id=0为全局默认,>0为项目覆盖';
+COMMENT ON TABLE byai.byai_default_agent IS '默认助理表:架构/需求/研发/测试四角色的兜底助理;project_id=0为全局默认,>0为项目覆盖';
 COMMENT ON COLUMN byai.byai_default_agent.id IS '主键ID';
 COMMENT ON COLUMN byai.byai_default_agent.project_id IS '作用域:0全局默认行,>0该研发项目覆盖行 byai_project.project_id';
-COMMENT ON COLUMN byai.byai_default_agent.architect_agent_id IS '架构数字员工ID(资源ID);空表示该角色回退全局默认';
-COMMENT ON COLUMN byai.byai_default_agent.architect_agent_name IS '架构数字员工名称(冗余展示)';
-COMMENT ON COLUMN byai.byai_default_agent.coder_agent_id IS '代码数字员工ID(资源ID);空表示该角色回退全局默认';
-COMMENT ON COLUMN byai.byai_default_agent.coder_agent_name IS '代码数字员工名称(冗余展示)';
-COMMENT ON COLUMN byai.byai_default_agent.tester_agent_id IS '测试数字员工ID(资源ID);空表示该角色回退全局默认';
-COMMENT ON COLUMN byai.byai_default_agent.tester_agent_name IS '测试数字员工名称(冗余展示)';
+COMMENT ON COLUMN byai.byai_default_agent.architect_agent_id IS '架构助理ID(资源ID);空表示该角色回退全局默认';
+COMMENT ON COLUMN byai.byai_default_agent.architect_agent_name IS '架构助理名称(冗余展示)';
+COMMENT ON COLUMN byai.byai_default_agent.requirement_agent_id IS '需求助理ID(资源ID);空表示该角色回退全局默认';
+COMMENT ON COLUMN byai.byai_default_agent.requirement_agent_name IS '需求助理名称(冗余展示)';
+COMMENT ON COLUMN byai.byai_default_agent.coder_agent_id IS '研发助理ID(资源ID);空表示该角色回退全局默认';
+COMMENT ON COLUMN byai.byai_default_agent.coder_agent_name IS '研发助理名称(冗余展示)';
+COMMENT ON COLUMN byai.byai_default_agent.tester_agent_id IS '测试助理ID(资源ID);空表示该角色回退全局默认';
+COMMENT ON COLUMN byai.byai_default_agent.tester_agent_name IS '测试助理名称(冗余展示)';
 COMMENT ON COLUMN byai.byai_default_agent.create_by IS '创建人';
 COMMENT ON COLUMN byai.byai_default_agent.create_time IS '创建时间';
 COMMENT ON COLUMN byai.byai_default_agent.update_by IS '更新人';
@@ -429,13 +461,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_scan_item_task_req_repo ON byai.byai_scan_i
 CREATE INDEX IF NOT EXISTS idx_scan_item_task_project ON byai.byai_scan_item_task (project_id, create_time DESC);
 CREATE INDEX IF NOT EXISTS idx_scan_item_task_session ON byai.byai_scan_item_task (session_id);
 
--- 集成执行记录挂上需求维度:需求级批量把每个 run 关联到触发它的需求,聚合看板与失败打回按此反查。
-ALTER TABLE byai.byai_integration_run ADD COLUMN requirement_id BIGINT;
-COMMENT ON COLUMN byai.byai_integration_run.requirement_id IS '触发本次执行的研发需求ID byai_scan_log_item.item_id;人工单套件执行可空';
-CREATE INDEX IF NOT EXISTS idx_integration_run_requirement ON byai.byai_integration_run (requirement_id, create_time DESC);
-ALTER TABLE byai.byai_integration_run ADD COLUMN kickback_at TIMESTAMP;
-COMMENT ON COLUMN byai.byai_integration_run.kickback_at IS '失败打回引擎处理本次执行的时间;非空表示已处理(驱动重工或建缺陷),幂等去重用';
-
 -- 仓库区分工作区与代码仓库:研发项目须有且仅有一个 workspace 仓库承载项目上下文/产出,其余为 code 代码仓库。
 -- 存量行默认 code;工作区先行由应用层保证,DB 仅存类型不强约束唯一,避免历史数据迁移期写入失败。
 ALTER TABLE byai.byai_project_repo ADD COLUMN repo_type VARCHAR(16) NOT NULL DEFAULT 'code';
@@ -451,13 +476,22 @@ COMMENT ON COLUMN byai.byai_project_repo.provider IS '代码平台 github/gitlab
 ALTER TABLE byai.byai_project_repo ADD COLUMN description TEXT;
 COMMENT ON COLUMN byai.byai_project_repo.description IS '仓库用途描述,人工填写;供需求AI预拆判断职责归属与人工理解';
 
+-- 项目描述仍由前后端限制最多500个字符；存储改为TEXT，避免不同数据库对中文VARCHAR长度语义不一致。
+ALTER TABLE byai.byai_project ALTER COLUMN description TYPE TEXT;
+COMMENT ON COLUMN byai.byai_project.description IS '项目描述,前后端限制最多500个字符';
+
 -- 研发项目工作区初始化状态:架构数字员工建成工作区前禁止建需求/启动任务。
 ALTER TABLE byai.byai_project ADD COLUMN init_status VARCHAR(16);
-COMMENT ON COLUMN byai.byai_project.init_status IS '研发项目初始化状态 ready已就绪/pending待初始化/initializing初始化中;仅 develop 未 ready 前禁用建需求与启动任务。无列默认值,应用层建项目时显式赋值';
+COMMENT ON COLUMN byai.byai_project.init_status IS '研发项目初始化状态 pending待初始化/initialized工作区已建好待架构员工/initializing架构员工进行中/ready已就绪;仅 develop 未 ready 前禁用建需求与启动任务。无列默认值,应用层建项目时显式赋值';
 ALTER TABLE byai.byai_project ADD COLUMN build_index VARCHAR(4) NOT NULL DEFAULT 'N';
 COMMENT ON COLUMN byai.byai_project.build_index IS '初始化是否建索引 Y建立/N不建立(默认)';
 ALTER TABLE byai.byai_project ADD COLUMN index_skills VARCHAR(512);
 COMMENT ON COLUMN byai.byai_project.index_skills IS '建索引所需技能包,逗号分隔(如 trellis,superpowers)';
+-- 初始化交给架构数字员工在沙箱里做:必须记住是哪条会话,轮询才知道该读哪个任务状态文件。
+ALTER TABLE byai.byai_project ADD COLUMN init_session_id BIGINT;
+COMMENT ON COLUMN byai.byai_project.init_session_id IS '工作区初始化会话ID(架构数字员工会话);轮询按此会话读 /by/.acp-runs/sessions/<会话ID>.json 判完成。空表示尚未下发初始化';
+ALTER TABLE byai.byai_project ADD COLUMN init_fail_reason VARCHAR(500);
+COMMENT ON COLUMN byai.byai_project.init_fail_reason IS '上次工作区初始化失败/超时原因;重新下发初始化时清空';
 
 -- 运营任务模板只保存模板目录元数据和默认配置；用户补充的任务参数进入会话提示词，不回写系统模板。
 CREATE TABLE IF NOT EXISTS byai.byai_task_template (
@@ -465,11 +499,8 @@ CREATE TABLE IF NOT EXISTS byai.byai_task_template (
     template_type  VARCHAR(32)  NOT NULL,
     template_name  VARCHAR(100) NOT NULL,
     description    VARCHAR(500),
-    icon           VARCHAR(16),
     config         TEXT,
     sort_no        INT          DEFAULT 0,
-    is_builtin     CHAR(1)      DEFAULT 'N',
-    status_cd      VARCHAR(8)   DEFAULT '00A',
     create_by      BIGINT,
     create_time    TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
     update_by      BIGINT,
@@ -480,18 +511,15 @@ CREATE TABLE IF NOT EXISTS byai.byai_task_template (
 
 COMMENT ON TABLE byai.byai_task_template IS '运营任务模板表';
 COMMENT ON COLUMN byai.byai_task_template.template_id IS '模板ID';
-COMMENT ON COLUMN byai.byai_task_template.template_type IS '模板类型 collect/knowledge/content/publish/analyze';
+COMMENT ON COLUMN byai.byai_task_template.template_type IS '模板类型 collect/knowledge/object_discovery/content/publish/analyze';
 COMMENT ON COLUMN byai.byai_task_template.template_name IS '模板名称';
 COMMENT ON COLUMN byai.byai_task_template.description IS '模板卡片说明';
-COMMENT ON COLUMN byai.byai_task_template.icon IS '模板卡片首字标记';
 COMMENT ON COLUMN byai.byai_task_template.config IS '模板默认配置 JSON';
 COMMENT ON COLUMN byai.byai_task_template.sort_no IS '展示顺序';
-COMMENT ON COLUMN byai.byai_task_template.is_builtin IS '是否系统内置 Y/N';
-COMMENT ON COLUMN byai.byai_task_template.status_cd IS '状态 00A有效/00X失效';
 COMMENT ON COLUMN byai.byai_task_template.delete_flag IS '删除标记 0正常/1删除';
 
 CREATE INDEX IF NOT EXISTS idx_task_template_type
-    ON byai.byai_task_template (template_type, status_cd, delete_flag, sort_no);
+    ON byai.byai_task_template (template_type, delete_flag, sort_no);
 -- 技能组资源类型及成员关系索引。
 COMMENT ON COLUMN byai.ss_resource.resource_biz_type IS '资源类型：DIG_EMPLOYEE=数字员工，AGENT=智能体，KG_DOC=文档知识库，KG_DB=数据知识库，KG_QA=问答知识库，KG_TERM=术语知识库，TOOLKIT=插件，MCP=MCP服务，TOOL=工具，MCP_TOOL=MCP工具，OBJECT=对象，ONTOLOGY_BASE=本体库，SCENE=场景，VIEW=视图，ACTION=动作，TAG=标签资源，MAN_USER=管理用户资源，MAN_ORG=管理组织资源，SKILL=技能，SKILL_GROUP=技能组';
 
@@ -577,17 +605,6 @@ COMMENT ON COLUMN project_init_audit_log.end_time IS '结束时间 - 操作结�
 COMMENT ON COLUMN project_init_audit_log.created_at IS '创建时间 - 数据库记录创建时间';
 COMMENT ON COLUMN project_init_audit_log.updated_at IS '更新时间 - 数据库记录更新时间';
 
--- 集成执行改为「测试数字员工」驱动:run 关联下发给测试员工的会话,结果由 poller 从会话回流,不再 SSH 跑用例命令解析 JUnit。
--- session_id 为空表示尚未成功下发会话(建 run 失败/无默认测试员工);poller 只回收 status=running 且 session_id 非空的行。
-ALTER TABLE byai.byai_integration_run ADD COLUMN session_id BIGINT;
-COMMENT ON COLUMN byai.byai_integration_run.session_id IS '承载本次测试的数字员工会话ID;结果回流 poller 按此会话读 [PHASE] tester 打点与结构化结果文件';
-ALTER TABLE byai.byai_integration_run ADD COLUMN tester_agent_id BIGINT;
-COMMENT ON COLUMN byai.byai_integration_run.tester_agent_id IS '执行本次测试的测试数字员工ID(下发时由 DefaultAgent 解析并冻结,便于回溯)';
-ALTER TABLE byai.byai_integration_run ADD COLUMN tester_agent_name VARCHAR(200);
-COMMENT ON COLUMN byai.byai_integration_run.tester_agent_name IS '测试数字员工名称(展示用快照)';
--- 环境维度历史查询(用例集/环境卡片「日志」按钮按 env 反查执行列表)。
-CREATE INDEX IF NOT EXISTS idx_integration_run_env ON byai.byai_integration_run (env_id, create_time DESC);
-
 /**项目关联本体对象文件**/
 create table byai_project_object_file
 (
@@ -639,3 +656,45 @@ CREATE TABLE IF NOT EXISTS byai.byai_project_resource
 
 CREATE INDEX IF NOT EXISTS idx_byai_project_resource_project
     ON byai.byai_project_resource (project_id, resource_type, sort_no);
+
+
+-- 数字员工组功能相关索引
+CREATE UNIQUE INDEX IF NOT EXISTS uk_ss_resource_rel_dig_employee_group_member
+    ON byai.ss_resource_rel_detail (resource_id, rel_resource_id)
+    WHERE rel_type_name = 'DIG_EMPLOYEE_GROUP_MEMBER' AND rel_status = 1;
+
+CREATE INDEX IF NOT EXISTS idx_ss_resource_version_active_resource
+    ON byai.ss_resource_version (resource_id, version_status, resource_version_id);
+
+-- OAuth2 真实凭证与连接器授权绑定分离：本表只保存 SM4 密文，绝不保存明文 token 或 client secret。
+CREATE TABLE IF NOT EXISTS byai.byai_connector_credential_secret (
+    credential_id             BIGINT       NOT NULL,
+    credential_reference      VARCHAR(64)  NOT NULL,
+    provider_code             VARCHAR(64)  NOT NULL,
+    user_id                   VARCHAR(64)  NOT NULL,
+    connector_id              BIGINT       NOT NULL,
+    access_token_cipher       TEXT         NOT NULL,
+    refresh_token_cipher      TEXT,
+    token_type                VARCHAR(32),
+    granted_scopes            TEXT,
+    access_expire_time        TIMESTAMP,
+    refresh_expire_time       TIMESTAMP,
+    status_cd                 CHAR(3)      NOT NULL DEFAULT '00A',
+    create_time               TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time               TIMESTAMP,
+    CONSTRAINT pk_byai_connector_credential_secret PRIMARY KEY (credential_id),
+    CONSTRAINT uk_byai_connector_credential_secret_reference UNIQUE (credential_reference)
+);
+
+CREATE INDEX IF NOT EXISTS idx_byai_connector_credential_secret_active
+    ON byai.byai_connector_credential_secret (user_id, connector_id, provider_code)
+    WHERE status_cd = '00A';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_byai_connector_credential_secret_active
+    ON byai.byai_connector_credential_secret (user_id, connector_id, provider_code)
+    WHERE status_cd = '00A';
+
+COMMENT ON TABLE byai.byai_connector_credential_secret IS '连接器 OAuth2 等真实凭证密文；授权绑定表仅保存 credential_reference';
+COMMENT ON COLUMN byai.byai_connector_credential_secret.credential_reference IS '随机 UUID 凭证引用，不含 token';
+COMMENT ON COLUMN byai.byai_connector_credential_secret.access_token_cipher IS 'SM4 加密的 access token，禁止写入日志或响应';
+COMMENT ON COLUMN byai.byai_connector_credential_secret.refresh_token_cipher IS 'SM4 加密的 refresh token，允许为空';

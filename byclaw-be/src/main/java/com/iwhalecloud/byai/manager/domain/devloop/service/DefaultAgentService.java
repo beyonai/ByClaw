@@ -9,9 +9,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.Date;
+import java.util.function.Function;
 
 /**
- * 默认数字员工领域服务。
+ * 默认助理领域服务。
  * 每个作用域(全局 project_id=0 或某项目)仅一行有效配置,保存走 upsert;
  * 解析时把项目覆盖合并到全局默认之上,得到各角色生效员工。
  */
@@ -55,6 +56,8 @@ public class DefaultAgentService {
         // 覆盖式更新:各角色字段整体以入参为准(空即清除该角色指定),避免残留旧值造成"删不掉"。
         existing.setArchitectAgentId(input.getArchitectAgentId());
         existing.setArchitectAgentName(input.getArchitectAgentName());
+        existing.setRequirementAgentId(input.getRequirementAgentId());
+        existing.setRequirementAgentName(input.getRequirementAgentName());
         existing.setCoderAgentId(input.getCoderAgentId());
         existing.setCoderAgentName(input.getCoderAgentName());
         existing.setTesterAgentId(input.getTesterAgentId());
@@ -74,23 +77,23 @@ public class DefaultAgentService {
         DefaultAgent override = projectId == null ? null : findByScope(projectId);
         DefaultAgent merged = new DefaultAgent();
         merged.setProjectId(projectId);
-        merged.setArchitectAgentId(pick(override == null ? null : override.getArchitectAgentId(),
-            global == null ? null : global.getArchitectAgentId()));
-        merged.setArchitectAgentName(pick(override == null ? null : override.getArchitectAgentName(),
-            global == null ? null : global.getArchitectAgentName()));
-        merged.setCoderAgentId(pick(override == null ? null : override.getCoderAgentId(),
-            global == null ? null : global.getCoderAgentId()));
-        merged.setCoderAgentName(pick(override == null ? null : override.getCoderAgentName(),
-            global == null ? null : global.getCoderAgentName()));
-        merged.setTesterAgentId(pick(override == null ? null : override.getTesterAgentId(),
-            global == null ? null : global.getTesterAgentId()));
-        merged.setTesterAgentName(pick(override == null ? null : override.getTesterAgentName(),
-            global == null ? null : global.getTesterAgentName()));
+        merged.setArchitectAgentId(pick(override, global, DefaultAgent::getArchitectAgentId));
+        merged.setArchitectAgentName(pick(override, global, DefaultAgent::getArchitectAgentName));
+        merged.setRequirementAgentId(pick(override, global, DefaultAgent::getRequirementAgentId));
+        merged.setRequirementAgentName(pick(override, global, DefaultAgent::getRequirementAgentName));
+        merged.setCoderAgentId(pick(override, global, DefaultAgent::getCoderAgentId));
+        merged.setCoderAgentName(pick(override, global, DefaultAgent::getCoderAgentName));
+        merged.setTesterAgentId(pick(override, global, DefaultAgent::getTesterAgentId));
+        merged.setTesterAgentName(pick(override, global, DefaultAgent::getTesterAgentName));
         return merged;
     }
 
-    /** 项目覆盖值优先,空(null/空串)则回退全局默认值。 */
-    private String pick(String override, String fallback) {
-        return override != null && !override.isEmpty() ? override : fallback;
+    /** 取单个角色字段:项目覆盖值优先,空(null/空串)或无覆盖行则回退全局默认行。 */
+    private String pick(DefaultAgent override, DefaultAgent global, Function<DefaultAgent, String> field) {
+        String value = override == null ? null : field.apply(override);
+        if (value != null && !value.isEmpty()) {
+            return value;
+        }
+        return global == null ? null : field.apply(global);
     }
 }
