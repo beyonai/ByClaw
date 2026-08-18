@@ -90,7 +90,9 @@ packages/by-conductor/            Orchestration core + Repository/Connector SPI 
   src/repositories.ts             Repository/Queue/Claim/Checkpoint/Credential PORTS
   src/memory.ts                   InMemory* implementations (tests only)
 packages/storage-postgres/        migrations.ts + postgres-database.ts (SQL Repository impls)
-packages/connectors/openclaw-by-framework/   OpenClaw Connector built on @byclaw/by-framework
+packages/connectors/by-framework-common/     Shared Gateway/Redis transport for by-framework Connectors
+packages/connectors/openclaw-by-framework/   Thin OpenClaw routing Connector
+packages/connectors/code-by-framework/       Thin Code routing Connector
 .dev/                             PROJECT_CONTEXT.md, progress, plans, contracts
 e2e/                              HTTP/SSE end-to-end tests (own tsconfig + vitest config)
 legacy/                           Pre-refactor reference; excluded from vitest and workspace
@@ -101,8 +103,8 @@ legacy/                           Pre-refactor reference; excluded from vitest a
 ```
 app → by-conductor
 app → storage-postgres → by-conductor
-app → connector-openclaw-by-framework → by-conductor
-connector-openclaw-by-framework → by-framework (Redis transport)
+app → connector-{openclaw,code}-by-framework → connector-by-framework-common
+connector-by-framework-common → by-conductor + by-framework (Redis transport)
 ```
 
 `by-conductor` must stay transport-neutral. **Do not import Fastify, Redis, `by-framework`, PostgreSQL (`pg`), or any concrete Connector/Repository from inside `packages/by-conductor/src/`.** It only defines ports (`repositories.ts`) and the orchestration that consumes them. New runtimes (Hermes, Codex, etc.) belong in a new `packages/connectors/*-*/` package; new storage backends belong in a new `packages/storage-*` package; both are registered from `app/runtime.ts`, never patched into the Leader.
@@ -136,7 +138,9 @@ INBOUND (two paths, same ingress chain)
         ↓ OUTBOUND
   DelegationService.execute     aggregates Connector events; status+event committed in one txn
   ConnectorRegistry.require     strict lookup; missing Connector = hard error, no fallback
-  OpenClawByFrameworkConnector  dispatches via by-framework GatewayClient to BYCLAW_EXE_{userCode}
+  ByFrameworkConnector         shared Gateway/Redis transport, selected by thin runtime Connector
+  OpenClawByFrameworkConnector routes to BYCLAW_EXE_{userCode}
+  CodeByFrameworkConnector     routes to BYCLAW_CODE_{userCode}
         resume(): reconnects Redis stream from persisted cursor, does NOT re-sendMessage
   AgentResult → Leader synthesizes → RunEvents appended to event store in the completion txn
         (Run terminal + Pi checkpoint COMMIT + sessions.context_revision + credential delete, one txn)

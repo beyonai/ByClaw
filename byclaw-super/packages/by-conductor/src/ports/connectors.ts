@@ -105,7 +105,12 @@ export interface AgentConnector {
   /** 从已持久化 externalRef/cursor 重连同一个外部执行，不得再次投递任务。 */
   resume?(
     ref: ExternalExecutionRef,
-    context: { signal: AbortSignal; cursor?: string },
+    context: {
+      signal: AbortSignal;
+      cursor?: string;
+      /** 当前 Run 的临时 metadata；用于重连后继续透传，不写入 externalRef。 */
+      metadata?: Record<string, unknown>;
+    },
   ): Promise<ConnectorExecution>;
 
   /** 检查 Connector 自身依赖是否可用；具体目标 Agent 的在线性仍在投递时校验。 */

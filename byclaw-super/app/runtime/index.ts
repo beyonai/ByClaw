@@ -7,6 +7,7 @@ import {
   type PiRuntimeConfig,
 } from "@byclaw/by-conductor";
 import { createRedis } from "@byclaw/by-framework";
+import { CodeByFrameworkConnector } from "@byclaw/connector-code-by-framework";
 import { OpenClawByFrameworkConnector } from "@byclaw/connector-openclaw-by-framework";
 import { ThirdPartyA2aConnector } from "@byclaw/connector-third-party-a2a";
 import { ExecutionDescriptorClient } from "@byclaw/connector-third-party-common";
@@ -120,6 +121,13 @@ function createConnectors(config: AppConfig) {
     cancelConfirmationTimeoutMs: config.openClaw.cancelConfirmationTimeoutMs,
   });
   connectors.register(openClaw);
+  const code = new CodeByFrameworkConnector({
+    redis,
+    sourceAgentType: config.worker.agentType,
+    firstEventTimeoutMs: config.openClaw.firstEventTimeoutMs,
+    cancelConfirmationTimeoutMs: config.openClaw.cancelConfirmationTimeoutMs,
+  });
+  connectors.register(code);
   const descriptors = new ExecutionDescriptorClient({
     ...config.byClawBe,
     pathPrefix: config.thirdPartyAgents.descriptorPath,
@@ -145,7 +153,12 @@ function createConnectors(config: AppConfig) {
     }),
   );
   connectors.register(new ThirdPartyPageConnector({ descriptors }));
-  return { connectors, redis, openClaw, endpointResolver };
+  return {
+    connectors,
+    redis,
+    byFrameworkConnectors: [openClaw, code],
+    endpointResolver,
+  };
 }
 
 /** 编排核心：委派服务 + Pi Leader + 数字员工授权目录 + 群聊/资源模型提供方。 */
@@ -242,7 +255,8 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
   }
 
   // 2) 出站传输：Connector 与 ByClaw BE 服务发现共用同一个 Redis 连接。
-  const { connectors, redis, openClaw, endpointResolver } = createConnectors(config);
+  const { connectors, redis, byFrameworkConnectors, endpointResolver } =
+    createConnectors(config);
 
   // 3) 编排核心：委派服务 + Pi Leader + 数字员工授权目录。
   const {
@@ -373,7 +387,9 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
       await runService.dispose();
       await serviceRegistrar.close();
       await app.close();
-      await openClaw.close();
+      await Promise.all(
+        byFrameworkConnectors.map((connector) => connector.close()),
+      );
       await redis.quit();
       await database.close();
     },

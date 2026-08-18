@@ -1,4 +1,5 @@
 import type { AgentProfile } from "@byclaw/by-conductor";
+import { CODE_BY_FRAMEWORK_CONNECTOR_ID } from "@byclaw/connector-code-by-framework";
 import { OPENCLAW_BY_FRAMEWORK_CONNECTOR_ID } from "@byclaw/connector-openclaw-by-framework";
 import { THIRD_PARTY_A2A_CONNECTOR_ID } from "@byclaw/connector-third-party-a2a";
 import {
@@ -62,7 +63,9 @@ export function toAgentProfiles(
 /** 根据资源创建方式和集成类型选择执行链路。 */
 function resolveConnectorId(item: AgentResourceRecord): string {
   if (normalizeEnum(item.createType) !== "FROM_THIRD") {
-    return OPENCLAW_BY_FRAMEWORK_CONNECTOR_ID;
+    return stringValue(item.agentType) === "011"
+      ? CODE_BY_FRAMEWORK_CONNECTOR_ID
+      : OPENCLAW_BY_FRAMEWORK_CONNECTOR_ID;
   }
   switch (normalizeEnum(item.integrationType)) {
     case "INTERFACE":

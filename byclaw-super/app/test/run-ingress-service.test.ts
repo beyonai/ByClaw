@@ -89,6 +89,12 @@ describe("RunIngressService self-exclusion", () => {
       message: "hi",
       externalSessionId: "11034160",
       parentMessageId: "gateway-message-1",
+      metadata: {
+        channelExtension: { source: "byclaw-be" },
+        externalSessionId: "untrusted-session",
+        parentMessageId: "untrusted-message",
+        "Beyond-Token": "untrusted-token",
+      },
     });
 
     expect(runService.createSessionRun.mock.calls[0][0].ingressContext).toEqual({
@@ -96,8 +102,10 @@ describe("RunIngressService self-exclusion", () => {
       parentMessageId: "gateway-message-1",
     });
     expect(runService.createSessionRun.mock.calls[0][0].metadata).toMatchObject({
+      channelExtension: { source: "byclaw-be" },
       externalSessionId: "11034160",
       parentMessageId: "gateway-message-1",
+      "Beyond-Token": PRINCIPAL_TOKEN,
     });
   });
 

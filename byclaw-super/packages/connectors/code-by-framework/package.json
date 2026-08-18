@@ -1,9 +1,9 @@
 {
-  "name": "@byclaw/connector-openclaw-by-framework",
+  "name": "@byclaw/connector-code-by-framework",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "OpenClaw connector transported by @byclaw/by-framework",
+  "description": "ByClaw Code connector transported by @byclaw/by-framework",
   "files": ["dist"],
   "exports": {
     ".": {
