@@ -619,7 +619,9 @@ public class RouteService {
         if (chatDto.getProjectId() != null) {
             JSONObject projectInfo = new JSONObject();
             projectInfo.put("project_id", chatDto.getProjectId());
-            projectInfo.put("workspace", Paths.get(ByClawUserWorkspacePaths.USER_FS_OBJECT_KEY_ROOT_PREFIX, "projects", String.valueOf(chatDto.getProjectId())));
+            // Serialize the filesystem path as text so JSON consumers do not receive a file:// URI.
+            projectInfo.put("workspace", Paths.get(ByClawUserWorkspacePaths.USER_FS_OBJECT_KEY_ROOT_PREFIX,
+                "projects", String.valueOf(chatDto.getProjectId())).toString());
             metadata.put("project_info", projectInfo);
         }
 
