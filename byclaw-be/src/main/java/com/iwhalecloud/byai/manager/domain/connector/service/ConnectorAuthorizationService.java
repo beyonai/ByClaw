@@ -40,8 +40,10 @@ import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorAuthMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import lombok.extern.slf4j.Slf4j;
 
 /** 提供与前端契约一致的连接器授权任务接口。 */
+@Slf4j
 @Service
 public class ConnectorAuthorizationService {
 
@@ -193,6 +195,7 @@ public class ConnectorAuthorizationService {
         try {
             commandCatalog = resolveCommandCatalog(connector);
         } catch (InvalidConnectorManifestException e) {
+            log.warn("[ConnectorAuth] 连接器 {} 运行时配置无效: {}", connector.getConnectorId(), e.getMessage(), e);
             return failed(
                 null,
                 connector.getConnectorId(),
@@ -450,6 +453,8 @@ public class ConnectorAuthorizationService {
             ManifestCommandCatalog commandCatalog = resolveSessionCommandCatalog(session);
             result = provider.queryStatus(providerContext(session, providerState, commandCatalog));
         } catch (InvalidConnectorManifestException e) {
+            log.warn("[ConnectorAuth] 授权会话 {} 状态查询时连接器 {} 运行时配置无效: {}",
+                session.authorizationId(), session.connectorId(), e.getMessage(), e);
             cancelProviderBestEffort(provider, providerContext(session, providerState, null));
             return transitionProviderTerminal(
                 session,
@@ -1097,6 +1102,7 @@ public class ConnectorAuthorizationService {
             String authorizationId,
             Long connectorId,
             RuntimeException error) {
+        log.warn("[ConnectorAuth] 授权 {} 绑定失败: {}", authorizationId, error.getMessage(), error);
         return failed(
             authorizationId,
             connectorId,
