@@ -88,7 +88,7 @@ describe("ByClaw BE Agent Catalog", () => {
     );
   });
 
-  it("maps data, QA and coding employees to their dedicated by-framework workers", async () => {
+  it("maps data, QA and code employees to their dedicated connectors", async () => {
     const catalog = new ByClawBeAgentCatalog({
       baseUrl: "http://127.0.0.1:8086",
       timeoutMs: 1_000,
@@ -133,7 +133,7 @@ describe("ByClaw BE Agent Catalog", () => {
     ).toEqual([
       ["3001", "openclaw-by-framework", "BYCLAW_DATA"],
       ["3002", "openclaw-by-framework", "BYCLAW_QA"],
-      ["3003", "openclaw-by-framework", "BYCLAW_CODE"],
+      ["3003", "code-by-framework", undefined],
     ]);
   });
 

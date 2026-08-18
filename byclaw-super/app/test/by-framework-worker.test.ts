@@ -26,6 +26,9 @@ describe("ByClawSuperGatewayWorker", () => {
       logger,
     });
     const command = askCommand();
+    (command.header.metadata as Record<string, unknown>).channelExtension = {
+      source: "byclaw-be",
+    };
 
     const result = await worker.processCommand(
       command,
@@ -37,6 +40,11 @@ describe("ByClawSuperGatewayWorker", () => {
       thinkingLevel: "off",
       externalSessionId: "session-1",
       parentMessageId: "message-1",
+      metadata: {
+        "Beyond-Token": "secret-token",
+        "System-Code": "system-1",
+        channelExtension: { source: "byclaw-be" },
+      },
       beyondToken: "secret-token",
       systemCode: "system-1",
     });
@@ -565,6 +573,10 @@ describe("ByClawSuperGatewayWorker", () => {
       thinkingLevel: "off",
       externalSessionId: "session-1",
       parentMessageId: "message-1",
+      metadata: {
+        "Beyond-Token": "secret-token",
+        "System-Code": "system-1",
+      },
       beyondToken: "secret-token",
       systemCode: "system-1",
     });
@@ -574,6 +586,10 @@ describe("ByClawSuperGatewayWorker", () => {
       thinkingLevel: "off",
       externalSessionId: "session-1",
       parentMessageId: "message-1",
+      metadata: {
+        "Beyond-Token": "secret-token",
+        "System-Code": "system-1",
+      },
       beyondToken: "secret-token",
       systemCode: "system-1",
     });
@@ -608,6 +624,10 @@ describe("ByClawSuperGatewayWorker", () => {
       thinkingLevel: "off",
       externalSessionId: "session-1",
       parentMessageId: "message-1",
+      metadata: {
+        "Beyond-Token": "a-token",
+        "System-Code": "system-1",
+      },
       beyondToken: "a-token",
       systemCode: "system-1",
     });
