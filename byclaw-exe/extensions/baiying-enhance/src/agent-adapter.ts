@@ -108,6 +108,8 @@ export type AdaptedManagedAgent = {
     sourceJson?: unknown;
     /** Baiying `prologue.modelId`, used to resolve model transport details from Redis. */
     baiyingModelId?: string;
+    /** Snapshot of the employee's image model selection; runtime calls re-read Redis. */
+    imageModelId?: string;
     /** SSE endpoint for INTERFACE-type agents. */
     agentSseUrl?: string;
     /** Home URL for PAGE-type / home-page based backend agents. */
@@ -341,10 +343,25 @@ function normalizeAgentListTools(
             : [];
     return allow.length > 0
         ? {
-              allow: Array.from(new Set([...allow, "baiying_call", BYCLAW_CHAT_CONTEXT_TOOL_NAME, ...extraTools])),
+              allow: Array.from(
+                  new Set([
+                      ...allow,
+                      "baiying_call",
+                      "image_generate",
+                      BYCLAW_CHAT_CONTEXT_TOOL_NAME,
+                      ...extraTools,
+                  ]),
+              ),
           }
         : {
-              alsoAllow: Array.from(new Set(["baiying_call", BYCLAW_CHAT_CONTEXT_TOOL_NAME, ...extraTools])),
+              alsoAllow: Array.from(
+                  new Set([
+                      "baiying_call",
+                      "image_generate",
+                      BYCLAW_CHAT_CONTEXT_TOOL_NAME,
+                      ...extraTools,
+                  ]),
+              ),
           };
 }
 
@@ -456,6 +473,7 @@ function adaptRawBaiyingDetail(params: {
         listEntry,
         systemPrompt: instructions,
         baiyingModelId: extractBaiyingPrologueModelId(detail),
+        imageModelId: normalizeModelId(detail.imageModelId),
         integrationType,
         agentSseUrl,
         agentHomeUrl,
