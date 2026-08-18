@@ -1,13 +1,40 @@
+---
+name: site-crawl
+description: >
+  爬取一个产品的文档站/功能说明并产出产品解读报告。用 sitemap.xml / llms.txt 发现全站 URL，
+  用 crawl-seed / crawl-next / crawl-mark 维护 frontier，取内容仍委派 bycli web read。
+  这是 knowledge-collection 深化研究流程中的抓取战术，不可独立于采集编排器调用。
+triggers:
+  - "爬这个产品的文档"
+  - "整理这个产品的功能说明"
+  - "生成产品解读报告"
+  - "通读官方文档站"
+  - "爬完这个站"
+mutating: true
+---
+
 # 站点爬取与产品解读
 
 本文档覆盖「爬取一个产品的文档站/功能说明，产出产品解读报告」这条链路。
 爬取只负责**扩大覆盖面**，取内容仍然一律委派来源执行器（公共网页 `bycli web read`），
 frontier 状态由 `scripts/crawl-state.mjs` 管理并落在 `session.json` 的 `crawl` 子树。
+本文中的 `scripts/` 路径都相对 **knowledge-collection 技能根**，不是相对本子 skill 目录。
 
 ## 与单页采集的分界
 
 - 目标是**一个已知 URL**（单页、单篇文章）→ 不需要 frontier，直接 `bycli web read` → `normalize` → `collect`。
 - 目标是**一个站点/一批文档**（"爬这个产品的文档"、"整理这个产品的功能说明"）→ 走本文档的 frontier 流程。
+
+## 与深化研究的关系
+
+本文档是一种**抓取战术**，不是与深化研究并列的另一条链路。
+用户给的是产品名而非文档站 URL 时（"分析 xxx 这个产品"），入口仍是
+[../research-methodology.md](../research-methodology.md) 的默认深化研究流程：
+`init --mode research` → `plan`（双信源初检，文档站域名在这一步查出来，不要凭产品名猜域名）
+→ 逐层 `branch`。其中"通读官方文档站"这一类分支的抓取环节才使用本文档的 sitemap + frontier 流程，
+产物照常经 `collect` 登记进同一份 inventory，`report` 引用 `itemId` 不变。
+
+只有用户已经直接给出文档站 URL、且明确只要"爬完这个站"时，才可以用 `--mode collection` 单独跑本流程。
 
 ## Step 1：发现全站 URL（优先 sitemap，不要靠搜索引擎）
 
@@ -80,18 +107,16 @@ node scripts/knowledge-collection.mjs crawl-mark --session-dir <dir> \
 `fetched` 的正文经 `normalize` 生成 `sanitized/items/*.md`，再按既有契约 `collect` 登记 inventory。
 frontier 只管覆盖面，inventory 仍是唯一的证据来源，报告引用 `itemId` 不变。
 
-批量导入注意两点（实测踩过）：
+批量导入注意（实测踩过）：`normalize --markdown-dir` 逐篇从正文头部 `> 原文链接: <URL>` 取各自的 `sourceUrl`；
+inventory 身份是 `sourceSkill + sourceUrl`，所以**不要**用一个 `--source-url` 覆盖整个目录，否则多篇会撞成同一条身份。
 
-- `normalize --markdown-dir` 逐篇从正文头部 `> 原文链接: <URL>` 取各自的 `sourceUrl`；inventory 身份是
-  `sourceSkill + sourceUrl`，所以**不要**用一个 `--source-url` 覆盖整个目录，否则多篇会撞成同一条身份。
-- 物化状态只在 `init` 建会话时按文件存在性推导一次，事后 `export-views` 不会补算。已经抓好一批正文再建会话时，
-  用 `init --collection-result-input-file` 配合 `--metadata-input-file` 预声明
-  `materialization: {status:"materialized", markdownPath, sanitizedPath, pendingArtifactCleanup: [], reason: null}`；
-  `collectionResult.backend` 决定 `sourceSkill`，缺失会导致 `collect` 报 “sourceSkill 必须是非空字符串”。
+已经抓好一批正文再建会话时（物化状态只在 `init` 时推导一次，事后不补算），照抄
+[../collection-contract.md](../collection-contract.md) 的「已抓好一批正文后登记会话」，
+不要凭报错逐字段试。
 
 ## Step 4：登录态与失败处理
 
-generic webpage 在 [source-routing.md](source-routing.md) 路由表里**没有兜底执行器**，`bycli` 失败即停止并报告。
+generic webpage 在 [../source-routing.md](../source-routing.md) 路由表里**没有兜底执行器**，`bycli` 失败即停止并报告。
 SaaS 控制台内的功能说明页常见 146 bytes 级别的登录墙响应，这类页面：
 
 1. 记 `status=failed` 并写明 `reason`，不要重试其他工具；

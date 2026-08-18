@@ -26,6 +26,9 @@ import {
   cmdCollect, cmdInspect, cmdRun, cmdCleanup, cmdUnlockStale, cmdSetRetention,
   cmdRewriteImageLinks, cmdExportViews, collectionStatus,
 } from './collection-state.mjs';
+import {
+  cmdCrawlSeed, cmdCrawlNext, cmdCrawlMark, cmdCrawlStatus,
+} from './crawl-state.mjs';
 import { sessionPaths } from './session.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -192,6 +195,42 @@ const COMMAND_SPECS = {
     title: '由 session.json 生成 sanitized/metadata.json 与 collection-result.json',
     args: { '--session-dir': '必填' },
     example: 'knowledge-collection.mjs export-views --session-dir /tmp/kc1',
+  }),
+  'crawl-seed': defineCommand({
+    group: 'crawl',
+    title: '用发现结果建立/扩充待爬队列(不取内容)',
+    args: {
+      '--session-dir': '必填',
+      '--urls-file': '必填。含 URL 的文件;接受 sitemap XML(<loc>)、Markdown 链接或裸 URL',
+      '--scope-prefix': '可选。同域/同路径前缀白名单,超出范围的 URL 丢弃',
+      '--max-pages': '可选。正整数;frontier 容量上限,超出部分记为 overCap',
+      '--depth': '可选。正整数,默认 1;记录本次允许的最大层数',
+    },
+    example: "knowledge-collection.mjs crawl-seed --session-dir /tmp/kc1 --urls-file /tmp/sitemap.md --scope-prefix https://docs.example.com/ --max-pages 40",
+  }),
+  'crawl-next': defineCommand({
+    group: 'crawl',
+    title: '取出待抓 URL 交给来源执行器(只读)',
+    args: {
+      '--session-dir': '必填',
+      '--limit': '可选。正整数,默认 10;单批返回上限',
+    },
+    example: 'knowledge-collection.mjs crawl-next --session-dir /tmp/kc1 --limit 5',
+  }),
+  'crawl-mark': defineCommand({
+    group: 'crawl',
+    title: '登记一批抓取结果(pending → fetched/failed/skipped)',
+    args: {
+      '--session-dir': '必填',
+      '--mark-json-file': '必填。位于 .post-processing-inputs/ 内;{results:[{url,status,itemId?,reason?}]}',
+    },
+    example: 'knowledge-collection.mjs crawl-mark --session-dir /tmp/kc1 --mark-json-file /tmp/kc1/.post-processing-inputs/mark.json',
+  }),
+  'crawl-status': defineCommand({
+    group: 'crawl',
+    title: '查看 frontier 计数与范围配置',
+    args: { '--session-dir': '必填' },
+    example: 'knowledge-collection.mjs crawl-status --session-dir /tmp/kc1',
   }),
   status: defineCommand({
     group: 'summary',
@@ -473,6 +512,22 @@ function main() {
   }
   if (canonical === 'cleanup') {
     render(cmdCleanup(paths, args), compactRequested(args));
+    return;
+  }
+  if (canonical === 'crawl-seed') {
+    render(cmdCrawlSeed(paths, args), compactRequested(args));
+    return;
+  }
+  if (canonical === 'crawl-next') {
+    render(cmdCrawlNext(paths, args), compactRequested(args));
+    return;
+  }
+  if (canonical === 'crawl-mark') {
+    render(cmdCrawlMark(paths, args), compactRequested(args));
+    return;
+  }
+  if (canonical === 'crawl-status') {
+    render(cmdCrawlStatus(paths), compactRequested(args));
     return;
   }
   if (canonical === 'unlock-stale') {

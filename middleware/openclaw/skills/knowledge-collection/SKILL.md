@@ -89,10 +89,19 @@ collection-result.json + sanitized/metadata.json）首次读写自动迁移为 s
 ## 站点爬取（多页文档）
 
 目标是**一个站点或一批文档**（"爬这个产品的文档"、"整理这个产品的功能说明"、"生成产品解读报告"）时，
-加载并遵循 [references/site-crawl.md](references/site-crawl.md)：先用 sitemap.xml / llms.txt 发现全站 URL，
+加载并遵循 [references/site-crawl/SKILL.md](references/site-crawl/SKILL.md)：先用 sitemap.xml / llms.txt 发现全站 URL，
 再用 `crawl-seed` / `crawl-next` / `crawl-mark` 维护 frontier，取内容仍按「来源路由」委派 `bycli web read`。
 
+站点爬取是**抓取战术，不是独立链路**：用户给产品名而非文档站 URL（"分析 xxx 这个产品"）时，
+入口仍是上面的深化研究默认模式，文档站域名由 `plan` 的双信源初检查出，不得凭产品名猜域名；
+frontier 流程只用在"通读官方文档站"这类分支的抓取环节。
+用户已直接给出文档站 URL 且只要"爬完这个站"时，才用 `--mode collection` 单独跑。
+
 目标是**单个已知 URL** 时不需要 frontier，直接按常规采集链路执行。
+
+`references/` 下的文档与子 skill 索引见 [references/manifest.json](references/manifest.json)：
+`skills[]` 是子 skill（`<name>/SKILL.md`，带 `triggers`，命中时读完整文件后按其流程执行），
+`references[]` 是按需加载的说明文档。子 skill 是本技能内部的战术单元，不可独立于采集编排器调用。
 
 `crawl-*` 命令只管覆盖面与续跑，不取内容、不产出正文；`--max-pages` 放弃的页数与 `failed` 页面必须写入报告的
 「覆盖缺口」章节，不得让部分覆盖读起来像全站覆盖。
