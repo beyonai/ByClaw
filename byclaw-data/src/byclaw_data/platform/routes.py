@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from collections.abc import Callable
-from typing import AsyncIterator
+from typing import Any, AsyncIterator, Awaitable
 
 from by_framework.core.discovery import ServiceRegistry
 
@@ -82,19 +83,72 @@ def create_app(**kwargs):
 
 
 def _wrap_lifespan_with_discovery(app) -> None:
-    """Wrap the app's lifespan with service discovery registration."""
+    """Wrap the app's lifespan with discovery and background workers."""
     platform_lifespan = app.router.lifespan_context
 
     @asynccontextmanager
     async def _lifespan(application) -> AsyncIterator[None]:
         async with platform_lifespan(application):
             await register_service(application)
+            _start_term_sync_worker(application)
             try:
                 yield
             finally:
+                await _stop_term_sync_worker(application)
                 await unregister_service(application)
 
     app.router.lifespan_context = _lifespan
+
+
+async def _run_term_sync_worker(
+    worker: Callable[..., Awaitable[None]],
+    handler: Any,
+) -> None:
+    """Run the term-sync worker and log an unexpected termination."""
+    try:
+        await worker(handler=handler)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning("PlatformService: term_sync_worker 非预期退出", exc_info=True)
+
+
+def _start_term_sync_worker(application) -> asyncio.Task[None] | None:
+    """Start the process-local term synchronization consumer."""
+    try:
+        from datacloud_knowledge.sync import term_sync_worker  # noqa: PLC0415
+        from datacloud_platform import get_platform  # noqa: PLC0415
+
+        task = asyncio.create_task(
+            _run_term_sync_worker(term_sync_worker, get_platform()),
+            name="term_sync_worker",
+        )
+        application.state.term_sync_worker_task = task
+        logger.info(
+            "PlatformService: term_sync_worker started with platform handler"
+        )
+        return task
+    except ImportError:
+        logger.debug(
+            "PlatformService: datacloud_knowledge.sync not available, "
+            "term sync disabled"
+        )
+    except Exception:
+        logger.warning("PlatformService: term_sync_worker 启动失败", exc_info=True)
+    return None
+
+
+async def _stop_term_sync_worker(application) -> None:
+    """Cancel and await the process-local term synchronization consumer."""
+    task = getattr(application.state, "term_sync_worker_task", None)
+    if task is None:
+        return
+
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
+    del application.state.term_sync_worker_task
+    logger.info("PlatformService: term_sync_worker stopped")
 
 
 async def register_service(application) -> None:
