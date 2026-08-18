@@ -143,15 +143,16 @@ public class DevloopController {
     /**
      * 分页查询当前用户自动化的运行记录
      *
-     * @param params 包含 status（可选，success/failed）、pageNum、pageSize
+     * @param params 包含 status、keyword（可选）、pageNum、pageSize
      * @return 按扫描时间倒序的运行记录分页
      */
     @PostMapping("/automation/run/list")
     public ResponseUtil<PageInfo<Map<String, Object>>> listMyAutomationRuns(@RequestBody Map<String, Object> params) {
         String status = MapParamUtil.getStringValue(params, "status");
+        String keyword = MapParamUtil.getStringValue(params, "keyword");
         int pageNum = Math.max(1, MapParamUtil.getIntValue(params, "pageNum", 1));
         int pageSize = Math.max(1, MapParamUtil.getIntValue(params, "pageSize", 20));
-        return applicationService.listMyAutomationRuns(status, pageNum, pageSize);
+        return applicationService.listMyAutomationRuns(status, keyword, pageNum, pageSize);
     }
 
     /**

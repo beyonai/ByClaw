@@ -1,5 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { CalendarOutlined } from '@ant-design/icons';
+import { useIntl } from '@umijs/max';
+import AntdIcon from '@/components/AntdIcon';
+
 import AutomationListPanel from './components/AutomationPanel';
+import AutomationRunPanel from './components/AutomationRunPanel';
+
+import styles from './index.module.less';
 
 /**
  * 应用级「自动化」页。
@@ -7,7 +14,42 @@ import AutomationListPanel from './components/AutomationPanel';
  * 「运行记录」页签按同一条口径反查这批自动化的历次调度结果。
  */
 const Automation: React.FC = () => {
-  return <AutomationListPanel />;
+  const intl = useIntl();
+  const [activeTab, setActiveTab] = useState<'tasks' | 'runs'>('tasks');
+  const tabNavigation = (
+    <div className={styles.automationTabs} role="tablist">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={activeTab === 'tasks'}
+        className={activeTab === 'tasks' ? styles.automationTabActive : styles.automationTab}
+        onClick={() => setActiveTab('tasks')}
+      >
+        <AntdIcon type="icon-a-Alarm-clocknaozhong" />
+        {intl.formatMessage({ id: 'automation.scheduledTasks' })}
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={activeTab === 'runs'}
+        className={activeTab === 'runs' ? styles.automationTabActive : styles.automationTab}
+        onClick={() => setActiveTab('runs')}
+      >
+        <CalendarOutlined />
+        {intl.formatMessage({ id: 'automation.runRecords' })}
+      </button>
+    </div>
+  );
+
+  return (
+    <div className={styles.automationPage}>
+      {activeTab === 'tasks' ? (
+        <AutomationListPanel headerLeading={tabNavigation} />
+      ) : (
+        <AutomationRunPanel headerLeading={tabNavigation} />
+      )}
+    </div>
+  );
 };
 
 export default Automation;

@@ -158,7 +158,7 @@ const WorkspaceProjectActions: React.FC<WorkspaceProjectActionsProps> = ({
       >
         <Input
           autoFocus
-          maxLength={100}
+          maxLength={15}
           value={renameValue}
           onChange={(event) => setRenameValue(event.target.value)}
           onPressEnter={() => void handleRename()}

@@ -1878,7 +1878,8 @@ public class DevloopApplicationService {
      * 分页查询「我的自动化」运行记录，可按状态筛选。 作用域是当前登录用户创建的 chat 自动化，与自动化列表同一条口径；
      * 用户没有自动化时直接返回空页，不去查全表。
      */
-    public ResponseUtil<PageInfo<Map<String, Object>>> listMyAutomationRuns(String status, int pageNum, int pageSize) {
+    public ResponseUtil<PageInfo<Map<String, Object>>> listMyAutomationRuns(String status, String keyword, int pageNum,
+        int pageSize) {
         PageInfo<Map<String, Object>> result = new PageInfo<>();
         result.setPageNum(pageNum);
         result.setPageSize(pageSize);
@@ -1894,9 +1895,17 @@ public class DevloopApplicationService {
         }
         Map<Long, String> nameBySourceId = new HashMap<>();
         List<Long> sourceIds = new ArrayList<>();
+        String normalizedKeyword = StringUtils.trimToNull(keyword);
         for (ScanSource source : sources) {
+            if (normalizedKeyword != null
+                && !StringUtils.containsIgnoreCase(source.getSourceName(), normalizedKeyword)) {
+                continue;
+            }
             sourceIds.add(source.getSourceId());
             nameBySourceId.put(source.getSourceId(), source.getSourceName());
+        }
+        if (sourceIds.isEmpty()) {
+            return ResponseUtil.successResponse(result);
         }
         Page<ScanLog> logPage = scanLogService.pageBySourceIds(sourceIds, StringUtils.trimToNull(status), pageNum,
             pageSize);

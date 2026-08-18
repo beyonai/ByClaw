@@ -23,9 +23,8 @@ const WorkspaceUserBar: React.FC = () => {
     <div className={styles.workspaceUserFooter}>
       <div className={styles.workspaceUserBar}>
         <Dropdown
-          trigger={['hover', 'click']}
+          trigger={['click']}
           placement="topRight"
-          mouseEnterDelay={0.15}
           overlayStyle={{ minWidth: 240 }}
           menu={{ items: userDropdownItems, onClick: onUserDropdownClick }}
           popupRender={userDropdownRender}

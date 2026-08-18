@@ -395,9 +395,13 @@ export const listScanLogs = (sourceId: number, limit = 20) =>
 
 export const listScanLogItems = (logId: number) => POST<any>('/byaiService/devloop/log/items', { logId });
 
-/** 当前用户自动化的运行记录，status 为空表示不筛选。后端已按当前登录用户收窄，前端不传用户参数。 */
-export const listMyAutomationRuns = (data: { status?: string; pageNum?: number; pageSize?: number }) =>
-  POST<any>('/byaiService/devloop/automation/run/list', data);
+/** 当前用户自动化的运行记录，status、keyword 为空表示不筛选。后端已按当前登录用户收窄。 */
+export const listMyAutomationRuns = (data: {
+  status?: string;
+  keyword?: string;
+  pageNum?: number;
+  pageSize?: number;
+}) => POST<any>('/byaiService/devloop/automation/run/list', data);
 
 // 按扫描源直查已收集需求(action=created)，避免按最近N条日志遍历漏掉早期需求
 export const listRequirementsBySource = (sourceId: number) =>
