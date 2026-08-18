@@ -568,8 +568,7 @@ SET param_value = CASE
         WHEN rtrim(c.param_value) = '[]' THEN '['
         ELSE left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1) || ','
     END
-    || '{"skillName":"by-skill-installer","skillCode":"by-skill-installer","skillDescZh":"按 skillCode 在平台查找内置技能并绑定到数字员工，让 agent 能使用该技能。","skillDescEn":"Look up built-in skills by skillCode and bind them to a digital employee so the agent can use them."}]',
-    update_time = CURRENT_TIMESTAMP
+    || '{"skillName":"by-skill-installer","skillCode":"by-skill-installer","skillDescZh":"按 skillCode 在平台查找内置技能并绑定到数字员工，让 agent 能使用该技能。","skillDescEn":"Look up built-in skills by skillCode and bind them to a digital employee so the agent can use them."}]'
 WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
   AND regexp_replace(c.param_value, '\s', '', 'g')
       NOT LIKE '%"skillCode":"by-skill-installer"%';
