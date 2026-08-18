@@ -37,6 +37,27 @@
   // &.messageListAppear {
   // animation: queryInputWrapperAppear 0.3s ease-in forwards;
   // }
+
+  .externalProjectSelector {
+    display: flex;
+    align-items: center;
+    height: 32px;
+    min-height: 0;
+    margin-top: 0;
+    padding-left: 12px;
+    background: transparent;
+  }
+
+  &.withProjectSelector {
+    box-sizing: border-box;
+    padding: 4px 4px;
+    border-radius: 24px;
+    background: #f5f5f5;
+
+    > .queryInput {
+      margin-bottom: 0;
+    }
+  }
 }
 
 .queryInput {

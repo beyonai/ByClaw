@@ -1,24 +1,17 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AppstoreOutlined,
   BookOutlined,
   DownOutlined,
-  EyeOutlined,
-  FileOutlined,
-  FolderOpenOutlined,
   FolderOutlined,
   LoadingOutlined,
-  PlusCircleOutlined,
   ReloadOutlined,
   RightOutlined,
-  RobotOutlined,
-  ThunderboltOutlined,
-  ToolOutlined,
 } from '@ant-design/icons';
 // @ts-ignore
 import { useDispatch, useIntl, useLocation, useNavigate } from '@umijs/max';
 import classNames from 'classnames';
 import dayjs from 'dayjs';
+import AntdIcon from '@/components/AntdIcon';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import useGlobal from '@/hooks/useGlobal';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
@@ -36,14 +29,15 @@ import styles from './index.module.less';
 const PROJECT_SESSION_PAGE_SIZE = 5;
 const EXPANDED_PROJECTS_STORAGE_KEY = 'byclaw.workspaceSider.expandedProjectIds';
 
-const RESOURCE_ITEMS = [
-  { key: 'knowledge', path: '/knowledgeCenter', labelId: 'resourceTabs.knowledgeCenter', icon: <BookOutlined /> },
-  { key: 'tool', path: '/toolCenter', labelId: 'resourceTabs.toolCenter', icon: <ToolOutlined /> },
-  { key: 'view', path: '/viewCenter', labelId: 'resourceTabs.viewCenter', icon: <EyeOutlined /> },
-  { key: 'object', path: '/objectCenter', labelId: 'resourceTabs.objectCenter', icon: <AppstoreOutlined /> },
-  { key: 'ontology', path: '/ontologyCenter', labelId: 'sider.ontologyCenter', icon: <AppstoreOutlined /> },
-  { key: 'skill', path: '/skillCenter', labelId: 'resourceTabs.skillCenter', icon: <ToolOutlined /> },
-  { key: 'file', path: '/files', labelId: 'workspaceSider.fileCenter', icon: <FileOutlined /> },
+const RESOURCE_PATHS = [
+  '/resourceCenter',
+  '/knowledgeCenter',
+  '/toolCenter',
+  '/viewCenter',
+  '/objectCenter',
+  '/ontologyCenter',
+  '/skillCenter',
+  '/files',
 ] as const;
 
 type ProjectSessionState = {
@@ -170,15 +164,10 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   const [projectScopeId, updateProjectScopeId] = useProjectScopeId();
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(readExpandedProjectIds);
   const [sessionStateMap, setSessionStateMap] = useState<Record<string, ProjectSessionState>>({});
-  const [resourceMenuOpen, setResourceMenuOpen] = useState(false);
-  const [resourceMenuPosition, setResourceMenuPosition] = useState({ left: 0, top: 0 });
   const initializedProjectRef = useRef(false);
   const expandedProjectIdsRef = useRef(expandedProjectIds);
   const sessionStateMapRef = useRef(sessionStateMap);
   const sessionLoadingProjectIdsRef = useRef<Set<string>>(new Set());
-  const resourceMenuRef = useRef<HTMLDivElement>(null);
-  const resourceMenuLabelRef = useRef<HTMLSpanElement>(null);
-  const resourceMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasStoredExpandedProjectIdsRef = useRef(hasStoredExpandedProjectIds());
 
   useEffect(() => {
@@ -188,25 +177,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   useEffect(() => {
     sessionStateMapRef.current = sessionStateMap;
   }, [sessionStateMap]);
-
-  const clearResourceMenuCloseTimer = useCallback(() => {
-    if (resourceMenuCloseTimerRef.current) {
-      clearTimeout(resourceMenuCloseTimerRef.current);
-      resourceMenuCloseTimerRef.current = null;
-    }
-  }, []);
-
-  const closeResourceMenuLater = useCallback(() => {
-    clearResourceMenuCloseTimer();
-    resourceMenuCloseTimerRef.current = setTimeout(() => setResourceMenuOpen(false), 120);
-  }, [clearResourceMenuCloseTimer]);
-
-  useEffect(
-    () => () => {
-      clearResourceMenuCloseTimer();
-    },
-    [clearResourceMenuCloseTimer]
-  );
 
   const updateProjectSessionState = useCallback((projectId: string, patch: Partial<ProjectSessionState>) => {
     const currentState = sessionStateMapRef.current[projectId] || createEmptySessionState();
@@ -345,26 +315,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   }, [fetchProjectSessions, projectScopeId, projects, selectProject]);
 
   useEffect(() => {
-    if (!resourceMenuOpen) return undefined;
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!resourceMenuRef.current?.contains(event.target as Node)) {
-        setResourceMenuOpen(false);
-      }
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setResourceMenuOpen(false);
-    };
-
-    document.addEventListener('pointerdown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [resourceMenuOpen]);
-
-  useEffect(() => {
     const handleProjectListRefresh = (payload?: { projectId?: string | number }) => {
       const projectId = normalizeProjectId(payload?.projectId);
       void fetchProjects().then((refreshedProjects) => {
@@ -458,7 +408,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
     () => projects.find((project) => normalizeProjectId(project.projectId) === projectScopeId),
     [projectScopeId, projects]
   );
-  const resourceCenterActive = RESOURCE_ITEMS.some((item) => isSameOrChildPath(location.pathname, item.path));
+  const resourceCenterActive = RESOURCE_PATHS.some((path) => isSameOrChildPath(location.pathname, path));
   const newSessionActive = location.pathname === '/chat' && !sessionId;
   const projectActive = isSameOrChildPath(location.pathname, '/projectSpace');
   const employeeActive =
@@ -726,8 +676,16 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
           className={classNames(styles.primaryItem, newSessionActive && styles.primaryItemActive)}
           onClick={handleNewSession}
         >
-          <PlusCircleOutlined className={styles.primaryIcon} />
-          <span>{intl.formatMessage({ id: 'workspaceSider.newSession' })}</span>
+          <AntdIcon type="icon-xinjianduihua" className={styles.primaryIcon} />
+          <span>{intl.formatMessage({ id: 'workspaceSider.newTask' })}</span>
+        </button>
+        <button
+          type="button"
+          className={classNames(styles.primaryItem, automationActive && styles.primaryItemActive)}
+          onClick={() => navigate('/automation')}
+        >
+          <AntdIcon type="icon-a-Alarm-clocknaozhong" className={styles.primaryIcon} />
+          <span>{intl.formatMessage({ id: 'workspaceSider.scheduledTasks' })}</span>
         </button>
         <button
           type="button"
@@ -742,65 +700,17 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
           className={classNames(styles.primaryItem, employeeActive && styles.primaryItemActive)}
           onClick={() => navigate('/digitalEmployees')}
         >
-          <RobotOutlined className={styles.primaryIcon} />
+          <AntdIcon type="icon-cebianlan-shuziyuangong" className={styles.primaryIcon} />
           <span>{intl.formatMessage({ id: 'workspaceSider.digitalEmployee' })}</span>
         </button>
         <button
           type="button"
-          className={classNames(styles.primaryItem, automationActive && styles.primaryItemActive)}
-          onClick={() => navigate('/automation')}
+          className={classNames(styles.primaryItem, resourceCenterActive && styles.primaryItemActive)}
+          onClick={() => navigate('/resourceCenter')}
         >
-          <ThunderboltOutlined className={styles.primaryIcon} />
-          <span>{intl.formatMessage({ id: 'sider.automation' })}</span>
+          <BookOutlined className={styles.primaryIcon} />
+          <span>{intl.formatMessage({ id: 'workspaceSider.resourceCenter' })}</span>
         </button>
-        <div
-          ref={resourceMenuRef}
-          className={styles.resourceMenuWrap}
-          onMouseEnter={() => {
-            clearResourceMenuCloseTimer();
-            const labelRect = resourceMenuLabelRef.current?.getBoundingClientRect();
-            if (labelRect) {
-              setResourceMenuPosition({ left: labelRect.right + 8, top: labelRect.bottom + 4 });
-            }
-            setResourceMenuOpen(true);
-          }}
-          onMouseLeave={closeResourceMenuLater}
-        >
-          <button
-            type="button"
-            className={classNames(styles.primaryItem, resourceCenterActive && styles.primaryItemActive)}
-            aria-expanded={resourceMenuOpen}
-            aria-haspopup="menu"
-          >
-            <AppstoreOutlined className={styles.primaryIcon} />
-            <span ref={resourceMenuLabelRef}>{intl.formatMessage({ id: 'workspaceSider.resourceCenter' })}</span>
-          </button>
-          {resourceMenuOpen && (
-            <div
-              className={styles.resourceMenu}
-              role="menu"
-              style={{ left: resourceMenuPosition.left, top: resourceMenuPosition.top }}
-              onMouseEnter={clearResourceMenuCloseTimer}
-              onMouseLeave={closeResourceMenuLater}
-            >
-              {RESOURCE_ITEMS.map((item) => (
-                <button
-                  type="button"
-                  role="menuitem"
-                  key={item.key}
-                  className={styles.resourceMenuItem}
-                  onClick={() => {
-                    setResourceMenuOpen(false);
-                    navigate(item.path);
-                  }}
-                >
-                  {item.icon}
-                  <span>{intl.formatMessage({ id: item.labelId })}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
       </nav>
 
       <section
@@ -829,11 +739,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
               <div key={projectId} className={styles.projectItem} role="treeitem" aria-expanded={isExpanded}>
                 <div className={styles.projectRow}>
                   <button type="button" className={styles.projectButton} onClick={() => handleProjectClick(project)}>
-                    {isExpanded ? (
-                      <FolderOpenOutlined className={styles.projectIcon} />
-                    ) : (
-                      <FolderOutlined className={styles.projectIcon} />
-                    )}
+                    <FolderOutlined className={styles.projectIcon} />
                     <span className={styles.projectName} title={project.projectName}>
                       {project.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' })}
                     </span>
@@ -851,7 +757,11 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
                   <WorkspaceProjectActions
                     project={project}
                     onNewSession={handleNewProjectSession}
+                    onRefreshSessions={(currentProject) =>
+                      void fetchProjectSessions(normalizeProjectId(currentProject.projectId), { force: true })
+                    }
                     onProjectChanged={handleProjectChanged}
+                    refreshing={Boolean(sessionStateMap[projectId]?.loading)}
                   />
                 </div>
                 {isExpanded && renderProjectSessions(project)}

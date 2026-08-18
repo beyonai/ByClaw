@@ -266,6 +266,7 @@ const Chat = () => {
           queryInputProps={queryInputProps}
           sendExtraParams={projectChatExtraParams}
           projectId={sessionProjectContext.projectId}
+          projectName={sessionProjectContext.projectName}
         />
       }
     />

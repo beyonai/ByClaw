@@ -108,6 +108,16 @@ describe('WorkspaceSider', () => {
     expect(screen.getByRole('img', { name: 'messageList.defaultAIName' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'layouHeader.search' })).toBeInTheDocument();
     expect(screen.getByTestId('workspace-user-bar')).toBeInTheDocument();
+    const primaryNavigation = screen.getByRole('navigation', { name: 'workspaceSider.primaryNavigation' });
+    const navigationLabels = Array.from(primaryNavigation.querySelectorAll('button > span:last-child')).map(
+      (element) => element.textContent
+    );
+    expect(navigationLabels.slice(0, 4)).toEqual([
+      'workspaceSider.newTask',
+      'workspaceSider.scheduledTasks',
+      'sider.projectSpace',
+      'workspaceSider.digitalEmployee',
+    ]);
   });
 
   it('loads the active project sessions and opens the selected session', async () => {
@@ -198,17 +208,12 @@ describe('WorkspaceSider', () => {
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
-  it('opens a resource-center entry', async () => {
+  it('opens the resource center page', () => {
     render(<WorkspaceSider />);
 
-    jest
-      .spyOn(screen.getByText('workspaceSider.resourceCenter'), 'getBoundingClientRect')
-      .mockReturnValue({ right: 180, bottom: 96 } as DOMRect);
-    fireEvent.mouseEnter(screen.getByRole('button', { name: /workspaceSider\.resourceCenter/ }));
-    expect(screen.getByRole('menu')).toHaveStyle({ left: '188px', top: '100px' });
-    fireEvent.click(screen.getByRole('menuitem', { name: /resourceTabs\.knowledgeCenter/ }));
+    fireEvent.click(screen.getByRole('button', { name: /workspaceSider\.resourceCenter/ }));
 
-    expect(mockNavigate).toHaveBeenCalledWith('/knowledgeCenter');
+    expect(mockNavigate).toHaveBeenCalledWith('/resourceCenter');
   });
 
   it('creates a new session in the project selected from the hovered action area', () => {

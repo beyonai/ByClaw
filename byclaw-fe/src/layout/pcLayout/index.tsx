@@ -352,6 +352,7 @@ const PCLayout = () => {
                     {
                       padding: 0,
                       '--sider-content-width': `${siderContentWidth}px`,
+                      '--layout-gap': '8px',
                     } as React.CSSProperties
                   }
                   ref={layoutRef}
@@ -381,7 +382,7 @@ const PCLayout = () => {
                           {detailPanel}
                         </aside>
                       ) : (
-                        <Resizable left limit={{ minWidth: 360, maxWidth: '70vw' }}>
+                        <Resizable left limit={{ minWidth: DEFAULT_SIDER_CONTENT_WIDTH, maxWidth: '70vw' }}>
                           <aside className={styles.detailPanel} style={detailPanelStyle}>
                             {detailPanel}
                           </aside>

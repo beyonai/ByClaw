@@ -84,9 +84,11 @@ describe('TaskTemplateEntry project selector', () => {
     });
   });
 
-  it('allows switching the project beside the task template entry', async () => {
+  it('allows switching the project from the chat input', async () => {
     mockUseProjectScopeId.mockReturnValue(['1', mockUpdateProjectScopeId]);
     render(<TaskTemplateEntry onApply={jest.fn()} />);
+
+    expect(screen.queryByRole('button', { name: '任务模板' })).not.toBeInTheDocument();
 
     const projectSelect = screen.getByRole('combobox', { name: '选择项目' });
     fireEvent.mouseDown(projectSelect);

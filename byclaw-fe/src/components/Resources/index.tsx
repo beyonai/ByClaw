@@ -1,8 +1,10 @@
 import React, { useCallback, useContext, useState, useEffect, useRef } from 'react';
 import {
   CheckOutlined,
+  DownloadOutlined,
   DownOutlined,
   FullscreenOutlined,
+  LeftOutlined,
   PlusOutlined,
   SearchOutlined,
   UploadOutlined,
@@ -79,10 +81,13 @@ interface IResourceItem {
   syncStatus?: string;
   syncError?: string;
   lastSyncTime?: string;
+  ownerType?: string;
 }
 
 interface Props {
   resourceType: string; // 对应资源类型
+  installedOnly?: boolean;
+  onInstalledOnlyChange?: (installedOnly: boolean) => void;
 }
 
 const getBannerUrl = (bannerList: any[], labels: string | string[]) => {
@@ -108,7 +113,7 @@ const parseBannerList = (value: any) => {
   }
 };
 
-const Resources: React.FC<Props> = ({ resourceType }) => {
+const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onInstalledOnlyChange }) => {
   const intl = useIntl();
   const { EventEmitter, agentId, agentInfo } = useGlobal();
 
@@ -143,8 +148,11 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     Array<{ catalogId: string | number; catalogName: string; pcatalogId?: string | number }>
   >([]);
 
-  type ResourceTab = 'personal' | 'enterprise' | 'marketplace';
+  type ResourceTab = 'personal' | 'enterprise' | 'marketplace' | 'installed';
   const defaultTab = (): ResourceTab => {
+    if (installedOnly) {
+      return 'installed';
+    }
     const tabFromUrl = searchParams.get('tab');
     if (
       tabFromUrl === 'enterprise' ||
@@ -167,6 +175,12 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
 
   useEffect(() => {
+    if (installedOnly) {
+      if (activeTab !== 'installed') {
+        setActiveTab('installed');
+      }
+      return;
+    }
     const tabFromUrl = searchParams.get('tab');
     if (
       (tabFromUrl === 'enterprise' ||
@@ -176,7 +190,20 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     ) {
       setActiveTab(tabFromUrl);
     }
-  }, [activeTab, searchParams]);
+  }, [activeTab, installedOnly, resourceType, searchParams]);
+
+  useEffect(() => {
+    if (!installedOnly && activeTab === 'installed') {
+      const tabFromUrl = searchParams.get('tab');
+      setActiveTab(
+        tabFromUrl === 'enterprise' ||
+          tabFromUrl === 'personal' ||
+          (resourceType === 'SKILL' && tabFromUrl === 'marketplace')
+          ? tabFromUrl
+          : 'personal'
+      );
+    }
+  }, [activeTab, installedOnly, resourceType, searchParams]);
 
   const { logoutModuleEvent } = useModuleEvent('KNOWLEDGE_CENTER');
 
@@ -472,7 +499,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         if (resourceSourcePkId) {
           params.set('resourceSourcePkId', resourceSourcePkId);
         }
-        params.set('fromTab', activeTab);
+        params.set('fromTab', item.ownerType || activeTab);
         navigate(`/knowledgeDetail?${params.toString()}`);
         return;
       }
@@ -571,7 +598,10 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         }}
       />
 
-      {brandVersion === 'openSource' && resourceType === 'KG_DOC' && (activeTab === 'personal' || isAdmin) && (
+      {!installedOnly &&
+        brandVersion === 'openSource' &&
+        resourceType === 'KG_DOC' &&
+        (activeTab === 'personal' || isAdmin) && (
         <Tooltip title={!knowledgeCapability?.allowKnowledgeBaseCreate ? knowledgeCapabilityDisabledTip : undefined}>
           <span>
             <Button
@@ -592,7 +622,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         </Tooltip>
       )}
 
-      {brandVersion === 'openSource' && (!isEnterpriseSkillGroupMode || isAdminVip(userInfo)) && (
+      {!installedOnly && brandVersion === 'openSource' && (!isEnterpriseSkillGroupMode || isAdminVip(userInfo)) && (
         <Tooltip
           title={
             !canImportCurrentEnterpriseResource
@@ -621,6 +651,16 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
             </Button>
           </span>
         </Tooltip>
+      )}
+      {!installedOnly && onInstalledOnlyChange && (
+        <Button
+          className={styles.installedButton}
+          icon={<DownloadOutlined />}
+          type={installedOnly ? 'primary' : 'default'}
+          onClick={() => onInstalledOnlyChange(!installedOnly)}
+        >
+          {intl.formatMessage({ id: 'resourceCenter.myInstalled' })}
+        </Button>
       )}
     </Space>
   );
@@ -779,9 +819,28 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   return (
     <div className={styles.fileManagerContainer}>
       <CommonTabs
+        className={classnames({ [styles.installedTabs]: installedOnly })}
         activeKey={activeTab}
-        tabBarExtraContent={activeTab === 'marketplace' ? undefined : tabBarExtraContent}
-        items={items}
+        tabBarExtraContent={
+          activeTab === 'marketplace'
+            ? undefined
+            : installedOnly
+              ? {
+                left: (
+                  <Button
+                    type="text"
+                    className={styles.installedBackButton}
+                    icon={<LeftOutlined />}
+                    onClick={() => onInstalledOnlyChange?.(false)}
+                  >
+                    {intl.formatMessage({ id: 'resourceCenter.backToAll' })}
+                  </Button>
+                ),
+                right: tabBarExtraContent,
+              }
+              : tabBarExtraContent
+        }
+        items={installedOnly ? [] : items}
         onChange={(key: string) => {
           const nextTab = key as ResourceTab;
           const nextSearchParams = new URLSearchParams(searchParams);
@@ -820,7 +879,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         </div>
       ) : (
         <div className={classnames('full-width ub ub-ver ub-f1', styles.wrapper)}>
-          {bannerLoaded && bannerUrl && (
+          {!installedOnly && bannerLoaded && bannerUrl && (
             <div className="mb-16">
               <img className={styles.marketBg} src={bannerUrl} alt="poster" />
             </div>
@@ -986,7 +1045,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
             setDetailPanelOpen(false);
             refreshList();
           }}
-          ownerType={activeTab as 'personal' | 'enterprise'}
+          ownerType={(currentItem?.ownerType || activeTab) as 'personal' | 'enterprise'}
           mode={currentItem?.resourceId ? 'edit' : 'create'}
           info={currentItem}
           createType={currentItem?.resourceId ? 'import' : 'create'}

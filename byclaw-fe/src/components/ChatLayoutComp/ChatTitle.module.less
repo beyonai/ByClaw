@@ -3,10 +3,13 @@ nav.chatTitle {
   // display: flex;
   // padding: 8px 20px;
   min-height: 48px;
+  position: relative;
+  flex: 0 0 auto;
   // align-items: center;
   // flex-direction: row;
   // box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px 0 rgba(0, 0, 0, 0.02);
   z-index: 100;
+  pointer-events: auto;
 
   .chatTitleWrap {
     padding: 8px 20px;
@@ -32,6 +35,62 @@ nav.chatTitle {
     font-style: normal;
     font-weight: 500;
     line-height: 24px;
+  }
+
+  .chatBreadcrumb {
+    position: relative;
+    z-index: 1;
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow: hidden;
+    color: #6b6f76;
+    font-size: 16px;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 24px;
+    white-space: nowrap;
+  }
+
+  .chatBreadcrumbLink,
+  .chatBreadcrumbCurrent {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chatBreadcrumbLink {
+    position: relative;
+    z-index: 1;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    color: #6b6f76;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+    pointer-events: auto;
+
+    &:hover,
+    &:focus-visible {
+      color: #14161a;
+      text-decoration: underline;
+      outline: none;
+    }
+  }
+
+  .chatBreadcrumbCurrent {
+    color: #14161a;
+    font-weight: 500;
+  }
+
+  .chatBreadcrumbSeparator {
+    flex: 0 0 auto;
+    color: #a3a7ad;
   }
 
   .actions {

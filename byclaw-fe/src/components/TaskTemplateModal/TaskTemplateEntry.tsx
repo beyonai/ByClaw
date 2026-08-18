@@ -1,4 +1,4 @@
-import { AppstoreOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
+import { PlusOutlined, RightOutlined } from '@ant-design/icons';
 import { Button, Divider, Empty, Modal, Select, Spin, message } from 'antd';
 import { getLocale } from '@umijs/max';
 import { useEffect, useMemo, useState } from 'react';
@@ -265,6 +265,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
             loading={projectsLoading}
             value={selectedProjectValue || undefined}
             placeholder="选择项目"
+            showArrow
             optionFilterProp="label"
             options={projectOptions.map((item) => ({
               value: `${item.projectId}`,
@@ -299,9 +300,6 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
             )}
           />
         )}
-        <Button icon={<AppstoreOutlined />} onClick={() => setVisible(true)}>
-          任务模板
-        </Button>
       </div>
       <ProjectFormModal
         open={createProjectOpen}

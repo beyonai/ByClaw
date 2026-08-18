@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { DeleteOutlined, EditOutlined, EllipsisOutlined, PlusCircleOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EditOutlined, EllipsisOutlined, PlusCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Dropdown, Input, Modal, message } from 'antd';
 // @ts-ignore
 import { useIntl, useSelector } from '@umijs/max';
@@ -10,13 +10,17 @@ import styles from './index.module.less';
 interface WorkspaceProjectActionsProps {
   project: ProjectSpace;
   onNewSession: (project: ProjectSpace) => void;
+  onRefreshSessions: (project: ProjectSpace) => void;
   onProjectChanged: (project: ProjectSpace, action: 'rename' | 'delete') => void | Promise<void>;
+  refreshing?: boolean;
 }
 
 const WorkspaceProjectActions: React.FC<WorkspaceProjectActionsProps> = ({
   project,
   onNewSession,
+  onRefreshSessions,
   onProjectChanged,
+  refreshing = false,
 }) => {
   const intl = useIntl();
   const userInfo = useSelector(({ user }: any) => user.userInfo) || {};
@@ -116,6 +120,19 @@ const WorkspaceProjectActions: React.FC<WorkspaceProjectActionsProps> = ({
           </button>
         </Dropdown>
       )}
+      <button
+        type="button"
+        className={`${styles.projectActionButton} ${styles.projectRefreshButton}`}
+        aria-label={intl.formatMessage({ id: 'common.refresh' })}
+        title={intl.formatMessage({ id: 'common.refresh' })}
+        disabled={refreshing}
+        onClick={(event) => {
+          event.stopPropagation();
+          onRefreshSessions(project);
+        }}
+      >
+        <ReloadOutlined spin={refreshing} />
+      </button>
       <button
         type="button"
         className={styles.projectActionButton}

@@ -110,6 +110,7 @@
   top: 42px;
   bottom: 0;
   left: 0;
+  // 与全局左侧 WorkspaceSider 保持同宽，切换列表和详情时不产生宽度跳变。
   width: 280px;
   border-right: 1px solid #e5e8ed;
   box-shadow: 8px 8px 20px rgba(25, 35, 55, 0.12);
@@ -143,57 +144,78 @@
   flex-direction: column;
 }
 
-// 当前会话和当前项目的文件空间标题下展示统一入口路径，方便直接复制给数字员工使用。
-.fileSpaceHeading {
+.resourceSection {
+  min-height: 0;
   display: flex;
-  min-width: 0;
+  flex: 1;
   flex-direction: column;
-}
-
-.fileSpaceHeadingTitle {
-  color: #1f2533;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 20px;
-}
-
-.fileSpacePathRow {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 4px;
-}
-
-.fileSpacePath {
-  min-width: 0;
-  color: #8a94a6;
-  font-size: 11px;
-  font-weight: 400;
-  line-height: 16px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.fileSpacePathCopy {
-  display: inline-flex;
-  width: 16px;
-  height: 16px;
+.projectResourceSection {
+  flex: 1;
+}
+
+.resourceSectionDivider {
+  position: relative;
   flex: none;
+  height: 18px;
+  display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #8a94a6;
-  cursor: pointer;
-  font-size: 12px;
-  line-height: 1;
+  cursor: row-resize;
+  touch-action: none;
+  background: #fff;
 
-  &:hover,
+  &::before {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    left: 0;
+    height: 1px;
+    content: '';
+    background: #e7e9ed;
+    transform: translateY(-50%);
+    transition: height 0.2s, background-color 0.2s;
+  }
+
+  &:hover::before,
+  &:focus-visible::before {
+    height: 3px;
+    background: #9aa4b2;
+  }
+
   &:focus-visible {
-    color: var(--beyond-color-primary, #1677ff);
     outline: none;
+  }
+}
+
+.resourceSectionDividerIcon {
+  position: relative;
+  z-index: 1;
+  width: 20px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 0;
+  color: #737b87;
+  background: #fff;
+  font-size: 10px;
+  line-height: 9px;
+  pointer-events: none;
+
+  :global(.@{antPrefix}icon) {
+    height: 9px;
+    line-height: 9px;
+  }
+}
+
+.resourceSectionDividerActive {
+  &::before {
+    height: 3px;
+    background: #667085;
   }
 }
 
@@ -245,6 +267,16 @@
 
 .primaryTabs {
   :global {
+    .@{antPrefix}-tabs-nav-list {
+      width: auto;
+      gap: 20px;
+    }
+
+    .@{antPrefix}-tabs-tab {
+      flex: none;
+      justify-content: flex-start;
+    }
+
     .@{antPrefix}-tabs-ink-bar {
       display: none;
     }
@@ -304,6 +336,24 @@
     .@{antPrefix}-tabs-ink-bar {
       display: none;
     }
+
+    .@{antPrefix}-tabs-extra-content {
+      flex: none;
+      margin-left: 6px;
+    }
+  }
+}
+
+.resourceRefreshButton {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  color: #7b8799;
+
+  &:hover,
+  &:focus-visible {
+    color: #344054;
+    background: #eef0f3;
   }
 }
 

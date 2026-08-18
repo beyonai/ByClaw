@@ -1,13 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type Key } from 'react';
-import { Dropdown, Empty, Modal, Tooltip, Typography, message, type MenuProps } from 'antd';
-import { CopyOutlined, EllipsisOutlined } from '@ant-design/icons';
+import { Dropdown, Empty, Modal, Typography, message, type MenuProps } from 'antd';
+import { EllipsisOutlined } from '@ant-design/icons';
 import { useIntl, useSelector } from '@umijs/max';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
 import type { FileTreeItem } from '@/layout/sider/components/FileSiderPanel/constants';
 import {
   canPreviewFile,
   ensureDirectoryPath,
-  getDisplayFileBrowserPath,
   getParentDirectoryPath,
   getSessionFilePath,
   isDirectory,
@@ -16,7 +15,6 @@ import {
   sortFileBrowserItems,
   unwrapListResponse,
 } from '@/layout/sider/components/FileSiderPanel/utils';
-import { PROJECT_FILE_PATH, SESSION_FILE_PATH } from '@/layout/sider/components/FileSiderPanel/constants';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import RenameModal from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/RenameModal';
 import { DragType } from '@/components/QueryInput/withDrag';
@@ -45,8 +43,6 @@ import FilePreviewPanel from './FilePreviewPanel';
 import projectStyles from '@/pages/projectSpace/index.module.less';
 import { useInfiniteScroll } from '@/pages/projectSpace/hooks/useInfiniteScroll';
 import { filterSessionRootItems } from './sessionResourceUtils';
-import { copyTextToClipboard } from '@/utils/copy';
-import styles from './index.module.less';
 
 type ProjectFileItem = FileBrowserItem & {
   fileId: number;
@@ -59,6 +55,7 @@ interface FileResourcePanelProps {
   projectId?: number;
   project?: ProjectSpace;
   resourceId?: string;
+  refreshKey?: number;
   onOpenDetail: (panel: React.ReactNode, options: DetailPanelOptions) => void;
   // 项目大详情使用卡片视图；会话资源继续复用原文件树交互。
   cardMode?: boolean;
@@ -81,6 +78,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   projectId: projectIdProp,
   project,
   resourceId,
+  refreshKey = 0,
   onOpenDetail,
   cardMode = false,
 }) => {
@@ -153,7 +151,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     setExpandedKeys([]);
     setRenameTarget(null);
     void loadRoot();
-  }, [loadRoot]);
+  }, [loadRoot, refreshKey]);
 
   useEffect(() => {
     setVisibleProjectItemCount(20);
@@ -408,17 +406,6 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     [quoteFile]
   );
 
-  const fileSpaceTitleId =
-    scope === 'project' ? 'projectSpace.detail.resource.sharedSpace' : 'projectSpace.detail.resource.currentSession';
-  const displayRootPath = getDisplayFileBrowserPath(scope === 'session' ? SESSION_FILE_PATH : PROJECT_FILE_PATH);
-  const copyRootPath = useCallback(() => {
-    // 右侧资源面板展示的是文件空间固定入口，复制时不附加当前会话 ID。
-    void copyTextToClipboard(
-      displayRootPath,
-      () => message.success(intl.formatMessage({ id: 'common.copySuccess' })),
-      () => message.error(intl.formatMessage({ id: 'common.copyFail' }))
-    );
-  }, [displayRootPath, intl]);
   const emptyTextId =
     scope === 'project'
       ? 'projectSpace.detail.resource.emptySharedFiles'
@@ -491,26 +478,8 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   return (
     <>
       <FileSpaceBlock
-        title={
-          <span className={styles.fileSpaceHeading}>
-            <span className={styles.fileSpaceHeadingTitle}>{intl.formatMessage({ id: fileSpaceTitleId })}</span>
-            <span className={styles.fileSpacePathRow}>
-              <span className={styles.fileSpacePath} title={displayRootPath}>
-                {displayRootPath}
-              </span>
-              <Tooltip title={intl.formatMessage({ id: 'common.copy' })}>
-                <button
-                  type="button"
-                  className={styles.fileSpacePathCopy}
-                  aria-label={intl.formatMessage({ id: 'common.copy' })}
-                  onClick={copyRootPath}
-                >
-                  <CopyOutlined />
-                </button>
-              </Tooltip>
-            </span>
-          </span>
-        }
+        title={null}
+        hideHeader
         fillContainer
         loading={loading}
         items={items}

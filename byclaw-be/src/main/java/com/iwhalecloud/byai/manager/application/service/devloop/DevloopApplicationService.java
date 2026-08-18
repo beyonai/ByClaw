@@ -426,7 +426,7 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(result);
     }
 
-    /** 扫描源对外视图：白名单字段，刻意排除 createBy/updateBy/时间戳/deleteFlag 等内部字段。 */
+    /** 扫描源对外视图：白名单字段，仅保留双周调度展示所需的创建时间。 */
     private Map<String, Object> scanSourceToVo(ScanSource s) {
         Map<String, Object> map = new HashMap<>();
         map.put("sourceId", s.getSourceId());
@@ -439,6 +439,7 @@ public class DevloopApplicationService {
         map.put("confirmMode", s.getConfirmMode());
         map.put("scoreThreshold", s.getScoreThreshold());
         map.put("lastScanTime", s.getLastScanTime());
+        map.put("createTime", s.getCreateTime());
         // 应用级自动化页跨项目展示，必须带项目归属；项目名由列表方法批量补齐，避免逐行查库。
         map.put("projectId", s.getProjectId());
         // 创建者信息:前端据此判断"当前用户是否创建者",控制授权/编辑/删除入口;createByName 供展示。
@@ -4603,6 +4604,13 @@ public class DevloopApplicationService {
             // 建会话用简短标题让会话名可读，真正发给模型的是配置里的完整聊天内容。
             chatDto.setChatContent(chatConfig.chatContent());
             scanSourceService.updateLastScanTime(source.getSourceId());
+            if ("once".equalsIgnoreCase(chatConfig.scheduleMode())) {
+                // 单次任务执行后立即停用，避免五段 Cron 在下一年同月同日再次命中。
+                ScanSource disabled = new ScanSource();
+                disabled.setSourceId(source.getSourceId());
+                disabled.setEnabled("0");
+                scanSourceService.update(disabled);
+            }
             // 事务提交后再异步 chat：确保异步线程能读到本事务已建的 session。
             submitTaskChatAfterCommit(chatDto, loginInfo, chatDto.getSessionId());
             // success 表示「已成功下发会话」，不代表数字员工已答完：后续对话结果在会话里看，运行记录只管调度这一段。
@@ -4625,7 +4633,8 @@ public class DevloopApplicationService {
      * chat 自动化配置：就是 /chat 输入框存下来的东西——提示词原文加 @ 出来的资源清单。
      * 承接员工不单独存字段，由 resourceList 里最后一次 @ 的数字员工决定，与前端 mention.ts 同一规则。
      */
-    private record ChatAutomationConfig(String chatContent, List<ResourceVo> resourceList, Long agentId) {
+    private record ChatAutomationConfig(String chatContent, List<ResourceVo> resourceList, Long agentId,
+        String scheduleMode) {
     }
 
     /** config 解析失败或缺必填项都返回 null，由调用方记日志跳过，不抛异常打断整轮调度。 */
@@ -4654,7 +4663,9 @@ public class DevloopApplicationService {
         if (agentId == null) {
             return null;
         }
-        return new ChatAutomationConfig(chatContent, resourceList, agentId);
+        JSONObject schedule = json.getJSONObject("schedule");
+        String scheduleMode = schedule == null ? null : schedule.getString("mode");
+        return new ChatAutomationConfig(chatContent, resourceList, agentId, scheduleMode);
     }
 
     /** 单个资源解析失败不能废掉整条提示词，坏项跳过即可；顺序必须保持，@ 命中规则依赖它。 */

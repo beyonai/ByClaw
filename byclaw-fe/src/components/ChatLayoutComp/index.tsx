@@ -32,8 +32,9 @@ import type { IState as UseEmployeesIState } from '@/models/useEmployees.ts';
 import styles from './index.module.less';
 import { getResponseAgentInfo, isMultiAgentResponsePayload, type ResponseMetadataPayload } from '../MessageList/utils';
 import ChatResourceWorkspace from './ChatResourceWorkspace';
+import TaskTemplateEntry from '@/components/TaskTemplateModal/TaskTemplateEntry';
 import {
-  DEFAULT_SIDER_CONTENT_WIDTH,
+  DEFAULT_DETAIL_PANEL_WIDTH,
   HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH,
   SiderContentContext,
   type DetailPanelOptions,
@@ -72,6 +73,7 @@ type IProps = {
    */
   fixedAgentId?: string;
   projectId?: number;
+  projectName?: string;
 };
 
 // 定义MessageList组件的ref类型接口
@@ -96,6 +98,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     hideAction = false,
     fixedAgentId,
     projectId,
+    projectName,
   } = props;
   const { isBottom, setIsBottom, autoEnterBottomOnMessage = true } = props;
   const { sessionId, queryInputProps = {}, readOnly, disableInputDraft = false } = props;
@@ -111,6 +114,10 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   const [resourceListOpen, setResourceListOpen] = useState(() => Boolean(sessionId));
   const [resourceTabs, setResourceTabs] = useState<ChatResourceTab[]>([]);
   const [activeResourceTabKey, setActiveResourceTabKey] = useState('');
+  const [selectedProject, setSelectedProject] = useState<{
+    projectId: string;
+    projectName: string;
+  }>();
 
   // 工作区状态只属于当前聊天实例，路由刷新后不恢复详情页签，避免复用失效的 React 节点。
   const resourceTabSequenceRef = useRef(0);
@@ -136,6 +143,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
 
   const { agentList, employeesList } = useSelector(({ employees }: { employees: UseEmployeesIState }) => employees);
   const { sessionList } = useSelector((state: any) => state.session);
+  const userInfo = useSelector((state: any) => state.user?.userInfo);
 
   const dispatch = useDispatch();
 
@@ -333,7 +341,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
         onCloseTab={closeResourceTab}
       />,
       {
-        width: resourceTabs.length ? HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH : DEFAULT_SIDER_CONTENT_WIDTH,
+        width: resourceTabs.length ? HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH : DEFAULT_DETAIL_PANEL_WIDTH,
       }
     );
   }, [
@@ -579,6 +587,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 currentSession={currentSession}
                 agentType={myAgentType}
                 projectId={sessionProjectId}
+                projectName={projectName}
                 // 按钮底色只反映右侧资源小面板状态，文件预览单独打开时保持无底色。
                 resourceWorkspaceOpen={resourceListOpen}
                 // 会话标题按钮关闭资源工作区时，需要同时关闭列表和全部多 Tab 预览。
@@ -606,6 +615,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
               <div
                 className={classnames(styles.queryInputWrapper, {
                   [styles.messageListDisappear]: isMultiChoices,
+                  [styles.withProjectSelector]: !sessionId && userInfo && queryInputProps.enableTaskTemplate !== false,
                 })}
                 id="queryInputWrapper"
               >
@@ -615,7 +625,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   isBottom={isBottom}
                   cannotAt={cannotAt}
                   disableInputDraft={disableInputDraft}
-                  queryInputProps={{ ...queryInputProps, projectId: sessionProjectId }}
+                  queryInputProps={{ ...queryInputProps, projectId: sessionProjectId, selectedProject }}
                   lastMsg={lastMsg}
                   sessionId={sessionId}
                   onSend={onSend}
@@ -623,6 +633,16 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   myAgentType={myAgentType}
                   setMyAgentType={setMyAgentType}
                 />
+                {!sessionId && userInfo && queryInputProps.enableTaskTemplate !== false && (
+                  <div className={styles.externalProjectSelector}>
+                    <TaskTemplateEntry
+                      projectId={sessionProjectId}
+                      sessionId={sessionId}
+                      onProjectChange={setSelectedProject}
+                      onApply={() => undefined}
+                    />
+                  </div>
+                )}
                 {/* {isBottom && TopButtons} */}
               </div>
             )}

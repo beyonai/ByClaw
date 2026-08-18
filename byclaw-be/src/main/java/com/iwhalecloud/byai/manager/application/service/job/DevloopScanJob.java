@@ -171,9 +171,17 @@ public class DevloopScanJob {
         if (SOURCE_TYPE_OPERATION_COLLECT.equals(source.getSourceType())) {
             return shouldExecuteOperationSource(source);
         }
+        if (SOURCE_TYPE_CHAT.equals(source.getSourceType())) {
+            return shouldExecuteChatSource(source);
+        }
         if (ScanSourceService.OPERATION_SOURCE_TYPES.contains(source.getSourceType())) {
             return false;
         }
+        return shouldScanLegacySource(source);
+    }
+
+    /** 外部渠道和旧版聊天自动化继续以 lastScanTime 推算下一触发点。 */
+    private boolean shouldScanLegacySource(ScanSource source) {
         String cron = source.getCronExpr();
         if (cron == null || cron.isEmpty()) {
             return true;
@@ -192,6 +200,53 @@ public class DevloopScanJob {
                 cron, source.getSourceId(), e);
             return true;
         }
+    }
+
+    /**
+     * 聊天自动化使用与前端结构化频率一致的调度规则，避免首次创建后绕过 Cron 立即执行。
+     */
+    private boolean shouldExecuteChatSource(ScanSource source) {
+        JSONObject config;
+        try {
+            config = StringUtils.isBlank(source.getConfig()) ? new JSONObject()
+                : JSON.parseObject(source.getConfig());
+        }
+        catch (Exception exception) {
+            logger.warn("[DevloopScanJob] 聊天自动化配置解析失败，跳过 sourceId={}", source.getSourceId(),
+                exception);
+            return false;
+        }
+        JSONObject schedule = config.getJSONObject("schedule");
+        if (schedule == null) {
+            // 旧自动化没有结构化配置时继续沿用原有 Cron 行为。
+            return shouldScanLegacySource(source);
+        }
+        LocalDateTime now = LocalDateTime.now(ZoneId.systemDefault());
+        if (!isWithinOperationEffectiveRange(source, schedule, now.toLocalDate())) {
+            return false;
+        }
+        String mode = firstText(schedule, "mode");
+        if ("once".equalsIgnoreCase(mode)) {
+            LocalDateTime triggerTime = parseOperationDateTime(firstText(schedule, "onceTime"));
+            return source.getLastScanTime() == null && triggerTime != null && !now.isBefore(triggerTime);
+        }
+        if ("interval".equalsIgnoreCase(mode)) {
+            if (!matchesOperationWeekday(schedule, "intervalWeekdays", now) || !shouldScanByCron(source, now)) {
+                return false;
+            }
+            if (source.getLastScanTime() == null) {
+                return true;
+            }
+            long intervalHours = parseLong(schedule.get("intervalHours"), 1L);
+            LocalDateTime lastScan = LocalDateTime.ofInstant(source.getLastScanTime().toInstant(),
+                ZoneId.systemDefault());
+            return !lastScan.plusHours(Math.max(1L, intervalHours)).isAfter(now);
+        }
+        if ("biweekly".equalsIgnoreCase(firstText(schedule, "periodType"))
+            && !matchesBiweeklyCycle(source, schedule, now.toLocalDate())) {
+            return false;
+        }
+        return shouldScanByCron(source, now);
     }
 
     /** 运营采集源支持单次、按间隔和按周期三种调度方式，并遵守可选的生效日期区间。 */

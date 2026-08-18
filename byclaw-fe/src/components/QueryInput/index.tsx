@@ -117,7 +117,7 @@ function QueryInput(props: IProps) {
       {/* <CleanSession /> */}
       <QueryInputComp
         {...rest}
-        // 三种会话输入框共用父类工具栏，确保普通助手、数字员工和搜索问答都展示任务模板入口。
+        // 三种会话输入框共用外部的新会话项目选择入口配置。
         enableTaskTemplate={enableTaskTemplate}
         cannotSTT={cannotSTT || !!ENV?.includes?.('asr')}
         myAgentType={myAgentType}

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Dropdown, Empty, Input, Modal, Spin, message } from 'antd';
+import { Button, Dropdown, Empty, Input, Modal, message } from 'antd';
 import {
   ShareAltOutlined,
   DeleteOutlined,
@@ -37,6 +37,12 @@ import type { ProjectSession, ProjectSpace } from './types';
 import styles from './index.module.less';
 
 const getProjectId = (value?: string | number) => `${value ?? ''}`.trim();
+
+interface ProjectSpaceNavigationState {
+  openProjectList?: boolean;
+  openProjectDetail?: boolean;
+  projectId?: string | number;
+}
 
 const formatProjectCreateTime = (value?: string) => {
   if (!value) return '';
@@ -108,10 +114,19 @@ const ProjectSpacePage: React.FC = () => {
   const [showProjectList, setShowProjectList] = useState(true);
 
   useEffect(() => {
-    if ((location.state as { openProjectList?: boolean } | null)?.openProjectList) {
+    const navigationState = location.state as ProjectSpaceNavigationState | null;
+    if (navigationState?.openProjectList) {
       setShowProjectList(true);
+      return;
     }
-  }, [location.key, location.state]);
+    if (navigationState?.openProjectDetail) {
+      const projectId = getProjectId(navigationState.projectId);
+      if (projectId) {
+        setSelectedProjectId(projectId);
+        setShowProjectList(false);
+      }
+    }
+  }, [location.key, location.state, setSelectedProjectId]);
 
   const { activeProject, refreshProject } = useProjectDetail(projects, selectedProjectId);
   const canManageProject = useMemo(() => isProjectCreator(activeProject, userInfo), [activeProject, userInfo]);
@@ -459,8 +474,16 @@ const ProjectSpacePage: React.FC = () => {
           />
         </div>
         {projectsLoading && !projects.length ? (
-          <div className={styles.projectListFeedback}>
-            <Spin />
+          <div className={styles.projectCardGrid} aria-busy="true">
+            {Array.from({ length: 9 }, (_, index) => (
+              <div key={index} className={styles.projectSkeletonCard} aria-hidden="true">
+                <span className={styles.projectSkeletonIcon} />
+                <span className={styles.projectSkeletonBody}>
+                  <span className={styles.projectSkeletonTitle} />
+                  <span className={styles.projectSkeletonDescription} />
+                </span>
+              </div>
+            ))}
           </div>
         ) : !projects.length ? (
           <div className={styles.projectListFeedback}>
