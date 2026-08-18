@@ -65,7 +65,7 @@ public class ByaiAimodelDomainService {
     /**
      * 按条件分页查询（使用 PageHelper 实现分页，与项目现有分页方式一致）
      *
-     * @param request 列表请求（pageNum、pageSize、status、ability、system、modelId、modelName、keyword）
+     * @param request 列表请求（pageNum、pageSize、status、modelType、ability、system、modelId、modelName、keyword）
      * @return PageInfo（list、pageNum、pageSize、total、totalPages）
      */
     public PageInfo<ByaiAimodel> listByCondition(ModelListRequest request) {
@@ -84,9 +84,9 @@ public class ByaiAimodelDomainService {
         }
 
         PageHelper.startPage(pageNum, pageSize);
-        List<ByaiAimodel> list = byaiAimodelMapper.selectByCondition(statusDb, request.getAbility(),
-            request.getSystem(), modelIdLong, request.getModelName(), request.getKeyword(), request.getCreateBy(),
-            request.getOwnerType());
+        List<ByaiAimodel> list = byaiAimodelMapper.selectByCondition(statusDb, request.getModelType(),
+            request.getAbility(), request.getSystem(), modelIdLong, request.getModelName(), request.getKeyword(),
+            request.getCreateBy(), request.getOwnerType());
         com.github.pagehelper.PageInfo<ByaiAimodel> phPageInfo = new com.github.pagehelper.PageInfo<>(list);
         return PageHelperUtil.toPageInfo(phPageInfo);
     }

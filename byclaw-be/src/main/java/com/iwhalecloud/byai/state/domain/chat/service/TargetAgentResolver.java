@@ -4,6 +4,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import com.iwhalecloud.byai.common.constants.Constants;
@@ -27,6 +28,9 @@ public class TargetAgentResolver {
     @Autowired
     private SsResourceService ssResourceService;
 
+    @Value("${byclaw.route-by-super-to-user-sandbox:false}")
+    private boolean routeBySuperToUserSandbox;
+
     /**
      * 根据基础 workerAgentType、agentId、sourceAgentType 与 userCode 计算最终 targetAgentType。
      *
@@ -38,6 +42,11 @@ public class TargetAgentResolver {
      */
     public String resolveAgentType(String workerAgentType, Long agentId, String resumeAgentType, String userCode) {
         String targetAgentType = workerAgentType;
+
+        if (routeBySuperToUserSandbox && agentId != null
+                && WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(targetAgentType)) {
+            return buildUserAgentType(WorkerAgentType.BYCLAW_EXE, userCode);
+        }
 
         // agentId 为空代表公共超级助手入口；不能被旧会话透传的 BYCLAW_EXE sourceAgentType 覆盖。
         if (agentId == null && WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(targetAgentType)) {
