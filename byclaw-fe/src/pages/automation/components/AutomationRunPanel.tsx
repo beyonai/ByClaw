@@ -1,9 +1,10 @@
 import { Button, Empty, Pagination, Select, Spin, Table, Tag, Tooltip, message } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import { MessageOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useState } from 'react';
-import { useIntl } from '@umijs/max';
+import { useIntl, useNavigate } from '@umijs/max';
 import dayjs from 'dayjs';
 
+import useGlobal from '@/hooks/useGlobal';
 import { listMyAutomationRuns } from '@/service/devloop';
 
 const PAGE_SIZE = 20;
@@ -18,6 +19,8 @@ interface AutomationRun {
   scanTime?: string;
   status?: string;
   errorMsg?: string;
+  // 只有成功下发的记录才有会话；失败行与历史行为空。
+  sessionId?: number;
 }
 
 const formatRunTime = (value?: string) =>
@@ -25,6 +28,8 @@ const formatRunTime = (value?: string) =>
 
 const AutomationRunPanel: React.FC = () => {
   const intl = useIntl();
+  const navigate = useNavigate();
+  const { setSessionId } = useGlobal();
   const [loading, setLoading] = useState(false);
   // 空串表示不筛选状态；Select 的 value 需要一个确定值，用 undefined 会退回 placeholder 态。
   const [status, setStatus] = useState<RunStatus | ''>('');
@@ -58,6 +63,19 @@ const AutomationRunPanel: React.FC = () => {
   useEffect(() => {
     void loadRuns(pageNum, status);
   }, [loadRuns, pageNum, status]);
+
+  // 切全局会话上下文后进聊天页，与项目详情页跳会话同一条路径；聊天页仍负责渲染会话内容。
+  const openRunSession = (run: AutomationRun) => {
+    if (!run.sessionId) return;
+    setSessionId?.(`${run.sessionId}`);
+    navigate('/chat', {
+      state: {
+        keepSiderActiveKey: 'sessions',
+        from: 'automation',
+        sessionId: run.sessionId,
+      },
+    });
+  };
 
   const columns = [
     {
@@ -107,6 +125,20 @@ const AutomationRunPanel: React.FC = () => {
           '-'
         ),
     },
+    {
+      title: intl.formatMessage({ id: 'automation.run.column.action' }),
+      dataIndex: 'sessionId',
+      width: 120,
+      // 失败行与历史行没有会话可回看，不给按钮，避免点了没反应。
+      render: (_: unknown, row: AutomationRun) =>
+        row.sessionId ? (
+          <Button type="link" size="small" icon={<MessageOutlined />} onClick={() => openRunSession(row)}>
+            {intl.formatMessage({ id: 'automation.run.viewSession' })}
+          </Button>
+        ) : (
+          '-'
+        ),
+    },
   ];
 
   return (
@@ -138,6 +170,11 @@ const AutomationRunPanel: React.FC = () => {
         columns={columns}
         dataSource={runs}
         pagination={false}
+        // 整行可点即进会话，和列尾按钮同一个动作；没有会话的行不给手型光标。
+        onRow={(row) => ({
+          onClick: () => openRunSession(row),
+          style: row.sessionId ? { cursor: 'pointer' } : undefined,
+        })}
         locale={{
           emptyText: (
             <Empty

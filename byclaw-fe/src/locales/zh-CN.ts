@@ -1079,6 +1079,8 @@ export default {
   // success 表示已成功下发会话，数字员工答得怎么样要进会话看，所以不用「成功/失败」以外的措辞。
   'automation.run.status.success': '已下发',
   'automation.run.status.failed': '失败',
+  'automation.run.column.action': '操作',
+  'automation.run.viewSession': '查看会话',
   'automation.run.empty': '暂无运行记录',
   'automation.run.loadFailed': '运行记录加载失败',
   'sider.knowledge': '知识',

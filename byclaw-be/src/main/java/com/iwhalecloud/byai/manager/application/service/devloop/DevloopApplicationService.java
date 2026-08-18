@@ -1899,6 +1899,9 @@ public class DevloopApplicationService {
         }
         Page<ScanLog> logPage = scanLogService.pageBySourceIds(sourceIds, StringUtils.trimToNull(status), pageNum,
             pageSize);
+        // 会话ID一次批量取，避免逐行查条目表造成 N+1。
+        Map<Long, Long> sessionIdByLogId = scanLogService
+            .mapSessionIdByLogIds(logPage.getRecords().stream().map(ScanLog::getLogId).toList());
         List<Map<String, Object>> list = new ArrayList<>();
         for (ScanLog runLog : logPage.getRecords()) {
             Map<String, Object> map = new HashMap<>();
@@ -1909,6 +1912,8 @@ public class DevloopApplicationService {
             map.put("scanTime", runLog.getScanTime());
             map.put("status", runLog.getStatus());
             map.put("errorMsg", runLog.getErrorMsg());
+            // 下发成功才有会话；失败行和历史行为空，前端据此决定是否显示「查看会话」。
+            map.put("sessionId", sessionIdByLogId.get(runLog.getLogId()));
             list.add(map);
         }
         result.setPageNum((int) logPage.getCurrent());
@@ -4579,7 +4584,7 @@ public class DevloopApplicationService {
         ChatAutomationConfig chatConfig = parseChatAutomationConfig(source.getConfig());
         if (chatConfig == null) {
             log.warn("[ChatAutomation] 自动化 {} 的提示词为空或未 @ 数字员工，跳过本次执行", source.getSourceId());
-            scanLogService.recordRun(source.getSourceId(), source.getProjectId(), "failed",
+            scanLogService.recordRun(source.getSourceId(), source.getProjectId(), null, source.getSourceName(), "failed",
                 I18nUtil.get("devloop.automation.run.config.invalid"));
             return;
         }
@@ -4587,7 +4592,7 @@ public class DevloopApplicationService {
         LoginInfo loginInfo = creatorId != null ? loginApplicationService.getLoginInfo(creatorId) : null;
         if (loginInfo == null) {
             log.warn("[ChatAutomation] 自动化 {} 无法加载创建者 {} 的登录信息，跳过本次执行", source.getSourceId(), creatorId);
-            scanLogService.recordRun(source.getSourceId(), source.getProjectId(), "failed",
+            scanLogService.recordRun(source.getSourceId(), source.getProjectId(), null, source.getSourceName(), "failed",
                 I18nUtil.get("devloop.automation.run.creator.missing"));
             return;
         }
@@ -4601,14 +4606,17 @@ public class DevloopApplicationService {
             // 事务提交后再异步 chat：确保异步线程能读到本事务已建的 session。
             submitTaskChatAfterCommit(chatDto, loginInfo, chatDto.getSessionId());
             // success 表示「已成功下发会话」，不代表数字员工已答完：后续对话结果在会话里看，运行记录只管调度这一段。
-            scanLogService.recordRun(source.getSourceId(), source.getProjectId(), "success", null);
+            // 带上本次建的 sessionId：定时任务发起的会话就是任务，运行记录据此提供「查看会话」入口。
+            scanLogService.recordRun(source.getSourceId(), source.getProjectId(), chatDto.getSessionId(),
+                source.getSourceName(), "success", null);
             log.info("[ChatAutomation] 已触发定时聊天，sourceId={}, sessionId={}", source.getSourceId(),
                 chatDto.getSessionId());
         }
         catch (Exception exception) {
             // 本方法带事务，异常会回滚已建会话，所以运行记录走 REQUIRES_NEW 独立事务，回滚后仍留得住失败原因。
             log.error("[ChatAutomation] 自动化 {} 下发会话失败", source.getSourceId(), exception);
-            scanLogService.recordRun(source.getSourceId(), source.getProjectId(), "failed", exception.getMessage());
+            scanLogService.recordRun(source.getSourceId(), source.getProjectId(), null, source.getSourceName(), "failed",
+                exception.getMessage());
             throw exception;
         }
     }

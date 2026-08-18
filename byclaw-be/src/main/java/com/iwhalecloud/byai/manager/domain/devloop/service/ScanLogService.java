@@ -16,8 +16,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * 扫描日志领域服务 管理扫描执行记录和扫描条目，提供去重判断
@@ -38,27 +40,30 @@ public class ScanLogService {
     /** byai_scan_log.error_msg 是 VARCHAR(1000)，openGauss 按字节计长。 */
     private static final int ERROR_MSG_MAX_BYTES = 1000;
 
+    /** byai_scan_log_item.title 是 VARCHAR(500)，同样按字节计长。 */
+    private static final int TITLE_MAX_BYTES = 500;
+
     /**
-     * 按 UTF-8 字节截断错误信息。 不能用 StringUtils.abbreviate：它按字符数截，一个中文占 3 字节，
+     * 按 UTF-8 字节截断到列宽。 不能用 StringUtils.abbreviate：它按字符数截，一个中文占 3 字节，
      * 1000 个中文字符会变成 3000 字节，直接撑爆列宽报 value too long。 逐字符累加字节数，保证不在多字节字符中间断开产生乱码。
      */
-    private String abbreviateErrorMsg(String errorMsg) {
-        if (StringUtils.isEmpty(errorMsg)) {
-            return errorMsg;
+    private String abbreviateByBytes(String value, int maxBytes) {
+        if (StringUtils.isEmpty(value)) {
+            return value;
         }
-        if (errorMsg.getBytes(StandardCharsets.UTF_8).length <= ERROR_MSG_MAX_BYTES) {
-            return errorMsg;
+        if (value.getBytes(StandardCharsets.UTF_8).length <= maxBytes) {
+            return value;
         }
         StringBuilder truncated = new StringBuilder();
         int usedBytes = 0;
-        for (int index = 0; index < errorMsg.length(); index++) {
-            char current = errorMsg.charAt(index);
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
             // 代理对必须整对处理，单独取一半会变成非法字符。
-            int charCount = Character.isHighSurrogate(current) && index + 1 < errorMsg.length()
-                && Character.isLowSurrogate(errorMsg.charAt(index + 1)) ? 2 : 1;
-            String unit = errorMsg.substring(index, index + charCount);
+            int charCount = Character.isHighSurrogate(current) && index + 1 < value.length()
+                && Character.isLowSurrogate(value.charAt(index + 1)) ? 2 : 1;
+            String unit = value.substring(index, index + charCount);
             int unitBytes = unit.getBytes(StandardCharsets.UTF_8).length;
-            if (usedBytes + unitBytes > ERROR_MSG_MAX_BYTES) {
+            if (usedBytes + unitBytes > maxBytes) {
                 break;
             }
             truncated.append(unit);
@@ -69,11 +74,14 @@ public class ScanLogService {
     }
 
     /**
-     * 独立事务写一条终态运行记录。 聊天型自动化的执行方法带事务，建会话失败会整体回滚；运行记录必须活过那次回滚，
+     * 独立事务写一条终态运行记录，并在下发成功时用条目行记住本次建的会话。 聊天型自动化的执行方法带事务，建会话失败会整体回滚；运行记录必须活过那次回滚，
      * 用户才能在自动化页看到失败原因。一次调度是同步下发，没有可观测的中间态，所以直接落终态、不留 running。
+     * sessionId 非空时补一行 byai_scan_log_item：定时任务发起的会话本身就是任务，条目行既是「会话即任务」的落点，
+     * 也让运行记录能跳回会话（前端按 sessionId 是否有值决定显示入口）。
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void recordRun(Long sourceId, Long projectId, String status, String errorMsg) {
+    public void recordRun(Long sourceId, Long projectId, Long sessionId, String sourceName, String status,
+        String errorMsg) {
         ScanLog scanLog = new ScanLog();
         scanLog.setLogId(sequenceService.nextVal());
         scanLog.setSourceId(sourceId);
@@ -83,8 +91,21 @@ public class ScanLogService {
         // 聊天型自动化没有「发现/创建需求条目」的概念，计数恒 0，列表也不展示这两列。
         scanLog.setFoundCount(0);
         scanLog.setCreatedCount(0);
-        scanLog.setErrorMsg(abbreviateErrorMsg(errorMsg));
+        scanLog.setErrorMsg(abbreviateByBytes(errorMsg, ERROR_MSG_MAX_BYTES));
         scanLogMapper.insert(scanLog);
+        if (sessionId == null) {
+            return;
+        }
+        // title/action/log_id 都是 NOT NULL，所以必须等 scanLog 落库拿到 logId 再写条目行。
+        ScanRequireItem item = new ScanRequireItem();
+        item.setItemId(sequenceService.nextVal());
+        item.setLogId(scanLog.getLogId());
+        item.setSourceId(sourceId);
+        item.setTitle(abbreviateByBytes(StringUtils.defaultIfBlank(sourceName, "自动化会话"), TITLE_MAX_BYTES));
+        item.setAction("created");
+        item.setSessionId(sessionId);
+        item.setCreateTime(new Date());
+        scanRequireItemMapper.insert(item);
     }
 
     /** 创建一条扫描日志，初始状态为running */
@@ -116,7 +137,7 @@ public class ScanLogService {
         ScanLog scanLog = new ScanLog();
         scanLog.setLogId(logId);
         scanLog.setStatus("failed");
-        scanLog.setErrorMsg(abbreviateErrorMsg(errorMsg));
+        scanLog.setErrorMsg(abbreviateByBytes(errorMsg, ERROR_MSG_MAX_BYTES));
         scanLogMapper.updateById(scanLog);
     }
 
@@ -164,6 +185,23 @@ public class ScanLogService {
         LambdaQueryWrapper<ScanRequireItem> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ScanRequireItem::getLogId, logId).orderByAsc(ScanRequireItem::getCreateTime);
         return scanRequireItemMapper.selectList(wrapper);
+    }
+
+    /**
+     * 批量取多条运行记录各自关联的会话ID，供运行记录列表一次查全部。 逐条查会话是 N+1，一页 20 行就是 20 条 SQL，这里合并成一次 IN 查询。
+     * 一次调度最多写一行条目，重复行按先到先得。
+     */
+    public Map<Long, Long> mapSessionIdByLogIds(List<Long> logIds) {
+        if (logIds == null || logIds.isEmpty()) {
+            return new HashMap<>();
+        }
+        LambdaQueryWrapper<ScanRequireItem> wrapper = new LambdaQueryWrapper<>();
+        wrapper.in(ScanRequireItem::getLogId, logIds).isNotNull(ScanRequireItem::getSessionId);
+        Map<Long, Long> sessionIdByLogId = new HashMap<>();
+        for (ScanRequireItem item : scanRequireItemMapper.selectList(wrapper)) {
+            sessionIdByLogId.putIfAbsent(item.getLogId(), item.getSessionId());
+        }
+        return sessionIdByLogId;
     }
 
     /** 查询某扫描源下所有已收集(created)的需求条目，按时间倒序，供需求列表直查 */

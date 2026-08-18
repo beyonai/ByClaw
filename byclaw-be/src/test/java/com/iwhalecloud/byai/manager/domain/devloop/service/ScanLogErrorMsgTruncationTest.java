@@ -14,7 +14,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 class ScanLogErrorMsgTruncationTest {
 
     private String abbreviate(String errorMsg) {
-        return (String) ReflectionTestUtils.invokeMethod(new ScanLogService(), "abbreviateErrorMsg", errorMsg);
+        return (String) ReflectionTestUtils.invokeMethod(new ScanLogService(), "abbreviateByBytes", errorMsg, 1000);
     }
 
     private int utf8Bytes(String value) {
@@ -60,6 +60,17 @@ class ScanLogErrorMsgTruncationTest {
         // 截出来的串必须仍是合法字符序列：长度为偶数且不以孤立高代理项结尾。
         assertThat(truncated.length() % 2).isZero();
         assertThat(Character.isHighSurrogate(truncated.charAt(truncated.length() - 1))).isFalse();
+    }
+
+    @Test
+    void titleColumnUsesItsOwnNarrowerByteBudget() {
+        // 自动化名称写进 byai_scan_log_item.title，那列是 VARCHAR(500)，比 error_msg 更窄。
+        String sourceName = "每日巡检".repeat(60);
+
+        String truncated = (String) ReflectionTestUtils.invokeMethod(new ScanLogService(), "abbreviateByBytes",
+            sourceName, 500);
+
+        assertThat(utf8Bytes(truncated)).isLessThanOrEqualTo(500);
     }
 
     @Test

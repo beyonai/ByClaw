@@ -1081,6 +1081,8 @@ export default {
   'automation.run.status.all': 'All statuses',
   'automation.run.status.success': 'Dispatched',
   'automation.run.status.failed': 'Failed',
+  'automation.run.column.action': 'Actions',
+  'automation.run.viewSession': 'View session',
   'automation.run.empty': 'No run records yet',
   'automation.run.loadFailed': 'Failed to load run records',
   // 侧栏固定宽度较窄，使用简短文案避免英文被截断。
