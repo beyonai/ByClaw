@@ -19,6 +19,16 @@ export const CONTEXT_TOKENS_CONFIG = {
 };
 export const DEFAULT_MAX_TOKENS = 1024 * 64;
 export const MIN_MAX_TOKENS = 65536;
+export const IMAGE_GENERATION_DEFAULTS = {
+  providerName: 'MINIMAX',
+  modelProtocol: 'MINIMAX_IMAGE',
+  apiEndpoint: 'https://api.minimaxi.com/v1/image_generation',
+  modelCode: 'image-01',
+  prompt: '',
+  aspectRatio: '1:1',
+  imageCount: 1,
+  responseFormat: 'url',
+};
 export const THINKING_LEVEL_OPTIONS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'adaptive', 'max'] as const;
 export const THINKING_CAPABILITY_OPTIONS = ['unsupported', 'binary', 'effort', 'budget', 'adaptive'] as const;
 export const THINKING_COMPAT_FORMAT_OPTIONS = [
@@ -67,6 +77,7 @@ export const MODEL_PROTOCOL_OPTIONS = [
   { label: 'OpenAI', value: 'OpenAI' },
   { label: 'OpenAI Responses', value: 'OpenAI Responses' },
   { label: 'Anthropic', value: 'Anthropic' },
+  { label: 'MiniMax Image', value: 'MINIMAX_IMAGE' },
 ] as const;
 
 export function getDefaultLlmDebugSuffix(modelProtocol?: any) {
@@ -78,7 +89,12 @@ export function getDefaultLlmDebugSuffix(modelProtocol?: any) {
 export function getApiEndpointPlaceholder(modelProtocol?: any) {
   const protocol = `${modelProtocol ?? 'OpenAI'}`.trim().toLowerCase();
   if (protocol === 'anthropic') return 'https://api.example.com/anthropic';
+  if (protocol === 'minimax_image') return IMAGE_GENERATION_DEFAULTS.apiEndpoint;
   return 'https://api.example.com/v1';
+}
+
+export function getImageGenerationDefaultFormValues() {
+  return { ...IMAGE_GENERATION_DEFAULTS };
 }
 
 export function getDefaultFormValues() {
@@ -110,6 +126,44 @@ export function normalizeModelType(v: any) {
   if (v === 2 || v === '2') return 'RERANK';
   if (typeof v === 'string' && v.trim()) return v.trim();
   return 'LLM';
+}
+
+export function getModelTypeSwitchFormValues(modelType: any) {
+  const normalizedType = normalizeModelType(modelType);
+  if (normalizedType === 'IMAGE_GENERATION') {
+    return {
+      ...getImageGenerationDefaultFormValues(),
+      modelType: normalizedType,
+      apiToken: '',
+      headers: [{ key: '', value: '' }],
+    };
+  }
+
+  const isOpenAiCompatible = normalizedType === 'LLM' || normalizedType === 'EMBEDDING';
+  return {
+    modelType: normalizedType,
+    providerName: isOpenAiCompatible ? 'OpenAI' : undefined,
+    modelProtocol: isOpenAiCompatible ? 'OpenAI' : undefined,
+    apiEndpoint: isOpenAiCompatible ? 'https://api.example.com/v1' : '',
+    modelCode: '',
+    apiToken: '',
+    headers: [{ key: '', value: '' }],
+    prompt: undefined,
+    aspectRatio: undefined,
+    imageCount: undefined,
+    responseFormat: undefined,
+    promptOptimizer: undefined,
+    seed: undefined,
+  };
+}
+
+export function getModelTypeTransitionFormValues(previousModelType: any, nextModelType: any) {
+  const previousType = normalizeModelType(previousModelType);
+  const nextType = normalizeModelType(nextModelType);
+  if (previousType !== 'IMAGE_GENERATION' && nextType !== 'IMAGE_GENERATION') {
+    return { modelType: nextType };
+  }
+  return getModelTypeSwitchFormValues(nextType);
 }
 
 export function joinUrl(base: string, path: string) {
@@ -194,6 +248,38 @@ export function buildRerankHeaders(options: { formApiToken?: any; formHeaders?: 
   return next;
 }
 
+export function buildDebugPayload(values: any) {
+  const imageCount = Number(values?.imageCount ?? values?.n);
+  const seed = Number(values?.seed);
+  const param: Record<string, any> = {
+    model: `${values?.modelCode || IMAGE_GENERATION_DEFAULTS.modelCode}`.trim(),
+    prompt: `${values?.prompt ?? ''}`,
+    aspect_ratio: `${values?.aspectRatio || IMAGE_GENERATION_DEFAULTS.aspectRatio}`,
+    response_format: `${values?.responseFormat || IMAGE_GENERATION_DEFAULTS.responseFormat}`,
+    n: Number.isFinite(imageCount) && imageCount > 0 ? Math.floor(imageCount) : IMAGE_GENERATION_DEFAULTS.imageCount,
+  };
+  if (typeof values?.promptOptimizer === 'boolean') {
+    param.prompt_optimizer = values.promptOptimizer;
+  }
+  if (Number.isFinite(seed)) {
+    param.seed = Math.floor(seed);
+  }
+
+  return {
+    input: {
+      providerName: 'MINIMAX',
+      modelProtocol: 'MINIMAX_IMAGE',
+      url: `${values?.apiEndpoint || IMAGE_GENERATION_DEFAULTS.apiEndpoint}`.trim(),
+      headers: buildLlmHeaders({
+        formApiToken: values?.apiToken,
+        formHeaders: values?.headers,
+        prevHeaders: values?.prevHeaders,
+      }),
+      param,
+    },
+  };
+}
+
 function safeParseJsonObject(text: string): any | null {
   try {
     const parsed = JSON.parse(text);
@@ -202,6 +288,11 @@ function safeParseJsonObject(text: string): any | null {
   } catch (e) {
     return null;
   }
+}
+
+export function hasImageGenerationPrompt(input: any) {
+  const parsed = typeof input === 'string' ? safeParseJsonObject(input) : input;
+  return typeof parsed?.param?.prompt === 'string' && parsed.param.prompt.trim().length > 0;
 }
 
 export function formatReasoningEffortMapText(reasoningConfig?: any) {
@@ -260,6 +351,39 @@ export function buildReasoningConfigPayload(values: any) {
     }
   }
   return next;
+}
+
+export function buildModelUpsertPayload(options: {
+  values: any;
+  type?: string;
+  dataId?: string | number;
+  savedNewId?: string | number;
+}) {
+  const { values, type, dataId, savedNewId } = options;
+  const restValues = { ...(values || {}) };
+  [
+    'reasoningEffortMapText',
+    'prompt',
+    'aspectRatio',
+    'imageCount',
+    'responseFormat',
+    'promptOptimizer',
+    'seed',
+  ].forEach((key) => delete restValues[key]);
+
+  const id =
+    type === 'edit' || type === 'debug'
+      ? dataId
+      : type === 'add' && savedNewId !== null && savedNewId !== undefined
+        ? savedNewId
+        : undefined;
+
+  return {
+    ...(id !== null && id !== undefined ? { id } : {}),
+    ...restValues,
+    reasoningConfig: buildReasoningConfigPayload(values),
+    modelType: normalizeModelType(values?.modelType),
+  };
 }
 
 function getReasoningBudget(reasoningConfig: any, level: string) {
@@ -348,6 +472,17 @@ export function buildAutoDebugRequestText(options: {
   const prevObj = prevText ? safeParseJsonObject(prevText) : null;
   const modelType = normalizeModelType(formValues?.modelType);
   const isTypeSwitch = Array.isArray(changedKeys) && changedKeys.includes('modelType');
+  if (modelType === 'IMAGE_GENERATION') {
+    return JSON.stringify(
+      buildDebugPayload({
+        ...formValues,
+        prevHeaders: !isTypeSwitch ? prevObj?.headers : undefined,
+      }).input,
+      null,
+      2
+    );
+  }
+
   if (modelType === 'LLM') {
     const apiEndpoint = `${formValues?.apiEndpoint ?? ''}`.trim();
     const prevUrl = typeof prevObj?.url === 'string' ? prevObj.url.trim() : '';
@@ -520,4 +655,45 @@ export function buildAutoDebugRequestText(options: {
 
 export function extractModelId(res: any) {
   return res?.data?.id ?? res?.id ?? res?.resourceId ?? res?.data?.resourceId ?? res?.result?.id ?? undefined;
+}
+
+export function getModelDebugDispatchTimeoutMs(modelType: any) {
+  return normalizeModelType(modelType) === 'IMAGE_GENERATION' ? 130000 : 15000;
+}
+
+export function dispatchModelActionWithResult(
+  dispatch: (action: any) => void,
+  actionType: string,
+  payload: any,
+  timeoutMs = 15000
+) {
+  return new Promise<any>((resolve, reject) => {
+    let settled = false;
+    const timer = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('dispatch timeout'));
+    }, timeoutMs);
+
+    const resolveOnce = (res: any) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      resolve(res);
+    };
+
+    const rejectOnce = (err: any) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      reject(err);
+    };
+
+    dispatch({
+      type: actionType,
+      payload,
+      success: resolveOnce,
+      fail: rejectOnce,
+    });
+  });
 }

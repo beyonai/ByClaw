@@ -392,6 +392,7 @@ export default {
   'modelMgr.error.setDefaultModelFail': 'Failed to set default model',
   'modelMgr.error.completeModelConfigFail': 'Failed to complete model parameters',
   'modelMgr.error.debugModelFail': 'Model debug failed',
+  'modelMgr.error.debugModelImageGenerationFail': 'Image generation debug failed',
 
   // Model Management - Edit/Debug Modal
   'modelMgr.modal.editTitle': 'Edit model',
@@ -446,6 +447,17 @@ export default {
   'modelMgr.modal.modelTypeLLM': 'LLM',
   'modelMgr.modal.modelTypeRERANK': 'RERANK',
   'modelMgr.modal.modelTypeEMBEDDING': 'EMBEDDING',
+  'modelMgr.modal.modelTypeIMAGE_GENERATION': 'Image generation',
+  'modelMgr.modal.minimaxModel': 'MiniMax model',
+  'modelMgr.modal.minimaxModelPlaceholder': 'Enter a MiniMax model, for example image-01',
+  'modelMgr.modal.minimaxModelRequired': 'Please enter a MiniMax model',
+  'modelMgr.modal.imagePrompt': 'Image prompt',
+  'modelMgr.modal.imagePromptPlaceholder': 'Describe the image to generate',
+  'modelMgr.modal.imagePromptRequired': 'Please enter an image prompt',
+  'modelMgr.modal.aspectRatio': 'Aspect ratio',
+  'modelMgr.modal.imageCount': 'Image count',
+  'modelMgr.modal.responseFormat': 'Response format',
+  'modelMgr.modal.promptOptimizer': 'Prompt optimizer',
   'modelMgr.modal.provider': 'Provider',
   'modelMgr.modal.modelProtocol': 'Model protocol',
   'modelMgr.modal.modelProtocolPlaceholder': 'Select model protocol',
@@ -542,4 +554,9 @@ export default {
   'digitalEmployee.authSourceTip':
     'Displays authorization records from positions, personnel, and position whitelist/blacklist configurations.',
   'digitalEmployee.total': 'Total: {total}',
+  'employeeDetail.imageModel': 'Image generation model',
+  'employeeDetail.imageModelGlobalDefault': 'Use global default',
+  'employeeDetail.imageModelPlaceholder': 'Select an image generation model',
+  'employeeDetail.imageModelLoadError': 'Failed to load image generation models',
+  'employeeDetail.imageModelRetry': 'Retry',
 };

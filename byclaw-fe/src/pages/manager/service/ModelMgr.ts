@@ -10,8 +10,45 @@ const withCustomHandle = {
   },
 };
 
-export async function getModelListByPage(params: any) {
-  return POST('/byaiService/new/model/getModelListByPage', { ...params }, withCustomHandle);
+export interface ModelListByPageParams {
+  pageNum: number;
+  pageSize: number;
+  modelType?: string;
+  status?: string;
+  keyword?: string;
+  ability?: string;
+  system?: string;
+}
+
+export interface ModelListItem {
+  id?: string;
+  modelId?: string;
+  modelName?: string;
+  displayName?: string;
+  modelCode?: string;
+  modelType?: string;
+  status?: string;
+}
+
+export interface ModelListPageData {
+  rows?: ModelListItem[];
+  list?: ModelListItem[];
+  pageNum?: number;
+  pageIndex?: number;
+  pageSize?: number;
+  total?: number;
+}
+
+export interface ModelListByPageResponse {
+  code?: number;
+  msg?: string;
+  data?: ModelListPageData;
+  rows?: ModelListItem[];
+  list?: ModelListItem[];
+}
+
+export async function getModelListByPage(params: ModelListByPageParams): Promise<ModelListByPageResponse> {
+  return POST<ModelListByPageResponse>('/byaiService/new/model/getModelListByPage', { ...params }, withCustomHandle);
 }
 
 export async function getModelDetail(params: any) {
@@ -71,6 +108,20 @@ export async function debugModelEmbedding(params: any) {
   void signal;
   void onDelta;
   return POST('/byaiService/new/model/debugModelEmbedding', { ...payload }, withCustomHandle);
+}
+
+export async function debugModelImageGeneration(params: any) {
+  const { signal, onDelta, ...payload } = params || {};
+  void onDelta;
+  return POST(
+    '/byaiService/new/model/debugModelImageGeneration',
+    { ...payload },
+    {
+      ...withCustomHandle,
+      cancelToken: signal ? ({ signal } as AbortController) : undefined,
+      timeout: 125000,
+    }
+  );
 }
 
 export async function debugModelStream(params: any) {

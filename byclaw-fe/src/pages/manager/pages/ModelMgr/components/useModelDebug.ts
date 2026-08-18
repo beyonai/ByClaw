@@ -1,6 +1,6 @@
 import { message } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { normalizeModelType } from './modelFormUtils';
+import { hasImageGenerationPrompt, normalizeModelType } from './modelFormUtils';
 import { copyTextToClipboard } from '@/pages/manager/utils/copy';
 
 type IntlShape = {
@@ -137,6 +137,11 @@ const useModelDebug = ({
       message.warning(intl.formatMessage({ id: 'modelMgr.modal.debugInputRequired' }));
       return;
     }
+    const currentType = normalizeModelType(currentModelType);
+    if (currentType === 'IMAGE_GENERATION' && !hasImageGenerationPrompt(debugInput)) {
+      message.warning(intl.formatMessage({ id: 'modelMgr.modal.imagePromptRequired' }));
+      return;
+    }
     if (currentModelId === null || currentModelId === undefined || currentModelId === '') {
       message.warning(intl.formatMessage({ id: 'modelMgr.modal.debugIdRequired' }));
       return;
@@ -150,8 +155,6 @@ const useModelDebug = ({
     setDebugOutput('');
     setRerankResult(null);
     setDebugOutputLoading(true);
-    const currentType = normalizeModelType(currentModelType);
-
     runDebugRequest({
       modelId: `${currentModelId}`,
       input: `${debugInput}`,
@@ -230,6 +233,11 @@ const useModelDebug = ({
         }
 
         const text = `${res?.output ?? ''}`;
+        if (currentType === 'IMAGE_GENERATION') {
+          streamDoneRef.current = true;
+          setDebugOutput(text);
+          return;
+        }
         if (!gotDeltaRef.current && text) {
           charQueueRef.current.push(...Array.from(text));
           ensureTyping();

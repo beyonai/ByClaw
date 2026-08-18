@@ -4,7 +4,14 @@ import React, { useCallback, useMemo } from 'react';
 import { useDispatch, useIntl } from '@umijs/max';
 import type { ModalStore } from '@/pages/manager/hooks/useShowModal';
 import SharedModelFormModal from './SharedModelFormModal';
-import { extractModelId, normalizeModelType, SYSTEM_SOURCE_TYPES, type ModelTagItem } from './modelFormUtils';
+import {
+  dispatchModelActionWithResult,
+  extractModelId,
+  getModelDebugDispatchTimeoutMs,
+  normalizeModelType,
+  SYSTEM_SOURCE_TYPES,
+  type ModelTagItem,
+} from './modelFormUtils';
 
 type Props = ModalStore<any> & {
   onCancel: () => void;
@@ -26,35 +33,7 @@ const ModelFormModal: React.FC<Props> = ({ onCancel, reload, ...props }) => {
 
   const dispatchWithResult = useCallback(
     (actionType: string, payload: any, timeoutMs = 15000) =>
-      new Promise<any>((resolve, reject) => {
-        let settled = false;
-        const timer = window.setTimeout(() => {
-          if (settled) return;
-          settled = true;
-          reject(new Error('dispatch timeout'));
-        }, timeoutMs);
-
-        const resolveOnce = (res: any) => {
-          if (settled) return;
-          settled = true;
-          window.clearTimeout(timer);
-          resolve(res);
-        };
-
-        const rejectOnce = (err: any) => {
-          if (settled) return;
-          settled = true;
-          window.clearTimeout(timer);
-          reject(err);
-        };
-
-        dispatch({
-          type: actionType,
-          payload,
-          success: resolveOnce,
-          fail: rejectOnce,
-        });
-      }),
+      dispatchModelActionWithResult(dispatch, actionType, payload, timeoutMs),
     [dispatch]
   );
 
@@ -129,19 +108,21 @@ const ModelFormModal: React.FC<Props> = ({ onCancel, reload, ...props }) => {
   const runDebugRequest = useCallback(
     ({ modelId, input, modelType, signal, onDelta }: any) => {
       const currentType = normalizeModelType(modelType);
-      const effectType =
-        currentType === 'RERANK'
-          ? 'modelMgr/debugModelRerank'
-          : currentType === 'EMBEDDING'
-            ? 'modelMgr/debugModelEmbedding'
-            : 'modelMgr/debugModel';
+      let effectType = 'modelMgr/debugModel';
+      if (currentType === 'RERANK') effectType = 'modelMgr/debugModelRerank';
+      if (currentType === 'EMBEDDING') effectType = 'modelMgr/debugModelEmbedding';
+      if (currentType === 'IMAGE_GENERATION') effectType = 'modelMgr/debugModelImageGeneration';
 
-      return dispatchWithResult(effectType, {
-        id: `${modelId}`,
-        input: `${input}`,
-        signal,
-        onDelta,
-      });
+      return dispatchWithResult(
+        effectType,
+        {
+          id: `${modelId}`,
+          input: `${input}`,
+          signal,
+          onDelta,
+        },
+        getModelDebugDispatchTimeoutMs(currentType)
+      );
     },
     [dispatchWithResult]
   );

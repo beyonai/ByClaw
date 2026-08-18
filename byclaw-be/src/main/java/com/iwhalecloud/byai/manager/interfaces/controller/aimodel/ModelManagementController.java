@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.interfaces.controller.aimodel;
 
 import com.iwhalecloud.byai.manager.application.service.aimodel.GptProxyChatCompletionsStreamApplicationService;
 import com.iwhalecloud.byai.manager.application.service.aimodel.ModelConfigCompleteApplicationService;
+import com.iwhalecloud.byai.manager.application.service.aimodel.ModelDebugImageGenerationApplicationService;
 import com.iwhalecloud.byai.manager.application.service.aimodel.ModelDebugRerankApplicationService;
 import com.iwhalecloud.byai.manager.application.service.aimodel.ModelManagementApplicationService;
 import com.iwhalecloud.byai.manager.application.service.aimodel.RerankDebugResult;
@@ -50,6 +51,9 @@ public class ModelManagementController {
 
     @Autowired
     private ModelDebugRerankApplicationService modelDebugRerankApplicationService;
+
+    @Autowired
+    private ModelDebugImageGenerationApplicationService modelDebugImageGenerationApplicationService;
 
     @Autowired
     private ModelConfigCompleteApplicationService modelConfigCompleteApplicationService;
@@ -163,6 +167,25 @@ public class ModelManagementController {
             RerankDebugResult result = modelDebugRerankApplicationService.startRerankDebug(body);
             modelManagementApplicationService.updateModelStatusAfterDebug(modelId, true);
             return ResponseUtil.successResponse(result.getBody());
+        }
+        catch (BaseException e) {
+            modelManagementApplicationService.updateModelStatusAfterDebug(modelId, false);
+            throw e;
+        }
+    }
+
+    /**
+     * MiniMax image generation debug proxy (non-streaming).
+     */
+    @ManageLogAnnotation(name = "模型管理", description = "文生图调试代理")
+    @ApiOperation("文生图调试代理")
+    @PostMapping(value = "/debugModelImageGeneration", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseUtil<Object> debugModelImageGeneration(@RequestBody Map<String, Object> body) {
+        Long modelId = modelManagementApplicationService.parseModelIdFromBody(body);
+        try {
+            Object result = modelDebugImageGenerationApplicationService.startImageGenerationDebug(body);
+            modelManagementApplicationService.updateModelStatusAfterDebug(modelId, true);
+            return ResponseUtil.successResponse(result);
         }
         catch (BaseException e) {
             modelManagementApplicationService.updateModelStatusAfterDebug(modelId, false);
