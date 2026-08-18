@@ -44,6 +44,245 @@
   background: #fff;
 }
 
+.projectListPage {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 40px 24px 48px;
+  overflow-y: auto;
+  box-sizing: border-box;
+  background: #fff;
+}
+
+.projectHero {
+  min-height: 260px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 48px;
+  margin-bottom: 36px;
+}
+
+.projectHeroContent {
+  flex: 0 0 360px;
+
+  h1 {
+    margin: 0 0 10px;
+    color: #181818;
+    font-size: 24px;
+    font-weight: 700;
+    line-height: 48px;
+  }
+
+  p {
+    margin: 0 0 30px;
+    color: #929292;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 24px;
+  }
+}
+
+.projectCreateButton {
+  width: 100px;
+  height: 32px;
+  padding: 0;
+  border-color: #1f1f1f;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  background: #1f1f1f;
+
+  &:hover,
+  &:focus-visible {
+    border-color: #353535 !important;
+    color: #fff !important;
+    background: #353535 !important;
+  }
+}
+
+.projectHeroIllustration {
+  min-width: 280px;
+  max-width: 520px;
+  height: 230px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    filter: grayscale(1);
+    opacity: 0.78;
+  }
+}
+
+.projectListHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 14px;
+
+  h2 {
+    margin: 0;
+    color: #1f1f1f;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 28px;
+  }
+}
+
+.projectSearchInput {
+  width: 340px;
+}
+
+.projectListFeedback {
+  min-height: 320px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.projectCardGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.projectListCard {
+  min-width: 0;
+  min-height: 80px;
+  padding: 14px 18px;
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+  text-align: left;
+  cursor: pointer;
+  background: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s, transform 0.2s;
+
+  &:hover {
+    border-color: #d1d1d1;
+    box-shadow: 0 6px 18px rgba(31, 31, 31, 0.06);
+    background: #f7f7f7;
+  }
+}
+
+.projectCardIcon {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  color: #202020;
+  font-size: 19px;
+  background: #f1f1f1;
+}
+
+.projectCardBody {
+  min-width: 0;
+  padding-right: 24px;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+
+  strong,
+  small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong {
+    color: #202020;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 24px;
+  }
+
+  small {
+    color: #aaa;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 20px;
+  }
+}
+
+.projectCardMore {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #667085;
+  font-size: 16px;
+  cursor: pointer;
+  background: transparent;
+  opacity: 1;
+  transform: translateY(-50%);
+  transition: opacity 0.2s, background-color 0.2s;
+
+  &:hover {
+    color: #1f2633;
+    background: #f1f3f5;
+  }
+}
+
+@media (max-width: 1200px) {
+  .projectCardGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .projectListPage {
+    padding: 24px;
+  }
+
+  .projectHero {
+    min-height: auto;
+  }
+
+  .projectHeroContent {
+    flex: 1;
+  }
+
+  .projectHeroIllustration {
+    display: none;
+  }
+
+  .projectListHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .projectSearchInput {
+    width: 100%;
+  }
+
+  .projectCardGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .header {
   display: flex;
   align-items: center;
@@ -193,6 +432,20 @@
 
   h3 {
     min-width: 0;
+  }
+}
+
+.detailBackButton {
+  height: 32px;
+  flex-shrink: 0;
+  padding: 0 8px;
+  color: #596579;
+  font-size: 14px;
+
+  &:hover,
+  &:focus-visible {
+    color: #202020 !important;
+    background: #f1f3f5 !important;
   }
 }
 
@@ -1403,4 +1656,21 @@
 .resourceSessionSelect {
   width: min(360px, 100%);
   margin-bottom: 10px;
+}
+
+// 编辑任务时负责人和预期时间并排展示，各占一半宽度；窄屏自动恢复单列布局。
+.taskEditRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+
+  & > div {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .taskEditRow {
+    grid-template-columns: 1fr;
+  }
 }
