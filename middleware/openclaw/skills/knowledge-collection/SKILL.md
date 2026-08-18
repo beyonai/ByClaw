@@ -1,12 +1,13 @@
 ---
 name: knowledge-collection
-description: Use when the goal is to COLLECT and keep material rather than just get an answer - collect, crawl, scrape, batch-search, archive, ingest, or organize content from internet or enterprise sources, or store already-collected files in a knowledge base. This is the collection orchestrator and owns collection artifacts, post-processing, and knowledge-base ingestion; prefer it over By-Reach whenever collection intent is explicit, even for a single page or result.
+description: Use when the goal is to COLLECT and keep material rather than just get an answer - collect, crawl, scrape, batch-search, archive, ingest, or organize content from internet or enterprise sources, or store already-collected files in a knowledge base. This is the collection orchestrator and owns collection artifacts, post-processing, and knowledge-base ingestion; prefer it whenever collection intent is explicit, even for a single page or result.
 ---
 
 # Knowledge Collection
 
 这是面向用户的默认知识采集编排 Skill。采集编排器 `knowledge-collection` 判断采集意图、编排深化研究、选择来源执行器，并衔接后处理；
-路由器 `agent-reach`（By-Reach）负责公共互联网渠道选择，网站执行器 `bycli` 或其他来源执行器负责取得内容。
+内置公共互联网路由层 [references/source-routing.md](references/source-routing.md)（原 By-Reach 路由器）负责渠道选择，
+网站执行器 `bycli` 或其他来源执行器负责取得内容。
 
 **取内容前先读这一条**：采集编排器自身永不取内容。任何一次取内容都必须先按下面的「来源路由」委派来源执行器，
 不得使用 `web_fetch`、`curl`、`wget`、`requests` 或其他直接 HTTP 客户端自行抓取。已经用直连拿到内容时，
@@ -25,15 +26,16 @@ description: Use when the goal is to COLLECT and keep material rather than just 
 先框架问题（breadth/depth/起始 query），逐层拆分为分支，每个分支完成一次「检索 → 抓取 → 登记 → 提炼」，再聚合去重、输出报告。
 深化研究会话必须用 `init --mode research` 创建；`mode=research` 会强制 `report` 交付后才允许 `cleanup` 整体清理。
 
-- 深化研究的每次「检索」：委派**双检索信源**确定哪些网页相关 —— 路由器 `agent-reach`（Exa 搜索、gh、RSS、站内搜索等渠道）
-  与 `online_search`（SearXNG 元搜索 CLI，时间窗/学术/中文多引擎，见 [references/online-search.md](references/online-search.md)）；
+- 深化研究的每次「检索」：使用**双检索信源**确定哪些网页相关 —— 内置路由层的检索渠道（Exa 搜索、gh、RSS、站内搜索等，
+  见 [references/source-routing.md](references/source-routing.md)）与 `online_search`（SearXNG 元搜索 CLI，
+  时间窗/学术/中文多引擎，见 [references/online-search.md](references/online-search.md)）；
   信源分工见 [references/research-methodology.md](references/research-methodology.md)「检索源分工」节；
-- **检索信源入口（强制）**：执行任何检索前，必须先打开并通读 `online_search` 与 `agent-reach` 两个技能的 SKILL.md
-  （若本会话尚未加载过它们）：`online_search` 位于 `skills/online_search/SKILL.md`（源码版 searxng CLI，
-  参数/输出/实测引擎可用性见其正文与 [references/online-search.md](references/online-search.md)）；
-  `agent-reach` 位于 `skills/agent-reach/SKILL.md`（By-Reach 路由表与 bycli 铁律）。
+- **检索信源入口（强制）**：执行任何检索前，必须先通读 [references/source-routing.md](references/source-routing.md)
+  （路由表与 bycli 铁律），并打开通读 `online_search` 技能的 SKILL.md（若本会话尚未加载过它）：
+  `online_search` 位于 `skills/online_search/SKILL.md`（源码版 searxng CLI，参数/输出/实测引擎可用性见其正文与
+  [references/online-search.md](references/online-search.md)）。
   **技能不是平台工具**：不得把技能名当作工具名调用（如 `online_search` 工具调用会报 "Tool not found"）；
-  必须按其 SKILL.md 中的实际命令面（searxng_cli.py / exec / bycli 等）执行。未通读技能文档就执行检索视为违规；
+  必须按其 SKILL.md 中的实际命令面（searxng_cli.py / exec / bycli 等）执行。未通读检索文档就执行检索视为违规；
 - 深化研究的每次「抓取」：按下方「来源路由」委派来源执行器取得内容（公共网页一律 `bycli`）；
 - 每轮分支产物经 `collect` 登记为 inventory（`sourceSkill + sourceUrl` 去重），learnings/citations 引用
 -   inventory 的 `itemId`，杜绝「只抓 snippet 就当证据」与重复抓取；
@@ -49,6 +51,7 @@ description: Use when the goal is to COLLECT and keep material rather than just 
 - 研究维度：`init` / `plan` / `branch` / `aggregate` / `report`；
 - 采集维度：`collect`（登记执行器抓取结果并物化，inventory 缺失自动补登）/ `inspect` / `run` / `cleanup` /
   `unlock-stale` / `set-retention` / `rewrite-image-links` / `export-views`；
+- 爬取维度：`crawl-seed` / `crawl-next` / `crawl-mark` / `crawl-status`（站点级 frontier，本身不取内容）；
 - 平台维度：`list-kb` / `upload-doc` / `upload-images` / `upload-resource` / `normalize` / `ingest`(`store` 已废弃)；
 - 汇总：`status`。
 
@@ -61,12 +64,12 @@ collection-result.json + sanitized/metadata.json）首次读写自动迁移为 s
 
 ## 来源路由
 
-- 公共互联网：加载并遵循 `agent-reach` skill（By-Reach）。公开网页、微信公众号文章、静态页面或 raw URL 均走这条路径，
-  不得因「一个链接」「内容公开可读」「直接抓更快」跳过路由。
+- 公共互联网：按内置路由层 [references/source-routing.md](references/source-routing.md) 选定执行器。公开网页、
+  微信公众号文章、静态页面或 raw URL 均走这条路径，不得因「一个链接」「内容公开可读」「直接抓更快」跳过路由。
 - 微信公众号后台（例如“我的公众号”的发表记录、后台数据或数据明细 Excel）：这是登录态归属账号采集，不要求公众号名称或原始 ID。
   直接加载并遵循 `bycli` skill，以委派采集模式先用 `published` 命令的 `--limit <N>` 返回最近 N 条发表记录及运营指标，再对每条返回记录的精确 URL 用
   `download-publish-data` 下载数据明细 Excel。不得询问公众号名称、原始 ID 或“数据明细”的含义；仅在登录、验证码或环境验证时按 byCLI 微信规则停下等待用户。
-- By-Reach 选择 `bycli`，或用户显式要求 byCLI、浏览器或 Adapter 执行：加载并遵循 `bycli` skill。
+- 路由层选中 `bycli`，或用户显式要求 byCLI、浏览器或 Adapter 执行：加载并遵循 `bycli` skill。
 - 钉钉/DingTalk：加载并遵循 `dws` skill，并遵循 [DingTalk DWS 采集桥接](references/sources/dingtalk-dws.md)。
 - 飞书/Lark：加载并遵循 `fws` skill，并遵循 [Feishu 采集桥接](references/sources/feishu-fws.md)。
 - 企业微信/WeCom：加载并遵循 `wecomcli` skill，并遵循 [WeCom 采集桥接](references/sources/wecom-wecomcli.md)。
@@ -74,7 +77,7 @@ collection-result.json + sanitized/metadata.json）首次读写自动迁移为 s
 采集编排器自身不取内容，取内容一律委派来源执行器：不得使用 `web_fetch`、`curl`、`wget`、`requests` 或其他直接 HTTP 客户端绕过来源执行器。
 公开可读、静态页面、raw URL、纯文本或 Markdown 内容均不是例外。
 
-By-Reach 的首选执行器与 `bycli` 兜底返回的结果必须统一进入同一套 collection contract，不得按执行后端分叉产物协议。
+路由表首选执行器与 `bycli` 兜底返回的结果必须统一进入同一套 collection contract，不得按执行后端分叉产物协议。
 
 委派来源执行器时，采集编排器明确声明当前调用采用“委派采集模式”。该模式的契约是：
 
@@ -82,6 +85,17 @@ By-Reach 的首选执行器与 `bycli` 兜底返回的结果必须统一进入�
 - 来源执行器只负责采集并返回结果，不得自行执行或询问后处理。
 - 来源执行器不得询问 `入库 / 知识整理 / 跳过`。
 - 来源执行器不得反向加载 `knowledge-collection`。
+
+## 站点爬取（多页文档）
+
+目标是**一个站点或一批文档**（"爬这个产品的文档"、"整理这个产品的功能说明"、"生成产品解读报告"）时，
+加载并遵循 [references/site-crawl.md](references/site-crawl.md)：先用 sitemap.xml / llms.txt 发现全站 URL，
+再用 `crawl-seed` / `crawl-next` / `crawl-mark` 维护 frontier，取内容仍按「来源路由」委派 `bycli web read`。
+
+目标是**单个已知 URL** 时不需要 frontier，直接按常规采集链路执行。
+
+`crawl-*` 命令只管覆盖面与续跑，不取内容、不产出正文；`--max-pages` 放弃的页数与 `failed` 页面必须写入报告的
+「覆盖缺口」章节，不得让部分覆盖读起来像全站覆盖。
 
 ## 采集与后处理
 

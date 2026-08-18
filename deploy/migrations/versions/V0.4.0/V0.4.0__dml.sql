@@ -509,3 +509,47 @@ Requirements:
 4. Prefer noun + verb structure, suitable for chat conversation list titles
 5. [Mandatory] Do not output tags, internal thinking or reasoning. Return only the final title', 10001, '2026-08-07 11:15:33', '2026-08-07 11:15:33', null);
 
+-- ============================================================================
+-- agent-reach 技能下线迁移（合并到 knowledge-collection 内置路由层）
+-- 2026-08-18: agent-reach skill 已合并为 knowledge-collection/references/source-routing.md
+-- ============================================================================
+
+-- 1. 从 OPENCLAW_BUNDLED_SKILLS 配置中移除 agent-reach 条目
+UPDATE byai.byai_system_config
+SET param_value = regexp_replace(
+    param_value,
+    ',?\s*\{"skillName":"(By-Reach|agent-reach)","skillCode":"agent-reach","skillDesc(Zh|En)":[^}]+\}',
+    '',
+    'g'
+),
+    update_time = CURRENT_TIMESTAMP
+WHERE param_code = 'OPENCLAW_BUNDLED_SKILLS'
+  AND regexp_replace(param_value, '\s', '', 'g') LIKE '%"skillCode":"agent-reach"%';
+
+-- 2. 清理配置 JSON 可能出现的语法问题（首尾多余逗号）
+UPDATE byai.byai_system_config
+SET param_value = regexp_replace(
+    regexp_replace(param_value, '\[\s*,', '[', 'g'),
+    ',\s*\]', ']', 'g'
+)
+WHERE param_code = 'OPENCLAW_BUNDLED_SKILLS';
+
+-- 3. 删除 agent-reach 资源的所有授权记录
+DELETE FROM byai.ss_grant g
+WHERE g.grant_obj_id = (
+    SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'agent-reach'
+);
+
+-- 4. 删除 agent-reach 的资源扩展记录（skill 元数据）
+DELETE FROM byai.ss_res_ext_skill e
+WHERE e.resource_id = (
+    SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'agent-reach'
+);
+
+-- 5. 删除 agent-reach 资源本体
+DELETE FROM byai.ss_resource
+WHERE resource_code = 'agent-reach';
+
+-- 验证查询（migration 执行后应返回 0 行）
+-- SELECT * FROM byai.ss_resource WHERE resource_code = 'agent-reach';
+-- SELECT * FROM byai.byai_system_config WHERE param_code = 'OPENCLAW_BUNDLED_SKILLS' AND param_value LIKE '%agent-reach%';
