@@ -1,7 +1,7 @@
 import { Button, Empty, Form, Input, List, Modal, Spin, Switch, Tag, message } from 'antd';
 import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useEffect, useState } from 'react';
-import { useIntl, useSelector } from '@umijs/max';
+import { useIntl } from '@umijs/max';
 import {
   createScanSource,
   deleteScanSource,
@@ -36,7 +36,6 @@ const parseChatConfig = (config?: string) => {
 
 const AutomationListPanel: React.FC<PanelProps> = ({ active = true }) => {
   const intl = useIntl();
-  const userInfo = useSelector(({ user }: any) => user.userInfo);
   const [loading, setLoading] = useState(false);
   const [sources, setSources] = useState<any[]>([]);
   const [editingSource, setEditingSource] = useState<any | null>(null);
@@ -46,23 +45,15 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true }) => {
     resourceList: [],
   });
   const [form] = Form.useForm();
-  const currentUserId = userInfo?.userId ?? userInfo?.id;
-  // 编辑/删除/启停的权限轴是自动化创建者本人（后端 requireSourceCreator 同口径），不是项目创建者。
-  // createBy 与 userId 两侧类型不稳定（Long / string），统一转字符串再比。
-  const isSourceOwner = (source: any) =>
-    currentUserId !== undefined &&
-    currentUserId !== null &&
-    source?.createBy !== undefined &&
-    source?.createBy !== null &&
-    `${currentUserId}` === `${source.createBy}`;
   const normalizeRows = (response: any) => {
     const data = response?.data ?? response;
     if (Array.isArray(data)) return data;
     return data?.list || data?.rows || data?.records || [];
   };
 
-  // 自动化不挂项目，列表始终跨项目取全量；不带 projectId 后端才不会按项目过滤。
-  const buildListParams = () => ({ pageNum: 1, pageSize: 100 });
+  // 自动化不挂项目，不带 projectId 后端才不会按项目过滤；
+  // onlyMine 让列表与编辑/删除权限同一条轴（都只认创建者），别人的自动化不出现在我的列表里。
+  const buildListParams = () => ({ onlyMine: true, pageNum: 1, pageSize: 100 });
 
   useEffect(() => {
     if (!active) return;
@@ -185,7 +176,6 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true }) => {
                 {/* eslint-disable-next-line @typescript-eslint/no-use-before-define */}
                 <SpaceActions
                   source={source}
-                  canManage={isSourceOwner(source)}
                   // 编辑表单只会写 chat 配置，历史渠道行放进来编辑会把它的传输配置覆盖掉，所以禁编辑只留停用/删除。
                   canEdit={isChatSource(source)}
                   onEdit={() => openEditor(source)}
@@ -253,9 +243,10 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true }) => {
   );
 };
 
+// 列表已由后端按创建者收窄（onlyMine），能看到的行就是自己的，所以这里不再判断归属；
+// 越权改删仍由后端 requireSourceCreator 兜住。
 function SpaceActions({
   source,
-  canManage,
   canEdit,
   onEdit,
   onDelete,
@@ -263,7 +254,6 @@ function SpaceActions({
   onTrigger,
 }: {
   source: any;
-  canManage: boolean;
   canEdit: boolean;
   onEdit: () => void;
   onDelete: () => void;
@@ -275,7 +265,6 @@ function SpaceActions({
   const statusText = intl.formatMessage({
     id: enabled ? 'automation.enabled' : 'automation.disabled',
   });
-  if (!canManage) return <Tag color={enabled ? 'success' : 'default'}>{statusText}</Tag>;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <Tag color={enabled ? 'success' : 'default'}>{statusText}</Tag>
