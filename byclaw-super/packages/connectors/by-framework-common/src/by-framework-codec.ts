@@ -193,7 +193,7 @@ export function extractError(message: DataMessage): string {
   if (message.state_msg) {
     return message.state_msg;
   }
-  return extractContent(message.data) || "OpenClaw execution failed";
+  return extractContent(message.data) || "by-framework execution failed";
 }
 
 /** 把 ioredis 的 XREAD 嵌套返回值展平为消息 ID 与 data 字段。 */

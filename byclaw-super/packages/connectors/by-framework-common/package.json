@@ -1,9 +1,9 @@
 {
-  "name": "@byclaw/connector-openclaw-by-framework",
+  "name": "@byclaw/connector-by-framework-common",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "OpenClaw connector transported by @byclaw/by-framework",
+  "description": "Shared Gateway, Redis stream and lifecycle transport for by-framework connectors",
   "files": ["dist"],
   "exports": {
     ".": {
@@ -19,6 +19,7 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@byclaw/connector-by-framework-common": "workspace:*"
+    "@byclaw/by-conductor": "workspace:*",
+    "@byclaw/by-framework": "1.5.1"
   }
 }

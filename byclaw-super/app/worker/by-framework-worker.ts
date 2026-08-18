@@ -181,6 +181,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       beyondToken,
       ...(systemCode ? { systemCode } : {}),
     };
+    const metadata = { ...command.header.metadata };
     const principal = await this.#runIngress.resolvePrincipal(auth);
     const bindingExternalSessionId = orchestratorBindingSessionId(
       command.header.sessionId,
@@ -209,6 +210,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
             ? { externalSessionId: command.header.sessionId }
             : {}),
           parentMessageId: command.header.messageId,
+          metadata,
           ...(groupChatRef ? { groupChatRef } : {}),
           ...(orchestrator ? { orchestrator } : {}),
           ...auth,
@@ -223,6 +225,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
             ? { externalSessionId: command.header.sessionId }
             : {}),
           parentMessageId: command.header.messageId,
+          metadata,
           ...(groupChatRef ? { groupChatRef } : {}),
           ...(orchestrator ? { orchestrator } : {}),
           ...auth,

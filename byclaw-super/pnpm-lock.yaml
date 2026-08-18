@@ -14,6 +14,9 @@ importers:
       '@byclaw/by-framework':
         specifier: 1.5.1
         version: 1.5.1
+      '@byclaw/connector-code-by-framework':
+        specifier: workspace:*
+        version: link:packages/connectors/code-by-framework
       '@byclaw/connector-openclaw-by-framework':
         specifier: workspace:*
         version: link:packages/connectors/openclaw-by-framework
@@ -67,7 +70,7 @@ importers:
         specifier: 1.1.38
         version: 1.1.38
 
-  packages/connectors/openclaw-by-framework:
+  packages/connectors/by-framework-common:
     dependencies:
       '@byclaw/by-conductor':
         specifier: workspace:*
@@ -75,6 +78,18 @@ importers:
       '@byclaw/by-framework':
         specifier: 1.5.1
         version: 1.5.1
+
+  packages/connectors/code-by-framework:
+    dependencies:
+      '@byclaw/connector-by-framework-common':
+        specifier: workspace:*
+        version: link:../by-framework-common
+
+  packages/connectors/openclaw-by-framework:
+    dependencies:
+      '@byclaw/connector-by-framework-common':
+        specifier: workspace:*
+        version: link:../by-framework-common
 
   packages/connectors/third-party-a2a:
     dependencies:
