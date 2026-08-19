@@ -30,9 +30,12 @@ node scripts/by-skill-installer.mjs <command> [options]
 
 1. `--digital-employee-id <id>`
 2. 环境变量 `BAIYING_DIGITAL_EMPLOYEE_ID` / `DIGITAL_EMPLOYEE_ID` / `RESOURCE_ID`
-3. Beyond-Token 里的 `defaultDigitalEmployeeId`
+3. 工作目录名 `workspace-baiying-agent-<id>`
+4. 环境变量 `BYAI_WORKER_ID=openclaw-<usercode>`
+5. JWT `BAIYING_AGENT_AUTH` 的 `sub` claim
+6. Beyond-Token 里的 `defaultDigitalEmployeeId`
 
-三者都拿不到时报错，不做猜测。
+都拿不到时报错，不做猜测。OpenClaw 运行时通常会注入第 3/4/5 项之一。
 
 ## 命令
 

@@ -472,6 +472,22 @@ function resolveDigitalEmployeeId(args) {
   if (fromEnv !== undefined) {
     return { digitalEmployeeId: fromEnv, source: "env" };
   }
+  // Extract from current working directory if it matches workspace-baiying-agent-<id>
+  const cwdMatch = process.cwd().match(/workspace-baiying-agent-(\d+)/);
+  if (cwdMatch) {
+    return { digitalEmployeeId: toNumber(cwdMatch[1]), source: "cwd" };
+  }
+  // Extract from BYAI_WORKER_ID=openclaw-<usercode>
+  const workerMatch = process.env.BYAI_WORKER_ID?.match(/openclaw-(\d+)/);
+  if (workerMatch) {
+    return { digitalEmployeeId: toNumber(workerMatch[1]), source: "BYAI_WORKER_ID" };
+  }
+  // Extract from BAIYING_AGENT_AUTH JWT sub claim
+  const agentAuthPayload = decodeJwtPayload(process.env.BAIYING_AGENT_AUTH);
+  const fromAgentAuth = toNumber(agentAuthPayload?.sub);
+  if (fromAgentAuth !== undefined) {
+    return { digitalEmployeeId: fromAgentAuth, source: "BAIYING_AGENT_AUTH" };
+  }
   // Beyond-Token carries the caller's default digital employee.
   const payload = decodeJwtPayload(resolveAuthValues(loadAuthContextSync()).beyondToken);
   const fromToken = toNumber(payload?.defaultDigitalEmployeeId);
@@ -583,23 +599,47 @@ async function bindCommand(args, { unbind = false } = {}) {
     relIds: actionable.map((item) => item.skillId),
     timeoutMs,
   });
-  return { ...base, changed: actionable.map((item) => item.skillCode) };
+
+  // Re-fetch to verify the mutation actually took effect
+  const afterBound = await fetchBoundResources({ digitalEmployeeId, timeoutMs });
+  const afterBoundIds = new Set(afterBound.map((item) => toNumber(item?.resourceId)).filter((id) => id !== undefined));
+
+  const verified = actionable.filter((item) => (unbind ? !afterBoundIds.has(item.skillId) : afterBoundIds.has(item.skillId)));
+  const verifyFailed = actionable.filter((item) => (unbind ? afterBoundIds.has(item.skillId) : !afterBoundIds.has(item.skillId)));
+
+  return {
+    ...base,
+    changed: verified.map((item) => item.skillCode),
+    verifyFailed: verifyFailed.length ? verifyFailed.map((item) => ({ skillCode: item.skillCode, skillId: item.skillId })) : undefined,
+  };
 }
 
 async function listCommand(args) {
   const { digitalEmployeeId, source } = resolveDigitalEmployeeId(args);
   const timeoutMs = timeoutMsFromArgs(args);
   const bound = await fetchBoundResources({ digitalEmployeeId, timeoutMs });
+
+  // Build a skillId → skillType map from the permission list for enrichment
+  const innerSkills = await fetchInnerSkills({ timeoutMs, keyword: "", ownerType: null });
+  const skillTypeMap = new Map(
+    innerSkills.map((entry) => [toNumber(entry?.resourceId), firstNonEmpty(entry?.skillType)])
+      .filter(([id, type]) => id !== undefined && type)
+  );
+
   const skills = bound
     .filter((item) => String(item?.resourceBizType || "").toUpperCase() === "SKILL"
       || firstNonEmpty(item?.skillType))
-    .map((item) => ({
-      skillCode: firstNonEmpty(item?.resourceCode),
-      skillId: toNumber(item?.resourceId) ?? null,
-      skillName: firstNonEmpty(item?.resourceName),
-      skillType: firstNonEmpty(item?.skillType),
-      inner: String(item?.skillType || "").trim().toLowerCase() === INNER_SKILL_TYPE,
-    }))
+    .map((item) => {
+      const skillId = toNumber(item?.resourceId) ?? null;
+      const skillType = firstNonEmpty(item?.skillType) || skillTypeMap.get(skillId) || "";
+      return {
+        skillCode: firstNonEmpty(item?.resourceCode),
+        skillId,
+        skillName: firstNonEmpty(item?.resourceName),
+        skillType,
+        inner: String(skillType).trim().toLowerCase() === INNER_SKILL_TYPE,
+      };
+    })
     .sort((left, right) => left.skillCode.localeCompare(right.skillCode));
   return {
     ok: true,
@@ -649,9 +689,9 @@ function helpManual() {
         name: "bind",
         summary: "把内置技能绑定到数字员工；已绑定的跳过",
         options: [
-          "--skill-code <code>          必填，技能编码，可重复传入批量绑定",
+          "--skill-code <code>          技能编码，可重复传入批量绑定",
           "--skill-id <id>              可选，直接指定资源ID绕过 skillCode 解析",
-          "--digital-employee-id <id>   可选，目标数字员工；默认取 Beyond-Token 里的默认数字员工",
+          "--digital-employee-id <id>   可选，目标数字员工；按 6 级链路推导（见下方环境变量）",
           "--owner-type <type>          可选，限定归属范围，如 personal / enterprise",
           "--dry-run                    可选，只解析不改动绑定关系",
           "--timeout-ms <ms>            可选，单次请求超时，默认 30000",
@@ -669,11 +709,20 @@ function helpManual() {
       relList: `POST ${DEFAULT_CONTEXT_PATH}${REL_LIST_PATH}`,
     },
     environment: [
-      "BYAI_SERVICE_BASE_URL / SKILL_INSTALLER_URL   显式后端地址，优先级最高",
-      "REDIS_HOST + BE_DOMAINNAME                    Redis 服务发现",
-      "BE_PROTOCOL / HOST / BE_SERVER_PORT           兜底组装地址",
-      "BAIYING_DIGITAL_EMPLOYEE_ID                   默认数字员工ID",
-      "BAIYING_AUTH_FILE / BEYOND_TOKEN / USER_CODE  鉴权来源",
+      "数字员工推导链（优先级从高到低）：",
+      "  1. --digital-employee-id <id>",
+      "  2. BAIYING_DIGITAL_EMPLOYEE_ID / DIGITAL_EMPLOYEE_ID / RESOURCE_ID",
+      "  3. workspace-baiying-agent-<id> (cwd 工作目录名)",
+      "  4. BYAI_WORKER_ID=openclaw-<usercode>",
+      "  5. BAIYING_AGENT_AUTH JWT sub claim",
+      "  6. BEYOND_TOKEN 的 defaultDigitalEmployeeId",
+      "",
+      "后端地址推导：",
+      "  BYAI_SERVICE_BASE_URL / SKILL_INSTALLER_URL   显式后端地址，优先级最高",
+      "  REDIS_HOST + BE_DOMAINNAME                    Redis 服务发现",
+      "  BE_PROTOCOL / HOST / BE_SERVER_PORT           兜底组装地址",
+      "",
+      "鉴权：BAIYING_AUTH_FILE / BEYOND_TOKEN / USER_CODE",
     ],
   };
 }

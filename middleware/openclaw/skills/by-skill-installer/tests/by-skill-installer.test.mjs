@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
+import path from "node:path";
 import { after, before, describe, it } from "node:test";
 
 const PORT = 18099;
@@ -11,6 +14,8 @@ process.env.USER_CODE = "tester";
 delete process.env.BAIYING_DIGITAL_EMPLOYEE_ID;
 delete process.env.DIGITAL_EMPLOYEE_ID;
 delete process.env.RESOURCE_ID;
+delete process.env.BYAI_WORKER_ID;
+delete process.env.BAIYING_AGENT_AUTH;
 
 const mod = await import("../scripts/by-skill-installer.mjs");
 const {
@@ -152,6 +157,44 @@ describe("resolveDigitalEmployeeId", () => {
       assert.deepEqual(resolveDigitalEmployeeId({}), { digitalEmployeeId: 77, source: "env" });
     } finally {
       delete process.env.BAIYING_DIGITAL_EMPLOYEE_ID;
+    }
+  });
+
+  it("derives the id from an OpenClaw workspace directory", () => {
+    const original = process.cwd();
+    const workspace = path.join(os.tmpdir(), "workspace-baiying-agent-321");
+    fs.mkdirSync(workspace, { recursive: true });
+    process.chdir(workspace);
+    try {
+      assert.deepEqual(resolveDigitalEmployeeId({}), { digitalEmployeeId: 321, source: "cwd" });
+    } finally {
+      process.chdir(original);
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("derives the id from BYAI_WORKER_ID", () => {
+    process.env.BYAI_WORKER_ID = "openclaw-654";
+    try {
+      assert.deepEqual(resolveDigitalEmployeeId({}), {
+        digitalEmployeeId: 654,
+        source: "BYAI_WORKER_ID",
+      });
+    } finally {
+      delete process.env.BYAI_WORKER_ID;
+    }
+  });
+
+  it("derives the id from the BAIYING_AGENT_AUTH sub claim", () => {
+    const payload = Buffer.from(JSON.stringify({ sub: 987 })).toString("base64url");
+    process.env.BAIYING_AGENT_AUTH = `header.${payload}.sig`;
+    try {
+      assert.deepEqual(resolveDigitalEmployeeId({}), {
+        digitalEmployeeId: 987,
+        source: "BAIYING_AGENT_AUTH",
+      });
+    } finally {
+      delete process.env.BAIYING_AGENT_AUTH;
     }
   });
 
