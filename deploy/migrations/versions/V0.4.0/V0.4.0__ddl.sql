@@ -703,3 +703,6 @@ COMMENT ON TABLE byai.byai_connector_credential_secret IS '连接器 OAuth2 等�
 COMMENT ON COLUMN byai.byai_connector_credential_secret.credential_reference IS '随机 UUID 凭证引用，不含 token';
 COMMENT ON COLUMN byai.byai_connector_credential_secret.access_token_cipher IS 'SM4 加密的 access token，禁止写入日志或响应';
 COMMENT ON COLUMN byai.byai_connector_credential_secret.refresh_token_cipher IS 'SM4 加密的 refresh token，允许为空';
+
+ALTER TABLE byai_project_object_file ADD COLUMN object_type VARCHAR(20) DEFAULT 'object';
+COMMENT ON COLUMN byai_project_object_file.object_type IS '文件对象类型,保存本体对象:object,保存知识文件:knowledge';

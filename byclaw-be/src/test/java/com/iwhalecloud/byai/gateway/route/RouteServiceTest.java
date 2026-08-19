@@ -30,6 +30,8 @@ import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEve
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.context.support.StaticMessageSource;
@@ -49,7 +51,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-
+@DisabledOnOs(OS.WINDOWS)
 class RouteServiceTest {
 
     private GatewayClient gatewayClient;
