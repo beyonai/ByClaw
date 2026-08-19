@@ -10,6 +10,13 @@ spec:
   rules:
     - http:
         paths:
+          - path: /byaiService
+            pathType: Prefix
+            backend:
+              service:
+                name: byclaw-be
+                port:
+                  number: 8086
           - path: /
             pathType: Prefix
             backend:

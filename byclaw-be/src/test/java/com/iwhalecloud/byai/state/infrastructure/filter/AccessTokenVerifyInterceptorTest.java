@@ -224,4 +224,48 @@ class AccessTokenVerifyInterceptorTest {
         assertThat(response.getStatus()).isEqualTo(401);
         verifyNoInteractions(jwtTokenFilter, sessionFilter);
     }
+
+    @Test
+    void artifactUploadForcesBeyondTokenIdentityOverCookieSession() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        JwtTokenFilter jwtTokenFilter = mock(JwtTokenFilter.class);
+        SessionFilter sessionFilter = mock(SessionFilter.class);
+        LoginApplicationService loginApplicationService = mock(LoginApplicationService.class);
+        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwtTokenFilter);
+        ReflectionTestUtils.setField(interceptor, "sessionFilter", sessionFilter);
+        ReflectionTestUtils.setField(interceptor, "loginApplicationService", loginApplicationService);
+        LoginInfo tokenLoginInfo = new LoginInfo();
+        tokenLoginInfo.setUserId(100L);
+        tokenLoginInfo.setUserCode("artifact-user");
+        LoginInfo localLoginInfo = new LoginInfo();
+        localLoginInfo.setUserId(10L);
+        localLoginInfo.setUserCode("artifact-user");
+        when(jwtTokenFilter.doFilter(null, "artifact-token")).thenAnswer(invocation -> {
+            CurrentUserHolder.setLoginInfo(tokenLoginInfo);
+            return true;
+        });
+        when(loginApplicationService.getLoginInfo("artifact-user")).thenReturn(localLoginInfo);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST",
+            "/byaiService/open/api/v1/artifacts");
+        request.addHeader("Beyond-Token", "artifact-token");
+        MockHttpSession cookieSession = new MockHttpSession();
+        cookieSession.setAttribute("USER_CODE", "cookie-user");
+        request.setSession(cookieSession);
+
+        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
+        assertThat(CurrentUserHolder.getCurrentUserId()).isEqualTo(10L);
+        verifyNoInteractions(sessionFilter);
+    }
+
+    @Test
+    void artifactPreviewCapabilityIsAnonymous() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        ReflectionTestUtils.setField(interceptor, "artifactPreviewPathPrefix", "/artifact-preview");
+        ReflectionTestUtils.setField(interceptor, "artifactDownloadPathPrefix", "/artifact-download");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET",
+            "/byaiService/artifact-preview/artifact/key/index.html");
+        request.setContextPath("/byaiService");
+
+        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
+    }
 }
