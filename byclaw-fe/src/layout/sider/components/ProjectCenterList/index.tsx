@@ -1,17 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button, Empty, Input, Spin, Tag, Tooltip, message } from 'antd';
 import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
-import { useIntl, useNavigate } from '@umijs/max';
+import { useIntl } from '@umijs/max';
 import classNames from 'classnames';
 import useGlobal from '@/hooks/useGlobal';
 import { createProject, saveProjectMembers } from '@/service/devloop';
-import ProjectOnboardingWizard, {
-  type ArchitectChatTarget,
-} from '@/pages/projectSpace/components/ProjectOnboardingWizard';
-import { setAgentCache } from '@/components/QueryInput/RichInput/agentCache';
-import getElementData from '@/components/QueryInput/RichInput/utils/getElementData';
-import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
-import { agentTypeMap } from '@/constants/agent';
+import ProjectOnboardingWizard from '@/pages/projectSpace/components/ProjectOnboardingWizard';
 import type { ProjectFormValues, ProjectShareMember } from '@/pages/projectSpace/components/ProjectFormModal';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
@@ -65,8 +59,7 @@ const getProjectScene = (project: ProjectSpace) => {
 // 原会话菜单的项目分组与会话操作保持不变。
 const ProjectCenterList: React.FC = () => {
   const intl = useIntl();
-  const navigate = useNavigate();
-  const { EventEmitter, setAgentId, setSessionId } = useGlobal();
+  const { EventEmitter } = useGlobal();
   const { projects, loading, keyword, setKeyword, fetchProjects } = useProjectList();
   const { projectTypeOptions, projectTypeLoading } = useProjectTypeConfig();
   const [createWizardOpen, setCreateWizardOpen] = useState(false);
@@ -161,42 +154,6 @@ const ProjectCenterList: React.FC = () => {
     [EventEmitter, updateProjectScopeId]
   );
 
-  const handleEnterArchitectChat = useCallback(
-    (projectId: string, architect?: ArchitectChatTarget) => {
-      setCreateWizardOpen(false);
-      // 架构员工是项目维度的,不在 redux 员工列表里,useDefaultAgentElement 查不到就兜底成「AI 助手」。
-      // agentCache 在那个 hook 里优先于 redux 查表,所以先把整份员工写进去再跳。
-      if (architect?.agentId && architect.agentName) {
-        setAgentCache(
-          getElementData(ResourceType.digitalEmployee, {
-            agentId: architect.agentId,
-            name: architect.agentName,
-            agentType: agentTypeMap.agent,
-          })
-        );
-      }
-      // 与项目详情页「查看会话」同一套:置全局会话上下文才是真正打开那条会话。
-      // 置空会落到空白新会话,且聊天页的 @ 恢复要等全局会话与 state.sessionId 对上才触发。
-      setAgentId?.(architect?.agentId || '');
-      setSessionId?.(architect?.sessionId || '');
-      // 带上后端下发初始化时建的会话ID,直达架构助理那条会话;缺省才新开。
-      navigate('/chat', {
-        state: {
-          keepSiderActiveKey: 'sessions',
-          from: 'projectSpace',
-          projectId,
-          projectName: createdProjectNameRef.current,
-          sessionId: architect?.sessionId,
-          // 聊天页据此在挂载后恢复 @ 员工。不能在这里直接 setAgentId:
-          // ChatLayoutComp 挂载时会按「无会话员工」清空一次,早设的值会被抹掉。
-          selectedAgentId: architect?.agentId,
-          selectedAgentObjectType: architect?.agentId ? 'DigEmployee' : undefined,
-        },
-      });
-    },
-    [navigate, setAgentId, setSessionId]
-  );
-
   return (
     <div className={styles.projectCenterList}>
       <div className={styles.header}>
@@ -268,7 +225,6 @@ const ProjectCenterList: React.FC = () => {
         onCancel={() => setCreateWizardOpen(false)}
         onCreateProject={handleCreateProject}
         onFinish={handleCreateWizardFinish}
-        onEnterArchitectChat={handleEnterArchitectChat}
       />
     </div>
   );

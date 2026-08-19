@@ -10,13 +10,7 @@ import ProjectFormModal, {
   type ProjectFormValues,
   type ProjectShareMember,
 } from '@/pages/projectSpace/components/ProjectFormModal';
-import ProjectOnboardingWizard, {
-  type ArchitectChatTarget,
-} from '@/pages/projectSpace/components/ProjectOnboardingWizard';
-import { setAgentCache } from '@/components/QueryInput/RichInput/agentCache';
-import getElementData from '@/components/QueryInput/RichInput/utils/getElementData';
-import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
-import { agentTypeMap } from '@/constants/agent';
+import ProjectOnboardingWizard from '@/pages/projectSpace/components/ProjectOnboardingWizard';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
@@ -851,41 +845,6 @@ const ProjectSpaceList: React.FC = () => {
     }
   };
 
-  const handleWizardEnterArchitectChat = (createdProjectId: string, architect?: ArchitectChatTarget) => {
-    const target = mergedProjects.find((project) => `${project.projectId}` === createdProjectId);
-    setWizardOpen(false);
-    clearDetailPanel?.();
-    // 架构员工是项目维度的,不在 redux 员工列表里,useDefaultAgentElement 查不到就兜底成「AI 助手」。
-    // agentCache 在那个 hook 里优先于 redux 查表,所以先把整份员工写进去再跳。
-    if (architect?.agentId && architect.agentName) {
-      setAgentCache(
-        getElementData(ResourceType.digitalEmployee, {
-          agentId: architect.agentId,
-          name: architect.agentName,
-          agentType: agentTypeMap.agent,
-        })
-      );
-    }
-    // 与项目详情页「查看会话」同一套:置全局会话上下文才是真正打开那条会话。
-    // 置空会落到空白新会话,且聊天页的 @ 恢复要等全局会话与 state.sessionId 对上才触发。
-    setAgentId?.(architect?.agentId || '');
-    setSessionId?.(architect?.sessionId || '');
-    // 初始化已由后端下发到架构助理的那条会话,带上 sessionId 直达该会话看进展;缺省才退化为新开会话。
-    navigate('/chat', {
-      state: {
-        keepSiderActiveKey: 'sessions',
-        from: 'projectSpace',
-        projectId: createdProjectId,
-        projectName: target?.projectName,
-        sessionId: architect?.sessionId,
-        // 聊天页据此在挂载后恢复 @ 员工。不能在这里直接 setAgentId:
-        // ChatLayoutComp 挂载时会按「无会话员工」清空一次,早设的值会被抹掉。
-        selectedAgentId: architect?.agentId,
-        selectedAgentObjectType: architect?.agentId ? 'DigEmployee' : undefined,
-      },
-    });
-  };
-
   const handleNewChat = useCallback(() => {
     if (!activeScopeProject?.projectId) {
       message.warning(t('message.selectProjectFirst'));
@@ -1714,7 +1673,6 @@ const ProjectSpaceList: React.FC = () => {
         onCancel={() => setWizardOpen(false)}
         onCreateProject={handleWizardCreateProject}
         onFinish={handleWizardFinish}
-        onEnterArchitectChat={handleWizardEnterArchitectChat}
       />
     </div>
   );

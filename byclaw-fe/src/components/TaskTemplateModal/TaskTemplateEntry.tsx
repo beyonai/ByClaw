@@ -1,6 +1,6 @@
 import { PlusOutlined, RightOutlined } from '@ant-design/icons';
 import { Button, Divider, Empty, Modal, Select, Spin, message } from 'antd';
-import { getLocale, useNavigate } from '@umijs/max';
+import { getLocale } from '@umijs/max';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getDcSystemConfigListByStandType } from '@/service/auth';
 import { createProject, saveProjectMembers } from '@/service/devloop';
@@ -9,15 +9,9 @@ import useGlobal from '@/hooks/useGlobal';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
-import ProjectOnboardingWizard, {
-  type ArchitectChatTarget,
-} from '@/pages/projectSpace/components/ProjectOnboardingWizard';
+import ProjectOnboardingWizard from '@/pages/projectSpace/components/ProjectOnboardingWizard';
 import type { ProjectFormValues } from '@/pages/projectSpace/components/ProjectFormModal';
 import type { ProjectSpace, ProjectType } from '@/pages/projectSpace/types';
-import { setAgentCache } from '@/components/QueryInput/RichInput/agentCache';
-import getElementData from '@/components/QueryInput/RichInput/utils/getElementData';
-import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
-import { agentTypeMap } from '@/constants/agent';
 import TaskTemplateModal from '.';
 import styles from './index.module.less';
 
@@ -55,8 +49,7 @@ const getSavedProjectId = (response: any) =>
 
 // 公共会话输入框统一使用该入口，再按当前会话所属项目类型切换对应模板数据。
 const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onProjectChange }) => {
-  const navigate = useNavigate();
-  const { EventEmitter, setAgentId, setSessionId } = useGlobal();
+  const { EventEmitter } = useGlobal();
   const [visible, setVisible] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [createProjectLoading, setCreateProjectLoading] = useState(false);
@@ -279,37 +272,6 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
     [createdProjectOption, onProjectChange, projectOptions, updateProjectScopeId]
   );
 
-  const handleEnterArchitectChat = useCallback(
-    (createdProjectId: string, architect?: ArchitectChatTarget) => {
-      setCreateProjectOpen(false);
-      if (architect?.agentId && architect.agentName) {
-        setAgentCache(
-          getElementData(ResourceType.digitalEmployee, {
-            agentId: architect.agentId,
-            name: architect.agentName,
-            agentType: agentTypeMap.agent,
-          })
-        );
-      }
-      setAgentId?.(architect?.agentId || '');
-      setSessionId?.(architect?.sessionId || '');
-      const createdProject =
-        projectOptions.find((project) => `${project.projectId}` === createdProjectId) || createdProjectOption;
-      navigate('/chat', {
-        state: {
-          keepSiderActiveKey: 'sessions',
-          from: 'projectSpace',
-          projectId: createdProjectId,
-          projectName: createdProject?.projectName || createdProjectNameRef.current,
-          sessionId: architect?.sessionId,
-          selectedAgentId: architect?.agentId,
-          selectedAgentObjectType: architect?.agentId ? 'DigEmployee' : undefined,
-        },
-      });
-    },
-    [createdProjectOption, navigate, projectOptions, setAgentId, setSessionId]
-  );
-
   const loadingModal = (
     <Modal
       open={visible}
@@ -381,7 +343,6 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
         onCancel={() => setCreateProjectOpen(false)}
         onCreateProject={handleCreateProject}
         onFinish={handleCreateWizardFinish}
-        onEnterArchitectChat={handleEnterArchitectChat}
       />
       {projectLoading && !project ? (
         loadingModal

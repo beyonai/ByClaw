@@ -26,7 +26,7 @@ import {
   updateProject,
 } from '@/service/devloop';
 import ProjectFormModal, { type ProjectFormValues } from './components/ProjectFormModal';
-import ProjectOnboardingWizard, { type ArchitectChatTarget } from './components/ProjectOnboardingWizard';
+import ProjectOnboardingWizard from './components/ProjectOnboardingWizard';
 import ProjectDetail from './components/ProjectDetail';
 import { type ChatWithAgentTarget } from './components/ProjectDefaultAgentPanel';
 import { useProjectDetail } from './hooks/useProjectDetail';
@@ -413,36 +413,6 @@ const ProjectSpacePage: React.FC = () => {
     [setSelectedProjectId]
   );
 
-  const handleWizardEnterArchitectChat = useCallback(
-    (projectId: string, target?: ArchitectChatTarget) => {
-      const project = projects.find((item) => getProjectId(item.projectId) === projectId);
-      setWizardOpen(false);
-      if (target?.agentId && target.agentName) {
-        setAgentCache(
-          getElementData(ResourceType.digitalEmployee, {
-            agentId: target.agentId,
-            name: target.agentName,
-            agentType: agentTypeMap.agent,
-          })
-        );
-      }
-      setAgentId?.(target?.agentId || '');
-      setSessionId?.(target?.sessionId || '');
-      navigate('/chat', {
-        state: {
-          keepSiderActiveKey: 'sessions',
-          from: 'projectSpace',
-          projectId,
-          projectName: project?.projectName,
-          sessionId: target?.sessionId,
-          selectedAgentId: target?.agentId,
-          selectedAgentObjectType: target?.agentId ? 'DigEmployee' : undefined,
-        },
-      });
-    },
-    [navigate, projects, setAgentId, setSessionId]
-  );
-
   const renderProjectCards = () => {
     return (
       <div className={styles.projectListPage}>
@@ -665,7 +635,6 @@ const ProjectSpacePage: React.FC = () => {
         onCancel={() => setWizardOpen(false)}
         onCreateProject={handleSaveProject}
         onFinish={handleWizardFinish}
-        onEnterArchitectChat={handleWizardEnterArchitectChat}
       />
 
       <Modal
