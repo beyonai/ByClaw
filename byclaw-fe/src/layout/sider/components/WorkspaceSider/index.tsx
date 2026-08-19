@@ -40,7 +40,6 @@ const RESOURCE_PATHS = [
   '/ontologyCenter',
   '/skillCenter',
   '/files',
-  '/inspiration',
 ] as const;
 
 type ProjectSessionState = {

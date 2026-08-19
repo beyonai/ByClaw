@@ -106,7 +106,10 @@ const Chat = () => {
   const selectedAgentId = (location.state as { selectedAgentId?: string | number } | null)?.selectedAgentId;
   const selectedAgentObjectType = (location.state as { selectedAgentObjectType?: string } | null)
     ?.selectedAgentObjectType;
+  const templateSchema = (location.state as { templateSchema?: { sessionId?: string | number; schema?: any } } | null)
+    ?.templateSchema;
   const autoSendKeyRef = React.useRef<string | undefined>(undefined);
+  const templateSchemaKeyRef = React.useRef<string | undefined>(undefined);
   const [projectChatContext, setProjectChatContext] = React.useState<ProjectChatContext>(locationProjectContext);
   const pendingSessionProjectContextRef = React.useRef<ProjectChatContext | undefined>(undefined);
   const sessionProjectContextMapRef = React.useRef<Record<string, ProjectChatContext>>({});
@@ -127,6 +130,21 @@ const Chat = () => {
     }, 150);
     return () => window.clearTimeout(timer);
   }, [EventEmitter, autoSendContent, sessionId, targetSessionId]);
+
+  // 灵感页「做同款」打开新会话后，将模板 schema 载入输入框（等输入组件挂载后再触发，与 autoSendContent 同理）。
+  React.useEffect(() => {
+    const schemaSessionId = templateSchema?.sessionId;
+    if (!schemaSessionId || !templateSchema?.schema) {
+      return undefined;
+    }
+    const schemaKey = `${schemaSessionId}`;
+    if (templateSchemaKeyRef.current === schemaKey) return undefined;
+    templateSchemaKeyRef.current = schemaKey;
+    const timer = window.setTimeout(() => {
+      EventEmitter.emit('queryInput-set-schema', templateSchema.schema);
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [EventEmitter, templateSchema]);
 
   // 带员工进入已有会话要等会话对齐；带员工开新会话没有 sessionId 可对齐，两者都要能恢复 @ 员工。
   const selectedAgentSessionReady = targetSessionId
