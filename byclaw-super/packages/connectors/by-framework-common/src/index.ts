@@ -51,6 +51,11 @@ export interface ByFrameworkConnectorOptions {
   sourceAgentType?: string;
   firstEventTimeoutMs?: number;
   cancelConfirmationTimeoutMs?: number;
+  /**
+   * callback 会让目标 Worker 完成后向 sourceAgentType 发送 Resume；direct 则由目标
+   * Worker 直接在会话流中发送 appStreamResponse。默认保持标准 Agent 回调模式。
+   */
+  agentReturnMode?: "callback" | "direct";
   /** 仅供 BYCLAW_CODE：把 reasoning 生命周期外的 1002 子会话文本恢复成回答正文。 */
   promoteOutOfReasoningTextToOutput?: boolean;
 }
@@ -95,7 +100,8 @@ export class ByFrameworkConnector implements AgentConnector {
       this.#client = new GatewayClient(registry, this.#redis);
     }
     this.#readBlockMs = options.readBlockMs ?? 1_000;
-    this.#sourceAgentType = options.sourceAgentType ?? "BY_SUPER";
+    this.#sourceAgentType =
+      options.agentReturnMode === "direct" ? "" : options.sourceAgentType ?? "BY_SUPER";
     this.#firstEventTimeoutMs = options.firstEventTimeoutMs ?? 300_000;
     this.#cancelConfirmationTimeoutMs = options.cancelConfirmationTimeoutMs ?? 30_000;
     this.#promoteOutOfReasoningTextToOutput =

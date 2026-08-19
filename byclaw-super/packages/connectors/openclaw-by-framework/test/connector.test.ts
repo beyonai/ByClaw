@@ -48,7 +48,10 @@ describe("OpenClawByFrameworkConnector", () => {
     expect(connector.id).toBe("openclaw-by-framework");
     expect(execution.ref.connectorId).toBe("openclaw-by-framework");
     expect(sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ targetAgentType: "BYCLAW_EXE_user-1" }),
+      expect.objectContaining({
+        sourceAgentType: "BY_SUPER",
+        targetAgentType: "BYCLAW_EXE_user-1",
+      }),
     );
   });
 });
