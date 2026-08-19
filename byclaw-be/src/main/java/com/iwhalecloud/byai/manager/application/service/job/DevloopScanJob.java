@@ -237,10 +237,11 @@ public class DevloopScanJob {
             if (source.getLastScanTime() == null) {
                 return true;
             }
-            long intervalHours = parseLong(schedule.get("intervalHours"), 1L);
+            // 新版定时任务同时保存 intervalValue 和 intervalUnit；分钟模式不能再按默认 1 小时判断。
+            long intervalMinutes = getIntervalMinutes(schedule, 60L);
             LocalDateTime lastScan = LocalDateTime.ofInstant(source.getLastScanTime().toInstant(),
                 ZoneId.systemDefault());
-            return !lastScan.plusHours(Math.max(1L, intervalHours)).isAfter(now);
+            return !lastScan.plusMinutes(intervalMinutes).isAfter(now);
         }
         if ("biweekly".equalsIgnoreCase(firstText(schedule, "periodType"))
             && !matchesBiweeklyCycle(source, schedule, now.toLocalDate())) {
@@ -411,6 +412,19 @@ public class DevloopScanJob {
         catch (NumberFormatException exception) {
             return fallback;
         }
+    }
+
+    /** 解析聊天自动化的间隔时长，兼容新版 intervalValue/intervalUnit 与旧版 intervalHours。 */
+    private long getIntervalMinutes(JSONObject config, long fallbackMinutes) {
+        long intervalValue = parseLong(config.get("intervalValue"), 0L);
+        if (intervalValue > 0) {
+            String unit = firstText(config, "intervalUnit", "unit");
+            return "minute".equalsIgnoreCase(unit) || "minutes".equalsIgnoreCase(unit)
+                ? intervalValue : intervalValue * 60L;
+        }
+
+        long intervalHours = parseLong(config.get("intervalHours"), 0L);
+        return intervalHours > 0 ? intervalHours * 60L : fallbackMinutes;
     }
 
     private List<Integer> parseIntegerList(Object value) {

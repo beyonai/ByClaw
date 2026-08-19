@@ -60,6 +60,11 @@
   background: #f3f3f3;
 }
 
+// 侧边栏收起后展开按钮悬浮在内容左上角，顶部页签向右避让避免被遮挡。
+.automationTabsCollapsed {
+  margin-left: 40px;
+}
+
 .automationTab,
 .automationTabActive {
   height: 32px;
@@ -547,38 +552,61 @@
 
 .scheduleWideField {
   width: 320px;
-  height: 40px !important;
-  min-height: 40px !important;
-  max-height: 40px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
 
   :global(.@{antPrefix}-select-selector) {
-    min-height: 38px;
+    height: 32px;
+    min-height: 32px;
+    max-height: 32px;
   }
 }
 
 .scheduleDateTimeField {
   width: 220px;
-  height: 40px !important;
-  min-height: 40px !important;
-  max-height: 40px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
 }
 
 .scheduleYearlyDateTimeField {
   width: 220px !important;
-  height: 40px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
 }
 
 .intervalField {
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
   display: inline-flex;
   align-items: center;
 }
 
+.intervalValueField,
+.intervalUnitField {
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+}
+
 .intervalValueField {
   width: 110px !important;
+
+  :global(.@{antPrefix}-input-number-input-wrap) {
+    height: 30px;
+  }
 }
 
 .intervalUnitField {
   width: 92px !important;
+
+  :global(.@{antPrefix}-select-selector) {
+    height: 30px;
+    min-height: 30px;
+  }
 }
 
 @media (max-width: 1100px) {
@@ -645,9 +673,9 @@
   .scheduleDateTimeField,
   .scheduleYearlyDateTimeField {
     width: 100% !important;
-    height: 40px !important;
-    min-height: 40px !important;
-    max-height: 40px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    max-height: 32px !important;
     flex: none;
   }
 }

@@ -1045,6 +1045,8 @@ export default {
   'workspaceSider.fileCenter': 'File Center',
   'workspaceSider.projectSection': 'Project list',
   'workspaceSider.projectCount': 'Projects ({count})',
+  'workspaceSider.collapseSidebar': 'Collapse sidebar',
+  'workspaceSider.expandSidebar': 'Expand sidebar',
   'workspaceSider.expandProject': 'Expand project',
   'workspaceSider.collapseProject': 'Collapse project',
   'workspaceSider.loading': 'Loading...',
