@@ -1,0 +1,43 @@
+{
+  "name": "knowledge-collection-references",
+  "description": "knowledge-collection 的按需加载文档与子 skill 索引。子 skill 是抓取/处理战术，不可独立于采集编排器调用。",
+  "skills": [
+    {
+      "name": "site-crawl",
+      "path": "site-crawl/SKILL.md",
+      "description": "站点文档爬取与产品解读报告。sitemap/llms.txt 发现 URL + frontier 维护覆盖面,取内容仍委派 bycli。嵌在深化研究的抓取环节。"
+    }
+  ],
+  "references": [
+    {
+      "name": "source-routing",
+      "path": "source-routing.md",
+      "description": "公共互联网来源路由表与 bycli 网页铁律。取内容前必读。"
+    },
+    {
+      "name": "research-methodology",
+      "path": "research-methodology.md",
+      "description": "递归树状深化研究方法论(默认模式)。"
+    },
+    {
+      "name": "collection-contract",
+      "path": "collection-contract.md",
+      "description": "session.json 状态契约与可照抄的 init/collect/run payload。"
+    },
+    {
+      "name": "post-processing",
+      "path": "post-processing.md",
+      "description": "持久化、预览、入库/知识整理/外部消费选择、逐篇状态与清理。"
+    },
+    {
+      "name": "knowledge-ingest",
+      "path": "knowledge-ingest.md",
+      "description": "知识库入库流程与目标确认。"
+    },
+    {
+      "name": "online-search",
+      "path": "online-search.md",
+      "description": "SearXNG 元搜索(中文引擎、时间窗、学术类别)。"
+    }
+  ]
+}

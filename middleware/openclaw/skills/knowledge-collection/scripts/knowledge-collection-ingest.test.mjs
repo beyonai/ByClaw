@@ -319,8 +319,8 @@ async function testCanonicalCollectionResultRejectsInvalidContractShapes() {
     },
     {
       name: "extra-top-level",
-      mutate(value) { value.router = "agent-reach"; },
-      error: /不支持的顶层字段.*router/,
+      mutate(value) { value.unknownField = "test-value"; },
+      error: /不支持的顶层字段.*unknownField/,
     },
     {
       name: "invalid-filters",
@@ -1785,6 +1785,27 @@ await testNonMediaFileSkipsUploadAndGoesToMarkdown();
 await testUploadImagesToDatasetWithoutBuild();
 await testUploadImagesSkipsUnsafeAndMissingImages();
 await testUploadImagesRequiresMarkdownAndResourceId();
+// normalize --markdown-dir：每篇正文自带的 `> 原文链接:` 决定各自 sourceUrl，
+// 批量导入不能被单个 --source-url 覆盖成同一个 URL(inventory 身份是 sourceSkill + sourceUrl)。
+async function testMarkdownDirDerivesPerFileSourceUrl() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kc-md-dir-"));
+  fs.writeFileSync(path.join(dir, "a.md"), "# A\n> 原文链接: <https://docs.example.com/a>\n\n正文 A");
+  fs.writeFileSync(path.join(dir, "b.md"), "# B\n> 原文链接: <https://docs.example.com/b>\n\n正文 B");
+  fs.writeFileSync(path.join(dir, "c.md"), "# C\n\n没有原文链接");
+  try {
+    const result = await runCli(["normalize", "--markdown-dir", dir], {}, 0);
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    const files = result.json?.summary?.files || [];
+    assert.equal(files.length, 3);
+    const byName = Object.fromEntries(files.map((f) => [f.fileName, f.sourceUrl]));
+    assert.equal(byName["a.md"], "https://docs.example.com/a");
+    assert.equal(byName["b.md"], "https://docs.example.com/b");
+    assert.equal(byName["c.md"], "", "没有原文链接的正文不得伪造 sourceUrl");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 await testUploadDocViaDatasetController();
 await testDefaultDirectoryPathUsesRunTimestamp();
 await testDefaultDirectoryPathFallsBackToRootWithoutTimestamp();
@@ -1809,4 +1830,5 @@ await testIngestRejectsSuccessfulManagerExitWithoutJsonContract();
 await testIngestReturnsConservativePerItemResultsWhenBatchOutcomeIsUnmapped();
 await testIngestRequiresBuildToReferenceExactUploadedPath();
 await testItemIdCountMustMatchMarkdownSelection();
+await testMarkdownDirDerivesPerFileSourceUrl();
 console.log("knowledge-collection-ingest tests passed");

@@ -739,6 +739,20 @@ function titleFromMarkdown(markdown) {
   return heading ? heading.replace(/^#\s+/, "").trim() : "";
 }
 
+function sourceUrlFromMarkdown(markdown) {
+  // 来源执行器(bycli web read 等)在正文头部写入 `> 原文链接: <URL>`;批量目录导入时
+  // 每篇的 URL 只能从正文自身取得,单个 --source-url 无法覆盖多篇。
+  const match = String(markdown || "").match(/^>\s*原文链接:\s*<?(https?:\/\/[^\s>]+)>?/m);
+  if (!match) {
+    return "";
+  }
+  try {
+    return new URL(match[1]).toString();
+  } catch {
+    return "";
+  }
+}
+
 function slugFromUrl(url) {
   if (!url) {
     return "";
@@ -1856,7 +1870,12 @@ function markdownItemsFromFiles(args) {
     }
     const fileName = sanitizeFileName(path.basename(filePath), `knowledge-collection-output-${index + 1}`);
     return {
-      ...normalizeItem({ markdown, fileName, title: titleFromMarkdown(markdown), sourceUrl: pick(args, "source-url") }, args, index),
+      ...normalizeItem({
+        markdown,
+        fileName,
+        title: titleFromMarkdown(markdown),
+        sourceUrl: firstNonEmpty(sourceUrlFromMarkdown(markdown), pick(args, "source-url")),
+      }, args, index),
       localPath: expandHome(filePath),
     };
   }).filter(Boolean);

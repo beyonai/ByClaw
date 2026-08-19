@@ -21,19 +21,19 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 
 常见触发：`bycli`、浏览器操作、驱动浏览器、打开网站、访问网页、登录、操作网站、搜索、查找、采集、抓取、爬取、写爬虫、adapter 坏了、写 adapter、修复命令、`browser open`、`open cli`、`autofix`、`scrape`、`crawl`、`browse`、`open URL`。
 
-## By-Reach 边界
+## 路由边界
 
-- 公共互联网调研、搜索或读取先由 `agent-reach` skill（By-Reach）做意图路由；Exa、`gh` CLI、RSS、视频字幕等不打开或读取具体网页的渠道可继续使用其专用后端。
-- 任何网站、网页或 URL 的打开、读取、站内搜索、采集、抓取或操作任务，包括 generic public webpage 读取，路由器 `agent-reach`（By-Reach）必须无条件选择并加载 `bycli` skill；公开静态页、服务端渲染页、SPA、raw URL、纯文本、Markdown 和无需登录的页面均无例外。
-- byCLI 是所有具体网页任务的唯一网站执行器，不是公共互联网非网页渠道的默认路由器。By-Reach 选择 byCLI 必须发生在获取网页内容之前，不能先调用任何其他网页工具试读。
-- 用户显式要求 byCLI、Adapter、浏览器操作、登录态网站，或 By-Reach 选择 byCLI 作为浏览器执行层时，进入本 skill。
-- By-Reach 选择 byCLI 后，浏览器启动、Adapter 发现、授权与执行仍完全遵守本 skill。
+- 公共互联网调研、搜索或读取先由 `knowledge-collection` 的内置路由层（`skills/knowledge-collection/references/source-routing.md`，原 By-Reach 路由器）做意图路由；Exa、`gh` CLI、RSS、视频字幕等不打开或读取具体网页的渠道可继续使用其专用后端。
+- 任何网站、网页或 URL 的打开、读取、站内搜索、采集、抓取或操作任务，包括 generic public webpage 读取，路由层必须无条件选择并加载 `bycli` skill；公开静态页、服务端渲染页、SPA、raw URL、纯文本、Markdown 和无需登录的页面均无例外。
+- byCLI 是所有具体网页任务的唯一网站执行器，不是公共互联网非网页渠道的默认路由器。选择 byCLI 必须发生在获取网页内容之前，不能先调用任何其他网页工具试读。
+- 用户显式要求 byCLI、Adapter、浏览器操作、登录态网站，或路由层选择 byCLI 作为浏览器执行层时，进入本 skill。
+- 选中 byCLI 后，浏览器启动、Adapter 发现、授权与执行仍完全遵守本 skill。
 - `byclaw-capability-doctor` 只是被动诊断；被动诊断不得启动 Chrome，其 `available_on_demand` 状态也不得触发 Chrome。只有实际任务需要浏览器时才执行下方冷启动流程。
 - byCLI 无法完成网页任务时必须停止并报告，不得回退到 `web_fetch`、Jina Reader、Web Reader MCP、`curl`、`wget`、`requests`、原站直连或其他网页获取工具。
 
 ## 委派所有权边界
 
-- 角色名称固定为：采集编排器 `knowledge-collection`、路由器 `agent-reach`（By-Reach）、网站执行器 `bycli`、站点 Adapter、直接查询所有者（根 Agent）。
+- 角色名称固定为：采集编排器 `knowledge-collection`（含内置公共互联网路由层）、网站执行器 `bycli`、站点 Adapter、直接查询所有者（根 Agent）。
 - 采集编排器委派时，`knowledge-collection` 负责统一持久化、产物协议、后处理与入库或知识整理。
 - 网站执行器只执行或发现、修复 Adapter，并把结构化记录、正文或文件元数据返回采集编排器，不规定统一产物名称或目录。
 - 网站执行器不得反向加载 `knowledge-collection`。是否处于委派模式不改变 byCLI 的命令、授权、浏览器生命周期或 Adapter 验证规则。
