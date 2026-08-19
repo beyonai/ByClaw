@@ -6,7 +6,6 @@ export const SKILL_MARKETPLACE_INSTALLED_MESSAGE_TYPE = 'BYCLAW_SKILL_INSTALLED'
 
 export const buildSkillMarketplaceUrl = (
   marketplaceBaseUrl?: string | null,
-  digitalEmployeeId?: string | number | null,
   beyondToken?: string | null,
   parentOrigin?: string | null
 ) => {
@@ -25,9 +24,7 @@ export const buildSkillMarketplaceUrl = (
     return '';
   }
 
-  if (`${digitalEmployeeId ?? ''}`.trim()) {
-    url.searchParams.set('digId', `${digitalEmployeeId}`);
-  }
+  url.searchParams.delete('digId');
   url.searchParams.delete('beyondToken');
   if (`${beyondToken ?? ''}`.trim()) {
     url.searchParams.set('BeyondToken', `${beyondToken}`.trim());
@@ -38,20 +35,13 @@ export const buildSkillMarketplaceUrl = (
   return url.toString();
 };
 
-export const isSkillMarketplaceInstalledMessage = (
-  payload: unknown,
-  activeDigitalEmployeeId?: string | number | null
-) => {
+export const isSkillMarketplaceInstalledMessage = (payload: unknown) => {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return false;
   }
 
   const message = payload as Record<string, unknown>;
-  const activeDigId = `${activeDigitalEmployeeId ?? ''}`.trim();
-  const messageDigId = `${message.digId ?? ''}`.trim();
-  return Boolean(
-    activeDigId && messageDigId === activeDigId && message.type === SKILL_MARKETPLACE_INSTALLED_MESSAGE_TYPE
-  );
+  return message.type === SKILL_MARKETPLACE_INSTALLED_MESSAGE_TYPE;
 };
 
 const getAllResourceBizTypeValues = (resourceType?: string) =>

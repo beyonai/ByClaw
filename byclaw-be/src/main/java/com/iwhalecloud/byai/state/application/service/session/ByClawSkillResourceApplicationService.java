@@ -25,6 +25,7 @@ import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.state.domain.resource.dto.ObjectZipImportItem;
 import com.iwhalecloud.byai.state.domain.resource.dto.ObjectZipImportResult;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorageService;
+import com.iwhalecloud.byai.state.domain.resource.vo.SkillMarketplaceDigitalEmployeeVo;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.io.ByteArrayOutputStream;
@@ -154,6 +155,24 @@ public class ByClawSkillResourceApplicationService {
     public void assertWorkspaceSkillManagePermission(Long digitalEmployeeResourceId) {
         Long resolvedDigitalEmployeeId = resolveDigitalEmployeeId(digitalEmployeeResourceId);
         digitalEmployeeApplicationService.assertSkillUninstallPermission(resolvedDigitalEmployeeId);
+    }
+
+    /**
+     * 技能超市安装时，查询当前用户可管理的数字员工。
+     *
+     * <p>必须复用资源管理权限的统一口径，避免列表中可选、安装时却被拒绝，或列表漏掉组织管理员、
+     * 显式管理授权等可管理数字员工。</p>
+     */
+    public List<SkillMarketplaceDigitalEmployeeVo> listSkillMarketplaceManageableDigitalEmployees() {
+        return ssResourceService.listActiveDigitalEmployees().stream()
+            .filter(authApplicationService::hasResourceManagePermission)
+            .map(resource -> {
+                SkillMarketplaceDigitalEmployeeVo item = new SkillMarketplaceDigitalEmployeeVo();
+                item.setDigId(resource.getResourceId());
+                item.setDigName(resource.getResourceName());
+                return item;
+            })
+            .collect(Collectors.toList());
     }
 
     /**

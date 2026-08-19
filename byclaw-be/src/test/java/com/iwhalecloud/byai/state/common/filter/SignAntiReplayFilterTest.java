@@ -29,6 +29,22 @@ class SignAntiReplayFilterTest {
     }
 
     @Test
+    void letsSkillMarketplaceManageableEmployeeQueryUseBeyondTokenWithoutCommonRequestSignature() throws Exception {
+        SignAntiReplayFilter filter = new SignAntiReplayFilter();
+        SignAntiReplayConfig config = new SignAntiReplayConfig();
+        config.setEnabled(true);
+        ReflectionTestUtils.setField(filter, "signProperties", config);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET",
+            "/byaiService/tool/queryThirdPartySkillManageableDigitalEmployees");
+        request.setServletPath("/tool/queryThirdPartySkillManageableDigitalEmployees");
+        MockFilterChain filterChain = new MockFilterChain();
+
+        filter.doFilter(request, new MockHttpServletResponse(), filterChain);
+
+        assertThat(filterChain.getRequest()).isSameAs(request);
+    }
+
+    @Test
     void letsConnectorSkillCallbackUseBeyondTokenWithoutCommonRequestSignature() throws Exception {
         SignAntiReplayFilter filter = new SignAntiReplayFilter();
         SignAntiReplayConfig config = new SignAntiReplayConfig();

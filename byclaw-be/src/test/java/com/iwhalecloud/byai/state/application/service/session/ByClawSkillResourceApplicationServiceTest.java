@@ -20,6 +20,7 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorageService;
+import com.iwhalecloud.byai.state.domain.resource.vo.SkillMarketplaceDigitalEmployeeVo;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.io.ByteArrayOutputStream;
@@ -165,6 +166,26 @@ class ByClawSkillResourceApplicationServiceTest {
         verify(digitalEmployeeApplicationService).rebuildAndSaveDigitalEmployeeRelSkills(9001L);
         verify(digitalEmployeeRuntimeRefreshService).scheduleSkillRuntimeRefreshAfterCommit(
             org.mockito.ArgumentMatchers.argThat(ids -> ids.size() == 1 && ids.contains(9001L)));
+    }
+
+    @Test
+    void listSkillMarketplaceManageableDigitalEmployees_returnsOnlyManageableEmployees() {
+        SsResource manageable = new SsResource();
+        manageable.setResourceId(9001L);
+        manageable.setResourceName("可管理数字员工");
+        SsResource useOnly = new SsResource();
+        useOnly.setResourceId(9002L);
+        useOnly.setResourceName("仅可使用数字员工");
+        when(ssResourceService.listActiveDigitalEmployees()).thenReturn(List.of(manageable, useOnly));
+        when(authApplicationService.hasResourceManagePermission(manageable)).thenReturn(true);
+        when(authApplicationService.hasResourceManagePermission(useOnly)).thenReturn(false);
+
+        List<SkillMarketplaceDigitalEmployeeVo> result = service.listSkillMarketplaceManageableDigitalEmployees();
+
+        assertThat(result).singleElement().satisfies(item -> {
+            assertThat(item.getDigId()).isEqualTo(9001L);
+            assertThat(item.getDigName()).isEqualTo("可管理数字员工");
+        });
     }
 
     @Test

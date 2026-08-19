@@ -80,6 +80,41 @@ class AccessTokenVerifyInterceptorTest {
     }
 
     @Test
+    void authenticatesSkillMarketplaceManageableEmployeeQueryWithBeyondToken() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        JwtTokenFilter jwtTokenFilter = mock(JwtTokenFilter.class);
+        SessionFilter sessionFilter = mock(SessionFilter.class);
+        LoginApplicationService loginApplicationService = mock(LoginApplicationService.class);
+        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwtTokenFilter);
+        ReflectionTestUtils.setField(interceptor, "sessionFilter", sessionFilter);
+        ReflectionTestUtils.setField(interceptor, "loginApplicationService", loginApplicationService);
+        interceptor.init();
+        LoginInfo tokenLoginInfo = new LoginInfo();
+        tokenLoginInfo.setUserId(10058L);
+        tokenLoginInfo.setUserCode("0027010369");
+        LoginInfo localLoginInfo = new LoginInfo();
+        localLoginInfo.setUserId(11L);
+        localLoginInfo.setUserCode("0027010369");
+        when(jwtTokenFilter.doFilter(null, "portal-login-token")).thenAnswer(invocation -> {
+            CurrentUserHolder.setLoginInfo(tokenLoginInfo);
+            return true;
+        });
+        when(loginApplicationService.getLoginInfo("0027010369")).thenReturn(localLoginInfo);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET",
+            "/byaiService/tool/queryThirdPartySkillManageableDigitalEmployees");
+        request.addHeader("Beyond-Token", "portal-login-token");
+        MockHttpSession cookieSession = new MockHttpSession();
+        cookieSession.setAttribute("USER_CODE", "cookie-session-user");
+        request.setSession(cookieSession);
+
+        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
+        assertThat(CurrentUserHolder.getCurrentUserId()).isEqualTo(11L);
+        verify(jwtTokenFilter).doFilter(null, "portal-login-token");
+        verify(loginApplicationService).getLoginInfo("0027010369");
+        verifyNoInteractions(sessionFilter);
+    }
+
+    @Test
     void rejectsSkillMarketplaceInstallWithoutBeyondTokenEvenWhenCookieSessionExists() {
         AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
         JwtTokenFilter jwtTokenFilter = mock(JwtTokenFilter.class);
@@ -109,6 +144,21 @@ class AccessTokenVerifyInterceptorTest {
         interceptor.init();
         MockHttpServletRequest request = new MockHttpServletRequest("OPTIONS",
             "/byaiService/tool/installThirdPartySkill");
+
+        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
+        verifyNoInteractions(jwtTokenFilter, sessionFilter);
+    }
+
+    @Test
+    void allowsSkillMarketplaceManageableEmployeeQueryCorsPreflightWithoutAuthentication() {
+        AccessTokenVerifyInterceptor interceptor = new AccessTokenVerifyInterceptor();
+        JwtTokenFilter jwtTokenFilter = mock(JwtTokenFilter.class);
+        SessionFilter sessionFilter = mock(SessionFilter.class);
+        ReflectionTestUtils.setField(interceptor, "jwtTokenFilter", jwtTokenFilter);
+        ReflectionTestUtils.setField(interceptor, "sessionFilter", sessionFilter);
+        interceptor.init();
+        MockHttpServletRequest request = new MockHttpServletRequest("OPTIONS",
+            "/byaiService/tool/queryThirdPartySkillManageableDigitalEmployees");
 
         assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
         verifyNoInteractions(jwtTokenFilter, sessionFilter);

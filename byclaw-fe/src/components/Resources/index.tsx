@@ -115,7 +115,7 @@ const parseBannerList = (value: any) => {
 
 const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onInstalledOnlyChange }) => {
   const intl = useIntl();
-  const { EventEmitter, agentId, agentInfo } = useGlobal();
+  const { EventEmitter } = useGlobal();
 
   // 根据 resourceType 判断资源名称
   const getResourceName = () => {
@@ -207,17 +207,14 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
 
   const { logoutModuleEvent } = useModuleEvent('KNOWLEDGE_CENTER');
 
-  const { userInfo, defaultDigEmployeeId } = useSelector(({ user, employees }: any) => ({
+  const { userInfo } = useSelector(({ user }: any) => ({
     userInfo: user?.userInfo,
-    defaultDigEmployeeId: employees?.defaultDigEmployeeId,
   }));
-  const activeDigitalEmployeeId =
-    agentId || agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
   const portalOrigin = typeof window === 'undefined' ? undefined : window.location.origin;
   const beyondToken = getToken();
   const skillMarketplaceUrl = React.useMemo(
-    () => buildSkillMarketplaceUrl(skillMarketplaceBaseUrl, activeDigitalEmployeeId, beyondToken, portalOrigin),
-    [activeDigitalEmployeeId, beyondToken, portalOrigin, skillMarketplaceBaseUrl]
+    () => buildSkillMarketplaceUrl(skillMarketplaceBaseUrl, beyondToken, portalOrigin),
+    [beyondToken, portalOrigin, skillMarketplaceBaseUrl]
   );
   const usersOrganizations = get(userInfo, 'usersOrganizations') || [];
   const userTypeList = usersOrganizations.map((item: any) => item.userType);
@@ -258,7 +255,7 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
       if (event.origin !== marketplaceOrigin || event.source !== marketplaceIframeRef.current?.contentWindow) {
         return;
       }
-      if (!isSkillMarketplaceInstalledMessage(event.data, activeDigitalEmployeeId)) {
+      if (!isSkillMarketplaceInstalledMessage(event.data)) {
         return;
       }
       notifySiderResourceListReload();
@@ -268,7 +265,7 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
     return () => {
       window.removeEventListener('message', handleSkillMarketplaceMessage);
     };
-  }, [activeDigitalEmployeeId, notifySiderResourceListReload, resourceType, skillMarketplaceUrl]);
+  }, [notifySiderResourceListReload, resourceType, skillMarketplaceUrl]);
 
   useEffect(() => {
     if (resourceType !== 'SKILL') {

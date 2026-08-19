@@ -46,6 +46,9 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
 
     private static final String THIRD_PARTY_SKILL_INSTALL_PATH = "/tool/installThirdPartySkill";
 
+    private static final String THIRD_PARTY_SKILL_MANAGEABLE_DIGITAL_EMPLOYEE_PATH =
+        "/tool/queryThirdPartySkillManageableDigitalEmployees";
+
     private static final String CONNECTOR_SKILL_COMPLETE_PATH =
         "/connector/authorization/skill-complete";
 
@@ -164,11 +167,12 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
             if (this.isFeishuBotEventCallback(request)) {
                 return true;
             }
-            if (this.isThirdPartySkillInstallRequest(request)) {
+            if (this.isThirdPartySkillMarketplaceRequest(request)) {
                 if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
                     return true;
                 }
-                return this.authenticateBeyondTokenOnlyRequest(request, "第三方技能安装");
+                return this.authenticateBeyondTokenOnlyRequest(request,
+                    this.isThirdPartySkillInstallRequest(request) ? "第三方技能安装" : "第三方技能可管理数字员工查询");
             }
             if (this.isConnectorSkillCompleteRequest(request)) {
                 if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
@@ -289,9 +293,18 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
     }
 
     private boolean isThirdPartySkillInstallRequest(HttpServletRequest request) {
+        return isRequestPath(request, THIRD_PARTY_SKILL_INSTALL_PATH);
+    }
+
+    private boolean isThirdPartySkillMarketplaceRequest(HttpServletRequest request) {
+        return isThirdPartySkillInstallRequest(request)
+            || isRequestPath(request, THIRD_PARTY_SKILL_MANAGEABLE_DIGITAL_EMPLOYEE_PATH);
+    }
+
+    private boolean isRequestPath(HttpServletRequest request, String expectedPath) {
         String requestUri = request == null ? null : request.getRequestURI();
-        return StringUtils.endsWith(requestUri, THIRD_PARTY_SKILL_INSTALL_PATH)
-            || StringUtils.endsWith(requestUri, THIRD_PARTY_SKILL_INSTALL_PATH + "/");
+        return StringUtils.endsWith(requestUri, expectedPath)
+            || StringUtils.endsWith(requestUri, expectedPath + "/");
     }
 
     private boolean isConnectorSkillCompleteRequest(HttpServletRequest request) {

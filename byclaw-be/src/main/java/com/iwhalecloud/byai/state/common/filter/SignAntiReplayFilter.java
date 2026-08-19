@@ -41,6 +41,9 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
 
     private static final String THIRD_PARTY_SKILL_INSTALL_PATH = "/tool/installThirdPartySkill";
 
+    private static final String THIRD_PARTY_SKILL_MANAGEABLE_DIGITAL_EMPLOYEE_PATH =
+        "/tool/queryThirdPartySkillManageableDigitalEmployees";
+
     private static final String CONNECTOR_SKILL_COMPLETE_PATH =
         "/connector/authorization/skill-complete";
 
@@ -82,9 +85,9 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
-        // 技能超市安装接口使用现有 Beyond-Token 完成用户认证；对端不持有门户通用请求签名密钥，
+        // 技能超市安装与可管理数字员工查询接口使用现有 Beyond-Token 完成用户认证；对端不持有门户通用请求签名密钥，
         // 因此仅跳过通用签名防重放校验，登录鉴权仍由 AccessTokenVerifyInterceptor 执行。
-        if (this.isThirdPartySkillInstall(request)) {
+        if (this.isThirdPartySkillMarketplaceRequest(request)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -176,9 +179,18 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
     }
 
     private boolean isThirdPartySkillInstall(HttpServletRequest request) {
-        return endsWithPath(request.getRequestURI(), THIRD_PARTY_SKILL_INSTALL_PATH)
-            || endsWithPath(request.getServletPath(), THIRD_PARTY_SKILL_INSTALL_PATH)
-            || endsWithPath(request.getPathInfo(), THIRD_PARTY_SKILL_INSTALL_PATH);
+        return isRequestPath(request, THIRD_PARTY_SKILL_INSTALL_PATH);
+    }
+
+    private boolean isThirdPartySkillMarketplaceRequest(HttpServletRequest request) {
+        return isThirdPartySkillInstall(request)
+            || isRequestPath(request, THIRD_PARTY_SKILL_MANAGEABLE_DIGITAL_EMPLOYEE_PATH);
+    }
+
+    private boolean isRequestPath(HttpServletRequest request, String expectedPath) {
+        return endsWithPath(request.getRequestURI(), expectedPath)
+            || endsWithPath(request.getServletPath(), expectedPath)
+            || endsWithPath(request.getPathInfo(), expectedPath);
     }
 
     private boolean isConnectorSkillComplete(HttpServletRequest request) {
