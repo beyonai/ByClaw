@@ -11,6 +11,8 @@ import java.util.zip.ZipOutputStream;
 
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
+import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
+import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -179,6 +181,22 @@ class ByClawSkillUploadApplicationServiceTest {
     }
 
     @Test
+    void shouldAcceptUtf8ChineseEntryNamesWithoutLanguageEncodingFlag() {
+        MultipartFile zip = buildUtf8ZipWithoutLanguageEncodingFlag("ppt-master.zip",
+            "ppt-master/SKILL.md", "# PPT Master",
+            "ppt-master/templates/brands/中汽研/design_spec.md", "brand spec");
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
+
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
+
+        assertEquals("ppt-master", dto.getSkillName());
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
+        assertTrue(pathCaptor.getAllValues()
+            .contains(AGENT_PREFIX + "ppt-master/templates/brands/中汽研/design_spec.md"));
+    }
+
+    @Test
     void shouldRejectZipWithMultipleSkillDocs() {
         // 两个顶层 skill 目录都存在 SKILL.md，仍按单 skill zip 判定违规。
         MultipartFile zip = buildZip("skill.zip",
@@ -318,6 +336,27 @@ class ByClawSkillUploadApplicationServiceTest {
                 zos.putNextEntry(new ZipEntry(entries[i]));
                 zos.write(entries[i + 1].getBytes());
                 zos.closeEntry();
+            }
+        }
+        catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+        return new MockMultipartFile("file", filename, "application/zip", buf.toByteArray());
+    }
+
+    private MultipartFile buildUtf8ZipWithoutLanguageEncodingFlag(String filename, String... entries) {
+        if (entries.length % 2 != 0) {
+            throw new IllegalArgumentException("entries 必须成对");
+        }
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        try (ZipArchiveOutputStream zos = new ZipArchiveOutputStream(buf)) {
+            zos.setEncoding("UTF-8");
+            zos.setUseLanguageEncodingFlag(false);
+            zos.setCreateUnicodeExtraFields(ZipArchiveOutputStream.UnicodeExtraFieldPolicy.NEVER);
+            for (int i = 0; i < entries.length; i += 2) {
+                zos.putArchiveEntry(new ZipArchiveEntry(entries[i]));
+                zos.write(entries[i + 1].getBytes());
+                zos.closeArchiveEntry();
             }
         }
         catch (IOException e) {
