@@ -111,11 +111,12 @@ const ProjectResources: React.FC<Props> = ({
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [branches, setBranches] = useState<ProjectRepoBranch[]>([]);
   const [selectedBranch, setSelectedBranch] = useState<string>('');
-  // fileName 决定预览器的类型判断与标题，path 仅用于展示完整位置。
+  // fileName 决定预览器的类型判断与标题，path 用于抽屉标题显示完整位置。
+  // content 为 null 时抽屉显示 loading，等异步填入后预览器自动刷新。
   const [filePreviewContent, setFilePreviewContent] = useState<{
     fileName: string;
     path: string;
-    content: string;
+    content: string | null;
     binary?: boolean;
   } | null>(null);
   const requestSeqRef = useRef(0);
@@ -455,19 +456,31 @@ const ProjectResources: React.FC<Props> = ({
     async (event: React.MouseEvent, node: FileTreeItem) => {
       event.stopPropagation();
       if (!detailRepo || isDirectory(node)) return;
+      // 点击立即开抽屉显示 loading，后台拉取内容回来后更新 content 字段触发预览器刷新。
+      setFilePreviewContent({
+        fileName: node.name,
+        path: node.path,
+        content: null,
+        binary: undefined,
+      });
       try {
         const file = await getProjectRepoFileContent({
           repoId: detailRepo.repoId,
           branch: selectedBranch || detailRepo.defaultBranch || 'main',
           path: node.path,
         });
-        setFilePreviewContent({
-          fileName: node.name,
-          path: file.path || node.path,
-          content: file.binary ? file.base64Content || '' : file.content || '',
-          binary: file.binary,
-        });
+        setFilePreviewContent((prev) =>
+          prev
+            ? {
+              ...prev,
+              path: file.path || prev.path,
+              content: file.binary ? file.base64Content || '' : file.content || '',
+              binary: file.binary,
+            }
+            : null
+        );
       } catch (error: any) {
+        setFilePreviewContent(null);
         message.error(error?.message || '文件内容加载失败');
       }
     },

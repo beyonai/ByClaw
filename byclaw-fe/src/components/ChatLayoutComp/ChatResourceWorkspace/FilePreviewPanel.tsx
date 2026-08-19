@@ -23,8 +23,9 @@ interface FilePreviewPanelProps {
   /**
    * 调用方已持有文件内容时直接传入，跳过下载。
    * 远程仓库文件走接口拿到的是字符串/base64，没有可下载的 resourceId+path 或 fileUrl。
+   * data 为 null 时保持 loading 占位状态，等调用方异步填入真实内容。
    */
-  content?: { data: string; binary?: boolean };
+  content?: { data: string | null; binary?: boolean };
 }
 
 // 复用与下载分支相同的 Blob + mimeType 约定，让 Preview/Twins 对同一类文件走同一条渲染路径。
@@ -116,7 +117,13 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
     setLoading(true);
 
     const loadFile = async () => {
-      if (content) return contentToBlob(content.data, content.binary, fileName);
+      if (content) {
+        if (content.data === null) {
+          // 调用方先开抽屉占位，content.data 后续异步填入，useEffect 会重新触发。
+          return new Promise<Blob>(() => {});
+        }
+        return contentToBlob(content.data, content.binary, fileName);
+      }
       if (fileUrl) {
         const response = await fetch(getFileUrl(fileUrl));
         if (!response.ok) throw new Error(response.statusText);

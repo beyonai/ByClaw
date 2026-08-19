@@ -43,7 +43,7 @@ const toFileBrowserItem = (node: ProjectRepoTreeNode) => ({
 const formatBranchLabel = (branch: string) => (branch.length > 10 ? `${branch.substring(0, 10)}...` : branch);
 
 // 远程仓库文件只有字符串/base64，没有可下载的 resourceId+path，走 FilePreviewPanel 的 content 入口复用富预览。
-const RemoteFileContent: React.FC<{ name: string; content: string; binary?: boolean }> = ({
+const RemoteFileContent: React.FC<{ name: string; content: string | null; binary?: boolean }> = ({
   name,
   content,
   binary,
@@ -215,11 +215,17 @@ const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail
       event.stopPropagation();
       if (isDirectory(node) || !onOpenDetail) return;
       const branch = branchMap[`${repo.repoId}`] || repo.defaultBranch || 'main';
+      const tabKey = `repo-remote-file:${repo.repoId}:${branch}:${node.path}`;
+      // 点击立即打开 detail panel 显示 loading，后台拉取完再刷新同一个 tab 填入真内容。
+      onOpenDetail(<RemoteFileContent name={node.name} content={null} binary={undefined} />, {
+        tabKey,
+        title: node.name,
+      });
       try {
         const file = await getProjectRepoFileContent({ repoId: repo.repoId, branch, path: node.path });
         const content = file.binary ? file.base64Content || '' : file.content || '';
         onOpenDetail(<RemoteFileContent name={node.name} content={content} binary={file.binary} />, {
-          tabKey: `repo-remote-file:${repo.repoId}:${branch}:${node.path}`,
+          tabKey,
           title: node.name,
         });
       } catch (error: any) {
