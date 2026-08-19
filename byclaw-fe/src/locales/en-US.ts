@@ -1040,6 +1040,7 @@ export default {
   'workspaceSider.scheduledTasks': 'Scheduled Tasks',
   'workspaceSider.digitalEmployee': 'Digital Employees',
   'workspaceSider.resourceCenter': 'Resource',
+  'workspaceSider.inspiration': 'Inspiration',
   'resourceCenter.myInstalled': 'My Installed',
   'resourceCenter.backToAll': 'Back to all',
   'workspaceSider.fileCenter': 'File Center',
@@ -1172,6 +1173,13 @@ export default {
   'automation.template.newsDigest': 'Daily news digest',
   'automation.template.newsDigestPrompt':
     'Collect important news related to my areas of interest today and provide a concise analysis.',
+  'inspiration.title': 'Inspiration',
+  'inspiration.subtitle': 'Discover templates and real examples to boost your creativity.',
+  'inspiration.searchPlaceholder': 'Search templates',
+  'inspiration.favorites': 'Favorites',
+  'inspiration.makeSameStyle': 'Make Same Style',
+  'inspiration.viewReplay': 'View Replay',
+  'inspiration.empty': 'No inspiration templates yet',
   // 侧栏固定宽度较窄，使用简短文案避免英文被截断。
   'sider.knowledge': 'KB',
   'sider.ontology': 'Ontology',

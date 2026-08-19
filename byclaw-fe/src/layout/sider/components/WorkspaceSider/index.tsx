@@ -1,6 +1,7 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BookOutlined,
+  BulbOutlined,
   DownOutlined,
   FolderOutlined,
   LoadingOutlined,
@@ -39,6 +40,7 @@ const RESOURCE_PATHS = [
   '/ontologyCenter',
   '/skillCenter',
   '/files',
+  '/inspiration',
 ] as const;
 
 type ProjectSessionState = {
@@ -416,6 +418,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   const employeeActive =
     isSameOrChildPath(location.pathname, '/digitalEmployees') || isSameOrChildPath(location.pathname, '/employees');
   const automationActive = isSameOrChildPath(location.pathname, '/automation');
+  const inspirationActive = isSameOrChildPath(location.pathname, '/inspiration');
 
   const handleNewSession = useCallback(() => {
     clearDetailPanel?.();
@@ -712,6 +715,14 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
         >
           <BookOutlined className={styles.primaryIcon} />
           <span>{intl.formatMessage({ id: 'workspaceSider.resourceCenter' })}</span>
+        </button>
+        <button
+          type="button"
+          className={classNames(styles.primaryItem, inspirationActive && styles.primaryItemActive)}
+          onClick={() => navigate('/inspiration')}
+        >
+          <BulbOutlined className={styles.primaryIcon} />
+          <span>{intl.formatMessage({ id: 'workspaceSider.inspiration' })}</span>
         </button>
       </nav>
 
