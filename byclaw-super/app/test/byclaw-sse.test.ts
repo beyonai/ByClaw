@@ -75,6 +75,55 @@ describe("createByClawSseSerializer", () => {
     expect(`${start}${detail}${end}`).not.toContain("reasoningLogEnd");
     expect(`${start}${detail}${end}`).not.toContain("appStreamResponse");
   });
+
+  it("serializes Super Assistant clarification with the 3014 protocol", () => {
+    const serialize = createByClawSseSerializer();
+    const questions = [
+      {
+        header: "目标平台",
+        question: "这个小游戏想跑在什么平台上？",
+        options: [
+          { label: "Web", description: "在浏览器运行" },
+          { label: "小程序", description: "在微信内运行" },
+        ],
+        multiSelect: false,
+      },
+    ];
+
+    const output = serialize(
+      event(1, "interaction.requested", {
+        interactionId: "run-1:tool-1",
+        source: "leader",
+        request: { questions },
+      }),
+    );
+
+    expect(output).toContain('"contentType":"3014"');
+    expect(output).toContain('"tool_name":"AskUserQuestion"');
+    expect(output).toContain('"role":"assistant"');
+    expect(output).toContain(JSON.stringify({ questions }).replaceAll('"', '\\"'));
+  });
+
+  it("keeps legacy child-agent forms on the 3013 protocol", () => {
+    const serialize = createByClawSseSerializer();
+    const uiPayload = {
+      formStatus: 0,
+      pluginMachineFields: [{ fieldCode: "answer_1", formType: "select" }],
+    };
+
+    const output = serialize(
+      event(1, "interaction.requested", {
+        interactionId: "child-form-1",
+        source: "by-framework",
+        delegationId: "delegation-1",
+        request: { uiPayload },
+      }),
+    );
+
+    expect(output).toContain('"contentType":"3013"');
+    expect(output).toContain(JSON.stringify(uiPayload).replaceAll('"', '\\"'));
+    expect(output).not.toContain('"tool_name":"AskUserQuestion"');
+  });
 });
 
 function event(eventId: number, type: RunEvent["type"], data: RunEvent["data"]): RunEvent {

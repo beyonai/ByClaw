@@ -292,6 +292,7 @@ export function protocolMessage(input: {
   agentName?: string;
   objectType?: string;
   status?: string;
+  role?: string;
 }): Record<string, unknown> {
   return {
     id: randomUUID().replaceAll("-", "").toUpperCase(),
@@ -310,7 +311,10 @@ export function protocolMessage(input: {
       {
         index: 0,
         finish_reason: "",
-        delta: { content: input.content },
+        delta: {
+          ...(input.role ? { role: input.role } : {}),
+          content: input.content,
+        },
       },
     ],
   };

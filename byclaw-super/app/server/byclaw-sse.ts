@@ -94,16 +94,19 @@ function serializeByClawSse(event: RunEvent, state: SerializerState): string {
   return frames.join("");
 }
 
-/** 把统一交互请求投影为现有前端已经支持的 3013 固定表单。 */
+/** Leader 自身的结构化提问使用 3014；子 Agent 表单继续兼容 3013。 */
 function appendInteractionFrame(frames: string[], event: RunEvent): void {
   if (event.type !== "interaction.requested") {
     return;
   }
   const interactionId = stringData(event.data.interactionId);
   const request = recordData(event.data.request);
-  const uiPayload =
-    recordData(request?.uiPayload) ??
-    ({ formStatus: 0, pluginMachineFields: [] } as Record<string, JsonValue>);
+  const leaderQuestion = stringData(event.data.source) === "leader";
+  const questions = Array.isArray(request?.questions) ? request.questions : [];
+  const content = leaderQuestion
+    ? { questions }
+    : recordData(request?.uiPayload) ??
+      ({ formStatus: 0, pluginMachineFields: [] } as Record<string, JsonValue>);
   frames.push(
     frame(event, "reasoningLogDelta", {
       event: "reasoningLogDelta",
@@ -111,13 +114,16 @@ function appendInteractionFrame(frames: string[], event: RunEvent): void {
       queryMessageId: event.runId,
       traceId: event.runId,
       sourceAgentType: "BY_SUPER",
-      contentType: "3013",
+      contentType: leaderQuestion ? "3014" : "3013",
       orderId: interactionId || event.runId,
       parentOrderId: stringData(event.data.delegationId) || "-1",
-      choices: [{ delta: { role: "assistant", content: JSON.stringify(uiPayload) } }],
+      choices: [{ delta: { role: "assistant", content: JSON.stringify(content) } }],
       metadata: {
         parent_run_id: event.runId,
         interaction_id: interactionId,
+        ...(leaderQuestion
+          ? { questions, tool_name: "AskUserQuestion" }
+          : {}),
       },
     }),
   );

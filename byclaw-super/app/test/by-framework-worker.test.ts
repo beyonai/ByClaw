@@ -378,6 +378,15 @@ describe("ByClawSuperGatewayWorker", () => {
           orderId: "delegation-1:answer",
           parentOrderId: "delegation-1",
           status: "_START_",
+          choices: [
+            expect.objectContaining({
+              delta: { content: "数字员工输出：数据分析助手" },
+            }),
+          ],
+        }),
+        metadata: expect.objectContaining({
+          delegated_agent_id: "agent-1",
+          delegated_agent_name: "数据分析助手",
         }),
       }),
     );
@@ -647,6 +656,78 @@ describe("ByClawSuperGatewayWorker", () => {
           parent_run_id: "run-1",
           interaction_id: "interaction-page-1",
           delegation_id: "delegation-page-1",
+        },
+      }),
+    );
+  });
+
+  it("maps a Super Assistant question to the new 3014 protocol", async () => {
+    const emitEvent = vi.fn(async () => undefined);
+    const worker = createWorker({
+      createSessionRun: vi.fn(async () => run()),
+      cancelRun: vi.fn(),
+      streamEvents: () => leaderQuestionEvents(),
+      emitEvent,
+    });
+
+    await worker.processCommand(askCommand(), contextMock());
+
+    const questions = leaderQuestions();
+    expect(emitEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: EventType.REASONING_LOG_DELTA,
+        messageId: "run-1:tool-1",
+        parentMessageId: "-1",
+        data: expect.objectContaining({
+          event: EventType.REASONING_LOG_DELTA,
+          contentType: "3014",
+          choices: [
+            expect.objectContaining({
+              delta: {
+                role: "assistant",
+                content: JSON.stringify({ questions }),
+              },
+            }),
+          ],
+        }),
+        metadata: {
+          parent_run_id: "run-1",
+          interaction_id: "run-1:tool-1",
+          questions,
+          tool_name: "AskUserQuestion",
+        },
+      }),
+    );
+  });
+
+  it("keeps a child-agent form on the existing 3013 protocol", async () => {
+    const emitEvent = vi.fn(async () => undefined);
+    const worker = createWorker({
+      createSessionRun: vi.fn(async () => run()),
+      cancelRun: vi.fn(),
+      streamEvents: () => legacyFormInteractionEvents(),
+      emitEvent,
+    });
+
+    await worker.processCommand(askCommand(), contextMock());
+
+    expect(emitEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: EventType.REASONING_LOG_DELTA,
+        data: expect.objectContaining({
+          contentType: "3013",
+          choices: [
+            expect.objectContaining({
+              delta: {
+                content: JSON.stringify(legacyFormPayload()),
+              },
+            }),
+          ],
+        }),
+        metadata: {
+          parent_run_id: "run-1",
+          interaction_id: "child-form-1",
+          delegation_id: "delegation-1",
         },
       }),
     );
@@ -1243,6 +1324,46 @@ async function* pageInteractionEvents(): AsyncIterable<RunEvent> {
     status: "COMPLETED",
     finalAnswer: "请完成页面操作",
   });
+}
+
+function leaderQuestions() {
+  return [
+    {
+      header: "数字员工",
+      question: "请选择由哪一位数字员工处理？",
+      options: [
+        { label: "员工 A", description: "擅长需求分析" },
+        { label: "员工 B", description: "擅长产品设计" },
+      ],
+      multiSelect: false,
+    },
+  ];
+}
+
+async function* leaderQuestionEvents(): AsyncIterable<RunEvent> {
+  yield event(1, "interaction.requested", {
+    interactionId: "run-1:tool-1",
+    source: "leader",
+    request: { questions: leaderQuestions() },
+  });
+  yield event(2, "run.cancelled", { status: "CANCELLED" });
+}
+
+function legacyFormPayload() {
+  return {
+    formStatus: 0,
+    pluginMachineFields: [{ fieldCode: "answer_1", formType: "select" }],
+  };
+}
+
+async function* legacyFormInteractionEvents(): AsyncIterable<RunEvent> {
+  yield event(1, "interaction.requested", {
+    interactionId: "child-form-1",
+    source: "by-framework",
+    delegationId: "delegation-1",
+    request: { uiPayload: legacyFormPayload() },
+  });
+  yield event(2, "run.cancelled", { status: "CANCELLED" });
 }
 
 /** 等待取消控制消息后输出 Run 取消终态。 */

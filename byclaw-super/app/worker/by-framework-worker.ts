@@ -740,6 +740,9 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     if (!delegationId) {
       return;
     }
+    const agentId = stringData(event.data.agentId);
+    const agentName = stringData(event.data.agentName);
+    const displayName = agentName || agentId;
     const orderId = `${delegationId}:answer`;
     await this.#protocolEmitter.emitEvent({
       sessionId: context.sessionId,
@@ -750,7 +753,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       parentMessageId: delegationId,
       data: protocolMessage({
         event: EventType.REASONING_LOG_DELTA,
-        content: "数字员工输出",
+        content: displayName ? `数字员工输出：${displayName}` : "数字员工输出",
         contentType: "3009",
         orderId,
         parentOrderId: delegationId,
@@ -759,6 +762,8 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       metadata: {
         parent_run_id: event.runId,
         delegation_id: delegationId,
+        ...(agentId ? { delegated_agent_id: agentId } : {}),
+        ...(agentName ? { delegated_agent_name: agentName } : {}),
       },
     });
   }
@@ -857,7 +862,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     });
   }
 
-  /** 将统一交互事件输出为 3013 表单或 2010 PAGE 数字员工卡片。 */
+  /** 将 Leader 提问输出为 3014，子 Agent 表单/PAGE 继续使用 3013/2010。 */
   async #forwardInteractionEvent(event: RunEvent, context: AgentContext): Promise<void> {
     if (event.type !== "interaction.requested") {
       return;
@@ -865,14 +870,16 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     const interactionId = stringData(event.data.interactionId);
     const request = recordValue(event.data.request);
     const externalPage = stringData(request?.kind) === "external_page";
+    const leaderQuestion = stringData(event.data.source) === "leader";
+    const questions = Array.isArray(request?.questions) ? request.questions : [];
     const uiPayload = recordValue(request?.uiPayload) ?? {
       formStatus: 0,
       pluginMachineFields: [],
     };
     const delegationId = stringData(event.data.delegationId);
-    const content = JSON.stringify(uiPayload);
+    const content = JSON.stringify(leaderQuestion ? { questions } : uiPayload);
     const eventType = externalPage ? EventType.ANSWER_DELTA : EventType.REASONING_LOG_DELTA;
-    const contentType = externalPage ? "2010" : "3013";
+    const contentType = externalPage ? "2010" : leaderQuestion ? "3014" : "3013";
     await this.#protocolEmitter.emitEvent({
       sessionId: context.sessionId,
       traceId: context.traceId,
@@ -888,11 +895,15 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         parentOrderId: delegationId || "-1",
         agentId: externalPage ? stringData(uiPayload.agentId) : "",
         agentName: externalPage ? stringData(uiPayload.agentName) : "",
+        ...(leaderQuestion ? { role: "assistant" } : {}),
       }),
       metadata: {
         parent_run_id: event.runId,
         interaction_id: interactionId,
         ...(delegationId ? { delegation_id: delegationId } : {}),
+        ...(leaderQuestion
+          ? { questions, tool_name: "AskUserQuestion" }
+          : {}),
       },
     });
   }
