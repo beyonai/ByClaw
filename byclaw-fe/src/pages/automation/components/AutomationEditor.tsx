@@ -311,21 +311,6 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
               )}
             </div>
           </Form.Item>
-          {scheduleMode !== 'once' && (
-            <Form.Item
-              name="effectiveDateRange"
-              label={
-                <span>
-                  {intl.formatMessage({ id: 'automation.effectiveDate' })}
-                  <small className={styles.optionalLabel}>
-                    {intl.formatMessage({ id: 'automation.effectiveDateHint' })}
-                  </small>
-                </span>
-              }
-            >
-              <DatePicker.RangePicker className={styles.fullControl} />
-            </Form.Item>
-          )}
         </Form>
       </div>
     </div>

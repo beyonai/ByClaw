@@ -4,7 +4,7 @@ import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import { useIntl, useNavigate } from '@umijs/max';
 import classNames from 'classnames';
 import useGlobal from '@/hooks/useGlobal';
-import { createProject, saveDefaultAgent, saveProjectMembers } from '@/service/devloop';
+import { createProject, saveProjectMembers } from '@/service/devloop';
 import ProjectOnboardingWizard, {
   type ArchitectChatTarget,
 } from '@/pages/projectSpace/components/ProjectOnboardingWizard';
@@ -44,7 +44,9 @@ const normalizeMemberId = (member: ProjectShareMember | any) =>
 
 // 项目头像统一展示名称前两个字，项目类型由右侧标签表达，不再使用类型图标区分。
 const getProjectAvatarText = (project: ProjectSpace) =>
-  Array.from(`${project.projectName || ''}`.trim()).slice(0, 2).join('') || '项目';
+  Array.from(`${project.projectName || ''}`.trim())
+    .slice(0, 2)
+    .join('') || '项目';
 
 // 与会话模块项目标签保持同一优先级：业务类型优先于共享属性，普通项目再区分个人和共享。
 const getProjectScene = (project: ProjectSpace) => {
@@ -119,10 +121,6 @@ const ProjectCenterList: React.FC = () => {
             userIds: values.shareMembers.map(normalizeMemberId).filter(Boolean),
           });
         }
-        if (values.projectType === 'develop' && values.defaultAgents) {
-          await saveDefaultAgent({ ...values.defaultAgents, projectId: Number(projectId) });
-        }
-
         message.success(intl.formatMessage({ id: 'projectSpace.message.createSuccess' }));
         // 创建接口返回项目 ID 后立即切换当前项目；研发项目后续即使仍停留在仓库/初始化步骤，
         // 关闭向导时也会保持选中新项目，不再回落到创建前的项目。
@@ -234,9 +232,7 @@ const ProjectCenterList: React.FC = () => {
                   className={classNames(styles.projectItem, isActive && styles.projectItemActive)}
                   onClick={() => selectProject(project)}
                 >
-                  <span
-                    className={classNames(styles.projectIcon, styles[`projectTag${projectScene.classSuffix}`])}
-                  >
+                  <span className={classNames(styles.projectIcon, styles[`projectTag${projectScene.classSuffix}`])}>
                     {getProjectAvatarText(project)}
                   </span>
                   <span className={styles.projectMain}>

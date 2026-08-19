@@ -1,4 +1,4 @@
-import { Button, Drawer, Dropdown, Empty, Modal, Select, Spin, Typography, message } from 'antd';
+import { Button, Drawer, Dropdown, Empty, Modal, Radio, Select, Spin, Typography, message } from 'antd';
 import {
   ApartmentOutlined,
   DatabaseOutlined,
@@ -6,11 +6,13 @@ import {
   EditOutlined,
   FileTextOutlined,
   GithubOutlined,
+  LoadingOutlined,
   MoreOutlined,
   PlusOutlined,
   ReloadOutlined,
   RightOutlined,
   RobotOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useIntl } from '@umijs/max';
@@ -23,6 +25,7 @@ import {
   listProjectSpaceFiles,
   deleteProjectRepo,
   saveProjectResources,
+  startProjectInit,
   type DevloopProjectRepo,
   type DevloopProjectSpaceFile,
   type ProjectResourceType,
@@ -44,6 +47,9 @@ interface Props {
 
   /** 仓库新增/编辑后由详情页递增，确保资源卡片立即重新读取列表。 */
   repositoryRefreshVersion?: number;
+
+  /** 工作区初始化成功后刷新项目详情，更新初始化状态和页面提示。 */
+  onProjectInitStarted?: () => void;
 }
 
 type ResourceOption = { value: string; label: string; description?: string };
@@ -54,6 +60,11 @@ const EMPTY_SELECTION: ResourceSelection = {
   digital_employee: [],
   ontology: [],
 };
+
+const INIT_SKILL_PACKAGE_OPTIONS = [
+  { value: 'trellis', label: 'trellis' },
+  { value: 'superpowers', label: 'superpowers' },
+];
 
 const getArray = (...candidates: any[]): any[] => candidates.find((candidate) => Array.isArray(candidate)) || [];
 
@@ -68,6 +79,7 @@ const ProjectResources: React.FC<Props> = ({
   onRefreshToolbarChange,
   onOpenRepositoryManager,
   repositoryRefreshVersion = 0,
+  onProjectInitStarted,
 }) => {
   const intl = useIntl();
   const [files, setFiles] = useState<DevloopProjectSpaceFile[]>([]);
@@ -81,6 +93,10 @@ const ProjectResources: React.FC<Props> = ({
   const [resourceOptionsLoading, setResourceOptionsLoading] = useState(false);
   const [resourceSaving, setResourceSaving] = useState(false);
   const [resourceModalOpen, setResourceModalOpen] = useState(false);
+  const [initModalOpen, setInitModalOpen] = useState(false);
+  const [initStarting, setInitStarting] = useState(false);
+  const [initBuildIndex, setInitBuildIndex] = useState(false);
+  const [initSkillPackages, setInitSkillPackages] = useState<string[]>([]);
   const [previewFile, setPreviewFile] = useState<DevloopProjectSpaceFile | null>(null);
   const [detailRepo, setDetailRepo] = useState<DevloopProjectRepo | null>(null);
   const [knowledgeOptions, setKnowledgeOptions] = useState<ResourceOption[]>([]);
@@ -99,6 +115,10 @@ const ProjectResources: React.FC<Props> = ({
   const isOperationProject = project.projectType === 'operation';
   // 资源分类始终在同一行等宽铺满：研发 2 类、运营 4 类，默认和普通项目仅展示共享文件。
   const resourceCategoryCount = isDevelopProject ? 2 : isOperationProject ? 4 : 1;
+  const workspaceInitRequired = isDevelopProject && !!project.initStatus && project.initStatus !== 'ready';
+  const workspaceInitInProgress =
+    project.initStatus === 'initializing' ||
+    (project.initStatus === 'initialized' && Number(project.initSessionId || 0) > 0);
 
   const loadFiles = useCallback(async () => {
     setLoadingFiles(true);
@@ -333,6 +353,32 @@ const ProjectResources: React.FC<Props> = ({
     });
   };
 
+  // 工作区仓库初始化沿用旧详情页流程:先选择建索引与技能包,再调用后端同步初始化接口。
+  const openInitModal = () => {
+    setInitBuildIndex(false);
+    setInitSkillPackages([]);
+    setInitModalOpen(true);
+  };
+
+  const handleStartInit = async () => {
+    if (initStarting) return;
+    setInitStarting(true);
+    try {
+      await startProjectInit({
+        projectId: Number(project.projectId),
+        buildIndex: initBuildIndex,
+        skillPackages: initBuildIndex ? initSkillPackages : [],
+      });
+      message.success(intl.formatMessage({ id: 'projectSpace.detail.initConfig.finished' }));
+      setInitModalOpen(false);
+      onProjectInitStarted?.();
+    } catch (error: any) {
+      message.error(error?.message || intl.formatMessage({ id: 'projectSpace.detail.initConfig.startFailed' }));
+    } finally {
+      setInitStarting(false);
+    }
+  };
+
   const empty = (
     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'chatResource.empty' })} />
   );
@@ -470,6 +516,24 @@ const ProjectResources: React.FC<Props> = ({
           {[repo.repoUrl, repo.defaultBranch, repo.description].filter(Boolean).join(' · ') || '-'}
         </Typography.Text>
       </div>
+      {workspaceInitRequired && repo.repoType === 'workspace' && (
+        <span className={styles.resourceRepoInitAction} onClick={(event) => event.stopPropagation()}>
+          {workspaceInitInProgress && (
+            <span className={styles.resourceRepoInitProgress}>
+              <LoadingOutlined spin />
+              {intl.formatMessage({ id: 'projectSpace.detail.repository.initializing' })}
+            </span>
+          )}
+          <Button type="link" size="small" icon={<ThunderboltOutlined />} onClick={openInitModal}>
+            {intl.formatMessage({
+              id:
+                workspaceInitInProgress || project.initStatus === 'initialized'
+                  ? 'projectSpace.detail.repository.reinitWorkspace'
+                  : 'projectSpace.detail.repository.initWorkspace',
+            })}
+          </Button>
+        </span>
+      )}
       <Dropdown
         trigger={['hover']}
         onOpenChange={() => undefined}
@@ -569,6 +633,55 @@ const ProjectResources: React.FC<Props> = ({
           </section>
         )}
       </div>
+
+      <Modal
+        title={intl.formatMessage({ id: 'projectSpace.detail.initConfig.title' })}
+        open={initModalOpen}
+        onCancel={() => setInitModalOpen(false)}
+        onOk={() => void handleStartInit()}
+        okText={intl.formatMessage({ id: 'projectSpace.detail.initConfig.start' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
+        confirmLoading={initStarting}
+        width={480}
+      >
+        <div className={styles.resourceInitConfigBody}>
+          <div className={styles.resourceInitConfigDescription}>
+            {intl.formatMessage({ id: 'projectSpace.detail.initConfig.desc' })}
+          </div>
+          <div className={styles.resourceInitConfigField}>
+            <span className={styles.resourceInitConfigLabel}>
+              {intl.formatMessage({ id: 'projectSpace.detail.initConfig.buildIndex' })}
+            </span>
+            <Radio.Group
+              value={initBuildIndex}
+              onChange={(event) => {
+                const next = event.target.value as boolean;
+                setInitBuildIndex(next);
+                setInitSkillPackages(next ? INIT_SKILL_PACKAGE_OPTIONS.map((option) => option.value) : []);
+              }}
+            >
+              <Radio value={false}>{intl.formatMessage({ id: 'projectSpace.detail.initConfig.buildIndexNo' })}</Radio>
+              <Radio value={true}>{intl.formatMessage({ id: 'projectSpace.detail.initConfig.buildIndexYes' })}</Radio>
+            </Radio.Group>
+          </div>
+          {initBuildIndex && (
+            <div className={styles.resourceInitConfigField}>
+              <span className={styles.resourceInitConfigLabel}>
+                {intl.formatMessage({ id: 'projectSpace.detail.initConfig.skillLabel' })}
+              </span>
+              <Select
+                mode="multiple"
+                allowClear
+                style={{ width: '100%' }}
+                value={initSkillPackages}
+                options={INIT_SKILL_PACKAGE_OPTIONS}
+                placeholder={intl.formatMessage({ id: 'projectSpace.detail.initConfig.skillPlaceholder' })}
+                onChange={(values) => setInitSkillPackages(values as string[])}
+              />
+            </div>
+          )}
+        </div>
+      </Modal>
 
       {isOperationProject && (
         <Modal

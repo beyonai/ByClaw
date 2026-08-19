@@ -329,6 +329,7 @@ const ProjectDetail: React.FC<Props> = ({
           project={project}
           onRefreshToolbarChange={refreshToolbarHandlers.resources}
           repositoryRefreshVersion={repositoryRefreshVersion}
+          onProjectInitStarted={onRefresh}
           onOpenRepositoryManager={(repo) => {
             setEditingRepository(repo);
             setRepositoryManagerOpen(true);

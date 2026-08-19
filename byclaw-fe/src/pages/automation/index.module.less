@@ -139,39 +139,25 @@
   overflow: auto;
 }
 
-.listGroupTitle {
-  margin: 0 0 10px 8px;
-  color: #aaa;
-  font-size: 13px;
-  line-height: 22px;
-}
-
-.automationGroups {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.taskGroup {
-  min-width: 0;
-}
-
 .automationList {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
 }
 
 .taskRow {
   position: relative;
-  min-height: 46px;
-  padding: 0 8px;
-  border-radius: 10px;
+  min-height: 180px;
+  padding: 16px 20px 14px;
+  border: 1px solid #e5e5e5;
+  border-radius: 16px;
   display: flex;
-  align-items: center;
-  gap: 12px;
+  align-items: stretch;
+  flex-direction: column;
+  gap: 0;
   box-sizing: border-box;
-  transition: background-color 0.2s;
+  background: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .taskRow[role='button'] {
@@ -180,85 +166,148 @@
 
 .taskRow:hover,
 .taskRowSelected {
-  background: #f5f5f5;
+  border-color: #d7d7d7;
+  box-shadow: 0 8px 24px rgba(28, 32, 36, 0.06);
+}
+
+.taskTop {
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.taskSwitch {
+  flex: none;
+
+  &:global(.@{antPrefix}-switch) {
+    width: 36px;
+    min-width: 36px;
+    height: 20px;
+  }
+
+  :global(.@{antPrefix}-switch-handle) {
+    top: 3px;
+    inset-inline-start: 3px;
+    width: 14px;
+    height: 14px;
+  }
+
+  &:global(.@{antPrefix}-switch-checked) {
+    :global(.@{antPrefix}-switch-handle) {
+      inset-inline-start: 19px;
+    }
+  }
 }
 
 .taskMain {
   min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  margin-top: 14px;
+  display: block;
   flex: 1;
   overflow: hidden;
 }
 
 .taskName {
-  flex: none;
-  color: #202124;
+  display: block;
+  overflow: hidden;
+  color: #141414;
   font-size: 14px;
   font-weight: 500;
-  line-height: 22px;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskDescription {
+  display: -webkit-box;
+  margin-top: 6px;
+  overflow: hidden;
+  color: #141414a6;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .taskMeta,
 .nextRun,
 .mutedText {
   overflow: hidden;
-  color: #969696;
-  font-size: 13px;
-  line-height: 22px;
+  color: #141414a6;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .nextRun {
-  width: 150px;
   flex: none;
-  color: #b0b0b0;
+  color: #141414a6;
+  font-size: 12px;
   text-align: right;
-  transition: opacity 0.16s ease;
+  white-space: nowrap;
 }
 
-.taskStatus {
-  flex: none;
-  margin: 0;
-}
-
-.rowActions {
-  position: absolute;
-  right: 8px;
-  width: 74px;
+.taskFooter {
+  min-width: 0;
+  margin-top: 12px;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transition: opacity 0.16s ease;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.schedulePill {
+  min-width: 0;
+  max-width: 58%;
+  padding: 5px 8px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  color: #141414a6;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #f6f6f6;
+
+  > span:first-child {
+    flex: none;
+  }
+
+  > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 .rowActionButton {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 6px;
   color: #454b54;
-}
-
-.taskRowWithActions:hover,
-.taskRowWithActions:focus-within {
-  .nextRun {
-    opacity: 0;
-  }
-
-  .rowActions {
-    opacity: 1;
-    visibility: visible;
-    pointer-events: auto;
-  }
+  font-size: 16px;
 }
 
 .automationSkeleton {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+
+  :global(.@{antPrefix}-skeleton) {
+    min-height: 144px;
+    padding: 16px 20px;
+    border: 1px solid #e5e5e5;
+    border-radius: 16px;
+    box-sizing: border-box;
+  }
 }
 
 .runContent {
@@ -485,7 +534,8 @@
 
 .scheduleFields {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  flex-direction: column;
   gap: 10px;
 }
 
@@ -500,11 +550,6 @@
 
 .scheduleDateTimeField {
   width: 220px;
-}
-
-.fullControl {
-  width: 420px;
-  max-width: 100%;
 }
 
 @media (max-width: 1100px) {
@@ -529,6 +574,27 @@
 }
 
 @media (max-width: 760px) {
+  .automationList {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .automationSkeleton {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .taskRow {
+    min-height: 180px;
+    padding: 16px 20px 14px;
+  }
+
+  .taskFooter {
+    align-items: flex-end;
+  }
+
+  .schedulePill {
+    max-width: 55%;
+  }
+
   .editorScroll {
     padding: 12px 16px 32px;
   }
@@ -543,9 +609,5 @@
   .scheduleDateTimeField {
     width: 100% !important;
     flex: none;
-  }
-
-  .nextRun {
-    display: none;
   }
 }

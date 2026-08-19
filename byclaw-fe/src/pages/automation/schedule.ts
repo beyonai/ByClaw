@@ -104,19 +104,12 @@ export const getAutomationFormInitialValues = (source?: AutomationSource): Autom
     intervalHours: schedule?.intervalHours || 1,
     intervalWeekdays: schedule?.intervalWeekdays?.length ? schedule.intervalWeekdays : [...ALL_WEEKDAYS],
     onceTime: schedule?.onceTime ? dayjs(schedule.onceTime) : dayjs().add(1, 'hour').startOf('minute'),
-    effectiveDateRange:
-      schedule?.effectiveStartDate && schedule?.effectiveEndDate
-        ? [dayjs(schedule.effectiveStartDate), dayjs(schedule.effectiveEndDate)]
-        : undefined,
   };
 };
 
 export const buildAutomationSchedule = (values: AutomationFormValues): AutomationScheduleConfig => {
-  const [effectiveStartDate, effectiveEndDate] = values.effectiveDateRange || [];
   const base = {
     mode: values.scheduleMode,
-    effectiveStartDate: effectiveStartDate?.format('YYYY-MM-DD'),
-    effectiveEndDate: effectiveEndDate?.format('YYYY-MM-DD'),
   };
   if (values.scheduleMode === 'once') {
     return {

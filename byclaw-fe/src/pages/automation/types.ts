@@ -54,7 +54,6 @@ export interface AutomationFormValues {
   intervalHours?: number;
   intervalWeekdays?: number[];
   onceTime?: Dayjs;
-  effectiveDateRange?: [Dayjs, Dayjs];
 }
 
 export interface AutomationTemplate {

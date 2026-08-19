@@ -56,6 +56,9 @@ type IProps = {
 
   queryInputProps?: Record<string, unknown>;
 
+  /** 输入区外层样式，由特殊聊天页面按需覆盖视觉，不改变输入逻辑。 */
+  queryInputWrapperClassName?: string;
+
   /** 禁用输入框草稿缓存与恢复，员工详情等固定聊天对象场景使用。 */
   disableInputDraft?: boolean;
 
@@ -99,6 +102,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     fixedAgentId,
     projectId,
     projectName,
+    queryInputWrapperClassName,
   } = props;
   const { isBottom, setIsBottom, autoEnterBottomOnMessage = true } = props;
   const { sessionId, queryInputProps = {}, readOnly, disableInputDraft = false } = props;
@@ -613,7 +617,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
             )}
             {!readOnly && (
               <div
-                className={classnames(styles.queryInputWrapper, {
+                className={classnames(styles.queryInputWrapper, queryInputWrapperClassName, {
                   [styles.messageListDisappear]: isMultiChoices,
                   [styles.withProjectSelector]: !sessionId && userInfo && queryInputProps.enableTaskTemplate !== false,
                 })}

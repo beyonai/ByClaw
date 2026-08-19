@@ -30,12 +30,7 @@ import {
 import type { ProjectMember, ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
-import {
-  saveDefaultAgent,
-  saveProjectMembers,
-  saveProjectResources,
-  type DevloopProjectSessionSearchMode,
-} from '@/service/devloop';
+import { saveProjectMembers, saveProjectResources, type DevloopProjectSessionSearchMode } from '@/service/devloop';
 import { SiderContentContext } from '../../siderContentContext';
 import DialogueCard from '../DialogueList/DialogueCard';
 import ProjectDetailPanel from './ProjectDetailModal';
@@ -844,10 +839,6 @@ const ProjectSpaceList: React.FC = () => {
       if (submitSharedFlag && shareMembers.length) {
         await syncProjectShareMembers(createdProjectId, shareMembers);
       }
-      // 仅研发项目落库默认员工覆盖(项目作用域);其余类型不显示该区块,也不写空覆盖行。
-      if (submitIsDevelopProject && values.defaultAgents) {
-        await saveDefaultAgent({ ...values.defaultAgents, projectId: Number(createdProjectId) });
-      }
       message.success(t('message.createSuccess'));
       const refreshedProjects = await fetchProjects();
       const createdProject = refreshedProjects.find((project) => `${project.projectId}` === createdProjectId);
@@ -1248,12 +1239,6 @@ const ProjectSpaceList: React.FC = () => {
           await syncProjectShareMembers(createdProjectId, shareMembers);
         }
         message.success(t('message.createSuccess'));
-      }
-      // 仅研发项目落库默认员工覆盖(项目作用域,projectId>0);后端 upsert,空串角色即清除该覆盖回退全局。
-      // 运营/普通项目不显示该区块,也不写空覆盖行。
-      const savedProjectId = editingProject ? editingProject.projectId : createdProjectId;
-      if (savedProjectId && submitIsDevelopProject && values.defaultAgents) {
-        await saveDefaultAgent({ ...values.defaultAgents, projectId: Number(savedProjectId) });
       }
       setProjectModalOpen(false);
       setEditingProject(undefined);

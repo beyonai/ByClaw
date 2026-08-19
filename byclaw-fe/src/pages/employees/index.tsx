@@ -461,6 +461,7 @@ const Employees = () => {
                 queryInputProps={{
                   placeholder: '',
                 }}
+                queryInputWrapperClassName={styles.employeeQueryInputWrapper}
                 // 员工详情固定与当前数字员工聊天，不显示 @ 入口，也不恢复任何历史输入草稿。
                 cannotAt
                 disableInputDraft

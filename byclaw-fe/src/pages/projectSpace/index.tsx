@@ -20,7 +20,6 @@ import { getPublicPath } from '@/utils';
 import {
   createProject,
   deleteProject,
-  saveDefaultAgent,
   saveProjectMembers,
   saveProjectResources,
   updateProject,
@@ -282,10 +281,6 @@ const ProjectSpacePage: React.FC = () => {
               .filter((userId): userId is string | number => Boolean(userId))
             : [],
         });
-        if (values.projectType === 'develop' && values.defaultAgents) {
-          await saveDefaultAgent({ ...values.defaultAgents, projectId: Number(savedProjectId) });
-        }
-
         message.success(
           intl.formatMessage({
             id: editingProject ? 'projectSpace.message.updateSuccess' : 'projectSpace.message.createSuccess',
