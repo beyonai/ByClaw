@@ -6,7 +6,7 @@ description: Use when the goal is to COLLECT and keep material rather than just 
 # Knowledge Collection
 
 这是面向用户的默认知识采集编排 Skill。采集编排器 `knowledge-collection` 判断采集意图、编排深化研究、选择来源执行器，并衔接后处理；
-内置公共互联网路由层 [references/source-routing.md](references/source-routing.md)（原 By-Reach 路由器）负责渠道选择，
+内置公共互联网路由层 [references/agent-reach.md](references/agent-reach.md)（原 By-Reach 路由器）负责渠道选择，
 网站执行器 `bycli` 或其他来源执行器负责取得内容。
 
 **取内容前先读这一条**：采集编排器自身永不取内容。任何一次取内容都必须先按下面的「来源路由」委派来源执行器，
@@ -26,19 +26,33 @@ description: Use when the goal is to COLLECT and keep material rather than just 
 先框架问题（breadth/depth/起始 query），逐层拆分为分支，每个分支完成一次「检索 → 抓取 → 登记 → 提炼」，再聚合去重、输出报告。
 深化研究会话必须用 `init --mode research` 创建；`mode=research` 会强制 `report` 交付后才允许 `cleanup` 整体清理。
 
-- 深化研究的每次「检索」：使用**双检索信源**确定哪些网页相关 —— 内置路由层的检索渠道（Exa 搜索、gh、RSS、站内搜索等，
-  见 [references/source-routing.md](references/source-routing.md)）与 `online_search`（SearXNG 元搜索 CLI，
-  时间窗/学术/中文多引擎，见 [references/online-search.md](references/online-search.md)）；
+- 深化研究的每次「检索」：使用**三检索信源**确定哪些网页相关 —— 内置路由层的检索渠道（Exa 搜索、gh、RSS、站内搜索等，
+  见 [references/agent-reach.md](references/agent-reach.md)）、`online_search`（SearXNG 元搜索 CLI，
+  时间窗/学术/中文多引擎，见 [references/online-search.md](references/online-search.md)），
+  以及 `online_search/references/hot_discovery`（**热度发现通道**子技能，经 bycli 适配器取平台原生热度
+  `citations`/`downloads`/`stars`/`score`，与 searxng **并行**跑后用其 `merge` 归并；
+  `groups.bothChannels` 双通道命中优先级最高）；
   信源分工见 [references/research-methodology.md](references/research-methodology.md)「检索源分工」节；
-- **检索信源入口（强制）**：执行任何检索前，必须先通读 [references/source-routing.md](references/source-routing.md)
+- **热度通道的三条硬边界**（调用前须通读其 SKILL.md）：① 只发现 URL 与热度字段，**不取正文** ——
+  取内容仍一律经下方「来源路由」；② 覆盖集中在 packages/science/it/q&a/repos/apps/books/movies 9 个维度，
+  images/videos/music/files/dictionaries/translate/map/lyrics/radio/weather/icons 这 11 个维度**无免登录热度源**；
+  ③ 30/33 个适配器需本地重排，对外只能称「相关结果中较热」，不得称「平台最热」；
+- **检索信源入口（强制）**：执行任何检索前，必须先通读 [references/agent-reach.md](references/agent-reach.md)
   （路由表与 bycli 铁律），并打开通读 `online_search` 技能的 SKILL.md（若本会话尚未加载过它）：
   `online_search` 位于 `skills/online_search/SKILL.md`（源码版 searxng CLI，参数/输出/实测引擎可用性见其正文与
   [references/online-search.md](references/online-search.md)）。
   **技能不是平台工具**：不得把技能名当作工具名调用（如 `online_search` 工具调用会报 "Tool not found"）；
   必须按其 SKILL.md 中的实际命令面（searxng_cli.py / exec / bycli 等）执行。未通读检索文档就执行检索视为违规；
+- **时序不可交换**：`init` 必须先于任何发现通道 —— `init` 要求目标目录不存在或为空，
+  而热度通道的发现快照目录 `.post-processing-inputs/` 由 `init` 自己以 0700 创建。
+  「先跑发现、后建会话」这个看似自然的顺序**必然失败**；
 - 深化研究的每次「抓取」：按下方「来源路由」委派来源执行器取得内容（公共网页一律 `bycli`）；
 - 每轮分支产物经 `collect` 登记为 inventory（`sourceSkill + sourceUrl` 去重），learnings/citations 引用
 -   inventory 的 `itemId`，杜绝「只抓 snippet 就当证据」与重复抓取；
+- **发现依据须随 `collect` 落盘**：热度通道命中的条目，把 `discoveredBy` / `popularity` / `searxngRank`
+  写进 item 的 `collectionFilters`，否则「这条 URL 当初为什么被选中」在最终产物里无法回溯。
+  **只写这三项** —— `titleContext` 与 `searxngContent` 严禁写入（会随 inventory 持久化，等于绕过物化登记）；
+  键名不得含 `token`/`cookie`/`secret`（`sanitizeMetadataValue` 会静默丢弃且无报错）；
 - 报告完成与后处理全部结束后才清理会话（见 [references/post-processing.md](references/post-processing.md)）。
 
 用户只需要单步采集时，同一链路退化为单分支（depth=1）：框架 → 检索 → 抓取 → 登记 → 后处理。
@@ -64,7 +78,7 @@ collection-result.json + sanitized/metadata.json）首次读写自动迁移为 s
 
 ## 来源路由
 
-- 公共互联网：按内置路由层 [references/source-routing.md](references/source-routing.md) 选定执行器。公开网页、
+- 公共互联网：按内置路由层 [references/agent-reach.md](references/agent-reach.md) 选定执行器。公开网页、
   微信公众号文章、静态页面或 raw URL 均走这条路径，不得因「一个链接」「内容公开可读」「直接抓更快」跳过路由。
 - 微信公众号后台（例如“我的公众号”的发表记录、后台数据或数据明细 Excel）：这是登录态归属账号采集，不要求公众号名称或原始 ID。
   直接加载并遵循 `bycli` skill，以委派采集模式先用 `published` 命令的 `--limit <N>` 返回最近 N 条发表记录及运营指标，再对每条返回记录的精确 URL 用

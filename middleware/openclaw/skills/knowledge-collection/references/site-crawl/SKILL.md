@@ -116,7 +116,7 @@ inventory 身份是 `sourceSkill + sourceUrl`，所以**不要**用一个 `--sou
 
 ## Step 4：登录态与失败处理
 
-generic webpage 在 [../source-routing.md](../source-routing.md) 路由表里**没有兜底执行器**，`bycli` 失败即停止并报告。
+generic webpage 在 [../agent-reach.md](../agent-reach.md) 路由表里**没有兜底执行器**，`bycli` 失败即停止并报告。
 SaaS 控制台内的功能说明页常见 146 bytes 级别的登录墙响应，这类页面：
 
 1. 记 `status=failed` 并写明 `reason`，不要重试其他工具；

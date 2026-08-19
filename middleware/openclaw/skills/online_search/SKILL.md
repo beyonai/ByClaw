@@ -17,6 +17,13 @@ description: 源码版 SearXNG 元搜索 CLI，一次调用聚合 40+ 搜索引�
 ```text
 online_search/
 ├── SKILL.md                     # 本技能
+├── references/
+│   └── hot_discovery/           # ★ 热度发现子技能（与 searxng 并行，见下节）
+│       ├── SKILL.md
+│       ├── adapters.md          # 逐适配器字段声明（机器可读，脚本唯一配置来源）
+│       └── scripts/
+│           ├── hot_discovery.mjs
+│           └── hot_discovery.test.mjs
 └── scripts/
     ├── searxng_cli.py           # ★ 搜索 CLI 入口（进程内调用 SearXNG 核心）
     ├── searxng_pack_settings.yml # 引擎白名单/超时/代理配置
@@ -114,6 +121,49 @@ stdout 输出**单个 JSON 对象**（`ensure_ascii=False`，中文原样保留�
 - `result_count`：本批返回条数（受 `--max-results` 限制）
 
 错误时：stderr 输出人类可读错误与堆栈，stdout 输出 `{"error": "原因", "exit_code": 1}`，退出码非 0。
+
+## 子技能：hot_discovery（热度发现通道）
+
+searxng 给的是**相关性**排序，拿不到平台原生热度。需要「相关 **且** 高热」时，
+与本技能**并行**调用子技能 [references/hot_discovery/SKILL.md](references/hot_discovery/SKILL.md)——
+它经 bycli 适配器按关键词检索，取平台原生热度字段（`citations` / `downloads` / `stars` / `score` …），
+再由其 `merge` 子命令归并两个通道的结果。
+
+**两个通道的分工**：
+
+| | searxng（本技能） | hot_discovery（子技能） |
+| --- | --- | --- |
+| 排序依据 | 多引擎相关性 | 平台原生热度字段 |
+| 覆盖面 | 249 引擎，几乎所有类别 | 33 个适配器，热度集中在 packages/science/it |
+| 摘要 | `content` 全留，不截断 | `titleContext` 硬截断 100 字符 |
+| 取内容 | 不做（委派来源执行器） | 不做（回 agent-reach 主路由表） |
+
+**何时并行调用**：主题落在 packages / science / it / q&a / repos / apps / books / movies 这 9 个维度，
+且需要按热度而非仅相关性筛选时。
+
+**何时不要调用**：images / videos / music / files / dictionaries / translate / map / lyrics /
+radio / weather / icons —— 这 11 个维度**没有免登录热度源**，调用只是白跑。
+
+**并行方式**：两个进程同时起，各自输出 JSON 文件，再交给 `hot_discovery.mjs merge`：
+
+```bash
+# 通道 1（本技能）
+.venv/bin/python searxng_cli.py "AI agent framework" --category it --max-results 20 > /tmp/sx.json
+
+# 通道 2（子技能，同时跑）
+node references/hot_discovery/scripts/hot_discovery.mjs search \
+    --query "AI agent framework" --dimensions "it,packages,repos" --tiers 1 --out /tmp/hot.json
+
+# 归并（两边都完成后；merge 只读文件，不执行 searxng）
+node references/hot_discovery/scripts/hot_discovery.mjs merge \
+    --hot-file /tmp/hot.json --searxng-file /tmp/sx.json
+```
+
+归并输出的 `groups.bothChannels` 是**双通道命中**——一条 URL 既被多引擎相关性捞到、又在垂直平台
+高热，是最高优先级的候选。
+
+**调用前必须通读子技能的 SKILL.md**：它有若干不可从命令面推出的约束（措辞纪律、
+`titleContext` 三层约束、失败不兜底、`init` 必须先于发现通道）。
 
 ## 给 Agent 的调用指引
 

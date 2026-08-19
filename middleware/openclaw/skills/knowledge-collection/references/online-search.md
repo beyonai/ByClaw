@@ -1,6 +1,6 @@
 # Online Search 检索信源（SearXNG 元搜索）
 
-`online_search` 是知识采集技能的第二检索信源（与内置路由层 [source-routing.md](source-routing.md) 并列），封装 SearXNG 249 引擎元搜索内核。
+`online_search` 是知识采集技能的第二检索信源（与内置路由层 [agent-reach.md](agent-reach.md) 并列），封装 SearXNG 249 引擎元搜索内核。
 技能本体位于 `skills/online_search/`（与 `knowledge-collection` 同级），源码版运行（Python 3.12 + venv），
 一次调用聚合多引擎结果并输出单个 JSON。**只负责发现 URL，不得直接抓取网页；取内容一律委派来源执行器（公共网页 `bycli`）。**
 
@@ -35,7 +35,7 @@ cd skills/online_search/scripts
 - **学术/标准**：优先 `online_search --category science`（不带 time-range）；
 - **英文技术/代码**：优先内置路由层的 Exa（擅长英文技术文档与代码上下文）与 `gh`（搜 GitHub）；
 - **通用发现**：两个信源各跑一次，同一 query 多引擎交叉验证；
-- **取内容**：一律委派来源执行器，公共网页按 [source-routing.md](source-routing.md) → `bycli web read --url <URL> --stdout`。
+- **取内容**：一律委派来源执行器，公共网页按 [agent-reach.md](agent-reach.md) → `bycli web read --url <URL> --stdout`。
 
 ## 实测引擎可用性（2026-08-15 直连探测）
 
