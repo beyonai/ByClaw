@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.route;
 
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -12,6 +13,7 @@ import java.util.concurrent.TimeUnit;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
@@ -28,6 +30,8 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
+import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
 import com.iwhalecloud.byai.state.common.dto.ChoiceDto;
 import com.iwhalecloud.byai.state.common.dto.DeltaDto;
@@ -52,13 +56,15 @@ import com.iwhalecloud.byai.state.infrastructure.utils.ChatUtils;
 import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
 import static com.iwhalecloud.byai.gateway.sandbox.service.SandboxService.WORKER_READY_TIMEOUT_MS;
 import lombok.extern.slf4j.Slf4j;
-import com.iwhalecloud.byai.state.application.service.session.ByClawUserWorkspacePaths;
 
 @Slf4j
 @Service
 public class RouteService {
 
     private static final int SANDBOX_STARTUP_WAIT_ROUNDS = 5;
+
+    @Value("${file.storage.local.path}")
+    private String fileStorageLocalPath;
 
     @Autowired
     private GatewayClient gatewayClient;
@@ -89,6 +95,12 @@ public class RouteService {
 
     @Autowired
     private A2aRouteService a2aRouteService;
+
+    @Autowired
+    private ProjectApplicationService projectApplicationService;
+
+    @Autowired
+    private UserBucketNamingService userBucketNamingService;
 
     /**
      * 判断是否为接口集成类型
@@ -619,9 +631,7 @@ public class RouteService {
         if (chatDto.getProjectId() != null) {
             JSONObject projectInfo = new JSONObject();
             projectInfo.put("project_id", chatDto.getProjectId());
-            // Serialize the filesystem path as text so JSON consumers do not receive a file:// URI.
-            projectInfo.put("workspace", Paths.get(ByClawUserWorkspacePaths.USER_FS_OBJECT_KEY_ROOT_PREFIX,
-                "projects", String.valueOf(chatDto.getProjectId())).toString());
+            projectInfo.put("workspace", resolveSandboxProjectWorkspace(chatDto.getProjectId()));
             metadata.put("project_info", projectInfo);
         }
 
@@ -687,6 +697,44 @@ public class RouteService {
 
             throw new BdpRuntimeException("Gateway SDK 消息发送失败: " + response.getError());
         }
+    }
+
+    /**
+     * 将项目的 NFS 实际路径转换为沙箱内用户桶根目录下的绝对路径。
+     *
+     * @param projectId 项目 ID
+     * @return 以正斜杠开头的沙箱项目路径
+     */
+    private String resolveSandboxProjectWorkspace(Long projectId) {
+        Path projectWorkspace = projectApplicationService.getProjectWorkspacePath(projectId)
+            .toAbsolutePath().normalize();
+        Path userBucketRoot = Paths.get(fileStorageLocalPath, resolveCurrentUserBucket())
+            .toAbsolutePath().normalize();
+        if (!projectWorkspace.startsWith(userBucketRoot)) {
+            return toSandboxAbsolutePath(projectWorkspace.toString());
+        }
+
+        return toSandboxAbsolutePath(userBucketRoot.relativize(projectWorkspace).toString());
+    }
+
+    /**
+     * 将路径分隔符统一为正斜杠，并确保路径以正斜杠开头。
+     *
+     * @param path 待转换路径
+     * @return 沙箱内绝对路径
+     */
+    private String toSandboxAbsolutePath(String path) {
+        String normalizedPath = path.replace('\\', '/');
+        return normalizedPath.startsWith("/") ? normalizedPath : "/" + normalizedPath;
+    }
+
+    /**
+     * 解析当前登录用户的用户桶名称。
+     *
+     * @return 当前登录用户对应的规范化用户桶名称
+     */
+    private String resolveCurrentUserBucket() {
+        return userBucketNamingService.buildUserBucketName(CurrentUserHolder.getCurrentUserCode());
     }
 
     private void restartSandboxWithProgress(ChatProcessContext ctx, String userCode, Long agentId,
