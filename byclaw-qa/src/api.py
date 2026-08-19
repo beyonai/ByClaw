@@ -58,11 +58,14 @@ from by_qa.knowledge_base.infrastructure.storage import (
     StorageNotFoundError,
     StorageOperationError,
 )
+from byclaw_knowledge_entity_callback import CALLBACK_CONTEXT_EXTRA_PARAM
+from byclaw_knowledge_entity_runner import install_byclaw_knowledge_entity_runner
 from byclaw_knowledge_storage import get_kg_doc_from_resourcefs
 from byclaw_userfs_storage import (
     RESOURCE_ID_HEADER,
+    USER_CODE_HEADER,
     bind_byclaw_resource_id,
-    build_byclaw_userfs_headers,
+    build_byclaw_userfs_headers_async,
     reset_byclaw_userfs_headers,
     set_byclaw_userfs_headers,
 )
@@ -77,18 +80,81 @@ from by_qa.main import (
 from redis_agent_config import get_kg_doc_from_redis
 from redis_runtime import init_shared_redis_from_env
 
+install_byclaw_knowledge_entity_runner()
+
+_KNOWLEDGE_ENTITY_CALLBACK_PATHS = frozenset(
+    {
+        "/api/v1/knowledgeItems/entityDiscovery",
+        "/api/v1/knowledgeItems/entityEnrich",
+    }
+)
+
+
+def _inject_knowledge_entity_callback_context(
+    body: bytes,
+    *,
+    user_code: str,
+    chat_session_id: str,
+    resource_id: str,
+) -> bytes:
+    """Persist non-secret callback routing identifiers in async task input."""
+    try:
+        payload = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return body
+    if not isinstance(payload, dict):
+        return body
+
+    extra_params = payload.get("extraParams", {})
+    if not isinstance(extra_params, dict):
+        return body
+    extra_params = dict(extra_params)
+    # This namespace is server-owned. Removing it first prevents callers from
+    # spoofing callback headers through the request body.
+    extra_params.pop(CALLBACK_CONTEXT_EXTRA_PARAM, None)
+    if user_code:
+        extra_params[CALLBACK_CONTEXT_EXTRA_PARAM] = {
+            "userCode": user_code,
+            "chatSessionId": chat_session_id,
+            "resourceId": resource_id,
+        }
+    payload["extraParams"] = extra_params
+    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+
 @app.middleware("http")
 async def byclaw_storage_header_context_middleware(request, call_next):
+    if request.url.path in _KNOWLEDGE_ENTITY_CALLBACK_PATHS:
+        callback_body = _inject_knowledge_entity_callback_context(
+            await request.body(),
+            user_code=request.headers.get("x-user-code", "").strip(),
+            chat_session_id=request.headers.get("x-chat-session-id", "").strip(),
+            resource_id=request.headers.get(RESOURCE_ID_HEADER, "").strip(),
+        )
+
+        async def receive():
+            return {
+                "type": "http.request",
+                "body": callback_body,
+                "more_body": False,
+            }
+
+        request._body = callback_body
+        request._receive = receive
+
     token = set_byclaw_userfs_headers(
         {
             "beyond-token": request.headers.get("beyond-token", ""),
             RESOURCE_ID_HEADER: request.headers.get(RESOURCE_ID_HEADER, ""),
+            USER_CODE_HEADER: request.headers.get(USER_CODE_HEADER, ""),
         }
     )
     try:
         return await call_next(request)
     finally:
         reset_byclaw_userfs_headers(token)
+
+
 _redis = init_shared_redis_from_env()
 
 
@@ -285,7 +351,7 @@ async def file_to_markdown_index_by_resource_id(
         with bind_byclaw_resource_id(resource_id):
             service = await resolve_knowledge_item_ingestion_service()
             build_task_id = await service.create_file_to_markdown_index_task(request)
-            background_headers = build_byclaw_userfs_headers()
+            background_headers = await build_byclaw_userfs_headers_async()
 
         async def _run_task():
             context_token = set_byclaw_userfs_headers(background_headers)

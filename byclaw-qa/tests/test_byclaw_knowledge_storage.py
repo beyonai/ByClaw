@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from by_qa.knowledge_base.infrastructure.storage import (
@@ -151,4 +153,36 @@ async def test_missing_resource_id_temporarily_falls_back_to_user_space(monkeypa
     assert transport.calls[0]["params"] == {
         "spaceType": "USER",
         "path": "/.bykc/KB001/raw/origin/a.txt",
+    }
+
+
+@pytest.mark.asyncio
+async def test_user_space_read_resolves_beyond_token_from_user_code(monkeypatch):
+    monkeypatch.setenv("BE_DOMAINNAME", "ByaiService")
+    redis_client = MagicMock()
+    redis_client.get = AsyncMock(return_value=b"real-user-1")
+    redis_client.hget = AsyncMock(return_value=b"token-from-redis")
+    monkeypatch.setattr(
+        "redis_runtime.init_shared_redis_from_env",
+        lambda: redis_client,
+    )
+    transport = FakeTransport([{"status_code": 200, "content": b"legacy"}])
+    provider = ByClawKnowledgeStorageProvider(transport=transport)
+    token = set_byclaw_userfs_headers({"x-user-code": "operator-1"})
+    try:
+        content = await provider.read(
+            StorageLocation("BYCLAW-USER", "/.bykc/KB001/raw/origin/a.txt")
+        )
+    finally:
+        reset_byclaw_userfs_headers(token)
+
+    assert content == b"legacy"
+    redis_client.get.assert_awaited_once_with("SHARE_BFM_USER_CODE_operator-1")
+    redis_client.hget.assert_awaited_once_with(
+        "user:real-user-1:login:auth",
+        "Beyond-Token",
+    )
+    assert transport.calls[0]["headers"] == {
+        "system-code": "BYCLAW-QA",
+        "beyond-token": "token-from-redis",
     }
