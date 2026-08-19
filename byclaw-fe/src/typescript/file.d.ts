@@ -171,6 +171,8 @@ export type IFile = {
   file?: File | RcFile | UploadRequestFile;
   uid: string;
   downloadUrl?: string;
+  /** 需要携带当前登录鉴权头的受保护文件下载方法。 */
+  downloadRequest?: () => Promise<{ fileName: string; file: Blob }>;
   imgUrl?: string;
   status: string; // 'uploading' | 'done';
   fileType: 'image' | 'file';

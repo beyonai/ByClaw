@@ -23,9 +23,34 @@ const usePreview = () => {
   });
 
   const onPreview = async (fileItem: IFile) => {
-    const { queryFile, downloadUrl } = fileItem;
+    const { queryFile, downloadUrl, downloadRequest } = fileItem;
 
-    if (queryFile?.fileUrl || downloadUrl || queryFile?.fileId) {
+    if (downloadRequest) {
+      setPreviewing(true);
+      setPreviewInfo({
+        open: true,
+        blob: null,
+        loading: true,
+      });
+      try {
+        const res = await downloadRequest();
+        setPreviewInfo({
+          open: true,
+          blob: res.file,
+          loading: false,
+        });
+      } catch (error) {
+        console.error(error);
+        setPreviewInfo({
+          open: false,
+          blob: null,
+          loading: false,
+        });
+        AntdMessage.warning(intl.formatMessage({ id: 'fileRender.previewUnavailable' }));
+      } finally {
+        setPreviewing(false);
+      }
+    } else if (queryFile?.fileUrl || downloadUrl || queryFile?.fileId) {
       let url = getFileUrl(downloadUrl || queryFile?.fileUrl || '');
 
       if (!url && queryFile?.fileId) {

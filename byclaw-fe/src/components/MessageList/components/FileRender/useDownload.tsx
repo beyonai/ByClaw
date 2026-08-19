@@ -25,9 +25,26 @@ const useDownload = () => {
     [intl]
   );
 
+  const handleDownloadRequest = useCallback(
+    async (request: () => Promise<{ fileName: string; file: Blob }>) => {
+      setDownloading(true);
+      try {
+        const res = await request();
+        downloadFile(res);
+      } catch (error) {
+        console.error(error);
+        AntdMessage.error(intl.formatMessage({ id: 'common.downloadFailed' }));
+      } finally {
+        setDownloading(false);
+      }
+    },
+    [intl]
+  );
+
   return {
     downloading,
     handleDownload,
+    handleDownloadRequest,
     downloadFile,
   };
 };

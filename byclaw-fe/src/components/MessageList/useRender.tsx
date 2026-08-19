@@ -13,6 +13,7 @@ import DualBallLoading from '@/components/Loading/DualBallLoading';
 import WaveBallLoading from '@/components/Loading/WaveBallLoading';
 import CiteRender from '@/components/MessageList/components/CiteRender';
 import FileRender from '@/components/MessageList/components/FileRender';
+import ReplyFileArtifacts from '@/components/MessageList/components/ReplyFileArtifacts';
 import NotSupport from '@/components/NotSupport';
 
 import ThumbUpContent from './components/AnswerActions/ThumbUp/content';
@@ -510,6 +511,7 @@ export default function useRender({
               <WaveBallLoading style={{ width: 20, height: 20, opacity: 0.6 }} />
             </div>
           )}
+          <ReplyFileArtifacts message={msg} sessionId={sessionId} />
           {attachmentListRender(msg)}
           {!hideAction && [IMessageState.Done, IMessageState.Cancel, IMessageState.Error].includes(messageState) && (
             <div className={styles.actionsBar}>
