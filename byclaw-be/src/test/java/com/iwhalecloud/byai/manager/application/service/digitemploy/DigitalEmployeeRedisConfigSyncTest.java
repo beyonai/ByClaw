@@ -50,6 +50,8 @@ class DigitalEmployeeRedisConfigSyncTest {
 
         ssResExtDigEmployeeService = mock(SsResExtDigEmployeeService.class);
         ReflectionTestUtils.setField(service, "ssResExtDigEmployeeService", ssResExtDigEmployeeService);
+        ReflectionTestUtils.setField(service, "digitalEmployeeGroupApplicationService",
+            mock(DigitalEmployeeGroupApplicationService.class));
 
         stringRedisTemplate = mock(StringRedisTemplate.class);
         @SuppressWarnings("unchecked")
