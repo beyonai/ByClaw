@@ -609,6 +609,8 @@ async function bindCommand(args, { unbind = false } = {}) {
 
   return {
     ...base,
+    // 写入未生效同样是失败：ok 必须把校验结果算进去，否则退出码 0 会掩盖问题。
+    ok: base.ok && verifyFailed.length === 0,
     changed: verified.map((item) => item.skillCode),
     verifyFailed: verifyFailed.length ? verifyFailed.map((item) => ({ skillCode: item.skillCode, skillId: item.skillId })) : undefined,
   };
@@ -619,12 +621,25 @@ async function listCommand(args) {
   const timeoutMs = timeoutMsFromArgs(args);
   const bound = await fetchBoundResources({ digitalEmployeeId, timeoutMs });
 
-  // Build a skillId → skillType map from the permission list for enrichment
-  const innerSkills = await fetchInnerSkills({ timeoutMs, keyword: "", ownerType: null });
-  const skillTypeMap = new Map(
-    innerSkills.map((entry) => [toNumber(entry?.resourceId), firstNonEmpty(entry?.skillType)])
-      .filter(([id, type]) => id !== undefined && type)
-  );
+  // 绑定关系接口不回 skillType，用权限列表补一层 skillId -> skillType。
+  // 这只是增强：查不到就退回接口原值，不让 list 因为补全失败而整体报错。
+  const ownerType = firstNonEmpty(args["owner-type"]);
+  let skillTypeMap = new Map();
+  let enrichment = "auth-list";
+  try {
+    const innerSkills = await fetchInnerSkills({ timeoutMs, keyword: "", ownerType });
+    skillTypeMap = new Map(
+      innerSkills
+        .map((entry) => [toNumber(entry?.resourceId), firstNonEmpty(entry?.skillType)])
+        .filter(([id, type]) => id !== undefined && type),
+    );
+    // 权限列表按 AUTH_PAGE_SIZE 分页，命中上限说明可能还有未覆盖的条目。
+    if (innerSkills.length >= AUTH_PAGE_SIZE) {
+      enrichment = "auth-list-truncated";
+    }
+  } catch (error) {
+    enrichment = `unavailable: ${error instanceof Error ? error.message : String(error)}`;
+  }
 
   const skills = bound
     .filter((item) => String(item?.resourceBizType || "").toUpperCase() === "SKILL"
@@ -637,7 +652,8 @@ async function listCommand(args) {
         skillId,
         skillName: firstNonEmpty(item?.resourceName),
         skillType,
-        inner: String(skillType).trim().toLowerCase() === INNER_SKILL_TYPE,
+        // skillType 补不到时用 null 表示未知，避免和"确认不是内置技能"混淆。
+        inner: skillType ? String(skillType).trim().toLowerCase() === INNER_SKILL_TYPE : null,
       };
     })
     .sort((left, right) => left.skillCode.localeCompare(right.skillCode));
@@ -645,6 +661,8 @@ async function listCommand(args) {
     ok: true,
     action: "list",
     digitalEmployee: { id: digitalEmployeeId, source },
+    // 告知 skillType 的来源与可信度：inner: null 的条目源于这里补全失败或分页截断。
+    skillTypeEnrichment: enrichment,
     boundSkillCount: skills.length,
     skills,
   };

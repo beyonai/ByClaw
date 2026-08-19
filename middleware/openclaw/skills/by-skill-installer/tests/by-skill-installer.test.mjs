@@ -40,6 +40,10 @@ const state = {
     { resourceId: 105, resourceCode: "dup-code", resourceBizType: "SKILL", skillType: "inner" },
   ],
   bound: new Map([[7, [102]]]),
+  // Fault injection: make the backend accept a write but not persist it,
+  // and make the permission list unavailable.
+  swallowWrites: false,
+  failAuthList: false,
 };
 const calls = [];
 
@@ -67,6 +71,11 @@ before(async () => {
     calls.push({ path: url.pathname, body });
 
     if (url.pathname.endsWith("/auth/privilegeGrant/listResourceUseAuth")) {
+      if (state.failAuthList) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ code: 500, msg: "auth list unavailable" }));
+        return;
+      }
       const keyword = String(body.keyword || "");
       const list = state.skills.filter((s) => !keyword || s.resourceCode.includes(keyword));
       ok(res, { list, total: list.length });
@@ -78,6 +87,10 @@ before(async () => {
       return;
     }
     if (url.pathname.endsWith("/digitalEmployeeController/installRelResources")) {
+      if (state.swallowWrites) {
+        ok(res, true);
+        return;
+      }
       const existing = state.bound.get(body.digitalEmployeeId) ?? [];
       state.bound.set(body.digitalEmployeeId, [...new Set([...existing, ...body.relIds])]);
       ok(res, true);
@@ -305,5 +318,51 @@ describe("bind / unbind / list / status", () => {
     const result = await bindCommand({ "skill-id": "103", "digital-employee-id": "9" });
     assert.equal(result.ok, true);
     assert.deepEqual(state.bound.get(9), [103]);
+  });
+
+  it("fails when the backend accepts the write but does not persist it", async () => {
+    state.swallowWrites = true;
+    try {
+      const result = await bindCommand({ "skill-code": "fol-auto-biztravel", "digital-employee-id": "11" });
+      assert.equal(result.ok, false, "写入未生效时 ok 必须为 false");
+      assert.deepEqual(result.changed, []);
+      assert.deepEqual(result.verifyFailed, [{ skillCode: "fol-auto-biztravel", skillId: 101 }]);
+    } finally {
+      state.swallowWrites = false;
+    }
+  });
+
+  it("keeps list usable when skillType enrichment is unavailable", async () => {
+    state.failAuthList = true;
+    try {
+      const result = await listCommand({ "digital-employee-id": "7" });
+      assert.equal(result.ok, true, "补全失败不应让 list 整体失败");
+      assert.match(result.skillTypeEnrichment, /^unavailable: /);
+      // queryRelResourceInfo 自身带 skillType 的条目仍应判定为 inner。
+      assert.equal(result.skills.every((s) => s.inner === true), true);
+    } finally {
+      state.failAuthList = false;
+    }
+  });
+
+  it("marks inner as null when skillType cannot be determined", async () => {
+    state.skills.push({ resourceId: 106, resourceCode: "typeless", resourceBizType: "SKILL" });
+    state.bound.set(12, [106]);
+    state.failAuthList = true;
+    try {
+      const result = await listCommand({ "digital-employee-id": "12" });
+      const entry = result.skills.find((s) => s.skillCode === "typeless");
+      assert.equal(entry.skillType, "");
+      assert.equal(entry.inner, null, "未知 skillType 应为 null 而非 false");
+    } finally {
+      state.failAuthList = false;
+      state.skills = state.skills.filter((s) => s.resourceId !== 106);
+      state.bound.delete(12);
+    }
+  });
+
+  it("reports skillType enrichment as the auth-list source on the happy path", async () => {
+    const result = await listCommand({ "digital-employee-id": "7" });
+    assert.equal(result.skillTypeEnrichment, "auth-list");
   });
 });

@@ -61,6 +61,8 @@ node scripts/by-skill-installer.mjs bind --skill-code demo --digital-employee-id
 
 一个 skillCode 命中多个内置技能条目时会报错并列出候选ID，此时用 `--skill-id` 指定。
 
+写入后会重新查询绑定关系做校验。接口返回成功但关系没落库的技能进入 `verifyFailed`，同时整体 `ok: false`、退出码 1，不会算进 `changed`。
+
 ### unbind
 
 解除关联，选项同 `bind`。未绑定的跳过。
@@ -71,12 +73,15 @@ node scripts/by-skill-installer.mjs unbind --skill-code demo
 
 ### list
 
-列出数字员工当前已绑定的技能，`inner: true` 表示内置技能。
+列出数字员工当前已绑定的技能。`inner: true` 是内置技能，`false` 不是，`null` 表示 skillType 没拿到、无法判断。
 
 ```bash
 node scripts/by-skill-installer.mjs list
 node scripts/by-skill-installer.mjs list --digital-employee-id 123
+node scripts/by-skill-installer.mjs list --owner-type enterprise
 ```
+
+绑定关系接口不返回 skillType，缺失时用权限列表补一层，`skillTypeEnrichment` 说明这层的结果：`auth-list` 正常，`auth-list-truncated` 命中分页上限可能没覆盖全，`unavailable: <原因>` 补全失败。补全失败只会让部分条目的 `inner` 变成 `null`，`list` 本身照常返回。
 
 ### status
 
