@@ -15,6 +15,7 @@ import AntdIcon from '@/components/AntdIcon';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import useGlobal from '@/hooks/useGlobal';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
+import useAppStore from '@/models/common/useAppStore';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
@@ -161,6 +162,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   const { EventEmitter, sessionId, setAgentId, setSessionId } = useGlobal();
   const { clearDetailPanel } = useContext(SiderContentContext);
   const { projects, loading, fetchProjects } = useProjectList();
+  const { setSiderCollapsed } = useAppStore();
   const [projectScopeId, updateProjectScopeId] = useProjectScopeId();
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(readExpandedProjectIds);
   const [sessionStateMap, setSessionStateMap] = useState<Record<string, ProjectSessionState>>({});
@@ -666,7 +668,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
 
   return (
     <aside className={classNames(styles.workspaceSider, className)} style={style} aria-label="workspace navigation">
-      <WorkspaceSiderHeader />
+      <WorkspaceSiderHeader onCollapse={() => setSiderCollapsed(true)} />
       <nav
         className={styles.primaryNavigation}
         aria-label={intl.formatMessage({ id: 'workspaceSider.primaryNavigation' })}

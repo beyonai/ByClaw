@@ -182,7 +182,10 @@ export const buildAutomationCron = (schedule: AutomationScheduleConfig) => {
     if (intervalUnit === 'minute' && intervalValue <= 59) {
       return `*/${intervalValue} * * * ${weekdays}`;
     }
-    // 小时数或超过 59 分钟的间隔使用每小时候选点，由结构化配置和 lastScanTime 控制实际间隔。
+    if (intervalUnit === 'hour' && intervalValue <= 23) {
+      return `0 */${intervalValue} * * ${weekdays}`;
+    }
+    // 超过 23 小时无法由标准 Cron 精确表达，使用每小时候选点，由结构化配置和 lastScanTime 控制实际间隔。
     return `0 * * * ${weekdays}`;
   }
   const value = parseTime(schedule.time);

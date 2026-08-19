@@ -1042,6 +1042,8 @@ export default {
   'workspaceSider.fileCenter': '文件中心',
   'workspaceSider.projectSection': '项目列表',
   'workspaceSider.projectCount': '项目 ({count})',
+  'workspaceSider.collapseSidebar': '收起侧边栏',
+  'workspaceSider.expandSidebar': '展开侧边栏',
   'workspaceSider.expandProject': '展开项目',
   'workspaceSider.collapseProject': '收起项目',
   'workspaceSider.loading': '加载中...',

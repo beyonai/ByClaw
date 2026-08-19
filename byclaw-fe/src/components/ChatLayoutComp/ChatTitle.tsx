@@ -18,6 +18,7 @@ import ResourcePanelToggleIcon from './ChatResourceWorkspace/ResourcePanelToggle
 import { sessionHandler } from '@/utils/session';
 import { Button } from 'antd';
 import { saveProjectScopeIdToStorage } from '@/pages/projectSpace/constants';
+import useAppStore from '@/models/common/useAppStore';
 
 interface ChatTitleProps {
   sessionId?: string;
@@ -36,6 +37,7 @@ export default function ChatTitle(props: ChatTitleProps) {
   const intl = useIntl();
   const achievementRef = useRef<TriggerRef>(null);
   const { EventEmitter } = useGlobal();
+  const { isSiderCollapsed } = useAppStore();
   const userInfo = useSelector((state: any) => state.user.userInfo);
 
   const [openTemplate, setOpenTemplate] = React.useState<boolean>(false);
@@ -71,7 +73,10 @@ export default function ChatTitle(props: ChatTitleProps) {
         {titleSession && (
           <div className={classnames(styles.chatTitleWrap, 'ub ub-ac gap8')}>
             {props.projectName ? (
-              <div className={styles.chatBreadcrumb} title={`${props.projectName} / ${titleSession.sessionName}`}>
+              <div
+                className={classnames(styles.chatBreadcrumb, isSiderCollapsed && styles.chatBreadcrumbCollapsed)}
+                title={`${props.projectName} / ${titleSession.sessionName}`}
+              >
                 <Link
                   to="/projectSpace"
                   state={{ openProjectList: true }}
