@@ -1,12 +1,19 @@
 import {
   buildAutoDebugRequestText,
+  buildDebugPayload,
+  dispatchModelActionWithResult,
   buildLlmHeaders,
+  buildModelUpsertPayload,
   buildReasoningConfigPayload,
   buildRerankHeaders,
   extractModelId,
   getDefaultFormValues,
   getDefaultLlmDebugSuffix,
+  getModelDebugDispatchTimeoutMs,
   getApiEndpointPlaceholder,
+  getModelTypeSwitchFormValues,
+  getModelTypeTransitionFormValues,
+  hasImageGenerationPrompt,
   headersListToObject,
   joinUrl,
   normalizeModelType,
@@ -21,8 +28,165 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
 
     it('trims custom string values and falls back to LLM', () => {
       expect(normalizeModelType(' EMBEDDING ')).toBe('EMBEDDING');
+      expect(normalizeModelType(' IMAGE_GENERATION ')).toBe('IMAGE_GENERATION');
       expect(normalizeModelType('')).toBe('LLM');
       expect(normalizeModelType(null)).toBe('LLM');
+    });
+  });
+
+  describe('buildDebugPayload', () => {
+    it('builds the MiniMax image generation debug contract with safe defaults', () => {
+      expect(
+        buildDebugPayload({
+          modelType: 'IMAGE_GENERATION',
+          modelCode: 'image-01',
+          prompt: 'whale',
+          apiToken: 'test-api-token',
+        })
+      ).toEqual({
+        input: {
+          providerName: 'MINIMAX',
+          modelProtocol: 'MINIMAX_IMAGE',
+          url: 'https://api.minimaxi.com/v1/image_generation',
+          headers: { Authorization: 'Bearer test-api-token' },
+          param: {
+            model: 'image-01',
+            prompt: 'whale',
+            aspect_ratio: '1:1',
+            response_format: 'url',
+            n: 1,
+          },
+        },
+      });
+    });
+
+    it('keeps supported image options in the provider payload', () => {
+      expect(
+        buildDebugPayload({
+          modelType: 'IMAGE_GENERATION',
+          modelCode: 'image-01',
+          prompt: 'blue whale',
+          aspectRatio: '16:9',
+          imageCount: 2,
+          responseFormat: 'base64',
+          promptOptimizer: false,
+          seed: 42,
+        }).input.param
+      ).toEqual({
+        model: 'image-01',
+        prompt: 'blue whale',
+        aspect_ratio: '16:9',
+        response_format: 'base64',
+        n: 2,
+        prompt_optimizer: false,
+        seed: 42,
+      });
+    });
+  });
+
+  describe('buildModelUpsertPayload', () => {
+    it('removes transient image debug fields before saving model metadata', () => {
+      expect(
+        buildModelUpsertPayload({
+          values: {
+            displayName: 'MiniMax image',
+            modelType: 'IMAGE_GENERATION',
+            modelCode: 'image-01',
+            prompt: 'whale',
+            aspectRatio: '1:1',
+            imageCount: 1,
+            responseFormat: 'url',
+            promptOptimizer: true,
+            seed: 42,
+          },
+          type: 'edit',
+          dataId: 'image-model-1',
+        })
+      ).toEqual({
+        id: 'image-model-1',
+        displayName: 'MiniMax image',
+        modelType: 'IMAGE_GENERATION',
+        modelCode: 'image-01',
+        reasoningConfig: {
+          enabled: false,
+          defaultLevel: 'off',
+          capability: 'unsupported',
+          compatFormat: 'auto',
+        },
+      });
+    });
+  });
+
+  describe('getModelTypeSwitchFormValues', () => {
+    it.each(['LLM', 'RERANK', 'EMBEDDING'])('clears MiniMax-only values when switching to %s', (modelType) => {
+      const values = getModelTypeSwitchFormValues(modelType);
+
+      expect(values).toMatchObject({ modelType, modelCode: '' });
+      expect(values.providerName).not.toBe('MINIMAX');
+      expect(values.modelProtocol).not.toBe('MINIMAX_IMAGE');
+      expect(values.apiEndpoint).not.toBe('https://api.minimaxi.com/v1/image_generation');
+      expect(values.prompt).toBeUndefined();
+      expect(values.apiToken).toBe('');
+      expect(values.headers).toEqual([{ key: '', value: '' }]);
+    });
+
+    it('restores MiniMax defaults when switching back to image generation', () => {
+      expect(getModelTypeSwitchFormValues('IMAGE_GENERATION')).toMatchObject({
+        modelType: 'IMAGE_GENERATION',
+        providerName: 'MINIMAX',
+        modelProtocol: 'MINIMAX_IMAGE',
+        apiEndpoint: 'https://api.minimaxi.com/v1/image_generation',
+        modelCode: 'image-01',
+        apiToken: '',
+        headers: [{ key: '', value: '' }],
+      });
+    });
+  });
+
+  describe('getModelTypeTransitionFormValues', () => {
+    it('preserves existing configuration between non-image model types', () => {
+      expect(getModelTypeTransitionFormValues('LLM', 'RERANK')).toEqual({ modelType: 'RERANK' });
+    });
+
+    it('clears image-only configuration when leaving image generation', () => {
+      expect(getModelTypeTransitionFormValues('IMAGE_GENERATION', 'LLM')).toEqual(getModelTypeSwitchFormValues('LLM'));
+    });
+
+    it('applies MiniMax defaults when entering image generation', () => {
+      expect(getModelTypeTransitionFormValues('EMBEDDING', 'IMAGE_GENERATION')).toEqual(
+        getModelTypeSwitchFormValues('IMAGE_GENERATION')
+      );
+    });
+  });
+
+  describe('hasImageGenerationPrompt', () => {
+    it('accepts only a non-blank prompt in the image debug JSON contract', () => {
+      expect(hasImageGenerationPrompt('{"param":{"prompt":" whale "}}')).toBe(true);
+      expect(hasImageGenerationPrompt('{"param":{"prompt":"   "}}')).toBe(false);
+      expect(hasImageGenerationPrompt('{"param":{}}')).toBe(false);
+      expect(hasImageGenerationPrompt('not-json')).toBe(false);
+    });
+  });
+
+  describe('image debug dispatch timeout', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('waits longer than the backend 120 second timeout before rejecting', async () => {
+      const dispatch = jest.fn();
+      const timeoutMs = getModelDebugDispatchTimeoutMs('IMAGE_GENERATION');
+      const result = dispatchModelActionWithResult(dispatch, 'modelMgr/debugModelImageGeneration', {}, timeoutMs);
+      const rejection = expect(result).rejects.toThrow('dispatch timeout');
+
+      expect(timeoutMs).toBe(130000);
+      jest.advanceTimersByTime(130000);
+
+      await rejection;
     });
   });
 
@@ -143,9 +307,46 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
       expect(getApiEndpointPlaceholder('OpenAI')).toBe('https://api.example.com/v1');
       expect(getApiEndpointPlaceholder(undefined)).toBe('https://api.example.com/v1');
     });
+
+    it('returns the MiniMax image generation endpoint for the image protocol', () => {
+      expect(getApiEndpointPlaceholder('MINIMAX_IMAGE')).toBe('https://api.minimaxi.com/v1/image_generation');
+    });
   });
 
   describe('buildAutoDebugRequestText', () => {
+    it('serializes the MiniMax image generation input consumed by the backend debug route', () => {
+      expect(
+        JSON.parse(
+          buildAutoDebugRequestText({
+            formValues: {
+              modelType: 'IMAGE_GENERATION',
+              providerName: 'MINIMAX',
+              modelProtocol: 'MINIMAX_IMAGE',
+              apiEndpoint: 'https://api.minimaxi.com/v1/image_generation',
+              apiToken: 'test-api-token',
+              modelCode: 'image-01',
+              prompt: 'whale',
+              aspectRatio: '1:1',
+              imageCount: 1,
+              responseFormat: 'url',
+            },
+          })
+        )
+      ).toEqual({
+        providerName: 'MINIMAX',
+        modelProtocol: 'MINIMAX_IMAGE',
+        url: 'https://api.minimaxi.com/v1/image_generation',
+        headers: { Authorization: 'Bearer test-api-token' },
+        param: {
+          model: 'image-01',
+          prompt: 'whale',
+          aspect_ratio: '1:1',
+          response_format: 'url',
+          n: 1,
+        },
+      });
+    });
+
     it('builds default LLM debug payload', () => {
       const result = JSON.parse(
         buildAutoDebugRequestText({

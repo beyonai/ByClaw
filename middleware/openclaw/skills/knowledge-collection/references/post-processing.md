@@ -67,6 +67,8 @@ canonical view 不携带 `sourceSkill` 或 `itemId`；这些字段以及物化�
 外部任务全部成功后视为本次运行成功；失败或结果不明确时保留对应工作副本。部分成功时只删除成功文章的工作副本。
 进入外部消费后，不再询问 `入库 / 知识整理 / 跳过`。部分成功会保留会话以便续跑；完整成功清理会话后，该批次终止，后续操作必须重新采集。
 
+**技术文章生成**（tech-article）：当用户提到"写文章"、"生成推文"、"做项目解读"或明确要求把采集产物用作素材时，`sanitized/items/*.md` 交给 tech-article 技能作为外围素材补充——tech-article 负责 GitHub 项目的本地克隆、实测和正文撰写，knowledge-collection 只负责补充作者博客、HN/Reddit 讨论、竞品文档等外围材料。交付方式：告知用户会话目录路径，由 tech-article 从 `<session-dir>/sanitized/items/*.md` 读取清单。正文抓在会话外时，按 [collection-contract.md](collection-contract.md) 的「已抓好一批正文后登记会话」用 `init` + `collect` 登记，再按「后处理 run payload」记一次 `external` run。
+
 ## knowledge-organizer → run 映射（临时适配）
 
 `knowledge-organizer` 当前不返回 `itemId` / `runId` / `globalStage`，因此知识整理完成后必须由采集编排器按以下规则

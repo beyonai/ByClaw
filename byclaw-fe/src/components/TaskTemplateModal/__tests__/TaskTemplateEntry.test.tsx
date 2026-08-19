@@ -84,6 +84,22 @@ describe('TaskTemplateEntry project selector', () => {
     });
   });
 
+  it('hides the project selector until the initial project request returns', () => {
+    mockUseProjectList.mockReturnValue({
+      projects: [],
+      loading: true,
+      keyword: '',
+      setKeyword: jest.fn(),
+      fetchProjects: jest.fn(),
+      hasMore: false,
+      loadMoreProjects: jest.fn(),
+    });
+
+    render(<TaskTemplateEntry onApply={jest.fn()} />);
+
+    expect(screen.queryByRole('combobox', { name: '选择项目' })).not.toBeInTheDocument();
+  });
+
   it('allows switching the project from the chat input', async () => {
     mockUseProjectScopeId.mockReturnValue(['1', mockUpdateProjectScopeId]);
     render(<TaskTemplateEntry onApply={jest.fn()} />);

@@ -8,7 +8,7 @@ import {
   SearchOutlined,
 } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
 import { deleteScanSource, listScanSources, toggleScanSource, triggerScan } from '@/service/devloop';
@@ -19,6 +19,7 @@ import styles from '../index.module.less';
 
 interface PanelProps {
   active?: boolean;
+  headerLeading?: ReactNode;
 }
 
 const normalizeRows = (response: any): AutomationSource[] => {
@@ -42,7 +43,7 @@ const getRelativeTime = (target: Dayjs, now: Dayjs) => {
   return { count: Math.max(1, totalMinutes), unit: 'minutes' as const };
 };
 
-const AutomationListPanel: React.FC<PanelProps> = ({ active = true }) => {
+const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeading }) => {
   const intl = useIntl();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
   const currentUserId = userInfo?.userId ?? userInfo?.id;
@@ -298,7 +299,9 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true }) => {
   return (
     <div className={styles.automationPanel}>
       <div className={styles.toolbar}>
-        <div className={styles.automationTitle}>{intl.formatMessage({ id: 'automation.scheduledTasks' })}</div>
+        {headerLeading || (
+          <div className={styles.automationTitle}>{intl.formatMessage({ id: 'automation.scheduledTasks' })}</div>
+        )}
         <div className={styles.toolbarActions}>
           <Input
             allowClear
@@ -308,10 +311,20 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true }) => {
             placeholder={intl.formatMessage({ id: 'automation.searchPlaceholder' })}
             onChange={(event) => setKeyword(event.target.value)}
           />
-          <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void reload()}>
-            {intl.formatMessage({ id: 'common.refresh' })}
-          </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>
+          <Button
+            className={styles.toolbarIconButton}
+            icon={<ReloadOutlined />}
+            loading={loading}
+            aria-label={intl.formatMessage({ id: 'common.refresh' })}
+            title={intl.formatMessage({ id: 'common.refresh' })}
+            onClick={() => void reload()}
+          />
+          <Button
+            className={styles.primaryActionButton}
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => openEditor()}
+          >
             {intl.formatMessage({ id: 'automation.add' })}
           </Button>
         </div>

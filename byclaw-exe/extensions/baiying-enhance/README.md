@@ -177,6 +177,14 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 - 在提示词中展开知识库、toolkit、MCP、AGENT 等能力
 - 由插件内置的 **TypeScript 执行器**（`src/executor/`，按资源类型拆分为 `toolkit.ts` / `tool.ts` / `agent.ts` / `mcp.ts` / `doc.ts` 等）在进程内统一执行并做参数校验/回填；历史上的 `~/.openclaw/skills/baiying/executor.py` 已废弃不再调用
 
+托管数字员工会启用 OpenClaw 原生 `image_generate`，插件不再实现自己的文生图工具或
+MiniMax HTTP 客户端。`baiying-redis-image` provider 在每次原生工具调用时重新读取 Redis 中的
+`DIG_EMPLOYEE_{resourceId}`：员工存在非空 `imageModelId` 时只使用
+`byai:aimodel:config` 中对应模型；未配置 `imageModelId` 时才读取
+`byai:aimodel:typelist` 的 `IMAGE_GENERATION` 全局默认。显式选择缺失、停用或类型错误时会直接报错，不会静默回退全局默认，因此管理端改动可在下一次调用热生效且不会掩盖错误配置。
+
+动态层把 `providerName` / `modelProtocol` / `modelCode` 映射到 OpenClaw 已注册的原生 image-generation provider，当前覆盖 MiniMax、OpenAI/ChatGPT、Google/Gemini、OpenRouter、LiteLLM、FAL、DeepInfra、xAI、Microsoft Foundry、Comfy 和 Vydra。Qwen 若暴露 OpenAI-compatible image API 可用 `QWEN + OPENAI_IMAGE`；其他 DashScope 专用协议应通过 OpenRouter/LiteLLM，或先为 OpenClaw 安装对应 provider，不能回退到自定义工具。`authToken` 复用现有 AI 模型 SM4 解密逻辑，只注入单次调用的内存配置，不持久化到 `openclaw.json`，也不会进入工具结果或错误消息。图片保存、后台任务、编辑、格式和 provider 能力归一化均由 OpenClaw 原生 `image_generate` 处理。
+
 如需完整运行态说明、架构与流程图，请优先阅读：
 
 - [docs/PLUGIN_OVERVIEW.zh-CN.md](docs/PLUGIN_OVERVIEW.zh-CN.md)

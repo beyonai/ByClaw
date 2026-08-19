@@ -1,7 +1,7 @@
 import { PlusOutlined, RightOutlined } from '@ant-design/icons';
 import { Button, Divider, Empty, Modal, Select, Spin, message } from 'antd';
 import { getLocale } from '@umijs/max';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getDcSystemConfigListByStandType } from '@/service/auth';
 import { createProject, saveDefaultAgent, saveProjectMembers } from '@/service/devloop';
 import { useChatResourceProject } from '@/components/ChatLayoutComp/ChatResourceWorkspace/useChatResourceProject';
@@ -59,6 +59,8 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
   const [selectedProjectId, updateProjectScopeId] = useProjectScopeId();
   const { projects, loading: projectsLoading, fetchProjects } = useProjectList();
   const { projectTypeOptions, projectTypeLoading } = useProjectTypeConfig();
+  const projectRequestStartedRef = useRef(projectsLoading);
+  const [projectListReady, setProjectListReady] = useState(() => projects.length > 0);
 
   const projectOptions = useMemo(() => {
     const projectMap = new Map<string, ProjectOption>(projects.map((project) => [project.projectId, project]));
@@ -68,6 +70,21 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
     return Array.from(projectMap.values());
   }, [createdProjectOption, projects]);
   const selectedProjectValue = selectedProjectOverride || selectedProjectId;
+  const selectedProjectExists = projectOptions.some(
+    (project) => `${project.projectId}` === `${selectedProjectValue || ''}`
+  );
+  const showProjectSelector =
+    projectListReady && (!projectOptions.length || !selectedProjectValue || selectedProjectExists);
+
+  useEffect(() => {
+    if (projectsLoading) {
+      projectRequestStartedRef.current = true;
+      return;
+    }
+    if (projectRequestStartedRef.current || projects.length > 0) {
+      setProjectListReady(true);
+    }
+  }, [projects.length, projectsLoading]);
 
   useEffect(() => {
     if (sessionId || !selectedProjectValue) return;
@@ -258,7 +275,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
   return (
     <>
       <div className={styles.taskTemplateTools}>
-        {!sessionId && (
+        {!sessionId && showProjectSelector && (
           <Select
             className={styles.projectSelect}
             showSearch
@@ -266,6 +283,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
             value={selectedProjectValue || undefined}
             placeholder="选择项目"
             showArrow
+            popupMatchSelectWidth={260}
             optionFilterProp="label"
             options={projectOptions.map((item) => ({
               value: `${item.projectId}`,

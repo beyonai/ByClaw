@@ -824,7 +824,16 @@ describe("createAgentWatchdog", () => {
                 name: "Demo",
                 identity: { name: "Demo" },
                 skills: [],
-                tools: { allow: ["*", "read", "write", "baiying_call", "byclaw_chat_context"] },
+                tools: {
+                    allow: [
+                        "*",
+                        "read",
+                        "write",
+                        "baiying_call",
+                        "image_generate",
+                        "byclaw_chat_context",
+                    ],
+                },
             },
         ]) as any;
 
@@ -850,14 +859,18 @@ describe("createAgentWatchdog", () => {
         expect(writeConfigFile).toHaveBeenCalledTimes(1);
         const next = writeConfigFile.mock.calls[0][0];
         const entry = next.agents.list.find((a: any) => a.id === agentId);
-        expect(entry.tools).toEqual({ allow: ["read", "baiying_call", "byclaw_chat_context"] });
+        expect(entry.tools).toEqual({
+            allow: ["read", "baiying_call", "image_generate", "byclaw_chat_context"],
+        });
         expect(next.skills.entries.__baiying_enhance_reload.enabled).toBe(false);
         expect(next.skills.entries.__baiying_enhance_reload.config.reason).toBe(
             "agent-tool-policy-sync",
         );
         expect(
             next.skills.entries.__baiying_enhance_reload.config.managedSnapshotSignature,
-        ).toContain('tools={"allow":["read","baiying_call","byclaw_chat_context"]}');
+        ).toContain(
+            'tools={"allow":["read","baiying_call","image_generate","byclaw_chat_context"]}',
+        );
     });
 
     it("calls writeConfigFile once when index is missing", async () => {
@@ -1753,7 +1766,9 @@ describe("createAgentWatchdog", () => {
                 workspace: agentWs,
                 identity: { name: "Hub Skill Agent" },
                 skills: ["hub-skill"],
-                tools: { alsoAllow: ["baiying_call", "byclaw_chat_context"] },
+                tools: {
+                    alsoAllow: ["baiying_call", "image_generate", "byclaw_chat_context"],
+                },
             },
         ]) as any;
 

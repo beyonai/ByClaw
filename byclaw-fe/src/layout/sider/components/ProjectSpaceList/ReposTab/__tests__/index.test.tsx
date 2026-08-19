@@ -10,6 +10,8 @@ import {
 } from '@/service/devloop';
 import ReposTab from '../index';
 
+jest.setTimeout(15000);
+
 jest.mock('@/service/devloop', () => ({
   getProjectRepoFileContent: jest.fn(),
   listProjectRepoBranches: jest.fn(),

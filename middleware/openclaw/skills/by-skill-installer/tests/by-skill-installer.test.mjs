@@ -1,0 +1,266 @@
+import assert from "node:assert/strict";
+import http from "node:http";
+import { after, before, describe, it } from "node:test";
+
+const PORT = 18099;
+const BASE_URL = `http://127.0.0.1:${PORT}/byaiService`;
+
+process.env.BYAI_SERVICE_BASE_URL = BASE_URL;
+process.env.BEYOND_TOKEN = "test-token";
+process.env.USER_CODE = "tester";
+delete process.env.BAIYING_DIGITAL_EMPLOYEE_ID;
+delete process.env.DIGITAL_EMPLOYEE_ID;
+delete process.env.RESOURCE_ID;
+
+const mod = await import("../scripts/by-skill-installer.mjs");
+const {
+  bindCommand,
+  isInnerSkill,
+  listCommand,
+  resolveDigitalEmployeeId,
+  resolveSkillIdByCode,
+  resolveTargets,
+  responseSucceeded,
+  statusCommand,
+  validateSkillCode,
+} = mod;
+
+// Backing store the fake backend serves and mutates.
+const state = {
+  skills: [
+    { resourceId: 101, resourceCode: "fol-auto-biztravel", resourceName: "差旅助手", resourceBizType: "SKILL", skillType: "inner" },
+    { resourceId: 102, resourceCode: "tech-article", resourceName: "技术文章", resourceBizType: "SKILL", skillType: "inner" },
+    { resourceId: 103, resourceCode: "custom-skill", resourceName: "自定义", resourceBizType: "SKILL", skillType: "custom" },
+    { resourceId: 104, resourceCode: "dup-code", resourceBizType: "SKILL", skillType: "inner" },
+    { resourceId: 105, resourceCode: "dup-code", resourceBizType: "SKILL", skillType: "inner" },
+  ],
+  bound: new Map([[7, [102]]]),
+};
+const calls = [];
+
+function readBody(req) {
+  return new Promise((resolve) => {
+    let raw = "";
+    req.on("data", (chunk) => { raw += chunk; });
+    req.on("end", () => {
+      try { resolve(JSON.parse(raw || "{}")); } catch { resolve({}); }
+    });
+  });
+}
+
+function ok(res, data) {
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ code: 0, msg: "success", data }));
+}
+
+let server;
+
+before(async () => {
+  server = http.createServer(async (req, res) => {
+    const body = await readBody(req);
+    const url = new URL(req.url, BASE_URL);
+    calls.push({ path: url.pathname, body });
+
+    if (url.pathname.endsWith("/auth/privilegeGrant/listResourceUseAuth")) {
+      const keyword = String(body.keyword || "");
+      const list = state.skills.filter((s) => !keyword || s.resourceCode.includes(keyword));
+      ok(res, { list, total: list.length });
+      return;
+    }
+    if (url.pathname.endsWith("/digitalEmployeeController/queryRelResourceInfo")) {
+      const relIds = state.bound.get(body.resourceId) ?? [];
+      ok(res, state.skills.filter((s) => relIds.includes(s.resourceId)));
+      return;
+    }
+    if (url.pathname.endsWith("/digitalEmployeeController/installRelResources")) {
+      const existing = state.bound.get(body.digitalEmployeeId) ?? [];
+      state.bound.set(body.digitalEmployeeId, [...new Set([...existing, ...body.relIds])]);
+      ok(res, true);
+      return;
+    }
+    if (url.pathname.endsWith("/digitalEmployeeController/uninstallRelResources")) {
+      const existing = state.bound.get(body.digitalEmployeeId) ?? [];
+      state.bound.set(body.digitalEmployeeId, existing.filter((id) => !body.relIds.includes(id)));
+      ok(res, true);
+      return;
+    }
+    res.writeHead(404).end("not found");
+  });
+  await new Promise((resolve) => server.listen(PORT, "127.0.0.1", resolve));
+});
+
+after(async () => {
+  await new Promise((resolve) => server.close(resolve));
+});
+
+describe("helpers", () => {
+  it("accepts the success envelope variants", () => {
+    assert.equal(responseSucceeded({ code: 0 }), true);
+    assert.equal(responseSucceeded({ success: true }), true);
+    assert.equal(responseSucceeded({ resultCode: 0 }), true);
+    assert.equal(responseSucceeded({ code: 500 }), false);
+    assert.equal(responseSucceeded(null), false);
+  });
+
+  it("rejects unsafe skill codes", () => {
+    for (const bad of ["", "..", ".", ".hidden", "a/b", "a b", "a;rm"]) {
+      assert.throws(() => validateSkillCode(bad), /skillCode/);
+    }
+    assert.equal(validateSkillCode(" tech-article "), "tech-article");
+  });
+
+  it("keeps only inner skills", () => {
+    assert.equal(isInnerSkill({ skillType: "INNER" }), true);
+    assert.equal(isInnerSkill({ skillType: "custom" }), false);
+    assert.equal(isInnerSkill({}), false);
+  });
+});
+
+describe("resolveTargets", () => {
+  it("requires at least one handle", () => {
+    assert.throws(() => resolveTargets({}), /--skill-code/);
+  });
+
+  it("pairs codes and ids positionally", () => {
+    const targets = resolveTargets({ "skill-code": ["a", "b"], "skill-id": ["1", "2"] });
+    assert.deepEqual(targets, [
+      { skillCode: "a", skillId: 1 },
+      { skillCode: "b", skillId: 2 },
+    ]);
+  });
+
+  it("rejects mismatched counts", () => {
+    assert.throws(() => resolveTargets({ "skill-code": ["a", "b"], "skill-id": ["1"] }), /数量必须一致/);
+  });
+
+  it("dedupes repeated handles", () => {
+    assert.deepEqual(resolveTargets({ "skill-code": ["a", "a"] }), [{ skillCode: "a", skillId: undefined }]);
+  });
+});
+
+describe("resolveDigitalEmployeeId", () => {
+  it("prefers the explicit flag", () => {
+    assert.deepEqual(resolveDigitalEmployeeId({ "digital-employee-id": "42" }), {
+      digitalEmployeeId: 42,
+      source: "flag",
+    });
+  });
+
+  it("falls back to the environment", () => {
+    process.env.BAIYING_DIGITAL_EMPLOYEE_ID = "77";
+    try {
+      assert.deepEqual(resolveDigitalEmployeeId({}), { digitalEmployeeId: 77, source: "env" });
+    } finally {
+      delete process.env.BAIYING_DIGITAL_EMPLOYEE_ID;
+    }
+  });
+
+  it("reads defaultDigitalEmployeeId out of the Beyond-Token", () => {
+    const payload = Buffer.from(JSON.stringify({ defaultDigitalEmployeeId: 88 })).toString("base64url");
+    process.env.BEYOND_TOKEN = `header.${payload}.sig`;
+    try {
+      assert.deepEqual(resolveDigitalEmployeeId({}), { digitalEmployeeId: 88, source: "beyond-token" });
+    } finally {
+      process.env.BEYOND_TOKEN = "test-token";
+    }
+  });
+
+  it("fails loudly when nothing identifies the agent", () => {
+    assert.throws(() => resolveDigitalEmployeeId({}), /--digital-employee-id/);
+  });
+});
+
+describe("resolveSkillIdByCode", () => {
+  it("maps resourceCode to resourceId", async () => {
+    const resolved = await resolveSkillIdByCode({ skillCode: "fol-auto-biztravel", timeoutMs: 5000 });
+    assert.equal(resolved.skillId, 101);
+    assert.equal(resolved.skillCode, "fol-auto-biztravel");
+    assert.equal(resolved.skillType, "inner");
+  });
+
+  it("hides non-inner skills", async () => {
+    await assert.rejects(
+      resolveSkillIdByCode({ skillCode: "custom-skill", timeoutMs: 5000 }),
+      /未找到/,
+    );
+  });
+
+  it("asks for --skill-id when a code is ambiguous", async () => {
+    await assert.rejects(
+      resolveSkillIdByCode({ skillCode: "dup-code", timeoutMs: 5000 }),
+      /--skill-id/,
+    );
+  });
+});
+
+describe("bind / unbind / list / status", () => {
+  it("dry-run reports the pending change without calling the mutation", async () => {
+    calls.length = 0;
+    const result = await bindCommand({
+      "skill-code": "fol-auto-biztravel",
+      "digital-employee-id": "7",
+      "dry-run": true,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.dryRun, true);
+    assert.deepEqual(result.wouldChange, ["fol-auto-biztravel"]);
+    assert.equal(calls.some((c) => c.path.endsWith("/installRelResources")), false);
+    assert.deepEqual(state.bound.get(7), [102]);
+  });
+
+  it("binds a resolved inner skill", async () => {
+    const result = await bindCommand({ "skill-code": "fol-auto-biztravel", "digital-employee-id": "7" });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.changed, ["fol-auto-biztravel"]);
+    assert.deepEqual(state.bound.get(7), [102, 101]);
+  });
+
+  it("skips a skill that is already bound", async () => {
+    calls.length = 0;
+    const result = await bindCommand({ "skill-code": "tech-article", "digital-employee-id": "7" });
+    assert.deepEqual(result.changed, []);
+    assert.deepEqual(result.alreadyInDesiredState, ["tech-article"]);
+    assert.equal(calls.some((c) => c.path.endsWith("/installRelResources")), false);
+  });
+
+  it("lists bound skills with their inner flag", async () => {
+    const result = await listCommand({ "digital-employee-id": "7" });
+    assert.equal(result.boundSkillCount, 2);
+    assert.deepEqual(result.skills.map((s) => s.skillCode), ["fol-auto-biztravel", "tech-article"]);
+    assert.equal(result.skills.every((s) => s.inner), true);
+  });
+
+  it("status reports resolution plus binding state", async () => {
+    const result = await statusCommand({
+      "skill-code": ["fol-auto-biztravel", "custom-skill"],
+      "digital-employee-id": "7",
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.digitalEmployee.id, 7);
+    const bound = result.items.find((i) => i.skillCode === "fol-auto-biztravel");
+    assert.equal(bound.bound, true);
+    assert.match(result.items.find((i) => i.skillCode === "custom-skill").error, /未找到/);
+  });
+
+  it("unbinds and then reports the no-op", async () => {
+    const first = await bindCommand(
+      { "skill-code": "fol-auto-biztravel", "digital-employee-id": "7" },
+      { unbind: true },
+    );
+    assert.deepEqual(first.changed, ["fol-auto-biztravel"]);
+    assert.deepEqual(state.bound.get(7), [102]);
+
+    const second = await bindCommand(
+      { "skill-code": "fol-auto-biztravel", "digital-employee-id": "7" },
+      { unbind: true },
+    );
+    assert.deepEqual(second.changed, []);
+    assert.deepEqual(second.alreadyInDesiredState, ["fol-auto-biztravel"]);
+  });
+
+  it("bypasses resolution when --skill-id is given", async () => {
+    const result = await bindCommand({ "skill-id": "103", "digital-employee-id": "9" });
+    assert.equal(result.ok, true);
+    assert.deepEqual(state.bound.get(9), [103]);
+  });
+});

@@ -509,3 +509,183 @@ Requirements:
 4. Prefer noun + verb structure, suitable for chat conversation list titles
 5. [Mandatory] Do not output tags, internal thinking or reasoning. Return only the final title', 10001, '2026-08-07 11:15:33', '2026-08-07 11:15:33', null);
 
+-- ============================================================================
+-- agent-reach 技能下线迁移（合并到 knowledge-collection 内置路由层）
+-- 2026-08-18: agent-reach skill 已合并为 knowledge-collection/references/source-routing.md
+-- ============================================================================
+
+-- 1. 从 OPENCLAW_BUNDLED_SKILLS 配置中移除 agent-reach 条目。
+--    先按空白归一化再整体替换，避免依赖交替分组等复杂正则特性。
+UPDATE byai.byai_system_config
+SET param_value = regexp_replace(
+    regexp_replace(param_value, '\s', '', 'g'),
+    ',?\{"skillName":"[^"]*","skillCode":"agent-reach","skillDescZh":"[^"]*","skillDescEn":"[^"]*"\}',
+    '',
+    'g'
+)
+WHERE param_code = 'OPENCLAW_BUNDLED_SKILLS'
+  AND regexp_replace(param_value, '\s', '', 'g') LIKE '%"skillCode":"agent-reach"%';
+
+-- 2. 清理配置 JSON 可能出现的语法问题（数组首尾多余逗号）
+UPDATE byai.byai_system_config
+SET param_value = regexp_replace(
+    regexp_replace(param_value, '\[,', '[', 'g'),
+    ',\]', ']', 'g'
+)
+WHERE param_code = 'OPENCLAW_BUNDLED_SKILLS';
+
+-- 3. 删除 agent-reach 资源的所有授权记录
+DELETE FROM byai.au_privilege_grant
+WHERE grant_obj_id IN (
+    SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'agent-reach'
+);
+
+-- 4. 删除 agent-reach 的资源扩展记录（skill 元数据）
+DELETE FROM byai.ss_res_ext_skill
+WHERE resource_id IN (
+    SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'agent-reach'
+);
+
+-- 5. 删除 agent-reach 资源本体
+DELETE FROM byai.ss_resource
+WHERE resource_code = 'agent-reach';
+
+-- 验证查询（migration 执行后应各返回 0 行）
+-- SELECT * FROM byai.ss_resource WHERE resource_code = 'agent-reach';
+-- SELECT * FROM byai.byai_system_config WHERE param_code = 'OPENCLAW_BUNDLED_SKILLS' AND param_value LIKE '%agent-reach%';
+-- SELECT g.* FROM byai.au_privilege_grant g JOIN byai.ss_resource r ON r.resource_id = g.grant_obj_id WHERE r.resource_code = 'agent-reach';
+-- SELECT e.* FROM byai.ss_res_ext_skill e JOIN byai.ss_resource r ON r.resource_id = e.resource_id WHERE r.resource_code = 'agent-reach';
+
+-- ============================================================================
+-- by-skill-installer 内置技能注册
+-- 2026-08-18: 按 skillCode 查平台内置技能并绑定到数字员工，让 agent 能使用该技能
+-- 各步骤均按 resource_code 幂等执行，resource_id 由序列生成避免固定 ID 冲突
+-- ============================================================================
+
+-- 1. 追加到 OPENCLAW_BUNDLED_SKILLS，已存在同名 skillCode 时不重复追加
+UPDATE byai.byai_system_config c
+SET param_value = CASE
+        WHEN rtrim(c.param_value) = '[]' THEN '['
+        ELSE left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1) || ','
+    END
+    || '{"skillName":"by-skill-installer","skillCode":"by-skill-installer","skillDescZh":"按 skillCode 在平台查找内置技能并绑定到数字员工，让 agent 能使用该技能。","skillDescEn":"Look up built-in skills by skillCode and bind them to a digital employee so the agent can use them."}]'
+WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
+  AND regexp_replace(c.param_value, '\s', '', 'g')
+      NOT LIKE '%"skillCode":"by-skill-installer"%';
+
+-- 2. 注册资源本体
+INSERT INTO byai.ss_resource (
+    resource_id, system_code, resource_biz_type, resource_type, resource_name,
+    resource_desc, resource_version_id, host_type, catalog_id, man_org_id,
+    man_user_id, create_by, create_time, update_by, update_time, com_acct_id,
+    resource_status, resource_d_verid, resource_r_verid, resource_code,
+    publish_time, auth_status, publish_portal, parent_resource_id, publish_type,
+    owner_type, impl_type, worker_agent_type
+)
+SELECT
+    nextval('byai.seq_any_table'), 'BYAI', 'SKILL', 'ATOM', '技能安装器',
+    '按 skillCode 在平台查找内置技能并绑定到数字员工，让 agent 能使用该技能。',
+    '1.0', 'hosted', 10, -1, '10001', 10001, CURRENT_TIMESTAMP,
+    10001, CURRENT_TIMESTAMP, 1, 2, -1, -1, 'by-skill-installer',
+    CURRENT_TIMESTAMP, 'passed', 1, -1, 'publish', 'enterprise', 'SKILL', 'NONE'
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.ss_resource
+    WHERE resource_code = 'by-skill-installer'
+);
+
+-- 3. 补齐内置 Skill 扩展记录；skill_type=inner 表示随运行时镜像提供，无需下载
+INSERT INTO byai.ss_res_ext_skill (
+    resource_id, skill_type, source_type, version, skill_url,
+    skill_package_format, skill_original_filename, skill_package_size,
+    skill_package_hash, sync_status, sync_error, last_sync_time
+)
+SELECT
+    r.resource_id, 'inner', 'SYSTEM_BUILTIN', 'v0.1', '', 'zip', NULL, NULL, NULL,
+    'SUCCESS', NULL, CURRENT_TIMESTAMP
+FROM byai.ss_resource r
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.ss_res_ext_skill e WHERE e.resource_id = r.resource_id
+)
+  AND r.resource_code = 'by-skill-installer';
+
+-- 4. 重建运行期技能快照，避免资源 ID 曾被其他技能复用时残留错误 target_content
+UPDATE byai.ss_res_ext_skill e
+SET target_content = json_build_object(
+    'resourceId', r.resource_id,
+    'resourceCode', r.resource_code,
+    'resourceName', r.resource_name,
+    'resourceDesc', r.resource_desc,
+    'resourceBizType', r.resource_biz_type,
+    'resourceType', r.resource_type,
+    'ownerType', r.owner_type,
+    'sourceType', e.source_type,
+    'skillType', e.skill_type,
+    'skillUrl', e.skill_url,
+    'version', e.version,
+    'skillPackageFormat', e.skill_package_format,
+    'skillOriginalFilename', e.skill_original_filename,
+    'skillPackageSize', e.skill_package_size,
+    'skillPackageHash', e.skill_package_hash,
+    'syncStatus', e.sync_status,
+    'syncError', e.sync_error,
+    'lastSyncTime', to_char(e.last_sync_time, 'YYYY-MM-DD HH24:MI:SS')
+)::text
+FROM byai.ss_resource r
+WHERE e.resource_id = r.resource_id
+  AND r.resource_code = 'by-skill-installer';
+
+-- 5. 清理历史重复授权，保证脚本重放不会累积重复数据
+DELETE FROM byai.au_privilege_grant
+WHERE privilege_grant_id IN (
+    SELECT privilege_grant_id
+    FROM (
+        SELECT g.privilege_grant_id,
+               ROW_NUMBER() OVER (
+                   PARTITION BY g.grant_obj_id, g.grant_type, g.grant_to_type,
+                                g.grant_to_obj_id, g.grant_to_obj_type
+                   ORDER BY g.privilege_grant_id DESC
+               ) AS row_num
+        FROM byai.au_privilege_grant g
+        WHERE g.grant_obj_id = (
+            SELECT resource_id FROM byai.ss_resource
+            WHERE resource_code = 'by-skill-installer'
+        )
+    ) ranked
+    WHERE ranked.row_num > 1
+);
+
+-- 6. 复制 knowledge-collection 的可用授权，使未传 ownerType 的技能列表也能发现该技能
+INSERT INTO byai.au_privilege_grant (
+    privilege_grant_id, grant_type, oper_type, grant_obj_type, grant_obj_id,
+    eff_date, exp_date, status_cd, create_staff, create_date, update_staff,
+    update_date, grant_to_type, grant_to_obj_id, grant_to_obj_type, allow_unsubscribe
+)
+SELECT
+    nextval('byai.seq_any_table'),
+    g.grant_type, g.oper_type, g.grant_obj_type, installer.resource_id,
+    g.eff_date, g.exp_date, g.status_cd, g.create_staff, g.create_date,
+    g.update_staff, g.update_date, g.grant_to_type, g.grant_to_obj_id,
+    g.grant_to_obj_type, g.allow_unsubscribe
+FROM byai.au_privilege_grant g
+CROSS JOIN (
+    SELECT resource_id FROM byai.ss_resource
+    WHERE resource_code = 'by-skill-installer'
+) installer
+CROSS JOIN (
+    SELECT resource_id FROM byai.ss_resource
+    WHERE resource_code = 'knowledge-collection'
+) knowledge_collection
+WHERE g.grant_obj_id = knowledge_collection.resource_id
+  AND NOT EXISTS (
+      SELECT 1
+      FROM byai.au_privilege_grant existing
+      WHERE existing.grant_obj_id = installer.resource_id
+        AND existing.grant_type = g.grant_type
+        AND existing.grant_to_type = g.grant_to_type
+        AND existing.grant_to_obj_id = g.grant_to_obj_id
+        AND existing.grant_to_obj_type = g.grant_to_obj_type
+  );
+
+-- 验证查询（migration 执行后应各返回 1 行）
+-- SELECT * FROM byai.ss_resource WHERE resource_code = 'by-skill-installer';
+-- SELECT e.* FROM byai.ss_res_ext_skill e JOIN byai.ss_resource r ON r.resource_id = e.resource_id WHERE r.resource_code = 'by-skill-installer';

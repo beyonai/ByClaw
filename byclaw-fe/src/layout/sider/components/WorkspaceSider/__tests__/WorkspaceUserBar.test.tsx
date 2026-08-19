@@ -33,13 +33,16 @@ describe('WorkspaceUserBar', () => {
     jest.clearAllMocks();
   });
 
-  it('shows the user avatar and name and opens the migrated user menu on hover', async () => {
+  it('shows the user avatar and name and opens the migrated user menu on click', async () => {
     render(<WorkspaceUserBar />);
 
     expect(screen.getByRole('img', { name: '测试用户' })).toHaveAttribute('src', '/avatar.png');
     expect(screen.getByText('测试用户')).toBeInTheDocument();
 
     fireEvent.mouseEnter(screen.getByTitle('测试用户'));
+    expect(screen.queryByText('设置')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle('测试用户'));
 
     await waitFor(() => {
       expect(screen.getByText('设置')).toBeInTheDocument();

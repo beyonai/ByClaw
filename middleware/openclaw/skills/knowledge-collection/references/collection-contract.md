@@ -121,3 +121,119 @@ collection_filters:
 读取历史采集结果时，允许只读兼容 `bycli-output.json`、`--bycli-json-file` 和 Markdown frontmatter 中的
 `bycli_filter`。这些字段均为只读兼容入口；新写入不得使用旧格式，必须生成本文件定义的
 `collection-result.json` 和 `collection_filters`。
+
+## 已抓好一批正文后登记会话
+
+来源执行器已经把正文抓到会话外的临时目录、要登记成正式会话时（例如把外围素材交给 `tech-article`），
+用 `init` + `collect`。**不要手写 metadata inventory**——`collect` 在 inventory 缺该 `itemId` 时会按
+`canonicalItem` 自动补登条目，`sourceSkill` 从 `collectionResult.backend` 推导，`materialization`
+由脚本按文件存在性写入。手写 inventory 会让你自己承担 `rawArtifacts`、`materialization`、
+canonical view 路径形态这些字段的正确性，而这些本来是脚本的职责。
+
+```bash
+# 1. init 建空会话。items 给空数组，只声明 backend；backend 决定后续 sourceSkill
+echo '{"backend":"bycli","items":[]}' > /tmp/cr.json
+node scripts/knowledge-collection.mjs init --mode collection --session-dir <dir> \
+  --query "<采集任务>" --collection-result-input-file /tmp/cr.json
+
+# 2. 把正文拷进会话。init 要求目标目录不存在或为空,所以必须在 init 之后拷
+cp -r /tmp/harvest/markdown /tmp/harvest/sanitized <dir>/
+
+# 3. 一次 collect 登记全部正文(payload 支持 items 数组批量)
+node scripts/knowledge-collection.mjs collect --session-dir <dir> \
+  --item-json-file <dir>/.post-processing-inputs/batch.json
+```
+
+`collect` 的批量 payload：
+
+```json
+{
+  "schemaVersion": "1.0",
+  "items": [
+    {
+      "itemId": "item-01",
+      "markdownPath": "markdown/post.md",
+      "sanitizedPath": "sanitized/items/post.md",
+      "canonicalItem": {
+        "title": "Post title",
+        "url": "https://example.com/post",
+        "author": "",
+        "publishTime": "",
+        "markdown": "sanitized/items/post.md",
+        "fileName": "sanitized/items/post.md"
+      }
+    }
+  ]
+}
+```
+
+单条时也可以直接用上面 `items[]` 中的对象作为根节点（省掉 `items` 包装）。
+`canonicalItem.markdown` 与 `fileName` 必须相等且都是相对采集根的完整路径（`sanitized/items/x.md`，不是 basename）。
+
+### 什么时候才需要 `--metadata-input-file`
+
+只有一种情况：需要在建会话时就预置一份**完整清单**，其中包含尚未物化的条目——
+例如站点抓取先登记 2215 条 sitemap URL 为 `pending`、随后分批物化，或从旧会话迁移既有 inventory。
+此时 `--metadata-input-file` 整体替换 `session.collection`（`research-state.mjs` 内
+`session.collection = metadata`），所以必须提交完整子树，并自行保证：
+
+- 每个条目必填非空 `sourceSkill` 与 `sourceUrl`（身份键），以及 `rawArtifacts`（空也要写 `[]`）；
+- 已物化条目必须预声明 `materialization`——物化状态只在 `init` 时按文件存在性推导一次，
+  事后 `export-views` 不补算；
+- canonical view 的 `fileName` 必须等于 inventory 的 `materialization.sanitizedPath`。
+  （`validateCanonicalView` 用 `sanitizedPath` 建 map 却用 `fileName` 查，字段名不同但值必须一致，
+  填 basename 会报 “canonical view 路径未对应 materialized inventory”。）
+
+除此之外的场景一律走 `collect`。
+
+## 后处理 run payload
+
+`run` 是后处理运行的唯一写入入口,没有更简单的替代入口,所以这份 payload 必须自己写。以 `external` 为例：
+
+```json
+{
+  "schemaVersion": "1.0",
+  "runId": "run-tech-article-1",
+  "operation": "external",
+  "target": { "kind": "external", "id": "tech-article/jujutsu", "path": "<dir>/sanitized/items" },
+  "status": "success",
+  "sessionStatus": "success",
+  "selection": {
+    "mode": "all",
+    "itemIds": ["item-01"],
+    "discardUnselected": false,
+    "discardUnselectedConfirmed": false
+  },
+  "items": [
+    {
+      "itemId": "item-01",
+      "status": "success",
+      "stage": "completed",
+      "reason": null,
+      "downstreamRef": null,
+      "cleanupStatus": "not-started"
+    }
+  ],
+  "globalStage": { "name": null, "required": false, "status": "not-required", "reason": null }
+}
+```
+
+成功条目的 `stage` 由 operation 决定，写错即拒：
+
+| operation | success item `stage` |
+|---|---|
+| `ingest` | `build-submitted` |
+| `organize` | `ads-organized` |
+| `external` | `completed` |
+
+其余易错点：
+
+- `target.kind` 只能是 `knowledge-base` / `knowledge-organization` / `external`，
+  external 就写 `external`（不是 `external-task`）。
+- `sessionStatus` 枚举是 `success` / `partial` / `failed` / `unknown`，**没有 `complete`**
+  （`complete` 属于 `collection.status`，两个枚举不同）；且脚本会重算并校验，与提交值不一致时拒绝写入。
+- `downstreamRef` 必填，无下游引用时写 `null`（不能省略）。
+- `globalStage`：`required: false` 时 `status` 必须是 `not-required` 且 `name` 必须是 `null`；
+  `required: true` 时 `name` 必须是非空字符串且 `status` 不能是 `not-required`。
+- `selection.discardUnselected` 与 `discardUnselectedConfirmed` 必须是布尔值，
+  只有用户明确确认放弃未选文章时才能同时为 `true`。
