@@ -34,6 +34,7 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -92,6 +93,10 @@ public class ByClawSkillResourceApplicationService {
     private static final String EXTERNAL_RESOURCE_ROOT = "/byclaw/resource";
 
     private static final String SKILL_DOC_FILE_NAME = "SKILL.md";
+
+    private static final String ZIP_ENTRY_NAME_PRIMARY_ENCODING = "GBK";
+
+    private static final String ZIP_ENTRY_NAME_FALLBACK_ENCODING = StandardCharsets.UTF_8.name();
 
     private static final int THIRD_PARTY_DOWNLOAD_TIMEOUT_MILLIS = 15_000;
 
@@ -1242,8 +1247,34 @@ public class ByClawSkillResourceApplicationService {
     }
 
     private List<ZipEntryInfo> readZipEntries(byte[] bytes) {
+        List<ZipEntryInfo> entries;
+        try {
+            entries = readZipEntries(bytes, ZIP_ENTRY_NAME_PRIMARY_ENCODING);
+        }
+        catch (CharacterCodingException primaryException) {
+            logger.debug("Skill 资源包 entry 名无法按 {} 解码，使用 {} 重试",
+                ZIP_ENTRY_NAME_PRIMARY_ENCODING, ZIP_ENTRY_NAME_FALLBACK_ENCODING);
+            try {
+                entries = readZipEntries(bytes, ZIP_ENTRY_NAME_FALLBACK_ENCODING);
+            }
+            catch (IOException fallbackException) {
+                fallbackException.addSuppressed(primaryException);
+                throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), fallbackException);
+            }
+        }
+        catch (IOException e) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), e);
+        }
+        if (entries.isEmpty()) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.empty"));
+        }
+        return entries;
+    }
+
+    private List<ZipEntryInfo> readZipEntries(byte[] bytes, String encoding) throws IOException {
         List<ZipEntryInfo> entries = new ArrayList<>();
-        try (ZipArchiveInputStream zin = new ZipArchiveInputStream(new ByteArrayInputStream(bytes), "GBK", true, true)) {
+        try (ZipArchiveInputStream zin =
+            new ZipArchiveInputStream(new ByteArrayInputStream(bytes), encoding, true, true)) {
             ArchiveEntry entry;
             while ((entry = zin.getNextEntry()) != null) {
                 if (entry.isDirectory()) {
@@ -1255,12 +1286,6 @@ public class ByClawSkillResourceApplicationService {
                 }
                 entries.add(new ZipEntryInfo(normalized, zin.readAllBytes()));
             }
-        }
-        catch (IOException e) {
-            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), e);
-        }
-        if (entries.isEmpty()) {
-            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.empty"));
         }
         return entries;
     }
