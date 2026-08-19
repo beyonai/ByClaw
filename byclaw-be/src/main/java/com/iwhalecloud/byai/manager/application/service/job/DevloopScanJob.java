@@ -18,6 +18,8 @@ import org.springframework.scheduling.support.CronExpression;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -306,17 +308,10 @@ public class DevloopScanJob {
             if (source.getLastScanTime() == null) {
                 return true;
             }
-            long intervalHours = parseLong(config.get("intervalHours"), 0L);
-            if (intervalHours <= 0) {
-                // 旧版间隔值继续兼容分钟和小时，保存后的新数据只会使用 intervalHours。
-                long legacyInterval = parseLong(config.get("interval"), parseLong(config.get("intervalValue"), 0L));
-                String unit = firstText(config, "intervalUnit", "unit");
-                intervalHours = "minute".equalsIgnoreCase(unit) || "minutes".equalsIgnoreCase(unit)
-                    ? Math.max(1L, (legacyInterval + 59L) / 60L) : legacyInterval;
-            }
+            long intervalMinutes = getIntervalMinutes(config, 60L);
             LocalDateTime lastScan = LocalDateTime.ofInstant(source.getLastScanTime().toInstant(),
                 ZoneId.systemDefault());
-            return intervalHours > 0 && !lastScan.plusHours(intervalHours).isAfter(now);
+            return !lastScan.plusMinutes(intervalMinutes).isAfter(now);
         }
         if ("biweekly".equalsIgnoreCase(firstText(config, "periodType"))
             && !matchesBiweeklyCycle(source, config, now.toLocalDate())) {
@@ -416,15 +411,30 @@ public class DevloopScanJob {
 
     /** 解析聊天自动化的间隔时长，兼容新版 intervalValue/intervalUnit 与旧版 intervalHours。 */
     private long getIntervalMinutes(JSONObject config, long fallbackMinutes) {
-        long intervalValue = parseLong(config.get("intervalValue"), 0L);
-        if (intervalValue > 0) {
-            String unit = firstText(config, "intervalUnit", "unit");
-            return "minute".equalsIgnoreCase(unit) || "minutes".equalsIgnoreCase(unit)
-                ? intervalValue : intervalValue * 60L;
+        BigDecimal intervalValue = parseDecimal(config.get("intervalValue"));
+        if (intervalValue == null) {
+            intervalValue = parseDecimal(config.get("interval"));
+        }
+        if (intervalValue == null) {
+            intervalValue = parseDecimal(config.get("intervalHours"));
+        }
+        if (intervalValue == null || intervalValue.signum() <= 0) {
+            return fallbackMinutes;
         }
 
-        long intervalHours = parseLong(config.get("intervalHours"), 0L);
-        return intervalHours > 0 ? intervalHours * 60L : fallbackMinutes;
+        String unit = firstText(config, "intervalUnit", "unit");
+        BigDecimal intervalMinutes = "minute".equalsIgnoreCase(unit) || "minutes".equalsIgnoreCase(unit)
+            ? intervalValue : intervalValue.multiply(BigDecimal.valueOf(60));
+        return Math.max(60L, intervalMinutes.setScale(0, RoundingMode.HALF_UP).longValue());
+    }
+
+    private BigDecimal parseDecimal(Object value) {
+        try {
+            return value == null ? null : new BigDecimal(String.valueOf(value));
+        }
+        catch (NumberFormatException exception) {
+            return null;
+        }
     }
 
     private List<Integer> parseIntegerList(Object value) {

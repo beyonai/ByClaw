@@ -15,6 +15,7 @@ import { processSessionContent, formatTime } from './util';
 import { getAgentPath } from '@/utils/agent';
 import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 import useTracker from '@/hooks/useTracker';
+import { isNotificationSession } from '@/utils/session';
 
 import { ISession } from '@/typescript/session';
 import { IAgentCache } from '@/typescript/agent';
@@ -105,6 +106,10 @@ const DialogueCard = ({
   const [editName, setEditName] = React.useState('');
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [isOptimisticallyDeleted, setIsOptimisticallyDeleted] = useState(false);
+  const effectiveCannotActionList = useMemo(
+    () => (isNotificationSession(item) ? ['delete', 'edit'] : cannotActionList),
+    [cannotActionList, item]
+  );
   const onRemove = useCallback(
     (payload: { sessionId: string }): any => {
       return dispatch({
@@ -285,7 +290,7 @@ const DialogueCard = ({
     const items = [];
 
     // 只有当 sessionType 不是 单聊h_h 时才显示编辑项
-    if (!cannotActionList?.includes('edit')) {
+    if (!effectiveCannotActionList?.includes('edit')) {
       items.push({
         key: 'edit',
         label: (
@@ -297,7 +302,7 @@ const DialogueCard = ({
       });
     }
 
-    if (!cannotActionList.includes('delete')) {
+    if (!effectiveCannotActionList.includes('delete')) {
       items.push({
         key: 'del',
         label: (
@@ -321,7 +326,7 @@ const DialogueCard = ({
     }
 
     return items;
-  }, [cannotActionList, delLoading, editLoading, sessionLoading, item, isOptimisticallyDeleted, handleDelete]);
+  }, [delLoading, editLoading, effectiveCannotActionList, sessionLoading, item, isOptimisticallyDeleted, handleDelete]);
 
   if (isOptimisticallyDeleted) {
     return null;
@@ -334,9 +339,9 @@ const DialogueCard = ({
         [styles.activeItem]: `${sessionId}` === `${item.sessionId}`,
       })}
       onClick={() => {
-        const { sessionId, objectId, objectType, unreadCount = 0 } = item;
+        const { sessionId, objectId, unreadCount = 0 } = item;
 
-        if (isFunction(onSelect)) {
+        if (isFunction(onSelect) && !isNotificationSession(item)) {
           onSelect(item);
           return;
         }
@@ -362,7 +367,7 @@ const DialogueCard = ({
         setSessionId?.(`${sessionId}`);
 
         // 通知会话
-        if (objectType === 'Notification') {
+        if (isNotificationSession(item)) {
           if (unreadCount > 0) {
             // 调用notice/batchReadNotice action，批量设置所有通知为已读
             dispatch({

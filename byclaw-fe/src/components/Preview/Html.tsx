@@ -7,6 +7,7 @@ import { copyWithMessage } from '@/utils/copy';
 import { getIntl } from '@umijs/max';
 
 import TextHighlight from './TextHighlight';
+import type { MarkdownImageResolver } from './Md';
 import styles from './Html.module.less';
 
 // loader.config({
@@ -28,60 +29,148 @@ export interface HtmlPreviewProps {
   title?: string;
 }
 
-export const HtmlRender = React.memo((props: { content?: string; safe?: boolean; href?: string }) => {
-  const { content, href, safe = true } = props;
-  const [loading, setLoading] = useState<boolean>(false);
-  const ref = useRef<HTMLIFrameElement>(null);
+const isRelativeResourcePath = (path: string) =>
+  !path.startsWith('/') && !path.startsWith('#') && !path.startsWith('//') && !/^[a-z][a-z\d+.-]*:/i.test(path);
 
-  const onLoad = () => {
-    setLoading(false);
-  };
+const resolveHtmlResources = async (content: string, resolver: MarkdownImageResolver) => {
+  const document = new DOMParser().parseFromString(content, 'text/html');
+  const resourceNodes = [
+    ...Array.from(document.querySelectorAll<HTMLElement>('img[src], source[src]')).map((element) => ({
+      element,
+      attribute: 'src',
+    })),
+    ...Array.from(document.querySelectorAll<HTMLElement>('video[poster]')).map((element) => ({
+      element,
+      attribute: 'poster',
+    })),
+  ];
+  const objectUrls: string[] = [];
 
-  useEffect(() => {
-    let objectUrl: string | undefined;
+  await Promise.all(
+    resourceNodes.map(async ({ element, attribute }) => {
+      const resourcePath = element.getAttribute(attribute);
+      if (!resourcePath || !isRelativeResourcePath(resourcePath)) return;
 
-    // 如果存在资源链接，则使用资源链接
-    if (href && !content) {
-      if (ref.current) {
-        setLoading(true);
-        ref.current.src = href;
-      }
-    }
-
-    // 如果存在内容，则使用内容
-    if (content && !href) {
-      if (safe) {
-        const blob = new Blob([content], { type: 'text/html' });
-        if (ref.current) {
-          setLoading(true);
-          objectUrl = URL.createObjectURL(blob);
-          ref.current.src = objectUrl;
+      try {
+        const resolvedResource = await resolver(resourcePath);
+        if (resolvedResource instanceof Blob) {
+          const objectUrl = URL.createObjectURL(resolvedResource);
+          objectUrls.push(objectUrl);
+          element.setAttribute(attribute, objectUrl);
+        } else if (resolvedResource) {
+          element.setAttribute(attribute, resolvedResource);
         }
+      } catch {
+        // 单个资源解析失败时保留原始地址，不影响 HTML 其它内容预览。
       }
-      if (!safe) {
-        if (ref.current) {
-          setLoading(true);
-          ref.current.srcdoc = content;
-        }
-      }
-    }
-
-    return () => {
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [content, safe, href]);
-
-  return (
-    <section className={styles.html}>
-      {loading && (
-        <div className={styles.loader}>
-          <span />
-        </div>
-      )}
-      <iframe ref={ref} title={getIntl().formatMessage({ id: 'preview.htmlPreview' })} onLoad={onLoad} />
-    </section>
+    })
   );
-});
+
+  return { content: document.documentElement.outerHTML, objectUrls };
+};
+
+export const HtmlRender = React.memo(
+  (props: {
+    content?: string;
+    data?: Blob;
+    safe?: boolean;
+    href?: string;
+    resolveResource?: MarkdownImageResolver;
+  }) => {
+    const { content, data, href, safe = true, resolveResource } = props;
+    const [loading, setLoading] = useState<boolean>(false);
+    const [blobContent, setBlobContent] = useState<string>();
+    const ref = useRef<HTMLIFrameElement>(null);
+    const htmlContent = content !== undefined ? content : blobContent;
+
+    const onLoad = () => {
+      setLoading(false);
+    };
+
+    useEffect(() => {
+      let objectUrl: string | undefined;
+      let resourceObjectUrls: string[] = [];
+      let active = true;
+
+      const revokeResourceObjectUrls = () => {
+        resourceObjectUrls.forEach((url) => URL.revokeObjectURL(url));
+        resourceObjectUrls = [];
+      };
+
+      const renderContent = (resolvedContent: string, resolvedObjectUrls: string[] = []) => {
+        resourceObjectUrls = resolvedObjectUrls;
+        if (!active) {
+          revokeResourceObjectUrls();
+          return;
+        }
+
+        if (safe) {
+          const blob = new Blob([resolvedContent], { type: 'text/html' });
+          if (ref.current) {
+            objectUrl = URL.createObjectURL(blob);
+            ref.current.src = objectUrl;
+          }
+        } else if (ref.current) {
+          ref.current.srcdoc = resolvedContent;
+        }
+        setLoading(false);
+      };
+
+      // 如果存在资源链接，则使用资源链接
+      if (href && !content) {
+        if (ref.current) {
+          setLoading(true);
+          ref.current.src = href;
+        }
+      }
+
+      // 如果存在内容，则使用内容
+      if (htmlContent !== undefined && !href) {
+        setLoading(true);
+        if (resolveResource) {
+          void resolveHtmlResources(htmlContent, resolveResource)
+            .then(({ content: resolvedContent, objectUrls }) => renderContent(resolvedContent, objectUrls))
+            .catch(() => renderContent(htmlContent));
+        } else {
+          renderContent(htmlContent);
+        }
+      }
+
+      return () => {
+        active = false;
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        revokeResourceObjectUrls();
+      };
+    }, [htmlContent, href, resolveResource, safe]);
+
+    useEffect(() => {
+      if (content !== undefined || !(data instanceof Blob)) {
+        setBlobContent(undefined);
+        return;
+      }
+
+      let active = true;
+      void data.text().then((text) => {
+        if (active) setBlobContent(text);
+      });
+
+      return () => {
+        active = false;
+      };
+    }, [content, data]);
+
+    return (
+      <section className={styles.html}>
+        {loading && (
+          <div className={styles.loader}>
+            <span />
+          </div>
+        )}
+        <iframe ref={ref} title={getIntl().formatMessage({ id: 'preview.htmlPreview' })} onLoad={onLoad} />
+      </section>
+    );
+  }
+);
 
 export default function HtmlPreview(props: HtmlPreviewProps) {
   const { data, title } = props;

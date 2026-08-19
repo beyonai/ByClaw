@@ -10,6 +10,7 @@ import {
   buildAutomationCron,
   buildAutomationSchedule,
   getAutomationFormInitialValues,
+  normalizeIntervalValue,
   parseAutomationConfig,
 } from '../schedule';
 import type { AutomationFormValues, AutomationSource, AutomationTemplate } from '../types';
@@ -30,9 +31,24 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
     text: '',
     resourceList: [],
   });
+  const [promptDraftVersion, setPromptDraftVersion] = useState(0);
   const { projects, loading: projectsLoading } = useProjectList();
   const scheduleMode = Form.useWatch('scheduleMode', form);
   const intervalUnit = Form.useWatch('intervalUnit', form);
+  const intervalValue = Form.useWatch('intervalValue', form);
+  const intervalMin = intervalUnit === 'minute' ? 60 : 1;
+  const intervalPrecision = intervalUnit === 'minute' ? 0 : 1;
+  const intervalValidationMessage = intl.formatMessage({
+    id: intervalUnit === 'minute' ? 'automation.intervalMinuteMin' : 'automation.intervalHourMin',
+  });
+  const intervalErrorMessage =
+    intervalValue === undefined || intervalValue === null || intervalValue === ''
+      ? undefined
+      : !Number.isFinite(Number(intervalValue)) || Number(intervalValue) < intervalMin
+      ? intervalValidationMessage
+      : intervalUnit === 'minute' && !Number.isInteger(Number(intervalValue))
+      ? intervalValidationMessage
+      : undefined;
   const periodType = Form.useWatch('periodType', form);
   const weekdayOptions = useMemo(
     () =>
@@ -53,8 +69,11 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
         const [hour, minute] = template.schedule.time.split(':').map(Number);
         initialValues.periodTime = initialValues.periodTime?.hour(hour).minute(minute);
       }
-      initialValues.intervalValue = template.schedule.intervalValue || template.schedule.intervalHours || 1;
       initialValues.intervalUnit = template.schedule.intervalUnit || 'hour';
+      initialValues.intervalValue = normalizeIntervalValue(
+        template.schedule.intervalValue || template.schedule.intervalHours,
+        initialValues.intervalUnit
+      );
       initialValues.periodWeekdays = template.schedule.weekdays || [...ALL_WEEKDAYS];
       initialValues.periodMonth = template.schedule.month || 1;
       initialValues.periodMonthDay = template.schedule.monthDay || 1;
@@ -68,6 +87,7 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
       const config = parseAutomationConfig(source?.config);
       setPromptDraft({ text: config.chatContent, resourceList: config.resourceList });
     }
+    setPromptDraftVersion((version) => version + 1);
     form.setFieldsValue(initialValues);
   }, [form, source, template]);
 
@@ -176,6 +196,7 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
           </Form.Item>
           <Form.Item label={intl.formatMessage({ id: 'automation.prompt' })} required>
             <QueryInput
+              key={promptDraftVersion}
               placeholder={intl.formatMessage({ id: 'automation.promptTip' })}
               minRows={6}
               maxRows={12}
@@ -216,6 +237,14 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
                   <Form.Item name="periodType" noStyle>
                     <Select
                       className={styles.scheduleCompactField}
+                      onChange={(nextPeriodType) => {
+                        form.setFieldsValue({
+                          periodType: nextPeriodType,
+                          ...(nextPeriodType === 'weekly' || nextPeriodType === 'biweekly'
+                            ? { periodWeekdays: [1, 2, 3, 4, 5] }
+                            : {}),
+                        });
+                      }}
                       options={[
                         { value: 'daily', label: intl.formatMessage({ id: 'automation.period.daily' }) },
                         { value: 'weekly', label: intl.formatMessage({ id: 'automation.period.weekly' }) },
@@ -273,40 +302,61 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
               )}
               {scheduleMode === 'interval' && (
                 <>
-                  <Space.Compact className={styles.intervalField}>
+                  <div className={styles.intervalField}>
                     <Form.Item
                       name="intervalValue"
-                      noStyle
-                      rules={
-                        intervalUnit === 'minute'
-                          ? [
-                            {
-                              type: 'number',
-                              max: 59,
-                              message: intl.formatMessage({ id: 'automation.intervalMinuteMax' }),
-                            },
-                          ]
-                          : undefined
-                      }
+                      className={styles.intervalValueItem}
+                      help={null}
+                      validateTrigger={['onChange', 'onBlur']}
+                      rules={[
+                        {
+                          type: 'number',
+                          min: intervalMin,
+                          message: intervalValidationMessage,
+                        },
+                        {
+                          validator: (_: unknown, value: number | null | undefined) => {
+                            if (value === undefined || value === null) return Promise.resolve();
+                            if (!Number.isFinite(value) || value < intervalMin) {
+                              return Promise.reject(new Error(intervalValidationMessage));
+                            }
+                            if (intervalUnit === 'minute' && !Number.isInteger(value)) {
+                              return Promise.reject(new Error(intervalValidationMessage));
+                            }
+                            return Promise.resolve();
+                          },
+                        },
+                      ]}
                     >
                       <InputNumber
                         className={styles.intervalValueField}
-                        min={1}
-                        max={intervalUnit === 'minute' ? 59 : undefined}
-                        precision={0}
-                        step={1}
+                        min={intervalMin}
+                        precision={intervalPrecision}
+                        step={intervalUnit === 'minute' ? 1 : 0.1}
                       />
                     </Form.Item>
                     <Form.Item name="intervalUnit" noStyle>
                       <Select
                         className={styles.intervalUnitField}
+                        onChange={(nextUnit) => {
+                          form.setFieldsValue({
+                            intervalUnit: nextUnit,
+                            intervalValue: nextUnit === 'minute' ? 60 : 1,
+                          });
+                        }}
                         options={[
                           { value: 'hour', label: intl.formatMessage({ id: 'automation.intervalUnit.hour' }) },
                           { value: 'minute', label: intl.formatMessage({ id: 'automation.intervalUnit.minute' }) },
                         ]}
                       />
                     </Form.Item>
-                  </Space.Compact>
+                    <span
+                      className={intervalErrorMessage ? styles.intervalError : styles.intervalHint}
+                      role={intervalErrorMessage ? 'alert' : undefined}
+                    >
+                      {intervalErrorMessage || intervalValidationMessage}
+                    </span>
+                  </div>
                   <Form.Item name="intervalWeekdays" noStyle>
                     <Select mode="multiple" className={styles.scheduleWideField} options={weekdayOptions} />
                   </Form.Item>

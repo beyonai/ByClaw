@@ -2,7 +2,7 @@ import { Button, Dropdown, Empty, Input, Modal, Skeleton, Switch, message } from
 import {
   ClockCircleOutlined,
   DeleteOutlined,
-  MoreOutlined,
+  EllipsisOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -295,7 +295,7 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
                 type="text"
                 size="small"
                 className={styles.rowActionButton}
-                icon={<MoreOutlined />}
+                icon={<EllipsisOutlined />}
                 aria-label={intl.formatMessage({ id: 'common.more' })}
                 onClick={(event) => event.stopPropagation()}
                 onKeyDown={(event) => event.stopPropagation()}

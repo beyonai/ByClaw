@@ -4,6 +4,7 @@ import { Spin } from 'antd';
 import Empty from '@/components/Empty';
 import PanelWrapper from './PanelWrapper';
 import usePreview from '@/components/MessageList/components/FileRender/components/Previewer/usePreview';
+import { createRelativeResourceResolver } from '@/components/MessageList/components/FileRender/components/Previewer/relativeResource';
 import type { IFile } from '@/typescript/file';
 
 import styles from './index.less';
@@ -35,6 +36,10 @@ const PreviewFilePanel: React.FC<PreviewFilePanelProps> = (props) => {
   const { isOpen, file, onClose, afterClose } = props;
 
   const { onPreview, previewInfo, onClosePreviewModal, previewing } = usePreview();
+  const resolveRelativeResource = useMemo(
+    () => previewInfo.resolvePreviewResource || createRelativeResourceResolver(previewInfo.resourceUrl),
+    [previewInfo.resolvePreviewResource, previewInfo.resourceUrl]
+  );
 
   const { fileName, fileUrl, fileId } = file || {};
 
@@ -105,7 +110,14 @@ const PreviewFilePanel: React.FC<PreviewFilePanelProps> = (props) => {
           {previewInfo.blob ? (
             <div className={styles.previewContainer}>
               <React.Suspense fallback={null}>
-                <PreViewFile data={previewInfo.blob} type={fileType} title={title} className={styles.preview} />
+                <PreViewFile
+                  data={previewInfo.blob}
+                  type={fileType}
+                  title={title}
+                  resolveMarkdownImage={resolveRelativeResource}
+                  resolveHtmlResource={resolveRelativeResource}
+                  className={styles.preview}
+                />
               </React.Suspense>
             </div>
           ) : (

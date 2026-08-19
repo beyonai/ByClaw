@@ -756,6 +756,15 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
                       {project.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' })}
                     </span>
                   </button>
+                  <WorkspaceProjectActions
+                    project={project}
+                    onNewSession={handleNewProjectSession}
+                    onRefreshSessions={(currentProject) =>
+                      void fetchProjectSessions(normalizeProjectId(currentProject.projectId), { force: true })
+                    }
+                    onProjectChanged={handleProjectChanged}
+                    refreshing={Boolean(sessionStateMap[projectId]?.loading)}
+                  />
                   <button
                     type="button"
                     className={styles.projectExpandButton}
@@ -766,15 +775,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
                   >
                     {isExpanded ? <DownOutlined /> : <RightOutlined />}
                   </button>
-                  <WorkspaceProjectActions
-                    project={project}
-                    onNewSession={handleNewProjectSession}
-                    onRefreshSessions={(currentProject) =>
-                      void fetchProjectSessions(normalizeProjectId(currentProject.projectId), { force: true })
-                    }
-                    onProjectChanged={handleProjectChanged}
-                    refreshing={Boolean(sessionStateMap[projectId]?.loading)}
-                  />
                 </div>
                 {isExpanded && renderProjectSessions(project)}
               </div>

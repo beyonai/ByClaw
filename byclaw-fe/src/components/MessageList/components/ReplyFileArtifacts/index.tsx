@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
 import FileRender from '@/components/MessageList/components/FileRender';
+import { createRelativePathResourceResolver } from '@/components/MessageList/components/FileRender/components/Previewer/relativeResource';
 import getDisplayAnswer from '@/components/QueryInput/getDisplayAnswer';
 import { ChatFileArtifact, downloadChatFileArtifact, resolveChatFileArtifacts } from '@/service/chatFileArtifact';
 import { IMessageState } from '@/constants/message';
@@ -90,6 +91,10 @@ function ReplyFileArtifacts({ message, sessionId }: { message: IMessage; session
         status: 'done',
         fileType: 'file',
         downloadRequest: () => downloadChatFileArtifact({ sessionId: resolvedSessionId, path: artifact.path }),
+        resolvePreviewResource: createRelativePathResourceResolver(artifact.path, async (path) => {
+          const response = await downloadChatFileArtifact({ sessionId: resolvedSessionId, path });
+          return response.file;
+        }),
         queryFile: {
           fileName: artifact.fileName,
           filePath: artifact.path,

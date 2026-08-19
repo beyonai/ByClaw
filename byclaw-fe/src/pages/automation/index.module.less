@@ -578,11 +578,33 @@
 }
 
 .intervalField {
-  height: 32px;
   min-height: 32px;
-  max-height: 32px;
-  display: inline-flex;
-  align-items: center;
+  display: flex;
+  align-items: flex-start;
+}
+
+.intervalValueItem {
+  margin-bottom: 0 !important;
+}
+
+.intervalError {
+  align-self: center;
+  flex: 0 1 auto;
+  margin-left: 12px;
+  color: #ff4d4f;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.intervalHint {
+  align-self: center;
+  flex: 0 1 auto;
+  margin-left: 12px;
+  color: #141414a6;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
 }
 
 .intervalValueField,
@@ -595,6 +617,9 @@
 .intervalValueField {
   width: 110px !important;
 
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+
   :global(.@{antPrefix}-input-number-input-wrap) {
     height: 30px;
   }
@@ -602,10 +627,13 @@
 
 .intervalUnitField {
   width: 92px !important;
+  margin-left: -1px;
 
   :global(.@{antPrefix}-select-selector) {
     height: 30px;
     min-height: 30px;
+    border-top-left-radius: 0 !important;
+    border-bottom-left-radius: 0 !important;
   }
 }
 
