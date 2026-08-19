@@ -108,6 +108,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
       { value: 'Xiaohongshu', label: platformT('xiaohongshu') },
       { value: 'WeChatChannels', label: platformT('video') },
       { value: 'Douyin', label: platformT('douyin') },
+      { value: 'CustomLink', label: platformT('customLink') },
     ],
     [platformT]
   );
@@ -324,7 +325,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
               const platform = platformOptionMap.get(account.platformId);
               const platformLabel = platform?.label || account.platformId;
               const status = account.loginStatus || 'unknown';
-              // 当前支持的四个运营平台均通过 UI Agent 浏览器登录，历史短编码继续兼容。
+              // 当前支持的四个运营平台均通过 UI Agent 浏览器登录，历史短编码继续兼容。自定义链接平台也支持登录。
               const canLogin = [
                 'WeChatAccount',
                 'wechat',
@@ -334,6 +335,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
                 'video',
                 'Douyin',
                 'douyin',
+                'CustomLink',
               ].includes(account.platformId);
               const canEditAccount = canSaveAccount && account.canEdit !== false;
               return (

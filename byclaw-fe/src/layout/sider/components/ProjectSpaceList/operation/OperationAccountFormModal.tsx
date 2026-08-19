@@ -30,6 +30,7 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
   const [submitting, setSubmitting] = useState(false);
   // 状态更新存在一个渲染间隔，使用同步标记拦截这个间隔内的连续点击。
   const submittingRef = useRef(false);
+  const [selectedPlatform, setSelectedPlatform] = useState<string>(account?.platformId || '');
   const t = useCallback((id: string) => intl.formatMessage({ id: `projectSpace.operation.accountForm.${id}` }), [intl]);
   const platformT = useCallback(
     (id: string) => intl.formatMessage({ id: `projectSpace.operation.platform.${id}` }),
@@ -43,6 +44,7 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
       { value: 'Xiaohongshu', label: platformT('xiaohongshu') },
       { value: 'WeChatChannels', label: platformT('video') },
       { value: 'Douyin', label: platformT('douyin') },
+      { value: 'CustomLink', label: platformT('customLink') },
     ],
     [platformT]
   );
@@ -54,12 +56,29 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
     if (!open) return;
     // 每次打开都按当前编辑对象重置，避免上一次新增或编辑残留到下一次操作。
     form.resetFields();
+    const platformId = account?.platformId || defaultPlatformId;
+    setSelectedPlatform(platformId);
     form.setFieldsValue({
-      platformId: account?.platformId || defaultPlatformId,
+      platformId,
       accountName: account?.accountName || '',
       accountId: account?.accountId || '',
+      customUrl: account?.customUrl || '',
     });
   }, [account, defaultPlatformId, form, open]);
+
+  // 当切换到自定义链接平台时，清空账号名称和账号ID字段的值和验证错误
+  useEffect(() => {
+    if (selectedPlatform === 'CustomLink') {
+      form.setFieldsValue({
+        accountName: '',
+        accountId: '',
+      });
+      form.setFields([
+        { name: 'accountName', errors: [], value: '' },
+        { name: 'accountId', errors: [], value: '' },
+      ]);
+    }
+  }, [selectedPlatform, form]);
 
   const handleSubmit = useCallback(async () => {
     if (loading || submittingRef.current) return;
@@ -68,6 +87,11 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
     setSubmitting(true);
     try {
       const values = await form.validateFields();
+      // 自定义链接平台不需要账号名称和账号ID，清空这些字段
+      if (values.platformId === 'CustomLink') {
+        values.accountName = '';
+        values.accountId = '';
+      }
       await onSubmit(values, account);
     } catch (error) {
       if (!isFormValidationError(error)) {
@@ -114,24 +138,54 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
               optionType="button"
               buttonStyle="solid"
               options={availablePlatformOptions}
+              onChange={(e) => setSelectedPlatform(e.target.value)}
             />
           </Form.Item>
-          <Form.Item
-            className={styles.operationFormHalf}
-            label={t('field.accountName')}
-            name="accountName"
-            rules={[{ required: true, whitespace: true, message: t('validation.accountNameRequired') }]}
-          >
-            <Input placeholder={t('placeholder.accountName')} />
-          </Form.Item>
-          <Form.Item
-            className={styles.operationFormHalf}
-            label={t('field.accountId')}
-            name="accountId"
-            rules={[{ required: true, whitespace: true, message: t('validation.accountIdRequired') }]}
-          >
-            <Input placeholder={t('placeholder.accountId')} />
-          </Form.Item>
+          {selectedPlatform === 'CustomLink' && (
+            <Form.Item
+              className={styles.operationFormFull}
+              label={t('field.customUrl')}
+              name="customUrl"
+              rules={[
+                { required: true, message: t('validation.customUrlRequired') },
+                { type: 'url', message: t('validation.customUrlInvalid') },
+              ]}
+            >
+              <Input placeholder={t('placeholder.customUrl')} />
+            </Form.Item>
+          )}
+          {selectedPlatform !== 'CustomLink' && (
+            <>
+              <Form.Item
+                className={styles.operationFormHalf}
+                label={t('field.accountName')}
+                name="accountName"
+                rules={[
+                  {
+                    required: selectedPlatform !== 'CustomLink',
+                    whitespace: true,
+                    message: t('validation.accountNameRequired'),
+                  },
+                ]}
+              >
+                <Input placeholder={t('placeholder.accountName')} />
+              </Form.Item>
+              <Form.Item
+                className={styles.operationFormHalf}
+                label={t('field.accountId')}
+                name="accountId"
+                rules={[
+                  {
+                    required: selectedPlatform !== 'CustomLink',
+                    whitespace: true,
+                    message: t('validation.accountIdRequired'),
+                  },
+                ]}
+              >
+                <Input placeholder={t('placeholder.accountId')} />
+              </Form.Item>
+            </>
+          )}
         </div>
       </Form>
     </Modal>

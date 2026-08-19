@@ -555,6 +555,8 @@ export type OperationAccountPayload = {
   platformCode: string;
   accountCode: string;
   accountName: string;
+  /** 自定义链接平台的登录地址，仅 platformCode 为 CustomLink 时提交。 */
+  customUrl?: string;
 };
 
 export const listOperationAccounts = (projectId: number) =>

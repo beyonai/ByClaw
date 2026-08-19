@@ -247,6 +247,7 @@ CREATE TABLE byai_project_account
     account_name  VARCHAR(100),
     status        VARCHAR(20) NOT NULL DEFAULT 'connected',
     login_status  VARCHAR(20),
+    custom_url    VARCHAR(500),
     config        TEXT,
     metrics       TEXT,
     create_by     BIGINT,
@@ -261,11 +262,12 @@ CREATE TABLE byai_project_account
 COMMENT ON TABLE byai_project_account IS '运营账号表';
 COMMENT ON COLUMN byai_project_account.account_id IS '账号ID（PK）';
 COMMENT ON COLUMN byai_project_account.project_id IS '所属项目ID → byai_project.project_id';
-COMMENT ON COLUMN byai_project_account.platform_code IS '平台编码：WeChatAccount-微信公众号 / Xiaohongshu-小红书 / WeChatChannels-视频号 / Internet-互联网 / GitHub-GitHub';
+COMMENT ON COLUMN byai_project_account.platform_code IS '平台编码：WeChatAccount-微信公众号 / Xiaohongshu-小红书 / WeChatChannels-视频号 / CustomLink-自定义链接 / Internet-互联网 / GitHub-GitHub';
 COMMENT ON COLUMN byai_project_account.account_code IS '账号编码（平台账号唯一标识，如 oa-beyond-ai）';
 COMMENT ON COLUMN byai_project_account.account_name IS '账号名称（如 BeyondAI实验室）';
 COMMENT ON COLUMN byai_project_account.status IS '连接状态：connected-已连接 / disconnected-未连接';
 COMMENT ON COLUMN byai_project_account.login_status IS '登录状态：online-已登录 / offline-未登录';
+COMMENT ON COLUMN byai_project_account.custom_url IS '自定义链接平台的登录URL，仅当 platform_code = CustomLink 时使用';
 COMMENT ON COLUMN byai_project_account.config IS '账号配置，TEXT 存 JSON 字符串（粉丝数、作品数等静态概要）';
 COMMENT ON COLUMN byai_project_account.metrics IS '运营指标，TEXT 存 JSON 字符串：{"followers":"12.8万","works":"286","reads":"34.6万","growth":"+8.4%"}';
 COMMENT ON COLUMN byai_project_account.create_by IS '创建人';
@@ -273,6 +275,9 @@ COMMENT ON COLUMN byai_project_account.create_time IS '创建时间';
 COMMENT ON COLUMN byai_project_account.update_by IS '更新人';
 COMMENT ON COLUMN byai_project_account.update_time IS '更新时间';
 COMMENT ON COLUMN byai_project_account.status_cd IS '状态：00A-有效 / 00X-无效';
+
+-- 为自定义链接平台添加复合索引，提高查询性能
+CREATE INDEX idx_project_account_platform_custom ON byai_project_account(platform_code, custom_url);
 
 
 /**账号-发布作品明细表**/

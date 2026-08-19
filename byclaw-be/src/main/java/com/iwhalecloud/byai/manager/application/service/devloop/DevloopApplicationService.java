@@ -6151,12 +6151,34 @@ public class DevloopApplicationService {
         if (editing && dto.getAccountId() == null) {
             return I18nUtil.get("devloop.operationAccount.id.required");
         }
-        if (StringUtils.isBlank(dto.getPlatformCode()) || StringUtils.isBlank(dto.getAccountCode())
-            || StringUtils.isBlank(dto.getAccountName())) {
+        if (StringUtils.isBlank(dto.getPlatformCode())) {
             return I18nUtil.get("devloop.operationAccount.field.required");
         }
-        if (dto.getPlatformCode().trim().length() > 20 || dto.getAccountCode().trim().length() > 100
-            || dto.getAccountName().trim().length() > 100) {
+
+        // 自定义链接平台：只需验证 customUrl，accountCode 和 accountName 可选
+        if ("CustomLink".equals(dto.getPlatformCode())) {
+            if (StringUtils.isBlank(dto.getCustomUrl())) {
+                return I18nUtil.get("devloop.operationAccount.customUrl.required");
+            }
+            try {
+                new java.net.URL(dto.getCustomUrl().trim());
+            } catch (java.net.MalformedURLException e) {
+                return I18nUtil.get("devloop.operationAccount.customUrl.invalid");
+            }
+            if (dto.getCustomUrl().trim().length() > 500) {
+                return I18nUtil.get("devloop.operationAccount.customUrl.length.invalid");
+            }
+        } else {
+            // 其他平台：accountCode 和 accountName 必填
+            if (StringUtils.isBlank(dto.getAccountCode()) || StringUtils.isBlank(dto.getAccountName())) {
+                return I18nUtil.get("devloop.operationAccount.field.required");
+            }
+            if (dto.getAccountCode().trim().length() > 100 || dto.getAccountName().trim().length() > 100) {
+                return I18nUtil.get("devloop.operationAccount.field.length.invalid");
+            }
+        }
+
+        if (dto.getPlatformCode().trim().length() > 20) {
             return I18nUtil.get("devloop.operationAccount.field.length.invalid");
         }
         return null;
@@ -6168,8 +6190,20 @@ public class DevloopApplicationService {
     private void applyOperationAccountDto(OperationAccount target, OperationAccountDTO dto) {
         target.setProjectId(dto.getProjectId());
         target.setPlatformCode(dto.getPlatformCode().trim());
-        target.setAccountCode(dto.getAccountCode().trim());
-        target.setAccountName(dto.getAccountName().trim());
+
+        // 自定义链接平台：accountCode 和 accountName 使用默认值（如果前端未提供）
+        if ("CustomLink".equals(dto.getPlatformCode())) {
+            target.setAccountCode(StringUtils.isNotBlank(dto.getAccountCode())
+                ? dto.getAccountCode().trim() : "custom");
+            target.setAccountName(StringUtils.isNotBlank(dto.getAccountName())
+                ? dto.getAccountName().trim() : "自定义链接");
+            target.setCustomUrl(StringUtils.isNotBlank(dto.getCustomUrl())
+                ? dto.getCustomUrl().trim() : null);
+        } else {
+            target.setAccountCode(dto.getAccountCode().trim());
+            target.setAccountName(dto.getAccountName().trim());
+            target.setCustomUrl(null);
+        }
     }
 
     /**
@@ -6304,6 +6338,10 @@ public class DevloopApplicationService {
         result.put("status", account.getStatus());
         result.put("metrics", resolveOperationAccountMetrics(account));
         result.put("canEdit", true);
+        // 自定义链接平台返回登录URL供前端使用
+        if (StringUtils.isNotBlank(account.getCustomUrl())) {
+            result.put("customUrl", account.getCustomUrl());
+        }
         return result;
     }
 

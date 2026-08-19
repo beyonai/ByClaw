@@ -2023,12 +2023,16 @@ const ProjectDetailPanel: React.FC<Props> = ({
       if (!projectId) return;
       setOperationAccountSaving(true);
       try {
-        const payload = {
+        const payload: any = {
           projectId,
           platformCode: values.platformId,
-          accountCode: values.accountId,
-          accountName: values.accountName,
+          accountCode: values.platformId === 'CustomLink' ? '' : values.accountId,
+          accountName: values.platformId === 'CustomLink' ? '' : values.accountName,
         };
+        // 自定义链接平台需要传递 customUrl
+        if (values.platformId === 'CustomLink') {
+          payload.customUrl = values.customUrl || '';
+        }
         if (account) {
           await updateOperationAccount({ ...payload, accountId: account.id });
         } else {
@@ -2086,7 +2090,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 沙箱准备完成后立即打开远程桌面，再异步导航登录页，避免导航等待期间用户看不到扫码入口。
   const handleLoginOperationAccount = useCallback(
     async (account: OperationAccount) => {
-      const loginUrl = OPERATION_PLATFORM_LOGIN_URLS[account.platformId];
+      // 自定义链接平台使用账号自带的 customUrl，其他平台使用预设的登录地址
+      const loginUrl = account.platformId === 'CustomLink'
+        ? account.customUrl
+        : OPERATION_PLATFORM_LOGIN_URLS[account.platformId];
       if (!loginUrl || operationAccountLoginPreparingId !== null) return;
       setOperationAccountLoginPreparingId(account.id);
       try {

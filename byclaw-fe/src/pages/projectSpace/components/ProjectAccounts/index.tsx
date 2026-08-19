@@ -44,6 +44,7 @@ const normalizeAccounts = (source: unknown): OperationAccount[] => {
       loginStatus: normalizeLoginStatus(item),
       metrics: item.metrics,
       canEdit: item.canEdit,
+      customUrl: item.customUrl || undefined,
     }))
     .filter((item) => item.platformId && item.accountName);
 };
@@ -74,11 +75,14 @@ const ProjectAccounts: React.FC<Props> = ({ project, keyword = '', onToolbarChan
     async (values: OperationAccountFormValues, account?: OperationAccount | null) => {
       setSaving(true);
       try {
+        const isCustomLink = values.platformId === 'CustomLink';
+        // 自定义链接平台不填账号名称和标识，后端按平台补默认值，只需提交登录地址。
         const payload = {
           projectId: Number(project.projectId),
           platformCode: values.platformId,
-          accountCode: values.accountId,
-          accountName: values.accountName,
+          accountCode: isCustomLink ? '' : values.accountId,
+          accountName: isCustomLink ? '' : values.accountName,
+          ...(isCustomLink ? { customUrl: values.customUrl || '' } : {}),
         };
         if (account) {
           await updateOperationAccount({ ...payload, accountId: account.id });
