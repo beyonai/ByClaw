@@ -51,10 +51,13 @@
 
 1. 用 `init --mode research --session-dir <dir> --query "..." [--breadth N] [--depth N]
    [--deadline-minutes M] [--max-branches N] [--max-sources-per-branch N] [--max-search-rounds N]` 创建会话。
-2. 做一次初步检索,覆盖多个角度,委派**双信源互补检索**:
+2. 做一次初步检索,覆盖多个角度,委派**三信源互补检索**:
    - 内置路由层([agent-reach.md](agent-reach.md)): Exa 搜索、gh、RSS、站内搜索等渠道;
    - `online_search`(searxng 多引擎技能): 时间窗(`--time-range day/week/month/year`)、
-     中文引擎(baidu/sogou/360search)、学术类别(`--category science`,含 arxiv/crossref/pubmed/openalex)。
+     中文引擎(baidu/sogou/360search)、学术类别(`--category science`,含 arxiv/crossref/pubmed/openalex);
+   - `hot_discovery`(热度发现通道子技能): 经 bycli 适配器取平台原生热度(`citations`/`downloads`/`stars`/`score`)，
+     与 searxng 并行跑后用其 `merge` 归并，双通道命中优先级最高。覆盖 packages/science/it/q&a/repos/apps/books/movies
+     9 个维度，详见 [online-search.md](online-search.md)「热度发现通道」节。
 3. 基于初步结果生成若干澄清问题或研究方面;用户没有回答时,记录合理假设继续。
 4. 用 `plan` 记录初始检索、follow-up 与合并起始查询(`--initial-search` / `--followups` 传 JSON 数组,`--combined-query` 传文本)。
 

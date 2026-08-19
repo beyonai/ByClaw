@@ -7,11 +7,7 @@ description: Use when the goal is to COLLECT and keep material rather than just 
 
 这是面向用户的默认知识采集编排 Skill。采集编排器 `knowledge-collection` 判断采集意图、编排深化研究、选择来源执行器，并衔接后处理；
 内置公共互联网路由层 [references/agent-reach.md](references/agent-reach.md)（原 By-Reach 路由器）负责渠道选择，
-网站执行器 `bycli` 或其他来源执行器负责取得内容。
-
-**取内容前先读这一条**：采集编排器自身永不取内容。任何一次取内容都必须先按下面的「来源路由」委派来源执行器，
-不得使用 `web_fetch`、`curl`、`wget`、`requests` 或其他直接 HTTP 客户端自行抓取。已经用直连拿到内容时，
-该结果作废，按规范流程重新采集，不得据此产出采集产物。
+网站执行器 `bycli` 或其他来源执行器负责取得内容。采集编排器自身永不取内容，任何一次取内容都必须先按下面的「来源路由」委派来源执行器。
 
 ## 查询 vs 采集
 
@@ -57,6 +53,50 @@ description: Use when the goal is to COLLECT and keep material rather than just 
 
 用户只需要单步采集时，同一链路退化为单分支（depth=1）：框架 → 检索 → 抓取 → 登记 → 后处理。
 
+### 分支登记的硬前置
+
+`branch --status done` 有四项前置，缺任一项都会被拒绝。一次准备齐全，不要靠逐次报错试出来：
+
+- `--research-goal`：非空；
+- `--learnings`：JSON 字符串数组，**至少一条**；
+- `--sources`：JSON 数组，其中每个 URL **必须已经过 `collect` 登记进 inventory**；未登记会报
+  `source 未登记在 inventory: <url>。请先经 collect 登记该来源`；
+- `--citations`：JSON 对象，**至少一条**，value 必须是 inventory 的 `itemId` 或已登记 `sourceUrl`。
+
+顺序含义：**先 `collect` 再 `branch`**。没有已登记的正文，就不存在"这一层研究成功了"这回事——
+这条约束正是用来阻止「只抓 snippet 就当证据」的，不要试图绕过它去先登记分支。
+
+### 抓取失败必须登记为 failed 分支
+
+抓取失败（超时、反爬、登录态失效、执行器报错、`--max-pages` 截断）时，**唯一的登记通道**是：
+
+```bash
+node scripts/knowledge-collection.mjs branch --session-dir <dir> \
+  --level <N> --query "<失败的调查方向>" --status failed --reason "<具体原因>"
+```
+
+`--reason` 在 `status=failed` 时强制必填，脚本不接受空原因。`failed` 分支不要求 learnings/sources/citations，
+所以**没有任何理由跳过登记**。
+
+失败后的正确动作是登记 failed 分支并继续其他分支，**不是**换用 `web_fetch` / `curl` 重试，也**不是**
+当作没发生过。抓取失败是研究结论的一部分；未登记的失败等于伪造了覆盖面。
+
+站点爬取的页面级失败走 `crawl-mark --status failed`（同样强制 `reason`），不必为每个失败页面单独建分支。
+
+### 报告正文必须披露失败
+
+`report` **不校验**正文内容，也不检查是否存在 failed 分支——它只校验分支数非零、深度达标、报告文件存在且非空。
+一份完全不提失败的报告能被正常放行。因此披露是**规范义务，不是脚本保障**：
+
+- `report.md` 正文必须有**独立章节**披露失败与覆盖范围限制。章节标题可以是「覆盖缺口」「数据局限」「研究限制」
+  或其他语义等价表述，不要求字面匹配，但必须单独成章（不得只在结论段落里一笔带过）。
+- 该章节必须列出**全部** failed 分支的调查方向与 `reason`，并说明缺口对结论的影响。
+- `--max-pages` 放弃的页数与 `crawl-mark` 的 `failed` 页面也必须写入该章节。
+- 一次失败都没有时，明确写"本次研究无覆盖缺口"或"无数据局限"，不要省略该章节。
+
+`research-tree.md` 由脚本渲染，会逐层输出每个分支的 `status` 与 `reason`（含中间层）。但用户读的是
+`report.md`——**tree 里有不等于报告里有**。不得让部分覆盖读起来像全面覆盖。
+
 ## 统一状态与命令
 
 会话的唯一状态文件是 `<session-dir>/session.json`（schemaVersion 2.0，task + research + collection 一体化），
@@ -72,9 +112,33 @@ description: Use when the goal is to COLLECT and keep material rather than just 
 所有命令都支持 `<command> --help` 查看参数、示例与 payload 说明；`help` 显示分组总览。
 平台命令不要求 `--session-dir`(门面会直接委派 `ingest.mjs`)。
 
-`collection-result.json` 与 `sanitized/metadata.json` 由 `export-views` 生成的兼容导出视图；旧会话（仅有
-collection-result.json + sanitized/metadata.json）首次读写自动迁移为 session.json。
-脚本与产物契约见 [references/collection-contract.md](references/collection-contract.md)。
+**`normalize` 的真实角色**：它是 `ingest` 的 dry-run 预检，与 `ingest` 共用 payload 构建逻辑，只校验不请求后端，
+结果写入 stdout、**不落盘任何文件**。它的 `payloads.collectionResult.items[].markdown` 是正文字符串（用于 ingest 上传），
+而 `collect` 要的是相对路径（指向已物化的 `.md` 文件），两者结构不兼容。因此 `normalize` **不是采集环节**，
+它的输出无法喂给 `collect`。登记采集产物一律直接用 `collect`，不要把 `normalize` 误当作前置步骤。
+
+### 状态文件关系与读写时序
+
+系统同时存在三个 JSON 文件，各有不同角色：
+
+1. **`session.json`（权威状态，schemaVersion 2.0）**
+   - 由 `knowledge-collection.mjs` 统一读写，包含 task + research + collection 完整状态
+   - 所有命令（`init`/`branch`/`collect`/`run`/`cleanup` 等）的修改都直接作用于它
+   - 禁止手工编辑
+
+2. **`collection-result.json`（双重角色）**
+   - **作为执行器产物输入契约**：来源执行器（bycli/dws/fws 等）抓取完成后写入，供 `init --collection-result-input-file` 或 `collect` 读取
+   - **作为导出视图**：`export-views` 从 session.json 重新生成，供外部消费者读取
+   - `collect` 成功后会更新它（同步 canonical view）
+
+3. **`sanitized/metadata.json`（纯导出视图）**
+   - 由 `export-views` 从 session.json 生成，供 fileBrowser 预览与旧消费者使用
+   - 包含完整 inventory、物化状态、保留策略、后处理运行历史
+   - 不作为任何命令的输入
+
+**时序**：执行器写 collection-result.json → `init`/`collect` 读取并更新 session.json → `export-views` 生成两个视图文件。
+旧会话（仅有后两者）首次读写自动迁移为 session.json，不删除旧文件。
+完整契约见 [references/collection-contract.md](references/collection-contract.md)。
 
 ## 来源路由
 
@@ -93,12 +157,20 @@ collection-result.json + sanitized/metadata.json）首次读写自动迁移为 s
 
 路由表首选执行器与 `bycli` 兜底返回的结果必须统一进入同一套 collection contract，不得按执行后端分叉产物协议。
 
-委派来源执行器时，采集编排器明确声明当前调用采用“委派采集模式”。该模式的契约是：
+### 委派采集模式
 
-- 委派采集模式优先于来源执行器的通用采集后处理规则。
-- 来源执行器只负责采集并返回结果，不得自行执行或询问后处理。
-- 来源执行器不得询问 `入库 / 知识整理 / 跳过`。
-- 来源执行器不得反向加载 `knowledge-collection`。
+委派来源执行器时，采集编排器在**自然语言指令中明确声明**当前调用采用”委派采集模式”（例如”加载并遵循 bycli skill，以委派采集模式先用 `published` 命令...”）。
+该声明不通过环境变量或 CLI 参数传递，而是作为调用上下文的一部分——执行器读取调用者的意图描述即可识别。
+
+**契约内容**：
+
+- 委派采集模式优先于来源执行器的通用采集后处理规则
+- 来源执行器只负责采集并返回结构化结果（写入 `collection-result.json` + 正文文件），**不得**自行执行或询问后处理
+- 来源执行器**不得**询问 `入库 / 知识整理 / 跳过`
+- 来源执行器**不得**反向加载 `knowledge-collection`
+- 委派模式不改变执行器的命令、授权、浏览器生命周期或 Adapter 验证规则（例如 byCLI 的微信登录流程不因委派而简化）
+
+统一持久化、产物协议、后处理、入库或知识整理均由 `knowledge-collection` 负责。
 
 ## 站点爬取（多页文档）
 
@@ -128,11 +200,32 @@ frontier 流程只用在"通读官方文档站"这类分支的抓取环节。
 
 ## 闭环执行顺序
 
-1. 来源执行器返回结果后，先建立或加载正式会话。没有自带受测会话 writer 时必须调用 `init`；不得直接修改正式 metadata。
-   公共网页执行器（bycli 等）只返回原始结果时，先经 `normalize` 生成规范的 `collection-result.json` 与 `sanitized/items/*.md`，
-   再进入会话登记；不得跳过 normalize 手工伪造契约文件。
-2. 每层深化研究的抓取结果经 `collect` 登记并物化；未物化正文缺失时，按 inventory 恢复描述重新物化，并通过 `collect` 重新登记。
-   `collect` 成功后脚本会删除 `.post-processing-inputs/` 中的输入 payload，失败时保留。
+1. **建立或加载会话**
+   
+   来源执行器返回结果（`collection-result.json` + 正文文件）后，决策路径：
+   
+   - **新采集任务**：调用 `init --mode collection --collection-result-input-file <执行器产物>`。
+     **关键**：必须在 `--collection-result-input-file` 指向的 JSON 里声明 `backend`（例如 `"backend":"bycli"`），
+     它决定后续每个条目的 `sourceSkill`，**init 之后无法补声明**。
+   
+   - **已有会话，追加正文**：把新正文拷进会话目录（`markdown/` 和 `sanitized/items/`），
+     然后直接调用 `collect --item-json-file <payload>`。
+   
+   **`collect` 的自动补登机制**（[collection-state.mjs:1782-1806](scripts/collection-state.mjs#L1782-L1806)）：
+   - 触发条件：inventory 中**不存在**该 `itemId`
+   - 补登来源：从 payload 的 `canonicalItem.url` 提取 `sourceUrl`，从**会话已有的** `collectionResult.backend` 推导 `sourceSkill`
+   - 初始状态：`materialization.status='pending'`，脚本随后按文件存在性更新为 `materialized`
+   - **不触发的情况**：inventory 已存在该 `itemId`（无论当前状态是 `materialized`/`pending`/`failed`），
+     此时 `collect` 更新已有条目的 `materialization`，不创建新条目
+   
+   **禁止手工伪造**：不得手写 `sanitized/metadata.json` 的 inventory，也不得手工伪造 `collection-result.json`——
+   后者有两个角色（执行器产物 vs `export-views` 导出视图），只有前者可以手写，后者是生成的。
+   完整步骤见 [collection-contract.md](references/collection-contract.md)「已抓好一批正文后登记会话」。
+
+2. **登记采集产物**
+   
+   每层深化研究的抓取结果经 `collect` 登记并物化。未物化正文缺失时，按 inventory 的恢复描述（`sourceSkill` + `sourceUrl` + `rawArtifacts`）
+   重新物化，并通过 `collect` 重新登记。`collect` 成功后脚本删除 `.post-processing-inputs/` 中的输入 payload，失败时保留。
 3. 一次只执行一种后处理。入库只采用 ingest 返回的顶层 `itemResults`；知识整理和外部消费也必须生成可按 `itemId` 验证的逐篇结果。
 4. 将本次选择、目标、逐篇结果和运行级状态通过 `run` 原子回写。无法证明的结果记为 `unknown`，不得猜测成功。
 5. 仅在 run 已成功记录后调用 `cleanup`。partial、failed、unknown、跳过或保留策略生效时，按后处理契约保留会话并从 `inspect` 续跑。

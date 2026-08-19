@@ -144,7 +144,11 @@ node scripts/knowledge-collection.mjs collect --session-dir <dir> \
   --item-json-file <dir>/.post-processing-inputs/batch.json
 ```
 
-`collect` 的批量 payload：
+`collect` 的批量 payload。**前置依赖：会话必须已声明 `backend`**（上面第 1 步的
+`--collection-result-input-file`）。`collect` 从**会话已有的** `collectionResult.backend` 推导每个条目的
+`sourceSkill`，**不读 payload 里的 `backend` 或 `sourceSkill` 字段**——把它们写进下面的 payload 不起作用，
+会话缺 `backend` 时报 `inventory item-01 sourceSkill 必须是非空字符串`。
+该报错指向 init 阶段的遗漏，不是 payload 字段缺失，照着改 payload 无法修复。
 
 ```json
 {
