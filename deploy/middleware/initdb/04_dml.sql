@@ -2903,7 +2903,7 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
     "ownerType": "personal",
     "agentType": "001",
     "relTools": ["*"],
-    "relSkills": ["dws"],
+    "relSkills": ["dws","by-skill-installer"],
     "skillPath": "",
     "prompts": [
       {
@@ -2938,7 +2938,7 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
     "ownerType": "enterprise",
     "agentType": "001",
     "relTools": ["*"],
-    "relSkills": [],
+    "relSkills": ["by-skill-installer"],
     "skillPath": "",
     "prompts": [
       {
