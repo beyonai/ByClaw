@@ -24,6 +24,7 @@ import type {
 import {
   abortError,
   extractContent,
+  extractContentType,
   extractDisplayEvent,
   extractError,
   extractUserInput,
@@ -50,6 +51,8 @@ export interface ByFrameworkConnectorOptions {
   sourceAgentType?: string;
   firstEventTimeoutMs?: number;
   cancelConfirmationTimeoutMs?: number;
+  /** 仅供 BYCLAW_CODE：把 reasoning 生命周期外的 1002 子会话文本恢复成回答正文。 */
+  promoteOutOfReasoningTextToOutput?: boolean;
 }
 
 /**
@@ -74,6 +77,7 @@ export class ByFrameworkConnector implements AgentConnector {
   readonly #sourceAgentType: string;
   readonly #firstEventTimeoutMs: number;
   readonly #cancelConfirmationTimeoutMs: number;
+  readonly #promoteOutOfReasoningTextToOutput: boolean;
   readonly #targetAgentTypeResolver: (request: ConnectorRequest) => string;
 
   /** 可注入 Redis 和 GatewayClient 以支持测试；缺省时创建并持有真实连接。 */
@@ -94,6 +98,8 @@ export class ByFrameworkConnector implements AgentConnector {
     this.#sourceAgentType = options.sourceAgentType ?? "BY_SUPER";
     this.#firstEventTimeoutMs = options.firstEventTimeoutMs ?? 300_000;
     this.#cancelConfirmationTimeoutMs = options.cancelConfirmationTimeoutMs ?? 30_000;
+    this.#promoteOutOfReasoningTextToOutput =
+      options.promoteOutOfReasoningTextToOutput === true;
   }
 
   /**
@@ -362,6 +368,7 @@ export class ByFrameworkConnector implements AgentConnector {
     const stream = QueueNames.session_data_stream(sessionId);
     let cursor = startCursor;
     let output = "";
+    let childReasoningOpen = false;
     const toolNames = new Map<string, string>();
     let firstEventReceived = false;
     const firstEventDeadline = Date.now() + this.#firstEventTimeoutMs;
@@ -404,10 +411,12 @@ export class ByFrameworkConnector implements AgentConnector {
           continue;
         }
         firstEventReceived = true;
-        if (
-          message.event_type === EventType.REASONING_LOG_START ||
-          message.event_type === EventType.REASONING_LOG_END
-        ) {
+        if (message.event_type === EventType.REASONING_LOG_START) {
+          childReasoningOpen = true;
+          continue;
+        }
+        if (message.event_type === EventType.REASONING_LOG_END) {
+          childReasoningOpen = false;
           continue;
         }
         if (message.event_type === EventType.ANSWER_DELTA) {
@@ -449,6 +458,22 @@ export class ByFrameworkConnector implements AgentConnector {
               resumeToken: input.resumeToken,
               cursor,
             };
+            continue;
+          }
+          const contentType = extractContentType(message.data);
+          const content = extractContent(message.data);
+          // byai-channel 为了让子会话正文显示在父会话思考树里，会把 assistant answer
+          // 编码为 reasoningLogDelta/1002，而不是 answerDelta。真正的 thinking/1002 一定
+          // 位于 reasoningLogStart..End 生命周期内；生命周期外的 1002 必须恢复为输出，
+          // 否则前端虽然能看到正文，DelegationService 和 Leader 拿到的 result.output 却为空。
+          if (
+            this.#promoteOutOfReasoningTextToOutput &&
+            contentType === "1002" &&
+            !childReasoningOpen &&
+            content
+          ) {
+            output += content;
+            yield { type: "output_delta", text: content, cursor };
             continue;
           }
           const displayEvent = extractDisplayEvent(message);

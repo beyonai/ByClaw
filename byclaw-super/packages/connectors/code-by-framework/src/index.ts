@@ -7,7 +7,7 @@ export const CODE_BY_FRAMEWORK_CONNECTOR_ID = "code-by-framework";
 
 export type CodeByFrameworkConnectorOptions = Omit<
   ByFrameworkConnectorOptions,
-  "connectorId" | "targetAgentTypeResolver"
+  "connectorId" | "targetAgentTypeResolver" | "promoteOutOfReasoningTextToOutput"
 >;
 
 /** 通过 by-framework Gateway/Redis 协议连接当前用户的 ByClaw Code Worker。 */
@@ -17,6 +17,8 @@ export class CodeByFrameworkConnector extends ByFrameworkConnector {
       ...options,
       connectorId: CODE_BY_FRAMEWORK_CONNECTOR_ID,
       targetAgentTypeResolver: (request) => `BYCLAW_CODE_${request.userCode}`,
+      // BYCLAW_CODE 的子会话 assistant 正文使用 reasoningLogDelta/1002 承载。
+      promoteOutOfReasoningTextToOutput: true,
     });
   }
 }

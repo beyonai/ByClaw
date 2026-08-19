@@ -78,6 +78,76 @@ export interface ByClawSuperWorkerOptions {
 }
 
 /**
+ * 2020 的 json 字段本身就是待展示的字符串。对象需要序列化，字符串则应直接输出；
+ * 对历史链路中已经 JSON 编码过一到两次的字符串做有限解包，避免前端看到成片反斜杠。
+ */
+function normalizeDisplayValue(value: unknown): unknown {
+  if (typeof value !== "string") {
+    return value ?? null;
+  }
+
+  let current = value;
+  for (let depth = 0; depth < 2; depth += 1) {
+    try {
+      const parsed: unknown = JSON.parse(current);
+      if (typeof parsed === "string") {
+        if (parsed === current) {
+          return current;
+        }
+        current = parsed;
+        continue;
+      }
+      return parsed;
+    } catch {
+      return current;
+    }
+  }
+  return current;
+}
+
+function formatDetailJson(value: unknown): string {
+  const normalized = normalizeDisplayValue(value);
+  return typeof normalized === "string" ? normalized : JSON.stringify(normalized, null, 2);
+}
+
+type DelegationToolCardState = {
+  title: string;
+  description: string;
+  input?: unknown;
+  output?: unknown;
+};
+
+function toolCardTitle(toolName: string, upstreamTitle: string): string {
+  if (/^\s*加载技能\s*[:：]/u.test(upstreamTitle)) {
+    return "Skill";
+  }
+  const stripped = upstreamTitle
+    .replace(/^\s*(?:调用工具|工具调用|tool call)\s*[:：]?\s*/iu, "")
+    .trim();
+  const candidate = toolName !== "工具" ? toolName : stripped || upstreamTitle || "Tool";
+  return /^[a-z]/u.test(candidate)
+    ? `${candidate.charAt(0).toUpperCase()}${candidate.slice(1)}`
+    : candidate;
+}
+
+function toolCardDescription(fallback: string, input: unknown, output: unknown): string {
+  const inputRecord = recordValue(input);
+  for (const key of ["description", "file_path", "path", "command", "skill", "name"]) {
+    const value = stringData(inputRecord?.[key]);
+    if (value) {
+      return value;
+    }
+  }
+  if (typeof output === "string") {
+    const skill = output.match(/^Launching skill:\s*(.+)$/imu)?.[1]?.trim();
+    if (skill) {
+      return skill;
+    }
+  }
+  return fallback;
+}
+
+/**
  * byclaw-super 的 by-framework 入站 Worker。
  * 它把 AskAgent 转为内部 Run，并把 Run 事件映射回 by-framework 流式协议。
  */
@@ -375,6 +445,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     let reasoningEnded = false;
     let answer = "";
     const reasoningMessageId = `${run.id}:reasoning`;
+    const delegationToolCards = new Map<string, DelegationToolCardState>();
 
     // 按 byai-channel 协议：未开启或已收尾时先补一条思考开始帧，再写增量。
     const ensureReasoningOpen = async () => {
@@ -402,7 +473,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       if (isDelegationReasoningEvent(event)) {
         await ensureReasoningOpen();
       }
-      await this.#forwardDelegationEvent(event, context);
+      await this.#forwardDelegationEvent(event, context, delegationToolCards);
       await this.#forwardInteractionEvent(event, context);
 
       const progress = progressMessage(event);
@@ -590,13 +661,16 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
 
   /**
    * 把已持久化的 Delegation 事件映射为前端现有的思考树协议：
-   * Agent 调用是 3009 状态节点，子 Agent 正文是挂在该节点下的 1002 文本。
+   * Agent 调用是 3009 根节点，过程、工具和正文按 parentOrderId 组成它的子树。
    */
-  async #forwardDelegationEvent(event: RunEvent, context: AgentContext): Promise<void> {
+  async #forwardDelegationEvent(
+    event: RunEvent,
+    context: AgentContext,
+    toolCards: Map<string, DelegationToolCardState>,
+  ): Promise<void> {
     if (event.type === "delegation.started") {
       await this.#emitDelegationStatus(event, context, "_START_");
       await this.#emitDelegationDetail(event, context, "start");
-      await this.#emitDelegationExecutionTitle(event, context);
       return;
     }
     if (event.type === "delegation.display.progress") {
@@ -604,28 +678,33 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       return;
     }
     if (event.type === "delegation.tool.started") {
-      await this.#emitDelegationToolStatus(event, context, "_START_");
-      if (event.data.input !== undefined) {
-        await this.#emitDelegationToolDetail(event, context, "input", event.data.input);
-      }
+      await this.#emitDelegationToolCard(event, context, "_START_", toolCards, {
+        ...(event.data.input !== undefined ? { input: event.data.input } : {}),
+      });
       return;
     }
     if (event.type === "delegation.tool.detail") {
       const phase = stringData(event.data.phase);
       if (phase === "input" || phase === "output") {
-        await this.#emitDelegationToolDetail(event, context, phase, event.data.value);
+        await this.#emitDelegationToolCard(event, context, "_START_", toolCards, {
+          [phase]: event.data.value,
+        });
       }
       return;
     }
     if (event.type === "delegation.tool.completed") {
-      await this.#emitDelegationToolStatus(event, context, "_DONE_");
+      await this.#emitDelegationToolCard(event, context, "_DONE_", toolCards, {
+        ...(event.data.output !== undefined ? { output: event.data.output } : {}),
+      });
       return;
     }
     if (event.type === "delegation.tool.failed") {
-      await this.#emitDelegationToolStatus(event, context, "_ERROR_");
-      await this.#emitDelegationToolDetail(event, context, "output", {
-        error: stringData(event.data.error) || "工具调用失败",
-        errorDetail: stringData(event.data.error) || "工具调用失败",
+      const error = stringData(event.data.error) || "工具调用失败";
+      await this.#emitDelegationToolCard(event, context, "_ERROR_", toolCards, {
+        output:
+          event.data.output !== undefined
+            ? { output: normalizeDisplayValue(event.data.output), error, errorDetail: error }
+            : { error, errorDetail: error },
       });
       return;
     }
@@ -651,7 +730,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     }
   }
 
-  /** 子 Agent 正文使用独立顶层状态节点，保证它排在此前工具节点之后。 */
+  /** 子 Agent 正文使用委派根节点下的独立状态节点。 */
   async #emitDelegationAnswerStatus(
     event: RunEvent,
     context: AgentContext,
@@ -661,8 +740,6 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     if (!delegationId) {
       return;
     }
-    const agentName =
-      stringData(event.data.agentName) || stringData(event.data.agentId) || "数字员工";
     const orderId = `${delegationId}:answer`;
     await this.#protocolEmitter.emitEvent({
       sessionId: context.sessionId,
@@ -670,13 +747,13 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       eventType: EventType.REASONING_LOG_DELTA,
       sourceAgentType: this.#agentType,
       messageId: orderId,
-      parentMessageId: "-1",
+      parentMessageId: delegationId,
       data: protocolMessage({
         event: EventType.REASONING_LOG_DELTA,
-        content: `[${agentName}] 数字员工输出`,
+        content: "数字员工输出",
         contentType: "3009",
         orderId,
-        parentOrderId: "-1",
+        parentOrderId: delegationId,
         status,
       }),
       metadata: {
@@ -686,37 +763,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     });
   }
 
-  /** 为子 Agent 执行过程建立一个顶层标题；后续工具节点保持完全摊平。 */
-  async #emitDelegationExecutionTitle(event: RunEvent, context: AgentContext): Promise<void> {
-    const delegationId = stringData(event.data.delegationId);
-    if (!delegationId) {
-      return;
-    }
-    const agentName =
-      stringData(event.data.agentName) || stringData(event.data.agentId) || "数字员工";
-    const orderId = `${delegationId}:execution`;
-    await this.#protocolEmitter.emitEvent({
-      sessionId: context.sessionId,
-      traceId: context.traceId,
-      eventType: EventType.REASONING_LOG_DELTA,
-      sourceAgentType: this.#agentType,
-      messageId: orderId,
-      parentMessageId: "-1",
-      data: protocolMessage({
-        event: EventType.REASONING_LOG_DELTA,
-        content: `派发需求：${agentName}`,
-        contentType: SseReasonMessageType.think_title,
-        orderId,
-        parentOrderId: "-1",
-      }),
-      metadata: {
-        parent_run_id: event.runId,
-        delegation_id: delegationId,
-      },
-    });
-  }
-
-  /** 将子 Agent 可展示过程流式挂在执行标题下一层，不引入嵌套工具树。 */
+  /** 将子 Agent 可展示过程挂在委派根节点下。 */
   async #emitDelegationProgress(event: RunEvent, context: AgentContext): Promise<void> {
     const delegationId = stringData(event.data.delegationId);
     const text = stringData(event.data.text);
@@ -724,7 +771,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       return;
     }
     const orderId = `${delegationId}:progress`;
-    const parentOrderId = `${delegationId}:execution`;
+    const parentOrderId = delegationId;
     await this.#protocolEmitter.emitEvent({
       sessionId: context.sessionId,
       traceId: context.traceId,
@@ -746,64 +793,45 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     });
   }
 
-  /** 将子 Agent 工具状态映射为顶层 3009，复用前端现有的扁平工具链。 */
-  async #emitDelegationToolStatus(
+  /** 复用 Byclaw-code 的 3015 工具卡片协议，并以同一 orderId 原位更新 Input/Output。 */
+  async #emitDelegationToolCard(
     event: RunEvent,
     context: AgentContext,
     status: "_START_" | "_DONE_" | "_ERROR_",
+    toolCards: Map<string, DelegationToolCardState>,
+    patch: { input?: unknown; output?: unknown },
   ): Promise<void> {
     const delegationId = stringData(event.data.delegationId);
     const callId = stringData(event.data.callId);
     if (!delegationId || !callId) {
       return;
     }
-    const agentName =
-      stringData(event.data.agentName) || stringData(event.data.agentId) || "数字员工";
     const toolName = stringData(event.data.toolName) || "工具";
     const upstreamTitle = stringData(event.data.title);
     const title = upstreamTitle || `调用工具：${toolName}`;
     const orderId = `${delegationId}:tool:${callId}`;
-    await this.#protocolEmitter.emitEvent({
-      sessionId: context.sessionId,
-      traceId: context.traceId,
-      eventType: EventType.REASONING_LOG_DELTA,
-      sourceAgentType: this.#agentType,
-      messageId: orderId,
-      parentMessageId: "-1",
-      data: protocolMessage({
-        event: EventType.REASONING_LOG_DELTA,
-        content: `[${agentName}] ${title}`,
-        contentType: "3009",
-        orderId,
-        parentOrderId: "-1",
-        objectType: "tool_call",
-        status,
-      }),
-      metadata: {
-        parent_run_id: event.runId,
-        delegation_id: delegationId,
-        child_call_id: callId,
-      },
-    });
-  }
-
-  /** 工具 Input/Output 只挂在顶层工具节点下一层。 */
-  async #emitDelegationToolDetail(
-    event: RunEvent,
-    context: AgentContext,
-    phase: "input" | "output",
-    value: unknown,
-  ): Promise<void> {
-    const delegationId = stringData(event.data.delegationId);
-    const callId = stringData(event.data.callId);
-    if (!delegationId || !callId) {
-      return;
-    }
-    const parentOrderId = `${delegationId}:tool:${callId}`;
-    const orderId = `${parentOrderId}:${phase}:${event.eventId}`;
+    const existing = toolCards.get(orderId);
+    const input =
+      patch.input !== undefined
+        ? normalizeDisplayValue(patch.input)
+        : existing?.input;
+    const output =
+      patch.output !== undefined
+        ? normalizeDisplayValue(patch.output)
+        : existing?.output;
+    const card: DelegationToolCardState = {
+      title: existing?.title || toolCardTitle(toolName, upstreamTitle),
+      description: toolCardDescription(title, input, output),
+      ...(input !== undefined ? { input } : {}),
+      ...(output !== undefined ? { output } : {}),
+    };
+    toolCards.set(orderId, card);
     const content = JSON.stringify({
-      title: phase === "input" ? "Input" : "Output",
-      json: JSON.stringify(value ?? null, null, 2),
+      title: card.title,
+      ...(card.input !== undefined ? { input: card.input } : {}),
+      ...(card.output !== undefined ? { output: card.output } : {}),
+      status,
+      description: card.description,
     });
     await this.#protocolEmitter.emitEvent({
       sessionId: context.sessionId,
@@ -811,19 +839,20 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       eventType: EventType.REASONING_LOG_DELTA,
       sourceAgentType: this.#agentType,
       messageId: orderId,
-      parentMessageId: parentOrderId,
+      parentMessageId: delegationId,
       data: protocolMessage({
         event: EventType.REASONING_LOG_DELTA,
         content,
-        contentType: SseReasonMessageType.json_block,
+        contentType: "3015",
         orderId,
-        parentOrderId,
+        parentOrderId: delegationId,
+        ...(stringData(event.data.agentId) ? { agentId: stringData(event.data.agentId) } : {}),
+        objectType: "tool_call",
       }),
       metadata: {
         parent_run_id: event.runId,
         delegation_id: delegationId,
         child_call_id: callId,
-        detail_phase: phase,
       },
     });
   }
@@ -951,7 +980,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
           };
     const content = JSON.stringify({
       title: phase === "start" ? "Input" : "Output",
-      json: JSON.stringify(detail, null, 2),
+      json: formatDetailJson(detail),
     });
     const messageId = `${delegationId}-${phase}`;
     await this.#protocolEmitter.emitEvent({

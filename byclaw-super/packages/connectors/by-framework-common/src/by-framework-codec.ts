@@ -12,6 +12,17 @@ type DisplayConnectorEvent = Extract<
   }
 >;
 
+type ToolContentEnvelope = {
+  status?: string;
+  title?: string;
+  toolName?: string;
+  error?: string;
+  hasInput: boolean;
+  input?: JsonValue;
+  hasOutput: boolean;
+  output?: JsonValue;
+};
+
 const MAX_DISPLAY_TEXT_LENGTH = 8_192;
 const MAX_DISPLAY_JSON_LENGTH = 32_768;
 const MAX_JSON_DEPTH = 8;
@@ -80,6 +91,14 @@ export function extractContent(data: unknown): string {
   return typeof first.delta.content === "string" ? first.delta.content : "";
 }
 
+/** 读取 by-framework SSE 布局的内容类型；缺失时返回空字符串。 */
+export function extractContentType(data: unknown): string {
+  if (!isRecord(data)) {
+    return "";
+  }
+  return typeof data.contentType === "string" ? data.contentType : String(data.contentType ?? "");
+}
+
 /**
  * 将子 Agent 面向 by-framework 前端的思考帧转换为传输无关事件。
  * reasoning start/end 仍由调用方作为内部边界消费；这里只解析 delta 内容。
@@ -97,16 +116,22 @@ export function extractDisplayEvent(message: DataMessage): DisplayConnectorEvent
     if (!orderId) {
       return undefined;
     }
-    const status = String(message.data.status ?? "_START_");
-    const title = safeDisplayText(content || "调用工具");
-    const toolName = extractToolName(message.data, title);
+    const envelope = parseToolContentEnvelope(content);
+    const status = displayString(message.data.status) || envelope?.status || "_START_";
+    const explicitTitle =
+      displayString(message.data.title) || envelope?.title || (envelope ? "" : content);
+    const toolName = extractToolName(message.data, explicitTitle, envelope?.toolName);
+    const title = explicitTitle
+      ? safeDisplayText(explicitTitle)
+      : buildToolEnvelopeTitle(toolName, envelope?.output, status);
     if (status === "_ERROR_") {
       return {
         type: "tool_failed",
         callId: orderId,
         toolName,
         title,
-        error: title || "工具调用失败",
+        error: envelope?.error || toolOutputPreview(envelope?.output) || "工具调用失败",
+        ...(envelope?.hasOutput ? { output: envelope.output } : {}),
       };
     }
     if (status === "_DONE_") {
@@ -115,6 +140,7 @@ export function extractDisplayEvent(message: DataMessage): DisplayConnectorEvent
         callId: orderId,
         toolName,
         title,
+        ...(envelope?.hasOutput ? { output: envelope.output } : {}),
       };
     }
     return {
@@ -122,6 +148,7 @@ export function extractDisplayEvent(message: DataMessage): DisplayConnectorEvent
       callId: orderId,
       toolName,
       title,
+      ...(envelope?.hasInput ? { input: envelope.input } : {}),
     };
   }
 
@@ -157,15 +184,89 @@ function displayId(primary: unknown, fallback: unknown): string {
   return typeof fallback === "string" && fallback !== "-1" ? fallback : "";
 }
 
-function extractToolName(data: Record<string, unknown>, title: string): string {
+function extractToolName(
+  data: Record<string, unknown>,
+  title: string,
+  envelopeToolName?: string,
+): string {
   for (const key of ["toolName", "tool_name", "name"]) {
     const value = data[key];
     if (typeof value === "string" && value.trim()) {
       return safeDisplayText(value.trim());
     }
   }
+  if (envelopeToolName) {
+    return safeDisplayText(envelopeToolName);
+  }
   const stripped = title.replace(/^\s*(?:调用工具|工具调用|tool call)\s*[:：]?\s*/i, "").trim();
   return stripped || "工具";
+}
+
+/** 兼容旧 Worker 把终态 `{ output, status }` 整体塞进 3009 content 的格式。 */
+function parseToolContentEnvelope(content: string): ToolContentEnvelope | undefined {
+  if (!content.trim().startsWith("{")) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed) || !("output" in parsed || "status" in parsed)) {
+    return undefined;
+  }
+  const hasInput = "input" in parsed;
+  const hasOutput = "output" in parsed;
+  return {
+    status: displayString(parsed.status),
+    title: displayString(parsed.title),
+    toolName:
+      displayString(parsed.toolName) ||
+      displayString(parsed.tool_name) ||
+      displayString(parsed.name),
+    error: displayString(parsed.error),
+    hasInput,
+    ...(hasInput ? { input: boundedJsonValue(parsed.input) } : {}),
+    hasOutput,
+    ...(hasOutput ? { output: boundedJsonValue(parsed.output) } : {}),
+  };
+}
+
+function buildToolEnvelopeTitle(toolName: string, output: JsonValue | undefined, status: string): string {
+  const state = status === "_ERROR_" ? "工具失败" : status === "_DONE_" ? "工具完成" : "调用工具";
+  if (toolName && toolName !== "工具") {
+    return `${state}：${toolName}`;
+  }
+  const preview = toolOutputPreview(output);
+  const skillMatch = preview.match(/^Launching skill:\s*([^:]+)(?::.*)?$/i);
+  if (skillMatch?.[1]) {
+    return `加载技能：${skillMatch[1]}`;
+  }
+  const exitCodeMatch = preview.match(/^Exit code\s+(-?\d+)/i);
+  if (exitCodeMatch?.[1]) {
+    return `${status === "_ERROR_" ? "命令执行失败" : "命令执行完成"}（退出码 ${exitCodeMatch[1]}）`;
+  }
+  if (/^total\s+\d+$/i.test(preview)) {
+    return status === "_ERROR_" ? "读取目录失败" : "读取目录结果";
+  }
+  return preview ? `${state}：${preview}` : state;
+}
+
+/** 标题只保留单行短预览；完整结果由 Output 明细承载。 */
+function toolOutputPreview(output: JsonValue | undefined): string {
+  if (typeof output !== "string") {
+    return "";
+  }
+  const firstLine = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  return safeDisplayText(firstLine || "").replace(/\s+/g, " ").slice(0, 96);
+}
+
+function displayString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function parseJsonBlock(

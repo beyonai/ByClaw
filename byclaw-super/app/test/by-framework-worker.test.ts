@@ -268,7 +268,7 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(respondToInteraction).not.toHaveBeenCalled();
   });
 
-  it("emits an Agent call node and a flat child execution section", async () => {
+  it("emits the child Agent output as a nested delegation tree", async () => {
     const emitEvent = vi.fn(async () => undefined);
     const emitProtocolChunk = vi.fn(async () => undefined);
     const emitState = vi.fn(async () => undefined);
@@ -282,7 +282,7 @@ describe("ByClawSuperGatewayWorker", () => {
 
     const result = await worker.processCommand(askCommand(), contextMock({ emitState }));
 
-    expect(emitEvent).toHaveBeenCalledTimes(8);
+    expect(emitEvent).toHaveBeenCalledTimes(7);
     expect(emitState).not.toHaveBeenCalled();
     expect(emitProtocolChunk).toHaveBeenNthCalledWith(
       1,
@@ -371,30 +371,18 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(emitEvent).toHaveBeenNthCalledWith(
       3,
       expect.objectContaining({
-        messageId: "delegation-1:execution",
-        parentMessageId: "-1",
-        data: expect.objectContaining({
-          contentType: "3003",
-          orderId: "delegation-1:execution",
-          parentOrderId: "-1",
-        }),
-      }),
-    );
-    expect(emitEvent).toHaveBeenNthCalledWith(
-      4,
-      expect.objectContaining({
         messageId: "delegation-1:answer",
-        parentMessageId: "-1",
+        parentMessageId: "delegation-1",
         data: expect.objectContaining({
           contentType: "3009",
           orderId: "delegation-1:answer",
-          parentOrderId: "-1",
+          parentOrderId: "delegation-1",
           status: "_START_",
         }),
       }),
     );
     expect(emitEvent).toHaveBeenNthCalledWith(
-      5,
+      4,
       expect.objectContaining({
         messageId: "delegation-1:answer:text",
         parentMessageId: "delegation-1:answer",
@@ -412,10 +400,10 @@ describe("ByClawSuperGatewayWorker", () => {
     );
     expect(emitEvent.mock.calls[0][0].data).not.toHaveProperty("agentId");
     expect(emitEvent.mock.calls[0][0].data).not.toHaveProperty("agentName");
-    expect(emitEvent.mock.calls[4][0].data).not.toHaveProperty("agentId");
+    expect(emitEvent.mock.calls[3][0].data).not.toHaveProperty("agentId");
     expect(emitEvent.mock.calls[2][0].data).not.toHaveProperty("agentName");
     expect(emitEvent).toHaveBeenNthCalledWith(
-      7,
+      6,
       expect.objectContaining({
         messageId: "delegation-1",
         data: expect.objectContaining({
@@ -430,7 +418,7 @@ describe("ByClawSuperGatewayWorker", () => {
       }),
     );
     expect(emitEvent).toHaveBeenNthCalledWith(
-      8,
+      7,
       expect.objectContaining({
         messageId: "delegation-1-result",
         parentMessageId: "delegation-1",
@@ -450,7 +438,7 @@ describe("ByClawSuperGatewayWorker", () => {
       expectedOutput: "结构化结论",
       attachments: [{ id: "attachment-1", name: "sales.csv", mediaType: "text/csv" }],
     });
-    const outputBlock = JSON.parse(emitEvent.mock.calls[7][0].data.choices[0].delta.content);
+    const outputBlock = JSON.parse(emitEvent.mock.calls[6][0].data.choices[0].delta.content);
     expect(outputBlock.title).toBe("Output");
     expect(JSON.parse(outputBlock.json)).toEqual({
       agentId: "agent-1",
@@ -461,13 +449,13 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(result.content).toBe("汇总答案");
   });
 
-  it("flattens child progress and tools without forwarding child stream lifecycle", async () => {
+  it("nests child progress, tools, details, and output without forwarding child stream lifecycle", async () => {
     const emitEvent = vi.fn(async () => undefined);
     const emitProtocolChunk = vi.fn(async () => undefined);
     const worker = createWorker({
       createSessionRun: vi.fn(async () => run()),
       cancelRun: vi.fn(),
-      streamEvents: () => flattenedDelegationEvents(),
+      streamEvents: () => nestedDelegationEvents(),
       emitEvent,
       emitProtocolChunk,
     });
@@ -485,10 +473,10 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(emitEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         messageId: "delegation-flat:progress",
-        parentMessageId: "delegation-flat:execution",
+        parentMessageId: "delegation-flat",
         data: expect.objectContaining({
           contentType: "1002",
-          parentOrderId: "delegation-flat:execution",
+          parentOrderId: "delegation-flat",
           choices: [
             expect.objectContaining({
               delta: { content: "正在分析需求范围" },
@@ -497,35 +485,77 @@ describe("ByClawSuperGatewayWorker", () => {
         }),
       }),
     );
+    const toolCardEvents = emitEvent.mock.calls
+      .map((call) => call[0])
+      .filter(
+        (emitted) =>
+          emitted.metadata?.child_call_id === "child-call-1" && emitted.data?.contentType === "3015",
+      );
+    expect(toolCardEvents.length).toBeGreaterThanOrEqual(2);
+    expect(toolCardEvents[0]).toMatchObject({
+      messageId: "delegation-flat:tool:child-call-1",
+      parentMessageId: "delegation-flat",
+      data: {
+        contentType: "3015",
+        objectType: "tool_call",
+        orderId: "delegation-flat:tool:child-call-1",
+        parentOrderId: "delegation-flat",
+      },
+    });
+    const startedCard = JSON.parse(toolCardEvents[0].data.choices[0].delta.content);
+    expect(startedCard).toMatchObject({ title: "Read", status: "_START_" });
+    const completedCard = JSON.parse(
+      toolCardEvents[toolCardEvents.length - 1].data.choices[0].delta.content,
+    );
+    expect(completedCard).toEqual({
+      title: "Read",
+      input: { path: "/tmp/requirements.md" },
+      output: { content: "需求文档" },
+      status: "_DONE_",
+      description: "/tmp/requirements.md",
+    });
+    expect(
+      emitEvent.mock.calls.some(
+        (call) =>
+          call[0].metadata?.child_call_id === "child-call-1" &&
+          call[0].metadata?.detail_phase !== undefined,
+      ),
+    ).toBe(false);
     expect(emitEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        messageId: "delegation-flat:tool:child-call-1",
-        parentMessageId: "-1",
+        messageId: "delegation-flat:answer",
+        parentMessageId: "delegation-flat",
         data: expect.objectContaining({
           contentType: "3009",
-          objectType: "tool_call",
-          status: "_START_",
-          orderId: "delegation-flat:tool:child-call-1",
-          parentOrderId: "-1",
+          parentOrderId: "delegation-flat",
         }),
-      }),
-    );
-    expect(emitEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        parentMessageId: "delegation-flat:tool:child-call-1",
-        data: expect.objectContaining({
-          contentType: "2020",
-          parentOrderId: "delegation-flat:tool:child-call-1",
-        }),
-      }),
-    );
-    expect(emitEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messageId: "delegation-flat:tool:child-call-1",
-        data: expect.objectContaining({ status: "_DONE_" }),
       }),
     );
     expect(result.content).toBe("汇总结果");
+  });
+
+  it("renders string tool output without JSON quotes and unwraps encoded JSON", async () => {
+    const emitEvent = vi.fn(async () => undefined);
+    const worker = createWorker({
+      createSessionRun: vi.fn(async () => run()),
+      cancelRun: vi.fn(),
+      streamEvents: () => stringToolOutputEvents(),
+      emitEvent,
+    });
+
+    await worker.processCommand(askCommand(), contextMock());
+
+    const emitted = emitEvent.mock.calls.map((call) => call[0]);
+    const textOutput = emitted.find((item) => item.metadata?.child_call_id === "plain-output");
+    const textBlock = JSON.parse(textOutput?.data.choices[0].delta.content || "{}");
+    expect(textBlock).toMatchObject({
+      output: "total 40\ndrwxr-xr-x SKILL.md",
+      status: "_DONE_",
+    });
+
+    const jsonOutput = emitted.find((item) => item.metadata?.child_call_id === "encoded-json");
+    const jsonBlock = JSON.parse(jsonOutput?.data.choices[0].delta.content || "{}");
+    expect(jsonBlock.output).toEqual({ to: "in_progress", loopCount: 0 });
   });
 
   it("emits a structured Output block with errorDetail for failed delegations", async () => {
@@ -542,7 +572,7 @@ describe("ByClawSuperGatewayWorker", () => {
     );
 
     expect(emitEvent).toHaveBeenNthCalledWith(
-      4,
+      3,
       expect.objectContaining({
         messageId: "delegation-failed",
         data: expect.objectContaining({
@@ -551,7 +581,7 @@ describe("ByClawSuperGatewayWorker", () => {
         }),
       }),
     );
-    const outputBlock = JSON.parse(emitEvent.mock.calls[4][0].data.choices[0].delta.content);
+    const outputBlock = JSON.parse(emitEvent.mock.calls[3][0].data.choices[0].delta.content);
     expect(outputBlock.title).toBe("Output");
     expect(JSON.parse(outputBlock.json)).toEqual({
       agentId: "agent-2",
@@ -1100,7 +1130,7 @@ async function* failedDelegationEvents(): AsyncIterable<RunEvent> {
   yield event(3, "run.failed", { error: "下游数字员工不可用" });
 }
 
-async function* flattenedDelegationEvents(): AsyncIterable<RunEvent> {
+async function* nestedDelegationEvents(): AsyncIterable<RunEvent> {
   yield event(1, "delegation.started", {
     delegationId: "delegation-flat",
     agentId: "agent-flat",
@@ -1130,20 +1160,30 @@ async function* flattenedDelegationEvents(): AsyncIterable<RunEvent> {
     phase: "input",
     value: { path: "/tmp/requirements.md" },
   });
-  yield event(5, "delegation.tool.completed", {
+  yield event(5, "delegation.tool.detail", {
     delegationId: "delegation-flat",
     agentId: "agent-flat",
     agentName: "需求侦探 · 许知意",
     callId: "child-call-1",
     toolName: "read",
+    phase: "output",
+    value: { content: "需求文档" },
   });
-  yield event(6, "delegation.output.delta", {
+  yield event(6, "delegation.tool.completed", {
+    delegationId: "delegation-flat",
+    agentId: "agent-flat",
+    agentName: "需求侦探 · 许知意",
+    callId: "child-call-1",
+    toolName: "read",
+    output: { content: "需求文档" },
+  });
+  yield event(7, "delegation.output.delta", {
     delegationId: "delegation-flat",
     agentId: "agent-flat",
     agentName: "需求侦探 · 许知意",
     text: "需求结论",
   });
-  yield event(7, "delegation.completed", {
+  yield event(8, "delegation.completed", {
     delegationId: "delegation-flat",
     agentId: "agent-flat",
     agentName: "需求侦探 · 许知意",
@@ -1152,11 +1192,28 @@ async function* flattenedDelegationEvents(): AsyncIterable<RunEvent> {
     artifactCount: 0,
     hasOutput: true,
   });
-  yield event(8, "leader.delta", { text: "汇总结果" });
-  yield event(9, "run.completed", {
+  yield event(9, "leader.delta", { text: "汇总结果" });
+  yield event(10, "run.completed", {
     status: "COMPLETED",
     finalAnswer: "汇总结果",
   });
+}
+
+async function* stringToolOutputEvents(): AsyncIterable<RunEvent> {
+  yield event(1, "delegation.tool.completed", {
+    delegationId: "delegation-string-output",
+    callId: "plain-output",
+    toolName: "read",
+    output: "total 40\ndrwxr-xr-x SKILL.md",
+  });
+  yield event(2, "delegation.tool.completed", {
+    delegationId: "delegation-string-output",
+    callId: "encoded-json",
+    toolName: "state",
+    output: JSON.stringify(JSON.stringify({ to: "in_progress", loopCount: 0 })),
+  });
+  yield event(3, "leader.delta", { text: "完成" });
+  yield event(4, "run.completed", { status: "COMPLETED", finalAnswer: "完成" });
 }
 
 async function* modelFailureEvents(): AsyncIterable<RunEvent> {

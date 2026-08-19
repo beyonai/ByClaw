@@ -80,6 +80,8 @@ export type ConnectorEvent = (
       callId: string;
       toolName?: string;
       title?: string;
+      /** 某些 by-framework Worker 把工具结果包装在 3009 的 output 字段中。 */
+      output?: JsonValue;
     }
   | {
       type: "tool_failed";
@@ -87,6 +89,7 @@ export type ConnectorEvent = (
       toolName?: string;
       title?: string;
       error: string;
+      output?: JsonValue;
     }
   | { type: "output_delta"; text: string }
   | { type: "artifact"; artifact: ArtifactRef }

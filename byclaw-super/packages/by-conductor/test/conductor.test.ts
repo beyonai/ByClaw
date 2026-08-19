@@ -222,6 +222,7 @@ describe("DelegationService", () => {
           type: "tool_completed",
           callId: "call-1",
           toolName: "read",
+          output: "file contents",
         };
         yield { type: "output_delta", text: "hello " };
         yield { type: "output_delta", text: "world" };
@@ -310,6 +311,13 @@ describe("DelegationService", () => {
       callId: "call-1",
       phase: "input",
       value: { path: "/tmp/data" },
+    });
+    expect(
+      storedEvents.find((event) => event.type === "delegation.tool.completed")?.data,
+    ).toMatchObject({
+      callId: "call-1",
+      toolName: "read",
+      output: "file contents",
     });
     const completedEvent = storedEvents.find((e) => e.type === "delegation.completed");
     expect(completedEvent?.data).toMatchObject({

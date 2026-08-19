@@ -59,15 +59,35 @@ describe('ThinkingProcessRender transformList', () => {
     expect(taskNode.children[0].content.orderId).toBe('text-1');
   });
 
-  it('renders flattened delegated progress, tools, and output as independent top-level sections', () => {
+  it('builds a nested delegation tree in protocol order and preserves children across status updates', () => {
     const thinkList: IMessageListItem[] = [
       {
-        contentType: SSEMessageType.thinkTitle,
+        contentType: SSEMessageType.thinkStatusTitle,
+        status: SSEEventStatus.query,
+        objectType: 'tool_call',
+        content: {
+          substance: { title: '正在让数字员工处理：需求侦探', status: '_START_' },
+          orderId: 'delegation-1',
+          parentOrderId: '-1',
+        },
+      },
+      {
+        contentType: SSEMessageType.jsonBlock,
         status: SSEEventStatus.query,
         content: {
-          substance: '派发需求：需求侦探',
-          orderId: 'delegation-1:execution',
-          parentOrderId: '-1',
+          substance: { title: 'Input', json: '{"task":"分析需求"}' },
+          orderId: 'delegation-1:start',
+          parentOrderId: 'delegation-1',
+        },
+      },
+      {
+        contentType: SSEMessageType.thinkStatusTitle,
+        status: SSEEventStatus.query,
+        objectType: 'tool_call',
+        content: {
+          substance: { title: '调用工具：read', status: '_START_' },
+          orderId: 'delegation-1:tool:call-1',
+          parentOrderId: 'delegation-1',
         },
       },
       {
@@ -76,17 +96,7 @@ describe('ThinkingProcessRender transformList', () => {
         content: {
           substance: '正在分析需求',
           orderId: 'delegation-1:progress',
-          parentOrderId: 'delegation-1:execution',
-        },
-      },
-      {
-        contentType: SSEMessageType.thinkStatusTitle,
-        status: SSEEventStatus.query,
-        objectType: 'tool_call',
-        content: {
-          substance: { title: '[需求侦探] 调用工具：read', status: '_DONE_' },
-          orderId: 'delegation-1:tool:call-1',
-          parentOrderId: '-1',
+          parentOrderId: 'delegation-1',
         },
       },
       {
@@ -99,12 +109,31 @@ describe('ThinkingProcessRender transformList', () => {
         },
       },
       {
+        contentType: SSEMessageType.jsonBlock,
+        status: SSEEventStatus.query,
+        content: {
+          substance: { title: 'Output', json: '{"content":"需求文档"}' },
+          orderId: 'delegation-1:tool:call-1:output',
+          parentOrderId: 'delegation-1:tool:call-1',
+        },
+      },
+      {
+        contentType: SSEMessageType.thinkStatusTitle,
+        status: SSEEventStatus.query,
+        objectType: 'tool_call',
+        content: {
+          substance: { title: '调用工具：read', status: '_DONE_' },
+          orderId: 'delegation-1:tool:call-1',
+          parentOrderId: 'delegation-1',
+        },
+      },
+      {
         contentType: SSEMessageType.thinkStatusTitle,
         status: SSEEventStatus.query,
         content: {
-          substance: { title: '[需求侦探] 数字员工输出', status: '_DONE_' },
+          substance: { title: '数字员工输出', status: '_START_' },
           orderId: 'delegation-1:answer',
-          parentOrderId: '-1',
+          parentOrderId: 'delegation-1',
         },
       },
       {
@@ -116,17 +145,61 @@ describe('ThinkingProcessRender transformList', () => {
           parentOrderId: 'delegation-1:answer',
         },
       },
+      {
+        contentType: SSEMessageType.thinkStatusTitle,
+        status: SSEEventStatus.query,
+        content: {
+          substance: { title: '数字员工输出', status: '_DONE_' },
+          orderId: 'delegation-1:answer',
+          parentOrderId: 'delegation-1',
+        },
+      },
+      {
+        contentType: SSEMessageType.thinkStatusTitle,
+        status: SSEEventStatus.query,
+        objectType: 'tool_call',
+        content: {
+          substance: { title: '数字员工处理完成：需求侦探', status: '_DONE_' },
+          orderId: 'delegation-1',
+          parentOrderId: '-1',
+        },
+      },
+      {
+        contentType: SSEMessageType.jsonBlock,
+        status: SSEEventStatus.query,
+        content: {
+          substance: { title: 'Output', json: '{"status":"completed"}' },
+          orderId: 'delegation-1:result',
+          parentOrderId: 'delegation-1',
+        },
+      },
     ];
 
     const result = transformList(thinkList, true);
 
-    expect(result.map((node) => node.content.orderId)).toEqual([
-      'delegation-1:execution',
+    expect(result).toHaveLength(1);
+    expect(result[0].content.orderId).toBe('delegation-1');
+    expect(result[0].content.substance).toEqual({
+      title: '数字员工处理完成：需求侦探',
+      status: '_DONE_',
+    });
+    expect(result[0].children?.map((node) => node.content.orderId)).toEqual([
+      'delegation-1:start',
       'delegation-1:tool:call-1',
+      'delegation-1:progress',
       'delegation-1:answer',
+      'delegation-1:result',
     ]);
-    expect(result[0].children?.[0].content.orderId).toBe('delegation-1:progress');
-    expect(result[1].children?.[0].content.orderId).toBe('delegation-1:tool:call-1:input');
-    expect(result[2].children?.[0].content.orderId).toBe('delegation-1:answer:text');
+
+    const toolNode = result[0].children?.[1];
+    expect(toolNode.content.substance.status).toBe('_DONE_');
+    expect(toolNode.children?.map((node) => node.content.orderId)).toEqual([
+      'delegation-1:tool:call-1:input',
+      'delegation-1:tool:call-1:output',
+    ]);
+
+    const answerNode = result[0].children?.[3];
+    expect(answerNode.content.substance.status).toBe('_DONE_');
+    expect(answerNode.children?.[0].content.orderId).toBe('delegation-1:answer:text');
   });
 });

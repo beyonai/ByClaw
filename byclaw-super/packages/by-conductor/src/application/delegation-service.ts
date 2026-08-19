@@ -462,6 +462,7 @@ export class DelegationService {
               callId: event.callId,
               ...(event.toolName ? { toolName: event.toolName } : {}),
               ...(event.title ? { title: event.title } : {}),
+              ...(event.output !== undefined ? { output: event.output } : {}),
             },
           });
           continue;
@@ -479,6 +480,7 @@ export class DelegationService {
               error: event.error,
               ...(event.toolName ? { toolName: event.toolName } : {}),
               ...(event.title ? { title: event.title } : {}),
+              ...(event.output !== undefined ? { output: event.output } : {}),
             },
           });
           continue;
