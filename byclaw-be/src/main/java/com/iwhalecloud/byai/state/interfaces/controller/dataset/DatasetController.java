@@ -20,6 +20,8 @@ import com.iwhalecloud.byai.manager.dto.resource.DatasetIdDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeBuildResultRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityDiscoveryRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityEnrichRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
@@ -47,6 +49,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileMetadataResu
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeEntityBatchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
 import com.iwhalecloud.byai.common.feign.request.knowledge.Folder;
@@ -215,6 +218,24 @@ public class DatasetController {
         @Valid @RequestBody KnowledgeItemReferencesRequest request) {
         return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
             datasetApplicationService.knowledgeItemReferences(request));
+    }
+
+    /**
+     * 异步发现知识库原始文档中的实体，并创建对应 KnowledgeEntity 文件任务。
+     */
+    @PostMapping("/knowledgeItems/entityDiscovery")
+    public ResponseUtil<KnowledgeEntityBatchResult> entityDiscovery(
+        @Valid @RequestBody KnowledgeEntityDiscoveryRequest request) {
+        return ResponseUtil.successResponse("知识实体发现任务已受理", datasetApplicationService.entityDiscovery(request));
+    }
+
+    /**
+     * 异步补全 KnowledgeEntity 文件中的实体信息、证据和语义关系。
+     */
+    @PostMapping("/knowledgeItems/entityEnrich")
+    public ResponseUtil<KnowledgeEntityBatchResult> entityEnrich(
+        @Valid @RequestBody KnowledgeEntityEnrichRequest request) {
+        return ResponseUtil.successResponse("知识实体补全任务已受理", datasetApplicationService.entityEnrich(request));
     }
 
     /** 按 QA glob 单层通配规则匹配文件或目录。 */

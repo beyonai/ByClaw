@@ -4,6 +4,9 @@ import lombok.Data;
 
 /**
  * 技能超市安装时可供当前用户选择的数字员工。
+ *
+ * @author qin.guoquan
+ * @date 2026-08-19 15:38:38
  */
 @Data
 public class SkillMarketplaceDigitalEmployeeVo {

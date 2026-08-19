@@ -31,6 +31,8 @@ public enum KnowledgeServiceOperation {
     GET_FILE_METADATA("getFileMetadata", "/api/v1/knowledgeItems/metadata/get"),
     MOVE_KNOWLEDGE_ITEMS("moveKnowledgeItems", "/api/v1/knowledgeItems/move"),
     KNOWLEDGE_ITEM_REFERENCES("knowledgeItemReferences", "/api/v1/knowledgeItems/references"),
+    ENTITY_DISCOVERY("entityDiscovery", "/api/v1/knowledgeItems/entityDiscovery"),
+    ENTITY_ENRICH("entityEnrich", "/api/v1/knowledgeItems/entityEnrich"),
     GLOB("glob", "/api/v1/glob"),
     KNOWLEDGE_SEARCH("knowledgeSearch", "/api/v1/knowledgeItems/search"),
     KNOWLEDGE_FILE_SEARCH("knowledgeFileSearch", "/api/v1/knowledgeItems/searchFile"),

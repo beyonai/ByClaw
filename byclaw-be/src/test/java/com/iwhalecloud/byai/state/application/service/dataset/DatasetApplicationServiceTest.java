@@ -9,6 +9,8 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbBuildResult;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataGet;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileUpdate;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbEntityDiscovery;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbEntityEnrich;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbGlob;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeMetadataSearch;
@@ -27,6 +29,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearc
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeEntityBatchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBuildResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchItem;
@@ -41,6 +44,8 @@ import com.iwhalecloud.byai.manager.dto.resource.KnowledgeMetadataSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeBuildResultRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityDiscoveryRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityEnrichRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
@@ -99,6 +104,8 @@ class DatasetApplicationServiceTest {
         messageSource.addMessage("dataset.pythonbuild.operation.failed", Locale.getDefault(), "{0} failed: {1}");
         messageSource.addMessage("dataset.pythonbuild.operation.response.empty", Locale.getDefault(),
             "{0} failed: knowledge base service returned an empty response");
+        messageSource.addMessage("user.permission.nopermission", Locale.getDefault(),
+            "No permission to manage this resource");
         ApplicationContext applicationContext = org.mockito.Mockito.mock(ApplicationContext.class);
         org.mockito.Mockito.when(applicationContext.getBean(org.springframework.context.MessageSource.class))
             .thenReturn(messageSource);
@@ -557,6 +564,79 @@ class DatasetApplicationServiceTest {
         assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
         assertThat(captor.getValue().getFilePath()).isEqualTo("/制度/请假.md");
         assertThat(captor.getValue().getDirection()).isEqualTo("inbound");
+    }
+
+    @Test
+    void entityDiscovery_mapsResourceIdToKnCodeAndKeepsWholeKnowledgeBaseScope() {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        KnowledgeEntityBatchResult qaResult = new KnowledgeEntityBatchResult();
+        qaResult.setBatchId("ed-20260817-0001");
+        qaResult.setScope("WHOLE_KB");
+        qaResult.setTaskType("ENTITY_DISCOVERY");
+        PythonBuildResponse<KnowledgeEntityBatchResult> response = new PythonBuildResponse<>();
+        response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+        response.setResultObject(qaResult);
+        when(feignPythonBuildService.entityDiscovery(any(), eq(100L))).thenReturn(response);
+
+        KnowledgeEntityDiscoveryRequest request = new KnowledgeEntityDiscoveryRequest();
+        request.setResourceId(100L);
+        request.setMaxEntities(12);
+        request.setForce(true);
+        request.setExtraParams(Map.of("source", "portal"));
+
+        KnowledgeEntityBatchResult result = service.entityDiscovery(request);
+
+        ArgumentCaptor<KbEntityDiscovery> captor = ArgumentCaptor.forClass(KbEntityDiscovery.class);
+        verify(feignPythonBuildService).entityDiscovery(captor.capture(), eq(100L));
+        assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
+        assertThat(captor.getValue().getFilePath()).isNull();
+        assertThat(captor.getValue().getMaxEntities()).isEqualTo(12);
+        assertThat(captor.getValue().getForce()).isTrue();
+        assertThat(captor.getValue().getExtraParams()).containsEntry("source", "portal");
+        assertThat(result.getResourceId()).isEqualTo(100L);
+        assertThat(result.getBatchId()).isEqualTo("ed-20260817-0001");
+    }
+
+    @Test
+    void entityEnrich_requiresManagePermissionAndNormalizesFilePath() {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        KnowledgeEntityBatchResult qaResult = new KnowledgeEntityBatchResult();
+        qaResult.setBatchId("ee-20260817-0001");
+        PythonBuildResponse<KnowledgeEntityBatchResult> response = new PythonBuildResponse<>();
+        response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+        response.setResultObject(qaResult);
+        when(feignPythonBuildService.entityEnrich(any(), eq(100L))).thenReturn(response);
+
+        KnowledgeEntityEnrichRequest request = new KnowledgeEntityEnrichRequest();
+        request.setResourceId(100L);
+        request.setFilePath("KnowledgeEntity/OSOT.md");
+        request.setTopK(20);
+
+        KnowledgeEntityBatchResult result = service.entityEnrich(request);
+
+        ArgumentCaptor<KbEntityEnrich> captor = ArgumentCaptor.forClass(KbEntityEnrich.class);
+        verify(feignPythonBuildService).entityEnrich(captor.capture(), eq(100L));
+        assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
+        assertThat(captor.getValue().getFilePath()).isEqualTo("/KnowledgeEntity/OSOT.md");
+        assertThat(captor.getValue().getTopK()).isEqualTo(20);
+        assertThat(result.getResourceId()).isEqualTo(100L);
+    }
+
+    @Test
+    void entityDiscovery_rejectsUserWithoutKnowledgeBaseManagePermission() {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(false);
+        KnowledgeEntityDiscoveryRequest request = new KnowledgeEntityDiscoveryRequest();
+        request.setResourceId(100L);
+
+        assertThatThrownBy(() -> service.entityDiscovery(request)).isInstanceOf(IllegalArgumentException.class);
+
+        verifyNoInteractions(feignPythonBuildService);
     }
 
     @Test

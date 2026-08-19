@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -26,6 +27,8 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbGlob;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryDelete;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbEntityDiscovery;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbEntityEnrich;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDownload;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataGet;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
@@ -48,6 +51,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearc
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeEntityBatchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBuildResult;
@@ -69,6 +73,8 @@ import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeBuildResultRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityDiscoveryRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityEnrichRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
@@ -979,6 +985,48 @@ public class DatasetApplicationService {
     }
 
     /**
+     * 异步发现原始文档中的实体。门户使用 resourceId 校验知识库管理权限，转发 QA 时转换为 knCode。
+     */
+    public KnowledgeEntityBatchResult entityDiscovery(KnowledgeEntityDiscoveryRequest request) {
+        SsResource ssResource = loadDatasetResource(request.getResourceId());
+        validateDatasetManagePermission(ssResource);
+
+        KbEntityDiscovery qaRequest = new KbEntityDiscovery();
+        qaRequest.setKnCode(ssResource.getResourceCode());
+        qaRequest.setFilePath(normalizeOptionalKnowledgeFilePath(request.getFilePath()));
+        qaRequest.setMaxEntities(request.getMaxEntities() == null ? 12 : request.getMaxEntities());
+        qaRequest.setForce(Boolean.TRUE.equals(request.getForce()));
+        qaRequest.setExtraParams(
+            request.getExtraParams() == null ? Collections.emptyMap() : request.getExtraParams());
+
+        PythonBuildResponse<KnowledgeEntityBatchResult> response = feignPythonBuildService.entityDiscovery(qaRequest,
+            request.getResourceId());
+        assertPythonBuildSuccess(response, "发起知识实体发现");
+        return attachEntityBatchResourceId(response.getResultObject(), request.getResourceId());
+    }
+
+    /**
+     * 异步补全 KnowledgeEntity 文档。门户使用 resourceId 校验知识库管理权限，转发 QA 时转换为 knCode。
+     */
+    public KnowledgeEntityBatchResult entityEnrich(KnowledgeEntityEnrichRequest request) {
+        SsResource ssResource = loadDatasetResource(request.getResourceId());
+        validateDatasetManagePermission(ssResource);
+
+        KbEntityEnrich qaRequest = new KbEntityEnrich();
+        qaRequest.setKnCode(ssResource.getResourceCode());
+        qaRequest.setFilePath(normalizeOptionalKnowledgeFilePath(request.getFilePath()));
+        qaRequest.setTopK(request.getTopK() == null ? 20 : request.getTopK());
+        qaRequest.setForce(Boolean.TRUE.equals(request.getForce()));
+        qaRequest.setExtraParams(
+            request.getExtraParams() == null ? Collections.emptyMap() : request.getExtraParams());
+
+        PythonBuildResponse<KnowledgeEntityBatchResult> response = feignPythonBuildService.entityEnrich(qaRequest,
+            request.getResourceId());
+        assertPythonBuildSuccess(response, "发起知识实体补全");
+        return attachEntityBatchResourceId(response.getResultObject(), request.getResourceId());
+    }
+
+    /**
      * 按 QA glob 单层通配规则匹配知识库文件或目录。
      */
     public List<DirAndFileVo> globKnowledgeItems(KnowledgeGlobRequest request) {
@@ -1727,6 +1775,17 @@ public class DatasetApplicationService {
             }
         }
         return normalizedPath;
+    }
+
+    private String normalizeOptionalKnowledgeFilePath(String filePath) {
+        return StringUtils.isBlank(filePath) ? null : normalizeKnowledgeFilePath(filePath);
+    }
+
+    private KnowledgeEntityBatchResult attachEntityBatchResourceId(KnowledgeEntityBatchResult result,
+        Long resourceId) {
+        KnowledgeEntityBatchResult resolved = result == null ? new KnowledgeEntityBatchResult() : result;
+        resolved.setResourceId(resourceId);
+        return resolved;
     }
 
     private String normalizeKnowledgeGlobRule(String pathRule) {

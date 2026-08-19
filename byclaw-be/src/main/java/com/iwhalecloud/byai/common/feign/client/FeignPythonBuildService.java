@@ -39,6 +39,8 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbBuildResult;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryDelete;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbEntityDiscovery;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbEntityEnrich;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDelete;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDownload;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileImport;
@@ -65,6 +67,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileUpdateResult
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbImportResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBaseInfo;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBuildResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeEntityBatchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
@@ -431,6 +434,24 @@ public class FeignPythonBuildService {
         Long resourceId) {
         return post(KnowledgeServiceOperation.KNOWLEDGE_ITEM_REFERENCES, request,
             new TypeReference<PythonBuildResponse<KnowledgeItemReferencesResult>>() {
+            }, resourceId);
+    }
+
+    /**
+     * 异步发现知识库原始文档中的实体。
+     */
+    public PythonBuildResponse<KnowledgeEntityBatchResult> entityDiscovery(KbEntityDiscovery request, Long resourceId) {
+        return post(KnowledgeServiceOperation.ENTITY_DISCOVERY, request,
+            new TypeReference<PythonBuildResponse<KnowledgeEntityBatchResult>>() {
+            }, resourceId);
+    }
+
+    /**
+     * 异步补全知识库 KnowledgeEntity 文档中的实体信息、证据和语义关系。
+     */
+    public PythonBuildResponse<KnowledgeEntityBatchResult> entityEnrich(KbEntityEnrich request, Long resourceId) {
+        return post(KnowledgeServiceOperation.ENTITY_ENRICH, request,
+            new TypeReference<PythonBuildResponse<KnowledgeEntityBatchResult>>() {
             }, resourceId);
     }
 
