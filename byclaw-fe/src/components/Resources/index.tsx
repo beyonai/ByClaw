@@ -45,6 +45,7 @@ import { saveTool } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import useGlobal from '@/hooks/useGlobal';
+import type { IState as IEmployeesState } from '@/models/useEmployees';
 import { getToken, isAdminVip } from '@/utils/auth';
 import { get, trim, intersection, isEmpty } from 'lodash';
 import { buildSkillMarketplaceUrl, isSkillMarketplaceInstalledMessage } from './utils';
@@ -115,7 +116,7 @@ const parseBannerList = (value: any) => {
 
 const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onInstalledOnlyChange }) => {
   const intl = useIntl();
-  const { EventEmitter } = useGlobal();
+  const { EventEmitter, agentId, agentInfo } = useGlobal();
 
   // 根据 resourceType 判断资源名称
   const getResourceName = () => {
@@ -207,9 +208,16 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
 
   const { logoutModuleEvent } = useModuleEvent('KNOWLEDGE_CENTER');
 
-  const { userInfo } = useSelector(({ user }: any) => ({
-    userInfo: user?.userInfo,
-  }));
+  const { userInfo, defaultDigEmployeeId } = useSelector(
+    ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
+      userInfo: user?.userInfo,
+      defaultDigEmployeeId: employees.defaultDigEmployeeId,
+    })
+  );
+  // 企业技能组浏览需要当前生效的数字员工，取值顺序与 ResourceList/ResourceCard 保持一致，
+  // 否则同一页面内技能组与技能列表会落到不同员工。
+  const activeDigitalEmployeeId =
+    agentId || agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
   const portalOrigin = typeof window === 'undefined' ? undefined : window.location.origin;
   const beyondToken = getToken();
   const skillMarketplaceUrl = React.useMemo(
