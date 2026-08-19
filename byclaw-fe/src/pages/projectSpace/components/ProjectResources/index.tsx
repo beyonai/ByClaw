@@ -111,8 +111,10 @@ const ProjectResources: React.FC<Props> = ({
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [branches, setBranches] = useState<ProjectRepoBranch[]>([]);
   const [selectedBranch, setSelectedBranch] = useState<string>('');
+  // fileName 决定预览器的类型判断与标题，path 仅用于展示完整位置。
   const [filePreviewContent, setFilePreviewContent] = useState<{
-    name: string;
+    fileName: string;
+    path: string;
     content: string;
     binary?: boolean;
   } | null>(null);
@@ -459,10 +461,10 @@ const ProjectResources: React.FC<Props> = ({
           branch: selectedBranch || detailRepo.defaultBranch || 'main',
           path: node.path,
         });
-        const content = file.binary ? file.base64Content || '' : file.content || '';
         setFilePreviewContent({
-          name: file.path || node.name,
-          content,
+          fileName: node.name,
+          path: file.path || node.path,
+          content: file.binary ? file.base64Content || '' : file.content || '',
           binary: file.binary,
         });
       } catch (error: any) {
@@ -861,24 +863,20 @@ const ProjectResources: React.FC<Props> = ({
       </Drawer>
 
       <Drawer
-        title={filePreviewContent?.name || ''}
+        title={filePreviewContent?.path || ''}
         open={!!filePreviewContent}
         placement="right"
         width="50vw"
         mask={false}
         destroyOnClose
         onClose={() => setFilePreviewContent(null)}
-        styles={{ body: { padding: 16, overflow: 'auto' } }}
+        styles={{ body: { padding: 0, overflow: 'hidden' } }}
       >
         {filePreviewContent && (
-          <div>
-            {filePreviewContent.binary && (
-              <div style={{ marginBottom: 8, color: '#667085', fontSize: 12 }}>{filePreviewContent.name} (Base64)</div>
-            )}
-            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {filePreviewContent.content}
-            </pre>
-          </div>
+          <FilePreviewPanel
+            fileName={filePreviewContent.fileName}
+            content={{ data: filePreviewContent.content, binary: filePreviewContent.binary }}
+          />
         )}
       </Drawer>
     </>

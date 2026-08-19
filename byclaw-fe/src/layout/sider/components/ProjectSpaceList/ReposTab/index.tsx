@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, type Key } from 'react
 import { Button, Dropdown, Empty, Input, message } from 'antd';
 import { BranchesOutlined, DownOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
+import FilePreviewPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FilePreviewPanel';
 import { DragType } from '@/components/QueryInput/withDrag';
 import useGlobal from '@/hooks/useGlobal';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
@@ -41,14 +42,14 @@ const toFileBrowserItem = (node: ProjectRepoTreeNode) => ({
 
 const formatBranchLabel = (branch: string) => (branch.length > 10 ? `${branch.substring(0, 10)}...` : branch);
 
+// 远程仓库文件只有字符串/base64，没有可下载的 resourceId+path，走 FilePreviewPanel 的 content 入口复用富预览。
 const RemoteFileContent: React.FC<{ name: string; content: string; binary?: boolean }> = ({
   name,
   content,
   binary,
 }) => (
-  <div style={{ height: '100%', overflow: 'auto', padding: 16 }}>
-    <div style={{ marginBottom: 8, color: '#667085', fontSize: 12 }}>{binary ? `${name} (Base64)` : name}</div>
-    <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{content}</pre>
+  <div style={{ height: '100%', overflow: 'hidden' }}>
+    <FilePreviewPanel fileName={name} content={{ data: content, binary }} />
   </div>
 );
 
@@ -217,7 +218,7 @@ const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail
       try {
         const file = await getProjectRepoFileContent({ repoId: repo.repoId, branch, path: node.path });
         const content = file.binary ? file.base64Content || '' : file.content || '';
-        onOpenDetail(<RemoteFileContent name={file.path || node.name} content={content} binary={file.binary} />, {
+        onOpenDetail(<RemoteFileContent name={node.name} content={content} binary={file.binary} />, {
           tabKey: `repo-remote-file:${repo.repoId}:${branch}:${node.path}`,
           title: node.name,
         });
