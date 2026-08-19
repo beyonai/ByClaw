@@ -59,10 +59,12 @@ export default function useRender({
   updateMessage,
   deleteMessage,
   sessionId,
+  hideAction,
 }: {
   updateMessage: (message: IMessage) => IMessage;
   deleteMessage: (message: IMessage) => void;
   sessionId?: string;
+  hideAction?: boolean;
 }) {
   const { ModalNode, setOpen, setMyContent, setMyTitle } = useModal({});
 
@@ -207,13 +209,13 @@ export default function useRender({
     [deleteMessage, updateMessage, canRefrence]
   );
 
-  const uploadFileRender = useCallback((fileList?: IFile[], msg?: IMessage) => {
+  const uploadFileRender = useCallback((fileList?: IFile[], msg?: IMessage, canQuote = true) => {
     if (!fileList || isEmpty(fileList)) return null;
 
     return (
       <div className={classnames(styles.fileList, 'ub ub-wrap full-width gap8')} style={{ justifyContent: 'inherit' }}>
         {fileList.map((fileItem) => {
-          return <FileRender fileItem={fileItem} key={fileItem.uid} message={msg} canQuote canCollect />;
+          return <FileRender fileItem={fileItem} key={fileItem.uid} message={msg} canQuote={canQuote} canCollect />;
         })}
       </div>
     );
@@ -294,14 +296,14 @@ export default function useRender({
   }, []);
 
   const attachmentListRender = useCallback(
-    (msg: IMessage) => {
+    (msg: IMessage, canInteract = true) => {
       const { fromBeyond, fromOtherUser, imageList, fileList, citeMsgList, extParams } = msg;
 
       const isLeftSide = fromBeyond || fromOtherUser;
 
       const renderList = compact([
-        uploadFileRender(imageList, msg),
-        uploadFileRender(fileList, msg),
+        uploadFileRender(imageList, msg, canInteract),
+        uploadFileRender(fileList, msg, canInteract),
         citeMsgRender(citeMsgList),
         extParamsRender(extParams, msg),
       ]);
@@ -323,7 +325,7 @@ export default function useRender({
         </div>
       );
     },
-    [citeMsgRender]
+    [citeMsgRender, extParamsRender, uploadFileRender]
   );
 
   const renderMessage = useCallback(
@@ -512,7 +514,7 @@ export default function useRender({
             </div>
           )}
           <ReplyFileArtifacts message={msg} sessionId={sessionId} />
-          {attachmentListRender(msg)}
+          {attachmentListRender(msg, !hideAction)}
           {!hideAction && [IMessageState.Done, IMessageState.Cancel, IMessageState.Error].includes(messageState) && (
             <div className={styles.actionsBar}>
               {isLeftSide && beyondAnswerActions(msg)}

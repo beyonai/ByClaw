@@ -61,6 +61,7 @@ function MessageList(props: IProps, ref: any) {
     updateMessage,
     deleteMessage,
     sessionId,
+    hideAction,
   });
   const { toBottomBtnVisable, setToBottomBtnVisable } = useToBottomBtn({
     messageList,

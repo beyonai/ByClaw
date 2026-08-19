@@ -9,6 +9,13 @@ import type {
 
 export const ALL_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7];
 
+export const normalizeIntervalValue = (value: unknown, unit: AutomationIntervalUnit = 'hour') => {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return unit === 'minute' ? 60 : 1;
+  if (unit === 'minute') return Math.max(60, Math.round(numericValue));
+  return Math.max(1, Math.round(numericValue * 10) / 10);
+};
+
 export const parseAutomationConfig = (config?: string): AutomationChatConfig => {
   if (!config) return { chatContent: '', resourceList: [] };
   try {
@@ -31,11 +38,11 @@ const parseLegacyCron = (cronExpr?: string): AutomationScheduleConfig | undefine
   if (parts.length !== 5) return undefined;
   const [minute, hour, day, month, weekday] = parts;
   if (minute.startsWith('*/') && hour === '*') {
+    const intervalValue = normalizeIntervalValue(minute.slice(2), 'minute');
     return {
       mode: 'interval',
-      intervalHours: 1,
-      intervalValue: 1,
-      intervalUnit: 'hour',
+      intervalValue,
+      intervalUnit: 'minute',
       intervalWeekdays: [...ALL_WEEKDAYS],
     };
   }
@@ -119,7 +126,10 @@ export const getAutomationFormInitialValues = (source?: AutomationSource): Autom
     periodMonthDay: schedule?.monthDay || 1,
     periodMonthDays: schedule?.monthDays?.length ? schedule.monthDays : [schedule?.monthDay || 1],
     intervalHours: schedule?.intervalHours || 1,
-    intervalValue: schedule?.intervalValue || schedule?.intervalHours || 1,
+    intervalValue: normalizeIntervalValue(
+      schedule?.intervalValue ?? schedule?.intervalHours,
+      schedule?.intervalUnit || 'hour'
+    ),
     intervalUnit: schedule?.intervalUnit || 'hour',
     intervalWeekdays: schedule?.intervalWeekdays?.length ? schedule.intervalWeekdays : [...ALL_WEEKDAYS],
     onceTime: schedule?.onceTime ? dayjs(schedule.onceTime) : dayjs().add(1, 'hour').startOf('minute'),
@@ -138,7 +148,7 @@ export const buildAutomationSchedule = (values: AutomationFormValues): Automatio
   }
   if (values.scheduleMode === 'interval') {
     const intervalUnit: AutomationIntervalUnit = values.intervalUnit || 'hour';
-    const intervalValue = Math.max(1, Number(values.intervalValue ?? values.intervalHours) || 1);
+    const intervalValue = normalizeIntervalValue(values.intervalValue ?? values.intervalHours, intervalUnit);
     return {
       ...base,
       intervalValue,
@@ -178,12 +188,17 @@ export const buildAutomationCron = (schedule: AutomationScheduleConfig) => {
   if (schedule.mode === 'interval') {
     const weekdays = schedule.intervalWeekdays?.length ? schedule.intervalWeekdays.join(',') : '*';
     const intervalUnit = schedule.intervalUnit || 'hour';
-    const intervalValue = Math.max(1, Number(schedule.intervalValue || schedule.intervalHours) || 1);
-    if (intervalUnit === 'minute' && intervalValue <= 59) {
-      return `*/${intervalValue} * * * ${weekdays}`;
+    const intervalValue = normalizeIntervalValue(schedule.intervalValue ?? schedule.intervalHours, intervalUnit);
+    if (intervalUnit === 'minute') {
+      // 分钟值最小为 60，Cron 只负责提供足够高频的候选点，实际间隔由 lastScanTime 校验。
+      return `* * * * ${weekdays}`;
     }
-    if (intervalUnit === 'hour' && intervalValue <= 23) {
+    if (Number.isInteger(intervalValue) && intervalValue <= 23) {
       return `0 */${intervalValue} * * ${weekdays}`;
+    }
+    if (!Number.isInteger(intervalValue)) {
+      // 小数小时无法直接表达为标准 Cron，使用每分钟候选点并由结构化配置控制实际间隔。
+      return `* * * * ${weekdays}`;
     }
     // 超过 23 小时无法由标准 Cron 精确表达，使用每小时候选点，由结构化配置和 lastScanTime 控制实际间隔。
     return `0 * * * ${weekdays}`;

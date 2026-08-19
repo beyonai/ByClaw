@@ -173,6 +173,8 @@ export type IFile = {
   downloadUrl?: string;
   /** 需要携带当前登录鉴权头的受保护文件下载方法。 */
   downloadRequest?: () => Promise<{ fileName: string; file: Blob }>;
+  /** 预览 HTML、Markdown 时，按当前文件目录加载相对路径资源。 */
+  resolvePreviewResource?: (resourcePath: string) => Promise<string | Blob>;
   imgUrl?: string;
   status: string; // 'uploading' | 'done';
   fileType: 'image' | 'file';

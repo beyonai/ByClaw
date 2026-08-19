@@ -44,9 +44,11 @@ const SHOW_SAVE_TO_WORKSPACE_ENTRY = false;
 export default function useRender({
   updateMessage,
   deleteMessage,
+  hideAction,
 }: {
   updateMessage: (message: IMessage) => void;
   deleteMessage: (message: IMessage) => void;
+  hideAction?: boolean;
 }) {
   const { ModalNode, setOpen, setMyContent, setMyTitle } = useModal({});
 
@@ -100,13 +102,13 @@ export default function useRender({
     [deleteMessage, updateMessage]
   );
 
-  const uploadFileRender = useCallback((fileList?: IFile[], msg?: IMessage) => {
+  const uploadFileRender = useCallback((fileList?: IFile[], msg?: IMessage, canQuote = true) => {
     if (!fileList || isEmpty(fileList)) return null;
 
     return (
       <div className={classnames(styles.fileList, 'ub ub-wrap full-width gap8')} style={{ justifyContent: 'inherit' }}>
         {fileList.map((fileItem) => {
-          return <FileRender fileItem={fileItem} key={fileItem.uid} message={msg} canQuote canCollect />;
+          return <FileRender fileItem={fileItem} key={fileItem.uid} message={msg} canQuote={canQuote} canCollect />;
         })}
       </div>
     );
@@ -146,14 +148,14 @@ export default function useRender({
     );
   }, []);
 
-  const attachmentListRender = useCallback((msg: IMessage) => {
+  const attachmentListRender = useCallback((msg: IMessage, canInteract = true) => {
     const { fromBeyond, fromOtherUser, imageList, fileList, extParams } = msg;
 
     const isLeftSide = fromBeyond || fromOtherUser;
 
     const renderList = compact([
-      uploadFileRender(imageList, msg),
-      uploadFileRender(fileList, msg),
+      uploadFileRender(imageList, msg, canInteract),
+      uploadFileRender(fileList, msg, canInteract),
       extParamsRender(extParams, msg),
     ]);
 
@@ -173,7 +175,7 @@ export default function useRender({
         {renderList}
       </div>
     );
-  }, []);
+  }, [extParamsRender, uploadFileRender]);
 
   const renderMessage = useCallback(
     (
@@ -289,7 +291,7 @@ export default function useRender({
               <WaveBallLoading style={{ width: 20, height: 20, opacity: 0.6 }} />
             </div>
           )}
-          {attachmentListRender(msg)}
+          {attachmentListRender(msg, !hideAction)}
           {!hideAction && [IMessageState.Done, IMessageState.Cancel, IMessageState.Error].includes(messageState) && (
             <div className={styles.actionsBar}>
               {isLeftSide && beyondAnswerActions(msg)}

@@ -105,6 +105,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.io.ByteArrayOutputStream;
+import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDate;
@@ -340,6 +341,10 @@ public class DevloopApplicationService {
             // 运营需求必须经过专用接口补齐负责人和完成时间，不能从渠道配置入口绕过校验。
             return ResponseUtil.failRes(I18nUtil.get("devloop.source.type.unsupported", dto.getSourceType()));
         }
+        String scheduleError = validateChatAutomationSchedule(dto.getSourceType(), dto.getConfig());
+        if (scheduleError != null) {
+            return ResponseUtil.failRes(scheduleError);
+        }
         ScanSource source = new ScanSource();
         source.setProjectId(dto.getProjectId());
         source.setSourceName(dto.getSourceName());
@@ -370,6 +375,12 @@ public class DevloopApplicationService {
         if (operationDenied != null) {
             return ResponseUtil.failRes(operationDenied);
         }
+        ScanSource existing = scanSourceService.findById(dto.getSourceId());
+        String scheduleError = validateChatAutomationSchedule(existing == null ? null : existing.getSourceType(),
+            dto.getConfig());
+        if (scheduleError != null) {
+            return ResponseUtil.failRes(scheduleError);
+        }
         ScanSource source = new ScanSource();
         source.setSourceId(dto.getSourceId());
         source.setSourceName(dto.getSourceName());
@@ -381,6 +392,58 @@ public class DevloopApplicationService {
         source.setUpdateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
         scanSourceService.update(source);
         return ResponseUtil.successResponse(null);
+    }
+
+    /**
+     * 校验聊天型定时任务的按间隔配置，避免绕过前端直接提交过小或精度不符合要求的间隔。
+     * 小时允许一位小数且最小 1 小时；分钟必须为整数且最小 60 分钟。
+     */
+    private String validateChatAutomationSchedule(String sourceType, String config) {
+        if (!ScanSourceService.SOURCE_TYPE_CHAT.equals(sourceType) || StringUtils.isBlank(config)) {
+            return null;
+        }
+
+        try {
+            JSONObject root = JSON.parseObject(config);
+            JSONObject schedule = root == null ? null : root.getJSONObject("schedule");
+            if (schedule == null || !"interval".equalsIgnoreCase(schedule.getString("mode"))) {
+                return null;
+            }
+
+            String unit = StringUtils.defaultIfBlank(schedule.getString("intervalUnit"), "hour");
+            if (!"hour".equalsIgnoreCase(unit) && !"minute".equalsIgnoreCase(unit)) {
+                return I18nUtil.get("devloop.automation.schedule.invalid");
+            }
+            Object valueObject = schedule.get("intervalValue");
+            if (valueObject == null) {
+                valueObject = schedule.get("interval");
+            }
+            if (valueObject == null && "hour".equalsIgnoreCase(unit)) {
+                valueObject = schedule.get("intervalHours");
+            }
+            BigDecimal value = valueObject == null ? null : new BigDecimal(String.valueOf(valueObject));
+            if (value == null) {
+                return intervalValidationMessage(unit);
+            }
+
+            if ("minute".equalsIgnoreCase(unit)) {
+                return value.compareTo(BigDecimal.valueOf(60)) < 0 || value.stripTrailingZeros().scale() > 0
+                    ? I18nUtil.get("devloop.automation.interval.minute.invalid") : null;
+            }
+            if ("hour".equalsIgnoreCase(unit)) {
+                return value.compareTo(BigDecimal.ONE) < 0 || value.stripTrailingZeros().scale() > 1
+                    ? I18nUtil.get("devloop.automation.interval.hour.invalid") : null;
+            }
+            return null;
+        } catch (Exception exception) {
+            return I18nUtil.get("devloop.automation.schedule.invalid");
+        }
+    }
+
+    private String intervalValidationMessage(String unit) {
+        return "minute".equalsIgnoreCase(unit)
+            ? I18nUtil.get("devloop.automation.interval.minute.invalid")
+            : I18nUtil.get("devloop.automation.interval.hour.invalid");
     }
 
     /**

@@ -14,7 +14,7 @@ import { agentTypeMap } from '@/constants/agent';
 import { Platform } from '@/layout/components/provider/global';
 import useAppStore from '@/models/common/useAppStore';
 
-import useChat, { ISendProps } from '@/hooks/useChat';
+import useChat, { ISendProps, ISendConf } from '@/hooks/useChat';
 import type { IAgentType } from '@/typescript/agent';
 import type { IMessage, IResourceFromItem } from '@/typescript/message';
 import type { ISession } from '@/typescript/session';
@@ -40,6 +40,7 @@ import {
   type DetailPanelOptions,
 } from '@/layout/sider/siderContentContext';
 import { closeChatResourceTab, upsertChatResourceTab, type ChatResourceTab } from './ChatResourceWorkspace/tabState';
+import { isNotificationSession } from '@/utils/session';
 
 type IProps = {
   sessionId: string;
@@ -206,6 +207,9 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     const normalizedProjectId = Number(candidateProjectId);
     return Number.isFinite(normalizedProjectId) && normalizedProjectId > 0 ? normalizedProjectId : undefined;
   }, [currentSession?.projectId, projectId]);
+
+  const notificationSession = isNotificationSession(currentSession);
+  const effectiveReadOnly = Boolean(readOnly || notificationSession);
 
   useEffect(() => {
     if (fixedAgentId) {
@@ -441,23 +445,39 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   });
   const lastMsg = last(messageList);
 
+  const guardedSendQuery = useCallback(
+    (sendProps: ISendProps, sendConf?: ISendConf) => {
+      if (effectiveReadOnly) return;
+      return sendQuery(sendProps, sendConf);
+    },
+    [effectiveReadOnly, sendQuery]
+  );
+  const guardedDeleteMessage = useCallback(
+    (message: IMessage) => {
+      if (effectiveReadOnly) return;
+      deleteMessage(message);
+    },
+    [deleteMessage, effectiveReadOnly]
+  );
+
   const onCancel = useCallback(() => {
+    if (effectiveReadOnly) return;
     if (
       isSessionRunning ||
       [IMessageState.Query, IMessageState.Answer].includes(lastMsg?.messageState as IMessageState)
     ) {
       cancelCurrentSession();
     }
-  }, [cancelCurrentSession, isSessionRunning, lastMsg?.messageState]);
+  }, [cancelCurrentSession, effectiveReadOnly, isSessionRunning, lastMsg?.messageState]);
 
   const { disabledInput, multiChoicesList, setMultiChoicesList, multiChoicesMsgId, setMultiChoicesMsgId } =
     useEventEmitterHooks({
       messageList,
       updateMessage,
       openDrawerSourceFromInfo,
-      sendQuery,
+      sendQuery: guardedSendQuery,
       setMyAgentType,
-      deleteMessage,
+      deleteMessage: guardedDeleteMessage,
       cancelSSE: onCancel,
     });
   const isMultiChoices = !isEmpty(multiChoicesList);
@@ -466,7 +486,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
 
   const onSend = useCallback(
     async (param: ISendProps, isRetry?: boolean) => {
-      if (disabledInput) return;
+      if (disabledInput || effectiveReadOnly) return;
       if (!isRetry) {
         Object.assign(param, { payload: { ...param.payload, ...tempParamsRef.current } });
       }
@@ -487,7 +507,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
         }
       }
     },
-    [disabledInput, sendQuery, setIsBottom]
+    [disabledInput, effectiveReadOnly, sendQuery, setIsBottom]
   );
 
   onSendRef.current = onSend;
@@ -618,17 +638,17 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   onNext={onNext}
                   hasMore={hasMore}
                   sessionId={sessionId}
-                  hideAction={hideAction}
+                  hideAction={hideAction || notificationSession}
                   messageList={messageList}
                   updateMessage={updateMessage}
-                  deleteMessage={deleteMessage}
+                  deleteMessage={guardedDeleteMessage}
                   multiChoicesList={multiChoicesList}
                   multiChoicesMsgId={multiChoicesMsgId}
                   setMultiChoicesMsgId={setMultiChoicesMsgId}
                 />
               </div>
             )}
-            {!readOnly && (
+            {!effectiveReadOnly && (
               <div
                 className={classnames(styles.queryInputWrapper, queryInputWrapperClassName, {
                   [styles.messageListDisappear]: isMultiChoices,

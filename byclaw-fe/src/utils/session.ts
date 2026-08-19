@@ -28,6 +28,10 @@ export const formatSessionName = (item: ISession) => {
   return item.sessionName;
 };
 
+/** 通知会话由通知中心负责展示，不应进入普通聊天交互。 */
+export const isNotificationSession = (session?: Pick<ISession, 'objectType'> | null) =>
+  `${session?.objectType || ''}`.toLowerCase() === 'notification';
+
 const SESSION_OBJECT_MAP: Record<string, { objectId: string; objectType: string }> = {};
 
 export const setSessionObjectTypeMap = (sessionId: string, objectId: number | string, objectType: string) => {
@@ -61,7 +65,7 @@ export const sessionHandler = (item: ISession, targetList?: ISession[]) => {
     sessionName: formatSessionName(item),
   };
 
-  if (item.objectType === 'Notification') {
+  if (isNotificationSession(item)) {
     Object.assign(payload, {
       ...item,
       avatar: 'beyond/noticeHead.png',
