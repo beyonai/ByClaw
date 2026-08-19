@@ -1,39 +1,50 @@
-import { Button, Drawer, Dropdown, Empty, Modal, Radio, Select, Spin, Typography, message } from 'antd';
+import { Button, Drawer, Dropdown, Empty, Modal, Select, Spin, Typography, message } from 'antd';
 import {
   ApartmentOutlined,
+  BranchesOutlined,
   DatabaseOutlined,
   DeleteOutlined,
+  DownOutlined,
   EditOutlined,
   FileTextOutlined,
   GithubOutlined,
-  LoadingOutlined,
   MoreOutlined,
   PlusOutlined,
   ReloadOutlined,
   RightOutlined,
   RobotOutlined,
-  ThunderboltOutlined,
 } from '@ant-design/icons';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl } from '@umijs/max';
 import { getAgentChatAvatar } from '@/utils/agent';
 import AntdIcon from '@/components/AntdIcon';
 import { getFileIconType } from '@/constants/icon';
+import FilePreviewPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FilePreviewPanel';
+import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
+import type { FileTreeItem } from '@/layout/sider/components/FileSiderPanel/constants';
 import {
+  ensureDirectoryPath,
+  isDirectory,
+  normalizeFileBrowserPath,
+} from '@/layout/sider/components/FileSiderPanel/utils';
+import {
+  getProjectRepoFileContent,
+  listProjectRepoBranches,
+  listProjectRepoTree,
   listProjectRepos,
   listProjectResources,
   listProjectSpaceFiles,
   deleteProjectRepo,
   saveProjectResources,
-  startProjectInit,
   type DevloopProjectRepo,
   type DevloopProjectSpaceFile,
+  type ProjectRepoBranch,
+  type ProjectRepoTreeNode,
   type ProjectResourceType,
 } from '@/service/devloop';
 import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import { listOntologyBases, pageOntologyResources } from '@/service/ontology';
 import { ResourceTypeMap } from '@/constants/resource';
-import FilePreviewPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FilePreviewPanel';
 import { useDigitalEmployeeOptions } from '../../hooks/useDigitalEmployeeOptions';
 import type { ProjectBoundResource, ProjectSpace } from '../../types';
 import styles from '../../index.module.less';
@@ -47,13 +58,11 @@ interface Props {
 
   /** 仓库新增/编辑后由详情页递增，确保资源卡片立即重新读取列表。 */
   repositoryRefreshVersion?: number;
-
-  /** 工作区初始化成功后刷新项目详情，更新初始化状态和页面提示。 */
-  onProjectInitStarted?: () => void;
 }
 
 type ResourceOption = { value: string; label: string; description?: string };
 type ResourceSelection = Record<ProjectResourceType, string[]>;
+type RepoFileItem = { name: string; path: string; isDir: boolean; size?: number };
 
 const EMPTY_SELECTION: ResourceSelection = {
   knowledge: [],
@@ -61,10 +70,12 @@ const EMPTY_SELECTION: ResourceSelection = {
   ontology: [],
 };
 
-const INIT_SKILL_PACKAGE_OPTIONS = [
-  { value: 'trellis', label: 'trellis' },
-  { value: 'superpowers', label: 'superpowers' },
-];
+const toFileBrowserItem = (node: ProjectRepoTreeNode): RepoFileItem => ({
+  name: node.name,
+  path: normalizeFileBrowserPath(node.path),
+  isDir: node.type === 'directory',
+  size: node.size,
+});
 
 const getArray = (...candidates: any[]): any[] => candidates.find((candidate) => Array.isArray(candidate)) || [];
 
@@ -79,7 +90,6 @@ const ProjectResources: React.FC<Props> = ({
   onRefreshToolbarChange,
   onOpenRepositoryManager,
   repositoryRefreshVersion = 0,
-  onProjectInitStarted,
 }) => {
   const intl = useIntl();
   const [files, setFiles] = useState<DevloopProjectSpaceFile[]>([]);
@@ -93,12 +103,20 @@ const ProjectResources: React.FC<Props> = ({
   const [resourceOptionsLoading, setResourceOptionsLoading] = useState(false);
   const [resourceSaving, setResourceSaving] = useState(false);
   const [resourceModalOpen, setResourceModalOpen] = useState(false);
-  const [initModalOpen, setInitModalOpen] = useState(false);
-  const [initStarting, setInitStarting] = useState(false);
-  const [initBuildIndex, setInitBuildIndex] = useState(false);
-  const [initSkillPackages, setInitSkillPackages] = useState<string[]>([]);
   const [previewFile, setPreviewFile] = useState<DevloopProjectSpaceFile | null>(null);
   const [detailRepo, setDetailRepo] = useState<DevloopProjectRepo | null>(null);
+  const [repoFiles, setRepoFiles] = useState<RepoFileItem[]>([]);
+  const [repoFilesLoading, setRepoFilesLoading] = useState(false);
+  const [childrenByPath, setChildrenByPath] = useState<Record<string, RepoFileItem[]>>({});
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
+  const [branches, setBranches] = useState<ProjectRepoBranch[]>([]);
+  const [selectedBranch, setSelectedBranch] = useState<string>('');
+  const [filePreviewContent, setFilePreviewContent] = useState<{
+    name: string;
+    content: string;
+    binary?: boolean;
+  } | null>(null);
+  const requestSeqRef = useRef(0);
   const [knowledgeOptions, setKnowledgeOptions] = useState<ResourceOption[]>([]);
   const [ontologyOptions, setOntologyOptions] = useState<ResourceOption[]>([]);
   const [selectedResources, setSelectedResources] = useState<ResourceSelection>(EMPTY_SELECTION);
@@ -115,10 +133,6 @@ const ProjectResources: React.FC<Props> = ({
   const isOperationProject = project.projectType === 'operation';
   // 资源分类始终在同一行等宽铺满：研发 2 类、运营 4 类，默认和普通项目仅展示共享文件。
   const resourceCategoryCount = isDevelopProject ? 2 : isOperationProject ? 4 : 1;
-  const workspaceInitRequired = isDevelopProject && !!project.initStatus && project.initStatus !== 'ready';
-  const workspaceInitInProgress =
-    project.initStatus === 'initializing' ||
-    (project.initStatus === 'initialized' && Number(project.initSessionId || 0) > 0);
 
   const loadFiles = useCallback(async () => {
     setLoadingFiles(true);
@@ -353,31 +367,121 @@ const ProjectResources: React.FC<Props> = ({
     });
   };
 
-  // 工作区仓库初始化沿用旧详情页流程:先选择建索引与技能包,再调用后端同步初始化接口。
-  const openInitModal = () => {
-    setInitBuildIndex(false);
-    setInitSkillPackages([]);
-    setInitModalOpen(true);
-  };
+  const loadRepoFiles = useCallback(
+    async (repo: DevloopProjectRepo, branch?: string) => {
+      const selectedBranch = branch || repo.defaultBranch || 'main';
+      const requestSeq = ++requestSeqRef.current;
+      setRepoFilesLoading(true);
+      try {
+        const response = await listProjectRepoTree({
+          projectId: Number(project.projectId),
+          repoId: repo.repoId,
+          ref: selectedBranch,
+        });
+        if (requestSeq === requestSeqRef.current) {
+          setRepoFiles((response || []).map(toFileBrowserItem));
+        }
+      } catch (error) {
+        console.error('Failed to load repository files:', error);
+        if (requestSeq === requestSeqRef.current) {
+          setRepoFiles([]);
+        }
+      } finally {
+        if (requestSeq === requestSeqRef.current) {
+          setRepoFilesLoading(false);
+        }
+      }
+    },
+    [project.projectId]
+  );
 
-  const handleStartInit = async () => {
-    if (initStarting) return;
-    setInitStarting(true);
+  const loadRepoBranches = useCallback(async (repo: DevloopProjectRepo) => {
     try {
-      await startProjectInit({
-        projectId: Number(project.projectId),
-        buildIndex: initBuildIndex,
-        skillPackages: initBuildIndex ? initSkillPackages : [],
-      });
-      message.success(intl.formatMessage({ id: 'projectSpace.detail.initConfig.finished' }));
-      setInitModalOpen(false);
-      onProjectInitStarted?.();
-    } catch (error: any) {
-      message.error(error?.message || intl.formatMessage({ id: 'projectSpace.detail.initConfig.startFailed' }));
-    } finally {
-      setInitStarting(false);
+      const branchList = await listProjectRepoBranches(repo.repoId);
+      const defaultBranch = repo.defaultBranch || branchList?.[0]?.name || 'main';
+      setBranches(branchList || []);
+      setSelectedBranch(defaultBranch);
+      return defaultBranch;
+    } catch (error) {
+      console.error('Failed to load repository branches:', error);
+      const fallbackBranch = repo.defaultBranch || 'main';
+      setBranches([]);
+      setSelectedBranch(fallbackBranch);
+      return fallbackBranch;
     }
-  };
+  }, []);
+
+  // 仓库详情抽屉打开时重置树/分支状态，避免上一个仓库的缓存串到当前仓库。
+  const handleOpenRepoDetail = useCallback(
+    async (repo: DevloopProjectRepo) => {
+      setDetailRepo(repo);
+      setRepoFiles([]);
+      setChildrenByPath({});
+      setExpandedKeys([]);
+      setFilePreviewContent(null);
+      const defaultBranch = await loadRepoBranches(repo);
+      await loadRepoFiles(repo, defaultBranch);
+    },
+    [loadRepoBranches, loadRepoFiles]
+  );
+
+  const loadRepoTreeNode = useCallback(
+    async (node: FileTreeItem) => {
+      if (!detailRepo || !isDirectory(node)) return;
+      const path = ensureDirectoryPath(normalizeFileBrowserPath(node.path));
+      if (childrenByPath[path]) return;
+      try {
+        const response = await listProjectRepoTree({
+          projectId: Number(project.projectId),
+          repoId: detailRepo.repoId,
+          path,
+          ref: selectedBranch || detailRepo.defaultBranch || 'main',
+        });
+        setChildrenByPath((current) => ({
+          ...current,
+          [path]: (response || []).map(toFileBrowserItem),
+        }));
+      } catch (error) {
+        console.error('Failed to load repository directory:', error);
+        setChildrenByPath((current) => ({ ...current, [path]: [] }));
+      }
+    },
+    [childrenByPath, detailRepo, project.projectId, selectedBranch]
+  );
+
+  const handleNodeClick = useCallback(
+    async (event: React.MouseEvent, node: FileTreeItem) => {
+      event.stopPropagation();
+      if (!detailRepo || isDirectory(node)) return;
+      try {
+        const file = await getProjectRepoFileContent({
+          repoId: detailRepo.repoId,
+          branch: selectedBranch || detailRepo.defaultBranch || 'main',
+          path: node.path,
+        });
+        const content = file.binary ? file.base64Content || '' : file.content || '';
+        setFilePreviewContent({
+          name: file.path || node.name,
+          content,
+          binary: file.binary,
+        });
+      } catch (error: any) {
+        message.error(error?.message || '文件内容加载失败');
+      }
+    },
+    [detailRepo, selectedBranch]
+  );
+
+  const changeBranch = useCallback(
+    async (branch: string) => {
+      if (!detailRepo) return;
+      setSelectedBranch(branch);
+      setChildrenByPath({});
+      setExpandedKeys([]);
+      await loadRepoFiles(detailRepo, branch);
+    },
+    [detailRepo, loadRepoFiles]
+  );
 
   const empty = (
     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'chatResource.empty' })} />
@@ -497,11 +601,11 @@ const ProjectResources: React.FC<Props> = ({
       className={styles.resourceSimpleItem}
       role="button"
       tabIndex={0}
-      onClick={() => setDetailRepo(repo)}
+      onClick={() => handleOpenRepoDetail(repo)}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          setDetailRepo(repo);
+          handleOpenRepoDetail(repo);
         }
       }}
     >
@@ -516,24 +620,6 @@ const ProjectResources: React.FC<Props> = ({
           {[repo.repoUrl, repo.defaultBranch, repo.description].filter(Boolean).join(' · ') || '-'}
         </Typography.Text>
       </div>
-      {workspaceInitRequired && repo.repoType === 'workspace' && (
-        <span className={styles.resourceRepoInitAction} onClick={(event) => event.stopPropagation()}>
-          {workspaceInitInProgress && (
-            <span className={styles.resourceRepoInitProgress}>
-              <LoadingOutlined spin />
-              {intl.formatMessage({ id: 'projectSpace.detail.repository.initializing' })}
-            </span>
-          )}
-          <Button type="link" size="small" icon={<ThunderboltOutlined />} onClick={openInitModal}>
-            {intl.formatMessage({
-              id:
-                workspaceInitInProgress || project.initStatus === 'initialized'
-                  ? 'projectSpace.detail.repository.reinitWorkspace'
-                  : 'projectSpace.detail.repository.initWorkspace',
-            })}
-          </Button>
-        </span>
-      )}
       <Dropdown
         trigger={['hover']}
         onOpenChange={() => undefined}
@@ -634,55 +720,6 @@ const ProjectResources: React.FC<Props> = ({
         )}
       </div>
 
-      <Modal
-        title={intl.formatMessage({ id: 'projectSpace.detail.initConfig.title' })}
-        open={initModalOpen}
-        onCancel={() => setInitModalOpen(false)}
-        onOk={() => void handleStartInit()}
-        okText={intl.formatMessage({ id: 'projectSpace.detail.initConfig.start' })}
-        cancelText={intl.formatMessage({ id: 'common.cancel' })}
-        confirmLoading={initStarting}
-        width={480}
-      >
-        <div className={styles.resourceInitConfigBody}>
-          <div className={styles.resourceInitConfigDescription}>
-            {intl.formatMessage({ id: 'projectSpace.detail.initConfig.desc' })}
-          </div>
-          <div className={styles.resourceInitConfigField}>
-            <span className={styles.resourceInitConfigLabel}>
-              {intl.formatMessage({ id: 'projectSpace.detail.initConfig.buildIndex' })}
-            </span>
-            <Radio.Group
-              value={initBuildIndex}
-              onChange={(event) => {
-                const next = event.target.value as boolean;
-                setInitBuildIndex(next);
-                setInitSkillPackages(next ? INIT_SKILL_PACKAGE_OPTIONS.map((option) => option.value) : []);
-              }}
-            >
-              <Radio value={false}>{intl.formatMessage({ id: 'projectSpace.detail.initConfig.buildIndexNo' })}</Radio>
-              <Radio value={true}>{intl.formatMessage({ id: 'projectSpace.detail.initConfig.buildIndexYes' })}</Radio>
-            </Radio.Group>
-          </div>
-          {initBuildIndex && (
-            <div className={styles.resourceInitConfigField}>
-              <span className={styles.resourceInitConfigLabel}>
-                {intl.formatMessage({ id: 'projectSpace.detail.initConfig.skillLabel' })}
-              </span>
-              <Select
-                mode="multiple"
-                allowClear
-                style={{ width: '100%' }}
-                value={initSkillPackages}
-                options={INIT_SKILL_PACKAGE_OPTIONS}
-                placeholder={intl.formatMessage({ id: 'projectSpace.detail.initConfig.skillPlaceholder' })}
-                onChange={(values) => setInitSkillPackages(values as string[])}
-              />
-            </div>
-          )}
-        </div>
-      </Modal>
-
       {isOperationProject && (
         <Modal
           open={resourceModalOpen}
@@ -773,68 +810,75 @@ const ProjectResources: React.FC<Props> = ({
         }
         open={!!detailRepo}
         placement="right"
-        width={420}
+        width="60vw"
         destroyOnClose
-        onClose={() => setDetailRepo(null)}
+        onClose={() => {
+          setDetailRepo(null);
+          setRepoFiles([]);
+          setChildrenByPath({});
+          setExpandedKeys([]);
+          setBranches([]);
+          setSelectedBranch('');
+          setFilePreviewContent(null);
+        }}
+        styles={{ body: { padding: 10 } }}
       >
         {detailRepo && (
-          <>
-            <div className={styles.projectResourceBindingModal}>
-              <div>
-                <Typography.Text type="secondary">
-                  {intl.formatMessage({ id: 'projectSpace.repository.type' })}
-                </Typography.Text>
-                <Typography.Paragraph>
-                  {detailRepo.repoType === 'workspace'
-                    ? intl.formatMessage({ id: 'projectSpace.repository.type.workspace' })
-                    : intl.formatMessage({ id: 'projectSpace.repository.type.code' })}
-                </Typography.Paragraph>
-              </div>
-              <div>
-                <Typography.Text type="secondary">
-                  {intl.formatMessage({ id: 'projectSpace.repository.provider' })}
-                </Typography.Text>
-                <Typography.Paragraph>{detailRepo.provider || '-'}</Typography.Paragraph>
-              </div>
-              <div>
-                <Typography.Text type="secondary">
-                  {intl.formatMessage({ id: 'projectSpace.repository.name' })}
-                </Typography.Text>
-                <Typography.Paragraph>{detailRepo.repoFullName || '-'}</Typography.Paragraph>
-              </div>
-              <div>
-                <Typography.Text type="secondary">
-                  {intl.formatMessage({ id: 'projectSpace.repository.url' })}
-                </Typography.Text>
-                <Typography.Paragraph>{detailRepo.repoUrl || '-'}</Typography.Paragraph>
-              </div>
-              <div>
-                <Typography.Text type="secondary">
-                  {intl.formatMessage({ id: 'projectSpace.repository.defaultBranch' })}
-                </Typography.Text>
-                <Typography.Paragraph>{detailRepo.defaultBranch || '-'}</Typography.Paragraph>
-              </div>
-              <div>
-                <Typography.Text type="secondary">
-                  {intl.formatMessage({ id: 'projectSpace.repository.description' })}
-                </Typography.Text>
-                <Typography.Paragraph>{detailRepo.description || '-'}</Typography.Paragraph>
-              </div>
-            </div>
-            {onOpenRepositoryManager && (
-              <Button
-                type="primary"
-                icon={<EditOutlined />}
-                onClick={() => {
-                  const repository = detailRepo;
-                  setDetailRepo(null);
-                  onOpenRepositoryManager(repository);
-                }}
-              >
-                {intl.formatMessage({ id: 'common.edit' })}
-              </Button>
+          <FileSpaceBlock
+            title={detailRepo.repoFullName || ''}
+            fillContainer
+            loading={repoFilesLoading}
+            items={repoFiles}
+            currentPath="/"
+            emptyText={intl.formatMessage({ id: 'projectSpace.detail.repo.emptyFiles' })}
+            resourceEmptyStyle
+            childrenByPath={childrenByPath}
+            expandedKeys={expandedKeys}
+            onExpand={setExpandedKeys}
+            onLoadData={loadRepoTreeNode}
+            onNodeClick={handleNodeClick}
+            headerExtra={
+              branches.length > 0 && (
+                <Dropdown
+                  menu={{
+                    items: branches.map((branch) => ({
+                      key: branch.name,
+                      label: branch.name,
+                      onClick: () => void changeBranch(branch.name),
+                    })),
+                  }}
+                  trigger={['click']}
+                >
+                  <Button type="text" size="small" icon={<DownOutlined />} iconPosition="end" title={selectedBranch}>
+                    <BranchesOutlined />
+                    <span>{selectedBranch.length > 10 ? `${selectedBranch.substring(0, 10)}...` : selectedBranch}</span>
+                  </Button>
+                </Dropdown>
+              )
+            }
+          />
+        )}
+      </Drawer>
+
+      <Drawer
+        title={filePreviewContent?.name || ''}
+        open={!!filePreviewContent}
+        placement="right"
+        width="50vw"
+        mask={false}
+        destroyOnClose
+        onClose={() => setFilePreviewContent(null)}
+        styles={{ body: { padding: 16, overflow: 'auto' } }}
+      >
+        {filePreviewContent && (
+          <div>
+            {filePreviewContent.binary && (
+              <div style={{ marginBottom: 8, color: '#667085', fontSize: 12 }}>{filePreviewContent.name} (Base64)</div>
             )}
-          </>
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {filePreviewContent.content}
+            </pre>
+          </div>
         )}
       </Drawer>
     </>
