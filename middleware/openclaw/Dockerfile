@@ -133,7 +133,7 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
         "@remotion/cli@${REMOTION_VERSION}" \
         "@byclaw/by-framework@${BY_FRAMEWORK_TS_VERSION}"
 
-ARG OPENCLI_VERSION=2.1.33
+ARG OPENCLI_VERSION=2.1.34
 ARG OPENCLI_EXTENSION_VERSION=2.1.18
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
