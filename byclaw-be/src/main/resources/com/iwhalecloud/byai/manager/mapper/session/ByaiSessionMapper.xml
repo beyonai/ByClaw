@@ -226,33 +226,6 @@
                     column="session_id" />
     </resultMap>
 
-    <select id="selectSessionsByProjectId" resultMap="ProjectSessionDtoResultMap">
-        SELECT a.session_id,
-               a.parent_session_id,
-               a.session_name,
-               a.session_content,
-               a.session_type,
-               a.create_time,
-               a.creator_id,
-               a.object_type,
-               a.object_id,
-               a.enterprise_id,
-               a.update_by,
-               a.update_time,
-               a.state,
-               a.project_id,
-               r.avatar
-        FROM byai_session a
-                 LEFT JOIN ss_resource r ON a.object_id = r.resource_id
-        WHERE a.project_id = #{projectId}
-          AND (a.state IS NULL OR a.state != 'DELETED')
-          <!-- 研发项目会话列表排除运营任务；运营项目仍保留任务会话入口。 -->
-          AND (EXISTS (SELECT 1 FROM byai_project op WHERE op.project_id = a.project_id AND op.project_type = 'operation')
-               OR NOT EXISTS (SELECT 1 FROM byai_session_ext oe
-                              WHERE oe.session_id = a.session_id
-                                AND oe.ext_param_code = 'oploop_source_id'))
-        ORDER BY COALESCE(a.update_time, a.create_time) DESC, a.create_time DESC
-    </select>
 
     <select id="selectSessionsByProjectByQo" resultMap="ProjectSessionDtoResultMap">
         SELECT a.session_id,

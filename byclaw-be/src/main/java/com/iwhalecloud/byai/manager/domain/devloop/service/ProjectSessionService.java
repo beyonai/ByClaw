@@ -30,10 +30,4 @@ public class ProjectSessionService {
         return PageHelperUtil.toPageInfo(page);
     }
 
-    /**
-     * 查询项目下全部有效会话。
-     */
-    public java.util.List<ByaiSessionDto> listSessionsByProjectId(Long projectId) {
-        return byaiSessionMapper.selectSessionsByProjectId(projectId);
-    }
 }

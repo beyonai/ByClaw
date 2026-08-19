@@ -45,10 +45,6 @@ public interface ByaiSessionMapper extends BaseMapper<ByaiSession> {
      */
     List<RecentlySearchAskVo> queryRecentlySearchAsk(RecentlySearchAskQo recentlySessionQo);
 
-    /**
-     * 查询项目下的有效会话，按最近更新时间排序。
-     */
-    List<ByaiSessionDto> selectSessionsByProjectId(@Param("projectId") Long projectId);
 
     /**
      * 按查询条件查询项目下的有效会话。
@@ -58,14 +54,14 @@ public interface ByaiSessionMapper extends BaseMapper<ByaiSession> {
     /**
      * 当会话仍带有指定扩展状态时更新会话名称。
      *
-     * @param sessionId 会话标识
-     * @param sessionName 新会话名称
+     * @param sessionId    会话标识
+     * @param sessionName  新会话名称
      * @param extParamCode 扩展参数编码
-     * @param updateBy 更新人
-     * @param updateTime 更新时间
+     * @param updateBy     更新人
+     * @param updateTime   更新时间
      * @return 更新记录数
      */
     int updateSessionNameWhenExtExists(@Param("sessionId") Long sessionId,
-        @Param("sessionName") String sessionName, @Param("extParamCode") String extParamCode,
-        @Param("updateBy") Long updateBy, @Param("updateTime") Date updateTime);
+                                       @Param("sessionName") String sessionName, @Param("extParamCode") String extParamCode,
+                                       @Param("updateBy") Long updateBy, @Param("updateTime") Date updateTime);
 }

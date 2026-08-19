@@ -37,6 +37,7 @@ import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorInfoServic
 import com.iwhalecloud.byai.manager.domain.session.service.ByaiSessionService;
 import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFileDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFilePkIdDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ListProjectTaskStatusDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDeleteDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDTO;
@@ -255,6 +256,9 @@ public class DevloopApplicationService {
 
     @Autowired
     private ProjectObjectFileService projectObjectFileService;
+
+    @Autowired
+    private ProjectTaskStatusService projectTaskStatusService;
 
     /** 运营任务模板目录服务由 Spring 管理，供模板列表、详情和任务启动复用。 */
     @Autowired
@@ -2400,6 +2404,20 @@ public class DevloopApplicationService {
         }
 
         return objectFileGroupMap.values();
+    }
+
+    /**
+     * 查询项目任务状态字典，供会话扩展状态 skill 校验编码。
+     *
+     * @param listProjectTaskStatusDto 项目与可选维度
+     * @return 有效状态列表
+     */
+    public List<ProjectTaskStatus> listProjectTaskStatuses(ListProjectTaskStatusDto listProjectTaskStatusDto) {
+        if (listProjectTaskStatusDto == null || listProjectTaskStatusDto.getProjectId() == null) {
+            return Collections.emptyList();
+        }
+        return projectTaskStatusService.listByProjectId(listProjectTaskStatusDto.getProjectId(),
+            listProjectTaskStatusDto.getDimensionName());
     }
 
     /**

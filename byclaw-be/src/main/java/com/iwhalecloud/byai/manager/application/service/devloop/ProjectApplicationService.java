@@ -609,7 +609,6 @@ public class ProjectApplicationService {
             .and(item -> item.isNull(ProjectResource::getDeleteFlag)
                 .or().ne(ProjectResource::getDeleteFlag, DeleteFlag.DELETED));
         List<ProjectResource> resources = projectResourceMapper.selectList(resourceWrapper);
-        List<ByaiSessionDto> sessions = projectSessionService.listSessionsByProjectId(projectId);
 
         Map<String, Object> map = new HashMap<>();
         map.put("projectId", project.getProjectId());
@@ -627,8 +626,6 @@ public class ProjectApplicationService {
         map.put("initFailReason", project.getInitFailReason());
         map.put("repos", repos);
         map.put("resources", resources);
-        map.put("sessions", sessions);
-        map.put("sessionCount", sessions.size());
         return map;
     }
 
