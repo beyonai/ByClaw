@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Dropdown, Empty, Input, Modal, message } from 'antd';
+import { Button, Dropdown, Empty, Input, Modal, Tag, message } from 'antd';
 import {
   ShareAltOutlined,
   DeleteOutlined,
@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
+import classNames from 'classnames';
 import useGlobal from '@/hooks/useGlobal';
 import { setAgentCache } from '@/components/QueryInput/RichInput/agentCache';
 import getElementData from '@/components/QueryInput/RichInput/utils/getElementData';
@@ -513,7 +514,29 @@ const ProjectSpacePage: React.FC = () => {
                     <ShareAltOutlined />
                   </span>
                   <span className={styles.projectCardBody}>
-                    <strong>{project.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' })}</strong>
+                    <span className={styles.projectCardTitleRow}>
+                      <strong>
+                        {project.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' })}
+                      </strong>
+                      {project.projectType === 'develop' || project.projectType === 'operation' ? (
+                        <Tag
+                          bordered={false}
+                          className={classNames(
+                            styles.projectTypeTag,
+                            project.projectType === 'develop'
+                              ? styles.projectTypeTagDevelopment
+                              : styles.projectTypeTagOperation
+                          )}
+                        >
+                          {intl.formatMessage({
+                            id:
+                              project.projectType === 'develop'
+                                ? 'projectSpace.scene.development'
+                                : 'projectSpace.scene.operation',
+                          })}
+                        </Tag>
+                      ) : null}
+                    </span>
                     <small>
                       {createTime
                         ? intl.formatMessage({ id: 'projectSpace.projectCard.createdAt' }, { time: createTime })

@@ -84,6 +84,7 @@ const Employees = () => {
   const routeStateEmployee = routeState?.selectedEmployee;
   const previousRouteSelectionRef = useRef('');
   const staleEmployeeSessionIdRef = useRef('');
+  const fileUploadSessionIdRef = useRef('');
   if (routeStateAgentId && previousRouteSelectionRef.current !== routeStateAgentId) {
     previousRouteSelectionRef.current = routeStateAgentId;
     // 从右侧列表打开新员工时，当前 sessionId 可能由浏览器历史恢复自上一员工，先标记为待隔离旧会话。
@@ -210,6 +211,10 @@ const Employees = () => {
 
   useEffect(() => {
     // 同一路由连续切换数字员工时重置为详情展示态，不能复用上一员工已经进入的会话态。
+    if (fileUploadSessionIdRef.current) {
+      if (`${employeeSessionId || ''}` === fileUploadSessionIdRef.current) return;
+      fileUploadSessionIdRef.current = '';
+    }
     setIsBottom(!!employeeSessionId);
   }, [employeeSessionId, myAgentId]);
 
@@ -460,8 +465,14 @@ const Employees = () => {
                 agentType={detailAgentInfo?.agentType || agentTypeMap.agent}
                 queryInputProps={{
                   placeholder: '',
+                  onFileUploadSessionCreated: (newSessionId: string) => {
+                    // 员工详情上传文件会提前创建会话，但仍保持员工介绍页，发送消息后再进入聊天态。
+                    if (employeeSessionId) return;
+                    fileUploadSessionIdRef.current = `${newSessionId}`;
+                    setIsBottom(false);
+                  },
                 }}
-                queryInputWrapperClassName={styles.employeeQueryInputWrapper}
+                queryInputWrapperClassName={!isBottom ? styles.employeeQueryInputWrapper : undefined}
                 // 员工详情固定与当前数字员工聊天，不显示 @ 入口，也不恢复任何历史输入草稿。
                 cannotAt
                 disableInputDraft
@@ -470,6 +481,7 @@ const Employees = () => {
                 // 打开或切换员工时保持详情态；只有当前员工发送成功后才进入聊天态。
                 autoEnterBottomOnMessage={false}
                 sendExtraParams={projectChatExtraParams}
+                preserveNewSessionView
               />
             </div>
           )}

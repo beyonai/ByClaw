@@ -1,5 +1,11 @@
 import dayjs, { type Dayjs } from 'dayjs';
-import type { AutomationChatConfig, AutomationFormValues, AutomationScheduleConfig, AutomationSource } from './types';
+import type {
+  AutomationChatConfig,
+  AutomationFormValues,
+  AutomationScheduleConfig,
+  AutomationSource,
+  AutomationIntervalUnit,
+} from './types';
 
 export const ALL_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7];
 
@@ -28,6 +34,8 @@ const parseLegacyCron = (cronExpr?: string): AutomationScheduleConfig | undefine
     return {
       mode: 'interval',
       intervalHours: 1,
+      intervalValue: 1,
+      intervalUnit: 'hour',
       intervalWeekdays: [...ALL_WEEKDAYS],
     };
   }
@@ -35,6 +43,8 @@ const parseLegacyCron = (cronExpr?: string): AutomationScheduleConfig | undefine
     return {
       mode: 'interval',
       intervalHours: Math.max(1, Number(hour.slice(2)) || 1),
+      intervalValue: Math.max(1, Number(hour.slice(2)) || 1),
+      intervalUnit: 'hour',
       intervalWeekdays:
         weekday === '*' || weekday === '?' ? [...ALL_WEEKDAYS] : weekday.split(',').map(Number).filter(Boolean),
     };
@@ -88,6 +98,12 @@ const parseTime = (value?: string) => {
     .second(0);
 };
 
+const parsePeriodDateTime = (schedule?: AutomationScheduleConfig) =>
+  parseTime(schedule?.time)
+    .date(1)
+    .month(Math.max(0, Math.min(11, (schedule?.month || 1) - 1)))
+    .date(Math.max(1, schedule?.monthDay || 1));
+
 export const getAutomationFormInitialValues = (source?: AutomationSource): AutomationFormValues => {
   const config = parseAutomationConfig(source?.config);
   const schedule = config.schedule || parseLegacyCron(source?.cronExpr);
@@ -97,11 +113,14 @@ export const getAutomationFormInitialValues = (source?: AutomationSource): Autom
     scheduleMode: schedule?.mode || 'periodic',
     periodType: schedule?.periodType || 'daily',
     periodTime: parseTime(schedule?.time),
+    periodDateTime: parsePeriodDateTime(schedule),
     periodWeekdays: schedule?.weekdays?.length ? schedule.weekdays : [...ALL_WEEKDAYS],
     periodMonth: schedule?.month || 1,
     periodMonthDay: schedule?.monthDay || 1,
     periodMonthDays: schedule?.monthDays?.length ? schedule.monthDays : [schedule?.monthDay || 1],
     intervalHours: schedule?.intervalHours || 1,
+    intervalValue: schedule?.intervalValue || schedule?.intervalHours || 1,
+    intervalUnit: schedule?.intervalUnit || 'hour',
     intervalWeekdays: schedule?.intervalWeekdays?.length ? schedule.intervalWeekdays : [...ALL_WEEKDAYS],
     onceTime: schedule?.onceTime ? dayjs(schedule.onceTime) : dayjs().add(1, 'hour').startOf('minute'),
   };
@@ -118,19 +137,26 @@ export const buildAutomationSchedule = (values: AutomationFormValues): Automatio
     };
   }
   if (values.scheduleMode === 'interval') {
+    const intervalUnit: AutomationIntervalUnit = values.intervalUnit || 'hour';
+    const intervalValue = Math.max(1, Number(values.intervalValue ?? values.intervalHours) || 1);
     return {
       ...base,
-      intervalHours: Math.max(1, Number(values.intervalHours) || 1),
+      intervalValue,
+      intervalUnit,
+      // 保留旧字段给历史前端/接口兼容；分钟间隔不能伪装成小时，避免后端优先读取旧字段。
+      ...(intervalUnit === 'hour' ? { intervalHours: intervalValue } : {}),
       intervalWeekdays: values.intervalWeekdays?.length ? values.intervalWeekdays : [...ALL_WEEKDAYS],
     };
   }
+  const yearlyDateTime = values.periodDateTime || values.periodTime;
+  const isYearly = values.periodType === 'yearly';
   return {
     ...base,
     periodType: values.periodType || 'daily',
-    time: values.periodTime?.format('HH:mm') || '09:00',
+    time: (isYearly ? yearlyDateTime : values.periodTime)?.format('HH:mm') || '09:00',
     weekdays: values.periodWeekdays,
-    month: values.periodMonth,
-    monthDay: values.periodMonthDay,
+    month: isYearly && yearlyDateTime ? yearlyDateTime.month() + 1 : values.periodMonth,
+    monthDay: isYearly && yearlyDateTime ? yearlyDateTime.date() : values.periodMonthDay,
     monthDays:
       values.periodType === 'monthly'
         ? Array.from(
@@ -151,7 +177,12 @@ export const buildAutomationCron = (schedule: AutomationScheduleConfig) => {
   }
   if (schedule.mode === 'interval') {
     const weekdays = schedule.intervalWeekdays?.length ? schedule.intervalWeekdays.join(',') : '*';
-    // Cron 每小时提供候选触发点，真实的无限小时跨度由结构化配置和 lastScanTime 控制。
+    const intervalUnit = schedule.intervalUnit || 'hour';
+    const intervalValue = Math.max(1, Number(schedule.intervalValue || schedule.intervalHours) || 1);
+    if (intervalUnit === 'minute' && intervalValue <= 59) {
+      return `*/${intervalValue} * * * ${weekdays}`;
+    }
+    // 小时数或超过 59 分钟的间隔使用每小时候选点，由结构化配置和 lastScanTime 控制实际间隔。
     return `0 * * * ${weekdays}`;
   }
   const value = parseTime(schedule.time);
@@ -195,10 +226,11 @@ export const getNextRunTime = (source: AutomationSource) => {
     return onceTime.isValid() && onceTime.isAfter(now) ? onceTime : null;
   }
   if (schedule.mode === 'interval') {
+    const intervalUnit = schedule.intervalUnit || 'hour';
+    const intervalValue = schedule.intervalValue || schedule.intervalHours || 1;
     const lastRun = dayjs(source.lastScanTime);
-    return lastRun.isValid()
-      ? lastRun.add(schedule.intervalHours || 1, 'hour')
-      : now.add(schedule.intervalHours || 1, 'hour');
+    const durationUnit = intervalUnit === 'minute' ? 'minute' : 'hour';
+    return lastRun.isValid() ? lastRun.add(intervalValue, durationUnit) : now.add(intervalValue, durationUnit);
   }
   const time = parseTime(schedule.time);
   if (schedule.periodType === 'yearly') {

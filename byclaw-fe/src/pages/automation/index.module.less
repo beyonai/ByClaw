@@ -124,14 +124,6 @@
   background: #f1f1f1 !important;
 }
 
-.primaryActionButton {
-  height: 32px;
-  border-color: #1f1f1f;
-  border-radius: 8px;
-  background: #1f1f1f;
-  box-shadow: none;
-}
-
 .listContent {
   min-height: 0;
   flex: 1;
@@ -541,15 +533,52 @@
 
 .scheduleCompactField {
   width: 110px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
   flex: 0 0 110px;
+
+  :global(.@{antPrefix}-select-selector),
+  :global(.@{antPrefix}-picker),
+  :global(.@{antPrefix}-input-number-input-wrap) {
+    height: 30px;
+  }
 }
 
 .scheduleWideField {
   width: 320px;
+  height: 40px !important;
+  min-height: 40px !important;
+  max-height: 40px !important;
+
+  :global(.@{antPrefix}-select-selector) {
+    min-height: 38px;
+  }
 }
 
 .scheduleDateTimeField {
   width: 220px;
+  height: 40px !important;
+  min-height: 40px !important;
+  max-height: 40px !important;
+}
+
+.scheduleYearlyDateTimeField {
+  width: 220px !important;
+  height: 40px !important;
+}
+
+.intervalField {
+  display: inline-flex;
+  align-items: center;
+}
+
+.intervalValueField {
+  width: 110px !important;
+}
+
+.intervalUnitField {
+  width: 92px !important;
 }
 
 @media (max-width: 1100px) {
@@ -604,10 +633,21 @@
     flex-direction: column;
   }
 
-  .scheduleCompactField,
-  .scheduleWideField,
-  .scheduleDateTimeField {
+  .scheduleCompactField {
     width: 100% !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    max-height: 32px !important;
+    flex: none;
+  }
+
+  .scheduleWideField,
+  .scheduleDateTimeField,
+  .scheduleYearlyDateTimeField {
+    width: 100% !important;
+    height: 40px !important;
+    min-height: 40px !important;
+    max-height: 40px !important;
     flex: none;
   }
 }

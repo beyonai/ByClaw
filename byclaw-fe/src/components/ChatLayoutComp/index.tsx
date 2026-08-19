@@ -59,6 +59,9 @@ type IProps = {
   /** 输入区外层样式，由特殊聊天页面按需覆盖视觉，不改变输入逻辑。 */
   queryInputWrapperClassName?: string;
 
+  /** 新建任务上传文件生成会话后，保持新建任务视图直到用户发送消息。 */
+  preserveNewSessionView?: boolean;
+
   /** 禁用输入框草稿缓存与恢复，员工详情等固定聊天对象场景使用。 */
   disableInputDraft?: boolean;
 
@@ -103,6 +106,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     projectId,
     projectName,
     queryInputWrapperClassName,
+    preserveNewSessionView = false,
   } = props;
   const { isBottom, setIsBottom, autoEnterBottomOnMessage = true } = props;
   const { sessionId, queryInputProps = {}, readOnly, disableInputDraft = false } = props;
@@ -304,7 +308,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     [activeResourceTabKey, resourceTabs]
   );
 
-  const resourceWorkspaceVisible = resourceListOpen || resourceTabs.length > 0;
+  const resourceWorkspaceVisible = isBottom && (resourceListOpen || resourceTabs.length > 0);
 
   // 预览页签栏的列表按钮只负责显示/隐藏资源列表，不能误关已经打开的文件预览。
   const toggleResourceList = useCallback(() => {
@@ -366,12 +370,16 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     // 每次进入另一个已有会话详情时关闭旧预览并默认打开资源列表；新建会话尚无 sessionId 时不展示。
     const previousSessionId = previousResourceSessionIdRef.current;
     previousResourceSessionIdRef.current = sessionId;
-    if (`${previousSessionId}` === `${sessionId}`) return;
+    if (`${previousSessionId}` === `${sessionId}`) {
+      // 上传文件提前创建的会话在新建任务页暂不打开资源面板；用户发送消息后再进入详情时补开。
+      if (sessionId && isBottom) setResourceListOpen(true);
+      return;
+    }
 
     setResourceTabs([]);
     setActiveResourceTabKey('');
-    setResourceListOpen(Boolean(sessionId));
-  }, [sessionId]);
+    setResourceListOpen(Boolean(sessionId && isBottom));
+  }, [isBottom, sessionId]);
 
   // 路由切换时由 PCLayout 统一决定是否清理详情面板；资源中心入口带 preserveDetailPanel 标记时，
   // 即使聊天组件卸载，也要保留右侧资源工作区显示在资源中心页面旁边。
@@ -573,6 +581,11 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     return lastMsg?.messageState;
   }, [isSessionRunning, lastMsg?.messageState]);
 
+  const showNewSessionProjectSelector = Boolean(
+    userInfo && queryInputProps.enableTaskTemplate !== false && (!sessionId || (preserveNewSessionView && !isBottom))
+  );
+  const projectSelectorSessionId = preserveNewSessionView && !isBottom ? '' : sessionId;
+
   return (
     <ChatLayoutCompContext.Provider
       value={{
@@ -619,7 +632,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
               <div
                 className={classnames(styles.queryInputWrapper, queryInputWrapperClassName, {
                   [styles.messageListDisappear]: isMultiChoices,
-                  [styles.withProjectSelector]: !sessionId && userInfo && queryInputProps.enableTaskTemplate !== false,
+                  [styles.withProjectSelector]: showNewSessionProjectSelector,
                 })}
                 id="queryInputWrapper"
               >
@@ -632,16 +645,17 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   queryInputProps={{ ...queryInputProps, projectId: sessionProjectId, selectedProject }}
                   lastMsg={lastMsg}
                   sessionId={sessionId}
+                  preserveInputOnSessionChange={preserveNewSessionView && !isBottom}
                   onSend={onSend}
                   onCancel={onCancel}
                   myAgentType={myAgentType}
                   setMyAgentType={setMyAgentType}
                 />
-                {!sessionId && userInfo && queryInputProps.enableTaskTemplate !== false && (
+                {showNewSessionProjectSelector && (
                   <div className={styles.externalProjectSelector}>
                     <TaskTemplateEntry
                       projectId={sessionProjectId}
-                      sessionId={sessionId}
+                      sessionId={projectSelectorSessionId}
                       onProjectChange={setSelectedProject}
                       onApply={() => undefined}
                     />

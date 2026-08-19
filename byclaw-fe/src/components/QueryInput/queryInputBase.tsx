@@ -62,6 +62,9 @@ export type IProps = {
 
   /** 输入框外部项目选择器当前选中的项目。 */
   selectedProject?: { projectId: string; projectName: string };
+
+  /** 新建任务上传文件生成会话后，由外层决定是否暂时保持新建任务视图。 */
+  onFileUploadSessionCreated?: (sessionId: string) => void;
 };
 
 export type IState = {

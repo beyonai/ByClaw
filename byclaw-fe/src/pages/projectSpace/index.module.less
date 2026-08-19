@@ -264,6 +264,13 @@
   flex-direction: column;
   gap: 4px;
 
+  .projectCardTitleRow {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
   strong,
   small {
     overflow: hidden;
@@ -284,6 +291,27 @@
     font-weight: 400;
     line-height: 20px;
   }
+}
+
+.projectTypeTag {
+  height: 18px;
+  margin-inline-end: 0;
+  padding: 0 5px;
+  border-radius: 5px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.projectTypeTagDevelopment {
+  color: #7a3fd1;
+  background: #f3ecff;
+}
+
+.projectTypeTagOperation {
+  color: #1677b8;
+  background: #e8f4fc;
 }
 
 .projectCardMore {

@@ -382,12 +382,16 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
               onRemove={this.onRemoveFile}
               setSessionId={(mySessionId: string, sessionName?: string) => {
                 if (`${mySessionId}` === `${sessionId}`) return;
+                this.props.onFileUploadSessionCreated?.(mySessionId);
                 setSessionId?.(mySessionId);
                 dispatch({
                   type: 'session/addSession',
                   payload: {
                     sessionId: mySessionId,
                     sessionName,
+                    objectId: agentId,
+                    objectType: agentId ? 'DigEmployee' : undefined,
+                    agentType: this.props.myAgentType,
                   },
                 });
               }}

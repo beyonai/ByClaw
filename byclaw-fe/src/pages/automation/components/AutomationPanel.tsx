@@ -188,7 +188,11 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
         ? `${intl.formatMessage({ id: 'automation.schedule.once' })} · ${onceTime.format('YYYY/M/D HH:mm:ss')}`
         : intl.formatMessage({ id: 'automation.schedule.unknown' });
     } else if (schedule.mode === 'interval') {
-      label = intl.formatMessage({ id: 'automation.schedule.everyHours' }, { hours: schedule.intervalHours || 1 });
+      const intervalValue = schedule.intervalValue || schedule.intervalHours || 1;
+      const unit = schedule.intervalUnit || 'hour';
+      label = `${intl.formatMessage({ id: 'automation.schedule.interval' })} · ${intervalValue} ${intl.formatMessage({
+        id: `automation.intervalUnit.${unit}`,
+      })}`;
     } else if (schedule.periodType === 'daily') {
       label = intl.formatMessage({ id: 'automation.schedule.dailyAt' }, { time });
     } else if (schedule.periodType === 'weekly' || schedule.periodType === 'biweekly') {
@@ -352,12 +356,7 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
             title={intl.formatMessage({ id: 'common.refresh' })}
             onClick={() => void reload()}
           />
-          <Button
-            className={styles.primaryActionButton}
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => openEditor()}
-          >
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>
             {intl.formatMessage({ id: 'automation.add' })}
           </Button>
         </div>

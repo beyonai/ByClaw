@@ -49,6 +49,7 @@ const Chat = () => {
   const userInfo = useSelector(({ user }) => user.userInfo);
 
   const [isBottom, setIsBottom] = React.useState(!!sessionId);
+  const fileUploadSessionIdRef = React.useRef('');
 
   const title = useMemo(() => {
     if (userInfo) {
@@ -69,6 +70,10 @@ const Chat = () => {
   const [writerModeSelect, setwriterModeSelect] = React.useState<'writer' | 'ppt' | 'longWriter'>('writer');
 
   React.useEffect(() => {
+    if (fileUploadSessionIdRef.current) {
+      if (`${sessionId || ''}` === fileUploadSessionIdRef.current) return;
+      fileUploadSessionIdRef.current = '';
+    }
     setIsBottom(!!sessionId);
   }, [sessionId]);
 
@@ -86,8 +91,14 @@ const Chat = () => {
           setwriterModeSelect(mode as 'writer' | 'ppt' | 'longWriter');
         }
       },
+      onFileUploadSessionCreated: (newSessionId: string) => {
+        // 文件上传接口会提前创建会话，但新建任务仍应保持当前空白任务页，发送消息后再进入详情。
+        if (sessionId) return;
+        fileUploadSessionIdRef.current = `${newSessionId}`;
+        setIsBottom(false);
+      },
     };
-  }, []);
+  }, [sessionId]);
 
   const locationProjectContext = React.useMemo(() => getProjectChatContext(location.state), [location.state]);
   const autoSendContent = (location.state as { autoSendContent?: string } | null)?.autoSendContent;
@@ -267,6 +278,7 @@ const Chat = () => {
           sendExtraParams={projectChatExtraParams}
           projectId={sessionProjectContext.projectId}
           projectName={sessionProjectContext.projectName}
+          preserveNewSessionView
         />
       }
     />
