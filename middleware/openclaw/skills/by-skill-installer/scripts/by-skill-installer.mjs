@@ -411,6 +411,72 @@ async function fetchInnerSkills({ timeoutMs, keyword, ownerType }) {
   return list.filter(isInnerSkill);
 }
 
+// 把一个技能条目压成搜索/列表输出用的扁平结构。
+function describeSkillEntry(entry) {
+  return {
+    skillCode: firstNonEmpty(entry?.resourceCode),
+    skillId: toNumber(entry?.resourceId) ?? null,
+    skillName: firstNonEmpty(entry?.resourceName),
+    skillDesc: firstNonEmpty(entry?.resourceDesc, entry?.description),
+    skillType: firstNonEmpty(entry?.skillType),
+    ownerType: firstNonEmpty(entry?.ownerType),
+  };
+}
+
+// 关键词落在 code / 名称 / 描述任意一处都算命中，让 agent 用中文词也能搜到英文 code。
+function skillMatchesKeyword(entry, keyword) {
+  if (!keyword) {
+    return true;
+  }
+  const needle = keyword.toLowerCase();
+  return [entry.skillCode, entry.skillName, entry.skillDesc]
+    .some((field) => String(field || "").toLowerCase().includes(needle));
+}
+
+async function searchCommand(args) {
+  const timeoutMs = timeoutMsFromArgs(args);
+  const ownerType = firstNonEmpty(args["owner-type"]);
+  const keyword = firstNonEmpty(args.keyword, args.q, args._?.[1]);
+
+  // 后端 keyword 只匹配 code，中文词会落空；所以先全量拉再本地过滤三个字段。
+  const entries = (await fetchInnerSkills({ timeoutMs, keyword: "", ownerType })).map(describeSkillEntry);
+  const matched = entries
+    .filter((entry) => skillMatchesKeyword(entry, keyword))
+    .sort((left, right) => left.skillCode.localeCompare(right.skillCode));
+
+  // 绑定状态是增强信息：推导不到数字员工时仍然要能搜。
+  let digitalEmployee = null;
+  let boundIds = new Set();
+  try {
+    const { digitalEmployeeId, source } = resolveDigitalEmployeeId(args);
+    digitalEmployee = { id: digitalEmployeeId, source };
+    const bound = await fetchBoundResources({ digitalEmployeeId, timeoutMs });
+    boundIds = new Set(bound.map((item) => toNumber(item?.resourceId)).filter((id) => id !== undefined));
+  } catch (error) {
+    digitalEmployee = { id: null, source: null, unavailable: error instanceof Error ? error.message : String(error) };
+  }
+
+  const skills = matched.map((entry) => ({
+    ...entry,
+    bound: digitalEmployee?.id === null || digitalEmployee?.id === undefined ? null : boundIds.has(entry.skillId),
+  }));
+
+  return {
+    ok: true,
+    action: "search",
+    keyword: keyword || null,
+    digitalEmployee,
+    visibleInnerSkillCount: entries.length,
+    // 命中上限说明可能还有没拉到的条目，提示调用方缩小 ownerType 再搜。
+    truncated: entries.length >= AUTH_PAGE_SIZE,
+    matchedCount: skills.length,
+    skills,
+    hint: skills.length
+      ? "用 bind --skill-code <code> 绑定；bound: false 表示可见但未绑定，bound: null 表示未能确定数字员工"
+      : "没有命中。换个关键词，或不带 --keyword 列出全部可见内置技能",
+  };
+}
+
 async function resolveSkillIdByCode({ skillCode, timeoutMs, ownerType }) {
   const code = validateSkillCode(skillCode);
   // Pass the code as keyword so the backend narrows the page server-side.
@@ -420,10 +486,22 @@ async function resolveSkillIdByCode({ skillCode, timeoutMs, ownerType }) {
     ? matches
     : entries.filter((entry) => firstNonEmpty(entry?.resourceCode).toLowerCase() === code.toLowerCase());
   if (!candidates.length) {
-    const available = entries.map((entry) => firstNonEmpty(entry?.resourceCode)).filter(Boolean).slice(0, 10);
+    // keyword 只匹配 code，命中为空时再全量拉一次找形近候选，避免让调用方靠猜。
+    let pool = entries;
+    if (!pool.length) {
+      pool = await fetchInnerSkills({ timeoutMs, keyword: "", ownerType }).catch(() => []);
+    }
+    const available = pool.map((entry) => firstNonEmpty(entry?.resourceCode)).filter(Boolean);
+    const near = available.filter((item) => {
+      const low = item.toLowerCase();
+      const target = code.toLowerCase();
+      return low.includes(target) || target.includes(low);
+    });
+    const suggestions = (near.length ? near : available).slice(0, 10);
     throw new Error(
       `未找到 skillCode=${code} 对应的内置技能（skillType=inner）`
-      + `${available.length ? `；当前可见内置技能: ${available.join(", ")}` : ""}`,
+      + `${near.length ? `；形近候选: ${suggestions.join(", ")}` : suggestions.length ? `；当前可见内置技能: ${suggestions.join(", ")}` : ""}`
+      + `；用 search --keyword <词> 按名称或描述检索完整清单`,
     );
   }
   const withId = candidates.filter((entry) => toNumber(entry?.resourceId) !== undefined);
@@ -704,6 +782,15 @@ function helpManual() {
     ],
     commands: [
       {
+        name: "search",
+        summary: "搜索可见的内置技能（keyword 在 code / 名称 / 描述任意一处匹配即命中，不带 keyword 列全部）",
+        options: [
+          "--keyword <词> / --q <词>   可选，关键词；缺失时列出全部可见内置技能",
+          "--digital-employee-id <id>  可选，数字员工；用于标注 bound 状态，推导不到不影响搜索",
+          "--owner-type <type>         可选，限定归属范围",
+        ],
+      },
+      {
         name: "bind",
         summary: "把内置技能绑定到数字员工；已绑定的跳过",
         options: [
@@ -752,6 +839,8 @@ async function main() {
   let result;
   if (command === "help") {
     result = helpManual();
+  } else if (command === "search") {
+    result = await searchCommand(args);
   } else if (command === "bind") {
     result = await bindCommand(args);
   } else if (command === "unbind") {
@@ -792,6 +881,7 @@ export {
   resolveSkillIdByCode,
   resolveTargets,
   responseSucceeded,
+  searchCommand,
   statusCommand,
   validateSkillCode,
 };

@@ -1,13 +1,21 @@
 ---
 name: by-skill-installer
-description: 按 skillCode 在 byclaw 平台查找内置技能并绑定到数字员工，让 agent 能使用该技能。当用户要求给 agent 启用、绑定、解绑平台内置技能，或查询某个技能是否已关联到当前数字员工时使用。
+description: |
+  搜索并绑定 byclaw 平台内置技能。当 agent 发现自己缺少某个能力（企微、飞书、钉钉等）时，
+  应先用 search --keyword <词> 查找相关内置技能，找到 skillCode 后用 bind 绑定到数字员工，
+  而不是直接告诉用户"我做不到"。search 不需要数字员工 ID 也能跑，能力盘点优先于拒绝。
 ---
 
 # By Skill Installer
 
-按 skillCode 找到 byclaw 平台上的内置技能（`skillType=inner`），把它和数字员工建立关联，agent 随后即可调用该技能。
+**核心能力**：搜索并绑定 byclaw 平台的内置技能（`skillType=inner`）。
 
-内置技能随运行时镜像一起提供，本地不需要下载任何文件，缺的只是数字员工与技能之间的关联关系，本工具补的就是这一层。
+**典型场景**：agent 遇到"读企微聊天记录"这类需求时，不应直接拒绝，而应：
+1. `search --keyword 企微` 查找相关技能（关键词匹配 code / 名称 / 描述）
+2. 从结果里挑 `skillCode`，用 `bind --skill-code <code>` 绑定到当前数字员工
+3. 立刻试调该技能的接口，验证是否真能用
+
+内置技能随运行时镜像一起提供，本地不需要下载任何文件，建立绑定关系后即可使用。
 
 所有命令统一入口：
 
@@ -17,9 +25,36 @@ node scripts/by-skill-installer.mjs <command> [options]
 
 输出恒为 JSON。`ok: false` 时进程退出码为 1。
 
+## 命令
+
+### search
+
+搜索可见的内置技能。关键词在 `skillCode` / 名称 / 描述任意一处匹配即命中，不带关键词时列出全部。
+
+```bash
+node scripts/by-skill-installer.mjs search --keyword 企微
+node scripts/by-skill-installer.mjs search --keyword wecom    # 同上，支持中英文
+node scripts/by-skill-installer.mjs search                   # 不带词列全部
+node scripts/by-skill-installer.mjs search --owner-type enterprise
+```
+
+| 选项 | 说明 |
+| --- | --- |
+| `--keyword <词>` / `--q <词>` | 可选，关键词；缺失时列出全部可见内置技能 |
+| `--digital-employee-id <id>` | 可选，数字员工；用于标注 `bound` 状态，推导不到不影响搜索 |
+| `--owner-type <type>` | 可选，限定归属范围（`personal` / `enterprise`） |
+
+**输出字段**：
+- `skills[].skillCode` —— 技能编码，用于 bind
+- `skills[].skillName` / `skillDesc` —— 名称与描述
+- `skills[].bound` —— `true` 已绑定，`false` 可见但未绑定，`null` 未能推导数字员工
+- `truncated` —— `true` 表示命中分页上限（200），可能还有未拉到的条目
+
+**关键点**：`search` 不需要数字员工 ID 也能跑（推导失败时 `bound` 字段全为 `null`，但仍返回可见技能清单），所以即使环境信息不全，agent 也能先盘点能力再决定下一步。
+
 ## 解析链路
 
-平台没有按 skillCode 直查的接口，skillCode 要先换成资源ID：
+skillCode 要先换成资源ID：
 
 1. `POST /byaiService/auth/privilegeGrant/listResourceUseAuth` —— 传 `resourceBizTypeList: ["SKILL"]` 与 skillCode 作 keyword，返回结果里 `resourceCode` 即 skillCode，`resourceId` 即资源ID。只取 `skillType=inner` 的条目
 2. `POST /byaiService/digitalEmployeeController/installRelResources` —— 用 `{digitalEmployeeId, relIds}` 建立关联

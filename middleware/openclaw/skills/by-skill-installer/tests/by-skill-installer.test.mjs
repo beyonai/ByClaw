@@ -26,6 +26,7 @@ const {
   resolveSkillIdByCode,
   resolveTargets,
   responseSucceeded,
+  searchCommand,
   statusCommand,
   validateSkillCode,
 } = mod;
@@ -153,6 +154,51 @@ describe("resolveTargets", () => {
 
   it("dedupes repeated handles", () => {
     assert.deepEqual(resolveTargets({ "skill-code": ["a", "a"] }), [{ skillCode: "a", skillId: undefined }]);
+  });
+});
+
+describe("search", () => {
+  it("returns all visible inner skills when no keyword is given", async () => {
+    const result = await searchCommand({});
+    assert.equal(result.ok, true);
+    assert.equal(result.action, "search");
+    assert.equal(result.keyword, null);
+    assert.equal(result.visibleInnerSkillCount, 4);
+    assert.equal(result.matchedCount, 4);
+    const codes = result.skills.map((s) => s.skillCode).sort();
+    assert.deepEqual(codes, ["dup-code", "dup-code", "fol-auto-biztravel", "tech-article"]);
+  });
+
+  it("filters by keyword matching code, name, or description", async () => {
+    const result = await searchCommand({ keyword: "auto" });
+    assert.equal(result.matchedCount, 1);
+    assert.equal(result.skills[0].skillCode, "fol-auto-biztravel");
+  });
+
+  it("marks bound status when digital employee is resolved", async () => {
+    const result = await searchCommand({ "digital-employee-id": "7" });
+    const techArticle = result.skills.find((s) => s.skillCode === "tech-article");
+    const biztravel = result.skills.find((s) => s.skillCode === "fol-auto-biztravel");
+    assert.equal(techArticle.bound, true);
+    assert.equal(biztravel.bound, false);
+  });
+
+  it("sets bound to null when digital employee cannot be resolved", async () => {
+    const result = await searchCommand({});
+    assert.equal(result.digitalEmployee.id, null);
+    assert.match(result.digitalEmployee.unavailable, /--digital-employee-id/);
+    assert.equal(result.skills.every((s) => s.bound === null), true);
+  });
+
+  it("supports --q as an alias for --keyword", async () => {
+    const result = await searchCommand({ q: "tech" });
+    assert.equal(result.matchedCount, 1);
+    assert.equal(result.skills[0].skillCode, "tech-article");
+  });
+
+  it("accepts keyword as the second positional arg", async () => {
+    const result = await searchCommand({ _: ["search", "biztravel"] });
+    assert.equal(result.matchedCount, 1);
   });
 });
 
