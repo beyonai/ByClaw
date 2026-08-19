@@ -1698,7 +1698,7 @@ export default {
   'projectSpace.onboarding.repo.field.url': '仓库地址',
   'projectSpace.onboarding.repo.field.branch': '分支',
   'projectSpace.onboarding.repo.field.description': '仓库描述（可选）',
-  'projectSpace.onboarding.repo.placeholder.description': '这个仓库负责什么，需求 AI 预拆会据此判断该改哪些仓库。',
+  'projectSpace.onboarding.repo.placeholder.description': '这个仓库负责什么',
   'projectSpace.onboarding.repo.placeholder.fullName': '如 org/repo',
   'projectSpace.onboarding.repo.placeholder.url': 'git@... 或 https://...',
   'projectSpace.onboarding.repo.validation.nameRequired': '请输入仓库名称',
@@ -2977,8 +2977,7 @@ export default {
   'projectSpace.detail.repository.repoType.workspaceExists': '已存在工作区仓库，新增前请先删除原工作区仓库，避免重复。',
   'projectSpace.detail.repository.placeholder.fullName': '如 beyonai/byclaw-test',
   'projectSpace.detail.repository.placeholder.url': '如 https://github.com/beyonai/byclaw-test',
-  'projectSpace.detail.repository.placeholder.description':
-    '这个仓库负责什么，如「后端服务，提供项目/需求/任务接口」。需求 AI 预拆会据此判断该改哪些仓库。',
+  'projectSpace.detail.repository.placeholder.description': '这个仓库负责什么，如「后端服务，提供项目/需求/任务接口」',
   'projectSpace.detail.repository.empty': '暂无仓库',
   'projectSpace.detail.repository.initWorkspace': '初始化',
   'projectSpace.detail.repository.initializing': '初始化中',

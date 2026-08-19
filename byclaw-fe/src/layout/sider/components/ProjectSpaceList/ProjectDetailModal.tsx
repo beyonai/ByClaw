@@ -223,7 +223,7 @@ type RepoOption = {
   repoFullName: string;
   repoUrl?: string;
   defaultBranch?: string;
-  // 人工填写的仓库职责,给后来人和需求 AI 预拆看;存量行为空。
+  // 人工填写的仓库职责,给后来人看清这个仓库负责什么;存量行为空。
   description?: string;
   // 仓库类型:workspace 工作区(单个)/code 代码仓库(可多个);存量无值按 code 处理。
   repoType?: 'workspace' | 'code';
@@ -811,7 +811,7 @@ type RepoFormState = {
   repoFullName: string;
   repoUrl: string;
   defaultBranch: string;
-  // 仓库职责描述,可选;需求 AI 预拆靠它判断该改哪些仓库,只凭仓库名经常拆错。
+  // 仓库职责描述,可选;只凭仓库名看不出这个仓库负责什么。
   description: string;
   repoType: 'workspace' | 'code';
   provider: RepoProvider;
@@ -2091,9 +2091,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const handleLoginOperationAccount = useCallback(
     async (account: OperationAccount) => {
       // 自定义链接平台使用账号自带的 customUrl，其他平台使用预设的登录地址
-      const loginUrl = account.platformId === 'CustomLink'
-        ? account.customUrl
-        : OPERATION_PLATFORM_LOGIN_URLS[account.platformId];
+      const loginUrl =
+        account.platformId === 'CustomLink' ? account.customUrl : OPERATION_PLATFORM_LOGIN_URLS[account.platformId];
       if (!loginUrl || operationAccountLoginPreparingId !== null) return;
       setOperationAccountLoginPreparingId(account.id);
       try {

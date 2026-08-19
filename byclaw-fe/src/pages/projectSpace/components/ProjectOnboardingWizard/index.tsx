@@ -31,7 +31,7 @@ const REPO_BRANCH_DEFAULT = 'main';
 const PLACEHOLDER_REPLACE = '__PLACEHOLDER__';
 
 // 建仓表单:工作区与代码仓库共用一份形状,新增/重置都走 emptyRepoForm,避免字面量漂移。
-// description 可选,人工填仓库职责,需求 AI 预拆靠它判断该改哪些仓库。
+// description 可选,人工填仓库职责,让后来人看清这个仓库负责什么。
 type RepoFormState = { repoFullName: string; repoUrl: string; defaultBranch: string; description: string };
 const emptyRepoForm = (): RepoFormState => ({
   repoFullName: '',

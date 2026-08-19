@@ -1713,8 +1713,7 @@ export default {
   'projectSpace.onboarding.repo.field.url': 'Repository URL',
   'projectSpace.onboarding.repo.field.branch': 'Branch',
   'projectSpace.onboarding.repo.field.description': 'Repository description (optional)',
-  'projectSpace.onboarding.repo.placeholder.description':
-    'What this repository is responsible for; the requirement AI pre-split uses it to decide which repositories to change.',
+  'projectSpace.onboarding.repo.placeholder.description': 'What this repository is responsible for',
   'projectSpace.onboarding.repo.placeholder.fullName': 'e.g. org/repo',
   'projectSpace.onboarding.repo.placeholder.url': 'git@... or https://...',
   'projectSpace.onboarding.repo.validation.nameRequired': 'Please enter a repository name',
@@ -3027,7 +3026,7 @@ export default {
   'projectSpace.detail.repository.placeholder.fullName': 'For example: beyonai/byclaw-test',
   'projectSpace.detail.repository.placeholder.url': 'For example: https://github.com/beyonai/byclaw-test',
   'projectSpace.detail.repository.placeholder.description':
-    'What this repository is responsible for, e.g. "Backend service exposing project/requirement/task APIs". The requirement AI pre-split uses it to decide which repositories to change.',
+    'What this repository is responsible for, e.g. "Backend service exposing project/requirement/task APIs"',
   'projectSpace.detail.repository.empty': 'No repositories',
   'projectSpace.detail.repository.initWorkspace': 'Initialize',
   'projectSpace.detail.repository.initializing': 'Initializing',
