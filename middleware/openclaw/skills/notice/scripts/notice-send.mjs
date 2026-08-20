@@ -9,6 +9,8 @@ const DEFAULT_CONTEXT_PATH = "/byaiService";
 const DEFAULT_SIGNATURE_SALT = "{#@*A12^c0+}";
 const NOTICE_PATH = "open/api/notice/create";
 const MEMBER_PATH = "open/api/v1/listProjectMembers";
+const PROJECT_PATH = "open/api/v1/selectProjectsByQo";
+const RESOLVE_PROJECT_PATH = "open/api/v1/resolveProjectBySession";
 // 后端 Notices DTO 的 @Size(max = 100)，超出会整批 400，所以在客户端分批。
 const NOTICE_BATCH_SIZE = 100;
 const TITLE_MAX = 200;
@@ -256,17 +258,64 @@ async function membersCommand(args) {
     userName: userName || undefined,
   });
   const rows = Array.isArray(data) ? data : [];
-  // 只回传通知需要的字段：userId/userCode 用于站内信寻址，userName 用于连接器按名字匹配。
+  // 手机号默认不回传：它只用于外部连接器精确匹配联系人，默认带上会让号码进入
+  // 日常输出和留档，属于无意义的个人信息外泄。调用方确有需要时显式 --with-phone。
+  // 工号不同：同样能精确匹配，但不是敏感个人信息，所以默认带上，让调用方优先用它。
+  const withPhone = args["with-phone"] === true || firstNonEmpty(args["with-phone"]) === "true";
+  // 只回传通知需要的字段：userId/userCode 用于站内信寻址，userNumber/userName 用于连接器匹配。
   const members = rows
     .filter((row) => row && (row.userId || row.userCode))
-    .map((row) => ({
-      userId: row.userId ?? null,
-      userCode: row.userCode ?? null,
-      userName: row.userName ?? null,
-      role: row.role ?? null,
-      agentName: row.agentName ?? null,
-    }));
+    .map((row) => {
+      const member = {
+        userId: row.userId ?? null,
+        userCode: row.userCode ?? null,
+        userName: row.userName ?? null,
+        userNumber: row.userNumber ?? null,
+        role: row.role ?? null,
+        agentName: row.agentName ?? null,
+      };
+      if (withPhone) member.phone = row.phone ?? null;
+      return member;
+    });
   return { ok: true, projectId: Number(projectId), total: members.length, members };
+}
+
+// 定时任务只知道自己跑在哪个会话里。会话已绑项目就直接拿到 projectId，
+// 不用为了要一个 ID 把整条链路停下来等人。未绑定返回 bound:false，由调用方兜底。
+async function resolveProjectCommand(args) {
+  const sessionId = firstNonEmpty(args["session-id"], args.sessionId);
+  if (!sessionId) throw new PublicFailure("NOTICE_SESSION_ID_MISSING");
+  const data = await postJson(RESOLVE_PROJECT_PATH, { sessionId: Number(sessionId) });
+  return {
+    ok: true,
+    bound: data?.bound === true,
+    sessionId: Number(sessionId),
+    projectId: data?.projectId ?? null,
+    projectName: data?.projectName ?? null,
+    projectType: data?.projectType ?? null,
+  };
+}
+
+// projectId 缺失时用来列候选项目：让调用方把开放式追问变成"从列表里选一个"，
+// 而不是猜项目或拿来源渠道顶替。只读，不产生任何通知。
+async function projectsCommand(args) {
+  const keyword = firstNonEmpty(args.keyword, args.q);
+  const data = await postJson(PROJECT_PATH, {
+    keyword: keyword || undefined,
+    projectType: firstNonEmpty(args["project-type"], args.projectType) || undefined,
+    pageNum: Number(firstNonEmpty(args.page, "1")),
+    pageSize: Number(firstNonEmpty(args.size, "20")),
+  });
+  const rows = Array.isArray(data?.list) ? data.list : Array.isArray(data) ? data : [];
+  const projects = rows
+    .filter((row) => row && row.projectId)
+    .map((row) => ({
+      projectId: row.projectId,
+      projectName: row.projectName ?? null,
+      projectType: row.projectType ?? null,
+      sessionCount: row.sessionCount ?? null,
+    }));
+  return { ok: true, total: data?.total ?? projects.length, projects };
 }
 
 function helpText() {
@@ -274,7 +323,11 @@ function helpText() {
     ok: true,
     commands: {
       send: "node scripts/notice-send.mjs send [--input <payload.json>]  # 无 --input 时读 stdin",
-      members: "node scripts/notice-send.mjs members --project-id <projectId> [--user-name <名字>]",
+      members:
+        "node scripts/notice-send.mjs members --project-id <projectId> [--user-name <名字>] [--with-phone]",
+      projects: "node scripts/notice-send.mjs projects [--keyword <关键词>] [--page 1] [--size 20]  # projectId 缺失时列候选",
+      "resolve-project":
+        "node scripts/notice-send.mjs resolve-project --session-id <sessionId>  # 按会话反查 projectId",
     },
     sendPayload: {
       title: "批次默认标题，单条可覆盖（<=200）",
@@ -292,6 +345,8 @@ async function main() {
   if (command === "help") return helpText();
   if (command === "send") return sendCommand(args);
   if (command === "members") return membersCommand(args);
+  if (command === "projects") return projectsCommand(args);
+  if (command === "resolve-project") return resolveProjectCommand(args);
   throw new PublicFailure("NOTICE_UNKNOWN_COMMAND", command);
 }
 

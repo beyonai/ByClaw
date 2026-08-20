@@ -166,7 +166,7 @@ test("send refuses when the sender identity is unavailable", async () => {
 
 test("members returns only the fields notification needs, including userName", async () => {
   const server = await startServer((request, response) => ok(response, [
-    { memberId: 1, projectId: 7, userId: 10000022, userCode: "zhangsan", userName: "张三", role: "owner", agentName: "架构师" },
+    { memberId: 1, projectId: 7, userId: 10000022, userCode: "zhangsan", userName: "张三", userNumber: "0012345678", role: "owner", agentName: "架构师" },
     { memberId: 2, projectId: 7, userId: 10000023, userCode: "lisi", userName: "李四", role: "member" },
     { memberId: 3, projectId: 7, userId: null, userCode: null, userName: "幽灵成员", role: "member" },
   ]));
@@ -180,11 +180,92 @@ test("members returns only the fields notification needs, including userName", a
     userId: 10000022,
     userCode: "zhangsan",
     userName: "张三",
+    userNumber: "0012345678",
     role: "owner",
     agentName: "架构师",
   });
+  // 工号缺失回 null 而不是省略字段，调用方据此直接降级到下一种匹配方式。
+  assert.equal(result.json.members[1].userNumber, null);
   // memberId / projectId / createTime 等不参与通知，不回传给调用方。
-  assert.deepEqual(Object.keys(result.json.members[1]).sort(), ["agentName", "role", "userCode", "userId", "userName"]);
+  assert.deepEqual(
+    Object.keys(result.json.members[1]).sort(),
+    ["agentName", "role", "userCode", "userId", "userName", "userNumber"],
+  );
+});
+
+test("projects lists candidates so a missing projectId can be resolved by choosing", async () => {
+  const server = await startServer((request, response) => ok(response, {
+    total: 2,
+    list: [
+      { projectId: 7, projectName: "研发闭环", projectType: "develop", sessionCount: 12, description: "无关字段" },
+      { projectId: 8, projectName: "客服助手", projectType: "normal", sessionCount: 3 },
+    ],
+  }));
+  const result = await run(["projects", "--keyword", "研发"], { port: server.port });
+  await server.close();
+
+  assert.match(server.requests[0].url, /\/open\/api\/v1\/selectProjectsByQo$/);
+  assert.equal(server.requests[0].body.keyword, "研发");
+  assert.equal(result.json.total, 2);
+  // 只回传选项需要的字段，description 之类不进上下文。
+  assert.deepEqual(result.json.projects[0], {
+    projectId: 7,
+    projectName: "研发闭环",
+    projectType: "develop",
+    sessionCount: 12,
+  });
+});
+
+test("members returns jobNumber by default but hides phone unless --with-phone", async () => {
+  const rows = [
+    { memberId: 1, projectId: 7, userId: 10000022, userCode: "zhangsan", userName: "张三", userNumber: "0012345678", role: "owner", phone: "13800138000" },
+  ];
+  const bare = await startServer((request, response) => ok(response, rows));
+  const bareResult = await run(["members", "--project-id", "7"], { port: bare.port });
+  await bare.close();
+  assert.ok(!("phone" in bareResult.json.members[0]));
+  assert.ok(!bareResult.stdout.includes("13800138000"));
+  // 工号是首选匹配项，默认就要有，否则调用方只能退回手机号。
+  assert.equal(bareResult.json.members[0].userNumber, "0012345678");
+
+  const opted = await startServer((request, response) => ok(response, rows));
+  const optedResult = await run(["members", "--project-id", "7", "--with-phone"], { port: opted.port });
+  await opted.close();
+  assert.equal(optedResult.json.members[0].phone, "13800138000");
+});
+
+test("resolve-project maps a session to its project", async () => {
+  const server = await startServer((request, response) => ok(response, {
+    sessionId: 990, bound: true, projectId: 7, projectName: "研发闭环", projectType: "develop",
+  }));
+  const result = await run(["resolve-project", "--session-id", "990"], { port: server.port });
+  await server.close();
+
+  assert.match(server.requests[0].url, /\/open\/api\/v1\/resolveProjectBySession$/);
+  assert.equal(server.requests[0].body.sessionId, 990);
+  assert.equal(result.json.bound, true);
+  assert.equal(result.json.projectId, 7);
+  assert.equal(result.json.projectName, "研发闭环");
+});
+
+test("resolve-project reports bound:false instead of failing when the session has no project", async () => {
+  const server = await startServer((request, response) => ok(response, {
+    sessionId: 991, bound: false, projectId: null, projectName: null, projectType: null,
+  }));
+  const result = await run(["resolve-project", "--session-id", "991"], { port: server.port });
+  await server.close();
+
+  // 查不到项目必须和调用失败区分开：ok=true 让调用方继续走追问兜底，而不是当成故障重试。
+  assert.equal(result.code, 0);
+  assert.equal(result.json.ok, true);
+  assert.equal(result.json.bound, false);
+  assert.equal(result.json.projectId, null);
+});
+
+test("resolve-project requires sessionId", async () => {
+  const result = await run(["resolve-project"], { port: 1 });
+  assert.equal(result.code, 1);
+  assert.equal(result.json.errorCode, "NOTICE_SESSION_ID_MISSING");
 });
 
 test("members requires projectId", async () => {
