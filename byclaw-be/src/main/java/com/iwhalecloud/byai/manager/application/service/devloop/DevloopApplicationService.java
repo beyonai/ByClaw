@@ -277,6 +277,9 @@ public class DevloopApplicationService {
     private OperationAccountService operationAccountService;
 
     @Autowired
+    private OperationAccountAccessService operationAccountAccessService;
+
+    @Autowired
     private ProjectObjectFileService projectObjectFileService;
 
     @Autowired
@@ -4314,6 +4317,11 @@ public class DevloopApplicationService {
         if (validationError != null) {
             return ResponseUtil.failRes(validationError);
         }
+        String accountReferenceError = validateOperationAccountReference(dto.getOperationType(), dto.getConfig(),
+            dto.getProjectId(), CurrentUserHolder.getCurrentUserId(), CurrentUserHolder.getCurrentUserCode(), false);
+        if (accountReferenceError != null) {
+            return ResponseUtil.failRes(accountReferenceError);
+        }
 
         ScanSource source = new ScanSource();
         source.setProjectId(dto.getProjectId());
@@ -4356,6 +4364,12 @@ public class DevloopApplicationService {
         }
         if (operationTaskSessionService.existsBySourceId(existing.getSourceId())) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.operationRequirement.edit.forbidden"));
+        }
+        String accountReferenceError = validateOperationAccountReference(dto.getOperationType(), dto.getConfig(),
+            existing.getProjectId(), CurrentUserHolder.getCurrentUserId(), CurrentUserHolder.getCurrentUserCode(),
+            false);
+        if (accountReferenceError != null) {
+            return ResponseUtil.failRes(accountReferenceError);
         }
 
         ScanSource update = new ScanSource();
@@ -4464,6 +4478,17 @@ public class DevloopApplicationService {
             String validationError = validateOperationTaskForStart(taskDto, requirement);
             if (validationError != null) {
                 return ResponseUtil.failRes(validationError);
+            }
+            OperationTaskTemplate selectedTemplate = taskDto.getTemplateId() == null ? null
+                : operationTaskTemplateService.get(taskDto.getTemplateId());
+            String operationType = selectedTemplate == null ? requirement.getSourceType()
+                : selectedTemplate.getTemplateType();
+            Object config = taskDto.getConfig() == null ? requirement.getConfig() : taskDto.getConfig();
+            String accountReferenceError = validateOperationAccountReference(operationType, config,
+                requirement.getProjectId(), CurrentUserHolder.getCurrentUserId(), CurrentUserHolder.getCurrentUserCode(),
+                false);
+            if (accountReferenceError != null) {
+                return ResponseUtil.failRes(accountReferenceError);
             }
         }
 
@@ -4658,6 +4683,13 @@ public class DevloopApplicationService {
         }
         Map<String, String> taskExt = operationTaskSessionService.getExtValues(task.getSessionId());
         if (OperationTaskSessionService.STATUS_RUNNING.equals(taskExt.get(OperationTaskSessionService.EXT_STATUS))) {
+            String accountReferenceError = validateOperationAccountReference(
+                taskExt.get(OperationTaskSessionService.EXT_OPERATION_TYPE),
+                taskExt.get(OperationTaskSessionService.EXT_CONFIG), task.getProjectId(),
+                CurrentUserHolder.getCurrentUserId(), CurrentUserHolder.getCurrentUserCode(), true);
+            if (accountReferenceError != null) {
+                return ResponseUtil.failRes(accountReferenceError);
+            }
             Map<String, Object> result = new HashMap<>();
             result.put("taskId", task.getSessionId());
             result.put("sessionId", task.getSessionId());
@@ -4670,26 +4702,26 @@ public class DevloopApplicationService {
             // 仅待执行或部分失败任务允许创建会话，避免已完成任务被重复启动。
             return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.execute.forbidden"));
         }
-        // 模板执行页允许覆盖待执行任务的模板配置；先落扩展参数，再由统一提示词构造逻辑读取，保证聊天首条消息使用用户确认后的内容。
-        if (dto.getTemplateId() != null || dto.getConfig() != null) {
-            Map<String, String> templateExtensions = new LinkedHashMap<>();
-            if (dto.getTemplateId() != null) {
-                OperationTaskTemplate template = operationTaskTemplateService.get(dto.getTemplateId());
-                if (template == null) {
-                    return ResponseUtil.failRes("任务模板不存在");
-                }
-                templateExtensions.put(OperationTaskSessionService.EXT_TEMPLATE_ID,
-                    String.valueOf(dto.getTemplateId()));
-                templateExtensions.put(OperationTaskSessionService.EXT_OPERATION_TYPE,
-                    StringUtils.defaultString(template.getTemplateType()));
+        // 模板执行页允许覆盖待执行任务的模板配置；授权校验必须先于任何扩展或会话写入。
+        String effectiveOperationType = taskExt.get(OperationTaskSessionService.EXT_OPERATION_TYPE);
+        Object effectiveConfig = taskExt.get(OperationTaskSessionService.EXT_CONFIG);
+        OperationTaskTemplate requestedTemplate = null;
+        Map<String, Object> enrichedRequestConfig = null;
+        if (dto.getTemplateId() != null) {
+            requestedTemplate = operationTaskTemplateService.get(dto.getTemplateId());
+            if (requestedTemplate == null) {
+                return ResponseUtil.failRes("任务模板不存在");
             }
-            if (dto.getConfig() != null) {
-                // 执行配置中的本体统一补齐 ID、code、名称和描述，供会话对象详情及 Worker 直接消费。
-                templateExtensions.put(OperationTaskSessionService.EXT_CONFIG,
-                    JSON.toJSONString(enrichOperationTaskOntologyConfig(dto.getConfig())));
-            }
-            operationTaskSessionService.saveTaskExtensions(task.getSessionId(), templateExtensions);
-            taskExt = operationTaskSessionService.getExtValues(task.getSessionId());
+            effectiveOperationType = requestedTemplate.getTemplateType();
+        }
+        if (dto.getConfig() != null) {
+            enrichedRequestConfig = enrichOperationTaskOntologyConfig(dto.getConfig());
+            effectiveConfig = enrichedRequestConfig;
+        }
+        String accountReferenceError = validateOperationAccountReference(effectiveOperationType, effectiveConfig,
+            task.getProjectId(), CurrentUserHolder.getCurrentUserId(), CurrentUserHolder.getCurrentUserCode(), true);
+        if (accountReferenceError != null) {
+            return ResponseUtil.failRes(accountReferenceError);
         }
         List<Long> agentIds = resolveOperationTaskAgentIds(dto, task.getProjectId());
         if (agentIds.isEmpty()) {
@@ -4699,6 +4731,23 @@ public class DevloopApplicationService {
         Long primaryAgentId = agentIds.get(0);
         if (primaryAgentId == null) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.operationTask.agents.required"));
+        }
+
+        if (dto.getTemplateId() != null || dto.getConfig() != null) {
+            Map<String, String> templateExtensions = new LinkedHashMap<>();
+            if (dto.getTemplateId() != null) {
+                templateExtensions.put(OperationTaskSessionService.EXT_TEMPLATE_ID,
+                    String.valueOf(dto.getTemplateId()));
+                templateExtensions.put(OperationTaskSessionService.EXT_OPERATION_TYPE,
+                    StringUtils.defaultString(requestedTemplate.getTemplateType()));
+            }
+            if (dto.getConfig() != null) {
+                // 执行配置中的本体统一补齐 ID、code、名称和描述，供会话对象详情及 Worker 直接消费。
+                templateExtensions.put(OperationTaskSessionService.EXT_CONFIG,
+                    JSON.toJSONString(enrichedRequestConfig));
+            }
+            operationTaskSessionService.saveTaskExtensions(task.getSessionId(), templateExtensions);
+            taskExt = operationTaskSessionService.getExtValues(task.getSessionId());
         }
         List<ResourceVo> mentionedAgents = buildOperationTaskAgentResources(agentIds);
         AssistantChatDto chatDto = new AssistantChatDto();
@@ -5587,6 +5636,55 @@ public class DevloopApplicationService {
     }
 
     /**
+     * 校验运营配置中真实账号字段的项目和用户可见性；采集地址字段不属于账号引用。
+     */
+    private String validateOperationAccountReference(String operationType, Object config, Long projectId,
+                                                       Long permissionUserId, String executionUserCode,
+                                                       boolean requireUsableSandbox) {
+        Object referencedAccountId = resolveReferencedOperationAccountId(operationType, config);
+        if (referencedAccountId == null || StringUtils.isBlank(String.valueOf(referencedAccountId))) {
+            return null;
+        }
+        final Long accountId;
+        try {
+            accountId = Long.valueOf(String.valueOf(referencedAccountId).trim());
+        } catch (NumberFormatException exception) {
+            return I18nUtil.get("devloop.operationAccount.notFound");
+        }
+        OperationAccount account = operationAccountAccessService.findAccessible(accountId, projectId,
+            permissionUserId);
+        if (account == null) {
+            return I18nUtil.get("devloop.operationAccount.notFound");
+        }
+        if (requireUsableSandbox && !operationAccountAccessService.hasUsableSandbox(account, executionUserCode)) {
+            return I18nUtil.get("devloop.operationAccount.browser.sandbox.invalid");
+        }
+        return null;
+    }
+
+    /**
+     * 发布读取 publishAccountId；分析优先读取 accountId，并兼容历史 analysisAccountId。
+     */
+    @SuppressWarnings("unchecked")
+    private Object resolveReferencedOperationAccountId(String operationType, Object config) {
+        Map<String, Object> operationConfig;
+        if (config instanceof Map<?, ?> configMap) {
+            operationConfig = new LinkedHashMap<>();
+            configMap.forEach((key, value) -> operationConfig.put(String.valueOf(key), value));
+        } else {
+            operationConfig = parseOperationConfig(config == null ? null : String.valueOf(config));
+        }
+        String normalizedType = normalizeOperationSourceType(operationType);
+        return switch (StringUtils.defaultString(normalizedType)) {
+            case ScanSourceService.OPERATION_SOURCE_TYPE_PUBLISH ->
+                findOperationConfigValue(operationConfig, "publishAccountId");
+            case ScanSourceService.OPERATION_SOURCE_TYPE_ANALYZE ->
+                findOperationConfigValue(operationConfig, "accountId", "analysisAccountId");
+            default -> null;
+        };
+    }
+
+    /**
      * 运营账号在提示词中优先显示账号名称，查询不到时保留原始标识以兼容历史配置。
      */
     private String resolveOperationAccountName(Object accountId) {
@@ -5649,9 +5747,11 @@ public class DevloopApplicationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Void> updateOperationAccount(OperationAccountDTO dto) {
-        String validationError = validateOperationAccount(dto, true);
-        if (validationError != null) {
-            return ResponseUtil.failRes(validationError);
+        if (dto == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.parameter.required"));
+        }
+        if (dto.getAccountId() == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.id.required"));
         }
         OperationAccount existing = operationAccountService.findById(dto.getAccountId());
         if (existing == null) {
@@ -5660,6 +5760,14 @@ public class DevloopApplicationService {
         String accessError = validateOperationProjectAccess(existing.getProjectId());
         if (accessError != null) {
             return ResponseUtil.failRes(accessError);
+        }
+        if (!operationAccountAccessService.canAccess(existing, existing.getProjectId(),
+            CurrentUserHolder.getCurrentUserId())) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.notFound"));
+        }
+        String validationError = validateOperationAccount(dto, true);
+        if (validationError != null) {
+            return ResponseUtil.failRes(validationError);
         }
         OperationAccount update = new OperationAccount();
         update.setAccountId(existing.getAccountId());
@@ -5696,6 +5804,10 @@ public class DevloopApplicationService {
         if (accessError != null) {
             return ResponseUtil.failRes(accessError);
         }
+        if (!operationAccountAccessService.canAccess(existing, existing.getProjectId(),
+            CurrentUserHolder.getCurrentUserId())) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.notFound"));
+        }
         operationAccountService.delete(accountId, CurrentUserHolder.getCurrentUserId());
         return ResponseUtil.successResponse(null);
     }
@@ -5709,7 +5821,8 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes(accessError);
         }
         List<Map<String, Object>> result = new ArrayList<>();
-        for (OperationAccount account : operationAccountService.listByProjectId(projectId)) {
+        for (OperationAccount account : operationAccountAccessService.listAccessible(projectId,
+            CurrentUserHolder.getCurrentUserId())) {
             result.add(toOperationAccountMap(account));
         }
         return ResponseUtil.successResponse(result);
@@ -5723,9 +5836,6 @@ public class DevloopApplicationService {
         if (accountId == null) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.id.required"));
         }
-        if (StringUtils.isBlank(sandboxId)) {
-            return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.browser.sandbox.required"));
-        }
         OperationAccount account = operationAccountService.findById(accountId);
         if (account == null) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.notFound"));
@@ -5733,6 +5843,13 @@ public class DevloopApplicationService {
         String accessError = validateOperationProjectAccess(account.getProjectId());
         if (accessError != null) {
             return ResponseUtil.failRes(accessError);
+        }
+        if (!operationAccountAccessService.canAccess(account, account.getProjectId(),
+            CurrentUserHolder.getCurrentUserId())) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.notFound"));
+        }
+        if (StringUtils.isBlank(sandboxId)) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.operationAccount.browser.sandbox.required"));
         }
         String currentUserCode = CurrentUserHolder.getCurrentUserCode();
         List<SsSandboxRecord> runningSandboxes = StringUtils.isNotBlank(currentUserCode)

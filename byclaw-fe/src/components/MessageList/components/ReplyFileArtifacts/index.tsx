@@ -44,7 +44,15 @@ const getExistingFileKeys = (message: IMessage) => {
   return keys;
 };
 
-function ReplyFileArtifacts({ message, sessionId }: { message: IMessage; sessionId?: string }) {
+function ReplyFileArtifacts({
+  message,
+  sessionId,
+  previewInDetailPanel = false,
+}: {
+  message: IMessage;
+  sessionId?: string;
+  previewInDetailPanel?: boolean;
+}) {
   const [artifacts, setArtifacts] = useState<ChatFileArtifact[]>([]);
   const answerText = useMemo(
     () => [message.text, getDisplayAnswer(message.messageList)].filter(Boolean).join('\n'),
@@ -110,7 +118,12 @@ function ReplyFileArtifacts({ message, sessionId }: { message: IMessage; session
   return (
     <div className="ub ub-wrap full-width gap8">
       {files.map((fileItem) => (
-        <FileRender fileItem={fileItem} key={fileItem.uid} message={message} />
+        <FileRender
+          fileItem={fileItem}
+          key={fileItem.uid}
+          message={message}
+          previewInDetailPanel={previewInDetailPanel}
+        />
       ))}
     </div>
   );

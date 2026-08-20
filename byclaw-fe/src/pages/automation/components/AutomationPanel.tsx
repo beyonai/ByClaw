@@ -1,12 +1,16 @@
 import { Button, Dropdown, Empty, Input, Modal, Skeleton, Switch, message } from 'antd';
 import {
+  CheckOutlined,
   ClockCircleOutlined,
   DeleteOutlined,
+  DownOutlined,
   EllipsisOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
+  SortAscendingOutlined,
+  SortDescendingOutlined,
 } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -19,6 +23,7 @@ import {
   getNextRunTime,
   isAutomationEnabled,
   parseAutomationConfig,
+  resolveAutomationPromptDisplayText,
 } from '../schedule';
 import type { AutomationSource } from '../types';
 import styles from '../index.module.less';
@@ -43,13 +48,55 @@ const getRelativeTime = (target: Dayjs, now: Dayjs) => {
   return { count: Math.max(1, totalMinutes), unit: 'minutes' as const };
 };
 
+type AutomationSortOrder = 'desc' | 'asc';
+
+const getSourceCreateTime = (source: AutomationSource) => {
+  if (source.createTime === undefined || source.createTime === null || source.createTime === '') {
+    return undefined;
+  }
+  if (typeof source.createTime === 'number' && Number.isFinite(source.createTime)) {
+    return source.createTime;
+  }
+  if (typeof source.createTime === 'string' && /^\d+$/.test(source.createTime)) {
+    const timestamp = Number(source.createTime);
+    return Number.isFinite(timestamp) ? timestamp : undefined;
+  }
+  const parsed = dayjs(source.createTime);
+  return parsed.isValid() ? parsed.valueOf() : undefined;
+};
+
+const sortAutomationSources = (rows: AutomationSource[], order: AutomationSortOrder) =>
+  [...rows].sort((left, right) => {
+    const leftTime = getSourceCreateTime(left);
+    const rightTime = getSourceCreateTime(right);
+
+    if (leftTime !== undefined && rightTime !== undefined && leftTime !== rightTime) {
+      return order === 'desc' ? rightTime - leftTime : leftTime - rightTime;
+    }
+    if (leftTime !== undefined || rightTime !== undefined) {
+      return leftTime === undefined ? 1 : -1;
+    }
+
+    const leftId = Number(left.sourceId);
+    const rightId = Number(right.sourceId);
+    if (Number.isFinite(leftId) && Number.isFinite(rightId) && leftId !== rightId) {
+      return order === 'desc' ? rightId - leftId : leftId - rightId;
+    }
+    return 0;
+  });
+
 const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeading }) => {
   const intl = useIntl();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
+  const employees = useSelector(({ employees: employeeState }: any) => [
+    ...(employeeState?.agentList || []),
+    ...(employeeState?.employeesList || []),
+  ]);
   const currentUserId = userInfo?.userId ?? userInfo?.id;
   const [loading, setLoading] = useState(false);
   const [sources, setSources] = useState<AutomationSource[]>([]);
   const [keyword, setKeyword] = useState('');
+  const [sortOrder, setSortOrder] = useState<AutomationSortOrder>('desc');
   const [editingSource, setEditingSource] = useState<AutomationSource>();
   const [editorOpen, setEditorOpen] = useState(false);
   const [togglingSourceIds, setTogglingSourceIds] = useState<Set<string>>(new Set());
@@ -217,6 +264,10 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
     return label;
   };
 
+  const sortedSources = sortAutomationSources(sources, sortOrder);
+  const sortLabelId = sortOrder === 'desc' ? 'automation.sort.createdDesc' : 'automation.sort.createdAsc';
+  const sortIcon = sortOrder === 'desc' ? <SortDescendingOutlined /> : <SortAscendingOutlined />;
+
   const renderTaskRow = (source: AutomationSource) => {
     const sourceId = `${source.sourceId}`;
     const owner = isSourceOwner(source);
@@ -236,6 +287,12 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
           : enabled && nextRun
             ? intl.formatMessage({ id: 'automation.nextRunAt' }, { time: relativeTimeText })
             : intl.formatMessage({ id: 'automation.noNextRun' });
+    const automationConfig = parseAutomationConfig(source.config);
+    const taskDescription = resolveAutomationPromptDisplayText(
+      automationConfig.chatContent.trim(),
+      automationConfig.resourceList,
+      employees
+    );
 
     return (
       <div
@@ -305,9 +362,7 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
         </div>
         <div className={styles.taskMain}>
           <span className={styles.taskName}>{source.sourceName || '-'}</span>
-          <span className={styles.taskDescription}>
-            {parseAutomationConfig(source.config).chatContent.trim() || '-'}
-          </span>
+          <span className={styles.taskDescription}>{taskDescription || '-'}</span>
         </div>
         <div className={styles.taskFooter}>
           <span className={styles.schedulePill}>
@@ -348,6 +403,38 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
             placeholder={intl.formatMessage({ id: 'automation.searchPlaceholder' })}
             onChange={(event) => setKeyword(event.target.value)}
           />
+          <Dropdown
+            trigger={['click']}
+            placement="bottomLeft"
+            menu={{
+              items: [
+                {
+                  key: 'desc',
+                  label: (
+                    <span className={styles.sortMenuItem}>
+                      <span>{intl.formatMessage({ id: 'automation.sort.createdDesc' })}</span>
+                      {sortOrder === 'desc' && <CheckOutlined className={styles.sortMenuCheck} />}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'asc',
+                  label: (
+                    <span className={styles.sortMenuItem}>
+                      <span>{intl.formatMessage({ id: 'automation.sort.createdAsc' })}</span>
+                      {sortOrder === 'asc' && <CheckOutlined className={styles.sortMenuCheck} />}
+                    </span>
+                  ),
+                },
+              ],
+              onClick: ({ key }) => setSortOrder(key as AutomationSortOrder),
+            }}
+          >
+            <Button className={styles.sortButton} icon={sortIcon}>
+              <span>{intl.formatMessage({ id: sortLabelId })}</span>
+              <DownOutlined className={styles.sortButtonArrow} />
+            </Button>
+          </Dropdown>
           <Button
             className={styles.toolbarIconButton}
             icon={<ReloadOutlined />}
@@ -356,7 +443,7 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
             title={intl.formatMessage({ id: 'common.refresh' })}
             onClick={() => void reload()}
           />
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>
+          <Button className={styles.automationCreateButton} icon={<PlusOutlined />} onClick={() => openEditor()}>
             {intl.formatMessage({ id: 'automation.add' })}
           </Button>
         </div>
@@ -371,7 +458,7 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
         ) : !sources.length ? (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'automation.empty' })} />
         ) : (
-          <div className={styles.automationList}>{sources.map((source) => renderTaskRow(source))}</div>
+          <div className={styles.automationList}>{sortedSources.map((source) => renderTaskRow(source))}</div>
         )}
       </div>
     </div>

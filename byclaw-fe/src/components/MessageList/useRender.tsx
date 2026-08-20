@@ -59,12 +59,12 @@ export default function useRender({
   updateMessage,
   deleteMessage,
   sessionId,
-  hideAction,
+  previewInDetailPanel,
 }: {
   updateMessage: (message: IMessage) => IMessage;
   deleteMessage: (message: IMessage) => void;
   sessionId?: string;
-  hideAction?: boolean;
+  previewInDetailPanel?: boolean;
 }) {
   const { ModalNode, setOpen, setMyContent, setMyTitle } = useModal({});
 
@@ -209,17 +209,32 @@ export default function useRender({
     [deleteMessage, updateMessage, canRefrence]
   );
 
-  const uploadFileRender = useCallback((fileList?: IFile[], msg?: IMessage, canQuote = true) => {
-    if (!fileList || isEmpty(fileList)) return null;
+  const uploadFileRender = useCallback(
+    (fileList?: IFile[], msg?: IMessage, canQuote = true) => {
+      if (!fileList || isEmpty(fileList)) return null;
 
-    return (
-      <div className={classnames(styles.fileList, 'ub ub-wrap full-width gap8')} style={{ justifyContent: 'inherit' }}>
-        {fileList.map((fileItem) => {
-          return <FileRender fileItem={fileItem} key={fileItem.uid} message={msg} canQuote={canQuote} canCollect />;
-        })}
-      </div>
-    );
-  }, []);
+      return (
+        <div
+          className={classnames(styles.fileList, 'ub ub-wrap full-width gap8')}
+          style={{ justifyContent: 'inherit' }}
+        >
+          {fileList.map((fileItem) => {
+            return (
+              <FileRender
+                fileItem={fileItem}
+                key={fileItem.uid}
+                message={msg}
+                canQuote={canQuote}
+                canCollect
+                previewInDetailPanel={previewInDetailPanel}
+              />
+            );
+          })}
+        </div>
+      );
+    },
+    [previewInDetailPanel]
+  );
   const citeMsgRender = useCallback(
     (citeMsgList?: IMessage[]) => {
       if (!citeMsgList || isEmpty(citeMsgList)) return null;
@@ -513,7 +528,7 @@ export default function useRender({
               <WaveBallLoading style={{ width: 20, height: 20, opacity: 0.6 }} />
             </div>
           )}
-          <ReplyFileArtifacts message={msg} sessionId={sessionId} />
+          <ReplyFileArtifacts message={msg} sessionId={sessionId} previewInDetailPanel={previewInDetailPanel} />
           {attachmentListRender(msg, !hideAction)}
           {!hideAction && [IMessageState.Done, IMessageState.Cancel, IMessageState.Error].includes(messageState) && (
             <div className={styles.actionsBar}>
@@ -537,6 +552,7 @@ export default function useRender({
       userQueryActions,
       insertAgentMention,
       relatedQuestionsRender,
+      previewInDetailPanel,
     ]
   );
 

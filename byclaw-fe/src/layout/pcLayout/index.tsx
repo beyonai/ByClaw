@@ -7,7 +7,7 @@ import { Outlet, useIntl, useLocation, useSelector, useSearchParams } from '@umi
 import { Layout, Tooltip } from 'antd';
 
 import { EventEmitter$Cls } from '@/utils/eventEmitter';
-import AntdIcon from '@/components/AntdIcon';
+import ResourcePanelToggleIcon from '@/components/ChatLayoutComp/ChatResourceWorkspace/ResourcePanelToggleIcon';
 import Auth from '../auth';
 import AntdProvider from '../components/provider/antd';
 import Header from '../header';
@@ -371,14 +371,14 @@ const PCLayout = () => {
                   >
                     {userInfo && siderContentWidth > 0 && !isSiderCollapsed && <WorkspaceSider />}
                     {userInfo && siderContentWidth > 0 && isSiderCollapsed && (
-                      <Tooltip title={intl.formatMessage({ id: 'workspaceSider.expandSidebar' })} placement="right">
+                      <Tooltip title={intl.formatMessage({ id: 'workspaceSider.expandSidebar' })} placement="bottom">
                         <button
                           type="button"
                           className={styles.workspaceSiderExpandButton}
                           aria-label={intl.formatMessage({ id: 'workspaceSider.expandSidebar' })}
                           onClick={() => setSiderCollapsed(false)}
                         >
-                          <AntdIcon type="icon-cebianlan" />
+                          <ResourcePanelToggleIcon className={styles.workspaceSiderExpandIcon} />
                         </button>
                       </Tooltip>
                     )}
@@ -388,6 +388,7 @@ const PCLayout = () => {
                       className={classNames(styles.content, {
                         [styles.opening]: !isClose,
                         [styles.closing]: isClose,
+                        [styles.siderCollapsedContent]: isSiderCollapsed,
                       })}
                     >
                       <Outlet />

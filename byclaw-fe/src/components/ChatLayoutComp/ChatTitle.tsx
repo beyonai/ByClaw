@@ -66,6 +66,9 @@ export default function ChatTitle(props: ChatTitleProps) {
       sessionName: 'New Chat',
     } as ISession);
   }, [currentSession, sessionId]);
+  const projectDetailPath = props.projectId
+    ? `/projectSpace?projectId=${encodeURIComponent(`${props.projectId}`)}`
+    : '/projectSpace';
 
   return (
     <>
@@ -87,7 +90,7 @@ export default function ChatTitle(props: ChatTitleProps) {
                 </Link>
                 <span className={styles.chatBreadcrumbSeparator}>/</span>
                 <Link
-                  to="/projectSpace"
+                  to={projectDetailPath}
                   state={
                     props.projectId
                       ? { openProjectDetail: true, projectId: props.projectId }

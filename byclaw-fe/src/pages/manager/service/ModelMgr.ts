@@ -18,6 +18,7 @@ export interface ModelListByPageParams {
   keyword?: string;
   ability?: string;
   system?: string;
+  ownerType?: string;
 }
 
 export interface ModelListItem {
@@ -49,6 +50,14 @@ export interface ModelListByPageResponse {
 
 export async function getModelListByPage(params: ModelListByPageParams): Promise<ModelListByPageResponse> {
   return POST<ModelListByPageResponse>('/byaiService/new/model/getModelListByPage', { ...params }, withCustomHandle);
+}
+
+export async function getPersonalModelList(params: ModelListByPageParams): Promise<ModelListByPageResponse> {
+  return POST<ModelListByPageResponse>('/byaiService/personal/model/list', { ...params }, withCustomHandle);
+}
+
+export async function getPublicModelList(params: ModelListByPageParams): Promise<ModelListByPageResponse> {
+  return POST<ModelListByPageResponse>('/byaiService/personal/model/listPublic', { ...params }, withCustomHandle);
 }
 
 export async function getModelDetail(params: any) {

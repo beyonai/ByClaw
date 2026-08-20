@@ -14,6 +14,7 @@ jest.mock('@umijs/max', () => ({
     userName: '测试用户',
     avatar: '/avatar.png',
     userCode: 'test-user',
+    usersOrganizations: [{ userType: 'BUSINESS_MAN', positionName: '业务经理' }],
   }),
 }));
 
@@ -25,6 +26,7 @@ jest.mock('@/layout/header/useUserDropdown', () => ({
     userDropdownItems: [{ key: 'settings', label: '设置' }],
     onUserDropdownClick: mockUserMenuClick,
     userDropdownRender: undefined,
+    userRoleName: '业务管理',
   }),
 }));
 
@@ -36,8 +38,9 @@ describe('WorkspaceUserBar', () => {
   it('shows the user avatar and name and opens the migrated user menu on click', async () => {
     render(<WorkspaceUserBar />);
 
-    expect(screen.getByRole('img', { name: '测试用户' })).toHaveAttribute('src', '/avatar.png');
+    expect(screen.getByText('用户')).toBeInTheDocument();
     expect(screen.getByText('测试用户')).toBeInTheDocument();
+    expect(screen.queryByText('业务管理')).not.toBeInTheDocument();
 
     fireEvent.mouseEnter(screen.getByTitle('测试用户'));
     expect(screen.queryByText('设置')).not.toBeInTheDocument();

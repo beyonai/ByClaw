@@ -11,6 +11,7 @@ import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
+import { getProjectTagMeta } from '@/pages/projectSpace/utils';
 import styles from './index.module.less';
 
 const getProjectIdFromResponse = (response: any) =>
@@ -35,25 +36,6 @@ const getProjectMutationErrorMessage = (error: unknown, fallback: string) => {
 
 const normalizeMemberId = (member: ProjectShareMember | any) =>
   member?.userId ?? String(member?.id || '').replace(/^user_/, '');
-
-// 项目头像统一展示名称前两个字，项目类型由右侧标签表达，不再使用类型图标区分。
-const getProjectAvatarText = (project: ProjectSpace) =>
-  Array.from(`${project.projectName || ''}`.trim())
-    .slice(0, 2)
-    .join('') || '项目';
-
-// 与会话模块项目标签保持同一优先级：业务类型优先于共享属性，普通项目再区分个人和共享。
-const getProjectScene = (project: ProjectSpace) => {
-  if (project.projectType === 'default') return { classSuffix: 'Default', messageId: 'projectSpace.scene.default' };
-  if (project.projectType === 'develop') {
-    return { classSuffix: 'Development', messageId: 'projectSpace.scene.development' };
-  }
-  if (project.projectType === 'operation') {
-    return { classSuffix: 'Operation', messageId: 'projectSpace.scene.operation' };
-  }
-  if (project.sharedFlag) return { classSuffix: 'Shared', messageId: 'projectSpace.scene.shared' };
-  return { classSuffix: 'Personal', messageId: 'projectSpace.scene.personal' };
-};
 
 // 项目主菜单的左侧列表只负责项目切换和新建；
 // 原会话菜单的项目分组与会话操作保持不变。
@@ -181,7 +163,7 @@ const ProjectCenterList: React.FC = () => {
             projects.map((project) => {
               const projectId = `${project.projectId}`;
               const isActive = projectId === projectScopeId;
-              const projectScene = getProjectScene(project);
+              const projectTag = getProjectTagMeta(project);
               return (
                 <button
                   type="button"
@@ -189,22 +171,17 @@ const ProjectCenterList: React.FC = () => {
                   className={classNames(styles.projectItem, isActive && styles.projectItemActive)}
                   onClick={() => selectProject(project)}
                 >
-                  <span className={classNames(styles.projectIcon, styles[`projectTag${projectScene.classSuffix}`])}>
-                    {getProjectAvatarText(project)}
-                  </span>
                   <span className={styles.projectMain}>
                     <span className={styles.projectTitleRow}>
+                      <Tag
+                        bordered={false}
+                        className={classNames(styles.projectTag, styles[`projectTag${projectTag.classSuffix}`])}
+                      >
+                        {intl.formatMessage({ id: projectTag.messageId })}
+                      </Tag>
                       <strong>{project.projectName}</strong>
                     </span>
                     <small>{project.description || '-'}</small>
-                  </span>
-                  <span className={styles.projectTagGroup}>
-                    <Tag
-                      bordered={false}
-                      className={classNames(styles.projectTag, styles[`projectTag${projectScene.classSuffix}`])}
-                    >
-                      {intl.formatMessage({ id: projectScene.messageId })}
-                    </Tag>
                   </span>
                 </button>
               );

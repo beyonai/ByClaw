@@ -10,7 +10,11 @@ const mockEventEmitter = {
   on: jest.fn(),
   off: jest.fn(),
 };
-const mockLocation = { key: 'project-list', state: { openProjectList: true } };
+const mockLocation: {
+  key: string;
+  search: string;
+  state: { openProjectList?: boolean; openProjectDetail?: boolean; projectId?: string | number } | null;
+} = { key: 'project-list', search: '', state: { openProjectList: true } };
 
 const mockProject = {
   projectId: '1001',
@@ -99,6 +103,8 @@ jest.mock('@/components/ChatLayoutComp/components/EasyConfirm', () => ({
 describe('ProjectSpacePage project cards', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockLocation.search = '';
+    mockLocation.state = { openProjectList: true };
   });
 
   it('supports project search and opens the existing project onboarding wizard', () => {
@@ -131,5 +137,28 @@ describe('ProjectSpacePage project cards', () => {
     fireEvent.click(screen.getByRole('button', { name: 'projectSpace.backToList' }));
 
     expect(screen.getByRole('button', { name: /测试项目/ })).toBeInTheDocument();
+  });
+
+  it('opens the matching project detail from the project ID in the URL', async () => {
+    mockLocation.state = null;
+    mockLocation.search = '?projectId=1001';
+
+    render(<ProjectSpacePage />);
+
+    await waitFor(() => {
+      expect(mockSetProjectScopeId).toHaveBeenCalledWith('1001');
+      expect(screen.getByRole('button', { name: 'projectSpace.backToList' })).toBeInTheDocument();
+    });
+  });
+
+  it('prefers the project ID in the URL when the list state is still present', async () => {
+    mockLocation.state = { openProjectList: true };
+    mockLocation.search = '?projectId=1001';
+
+    render(<ProjectSpacePage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'projectSpace.backToList' })).toBeInTheDocument();
+    });
   });
 });

@@ -3,10 +3,10 @@ import {
   BookOutlined,
   BulbOutlined,
   DownOutlined,
-  FolderOutlined,
   LoadingOutlined,
   ReloadOutlined,
   RightOutlined,
+  ShareAltOutlined,
 } from '@ant-design/icons';
 // @ts-ignore
 import { useDispatch, useIntl, useLocation, useNavigate } from '@umijs/max';
@@ -21,7 +21,7 @@ import useAppStore from '@/models/common/useAppStore';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
-import { getArrayData, getPageTotal, normalizeProjectSession } from '@/pages/projectSpace/utils';
+import { getArrayData, getPageTotal, getProjectTagMeta, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import { listProjectSessionsByQo } from '@/service/devloop';
 import { getChatRunningStatus } from '@/service/message';
 import { chatSessionRuntimeManager, type RunningChatInfo } from '@/utils/chatSessionRuntimeManager';
@@ -146,14 +146,21 @@ const formatSessionTime = (value: string | number | undefined, intl: ReturnType<
   if (!time.isValid()) return '';
 
   const minuteDiff = dayjs().diff(time, 'minute');
-  if (minuteDiff <= 0) return intl.formatMessage({ id: 'workspaceSider.time.justNow' });
   if (minuteDiff < 60) {
-    return intl.formatMessage({ id: 'workspaceSider.time.minutesAgo' }, { count: minuteDiff });
+    return intl.formatMessage({ id: 'workspaceSider.time.minutesAgo' }, { count: Math.max(1, minuteDiff) });
   }
   if (minuteDiff < 60 * 24) {
     return intl.formatMessage({ id: 'workspaceSider.time.hoursAgo' }, { count: Math.floor(minuteDiff / 60) });
   }
-  return time.format('MM-DD');
+  const dayDiff = dayjs().diff(time, 'day');
+  if (dayDiff < 30) {
+    return intl.formatMessage({ id: 'workspaceSider.time.daysAgo' }, { count: dayDiff });
+  }
+  const monthDiff = dayjs().diff(time, 'month');
+  if (monthDiff < 12) {
+    return intl.formatMessage({ id: 'workspaceSider.time.monthsAgo' }, { count: Math.max(1, monthDiff) });
+  }
+  return intl.formatMessage({ id: 'workspaceSider.time.yearsAgo' }, { count: Math.max(1, dayjs().diff(time, 'year')) });
 };
 
 const isSameOrChildPath = (pathname: string, path: string) => pathname === path || pathname.startsWith(`${path}/`);
@@ -782,7 +789,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
           className={classNames(styles.primaryItem, projectActive && styles.primaryItemActive)}
           onClick={() => navigate('/projectSpace', { state: { openProjectList: true } })}
         >
-          <FolderOutlined className={styles.primaryIcon} />
+          <ShareAltOutlined className={styles.primaryIcon} />
           <span>{intl.formatMessage({ id: 'sider.projectSpace' })}</span>
         </button>
         <button
@@ -833,11 +840,16 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
           {projects.map((project) => {
             const projectId = normalizeProjectId(project.projectId);
             const isExpanded = expandedProjectIds.has(projectId);
+            const projectTag = getProjectTagMeta(project);
             return (
               <div key={projectId} className={styles.projectItem} role="treeitem" aria-expanded={isExpanded}>
                 <div className={styles.projectRow}>
                   <button type="button" className={styles.projectButton} onClick={() => handleProjectClick(project)}>
-                    <FolderOutlined className={styles.projectIcon} />
+                    <span
+                      className={classNames(styles.projectTypeTag, styles[`projectTypeTag${projectTag.classSuffix}`])}
+                    >
+                      {intl.formatMessage({ id: projectTag.messageId })}
+                    </span>
                     <span className={styles.projectName} title={project.projectName}>
                       {project.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' })}
                     </span>

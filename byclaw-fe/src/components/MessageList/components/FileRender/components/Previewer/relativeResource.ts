@@ -1,5 +1,6 @@
 import { getMimeType } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import type { MarkdownImageResolver } from '@/components/Preview/Md';
+import { getFileUrl } from '@/utils/file';
 
 const relativeResourceCache = new Map<string, Promise<Blob>>();
 
@@ -39,11 +40,28 @@ const normalizeResourceBlob = (blob: Blob, resourcePath: string) => {
   return mimeType ? new Blob([blob], { type: mimeType }) : blob;
 };
 
+export const isSessionFilePath = (filePath: string) => /^\/(?:by\/)?\.sessions\//.test(normalizeFilePath(filePath));
+
+const normalizeCommonFilePath = (filePath: string) => {
+  const normalizedPath = normalizeFilePath(filePath);
+  return normalizedPath.startsWith('/.sessions/') ? `/by${normalizedPath}` : normalizedPath;
+};
+
+export const getCommonFilePreviewUrl = (filePath: string) => {
+  const previewUrl = new URL(getFileUrl('/commonFile/preview'), window.location.origin);
+  previewUrl.searchParams.set('filePath', normalizeCommonFilePath(filePath));
+  return previewUrl.toString();
+};
+
 const getRelativeResourceUrl = (fileUrl: string, resourcePath: string) => {
   const previewUrl = new URL(fileUrl, window.location.origin);
   const filePath = previewUrl.searchParams.get('filePath');
   if (filePath) {
-    previewUrl.searchParams.set('filePath', resolveRelativeFilePath(filePath, resourcePath));
+    const resolvedPath = resolveRelativeFilePath(filePath, resourcePath);
+    previewUrl.searchParams.set(
+      'filePath',
+      isSessionFilePath(filePath) ? normalizeCommonFilePath(resolvedPath) : resolvedPath
+    );
     return previewUrl.toString();
   }
   return new URL(resourcePath, previewUrl).toString();
@@ -85,6 +103,8 @@ export const createRelativePathResourceResolver = (
     if (isExternalResourcePath(resourcePath)) return resourcePath;
 
     const resolvedPath = resolveRelativeFilePath(filePath, resourcePath);
+    if (isSessionFilePath(filePath)) return getCommonFilePreviewUrl(resolvedPath);
+
     const cached = resourceCache.get(resolvedPath);
     if (cached) return cached;
 

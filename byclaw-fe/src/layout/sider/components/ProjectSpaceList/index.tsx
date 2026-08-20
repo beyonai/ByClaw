@@ -22,7 +22,12 @@ import {
   updateProject,
 } from '@/pages/projectSpace/service';
 import type { ProjectMember, ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
-import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
+import {
+  getArrayData,
+  getProjectTagMeta,
+  normalizeProjectDetail,
+  normalizeProjectSession,
+} from '@/pages/projectSpace/utils';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import { saveProjectMembers, saveProjectResources, type DevloopProjectSessionSearchMode } from '@/service/devloop';
 import { SiderContentContext } from '../../siderContentContext';
@@ -147,25 +152,8 @@ const getOperationSessionDescription = (session: ProjectSession): string | undef
 };
 
 const getProjectScenes = (project: ProjectSpace, t: ProjectSpaceTranslate) => {
-  if (project.projectType === 'default') {
-    return [{ classSuffix: 'Default', text: t('scene.default') }];
-  }
-
-  // 研发项目即使强制共享，列表也优先展示业务类型标签。
-  if (project.projectType === 'develop') {
-    return [{ classSuffix: 'Development', text: t('scene.development') }];
-  }
-
-  // 运营项目优先展示业务类型；即使开启共享也不额外展示共享标签，避免项目标题区域标签过多。
-  if (project.projectType === 'operation') {
-    return [{ classSuffix: 'Operation', text: t('scene.operation') }];
-  }
-
-  if (project.sharedFlag) {
-    return [{ classSuffix: 'Shared', text: t('scene.shared') }];
-  }
-
-  return [{ classSuffix: 'Personal', text: t('scene.personal') }];
+  const projectTag = getProjectTagMeta(project);
+  return [{ classSuffix: projectTag.classSuffix, text: t(projectTag.messageId.replace('projectSpace.', '')) }];
 };
 
 // 研发项目未完成初始化(pending/initialized/initializing)时展示初始化中标签,提示尚不能建需求/启动任务。

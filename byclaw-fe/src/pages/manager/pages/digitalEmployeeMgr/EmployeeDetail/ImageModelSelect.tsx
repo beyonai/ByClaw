@@ -1,20 +1,28 @@
-import { Alert, Button, Select, Spin } from 'antd';
+import { DownOutlined, PictureOutlined } from '@ant-design/icons';
+import { Alert, Button, Popover, Radio, Spin, Tabs } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl } from '@umijs/max';
 
-import { getModelListByPage } from '@/pages/manager/service/ModelMgr';
+import {
+  getPersonalModelList,
+  getPublicModelList,
+  type ModelListByPageResponse,
+} from '@/pages/manager/service/ModelMgr';
 import {
   buildImageModelOptions,
   getImageModelRows,
   normalizeImageModelId,
   type ImageModelOption,
 } from './imageModelUtils';
+import styles from './ImageModelSelect.module.less';
 
 interface ImageModelSelectProps {
   value?: string;
   onChange: (value: string | undefined) => void;
   disabled?: boolean;
 }
+
+type ModelScope = 'mine' | 'public';
 
 const IMAGE_MODEL_QUERY = {
   modelType: 'IMAGE_GENERATION',
@@ -23,12 +31,17 @@ const IMAGE_MODEL_QUERY = {
   pageSize: 1000,
 };
 
+const isSuccessfulResponse = (response?: ModelListByPageResponse) =>
+  response?.code === undefined || response.code === 0;
+
 const ImageModelSelect = ({ value, onChange, disabled = false }: ImageModelSelectProps) => {
   const intl = useIntl();
   const globalDefaultLabel = intl.formatMessage({ id: 'employeeDetail.imageModelGlobalDefault' });
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [models, setModels] = useState<ImageModelOption[]>([{ label: globalDefaultLabel, value: '' }]);
+  const [open, setOpen] = useState(false);
+  const [activeScope, setActiveScope] = useState<ModelScope>('public');
+  const [modelGroups, setModelGroups] = useState<Record<ModelScope, ImageModelOption[]>>({ mine: [], public: [] });
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -41,15 +54,20 @@ const ImageModelSelect = ({ value, onChange, disabled = false }: ImageModelSelec
   const loadModels = useCallback(() => {
     setLoading(true);
     setLoadFailed(false);
-    getModelListByPage(IMAGE_MODEL_QUERY)
-      .then((response) => {
-        if (response?.code !== 0) throw new Error(response?.msg || 'image model request failed');
+    Promise.all([getPersonalModelList(IMAGE_MODEL_QUERY), getPublicModelList(IMAGE_MODEL_QUERY)])
+      .then(([personalResponse, publicResponse]) => {
+        if (!isSuccessfulResponse(personalResponse) || !isSuccessfulResponse(publicResponse)) {
+          throw new Error('image model request failed');
+        }
         if (!mountedRef.current) return;
-        setModels(buildImageModelOptions(getImageModelRows(response), globalDefaultLabel));
+        setModelGroups({
+          mine: buildImageModelOptions(getImageModelRows(personalResponse), globalDefaultLabel, false),
+          public: buildImageModelOptions(getImageModelRows(publicResponse), globalDefaultLabel, false),
+        });
       })
       .catch(() => {
         if (!mountedRef.current) return;
-        setModels([{ label: globalDefaultLabel, value: '' }]);
+        setModelGroups({ mine: [], public: [] });
         setLoadFailed(true);
       })
       .finally(() => {
@@ -62,27 +80,78 @@ const ImageModelSelect = ({ value, onChange, disabled = false }: ImageModelSelec
   }, [loadModels]);
 
   const selectedValue = useMemo(() => normalizeImageModelId(value) || '', [value]);
-  const options = useMemo(() => {
-    if (!selectedValue || models.some((option) => option.value === selectedValue)) return models;
-    return [...models, { label: selectedValue, value: selectedValue }];
-  }, [models, selectedValue]);
+  const selectedOption = useMemo(
+    () => [...modelGroups.mine, ...modelGroups.public].find((option) => option.value === selectedValue),
+    [modelGroups, selectedValue]
+  );
+  const selectedLabel = selectedOption?.label || selectedValue || globalDefaultLabel;
+  const currentModels = modelGroups[activeScope];
+
+  const popoverContent = (
+    <div className={styles.modelPopover}>
+      <div className={styles.popoverTitle}>{intl.formatMessage({ id: 'employeeDetail.imageModelConfiguration' })}</div>
+      <Tabs
+        activeKey={activeScope}
+        className={styles.scopeTabs}
+        size="small"
+        onChange={(key) => setActiveScope(key as ModelScope)}
+        items={[
+          { key: 'mine', label: intl.formatMessage({ id: 'modelPopover.mine' }) },
+          { key: 'public', label: intl.formatMessage({ id: 'modelPopover.public' }) },
+        ]}
+      />
+      <Spin spinning={loading}>
+        <Radio.Group
+          className={styles.modelList}
+          value={selectedValue}
+          onChange={(event) => onChange(normalizeImageModelId(event.target.value))}
+        >
+          <div className={styles.modelItem}>
+            <Radio value="">{globalDefaultLabel}</Radio>
+          </div>
+          {currentModels.map((model) => (
+            <div key={model.value} className={styles.modelItem}>
+              <Radio value={model.value}>
+                <span className={styles.modelName}>{model.label}</span>
+              </Radio>
+            </div>
+          ))}
+          {currentModels.length === 0 && !loading && (
+            <div className={styles.emptyTip}>{intl.formatMessage({ id: 'modelPopover.noModels' })}</div>
+          )}
+        </Radio.Group>
+      </Spin>
+      <div className={styles.popoverFooter}>
+        <Button size="small" type="primary" onClick={() => setOpen(false)}>
+          {intl.formatMessage({ id: 'modelPopover.confirm' })}
+        </Button>
+      </div>
+    </div>
+  );
 
   return (
-    <div style={{ padding: '0 16px' }}>
-      <label style={{ display: 'block', marginBottom: 8 }}>
-        {intl.formatMessage({ id: 'employeeDetail.imageModel' })}
-      </label>
-      <Select
-        aria-label={intl.formatMessage({ id: 'employeeDetail.imageModel' })}
-        disabled={disabled || loading || loadFailed}
-        loading={loading}
-        notFoundContent={loading ? <Spin size="small" /> : undefined}
-        options={options}
-        placeholder={intl.formatMessage({ id: 'employeeDetail.imageModelPlaceholder' })}
-        style={{ width: '100%' }}
-        value={selectedValue}
-        onChange={(nextValue) => onChange(normalizeImageModelId(nextValue))}
-      />
+    <div className={styles.imageModelConfig}>
+      <span className={styles.configLabel}>{intl.formatMessage({ id: 'employeeDetail.imageModel' })}</span>
+      <Popover
+        arrow={false}
+        content={popoverContent}
+        open={open}
+        placement="bottomRight"
+        trigger={disabled || loading || loadFailed ? [] : ['click']}
+        onOpenChange={setOpen}
+      >
+        <button
+          aria-label={intl.formatMessage({ id: 'employeeDetail.imageModel' })}
+          className={styles.modelTrigger}
+          disabled={disabled || loading || loadFailed}
+          title={selectedLabel}
+          type="button"
+        >
+          <PictureOutlined className={styles.modelIcon} />
+          <span className={styles.selectedModel}>{selectedLabel}</span>
+          <DownOutlined className={styles.downIcon} />
+        </button>
+      </Popover>
       {loadFailed && (
         <Alert
           action={
@@ -90,9 +159,9 @@ const ImageModelSelect = ({ value, onChange, disabled = false }: ImageModelSelec
               {intl.formatMessage({ id: 'employeeDetail.imageModelRetry' })}
             </Button>
           }
+          className={styles.loadError}
           message={intl.formatMessage({ id: 'employeeDetail.imageModelLoadError' })}
           showIcon
-          style={{ marginTop: 8 }}
           type="error"
         />
       )}

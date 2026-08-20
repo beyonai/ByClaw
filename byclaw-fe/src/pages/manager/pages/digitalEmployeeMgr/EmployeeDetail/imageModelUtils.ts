@@ -19,7 +19,8 @@ export const getImageModelRows = (response?: ModelListByPageResponse): ModelList
 
 export const buildImageModelOptions = (
   models: ModelListItem[] = [],
-  globalDefaultLabel: string
+  globalDefaultLabel: string,
+  includeGlobalDefault: boolean = true
 ): ImageModelOption[] => {
   const options = models
     .filter((model) => model.modelType === 'IMAGE_GENERATION' && model.status === 'ENABLED')
@@ -33,7 +34,7 @@ export const buildImageModelOptions = (
     })
     .filter((option): option is ImageModelOption => option !== null);
 
-  return [{ label: globalDefaultLabel, value: '' }, ...options];
+  return includeGlobalDefault ? [{ label: globalDefaultLabel, value: '' }, ...options] : options;
 };
 
 export const applyImageModelId = (payload: Record<string, unknown>, value: unknown): void => {

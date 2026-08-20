@@ -27,7 +27,7 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
   const { blockedPaths } = useSelector(({ menu }: any) => menu);
   const { modal } = App.useApp();
 
-  const { ENV, devConfig, setSiderCollapsed } = useAppStore();
+  const { ENV, devConfig } = useAppStore();
   const { token } = theme.useToken();
   const [menuConfig, setMenuConfig] = useState<any[]>(fallbackMenuConfig);
   const [userTypeConfigList, setUserTypeConfigList] = useState<any[]>([]);
@@ -126,7 +126,6 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
       if (key === 'accessToken') {
         navigate('/accessTokenMgmt');
       } else if (key === 'settings') {
-        setSiderCollapsed(true);
         navigate('/settings');
       } else if (key === 'assistantSettings') {
         navigate('/assistantSettings');
@@ -221,6 +220,19 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
     return m.filter((i) => !i.hidden);
   }, [userInfo, ENV, devConfig, blockedPaths, menuConfig]);
 
+  const roleName = useMemo(
+    () =>
+      Array.from(
+        new Set(userInfo?.usersOrganizations?.map((item: { userType: string }) => item.userType).filter(Boolean))
+      )
+        .map(
+          (userType) =>
+            userTypeConfigList?.find((item) => `${item.standCode}` === `${userType}`)?.standDisplayValue || userType
+        )
+        .join('、'),
+    [userInfo, userTypeConfigList]
+  );
+
   const dropdownRender = useCallback<Required<DropdownProps>['dropdownRender']>(
     (menu) => {
       const contentStyle: React.CSSProperties = {
@@ -235,14 +247,6 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
         borderRadius: 0,
         background: 'transparent',
       };
-      const roleName = Array.from(
-        new Set(userInfo?.usersOrganizations?.map((item: { userType: string }) => item.userType).filter(Boolean))
-      )
-        .map(
-          (userType) =>
-            userTypeConfigList?.find((item) => `${item.standCode}` === `${userType}`)?.standDisplayValue || userType
-        )
-        .join('、');
       return (
         <div style={contentStyle}>
           <div className={styles.userDropdownTopInfo}>
@@ -272,12 +276,13 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
         </div>
       );
     },
-    [userInfo, userTypeConfigList]
+    [roleName, userInfo]
   );
 
   return {
     userDropdownRender: dropdownRender,
     userDropdownItems: items,
     onUserDropdownClick: handleClick,
+    userRoleName: roleName,
   };
 }

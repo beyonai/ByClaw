@@ -78,20 +78,34 @@ function backendBaseUrl() {
 }
 
 function resolveAuth() {
-  return {
-    beyondToken: firstNonEmpty(
-      process.env.BEYOND_TOKEN,
-      process.env.BYCLAW_BEYOND_TOKEN,
-      process.env.BYCLAW_ECOSYSTEM_BEYOND_TOKEN
-    ),
-    userCode: firstNonEmpty(process.env.USER_CODE, process.env.BYCLAW_ECOSYSTEM_USER_CODE),
-    sessionId: firstNonEmpty(
-      process.env.BAIYING_SESSION,
-      process.env.SESSION_ID,
-      process.env.BYCLAW_SESSION,
-      process.env.BYCLAW_ECOSYSTEM_SESSION
-    ),
-  };
+  const beyondToken = firstNonEmpty(
+    process.env.BEYOND_TOKEN,
+    process.env.BYCLAW_BEYOND_TOKEN,
+    process.env.BYCLAW_ECOSYSTEM_BEYOND_TOKEN
+  );
+  const userCode = firstNonEmpty(process.env.USER_CODE, process.env.BYCLAW_ECOSYSTEM_USER_CODE);
+  const sessionId = firstNonEmpty(
+    process.env.BAIYING_SESSION,
+    process.env.SESSION_ID,
+    process.env.BYCLAW_SESSION,
+    process.env.BYCLAW_ECOSYSTEM_SESSION
+  );
+
+  // 从 BEYOND_TOKEN 解析 userId（JWT payload 的 userId 字段）
+  let userId = undefined;
+  if (beyondToken) {
+    try {
+      const parts = beyondToken.split(".");
+      if (parts.length === 3) {
+        const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
+        userId = payload.userId || payload.uid || payload.sub;
+      }
+    } catch (error) {
+      // JWT 解析失败不影响站内信发送，只影响钉钉侧
+    }
+  }
+
+  return { beyondToken, userCode, sessionId, userId };
 }
 
 // 网关按 userCode + nonce + timestamp + body + salt 的 md5 校验，缺 userCode 时跳过签名头。
@@ -263,14 +277,19 @@ async function sendCommand(args) {
   }
 
   // 站内通知发送完成后，尝试发送钉钉消息（可选,失败不影响主流程）
-  const dingtalkResults = [];
+  // 逐人记账：一个人失败不能把整批计成 0，否则回执无法区分"全失败"和"部分失败"
+  const dingtalkFailures = [];
+  let dingtalkSent = 0;
   if (payload?.sendDingtalk === true && auth.userId) {
     const dingtalkBody = payload?.dingtalkBody || payload?.content || defaults.content;
     for (const detail of details) {
       if (!detail.targetId) continue; // 钉钉发送需要 targetId
       const result = await sendDingtalkMessage(auth.userId, detail.targetId, dingtalkBody);
-      if (!result.ok) {
-        dingtalkResults.push({ targetId: detail.targetId, error: result.message });
+      if (result.ok) {
+        dingtalkSent += 1;
+      }
+      else {
+        dingtalkFailures.push({ targetId: detail.targetId, error: result.message });
       }
     }
   }
@@ -281,8 +300,8 @@ async function sendCommand(args) {
     sent,
     batches: batches.length,
     failures,
-    dingtalkSent: dingtalkResults.length === 0 && payload?.sendDingtalk === true ? details.length : 0,
-    dingtalkFailures: dingtalkResults.length > 0 ? dingtalkResults : undefined,
+    dingtalkSent,
+    dingtalkFailures: dingtalkFailures.length > 0 ? dingtalkFailures : undefined,
   };
 }
 

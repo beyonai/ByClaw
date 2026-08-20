@@ -73,7 +73,7 @@ test("send maps priority words to backend 1-4 and defaults sender to USER_CODE",
   await server.close();
 
   assert.equal(result.code, 0);
-  assert.deepEqual(result.json, { ok: true, requested: 2, sent: 2, batches: 1, failures: [] });
+  assert.deepEqual(result.json, { ok: true, requested: 2, sent: 2, batches: 1, failures: [], dingtalkSent: 0 });
   const [call] = server.requests;
   assert.match(call.url, /\/byaiService\/open\/api\/notice\/create$/);
   assert.equal(call.headers["beyond-token"], SECRET_TOKEN);

@@ -384,13 +384,20 @@ const Sidebar = () => {
       </div>
       {!shouldHideSiderContent && (
         <div className={styles.collapseLine}>
-          <div
-            className={classnames(styles.collapesBtn, 'pointer ub ub-ac ub-pc')}
-            onClick={() => setSiderCollapsed(!isSiderCollapsed)}
+          <Tooltip
+            title={intl.formatMessage({
+              id: isSiderCollapsed ? 'workspaceSider.expandSidebar' : 'workspaceSider.collapseSidebar',
+            })}
+            placement="bottom"
           >
-            {!isSiderCollapsed && <CaretLeftOutlined />}
-            {isSiderCollapsed && <CaretRightOutlined />}
-          </div>
+            <div
+              className={classnames(styles.collapesBtn, 'pointer ub ub-ac ub-pc')}
+              onClick={() => setSiderCollapsed(!isSiderCollapsed)}
+            >
+              {!isSiderCollapsed && <CaretLeftOutlined />}
+              {isSiderCollapsed && <CaretRightOutlined />}
+            </div>
+          </Tooltip>
         </div>
       )}
     </>
