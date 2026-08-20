@@ -2,6 +2,7 @@ import type { Dayjs } from 'dayjs';
 
 export type AutomationScheduleMode = 'periodic' | 'interval' | 'once';
 export type AutomationPeriodType = 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly';
+export type AutomationIntervalUnit = 'hour' | 'minute';
 
 export interface AutomationScheduleConfig {
   mode: AutomationScheduleMode;
@@ -12,6 +13,8 @@ export interface AutomationScheduleConfig {
   monthDay?: number;
   monthDays?: number[];
   intervalHours?: number;
+  intervalValue?: number;
+  intervalUnit?: AutomationIntervalUnit;
   intervalWeekdays?: number[];
   onceTime?: string;
   effectiveStartDate?: string;
@@ -47,14 +50,16 @@ export interface AutomationFormValues {
   scheduleMode: AutomationScheduleMode;
   periodType?: AutomationPeriodType;
   periodTime?: Dayjs;
+  periodDateTime?: Dayjs;
   periodWeekdays?: number[];
   periodMonth?: number;
   periodMonthDay?: number;
   periodMonthDays?: number[];
   intervalHours?: number;
+  intervalValue?: number;
+  intervalUnit?: AutomationIntervalUnit;
   intervalWeekdays?: number[];
   onceTime?: Dayjs;
-  effectiveDateRange?: [Dayjs, Dayjs];
 }
 
 export interface AutomationTemplate {

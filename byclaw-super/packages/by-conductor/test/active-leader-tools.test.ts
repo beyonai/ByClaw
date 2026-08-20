@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ASK_USER_QUESTION_ENABLED,
   DOWNLOAD_ATTACHMENT_ENABLED,
   LEADER_CHECKPOINT_TOOL_NAMES,
   LEADER_FILE_TOOL_NAMES,
@@ -8,6 +9,8 @@ import {
 
 describe("Leader checkpoint tool allowlist", () => {
   it("covers attachment tools and every enabled session file tool", () => {
+    expect(ASK_USER_QUESTION_ENABLED).toBe(true);
+    expect(LEADER_CHECKPOINT_TOOL_NAMES).toContain("askUserQuestion");
     expect(LEADER_CHECKPOINT_TOOL_NAMES).toContain("inspectAttachment");
     // downloadAttachment 随 DOWNLOAD_ATTACHMENT_ENABLED 开关进出长期 checkpoint 白名单。
     if (DOWNLOAD_ATTACHMENT_ENABLED) {
@@ -40,7 +43,7 @@ describe("active Leader tools", () => {
     ).toEqual(expect.arrayContaining(["delegateAgent", "inspectAttachment"]));
   });
 
-  it("only exposes delegation to an expert-team leader", () => {
+  it("exposes delegation and structured clarification to an expert-team leader", () => {
     expect(
       resolveActiveLeaderToolNames({
         authorizedAgents: [specialist],
@@ -49,6 +52,6 @@ describe("active Leader tools", () => {
         downloadAttachmentAvailable: true,
         expertTeam: true,
       }),
-    ).toEqual(["delegateAgent"]);
+    ).toEqual(["delegateAgent", "askUserQuestion"]);
   });
 });

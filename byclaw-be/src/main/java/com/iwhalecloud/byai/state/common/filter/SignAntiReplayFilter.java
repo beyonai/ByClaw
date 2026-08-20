@@ -41,11 +41,22 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
 
     private static final String THIRD_PARTY_SKILL_INSTALL_PATH = "/tool/installThirdPartySkill";
 
+    private static final String THIRD_PARTY_SKILL_MANAGEABLE_DIGITAL_EMPLOYEE_PATH =
+        "/tool/queryThirdPartySkillManageableDigitalEmployees";
+
     private static final String CONNECTOR_SKILL_COMPLETE_PATH =
         "/connector/authorization/skill-complete";
 
     private static final String ORCHESTRATOR_RUNTIME_PATH =
         "/internal/v1/orchestrators/resolve-runtime";
+
+    private static final String ARTIFACT_UPLOAD_PATH = "/open/api/v1/artifacts";
+
+    @org.springframework.beans.factory.annotation.Value("${artifact.preview.path-prefix:/artifact-preview}")
+    private String artifactPreviewPathPrefix;
+
+    @org.springframework.beans.factory.annotation.Value("${artifact.download.path-prefix:/artifact-download}")
+    private String artifactDownloadPathPrefix;
 
 
     public static final String HEADER_SIGNATURE = "x-signature-value";
@@ -74,9 +85,9 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
-        // 技能超市安装接口使用现有 Beyond-Token 完成用户认证；对端不持有门户通用请求签名密钥，
+        // 技能超市安装与可管理数字员工查询接口使用现有 Beyond-Token 完成用户认证；对端不持有门户通用请求签名密钥，
         // 因此仅跳过通用签名防重放校验，登录鉴权仍由 AccessTokenVerifyInterceptor 执行。
-        if (this.isThirdPartySkillInstall(request)) {
+        if (this.isThirdPartySkillMarketplaceRequest(request)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -89,6 +100,11 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
         // Super 仅持有当前用户 Beyond-Token，不持有门户通用请求签名密钥。
         // 此处只跳过通用签名防重放，登录与资源权限仍由 AccessTokenVerifyInterceptor 强制校验。
         if (this.isOrchestratorRuntime(request)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+        // 沙箱上传使用Beyond-Token，匿名预览使用能力URL，二者都不持有门户签名盐。
+        if (this.isArtifactUpload(request) || this.isArtifactCapabilityRequest(request)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -163,9 +179,18 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
     }
 
     private boolean isThirdPartySkillInstall(HttpServletRequest request) {
-        return endsWithPath(request.getRequestURI(), THIRD_PARTY_SKILL_INSTALL_PATH)
-            || endsWithPath(request.getServletPath(), THIRD_PARTY_SKILL_INSTALL_PATH)
-            || endsWithPath(request.getPathInfo(), THIRD_PARTY_SKILL_INSTALL_PATH);
+        return isRequestPath(request, THIRD_PARTY_SKILL_INSTALL_PATH);
+    }
+
+    private boolean isThirdPartySkillMarketplaceRequest(HttpServletRequest request) {
+        return isThirdPartySkillInstall(request)
+            || isRequestPath(request, THIRD_PARTY_SKILL_MANAGEABLE_DIGITAL_EMPLOYEE_PATH);
+    }
+
+    private boolean isRequestPath(HttpServletRequest request, String expectedPath) {
+        return endsWithPath(request.getRequestURI(), expectedPath)
+            || endsWithPath(request.getServletPath(), expectedPath)
+            || endsWithPath(request.getPathInfo(), expectedPath);
     }
 
     private boolean isConnectorSkillComplete(HttpServletRequest request) {
@@ -178,6 +203,30 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
         return endsWithPath(request.getRequestURI(), ORCHESTRATOR_RUNTIME_PATH)
             || endsWithPath(request.getServletPath(), ORCHESTRATOR_RUNTIME_PATH)
             || endsWithPath(request.getPathInfo(), ORCHESTRATOR_RUNTIME_PATH);
+    }
+
+    private boolean isArtifactUpload(HttpServletRequest request) {
+        return request != null && "POST".equalsIgnoreCase(request.getMethod())
+            && endsWithPath(request.getRequestURI(), ARTIFACT_UPLOAD_PATH);
+    }
+
+    private boolean isArtifactCapabilityRequest(HttpServletRequest request) {
+        if (request == null || !("GET".equalsIgnoreCase(request.getMethod())
+            || "HEAD".equalsIgnoreCase(request.getMethod()))) {
+            return false;
+        }
+        return matchesConfiguredPrefix(request, artifactPreviewPathPrefix)
+            || matchesConfiguredPrefix(request, artifactDownloadPathPrefix);
+    }
+
+    private boolean matchesConfiguredPrefix(HttpServletRequest request, String prefix) {
+        if (request == null || StringUtils.isAnyBlank(request.getRequestURI(), prefix)) {
+            return false;
+        }
+        String normalizedPrefix = prefix.startsWith("/") ? prefix : "/" + prefix;
+        String endpointPrefix = StringUtils.defaultString(request.getContextPath()) + normalizedPrefix;
+        return request.getRequestURI().equals(endpointPrefix)
+            || request.getRequestURI().startsWith(endpointPrefix + "/");
     }
 
     private boolean endsWithFeishuBotEventPath(String path) {

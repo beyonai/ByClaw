@@ -29,6 +29,22 @@ class SignAntiReplayFilterTest {
     }
 
     @Test
+    void letsSkillMarketplaceManageableEmployeeQueryUseBeyondTokenWithoutCommonRequestSignature() throws Exception {
+        SignAntiReplayFilter filter = new SignAntiReplayFilter();
+        SignAntiReplayConfig config = new SignAntiReplayConfig();
+        config.setEnabled(true);
+        ReflectionTestUtils.setField(filter, "signProperties", config);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET",
+            "/byaiService/tool/queryThirdPartySkillManageableDigitalEmployees");
+        request.setServletPath("/tool/queryThirdPartySkillManageableDigitalEmployees");
+        MockFilterChain filterChain = new MockFilterChain();
+
+        filter.doFilter(request, new MockHttpServletResponse(), filterChain);
+
+        assertThat(filterChain.getRequest()).isSameAs(request);
+    }
+
+    @Test
     void letsConnectorSkillCallbackUseBeyondTokenWithoutCommonRequestSignature() throws Exception {
         SignAntiReplayFilter filter = new SignAntiReplayFilter();
         SignAntiReplayConfig config = new SignAntiReplayConfig();
@@ -58,5 +74,40 @@ class SignAntiReplayFilterTest {
         filter.doFilter(request, new MockHttpServletResponse(), filterChain);
 
         assertThat(filterChain.getRequest()).isSameAs(request);
+    }
+
+    @Test
+    void letsArtifactUploadUseBeyondTokenWithoutCommonRequestSignature() throws Exception {
+        SignAntiReplayFilter filter = enabledFilter();
+        MockHttpServletRequest request = new MockHttpServletRequest("POST",
+            "/byaiService/open/api/v1/artifacts");
+        MockFilterChain filterChain = new MockFilterChain();
+
+        filter.doFilter(request, new MockHttpServletResponse(), filterChain);
+
+        assertThat(filterChain.getRequest()).isSameAs(request);
+    }
+
+    @Test
+    void letsArtifactCapabilityUrlPassWithoutRequestSignature() throws Exception {
+        SignAntiReplayFilter filter = enabledFilter();
+        ReflectionTestUtils.setField(filter, "artifactPreviewPathPrefix", "/artifact-preview");
+        ReflectionTestUtils.setField(filter, "artifactDownloadPathPrefix", "/artifact-download");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET",
+            "/byaiService/artifact-preview/artifact/key/index.html");
+        request.setContextPath("/byaiService");
+        MockFilterChain filterChain = new MockFilterChain();
+
+        filter.doFilter(request, new MockHttpServletResponse(), filterChain);
+
+        assertThat(filterChain.getRequest()).isSameAs(request);
+    }
+
+    private SignAntiReplayFilter enabledFilter() {
+        SignAntiReplayFilter filter = new SignAntiReplayFilter();
+        SignAntiReplayConfig config = new SignAntiReplayConfig();
+        config.setEnabled(true);
+        ReflectionTestUtils.setField(filter, "signProperties", config);
+        return filter;
     }
 }

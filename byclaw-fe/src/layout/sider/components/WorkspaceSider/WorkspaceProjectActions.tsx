@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { DeleteOutlined, EditOutlined, EllipsisOutlined, PlusCircleOutlined, ReloadOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EditOutlined, EllipsisOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Dropdown, Input, Modal, message } from 'antd';
 // @ts-ignore
 import { useIntl, useSelector } from '@umijs/max';
+import AntdIcon from '@/components/AntdIcon';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import { deleteProject, updateProject } from '@/service/devloop';
 import styles from './index.module.less';
@@ -79,6 +80,10 @@ const WorkspaceProjectActions: React.FC<WorkspaceProjectActionsProps> = ({
 
   const handleMenuClick = ({ key, domEvent }: any) => {
     domEvent.stopPropagation();
+    if (key === 'refresh') {
+      onRefreshSessions(project);
+      return;
+    }
     if (!canManage) return;
     if (key === 'rename') {
       setRenameValue(project.projectName || '');
@@ -89,50 +94,45 @@ const WorkspaceProjectActions: React.FC<WorkspaceProjectActionsProps> = ({
 
   return (
     <div className={styles.projectActionGroup}>
-      {canManage && (
-        <Dropdown
-          trigger={['click']}
-          menu={{
-            items: [
-              {
-                key: 'rename',
-                icon: <EditOutlined />,
-                label: intl.formatMessage({ id: 'common.rename' }),
-              },
-              {
-                key: 'delete',
-                icon: <DeleteOutlined />,
-                label: intl.formatMessage({ id: 'projectSpace.message.deleteConfirmTitle' }),
-                danger: true,
-              },
-            ],
-            onClick: handleMenuClick,
-          }}
-        >
-          <button
-            type="button"
-            className={styles.projectActionButton}
-            aria-label={intl.formatMessage({ id: 'common.more' })}
-            title={intl.formatMessage({ id: 'common.more' })}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <EllipsisOutlined />
-          </button>
-        </Dropdown>
-      )}
-      <button
-        type="button"
-        className={`${styles.projectActionButton} ${styles.projectRefreshButton}`}
-        aria-label={intl.formatMessage({ id: 'common.refresh' })}
-        title={intl.formatMessage({ id: 'common.refresh' })}
-        disabled={refreshing}
-        onClick={(event) => {
-          event.stopPropagation();
-          onRefreshSessions(project);
+      <Dropdown
+        trigger={['click']}
+        menu={{
+          items: [
+            {
+              key: 'refresh',
+              icon: <ReloadOutlined spin={refreshing} />,
+              label: intl.formatMessage({ id: 'common.refresh' }),
+              disabled: refreshing,
+            },
+            ...(canManage
+              ? [
+                {
+                  key: 'rename',
+                  icon: <EditOutlined />,
+                  label: intl.formatMessage({ id: 'common.rename' }),
+                },
+                {
+                  key: 'delete',
+                  icon: <DeleteOutlined />,
+                  label: intl.formatMessage({ id: 'common.delete' }),
+                  danger: true,
+                },
+              ]
+              : []),
+          ],
+          onClick: handleMenuClick,
         }}
       >
-        <ReloadOutlined spin={refreshing} />
-      </button>
+        <button
+          type="button"
+          className={styles.projectActionButton}
+          aria-label={intl.formatMessage({ id: 'common.more' })}
+          title={intl.formatMessage({ id: 'common.more' })}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <EllipsisOutlined />
+        </button>
+      </Dropdown>
       <button
         type="button"
         className={styles.projectActionButton}
@@ -143,7 +143,7 @@ const WorkspaceProjectActions: React.FC<WorkspaceProjectActionsProps> = ({
           onNewSession(project);
         }}
       >
-        <PlusCircleOutlined />
+        <AntdIcon type="icon-xinjianduihua" />
       </button>
 
       <Modal

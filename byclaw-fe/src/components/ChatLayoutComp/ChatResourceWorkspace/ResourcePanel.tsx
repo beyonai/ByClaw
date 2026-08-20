@@ -41,8 +41,8 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
   const [secondaryState, setSecondaryState] = useState<SecondaryState>(EMPTY_SECONDARY_STATE);
   const [upperSectionRatio, setUpperSectionRatio] = useState(0.5);
   const [resizing, setResizing] = useState(false);
-  const [sessionFileRefreshKey, setSessionFileRefreshKey] = useState(0);
-  const [projectFileRefreshKey, setProjectFileRefreshKey] = useState(0);
+  const [sessionResourceRefreshKey, setSessionResourceRefreshKey] = useState(0);
+  const [projectResourceRefreshKey, setProjectResourceRefreshKey] = useState(0);
   const resourceId = activeEmployee.resourceId || (project?.resourceId ? `${project.resourceId}` : undefined);
 
   // 代码入口只对已启用研发能力的项目开放；未明确的数据项按约定保留空态。
@@ -65,7 +65,8 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
       ];
     }
     return [
-      { key: 'file', label: label('chatResource.sessionFile') },
+      { key: 'file', label: label('chatResource.file') },
+      { key: 'knowledge', label: label('chatResource.knowledge') },
       ...(showCode ? [{ key: 'code', label: label('chatResource.code') }] : []),
       { key: 'ontology', label: label('chatResource.ontology') },
     ];
@@ -74,7 +75,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
   const projectSecondaryItems = useMemo(() => {
     const label = (id: string) => intl.formatMessage({ id });
     return [
-      { key: 'file', label: label('chatResource.projectFile') },
+      { key: 'file', label: label('chatResource.file') },
       { key: 'knowledge', label: label('chatResource.knowledge') },
       ...(showCode ? [{ key: 'code', label: label('chatResource.code') }] : []),
       { key: 'ontology', label: label('chatResource.ontology') },
@@ -97,7 +98,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
             projectId={projectId}
             project={project}
             resourceId={resourceId}
-            refreshKey={sessionFileRefreshKey}
+            refreshKey={sessionResourceRefreshKey}
             onOpenDetail={onOpenDetail}
           />
         );
@@ -113,11 +114,24 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
           />
         );
       }
+      if (upperSecondaryKey === 'knowledge') {
+        return (
+          <ObjectFilesPanel
+            objectType="knowledge"
+            projectId={project?.projectId || projectId}
+            sessionId={sessionId}
+            refreshToken={sessionResourceRefreshKey}
+            onOpenDetail={onOpenDetail}
+          />
+        );
+      }
       if (upperSecondaryKey === 'ontology') {
         return (
           <ObjectFilesPanel
+            objectType="object"
             projectId={project?.projectId || projectId}
             sessionId={sessionId}
+            refreshToken={sessionResourceRefreshKey}
             onOpenDetail={onOpenDetail}
           />
         );
@@ -142,7 +156,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
     project,
     projectId,
     resourceId,
-    sessionFileRefreshKey,
+    sessionResourceRefreshKey,
     sessionId,
     showCode,
     upperScopeKey,
@@ -158,16 +172,30 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
           projectId={projectId}
           project={project}
           resourceId={resourceId}
-          refreshKey={projectFileRefreshKey}
+          refreshKey={projectResourceRefreshKey}
           onOpenDetail={onOpenDetail}
         />
       );
     }
     if (projectSecondaryKey === 'knowledge') {
-      return <Knowledge embedded showRouter />;
+      return (
+        <ObjectFilesPanel
+          objectType="knowledge"
+          projectId={project?.projectId || projectId}
+          refreshToken={projectResourceRefreshKey}
+          onOpenDetail={onOpenDetail}
+        />
+      );
     }
     if (projectSecondaryKey === 'ontology') {
-      return <ObjectFilesPanel projectId={project?.projectId || projectId} onOpenDetail={onOpenDetail} />;
+      return (
+        <ObjectFilesPanel
+          objectType="object"
+          projectId={project?.projectId || projectId}
+          refreshToken={projectResourceRefreshKey}
+          onOpenDetail={onOpenDetail}
+        />
+      );
     }
     if (projectSecondaryKey === 'code' && showCode) {
       return (
@@ -183,7 +211,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
     empty,
     onOpenDetail,
     project,
-    projectFileRefreshKey,
+    projectResourceRefreshKey,
     projectId,
     projectSecondaryKey,
     resourceId,
@@ -232,13 +260,13 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
           size="small"
           activeKey={upperSecondaryKey}
           tabBarExtraContent={
-            upperScopeKey === 'session' && upperSecondaryKey === 'file' ? (
+            upperScopeKey === 'session' && ['file', 'knowledge', 'ontology'].includes(upperSecondaryKey) ? (
               <Button
                 type="text"
                 className={styles.resourceRefreshButton}
                 icon={<ReloadOutlined />}
                 aria-label={intl.formatMessage({ id: 'common.refresh' })}
-                onClick={() => setSessionFileRefreshKey((current) => current + 1)}
+                onClick={() => setSessionResourceRefreshKey((current) => current + 1)}
               />
             ) : null
           }
@@ -300,13 +328,13 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
           size="small"
           activeKey={projectSecondaryKey}
           tabBarExtraContent={
-            projectSecondaryKey === 'file' ? (
+            ['file', 'knowledge', 'ontology'].includes(projectSecondaryKey) ? (
               <Button
                 type="text"
                 className={styles.resourceRefreshButton}
                 icon={<ReloadOutlined />}
                 aria-label={intl.formatMessage({ id: 'common.refresh' })}
-                onClick={() => setProjectFileRefreshKey((current) => current + 1)}
+                onClick={() => setProjectResourceRefreshKey((current) => current + 1)}
               />
             ) : null
           }

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Dropdown, Empty, Input, Modal, message } from 'antd';
+import { Button, Dropdown, Empty, Input, Modal, Tag, message } from 'antd';
 import {
   ShareAltOutlined,
   DeleteOutlined,
@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
+import classNames from 'classnames';
 import useGlobal from '@/hooks/useGlobal';
 import { setAgentCache } from '@/components/QueryInput/RichInput/agentCache';
 import getElementData from '@/components/QueryInput/RichInput/utils/getElementData';
@@ -20,13 +21,12 @@ import { getPublicPath } from '@/utils';
 import {
   createProject,
   deleteProject,
-  saveDefaultAgent,
   saveProjectMembers,
   saveProjectResources,
   updateProject,
 } from '@/service/devloop';
 import ProjectFormModal, { type ProjectFormValues } from './components/ProjectFormModal';
-import ProjectOnboardingWizard, { type ArchitectChatTarget } from './components/ProjectOnboardingWizard';
+import ProjectOnboardingWizard from './components/ProjectOnboardingWizard';
 import ProjectDetail from './components/ProjectDetail';
 import { type ChatWithAgentTarget } from './components/ProjectDefaultAgentPanel';
 import { useProjectDetail } from './hooks/useProjectDetail';
@@ -282,10 +282,6 @@ const ProjectSpacePage: React.FC = () => {
               .filter((userId): userId is string | number => Boolean(userId))
             : [],
         });
-        if (values.projectType === 'develop' && values.defaultAgents) {
-          await saveDefaultAgent({ ...values.defaultAgents, projectId: Number(savedProjectId) });
-        }
-
         message.success(
           intl.formatMessage({
             id: editingProject ? 'projectSpace.message.updateSuccess' : 'projectSpace.message.createSuccess',
@@ -417,36 +413,6 @@ const ProjectSpacePage: React.FC = () => {
     [setSelectedProjectId]
   );
 
-  const handleWizardEnterArchitectChat = useCallback(
-    (projectId: string, target?: ArchitectChatTarget) => {
-      const project = projects.find((item) => getProjectId(item.projectId) === projectId);
-      setWizardOpen(false);
-      if (target?.agentId && target.agentName) {
-        setAgentCache(
-          getElementData(ResourceType.digitalEmployee, {
-            agentId: target.agentId,
-            name: target.agentName,
-            agentType: agentTypeMap.agent,
-          })
-        );
-      }
-      setAgentId?.(target?.agentId || '');
-      setSessionId?.(target?.sessionId || '');
-      navigate('/chat', {
-        state: {
-          keepSiderActiveKey: 'sessions',
-          from: 'projectSpace',
-          projectId,
-          projectName: project?.projectName,
-          sessionId: target?.sessionId,
-          selectedAgentId: target?.agentId,
-          selectedAgentObjectType: target?.agentId ? 'DigEmployee' : undefined,
-        },
-      });
-    },
-    [navigate, projects, setAgentId, setSessionId]
-  );
-
   const renderProjectCards = () => {
     return (
       <div className={styles.projectListPage}>
@@ -518,7 +484,29 @@ const ProjectSpacePage: React.FC = () => {
                     <ShareAltOutlined />
                   </span>
                   <span className={styles.projectCardBody}>
-                    <strong>{project.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' })}</strong>
+                    <span className={styles.projectCardTitleRow}>
+                      <strong>
+                        {project.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' })}
+                      </strong>
+                      {project.projectType === 'develop' || project.projectType === 'operation' ? (
+                        <Tag
+                          bordered={false}
+                          className={classNames(
+                            styles.projectTypeTag,
+                            project.projectType === 'develop'
+                              ? styles.projectTypeTagDevelopment
+                              : styles.projectTypeTagOperation
+                          )}
+                        >
+                          {intl.formatMessage({
+                            id:
+                              project.projectType === 'develop'
+                                ? 'projectSpace.scene.development'
+                                : 'projectSpace.scene.operation',
+                          })}
+                        </Tag>
+                      ) : null}
+                    </span>
                     <small>
                       {createTime
                         ? intl.formatMessage({ id: 'projectSpace.projectCard.createdAt' }, { time: createTime })
@@ -647,7 +635,6 @@ const ProjectSpacePage: React.FC = () => {
         onCancel={() => setWizardOpen(false)}
         onCreateProject={handleSaveProject}
         onFinish={handleWizardFinish}
-        onEnterArchitectChat={handleWizardEnterArchitectChat}
       />
 
       <Modal

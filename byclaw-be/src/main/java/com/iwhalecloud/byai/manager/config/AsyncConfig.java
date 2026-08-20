@@ -101,4 +101,49 @@ public class AsyncConfig {
 
         return executor;
     }
+
+    /**
+     * 默认异步任务执行器
+     *
+     * 未指定线程池名的 @Async 注解会使用此执行器，避免退化到 SimpleAsyncTaskExecutor
+     * 当前发现三处裸 @Async：
+     * - DigEmployeeChangeAuthRefreshService.scheduleRefreshGranteesAsync
+     * - AuthApplicationService.syncUsersAuthToRedis
+     * - UserPrivateParamApplicationService.syncAllPrivateParamCache
+     */
+    @Bean(name = {"taskExecutor", "defaultAsyncExecutor"})
+    public Executor taskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+
+        // 核心线程数
+        executor.setCorePoolSize(10);
+
+        // 最大线程数（根据业务负载调整，修复前观察到 1533 个 SimpleAsyncTask 线程）
+        executor.setMaxPoolSize(50);
+
+        // 队列容量
+        executor.setQueueCapacity(500);
+
+        // 线程空闲存活时间（秒）
+        executor.setKeepAliveSeconds(300);
+
+        // 线程名称前缀（用于定位问题）
+        executor.setThreadNamePrefix("default-async-");
+
+        // 拒绝策略：由调用线程执行（避免丢失任务）
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+
+        // 等待任务完成后再关闭线程池
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+
+        // 最多等待 60 秒
+        executor.setAwaitTerminationSeconds(60);
+
+        executor.initialize();
+
+        log.info("Initialized defaultAsyncExecutor: corePoolSize={}, maxPoolSize={}, queueCapacity={}",
+            executor.getCorePoolSize(), executor.getMaxPoolSize(), executor.getQueueCapacity());
+
+        return executor;
+    }
 }

@@ -20,6 +20,7 @@
     <select id="listProjectObjectFiles" resultMap="BaseResultMap">
         SELECT a.id,
                a.session_id,
+               a.object_type,
                a.object_name,
                a.object_code,
                a.file_name,
@@ -37,8 +38,16 @@
                 AND b.project_id = #{projectId}
             </if>
             <if test="sessionId != null">
-                AND b.session_id = #{sessionId}
+                AND a.session_id = #{sessionId}
             </if>
+            <choose>
+                <when test="objectType !=null and objectType !=''">
+                    AND a.object_type = #{objectType}
+                </when>
+                <otherwise>
+                    AND a.object_type = 'object'
+                </otherwise>
+            </choose>
         </where>
     </select>
 

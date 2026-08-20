@@ -12,3 +12,4 @@
 - [9. Docker 文件型运行态存储部署](10-docker-file-storage-deployment.md)
 - [10. MinIO 到文件型存储迁移](11-minio-to-file-storage-migration.md)
 - [11. 一键部署存储模式切换 HTML](12-one-click-storage-deployment.html)
+- [12. Artifact 上传、预览与下载部署](../guide/artifact-upload-preview.md)

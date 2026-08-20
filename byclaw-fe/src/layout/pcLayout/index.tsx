@@ -3,10 +3,11 @@ import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import classNames from 'classnames';
 
 // @ts-ignore
-import { Outlet, useLocation, useSelector, useSearchParams } from '@umijs/max';
-import { Layout } from 'antd';
+import { Outlet, useIntl, useLocation, useSelector, useSearchParams } from '@umijs/max';
+import { Layout, Tooltip } from 'antd';
 
 import { EventEmitter$Cls } from '@/utils/eventEmitter';
+import AntdIcon from '@/components/AntdIcon';
 import Auth from '../auth';
 import AntdProvider from '../components/provider/antd';
 import Header from '../header';
@@ -79,6 +80,7 @@ if (process.env.NODE_ENV === 'development' && typeof window !== 'undefined') {
 }
 
 const PCLayout = () => {
+  const intl = useIntl();
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const { pathname } = location;
@@ -129,7 +131,7 @@ const PCLayout = () => {
     };
   }, [clearDetailPanel]);
 
-  const { setLoginModalOpen } = useAppStore();
+  const { isSiderCollapsed, setLoginModalOpen, setSiderCollapsed } = useAppStore();
   useVersionNotification(myEventEmitter);
 
   const [isClose, setIsClose] = useState(false);
@@ -143,7 +145,9 @@ const PCLayout = () => {
   const dragFileEventHandlerRef = useRef<DragFileEventHandler>(null);
   const layoutRef = useRef<HTMLElement>(null);
   const [layoutWidth, setLayoutWidth] = useState(0);
-  const mainContentHalfWidth = layoutWidth > 0 ? Math.max(280, Math.floor((layoutWidth - siderContentWidth) / 2)) : 450;
+  const visibleSiderContentWidth = isSiderCollapsed ? 0 : siderContentWidth;
+  const mainContentHalfWidth =
+    layoutWidth > 0 ? Math.max(280, Math.floor((layoutWidth - visibleSiderContentWidth) / 2)) : 450;
   const detailPanelBasis = (() => {
     if (detailPanelWidth === undefined) return undefined;
     if (typeof detailPanelWidth === 'number') return `${detailPanelWidth}px`;
@@ -351,7 +355,7 @@ const PCLayout = () => {
                   style={
                     {
                       padding: 0,
-                      '--sider-content-width': `${siderContentWidth}px`,
+                      '--sider-content-width': `${visibleSiderContentWidth}px`,
                       '--layout-gap': '8px',
                     } as React.CSSProperties
                   }
@@ -359,13 +363,25 @@ const PCLayout = () => {
                 >
                   <SiderContentContext.Provider
                     value={{
-                      siderContentWidth,
+                      siderContentWidth: visibleSiderContentWidth,
                       setSiderContentWidth,
                       setDetailPanel: openDetailPanel,
                       clearDetailPanel,
                     }}
                   >
-                    {userInfo && siderContentWidth > 0 && <WorkspaceSider />}
+                    {userInfo && siderContentWidth > 0 && !isSiderCollapsed && <WorkspaceSider />}
+                    {userInfo && siderContentWidth > 0 && isSiderCollapsed && (
+                      <Tooltip title={intl.formatMessage({ id: 'workspaceSider.expandSidebar' })} placement="right">
+                        <button
+                          type="button"
+                          className={styles.workspaceSiderExpandButton}
+                          aria-label={intl.formatMessage({ id: 'workspaceSider.expandSidebar' })}
+                          onClick={() => setSiderCollapsed(false)}
+                        >
+                          <AntdIcon type="icon-cebianlan" />
+                        </button>
+                      </Tooltip>
+                    )}
                     <MinorDrawer />
                     <Content
                       id={pcLayoutContentId}

@@ -10,6 +10,7 @@ import {
   buildAutomationCron,
   buildAutomationSchedule,
   getAutomationFormInitialValues,
+  normalizeIntervalValue,
   parseAutomationConfig,
 } from '../schedule';
 import type { AutomationFormValues, AutomationSource, AutomationTemplate } from '../types';
@@ -22,8 +23,6 @@ interface AutomationEditorProps {
   onSaved: () => void | Promise<void>;
 }
 
-const YEARLY_MONTH_DAY_COUNTS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-
 const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, onCancel, onSaved }) => {
   const intl = useIntl();
   const [form] = Form.useForm<AutomationFormValues>();
@@ -32,11 +31,25 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
     text: '',
     resourceList: [],
   });
+  const [promptDraftVersion, setPromptDraftVersion] = useState(0);
   const { projects, loading: projectsLoading } = useProjectList();
   const scheduleMode = Form.useWatch('scheduleMode', form);
+  const intervalUnit = Form.useWatch('intervalUnit', form);
+  const intervalValue = Form.useWatch('intervalValue', form);
+  const intervalMin = intervalUnit === 'minute' ? 60 : 1;
+  const intervalPrecision = intervalUnit === 'minute' ? 0 : 1;
+  const intervalValidationMessage = intl.formatMessage({
+    id: intervalUnit === 'minute' ? 'automation.intervalMinuteMin' : 'automation.intervalHourMin',
+  });
+  const intervalErrorMessage =
+    intervalValue === undefined || intervalValue === null || intervalValue === ''
+      ? undefined
+      : !Number.isFinite(Number(intervalValue)) || Number(intervalValue) < intervalMin
+      ? intervalValidationMessage
+      : intervalUnit === 'minute' && !Number.isInteger(Number(intervalValue))
+      ? intervalValidationMessage
+      : undefined;
   const periodType = Form.useWatch('periodType', form);
-  const periodMonth = Form.useWatch('periodMonth', form);
-  const yearlyMonthDayCount = YEARLY_MONTH_DAY_COUNTS[(periodMonth || 1) - 1] || 31;
   const weekdayOptions = useMemo(
     () =>
       ALL_WEEKDAYS.map((value) => ({
@@ -56,10 +69,17 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
         const [hour, minute] = template.schedule.time.split(':').map(Number);
         initialValues.periodTime = initialValues.periodTime?.hour(hour).minute(minute);
       }
-      initialValues.intervalHours = template.schedule.intervalHours || 1;
+      initialValues.intervalUnit = template.schedule.intervalUnit || 'hour';
+      initialValues.intervalValue = normalizeIntervalValue(
+        template.schedule.intervalValue || template.schedule.intervalHours,
+        initialValues.intervalUnit
+      );
       initialValues.periodWeekdays = template.schedule.weekdays || [...ALL_WEEKDAYS];
       initialValues.periodMonth = template.schedule.month || 1;
       initialValues.periodMonthDay = template.schedule.monthDay || 1;
+      initialValues.periodDateTime = (initialValues.periodDateTime || initialValues.periodTime)
+        ?.month((template.schedule.month || 1) - 1)
+        .date(template.schedule.monthDay || 1);
       initialValues.periodMonthDays = template.schedule.monthDays || [template.schedule.monthDay || 1];
       initialValues.intervalWeekdays = template.schedule.intervalWeekdays || [...ALL_WEEKDAYS];
       setPromptDraft({ text: template.prompt, resourceList: [] });
@@ -67,16 +87,9 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
       const config = parseAutomationConfig(source?.config);
       setPromptDraft({ text: config.chatContent, resourceList: config.resourceList });
     }
+    setPromptDraftVersion((version) => version + 1);
     form.setFieldsValue(initialValues);
   }, [form, source, template]);
-
-  useEffect(() => {
-    if (periodType !== 'yearly') return;
-    const currentDay = Number(form.getFieldValue('periodMonthDay')) || 1;
-    if (currentDay > yearlyMonthDayCount) {
-      form.setFieldValue('periodMonthDay', yearlyMonthDayCount);
-    }
-  }, [form, periodType, yearlyMonthDayCount]);
 
   const handleSave = async () => {
     try {
@@ -183,6 +196,7 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
           </Form.Item>
           <Form.Item label={intl.formatMessage({ id: 'automation.prompt' })} required>
             <QueryInput
+              key={promptDraftVersion}
               placeholder={intl.formatMessage({ id: 'automation.promptTip' })}
               minRows={6}
               maxRows={12}
@@ -223,6 +237,14 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
                   <Form.Item name="periodType" noStyle>
                     <Select
                       className={styles.scheduleCompactField}
+                      onChange={(nextPeriodType) => {
+                        form.setFieldsValue({
+                          periodType: nextPeriodType,
+                          ...(nextPeriodType === 'weekly' || nextPeriodType === 'biweekly'
+                            ? { periodWeekdays: [1, 2, 3, 4, 5] }
+                            : {}),
+                        });
+                      }}
                       options={[
                         { value: 'daily', label: intl.formatMessage({ id: 'automation.period.daily' }) },
                         { value: 'weekly', label: intl.formatMessage({ id: 'automation.period.weekly' }) },
@@ -238,63 +260,103 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
                     </Form.Item>
                   )}
                   {periodType === 'yearly' && (
-                    <Form.Item name="periodMonth" noStyle>
+                    <Form.Item name="periodDateTime" noStyle>
+                      <DatePicker
+                        className={styles.scheduleYearlyDateTimeField}
+                        format="MM月DD日 HH:mm"
+                        showTime={{ format: 'HH:mm' }}
+                        allowClear={false}
+                      />
+                    </Form.Item>
+                  )}
+                  {periodType === 'monthly' && (
+                    <Form.Item
+                      name="periodMonthDays"
+                      noStyle
+                      rules={[
+                        {
+                          required: true,
+                          type: 'array',
+                          min: 1,
+                          message: intl.formatMessage({ id: 'automation.scheduleRequired' }),
+                        },
+                      ]}
+                    >
                       <Select
-                        className={styles.scheduleCompactField}
-                        options={Array.from({ length: 12 }, (_, index) => ({
+                        mode="multiple"
+                        className={styles.scheduleWideField}
+                        maxTagCount="responsive"
+                        options={Array.from({ length: 31 }, (_, index) => ({
                           value: index + 1,
-                          label: intl.formatMessage({ id: 'automation.month' }, { month: index + 1 }),
+                          label: intl.formatMessage({ id: 'automation.monthDay' }, { day: index + 1 }),
                         }))}
                       />
                     </Form.Item>
                   )}
-                  {(periodType === 'monthly' || periodType === 'yearly') && (
-                    <Form.Item
-                      name={periodType === 'monthly' ? 'periodMonthDays' : 'periodMonthDay'}
-                      noStyle
-                      rules={
-                        periodType === 'monthly'
-                          ? [
-                            {
-                              required: true,
-                              type: 'array',
-                              min: 1,
-                              message: intl.formatMessage({ id: 'automation.scheduleRequired' }),
-                            },
-                          ]
-                          : undefined
-                      }
-                    >
-                      <Select
-                        mode={periodType === 'monthly' ? 'multiple' : undefined}
-                        className={periodType === 'monthly' ? styles.scheduleWideField : styles.scheduleCompactField}
-                        maxTagCount="responsive"
-                        options={Array.from(
-                          { length: periodType === 'yearly' ? yearlyMonthDayCount : 31 },
-                          (_, index) => ({
-                            value: index + 1,
-                            label: intl.formatMessage({ id: 'automation.monthDay' }, { day: index + 1 }),
-                          })
-                        )}
-                      />
+                  {periodType !== 'yearly' && (
+                    <Form.Item name="periodTime" noStyle>
+                      <TimePicker className={styles.scheduleCompactField} format="HH:mm" />
                     </Form.Item>
                   )}
-                  <Form.Item name="periodTime" noStyle>
-                    <TimePicker className={styles.scheduleCompactField} format="HH:mm" />
-                  </Form.Item>
                 </>
               )}
               {scheduleMode === 'interval' && (
                 <>
-                  <Form.Item name="intervalHours" noStyle>
-                    <InputNumber
-                      className={styles.scheduleCompactField}
-                      min={1}
-                      precision={0}
-                      step={1}
-                      addonAfter="h"
-                    />
-                  </Form.Item>
+                  <div className={styles.intervalField}>
+                    <Form.Item
+                      name="intervalValue"
+                      className={styles.intervalValueItem}
+                      help={null}
+                      validateTrigger={['onChange', 'onBlur']}
+                      rules={[
+                        {
+                          type: 'number',
+                          min: intervalMin,
+                          message: intervalValidationMessage,
+                        },
+                        {
+                          validator: (_: unknown, value: number | null | undefined) => {
+                            if (value === undefined || value === null) return Promise.resolve();
+                            if (!Number.isFinite(value) || value < intervalMin) {
+                              return Promise.reject(new Error(intervalValidationMessage));
+                            }
+                            if (intervalUnit === 'minute' && !Number.isInteger(value)) {
+                              return Promise.reject(new Error(intervalValidationMessage));
+                            }
+                            return Promise.resolve();
+                          },
+                        },
+                      ]}
+                    >
+                      <InputNumber
+                        className={styles.intervalValueField}
+                        min={intervalMin}
+                        precision={intervalPrecision}
+                        step={intervalUnit === 'minute' ? 1 : 0.1}
+                      />
+                    </Form.Item>
+                    <Form.Item name="intervalUnit" noStyle>
+                      <Select
+                        className={styles.intervalUnitField}
+                        onChange={(nextUnit) => {
+                          form.setFieldsValue({
+                            intervalUnit: nextUnit,
+                            intervalValue: nextUnit === 'minute' ? 60 : 1,
+                          });
+                        }}
+                        options={[
+                          { value: 'hour', label: intl.formatMessage({ id: 'automation.intervalUnit.hour' }) },
+                          { value: 'minute', label: intl.formatMessage({ id: 'automation.intervalUnit.minute' }) },
+                        ]}
+                      />
+                    </Form.Item>
+                    <span
+                      className={intervalErrorMessage ? styles.intervalError : styles.intervalHint}
+                      role={intervalErrorMessage ? 'alert' : undefined}
+                    >
+                      {intervalErrorMessage || intervalValidationMessage}
+                    </span>
+                  </div>
                   <Form.Item name="intervalWeekdays" noStyle>
                     <Select mode="multiple" className={styles.scheduleWideField} options={weekdayOptions} />
                   </Form.Item>
@@ -311,21 +373,6 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
               )}
             </div>
           </Form.Item>
-          {scheduleMode !== 'once' && (
-            <Form.Item
-              name="effectiveDateRange"
-              label={
-                <span>
-                  {intl.formatMessage({ id: 'automation.effectiveDate' })}
-                  <small className={styles.optionalLabel}>
-                    {intl.formatMessage({ id: 'automation.effectiveDateHint' })}
-                  </small>
-                </span>
-              }
-            >
-              <DatePicker.RangePicker className={styles.fullControl} />
-            </Form.Item>
-          )}
         </Form>
       </div>
     </div>

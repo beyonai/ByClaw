@@ -70,6 +70,9 @@ export const normalizeProject = (item: any): ProjectSpace => ({
   sharedFlag: item?.isShare === 'Y' || item?.sharedFlag === true,
   // 存量/普通项目无该字段时按 ready 处理,避免误拦截历史项目建需求/启动任务。
   initStatus: item?.initStatus || 'ready',
+  initSessionId:
+    item?.initSessionId !== undefined && item?.initSessionId !== null ? Number(item.initSessionId) : undefined,
+  initFailReason: item?.initFailReason,
   createBy: item?.createBy,
   createTime: item?.createTime,
   sessionCount: item?.sessionCount ?? item?.sessions?.length ?? 0,

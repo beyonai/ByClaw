@@ -9,7 +9,6 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 import org.apache.commons.lang3.StringUtils;
@@ -32,12 +31,6 @@ public class SandboxBrowserNavigationService {
 
     private static final String BYCLI_HEADER = "X-byCLI";
     private static final int REQUEST_TIMEOUT_MS = 10_000;
-    private static final Set<String> LOGIN_HOSTS = Set.of(
-        "mp.weixin.qq.com",
-        "creator.xiaohongshu.com",
-        "channels.weixin.qq.com",
-        "creator.douyin.com"
-    );
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
@@ -79,12 +72,18 @@ public class SandboxBrowserNavigationService {
 
         // 采集流程在扩展断开时会先恢复浏览器，账号登录沿用同样的恢复动作。
         post(buildEndpoint(sandbox, "/v1/browser/recover"), Map.of());
-        for (int attempt = 0; attempt < 10; attempt++) {
-            waitForRetry();
+        // 浏览器启动需要时间（约10-15秒），首次启动需要等待浏览器进程启动和扩展连接
+        try {
+            Thread.sleep(3000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        for (int attempt = 0; attempt < 20; attempt++) {
             response = post(commandEndpoint, command);
             if (isSuccessful(response)) {
                 return;
             }
+            waitForRetry();
         }
         log.warn("[SandboxBrowser] 浏览器导航失败，userCode={}，sandboxId={}，statusCode={}，error={}", userCode,
             sandboxId, response.statusCode(), response.body().get("error"));
@@ -129,7 +128,10 @@ public class SandboxBrowserNavigationService {
             throw new IllegalArgumentException("Sandbox navigation parameters are required");
         }
         URI target = URI.create(targetUrl);
-        if (!"https".equalsIgnoreCase(target.getScheme()) || !LOGIN_HOSTS.contains(target.getHost())) {
+        // CustomLink 支持公网、内网与 localhost，仅限制为浏览器可安全导航的 HTTP(S) 协议。
+        boolean supportedScheme = "http".equalsIgnoreCase(target.getScheme())
+            || "https".equalsIgnoreCase(target.getScheme());
+        if (!supportedScheme || StringUtils.isBlank(target.getHost())) {
             throw new IllegalArgumentException("Unsupported operation account login URL");
         }
     }

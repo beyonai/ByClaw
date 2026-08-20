@@ -273,9 +273,9 @@ describe('AskUserQuestions', () => {
     expect(screen.getByRole('tab', { name: 'Which capabilities?' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('radio', { name: /React/ }));
+    expect(screen.getByRole('tab', { name: 'Which capabilities?' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('button', { name: 'form.confirm' })).toBeDisabled();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Which capabilities?' }));
     fireEvent.click(screen.getByRole('checkbox', { name: /Testing/ }));
     fireEvent.click(screen.getByRole('checkbox', { name: /Linting/ }));
 

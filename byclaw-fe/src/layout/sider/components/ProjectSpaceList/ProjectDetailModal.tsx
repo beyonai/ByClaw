@@ -223,7 +223,7 @@ type RepoOption = {
   repoFullName: string;
   repoUrl?: string;
   defaultBranch?: string;
-  // 人工填写的仓库职责,给后来人和需求 AI 预拆看;存量行为空。
+  // 人工填写的仓库职责,给后来人看清这个仓库负责什么;存量行为空。
   description?: string;
   // 仓库类型:workspace 工作区(单个)/code 代码仓库(可多个);存量无值按 code 处理。
   repoType?: 'workspace' | 'code';
@@ -811,7 +811,7 @@ type RepoFormState = {
   repoFullName: string;
   repoUrl: string;
   defaultBranch: string;
-  // 仓库职责描述,可选;需求 AI 预拆靠它判断该改哪些仓库,只凭仓库名经常拆错。
+  // 仓库职责描述,可选;只凭仓库名看不出这个仓库负责什么。
   description: string;
   repoType: 'workspace' | 'code';
   provider: RepoProvider;
@@ -2023,12 +2023,16 @@ const ProjectDetailPanel: React.FC<Props> = ({
       if (!projectId) return;
       setOperationAccountSaving(true);
       try {
-        const payload = {
+        const payload: any = {
           projectId,
           platformCode: values.platformId,
-          accountCode: values.accountId,
-          accountName: values.accountName,
+          accountCode: values.platformId === 'CustomLink' ? '' : values.accountId,
+          accountName: values.platformId === 'CustomLink' ? '' : values.accountName,
         };
+        // 自定义链接平台需要传递 customUrl
+        if (values.platformId === 'CustomLink') {
+          payload.customUrl = values.customUrl || '';
+        }
         if (account) {
           await updateOperationAccount({ ...payload, accountId: account.id });
         } else {
@@ -2086,7 +2090,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 沙箱准备完成后立即打开远程桌面，再异步导航登录页，避免导航等待期间用户看不到扫码入口。
   const handleLoginOperationAccount = useCallback(
     async (account: OperationAccount) => {
-      const loginUrl = OPERATION_PLATFORM_LOGIN_URLS[account.platformId];
+      // 自定义链接平台使用账号自带的 customUrl，其他平台使用预设的登录地址
+      const loginUrl =
+        account.platformId === 'CustomLink' ? account.customUrl : OPERATION_PLATFORM_LOGIN_URLS[account.platformId];
       if (!loginUrl || operationAccountLoginPreparingId !== null) return;
       setOperationAccountLoginPreparingId(account.id);
       try {

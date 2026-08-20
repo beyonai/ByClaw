@@ -23,7 +23,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 
 ## 路由边界
 
-- 公共互联网调研、搜索或读取先由 `knowledge-collection` 的内置路由层（`skills/knowledge-collection/references/source-routing.md`，原 By-Reach 路由器）做意图路由；Exa、`gh` CLI、RSS、视频字幕等不打开或读取具体网页的渠道可继续使用其专用后端。
+- 公共互联网调研、搜索或读取先由 `knowledge-collection` 的内置路由层（`skills/knowledge-collection/references/agent-reach.md`，原 By-Reach 路由器）做意图路由；Exa、`gh` CLI、RSS、视频字幕等不打开或读取具体网页的渠道可继续使用其专用后端。
 - 任何网站、网页或 URL 的打开、读取、站内搜索、采集、抓取或操作任务，包括 generic public webpage 读取，路由层必须无条件选择并加载 `bycli` skill；公开静态页、服务端渲染页、SPA、raw URL、纯文本、Markdown 和无需登录的页面均无例外。
 - byCLI 是所有具体网页任务的唯一网站执行器，不是公共互联网非网页渠道的默认路由器。选择 byCLI 必须发生在获取网页内容之前，不能先调用任何其他网页工具试读。
 - 用户显式要求 byCLI、Adapter、浏览器操作、登录态网站，或路由层选择 byCLI 作为浏览器执行层时，进入本 skill。

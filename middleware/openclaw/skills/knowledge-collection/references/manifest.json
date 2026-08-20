@@ -10,8 +10,8 @@
   ],
   "references": [
     {
-      "name": "source-routing",
-      "path": "source-routing.md",
+      "name": "agent-reach",
+      "path": "agent-reach.md",
       "description": "公共互联网来源路由表与 bycli 网页铁律。取内容前必读。"
     },
     {

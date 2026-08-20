@@ -494,9 +494,14 @@ export const queryObjectsByKnowledge = (data: {
   pageSize?: number;
 }) => POST<any>('/byaiService/devloop/operation/queryObjectsByKnowledge', data);
 
-/** 查询会话或项目关联的本体对象文件；未传 sessionId 时按项目维度查询。 */
-export const listProjectObjectFiles = (data: { projectId?: number | string; sessionId?: number | string }) =>
-  POST<any>('/byaiService/devloop/operation/listProjectObjectFiles', data);
+export type ProjectObjectFileType = 'object' | 'knowledge';
+
+/** 查询会话或项目关联的对象/知识库文件；未传 sessionId 时按项目维度查询。 */
+export const listProjectObjectFiles = (data: {
+  projectId?: number | string;
+  sessionId?: number | string;
+  objectType: ProjectObjectFileType;
+}) => POST<any>('/byaiService/devloop/operation/listProjectObjectFiles', data);
 
 // 运营需求启动后拆解为会话任务，taskId 与 byai_session.session_id 保持一致。
 export type OperationTaskStartItem = {
@@ -555,6 +560,8 @@ export type OperationAccountPayload = {
   platformCode: string;
   accountCode: string;
   accountName: string;
+  /** 自定义链接平台的登录地址，仅 platformCode 为 CustomLink 时提交。 */
+  customUrl?: string;
 };
 
 export const listOperationAccounts = (projectId: number) =>

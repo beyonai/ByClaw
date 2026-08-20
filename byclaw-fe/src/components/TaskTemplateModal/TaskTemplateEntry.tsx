@@ -1,15 +1,16 @@
 import { PlusOutlined, RightOutlined } from '@ant-design/icons';
 import { Button, Divider, Empty, Modal, Select, Spin, message } from 'antd';
 import { getLocale } from '@umijs/max';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getDcSystemConfigListByStandType } from '@/service/auth';
-import { createProject, saveDefaultAgent, saveProjectMembers } from '@/service/devloop';
+import { createProject, saveProjectMembers } from '@/service/devloop';
 import { useChatResourceProject } from '@/components/ChatLayoutComp/ChatResourceWorkspace/useChatResourceProject';
 import useGlobal from '@/hooks/useGlobal';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
-import ProjectFormModal, { type ProjectFormValues } from '@/pages/projectSpace/components/ProjectFormModal';
+import ProjectOnboardingWizard from '@/pages/projectSpace/components/ProjectOnboardingWizard';
+import type { ProjectFormValues } from '@/pages/projectSpace/components/ProjectFormModal';
 import type { ProjectSpace, ProjectType } from '@/pages/projectSpace/types';
 import TaskTemplateModal from '.';
 import styles from './index.module.less';
@@ -56,6 +57,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
   const [recommendedLoading, setRecommendedLoading] = useState(false);
   const [createdProjectOption, setCreatedProjectOption] = useState<ProjectOption>();
   const [selectedProjectOverride, setSelectedProjectOverride] = useState<string>();
+  const createdProjectNameRef = useRef('');
   const [selectedProjectId, updateProjectScopeId] = useProjectScopeId();
   const { projects, loading: projectsLoading, fetchProjects } = useProjectList();
   const { projectTypeOptions, projectTypeLoading } = useProjectTypeConfig();
@@ -228,16 +230,13 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
             .filter((userId): userId is string | number => Boolean(userId))
           : [],
       });
-      if (values.projectType === 'develop' && values.defaultAgents) {
-        await saveDefaultAgent({ ...values.defaultAgents, projectId: Number(savedProjectId) });
-      }
-
       const refreshedProjects = await fetchProjects();
       const refreshedProject = refreshedProjects.find((project) => `${project.projectId}` === savedProjectId);
       const createdProject = refreshedProject || {
         projectId: savedProjectId,
         projectName: values.projectName.trim(),
       };
+      createdProjectNameRef.current = createdProject.projectName;
       setCreatedProjectOption(createdProject);
       setSelectedProjectOverride(savedProjectId);
       updateProjectScopeId(savedProjectId);
@@ -246,14 +245,32 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
         projectName: createdProject.projectName,
       });
       EventEmitter.emit('projectSpace-list-refresh', { projectId: savedProjectId });
-      setCreateProjectOpen(false);
       message.success('项目创建成功');
+      return savedProjectId;
     } catch (error: any) {
       message.error(error?.message || '项目创建失败');
+      return '';
     } finally {
       setCreateProjectLoading(false);
     }
   };
+
+  const handleCreateWizardFinish = useCallback(
+    (createdProjectId: string) => {
+      setCreateProjectOpen(false);
+      updateProjectScopeId(createdProjectId);
+      const createdProject =
+        projectOptions.find((project) => `${project.projectId}` === createdProjectId) || createdProjectOption;
+      const projectName = createdProject?.projectName || createdProjectNameRef.current;
+      if (projectName) {
+        onProjectChange?.({
+          projectId: createdProjectId,
+          projectName,
+        });
+      }
+    },
+    [createdProjectOption, onProjectChange, projectOptions, updateProjectScopeId]
+  );
 
   const loadingModal = (
     <Modal
@@ -319,13 +336,13 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
           />
         )}
       </div>
-      <ProjectFormModal
+      <ProjectOnboardingWizard
         open={createProjectOpen}
-        loading={createProjectLoading}
         projectTypeConfigOptions={projectTypeOptions}
         projectTypeLoading={projectTypeLoading}
         onCancel={() => setCreateProjectOpen(false)}
-        onSubmit={handleCreateProject}
+        onCreateProject={handleCreateProject}
+        onFinish={handleCreateWizardFinish}
       />
       {projectLoading && !project ? (
         loadingModal

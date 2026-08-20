@@ -5,6 +5,7 @@
 ## 推荐入口
 
 - [ByClaw 操作手册](./operation-manual.md) - 按真实界面和模块组织的完整操作手册，适合发布到 GitHub 作为主入口。
+- [Artifact 上传、预览与下载](./artifact-upload-preview.md) - Agent Harness API、路径与子域名路由、Docker 和 K3s 部署手册。
 
 ## 指南分类
 

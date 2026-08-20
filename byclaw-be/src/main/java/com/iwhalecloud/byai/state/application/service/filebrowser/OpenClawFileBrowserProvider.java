@@ -9,7 +9,6 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import org.slf4j.Logger;
@@ -60,11 +59,7 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
     @Override
     public List<FileBrowserItemVo> list(String userCode, Long resourceId, String relativePath) {
         try {
-            String path = resolvePath(relativePath);
-            HttpUrl targetUrl = buildTargetUrl(userCode, API_PREFIX + "/list", "path=" + encode(path));
-            Request request = new Request.Builder().url(targetUrl).get().build();
-            String body = executeForString(request);
-            return parseItemList(body);
+            return requestItemList(userCode, relativePath);
         } catch (Exception e) {
             LOGGER.warn("OpenClaw文件列表获取失败: userCode={}, path={}, error={}", userCode, relativePath, e.getMessage());
             return new ArrayList<>();
@@ -113,10 +108,8 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
             throw new RuntimeException("文件下载失败：沙箱环境不可用", e);
         }
         Request request = new Request.Builder().url(targetUrl).get().build();
-        try {
-            Response response = httpClient.newCall(request).execute();
+        try (Response response = httpClient.newCall(request).execute()) {
             if (!response.isSuccessful() || response.body() == null) {
-                if (response.body() != null) response.body().close();
                 throw new RuntimeException("下载文件失败: " + path + ", status=" + response.code());
             }
             byte[] bytes = response.body().bytes();
@@ -218,15 +211,17 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
     @Override
     public void downloadFolder(String userCode, Long resourceId, String relativePath, OutputStream outputStream) throws IOException {
         String rootPath = ensureDirectoryPath(relativePath);
-        List<FileBrowserItemVo> items = list(userCode, resourceId, rootPath);
-        if (items.isEmpty()) {
-            return;
-        }
-
-        try (ZipOutputStream zos = new ZipOutputStream(outputStream)) {
+        FileBrowserZipSupport.writeArchive(outputStream, zos -> {
             byte[] buffer = new byte[8192];
-            writeZipEntries(userCode, resourceId, rootPath, items, zos, buffer);
-        }
+            writeZipEntries(userCode, resourceId, rootPath, requestItemList(userCode, rootPath), zos, buffer);
+        });
+    }
+
+    private List<FileBrowserItemVo> requestItemList(String userCode, String relativePath) {
+        String path = resolvePath(relativePath);
+        HttpUrl targetUrl = buildTargetUrl(userCode, API_PREFIX + "/list", "path=" + encode(path));
+        Request request = new Request.Builder().url(targetUrl).get().build();
+        return parseItemList(executeForString(request));
     }
 
     private HttpUrl buildTargetUrl(String userCode, String apiPath, String queryString) {
@@ -275,18 +270,28 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
             JsonNode root = objectMapper.readTree(json);
             JsonNode items = root.get("items");
             if (items == null || !items.isArray()) {
-                return result;
+                throw new IllegalStateException("OpenClaw响应缺少items数组");
             }
             for (JsonNode node : items) {
+                JsonNode name = node.get("name");
+                JsonNode path = node.get("path");
+                JsonNode isDir = node.get("isDir");
+                if (name == null || path == null || isDir == null) {
+                    throw new IllegalStateException("OpenClaw文件项字段不完整");
+                }
                 FileBrowserItemVo vo = new FileBrowserItemVo();
-                vo.setName(node.get("name").asText());
-                vo.setPath(node.get("path").asText());
-                vo.setDir(node.get("isDir").asBoolean());
+                vo.setName(name.asText());
+                vo.setPath(path.asText());
+                vo.setDir(isDir.asBoolean());
                 if (!vo.isDir()) {
-                    vo.setSize(node.get("size").asLong());
-                    long modified = node.get("modified").asLong();
+                    JsonNode size = node.get("size");
+                    JsonNode modified = node.get("modified");
+                    if (size == null || modified == null) {
+                        throw new IllegalStateException("OpenClaw文件项缺少大小或修改时间");
+                    }
+                    vo.setSize(size.asLong());
                     vo.setLastModified(
-                        Instant.ofEpochMilli(modified)
+                        Instant.ofEpochMilli(modified.asLong())
                             .atOffset(ZoneOffset.UTC)
                             .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
                     );
@@ -294,7 +299,7 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
                 result.add(vo);
             }
         } catch (Exception e) {
-            LOGGER.error("解析OpenClaw响应失败", e);
+            throw new IllegalStateException("解析OpenClaw响应失败", e);
         }
         return result;
     }
@@ -342,28 +347,26 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
     }
 
     private void writeZipEntries(String userCode, Long resourceId, String rootPath, List<FileBrowserItemVo> items,
-        ZipOutputStream zos, byte[] buffer) {
+        ZipOutputStream zos, byte[] buffer) throws IOException {
         for (FileBrowserItemVo item : items) {
             if (item.isDir()) {
-                writeZipEntries(userCode, resourceId, rootPath, list(userCode, resourceId, ensureDirectoryPath(item.getPath())),
-                    zos, buffer);
+                List<FileBrowserItemVo> children;
+                try {
+                    children = requestItemList(userCode, ensureDirectoryPath(item.getPath()));
+                } catch (RuntimeException e) {
+                    throw new IOException("获取文件夹内容失败: " + item.getPath(), e);
+                }
+                writeZipEntries(userCode, resourceId, rootPath, children, zos, buffer);
                 continue;
             }
-            try {
-                String entryName = buildZipEntryName(rootPath, item.getPath());
-                if (entryName.isEmpty()) {
-                    continue;
-                }
-                zos.putNextEntry(new ZipEntry(entryName));
-                try (InputStream in = download(userCode, resourceId, item.getPath())) {
-                    int len;
-                    while ((len = in.read(buffer)) > 0) {
-                        zos.write(buffer, 0, len);
-                    }
-                }
-                zos.closeEntry();
-            } catch (Exception e) {
-                LOGGER.warn("OpenClaw文件夹下载-跳过文件: path={}, error={}", item.getPath(), e.getMessage());
+            String entryName = buildZipEntryName(rootPath, item.getPath());
+            if (entryName.isEmpty()) {
+                continue;
+            }
+            try (InputStream in = download(userCode, resourceId, item.getPath())) {
+                FileBrowserZipSupport.writeEntry(zos, entryName, in, buffer, item.getSize());
+            } catch (RuntimeException e) {
+                throw new IOException("下载文件失败: " + item.getPath(), e);
             }
         }
     }

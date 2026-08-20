@@ -9,6 +9,7 @@ import ChatAvatar from '@/components/ChatAvatar';
 
 import { ISession } from '@/typescript/session';
 import { IAgentCache } from '@/typescript/agent';
+import { isNotificationSession } from '@/utils/session';
 
 import styles from './index.module.less';
 
@@ -64,11 +65,11 @@ const DialogueCard = ({ item, onClose }: { item: ISession; onClose: () => void }
         [styles.activeItem]: `${sessionId}` === `${item.sessionId}`,
       })}
       onClick={() => {
-        const { sessionId, objectId, objectType, unreadCount = 0 } = item;
+        const { sessionId, objectId, unreadCount = 0 } = item;
         setSessionId?.(`${sessionId}`);
 
         // 通知会话
-        if (objectType === 'Notification') {
+        if (isNotificationSession(item)) {
           if (unreadCount > 0) {
             // 调用notice/batchReadNotice action，批量设置所有通知为已读
             dispatch({

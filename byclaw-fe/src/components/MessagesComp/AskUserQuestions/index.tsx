@@ -6,7 +6,7 @@ import { get } from 'lodash';
 import { useIntl } from '@umijs/max';
 import { Button, Checkbox, Input, Radio, Tabs } from 'antd';
 import type { InputRef } from 'antd';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { LayoutMode } from '@/constants/system';
 import withEasyConfirm from '@/components/MessagesComp/withEasyConfirm';
 import Md from '@/components/Preview/Md';
@@ -156,6 +156,10 @@ export function AskUserQuestions(props: IProps) {
   const intl = useIntl();
   const { EventEmitter, layoutMode } = useGlobal();
   const otherInputRefs = useRef<Record<number, InputRef | null>>({});
+  const getQuestionKey = (question: IAskUserQuestion, index: number) => `${question.header}-${index}`;
+  const [activeQuestionKey, setActiveQuestionKey] = useState(() =>
+    questions[0] ? getQuestionKey(questions[0], 0) : undefined
+  );
 
   const isPreviewMode = layoutMode === LayoutMode.preview;
   const isThinkingProcess = !!props.thinkListItem;
@@ -230,6 +234,10 @@ export function AskUserQuestions(props: IProps) {
                     selectedOptions: [option.label],
                     otherSelected: false,
                   });
+                  const nextQuestion = questions[questionIndex + 1];
+                  if (nextQuestion) {
+                    setActiveQuestionKey(getQuestionKey(nextQuestion, questionIndex + 1));
+                  }
                 }}
               />
               {optionContent}
@@ -298,8 +306,10 @@ export function AskUserQuestions(props: IProps) {
   if (questions.length > 1) {
     questionContent = (
       <Tabs
+        activeKey={activeQuestionKey}
+        onChange={setActiveQuestionKey}
         items={questions.map((question, index) => ({
-          key: `${question.header}-${index}`,
+          key: getQuestionKey(question, index),
           label: (
             <div className={styles.questionMarkdown}>
               <Md content={question.question} />

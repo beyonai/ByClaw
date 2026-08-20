@@ -1,7 +1,20 @@
 import dayjs, { type Dayjs } from 'dayjs';
-import type { AutomationChatConfig, AutomationFormValues, AutomationScheduleConfig, AutomationSource } from './types';
+import type {
+  AutomationChatConfig,
+  AutomationFormValues,
+  AutomationScheduleConfig,
+  AutomationSource,
+  AutomationIntervalUnit,
+} from './types';
 
 export const ALL_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7];
+
+export const normalizeIntervalValue = (value: unknown, unit: AutomationIntervalUnit = 'hour') => {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return unit === 'minute' ? 60 : 1;
+  if (unit === 'minute') return Math.max(60, Math.round(numericValue));
+  return Math.max(1, Math.round(numericValue * 10) / 10);
+};
 
 export const parseAutomationConfig = (config?: string): AutomationChatConfig => {
   if (!config) return { chatContent: '', resourceList: [] };
@@ -25,9 +38,11 @@ const parseLegacyCron = (cronExpr?: string): AutomationScheduleConfig | undefine
   if (parts.length !== 5) return undefined;
   const [minute, hour, day, month, weekday] = parts;
   if (minute.startsWith('*/') && hour === '*') {
+    const intervalValue = normalizeIntervalValue(minute.slice(2), 'minute');
     return {
       mode: 'interval',
-      intervalHours: 1,
+      intervalValue,
+      intervalUnit: 'minute',
       intervalWeekdays: [...ALL_WEEKDAYS],
     };
   }
@@ -35,6 +50,8 @@ const parseLegacyCron = (cronExpr?: string): AutomationScheduleConfig | undefine
     return {
       mode: 'interval',
       intervalHours: Math.max(1, Number(hour.slice(2)) || 1),
+      intervalValue: Math.max(1, Number(hour.slice(2)) || 1),
+      intervalUnit: 'hour',
       intervalWeekdays:
         weekday === '*' || weekday === '?' ? [...ALL_WEEKDAYS] : weekday.split(',').map(Number).filter(Boolean),
     };
@@ -88,6 +105,12 @@ const parseTime = (value?: string) => {
     .second(0);
 };
 
+const parsePeriodDateTime = (schedule?: AutomationScheduleConfig) =>
+  parseTime(schedule?.time)
+    .date(1)
+    .month(Math.max(0, Math.min(11, (schedule?.month || 1) - 1)))
+    .date(Math.max(1, schedule?.monthDay || 1));
+
 export const getAutomationFormInitialValues = (source?: AutomationSource): AutomationFormValues => {
   const config = parseAutomationConfig(source?.config);
   const schedule = config.schedule || parseLegacyCron(source?.cronExpr);
@@ -97,26 +120,25 @@ export const getAutomationFormInitialValues = (source?: AutomationSource): Autom
     scheduleMode: schedule?.mode || 'periodic',
     periodType: schedule?.periodType || 'daily',
     periodTime: parseTime(schedule?.time),
+    periodDateTime: parsePeriodDateTime(schedule),
     periodWeekdays: schedule?.weekdays?.length ? schedule.weekdays : [...ALL_WEEKDAYS],
     periodMonth: schedule?.month || 1,
     periodMonthDay: schedule?.monthDay || 1,
     periodMonthDays: schedule?.monthDays?.length ? schedule.monthDays : [schedule?.monthDay || 1],
     intervalHours: schedule?.intervalHours || 1,
+    intervalValue: normalizeIntervalValue(
+      schedule?.intervalValue ?? schedule?.intervalHours,
+      schedule?.intervalUnit || 'hour'
+    ),
+    intervalUnit: schedule?.intervalUnit || 'hour',
     intervalWeekdays: schedule?.intervalWeekdays?.length ? schedule.intervalWeekdays : [...ALL_WEEKDAYS],
     onceTime: schedule?.onceTime ? dayjs(schedule.onceTime) : dayjs().add(1, 'hour').startOf('minute'),
-    effectiveDateRange:
-      schedule?.effectiveStartDate && schedule?.effectiveEndDate
-        ? [dayjs(schedule.effectiveStartDate), dayjs(schedule.effectiveEndDate)]
-        : undefined,
   };
 };
 
 export const buildAutomationSchedule = (values: AutomationFormValues): AutomationScheduleConfig => {
-  const [effectiveStartDate, effectiveEndDate] = values.effectiveDateRange || [];
   const base = {
     mode: values.scheduleMode,
-    effectiveStartDate: effectiveStartDate?.format('YYYY-MM-DD'),
-    effectiveEndDate: effectiveEndDate?.format('YYYY-MM-DD'),
   };
   if (values.scheduleMode === 'once') {
     return {
@@ -125,19 +147,26 @@ export const buildAutomationSchedule = (values: AutomationFormValues): Automatio
     };
   }
   if (values.scheduleMode === 'interval') {
+    const intervalUnit: AutomationIntervalUnit = values.intervalUnit || 'hour';
+    const intervalValue = normalizeIntervalValue(values.intervalValue ?? values.intervalHours, intervalUnit);
     return {
       ...base,
-      intervalHours: Math.max(1, Number(values.intervalHours) || 1),
+      intervalValue,
+      intervalUnit,
+      // 保留旧字段给历史前端/接口兼容；分钟间隔不能伪装成小时，避免后端优先读取旧字段。
+      ...(intervalUnit === 'hour' ? { intervalHours: intervalValue } : {}),
       intervalWeekdays: values.intervalWeekdays?.length ? values.intervalWeekdays : [...ALL_WEEKDAYS],
     };
   }
+  const yearlyDateTime = values.periodDateTime || values.periodTime;
+  const isYearly = values.periodType === 'yearly';
   return {
     ...base,
     periodType: values.periodType || 'daily',
-    time: values.periodTime?.format('HH:mm') || '09:00',
+    time: (isYearly ? yearlyDateTime : values.periodTime)?.format('HH:mm') || '09:00',
     weekdays: values.periodWeekdays,
-    month: values.periodMonth,
-    monthDay: values.periodMonthDay,
+    month: isYearly && yearlyDateTime ? yearlyDateTime.month() + 1 : values.periodMonth,
+    monthDay: isYearly && yearlyDateTime ? yearlyDateTime.date() : values.periodMonthDay,
     monthDays:
       values.periodType === 'monthly'
         ? Array.from(
@@ -158,7 +187,20 @@ export const buildAutomationCron = (schedule: AutomationScheduleConfig) => {
   }
   if (schedule.mode === 'interval') {
     const weekdays = schedule.intervalWeekdays?.length ? schedule.intervalWeekdays.join(',') : '*';
-    // Cron 每小时提供候选触发点，真实的无限小时跨度由结构化配置和 lastScanTime 控制。
+    const intervalUnit = schedule.intervalUnit || 'hour';
+    const intervalValue = normalizeIntervalValue(schedule.intervalValue ?? schedule.intervalHours, intervalUnit);
+    if (intervalUnit === 'minute') {
+      // 分钟值最小为 60，Cron 只负责提供足够高频的候选点，实际间隔由 lastScanTime 校验。
+      return `* * * * ${weekdays}`;
+    }
+    if (Number.isInteger(intervalValue) && intervalValue <= 23) {
+      return `0 */${intervalValue} * * ${weekdays}`;
+    }
+    if (!Number.isInteger(intervalValue)) {
+      // 小数小时无法直接表达为标准 Cron，使用每分钟候选点并由结构化配置控制实际间隔。
+      return `* * * * ${weekdays}`;
+    }
+    // 超过 23 小时无法由标准 Cron 精确表达，使用每小时候选点，由结构化配置和 lastScanTime 控制实际间隔。
     return `0 * * * ${weekdays}`;
   }
   const value = parseTime(schedule.time);
@@ -202,10 +244,11 @@ export const getNextRunTime = (source: AutomationSource) => {
     return onceTime.isValid() && onceTime.isAfter(now) ? onceTime : null;
   }
   if (schedule.mode === 'interval') {
+    const intervalUnit = schedule.intervalUnit || 'hour';
+    const intervalValue = schedule.intervalValue || schedule.intervalHours || 1;
     const lastRun = dayjs(source.lastScanTime);
-    return lastRun.isValid()
-      ? lastRun.add(schedule.intervalHours || 1, 'hour')
-      : now.add(schedule.intervalHours || 1, 'hour');
+    const durationUnit = intervalUnit === 'minute' ? 'minute' : 'hour';
+    return lastRun.isValid() ? lastRun.add(intervalValue, durationUnit) : now.add(intervalValue, durationUnit);
   }
   const time = parseTime(schedule.time);
   if (schedule.periodType === 'yearly') {

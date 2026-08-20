@@ -16,6 +16,8 @@ const usePreview = () => {
     open: boolean;
     blob: Blob | null;
     loading: boolean;
+    resourceUrl?: string;
+    resolvePreviewResource?: IFile['resolvePreviewResource'];
   }>({
     open: false,
     blob: null,
@@ -23,9 +25,40 @@ const usePreview = () => {
   });
 
   const onPreview = async (fileItem: IFile) => {
-    const { queryFile, downloadUrl } = fileItem;
+    const { queryFile, downloadUrl, downloadRequest, resolvePreviewResource } = fileItem;
 
-    if (queryFile?.fileUrl || downloadUrl || queryFile?.fileId) {
+    if (downloadRequest) {
+      setPreviewing(true);
+      setPreviewInfo({
+        open: true,
+        blob: null,
+        loading: true,
+        resourceUrl: undefined,
+        resolvePreviewResource,
+      });
+      try {
+        const res = await downloadRequest();
+        setPreviewInfo({
+          open: true,
+          blob: res.file,
+          loading: false,
+          resourceUrl: undefined,
+          resolvePreviewResource,
+        });
+      } catch (error) {
+        console.error(error);
+        setPreviewInfo({
+          open: false,
+          blob: null,
+          loading: false,
+          resourceUrl: undefined,
+          resolvePreviewResource: undefined,
+        });
+        AntdMessage.warning(intl.formatMessage({ id: 'fileRender.previewUnavailable' }));
+      } finally {
+        setPreviewing(false);
+      }
+    } else if (queryFile?.fileUrl || downloadUrl || queryFile?.fileId) {
       let url = getFileUrl(downloadUrl || queryFile?.fileUrl || '');
 
       if (!url && queryFile?.fileId) {
@@ -40,6 +73,8 @@ const usePreview = () => {
           open: true,
           blob: null,
           loading: true,
+          resourceUrl: url,
+          resolvePreviewResource: undefined,
         });
         fetch(url)
           .then((res) => {
@@ -52,6 +87,8 @@ const usePreview = () => {
                   ...prev,
                   blob,
                   loading: false,
+                  resourceUrl: url,
+                  resolvePreviewResource: undefined,
                 }));
               });
           })
@@ -63,6 +100,8 @@ const usePreview = () => {
           open: true,
           blob: caches[url],
           loading: false,
+          resourceUrl: url,
+          resolvePreviewResource: undefined,
         });
       }
     } else {
@@ -72,6 +111,8 @@ const usePreview = () => {
           open: true,
           blob: null,
           loading: true,
+          resourceUrl: undefined,
+          resolvePreviewResource: undefined,
         });
         setPreviewing(true);
         const res = await downloadResourceFile(dp);
@@ -90,7 +131,13 @@ const usePreview = () => {
   };
 
   const onClosePreviewModal = useCallback(() => {
-    setPreviewInfo((prev) => ({ ...prev, open: false, blob: null }));
+    setPreviewInfo((prev) => ({
+      ...prev,
+      open: false,
+      blob: null,
+      resourceUrl: undefined,
+      resolvePreviewResource: undefined,
+    }));
   }, []);
 
   return {

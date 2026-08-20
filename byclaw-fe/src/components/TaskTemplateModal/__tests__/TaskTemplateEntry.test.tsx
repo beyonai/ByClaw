@@ -12,6 +12,7 @@ const mockEventEmitter = {
 };
 jest.mock('@umijs/max', () => ({
   getLocale: () => 'zh-CN',
+  useNavigate: () => jest.fn(),
 }));
 
 jest.mock('@/hooks/useGlobal', () => ({
@@ -48,12 +49,10 @@ jest.mock('@/pages/projectSpace/hooks/useProjectTypeConfig', () => ({
   useProjectTypeConfig: () => ({ projectTypeOptions: [], projectTypeLoading: false }),
 }));
 
-jest.mock(
-  '@/pages/projectSpace/components/ProjectFormModal',
-  () =>
-    ({ open }: { open: boolean }) =>
-      open ? <div data-testid="project-form-modal" /> : null
-);
+jest.mock('@/pages/projectSpace/components/ProjectOnboardingWizard', () => ({
+  __esModule: true,
+  default: ({ open }: { open: boolean }) => (open ? <div data-testid="project-onboarding-wizard" /> : null),
+}));
 
 const mockUseProjectList = useProjectList as jest.MockedFunction<typeof useProjectList>;
 const mockUseProjectScopeId = useProjectScopeId as jest.MockedFunction<typeof useProjectScopeId>;
@@ -120,6 +119,6 @@ describe('TaskTemplateEntry project selector', () => {
     fireEvent.mouseDown(screen.getByRole('combobox', { name: '选择项目' }));
     fireEvent.click(await screen.findByText('新建项目'));
 
-    expect(screen.getByTestId('project-form-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('project-onboarding-wizard')).toBeInTheDocument();
   });
 });

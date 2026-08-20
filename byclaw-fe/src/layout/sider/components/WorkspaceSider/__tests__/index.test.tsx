@@ -1,9 +1,11 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import WorkspaceSider from '..';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import { listProjectSessionsByQo } from '@/service/devloop';
+import { getChatRunningStatus } from '@/service/message';
+import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 
 const mockNavigate = jest.fn();
 const mockDispatch = jest.fn();
@@ -46,6 +48,10 @@ jest.mock('@/service/devloop', () => ({
   listProjectSessionsByQo: jest.fn(),
 }));
 
+jest.mock('@/service/message', () => ({
+  getChatRunningStatus: jest.fn(() => Promise.resolve([])),
+}));
+
 jest.mock('@/components/ChatLayoutComp/components/EasyConfirm', () => ({
   clearEasyConfirmInputDraft: jest.fn(),
 }));
@@ -66,10 +72,15 @@ jest.mock('../WorkspaceProjectActions', () => ({ project, onNewSession }: any) =
 const mockUseProjectList = useProjectList as jest.MockedFunction<typeof useProjectList>;
 const mockUseProjectScopeId = useProjectScopeId as jest.MockedFunction<typeof useProjectScopeId>;
 const mockListProjectSessionsByQo = listProjectSessionsByQo as jest.MockedFunction<typeof listProjectSessionsByQo>;
+const mockGetChatRunningStatus = getChatRunningStatus as jest.MockedFunction<typeof getChatRunningStatus>;
 
 describe('WorkspaceSider', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    act(() => {
+      chatSessionRuntimeManager.clear();
+    });
+    mockGetChatRunningStatus.mockResolvedValue([]);
     mockUseProjectList.mockReturnValue({
       projects: [
         {
@@ -100,6 +111,12 @@ describe('WorkspaceSider', () => {
       total: 1,
       pageNum: 1,
     } as any);
+  });
+
+  afterEach(() => {
+    act(() => {
+      chatSessionRuntimeManager.clear();
+    });
   });
 
   it('renders the system identity and global search above the primary navigation', () => {
@@ -138,6 +155,32 @@ describe('WorkspaceSider', () => {
       })
     );
     expect(mockNavigate).toHaveBeenCalledWith('/chat', expect.any(Object));
+  });
+
+  it('synchronizes and reacts to the running status of loaded project sessions', async () => {
+    mockGetChatRunningStatus.mockResolvedValue([
+      {
+        sessionId: '2001',
+        clientRequestId: 'request-2001',
+        running: true,
+      },
+    ] as any);
+
+    const { container } = render(<WorkspaceSider />);
+
+    await waitFor(() => {
+      expect(mockGetChatRunningStatus).toHaveBeenCalledWith({ sessionIds: ['2001'] });
+      expect(container.querySelector('.sessionTime .anticon-loading')).toBeInTheDocument();
+    });
+
+    act(() => {
+      chatSessionRuntimeManager.complete('request-2001');
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.sessionTime .anticon-loading')).not.toBeInTheDocument();
+      expect(screen.getByText(/workspaceSider\.time\.minutesAgo:/)).toBeInTheDocument();
+    });
   });
 
   it('shows edit and delete actions from the session more menu', async () => {

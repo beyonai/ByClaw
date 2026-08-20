@@ -70,7 +70,7 @@ class ProjectApplicationServiceCreateTest {
         when(sequenceService.nextVal()).thenReturn(1001L);
         when(projectService.findById(1001L)).thenReturn(persistedProject);
         ProjectDTO dto = new ProjectDTO();
-        dto.setProjectName("workspace-project");
+        dto.setProjectName("workspace");
 
         service.createProject(dto);
 
@@ -87,7 +87,7 @@ class ProjectApplicationServiceCreateTest {
         when(projectInitService.initProjectWorkspace(1001L))
             .thenThrow(new IllegalStateException("workspace unavailable"));
         ProjectDTO dto = new ProjectDTO();
-        dto.setProjectName("workspace-project");
+        dto.setProjectName("workspace");
 
         assertThatThrownBy(() -> service.createProject(dto))
             .isInstanceOf(IllegalStateException.class)

@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { CalendarOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
+import classnames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
+import useAppStore from '@/models/common/useAppStore';
 
 import AutomationListPanel from './components/AutomationPanel';
 import AutomationRunPanel from './components/AutomationRunPanel';
@@ -15,9 +17,13 @@ import styles from './index.module.less';
  */
 const Automation: React.FC = () => {
   const intl = useIntl();
+  const { isSiderCollapsed } = useAppStore();
   const [activeTab, setActiveTab] = useState<'tasks' | 'runs'>('tasks');
   const tabNavigation = (
-    <div className={styles.automationTabs} role="tablist">
+    <div
+      className={classnames(styles.automationTabs, isSiderCollapsed && styles.automationTabsCollapsed)}
+      role="tablist"
+    >
       <button
         type="button"
         role="tab"

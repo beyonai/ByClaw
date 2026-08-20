@@ -1,237 +1,48 @@
 ---
 name: by-knowledge-manager
-description: "Manage knowledge base content through the by-knowledge-manager CLI. Use when an agent or user needs to operate a knowledge base: list/create/rename/delete directories, check upload conflicts, upload or overwrite files, trigger or inspect builds, download files or directory archives, read file line ranges, remove files, or run semantic chunk/file search across one or more knowledge base resource IDs."
+description: "仅通过 Python CLI 管理 ByClaw 知识库内容。用于浏览或变更知识库目录和文件、导入与构建内容、发起知识实体发现或补全，以及在一个或多个知识库中执行语义检索、文件检索或 Agent DSL 元数据过滤。不用于管理本体对象库，也不处理本体、对象类型或本体对象关系。"
 ---
 
-# BY Knowledge Manager
+# 管理 ByClaw 知识库
 
-Use this skill to manage knowledge base files and directories, and to search indexed chunks or files semantically.
+只通过本 Skill 自带的 Python CLI 操作知识库。
 
-## Prerequisites
+## 路由本轮操作
 
-Before running the CLI, install the script dependencies from this skill's `scripts/` directory:
+根据用户当前意图只读取对应子 Skill。多个意图可以读取多个子 Skill，但不要加载无关说明。
 
-```bash
-cd middleware/openclaw/skills/by-knowledge-manager/scripts && npm install
-```
+| 用户意图 | 读取 |
+|---|---|
+| 浏览目录、查看文件、查询构建状态、下载 | [`by-knowledge-manager-read/SKILL.md`](by-knowledge-manager-read/SKILL.md) |
+| 新建、重命名、删除、上传、更新、构建 | [`by-knowledge-manager-write/SKILL.md`](by-knowledge-manager-write/SKILL.md) |
+| 语义检索、文件检索、元数据条件或 DSL 过滤 | [`by-knowledge-manager-search/SKILL.md`](by-knowledge-manager-search/SKILL.md) |
+| 知识实体发现或补全 | [`by-knowledge-manager-entity/SKILL.md`](by-knowledge-manager-entity/SKILL.md) |
 
-Do this before the first run in a new environment, or any time the runtime reports missing Node dependencies.
+`KnowledgeEntity` 是知识库内的实体 Markdown 目录，不是本体对象库。涉及本体、对象类型或本体关系时不要使用本 Skill。
 
-## Command Entry Point
+## 准备运行环境
 
-Start by loading the live command list:
+使用安装了 `by-framework` 的 Python3 环境。
 
-```bash
-node scripts/by-knowledge-manager.mjs help
-```
-
-Use the runtime environment as provided. The CLI expects backend/auth/discovery environment variables to already be available in that environment. If the user provides a different script path, use the user's path.
-
-Base command pattern:
+把 `argparse` 输出作为实时命令语法的唯一依据：
 
 ```bash
-node scripts/by-knowledge-manager.mjs <command> [options]
+python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py --help
+python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py <command> --help
 ```
 
-For commands that need local files, pass a file path that is readable from the runtime environment:
+统一使用以下调用形式：
 
 ```bash
-node scripts/by-knowledge-manager.mjs upload \
-  --resource-id RESOURCE_ID \
-  --directory-path /目标目录 \
-  --file-path /tmp/local-file.md
+python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py <command> [options]
 ```
 
-## Operating Rules
-
-- Determine the target knowledge base before operating. If the user has not specified which knowledge base to access, ask them to provide the target `--resource-id` first.
-- For `search` and `search-file`, ask whether to search one knowledge base or multiple knowledge bases when the target is unclear; pass multiple IDs by repeating `--resource-id`.
-- Run `help` first when command syntax might have changed; treat the JSON help as authoritative.
-- Prefer read-only commands (`list`, `read-file`, `search`, `search-file`, `build-status`, `download`) while exploring.
-- Use `--dry-run` on mutating commands when validating paths or payloads before changing the knowledge base.
-- Ask before destructive or irreversible operations unless the user explicitly requested them: `delete-dir`, `remove-file`, and overwriting via `update-file`.
-- After any file or directory operation that changes knowledge base contents (`mkdir`, `rename-dir`, `delete-dir`, `upload`, `update-file`, `remove-file`), run `list` on the target parent directory to verify the expected result.
-- Only upload or update supported knowledge base file types: `.md`, `.markdown`, `.txt`, `.pdf`, `.docx`, `.doc`, `.pptx`, `.ppt`, `.xlsx`, `.xls`, `.csv`. Directly refuse requests to ingest any other file type.
-- Preserve knowledge base paths exactly. Paths are absolute inside the knowledge base, such as `/`, `/产品资料`, or `/产品资料/a.md`.
-- Report the CLI JSON result back to the user in plain language, especially `ok`, `action`, created/renamed paths, build status, conflict paths, downloaded output path, and search hits.
-
-## Common Workflows
-
-### Inspect a directory
-
-```bash
-node scripts/by-knowledge-manager.mjs list --resource-id RESOURCE_ID --directory-path /
-```
-
-Use this before uploading, deleting, or renaming so the current tree shape is known.
-
-### Create or rename directories
-
-Create:
-
-```bash
-node scripts/by-knowledge-manager.mjs mkdir --resource-id RESOURCE_ID --directory-path / --directory-name 产品资料
-```
-
-Then list the parent directory and confirm the new directory appears:
-
-```bash
-node scripts/by-knowledge-manager.mjs list --resource-id RESOURCE_ID --directory-path /
-```
-
-Rename:
-
-```bash
-node scripts/by-knowledge-manager.mjs rename-dir --resource-id RESOURCE_ID --directory-path /产品资料 --directory-name 产品手册
-```
-
-Then list the parent directory and confirm the old name is gone and the new name appears:
-
-```bash
-node scripts/by-knowledge-manager.mjs list --resource-id RESOURCE_ID --directory-path /
-```
-
-### Upload new files
-
-Only proceed when every target file has one of these extensions: `.md`, `.markdown`, `.txt`, `.pdf`, `.docx`, `.doc`, `.pptx`, `.ppt`, `.xlsx`, `.xls`, `.csv`. If any file has another extension, refuse the upload request instead of calling the CLI.
-
-Check conflicts first when the user does not explicitly want overwrite behavior:
-
-```bash
-node scripts/by-knowledge-manager.mjs check-conflicts --resource-id RESOURCE_ID --directory-path /产品资料 --file-name a.md
-```
-
-Upload can accept repeated `--file-path` values. Successful upload automatically triggers build for the returned files.
-
-```bash
-node scripts/by-knowledge-manager.mjs upload --resource-id RESOURCE_ID --directory-path /产品资料 --file-path /tmp/a.md --check-conflicts
-```
-
-Then list the upload directory and confirm the uploaded file appears:
-
-```bash
-node scripts/by-knowledge-manager.mjs list --resource-id RESOURCE_ID --directory-path /产品资料
-```
-
-Use `--process-front-matter false` only when front matter should be preserved as normal content instead of processed by the backend.
-
-### Overwrite existing files
-
-Only proceed when every replacement file has one of the supported upload extensions: `.md`, `.markdown`, `.txt`, `.pdf`, `.docx`, `.doc`, `.pptx`, `.ppt`, `.xlsx`, `.xls`, `.csv`. If any file has another extension, refuse the update request instead of calling the CLI.
-
-Use `update-file` only when overwrite is intended. It checks conflicts by default and uploads with overwrite enabled.
-
-```bash
-node scripts/by-knowledge-manager.mjs update-file --resource-id RESOURCE_ID --directory-path /产品资料 --file-path /tmp/a.md
-```
-
-Then list the target directory and confirm the file still exists:
-
-```bash
-node scripts/by-knowledge-manager.mjs list --resource-id RESOURCE_ID --directory-path /产品资料
-```
-
-Use `--skip-conflict-check` only when the user has already confirmed the target.
-
-### Build and inspect build status
-
-Trigger build for a knowledge base file path:
-
-```bash
-node scripts/by-knowledge-manager.mjs build --resource-id RESOURCE_ID --file-path /产品资料/a.md
-```
-
-Check status:
-
-```bash
-node scripts/by-knowledge-manager.mjs build-status --resource-id RESOURCE_ID --file-path /产品资料/a.md
-```
-
-After upload or update, query build status if the user cares about search readiness.
-
-### Download or read files
-
-Download a file:
-
-```bash
-node scripts/by-knowledge-manager.mjs download --resource-id RESOURCE_ID --file-path /产品资料/a.md --output /tmp/a.md
-```
-
-Download a directory archive:
-
-```bash
-node scripts/by-knowledge-manager.mjs download --resource-id RESOURCE_ID --directory-path /产品资料 --output /tmp/产品资料.zip
-```
-
-Read file content by line range:
-
-```bash
-node scripts/by-knowledge-manager.mjs read-file --resource-id RESOURCE_ID --file-path /产品资料/a.md --start-line 1 --end-line 80
-```
-
-Use `read-file` after search hits to inspect surrounding context.
-
-### Semantic chunk search
-
-Search one knowledge base:
-
-```bash
-node scripts/by-knowledge-manager.mjs search --resource-id RESOURCE_ID --query "员工请假流程是什么" --top-k 5
-```
-
-Search multiple knowledge bases by repeating `--resource-id`:
-
-```bash
-node scripts/by-knowledge-manager.mjs search --resource-id RESOURCE_ID_A --resource-id RESOURCE_ID_B --query "员工请假流程是什么" --top-k 10
-```
-
-Interpret each search item as a chunk hit with `resourceId`, `filePath`, `chunkNo`, `chunkText`, `score`, and optional `startLine`/`endLine`/`imagePath`. Cite or summarize results by file path and line range when present. When a chunk looks relevant, run `read-file` on the same `filePath` with a slightly wider line range.
-
-### Semantic file search
-
-Use `search-file` when the user wants relevant files first instead of chunk snippets:
-
-```bash
-node scripts/by-knowledge-manager.mjs search-file --resource-id RESOURCE_ID --query "故障" --top-k 10
-```
-
-Search multiple knowledge bases by repeating `--resource-id`:
-
-```bash
-node scripts/by-knowledge-manager.mjs search-file --resource-id RESOURCE_ID_A --resource-id RESOURCE_ID_B --query "故障" --top-k 10
-```
-
-Interpret each search item as a file hit with `resourceId`, `filePath`, `score`, and optional `metadata`. When a file looks relevant, run `read-file` on the same `filePath` or `download` it for deeper inspection.
-
-### Delete content
-
-Delete a file:
-
-```bash
-node scripts/by-knowledge-manager.mjs remove-file --resource-id RESOURCE_ID --file-path /产品资料/a.md
-```
-
-Then list the parent directory and confirm the file is gone:
-
-```bash
-node scripts/by-knowledge-manager.mjs list --resource-id RESOURCE_ID --directory-path /产品资料
-```
-
-Delete a directory:
-
-```bash
-node scripts/by-knowledge-manager.mjs delete-dir --resource-id RESOURCE_ID --directory-path /产品资料
-```
-
-Before deletion, list the parent directory and tell the user what will be removed. After deletion, list the parent directory again and confirm the directory is gone:
-
-```bash
-node scripts/by-knowledge-manager.mjs list --resource-id RESOURCE_ID --directory-path /
-```
-
-## Troubleshooting
-
-- If a command returns `{ "ok": false, "error": "..." }`, fix the path, resource ID, local file path, or auth/env issue and retry only when safe.
-- If upload says the local file does not exist, check whether `--file-path` is readable from the runtime environment.
-- If search returns no items after upload/update, check `build-status`; the file may not be fully indexed yet.
-- If backend discovery or authentication fails, inspect the runtime environment or the env file supplied by the user for the expected connection variables.
+## 遵守通用约束
+
+- 操作前确定目标知识库。缺少 `resourceId` 时先询问，不要猜测。
+- 搜索范围不明确时，确认搜索一个还是多个知识库；多个知识库重复传入 `--resource-id`。
+- 原样保留知识库绝对路径，例如 `/`、`/产品资料`、`/产品资料/a.md`。
+- 修改前需要校验参数时使用 `--dry-run`；删除和覆盖操作遵守变更子 Skill 的确认规则。
+- 单资源请求自动携带 `X-BYCLAW-RESOURCE-ID`。多知识库检索没有唯一资源 ID，只在请求体传递 `resourceIdList`。
+- 用自然语言汇报 CLI JSON，保留资源 ID、目录或文件路径、批次 ID、任务 ID、构建状态和检索命中定位信息。
+- CLI 返回 `{ "ok": false, "error": "..." }` 时修正输入或环境；不得绕过 CLI 改调其他接口。

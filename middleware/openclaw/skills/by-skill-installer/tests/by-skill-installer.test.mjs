@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
+import path from "node:path";
 import { after, before, describe, it } from "node:test";
 
 const PORT = 18099;
@@ -11,6 +14,8 @@ process.env.USER_CODE = "tester";
 delete process.env.BAIYING_DIGITAL_EMPLOYEE_ID;
 delete process.env.DIGITAL_EMPLOYEE_ID;
 delete process.env.RESOURCE_ID;
+delete process.env.BYAI_WORKER_ID;
+delete process.env.BAIYING_AGENT_AUTH;
 
 const mod = await import("../scripts/by-skill-installer.mjs");
 const {
@@ -21,6 +26,7 @@ const {
   resolveSkillIdByCode,
   resolveTargets,
   responseSucceeded,
+  searchCommand,
   statusCommand,
   validateSkillCode,
 } = mod;
@@ -35,6 +41,10 @@ const state = {
     { resourceId: 105, resourceCode: "dup-code", resourceBizType: "SKILL", skillType: "inner" },
   ],
   bound: new Map([[7, [102]]]),
+  // Fault injection: make the backend accept a write but not persist it,
+  // and make the permission list unavailable.
+  swallowWrites: false,
+  failAuthList: false,
 };
 const calls = [];
 
@@ -62,6 +72,11 @@ before(async () => {
     calls.push({ path: url.pathname, body });
 
     if (url.pathname.endsWith("/auth/privilegeGrant/listResourceUseAuth")) {
+      if (state.failAuthList) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ code: 500, msg: "auth list unavailable" }));
+        return;
+      }
       const keyword = String(body.keyword || "");
       const list = state.skills.filter((s) => !keyword || s.resourceCode.includes(keyword));
       ok(res, { list, total: list.length });
@@ -73,6 +88,10 @@ before(async () => {
       return;
     }
     if (url.pathname.endsWith("/digitalEmployeeController/installRelResources")) {
+      if (state.swallowWrites) {
+        ok(res, true);
+        return;
+      }
       const existing = state.bound.get(body.digitalEmployeeId) ?? [];
       state.bound.set(body.digitalEmployeeId, [...new Set([...existing, ...body.relIds])]);
       ok(res, true);
@@ -138,6 +157,51 @@ describe("resolveTargets", () => {
   });
 });
 
+describe("search", () => {
+  it("returns all visible inner skills when no keyword is given", async () => {
+    const result = await searchCommand({});
+    assert.equal(result.ok, true);
+    assert.equal(result.action, "search");
+    assert.equal(result.keyword, null);
+    assert.equal(result.visibleInnerSkillCount, 4);
+    assert.equal(result.matchedCount, 4);
+    const codes = result.skills.map((s) => s.skillCode).sort();
+    assert.deepEqual(codes, ["dup-code", "dup-code", "fol-auto-biztravel", "tech-article"]);
+  });
+
+  it("filters by keyword matching code, name, or description", async () => {
+    const result = await searchCommand({ keyword: "auto" });
+    assert.equal(result.matchedCount, 1);
+    assert.equal(result.skills[0].skillCode, "fol-auto-biztravel");
+  });
+
+  it("marks bound status when digital employee is resolved", async () => {
+    const result = await searchCommand({ "digital-employee-id": "7" });
+    const techArticle = result.skills.find((s) => s.skillCode === "tech-article");
+    const biztravel = result.skills.find((s) => s.skillCode === "fol-auto-biztravel");
+    assert.equal(techArticle.bound, true);
+    assert.equal(biztravel.bound, false);
+  });
+
+  it("sets bound to null when digital employee cannot be resolved", async () => {
+    const result = await searchCommand({});
+    assert.equal(result.digitalEmployee.id, null);
+    assert.match(result.digitalEmployee.unavailable, /--digital-employee-id/);
+    assert.equal(result.skills.every((s) => s.bound === null), true);
+  });
+
+  it("supports --q as an alias for --keyword", async () => {
+    const result = await searchCommand({ q: "tech" });
+    assert.equal(result.matchedCount, 1);
+    assert.equal(result.skills[0].skillCode, "tech-article");
+  });
+
+  it("accepts keyword as the second positional arg", async () => {
+    const result = await searchCommand({ _: ["search", "biztravel"] });
+    assert.equal(result.matchedCount, 1);
+  });
+});
+
 describe("resolveDigitalEmployeeId", () => {
   it("prefers the explicit flag", () => {
     assert.deepEqual(resolveDigitalEmployeeId({ "digital-employee-id": "42" }), {
@@ -152,6 +216,44 @@ describe("resolveDigitalEmployeeId", () => {
       assert.deepEqual(resolveDigitalEmployeeId({}), { digitalEmployeeId: 77, source: "env" });
     } finally {
       delete process.env.BAIYING_DIGITAL_EMPLOYEE_ID;
+    }
+  });
+
+  it("derives the id from an OpenClaw workspace directory", () => {
+    const original = process.cwd();
+    const workspace = path.join(os.tmpdir(), "workspace-baiying-agent-321");
+    fs.mkdirSync(workspace, { recursive: true });
+    process.chdir(workspace);
+    try {
+      assert.deepEqual(resolveDigitalEmployeeId({}), { digitalEmployeeId: 321, source: "cwd" });
+    } finally {
+      process.chdir(original);
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("derives the id from BYAI_WORKER_ID", () => {
+    process.env.BYAI_WORKER_ID = "openclaw-654";
+    try {
+      assert.deepEqual(resolveDigitalEmployeeId({}), {
+        digitalEmployeeId: 654,
+        source: "BYAI_WORKER_ID",
+      });
+    } finally {
+      delete process.env.BYAI_WORKER_ID;
+    }
+  });
+
+  it("derives the id from the BAIYING_AGENT_AUTH sub claim", () => {
+    const payload = Buffer.from(JSON.stringify({ sub: 987 })).toString("base64url");
+    process.env.BAIYING_AGENT_AUTH = `header.${payload}.sig`;
+    try {
+      assert.deepEqual(resolveDigitalEmployeeId({}), {
+        digitalEmployeeId: 987,
+        source: "BAIYING_AGENT_AUTH",
+      });
+    } finally {
+      delete process.env.BAIYING_AGENT_AUTH;
     }
   });
 
@@ -262,5 +364,51 @@ describe("bind / unbind / list / status", () => {
     const result = await bindCommand({ "skill-id": "103", "digital-employee-id": "9" });
     assert.equal(result.ok, true);
     assert.deepEqual(state.bound.get(9), [103]);
+  });
+
+  it("fails when the backend accepts the write but does not persist it", async () => {
+    state.swallowWrites = true;
+    try {
+      const result = await bindCommand({ "skill-code": "fol-auto-biztravel", "digital-employee-id": "11" });
+      assert.equal(result.ok, false, "写入未生效时 ok 必须为 false");
+      assert.deepEqual(result.changed, []);
+      assert.deepEqual(result.verifyFailed, [{ skillCode: "fol-auto-biztravel", skillId: 101 }]);
+    } finally {
+      state.swallowWrites = false;
+    }
+  });
+
+  it("keeps list usable when skillType enrichment is unavailable", async () => {
+    state.failAuthList = true;
+    try {
+      const result = await listCommand({ "digital-employee-id": "7" });
+      assert.equal(result.ok, true, "补全失败不应让 list 整体失败");
+      assert.match(result.skillTypeEnrichment, /^unavailable: /);
+      // queryRelResourceInfo 自身带 skillType 的条目仍应判定为 inner。
+      assert.equal(result.skills.every((s) => s.inner === true), true);
+    } finally {
+      state.failAuthList = false;
+    }
+  });
+
+  it("marks inner as null when skillType cannot be determined", async () => {
+    state.skills.push({ resourceId: 106, resourceCode: "typeless", resourceBizType: "SKILL" });
+    state.bound.set(12, [106]);
+    state.failAuthList = true;
+    try {
+      const result = await listCommand({ "digital-employee-id": "12" });
+      const entry = result.skills.find((s) => s.skillCode === "typeless");
+      assert.equal(entry.skillType, "");
+      assert.equal(entry.inner, null, "未知 skillType 应为 null 而非 false");
+    } finally {
+      state.failAuthList = false;
+      state.skills = state.skills.filter((s) => s.resourceId !== 106);
+      state.bound.delete(12);
+    }
+  });
+
+  it("reports skillType enrichment as the auth-list source on the happy path", async () => {
+    const result = await listCommand({ "digital-employee-id": "7" });
+    assert.equal(result.skillTypeEnrichment, "auth-list");
   });
 });

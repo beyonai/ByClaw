@@ -1,8 +1,10 @@
 import { Button, Drawer, Dropdown, Empty, Modal, Select, Spin, Typography, message } from 'antd';
 import {
   ApartmentOutlined,
+  BranchesOutlined,
   DatabaseOutlined,
   DeleteOutlined,
+  DownOutlined,
   EditOutlined,
   FileTextOutlined,
   GithubOutlined,
@@ -12,12 +14,23 @@ import {
   RightOutlined,
   RobotOutlined,
 } from '@ant-design/icons';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl } from '@umijs/max';
 import { getAgentChatAvatar } from '@/utils/agent';
 import AntdIcon from '@/components/AntdIcon';
 import { getFileIconType } from '@/constants/icon';
+import FilePreviewPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FilePreviewPanel';
+import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
+import type { FileTreeItem } from '@/layout/sider/components/FileSiderPanel/constants';
 import {
+  ensureDirectoryPath,
+  isDirectory,
+  normalizeFileBrowserPath,
+} from '@/layout/sider/components/FileSiderPanel/utils';
+import {
+  getProjectRepoFileContent,
+  listProjectRepoBranches,
+  listProjectRepoTree,
   listProjectRepos,
   listProjectResources,
   listProjectSpaceFiles,
@@ -25,12 +38,13 @@ import {
   saveProjectResources,
   type DevloopProjectRepo,
   type DevloopProjectSpaceFile,
+  type ProjectRepoBranch,
+  type ProjectRepoTreeNode,
   type ProjectResourceType,
 } from '@/service/devloop';
 import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import { listOntologyBases, pageOntologyResources } from '@/service/ontology';
 import { ResourceTypeMap } from '@/constants/resource';
-import FilePreviewPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FilePreviewPanel';
 import { useDigitalEmployeeOptions } from '../../hooks/useDigitalEmployeeOptions';
 import type { ProjectBoundResource, ProjectSpace } from '../../types';
 import styles from '../../index.module.less';
@@ -48,12 +62,20 @@ interface Props {
 
 type ResourceOption = { value: string; label: string; description?: string };
 type ResourceSelection = Record<ProjectResourceType, string[]>;
+type RepoFileItem = { name: string; path: string; isDir: boolean; size?: number };
 
 const EMPTY_SELECTION: ResourceSelection = {
   knowledge: [],
   digital_employee: [],
   ontology: [],
 };
+
+const toFileBrowserItem = (node: ProjectRepoTreeNode): RepoFileItem => ({
+  name: node.name,
+  path: normalizeFileBrowserPath(node.path),
+  isDir: node.type === 'directory',
+  size: node.size,
+});
 
 const getArray = (...candidates: any[]): any[] => candidates.find((candidate) => Array.isArray(candidate)) || [];
 
@@ -83,6 +105,21 @@ const ProjectResources: React.FC<Props> = ({
   const [resourceModalOpen, setResourceModalOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<DevloopProjectSpaceFile | null>(null);
   const [detailRepo, setDetailRepo] = useState<DevloopProjectRepo | null>(null);
+  const [repoFiles, setRepoFiles] = useState<RepoFileItem[]>([]);
+  const [repoFilesLoading, setRepoFilesLoading] = useState(false);
+  const [childrenByPath, setChildrenByPath] = useState<Record<string, RepoFileItem[]>>({});
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
+  const [branches, setBranches] = useState<ProjectRepoBranch[]>([]);
+  const [selectedBranch, setSelectedBranch] = useState<string>('');
+  // fileName 决定预览器的类型判断与标题，path 用于抽屉标题显示完整位置。
+  // content 为 null 时抽屉显示 loading，等异步填入后预览器自动刷新。
+  const [filePreviewContent, setFilePreviewContent] = useState<{
+    fileName: string;
+    path: string;
+    content: string | null;
+    binary?: boolean;
+  } | null>(null);
+  const requestSeqRef = useRef(0);
   const [knowledgeOptions, setKnowledgeOptions] = useState<ResourceOption[]>([]);
   const [ontologyOptions, setOntologyOptions] = useState<ResourceOption[]>([]);
   const [selectedResources, setSelectedResources] = useState<ResourceSelection>(EMPTY_SELECTION);
@@ -333,6 +370,134 @@ const ProjectResources: React.FC<Props> = ({
     });
   };
 
+  const loadRepoFiles = useCallback(
+    async (repo: DevloopProjectRepo, branch?: string) => {
+      const selectedBranch = branch || repo.defaultBranch || 'main';
+      const requestSeq = ++requestSeqRef.current;
+      setRepoFilesLoading(true);
+      try {
+        const response = await listProjectRepoTree({
+          projectId: Number(project.projectId),
+          repoId: repo.repoId,
+          ref: selectedBranch,
+        });
+        if (requestSeq === requestSeqRef.current) {
+          setRepoFiles((response || []).map(toFileBrowserItem));
+        }
+      } catch (error) {
+        console.error('Failed to load repository files:', error);
+        if (requestSeq === requestSeqRef.current) {
+          setRepoFiles([]);
+        }
+      } finally {
+        if (requestSeq === requestSeqRef.current) {
+          setRepoFilesLoading(false);
+        }
+      }
+    },
+    [project.projectId]
+  );
+
+  const loadRepoBranches = useCallback(async (repo: DevloopProjectRepo) => {
+    try {
+      const branchList = await listProjectRepoBranches(repo.repoId);
+      const defaultBranch = repo.defaultBranch || branchList?.[0]?.name || 'main';
+      setBranches(branchList || []);
+      setSelectedBranch(defaultBranch);
+      return defaultBranch;
+    } catch (error) {
+      console.error('Failed to load repository branches:', error);
+      const fallbackBranch = repo.defaultBranch || 'main';
+      setBranches([]);
+      setSelectedBranch(fallbackBranch);
+      return fallbackBranch;
+    }
+  }, []);
+
+  // 仓库详情抽屉打开时重置树/分支状态，避免上一个仓库的缓存串到当前仓库。
+  const handleOpenRepoDetail = useCallback(
+    async (repo: DevloopProjectRepo) => {
+      setDetailRepo(repo);
+      setRepoFiles([]);
+      setChildrenByPath({});
+      setExpandedKeys([]);
+      setFilePreviewContent(null);
+      const defaultBranch = await loadRepoBranches(repo);
+      await loadRepoFiles(repo, defaultBranch);
+    },
+    [loadRepoBranches, loadRepoFiles]
+  );
+
+  const loadRepoTreeNode = useCallback(
+    async (node: FileTreeItem) => {
+      if (!detailRepo || !isDirectory(node)) return;
+      const path = ensureDirectoryPath(normalizeFileBrowserPath(node.path));
+      if (childrenByPath[path]) return;
+      try {
+        const response = await listProjectRepoTree({
+          projectId: Number(project.projectId),
+          repoId: detailRepo.repoId,
+          path,
+          ref: selectedBranch || detailRepo.defaultBranch || 'main',
+        });
+        setChildrenByPath((current) => ({
+          ...current,
+          [path]: (response || []).map(toFileBrowserItem),
+        }));
+      } catch (error) {
+        console.error('Failed to load repository directory:', error);
+        setChildrenByPath((current) => ({ ...current, [path]: [] }));
+      }
+    },
+    [childrenByPath, detailRepo, project.projectId, selectedBranch]
+  );
+
+  const handleNodeClick = useCallback(
+    async (event: React.MouseEvent, node: FileTreeItem) => {
+      event.stopPropagation();
+      if (!detailRepo || isDirectory(node)) return;
+      // 点击立即开抽屉显示 loading，后台拉取内容回来后更新 content 字段触发预览器刷新。
+      setFilePreviewContent({
+        fileName: node.name,
+        path: node.path,
+        content: null,
+        binary: undefined,
+      });
+      try {
+        const file = await getProjectRepoFileContent({
+          repoId: detailRepo.repoId,
+          branch: selectedBranch || detailRepo.defaultBranch || 'main',
+          path: node.path,
+        });
+        setFilePreviewContent((prev) =>
+          prev
+            ? {
+              ...prev,
+              path: file.path || prev.path,
+              content: file.binary ? file.base64Content || '' : file.content || '',
+              binary: file.binary,
+            }
+            : null
+        );
+      } catch (error: any) {
+        setFilePreviewContent(null);
+        message.error(error?.message || '文件内容加载失败');
+      }
+    },
+    [detailRepo, selectedBranch]
+  );
+
+  const changeBranch = useCallback(
+    async (branch: string) => {
+      if (!detailRepo) return;
+      setSelectedBranch(branch);
+      setChildrenByPath({});
+      setExpandedKeys([]);
+      await loadRepoFiles(detailRepo, branch);
+    },
+    [detailRepo, loadRepoFiles]
+  );
+
   const empty = (
     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'chatResource.empty' })} />
   );
@@ -451,11 +616,11 @@ const ProjectResources: React.FC<Props> = ({
       className={styles.resourceSimpleItem}
       role="button"
       tabIndex={0}
-      onClick={() => setDetailRepo(repo)}
+      onClick={() => handleOpenRepoDetail(repo)}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          setDetailRepo(repo);
+          handleOpenRepoDetail(repo);
         }
       }}
     >
@@ -660,68 +825,71 @@ const ProjectResources: React.FC<Props> = ({
         }
         open={!!detailRepo}
         placement="right"
-        width={420}
+        width="60vw"
         destroyOnClose
-        onClose={() => setDetailRepo(null)}
+        onClose={() => {
+          setDetailRepo(null);
+          setRepoFiles([]);
+          setChildrenByPath({});
+          setExpandedKeys([]);
+          setBranches([]);
+          setSelectedBranch('');
+          setFilePreviewContent(null);
+        }}
+        styles={{ body: { padding: 10 } }}
       >
         {detailRepo && (
-          <>
-            <div className={styles.projectResourceBindingModal}>
-              <div>
-                <Typography.Text type="secondary">
-                  {intl.formatMessage({ id: 'projectSpace.repository.type' })}
-                </Typography.Text>
-                <Typography.Paragraph>
-                  {detailRepo.repoType === 'workspace'
-                    ? intl.formatMessage({ id: 'projectSpace.repository.type.workspace' })
-                    : intl.formatMessage({ id: 'projectSpace.repository.type.code' })}
-                </Typography.Paragraph>
-              </div>
-              <div>
-                <Typography.Text type="secondary">
-                  {intl.formatMessage({ id: 'projectSpace.repository.provider' })}
-                </Typography.Text>
-                <Typography.Paragraph>{detailRepo.provider || '-'}</Typography.Paragraph>
-              </div>
-              <div>
-                <Typography.Text type="secondary">
-                  {intl.formatMessage({ id: 'projectSpace.repository.name' })}
-                </Typography.Text>
-                <Typography.Paragraph>{detailRepo.repoFullName || '-'}</Typography.Paragraph>
-              </div>
-              <div>
-                <Typography.Text type="secondary">
-                  {intl.formatMessage({ id: 'projectSpace.repository.url' })}
-                </Typography.Text>
-                <Typography.Paragraph>{detailRepo.repoUrl || '-'}</Typography.Paragraph>
-              </div>
-              <div>
-                <Typography.Text type="secondary">
-                  {intl.formatMessage({ id: 'projectSpace.repository.defaultBranch' })}
-                </Typography.Text>
-                <Typography.Paragraph>{detailRepo.defaultBranch || '-'}</Typography.Paragraph>
-              </div>
-              <div>
-                <Typography.Text type="secondary">
-                  {intl.formatMessage({ id: 'projectSpace.repository.description' })}
-                </Typography.Text>
-                <Typography.Paragraph>{detailRepo.description || '-'}</Typography.Paragraph>
-              </div>
-            </div>
-            {onOpenRepositoryManager && (
-              <Button
-                type="primary"
-                icon={<EditOutlined />}
-                onClick={() => {
-                  const repository = detailRepo;
-                  setDetailRepo(null);
-                  onOpenRepositoryManager(repository);
-                }}
-              >
-                {intl.formatMessage({ id: 'common.edit' })}
-              </Button>
-            )}
-          </>
+          <FileSpaceBlock
+            title={detailRepo.repoFullName || ''}
+            fillContainer
+            loading={repoFilesLoading}
+            items={repoFiles}
+            currentPath="/"
+            emptyText={intl.formatMessage({ id: 'projectSpace.detail.repo.emptyFiles' })}
+            resourceEmptyStyle
+            childrenByPath={childrenByPath}
+            expandedKeys={expandedKeys}
+            onExpand={setExpandedKeys}
+            onLoadData={loadRepoTreeNode}
+            onNodeClick={handleNodeClick}
+            headerExtra={
+              branches.length > 0 && (
+                <Dropdown
+                  menu={{
+                    items: branches.map((branch) => ({
+                      key: branch.name,
+                      label: branch.name,
+                      onClick: () => void changeBranch(branch.name),
+                    })),
+                  }}
+                  trigger={['click']}
+                >
+                  <Button type="text" size="small" icon={<DownOutlined />} iconPosition="end" title={selectedBranch}>
+                    <BranchesOutlined />
+                    <span>{selectedBranch.length > 10 ? `${selectedBranch.substring(0, 10)}...` : selectedBranch}</span>
+                  </Button>
+                </Dropdown>
+              )
+            }
+          />
+        )}
+      </Drawer>
+
+      <Drawer
+        title={filePreviewContent?.path || ''}
+        open={!!filePreviewContent}
+        placement="right"
+        width="50vw"
+        mask={false}
+        destroyOnClose
+        onClose={() => setFilePreviewContent(null)}
+        styles={{ body: { padding: 0, overflow: 'hidden' } }}
+      >
+        {filePreviewContent && (
+          <FilePreviewPanel
+            fileName={filePreviewContent.fileName}
+            content={{ data: filePreviewContent.content, binary: filePreviewContent.binary }}
+          />
         )}
       </Drawer>
     </>

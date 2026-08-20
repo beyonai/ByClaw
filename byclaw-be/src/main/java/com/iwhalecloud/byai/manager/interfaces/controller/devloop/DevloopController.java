@@ -24,6 +24,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.OperationAccountDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationRequirementStartDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationTaskDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFileDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ListProjectTaskStatusDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ObjectFileGroupDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ObjectFileSaveDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
@@ -33,6 +34,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.DefaultAgentDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.TesterConfigDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.UpdateTaskStatusDto;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectObjectFile;
+import com.iwhalecloud.byai.manager.entity.devloop.ProjectTaskStatus;
 import com.iwhalecloud.byai.manager.entity.devloop.OperationTaskTemplate;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import jakarta.servlet.http.HttpServletRequest;
@@ -796,6 +798,18 @@ public class DevloopController {
     public ResponseUtil<Void> updateTaskStatus(@RequestBody UpdateTaskStatusDto updateTaskStatusDto) {
         applicationService.updateTaskStatus(updateTaskStatusDto);
         return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 查询项目任务状态字典，供会话扩展状态 skill 使用。
+     *
+     * @param listProjectTaskStatusDto 项目与可选维度
+     * @return 有效状态列表
+     */
+    @PostMapping("/project/taskStatuses/list")
+    public ResponseUtil<List<ProjectTaskStatus>> listProjectTaskStatuses(
+        @RequestBody ListProjectTaskStatusDto listProjectTaskStatusDto) {
+        return ResponseUtil.successResponse(applicationService.listProjectTaskStatuses(listProjectTaskStatusDto));
     }
 
 }

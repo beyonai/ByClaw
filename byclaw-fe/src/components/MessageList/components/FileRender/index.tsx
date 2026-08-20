@@ -57,9 +57,9 @@ function FileRender(props: IProps) {
 
   const { EventEmitter, layoutMode } = useGlobal();
   const { onPreview, previewInfo, onClosePreviewModal, previewing } = usePreview();
-  const { handleDownload, downloadFile, downloading } = useDownload();
+  const { handleDownload, handleDownloadRequest, downloadFile, downloading } = useDownload();
 
-  const { file, imgUrl, uid, status, queryFile, downloadUrl } = fileItem;
+  const { file, imgUrl, uid, status, queryFile, downloadUrl, downloadRequest } = fileItem;
 
   const size = get(queryFile, 'length') || file?.size;
   const name = get(queryFile, 'fileName') || file?.name;
@@ -71,7 +71,7 @@ function FileRender(props: IProps) {
   const fileType = queryFile?.fileType || nameArr?.pop();
   const fileName = nameArr?.join('.');
 
-  const canDownload = downloadUrl || queryFile?.fileUrl || queryFile?.fileId;
+  const canDownload = downloadRequest || downloadUrl || queryFile?.fileUrl || queryFile?.fileId;
   const canPreview = PREVIEWABLE.includes(fileType);
 
   const isLoading = status === 'uploading' || previewing || downloading;
@@ -111,7 +111,9 @@ function FileRender(props: IProps) {
             <div
               className={classnames(styles.fileItemDownload, 'ub ub-ac ub-pc pointer download')}
               onClick={() => {
-                if (downloadUrl || queryFile?.fileUrl) {
+                if (downloadRequest) {
+                  void handleDownloadRequest(downloadRequest);
+                } else if (downloadUrl || queryFile?.fileUrl) {
                   downloadFile({
                     fileUrl: downloadUrl || queryFile?.fileUrl,
                     fileName: name,

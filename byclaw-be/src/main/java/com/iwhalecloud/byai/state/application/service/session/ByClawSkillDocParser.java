@@ -1,6 +1,8 @@
 package com.iwhalecloud.byai.state.application.service.session;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
@@ -38,17 +40,80 @@ final class ByClawSkillDocParser {
         if (!frontMatterText.hasFrontMatter()) {
             return null;
         }
-        String[] lines = frontMatterText.text().split("\\R");
+        String[] lines = frontMatterText.text().split("\\R", -1);
         for (int i = frontMatterText.startLine(); i < lines.length; i++) {
             String line = StringUtils.trimToEmpty(lines[i]);
             if ("---".equals(line) || "...".equals(line)) {
                 break;
             }
             if (StringUtils.startsWithIgnoreCase(line, key + ":")) {
-                return StringUtils.strip(StringUtils.substringAfter(line, ":"), "\"' ");
+                String inlineValue = StringUtils.strip(StringUtils.substringAfter(line, ":"), "\"' ");
+                if (StringUtils.isBlank(inlineValue) || isYamlBlockScalarHeader(inlineValue)
+                    || isSymbolOnly(inlineValue)) {
+                    return extractIndentedValue(lines, i + 1, leadingWhitespaceCount(lines[i]));
+                }
+                return sanitizeDescription(inlineValue);
             }
         }
         return null;
+    }
+
+    /**
+     * Reads a YAML block scalar (description: &gt; / |) and the compatible historical form where the value line
+     * contains only symbols. The value ends at the next front-matter delimiter or sibling top-level property.
+     */
+    private static String extractIndentedValue(String[] lines, int startLine, int keyIndent) {
+        List<String> valueLines = new ArrayList<>();
+        for (int i = startLine; i < lines.length; i++) {
+            String trimmed = StringUtils.trimToEmpty(lines[i]);
+            if ("---".equals(trimmed) || "...".equals(trimmed)) {
+                break;
+            }
+            if (StringUtils.isNotBlank(trimmed) && leadingWhitespaceCount(lines[i]) <= keyIndent) {
+                break;
+            }
+            valueLines.add(trimmed);
+        }
+        if (valueLines.isEmpty()) {
+            return null;
+        }
+        // Skill descriptions are displayed as plain summaries. Fold both YAML scalar styles into stable text so
+        // formatting-only line wraps do not leak into the resource card or database description.
+        return sanitizeDescription(String.join("\n", valueLines));
+    }
+
+    private static String sanitizeDescription(String description) {
+        if (StringUtils.isBlank(description)) {
+            return null;
+        }
+        List<String> contentLines = description.lines()
+            .map(StringUtils::trimToEmpty)
+            .collect(Collectors.toCollection(ArrayList::new));
+        while (!contentLines.isEmpty()
+            && (StringUtils.isBlank(contentLines.get(0)) || isSymbolOnly(contentLines.get(0)))) {
+            contentLines.remove(0);
+        }
+        String result = contentLines.stream()
+            .filter(StringUtils::isNotBlank)
+            .collect(Collectors.joining(" "));
+        return StringUtils.trimToNull(result);
+    }
+
+    private static boolean isYamlBlockScalarHeader(String value) {
+        String marker = StringUtils.trimToEmpty(StringUtils.substringBefore(value, "#"));
+        return marker.matches("[>|][+\\-1-9]*");
+    }
+
+    private static boolean isSymbolOnly(String value) {
+        return StringUtils.isNotBlank(value) && value.codePoints().noneMatch(Character::isLetterOrDigit);
+    }
+
+    private static int leadingWhitespaceCount(String line) {
+        int index = 0;
+        while (index < line.length() && Character.isWhitespace(line.charAt(index))) {
+            index++;
+        }
+        return index;
     }
 
     private static String stripFrontMatter(String content) {

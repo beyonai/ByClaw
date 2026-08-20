@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Modal, Spin } from 'antd';
 
 import AntdIcon from '@/components/AntdIcon';
 import styles from './index.module.less';
+import { createRelativeResourceResolver } from './relativeResource';
 
 const PreViewFile = React.lazy(() =>
   import('@/components/Preview/Twins').then((module) => ({ default: module.PreViewFile }))
@@ -13,6 +14,8 @@ function Previewer(props: {
     open: boolean;
     blob: Blob | null;
     loading: boolean;
+    resourceUrl?: string;
+    resolvePreviewResource?: (resourcePath: string) => Promise<string | Blob>;
   };
   onClosePreviewModal: () => void;
   fileType: string;
@@ -21,6 +24,11 @@ function Previewer(props: {
   zIndex?: number;
 }) {
   const { previewInfo, onClosePreviewModal, fileType, fileName, zIndex } = props;
+  const resolveRelativeResource = useMemo(
+    () => previewInfo.resolvePreviewResource || createRelativeResourceResolver(previewInfo.resourceUrl),
+    [previewInfo.resolvePreviewResource, previewInfo.resourceUrl]
+  );
+
   return (
     <Modal
       centered
@@ -50,6 +58,8 @@ function Previewer(props: {
               data={previewInfo.blob}
               type={fileType}
               title={fileName}
+              resolveMarkdownImage={resolveRelativeResource}
+              resolveHtmlResource={resolveRelativeResource}
               className={styles.preview}
               extra={
                 <span className={styles.icon}>

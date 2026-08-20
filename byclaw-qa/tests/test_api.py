@@ -1,5 +1,7 @@
 """Tests for api.py resource-scoped endpoints."""
 
+import json
+
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
@@ -9,7 +11,9 @@ from by_qa.knowledge_base.infrastructure.storage import (
     StorageAuthenticationError,
     StorageOperationError,
 )
-from api import app
+from api import _inject_knowledge_entity_callback_context, app
+from byclaw_knowledge_entity_callback import CALLBACK_CONTEXT_EXTRA_PARAM
+from byclaw_userfs_storage import RESOURCE_ID_HEADER
 
 
 @pytest.fixture(autouse=True)
@@ -35,6 +39,132 @@ async def client():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
+
+
+def test_callback_context_is_injected_without_overwriting_extra_params():
+    body = _inject_knowledge_entity_callback_context(
+        b'{"knCode":"kb-1","extraParams":{"requestId":"request-1"}}',
+        user_code="user-1",
+        chat_session_id="session-1",
+        resource_id="42",
+    )
+
+    payload = json.loads(body)
+    assert payload["extraParams"] == {
+        "requestId": "request-1",
+        CALLBACK_CONTEXT_EXTRA_PARAM: {
+            "userCode": "user-1",
+            "chatSessionId": "session-1",
+            "resourceId": "42",
+        },
+    }
+
+
+def test_callback_context_cannot_be_spoofed_without_request_headers():
+    body = _inject_knowledge_entity_callback_context(
+        (
+            b'{"knCode":"kb-1","extraParams":'
+            b'{"_byclawCallbackContext":{"userCode":"fake",'
+            b'"chatSessionId":"fake"}}}'
+        ),
+        user_code="",
+        chat_session_id="",
+        resource_id="",
+    )
+
+    payload = json.loads(body)
+    assert CALLBACK_CONTEXT_EXTRA_PARAM not in payload["extraParams"]
+
+
+def test_user_code_is_persisted_for_async_storage_without_chat_session():
+    body = _inject_knowledge_entity_callback_context(
+        b'{"knCode":"kb-1"}',
+        user_code="user-1",
+        chat_session_id="",
+        resource_id="42",
+    )
+
+    payload = json.loads(body)
+    assert payload["extraParams"][CALLBACK_CONTEXT_EXTRA_PARAM] == {
+        "userCode": "user-1",
+        "chatSessionId": "",
+        "resourceId": "42",
+    }
+
+
+@pytest.mark.asyncio
+async def test_entity_discovery_route_persists_callback_headers(client):
+    mock_service = AsyncMock()
+    mock_service.discover_knowledge_entities.return_value = {
+        "batchId": "batch-1",
+        "tasks": [],
+    }
+    with (
+        patch(
+            "by_qa.main._get_or_build_knowledge_entity_processing_service",
+            new_callable=AsyncMock,
+            return_value=mock_service,
+        ),
+        patch("by_qa.main._build_model_config_provider", return_value=object()),
+    ):
+        response = await client.post(
+            "/api/v1/knowledgeItems/entityDiscovery",
+            json={
+                "knCode": "kb-1",
+                "filePath": "/OriginalDocument/source.md",
+                "extraParams": {"requestId": "request-1"},
+            },
+            headers={
+                "X-User-Code": "user-1",
+                "X-CHAT-SESSION-ID": "session-1",
+                RESOURCE_ID_HEADER: "42",
+            },
+        )
+
+    assert response.json()["resultCode"] == "0"
+    request = mock_service.discover_knowledge_entities.call_args.args[0]
+    assert request.extra_params == {
+        "requestId": "request-1",
+        CALLBACK_CONTEXT_EXTRA_PARAM: {
+            "userCode": "user-1",
+            "chatSessionId": "session-1",
+            "resourceId": "42",
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_entity_enrich_route_drops_spoofed_context_without_headers(client):
+    mock_service = AsyncMock()
+    mock_service.enrich_knowledge_entities.return_value = {
+        "batchId": "batch-1",
+        "tasks": [],
+    }
+    with (
+        patch(
+            "by_qa.main._get_or_build_knowledge_entity_processing_service",
+            new_callable=AsyncMock,
+            return_value=mock_service,
+        ),
+        patch("by_qa.main._build_model_config_provider", return_value=object()),
+    ):
+        response = await client.post(
+            "/api/v1/knowledgeItems/entityEnrich",
+            json={
+                "knCode": "kb-1",
+                "filePath": "/KnowledgeEntity/entity.md",
+                "extraParams": {
+                    CALLBACK_CONTEXT_EXTRA_PARAM: {
+                        "userCode": "fake",
+                        "chatSessionId": "fake",
+                    }
+                },
+            },
+        )
+
+    assert response.json()["resultCode"] == "0"
+    request = mock_service.enrich_knowledge_entities.call_args.args[0]
+    assert CALLBACK_CONTEXT_EXTRA_PARAM not in request.extra_params
 
 
 # ---------------------------------------------------------------------------

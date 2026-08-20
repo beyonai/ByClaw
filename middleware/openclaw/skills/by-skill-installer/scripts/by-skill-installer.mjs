@@ -411,6 +411,72 @@ async function fetchInnerSkills({ timeoutMs, keyword, ownerType }) {
   return list.filter(isInnerSkill);
 }
 
+// 把一个技能条目压成搜索/列表输出用的扁平结构。
+function describeSkillEntry(entry) {
+  return {
+    skillCode: firstNonEmpty(entry?.resourceCode),
+    skillId: toNumber(entry?.resourceId) ?? null,
+    skillName: firstNonEmpty(entry?.resourceName),
+    skillDesc: firstNonEmpty(entry?.resourceDesc, entry?.description),
+    skillType: firstNonEmpty(entry?.skillType),
+    ownerType: firstNonEmpty(entry?.ownerType),
+  };
+}
+
+// 关键词落在 code / 名称 / 描述任意一处都算命中，让 agent 用中文词也能搜到英文 code。
+function skillMatchesKeyword(entry, keyword) {
+  if (!keyword) {
+    return true;
+  }
+  const needle = keyword.toLowerCase();
+  return [entry.skillCode, entry.skillName, entry.skillDesc]
+    .some((field) => String(field || "").toLowerCase().includes(needle));
+}
+
+async function searchCommand(args) {
+  const timeoutMs = timeoutMsFromArgs(args);
+  const ownerType = firstNonEmpty(args["owner-type"]);
+  const keyword = firstNonEmpty(args.keyword, args.q, args._?.[1]);
+
+  // 后端 keyword 只匹配 code，中文词会落空；所以先全量拉再本地过滤三个字段。
+  const entries = (await fetchInnerSkills({ timeoutMs, keyword: "", ownerType })).map(describeSkillEntry);
+  const matched = entries
+    .filter((entry) => skillMatchesKeyword(entry, keyword))
+    .sort((left, right) => left.skillCode.localeCompare(right.skillCode));
+
+  // 绑定状态是增强信息：推导不到数字员工时仍然要能搜。
+  let digitalEmployee = null;
+  let boundIds = new Set();
+  try {
+    const { digitalEmployeeId, source } = resolveDigitalEmployeeId(args);
+    digitalEmployee = { id: digitalEmployeeId, source };
+    const bound = await fetchBoundResources({ digitalEmployeeId, timeoutMs });
+    boundIds = new Set(bound.map((item) => toNumber(item?.resourceId)).filter((id) => id !== undefined));
+  } catch (error) {
+    digitalEmployee = { id: null, source: null, unavailable: error instanceof Error ? error.message : String(error) };
+  }
+
+  const skills = matched.map((entry) => ({
+    ...entry,
+    bound: digitalEmployee?.id === null || digitalEmployee?.id === undefined ? null : boundIds.has(entry.skillId),
+  }));
+
+  return {
+    ok: true,
+    action: "search",
+    keyword: keyword || null,
+    digitalEmployee,
+    visibleInnerSkillCount: entries.length,
+    // 命中上限说明可能还有没拉到的条目，提示调用方缩小 ownerType 再搜。
+    truncated: entries.length >= AUTH_PAGE_SIZE,
+    matchedCount: skills.length,
+    skills,
+    hint: skills.length
+      ? "用 bind --skill-code <code> 绑定；bound: false 表示可见但未绑定，bound: null 表示未能确定数字员工"
+      : "没有命中。换个关键词，或不带 --keyword 列出全部可见内置技能",
+  };
+}
+
 async function resolveSkillIdByCode({ skillCode, timeoutMs, ownerType }) {
   const code = validateSkillCode(skillCode);
   // Pass the code as keyword so the backend narrows the page server-side.
@@ -420,10 +486,22 @@ async function resolveSkillIdByCode({ skillCode, timeoutMs, ownerType }) {
     ? matches
     : entries.filter((entry) => firstNonEmpty(entry?.resourceCode).toLowerCase() === code.toLowerCase());
   if (!candidates.length) {
-    const available = entries.map((entry) => firstNonEmpty(entry?.resourceCode)).filter(Boolean).slice(0, 10);
+    // keyword 只匹配 code，命中为空时再全量拉一次找形近候选，避免让调用方靠猜。
+    let pool = entries;
+    if (!pool.length) {
+      pool = await fetchInnerSkills({ timeoutMs, keyword: "", ownerType }).catch(() => []);
+    }
+    const available = pool.map((entry) => firstNonEmpty(entry?.resourceCode)).filter(Boolean);
+    const near = available.filter((item) => {
+      const low = item.toLowerCase();
+      const target = code.toLowerCase();
+      return low.includes(target) || target.includes(low);
+    });
+    const suggestions = (near.length ? near : available).slice(0, 10);
     throw new Error(
       `未找到 skillCode=${code} 对应的内置技能（skillType=inner）`
-      + `${available.length ? `；当前可见内置技能: ${available.join(", ")}` : ""}`,
+      + `${near.length ? `；形近候选: ${suggestions.join(", ")}` : suggestions.length ? `；当前可见内置技能: ${suggestions.join(", ")}` : ""}`
+      + `；用 search --keyword <词> 按名称或描述检索完整清单`,
     );
   }
   const withId = candidates.filter((entry) => toNumber(entry?.resourceId) !== undefined);
@@ -471,6 +549,22 @@ function resolveDigitalEmployeeId(args) {
   ));
   if (fromEnv !== undefined) {
     return { digitalEmployeeId: fromEnv, source: "env" };
+  }
+  // Extract from current working directory if it matches workspace-baiying-agent-<id>
+  const cwdMatch = process.cwd().match(/workspace-baiying-agent-(\d+)/);
+  if (cwdMatch) {
+    return { digitalEmployeeId: toNumber(cwdMatch[1]), source: "cwd" };
+  }
+  // Extract from BYAI_WORKER_ID=openclaw-<usercode>
+  const workerMatch = process.env.BYAI_WORKER_ID?.match(/openclaw-(\d+)/);
+  if (workerMatch) {
+    return { digitalEmployeeId: toNumber(workerMatch[1]), source: "BYAI_WORKER_ID" };
+  }
+  // Extract from BAIYING_AGENT_AUTH JWT sub claim
+  const agentAuthPayload = decodeJwtPayload(process.env.BAIYING_AGENT_AUTH);
+  const fromAgentAuth = toNumber(agentAuthPayload?.sub);
+  if (fromAgentAuth !== undefined) {
+    return { digitalEmployeeId: fromAgentAuth, source: "BAIYING_AGENT_AUTH" };
   }
   // Beyond-Token carries the caller's default digital employee.
   const payload = decodeJwtPayload(resolveAuthValues(loadAuthContextSync()).beyondToken);
@@ -583,28 +677,70 @@ async function bindCommand(args, { unbind = false } = {}) {
     relIds: actionable.map((item) => item.skillId),
     timeoutMs,
   });
-  return { ...base, changed: actionable.map((item) => item.skillCode) };
+
+  // Re-fetch to verify the mutation actually took effect
+  const afterBound = await fetchBoundResources({ digitalEmployeeId, timeoutMs });
+  const afterBoundIds = new Set(afterBound.map((item) => toNumber(item?.resourceId)).filter((id) => id !== undefined));
+
+  const verified = actionable.filter((item) => (unbind ? !afterBoundIds.has(item.skillId) : afterBoundIds.has(item.skillId)));
+  const verifyFailed = actionable.filter((item) => (unbind ? afterBoundIds.has(item.skillId) : !afterBoundIds.has(item.skillId)));
+
+  return {
+    ...base,
+    // 写入未生效同样是失败：ok 必须把校验结果算进去，否则退出码 0 会掩盖问题。
+    ok: base.ok && verifyFailed.length === 0,
+    changed: verified.map((item) => item.skillCode),
+    verifyFailed: verifyFailed.length ? verifyFailed.map((item) => ({ skillCode: item.skillCode, skillId: item.skillId })) : undefined,
+  };
 }
 
 async function listCommand(args) {
   const { digitalEmployeeId, source } = resolveDigitalEmployeeId(args);
   const timeoutMs = timeoutMsFromArgs(args);
   const bound = await fetchBoundResources({ digitalEmployeeId, timeoutMs });
+
+  // 绑定关系接口不回 skillType，用权限列表补一层 skillId -> skillType。
+  // 这只是增强：查不到就退回接口原值，不让 list 因为补全失败而整体报错。
+  const ownerType = firstNonEmpty(args["owner-type"]);
+  let skillTypeMap = new Map();
+  let enrichment = "auth-list";
+  try {
+    const innerSkills = await fetchInnerSkills({ timeoutMs, keyword: "", ownerType });
+    skillTypeMap = new Map(
+      innerSkills
+        .map((entry) => [toNumber(entry?.resourceId), firstNonEmpty(entry?.skillType)])
+        .filter(([id, type]) => id !== undefined && type),
+    );
+    // 权限列表按 AUTH_PAGE_SIZE 分页，命中上限说明可能还有未覆盖的条目。
+    if (innerSkills.length >= AUTH_PAGE_SIZE) {
+      enrichment = "auth-list-truncated";
+    }
+  } catch (error) {
+    enrichment = `unavailable: ${error instanceof Error ? error.message : String(error)}`;
+  }
+
   const skills = bound
     .filter((item) => String(item?.resourceBizType || "").toUpperCase() === "SKILL"
       || firstNonEmpty(item?.skillType))
-    .map((item) => ({
-      skillCode: firstNonEmpty(item?.resourceCode),
-      skillId: toNumber(item?.resourceId) ?? null,
-      skillName: firstNonEmpty(item?.resourceName),
-      skillType: firstNonEmpty(item?.skillType),
-      inner: String(item?.skillType || "").trim().toLowerCase() === INNER_SKILL_TYPE,
-    }))
+    .map((item) => {
+      const skillId = toNumber(item?.resourceId) ?? null;
+      const skillType = firstNonEmpty(item?.skillType) || skillTypeMap.get(skillId) || "";
+      return {
+        skillCode: firstNonEmpty(item?.resourceCode),
+        skillId,
+        skillName: firstNonEmpty(item?.resourceName),
+        skillType,
+        // skillType 补不到时用 null 表示未知，避免和"确认不是内置技能"混淆。
+        inner: skillType ? String(skillType).trim().toLowerCase() === INNER_SKILL_TYPE : null,
+      };
+    })
     .sort((left, right) => left.skillCode.localeCompare(right.skillCode));
   return {
     ok: true,
     action: "list",
     digitalEmployee: { id: digitalEmployeeId, source },
+    // 告知 skillType 的来源与可信度：inner: null 的条目源于这里补全失败或分页截断。
+    skillTypeEnrichment: enrichment,
     boundSkillCount: skills.length,
     skills,
   };
@@ -646,12 +782,21 @@ function helpManual() {
     ],
     commands: [
       {
+        name: "search",
+        summary: "搜索可见的内置技能（keyword 在 code / 名称 / 描述任意一处匹配即命中，不带 keyword 列全部）",
+        options: [
+          "--keyword <词> / --q <词>   可选，关键词；缺失时列出全部可见内置技能",
+          "--digital-employee-id <id>  可选，数字员工；用于标注 bound 状态，推导不到不影响搜索",
+          "--owner-type <type>         可选，限定归属范围",
+        ],
+      },
+      {
         name: "bind",
         summary: "把内置技能绑定到数字员工；已绑定的跳过",
         options: [
-          "--skill-code <code>          必填，技能编码，可重复传入批量绑定",
+          "--skill-code <code>          技能编码，可重复传入批量绑定",
           "--skill-id <id>              可选，直接指定资源ID绕过 skillCode 解析",
-          "--digital-employee-id <id>   可选，目标数字员工；默认取 Beyond-Token 里的默认数字员工",
+          "--digital-employee-id <id>   可选，目标数字员工；按 6 级链路推导（见下方环境变量）",
           "--owner-type <type>          可选，限定归属范围，如 personal / enterprise",
           "--dry-run                    可选，只解析不改动绑定关系",
           "--timeout-ms <ms>            可选，单次请求超时，默认 30000",
@@ -669,11 +814,20 @@ function helpManual() {
       relList: `POST ${DEFAULT_CONTEXT_PATH}${REL_LIST_PATH}`,
     },
     environment: [
-      "BYAI_SERVICE_BASE_URL / SKILL_INSTALLER_URL   显式后端地址，优先级最高",
-      "REDIS_HOST + BE_DOMAINNAME                    Redis 服务发现",
-      "BE_PROTOCOL / HOST / BE_SERVER_PORT           兜底组装地址",
-      "BAIYING_DIGITAL_EMPLOYEE_ID                   默认数字员工ID",
-      "BAIYING_AUTH_FILE / BEYOND_TOKEN / USER_CODE  鉴权来源",
+      "数字员工推导链（优先级从高到低）：",
+      "  1. --digital-employee-id <id>",
+      "  2. BAIYING_DIGITAL_EMPLOYEE_ID / DIGITAL_EMPLOYEE_ID / RESOURCE_ID",
+      "  3. workspace-baiying-agent-<id> (cwd 工作目录名)",
+      "  4. BYAI_WORKER_ID=openclaw-<usercode>",
+      "  5. BAIYING_AGENT_AUTH JWT sub claim",
+      "  6. BEYOND_TOKEN 的 defaultDigitalEmployeeId",
+      "",
+      "后端地址推导：",
+      "  BYAI_SERVICE_BASE_URL / SKILL_INSTALLER_URL   显式后端地址，优先级最高",
+      "  REDIS_HOST + BE_DOMAINNAME                    Redis 服务发现",
+      "  BE_PROTOCOL / HOST / BE_SERVER_PORT           兜底组装地址",
+      "",
+      "鉴权：BAIYING_AUTH_FILE / BEYOND_TOKEN / USER_CODE",
     ],
   };
 }
@@ -685,6 +839,8 @@ async function main() {
   let result;
   if (command === "help") {
     result = helpManual();
+  } else if (command === "search") {
+    result = await searchCommand(args);
   } else if (command === "bind") {
     result = await bindCommand(args);
   } else if (command === "unbind") {
@@ -725,6 +881,7 @@ export {
   resolveSkillIdByCode,
   resolveTargets,
   responseSucceeded,
+  searchCommand,
   statusCommand,
   validateSkillCode,
 };

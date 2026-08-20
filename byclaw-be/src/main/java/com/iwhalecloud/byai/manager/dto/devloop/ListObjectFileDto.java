@@ -10,9 +10,19 @@ import lombok.Setter;
 @Setter
 public class ListObjectFileDto {
 
-    /** 会话ID */
+    /**
+     * 会话ID
+     */
     private Long sessionId;
 
-    /** 项目ID */
+    /**
+     * 项目ID
+     */
     private Long projectId;
+
+
+    /**
+     * 保存文件类型,保存对象:object,保存知识文件:knowledge
+     */
+    private String objectType = "object";
 }

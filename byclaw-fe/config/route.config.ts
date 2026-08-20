@@ -158,6 +158,11 @@ export default [
             component: './knowledgeCenter',
           },
           {
+            path: '/inspiration',
+            name: 'inspiration',
+            component: './inspiration',
+          },
+          {
             path: '/resourceCenter',
             name: 'resourceCenter',
             component: './resourceCenter',

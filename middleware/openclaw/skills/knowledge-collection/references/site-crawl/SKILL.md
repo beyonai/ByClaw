@@ -22,19 +22,51 @@ frontier 状态由 `scripts/crawl-state.mjs` 管理并落在 `session.json` 的 
 
 ## 与单页采集的分界
 
-- 目标是**一个已知 URL**（单页、单篇文章）→ 不需要 frontier，直接 `bycli web read` → `normalize` → `collect`。
+- 目标是**一个已知 URL**（单页、单篇文章）→ 不需要 frontier，直接 `bycli web read` → `collect`。
 - 目标是**一个站点/一批文档**（"爬这个产品的文档"、"整理这个产品的功能说明"）→ 走本文档的 frontier 流程。
 
 ## 与深化研究的关系
 
 本文档是一种**抓取战术**，不是与深化研究并列的另一条链路。
-用户给的是产品名而非文档站 URL 时（"分析 xxx 这个产品"），入口仍是
-[../research-methodology.md](../research-methodology.md) 的默认深化研究流程：
-`init --mode research` → `plan`（双信源初检，文档站域名在这一步查出来，不要凭产品名猜域名）
-→ 逐层 `branch`。其中"通读官方文档站"这一类分支的抓取环节才使用本文档的 sitemap + frontier 流程，
+
+### 模式判据：报告由谁写
+
+`--mode` 按**最终报告的归属**选，不按输入形态（给产品名还是给 URL）选。
+输入形态只决定要不要多花一步查域名，不决定模式：
+
+| 报告由谁写 | mode | 链路 |
+| --- | --- | --- |
+| 由本 Agent 写 | `research` | `init` → 三信源初检 → `plan` → 逐层 `branch` → `aggregate` → `report` |
+| 由下游写（外部消费） | `collection` | `init` → 三信源初检定域名 → sitemap + frontier → `collect` → 外部消费 run |
+
+按输入形态判据会错判一类真实场景：用户只给产品名、但报告由下游写。
+此时 `research` 模式的 `report` 前置永远等不到那份报告，`cleanup` 只会返回
+`retention=true, reason=research-report-pending`。判据落在归属上才收得住。
+
+用户给的是产品名而非文档站 URL 时（"分析 xxx 这个产品"），无论哪种 mode，
+文档站域名都由三信源初检查出（内置路由层 + `online_search` + `hot_discovery`），**不得凭产品名猜域名**。
+`research` 模式下这步发生在 `plan` 之前；`collection` 模式下它是独立的一次发现，不需要 `plan`。
+
+`research` 模式里，"通读官方文档站"这一类分支的抓取环节才使用本文档的 sitemap + frontier 流程，
 产物照常经 `collect` 登记进同一份 inventory，`report` 引用 `itemId` 不变。
 
-只有用户已经直接给出文档站 URL、且明确只要"爬完这个站"时，才可以用 `--mode collection` 单独跑本流程。
+### 只要筛过的文章、报告归下游
+
+下游写报告，但希望拿到**经过筛选**的文章（而不是 frontier 全量），仍用 `--mode collection`：
+筛选是 Agent 判断，不是脚本能力，`plan` / `branch` 只是把研究轨迹持久化下来给引用用。
+报告归下游时那条轨迹没有消费方，所以照常跑筛选判断，但不必调 `plan` / `branch`：
+
+- 框架问题、定域名、按主题切面 → 照做，只是不写进 `task.initialSearch`；
+- 逐条判断哪些页值得取全文 → 照做，被筛掉的页 `crawl-mark --status skipped`；
+- 选中理由随 `collect` 落盘到 `collectionFilters`（`discoveredBy` / `popularity` / `searxngRank`），
+  下游按 `itemId` 就能看出每篇为什么入选；
+- 不需要 `--learnings` / `--citations` —— 结论由下游得出，本 Agent 不产出结论。
+
+**交付时必须一并说明筛选口径与放弃量**：`skipped` 页数、`overCap` 放弃页数、`failed` 页数。
+下游拿到的是抽样，不说明就会被当成全量，这与报告里的「覆盖缺口」章节是同一个义务。
+
+需要研究轨迹本身也交付时（下游要看"为什么这么筛"的完整链条），才值得用 `research` 模式，
+并接受 `report` 是 `cleanup` 的硬前置 —— 此时那份 `report.md` 写成交接说明即可，不必是成品解读。
 
 ## Step 1：发现全站 URL（优先 sitemap，不要靠搜索引擎）
 
@@ -104,11 +136,25 @@ node scripts/knowledge-collection.mjs crawl-mark --session-dir <dir> \
 - 未 `crawl-seed` 过的 URL 拒绝登记，避免"抓了范围外的页还记成成功"；
 - 登记成功后脚本删除 payload，失败时保留以便修正重试。
 
-`fetched` 的正文经 `normalize` 生成 `sanitized/items/*.md`，再按既有契约 `collect` 登记 inventory。
+`fetched` 的正文直接 `collect` 登记进 inventory，**中间没有 `normalize` 这一步**：
+`normalize` 是 `ingest` 的 dry-run 预检，只写 stdout、不落盘，其 `items[].markdown` 是正文字符串而
+`collect` 要的是相对路径，两者结构不兼容（见 [../../SKILL.md](../../SKILL.md)「`normalize` 的真实角色」）。
+
+`collect` 要求 `markdownPath`（`markdown/` 下）与 `sanitizedPath`（`sanitized/items/` 下）**两个文件都已存在**，
+否则报 `必须指向普通文件`。所以抓完后自己把正文写到这两个位置（净化副本可与原文同内容），再 `collect`：
+
+```bash
+bycli web read --url <URL> --stdout > <dir>/markdown/<itemId>.md
+cp <dir>/markdown/<itemId>.md <dir>/sanitized/items/<itemId>.md
+node scripts/knowledge-collection.mjs collect --session-dir <dir> \
+  --item-json-file <dir>/.post-processing-inputs/batch.json
+```
+
 frontier 只管覆盖面，inventory 仍是唯一的证据来源，报告引用 `itemId` 不变。
 
-批量导入注意（实测踩过）：`normalize --markdown-dir` 逐篇从正文头部 `> 原文链接: <URL>` 取各自的 `sourceUrl`；
-inventory 身份是 `sourceSkill + sourceUrl`，所以**不要**用一个 `--source-url` 覆盖整个目录，否则多篇会撞成同一条身份。
+批量登记注意：inventory 身份是 `sourceSkill + sourceUrl`，每条 `canonicalItem.url` 必须是该页自己的 URL
+（`bycli web read` 在正文头部写的 `> 原文链接: <URL>`），**不要**让多篇共用同一个 URL，否则会撞成同一条身份。
+`canonicalItem.markdown` 与 `fileName` 必须都等于 `sanitizedPath` 的完整相对路径，不是 basename。
 
 已经抓好一批正文再建会话时（物化状态只在 `init` 时推导一次，事后不补算），照抄
 [../collection-contract.md](../collection-contract.md) 的「已抓好一批正文后登记会话」，
@@ -116,7 +162,7 @@ inventory 身份是 `sourceSkill + sourceUrl`，所以**不要**用一个 `--sou
 
 ## Step 4：登录态与失败处理
 
-generic webpage 在 [../source-routing.md](../source-routing.md) 路由表里**没有兜底执行器**，`bycli` 失败即停止并报告。
+generic webpage 在 [../agent-reach.md](../agent-reach.md) 路由表里**没有兜底执行器**，`bycli` 失败即停止并报告。
 SaaS 控制台内的功能说明页常见 146 bytes 级别的登录墙响应，这类页面：
 
 1. 记 `status=failed` 并写明 `reason`，不要重试其他工具；

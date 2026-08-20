@@ -9,6 +9,7 @@ import useGlobal from '@/hooks/useGlobal';
 import IconRender from '@/components/MessageList/components/FileRender/components/IconRender';
 
 import { downloadFile, getFileUrl } from '@/utils/file';
+import { isManagedChatFileArtifactPath } from '@/utils/chatFileArtifact';
 import { PREVIEWABLE } from '@/components/MessageList/components/FileRender';
 
 import previewStyle from '@/components/MessageList/components/FileRender/components/Previewer/index.module.less';
@@ -79,6 +80,8 @@ function ATag({ domNode }: { domNode: any }) {
       });
   };
 
+  // 会话产物由消息级组件统一校验并渲染，避免这里用原始路径再生成一张不可鉴权的重复卡片。
+  if (isManagedChatFileArtifactPath(href)) return <>{domToReact(domNode.children || [])}</>;
   if (!href || !canPreview) return <>{domToReact([domNode])}</>;
 
   return (

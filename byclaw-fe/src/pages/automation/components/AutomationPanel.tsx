@@ -1,19 +1,25 @@
-import { Button, Dropdown, Empty, Input, Modal, Skeleton, message } from 'antd';
+import { Button, Dropdown, Empty, Input, Modal, Skeleton, Switch, message } from 'antd';
 import {
+  ClockCircleOutlined,
   DeleteOutlined,
-  MoreOutlined,
-  PauseCircleOutlined,
+  EllipsisOutlined,
+  PlayCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
-import AntdIcon from '@/components/AntdIcon';
 import { deleteScanSource, listScanSources, toggleScanSource, triggerScan } from '@/service/devloop';
 import AutomationEditor from './AutomationEditor';
-import { getAutomationListGroup, getAutomationSchedule, getNextRunTime, isAutomationEnabled } from '../schedule';
+import {
+  getAutomationListGroup,
+  getAutomationSchedule,
+  getNextRunTime,
+  isAutomationEnabled,
+  parseAutomationConfig,
+} from '../schedule';
 import type { AutomationSource } from '../types';
 import styles from '../index.module.less';
 
@@ -26,12 +32,6 @@ const normalizeRows = (response: any): AutomationSource[] => {
   const data = response?.data ?? response;
   const rows = Array.isArray(data) ? data : data?.list || data?.rows || data?.records || [];
   return rows;
-};
-
-const formatSourceCreateTime = (source: AutomationSource) => {
-  if (!source.createTime) return '';
-  const value = dayjs(source.createTime);
-  return value.isValid() ? value.format('YYYY-MM-DD HH:mm:ss') : '';
 };
 
 const getRelativeTime = (target: Dayjs, now: Dayjs) => {
@@ -52,6 +52,8 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
   const [keyword, setKeyword] = useState('');
   const [editingSource, setEditingSource] = useState<AutomationSource>();
   const [editorOpen, setEditorOpen] = useState(false);
+  const [togglingSourceIds, setTogglingSourceIds] = useState<Set<string>>(new Set());
+  const toggleTimersRef = useRef<Record<string, number>>({});
 
   const isSourceOwner = useCallback(
     (source: AutomationSource) => {
@@ -90,6 +92,14 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
     return () => window.clearTimeout(timer);
   }, [active, keyword, reload]);
 
+  useEffect(
+    () => () => {
+      Object.values(toggleTimersRef.current).forEach((timer) => window.clearTimeout(timer));
+      toggleTimersRef.current = {};
+    },
+    []
+  );
+
   const openEditor = (source?: AutomationSource) => {
     setEditingSource(source);
     setEditorOpen(true);
@@ -127,6 +137,45 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
     });
   };
 
+  const toggleSource = useCallback(
+    (source: AutomationSource, enabled: boolean) => {
+      const sourceId = `${source.sourceId}`;
+      const previousTimer = toggleTimersRef.current[sourceId];
+      if (previousTimer) window.clearTimeout(previousTimer);
+      setTogglingSourceIds((current) => new Set(current).add(sourceId));
+
+      toggleTimersRef.current[sourceId] = window.setTimeout(async () => {
+        try {
+          await toggleScanSource(Number(source.sourceId), enabled ? '1' : '0');
+          await reload();
+        } catch (error: any) {
+          message.error(error?.message || intl.formatMessage({ id: 'automation.saveFailed' }));
+        } finally {
+          delete toggleTimersRef.current[sourceId];
+          setTogglingSourceIds((current) => {
+            const next = new Set(current);
+            next.delete(sourceId);
+            return next;
+          });
+        }
+      }, 300);
+    },
+    [intl, reload]
+  );
+
+  const runSource = useCallback(
+    async (source: AutomationSource) => {
+      try {
+        await triggerScan(Number(source.sourceId));
+        message.success(intl.formatMessage({ id: 'automation.triggerSuccess' }));
+        await reload();
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'automation.saveFailed' }));
+      }
+    },
+    [intl, reload]
+  );
+
   const formatSchedule = (source: AutomationSource) => {
     const schedule = getAutomationSchedule(source);
     if (!schedule) return intl.formatMessage({ id: 'automation.schedule.unknown' });
@@ -139,7 +188,11 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
         ? `${intl.formatMessage({ id: 'automation.schedule.once' })} · ${onceTime.format('YYYY/M/D HH:mm:ss')}`
         : intl.formatMessage({ id: 'automation.schedule.unknown' });
     } else if (schedule.mode === 'interval') {
-      label = intl.formatMessage({ id: 'automation.schedule.everyHours' }, { hours: schedule.intervalHours || 1 });
+      const intervalValue = schedule.intervalValue || schedule.intervalHours || 1;
+      const unit = schedule.intervalUnit || 'hour';
+      label = `${intl.formatMessage({ id: 'automation.schedule.interval' })} · ${intervalValue} ${intl.formatMessage({
+        id: `automation.intervalUnit.${unit}`,
+      })}`;
     } else if (schedule.periodType === 'daily') {
       label = intl.formatMessage({ id: 'automation.schedule.dailyAt' }, { time });
     } else if (schedule.periodType === 'weekly' || schedule.periodType === 'biweekly') {
@@ -161,22 +214,16 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
       );
     }
 
-    if (schedule.effectiveStartDate || schedule.effectiveEndDate) {
-      label += ` · ${intl.formatMessage(
-        { id: 'automation.effectivePeriod' },
-        { start: schedule.effectiveStartDate || '-', end: schedule.effectiveEndDate || '-' }
-      )}`;
-    }
     return label;
   };
 
-  const renderTaskRow = (source: AutomationSource, group: 'running' | 'current' | 'paused') => {
+  const renderTaskRow = (source: AutomationSource) => {
     const sourceId = `${source.sourceId}`;
     const owner = isSourceOwner(source);
     const canEdit = source.sourceType === 'chat';
     const enabled = isAutomationEnabled(source);
+    const group = getAutomationListGroup(source);
     const nextRun = getNextRunTime(source);
-    const sourceTime = formatSourceCreateTime(source);
     const relativeTime = nextRun ? getRelativeTime(nextRun, dayjs()) : undefined;
     const relativeTimeText = relativeTime
       ? intl.formatMessage({ id: `automation.time.${relativeTime.unit}` }, { count: relativeTime.count })
@@ -205,30 +252,19 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
           if (owner && canEdit) openEditor(source);
         }}
       >
-        <div className={styles.taskMain}>
-          <span className={styles.taskName}>{source.sourceName || '-'}</span>
-          {sourceTime && <span className={styles.taskMeta}>{sourceTime}</span>}
-          <span className={styles.taskMeta}>{formatSchedule(source)}</span>
-        </div>
-        <span className={styles.nextRun}>{rightText}</span>
-        <div className={styles.rowActions} onClick={(event) => event.stopPropagation()}>
-          {owner && (
-            <Button
-              type="text"
-              size="small"
-              className={styles.rowActionButton}
-              icon={<AntdIcon type="icon-a-Play-onebofang" />}
-              aria-label={intl.formatMessage({ id: enabled ? 'automation.runNow' : 'automation.resume' })}
-              onClick={async () => {
-                if (enabled) {
-                  await triggerScan(Number(source.sourceId));
-                  message.success(intl.formatMessage({ id: 'automation.triggerSuccess' }));
-                } else {
-                  await toggleScanSource(Number(source.sourceId), '1');
-                }
-                await reload();
-              }}
+        <div className={styles.taskTop}>
+          {owner ? (
+            <Switch
+              className={styles.taskSwitch}
+              checked={enabled}
+              loading={togglingSourceIds.has(sourceId)}
+              onClick={(_, event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+              onChange={(checked) => void toggleSource(source, checked)}
+              aria-label={intl.formatMessage({ id: enabled ? 'automation.pause' : 'automation.resume' })}
             />
+          ) : (
+            <span />
           )}
           {owner && (
             <Dropdown
@@ -236,52 +272,53 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
               menu={{
                 items: [
                   {
-                    key: 'toggle',
-                    icon: enabled ? <PauseCircleOutlined /> : <ReloadOutlined />,
-                    label: intl.formatMessage({ id: enabled ? 'automation.pause' : 'automation.resume' }),
+                    key: 'run',
+                    icon: <PlayCircleOutlined />,
+                    label: intl.formatMessage({ id: 'automation.runNow' }),
+                    disabled: !enabled,
                   },
                   {
                     key: 'delete',
                     icon: <DeleteOutlined />,
-                    label: intl.formatMessage({ id: 'common.delete' }),
+                    label: intl.formatMessage({ id: 'automation.deleteTask' }),
                     danger: true,
                   },
                 ],
                 onClick: async ({ key, domEvent }) => {
                   domEvent.stopPropagation();
+                  if (key === 'run' && enabled) await runSource(source);
                   if (key === 'delete') confirmDelete(source);
-                  if (key === 'toggle') {
-                    await toggleScanSource(Number(source.sourceId), enabled ? '0' : '1');
-                    await reload();
-                  }
                 },
               }}
             >
-              <Button type="text" size="small" className={styles.rowActionButton} icon={<MoreOutlined />} />
+              <Button
+                type="text"
+                size="small"
+                className={styles.rowActionButton}
+                icon={<EllipsisOutlined />}
+                aria-label={intl.formatMessage({ id: 'common.more' })}
+                onClick={(event) => event.stopPropagation()}
+                onKeyDown={(event) => event.stopPropagation()}
+              />
             </Dropdown>
           )}
+        </div>
+        <div className={styles.taskMain}>
+          <span className={styles.taskName}>{source.sourceName || '-'}</span>
+          <span className={styles.taskDescription}>
+            {parseAutomationConfig(source.config).chatContent.trim() || '-'}
+          </span>
+        </div>
+        <div className={styles.taskFooter}>
+          <span className={styles.schedulePill}>
+            <ClockCircleOutlined />
+            <span>{formatSchedule(source)}</span>
+          </span>
+          <span className={styles.nextRun}>{rightText}</span>
         </div>
       </div>
     );
   };
-
-  const taskGroups = [
-    {
-      key: 'running' as const,
-      title: intl.formatMessage({ id: 'automation.running' }),
-      items: sources.filter((source) => getAutomationListGroup(source) === 'running'),
-    },
-    {
-      key: 'current' as const,
-      title: intl.formatMessage({ id: 'automation.current' }),
-      items: sources.filter((source) => getAutomationListGroup(source) === 'current'),
-    },
-    {
-      key: 'paused' as const,
-      title: intl.formatMessage({ id: 'automation.paused' }),
-      items: sources.filter((source) => getAutomationListGroup(source) === 'paused'),
-    },
-  ].filter((group) => group.items.length > 0);
 
   if (editorOpen) {
     return (
@@ -319,12 +356,7 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
             title={intl.formatMessage({ id: 'common.refresh' })}
             onClick={() => void reload()}
           />
-          <Button
-            className={styles.primaryActionButton}
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => openEditor()}
-          >
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>
             {intl.formatMessage({ id: 'automation.add' })}
           </Button>
         </div>
@@ -339,16 +371,7 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
         ) : !sources.length ? (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'automation.empty' })} />
         ) : (
-          <div className={styles.automationGroups}>
-            {taskGroups.map((group) => (
-              <section key={group.key} className={styles.taskGroup}>
-                <div className={styles.listGroupTitle}>{group.title}</div>
-                <div className={styles.automationList}>
-                  {group.items.map((source) => renderTaskRow(source, group.key))}
-                </div>
-              </section>
-            ))}
-          </div>
+          <div className={styles.automationList}>{sources.map((source) => renderTaskRow(source))}</div>
         )}
       </div>
     </div>
