@@ -630,6 +630,37 @@ public class ProjectApplicationService {
     }
 
     /**
+     * 按会话反查所属项目，供只知道 sessionId 的调用方（定时任务、外部技能）解析项目。
+     * <p>
+     * 会话未绑定项目、项目已删除都返回 {@code bound=false}，不抛异常：调用方要能区分
+     * 「查不到」和「调用失败」，前者可以继续走追问兜底，后者必须重试或报错。
+     *
+     * @param sessionId 会话 ID，必填
+     * @return 含 bound、projectId、projectName、projectType
+     */
+    public Map<String, Object> resolveProjectBySession(Long sessionId) {
+        if (sessionId == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "session.id.required");
+        }
+        Map<String, Object> map = new HashMap<>();
+        map.put("sessionId", sessionId);
+        Long projectId = projectSessionService.findProjectIdBySessionId(sessionId);
+        Project project = projectId == null ? null : projectService.findById(projectId);
+        if (project == null || DeleteFlag.DELETED.equals(project.getDeleteFlag())) {
+            map.put("bound", false);
+            map.put("projectId", null);
+            map.put("projectName", null);
+            map.put("projectType", null);
+            return map;
+        }
+        map.put("bound", true);
+        map.put("projectId", project.getProjectId());
+        map.put("projectName", project.getProjectName());
+        map.put("projectType", project.getProjectType());
+        return map;
+    }
+
+    /**
      * 查询项目关联的代码仓库列表。
      *
      * @param projectId 项目 ID，必填
