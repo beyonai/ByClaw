@@ -591,6 +591,45 @@ describe("DelegationService", () => {
     expect((await delegations.listByRun("run-timeout"))[0]?.status).toBe("TIMED_OUT");
   });
 
+  it("renews the idle deadline for activity from any connector", async () => {
+    const registry = new ConnectorRegistry();
+    registry.register(
+      fakeConnector(async function* () {
+        for (let index = 0; index < 3; index += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 8));
+          yield { type: "activity", cursor: `${index + 1}-0` };
+        }
+        yield completed("long task done");
+      }),
+    );
+    const delegations = new InMemoryDelegationRepository();
+    const service = new DelegationService(
+      registry,
+      delegations,
+      new InMemoryRunEventStore(),
+      { firstActivityMs: 20, idleMs: 20 },
+    );
+
+    const result = await service.execute({
+      session: {
+        id: "session-1",
+        owner: { userCode: "user-1" },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      runId: "run-sliding-timeout",
+      agents: [agent],
+      agentId: agent.id,
+      task: "keep working",
+      metadata: {},
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({ status: "completed", output: "long task done" });
+    expect((await delegations.listByRun("run-sliding-timeout"))[0]?.lastActivityAt)
+      .toBeTypeOf("number");
+  });
+
   it("maps a connector first-event timeout to a timed-out delegation", async () => {
     const registry = new ConnectorRegistry();
     registry.register(

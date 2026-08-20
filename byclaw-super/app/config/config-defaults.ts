@@ -23,9 +23,11 @@ export const APP_CONFIG_DEFAULTS = {
     statementTimeoutMs: 30_000,
     migrateOnStart: false,
   },
-  delegationTimeoutMs: 900_000,
+  delegationTimeouts: {
+    firstActivityMs: 300_000,
+    idleMs: 900_000,
+  },
   openClaw: {
-    firstEventTimeoutMs: 300_000,
     cancelConfirmationTimeoutMs: 30_000,
   },
   worker: {

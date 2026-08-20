@@ -144,19 +144,26 @@ export class ThirdPartyA2aConnector implements AgentConnector {
         this.#allowInsecureExternalHttp,
         this.#allowedExternalHosts,
       );
-      const response = await this.#fetch(rpcUrl, {
-        method: "POST",
-        headers: {
-          accept: "text/event-stream",
-          "content-type": "application/json",
-          ...descriptor.headers,
-        },
-        body: JSON.stringify(buildJsonRpcRequest(request)),
-        signal: AbortSignal.any([
-          controller.signal,
-          AbortSignal.timeout(this.#requestTimeoutMs),
-        ]),
-      });
+      const connectController = new AbortController();
+      const connectTimeout = setTimeout(
+        () => connectController.abort(new Error("A2A streaming connection timed out")),
+        this.#requestTimeoutMs,
+      );
+      let response: Response;
+      try {
+        response = await this.#fetch(rpcUrl, {
+          method: "POST",
+          headers: {
+            accept: "text/event-stream",
+            "content-type": "application/json",
+            ...descriptor.headers,
+          },
+          body: JSON.stringify(buildJsonRpcRequest(request)),
+          signal: AbortSignal.any([controller.signal, connectController.signal]),
+        });
+      } finally {
+        clearTimeout(connectTimeout);
+      }
       if (!response.ok) {
         yield failed(
           "A2A_RPC_HTTP_ERROR",
@@ -239,6 +246,8 @@ export class ThirdPartyA2aConnector implements AgentConnector {
           } else if (isCompletedState(state)) {
             yield completed(output, artifacts);
             return;
+          } else {
+            yield { type: "activity" };
           }
           continue;
         }
@@ -248,7 +257,9 @@ export class ThirdPartyA2aConnector implements AgentConnector {
             artifacts.push(artifact);
             yield { type: "artifact", artifact };
           }
+          continue;
         }
+        yield { type: "activity" };
       }
       if (output || artifacts.length > 0) {
         yield completed(output, artifacts);

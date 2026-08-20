@@ -1442,6 +1442,7 @@ async function writeDelegation(
     nullableDate(delegation.startedAt),
     nullableDate(delegation.finishedAt),
     delegation.agentName ?? null,
+    nullableDate(delegation.lastActivityAt),
   ];
   const updated = await client.query(
     `UPDATE ${table(schema, "delegations")}
@@ -1455,7 +1456,8 @@ async function writeDelegation(
             updated_at = $9,
             started_at = $10,
             finished_at = $11,
-            agent_name = $12
+            agent_name = $12,
+            last_activity_at = $13
       WHERE id = $1 AND version = $8::bigint - 1`,
     [
       delegation.id,
@@ -1470,6 +1472,7 @@ async function writeDelegation(
       nullableDate(delegation.startedAt),
       nullableDate(delegation.finishedAt),
       delegation.agentName ?? null,
+      nullableDate(delegation.lastActivityAt),
     ],
   );
   if (updated.rowCount !== 0) {
@@ -1486,10 +1489,10 @@ async function writeDelegation(
     `INSERT INTO ${table(schema, "delegations")} (
        id, run_id, agent_id, connector_id, task, expected_output, status,
        external_ref, connector_cursor, result, partial_output, error, version,
-       created_at, updated_at, started_at, finished_at, agent_name
+       created_at, updated_at, started_at, finished_at, agent_name, last_activity_at
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::jsonb, $11, $12, $13,
-       $14, $15, $16, $17, $18
+       $14, $15, $16, $17, $18, $19
      )`,
     values,
   );
@@ -1839,6 +1842,9 @@ function mapDelegation(row: QueryResultRow): Delegation {
     updatedAt: milliseconds(row.updated_at),
     ...(row.started_at === null ? {} : { startedAt: milliseconds(row.started_at) }),
     ...(row.finished_at === null ? {} : { finishedAt: milliseconds(row.finished_at) }),
+    ...(row.last_activity_at === null
+      ? {}
+      : { lastActivityAt: milliseconds(row.last_activity_at) }),
   };
 }
 
@@ -1893,6 +1899,13 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
   if (record.parentMessageId !== undefined && !parentMessageId) {
     throw new Error("Invalid persisted Run parent message ID");
   }
+  const traceId =
+    typeof record.traceId === "string" && record.traceId.trim()
+      ? record.traceId.trim()
+      : undefined;
+  if (record.traceId !== undefined && !traceId) {
+    throw new Error("Invalid persisted Run trace ID");
+  }
   const agentCatalogError =
     typeof record.agentCatalogError === "string" && record.agentCatalogError.trim()
       ? record.agentCatalogError.trim()
@@ -1908,12 +1921,14 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
   if (record.groupChat === undefined) {
     return externalSessionId ||
       parentMessageId ||
+      traceId ||
       agentCatalogError ||
       leaderModel ||
       orchestrator
       ? {
           ...(externalSessionId ? { externalSessionId } : {}),
           ...(parentMessageId ? { parentMessageId } : {}),
+          ...(traceId ? { traceId } : {}),
           ...(agentCatalogError ? { agentCatalogError } : {}),
           ...(leaderModel ? { leaderModel } : {}),
           ...(orchestrator ? { orchestrator } : {}),
@@ -1931,6 +1946,7 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
   return {
     ...(externalSessionId ? { externalSessionId } : {}),
     ...(parentMessageId ? { parentMessageId } : {}),
+    ...(traceId ? { traceId } : {}),
     groupChat,
     groupChatFingerprint: fingerprint,
     ...(agentCatalogError ? { agentCatalogError } : {}),

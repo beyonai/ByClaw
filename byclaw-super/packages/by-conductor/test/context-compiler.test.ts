@@ -52,6 +52,7 @@ describe("ContextCompiler", () => {
       "session-workspace",
       "user-context",
       "group-chat-context",
+      "task-plan",
       "authorized-agents",
       "context-cleanup",
     ]);
@@ -335,7 +336,10 @@ describe("OrchestratorContextCompiler", () => {
       "You are an expert-team leader whose only job is orchestration.",
     );
     expect(compiled.stableSystemPrompt).toContain(
-      "use askUserQuestion to ask the minimum necessary structured questions",
+      "you must call the askUserQuestion tool and wait for the response",
+    );
+    expect(compiled.stableSystemPrompt).toContain(
+      "Never ask a clarification question in ordinary assistant text",
     );
     expect(compiled.stableSystemPrompt).toContain("优先安排交叉复核。");
     expect(compiled.systemPrompt).not.toContain("ByClaw Super Assistant");
@@ -346,6 +350,7 @@ describe("OrchestratorContextCompiler", () => {
     expect(compiled.diagnostics.processors.map(({ name }) => name)).toEqual([
       "supervisor-policy",
       "session-context",
+      "task-plan",
       "authorized-agents",
       "context-cleanup",
     ]);

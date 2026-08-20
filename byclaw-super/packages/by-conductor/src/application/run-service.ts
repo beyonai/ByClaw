@@ -7,6 +7,10 @@ import type { AttachmentResolver } from "../ports/attachment-resolver.js";
 import { DelegationService } from "./delegation-service.js";
 import type { RunIngressContextV1 } from "../domain/run-ingress-context.js";
 import type { LeaderSession, LeaderSessionFactory } from "../ports/leader.js";
+import type {
+  TaskPlanExecutionContext,
+  TaskPlanGateway,
+} from "../ports/task-plan.js";
 import { LeaderSessionCache } from "./leader-session-cache.js";
 import type {
   DelegationRepository,
@@ -101,6 +105,8 @@ export interface RunServiceRuntimeOptions {
    * 用 Run 短期凭证经 BE 安全读取本轮附件。未实现对应能力时工具不暴露。
    */
   attachmentResolver?: AttachmentResolver;
+  /** BE 权威任务计划 Port；缺失时不向 Leader 暴露 updateTaskPlan。 */
+  taskPlans?: TaskPlanGateway;
 }
 
 /**
@@ -122,6 +128,7 @@ export class RunService {
   readonly #maxConcurrentRuns: number;
   readonly #credentialCleanupIntervalMs: number;
   readonly #attachmentResolver: AttachmentResolver | undefined;
+  readonly #taskPlans: TaskPlanGateway | undefined;
   #persistentActive = 0;
   #claimLoop: Promise<void> | undefined;
   #pollTimer: ReturnType<typeof setInterval> | undefined;
@@ -148,6 +155,7 @@ export class RunService {
     this.#credentialCleanupIntervalMs =
       runtime.credentialCleanupIntervalMs ?? 60_000;
     this.#attachmentResolver = runtime.attachmentResolver;
+    this.#taskPlans = runtime.taskPlans;
     this.#leaderCache = new LeaderSessionCache(leaders, {
       maxEntries: runtime.leaderCacheMaxEntries ?? 100,
       idleTtlMs: runtime.leaderCacheIdleTtlMs ?? 1_800_000,
@@ -458,13 +466,19 @@ export class RunService {
    * 取消排队中或执行中的 Run。
    * 执行中会先进入 CANCELLING，再同时中止 Leader、工具信号和活动 Connector。
    */
-  async cancelRun(runId: string, reason = "user requested cancellation"): Promise<Run | undefined> {
+  async cancelRun(
+    runId: string,
+    reason = "user requested cancellation",
+    beyondToken?: string,
+  ): Promise<Run | undefined> {
     const run = await this.runs.get(runId);
     if (!run || TERMINAL_RUN_STATUSES.has(run.status)) {
       return run;
     }
     if (run.status === "QUEUED" || run.status === "CREATED") {
-      return this.#finishCancelled(run, reason);
+      const cancelled = await this.#finishCancelled(run, reason);
+      await this.#cancelTaskPlan(run, reason, beyondToken);
+      return cancelled;
     }
 
     const cancelling = await this.#requestCancelling(run, reason);
@@ -480,7 +494,9 @@ export class RunService {
     if (delegationCancellation.status === "rejected") {
       throw delegationCancellation.reason;
     }
-    return this.#finishCancelled(cancelling, reason);
+    const cancelled = await this.#finishCancelled(cancelling, reason);
+    await this.#cancelTaskPlan(run, reason, beyondToken);
+    return cancelled;
   }
 
   /** 与执行实例的状态推进竞争时重读后重试，避免合法取消因一次乐观锁冲突返回 500。 */
@@ -766,6 +782,10 @@ ${JSON.stringify(response)}`;
         }
       }
       current = await this.#setStatus(latest, "RUNNING");
+      const taskPlanContext = this.#taskPlanContext(current, metadata);
+      const activeTaskPlan = taskPlanContext
+        ? await this.#taskPlans?.loadActive(taskPlanContext).catch(() => undefined)
+        : undefined;
       const result = await leader.run({
         message: leaderMessage,
         ...(current.ingressContext?.externalSessionId
@@ -786,6 +806,7 @@ ${JSON.stringify(response)}`;
         ...(current.ingressContext?.orchestrator
           ? { orchestrator: current.ingressContext.orchestrator }
           : {}),
+        ...(activeTaskPlan ? { activeTaskPlan } : {}),
         signal: runController.signal,
         // Leader 的可见回答与思考增量被规范化为 Run 事件，供对外流协议消费。
         onDelta: async (text) => {
@@ -949,6 +970,23 @@ ${JSON.stringify(response)}`;
           }
           return response;
         },
+        ...(taskPlanContext && this.#taskPlans
+          ? {
+              updateTaskPlan: async ({
+                toolCallId,
+                update,
+                signal,
+              }) => {
+                runController.signal.throwIfAborted();
+                signal?.throwIfAborted();
+                return this.#taskPlans!.update({
+                  context: taskPlanContext,
+                  idempotencyKey: toolCallId,
+                  update,
+                });
+              },
+            }
+          : {}),
         // inspectAttachment 用 Run 短期凭证经 Resolver 安全读取本轮附件；
         // 工具层只能传 attachmentId，附件对象必须在 current.attachments 中命中。
         ...(this.#attachmentResolver
@@ -1092,6 +1130,53 @@ ${JSON.stringify(response)}`;
       }
       this.#persistentWaiting.delete(run.id);
     }
+  }
+
+  /** 只从可信 Run 快照和短期凭证构造计划归属，模型不能覆盖这些字段。 */
+  #taskPlanContext(
+    run: Run,
+    metadata: Record<string, unknown>,
+  ): TaskPlanExecutionContext | undefined {
+    if (!this.#taskPlans) {
+      return undefined;
+    }
+    const sessionId = run.ingressContext?.externalSessionId?.trim();
+    const messageId = run.ingressContext?.parentMessageId?.trim();
+    const beyondToken = readBeyondToken(metadata);
+    if (!sessionId || !messageId || !beyondToken) {
+      return undefined;
+    }
+    return {
+      beyondToken,
+      sessionId,
+      messageId,
+      ...(run.ingressContext?.traceId
+        ? { traceId: run.ingressContext.traceId }
+        : {}),
+      sourceRuntime: "BYCLAW_SUPER",
+      sourceRunId: run.id,
+    };
+  }
+
+  async #cancelTaskPlan(
+    run: Run,
+    reason: string,
+    beyondToken?: string,
+  ): Promise<void> {
+    if (!this.#taskPlans) {
+      return;
+    }
+    const metadata = {
+      ...(this.#ephemeralMetadata.get(run.id) ?? {}),
+      ...(beyondToken ? { "Beyond-Token": beyondToken } : {}),
+    };
+    const context = this.#taskPlanContext(run, metadata);
+    if (!context) {
+      return;
+    }
+    // 计划同步不能把已经成功的运行时取消反转成网关失败；标准 STOP_CHAT
+    // 仍会由 BE 在 Gateway 返回后执行权威的 confirmCancellation。
+    await this.#taskPlans.cancel({ context, reason }).catch(() => undefined);
   }
 
   /**

@@ -172,6 +172,8 @@ export interface Delegation {
   connectorCursor?: string;
   /** 已确认 cursor 之前的 Connector 输出，供跨实例 resume 后继续聚合。 */
   partialOutput?: string;
+  /** 最近一次经 Connector 校验、属于本委派的活动时间。 */
+  lastActivityAt?: number;
   version: number;
   result?: AgentResult;
   error?: string;

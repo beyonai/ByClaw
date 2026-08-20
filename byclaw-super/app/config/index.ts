@@ -31,9 +31,11 @@ export interface AppConfig {
   port: number;
   corsOrigin: string | boolean;
   logLevel: string;
-  delegationTimeoutMs: number;
+  delegationTimeouts: {
+    firstActivityMs: number;
+    idleMs: number;
+  };
   openClaw: {
-    firstEventTimeoutMs: number;
     cancelConfirmationTimeoutMs: number;
   };
   redis: RedisConnectionConfig;
@@ -102,9 +104,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     1,
     65_535,
   );
-  const delegationTimeoutMs = integer(
-    env.DELEGATION_TIMEOUT_MS ?? String(defaults.delegationTimeoutMs),
-    "DELEGATION_TIMEOUT_MS",
+  const delegationFirstActivityMs = integer(
+    env.DELEGATION_FIRST_ACTIVITY_TIMEOUT_MS ??
+      env.OPENCLAW_FIRST_EVENT_TIMEOUT_MS ??
+      String(defaults.delegationTimeouts.firstActivityMs),
+    "DELEGATION_FIRST_ACTIVITY_TIMEOUT_MS",
+    1,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const delegationIdleMs = integer(
+    env.DELEGATION_IDLE_TIMEOUT_MS ??
+      env.DELEGATION_TIMEOUT_MS ??
+      String(defaults.delegationTimeouts.idleMs),
+    "DELEGATION_IDLE_TIMEOUT_MS",
     1,
     Number.MAX_SAFE_INTEGER,
   );
@@ -137,15 +149,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     port,
     corsOrigin: corsOrigin === "*" ? true : corsOrigin,
     logLevel: env.LOG_LEVEL ?? defaults.http.logLevel,
-    delegationTimeoutMs,
+    delegationTimeouts: {
+      firstActivityMs: delegationFirstActivityMs,
+      idleMs: delegationIdleMs,
+    },
     openClaw: {
-      firstEventTimeoutMs: integer(
-        env.OPENCLAW_FIRST_EVENT_TIMEOUT_MS ??
-          String(defaults.openClaw.firstEventTimeoutMs),
-        "OPENCLAW_FIRST_EVENT_TIMEOUT_MS",
-        1,
-        3_600_000,
-      ),
       cancelConfirmationTimeoutMs: integer(
         env.OPENCLAW_CANCEL_CONFIRM_TIMEOUT_MS ??
           String(defaults.openClaw.cancelConfirmationTimeoutMs),

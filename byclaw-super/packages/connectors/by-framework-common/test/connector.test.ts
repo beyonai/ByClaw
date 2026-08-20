@@ -371,6 +371,7 @@ describe("ByFrameworkConnector", () => {
     }
 
     expect(events).toEqual([
+      { type: "activity", cursor: "1-0" },
       {
         type: "display_progress",
         text: "正在分析",
@@ -399,6 +400,7 @@ describe("ByFrameworkConnector", () => {
         title: "调用工具：read",
         cursor: "5-0",
       },
+      { type: "activity", cursor: "6-0" },
       { type: "output_delta", text: "完成", cursor: "7-0" },
       {
         type: "completed",

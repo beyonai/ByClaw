@@ -12,6 +12,7 @@ import com.iwhalecloud.byai.common.constants.chat.ConversationObjectType;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.state.application.service.taskplan.TaskPlanApplicationService;
 import com.iwhalecloud.byai.manager.dto.session.SessionUploadResult;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
@@ -19,6 +20,8 @@ import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
 import com.iwhalecloud.byai.state.domain.chat.service.TraceIdCodec;
+import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanSnapshot;
+import com.iwhalecloud.byai.state.domain.ws.service.TaskPlanWebSocketPublisher;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionTitleService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
@@ -42,6 +45,8 @@ class AssistantChatApplicationServiceTest {
 
     private ByaiSystemConfigService byaiSystemConfigService;
 
+    private TaskPlanApplicationService taskPlanApplicationService;
+    private TaskPlanWebSocketPublisher taskPlanWebSocketPublisher;
     private AssistantChatApplicationService assistantChatApplicationService;
 
     @BeforeEach
@@ -50,6 +55,8 @@ class AssistantChatApplicationServiceTest {
         ssResourceService = mock(SsResourceService.class);
         runningOutputStreamRegistry = mock(RunningOutputStreamRegistry.class);
         runningChatSnapshotService = mock(RunningChatSnapshotService.class);
+        taskPlanApplicationService = mock(TaskPlanApplicationService.class);
+        taskPlanWebSocketPublisher = mock(TaskPlanWebSocketPublisher.class);
         sessionService = mock(SessionService.class);
         sessionTitleService = mock(SessionTitleService.class);
         byaiSystemConfigService = mock(ByaiSystemConfigService.class);
@@ -67,8 +74,13 @@ class AssistantChatApplicationServiceTest {
         ReflectionTestUtils.setField(assistantChatApplicationService, "sessionService", sessionService);
         ReflectionTestUtils.setField(assistantChatApplicationService, "sessionTitleService", sessionTitleService);
         ReflectionTestUtils.setField(assistantChatApplicationService, "byaiSystemConfigService", byaiSystemConfigService);
+        ReflectionTestUtils.setField(assistantChatApplicationService, "taskPlanApplicationService",
+            taskPlanApplicationService);
+        ReflectionTestUtils.setField(assistantChatApplicationService, "taskPlanWebSocketPublisher",
+            taskPlanWebSocketPublisher);
 
         LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserId(1L);
         loginInfo.setUserCode("u1");
         CurrentUserHolder.setLoginInfo(loginInfo);
     }
@@ -85,12 +97,22 @@ class AssistantChatApplicationServiceTest {
         stopChatDto.setSessionId(10L);
         stopChatDto.setMessageId(20L);
         when(ssResourceService.findById(30L)).thenReturn(null);
+        TaskPlanSnapshot cancelling = new TaskPlanSnapshot();
+        cancelling.setStatus("CANCELLING");
+        TaskPlanSnapshot cancelled = new TaskPlanSnapshot();
+        cancelled.setStatus("CANCELLED");
+        when(taskPlanApplicationService.requestCancellation(stopChatDto, "USER_STOPPED", "用户请求停止"))
+            .thenReturn(cancelling);
+        when(taskPlanApplicationService.confirmCancellation(stopChatDto, "USER_STOPPED", "用户已停止执行"))
+            .thenReturn(cancelled);
 
         assistantChatApplicationService.stopChat(stopChatDto);
 
         verify(gatewayClient).cancelSession(eq("10"), eq("user cancel task"));
         verify(runningOutputStreamRegistry).release(10L, 20L);
         verify(runningChatSnapshotService).delete(10L, 20L);
+        verify(taskPlanWebSocketPublisher).broadcast(1L, cancelling, null);
+        verify(taskPlanWebSocketPublisher).broadcast(1L, cancelled, null);
     }
 
     @Test
