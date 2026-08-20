@@ -78,20 +78,34 @@ function backendBaseUrl() {
 }
 
 function resolveAuth() {
-  return {
-    beyondToken: firstNonEmpty(
-      process.env.BEYOND_TOKEN,
-      process.env.BYCLAW_BEYOND_TOKEN,
-      process.env.BYCLAW_ECOSYSTEM_BEYOND_TOKEN
-    ),
-    userCode: firstNonEmpty(process.env.USER_CODE, process.env.BYCLAW_ECOSYSTEM_USER_CODE),
-    sessionId: firstNonEmpty(
-      process.env.BAIYING_SESSION,
-      process.env.SESSION_ID,
-      process.env.BYCLAW_SESSION,
-      process.env.BYCLAW_ECOSYSTEM_SESSION
-    ),
-  };
+  const beyondToken = firstNonEmpty(
+    process.env.BEYOND_TOKEN,
+    process.env.BYCLAW_BEYOND_TOKEN,
+    process.env.BYCLAW_ECOSYSTEM_BEYOND_TOKEN
+  );
+  const userCode = firstNonEmpty(process.env.USER_CODE, process.env.BYCLAW_ECOSYSTEM_USER_CODE);
+  const sessionId = firstNonEmpty(
+    process.env.BAIYING_SESSION,
+    process.env.SESSION_ID,
+    process.env.BYCLAW_SESSION,
+    process.env.BYCLAW_ECOSYSTEM_SESSION
+  );
+
+  // 从 BEYOND_TOKEN 解析 userId（JWT payload 的 userId 字段）
+  let userId = undefined;
+  if (beyondToken) {
+    try {
+      const parts = beyondToken.split(".");
+      if (parts.length === 3) {
+        const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
+        userId = payload.userId || payload.uid || payload.sub;
+      }
+    } catch (error) {
+      // JWT 解析失败不影响站内信发送，只影响钉钉侧
+    }
+  }
+
+  return { beyondToken, userCode, sessionId, userId };
 }
 
 // 网关按 userCode + nonce + timestamp + body + salt 的 md5 校验，缺 userCode 时跳过签名头。
