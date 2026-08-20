@@ -115,11 +115,40 @@ citations 指向 itemId、report 先于 cleanup）脚本都会拦，只有「报
 - 采集维度：`collect`（登记执行器抓取结果并物化，inventory 缺失自动补登）/ `inspect` / `run` / `cleanup` /
   `unlock-stale` / `set-retention` / `rewrite-image-links` / `export-views`；
 - 爬取维度：`crawl-seed` / `crawl-next` / `crawl-mark` / `crawl-status`（站点级 frontier，本身不取内容）；
-- 平台维度：`list-kb` / `upload-doc` / `upload-images` / `upload-resource` / `normalize` / `ingest`(`store` 已废弃)；
+- 平台维度：`list-kb` / `upload-doc` / `upload-images` / `upload-resource` / `normalize` / `ingest`(`store` 已废弃) /
+  `enterprise`（企业来源脚本封装，见下）；
 - 汇总：`status`。
 
 所有命令都支持 `<command> --help` 查看参数、示例与 payload 说明；`help` 显示分组总览。
 平台命令不要求 `--session-dir`(门面会直接委派 `ingest.mjs`)。
+
+### `plan` 的 `--channels` 是强制参数
+
+`plan` 除 `--initial-search` 外还**强制要求 `--channels`**，三个发现通道逐个表态，漏一个即报错：
+
+```bash
+--channels '{"builtin-routing":{"state":"used"},
+             "searxng":{"state":"used"},
+             "hot-discovery":{"state":"unavailable","reason":"images 维度无免登录热度源"}}'
+```
+
+`state` 取 `used` / `unavailable` / `not-applicable`；非 `used` 时 `reason` 必填，
+且**笼统或短于 8 字符即报错**（"跳过"、"不适用" 都会被拒）。这条约束用来阻止「悄悄只跑一个通道」。
+
+### `enterprise`: 企业来源的脚本封装
+
+两条企业采集已有脚本封装，不必手工拼 CLI 调用（其余企业能力仍按「来源路由」委派对应 skill）：
+
+```bash
+node scripts/knowledge-collection.mjs enterprise wecom-smartpage \
+  --url <doc.weixin.qq.com/smartpage/...> --output-dir <绝对路径>
+node scripts/knowledge-collection.mjs enterprise feishu-minutes \
+  --minute-token <真实 minute token> --url <妙记 URL> --output-dir <绝对路径>
+```
+
+`--output-dir` 必须是绝对路径；脚本自建 `raw/`、`markdown/`、`sanitized/items/` 并按 0700/0600 落权限，
+输出即标准 `collection-result.json`，可直接交给 `collect`。
+两条之外的子命令一律返回 `unsupported command`，不要臆造（例如没有 `dingtalk-minutes`）。
 
 **`normalize` 的真实角色**：它是 `ingest` 的 dry-run 预检，与 `ingest` 共用 payload 构建逻辑，只校验不请求后端，
 结果写入 stdout、**不落盘任何文件**。它的 `payloads.collectionResult.items[].markdown` 是正文字符串（用于 ingest 上传），
@@ -160,6 +189,11 @@ citations 指向 itemId、report 先于 cleanup）脚本都会拦，只有「报
 - 钉钉/DingTalk：加载并遵循 `dws` skill，并遵循 [DingTalk DWS 采集桥接](references/sources/dingtalk-dws.md)。
 - 飞书/Lark：加载并遵循 `fws` skill，并遵循 [Feishu 采集桥接](references/sources/feishu-fws.md)。
 - 企业微信/WeCom：加载并遵循 `wecomcli` skill，并遵循 [WeCom 采集桥接](references/sources/wecom-wecomcli.md)。
+
+企业来源（钉钉/飞书/企微）**没有兜底执行器**。`agent-reach.md` 的「一次 byCLI 兜底」只适用于公共互联网路由表中
+明确给出兜底的行，**不得推广到企业来源**：对应 CLI 不可用或明确不支持时报告并停止，不得改用 byCLI、浏览器、
+`curl`、直接 HTTP/API 或通用网页抓取，也不得编造替代数据；权限拒绝、无效 ID 或数据不存在按执行器的错误语义如实报告。
+三家各自的完整边界见其桥接文档的「严禁降级」节。
 
 采集编排器自身不取内容，取内容一律委派来源执行器：不得使用 `web_fetch`、`curl`、`wget`、`requests` 或其他直接 HTTP 客户端绕过来源执行器。
 公开可读、静态页面、raw URL、纯文本或 Markdown 内容均不是例外。
