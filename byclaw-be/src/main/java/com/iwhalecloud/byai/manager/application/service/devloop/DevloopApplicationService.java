@@ -2694,6 +2694,9 @@ public class DevloopApplicationService {
     @Autowired
     private UserPrivateParamMapper userPrivateParamMapper;
 
+    @Autowired
+    private UserPrivateParamApplicationService userPrivateParamApplicationService;
+
     /**
      * 保存GitHub PAT，SM4加密存储
      */
@@ -2731,6 +2734,10 @@ public class DevloopApplicationService {
             param.setDeleteFlag("0");
             userPrivateParamMapper.insert(param);
         }
+        // 沙箱启动时从 Redis 读个人参数注入 env（SandboxLaunchContextFactory#loadPersonalEnvSettings），
+        // 不刷缓存的话 PAT 只落库不注入，技能里 GH_TOKEN 仍是空的。
+        userPrivateParamApplicationService.refreshPrivateParamCacheAfterCommit(userId,
+            CurrentUserHolder.getCurrentUserCode());
         return ResponseUtil.successResponse(null);
     }
 
