@@ -66,17 +66,13 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
     });
   }, [account, defaultPlatformId, form, open]);
 
-  // 当切换到自定义链接平台时，清空账号名称和账号ID字段的值和验证错误
+  // 自定义链接没有平台账号 ID，但复用 accountName 保存用户填写的链接名称。
   useEffect(() => {
     if (selectedPlatform === 'CustomLink') {
       form.setFieldsValue({
-        accountName: '',
         accountId: '',
       });
-      form.setFields([
-        { name: 'accountName', errors: [], value: '' },
-        { name: 'accountId', errors: [], value: '' },
-      ]);
+      form.setFields([{ name: 'accountId', errors: [], value: '' }]);
     }
   }, [selectedPlatform, form]);
 
@@ -87,9 +83,8 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
     setSubmitting(true);
     try {
       const values = await form.validateFields();
-      // 自定义链接平台不需要账号名称和账号ID，清空这些字段
+      // 自定义链接平台不需要平台账号 ID，链接名称仍通过 accountName 保存。
       if (values.platformId === 'CustomLink') {
-        values.accountName = '';
         values.accountId = '';
       }
       await onSubmit(values, account);
@@ -118,7 +113,7 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
       closable={!isSubmitting}
       maskClosable={!isSubmitting}
       keyboard={!isSubmitting}
-      destroyOnClose
+      destroyOnHidden
       okText={t('save')}
       cancelText={t('cancel')}
       cancelButtonProps={{ disabled: isSubmitting }}
@@ -142,17 +137,27 @@ const OperationAccountFormModal: React.FC<OperationAccountFormModalProps> = ({
             />
           </Form.Item>
           {selectedPlatform === 'CustomLink' && (
-            <Form.Item
-              className={styles.operationFormFull}
-              label={t('field.customUrl')}
-              name="customUrl"
-              rules={[
-                { required: true, message: t('validation.customUrlRequired') },
-                { type: 'url', message: t('validation.customUrlInvalid') },
-              ]}
-            >
-              <Input placeholder={t('placeholder.customUrl')} />
-            </Form.Item>
+            <>
+              <Form.Item
+                className={styles.operationFormFull}
+                label={t('field.customLinkName')}
+                name="accountName"
+                rules={[{ required: true, whitespace: true, message: t('validation.customLinkNameRequired') }]}
+              >
+                <Input placeholder={t('placeholder.customLinkName')} />
+              </Form.Item>
+              <Form.Item
+                className={styles.operationFormFull}
+                label={t('field.customUrl')}
+                name="customUrl"
+                rules={[
+                  { required: true, message: t('validation.customUrlRequired') },
+                  { type: 'url', message: t('validation.customUrlInvalid') },
+                ]}
+              >
+                <Input placeholder={t('placeholder.customUrl')} />
+              </Form.Item>
+            </>
           )}
           {selectedPlatform !== 'CustomLink' && (
             <>

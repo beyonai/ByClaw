@@ -31,7 +31,7 @@ const normalizeLoginStatus = (account: Record<string, any>): OperationAccount['l
 };
 
 // 账号接口存在新旧字段并行返回的情况，大详情在数据入口统一转换为账号卡片结构。
-const normalizeAccounts = (source: unknown): OperationAccount[] => {
+export const normalizeAccounts = (source: unknown): OperationAccount[] => {
   if (!Array.isArray(source)) return [];
 
   return source
@@ -39,7 +39,12 @@ const normalizeAccounts = (source: unknown): OperationAccount[] => {
     .map((item, index) => ({
       id: item.id ?? item.operationAccountId ?? item.accountPkId ?? item.accountId ?? `operation-account-${index}`,
       platformId: `${item.platformId ?? item.platformCode ?? item.platform ?? item.channelId ?? ''}`,
-      accountName: item.accountName || item.name || '',
+      accountName:
+        item.accountName ||
+        item.name ||
+        (`${item.platformId ?? item.platformCode ?? item.platform ?? item.channelId ?? ''}` === 'CustomLink'
+          ? '自定义链接'
+          : ''),
       accountId: `${item.accountCode ?? item.platformAccountId ?? item.platformAccountCode ?? item.accountId ?? ''}`,
       avatar: item.avatar,
       loginStatus: normalizeLoginStatus(item),
@@ -48,6 +53,17 @@ const normalizeAccounts = (source: unknown): OperationAccount[] => {
       customUrl: item.customUrl || undefined,
     }))
     .filter((item) => item.platformId && item.accountName);
+};
+
+export const buildOperationAccountPayload = (projectId: number, values: OperationAccountFormValues) => {
+  const isCustomLink = values.platformId === 'CustomLink';
+  return {
+    projectId,
+    platformCode: values.platformId,
+    accountCode: isCustomLink ? '' : values.accountId,
+    accountName: values.accountName,
+    ...(isCustomLink ? { customUrl: values.customUrl || '' } : {}),
+  };
 };
 
 const ProjectAccounts: React.FC<Props> = ({ project, keyword = '', onToolbarChange, onRefreshToolbarChange }) => {
@@ -83,15 +99,7 @@ const ProjectAccounts: React.FC<Props> = ({ project, keyword = '', onToolbarChan
     async (values: OperationAccountFormValues, account?: OperationAccount | null) => {
       setSaving(true);
       try {
-        const isCustomLink = values.platformId === 'CustomLink';
-        // 自定义链接平台不填账号名称和标识，后端按平台补默认值，只需提交登录地址。
-        const payload = {
-          projectId: Number(project.projectId),
-          platformCode: values.platformId,
-          accountCode: isCustomLink ? '' : values.accountId,
-          accountName: isCustomLink ? '' : values.accountName,
-          ...(isCustomLink ? { customUrl: values.customUrl || '' } : {}),
-        };
+        const payload = buildOperationAccountPayload(Number(project.projectId), values);
         if (account) {
           await updateOperationAccount({ ...payload, accountId: account.id });
         } else {

@@ -324,6 +324,10 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
             {filteredAccounts.map((account) => {
               const platform = platformOptionMap.get(account.platformId);
               const platformLabel = platform?.label || account.platformId;
+              const accountName =
+                account.accountName || (account.platformId === 'CustomLink' ? platformLabel : account.accountName);
+              const accountSubtitle =
+                account.platformId === 'CustomLink' && account.customUrl ? account.customUrl : account.accountId;
               const status = account.loginStatus || 'unknown';
               // 当前支持的四个运营平台均通过 UI Agent 浏览器登录，历史短编码继续兼容。自定义链接平台也支持登录。
               const canLogin = [
@@ -350,8 +354,8 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
                   <div className={styles.accountCardHeader}>
                     <span className={styles.accountPlatformMark}>{platform?.mark || platformLabel.slice(0, 1)}</span>
                     <div className={styles.accountCardIdentity}>
-                      <strong title={account.accountName}>{account.accountName}</strong>
-                      <span title={account.accountId}>{account.accountId}</span>
+                      <strong title={accountName}>{accountName}</strong>
+                      <span title={accountSubtitle}>{accountSubtitle}</span>
                     </div>
                     <Tag className={styles.accountStatusTag} color={ACCOUNT_STATUS_COLOR[status]}>
                       {t(`status.${status}`)}

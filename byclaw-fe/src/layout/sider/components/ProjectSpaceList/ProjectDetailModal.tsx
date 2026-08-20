@@ -434,9 +434,15 @@ const normalizeOperationAccounts = (detail?: OperationProjectDetailData | null):
     .map((item, index) => ({
       id: item.id ?? item.operationAccountId ?? item.accountPkId ?? item.accountId ?? `operation-account-${index}`,
       platformId: `${item.platformId ?? item.platformCode ?? item.platform ?? item.channelId ?? ''}`,
-      accountName: item.accountName || item.name || '',
+      accountName:
+        item.accountName ||
+        item.name ||
+        (`${item.platformId ?? item.platformCode ?? item.platform ?? item.channelId ?? ''}` === 'CustomLink'
+          ? '自定义链接'
+          : ''),
       // 新接口的 accountId 是系统主键，平台侧标识优先读取 accountCode，避免卡片误展示数字主键。
       accountId: `${item.accountCode ?? item.platformAccountId ?? item.platformAccountCode ?? item.accountId ?? ''}`,
+      customUrl: item.customUrl ? `${item.customUrl}` : undefined,
       avatar: item.avatar,
       loginStatus: normalizeOperationLoginStatus(item),
       metrics: {
@@ -2027,7 +2033,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           projectId,
           platformCode: values.platformId,
           accountCode: values.platformId === 'CustomLink' ? '' : values.accountId,
-          accountName: values.platformId === 'CustomLink' ? '' : values.accountName,
+          accountName: values.accountName,
         };
         // 自定义链接平台需要传递 customUrl
         if (values.platformId === 'CustomLink') {

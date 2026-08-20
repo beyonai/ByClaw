@@ -6218,8 +6218,11 @@ public class DevloopApplicationService {
             return I18nUtil.get("devloop.operationAccount.field.required");
         }
 
-        // 自定义链接平台：只需验证 customUrl，accountCode 和 accountName 可选
+        // 自定义链接平台无需账号编码，但链接名称和 customUrl 均为必填。
         if ("CustomLink".equals(dto.getPlatformCode())) {
+            if (StringUtils.isBlank(dto.getAccountName())) {
+                return I18nUtil.get("devloop.operationAccount.field.required");
+            }
             if (StringUtils.isBlank(dto.getCustomUrl())) {
                 return I18nUtil.get("devloop.operationAccount.customUrl.required");
             }
@@ -6230,6 +6233,9 @@ public class DevloopApplicationService {
             }
             if (dto.getCustomUrl().trim().length() > 500) {
                 return I18nUtil.get("devloop.operationAccount.customUrl.length.invalid");
+            }
+            if (dto.getAccountName().trim().length() > 100) {
+                return I18nUtil.get("devloop.operationAccount.field.length.invalid");
             }
         } else {
             // 其他平台：accountCode 和 accountName 必填
