@@ -1999,6 +1999,7 @@ export default {
   'projectSpace.operation.accountLogin.remoteHint': '请在右侧远程桌面完成扫码，进入平台后台后点击“完成登录”',
   'projectSpace.operation.accountLogin.complete': '完成登录',
   'projectSpace.operation.accountLogin.cancel': '取消',
+  'projectSpace.operation.accountLogin.urlMissing': '该账号未配置登录地址，请先编辑账号补充链接',
   'projectSpace.operation.accountLogin.startFailed': '远程桌面启动失败，请重试',
   'projectSpace.operation.accountLogin.navigateFailed': '登录页面打开失败，请在远程桌面中手工打开对应平台',
   'projectSpace.operation.accountLogin.confirmFailed': '登录状态保存失败，请确认已完成登录后重试',

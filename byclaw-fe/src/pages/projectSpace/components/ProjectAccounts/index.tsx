@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useIntl } from '@umijs/max';
 import {
   OperationAccountPanel,
+  useOperationAccountLogin,
   type OperationAccount,
   type OperationAccountFormValues,
 } from '@/layout/sider/components/ProjectSpaceList/operation';
@@ -71,6 +72,13 @@ const ProjectAccounts: React.FC<Props> = ({ project, keyword = '', onToolbarChan
     void fetchAccounts();
   }, [fetchAccounts]);
 
+  // 账号登录复用大详情的沙箱远程桌面链路，登录完成后刷新卡片状态。
+  const { loginTarget, loginPreparingAccountId, loginConfirming, handleLogin, handleConfirmLogin, closeRemoteDesktop } =
+    useOperationAccountLogin(fetchAccounts);
+
+  // 离开账号页时收起远程桌面，避免遗留遮罩层覆盖其他页签。
+  useEffect(() => closeRemoteDesktop, [closeRemoteDesktop]);
+
   const handleSave = useCallback(
     async (values: OperationAccountFormValues, account?: OperationAccount | null) => {
       setSaving(true);
@@ -103,13 +111,15 @@ const ProjectAccounts: React.FC<Props> = ({ project, keyword = '', onToolbarChan
       setDeletingAccountId(account.id);
       try {
         await deleteOperationAccount(account.id);
+        // 删除正在登录的账号时先收起远程桌面，避免继续操作已失效账号。
+        if (`${loginTarget?.id ?? ''}` === `${account.id}`) closeRemoteDesktop();
         await fetchAccounts();
         message.success(intl.formatMessage({ id: 'projectSpace.operation.account.deleteSuccess' }));
       } finally {
         setDeletingAccountId(null);
       }
     },
-    [fetchAccounts, intl, message]
+    [closeRemoteDesktop, fetchAccounts, intl, loginTarget?.id, message]
   );
 
   return (
@@ -124,9 +134,15 @@ const ProjectAccounts: React.FC<Props> = ({ project, keyword = '', onToolbarChan
       loading={loading}
       savingAccount={saving}
       deletingAccountId={deletingAccountId}
+      loginTarget={loginTarget}
+      loginPreparingAccountId={loginPreparingAccountId}
+      loginConfirming={loginConfirming}
       onRefresh={fetchAccounts}
       onSaveAccount={handleSave}
       onDeleteAccount={handleDelete}
+      onLogin={handleLogin}
+      onConfirmLogin={handleConfirmLogin}
+      onCancelLogin={closeRemoteDesktop}
     />
   );
 };

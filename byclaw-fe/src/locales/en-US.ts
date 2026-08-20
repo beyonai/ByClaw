@@ -2020,6 +2020,7 @@ export default {
   'projectSpace.operation.accountLogin.remoteHint': 'Scan in Remote Desktop, then click Complete sign-in',
   'projectSpace.operation.accountLogin.complete': 'Complete sign-in',
   'projectSpace.operation.accountLogin.cancel': 'Cancel',
+  'projectSpace.operation.accountLogin.urlMissing': 'This account has no sign-in URL. Edit the account to add one',
   'projectSpace.operation.accountLogin.startFailed': 'Failed to start Remote Desktop. Try again',
   'projectSpace.operation.accountLogin.navigateFailed':
     'Failed to open the sign-in page. Open the platform manually in Remote Desktop',
