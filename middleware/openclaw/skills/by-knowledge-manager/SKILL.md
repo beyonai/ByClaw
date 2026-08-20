@@ -1,237 +1,238 @@
 ---
 name: by-knowledge-manager
-description: "Manage knowledge base content through the by-knowledge-manager CLI. Use when an agent or user needs to operate a knowledge base: list/create/rename/delete directories, check upload conflicts, upload or overwrite files, trigger or inspect builds, download files or directory archives, read file line ranges, remove files, or run semantic chunk/file search across one or more knowledge base resource IDs."
+description: "仅通过 Python CLI 管理 ByClaw 知识库内容。用于浏览、新建、重命名或删除知识库目录，检查上传冲突，导入或更新知识库文件，触发或查询知识构建，下载、分行读取或删除文件，以及在一个或多个知识库资源 ID 中执行语义切片检索或文件检索。不用于管理本体对象库，也不处理本体、对象、对象类型或对象关系。"
 ---
 
-# BY Knowledge Manager
+# 管理 ByClaw 知识库
 
-Use this skill to manage knowledge base files and directories, and to search indexed chunks or files semantically.
+只通过本技能自带的 Python CLI 管理知识库目录、文件和检索结果。通过后端服务发现调用 `datasetController`，不得直接调用 ByQA 接口。
 
-## Prerequisites
+## 准备运行环境
 
-Before running the CLI, install the script dependencies from this skill's `scripts/` directory:
+使用已安装 `by-framework` 的 Python 3.12 运行环境。CLI 从 Redis 读取当前用户登录态，并通过 `BE_DOMAINNAME` 发现后端服务。
+
+先读取实时命令清单，并把返回的 JSON 帮助视为命令语法的唯一依据：
 
 ```bash
-cd middleware/openclaw/skills/by-knowledge-manager/scripts && npm install
+python3 scripts/by_knowledge_manager.py help
 ```
 
-Do this before the first run in a new environment, or any time the runtime reports missing Node dependencies.
-
-## Command Entry Point
-
-Start by loading the live command list:
+统一使用以下调用形式：
 
 ```bash
-node scripts/by-knowledge-manager.mjs help
+python3 scripts/by_knowledge_manager.py <command> [options]
 ```
 
-Use the runtime environment as provided. The CLI expects backend/auth/discovery environment variables to already be available in that environment. If the user provides a different script path, use the user's path.
-
-Base command pattern:
+上传或更新本地文件时，传入运行环境能够读取的路径：
 
 ```bash
-node scripts/by-knowledge-manager.mjs <command> [options]
-```
-
-For commands that need local files, pass a file path that is readable from the runtime environment:
-
-```bash
-node scripts/by-knowledge-manager.mjs upload \
+python3 scripts/by_knowledge_manager.py upload \
   --resource-id RESOURCE_ID \
   --directory-path /目标目录 \
   --file-path /tmp/local-file.md
 ```
 
-## Operating Rules
+## 遵守操作规则
 
-- Determine the target knowledge base before operating. If the user has not specified which knowledge base to access, ask them to provide the target `--resource-id` first.
-- For `search` and `search-file`, ask whether to search one knowledge base or multiple knowledge bases when the target is unclear; pass multiple IDs by repeating `--resource-id`.
-- Run `help` first when command syntax might have changed; treat the JSON help as authoritative.
-- Prefer read-only commands (`list`, `read-file`, `search`, `search-file`, `build-status`, `download`) while exploring.
-- Use `--dry-run` on mutating commands when validating paths or payloads before changing the knowledge base.
-- Ask before destructive or irreversible operations unless the user explicitly requested them: `delete-dir`, `remove-file`, and overwriting via `update-file`.
-- After any file or directory operation that changes knowledge base contents (`mkdir`, `rename-dir`, `delete-dir`, `upload`, `update-file`, `remove-file`), run `list` on the target parent directory to verify the expected result.
-- Only upload or update supported knowledge base file types: `.md`, `.markdown`, `.txt`, `.pdf`, `.docx`, `.doc`, `.pptx`, `.ppt`, `.xlsx`, `.xls`, `.csv`. Directly refuse requests to ingest any other file type.
-- Preserve knowledge base paths exactly. Paths are absolute inside the knowledge base, such as `/`, `/产品资料`, or `/产品资料/a.md`.
-- Report the CLI JSON result back to the user in plain language, especially `ok`, `action`, created/renamed paths, build status, conflict paths, downloaded output path, and search hits.
+- 操作前确定目标知识库。用户未指定时，先要求提供 `--resource-id`，不要猜测。
+- `search` 和 `search-file` 的知识库范围不明确时，先确认搜索一个还是多个知识库；搜索多个知识库时重复传入 `--resource-id`。
+- 探索阶段优先使用 `list`、`read-file`、`search`、`search-file`、`build-status` 和 `download` 等只读命令。
+- 修改前需要校验路径或参数时，对可变更命令使用 `--dry-run`。
+- 用户未明确授权时，在执行 `delete-dir`、`remove-file` 和 `update-file` 前取得确认。
+- 执行 `mkdir`、`rename-dir`、`delete-dir`、`upload`、`update-file` 或 `remove-file` 后，对目标父目录执行 `list`，确认结果符合预期。
+- 允许导入任意文件类型。无法构建的格式仍可入库，后续 `build-status` 会返回 `unsupported`。
+- 把 `.zip` 上传视为后端批量导入；`--directory-path` 表示 ZIP 内容的目标目录，并对返回的每个成功文件触发构建。
+- `update-file` 只接受一个本地文件。远端目标路径由目标目录和本地文件名组成，因此本地文件名必须与待更新文件名一致。
+- 单资源请求会自动携带 `X-BYCLAW-RESOURCE-ID`。单知识库检索也会携带；多知识库检索没有唯一资源 ID，只在请求体中传递 `resourceIdList`。
+- 原样保留知识库绝对路径，例如 `/`、`/产品资料`、`/产品资料/a.md`。
+- 用自然语言汇报 CLI JSON 结果，重点说明 `ok`、`action`、目录或文件路径、冲突路径、构建状态、下载输出路径和检索命中项。
 
-## Common Workflows
+## 浏览目录
 
-### Inspect a directory
-
-```bash
-node scripts/by-knowledge-manager.mjs list --resource-id RESOURCE_ID --directory-path /
-```
-
-Use this before uploading, deleting, or renaming so the current tree shape is known.
-
-### Create or rename directories
-
-Create:
+先列出目录，再进行上传、删除或重命名：
 
 ```bash
-node scripts/by-knowledge-manager.mjs mkdir --resource-id RESOURCE_ID --directory-path / --directory-name 产品资料
+python3 scripts/by_knowledge_manager.py list --resource-id RESOURCE_ID --directory-path /
 ```
 
-Then list the parent directory and confirm the new directory appears:
+## 新建或重命名目录
+
+新建目录：
 
 ```bash
-node scripts/by-knowledge-manager.mjs list --resource-id RESOURCE_ID --directory-path /
+python3 scripts/by_knowledge_manager.py mkdir \
+  --resource-id RESOURCE_ID \
+  --directory-path / \
+  --directory-name 产品资料
 ```
 
-Rename:
+重命名目录：
 
 ```bash
-node scripts/by-knowledge-manager.mjs rename-dir --resource-id RESOURCE_ID --directory-path /产品资料 --directory-name 产品手册
+python3 scripts/by_knowledge_manager.py rename-dir \
+  --resource-id RESOURCE_ID \
+  --directory-path /产品资料 \
+  --directory-name 产品手册
 ```
 
-Then list the parent directory and confirm the old name is gone and the new name appears:
+完成后列出父目录，确认新目录存在且旧名称已消失。
+
+## 导入新文件
+
+用户没有明确要求覆盖时，先检查同名冲突：
 
 ```bash
-node scripts/by-knowledge-manager.mjs list --resource-id RESOURCE_ID --directory-path /
+python3 scripts/by_knowledge_manager.py check-conflicts \
+  --resource-id RESOURCE_ID \
+  --directory-path /产品资料 \
+  --file-name a.md
 ```
 
-### Upload new files
-
-Only proceed when every target file has one of these extensions: `.md`, `.markdown`, `.txt`, `.pdf`, `.docx`, `.doc`, `.pptx`, `.ppt`, `.xlsx`, `.xls`, `.csv`. If any file has another extension, refuse the upload request instead of calling the CLI.
-
-Check conflicts first when the user does not explicitly want overwrite behavior:
+重复传入 `--file-path` 可一次上传多个文件。上传成功后，CLI 会对后端返回的成功文件自动触发构建：
 
 ```bash
-node scripts/by-knowledge-manager.mjs check-conflicts --resource-id RESOURCE_ID --directory-path /产品资料 --file-name a.md
+python3 scripts/by_knowledge_manager.py upload \
+  --resource-id RESOURCE_ID \
+  --directory-path /产品资料 \
+  --file-path /tmp/a.md \
+  --check-conflicts
 ```
 
-Upload can accept repeated `--file-path` values. Successful upload automatically triggers build for the returned files.
+只在需要把 YAML 前置元数据当作普通正文保留时传入 `--process-front-matter false`。
+
+导入 ZIP 并保留其中的目录结构：
 
 ```bash
-node scripts/by-knowledge-manager.mjs upload --resource-id RESOURCE_ID --directory-path /产品资料 --file-path /tmp/a.md --check-conflicts
+python3 scripts/by_knowledge_manager.py upload \
+  --resource-id RESOURCE_ID \
+  --directory-path /产品资料 \
+  --file-path /tmp/docs.zip
 ```
 
-Then list the upload directory and confirm the uploaded file appears:
+## 更新已有文件
+
+只在明确替换已有文件时使用 `update-file`。CLI 调用后端专用更新接口，并在更新成功后重新触发构建：
 
 ```bash
-node scripts/by-knowledge-manager.mjs list --resource-id RESOURCE_ID --directory-path /产品资料
+python3 scripts/by_knowledge_manager.py update-file \
+  --resource-id RESOURCE_ID \
+  --directory-path /产品资料 \
+  --file-path /tmp/a.md
 ```
 
-Use `--process-front-matter false` only when front matter should be preserved as normal content instead of processed by the backend.
+完成后列出目标目录，确认文件仍存在。
 
-### Overwrite existing files
+## 构建并查询状态
 
-Only proceed when every replacement file has one of the supported upload extensions: `.md`, `.markdown`, `.txt`, `.pdf`, `.docx`, `.doc`, `.pptx`, `.ppt`, `.xlsx`, `.xls`, `.csv`. If any file has another extension, refuse the update request instead of calling the CLI.
-
-Use `update-file` only when overwrite is intended. It checks conflicts by default and uploads with overwrite enabled.
+触发指定文件的异步知识构建：
 
 ```bash
-node scripts/by-knowledge-manager.mjs update-file --resource-id RESOURCE_ID --directory-path /产品资料 --file-path /tmp/a.md
+python3 scripts/by_knowledge_manager.py build \
+  --resource-id RESOURCE_ID \
+  --file-path /产品资料/a.md
 ```
 
-Then list the target directory and confirm the file still exists:
+查询构建状态：
 
 ```bash
-node scripts/by-knowledge-manager.mjs list --resource-id RESOURCE_ID --directory-path /产品资料
+python3 scripts/by_knowledge_manager.py build-status \
+  --resource-id RESOURCE_ID \
+  --file-path /产品资料/a.md
 ```
 
-Use `--skip-conflict-check` only when the user has already confirmed the target.
+上传或更新后，如果用户关心检索是否就绪，继续查询构建状态。异步受理不能表述为构建已完成。
 
-### Build and inspect build status
+## 下载或读取文件
 
-Trigger build for a knowledge base file path:
+下载文件：
 
 ```bash
-node scripts/by-knowledge-manager.mjs build --resource-id RESOURCE_ID --file-path /产品资料/a.md
+python3 scripts/by_knowledge_manager.py download \
+  --resource-id RESOURCE_ID \
+  --file-path /产品资料/a.md \
+  --output /tmp/a.md
 ```
 
-Check status:
+下载目录压缩包：
 
 ```bash
-node scripts/by-knowledge-manager.mjs build-status --resource-id RESOURCE_ID --file-path /产品资料/a.md
+python3 scripts/by_knowledge_manager.py download \
+  --resource-id RESOURCE_ID \
+  --directory-path /产品资料 \
+  --output /tmp/产品资料.zip
 ```
 
-After upload or update, query build status if the user cares about search readiness.
-
-### Download or read files
-
-Download a file:
+按行读取文件：
 
 ```bash
-node scripts/by-knowledge-manager.mjs download --resource-id RESOURCE_ID --file-path /产品资料/a.md --output /tmp/a.md
+python3 scripts/by_knowledge_manager.py read-file \
+  --resource-id RESOURCE_ID \
+  --file-path /产品资料/a.md \
+  --start-line 1 \
+  --end-line 80
 ```
 
-Download a directory archive:
+检索命中后，使用 `read-file` 扩大命中行附近的阅读范围。
+
+## 执行语义切片检索
+
+搜索一个知识库：
 
 ```bash
-node scripts/by-knowledge-manager.mjs download --resource-id RESOURCE_ID --directory-path /产品资料 --output /tmp/产品资料.zip
+python3 scripts/by_knowledge_manager.py search \
+  --resource-id RESOURCE_ID \
+  --query "员工请假流程是什么" \
+  --top-k 5
 ```
 
-Read file content by line range:
+搜索多个知识库：
 
 ```bash
-node scripts/by-knowledge-manager.mjs read-file --resource-id RESOURCE_ID --file-path /产品资料/a.md --start-line 1 --end-line 80
+python3 scripts/by_knowledge_manager.py search \
+  --resource-id RESOURCE_ID_A \
+  --resource-id RESOURCE_ID_B \
+  --query "员工请假流程是什么" \
+  --top-k 10
 ```
 
-Use `read-file` after search hits to inspect surrounding context.
+把每个结果解释为切片命中，字段包括 `resourceId`、`filePath`、`chunkNo`、`chunkText`、`score`，以及可选的 `startLine`、`endLine` 和 `imagePath`。按文件路径和行范围引用或概述结果。
 
-### Semantic chunk search
+## 执行语义文件检索
 
-Search one knowledge base:
+只需要先找相关文件时使用 `search-file`：
 
 ```bash
-node scripts/by-knowledge-manager.mjs search --resource-id RESOURCE_ID --query "员工请假流程是什么" --top-k 5
+python3 scripts/by_knowledge_manager.py search-file \
+  --resource-id RESOURCE_ID \
+  --query "故障" \
+  --top-k 10
 ```
 
-Search multiple knowledge bases by repeating `--resource-id`:
+搜索多个知识库时重复传入 `--resource-id`。把结果解释为文件命中，字段包括 `resourceId`、`filePath`、`score` 和可选的 `metadata`；需要深入查看时继续使用 `read-file` 或 `download`。
+
+## 删除内容
+
+删除文件：
 
 ```bash
-node scripts/by-knowledge-manager.mjs search --resource-id RESOURCE_ID_A --resource-id RESOURCE_ID_B --query "员工请假流程是什么" --top-k 10
+python3 scripts/by_knowledge_manager.py remove-file \
+  --resource-id RESOURCE_ID \
+  --file-path /产品资料/a.md
 ```
 
-Interpret each search item as a chunk hit with `resourceId`, `filePath`, `chunkNo`, `chunkText`, `score`, and optional `startLine`/`endLine`/`imagePath`. Cite or summarize results by file path and line range when present. When a chunk looks relevant, run `read-file` on the same `filePath` with a slightly wider line range.
-
-### Semantic file search
-
-Use `search-file` when the user wants relevant files first instead of chunk snippets:
+删除目录：
 
 ```bash
-node scripts/by-knowledge-manager.mjs search-file --resource-id RESOURCE_ID --query "故障" --top-k 10
+python3 scripts/by_knowledge_manager.py delete-dir \
+  --resource-id RESOURCE_ID \
+  --directory-path /产品资料
 ```
 
-Search multiple knowledge bases by repeating `--resource-id`:
+删除目录前先列出父目录并说明将删除的范围；删除后再次列出父目录，确认目标已消失。
 
-```bash
-node scripts/by-knowledge-manager.mjs search-file --resource-id RESOURCE_ID_A --resource-id RESOURCE_ID_B --query "故障" --top-k 10
-```
+## 处理故障
 
-Interpret each search item as a file hit with `resourceId`, `filePath`, `score`, and optional `metadata`. When a file looks relevant, run `read-file` on the same `filePath` or `download` it for deeper inspection.
-
-### Delete content
-
-Delete a file:
-
-```bash
-node scripts/by-knowledge-manager.mjs remove-file --resource-id RESOURCE_ID --file-path /产品资料/a.md
-```
-
-Then list the parent directory and confirm the file is gone:
-
-```bash
-node scripts/by-knowledge-manager.mjs list --resource-id RESOURCE_ID --directory-path /产品资料
-```
-
-Delete a directory:
-
-```bash
-node scripts/by-knowledge-manager.mjs delete-dir --resource-id RESOURCE_ID --directory-path /产品资料
-```
-
-Before deletion, list the parent directory and tell the user what will be removed. After deletion, list the parent directory again and confirm the directory is gone:
-
-```bash
-node scripts/by-knowledge-manager.mjs list --resource-id RESOURCE_ID --directory-path /
-```
-
-## Troubleshooting
-
-- If a command returns `{ "ok": false, "error": "..." }`, fix the path, resource ID, local file path, or auth/env issue and retry only when safe.
-- If upload says the local file does not exist, check whether `--file-path` is readable from the runtime environment.
-- If search returns no items after upload/update, check `build-status`; the file may not be fully indexed yet.
-- If backend discovery or authentication fails, inspect the runtime environment or the env file supplied by the user for the expected connection variables.
+- CLI 返回 `{ "ok": false, "error": "..." }` 时，先修正路径、资源 ID、本地文件路径或认证环境；只在重试安全时再次执行。
+- 提示本地文件不存在时，确认 `--file-path` 对当前运行环境可读。
+- 上传或更新后检索不到内容时，先执行 `build-status`；文件可能仍在构建中。
+- 服务发现或认证失败时，检查 `BE_DOMAINNAME`、`USER_CODE` 和 Redis 连接变量。不要改用直连 ByQA 或主机 URL 绕过服务发现。
