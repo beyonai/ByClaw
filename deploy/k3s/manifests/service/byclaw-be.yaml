@@ -55,8 +55,6 @@ spec:
               value: "/mnt/byclaw-workspace"
             - name: ARTIFACT_STORAGE_TYPE
               value: "file"
-            - name: ARTIFACT_STORAGE_LOCAL_ROOT
-              value: "/mnt/byclaw-artifacts"
             - name: ARTIFACT_PUBLIC_BASE_URL
               value: ""
             - name: BYCLAW_SANDBOX_FILE_VOLUME_TYPE
@@ -78,8 +76,6 @@ spec:
               readOnly: true
             - name: workspace
               mountPath: /mnt/byclaw-workspace
-            - name: artifacts
-              mountPath: /mnt/byclaw-artifacts
       volumes:
         - name: config
           configMap:
@@ -87,9 +83,6 @@ spec:
         - name: workspace
           persistentVolumeClaim:
             claimName: byclaw-workspace
-        - name: artifacts
-          persistentVolumeClaim:
-            claimName: byclaw-artifacts
 ---
 apiVersion: v1
 kind: Service

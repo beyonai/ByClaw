@@ -36,6 +36,7 @@ class ArtifactApplicationServiceTest {
     private InMemoryStorage storage;
     private ArtifactCleanupService cleanupService;
     private ArtifactApplicationService service;
+    private ArtifactProperties properties;
     private AtomicReference<ArtifactRecord> record;
 
     @BeforeEach
@@ -45,9 +46,9 @@ class ArtifactApplicationServiceTest {
         loginInfo.setUserCode("user-42");
         CurrentUserHolder.setLoginInfo(loginInfo);
 
-        ArtifactProperties properties = new ArtifactProperties();
+        properties = new ArtifactProperties();
         ReflectionTestUtils.setField(properties, "storageType", "file");
-        ReflectionTestUtils.setField(properties, "localRoot", "/artifact-root");
+        ReflectionTestUtils.setField(properties, "sandboxFileVolumeRoot", "/sandbox-volume-root");
         ReflectionTestUtils.setField(properties, "bucket", "artifact-bucket");
         ReflectionTestUtils.setField(properties, "publicBaseUrl", "https://preview.test/byaiService");
         ReflectionTestUtils.setField(properties, "previewPathPrefix", "/artifact-preview");
@@ -90,9 +91,22 @@ class ArtifactApplicationServiceTest {
         assertThat(result.getKind()).isEqualTo("FILE");
         assertThat(result.getPreviewUrl()).startsWith("https://preview.test/byaiService/artifact-preview/");
         assertThat(result.getDownloadUrl()).startsWith("https://preview.test/byaiService/artifact-download/");
+        assertThat(record.get().getStorageRoot()).isEqualTo("/sandbox-volume-root/byclaw-artifacts");
         assertThat(record.get().getAccessKeyHash()).hasSize(64).doesNotContain(accessKey);
         assertThat(service.resolvePreview(result.getArtifactId(), accessKey, null)).isNotNull();
         assertThat(service.resolvePreview(result.getArtifactId(), "wrong-key", null)).isNull();
+    }
+
+    @Test
+    void usesBucketInsteadOfFilesystemRootForObjectStorage() {
+        ReflectionTestUtils.setField(properties, "storageType", "aliyun-oss");
+        MockMultipartFile file = new MockMultipartFile("file", "index.html", "text/html",
+            "<h1>preview</h1>".getBytes());
+
+        service.publish(file, ArtifactPublishMode.AUTO, null, true, null, null, null);
+
+        assertThat(record.get().getStorageType()).isEqualTo("aliyun-oss");
+        assertThat(record.get().getStorageRoot()).isEqualTo("artifact-bucket");
     }
 
     @Test

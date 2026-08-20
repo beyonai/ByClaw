@@ -34,9 +34,8 @@ services:
       - ./logs/be:/app/logs
       # dws 登录态（file-DEK 加密），持久化后重启无需重新钉钉授权。
       - byclaw-dws-auth:/home/appuser/.dws
+      # Artifact 存储在该共享根下的 byclaw-artifacts 目录；沙箱仍只挂载各自的用户子目录。
       - ${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}:${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}
-      # Artifact发布区不挂进沙箱，避免已发布内容被不可信进程原地替换。
-      - ${ARTIFACT_STORAGE_LOCAL_ROOT:-/mnt/byclaw-artifacts}:${ARTIFACT_STORAGE_LOCAL_ROOT:-/mnt/byclaw-artifacts}
     networks:
       - byclaw-network
     restart: unless-stopped

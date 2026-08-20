@@ -1,6 +1,8 @@
 package com.iwhalecloud.byai.state.domain.artifact.config;
 
+import java.nio.file.Path;
 import lombok.Getter;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -11,11 +13,13 @@ import org.springframework.stereotype.Component;
 @Component
 public class ArtifactProperties {
 
+    private static final String ARTIFACT_DIRECTORY = "byclaw-artifacts";
+
     @Value("${artifact.storage.type:${file.storage.type:file}}")
     private String storageType;
 
-    @Value("${artifact.storage.local-root:/mnt/byclaw-artifacts}")
-    private String localRoot;
+    @Value("${byclaw.sandbox.volume.file-root:/tmp/byclaw-storage}")
+    private String sandboxFileVolumeRoot;
 
     @Value("${artifact.storage.bucket:byclaw-artifacts}")
     private String bucket;
@@ -55,4 +59,13 @@ public class ArtifactProperties {
 
     @Value("${artifact.cleanup.fixed-delay-ms:3600000}")
     private long cleanupFixedDelayMs;
+
+    /**
+     * Keep filesystem-backed Artifacts inside the already-mounted sandbox volume root without exposing this sibling
+     * directory through the per-user sandbox mount.
+     */
+    public String getLocalRoot() {
+        String volumeRoot = StringUtils.defaultIfBlank(sandboxFileVolumeRoot, "/tmp/byclaw-storage");
+        return Path.of(volumeRoot).resolve(ARTIFACT_DIRECTORY).normalize().toString();
+    }
 }

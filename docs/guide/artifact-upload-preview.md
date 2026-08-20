@@ -236,20 +236,22 @@ ZIP 限制默认包括：压缩文件 300MB、解压总量 1GB、单文件 200MB
 
 ## 5. Docker 单机版部署
 
-### 5.1 配置独立 Artifact 目录
+### 5.1 复用现有文件存储挂载
 
 在仓库根目录的私有 `.env` 中配置：
 
 ```dotenv
 ARTIFACT_STORAGE_TYPE=file
-ARTIFACT_STORAGE_LOCAL_ROOT=/mnt/byclaw-artifacts
 ARTIFACT_STORAGE_BUCKET=byclaw-artifacts
 ARTIFACT_PUBLIC_BASE_URL=https://www.beyonai.cn/byaiService
 ```
 
-`deploy/standalone/docker-compose.yml` 会把 `ARTIFACT_STORAGE_LOCAL_ROOT` 挂载到 BE 容器的同一路径。该目录不会挂载进沙箱，避免沙箱进程在发布后原地篡改内容。
+`file/local` 后端固定把 Artifact 存储到
+`${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}/byclaw-artifacts`。`deploy/standalone/docker-compose.yml` 已把
+`BYCLAW_SANDBOX_FILE_VOLUME_ROOT` 挂载到 BE 容器，因此无需增加新的宿主机目录或 Volume 配置。
 
-确认宿主机目录对容器用户 `1001:1001` 可写。生产环境建议使用独立磁盘或 NFS 挂载点，并把备份、容量告警和 inode 监控纳入运维体系。
+沙箱只挂载 `${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}/byclaw-${USER_CODE}/by`，不会看到同级的
+`byclaw-artifacts` 发布目录。确认现有 NFS 根目录对容器用户 `1001:1001` 可写，并把 Artifact 容量计入该共享存储的备份、容量告警和 inode 监控。
 
 ### 5.2 执行数据库迁移
 
@@ -324,7 +326,7 @@ ARTIFACT_PUBLIC_BASE_URL=https://preview.beyonai.cn
 
 ## 6. K3s 部署
 
-### 6.1 配置 RWX PVC 和公共 URL
+### 6.1 复用工作区 RWX PVC 并配置公共 URL
 
 复制环境变量模板：
 
@@ -335,15 +337,13 @@ cp deploy/k3s/env.k3s.example deploy/k3s/env.k3s
 编辑私有 `deploy/k3s/env.k3s`：
 
 ```dotenv
-ARTIFACT_PVC_NAME=byclaw-artifacts
-ARTIFACT_PVC_SIZE=200Gi
 ARTIFACT_STORAGE_TYPE=file
-ARTIFACT_STORAGE_LOCAL_ROOT=/mnt/byclaw-artifacts
 ARTIFACT_STORAGE_BUCKET=byclaw-artifacts
 ARTIFACT_PUBLIC_BASE_URL=https://www.beyonai.cn/byaiService
 ```
 
-渲染脚本会创建独立 `ReadWriteMany` PVC，并只把它读写挂载到 BE Pod。多副本 BE 因此可以立即读取其他副本刚发布的 Artifact。
+渲染脚本复用 `WORKSPACE_PVC_NAME` 指定的 `ReadWriteMany` PVC。Artifact 固定写入
+`${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}/byclaw-artifacts`，不再创建或挂载独立 Artifact PVC。多副本 BE 使用同一共享卷，因此可以立即读取其他副本刚发布的 Artifact。
 
 先检查渲染结果：
 
@@ -481,10 +481,10 @@ curl -I http://127.0.0.1:8086/byaiService/actuator/health
 K3s 检查：
 
 ```bash
-kubectl -n by-service get pvc byclaw-artifacts
+kubectl -n by-service get pvc byclaw-workspace
 kubectl -n by-service get pods -l app=byclaw-be
 kubectl -n by-service get ingress
-kubectl -n by-service exec deploy/byclaw-be -- test -w /mnt/byclaw-artifacts
+kubectl -n by-service exec deploy/byclaw-be -- test -w /mnt/byclaw-workspace/byclaw-artifacts
 ```
 
 然后使用一个小型 HTML 或 ZIP 完成端到端验证：
@@ -528,7 +528,8 @@ curl -i \
 
 ### 多副本环境偶发找不到刚上传的文件
 
-确认所有 BE Pod 挂载的是同一个 RWX PVC，而不是节点本地目录；检查 `ARTIFACT_STORAGE_LOCAL_ROOT` 和 Artifact 记录中的 `storageType/storageRoot`。
+确认所有 BE Pod 挂载的是同一个 workspace RWX PVC，而不是节点本地目录；检查
+`BYCLAW_SANDBOX_FILE_VOLUME_ROOT` 和 Artifact 记录中的 `storageType/storageRoot`。
 
 ## 9. 安全说明
 
@@ -537,5 +538,4 @@ curl -i \
 - 如果预览 URL 与主站同属 `www.beyonai.cn`，上传脚本与主站同源，可能访问未正确隔离的 Cookie、LocalStorage 或同源 API。
 - 条件允许时，生产环境应优先使用 `preview.beyonai.cn`，并避免在该子域名设置主站 Cookie。
 - Artifact 发布目录不能挂载到沙箱。沙箱只能通过上传 API 发布内容。
-- 过期清理依赖数据库状态和共享存储；应监控长期停留在 `DELETING` 的记录、PVC 使用率和清理任务日志。
-
+- 过期清理依赖数据库状态和共享存储；应监控长期停留在 `DELETING` 的记录、共享卷使用率和清理任务日志。

@@ -61,12 +61,9 @@ OPENSANDBOX_WORKLOAD_NAMESPACE="${OPENSANDBOX_WORKLOAD_NAMESPACE:-$NS_SERVICE}"
 STORAGE_CLASS="${STORAGE_CLASS:-longhorn}"
 WORKSPACE_PVC_NAME="${WORKSPACE_PVC_NAME:-byclaw-workspace}"
 WORKSPACE_PVC_SIZE="${WORKSPACE_PVC_SIZE:-500Gi}"
-ARTIFACT_PVC_NAME="${ARTIFACT_PVC_NAME:-byclaw-artifacts}"
-ARTIFACT_PVC_SIZE="${ARTIFACT_PVC_SIZE:-200Gi}"
 BYCLAW_SANDBOX_FILE_VOLUME_ROOT="${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-workspace}"
 FILE_STORAGE_LOCAL_PATH="${FILE_STORAGE_LOCAL_PATH:-$BYCLAW_SANDBOX_FILE_VOLUME_ROOT}"
 FILE_STORAGE_MINIO_MOUNT_PATH="${FILE_STORAGE_MINIO_MOUNT_PATH:-$BYCLAW_SANDBOX_FILE_VOLUME_ROOT}"
-ARTIFACT_STORAGE_LOCAL_ROOT="${ARTIFACT_STORAGE_LOCAL_ROOT:-/mnt/byclaw-artifacts}"
 BYCLAW_SANDBOX_BASE_URL="${BYCLAW_SANDBOX_BASE_URL:-http://opensandbox-server.${NS_SANDBOX}.svc.cluster.local:9005}"
 BYCLAW_SANDBOX_ENDPOINT_SCHEME="${BYCLAW_SANDBOX_ENDPOINT_SCHEME:-https}"
 OPENSANDBOX_API_PORT="${OPENSANDBOX_API_PORT:-9005}"
@@ -459,21 +456,6 @@ spec:
   resources:
     requests:
       storage: ${WORKSPACE_PVC_SIZE}
-EOF
-
-cat > "$OUT_DIR/10-storage/artifact-pvc.yaml" <<EOF
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: ${ARTIFACT_PVC_NAME}
-  namespace: ${NS_SERVICE}
-spec:
-  accessModes:
-    - ReadWriteMany
-  storageClassName: ${STORAGE_CLASS}
-  resources:
-    requests:
-      storage: ${ARTIFACT_PVC_SIZE}
 EOF
 
 cat > "$OUT_DIR/20-middleware/opengauss.yaml" <<EOF
@@ -1521,8 +1503,6 @@ spec:
               subPath: logs/be
             - name: workspace
               mountPath: ${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}
-            - name: artifacts
-              mountPath: ${ARTIFACT_STORAGE_LOCAL_ROOT}
             - name: runtime-env-file
               mountPath: /etc/byclaw/.env
               subPath: .env
@@ -1537,9 +1517,6 @@ spec:
         - name: workspace
           persistentVolumeClaim:
             claimName: ${WORKSPACE_PVC_NAME}
-        - name: artifacts
-          persistentVolumeClaim:
-            claimName: ${ARTIFACT_PVC_NAME}
         - name: runtime-env-file
           configMap:
             name: byclaw-be-runtime-env-file
