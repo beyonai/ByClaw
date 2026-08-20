@@ -395,7 +395,13 @@ class ByFrameworkDiscoveryTransport:
         code = body.get("code")
         success = body.get("success")
         if code not in {0, 200, "0", "200"} or success is False:
-            raise ValueError(body.get("msg") or body.get("message") or f"接口返回异常 code={code}")
+            message = body.get("msg") or body.get("message") or f"接口返回异常 code={code}"
+            detail = body.get("data")
+            if isinstance(detail, dict) and (
+                detail.get("errorCode") or detail.get("errorList")
+            ):
+                message = f"{message}: {json.dumps(detail, ensure_ascii=False)}"
+            raise ValueError(message)
         return body.get("data")
 
 
@@ -780,21 +786,50 @@ class KnowledgeManager:
             raise ValueError("--resource-id 必须是正整数")
         if args.top_k <= 0:
             raise ValueError("--top-k 必须是正整数")
-        return {"resourceIdList": args.resource_id, "query": args.query, "topK": args.top_k, "searchMode": "mixedRecall"}
+        return _compact(
+            {
+                "resourceIdList": args.resource_id,
+                "query": args.query,
+                "where": args.where_json,
+                "metadataFieldList": args.metadata_field,
+                "topK": args.top_k,
+                "searchMode": args.search_mode,
+            }
+        )
 
     def _search(self, args: argparse.Namespace) -> dict[str, Any]:
         payload = self._search_payload(args)
         value = self.api.search(payload)
         raw_items = value.get("data", []) if isinstance(value, dict) else []
-        items = [_compact({"resourceId": _as_int(item.get("resourceId")), "filePath": item.get("filePath"), "chunkNo": _as_int(item.get("chunkNo")), "chunkText": item.get("chunkText"), "score": item.get("score"), "imagePath": item.get("imagePath"), "startLine": _as_int(item.get("startLine")), "endLine": _as_int(item.get("endLine"))}) for item in raw_items if isinstance(item, dict)]
-        return {"ok": True, "action": "search", "resourceIds": args.resource_id, "query": args.query, "topK": args.top_k, "items": items}
+        items = [_compact({"resourceId": _as_int(item.get("resourceId")), "filePath": item.get("filePath"), "chunkNo": _as_int(item.get("chunkNo")), "chunkText": item.get("chunkText"), "score": item.get("score"), "imagePath": item.get("imagePath"), "startLine": _as_int(item.get("startLine")), "endLine": _as_int(item.get("endLine")), "metadata": item.get("metadata")}) for item in raw_items if isinstance(item, dict)]
+        return {
+            "ok": True,
+            "action": "search",
+            "resourceIds": args.resource_id,
+            "query": args.query,
+            "where": args.where_json,
+            "metadataFields": args.metadata_field or [],
+            "searchMode": args.search_mode,
+            "topK": args.top_k,
+            "items": items,
+        }
 
     def _search_file(self, args: argparse.Namespace) -> dict[str, Any]:
         payload = self._search_payload(args)
         value = self.api.search_file(payload)
         raw_items = value.get("data", []) if isinstance(value, dict) else []
         items = [_compact({"resourceId": _as_int(item.get("resourceId")), "filePath": item.get("filePath"), "score": item.get("score"), "metadata": item.get("metadata")}) for item in raw_items if isinstance(item, dict)]
-        return {"ok": True, "action": "search-file", "resourceIds": args.resource_id, "query": args.query, "topK": args.top_k, "items": items}
+        return {
+            "ok": True,
+            "action": "search-file",
+            "resourceIds": args.resource_id,
+            "query": args.query,
+            "where": args.where_json,
+            "metadataFields": args.metadata_field or [],
+            "searchMode": args.search_mode,
+            "topK": args.top_k,
+            "items": items,
+        }
 
     @staticmethod
     def _entity_batch(value: Any, *, resource_id: int) -> dict[str, Any]:
@@ -1159,6 +1194,24 @@ def build_parser() -> argparse.ArgumentParser:
             metavar="N",
             help="返回结果数量（默认 5）",
         )
+        command.add_argument(
+            "--where-json",
+            type=_agent_dsl,
+            metavar="JSON",
+            help="Agent DSL 的 where JSON 对象；完整规则见检索子 Skill",
+        )
+        command.add_argument(
+            "--metadata-field",
+            action="append",
+            metavar="NAME",
+            help="需要返回的元数据字段；多个字段时重复传入",
+        )
+        command.add_argument(
+            "--search-mode",
+            choices=("fullTextRecall", "embedding", "mixedRecall"),
+            default="mixedRecall",
+            help="检索召回模式（默认 mixedRecall）",
+        )
 
     for name in ("entity-discovery", "entity-enrich"):
         command = _add_command(subparsers, name, descriptions[name])
@@ -1258,6 +1311,107 @@ def _json_object(value: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise argparse.ArgumentTypeError("必须是 JSON 对象")
     return parsed
+
+
+def _agent_dsl(value: str) -> dict[str, Any]:
+    expression = _json_object(value)
+    boolean_operators = {"and", "or", "not"}
+    leaf_operators = {
+        "eq",
+        "ne",
+        "in",
+        "contains",
+        "exists",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "prefix",
+        "wildcard",
+    }
+    leaf_count = 0
+
+    def visit(node: Any, *, boolean_depth: int, path: str) -> None:
+        nonlocal leaf_count
+        if not isinstance(node, dict) or len(node) != 1:
+            raise argparse.ArgumentTypeError(
+                f"{path} 必须是只包含一个操作符的对象"
+            )
+        operator, operand = next(iter(node.items()))
+        if operator not in boolean_operators | leaf_operators:
+            raise argparse.ArgumentTypeError(f"{path} 使用了不支持的操作符: {operator}")
+
+        if operator in boolean_operators:
+            next_depth = boolean_depth + 1
+            if next_depth > 3:
+                raise argparse.ArgumentTypeError("where 布尔嵌套深度不能超过 3")
+            if operator in {"and", "or"}:
+                if not isinstance(operand, list) or not operand:
+                    raise argparse.ArgumentTypeError(
+                        f"{path}.{operator} 必须是非空数组"
+                    )
+                for index, child in enumerate(operand):
+                    visit(
+                        child,
+                        boolean_depth=next_depth,
+                        path=f"{path}.{operator}[{index}]",
+                    )
+            else:
+                if not isinstance(operand, dict):
+                    raise argparse.ArgumentTypeError(
+                        f"{path}.not 必须是单个表达式对象"
+                    )
+                visit(operand, boolean_depth=next_depth, path=f"{path}.not")
+            return
+
+        leaf_count += 1
+        if leaf_count > 12:
+            raise argparse.ArgumentTypeError("where 叶子条件数不能超过 12")
+        if not isinstance(operand, dict):
+            raise argparse.ArgumentTypeError(f"{path}.{operator} 必须是对象")
+        field_name = operand.get("fieldName")
+        if not isinstance(field_name, str) or not field_name.strip():
+            raise argparse.ArgumentTypeError(
+                f"{path}.{operator}.fieldName 必须是非空字符串"
+            )
+        allowed_keys = {"fieldName", "value"}
+        unknown_keys = set(operand) - allowed_keys
+        if unknown_keys:
+            raise argparse.ArgumentTypeError(
+                f"{path}.{operator} 包含未知字段: {', '.join(sorted(unknown_keys))}"
+            )
+        if operator == "exists":
+            if "value" in operand:
+                raise argparse.ArgumentTypeError("exists 不应携带 value")
+            return
+        if "value" not in operand:
+            raise argparse.ArgumentTypeError(f"{path}.{operator} 缺少 value")
+        leaf_value = operand["value"]
+        if operator == "in" and (
+            not isinstance(leaf_value, list) or not leaf_value
+        ):
+            raise argparse.ArgumentTypeError("in.value 必须是非空数组")
+        if operator in {"contains", "prefix", "wildcard"} and not isinstance(
+            leaf_value, str
+        ):
+            raise argparse.ArgumentTypeError(f"{operator}.value 必须是字符串")
+        scalar_types = (str, int, float, bool)
+        if operator in {"eq", "ne"} and not isinstance(leaf_value, scalar_types):
+            raise argparse.ArgumentTypeError(f"{operator}.value 必须是标量")
+        if operator in {"gt", "gte", "lt", "lte"} and (
+            isinstance(leaf_value, bool)
+            or not isinstance(leaf_value, (str, int, float))
+        ):
+            raise argparse.ArgumentTypeError(
+                f"{operator}.value 必须是数值或 ISO 8601 字符串"
+            )
+        if operator == "in" and any(
+            not isinstance(item, scalar_types) for item in leaf_value
+        ):
+            raise argparse.ArgumentTypeError("in.value 的元素必须是标量")
+
+    visit(expression, boolean_depth=0, path="where")
+    return expression
 
 
 def main(argv: list[str] | None = None) -> int:

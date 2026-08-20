@@ -133,6 +133,26 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(self.transport.calls[0]["file_paths"], [Path("a.md")])
         self.assertEqual(self.transport.calls[0]["file_field"], "fileContent")
 
+    def test_transport_preserves_dsl_error_details(self) -> None:
+        with self.assertRaisesRegex(ValueError, "UNKNOWN_FIELD"):
+            manager_module.ByFrameworkDiscoveryTransport._unwrap_body(
+                {
+                    "code": -1,
+                    "msg": "request validation failed",
+                    "data": {
+                        "errorCode": "DSL_VALIDATION_ERROR",
+                        "errorList": [
+                            {
+                                "path": "where.eq.fieldName",
+                                "code": "UNKNOWN_FIELD",
+                                "message": "unknown field",
+                            }
+                        ],
+                    },
+                },
+                "/knowledgeItems/search",
+            )
+
 
 class KnowledgeManagerTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -185,6 +205,81 @@ class KnowledgeManagerTests(unittest.TestCase):
         self.assertEqual(result["items"], [{"resourceId": 7, "filePath": "/a.md", "chunkText": "A"}])
         self.assertNotIn("knCode", result["items"][0])
         self.assertEqual(self.transport.calls[0]["payload"], {"resourceIdList": [7], "query": "A", "topK": 5, "searchMode": "mixedRecall"})
+
+    def test_search_supports_agent_dsl_mode_and_metadata_fields(self) -> None:
+        self.transport.responses = [
+            {
+                "data": [
+                    {
+                        "resourceId": 7,
+                        "filePath": "/a.md",
+                        "chunkText": "A",
+                        "metadata": {
+                            "status": {"valueType": "string", "value": "active"}
+                        },
+                    }
+                ]
+            }
+        ]
+        result = self.manager.execute(
+            self.parse(
+                "search",
+                "--resource-id",
+                "7",
+                "--query",
+                "A",
+                "--where-json",
+                '{"eq":{"fieldName":"status","value":"active"}}',
+                "--metadata-field",
+                "status",
+                "--metadata-field",
+                "filePath",
+                "--search-mode",
+                "fullTextRecall",
+            )
+        )
+        self.assertEqual(
+            self.transport.calls[0]["payload"],
+            {
+                "resourceIdList": [7],
+                "query": "A",
+                "where": {"eq": {"fieldName": "status", "value": "active"}},
+                "metadataFieldList": ["status", "filePath"],
+                "topK": 5,
+                "searchMode": "fullTextRecall",
+            },
+        )
+        self.assertEqual(
+            result["items"][0]["metadata"]["status"]["value"],
+            "active",
+        )
+        self.assertEqual(result["where"]["eq"]["fieldName"], "status")
+        self.assertEqual(result["metadataFields"], ["status", "filePath"])
+        self.assertEqual(result["searchMode"], "fullTextRecall")
+
+    def test_agent_dsl_validates_structure_and_complexity(self) -> None:
+        valid = manager_module._agent_dsl(
+            '{"and":['
+            '{"eq":{"fieldName":"status","value":"active"}},'
+            '{"contains":{"fieldName":"tags","value":"contract"}}'
+            "]}"
+        )
+        self.assertIn("and", valid)
+
+        invalid_expressions = (
+            '{"eq":{"fieldName":"status","value":"active"},'
+            '"ne":{"fieldName":"status","value":"disabled"}}',
+            '{"and":[]}',
+            '{"in":{"fieldName":"status","value":[]}}',
+            '{"exists":{"fieldName":"status","value":true}}',
+            '{"not":{"not":{"not":{"not":'
+            '{"eq":{"fieldName":"status","value":"active"}}}}}}}',
+        )
+        for expression in invalid_expressions:
+            with self.subTest(expression=expression), self.assertRaises(
+                manager_module.argparse.ArgumentTypeError
+            ):
+                manager_module._agent_dsl(expression)
 
     def test_read_file_preserves_resource_id_and_line_window(self) -> None:
         self.transport.responses = [{"knCode": "internal", "resourceId": 7, "filePath": "/a.md", "startLine": 1, "endLine": 2, "data": "A", "reachedEof": True}]
@@ -354,6 +449,14 @@ class KnowledgeManagerTests(unittest.TestCase):
         self.assertIn("--resource-id ID", upload_help)
         self.assertIn("--file-path LOCAL_FILE", upload_help)
         self.assertIn("--dry-run", upload_help)
+
+        search_output = io.StringIO()
+        with redirect_stdout(search_output), self.assertRaises(SystemExit):
+            parser.parse_args(["search", "--help"])
+        search_help = search_output.getvalue()
+        self.assertIn("--where-json JSON", search_help)
+        self.assertIn("--metadata-field NAME", search_help)
+        self.assertIn("--search-mode", search_help)
 
     def test_main_without_arguments_prints_help(self) -> None:
         output = io.StringIO()
