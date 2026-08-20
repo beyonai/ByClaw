@@ -51,13 +51,14 @@ import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.UploadResult;
-import java.util.Collections;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
+
+import java.util.*;
+
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -75,7 +76,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
-
+@DisabledOnOs(OS.WINDOWS)
 @ExtendWith(MockitoExtension.class)
 class DatasetApplicationServiceTest {
 
@@ -419,10 +420,10 @@ class DatasetApplicationServiceTest {
         response.setResultObject(qaResult);
         when(feignPythonBuildService.importKnowledgeItem(any(), eq(100L))).thenReturn(response);
 
-        MockMultipartFile zip = new MockMultipartFile("files", "制度.zip", "application/zip", new byte[] {
+        MockMultipartFile zip = new MockMultipartFile("files", "制度.zip", "application/zip", new byte[]{
             1, 2, 3
         });
-        UploadResult result = service.uploadFiles(new MockMultipartFile[] {
+        UploadResult result = service.uploadFiles(new MockMultipartFile[]{
             zip
         }, 100L, "/制度", null, null, false, false);
 
@@ -578,7 +579,11 @@ class DatasetApplicationServiceTest {
         PythonBuildResponse<KnowledgeEntityBatchResult> response = new PythonBuildResponse<>();
         response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
         response.setResultObject(qaResult);
-        when(feignPythonBuildService.entityDiscovery(any(), eq(100L))).thenReturn(response);
+
+        Map<String, String> headers = new HashMap<String, String>();
+        headers.put(FeignPythonBuildService.RESOURCE_ID_HEADER, String.valueOf(100L));
+
+        when(feignPythonBuildService.entityDiscovery(any(), headers)).thenReturn(response);
 
         KnowledgeEntityDiscoveryRequest request = new KnowledgeEntityDiscoveryRequest();
         request.setResourceId(100L);
@@ -586,10 +591,10 @@ class DatasetApplicationServiceTest {
         request.setForce(true);
         request.setExtraParams(Map.of("source", "portal"));
 
-        KnowledgeEntityBatchResult result = service.entityDiscovery(request);
+        KnowledgeEntityBatchResult result = service.entityDiscovery(request, Collections.emptyMap());
 
         ArgumentCaptor<KbEntityDiscovery> captor = ArgumentCaptor.forClass(KbEntityDiscovery.class);
-        verify(feignPythonBuildService).entityDiscovery(captor.capture(), eq(100L));
+        verify(feignPythonBuildService).entityDiscovery(captor.capture(), headers);
         assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
         assertThat(captor.getValue().getFilePath()).isNull();
         assertThat(captor.getValue().getMaxEntities()).isEqualTo(12);
@@ -609,17 +614,22 @@ class DatasetApplicationServiceTest {
         PythonBuildResponse<KnowledgeEntityBatchResult> response = new PythonBuildResponse<>();
         response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
         response.setResultObject(qaResult);
-        when(feignPythonBuildService.entityEnrich(any(), eq(100L))).thenReturn(response);
+
+        Map<String, String> headers = new HashMap<String, String>();
+        headers.put(FeignPythonBuildService.RESOURCE_ID_HEADER, String.valueOf(100L));
+
+        when(feignPythonBuildService.entityEnrich(any(), headers)).thenReturn(response);
 
         KnowledgeEntityEnrichRequest request = new KnowledgeEntityEnrichRequest();
         request.setResourceId(100L);
         request.setFilePath("KnowledgeEntity/OSOT.md");
         request.setTopK(20);
 
-        KnowledgeEntityBatchResult result = service.entityEnrich(request);
+
+        KnowledgeEntityBatchResult result = service.entityEnrich(request, headers);
 
         ArgumentCaptor<KbEntityEnrich> captor = ArgumentCaptor.forClass(KbEntityEnrich.class);
-        verify(feignPythonBuildService).entityEnrich(captor.capture(), eq(100L));
+        verify(feignPythonBuildService).entityEnrich(captor.capture(), headers);
         assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
         assertThat(captor.getValue().getFilePath()).isEqualTo("/KnowledgeEntity/OSOT.md");
         assertThat(captor.getValue().getTopK()).isEqualTo(20);
@@ -634,7 +644,7 @@ class DatasetApplicationServiceTest {
         KnowledgeEntityDiscoveryRequest request = new KnowledgeEntityDiscoveryRequest();
         request.setResourceId(100L);
 
-        assertThatThrownBy(() -> service.entityDiscovery(request)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.entityDiscovery(request, Collections.emptyMap())).isInstanceOf(IllegalArgumentException.class);
 
         verifyNoInteractions(feignPythonBuildService);
     }

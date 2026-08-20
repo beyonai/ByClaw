@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.resource.SystemCode;
@@ -83,9 +84,11 @@ import com.iwhalecloud.byai.manager.dto.resource.KnowledgeMetadataSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckResponse;
+
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Set;
+
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.parser.Feature;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetImportDto;
@@ -259,8 +262,7 @@ public class DatasetApplicationService {
         if (isLocalDatasetType(type)) {
             extDoc = ssResExtDocService.createSsResExtDoc(myResource.getResourceId(), type,
                 myResource.getResourceCode(), resourceName, resourceDesc, ownerType);
-        }
-        else {
+        } else {
             extDoc = ssResExtDocService.createSsResExtDoc(myResource.getResourceId(), type);
         }
         // 页面新增知识库后，也按知识库导入的同一套规则把 targetContent 同步到开放资源目录。
@@ -274,7 +276,7 @@ public class DatasetApplicationService {
     /**
      * 创建默认个人知识库，资源保存仍复用 createDataset 主链路。
      *
-     * @param userId 用户ID
+     * @param userId   用户ID
      * @param userCode 用户编码
      * @param userName 用户名称
      * @return 默认个人知识库资源
@@ -298,7 +300,7 @@ public class DatasetApplicationService {
     /**
      * 创建知识库
      *
-     * @param knName 知识库名称
+     * @param knName        知识库名称
      * @param knDescription 描述
      * @return KnowledgeBaseInfo
      */
@@ -384,7 +386,7 @@ public class DatasetApplicationService {
      * 页面知识库保存后的 JSON 同步属于增强动作，不应阻断主流程。
      */
     private void syncDatasetTargetContentSafely(String targetContent, String resourceBizType, Long resourceId,
-        String scene) {
+                                                String scene) {
         try {
             resourceArtifactStorageService.syncResourceJsonByBizType(targetContent, resourceBizType, resourceId);
             ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, resourceBizType, scene);
@@ -393,8 +395,7 @@ public class DatasetApplicationService {
             // 同步Redis
             String redisKey = DigEmployeeRedisKeys.resourceConfigJsonKey(resourceBizType, resourceId);
             RedisUtil.setString(redisKey, targetContent);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.error("页面知识库JSON同步失败但不影响主流程, scene={}, resourceBizType={}, resourceId={}", scene, resourceBizType,
                 resourceId, e);
         }
@@ -527,12 +528,12 @@ public class DatasetApplicationService {
      * @throws IOException 异常信息
      */
     public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
-        String fileDescription) throws IOException {
+                                    String fileDescription) throws IOException {
         return uploadFiles(files, resourceId, directoryPath, fileDescription, null);
     }
 
     public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
-        String fileDescription, Boolean processFrontMatter) throws IOException {
+                                    String fileDescription, Boolean processFrontMatter) throws IOException {
         return uploadFiles(files, resourceId, directoryPath, fileDescription, processFrontMatter, Boolean.FALSE, false);
     }
 
@@ -569,7 +570,7 @@ public class DatasetApplicationService {
      * @throws IOException 异常信息
      */
     public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
-        String fileDescription, Boolean processFrontMatter, Boolean overwrite, boolean skipIfDuplicate)
+                                    String fileDescription, Boolean processFrontMatter, Boolean overwrite, boolean skipIfDuplicate)
         throws IOException {
 
         SsResource ssResource = loadDatasetResource(resourceId);
@@ -622,7 +623,7 @@ public class DatasetApplicationService {
     }
 
     private void appendImportResult(UploadResult uploadResult, KbImportResult importResult, MultipartFile multipartFile,
-        String fallbackPath) {
+                                    String fallbackPath) {
         if (importResult != null && importResult.getPostProcessErrors() != null) {
             uploadResult.getPostProcessErrors().addAll(importResult.getPostProcessErrors());
         }
@@ -644,8 +645,7 @@ public class DatasetApplicationService {
                 resultItem.getError());
             if (success) {
                 uploadResult.getUploadItems().add(uploadItem);
-            }
-            else {
+            } else {
                 uploadResult.getFailedItems().add(uploadItem);
             }
             incrementUploadSummary(uploadResult, success);
@@ -666,8 +666,7 @@ public class DatasetApplicationService {
         summary.setTotal(summary.getTotal() + 1);
         if (success) {
             summary.setSucceeded(summary.getSucceeded() + 1);
-        }
-        else {
+        } else {
             summary.setFailed(summary.getFailed() + 1);
         }
     }
@@ -708,9 +707,9 @@ public class DatasetApplicationService {
     /**
      * 下载文件
      *
-     * @param resourceId 资源标识
+     * @param resourceId    资源标识
      * @param directoryPath 文件路径，/百应AI设计方案-智能体集成.docx
-     * @param response 响应流
+     * @param response      响应流
      */
     public void download(Long resourceId, String directoryPath, HttpServletResponse response) {
 
@@ -739,8 +738,7 @@ public class DatasetApplicationService {
             String contentDisposition = "attachment;filename=" + URLEncoder.encode(fileName, StandardCharsets.UTF_8);
             response.setHeader("Content-Disposition", contentDisposition);
             IOUtils.copy(inputStream, response.getOutputStream());
-        }
-        catch (IOException e) {
+        } catch (IOException e) {
             throw new BaseException("下载知识库文件失败：" + e.getMessage(), e);
         }
     }
@@ -749,7 +747,7 @@ public class DatasetApplicationService {
      * 目录下载按 zip 包输出，和文件管理里的文件夹下载体验保持一致。
      */
     private void downloadKnowledgeDirectoryZip(SsResource ssResource, String directoryPath,
-        HttpServletResponse response) {
+                                               HttpServletResponse response) {
         String normalizedDirectoryPath = normalizeKnowledgeDirectoryPath(directoryPath);
         String directoryName = getLastSplitName(normalizedDirectoryPath);
         String zipFileName = StringUtils.defaultIfBlank(directoryName,
@@ -763,14 +761,13 @@ public class DatasetApplicationService {
             ZipOutputStream zipOutputStream = new ZipOutputStream(response.getOutputStream(), StandardCharsets.UTF_8)) {
             addKnowledgeDirectoryToZip(ssResource.getResourceId(), ssResource.getResourceCode(),
                 normalizedDirectoryPath, "", zipOutputStream);
-        }
-        catch (IOException e) {
+        } catch (IOException e) {
             throw new BaseException("下载知识库目录失败：" + e.getMessage(), e);
         }
     }
 
     private void addKnowledgeDirectoryToZip(Long resourceId, String knCode, String directoryPath, String relativePrefix,
-        ZipOutputStream zipOutputStream) throws IOException {
+                                            ZipOutputStream zipOutputStream) throws IOException {
         List<DirAndFileVo> children = listKnowledgeDir(resourceId, knCode, directoryPath);
         for (DirAndFileVo child : children) {
             String entryName = sanitizeZipEntryName(child.getName());
@@ -820,7 +817,7 @@ public class DatasetApplicationService {
      * 更新已存在知识库文件。更新后不会自动触发 Markdown 转换、切片或向量化。
      */
     public KbFileUpdateResult updateKnowledgeFile(Long resourceId, String filePath, String fileDescription,
-        Boolean processFrontMatter, MultipartFile fileContent) {
+                                                  Boolean processFrontMatter, MultipartFile fileContent) {
         SsResource ssResource = loadDatasetResource(resourceId);
         validateDatasetManagePermission(ssResource);
 
@@ -987,7 +984,7 @@ public class DatasetApplicationService {
     /**
      * 异步发现原始文档中的实体。门户使用 resourceId 校验知识库管理权限，转发 QA 时转换为 knCode。
      */
-    public KnowledgeEntityBatchResult entityDiscovery(KnowledgeEntityDiscoveryRequest request) {
+    public KnowledgeEntityBatchResult entityDiscovery(KnowledgeEntityDiscoveryRequest request, Map<String, String> headers) {
         SsResource ssResource = loadDatasetResource(request.getResourceId());
         validateDatasetManagePermission(ssResource);
 
@@ -999,8 +996,13 @@ public class DatasetApplicationService {
         qaRequest.setExtraParams(
             request.getExtraParams() == null ? Collections.emptyMap() : request.getExtraParams());
 
+        Long resourceId = request.getResourceId();
+        if (resourceId != null) {
+            headers.put(FeignPythonBuildService.RESOURCE_ID_HEADER, String.valueOf(resourceId));
+        }
+
         PythonBuildResponse<KnowledgeEntityBatchResult> response = feignPythonBuildService.entityDiscovery(qaRequest,
-            request.getResourceId());
+            headers);
         assertPythonBuildSuccess(response, "发起知识实体发现");
         return attachEntityBatchResourceId(response.getResultObject(), request.getResourceId());
     }
@@ -1008,7 +1010,7 @@ public class DatasetApplicationService {
     /**
      * 异步补全 KnowledgeEntity 文档。门户使用 resourceId 校验知识库管理权限，转发 QA 时转换为 knCode。
      */
-    public KnowledgeEntityBatchResult entityEnrich(KnowledgeEntityEnrichRequest request) {
+    public KnowledgeEntityBatchResult entityEnrich(KnowledgeEntityEnrichRequest request, Map<String, String> headers) {
         SsResource ssResource = loadDatasetResource(request.getResourceId());
         validateDatasetManagePermission(ssResource);
 
@@ -1020,8 +1022,14 @@ public class DatasetApplicationService {
         qaRequest.setExtraParams(
             request.getExtraParams() == null ? Collections.emptyMap() : request.getExtraParams());
 
+
+        Long resourceId = request.getResourceId();
+        if (resourceId != null) {
+            headers.put(FeignPythonBuildService.RESOURCE_ID_HEADER, String.valueOf(resourceId));
+        }
+
         PythonBuildResponse<KnowledgeEntityBatchResult> response = feignPythonBuildService.entityEnrich(qaRequest,
-            request.getResourceId());
+            headers);
         assertPythonBuildSuccess(response, "发起知识实体补全");
         return attachEntityBatchResourceId(response.getResultObject(), request.getResourceId());
     }
@@ -1055,8 +1063,7 @@ public class DatasetApplicationService {
             SsResource ssResource = loadDatasetResource(dirAndFileQo.getResourceId());
             validateDatasetReadablePermission(ssResource);
             knCode = resolveKnowledgeCode(dirAndFileQo, ssResource);
-        }
-        else {
+        } else {
             // openApi接口查询不做校验
             knCode = dirAndFileQo.getResourceCode();
         }
@@ -1093,7 +1100,7 @@ public class DatasetApplicationService {
     }
 
     private void searchKnowledgeDir(Long resourceId, String knCode, String directoryPath, String keyword, int depth,
-        List<DirAndFileVo> resultList) {
+                                    List<DirAndFileVo> resultList) {
         if (depth > KNOWLEDGE_DIR_SEARCH_MAX_DEPTH || resultList.size() >= KNOWLEDGE_DIR_SEARCH_MAX_RESULT_SIZE) {
             return;
         }
@@ -1153,7 +1160,7 @@ public class DatasetApplicationService {
      * 查询指定目录下已存在的同名文件，返回完整文件路径。QA 的 import 暂不支持覆盖，所以覆盖上传前必须先找出旧文件。
      */
     private List<String> findExistingKnowledgeFilePaths(SsResource ssResource, String directoryPath,
-        List<String> fileNames) {
+                                                        List<String> fileNames) {
         if (fileNames == null || fileNames.isEmpty()) {
             return new ArrayList<>();
         }
@@ -1176,8 +1183,7 @@ public class DatasetApplicationService {
         PythonBuildResponse<Data> response;
         try {
             response = feignPythonBuildService.listDir(kbListDir, ssResource.getResourceId());
-        }
-        catch (BaseException e) {
+        } catch (BaseException e) {
             if (isKnowledgeDirectoryNotFound(e)) {
                 logger.info("检查知识库同名文件时目录不存在，按无冲突处理 directoryPath={}", normalizedDirectoryPath);
                 return new ArrayList<>();
@@ -1237,8 +1243,7 @@ public class DatasetApplicationService {
         if (directoryPath != null && directoryPath.contains("/")) {
             String[] splitStr = directoryPath.split("/");
             return splitStr[splitStr.length - 1];
-        }
-        else {
+        } else {
             return directoryPath;
         }
     }
@@ -1247,7 +1252,7 @@ public class DatasetApplicationService {
      * 知识库JSON导入（新增或更新）。
      *
      * @param ownerType 资源归属类型：enterprise-企业，personal-个人
-     * @param file 上传的JSON文件
+     * @param file      上传的JSON文件
      * @return resourceId
      */
     @Transactional(rollbackFor = Exception.class)
@@ -1264,8 +1269,7 @@ public class DatasetApplicationService {
             dto.getResourceCode());
         if (existing == null) {
             return createDatasetFromImport(dto, rawJson, ownerType);
-        }
-        else {
+        } else {
             ResourceImportOwnerTypeValidator.validate(existing, ownerType, dto.getResourceCode(), dto.getResourceName(),
                 dto.getResourceBizType(), dto.getSystemCode());
             validateDatasetImportUpdatePermission(existing, dto.getResourceCode());
@@ -1281,8 +1285,7 @@ public class DatasetApplicationService {
         }
         try {
             return new String(file.getBytes(), StandardCharsets.UTF_8);
-        }
-        catch (IOException e) {
+        } catch (IOException e) {
             throw new IllegalArgumentException(I18nUtil.get("dataset.import.file.read.failed"));
         }
     }
@@ -1444,8 +1447,7 @@ public class DatasetApplicationService {
             extDoc.setResourceId(resourceId);
             fillExtDoc(extDoc, dto, rawJson, resourceId);
             ssResExtDocService.save(extDoc);
-        }
-        else {
+        } else {
             fillExtDoc(extDoc, dto, rawJson, resourceId);
             ssResExtDocService.update(extDoc);
         }
@@ -1479,8 +1481,7 @@ public class DatasetApplicationService {
     private void validateResourceCodeCanMapToAgentId(String resourceCode) {
         try {
             Long.valueOf(resourceCode);
-        }
-        catch (NumberFormatException e) {
+        } catch (NumberFormatException e) {
             throw new IllegalArgumentException(I18nUtil.get("dataset.import.resource.code.numeric.required"));
         }
     }
@@ -1494,7 +1495,7 @@ public class DatasetApplicationService {
     /**
      * 文件状态查询
      *
-     * @param resourceId 资源标识
+     * @param resourceId    资源标识
      * @param directoryPath 文件路径
      * @return ProcessStatus
      */
@@ -1782,7 +1783,7 @@ public class DatasetApplicationService {
     }
 
     private KnowledgeEntityBatchResult attachEntityBatchResourceId(KnowledgeEntityBatchResult result,
-        Long resourceId) {
+                                                                   Long resourceId) {
         KnowledgeEntityBatchResult resolved = result == null ? new KnowledgeEntityBatchResult() : result;
         resolved.setResourceId(resourceId);
         return resolved;
