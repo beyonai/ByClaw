@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -7,9 +7,11 @@ import { fileURLToPath } from 'node:url';
 
 const scriptPath = resolve(dirname(fileURLToPath(import.meta.url)), 'knowledge-collection.mjs');
 
-function runCli(args) {
+function runCli(args, env = {}) {
   return new Promise((resolveRun) => {
-    const child = spawn(process.execPath, [scriptPath, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [scriptPath, ...args], {
+      env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk; });
@@ -101,6 +103,50 @@ await (async () => {
   const kb = await runCli(['list-kb', '--help']);
   assert.equal(kb.code, 0);
   assert.equal(kb.json.name, 'knowledge-collection-ingest');
+
+  const enterprise = await runCli(['enterprise', '--help']);
+  assert.equal(enterprise.code, 0);
+  assert.equal(enterprise.json.name, 'knowledge-collection-enterprise');
+  assert.match(enterprise.json.usage, /enterprise (search|resource)/);
+  assert.match(enterprise.json.defaults, /limit 50/);
+  assert.match(enterprise.json.defaults, /concurrency 4/);
+
+  const enterpriseSearchHelp = await runCli(['enterprise', 'search', '--help']);
+  assert.equal(enterpriseSearchHelp.code, 0, enterpriseSearchHelp.stderr);
+  assert.equal(enterpriseSearchHelp.json.name, 'knowledge-collection-enterprise');
+
+  const unsupported = await runCli([
+    'enterprise', 'resource', '--source', 'dingtalk', '--url', 'https://example.com/document', '--output-dir', '/tmp/kc-enterprise-route',
+  ]);
+  assert.equal(unsupported.code, 0, unsupported.stderr);
+  assert.equal(unsupported.json.status, 'unsupported_capability');
+  assert.equal(unsupported.json.continuable, true);
+
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'kc-enterprise-feishu-'));
+  const fixtureBin = join(fixtureRoot, 'lark-cli');
+  const outputDir = join(fixtureRoot, 'output');
+  writeFileSync(fixtureBin, `#!/usr/bin/env node
+const { mkdirSync, writeFileSync } = require('node:fs');
+const { join } = require('node:path');
+const args = process.argv.slice(2);
+const outputDir = args[args.indexOf('--output-dir') + 1];
+if (args[0] !== 'minutes' || args[1] !== '+detail' || args[args.indexOf('--minute-tokens') + 1] !== 'minute-1') process.exit(2);
+mkdirSync(outputDir, { recursive: true });
+writeFileSync(join(outputDir, 'transcript.md'), '# Transcript\\n\\nCLI regression.\\n');
+console.log(JSON.stringify({ ok: true }));
+`);
+  chmodSync(fixtureBin, 0o700);
+  try {
+    const feishu = await runCli([
+      'enterprise', 'resource', '--source', 'feishu', '--url', 'https://example.feishu.cn/minutes/minute-1',
+      '--minute-token', 'minute-1', '--output-dir', outputDir,
+    ], { LARK_CLI_BIN: fixtureBin });
+    assert.equal(feishu.code, 0, feishu.stderr);
+    assert.equal(feishu.json.status, 'complete');
+    assert.match(readFileSync(join(outputDir, 'sanitized/items/transcript.md'), 'utf8'), /CLI regression/);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
   console.log('PASS cli help and platform dispatch');
 })();
 

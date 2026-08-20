@@ -291,9 +291,9 @@ const COMMAND_SPECS = {
   }),
   enterprise: defineCommand({
     group: 'platform',
-    title: '企业来源采集: wecom-smartpage | feishu-minutes(委派 enterprise-collection.mjs)',
-    args: { '<subcommand>': 'wecom-smartpage 或 feishu-minutes' },
-    example: 'knowledge-collection.mjs enterprise wecom-smartpage --help',
+    title: '企业来源采集: search | resource；兼容 wecom-smartpage | feishu-minutes(委派 enterprise-collection.mjs)',
+    args: { '<subcommand>': 'search、resource、wecom-smartpage 或 feishu-minutes' },
+    example: 'knowledge-collection.mjs enterprise search --source wecom --query "季度计划" --output-dir /tmp/enterprise',
   }),
 };
 
@@ -460,10 +460,6 @@ function main() {
     return;
   }
   if (command === 'enterprise') {
-    if (args.help === true || args.help === 'true') {
-      render(commandHelp(command), compactRequested(args));
-      return;
-    }
     delegate('enterprise-collection.mjs', process.argv.slice(3));
     return;
   }
