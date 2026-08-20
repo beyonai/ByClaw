@@ -1,43 +1,22 @@
 ---
 name: knowledge-organizer-build
-description: 在已初始化的知识整理任务中，为选定对象提交知识丰富与构建。适用于用户要求丰富、融合、整理或构建对象知识。
+description: 在指定 ByClaw 知识库中发起 KnowledgeEntity 补全。适用于知识整理流程中的丰富、融合、补全或知识构建阶段。
 allowed-tools: read, exec
 ---
 
-# 丰富对象知识
+# 补全知识实体
+
+加载并遵循 `by-knowledge-manager` skill，使用 `entity-enrich` 执行本阶段。不得上传文件或发起实体发现。
 
 ## 选择范围
 
-只从初始化结果 `objects/ads/` 目录选择对象，不得使用 ODS 对象：
+- 使用父 Skill 已确定的知识库 `resourceId`。
+- 用户指定知识实体文件时，原样使用 `/KnowledgeEntity/` 下的 `filePath`。
+- 用户明确要求处理全部知识实体或未限定范围时，可以省略文件路径，处理 `/KnowledgeEntity/` 下全部合格实体文档。
+- 当前上下文有会话 ID 时显式传入。只有用户明确要求重新处理时才使用强制处理选项。
 
-- 用户指定对象名称、编码或业务范围时，选择匹配的 ADS 对象；交互任务仍有实质歧义时再询问用户。
-- 用户未指定任何范围时，选择当前获取到的**全部 ADS 对象**。
-- 后台任务不要为对象范围逐项确认；按以上规则直接推进，并在最终汇报中列出实际提交的对象。
-
-此操作不要求先登记文件或发现对象，也不能自动执行这些操作。
-
-## 执行
-
-用户指定范围时，每个所选 ADS 对象分别传入一个 `--object-code`：
-
-```bash
-python3 <技能目录>/scripts/knowledge_organizer.py build \
-  --task-dir "<任务目录>" \
-  --object-code "<对象编码1>" \
-  --object-code "<对象编码2>"
-```
-
-用户未指定范围时省略 `--object-code`，由 CLI 提交当前全部 ADS 对象：
-
-```bash
-python3 <技能目录>/scripts/knowledge_organizer.py build \
-  --task-dir "<任务目录>"
-```
+此阶段不要求先执行资料入库或实体发现，也不能自动补做这些阶段。
 
 ## 完成标准
 
-只有命令确认受理时，才算提交成功。汇报所选对象，并明确说明知识丰富任务**已提交**。不要声称后台丰富已经完成。
-
-- 后台任务未能成功提交时，使用 `knowledge-organizer-update-task-status` 将状态设置为 `failed`。
-- 后台任务确认受理后，不得更新任务状态；后续状态由异步任务维护。
-- 普通交互任务不得更新任务状态。
+只有 `entity-enrich` 返回批次受理或复用结果时，才算提交成功。按 `by-knowledge-manager` 的规则汇报范围、批次、任务、文件路径和状态，并明确说明补全任务**已提交**，不能声称已经完成。
