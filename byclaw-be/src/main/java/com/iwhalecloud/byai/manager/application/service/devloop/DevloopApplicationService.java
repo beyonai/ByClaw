@@ -29,6 +29,7 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
+import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamApplicationService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.*;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorManifestCommandResolver;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
@@ -2712,6 +2713,8 @@ public class DevloopApplicationService {
         if (existing != null) {
             existing.setParamValueCipher(encrypted);
             existing.setParamValueLast4(last4);
+            // 重存等于用户确认要用这个 PAT，顺带把停用态拉回启用，免得用户存完还要去参数页点一次启用
+            existing.setStatus(UserPrivateParamApplicationService.STATUS_NORMAL);
             existing.setUpdateTime(new Date());
             userPrivateParamMapper.updateById(existing);
         } else {
@@ -2722,7 +2725,8 @@ public class DevloopApplicationService {
             param.setParamValueCipher(encrypted);
             param.setParamValueLast4(last4);
             param.setDescription("GitHub Personal Access Token");
-            param.setStatus("1");
+            // status 是字符串枚举 NORMAL/DISABLED，不是 0/1；写 "1" 会被 buildActiveParamMap 当停用跳过
+            param.setStatus(UserPrivateParamApplicationService.STATUS_NORMAL);
             param.setCreateTime(new Date());
             param.setDeleteFlag("0");
             userPrivateParamMapper.insert(param);

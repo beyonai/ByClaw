@@ -49,7 +49,10 @@ public class UserPrivateParamApplicationService {
 
     private static final String REDIS_KEY_PREFIX = "byai:user:private_params:";
 
-    private static final String NORMAL = "NORMAL";
+    /** 参数启用态。写库的服务都要用它，别再写字面量 "1"（会被 buildActiveParamMap 当停用跳过）。 */
+    public static final String STATUS_NORMAL = "NORMAL";
+
+    private static final String NORMAL = STATUS_NORMAL;
 
     private static final String DISABLED = "DISABLED";
 
