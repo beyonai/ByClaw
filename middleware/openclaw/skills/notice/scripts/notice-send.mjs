@@ -11,6 +11,7 @@ const NOTICE_PATH = "open/api/notice/create";
 const MEMBER_PATH = "open/api/v1/listProjectMembers";
 const PROJECT_PATH = "open/api/v1/selectProjectsByQo";
 const RESOLVE_PROJECT_PATH = "open/api/v1/resolveProjectBySession";
+const DINGTALK_SEND_PATH = "open/api/v1/dingtalk/sendUserToUser";
 // 后端 Notices DTO 的 @Size(max = 100)，超出会整批 400，所以在客户端分批。
 const NOTICE_BATCH_SIZE = 100;
 const TITLE_MAX = 200;
@@ -84,7 +85,12 @@ function resolveAuth() {
       process.env.BYCLAW_ECOSYSTEM_BEYOND_TOKEN
     ),
     userCode: firstNonEmpty(process.env.USER_CODE, process.env.BYCLAW_ECOSYSTEM_USER_CODE),
-    sessionId: firstNonEmpty(process.env.BAIYING_SESSION, process.env.SESSION_ID, process.env.BYCLAW_SESSION),
+    sessionId: firstNonEmpty(
+      process.env.BAIYING_SESSION,
+      process.env.SESSION_ID,
+      process.env.BYCLAW_SESSION,
+      process.env.BYCLAW_ECOSYSTEM_SESSION
+    ),
   };
 }
 
@@ -107,6 +113,11 @@ function signatureHeaders(userCode, bodyText) {
 
 async function postJson(pathname, payload) {
   const auth = resolveAuth();
+  // 两条凭据都空就别发了：后端会回 401，和「token 过期」长得一模一样，
+  // 调用方只能猜。这里提前判死，让「运行时没给凭据」有自己的错误码。
+  if (!auth.beyondToken && !auth.sessionId) {
+    throw new PublicFailure("NOTICE_AUTH_CONTEXT_UNAVAILABLE");
+  }
   const bodyText = JSON.stringify(payload);
   const headers = {
     Accept: "application/json",
@@ -115,7 +126,12 @@ async function postJson(pathname, payload) {
   };
   if (auth.beyondToken) headers["Beyond-Token"] = auth.beyondToken;
   if (auth.userCode) headers["X-User-Id"] = auth.userCode;
-  if (auth.sessionId) headers["x-signature-sessionId"] = auth.sessionId;
+  if (auth.sessionId) {
+    headers["x-signature-sessionId"] = auth.sessionId;
+    // 拦截器先看 HttpSession 再看 beyond-token（AccessTokenVerifyInterceptor#preHandle）。
+    // session 存 Redis 共享，所以定时任务里 env 的 token 快照过期后，这条 cookie 仍能过。
+    headers.Cookie = `SESSION=${auth.sessionId}; PORTAL-SESSION=${auth.sessionId}`;
+  }
 
   const url = `${backendBaseUrl()}/${pathname}`;
   let response;
@@ -140,6 +156,11 @@ async function postJson(pathname, payload) {
     throw new PublicFailure("NOTICE_RESPONSE_INVALID");
   }
   if (!response.ok) {
+    // 401 体是 {resultCode,resultMsg}（setLoginError），不是 ResponseUtil 的 {code,msg}。
+    // resultMsg 区分「未登录」和「token 过期」，不含凭据，直接透出给人排障。
+    if (response.status === 401) {
+      throw new PublicFailure("NOTICE_AUTH_REJECTED", body?.resultMsg || "HTTP 401");
+    }
     throw new PublicFailure("NOTICE_BACKEND_HTTP_ERROR", body?.msg || `HTTP ${response.status}`);
   }
   // ResponseUtil：code 0 成功，-1 失败；msg 可直接透出，不含凭据。
@@ -240,13 +261,50 @@ async function sendCommand(args) {
       failures.push({ batch: batchIndex, count: batch.length, errorCode: failure.errorCode, detail: failure.detail });
     }
   }
+
+  // 站内通知发送完成后，尝试发送钉钉消息（可选,失败不影响主流程）
+  const dingtalkResults = [];
+  if (payload?.sendDingtalk === true && auth.userId) {
+    const dingtalkBody = payload?.dingtalkBody || payload?.content || defaults.content;
+    for (const detail of details) {
+      if (!detail.targetId) continue; // 钉钉发送需要 targetId
+      const result = await sendDingtalkMessage(auth.userId, detail.targetId, dingtalkBody);
+      if (!result.ok) {
+        dingtalkResults.push({ targetId: detail.targetId, error: result.message });
+      }
+    }
+  }
+
   return {
     ok: failures.length === 0,
     requested: details.length,
     sent,
     batches: batches.length,
     failures,
+    dingtalkSent: dingtalkResults.length === 0 && payload?.sendDingtalk === true ? details.length : 0,
+    dingtalkFailures: dingtalkResults.length > 0 ? dingtalkResults : undefined,
   };
+}
+
+/**
+ * 尝试通过钉钉发送消息(可选,失败不影响站内通知)。
+ * @param {number} senderUserId - 发送人(执行 skill 的用户)
+ * @param {number} receiverUserId - 接收人
+ * @param {string} content - 消息内容(Markdown)
+ * @returns {Promise<{ok: boolean, message?: string}>}
+ */
+async function sendDingtalkMessage(senderUserId, receiverUserId, content) {
+  try {
+    const response = await postJson(DINGTALK_SEND_PATH, {
+      senderUserId,
+      receiverUserId,
+      content,
+    });
+    return { ok: true };
+  } catch (error) {
+    const message = error?.message || String(error);
+    return { ok: false, message };
+  }
 }
 
 async function membersCommand(args) {
@@ -333,6 +391,8 @@ function helpText() {
       title: "批次默认标题，单条可覆盖（<=200）",
       content: "批次默认正文，单条可覆盖（<=2000）",
       priority: "low|medium|high 或 1-4，默认 medium",
+      sendDingtalk: "true 则尝试同时发送钉钉消息(需发送人已授权 dws)",
+      dingtalkBody: "可选,钉钉消息内容,默认使用 content",
       notices: [{ userId: 10000022, userCode: "zhangsan", title: "可选", content: "可选", priority: "high" }],
     },
   };

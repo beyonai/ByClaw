@@ -295,3 +295,50 @@ test("help lists both commands without contacting the backend", async () => {
   assert.ok(result.json.commands.send.includes("notice-send.mjs send"));
   assert.ok(result.json.commands.members.includes("--project-id"));
 });
+
+const NO_AUTH_ENV = {
+  BEYOND_TOKEN: "",
+  BYCLAW_BEYOND_TOKEN: "",
+  BYCLAW_ECOSYSTEM_BEYOND_TOKEN: "",
+  BAIYING_SESSION: "",
+  SESSION_ID: "",
+  BYCLAW_SESSION: "",
+  BYCLAW_ECOSYSTEM_SESSION: "",
+};
+
+test("missing credentials fail before the request instead of surfacing as a backend 401", async () => {
+  const server = await startServer((request, response) => ok(response, { bound: false }));
+  const result = await run(["resolve-project", "--session-id", "77"], { port: server.port, env: NO_AUTH_ENV });
+  await server.close();
+
+  assert.equal(result.code, 1);
+  assert.equal(result.json.errorCode, "NOTICE_AUTH_CONTEXT_UNAVAILABLE");
+  assert.equal(server.requests.length, 0);
+});
+
+test("sessionId is sent as a SESSION cookie so an expired token snapshot still authenticates", async () => {
+  const server = await startServer((request, response) => ok(response, { bound: false }));
+  const result = await run(["resolve-project", "--session-id", "77"], {
+    port: server.port,
+    env: { ...NO_AUTH_ENV, BAIYING_SESSION: "sess-9" },
+  });
+  await server.close();
+
+  assert.equal(result.code, 0);
+  assert.equal(server.requests[0].headers.cookie, "SESSION=sess-9; PORTAL-SESSION=sess-9");
+  assert.equal(server.requests[0].headers["beyond-token"], undefined);
+});
+
+test("a 401 reports the login reason from resultMsg under its own error code", async () => {
+  const server = await startServer((request, response) => {
+    response.writeHead(401, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ resultCode: 401, resultMsg: "beyond-token 已过期", type: 1 }));
+  });
+  const result = await run(["resolve-project", "--session-id", "77"], { port: server.port });
+  await server.close();
+
+  assert.equal(result.code, 1);
+  assert.equal(result.json.errorCode, "NOTICE_AUTH_REJECTED");
+  assert.match(result.json.detail, /已过期/);
+  assert.ok(!JSON.stringify(result.json).includes(SECRET_TOKEN));
+});

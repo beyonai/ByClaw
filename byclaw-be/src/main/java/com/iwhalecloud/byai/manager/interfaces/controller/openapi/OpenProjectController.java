@@ -4,6 +4,7 @@ import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkProactiveMessageService;
 import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
@@ -14,9 +15,11 @@ import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +35,9 @@ public class OpenProjectController {
 
     @Autowired
     private ProjectApplicationService projectApplicationService;
+
+    @Autowired
+    private DingtalkProactiveMessageService dingtalkProactiveMessageService;
 
     /**
      * 查询项目列表
@@ -189,6 +195,66 @@ public class OpenProjectController {
     public ResponseUtil<Void> batchRemoveProjectMembers(@RequestBody MemberBatchDTO dto) {
         projectApplicationService.batchRemoveProjectMembers(dto);
         return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 通过 dws 给项目成员发送钉钉单聊消息
+     *
+     * @param params 包含 senderUserId (发送人/执行 skill 的用户)、receiverUserId (接收人)、content (消息内容)
+     * @return 成功/失败结果
+     */
+    @ManageLogAnnotation(name = "API调用", description = "钉钉发送消息(dws)")
+    @PostMapping("/dingtalk/sendUserToUser")
+    public ResponseUtil<Void> sendDingtalkToUser(@RequestBody Map<String, Object> params) {
+        Long senderUserId = MapParamUtil.getLongValue(params, "senderUserId");
+        Long receiverUserId = MapParamUtil.getLongValue(params, "receiverUserId");
+        String content = MapParamUtil.getStringValue(params, "content");
+
+        if (senderUserId == null || receiverUserId == null || StringUtil.isEmpty(content)) {
+            return ResponseUtil.failRes("参数不完整: 需要 senderUserId, receiverUserId, content");
+        }
+
+        try {
+            dingtalkProactiveMessageService.sendUserToUserViaDws(senderUserId, receiverUserId, content);
+            return ResponseUtil.successResponse();
+        }
+        catch (IllegalStateException e) {
+            // 未授权或映射失败
+            return ResponseUtil.failRes(e.getMessage());
+        }
+        catch (Exception e) {
+            return ResponseUtil.failRes("钉钉消息发送失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 测试钉钉消息发送 (GET 版本，方便浏览器直接测试)
+     *
+     * @param senderUserId 发送人 userId
+     * @param receiverUserId 接收人 userId
+     * @param content 消息内容（可选，默认为测试消息）
+     * @return 成功/失败结果
+     */
+    @ManageLogAnnotation(name = "API调用", description = "钉钉发送消息测试(GET)")
+    @GetMapping("/dingtalk/testSend")
+    public ResponseUtil<String> testSendDingtalk(@RequestParam Long senderUserId, @RequestParam Long receiverUserId,
+        @RequestParam(required = false) String content) {
+
+        // 默认测试消息
+        if (StringUtil.isEmpty(content)) {
+            content = "## 钉钉消息测试\n\n这是一条测试消息。\n\n时间: " + new java.util.Date();
+        }
+
+        try {
+            dingtalkProactiveMessageService.sendUserToUserViaDws(senderUserId, receiverUserId, content);
+            return ResponseUtil.successResponse("发送成功！请检查钉钉单聊。");
+        }
+        catch (IllegalStateException e) {
+            return ResponseUtil.failRes(e.getMessage());
+        }
+        catch (Exception e) {
+            return ResponseUtil.failRes("发送失败: " + e.getMessage());
+        }
     }
 
 }

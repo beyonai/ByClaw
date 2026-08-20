@@ -171,6 +171,8 @@ node scripts/notice-send.mjs resolve-project --session-id 990
 | `NOTICE_SENDER_UNRESOLVED` | 运行身份不可用 | 运行环境问题，上报，不要索要账号 |
 | `NOTICE_BACKEND_REJECTED` | 后端拒绝（如用户不存在） | 看 `detail`，核对收件人 |
 | `NOTICE_BACKEND_UNREACHABLE` / `NOTICE_BACKEND_TIMEOUT` | 服务不可达 | 重试一轮，仍失败上报 |
+| `NOTICE_AUTH_CONTEXT_UNAVAILABLE` | 运行环境没给任何登录凭据 | **不是后端故障，重试无用**。上报「需要登录态」，不要索要 token |
+| `NOTICE_AUTH_REJECTED` | 后端回 401，`detail` 是登录失败原因 | 多为凭据过期。上报 `detail` 原文，不要重试到底 |
 | `NOTICE_INPUT_MISSING` / `NOTICE_INPUT_NOT_JSON` | payload 缺失或不合法 | 修 payload |
 | `NOTICE_SESSION_ID_MISSING` | `resolve-project` 没给 `--session-id` | 补参数 |
 | `NOTICE_FIELD_EMPTY` | `title` 或 `content` 为空 | 补文案 |
