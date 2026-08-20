@@ -1,5 +1,5 @@
 import { Alert, Button, Dropdown, Input, Modal, Segmented, Tag, Typography, message } from 'antd';
-import { ArrowLeftOutlined, EllipsisOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
+import { EllipsisOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
@@ -13,7 +13,7 @@ import { PROJECT_DETAIL_SECTIONS, type ProjectDetailSection } from '../../consta
 import { useProjectTypeConfig } from '../../hooks/useProjectTypeConfig';
 import { checkGitHubPat, saveGitHubPat, type DevloopProjectRepo } from '@/service/devloop';
 import type { ProjectSession, ProjectSpace } from '../../types';
-import { getArrayData } from '../../utils';
+import { getArrayData, getProjectTagMeta } from '../../utils';
 import ProjectAccounts from '../ProjectAccounts';
 import ProjectMembers from '../ProjectMembers';
 import ProjectRequirements from '../ProjectRequirements';
@@ -248,22 +248,7 @@ const ProjectDetail: React.FC<Props> = ({
     return <div className={styles.detailEmpty}>{intl.formatMessage({ id: 'projectSpace.selectProject' })}</div>;
   }
 
-  // 大详情项目标签与左侧小列表使用同一套分类和短文案，普通项目继续区分个人、共享。
-  const projectTagMeta = (() => {
-    if (project.projectType === 'default') {
-      return { className: styles.detailProjectTagDefault, messageId: 'projectSpace.scene.default' };
-    }
-    if (project.projectType === 'develop') {
-      return { className: styles.detailProjectTagDevelopment, messageId: 'projectSpace.scene.development' };
-    }
-    if (project.projectType === 'operation') {
-      return { className: styles.detailProjectTagOperation, messageId: 'projectSpace.scene.operation' };
-    }
-    if (project.sharedFlag) {
-      return { className: styles.detailProjectTagShared, messageId: 'projectSpace.scene.shared' };
-    }
-    return { className: styles.detailProjectTagPersonal, messageId: 'projectSpace.scene.personal' };
-  })();
+  const projectTagMeta = getProjectTagMeta(project);
 
   const renderSectionContent = (section: ProjectDetailSection) => {
     const sectionKeyword = sectionKeywordMap[section] || '';
@@ -392,13 +377,19 @@ const ProjectDetail: React.FC<Props> = ({
       <div className={styles.detailHeader}>
         <div className={styles.detailHeading}>
           <div className={styles.detailTitleRow}>
-            <Button type="text" className={styles.detailBackButton} icon={<ArrowLeftOutlined />} onClick={onBack}>
-              {intl.formatMessage({ id: 'projectSpace.backToList' })}
-            </Button>
-            <Typography.Title level={3} ellipsis={{ tooltip: project.projectName }}>
-              {project.projectName}
-            </Typography.Title>
-            <Tag bordered={false} className={`${styles.detailProjectTag} ${projectTagMeta.className}`}>
+            <nav className={styles.detailBreadcrumb} aria-label={intl.formatMessage({ id: 'sider.projectSpace' })}>
+              <button type="button" className={styles.detailBreadcrumbLink} onClick={onBack}>
+                {intl.formatMessage({ id: 'sider.projectSpace' })}
+              </button>
+              <span className={styles.detailBreadcrumbSeparator}>/</span>
+              <span className={styles.detailBreadcrumbCurrent} title={project.projectName}>
+                {project.projectName}
+              </span>
+            </nav>
+            <Tag
+              bordered={false}
+              className={`${styles.detailProjectTag} ${styles[`detailProjectTag${projectTagMeta.classSuffix}`]}`}
+            >
               {intl.formatMessage({ id: projectTagMeta.messageId })}
             </Tag>
             {(onEditProject || onDeleteProject) && (

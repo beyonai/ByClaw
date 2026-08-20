@@ -1,0 +1,131 @@
+.imageModelConfig {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.configLabel {
+  flex: 0 0 auto;
+  color: var(~'--@{antPrefix}-color-text');
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 32px;
+  white-space: nowrap;
+}
+
+.modelTrigger {
+  min-width: 0;
+  max-width: calc(100% - 88px);
+  margin-left: auto;
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 10px;
+  color: #000;
+  font-size: 14px;
+  line-height: 1;
+  background: #f5f8ff;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.2s, background-color 0.2s;
+
+  &:hover:not(:disabled) {
+    background: #edf3ff;
+    border-color: #b7d0ff;
+  }
+
+  &:disabled {
+    color: #8c8c8c;
+    cursor: not-allowed;
+  }
+}
+
+.modelIcon {
+  flex: 0 0 auto;
+  margin-right: 8px;
+  font-size: 14px;
+}
+
+.selectedModel {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.downIcon {
+  flex: 0 0 auto;
+  margin-left: 8px;
+  font-size: 12px;
+}
+
+.modelPopover {
+  width: 360px;
+}
+
+.popoverTitle {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+  color: #1f2533;
+  font-size: 14px;
+  font-weight: 500;
+
+  &::before {
+    width: 3px;
+    height: 14px;
+    margin-right: 6px;
+    background: #165dff;
+    content: '';
+  }
+}
+
+.scopeTabs {
+  margin-bottom: 4px;
+}
+
+.modelList {
+  display: block;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.modelItem {
+  padding: 8px 4px;
+  border-bottom: 1px solid #f0f0f0;
+
+  &:last-of-type {
+    border-bottom: none;
+  }
+}
+
+.modelName {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.emptyTip {
+  padding: 16px 0;
+  color: #8c8c8c;
+  font-size: 13px;
+  text-align: center;
+}
+
+.popoverFooter {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.loadError {
+  width: 100%;
+  flex-basis: 100%;
+}

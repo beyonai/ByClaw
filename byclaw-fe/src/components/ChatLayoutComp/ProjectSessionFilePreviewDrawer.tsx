@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Drawer, Spin, message } from 'antd';
+import { createRelativePathResourceResolver } from '@/components/MessageList/components/FileRender/components/Previewer/relativeResource';
 import { getMimeType } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import fileSiderStyles from '@/layout/sider/components/FileSiderPanel/index.module.less';
 import { downloadFile, type FileBrowserItem } from '@/service/fileBrowser';
@@ -25,6 +26,16 @@ const ProjectSessionFilePreviewDrawer: React.FC<ProjectSessionFilePreviewDrawerP
   const [blob, setBlob] = useState<Blob | null>(null);
   const [loading, setLoading] = useState(false);
   const fileType = file ? getFileType(file.name) : 'txt';
+  const resolveRelativeResource = useMemo(
+    () =>
+      file
+        ? createRelativePathResourceResolver(file.path, async (path) => {
+          const response = await downloadFile(resourceId, path);
+          return response.file;
+        })
+        : undefined,
+    [file?.path, resourceId]
+  );
 
   useEffect(() => {
     if (!open || !file || !resourceId) {
@@ -82,7 +93,14 @@ const ProjectSessionFilePreviewDrawer: React.FC<ProjectSessionFilePreviewDrawerP
       <Spin spinning={loading} wrapperClassName="full-height-spin">
         {blob && (
           <React.Suspense fallback={null}>
-            <PreViewFile data={blob} type={fileType} title={file?.name} className={fileSiderStyles.previewContent} />
+            <PreViewFile
+              data={blob}
+              type={fileType}
+              title={file?.name}
+              resolveMarkdownImage={resolveRelativeResource}
+              resolveHtmlResource={resolveRelativeResource}
+              className={fileSiderStyles.previewContent}
+            />
           </React.Suspense>
         )}
       </Spin>

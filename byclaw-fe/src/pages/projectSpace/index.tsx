@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Dropdown, Empty, Input, Modal, Tag, message } from 'antd';
 import {
-  ShareAltOutlined,
   DeleteOutlined,
   EditOutlined,
   MoreOutlined,
   PlusOutlined,
   SearchOutlined,
+  ShareAltOutlined,
 } from '@ant-design/icons';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
@@ -34,6 +34,7 @@ import { useProjectList } from './hooks/useProjectList';
 import { useProjectScopeId } from './hooks/useProjectScopeId';
 import { useProjectTypeConfig } from './hooks/useProjectTypeConfig';
 import type { ProjectSession, ProjectSpace } from './types';
+import { getProjectTagMeta } from './utils';
 import styles from './index.module.less';
 
 const getProjectId = (value?: string | number) => `${value ?? ''}`.trim();
@@ -44,11 +45,37 @@ interface ProjectSpaceNavigationState {
   projectId?: string | number;
 }
 
-const formatProjectCreateTime = (value?: string) => {
+const formatProjectCreateTime = (value: string | number | undefined, intl: ReturnType<typeof useIntl>) => {
   if (!value) return '';
-  const normalizedValue = /^\d+$/.test(value) ? Number(value) : value;
+  const normalizedValue = /^\d+$/.test(`${value}`) ? Number(value) : value;
   const createTime = dayjs(normalizedValue);
-  return createTime.isValid() ? createTime.format('YYYY-MM-DD') : '';
+  const now = dayjs();
+  if (!createTime.isValid() || createTime.isAfter(now)) return '';
+
+  const minutes = Math.max(1, now.diff(createTime, 'minute'));
+  if (minutes < 60) {
+    return intl.formatMessage({ id: 'projectSpace.projectCard.addedMinutesAgo' }, { count: minutes });
+  }
+
+  const hours = now.diff(createTime, 'hour');
+  if (hours < 24) {
+    return intl.formatMessage({ id: 'projectSpace.projectCard.addedHoursAgo' }, { count: hours });
+  }
+
+  const days = now.diff(createTime, 'day');
+  if (days < 30) {
+    return intl.formatMessage({ id: 'projectSpace.projectCard.addedDaysAgo' }, { count: days });
+  }
+
+  const months = now.diff(createTime, 'month');
+  if (months < 12) {
+    return intl.formatMessage({ id: 'projectSpace.projectCard.addedMonthsAgo' }, { count: Math.max(1, months) });
+  }
+
+  return intl.formatMessage(
+    { id: 'projectSpace.projectCard.addedYearsAgo' },
+    { count: Math.max(1, now.diff(createTime, 'year')) }
+  );
 };
 
 const getProjectIdFromSaveResponse = (response: any) =>
@@ -112,21 +139,25 @@ const ProjectSpacePage: React.FC = () => {
   const [renameLoading, setRenameLoading] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [showProjectList, setShowProjectList] = useState(true);
+  const projectIdFromSearch = useMemo(
+    () => getProjectId(new URLSearchParams(location.search).get('projectId')),
+    [location.search]
+  );
 
   useEffect(() => {
     const navigationState = location.state as ProjectSpaceNavigationState | null;
-    if (navigationState?.openProjectList) {
-      setShowProjectList(true);
+    // 项目名称面包屑通过 URL 传入 projectId；即使历史路由状态残留 openProjectList，也应优先打开对应详情。
+    const detailProjectId = getProjectId(navigationState?.openProjectDetail ? navigationState.projectId : undefined);
+    const projectId = detailProjectId || projectIdFromSearch;
+    if (projectId) {
+      setSelectedProjectId(projectId);
+      setShowProjectList(false);
       return;
     }
-    if (navigationState?.openProjectDetail) {
-      const projectId = getProjectId(navigationState.projectId);
-      if (projectId) {
-        setSelectedProjectId(projectId);
-        setShowProjectList(false);
-      }
+    if (navigationState?.openProjectList) {
+      setShowProjectList(true);
     }
-  }, [location.key, location.state, setSelectedProjectId]);
+  }, [location.key, location.state, projectIdFromSearch, setSelectedProjectId]);
 
   const { activeProject, refreshProject } = useProjectDetail(projects, selectedProjectId);
   const canManageProject = useMemo(() => isProjectCreator(activeProject, userInfo), [activeProject, userInfo]);
@@ -465,7 +496,8 @@ const ProjectSpacePage: React.FC = () => {
           <div className={styles.projectCardGrid}>
             {projects.map((project) => {
               const canManageCard = isProjectCreator(project, userInfo);
-              const createTime = formatProjectCreateTime(project.createTime);
+              const createTime = formatProjectCreateTime(project.createTime, intl);
+              const projectTag = getProjectTagMeta(project);
               return (
                 <div
                   key={getProjectId(project.projectId)}
@@ -488,31 +520,14 @@ const ProjectSpacePage: React.FC = () => {
                       <strong>
                         {project.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' })}
                       </strong>
-                      {project.projectType === 'develop' || project.projectType === 'operation' ? (
-                        <Tag
-                          bordered={false}
-                          className={classNames(
-                            styles.projectTypeTag,
-                            project.projectType === 'develop'
-                              ? styles.projectTypeTagDevelopment
-                              : styles.projectTypeTagOperation
-                          )}
-                        >
-                          {intl.formatMessage({
-                            id:
-                              project.projectType === 'develop'
-                                ? 'projectSpace.scene.development'
-                                : 'projectSpace.scene.operation',
-                          })}
-                        </Tag>
-                      ) : null}
+                      <Tag
+                        bordered={false}
+                        className={classNames(styles.projectTypeTag, styles[`projectTypeTag${projectTag.classSuffix}`])}
+                      >
+                        {intl.formatMessage({ id: projectTag.messageId })}
+                      </Tag>
                     </span>
-                    <small>
-                      {createTime
-                        ? intl.formatMessage({ id: 'projectSpace.projectCard.createdAt' }, { time: createTime })
-                        : project.description ||
-                          intl.formatMessage({ id: 'projectSpace.projectCard.emptyDescription' })}
-                    </small>
+                    {createTime && <small>{createTime}</small>}
                   </span>
                   {canManageCard && (
                     <Dropdown

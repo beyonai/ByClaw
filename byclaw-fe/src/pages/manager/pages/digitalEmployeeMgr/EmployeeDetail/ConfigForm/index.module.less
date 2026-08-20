@@ -1653,6 +1653,86 @@
   font-weight: 500;
 }
 
+.configurationHeader {
+  margin-bottom: 10px;
+}
+
+.modelConfigGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 0;
+}
+
+.modelConfigItem {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.modelConfigLabel {
+  flex: 0 0 auto;
+  color: var(~'--@{antPrefix}-color-text');
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 32px;
+  white-space: nowrap;
+}
+
+.modelSelectTrigger {
+  min-width: 0;
+  max-width: calc(100% - 88px);
+  height: 32px;
+  margin-left: auto;
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #000;
+  font-size: 14px;
+  line-height: 1;
+  background: #f5f8ff;
+  cursor: pointer;
+  transition: border-color 0.2s, background-color 0.2s;
+
+  &:hover:not(:disabled) {
+    border-color: #b7d0ff;
+    background: #edf3ff;
+  }
+
+  &:disabled {
+    color: #8c8c8c;
+    cursor: not-allowed;
+  }
+}
+
+.modelSelectIcon {
+  flex: 0 0 auto;
+  margin-right: 8px;
+  font-size: 16px;
+}
+
+.modelSelectValue {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelSelectArrow {
+  flex: 0 0 auto;
+  margin-left: 8px;
+  font-size: 12px;
+}
+
 .displayNone {
   display: none;
 }
@@ -1678,9 +1758,14 @@
 .rowFlexBetween {
   margin-bottom: 16px;
   width: 100%;
+  min-height: 32px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.configFieldFormItem {
+  margin-bottom: 16px;
 }
 
 .marginLeft4 {

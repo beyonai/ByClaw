@@ -18,7 +18,6 @@ const WorkspaceUserBar: React.FC = () => {
 
   const userName = userInfo.userName || '';
   const avatarText = getDisplayUserNameInChat(userName);
-
   return (
     <div className={styles.workspaceUserFooter}>
       <div className={styles.workspaceUserBar}>
@@ -32,17 +31,10 @@ const WorkspaceUserBar: React.FC = () => {
           <div className={styles.workspaceUserIdentity} role="button" tabIndex={0} title={userName}>
             <span className={styles.workspaceUserAvatar}>
               <span>{avatarText}</span>
-              {userInfo.avatar && (
-                <img
-                  src={userInfo.avatar}
-                  alt={userName}
-                  onError={(event) => {
-                    event.currentTarget.style.display = 'none';
-                  }}
-                />
-              )}
             </span>
-            <span className={styles.workspaceUserName}>{userName}</span>
+            <span className={styles.workspaceUserText}>
+              <span className={styles.workspaceUserName}>{userName}</span>
+            </span>
           </div>
         </Dropdown>
         <span className={styles.workspaceUserLocale} onClick={(event) => event.stopPropagation()}>

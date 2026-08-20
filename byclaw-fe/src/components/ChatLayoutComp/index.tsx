@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState, useMemo, ForwardedRef } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useMemo, ForwardedRef } from 'react';
 import { useDispatch, useIntl, useSelector } from '@umijs/max';
 import { isEmpty, last, size } from 'lodash';
 import { notification } from 'antd';
@@ -205,7 +205,9 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     // 路由状态在刷新或非项目列表入口时可能丢失，优先从当前会话的后端归属字段恢复。
     const candidateProjectId = projectId ?? currentSession?.projectId;
     const normalizedProjectId = Number(candidateProjectId);
-    return Number.isFinite(normalizedProjectId) && normalizedProjectId > 0 ? normalizedProjectId : undefined;
+    return Number.isFinite(normalizedProjectId) && (normalizedProjectId === -1 || normalizedProjectId > 0)
+      ? normalizedProjectId
+      : undefined;
   }, [currentSession?.projectId, projectId]);
 
   const notificationSession = isNotificationSession(currentSession);
@@ -370,7 +372,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     toggleResourceList,
   ]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     // 每次进入另一个已有会话详情时关闭旧预览并默认打开资源列表；新建会话尚无 sessionId 时不展示。
     const previousSessionId = previousResourceSessionIdRef.current;
     previousResourceSessionIdRef.current = sessionId;
@@ -645,6 +647,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   multiChoicesList={multiChoicesList}
                   multiChoicesMsgId={multiChoicesMsgId}
                   setMultiChoicesMsgId={setMultiChoicesMsgId}
+                  previewInDetailPanel
                 />
               </div>
             )}

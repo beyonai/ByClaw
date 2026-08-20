@@ -163,18 +163,42 @@ nav.chatTitle {
       }
     }
 
+    .projectActionButton.resourcePanelToggleButton {
+      color: #000;
+
+      &:hover,
+      &:focus-visible {
+        color: #000;
+      }
+    }
+
+    .projectActionButton.taskProgressButton {
+      color: #000;
+
+      &:hover,
+      &:focus-visible {
+        color: #000;
+      }
+    }
+
+    .projectActionButton.taskProgressButton :global(.@{antPrefix}-btn-icon),
+    .projectActionButton.taskProgressButton svg {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 16px;
+    }
+
     .projectActionButton.resourcePanelToggleButton :global(.@{antPrefix}-btn-icon) {
-      // Ant Design 默认图标槽为 16px；同步调整槽位，避免 19px SVG 被 flex 自动压缩。
-      width: 19px;
-      height: 19px;
-      flex: 0 0 19px;
+      // 与左侧边栏展开按钮保持相同尺寸，避免 SVG 被 flex 自动压缩。
+      width: 18px;
+      height: 18px;
+      flex: 0 0 18px;
     }
 
     .projectActionButton .resourcePanelToggleIcon {
-      // 资源列表图形线条较疏，单独放大图标以保持与任务进度图标的视觉重量一致。
-      width: 19px;
-      height: 19px;
-      flex: 0 0 19px;
+      width: 18px;
+      height: 18px;
+      flex: 0 0 18px;
     }
 
     .btn {

@@ -130,7 +130,7 @@ import {
 } from './operation';
 import { isCurrentUserTaskAssignee } from './taskAccess';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
-import { getArrayData, normalizeProjectSession } from '@/pages/projectSpace/utils';
+import { getArrayData, getProjectTagMeta, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import AntdIcon from '@/components/AntdIcon';
 import TaskTemplateModal, { type TaskTemplateApplyResult } from '@/components/TaskTemplateModal';
 import ChatAvatar from '@/components/ChatAvatar';
@@ -1277,21 +1277,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 详情标题与项目列表使用同一场景标签规则，研发项目优先于共享状态展示。
   const projectScenes = useMemo(() => {
     if (!project) return null;
-    if (projectType === 'default') {
-      return [{ classSuffix: 'Default', text: intl.formatMessage({ id: 'projectSpace.scene.default' }) }];
-    }
-    if (projectType === 'develop') {
-      return [{ classSuffix: 'Development', text: intl.formatMessage({ id: 'projectSpace.scene.development' }) }];
-    }
-    if (projectType === 'operation') {
-      // 运营标签优先于共享范围展示，详情头部只保留一个项目类型标签。
-      return [{ classSuffix: 'Operation', text: intl.formatMessage({ id: 'projectSpace.scene.operation' }) }];
-    }
-    if (project.sharedFlag) {
-      return [{ classSuffix: 'Shared', text: intl.formatMessage({ id: 'projectSpace.scene.shared' }) }];
-    }
-    return [{ classSuffix: 'Personal', text: intl.formatMessage({ id: 'projectSpace.scene.personal' }) }];
-  }, [intl, project, projectType]);
+    const projectTag = getProjectTagMeta(project);
+    return [{ classSuffix: projectTag.classSuffix, text: intl.formatMessage({ id: projectTag.messageId }) }];
+  }, [intl, project]);
   // 未配置研发项目时，即使存在历史 develop 数据也不展示研发闭环能力。
   const isDevelopProject = developProjectEnabled && projectType === 'develop';
   // 研发项目工作区初始化未就绪(pending/initializing)前禁止建需求/启动任务;普通项目与存量(无值)视为就绪。

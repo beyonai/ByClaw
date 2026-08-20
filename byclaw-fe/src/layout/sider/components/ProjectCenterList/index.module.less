@@ -102,7 +102,14 @@
     z-index: 0;
     width: 48%;
     pointer-events: none;
-    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.12) 20%, rgba(91, 143, 249, 0.18) 50%, rgba(255, 255, 255, 0.12) 80%, transparent 100%);
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.12) 20%,
+      rgba(91, 143, 249, 0.18) 50%,
+      rgba(255, 255, 255, 0.12) 80%,
+      transparent 100%
+    );
     transform: translateX(-110%);
     animation: projectActiveFlow 2.4s ease-in-out infinite;
   }
@@ -132,22 +139,6 @@
   .projectItemActive::before {
     animation: none;
   }
-}
-
-.projectIcon {
-  width: 32px;
-  height: 32px;
-  flex: 0 0 32px;
-  box-sizing: border-box;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid transparent;
-  border-radius: 50%;
-  color: #246bfe;
-  background: linear-gradient(145deg, #f5f9ff 0%, #e5efff 100%);
-  font-size: 12px;
-  font-weight: 600;
 }
 
 .projectMain {
@@ -187,7 +178,7 @@
   line-height: 20px;
 }
 
-// 项目类型标签与会话模块保持相同尺寸、圆角和颜色，放在项目名称行最右侧。
+// 项目类型标签紧跟项目名称展示，尺寸、圆角和颜色与会话模块保持一致。
 .projectTag {
   height: 18px;
   display: inline-flex;
@@ -202,71 +193,7 @@
   line-height: 1;
 }
 
-.projectTagGroup {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  align-self: center;
-  gap: 4px;
-  margin-left: auto;
-}
-
-.projectTagPersonal {
-  color: #246bfe;
-  background: #eaf2ff;
-}
-
-.projectTagShared {
-  color: #16835a;
-  background: #eaf8f0;
-}
-
-.projectTagDefault {
-  color: #596579;
-  background: #f1f4f8;
-}
-
-.projectTagDevelopment {
-  color: #7a3fd1;
-  background: #f3ecff;
-}
-
-.projectTagOperation {
-  color: #1677b8;
-  background: #e8f4fc;
-}
-
-// 项目类型标签与会话模块保持相同尺寸、圆角和颜色，放在项目名称行最右侧。
-.projectTag {
-  height: 18px;
-  line-height: 18px;
-  flex-shrink: 0;
-  margin-inline-end: 0;
-  padding: 0 5px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.projectTagGroup {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-}
-
-.projectTagPersonal {
-  color: #246bfe;
-  background: #eaf2ff;
-}
-
-.projectTagShared {
-  color: #16835a;
-  background: #eaf8f0;
-}
-
-.projectTagDefault {
+.projectTagNormal {
   color: #596579;
   background: #f1f4f8;
 }

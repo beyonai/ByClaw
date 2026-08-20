@@ -1,5 +1,27 @@
 import { sessionHandler } from '@/utils/session';
-import type { ProjectSession, ProjectShareTarget, ProjectSpace } from './types';
+import type { ProjectSession, ProjectShareTarget, ProjectSpace, ProjectType } from './types';
+
+export type ProjectTagMeta = {
+  classSuffix: 'Normal' | 'Development' | 'Operation';
+  messageId: 'projectSpace.scene.normal' | 'projectSpace.scene.development' | 'projectSpace.scene.operation';
+};
+
+/**
+ * 项目标签只表达项目类型：普通、研发、运营。
+ * default 是系统内置项目、sharedFlag 是共享范围，均不再作为标签类型展示。
+ */
+export const getProjectTagMeta = (
+  project?: Pick<ProjectSpace, 'projectType' | 'sharedFlag'> | ProjectType | string
+): ProjectTagMeta => {
+  const projectType = typeof project === 'string' ? project : project?.projectType;
+  if (projectType === 'develop' || projectType === 'development') {
+    return { classSuffix: 'Development', messageId: 'projectSpace.scene.development' };
+  }
+  if (projectType === 'operation') {
+    return { classSuffix: 'Operation', messageId: 'projectSpace.scene.operation' };
+  }
+  return { classSuffix: 'Normal', messageId: 'projectSpace.scene.normal' };
+};
 
 export const getArrayData = (response: any): any[] => {
   if (Array.isArray(response)) return response;

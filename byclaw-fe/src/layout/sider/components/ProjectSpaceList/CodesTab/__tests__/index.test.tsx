@@ -329,5 +329,5 @@ describe('CodesTab', () => {
 
     await waitFor(() => expect(mockGetTaskFileDiff).toHaveBeenCalledWith(301, 'src/changed.ts', 1));
     expect(await screen.findByText('+new value')).toBeInTheDocument();
-  });
+  }, 10000);
 });

@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { SearchOutlined } from '@ant-design/icons';
-import { Modal } from 'antd';
+import { Modal, Tooltip } from 'antd';
 // @ts-ignore
 import { useIntl } from '@umijs/max';
-import AntdIcon from '@/components/AntdIcon';
+import ResourcePanelToggleIcon from '@/components/ChatLayoutComp/ChatResourceWorkspace/ResourcePanelToggleIcon';
 import Search from '@/layout/header/components/Search';
 import { getPublicPath } from '@/utils';
 import { getSystemConfigByStorage } from '@/utils/system';
@@ -27,23 +27,26 @@ const WorkspaceSiderHeader: React.FC<WorkspaceSiderHeaderProps> = ({ onCollapse 
         <img className={styles.workspaceLogo} src={systemLogo} alt={systemTitle} />
         <span className={styles.workspaceName}>{systemTitle}</span>
       </div>
-      <button
-        type="button"
-        className={styles.globalSearchTrigger}
-        aria-label={searchLabel}
-        onClick={() => setShowSearch(true)}
-      >
-        <SearchOutlined className={styles.globalSearchIcon} />
-      </button>
-      <button
-        type="button"
-        className={styles.globalSearchTrigger}
-        aria-label={collapseLabel}
-        title={collapseLabel}
-        onClick={onCollapse}
-      >
-        <AntdIcon type="icon-cebianlan" className={styles.globalSearchIcon} />
-      </button>
+      <Tooltip title={searchLabel} placement="bottom">
+        <button
+          type="button"
+          className={styles.globalSearchTrigger}
+          aria-label={searchLabel}
+          onClick={() => setShowSearch(true)}
+        >
+          <SearchOutlined className={styles.globalSearchIcon} />
+        </button>
+      </Tooltip>
+      <Tooltip title={collapseLabel} placement="bottom">
+        <button
+          type="button"
+          className={`${styles.globalSearchTrigger} ${styles.sidebarToggleTrigger}`}
+          aria-label={collapseLabel}
+          onClick={onCollapse}
+        >
+          <ResourcePanelToggleIcon className={styles.sidebarToggleIcon} />
+        </button>
+      </Tooltip>
       {showSearch && (
         <Modal
           open

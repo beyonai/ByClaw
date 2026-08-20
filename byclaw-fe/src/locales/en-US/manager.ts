@@ -558,7 +558,9 @@ export default {
   'digitalEmployee.authSourceTip':
     'Displays authorization records from positions, personnel, and position whitelist/blacklist configurations.',
   'digitalEmployee.total': 'Total: {total}',
+  'employeeDetail.qaModel': 'QA model',
   'employeeDetail.imageModel': 'Image generation model',
+  'employeeDetail.imageModelConfiguration': 'Image generation model configuration',
   'employeeDetail.imageModelGlobalDefault': 'Use global default',
   'employeeDetail.imageModelPlaceholder': 'Select an image generation model',
   'employeeDetail.imageModelLoadError': 'Failed to load image generation models',

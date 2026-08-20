@@ -2021,14 +2021,6 @@ const EmployeeDetail = ({ loading }) => {
           <>
             {/* 左侧 */}
             <div className={classnames(styles.contentLeft, 'ub ub-ver')}>
-              <ImageModelSelect
-                value={selectedImageModelId}
-                disabled={readOnly}
-                onChange={(value) => {
-                  form.setFieldValue('imageModelId', value);
-                  onValuesChange();
-                }}
-              />
               <ConfigForm
                 agentId={agentId}
                 form={form}
@@ -2073,6 +2065,16 @@ const EmployeeDetail = ({ loading }) => {
                 employeeGroupMembers={employeeGroupMembers}
                 setEmployeeGroupMembers={setEmployeeGroupMembers}
                 onOpenOntologyDrawer={() => setOntologyDrawerOpen(true)}
+                imageModelSelect={
+                  <ImageModelSelect
+                    value={selectedImageModelId}
+                    disabled={readOnly}
+                    onChange={(value) => {
+                      form.setFieldValue('imageModelId', value);
+                      onValuesChange();
+                    }}
+                  />
+                }
               />
             </div>
 

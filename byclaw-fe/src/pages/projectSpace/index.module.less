@@ -304,6 +304,11 @@
   line-height: 18px;
 }
 
+.projectTypeTagNormal {
+  color: #596579;
+  background: #f1f4f8;
+}
+
 .projectTypeTagDevelopment {
   color: #7a3fd1;
   background: #f3ecff;
@@ -523,24 +528,51 @@
   align-items: center;
   gap: 6px;
   margin-bottom: 0;
-
-  h3 {
-    min-width: 0;
-  }
 }
 
-.detailBackButton {
-  height: 32px;
-  flex-shrink: 0;
-  padding: 0 8px;
-  color: #596579;
-  font-size: 14px;
+.detailBreadcrumb {
+  min-width: 0;
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  color: #6b6f76;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 24px;
+  white-space: nowrap;
+}
+
+.detailBreadcrumbLink {
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  background: transparent;
 
   &:hover,
   &:focus-visible {
-    color: #202020 !important;
-    background: #f1f3f5 !important;
+    color: #14161a;
+    text-decoration: underline;
+    outline: none;
   }
+}
+
+.detailBreadcrumbSeparator {
+  flex: 0 0 auto;
+  color: #a3a7ad;
+}
+
+.detailBreadcrumbCurrent {
+  min-width: 0;
+  overflow: hidden;
+  color: #14161a;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .detailDescription {
@@ -565,17 +597,7 @@
   line-height: 1;
 }
 
-.detailProjectTagPersonal {
-  color: #246bfe;
-  background: #eaf2ff;
-}
-
-.detailProjectTagShared {
-  color: #16835a;
-  background: #eaf8f0;
-}
-
-.detailProjectTagDefault {
+.detailProjectTagNormal {
   color: #596579;
   background: #f1f4f8;
 }

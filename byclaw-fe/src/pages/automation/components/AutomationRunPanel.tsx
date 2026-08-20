@@ -1,10 +1,8 @@
-import { Button, Dropdown, Empty, Input, Modal, Skeleton, Tooltip, message } from 'antd';
+import { Button, Empty, Input, Modal, Skeleton, Tooltip, message } from 'antd';
 import {
   CheckOutlined,
   DownOutlined,
   ExclamationCircleOutlined,
-  FilterOutlined,
-  InboxOutlined,
   LoadingOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -19,8 +17,15 @@ import styles from '../index.module.less';
 
 const PAGE_SIZE = 20;
 
-type RunStatus = 'success' | 'failed' | 'running' | 'archived';
+type RunStatus = 'success' | 'failed' | 'running';
 type RunStatusFilter = RunStatus | '';
+
+const runStatusOptions: Array<{ key: RunStatusFilter; labelId: string }> = [
+  { key: '', labelId: 'automation.run.status.all' },
+  { key: 'success', labelId: 'automation.run.status.success' },
+  { key: 'failed', labelId: 'automation.run.status.failed' },
+  { key: 'running', labelId: 'automation.run.status.running' },
+];
 
 interface AutomationRun {
   logId: number;
@@ -147,7 +152,6 @@ const AutomationRunPanel: React.FC<AutomationRunPanelProps> = ({ headerLeading }
     if (run.status === 'success') return intl.formatMessage({ id: 'automation.run.status.success' });
     if (run.status === 'failed') return intl.formatMessage({ id: 'automation.run.status.failed' });
     if (run.status === 'running') return intl.formatMessage({ id: 'automation.run.status.running' });
-    if (run.status === 'archived') return intl.formatMessage({ id: 'automation.run.status.archived' });
     return run.status || '-';
   };
 
@@ -173,9 +177,6 @@ const AutomationRunPanel: React.FC<AutomationRunPanelProps> = ({ headerLeading }
     }
     if (run.status === 'running') {
       return <LoadingOutlined className={styles.runStatusRunning} spin />;
-    }
-    if (run.status === 'archived') {
-      return <InboxOutlined className={styles.runStatusArchived} />;
     }
     return <CheckOutlined className={styles.runStatusSuccess} />;
   };
@@ -212,34 +213,6 @@ const AutomationRunPanel: React.FC<AutomationRunPanelProps> = ({ headerLeading }
           <div className={styles.automationTitle}>{intl.formatMessage({ id: 'automation.runRecords' })}</div>
         )}
         <div className={styles.toolbarActions}>
-          <Dropdown
-            trigger={['click']}
-            placement="bottomRight"
-            menu={{
-              selectable: true,
-              selectedKeys: [status || 'all'],
-              items: [
-                { key: 'all', label: intl.formatMessage({ id: 'automation.run.status.all' }) },
-                { key: 'success', label: intl.formatMessage({ id: 'automation.run.status.success' }) },
-                { key: 'failed', label: intl.formatMessage({ id: 'automation.run.status.failed' }) },
-                { key: 'running', label: intl.formatMessage({ id: 'automation.run.status.running' }) },
-                { key: 'archived', label: intl.formatMessage({ id: 'automation.run.status.archived' }) },
-              ],
-              onClick: ({ key }) => {
-                const nextStatus = key === 'all' ? '' : (key as RunStatus);
-                if (nextStatus === status) return;
-                prepareQueryChange();
-                setStatus(nextStatus);
-              },
-            }}
-          >
-            <Button
-              className={`${styles.toolbarIconButton} ${status ? styles.toolbarIconButtonActive : ''}`}
-              icon={<FilterOutlined />}
-              aria-label={intl.formatMessage({ id: 'automation.run.filter' })}
-              title={intl.formatMessage({ id: 'automation.run.filter' })}
-            />
-          </Dropdown>
           <Input
             allowClear
             className={styles.searchInput}
@@ -251,6 +224,28 @@ const AutomationRunPanel: React.FC<AutomationRunPanelProps> = ({ headerLeading }
               setKeyword(event.target.value);
             }}
           />
+          <div
+            className={styles.runStatusTabs}
+            role="tablist"
+            aria-label={intl.formatMessage({ id: 'automation.run.filter' })}
+          >
+            {runStatusOptions.map((item) => (
+              <button
+                key={item.key || 'all'}
+                type="button"
+                role="tab"
+                aria-selected={status === item.key}
+                className={status === item.key ? styles.runStatusTabActive : styles.runStatusTab}
+                onClick={() => {
+                  if (item.key === status) return;
+                  prepareQueryChange();
+                  setStatus(item.key);
+                }}
+              >
+                {intl.formatMessage({ id: item.labelId })}
+              </button>
+            ))}
+          </div>
           <Button
             className={styles.toolbarIconButton}
             icon={<ReloadOutlined />}

@@ -7,6 +7,30 @@ import type {
   AutomationIntervalUnit,
 } from './types';
 
+const getDigitalEmployeeIdentity = (employee: any) =>
+  [employee?.agentId, employee?.id, employee?.resourceId, employee?.resourceCode]
+    .filter((value) => value !== undefined && value !== null && `${value}` !== '')
+    .map((value) => `${value}`);
+
+const getDigitalEmployeeName = (employee: any) =>
+  employee?.resourceName || employee?.name || employee?.resourceDesc || employee?.agentName;
+
+/** 将任务配置中用于执行的数字员工占位符转换为卡片可读名称。 */
+export const resolveAutomationPromptDisplayText = (prompt: string, resourceList: any[] = [], employees: any[] = []) => {
+  if (!prompt) return '';
+
+  const employeesById = new Map<string, string>();
+  [...resourceList, ...employees].forEach((employee) => {
+    const name = getDigitalEmployeeName(employee);
+    if (!name) return;
+    getDigitalEmployeeIdentity(employee).forEach((identity) => employeesById.set(identity, `${name}`));
+  });
+
+  return prompt.replace(/\{\{DIG_EMPLOYEE_([^}]+)\}\}/g, (placeholder, employeeId: string) => {
+    return employeesById.get(employeeId) || placeholder;
+  });
+};
+
 export const ALL_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7];
 
 export const normalizeIntervalValue = (value: unknown, unit: AutomationIntervalUnit = 'hour') => {

@@ -221,6 +221,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
           resourceId={projectFileUrl ? undefined : resourceId}
           path={projectFileUrl ? undefined : item.path}
           fileUrl={projectFileUrl}
+          sessionId={scope === 'session' ? sessionId : undefined}
           source="fileBrowser"
         />,
         {
@@ -229,7 +230,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         }
       );
     },
-    [intl, onOpenDetail, resourceId, scope]
+    [intl, onOpenDetail, resourceId, scope, sessionId]
   );
 
   const downloadResource = useCallback(
