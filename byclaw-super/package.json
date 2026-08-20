@@ -32,7 +32,7 @@
   },
   "dependencies": {
     "@byclaw/by-conductor": "workspace:*",
-    "@byclaw/by-framework": "1.5.1",
+    "@byclaw/by-framework": "1.5.2",
     "@byclaw/connector-code-by-framework": "workspace:*",
     "@byclaw/connector-openclaw-by-framework": "workspace:*",
     "@byclaw/connector-third-party-a2a": "workspace:*",
