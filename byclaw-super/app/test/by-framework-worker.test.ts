@@ -543,6 +543,73 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(result.content).toBe("汇总结果");
   });
 
+  it("preserves the BYCLAW_CODE timeline without a digital-employee-output wrapper", async () => {
+    const emitEvent = vi.fn(async () => undefined);
+    const worker = createWorker({
+      createSessionRun: vi.fn(async () => run()),
+      cancelRun: vi.fn(),
+      streamEvents: () => codeDelegationTimelineEvents(),
+      emitEvent,
+      emitProtocolChunk: vi.fn(async () => undefined),
+    });
+
+    await worker.processCommand(askCommand(), contextMock());
+
+    const emitted = emitEvent.mock.calls.map((call) => call[0]);
+    const contents = emitted.map(
+      (message) => message.data?.choices?.[0]?.delta?.content ?? "",
+    );
+    expect(contents.some((content) => content.includes("数字员工输出"))).toBe(false);
+
+    const timeline = emitted
+      .filter(
+        (message) =>
+          message.data?.parentOrderId === "delegation-code" &&
+          ["1002", "3015"].includes(message.data?.contentType),
+      )
+      .map((message) => ({
+        orderId: message.data.orderId,
+        parentOrderId: message.data.parentOrderId,
+        contentType: message.data.contentType,
+        content: message.data.choices[0].delta.content,
+      }));
+
+    expect(timeline).toHaveLength(5);
+    expect(timeline[0]).toMatchObject({
+      orderId: "delegation-code:timeline:1",
+      parentOrderId: "delegation-code",
+      contentType: "1002",
+      content: "工具前思考",
+    });
+    expect(timeline[1]).toMatchObject({
+      orderId: "delegation-code:tool:child-call-code",
+      parentOrderId: "delegation-code",
+      contentType: "3015",
+    });
+    expect(JSON.parse(timeline[1].content)).toMatchObject({ title: "Bash", status: "_START_" });
+    expect(timeline[2]).toMatchObject({
+      orderId: "delegation-code:tool:child-call-code",
+      contentType: "3015",
+    });
+    expect(JSON.parse(timeline[2].content)).toMatchObject({
+      title: "Bash",
+      output: "/by/projects/demo",
+      status: "_DONE_",
+    });
+    expect(timeline[3]).toMatchObject({
+      orderId: "delegation-code:timeline:2",
+      parentOrderId: "delegation-code",
+      contentType: "1002",
+      content: "工具后思考",
+    });
+    expect(timeline[4]).toMatchObject({
+      orderId: "delegation-code:timeline:3",
+      parentOrderId: "delegation-code",
+      contentType: "1002",
+      content: "最终正文",
+    });
+  });
+
   it("renders string tool output without JSON quotes and unwraps encoded JSON", async () => {
     const emitEvent = vi.fn(async () => undefined);
     const worker = createWorker({
@@ -1278,6 +1345,63 @@ async function* nestedDelegationEvents(): AsyncIterable<RunEvent> {
     status: "COMPLETED",
     finalAnswer: "汇总结果",
   });
+}
+
+async function* codeDelegationTimelineEvents(): AsyncIterable<RunEvent> {
+  yield event(1, "delegation.started", {
+    delegationId: "delegation-code",
+    agentId: "agent-code",
+    agentName: "代码工匠 · 程开源",
+    connectorId: "code-by-framework",
+    task: "查看当前工作目录",
+  });
+  yield event(2, "delegation.display.progress", {
+    delegationId: "delegation-code",
+    agentId: "agent-code",
+    agentName: "代码工匠 · 程开源",
+    text: "工具前思考",
+  });
+  yield event(3, "delegation.tool.started", {
+    delegationId: "delegation-code",
+    agentId: "agent-code",
+    agentName: "代码工匠 · 程开源",
+    callId: "child-call-code",
+    toolName: "Bash",
+    title: "Bash",
+    input: { command: "pwd", description: "显示当前工作目录" },
+  });
+  yield event(4, "delegation.tool.completed", {
+    delegationId: "delegation-code",
+    agentId: "agent-code",
+    agentName: "代码工匠 · 程开源",
+    callId: "child-call-code",
+    toolName: "Bash",
+    title: "Bash",
+    output: "/by/projects/demo",
+  });
+  yield event(5, "delegation.display.progress", {
+    delegationId: "delegation-code",
+    agentId: "agent-code",
+    agentName: "代码工匠 · 程开源",
+    text: "工具后思考",
+  });
+  yield event(6, "delegation.output.delta", {
+    delegationId: "delegation-code",
+    agentId: "agent-code",
+    agentName: "代码工匠 · 程开源",
+    text: "最终正文",
+  });
+  yield event(7, "delegation.completed", {
+    delegationId: "delegation-code",
+    agentId: "agent-code",
+    agentName: "代码工匠 · 程开源",
+    status: "COMPLETED",
+    resultStatus: "completed",
+    artifactCount: 0,
+    hasOutput: true,
+  });
+  yield event(8, "leader.delta", { text: "汇总结果" });
+  yield event(9, "run.completed", { status: "COMPLETED", finalAnswer: "汇总结果" });
 }
 
 async function* stringToolOutputEvents(): AsyncIterable<RunEvent> {

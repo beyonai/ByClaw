@@ -59,7 +59,7 @@ describe("CodeByFrameworkConnector", () => {
     );
   });
 
-  it("collects BYCLAW_CODE child-session 1002 text as the final answer", async () => {
+  it("keeps BYCLAW_CODE direct reasoning separate from its answer", async () => {
     const redis = {
       xread: vi.fn().mockResolvedValueOnce([
         [
@@ -76,13 +76,29 @@ describe("CodeByFrameworkConnector", () => {
                   data: {
                     contentType: "1002",
                     orderId: "answer-1",
-                    choices: [{ delta: { content: "BYCLAW_CODE 正文" } }],
+                    choices: [{ delta: { content: "BYCLAW_CODE 思考" } }],
                   },
                 }),
               ],
             ],
             [
               "2-0",
+              [
+                "data",
+                JSON.stringify({
+                  trace_id: "trace-1",
+                  event_type: "answerDelta",
+                  message_id: "answer-1",
+                  data: {
+                    contentType: "1002",
+                    orderId: "answer-1",
+                    choices: [{ delta: { content: "BYCLAW_CODE 正文" } }],
+                  },
+                }),
+              ],
+            ],
+            [
+              "3-0",
               [
                 "data",
                 JSON.stringify({
@@ -137,11 +153,17 @@ describe("CodeByFrameworkConnector", () => {
     }
 
     expect(events).toEqual([
-      { type: "output_delta", text: "BYCLAW_CODE 正文", cursor: "1-0" },
+      {
+        type: "display_progress",
+        text: "BYCLAW_CODE 思考",
+        sourceMessageId: "answer-1",
+        cursor: "1-0",
+      },
+      { type: "output_delta", text: "BYCLAW_CODE 正文", cursor: "2-0" },
       {
         type: "completed",
         result: { status: "completed", output: "BYCLAW_CODE 正文", artifacts: [] },
-        cursor: "2-0",
+        cursor: "3-0",
       },
     ]);
   });
@@ -175,7 +197,7 @@ describe("CodeByFrameworkConnector", () => {
               "data",
               JSON.stringify({
                 trace_id: traceId,
-                event_type: "reasoningLogDelta",
+                event_type: "answerDelta",
                 data: {
                   contentType: "1002",
                   choices: [{ delta: { content: text } }],

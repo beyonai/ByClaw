@@ -23,8 +23,9 @@ export class CodeByFrameworkConnector extends ByFrameworkConnector {
       // BYCLAW_CODE 的 Agent 回调会复用外层 messageId，连续委派时会被 BY_SUPER
       // WorkerRunner 当作已完成执行去重。改为直接结束会话流，与其直调链路一致。
       agentReturnMode: "direct",
-      // BYCLAW_CODE 的子会话 assistant 正文使用 reasoningLogDelta/1002 承载。
-      promoteOutOfReasoningTextToOutput: true,
+      // direct 链路会正常发送 answerDelta/finalAnswer；reasoningLogDelta/1002
+      // 保持为展示过程，不能再沿用旧 callback 子会话的正文提升兼容逻辑。
+      promoteOutOfReasoningTextToOutput: false,
     });
   }
 }

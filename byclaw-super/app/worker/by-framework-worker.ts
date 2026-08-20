@@ -117,6 +117,15 @@ type DelegationToolCardState = {
   output?: unknown;
 };
 
+type DelegationPresentationState = {
+  connectorId: string;
+  nextTextSegment: number;
+  activeTextKind?: "progress" | "output";
+  activeTextOrderId?: string;
+};
+
+const CODE_BY_FRAMEWORK_CONNECTOR_ID = "code-by-framework";
+
 function toolCardTitle(toolName: string, upstreamTitle: string): string {
   if (/^\s*加载技能\s*[:：]/u.test(upstreamTitle)) {
     return "Skill";
@@ -446,6 +455,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     let answer = "";
     const reasoningMessageId = `${run.id}:reasoning`;
     const delegationToolCards = new Map<string, DelegationToolCardState>();
+    const delegationPresentations = new Map<string, DelegationPresentationState>();
 
     // 按 byai-channel 协议：未开启或已收尾时先补一条思考开始帧，再写增量。
     const ensureReasoningOpen = async () => {
@@ -473,7 +483,12 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       if (isDelegationReasoningEvent(event)) {
         await ensureReasoningOpen();
       }
-      await this.#forwardDelegationEvent(event, context, delegationToolCards);
+      await this.#forwardDelegationEvent(
+        event,
+        context,
+        delegationToolCards,
+        delegationPresentations,
+      );
       await this.#forwardInteractionEvent(event, context);
 
       const progress = progressMessage(event);
@@ -667,23 +682,47 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     event: RunEvent,
     context: AgentContext,
     toolCards: Map<string, DelegationToolCardState>,
+    presentations: Map<string, DelegationPresentationState>,
   ): Promise<void> {
     if (event.type === "delegation.started") {
+      const delegationId = stringData(event.data.delegationId);
+      if (delegationId) {
+        presentations.set(delegationId, {
+          connectorId: stringData(event.data.connectorId),
+          nextTextSegment: 0,
+        });
+      }
       await this.#emitDelegationStatus(event, context, "_START_");
       await this.#emitDelegationDetail(event, context, "start");
       return;
     }
+    const delegationId = stringData(event.data.delegationId);
+    const presentation = delegationId ? presentations.get(delegationId) : undefined;
+    const directCodePresentation =
+      presentation?.connectorId === CODE_BY_FRAMEWORK_CONNECTOR_ID;
     if (event.type === "delegation.display.progress") {
-      await this.#emitDelegationProgress(event, context);
+      await this.#emitDelegationProgress(
+        event,
+        context,
+        directCodePresentation && presentation
+          ? nextDelegationTextOrderId(delegationId, presentation, "progress")
+          : undefined,
+      );
       return;
     }
     if (event.type === "delegation.tool.started") {
+      if (presentation) {
+        closeDelegationTextSegment(presentation);
+      }
       await this.#emitDelegationToolCard(event, context, "_START_", toolCards, {
         ...(event.data.input !== undefined ? { input: event.data.input } : {}),
       });
       return;
     }
     if (event.type === "delegation.tool.detail") {
+      if (presentation) {
+        closeDelegationTextSegment(presentation);
+      }
       const phase = stringData(event.data.phase);
       if (phase === "input" || phase === "output") {
         await this.#emitDelegationToolCard(event, context, "_START_", toolCards, {
@@ -693,12 +732,18 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       return;
     }
     if (event.type === "delegation.tool.completed") {
+      if (presentation) {
+        closeDelegationTextSegment(presentation);
+      }
       await this.#emitDelegationToolCard(event, context, "_DONE_", toolCards, {
         ...(event.data.output !== undefined ? { output: event.data.output } : {}),
       });
       return;
     }
     if (event.type === "delegation.tool.failed") {
+      if (presentation) {
+        closeDelegationTextSegment(presentation);
+      }
       const error = stringData(event.data.error) || "工具调用失败";
       await this.#emitDelegationToolCard(event, context, "_ERROR_", toolCards, {
         output:
@@ -711,22 +756,37 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     if (event.type === "delegation.output.delta") {
       const text = stringData(event.data.text);
       if (text) {
-        await this.#emitDelegationAnswerStatus(event, context, "_START_");
-        await this.#emitDelegationOutput(event, context, text);
+        if (directCodePresentation && presentation) {
+          await this.#emitDelegationOutput(
+            event,
+            context,
+            text,
+            nextDelegationTextOrderId(delegationId, presentation, "output"),
+          );
+        } else {
+          await this.#emitDelegationAnswerStatus(event, context, "_START_");
+          await this.#emitDelegationOutput(event, context, text);
+        }
       }
       return;
     }
     if (event.type === "delegation.completed") {
-      if (event.data.hasOutput === true) {
+      if (event.data.hasOutput === true && !directCodePresentation) {
         await this.#emitDelegationAnswerStatus(event, context, "_DONE_");
       }
       await this.#emitDelegationStatus(event, context, "_DONE_");
       await this.#emitDelegationDetail(event, context, "result");
+      if (delegationId) {
+        presentations.delete(delegationId);
+      }
       return;
     }
     if (event.type === "delegation.failed") {
       await this.#emitDelegationStatus(event, context, "_ERROR_");
       await this.#emitDelegationDetail(event, context, "result");
+      if (delegationId) {
+        presentations.delete(delegationId);
+      }
     }
   }
 
@@ -769,13 +829,17 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
   }
 
   /** 将子 Agent 可展示过程挂在委派根节点下。 */
-  async #emitDelegationProgress(event: RunEvent, context: AgentContext): Promise<void> {
+  async #emitDelegationProgress(
+    event: RunEvent,
+    context: AgentContext,
+    timelineOrderId?: string,
+  ): Promise<void> {
     const delegationId = stringData(event.data.delegationId);
     const text = stringData(event.data.text);
     if (!delegationId || !text) {
       return;
     }
-    const orderId = `${delegationId}:progress`;
+    const orderId = timelineOrderId || `${delegationId}:progress`;
     const parentOrderId = delegationId;
     await this.#protocolEmitter.emitEvent({
       sessionId: context.sessionId,
@@ -1019,26 +1083,33 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
   }
 
   /** 原样输出子 Agent 正文，并用 parentOrderId 挂到对应 Agent 调用节点。 */
-  async #emitDelegationOutput(event: RunEvent, context: AgentContext, text: string): Promise<void> {
+  async #emitDelegationOutput(
+    event: RunEvent,
+    context: AgentContext,
+    text: string,
+    timelineOrderId?: string,
+  ): Promise<void> {
     const delegationId = stringData(event.data.delegationId);
     if (!delegationId) {
       return;
     }
     const agentId = stringData(event.data.agentId);
     const agentName = stringData(event.data.agentName);
+    const orderId = timelineOrderId || `${delegationId}:answer:text`;
+    const parentOrderId = timelineOrderId ? delegationId : `${delegationId}:answer`;
     await this.#protocolEmitter.emitEvent({
       sessionId: context.sessionId,
       traceId: context.traceId,
       eventType: EventType.REASONING_LOG_DELTA,
       sourceAgentType: this.#agentType,
-      messageId: `${delegationId}:answer:text`,
-      parentMessageId: `${delegationId}:answer`,
+      messageId: orderId,
+      parentMessageId: parentOrderId,
       data: protocolMessage({
         event: EventType.REASONING_LOG_DELTA,
         content: text,
         contentType: "1002",
-        orderId: `${delegationId}:answer:text`,
-        parentOrderId: `${delegationId}:answer`,
+        orderId,
+        parentOrderId,
       }),
       metadata: {
         parent_run_id: event.runId,
@@ -1048,4 +1119,22 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       },
     });
   }
+}
+
+function nextDelegationTextOrderId(
+  delegationId: string,
+  state: DelegationPresentationState,
+  kind: "progress" | "output",
+): string {
+  if (state.activeTextKind !== kind || !state.activeTextOrderId) {
+    state.nextTextSegment += 1;
+    state.activeTextKind = kind;
+    state.activeTextOrderId = `${delegationId}:timeline:${state.nextTextSegment}`;
+  }
+  return state.activeTextOrderId;
+}
+
+function closeDelegationTextSegment(state: DelegationPresentationState): void {
+  delete state.activeTextKind;
+  delete state.activeTextOrderId;
 }
