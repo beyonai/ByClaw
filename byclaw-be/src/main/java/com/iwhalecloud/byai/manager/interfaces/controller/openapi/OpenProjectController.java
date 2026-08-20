@@ -84,6 +84,22 @@ public class OpenProjectController {
     }
 
     /**
+     * 按会话反查所属项目
+     * <p>
+     * 只知道 sessionId 的调用方（定时任务、外部技能）用它解析 projectId；会话没绑项目时
+     * 返回 bound=false 而不是报错，调用方据此走自己的兜底流程。
+     *
+     * @param params 包含 sessionId
+     * @return 含 bound、projectId、projectName、projectType
+     */
+    @ManageLogAnnotation(name = "API调用", description = "按会话查项目")
+    @PostMapping("/resolveProjectBySession")
+    public ResponseUtil<Map<String, Object>> resolveProjectBySession(@RequestBody Map<String, Object> params) {
+        Long sessionId = MapParamUtil.getLongValue(params, "sessionId");
+        return ResponseUtil.successResponse(projectApplicationService.resolveProjectBySession(sessionId));
+    }
+
+    /**
      * 删除项目（软删除）
      *
      * @param params 包含 projectId
