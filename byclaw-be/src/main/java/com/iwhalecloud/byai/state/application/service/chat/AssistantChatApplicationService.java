@@ -199,6 +199,7 @@ public class AssistantChatApplicationService {
             stopChatDto.setMessageId(runningMessageId);
         }
 
+        /*
         SsResource ssResource = ssResourceService.findById(stopChatDto.getAgentId());
         String workerAgentType = null;
         if (ssResource == null) {
@@ -212,10 +213,13 @@ public class AssistantChatApplicationService {
             CurrentUserHolder.getCurrentUserCode());
 
         String executionId = resolveStopExecutionId(stopChatDto);
-        Long cleanupMessageId = resolveStopCleanupMessageId(stopChatDto);
 
         gatewayClient.cancelTask(executionId, String.valueOf(stopChatDto.getSessionId()),
             "user cancel task", targetAgentType, CurrentUserHolder.getCurrentUserCode(), "force");
+        */
+        gatewayClient.cancelSession(String.valueOf(stopChatDto.getSessionId()), "user cancel task");
+
+        Long cleanupMessageId = resolveStopCleanupMessageId(stopChatDto);
 
         runningOutputStreamRegistry.release(stopChatDto.getSessionId(), cleanupMessageId);
         runningChatSnapshotService.delete(stopChatDto.getSessionId(), cleanupMessageId);
