@@ -55,6 +55,42 @@ export interface ConnectorError {
 /** 不同传输实现都必须转换成的标准事件联合类型。 */
 export type ConnectorEvent = (
   | { type: "progress"; message: string }
+  | {
+      /** 子 Agent 主动发出的、允许展示给用户的执行过程文本；不是模型隐藏推理。 */
+      type: "display_progress";
+      text: string;
+      sourceMessageId?: string;
+    }
+  | {
+      type: "tool_started";
+      callId: string;
+      toolName: string;
+      title?: string;
+      input?: JsonValue;
+    }
+  | {
+      type: "tool_detail";
+      callId: string;
+      toolName?: string;
+      phase: "input" | "output";
+      value: JsonValue;
+    }
+  | {
+      type: "tool_completed";
+      callId: string;
+      toolName?: string;
+      title?: string;
+      /** 某些 by-framework Worker 把工具结果包装在 3009 的 output 字段中。 */
+      output?: JsonValue;
+    }
+  | {
+      type: "tool_failed";
+      callId: string;
+      toolName?: string;
+      title?: string;
+      error: string;
+      output?: JsonValue;
+    }
   | { type: "output_delta"; text: string }
   | { type: "artifact"; artifact: ArtifactRef }
   | {
@@ -97,10 +133,7 @@ export interface AgentConnector {
   readonly capabilities: ConnectorCapabilities;
 
   /** 启动一次外部 Agent 执行，并返回可持久化引用、规范化事件流和取消句柄。 */
-  start(
-    request: ConnectorRequest,
-    context: { signal: AbortSignal },
-  ): Promise<ConnectorExecution>;
+  start(request: ConnectorRequest, context: { signal: AbortSignal }): Promise<ConnectorExecution>;
 
   /** 从已持久化 externalRef/cursor 重连同一个外部执行，不得再次投递任务。 */
   resume?(

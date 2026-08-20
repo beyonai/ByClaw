@@ -66,7 +66,7 @@ export class PiLeaderSession implements LeaderSession {
   }
 
   /**
-   * 构造受限的 Pi Session：关闭扩展、技能和上下文文件，只注册 delegateAgent 工具。
+   * 构造受限的 Pi Session：关闭扩展、技能和上下文文件，只注册平台白名单工具。
    */
   static async create(
     runtime: Awaited<ReturnType<typeof ModelRuntime.create>>,

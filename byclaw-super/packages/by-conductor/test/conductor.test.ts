@@ -190,9 +190,9 @@ describe("DelegationService", () => {
 
     expect(result.status).toBe("cancelled");
     expect(cancel).toHaveBeenCalledWith("run cancelled");
-    expect(
-      (await delegations.listByRun("run-cancelled-during-start"))[0]?.status,
-    ).toBe("CANCELLED");
+    expect((await delegations.listByRun("run-cancelled-during-start"))[0]?.status).toBe(
+      "CANCELLED",
+    );
   });
 
   it("validates authorization and aggregates normalized output", async () => {
@@ -200,6 +200,30 @@ describe("DelegationService", () => {
     const start = vi.fn(async () => ({
       ref: { connectorId: "fake", executionId: "external-1" },
       events: (async function* (): AsyncIterable<ConnectorEvent> {
+        yield {
+          type: "display_progress",
+          text: "正在分析",
+          sourceMessageId: "reason-1",
+        };
+        yield {
+          type: "tool_started",
+          callId: "call-1",
+          toolName: "read",
+          title: "调用工具：read",
+        };
+        yield {
+          type: "tool_detail",
+          callId: "call-1",
+          toolName: "read",
+          phase: "input",
+          value: { path: "/tmp/data" },
+        };
+        yield {
+          type: "tool_completed",
+          callId: "call-1",
+          toolName: "read",
+          output: "file contents",
+        };
         yield { type: "output_delta", text: "hello " };
         yield { type: "output_delta", text: "world" };
         yield completed("");
@@ -251,6 +275,10 @@ describe("DelegationService", () => {
     const storedEvents = await events.list("run-1");
     expect(storedEvents.map((event) => event.type)).toEqual([
       "delegation.started",
+      "delegation.display.progress",
+      "delegation.tool.started",
+      "delegation.tool.detail",
+      "delegation.tool.completed",
       "delegation.output.delta",
       "delegation.output.delta",
       "delegation.completed",
@@ -261,15 +289,36 @@ describe("DelegationService", () => {
       connectorId: "fake",
       task: "analyze",
       expectedOutput: "structured summary",
-      attachments: [
-        { id: "attachment-1", name: "sales.csv", mediaType: "text/csv" },
-      ],
+      attachments: [{ id: "attachment-1", name: "sales.csv", mediaType: "text/csv" }],
     });
     expect(
       storedEvents
         .filter((event) => event.type === "delegation.output.delta")
         .map((event) => event.data.text),
     ).toEqual(["hello ", "world"]);
+    expect(
+      storedEvents.find((event) => event.type === "delegation.tool.started")?.data,
+    ).toMatchObject({
+      delegationId: stored?.id,
+      agentId: "1001",
+      agentName: "Analyst",
+      callId: "call-1",
+      toolName: "read",
+    });
+    expect(
+      storedEvents.find((event) => event.type === "delegation.tool.detail")?.data,
+    ).toMatchObject({
+      callId: "call-1",
+      phase: "input",
+      value: { path: "/tmp/data" },
+    });
+    expect(
+      storedEvents.find((event) => event.type === "delegation.tool.completed")?.data,
+    ).toMatchObject({
+      callId: "call-1",
+      toolName: "read",
+      output: "file contents",
+    });
     const completedEvent = storedEvents.find((e) => e.type === "delegation.completed");
     expect(completedEvent?.data).toMatchObject({
       delegationId: stored?.id,
@@ -325,9 +374,7 @@ describe("DelegationService", () => {
       (e) => e.type === "delegation.completed",
     );
     expect(completedEvent?.data).toMatchObject({ agentName: "Analyst", artifactCount: 1 });
-    expect(
-      (await delegations.listByRun("run-art"))[0]?.result?.artifacts,
-    ).toHaveLength(1);
+    expect((await delegations.listByRun("run-art"))[0]?.result?.artifacts).toHaveLength(1);
   });
 
   it("persists an input request and resumes the same connector execution", async () => {
@@ -386,20 +433,11 @@ describe("DelegationService", () => {
       signal: new AbortController().signal,
     });
     await waitFor(async () =>
-      (await events.list("run-input")).some(
-        (event) => event.type === "interaction.requested",
-      ),
+      (await events.list("run-input")).some((event) => event.type === "interaction.requested"),
     );
-    expect((await delegations.listByRun("run-input"))[0]?.status).toBe(
-      "WAITING_USER",
-    );
+    expect((await delegations.listByRun("run-input"))[0]?.status).toBe("WAITING_USER");
 
-    const responderOnAnotherInstance = new DelegationService(
-      registry,
-      delegations,
-      events,
-      1_000,
-    );
+    const responderOnAnotherInstance = new DelegationService(registry, delegations, events, 1_000);
     await expect(
       responderOnAnotherInstance.respondToInteraction("run-input", "interaction-1", {
         action: "submit",
@@ -530,12 +568,7 @@ describe("DelegationService", () => {
       },
     });
     const delegations = new InMemoryDelegationRepository();
-    const service = new DelegationService(
-      registry,
-      delegations,
-      new InMemoryRunEventStore(),
-      10,
-    );
+    const service = new DelegationService(registry, delegations, new InMemoryRunEventStore(), 10);
     const result = await service.execute({
       session: {
         id: "session-1",
@@ -597,9 +630,7 @@ describe("DelegationService", () => {
     });
 
     expect(result.status).toBe("timed_out");
-    expect(
-      (await delegations.listByRun("run-first-event-timeout"))[0]?.status,
-    ).toBe("TIMED_OUT");
+    expect((await delegations.listByRun("run-first-event-timeout"))[0]?.status).toBe("TIMED_OUT");
   });
 
   it("reports active delegation cancellation failures", async () => {
@@ -653,9 +684,9 @@ describe("DelegationService", () => {
       .catch((error: unknown) => error);
     await started;
 
-    await expect(
-      service.cancelRun("run-cancel-failure", "user cancelled"),
-    ).rejects.toThrow("Failed to cancel 1 active delegation");
+    await expect(service.cancelRun("run-cancel-failure", "user cancelled")).rejects.toThrow(
+      "Failed to cancel 1 active delegation",
+    );
 
     controller.abort(new Error("user cancelled"));
     await execution;
@@ -823,7 +854,7 @@ describe("DelegationService", () => {
       expect.objectContaining({ delegationId: "delegation-stable" }),
       expect.anything(),
     );
-    expect((await delegations.listByRun("run-stable"))).toHaveLength(1);
+    expect(await delegations.listByRun("run-stable")).toHaveLength(1);
     expect((await events.list("run-stable")).map((event) => event.type)).toEqual([
       "delegation.output.delta",
       "delegation.completed",
@@ -988,12 +1019,8 @@ describe("RunService", () => {
     });
 
     expect(run.thinkingLevel).toBe("high");
-    expect(
-      await service.getOwnedSession(run.sessionId, { userCode: "first-user" }),
-    ).toBeDefined();
-    expect(
-      await service.getOwnedRun(run.id, { userCode: "another-user" }),
-    ).toBeUndefined();
+    expect(await service.getOwnedSession(run.sessionId, { userCode: "first-user" })).toBeDefined();
+    expect(await service.getOwnedRun(run.id, { userCode: "another-user" })).toBeUndefined();
     expect((await events.list(run.id))[0]).toMatchObject({
       type: "run.created",
       data: { status: "QUEUED" },
@@ -1058,9 +1085,7 @@ describe("RunService", () => {
       agentList: [],
     });
     await waitFor(async () =>
-      (await events.list(run.id)).some(
-        (event) => event.type === "interaction.requested",
-      ),
+      (await events.list(run.id)).some((event) => event.type === "interaction.requested"),
     );
     const requested = (await events.list(run.id)).find(
       (event) => event.type === "interaction.requested",
@@ -1218,9 +1243,7 @@ describe("RunService", () => {
       agentList: [],
     });
     await waitFor(async () =>
-      (await events.list(run.id)).some(
-        (event) => event.type === "interaction.requested",
-      ),
+      (await events.list(run.id)).some((event) => event.type === "interaction.requested"),
     );
     const requested = (await events.list(run.id)).find(
       (event) => event.type === "interaction.requested",
@@ -1235,9 +1258,7 @@ describe("RunService", () => {
       }),
     ).rejects.toThrow("Run is already terminal:");
     expect(
-      (await events.list(run.id)).filter(
-        (event) => event.type === "interaction.responded",
-      ),
+      (await events.list(run.id)).filter((event) => event.type === "interaction.responded"),
     ).toHaveLength(0);
     await service.dispose();
   });
@@ -1314,9 +1335,7 @@ describe("RunService", () => {
       agentList: [],
     });
     await waitFor(async () =>
-      (await events.list(first.id)).some(
-        (event) => event.type === "interaction.requested",
-      ),
+      (await events.list(first.id)).some((event) => event.type === "interaction.requested"),
     );
 
     await waitFor(() => started.includes("second"));
@@ -1472,12 +1491,7 @@ describe("RunService", () => {
         };
       },
     });
-    const delegationService = new DelegationService(
-      registry,
-      delegations,
-      events,
-      1_000,
-    );
+    const delegationService = new DelegationService(registry, delegations, events, 1_000);
     const leaders: LeaderSessionFactory = {
       async create() {
         return {
@@ -1501,14 +1515,7 @@ describe("RunService", () => {
         return { healthy: true };
       },
     };
-    const service = new RunService(
-      sessions,
-      runs,
-      delegations,
-      events,
-      delegationService,
-      leaders,
-    );
+    const service = new RunService(sessions, runs, delegations, events, delegationService, leaders);
     const session = await service.createSession({
       owner: { userCode: "user" },
     });
@@ -1558,9 +1565,7 @@ describe("RunService", () => {
     });
     await waitFor(() => leaderFactory.started.includes("cancel-failure"));
 
-    await expect(service.cancelRun(run.id)).rejects.toThrow(
-      "downstream cancellation failed",
-    );
+    await expect(service.cancelRun(run.id)).rejects.toThrow("downstream cancellation failed");
     await waitFor(async () => (await service.getRun(run.id))?.status === "CANCELLING");
 
     expect((await service.getRun(run.id))?.status).toBe("CANCELLING");
@@ -1734,9 +1739,7 @@ describe("RunService inspectAttachment 接线", () => {
     const { input } = await runWithAttachments(harness, {
       "Beyond-Token": "token-1",
     });
-    await expect(
-      input.inspectAttachment!({ attachmentId: "not-in-run" }),
-    ).rejects.toMatchObject({
+    await expect(input.inspectAttachment!({ attachmentId: "not-in-run" })).rejects.toMatchObject({
       name: "AttachmentInspectionError",
       code: ATTACHMENT_INSPECTION_ERROR_CODES.NOT_FOUND,
     });
@@ -1748,9 +1751,7 @@ describe("RunService inspectAttachment 接线", () => {
     const inspect = vi.fn() as unknown as AttachmentResolver["inspect"];
     const harness = createInspectHarness({ inspect });
     const { input } = await runWithAttachments(harness);
-    await expect(
-      input.inspectAttachment!({ attachmentId: "123" }),
-    ).rejects.toMatchObject({
+    await expect(input.inspectAttachment!({ attachmentId: "123" })).rejects.toMatchObject({
       name: "AttachmentInspectionError",
       code: ATTACHMENT_INSPECTION_ERROR_CODES.CREDENTIAL_MISSING,
     });
@@ -1871,20 +1872,15 @@ function createRunService(leaders: LeaderSessionFactory) {
   const delegations = new InMemoryDelegationRepository();
   const events = new InMemoryRunEventStore();
   const registry = new ConnectorRegistry();
-  registry.register(fakeConnector(async function* () {
-    yield completed("ok");
-  }));
+  registry.register(
+    fakeConnector(async function* () {
+      yield completed("ok");
+    }),
+  );
   const delegationService = new DelegationService(registry, delegations, events, 1_000);
   return {
     events,
-    service: new RunService(
-      sessions,
-      runs,
-      delegations,
-      events,
-      delegationService,
-      leaders,
-    ),
+    service: new RunService(sessions, runs, delegations, events, delegationService, leaders),
   };
 }
 
@@ -2003,7 +1999,10 @@ function completed(output: string): ConnectorEvent {
   };
 }
 
-async function waitFor(condition: () => boolean | Promise<boolean>, timeoutMs = 1_000): Promise<void> {
+async function waitFor(
+  condition: () => boolean | Promise<boolean>,
+  timeoutMs = 1_000,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!(await condition())) {
     if (Date.now() > deadline) {
