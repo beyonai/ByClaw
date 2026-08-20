@@ -243,6 +243,17 @@ ALTER TABLE ${POSTGRES_TABLE_PREFIX}runs
   ADD COLUMN ingress_context jsonb NULL;
 `,
   },
+  {
+    version: 10,
+    name: "delegation_last_activity",
+    sql: `
+ALTER TABLE ${POSTGRES_TABLE_PREFIX}delegations
+  ADD COLUMN last_activity_at timestamptz NULL;
+UPDATE ${POSTGRES_TABLE_PREFIX}delegations
+  SET last_activity_at = updated_at
+  WHERE started_at IS NOT NULL;
+`,
+  },
 ] as const;
 
 export const LATEST_POSTGRES_SCHEMA_VERSION =

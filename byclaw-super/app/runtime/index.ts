@@ -117,14 +117,15 @@ function createConnectors(config: AppConfig) {
   const openClaw = new OpenClawByFrameworkConnector({
     redis,
     sourceAgentType: config.worker.agentType,
-    firstEventTimeoutMs: config.openClaw.firstEventTimeoutMs,
+    // 首次活动边界由通用 DelegationService 统一管理。
+    firstEventTimeoutMs: 0,
     cancelConfirmationTimeoutMs: config.openClaw.cancelConfirmationTimeoutMs,
   });
   connectors.register(openClaw);
   const code = new CodeByFrameworkConnector({
     redis,
     sourceAgentType: config.worker.agentType,
-    firstEventTimeoutMs: config.openClaw.firstEventTimeoutMs,
+    firstEventTimeoutMs: 0,
     cancelConfirmationTimeoutMs: config.openClaw.cancelConfirmationTimeoutMs,
   });
   connectors.register(code);
@@ -174,7 +175,7 @@ function createOrchestration(input: {
     connectors,
     database.delegations,
     database.events,
-    config.delegationTimeoutMs,
+    config.delegationTimeouts,
   );
   const llmProvider = createLlmProviderSource(config, redis);
   const leaders = new LazyPiLeaderFactory(

@@ -57,6 +57,15 @@ type ActiveInteraction = {
   respond(response: UserInteractionResponse): Promise<void>;
 };
 
+export interface DelegationTimeoutOptions {
+  /** 从投递到首个可信 Connector 活动的最长等待时间。 */
+  firstActivityMs: number;
+  /** 执行期间连续无任何可信活动的最长时间。 */
+  idleMs: number;
+}
+
+type DelegationTimeoutKind = "first_activity" | "idle";
+
 /**
  * 负责一次 Agent 委派从授权校验到终态落库的完整生命周期。
  * Connector 的传输细节会在这里被归一化，Leader 只看到统一的 AgentResult。
@@ -65,16 +74,28 @@ export class DelegationService {
   readonly #active = new Map<string, Map<string, ActiveExecution>>();
   readonly #claims = new Map<string, RunExecutionClaim>();
   readonly #interactions = new Map<string, ActiveInteraction>();
+  readonly #timeouts: DelegationTimeoutOptions;
 
   /** 注入 Connector 注册表、持久化 Port 以及可替换的时间和 ID 实现。 */
   constructor(
     private readonly connectors: ConnectorRegistry,
     private readonly delegations: DelegationRepository,
     private readonly events: RunEventStore,
-    private readonly timeoutMs = 900_000,
+    timeoutOptions: number | Partial<DelegationTimeoutOptions> = {},
     private readonly now: () => number = Date.now,
     private readonly createId: () => string = randomUUID,
-  ) {}
+  ) {
+    // number 是旧构造参数；同时作为首次活动和空闲边界。
+    this.#timeouts = typeof timeoutOptions === "number"
+      ? {
+          firstActivityMs: timeoutOptions,
+          idleMs: timeoutOptions,
+        }
+      : {
+          firstActivityMs: timeoutOptions.firstActivityMs ?? 300_000,
+          idleMs: timeoutOptions.idleMs ?? 900_000,
+        };
+  }
 
   /**
    * 执行一次委派，聚合流式输出并处理成功、失败、超时和上游取消。
@@ -177,7 +198,7 @@ export class DelegationService {
     // 投递；直接收敛为 CANCELLED，不能继续调用 Connector。
     if (input.signal.aborted) {
       try {
-        return await this.#finishAborted(delegation, false);
+        return await this.#finishAborted(delegation);
       } finally {
         if (this.#claims.get(input.runId) === input.leaseClaim) {
           this.#claims.delete(input.runId);
@@ -186,7 +207,7 @@ export class DelegationService {
     }
 
     const controller = new AbortController();
-    let timedOut = false;
+    let timeoutKind: DelegationTimeoutKind | undefined;
     let execution: ConnectorExecution | undefined;
     // 将 Run 或工具级取消转发到当前委派的独立控制器。
     const forwardAbort = () => controller.abort(input.signal.reason);
@@ -195,36 +216,63 @@ export class DelegationService {
     if (input.signal.aborted) {
       forwardAbort();
     }
-    // 外部执行超时不包含等待用户作答的时间；恢复输入后重新开始计时。
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const armTimeout = () => {
-      if (timeout) {
-        clearTimeout(timeout);
+    // 首次/空闲是滑动边界；可信活动会续期，不设绝对执行上限。
+    let activityTimeout: ReturnType<typeof setTimeout> | undefined;
+    const recoveryFallbackAt = this.now();
+    const timeoutReason = (kind: DelegationTimeoutKind) => {
+      if (kind === "first_activity") {
+        return `Delegation received no activity within ${this.#timeouts.firstActivityMs}ms`;
       }
-      timeout = setTimeout(() => {
-        timedOut = true;
-        controller.abort(new Error(`Delegation timed out after ${this.timeoutMs}ms`));
-        if (execution) {
-          void this.#cancelExecution(
-            input.runId,
-            delegationId,
-            execution,
-            "delegation timeout",
-          ).catch(() => undefined);
-        }
-      }, this.timeoutMs);
+      return `Delegation was idle for ${this.#timeouts.idleMs}ms`;
     };
-    const pauseTimeout = () => {
-      if (timeout) {
-        clearTimeout(timeout);
-        timeout = undefined;
+    const triggerTimeout = (kind: DelegationTimeoutKind) => {
+      if (timeoutKind || controller.signal.aborted) {
+        return;
+      }
+      timeoutKind = kind;
+      controller.abort(new Error(timeoutReason(kind)));
+      if (execution) {
+        void this.#cancelExecution(
+          input.runId,
+          delegationId,
+          execution,
+          `delegation ${kind} timeout`,
+        ).catch(() => undefined);
       }
     };
-    armTimeout();
+    const armActivityTimeout = () => {
+      if (activityTimeout) {
+        clearTimeout(activityTimeout);
+      }
+      const lastActivityAt = delegation.lastActivityAt;
+      const duration = lastActivityAt
+        ? this.#timeouts.idleMs
+        : this.#timeouts.firstActivityMs;
+      const deadline = (
+        lastActivityAt ??
+        delegation.startedAt ??
+        (resuming ? recoveryFallbackAt : delegation.createdAt)
+      ) + duration;
+      activityTimeout = setTimeout(
+        () => triggerTimeout(lastActivityAt ? "idle" : "first_activity"),
+        Math.max(0, deadline - this.now()),
+      );
+    };
+    const pauseActivityTimeout = () => {
+      if (activityTimeout) {
+        clearTimeout(activityTimeout);
+        activityTimeout = undefined;
+      }
+    };
+    const markActivity = () => {
+      delegation = { ...delegation, lastActivityAt: this.now() };
+      armActivityTimeout();
+    };
+    armActivityTimeout();
 
     try {
       if (controller.signal.aborted) {
-        return await this.#finishAborted(delegation, false);
+        return await this.#finishAborted(delegation);
       }
       if (resuming) {
         if (!connector.resume || !delegation.externalRef) {
@@ -261,9 +309,9 @@ export class DelegationService {
           input.runId,
           delegationId,
           execution,
-          timedOut ? "delegation timeout" : "run cancelled",
+          timeoutKind ? `delegation ${timeoutKind} timeout` : "run cancelled",
         );
-        return await this.#finishAborted(delegation, timedOut);
+        return await this.#finishAborted(delegation, timeoutKind, timeoutReason);
       }
 
       if (!resuming) {
@@ -272,7 +320,7 @@ export class DelegationService {
           status: "RUNNING",
           version: delegation.version + 1,
           externalRef: execution.ref,
-          startedAt: this.now(),
+          startedAt: delegation.startedAt ?? this.now(),
           updatedAt: this.now(),
         };
         await this.#saveDelegation(delegation);
@@ -287,7 +335,7 @@ export class DelegationService {
         requestedEventId: number,
       ) => {
         pendingInteractionId = interactionId;
-        pauseTimeout();
+        pauseActivityTimeout();
         await input.onInputRequired?.(interactionId, request);
         this.#interactions.set(interactionId, {
           runId: input.runId,
@@ -300,11 +348,12 @@ export class DelegationService {
             delegation = {
               ...delegation,
               status: "RUNNING",
+              lastActivityAt: this.now(),
               version: delegation.version + 1,
               updatedAt: this.now(),
             };
             await this.#saveDelegation(delegation);
-            armTimeout();
+            armActivityTimeout();
             await input.onInputResolved?.(interactionId);
           },
         });
@@ -345,7 +394,10 @@ export class DelegationService {
 
       for await (const event of execution.events) {
         if (controller.signal.aborted) {
-          return await this.#finishAborted(delegation, timedOut);
+          return await this.#finishAborted(delegation, timeoutKind, timeoutReason);
+        }
+        if (event.type !== "completed" && event.type !== "failed") {
+          markActivity();
         }
         if (pendingInteractionId && event.type !== "input_required") {
           const interactionId = pendingInteractionId;
@@ -399,6 +451,10 @@ export class DelegationService {
             event.resumeToken,
             requestedEvent.eventId,
           );
+          continue;
+        }
+        if (event.type === "activity") {
+          delegation = await this.#checkpointProgress(delegation, output, event.cursor);
           continue;
         }
         if (event.type === "display_progress") {
@@ -570,10 +626,10 @@ export class DelegationService {
             input.runId,
             delegationId,
             execution,
-            timedOut ? "delegation timeout" : "run cancelled",
+            timeoutKind ? `delegation ${timeoutKind} timeout` : "run cancelled",
           );
         }
-        return await this.#finishAborted(delegation, timedOut);
+        return await this.#finishAborted(delegation, timeoutKind, timeoutReason);
       }
       const message = error instanceof Error ? error.message : String(error);
       if (execution) {
@@ -599,8 +655,8 @@ export class DelegationService {
       await this.#finish(delegation, "FAILED", result);
       return result;
     } finally {
-      if (timeout) {
-        clearTimeout(timeout);
+      if (activityTimeout) {
+        clearTimeout(activityTimeout);
       }
       input.signal.removeEventListener("abort", forwardAbort);
       this.#untrack(input.runId, delegationId);
@@ -680,9 +736,6 @@ export class DelegationService {
     partialOutput: string,
     cursor: string | undefined,
   ): Promise<Delegation> {
-    if (!cursor && partialOutput === (delegation.partialOutput ?? "")) {
-      return delegation;
-    }
     const updated: Delegation = {
       ...delegation,
       partialOutput,
@@ -804,12 +857,17 @@ export class DelegationService {
   }
 
   /** 将 AbortSignal 的中止原因转换为取消或超时结果，并统一完成委派。 */
-  async #finishAborted(delegation: Delegation, timedOut: boolean): Promise<AgentResult> {
+  async #finishAborted(
+    delegation: Delegation,
+    timeoutKind?: DelegationTimeoutKind,
+    timeoutReason?: (kind: DelegationTimeoutKind) => string,
+  ): Promise<AgentResult> {
+    const timedOut = timeoutKind !== undefined;
     const result: AgentResult = {
       status: timedOut ? "timed_out" : "cancelled",
       output: delegation.partialOutput ?? "",
       artifacts: [],
-      error: timedOut ? `Delegation timed out after ${this.timeoutMs}ms` : "Delegation cancelled",
+      error: timeoutKind && timeoutReason ? timeoutReason(timeoutKind) : "Delegation cancelled",
     };
     await this.#finish(delegation, timedOut ? "TIMED_OUT" : "CANCELLED", result);
     return result;

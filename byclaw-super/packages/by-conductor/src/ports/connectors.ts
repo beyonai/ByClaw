@@ -54,6 +54,10 @@ export interface ConnectorError {
 
 /** 不同传输实现都必须转换成的标准事件联合类型。 */
 export type ConnectorEvent = (
+  | {
+      /** 仅表示外部执行仍在活动，不向用户展示。 */
+      type: "activity";
+    }
   | { type: "progress"; message: string }
   | {
       /** 子 Agent 主动发出的、允许展示给用户的执行过程文本；不是模型隐藏推理。 */

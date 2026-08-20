@@ -29,9 +29,11 @@ describe("应用配置", () => {
       APP_CONFIG_DEFAULTS.database.maxConnections,
     );
     expect(config.runLeaseMs).toBe(APP_CONFIG_DEFAULTS.run.leaseMs);
-    expect(config.delegationTimeoutMs).toBe(900_000);
+    expect(config.delegationTimeouts).toEqual({
+      firstActivityMs: 300_000,
+      idleMs: 900_000,
+    });
     expect(config.openClaw).toEqual({
-      firstEventTimeoutMs: 300_000,
       cancelConfirmationTimeoutMs: 30_000,
     });
     expect(config.piProvider).toBe(APP_CONFIG_DEFAULTS.pi.provider);
@@ -84,17 +86,19 @@ describe("应用配置", () => {
       BYCLAW_SUPER_DISCOVERY_PORT: "3443",
       BYCLAW_SUPER_DISCOVERY_PROTOCOL: "https",
       BYCLAW_SUPER_DISCOVERY_WEIGHT: "3",
-      DELEGATION_TIMEOUT_MS: "800000",
-      OPENCLAW_FIRST_EVENT_TIMEOUT_MS: "240000",
+      DELEGATION_IDLE_TIMEOUT_MS: "800000",
+      DELEGATION_FIRST_ACTIVITY_TIMEOUT_MS: "240000",
       OPENCLAW_CANCEL_CONFIRM_TIMEOUT_MS: "15000",
     });
 
     expect(config.database.host).toBe("postgres.internal");
     expect(config.database.port).toBe(6_432);
     expect(config.runLeaseMs).toBe(45_000);
-    expect(config.delegationTimeoutMs).toBe(800_000);
+    expect(config.delegationTimeouts).toEqual({
+      firstActivityMs: 240_000,
+      idleMs: 800_000,
+    });
     expect(config.openClaw).toEqual({
-      firstEventTimeoutMs: 240_000,
       cancelConfirmationTimeoutMs: 15_000,
     });
     expect(config.piProvider).toBe("volcengine-ark");

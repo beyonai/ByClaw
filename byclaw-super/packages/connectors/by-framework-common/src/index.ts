@@ -80,7 +80,7 @@ export class ByFrameworkConnector implements AgentConnector {
   readonly #ownsRedis: boolean;
   readonly #readBlockMs: number;
   readonly #sourceAgentType: string;
-  readonly #firstEventTimeoutMs: number;
+  readonly #firstEventTimeoutMs: number | undefined;
   readonly #cancelConfirmationTimeoutMs: number;
   readonly #promoteOutOfReasoningTextToOutput: boolean;
   readonly #targetAgentTypeResolver: (request: ConnectorRequest) => string;
@@ -102,7 +102,9 @@ export class ByFrameworkConnector implements AgentConnector {
     this.#readBlockMs = options.readBlockMs ?? 1_000;
     this.#sourceAgentType =
       options.agentReturnMode === "direct" ? "" : options.sourceAgentType ?? "BY_SUPER";
-    this.#firstEventTimeoutMs = options.firstEventTimeoutMs ?? 300_000;
+    this.#firstEventTimeoutMs = options.firstEventTimeoutMs === 0
+      ? undefined
+      : options.firstEventTimeoutMs ?? 300_000;
     this.#cancelConfirmationTimeoutMs = options.cancelConfirmationTimeoutMs ?? 30_000;
     this.#promoteOutOfReasoningTextToOutput =
       options.promoteOutOfReasoningTextToOutput === true;
@@ -377,10 +379,16 @@ export class ByFrameworkConnector implements AgentConnector {
     let childReasoningOpen = false;
     const toolNames = new Map<string, string>();
     let firstEventReceived = false;
-    const firstEventDeadline = Date.now() + this.#firstEventTimeoutMs;
+    const firstEventDeadline = this.#firstEventTimeoutMs === undefined
+      ? undefined
+      : Date.now() + this.#firstEventTimeoutMs;
     while (!signal.aborted) {
-      if (!firstEventReceived && Date.now() >= firstEventDeadline) {
-        const reason = `by-framework first event timed out after ${this.#firstEventTimeoutMs}ms`;
+      if (
+        !firstEventReceived &&
+        firstEventDeadline !== undefined &&
+        Date.now() >= firstEventDeadline
+      ) {
+        const reason = `by-framework first event timed out after ${this.#firstEventTimeoutMs!}ms`;
         let cancellationError: string | undefined;
         try {
           await cancel(reason);
@@ -398,7 +406,7 @@ export class ByFrameworkConnector implements AgentConnector {
         };
         return;
       }
-      const blockMs = firstEventReceived
+      const blockMs = firstEventReceived || firstEventDeadline === undefined
         ? this.#readBlockMs
         : Math.min(this.#readBlockMs, Math.max(1, firstEventDeadline - Date.now()));
       const rows = await this.#redis.xread(
@@ -413,16 +421,27 @@ export class ByFrameworkConnector implements AgentConnector {
       for (const entry of parseXreadRows(rows)) {
         cursor = entry.id;
         const message = parseDataMessage(entry.data);
-        if (!message || (message.trace_id && message.trace_id !== traceId)) {
+        // 共享 Session 中可能同时存在多个执行；无 trace 或 trace 不匹配的
+        // 消息不得进入本委派，更不得用于续期。
+        if (!message || message.trace_id !== traceId) {
           continue;
         }
         firstEventReceived = true;
         if (message.event_type === EventType.REASONING_LOG_START) {
           childReasoningOpen = true;
+          yield { type: "activity", cursor };
           continue;
         }
         if (message.event_type === EventType.REASONING_LOG_END) {
           childReasoningOpen = false;
+          yield { type: "activity", cursor };
+          continue;
+        }
+        if (
+          message.event_type === EventType.TASK_CREATE ||
+          message.event_type === EventType.STEP_COMPLETE
+        ) {
+          yield { type: "activity", cursor };
           continue;
         }
         if (message.event_type === EventType.ANSWER_DELTA) {
