@@ -86,6 +86,9 @@ export class PiLeaderSession implements LeaderSession {
       label: "Delegate Agent",
       description: "Delegate a well-scoped task to one authorized specialist agent and wait for its result.",
       promptSnippet: "Delegate work to an authorized specialist agent.",
+      // Run/Delegation 状态目前按单活动委派维护；同一轮的多个子 Agent
+      // 必须依次执行，避免 Run version、恢复匹配和交互状态竞争。
+      executionMode: "sequential",
       parameters: Type.Object({
         agentId: Type.String({ description: "Exact id from the current authorized agent list" }),
         task: Type.String({ description: "Self-contained task for the specialist" }),
