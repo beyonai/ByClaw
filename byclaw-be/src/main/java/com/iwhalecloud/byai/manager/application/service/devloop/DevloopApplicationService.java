@@ -2563,7 +2563,7 @@ public class DevloopApplicationService {
 
         // 如果没有根据名称查询
         return projectObjectFileService.findByBizKey(objectFileDTO.getSessionId(), objectFileDTO.getObjectCode(),
-            objectFileDTO.getFileName());
+            objectFileDTO.getFilePath());
     }
 
     /**

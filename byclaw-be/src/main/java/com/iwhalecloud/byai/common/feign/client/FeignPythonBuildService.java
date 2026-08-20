@@ -666,7 +666,7 @@ public class FeignPythonBuildService {
         if (headers == null) {
             headers = new HashMap<String, String>();
         }
-        
+
         headers.put("Content-Type", "application/json");
         this.addAuth(headers);
 

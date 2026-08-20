@@ -71,16 +71,16 @@ public class ProjectObjectFileService {
      *
      * @param sessionId 会话ID
      * @param objectCode 业务对象编码
-     * @param fileName 文件名
+     * @param filePath 文件名
      * @return 记录，不存在返回 null
      */
-    public ProjectObjectFile findByBizKey(Long sessionId, String objectCode, String fileName) {
-        if (StringUtils.isAnyBlank(sessionId + "", objectCode, fileName)) {
+    public ProjectObjectFile findByBizKey(Long sessionId, String objectCode, String filePath) {
+        if (StringUtils.isAnyBlank(sessionId + "", objectCode, filePath)) {
             return null;
         }
         return projectObjectFileMapper.selectOne(new LambdaQueryWrapper<ProjectObjectFile>()
             .eq(ProjectObjectFile::getSessionId, sessionId).eq(ProjectObjectFile::getObjectCode, objectCode)
-            .eq(ProjectObjectFile::getFileName, fileName).last("LIMIT 1"));
+            .eq(ProjectObjectFile::getFilePath, filePath).last("LIMIT 1"));
     }
 
     /**
