@@ -493,13 +493,24 @@ public class DingtalkProactiveMessageService {
                 return null;
             }
 
-            // 解析 JSON: [{"userId": "3133650516-691226786", ...}]
-            var jsonArray = objectMapper.readTree(result.output());
-            logger.info("【调试】解析后的 JSON 数组大小: {}", jsonArray.size());
+            // 解析 JSON: dws 可能返回包装对象或数组
+            var root = objectMapper.readTree(result.output());
+            logger.info("【调试】解析后的 JSON 节点类型: {}, 内容键数: {}",
+                root.getNodeType(), root.isObject() ? root.size() : "N/A");
 
-            if (jsonArray.isArray() && !jsonArray.isEmpty()) {
-                String userId = jsonArray.get(0).path("userId").asText(null);
-                logger.info("【调试】提取的 userId: {}", userId);
+            // 格式1: {"success": true, "result": {"userId": "xxx", ...}}
+            if (root.isObject() && root.path("success").asBoolean(false)) {
+                String userId = root.path("result").path("userId").asText(null);
+                logger.info("【调试】从包装对象提取的 userId: {}", userId);
+                if (StringUtils.hasText(userId)) {
+                    return userId;
+                }
+            }
+
+            // 格式2: [{"userId": "xxx", ...}]
+            if (root.isArray() && !root.isEmpty()) {
+                String userId = root.get(0).path("userId").asText(null);
+                logger.info("【调试】从数组提取的 userId: {}", userId);
                 if (StringUtils.hasText(userId)) {
                     return userId;
                 }
@@ -529,13 +540,24 @@ public class DingtalkProactiveMessageService {
                 return null;
             }
 
-            // 解析 JSON: [{"meta": {"jobNumber": "3133650516-691226786"}, ...}]
+            // 解析 JSON: dws 可能返回包装对象或数组
+            var root = objectMapper.readTree(result.output());
+
+            // 格式1: {"success": true, "result": {"userId": "xxx", ...}}
+            if (root.isObject() && root.path("success").asBoolean(false)) {
+                String userId = root.path("result").path("userId").asText(null);
+                if (StringUtils.hasText(userId)) {
+                    logger.info("dws aisearch 从包装对象返回 staffId: {}", userId);
+                    return userId;
+                }
+            }
+
+            // 格式2: [{"meta": {"jobNumber": "xxx"}, ...}]
             // 注意: meta.jobNumber 实际是钉钉 userId/staffId,不是真实工号
-            var jsonArray = objectMapper.readTree(result.output());
-            if (jsonArray.isArray() && !jsonArray.isEmpty()) {
-                String staffId = jsonArray.get(0).path("meta").path("jobNumber").asText(null);
+            if (root.isArray() && !root.isEmpty()) {
+                String staffId = root.get(0).path("meta").path("jobNumber").asText(null);
                 if (StringUtils.hasText(staffId)) {
-                    logger.info("dws aisearch 返回 staffId: {} (注意此字段名为 jobNumber 但实为 staffId)", staffId);
+                    logger.info("dws aisearch 从数组返回 staffId: {} (注意此字段名为 jobNumber 但实为 staffId)", staffId);
                     return staffId;
                 }
             }
