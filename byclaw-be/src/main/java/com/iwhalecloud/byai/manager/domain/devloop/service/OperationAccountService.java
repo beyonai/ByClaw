@@ -62,4 +62,17 @@ public class OperationAccountService {
             .orderByDesc(OperationAccount::getCreateTime);
         return operationAccountMapper.selectList(wrapper);
     }
+
+    /** 查询当前用户可见的项目有效账号，同时兼容没有创建人信息的历史账号。 */
+    public List<OperationAccount> listAccessibleByProjectId(Long projectId, Long userId) {
+        if (projectId == null || userId == null) {
+            return List.of();
+        }
+        LambdaQueryWrapper<OperationAccount> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(OperationAccount::getProjectId, projectId).eq(OperationAccount::getStatusCd, "00A")
+            .and(owner -> owner.eq(OperationAccount::getCreateBy, userId)
+                .or().isNull(OperationAccount::getCreateBy))
+            .orderByDesc(OperationAccount::getCreateTime);
+        return operationAccountMapper.selectList(wrapper);
+    }
 }
