@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -96,6 +98,8 @@ class BackendApiTests(unittest.TestCase):
         self.api.read_file({"resourceId": 1})
         self.api.search({"resourceIdList": [1]})
         self.api.search_file({"resourceIdList": [1]})
+        self.api.entity_discovery({"resourceId": 1})
+        self.api.entity_enrich({"resourceId": 1})
         self.api.remove_file({"resourceId": 1})
         paths = [call["path"] for call in self.transport.calls]
         self.assertEqual(paths, [
@@ -108,6 +112,8 @@ class BackendApiTests(unittest.TestCase):
             "/byaiService/datasetController/readFile",
             "/byaiService/datasetController/knowledgeItems/search",
             "/byaiService/datasetController/knowledgeItems/searchFile",
+            "/byaiService/datasetController/knowledgeItems/entityDiscovery",
+            "/byaiService/datasetController/knowledgeItems/entityEnrich",
             "/byaiService/datasetController/removeFile",
         ])
 
@@ -185,10 +191,176 @@ class KnowledgeManagerTests(unittest.TestCase):
         result = self.manager.execute(self.parse("read-file", "--resource-id", "7", "--file-path", "/a.md", "--start-line", "1", "--end-line", "2"))
         self.assertEqual(result["file"], {"resourceId": 7, "filePath": "/a.md", "startLine": 1, "endLine": 2, "content": "A", "reachedEof": True})
 
-    def test_help_uses_python_entrypoint(self) -> None:
-        manual = manager_module.help_manual()
-        self.assertEqual(manual["usage"], "python3 ./scripts/by_knowledge_manager.py <command> [options]")
-        self.assertIn("ZIP", manual["commands"]["upload"]["description"])
+    def test_entity_discovery_submits_async_batch_and_preserves_task_ids(self) -> None:
+        self.transport.responses = [
+            {
+                "resourceId": 7,
+                "batchId": "ed-batch-1",
+                "scope": "SINGLE_FILE",
+                "taskType": "ENTITY_DISCOVERY",
+                "eligibleCount": 1,
+                "acceptedCount": 1,
+                "reusedCount": 0,
+                "skippedCount": 0,
+                "tasks": [
+                    {
+                        "taskId": "task-1",
+                        "status": "PENDING",
+                        "fileId": "file-1",
+                        "filePath": "/docs/a.md",
+                        "reused": False,
+                    }
+                ],
+            }
+        ]
+        result = self.manager.execute(
+            self.parse(
+                "entity-discovery",
+                "--resource-id",
+                "7",
+                "--file-path",
+                "/docs/a.md",
+                "--session-id",
+                "session-001",
+                "--extra-params-json",
+                '{"requestSource":"manual"}',
+            )
+        )
+        self.assertTrue(result["accepted"])
+        self.assertEqual(result["batch"]["batchId"], "ed-batch-1")
+        self.assertEqual(result["batch"]["tasks"][0]["taskId"], "task-1")
+        self.assertEqual(
+            self.transport.calls[0]["headers"],
+            {"X-CHAT-SESSION-ID": "session-001"},
+        )
+        self.assertEqual(
+            self.transport.calls[0]["payload"],
+            {
+                "resourceId": 7,
+                "filePath": "/docs/a.md",
+                "maxEntities": 12,
+                "force": False,
+                "extraParams": {"requestSource": "manual"},
+            },
+        )
+
+    def test_entity_enrich_supports_whole_kb_dry_run(self) -> None:
+        result = self.manager.execute(
+            self.parse(
+                "entity-enrich",
+                "--resource-id",
+                "7",
+                "--top-k",
+                "30",
+                "--force",
+                "--dry-run",
+            )
+        )
+        self.assertEqual(
+            result,
+            {
+                "ok": True,
+                "action": "entity-enrich",
+                "dryRun": True,
+                "payload": {
+                    "resourceId": 7,
+                    "topK": 30,
+                    "force": True,
+                },
+            },
+        )
+        self.assertEqual(self.transport.calls, [])
+
+    def test_entity_enrich_submits_single_file_batch(self) -> None:
+        self.transport.responses = [
+            {
+                "resourceId": 7,
+                "batchId": "ee-batch-1",
+                "scope": "SINGLE_FILE",
+                "taskType": "DOCUMENT_ENRICH",
+                "eligibleCount": 1,
+                "acceptedCount": 0,
+                "reusedCount": 1,
+                "skippedCount": 1,
+                "tasks": [
+                    {
+                        "taskId": "task-2",
+                        "status": "SKIPPED",
+                        "filePath": "/KnowledgeEntity/a.md",
+                        "reused": True,
+                        "skipReason": "INPUT_UNCHANGED",
+                    }
+                ],
+            }
+        ]
+        result = self.manager.execute(
+            self.parse(
+                "entity-enrich",
+                "--resource-id",
+                "7",
+                "--file-path",
+                "/KnowledgeEntity/a.md",
+                "--top-k",
+                "30",
+            )
+        )
+        self.assertEqual(result["batch"]["batchId"], "ee-batch-1")
+        self.assertEqual(result["batch"]["tasks"][0]["status"], "SKIPPED")
+        self.assertEqual(
+            self.transport.calls[0]["payload"],
+            {
+                "resourceId": 7,
+                "filePath": "/KnowledgeEntity/a.md",
+                "topK": 30,
+                "force": False,
+            },
+        )
+
+    def test_entity_command_parser_validates_ranges_and_json_object(self) -> None:
+        parser = manager_module.build_parser()
+        for argv in (
+            ["entity-discovery", "--resource-id", "7", "--max-entities", "13"],
+            ["entity-enrich", "--resource-id", "7", "--top-k", "0"],
+            [
+                "entity-discovery",
+                "--resource-id",
+                "7",
+                "--extra-params-json",
+                "[]",
+            ],
+        ):
+            with (
+                self.subTest(argv=argv),
+                redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                parser.parse_args(argv)
+
+    def test_argparse_help_lists_commands_and_subcommand_options(self) -> None:
+        parser = manager_module.build_parser()
+        top_level_help = parser.format_help()
+        self.assertIn("管理 ByClaw 知识库", top_level_help)
+        self.assertIn("upload", top_level_help)
+        self.assertIn("entity-discovery", top_level_help)
+        self.assertIn("entity-enrich", top_level_help)
+        self.assertIn("查看子命令参数", top_level_help)
+
+        output = io.StringIO()
+        with redirect_stdout(output), self.assertRaises(SystemExit) as raised:
+            parser.parse_args(["upload", "--help"])
+        self.assertEqual(raised.exception.code, 0)
+        upload_help = output.getvalue()
+        self.assertIn("导入一个或多个文件或 ZIP", upload_help)
+        self.assertIn("--resource-id ID", upload_help)
+        self.assertIn("--file-path LOCAL_FILE", upload_help)
+        self.assertIn("--dry-run", upload_help)
+
+    def test_main_without_arguments_prints_help(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = manager_module.main([])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("by-knowledge-manager [-h] COMMAND", output.getvalue())
 
 
 if __name__ == "__main__":

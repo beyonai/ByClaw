@@ -119,6 +119,7 @@ class ManagerTransport(Protocol):
         path: str,
         payload: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> Any: ...
 
     def upload(
@@ -170,6 +171,7 @@ class ByFrameworkDiscoveryTransport:
         path: str,
         payload: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> Any:
         resource_id = _request_resource_id(payload=payload, params=params)
         return self.run(
@@ -179,6 +181,7 @@ class ByFrameworkDiscoveryTransport:
                 payload=payload,
                 params=params,
                 resource_id=resource_id,
+                extra_headers=headers,
             )
         )
 
@@ -262,6 +265,7 @@ class ByFrameworkDiscoveryTransport:
         payload: dict[str, Any] | None,
         params: dict[str, Any] | None,
         resource_id: str,
+        extra_headers: dict[str, str] | None,
     ) -> Any:
         from by_framework.util.discovery_http_client import DiscoveryHttpClient
         from by_framework.util.http_client import RetryConfig
@@ -273,12 +277,14 @@ class ByFrameworkDiscoveryTransport:
         )
         try:
             async with DiscoveryHttpClient(discovery, retry_config=retry) as client:
+                request_headers = dict(headers)
+                request_headers.update(extra_headers or {})
                 response = await client._request_with_discovery(
                     method=method,
                     service_name=service_name,
                     path=path,
                     headers=_request_headers(
-                        headers,
+                        request_headers,
                         resource_id=resource_id,
                         json_content=True,
                     ),
@@ -433,6 +439,17 @@ def _as_int(value: Any) -> int | None:
         return None
 
 
+def _normalize_session_id(value: Any) -> str:
+    session_id = str(value or "").strip()
+    while (
+        len(session_id) >= 2
+        and session_id[0] in {"'", '"'}
+        and session_id[-1] == session_id[0]
+    ):
+        session_id = session_id[1:-1].strip()
+    return session_id
+
+
 class BackendApi:
     """Map skill operations to the backend's resourceId-based interfaces."""
 
@@ -499,6 +516,32 @@ class BackendApi:
 
     def search_file(self, payload: dict[str, Any]) -> Any:
         return self.transport.request(method="POST", path=self._path("knowledgeItems/searchFile"), payload=payload)
+
+    def entity_discovery(
+        self,
+        payload: dict[str, Any],
+        *,
+        session_id: str = "",
+    ) -> Any:
+        return self.transport.request(
+            method="POST",
+            path=self._path("knowledgeItems/entityDiscovery"),
+            payload=payload,
+            headers={"X-CHAT-SESSION-ID": session_id} if session_id else None,
+        )
+
+    def entity_enrich(
+        self,
+        payload: dict[str, Any],
+        *,
+        session_id: str = "",
+    ) -> Any:
+        return self.transport.request(
+            method="POST",
+            path=self._path("knowledgeItems/entityEnrich"),
+            payload=payload,
+            headers={"X-CHAT-SESSION-ID": session_id} if session_id else None,
+        )
 
     def remove_file(self, payload: dict[str, Any]) -> Any:
         return self.transport.request(method="POST", path=self._path("removeFile"), payload=payload)
@@ -753,6 +796,113 @@ class KnowledgeManager:
         items = [_compact({"resourceId": _as_int(item.get("resourceId")), "filePath": item.get("filePath"), "score": item.get("score"), "metadata": item.get("metadata")}) for item in raw_items if isinstance(item, dict)]
         return {"ok": True, "action": "search-file", "resourceIds": args.resource_id, "query": args.query, "topK": args.top_k, "items": items}
 
+    @staticmethod
+    def _entity_batch(value: Any, *, resource_id: int) -> dict[str, Any]:
+        if not isinstance(value, dict) or not str(value.get("batchId") or "").strip():
+            raise ValueError("实体处理接口受理成功但未返回 batchId")
+        raw_tasks = value.get("tasks", [])
+        tasks = [
+            _compact(
+                {
+                    "taskId": item.get("taskId"),
+                    "status": item.get("status"),
+                    "fileId": item.get("fileId"),
+                    "filePath": item.get("filePath"),
+                    "reused": item.get("reused"),
+                    "skipReason": item.get("skipReason"),
+                }
+            )
+            for item in raw_tasks
+            if isinstance(item, dict)
+        ] if isinstance(raw_tasks, list) else []
+        batch = _compact(
+            {
+                "resourceId": _as_int(value.get("resourceId")) or resource_id,
+                "batchId": value.get("batchId"),
+                "scope": value.get("scope"),
+                "taskType": value.get("taskType"),
+                "eligibleCount": _as_int(value.get("eligibleCount")),
+                "acceptedCount": _as_int(value.get("acceptedCount")),
+                "reusedCount": _as_int(value.get("reusedCount")),
+                "skippedCount": _as_int(value.get("skippedCount")),
+            }
+        )
+        batch["tasks"] = tasks
+        return batch
+
+    def _entity_payload(
+        self,
+        args: argparse.Namespace,
+        *,
+        field_name: str,
+        attribute_name: str,
+    ) -> dict[str, Any]:
+        return _compact(
+            {
+                "resourceId": self._resource_id(args),
+                "filePath": args.file_path.strip() if args.file_path else None,
+                field_name: getattr(args, attribute_name),
+                "force": args.force,
+                "extraParams": args.extra_params_json,
+            }
+        )
+
+    def _entity_discovery(self, args: argparse.Namespace) -> dict[str, Any]:
+        payload = self._entity_payload(
+            args,
+            field_name="maxEntities",
+            attribute_name="max_entities",
+        )
+        session_id = _normalize_session_id(args.session_id)
+        if args.dry_run:
+            result = {
+                "ok": True,
+                "action": "entity-discovery",
+                "dryRun": True,
+                "payload": payload,
+            }
+            if session_id:
+                result["headers"] = {"X-CHAT-SESSION-ID": session_id}
+            return result
+        value = self.api.entity_discovery(
+            payload,
+            session_id=session_id,
+        )
+        return {
+            "ok": True,
+            "action": "entity-discovery",
+            "accepted": True,
+            "batch": self._entity_batch(value, resource_id=payload["resourceId"]),
+        }
+
+    def _entity_enrich(self, args: argparse.Namespace) -> dict[str, Any]:
+        payload = self._entity_payload(
+            args,
+            field_name="topK",
+            attribute_name="top_k",
+        )
+        session_id = _normalize_session_id(args.session_id)
+        if args.dry_run:
+            result = {
+                "ok": True,
+                "action": "entity-enrich",
+                "dryRun": True,
+                "payload": payload,
+            }
+            if session_id:
+                result["headers"] = {"X-CHAT-SESSION-ID": session_id}
+            return result
+        value = self.api.entity_enrich(
+            payload,
+            session_id=session_id,
+        )
+        return {
+            "ok": True,
+            "action": "entity-enrich",
+            "accepted": True,
+            "batch": self._entity_batch(value, resource_id=payload["resourceId"]),
+        }
+
     def _remove_file(self, args: argparse.Namespace) -> dict[str, Any]:
         payload = self._file_path_payload(self._resource_id(args), args.file_path)
         if args.dry_run:
@@ -760,102 +910,306 @@ class KnowledgeManager:
         return {"ok": True, "action": "remove-file", "removed": self.api.remove_file(payload)}
 
 
-def help_manual() -> dict[str, Any]:
-    return {
-        "ok": True,
-        "name": "by-knowledge-manager",
-        "description": "知识库内容管理 CLI：管理目录、文件导入/更新/构建/下载/删除和检索。",
-        "usage": "python3 ./scripts/by_knowledge_manager.py <command> [options]",
-        "commands": {
-            "list": {"required": ["--resource-id", "--directory-path"], "description": "查询指定目录下的文件和子目录"},
-            "mkdir": {"required": ["--resource-id", "--directory-path", "--directory-name"], "description": "创建知识库目录"},
-            "rename-dir": {"required": ["--resource-id", "--directory-path", "--directory-name"], "description": "重命名知识库目录"},
-            "delete-dir": {"required": ["--resource-id", "--directory-path"], "description": "删除知识库目录"},
-            "check-conflicts": {"required": ["--resource-id", "--directory-path", "--file-name"], "description": "上传前检查目标目录同名文件"},
-            "upload": {"required": ["--resource-id", "--directory-path", "--file-path"], "description": "导入文件或 ZIP，成功后自动触发构建"},
-            "update-file": {"required": ["--resource-id", "--directory-path", "--file-path"], "description": "更新一个已有文件，成功后自动触发构建"},
-            "build": {"required": ["--resource-id", "--file-path"], "description": "触发指定知识文件构建"},
-            "build-status": {"required": ["--resource-id", "--file-path"], "description": "查询知识文件构建状态"},
-            "download": {"required": ["--resource-id", "--output", "--file-path 或 --directory-path"], "description": "下载知识库文件或目录压缩包"},
-            "read-file": {"required": ["--resource-id", "--file-path"], "description": "读取知识库文件指定行范围内容"},
-            "search": {"required": ["--resource-id", "--query"], "description": "检索知识库内容"},
-            "search-file": {"required": ["--resource-id", "--query"], "description": "检索知识库相关文件"},
-            "remove-file": {"required": ["--resource-id", "--file-path"], "description": "删除知识库文件"},
-        },
-    }
-
-
 def _add_single_resource(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--resource-id", type=int, required=True)
+    parser.add_argument(
+        "--resource-id",
+        type=_positive_int,
+        required=True,
+        metavar="ID",
+        help="知识库资源 ID（正整数）",
+    )
 
 
 def _add_dry_run(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--dry-run", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="只校验参数并输出计划，不调用变更接口",
+    )
+
+
+def _add_command(
+    subparsers: Any,
+    name: str,
+    description: str,
+) -> argparse.ArgumentParser:
+    return subparsers.add_parser(
+        name,
+        help=description,
+        description=description,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(add_help=False)
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser = argparse.ArgumentParser(
+        prog="by-knowledge-manager",
+        description="管理 ByClaw 知识库目录、文件、构建、实体处理任务和检索。",
+        epilog=(
+            "示例：\n"
+            "  by-knowledge-manager list --resource-id 1001 --directory-path /\n"
+            "  by-knowledge-manager upload --resource-id 1001 --directory-path /docs "
+            "--file-path ./manual.pdf\n"
+            "  by-knowledge-manager entity-discovery --resource-id 1001 "
+            "--file-path /docs/manual.md\n"
+            "  by-knowledge-manager search --resource-id 1001 --query '退款规则'\n\n"
+            "查看子命令参数：by-knowledge-manager <command> --help"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    subparsers = parser.add_subparsers(
+        dest="command",
+        required=True,
+        title="命令",
+        metavar="COMMAND",
+    )
+
+    descriptions = {
+        "mkdir": "创建知识库目录",
+        "rename-dir": "重命名知识库目录",
+        "delete-dir": "删除知识库目录",
+        "list": "列出指定目录的文件和子目录",
+        "check-conflicts": "上传前检查目标目录中的同名文件",
+        "upload": "导入一个或多个文件或 ZIP，并自动触发构建",
+        "update-file": "更新一个已有文件，并自动触发构建",
+        "build": "触发指定知识文件构建",
+        "build-status": "查询知识文件构建状态",
+        "download": "下载知识库文件或目录压缩包",
+        "read-file": "按行读取知识库文件内容",
+        "search": "检索知识库内容切片",
+        "search-file": "检索知识库相关文件",
+        "entity-discovery": "异步发现原始文档中的知识实体",
+        "entity-enrich": "异步补全 KnowledgeEntity 文档",
+        "remove-file": "删除知识库文件",
+    }
 
     for name in ("mkdir", "rename-dir"):
-        command = subparsers.add_parser(name)
+        command = _add_command(subparsers, name, descriptions[name])
         _add_single_resource(command)
-        command.add_argument("--directory-path", required=True)
-        command.add_argument("--directory-name", required=True)
+        command.add_argument(
+            "--directory-path",
+            required=True,
+            metavar="PATH",
+            help="目标目录的绝对路径，例如 / 或 /产品资料",
+        )
+        command.add_argument(
+            "--directory-name",
+            required=True,
+            metavar="NAME",
+            help="要创建的新目录名或重命名后的目录名",
+        )
         if name == "mkdir":
-            command.add_argument("--directory-description")
+            command.add_argument(
+                "--directory-description",
+                metavar="TEXT",
+                help="目录说明",
+            )
         _add_dry_run(command)
 
     for name in ("delete-dir", "list"):
-        command = subparsers.add_parser(name)
+        command = _add_command(subparsers, name, descriptions[name])
         _add_single_resource(command)
-        command.add_argument("--directory-path", required=True)
+        command.add_argument(
+            "--directory-path",
+            required=True,
+            metavar="PATH",
+            help="知识库目录的绝对路径",
+        )
         if name == "delete-dir":
             _add_dry_run(command)
 
-    conflicts = subparsers.add_parser("check-conflicts")
+    conflicts = _add_command(
+        subparsers,
+        "check-conflicts",
+        descriptions["check-conflicts"],
+    )
     _add_single_resource(conflicts)
-    conflicts.add_argument("--directory-path", required=True)
-    conflicts.add_argument("--file-name", action="append", required=True)
+    conflicts.add_argument(
+        "--directory-path",
+        required=True,
+        metavar="PATH",
+        help="准备上传到的知识库目录",
+    )
+    conflicts.add_argument(
+        "--file-name",
+        action="append",
+        required=True,
+        metavar="NAME",
+        help="待检查的文件名；检查多个文件时重复传入",
+    )
     _add_dry_run(conflicts)
 
     for name in ("upload", "update-file"):
-        command = subparsers.add_parser(name)
+        command = _add_command(subparsers, name, descriptions[name])
         _add_single_resource(command)
-        command.add_argument("--directory-path", required=True)
-        command.add_argument("--file-path", action="append", required=True)
-        command.add_argument("--file-description")
-        command.add_argument("--process-front-matter", type=_boolean, default=True)
+        command.add_argument(
+            "--directory-path",
+            required=True,
+            metavar="PATH",
+            help="目标知识库目录",
+        )
+        command.add_argument(
+            "--file-path",
+            action="append",
+            required=True,
+            metavar="LOCAL_FILE",
+            help=(
+                "本地文件路径；upload 可重复传入或上传 ZIP，"
+                "update-file 只能传一个文件"
+            ),
+        )
+        command.add_argument(
+            "--file-description",
+            metavar="TEXT",
+            help="文件说明",
+        )
+        command.add_argument(
+            "--process-front-matter",
+            type=_boolean,
+            default=True,
+            metavar="BOOL",
+            help="是否解析 Markdown front matter，可选 true/false（默认 true）",
+        )
         if name == "upload":
-            command.add_argument("--skip-if-duplicate", action="store_true")
-            command.add_argument("--check-conflicts", action="store_true")
+            command.add_argument(
+                "--skip-if-duplicate",
+                action="store_true",
+                help="跳过内容重复的文件",
+            )
+            command.add_argument(
+                "--check-conflicts",
+                action="store_true",
+                help="上传前检查同名文件；存在冲突时不上传",
+            )
         _add_dry_run(command)
 
     for name in ("build", "build-status", "remove-file"):
-        command = subparsers.add_parser(name)
+        command = _add_command(subparsers, name, descriptions[name])
         _add_single_resource(command)
-        command.add_argument("--file-path", required=True)
+        command.add_argument(
+            "--file-path",
+            required=True,
+            metavar="PATH",
+            help="知识库文件的绝对路径",
+        )
         if name != "build-status":
             _add_dry_run(command)
 
-    download = subparsers.add_parser("download")
+    download = _add_command(subparsers, "download", descriptions["download"])
     _add_single_resource(download)
-    download.add_argument("--file-path")
-    download.add_argument("--directory-path")
-    download.add_argument("--output", required=True)
+    target = download.add_mutually_exclusive_group(required=True)
+    target.add_argument(
+        "--file-path",
+        metavar="PATH",
+        help="要下载的知识库文件绝对路径",
+    )
+    target.add_argument(
+        "--directory-path",
+        metavar="PATH",
+        help="要打包下载的知识库目录绝对路径",
+    )
+    download.add_argument(
+        "--output",
+        required=True,
+        metavar="LOCAL_PATH",
+        help="本地输出文件路径",
+    )
     _add_dry_run(download)
 
-    read = subparsers.add_parser("read-file")
+    read = _add_command(subparsers, "read-file", descriptions["read-file"])
     _add_single_resource(read)
-    read.add_argument("--file-path", required=True)
-    read.add_argument("--start-line", type=int)
-    read.add_argument("--end-line", type=int)
+    read.add_argument(
+        "--file-path",
+        required=True,
+        metavar="PATH",
+        help="知识库文件的绝对路径",
+    )
+    read.add_argument(
+        "--start-line",
+        type=_positive_int,
+        metavar="N",
+        help="起始行号（从 1 开始）",
+    )
+    read.add_argument(
+        "--end-line",
+        type=_positive_int,
+        metavar="N",
+        help="结束行号（包含该行）",
+    )
 
     for name in ("search", "search-file"):
-        command = subparsers.add_parser(name)
-        command.add_argument("--resource-id", action="append", type=int, required=True)
-        command.add_argument("--query", required=True)
-        command.add_argument("--top-k", type=int, default=5)
+        command = _add_command(subparsers, name, descriptions[name])
+        command.add_argument(
+            "--resource-id",
+            action="append",
+            type=_positive_int,
+            required=True,
+            metavar="ID",
+            help="知识库资源 ID；检索多个知识库时重复传入",
+        )
+        command.add_argument(
+            "--query",
+            required=True,
+            metavar="TEXT",
+            help="自然语言检索词",
+        )
+        command.add_argument(
+            "--top-k",
+            type=_positive_int,
+            default=5,
+            metavar="N",
+            help="返回结果数量（默认 5）",
+        )
+
+    for name in ("entity-discovery", "entity-enrich"):
+        command = _add_command(subparsers, name, descriptions[name])
+        _add_single_resource(command)
+        command.add_argument(
+            "--file-path",
+            metavar="PATH",
+            help=(
+                "知识库内文件路径；不传或传空白时处理整个知识库。"
+                + (
+                    "文件必须位于 /KnowledgeEntity"
+                    if name == "entity-enrich"
+                    else "文件必须是支持实体发现的原始文档"
+                )
+            ),
+        )
+        if name == "entity-discovery":
+            command.add_argument(
+                "--max-entities",
+                type=_integer_range(1, 12),
+                default=12,
+                metavar="N",
+                help="单个文档最多发现的实体数，范围 1-12（默认 12）",
+            )
+        else:
+            command.add_argument(
+                "--top-k",
+                type=_integer_range(1, 100),
+                default=20,
+                metavar="N",
+                help="语义证据候选数量，范围 1-100（默认 20）",
+            )
+        command.add_argument(
+            "--force",
+            action="store_true",
+            help="绕过新鲜成功结果的复用并重新处理",
+        )
+        command.add_argument(
+            "--session-id",
+            default="",
+            metavar="ID",
+            help="当前任务会话 ID；提供后作为 X-CHAT-SESSION-ID 请求头",
+        )
+        command.add_argument(
+            "--extra-params-json",
+            type=_json_object,
+            default={},
+            metavar="JSON",
+            help="随异步任务保存的 JSON 对象",
+        )
+        _add_dry_run(command)
 
     return parser
 
@@ -869,23 +1223,58 @@ def _boolean(value: str) -> bool:
     raise argparse.ArgumentTypeError("必须是 true 或 false")
 
 
+def _positive_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("必须是正整数") from exc
+    if number <= 0:
+        raise argparse.ArgumentTypeError("必须是正整数")
+    return number
+
+
+def _integer_range(minimum: int, maximum: int) -> Any:
+    def parse(value: str) -> int:
+        try:
+            number = int(value)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(
+                f"必须是 {minimum}-{maximum} 之间的整数"
+            ) from exc
+        if not minimum <= number <= maximum:
+            raise argparse.ArgumentTypeError(
+                f"必须是 {minimum}-{maximum} 之间的整数"
+            )
+        return number
+
+    return parse
+
+
+def _json_object(value: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise argparse.ArgumentTypeError(f"不是合法 JSON: {exc.msg}") from exc
+    if not isinstance(parsed, dict):
+        raise argparse.ArgumentTypeError("必须是 JSON 对象")
+    return parsed
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(argv if argv is not None else os.sys.argv[1:])
-    if not argv or argv[0] == "help" or "--help" in argv:
-        print(json.dumps(help_manual(), ensure_ascii=False, indent=2))
+    parser = build_parser()
+    if not argv:
+        parser.print_help()
         return 0
+    args = parser.parse_args(argv)
     transport: ManagerTransport | None = None
     try:
-        args = build_parser().parse_args(argv)
         transport = ByFrameworkDiscoveryTransport()
         result = KnowledgeManager(BackendApi(transport)).execute(args)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
-    except (SystemExit, Exception) as exc:
-        if isinstance(exc, SystemExit) and exc.code == 0:
-            return 0
-        message = "参数解析失败" if isinstance(exc, SystemExit) else str(exc)
-        print(json.dumps({"ok": False, "error": message}, ensure_ascii=False, indent=2))
+    except Exception as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
         return 1
     finally:
         if transport is not None:

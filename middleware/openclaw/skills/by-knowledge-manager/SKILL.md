@@ -1,6 +1,6 @@
 ---
 name: by-knowledge-manager
-description: "仅通过 Python CLI 管理 ByClaw 知识库内容。用于浏览、新建、重命名或删除知识库目录，检查上传冲突，导入或更新知识库文件，触发或查询知识构建，下载、分行读取或删除文件，以及在一个或多个知识库资源 ID 中执行语义切片检索或文件检索。不用于管理本体对象库，也不处理本体、对象、对象类型或对象关系。"
+description: "仅通过 Python CLI 管理 ByClaw 知识库内容。用于浏览、新建、重命名或删除知识库目录，检查上传冲突，导入或更新知识库文件，触发或查询知识构建，发起知识实体发现或补全，下载、分行读取或删除文件，以及在一个或多个知识库资源 ID 中执行语义切片检索或文件检索。不用于管理本体对象库，也不处理本体、对象类型或本体对象关系。"
 ---
 
 # 管理 ByClaw 知识库
@@ -11,10 +11,11 @@ description: "仅通过 Python CLI 管理 ByClaw 知识库内容。用于浏览�
 
 使用已安装 `by-framework` 的 Python 3.12 运行环境。CLI 从 Redis 读取当前用户登录态，并通过 `BE_DOMAINNAME` 发现后端服务。
 
-先读取实时命令清单，并把返回的 JSON 帮助视为命令语法的唯一依据：
+先读取实时命令清单，并把 `argparse` 输出视为命令语法的唯一依据：
 
 ```bash
-python3 scripts/by_knowledge_manager.py help
+python3 scripts/by_knowledge_manager.py --help
+python3 scripts/by_knowledge_manager.py <command> --help
 ```
 
 统一使用以下调用形式：
@@ -43,6 +44,9 @@ python3 scripts/by_knowledge_manager.py upload \
 - 允许导入任意文件类型。无法构建的格式仍可入库，后续 `build-status` 会返回 `unsupported`。
 - 把 `.zip` 上传视为后端批量导入；`--directory-path` 表示 ZIP 内容的目标目录，并对返回的每个成功文件触发构建。
 - `update-file` 只接受一个本地文件。远端目标路径由目标目录和本地文件名组成，因此本地文件名必须与待更新文件名一致。
+- `entity-discovery` 和 `entity-enrich` 要求当前用户拥有知识库管理权限。两者只返回异步任务受理结果；保存并汇报 `batchId`、`taskId` 和任务状态，不得表述为实体处理已完成。
+- 当前任务上下文有会话 ID 时，通过 `--session-id` 显式传入；CLI 会发送 `X-CHAT-SESSION-ID`，但不会自行发现或猜测会话 ID。
+- 只在用户明确要求重新处理时传 `--force`；否则允许后端复用正在执行的任务或新鲜成功结果。
 - 单资源请求会自动携带 `X-BYCLAW-RESOURCE-ID`。单知识库检索也会携带；多知识库检索没有唯一资源 ID，只在请求体中传递 `resourceIdList`。
 - 原样保留知识库绝对路径，例如 `/`、`/产品资料`、`/产品资料/a.md`。
 - 用自然语言汇报 CLI JSON 结果，重点说明 `ok`、`action`、目录或文件路径、冲突路径、构建状态、下载输出路径和检索命中项。
@@ -142,6 +146,35 @@ python3 scripts/by_knowledge_manager.py build-status \
 
 上传或更新后，如果用户关心检索是否就绪，继续查询构建状态。异步受理不能表述为构建已完成。
 
+## 发现或补全知识实体
+
+从一个原始文档发现实体：
+
+```bash
+python3 scripts/by_knowledge_manager.py entity-discovery \
+  --resource-id RESOURCE_ID \
+  --file-path /产品资料/a.md \
+  --max-entities 12 \
+  --session-id SESSION_ID \
+  --extra-params-json '{"requestSource":"manual"}'
+```
+
+省略 `--file-path` 时扫描整个知识库中的合格原始文档。单文件发现支持 `.csv`、`.htm`、`.html`、`.markdown`、`.md` 和 `.txt`，且不能把 `/KnowledgeEntity` 中的文件作为发现输入。
+
+补全一个知识实体文档：
+
+```bash
+python3 scripts/by_knowledge_manager.py entity-enrich \
+  --resource-id RESOURCE_ID \
+  --file-path /KnowledgeEntity/示例实体.md \
+  --top-k 20 \
+  --session-id SESSION_ID
+```
+
+省略 `--file-path` 时处理 `/KnowledgeEntity` 下的全部合格实体文档。这里的 `KnowledgeEntity` 是知识库内的 Markdown 文档目录，不是本体对象库。
+
+命令成功仅表示异步批次已受理或复用了已有任务。汇报 `scope`、`batchId`、`eligibleCount`、`acceptedCount`、`reusedCount`、`skippedCount`，并保留 `tasks` 中的 `taskId`、`status`、`filePath`、`reused` 和 `skipReason`。
+
 ## 下载或读取文件
 
 下载文件：
@@ -236,3 +269,4 @@ python3 scripts/by_knowledge_manager.py delete-dir \
 - 提示本地文件不存在时，确认 `--file-path` 对当前运行环境可读。
 - 上传或更新后检索不到内容时，先执行 `build-status`；文件可能仍在构建中。
 - 服务发现或认证失败时，检查 `BE_DOMAINNAME`、`USER_CODE` 和 Redis 连接变量。不要改用直连 ByQA 或主机 URL 绕过服务发现。
+- 实体任务 Worker 报 `missing beyond-token and X-User-Code` 时，这是当前门户未向 QA 转发 `X-User-Code` 的后端限制；客户端重复传 Header 无法绕过，应修复门户转发逻辑。
