@@ -37,6 +37,7 @@ describe("ByClawSuperGatewayWorker", () => {
       thinkingLevel: "off",
       externalSessionId: "session-1",
       parentMessageId: "message-1",
+      traceId: "trace-1",
       metadata: {
         "Beyond-Token": "secret-token",
         "System-Code": "system-1",
@@ -818,6 +819,7 @@ describe("ByClawSuperGatewayWorker", () => {
       thinkingLevel: "off",
       externalSessionId: "session-1",
       parentMessageId: "message-1",
+      traceId: "trace-1",
       metadata: {
         "Beyond-Token": "secret-token",
         "System-Code": "system-1",
@@ -831,6 +833,7 @@ describe("ByClawSuperGatewayWorker", () => {
       thinkingLevel: "off",
       externalSessionId: "session-1",
       parentMessageId: "message-1",
+      traceId: "trace-1",
       metadata: {
         "Beyond-Token": "secret-token",
         "System-Code": "system-1",
@@ -869,6 +872,7 @@ describe("ByClawSuperGatewayWorker", () => {
       thinkingLevel: "off",
       externalSessionId: "session-1",
       parentMessageId: "message-1",
+      traceId: "trace-1",
       metadata: {
         "Beyond-Token": "a-token",
         "System-Code": "system-1",

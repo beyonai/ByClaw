@@ -20,6 +20,7 @@ import { ByClawBeAgentCatalog } from "../business/agent-catalog.js";
 import { ByAiAttachmentResolver } from "../business/byai-attachment-resolver.js";
 import { RedisByClawBeEndpointResolver } from "../business/endpoint-resolver.js";
 import { ByClawBeGroupChatContextProvider } from "../business/group-chat-context.js";
+import { ByClawBeTaskPlanGateway } from "../business/task-plan.js";
 import { ByClawBeOrchestratorRuntimeProvider } from "../business/orchestrator-runtime.js";
 import {
   ByClawBeResourceModelResolver,
@@ -279,6 +280,10 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     maxTextChars: config.attachments.maxTextChars,
     maxStructureChars: config.attachments.maxStructureChars,
   });
+  const taskPlans = new ByClawBeTaskPlanGateway({
+    ...config.byClawBe,
+    endpointResolver,
+  });
   const runService = new RunService(
     database.sessions,
     database.runs,
@@ -291,6 +296,7 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     {
       ...buildRunServiceOptions(config, database),
       attachmentResolver,
+      taskPlans,
     },
   );
   const runIngress = new RunIngressService(

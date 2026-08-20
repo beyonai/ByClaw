@@ -1899,6 +1899,13 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
   if (record.parentMessageId !== undefined && !parentMessageId) {
     throw new Error("Invalid persisted Run parent message ID");
   }
+  const traceId =
+    typeof record.traceId === "string" && record.traceId.trim()
+      ? record.traceId.trim()
+      : undefined;
+  if (record.traceId !== undefined && !traceId) {
+    throw new Error("Invalid persisted Run trace ID");
+  }
   const agentCatalogError =
     typeof record.agentCatalogError === "string" && record.agentCatalogError.trim()
       ? record.agentCatalogError.trim()
@@ -1914,12 +1921,14 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
   if (record.groupChat === undefined) {
     return externalSessionId ||
       parentMessageId ||
+      traceId ||
       agentCatalogError ||
       leaderModel ||
       orchestrator
       ? {
           ...(externalSessionId ? { externalSessionId } : {}),
           ...(parentMessageId ? { parentMessageId } : {}),
+          ...(traceId ? { traceId } : {}),
           ...(agentCatalogError ? { agentCatalogError } : {}),
           ...(leaderModel ? { leaderModel } : {}),
           ...(orchestrator ? { orchestrator } : {}),
@@ -1937,6 +1946,7 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
   return {
     ...(externalSessionId ? { externalSessionId } : {}),
     ...(parentMessageId ? { parentMessageId } : {}),
+    ...(traceId ? { traceId } : {}),
     groupChat,
     groupChatFingerprint: fingerprint,
     ...(agentCatalogError ? { agentCatalogError } : {}),

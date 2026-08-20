@@ -4,11 +4,14 @@ import com.iwhaleai.byai.framework.client.GatewayClient;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.state.application.service.taskplan.TaskPlanApplicationService;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
 import com.iwhalecloud.byai.state.domain.chat.service.TraceIdCodec;
+import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanSnapshot;
+import com.iwhalecloud.byai.state.domain.ws.service.TaskPlanWebSocketPublisher;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,6 +28,8 @@ class AssistantChatApplicationServiceTest {
     private SsResourceService ssResourceService;
     private RunningOutputStreamRegistry runningOutputStreamRegistry;
     private RunningChatSnapshotService runningChatSnapshotService;
+    private TaskPlanApplicationService taskPlanApplicationService;
+    private TaskPlanWebSocketPublisher taskPlanWebSocketPublisher;
     private AssistantChatApplicationService assistantChatApplicationService;
 
     @BeforeEach
@@ -33,6 +38,8 @@ class AssistantChatApplicationServiceTest {
         ssResourceService = mock(SsResourceService.class);
         runningOutputStreamRegistry = mock(RunningOutputStreamRegistry.class);
         runningChatSnapshotService = mock(RunningChatSnapshotService.class);
+        taskPlanApplicationService = mock(TaskPlanApplicationService.class);
+        taskPlanWebSocketPublisher = mock(TaskPlanWebSocketPublisher.class);
 
         TargetAgentResolver targetAgentResolver = new TargetAgentResolver();
         ReflectionTestUtils.setField(targetAgentResolver, "ssResourceService", ssResourceService);
@@ -44,8 +51,13 @@ class AssistantChatApplicationServiceTest {
             runningOutputStreamRegistry);
         ReflectionTestUtils.setField(assistantChatApplicationService, "runningChatSnapshotService",
             runningChatSnapshotService);
+        ReflectionTestUtils.setField(assistantChatApplicationService, "taskPlanApplicationService",
+            taskPlanApplicationService);
+        ReflectionTestUtils.setField(assistantChatApplicationService, "taskPlanWebSocketPublisher",
+            taskPlanWebSocketPublisher);
 
         LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserId(1L);
         loginInfo.setUserCode("u1");
         CurrentUserHolder.setLoginInfo(loginInfo);
     }
@@ -62,6 +74,14 @@ class AssistantChatApplicationServiceTest {
         stopChatDto.setSessionId(10L);
         stopChatDto.setMessageId(20L);
         when(ssResourceService.findById(30L)).thenReturn(null);
+        TaskPlanSnapshot cancelling = new TaskPlanSnapshot();
+        cancelling.setStatus("CANCELLING");
+        TaskPlanSnapshot cancelled = new TaskPlanSnapshot();
+        cancelled.setStatus("CANCELLED");
+        when(taskPlanApplicationService.requestCancellation(stopChatDto, "USER_STOPPED", "用户请求停止"))
+            .thenReturn(cancelling);
+        when(taskPlanApplicationService.confirmCancellation(stopChatDto, "USER_STOPPED", "用户已停止执行"))
+            .thenReturn(cancelled);
 
         assistantChatApplicationService.stopChat(stopChatDto);
 
@@ -69,6 +89,8 @@ class AssistantChatApplicationServiceTest {
             eq("u1"), eq("force"));
         verify(runningOutputStreamRegistry).release(10L, 20L);
         verify(runningChatSnapshotService).delete(10L, 20L);
+        verify(taskPlanWebSocketPublisher).broadcast(1L, cancelling, null);
+        verify(taskPlanWebSocketPublisher).broadcast(1L, cancelled, null);
     }
 
     @Test

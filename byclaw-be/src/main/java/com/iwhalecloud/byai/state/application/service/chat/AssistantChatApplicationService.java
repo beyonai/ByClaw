@@ -41,6 +41,9 @@ import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
+import com.iwhalecloud.byai.state.application.service.taskplan.TaskPlanApplicationService;
+import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanSnapshot;
+import com.iwhalecloud.byai.state.domain.ws.service.TaskPlanWebSocketPublisher;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
 import com.iwhalecloud.byai.state.domain.chat.service.ScriptService;
 import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamManager;
@@ -119,6 +122,12 @@ public class AssistantChatApplicationService {
     private RunningChatSnapshotService runningChatSnapshotService;
 
     @Autowired
+    private TaskPlanApplicationService taskPlanApplicationService;
+
+    @Autowired
+    private TaskPlanWebSocketPublisher taskPlanWebSocketPublisher;
+
+    @Autowired
     private OutputStreamManager outputStreamManager;
 
     // 使用 @Lazy 打破依赖环：ScriptService 经由 paramService → ... → dingtalk 链路最终又依赖本类。
@@ -195,6 +204,11 @@ public class AssistantChatApplicationService {
             stopChatDto.setMessageId(runningMessageId);
         }
 
+        TaskPlanSnapshot cancellingPlan = taskPlanApplicationService.requestCancellation(stopChatDto,
+            "USER_STOPPED", "用户请求停止");
+        taskPlanWebSocketPublisher.broadcast(CurrentUserHolder.getCurrentUserId(), cancellingPlan,
+            stopChatDto.getClientRequestId());
+
         SsResource ssResource = ssResourceService.findById(stopChatDto.getAgentId());
         String workerAgentType = null;
         if (ssResource == null) {
@@ -212,6 +226,11 @@ public class AssistantChatApplicationService {
 
         gatewayClient.cancelTask(executionId, String.valueOf(stopChatDto.getSessionId()),
             "user cancel task", targetAgentType, CurrentUserHolder.getCurrentUserCode(), "force");
+
+        TaskPlanSnapshot cancelledPlan = taskPlanApplicationService.confirmCancellation(stopChatDto,
+            "USER_STOPPED", "用户已停止执行");
+        taskPlanWebSocketPublisher.broadcast(CurrentUserHolder.getCurrentUserId(), cancelledPlan,
+            stopChatDto.getClientRequestId());
 
         runningOutputStreamRegistry.release(stopChatDto.getSessionId(), cleanupMessageId);
         runningChatSnapshotService.delete(stopChatDto.getSessionId(), cleanupMessageId);

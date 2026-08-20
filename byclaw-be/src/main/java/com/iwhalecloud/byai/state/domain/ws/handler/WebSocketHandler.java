@@ -16,6 +16,7 @@ import com.iwhalecloud.byai.state.domain.ws.constant.Constant;
 import com.iwhalecloud.byai.state.domain.ws.model.ChatMessage;
 import com.iwhalecloud.byai.state.domain.ws.service.ChatService;
 import com.iwhalecloud.byai.state.domain.ws.service.WebSocketI18nSupport;
+import com.iwhalecloud.byai.state.domain.ws.service.TaskPlanWebSocketService;
 import com.iwhalecloud.byai.state.infrastructure.utils.CloseUtil;
 import com.iwhalecloud.byai.state.infrastructure.utils.NettyResponse;
 import com.iwhalecloud.byai.state.infrastructure.utils.PushUtil;
@@ -35,6 +36,9 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
 
     @Autowired
     private ChatService chatService;
+
+    @Autowired
+    private TaskPlanWebSocketService taskPlanWebSocketService;
 
     @Autowired
     private NotificationService notificationService;
@@ -93,7 +97,9 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
                     case SSE_STREAM -> chatService.sseStream(ctx, chatMessage);
                     case NOTIFICATION -> notificationService.getRealTimeNotification(ctx, message);
                     case STOP_CHAT -> chatService.stopChat(ctx, chatMessage);
-                default -> throw new RuntimeException(I18nUtil.get("ws.handler.unsupported.message.type", chatMessage.getType()));
+                    case TASK_PLAN_GET -> taskPlanWebSocketService.get(ctx, chatMessage);
+                    default -> throw new RuntimeException(
+                        I18nUtil.get("ws.handler.unsupported.message.type", chatMessage.getType()));
                 }
             }
             finally {

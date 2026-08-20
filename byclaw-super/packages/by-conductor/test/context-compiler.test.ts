@@ -52,6 +52,7 @@ describe("ContextCompiler", () => {
       "session-workspace",
       "user-context",
       "group-chat-context",
+      "task-plan",
       "authorized-agents",
       "context-cleanup",
     ]);
@@ -346,6 +347,7 @@ describe("OrchestratorContextCompiler", () => {
     expect(compiled.diagnostics.processors.map(({ name }) => name)).toEqual([
       "supervisor-policy",
       "session-context",
+      "task-plan",
       "authorized-agents",
       "context-cleanup",
     ]);

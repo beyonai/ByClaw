@@ -70,6 +70,8 @@ export interface CreateSessionRunRequest extends AuthenticatedIngressRequest {
   externalSessionId?: string;
   /** by-framework 入站消息 ID；仅 Worker 入口提供，用于关联后续子 Agent 执行。 */
   parentMessageId?: string;
+  /** by-framework 入站执行链路 ID；仅 Worker 入口提供。 */
+  traceId?: string;
   /** Gateway 只提供定位引用；正文由 Super 使用当前 Token 从 BE 权威读取。 */
   groupChatRef?: GroupChatRefV1;
   /** by-framework 声明的编排者定位；EXPERT_TEAM 会在创建 Run 前向 BE 验权。 */
@@ -145,6 +147,7 @@ export class RunIngressService {
       ...(input.parentMessageId
         ? { parentMessageId: input.parentMessageId }
         : {}),
+      ...(input.traceId ? { traceId: input.traceId } : {}),
     });
     const run = await this.runService.createSessionRun({
       owner: principal,
@@ -215,6 +218,7 @@ export class RunIngressService {
       ...(input.parentMessageId
         ? { parentMessageId: input.parentMessageId }
         : {}),
+      ...(input.traceId ? { traceId: input.traceId } : {}),
     });
     const run = await this.runService.createRun({
       sessionId: input.sessionId,
@@ -511,6 +515,7 @@ export class RunIngressService {
     orchestrator?: ExpertTeamRuntimeSnapshotV1;
     externalSessionId?: string;
     parentMessageId?: string;
+    traceId?: string;
   }) {
     if (
       !input.context &&
@@ -518,7 +523,8 @@ export class RunIngressService {
       !input.leaderModel &&
       !input.orchestrator &&
       !input.externalSessionId &&
-      !input.parentMessageId
+      !input.parentMessageId &&
+      !input.traceId
     ) {
       return undefined;
     }
@@ -530,6 +536,7 @@ export class RunIngressService {
       ...(input.parentMessageId
         ? { parentMessageId: input.parentMessageId }
         : {}),
+      ...(input.traceId ? { traceId: input.traceId } : {}),
       ...(input.agentCatalogError
         ? { agentCatalogError: input.agentCatalogError }
         : {}),

@@ -20,6 +20,7 @@ import {
   DOWNLOAD_ATTACHMENT_ENABLED,
   DOWNLOAD_ATTACHMENT_TOOL_NAME,
   INSPECT_ATTACHMENT_TOOL_NAME,
+  UPDATE_TASK_PLAN_TOOL_NAME,
   LEADER_FILE_TOOL_NAMES,
   resolveActiveLeaderToolNames,
 } from "./context/active-leader-tools.js";
@@ -164,6 +165,78 @@ export class PiLeaderSession implements LeaderSession {
         };
       },
     });
+    const updateTaskPlan = defineTool({
+      name: UPDATE_TASK_PLAN_TOOL_NAME,
+      label: "Update Task Plan",
+      description:
+        "Create or replace the current execution task plan. Send the complete ordered task list every time progress changes. Omit planId only for the first call; preserve returned taskIds and use the returned planId/version for later calls.",
+      promptSnippet:
+        "Create and keep a structured task plan synchronized with actual execution progress.",
+      executionMode: "sequential",
+      parameters: Type.Object({
+        planId: Type.Optional(Type.String({ minLength: 1 })),
+        expectedVersion: Type.Optional(Type.Integer({ minimum: 1 })),
+        title: Type.String({ minLength: 1, maxLength: 500 }),
+        explanation: Type.Optional(Type.String({ maxLength: 2000 })),
+        tasks: Type.Array(
+          Type.Object({
+            taskId: Type.Optional(Type.String({ minLength: 1 })),
+            step: Type.String({ minLength: 1, maxLength: 1000 }),
+            description: Type.Optional(Type.String({ maxLength: 4000 })),
+            status: Type.Union([
+              Type.Literal("PENDING"),
+              Type.Literal("IN_PROGRESS"),
+              Type.Literal("COMPLETED"),
+              Type.Literal("FAILED"),
+              Type.Literal("SKIPPED"),
+              Type.Literal("CANCELLED"),
+            ]),
+            statusReason: Type.Optional(
+              Type.Object({
+                code: Type.String({ minLength: 1, maxLength: 64 }),
+                message: Type.Optional(Type.String({ maxLength: 500 })),
+              }),
+            ),
+          }),
+          { minItems: 1, maxItems: 100 },
+        ),
+      }),
+      execute: async (toolCallId, params, signal) => {
+        const active = wrapper?.activeInput;
+        if (!active?.updateTaskPlan) {
+          throw new Error("task plan updates are not available for this run");
+        }
+        const snapshot = await active.updateTaskPlan({
+          toolCallId,
+          update: {
+            ...(params.planId ? { planId: params.planId } : {}),
+            ...(params.expectedVersion !== undefined
+              ? { expectedVersion: params.expectedVersion }
+              : {}),
+            title: params.title,
+            ...(params.explanation ? { explanation: params.explanation } : {}),
+            tasks: params.tasks.map((task) => ({
+              ...(task.taskId ? { taskId: task.taskId } : {}),
+              step: task.step,
+              ...(task.description ? { description: task.description } : {}),
+              status: task.status,
+              ...(task.statusReason ? { statusReason: task.statusReason } : {}),
+            })),
+          },
+          ...(signal ? { signal } : {}),
+        });
+        // before_agent_start 每轮都会读取 activeInput；原位替换后下一次推理立即看到最新计划。
+        active.activeTaskPlan = snapshot;
+        return {
+          content: [{ type: "text", text: JSON.stringify(snapshot) }],
+          details: {
+            planId: snapshot.planId,
+            version: snapshot.version,
+            status: snapshot.status,
+          },
+        };
+      },
+    });
     const inspectAttachment = defineTool({
       name: INSPECT_ATTACHMENT_TOOL_NAME,
       label: "Inspect Attachment",
@@ -292,6 +365,10 @@ export class PiLeaderSession implements LeaderSession {
                 ...(active.orchestrator
                   ? { orchestrator: active.orchestrator }
                   : {}),
+                ...(active.activeTaskPlan
+                  ? { activeTaskPlan: active.activeTaskPlan }
+                  : {}),
+                taskPlanAvailable: Boolean(active.updateTaskPlan),
               });
               return { systemPrompt: context.systemPrompt };
             });
@@ -325,6 +402,7 @@ export class PiLeaderSession implements LeaderSession {
       tools: [
         DELEGATE_AGENT_TOOL_NAME,
         ...(ASK_USER_QUESTION_ENABLED ? [ASK_USER_QUESTION_TOOL_NAME] : []),
+        UPDATE_TASK_PLAN_TOOL_NAME,
         ...LEADER_FILE_TOOL_NAMES,
         INSPECT_ATTACHMENT_TOOL_NAME,
         ...(DOWNLOAD_ATTACHMENT_ENABLED ? [DOWNLOAD_ATTACHMENT_TOOL_NAME] : []),
@@ -332,6 +410,7 @@ export class PiLeaderSession implements LeaderSession {
       customTools: [
         delegateAgent,
         ...(ASK_USER_QUESTION_ENABLED ? [askUserQuestion] : []),
+        updateTaskPlan,
         inspectAttachment,
         ...(DOWNLOAD_ATTACHMENT_ENABLED ? [downloadAttachment] : []),
       ],
@@ -430,6 +509,7 @@ export class PiLeaderSession implements LeaderSession {
           inspectAttachmentAvailable: Boolean(input.inspectAttachment),
           downloadAttachmentAvailable: Boolean(input.downloadAttachment),
           expertTeam: Boolean(input.orchestrator),
+          taskPlanAvailable: Boolean(input.updateTaskPlan),
         }),
       );
       // 群聊只把未见过的消息作为 Pi custom message 追加；cursor 和 compaction
