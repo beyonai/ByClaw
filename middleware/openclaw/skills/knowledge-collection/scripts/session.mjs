@@ -152,6 +152,7 @@ export function newSession(task = {}) {
       initialSearch: [],
       followups: [],
       combinedQuery: null,
+      discoveryChannels: null,
       stopReason: null,
       status: 'initialized',
       ...task,

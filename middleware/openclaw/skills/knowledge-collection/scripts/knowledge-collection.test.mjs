@@ -142,8 +142,29 @@ await (async () => {
   assert.equal(c.json.ok, true);
   assert.ok(!existsSync(payloadPath), 'collect 成功后应删除输入 payload');
 
-  const p = await runCli(['plan', '--session-dir', root, '--initial-search', '["arxiv"]', '--combined-query', 'q1']);
+  // plan 必须为三个发现通道逐个表态：漏传、漏通道、缺 reason、reason 笼统均须拒收。
+  const noChannels = await runCli(['plan', '--session-dir', root, '--initial-search', '["arxiv"]', '--combined-query', 'q1']);
+  assert.equal(noChannels.json.ok, false, '未传 --channels 应拒收');
+  assert.match(noChannels.json.error, /--channels/);
+
+  const partial = await runCli(['plan', '--session-dir', root, '--initial-search', '["arxiv"]',
+    '--channels', '{"builtin-routing":{"state":"used"},"searxng":{"state":"used"}}']);
+  assert.equal(partial.json.ok, false, '漏掉 hot-discovery 应拒收');
+  assert.match(partial.json.error, /hot-discovery/);
+
+  const noReason = await runCli(['plan', '--session-dir', root, '--initial-search', '["arxiv"]',
+    '--channels', '{"builtin-routing":{"state":"used"},"searxng":{"state":"used"},"hot-discovery":{"state":"unavailable"}}']);
+  assert.equal(noReason.json.ok, false, 'state 非 used 且缺 reason 应拒收');
+
+  const vague = await runCli(['plan', '--session-dir', root, '--initial-search', '["arxiv"]',
+    '--channels', '{"builtin-routing":{"state":"used"},"searxng":{"state":"used"},"hot-discovery":{"state":"unavailable","reason":"跳过"}}']);
+  assert.equal(vague.json.ok, false, 'reason 笼统应拒收');
+
+  const p = await runCli(['plan', '--session-dir', root, '--initial-search', '["arxiv"]', '--combined-query', 'q1',
+    '--channels', '{"builtin-routing":{"state":"used"},"searxng":{"state":"used"},'
+      + '"hot-discovery":{"state":"unavailable","reason":"bycli 适配器在测试环境未就绪"}}']);
   assert.equal(p.json.ok, true);
+  assert.equal(p.json.channels['hot-discovery'].state, 'unavailable');
 
   const b = await runCli(['branch', '--session-dir', root, '--level', '1', '--query', 'arXiv 论文',
     '--research-goal', '找窗口内论文', '--learnings', '["AgentK"]',

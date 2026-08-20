@@ -29,6 +29,11 @@ description: Use when the goal is to COLLECT and keep material rather than just 
   `citations`/`downloads`/`stars`/`score`，与 searxng **并行**跑后用其 `merge` 归并；
   `groups.bothChannels` 双通道命中优先级最高）；
   信源分工见 [references/research-methodology.md](references/research-methodology.md)「检索源分工」节；
+- **先验证再排除原则（Critical）**：plan 阶段必须逐个验证三信源的可用性与适用性，**禁止基于片面认知或主观推测就排除某个信源**。
+  错误示例："B2B SaaS 不会出现在热度平台" ← 未验证 hot_discovery 是否有 Hacker News/Reddit/Product Hunt 讨论；
+  正确示例："已通读 hot_discovery SKILL.md，确认 9 个维度均不覆盖本主题，且调用返回 0 results"。
+  non-`used` 信源的 reason 必须基于**实际调用结果**或**完整 SKILL.md 验证**，而非推测。
+  详见 [references/research-methodology.md](references/research-methodology.md) Step 1 的「三信源验证与表态」节；
 - **热度通道的三条硬边界**（调用前须通读其 SKILL.md）：① 只发现 URL 与热度字段，**不取正文** ——
   取内容仍一律经下方「来源路由」；② 覆盖集中在 packages/science/it/q&a/repos/apps/books/movies 9 个维度，
   images/videos/music/files/dictionaries/translate/map/lyrics/radio/weather/icons 这 11 个维度**无免登录热度源**；

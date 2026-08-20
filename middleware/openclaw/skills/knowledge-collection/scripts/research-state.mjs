@@ -117,6 +117,66 @@ function nonEmptyStringList(value, label) {
   return items;
 }
 
+/** 深化研究的三个发现通道；plan 必须为每个通道显式表态。 */
+const DISCOVERY_CHANNELS = ['builtin-routing', 'searxng', 'hot-discovery'];
+const CHANNEL_STATES = ['used', 'unavailable', 'not-applicable'];
+/** 「命令跑通了所以不用读文档」这类自我豁免的常见措辞，一律拒收。 */
+const VAGUE_REASON_PATTERN = /^(skip|skipped|n\/?a|none|no|未用|没用|跳过|不需要|无需|不适用|忽略|略)$/i;
+
+/**
+ * 校验 plan 的通道覆盖表。三通道各自必须是 used，或给出 unavailable/not-applicable + 具体 reason。
+ * 目的：让「漏跑某个发现通道」在 plan 阶段就报错，而不是等到报告写完才在覆盖缺口里补一句。
+ *
+ * **先验证再排除原则**: non-`used` 的 reason 必须基于实际验证(已通读完整 SKILL.md 或已尝试调用),
+ * 而非主观推测。错误示例："B2B SaaS 不会出现在热度平台"(未验证 hot_discovery 是否有 HN/Reddit/PH)；
+ * 正确示例："hot_discovery --query 'Lightfield' 返回 0 results,三维度均无命中"。
+ */
+function validateChannels(value) {
+  const dict = asDict(value, 'channels');
+  const missing = DISCOVERY_CHANNELS.filter((name) => dict[name] === undefined);
+  if (missing.length > 0) {
+    throw new Error(
+      `plan --channels 缺少通道: ${missing.join(', ')}。三个发现通道必须逐个表态：`
+      + `{"builtin-routing":{"state":"used"},"searxng":{"state":"used"},"hot-discovery":{"state":"unavailable","reason":"..."}}。`
+      + 'state 取值 used | unavailable | not-applicable；后两者必须带具体 reason。'
+      + '若尚未确认某通道能力边界，先通读其 SKILL.md（hot-discovery 见 online_search/references/hot_discovery/SKILL.md），'
+      + '或尝试调用并用实际结果作为排除依据，而非基于推测',
+    );
+  }
+  const unknown = Object.keys(dict).filter((name) => !DISCOVERY_CHANNELS.includes(name));
+  if (unknown.length > 0) {
+    throw new Error(`plan --channels 含未知通道: ${unknown.join(', ')}；合法通道为 ${DISCOVERY_CHANNELS.join(', ')}`);
+  }
+  const normalized = {};
+  for (const name of DISCOVERY_CHANNELS) {
+    const entry = asDict(dict[name], `channels.${name}`);
+    const state = typeof entry.state === 'string' ? entry.state.trim() : '';
+    if (!CHANNEL_STATES.includes(state)) {
+      throw new Error(`channels.${name}.state 必须是 ${CHANNEL_STATES.join(' | ')}，实际: ${JSON.stringify(entry.state)}`);
+    }
+    const reason = typeof entry.reason === 'string' ? entry.reason.trim() : '';
+    if (state !== 'used') {
+      if (!reason) {
+        throw new Error(
+          `channels.${name}.state=${state} 必须带 reason，说明是「环境不可用」还是「本主题不适用」。`
+          + '**先验证再排除**: reason 必须基于实际调用结果或完整 SKILL.md 验证，而非主观推测。'
+          + '错误示例: "不适合本主题"(未说明如何确认)；正确示例: "已通读 SKILL.md,9 个维度均不覆盖本主题" 或 "调用返回 0 results"',
+        );
+      }
+      if (VAGUE_REASON_PATTERN.test(reason) || reason.length < 8) {
+        throw new Error(
+          `channels.${name}.reason 过于笼统: ${JSON.stringify(reason)}；需写明具体原因。`
+          + '环境限制示例: "mcporter 未安装，Exa 通道不可用"；主题不适用示例: "已通读 hot_discovery SKILL.md，'
+          + '9 个维度(packages/science/...)均不覆盖本主题，且调用返回 0 results"。'
+          + '禁止仅凭片面认知就排除(如"只看到 apps 维度有 flathub/steam,认为 B2B SaaS 不适用"——未验证是否有 HN/Reddit/PH 讨论)',
+        );
+      }
+    }
+    normalized[name] = state === 'used' ? { state } : { state, reason };
+  }
+  return normalized;
+}
+
 function validateLevel(session, level) {
   const depth = session.task.depth ?? DEFAULTS.depth;
   if (!Number.isInteger(level) || level < 1) {
@@ -542,14 +602,26 @@ export function cmdPlan(args) {
     if (initialSearch.length === 0 && !(typeof args['combined-query'] === 'string' && args['combined-query'].trim())) {
       throw new Error('plan 必须提供 --initial-search 非空数组或 --combined-query');
     }
+    if (args.channels === undefined) {
+      throw new Error(
+        'plan 必须提供 --channels：三个发现通道(builtin-routing / searxng / hot-discovery)逐个表态。'
+        + '例: --channels \'{"builtin-routing":{"state":"used"},"searxng":{"state":"used"},'
+        + '"hot-discovery":{"state":"used"}}\'。'
+        + '这道校验存在的原因：三通道并行此前只写在散文里，会被「命令已跑通」的错觉跳过',
+      );
+    }
+    const channels = validateChannels(parseJsonArg(args.channels, {}));
     session.task.initialSearch = initialSearch;
     session.task.followups = followups;
+    session.task.discoveryChannels = channels;
     if (args['combined-query'] !== undefined && args['combined-query'] !== null) {
       session.task.combinedQuery = String(args['combined-query']);
     }
     session.task.status = 'planned';
     persistSession(paths, session);
-    return { ok: true, action: 'plan', status: session.task.status, initialSearch, combinedQuery: session.task.combinedQuery };
+    return {
+      ok: true, action: 'plan', status: session.task.status, initialSearch, combinedQuery: session.task.combinedQuery, channels,
+    };
   });
 }
 

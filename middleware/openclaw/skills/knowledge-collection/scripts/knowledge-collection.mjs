@@ -66,14 +66,19 @@ const COMMAND_SPECS = {
   }),
   plan: defineCommand({
     group: 'research',
-    title: '记录初始检索、follow-ups 与合并起始查询',
+    title: '记录初始检索、follow-ups、合并起始查询与三通道覆盖表',
     args: {
       '--session-dir': '必填',
       '--initial-search': 'JSON 数组,必填(初始检索记录)',
+      '--channels': '必填。JSON 对象;三个发现通道 builtin-routing / searxng / hot-discovery 逐个表态,'
+        + '{"<通道>":{"state":"used|unavailable|not-applicable","reason":"非 used 时必填,须具体"}}。'
+        + '漏一个即报错;reason 笼统(如「跳过」「不适用」)或短于 8 字符即报错',
       '--followups': 'JSON 数组,可选',
       '--combined-query': '文本,可选',
     },
-    example: 'knowledge-collection.mjs plan --session-dir /tmp/kc1 --initial-search \'["arxiv", "github"]\' --combined-query "combined"',
+    example: 'knowledge-collection.mjs plan --session-dir /tmp/kc1 --initial-search \'["arxiv", "github"]\''
+      + ' --channels \'{"builtin-routing":{"state":"used"},"searxng":{"state":"used"},'
+      + '"hot-discovery":{"state":"unavailable","reason":"images 维度无免登录热度源"}}\' --combined-query "combined"',
   }),
   branch: defineCommand({
     group: 'research',

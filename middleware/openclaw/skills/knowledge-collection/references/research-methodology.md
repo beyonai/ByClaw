@@ -51,15 +51,56 @@
 
 1. 用 `init --mode research --session-dir <dir> --query "..." [--breadth N] [--depth N]
    [--deadline-minutes M] [--max-branches N] [--max-sources-per-branch N] [--max-search-rounds N]` 创建会话。
-2. 做一次初步检索,覆盖多个角度,委派**三信源互补检索**:
-   - 内置路由层([agent-reach.md](agent-reach.md)): Exa 搜索、gh、RSS、站内搜索等渠道;
-   - `online_search`(searxng 多引擎技能): 时间窗(`--time-range day/week/month/year`)、
-     中文引擎(baidu/sogou/360search)、学术类别(`--category science`,含 arxiv/crossref/pubmed/openalex);
-   - `hot_discovery`(热度发现通道子技能): 经 bycli 适配器取平台原生热度(`citations`/`downloads`/`stars`/`score`)，
-     与 searxng 并行跑后用其 `merge` 归并，双通道命中优先级最高。覆盖 packages/science/it/q&a/repos/apps/books/movies
-     9 个维度，详见 [online-search.md](online-search.md)「热度发现通道」节。
-3. 基于初步结果生成若干澄清问题或研究方面;用户没有回答时,记录合理假设继续。
-4. 用 `plan` 记录初始检索、follow-up 与合并起始查询(`--initial-search` / `--followups` 传 JSON 数组,`--combined-query` 传文本)。
+
+2. **三信源验证与表态(强制前置)**:
+   
+   执行任何检索前,必须逐个验证三个发现通道的可用性与适用性:
+   
+   - **内置路由层** ([agent-reach.md](agent-reach.md)): Exa 搜索、gh、RSS、站内搜索等渠道。
+     **验证方式**: 通读 agent-reach.md 路由表,确认本主题是否在其覆盖范围。
+   
+   - **online_search** (searxng 多引擎技能): 时间窗(`--time-range day/week/month/year`)、
+     中文引擎(baidu/sogou/360search)、学术类别(`--category science`,含 arxiv/crossref/pubmed/openalex)。
+     **验证方式**: 通读 `skills/online_search/SKILL.md`,确认引擎可用性与本主题的语言/时效/学术性匹配度。
+   
+   - **hot_discovery** (热度发现通道子技能): 经 bycli 适配器取平台原生热度(`citations`/`downloads`/`stars`/`score`)，
+     与 searxng 并行跑后用其 `merge` 归并，双通道命中优先级最高。
+     **验证方式**: 通读 `skills/online_search/references/hot_discovery/SKILL.md`,检查本主题所属维度
+     (packages/science/it/q&a/repos/apps/books/movies 9 个覆盖 vs 
+      images/videos/music/files/dictionaries/translate/map/lyrics/radio/weather/icons 11 个无热度源)。
+   
+   **先验证再排除原则(Critical)**:
+   - ❌ **错误**: 仅凭文档片段或主观推测就标记为 `unavailable` / `not-applicable`
+   - ✅ **正确**: 先尝试调用(或至少通读完整 SKILL.md),用**实际结果或能力边界**作为排除依据
+   - **反例**: "B2B SaaS 不会出现在热度平台" ← 错误推测,hot_discovery 可能有 Hacker News/Reddit/Product Hunt 讨论
+   - **正例**: "hot_discovery 查询 'Lightfield' 返回 0 results,三个维度均无命中" ← 基于实际调用结果
+   
+   **通道表态约束**:
+   - `state: "used"` 无需 reason
+   - `state: "unavailable"` 需 reason 说明环境限制(如"mcporter 未安装,Exa 通道不可用")
+   - `state: "not-applicable"` 需 reason 说明主题不适用,且**必须基于实际验证**:
+     * 已通读完整 SKILL.md 并确认覆盖边界
+     * 或已尝试调用并获得空结果/错误响应
+     * 禁止基于"看起来不适合"的推测
+
+3. 做一次初步检索,覆盖多个角度,委派**三信源互补检索**。详见下方「检索源分工」节。
+
+4. 基于初步结果生成若干澄清问题或研究方面;用户没有回答时,记录合理假设继续。
+
+5. 用 `plan` 记录初始检索、follow-up、合并起始查询与**三信源表态**:
+   ```bash
+   node scripts/knowledge-collection.mjs plan --session-dir <dir> \
+     --initial-search '["query1","query2",...]' \
+     --followups '["aspect1","aspect2",...]' \
+     --combined-query "combined starting point" \
+     --channels '{"builtin-routing":{"state":"used"},"searxng":{"state":"used"},"hot-discovery":{"state":"not-applicable","reason":"实际调用 hot_discovery --query ... 返回 0 results,三个维度(repos/apps/q&a)均无匹配"}}'
+   ```
+   
+   **plan 拒绝的情况**:
+   - 缺少任一通道的表态
+   - non-`used` 通道的 reason < 8 字符
+   - reason 过于笼统(如"不适合""没用""不需要")
+   - reason 未说明是环境限制还是主题不适用
 
 ### Step 2: 递归研究(branch × 层级)
 
