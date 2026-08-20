@@ -666,6 +666,7 @@ public class FeignPythonBuildService {
         if (headers == null) {
             headers = new HashMap<String, String>();
         }
+        
         headers.put("Content-Type", "application/json");
         this.addAuth(headers);
 
@@ -678,7 +679,7 @@ public class FeignPythonBuildService {
     private <T> PythonBuildResponse<T> post(KnowledgeServiceOperation operation, Object payload,
                                             TypeReference<PythonBuildResponse<T>> type, boolean throwExceptions) {
         try {
-            return doPost(operation, payload, type, Collections.emptyMap());
+            return doPost(operation, payload, type, new HashMap<>());
         } catch (BaseException e) {
             if (throwExceptions) {
                 throw e;
