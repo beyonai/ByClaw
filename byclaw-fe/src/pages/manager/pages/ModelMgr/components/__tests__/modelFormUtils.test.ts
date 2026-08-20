@@ -15,6 +15,7 @@ import {
   getModelTypeTransitionFormValues,
   hasImageGenerationPrompt,
   headersListToObject,
+  isExampleApiEndpointPlaceholder,
   joinUrl,
   normalizeModelType,
 } from '../modelFormUtils';
@@ -285,6 +286,10 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
     it('defaults modelProtocol to OpenAI', () => {
       expect(getDefaultFormValues().modelProtocol).toBe('OpenAI');
     });
+
+    it('leaves apiEndpoint empty so protocol placeholder can show', () => {
+      expect(getDefaultFormValues().apiEndpoint).toBe('');
+    });
   });
 
   describe('getDefaultLlmDebugSuffix', () => {
@@ -310,6 +315,16 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
 
     it('returns the MiniMax image generation endpoint for the image protocol', () => {
       expect(getApiEndpointPlaceholder('MINIMAX_IMAGE')).toBe('https://api.minimaxi.com/v1/image_generation');
+    });
+  });
+
+  describe('isExampleApiEndpointPlaceholder', () => {
+    it('treats blank and protocol sample urls as placeholders', () => {
+      expect(isExampleApiEndpointPlaceholder('')).toBe(true);
+      expect(isExampleApiEndpointPlaceholder('https://api.example.com/v1')).toBe(true);
+      expect(isExampleApiEndpointPlaceholder('https://api.example.com/v1/')).toBe(true);
+      expect(isExampleApiEndpointPlaceholder('https://api.example.com/anthropic')).toBe(true);
+      expect(isExampleApiEndpointPlaceholder('https://api.anthropic.com')).toBe(false);
     });
   });
 
@@ -356,6 +371,7 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
             apiToken: 'token-1',
             modelCode: 'gpt-4o',
             headers: [{ key: 'X-App', value: 'manager' }],
+            maxTokens: 65536,
           },
           defaultUserMessage: 'hello',
         })
@@ -368,12 +384,32 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
           Authorization: 'Bearer token-1',
         },
         model: 'gpt-4o',
+        max_tokens: 65536,
         messages: [{ role: 'user', content: 'hello' }],
         temperature: 0.1,
         stream: true,
         enable_thinking: false,
         chat_template_kwargs: { enable_thinking: false },
       });
+    });
+
+    it('maps form maxTokens into LLM debug max_tokens', () => {
+      const result = JSON.parse(
+        buildAutoDebugRequestText({
+          formValues: {
+            modelType: 'LLM',
+            modelProtocol: 'Anthropic',
+            apiEndpoint: 'https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic',
+            modelCode: 'glm-5.2',
+            headers: [],
+            maxTokens: 1024,
+          },
+          defaultUserMessage: '今天天气如何',
+        })
+      );
+
+      expect(result.max_tokens).toBe(1024);
+      expect(result.url).toBe('https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages');
     });
 
     it('preserves previous llm suffix, messages and extra keys when not switching type', () => {
@@ -385,6 +421,7 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
             apiToken: '',
             modelCode: 'gpt-4o-mini',
             headers: [],
+            maxTokens: 65536,
           },
           prevText: JSON.stringify({
             url: 'https://api.example.com/v2/responses',
@@ -392,6 +429,7 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
             messages: [{ role: 'assistant', content: 'cached' }],
             temperature: 0.5,
             stream: false,
+            max_tokens: 2048,
             customFlag: true,
           }),
           changedKeys: ['apiEndpoint'],
@@ -404,6 +442,45 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
       expect(result.messages).toEqual([{ role: 'assistant', content: 'cached' }]);
       expect(result.temperature).toBe(0.5);
       expect(result.stream).toBe(false);
+      expect(result.max_tokens).toBe(2048);
+    });
+
+    it('refreshes max_tokens when form maxTokens changes', () => {
+      const result = JSON.parse(
+        buildAutoDebugRequestText({
+          formValues: {
+            modelType: 'LLM',
+            apiEndpoint: 'https://api.example.com/v1',
+            modelCode: 'gpt-4o',
+            headers: [],
+            maxTokens: 4096,
+          },
+          prevText: JSON.stringify({
+            url: 'https://api.example.com/v1/chat/completions',
+            max_tokens: 1024,
+            messages: [{ role: 'user', content: 'hello' }],
+          }),
+          changedKeys: ['maxTokens'],
+        })
+      );
+
+      expect(result.max_tokens).toBe(4096);
+    });
+
+    it('omits max_tokens when Max Tokens is unset', () => {
+      const result = JSON.parse(
+        buildAutoDebugRequestText({
+          formValues: {
+            modelType: 'LLM',
+            apiEndpoint: 'https://api.example.com/v1',
+            modelCode: 'gpt-4o',
+            headers: [],
+          },
+          defaultUserMessage: 'hello',
+        })
+      );
+
+      expect(result.max_tokens).toBeUndefined();
     });
 
     it('uses anthropic suffix when modelProtocol is Anthropic', () => {
@@ -415,12 +492,14 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
             apiEndpoint: 'https://api.anthropic.com',
             modelCode: 'claude-3-5-sonnet',
             headers: [],
+            maxTokens: 1024,
           },
           defaultUserMessage: 'hello',
         })
       );
 
       expect(result.url).toBe('https://api.anthropic.com/v1/messages');
+      expect(result.max_tokens).toBe(1024);
     });
 
     it('adds reasoning effort when DeepSeek thinking is enabled', () => {

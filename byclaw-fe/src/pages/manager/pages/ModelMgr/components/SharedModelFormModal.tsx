@@ -16,6 +16,7 @@ import {
   getImageGenerationDefaultFormValues,
   getImageProviderTransitionFormValues,
   getModelTypeTransitionFormValues,
+  isExampleApiEndpointPlaceholder,
   normalizeModelType,
 } from './modelFormUtils';
 import useModelDebug from './useModelDebug';
@@ -217,7 +218,7 @@ const SharedModelFormModal: React.FC<Props> = ({
             modelProtocol: detail.modelProtocol || imageDefaults.modelProtocol || 'OpenAI',
             modelCode: detail.modelCode || imageDefaults.modelCode,
             modelType,
-            apiEndpoint: detail.apiEndpoint || imageDefaults.apiEndpoint || 'https://api.example.com/v1',
+            apiEndpoint: detail.apiEndpoint || imageDefaults.apiEndpoint || '',
             apiToken: detail.apiToken || '',
             headers: Array.isArray(detail.headers) && detail.headers.length ? detail.headers : [{ key: '', value: '' }],
             connectTimeoutSec: detail.connectTimeoutSec ?? 32,
@@ -385,13 +386,16 @@ const SharedModelFormModal: React.FC<Props> = ({
       lastModelTypeForSyncRef.current = targetModelType;
     }
 
-    if (
-      changedKeys.includes('providerName') &&
-      normalizeModelType(syncedValues?.modelType) === 'IMAGE_GENERATION'
-    ) {
+    if (changedKeys.includes('providerName') && normalizeModelType(syncedValues?.modelType) === 'IMAGE_GENERATION') {
       const providerDefaults = getImageProviderTransitionFormValues(changedValues?.providerName);
       form.setFieldsValue(providerDefaults);
       syncedValues = { ...syncedValues, ...providerDefaults };
+    }
+
+    // 协议切换只联动 placeholder；若当前仍是示例地址则清空，避免挡住新协议样例。
+    if (changedKeys.includes('modelProtocol') && isExampleApiEndpointPlaceholder(syncedValues?.apiEndpoint)) {
+      form.setFieldsValue({ apiEndpoint: '' });
+      syncedValues = { ...syncedValues, apiEndpoint: '' };
     }
 
     if (debugInputMode !== 'auto') return;

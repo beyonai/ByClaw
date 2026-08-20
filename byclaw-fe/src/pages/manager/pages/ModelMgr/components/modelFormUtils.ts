@@ -1,7 +1,4 @@
-import {
-  getImageGenerationProviderByProtocol,
-  getImageProviderFormValues,
-} from './imageGenerationProviders';
+import { getImageGenerationProviderByProtocol, getImageProviderFormValues } from './imageGenerationProviders';
 
 export type DebugInputMode = 'template' | 'auto';
 
@@ -96,6 +93,13 @@ export function getApiEndpointPlaceholder(modelProtocol?: any) {
   return 'https://api.example.com/v1';
 }
 
+/** 判断当前值是否仅为协议示例占位，切换协议时应清空以便展示新 placeholder。 */
+export function isExampleApiEndpointPlaceholder(value?: any) {
+  const normalized = `${value ?? ''}`.trim().replace(/\/+$/, '');
+  if (!normalized) return true;
+  return normalized === 'https://api.example.com/v1' || normalized === 'https://api.example.com/anthropic';
+}
+
 export function getImageProviderTransitionFormValues(providerName?: any) {
   return getImageProviderFormValues(providerName);
 }
@@ -111,7 +115,8 @@ export function getDefaultFormValues() {
     systems: [],
     modelType: 'LLM',
     modelProtocol: 'OpenAI',
-    apiEndpoint: 'https://api.example.com/v1',
+    // 仅靠 placeholder 展示样例，不预填实际默认值。
+    apiEndpoint: '',
     headers: [{ key: '', value: '' }],
     connectTimeoutSec: 32,
     readTimeoutSec: 60,
@@ -151,7 +156,8 @@ export function getModelTypeSwitchFormValues(modelType: any) {
     modelType: normalizedType,
     providerName: isOpenAiCompatible ? 'OpenAI' : undefined,
     modelProtocol: isOpenAiCompatible ? 'OpenAI' : undefined,
-    apiEndpoint: isOpenAiCompatible ? 'https://api.example.com/v1' : '',
+    // 非文生图类型不预填示例地址，由 placeholder 按协议提示。
+    apiEndpoint: '',
     modelCode: '',
     apiToken: '',
     headers: [{ key: '', value: '' }],
@@ -524,11 +530,27 @@ export function buildAutoDebugRequestText(options: {
 
     const temperature = !isTypeSwitch && typeof prevObj?.temperature === 'number' ? prevObj.temperature : 0.1;
     const stream = !isTypeSwitch && typeof prevObj?.stream === 'boolean' ? prevObj.stream : true;
+    // 调试请求 max_tokens 跟左侧高级参数「Max Tokens」对齐：填多少就同步多少。
+    const maxTokensChanged = Array.isArray(changedKeys) && changedKeys.includes('maxTokens');
+    const formMaxTokens = Number(formValues?.maxTokens);
+    let maxTokens: number | undefined;
+    if (
+      !isTypeSwitch &&
+      !maxTokensChanged &&
+      typeof prevObj?.max_tokens === 'number' &&
+      Number.isFinite(prevObj.max_tokens) &&
+      prevObj.max_tokens > 0
+    ) {
+      maxTokens = Math.floor(prevObj.max_tokens);
+    } else if (Number.isFinite(formMaxTokens) && formMaxTokens > 0) {
+      maxTokens = Math.floor(formMaxTokens);
+    }
 
     const req: Record<string, any> = {
       url,
       headers: Object.keys(headersObj).length ? headersObj : {},
       model: modelNoOrCode,
+      ...(maxTokens !== undefined ? { max_tokens: maxTokens } : {}),
       messages,
       temperature,
       stream,
