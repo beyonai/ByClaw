@@ -14,6 +14,7 @@ import classNames from 'classnames';
 import dayjs from 'dayjs';
 import AntdIcon from '@/components/AntdIcon';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
+import { hydrateRunningSessions } from '@/hooks/useChat/chatRuntime';
 import useGlobal from '@/hooks/useGlobal';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import useAppStore from '@/models/common/useAppStore';
@@ -22,6 +23,8 @@ import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId'
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, getPageTotal, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import { listProjectSessionsByQo } from '@/service/devloop';
+import { getChatRunningStatus } from '@/service/message';
+import { chatSessionRuntimeManager, type RunningChatInfo } from '@/utils/chatSessionRuntimeManager';
 import WorkspaceSiderHeader from './WorkspaceSiderHeader';
 import WorkspaceProjectActions from './WorkspaceProjectActions';
 import WorkspaceSessionActions from './WorkspaceSessionActions';
@@ -167,11 +170,13 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   const [projectScopeId, updateProjectScopeId] = useProjectScopeId();
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(readExpandedProjectIds);
   const [sessionStateMap, setSessionStateMap] = useState<Record<string, ProjectSessionState>>({});
+  const [, setRuntimeVersion] = useState(0);
   const initializedProjectRef = useRef(false);
   const expandedProjectIdsRef = useRef(expandedProjectIds);
   const sessionStateMapRef = useRef(sessionStateMap);
   const sessionLoadingProjectIdsRef = useRef<Set<string>>(new Set());
   const hasStoredExpandedProjectIdsRef = useRef(hasStoredExpandedProjectIds());
+  const runningSessionIdsKeyRef = useRef('');
 
   useEffect(() => {
     expandedProjectIdsRef.current = expandedProjectIds;
@@ -180,6 +185,83 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   useEffect(() => {
     sessionStateMapRef.current = sessionStateMap;
   }, [sessionStateMap]);
+
+  const loadedSessionIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          Object.values(sessionStateMap)
+            .flatMap((sessionState) => sessionState.sessions)
+            .map((session) => `${session.sessionId || ''}`.trim())
+            // 临时会话的运行态由本地 manager 维护，后端仅能查询已经落库的真实会话。
+            .filter((loadedSessionId) => loadedSessionId && !loadedSessionId.startsWith('pending_'))
+        )
+      ).sort(),
+    [sessionStateMap]
+  );
+  const loadedSessionIdsKey = loadedSessionIds.join(',');
+
+  const syncRunningStatus = useCallback(async () => {
+    if (!loadedSessionIdsKey) return;
+
+    try {
+      const runningInfoList: RunningChatInfo[] = await getChatRunningStatus({
+        sessionIds: loadedSessionIdsKey.split(','),
+      });
+      hydrateRunningSessions(runningInfoList || []);
+    } catch (error) {
+      console.error('Failed to synchronize workspace session running status:', error);
+    }
+  }, [loadedSessionIdsKey]);
+
+  const updateDisplayedRunningSessions = useCallback(() => {
+    const nextRunningSessionIdsKey = Object.values(sessionStateMapRef.current)
+      .flatMap((sessionState) => sessionState.sessions)
+      .map((session) => `${session.sessionId || ''}`.trim())
+      .filter((loadedSessionId) => loadedSessionId && chatSessionRuntimeManager.isSessionRunning(loadedSessionId))
+      .sort()
+      .join(',');
+    if (nextRunningSessionIdsKey === runningSessionIdsKeyRef.current) return;
+
+    runningSessionIdsKeyRef.current = nextRunningSessionIdsKey;
+    setRuntimeVersion((version) => version + 1);
+  }, []);
+
+  useEffect(() => {
+    // 流式游标也会触发 manager 通知，仅在可见会话的 running 集合变化时刷新侧边栏。
+    return chatSessionRuntimeManager.subscribe(updateDisplayedRunningSessions);
+  }, [updateDisplayedRunningSessions]);
+
+  useEffect(() => {
+    updateDisplayedRunningSessions();
+  }, [sessionStateMap, updateDisplayedRunningSessions]);
+
+  useEffect(() => {
+    void syncRunningStatus();
+  }, [syncRunningStatus]);
+
+  useEffect(() => {
+    if (!loadedSessionIdsKey) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void syncRunningStatus();
+      }
+    };
+    const handleOnline = () => {
+      void syncRunningStatus();
+    };
+
+    window.addEventListener('online', handleOnline);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const timer = window.setInterval(() => void syncRunningStatus(), 30000);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.clearInterval(timer);
+    };
+  }, [loadedSessionIdsKey, syncRunningStatus]);
 
   const updateProjectSessionState = useCallback((projectId: string, patch: Partial<ProjectSessionState>) => {
     const currentState = sessionStateMapRef.current[projectId] || createEmptySessionState();
@@ -636,7 +718,11 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
                 {session.sessionName || intl.formatMessage({ id: 'workspaceSider.newSession' })}
               </span>
               <span className={styles.sessionTime}>
-                {formatSessionTime(session.updateTime || session.createTime, intl)}
+                {chatSessionRuntimeManager.isSessionRunning(`${session.sessionId}`) ? (
+                  <LoadingOutlined />
+                ) : (
+                  formatSessionTime(session.updateTime || session.createTime, intl)
+                )}
               </span>
             </button>
             <WorkspaceSessionActions
