@@ -101,23 +101,12 @@ export type RunExecutionStage =
   | "LEADER_SYNTHESIZING"
   | "SETTLED";
 
-export const THINKING_LEVELS = [
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-] as const;
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 export function isThinkingLevel(value: unknown): value is ThinkingLevel {
-  return (
-    typeof value === "string" &&
-    (THINKING_LEVELS as readonly string[]).includes(value)
-  );
+  return typeof value === "string" && (THINKING_LEVELS as readonly string[]).includes(value);
 }
 
 /** 一次用户请求的输入、授权快照和执行状态。 */
@@ -231,6 +220,11 @@ export type RunEventType =
   | "leader.delta"
   | "delegation.started"
   | "delegation.progress"
+  | "delegation.display.progress"
+  | "delegation.tool.started"
+  | "delegation.tool.detail"
+  | "delegation.tool.completed"
+  | "delegation.tool.failed"
   | "delegation.output.delta"
   | "delegation.completed"
   | "delegation.failed"
@@ -250,11 +244,7 @@ export interface RunEvent {
 }
 
 /** Run 的不可逆终态集合。 */
-export const TERMINAL_RUN_STATUSES = new Set<RunStatus>([
-  "COMPLETED",
-  "FAILED",
-  "CANCELLED",
-]);
+export const TERMINAL_RUN_STATUSES = new Set<RunStatus>(["COMPLETED", "FAILED", "CANCELLED"]);
 
 /** Delegation 的不可逆终态集合。 */
 export const TERMINAL_DELEGATION_STATUSES = new Set<DelegationStatus>([

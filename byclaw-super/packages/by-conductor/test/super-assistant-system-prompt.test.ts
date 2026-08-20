@@ -23,10 +23,22 @@ describe("SUPER_ASSISTANT_SYSTEM_PROMPT", () => {
       "apply the Mandatory Task Triage again to that question",
     );
     expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
-      "ask the user the minimum necessary question",
+      "use askUserQuestion to ask the user the minimum necessary structured question",
     );
     expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
       "Never guess or make the decision without the user's confirmation.",
+    );
+  });
+
+  it("uses structured clarification and lets the user choose between similar employees", () => {
+    expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
+      "use askUserQuestion to ask the minimum necessary structured questions",
+    );
+    expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
+      "two or more authorized digital employees have similar capabilities",
+    );
+    expect(SUPER_ASSISTANT_SYSTEM_PROMPT).toContain(
+      "let the user choose the digital employee before delegating",
     );
   });
 

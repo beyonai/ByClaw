@@ -334,6 +334,9 @@ describe("OrchestratorContextCompiler", () => {
     expect(compiled.stableSystemPrompt).toContain(
       "You are an expert-team leader whose only job is orchestration.",
     );
+    expect(compiled.stableSystemPrompt).toContain(
+      "use askUserQuestion to ask the minimum necessary structured questions",
+    );
     expect(compiled.stableSystemPrompt).toContain("优先安排交叉复核。");
     expect(compiled.systemPrompt).not.toContain("ByClaw Super Assistant");
     expect(compiled.dynamicSystemContext).toContain('"role":"数据复核"');
