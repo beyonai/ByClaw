@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.state.domain.artifact.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.iwhalecloud.byai.manager.mapper.artifact.ArtifactMapper;
+import com.iwhalecloud.byai.manager.mapper.artifact.ArtifactDataRecordMapper;
 import com.iwhalecloud.byai.state.domain.artifact.model.ArtifactRecord;
 import com.iwhalecloud.byai.state.domain.artifact.model.ArtifactStatus;
 import com.iwhalecloud.byai.state.domain.artifact.storage.ArtifactStoragePort;
@@ -22,10 +23,13 @@ public class ArtifactCleanupService {
 
     private final ArtifactMapper artifactMapper;
     private final ArtifactStoragePort storage;
+    private final ArtifactDataRecordMapper dataRecordMapper;
 
-    public ArtifactCleanupService(ArtifactMapper artifactMapper, ArtifactStoragePort storage) {
+    public ArtifactCleanupService(ArtifactMapper artifactMapper, ArtifactStoragePort storage,
+        ArtifactDataRecordMapper dataRecordMapper) {
         this.artifactMapper = artifactMapper;
         this.storage = storage;
+        this.dataRecordMapper = dataRecordMapper;
     }
 
     @Async
@@ -83,6 +87,7 @@ public class ArtifactCleanupService {
     private void cleanAndMarkDeleted(ArtifactRecord record) {
         try {
             storage.deletePrefix(record.getStorageType(), record.getStorageRoot(), record.getStoragePrefix());
+            dataRecordMapper.deleteByArtifactId(record.getArtifactId());
             artifactMapper.update(null, new LambdaUpdateWrapper<ArtifactRecord>()
                 .eq(ArtifactRecord::getArtifactId, record.getArtifactId())
                 .eq(ArtifactRecord::getStatus, ArtifactStatus.DELETING.name())

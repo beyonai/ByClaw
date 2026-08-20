@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.state.common.filter;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import com.iwhalecloud.byai.common.constants.staticdata.RedisConfig;
 import com.iwhalecloud.byai.common.ecrypt.MD5Util;
@@ -52,11 +53,17 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
 
     private static final String ARTIFACT_UPLOAD_PATH = "/open/api/v1/artifacts";
 
+    private static final Pattern ARTIFACT_DATA_OWNER_PATH = Pattern.compile(
+        ".*/open/api/v1/artifacts/[^/]+/data-records(?:/[^/]+)?/?$");
+
     @org.springframework.beans.factory.annotation.Value("${artifact.preview.path-prefix:/artifact-preview}")
     private String artifactPreviewPathPrefix;
 
     @org.springframework.beans.factory.annotation.Value("${artifact.download.path-prefix:/artifact-download}")
     private String artifactDownloadPathPrefix;
+
+    @org.springframework.beans.factory.annotation.Value("${artifact.data.path-prefix:/artifact-data}")
+    private String artifactDataPathPrefix;
 
 
     public static final String HEADER_SIGNATURE = "x-signature-value";
@@ -103,8 +110,9 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
-        // 沙箱上传使用Beyond-Token，匿名预览使用能力URL，二者都不持有门户签名盐。
-        if (this.isArtifactUpload(request) || this.isArtifactCapabilityRequest(request)) {
+        // 沙箱上传与数据访问使用Beyond-Token，匿名预览与数据访问使用能力URL，调用方都不持有门户签名盐。
+        if (this.isArtifactUpload(request) || this.isArtifactDataOwnerRequest(request)
+            || this.isArtifactCapabilityRequest(request)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -210,13 +218,27 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
             && endsWithPath(request.getRequestURI(), ARTIFACT_UPLOAD_PATH);
     }
 
-    private boolean isArtifactCapabilityRequest(HttpServletRequest request) {
+    private boolean isArtifactDataOwnerRequest(HttpServletRequest request) {
         if (request == null || !("GET".equalsIgnoreCase(request.getMethod())
-            || "HEAD".equalsIgnoreCase(request.getMethod()))) {
+            || "POST".equalsIgnoreCase(request.getMethod())
+            || "PUT".equalsIgnoreCase(request.getMethod()))) {
             return false;
         }
-        return matchesConfiguredPrefix(request, artifactPreviewPathPrefix)
-            || matchesConfiguredPrefix(request, artifactDownloadPathPrefix);
+        return ARTIFACT_DATA_OWNER_PATH.matcher(StringUtils.defaultString(request.getRequestURI())).matches();
+    }
+
+    private boolean isArtifactCapabilityRequest(HttpServletRequest request) {
+        if (request == null) {
+            return false;
+        }
+        if (("GET".equalsIgnoreCase(request.getMethod()) || "POST".equalsIgnoreCase(request.getMethod())
+            || "PUT".equalsIgnoreCase(request.getMethod()))
+            && matchesConfiguredPrefix(request, artifactDataPathPrefix)) {
+            return true;
+        }
+        return ("GET".equalsIgnoreCase(request.getMethod()) || "HEAD".equalsIgnoreCase(request.getMethod()))
+            && (matchesConfiguredPrefix(request, artifactPreviewPathPrefix)
+                || matchesConfiguredPrefix(request, artifactDownloadPathPrefix));
     }
 
     private boolean matchesConfiguredPrefix(HttpServletRequest request, String prefix) {

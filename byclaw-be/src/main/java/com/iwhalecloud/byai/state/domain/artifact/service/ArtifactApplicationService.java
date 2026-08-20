@@ -142,6 +142,18 @@ public class ArtifactApplicationService {
         cleanupService.deleteAsync(record.getArtifactId());
     }
 
+    public void requireOwnedDataAccessible(String artifactId) {
+        requireDataAccessible(requireOwned(artifactId));
+    }
+
+    public void requireCapabilityDataAccessible(String artifactId, String accessKey) {
+        ArtifactRecord record = resolveCapability(artifactId, accessKey);
+        if (record == null) {
+            throw new IllegalArgumentException("Artifact不存在或访问凭证无效");
+        }
+        requireDataAccessible(record);
+    }
+
     public ArtifactContent resolvePreview(String artifactId, String accessKey, String requestedPath) {
         ArtifactRecord record = resolveCapability(artifactId, accessKey);
         if (record == null || ArtifactKind.DOWNLOAD_ONLY.name().equals(record.getKind())) {
@@ -241,6 +253,16 @@ public class ArtifactApplicationService {
             throw new IllegalArgumentException("Artifact不存在");
         }
         return record;
+    }
+
+    private void requireDataAccessible(ArtifactRecord record) {
+        boolean htmlArtifact = ArtifactKind.SITE.name().equals(record.getKind())
+            || ArtifactMediaTypeResolver.isHtml(record.getOriginalName());
+        if (!ArtifactStatus.READY.name().equals(record.getStatus())
+            || record.getExpiresAt() == null || !record.getExpiresAt().isAfter(LocalDateTime.now())
+            || !htmlArtifact) {
+            throw new IllegalArgumentException("Artifact不可写入数据");
+        }
     }
 
     private ArtifactDto toDto(ArtifactRecord record, String accessKey, List<String> warnings) {

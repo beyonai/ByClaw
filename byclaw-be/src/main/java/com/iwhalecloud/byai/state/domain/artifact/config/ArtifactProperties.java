@@ -33,6 +33,12 @@ public class ArtifactProperties {
     @Value("${artifact.download.path-prefix:/artifact-download}")
     private String downloadPathPrefix;
 
+    @Value("${artifact.data.path-prefix:/artifact-data}")
+    private String dataPathPrefix;
+
+    @Value("${artifact.data.max-record-bytes:65536}")
+    private int maxDataRecordBytes;
+
     @Value("${artifact.lifecycle.default-expires-seconds:604800}")
     private long defaultExpiresSeconds;
 

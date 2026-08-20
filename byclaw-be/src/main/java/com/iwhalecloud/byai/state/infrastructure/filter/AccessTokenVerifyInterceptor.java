@@ -57,11 +57,17 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
 
     private static final String ARTIFACT_UPLOAD_PATH = "/open/api/v1/artifacts";
 
+    private static final Pattern ARTIFACT_DATA_OWNER_PATH = Pattern.compile(
+        ".*/open/api/v1/artifacts/[^/]+/data-records(?:/[^/]+)?/?$");
+
     @Value("${artifact.preview.path-prefix:/artifact-preview}")
     private String artifactPreviewPathPrefix;
 
     @Value("${artifact.download.path-prefix:/artifact-download}")
     private String artifactDownloadPathPrefix;
+
+    @Value("${artifact.data.path-prefix:/artifact-data}")
+    private String artifactDataPathPrefix;
 
     @Value("${byai.access.urlpatterns:}")
     private String urlPattenrs;
@@ -197,6 +203,13 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                 }
                 return this.authenticateBeyondTokenOnlyRequest(request, "Artifact发布");
             }
+            // Agent 访问 Artifact 持久化数据时只能使用沙箱注入的 Beyond-Token，不允许 Cookie 覆盖身份。
+            if (this.isArtifactDataOwnerRequest(request)) {
+                if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+                    return true;
+                }
+                return this.authenticateBeyondTokenOnlyRequest(request, "Artifact数据访问");
+            }
             if (this.checkUrlByRegex(url)) {
                 return true;
             }
@@ -324,13 +337,27 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
             && endsWithConfiguredPath(request.getRequestURI(), ARTIFACT_UPLOAD_PATH);
     }
 
-    private boolean isArtifactCapabilityRequest(HttpServletRequest request) {
+    private boolean isArtifactDataOwnerRequest(HttpServletRequest request) {
         if (request == null || !("GET".equalsIgnoreCase(request.getMethod())
-            || "HEAD".equalsIgnoreCase(request.getMethod()))) {
+            || "POST".equalsIgnoreCase(request.getMethod())
+            || "PUT".equalsIgnoreCase(request.getMethod()))) {
             return false;
         }
-        return matchesConfiguredPrefix(request, artifactPreviewPathPrefix)
-            || matchesConfiguredPrefix(request, artifactDownloadPathPrefix);
+        return ARTIFACT_DATA_OWNER_PATH.matcher(StringUtils.defaultString(request.getRequestURI())).matches();
+    }
+
+    private boolean isArtifactCapabilityRequest(HttpServletRequest request) {
+        if (request == null) {
+            return false;
+        }
+        if (("GET".equalsIgnoreCase(request.getMethod()) || "POST".equalsIgnoreCase(request.getMethod())
+            || "PUT".equalsIgnoreCase(request.getMethod()))
+            && matchesConfiguredPrefix(request, artifactDataPathPrefix)) {
+            return true;
+        }
+        return ("GET".equalsIgnoreCase(request.getMethod()) || "HEAD".equalsIgnoreCase(request.getMethod()))
+            && (matchesConfiguredPrefix(request, artifactPreviewPathPrefix)
+                || matchesConfiguredPrefix(request, artifactDownloadPathPrefix));
     }
 
     private boolean endsWithConfiguredPath(String path, String expectedPath) {

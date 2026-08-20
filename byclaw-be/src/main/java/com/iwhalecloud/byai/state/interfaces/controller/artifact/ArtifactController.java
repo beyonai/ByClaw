@@ -1,9 +1,14 @@
 package com.iwhalecloud.byai.state.interfaces.controller.artifact;
 
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
+import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDataCreateRequest;
+import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDataRecordDto;
+import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDataUpdateRequest;
 import com.iwhalecloud.byai.state.domain.artifact.dto.ArtifactDto;
 import com.iwhalecloud.byai.state.domain.artifact.model.ArtifactPublishMode;
 import com.iwhalecloud.byai.state.domain.artifact.service.ArtifactApplicationService;
+import com.iwhalecloud.byai.state.domain.artifact.service.ArtifactDataRecordService;
+import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.MediaType;
@@ -11,6 +16,8 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -26,9 +33,12 @@ import org.springframework.web.multipart.MultipartFile;
 public class ArtifactController {
 
     private final ArtifactApplicationService artifactApplicationService;
+    private final ArtifactDataRecordService artifactDataRecordService;
 
-    public ArtifactController(ArtifactApplicationService artifactApplicationService) {
+    public ArtifactController(ArtifactApplicationService artifactApplicationService,
+        ArtifactDataRecordService artifactDataRecordService) {
         this.artifactApplicationService = artifactApplicationService;
+        this.artifactDataRecordService = artifactDataRecordService;
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
@@ -56,5 +66,26 @@ public class ArtifactController {
     public ResponseUtil<Void> delete(@PathVariable("artifactId") String artifactId) {
         artifactApplicationService.deleteOwned(artifactId);
         return ResponseUtil.successResponse();
+    }
+
+    @PostMapping("/{artifactId}/data-records")
+    @Operation(summary = "为本人Artifact创建JSON数据记录")
+    public ResponseUtil<ArtifactDataRecordDto> createDataRecord(@PathVariable("artifactId") String artifactId,
+        @Valid @RequestBody ArtifactDataCreateRequest request) {
+        return ResponseUtil.successResponse(artifactDataRecordService.createOwned(artifactId, request));
+    }
+
+    @GetMapping("/{artifactId}/data-records/{recordKey}")
+    @Operation(summary = "按recordKey查询本人Artifact数据记录")
+    public ResponseUtil<ArtifactDataRecordDto> getDataRecord(@PathVariable("artifactId") String artifactId,
+        @PathVariable("recordKey") String recordKey) {
+        return ResponseUtil.successResponse(artifactDataRecordService.getOwned(artifactId, recordKey));
+    }
+
+    @PutMapping("/{artifactId}/data-records/{recordKey}")
+    @Operation(summary = "按recordKey更新本人Artifact数据记录")
+    public ResponseUtil<ArtifactDataRecordDto> updateDataRecord(@PathVariable("artifactId") String artifactId,
+        @PathVariable("recordKey") String recordKey, @Valid @RequestBody ArtifactDataUpdateRequest request) {
+        return ResponseUtil.successResponse(artifactDataRecordService.updateOwned(artifactId, recordKey, request));
     }
 }
