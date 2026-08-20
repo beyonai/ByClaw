@@ -190,6 +190,49 @@ describe("resolveImageModel", () => {
     });
   });
 
+  it("parses provider-specific extendParam without exposing an invalid JSON shape", async () => {
+    const configured = model({
+      instanceId: "22",
+      isDefault: 0,
+      providerName: "COMFYUI",
+      modelProtocol: "COMFY_IMAGE",
+      instanceParam: {
+        providerName: "COMFYUI",
+        modelProtocol: "COMFY_IMAGE",
+        extendParam: JSON.stringify({
+          mode: "local",
+          workflowPath: "/workspace/comfy-image.json",
+          promptNodeId: "6",
+        }),
+      },
+    });
+    const malformed = model({
+      instanceId: "33",
+      isDefault: 0,
+      providerName: "OPENAI",
+      modelProtocol: "OPENAI_IMAGE",
+      instanceParam: {
+        providerName: "OPENAI",
+        modelProtocol: "OPENAI_IMAGE",
+        extendParam: "[]",
+      },
+    });
+    const store = createMemoryStore({ models: { "22": configured, "33": malformed } });
+
+    await expect(
+      resolveImageModel({ employee: { imageModelId: "22" }, store }),
+    ).resolves.toMatchObject({
+      extendParam: {
+        mode: "local",
+        workflowPath: "/workspace/comfy-image.json",
+        promptNodeId: "6",
+      },
+    });
+    await expect(
+      resolveImageModel({ employee: { imageModelId: "33" }, store }),
+    ).resolves.toMatchObject({ extendParam: {} });
+  });
+
   it("reads the employee and model again on every call so Redis changes hot-switch the model", async () => {
     const employees: Record<string, Record<string, unknown>> = {
       "employee-1": { imageModelId: "22" },

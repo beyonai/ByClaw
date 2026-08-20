@@ -7,6 +7,7 @@ export type ResolvedImageModel = {
   modelProtocol: string;
   endpoint: string;
   apiToken: string;
+  extendParam: Record<string, unknown>;
   source: ImageModelSource;
   timeout: number;
 };

@@ -15,6 +15,7 @@ describe("openclaw plugin manifest", () => {
     expect(manifest.contracts?.tools).toEqual(["baiying_call"]);
     expect(manifest.contracts?.imageGenerationProviders).toEqual([
       "baiying-redis-image",
+      "volcengine",
     ]);
     expect(
       manifest.imageGenerationProviderMetadata?.["baiying-redis-image"]

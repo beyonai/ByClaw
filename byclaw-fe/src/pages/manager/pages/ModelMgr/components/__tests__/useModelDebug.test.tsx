@@ -15,6 +15,32 @@ import { message } from 'antd';
 import useModelDebug from '../useModelDebug';
 
 describe('useModelDebug image generation validation', () => {
+  it('does not dispatch a non-MiniMax model into the MiniMax-only manager debug endpoint', () => {
+    const runDebugRequest = jest.fn().mockResolvedValue({});
+    const { result } = renderHook(() =>
+      useModelDebug({
+        intl: {
+          formatMessage: ({ id }) => id,
+        },
+        open: true,
+        currentModelType: 'IMAGE_GENERATION',
+        currentProviderName: 'VOLCENGINE',
+        getCurrentModelId: () => 'image-model-1',
+        runDebugRequest,
+      })
+    );
+
+    act(() => {
+      result.current.setDebugInput('{"param":{"prompt":"whale"}}');
+    });
+    act(() => {
+      result.current.runDebug();
+    });
+
+    expect(runDebugRequest).not.toHaveBeenCalled();
+    expect(message.warning).toHaveBeenCalledWith('modelMgr.modal.imageDebugViaOpenClaw');
+  });
+
   it('does not dispatch an image debug request when param.prompt is blank', () => {
     const runDebugRequest = jest.fn().mockResolvedValue({});
     const { result } = renderHook(() =>

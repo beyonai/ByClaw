@@ -14,6 +14,7 @@ import {
   formatReasoningEffortMapText,
   getDefaultFormValues,
   getImageGenerationDefaultFormValues,
+  getImageProviderTransitionFormValues,
   getModelTypeTransitionFormValues,
   normalizeModelType,
 } from './modelFormUtils';
@@ -127,6 +128,7 @@ const SharedModelFormModal: React.FC<Props> = ({
     intl,
     open,
     currentModelType,
+    currentProviderName,
     getCurrentModelId,
     allowRerankTable,
     formatDebugError,
@@ -381,6 +383,15 @@ const SharedModelFormModal: React.FC<Props> = ({
       form.setFieldsValue(modelTypeDefaults);
       syncedValues = { ...allValues, ...modelTypeDefaults };
       lastModelTypeForSyncRef.current = targetModelType;
+    }
+
+    if (
+      changedKeys.includes('providerName') &&
+      normalizeModelType(syncedValues?.modelType) === 'IMAGE_GENERATION'
+    ) {
+      const providerDefaults = getImageProviderTransitionFormValues(changedValues?.providerName);
+      form.setFieldsValue(providerDefaults);
+      syncedValues = { ...syncedValues, ...providerDefaults };
     }
 
     if (debugInputMode !== 'auto') return;

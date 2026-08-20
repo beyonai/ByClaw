@@ -1,3 +1,8 @@
+import {
+  getImageGenerationProviderByProtocol,
+  getImageProviderFormValues,
+} from './imageGenerationProviders';
+
 export type DebugInputMode = 'template' | 'auto';
 
 export type ModelTagItem = {
@@ -20,10 +25,7 @@ export const CONTEXT_TOKENS_CONFIG = {
 export const DEFAULT_MAX_TOKENS = 1024 * 64;
 export const MIN_MAX_TOKENS = 65536;
 export const IMAGE_GENERATION_DEFAULTS = {
-  providerName: 'MINIMAX',
-  modelProtocol: 'MINIMAX_IMAGE',
-  apiEndpoint: 'https://api.minimaxi.com/v1/image_generation',
-  modelCode: 'image-01',
+  ...getImageProviderFormValues('MINIMAX'),
   prompt: '',
   aspectRatio: '1:1',
   imageCount: 1,
@@ -89,8 +91,13 @@ export function getDefaultLlmDebugSuffix(modelProtocol?: any) {
 export function getApiEndpointPlaceholder(modelProtocol?: any) {
   const protocol = `${modelProtocol ?? 'OpenAI'}`.trim().toLowerCase();
   if (protocol === 'anthropic') return 'https://api.example.com/anthropic';
-  if (protocol === 'minimax_image') return IMAGE_GENERATION_DEFAULTS.apiEndpoint;
+  const imageProvider = getImageGenerationProviderByProtocol(modelProtocol);
+  if (imageProvider) return imageProvider.apiEndpoint;
   return 'https://api.example.com/v1';
+}
+
+export function getImageProviderTransitionFormValues(providerName?: any) {
+  return getImageProviderFormValues(providerName);
 }
 
 export function getImageGenerationDefaultFormValues() {

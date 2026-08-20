@@ -7,7 +7,7 @@
   "providers": ["baiying-aimodel"],
   "contracts": {
     "tools": ["baiying_call"],
-    "imageGenerationProviders": ["baiying-redis-image"]
+    "imageGenerationProviders": ["baiying-redis-image", "volcengine"]
   },
   "imageGenerationProviderMetadata": {
     "baiying-redis-image": {

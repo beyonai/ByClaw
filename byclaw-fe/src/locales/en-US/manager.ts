@@ -454,6 +454,8 @@ export default {
   'modelMgr.modal.imagePrompt': 'Image prompt',
   'modelMgr.modal.imagePromptPlaceholder': 'Describe the image to generate',
   'modelMgr.modal.imagePromptRequired': 'Please enter an image prompt',
+  'modelMgr.modal.imageDebugViaOpenClaw':
+    'Save this provider and validate it through digital employee image generation',
   'modelMgr.modal.aspectRatio': 'Aspect ratio',
   'modelMgr.modal.imageCount': 'Image count',
   'modelMgr.modal.responseFormat': 'Response format',

@@ -17,6 +17,7 @@ import {
   type ImageModelCache,
 } from "./image-model-selector.js";
 import type { ResolvedImageModel } from "./types.js";
+import { buildVolcengineImageGenerationProvider } from "./volcengine-image-provider.js";
 
 export const BAIYING_IMAGE_PROVIDER_ID = "baiying-redis-image";
 export const BAIYING_IMAGE_MODEL_REF = `${BAIYING_IMAGE_PROVIDER_ID}/dynamic`;
@@ -35,21 +36,29 @@ type ImageToolHookContext = {
   agentId?: string;
 };
 
-const NATIVE_PROVIDER_BY_NAME: Record<string, string> = {
-  CHATGPT: "openai",
-  COMFY: "comfy",
-  COMFYUI: "comfy",
-  DEEPINFRA: "deepinfra",
-  FAL: "fal",
-  GEMINI: "google",
-  GOOGLE: "google",
-  LITELLM: "litellm",
-  MICROSOFT_FOUNDRY: "microsoft-foundry",
-  MINIMAX: "minimax",
-  OPENAI: "openai",
-  OPENROUTER: "openrouter",
-  VYDRA: "vydra",
-  XAI: "xai",
+const NATIVE_IMAGE_ROUTES: Record<
+  string,
+  { provider: string; protocols: readonly string[] }
+> = {
+  CHATGPT: { provider: "openai", protocols: ["OPENAI_IMAGE"] },
+  COMFY: { provider: "comfy", protocols: ["COMFY_IMAGE"] },
+  COMFYUI: { provider: "comfy", protocols: ["COMFY_IMAGE"] },
+  DEEPINFRA: { provider: "deepinfra", protocols: ["DEEPINFRA_IMAGE"] },
+  FAL: { provider: "fal", protocols: ["FAL_IMAGE"] },
+  GEMINI: { provider: "google", protocols: ["GOOGLE_IMAGE"] },
+  GOOGLE: { provider: "google", protocols: ["GOOGLE_IMAGE"] },
+  LITELLM: { provider: "litellm", protocols: ["LITELLM_IMAGE"] },
+  MICROSOFT_FOUNDRY: {
+    provider: "microsoft-foundry",
+    protocols: ["MICROSOFT_FOUNDRY_IMAGE"],
+  },
+  MINIMAX: { provider: "minimax", protocols: ["MINIMAX_IMAGE"] },
+  OPENAI: { provider: "openai", protocols: ["OPENAI_IMAGE"] },
+  OPENROUTER: { provider: "openrouter", protocols: ["OPENROUTER_IMAGE"] },
+  VYDRA: { provider: "vydra", protocols: ["VYDRA_IMAGE"] },
+  VOLCENGINE: { provider: "volcengine", protocols: ["VOLCENGINE_IMAGE"] },
+  DOUBAO: { provider: "volcengine", protocols: ["VOLCENGINE_IMAGE"] },
+  XAI: { provider: "xai", protocols: ["XAI_IMAGE"] },
 };
 
 function normalizedEnum(value: string): string {
@@ -59,20 +68,17 @@ function normalizedEnum(value: string): string {
 function resolveNativeProvider(model: ResolvedImageModel): string {
   const providerName = normalizedEnum(model.providerName);
   const protocol = normalizedEnum(model.modelProtocol);
-  if (providerName === "MINIMAX" && protocol !== "MINIMAX_IMAGE") {
-    throw new Error(`Unsupported image model route ${providerName}/${protocol}`);
-  }
   if (providerName === "QWEN") {
     if (protocol === "OPENAI_IMAGE" || protocol === "OPENAI_COMPATIBLE_IMAGE") {
       return "openai";
     }
     throw new Error(`Unsupported image model route ${providerName}/${protocol}`);
   }
-  const provider = NATIVE_PROVIDER_BY_NAME[providerName];
-  if (!provider) {
+  const route = NATIVE_IMAGE_ROUTES[providerName];
+  if (!route || !route.protocols.includes(protocol)) {
     throw new Error(`Unsupported image model route ${providerName}/${protocol}`);
   }
-  return provider;
+  return route.provider;
 }
 
 function stripKnownEndpointPath(rawEndpoint: string, provider: string): string {
@@ -100,6 +106,10 @@ function mergeNativeProviderConfig(params: {
   const existingProvider = existingProviders[params.provider];
   const existingPlugins = params.cfg.plugins;
   const existingEntry = existingPlugins?.entries?.[params.provider];
+  const existingPluginConfig =
+    existingEntry?.config && typeof existingEntry.config === "object"
+      ? existingEntry.config
+      : {};
   const allow = existingPlugins?.allow;
   return {
     ...params.cfg,
@@ -109,6 +119,7 @@ function mergeNativeProviderConfig(params: {
         ...existingProviders,
         [params.provider]: {
           ...existingProvider,
+          ...params.model.extendParam,
           apiKey: params.model.apiToken,
           auth: "api-key",
           baseUrl: stripKnownEndpointPath(params.model.endpoint, params.provider),
@@ -126,6 +137,16 @@ function mergeNativeProviderConfig(params: {
         [params.provider]: {
           ...existingEntry,
           enabled: true,
+          ...(params.provider === "comfy"
+            ? {
+                config: {
+                  ...existingPluginConfig,
+                  ...params.model.extendParam,
+                  baseUrl: params.model.endpoint,
+                  apiKey: params.model.apiToken,
+                },
+              }
+            : {}),
         },
       },
     },
@@ -311,6 +332,9 @@ export function registerBaiyingNativeImageRouting(params: {
       store: params.store,
       loadGenerateImage: params.loadGenerateImage,
     }),
+  );
+  params.api.registerImageGenerationProvider(
+    buildVolcengineImageGenerationProvider(),
   );
   params.api.on(
     "before_tool_call",

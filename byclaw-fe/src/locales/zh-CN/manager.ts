@@ -449,6 +449,7 @@ export default {
   'modelMgr.modal.imagePrompt': '图片提示词',
   'modelMgr.modal.imagePromptPlaceholder': '描述希望生成的图片',
   'modelMgr.modal.imagePromptRequired': '请输入图片提示词',
+  'modelMgr.modal.imageDebugViaOpenClaw': '该提供商请保存后通过数字员工图片生成能力验证',
   'modelMgr.modal.aspectRatio': '图片宽高比',
   'modelMgr.modal.imageCount': '生成数量',
   'modelMgr.modal.responseFormat': '响应格式',

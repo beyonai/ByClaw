@@ -2,6 +2,7 @@ import { message } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { hasImageGenerationPrompt, normalizeModelType } from './modelFormUtils';
 import { copyTextToClipboard } from '@/pages/manager/utils/copy';
+import { supportsManagerImageDebug } from './imageGenerationProviders';
 
 type IntlShape = {
   formatMessage: (descriptor: { id: string }, values?: Record<string, any>) => string;
@@ -11,6 +12,7 @@ type Params = {
   intl: IntlShape;
   open: boolean;
   currentModelType?: any;
+  currentProviderName?: any;
   getCurrentModelId: () => string | number | undefined;
   allowRerankTable?: boolean;
   formatDebugError?: (error: any) => string | undefined;
@@ -29,6 +31,7 @@ const useModelDebug = ({
   intl,
   open,
   currentModelType,
+  currentProviderName,
   getCurrentModelId,
   allowRerankTable = true,
   formatDebugError,
@@ -140,6 +143,10 @@ const useModelDebug = ({
     const currentType = normalizeModelType(currentModelType);
     if (currentType === 'IMAGE_GENERATION' && !hasImageGenerationPrompt(debugInput)) {
       message.warning(intl.formatMessage({ id: 'modelMgr.modal.imagePromptRequired' }));
+      return;
+    }
+    if (currentType === 'IMAGE_GENERATION' && !supportsManagerImageDebug(currentProviderName)) {
+      message.warning(intl.formatMessage({ id: 'modelMgr.modal.imageDebugViaOpenClaw' }));
       return;
     }
     if (currentModelId === null || currentModelId === undefined || currentModelId === '') {
@@ -254,6 +261,7 @@ const useModelDebug = ({
   }, [
     abortDebug,
     currentModelType,
+    currentProviderName,
     debugInput,
     ensureTyping,
     formatDebugError,

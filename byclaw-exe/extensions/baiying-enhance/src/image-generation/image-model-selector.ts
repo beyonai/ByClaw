@@ -105,6 +105,17 @@ function plainRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function parseExtendParam(value: unknown): Record<string, unknown> {
+  if (typeof value === "string" && value.trim()) {
+    try {
+      return plainRecord(JSON.parse(value));
+    } catch {
+      return {};
+    }
+  }
+  return plainRecord(value);
+}
+
 function modelEnum(record: ModelDto, field: "providerName" | "modelProtocol"): string {
   const direct = nonEmptyString(record[field]);
   if (direct) {
@@ -154,6 +165,7 @@ function validateModel(params: {
     modelProtocol: protocol,
     endpoint,
     apiToken,
+    extendParam: parseExtendParam(instanceParam.extendParam),
     source: params.source,
     timeout: resolveTimeout(instanceParam),
   };

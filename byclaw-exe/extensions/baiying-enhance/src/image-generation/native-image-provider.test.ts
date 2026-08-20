@@ -25,6 +25,7 @@ function model(params: {
   providerName: string;
   modelProtocol: string;
   url: string;
+  extendParam?: Record<string, unknown>;
 }) {
   return {
     authToken: TEST_TOKEN,
@@ -33,6 +34,7 @@ function model(params: {
       providerName: params.providerName,
       modelProtocol: params.modelProtocol,
       readTimeoutSec: 120,
+      ...(params.extendParam ? { extendParam: JSON.stringify(params.extendParam) } : {}),
     },
     modelCode: params.code,
     providerName: params.providerName,
@@ -126,6 +128,7 @@ describe("Baiying native image provider", () => {
 
     expect(registeredProviders.map((provider) => provider.id)).toEqual([
       BAIYING_IMAGE_PROVIDER_ID,
+      "volcengine",
     ]);
     expect(registeredHooks.map((hook) => hook.name)).toEqual(["before_tool_call"]);
   });
@@ -207,6 +210,144 @@ describe("Baiying native image provider", () => {
     expect(first.model).toBe("minimax/image-01");
     expect(second.model).toBe("openai/gpt-image-1");
     expect(JSON.stringify([first, second])).not.toContain(TEST_TOKEN);
+  });
+
+  it.each([
+    ["COMFYUI", "COMFY_IMAGE", "comfy"],
+    ["DEEPINFRA", "DEEPINFRA_IMAGE", "deepinfra"],
+    ["FAL", "FAL_IMAGE", "fal"],
+    ["GOOGLE", "GOOGLE_IMAGE", "google"],
+    ["LITELLM", "LITELLM_IMAGE", "litellm"],
+    ["MICROSOFT_FOUNDRY", "MICROSOFT_FOUNDRY_IMAGE", "microsoft-foundry"],
+    ["MINIMAX", "MINIMAX_IMAGE", "minimax"],
+    ["OPENAI", "OPENAI_IMAGE", "openai"],
+    ["OPENROUTER", "OPENROUTER_IMAGE", "openrouter"],
+    ["VYDRA", "VYDRA_IMAGE", "vydra"],
+    ["XAI", "XAI_IMAGE", "xai"],
+    ["VOLCENGINE", "VOLCENGINE_IMAGE", "volcengine"],
+    ["DOUBAO", "VOLCENGINE_IMAGE", "volcengine"],
+  ])("routes %s/%s to the OpenClaw %s provider", async (providerName, modelProtocol, expectedProvider) => {
+    const registry = new AgentRegistryState();
+    registry.replaceAll([managedAgent()]);
+    const store = memoryStore({ imageModelId: "22" });
+    store.getHashJsonStrict = async ({ field }) => ({
+      status: "ok",
+      value: payload(
+        `byai:aimodel:config:${field}`,
+        model({
+          id: field,
+          code: "image-model",
+          providerName,
+          modelProtocol,
+          url: "https://images.example.com/v1",
+        }),
+      ),
+    });
+    const generateImage = vi.fn(async (params: Record<string, unknown>) => ({
+      images: [{ buffer: Buffer.from("image"), mimeType: "image/png" }],
+      provider: String(params.modelOverride).split("/")[0],
+      model: "image-model",
+      attempts: [],
+      ignoredOverrides: [],
+    }));
+    const provider = createBaiyingNativeImageProvider({
+      registry,
+      store,
+      loadGenerateImage: async () => generateImage,
+    });
+
+    await provider.generateImage(request());
+
+    expect(generateImage).toHaveBeenCalledWith(
+      expect.objectContaining({ modelOverride: `${expectedProvider}/image-model` }),
+    );
+  });
+
+  it("rejects a provider paired with another provider's image protocol before network access", async () => {
+    const registry = new AgentRegistryState();
+    registry.replaceAll([managedAgent()]);
+    const store = memoryStore({ imageModelId: "22" });
+    store.getHashJsonStrict = async ({ field }) => ({
+      status: "ok",
+      value: payload(
+        `byai:aimodel:config:${field}`,
+        model({
+          id: field,
+          code: "gpt-image-2",
+          providerName: "OPENAI",
+          modelProtocol: "GOOGLE_IMAGE",
+          url: "https://api.openai.com/v1",
+        }),
+      ),
+    });
+    const generateImage = vi.fn();
+    const provider = createBaiyingNativeImageProvider({
+      registry,
+      store,
+      loadGenerateImage: async () => generateImage,
+    });
+
+    await expect(provider.generateImage(request())).rejects.toThrow(
+      "Unsupported image model route OPENAI/GOOGLE_IMAGE",
+    );
+    expect(generateImage).not.toHaveBeenCalled();
+  });
+
+  it("injects ComfyUI workflow settings into the in-memory plugin config", async () => {
+    const registry = new AgentRegistryState();
+    registry.replaceAll([managedAgent()]);
+    const store = memoryStore({ imageModelId: "22" });
+    store.getHashJsonStrict = async ({ field }) => ({
+      status: "ok",
+      value: payload(
+        `byai:aimodel:config:${field}`,
+        model({
+          id: field,
+          code: "workflow",
+          providerName: "COMFYUI",
+          modelProtocol: "COMFY_IMAGE",
+          url: "http://127.0.0.1:8188",
+          extendParam: {
+            mode: "local",
+            workflowPath: "/workspace/comfy-image.json",
+            promptNodeId: "6",
+          },
+        }),
+      ),
+    });
+    const generateImage = vi.fn(async () => ({
+      images: [{ buffer: Buffer.from("image"), mimeType: "image/png" }],
+      provider: "comfy",
+      model: "workflow",
+      attempts: [],
+      ignoredOverrides: [],
+    }));
+    const provider = createBaiyingNativeImageProvider({
+      registry,
+      store,
+      loadGenerateImage: async () => generateImage,
+    });
+
+    await provider.generateImage(request());
+
+    expect(generateImage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cfg: expect.objectContaining({
+          plugins: expect.objectContaining({
+            entries: expect.objectContaining({
+              comfy: expect.objectContaining({
+                config: expect.objectContaining({
+                  mode: "local",
+                  baseUrl: "http://127.0.0.1:8188",
+                  workflowPath: "/workspace/comfy-image.json",
+                  promptNodeId: "6",
+                }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    );
   });
 
   it("rejects providers that OpenClaw cannot route without exposing the token", async () => {

@@ -17,6 +17,10 @@ import {
   getApiEndpointPlaceholder,
 } from './modelFormUtils';
 import styles from './ModelFormModal.module.less';
+import {
+  getImageGenerationProvider,
+  IMAGE_GENERATION_PROVIDER_OPTIONS,
+} from './imageGenerationProviders';
 
 const { TextArea } = Input;
 
@@ -105,15 +109,19 @@ const ModelFormFields: React.FC<Props> = ({
   const intl = useIntl();
   const currentModelProtocol = Form.useWatch('modelProtocol', form);
   const currentModelType = Form.useWatch('modelType', form);
+  const currentProviderName = Form.useWatch('providerName', form);
   const reasoningConfig = Form.useWatch('reasoningConfig', form) || {};
   const apiEndpointPlaceholder = useMemo(() => getApiEndpointPlaceholder(currentModelProtocol), [currentModelProtocol]);
   const isLlmModel = `${currentModelType ?? 'LLM'}`.trim().toUpperCase() === 'LLM';
   const isImageGenerationModel = `${currentModelType ?? 'LLM'}`.trim().toUpperCase() === 'IMAGE_GENERATION';
+  const currentImageProvider = getImageGenerationProvider(currentProviderName);
   const modelProtocolOptions = isImageGenerationModel
-    ? [{ label: 'MiniMax Image', value: 'MINIMAX_IMAGE' }]
+    ? currentImageProvider
+      ? [{ label: currentImageProvider.label, value: currentImageProvider.modelProtocol }]
+      : []
     : [...MODEL_PROTOCOL_OPTIONS].filter((item) => item.value !== 'MINIMAX_IMAGE');
   const providerOptions = isImageGenerationModel
-    ? [{ label: 'MiniMax', value: 'MINIMAX' }]
+    ? IMAGE_GENERATION_PROVIDER_OPTIONS
     : [
       { label: 'OpenAI', value: 'OpenAI' },
       { label: 'Anthropic', value: 'Anthropic' },
@@ -270,6 +278,7 @@ const ModelFormFields: React.FC<Props> = ({
           <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.modelProtocol' })} name="modelProtocol">
             <Select
               allowClear
+              disabled={isImageGenerationModel}
               placeholder={intl.formatMessage({ id: 'modelMgr.modal.modelProtocolPlaceholder' })}
               options={modelProtocolOptions}
             />
