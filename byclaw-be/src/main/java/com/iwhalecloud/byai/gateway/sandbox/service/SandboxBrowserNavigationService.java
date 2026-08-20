@@ -79,12 +79,18 @@ public class SandboxBrowserNavigationService {
 
         // 采集流程在扩展断开时会先恢复浏览器，账号登录沿用同样的恢复动作。
         post(buildEndpoint(sandbox, "/v1/browser/recover"), Map.of());
-        for (int attempt = 0; attempt < 10; attempt++) {
-            waitForRetry();
+        // 浏览器启动需要时间（约10-15秒），首次启动需要等待浏览器进程启动和扩展连接
+        try {
+            Thread.sleep(3000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        for (int attempt = 0; attempt < 20; attempt++) {
             response = post(commandEndpoint, command);
             if (isSuccessful(response)) {
                 return;
             }
+            waitForRetry();
         }
         log.warn("[SandboxBrowser] 浏览器导航失败，userCode={}，sandboxId={}，statusCode={}，error={}", userCode,
             sandboxId, response.statusCode(), response.body().get("error"));

@@ -2024,6 +2024,7 @@ export default {
   'projectSpace.operation.accountLogin.startFailed': 'Failed to start Remote Desktop. Try again',
   'projectSpace.operation.accountLogin.navigateFailed':
     'Failed to open the sign-in page. Open the platform manually in Remote Desktop',
+  'projectSpace.operation.accountLogin.navigateSuccess': 'Sign-in page opened',
   'projectSpace.operation.accountLogin.confirmFailed': 'Failed to save sign-in status. Confirm sign-in and retry',
   'projectSpace.operation.accountForm.addTitle': 'New account',
   'projectSpace.operation.accountForm.editTitle': 'Edit account',

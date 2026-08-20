@@ -104,11 +104,28 @@ export function useOperationAccountLogin(onLoggedIn?: () => void | Promise<void>
         });
         EventEmitter.emit('beyond-main-driver-message', { url: getVNCUrl(toStoreSandboxInfo(sandboxInfo)) });
         try {
-          await navigateSandboxBrowser({
-            sandboxId: sandboxInfo.sandboxId,
-            targetUrl: loginUrl,
-            sessionKey: `operation-account-${account.id}`,
-          });
+          // 首次登录时浏览器可能还在启动，导航失败后自动重试一次
+          let navigateSuccess = false;
+          try {
+            await navigateSandboxBrowser({
+              sandboxId: sandboxInfo.sandboxId,
+              targetUrl: loginUrl,
+              sessionKey: `operation-account-${account.id}`,
+            });
+            navigateSuccess = true;
+          } catch (firstError) {
+            // 首次失败，等待5秒后重试（给浏览器更多启动时间）
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            await navigateSandboxBrowser({
+              sandboxId: sandboxInfo.sandboxId,
+              targetUrl: loginUrl,
+              sessionKey: `operation-account-${account.id}`,
+            });
+            navigateSuccess = true;
+          }
+          if (navigateSuccess) {
+            message.success(intl.formatMessage({ id: 'projectSpace.operation.accountLogin.navigateSuccess' }));
+          }
         } catch {
           // 导航失败时保留远程桌面，用户仍可在沙箱浏览器中手工进入对应平台完成登录。
           message.warning(intl.formatMessage({ id: 'projectSpace.operation.accountLogin.navigateFailed' }));
