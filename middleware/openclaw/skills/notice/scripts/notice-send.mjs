@@ -263,14 +263,19 @@ async function sendCommand(args) {
   }
 
   // 站内通知发送完成后，尝试发送钉钉消息（可选,失败不影响主流程）
-  const dingtalkResults = [];
+  // 逐人记账：一个人失败不能把整批计成 0，否则回执无法区分"全失败"和"部分失败"
+  const dingtalkFailures = [];
+  let dingtalkSent = 0;
   if (payload?.sendDingtalk === true && auth.userId) {
     const dingtalkBody = payload?.dingtalkBody || payload?.content || defaults.content;
     for (const detail of details) {
       if (!detail.targetId) continue; // 钉钉发送需要 targetId
       const result = await sendDingtalkMessage(auth.userId, detail.targetId, dingtalkBody);
-      if (!result.ok) {
-        dingtalkResults.push({ targetId: detail.targetId, error: result.message });
+      if (result.ok) {
+        dingtalkSent += 1;
+      }
+      else {
+        dingtalkFailures.push({ targetId: detail.targetId, error: result.message });
       }
     }
   }
@@ -281,8 +286,8 @@ async function sendCommand(args) {
     sent,
     batches: batches.length,
     failures,
-    dingtalkSent: dingtalkResults.length === 0 && payload?.sendDingtalk === true ? details.length : 0,
-    dingtalkFailures: dingtalkResults.length > 0 ? dingtalkResults : undefined,
+    dingtalkSent,
+    dingtalkFailures: dingtalkFailures.length > 0 ? dingtalkFailures : undefined,
   };
 }
 
