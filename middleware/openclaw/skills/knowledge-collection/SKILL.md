@@ -39,9 +39,12 @@ description: Use when the goal is to COLLECT and keep material rather than just 
   [references/online-search.md](references/online-search.md)）。
   **技能不是平台工具**：不得把技能名当作工具名调用（如 `online_search` 工具调用会报 "Tool not found"）；
   必须按其 SKILL.md 中的实际命令面（searxng_cli.py / exec / bycli 等）执行。未通读检索文档就执行检索视为违规；
-- **时序不可交换**：`init` 必须先于任何发现通道 —— `init` 要求目标目录不存在或为空，
-  而热度通道的发现快照目录 `.post-processing-inputs/` 由 `init` 自己以 0700 创建。
-  「先跑发现、后建会话」这个看似自然的顺序**必然失败**；
+- **时序不可交换（三条硬顺序，违反必失败）**：
+  ① `init` 必须先于任何发现通道 —— `init` 要求目标目录不存在或为空，而发现快照目录
+  `.post-processing-inputs/` 由 `init` 自己以 0700 创建，「先跑发现、后建会话」**必然失败**；
+  ② `collect` 必须先于 `branch --status done` —— `--sources` 的每个 URL 都要已在 inventory；
+  ③ `report` 必须先于 `cleanup` —— `mode=research` 未交付报告时清理只返回
+  `retention=true, reason=research-report-pending`，不删任何东西；
 - 深化研究的每次「抓取」：按下方「来源路由」委派来源执行器取得内容（公共网页一律 `bycli`）；
 - 每轮分支产物经 `collect` 登记为 inventory（`sourceSkill + sourceUrl` 去重），learnings/citations 引用
 -   inventory 的 `itemId`，杜绝「只抓 snippet 就当证据」与重复抓取；
@@ -66,6 +69,10 @@ description: Use when the goal is to COLLECT and keep material rather than just 
 顺序含义：**先 `collect` 再 `branch`**。没有已登记的正文，就不存在"这一层研究成功了"这回事——
 这条约束正是用来阻止「只抓 snippet 就当证据」的，不要试图绕过它去先登记分支。
 
+`collect` 自身还有一条文件前置：`markdownPath`（须在 `markdown/` 下）与 `sanitizedPath`
+（须在 `sanitized/items/` 下）指向的文件**必须都已存在**，否则报 `必须指向普通文件`。
+抓完正文后先落这两个文件再 `collect`，不要指望脚本替你生成净化副本。
+
 ### 抓取失败必须登记为 failed 分支
 
 抓取失败（超时、反爬、登录态失效、执行器报错、`--max-pages` 截断）时，**唯一的登记通道**是：
@@ -86,7 +93,9 @@ node scripts/knowledge-collection.mjs branch --session-dir <dir> \
 ### 报告正文必须披露失败
 
 `report` **不校验**正文内容，也不检查是否存在 failed 分支——它只校验分支数非零、深度达标、报告文件存在且非空。
-一份完全不提失败的报告能被正常放行。因此披露是**规范义务，不是脚本保障**：
+一份完全不提失败的报告能被正常放行。**这是本技能唯一靠自觉守住的环节**：其他前置（collect 先于 branch、
+citations 指向 itemId、report 先于 cleanup）脚本都会拦，只有「报告是否如实披露缺口」拦不住。
+因此披露是**规范义务，不是脚本保障**：
 
 - `report.md` 正文必须有**独立章节**披露失败与覆盖范围限制。章节标题可以是「覆盖缺口」「数据局限」「研究限制」
   或其他语义等价表述，不要求字面匹配，但必须单独成章（不得只在结论段落里一笔带过）。
@@ -178,10 +187,15 @@ node scripts/knowledge-collection.mjs branch --session-dir <dir> \
 加载并遵循 [references/site-crawl/SKILL.md](references/site-crawl/SKILL.md)：先用 sitemap.xml / llms.txt 发现全站 URL，
 再用 `crawl-seed` / `crawl-next` / `crawl-mark` 维护 frontier，取内容仍按「来源路由」委派 `bycli web read`。
 
-站点爬取是**抓取战术，不是独立链路**：用户给产品名而非文档站 URL（"分析 xxx 这个产品"）时，
-入口仍是上面的深化研究默认模式，文档站域名由 `plan` 的双信源初检查出，不得凭产品名猜域名；
-frontier 流程只用在"通读官方文档站"这类分支的抓取环节。
-用户已直接给出文档站 URL 且只要"爬完这个站"时，才用 `--mode collection` 单独跑。
+站点爬取是**抓取战术，不是独立链路**：frontier 流程只用在"通读官方文档站"这类抓取环节。
+
+`--mode` 按**最终报告由谁写**选，不按输入形态选：报告由本 Agent 写 → `research`；
+报告由下游写（外部消费）→ `collection`，此时不必跑 `plan` / `branch`，但筛选判断照做、
+选中理由随 `collect` 落盘到 `collectionFilters`。
+按「给产品名还是给 URL」判据会错判「给产品名但报告归下游」这类场景，
+把它推进 `research` 后 `cleanup` 只会返回 `reason=research-report-pending`。
+两种 mode 下文档站域名都由三信源初检查出，**不得凭产品名猜域名**。
+详见 [references/site-crawl/SKILL.md](references/site-crawl/SKILL.md)「模式判据」与「只要筛过的文章」两节。
 
 目标是**单个已知 URL** 时不需要 frontier，直接按常规采集链路执行。
 
