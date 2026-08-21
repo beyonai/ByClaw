@@ -2,19 +2,22 @@ import { isAbsolute, join } from 'node:path';
 import { createDingtalkAdapter } from './adapters/dingtalk.mjs';
 import { createFwsAdapter } from './adapters/fws.mjs';
 import { createWecomAdapter } from './adapters/wecom.mjs';
+import { createImaAdapter } from './adapters/ima.mjs';
 import { handledOutcome } from './shared/status-model.mjs';
 
-const SOURCES = new Set(['dingtalk', 'feishu', 'wecom']);
+const SOURCES = new Set(['dingtalk', 'feishu', 'wecom', 'ima']);
 const SENSITIVE_KEY = /(token|cookie|secret|password|authorization|credential|device[_-]?code)/i;
 const SEARCH_OPTIONS = {
   dingtalk: new Map([['workspace-ids', 'workspaceIds'], ['extensions', 'extensions'], ['folder-id', 'folderId']]),
   feishu: new Map([['space-id', 'spaceId'], ['file-types', 'fileTypes']]),
   wecom: new Map(),
+  ima: new Map([['kb', 'kb'], ['note-mode', 'noteMode']]),
 };
 const RESOURCE_OPTIONS = {
   dingtalk: new Map(),
   feishu: new Map([['minute-token', 'minuteToken']]),
   wecom: new Map(),
+  ima: new Map([['kb', 'kb']]),
 };
 
 function requiredString(values, key) {
@@ -183,6 +186,7 @@ export function parseResourceRequest(values) {
   const sourceOptions = parseOptions(values, source, RESOURCE_OPTIONS, ['source', 'output-dir', 'url']);
   const url = parseUrl(values);
   if (source === 'feishu' && !sourceOptions.minuteToken) throw new Error('--minute-token is required for source feishu');
+  if (source === 'ima' && !sourceOptions.kb) throw new Error('--kb is required for source ima URL import');
   return { source, outputDir: absoluteOutputDir(values), url, sourceOptions };
 }
 
@@ -201,6 +205,7 @@ function defaultAdapters() {
     dingtalk: createDingtalkAdapter({ bin: process.env.DWS_CLI_BIN || 'dws', env: process.env }),
     feishu: createFwsAdapter({ bin: process.env.LARK_CLI_BIN || 'lark-cli', env: process.env }),
     wecom: createWecomAdapter({ bin: process.env.WECOM_CLI_BIN || 'wecom-cli', env: process.env }),
+    ima: createImaAdapter({ bin: process.env.IMA_CLI_BIN || 'ima', env: process.env }),
   };
 }
 

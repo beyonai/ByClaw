@@ -112,9 +112,9 @@ await (async () => {
   assert.match(enterprise.json.usage, /enterprise (search|resource)/);
   assert.match(enterprise.json.defaults, /limit 50/);
   assert.match(enterprise.json.defaults, /concurrency 4/);
-  assert.match(enterprise.json.defaults, /search-all defaults: sources dingtalk,feishu,wecom/);
+  assert.match(enterprise.json.defaults, /search-all defaults: sources dingtalk,feishu,wecom,ima/);
   assert.match(enterprise.json.defaults, /search-all defaults:.*metadata-only true/);
-  assert.match(enterprise.json.commands.searchAll, /\[--sources dingtalk,feishu,wecom\]/);
+  assert.match(enterprise.json.commands.searchAll, /\[--sources dingtalk,feishu,wecom,ima\]/);
 
   const enterpriseSearchHelp = await runCli(['enterprise', 'search', '--help']);
   assert.equal(enterpriseSearchHelp.code, 0, enterpriseSearchHelp.stderr);

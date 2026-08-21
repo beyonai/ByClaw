@@ -21,7 +21,7 @@ description: Use when a user asks to collect, gather, acquire, crawl, scrape, ba
 调用一次 `enterprise search-all --query <主题> --output-root <绝对路径>` 补充企业候选。企业补充检索不替代公共互联网的三检索信源，
 两者都要执行；只有用户明确要求“只查互联网”“不要搜索企业来源”或语义等价的排除条件时，才跳过企业搜索。
 
-`search-all` 省略 `--sources` 时默认检查 `dingtalk,feishu,wecom`，省略 `--metadata-only` 时默认只登记每家前 50 条候选。
+`search-all` 省略 `--sources` 时默认检查 `dingtalk,feishu,wecom,ima`，省略 `--metadata-only` 时默认只登记每家前 50 条候选。
 DWS/FWS 候选须先按相关性选择，再用 `materialize` 采集正文；WeCom 当前会如实登记 `unsupported_capability`，不得声称已完成企微搜索。
 任一连接器鉴权失败、不可用、不支持或调用异常都只形成该连接器的覆盖缺口，不中断其他企业连接器或公共互联网采集；最终报告必须披露这些缺口。
 普通事实问答中的“获取答案/信息”不属于本规则，仍按上一节的查询边界处理。
@@ -153,7 +153,7 @@ citations 指向 itemId、report 先于 cleanup）脚本都会拦，只有「报
 
 ### `enterprise`: 企业来源的脚本封装
 
-企业来源既可按 URL 采集，也可搜索钉钉/飞书的知识库与云盘；复用 dws、fws、wecomcli 各自的既有鉴权：
+企业来源既可按 URL 采集，也可搜索钉钉/飞书/IMA 的知识库与云盘；复用 dws、fws、wecomcli、ima-skill 各自的既有鉴权：
 
 ```bash
 node scripts/knowledge-collection.mjs enterprise wecom-smartpage \
@@ -161,19 +161,22 @@ node scripts/knowledge-collection.mjs enterprise wecom-smartpage \
 node scripts/knowledge-collection.mjs enterprise feishu-minutes \
   --minute-token <真实 minute token> --url <妙记 URL> --output-dir <绝对路径>
 node scripts/knowledge-collection.mjs enterprise search \
-  --source dingtalk|feishu|wecom --query <查询> --output-dir <绝对路径> [--limit 50] [--metadata-only]
+  --source dingtalk|feishu|wecom|ima --query <查询> --output-dir <绝对路径> [--limit 50] [--metadata-only]
 node scripts/knowledge-collection.mjs enterprise search-all \
-  --query <查询> --output-root <绝对路径> [--sources dingtalk,feishu,wecom] [--limit 50] [--metadata-only true|false]
+  --query <查询> --output-root <绝对路径> [--sources dingtalk,feishu,wecom,ima] [--limit 50] [--metadata-only true|false]
 node scripts/knowledge-collection.mjs enterprise materialize \
-  --source dingtalk|feishu --session-dir <metadata-only 会话> --item-ids <候选ID[,候选ID]> --output-dir <新的绝对路径>
+  --source dingtalk|feishu|ima --session-dir <metadata-only 会话> --item-ids <候选ID[,候选ID]> --output-dir <新的绝对路径>
+node scripts/knowledge-collection.mjs enterprise resource \
+  --source ima --kb <知识库ID> --url <网页或微信文章 URL> --output-dir <绝对路径>
 node scripts/knowledge-collection.mjs enterprise resume-resource \
   --source wecom --session-dir <部分完成会话> --output-dir <新的绝对路径>
 ```
 
 `--output-dir` 必须是绝对路径；脚本自建 `raw/`、`markdown/`、`sanitized/items/` 并按 0700/0600 落权限，
 输出即标准 `collection-result.json`，可直接交给 `collect`。
-搜索默认处理前 50 条。单来源 `search` 默认采集正文，显式 `--metadata-only` 才只登记候选；`search-all` 默认三家来源且
+搜索默认处理前 50 条。单来源 `search` 默认采集正文，显式 `--metadata-only` 才只登记候选；`search-all` 默认四家来源且
 `metadata-only=true`，只登记候选，显式 `--metadata-only false` 才直接采集正文。选择候选后使用 `materialize` 续采，必须写到新的输出目录。
+IMA 的 `resource` 命令是显式 URL 导入写操作，必须指定 `--kb`；它只记录导入结果，不生成虚假的本地正文。
 单来源 `search` 的鉴权失败返回 `auth_required`，调用或落盘等致命错误返回非零。wecom 当前仅支持资源导出，搜索会返回 `unsupported_capability`。
 `search-all` 并发运行默认或显式指定的连接器：单个连接器认证失败、不可用、不支持或调用异常不会中断其余连接器；每家产物在 `<output-root>/<source>/`，汇总状态持久化为 `<output-root>/raw/search-all.json`。
 企业微信的文档、表格和智能页面导出在轮询中断后可用 `resume-resource` 从已登记 task ID 继续；智能表分页截断会保留已采集的标准正文，并以 `partial` 标记。
@@ -219,11 +222,12 @@ node scripts/knowledge-collection.mjs enterprise resume-resource \
 - 钉钉/DingTalk：加载并遵循 `dws` skill，并遵循 [DingTalk DWS 采集桥接](references/sources/dingtalk-dws.md)。
 - 飞书/Lark：加载并遵循 `fws` skill，并遵循 [Feishu 采集桥接](references/sources/feishu-fws.md)。
 - 企业微信/WeCom：加载并遵循 `wecomcli` skill，并遵循 [WeCom 采集桥接](references/sources/wecom-wecomcli.md)。
+- IMA 笔记与知识库：加载并遵循 `ima-skill` skill，并遵循 [IMA 采集桥接](references/sources/ima.md)。所有 IMA CLI 调用先做认证检查；外部 URL 导入必须明确目标知识库。
 
-企业来源（钉钉/飞书/企微）**没有兜底执行器**。`agent-reach.md` 的「一次 byCLI 兜底」只适用于公共互联网路由表中
+企业来源（钉钉/飞书/企微/IMA）**没有兜底执行器**。`agent-reach.md` 的「一次 byCLI 兜底」只适用于公共互联网路由表中
 明确给出兜底的行，**不得推广到企业来源**：对应 CLI 不可用或明确不支持时报告并停止，不得改用 byCLI、浏览器、
 `curl`、直接 HTTP/API 或通用网页抓取，也不得编造替代数据；权限拒绝、无效 ID 或数据不存在按执行器的错误语义如实报告。
-三家各自的完整边界见其桥接文档的「严禁降级」节。
+各家来源的完整边界见其桥接文档的「严禁降级」节。
 
 采集编排器自身不取内容，取内容一律委派来源执行器：不得使用 `web_fetch`、`curl`、`wget`、`requests` 或其他直接 HTTP 客户端绕过来源执行器。
 公开可读、静态页面、raw URL、纯文本或 Markdown 内容均不是例外。

@@ -4,7 +4,7 @@
 任何一次公共互联网取内容前，必须先按本文选定来源执行器，再委派该执行器；**采集编排器自身永不取内容**。
 
 角色固定为：采集编排器 `knowledge-collection`（本技能，含本路由层）、网站执行器 `bycli`、
-企业来源执行器 `dws` / `fws` / `wecomcli`、直接查询所有者（根 Agent）。
+企业来源执行器 `dws` / `fws` / `wecomcli` / `ima`、直接查询所有者（根 Agent）。
 路由层只选择执行器并接收其返回结果，持久化、产物契约、后处理、入库与用户追问全部归采集编排器。
 来源执行器不得询问「入库 / 知识整理 / 跳过」，也不得反向加载 `knowledge-collection`。
 
@@ -120,8 +120,19 @@ provider 诊断只是被动信息，不能替代企业业务 Skills。
 
 ## 企业来源不走本路由层
 
-企业来源（钉钉/飞书/企微）的采集、归档、批量搜索或入库按 SKILL.md「来源路由」节加载
-`dws` / `fws` / `wecomcli`，不得作为公共互联网任务交给 `bycli`。
+企业来源（钉钉/飞书/企微/IMA）的采集、归档、批量搜索或入库按 SKILL.md「来源路由」节加载
+`dws` / `fws` / `wecomcli` / `ima-skill`，不得作为公共互联网任务交给 `bycli`。
+
+IMA 企业渠道的命令面由 `ima-skill` 提供：
+
+```bash
+ima auth check --test --json
+ima note search --content "<query>" --json
+ima wiki search "<query>" --kb <knowledge-base-id> --json
+ima wiki import-urls --kb <knowledge-base-id> <url> --json
+```
+
+IMA 只允许通过 CLI 访问；认证失败时停止并提示重新连接，URL 导入属于显式知识库写操作，不得回退到 `bycli` 或直接 HTTP。
 
 ---
 

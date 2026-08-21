@@ -1315,6 +1315,7 @@ test('SOURCE_IDENTITY exposes the exact enterprise connector identities', async 
     dingtalk: { connector: 'dws', source: 'dws', backend: 'dws', sourceSkill: 'dws' },
     feishu: { connector: 'fws', source: 'fws', backend: 'lark-cli', sourceSkill: 'fws' },
     wecom: { connector: 'wecom', source: 'wecom', backend: 'wecom-cli', sourceSkill: 'wecomcli' },
+    ima: { connector: 'ima', source: 'ima', backend: 'ima', sourceSkill: 'ima-skill' },
   });
 });
 

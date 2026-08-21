@@ -88,6 +88,12 @@ test('parseResourceRequest enforces source-specific resource fields', () => {
   });
   assert.throws(() => parseResourceRequest({ source: 'wecom', 'output-dir': '/tmp/out', url: 'not-a-url' }));
   assert.throws(() => parseResourceRequest({ source: 'feishu', 'output-dir': '/tmp/out', url: 'https://example.feishu.cn/minutes/m1' }));
+  assert.deepEqual(parseResourceRequest({
+    source: 'ima', 'output-dir': '/tmp/ima', url: 'https://example.com/article', kb: 'kb-1',
+  }), {
+    source: 'ima', outputDir: '/tmp/ima', url: 'https://example.com/article', sourceOptions: { kb: 'kb-1' },
+  });
+  assert.throws(() => parseResourceRequest({ source: 'ima', 'output-dir': '/tmp/ima', url: 'https://example.com/article' }));
 });
 
 test('parseMaterializeRequest requires a new output session and explicit candidate IDs', () => {
@@ -111,6 +117,7 @@ test('parseSearchBatchRequests defaults to metadata-only sessions for every ente
     { source: 'dingtalk', query: 'quarterly plan', 'output-dir': '/tmp/enterprise-batch/dingtalk', limit: '10', 'metadata-only': true },
     { source: 'feishu', query: 'quarterly plan', 'output-dir': '/tmp/enterprise-batch/feishu', limit: '10', 'metadata-only': true },
     { source: 'wecom', query: 'quarterly plan', 'output-dir': '/tmp/enterprise-batch/wecom', limit: '10', 'metadata-only': true },
+    { source: 'ima', query: 'quarterly plan', 'output-dir': '/tmp/enterprise-batch/ima', limit: '10', 'metadata-only': true },
   ]);
 });
 
