@@ -19,7 +19,7 @@ import ProjectMembers from '../ProjectMembers';
 import ProjectRequirements from '../ProjectRequirements';
 import ProjectResources from '../ProjectResources';
 import ProjectTasks from '../ProjectTasks';
-import ProjectDefaultAgentPanel, { type ChatWithAgentTarget } from '../ProjectDefaultAgentPanel';
+import { type ChatWithAgentTarget } from '../ProjectDefaultAgentPanel';
 import Integration from '@/layout/sider/components/ProjectSpaceList/Integration';
 import ProjectRepositoryManager from '../ProjectRepositoryManager';
 import styles from '../../index.module.less';
@@ -172,14 +172,14 @@ const ProjectDetail: React.FC<Props> = ({
     () =>
       PROJECT_DETAIL_SECTIONS.filter((item) => {
         if (item.key === 'accounts') return isOperationProject;
-        if (item.key === 'digitalAgents' || item.key === 'integration') return isDevelopProject;
+        if (item.key === 'integration') return isDevelopProject;
         if (item.key === 'sessions') return false;
         if (item.key === 'members') return showMembersSection;
         if (item.key === 'requirements') return showRequirementsSection;
         return true;
       }).sort((left, right) => {
         const order = isDevelopProject
-          ? ['tasks', 'resources', 'digitalAgents', 'members', 'integration']
+          ? ['tasks', 'resources', 'members', 'integration']
           : isOperationProject
             ? ['accounts', 'requirements', 'tasks', 'resources', 'members']
             : ['tasks', 'resources'];
@@ -228,7 +228,7 @@ const ProjectDetail: React.FC<Props> = ({
     const currentTabHidden =
       activeSection === 'sessions' ||
       (!isOperationProject && activeSection === 'accounts') ||
-      (!isDevelopProject && (activeSection === 'digitalAgents' || activeSection === 'integration')) ||
+      (!isDevelopProject && activeSection === 'integration') ||
       (!showMembersSection && activeSection === 'members') ||
       (!showRequirementsSection && activeSection === 'requirements');
     if (currentTabHidden) {
@@ -288,15 +288,6 @@ const ProjectDetail: React.FC<Props> = ({
           }}
         />
       );
-    }
-    if (section === 'digitalAgents') {
-      return isDevelopProject ? (
-        <ProjectDefaultAgentPanel
-          projectId={Number(project.projectId)}
-          active
-          onChatWithAgent={onNewSession ? (target) => onNewSession(target) : undefined}
-        />
-      ) : null;
     }
     if (section === 'integration') {
       return isDevelopProject ? (
