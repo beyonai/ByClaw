@@ -54,6 +54,61 @@ describe("ConnectorRegistry", () => {
 });
 
 describe("DelegationService", () => {
+  it("logs delegation lifecycle and redacted child output previews", async () => {
+    const registry = new ConnectorRegistry();
+    registry.register(
+      fakeConnector(async function* () {
+        yield { type: "output_delta", text: "token=secret-value partial" };
+        yield completed("done");
+      }),
+    );
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const service = new DelegationService(
+      registry,
+      new InMemoryDelegationRepository(),
+      new InMemoryRunEventStore(),
+      1_000,
+      Date.now,
+      () => "delegation-observed",
+      logger,
+    );
+
+    const result = await service.execute({
+      session: {
+        id: "session-1",
+        owner: { userCode: "user-1" },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      runId: "run-observed",
+      agents: [agent],
+      agentId: agent.id,
+      task: "analyze",
+      metadata: { externalSessionId: "external-session-1" },
+      signal: new AbortController().signal,
+    });
+
+    expect(result.status).toBe("completed");
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: "delegation_event",
+        sessionId: "session-1",
+        externalSessionId: "external-session-1",
+        connectorEventType: "output_delta",
+        contentPreview: "token=[REDACTED] partial",
+      }),
+      "收到子 Agent 归一化事件",
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: "delegation_finished",
+        status: "COMPLETED",
+      }),
+      "子 Agent 委派结束",
+    );
+    expect(JSON.stringify(logger.info.mock.calls)).not.toContain("secret-value");
+  });
+
   it("does not dispatch a connector after its signal was already aborted", async () => {
     const start = vi.fn();
     const registry = new ConnectorRegistry();

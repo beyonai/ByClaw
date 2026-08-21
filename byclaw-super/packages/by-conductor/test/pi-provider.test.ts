@@ -123,16 +123,22 @@ describe("Pi provider registration", () => {
 
   it("removes developer from the final Leader provider request", async () => {
     let capturedPayload: Record<string, unknown> | undefined;
+    const info = vi.fn();
+    const warn = vi.fn();
+    const error = vi.fn();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
       async (request, init) => {
         const body =
           init?.body ??
           (request instanceof Request ? await request.clone().text() : undefined);
         capturedPayload = JSON.parse(String(body)) as Record<string, unknown>;
-        return new Response(JSON.stringify({ error: { message: "request captured" } }), {
-          status: 400,
-          headers: { "content-type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({ error: { message: "request captured token=secret-live-value" } }),
+          {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          },
+        );
       },
     );
 
@@ -156,12 +162,19 @@ describe("Pi provider registration", () => {
         },
         instanceId: "role-provider-test",
         sessionCacheDirectory: cacheDirectory,
+        logger: { info, warn, error },
       });
       const leader = await factory.create("internal-session-role-test");
 
       await expect(
         leader.run({
           message: "hello",
+          observability: {
+            runId: "run-role-test",
+            sessionId: "session-role-test",
+            externalSessionId: "external-session-role-test",
+            traceId: "trace-role-test",
+          },
           attachments: [],
           thinkingLevel: "medium",
           agents: [],
@@ -181,6 +194,33 @@ describe("Pi provider registration", () => {
       const input = capturedPayload?.input;
       expect(Array.isArray(input) ? input[0] : undefined).toMatchObject({ role: "system" });
       expect(JSON.stringify(capturedPayload)).not.toContain('"role":"developer"');
+      const structuredLogs = [...info.mock.calls, ...warn.mock.calls].map(
+        ([bindings]) => bindings as Record<string, unknown>,
+      );
+      expect(structuredLogs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            stage: "leader_run_started",
+            internalSessionId: "internal-session-role-test",
+            sessionId: "session-role-test",
+            externalSessionId: "external-session-role-test",
+          }),
+          expect.objectContaining({
+            stage: "leader_provider_request_started",
+            turnNumber: 1,
+          }),
+          expect.objectContaining({
+            stage: "leader_provider_request_finished",
+            stopReason: "error",
+          }),
+          expect.objectContaining({
+            stage: "leader_run_finished",
+            turnCount: 1,
+          }),
+        ]),
+      );
+      expect(JSON.stringify(structuredLogs)).not.toContain("secret-live-value");
+      expect(error).not.toHaveBeenCalled();
       await leader.dispose();
     } finally {
       fetchMock.mockRestore();

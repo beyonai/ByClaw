@@ -34,6 +34,7 @@ import {
 import { exportPiSessionCheckpoint } from "./pi-session-checkpoint.js";
 import { shouldPreflightCompact } from "./pi-compaction.js";
 import type { PiRuntimeProviderConfig } from "./pi-model-provider.js";
+import type { PiLeaderLogger } from "./pi-leader.js";
 import { adaptByclawMessageRoles } from "./pi-provider-adapters/byclaw-message-roles.js";
 import { adaptVolcengineArkResponsesPayload } from "./pi-provider-adapters/volcengine-ark.js";
 import type {
@@ -63,6 +64,8 @@ export class PiLeaderSession implements LeaderSession {
     private readonly session: AgentSession,
     contextRevision: number,
     private readonly compaction: PiLeaderCompactionConfig,
+    private readonly internalSessionId: string,
+    private readonly logger: PiLeaderLogger | undefined,
   ) {
     this.contextRevision = contextRevision;
   }
@@ -81,6 +84,8 @@ export class PiLeaderSession implements LeaderSession {
     requestAdapter: PiRuntimeProviderConfig["requestAdapter"],
     thinkingBudgets: PiRuntimeProviderConfig["thinkingBudgets"],
     compaction: PiLeaderCompactionConfig,
+    internalSessionId: string,
+    logger?: PiLeaderLogger,
   ): Promise<PiLeaderSession> {
     let wrapper: PiLeaderSession | undefined;
     const delegateAgent = defineTool({
@@ -411,7 +416,13 @@ export class PiLeaderSession implements LeaderSession {
       sessionManager,
       settingsManager,
     });
-    wrapper = new PiLeaderSession(created.session, contextRevision, compaction);
+    wrapper = new PiLeaderSession(
+      created.session,
+      contextRevision,
+      compaction,
+      internalSessionId,
+      logger,
+    );
     return wrapper;
   }
 
@@ -431,6 +442,17 @@ export class PiLeaderSession implements LeaderSession {
     let thinkingParser = new ThinkingStreamParser();
     let deltaWrites = Promise.resolve();
     let checkpointWrites = Promise.resolve();
+    const runStartedAt = Date.now();
+    let turnNumber = 0;
+    let turnStartedAt: number | undefined;
+    let streamStartedAt: number | undefined;
+    let firstTokenAt: number | undefined;
+    const toolStartedAt = new Map<string, number>();
+    const logBase = () => ({
+      component: "byclaw-super",
+      internalSessionId: this.internalSessionId,
+      ...(input.observability ?? {}),
+    });
     const forwardSegments = (segments: ThinkingStreamSegment[]) => {
       for (const segment of segments) {
         if (segment.kind === "answer") {
@@ -443,7 +465,40 @@ export class PiLeaderSession implements LeaderSession {
     };
     // 标准 thinking_delta 与普通文本中的 <think> 兼容格式都归一化为独立思考增量。
     const unsubscribe = this.session.subscribe((event) => {
-      if (event.type === "message_start" && event.message.role === "assistant") {
+      if (event.type === "agent_start") {
+        this.logger?.info(
+          { ...logBase(), stage: "leader_run_started" },
+          "Leader Run 开始",
+        );
+      } else if (event.type === "turn_start") {
+        turnNumber += 1;
+        turnStartedAt = Date.now();
+        streamStartedAt = undefined;
+        firstTokenAt = undefined;
+        this.logger?.info(
+          {
+            ...logBase(),
+            stage: "leader_provider_request_started",
+            turnNumber,
+            elapsedMs: turnStartedAt - runStartedAt,
+          },
+          "Leader 模型请求开始",
+        );
+      } else if (event.type === "message_start" && event.message.role === "assistant") {
+        streamStartedAt = Date.now();
+        this.logger?.info(
+          {
+            ...logBase(),
+            stage: "leader_provider_stream_started",
+            turnNumber,
+            provider: event.message.provider,
+            model: event.message.model,
+            timeToStreamMs:
+              turnStartedAt === undefined ? undefined : streamStartedAt - turnStartedAt,
+            elapsedMs: streamStartedAt - runStartedAt,
+          },
+          "Leader 模型响应流已建立",
+        );
         currentAssistant = "";
         sawTextDelta = false;
         thinkingParser = new ThinkingStreamParser();
@@ -451,6 +506,22 @@ export class PiLeaderSession implements LeaderSession {
         event.type === "message_update" &&
         event.assistantMessageEvent.type === "text_delta"
       ) {
+        if (firstTokenAt === undefined) {
+          firstTokenAt = Date.now();
+          this.logger?.info(
+            {
+              ...logBase(),
+              stage: "leader_provider_first_token",
+              turnNumber,
+              timeToFirstTokenMs:
+                turnStartedAt === undefined ? undefined : firstTokenAt - turnStartedAt,
+              streamToFirstTokenMs:
+                streamStartedAt === undefined ? undefined : firstTokenAt - streamStartedAt,
+              elapsedMs: firstTokenAt - runStartedAt,
+            },
+            "Leader 模型收到首个文本 Token",
+          );
+        }
         sawTextDelta = true;
         forwardSegments(thinkingParser.push(event.assistantMessageEvent.delta));
       } else if (
@@ -458,9 +529,55 @@ export class PiLeaderSession implements LeaderSession {
         event.assistantMessageEvent.type === "thinking_delta" &&
         input.onReasoningDelta
       ) {
+        if (firstTokenAt === undefined) {
+          firstTokenAt = Date.now();
+          this.logger?.info(
+            {
+              ...logBase(),
+              stage: "leader_provider_first_token",
+              turnNumber,
+              tokenKind: "thinking",
+              timeToFirstTokenMs:
+                turnStartedAt === undefined ? undefined : firstTokenAt - turnStartedAt,
+              streamToFirstTokenMs:
+                streamStartedAt === undefined ? undefined : firstTokenAt - streamStartedAt,
+              elapsedMs: firstTokenAt - runStartedAt,
+            },
+            "Leader 模型收到首个思考 Token",
+          );
+        }
         const delta = event.assistantMessageEvent.delta;
         deltaWrites = deltaWrites.then(() => input.onReasoningDelta?.(delta));
       } else if (event.type === "message_end" && event.message.role === "assistant") {
+        const messageEndedAt = Date.now();
+        const responseFields = {
+          ...logBase(),
+          stage: "leader_provider_request_finished",
+          turnNumber,
+          provider: event.message.provider,
+          model: event.message.model,
+          stopReason: event.message.stopReason,
+          durationMs:
+            turnStartedAt === undefined ? undefined : messageEndedAt - turnStartedAt,
+          timeToFirstTokenMs:
+            turnStartedAt === undefined || firstTokenAt === undefined
+              ? undefined
+              : firstTokenAt - turnStartedAt,
+          inputTokens: event.message.usage.input,
+          outputTokens: event.message.usage.output,
+          reasoningTokens: event.message.usage.reasoning,
+          cacheReadTokens: event.message.usage.cacheRead,
+          totalTokens: event.message.usage.totalTokens,
+          elapsedMs: messageEndedAt - runStartedAt,
+          ...(event.message.errorMessage
+            ? { error: leaderLogPreview(event.message.errorMessage) }
+            : {}),
+        };
+        if (event.message.stopReason === "error") {
+          this.logger?.warn(responseFields, "Leader 模型请求异常结束");
+        } else {
+          this.logger?.info(responseFields, "Leader 模型请求结束");
+        }
         const finalizedText = event.message.content
           .map((content) => (content.type === "text" ? content.text : ""))
           .join("");
@@ -477,6 +594,92 @@ export class PiLeaderSession implements LeaderSession {
         // 记录错误用于把空回答转为明确失败，避免静默成功。
         if (event.message.stopReason === "error") {
           modelErrorMessage = event.message.errorMessage || "model call failed";
+        }
+      } else if (event.type === "tool_execution_start") {
+        toolStartedAt.set(event.toolCallId, Date.now());
+        this.logger?.info(
+          {
+            ...logBase(),
+            stage: "leader_tool_started",
+            turnNumber,
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            elapsedMs: Date.now() - runStartedAt,
+          },
+          "Leader 工具开始",
+        );
+      } else if (event.type === "tool_execution_end") {
+        const endedAt = Date.now();
+        const startedAt = toolStartedAt.get(event.toolCallId);
+        toolStartedAt.delete(event.toolCallId);
+        const fields = {
+          ...logBase(),
+          stage: "leader_tool_finished",
+          turnNumber,
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          isError: event.isError,
+          durationMs: startedAt === undefined ? undefined : endedAt - startedAt,
+          elapsedMs: endedAt - runStartedAt,
+        };
+        if (event.isError) {
+          this.logger?.warn(fields, "Leader 工具异常结束");
+        } else {
+          this.logger?.info(fields, "Leader 工具结束");
+        }
+      } else if (event.type === "auto_retry_start") {
+        this.logger?.warn(
+          {
+            ...logBase(),
+            stage: "leader_provider_retry_started",
+            turnNumber,
+            attempt: event.attempt,
+            maxAttempts: event.maxAttempts,
+            retryDelayMs: event.delayMs,
+            error: leaderLogPreview(event.errorMessage),
+            elapsedMs: Date.now() - runStartedAt,
+          },
+          "Leader 模型请求准备重试",
+        );
+      } else if (event.type === "auto_retry_end") {
+        const fields = {
+          ...logBase(),
+          stage: "leader_provider_retry_finished",
+          turnNumber,
+          attempt: event.attempt,
+          success: event.success,
+          ...(event.finalError ? { error: leaderLogPreview(event.finalError) } : {}),
+          elapsedMs: Date.now() - runStartedAt,
+        };
+        if (event.success) {
+          this.logger?.info(fields, "Leader 模型重试结束");
+        } else {
+          this.logger?.warn(fields, "Leader 模型重试失败");
+        }
+      } else if (event.type === "compaction_start") {
+        this.logger?.info(
+          {
+            ...logBase(),
+            stage: "leader_compaction_started",
+            reason: event.reason,
+            elapsedMs: Date.now() - runStartedAt,
+          },
+          "Leader 上下文压缩开始",
+        );
+      } else if (event.type === "compaction_end") {
+        const fields = {
+          ...logBase(),
+          stage: "leader_compaction_finished",
+          reason: event.reason,
+          aborted: event.aborted,
+          willRetry: event.willRetry,
+          ...(event.errorMessage ? { error: leaderLogPreview(event.errorMessage) } : {}),
+          elapsedMs: Date.now() - runStartedAt,
+        };
+        if (event.errorMessage) {
+          this.logger?.warn(fields, "Leader 上下文压缩异常结束");
+        } else {
+          this.logger?.info(fields, "Leader 上下文压缩结束");
         }
       } else if (event.type === "entry_appended" && input.onCheckpoint) {
         const checkpoint = exportPiSessionCheckpoint(this.session.sessionManager);
@@ -527,6 +730,15 @@ export class PiLeaderSession implements LeaderSession {
       }
       return { text };
     } finally {
+      this.logger?.info(
+        {
+          ...logBase(),
+          stage: "leader_run_finished",
+          turnCount: turnNumber,
+          durationMs: Date.now() - runStartedAt,
+        },
+        "Leader Run 结束",
+      );
       input.signal.removeEventListener("abort", onAbort);
       unsubscribe();
       this.activeInput = undefined;
@@ -630,4 +842,17 @@ export class PiLeaderSession implements LeaderSession {
       );
     }
   }
+}
+
+function leaderLogPreview(value: string, limit = 240): string {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
+    .replace(/([?&](?:token|access_token|api_key|password)=)[^&\s]+/gi, "$1[REDACTED]")
+    .replace(
+      /(["']?(?:authorization|password|passwd|pwd|secret|token|access[_-]?token|refresh[_-]?token|api[_-]?key)["']?\s*[:=]\s*["']?)[^"',;\s}]+/gi,
+      "$1[REDACTED]",
+    )
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, limit);
 }

@@ -62,6 +62,11 @@ function buildPiRuntimeConfig(
   database: PostgresDatabase,
   llmProvider: Promise<LlmProviderResolution>,
   modelScope?: string,
+  logger?: {
+    info(bindings: Record<string, unknown>, message: string): void;
+    warn(bindings: Record<string, unknown>, message: string): void;
+    error(bindings: Record<string, unknown>, message: string): void;
+  },
 ): Promise<PiRuntimeConfig> {
   return llmProvider.then((resolved) => ({
     llmProvider: resolved.config,
@@ -70,6 +75,7 @@ function buildPiRuntimeConfig(
     ...(config.piSessionCacheDirectory
       ? { sessionCacheDirectory: config.piSessionCacheDirectory }
       : {}),
+    ...(logger ? { logger } : {}),
   }));
 }
 
@@ -109,7 +115,14 @@ function buildRunServiceOptions(config: AppConfig, database: PostgresDatabase) {
 }
 
 /** 出站传输：Connector Registry + 共享 Redis + ByClaw BE 服务发现。 */
-function createConnectors(config: AppConfig) {
+function createConnectors(
+  config: AppConfig,
+  logger: {
+    info(bindings: Record<string, unknown>, message: string): void;
+    warn(bindings: Record<string, unknown>, message: string): void;
+    error(bindings: Record<string, unknown>, message: string): void;
+  },
+) {
   const connectors = new ConnectorRegistry();
   const redis = createRedis(config.redis);
   const endpointResolver = new RedisByClawBeEndpointResolver(redis);
@@ -121,6 +134,7 @@ function createConnectors(config: AppConfig) {
     // 首次活动边界由通用 DelegationService 统一管理。
     firstEventTimeoutMs: 0,
     cancelConfirmationTimeoutMs: config.openClaw.cancelConfirmationTimeoutMs,
+    logger,
   });
   connectors.register(openClaw);
   const code = new CodeByFrameworkConnector({
@@ -128,6 +142,7 @@ function createConnectors(config: AppConfig) {
     sourceAgentType: config.worker.agentType,
     firstEventTimeoutMs: 0,
     cancelConfirmationTimeoutMs: config.openClaw.cancelConfirmationTimeoutMs,
+    logger,
   });
   connectors.register(code);
   const descriptors = new ExecutionDescriptorClient({
@@ -170,17 +185,25 @@ function createOrchestration(input: {
   connectors: ConnectorRegistry;
   endpointResolver: RedisByClawBeEndpointResolver;
   redis: ReturnType<typeof createRedis>;
+  logger: {
+    info(bindings: Record<string, unknown>, message: string): void;
+    warn(bindings: Record<string, unknown>, message: string): void;
+    error(bindings: Record<string, unknown>, message: string): void;
+  };
 }) {
-  const { config, database, connectors, endpointResolver, redis } = input;
+  const { config, database, connectors, endpointResolver, redis, logger } = input;
   const delegationService = new DelegationService(
     connectors,
     database.delegations,
     database.events,
     config.delegationTimeouts,
+    Date.now,
+    randomUUID,
+    logger,
   );
   const llmProvider = createLlmProviderSource(config, redis);
   const leaders = new LazyPiLeaderFactory(
-    buildPiRuntimeConfig(config, database, llmProvider.resolve()),
+    buildPiRuntimeConfig(config, database, llmProvider.resolve(), undefined, logger),
     async (selection: LeaderModelSelection) => {
       const modelConfig = await llmProvider.resolveByModelId(selection.modelId);
       if (fingerprintModelConfig(modelConfig) !== selection.fingerprint) {
@@ -193,6 +216,7 @@ function createOrchestration(input: {
         database,
         Promise.resolve({ source: "redis", config: modelConfig }),
         `model:${selection.modelId}:${selection.fingerprint}`,
+        logger,
       );
     },
   );
@@ -241,12 +265,18 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
   let ingressWarningSink:
     | ((bindings: Record<string, unknown>, message: string) => void)
     | undefined;
+  let ingressErrorSink:
+    | ((bindings: Record<string, unknown>, message: string) => void)
+    | undefined;
   const ingressLogger = {
     info(bindings: Record<string, unknown>, message: string) {
       ingressInfoSink?.(bindings, message);
     },
     warn(bindings: Record<string, unknown>, message: string) {
       ingressWarningSink?.(bindings, message);
+    },
+    error(bindings: Record<string, unknown>, message: string) {
+      ingressErrorSink?.(bindings, message);
     },
   };
 
@@ -258,7 +288,7 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
 
   // 2) 出站传输：Connector 与 ByClaw BE 服务发现共用同一个 Redis 连接。
   const { connectors, redis, byFrameworkConnectors, endpointResolver } =
-    createConnectors(config);
+    createConnectors(config, ingressLogger);
 
   // 3) 编排核心：委派服务 + Pi Leader + 数字员工授权目录。
   const {
@@ -268,7 +298,14 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     groupChatContexts,
     resourceModels,
     orchestratorRuntimes,
-  } = createOrchestration({ config, database, connectors, endpointResolver, redis });
+  } = createOrchestration({
+    config,
+    database,
+    connectors,
+    endpointResolver,
+    redis,
+    logger: ingressLogger,
+  });
 
   // 4) Run 流水线：RunService（快照授权、调度 Leader）+ 入站鉴权与 Run 创建。
   //    附件读取边界：按 fileId 经 BE 下载，凭 Run 短期凭证鉴权；契约见 .dev/attachments-be-read-contract.md。
@@ -333,6 +370,7 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
   });
   ingressInfoSink = (bindings, message) => app.log.info(bindings, message);
   ingressWarningSink = (bindings, message) => app.log.warn(bindings, message);
+  ingressErrorSink = (bindings, message) => app.log.error(bindings, message);
   const serviceRegistrar = new RedisServiceRegistrar(
     redis,
     {

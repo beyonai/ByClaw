@@ -482,6 +482,8 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         await context.checkCancelled();
       }
 
+      this.#logRunStep(run, context, event);
+
       if (isDelegationReasoningEvent(event)) {
         await ensureReasoningOpen();
       }
@@ -606,6 +608,48 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     }
 
     throw new Error(`Run event stream ended without a terminal event: ${run.id}`);
+  }
+
+  /**
+   * 记录可串联的 Run 里程碑。Leader token 流和子 Agent 正文增量由终态/委派日志汇总，
+   * 避免逐 token 写日志；状态、工具、交互和终态事件仍逐步可见。
+   */
+  #logRunStep(
+    run: { id: string; sessionId: string; createdAt: number },
+    context: AgentContext,
+    event: RunEvent,
+  ): void {
+    if (
+      event.type === "leader.reasoning.delta" ||
+      event.type === "leader.delta" ||
+      event.type === "delegation.output.delta"
+    ) {
+      return;
+    }
+    this.#logger?.info(
+      {
+        component: "byclaw-super",
+        stage: "run_step",
+        runId: run.id,
+        sessionId: run.sessionId,
+        externalSessionId: context.sessionId,
+        traceId: context.traceId,
+        runEventId: event.eventId,
+        runEventType: event.type,
+        elapsedMs: Date.now() - run.createdAt,
+        ...(stringData(event.data.delegationId)
+          ? { delegationId: stringData(event.data.delegationId) }
+          : {}),
+        ...(stringData(event.data.agentId) ? { agentId: stringData(event.data.agentId) } : {}),
+        ...(stringData(event.data.agentName)
+          ? { agentName: stringData(event.data.agentName) }
+          : {}),
+        ...(stringData(event.data.status) ? { stepStatus: stringData(event.data.status) } : {}),
+        ...(stringData(event.data.callId) ? { callId: stringData(event.data.callId) } : {}),
+        ...(stringData(event.data.toolName) ? { toolName: stringData(event.data.toolName) } : {}),
+      },
+      "Run 处理步骤",
+    );
   }
 
   /** 在 Run 开始时输出与 byai-channel 相同的“智能体已就绪”思考标题。 */

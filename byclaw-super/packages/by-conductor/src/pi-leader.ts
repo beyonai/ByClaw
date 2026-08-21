@@ -43,6 +43,13 @@ export interface PiRuntimeConfig {
     reserveTokens?: number;
     keepRecentTokens?: number;
   };
+  logger?: PiLeaderLogger;
+}
+
+export interface PiLeaderLogger {
+  info(bindings: Record<string, unknown>, message: string): void;
+  warn(bindings: Record<string, unknown>, message: string): void;
+  error(bindings: Record<string, unknown>, message: string): void;
 }
 
 /** 管理 Pi ModelRuntime 生命周期、Session 隔离缓存与 checkpoint 恢复。 */
@@ -61,6 +68,7 @@ export class PiLeaderSessionFactory
     private readonly requestAdapter: PiRuntimeProviderConfig["requestAdapter"],
     private readonly thinkingBudgets: PiRuntimeProviderConfig["thinkingBudgets"],
     private readonly compaction: PiLeaderCompactionConfig,
+    private readonly logger: PiLeaderLogger | undefined,
   ) {}
 
   /** 初始化模型运行时，并准备实例隔离的 Session 缓存目录。 */
@@ -97,6 +105,7 @@ export class PiLeaderSessionFactory
         reserveTokens: config.compaction?.reserveTokens ?? 16_384,
         keepRecentTokens: config.compaction?.keepRecentTokens ?? 20_000,
       },
+      config.logger,
     );
   }
 
@@ -126,6 +135,8 @@ export class PiLeaderSessionFactory
       this.requestAdapter,
       this.thinkingBudgets,
       this.compaction,
+      sessionId,
+      this.logger,
     );
   }
 

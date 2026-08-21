@@ -64,6 +64,12 @@ export interface DelegationTimeoutOptions {
   idleMs: number;
 }
 
+export interface DelegationLogger {
+  info(bindings: Record<string, unknown>, message: string): void;
+  warn(bindings: Record<string, unknown>, message: string): void;
+  error(bindings: Record<string, unknown>, message: string): void;
+}
+
 type DelegationTimeoutKind = "first_activity" | "idle";
 
 /**
@@ -84,6 +90,7 @@ export class DelegationService {
     timeoutOptions: number | Partial<DelegationTimeoutOptions> = {},
     private readonly now: () => number = Date.now,
     private readonly createId: () => string = randomUUID,
+    private readonly logger?: DelegationLogger,
   ) {
     // number 是旧构造参数；同时作为首次活动和空闲边界。
     this.#timeouts = typeof timeoutOptions === "number"
@@ -111,6 +118,29 @@ export class DelegationService {
     }
 
     const connector = this.connectors.require(agent.execution.connectorId);
+    const externalSessionId = optionalMetadataString(input.metadata, "externalSessionId");
+    const lifecycleFields = {
+      component: "byclaw-super",
+      runId: input.runId,
+      sessionId: input.session.id,
+      ...(externalSessionId ? { externalSessionId } : {}),
+      agentId: agent.id,
+      agentName: agent.name,
+      connectorId: connector.id,
+      targetId: agent.execution.targetId,
+      ...(agent.execution.targetAgentType
+        ? { targetAgentType: agent.execution.targetAgentType }
+        : {}),
+    };
+    this.logger?.info(
+      {
+        ...lifecycleFields,
+        stage: "delegation_authorized",
+        attachmentCount: input.attachments?.length ?? 0,
+        hasExpectedOutput: Boolean(input.expectedOutput),
+      },
+      "子 Agent 委派已授权",
+    );
     if (input.attachments && input.attachments.length > 0 && !connector.capabilities.attachments) {
       // 连接器不支持附件时明确报错，绝不静默降级为纯文本委派。
       throw new Error(
@@ -132,6 +162,17 @@ export class DelegationService {
             candidate.expectedOutput === input.expectedOutput,
         );
       if (completed?.result) {
+        this.logger?.info(
+          {
+            ...lifecycleFields,
+            stage: "delegation_reused",
+            delegationId: completed.id,
+            resultStatus: completed.result.status,
+            outputChars: completed.result.output.length,
+            outputPreview: delegationLogPreview(completed.result.output),
+          },
+          "复用已完成的子 Agent 委派结果",
+        );
         return structuredClone(completed.result);
       }
     }
@@ -186,6 +227,14 @@ export class DelegationService {
               : {}),
           },
         });
+        this.logger?.info(
+          {
+            ...lifecycleFields,
+            stage: "delegation_created",
+            delegationId,
+          },
+          "已创建子 Agent 委派",
+        );
       } catch (error) {
         if (this.#claims.get(input.runId) === input.leaseClaim) {
           this.#claims.delete(input.runId);
@@ -230,6 +279,18 @@ export class DelegationService {
         return;
       }
       timeoutKind = kind;
+      this.logger?.warn(
+        {
+          ...lifecycleFields,
+          stage: "delegation_timeout",
+          delegationId,
+          timeoutKind: kind,
+          timeoutMs:
+            kind === "first_activity" ? this.#timeouts.firstActivityMs : this.#timeouts.idleMs,
+          lastActivityAt: delegation.lastActivityAt,
+        },
+        "等待子 Agent 事件超时",
+      );
       controller.abort(new Error(timeoutReason(kind)));
       if (execution) {
         void this.#cancelExecution(
@@ -278,13 +339,16 @@ export class DelegationService {
         if (!connector.resume || !delegation.externalRef) {
           throw new Error(`Connector does not support persisted resume: ${connector.id}`);
         }
+        this.logger?.info(
+          { ...lifecycleFields, stage: "delegation_resuming", delegationId },
+          "正在恢复子 Agent 委派事件流",
+        );
         execution = await connector.resume(delegation.externalRef, {
           signal: controller.signal,
           metadata: input.metadata,
           ...(delegation.connectorCursor ? { cursor: delegation.connectorCursor } : {}),
         });
       } else {
-        const externalSessionId = optionalMetadataString(input.metadata, "externalSessionId");
         const parentMessageId = optionalMetadataString(input.metadata, "parentMessageId");
         const request: ConnectorRequest = {
           userCode: input.session.owner.userCode,
@@ -300,8 +364,22 @@ export class DelegationService {
           ...(parentMessageId ? { parentMessageId } : {}),
           metadata: input.metadata,
         };
+        this.logger?.info(
+          { ...lifecycleFields, stage: "delegation_dispatching", delegationId },
+          "正在调度子 Agent",
+        );
         execution = await connector.start(request, { signal: controller.signal });
       }
+      this.logger?.info(
+        {
+          ...lifecycleFields,
+          stage: "delegation_dispatched",
+          delegationId,
+          externalExecutionId: execution.ref.executionId,
+          resumed: resuming,
+        },
+        "子 Agent 调度已建立事件流",
+      );
       // Connector 一旦返回便立即纳入 Run 级取消，避免 externalRef 落库期间出现取消盲区。
       this.#track(input.runId, delegationId, execution);
       if (controller.signal.aborted) {
@@ -326,6 +404,7 @@ export class DelegationService {
         await this.#saveDelegation(delegation);
       }
       let output = delegation.partialOutput ?? "";
+      let outputDeltaLogged = false;
       const artifacts: ArtifactRef[] = [];
       let pendingInteractionId: string | undefined;
       const registerInteraction = async (
@@ -398,6 +477,13 @@ export class DelegationService {
         }
         if (event.type !== "completed" && event.type !== "failed") {
           markActivity();
+        }
+        if (event.type !== "output_delta" || !outputDeltaLogged) {
+          this.logger?.info(
+            delegationEventLogFields(lifecycleFields, delegationId, event, output),
+            "收到子 Agent 归一化事件",
+          );
+          outputDeltaLogged ||= event.type === "output_delta";
         }
         if (pendingInteractionId && event.type !== "input_required") {
           const interactionId = pendingInteractionId;
@@ -617,6 +703,16 @@ export class DelegationService {
         artifacts,
         error: "Connector event stream ended without a terminal event",
       };
+      this.logger?.warn(
+        {
+          ...lifecycleFields,
+          stage: "delegation_stream_ended",
+          delegationId,
+          outputChars: output.length,
+          outputPreview: delegationLogPreview(output),
+        },
+        "子 Agent 事件流未携带终态即结束",
+      );
       await this.#finish(delegation, "FAILED", result);
       return result;
     } catch (error) {
@@ -632,6 +728,16 @@ export class DelegationService {
         return await this.#finishAborted(delegation, timeoutKind, timeoutReason);
       }
       const message = error instanceof Error ? error.message : String(error);
+      this.logger?.error(
+        {
+          ...lifecycleFields,
+          stage: execution ? "delegation_stream_error" : "delegation_dispatch_error",
+          delegationId,
+          error: delegationLogPreview(message),
+          hasExternalExecution: Boolean(execution),
+        },
+        execution ? "处理子 Agent 事件流失败" : "调度子 Agent 失败",
+      );
       if (execution) {
         // externalRef/cursor 无法可靠持久化时停止外部任务，避免留下无人接管的执行。
         await this.#cancelExecution(
@@ -903,6 +1009,27 @@ export class DelegationService {
         ...(result.error ? { error: result.error } : {}),
       },
     });
+    const fields = {
+      component: "byclaw-super",
+      stage: "delegation_finished",
+      runId: delegation.runId,
+      delegationId: delegation.id,
+      agentId: delegation.agentId,
+      ...(delegation.agentName ? { agentName: delegation.agentName } : {}),
+      connectorId: delegation.connectorId,
+      status,
+      resultStatus: result.status,
+      durationMs: finished.finishedAt! - delegation.createdAt,
+      outputChars: result.output.length,
+      outputPreview: delegationLogPreview(result.output),
+      artifactCount: result.artifacts.length,
+      ...(result.error ? { error: delegationLogPreview(result.error) } : {}),
+    };
+    if (status === "COMPLETED") {
+      this.logger?.info(fields, "子 Agent 委派结束");
+    } else {
+      this.logger?.warn(fields, "子 Agent 委派异常结束");
+    }
   }
 
   /** 持久化实现将委派快照与事件放在同一事务，内存实现保持简单回退。 */
@@ -931,6 +1058,87 @@ export class DelegationService {
     }
     return this.events.append(event);
   }
+}
+
+function delegationEventLogFields(
+  base: Record<string, unknown>,
+  delegationId: string,
+  event: import("../ports/connectors.js").ConnectorEvent,
+  accumulatedOutput: string,
+): Record<string, unknown> {
+  const fields: Record<string, unknown> = {
+    ...base,
+    stage: "delegation_event",
+    delegationId,
+    connectorEventType: event.type,
+    outputCharsBeforeEvent: accumulatedOutput.length,
+    ...(event.cursor ? { cursor: event.cursor } : {}),
+  };
+  if (event.type === "output_delta") {
+    fields.contentChars = event.text.length;
+    fields.contentPreview = delegationLogPreview(event.text);
+  } else if (event.type === "progress") {
+    fields.contentPreview = delegationLogPreview(event.message);
+  } else if (event.type === "display_progress") {
+    fields.contentPreview = delegationLogPreview(event.text);
+  } else if (event.type === "tool_started") {
+    fields.callId = event.callId;
+    fields.toolName = event.toolName;
+    fields.contentPreview = delegationValuePreview(event.input);
+  } else if (event.type === "tool_detail") {
+    fields.callId = event.callId;
+    fields.toolName = event.toolName;
+    fields.toolPhase = event.phase;
+    fields.contentPreview = delegationValuePreview(event.value);
+  } else if (event.type === "tool_completed") {
+    fields.callId = event.callId;
+    fields.toolName = event.toolName;
+    fields.contentPreview = delegationValuePreview(event.output);
+  } else if (event.type === "tool_failed") {
+    fields.callId = event.callId;
+    fields.toolName = event.toolName;
+    fields.error = delegationLogPreview(event.error);
+    fields.contentPreview = delegationValuePreview(event.output);
+  } else if (event.type === "completed") {
+    fields.resultStatus = event.result.status;
+    fields.outputChars = event.result.output.length;
+    fields.contentPreview = delegationLogPreview(event.result.output);
+  } else if (event.type === "failed") {
+    fields.errorCode = event.error.code;
+    fields.error = delegationLogPreview(event.error.message);
+    fields.timedOut = event.error.timedOut === true;
+  } else if (event.type === "input_required") {
+    fields.interactionId = event.interactionId;
+  }
+  return fields;
+}
+
+function delegationValuePreview(value: unknown): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  try {
+    return delegationLogPreview(typeof value === "string" ? value : JSON.stringify(value));
+  } catch {
+    return "[unserializable]";
+  }
+}
+
+function delegationLogPreview(value: string, limit = 240): string {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
+    .replace(/([?&](?:token|access_token|api_key|password)=)[^&\s]+/gi, "$1[REDACTED]")
+    .replace(
+      /(["']?(?:authorization|password|passwd|pwd|secret|token|access[_-]?token|refresh[_-]?token|api[_-]?key)["']?\s*[:=]\s*["']?)[^"',;\s}]+/gi,
+      "$1[REDACTED]",
+    )
+    .replace(
+      /\b((?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/)[^\s/@:]+:[^\s/@]+@/gi,
+      "$1[REDACTED]@",
+    )
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, limit);
 }
 
 function responseFromEvent(data: Record<string, JsonValue>): UserInteractionResponse {

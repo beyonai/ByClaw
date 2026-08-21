@@ -32,6 +32,7 @@ import {
   parseDataMessage,
   parseXreadRows,
   refString,
+  safeDisplayText,
 } from "./by-framework-codec.js";
 
 type RedisClient = ReturnType<typeof createRedis>;
@@ -58,6 +59,14 @@ export interface ByFrameworkConnectorOptions {
   agentReturnMode?: "callback" | "direct";
   /** 仅供 BYCLAW_CODE：把 reasoning 生命周期外的 1002 子会话文本恢复成回答正文。 */
   promoteOutOfReasoningTextToOutput?: boolean;
+  /** 仅记录结构化链路元数据和脱敏后的内容缩略，不记录凭证或完整请求。 */
+  logger?: ByFrameworkConnectorLogger;
+}
+
+export interface ByFrameworkConnectorLogger {
+  info(bindings: Record<string, unknown>, message: string): void;
+  warn(bindings: Record<string, unknown>, message: string): void;
+  error(bindings: Record<string, unknown>, message: string): void;
 }
 
 /**
@@ -84,6 +93,7 @@ export class ByFrameworkConnector implements AgentConnector {
   readonly #cancelConfirmationTimeoutMs: number;
   readonly #promoteOutOfReasoningTextToOutput: boolean;
   readonly #targetAgentTypeResolver: (request: ConnectorRequest) => string;
+  readonly #logger: ByFrameworkConnectorLogger | undefined;
 
   /** 可注入 Redis 和 GatewayClient 以支持测试；缺省时创建并持有真实连接。 */
   constructor(options: ByFrameworkConnectorOptions) {
@@ -108,6 +118,7 @@ export class ByFrameworkConnector implements AgentConnector {
     this.#cancelConfirmationTimeoutMs = options.cancelConfirmationTimeoutMs ?? 30_000;
     this.#promoteOutOfReasoningTextToOutput =
       options.promoteOutOfReasoningTextToOutput === true;
+    this.#logger = options.logger;
   }
 
   /**
@@ -164,14 +175,65 @@ export class ByFrameworkConnector implements AgentConnector {
       traceId: request.delegationId,
       ...(request.parentMessageId ? { parentMessageId: request.parentMessageId } : {}),
     };
-    const response = await this.#client.sendMessage(params);
+    const dispatchStartedAt = Date.now();
+    const dispatchFields = {
+      component: "byclaw-super",
+      stage: "child_agent_dispatch",
+      connectorId: this.id,
+      runId: request.runId,
+      sessionId: request.sessionId,
+      ...(request.externalSessionId ? { externalSessionId: request.externalSessionId } : {}),
+      delegationId: request.delegationId,
+      agentId: request.agent.id,
+      agentName: request.agent.name,
+      sourceAgentType: this.#sourceAgentType || "direct",
+      targetAgentType,
+      childSessionId,
+      messageId: request.delegationId,
+      traceId: request.delegationId,
+    };
+    this.#logger?.info(dispatchFields, "准备通过 by-framework 调度子 Agent");
+    let response: Awaited<ReturnType<GatewayClientLike["sendMessage"]>>;
+    try {
+      response = await this.#client.sendMessage(params);
+    } catch (error) {
+      this.#logger?.error(
+        {
+          ...dispatchFields,
+          durationMs: Date.now() - dispatchStartedAt,
+          error: errorMessage(error),
+        },
+        "调用 by-framework 调度接口异常",
+      );
+      throw error;
+    }
     if (!response.success) {
+      this.#logger?.warn(
+        {
+          ...dispatchFields,
+          durationMs: Date.now() - dispatchStartedAt,
+          frameworkStatus: response.status,
+          ...(response.error_code ? { frameworkErrorCode: response.error_code } : {}),
+          ...(response.error ? { frameworkError: logPreview(response.error) } : {}),
+        },
+        "by-framework 子 Agent 调度失败",
+      );
       throw new Error(
         `by-framework dispatch failed${response.error_code ? ` (${response.error_code})` : ""}: ${
           response.error ?? response.status
         }`,
       );
     }
+    this.#logger?.info(
+      {
+        ...dispatchFields,
+        durationMs: Date.now() - dispatchStartedAt,
+        frameworkStatus: response.status,
+        frameworkMessageId: response.message_id,
+        frameworkTraceId: response.trace_id,
+      },
+      "by-framework 已受理子 Agent 调度",
+    );
 
     const cancel = this.#createCancel(response.message_id, childSessionId, targetAgentType);
     if (context.signal.aborted) {
@@ -188,11 +250,25 @@ export class ByFrameworkConnector implements AgentConnector {
         traceId: response.trace_id,
         targetAgentType,
         userCode: request.userCode,
+        sessionId: request.sessionId,
+        ...(request.externalSessionId ? { externalSessionId: request.externalSessionId } : {}),
       },
     };
     return {
       ref,
-      events: this.#readEvents(childSessionId, response.trace_id, "0-0", context.signal, cancel),
+      events: this.#readEvents(
+        childSessionId,
+        response.trace_id,
+        "0-0",
+        context.signal,
+        cancel,
+        {
+          ...dispatchFields,
+          frameworkMessageId: response.message_id,
+          frameworkTraceId: response.trace_id,
+          dispatchStartedAt,
+        },
+      ),
       cancel,
       respondToInput: (interactionId, response, resumeToken) =>
         this.#resumeUserInput(ref, interactionId, response, resumeToken, request.metadata),
@@ -215,6 +291,11 @@ export class ByFrameworkConnector implements AgentConnector {
     const messageId = refString(ref, "messageId");
     const traceId = refString(ref, "traceId") || ref.executionId;
     const targetAgentType = refString(ref, "targetAgentType");
+    const sessionId = refString(ref, "sessionId");
+    const metadataExternalSessionId = context.metadata?.externalSessionId;
+    const externalSessionId =
+      refString(ref, "externalSessionId") ||
+      (typeof metadataExternalSessionId === "string" ? metadataExternalSessionId.trim() : "");
     if (!childSessionId || !messageId || !traceId || !targetAgentType) {
       throw new Error("by-framework external execution reference is incomplete");
     }
@@ -227,6 +308,19 @@ export class ByFrameworkConnector implements AgentConnector {
         context.cursor ?? "0-0",
         context.signal,
         cancel,
+        {
+          component: "byclaw-super",
+          stage: "child_agent_stream",
+          connectorId: this.id,
+          ...(sessionId ? { sessionId } : {}),
+          ...(externalSessionId ? { externalSessionId } : {}),
+          childSessionId,
+          targetAgentType,
+          frameworkMessageId: messageId,
+          frameworkTraceId: traceId,
+          dispatchStartedAt: Date.now(),
+          resumed: true,
+        },
       ),
       cancel,
       respondToInput: (interactionId, response, resumeToken) =>
@@ -372,6 +466,7 @@ export class ByFrameworkConnector implements AgentConnector {
     startCursor: string,
     signal: AbortSignal,
     cancel: (reason: string) => Promise<void>,
+    logContext: Record<string, unknown> & { dispatchStartedAt: number },
   ): AsyncIterable<ConnectorEvent> {
     const stream = QueueNames.session_data_stream(sessionId);
     let cursor = startCursor;
@@ -427,6 +522,30 @@ export class ByFrameworkConnector implements AgentConnector {
           continue;
         }
         firstEventReceived = true;
+        const content = extractContent(message.data);
+        const contentType = extractContentType(message.data);
+        const highFrequencyTextEvent =
+          message.event_type === EventType.ANSWER_DELTA ||
+          (message.event_type === EventType.REASONING_LOG_DELTA && contentType === "1002");
+        if (!highFrequencyTextEvent) {
+          this.#logger?.info(
+            {
+              ...logContext,
+              stage: "child_agent_event",
+              cursor,
+              eventType: message.event_type,
+              contentType,
+              ...(message.message_id ? { childMessageId: message.message_id } : {}),
+              ...(message.parent_message_id
+                ? { childParentMessageId: message.parent_message_id }
+                : {}),
+              contentChars: content.length,
+              ...(content ? { contentPreview: logPreview(content) } : {}),
+              elapsedMs: Date.now() - logContext.dispatchStartedAt,
+            },
+            "收到子 Agent 事件",
+          );
+        }
         if (message.event_type === EventType.REASONING_LOG_START) {
           childReasoningOpen = true;
           yield { type: "activity", cursor };
@@ -537,10 +656,33 @@ export class ByFrameworkConnector implements AgentConnector {
             output,
             artifacts: [],
           };
+          this.#logger?.info(
+            {
+              ...logContext,
+              stage: "child_agent_terminal",
+              cursor,
+              terminalEvent: EventType.APP_STREAM_RESPONSE,
+              outputChars: output.length,
+              outputPreview: logPreview(output),
+              durationMs: Date.now() - logContext.dispatchStartedAt,
+            },
+            "收到子 Agent 会话结束信号",
+          );
           yield { type: "completed", result, cursor };
           return;
         }
         if (message.event_type === "error") {
+          this.#logger?.warn(
+            {
+              ...logContext,
+              stage: "child_agent_terminal",
+              cursor,
+              terminalEvent: "error",
+              error: logPreview(extractError(message)),
+              durationMs: Date.now() - logContext.dispatchStartedAt,
+            },
+            "收到子 Agent 错误终态",
+          );
           yield {
             type: "failed",
             cursor,
@@ -557,6 +699,21 @@ export class ByFrameworkConnector implements AgentConnector {
     await cancel("connector event stream aborted").catch(() => undefined);
     throw abortError(signal.reason);
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function logPreview(value: string, limit = 240): string {
+  return safeDisplayText(value)
+    .replace(
+      /(["']?(?:authorization|password|passwd|pwd|secret|token|access[_-]?token|refresh[_-]?token|api[_-]?key)["']?\s*[:=]\s*["']?)[^"',;\s}]+/gi,
+      "$1[REDACTED]",
+    )
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, limit);
 }
 
 function delay(milliseconds: number): Promise<void> {

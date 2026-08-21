@@ -40,6 +40,13 @@ export interface LeaderRunInput {
   /** 本轮开始时从 byclaw-be 恢复的活动计划；后续工具更新会原位替换该快照。 */
   activeTaskPlan?: TaskPlanSnapshot;
   signal: AbortSignal;
+  /** 仅用于结构化链路日志，不进入模型上下文。 */
+  observability?: {
+    runId: string;
+    sessionId: string;
+    externalSessionId?: string;
+    traceId?: string;
+  };
   /** 接收最终可见回答的文本增量。 */
   onDelta(text: string): Promise<void> | void;
   /** 接收模型思考文本增量；不进入最终可见回答。 */
