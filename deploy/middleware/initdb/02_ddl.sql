@@ -1535,10 +1535,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_token_quota_user
 CREATE TABLE IF NOT EXISTS byai.byai_project (
     project_id      BIGINT          NOT NULL,
     project_name    VARCHAR(100)    NOT NULL,
-    description     VARCHAR(500),
+    description     TEXT,
     resource_id     BIGINT,
     project_type    VARCHAR(20)     NOT NULL DEFAULT 'normal',
     is_share        VARCHAR(10)     NOT NULL DEFAULT 'N',
+    init_status     VARCHAR(16),
+    build_index     VARCHAR(4)      NOT NULL DEFAULT 'N',
+    index_skills    VARCHAR(512),
+    init_session_id BIGINT,
+    init_fail_reason VARCHAR(500),
     create_by       BIGINT,
     create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
     update_by       BIGINT,
@@ -1554,6 +1559,11 @@ COMMENT ON COLUMN byai.byai_project.description IS '项目描述';
 COMMENT ON COLUMN byai.byai_project.resource_id IS '关联Agent资源ID';
 COMMENT ON COLUMN byai.byai_project.project_type IS '项目类型：normal普通项目，develop研发项目';
 COMMENT ON COLUMN byai.byai_project.is_share IS '是否分享：N-不分享，Y-可分享';
+COMMENT ON COLUMN byai.byai_project.init_status IS '研发项目工作区初始化状态 pending待初始化/initializing初始化中/ready已就绪';
+COMMENT ON COLUMN byai.byai_project.build_index IS '初始化是否建索引 Y建立/N不建立';
+COMMENT ON COLUMN byai.byai_project.index_skills IS '建索引所需技能包,逗号分隔';
+COMMENT ON COLUMN byai.byai_project.init_session_id IS '工作区初始化会话ID';
+COMMENT ON COLUMN byai.byai_project.init_fail_reason IS '上次工作区初始化失败或超时原因';
 COMMENT ON COLUMN byai.byai_project.create_by IS '创建人';
 COMMENT ON COLUMN byai.byai_project.create_time IS '创建时间';
 COMMENT ON COLUMN byai.byai_project.update_by IS '更新人';
@@ -1594,6 +1604,9 @@ CREATE TABLE IF NOT EXISTS byai.byai_project_repo (
     repo_full_name  VARCHAR(200)    NOT NULL,
     repo_url        VARCHAR(500),
     default_branch  VARCHAR(100)    DEFAULT 'main',
+    description     TEXT,
+    repo_type       VARCHAR(16)     NOT NULL DEFAULT 'code',
+    provider        VARCHAR(20)     NOT NULL DEFAULT 'github',
     create_by       VARCHAR(64),
     create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT pk_byai_project_repo PRIMARY KEY (repo_id)
@@ -1605,6 +1618,9 @@ COMMENT ON COLUMN byai.byai_project_repo.project_id IS '所属项目ID';
 COMMENT ON COLUMN byai.byai_project_repo.repo_full_name IS '仓库全名 owner/repo';
 COMMENT ON COLUMN byai.byai_project_repo.repo_url IS '仓库地址';
 COMMENT ON COLUMN byai.byai_project_repo.default_branch IS '默认分支';
+COMMENT ON COLUMN byai.byai_project_repo.description IS '仓库用途描述';
+COMMENT ON COLUMN byai.byai_project_repo.repo_type IS '仓库类型 workspace工作区/code代码仓库';
+COMMENT ON COLUMN byai.byai_project_repo.provider IS '代码平台 github/gitlab/gitea';
 
 -- 项目空间共享文件表
 CREATE TABLE IF NOT EXISTS byai.byai_project_share_file

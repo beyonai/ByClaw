@@ -20,6 +20,7 @@ import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService;
 import com.iwhalecloud.byai.manager.application.service.project.ProjectInitService;
+import com.iwhalecloud.byai.manager.application.service.project.ProjectWorkspaceManifestService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
@@ -150,6 +151,9 @@ public class ProjectApplicationService {
     @Autowired
     private ProjectInitService projectInitService;
 
+    @Autowired
+    private ProjectWorkspaceManifestService projectWorkspaceManifestService;
+
     /**
      * 分页查询用户可见项目
      *
@@ -206,6 +210,7 @@ public class ProjectApplicationService {
 
         // 工作目录属于项目创建结果的一部分，初始化失败时由事务回滚项目数据库记录。
         projectInitService.initProjectWorkspace(project.getProjectId());
+        projectWorkspaceManifestService.syncProjectGitmodules(project.getProjectId());
 
         return project;
     }
@@ -302,6 +307,7 @@ public class ProjectApplicationService {
             projectRepoMapper
                 .delete(new LambdaQueryWrapper<ProjectRepo>().eq(ProjectRepo::getProjectId, dto.getProjectId()));
             saveProjectRepos(dto.getProjectId(), dto.getRepos());
+            projectWorkspaceManifestService.syncProjectGitmodules(dto.getProjectId());
         }
         if (dto.getResources() != null) {
             saveProjectResources(dto.getProjectId(), dto.getResources());
@@ -802,6 +808,7 @@ public class ProjectApplicationService {
      * @param dto 含 projectId、repoFullName
      * @return 新建仓库基本信息
      */
+    @Transactional
     public Map<String, Object> createProjectRepo(ProjectRepoDTO dto) {
         if (dto == null || dto.getProjectId() == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.id.required");
@@ -810,6 +817,7 @@ public class ProjectApplicationService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.name.required");
         }
         ProjectRepo repo = insertProjectRepo(dto.getProjectId(), dto);
+        projectWorkspaceManifestService.syncProjectGitmodules(dto.getProjectId());
         Map<String, Object> result = new HashMap<>();
         result.put("repoId", repo.getRepoId());
         result.put("repoFullName", repo.getRepoFullName());
@@ -826,6 +834,7 @@ public class ProjectApplicationService {
      *
      * <p>编辑直接更新原记录，不采用删除后重建，避免需求、任务或扫描源中保存的 repoId 失效。</p>
      */
+    @Transactional
     public Map<String, Object> updateProjectRepo(ProjectRepoDTO dto) {
         if (dto == null || dto.getRepoId() == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.id.required");
@@ -848,6 +857,7 @@ public class ProjectApplicationService {
         repo.setRepoType("workspace".equals(dto.getRepoType()) ? "workspace" : "code");
         repo.setProvider(normalizeProvider(dto.getProvider()));
         projectRepoMapper.updateById(repo);
+        projectWorkspaceManifestService.syncProjectGitmodules(repo.getProjectId());
         Map<String, Object> result = new HashMap<>();
         result.put("repoId", repo.getRepoId());
         result.put("projectId", repo.getProjectId());
@@ -873,6 +883,7 @@ public class ProjectApplicationService {
      *
      * @param repoId 仓库 ID
      */
+    @Transactional
     public void deleteProjectRepo(Long repoId) {
         if (repoId == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.id.required");
@@ -889,6 +900,9 @@ public class ProjectApplicationService {
                 I18nUtil.get("project.repo.manualRequirement.bound", manualRequirementBoundCount));
         }
         projectRepoMapper.deleteById(repoId);
+        if (repo != null) {
+            projectWorkspaceManifestService.syncProjectGitmodules(repo.getProjectId());
+        }
     }
 
     /**

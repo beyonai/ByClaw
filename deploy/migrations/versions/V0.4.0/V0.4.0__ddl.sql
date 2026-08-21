@@ -473,17 +473,17 @@ CREATE INDEX IF NOT EXISTS idx_scan_item_task_session ON byai.byai_scan_item_tas
 
 -- 仓库区分工作区与代码仓库:研发项目须有且仅有一个 workspace 仓库承载项目上下文/产出,其余为 code 代码仓库。
 -- 存量行默认 code;工作区先行由应用层保证,DB 仅存类型不强约束唯一,避免历史数据迁移期写入失败。
-ALTER TABLE byai.byai_project_repo ADD COLUMN repo_type VARCHAR(16) NOT NULL DEFAULT 'code';
+ALTER TABLE byai.byai_project_repo ADD COLUMN IF NOT EXISTS repo_type VARCHAR(16) NOT NULL DEFAULT 'code';
 COMMENT ON COLUMN byai.byai_project_repo.repo_type IS '仓库类型 workspace工作区(项目上下文/产出落点,单个)/code代码仓库(可多个)';
 
 -- 仓库代码平台:决定 clone host 与令牌注入(github->GH_TOKEN,gitlab->GL_TOKEN oauth2前缀,gitea->GITEA_TOKEN)。
 -- 存量行默认 github;自建/私有实例靠 repo_url 显式完整地址兜底,不受 host 拼接影响。
-ALTER TABLE byai.byai_project_repo ADD COLUMN provider VARCHAR(20) NOT NULL DEFAULT 'github';
+ALTER TABLE byai.byai_project_repo ADD COLUMN IF NOT EXISTS provider VARCHAR(20) NOT NULL DEFAULT 'github';
 COMMENT ON COLUMN byai.byai_project_repo.provider IS '代码平台 github/gitlab/gitea;决定 clone host 与令牌变量,存量默认 github';
 
 -- 仓库用途描述:人工填写,给后来人和大模型理解该仓库承担什么职责。
 -- 需求 AI 预拆据此判断该改哪些仓库,仅凭 owner/repo 名字猜职责经常拆错。可空,存量行为 NULL。
-ALTER TABLE byai.byai_project_repo ADD COLUMN description TEXT;
+ALTER TABLE byai.byai_project_repo ADD COLUMN IF NOT EXISTS description TEXT;
 COMMENT ON COLUMN byai.byai_project_repo.description IS '仓库用途描述,人工填写;供需求AI预拆判断职责归属与人工理解';
 
 -- 项目描述仍由前后端限制最多500个字符；存储改为TEXT，避免不同数据库对中文VARCHAR长度语义不一致。
@@ -491,16 +491,16 @@ ALTER TABLE byai.byai_project ALTER COLUMN description TYPE TEXT;
 COMMENT ON COLUMN byai.byai_project.description IS '项目描述,前后端限制最多500个字符';
 
 -- 研发项目工作区初始化状态:架构数字员工建成工作区前禁止建需求/启动任务。
-ALTER TABLE byai.byai_project ADD COLUMN init_status VARCHAR(16);
+ALTER TABLE byai.byai_project ADD COLUMN IF NOT EXISTS init_status VARCHAR(16);
 COMMENT ON COLUMN byai.byai_project.init_status IS '研发项目初始化状态 pending待初始化/initialized工作区已建好待架构员工/initializing架构员工进行中/ready已就绪;仅 develop 未 ready 前禁用建需求与启动任务。无列默认值,应用层建项目时显式赋值';
-ALTER TABLE byai.byai_project ADD COLUMN build_index VARCHAR(4) NOT NULL DEFAULT 'N';
+ALTER TABLE byai.byai_project ADD COLUMN IF NOT EXISTS build_index VARCHAR(4) NOT NULL DEFAULT 'N';
 COMMENT ON COLUMN byai.byai_project.build_index IS '初始化是否建索引 Y建立/N不建立(默认)';
-ALTER TABLE byai.byai_project ADD COLUMN index_skills VARCHAR(512);
+ALTER TABLE byai.byai_project ADD COLUMN IF NOT EXISTS index_skills VARCHAR(512);
 COMMENT ON COLUMN byai.byai_project.index_skills IS '建索引所需技能包,逗号分隔(如 trellis,superpowers)';
 -- 初始化交给架构数字员工在沙箱里做:必须记住是哪条会话,轮询才知道该读哪个任务状态文件。
-ALTER TABLE byai.byai_project ADD COLUMN init_session_id BIGINT;
+ALTER TABLE byai.byai_project ADD COLUMN IF NOT EXISTS init_session_id BIGINT;
 COMMENT ON COLUMN byai.byai_project.init_session_id IS '工作区初始化会话ID(架构数字员工会话);轮询按此会话读 /by/.acp-runs/sessions/<会话ID>.json 判完成。空表示尚未下发初始化';
-ALTER TABLE byai.byai_project ADD COLUMN init_fail_reason VARCHAR(500);
+ALTER TABLE byai.byai_project ADD COLUMN IF NOT EXISTS init_fail_reason VARCHAR(500);
 COMMENT ON COLUMN byai.byai_project.init_fail_reason IS '上次工作区初始化失败/超时原因;重新下发初始化时清空';
 
 -- 运营任务模板只保存模板目录元数据和默认配置；用户补充的任务参数进入会话提示词，不回写系统模板。
