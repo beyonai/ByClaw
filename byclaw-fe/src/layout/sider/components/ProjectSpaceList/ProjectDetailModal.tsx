@@ -6178,6 +6178,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
             handleOpenTaskSession(task);
             setTaskKanbanOpen(false);
           }}
+          onViewSession={(task) => {
+            handleOpenReadonlySession(task);
+            setTaskKanbanOpen(false);
+          }}
         />
       )}
 

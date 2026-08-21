@@ -527,9 +527,18 @@ const ProjectTasks: React.FC<Props> = ({
           open
           projectId={project.projectId}
           operationProject={project.projectType === 'operation'}
-          canEnterSession={(task) => Boolean(task.sessionId)}
+          // 与列表模式的 TaskDetailDrawer 判断保持一致：普通项目按会话存在放行，
+          // 研发/运营项目只有处理人能进可对话会话，非处理人走 onViewSession 只读。
+          canEnterSession={(task) =>
+            project.projectType === 'normal' || project.projectType === 'default'
+              ? Boolean(task.sessionId)
+              : isCurrentUserTaskAssignee(task, userInfo)
+          }
           onEnterSession={(task) => {
             if (task.sessionId) openTaskSession(task);
+          }}
+          onViewSession={(task) => {
+            if (task.sessionId) openReadonlyTaskSession(task);
           }}
         />
       </div>
