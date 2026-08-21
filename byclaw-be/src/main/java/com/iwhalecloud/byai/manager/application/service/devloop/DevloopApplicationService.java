@@ -81,7 +81,15 @@ import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionExtMapper;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
 import com.iwhalecloud.byai.manager.mapper.users.UserPrivateParamMapper;
+import com.iwhalecloud.byai.state.application.service.message.MessageService;
+import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
+import com.iwhalecloud.byai.state.common.enums.MessageContentTypeEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.dto.ContentVo;
+import com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum;
+import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
+import com.iwhalecloud.byai.state.domain.chat.spi.PendingTaskConfirmHook;
+import com.iwhalecloud.byai.state.domain.message.service.MemoryMessageService;
 import com.iwhalecloud.byai.state.domain.chat.dto.MultiAgentMetadata;
 import com.iwhalecloud.byai.state.domain.chat.service.AssistantChatService;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
@@ -126,7 +134,7 @@ import java.util.stream.Stream;
  */
 @Slf4j
 @Service
-public class DevloopApplicationService {
+public class DevloopApplicationService implements PendingTaskConfirmHook {
 
     private static final Logger logger = LoggerFactory.getLogger(DevloopApplicationService.class);
 
@@ -159,6 +167,15 @@ public class DevloopApplicationService {
     private static final String AGENT_MAX_CONCURRENT_CODE = "DEVLOOP_AGENT_MAX_CONCURRENT";
 
     private static final int AGENT_MAX_CONCURRENT_DEFAULT = 1;
+
+    /**
+     * 接单确认词:整句命中才算确认,避免"确认一下需求范围"这类正常提问被当成接单。
+     * 提示语只展示 TASK_CONFIRM_HINT_WORD 一个说法,其余为容错同义词。
+     */
+    private static final String TASK_CONFIRM_HINT_WORD = "开始";
+
+    private static final Set<String> TASK_CONFIRM_WORDS = Set.of("开始", "接单", "确认", "收到", "ok", "start",
+        "开始任务", "确认接收");
 
     /**
      * 运营任务复用 byai_session.session_name，名称长度必须遵循现有会话主表的255字符限制。
@@ -299,6 +316,12 @@ public class DevloopApplicationService {
 
     @Autowired
     private AssistantChatService assistantChatService;
+
+    @Autowired
+    private MemoryMessageService memoryMessageService;
+
+    @Autowired
+    private MessageService messageService;
 
     @Autowired
     private SessionService sessionService;
@@ -2211,11 +2234,25 @@ public class DevloopApplicationService {
         }
 
         ScanSource source = findOrCreateManualSource(dto.getProjectId());
+
+        // 采集侧带外部稳定 id 时先按 (来源, originId) 查重:同一诉求重复采集要命中原行,
+        // 否则每轮采集都会在需求列表里刷出一份副本,派发人无从分辨哪条是真的。
+        String externalOriginId = StringUtils.trimToNull(dto.getOriginId());
+        if (externalOriginId != null) {
+            ScanRequireItem existing = scanRequireItemMapper.selectOne(new LambdaQueryWrapper<ScanRequireItem>()
+                .eq(ScanRequireItem::getSourceId, source.getSourceId())
+                .eq(ScanRequireItem::getOriginId, externalOriginId)
+                .last("limit 1"));
+            if (existing != null) {
+                return ResponseUtil.successResponse(toRequirementMap(existing, source));
+            }
+        }
+
         ScanLog log = scanLogService.createLog(source.getSourceId(), dto.getProjectId());
         ScanRequireItem item = scanLogService.createItem(
             log.getLogId(), source.getSourceId(), title, serializeManualRequirementContent(originType, dto.getBranch(),
                 dto.getRepoId(), originalContent, dto.getProductContent()),
-            "manual:" + UUID.randomUUID(), null, "created");
+            externalOriginId != null ? externalOriginId : "manual:" + UUID.randomUUID(), null, "created");
         scanLogService.completeLog(log.getLogId(), 1, 1);
 
         return ResponseUtil.successResponse(toRequirementMap(item, source));
@@ -2842,7 +2879,10 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 从需求创建任务（前端手动启动入口，身份取当前登录用户）
+     * 从需求创建任务。assigneeId 为空=自己启动(前端手动入口);非空=派给他人,自然语言派发技能走这条。
+     * 派给他人时必须切 CurrentUserHolder 到承接人:下游 createGroupChatSession 按当前用户定会话归属,
+     * RouteService#route 按 loginInfo.userCode 选沙箱,不切身份任务会落到操作人名下并跑错沙箱。
+     * awaitConfirm=true 时只建会话+插一条待接单提示,不下发提示词,等承接人回确认词再开工。
      */
     @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Map<String, Object>> createTask(Map<String, Object> params) {
@@ -2851,9 +2891,31 @@ public class DevloopApplicationService {
             : null;
         String title = params.containsKey("title") && params.get("title") != null ? params.get("title").toString()
             : null;
-        Long currentUserId = CurrentUserHolder.getCurrentUserId();
-        LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
-        return deriveTask(currentUserId, loginInfo, projectId, sourceItemId, title);
+        Long assigneeId = params.get("assigneeId") != null ? Long.valueOf(params.get("assigneeId").toString()) : null;
+        boolean awaitConfirm = Boolean.parseBoolean(String.valueOf(params.getOrDefault("awaitConfirm", "false")));
+
+        Long operatorId = CurrentUserHolder.getCurrentUserId();
+        if (assigneeId == null || assigneeId.equals(operatorId)) {
+            return deriveTask(operatorId, CurrentUserHolder.getLoginInfo(), projectId, sourceItemId, title,
+                awaitConfirm, operatorId);
+        }
+
+        LoginInfo assigneeLogin = loginApplicationService.getLoginInfo(assigneeId);
+        if (assigneeLogin == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.assignee.not.found"));
+        }
+        LoginInfo previous = CurrentUserHolder.getLoginInfo();
+        try {
+            CurrentUserHolder.setLoginInfo(assigneeLogin);
+            return deriveTask(assigneeId, assigneeLogin, projectId, sourceItemId, title, awaitConfirm, operatorId);
+        } finally {
+            // 还原操作人身份:本方法在请求线程内跑,泄漏身份会污染同请求后续逻辑。
+            if (previous != null) {
+                CurrentUserHolder.setLoginInfo(previous);
+            } else {
+                CurrentUserHolder.clearLoginInfo();
+            }
+        }
     }
 
     /**
@@ -3061,7 +3123,8 @@ public class DevloopApplicationService {
      * LoginInfo 构造）。
      */
     private ResponseUtil<Map<String, Object>> deriveTask(Long userId, LoginInfo loginInfo, Long projectId,
-                                                         Long sourceItemId, String title) {
+                                                         Long sourceItemId, String title, boolean awaitConfirm,
+                                                         Long operatorId) {
         // 防止重复启动：该需求已关联会话则拒绝重复启动
         if (sourceItemId != null) {
             ScanRequireItem existing = scanRequireItemMapper.selectById(sourceItemId);
@@ -3105,8 +3168,10 @@ public class DevloopApplicationService {
 
         // 会话即任务:建会话+算分支+写提示词+登记事务后异步 chat,单任务与拆分共用 startOneSession。
         // 分支名由后端按会话ID生成(单任务无用户自定义分支入口),故 explicitBranch 传 null。
-        SessionStart started = startOneSession(agentId, projectId, title, description, branchKind, repo, null,
-            loginInfo);
+        // awaitConfirm 时只建会话并插一条待接单提示,提示词不下发,承接人回确认词后由 confirmPendingTask 重算下发。
+        SessionStart started = awaitConfirm
+            ? startPendingSession(agentId, projectId, title, repo, operatorId)
+            : startOneSession(agentId, projectId, title, description, branchKind, repo, null, loginInfo);
         Long sessionId = started.sessionId();
 
         // 需求项回写 sessionId，标记“已启动”并支持跳转会话
@@ -3116,7 +3181,11 @@ public class DevloopApplicationService {
             item.setSessionId(sessionId);
             scanRequireItemMapper.updateById(item);
             // 登记需求→仓库子任务，让需求级就绪聚合与批量集成按 (需求,仓库) 维度可查，不再仅靠 1:1 的 sessionId 绑定。
-            scanItemTaskService.upsertOnStart(sourceItemId, projectId, repo.getRepoId(), sessionId, userId);
+            if (awaitConfirm) {
+                scanItemTaskService.upsertPendingConfirm(sourceItemId, projectId, repo.getRepoId(), sessionId, userId);
+            } else {
+                scanItemTaskService.upsertOnStart(sourceItemId, projectId, repo.getRepoId(), sessionId, userId);
+            }
         }
 
         Map<String, Object> result = new HashMap<>();
@@ -3124,7 +3193,132 @@ public class DevloopApplicationService {
         result.put("sessionId", sessionId);
         result.put("branchName", started.branchName());
         result.put("title", title);
+        result.put("awaitConfirm", awaitConfirm);
         return ResponseUtil.successResponse(result);
+    }
+
+    /**
+     * 派发待确认:建会话并插一条「等接单」的助手消息,但不下发任务提示词,沙箱不开工。
+     * 不能用 submitTaskChatAfterCommit:那条路把内容当用户消息发给 openclaw,沙箱收到就立刻干活。
+     * 提示词不落库,承接人确认时按 requirement/repo/sessionId 原样重算(见 resolvePendingTaskPrompt);
+     * 分支名只依赖 sessionId,故重算结果与此刻一致。
+     */
+    private SessionStart startPendingSession(Long agentId, Long projectId, String title, ProjectRepo repo,
+                                             Long operatorId) {
+        AssistantChatDto chatDto = new AssistantChatDto();
+        chatDto.setSessionId(null);
+        chatDto.setAgentId(agentId);
+        chatDto.setProjectId(projectId);
+        chatDto.setChatContent(title);
+        chatDto.setAccessTerminal("DevLoop");
+        chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
+        assistantChatService.createGroupChatSession(chatDto);
+        Long sessionId = chatDto.getSessionId();
+
+        String operatorName = resolveUserDisplayName(operatorId);
+        String repoName = repo != null && repo.getRepoFullName() != null ? repo.getRepoFullName() : "";
+        String notice = I18nUtil.get("devloop.task.pending.confirm.notice", operatorName, title, repoName,
+            TASK_CONFIRM_HINT_WORD);
+        insertAssistantNotice(sessionId, notice);
+
+        return new SessionStart(sessionId, buildBranchName(detectBranchKind(null, title), sessionId));
+    }
+
+    /**
+     * 往会话插一条助手消息,不触发模型、不进 openclaw 会话历史。
+     * 只作 ByClaw 侧展示:RouteService#route 只把当次 chatContent 发给沙箱,库里的消息沙箱看不到,
+     * 所以确认放行时必须重新下发完整提示词,不能指望数字员工"记得"这条。
+     */
+    private void insertAssistantNotice(Long sessionId, String content) {
+        MessageContext messageContext = new MessageContext(AgentTypeEnum.AGENT, sequenceService.nextVal());
+        messageContext.setAnswerText(new StringBuilder(content));
+        messageContext.setAnswerMessageList(Collections.singletonList(
+            messageService.generateMsgAnswerDelta(new ContentVo(MessageContentTypeEnum.TEXT.getCode(), content))));
+
+        AssistantChatDto noticeDto = new AssistantChatDto();
+        noticeDto.setSessionId(sessionId);
+        memoryMessageService.save(sessionId, ChatUseageEnum.SYSTEM_RESPONSE.getCode(), messageContext, noticeDto);
+    }
+
+    /**
+     * 承接人确认接单:命中确认词则重算完整任务提示词交回聊天主链路下发,子任务转 running。
+     * 返回 null = 该会话不在等确认或没命中确认词,调用方原样放行,不干扰普通会话。
+     * 提示词重算而非存库:入参全部可由 (requirement, repo, sessionId) 推出,分支名是 sessionId 的纯函数。
+     */
+    @Override
+    public String resolveConfirmedPrompt(Long sessionId, String userInput) {
+        if (sessionId == null) {
+            return null;
+        }
+        ScanItemTask pending = scanItemTaskService.findPendingConfirmBySession(sessionId);
+        if (pending == null) {
+            return null;
+        }
+        // 未命中确认词也必须改写:派发时那条通知只落在 byai_message_hot,沙箱侧会话历史是空的,
+        // 原样透传会让数字员工收到一句没有上下文的话。引导词里不带仓库/分支/需求描述,确认前无从开工。
+        if (!isTaskConfirmWord(userInput)) {
+            return buildPendingConfirmGuide(pending, userInput);
+        }
+        String prompt = resolvePendingTaskPrompt(pending);
+        if (prompt == null) {
+            return null;
+        }
+        scanItemTaskService.markRunning(pending.getTaskId(), CurrentUserHolder.getCurrentUserId());
+        return prompt;
+    }
+
+    /** 待接单会话收到非确认词时下发的引导提示词:只给标题与确认词,不给可开工的任何输入。 */
+    private String buildPendingConfirmGuide(ScanItemTask pending, String userInput) {
+        ScanRequireItem item = pending.getRequirementId() != null
+            ? scanRequireItemMapper.selectById(pending.getRequirementId())
+            : null;
+        String title = item != null && item.getTitle() != null ? item.getTitle() : "";
+        return I18nUtil.get("devloop.task.pending.confirm.guide", title,
+            StringUtils.defaultString(userInput), TASK_CONFIRM_HINT_WORD);
+    }
+
+    /**
+     * 待确认子任务 → 完整任务提示词。与派发时逐字一致:分支名只依赖 sessionId,其余入参按 id 反查。
+     */
+    private String resolvePendingTaskPrompt(ScanItemTask pending) {
+        ScanRequireItem item = pending.getRequirementId() != null
+            ? scanRequireItemMapper.selectById(pending.getRequirementId())
+            : null;
+        if (item == null) {
+            return null;
+        }
+        ProjectRepo repo = findProjectRepo(pending.getProjectId(), pending.getRepoId());
+        if (repo == null) {
+            return null;
+        }
+        String title = item.getTitle();
+        String description = StringUtils.isNotBlank(item.getContent()) ? getRequirementContent(item) : title;
+        String branchKind = detectBranchKind(item, title);
+        Project project = projectMapper.selectById(pending.getProjectId());
+        String projectName = project != null ? project.getProjectName() : "";
+        String branchName = buildBranchName(branchKind, pending.getSessionId());
+        return buildTaskPrompt(projectName, repo, branchName, branchKind, title, description);
+    }
+
+    /**
+     * 确认词判定:一组固定接单说法,容忍首尾空白、大小写与句末标点。
+     * 收紧到「短句且整句就是确认词」,避免承接人正常提问("确认一下需求范围")被误当接单。
+     */
+    private boolean isTaskConfirmWord(String userInput) {
+        if (StringUtils.isBlank(userInput)) {
+            return false;
+        }
+        String normalized = userInput.trim().toLowerCase().replaceAll("[\\s。.!!,,~]+$", "");
+        return TASK_CONFIRM_WORDS.contains(normalized);
+    }
+
+    /** 承接人显示名,取不到时回退为空串,不让提示语因缺名报错。 */
+    private String resolveUserDisplayName(Long userId) {
+        if (userId == null) {
+            return "";
+        }
+        LoginInfo login = loginApplicationService.getLoginInfo(userId);
+        return login != null && login.getUserName() != null ? login.getUserName() : "";
     }
 
     /**
@@ -3244,8 +3438,9 @@ public class DevloopApplicationService {
                 }
                 try {
                     CurrentUserHolder.setLoginInfo(memberLogin);
+                    // 定时自动派生不等确认:无人值守场景没人回确认词,建了会话就该直接开工。
                     ResponseUtil<Map<String, Object>> res = deriveTask(chosen.getUserId(), memberLogin, projectId,
-                        item.getItemId(), item.getTitle());
+                        item.getItemId(), item.getTitle(), false, chosen.getUserId());
                     if (res != null && res.getCode() == ResponseUtil.SUCCESS) {
                         // 派发成功才计入负载，供后续需求继续均衡
                         loadByAgent.merge(chosen.getAgentId(), 1, Integer::sum);

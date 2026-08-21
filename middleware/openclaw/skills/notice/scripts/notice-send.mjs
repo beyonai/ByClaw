@@ -12,6 +12,8 @@ const MEMBER_PATH = "open/api/v1/listProjectMembers";
 const PROJECT_PATH = "open/api/v1/selectProjectsByQo";
 const RESOLVE_PROJECT_PATH = "open/api/v1/resolveProjectBySession";
 const DINGTALK_SEND_PATH = "open/api/v1/dingtalk/sendUserToUser";
+// 业务路径,不在 /open/api 下:该层只是免登录白名单与签名校验所在,devloop 走同一个 Beyond-Token 拦截器。
+const REQUIREMENT_CREATE_PATH = "devloop/requirement/create";
 // 后端 Notices DTO 的 @Size(max = 100)，超出会整批 400，所以在客户端分批。
 const NOTICE_BATCH_SIZE = 100;
 const TITLE_MAX = 200;
@@ -395,6 +397,44 @@ async function projectsCommand(args) {
   return { ok: true, total: data?.total ?? projects.length, projects };
 }
 
+// 采集环节把规范化后的需求写进库,拿回平台 itemId 供派发环节派单。
+// 逐条发而不是批量:后端一次只收一条,且要让部分失败可定位到具体需求,不能一条坏的拖垮整批。
+async function requirementCreateCommand(args) {
+  const payload = await readPayload(args);
+  const rawItems = Array.isArray(payload) ? payload : payload?.requirements;
+  if (!Array.isArray(rawItems) || rawItems.length === 0) throw new PublicFailure("NOTICE_ITEMS_EMPTY");
+  const defaultProjectId = firstNonEmpty(args["project-id"], args.projectId, payload?.projectId);
+
+  const created = [];
+  const failed = [];
+  for (const item of rawItems) {
+    const projectId = firstNonEmpty(item?.projectId, defaultProjectId);
+    const title = firstNonEmpty(item?.title);
+    const originalContent = firstNonEmpty(item?.originalContent, item?.description);
+    // 三个必填项就地判掉,不发请求:后端也会拒,但那样拿不到是哪条需求缺什么。
+    if (!projectId || !title || !originalContent) {
+      failed.push({ id: item?.id ?? null, title: title ?? null, reason: "REQUIREMENT_FIELDS_MISSING" });
+      continue;
+    }
+    // originId 是幂等键,后端按 (来源, originId) 查重命中即原样返回。留空会每次新建。
+    const originId = firstNonEmpty(item?.originId, item?.sourceId);
+    try {
+      const data = await postJson(REQUIREMENT_CREATE_PATH, {
+        projectId: Number(projectId),
+        sourceType: firstNonEmpty(item?.sourceType, "manual"),
+        title,
+        originalContent,
+        productContent: firstNonEmpty(item?.productContent) || undefined,
+        originId: originId || undefined,
+      });
+      created.push({ id: item?.id ?? null, itemId: data?.itemId ?? null, title, originId: originId ?? null });
+    } catch (error) {
+      failed.push({ id: item?.id ?? null, title, reason: error?.code ?? error?.message ?? "REQUIREMENT_CREATE_FAILED" });
+    }
+  }
+  return { ok: failed.length === 0, total: rawItems.length, createdCount: created.length, created, failed };
+}
+
 function helpText() {
   return {
     ok: true,
@@ -405,6 +445,20 @@ function helpText() {
       projects: "node scripts/notice-send.mjs projects [--keyword <关键词>] [--page 1] [--size 20]  # projectId 缺失时列候选",
       "resolve-project":
         "node scripts/notice-send.mjs resolve-project --session-id <sessionId>  # 按会话反查 projectId",
+      "requirement-create":
+        "node scripts/notice-send.mjs requirement-create [--input <reqs.json>] [--project-id <projectId>]  # 需求入库,回吐 itemId",
+    },
+    requirementCreatePayload: {
+      projectId: "批次默认项目,单条可覆盖",
+      requirements: [
+        {
+          id: "req-001（本地编号，原样回吐便于调用方回填）",
+          title: "必填",
+          originalContent: "必填，缺省取 description",
+          originId: "幂等键，缺省取 sourceId；留空则每次新建",
+          sourceType: "manual|customer_feedback|internal_proposal，默认 manual",
+        },
+      ],
     },
     sendPayload: {
       title: "批次默认标题，单条可覆盖（<=200）",
@@ -426,6 +480,7 @@ async function main() {
   if (command === "members") return membersCommand(args);
   if (command === "projects") return projectsCommand(args);
   if (command === "resolve-project") return resolveProjectCommand(args);
+  if (command === "requirement-create") return requirementCreateCommand(args);
   throw new PublicFailure("NOTICE_UNKNOWN_COMMAND", command);
 }
 
