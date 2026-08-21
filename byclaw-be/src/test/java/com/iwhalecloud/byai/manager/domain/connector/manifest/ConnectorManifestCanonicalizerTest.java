@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorManifestCommandResolver;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +32,123 @@ class ConnectorManifestCanonicalizerTest {
         String canonical = new ConnectorManifestCanonicalizer(new ObjectMapper()).canonicalize(connector, manifest);
 
         assertThat(canonical).contains("\"type\":\"oauth2\"", "\"mode\":\"credential-reference\"");
+    }
+
+    @Test
+    void acceptsCliManagedEnvironmentManifestAndExtractsItsAllowlist() {
+        ConnectorInfo connector = connector("ima-openapi");
+        connector.setSkillCode("ima-skill");
+        String manifest = managedEnvironmentManifest("cli", "[\"IMA_OPENAPI_CLIENTID\",\"IMA_OPENAPI_APIKEY\"]");
+
+        String canonical = canonicalizer.canonicalize(connector, manifest);
+
+        assertThat(canonical).contains("\"mode\":\"managed-environment\"");
+        assertThat(canonicalizer.extractManagedEnvironmentKeys(connector, manifest))
+            .containsExactly("IMA_OPENAPI_APIKEY", "IMA_OPENAPI_CLIENTID");
+    }
+
+    @Test
+    void rejectsInvalidManagedEnvironmentManifests() {
+        ConnectorInfo connector = connector("ima-openapi");
+        connector.setSkillCode("ima-skill");
+
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector,
+            managedEnvironmentManifest("cli", "[]")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("managedEnvironmentKeys");
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector,
+            managedEnvironmentManifest("cli", "[\"lower-case\"]")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("managedEnvironmentKeys");
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector,
+            managedEnvironmentManifest("cli", "[\"IMA_OPENAPI_CLIENTID\",\"IMA_OPENAPI_CLIENTID\"]")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("duplicate");
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector,
+            managedEnvironmentManifest("cli", "[\"IMA_OPENAPI_CLIENTID\"]")
+                .replace("\"environment\":{}", "\"nativePath\":\"/by/.connector-auth/.ima\",\"environment\":{}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("nativePath");
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector,
+            managedEnvironmentManifest("oauth2", "[\"IMA_OPENAPI_CLIENTID\"]")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("incompatible");
+    }
+
+    @Test
+    void rejectsManagedEnvironmentWithStaticEnvironmentValues() {
+        ConnectorInfo connector = connector("ima-openapi");
+        connector.setSkillCode("ima-skill");
+
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector,
+            managedEnvironmentManifest("cli", "[\"IMA_OPENAPI_CLIENTID\"]")
+                .replace("\"environment\":{}", "\"environment\":{\"IMA_OPENAPI_CLIENTID\":\"value\"}")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("static environment");
+    }
+
+    @Test
+    void managedEnvironmentRequiresBeAuthJobAuthorization() {
+        ConnectorInfo connector = connector("ima-openapi");
+        connector.setSkillCode("ima-skill");
+
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector,
+            managedEnvironmentManifest("cli", "[\"IMA_OPENAPI_CLIENTID\"]")
+                .replace(",\"authorizeIn\":\"be-auth-job\"", "")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("authorizeIn");
+        assertThatThrownBy(() -> canonicalizer.canonicalize(
+            connector,
+            managedEnvironmentManifest("cli", "[\"IMA_OPENAPI_CLIENTID\"]")
+                .replace("\"authorizeIn\":\"be-auth-job\"", "\"authorizeIn\":\"user-sandbox\"")))
+            .isInstanceOf(InvalidConnectorManifestException.class)
+            .hasMessageContaining("authorizeIn");
+    }
+
+    @Test
+    void canonicalizesManagedEnvironmentKeysIndependentlyOfTheirInputOrder() {
+        ConnectorInfo connector = connector("ima-openapi");
+        connector.setSkillCode("ima-skill");
+        String first = managedEnvironmentManifest("cli", "[\"IMA_OPENAPI_CLIENTID\",\"IMA_OPENAPI_APIKEY\"]");
+        String second = managedEnvironmentManifest("cli", "[\"IMA_OPENAPI_APIKEY\",\"IMA_OPENAPI_CLIENTID\"]");
+        ConnectorManifestCommandResolver resolver = new ConnectorManifestCommandResolver(new ObjectMapper(), canonicalizer);
+
+        assertThat(canonicalizer.canonicalize(connector, first))
+            .isEqualTo(canonicalizer.canonicalize(connector, second));
+        connector.setRuntimeManifest(first);
+        String firstDigest = resolver.resolve(connector).digest();
+        connector.setRuntimeManifest(second);
+        assertThat(resolver.resolve(connector).digest()).isEqualTo(firstDigest);
+    }
+
+    @Test
+    void sortsManagedEnvironmentKeysOnlyAtTheRootAuthStoragePath() throws Exception {
+        ConnectorInfo connector = connector("ima-openapi");
+        connector.setSkillCode("ima-skill");
+        String manifest = managedEnvironmentManifest("cli", "[\"IMA_OPENAPI_CLIENTID\",\"IMA_OPENAPI_APIKEY\"]")
+            .replace(",\"authorizeIn\":\"be-auth-job\"", """
+                ,"extension":{"mode":"managed-environment","managedEnvironmentKeys":["Z_KEY","A_KEY"]},
+                "metadata":{"mode":"managed-environment","managedEnvironmentKeys":"not-an-array"},
+                "authorizeIn":"be-auth-job"
+                """);
+
+        JsonNode canonical = new ObjectMapper().readTree(canonicalizer.canonicalize(connector, manifest));
+
+        assertThat(canonical.path("authStorage").path("managedEnvironmentKeys"))
+            .extracting(JsonNode::asText)
+            .containsExactly("IMA_OPENAPI_APIKEY", "IMA_OPENAPI_CLIENTID");
+        assertThat(canonical.path("runtime").path("extension").path("managedEnvironmentKeys"))
+            .extracting(JsonNode::asText)
+            .containsExactly("Z_KEY", "A_KEY");
+        assertThat(canonical.path("runtime").path("metadata").path("managedEnvironmentKeys").asText())
+            .isEqualTo("not-an-array");
     }
 
     private ConnectorManifestCanonicalizer canonicalizer;
@@ -245,5 +364,20 @@ class ConnectorManifestCanonicalizerTest {
               "skill":{"code":"dws","source":"system-builtin","installScope":"user","grantScope":"agent"}
             }
             """.formatted(environment);
+    }
+
+    private String managedEnvironmentManifest(String runtimeType, String managedEnvironmentKeys) {
+        String commands = "cli".equals(runtimeType) ? ",\"commands\":{\"version\":[[\"ima\",\"--version\"]]}" : "";
+        return """
+            {
+              "schemaVersion":"1.0",
+              "id":"ima-openapi",
+              "version":"1.0.0",
+              "runtime":{"type":"%s"%s,"authorizeIn":"be-auth-job"},
+              "authStorage":{"mode":"managed-environment","owner":"be-auth-job",
+                "runtimeMutation":"provider-refresh-only","managedEnvironmentKeys":%s,"environment":{}},
+              "skill":{"code":"ima-skill","source":"system-builtin","installScope":"user","grantScope":"agent"}
+            }
+            """.formatted(runtimeType, commands, managedEnvironmentKeys);
     }
 }

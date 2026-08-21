@@ -69,6 +69,31 @@ public class ConnectorConnectionStateService {
         return auth;
     }
 
+    /** Persists verified form credentials and the binding in the same transaction. */
+    @Transactional(rollbackFor = Exception.class)
+    public ConnectorAuth saveEnabledCredentialAuthorization(
+            String userId,
+            ConnectorInfo connector,
+            AuthorizationStatusResult statusResult,
+            String authorizationId,
+            Map<String, String> runtimeEnvironment) {
+        UserIdentity user = requireUser(userId);
+        boolean manifestChanged = manifestService.upsertAndEnable(user.userId(), connector, runtimeEnvironment);
+
+        ConnectorAuth existing = findActiveAuthorization(userId, connector.getConnectorId());
+        Date now = new Date();
+        ConnectorAuth auth = existing == null ? new ConnectorAuth() : existing;
+        applyEnabledAuthorization(auth, userId, connector, statusResult, authorizationId, now);
+        if (existing != null) {
+            auth.setUpdateTime(now);
+            requireSingleAffectedRow(connectorAuthMapper.updateById(auth));
+        } else {
+            auth = insertOrUpdateWinner(auth, userId, connector, statusResult, authorizationId, now);
+        }
+        refreshPrivateParamCache(user);
+        return auth;
+    }
+
     @Transactional(rollbackFor = Exception.class)
     public void updateEnableFlag(String userId, Long connectorId, boolean enabled) {
         UserIdentity user = requireUser(userId);
@@ -93,19 +118,33 @@ public class ConnectorConnectionStateService {
     public void revokeAuthorization(String userId, Long connectorId) {
         UserIdentity user = requireUser(userId);
         ConnectorAuth auth = findActiveAuthorization(userId, connectorId);
-        if (auth == null) {
-            throw new IllegalArgumentException("连接器授权记录不存在");
-        }
         ConnectorInfo connector = connectorInfoMapper.selectById(connectorId);
-        if (connector == null || !"00A".equals(connector.getStatusCd())) {
+        if (connector == null) {
             throw new IllegalArgumentException("连接器不存在或已失效");
         }
 
-        boolean manifestChanged = manifestService.disable(user.userId(), connector);
-        auth.setEnableFlag("N");
-        auth.setStatusCd("00X");
-        auth.setUpdateTime(new Date());
-        requireSingleAffectedRow(connectorAuthMapper.updateById(auth));
+        boolean credentialConnector = "AK_SK".equals(connector.getAuthMode());
+        if (!credentialConnector && !"00A".equals(connector.getStatusCd())) {
+            throw new IllegalArgumentException("连接器不存在或已失效");
+        }
+        if (auth == null && !credentialConnector) {
+            throw new IllegalArgumentException("连接器授权记录不存在");
+        }
+        boolean manifestChanged;
+        if (credentialConnector) {
+            manifestChanged = manifestService.removeManagedCredentials(user.userId(), connector);
+        } else {
+            boolean managedCredentials = !manifestService.managedEnvironmentKeys(connector).isEmpty();
+            manifestChanged = managedCredentials
+                ? manifestService.removeManagedCredentials(user.userId(), connector)
+                : manifestService.disable(user.userId(), connector);
+        }
+        if (auth != null) {
+            auth.setEnableFlag("N");
+            auth.setStatusCd("00X");
+            auth.setUpdateTime(new Date());
+            requireSingleAffectedRow(connectorAuthMapper.updateById(auth));
+        }
         scheduleCacheRefresh(manifestChanged, user);
     }
 
@@ -118,6 +157,7 @@ public class ConnectorConnectionStateService {
             .orderByDesc(ConnectorAuth::getUpdateTime)
             .last("LIMIT 1"));
     }
+
 
     private ConnectorAuth insertOrUpdateWinner(
             ConnectorAuth auth,
@@ -249,6 +289,10 @@ public class ConnectorConnectionStateService {
         if (!manifestChanged) {
             return;
         }
+        refreshPrivateParamCache(user);
+    }
+
+    private void refreshPrivateParamCache(UserIdentity user) {
         privateParamService.refreshPrivateParamCacheAfterCommit(user.userId(), user.userCode());
     }
 

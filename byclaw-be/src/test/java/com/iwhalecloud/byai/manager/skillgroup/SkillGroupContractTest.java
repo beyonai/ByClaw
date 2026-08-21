@@ -486,6 +486,23 @@ class SkillGroupContractTest {
     }
 
     @Test
+    void imaRuntimeSkillGrantRequiresActiveTenantEmployeeSkillAndRelation() throws Exception {
+        String sql = normalizedBoundSql(buildMapperConfiguration(), "hasActiveDigitalEmployeeSkill", Map.of(
+            "digitalEmployeeId", 30001L, "tenantId", 60001L, "skillCode", "ima-skill")).getSql();
+
+        assertThat(sql)
+            .contains("employee.com_acct_id = ?")
+            .contains("employee.resource_biz_type = 'dig_employee'")
+            .contains("employee.resource_status = 2")
+            .contains("skill_resource.com_acct_id = ?")
+            .contains("skill_resource.resource_biz_type = 'skill'")
+            .contains("skill_resource.resource_status = 2")
+            .contains("skill_resource.resource_code = ?")
+            .contains("relation.rel_type_name = 'dig_employee_skill' or relation.rel_type_name is null")
+            .contains("relation.rel_status = 1 or relation.rel_status is null");
+    }
+
+    @Test
     void activeSkillBatchLockIsTenantTypeStatusGuardedSortedAndForUpdate() throws Exception {
         Configuration configuration = buildMapperConfiguration();
         Map<String, Object> parameters = new HashMap<>();
@@ -667,6 +684,7 @@ class SkillGroupContractTest {
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectMemberRelations")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectDigitalEmployeeSkillRelations")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectInstalledSkillIds")).isTrue();
+        assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "hasActiveDigitalEmployeeSkill")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectSkillRelationsWithSourceInfo")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectSkillRelationsWithSourceInfoByTenant")).isTrue();
         assertThat(configuration.hasStatement(MAPPER_NAMESPACE + "selectMemberRelationsIncludingInactive")).isTrue();

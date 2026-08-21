@@ -17,6 +17,8 @@ import com.iwhalecloud.byai.manager.mapper.users.UserPrivateParamMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
@@ -42,6 +44,8 @@ class ConnectorManifestServiceTest {
         );
         when(mapper.insertConnectorParamIgnoreConflict(any())).thenReturn(1);
         when(mapper.updateById(any())).thenReturn(1);
+        org.mockito.Mockito.doReturn(1).when(mapper).deleteById(
+            org.mockito.ArgumentMatchers.<java.io.Serializable>any());
     }
 
     @Test
@@ -157,6 +161,151 @@ class ConnectorManifestServiceTest {
         verify(mapper, times(2)).updateById(any());
     }
 
+    @Test
+    void managedCredentialReplacementDeletesObsoleteConnectorOwnedKeys() {
+        UserPrivateParam clientId = existing(
+            "IMA_OPENAPI_CLIENTID", "stored-client-id", "CONNECTOR", "ima-openapi", "DISABLED");
+        UserPrivateParam apiKey = existing(
+            "IMA_OPENAPI_APIKEY", "stored-api-key", "CONNECTOR", "ima-openapi", "NORMAL");
+        UserPrivateParam ignoredKey = existing(
+            "IMA_OPENAPI_IGNORED", "ignored", "CONNECTOR", "ima-openapi", "NORMAL");
+        UserPrivateParam otherConnector = existing(
+            "OTHER_CONNECTOR_KEY", "other", "CONNECTOR", "other-connector", "NORMAL");
+        when(mapper.selectList(any())).thenReturn(List.of(clientId, apiKey, ignoredKey, otherConnector));
+        ConnectorInfo connector = imaConnector();
+        assertThat(service.upsertAndEnable(USER_ID, connector, Map.of(
+            "IMA_OPENAPI_CLIENTID", "client-id", "IMA_OPENAPI_APIKEY", "api-key"))).isTrue();
+        assertThat(clientId.getStatus()).isEqualTo("NORMAL");
+        assertThat(apiKey.getStatus()).isEqualTo("NORMAL");
+        verify(mapper).deleteById(ignoredKey.getParamId());
+        assertThat(otherConnector.getStatus()).isEqualTo("NORMAL");
+        verify(mapper, never()).insertConnectorParamIgnoreConflict(any());
+        verify(mapper, times(2)).updateById(any());
+    }
+
+    @Test
+    void managedCredentialEnableWithoutOverridesRejectsMissingCredentialPairBeforeWriting() {
+        when(mapper.selectList(any())).thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.upsertAndEnable(USER_ID, imaConnector(), Map.of()))
+            .isInstanceOf(IllegalStateException.class);
+
+        verify(mapper, never()).insertConnectorParamIgnoreConflict(any());
+        verify(mapper, never()).updateById(any());
+    }
+
+    @Test
+    void managedCredentialEnableWithoutOverridesRejectsMixedPairBeforeWriting() {
+        when(mapper.selectList(any())).thenReturn(List.of(
+            existing("IMA_OPENAPI_CLIENTID", "client", "CONNECTOR", "ima-openapi", "DISABLED"),
+            existing("IMA_OPENAPI_APIKEY", "key", "CONNECTOR", "ima-openapi", "NORMAL")));
+
+        assertThatThrownBy(() -> service.upsertAndEnable(USER_ID, imaConnector(), Map.of()))
+            .isInstanceOf(IllegalStateException.class);
+
+        verify(mapper, never()).updateById(any());
+    }
+
+    @Test
+    void managedCredentialPairCreatesExactlyTwoEncryptedConnectorRows() {
+        when(mapper.selectList(any())).thenReturn(List.of());
+        when(sequenceService.nextVal()).thenReturn(71L, 72L);
+
+        service.upsertAndEnable(USER_ID, imaConnector(), Map.of(
+            "IMA_OPENAPI_CLIENTID", "client-id", "IMA_OPENAPI_APIKEY", "api-key"));
+
+        ArgumentCaptor<UserPrivateParam> rows = ArgumentCaptor.forClass(UserPrivateParam.class);
+        verify(mapper, times(2)).insertConnectorParamIgnoreConflict(rows.capture());
+        assertThat(rows.getAllValues()).allSatisfy(row -> {
+            assertThat(row.getParamSource()).isEqualTo("CONNECTOR");
+            assertThat(row.getSourceRef()).isEqualTo("ima-openapi");
+            assertThat(row.getParamValueLast4()).isNull();
+            assertThat(row.getParamValueCipher()).isNotEqualTo("client-id").isNotEqualTo("api-key");
+        });
+        assertThat(rows.getAllValues()).extracting(row -> Sm4Util.decrypt(row.getParamValueCipher()))
+            .containsExactlyInAnyOrder("client-id", "api-key");
+    }
+
+    @Test
+    void managedCredentialPairRejectsPartialExtraAndForeignCollisionsBeforeWrites() {
+        when(mapper.selectList(any())).thenReturn(List.of(existing(
+            "IMA_OPENAPI_CLIENTID", "user", "USER", null, "NORMAL")));
+        assertThatThrownBy(() -> service.upsertAndEnable(USER_ID, imaConnector(), Map.of("IMA_OPENAPI_CLIENTID", "one")))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.upsertAndEnable(USER_ID, imaConnector(), Map.of(
+            "IMA_OPENAPI_CLIENTID", "one", "IMA_OPENAPI_APIKEY", "two", "EXTRA", "three")))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.upsertAndEnable(USER_ID, imaConnector(), Map.of(
+            "IMA_OPENAPI_CLIENTID", "one", "IMA_OPENAPI_APIKEY", "two")))
+            .isInstanceOf(ConnectorParameterConflictException.class);
+        verify(mapper, never()).insertConnectorParamIgnoreConflict(any());
+        verify(mapper, never()).updateById(any());
+    }
+
+    @Test
+    void readAndRemoveManagedCredentialsStayBoundedToOwnedConnectorRows() {
+        UserPrivateParam client = existing("IMA_OPENAPI_CLIENTID", "client", "CONNECTOR", "ima-openapi", "NORMAL");
+        UserPrivateParam key = existing("IMA_OPENAPI_APIKEY", "key", "CONNECTOR", "ima-openapi", "NORMAL");
+        UserPrivateParam foreign = existing("IMA_OPENAPI_CLIENTID", "foreign", "CONNECTOR", "other", "NORMAL");
+        UserPrivateParam extra = existing("OTHER", "other", "CONNECTOR", "ima-openapi", "NORMAL");
+        foreign.setParamId(9901L);
+        extra.setParamId(9902L);
+        when(mapper.selectList(any())).thenReturn(List.of(client, key, foreign, extra));
+
+        assertThat(service.readManagedCredentials(USER_ID, imaConnector(),
+            Set.of("IMA_OPENAPI_CLIENTID", "IMA_OPENAPI_APIKEY")))
+            .containsExactlyInAnyOrderEntriesOf(Map.of("IMA_OPENAPI_CLIENTID", "client", "IMA_OPENAPI_APIKEY", "key"));
+        assertThat(service.removeManagedCredentials(USER_ID, imaConnector())).isTrue();
+        verify(mapper).deleteById(client.getParamId());
+        verify(mapper).deleteById(key.getParamId());
+        verify(mapper, never()).deleteById(foreign.getParamId());
+        verify(mapper).deleteById(extra.getParamId());
+    }
+
+    @Test
+    void verificationReadAcceptsCompleteDisabledPairWithoutChangingRows() {
+        UserPrivateParam client = existing(
+            "IMA_OPENAPI_CLIENTID", "client", "CONNECTOR", "ima-openapi", "DISABLED");
+        UserPrivateParam key = existing(
+            "IMA_OPENAPI_APIKEY", "key", "CONNECTOR", "ima-openapi", "DISABLED");
+        when(mapper.selectList(any())).thenReturn(List.of(client, key));
+
+        assertThat(service.readManagedCredentialsForVerification(USER_ID, imaConnector(),
+            Set.of("IMA_OPENAPI_CLIENTID", "IMA_OPENAPI_APIKEY")))
+            .containsExactlyInAnyOrderEntriesOf(Map.of(
+                "IMA_OPENAPI_CLIENTID", "client", "IMA_OPENAPI_APIKEY", "key"));
+
+        assertThat(client.getStatus()).isEqualTo("DISABLED");
+        assertThat(key.getStatus()).isEqualTo("DISABLED");
+        verify(mapper, never()).updateById(any());
+    }
+
+    @Test
+    void verificationReadRejectsMixedMissingExtraAndDuplicateOwnedRows() {
+        ConnectorInfo connector = imaConnector();
+        UserPrivateParam client = existing(
+            "IMA_OPENAPI_CLIENTID", "client", "CONNECTOR", "ima-openapi", "DISABLED");
+        UserPrivateParam key = existing(
+            "IMA_OPENAPI_APIKEY", "key", "CONNECTOR", "ima-openapi", "NORMAL");
+        UserPrivateParam extra = existing("EXTRA", "extra", "CONNECTOR", "ima-openapi", "DISABLED");
+        UserPrivateParam duplicate = existing(
+            "IMA_OPENAPI_CLIENTID", "duplicate", "CONNECTOR", "ima-openapi", "DISABLED");
+
+        when(mapper.selectList(any())).thenReturn(List.of(client, key));
+        assertThatThrownBy(() -> service.readManagedCredentialsForVerification(USER_ID, connector,
+            Set.of("IMA_OPENAPI_CLIENTID", "IMA_OPENAPI_APIKEY"))).isInstanceOf(IllegalStateException.class);
+        when(mapper.selectList(any())).thenReturn(List.of(client));
+        assertThatThrownBy(() -> service.readManagedCredentialsForVerification(USER_ID, connector,
+            Set.of("IMA_OPENAPI_CLIENTID", "IMA_OPENAPI_APIKEY"))).isInstanceOf(IllegalStateException.class);
+        when(mapper.selectList(any())).thenReturn(List.of(client, extra));
+        assertThatThrownBy(() -> service.readManagedCredentialsForVerification(USER_ID, connector,
+            Set.of("IMA_OPENAPI_CLIENTID", "IMA_OPENAPI_APIKEY"))).isInstanceOf(IllegalStateException.class);
+        when(mapper.selectList(any())).thenReturn(List.of(client, duplicate,
+            existing("IMA_OPENAPI_APIKEY", "key", "CONNECTOR", "ima-openapi", "DISABLED")));
+        assertThatThrownBy(() -> service.readManagedCredentialsForVerification(USER_ID, connector,
+            Set.of("IMA_OPENAPI_CLIENTID", "IMA_OPENAPI_APIKEY"))).isInstanceOf(IllegalStateException.class);
+    }
+
     private UserPrivateParam existing(
             String key,
             String value,
@@ -185,6 +334,28 @@ class ConnectorManifestServiceTest {
         connector.setConnectorCode("dingtalk");
         connector.setConnectorName("钉钉");
         connector.setRuntimeManifest(manifest);
+        return connector;
+    }
+
+    private ConnectorInfo imaConnector() {
+        ConnectorInfo connector = new ConnectorInfo();
+        connector.setConnectorId(16L);
+        connector.setConnectorCode("ima-openapi");
+        connector.setConnectorName("IMA");
+        connector.setSkillCode("ima-skill");
+        connector.setRuntimeManifest("""
+            {
+              "schemaVersion":"1.0",
+              "id":"ima-openapi",
+              "version":"1.0.0",
+              "runtime":{"type":"cli","authorizeIn":"be-auth-job",
+                "commands":{"version":[["ima","--version"]]}},
+              "authStorage":{"mode":"managed-environment","owner":"be-auth-job",
+                "runtimeMutation":"provider-refresh-only",
+                "managedEnvironmentKeys":["IMA_OPENAPI_CLIENTID","IMA_OPENAPI_APIKEY"],"environment":{}},
+              "skill":{"code":"ima-skill","source":"system-builtin","installScope":"user","grantScope":"agent"}
+            }
+            """);
         return connector;
     }
 

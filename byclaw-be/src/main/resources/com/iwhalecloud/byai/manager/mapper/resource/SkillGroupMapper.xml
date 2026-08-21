@@ -404,6 +404,25 @@
         </choose>
     </select>
 
+    <select id="hasActiveDigitalEmployeeSkill" resultType="boolean">
+        SELECT CASE WHEN COUNT(*) &gt; 0 THEN TRUE ELSE FALSE END
+        FROM ss_resource_rel_detail relation
+        JOIN ss_resource employee
+          ON employee.resource_id = relation.resource_id
+        JOIN ss_resource skill_resource
+          ON skill_resource.resource_id = relation.rel_resource_id
+        WHERE relation.resource_id = #{digitalEmployeeId}
+          AND employee.com_acct_id = #{tenantId}
+          AND employee.resource_biz_type = 'DIG_EMPLOYEE'
+          AND employee.resource_status = 2
+          AND skill_resource.com_acct_id = #{tenantId}
+          AND skill_resource.resource_biz_type = 'SKILL'
+          AND skill_resource.resource_status = 2
+          AND skill_resource.resource_code = #{skillCode}
+          AND (relation.rel_type_name = 'DIG_EMPLOYEE_SKILL' OR relation.rel_type_name IS NULL)
+          AND (relation.rel_status = 1 OR relation.rel_status IS NULL)
+    </select>
+
     <insert id="insertDigitalEmployeeSkillIfAbsent">
         MERGE INTO ss_resource_rel_detail target
         USING (

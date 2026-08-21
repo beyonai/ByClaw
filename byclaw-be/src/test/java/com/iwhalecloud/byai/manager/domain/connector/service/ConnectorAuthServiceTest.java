@@ -23,12 +23,18 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
+
+import com.iwhalecloud.byai.manager.domain.connector.authorization.RedisAuthorizationSessionRepository;
+
+import java.util.Optional;
 
 class ConnectorAuthServiceTest {
 
     private ConnectorAuthMapper connectorAuthMapper;
     private ConnectorInfoMapper connectorInfoMapper;
     private ConnectorConnectionStateService connectionStateService;
+    private RedisAuthorizationSessionRepository sessionRepository;
     private ConnectorAuthService service;
 
     @BeforeEach
@@ -36,10 +42,12 @@ class ConnectorAuthServiceTest {
         connectorAuthMapper = mock(ConnectorAuthMapper.class);
         connectorInfoMapper = mock(ConnectorInfoMapper.class);
         connectionStateService = mock(ConnectorConnectionStateService.class);
+        sessionRepository = mock(RedisAuthorizationSessionRepository.class);
         service = new ConnectorAuthService();
         ReflectionTestUtils.setField(service, "connectorAuthMapper", connectorAuthMapper);
         ReflectionTestUtils.setField(service, "connectorInfoMapper", connectorInfoMapper);
         ReflectionTestUtils.setField(service, "connectionStateService", connectionStateService);
+        ReflectionTestUtils.setField(service, "sessionRepository", sessionRepository);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(1001L);
@@ -88,7 +96,38 @@ class ConnectorAuthServiceTest {
     }
 
     @Test
-    void updateEnableFlagDelegatesToTransactionalConnectionStateService() {
+    void updateEnableFlagUsesTheSharedOperationLockBeforeChangingState() {
+        when(sessionRepository.tryAcquireStartLock(org.mockito.ArgumentMatchers.eq("1001"),
+            org.mockito.ArgumentMatchers.eq(3001L), org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.of("lock-token"));
+
+        service.updateEnableFlag(3001L, true);
+
+        verify(connectionStateService).updateEnableFlag("1001", 3001L, true);
+        verify(sessionRepository).releaseStartLock("1001", 3001L, "lock-token");
+    }
+
+    @Test
+    void updateEnableFlagRejectsAConcurrentConnectorOperation() {
+        when(sessionRepository.tryAcquireStartLock(org.mockito.ArgumentMatchers.eq("1001"),
+            org.mockito.ArgumentMatchers.eq(3001L), org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.updateEnableFlag(3001L, false))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("进行中的授权任务");
+
+        verifyNoInteractions(connectionStateService);
+    }
+
+    @Test
+    void updateEnableFlagKeepsTheCommittedStateWhenLockReleaseFails() {
+        when(sessionRepository.tryAcquireStartLock(org.mockito.ArgumentMatchers.eq("1001"),
+            org.mockito.ArgumentMatchers.eq(3001L), org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.of("lock-token"));
+        doThrow(new IllegalStateException("redis unavailable"))
+            .when(sessionRepository).releaseStartLock("1001", 3001L, "lock-token");
+
         service.updateEnableFlag(3001L, true);
 
         verify(connectionStateService).updateEnableFlag("1001", 3001L, true);

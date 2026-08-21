@@ -27,6 +27,9 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorAuthorizationProvider;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialFormProvider;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialFormProviderRegistry;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialFormVerification;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorProvisionalCredentialCleaner;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorManifestCommandResolver;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
@@ -70,6 +73,8 @@ public class ConnectorAuthorizationService {
     private final ConnectorConnectionStateService connectionStateService;
     private final AuthorizationQrCodeEncoder qrCodeEncoder;
     private final ConnectorManifestCommandResolver manifestCommandResolver;
+    private final ConnectorCredentialFormProviderRegistry credentialFormProviderRegistry;
+    private final ConnectorCredentialVerificationGuard credentialVerificationGuard;
 
     @Autowired
     public ConnectorAuthorizationService(
@@ -80,7 +85,9 @@ public class ConnectorAuthorizationService {
             SequenceService sequenceService,
             ConnectorConnectionStateService connectionStateService,
             AuthorizationQrCodeEncoder qrCodeEncoder,
-            ConnectorManifestCommandResolver manifestCommandResolver) {
+            ConnectorManifestCommandResolver manifestCommandResolver,
+            ConnectorCredentialFormProviderRegistry credentialFormProviderRegistry,
+            ConnectorCredentialVerificationGuard credentialVerificationGuard) {
         this.connectorInfoService = connectorInfoService;
         this.providerRegistry = providerRegistry;
         this.sessionRepository = sessionRepository;
@@ -89,6 +96,23 @@ public class ConnectorAuthorizationService {
         this.connectionStateService = connectionStateService;
         this.qrCodeEncoder = qrCodeEncoder;
         this.manifestCommandResolver = manifestCommandResolver;
+        this.credentialFormProviderRegistry = credentialFormProviderRegistry;
+        this.credentialVerificationGuard = credentialVerificationGuard;
+    }
+
+    ConnectorAuthorizationService(
+            ConnectorInfoService connectorInfoService,
+            AuthorizationProviderRegistry providerRegistry,
+            RedisAuthorizationSessionRepository sessionRepository,
+            ConnectorAuthMapper connectorAuthMapper,
+            SequenceService sequenceService,
+            ConnectorConnectionStateService connectionStateService,
+            AuthorizationQrCodeEncoder qrCodeEncoder,
+            ConnectorManifestCommandResolver manifestCommandResolver,
+            ConnectorCredentialFormProviderRegistry credentialFormProviderRegistry) {
+        this(connectorInfoService, providerRegistry, sessionRepository, connectorAuthMapper, sequenceService,
+            connectionStateService, qrCodeEncoder, manifestCommandResolver, credentialFormProviderRegistry,
+            new ConnectorCredentialVerificationGuard(new ConnectorSkillAuthorizationSyncProperties(32, 0)));
     }
 
     ConnectorAuthorizationService(
@@ -107,7 +131,9 @@ public class ConnectorAuthorizationService {
             sequenceService,
             connectionStateService,
             qrCodeEncoder,
-            null
+            null,
+            null,
+            new ConnectorCredentialVerificationGuard(new ConnectorSkillAuthorizationSyncProperties(32, 0))
         );
     }
 
@@ -126,8 +152,25 @@ public class ConnectorAuthorizationService {
             sequenceService,
             null,
             new AuthorizationQrCodeEncoder(),
-            null
+            null,
+            null,
+            new ConnectorCredentialVerificationGuard(new ConnectorSkillAuthorizationSyncProperties(32, 0))
         );
+    }
+
+    ConnectorAuthorizationService(
+            ConnectorInfoService connectorInfoService,
+            AuthorizationProviderRegistry providerRegistry,
+            RedisAuthorizationSessionRepository sessionRepository,
+            ConnectorAuthMapper connectorAuthMapper,
+            SequenceService sequenceService,
+            ConnectorConnectionStateService connectionStateService,
+            AuthorizationQrCodeEncoder qrCodeEncoder,
+            ConnectorManifestCommandResolver manifestCommandResolver) {
+        this(
+            connectorInfoService, providerRegistry, sessionRepository, connectorAuthMapper, sequenceService,
+            connectionStateService, qrCodeEncoder, manifestCommandResolver, null,
+            new ConnectorCredentialVerificationGuard(new ConnectorSkillAuthorizationSyncProperties(32, 0)));
     }
 
     public ConnectorAuthorizationDto start(StartConnectorAuthorizationRequest request, String userId) {
@@ -136,6 +179,9 @@ public class ConnectorAuthorizationService {
         if (connector == null || !"00A".equals(connector.getStatusCd())) {
             return failed(null, request.getConnectorId(), CONNECTOR_NOT_FOUND, "连接器不存在或已失效", null);
         }
+        if (!"AK_SK".equals(connector.getAuthMode())) {
+            validateRedirectUrl(request.getRedirectUrl());
+        }
         if ("NONE".equals(connector.getAuthMode())) {
             try {
                 saveEnabledAuthorization(userId, connector, null, null);
@@ -143,6 +189,10 @@ public class ConnectorAuthorizationService {
             } catch (RuntimeException e) {
                 return bindingFailure(null, connector.getConnectorId(), e);
             }
+        }
+
+        if ("AK_SK".equals(connector.getAuthMode())) {
+            return startCredentialAuthorization(request, userId, connector);
         }
 
         ConnectorAuthorizationProvider provider = findProvider(connector.getProviderCode());
@@ -184,6 +234,62 @@ public class ConnectorAuthorizationService {
         } finally {
             releaseStartLockBestEffort(userId, connector.getConnectorId(), startLockToken.get());
         }
+    }
+
+    private ConnectorAuthorizationDto startCredentialAuthorization(
+            StartConnectorAuthorizationRequest request,
+            String userId,
+            ConnectorInfo connector) {
+        if (credentialFormProviderRegistry == null || connectionStateService == null) {
+            return failed(null, connector.getConnectorId(), PROVIDER_NOT_CONFIGURED, "连接器授权Provider未配置", null);
+        }
+        ConnectorCredentialFormProvider provider;
+        try {
+            provider = credentialFormProviderRegistry.get(connector.getProviderCode());
+        } catch (IllegalArgumentException e) {
+            return failed(null, connector.getConnectorId(), PROVIDER_NOT_CONFIGURED, "连接器授权Provider未配置", null);
+        }
+        Optional<String> lockToken = sessionRepository.tryAcquireStartLock(
+            userId, connector.getConnectorId(), AUTHORIZATION_START_LOCK_TTL);
+        if (lockToken.isEmpty()) {
+            return failed(null, connector.getConnectorId(), SESSION_ALREADY_ACTIVE, "当前连接器已有进行中的授权任务", null);
+        }
+        try {
+            CredentialFormVerification verification;
+            try (ConnectorCredentialVerificationGuard.Admission ignored = credentialVerificationGuard.acquire(
+                    requireCredentialUserId(userId), connector.getConnectorCode())) {
+                verification = provider.verify(userId, connector, request.getCredentials());
+            } catch (ConnectorCredentialVerificationBusyException e) {
+                return failed(null, connector.getConnectorId(), ConnectorCredentialVerificationBusyException.ERROR_CODE,
+                    ConnectorCredentialVerificationBusyException.PUBLIC_MESSAGE, null);
+            } catch (RuntimeException e) {
+                return failed(null, connector.getConnectorId(), "CONNECTOR_CREDENTIAL_INVALID", "连接器凭据无效", null);
+            }
+            if (verification == null || verification.status() == null
+                    || verification.status().status() != AuthorizationStatus.CONNECTED) {
+                AuthorizationStatusResult status = verification == null ? null : verification.status();
+                return failed(null, connector.getConnectorId(),
+                    status == null || !StringUtils.hasText(status.errorCode()) ? "CONNECTOR_CREDENTIAL_INVALID" : status.errorCode(),
+                    "连接器凭据校验未通过", null);
+            }
+            String authorizationId = UUID.randomUUID().toString();
+            try {
+                connectionStateService.saveEnabledCredentialAuthorization(
+                    userId, connector, verification.status(), authorizationId, verification.runtimeEnvironment());
+                return connected(authorizationId, connector.getConnectorId(), null);
+            } catch (RuntimeException e) {
+                return bindingFailure(authorizationId, connector.getConnectorId(), e);
+            }
+        } finally {
+            releaseStartLockBestEffort(userId, connector.getConnectorId(), lockToken.get());
+        }
+    }
+
+    private Long requireCredentialUserId(String userId) {
+        if (!StringUtils.hasText(userId)) {
+            throw new IllegalArgumentException("userId is required");
+        }
+        return Long.valueOf(userId.trim());
     }
 
     private ConnectorAuthorizationDto startLocked(
@@ -1063,10 +1169,13 @@ public class ConnectorAuthorizationService {
         if (request == null || request.getConnectorId() == null) {
             throw new IllegalArgumentException("connectorId不能为空");
         }
-        if (!StringUtils.hasText(request.getRedirectUrl())) {
+    }
+
+    private void validateRedirectUrl(String redirectUrl) {
+        if (!StringUtils.hasText(redirectUrl)) {
             throw new IllegalArgumentException("redirectUrl不能为空");
         }
-        URI redirectUri = URI.create(request.getRedirectUrl());
+        URI redirectUri = URI.create(redirectUrl);
         if (!"http".equalsIgnoreCase(redirectUri.getScheme())
                 && !"https".equalsIgnoreCase(redirectUri.getScheme())) {
             throw new IllegalArgumentException("redirectUrl必须使用HTTP或HTTPS");

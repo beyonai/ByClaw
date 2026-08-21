@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.dto.connector;
 
+import java.util.Map;
+
 import lombok.Getter;
 import lombok.Setter;
 
@@ -11,4 +13,7 @@ public class StartConnectorAuthorizationRequest {
     private Long connectorId;
 
     private String redirectUrl;
+
+    /** Synchronous credential-form input. Never copied into authorization response DTOs. */
+    private Map<String, String> credentials;
 }

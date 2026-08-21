@@ -38,4 +38,12 @@ class SandboxLaunchContextFactoryTest {
             .containsEntry("USER_CODE", "user001")
             .doesNotContainKey("BYCLAW_USER_CODE");
     }
+
+    @Test
+    void buildContextDoesNotInjectAnImaCredentialHome() {
+        SandboxLaunchContext context = factory.buildContext("user001", 101L,
+            SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
+
+        assertThat(context.getEnvs()).doesNotContainKey("IMA_HOME");
+    }
 }

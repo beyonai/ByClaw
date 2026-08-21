@@ -9,6 +9,18 @@ export interface ConnectorListQuery {
   keyword: string;
 }
 
+export interface ConnectorCredentialField {
+  key: 'clientId' | 'apiKey';
+  label: string;
+  inputType: 'text' | 'password';
+  maxLength: number;
+}
+
+export interface ConnectorCredentialForm {
+  helpUrl: string;
+  fields: ConnectorCredentialField[];
+}
+
 export interface ConnectorListItem {
   connectorCode: string;
   connectorId: number;
@@ -24,6 +36,9 @@ export interface ConnectorListItem {
   lastVerifiedAt?: string | null;
   // 兼容旧版后端，值等同于 accessExpiresAt。
   credentialExpiresAt?: string | null;
+  // 仅使用列表接口提供的安全授权元数据，禁止读取或解析 raw authConfig。
+  authMode?: string | null;
+  credentialForm?: ConnectorCredentialForm | null;
 }
 
 export type ConnectorCredentialState = 'READY' | 'REFRESH_NEEDED' | 'EXPIRING' | 'REAUTH_REQUIRED' | 'UNKNOWN';
@@ -58,6 +73,14 @@ export interface StartConnectorAuthorizationPayload {
   connectorId: ConnectorId;
   // 后端在授权完成后回跳前端时使用，实际换取 token 的回调仍由后端完成。
   redirectUrl: string;
+}
+
+export interface ConnectorCredentialAuthorizationPayload {
+  connectorId: ConnectorId;
+  redirectUrl: string;
+  credentials: Record<ConnectorCredentialField['key'], string>;
+  // request 封装使用该 AbortController 的 signal 传给 Axios。
+  cancelToken?: AbortController;
 }
 
 export interface ConnectorAuthorization {
@@ -104,6 +127,16 @@ export const updateConnectorEnable = (connectorId: ConnectorId, enabled: boolean
 // 创建一次性授权任务，后端返回平台二维码或跳转地址，并负责保存任务与三方回调结果。
 export const startConnectorAuthorization = (data: StartConnectorAuthorizationPayload) =>
   POST<ConnectorAuthorization>('/byaiService/connector/authorization/start', data);
+
+// 凭据校验失败可能包含服务端诊断信息，禁止由全局请求层直接回显。
+export const startConnectorCredentialAuthorization = ({
+  cancelToken,
+  ...data
+}: ConnectorCredentialAuthorizationPayload) =>
+  POST<ConnectorAuthorization>('/byaiService/connector/authorization/start', data, {
+    cancelToken,
+    responseCfg: { hideErrorTips: true },
+  });
 
 // 按授权任务 ID 读取状态，供前端轮询并在 connected 后回显连接器。
 export const getConnectorAuthorization = (authorizationId: string) =>

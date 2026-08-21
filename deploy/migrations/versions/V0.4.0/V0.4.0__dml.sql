@@ -24,6 +24,144 @@ SET provider_code = 'github-oauth2',
     update_time = CURRENT_TIMESTAMP
 WHERE connector_code = 'github';
 
+-- IMA OpenAPI 连接器。凭据仅由后续用户私有参数流程写入，迁移仅声明前端表单与受管环境白名单。
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort
+)
+SELECT nextval('byai.seq_any_table'), 'ima-openapi', 'IMA', '通过 IMA OpenAPI 连接 IMA 服务', 'SYSTEM',
+       'ima-openapi', 'ima-skill', 'AK_SK',
+       '{"credentialForm":{"helpUrl":"https://ima.qq.com/agent-interface","fields":[{"key":"clientId","label":"Client ID","inputType":"text","maxLength":256},{"key":"apiKey","label":"API Key","inputType":"password","maxLength":2048}]}}',
+       '{}',
+       '{"schemaVersion":"1.0","id":"ima-openapi","version":"1.0.0","runtime":{"type":"cli","authorizeIn":"be-auth-job","commands":{"version":[["ima","--version"]]}},"authStorage":{"mode":"managed-environment","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","managedEnvironmentKeys":["IMA_OPENAPI_CLIENTID","IMA_OPENAPI_APIKEY"],"environment":{}},"skill":{"code":"ima-skill","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+       50
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'ima-openapi'
+);
+
+-- IMA OpenAPI 内置 Skill 注册
+-- CLI 与 skill 文件随 OpenClaw 镜像提供；数据库仅注册目录、运行期快照和可发现权限。
+UPDATE byai.byai_system_config c
+SET param_value = CASE
+        WHEN rtrim(c.param_value) = '[]' THEN '['
+        ELSE left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1) || ','
+    END
+    || '{"skillName":"IMA","skillCode":"ima-skill","skillDescZh":"通过 ima-openapi-cli 管理 IMA 笔记和知识库。","skillDescEn":"Manage IMA notes and knowledge bases through ima-openapi-cli."}]'
+WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
+  AND regexp_replace(c.param_value, '\s', '', 'g')
+      NOT LIKE '%"skillCode":"ima-skill"%';
+
+INSERT INTO byai.ss_resource (
+    resource_id, system_code, resource_biz_type, resource_type, resource_name,
+    resource_desc, resource_version_id, host_type, catalog_id, man_org_id,
+    man_user_id, create_by, create_time, update_by, update_time, com_acct_id,
+    resource_status, resource_d_verid, resource_r_verid, resource_code,
+    publish_time, auth_status, publish_portal, parent_resource_id, publish_type,
+    owner_type, impl_type, worker_agent_type
+)
+SELECT
+    nextval('byai.seq_any_table'), 'BYAI', 'SKILL', 'ATOM', 'IMA',
+    '通过 ima-openapi-cli 管理 IMA 笔记和知识库。',
+    '0.1.3', 'hosted', 10, -1, '10001', 10001, CURRENT_TIMESTAMP,
+    10001, CURRENT_TIMESTAMP, 1, 2, -1, -1, 'ima-skill',
+    CURRENT_TIMESTAMP, 'passed', 1, -1, 'publish', 'enterprise', 'SKILL', 'NONE'
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.ss_resource WHERE resource_code = 'ima-skill'
+);
+
+INSERT INTO byai.ss_res_ext_skill (
+    resource_id, skill_type, source_type, version, skill_url,
+    skill_package_format, skill_original_filename, skill_package_size,
+    skill_package_hash, sync_status, sync_error, last_sync_time
+)
+SELECT
+    r.resource_id, 'inner', 'SYSTEM_BUILTIN', '0.1.3', '', 'zip', NULL, NULL, NULL,
+    'SUCCESS', NULL, CURRENT_TIMESTAMP
+FROM byai.ss_resource r
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.ss_res_ext_skill e WHERE e.resource_id = r.resource_id
+)
+  AND r.resource_code = 'ima-skill';
+
+UPDATE byai.ss_res_ext_skill e
+SET target_content = json_build_object(
+    'resourceId', r.resource_id,
+    'resourceCode', r.resource_code,
+    'resourceName', r.resource_name,
+    'resourceDesc', r.resource_desc,
+    'resourceBizType', r.resource_biz_type,
+    'resourceType', r.resource_type,
+    'ownerType', r.owner_type,
+    'sourceType', e.source_type,
+    'skillType', e.skill_type,
+    'skillUrl', e.skill_url,
+    'version', e.version,
+    'skillPackageFormat', e.skill_package_format,
+    'skillOriginalFilename', e.skill_original_filename,
+    'skillPackageSize', e.skill_package_size,
+    'skillPackageHash', e.skill_package_hash,
+    'syncStatus', e.sync_status,
+    'syncError', e.sync_error,
+    'lastSyncTime', to_char(e.last_sync_time, 'YYYY-MM-DD HH24:MI:SS')
+)::text
+FROM byai.ss_resource r
+WHERE e.resource_id = r.resource_id
+  AND r.resource_code = 'ima-skill';
+
+INSERT INTO byai.au_privilege_grant (
+    privilege_grant_id, grant_type, oper_type, grant_obj_type, grant_obj_id,
+    eff_date, exp_date, status_cd, create_staff, create_date, update_staff,
+    update_date, grant_to_type, grant_to_obj_id, grant_to_obj_type, allow_unsubscribe
+)
+SELECT
+    nextval('byai.seq_any_table'),
+    g.grant_type, g.oper_type, g.grant_obj_type, ima.resource_id,
+    g.eff_date, g.exp_date, g.status_cd, g.create_staff, g.create_date,
+    g.update_staff, g.update_date, g.grant_to_type, g.grant_to_obj_id,
+    g.grant_to_obj_type, g.allow_unsubscribe
+FROM byai.au_privilege_grant g
+CROSS JOIN (
+    SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'ima-skill'
+) ima
+CROSS JOIN (
+    SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'dws'
+) dws
+WHERE g.grant_obj_id = dws.resource_id
+  AND NOT EXISTS (
+      SELECT 1
+      FROM byai.au_privilege_grant existing
+      WHERE existing.grant_obj_id = ima.resource_id
+        AND existing.grant_type = g.grant_type
+        AND existing.grant_to_type = g.grant_to_type
+        AND existing.grant_to_obj_id = g.grant_to_obj_id
+        AND existing.grant_to_obj_type = g.grant_to_obj_type
+  );
+
+-- IMA 授权兜底：DWS 尚未初始化授权时，至少授予内置管理员使用和管理权限。
+INSERT INTO byai.au_privilege_grant (
+    privilege_grant_id, grant_type, oper_type, grant_obj_type, grant_obj_id,
+    eff_date, exp_date, status_cd, create_staff, create_date, update_staff,
+    update_date, grant_to_type, grant_to_obj_id, grant_to_obj_type, allow_unsubscribe
+)
+SELECT
+    nextval('byai.seq_any_table'), fallback.grant_type, 'READ', 'SKILL', ima.resource_id,
+    CURRENT_TIMESTAMP, NULL, 'A', 10001, CURRENT_TIMESTAMP, 10001, CURRENT_TIMESTAMP,
+    'RED', 10001, 'USER', 'Y'
+FROM (VALUES ('AVAILABLE_USE'), ('ALLOW_MANAGE')) AS fallback(grant_type)
+CROSS JOIN (
+    SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'ima-skill'
+) ima
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.au_privilege_grant existing
+    WHERE existing.grant_obj_id = ima.resource_id
+      AND existing.status_cd = 'A'
+      AND existing.grant_type = fallback.grant_type
+      AND existing.grant_to_type = 'RED'
+      AND existing.grant_to_obj_id = 10001
+      AND existing.grant_to_obj_type = 'USER'
+);
+-- IMA OpenAPI 内置 Skill 注册结束
+
 /**百应运营渠道**/
 -- 运营闭环：按运营需求类型配置独立启动提示词，避免不同类型任务携带无关字段。
 -- 后端按 operationType 分别读取采集、知识整理、对象发现、发布和分析提示词，避免不同任务类型混用字段。

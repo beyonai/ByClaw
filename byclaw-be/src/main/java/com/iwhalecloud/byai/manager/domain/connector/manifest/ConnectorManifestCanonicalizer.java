@@ -6,11 +6,13 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -76,6 +78,24 @@ public class ConnectorManifestCanonicalizer {
         }
     }
 
+    /** 返回由受管凭据作业注入的环境变量白名单；其他存储模式返回空列表。 */
+    public List<String> extractManagedEnvironmentKeys(ConnectorInfo connector, String manifestJson) {
+        String canonicalManifest = canonicalize(connector, manifestJson);
+        try {
+            JsonNode authStorage = objectMapper.readTree(canonicalManifest).path("authStorage");
+            if (!"managed-environment".equals(authStorage.path("mode").textValue())) {
+                return List.of();
+            }
+            List<String> keys = new ArrayList<>();
+            authStorage.path("managedEnvironmentKeys").forEach(key -> keys.add(key.textValue()));
+            Collections.sort(keys);
+            return List.copyOf(keys);
+        }
+        catch (JsonProcessingException e) {
+            throw new InvalidConnectorManifestException("Invalid connector Manifest JSON", e);
+        }
+    }
+
     private void validateRoot(JsonNode root, String connectorCode, String connectorSkillCode) {
         requireObject(root, "Manifest root");
         rejectSensitiveFields(root);
@@ -117,18 +137,36 @@ public class ConnectorManifestCanonicalizer {
         }
 
         JsonNode authStorage = requireObject(root.get("authStorage"), "authStorage");
-        String storageMode = requireAllowedText(authStorage, "mode", "native-home", "credential-reference");
-        if ("cli".equals(runtimeType) != "native-home".equals(storageMode)) {
+        String storageMode = requireAllowedText(authStorage, "mode", "native-home", "credential-reference",
+            "managed-environment");
+        boolean cliRuntime = "cli".equals(runtimeType);
+        boolean cliStorage = "native-home".equals(storageMode) || "managed-environment".equals(storageMode);
+        if (cliRuntime != cliStorage) {
             throw invalid("runtime.type and authStorage.mode are incompatible");
         }
         requireAllowedText(authStorage, "owner", "be-auth-job", "user-sandbox-auth-job");
         requireAllowedText(authStorage, "runtimeMutation", "provider-refresh-only", "sandbox-native");
         if ("native-home".equals(storageMode)) {
             validateNativePath(requireNonBlankText(authStorage, "nativePath"));
-        } else if (authStorage.has("nativePath")) {
-            throw invalid("credential-reference must not define nativePath");
+            rejectManagedEnvironmentKeys(authStorage, storageMode);
+        } else if ("managed-environment".equals(storageMode)) {
+            if (authStorage.has("nativePath")) {
+                throw invalid("managed-environment must not define nativePath");
+            }
+            requireText(runtime, "authorizeIn", "be-auth-job");
+            requireText(authStorage, "owner", "be-auth-job");
+            requireText(authStorage, "runtimeMutation", "provider-refresh-only");
+            validateManagedEnvironmentKeys(authStorage);
+        } else {
+            if (authStorage.has("nativePath")) {
+                throw invalid("credential-reference must not define nativePath");
+            }
+            rejectManagedEnvironmentKeys(authStorage, storageMode);
         }
         JsonNode environment = requireObject(authStorage.get("environment"), "authStorage.environment");
+        if ("managed-environment".equals(storageMode) && !environment.isEmpty()) {
+            throw invalid("managed-environment must not define static environment values");
+        }
         Iterator<Map.Entry<String, JsonNode>> environmentFields = environment.fields();
         while (environmentFields.hasNext()) {
             Map.Entry<String, JsonNode> field = environmentFields.next();
@@ -181,21 +219,60 @@ public class ConnectorManifestCanonicalizer {
         }
     }
 
+    private void rejectManagedEnvironmentKeys(JsonNode authStorage, String storageMode) {
+        if (authStorage.has("managedEnvironmentKeys")) {
+            throw invalid(storageMode + " must not define managedEnvironmentKeys");
+        }
+    }
+
+    private void validateManagedEnvironmentKeys(JsonNode authStorage) {
+        JsonNode keys = authStorage.get("managedEnvironmentKeys");
+        if (keys == null || !keys.isArray() || keys.isEmpty()) {
+            throw invalid("managedEnvironmentKeys must be a non-empty array");
+        }
+        Set<String> seen = new HashSet<>();
+        for (JsonNode key : keys) {
+            if (!key.isTextual() || !ENVIRONMENT_KEY_PATTERN.matcher(key.textValue()).matches()) {
+                throw invalid("managedEnvironmentKeys contains an invalid environment variable name");
+            }
+            if (!seen.add(key.textValue())) {
+                throw invalid("managedEnvironmentKeys contains a duplicate environment variable name");
+            }
+        }
+    }
+
     private JsonNode canonicalNode(JsonNode node) {
+        return canonicalNode(node, "");
+    }
+
+    private JsonNode canonicalNode(JsonNode node, String path) {
         if (node.isObject()) {
             ObjectNode object = objectMapper.createObjectNode();
             List<Map.Entry<String, JsonNode>> fields = new ArrayList<>();
             node.fields().forEachRemaining(fields::add);
             fields.sort(Comparator.comparing(Map.Entry::getKey));
-            fields.forEach(field -> object.set(field.getKey(), canonicalNode(field.getValue())));
+            fields.forEach(field -> object.set(field.getKey(), canonicalField(path, field)));
             return object;
         }
         if (node.isArray()) {
             ArrayNode array = objectMapper.createArrayNode();
-            node.forEach(item -> array.add(canonicalNode(item)));
+            node.forEach(item -> array.add(canonicalNode(item, path)));
             return array;
         }
         return node.deepCopy();
+    }
+
+    private JsonNode canonicalField(String parentPath, Map.Entry<String, JsonNode> field) {
+        if ("authStorage".equals(parentPath) && "managedEnvironmentKeys".equals(field.getKey())) {
+            List<JsonNode> keys = new ArrayList<>();
+            field.getValue().forEach(keys::add);
+            keys.sort(Comparator.comparing(JsonNode::textValue));
+            ArrayNode sorted = objectMapper.createArrayNode();
+            keys.forEach(key -> sorted.add(canonicalNode(key, parentPath + "." + field.getKey())));
+            return sorted;
+        }
+        String fieldPath = parentPath.isEmpty() ? field.getKey() : parentPath + "." + field.getKey();
+        return canonicalNode(field.getValue(), fieldPath);
     }
 
     private JsonNode requireObject(JsonNode node, String field) {

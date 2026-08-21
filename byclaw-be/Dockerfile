@@ -32,17 +32,28 @@ ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG LARKSUITE_CLI_VERSION=1.0.85
 ARG WECOM_CLI_VERSION=0.1.9
+ARG IMA_OPENAPI_CLI_VERSION=0.1.3
+ARG IMA_OPENAPI_CLI_INTEGRITY=sha512-ckur/WWHugygFu130u/Zmn2IU9w7Ghc2cmPPxS6lFWvETSz7Rl3lqQGjMLmhSbTY2eCIR8DvqOzozOf5rWRbHg==
 RUN npm config set registry "${NPM_REGISTRY}" --global \
     && npm config set fund false --global \
     && npm config set audit false --global \
     && npm config set fetch-retries 5 --global \
     && npm config set fetch-retry-mintimeout 20000 --global \
     && npm config set fetch-retry-maxtimeout 120000 --global \
+    && cd /tmp \
+    && npm pack "ima-openapi-cli@${IMA_OPENAPI_CLI_VERSION}" \
+    && node -e 'const fs=require("fs"); const crypto=require("crypto"); const [expected,file]=process.argv.slice(1); const actual="sha512-"+crypto.createHash("sha512").update(fs.readFileSync(file)).digest("base64"); if (actual !== expected) throw new Error("IMA CLI integrity mismatch");' "${IMA_OPENAPI_CLI_INTEGRITY}" "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz" \
     && npm install --global \
         "@larksuite/cli@${LARKSUITE_CLI_VERSION}" \
         "@wecom/cli@${WECOM_CLI_VERSION}" \
+        "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz" \
     && lark-cli --version \
     && wecom-cli --version \
+    && test "$(ima --version)" = "${IMA_OPENAPI_CLI_VERSION}" \
+    && ima auth --help >/dev/null \
+    && ima note --help >/dev/null \
+    && ima wiki --help >/dev/null \
+    && rm -f "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz" \
     && npm cache clean --force
 
 # 复制 Trellis 离线安装包

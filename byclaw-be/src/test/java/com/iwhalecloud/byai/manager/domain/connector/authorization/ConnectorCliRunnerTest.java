@@ -47,6 +47,50 @@ class ConnectorCliRunnerTest {
     }
 
     @Test
+    void runDoesNotInheritBackendEnvironmentVariablesExceptRequiredPath() {
+        ConnectorCliRunner.CliResult result = runner.run(
+            List.of("/usr/bin/env"),
+            Map.of("TASK4_VALUE", "environment-line"),
+            null,
+            TEST_TIMEOUT);
+
+        assertThat(result.exitCode()).isZero();
+        assertThat(result.output().lines())
+            .containsExactlyInAnyOrder(
+                "TASK4_VALUE=environment-line",
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+    }
+
+    @Test
+    void runSupportsCliShebangThatResolvesItsRuntimeFromPath() throws Exception {
+        Path cli = tempDir.resolve("task4-cli");
+        Files.writeString(cli, "#!/usr/bin/env sh\nprintf '%s' \"$TASK4_VALUE\"\n");
+        assertThat(cli.toFile().setExecutable(true)).isTrue();
+
+        ConnectorCliRunner.CliResult result = runner.run(
+            List.of(cli.toString()),
+            Map.of("TASK4_VALUE", "environment-line"),
+            null,
+            TEST_TIMEOUT);
+
+        assertThat(result.exitCode()).isZero();
+        assertThat(result.output()).isEqualTo("environment-line");
+    }
+
+    @Test
+    void runDoesNotAllowCallerToOverrideSafeCliPath() {
+        ConnectorCliRunner.CliResult result = runner.run(
+            List.of("/usr/bin/env"),
+            Map.of("PATH", "/untrusted", "TASK4_VALUE", "environment-line"),
+            null,
+            TEST_TIMEOUT);
+
+        assertThat(result.exitCode()).isZero();
+        assertThat(result.output()).contains("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+            .doesNotContain("PATH=/untrusted");
+    }
+
+    @Test
     void runWritesUtf8StdinAndClosesChildInput() {
         String stdin = "你好, connector\n";
 
@@ -186,6 +230,17 @@ class ConnectorCliRunnerTest {
         assertThat(result.output().getBytes(StandardCharsets.UTF_8).length).isLessThanOrEqualTo(64 * 1024);
         assertThat(result.output()).doesNotContain("\uFFFD").endsWith("TAIL-✓");
         assertThat(resultTruncated(result)).isTrue();
+    }
+
+    @Test
+    void runSupportsACallerSpecificOutputLimitWithoutChangingTheSafeDefault() {
+        ConnectorCliRunner.CliResult result = runner.run(
+            List.of("/bin/sh", "-c", "i=0; while [ \"$i\" -lt 100000 ]; do printf x; i=$((i + 1)); done"),
+            Map.of(), null, TEST_TIMEOUT, 128 * 1024);
+
+        assertThat(result.exitCode()).isZero();
+        assertThat(result.output()).hasSize(100000);
+        assertThat(result.truncated()).isFalse();
     }
 
     @Test

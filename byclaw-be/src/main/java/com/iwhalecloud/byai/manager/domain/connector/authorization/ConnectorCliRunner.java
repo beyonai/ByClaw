@@ -23,22 +23,36 @@ import org.springframework.stereotype.Component;
 public class ConnectorCliRunner {
 
     private static final int MAX_OUTPUT_BYTES = 64 * 1024;
+    private static final int MAX_CALLER_OUTPUT_BYTES = 16 * 1024 * 1024;
     private static final long PROCESS_POLL_MILLIS = 20L;
     private static final long DESTROY_GRACE_MILLIS = 200L;
     private static final long DESTROY_POLL_MILLIS = 10L;
+    private static final String CLI_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
     public CliResult run(
         List<String> command,
         Map<String, String> environment,
         String stdin,
         Duration timeout) {
+        return run(command, environment, stdin, timeout, MAX_OUTPUT_BYTES);
+    }
+
+    public CliResult run(
+        List<String> command,
+        Map<String, String> environment,
+        String stdin,
+        Duration timeout,
+        int maxOutputBytes) {
         if (timeout == null || timeout.isZero() || timeout.isNegative()) {
             throw new IllegalArgumentException("timeout must be positive");
+        }
+        if (maxOutputBytes <= 0 || maxOutputBytes > MAX_CALLER_OUTPUT_BYTES) {
+            throw new IllegalArgumentException("maxOutputBytes is invalid");
         }
         long deadlineNanos = deadlineFromNow(timeout);
         List<String> safeCommand = validatedCommandCopy(command);
         Map<String, String> safeEnvironment = validatedEnvironmentCopy(environment);
-        DefaultManagedProcess managedProcess = startProcess(safeCommand, safeEnvironment, stdin);
+        DefaultManagedProcess managedProcess = startProcess(safeCommand, safeEnvironment, stdin, maxOutputBytes);
 
         try {
             while (managedProcess.isAlive()) {
@@ -85,19 +99,22 @@ public class ConnectorCliRunner {
     public ManagedProcess start(List<String> command, Map<String, String> environment, String stdin) {
         List<String> safeCommand = validatedCommandCopy(command);
         Map<String, String> safeEnvironment = validatedEnvironmentCopy(environment);
-        return startProcess(safeCommand, safeEnvironment, stdin);
+        return startProcess(safeCommand, safeEnvironment, stdin, MAX_OUTPUT_BYTES);
     }
 
     private DefaultManagedProcess startProcess(
         List<String> command,
         Map<String, String> environment,
-        String stdin) {
+        String stdin,
+        int maxOutputBytes) {
         ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.redirectErrorStream(true);
+        processBuilder.environment().clear();
         processBuilder.environment().putAll(environment);
+        processBuilder.environment().put("PATH", CLI_PATH);
 
         try {
-            return new DefaultManagedProcess(processBuilder.start(), stdin);
+            return new DefaultManagedProcess(processBuilder.start(), stdin, maxOutputBytes);
         } catch (IOException | RuntimeException e) {
             throw new IllegalStateException("Unable to start connector CLI process");
         }
@@ -198,7 +215,7 @@ public class ConnectorCliRunner {
     private static final class DefaultManagedProcess implements ManagedProcess {
 
         private final Process process;
-        private final BoundedOutput output = new BoundedOutput();
+        private final BoundedOutput output;
         private final AtomicBoolean destroyed = new AtomicBoolean();
         private final AtomicBoolean inputFailed = new AtomicBoolean();
         private final AtomicBoolean outputFailed = new AtomicBoolean();
@@ -207,8 +224,9 @@ public class ConnectorCliRunner {
         private final Thread inputWriter;
         private final Thread outputDrainer;
 
-        private DefaultManagedProcess(Process process, String stdin) {
+        private DefaultManagedProcess(Process process, String stdin, int maxOutputBytes) {
             this.process = process;
+            this.output = new BoundedOutput(maxOutputBytes);
             this.outputDrainer = Thread.ofVirtual()
                 .name("connector-cli-output-drainer")
                 .start(this::drainOutput);
@@ -379,19 +397,23 @@ public class ConnectorCliRunner {
 
     private static final class BoundedOutput {
 
-        private final byte[] retained = new byte[MAX_OUTPUT_BYTES];
+        private final byte[] retained;
         private int start;
         private int size;
         private boolean truncated;
 
+        private BoundedOutput(int maxOutputBytes) {
+            this.retained = new byte[maxOutputBytes];
+        }
+
         private synchronized void append(byte[] bytes, int length) {
             for (int index = 0; index < length; index++) {
-                if (size < MAX_OUTPUT_BYTES) {
-                    retained[(start + size) % MAX_OUTPUT_BYTES] = bytes[index];
+                if (size < retained.length) {
+                    retained[(start + size) % retained.length] = bytes[index];
                     size++;
                 } else {
                     retained[start] = bytes[index];
-                    start = (start + 1) % MAX_OUTPUT_BYTES;
+                    start = (start + 1) % retained.length;
                     truncated = true;
                 }
             }
@@ -400,7 +422,7 @@ public class ConnectorCliRunner {
         private synchronized String snapshot() {
             byte[] ordered = new byte[size];
             for (int index = 0; index < size; index++) {
-                ordered[index] = retained[(start + index) % MAX_OUTPUT_BYTES];
+                ordered[index] = retained[(start + index) % retained.length];
             }
             try {
                 return StandardCharsets.UTF_8.newDecoder()

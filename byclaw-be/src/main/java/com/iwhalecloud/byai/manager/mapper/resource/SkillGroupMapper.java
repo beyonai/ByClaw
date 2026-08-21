@@ -129,6 +129,12 @@ public interface SkillGroupMapper {
             @Param("tenantId") Long tenantId,
             @Param("skillIds") List<Long> skillIds);
 
+    /** Returns whether one tenant-owned digital employee has an active direct relation to the named active skill. */
+    boolean hasActiveDigitalEmployeeSkill(
+            @Param("digitalEmployeeId") Long digitalEmployeeId,
+            @Param("tenantId") Long tenantId,
+            @Param("skillCode") String skillCode);
+
     /**
      * Inserts a canonical direct employee-skill relation and tolerates any database uniqueness conflict. Callers
      * must hold {@link #selectDigitalEmployeeForUpdate(Long, Long)} because historical deployments do not have a
