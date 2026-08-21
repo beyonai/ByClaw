@@ -11,6 +11,7 @@ import type {
   TaskPlanExecutionContext,
   TaskPlanGateway,
 } from "../ports/task-plan.js";
+import type { TaskPlanSnapshot } from "../domain/task-plan.js";
 import { LeaderSessionCache } from "./leader-session-cache.js";
 import type {
   DelegationRepository,
@@ -783,9 +784,17 @@ ${JSON.stringify(response)}`;
       }
       current = await this.#setStatus(latest, "RUNNING");
       const taskPlanContext = this.#taskPlanContext(current, metadata);
-      const activeTaskPlan = taskPlanContext
-        ? await this.#taskPlans?.loadActive(taskPlanContext).catch(() => undefined)
-        : undefined;
+      let taskPlanReady = false;
+      let activeTaskPlan: TaskPlanSnapshot | undefined;
+      if (taskPlanContext && this.#taskPlans) {
+        try {
+          activeTaskPlan = await this.#taskPlans.loadActive(taskPlanContext);
+          taskPlanReady = true;
+        } catch {
+          // 查询失败不等于“没有计划”；本轮关闭计划工具，但不阻断主任务。
+          taskPlanReady = false;
+        }
+      }
       const result = await leader.run({
         message: leaderMessage,
         ...(current.ingressContext?.externalSessionId
@@ -970,7 +979,7 @@ ${JSON.stringify(response)}`;
           }
           return response;
         },
-        ...(taskPlanContext && this.#taskPlans
+        ...(taskPlanReady && taskPlanContext && this.#taskPlans
           ? {
               updateTaskPlan: async ({
                 toolCallId,

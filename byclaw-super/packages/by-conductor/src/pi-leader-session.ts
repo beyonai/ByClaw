@@ -45,6 +45,7 @@ import {
   ThinkingStreamParser,
   type ThinkingStreamSegment,
 } from "./thinking-stream-parser.js";
+import { toTaskPlanModelView } from "./domain/task-plan.js";
 
 export interface PiLeaderCompactionConfig {
   enabled: boolean;
@@ -169,18 +170,15 @@ export class PiLeaderSession implements LeaderSession {
       name: UPDATE_TASK_PLAN_TOOL_NAME,
       label: "Update Task Plan",
       description:
-        "Create or replace the current execution task plan. Send the complete ordered task list every time progress changes. Omit planId only for the first call; preserve returned taskIds and use the returned planId/version for later calls.",
+        "Create or replace the current execution task plan. Send the complete ordered task list every time progress changes. The system owns execution identity, plan identity, versions, and task IDs.",
       promptSnippet:
         "Create and keep a structured task plan synchronized with actual execution progress.",
       executionMode: "sequential",
       parameters: Type.Object({
-        planId: Type.Optional(Type.String({ minLength: 1 })),
-        expectedVersion: Type.Optional(Type.Integer({ minimum: 1 })),
         title: Type.String({ minLength: 1, maxLength: 500 }),
         explanation: Type.Optional(Type.String({ maxLength: 2000 })),
         tasks: Type.Array(
           Type.Object({
-            taskId: Type.Optional(Type.String({ minLength: 1 })),
             step: Type.String({ minLength: 1, maxLength: 1000 }),
             description: Type.Optional(Type.String({ maxLength: 4000 })),
             status: Type.Union([
@@ -209,14 +207,9 @@ export class PiLeaderSession implements LeaderSession {
         const snapshot = await active.updateTaskPlan({
           toolCallId,
           update: {
-            ...(params.planId ? { planId: params.planId } : {}),
-            ...(params.expectedVersion !== undefined
-              ? { expectedVersion: params.expectedVersion }
-              : {}),
             title: params.title,
             ...(params.explanation ? { explanation: params.explanation } : {}),
             tasks: params.tasks.map((task) => ({
-              ...(task.taskId ? { taskId: task.taskId } : {}),
               step: task.step,
               ...(task.description ? { description: task.description } : {}),
               status: task.status,
@@ -228,10 +221,10 @@ export class PiLeaderSession implements LeaderSession {
         // before_agent_start 每轮都会读取 activeInput；原位替换后下一次推理立即看到最新计划。
         active.activeTaskPlan = snapshot;
         return {
-          content: [{ type: "text", text: JSON.stringify(snapshot) }],
+          content: [
+            { type: "text", text: JSON.stringify(toTaskPlanModelView(snapshot)) },
+          ],
           details: {
-            planId: snapshot.planId,
-            version: snapshot.version,
             status: snapshot.status,
           },
         };

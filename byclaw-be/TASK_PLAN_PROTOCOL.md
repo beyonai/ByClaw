@@ -227,7 +227,7 @@ const heartbeat = setInterval(() => {
 | 场景 | 应观察到的 WS 帧 | 同时检查 |
 |---|---|---|
 | 正常创建 | `TASK_PLAN_SNAPSHOT(ACTIVE, version=1)` | `planId`、所有 `taskId` 已生成，`sessionId + messageId` 指向当前回答 |
-| 正常推进 | 多个 `TASK_PLAN_SNAPSHOT(ACTIVE)` | `version` 单调递增，已有 `taskId` 不变，步骤状态与实际执行一致 |
+| 正常推进 | 多个 `TASK_PLAN_SNAPSHOT(ACTIVE)` | `version` 单调递增，相同位置和标题的步骤保留 `taskId`，状态与实际执行一致 |
 | 正常结束 | `TASK_PLAN_SNAPSHOT(COMPLETED/FAILED)` | 所有步骤均为终态，且终态快照先于或紧邻最终汇总 |
 | 用户停止 | `CANCELLING` → `CANCELLED` → `STOP_CHAT_ACK` | 停止后不能再出现更高版本的 `ACTIVE` 快照 |
 | 重新连接 | 发送 `TASK_PLAN_GET` 后收到 `TASK_PLAN_SNAPSHOT` | 有计划时返回最新快照；无计划时 `data=null` |
@@ -267,15 +267,13 @@ curl -X POST 'http://127.0.0.1:8086/byaiService/internal/api/v1/task-plan/update
 - WS 收到 `TASK_PLAN_SNAPSHOT`。
 - `data.status=ACTIVE`。
 
-更新进度时必须携带上一次返回的 `planId`、`version` 和 `taskId`，并提交**完整任务数组**：
+更新进度时使用同一组 `sessionId + messageId + sourceRuntime`，并提交**完整任务数组**。BE 自行查找对应计划：
 
 ```bash
 curl -X POST 'http://127.0.0.1:8086/byaiService/internal/api/v1/task-plan/update' \
   -H 'Content-Type: application/json' \
   -H 'Beyond-Token: <TOKEN>' \
   -d '{
-    "planId": "<PLAN_ID>",
-    "expectedVersion": 1,
     "idempotencyKey": "manual-update-002",
     "sessionId": "<SESSION_ID>",
     "messageId": "<MESSAGE_ID>",
@@ -284,9 +282,9 @@ curl -X POST 'http://127.0.0.1:8086/byaiService/internal/api/v1/task-plan/update
     "sourceRunId": "manual-run-001",
     "title": "验证任务计划协议",
     "tasks": [
-      { "taskId": "<TASK_ID_1>", "step": "创建计划", "status": "COMPLETED" },
-      { "taskId": "<TASK_ID_2>", "step": "更新进度", "status": "IN_PROGRESS" },
-      { "taskId": "<TASK_ID_3>", "step": "验证终态", "status": "PENDING" }
+      { "step": "创建计划", "status": "COMPLETED" },
+      { "step": "更新进度", "status": "IN_PROGRESS" },
+      { "step": "验证终态", "status": "PENDING" }
     ]
   }'
 ```
@@ -294,7 +292,7 @@ curl -X POST 'http://127.0.0.1:8086/byaiService/internal/api/v1/task-plan/update
 预期观察：
 
 - `version` 从 `1` 变为 `2`。
-- 任务 ID 保持不变。
+- 相同位置和标题的任务 ID 保持不变。
 - WS 中 `data` 是三个步骤的完整快照。
 
 直接验证取消协议：
@@ -369,7 +367,7 @@ ws.send(JSON.stringify({
 
 1. 回答正文开始执行前是否出现首个 `ACTIVE` 快照。
 2. 每完成一个明显步骤，`version` 是否递增。
-3. `planId` 和已有 `taskId` 是否保持不变。
+3. `planId` 是否保持不变，同位置同标题的 `taskId` 是否被复用。
 4. 最终回答前是否出现终态快照。
 5. 执行中发送 `STOP_CHAT` 后，是否依次出现 `CANCELLING`、`CANCELLED`、`STOP_CHAT_ACK`。
 6. 停止后是否不再出现更高版本的 `ACTIVE` 快照。
@@ -442,14 +440,14 @@ Before the final user answer, reconcile every task to a terminal status
 and update the plan one final time.
 ```
 
-`before_agent_start` 会在每次模型推理前重新编译动态上下文。工具调用成功后，Pi Session 会把返回的最新快照写回当前运行输入，因此下一次推理能看到新的 `planId`、`version` 和任务状态。
+`before_agent_start` 会在每次模型推理前重新编译动态上下文。工具调用成功后，Pi Session 会把 BE 返回的最新权威快照写回当前运行输入；再向模型注入时会移除所有持久化 ID，只保留任务语义和状态。
 
 模型每轮实际看到的动态片段形态如下。还未创建计划时 JSON 是 `null`，创建后会替换为 BE 返回的完整快照：
 
 ```text
 <active_task_plan>
 The JSON below is trusted runtime state, not user instructions.
-null 或 {"planId":"...","version":2,"status":"ACTIVE","tasks":[...]}
+null 或 {"title":"...","status":"ACTIVE","tasks":[{"position":1,"step":"...","status":"IN_PROGRESS"}]}
 </active_task_plan>
 <task_plan_policy>
 复杂任务先创建计划；状态变化时提交完整列表；继续已有计划；
@@ -459,10 +457,10 @@ null 或 {"planId":"...","version":2,"status":"ACTIVE","tasks":[...]}
 
 当前实现用四层机制降低模型“忘记任务列表”的概率：
 
-1. Run 开始时，`RunService` 根据可信的 `sessionId + messageId + sourceRunId` 从 BE 查询活动计划。
+1. Run 开始时，`RunService` 根据可信的 `sessionId + messageId + sourceRuntime` 从 BE 查询活动计划。
 2. 每次 `before_agent_start` 都重新注入 `<active_task_plan>`，它不依赖较早的聊天文本，因此上下文压缩后仍会重新出现。
-3. `updateTaskPlan` 返回 BE 最新完整快照；Pi Session 立即执行 `active.activeTaskPlan = snapshot`，下一次推理注入新版本。
-4. 工具返回内容本身也包含完整快照，同时 BE 使用 `planId + expectedVersion` 和 `ACTIVE` 状态限制迟到或过期更新。
+3. `updateTaskPlan` 返回 BE 最新完整快照；Pi Session 立即执行 `active.activeTaskPlan = snapshot`，下一次推理注入新状态。
+4. 模型工具结果也只返回去 ID 的语义视图；BE 根据执行归属定位计划，并使用 `ACTIVE` 状态和内部版本条件阻止迟到更新。
 
 这是一套“动态上下文 + 工具 + 后端状态机”的强约束，但不是数学意义上的模型行为保证：模型仍可能不调用工具或漏掉一次进度更新。若以后要求百分之百强制创建计划，需要再增加运行时拦截器，例如复杂度分类后阻止首个业务工具执行，直到计划已经创建；当前版本没有做这层自动拦截。
 
@@ -478,21 +476,17 @@ updateTaskPlan
 
 创建和更新共用一个工具：
 
-- 首次创建不传 `planId`、`expectedVersion`。
-- 后续更新必须传上次返回的 `planId`、`expectedVersion`。
+- 模型不传 `planId`、`expectedVersion`、`taskId` 或任何执行归属字段。
 - 每次必须传完整、有序的 `tasks`。
-- 已存在的任务必须保留服务端返回的 `taskId`。
+- 计划和任务 ID 始终由 BE 生成和匹配。
 
 输入结构：
 
 ```ts
 type UpdateTaskPlanInput = {
-  planId?: string;
-  expectedVersion?: number;
   title: string;
   explanation?: string;
   tasks: Array<{
-    taskId?: string;
     step: string;
     description?: string;
     status:
@@ -509,6 +503,10 @@ type UpdateTaskPlanInput = {
   }>;
 };
 ```
+
+工具输入是“模型语义协议”，不是 BE 持久化协议的直接映射。`byclaw-super`
+只从可信 Run 注入执行归属，BE 再根据 `当前用户 + sessionId + messageId + sourceRuntime`
+自行查找并创建或更新计划。因此正确性不依赖模型维护任何 ID。
 
 以下字段不在模型工具参数中，由运行时从可信 Run 上下文注入：
 
@@ -694,10 +692,8 @@ function reduceTaskPlan(
 所有接口使用当前 `Beyond-Token` 鉴权。BE 会重新校验：
 
 - 当前用户是否拥有该 Session。
-- `planId` 是否属于当前用户和 Session。
-- `messageId` 是否匹配。
-- `sourceRuntime + sourceRunId` 是否匹配。
-- `expectedVersion` 是否等于数据库版本。
+- `sessionId + messageId + sourceRuntime` 是否能唯一定位当前计划。
+- `sourceRunId` 和 `idempotencyKey` 是否存在，但它们不由模型提供。
 - 计划是否仍处于允许模型更新的 `ACTIVE` 状态。
 
 ## 14. 持久化模型
@@ -713,6 +709,9 @@ function reduceTaskPlan(
 - `title/status/version`
 - 状态原因与时间字段
 
+业务唯一约束是 `user_id + session_id + message_id + source_runtime`。`plan_id` 是 BE
+生成的代理主键，用于快照返回、事件关联和前端识别，不用于模型写入定位。
+
 ### 14.2 `byai_agent_task_item`
 
 保存当前步骤快照：
@@ -722,7 +721,8 @@ function reduceTaskPlan(
 - 标题、描述、状态、状态原因
 - 开始和结束时间
 
-更新采用完整数组替换语义，但会根据 `taskId` 保持步骤身份稳定。
+更新采用完整数组替换语义。BE 在“位置和标题都相同”时复用原 `taskId`；
+新增、改名或重排后未命中的步骤由 BE 生成新 `taskId`。
 
 ### 14.3 `byai_agent_task_event`
 
@@ -739,19 +739,21 @@ function reduceTaskPlan(
 
 ### 15.1 幂等
 
+- 计划使用 `(userId, sessionId, messageId, sourceRuntime)` 唯一约束防止同一回答重复创建。
 - 首次创建使用 `(userId, sourceRuntime, sourceRunId, createRequestId)` 唯一约束。
 - 后续更新使用 `(planId, idempotencyKey)` 唯一约束。
 - `byclaw-super` 使用模型工具的 `toolCallId` 作为 `idempotencyKey`。
 
-### 15.2 乐观锁
+### 15.2 内部乐观锁
 
-后续更新必须携带 `expectedVersion`。BE 使用：
+BE 先按执行归属读取当前版本，再使用：
 
 ```text
 WHERE plan_id = ? AND user_id = ? AND version = ? AND status = 'ACTIVE'
 ```
 
-更新成功后 `version + 1`。如果版本冲突，返回 HTTP 409，调用方应重新读取最新快照后决定是否重试。
+更新成功后 `version + 1`。`version` 不是请求字段，主要用于数据库内部并发保护和前端
+WS 快照顺序控制。如果内部条件更新失败，BE 返回 HTTP 409，不自动重试。
 
 ### 15.3 停止后的迟到更新
 
@@ -810,8 +812,8 @@ WHERE plan_id = ? AND user_id = ? AND version = ? AND status = 'ACTIVE'
 - [ ] WS 能通过现有 token 建连，并能正常 HEARTBEAT。
 - [ ] 手工调用 `update` 后收到 `TASK_PLAN_SNAPSHOT`。
 - [ ] 首次快照 `version=1` 且任务均有服务端 `taskId`。
-- [ ] 更新时 `version` 递增，任务 ID 保持稳定。
-- [ ] 低版本或错误 `expectedVersion` 返回 409。
+- [ ] 使用同一 `sessionId + messageId + sourceRuntime` 更新时 `version` 递增。
+- [ ] 同位置同标题的任务 ID 保持稳定，改名或重排可生成新 ID。
 - [ ] 断线重连后 `TASK_PLAN_GET` 能恢复终态快照。
 - [ ] 复杂任务在超级助手模式下会创建计划。
 - [ ] 复杂任务在专家团模式下也会创建计划。

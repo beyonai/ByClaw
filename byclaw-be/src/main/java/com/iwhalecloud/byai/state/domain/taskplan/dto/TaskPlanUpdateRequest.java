@@ -9,10 +9,6 @@ import lombok.Data;
 @Data
 public class TaskPlanUpdateRequest {
 
-    private String planId;
-
-    private Integer expectedVersion;
-
     private String idempotencyKey;
 
     private String sessionId;
@@ -37,8 +33,6 @@ public class TaskPlanUpdateRequest {
 
     @Data
     public static class TaskInput {
-
-        private String taskId;
 
         private String step;
 

@@ -3,7 +3,6 @@ package com.iwhalecloud.byai.state.application.service.taskplan;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -63,22 +62,18 @@ public class TaskPlanApplicationService {
         this.sessionService = sessionService;
     }
 
-    /** 创建计划或以完整任务数组替换当前快照。 */
+    /** 按可信执行归属查找计划，不存在则创建，存在则替换完整任务快照。 */
     @Transactional
     public TaskPlanSnapshot update(TaskPlanUpdateRequest request) {
         requireRequest(request);
         Long userId = CurrentUserHolder.getCurrentUserId();
         Long sessionId = parseRequiredLong(request.getSessionId(), "sessionId");
         Long messageId = parseRequiredLong(request.getMessageId(), "messageId");
+        String sourceRuntime = normalizeRuntime(request.getSourceRuntime());
         requireOwnedSession(sessionId, userId);
-
-        if (StringUtils.isBlank(request.getPlanId())) {
-            if (request.getExpectedVersion() != null) {
-                throw badRequest("expectedVersion must be omitted when creating a task plan");
-            }
-            return create(request, userId, sessionId, messageId);
-        }
-        return replace(request, userId, sessionId, messageId);
+        ByaiAgentTaskPlan plan = findByExecution(userId, sessionId, messageId, request.getTraceId(),
+            sourceRuntime, null, true, true);
+        return plan == null ? create(request, userId, sessionId, messageId) : replace(request, userId, plan);
     }
 
     /** 查询当前用户在指定执行上的最新计划；没有计划时返回 null。 */
@@ -106,7 +101,7 @@ public class TaskPlanApplicationService {
             stopChatDto.getTraceId(), null, null, reasonCode, reasonMessage);
     }
 
-    /** 运行时直接取消时额外校验 sourceRuntime/sourceRunId，避免同消息的不同执行互相影响。 */
+    /** 运行时直接取消时使用同一回答的执行归属定位计划。 */
     @Transactional
     public TaskPlanSnapshot requestCancellation(TaskPlanLookupRequest request, String reasonCode,
         String reasonMessage) {
@@ -225,23 +220,6 @@ public class TaskPlanApplicationService {
     }
 
     private TaskPlanSnapshot create(TaskPlanUpdateRequest request, Long userId, Long sessionId, Long messageId) {
-        ByaiAgentTaskPlan retried = planMapper.selectOne(Wrappers.<ByaiAgentTaskPlan>lambdaQuery()
-            .eq(ByaiAgentTaskPlan::getUserId, userId)
-            .eq(ByaiAgentTaskPlan::getSourceRuntime, normalizeRuntime(request.getSourceRuntime()))
-            .eq(ByaiAgentTaskPlan::getSourceRunId, requiredText(request.getSourceRunId(), "sourceRunId", 128))
-            .eq(ByaiAgentTaskPlan::getCreateRequestId,
-                requiredText(request.getIdempotencyKey(), "idempotencyKey", 128))
-            .last("LIMIT 1"));
-        if (retried != null) {
-            return snapshot(retried);
-        }
-
-        ByaiAgentTaskPlan active = findByExecution(userId, sessionId, messageId, request.getTraceId(),
-            request.getSourceRuntime(), null, true, false);
-        if (active != null) {
-            throw conflict("An active task plan already exists; update it with planId and expectedVersion");
-        }
-
         Date now = new Date();
         ByaiAgentTaskPlan plan = new ByaiAgentTaskPlan();
         plan.setPlanId(IdUtil.getSnowflakeNextId());
@@ -275,30 +253,18 @@ public class TaskPlanApplicationService {
         return snapshot;
     }
 
-    private TaskPlanSnapshot replace(TaskPlanUpdateRequest request, Long userId, Long sessionId, Long messageId) {
-        Long planId = parseRequiredLong(request.getPlanId(), "planId");
+    private TaskPlanSnapshot replace(TaskPlanUpdateRequest request, Long userId, ByaiAgentTaskPlan plan) {
+        Long planId = plan.getPlanId();
         ByaiAgentTaskEvent retried = eventMapper.selectOne(Wrappers.<ByaiAgentTaskEvent>lambdaQuery()
             .eq(ByaiAgentTaskEvent::getPlanId, planId)
             .eq(ByaiAgentTaskEvent::getIdempotencyKey,
                 requiredText(request.getIdempotencyKey(), "idempotencyKey", 128))
             .last("LIMIT 1"));
         if (retried != null) {
-            return snapshot(requireOwnedPlan(planId, userId));
-        }
-
-        ByaiAgentTaskPlan plan = requireOwnedPlan(planId, userId);
-        if (!Objects.equals(plan.getSessionId(), sessionId) || !Objects.equals(plan.getMessageId(), messageId)) {
-            throw notFound();
-        }
-        if (!Objects.equals(plan.getSourceRuntime(), normalizeRuntime(request.getSourceRuntime()))
-            || !Objects.equals(plan.getSourceRunId(), requiredText(request.getSourceRunId(), "sourceRunId", 128))) {
-            throw notFound();
+            return snapshot(plan);
         }
         if (!"ACTIVE".equals(plan.getStatus())) {
             throw conflict("Task plan is not active: " + plan.getStatus());
-        }
-        if (request.getExpectedVersion() == null || !Objects.equals(request.getExpectedVersion(), plan.getVersion())) {
-            throw conflict("Task plan version conflict; latest version is " + plan.getVersion());
         }
 
         Date now = new Date();
@@ -339,13 +305,8 @@ public class TaskPlanApplicationService {
             throw badRequest("tasks must not contain more than " + MAX_TASKS + " tasks");
         }
 
-        Map<Long, ByaiAgentTaskItem> byId = new HashMap<>();
         Map<Integer, ByaiAgentTaskItem> byPosition = new HashMap<>();
-        existing.forEach(item -> {
-            byId.put(item.getTaskId(), item);
-            byPosition.put(item.getPosition(), item);
-        });
-        Set<Long> used = new HashSet<>();
+        existing.forEach(item -> byPosition.put(item.getPosition(), item));
         List<ByaiAgentTaskItem> result = new ArrayList<>(input.size());
 
         for (int index = 0; index < input.size(); index++) {
@@ -356,22 +317,11 @@ public class TaskPlanApplicationService {
             int position = index + 1;
             String title = requiredText(source.getStep(), "tasks[" + index + "].step", 1000);
             String status = normalizeTaskStatus(source.getStatus());
-            Long requestedId = parseOptionalLong(source.getTaskId());
-            ByaiAgentTaskItem previous = requestedId == null ? null : byId.get(requestedId);
-            if (requestedId != null && previous == null) {
-                throw badRequest("tasks[" + index + "].taskId does not belong to this plan");
-            }
-            if (previous == null) {
-                ByaiAgentTaskItem samePosition = byPosition.get(position);
-                if (samePosition != null && title.equals(samePosition.getTitle())) {
-                    previous = samePosition;
-                }
-            }
+            ByaiAgentTaskItem samePosition = byPosition.get(position);
+            ByaiAgentTaskItem previous = samePosition != null && title.equals(samePosition.getTitle())
+                ? samePosition : null;
 
             Long taskId = previous == null ? IdUtil.getSnowflakeNextId() : previous.getTaskId();
-            if (!used.add(taskId)) {
-                throw badRequest("duplicate taskId in task plan");
-            }
             ByaiAgentTaskItem item = new ByaiAgentTaskItem();
             item.setTaskId(taskId);
             item.setPlanId(planId);
@@ -432,9 +382,6 @@ public class TaskPlanApplicationService {
         }
         if (StringUtils.isNotBlank(sourceRuntime)) {
             query.eq(ByaiAgentTaskPlan::getSourceRuntime, normalizeRuntime(sourceRuntime));
-        }
-        if (StringUtils.isNotBlank(sourceRunId)) {
-            query.eq(ByaiAgentTaskPlan::getSourceRunId, sourceRunId.trim());
         }
         if (!includeTerminal) {
             query.in(ByaiAgentTaskPlan::getStatus, includeCancelling ? ACTIVE_PLAN_STATUSES : Set.of("ACTIVE"));

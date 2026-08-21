@@ -4,6 +4,7 @@ import type {
   ContextProcessor,
   SystemContextSection,
 } from "../types.js";
+import { toTaskPlanModelView } from "../../domain/task-plan.js";
 
 const SECTION_ID = "active-task-plan";
 
@@ -32,7 +33,9 @@ function renderTaskPlan(
   if (!input.taskPlanAvailable) {
     return undefined;
   }
-  const snapshot = input.activeTaskPlan ?? null;
+  const snapshot = input.activeTaskPlan
+    ? toTaskPlanModelView(input.activeTaskPlan)
+    : null;
   return {
     id: SECTION_ID,
     content: `<active_task_plan>
@@ -43,7 +46,7 @@ ${JSON.stringify(snapshot)}
 For a request with multiple meaningful execution steps, call updateTaskPlan before doing the work when no active plan exists.
 When an active plan exists, continue it instead of creating a duplicate.
 Send the complete ordered task list whenever a task starts, completes, fails, is skipped, or the plan changes.
-Preserve planId, taskIds, and use expectedVersion from the latest snapshot on every update.
+The system owns execution identity, plan identity, versions, and task IDs. Never invent or request them.
 Before the final user answer, reconcile every task to a terminal status and update the plan one final time.
 </task_plan_policy>`,
   };

@@ -52,17 +52,31 @@ export interface TaskPlanSnapshot {
   tasks: TaskPlanTaskSnapshot[];
 }
 
-/** 模型工具提交的完整任务数组；运行归属和幂等键由运行时补齐。 */
+/** 模型只提交语义计划；执行归属和所有持久化字段由系统管理。 */
 export interface TaskPlanUpdate {
-  planId?: string;
-  expectedVersion?: number;
   title: string;
   explanation?: string;
   tasks: Array<{
-    taskId?: string;
     step: string;
     description?: string;
     status: TaskPlanTaskStatus;
     statusReason?: TaskPlanStatusReason;
   }>;
+}
+
+/** 隐藏持久化字段后注入模型的计划语义视图。 */
+export function toTaskPlanModelView(snapshot: TaskPlanSnapshot) {
+  return {
+    title: snapshot.title,
+    status: snapshot.status,
+    ...(snapshot.statusReason ? { statusReason: snapshot.statusReason } : {}),
+    ...(snapshot.explanation ? { explanation: snapshot.explanation } : {}),
+    tasks: snapshot.tasks.map((task) => ({
+      position: task.position,
+      step: task.title,
+      ...(task.description ? { description: task.description } : {}),
+      status: task.status,
+      ...(task.statusReason ? { statusReason: task.statusReason } : {}),
+    })),
+  };
 }

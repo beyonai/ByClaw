@@ -87,12 +87,9 @@ describe("ByClaw BE task plan gateway", () => {
       },
       idempotencyKey: "tool-call-1",
       update: {
-        planId: "1001",
-        expectedVersion: 1,
         title: "实现任务计划",
         tasks: [
           {
-            taskId: "4001",
             step: "分析协议",
             status: "COMPLETED",
           },
@@ -105,14 +102,15 @@ describe("ByClaw BE task plan gateway", () => {
       "http://127.0.0.1:8086/byaiService/internal/api/v1/task-plan/update",
     );
     expect(JSON.parse(String(init?.body))).toMatchObject({
-      planId: "1001",
-      expectedVersion: 1,
       idempotencyKey: "tool-call-1",
       sessionId: "2001",
       messageId: "3001",
       sourceRuntime: "BYCLAW_SUPER",
       sourceRunId: "run-1",
     });
+    expect(JSON.parse(String(init?.body))).not.toHaveProperty("planId");
+    expect(JSON.parse(String(init?.body))).not.toHaveProperty("expectedVersion");
+    expect(JSON.parse(String(init?.body)).tasks[0]).not.toHaveProperty("taskId");
   });
 
   it("treats a null active response as no plan", async () => {

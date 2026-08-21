@@ -24,9 +24,27 @@ CREATE TABLE IF NOT EXISTS byai_agent_task_plan
     updated_at            TIMESTAMP    NOT NULL,
     completed_at          TIMESTAMP,
     CONSTRAINT pk_byai_agent_task_plan PRIMARY KEY (plan_id),
+    CONSTRAINT uk_byai_agent_task_plan_execution
+        UNIQUE (user_id, session_id, message_id, source_runtime),
     CONSTRAINT uk_byai_agent_task_plan_create
         UNIQUE (user_id, source_runtime, source_run_id, create_request_id)
 );
+
+-- 兼容已建表的手工部署：同一用户、回答消息和运行时只保留一份计划。
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'uk_byai_agent_task_plan_execution'
+          AND conrelid = 'byai.byai_agent_task_plan'::regclass
+    ) THEN
+        ALTER TABLE byai_agent_task_plan
+            ADD CONSTRAINT uk_byai_agent_task_plan_execution
+            UNIQUE (user_id, session_id, message_id, source_runtime);
+    END IF;
+END;
+$$;
 
 CREATE INDEX IF NOT EXISTS idx_agent_task_plan_execution
     ON byai_agent_task_plan (user_id, session_id, message_id, updated_at DESC);

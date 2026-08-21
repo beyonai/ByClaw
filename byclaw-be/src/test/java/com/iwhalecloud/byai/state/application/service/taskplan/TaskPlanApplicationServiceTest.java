@@ -72,7 +72,7 @@ class TaskPlanApplicationServiceTest {
     }
 
     @Test
-    void update_createsSnapshotAndStableTaskIds() {
+    void update_createsSnapshotAndServerAssignedTaskIds() {
         when(planMapper.selectOne(any())).thenReturn(null);
         List<ByaiAgentTaskItem> savedItems = new ArrayList<>();
         doAnswer(invocation -> {
@@ -95,6 +95,42 @@ class TaskPlanApplicationServiceTest {
         assertThat(snapshot.getTasks().getFirst().getStatusReason().getCode()).isEqualTo("WORKING");
         verify(planMapper).insert(any(ByaiAgentTaskPlan.class));
         verify(eventMapper).insert(any(ByaiAgentTaskEvent.class));
+    }
+
+    @Test
+    void update_findsPlanByExecutionAndAdvancesVersion() {
+        ByaiAgentTaskPlan active = plan("ACTIVE", 1);
+        active.setSourceRunId("previous-run");
+        ByaiAgentTaskPlan updated = plan("ACTIVE", 2);
+        when(planMapper.selectOne(any())).thenReturn(active, updated);
+        when(planMapper.update(any(), any(Wrapper.class))).thenReturn(1);
+
+        ByaiAgentTaskItem first = item(101L, 1, "IN_PROGRESS");
+        first.setTitle("分析协议");
+        ByaiAgentTaskItem second = item(102L, 2, "PENDING");
+        second.setTitle("实现协议");
+        List<ByaiAgentTaskItem> savedItems = new ArrayList<>(List.of(first, second));
+        when(itemMapper.selectList(any())).thenAnswer(invocation -> new ArrayList<>(savedItems));
+        doAnswer(invocation -> {
+            savedItems.clear();
+            return 2;
+        }).when(itemMapper).delete(any());
+        doAnswer(invocation -> {
+            savedItems.add(invocation.getArgument(0));
+            return 1;
+        }).when(itemMapper).insert(any(ByaiAgentTaskItem.class));
+
+        TaskPlanUpdateRequest request = request();
+        request.getTasks().getFirst().setStatus("COMPLETED");
+        request.getTasks().get(1).setStatus("IN_PROGRESS");
+        TaskPlanSnapshot snapshot = service.update(request);
+
+        assertThat(snapshot.getVersion()).isEqualTo(2);
+        assertThat(snapshot.getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getTaskId)
+            .containsExactly("101", "102");
+        assertThat(snapshot.getTasks()).extracting(TaskPlanSnapshot.TaskSnapshot::getStatus)
+            .containsExactly("COMPLETED", "IN_PROGRESS");
+        verify(planMapper).update(any(), any(Wrapper.class));
     }
 
     @Test

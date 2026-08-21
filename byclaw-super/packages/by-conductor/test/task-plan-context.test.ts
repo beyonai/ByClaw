@@ -33,9 +33,15 @@ describe("TaskPlanProcessor", () => {
     });
 
     expect(compiled.systemPrompt).toContain("<active_task_plan>");
-    expect(compiled.systemPrompt).toContain('"planId":"plan-1"');
+    expect(compiled.systemPrompt).toContain('"step":"定位实现"');
+    expect(compiled.systemPrompt).not.toContain('"planId"');
+    expect(compiled.systemPrompt).not.toContain('"version"');
+    expect(compiled.systemPrompt).not.toContain('"taskId"');
     expect(compiled.systemPrompt).toContain(
       "Before the final user answer, reconcile every task",
+    );
+    expect(compiled.systemPrompt).toContain(
+      "The system owns execution identity, plan identity, versions, and task IDs",
     );
   });
 

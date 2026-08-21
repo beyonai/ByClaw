@@ -70,10 +70,6 @@ export class ByClawBeTaskPlanGateway implements TaskPlanGateway {
   ): Promise<TaskPlanSnapshot> {
     const { context, update } = input;
     const data = await this.#post(UPDATE_PATH, context, {
-      ...(update.planId ? { planId: update.planId } : {}),
-      ...(update.expectedVersion !== undefined
-        ? { expectedVersion: update.expectedVersion }
-        : {}),
       idempotencyKey: input.idempotencyKey,
       sessionId: context.sessionId,
       messageId: context.messageId,
