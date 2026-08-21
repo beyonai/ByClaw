@@ -583,7 +583,7 @@ class DatasetApplicationServiceTest {
         Map<String, String> headers = new HashMap<String, String>();
         headers.put(FeignPythonBuildService.RESOURCE_ID_HEADER, String.valueOf(100L));
 
-        when(feignPythonBuildService.entityDiscovery(any(), headers)).thenReturn(response);
+        when(feignPythonBuildService.entityDiscovery(any(), eq(headers))).thenReturn(response);
 
         KnowledgeEntityDiscoveryRequest request = new KnowledgeEntityDiscoveryRequest();
         request.setResourceId(100L);
@@ -594,7 +594,7 @@ class DatasetApplicationServiceTest {
         KnowledgeEntityBatchResult result = service.entityDiscovery(request, Collections.emptyMap());
 
         ArgumentCaptor<KbEntityDiscovery> captor = ArgumentCaptor.forClass(KbEntityDiscovery.class);
-        verify(feignPythonBuildService).entityDiscovery(captor.capture(), headers);
+        verify(feignPythonBuildService).entityDiscovery(captor.capture(), eq(headers));
         assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
         assertThat(captor.getValue().getFilePath()).isNull();
         assertThat(captor.getValue().getMaxEntities()).isEqualTo(12);
@@ -618,7 +618,7 @@ class DatasetApplicationServiceTest {
         Map<String, String> headers = new HashMap<String, String>();
         headers.put(FeignPythonBuildService.RESOURCE_ID_HEADER, String.valueOf(100L));
 
-        when(feignPythonBuildService.entityEnrich(any(), headers)).thenReturn(response);
+        when(feignPythonBuildService.entityEnrich(any(), eq(headers))).thenReturn(response);
 
         KnowledgeEntityEnrichRequest request = new KnowledgeEntityEnrichRequest();
         request.setResourceId(100L);
@@ -629,7 +629,7 @@ class DatasetApplicationServiceTest {
         KnowledgeEntityBatchResult result = service.entityEnrich(request, headers);
 
         ArgumentCaptor<KbEntityEnrich> captor = ArgumentCaptor.forClass(KbEntityEnrich.class);
-        verify(feignPythonBuildService).entityEnrich(captor.capture(), headers);
+        verify(feignPythonBuildService).entityEnrich(captor.capture(), eq(headers));
         assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
         assertThat(captor.getValue().getFilePath()).isEqualTo("/KnowledgeEntity/OSOT.md");
         assertThat(captor.getValue().getTopK()).isEqualTo(20);

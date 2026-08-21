@@ -1,6 +1,5 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  BookOutlined,
   BulbOutlined,
   DownOutlined,
   LoadingOutlined,
@@ -805,7 +804,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
           className={classNames(styles.primaryItem, resourceCenterActive && styles.primaryItemActive)}
           onClick={() => navigate('/resourceCenter')}
         >
-          <BookOutlined className={styles.primaryIcon} />
+          <AntdIcon type="icon-ziyuan" className={styles.primaryIcon} />
           <span>{intl.formatMessage({ id: 'workspaceSider.resourceCenter' })}</span>
         </button>
         <button

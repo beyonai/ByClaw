@@ -136,6 +136,14 @@ const PCLayout = () => {
 
   const [isClose, setIsClose] = useState(false);
   const [sessionId, setSessionId] = useState<string>('');
+
+  React.useEffect(() => {
+    if (pathname !== '/chat' || !sessionId) return;
+
+    // 会话切换可能发生在资源中心路由，通知聊天组件重新注册右侧资源工作区。
+    myEventEmitter.emit('chat-session-changed', { sessionId }, { waitForListeners: true });
+  }, [pathname, sessionId]);
+
   const [agentId, setAgentId] = useState<string>('');
   // 仅用于左侧资源联动，与实际聊天 agentId 分离。
   const [siderAgentId, setSiderAgentId] = useState<string>('');

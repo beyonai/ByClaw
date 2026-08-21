@@ -194,6 +194,7 @@ class DigitalEmployeeApplicationServiceTest {
         superassist.setDefaultDigEmployeeId(100L);
 
         when(ssResourceService.findById(200L)).thenReturn(newResource);
+        when(authApplicationService.hasResourceUsePermission(newResource, 1L)).thenReturn(true);
         when(suasSuperassistService.findById(7L)).thenReturn(superassist);
 
         SetDefaultDigitalEmployeeResultVo result = service.setDefaultDigitalEmployee(dto);
@@ -220,7 +221,7 @@ class DigitalEmployeeApplicationServiceTest {
         superassist.setDefaultDigEmployeeId(100L);
 
         when(ssResourceService.findById(200L)).thenReturn(sharedResource);
-        when(authApplicationService.queryCurrentUserUsePermittedResourceIds(any(), any())).thenReturn(Set.of(200L));
+        when(authApplicationService.hasResourceUsePermission(sharedResource, 1L)).thenReturn(true);
         when(suasSuperassistService.findById(7L)).thenReturn(superassist);
 
         SetDefaultDigitalEmployeeResultVo result = service.setDefaultDigitalEmployee(dto);
@@ -242,8 +243,7 @@ class DigitalEmployeeApplicationServiceTest {
         superassist.setDefaultDigEmployeeId(100L);
 
         when(ssResourceService.findById(201L)).thenReturn(managedResource);
-        when(authApplicationService.queryCurrentUserUsePermittedResourceIds(any(), any())).thenReturn(Set.of());
-        when(authApplicationService.hasCurrentUserAllowManagePrivilege(managedResource)).thenReturn(true);
+        when(authApplicationService.hasResourceManagePermission(managedResource)).thenReturn(true);
         when(suasSuperassistService.findById(7L)).thenReturn(superassist);
 
         SetDefaultDigitalEmployeeResultVo result = service.setDefaultDigitalEmployee(dto);
@@ -594,6 +594,7 @@ class DigitalEmployeeApplicationServiceTest {
         superassist.setDefaultDigEmployeeId(100L);
 
         when(ssResourceService.findById(100L)).thenReturn(currentDefaultResource);
+        when(authApplicationService.hasResourceUsePermission(currentDefaultResource, 1L)).thenReturn(true);
         when(suasSuperassistService.findById(7L)).thenReturn(superassist);
 
         SetDefaultDigitalEmployeeResultVo result = service.setDefaultDigitalEmployee(dto);
@@ -619,6 +620,7 @@ class DigitalEmployeeApplicationServiceTest {
         superassist.setSuperassistId(7L);
 
         when(ssResourceService.findById(200L)).thenReturn(newResource);
+        when(authApplicationService.hasResourceUsePermission(newResource, 1L)).thenReturn(true);
         when(suasSuperassistService.findById(7L)).thenReturn(superassist);
 
         SetDefaultDigitalEmployeeResultVo result = service.setDefaultDigitalEmployee(dto);
@@ -643,6 +645,7 @@ class DigitalEmployeeApplicationServiceTest {
         superassist.setSuperassistId(7L);
 
         when(ssResourceService.findById(202L)).thenReturn(newResource);
+        when(authApplicationService.hasResourceUsePermission(newResource, 1L)).thenReturn(true);
         when(suasSuperassistService.findById(7L)).thenReturn(superassist);
 
         SetDefaultDigitalEmployeeResultVo result = service.setDefaultDigitalEmployee(dto);
@@ -662,8 +665,8 @@ class DigitalEmployeeApplicationServiceTest {
 
         SsResource otherPersonalResource = buildDigitalEmployee(201L, OwnerType.PERSONAL, 2L);
         when(ssResourceService.findById(201L)).thenReturn(otherPersonalResource);
-        when(authApplicationService.queryCurrentUserUsePermittedResourceIds(any(), any())).thenReturn(Set.of());
-        when(authApplicationService.hasCurrentUserAllowManagePrivilege(otherPersonalResource)).thenReturn(false);
+        when(authApplicationService.hasResourceManagePermission(otherPersonalResource)).thenReturn(false);
+        when(authApplicationService.hasResourceUsePermission(otherPersonalResource, 1L)).thenReturn(false);
 
         assertThatThrownBy(() -> service.setDefaultDigitalEmployee(dto)).isInstanceOf(RuntimeException.class);
         verify(ssResourceService, never()).updateResourceEntity(any(SsResource.class));

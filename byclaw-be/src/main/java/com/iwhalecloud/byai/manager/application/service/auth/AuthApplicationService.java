@@ -29,6 +29,7 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtToolKitServi
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtToolService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtViewService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SuperassistSubAgentService;
+import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.domain.station.service.StationService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.auth.AuthDTO;
@@ -43,6 +44,7 @@ import com.iwhalecloud.byai.manager.entity.position.Position;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.station.Station;
+import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
@@ -151,6 +153,9 @@ public class AuthApplicationService {
 
     @Autowired
     private SuperassistSubAgentService superassistSubAgentService;
+
+    @Autowired
+    private SuasSuperassistService suasSuperassistService;
 
     @Autowired
     private SsResourceMapper ssResourceMapper;
@@ -2835,6 +2840,10 @@ public class AuthApplicationService {
         Set<Long> useBlacklistedIds = queryCurrentUserUseBlacklistedResourceIds(existingResourceIds, resourceBizTypes);
         Set<Long> usePermittedIds = queryCurrentUserUsePermittedResourceIds(existingResourceIds, resourceBizTypes);
         Set<Long> pendingUseApplyIds = queryCurrentUserPendingUseApplyResourceIds(existingResourceIds, resourceBizTypes);
+        boolean containsDigitalEmployee = resources.stream()
+            .anyMatch(resource -> resource != null
+                && ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(resource.getResourceBizType()));
+        Long defaultDigitalEmployeeId = containsDigitalEmployee ? resolveCurrentUserDefaultDigitalEmployeeId() : null;
         Map<Long, Boolean> organizationManageCache = new HashMap<>();
 
         Map<Long, ResourceOperationPermissionsVo> result = new LinkedHashMap<>();
@@ -2843,14 +2852,15 @@ public class AuthApplicationService {
                 return;
             }
             result.put(resource.getResourceId(), buildResourceOperationPermissions(resource, currentUserId,
-                managePrivilegeIds, useBlacklistedIds, usePermittedIds, pendingUseApplyIds, organizationManageCache));
+                managePrivilegeIds, useBlacklistedIds, usePermittedIds, pendingUseApplyIds, organizationManageCache,
+                defaultDigitalEmployeeId));
         });
         return result;
     }
 
     private ResourceOperationPermissionsVo buildResourceOperationPermissions(SsResource ssResource,
         Long currentUserId, Set<Long> managePrivilegeIds, Set<Long> useBlacklistedIds, Set<Long> usePermittedIds,
-        Set<Long> pendingUseApplyIds, Map<Long, Boolean> organizationManageCache) {
+        Set<Long> pendingUseApplyIds, Map<Long, Boolean> organizationManageCache, Long defaultDigitalEmployeeId) {
         ResourceOperationPermissionsVo vo = new ResourceOperationPermissionsVo();
         Long resourceId = ssResource.getResourceId();
         vo.setResourceId(resourceId);
@@ -2902,8 +2912,35 @@ public class AuthApplicationService {
         vo.setCanAuditUse(canSetUse && !isPersonalResourceUseApplyUnsupported);
         vo.setCanApplyUse(!isPersonalResourceUseApplyUnsupported
             && checkCanApplyUse(ssResource, currentUserId, useBlacklistedIds, usePermittedIds, pendingUseApplyIds));
-        vo.setCanSetDefault(false);
+        vo.setCanSetDefault(canSetDefaultDigitalEmployee(ssResource,
+            canManage || isCurrentUserGlobalResourceManager(), hasUsePermission,
+            defaultDigitalEmployeeId));
         return vo;
+    }
+
+    private boolean canSetDefaultDigitalEmployee(SsResource ssResource, boolean canManage, boolean hasUsePermission,
+        Long defaultDigitalEmployeeId) {
+        return ssResource != null
+            && ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(ssResource.getResourceBizType())
+            && !Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum())
+            && !Objects.equals(ssResource.getResourceId(), defaultDigitalEmployeeId)
+            && (canManage || hasUsePermission);
+    }
+
+    private Long resolveCurrentUserDefaultDigitalEmployeeId() {
+        Long defaultDigitalEmployeeId = CurrentUserHolder.getDefaultDigEmployeeId();
+        if (defaultDigitalEmployeeId != null) {
+            return defaultDigitalEmployeeId;
+        }
+        Long assistantId = CurrentUserHolder.getAssistantId();
+        if (assistantId == null || assistantId <= 0) {
+            assistantId = CurrentUserHolder.getCurrentUserId();
+        }
+        if (assistantId == null || assistantId <= 0) {
+            return null;
+        }
+        SuasSuperassist superassist = suasSuperassistService.findById(assistantId);
+        return superassist == null ? null : superassist.getDefaultDigEmployeeId();
     }
 
     private boolean hasResourceMemberSettingPermission(SsResource ssResource, Long currentUserId,
@@ -2993,9 +3030,7 @@ public class AuthApplicationService {
     }
 
     /**
-     * 查询当前登录用户对指定资源的 6 项操作权限。
-     * canSetDefault 已统一迁移到左侧“全部列表项”接口计算，这里固定返回 false，避免资源卡片继续出现旧入口。
-     * 与列表查询返回的 canEdit/canManageAuth/... 字段语义保持一致。
+     * 查询当前登录用户对指定资源的操作权限。
      *
      * @param resourceId 资源 ID
      * @return 操作权限 VO
@@ -3069,9 +3104,9 @@ public class AuthApplicationService {
         vo.setCanAuditUse(canSetUse && !isPersonalResourceUseApplyUnsupported); // 移除 !isDefaultSuperAssistantResource
         vo.setCanApplyUse(!isPersonalResourceUseApplyUnsupported
             && checkCanApplyUse(ssResource)); // 移除 !isDefaultSuperAssistantResource
-
-        // “设为默认”入口统一收敛到左侧“全部列表项”，个人/企业资源卡片不再展示该操作。
-        vo.setCanSetDefault(false);
+        Long defaultDigitalEmployeeId = isDigitalEmployee ? resolveCurrentUserDefaultDigitalEmployeeId() : null;
+        vo.setCanSetDefault(canSetDefaultDigitalEmployee(ssResource, canManage, hasUsePermission,
+            defaultDigitalEmployeeId));
         return vo;
     }
 

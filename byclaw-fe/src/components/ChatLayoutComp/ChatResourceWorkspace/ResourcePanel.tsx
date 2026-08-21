@@ -144,8 +144,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
       if (upperSecondaryKey === 'knowledge') return <Knowledge embedded showRouter />;
       if (upperSecondaryKey === 'skill') return <ResourceSiderPanel resourceType="SKILL" embedded showRouter />;
       if (upperSecondaryKey === 'ontology') return <OntologySiderPanel embedded showRouter />;
-      // 模型主菜单已移除，右侧模型列表不再提供“模型中心”跳转入口。
-      if (upperSecondaryKey === 'model') return <ModelSiderPanel embedded />;
+      if (upperSecondaryKey === 'model') return <ModelSiderPanel embedded showRouter />;
       return empty;
     }
 

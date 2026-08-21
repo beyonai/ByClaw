@@ -27,6 +27,7 @@ import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer'
 import { applyResourceUse } from '@/pages/manager/service/resources';
 import type { IOnOkParams } from '@/components/Resources/components/ResourceFilter';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
+import { sortDefaultDigitalEmployeeFirst } from '@/pages/digitalEmployees/utils';
 
 type DisableActionList = Array<'delete' | 'apply' | 'unapply' | 'edit'>;
 
@@ -88,7 +89,11 @@ function AllDigitalEmployees(
   const infiniteScrollRef = React.useRef(null);
   const abortControllerRef = React.useRef<AbortController>(null);
 
-  const { employeesTypeList } = useSelector((state: any) => state.employees);
+  const { employeesTypeList, defaultDigEmployeeId, userInfo } = useSelector((state: any) => ({
+    employeesTypeList: state.employees?.employeesTypeList,
+    defaultDigEmployeeId: state.employees?.defaultDigEmployeeId,
+    userInfo: state.user?.userInfo,
+  }));
 
   const [curActiveLink, setCurActiveLink] = useState<string>(() => searchParams.get(catalogSearchParamKey) || '');
   const [list, setList] = useState<IAgentCache[]>([]);
@@ -267,12 +272,22 @@ function AllDigitalEmployees(
       ApplyList?: string[];
       delIdList?: string[];
       updateList?: Partial<IAgentCache>[];
+      defaultResourceId?: string;
     }) => {
-      const { unApplyList = [], ApplyList = [], delIdList = [], updateList = [] } = param || {};
+      const { unApplyList = [], ApplyList = [], delIdList = [], updateList = [], defaultResourceId } = param || {};
 
       setList((prevList) => {
         return compact([
           ...prevList.map((item: IAgentCache) => {
+            if (defaultResourceId) {
+              const isDefault = `${item.resourceId ?? item.id ?? item.agentId}` === `${defaultResourceId}`;
+              return {
+                ...item,
+                isDefault,
+                canSetDefault: isDefault ? false : item.canSetDefault,
+                ownerType: !isDefault && item.ownerType === 'personal_default' ? 'personal' : item.ownerType,
+              };
+            }
             if (ApplyList.includes(`${item.id}`)) {
               return {
                 ...item,
@@ -316,6 +331,12 @@ function AllDigitalEmployees(
       window.removeEventListener('resourceRestored', handleResourceChanged);
     };
   }, [EventEmitter, curActiveLink, dropdownParam, getSearch, searchName]);
+
+  const defaultResourceId = defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
+  const visibleList = useMemo(
+    () => sortDefaultDigitalEmployeeFirst(list, defaultResourceId),
+    [defaultResourceId, list]
+  );
 
   const showNoUsePermissionWarning = React.useCallback(() => {
     message.destroy();
@@ -507,17 +528,18 @@ function AllDigitalEmployees(
                 className={classnames(styles.messageRowWrap, { [styles.hasMore]: hasMore })}
                 scrollThreshold="50px"
                 hasChildren={list.length > 0}
-                topItemKey={head(list)?.agentId}
+                topItemKey={head(visibleList)?.agentId}
                 style={{
                   overflow: 'visible',
                 }}
               >
                 <div className={styles.employeeList}>
-                  {list.map((employee: IAgentCache) => {
+                  {visibleList.map((employee: IAgentCache) => {
                     return (
                       <ResourceCard
                         key={employee.agentId}
                         resource={employee}
+                        resourceType="DIG_EMPLOYEE"
                         avatarNode={
                           <div className={styles.employeeAvatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>
                         }

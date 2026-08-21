@@ -59,7 +59,11 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
 
   const [currentAgent, setCurrentAgent] = useState<IAgentCache | null>(null);
   const { employeesList } = useSelector(({ employees }: { employees: UseEmployeesIState }) => employees);
-  const resolvedAgentId = currentAgent?.agentId || agentId;
+  const scopedAgentId = resourceAgentIds
+    ?.split(',')
+    .map((item) => item.trim())
+    .find(Boolean);
+  const resolvedAgentId = currentAgent?.agentId || scopedAgentId || agentId;
   const isExpertResourceOverlayOpen = chatMode === chatModeMap.expert && !!currentAgent;
 
   useEffect(() => {
@@ -104,13 +108,15 @@ const MentionPopover: React.FC<MentionPopoverProps> = ({
 
   useEffect(() => {
     if (agentId && type === '#') {
-      const agent = employeesList.find(
-        (item) => `${item.agentId}` === `${agentId}` || `${item.resourceCode}` === `${agentId}`
+      const agent = employeesList.find((item) =>
+        [item.agentId, item.resourceId, item.resourceCode, item.id]
+          .filter(Boolean)
+          .some((identity) => `${identity}` === `${agentId}`)
       );
-      if (agent) {
-        setCurrentAgent(agent);
-      }
+      setCurrentAgent(agent || null);
+      return;
     }
+    setCurrentAgent(null);
   }, [type, agentId, employeesList]);
 
   const onSelectAgentTool = useCallback(

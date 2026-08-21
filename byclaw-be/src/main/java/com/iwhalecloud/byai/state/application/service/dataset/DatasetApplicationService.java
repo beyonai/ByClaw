@@ -996,13 +996,14 @@ public class DatasetApplicationService {
         qaRequest.setExtraParams(
             request.getExtraParams() == null ? Collections.emptyMap() : request.getExtraParams());
 
+        Map<String, String> forwardedHeaders = headers == null ? new HashMap<>() : new HashMap<>(headers);
         Long resourceId = request.getResourceId();
         if (resourceId != null) {
-            headers.put(FeignPythonBuildService.RESOURCE_ID_HEADER, String.valueOf(resourceId));
+            forwardedHeaders.put(FeignPythonBuildService.RESOURCE_ID_HEADER, String.valueOf(resourceId));
         }
 
         PythonBuildResponse<KnowledgeEntityBatchResult> response = feignPythonBuildService.entityDiscovery(qaRequest,
-            headers);
+            forwardedHeaders);
         assertPythonBuildSuccess(response, "发起知识实体发现");
         return attachEntityBatchResourceId(response.getResultObject(), request.getResourceId());
     }
@@ -1023,13 +1024,14 @@ public class DatasetApplicationService {
             request.getExtraParams() == null ? Collections.emptyMap() : request.getExtraParams());
 
 
+        Map<String, String> forwardedHeaders = headers == null ? new HashMap<>() : new HashMap<>(headers);
         Long resourceId = request.getResourceId();
         if (resourceId != null) {
-            headers.put(FeignPythonBuildService.RESOURCE_ID_HEADER, String.valueOf(resourceId));
+            forwardedHeaders.put(FeignPythonBuildService.RESOURCE_ID_HEADER, String.valueOf(resourceId));
         }
 
         PythonBuildResponse<KnowledgeEntityBatchResult> response = feignPythonBuildService.entityEnrich(qaRequest,
-            headers);
+            forwardedHeaders);
         assertPythonBuildSuccess(response, "发起知识实体补全");
         return attachEntityBatchResourceId(response.getResultObject(), request.getResourceId());
     }

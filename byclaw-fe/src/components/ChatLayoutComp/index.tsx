@@ -123,6 +123,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   const [resourceListOpen, setResourceListOpen] = useState(() => Boolean(sessionId));
   const [resourceTabs, setResourceTabs] = useState<ChatResourceTab[]>([]);
   const [activeResourceTabKey, setActiveResourceTabKey] = useState('');
+  const [resourceWorkspaceRefreshKey, setResourceWorkspaceRefreshKey] = useState(0);
   const [selectedProject, setSelectedProject] = useState<{
     projectId: string;
     projectName: string;
@@ -366,6 +367,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     resourceListOpen,
     resourceTabs,
     resourceWorkspaceVisible,
+    resourceWorkspaceRefreshKey,
     sessionId,
     sessionProjectId,
     setDetailPanel,
@@ -386,6 +388,30 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     setActiveResourceTabKey('');
     setResourceListOpen(Boolean(sessionId && isBottom));
   }, [isBottom, sessionId]);
+
+  useEffect(() => {
+    // 会话详情切换时兜底打开一次资源列表，避免路由切换和详情面板清理的异步时序导致右侧面板偶发保持关闭。
+    if (sessionId && isBottom) {
+      setResourceListOpen(true);
+    }
+  }, [isBottom, sessionId]);
+
+  useEffect(() => {
+    const handleChatSessionChanged = (payload?: { sessionId?: string | number }) => {
+      if (!payload?.sessionId || `${payload.sessionId}` !== `${sessionId}`) return;
+
+      setResourceTabs([]);
+      setActiveResourceTabKey('');
+      setResourceListOpen(true);
+      // PC 布局切换路由时可能已经清空了详情面板，此处递增 key 强制重新注册资源工作区。
+      setResourceWorkspaceRefreshKey((current) => current + 1);
+    };
+
+    EventEmitter.on('chat-session-changed', handleChatSessionChanged);
+    return () => {
+      EventEmitter.off('chat-session-changed', handleChatSessionChanged);
+    };
+  }, [EventEmitter, sessionId]);
 
   // 路由切换时由 PCLayout 统一决定是否清理详情面板；资源中心入口带 preserveDetailPanel 标记时，
   // 即使聊天组件卸载，也要保留右侧资源工作区显示在资源中心页面旁边。

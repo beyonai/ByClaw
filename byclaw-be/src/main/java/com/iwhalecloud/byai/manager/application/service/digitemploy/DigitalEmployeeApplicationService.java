@@ -1943,22 +1943,14 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 左侧“全部列表项”中可见的数字员工才允许设为默认: 我创建的、我有使用授权的、或我有 ALLOW_MANAGE 管理授权的资源均可.
+     * 有使用或管理权限的数字员工均可设为默认，和资源权限接口的 canSetDefault 口径保持一致。
      */
     private boolean canCurrentUserSetAsDefault(SsResource resource, Long currentUserId) {
         if (resource == null || currentUserId == null) {
             return false;
         }
-        if (Objects.equals(resource.getCreateBy(), currentUserId)) {
-            return true;
-        }
-        List<Long> resourceIds = List.of(resource.getResourceId());
-        List<String> resourceBizTypes = List.of(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
-        if (authApplicationService.queryCurrentUserUsePermittedResourceIds(resourceIds, resourceBizTypes)
-            .contains(resource.getResourceId())) {
-            return true;
-        }
-        return authApplicationService.hasCurrentUserAllowManagePrivilege(resource);
+        return authApplicationService.hasResourceManagePermission(resource)
+            || authApplicationService.hasResourceUsePermission(resource, currentUserId);
     }
 
     private SuasSuperassist loadCurrentUserSuperassist() {

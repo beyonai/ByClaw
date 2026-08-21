@@ -16,6 +16,7 @@ import ResourceCard from '@/components/Resources/components/ResourceCard';
 import { IAgentCache } from '@/typescript/agent';
 import useGlobal from '@/hooks/useGlobal';
 import { getAgentChatAvatar } from '@/utils/agent';
+import { sortDefaultDigitalEmployeeFirst } from '@/pages/digitalEmployees/utils';
 import useTracker from '@/hooks/useTracker';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
@@ -51,8 +52,10 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
   const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const { trackerEmployeeClick } = useTracker();
 
-  const { employeesTypeList } = useSelector(({ employees }) => ({
-    ...employees,
+  const { employeesTypeList, defaultDigEmployeeId, userInfo } = useSelector(({ employees, user }: any) => ({
+    employeesTypeList: employees?.employeesTypeList,
+    defaultDigEmployeeId: employees?.defaultDigEmployeeId,
+    userInfo: user?.userInfo,
   }));
 
   const [curActiveLink, setCurActiveLink] = useState<string>(() => searchParams.get('personalCatalogId') || '');
@@ -217,11 +220,21 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
       ApplyList?: string[];
       delIdList?: string[];
       updateList?: Partial<IAgentCache>[];
+      defaultResourceId?: string;
     }) => {
-      const { unApplyList = [], ApplyList = [], delIdList = [], updateList = [] } = param || {};
+      const { unApplyList = [], ApplyList = [], delIdList = [], updateList = [], defaultResourceId } = param || {};
       setList((prevList) => {
         return compact([
           ...prevList.map((item: IAgentCache) => {
+            if (defaultResourceId) {
+              const isDefault = `${item.resourceId ?? item.id ?? item.agentId}` === `${defaultResourceId}`;
+              return {
+                ...item,
+                isDefault,
+                canSetDefault: isDefault ? false : item.canSetDefault,
+                ownerType: !isDefault && item.ownerType === 'personal_default' ? 'personal' : item.ownerType,
+              };
+            }
             if (ApplyList.includes(`${item.id}`)) {
               return {
                 ...item,
@@ -265,6 +278,12 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
       window.removeEventListener('resourceRestored', handleResourceChanged);
     };
   }, [EventEmitter, curActiveLink, dropdownParam, getSearch, searchName]);
+
+  const defaultResourceId = defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
+  const visibleList = useMemo(
+    () => sortDefaultDigitalEmployeeFirst(list, defaultResourceId),
+    [defaultResourceId, list]
+  );
 
   const onClickEmployee = React.useCallback(
     (employee: IAgentCache) => {
@@ -418,18 +437,19 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
               className={classnames(styles.messageRowWrap, { [styles.hasMore]: hasMore })}
               scrollThreshold="50px"
               hasChildren={list.length > 0}
-              topItemKey={head(list)?.agentId}
+              topItemKey={head(visibleList)?.agentId}
               style={{
                 overflow: 'visible',
               }}
             >
               <div className={styles.categorySection}>
                 <div className={styles.employeeList}>
-                  {list.map((employee: IAgentCache) => {
+                  {visibleList.map((employee: IAgentCache) => {
                     return (
                       <ResourceCard
                         key={employee.agentId}
                         resource={employee}
+                        resourceType="DIG_EMPLOYEE"
                         avatarNode={
                           <div className={styles.employeeAvatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>
                         }

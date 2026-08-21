@@ -1,8 +1,9 @@
-import { Button, Col, Empty, Input, message, Pagination, Row, Spin, Tabs } from 'antd';
+import { Button, Empty, Input, message, Spin, Tabs } from 'antd';
 import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useIntl, useLocation, useSelector } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
+import InfiniteScroll from 'react-infinite-scroll-component';
 import { getCompositeAppInfo } from '@/service/digitalEmployees';
 import useShowModal from '@/pages/manager/hooks/useShowModal';
 import QuotaCard from './components/QuotaCard';
@@ -91,12 +92,17 @@ const ModelsPage: React.FC = () => {
   const [list, setList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
-  const [pagination, setPagination] = useState({ pageNum: 1, pageSize: PAGE_SIZE, total: 0 });
+  const [pagination, setPagination] = useState({ pageNum: 1, pageSize: PAGE_SIZE, total: 0, hasMore: false });
 
   const [publicList, setPublicList] = useState<any[]>([]);
   const [publicLoading, setPublicLoading] = useState(false);
   const [publicKeyword, setPublicKeyword] = useState('');
-  const [publicPagination, setPublicPagination] = useState({ pageNum: 1, pageSize: PAGE_SIZE, total: 0 });
+  const [publicPagination, setPublicPagination] = useState({
+    pageNum: 1,
+    pageSize: PAGE_SIZE,
+    total: 0,
+    hasMore: false,
+  });
 
   const [quota, setQuota] = useState<{
     used: number;
@@ -111,14 +117,21 @@ const ModelsPage: React.FC = () => {
   } | null>(null);
 
   const fetchList = useCallback(
-    async (page = 1) => {
+    async (page = 1, append = false) => {
       setLoading(true);
       try {
         const res = await getMyModels({ pageNum: page, pageSize: PAGE_SIZE, keyword });
         const data = res?.data;
         if (data) {
-          setList(data.rows || data.list || []);
-          setPagination((prev) => ({ ...prev, pageNum: page, total: data.total || 0 }));
+          const rows = data.rows || data.list || [];
+          const total = Number(data.total ?? data.totalCount ?? 0);
+          setList((prev) => (append ? [...prev, ...rows] : rows));
+          setPagination((prev) => ({
+            ...prev,
+            pageNum: page,
+            total,
+            hasMore: total > 0 ? page * PAGE_SIZE < total : rows.length >= PAGE_SIZE,
+          }));
         }
       } finally {
         setLoading(false);
@@ -128,14 +141,21 @@ const ModelsPage: React.FC = () => {
   );
 
   const fetchPublicList = useCallback(
-    async (page = 1) => {
+    async (page = 1, append = false) => {
       setPublicLoading(true);
       try {
         const res = await getPublicModels({ pageNum: page, pageSize: PAGE_SIZE, keyword: publicKeyword });
         const data = res?.data;
         if (data) {
-          setPublicList(data.rows || data.list || []);
-          setPublicPagination((prev) => ({ ...prev, pageNum: page, total: data.total || 0 }));
+          const rows = data.rows || data.list || [];
+          const total = Number(data.total ?? data.totalCount ?? 0);
+          setPublicList((prev) => (append ? [...prev, ...rows] : rows));
+          setPublicPagination((prev) => ({
+            ...prev,
+            pageNum: page,
+            total,
+            hasMore: total > 0 ? page * PAGE_SIZE < total : rows.length >= PAGE_SIZE,
+          }));
         }
       } finally {
         setPublicLoading(false);
@@ -198,16 +218,19 @@ const ModelsPage: React.FC = () => {
     formAction.handleShow('add');
   };
 
-  const handleEdit = useCallback(async (record: any) => {
-    try {
-      const res = await getMyModelDetail({ id: record.id });
-      if (res?.data) {
-        handleShow('edit', res.data);
+  const handleEdit = useCallback(
+    async (record: any) => {
+      try {
+        const res = await getMyModelDetail({ id: record.id });
+        if (res?.data) {
+          handleShow('edit', res.data);
+        }
+      } catch {
+        message.error('Failed to load model detail');
       }
-    } catch {
-      message.error('Failed to load model detail');
-    }
-  }, [handleShow]);
+    },
+    [handleShow]
+  );
 
   useEffect(() => {
     const state = (location.state || {}) as { editModelId?: string | number; editModelRequestId?: number };
@@ -262,11 +285,21 @@ const ModelsPage: React.FC = () => {
   };
 
   const handleSaved = () => {
-    fetchList(pagination.pageNum);
+    fetchList(1);
+  };
+
+  const loadMoreMine = () => {
+    if (loading || !pagination.hasMore) return;
+    void fetchList(pagination.pageNum + 1, true);
+  };
+
+  const loadMorePublic = () => {
+    if (publicLoading || !publicPagination.hasMore) return;
+    void fetchPublicList(publicPagination.pageNum + 1, true);
   };
 
   return (
-    <div className={styles.container}>
+    <div id="models-scroll-container" className={styles.container}>
       <QuotaCard quota={quota} />
 
       <div className={styles.headerBar}>
@@ -314,31 +347,31 @@ const ModelsPage: React.FC = () => {
           <Spin spinning={loading}>
             {list.length > 0 ? (
               <>
-                <Row gutter={[16, 16]} className={styles.grid}>
-                  {sortedList.map((item) => (
-                    <Col key={item.id} xs={24} sm={12} md={8} lg={6}>
-                      <ModelCard
-                        data={item}
-                        current={isCurrentModel(item, currentModelInfo)}
-                        onEdit={() => handleEdit(item)}
-                        onDebug={() => handleDebug(item)}
-                        onDelete={() => handleDelete(item)}
-                        onSetStatus={(status) => handleSetStatus(item, status)}
-                      />
-                    </Col>
-                  ))}
-                </Row>
-                {pagination.total > PAGE_SIZE && (
-                  <div className={styles.pagination}>
-                    <Pagination
-                      current={pagination.pageNum}
-                      pageSize={PAGE_SIZE}
-                      total={pagination.total}
-                      onChange={(page) => fetchList(page)}
-                      showSizeChanger={false}
-                    />
+                <InfiniteScroll
+                  next={loadMoreMine}
+                  hasMore={pagination.hasMore}
+                  dataLength={list.length}
+                  scrollableTarget="models-scroll-container"
+                  scrollThreshold="120px"
+                  loader={<Spin />}
+                  endMessage={null}
+                  style={{ overflow: 'visible' }}
+                >
+                  <div className={styles.grid}>
+                    {sortedList.map((item) => (
+                      <div key={item.id}>
+                        <ModelCard
+                          data={item}
+                          current={isCurrentModel(item, currentModelInfo)}
+                          onEdit={() => handleEdit(item)}
+                          onDebug={() => handleDebug(item)}
+                          onDelete={() => handleDelete(item)}
+                          onSetStatus={(status) => handleSetStatus(item, status)}
+                        />
+                      </div>
+                    ))}
                   </div>
-                )}
+                </InfiniteScroll>
               </>
             ) : (
               !loading && (
@@ -357,24 +390,24 @@ const ModelsPage: React.FC = () => {
           <Spin spinning={publicLoading}>
             {publicList.length > 0 ? (
               <>
-                <Row gutter={[16, 16]} className={styles.grid}>
-                  {sortedPublicList.map((item) => (
-                    <Col key={item.id} xs={24} sm={12} md={8} lg={6}>
-                      <PublicModelCard record={item} current={isCurrentModel(item, currentModelInfo)} />
-                    </Col>
-                  ))}
-                </Row>
-                {publicPagination.total > PAGE_SIZE && (
-                  <div className={styles.pagination}>
-                    <Pagination
-                      current={publicPagination.pageNum}
-                      pageSize={PAGE_SIZE}
-                      total={publicPagination.total}
-                      onChange={(page) => fetchPublicList(page)}
-                      showSizeChanger={false}
-                    />
+                <InfiniteScroll
+                  next={loadMorePublic}
+                  hasMore={publicPagination.hasMore}
+                  dataLength={publicList.length}
+                  scrollableTarget="models-scroll-container"
+                  scrollThreshold="120px"
+                  loader={<Spin />}
+                  endMessage={null}
+                  style={{ overflow: 'visible' }}
+                >
+                  <div className={styles.grid}>
+                    {sortedPublicList.map((item) => (
+                      <div key={item.id}>
+                        <PublicModelCard record={item} current={isCurrentModel(item, currentModelInfo)} />
+                      </div>
+                    ))}
                   </div>
-                )}
+                </InfiniteScroll>
               </>
             ) : (
               !publicLoading && (

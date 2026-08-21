@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Tabs } from 'antd';
 import {
+  ApartmentOutlined,
   AppstoreOutlined,
   DatabaseOutlined,
   EyeOutlined,
@@ -9,12 +10,14 @@ import {
   ToolOutlined,
 } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
+import AntdIcon from '@/components/AntdIcon';
 import Resources from '@/components/Resources';
 import FilesPage from '@/pages/files';
+import ModelsPage from '@/pages/models';
 import OntologyCenter from '@/pages/ontologyCenter';
 import styles from './index.module.less';
 
-type ResourceTabKey = 'knowledge' | 'tool' | 'view' | 'object' | 'ontology' | 'skill' | 'file';
+type ResourceTabKey = 'knowledge' | 'tool' | 'view' | 'object' | 'ontology' | 'skill' | 'model' | 'file';
 
 const ResourceCenter: React.FC = () => {
   const intl = useIntl();
@@ -40,7 +43,7 @@ const ResourceCenter: React.FC = () => {
     {
       key: 'ontology',
       label: intl.formatMessage({ id: 'common.resourceType.ontology' }),
-      icon: <DatabaseOutlined />,
+      icon: <ApartmentOutlined />,
     },
     {
       key: 'view',
@@ -51,6 +54,11 @@ const ResourceCenter: React.FC = () => {
       key: 'object',
       label: intl.formatMessage({ id: 'common.object' }),
       icon: <AppstoreOutlined />,
+    },
+    {
+      key: 'model',
+      label: intl.formatMessage({ id: 'common.model' }),
+      icon: <AntdIcon type="icon-a-Braindanao" />,
     },
     {
       key: 'file',
@@ -67,6 +75,7 @@ const ResourceCenter: React.FC = () => {
     if (activeKey === 'object') return <Resources resourceType="OBJECT" {...installedProps} />;
     if (activeKey === 'ontology') return <OntologyCenter />;
     if (activeKey === 'skill') return <Resources resourceType="SKILL" {...installedProps} />;
+    if (activeKey === 'model') return <ModelsPage />;
     return <FilesPage />;
   };
 
