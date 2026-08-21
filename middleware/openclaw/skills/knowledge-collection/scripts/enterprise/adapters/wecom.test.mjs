@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { createWecomAdapter } from './wecom.mjs';
 
+const testWecomHome = join(tmpdir(), 'wecom-adapter-home');
+process.env.WECOM_HOME = testWecomHome;
+
 async function fixture(root, program) {
   const bin = join(root, 'wecom-cli');
-  await writeFile(bin, `#!/usr/bin/env node\n${program}\n`, { mode: 0o700 });
+  await writeFile(bin, `#!/usr/bin/env node\nif (process.env.HOME !== process.env.WECOM_HOME) process.exit(96);\n${program}\n`, { mode: 0o700 });
   await chmod(bin, 0o700);
   return bin;
 }
@@ -36,7 +39,7 @@ test('search is unsupported but persists an inspectable empty bundle', async () 
     assert.equal(result.status, 'unsupported_capability');
     assert.equal(result.continuable, true);
     assert.deepEqual((await json(join(outputDir, 'collection-result.json'))).items, []);
-    assert.equal((await json(join(outputDir, 'sanitized/metadata.json'))).collection.status, 'complete');
+    assert.equal((await json(join(outputDir, 'sanitized/metadata.json'))).collection.status, 'failed');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -99,11 +102,11 @@ test('smartsheet materializes each sheet with fields and cursor-paginated record
     const bin = await fixture(root, `
 const command = process.argv[3]; const request = JSON.parse(process.argv[4]);
 const out = ${envelope.toString()};
-if (command === 'get_sheet') console.log(out({ errcode: 0, sheets: [{ sheet_id: 'one', title: 'One' }, { sheet_id: 'two', title: 'Two' }] }));
-else if (command === 'get_fields') console.log(out({ errcode: 0, fields: [{ field_id: 'name', title: 'Name' }, { field_id: 'meta', title: 'Meta' }] }));
-else if (command === 'get_records' && request.sheet_id === 'one' && !request.cursor) console.log(out({ errcode: 0, records: [{ values: { name: 'Ada', meta: { tags: ['x'] } } }], next_cursor: 'next' }));
-else if (command === 'get_records' && request.sheet_id === 'one') console.log(out({ errcode: 0, records: [{ values: { name: 'Grace', meta: ['a', 'b'] } }], next_cursor: '' }));
-else if (command === 'get_records') console.log(out({ errcode: 0, records: [{ values: { name: 'Lin', meta: { ok: true } } }], next_cursor: null }));
+if (command === 'smartsheet_get_sheet') console.log(out({ errcode: 0, sheets: [{ sheet_id: 'one', title: 'One' }, { sheet_id: 'two', title: 'Two' }] }));
+else if (command === 'smartsheet_get_fields') console.log(out({ errcode: 0, fields: [{ field_id: 'name', title: 'Name' }, { field_id: 'meta', title: 'Meta' }] }));
+else if (command === 'smartsheet_get_records' && request.sheet_id === 'one' && !request.cursor) console.log(out({ errcode: 0, records: [{ values: { name: 'Ada', meta: { tags: ['x'] } } }], next_cursor: 'next' }));
+else if (command === 'smartsheet_get_records' && request.sheet_id === 'one') console.log(out({ errcode: 0, records: [{ values: { name: 'Grace', meta: ['a', 'b'] } }], next_cursor: '' }));
+else if (command === 'smartsheet_get_records') console.log(out({ errcode: 0, records: [{ values: { name: 'Lin', meta: { ok: true } } }], next_cursor: null }));
 else process.exit(2);
 `);
     const outputDir = await output(root, 'smartsheet');
@@ -138,6 +141,55 @@ else process.exit(2);
     });
     assert.equal(result.status, 'complete');
     assert.equal((await json(join(outputDir, 'sanitized/metadata.json'))).collection.items[0].sourceItemId, 'page-task');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('resumes a partial WeCom document export from its persisted task ID', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'wecom-adapter-'));
+  try {
+    const pollPath = join(root, 'resume-polls');
+    const bin = await fixture(root, `
+const { existsSync, readFileSync, writeFileSync } = require('node:fs');
+const command = process.argv[3]; const request = JSON.parse(process.argv[4]); const out = ${envelope.toString()};
+if (command !== 'get_doc_content') process.exit(2);
+if (!request.task_id) console.log(out({ errcode: 0, task_id: 'resume-task' }));
+else if (request.task_id === 'resume-task') {
+  const count = existsSync(${JSON.stringify(pollPath)}) ? Number(readFileSync(${JSON.stringify(pollPath)}, 'utf8')) : 0;
+  writeFileSync(${JSON.stringify(pollPath)}, String(count + 1));
+  console.log(out(count === 0 ? { errcode: 0, task_done: false } : { errcode: 0, task_done: true, content: '# Resumed' }));
+}
+else process.exit(2);
+`);
+    const adapter = createWecomAdapter({ bin, maxPolls: 1 });
+    const partialDir = await output(root, 'partial');
+    const partial = await adapter.collectResource({ url: 'https://doc.weixin.qq.com/doc/abc', outputDir: partialDir });
+    assert.equal(partial.status, 'partial');
+    const resumedDir = await output(root, 'resumed');
+    const resumed = await adapter.resumeResource({ sessionDir: partialDir, outputDir: resumedDir });
+    assert.equal(resumed.status, 'complete');
+    assert.match(await readFile(join(resumedDir, 'sanitized/items/document.md'), 'utf8'), /Resumed/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('refuses a WeCom resume session whose source metadata was replaced', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'wecom-adapter-'));
+  try {
+    const bin = await fixture(root, `process.exit(2);`);
+    const partialDir = await output(root, 'partial');
+    await mkdir(join(partialDir, 'sanitized'), { recursive: true });
+    await writeFile(join(partialDir, 'sanitized/metadata.json'), JSON.stringify({
+      sourceMetadata: { source: 'dws', resourceKind: 'doc', taskId: 'foreign-task' },
+      collection: {
+        status: 'partial',
+        items: [{ sourceUrl: 'https://doc.weixin.qq.com/doc/abc', sourceItemId: 'foreign-task', materialization: { status: 'pending' } }],
+      },
+    }));
+    const result = await createWecomAdapter({ bin }).resumeResource({
+      sessionDir: partialDir,
+      outputDir: await output(root, 'resumed'),
+    });
+    assert.equal(result.status, 'failed');
+    assert.match(result.reason, /not a resumable WeCom/i);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -198,9 +250,9 @@ test('smartsheet cursor pagination stops at the configured page limit with audit
     const bin = await fixture(root, `
 const { appendFileSync, readFileSync } = require('node:fs');
 const command = process.argv[3]; const request = JSON.parse(process.argv[4]); const out = ${envelope.toString()};
-if (command === 'get_sheet') console.log(out({ errcode: 0, sheets: [{ sheet_id: 'one', title: 'One' }] }));
-else if (command === 'get_fields') console.log(out({ errcode: 0, fields: [{ field_id: 'name', title: 'Name' }] }));
-else if (command === 'get_records') { appendFileSync(${JSON.stringify(callsPath)}, request.cursor + '\\n'); if (readFileSync(${JSON.stringify(callsPath)}, 'utf8').trim().split('\\n').length > 3) process.exit(9); console.log(out({ errcode: 0, records: [{ values: { name: request.cursor || 'first' } }], next_cursor: 'cursor-' + (request.cursor || '0') })); }
+if (command === 'smartsheet_get_sheet') console.log(out({ errcode: 0, sheets: [{ sheet_id: 'one', title: 'One' }] }));
+else if (command === 'smartsheet_get_fields') console.log(out({ errcode: 0, fields: [{ field_id: 'name', title: 'Name' }] }));
+else if (command === 'smartsheet_get_records') { appendFileSync(${JSON.stringify(callsPath)}, request.cursor + '\\n'); if (readFileSync(${JSON.stringify(callsPath)}, 'utf8').trim().split('\\n').length > 3) process.exit(9); console.log(out({ errcode: 0, records: [{ values: { name: request.cursor || 'first' } }], next_cursor: 'cursor-' + (request.cursor || '0') })); }
 else process.exit(2);
 `);
     const outputDir = await output(root, 'limited-pages');
@@ -216,8 +268,11 @@ else process.exit(2);
     const rawMetadata = await json(join(outputDir, 'raw/metadata.json'));
     assert.equal(rawMetadata.pagesCollected, 2);
     assert.equal(rawMetadata.lastCursor, 'cursor-cursor-0');
-    assert.match(rawMetadata.partialContent, /first/);
-    assert.equal((await json(join(outputDir, 'sanitized/metadata.json'))).collection.status, 'partial');
+    assert.equal(rawMetadata.partialContent, undefined);
+    assert.match(await readFile(join(outputDir, 'sanitized/items/document.md'), 'utf8'), /first/);
+    const metadata = await json(join(outputDir, 'sanitized/metadata.json'));
+    assert.equal(metadata.collection.status, 'partial');
+    assert.equal(metadata.collection.items[0].materialization.status, 'materialized');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -272,8 +327,8 @@ test('empty content, missing task, repeated cursor, malformed response, and rout
     ['malformed', "console.log('not json');", 'https://doc.weixin.qq.com/doc/a'],
     ['repeat-cursor', `
 const command = process.argv[3]; const out = ${envelope.toString()};
-if (command === 'get_sheet') console.log(out({ errcode: 0, sheets: [{ sheet_id: 'one' }] }));
-else if (command === 'get_fields') console.log(out({ errcode: 0, fields: [] }));
+if (command === 'smartsheet_get_sheet') console.log(out({ errcode: 0, sheets: [{ sheet_id: 'one' }] }));
+else if (command === 'smartsheet_get_fields') console.log(out({ errcode: 0, fields: [] }));
 else console.log(out({ errcode: 0, records: [], next_cursor: 'again' }));`, 'https://doc.weixin.qq.com/smartsheet/a'],
   ];
   for (const [name, program, url] of scenarios) {

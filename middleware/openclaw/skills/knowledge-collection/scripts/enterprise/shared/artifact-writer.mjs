@@ -595,11 +595,24 @@ export async function createArtifactWriter(root) {
       return writePrivateFile(normalizedRoot, rootIdentity, relativePath, content);
     },
 
+    async abort() {
+      if (publicationState === 'committed') {
+        throw new Error('cannot abort a committed collection bundle');
+      }
+      if (publicationState === 'publishing') {
+        throw new Error('cannot abort a collection bundle publication in progress');
+      }
+      await removeOwnedPath(normalizedRoot, rootIdentity, true);
+      publicationState = 'aborted';
+    },
+
     async writeCollectionBundle(bundle) {
       if (publicationState !== 'open') {
         throw new Error(publicationState === 'committed'
           ? 'collection bundle is already committed; publication is one-shot'
-          : 'collection bundle publication is already in progress');
+          : publicationState === 'aborted'
+            ? 'collection bundle writer was aborted'
+            : 'collection bundle publication is already in progress');
       }
       publicationState = 'publishing';
       try {

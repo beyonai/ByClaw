@@ -291,9 +291,9 @@ const COMMAND_SPECS = {
   }),
   enterprise: defineCommand({
     group: 'platform',
-    title: '企业来源采集: search | resource；兼容 wecom-smartpage | feishu-minutes(委派 enterprise-collection.mjs)',
-    args: { '<subcommand>': 'search、resource、wecom-smartpage 或 feishu-minutes' },
-    example: 'knowledge-collection.mjs enterprise search --source wecom --query "季度计划" --output-dir /tmp/enterprise',
+    title: '企业来源采集: search | search-all | materialize | resource | resume-resource；兼容 wecom-smartpage | feishu-minutes(委派 enterprise-collection.mjs)',
+    args: { '<subcommand>': 'search、search-all、materialize、resource、resume-resource、wecom-smartpage 或 feishu-minutes' },
+    example: 'knowledge-collection.mjs enterprise search --source dingtalk --query "季度计划" --output-dir /tmp/enterprise',
   }),
 };
 

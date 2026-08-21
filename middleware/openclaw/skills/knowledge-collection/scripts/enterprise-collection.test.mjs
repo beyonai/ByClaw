@@ -85,6 +85,49 @@ async function testScriptHasValidSyntax() {
   assert.equal(result.code, 0, result.stderr);
 }
 
+async function testSearchFailsWhenTheDwsExecutableCannotStart() {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-missing-dws-'));
+  const outputDir = join(tempRoot, 'output');
+  try {
+    const result = await run(process.execPath, [scriptPath, 'search', '--source', 'dingtalk', '--query', 'probe', '--output-dir', outputDir], {
+      DWS_HOME: join(tempRoot, 'dws-home'),
+      DWS_CLI_BIN: join(tempRoot, 'missing-dws'),
+    });
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /failed to start: ENOENT/);
+    await assert.rejects(stat(outputDir), { code: 'ENOENT' });
+  } finally { await rm(tempRoot, { recursive: true, force: true }); }
+}
+
+async function testSearchFailsWhenTheFwsExecutableCannotStart() {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-missing-fws-'));
+  const outputDir = join(tempRoot, 'output');
+  try {
+    const result = await run(process.execPath, [scriptPath, 'search', '--source', 'feishu', '--query', 'probe', '--output-dir', outputDir], {
+      LARK_HOME: join(tempRoot, 'lark-home'),
+      LARK_CLI_BIN: join(tempRoot, 'missing-lark-cli'),
+    });
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /failed to start: ENOENT/);
+    await assert.rejects(stat(outputDir), { code: 'ENOENT' });
+  } finally { await rm(tempRoot, { recursive: true, force: true }); }
+}
+
+async function testSearchFailsWhenConnectorHomeIsMissing() {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-missing-home-'));
+  try {
+    for (const [source, home] of [['dingtalk', 'DWS_HOME'], ['feishu', 'LARK_HOME']]) {
+      const outputDir = join(tempRoot, `${source}-output`);
+      const result = await run(process.execPath, [scriptPath, 'search', '--source', source, '--query', 'probe', '--output-dir', outputDir], {
+        DWS_HOME: '',
+        LARK_HOME: '',
+      });
+      assert.notEqual(result.code, 0, `${source} missing ${home} must fail the command`);
+      await assert.rejects(stat(outputDir), { code: 'ENOENT' });
+    }
+  } finally { await rm(tempRoot, { recursive: true, force: true }); }
+}
+
 async function testWecomExportWritesCanonicalPrivateArtifacts() {
   const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-test-'));
   const outputDir = join(tempRoot, 'output');
@@ -93,6 +136,7 @@ async function testWecomExportWritesCanonicalPrivateArtifacts() {
     const result = await run(process.execPath, [scriptPath, 'wecom-smartpage', '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir], {
       WECOM_CLI_BIN: fixture,
       WECOM_FIXTURE_STATE: join(tempRoot, 'wecom-state'),
+      WECOM_HOME: join(tempRoot, 'wecom-home'),
     });
     assert.equal(result.code, 0, result.stderr);
     for (const relativePath of [
@@ -149,6 +193,7 @@ else process.exit(2);
     const result = await run(process.execPath, [scriptPath, 'wecom-smartpage', '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir], {
       WECOM_CLI_BIN: fixturePath,
       KNOWLEDGE_COLLECTION_MAX_WECOM_POLLS: '2',
+      WECOM_HOME: join(tempRoot, 'wecom-home'),
     });
     assert.notEqual(result.code, 0);
     const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
@@ -172,6 +217,7 @@ async function testEnterpriseCliTimeoutIsBounded() {
     const result = await run(process.execPath, [scriptPath, 'wecom-smartpage', '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir], {
       WECOM_CLI_BIN: fixturePath,
       KNOWLEDGE_COLLECTION_CLI_TIMEOUT_MS: '50',
+      WECOM_HOME: join(tempRoot, 'wecom-home'),
     });
     assert.notEqual(result.code, 0);
     assert.ok(Date.now() - started < 500, `CLI timeout took ${Date.now() - started}ms`);
@@ -192,7 +238,7 @@ async function testEnterpriseRunnerDoesNotReuseExistingOutputDir() {
     await writeFile(join(outputDir, 'sentinel'), 'preserve');
     const result = await run(process.execPath, [
       scriptPath, 'wecom-smartpage', '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir,
-    ], { WECOM_CLI_BIN: fixture, WECOM_FIXTURE_STATE: join(tempRoot, 'wecom-state') });
+    ], { WECOM_CLI_BIN: fixture, WECOM_FIXTURE_STATE: join(tempRoot, 'wecom-state'), WECOM_HOME: join(tempRoot, 'wecom-home') });
     assert.notEqual(result.code, 0);
     assert.match(result.stderr, /must not already exist/);
     assert.equal(await readFile(join(outputDir, 'sentinel'), 'utf8'), 'preserve');
@@ -209,6 +255,7 @@ async function testWecomRejectsNestedBusinessFailure() {
     const result = await run(process.execPath, [scriptPath, 'wecom-smartpage', '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir], {
       WECOM_CLI_BIN: fixture,
       WECOM_FIXTURE_STATE: join(tempRoot, 'wecom-state'),
+      WECOM_HOME: join(tempRoot, 'wecom-home'),
     });
     assert.notEqual(result.code, 0);
     assert.match(result.stderr, /errcode 93001/);
@@ -239,7 +286,7 @@ console.log(envelope({ errcode: 0 }));
       'https://doc.weixin.qq.com/smartpage/missing-task',
       '--output-dir',
       outputDir,
-    ], { WECOM_CLI_BIN: fixturePath });
+    ], { WECOM_CLI_BIN: fixturePath, WECOM_HOME: join(tempRoot, 'wecom-home') });
     assert.notEqual(result.code, 0);
     const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
     assert.equal(metadata.collection.status, 'failed');
@@ -268,7 +315,7 @@ async function testFeishuMinutesReadsCliCreatedTranscript() {
       'https://example.feishu.cn/minutes/minute-1',
       '--output-dir',
       outputDir,
-    ], { LARK_CLI_BIN: fixture });
+    ], { LARK_CLI_BIN: fixture, LARK_HOME: join(tempRoot, 'lark-home') });
     assert.equal(result.code, 0, result.stderr);
     for (const relativePath of [
       'raw/detail.json',
@@ -314,7 +361,7 @@ async function testFeishuCliFailurePersistsFailedMetadata() {
       'https://example.feishu.cn/minutes/minute-failed',
       '--output-dir',
       outputDir,
-    ], { LARK_CLI_BIN: fixturePath });
+    ], { LARK_CLI_BIN: fixturePath, LARK_HOME: join(tempRoot, 'lark-home') });
     assert.notEqual(result.code, 0);
     const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
     assert.equal(metadata.collection.status, 'failed');
@@ -343,7 +390,7 @@ async function testFeishuMissingTranscriptPersistsPartialMetadata() {
       'https://example.feishu.cn/minutes/minute-partial',
       '--output-dir',
       outputDir,
-    ], { LARK_CLI_BIN: fixturePath });
+    ], { LARK_CLI_BIN: fixturePath, LARK_HOME: join(tempRoot, 'lark-home') });
     assert.notEqual(result.code, 0);
     const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
     assert.equal(metadata.collection.status, 'partial');
@@ -358,6 +405,9 @@ async function testFeishuMissingTranscriptPersistsPartialMetadata() {
 }
 
 await testScriptHasValidSyntax();
+await testSearchFailsWhenTheDwsExecutableCannotStart();
+await testSearchFailsWhenTheFwsExecutableCannotStart();
+await testSearchFailsWhenConnectorHomeIsMissing();
 await testWecomExportWritesCanonicalPrivateArtifacts();
 await testWecomRejectsNestedBusinessFailure();
 await testWecomMissingTaskIdPersistsFailedMetadata();

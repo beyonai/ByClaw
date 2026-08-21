@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { createArtifactWriter } from '../shared/artifact-writer.mjs';
 import { positiveEnv, runCli } from '../shared/cli-runner.mjs';
+import { readResumeMetadata } from '../shared/resume.mjs';
 import { SOURCE_IDENTITY, handledOutcome } from '../shared/status-model.mjs';
 
 const RESOURCE_BY_URL = [
@@ -29,6 +30,14 @@ class WecomCommandError extends Error {
 
 function reasonOf(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function commandEnvironment(dependencies) {
+  const env = { ...process.env, ...(dependencies.env || {}) };
+  if (typeof env.WECOM_HOME !== 'string' || !env.WECOM_HOME.trim()) {
+    throw new Error('WECOM_HOME is required for WeCom collection');
+  }
+  return { ...env, HOME: env.WECOM_HOME };
 }
 
 function contextOf(error) {
@@ -128,7 +137,16 @@ function canonical({ title, url, path }) {
   return { title, url, author: '', publishTime: '', markdown: path, fileName: path };
 }
 
-async function persistBundle(writer, { title, url, inventory, canonicalItems, sourceMetadata }) {
+async function persistBundle(writer, {
+  title,
+  url,
+  inventory,
+  canonicalItems,
+  sourceMetadata,
+  discoverySucceeded,
+  collectionStatus,
+  paginationFailed,
+}) {
   await writer.writeCollectionBundle({
     title,
     source: identity.source,
@@ -138,6 +156,9 @@ async function persistBundle(writer, { title, url, inventory, canonicalItems, so
     inventory,
     canonicalItems,
     sourceMetadata,
+    discoverySucceeded,
+    collectionStatus,
+    paginationFailed,
   });
 }
 
@@ -149,6 +170,8 @@ async function persistUnsupportedSearch({ query, outputDir }) {
     inventory: [],
     canonicalItems: [],
     sourceMetadata: { connector: identity.connector, capability: 'search', unsupported: true },
+    discoverySucceeded: false,
+    collectionStatus: 'failed',
   });
   return handledOutcome(identity.connector, 'unsupported_capability', outputDir);
 }
@@ -170,7 +193,12 @@ async function collectWecomResource(request, dependencies = {}) {
   const { url, kind } = resource;
   const rawArtifacts = [];
   const bin = dependencies.bin || 'wecom-cli';
-  const env = { ...process.env, ...(dependencies.env || {}) };
+  let env;
+  try {
+    env = commandEnvironment(dependencies);
+  } catch (error) {
+    return persistFailure(writer, outputDir, url, kind, rawArtifacts, reasonOf(error), { stage: 'authentication' });
+  }
   const maxPolls = positiveOption(
     dependencies.maxPolls,
     positiveEnv('KNOWLEDGE_COLLECTION_MAX_WECOM_POLLS', MAX_POLLS, env),
@@ -213,8 +241,8 @@ async function collectWecomResource(request, dependencies = {}) {
   try {
     let result;
     if (kind === 'smartsheet') result = await collectSmartsheet(call, url, maxPages);
-    else if (kind === 'smartpage') result = await collectSmartpage(call, url, maxPolls);
-    else result = await collectDocument(call, url, maxPolls);
+    else if (kind === 'smartpage') result = await collectSmartpage(call, url, maxPolls, request.resumeTaskId);
+    else result = await collectDocument(call, url, maxPolls, request.resumeTaskId);
     const markdownPath = 'markdown/document.md';
     const sanitizedPath = 'sanitized/items/document.md';
     const title = titleFor(kind);
@@ -259,7 +287,7 @@ async function collectWecomResource(request, dependencies = {}) {
 
 async function persistFailure(writer, outputDir, url, kind, rawArtifacts, reason, { partial = false, ...context } = {}) {
   const title = titleFor(kind);
-  const { evidence, ...metadataContext } = context;
+  const { evidence, partialContent, ...metadataContext } = context;
   const artifacts = [...rawArtifacts];
   if (evidence) {
     const evidencePath = `raw/failed-${artifacts.length + 1}.json`;
@@ -275,44 +303,55 @@ async function persistFailure(writer, outputDir, url, kind, rawArtifacts, reason
     rawArtifacts: artifacts,
     ...metadataContext,
   });
+  const hasPartialContent = partial && typeof partialContent === 'string' && partialContent.trim();
+  const markdownPath = hasPartialContent ? 'markdown/document.md' : null;
+  const sanitizedPath = hasPartialContent ? 'sanitized/items/document.md' : null;
+  if (hasPartialContent) {
+    const normalized = markdown(partialContent, { title, url });
+    await Promise.all([
+      writer.writeText(markdownPath, normalized),
+      writer.writeText(sanitizedPath, normalized),
+    ]);
+  }
   const inventory = [item({
     itemId: `wecom-${kind}-${crypto.createHash('sha256').update(url).digest('hex').slice(0, 16)}`,
     title,
     url,
     sourceItemId: metadataContext.taskId || url,
     rawArtifacts: artifacts,
-    status: partial ? 'pending' : 'failed',
+    status: hasPartialContent ? 'materialized' : partial ? 'pending' : 'failed',
     reason,
+    markdownPath,
+    sanitizedPath,
   })];
   const sourceMetadata = { ...identity, resourceKind: kind, reason, ...metadataContext };
   await persistBundle(writer, {
-    title, url, inventory, canonicalItems: [],
+    title,
+    url,
+    inventory,
+    canonicalItems: hasPartialContent ? [canonical({ title, url, path: sanitizedPath })] : [],
     sourceMetadata,
+    ...(partial ? { collectionStatus: 'partial' } : {}),
+    ...(hasPartialContent ? { paginationFailed: true } : {}),
   });
-  if (partial) {
-    await writer.writeJson('sanitized/metadata.json', {
-      schemaVersion: '1.0',
-      storage: { fallback: false },
-      collection: { status: 'partial', items: inventory },
-      retention: { auditRequired: false, userRequested: false },
-      postProcessing: { runs: [] },
-      sourceMetadata,
-    });
-  }
   return {
     ...handledOutcome(identity.connector, partial ? 'partial' : 'failed', outputDir, {
       discovered: 1,
-      [partial ? 'pending' : 'failed']: 1,
+      [partial ? (hasPartialContent ? 'materialized' : 'pending') : 'failed']: 1,
     }),
     reason,
   };
 }
 
-async function collectDocument(call, url, maxPolls) {
-  let response = await call('get_doc_content', { url, type: 2 }, 'raw/get-doc-content.json');
-  if (typeof response.content === 'string' && response.content.trim()) return { content: response.content, sourceItemId: url };
-  const taskId = response.task_id;
-  if (typeof taskId !== 'string' || !taskId) throw new Error('wecom-cli document response has no content or task_id');
+async function collectDocument(call, url, maxPolls, resumeTaskId = null) {
+  let response;
+  let taskId = resumeTaskId;
+  if (!taskId) {
+    response = await call('get_doc_content', { url, type: 2 }, 'raw/get-doc-content.json');
+    if (typeof response.content === 'string' && response.content.trim()) return { content: response.content, sourceItemId: url };
+    taskId = response.task_id;
+    if (typeof taskId !== 'string' || !taskId) throw new Error('wecom-cli document response has no content or task_id');
+  }
   for (let poll = 1; poll <= maxPolls; poll += 1) {
     try {
       response = await call('get_doc_content', { url, type: 2, task_id: taskId }, `raw/poll-${poll}.json`);
@@ -331,10 +370,13 @@ async function collectDocument(call, url, maxPolls) {
   });
 }
 
-async function collectSmartpage(call, url, maxPolls) {
-  const start = await call('smartpage_export_task', { url, content_type: 1 }, 'raw/export-task.json');
-  const taskId = start.task_id;
-  if (typeof taskId !== 'string' || !taskId) throw new Error('wecom-cli export response has no task_id');
+async function collectSmartpage(call, url, maxPolls, resumeTaskId = null) {
+  let taskId = resumeTaskId;
+  if (!taskId) {
+    const start = await call('smartpage_export_task', { url, content_type: 1 }, 'raw/export-task.json');
+    taskId = start.task_id;
+    if (typeof taskId !== 'string' || !taskId) throw new Error('wecom-cli export response has no task_id');
+  }
   for (let poll = 1; poll <= maxPolls; poll += 1) {
     let response;
     try {
@@ -352,6 +394,37 @@ async function collectSmartpage(call, url, maxPolls) {
   throw new PartialCollectionError(`wecom-cli export did not finish after ${maxPolls} polls`, {
     stage: 'poll', taskId, lastPoll: maxPolls,
   });
+}
+
+async function resumeWecomResource(request, dependencies) {
+  const sessionDir = typeof request?.sessionDir === 'string' ? request.sessionDir.trim() : '';
+  const outputDir = request?.outputDir;
+  if (!sessionDir) return { ...handledOutcome(identity.connector, 'failed', outputDir), reason: 'sessionDir is required' };
+  try {
+    const { metadata } = await readResumeMetadata(sessionDir);
+    const sourceMetadata = metadata?.sourceMetadata;
+    const resourceKind = sourceMetadata?.resourceKind;
+    const taskId = sourceMetadata?.taskId;
+    const url = metadata?.collection?.items?.[0]?.sourceUrl;
+    const resumableItem = metadata?.collection?.items?.find((item) => (
+      item?.sourceUrl === url
+      && item?.sourceItemId === taskId
+      && item?.materialization?.status === 'pending'
+    ));
+    if (sourceMetadata?.source !== identity.source
+      || metadata?.collection?.status !== 'partial'
+      || !['doc', 'sheet', 'smartpage'].includes(resourceKind)
+      || typeof taskId !== 'string'
+      || !taskId
+      || typeof url !== 'string'
+      || !url
+      || !resumableItem) {
+      throw new Error('session is not a resumable WeCom document, sheet, or smartpage collection');
+    }
+    return collectWecomResource({ outputDir, url, resourceKind, resumeTaskId: taskId }, dependencies);
+  } catch (error) {
+    return { ...handledOutcome(identity.connector, 'failed', outputDir), reason: reasonOf(error) };
+  }
 }
 
 function fieldsOf(response) {
@@ -392,16 +465,16 @@ function sheetSection(sheet, fields, rows) {
 }
 
 async function collectSmartsheet(call, url, maxPages) {
-  const sheets = sheetList(await call('get_sheet', { url }, 'raw/get-sheet.json'));
+  const sheets = sheetList(await call('smartsheet_get_sheet', { url }, 'raw/get-sheet.json'));
   const sections = [];
   for (const sheet of sheets) {
-    const fields = fieldsOf(await call('get_fields', { url, sheet_id: sheet.id }, `raw/fields-${sheet.id}.json`));
+    const fields = fieldsOf(await call('smartsheet_get_fields', { url, sheet_id: sheet.id }, `raw/fields-${sheet.id}.json`));
     const rows = [];
     const cursors = new Set();
     let cursor;
     let page = 1;
     do {
-      const response = await call('get_records', { url, sheet_id: sheet.id, cursor, limit: 1000 }, `raw/records-${sheet.id}-${page}.json`);
+      const response = await call('smartsheet_get_records', { url, sheet_id: sheet.id, cursor, limit: 1000 }, `raw/records-${sheet.id}-${page}.json`);
       if (!Array.isArray(response.records)) throw new Error('wecom-cli records response is malformed');
       rows.push(...response.records);
       cursor = response.next_cursor;
@@ -431,5 +504,6 @@ export function createWecomAdapter(dependencies = {}) {
     capabilities: () => ({ search: false, resource: true }),
     search: (request) => persistUnsupportedSearch(request),
     collectResource: (request) => collectWecomResource(request, dependencies),
+    resumeResource: (request) => resumeWecomResource(request, dependencies),
   };
 }

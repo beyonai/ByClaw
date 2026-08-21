@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, chmod, link, mkdir, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { access, chmod, link, mkdir, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
 import { assertPrivateTree, executable, readJson, runNode, tempCase } from '../test-helpers.mjs';
@@ -76,6 +76,25 @@ test('runCli rejects invalid explicit bounds before spawning', async (t) => {
         );
       }
     });
+  }
+});
+
+test('runCli validates cwd and executes the child in the requested directory', async () => {
+  await assert.rejects(
+    runCli(process.execPath, ['-e', ''], { cwd: '' }),
+    { name: 'TypeError', message: 'cwd must be a non-empty string' },
+  );
+  await assert.rejects(
+    runCli(process.execPath, ['-e', ''], { cwd: 42 }),
+    { name: 'TypeError', message: 'cwd must be a non-empty string' },
+  );
+
+  const { root } = await tempCase('enterprise-cli-cwd-');
+  try {
+    const result = await runCli(process.execPath, ['-e', 'process.stdout.write(process.cwd())'], { cwd: root });
+    assert.equal(result.stdout, await realpath(root));
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 
@@ -430,6 +449,21 @@ test('sanitizeSensitive redacts nested JSON strings in WeCom envelopes and prese
     nested: { credential: '[REDACTED]' },
   });
   assert.equal(sanitized.note, 'ordinary non-JSON string');
+});
+
+test('sanitizeSensitive scrubs credentials from free-form persisted evidence without changing ordinary text', async () => {
+  const { sanitizeSensitive } = await import('./secret-sanitizer.mjs');
+  const input = {
+    stderr: 'request failed: Bearer abc.def-123, access_token=alpha&cookie=session-value password: swordfish device_code=dc-1',
+    url: 'https://example.com/callback?token=query-token&keep=ordinary',
+    note: 'A secret discussion is ordinary text.',
+  };
+
+  const sanitized = sanitizeSensitive(input);
+  assert.doesNotMatch(JSON.stringify(sanitized), /abc\.def-123|alpha|session-value|swordfish|dc-1|query-token/);
+  assert.match(sanitized.stderr, /Bearer \[REDACTED\]/);
+  assert.match(sanitized.url, /token=\[REDACTED\]&keep=ordinary/);
+  assert.equal(sanitized.note, input.note);
 });
 
 test('sanitizeSensitive clearly rejects circular structures', async () => {
@@ -1308,6 +1342,16 @@ test('handledOutcome returns a continuable normalized result with default counts
     continuable: true,
     counts: { discovered: 0, materialized: 2, pending: 0, failed: 1 },
   });
+});
+
+test('inventoryCounts derives every outcome count from final materialization states', async () => {
+  const { inventoryCounts } = await import('./status-model.mjs');
+  assert.deepEqual(inventoryCounts([
+    { materialization: { status: 'materialized' } },
+    { materialization: { status: 'failed' } },
+    { materialization: { status: 'failed' } },
+    { materialization: { status: 'pending' } },
+  ]), { discovered: 4, materialized: 1, failed: 2, pending: 1 });
 });
 
 test('withRateLimitRetry returns immediately after a successful operation', async () => {

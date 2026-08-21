@@ -288,6 +288,11 @@ RUN ln -s /app /app/node_modules/openclaw
 
 COPY middleware/openclaw/skills/ /app/skills/
 
+# 复用镜像全局 by-framework，确保文档转换脚本能按本地 node_modules 路径解析依赖。
+RUN rm -rf /app/skills/by-doc-to-markdown/scripts/node_modules/@byclaw/by-framework \
+    && mkdir -p /app/skills/by-doc-to-markdown/scripts/node_modules/@byclaw \
+    && ln -s /usr/local/lib/node_modules/@byclaw/by-framework /app/skills/by-doc-to-markdown/scripts/node_modules/@byclaw/by-framework
+
 
 COPY middleware/openclaw/linux-amd64-filebrowser/filebrowser /usr/local/bin/filebrowser
 RUN chmod a+x /usr/local/bin/filebrowser

@@ -94,6 +94,8 @@ await (async () => {
   const h = await runCli(['help']);
   assert.equal(h.json.ok, true);
   assert.ok(h.json.commandsByGroup.research.some((item) => item.name === 'init'));
+  const rootEnterprise = h.json.commandsByGroup.platform.find((item) => item.name === 'enterprise');
+  assert.match(rootEnterprise.title, /resume-resource/);
 
   const ih = await runCli(['init', '--help']);
   assert.equal(ih.json.ok, true);
@@ -110,6 +112,9 @@ await (async () => {
   assert.match(enterprise.json.usage, /enterprise (search|resource)/);
   assert.match(enterprise.json.defaults, /limit 50/);
   assert.match(enterprise.json.defaults, /concurrency 4/);
+  assert.match(enterprise.json.defaults, /search-all defaults: sources dingtalk,feishu,wecom/);
+  assert.match(enterprise.json.defaults, /search-all defaults:.*metadata-only true/);
+  assert.match(enterprise.json.commands.searchAll, /\[--sources dingtalk,feishu,wecom\]/);
 
   const enterpriseSearchHelp = await runCli(['enterprise', 'search', '--help']);
   assert.equal(enterpriseSearchHelp.code, 0, enterpriseSearchHelp.stderr);
@@ -140,7 +145,7 @@ console.log(JSON.stringify({ ok: true }));
     const feishu = await runCli([
       'enterprise', 'resource', '--source', 'feishu', '--url', 'https://example.feishu.cn/minutes/minute-1',
       '--minute-token', 'minute-1', '--output-dir', outputDir,
-    ], { LARK_CLI_BIN: fixtureBin });
+    ], { LARK_CLI_BIN: fixtureBin, LARK_HOME: join(fixtureRoot, 'lark-home') });
     assert.equal(feishu.code, 0, feishu.stderr);
     assert.equal(feishu.json.status, 'complete');
     assert.match(readFileSync(join(outputDir, 'sanitized/items/transcript.md'), 'utf8'), /CLI regression/);

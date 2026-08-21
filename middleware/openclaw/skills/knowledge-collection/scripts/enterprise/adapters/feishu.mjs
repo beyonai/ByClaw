@@ -12,6 +12,14 @@ function reasonOf(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function commandEnvironment(dependencies) {
+  const env = { ...process.env, ...(dependencies.env || {}) };
+  if (typeof env.LARK_HOME !== 'string' || !env.LARK_HOME.trim()) {
+    throw new Error('LARK_HOME is required for Feishu collection');
+  }
+  return { ...env, HOME: env.LARK_HOME };
+}
+
 function markdown(content, url) {
   return `---\ntitle: ${JSON.stringify(title)}\nsource: "fws"\nsource_url: ${JSON.stringify(url)}\ncollection_filters: {}\n---\n\n${content.trim()}\n`;
 }
@@ -151,7 +159,14 @@ async function collectFeishuMinutes(request, dependencies) {
   await mkdir(minutesDir, { recursive: true, mode: 0o700 });
   await chmod(minutesDir, 0o700);
   const bin = dependencies.bin || 'lark-cli';
-  const env = { ...process.env, ...(dependencies.env || {}) };
+  let env;
+  try {
+    env = commandEnvironment(dependencies);
+  } catch (error) {
+    return persistIncomplete(writer, outputDir, {
+      minuteToken, url, rawArtifacts: [], reason: reasonOf(error), partial: false, stage: 'authentication',
+    });
+  }
   let detail;
   try {
     const result = await runCli(bin, [

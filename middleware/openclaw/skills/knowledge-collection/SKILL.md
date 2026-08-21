@@ -1,6 +1,6 @@
 ---
 name: knowledge-collection
-description: Use when the goal is to COLLECT and keep material rather than just get an answer - collect, crawl, scrape, batch-search, archive, ingest, or organize content from internet or enterprise sources, or store already-collected files in a knowledge base. This is the collection orchestrator and owns collection artifacts, post-processing, and knowledge-base ingestion; prefer it whenever collection intent is explicit, even for a single page or result.
+description: Use when a user asks to collect, gather, acquire, crawl, scrape, batch-search, archive, ingest, or organize articles, materials, documents, URLs, or files from internet or enterprise sources, including a single result, or to store already-collected files in a knowledge base.
 ---
 
 # Knowledge Collection
@@ -15,6 +15,17 @@ description: Use when the goal is to COLLECT and keep material rather than just 
   即使只有一个页面或一条结果，也进入采集流程。
 - 只有不存在显式采集意图时，单个事实、单个页面、打开页面、登录或一次性操作才属于查询，不执行采集后处理。
 
+### 通用内容采集默认补充企业搜索
+
+用户提出“收集/采集/获取关于某主题的文章、资料或文档”等内容采集请求时，即使没有点名企业平台，也必须在公共互联网发现之外，
+调用一次 `enterprise search-all --query <主题> --output-root <绝对路径>` 补充企业候选。企业补充检索不替代公共互联网的三检索信源，
+两者都要执行；只有用户明确要求“只查互联网”“不要搜索企业来源”或语义等价的排除条件时，才跳过企业搜索。
+
+`search-all` 省略 `--sources` 时默认检查 `dingtalk,feishu,wecom`，省略 `--metadata-only` 时默认只登记每家前 50 条候选。
+DWS/FWS 候选须先按相关性选择，再用 `materialize` 采集正文；WeCom 当前会如实登记 `unsupported_capability`，不得声称已完成企微搜索。
+任一连接器鉴权失败、不可用、不支持或调用异常都只形成该连接器的覆盖缺口，不中断其他企业连接器或公共互联网采集；最终报告必须披露这些缺口。
+普通事实问答中的“获取答案/信息”不属于本规则，仍按上一节的查询边界处理。
+
 ## 深化研究（默认模式）
 
 本技能把「研究深化」与「采集执行」整合为一条链路。复杂、多面、需要多轮检索或带引用的任务，默认按
@@ -22,7 +33,7 @@ description: Use when the goal is to COLLECT and keep material rather than just 
 先框架问题（breadth/depth/起始 query），逐层拆分为分支，每个分支完成一次「检索 → 抓取 → 登记 → 提炼」，再聚合去重、输出报告。
 深化研究会话必须用 `init --mode research` 创建；`mode=research` 会强制 `report` 交付后才允许 `cleanup` 整体清理。
 
-- 深化研究的每次「检索」：使用**三检索信源**确定哪些网页相关 —— 内置路由层的检索渠道（Exa 搜索、gh、RSS、站内搜索等，
+- 深化研究的每次公共互联网「检索」：使用**三检索信源**确定哪些网页相关 —— 内置路由层的检索渠道（Exa 搜索、gh、RSS、站内搜索等，
   见 [references/agent-reach.md](references/agent-reach.md)）、`online_search`（SearXNG 元搜索 CLI，
   时间窗/学术/中文多引擎，见 [references/online-search.md](references/online-search.md)），
   以及 `online_search/references/hot_discovery`（**热度发现通道**子技能，经 bycli 适配器取平台原生热度
@@ -142,18 +153,30 @@ citations 指向 itemId、report 先于 cleanup）脚本都会拦，只有「报
 
 ### `enterprise`: 企业来源的脚本封装
 
-两条企业采集已有脚本封装，不必手工拼 CLI 调用（其余企业能力仍按「来源路由」委派对应 skill）：
+企业来源既可按 URL 采集，也可搜索钉钉/飞书的知识库与云盘；复用 dws、fws、wecomcli 各自的既有鉴权：
 
 ```bash
 node scripts/knowledge-collection.mjs enterprise wecom-smartpage \
   --url <doc.weixin.qq.com/smartpage/...> --output-dir <绝对路径>
 node scripts/knowledge-collection.mjs enterprise feishu-minutes \
   --minute-token <真实 minute token> --url <妙记 URL> --output-dir <绝对路径>
+node scripts/knowledge-collection.mjs enterprise search \
+  --source dingtalk|feishu|wecom --query <查询> --output-dir <绝对路径> [--limit 50] [--metadata-only]
+node scripts/knowledge-collection.mjs enterprise search-all \
+  --query <查询> --output-root <绝对路径> [--sources dingtalk,feishu,wecom] [--limit 50] [--metadata-only true|false]
+node scripts/knowledge-collection.mjs enterprise materialize \
+  --source dingtalk|feishu --session-dir <metadata-only 会话> --item-ids <候选ID[,候选ID]> --output-dir <新的绝对路径>
+node scripts/knowledge-collection.mjs enterprise resume-resource \
+  --source wecom --session-dir <部分完成会话> --output-dir <新的绝对路径>
 ```
 
 `--output-dir` 必须是绝对路径；脚本自建 `raw/`、`markdown/`、`sanitized/items/` 并按 0700/0600 落权限，
 输出即标准 `collection-result.json`，可直接交给 `collect`。
-两条之外的子命令一律返回 `unsupported command`，不要臆造（例如没有 `dingtalk-minutes`）。
+搜索默认处理前 50 条。单来源 `search` 默认采集正文，显式 `--metadata-only` 才只登记候选；`search-all` 默认三家来源且
+`metadata-only=true`，只登记候选，显式 `--metadata-only false` 才直接采集正文。选择候选后使用 `materialize` 续采，必须写到新的输出目录。
+单来源 `search` 的鉴权失败返回 `auth_required`，调用或落盘等致命错误返回非零。wecom 当前仅支持资源导出，搜索会返回 `unsupported_capability`。
+`search-all` 并发运行默认或显式指定的连接器：单个连接器认证失败、不可用、不支持或调用异常不会中断其余连接器；每家产物在 `<output-root>/<source>/`，汇总状态持久化为 `<output-root>/raw/search-all.json`。
+企业微信的文档、表格和智能页面导出在轮询中断后可用 `resume-resource` 从已登记 task ID 继续；智能表分页截断会保留已采集的标准正文，并以 `partial` 标记。
 
 **`normalize` 的真实角色**：它是 `ingest` 的 dry-run 预检，与 `ingest` 共用 payload 构建逻辑，只校验不请求后端，
 结果写入 stdout、**不落盘任何文件**。它的 `payloads.collectionResult.items[].markdown` 是正文字符串（用于 ingest 上传），
@@ -191,6 +214,8 @@ node scripts/knowledge-collection.mjs enterprise feishu-minutes \
   直接加载并遵循 `bycli` skill，以委派采集模式先用 `published` 命令的 `--limit <N>` 返回最近 N 条发表记录及运营指标，再对每条返回记录的精确 URL 用
   `download-publish-data` 下载数据明细 Excel。不得询问公众号名称、原始 ID 或“数据明细”的含义；仅在登录、验证码或环境验证时按 byCLI 微信规则停下等待用户。
 - 路由层选中 `bycli`，或用户显式要求 byCLI、浏览器或 Adapter 执行：加载并遵循 `bycli` skill。
+- 未点名平台的文章/资料/文档采集：公共互联网按上述路由执行，同时按「通用内容采集默认补充企业搜索」调用
+  `enterprise search-all`；不得因为用户没有说“企业知识库”而省略企业候选检索。
 - 钉钉/DingTalk：加载并遵循 `dws` skill，并遵循 [DingTalk DWS 采集桥接](references/sources/dingtalk-dws.md)。
 - 飞书/Lark：加载并遵循 `fws` skill，并遵循 [Feishu 采集桥接](references/sources/feishu-fws.md)。
 - 企业微信/WeCom：加载并遵循 `wecomcli` skill，并遵循 [WeCom 采集桥接](references/sources/wecom-wecomcli.md)。

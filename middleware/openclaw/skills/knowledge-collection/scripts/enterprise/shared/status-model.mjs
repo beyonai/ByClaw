@@ -39,3 +39,13 @@ export function handledOutcome(connector, status, outputDir, counts = {}) {
     },
   };
 }
+
+export function inventoryCounts(inventory) {
+  const items = Array.isArray(inventory) ? inventory : [];
+  return {
+    discovered: items.length,
+    materialized: items.filter((item) => item?.materialization?.status === 'materialized').length,
+    pending: items.filter((item) => item?.materialization?.status === 'pending').length,
+    failed: items.filter((item) => item?.materialization?.status === 'failed').length,
+  };
+}

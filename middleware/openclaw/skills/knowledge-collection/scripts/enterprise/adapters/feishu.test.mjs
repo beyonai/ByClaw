@@ -17,6 +17,7 @@ const expected = ['minutes', '+detail', '--minute-tokens', '--transcript', '--ou
 if (expected.some((token) => !args.includes(token))) process.exit(12);
 const outputDir = valueFor('--output-dir');
 if (!outputDir || valueFor('--minute-tokens') !== process.env.FIXTURE_TOKEN) process.exit(13);
+if (process.env.HOME !== process.env.LARK_HOME) process.exit(14);
 mkdirSync(outputDir, { recursive: true });
 if (process.env.FIXTURE_MODE === 'one') writeFileSync(join(outputDir, 'transcript.md'), '# Transcript\\n\\nHello.\\n');
 if (process.env.FIXTURE_MODE === 'multiple') {
@@ -40,7 +41,7 @@ async function collect(mode, request = {}) {
   const url = request.url || 'https://example.feishu.cn/minutes/minute-token';
   const result = await createFeishuAdapter({
     bin,
-    env: { FIXTURE_MODE: mode, FIXTURE_TOKEN: minuteToken },
+    env: { FIXTURE_MODE: mode, FIXTURE_TOKEN: minuteToken, LARK_HOME: join(testCase.root, 'lark-home') },
   }).collectResource({ resourceKind: 'minutes', minuteToken, url, outputDir });
   return { ...testCase, outputDir, result, minuteToken, url };
 }

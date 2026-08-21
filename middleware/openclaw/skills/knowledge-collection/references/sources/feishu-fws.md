@@ -84,3 +84,6 @@ sanitized/
   用户筛选、关联 `rawArtifacts` 和 materialization 状态；尚未生成正文的列表项仍进入 inventory，但不得进入
   `collection-result.json.items`。
 - 来源执行器不得询问或执行 `入库 / 知识整理 / 跳过`；仅由 `knowledge-collection` 在采集后执行该选择。
+## Knowledge collection enterprise search
+
+Generic requests to collect articles, materials, or documents include Feishu through the default `enterprise search-all` augmentation, even when the user does not name an enterprise platform. The connector reuses FWS discovery/authentication, retries explicit rate limits, and classifies structured `missing_scope` / `permission_violations` as connector authentication requirements. Batch search defaults to metadata-only and isolates FWS failures from other sources; selected candidates are materialized later with `enterprise materialize` into a new output session.

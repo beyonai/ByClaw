@@ -1,4 +1,12 @@
 const SENSITIVE_KEY = /(token|cookie|secret|password|authorization|credential|device[_-]?code)/i;
+const FREE_FORM_SECRET_KEY = /access[_-]?token|token|cookie|password|secret|authorization|credential|device[_-]?code/gi;
+
+function scrubFreeForm(value) {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+    .replace(new RegExp(`([?&]\\s*(?:${FREE_FORM_SECRET_KEY.source})\\s*=\\s*)[^&#\\s,;]+`, 'gi'), '$1[REDACTED]')
+    .replace(new RegExp(`(\\b(?:${FREE_FORM_SECRET_KEY.source})\\s*[=:]\\s*)(?:"[^"]*"|'[^']*'|[^\\s,&;]+)`, 'gi'), '$1[REDACTED]');
+}
 
 function transform(value, ancestors, removeKeys) {
   if (Array.isArray(value)) {
@@ -21,7 +29,7 @@ function transform(value, ancestors, removeKeys) {
         if (error instanceof TypeError && /circular/i.test(error.message)) throw error;
       }
     }
-    return value;
+    return scrubFreeForm(value);
   }
   if (!value || typeof value !== 'object') {
     return value;

@@ -26,10 +26,17 @@ function validateExplicitBound(options, name) {
   }
 }
 
+function validateCwd(options) {
+  if (options.cwd !== undefined && (typeof options.cwd !== 'string' || !options.cwd)) {
+    throw new TypeError('cwd must be a non-empty string');
+  }
+}
+
 export function runCli(bin, args, options = {}) {
   return new Promise((resolve, reject) => {
     validateExplicitBound(options, 'timeoutMs');
     validateExplicitBound(options, 'maxOutputBytes');
+    validateCwd(options);
 
     const env = options.env ?? process.env;
     const environmentTimeoutMs = positiveEnv(
@@ -43,6 +50,7 @@ export function runCli(bin, args, options = {}) {
       ?? positiveEnv('KNOWLEDGE_COLLECTION_MAX_CLI_OUTPUT_BYTES', DEFAULT_MAX_OUTPUT_BYTES, env);
     const child = spawn(bin, args, {
       detached: USE_PROCESS_GROUP,
+      cwd: options.cwd,
       env,
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
