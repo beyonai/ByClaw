@@ -72,6 +72,18 @@
       "prompt": "bycli doctor 失败了，能直接 browser open 预热吗？",
       "expected_output": "不能。每次 doctor 后紧接 daemon status；桥接异常时先检查 browser status，只有 /usr/local/bin/start-chrome.sh 存在且可执行才使用它，否则执行 openclaw browser --browser-profile openclaw start，再 doctor → daemon status 复检。不能用 browser open/state 做冷启动、健康检查或预热。",
       "files": []
+    },
+    {
+      "id": 16,
+      "prompt": "用本地 article.html 和 cover.jpg 创建一篇微信公众号富文本草稿",
+      "expected_output": "明确使用 bycli weixin create-draft --title ... --content-file article.html --content-format html --cover-image cover.jpg，并保留 --site-session persistent --keep-tab true；说明这是浏览器模式，HTML 中的本地图片会先上传，只有 status: draft saved 才算保存成功。",
+      "files": []
+    },
+    {
+      "id": 17,
+      "prompt": "我有 appid 和 appsecret，直接把 HTML 文章创建到公众号草稿箱，不要打开浏览器",
+      "expected_output": "先读取结构化帮助；browser: conditional 时，同时传入 --appid 和 --appsecret 进入官方 API 模式且不执行浏览器预检，使用 --content-file ... --content-format html 和必需的 --cover-image，说明正文本地图片会上传后调用 draft/add，并且不输出或保存凭据。若安装版本仍报告 browser: true，则说明该版本不能保证无浏览器执行并要求更新。",
+      "files": []
     }
   ]
 }

@@ -2,7 +2,7 @@
 
 Load this reference for every `bycli weixin` command; `--auth-source`; `WECHAT_TOKEN`, `WECHAT_COOKIE`, or `WECHAT_FINGERPRINT`; and authentication or verification failures from `mp.weixin.qq.com` or `weixin.sogou.com`.
 
-This reference tracks the Weixin command surface in `@sovovs/bycli` 2.1.25. Treat `bycli weixin --help -f yaml` and `bycli weixin <command> --help -f yaml` as the source of truth when the installed version differs. This reference only defines Weixin command execution, authentication gates, session handling, and returned records. When a caller delegates the task, return all requested records, bodies, and file metadata to that caller without choosing a canonical artifact name or storage layout.
+This reference tracks the Weixin command surface in `@sovovs/bycli` 2.1.35. Treat `bycli weixin --help -f yaml` and `bycli weixin <command> --help -f yaml` as the source of truth when the installed version differs. This reference only defines Weixin command execution, authentication gates, session handling, and returned records. When a caller delegates the task, return all requested records, bodies, and file metadata to that caller without choosing a canonical artifact name or storage layout.
 
 ## Command selection
 
@@ -18,7 +18,7 @@ This reference tracks the Weixin command surface in `@sovovs/bycli` 2.1.25. Trea
 | `download --url <article-url>` | read | Save one article as Markdown from either a direct WeChat article URL or a Sogou `/link` result; returns title, author, publish time, status, size, saved path, `source_url`, and `resolved_url`. Defaults: `--output ./weixin-articles --download-images true`. |
 | `save-articles <fakeid>` | write | Save account articles as Markdown; returns per-record status, stage, path, error, URL, `source`, and `coverage`. Supports `--name`, `--output`, `--limit`, and `--max-pages`. |
 | `download-publish-data <query>` | write | Match an exact article URL or title and save both its Excel data and Markdown analysis; returns title, publication time, URL, status, `markdownPath`, `markdownSize`, `dataPath`, `dataSize`, and error. Defaults: `--output ./weixin-publish-data --max-pages 5 --timeout 60`. |
-| `create-draft <content>` | write | Create a Weixin article draft; requires `--title`, supports `--author`, `--cover-image`, `--summary`, and `--timeout` (default 180), and returns `status` and `detail`. |
+| `create-draft [content]` | write | Create a Weixin article draft; requires `--title`, accepts inline text or `--content-file`, supports `text`, `html`, and `html-text` content formats, browser rich-text paste, official API mode, `--author`, `--cover-image`, `--summary`, `--dry-run`, and `--timeout` (default 180). Returns `status` and `detail`. |
 
 Use IDs from the corresponding list command: `accounts` supplies the `fakeid` for `articles` and `save-articles`; `collections` supplies the `collectionId` for `collection-detail`.
 
@@ -47,7 +47,22 @@ The internal fallback scans sequentially until an explicit empty page, an explic
 
 ## Direct command safeguards
 
-`create-draft` mutates the official account. Execute it only when the user explicitly requests draft creation and has supplied or approved the final title and body. The command validates title, body, author, and any requested cover before browser navigation. If a requested cover cannot be set or the editor does not expose a positive save confirmation, it returns `COMMAND_EXEC` and no success record. Only `status: draft saved` confirms success.
+`create-draft` mutates the official account. Execute it only when the user explicitly requests draft creation and has supplied or approved the final title and body. The command validates title, body, author, and any requested cover before performing the write.
+
+Publishing modes:
+
+- Browser mode is the default. Use `--site-session persistent --keep-tab true`; it fills the WeChat editor and saves through the logged-in browser session. `--content-format html` uses the browser's native rich-text clipboard paste path, which preserves supported inline styles, headings, lists, tables, links, and images. `--content-format html-text` keeps text and paragraph structure while discarding HTML styling. `--dry-run true` fills and verifies the browser editor but does not save a draft; its success status is `draft ready`.
+- Official API mode is selected only when both `--appid` and `--appsecret` are supplied. It uploads the cover and local body images through the official material API, then creates the draft with `draft/add`; `--cover-image` is required in this mode. When structured help reports `browser: conditional`, this mode does not need `doctor`, daemon, Browser Bridge, `--site-session`, or `--keep-tab`. If an installed build still reports `browser: true`, it cannot guarantee browserless API execution; do not claim otherwise or bypass the command—ask the user to update byCLI. Never print, store, or commit the credential values.
+- A partial `--appid` / `--appsecret` pair is invalid. Do not combine a browser-authenticated flow with API credentials or silently switch modes after an authentication failure.
+- API error `40164` is an Official Account outbound-IP whitelist failure. Stop and ask the user to add the machine's current public egress IP in the WeChat Official Account platform; do not retry, enter AutoFix, expose credentials, or switch to browser mode without a new explicit request. Invalid AppID/AppSecret errors are also terminal configuration errors.
+
+HTML input rules:
+
+- Use `--content-file '<article.html>' --content-format html` for a complete HTML article. Local image paths are resolved relative to the HTML file's directory and uploaded before insertion; remote HTTPS images may remain remote in browser mode. API mode requires body images to be local files so it can upload them as material before `draft/add`.
+- The HTML pipeline removes unsafe tags, event handlers, scripts, unsupported URL schemes, and unsafe style declarations. A missing, unreadable, empty, unsupported, or unuploadable image is an argument or execution failure, not a successful draft.
+- A requested cover is uploaded into the article body before it is selected as the cover in browser mode. If the requested cover cannot be confirmed, or the editor does not expose a positive save confirmation, return `COMMAND_EXEC` and no success record.
+
+Success statuses are `draft saved` for a browser save, `draft ready` for browser dry-run, and `draft created` for official API mode. Do not report success based only on navigation, a filled editor, or an HTTP request that was not confirmed by the command result.
 
 `download-publish-data` accepts an exact article URL or title. Title comparison trims and collapses whitespace but otherwise requires complete equality; title substrings are not matches. If a title matches multiple records, do not guess: rerun with the complete URL or add `--date YYYY-MM-DD` using a user-provided or already-known publication date. An absolute query URL that is not a trusted `https://mp.weixin.qq.com/s...` article URL is rejected before authentication.
 
@@ -85,7 +100,7 @@ An `EMPTY_RESULT` in this table is the final command result after any eligible a
 - Before browser commands, complete the main skill's `doctor` and `daemon status` checks. Reuse the Chrome session for `mp.weixin.qq.com` and `weixin.sogou.com`.
 - A newly leased adapter tab may begin at `about:blank`. An `mp.weixin.qq.com`-backed command navigates there and then re-reads page state; if existing cookies redirect it to an authenticated `/cgi-bin/` URL with a non-empty token, continue the command. `sougousearch` navigates to `weixin.sogou.com` instead. Do not reproduce either check with `bycli browser`.
 - If navigation reaches an authenticated `/wxamp/` URL, the connected session is a Mini Program account, not the Official Account backend required by these commands. Report the account-type mismatch and ask the user to switch to an Official Account in the same browser profile; do not call it an unauthenticated QR-login state or invoke an Official Account data endpoint.
-- Only `accounts`, `articles`, and `save-articles` support `--auth-source env`. All other Weixin commands require Browser Bridge and the logged-in browser session.
+- Only `accounts`, `articles`, and `save-articles` support `--auth-source env`. Other Weixin commands require Browser Bridge and the logged-in browser session, except `create-draft` with a complete `--appid` / `--appsecret` pair when its structured help reports `browser: conditional`.
 - Pass only options shown by that command's structured help. In particular, `accounts`, `articles`, `sougousearch`, `collections`, `collection-detail`, `download`, and `save-articles` do not support `--timeout`; never add a generic `--timeout 180` to them.
 - Do not ask the user to extract credentials when browser authentication can satisfy the request. Do not silently switch to environment authentication after a browser, login, or verification failure.
 
@@ -103,7 +118,10 @@ bycli weixin download --url '<article-url>' --output '<directory>' --download-im
 bycli weixin save-articles '<fakeid>' --limit <n> --max-pages <n> --output '<directory>' --auth-source browser --site-session persistent --keep-tab true -f json
 bycli weixin download-publish-data '<exact article URL>' --date YYYY-MM-DD --output '<directory>' --max-pages <n> --timeout 60 --site-session persistent --keep-tab true -f json
 bycli weixin download-publish-data '<exact article title>' --output '<directory>' --max-pages <n> --timeout 60 --site-session persistent --keep-tab true -f json
-bycli weixin create-draft '<content>' --title '<title>' --author '<author>' --cover-image '<local path>' --summary '<summary>' --timeout 180 --site-session persistent --keep-tab true -f json
+bycli weixin create-draft --title '<title>' --content-file '<article.html>' --content-format html --author '<author>' --cover-image '<cover.jpg>' --summary '<summary>' --site-session persistent --keep-tab true -f json
+bycli weixin create-draft '<text body>' --title '<title>' --cover-image '<cover.jpg>' --dry-run true --site-session persistent --keep-tab true -f json
+# API mode: inject these variables locally without echoing their values.
+bycli weixin create-draft --title '<title>' --content-file '<article.html>' --content-format html --cover-image '<cover.jpg>' --appid "$WECHAT_APPID" --appsecret "$WECHAT_APPSECRET" -f json
 ```
 
 Only after `accounts` proves one unique nickname-to-`fakeid` binding for the selected `fakeid` may the corresponding account-history command include `--name` and enable the adapter-owned public fallback:
@@ -113,7 +131,7 @@ bycli weixin articles '<fakeid>' --name '<proven exact account name>' --limit <n
 bycli weixin save-articles '<fakeid>' --name '<proven exact account name>' --limit <n> --max-pages <n> --output '<directory>' --auth-source browser --site-session persistent --keep-tab true -f json
 ```
 
-Omit optional placeholders and their flags rather than passing empty strings. `--author` is limited to 8 Unicode characters and `--title` to 64 Unicode characters; oversized values return `ARGUMENT` before browser navigation. `--cover-image` must be a readable, non-empty jpg, jpeg, png, gif, or webp file. The adapter uploads it into the article body before selecting it as the cover, and failure to confirm that requested cover returns `COMMAND_EXEC`.
+Omit optional placeholders and their flags rather than passing empty strings. `--author` is limited to 8 Unicode characters and `--title` to 64 Unicode characters; oversized values return `ARGUMENT` before mode dispatch. `--cover-image` must be a readable, non-empty jpg, jpeg, png, gif, or webp file. Browser mode uploads it into the article body before selecting it as the cover; API mode uploads it as permanent image material and uses the returned media ID. A browser cover-confirmation failure returns `COMMAND_EXEC`.
 
 ## Login and verification gate
 
@@ -123,7 +141,7 @@ After the adapter's post-navigation check, treat login `AUTH_REQUIRED` / exit co
 
 An authentication outcome from an already-consumed diagnostic rerun follows terminal priority 1: freeze and preserve the browser context for the user, but do not rerun the original `download-publish-data` command after confirmation. A later execution requires a new explicit user request and starts a new original-command state; it is not a continuation of the consumed diagnostic retry.
 
-Verified for byCLI 2.1.25: `create-draft` session failures return `AUTH_REQUIRED`; both a missing backend token and an editor page that indicates an expired session enter this gate. For another installed version, follow its structured command help and typed output rather than assuming forward compatibility. Field, cover, and save-confirmation failures remain `COMMAND_EXEC` and follow their typed execution-error path.
+Verified for byCLI 2.1.35: browser-mode `create-draft` session failures return `AUTH_REQUIRED`; both a missing backend token and an editor page that indicates an expired session enter this gate. Official API mode reports token, material-upload, and draft-creation failures as typed execution errors. For another installed version, follow its structured command help and typed output rather than assuming forward compatibility. Field, cover, and save-confirmation failures remain `COMMAND_EXEC` and follow their typed execution-error path.
 
 1. Stop all tool execution immediately. Do not click, bypass, refresh, retry, navigate, focus another page, switch authentication source, or use another acquisition method.
 2. Freeze the current browser context. Do not issue another Weixin, raw browser, doctor, daemon, or browser-lifecycle command; keep the current tab and processes available for the user.
@@ -165,7 +183,7 @@ Use `--auth-source env` only when the user explicitly requests it or Browser Bri
 | `articles`, `save-articles` | `WECHAT_TOKEN` + `WECHAT_COOKIE` |
 | `accounts` | `WECHAT_TOKEN` + `WECHAT_COOKIE` + `WECHAT_FINGERPRINT` |
 
-Never use environment authentication for `sougousearch`, `collections`, `collection-detail`, `drafts`, `published`, `download`, `download-publish-data`, or `create-draft`; those commands do not expose `--auth-source`.
+Never use `--auth-source env` for `sougousearch`, `collections`, `collection-detail`, `drafts`, `published`, `download`, `download-publish-data`, or `create-draft`; those commands do not expose that option. `create-draft --appid/--appsecret` is a separate official-API mode, not Weixin environment authentication.
 
 Never mix browser-derived and environment-derived values. If variables are missing, name them without displaying their values. If all variables exist but authentication fails, ask the user to replace the complete same-session set because it may be expired or mixed across sessions.
 
