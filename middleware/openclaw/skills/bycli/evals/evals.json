@@ -75,14 +75,20 @@
     },
     {
       "id": 16,
-      "prompt": "用本地 article.html 和 cover.jpg 创建一篇微信公众号富文本草稿",
+      "prompt": "环境变量 WECHAT_APPID 和 WECHAT_APPSECRET 都未配置。用本地 article.html 和 cover.jpg 创建一篇微信公众号富文本草稿",
       "expected_output": "明确使用 bycli weixin create-draft --title ... --content-file article.html --content-format html --cover-image cover.jpg，并保留 --site-session persistent --keep-tab true；说明这是浏览器模式，HTML 中的本地图片会先上传，只有 status: draft saved 才算保存成功。",
       "files": []
     },
     {
       "id": 17,
-      "prompt": "我有 appid 和 appsecret，直接把 HTML 文章创建到公众号草稿箱，不要打开浏览器",
-      "expected_output": "先读取结构化帮助；browser: conditional 时，同时传入 --appid 和 --appsecret 进入官方 API 模式且不执行浏览器预检，使用 --content-file ... --content-format html 和必需的 --cover-image，说明正文本地图片会上传后调用 draft/add，并且不输出或保存凭据。若安装版本仍报告 browser: true，则说明该版本不能保证无浏览器执行并要求更新。",
+      "prompt": "环境变量 WECHAT_APPID 和 WECHAT_APPSECRET 都已配置且非空，直接把 HTML 文章创建到公众号草稿箱",
+      "expected_output": "先读取结构化帮助并仅检查两个环境变量均非空；browser: conditional 时，将它们分别传给 --appid 和 --appsecret 优先执行 API，使用 --content-file ... --content-format html 和必需的 --cover-image，不执行浏览器预检且不输出或保存凭据。API 失败时保留错误并自动执行一次不含 API 参数的浏览器回退。若安装版本仍报告 browser: true，则说明该版本不能保证无浏览器 API 首次尝试并要求更新。",
+      "files": []
+    },
+    {
+      "id": 18,
+      "prompt": "把 article.html 发布到公众号草稿箱。环境里可能配置了 WECHAT_APPID 和 WECHAT_APPSECRET；如果 API 发布失败也继续用浏览器创建草稿。",
+      "expected_output": "先只判断 WECHAT_APPID 与 WECHAT_APPSECRET 是否都存在且 trim 后非空，不读取、打印或记录其值。两者齐全时优先将其分别传给 --appid 和 --appsecret 走一次 API；任一缺失或为空时直接走浏览器。API 返回任何失败时保留原错误并自动回退浏览器模式一次，回退命令不得携带 --appid/--appsecret，且先完成 doctor 与 daemon status；浏览器成功时报告 draft saved，并附带 API 失败上下文。浏览器也失败时同时报告两个错误，不再重试或反向回退。",
       "files": []
     }
   ]
