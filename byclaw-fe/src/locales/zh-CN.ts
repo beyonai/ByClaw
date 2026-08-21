@@ -2427,6 +2427,8 @@ export default {
   'projectSpace.members.searchAgent': '搜索数字员工',
   'projectSpace.members.emptyAgents': '暂无数字员工',
   'projectSpace.members.select': '选择',
+  'projectSpace.members.agentTabPersonal': '数字员工',
+  'projectSpace.members.agentTabGroup': '数字员工组',
   'projectSpace.taskBoard.title': '整体任务视图',
   'projectSpace.taskBoard.status.pending': '待开始',
   'projectSpace.taskBoard.status.running': '进行中',

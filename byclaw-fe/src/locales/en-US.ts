@@ -2459,6 +2459,8 @@ export default {
   'projectSpace.members.searchAgent': 'Search digital employees',
   'projectSpace.members.emptyAgents': 'No digital employees',
   'projectSpace.members.select': 'Select',
+  'projectSpace.members.agentTabPersonal': 'Agents',
+  'projectSpace.members.agentTabGroup': 'Agent Groups',
   'projectSpace.taskBoard.title': 'Task Overview',
   'projectSpace.taskBoard.status.pending': 'Not Started',
   'projectSpace.taskBoard.status.running': 'In Progress',
