@@ -14,6 +14,7 @@ const RESOLVE_PROJECT_PATH = "open/api/v1/resolveProjectBySession";
 const DINGTALK_SEND_PATH = "open/api/v1/dingtalk/sendUserToUser";
 // 业务路径,不在 /open/api 下:该层只是免登录白名单与签名校验所在,devloop 走同一个 Beyond-Token 拦截器。
 const REQUIREMENT_CREATE_PATH = "devloop/requirement/create";
+const REQUIREMENT_LIST_PATH = "devloop/project/requirements";
 const TASK_CREATE_PATH = "devloop/task/create";
 // 后端 Notices DTO 的 @Size(max = 100)，超出会整批 400，所以在客户端分批。
 const NOTICE_BATCH_SIZE = 100;
@@ -398,7 +399,47 @@ async function projectsCommand(args) {
   return { ok: true, total: data?.total ?? projects.length, projects };
 }
 
-// 采集环节把规范化后的需求写进库,拿回平台 itemId 供派发环节派单。
+// 按项目查当前需求全量(时间倒序),供"我有哪些需求""采集了哪些需求"这类询问,
+// 也是派发环节的需求真相源 —— 采集产物 requirements.json 只覆盖单次批次,看不到别人采的和历史需求。
+// sessionId 非空 = 已启动,派发要跳过;这里原样回传,判断留给调用方。
+async function requirementsCommand(args) {
+  const projectId = firstNonEmpty(args["project-id"], args.projectId);
+  if (!projectId) throw new PublicFailure("NOTICE_PROJECT_ID_MISSING");
+  // 后端只按标题筛，keyword 是它兼容旧前端的别名；这里统一送 title，别名只在入参侧接受。
+  const title = firstNonEmpty(args.title, args.keyword);
+  const data = await postJson(REQUIREMENT_LIST_PATH, {
+    projectId: Number(projectId),
+    title: title || undefined,
+  });
+  const rows = Array.isArray(data) ? data : [];
+  const requirements = rows
+    .filter((row) => row && row.itemId)
+    .map((row) => ({
+      itemId: row.itemId,
+      title: row.title ?? null,
+      content: row.content ?? null,
+      priority: row.priority ?? null,
+      // 已启动的需求带会话 ID，派发环节按它跳过，回答"哪些在做"也靠它。
+      sessionId: row.sessionId ?? null,
+      started: Boolean(row.sessionId),
+      sourceName: row.sourceName ?? null,
+      sourceType: row.sourceType ?? null,
+      originUrl: row.originUrl ?? null,
+      createTime: row.createTime ?? null,
+    }));
+  const startedCount = requirements.filter((item) => item.started).length;
+  return {
+    ok: true,
+    projectId: Number(projectId),
+    title: title || null,
+    total: requirements.length,
+    startedCount,
+    pendingCount: requirements.length - startedCount,
+    requirements,
+  };
+}
+
+
 // 逐条发而不是批量:后端一次只收一条,且要让部分失败可定位到具体需求,不能一条坏的拖垮整批。
 async function requirementCreateCommand(args) {
   const payload = await readPayload(args);
@@ -492,6 +533,8 @@ function helpText() {
         "node scripts/notice-send.mjs resolve-project --session-id <sessionId>  # 按会话反查 projectId",
       "requirement-create":
         "node scripts/notice-send.mjs requirement-create [--input <reqs.json>] [--project-id <projectId>]  # 需求入库,回吐 itemId",
+      requirements:
+        "node scripts/notice-send.mjs requirements --project-id <projectId> [--title <标题片段>]  # 查当前需求全量,回传 itemId/started",
       "task-create":
         "node scripts/notice-send.mjs task-create [--input <calls.json>]  # 逐条派发建待接单会话",
     },
@@ -528,6 +571,7 @@ async function main() {
   if (command === "projects") return projectsCommand(args);
   if (command === "resolve-project") return resolveProjectCommand(args);
   if (command === "requirement-create") return requirementCreateCommand(args);
+  if (command === "requirements") return requirementsCommand(args);
   if (command === "task-create") return taskCreateCommand(args);
   throw new PublicFailure("NOTICE_UNKNOWN_COMMAND", command);
 }
