@@ -13,7 +13,9 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.iwhalecloud.byai.manager.domain.event.devloop.GitHubTokenConfiguredEvent;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
+import com.iwhalecloud.byai.manager.mapper.devloop.ProjectMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 
 class ProjectWorkspaceManifestServiceTest {
@@ -39,6 +41,17 @@ class ProjectWorkspaceManifestServiceTest {
     }
 
     @Test
+    void treatsRepositoryWithoutTypeAsCodeRepositoryForLegacyRows() {
+        ProjectRepo workspace = repo(1L, "beyonai/byclaw-workspace", "https://example.com/workspace.git",
+            "main", "workspace");
+        ProjectRepo legacyCode = repo(2L, "beyonai/byclaw-be", "https://example.com/backend.git", "develop", null);
+
+        String manifest = ProjectWorkspaceManifestService.buildGitmodules(List.of(workspace, legacyCode));
+
+        assertThat(manifest).contains("[submodule \"beyonai/byclaw-be\"]", "url = https://example.com/backend.git");
+    }
+
+    @Test
     void rejectsMoreThanOneWorkspaceRepository() {
         ProjectRepo first = repo(1L, "beyonai/workspace-one", "https://example.com/one.git", "main", "workspace");
         ProjectRepo second = repo(2L, "beyonai/workspace-two", "https://example.com/two.git", "main", "workspace");
@@ -51,6 +64,7 @@ class ProjectWorkspaceManifestServiceTest {
     void writesManifestUnderProjectWorkspaceDirectory() throws Exception {
         ProjectInitService projectInitService = mock(ProjectInitService.class);
         ProjectRepoMapper projectRepoMapper = mock(ProjectRepoMapper.class);
+        ProjectMapper projectMapper = mock(ProjectMapper.class);
         Path projectDirectory = tempDir.resolve("project");
         Files.createDirectories(projectDirectory);
         when(projectInitService.initProjectWorkspace(1001L)).thenReturn(projectDirectory);
@@ -58,11 +72,34 @@ class ProjectWorkspaceManifestServiceTest {
             repo(1L, "beyonai/workspace", "https://example.com/workspace.git", "main", "workspace")));
 
         ProjectWorkspaceManifestService service = new ProjectWorkspaceManifestService(projectInitService,
-            projectRepoMapper);
+            projectRepoMapper, projectMapper);
         service.syncProjectGitmodules(1001L);
 
         assertThat(Files.readString(projectDirectory.resolve(".gitmodules"))).contains(
             "[environment]", "url = https://example.com/workspace.git", "branch = main");
+    }
+
+    @Test
+    void syncsEveryVisibleDevelopProjectForUser() throws Exception {
+        ProjectInitService projectInitService = mock(ProjectInitService.class);
+        ProjectRepoMapper projectRepoMapper = mock(ProjectRepoMapper.class);
+        ProjectMapper projectMapper = mock(ProjectMapper.class);
+        when(projectMapper.selectVisibleDevelopProjectIds(88L)).thenReturn(List.of(1001L, 1002L));
+        Path firstProject = tempDir.resolve("project-1001");
+        Path secondProject = tempDir.resolve("project-1002");
+        Files.createDirectories(firstProject);
+        Files.createDirectories(secondProject);
+        when(projectInitService.initProjectWorkspace(1001L)).thenReturn(firstProject);
+        when(projectInitService.initProjectWorkspace(1002L)).thenReturn(secondProject);
+        when(projectRepoMapper.selectList(any())).thenReturn(List.of(
+            repo(1L, "beyonai/workspace", "https://example.com/workspace.git", "main", "workspace")));
+
+        ProjectWorkspaceManifestService service = new ProjectWorkspaceManifestService(projectInitService,
+            projectRepoMapper, projectMapper);
+        service.handleGitHubTokenConfigured(new GitHubTokenConfiguredEvent(this, 88L));
+
+        assertThat(Files.exists(firstProject.resolve(".gitmodules"))).isTrue();
+        assertThat(Files.exists(secondProject.resolve(".gitmodules"))).isTrue();
     }
 
     private ProjectRepo repo(Long repoId, String fullName, String url, String branch, String repoType) {

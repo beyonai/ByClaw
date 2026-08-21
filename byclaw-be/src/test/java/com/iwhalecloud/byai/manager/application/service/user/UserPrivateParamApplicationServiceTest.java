@@ -13,6 +13,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.manager.domain.event.devloop.GitHubTokenConfiguredEvent;
 import com.iwhalecloud.byai.manager.dto.users.UserPrivateParamDTO;
 import com.iwhalecloud.byai.manager.entity.users.UserPrivateParam;
 import com.iwhalecloud.byai.manager.entity.users.Users;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class UserPrivateParamApplicationServiceTest {
@@ -111,6 +113,19 @@ class UserPrivateParamApplicationServiceTest {
 
         assertThat(saved.getKey()).isEqualTo("CONNECTOR_LARK_MANIFEST");
         assertThat(saved.getSource()).isEqualTo("USER");
+    }
+
+    @Test
+    void publishesProjectManifestSyncEventWhenGitHubTokenIsSaved() {
+        ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+        ReflectionTestUtils.setField(service, "eventPublisher", eventPublisher);
+        UserPrivateParamDTO request = new UserPrivateParamDTO();
+        request.setKey("GH_TOKEN");
+        request.setValue("token-value");
+
+        service.save(request);
+
+        verify(eventPublisher).publishEvent(any(GitHubTokenConfiguredEvent.class));
     }
 
     @Test

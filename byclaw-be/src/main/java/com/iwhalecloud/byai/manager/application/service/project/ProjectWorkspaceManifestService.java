@@ -11,10 +11,16 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.iwhalecloud.byai.manager.domain.event.devloop.GitHubTokenConfiguredEvent;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
+import com.iwhalecloud.byai.manager.mapper.devloop.ProjectMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 
 /**
@@ -29,17 +35,21 @@ import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 @Service
 public class ProjectWorkspaceManifestService {
 
+    private static final Logger log = LoggerFactory.getLogger(ProjectWorkspaceManifestService.class);
+
     private static final String REPO_TYPE_WORKSPACE = "workspace";
-    private static final String REPO_TYPE_CODE = "code";
     private static final String DEFAULT_BRANCH = "main";
     private static final String MANIFEST_FILE_NAME = ".gitmodules";
 
     private final ProjectInitService projectInitService;
     private final ProjectRepoMapper projectRepoMapper;
+    private final ProjectMapper projectMapper;
 
-    public ProjectWorkspaceManifestService(ProjectInitService projectInitService, ProjectRepoMapper projectRepoMapper) {
+    public ProjectWorkspaceManifestService(ProjectInitService projectInitService, ProjectRepoMapper projectRepoMapper,
+            ProjectMapper projectMapper) {
         this.projectInitService = Objects.requireNonNull(projectInitService, "projectInitService");
         this.projectRepoMapper = Objects.requireNonNull(projectRepoMapper, "projectRepoMapper");
+        this.projectMapper = Objects.requireNonNull(projectMapper, "projectMapper");
     }
 
     /**
@@ -77,6 +87,41 @@ public class ProjectWorkspaceManifestService {
     }
 
     /**
+     * Rebuilds manifests for every visible研发项目 belonging to the user.
+     *
+     * <p>One malformed project must not prevent the remaining projects from being
+     * repaired after a credential change.</p>
+     */
+    public void syncProjectGitmodulesForUser(Long userId) {
+        if (userId == null) {
+            return;
+        }
+        List<Long> projectIds = projectMapper.selectVisibleDevelopProjectIds(userId);
+        if (projectIds == null) {
+            return;
+        }
+        for (Long projectId : projectIds) {
+            try {
+                syncProjectGitmodules(projectId);
+            }
+            catch (RuntimeException ex) {
+                log.warn("同步用户研发项目 Git manifest 失败，userId={}，projectId={}，reason={}", userId, projectId,
+                    ex.getMessage(), ex);
+            }
+        }
+    }
+
+    /**
+     * GH_TOKEN 事务提交后同步全部研发项目，避免凭据事务回滚时提前改写文件。
+     */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void handleGitHubTokenConfigured(GitHubTokenConfiguredEvent event) {
+        if (event != null) {
+            syncProjectGitmodulesForUser(event.getUserId());
+        }
+    }
+
+    /**
      * Builds the canonical manifest. The first workspace repository becomes
      * the environment section; code repositories become Git submodules in
      * their persisted order.
@@ -96,7 +141,7 @@ public class ProjectWorkspaceManifestService {
         StringBuilder manifest = new StringBuilder();
         appendEnvironment(manifest, workspace);
         repositories.stream()
-            .filter(repo -> REPO_TYPE_CODE.equalsIgnoreCase(StringUtils.trimToEmpty(repo.getRepoType())))
+            .filter(repo -> !REPO_TYPE_WORKSPACE.equalsIgnoreCase(StringUtils.trimToEmpty(repo.getRepoType())))
             .forEach(repo -> appendSubmodule(manifest, repo));
         return manifest.toString();
     }

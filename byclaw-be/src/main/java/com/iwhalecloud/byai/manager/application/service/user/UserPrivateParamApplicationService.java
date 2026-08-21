@@ -15,6 +15,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.manager.domain.event.devloop.GitHubTokenConfiguredEvent;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.users.UserPrivateParamDTO;
 import com.iwhalecloud.byai.manager.entity.users.UserPrivateParam;
@@ -27,6 +28,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.scheduling.annotation.Async;
@@ -92,6 +94,9 @@ public class UserPrivateParamApplicationService {
 
     @Autowired
     private UserService userService;
+
+    @Autowired
+    private ApplicationEventPublisher eventPublisher;
 
     @Value("${load.to.redis.batchSize:1000}")
     private Integer syncBatchSize;
@@ -160,6 +165,9 @@ public class UserPrivateParamApplicationService {
             userPrivateParamMapper.updateById(entity);
         }
         refreshPrivateParamCacheAfterCommit(userId, currentUserCode());
+        if ("GH_TOKEN".equals(nextKey)) {
+            eventPublisher.publishEvent(new GitHubTokenConfiguredEvent(this, userId));
+        }
         return toVo(entity);
     }
 
@@ -204,6 +212,9 @@ public class UserPrivateParamApplicationService {
         param.setStatus(nextStatus);
         param.setUpdateTime(now);
         refreshPrivateParamCacheAfterCommit(userId, currentUserCode());
+        if ("GH_TOKEN".equals(param.getParamKey()) && NORMAL.equals(nextStatus)) {
+            eventPublisher.publishEvent(new GitHubTokenConfiguredEvent(this, userId));
+        }
         return toVo(param);
     }
 

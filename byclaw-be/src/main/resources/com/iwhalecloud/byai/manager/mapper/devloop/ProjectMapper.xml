@@ -62,4 +62,16 @@
         ORDER BY a.create_time DESC
     </select>
 
+    <select id="selectVisibleDevelopProjectIds" resultType="java.lang.Long">
+        SELECT a.project_id
+        FROM byai_project a
+        WHERE a.project_type = 'develop'
+          AND (a.delete_flag IS NULL OR a.delete_flag != '1')
+          AND (a.create_by = #{userId}
+            OR a.project_id IN (SELECT project_id
+                                FROM byai_project_member
+                                WHERE user_id = #{userId}))
+        ORDER BY a.project_id
+    </select>
+
 </mapper>

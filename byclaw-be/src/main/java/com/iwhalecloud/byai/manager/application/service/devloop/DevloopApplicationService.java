@@ -30,6 +30,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamApplicationService;
+import com.iwhalecloud.byai.manager.domain.event.devloop.GitHubTokenConfiguredEvent;
 import com.iwhalecloud.byai.manager.domain.devloop.service.*;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorManifestCommandResolver;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
@@ -98,6 +99,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -2697,6 +2699,9 @@ public class DevloopApplicationService {
     @Autowired
     private UserPrivateParamApplicationService userPrivateParamApplicationService;
 
+    @Autowired
+    private ApplicationEventPublisher eventPublisher;
+
     /**
      * 保存GitHub PAT，SM4加密存储
      */
@@ -2738,6 +2743,7 @@ public class DevloopApplicationService {
         // 不刷缓存的话 PAT 只落库不注入，技能里 GH_TOKEN 仍是空的。
         userPrivateParamApplicationService.refreshPrivateParamCacheAfterCommit(userId,
             CurrentUserHolder.getCurrentUserCode());
+        eventPublisher.publishEvent(new GitHubTokenConfiguredEvent(this, userId));
         return ResponseUtil.successResponse(null);
     }
 
