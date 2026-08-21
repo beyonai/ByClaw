@@ -3294,7 +3294,16 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             return false;
         }
         String normalized = userInput.trim().toLowerCase().replaceAll("[\\s。.!!,,~]+$", "");
-        return TASK_CONFIRM_WORDS.contains(normalized);
+        // 完全匹配任意确认词，或者消息中包含确认词（允许 @前缀、多余空格等）
+        if (TASK_CONFIRM_WORDS.contains(normalized)) {
+            return true;
+        }
+        for (String word : TASK_CONFIRM_WORDS) {
+            if (normalized.contains(word)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 承接人显示名,取不到时回退为空串,不让提示语因缺名报错。 */
