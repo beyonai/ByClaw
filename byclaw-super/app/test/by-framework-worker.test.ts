@@ -56,6 +56,15 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(JSON.stringify(logger.info.mock.calls)).not.toContain("请分析数据");
     expect(logger.info).toHaveBeenCalledWith(
       expect.objectContaining({
+        component: "byclaw-super",
+        stage: "run_step",
+        runId: "run-1",
+        runEventType: "run.completed",
+      }),
+      "Run 处理步骤",
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
         userCode: "user-1",
         sessionId: "session-1",
         runId: "run-1",

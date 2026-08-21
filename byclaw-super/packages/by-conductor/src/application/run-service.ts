@@ -797,6 +797,16 @@ ${JSON.stringify(response)}`;
       }
       const result = await leader.run({
         message: leaderMessage,
+        observability: {
+          runId: current.id,
+          sessionId: current.sessionId,
+          ...(current.ingressContext?.externalSessionId
+            ? { externalSessionId: current.ingressContext.externalSessionId }
+            : {}),
+          ...(current.ingressContext?.traceId
+            ? { traceId: current.ingressContext.traceId }
+            : {}),
+        },
         ...(current.ingressContext?.externalSessionId
           ? { externalSessionId: current.ingressContext.externalSessionId }
           : {}),

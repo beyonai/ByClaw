@@ -5,6 +5,65 @@ import {
 } from "../src/index.js";
 
 describe("CodeByFrameworkConnector", () => {
+  it("logs the exact by-framework routing failure without request content", async () => {
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const connector = new CodeByFrameworkConnector({
+      redis: {
+        xread: vi.fn(),
+        ping: vi.fn(async () => "PONG"),
+        quit: vi.fn(async () => "OK"),
+        status: "ready",
+      } as never,
+      gatewayClient: {
+        sendMessage: vi.fn(async () => ({
+          success: false,
+          message_id: "delegation-1",
+          trace_id: "delegation-1",
+          timestamp: Date.now(),
+          status: "FAILED",
+          error_code: "AGENT_TYPE_UNAVAILABLE",
+          error: "No alive worker found with agent type 'BYCLAW_CODE_user-1'",
+        })),
+        cancelTask: vi.fn(),
+      },
+      logger,
+    });
+
+    await expect(
+      connector.start(
+        {
+          userCode: "user-1",
+          sessionId: "session-1",
+          externalSessionId: "external-session-1",
+          runId: "run-1",
+          delegationId: "delegation-1",
+          agent: {
+            id: "1001",
+            name: "Code Agent",
+            execution: { connectorId: CODE_BY_FRAMEWORK_CONNECTOR_ID, targetId: "1001" },
+          },
+          task: "secret task body",
+          attachments: [],
+          metadata: { token: "secret-token" },
+        },
+        { signal: new AbortController().signal },
+      ),
+    ).rejects.toThrow("AGENT_TYPE_UNAVAILABLE");
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "byclaw-super",
+        sessionId: "session-1",
+        externalSessionId: "external-session-1",
+        targetAgentType: "BYCLAW_CODE_user-1",
+        frameworkErrorCode: "AGENT_TYPE_UNAVAILABLE",
+      }),
+      "by-framework 子 Agent 调度失败",
+    );
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("secret-token");
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("secret task body");
+  });
+
   it("dispatches to the current user's BYCLAW_CODE worker", async () => {
     const sendMessage = vi.fn(async () => ({
       success: true,
@@ -60,6 +119,7 @@ describe("CodeByFrameworkConnector", () => {
   });
 
   it("keeps BYCLAW_CODE direct reasoning separate from its answer", async () => {
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const redis = {
       xread: vi.fn().mockResolvedValueOnce([
         [
@@ -129,6 +189,7 @@ describe("CodeByFrameworkConnector", () => {
         cancelTask: vi.fn(),
       },
       readBlockMs: 1,
+      logger,
     });
     const execution = await connector.start(
       {
@@ -166,6 +227,13 @@ describe("CodeByFrameworkConnector", () => {
         cursor: "3-0",
       },
     ]);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        terminalEvent: "appStreamResponse",
+        outputPreview: "BYCLAW_CODE 正文",
+      }),
+      "收到子 Agent 会话结束信号",
+    );
   });
 
   it("completes consecutive BYCLAW_CODE delegations from their direct stream endings", async () => {
