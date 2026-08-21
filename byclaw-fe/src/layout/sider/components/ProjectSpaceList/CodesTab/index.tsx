@@ -10,7 +10,6 @@ import type { FileTreeItem } from '@/layout/sider/components/FileSiderPanel/cons
 import {
   canPreviewFile,
   ensureDirectoryPath,
-  getSessionFilePath,
   isDirectory,
   isPathIn,
   normalizeFileBrowserPath,
@@ -22,6 +21,7 @@ import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import {
   getTaskChanges,
   getTaskFileDiff,
+  getProjectSessionWorktree,
   listProjectRepos,
   type DevloopProjectRepo as OriDevloopProjectRepo,
   type DevloopTaskChanges,
@@ -45,9 +45,7 @@ interface CodesTabProps {
   onNodeClick?: (event: React.MouseEvent, node: FileTreeItem) => void;
 }
 
-type DevloopProjectRepo = OriDevloopProjectRepo & {
-  workspaceRepoName?: string;
-};
+type DevloopProjectRepo = OriDevloopProjectRepo;
 
 type ProjectDetailTranslate = (id: string, values?: Record<string, string | number>) => string;
 
@@ -86,18 +84,6 @@ const parseDiffLines = (diff?: string | null): { type: DiffLineType; text: strin
   return diff.split('\n').map((text) => ({ type: classifyDiffLine(text), text }));
 };
 
-const getRepoDirectoryName = (repoFullName: string) => {
-  const normalizedName = repoFullName.trim().replace(/\/+$/, '');
-  return normalizedName.split('/').filter(Boolean).pop() || normalizedName;
-};
-
-const getRepoRootPath = (sessionId: string | number, repo: DevloopProjectRepo) => {
-  if (repo.workspaceRepoName) {
-    return ensureDirectoryPath(`${getSessionFilePath(`${sessionId}`)}${repo.workspaceRepoName}/${repo.repoFullName}`);
-  }
-  return ensureDirectoryPath(`${getSessionFilePath(`${sessionId}`)}${getRepoDirectoryName(repo.repoFullName)}`);
-};
-
 const CodesTab: React.FC<CodesTabProps> = ({
   projectId,
   resourceId,
@@ -115,6 +101,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
   );
   const [repos, setRepos] = useState<DevloopProjectRepo[]>([]);
   const [reposLoading, setReposLoading] = useState(false);
+  const [sessionWorktreePath, setSessionWorktreePath] = useState<string | null>(null);
   const [repoFilesMap, setRepoFilesMap] = useState<Record<string, FileBrowserItem[]>>({});
   const [repoLoadingMap, setRepoLoadingMap] = useState<Record<string, boolean>>({});
   const [repoSearchValueMap, setRepoSearchValueMap] = useState<Record<string, string>>({});
@@ -133,17 +120,16 @@ const CodesTab: React.FC<CodesTabProps> = ({
   const repoRootPathMap = useMemo(
     () =>
       repos.reduce<Record<string, string>>((result, repo) => {
-        if (sessionId) result[`${repo.repoId}`] = getRepoRootPath(sessionId, repo);
+        if (sessionWorktreePath) result[`${repo.repoId}`] = sessionWorktreePath;
         return result;
       }, {}),
-    [repos, sessionId]
+    [repos, sessionWorktreePath]
   );
 
   const fetchRepoFiles = useCallback(
-    async (repo: DevloopProjectRepo) => {
-      if (!resourceId || !sessionId) return;
+    async (repo: DevloopProjectRepo, rootPath: string) => {
+      if (!resourceId || !rootPath) return;
       const repoKey = `${repo.repoId}`;
-      const rootPath = getRepoRootPath(sessionId, repo);
       const requestSeq = (repoRequestSeqRef.current[repoKey] || 0) + 1;
       repoRequestSeqRef.current[repoKey] = requestSeq;
       setRepoLoadingMap((current) => ({ ...current, [repoKey]: true }));
@@ -167,7 +153,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
         }
       }
     },
-    [resourceId, sessionId]
+    [resourceId]
   );
 
   const fetchTaskChanges = useCallback(async () => {
@@ -194,9 +180,14 @@ const CodesTab: React.FC<CodesTabProps> = ({
       const response = await listProjectRepos(projectId);
       const nextRepos = Array.isArray(response) ? response : [];
       const workspaceRepo = nextRepos.find((repo) => repo.repoType === 'workspace');
-      setRepos(nextRepos);
-      if (workspaceRepo) {
-        await fetchRepoFiles(workspaceRepo);
+      setRepos(workspaceRepo ? [workspaceRepo] : []);
+      if (workspaceRepo && sessionId) {
+        const worktree = await getProjectSessionWorktree(projectId, Number(sessionId));
+        const rootPath = worktree?.found && worktree.path ? ensureDirectoryPath(worktree.path) : null;
+        setSessionWorktreePath(rootPath);
+        if (rootPath) await fetchRepoFiles(workspaceRepo, rootPath);
+      } else {
+        setSessionWorktreePath(null);
       }
     } catch (error) {
       console.error('Failed to load project repositories:', error);
@@ -204,10 +195,11 @@ const CodesTab: React.FC<CodesTabProps> = ({
     } finally {
       setReposLoading(false);
     }
-  }, [fetchRepoFiles, projectId]);
+  }, [fetchRepoFiles, projectId, sessionId]);
 
   useEffect(() => {
     setRepos([]);
+    setSessionWorktreePath(null);
     setRepoFilesMap({});
     setRepoLoadingMap({});
     setRepoSearchValueMap({});
@@ -338,28 +330,29 @@ const CodesTab: React.FC<CodesTabProps> = ({
     async (repo: DevloopProjectRepo) => {
       if (!sessionId) return;
       const repoKey = `${repo.repoId}`;
-      const rootPath = getRepoRootPath(sessionId, repo);
+      const rootPath = sessionWorktreePath;
+      if (!rootPath) return;
       setRepoSearchValueMap((current) => ({ ...current, [repoKey]: '' }));
       setChildrenByPath((current) =>
         Object.fromEntries(Object.entries(current).filter(([path]) => !isPathIn(path, rootPath)))
       );
       setExpandedKeys((current) => current.filter((key) => !isPathIn(`${key}`, rootPath)));
-      await Promise.all([fetchRepoFiles(repo), fetchTaskChanges()]);
+      await Promise.all([fetchRepoFiles(repo, rootPath), fetchTaskChanges()]);
     },
-    [fetchRepoFiles, fetchTaskChanges, sessionId]
+    [fetchRepoFiles, fetchTaskChanges, sessionId, sessionWorktreePath]
   );
 
   const searchRepoFiles = useCallback(
     async (repo: DevloopProjectRepo, keyword: string) => {
-      if (!resourceId || !sessionId) return;
+      if (!resourceId || !sessionWorktreePath) return;
       const repoKey = `${repo.repoId}`;
       const nextKeyword = keyword.trim();
       if (!nextKeyword) {
-        await fetchRepoFiles(repo);
+        await fetchRepoFiles(repo, sessionWorktreePath);
         return;
       }
 
-      const rootPath = getRepoRootPath(sessionId, repo);
+      const rootPath = sessionWorktreePath;
       const requestSeq = (repoRequestSeqRef.current[repoKey] || 0) + 1;
       repoRequestSeqRef.current[repoKey] = requestSeq;
       setRepoLoadingMap((current) => ({ ...current, [repoKey]: true }));
@@ -386,7 +379,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
         }
       }
     },
-    [fetchRepoFiles, resourceId, sessionId]
+    [fetchRepoFiles, resourceId, sessionWorktreePath]
   );
 
   const renderCodeChanges = () => {

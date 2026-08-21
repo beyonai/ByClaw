@@ -73,7 +73,7 @@ const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail
   const fetchRepoTree = useCallback(
     async (repo: DevloopProjectRepo, branch?: string) => {
       const repoKey = `${repo.repoId}`;
-      const selectedBranch = branch || repo.defaultBranch || 'main';
+      const selectedBranch = branch || `${projectId}`;
       const requestSeq = (requestSeqRef.current[repoKey] || 0) + 1;
       requestSeqRef.current[repoKey] = requestSeq;
       setRepoLoadingMap((current) => ({ ...current, [repoKey]: true }));
@@ -100,22 +100,31 @@ const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail
     [projectId]
   );
 
-  const fetchBranches = useCallback(async (repo: DevloopProjectRepo) => {
-    const repoKey = `${repo.repoId}`;
-    setBranchLoadingMap((current) => ({ ...current, [repoKey]: true }));
-    try {
-      const branches = await listProjectRepoBranches(repo.repoId);
-      const defaultBranch = repo.defaultBranch || branches?.[0]?.name || 'main';
-      setBranchesMap((current) => ({ ...current, [repoKey]: branches || [] }));
-      setBranchMap((current) => ({ ...current, [repoKey]: current[repoKey] || defaultBranch }));
-    } catch (error) {
-      console.error('Failed to load remote repository branches:', error);
-      setBranchesMap((current) => ({ ...current, [repoKey]: [] }));
-      setBranchMap((current) => ({ ...current, [repoKey]: current[repoKey] || repo.defaultBranch || 'main' }));
-    } finally {
-      setBranchLoadingMap((current) => ({ ...current, [repoKey]: false }));
-    }
-  }, []);
+  const fetchBranches = useCallback(
+    async (repo: DevloopProjectRepo) => {
+      const repoKey = `${repo.repoId}`;
+      setBranchLoadingMap((current) => ({ ...current, [repoKey]: true }));
+      try {
+        const branches = await listProjectRepoBranches(repo.repoId);
+        const projectBranch = `${projectId}`;
+        const defaultBranch = branches?.some((branch) => branch.name === projectBranch)
+          ? projectBranch
+          : repo.defaultBranch || branches?.[0]?.name || 'main';
+        setBranchesMap((current) => ({ ...current, [repoKey]: branches || [] }));
+        setBranchMap((current) => ({ ...current, [repoKey]: current[repoKey] || defaultBranch }));
+        return defaultBranch;
+      } catch (error) {
+        console.error('Failed to load remote repository branches:', error);
+        setBranchesMap((current) => ({ ...current, [repoKey]: [] }));
+        const defaultBranch = repo.defaultBranch || `${projectId}`;
+        setBranchMap((current) => ({ ...current, [repoKey]: current[repoKey] || defaultBranch }));
+        return defaultBranch;
+      } finally {
+        setBranchLoadingMap((current) => ({ ...current, [repoKey]: false }));
+      }
+    },
+    [projectId]
+  );
 
   const fetchRepos = useCallback(async () => {
     if (!projectId) return;
@@ -123,8 +132,12 @@ const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail
     try {
       const nextRepos = (await listProjectRepos(projectId)) || [];
       setRepos(nextRepos);
-      await Promise.all(nextRepos.map((repo) => fetchBranches(repo)));
-      await Promise.all(nextRepos.map((repo) => fetchRepoTree(repo)));
+      await Promise.all(
+        nextRepos.map(async (repo) => {
+          const branch = await fetchBranches(repo);
+          await fetchRepoTree(repo, branch);
+        })
+      );
     } catch (error) {
       console.error('Failed to load project repositories:', error);
       setRepos([]);

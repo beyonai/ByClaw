@@ -281,6 +281,14 @@ export const updateProjectRepo = (data: {
 export const listProjectRepos = (projectId: number) =>
   POST<DevloopProjectRepo[]>('/byaiService/project/repo/list', { projectId });
 
+export type ProjectSessionWorktree = {
+  found: boolean;
+  path?: string;
+};
+
+export const getProjectSessionWorktree = (projectId: number, sessionId: number) =>
+  POST<ProjectSessionWorktree>('/byaiService/project/repo/session-worktree', { projectId, sessionId });
+
 export type ProjectRepoTreeNode = {
   name: string;
   path: string;
@@ -560,6 +568,7 @@ export type OperationAccountPayload = {
   platformCode: string;
   accountCode: string;
   accountName: string;
+
   /** 自定义链接平台的登录地址，仅 platformCode 为 CustomLink 时提交。 */
   customUrl?: string;
 };

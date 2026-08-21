@@ -254,6 +254,14 @@ public class ProjectController {
         return ResponseUtil.successResponse(projectApplicationService.listProjectRepos(projectId));
     }
 
+    /** 查询项目 workspace 仓库中指定会话对应的实际 worktree。 */
+    @PostMapping("/repo/session-worktree")
+    public ResponseUtil<Map<String, Object>> getProjectSessionWorktree(@RequestBody Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        Long sessionId = MapParamUtil.getLongValue(params, "sessionId");
+        return ResponseUtil.successResponse(projectRepositoryService.getSessionWorktree(projectId, sessionId));
+    }
+
     /**
      * 查询项目仓库目录的直接子节点。
      *

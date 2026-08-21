@@ -28,10 +28,10 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
-import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamApplicationService;
 import com.iwhalecloud.byai.manager.domain.event.devloop.GitHubTokenConfiguredEvent;
 import com.iwhalecloud.byai.manager.domain.devloop.service.*;
+import com.iwhalecloud.byai.manager.domain.project.service.ProjectWorkspaceGitService;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorManifestCommandResolver;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
 import com.iwhalecloud.byai.manager.domain.connector.provider.dingtalk.DwsAuthorizationCommandPolicy;
@@ -118,7 +118,6 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -137,17 +136,6 @@ import java.util.stream.Stream;
 public class DevloopApplicationService implements PendingTaskConfirmHook {
 
     private static final Logger logger = LoggerFactory.getLogger(DevloopApplicationService.class);
-
-    /**
-     * 本地文件存储根(NFS 挂载点),与 LocalStorageService 同源配置;用于拼会话工作区绝对路径读本地 git 变更。
-     */
-    @Value("${file.storage.local.path:${byclaw.sandbox.volume.file-root:/tmp/byclaw-storage}}")
-    private String fileStorageRoot;
-
-    /**
-     * 会话私有工作区目录名,即 {bucket}/by/.sessions 里的 by 段,与前端会话空间口径一致。
-     */
-    private static final String SESSION_WORKSPACE_SEGMENT = "by/.sessions";
 
     private static final String DELETE_FLAG_DELETED = "1";
 
@@ -336,10 +324,10 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
     private DevloopTaskStateReader taskStateReader;
 
     @Autowired
-    private GitHubCompareService gitHubCompareService;
+    private LocalGitChangeService localGitChangeService;
 
     @Autowired
-    private LocalGitChangeService localGitChangeService;
+    private ProjectWorkspaceGitService projectWorkspaceGitService;
 
     @Autowired
     private SsResourceMapper ssResourceMapper;
@@ -352,9 +340,6 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
 
     @Autowired
     private AiPromptService aiPromptService;
-
-    @Autowired
-    private UserBucketNamingService userBucketNamingService;
 
     @Autowired
     private FeignDataCloudService feignDataCloudService;
@@ -3921,10 +3906,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         }
     }
 
-    /**
-     * 查询任务代码变更:workspace 架构采集 workspace 自身及 .gitmodules 中的实际子模块；无 workspace 时采集项目全部仓库。
-     * 每个仓库均本地优先、远程兜底，最终扁平合并文件列表，并在文件项上标记所属 repoId。
-     */
+    /** 查询任务对应 worktree 的代码变更。 */
     public ResponseUtil<Map<String, Object>> getTaskChanges(Long sessionId) {
         if (sessionId == null) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.task.session.id.required"));
@@ -3933,17 +3915,26 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         if (s == null) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.task.session.not.found"));
         }
-        // 代码变更是只读展示,任何本地/远程异常都不抛前端:顶层兜底,失败返回 http_error 空态并记日志。
+        // 代码变更是只读展示，任何本地 Git 异常都不抛前端：顶层兜底并返回 http_error 空态。
         try {
-            ScanRequireItem item = scanRequireItemMapper.selectOne(
-                new LambdaQueryWrapper<ScanRequireItem>().eq(ScanRequireItem::getSessionId, sessionId).last("limit 1"));
-            List<ProjectRepo> projectRepos = projectRepoMapper.selectList(new LambdaQueryWrapper<ProjectRepo>()
-                .eq(ProjectRepo::getProjectId, s.getProjectId()).orderByAsc(ProjectRepo::getRepoId));
-            ProjectRepo workspaceRepo = projectRepos.stream()
-                .filter(candidate -> "workspace".equalsIgnoreCase(candidate.getRepoType())).findFirst().orElse(null);
-            String headBranch = buildBranchName(detectBranchKind(item, s.getSessionName()), sessionId);
-            List<RepoWorkspace> repoWorkspaces = resolveTaskRepoWorkspaces(s, workspaceRepo, projectRepos);
-            return ResponseUtil.successResponse(collectTaskChanges(s, repoWorkspaces, headBranch));
+            Optional<ProjectRepo> workspaceRepo = projectWorkspaceGitService.findWorkspaceRepo(s.getProjectId());
+            Optional<Path> worktree = projectWorkspaceGitService.resolveSessionWorktree(s.getProjectId(), sessionId);
+            if (workspaceRepo.isEmpty() || worktree.isEmpty()) {
+                return ResponseUtil.successResponse(emptyLocalChangesMap());
+            }
+            LocalGitChangeService.LocalChangeResult local = localGitChangeService.collectChanges(worktree.get(),
+                "main");
+            if (local.getStatus() != LocalGitChangeService.LocalStatus.OK) {
+                return ResponseUtil.successResponse(emptyLocalChangesMap());
+            }
+            Map<String, Object> changes = localResultToMap(local, workspaceRepo.get().getRepoFullName());
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> files = (List<Map<String, Object>>) changes.get("files");
+            for (Map<String, Object> file : files) {
+                file.put("repoId", workspaceRepo.get().getRepoId());
+                file.put("source", "local");
+            }
+            return ResponseUtil.successResponse(changes);
         } catch (Exception e) {
             // 兜底:任何未预期异常都吞掉,返回 http_error 空态,前端照常渲染"暂时无法获取代码变更"。
             log.error("[Devloop] 查询任务代码变更失败, sessionId={}", sessionId, e);
@@ -3974,29 +3965,13 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             if (s == null) {
                 return ResponseUtil.failRes(I18nUtil.get("devloop.task.session.not.found"));
             }
-            ProjectRepo repo;
-            if (repoId != null) {
-                repo = projectRepoMapper.selectById(repoId);
-            } else {
-                // 兼容旧调用方：未指定仓库时，沿用任务关联需求、扫描源和项目首仓库的既有解析顺序。
-                ScanRequireItem item = scanRequireItemMapper.selectOne(new LambdaQueryWrapper<ScanRequireItem>()
-                    .eq(ScanRequireItem::getSessionId, sessionId).last("limit 1"));
-                repo = resolveTaskRepo(s.getProjectId(), item);
-            }
-            if (repo == null || !s.getProjectId().equals(repo.getProjectId())) {
+            ProjectRepo repo = projectWorkspaceGitService.findWorkspaceRepo(s.getProjectId()).orElse(null);
+            if (repo == null || (repoId != null && !repoId.equals(repo.getRepoId()))) {
                 return ResponseUtil.failRes(I18nUtil.get("devloop.task.repository.not.found"));
             }
-            List<ProjectRepo> projectRepos = projectRepoMapper.selectList(new LambdaQueryWrapper<ProjectRepo>()
-                .eq(ProjectRepo::getProjectId, s.getProjectId()).orderByAsc(ProjectRepo::getRepoId));
-            ProjectRepo workspaceRepo = projectRepos.stream()
-                .filter(candidate -> "workspace".equalsIgnoreCase(candidate.getRepoType())).findFirst().orElse(null);
-            String baseBranch = StringUtils.isNotBlank(repo.getDefaultBranch()) ? repo.getDefaultBranch()
-                : "main";
-            Path workspaceDir = "workspace".equalsIgnoreCase(repo.getRepoType())
-                ? resolveSessionWorkspace(s, repo.getRepoFullName())
-                : resolveCodeRepoWorkspace(s, workspaceRepo, repo);
-
-            LocalGitChangeService.FileDiffResult result = localGitChangeService.fileDiff(workspaceDir, baseBranch,
+            Path workspaceDir = projectWorkspaceGitService.resolveSessionWorktree(s.getProjectId(), sessionId)
+                .orElse(null);
+            LocalGitChangeService.FileDiffResult result = localGitChangeService.fileDiff(workspaceDir, "main",
                 filePath);
             Map<String, Object> map = new HashMap<>();
             map.put("status", result.getStatus().name().toLowerCase());
@@ -4014,180 +3989,17 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         }
     }
 
-    /**
-     * 定位会话中的业务代码仓库：workspace 架构从 .gitmodules 解析子模块路径，旧架构回退到会话一级目录。
-     */
-    private Path resolveCodeRepoWorkspace(ByaiSession session, ProjectRepo workspaceRepo, ProjectRepo codeRepo) {
-        if (codeRepo == null) {
-            return null;
-        }
-        if (workspaceRepo != null) {
-            Path workspaceRoot = resolveSessionWorkspace(session, workspaceRepo.getRepoFullName());
-            return new GitSubmodulePathResolver().resolve(workspaceRoot, codeRepo).orElse(null);
-        }
-        return resolveSessionWorkspace(session, codeRepo.getRepoFullName());
+    /** worktree 不存在时返回成功空集，前端按“暂无改动”展示。 */
+    private Map<String, Object> emptyLocalChangesMap() {
+        Map<String, Object> map = new HashMap<>();
+        map.put("status", "ok");
+        map.put("source", "local");
+        map.put("files", new ArrayList<>());
+        map.put("fileCount", 0);
+        return map;
     }
 
-    /**
-     * 按实际仓库布局生成本次变更查询目标；workspace 自身始终排在其子模块之前。
-     */
-    private List<RepoWorkspace> resolveTaskRepoWorkspaces(ByaiSession session, ProjectRepo workspaceRepo,
-                                                          List<ProjectRepo> projectRepos) {
-        List<RepoWorkspace> resolved = new ArrayList<>();
-        if (workspaceRepo == null) {
-            for (ProjectRepo repo : projectRepos) {
-                resolved.add(new RepoWorkspace(repo, resolveSessionWorkspace(session, repo.getRepoFullName())));
-            }
-            return resolved;
-        }
-
-        Path workspaceRoot = resolveSessionWorkspace(session, workspaceRepo.getRepoFullName());
-        resolved.add(new RepoWorkspace(workspaceRepo, workspaceRoot));
-        List<ProjectRepo> codeRepos = projectRepos.stream()
-            .filter(repo -> !"workspace".equalsIgnoreCase(repo.getRepoType())).toList();
-        GitSubmodulePathResolver.SubmoduleResolution submoduleResolution = new GitSubmodulePathResolver()
-            .resolveAllWithStatus(workspaceRoot, codeRepos);
-        for (GitSubmodulePathResolver.ResolvedSubmodule submodule : submoduleResolution.submodules()) {
-            resolved.add(new RepoWorkspace(submodule.repo(), submodule.path()));
-        }
-        // workspace 尚未克隆或 .gitmodules 不可读时无法按实际文件枚举；仅此时回退配置仓库，保留远程 compare 能力。
-        if (!submoduleResolution.metadataAvailable()) {
-            for (ProjectRepo codeRepo : codeRepos) {
-                resolved.add(new RepoWorkspace(codeRepo, null));
-            }
-        }
-        return resolved;
-    }
-
-    /**
-     * 汇总多个仓库的变更列表；顶层不再携带单一 repoId，每个文件使用自身仓库的 repoId。
-     */
-    private Map<String, Object> collectTaskChanges(ByaiSession session, List<RepoWorkspace> repoWorkspaces,
-                                                   String headBranch) {
-        Map<String, Object> aggregate = null;
-        List<Map<String, Object>> files = new ArrayList<>();
-        boolean hasLocalChanges = false;
-        boolean usedRemote = false;
-        String pat = null;
-        boolean patLoaded = false;
-
-        if (repoWorkspaces.isEmpty()) {
-            Map<String, Object> noRepo = new HashMap<>();
-            noRepo.put("status", "no_repo");
-            noRepo.put("files", files);
-            noRepo.put("fileCount", 0);
-            noRepo.put("headBranch", headBranch);
-            return noRepo;
-        }
-
-        for (RepoWorkspace repoWorkspace : repoWorkspaces) {
-            ProjectRepo repo = repoWorkspace.repo();
-            String baseBranch = StringUtils.isNotBlank(repo.getDefaultBranch()) ? repo.getDefaultBranch() : "main";
-            Map<String, Object> repoChanges = null;
-            try {
-                LocalGitChangeService.LocalChangeResult local = localGitChangeService
-                    .collectChanges(repoWorkspace.path(), baseBranch);
-                if (local.getStatus() == LocalGitChangeService.LocalStatus.OK) {
-                    repoChanges = localResultToMap(local, repo.getRepoFullName());
-                    hasLocalChanges = true;
-                } else {
-                    log.info("[Devloop] 本地工作区变更不可用({}),回退远程 compare, sessionId={}, repoId={}",
-                        local.getStatus(), session.getSessionId(), repo.getRepoId());
-                }
-            } catch (Exception e) {
-                log.warn("[Devloop] 本地 git 变更采集异常,回退远程 compare, sessionId={}, repoId={}",
-                    session.getSessionId(), repo.getRepoId(), e);
-            }
-
-            if (repoChanges == null) {
-                if (!patLoaded) {
-                    pat = patService.getGitHubPat(
-                        session.getCreatorId() != null ? String.valueOf(session.getCreatorId()) : null);
-                    patLoaded = true;
-                }
-                GitHubCompareService.CompareResult remote = gitHubCompareService.compare(repo.getRepoFullName(),
-                    baseBranch, headBranch, pat);
-                repoChanges = compareResultToMap(remote);
-                usedRemote = true;
-            }
-            if (aggregate == null || "ok".equals(repoChanges.get("status"))) {
-                aggregate = new HashMap<>(repoChanges);
-            }
-            appendRepoFiles(files, repoChanges.get("files"), repo.getRepoId(), (String) repoChanges.get("source"));
-        }
-
-        if (aggregate == null) {
-            aggregate = errorChangesMap();
-        }
-        aggregate.remove("repoId");
-        aggregate.put("files", files);
-        aggregate.put("fileCount", files.size());
-        aggregate.put("headBranch", headBranch);
-        if (!files.isEmpty()) {
-            aggregate.put("status", "ok");
-        }
-        if (hasLocalChanges) {
-            aggregate.put("source", "local");
-        } else if (usedRemote) {
-            aggregate.put("source", "remote");
-        }
-        if (repoWorkspaces.size() > 1) {
-            aggregate.remove("repoFullName");
-            aggregate.remove("baseBranch");
-            aggregate.remove("aheadBy");
-            aggregate.remove("compareUrl");
-            aggregate.remove("message");
-        }
-        return aggregate;
-    }
-
-    private void appendRepoFiles(List<Map<String, Object>> target, Object source, Long repoId, String changeSource) {
-        if (!(source instanceof List<?> fileChanges)) {
-            return;
-        }
-        for (Object fileChange : fileChanges) {
-            if (fileChange instanceof Map<?, ?>) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> file = new HashMap<>((Map<String, Object>) fileChange);
-                file.put("repoId", repoId);
-                file.put("source", changeSource);
-                target.add(file);
-            }
-        }
-    }
-
-    private record RepoWorkspace(ProjectRepo repo, Path path) {
-    }
-
-    /**
-     * 拼会话工作区里 git 仓库的宿主机绝对路径:{nfs根}/{bucket}/by/.sessions/{sessionId}/{repoName}。 bucket 由创建者 userCode 解析;repoName 取
-     * repoFullName 去掉 owner/ 前缀。任一环节缺失返回 null(走远程兜底)。
-     */
-    private Path resolveSessionWorkspace(ByaiSession session, String repoFullName) {
-        if (repoFullName == null || repoFullName.trim().isEmpty() || session.getCreatorId() == null) {
-            return null;
-        }
-        try {
-            LoginInfo owner = loginApplicationService.getLoginInfo(session.getCreatorId());
-            if (owner == null || StringUtils.isBlank(owner.getUserCode())) {
-                return null;
-            }
-            String bucket = userBucketNamingService.buildUserBucketName(owner.getUserCode());
-            String repoName = StringUtils.substringAfterLast(repoFullName, "/");
-            if (StringUtils.isBlank(repoName)) {
-                repoName = repoFullName;
-            }
-            return Paths.get(fileStorageRoot, bucket, SESSION_WORKSPACE_SEGMENT, String.valueOf(session.getSessionId()),
-                repoName);
-        } catch (Exception e) {
-            log.warn("[Devloop] 解析会话工作区路径失败, sessionId={}", session.getSessionId(), e);
-            return null;
-        }
-    }
-
-    /**
-     * 本地变更结果转前端形状:与 compareResultToMap 同构,status/files 字段口径一致,前端无需区分来源。
-     */
+    /** 将 worktree 的本地变更结果转换成前端代码变更视图结构。 */
     private Map<String, Object> localResultToMap(LocalGitChangeService.LocalChangeResult result, String repoFullName) {
         Map<String, Object> map = new HashMap<>();
         map.put("status", "ok");
@@ -4207,37 +4019,6 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             fm.put("deletions", f.getDeletions());
             fm.put("previousFilename", f.getPreviousFilename());
             fm.put("blobUrl", null);
-            files.add(fm);
-        }
-        map.put("files", files);
-        map.put("fileCount", files.size());
-        return map;
-    }
-
-    /**
-     * 比对结果转前端形状:状态字符串 + 分支信息 + 文件变更数组。
-     */
-    private Map<String, Object> compareResultToMap(GitHubCompareService.CompareResult result) {
-        Map<String, Object> map = new HashMap<>();
-        // 状态转小写字符串,前端按 ok/no_repo/no_token/branch_not_found/http_error 分支渲染不同空态。
-        map.put("status", result.getStatus().name().toLowerCase());
-        // 来源标记为远程,与本地口径统一;前端可据此提示"仅远程已推送"。
-        map.put("source", "remote");
-        map.put("repoFullName", result.getRepoFullName());
-        map.put("baseBranch", result.getBaseBranch());
-        map.put("headBranch", result.getHeadBranch());
-        map.put("aheadBy", result.getAheadBy());
-        map.put("compareUrl", result.getCompareUrl());
-        map.put("message", result.getMessage());
-        List<Map<String, Object>> files = new ArrayList<>();
-        for (GitHubCompareService.FileChange f : result.getFiles()) {
-            Map<String, Object> fm = new HashMap<>();
-            fm.put("filename", f.getFilename());
-            fm.put("status", f.getStatus());
-            fm.put("additions", f.getAdditions());
-            fm.put("deletions", f.getDeletions());
-            fm.put("previousFilename", f.getPreviousFilename());
-            fm.put("blobUrl", f.getBlobUrl());
             files.add(fm);
         }
         map.put("files", files);

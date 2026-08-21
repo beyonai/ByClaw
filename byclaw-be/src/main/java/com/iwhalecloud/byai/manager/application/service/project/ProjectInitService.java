@@ -620,6 +620,18 @@ public class ProjectInitService {
     }
 
     /**
+     * 获取项目仓库在当前用户项目工作区中的实际路径。
+     *
+     * <p>仓库浏览与 worktree 解析必须和初始化流程共用同一路径规则，避免各处重复拼接用户桶、项目和仓库名。</p>
+     *
+     * @param repo 项目仓库配置
+     * @return 本地仓库的规范化绝对路径
+     */
+    public Path getProjectRepositoryPath(ProjectRepo repo) {
+        return buildRepoPath(repo).toAbsolutePath().normalize();
+    }
+
+    /**
      * 解析当前登录用户的用户桶名称。
      *
      * @return 当前登录用户对应的规范化用户桶名称

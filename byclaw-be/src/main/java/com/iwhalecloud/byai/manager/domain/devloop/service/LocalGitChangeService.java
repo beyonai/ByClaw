@@ -112,7 +112,7 @@ public class LocalGitChangeService {
             }
 
             String headBranch = runGit(dir, "rev-parse", "--abbrev-ref", "HEAD").trim();
-            // 基线以本地实际存在的为准:优先 origin/{base},回退本地 {base};都没有则对空树 diff,至少能列出全部文件。
+            // worktree 比较基线按约定依次取上游、reflog 起点和 main，保证未配置远端跟踪的临时分支也能展示改动。
             String baseRef = resolveBaseRef(dir, baseBranch);
 
             // 已 commit:base...HEAD 的累计增删行;未 commit:工作区相对 HEAD 的改动。两者按文件名合并,未提交优先。
@@ -120,7 +120,7 @@ public class LocalGitChangeService {
             collectNumstat(dir, baseRef, merged);
             collectWorkingTree(dir, merged);
 
-            return LocalChangeResult.ok(baseBranch, headBranch, new ArrayList<>(merged.values()));
+            return LocalChangeResult.ok(baseRef, headBranch, new ArrayList<>(merged.values()));
         }
         catch (Exception e) {
             log.warn("[Devloop] 本地 git 变更采集失败 dir={}", workspaceDir, e);
@@ -181,16 +181,61 @@ public class LocalGitChangeService {
         }
     }
 
-    /** 基线引用解析:优先远程跟踪 origin/{base},其次本地 {base};都无则用 git 空树哈希(列全部文件为新增)。 */
+    /** 基线引用解析:优先当前分支上游，其次 reflog 创建起点，最后回退 main。 */
     private String resolveBaseRef(File dir, String baseBranch) {
-        String candidate = "origin/" + baseBranch;
-        if (refExists(dir, candidate)) {
-            return candidate;
+        String upstream = resolveUpstream(dir);
+        if (upstream != null) {
+            return upstream;
         }
-        if (refExists(dir, baseBranch)) {
-            return baseBranch;
+
+        String reflogBase = resolveReflogBase(dir);
+        if (reflogBase != null) {
+            return reflogBase;
+        }
+
+        String fallbackBranch = baseBranch == null || baseBranch.isBlank() ? "main" : baseBranch;
+        String remoteMain = "origin/" + fallbackBranch;
+        if (refExists(dir, remoteMain)) {
+            return remoteMain;
+        }
+        if (refExists(dir, fallbackBranch)) {
+            return fallbackBranch;
         }
         return EMPTY_TREE_HASH;
+    }
+
+    private String resolveUpstream(File dir) {
+        if (!refExists(dir, "@{upstream}")) {
+            return null;
+        }
+        try {
+            String upstream = runGit(dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name",
+                "@{upstream}").trim();
+            return upstream.isEmpty() ? null : upstream;
+        }
+        catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** reflog 的最早提交通常就是 worktree 分支创建点；只有它与当前 HEAD 不同时才作为有效基线。 */
+    private String resolveReflogBase(File dir) {
+        try {
+            String head = runGit(dir, "rev-parse", "HEAD").trim();
+            String reflog = runGit(dir, "reflog", "show", "--format=%H", "HEAD");
+            String oldestDistinct = null;
+            for (String line : reflog.split("\\R")) {
+                String candidate = line.trim();
+                if (!candidate.isEmpty() && !candidate.equals(head)) {
+                    oldestDistinct = candidate;
+                }
+            }
+            return oldestDistinct;
+        }
+        catch (Exception e) {
+            log.debug("[Devloop] worktree reflog 基线不可用 dir={}", dir, e);
+        }
+        return null;
     }
 
     /**

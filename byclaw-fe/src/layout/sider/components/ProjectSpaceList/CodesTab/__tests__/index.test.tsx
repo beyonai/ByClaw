@@ -2,12 +2,13 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { FileTreeItem } from '@/layout/sider/components/FileSiderPanel/constants';
 import { listFiles, searchFiles } from '@/service/fileBrowser';
-import { getTaskChanges, getTaskFileDiff, listProjectRepos } from '@/service/devloop';
+import { getProjectSessionWorktree, getTaskChanges, getTaskFileDiff, listProjectRepos } from '@/service/devloop';
 import CodesTab from '../index';
 
 jest.mock('@/service/devloop', () => ({
   getTaskChanges: jest.fn(),
   getTaskFileDiff: jest.fn(),
+  getProjectSessionWorktree: jest.fn(),
   listProjectRepos: jest.fn(),
 }));
 
@@ -102,6 +103,9 @@ const mockListFiles = listFiles as jest.MockedFunction<typeof listFiles>;
 const mockSearchFiles = searchFiles as jest.MockedFunction<typeof searchFiles>;
 const mockGetTaskChanges = getTaskChanges as jest.MockedFunction<typeof getTaskChanges>;
 const mockGetTaskFileDiff = getTaskFileDiff as jest.MockedFunction<typeof getTaskFileDiff>;
+const mockGetProjectSessionWorktree = getProjectSessionWorktree as jest.MockedFunction<
+  typeof getProjectSessionWorktree
+>;
 
 describe('CodesTab', () => {
   beforeEach(() => {
@@ -111,6 +115,7 @@ describe('CodesTab', () => {
       { repoId: 1, projectId: 203, repoFullName: 'beyonai/ByClaw', repoType: 'workspace' },
       { repoId: 2, projectId: 203, repoFullName: 'standalone-repo' },
     ]);
+    mockGetProjectSessionWorktree.mockResolvedValue({ found: true, path: '/by/.sessions/301/ByClaw/' });
     mockListFiles.mockImplementation(async ({ path = '' }) => [
       { name: path.endsWith('/ByClaw/') ? 'src' : 'README.md', path: `${path}entry`, isDir: false },
     ]);
@@ -146,12 +151,22 @@ describe('CodesTab', () => {
     await waitFor(() =>
       expect(mockListFiles).toHaveBeenCalledWith({
         resourceId: 'agent-9',
-        path: '/.sessions/301/ByClaw/',
+        path: '/by/.sessions/301/ByClaw/',
       })
     );
 
-    expect(screen.getByTestId('repo-beyonai/ByClaw')).toHaveTextContent('/.sessions/301/ByClaw/');
+    expect(screen.getByTestId('repo-beyonai/ByClaw')).toHaveTextContent('/by/.sessions/301/ByClaw/');
     expect(screen.queryByTestId('repo-standalone-repo')).toBeNull();
+  });
+
+  it('keeps the session code file list empty when no matching worktree exists', async () => {
+    mockGetProjectSessionWorktree.mockResolvedValue({ found: false });
+
+    render(<CodesTab projectId={203} resourceId="agent-9" sessionId="301" />);
+
+    const repoBlock = await screen.findByTestId('repo-beyonai/ByClaw');
+    expect(within(repoBlock).getByTestId('repo-files-beyonai/ByClaw')).not.toHaveTextContent('README.md');
+    expect(mockListFiles).not.toHaveBeenCalled();
   });
 
   it('refreshes one repository and lazily loads nested directories', async () => {
@@ -164,7 +179,7 @@ describe('CodesTab', () => {
     await waitFor(() =>
       expect(mockListFiles).toHaveBeenCalledWith({
         resourceId: 'agent-9',
-        path: '/.sessions/301/ByClaw/',
+        path: '/by/.sessions/301/ByClaw/',
       })
     );
 
@@ -173,7 +188,7 @@ describe('CodesTab', () => {
     await waitFor(() =>
       expect(mockListFiles).toHaveBeenCalledWith({
         resourceId: 'agent-9',
-        path: '/.sessions/301/ByClaw/src/',
+        path: '/by/.sessions/301/ByClaw/src/',
       })
     );
   });
@@ -190,7 +205,7 @@ describe('CodesTab', () => {
     await waitFor(() =>
       expect(mockSearchFiles).toHaveBeenCalledWith({
         resourceId: 'agent-9',
-        path: '/.sessions/301/ByClaw/',
+        path: '/by/.sessions/301/ByClaw/',
         keyword: 'session token',
       })
     );
@@ -204,7 +219,7 @@ describe('CodesTab', () => {
     await waitFor(() =>
       expect(mockListFiles).toHaveBeenCalledWith({
         resourceId: 'agent-9',
-        path: '/.sessions/301/ByClaw/',
+        path: '/by/.sessions/301/ByClaw/',
       })
     );
   });
@@ -220,7 +235,7 @@ describe('CodesTab', () => {
       expect.anything(),
       expect.objectContaining({
         name: 'README.md',
-        path: '/.sessions/301/ByClaw/README.md',
+        path: '/by/.sessions/301/ByClaw/README.md',
         isDir: false,
       })
     );
@@ -239,7 +254,7 @@ describe('CodesTab', () => {
       jest.advanceTimersByTime(300);
     });
     expect(onOpenDetail).toHaveBeenCalledWith(expect.anything(), {
-      tabKey: 'repo-file:/.sessions/301/ByClaw/README.md',
+      tabKey: 'repo-file:/by/.sessions/301/ByClaw/README.md',
       title: 'README.md',
     });
     jest.useRealTimers();
@@ -260,7 +275,7 @@ describe('CodesTab', () => {
     expect(onOpenDetail).not.toHaveBeenCalled();
     expect(mockEventEmitter.emit).toHaveBeenCalledWith('queryInput-insert-item', {
       item: expect.objectContaining({
-        id: '/.sessions/301/ByClaw/README.md',
+        id: '/by/.sessions/301/ByClaw/README.md',
         collectionName: 'README.md',
         resourceId: 'agent-9',
         type: 'file',
@@ -311,7 +326,7 @@ describe('CodesTab', () => {
     await waitFor(() => {
       expect(mockListFiles).toHaveBeenCalledWith({
         resourceId: 'agent-9',
-        path: '/.sessions/301/ByClaw/',
+        path: '/by/.sessions/301/ByClaw/',
       });
       expect(mockGetTaskChanges).toHaveBeenCalledWith(301);
     });
