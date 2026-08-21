@@ -14,6 +14,7 @@ const RESOLVE_PROJECT_PATH = "open/api/v1/resolveProjectBySession";
 const DINGTALK_SEND_PATH = "open/api/v1/dingtalk/sendUserToUser";
 // 业务路径,不在 /open/api 下:该层只是免登录白名单与签名校验所在,devloop 走同一个 Beyond-Token 拦截器。
 const REQUIREMENT_CREATE_PATH = "devloop/requirement/create";
+const TASK_CREATE_PATH = "devloop/task/create";
 // 后端 Notices DTO 的 @Size(max = 100)，超出会整批 400，所以在客户端分批。
 const NOTICE_BATCH_SIZE = 100;
 const TITLE_MAX = 200;
@@ -435,6 +436,50 @@ async function requirementCreateCommand(args) {
   return { ok: failed.length === 0, total: rawItems.length, createdCount: created.length, created, failed };
 }
 
+// 派发环节逐条建待接单会话。入参是 dispatch-plan.mjs plan 输出的 calls 数组，
+// 每条含 {projectId, sourceItemId, assigneeId, awaitConfirm}。
+// 逐条发：一条失败不影响其余，回执里区分 dispatched/failed 供技能落回执。
+async function taskCreateCommand(args) {
+  const payload = await readPayload(args);
+  const rawCalls = Array.isArray(payload) ? payload : payload?.calls;
+  if (!Array.isArray(rawCalls) || rawCalls.length === 0) throw new PublicFailure("NOTICE_ITEMS_EMPTY");
+
+  const dispatched = [];
+  const failed = [];
+  for (const call of rawCalls) {
+    const projectId = call?.projectId;
+    const sourceItemId = call?.sourceItemId;
+    const assigneeId = call?.assigneeId;
+    if (!projectId || !sourceItemId || !assigneeId) {
+      failed.push({ sourceItemId: sourceItemId ?? null, reason: "TASK_CREATE_FIELDS_MISSING" });
+      continue;
+    }
+    try {
+      const data = await postJson(TASK_CREATE_PATH, {
+        projectId: Number(projectId),
+        sourceItemId: Number(sourceItemId),
+        assigneeId: Number(assigneeId),
+        awaitConfirm: call?.awaitConfirm !== false,
+      });
+      dispatched.push({
+        sourceItemId: Number(sourceItemId),
+        assigneeId: Number(assigneeId),
+        sessionId: data?.sessionId ?? null,
+        agentId: data?.agentId ?? null,
+        branchName: data?.branchName ?? null,
+        title: data?.title ?? null,
+        awaitConfirm: data?.awaitConfirm ?? true,
+      });
+    } catch (error) {
+      failed.push({
+        sourceItemId: Number(sourceItemId),
+        reason: error instanceof PublicFailure ? `${error.errorCode}: ${error.detail}` : (error?.message ?? "TASK_CREATE_FAILED"),
+      });
+    }
+  }
+  return { ok: failed.length === 0, total: rawCalls.length, dispatchedCount: dispatched.length, dispatched, failed };
+}
+
 function helpText() {
   return {
     ok: true,
@@ -447,6 +492,8 @@ function helpText() {
         "node scripts/notice-send.mjs resolve-project --session-id <sessionId>  # 按会话反查 projectId",
       "requirement-create":
         "node scripts/notice-send.mjs requirement-create [--input <reqs.json>] [--project-id <projectId>]  # 需求入库,回吐 itemId",
+      "task-create":
+        "node scripts/notice-send.mjs task-create [--input <calls.json>]  # 逐条派发建待接单会话",
     },
     requirementCreatePayload: {
       projectId: "批次默认项目,单条可覆盖",
@@ -481,6 +528,7 @@ async function main() {
   if (command === "projects") return projectsCommand(args);
   if (command === "resolve-project") return resolveProjectCommand(args);
   if (command === "requirement-create") return requirementCreateCommand(args);
+  if (command === "task-create") return taskCreateCommand(args);
   throw new PublicFailure("NOTICE_UNKNOWN_COMMAND", command);
 }
 
