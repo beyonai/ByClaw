@@ -81,7 +81,9 @@ node $SKILL/hot_discovery.mjs merge \
 
 **判定者**：编排层的 Agent —— 与选 searxng `--category` 是**同一次判断**，不新增步骤。
 
-**多维度取并集，不择一。**「AI 发展」同时命中 general + science + it，三套适配器都跑。
+**多维度取并集，不择一。** 每次搜索都强制补充 `general` 维度；例如输入 `science,it` 时实际执行
+`science,it,general`。因此「AI 发展」会同时命中 general + science + it，三套适配器都跑。
+输出中的 `dimensions` 保留调用方请求，`effectiveDimensions` 记录实际执行维度。
 理由是各维度的召回集本就不重叠（openalex 出论文、SO 出技术问答、虎扑出讨论帖），
 择一等于人为砍掉召回。
 

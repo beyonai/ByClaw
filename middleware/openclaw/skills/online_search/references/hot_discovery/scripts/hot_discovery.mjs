@@ -400,8 +400,10 @@ export function allSelectedAdaptersEmpty(selected, adapterStats) {
 export async function searchHotDiscovery(argv, options = {}) {
   const query = argv.query;
   if (!query) fail('search 需要 --query');
-  const dims = (argv.dimensions || '').split(',').map((s) => s.trim()).filter(Boolean);
-  if (!dims.length) fail('search 需要 --dimensions（多维度取并集，不择一）');
+  const requestedDims = (argv.dimensions || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!requestedDims.length) fail('search 需要 --dimensions（多维度取并集，不择一）');
+  // general 是公共互联网的兜底召回面，即使调用方传入了其他维度，也必须补跑一次。
+  const dims = [...new Set([...requestedDims, 'general'])];
   const limit = parseBoundedInteger(argv.limit, 'limit', 20, 1, 100);
   const tiers = parseTiers(argv.tiers);
 
@@ -418,7 +420,8 @@ export async function searchHotDiscovery(argv, options = {}) {
     return {
       channel: 'hot_discovery',
       query,
-      dimensions: dims,
+      dimensions: requestedDims,
+      effectiveDimensions: dims,
       observedAt: new Date().toISOString(),
       bycliVersion: null,
       adaptersSelected: 0,
@@ -609,7 +612,8 @@ export async function searchHotDiscovery(argv, options = {}) {
   return {
     channel: 'hot_discovery',
     query,
-    dimensions: dims,
+    dimensions: requestedDims,
+    effectiveDimensions: dims,
     // 热度值是时点观测，跨时间比较无意义。报告引用热度时须一并给出观测时间。
     observedAt: new Date().toISOString(),
     bycliVersion: compatibility.currentVersion,

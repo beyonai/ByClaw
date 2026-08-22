@@ -920,6 +920,60 @@ test('维度选择显式报告无覆盖维度和完全无适配器', () => {
   assert.match(none.warnings.join('\n'), /没有可运行的热度适配器/);
 });
 
+test('热度发现始终补充 general 维度并单独报告有效维度', async () => {
+  const calls = [];
+  const result = await searchHotDiscovery(
+    { query: 'state engineering', dimensions: 'it,science', tiers: '1', limit: '1' },
+    {
+      declarations: {
+        adapters: [
+          {
+            site: 'it-adapter', tier: 1, cmd: 'search', dimensions: ['it'],
+            urlColumn: 'url', titleColumn: 'title', metricColumns: [],
+            titleContextFrom: ['snippet'],
+          },
+          {
+            site: 'general-adapter', tier: 1, cmd: 'search', dimensions: ['general'],
+            urlColumn: 'url', titleColumn: 'title', metricColumns: [],
+            titleContextFrom: ['snippet'],
+          },
+        ],
+        queryParamAllowlist: {},
+        mobileSubdomainAllowlist: [],
+      },
+      bycli: {
+        async ensureBridge() {
+          return { ok: true };
+        },
+        async loadRuntime() {
+          return {
+            catalog: new Map([
+              ['it-adapter/search', {
+                args: [{ name: 'limit', positional: false }],
+                columns: ['url', 'title', 'snippet'],
+              }],
+              ['general-adapter/search', {
+                args: [{ name: 'limit', positional: false }],
+                columns: ['url', 'title', 'snippet'],
+              }],
+            ]),
+            compatibility: { status: 'compatible', currentVersion: 'test', baselineVersion: 'test' },
+          };
+        },
+        async invoke(_bin, args) {
+          calls.push(args[0]);
+          return { code: 0, stdout: '[]', stderr: '' };
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(calls.sort(), ['general-adapter', 'it-adapter']);
+  assert.deepEqual(result.dimensions, ['it', 'science']);
+  assert.deepEqual(result.effectiveDimensions, ['it', 'science', 'general']);
+  assert.equal(result.adapterStats['general-adapter'].status, 'ok_empty');
+});
+
 test('全部已选适配器 ok_empty 时产生聚合无覆盖信号', () => {
   const selected = [{ site: 'a' }, { site: 'b' }];
   assert.equal(allSelectedAdaptersEmpty(selected, {
