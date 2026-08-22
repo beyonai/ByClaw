@@ -505,11 +505,23 @@ export class RunService {
         .slice()
         .reverse()
         .find((event) => event.type === "run.suspended");
+      // 回调可能早于旧执行提交 run.suspended。delegation.started 同样是可靠的
+      // 恢复边界，避免 Resume 上下文从事件 0 重放 Super 的历史输出。
+      const resumeBoundary =
+        suspendedEvent ??
+        history
+          .slice()
+          .reverse()
+          .find(
+            (event) =>
+              event.type === "delegation.started" &&
+              event.data.delegationId === input.delegationId,
+          );
       if (!settled.accepted) {
         return {
           accepted: false,
           runId: settled.runId,
-          ...(suspendedEvent ? { afterEventId: suspendedEvent.eventId } : {}),
+          ...(resumeBoundary ? { afterEventId: resumeBoundary.eventId } : {}),
         };
       }
       if (!settled.wakeRun) {
@@ -517,7 +529,7 @@ export class RunService {
           accepted: true,
           runId: settled.runId,
           forwardEvents: false,
-          ...(suspendedEvent ? { afterEventId: suspendedEvent.eventId } : {}),
+          ...(resumeBoundary ? { afterEventId: resumeBoundary.eventId } : {}),
         };
       }
       const queued = await this.runs.get(settled.runId);
@@ -528,7 +540,7 @@ export class RunService {
         accepted: true,
         runId: settled.runId,
         forwardEvents: true,
-        ...(suspendedEvent ? { afterEventId: suspendedEvent.eventId } : {}),
+        ...(resumeBoundary ? { afterEventId: resumeBoundary.eventId } : {}),
       };
     }
     const completed = await this.delegationService.completeFromExternalCallback(input);
@@ -936,6 +948,7 @@ ${JSON.stringify(completedDelegations)}`;
           taskPlanReady = false;
         }
       }
+      let leaderOutputPausedForDelegation = false;
       const result = await leader.run({
         message: leaderMessage,
         observability: {
@@ -970,6 +983,9 @@ ${JSON.stringify(completedDelegations)}`;
         signal: runController.signal,
         // Leader 的可见回答与思考增量被规范化为 Run 事件，供对外流协议消费。
         onDelta: async (text) => {
+          if (leaderOutputPausedForDelegation) {
+            return;
+          }
           const event = {
             timestamp: this.now(),
             runId: current.id,
@@ -983,6 +999,9 @@ ${JSON.stringify(completedDelegations)}`;
           }
         },
         onReasoningDelta: async (text) => {
+          if (leaderOutputPausedForDelegation) {
+            return;
+          }
           const event = {
             timestamp: this.now(),
             runId: current.id,
@@ -1013,6 +1032,9 @@ ${JSON.stringify(completedDelegations)}`;
         // 工具调用只进入 DelegationService，不让 Pi 接触 Connector Registry。
         delegate: async (delegationInput) => {
           runController.signal.throwIfAborted();
+          // Pi 可能尚有排队的流回调。委派开始即交出控制权，迟到的 Super
+          // reasoning/answer 不再逐 Token 落库，也不能延迟 WAITING_AGENT。
+          leaderOutputPausedForDelegation = true;
           // Pi 工具 signal 只代表该次工具调用；Run 级停止必须始终拥有更高优先级，
           // 不能因为工具传入了独立 signal 就丢失整轮取消。
           const delegationSignal = delegationInput.signal
@@ -1062,6 +1084,9 @@ ${JSON.stringify(completedDelegations)}`;
               }
             },
           });
+          // 同步 Connector 返回了真实终态时，Leader 仍需继续使用工具结果。
+          // 挂起会抛出 DelegationSuspendedError，因此不会执行到这里。
+          leaderOutputPausedForDelegation = false;
           if (!runController.signal.aborted) {
             current = await this.#setStatus(current, "SYNTHESIZING");
           }
@@ -1269,18 +1294,29 @@ ${JSON.stringify(completedDelegations)}`;
         await this.runtime.checkpoints
           ?.discardPending(current.id, current.attemptNo, claim)
           .catch(() => undefined);
-        current = await this.#setStatus(current, "WAITING_AGENT", {
-          delegationId: error.delegationId,
-        });
-        await this.#appendRunEvent({
-          timestamp: this.now(),
-          runId: current.id,
-          type: "run.suspended",
-          data: {
-            status: "WAITING_AGENT",
+        const atomicSuspension = this.runtime.executionQueue?.suspendRunForDelegation;
+        if (atomicSuspension) {
+          await atomicSuspension.call(this.runtime.executionQueue, {
+            runId: current.id,
             delegationId: error.delegationId,
-          },
-        });
+            expectedRunVersion: current.version,
+            ...(claim ? { claim } : {}),
+          });
+          current = (await this.runs.get(current.id)) ?? current;
+        } else {
+          current = await this.#setStatus(current, "WAITING_AGENT", {
+            delegationId: error.delegationId,
+          });
+          await this.#appendRunEvent({
+            timestamp: this.now(),
+            runId: current.id,
+            type: "run.suspended",
+            data: {
+              status: "WAITING_AGENT",
+              delegationId: error.delegationId,
+            },
+          });
+        }
       } else if (controller?.signal.aborted) {
         await this.#finishLocallyCancelledRun(current, "run cancelled");
       } else {

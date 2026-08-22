@@ -992,6 +992,80 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
     );
   }
 
+  /** 原子提交调度挂起边界，避免 Resume 与 WAITING_AGENT 分属两个事务而丢失唤醒。 */
+  async suspendRunForDelegation(input: {
+    runId: string;
+    delegationId: string;
+    expectedRunVersion: number;
+    claim?: RunExecutionClaim;
+  }): Promise<{ runStatus: Run["status"]; suspended: boolean }> {
+    return transaction(this.pool, async (client) => {
+      if (input.claim) {
+        await assertLease(client, this.schema, input.claim);
+      }
+      // settleWaitingCallback 也采用 event lock -> Delegation/Run row locks，顺序必须一致。
+      await lockRunEventSequence(client, input.runId);
+      const selected = await client.query<{
+        delegation_status: string;
+        run_status: Run["status"];
+        run_version: number | string;
+        suspended_at: Date | string;
+      }>(
+        `SELECT d.status AS delegation_status, r.status AS run_status,
+                r.version AS run_version, clock_timestamp() AS suspended_at
+           FROM ${table(this.schema, "delegations")} d
+           JOIN ${table(this.schema, "runs")} r ON r.id = d.run_id
+          WHERE d.id = $1 AND d.run_id = $2
+          FOR UPDATE OF d, r`,
+        [input.delegationId, input.runId],
+      );
+      const row = selected.rows[0];
+      if (!row) {
+        throw new Error(`Delegation suspension target not found: ${input.delegationId}`);
+      }
+      const delegationSettled = ["COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"].includes(
+        row.delegation_status,
+      );
+      // Resume 先到时已经将 Run 改成 QUEUED；旧执行只退出，绝不再写 WAITING_AGENT。
+      if (delegationSettled || row.run_status !== "RUNNING") {
+        return { runStatus: row.run_status, suspended: false };
+      }
+      const runVersion = integer(row.run_version);
+      if (runVersion !== input.expectedRunVersion) {
+        throw new Error(`Run changed before Delegation suspension: ${input.runId}`);
+      }
+      const suspendedAt = milliseconds(row.suspended_at);
+      const updated = await client.query(
+        `UPDATE ${table(this.schema, "runs")}
+            SET status = 'WAITING_AGENT', execution_stage = 'CONNECTOR_WAITING',
+                version = version + 1, updated_at = $3
+          WHERE id = $1 AND version = $2 AND status = 'RUNNING'`,
+        [input.runId, runVersion, date(suspendedAt)],
+      );
+      if (updated.rowCount !== 1) {
+        throw new Error(`Run suspension rejected by optimistic lock: ${input.runId}`);
+      }
+      for (const event of [
+        {
+          type: "run.status" as const,
+          data: { status: "WAITING_AGENT", delegationId: input.delegationId },
+        },
+        {
+          type: "run.suspended" as const,
+          data: { status: "WAITING_AGENT", delegationId: input.delegationId },
+        },
+      ]) {
+        await appendRunEvent(client, this.schema, {
+          timestamp: suspendedAt,
+          runId: input.runId,
+          ...event,
+        });
+      }
+      await notifyRunEvent(client, this.schema, input.runId);
+      return { runStatus: "WAITING_AGENT", suspended: true };
+    });
+  }
+
   /** 多实例安全地领取到期回调；状态、Run 唤醒和事件使用同一个数据库事务。 */
   async expireWaitingCallbacks(input: {
     limit: number;
@@ -1099,6 +1173,20 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
     finalAnswer: string;
   }): Promise<{ accepted: boolean; runId?: string; wakeRun?: boolean }> {
     return transaction(this.pool, async (client) => {
+      // 事件写入会先持有 Run 事件序列锁，再通过外键读取 runs。这里必须采用相同顺序：
+      // 先定位 runId 并获取事件锁，再锁 Delegation/Run 行。否则并发 append 可能持有
+      // advisory lock 等待 runs 行，而 Resume 持有 runs 行等待 advisory lock，形成 40P01。
+      const located = await client.query<{ run_id: string }>(
+        `SELECT run_id
+           FROM ${table(this.schema, "delegations")}
+          WHERE id = $1`,
+        [input.delegationId],
+      );
+      const locatedRunId = located.rows[0]?.run_id;
+      if (!locatedRunId) {
+        return { accepted: false };
+      }
+      await lockRunEventSequence(client, locatedRunId);
       const selected = await client.query<{
         delegation_id: string;
         run_id: string;
@@ -1118,8 +1206,9 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
            FROM ${table(this.schema, "delegations")} d
            JOIN ${table(this.schema, "runs")} r ON r.id = d.run_id
           WHERE d.id = $1
+            AND d.run_id = $2
           FOR UPDATE OF d, r`,
-        [input.delegationId],
+        [input.delegationId, locatedRunId],
       );
       const row = selected.rows[0];
       if (!row) {
@@ -1174,11 +1263,14 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
           ...(error ? { error } : {}),
         },
       });
-      const wakeRun = row.run_status === "WAITING_AGENT" && row.execution_stage === "CONNECTOR_WAITING";
+      const wakeRun =
+        (row.run_status === "WAITING_AGENT" && row.execution_stage === "CONNECTOR_WAITING") ||
+        row.run_status === "RUNNING";
       if (wakeRun) {
         await client.query(
           `UPDATE ${table(this.schema, "runs")}
-              SET status = 'QUEUED', version = version + 1, updated_at = $2
+              SET status = 'QUEUED', execution_stage = 'CONNECTOR_WAITING',
+                  version = version + 1, updated_at = $2
             WHERE id = $1`,
           [row.run_id, date(settledAt)],
         );
@@ -1792,10 +1884,7 @@ async function appendRunEvent(
   schema: string,
   event: Omit<RunEvent, "eventId">,
 ): Promise<RunEvent> {
-  await client.query(
-    "SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",
-    [`byclaw-run-event:${event.runId}`],
-  );
+  await lockRunEventSequence(client, event.runId);
   const result = await client.query(
     `INSERT INTO ${table(schema, "run_events")}
        (run_id, event_id, timestamp, type, data)
@@ -2277,18 +2366,46 @@ async function transaction<T>(
   pool: Pool,
   work: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    const result = await work(client);
-    await client.query("COMMIT");
-    return result;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await work(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      if (!isRetryableTransactionError(error) || attempt === maxAttempts) {
+        throw error;
+      }
+    } finally {
+      client.release();
+    }
+    await transactionRetryDelay(attempt);
   }
+  throw new Error("PostgreSQL transaction retry loop exhausted");
+}
+
+/** Run 事件 ID 分配与其外键检查共用的事务级锁，所有复合事务必须先拿此锁。 */
+async function lockRunEventSequence(client: PoolClient, runId: string): Promise<void> {
+  await client.query(
+    "SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",
+    [`byclaw-run-event:${runId}`],
+  );
+}
+
+function isRetryableTransactionError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const code = (error as { code?: unknown }).code;
+  return code === "40P01" || code === "40001";
+}
+
+function transactionRetryDelay(attempt: number): Promise<void> {
+  const delayMs = 5 * 2 ** (attempt - 1) + Math.floor(Math.random() * 10);
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
 /** 兼容 PostgreSQL 与不支持 ON CONFLICT 的 openGauss，用事务级锁串行化 upsert。 */

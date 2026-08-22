@@ -30,6 +30,7 @@ import {
   type RunAttachment,
   type Session,
 } from "../src/index.js";
+import { LeaderRunSuspendedError } from "../src/application/run-suspension.js";
 
 const agent: AgentProfile = {
   id: "1001",
@@ -1021,6 +1022,74 @@ describe("DelegationService", () => {
 });
 
 describe("RunService", () => {
+  it("drops queued Leader output as soon as callAgent suspends the Run", async () => {
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const registry = new ConnectorRegistry();
+    registry.register(
+      fakeConnector(async function* () {
+        yield { type: "suspended" };
+      }),
+    );
+    const leaderFactory: LeaderSessionFactory = {
+      async create() {
+        return {
+          contextRevision: 0,
+          async run(input) {
+            try {
+              await input.delegate({
+                agentId: agent.id,
+                task: "analyze later",
+              });
+            } catch (error) {
+              if (!(error instanceof DelegationSuspendedError)) {
+                throw error;
+              }
+              // 模拟 Pi 已经排入异步回调队列、但在 callAgent 挂起后才执行的 token。
+              await input.onReasoningDelta?.("late reasoning");
+              await input.onDelta("late answer");
+              throw new LeaderRunSuspendedError(error.delegationId);
+            }
+            throw new Error("expected delegation suspension");
+          },
+          checkpoint: () => undefined,
+          markCommitted: () => undefined,
+          abort: async () => undefined,
+          dispose: () => undefined,
+        };
+      },
+      async health() {
+        return { healthy: true };
+      },
+    };
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      new DelegationService(registry, delegations, events, 1_000),
+      leaderFactory,
+    );
+
+    const run = await service.createSessionRun({
+      owner: { userCode: "user-1" },
+      message: "delegate",
+      agentList: [agent],
+    });
+
+    await waitFor(async () => (await service.getRun(run.id))?.status === "WAITING_AGENT");
+    const history = await events.list(run.id);
+    expect(history.some((event) => event.type === "run.suspended")).toBe(true);
+    expect(
+      history.some(
+        (event) => event.type === "leader.reasoning.delta" || event.type === "leader.delta",
+      ),
+    ).toBe(false);
+    await service.dispose();
+  });
+
   it("requeues a WAITING_AGENT Run only after its persisted callback arrives", async () => {
     const sessions = new InMemorySessionRepository();
     const runs = new InMemoryRunRepository(sessions);

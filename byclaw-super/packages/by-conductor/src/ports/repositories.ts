@@ -148,6 +148,16 @@ export interface RunExecutionQueue {
   /** 仅当前 fencing owner 可以释放，避免旧实例删除新实例的租约。 */
   release(claim: RunExecutionClaim): Promise<void>;
   /**
+   * 与终态 Resume 使用相同数据库锁，原子提交 WAITING_AGENT 和 run.suspended。
+   * 若终态回调已经先到，只返回其 QUEUED 结果，禁止旧执行覆盖。
+   */
+  suspendRunForDelegation?(input: {
+    runId: string;
+    delegationId: string;
+    expectedRunVersion: number;
+    claim?: RunExecutionClaim;
+  }): Promise<{ runStatus: Run["status"]; suspended: boolean }>;
+  /**
    * 原子结算到期的外部回调并把 WAITING_AGENT Run 放回队列。
    * 多实例实现必须使用行锁或等价 CAS，且状态、事件在同一事务提交。
    */

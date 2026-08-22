@@ -91,6 +91,9 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(result.content).toBe("");
     expect(result.replyData).toBeNull();
     expect(emitChunk).not.toHaveBeenCalled();
+    expect(emitProtocolChunk.mock.calls.map((call) => call[2])).not.toContain(
+      "调度后不应展示的思考",
+    );
     expect(emitProtocolChunk).toHaveBeenCalledWith(
       "session-1",
       "trace-1",
@@ -274,6 +277,7 @@ describe("ByClawSuperGatewayWorker", () => {
         "Beyond-Token": "secret-token",
         "System-Code": "system-1",
         parent_run_id: "run-1",
+        delegation_id: "delegation-1",
       },
     });
     const command = new ResumeCommand(
@@ -308,6 +312,7 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(
       emitProtocolChunk.mock.calls.some(
         (call) =>
+          call[2] === "挂起前积压的正文" ||
           call[2] === "超级助手正在汇总数字员工结果" ||
           (call[2] === "正在整理数字员工结果" &&
             call[3]?.eventType === EventType.REASONING_LOG_DELTA),
@@ -321,16 +326,6 @@ describe("ByClawSuperGatewayWorker", () => {
           orderId: "delegation-1",
           parentOrderId: "-1",
           status: "_DONE_",
-        }),
-      }),
-    );
-    expect(emitEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messageId: "delegation-1-result",
-        parentMessageId: "delegation-1",
-        data: expect.objectContaining({
-          orderId: "delegation-1-result",
-          parentOrderId: "delegation-1",
         }),
       }),
     );
@@ -365,12 +360,14 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(logger.info).toHaveBeenCalledWith(
       expect.objectContaining({
         status: AgentState.COMPLETED,
+        parentMessageId: "delegation-1:request",
+        delegationId: "delegation-1",
         contentType: "string",
-        content: "",
+        contentChars: 0,
         replyDataType: "string",
-        replyData: "\n\n你好！我是工作规范，负责研发需求分析与澄清的数字员工。",
+        replyDataChars: 29,
       }),
-      "收到 by-framework ResumeCommand 原始回调",
+      "收到 by-framework ResumeCommand",
     );
   });
 
@@ -460,75 +457,27 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(respondToInteraction).not.toHaveBeenCalled();
   });
 
-  it("emits the child Agent output as a nested delegation tree", async () => {
+  it("emits only Delegation status cards and leaves child activity to the child Agent", async () => {
     const emitEvent = vi.fn(async () => undefined);
-    const emitProtocolChunk = vi.fn(async () => undefined);
     const emitChunk = vi.fn(async () => undefined);
-    const emitState = vi.fn(async () => undefined);
     const worker = createWorker({
       createSessionRun: vi.fn(async () => run()),
       cancelRun: vi.fn(),
       streamEvents: () => delegatedEvents(),
       emitEvent,
-      emitProtocolChunk,
+      emitProtocolChunk: vi.fn(async () => undefined),
     });
 
-    const result = await worker.processCommand(
-      askCommand(),
-      contextMock({ emitChunk, emitState }),
-    );
+    const result = await worker.processCommand(askCommand(), contextMock({ emitChunk }));
 
-    expect(emitEvent).toHaveBeenCalledTimes(6);
-    expect(emitState).not.toHaveBeenCalled();
-    expect(emitProtocolChunk).toHaveBeenNthCalledWith(
-      1,
-      "session-1",
-      "trace-1",
-      "超级助手 智能体已就绪",
-      expect.objectContaining({
-        eventType: EventType.REASONING_LOG_DELTA,
-        contentType: "3003",
-        messageId: "run-1:ready",
-        parentMessageId: "-1",
-      }),
-    );
-    expect(emitProtocolChunk).toHaveBeenNthCalledWith(
-      2,
-      "session-1",
-      "trace-1",
-      "",
-      expect.objectContaining({
-        eventType: EventType.REASONING_LOG_START,
-        contentType: "1002",
-        messageId: "run-1:reasoning",
-        parentMessageId: "-1",
-      }),
-    );
-    expect(emitProtocolChunk).toHaveBeenNthCalledWith(
-      3,
-      "session-1",
-      "trace-1",
-      "",
-      expect.objectContaining({
-        eventType: EventType.REASONING_LOG_END,
-        contentType: "1002",
-        messageId: "run-1:reasoning",
-        parentMessageId: "-1",
-      }),
-    );
+    expect(emitEvent).toHaveBeenCalledTimes(2);
     expect(emitEvent).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        sessionId: "session-1",
-        traceId: "trace-1",
-        eventType: EventType.REASONING_LOG_DELTA,
-        sourceAgentType: "BY_SUPER",
         messageId: "delegation-1",
         parentMessageId: "-1",
+        traceId: "trace-1",
         data: expect.objectContaining({
-          event: EventType.REASONING_LOG_DELTA,
-          contentType: "3009",
-          objectType: "tool_call",
           orderId: "delegation-1",
           parentOrderId: "-1",
           status: "_START_",
@@ -543,58 +492,12 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(emitEvent).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        messageId: "delegation-1-start",
-        parentMessageId: "delegation-1",
-        data: expect.objectContaining({
-          contentType: "2020",
-          orderId: "delegation-1-start",
-          parentOrderId: "delegation-1",
-        }),
-      }),
-    );
-    expect(emitEvent).toHaveBeenNthCalledWith(
-      3,
-      expect.objectContaining({
-        messageId: "delegation-1:progress",
-        parentMessageId: "delegation-1",
-        data: expect.objectContaining({
-          contentType: "1002",
-          orderId: "delegation-1:progress",
-          parentOrderId: "delegation-1",
-          choices: [
-            expect.objectContaining({
-              delta: { content: "正在整理子 Agent 结果" },
-            }),
-          ],
-        }),
-      }),
-    );
-    expect(emitEvent).toHaveBeenNthCalledWith(
-      4,
-      expect.objectContaining({
-        messageId: "delegation-1:answer:text",
-        parentMessageId: "delegation-1",
-        data: expect.objectContaining({
-          contentType: "1002",
-          orderId: "delegation-1:answer:text",
-          parentOrderId: "delegation-1",
-          choices: [
-            expect.objectContaining({
-              delta: { content: "子 Agent 输出" },
-            }),
-          ],
-        }),
-      }),
-    );
-    expect(emitEvent.mock.calls[0][0].data).not.toHaveProperty("agentId");
-    expect(emitEvent.mock.calls[0][0].data).not.toHaveProperty("agentName");
-    expect(emitEvent.mock.calls[3][0].data).not.toHaveProperty("agentName");
-    expect(emitEvent).toHaveBeenNthCalledWith(
-      5,
-      expect.objectContaining({
         messageId: "delegation-1",
+        parentMessageId: "-1",
+        traceId: "trace-1",
         data: expect.objectContaining({
           orderId: "delegation-1",
+          parentOrderId: "-1",
           status: "_DONE_",
           choices: [
             expect.objectContaining({
@@ -604,222 +507,37 @@ describe("ByClawSuperGatewayWorker", () => {
         }),
       }),
     );
-    expect(emitEvent).toHaveBeenNthCalledWith(
-      6,
-      expect.objectContaining({
-        messageId: "delegation-1-result",
-        parentMessageId: "delegation-1",
-        data: expect.objectContaining({
-          contentType: "2020",
-          orderId: "delegation-1-result",
-          parentOrderId: "delegation-1",
-        }),
-      }),
-    );
-    const inputBlock = JSON.parse(emitEvent.mock.calls[1][0].data.choices[0].delta.content);
-    expect(inputBlock.title).toBe("Input");
-    expect(JSON.parse(inputBlock.json)).toEqual({
-      agentId: "agent-1",
-      agentName: "数据分析助手",
-      task: "请分析销售数据",
-      expectedOutput: "结构化结论",
-      attachments: [{ id: "attachment-1", name: "sales.csv", mediaType: "text/csv" }],
-    });
-    const outputBlock = JSON.parse(emitEvent.mock.calls[5][0].data.choices[0].delta.content);
-    expect(outputBlock.title).toBe("Output");
-    expect(JSON.parse(outputBlock.json)).toEqual({
-      agentId: "agent-1",
-      agentName: "数据分析助手",
-      status: "completed",
-      artifactCount: 1,
-    });
+    expect(
+      emitEvent.mock.calls.some((call) => call[0].parentMessageId === "delegation-1"),
+    ).toBe(false);
     expect(emitChunk).toHaveBeenCalledOnce();
     expect(emitChunk).toHaveBeenCalledWith("汇总答案", EventType.ANSWER_DELTA);
     expect(result.content).toBe("汇总答案");
   });
-
-  it("nests child progress, tools, details, and output without forwarding child stream lifecycle", async () => {
+  it("does not reproject child progress, tools, details, or output", async () => {
     const emitEvent = vi.fn(async () => undefined);
-    const emitProtocolChunk = vi.fn(async () => undefined);
     const worker = createWorker({
       createSessionRun: vi.fn(async () => run()),
       cancelRun: vi.fn(),
       streamEvents: () => nestedDelegationEvents(),
       emitEvent,
-      emitProtocolChunk,
+      emitProtocolChunk: vi.fn(async () => undefined),
     });
 
     const result = await worker.processCommand(askCommand(), contextMock());
 
-    const protocolEvents = emitProtocolChunk.mock.calls.map((call) => call[3]?.eventType);
-    expect(
-      protocolEvents.filter((eventType) => eventType === EventType.REASONING_LOG_START),
-    ).toHaveLength(1);
-    expect(
-      protocolEvents.filter((eventType) => eventType === EventType.REASONING_LOG_END),
-    ).toHaveLength(1);
-
-    expect(emitEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messageId: "delegation-flat:progress",
-        parentMessageId: "delegation-flat",
-        data: expect.objectContaining({
-          contentType: "1002",
-          parentOrderId: "delegation-flat",
-          choices: [
-            expect.objectContaining({
-              delta: { content: "正在分析需求范围" },
-            }),
-          ],
-        }),
-      }),
-    );
-    const toolCardEvents = emitEvent.mock.calls
-      .map((call) => call[0])
-      .filter(
-        (emitted) =>
-          emitted.metadata?.child_call_id === "child-call-1" && emitted.data?.contentType === "3015",
-      );
-    expect(toolCardEvents.length).toBeGreaterThanOrEqual(2);
-    expect(toolCardEvents[0]).toMatchObject({
-      messageId: "delegation-flat:tool:child-call-1",
-      parentMessageId: "delegation-flat",
-      data: {
-        contentType: "3015",
-        objectType: "tool_call",
-        orderId: "delegation-flat:tool:child-call-1",
-        parentOrderId: "delegation-flat",
-      },
-    });
-    const startedCard = JSON.parse(toolCardEvents[0].data.choices[0].delta.content);
-    expect(startedCard).toMatchObject({ title: "Read", status: "_START_" });
-    const completedCard = JSON.parse(
-      toolCardEvents[toolCardEvents.length - 1].data.choices[0].delta.content,
-    );
-    expect(completedCard).toEqual({
-      title: "Read",
-      input: { path: "/tmp/requirements.md" },
-      output: { content: "需求文档" },
-      status: "_DONE_",
-      description: "/tmp/requirements.md",
-    });
-    expect(
-      emitEvent.mock.calls.some(
-        (call) =>
-          call[0].metadata?.child_call_id === "child-call-1" &&
-          call[0].metadata?.detail_phase !== undefined,
-      ),
-    ).toBe(false);
-    expect(emitEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messageId: "delegation-flat:answer:text",
-        parentMessageId: "delegation-flat",
-        data: expect.objectContaining({
-          contentType: "1002",
-          parentOrderId: "delegation-flat",
-        }),
-      }),
-    );
-    expect(
-      emitEvent.mock.calls.some((call) =>
-        String(call[0].data?.choices?.[0]?.delta?.content ?? "").includes("数字员工输出"),
-      ),
-    ).toBe(false);
+    const emitted = emitEvent.mock.calls.map((call) => call[0]);
+    expect(emitted).toHaveLength(2);
+    expect(emitted.map((message) => message.messageId)).toEqual([
+      "delegation-flat",
+      "delegation-flat",
+    ]);
+    expect(emitted.map((message) => message.data?.status)).toEqual(["_START_", "_DONE_"]);
+    expect(emitted.some((message) => message.metadata?.child_call_id)).toBe(false);
+    expect(emitted.some((message) => message.parentMessageId === "delegation-flat")).toBe(false);
     expect(result.content).toBe("汇总结果");
   });
-
-  it("preserves the BYCLAW_CODE timeline without a digital-employee-output wrapper", async () => {
-    const emitEvent = vi.fn(async () => undefined);
-    const worker = createWorker({
-      createSessionRun: vi.fn(async () => run()),
-      cancelRun: vi.fn(),
-      streamEvents: () => codeDelegationTimelineEvents(),
-      emitEvent,
-      emitProtocolChunk: vi.fn(async () => undefined),
-    });
-
-    await worker.processCommand(askCommand(), contextMock());
-
-    const emitted = emitEvent.mock.calls.map((call) => call[0]);
-    const contents = emitted.map(
-      (message) => message.data?.choices?.[0]?.delta?.content ?? "",
-    );
-    expect(contents.some((content) => content.includes("数字员工输出"))).toBe(false);
-
-    const timeline = emitted
-      .filter(
-        (message) =>
-          message.data?.parentOrderId === "delegation-code" &&
-          ["1002", "3015"].includes(message.data?.contentType),
-      )
-      .map((message) => ({
-        orderId: message.data.orderId,
-        parentOrderId: message.data.parentOrderId,
-        contentType: message.data.contentType,
-        content: message.data.choices[0].delta.content,
-      }));
-
-    expect(timeline).toHaveLength(5);
-    expect(timeline[0]).toMatchObject({
-      orderId: "delegation-code:timeline:1",
-      parentOrderId: "delegation-code",
-      contentType: "1002",
-      content: "工具前思考",
-    });
-    expect(timeline[1]).toMatchObject({
-      orderId: "delegation-code:tool:child-call-code",
-      parentOrderId: "delegation-code",
-      contentType: "3015",
-    });
-    expect(JSON.parse(timeline[1].content)).toMatchObject({ title: "Bash", status: "_START_" });
-    expect(timeline[2]).toMatchObject({
-      orderId: "delegation-code:tool:child-call-code",
-      contentType: "3015",
-    });
-    expect(JSON.parse(timeline[2].content)).toMatchObject({
-      title: "Bash",
-      output: "/by/projects/demo",
-      status: "_DONE_",
-    });
-    expect(timeline[3]).toMatchObject({
-      orderId: "delegation-code:timeline:2",
-      parentOrderId: "delegation-code",
-      contentType: "1002",
-      content: "工具后思考",
-    });
-    expect(timeline[4]).toMatchObject({
-      orderId: "delegation-code:timeline:3",
-      parentOrderId: "delegation-code",
-      contentType: "1002",
-      content: "最终正文",
-    });
-  });
-
-  it("renders string tool output without JSON quotes and unwraps encoded JSON", async () => {
-    const emitEvent = vi.fn(async () => undefined);
-    const worker = createWorker({
-      createSessionRun: vi.fn(async () => run()),
-      cancelRun: vi.fn(),
-      streamEvents: () => stringToolOutputEvents(),
-      emitEvent,
-    });
-
-    await worker.processCommand(askCommand(), contextMock());
-
-    const emitted = emitEvent.mock.calls.map((call) => call[0]);
-    const textOutput = emitted.find((item) => item.metadata?.child_call_id === "plain-output");
-    const textBlock = JSON.parse(textOutput?.data.choices[0].delta.content || "{}");
-    expect(textBlock).toMatchObject({
-      output: "total 40\ndrwxr-xr-x SKILL.md",
-      status: "_DONE_",
-    });
-
-    const jsonOutput = emitted.find((item) => item.metadata?.child_call_id === "encoded-json");
-    const jsonBlock = JSON.parse(jsonOutput?.data.choices[0].delta.content || "{}");
-    expect(jsonBlock.output).toEqual({ to: "in_progress", loopCount: 0 });
-  });
-
-  it("emits a structured Output block with errorDetail for failed delegations", async () => {
+  it("updates only the Delegation status card when a child Agent fails", async () => {
     const emitEvent = vi.fn(async () => undefined);
     const worker = createWorker({
       createSessionRun: vi.fn(async () => run()),
@@ -832,28 +550,18 @@ describe("ByClawSuperGatewayWorker", () => {
       "下游数字员工不可用",
     );
 
-    expect(emitEvent).toHaveBeenNthCalledWith(
-      3,
+    expect(emitEvent).toHaveBeenCalledTimes(2);
+    expect(emitEvent).toHaveBeenLastCalledWith(
       expect.objectContaining({
         messageId: "delegation-failed",
+        parentMessageId: "-1",
         data: expect.objectContaining({
           contentType: "3009",
           status: "_ERROR_",
         }),
       }),
     );
-    const outputBlock = JSON.parse(emitEvent.mock.calls[3][0].data.choices[0].delta.content);
-    expect(outputBlock.title).toBe("Output");
-    expect(JSON.parse(outputBlock.json)).toEqual({
-      agentId: "agent-2",
-      agentName: "失败员工",
-      status: "failed",
-      artifactCount: 0,
-      error: "下游数字员工不可用",
-      errorDetail: "下游数字员工不可用",
-    });
   });
-
   it("returns a safe answer instead of throwing when the downstream model fails", async () => {
     const emitChunk = vi.fn(async () => undefined);
     const worker = createWorker({
@@ -871,48 +579,19 @@ describe("ByClawSuperGatewayWorker", () => {
     );
   });
 
-  it("maps an external PAGE interaction to the existing 2010 agent card", async () => {
+  it("does not reproject child Agent interactions", async () => {
     const emitEvent = vi.fn(async () => undefined);
     const worker = createWorker({
       createSessionRun: vi.fn(async () => run()),
       cancelRun: vi.fn(),
-      streamEvents: () => pageInteractionEvents(),
+      streamEvents: () => childQuestionEvents(),
       emitEvent,
     });
 
     await worker.processCommand(askCommand(), contextMock());
 
-    expect(emitEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventType: EventType.ANSWER_DELTA,
-        messageId: "interaction-page-1",
-        parentMessageId: "delegation-page-1",
-        data: expect.objectContaining({
-          event: EventType.ANSWER_DELTA,
-          contentType: "2010",
-          agentId: "agent-page-1",
-          agentName: "页面员工",
-          choices: [
-            expect.objectContaining({
-              delta: {
-                content: JSON.stringify({
-                  agentId: "agent-page-1",
-                  agentName: "页面员工",
-                  runId: "run-1",
-                }),
-              },
-            }),
-          ],
-        }),
-        metadata: {
-          parent_run_id: "run-1",
-          interaction_id: "interaction-page-1",
-          delegation_id: "delegation-page-1",
-        },
-      }),
-    );
+    expect(emitEvent).not.toHaveBeenCalled();
   });
-
   it("maps a Super Assistant question to the new 3014 protocol", async () => {
     const emitEvent = vi.fn(async () => undefined);
     const worker = createWorker({
@@ -952,76 +631,39 @@ describe("ByClawSuperGatewayWorker", () => {
     );
   });
 
-  it("keeps a child-agent form on the existing 3013 protocol", async () => {
+  it("stops Leader output after AskUserQuestion until the user responds", async () => {
     const emitEvent = vi.fn(async () => undefined);
+    const emitProtocolChunk = vi.fn(async () => undefined);
+    const emitChunk = vi.fn(async () => undefined);
     const worker = createWorker({
       createSessionRun: vi.fn(async () => run()),
       cancelRun: vi.fn(),
-      streamEvents: () => legacyFormInteractionEvents(),
+      streamEvents: () => leaderQuestionWaitingEvents(),
       emitEvent,
+      emitProtocolChunk,
     });
 
-    await worker.processCommand(askCommand(), contextMock());
+    const result = await worker.processCommand(askCommand(), contextMock({ emitChunk }));
 
-    expect(emitEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventType: EventType.REASONING_LOG_DELTA,
-        data: expect.objectContaining({
-          contentType: "3013",
-          choices: [
-            expect.objectContaining({
-              delta: {
-                content: JSON.stringify(legacyFormPayload()),
-              },
-            }),
-          ],
-        }),
-        metadata: {
-          parent_run_id: "run-1",
-          interaction_id: "child-form-1",
-          delegation_id: "delegation-1",
-        },
-      }),
+    const reasoningContents = emitProtocolChunk.mock.calls.map((call) => call[2]);
+    expect(reasoningContents).toContain("提问前思考");
+    expect(reasoningContents).not.toContain("问题卡之后迟到的思考");
+    expect(reasoningContents).toContain("用户回答后的思考");
+    expect(emitChunk).not.toHaveBeenCalledWith(
+      "问题卡之后迟到的正文",
+      EventType.ANSWER_DELTA,
     );
-  });
+    expect(emitChunk).toHaveBeenCalledWith("最终答案", EventType.ANSWER_DELTA);
+    expect(result.content).toBe("最终答案");
 
-  it("keeps a child-agent AskUserQuestion on the 3014 protocol", async () => {
-    const emitEvent = vi.fn(async () => undefined);
-    const worker = createWorker({
-      createSessionRun: vi.fn(async () => run()),
-      cancelRun: vi.fn(),
-      streamEvents: () => childQuestionEvents(),
-      emitEvent,
-    });
-
-    await worker.processCommand(askCommand(), contextMock());
-
-    const questions = leaderQuestions();
-    expect(emitEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventType: EventType.REASONING_LOG_DELTA,
-        messageId: "child-question-1",
-        parentMessageId: "delegation-1",
-        data: expect.objectContaining({
-          contentType: "3014",
-          choices: [
-            expect.objectContaining({
-              delta: {
-                role: "assistant",
-                content: JSON.stringify({ questions }),
-              },
-            }),
-          ],
-        }),
-        metadata: {
-          parent_run_id: "run-1",
-          interaction_id: "child-question-1",
-          delegation_id: "delegation-1",
-          questions,
-          tool_name: "AskUserQuestion",
-        },
-      }),
+    const questionOrder = emitEvent.mock.invocationCallOrder[0];
+    const reasoningEndAfterQuestion = emitProtocolChunk.mock.calls.findIndex(
+      (call) =>
+        call[3]?.eventType === EventType.REASONING_LOG_END &&
+        emitProtocolChunk.mock.invocationCallOrder[emitProtocolChunk.mock.calls.indexOf(call)] >
+          questionOrder,
     );
+    expect(reasoningEndAfterQuestion).toBeGreaterThanOrEqual(0);
   });
 
   it("reuses the internal Session for the same by-framework session", async () => {
@@ -1469,9 +1111,11 @@ async function* resumedSummaryEvents(): AsyncIterable<RunEvent> {
     agentName: "数据分析助手",
     status: "COMPLETED",
   });
-  yield event(12, "leader.reasoning.delta", { text: "正在整理数字员工结果" });
-  yield event(13, "leader.delta", { text: "最终答案" });
-  yield event(14, "run.completed", { status: "COMPLETED", finalAnswer: "最终答案" });
+  yield event(12, "leader.delta", { text: "挂起前积压的正文" });
+  yield event(13, "run.attempt", { attemptNo: 2, resumedFrom: "CONNECTOR_WAITING" });
+  yield event(14, "leader.reasoning.delta", { text: "正在整理数字员工结果" });
+  yield event(15, "leader.delta", { text: "最终答案" });
+  yield event(16, "run.completed", { status: "COMPLETED", finalAnswer: "最终答案" });
 }
 
 async function* suspendedEvents(): AsyncIterable<RunEvent> {
@@ -1481,8 +1125,9 @@ async function* suspendedEvents(): AsyncIterable<RunEvent> {
     agentName: "数据分析助手",
     task: "分析数据",
   });
-  yield event(2, "leader.delta", { text: "我来调用数据分析助手" });
-  yield event(3, "run.suspended", {
+  yield event(2, "leader.reasoning.delta", { text: "调度后不应展示的思考" });
+  yield event(3, "leader.delta", { text: "我来调用数据分析助手" });
+  yield event(4, "run.suspended", {
     status: "WAITING_AGENT",
     delegationId: "delegation-1",
   });
@@ -1621,106 +1266,11 @@ async function* nestedDelegationEvents(): AsyncIterable<RunEvent> {
   });
 }
 
-async function* codeDelegationTimelineEvents(): AsyncIterable<RunEvent> {
-  yield event(1, "delegation.started", {
-    delegationId: "delegation-code",
-    agentId: "agent-code",
-    agentName: "代码工匠 · 程开源",
-    connectorId: "code-by-framework",
-    task: "查看当前工作目录",
-  });
-  yield event(2, "delegation.display.progress", {
-    delegationId: "delegation-code",
-    agentId: "agent-code",
-    agentName: "代码工匠 · 程开源",
-    text: "工具前思考",
-  });
-  yield event(3, "delegation.tool.started", {
-    delegationId: "delegation-code",
-    agentId: "agent-code",
-    agentName: "代码工匠 · 程开源",
-    callId: "child-call-code",
-    toolName: "Bash",
-    title: "Bash",
-    input: { command: "pwd", description: "显示当前工作目录" },
-  });
-  yield event(4, "delegation.tool.completed", {
-    delegationId: "delegation-code",
-    agentId: "agent-code",
-    agentName: "代码工匠 · 程开源",
-    callId: "child-call-code",
-    toolName: "Bash",
-    title: "Bash",
-    output: "/by/projects/demo",
-  });
-  yield event(5, "delegation.display.progress", {
-    delegationId: "delegation-code",
-    agentId: "agent-code",
-    agentName: "代码工匠 · 程开源",
-    text: "工具后思考",
-  });
-  yield event(6, "delegation.output.delta", {
-    delegationId: "delegation-code",
-    agentId: "agent-code",
-    agentName: "代码工匠 · 程开源",
-    text: "最终正文",
-  });
-  yield event(7, "delegation.completed", {
-    delegationId: "delegation-code",
-    agentId: "agent-code",
-    agentName: "代码工匠 · 程开源",
-    status: "COMPLETED",
-    resultStatus: "completed",
-    artifactCount: 0,
-    hasOutput: true,
-  });
-  yield event(8, "leader.delta", { text: "汇总结果" });
-  yield event(9, "run.completed", { status: "COMPLETED", finalAnswer: "汇总结果" });
-}
-
-async function* stringToolOutputEvents(): AsyncIterable<RunEvent> {
-  yield event(1, "delegation.tool.completed", {
-    delegationId: "delegation-string-output",
-    callId: "plain-output",
-    toolName: "read",
-    output: "total 40\ndrwxr-xr-x SKILL.md",
-  });
-  yield event(2, "delegation.tool.completed", {
-    delegationId: "delegation-string-output",
-    callId: "encoded-json",
-    toolName: "state",
-    output: JSON.stringify(JSON.stringify({ to: "in_progress", loopCount: 0 })),
-  });
-  yield event(3, "leader.delta", { text: "完成" });
-  yield event(4, "run.completed", { status: "COMPLETED", finalAnswer: "完成" });
-}
-
 async function* modelFailureEvents(): AsyncIterable<RunEvent> {
   yield event(1, "run.failed", {
     status: "FAILED",
     error: "Leader model call failed: 403: sensitive provider response",
     userMessage: "下游模型调用异常，请切换模型或者联系管理员",
-  });
-}
-
-async function* pageInteractionEvents(): AsyncIterable<RunEvent> {
-  yield event(1, "interaction.requested", {
-    interactionId: "interaction-page-1",
-    delegationId: "delegation-page-1",
-    request: {
-      kind: "external_page",
-      questions: [],
-      uiPayload: {
-        agentId: "agent-page-1",
-        agentName: "页面员工",
-        runId: "run-1",
-      },
-    },
-  });
-  yield event(2, "leader.delta", { text: "请完成页面操作" });
-  yield event(3, "run.completed", {
-    status: "COMPLETED",
-    finalAnswer: "请完成页面操作",
   });
 }
 
@@ -1747,21 +1297,24 @@ async function* leaderQuestionEvents(): AsyncIterable<RunEvent> {
   yield event(2, "run.cancelled", { status: "CANCELLED" });
 }
 
-function legacyFormPayload() {
-  return {
-    formStatus: 0,
-    pluginMachineFields: [{ fieldCode: "answer_1", formType: "select" }],
-  };
-}
-
-async function* legacyFormInteractionEvents(): AsyncIterable<RunEvent> {
-  yield event(1, "interaction.requested", {
-    interactionId: "child-form-1",
-    source: "by-framework",
-    delegationId: "delegation-1",
-    request: { uiPayload: legacyFormPayload() },
+async function* leaderQuestionWaitingEvents(): AsyncIterable<RunEvent> {
+  yield event(1, "leader.reasoning.delta", { text: "提问前思考" });
+  yield event(2, "interaction.requested", {
+    interactionId: "run-1:tool-1",
+    source: "leader",
+    request: { questions: leaderQuestions() },
   });
-  yield event(2, "run.cancelled", { status: "CANCELLED" });
+  yield event(3, "leader.reasoning.delta", { text: "问题卡之后迟到的思考" });
+  yield event(4, "leader.delta", { text: "问题卡之后迟到的正文" });
+  yield event(5, "interaction.responded", {
+    interactionId: "run-1:tool-1",
+    source: "leader",
+    action: "submit",
+    text: "用户选择员工 A",
+  });
+  yield event(6, "leader.reasoning.delta", { text: "用户回答后的思考" });
+  yield event(7, "leader.delta", { text: "最终答案" });
+  yield event(8, "run.completed", { status: "COMPLETED", finalAnswer: "最终答案" });
 }
 
 async function* childQuestionEvents(): AsyncIterable<RunEvent> {

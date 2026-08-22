@@ -666,11 +666,11 @@ export class DelegationService {
           try {
             delegation = await this.#checkpointSuspension(delegation, output, event.cursor);
           } catch (error) {
-            // 极快的子 Agent 可能在本地保存挂起点之前已经回调；数据库终态获胜时
-            // 直接把结果交还仍在运行的 Leader，不能覆盖终态或再次挂起。
+            // 极快的子 Agent 可能在本地保存挂起点之前已经回调。此时 Resume 已经
+            // 将原 Run 放回队列；旧 Leader 必须结束，不能与恢复执行并行汇总。
             const latest = await this.delegations.get(delegationId);
             if (latest?.result && TERMINAL_DELEGATION_STATUSES.has(latest.status)) {
-              return structuredClone(latest.result);
+              throw new DelegationSuspendedError(input.runId, delegationId);
             }
             throw error;
           }
