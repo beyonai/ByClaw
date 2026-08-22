@@ -933,12 +933,33 @@ test('全部已选适配器 ok_empty 时产生聚合无覆盖信号', () => {
 
 // ═══════════════ 声明表自身的完整性 ═══════════════
 
-test('声明表 33 个适配器，分档 14/5/14', () => {
+test('声明表 42 个适配器，分档 14/11/17', () => {
   const byTier = (t) => decl.adapters.filter((a) => a.tier === t).length;
-  assert.equal(decl.adapters.length, 33);
+  assert.equal(decl.adapters.length, 42);
   assert.equal(byTier(1), 14);
-  assert.equal(byTier(2), 5);
-  assert.equal(byTier(3), 14);
+  assert.equal(byTier(2), 11);
+  assert.equal(byTier(3), 17);
+});
+
+test('实测需要登录或高风险拦截的新适配器归入第三档', () => {
+  const bySite = new Map(decl.adapters.map((adapter) => [adapter.site, adapter]));
+  for (const site of ['gitlab', 'csdn', 'threads']) {
+    assert.equal(bySite.get(site)?.tier, 3, `${site} 需要登录或高风险拦截`);
+  }
+});
+
+test('新增九个公共浏览器适配器进入业务路由且不伪造热度', () => {
+  const addedSites = ['baidu', 'bing', 'yandex', 'so', 'sogou', 'gitlab', 'csdn', 'threads', '52pojie'];
+  const bySite = new Map(decl.adapters.map((adapter) => [adapter.site, adapter]));
+
+  for (const site of addedSites) {
+    const adapter = bySite.get(site);
+    assert.ok(adapter, `${site} 未进入声明表`);
+    assert.equal(adapter.tier, ['gitlab', 'csdn', 'threads'].includes(site) ? 3 : 2);
+    assert.equal(adapter.cmd, 'search');
+    assert.deepEqual(adapter.metricColumns, [], `${site} 不应把搜索相关性分数当作热度`);
+    assert.deepEqual(adapter.titleContextFrom, ['snippet']);
+  }
 });
 
 test('每个适配器都有可用的 URL 列与标题来源', () => {
