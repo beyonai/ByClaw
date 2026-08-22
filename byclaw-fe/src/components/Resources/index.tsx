@@ -824,7 +824,7 @@ const Resources: React.FC<Props> = ({ resourceType, installedOnly = false, onIns
   return (
     <div className={styles.fileManagerContainer}>
       <CommonTabs
-        className={classnames({ [styles.installedTabs]: installedOnly })}
+        className={classnames(styles.secondaryTabs, { [styles.installedTabs]: installedOnly })}
         activeKey={activeTab}
         tabBarExtraContent={
           activeTab === 'marketplace'

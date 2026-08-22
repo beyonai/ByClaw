@@ -443,7 +443,7 @@ const AutomationListPanel: React.FC<PanelProps> = ({ active = true, headerLeadin
             title={intl.formatMessage({ id: 'common.refresh' })}
             onClick={() => void reload()}
           />
-          <Button className={styles.automationCreateButton} icon={<PlusOutlined />} onClick={() => openEditor()}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>
             {intl.formatMessage({ id: 'automation.add' })}
           </Button>
         </div>

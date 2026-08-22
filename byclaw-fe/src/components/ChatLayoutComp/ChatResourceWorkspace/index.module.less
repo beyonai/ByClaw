@@ -152,73 +152,6 @@
   overflow: hidden;
 }
 
-.projectResourceSection {
-  flex: 1;
-}
-
-.resourceSectionDivider {
-  position: relative;
-  flex: none;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: row-resize;
-  touch-action: none;
-  background: #fff;
-
-  &::before {
-    position: absolute;
-    top: 50%;
-    right: 0;
-    left: 0;
-    height: 1px;
-    content: '';
-    background: #e7e9ed;
-    transform: translateY(-50%);
-    transition: height 0.2s, background-color 0.2s;
-  }
-
-  &:hover::before,
-  &:focus-visible::before {
-    height: 3px;
-    background: #9aa4b2;
-  }
-
-  &:focus-visible {
-    outline: none;
-  }
-}
-
-.resourceSectionDividerIcon {
-  position: relative;
-  z-index: 1;
-  width: 20px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 0;
-  color: #737b87;
-  background: #fff;
-  font-size: 10px;
-  line-height: 9px;
-  pointer-events: none;
-
-  :global(.@{antPrefix}icon) {
-    height: 9px;
-    line-height: 9px;
-  }
-}
-
-.resourceSectionDividerActive {
-  &::before {
-    height: 3px;
-    background: #667085;
-  }
-}
-
 .primaryTabs,
 .secondaryTabs {
   flex: none;
@@ -303,14 +236,14 @@
     min-width: 0;
     box-sizing: border-box;
     justify-content: center;
-    padding: 4px 5px;
+    padding: 2px 4px;
     border: 0;
     border-radius: 28px;
     color: rgba(112, 118, 128, 1);
     background: #f5f5f5;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 400;
-    line-height: 18px;
+    line-height: 16px;
 
     &:hover {
       color: var(--beyond-color-primary);
@@ -345,8 +278,8 @@
 }
 
 .resourceRefreshButton {
-  width: 26px;
-  height: 26px;
+  width: 20px;
+  height: 20px;
   padding: 0;
   color: #7b8799;
 

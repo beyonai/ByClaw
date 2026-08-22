@@ -32,6 +32,7 @@ export const resolveAutomationPromptDisplayText = (prompt: string, resourceList:
 };
 
 export const ALL_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7];
+export const DEFAULT_WEEKDAYS = [1, 2, 3, 4, 5];
 
 export const normalizeIntervalValue = (value: unknown, unit: AutomationIntervalUnit = 'hour') => {
   const numericValue = Number(value);
@@ -145,7 +146,7 @@ export const getAutomationFormInitialValues = (source?: AutomationSource): Autom
     periodType: schedule?.periodType || 'daily',
     periodTime: parseTime(schedule?.time),
     periodDateTime: parsePeriodDateTime(schedule),
-    periodWeekdays: schedule?.weekdays?.length ? schedule.weekdays : [...ALL_WEEKDAYS],
+    periodWeekdays: schedule?.weekdays?.length ? schedule.weekdays : [...DEFAULT_WEEKDAYS],
     periodMonth: schedule?.month || 1,
     periodMonthDay: schedule?.monthDay || 1,
     periodMonthDays: schedule?.monthDays?.length ? schedule.monthDays : [schedule?.monthDay || 1],
@@ -155,7 +156,7 @@ export const getAutomationFormInitialValues = (source?: AutomationSource): Autom
       schedule?.intervalUnit || 'hour'
     ),
     intervalUnit: schedule?.intervalUnit || 'hour',
-    intervalWeekdays: schedule?.intervalWeekdays?.length ? schedule.intervalWeekdays : [...ALL_WEEKDAYS],
+    intervalWeekdays: schedule?.intervalWeekdays?.length ? schedule.intervalWeekdays : [...DEFAULT_WEEKDAYS],
     onceTime: schedule?.onceTime ? dayjs(schedule.onceTime) : dayjs().add(1, 'hour').startOf('minute'),
   };
 };

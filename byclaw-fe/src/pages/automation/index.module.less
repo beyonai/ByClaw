@@ -39,8 +39,8 @@
 }
 
 .editorHeader {
-  min-height: 72px;
-  padding: 14px 20px;
+  min-height: 48px;
+  padding: 8px 20px;
 }
 
 .automationTabs,
@@ -127,24 +127,6 @@
 .toolbarIconButton:hover {
   color: #111 !important;
   background: #f1f1f1 !important;
-}
-
-.automationCreateButton {
-  height: 32px;
-  padding: 0 12px;
-  border-color: #1f1f1f;
-  border-radius: 8px;
-  color: #fff;
-  font-size: 14px;
-  font-weight: 500;
-  background: #1f1f1f;
-
-  &:hover,
-  &:focus-visible {
-    border-color: #353535 !important;
-    color: #fff !important;
-    background: #353535 !important;
-  }
 }
 
 .runStatusTabs {
@@ -550,25 +532,48 @@
 }
 
 .editorBreadcrumb {
-  color: #666;
-  font-size: 14px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: #6b6f76;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 24px;
+  white-space: nowrap;
+
+  .editorBreadcrumbLink,
+  .editorBreadcrumbCurrent {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
   .editorBreadcrumbLink {
     height: auto;
     padding: 0;
+    border: 0;
     color: inherit;
-    font-size: inherit;
+    font: inherit;
+    text-align: left;
 
     &:hover,
     &:focus-visible {
-      color: #165dff;
+      color: #14161a;
       background: transparent;
+      text-decoration: underline;
+      outline: none;
     }
   }
 
-  strong {
-    color: #202124;
-    font-weight: 600;
+  .editorBreadcrumbCurrent {
+    color: #14161a;
+    font-weight: 500;
+  }
+
+  .editorBreadcrumbSeparator {
+    flex: 0 0 auto;
+    color: #a3a7ad;
   }
 }
 
@@ -672,7 +677,7 @@
 .intervalField {
   min-height: 32px;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
 }
 
 .intervalValueItem {
@@ -689,12 +694,10 @@
   white-space: nowrap;
 }
 
-.intervalHint {
+.intervalField > .fieldHint {
   align-self: center;
   flex: 0 1 auto;
   margin-left: 12px;
-  color: #141414a6;
-  font-size: 12px;
   line-height: 20px;
   white-space: nowrap;
 }

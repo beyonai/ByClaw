@@ -1,5 +1,4 @@
 import { Button, DatePicker, Form, Input, InputNumber, Radio, Select, Space, TimePicker, message } from 'antd';
-import { ClockCircleOutlined } from '@ant-design/icons';
 import { useEffect, useMemo, useState } from 'react';
 import { useIntl } from '@umijs/max';
 import QueryInput from '@/components/QueryInput';
@@ -9,6 +8,7 @@ import {
   ALL_WEEKDAYS,
   buildAutomationCron,
   buildAutomationSchedule,
+  DEFAULT_WEEKDAYS,
   getAutomationFormInitialValues,
   normalizeIntervalValue,
   parseAutomationConfig,
@@ -45,10 +45,10 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
     intervalValue === undefined || intervalValue === null || intervalValue === ''
       ? undefined
       : !Number.isFinite(Number(intervalValue)) || Number(intervalValue) < intervalMin
-      ? intervalValidationMessage
-      : intervalUnit === 'minute' && !Number.isInteger(Number(intervalValue))
-      ? intervalValidationMessage
-      : undefined;
+        ? intervalValidationMessage
+        : intervalUnit === 'minute' && !Number.isInteger(Number(intervalValue))
+          ? intervalValidationMessage
+          : undefined;
   const periodType = Form.useWatch('periodType', form);
   const weekdayOptions = useMemo(
     () =>
@@ -74,14 +74,14 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
         template.schedule.intervalValue || template.schedule.intervalHours,
         initialValues.intervalUnit
       );
-      initialValues.periodWeekdays = template.schedule.weekdays || [...ALL_WEEKDAYS];
+      initialValues.periodWeekdays = template.schedule.weekdays || [...DEFAULT_WEEKDAYS];
       initialValues.periodMonth = template.schedule.month || 1;
       initialValues.periodMonthDay = template.schedule.monthDay || 1;
       initialValues.periodDateTime = (initialValues.periodDateTime || initialValues.periodTime)
         ?.month((template.schedule.month || 1) - 1)
         .date(template.schedule.monthDay || 1);
       initialValues.periodMonthDays = template.schedule.monthDays || [template.schedule.monthDay || 1];
-      initialValues.intervalWeekdays = template.schedule.intervalWeekdays || [...ALL_WEEKDAYS];
+      initialValues.intervalWeekdays = template.schedule.intervalWeekdays || [...DEFAULT_WEEKDAYS];
       setPromptDraft({ text: template.prompt, resourceList: [] });
     } else {
       const config = parseAutomationConfig(source?.config);
@@ -141,14 +141,13 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
     <div className={styles.editorPage}>
       <div className={styles.editorHeader}>
         <div className={styles.editorBreadcrumb}>
-          <ClockCircleOutlined />
           <Button type="text" className={styles.editorBreadcrumbLink} onClick={onCancel}>
             {intl.formatMessage({ id: 'automation.title' })}
           </Button>
-          <span>/</span>
-          <strong>
+          <span className={styles.editorBreadcrumbSeparator}>/</span>
+          <span className={styles.editorBreadcrumbCurrent}>
             {intl.formatMessage({ id: source?.sourceId ? 'automation.editTitle' : 'automation.addTitle' })}
-          </strong>
+          </span>
         </div>
         <Space>
           <Button onClick={onCancel}>{intl.formatMessage({ id: 'common.cancel' })}</Button>
@@ -241,7 +240,7 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
                         form.setFieldsValue({
                           periodType: nextPeriodType,
                           ...(nextPeriodType === 'weekly' || nextPeriodType === 'biweekly'
-                            ? { periodWeekdays: [1, 2, 3, 4, 5] }
+                            ? { periodWeekdays: [...DEFAULT_WEEKDAYS] }
                             : {}),
                         });
                       }}
@@ -351,7 +350,7 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({ source, template, o
                       />
                     </Form.Item>
                     <span
-                      className={intervalErrorMessage ? styles.intervalError : styles.intervalHint}
+                      className={intervalErrorMessage ? styles.intervalError : styles.fieldHint}
                       role={intervalErrorMessage ? 'alert' : undefined}
                     >
                       {intervalErrorMessage || intervalValidationMessage}

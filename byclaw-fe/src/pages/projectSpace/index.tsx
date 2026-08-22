@@ -451,7 +451,7 @@ const ProjectSpacePage: React.FC = () => {
           <div className={styles.projectHeroContent}>
             <h1>{intl.formatMessage({ id: 'sider.projectSpace' })}</h1>
             <p>{intl.formatMessage({ id: 'projectSpace.heroSubtitle' })}</p>
-            <Button className={styles.projectCreateButton} icon={<PlusOutlined />} onClick={handleCreateProject}>
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateProject}>
               {intl.formatMessage({ id: 'projectSpace.createProject' })}
             </Button>
           </div>
