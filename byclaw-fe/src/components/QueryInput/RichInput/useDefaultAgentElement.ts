@@ -35,8 +35,12 @@ export default function useDefaultAgentElement({ agentType, agentId }: { agentTy
        * 出此下策，因为有些数字员工的agentType老是配置成了慧笔的，但是给到输入框的agentType又是001
        * 这个时候查出来的agentInfo的agentType就和传到输入框的不一样，这会导致前后不一致，因此输入框的前缀突然间变成了慧笔
        * 因此这里用传入的agentType覆盖agentInfo的agentType
+       *
+       * 但员工组(017)例外：调用方只知道 objectType 是 DIGEMPLOYEE，恢复历史会话时一律传 001
+       * (见 pages/chat/index.tsx 的 queryInput-set-schema)。覆盖掉 017 会让 RichInput 不再把它
+       * 当组处理，用户就能把组和普通员工一起选中，而组本来是互斥的。
        */
-      agentType,
+      agentType: agentInfo.agentType === agentTypeMap.employeeGroup ? agentInfo.agentType : agentType,
     };
   }, [agentId, agentType, employeesList, defaultAgentList]);
 
