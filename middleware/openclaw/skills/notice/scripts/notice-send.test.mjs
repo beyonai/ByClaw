@@ -342,3 +342,49 @@ test("a 401 reports the login reason from resultMsg under its own error code", a
   assert.match(result.json.detail, /已过期/);
   assert.ok(!JSON.stringify(result.json).includes(SECRET_TOKEN));
 });
+
+// originId 是需求去重的精确判定键。曾经这里只透传 originUrl，钉钉把 taskId 放查询参数，
+// 下游从 URL 反推拿到 "task?taskId=xxx"，重复需求整轮漏过去，所以固定住这个字段。
+test("requirements passes through originId so dedup can match on the source id", async () => {
+  const server = await startServer((request, response) => {
+    ok(response, [
+      {
+        itemId: 11190786,
+        title: "运行记录支持按状态筛选",
+        content: "按成功失败过滤",
+        priority: "high",
+        sessionId: null,
+        originId: 55563304998,
+        originUrl: "https://alidocs.dingtalk.com/i/task?taskId=55563304998",
+        sourceName: "钉钉待办",
+        sourceType: "dingtalk_todo",
+        createTime: "2026-08-22 07:52:52",
+      },
+      { itemId: 11190784, title: "已启动的需求", sessionId: 11190880, originId: "482" },
+      { title: "没有 itemId 的脏行会被过滤", originId: "999" },
+    ]);
+  });
+  const result = await run(["requirements", "--project-id", "10000811"], { port: server.port });
+  await server.close();
+
+  assert.equal(result.code, 0);
+  assert.equal(result.json.total, 2);
+  assert.equal(result.json.startedCount, 1);
+  assert.equal(result.json.pendingCount, 1);
+  assert.equal(result.json.requirements[0].originId, 55563304998);
+  assert.equal(result.json.requirements[0].originUrl, "https://alidocs.dingtalk.com/i/task?taskId=55563304998");
+  assert.equal(result.json.requirements[0].started, false);
+  assert.equal(result.json.requirements[1].started, true);
+  assert.equal(server.requests[0].body.projectId, 10000811);
+});
+
+test("requirements keeps originId null when the source has none", async () => {
+  const server = await startServer((request, response) => {
+    ok(response, [{ itemId: 7, title: "会话来源需求", originId: null, originUrl: null }]);
+  });
+  const result = await run(["requirements", "--project-id", "1"], { port: server.port });
+  await server.close();
+
+  assert.equal(result.code, 0);
+  assert.equal(result.json.requirements[0].originId, null);
+});

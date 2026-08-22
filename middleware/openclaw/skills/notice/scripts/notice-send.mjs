@@ -424,6 +424,10 @@ async function requirementsCommand(args) {
       started: Boolean(row.sessionId),
       sourceName: row.sourceName ?? null,
       sourceType: row.sourceType ?? null,
+      // originId 是来源系统的原始 ID（钉钉 taskId、GitHub issue number），去重靠它做精确判定。
+      // 不能拿 originUrl 反推：钉钉把 ID 放查询参数（?taskId=xxx），GitHub 放路径末段，
+      // 反推规则每加一个来源就要改一次，而后端本来就存了这个字段。
+      originId: row.originId ?? null,
       originUrl: row.originUrl ?? null,
       createTime: row.createTime ?? null,
     }));
