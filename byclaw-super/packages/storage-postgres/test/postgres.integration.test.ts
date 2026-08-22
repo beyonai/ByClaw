@@ -252,7 +252,7 @@ suite("PostgreSQL persistence integration", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("settles one expired callback exactly once across concurrent sweepers", async () => {
+  it("terminally settles one expired callback exactly once across concurrent sweepers", async () => {
     const owner = session("callback-timeout-user");
     sessionsToDelete.push(owner.id);
     await database.sessions.save(owner);
@@ -300,32 +300,21 @@ suite("PostgreSQL persistence integration", () => {
       result: { status: "timed_out" },
     });
     await expect(database.runs.get(waiting.id)).resolves.toMatchObject({
-      status: "QUEUED",
-      executionStage: "CONNECTOR_WAITING",
+      status: "FAILED",
+      executionStage: "SETTLED",
+      finalAnswer: "子 Agent 在规定时间内未返回最终结果，本次调度已超时。",
+      error: "Delegation received no terminal ResumeCommand within its callback timeout",
     });
     expect(
       (await database.events.list(waiting.id)).filter(
         (event) => event.type === "delegation.failed",
       ),
     ).toHaveLength(1);
-    const queued = await database.runs.get(waiting.id);
-    await database.runs.saveWithEvent?.(
-      {
-        ...queued!,
-        status: "COMPLETED",
-        executionStage: "SETTLED",
-        finalAnswer: "timeout handled",
-        version: queued!.version + 1,
-        updatedAt: Date.now(),
-        finishedAt: Date.now(),
-      },
-      {
-        runId: waiting.id,
-        timestamp: Date.now(),
-        type: "run.completed",
-        data: { status: "COMPLETED", finalAnswer: "timeout handled" },
-      },
-    );
+    expect(
+      (await database.events.list(waiting.id)).filter(
+        (event) => event.type === "run.failed",
+      ),
+    ).toHaveLength(1);
     const [deliveryA, deliveryB] = await Promise.all([
       database.queue.claimCallbackTimeoutDeliveries({
         instanceId: "delivery-a",
@@ -342,7 +331,8 @@ suite("PostgreSQL persistence integration", () => {
     expect(deliveries).toEqual([
       expect.objectContaining({
         runId: waiting.id,
-        finalAnswer: "timeout handled",
+        runStatus: "FAILED",
+        finalAnswer: "子 Agent 在规定时间内未返回最终结果，本次调度已超时。",
         externalSessionId: "external-timeout-session",
       }),
     ]);

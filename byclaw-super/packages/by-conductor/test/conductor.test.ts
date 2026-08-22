@@ -1197,12 +1197,20 @@ describe("RunService", () => {
     expect(enqueue).toHaveBeenCalledOnce();
   });
 
-  it("polls the persistent callback deadline store without creating an in-memory timer", async () => {
+  it("polls the persistent callback deadline store and reports retryable sweep failures", async () => {
     const sessions = new InMemorySessionRepository();
     const runs = new InMemoryRunRepository(sessions);
     const delegations = new InMemoryDelegationRepository();
     const events = new InMemoryRunEventStore();
-    const expireWaitingCallbacks = vi.fn(async () => []);
+    const expireWaitingCallbacks = vi
+      .fn<() => Promise<Array<{ runId: string; delegationId: string }>>>()
+      .mockRejectedValueOnce(new Error("database unavailable"))
+      .mockResolvedValue([]);
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
     const service = new RunService(
       sessions,
       runs,
@@ -1224,13 +1232,18 @@ describe("RunService", () => {
           expireWaitingCallbacks,
         },
         queuePollMs: 5,
+        logger,
       },
     );
 
     service.start();
-    await waitFor(() => Promise.resolve(expireWaitingCallbacks.mock.calls.length > 0));
+    await waitFor(() => Promise.resolve(expireWaitingCallbacks.mock.calls.length > 1));
     await service.dispose();
     expect(expireWaitingCallbacks).toHaveBeenCalledWith({ limit: 100 });
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ error: "database unavailable" }),
+      "扫描子 Agent 回调超时失败",
+    );
   });
 
   it("stores Leader reasoning separately from visible answer deltas", async () => {

@@ -327,6 +327,7 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     randomUUID,
     {
       ...buildRunServiceOptions(config, database),
+      logger: ingressLogger,
       attachmentResolver,
       taskPlans,
     },

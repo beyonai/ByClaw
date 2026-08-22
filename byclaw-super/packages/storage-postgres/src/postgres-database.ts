@@ -1066,21 +1066,16 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
     });
   }
 
-  /** 多实例安全地领取到期回调；状态、Run 唤醒和事件使用同一个数据库事务。 */
+  /** 多实例安全地终结到期回调；Delegation、Run、事件和投递 Outbox 同事务提交。 */
   async expireWaitingCallbacks(input: {
     limit: number;
   }): Promise<Array<{ runId: string; delegationId: string }>> {
     return transaction(this.pool, async (client) => {
-      const candidates = await client.query<{
+      const candidateRefs = await client.query<{
         delegation_id: string;
         run_id: string;
-        agent_id: string;
-        agent_name: string | null;
-        partial_output: string | null;
-        expired_at: Date | string;
       }>(
-        `SELECT d.id AS delegation_id, d.run_id, d.agent_id, d.agent_name,
-                d.partial_output, clock_timestamp() AS expired_at
+        `SELECT d.id AS delegation_id, d.run_id
            FROM ${table(this.schema, "delegations")} d
            JOIN ${table(this.schema, "runs")} r ON r.id = d.run_id
           WHERE d.status = 'RUNNING'
@@ -1089,14 +1084,43 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
             AND r.status = 'WAITING_AGENT'
             AND r.execution_stage = 'CONNECTOR_WAITING'
           ORDER BY d.callback_deadline_at, d.id
-          FOR UPDATE OF d, r SKIP LOCKED
           LIMIT $1`,
         [input.limit],
       );
       const expired: Array<{ runId: string; delegationId: string }> = [];
-      for (const candidate of candidates.rows) {
+      for (const candidateRef of candidateRefs.rows) {
+        // Resume/suspend/timeout 统一使用 event lock -> Delegation/Run row locks。
+        // 先无锁找候选，再在锁内重查，避免旧实现 row lock -> event lock 的死锁窗口。
+        await lockRunEventSequence(client, candidateRef.run_id);
+        const selected = await client.query<{
+          delegation_id: string;
+          run_id: string;
+          agent_id: string;
+          agent_name: string | null;
+          partial_output: string | null;
+          expired_at: Date | string;
+        }>(
+          `SELECT d.id AS delegation_id, d.run_id, d.agent_id, d.agent_name,
+                d.partial_output, clock_timestamp() AS expired_at
+           FROM ${table(this.schema, "delegations")} d
+           JOIN ${table(this.schema, "runs")} r ON r.id = d.run_id
+          WHERE d.id = $1
+            AND d.run_id = $2
+            AND d.status = 'RUNNING'
+            AND d.callback_deadline_at IS NOT NULL
+            AND d.callback_deadline_at <= clock_timestamp()
+            AND r.status = 'WAITING_AGENT'
+            AND r.execution_stage = 'CONNECTOR_WAITING'
+          FOR UPDATE OF d, r`,
+          [candidateRef.delegation_id, candidateRef.run_id],
+        );
+        const candidate = selected.rows[0];
+        if (!candidate) {
+          continue;
+        }
         const expiredAt = milliseconds(candidate.expired_at);
         const error = "Delegation received no terminal ResumeCommand within its callback timeout";
+        const finalAnswer = "子 Agent 在规定时间内未返回最终结果，本次调度已超时。";
         const result = {
           status: "timed_out",
           output: candidate.partial_output ?? "",
@@ -1112,11 +1136,13 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
         );
         await client.query(
           `UPDATE ${table(this.schema, "runs")}
-              SET status = 'QUEUED', version = version + 1, updated_at = $2
+              SET status = 'FAILED', execution_stage = 'SETTLED',
+                  final_answer = $2, error_message = $3,
+                  version = version + 1, updated_at = $4, finished_at = $4
             WHERE id = $1
               AND status = 'WAITING_AGENT'
               AND execution_stage = 'CONNECTOR_WAITING'`,
-          [candidate.run_id, date(expiredAt)],
+          [candidate.run_id, finalAnswer, error, date(expiredAt)],
         );
         await appendRunEvent(client, this.schema, {
           timestamp: expiredAt,
@@ -1136,14 +1162,20 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
         await appendRunEvent(client, this.schema, {
           timestamp: expiredAt,
           runId: candidate.run_id,
-          type: "run.status",
+          type: "run.failed",
           data: {
-            status: "QUEUED",
+            status: "FAILED",
             delegationId: candidate.delegation_id,
-            resumed: true,
             timedOut: true,
+            error,
+            userMessage: finalAnswer,
           },
         });
+        await client.query(
+          `DELETE FROM ${table(this.schema, "run_execution_credentials")}
+            WHERE run_id = $1`,
+          [candidate.run_id],
+        );
         await client.query(
           `INSERT INTO ${table(this.schema, "callback_timeout_outbox")} (
              run_id, created_at, updated_at

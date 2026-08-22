@@ -158,7 +158,8 @@ export interface RunExecutionQueue {
     claim?: RunExecutionClaim;
   }): Promise<{ runStatus: Run["status"]; suspended: boolean }>;
   /**
-   * 原子结算到期的外部回调并把 WAITING_AGENT Run 放回队列。
+   * 原子结算到期的外部回调并直接终结 WAITING_AGENT Run。
+   * 超时不能依赖 Leader 再执行一次，否则恢复队列或模型异常会继续占住前端流。
    * 多实例实现必须使用行锁或等价 CAS，且状态、事件在同一事务提交。
    */
   expireWaitingCallbacks?(input: {

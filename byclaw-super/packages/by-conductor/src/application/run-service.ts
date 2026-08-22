@@ -97,6 +97,11 @@ export interface RunServiceRuntimeOptions {
   executionQueue?: RunExecutionQueue;
   checkpoints?: LeaderCheckpointStore;
   credentials?: ExecutionCredentialRepository;
+  logger?: {
+    info(bindings: Record<string, unknown>, message: string): void;
+    warn(bindings: Record<string, unknown>, message: string): void;
+    error(bindings: Record<string, unknown>, message: string): void;
+  };
   instanceId?: string;
   leaseMs?: number;
   queuePollMs?: number;
@@ -716,9 +721,29 @@ export class RunService {
     }
     this.#callbackSweep = queue
       .expireWaitingCallbacks({ limit: 100 })
-      .then(() => undefined)
-      // 数据库短暂异常时保留 WAITING_AGENT，下个轮询周期继续扫描。
-      .catch(() => undefined)
+      .then((expired) => {
+        if (expired.length > 0) {
+          this.runtime.logger?.warn(
+            {
+              instanceId: this.#instanceId,
+              expiredCount: expired.length,
+              runIds: expired.map((item) => item.runId),
+              delegationIds: expired.map((item) => item.delegationId),
+            },
+            "已终结超过回调截止时间的子 Agent 委派",
+          );
+        }
+      })
+      // 数据库短暂异常时保留 WAITING_AGENT，下个轮询周期继续扫描，但必须留下日志。
+      .catch((error: unknown) => {
+        this.runtime.logger?.error(
+          {
+            instanceId: this.#instanceId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          "扫描子 Agent 回调超时失败",
+        );
+      })
       .finally(() => {
         this.#callbackSweep = undefined;
       });
