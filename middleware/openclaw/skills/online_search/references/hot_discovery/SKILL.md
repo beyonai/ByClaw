@@ -19,7 +19,7 @@ allowed-tools: read, exec
 | 本地按热度重排，输出分组视图 | 写 `session.json`（只经 `knowledge-collection.mjs`） |
 | URL 规范化 + 跨通道去重 | 调 searxng（`merge` 只**读**它的输出文件） |
 | 读 `adapters.md` + `bycli list` 运行时校验 | 硬编码适配器清单 |
-| 鉴权失败即跳过 | **触发登录流程**、清理浏览器 session |
+| 鉴权/限流时保留已完成候选并返回 `requiresUserAction` | **触发登录流程**、清理浏览器 session、启动未执行适配器 |
 | — | 任何直接 HTTP（禁 `web_fetch` / `curl` / `requests`） |
 
 ## 时序：`init` 必须先于本通道
@@ -32,7 +32,7 @@ allowed-tools: read, exec
 两者合起来：**快照没有任何合法位置可以先于 `init` 存在**。为了先跑发现而预建目录或写文件，
 `init` 会因目录非空直接失败，整条链断在第一步。
 
-固定顺序：**`init` → 三通道并行发现 → `merge` → 快照落盘**。
+固定顺序：**`init` → 三通道并行发现并分别写输入快照 → `merge` → 可选写 merged 快照**。
 
 ## 用法
 
@@ -53,7 +53,8 @@ online_search/scripts/.venv/bin/python searxng_cli.py "AI agent framework" \
 # ③ 归并（两边都完成后）
 node $SKILL/hot_discovery.mjs merge \
     --hot-file <快照路径> --searxng-file /tmp/sx.json \
-    [--agent-reach-file <f>] [--group-limit 5]
+    [--agent-reach-file <f>] [--group-limit 5] \
+    [--agent-reach-limit 20] [--unverified-limit 20] [--unranked-hot-limit 20]
 ```
 
 **快照命名须避开 `items.json` / `run.json` / `m.json`** —— 这些是 `collect --item-json-file`
@@ -65,22 +66,29 @@ node $SKILL/hot_discovery.mjs merge \
 | --- | --- | --- |
 | `search` | `--query` | 必填 |
 | | `--dimensions` | 必填，逗号分隔。**多维度取并集，不择一** |
-| | `--tiers` | 默认 `1,2,3`。只想跑免登录纯 HTTP 就传 `1` |
-| | `--limit` | 每个适配器取几条（默认 20），同时是 `searchWindowSize` |
+| | `--tiers` | 默认 `1,2,3`。只接受 1/2/3 的不重复逗号列表；只跑免登录纯 HTTP 就传 `1` |
+| | `--limit` | 每个适配器取几条（1–100，默认 20），同时是 `searchWindowSize` |
 | `merge` | `--hot-file` | `search` 的输出 |
 | | `--searxng-file` | searxng 的输出（缺失时会在 `warnings` 标注「相关性通道缺失」） |
-| | `--group-limit` | 每个热度来源展示几条（默认 5），避免高产来源淹没其他来源 |
+| | `--group-limit` | 每个热度来源展示几条（1–100，默认 5），避免高产来源淹没其他来源 |
+| | `--searxng-limit` | `searxngTop` 最多展示几条（1–1000，默认 20） |
+| | `--agent-reach-limit` | `agentReachTop` 最多展示几条（1–1000，默认 20） |
+| | `--unverified-limit` | 缺 query、无法验证来源的候选最多展示几条（1–1000，默认 20） |
+| | `--unranked-hot-limit` | hot 命中但没有可用热度值的降级候选最多展示几条（1–1000，默认 20） |
 | 通用 | `--out` | 结果同时写入该文件 |
 
 ## 维度判定（通道入口条件）
 
 **判定者**：编排层的 Agent —— 与选 searxng `--category` 是**同一次判断**，不新增步骤。
 
-**多维度取并集，不择一。**「AI 发展」同时命中 general + science + it，三套适配器都跑。
+**多维度取并集，不择一。** 每次搜索都强制补充 `general` 维度；例如输入 `science,it` 时实际执行
+`science,it,general`。因此「AI 发展」会同时命中 general + science + it，三套适配器都跑。
+输出中的 `dimensions` 保留调用方请求，`effectiveDimensions` 记录实际执行维度。
 理由是各维度的召回集本就不重叠（openalex 出论文、SO 出技术问答、虎扑出讨论帖），
 择一等于人为砍掉召回。
 
-**判错的反馈路径**：若所选维度的适配器全部返回 0 结果，**报告「热度通道无覆盖」并继续**，
+**判错的反馈路径**：若维度在所选 tiers 中没有适配器，脚本直接返回空结果并在 `warnings`
+报告「无热度适配器覆盖」；若适配器存在但全部返回 0 结果，**报告「热度通道无覆盖」并继续**，
 **不自动改判维度重跑** —— 自动重判会掩盖那 11 个真实无覆盖的维度，把「本来就没有热度源」
 误报成「判错了」。是否换维度交给 Agent 显式决定。
 
@@ -103,7 +111,8 @@ node $SKILL/hot_discovery.mjs merge \
 ### 只有榜单、无关键词搜索（6 个维度，第 2 期）
 
 news / blogs / currency / general / social media / software wikis —— 热度字段有，
-但只能榜单 + 本地过滤。虎扑 `search` 是 general 维度唯一的关键词例外。
+但只能榜单 + 本地过滤。`general` 现在有 `hupu`、`toutiao` 等关键词入口；其余多数 general
+适配器仍是普通相关性搜索或需要登录，不能一律视为平台热榜。
 
 ### 完全无免登录热度源（11 个维度，**在 SKILL 层面显式声明不支持**）
 
@@ -113,20 +122,23 @@ news / blogs / currency / general / social media / software wikis —— 热度�
 
 **对这些维度不要调用本通道。**
 
-### 中文 general 主题是弱项
+### 中文 general 主题仍需区分公开热榜与登录渠道
 
-免登录集里覆盖 general 的只有虎扑（偏体育娱乐）。juejin 补上了中文**技术**热度，但：
+公开渠道现在包含虎扑和头条；知乎、微博、贴吧、小红书、即刻等还依赖登录态或浏览器环境。
+`juejin` 补上了中文**技术**热度，但：
 
 - **限技术领域** —— 「AI 发展」的政策、产业、社会面向命中不了
 - **`hot_index` 是累积量** —— `--sort hottest` 实测排出 2023-2024 老文，对「当前热点」是反向的
 
-真正有价值的知乎 `search`（`votes`）需 cookie。**不应制造「有热度数据」的假象。**
+知乎 `search`（`votes`）以及微博、贴吧等社区搜索需按运行时鉴权结果判断；搜索引擎的 `score`
+仍是相关性分数，不能制造「有热度数据」的假象。
 
 ## 措辞纪律（写报告时必须遵守）
 
 > **本通道对外只能称「相关结果中较热」，不得称「平台最热」。**
 
-19 个免登录适配器里只有 3 个有原生热度排序（hupu / juejin / github），**其余 30 个必须本地重排**。
+当前声明的 52 个适配器中有 7 个带原生热度排序（hupu / juejin / github / pixiv / twitter / reddit / youtube），
+**其余 45 个必须本地重排或不提供热度字段**。
 本地重排的样本是平台按相关性返回的前 N 条 —— 平台上真正最高热的那条**可能根本不在这 N 条里**。
 
 因此 `sortedLocally: true` 是常态，`searchWindowSize` 不是边缘字段而是几乎每条候选都要带的
@@ -148,7 +160,8 @@ news / blogs / currency / general / social media / software wikis —— 热度�
   //   ★ 硬截断 100 字符（UTF-16 码元，非字节）
   //   ★ 禁止写入 collectionFilters / citations / 最终报告
   "searxngContent": "……searxng 引擎的 content 原样保留，不截断……",  // 仅 searxng 命中时存在
-  "discoveredBy": ["bycli:crates", "searxng:crates.io"],   // length>1 即双通道命中
+  "discoveredBy": ["bycli:crates", "searxng:crates.io"],   // 跨 channel 才是双通道命中
+  "unverifiedDiscoveredBy": [],             // 输入缺 query 时存在；不得用于双通道判断
   "relevance": {"searxngScore": 12.34, "searxngRank": 3},
   "popularity": {
     "source": "rubygems",
@@ -160,6 +173,7 @@ news / blogs / currency / general / social media / software wikis —— 热度�
     "searchWindowSize": 8,        // ★ 本地重排的样本量 = 平台按相关性返回的条数
     "secondary": {"version": "1.2.0", "license": "MIT"}
   },
+  "popularities": [/* 同一 URL 命中多个 hot 来源时存在；按 source/metric 稳定排序 */],
   "acquisitionRoute": null        // 发现阶段一律 null
 }
 ```
@@ -170,12 +184,28 @@ news / blogs / currency / general / social media / software wikis —— 热度�
 
 | 组 | 依据 |
 | --- | --- |
-| `bothChannels` | `discoveredBy` 跨 channel —— **最高优先级** |
+| `bothChannels` | 有 `popularity`，且 `discoveredBy` 同时含 bycli 与 searxng/agent-reach —— **最高优先级** |
 | `searxngTop` | 按 `searxngRank` |
+| `agentReachTop` | agent-reach 单通道候选，保留输入顺序 |
 | `hotBySource` | 按来源分组，每组按其 `metric` 独立排序，各取前 K |
+| `hotWithoutPopularity` | bycli 已验证命中但热度列缺失的合法降级候选 |
+| `unverified` | 所有来源都缺 query 的候选；只能人工复核，不得当作双通道命中 |
 
 「双通道命中」是核心价值：一条 URL 既被多引擎相关性捞到、又在垂直平台高热，
 **不需跨平台折算就能立住**。
+
+`merge` 会把 `--hot-file` 视为不可信快照并重新执行完整 schema 白名单：候选与顶层
+`adapterStats` / `warnings` / `query` / `observedAt` 都不直接透传；未知字段、正文、伪造的
+`searxng:*` 来源与 `relevance` 一律删除。`popularity.source` 必须匹配 `discoveredBy` 中的
+`bycli:<source>`，`rankInSource` / `searchWindowSize` 必须是相互一致的正整数。规范化 URL
+只用于去重，原始 URL 不输出，避免凭据或敏感查询参数通过 `originalUrls` 回流。OAuth callback、
+对象存储签名等能力参数按上下文从去重身份和公开 URL 同时删除，使轮换凭据仍归并到同一资源；
+没有凭据上下文的普通业务参数必须保留。内部 `_dedupKey` 不得出现在输出中。
+
+hot / searxng / agent-reach 快照的非空查询规范化后不一致时，后续不一致通道会被隔离；缺少
+query 的通道可保留候选，但来源只进入 `unverifiedDiscoveredBy`，不得参与双通道命中。结构无效、候选行畸形、文件不可读或 JSON
+损坏的输入只产生 warning 并隔离该行或该通道，不得让整个 merge 崩溃。同一 URL 命中多个
+hot 来源时全部保留在 `popularities`，并在每个 `hotBySource` 组中使用对应来源的热度。
 
 ## 三层文本约束（改代码前必读）
 
@@ -235,6 +265,8 @@ Agent 筛选时容易系统性偏向信息更多的 searxng 候选。这是已�
   "discoveredBy": ["searxng:crates.io", "bycli:crates"],
   "popularity": {"source":"crates","metric":"downloads","value":141816,
                  "rankInSource":1,"sortedLocally":true,"searchWindowSize":8},
+  "popularities": [{"source":"crates","metric":"downloads","value":141816,
+                    "rankInSource":1,"sortedLocally":true,"searchWindowSize":8}],
   "searxngRank": 3
 }
 ```
@@ -243,13 +275,14 @@ Agent 筛选时容易系统性偏向信息更多的 searxng 候选。这是已�
 
 1. **只写发现元数据，不写正文。** `collectionFilters` 是自由 object，等于白名单之外的一个缺口。
    **`titleContext` 与 `searxngContent` 都不得写入** —— 上面示例刻意只有三项。
-2. **`metric` 与 `value` 原样透传**，不折算。
+2. **`metric` 与 `value` 原样透传**，不折算。存在 `popularities` 时必须完整落盘；单数
+   `popularity` 保留为兼容字段，等于 merged 候选的稳定主热度，不得用它替代复数数组。
 3. `sanitizeMetadataValue` 会**静默丢弃**敏感键名，因此不得用 `token` / `cookie` / `secret`
    作键名，否则字段消失且无报错。
 4. **写入口是 `collection-result.json` 的顶层 `filters`，不是 `collect` 的 payload。**
    `collection-state.mjs:1789` 取的是 `collectionResult.filters`，payload 里同名字段会被忽略。
    这意味着 **`filters` 是整批共享的，不是每条 item 各一份** —— 一次 `collect` 只能落一组
-   `popularity`。不同来源/热度的候选必须**分批 `collect`**，每批之前更新
+   `popularity` / `popularities`。不同来源/热度集合的候选必须**分批 `collect`**，每批之前更新
    `collection-result.json.filters`；混在一批会让所有条目共用第一条的热度值，
    且不报错（实测已验证：filters 原样进入 inventory 的 `collectionFilters`）。
 
@@ -269,16 +302,18 @@ Agent 筛选时容易系统性偏向信息更多的 searxng 候选。这是已�
 
 ## 失败处置
 
-**不兜底、不重试、不降级、不改参数。** 记入 `adapterStats` 后跳过。
+**不兜底、不重试、不降级、不改参数。** 命中认证、CAPTCHA、环境验证或限流时，保留已完成候选，
+在顶层返回 `requiresUserAction`，并停止所有尚未启动的适配器；不得触发登录或清理 session。
 
 | exit | `error.code` | 记录 | 处置 |
 | --- | --- | --- | --- |
-| 77 | `AUTH_REQUIRED` | `auth_required` | 跳过该适配器，**不触发登录** |
+| 77 | `AUTH_REQUIRED` | `auth_required` | 保留已完成候选，停止未启动适配器，**不触发登录** |
 | 69 | `BROWSER_CONNECT` | `bridge_unavailable` | **整档**跳过 |
-| 75 | `RATE_LIMITED` | `rate_limited` | 跳过，不重试（github 未认证 10 req/min） |
+| 75 | `RATE_LIMITED` | `rate_limited` | 保留已完成候选，停止未启动适配器，不重试 |
 | 75 | `TIMEOUT` | `login_timeout` | 跳过，**不触发登录、不清理 session** |
 | 75 | *(缺失)* | `exit75_ambiguous` | 不猜 |
 | 66 | `EMPTY_RESULT` | `empty_result` | **不改参数重试** |
+| OS 超时 | — | `timeout` | 跳过并保留 `killed` / 原始错误码，不重试 |
 | 其他非 0 | — | `command_failed` | 跳过 |
 | **0** | — | **`ok_empty`** | 返回 0 行。**不得当作「已覆盖该平台」** |
 
@@ -300,6 +335,13 @@ bycli 在 session 失效时只往 stderr 写 `⚠ Command returned an empty resu
 
 **跳过某适配器时不得顺手清理其浏览器 session** —— 页面可能停在 login/SSO/MFA/CAPTCHA 状态，
 规定是不执行任何关闭、跳转、页面检查或重试。
+
+### 运行时传输方式与访问档位
+
+声明里的 tier 是**访问策略**：是否应在当前请求中选用该 adapter、是否可能需要凭据；它不再推断浏览器依赖。
+每次执行均从 `bycli list -f json` 读取 `strategy` / `browser`：只有运行时要求浏览器传输的 adapter 才进入
+桥接门禁。门禁固定为 `bycli doctor` 后立即 `bycli daemon status`；异常时按冷启动、一次 daemon restart、复检的
+阶梯处理，仍异常则返回 `requiresUserAction.kind="bridge_unavailable"`。
 
 ### 两级字段告警（列名漂移的唯一防线）
 

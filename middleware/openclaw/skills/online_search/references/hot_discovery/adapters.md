@@ -11,9 +11,9 @@
 
 | 项 | 值 |
 | --- | --- |
-| 核对时的 bycli 版本 | **2.1.31** |
-| 站点总数 | **151**（设计文档记 v2.1.29 为 158，v2.1.31 实测 151 —— 站点数会双向漂移） |
-| 核对日期 | 2026-08-19（`bycli list -f json` 全量提取，逐字段比对） |
+| 核对时的 bycli 版本 | **2.1.38** |
+| 命令总数 | **922**（`bycli list -f json` 全量提取；命令数会双向漂移） |
+| 核对日期 | 2026-08-22（逐字段、限量参数与运行时传输方式比对） |
 
 **升级 bycli 后必须重跑本表的核对**，方法见 SKILL.md 末节。
 
@@ -24,7 +24,7 @@
 | # | 设计文档记载 | v2.1.31 实测 | 影响 |
 | --- | --- | --- | --- |
 | 1 | 失败时 stdout 输出 JSON，读 `error.code` | 错误走 **stderr 的 YAML**（`ok: false` / `code: X` / `exitCode: N`），**stdout 为空** | §5.0 的按 `error.code` 分派必须解析 stderr YAML，不能 `JSON.parse(stdout)` |
-| 2 | `weread-official` 是免登录档（档 1） | 需 `WEREAD_API_KEY`，实测 **exit 77 `AUTH_REQUIRED`** | 移入档 3。免登录数量 20 → **19** |
+| 2 | `weread-official` 是免登录档（档 1） | 需 `WEREAD_API_KEY`，实测 **exit 77 `AUTH_REQUIRED`**；v2.1.38 目录为 `strategy=public,browser=false` | 归入档 3 的**访问策略**，但运行时不走浏览器门禁 |
 | 3 | 全部适配器输出 `url` 列 | `weread-official` 的 URL 列是 **`link`** | URL 列同样是开放集合，须逐适配器声明 `urlColumn`（详见下节） |
 | 4 | `medium` 无 public 变体 | `medium tag` 是 `strategy=public browser=false`，但**无热度列**（`columns` 无 `claps`） | 结论不变：medium 仍只能走 cookie 档的 `search` |
 | 5 | 全部适配器接受 `--limit` | `weread-official search` 只有 `--count`（另有 `--scope` / `--max-idx`），**无 `--limit`** | 须逐适配器声明 `limitFlag`；硬编码 `--limit` 会让它以 `exit 1 unknown option` 失败，**把 `auth_required` 掩盖成 `command_failed`** |
@@ -59,15 +59,15 @@
 `urlColumn` 的处置与 `titleColumn` 同级：取不到即丢弃该条并记 `url_missing`。理由更强 ——
 无 URL 的候选连去重的键都没有，比无标题更彻底地不可用。
 
-## 三档划分（19 免登录 + 14 cookie = 33）
+## 三档划分（访问策略；运行时浏览器传输另行判定）
 
 | 档 | 条件 | 数量 | 调度 |
 | --- | --- | --- | --- |
-| **1** | `strategy=public` + `browser=false` | **14** | 并发（github 除外，见 quirks） |
-| **2** | `strategy=public` + `browser=true` | **5** | 串行，先过 `bycli doctor` |
-| **3** | `strategy=cookie` | **14** | 串行，鉴权失败即跳过，**不触发登录** |
+| **1** | 无凭据直连优先 | **14** | 顺序执行；认证/限流即停止后续 adapter |
+| **2** | 公开浏览器候选 | **18** | 若运行时需浏览器，先完成桥接健康检查 |
+| **3** | 凭据或高风险候选 | **20** | 运行时按 `strategy/browser` 决定直连或浏览器；鉴权失败即停止后续 adapter |
 
-## 原生热度排序：19 个免登录里只有 3 个
+## 原生热度排序：当前声明中只有 7 个带原生排序参数
 
 | 适配器 | 参数 | 热度值 | `choices` 是否可信 |
 | --- | --- | --- | --- |
@@ -81,7 +81,7 @@ cookie 档另有 4 个：`pixiv --order popular_d`（`choices` 完整）、`twit
 **实现不得用 `choices` 做参数校验** —— hupu / reddit / youtube 三个的 `choices` 是空数组，
 用它校验会把全部合法值判为非法。只能传值后按退出码判断。
 
-## 其余 30 个必须本地重排
+## 其余 45 个必须本地重排或不提供热度字段
 
 `sortedLocally: true` 是常态。本通道对外只能称「**相关结果中较热**」，不得称「平台最热」——
 重排样本是平台按相关性返回的前 N 条，`searchWindowSize` 必须如实填写。
@@ -127,19 +127,38 @@ weread-official 的 `cover`、rednote 的 `author_url`。它们不是正文，�
   },
   "tier2": {
     "gitee":          {"cmd":"search","dimensions":["repos"],"urlColumn":"url","titleColumn":"name","metricColumns":["stars"],"secondaryColumns":["language"],"titleContextFrom":["description"],"nativeSort":null},
+    "36kr":           {"cmd":"search","dimensions":["it","news"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":["date"],"titleContextFrom":[],"nativeSort":null},
+    "baidu":          {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
+    "bing":           {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
+    "brave":          {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
+    "duckduckgo":     {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
+    "google":         {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
+    "yahoo":          {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
+    "toutiao":        {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":["like_count","comment_count","share_count","read_count"],"secondaryColumns":["source","publish_time","type"],"titleContextFrom":["summary"],"nativeSort":null},
+    "weixin":         {"cmd":"sougousearch","dimensions":["general","blogs"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":["account","publish_time"],"titleContextFrom":["summary"],"nativeSort":null},
+    "yandex":         {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
+    "so":             {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
+    "sogou":          {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
+    "52pojie":        {"cmd":"search","dimensions":["general","it"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
     "hupu":           {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":["lights","replies"],"secondaryColumns":["forum","author"],"titleContextFrom":[],"nativeSort":{"flag":"--sort","value":"light"},"quirks":["choices-empty-untrusted"]},
     "google-scholar": {"cmd":"search","dimensions":["science","scientific publications"],"urlColumn":"url","titleColumn":"title","metricColumns":["cited"],"secondaryColumns":["year","source"],"titleContextFrom":[],"nativeSort":null},
     "baidu-scholar":  {"cmd":"search","dimensions":["science","scientific publications"],"urlColumn":"url","titleColumn":"title","metricColumns":["cited"],"secondaryColumns":["year","journal"],"titleContextFrom":[],"nativeSort":null},
     "wanfang":        {"cmd":"search","dimensions":["science","scientific publications"],"urlColumn":"url","titleColumn":"title","metricColumns":["cited"],"secondaryColumns":["year","source","type"],"titleContextFrom":[],"nativeSort":null}
   },
   "tier3": {
+    "reuters":        {"cmd":"search","dimensions":["news"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":["date","section","authors"],"titleContextFrom":[],"nativeSort":null},
     "zhihu":          {"cmd":"search","dimensions":["general","q&a"],"urlColumn":"url","titleColumn":"title","metricColumns":["votes"],"secondaryColumns":["type","author"],"titleContextFrom":[],"nativeSort":null},
+    "gitlab":         {"cmd":"search","dimensions":["repos"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
+    "csdn":           {"cmd":"search","dimensions":["it","blogs"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
+    "threads":        {"cmd":"search","dimensions":["social media"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
     "weread-official":{"cmd":"search","dimensions":["books"],"urlColumn":"link","titleColumn":"title","metricColumns":["rating","readingCount"],"secondaryColumns":["author","category"],"titleContextFrom":["intro"],"nativeSort":null,"limitFlag":"--count","quirks":["weread-api-key"]},
     "medium":         {"cmd":"search","dimensions":["blogs"],"urlColumn":"url","titleColumn":"title","metricColumns":["claps"],"secondaryColumns":["date","readTime"],"titleContextFrom":[],"nativeSort":null},
     "linux-do":       {"cmd":"search","dimensions":["it"],"urlColumn":"url","titleColumn":"title","metricColumns":["views","likes","replies"],"secondaryColumns":[],"titleContextFrom":[],"nativeSort":null},
     "twitter":        {"cmd":"search","dimensions":["social media"],"urlColumn":"url","titleColumn":null,"titleFrom":["text"],"metricColumns":["likes","views"],"secondaryColumns":["created_at","author"],"titleContextFrom":[],"nativeSort":{"flag":"--top-by-engagement","value":"30"},"quirks":["twitter-no-title-column"]},
     "reddit":         {"cmd":"search","dimensions":["social media"],"urlColumn":"url","titleColumn":"title","metricColumns":["score","comments"],"secondaryColumns":["subreddit","created_utc"],"titleContextFrom":[],"nativeSort":{"flag":"--sort","value":"top"},"quirks":["choices-empty-untrusted"]},
     "jike":           {"cmd":"search","dimensions":["social media"],"urlColumn":"url","titleColumn":null,"titleFrom":["content"],"metricColumns":["likes","comments"],"secondaryColumns":["time","author"],"titleContextFrom":[],"nativeSort":null,"quirks":["jike-no-title-column"]},
+    "tieba":          {"cmd":"search","dimensions":["general","social media"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":["forum","author","time"],"titleContextFrom":[],"nativeSort":null},
+    "weibo":          {"cmd":"search","dimensions":["general","social media"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":["author","time"],"titleContextFrom":[],"nativeSort":null},
     "xiaohongshu":    {"cmd":"search","dimensions":["general","social media"],"urlColumn":"url","titleColumn":"title","metricColumns":["likes"],"secondaryColumns":["published_at","author"],"titleContextFrom":[],"nativeSort":null},
     "rednote":        {"cmd":"search","dimensions":["general","social media"],"urlColumn":"url","titleColumn":"title","metricColumns":["likes"],"secondaryColumns":["published_at","author"],"titleContextFrom":[],"nativeSort":null},
     "1point3acres":   {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":["views","replies"],"secondaryColumns":["forum","postTime"],"titleContextFrom":[],"nativeSort":null},
@@ -223,15 +242,21 @@ weread-official 的 `cover`、rednote 的 `author_url`。它们不是正文，�
 
 ### 查询参数白名单（§6.3 第三条规则）
 
-`queryParamAllowlist` 按 host 声明**保留**哪些查询参数，其余全去。`"*"` 是兜底（默认全去）。
+`queryParamAllowlist` 按 host 声明**已确认可安全保留**的身份参数；只有精确命中 host 时才启用。
+未声明的站点默认保留业务参数，只删除 `utm_*` / `fbclid` / `gclid` 等明确追踪参数和敏感参数。
+历史 `"*"` 项不作为兜底使用，保留仅为兼容已有声明格式。
+
+敏感参数按上下文识别：对象存储签名、OAuth callback 等已确认的能力参数同时从去重身份和
+公开 URL 删除，因此轮换签名仍能归并到同一资源；普通 `policy=privacy` / `policy=terms`
+没有签名上下文，必须作为业务身份参数保留，不能误合并。
 
 失败方向与正文列白名单**相反**，必须记准：
 
 - 正文列白名单漏一个 → 少一个字段（安全侧）
-- 参数白名单**多留**一个 → 少一次合并，退化为两条候选（安全侧）
-- 参数白名单**漏删**一个 → 误判为两条不同资源，**丢一次双通道命中**（危险侧，且低估核心指标）
+- 多留一个参数 → 少一次合并，退化为两条候选（安全侧）
+- 误删一个业务参数 → 把两个不同资源合并，制造**伪双通道命中**（危险侧）
 
-因此这里的默认必须是「全去」而非「全留」。
+因此未知站点必须默认保留业务参数；只有已确认站点才按白名单收敛。
 
 ### 移动子域白名单（§6.3 第二条规则）
 
