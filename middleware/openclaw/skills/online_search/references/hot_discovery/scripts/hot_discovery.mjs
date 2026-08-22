@@ -44,12 +44,13 @@
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
-import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { createBycliIntegration, deriveExecutionProfile } from './bycli_integration.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ADAPTERS_MD = resolve(HERE, '..', 'adapters.md');
+const BYCLI_BASELINE_VERSION = '2.1.38';
 
 /** titleContext 硬上限（字符 = UTF-16 码元，不是字节） */
 const TITLE_CONTEXT_MAX = 100;
@@ -67,10 +68,8 @@ const KNOWN_QUIRKS = new Set([
 // 基础四条（去 utm_* / 末尾斜杠 / http→https / fragment）实测对 6 种真实形态只对齐 1 种。
 // 补三条：去 www. / 移动子域按白名单归一 / 查询参数按白名单保留。
 //
-// 注意参数白名单的失败方向与正文列白名单相反：
-//   多留一个参数 → 少一次合并（安全，退化为两条候选）
-//   漏删一个参数 → 误判为两条不同资源，丢一次双通道命中（危险，且低估核心指标）
-// 所以默认是「全去」。
+// 站点有显式参数白名单时只保留身份参数；未知站点默认保留业务参数，只删除明确的追踪参数。
+// 多留参数最多造成漏合并，误删业务参数却会把不同资源合并成伪双通道，因此默认走安全侧。
 //
 // 【不解决】等价路径变体（/tree/master）。判定两个路径是否同一资源需要站点语义，
 // 无通用规则，且尝试对齐反有误合并风险（/tree/v1 与 /tree/v2 是不同内容）。已知缺口。
@@ -88,11 +87,10 @@ export function normalizeUrl(raw, cfg = {}) {
   }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
 
-  u.protocol = 'https:';        // 规则 3
+  if (!u.port) u.protocol = 'https:'; // 规则 3；非默认端口不改协议，避免改变资源身份
   u.hash = '';                  // 规则 4
   u.username = '';
   u.password = '';
-  u.port = '';
 
   let host = u.hostname.toLowerCase();
   // 规则 6：移动子域按白名单归一，不用 m.* 通配 —— 个别站点 m. 是独立内容
@@ -101,10 +99,38 @@ export function normalizeUrl(raw, cfg = {}) {
   host = host.replace(/^www\./, '');
   u.hostname = host;
 
-  // 规则 7：查询参数按白名单保留，其余全去（含 utm_*，规则 1 被它覆盖）
-  const allow = new Set(paramAllow[host] ?? paramAllow['*'] ?? []);
+  // 规则 7：已声明站点按白名单保留身份参数；未知站点只删除明确追踪参数。
+  const hasExactAllowlist = Object.prototype.hasOwnProperty.call(paramAllow, host);
+  const allow = new Set(hasExactAllowlist ? paramAllow[host] : []);
+  const isTrackingParam = (key) => /^utm_/i.test(key)
+    || ['fbclid', 'gclid', 'dclid', 'msclkid'].includes(key.toLowerCase());
+  const canonicalKeys = new Set([...u.searchParams.keys()]
+    .map((key) => key.toLowerCase().replace(/[^a-z0-9]/g, '')));
+  const hasSigningContext = [...canonicalKeys].some((key) =>
+    /^(xamz|xgoog)/.test(key)
+    || /(signature|credential|securitytoken|keypairid)$/.test(key) || key === 'sig');
+  const hasOauthContext = canonicalKeys.has('code')
+    && (canonicalKeys.has('iss') || canonicalKeys.has('state') || /(?:oauth|callback)/i.test(u.pathname));
+  const isSensitiveParam = (key) => {
+    const canonicalKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (/^(xamz|xgoog)/.test(canonicalKey)) return true;
+    if (canonicalKey === 'code') return hasOauthContext;
+    if (canonicalKey === 'state') return hasOauthContext;
+    if (canonicalKey === 'policy') return hasSigningContext;
+    if (hasSigningContext
+      && [
+        'expires', 'keypairid', 'rscc', 'rscd', 'rsce', 'rscl', 'rsct',
+        'saoid', 'scid', 'se', 'sip', 'ske', 'skoid', 'sks', 'skt', 'sktid', 'skv',
+        'sp', 'spr', 'sr', 'st', 'suoid', 'sv',
+      ].includes(canonicalKey)) {
+      return true;
+    }
+    return ['auth', 'jwt', 'key', 'sig'].includes(canonicalKey)
+      || /(token|secret|signature|credential|password|passwd|authorization|cookie|session|sessionid|apikey|accesskey|accesskeyid|keypairid)$/.test(canonicalKey);
+  };
   const kept = [...u.searchParams.entries()]
-    .filter(([k]) => allow.has(k))
+    .filter(([k]) => !isSensitiveParam(k)
+      && (hasExactAllowlist ? allow.has(k) : !isTrackingParam(k)))
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));   // 顺序无关
   u.search = '';
   for (const [k, v] of kept) u.searchParams.append(k, v);
@@ -176,7 +202,8 @@ export function parseBycliErrorCode(stderr) {
  * exit 75 同码两义：github 的 RATE_LIMITED 与微信登录 TIMEOUT 共用它。分派必须同时读
  * error.code —— 只看码会把限流误判为「等待登录」而进入错误的等待分支。
  */
-export function classifyFailure(exitCode, errorCode) {
+export function classifyFailure(exitCode, errorCode, timedOut = false) {
+  if (timedOut) return 'timeout';
   if (errorCode === 'AUTH_REQUIRED') return 'auth_required';
   if (errorCode === 'BROWSER_CONNECT') return 'bridge_unavailable';
   if (errorCode === 'RATE_LIMITED') return 'rate_limited';
@@ -192,28 +219,14 @@ export function classifyFailure(exitCode, errorCode) {
   }
 }
 
-function run(cmd, args, timeoutMs = 60_000) {
-  return new Promise((res) => {
-    execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 },
-      (err, stdout, stderr) => {
-        res({
-          code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
-          stdout: stdout || '',
-          stderr: stderr || '',
-          killed: Boolean(err && err.killed),
-        });
-      });
-  });
-}
-
-/** bycli list -f json —— 站点/命令/列名的运行时校验依据 */
-async function loadBycliCatalog() {
-  const r = await run('bycli', ['list', '-f', 'json'], 120_000);
-  if (r.code !== 0) throw new Error(`bycli list 失败 (exit ${r.code}): ${r.stderr.slice(0, 300)}`);
-  const rows = JSON.parse(r.stdout);
-  const map = new Map();
-  for (const c of rows) map.set(`${c.site}/${c.name}`, c);
-  return map;
+export function bridgeFailureStats(tier, result) {
+  return {
+    tier,
+    status: result.timedOut ? 'timeout' : 'bridge_unavailable',
+    exitCode: result.code,
+    ...(result.killed ? { killed: true } : {}),
+    ...(result.rawErrorCode ? { rawErrorCode: result.rawErrorCode } : {}),
+  };
 }
 
 // ───────────────────────── 白名单取列（★ 边界的实现点）─────────────────────────
@@ -234,6 +247,11 @@ const isScalar = (v) => v === null || ['string', 'number', 'boolean'].includes(t
  */
 export function extractCandidate(row, spec, stats) {
   const note = (k) => { stats[k] = (stats[k] || 0) + 1; };
+
+  if (!row || typeof row !== 'object' || Array.isArray(row)) {
+    note('row_shape_unexpected');
+    return null;
+  }
 
   // 嵌套探测覆盖整行：即使嵌套字段不在白名单里，也要记账（juejin 的 extra 即此例），
   // 这样声明漂移到把嵌套列纳入白名单时能立刻看见。
@@ -334,27 +352,88 @@ function rerank(cands, spec) {
   return sorted;
 }
 
+export function parseBoundedInteger(raw, name, defaultValue, min, max) {
+  if (raw === undefined) return defaultValue;
+  const value = typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN;
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`${name} 必须是 ${min}–${max} 的整数`);
+  }
+  return value;
+}
+
+export function parseTiers(raw) {
+  const input = raw === undefined ? '1,2,3' : raw;
+  if (typeof input !== 'string') {
+    throw new Error('tiers 必须是 1、2、3 的不重复逗号分隔列表');
+  }
+  const parts = input.split(',').map((part) => part.trim());
+  const values = parts.map(Number);
+  if (!parts.length || parts.some((part) => !part)
+    || values.some((value) => !Number.isInteger(value) || value < 1 || value > 3)
+    || new Set(values).size !== values.length) {
+    throw new Error('tiers 必须是 1、2、3 的不重复逗号分隔列表');
+  }
+  return new Set(values);
+}
+
+export function selectAdaptersForDimensions(adapters, dimensions, tiers) {
+  const selected = adapters.filter(
+    (adapter) => tiers.has(adapter.tier)
+      && adapter.dimensions.some((dimension) => dimensions.includes(dimension)),
+  );
+  const covered = new Set(selected.flatMap((adapter) => adapter.dimensions));
+  const uncovered = dimensions.filter((dimension) => !covered.has(dimension));
+  const warnings = uncovered.length
+    ? [`维度 [${uncovered.join(', ')}] 在所选 tiers 中无热度适配器覆盖`]
+    : [];
+  if (!selected.length) warnings.push('所选维度与 tiers 没有可运行的热度适配器');
+  return { selected, warnings };
+}
+
+export function allSelectedAdaptersEmpty(selected, adapterStats) {
+  return selected.length > 0
+    && selected.every((adapter) => adapterStats[adapter.site]?.status === 'ok_empty');
+}
+
 // ──────────────────────────── search 子命令 ────────────────────────────
 
-async function cmdSearch(argv) {
+export async function searchHotDiscovery(argv, options = {}) {
   const query = argv.query;
   if (!query) fail('search 需要 --query');
   const dims = (argv.dimensions || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (!dims.length) fail('search 需要 --dimensions（多维度取并集，不择一）');
-  const limit = Number(argv.limit || 20);
-  const tiers = new Set((argv.tiers || '1,2,3').split(',').map(Number));
+  const limit = parseBoundedInteger(argv.limit, 'limit', 20, 1, 100);
+  const tiers = parseTiers(argv.tiers);
 
-  const decl = parseDeclarations(await readFile(ADAPTERS_MD, 'utf8'));
-  const catalog = await loadBycliCatalog();
+  const decl = options.declarations || parseDeclarations(await readFile(ADAPTERS_MD, 'utf8'));
+  const bycli = options.bycli || createBycliIntegration();
 
   // 维度取并集：各维度适配器的召回集本就不重叠（openalex 出论文、SO 出技术问答、
   // 虎扑出讨论帖），择一等于人为砍掉召回。
-  const selected = decl.adapters.filter(
-    (a) => tiers.has(a.tier) && a.dimensions.some((d) => dims.includes(d)));
+  const { selected, warnings } = selectAdaptersForDimensions(decl.adapters, dims, tiers);
 
   const adapterStats = {};
-  const warnings = [];
   const candidates = [];
+  if (!selected.length) {
+    return {
+      channel: 'hot_discovery',
+      query,
+      dimensions: dims,
+      observedAt: new Date().toISOString(),
+      bycliVersion: null,
+      adaptersSelected: 0,
+      candidates,
+      adapterStats,
+      warnings,
+    };
+  }
+  const runtime = await bycli.loadRuntime({ baselineVersion: BYCLI_BASELINE_VERSION });
+  const { catalog, compatibility } = runtime;
+  if (compatibility.status !== 'compatible') {
+    warnings.push(compatibility.status === 'version_drift'
+      ? `bycli 版本 ${compatibility.currentVersion} 与声明基线 ${compatibility.baselineVersion} 不同；已按运行时目录校验，请复核策略和错误协议`
+      : '无法读取 bycli 版本；已按运行时目录校验，但无法确认协议基线');
+  }
 
   // ── 预校验：bycli list 能校验站点/命令存在，也能比对声明的列名是否出现在 columns 里。
   // 不一致即说明声明已过期，在跑 search 之前就告警 —— 比事后发现字段缺失更早。
@@ -374,11 +453,8 @@ async function cmdSearch(argv) {
     if (drifted.length) {
       warnings.push(`${a.site}: 声明的列 [${drifted.join(', ')}] 不在 bycli columns 中 —— 声明已漂移`);
     }
-    // 声明的 strategy/browser 档位与实际不符也要报（weread-official 就是这样被发现的）
-    const actualTier = meta.strategy === 'cookie' ? 3 : (meta.browser ? 2 : 1);
-    if (actualTier !== a.tier) {
-      warnings.push(`${a.site}: 声明在档 ${a.tier}，实际 strategy=${meta.strategy} browser=${meta.browser} → 档 ${actualTier}`);
-    }
+    // access tier 是本地的凭据/调用策略，浏览器传输方式必须以 bycli 运行时元数据为准。
+    const execution = deriveExecutionProfile(meta);
     // 限量参数名校验：bycli list 的 args[].name 是不带 -- 的裸名。
     // 校验失败必须整条跳过而不是照发 —— 未知选项会让适配器以 exit 1 失败，
     // 掩盖真实的 auth_required / rate_limited 状态。
@@ -389,7 +465,7 @@ async function cmdSearch(argv) {
       warnings.push(`${a.site}: 声明的限量参数 ${limitFlag} 不在该命令选项中（可用：${[...optNames].join(', ') || '无'}）—— 已跳过，请更正 adapters.md 的 limitFlag`);
       continue;
     }
-    runnable.push({ ...a, limitFlag, meta, driftedColumns: drifted });
+    runnable.push({ ...a, limitFlag, meta, execution, driftedColumns: drifted });
   }
 
   const buildArgs = (a) => {
@@ -404,18 +480,38 @@ async function cmdSearch(argv) {
     return args;
   };
 
+  let requiresUserAction = null;
+  const markSkippedForUserAction = (a) => {
+    if (!adapterStats[a.site]) {
+      adapterStats[a.site] = { tier: a.tier, transport: a.execution.transport, status: 'skipped_user_action' };
+    }
+  };
   const invoke = async (a) => {
-    const r = await run('bycli', buildArgs(a), a.tier === 1 ? 60_000 : 120_000);
-    const st = { tier: a.tier, exitCode: r.code };
+    if (requiresUserAction) {
+      markSkippedForUserAction(a);
+      return;
+    }
+    const r = await bycli.invoke('bycli', buildArgs(a), a.tier === 1 ? 60_000 : 120_000);
+    const st = { tier: a.tier, transport: a.execution.transport, exitCode: r.code };
     if (a.driftedColumns.length) st.driftedColumns = a.driftedColumns;
 
     if (r.code !== 0) {
       const errCode = parseBycliErrorCode(r.stderr);
-      st.status = classifyFailure(r.code, errCode);
+      st.status = classifyFailure(r.code, errCode, r.timedOut);
       st.errorCode = errCode;
+      if (r.killed) st.killed = true;
+      if (r.rawErrorCode) st.rawErrorCode = r.rawErrorCode;
       // 不兜底、不重试、不降级、不改参数 —— 记入 adapterStats 后跳过。
       // 跳过时不得顺手清理该适配器的浏览器 session（可能停在 login/SSO/MFA 状态）。
       adapterStats[a.site] = st;
+      if (['AUTH_REQUIRED', 'BROWSER_CONNECT', 'CAPTCHA', 'RATE_LIMITED', 'ENVIRONMENT_VALIDATION'].includes(errCode)) {
+        requiresUserAction = {
+          kind: st.status,
+          source: a.site,
+          errorCode: errCode,
+          message: `${a.site} 需要人工处理；已保留已完成候选并停止未启动的适配器。`,
+        };
+      }
       return;
     }
 
@@ -471,7 +567,7 @@ async function cmdSearch(argv) {
       st[k] = v instanceof Set ? [...v] : v;
     }
     if (st.status === 'ok_empty') {
-      warnings.push(`${a.site}: exit 0 但返回 0 行 —— 可能是关键词无结果，也可能是${a.tier === 3 ? ' cookie session 失效' : '站点改版'}，两者在退出码上不可区分，需人工判断`);
+      warnings.push(`${a.site}: exit 0 但返回 0 行 —— 可能是关键词无结果，也可能是${a.execution.needsBrowser ? '登录态失效' : '站点改版'}，两者在退出码上不可区分，需人工判断`);
     }
     if (fieldStats.metric_missing) {
       warnings.push(`${a.site}: ${fieldStats.metric_missing} 行取不到任何声明的热度列 —— 降级为普通候选`);
@@ -482,32 +578,32 @@ async function cmdSearch(argv) {
     if (fieldStats.url_missing) {
       warnings.push(`${a.site}: ${fieldStats.url_missing} 行取不到 urlColumn —— 已丢弃`);
     }
+    if (fieldStats.row_shape_unexpected) {
+      warnings.push(`${a.site}: ${fieldStats.row_shape_unexpected} 行不是对象 —— 已丢弃`);
+    }
     adapterStats[a.site] = st;
   };
 
-  // ── 调度分档
-  // 档 1 并发，但 github 必须摘出来串行：未认证 10 req/min，--scan 默认 30 且
-  // 「one API call each」，与其余适配器同等并发会立刻吃掉配额。
-  const t1 = runnable.filter((a) => a.tier === 1 && !a.quirks.includes('github-rate-limit'));
-  const t1Serial = runnable.filter((a) => a.tier === 1 && a.quirks.includes('github-rate-limit'));
-  const t2 = runnable.filter((a) => a.tier === 2);
-  const t3 = runnable.filter((a) => a.tier === 3);
+  // access tier 只决定是否入选；真实浏览器门禁只看 bycli runtime metadata。
+  // 直接传输档按声明顺序执行，确保认证/限流一旦出现就不会再启动后续 adapter。
+  const direct = runnable.filter((a) => !a.execution.needsBrowser);
+  const browser = runnable.filter((a) => a.execution.needsBrowser);
+  for (const a of direct) await invoke(a);
 
-  await Promise.all(t1.map(invoke));
-  for (const a of t1Serial) await invoke(a);      // 限流自控：串行 + 单次会话 1 调用
-
-  // 档 2、3 需浏览器：先过桥接健康检查。整档失败就整档跳过，不逐个重试
-  // （共享 TAB 租约池，逐个试是纯浪费）。
-  if (t2.length || t3.length) {
-    const doc = await run('bycli', ['doctor'], 60_000);
-    if (doc.code !== 0) {
-      for (const a of [...t2, ...t3]) {
-        adapterStats[a.site] = { tier: a.tier, status: 'bridge_unavailable' };
-      }
-      warnings.push(`bycli doctor 失败 (exit ${doc.code}) —— 档 2/3 共 ${t2.length + t3.length} 个整档跳过`);
+  if (!requiresUserAction && browser.length) {
+    const bridge = await bycli.ensureBridge();
+    if (!bridge.ok) {
+      requiresUserAction = bridge.requiresUserAction;
+      for (const a of browser) markSkippedForUserAction(a);
+      warnings.push('byCLI 浏览器桥接不可用；已停止浏览器适配器并等待人工恢复。');
     } else {
-      for (const a of [...t2, ...t3]) await invoke(a);   // 按 TAB 租约串行
+      for (const a of browser) await invoke(a); // TAB 租约串行，认证失败后不再启动后续 adapter
     }
+  } else if (requiresUserAction) {
+    for (const a of browser) markSkippedForUserAction(a);
+  }
+  if (allSelectedAdaptersEmpty(selected, adapterStats)) {
+    warnings.push('热度通道无覆盖 —— 所有已选适配器均返回 0 行');
   }
 
   return {
@@ -516,11 +612,13 @@ async function cmdSearch(argv) {
     dimensions: dims,
     // 热度值是时点观测，跨时间比较无意义。报告引用热度时须一并给出观测时间。
     observedAt: new Date().toISOString(),
-    bycliVersion: (await run('bycli', ['--version'])).stdout.trim(),
+    bycliVersion: compatibility.currentVersion,
+    bycliCompatibility: compatibility,
     adaptersSelected: selected.length,
     candidates,
     adapterStats,
     warnings,
+    ...(requiresUserAction ? { requiresUserAction } : {}),
   };
 }
 
@@ -546,108 +644,317 @@ async function cmdSearch(argv) {
  * 【但下游规则相同】searxngContent 与 titleContext 同样不得写入 collectionFilters、
  * 不得作为 citations 依据、不得进最终报告。它更长，泄漏后果更大。
  */
-function fromSearxng(doc) {
-  const out = [];
-  for (const [i, r] of (doc.results || []).entries()) {
-    if (!r.url) continue;
-    out.push({
+function fromSearxng(doc, queryVerified) {
+  const candidates = [];
+  let invalidRows = 0;
+  const rows = isRecord(doc) && Array.isArray(doc.results) ? doc.results : [];
+  for (const [i, r] of rows.entries()) {
+    if (!isRecord(r) || typeof r.url !== 'string' || !r.url.trim()) {
+      invalidRows += 1;
+      continue;
+    }
+    const engines = typeof r.engine === 'string' ? r.engine.split(',') : ['searxng'];
+    const parsedSources = engines.map((e) => e.trim()).filter(Boolean).map((e) => `searxng:${e}`);
+    const discoveredBy = parsedSources.length ? parsedSources : ['searxng:searxng'];
+    candidates.push({
       url: r.url,
-      title: r.title || '',
-      ...(r.content ? { searxngContent: r.content } : {}),
-      discoveredBy: (r.engine || 'searxng').split(',').map((e) => `searxng:${e.trim()}`),
+      title: typeof r.title === 'string' ? r.title : '',
+      ...(typeof r.content === 'string' && r.content ? { searxngContent: r.content } : {}),
+      discoveredBy,
+      _verifiedDiscoveredBy: queryVerified ? discoveredBy : [],
       relevance: {
-        searxngScore: typeof r.score === 'number' ? r.score : null,
+        searxngScore: typeof r.score === 'number' && Number.isFinite(r.score) ? r.score : null,
         searxngRank: i + 1,
       },
       popularity: null,
       acquisitionRoute: null,
     });
   }
-  return out;
+  return { candidates, invalidRows };
 }
 
-function fromAgentReach(doc) {
-  const rows = Array.isArray(doc) ? doc : (doc.results || doc.candidates || []);
-  return rows.filter((r) => r && r.url).map((r) => ({
-    url: r.url,
-    title: r.title || '',
-    discoveredBy: [r.source ? `agent-reach:${r.source}` : 'agent-reach'],
+function fromAgentReach(doc, queryVerified) {
+  const rows = Array.isArray(doc) ? doc
+    : (isRecord(doc) && Array.isArray(doc.results) ? doc.results
+      : (isRecord(doc) && Array.isArray(doc.candidates) ? doc.candidates : []));
+  const candidates = [];
+  let invalidRows = 0;
+  for (const r of rows) {
+    if (!isRecord(r) || typeof r.url !== 'string' || !r.url.trim()) {
+      invalidRows += 1;
+      continue;
+    }
+    const discoveredBy = [typeof r.source === 'string' && r.source.trim()
+      ? `agent-reach:${r.source.trim()}` : 'agent-reach'];
+    candidates.push({
+      url: r.url,
+      title: typeof r.title === 'string' ? r.title : '',
+      discoveredBy,
+      _verifiedDiscoveredBy: queryVerified ? discoveredBy : [],
+      relevance: null,
+      popularity: null,
+      acquisitionRoute: null,
+    });
+  }
+  return { candidates, invalidRows };
+}
+
+const isRecord = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+
+function scalarMap(value, numbersOnly = false) {
+  if (!isRecord(value)) return {};
+  const entries = [];
+  for (const [key, item] of Object.entries(value)) {
+    if (!key || !isScalar(item) || item === null) continue;
+    if (typeof item === 'number' && !Number.isFinite(item)) continue;
+    if (numbersOnly && typeof item !== 'number') continue;
+    entries.push([key, item]);
+  }
+  return Object.fromEntries(entries);
+}
+
+function sanitizeHotCandidate(candidate, normalizer, queryVerified) {
+  if (!isRecord(candidate) || typeof candidate.url !== 'string' || !normalizer(candidate.url)) return null;
+  if (typeof candidate.title !== 'string' || !candidate.title.trim()) return null;
+
+  const discoveredBy = Array.isArray(candidate.discoveredBy)
+    ? [...new Set(candidate.discoveredBy
+      .filter((v) => typeof v === 'string' && /^bycli:[^:\s]+$/.test(v.trim()))
+      .map((v) => v.trim()))]
+    : [];
+  if (!discoveredBy.length) return null;
+
+  let popularity = null;
+  if (candidate.popularity !== undefined && candidate.popularity !== null) {
+    if (!isRecord(candidate.popularity)
+      || typeof candidate.popularity.source !== 'string' || !candidate.popularity.source.trim()
+      || !discoveredBy.includes(`bycli:${candidate.popularity.source.trim()}`)
+      || typeof candidate.popularity.metric !== 'string' || !candidate.popularity.metric.trim()
+      || typeof candidate.popularity.value !== 'number' || !Number.isFinite(candidate.popularity.value)
+      || !Number.isInteger(candidate.popularity.rankInSource) || candidate.popularity.rankInSource < 1
+      || !Number.isInteger(candidate.popularity.searchWindowSize) || candidate.popularity.searchWindowSize < 1
+      || candidate.popularity.rankInSource > candidate.popularity.searchWindowSize
+      || typeof candidate.popularity.sortedLocally !== 'boolean') {
+      return null;
+    }
+    const metric = candidate.popularity.metric.trim();
+    const allMetrics = Object.fromEntries([
+      ...Object.entries(scalarMap(candidate.popularity.allMetrics, true)),
+      [metric, candidate.popularity.value],
+    ]);
+    const secondary = scalarMap(candidate.popularity.secondary);
+    popularity = {
+      source: candidate.popularity.source.trim(),
+      metric,
+      value: candidate.popularity.value,
+      allMetrics,
+      rankInSource: candidate.popularity.rankInSource,
+      sortedLocally: candidate.popularity.sortedLocally,
+      searchWindowSize: candidate.popularity.searchWindowSize,
+      ...(Object.keys(secondary).length ? { secondary } : {}),
+    };
+  }
+
+  const titleContext = typeof candidate.titleContext === 'string'
+    ? candidate.titleContext.trim().slice(0, TITLE_CONTEXT_MAX) : '';
+  return {
+    url: candidate.url,
+    title: candidate.title.trim(),
+    ...(titleContext ? { titleContext } : {}),
+    discoveredBy,
+    _verifiedDiscoveredBy: queryVerified ? discoveredBy : [],
     relevance: null,
-    popularity: null,
+    popularity,
     acquisitionRoute: null,
-  }));
+  };
 }
 
-async function readJsonIfGiven(p) {
-  if (!p) return null;
-  return JSON.parse(await readFile(p, 'utf8'));
+const ADAPTER_STAT_SCALAR_KEYS = new Set([
+  'tier', 'transport', 'status', 'exitCode', 'errorCode', 'rawErrorCode', 'rows', 'candidates',
+  'sortedLocally', 'killed', 'shape_unexpected', 'row_shape_unexpected',
+  'metric_missing', 'title_missing', 'url_missing',
+]);
+const ADAPTER_STAT_ARRAY_KEYS = new Set(['driftedColumns', 'shapeUnexpectedFields']);
+
+function sanitizeAdapterStats(value) {
+  if (!isRecord(value)) return {};
+  const sites = [];
+  for (const [site, rawStats] of Object.entries(value)) {
+    if (!site || !isRecord(rawStats)) continue;
+    const fields = [];
+    for (const [key, item] of Object.entries(rawStats)) {
+      if (ADAPTER_STAT_SCALAR_KEYS.has(key) && isScalar(item)) {
+        if (typeof item === 'number' && !Number.isFinite(item)) continue;
+        fields.push([key, typeof item === 'string' ? item.slice(0, 300) : item]);
+      } else if (ADAPTER_STAT_ARRAY_KEYS.has(key) && Array.isArray(item)) {
+        fields.push([key, item.filter((v) => typeof v === 'string').slice(0, 100).map((v) => v.slice(0, 200))]);
+      }
+    }
+    sites.push([site, Object.fromEntries(fields)]);
+  }
+  return Object.fromEntries(sites);
 }
 
-async function cmdMerge(argv) {
-  const decl = parseDeclarations(await readFile(ADAPTERS_MD, 'utf8'));
-  const nrm = (u) => normalizeUrl(u, decl);
+export async function readJsonIfGiven(p, label) {
+  if (!p) return { doc: null, warning: null };
+  try {
+    return { doc: JSON.parse(await readFile(p, 'utf8')), warning: null };
+  } catch (e) {
+    return { doc: null, warning: `${label} 读取或解析失败 —— 已忽略该输入：${e.message}` };
+  }
+}
 
-  const hotDoc = await readJsonIfGiven(argv['hot-file']);
-  const sxDoc = await readJsonIfGiven(argv['searxng-file']);
-  const arDoc = await readJsonIfGiven(argv['agent-reach-file']);
-
+export function mergeDocuments({
+  hotDoc, sxDoc, arDoc, normalizer, identityNormalizer = normalizer,
+  groupLimit = 5, searxngLimit = 20,
+  agentReachLimit = 20, unverifiedLimit = 20, unrankedHotLimit = 20, inputWarnings = [],
+}) {
+  const hotProvided = hotDoc !== null && hotDoc !== undefined;
+  const sxProvided = sxDoc !== null && sxDoc !== undefined;
+  const arProvided = arDoc !== null && arDoc !== undefined;
+  const invalidHotDoc = hotProvided && (!isRecord(hotDoc) || !Array.isArray(hotDoc.candidates));
+  const invalidSearxngDoc = sxProvided && (!isRecord(sxDoc) || !Array.isArray(sxDoc.results));
+  const invalidAgentReachDoc = arProvided && !Array.isArray(arDoc)
+    && (!isRecord(arDoc) || (!Array.isArray(arDoc.results) && !Array.isArray(arDoc.candidates)));
+  const hotQuery = !invalidHotDoc && typeof hotDoc?.query === 'string' ? hotDoc.query.trim() : '';
+  const sxQuery = !invalidSearxngDoc && typeof sxDoc?.query === 'string' ? sxDoc.query.trim() : '';
+  const arQuery = !invalidAgentReachDoc && typeof arDoc?.query === 'string' ? arDoc.query.trim() : '';
+  const normalizeQuery = (q) => q.replace(/\s+/g, ' ').toLocaleLowerCase();
+  const canonicalQuery = hotQuery || sxQuery || arQuery;
+  const queryMatches = (query) => Boolean(query && canonicalQuery
+    && normalizeQuery(query) === normalizeQuery(canonicalQuery));
+  const hotQueryMismatch = Boolean(hotQuery && !queryMatches(hotQuery));
+  const sxQueryMismatch = Boolean(sxQuery && !queryMatches(sxQuery));
+  const arQueryMismatch = Boolean(arQuery && !queryMatches(arQuery));
+  const observedAt = !invalidHotDoc && typeof hotDoc?.observedAt === 'string'
+    && Number.isFinite(Date.parse(hotDoc.observedAt))
+    ? hotDoc.observedAt : new Date().toISOString();
+  const adapterStats = invalidHotDoc ? {} : sanitizeAdapterStats(hotDoc?.adapterStats);
+  const hotWarnings = invalidHotDoc || !Array.isArray(hotDoc?.warnings) ? []
+    : hotDoc.warnings.filter((w) => typeof w === 'string').slice(0, 500).map((w) => w.slice(0, 1000));
+  const hotRows = hotDoc && Array.isArray(hotDoc.candidates) ? hotDoc.candidates : [];
+  const hotCandidates = hotRows
+    .map((candidate) => sanitizeHotCandidate(candidate, normalizer, queryMatches(hotQuery)))
+    .filter(Boolean);
+  const invalidHotCandidates = hotRows.length - hotCandidates.length;
+  const sxConverted = !invalidSearxngDoc && sxProvided && !sxQueryMismatch
+    ? fromSearxng(sxDoc, queryMatches(sxQuery)) : { candidates: [], invalidRows: 0 };
+  const arConverted = !invalidAgentReachDoc && arProvided && !arQueryMismatch
+    ? fromAgentReach(arDoc, queryMatches(arQuery)) : { candidates: [], invalidRows: 0 };
   const incoming = [
-    ...(hotDoc ? (hotDoc.candidates || []) : []),
-    ...(sxDoc ? fromSearxng(sxDoc) : []),
-    ...(arDoc ? fromAgentReach(arDoc) : []),
+    ...(!hotQueryMismatch ? hotCandidates : []),
+    ...sxConverted.candidates,
+    ...arConverted.candidates,
   ];
 
   const byKey = new Map();
   let unnormalizable = 0;
   for (const c of incoming) {
-    const key = nrm(c.url);
-    if (!key) { unnormalizable += 1; continue; }
+    const key = identityNormalizer(c.url);
+    const publicUrl = normalizer(c.url);
+    if (!key || !publicUrl) { unnormalizable += 1; continue; }
     const prev = byKey.get(key);
     if (!prev) {
-      byKey.set(key, { ...c, url: key, originalUrls: [c.url] });
+      byKey.set(key, {
+        ...c, url: publicUrl, _dedupKey: key, _popularities: c.popularity ? [c.popularity] : [],
+      });
       continue;
     }
     // 合并 discoveredBy —— 这是「双通道命中」判定的唯一依据
     prev.discoveredBy = [...new Set([...prev.discoveredBy, ...c.discoveredBy])];
-    if (!prev.originalUrls.includes(c.url)) prev.originalUrls.push(c.url);
+    prev._verifiedDiscoveredBy = [...new Set([
+      ...(prev._verifiedDiscoveredBy || []), ...(c._verifiedDiscoveredBy || []),
+    ])];
+    if (c.popularity) prev._popularities.push(c.popularity);
     if (!prev.title && c.title) prev.title = c.title;
     // 两个通道各自的判断依据都保留：字段名不同，不互相覆盖
     if (c.titleContext && !prev.titleContext) prev.titleContext = c.titleContext;
     if (c.searxngContent && !prev.searxngContent) prev.searxngContent = c.searxngContent;
     if (c.relevance && !prev.relevance) prev.relevance = c.relevance;
-    if (c.popularity && !prev.popularity) prev.popularity = c.popularity;
   }
 
   const all = [...byKey.values()];
+  for (const candidate of all) {
+    candidate.discoveredBy.sort();
+    candidate._verifiedDiscoveredBy.sort();
+    const popularityBySourceMetric = new Map();
+    for (const popularity of candidate._popularities) {
+      const key = `${popularity.source}\u0000${popularity.metric}`;
+      const previous = popularityBySourceMetric.get(key);
+      if (!previous || popularity.rankInSource < previous.rankInSource) {
+        popularityBySourceMetric.set(key, popularity);
+      }
+    }
+    const popularities = [...popularityBySourceMetric.values()]
+      .sort((a, b) => a.source.localeCompare(b.source) || a.metric.localeCompare(b.metric));
+    candidate.popularity = popularities[0] || null;
+    if (popularities.length > 1) candidate.popularities = popularities;
+    delete candidate._popularities;
+  }
 
   // ── 分组视图。不做跨平台加权 —— metric 不可比（downloads 8400000 与 citations 1284
   // 放在一起折算是无意义的），所以不造统一热度分。
   const bothChannels = all.filter((c) => {
-    const chans = new Set(c.discoveredBy.map((d) => d.split(':')[0]));
-    return chans.size > 1;
+    const sources = c._verifiedDiscoveredBy || [];
+    const hasHot = sources.some((source) => source.startsWith('bycli:'));
+    const hasRelevant = sources.some((source) => source.startsWith('searxng:')
+      || source === 'agent-reach' || source.startsWith('agent-reach:'));
+    return Boolean(c.popularity && hasHot && hasRelevant);
   });
-  const bothSet = new Set(bothChannels.map((c) => c.url));
+  const bothSet = new Set(bothChannels.map((c) => c._dedupKey));
+  for (const candidate of all) {
+    const verified = [...new Set(candidate._verifiedDiscoveredBy || [])].sort();
+    const verifiedSet = new Set(verified);
+    const unverified = candidate.discoveredBy.filter((source) => !verifiedSet.has(source)).sort();
+    candidate.discoveredBy = verified;
+    if (unverified.length) candidate.unverifiedDiscoveredBy = unverified;
+    delete candidate._verifiedDiscoveredBy;
+  }
 
   const searxngTop = all
-    .filter((c) => c.relevance && !bothSet.has(c.url))
+    .filter((c) => c.relevance && !bothSet.has(c._dedupKey)
+      && c.discoveredBy.some((source) => source.startsWith('searxng:')))
     .sort((a, b) => (a.relevance.searxngRank || 1e9) - (b.relevance.searxngRank || 1e9));
+  const agentReachTop = all.filter((c) => !bothSet.has(c._dedupKey)
+    && !c.discoveredBy.some((source) => source.startsWith('searxng:'))
+    && c.discoveredBy.some((source) => source === 'agent-reach' || source.startsWith('agent-reach:')));
+  const hotWithoutPopularity = all.filter((c) => !bothSet.has(c._dedupKey) && !c.popularity
+    && c.discoveredBy.some((source) => source.startsWith('bycli:'))
+    && !c.discoveredBy.some((source) => source.startsWith('searxng:')
+      || source === 'agent-reach' || source.startsWith('agent-reach:')));
+  const unverified = all.filter((c) => c.discoveredBy.length === 0);
 
-  const K = Number(argv['group-limit'] || 5);   // 避免高产来源淹没其他来源
-  const bySource = {};
+  const bySource = new Map();
   for (const c of all) {
-    if (!c.popularity || bothSet.has(c.url)) continue;
-    (bySource[c.popularity.source] ||= []).push(c);
+    if (!c.popularity || bothSet.has(c._dedupKey)
+      || !c.discoveredBy.some((source) => source.startsWith('bycli:'))) continue;
+    const popularities = c.popularities || [c.popularity];
+    const bestPopularityBySource = new Map();
+    for (const popularity of popularities) {
+      const previous = bestPopularityBySource.get(popularity.source);
+      if (!previous || popularity.rankInSource < previous.rankInSource
+        || (popularity.rankInSource === previous.rankInSource
+          && popularity.metric.localeCompare(previous.metric) < 0)) {
+        bestPopularityBySource.set(popularity.source, popularity);
+      }
+    }
+    for (const popularity of bestPopularityBySource.values()) {
+      if (!c.discoveredBy.includes(`bycli:${popularity.source}`)) continue;
+      const sourceRows = bySource.get(popularity.source) || [];
+      const groupedCandidate = { ...c, popularity };
+      delete groupedCandidate._dedupKey;
+      sourceRows.push(groupedCandidate);
+      bySource.set(popularity.source, sourceRows);
+    }
   }
-  const hotBySource = {};
-  for (const [src, arr] of Object.entries(bySource)) {
-    hotBySource[src] = arr
+  const hotBySource = Object.fromEntries([...bySource.entries()].map(([src, arr]) => [src, arr
       .sort((a, b) => (a.popularity.rankInSource || 1e9) - (b.popularity.rankInSource || 1e9))
-      .slice(0, K);
-  }
+      .slice(0, groupLimit)]));
+  for (const candidate of all) delete candidate._dedupKey;
 
   return {
-    observedAt: hotDoc?.observedAt || new Date().toISOString(),
-    query: hotDoc?.query || sxDoc?.query || null,
+    observedAt,
+    query: canonicalQuery || null,
     totals: {
       incoming: incoming.length,
       afterDedup: all.length,
@@ -657,18 +964,74 @@ async function cmdMerge(argv) {
     },
     groups: {
       bothChannels,                      // 最高优先级：既被多引擎相关性捞到，又在垂直平台高热
-      searxngTop: searxngTop.slice(0, Number(argv['searxng-limit'] || 20)),
+      searxngTop: searxngTop.slice(0, searxngLimit),
+      agentReachTop: agentReachTop.slice(0, agentReachLimit),
       hotBySource,
+      hotWithoutPopularity: hotWithoutPopularity.slice(0, unrankedHotLimit),
+      unverified: unverified.slice(0, unverifiedLimit),
     },
-    adapterStats: hotDoc?.adapterStats || {},
+    adapterStats,
     warnings: [
-      ...(hotDoc?.warnings || []),
-      ...(sxDoc ? [] : ['searxng 通道缺失 —— 热度结果仍可用，但相关性通道未参与']),
+      ...inputWarnings.filter((w) => typeof w === 'string'),
+      ...hotWarnings,
+      ...(sxProvided ? [] : ['searxng 通道缺失 —— 热度结果仍可用，但相关性通道未参与']),
+      ...(invalidHotDoc ? ['hot-file 结构无效 —— 已忽略该通道'] : []),
+      ...(invalidSearxngDoc ? ['searxng-file 结构无效 —— 已忽略该通道'] : []),
+      ...(invalidAgentReachDoc ? ['agent-reach-file 结构无效 —— 已忽略该通道'] : []),
+      ...(sxQueryMismatch ? ['查询不一致 —— 已隔离 searxng 通道，禁止跨快照合并'] : []),
+      ...(arQueryMismatch ? ['查询不一致 —— 已隔离 agent-reach 通道，禁止跨快照合并'] : []),
+      ...(!invalidHotDoc && hotDoc !== null && hotDoc !== undefined && !hotQuery
+        ? ['hot-file 缺少 query —— 候选保留但不参与双通道命中'] : []),
+      ...(!invalidSearxngDoc && sxDoc !== null && sxDoc !== undefined && !sxQuery
+        ? ['searxng-file 缺少 query —— 候选保留但不参与双通道命中'] : []),
+      ...(!invalidAgentReachDoc && arDoc !== null && arDoc !== undefined && !arQuery
+        ? ['agent-reach-file 缺少 query —— 候选保留但不参与双通道命中'] : []),
+      ...(invalidHotCandidates
+        ? [`hot-file 有 ${invalidHotCandidates} 条候选不符合 schema，已丢弃`] : []),
+      ...(sxConverted.invalidRows
+        ? [`searxng-file 有 ${sxConverted.invalidRows} 行不符合 schema，已丢弃`] : []),
+      ...(arConverted.invalidRows
+        ? [`agent-reach-file 有 ${arConverted.invalidRows} 行不符合 schema，已丢弃`] : []),
       ...(unnormalizable ? [`${unnormalizable} 条 URL 无法规范化，已丢弃`] : []),
     ],
     // 已知缺口：等价路径变体（/tree/master 与仓库根）不对齐，无通用规则可判同一资源
     knownGaps: ['equivalent-path-variants-not-merged'],
   };
+}
+
+async function cmdMerge(argv) {
+  const decl = parseDeclarations(await readFile(ADAPTERS_MD, 'utf8'));
+  const normalizer = (u) => normalizeUrl(u, decl);
+  const identityNormalizer = (u) => normalizeUrl(u, decl);
+  const [hotInput, sxInput, arInput] = await Promise.all([
+    readJsonIfGiven(argv['hot-file'], 'hot-file'),
+    readJsonIfGiven(argv['searxng-file'], 'searxng-file'),
+    readJsonIfGiven(argv['agent-reach-file'], 'agent-reach-file'),
+  ]);
+  const groupLimit = parseBoundedInteger(argv['group-limit'], 'group-limit', 5, 1, 100);
+  const searxngLimit = parseBoundedInteger(argv['searxng-limit'], 'searxng-limit', 20, 1, 1000);
+  const agentReachLimit = parseBoundedInteger(
+    argv['agent-reach-limit'], 'agent-reach-limit', 20, 1, 1000,
+  );
+  const unverifiedLimit = parseBoundedInteger(
+    argv['unverified-limit'], 'unverified-limit', 20, 1, 1000,
+  );
+  const unrankedHotLimit = parseBoundedInteger(
+    argv['unranked-hot-limit'], 'unranked-hot-limit', 20, 1, 1000,
+  );
+  return mergeDocuments({
+    hotDoc: hotInput.doc,
+    sxDoc: sxInput.doc,
+    arDoc: arInput.doc,
+    normalizer,
+    identityNormalizer,
+    groupLimit,
+    searxngLimit,
+    agentReachLimit,
+    unverifiedLimit,
+    unrankedHotLimit,
+    inputWarnings: [hotInput.warning, sxInput.warning, arInput.warning].filter(Boolean),
+  });
 }
 
 // ──────────────────────────── CLI ────────────────────────────
@@ -696,6 +1059,8 @@ const USAGE = `hot_discovery.mjs — 热度发现通道（只发现 URL 与热�
 
   search --query "<q>" --dimensions a,b [--limit 20] [--tiers 1,2,3]
   merge  --hot-file <f> [--searxng-file <f>] [--agent-reach-file <f>]
+         [--group-limit 5] [--searxng-limit 20] [--agent-reach-limit 20]
+         [--unverified-limit 20] [--unranked-hot-limit 20]
          [--group-limit 5] [--searxng-limit 20]
 
 通用： [--out <file>]  结果同时写入该文件（供 .post-processing-inputs/ 快照）
@@ -707,7 +1072,7 @@ async function main() {
   if (!sub || sub === '--help' || sub === '-h') { process.stdout.write(USAGE); return; }
 
   let result;
-  if (sub === 'search') result = await cmdSearch(argv);
+  if (sub === 'search') result = await searchHotDiscovery(argv);
   else if (sub === 'merge') result = await cmdMerge(argv);
   else fail(`未知子命令 "${sub}"\n${USAGE}`);
 
