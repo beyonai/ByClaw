@@ -109,7 +109,8 @@ node $SKILL/hot_discovery.mjs merge \
 ### 只有榜单、无关键词搜索（6 个维度，第 2 期）
 
 news / blogs / currency / general / social media / software wikis —— 热度字段有，
-但只能榜单 + 本地过滤。虎扑 `search` 是 general 维度唯一的关键词例外。
+但只能榜单 + 本地过滤。`general` 现在有 `hupu`、`toutiao` 等关键词入口；其余多数 general
+适配器仍是普通相关性搜索或需要登录，不能一律视为平台热榜。
 
 ### 完全无免登录热度源（11 个维度，**在 SKILL 层面显式声明不支持**）
 
@@ -119,20 +120,23 @@ news / blogs / currency / general / social media / software wikis —— 热度�
 
 **对这些维度不要调用本通道。**
 
-### 中文 general 主题是弱项
+### 中文 general 主题仍需区分公开热榜与登录渠道
 
-免登录集里覆盖 general 的只有虎扑（偏体育娱乐）。juejin 补上了中文**技术**热度，但：
+公开渠道现在包含虎扑和头条；知乎、微博、贴吧、小红书、即刻等还依赖登录态或浏览器环境。
+`juejin` 补上了中文**技术**热度，但：
 
 - **限技术领域** —— 「AI 发展」的政策、产业、社会面向命中不了
 - **`hot_index` 是累积量** —— `--sort hottest` 实测排出 2023-2024 老文，对「当前热点」是反向的
 
-真正有价值的知乎 `search`（`votes`）需 cookie。**不应制造「有热度数据」的假象。**
+知乎 `search`（`votes`）以及微博、贴吧等社区搜索需按运行时鉴权结果判断；搜索引擎的 `score`
+仍是相关性分数，不能制造「有热度数据」的假象。
 
 ## 措辞纪律（写报告时必须遵守）
 
 > **本通道对外只能称「相关结果中较热」，不得称「平台最热」。**
 
-19 个免登录适配器里只有 3 个有原生热度排序（hupu / juejin / github），**其余 30 个必须本地重排**。
+当前声明的 52 个适配器中有 7 个带原生热度排序（hupu / juejin / github / pixiv / twitter / reddit / youtube），
+**其余 45 个必须本地重排或不提供热度字段**。
 本地重排的样本是平台按相关性返回的前 N 条 —— 平台上真正最高热的那条**可能根本不在这 N 条里**。
 
 因此 `sortedLocally: true` 是常态，`searchWindowSize` 不是边缘字段而是几乎每条候选都要带的

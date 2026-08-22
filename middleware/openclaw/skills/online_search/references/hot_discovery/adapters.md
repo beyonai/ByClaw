@@ -64,10 +64,10 @@
 | 档 | 条件 | 数量 | 调度 |
 | --- | --- | --- | --- |
 | **1** | 无凭据直连优先 | **14** | 顺序执行；认证/限流即停止后续 adapter |
-| **2** | 公开浏览器候选 | **11** | 若运行时需浏览器，先完成桥接健康检查 |
-| **3** | 凭据或高风险候选 | **17** | 运行时按 `strategy/browser` 决定直连或浏览器；鉴权失败即停止后续 adapter |
+| **2** | 公开浏览器候选 | **18** | 若运行时需浏览器，先完成桥接健康检查 |
+| **3** | 凭据或高风险候选 | **20** | 运行时按 `strategy/browser` 决定直连或浏览器；鉴权失败即停止后续 adapter |
 
-## 原生热度排序：19 个免登录里只有 3 个
+## 原生热度排序：当前声明中只有 7 个带原生排序参数
 
 | 适配器 | 参数 | 热度值 | `choices` 是否可信 |
 | --- | --- | --- | --- |
@@ -81,7 +81,7 @@ cookie 档另有 4 个：`pixiv --order popular_d`（`choices` 完整）、`twit
 **实现不得用 `choices` 做参数校验** —— hupu / reddit / youtube 三个的 `choices` 是空数组，
 用它校验会把全部合法值判为非法。只能传值后按退出码判断。
 
-## 其余 30 个必须本地重排
+## 其余 45 个必须本地重排或不提供热度字段
 
 `sortedLocally: true` 是常态。本通道对外只能称「**相关结果中较热**」，不得称「平台最热」——
 重排样本是平台按相关性返回的前 N 条，`searchWindowSize` 必须如实填写。
@@ -127,8 +127,15 @@ weread-official 的 `cover`、rednote 的 `author_url`。它们不是正文，�
   },
   "tier2": {
     "gitee":          {"cmd":"search","dimensions":["repos"],"urlColumn":"url","titleColumn":"name","metricColumns":["stars"],"secondaryColumns":["language"],"titleContextFrom":["description"],"nativeSort":null},
+    "36kr":           {"cmd":"search","dimensions":["it","news"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":["date"],"titleContextFrom":[],"nativeSort":null},
     "baidu":          {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
     "bing":           {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
+    "brave":          {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
+    "duckduckgo":     {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
+    "google":         {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
+    "yahoo":          {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
+    "toutiao":        {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":["like_count","comment_count","share_count","read_count"],"secondaryColumns":["source","publish_time","type"],"titleContextFrom":["summary"],"nativeSort":null},
+    "weixin":         {"cmd":"sougousearch","dimensions":["general","blogs"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":["account","publish_time"],"titleContextFrom":["summary"],"nativeSort":null},
     "yandex":         {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
     "so":             {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
     "sogou":          {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
@@ -139,6 +146,7 @@ weread-official 的 `cover`、rednote 的 `author_url`。它们不是正文，�
     "wanfang":        {"cmd":"search","dimensions":["science","scientific publications"],"urlColumn":"url","titleColumn":"title","metricColumns":["cited"],"secondaryColumns":["year","source","type"],"titleContextFrom":[],"nativeSort":null}
   },
   "tier3": {
+    "reuters":        {"cmd":"search","dimensions":["news"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":["date","section","authors"],"titleContextFrom":[],"nativeSort":null},
     "zhihu":          {"cmd":"search","dimensions":["general","q&a"],"urlColumn":"url","titleColumn":"title","metricColumns":["votes"],"secondaryColumns":["type","author"],"titleContextFrom":[],"nativeSort":null},
     "gitlab":         {"cmd":"search","dimensions":["repos"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
     "csdn":           {"cmd":"search","dimensions":["it","blogs"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":[],"titleContextFrom":["snippet"],"nativeSort":null},
@@ -149,6 +157,8 @@ weread-official 的 `cover`、rednote 的 `author_url`。它们不是正文，�
     "twitter":        {"cmd":"search","dimensions":["social media"],"urlColumn":"url","titleColumn":null,"titleFrom":["text"],"metricColumns":["likes","views"],"secondaryColumns":["created_at","author"],"titleContextFrom":[],"nativeSort":{"flag":"--top-by-engagement","value":"30"},"quirks":["twitter-no-title-column"]},
     "reddit":         {"cmd":"search","dimensions":["social media"],"urlColumn":"url","titleColumn":"title","metricColumns":["score","comments"],"secondaryColumns":["subreddit","created_utc"],"titleContextFrom":[],"nativeSort":{"flag":"--sort","value":"top"},"quirks":["choices-empty-untrusted"]},
     "jike":           {"cmd":"search","dimensions":["social media"],"urlColumn":"url","titleColumn":null,"titleFrom":["content"],"metricColumns":["likes","comments"],"secondaryColumns":["time","author"],"titleContextFrom":[],"nativeSort":null,"quirks":["jike-no-title-column"]},
+    "tieba":          {"cmd":"search","dimensions":["general","social media"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":["forum","author","time"],"titleContextFrom":[],"nativeSort":null},
+    "weibo":          {"cmd":"search","dimensions":["general","social media"],"urlColumn":"url","titleColumn":"title","metricColumns":[],"secondaryColumns":["author","time"],"titleContextFrom":[],"nativeSort":null},
     "xiaohongshu":    {"cmd":"search","dimensions":["general","social media"],"urlColumn":"url","titleColumn":"title","metricColumns":["likes"],"secondaryColumns":["published_at","author"],"titleContextFrom":[],"nativeSort":null},
     "rednote":        {"cmd":"search","dimensions":["general","social media"],"urlColumn":"url","titleColumn":"title","metricColumns":["likes"],"secondaryColumns":["published_at","author"],"titleContextFrom":[],"nativeSort":null},
     "1point3acres":   {"cmd":"search","dimensions":["general"],"urlColumn":"url","titleColumn":"title","metricColumns":["views","replies"],"secondaryColumns":["forum","postTime"],"titleContextFrom":[],"nativeSort":null},

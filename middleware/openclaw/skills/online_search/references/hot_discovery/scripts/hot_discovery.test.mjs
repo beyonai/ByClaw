@@ -933,12 +933,12 @@ test('全部已选适配器 ok_empty 时产生聚合无覆盖信号', () => {
 
 // ═══════════════ 声明表自身的完整性 ═══════════════
 
-test('声明表 42 个适配器，分档 14/11/17', () => {
+test('声明表 52 个适配器，分档 14/18/20', () => {
   const byTier = (t) => decl.adapters.filter((a) => a.tier === t).length;
-  assert.equal(decl.adapters.length, 42);
+  assert.equal(decl.adapters.length, 52);
   assert.equal(byTier(1), 14);
-  assert.equal(byTier(2), 11);
-  assert.equal(byTier(3), 17);
+  assert.equal(byTier(2), 18);
+  assert.equal(byTier(3), 20);
 });
 
 test('实测需要登录或高风险拦截的新适配器归入第三档', () => {
@@ -959,6 +959,30 @@ test('新增九个公共浏览器适配器进入业务路由且不伪造热度',
     assert.equal(adapter.cmd, 'search');
     assert.deepEqual(adapter.metricColumns, [], `${site} 不应把搜索相关性分数当作热度`);
     assert.deepEqual(adapter.titleContextFrom, ['snippet']);
+  }
+});
+
+test('general 补充覆盖公共搜索、内容社区与新闻入口', () => {
+  const bySite = new Map(decl.adapters.map((adapter) => [adapter.site, adapter]));
+  const expected = {
+    brave: { tier: 2, cmd: 'search', dimensions: ['general'] },
+    duckduckgo: { tier: 2, cmd: 'search', dimensions: ['general'] },
+    google: { tier: 2, cmd: 'search', dimensions: ['general'] },
+    yahoo: { tier: 2, cmd: 'search', dimensions: ['general'] },
+    toutiao: { tier: 2, cmd: 'search', dimensions: ['general'] },
+    weixin: { tier: 2, cmd: 'sougousearch', dimensions: ['general', 'blogs'] },
+    tieba: { tier: 3, cmd: 'search', dimensions: ['general', 'social media'] },
+    weibo: { tier: 3, cmd: 'search', dimensions: ['general', 'social media'] },
+    reuters: { tier: 3, cmd: 'search', dimensions: ['news'] },
+    '36kr': { tier: 2, cmd: 'search', dimensions: ['it', 'news'] },
+  };
+
+  for (const [site, shape] of Object.entries(expected)) {
+    const adapter = bySite.get(site);
+    assert.ok(adapter, `${site} 未进入声明表`);
+    assert.equal(adapter.tier, shape.tier, `${site} tier 不正确`);
+    assert.equal(adapter.cmd, shape.cmd, `${site} 命令不正确`);
+    assert.deepEqual(adapter.dimensions, shape.dimensions, `${site} 维度不正确`);
   }
 });
 
