@@ -20,7 +20,7 @@ import styles from './index.module.less';
 import useLocateMsg from './hooks/useLocateMsg';
 
 type IProps = {
-  onNext?: (isPrev?: boolean) => void;
+  onNext?: (isPrev?: boolean) => any;
   messageList: Array<IMessage>;
   hasMore: boolean;
   inverse?: boolean;
@@ -113,9 +113,7 @@ function MessageList(props: IProps, ref: any) {
         >
           <MessageInfiniteScroll
             ref={infiniteScrollRef}
-            next={(isPrev?: boolean) => {
-              onNext?.(isPrev);
-            }}
+            next={(isPrev?: boolean) => onNext?.(isPrev)}
             hasMore={hasMore}
             loader={
               <div className="ub ub-ac ub-pc">

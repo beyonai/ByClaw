@@ -245,4 +245,41 @@ describe('MessageInfiniteScroll', () => {
 
     expect(scroller.scrollTop).toBe(300);
   });
+
+  it('releases the loading lock when a page adds no visible messages', async () => {
+    let resolveRequest: (() => void) | undefined;
+    const next = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRequest = resolve;
+        })
+    );
+    const { ref, scroller } = renderMessageInfiniteScroll({
+      next,
+      hasMore: true,
+      dataLength: 1,
+    });
+
+    setScrollMetrics(scroller, {
+      clientHeight: 200,
+      scrollHeight: 600,
+      scrollTop: 0,
+    });
+
+    act(() => {
+      (ref.current as any).onScrollListener({ target: scroller, isTrusted: true }, 'up');
+      (ref.current as any).onScrollListener({ target: scroller, isTrusted: true }, 'up');
+    });
+    expect(next).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveRequest?.();
+      await Promise.resolve();
+    });
+
+    act(() => {
+      (ref.current as any).onScrollListener({ target: scroller, isTrusted: true }, 'up');
+    });
+    expect(next).toHaveBeenCalledTimes(2);
+  });
 });

@@ -115,8 +115,8 @@ export const fetchMessage = async (param: {
     pageNum: Number(pageNum),
     pageSize: Number(pageSize),
     total: Number(total),
-    // ⚠️ 需要用接口查询出来的list长度来判断，因为cacheList经过了filter
-    hasMore: size(list) >= Number(pageSize),
+    // 使用接口原始列表判断是否满页，cacheList 经过过滤，不能代表后端分页进度。
+    hasMore: size(list) >= Number(pageSize) && Number(pageNum) * Number(pageSize) < Number(total),
   };
 };
 
@@ -240,7 +240,8 @@ export default {
 
         cache = {
           ...res,
-          hasMore: isPrev ? undefined : size(res.list) >= cache.pageSize,
+          // fetchMessage 已根据接口原始列表和总数判断，避免再用过滤后的 res.list 覆盖。
+          hasMore: isPrev ? undefined : res.hasMore,
           list: sortMessagesByTimeline(
             uniqBy(isPrev ? [...cache.list, ...res.list] : [...res.list, ...cache.list], 'messageId')
           ),
