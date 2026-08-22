@@ -1,5 +1,15 @@
-import type { IngressSessionBindingRepository } from "@byclaw/by-conductor";
-import { WorkerRegistry, WorkerRunner } from "@byclaw/by-framework";
+import type {
+  CallbackTimeoutDelivery,
+  IngressSessionBindingRepository,
+  RunExecutionQueue,
+} from "@byclaw/by-conductor";
+import {
+  AgentState,
+  EventType,
+  GatewayDataEmitter,
+  WorkerRegistry,
+  WorkerRunner,
+} from "@byclaw/by-framework";
 import {
   ByClawSuperGatewayWorker,
   type RedisClient,
@@ -14,6 +24,10 @@ export interface ByFrameworkWorkerRuntimeOptions {
   runService: WorkerRunService;
   runIngress: WorkerRunIngress;
   sessionBindings?: IngressSessionBindingRepository;
+  timeoutDeliveries?: Pick<
+    RunExecutionQueue,
+    "claimCallbackTimeoutDeliveries" | "completeCallbackTimeoutDelivery"
+  >;
   agentType: string;
   workerId?: string;
   maxConcurrency: number;
@@ -29,7 +43,12 @@ export class ByFrameworkWorkerRuntime {
   readonly #runner: WorkerRunner;
   readonly #startupTimeoutMs: number;
   readonly #logger: WorkerLogger | undefined;
+  readonly #timeoutDeliveries: ByFrameworkWorkerRuntimeOptions["timeoutDeliveries"];
+  readonly #protocolEmitter: GatewayDataEmitter;
+  readonly #maxConcurrency: number;
   #runPromise: Promise<void> | undefined;
+  #timeoutDeliveryLoop: Promise<void> | undefined;
+  #timeoutDeliveryTimer: ReturnType<typeof setInterval> | undefined;
   #runFailure: Error | undefined;
   #runnerStopped = false;
   #closing = false;
@@ -55,6 +74,9 @@ export class ByFrameworkWorkerRuntime {
     });
     this.#startupTimeoutMs = options.startupTimeoutMs ?? 10_000;
     this.#logger = options.logger;
+    this.#timeoutDeliveries = options.timeoutDeliveries;
+    this.#protocolEmitter = new GatewayDataEmitter(options.redis);
+    this.#maxConcurrency = options.maxConcurrency;
   }
 
   /** 在后台启动消费循环，并等待注册中心确认 Worker 已在线。 */
@@ -87,10 +109,21 @@ export class ByFrameworkWorkerRuntime {
         { workerId: this.workerId, agentType: this.agentType },
         "by-framework Worker 已注册并在线",
       );
+      if (this.#timeoutDeliveries?.claimCallbackTimeoutDeliveries) {
+        this.#timeoutDeliveryTimer = setInterval(() => {
+          void this.#drainTimeoutDeliveries();
+        }, 1_000);
+        this.#timeoutDeliveryTimer.unref?.();
+        void this.#drainTimeoutDeliveries();
+      }
     } catch (error) {
       await this.close();
       throw error;
     }
+  }
+
+  async poll() {
+
   }
 
   /** 查询当前 Worker 是否仍持有在线租约，供 /byclawSuper/ready 聚合。 */
@@ -118,8 +151,13 @@ export class ByFrameworkWorkerRuntime {
       return;
     }
     this.#closing = true;
+    if (this.#timeoutDeliveryTimer) {
+      clearInterval(this.#timeoutDeliveryTimer);
+      this.#timeoutDeliveryTimer = undefined;
+    }
     this.#runner.stop();
     await this.#runPromise?.catch(() => undefined);
+    await this.#timeoutDeliveryLoop?.catch(() => undefined);
     this.#logger?.info(
       { workerId: this.workerId, agentType: this.agentType },
       "by-framework Worker 已停止",
@@ -144,5 +182,90 @@ export class ByFrameworkWorkerRuntime {
     throw new Error(
       `Timed out waiting for by-framework Worker to become online: ${this.workerId}`,
     );
+  }
+
+  /** 领取数据库 Outbox；Redis 发布失败时不确认，租约到期后由任一实例重试。 */
+  async #drainTimeoutDeliveries(): Promise<void> {
+    const store = this.#timeoutDeliveries;
+    if (
+      this.#closing ||
+      this.#timeoutDeliveryLoop ||
+      !store?.claimCallbackTimeoutDeliveries ||
+      !store.completeCallbackTimeoutDelivery
+    ) {
+      return this.#timeoutDeliveryLoop ?? Promise.resolve();
+    }
+    this.#timeoutDeliveryLoop = store
+      .claimCallbackTimeoutDeliveries({
+        instanceId: this.workerId,
+        leaseMs: 30_000,
+        limit: this.#maxConcurrency,
+      })
+      .then(async (deliveries) => {
+        await Promise.allSettled(deliveries.map((delivery) => this.#deliverTimeout(delivery)));
+      })
+      .catch((error) => {
+        this.#logger?.warn(
+          { workerId: this.workerId, error: toError(error).message },
+          "扫描或投递子 Agent 回调超时结果失败，等待数据库租约后重试",
+        );
+      })
+      .finally(() => {
+        this.#timeoutDeliveryLoop = undefined;
+      });
+    return this.#timeoutDeliveryLoop;
+  }
+
+  async #deliverTimeout(delivery: CallbackTimeoutDelivery): Promise<void> {
+    const content =
+      delivery.finalAnswer?.trim() ||
+      delivery.error?.trim() ||
+      "子 Agent 在规定时间内未返回最终结果，本次调度已超时。";
+    const options = {
+      sourceAgentType: this.agentType,
+      messageId: delivery.parentMessageId,
+      metadata: { parent_run_id: delivery.runId, callback_timeout: true },
+    };
+    if (content) {
+      await this.#protocolEmitter.emitChunk(
+        delivery.externalSessionId,
+        delivery.traceId,
+        content,
+        { ...options, eventType: EventType.ANSWER_DELTA },
+      );
+      await this.#protocolEmitter.emitChunk(
+        delivery.externalSessionId,
+        delivery.traceId,
+        content,
+        { ...options, eventType: EventType.FINAL_ANSWER },
+      );
+    }
+    await this.#protocolEmitter.emitChunk(
+      delivery.externalSessionId,
+      delivery.traceId,
+      "",
+      { ...options, eventType: EventType.APP_STREAM_RESPONSE },
+    );
+    const execution = await this.#registry.getExecutionByMessageId(
+      delivery.parentMessageId,
+      delivery.externalSessionId,
+    );
+    if (execution?.execution_id) {
+      const frameworkStatus =
+        delivery.runStatus === "COMPLETED"
+          ? AgentState.COMPLETED
+          : delivery.runStatus === "CANCELLED"
+            ? AgentState.CANCELLED
+            : AgentState.FAILED;
+      await this.#registry.markExecutionFinished(
+        String(execution.execution_id),
+        delivery.externalSessionId,
+        frameworkStatus,
+      );
+    }
+    await this.#timeoutDeliveries?.completeCallbackTimeoutDelivery?.({
+      runId: delivery.runId,
+      instanceId: this.workerId,
+    });
   }
 }

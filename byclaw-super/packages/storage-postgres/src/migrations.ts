@@ -1,6 +1,6 @@
 /**
  * 显式维护数据库版本。迁移只允许向前执行，生产环境由独立 migration job 调用；
- * 应用启动仅检查版本，不会擅自修改 schema。
+ * 应用启动只检查数据库连通性，不校验版本，也不会擅自修改 schema。
  */
 export interface PostgresMigration {
   version: number;
@@ -252,6 +252,30 @@ ALTER TABLE ${POSTGRES_TABLE_PREFIX}delegations
 UPDATE ${POSTGRES_TABLE_PREFIX}delegations
   SET last_activity_at = updated_at
   WHERE started_at IS NOT NULL;
+`,
+  },
+  {
+    version: 11,
+    name: "delegation_callback_deadline",
+    sql: `
+ALTER TABLE ${POSTGRES_TABLE_PREFIX}delegations
+  ADD COLUMN callback_deadline_at timestamptz NULL;
+CREATE INDEX delegations_callback_deadline_idx
+  ON ${POSTGRES_TABLE_PREFIX}delegations(callback_deadline_at)
+  WHERE status = 'RUNNING' AND callback_deadline_at IS NOT NULL;
+
+CREATE TABLE ${POSTGRES_TABLE_PREFIX}callback_timeout_outbox (
+  run_id uuid PRIMARY KEY REFERENCES ${POSTGRES_TABLE_PREFIX}runs(id) ON DELETE CASCADE,
+  claimed_by text NULL,
+  claim_expires_at timestamptz NULL,
+  delivered_at timestamptz NULL,
+  attempt_count integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL
+);
+CREATE INDEX callback_timeout_outbox_pending_idx
+  ON ${POSTGRES_TABLE_PREFIX}callback_timeout_outbox(claim_expires_at, created_at)
+  WHERE delivered_at IS NULL;
 `,
   },
 ] as const;

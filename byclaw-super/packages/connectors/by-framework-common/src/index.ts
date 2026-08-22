@@ -1,16 +1,16 @@
 import {
-  ActionType,
-  EventType,
+  AgentState,
   GatewayClient,
-  QueueNames,
   WorkerRegistry,
   createRedis,
   type RedisConnectionConfig,
-  type SendMessageParams,
 } from "@byclaw/by-framework";
+import {
+  callAgent as frameworkCallAgent,
+  createRedisCallAgentDeps,
+} from "@byclaw/by-framework/dist/dispatch/dispatch_ask_agent.js";
 import type {
   AgentConnector,
-  AgentResult,
   ConnectorCapabilities,
   ConnectorEvent,
   ConnectorExecution,
@@ -19,27 +19,36 @@ import type {
   ExternalExecutionRef,
   JsonValue,
   RunAttachment,
-  UserInteractionResponse,
 } from "@byclaw/by-conductor";
-import {
-  abortError,
-  extractContent,
-  extractContentType,
-  extractDisplayEvent,
-  extractError,
-  extractUserInput,
-  jsonString,
-  parseDataMessage,
-  parseXreadRows,
-  refString,
-  safeDisplayText,
-} from "./by-framework-codec.js";
 
 type RedisClient = ReturnType<typeof createRedis>;
-type GatewayClientLike = Pick<GatewayClient, "sendMessage" | "cancelTask">;
-type WorkerRegistryLike = Pick<WorkerRegistry, "getExecutionByMessageId">;
+type GatewayClientLike = Pick<GatewayClient, "cancelTask">;
 
-const TERMINAL_EXECUTION_STATUSES = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
+export interface ByFrameworkCallAgentInput {
+  sessionId: string;
+  traceId: string;
+  sourceAgentType: string;
+  defaultParentMessageId: string;
+  targetAgentType: string;
+  content: unknown;
+  extraPayload?: Readonly<Record<string, unknown>>;
+  waitForReply?: boolean;
+  userCode?: string;
+  userName?: string;
+  metadata?: Readonly<Record<string, unknown>>;
+  messageId?: string;
+  parentMessageId?: string;
+  routePolicy?: "FAIL_FAST" | "SEND_ANYWAY" | "WAKE_AND_WAIT" | "WAKE_AND_QUEUE" | "QUEUE_ONLY";
+}
+
+export interface ByFrameworkCallAgentResult {
+  status: string;
+  messageId: string;
+  parentMessageId?: string;
+  targetAgentType: string;
+  error?: string;
+  error_code?: string;
+}
 
 export interface ByFrameworkConnectorOptions {
   connectorId: string;
@@ -47,19 +56,8 @@ export interface ByFrameworkConnectorOptions {
   redisOptions?: RedisConnectionConfig;
   redis?: RedisClient;
   gatewayClient?: GatewayClientLike;
-  registry?: WorkerRegistryLike;
-  readBlockMs?: number;
+  callAgent?: (input: ByFrameworkCallAgentInput) => Promise<ByFrameworkCallAgentResult>;
   sourceAgentType?: string;
-  firstEventTimeoutMs?: number;
-  cancelConfirmationTimeoutMs?: number;
-  /**
-   * callback 会让目标 Worker 完成后向 sourceAgentType 发送 Resume；direct 则由目标
-   * Worker 直接在会话流中发送 appStreamResponse。默认保持标准 Agent 回调模式。
-   */
-  agentReturnMode?: "callback" | "direct";
-  /** 仅供 BYCLAW_CODE：把 reasoning 生命周期外的 1002 子会话文本恢复成回答正文。 */
-  promoteOutOfReasoningTextToOutput?: boolean;
-  /** 仅记录结构化链路元数据和脱敏后的内容缩略，不记录凭证或完整请求。 */
   logger?: ByFrameworkConnectorLogger;
 }
 
@@ -69,14 +67,11 @@ export interface ByFrameworkConnectorLogger {
   error(bindings: Record<string, unknown>, message: string): void;
 }
 
-/**
- * 通过 by-framework Gateway/Redis 协议连接目标 Worker。
- * 该类只负责传输适配，授权、超时和业务状态由 by-conductor 处理。
- */
+/** 使用 callAgent 发布任务；终态由 BY_SUPER Worker 的 ResumeCommand 独立恢复 Run。 */
 export class ByFrameworkConnector implements AgentConnector {
   readonly id: string;
   readonly capabilities: ConnectorCapabilities = {
-    streaming: true,
+    streaming: false,
     cancellation: true,
     artifacts: false,
     resumable: true,
@@ -85,141 +80,102 @@ export class ByFrameworkConnector implements AgentConnector {
 
   readonly #redis: RedisClient;
   readonly #client: GatewayClientLike;
-  readonly #registry: WorkerRegistryLike | undefined;
   readonly #ownsRedis: boolean;
-  readonly #readBlockMs: number;
+  readonly #callAgent: (input: ByFrameworkCallAgentInput) => Promise<ByFrameworkCallAgentResult>;
   readonly #sourceAgentType: string;
-  readonly #firstEventTimeoutMs: number | undefined;
-  readonly #cancelConfirmationTimeoutMs: number;
-  readonly #promoteOutOfReasoningTextToOutput: boolean;
   readonly #targetAgentTypeResolver: (request: ConnectorRequest) => string;
   readonly #logger: ByFrameworkConnectorLogger | undefined;
 
-  /** 可注入 Redis 和 GatewayClient 以支持测试；缺省时创建并持有真实连接。 */
   constructor(options: ByFrameworkConnectorOptions) {
     this.id = options.connectorId;
     this.#targetAgentTypeResolver = options.targetAgentTypeResolver;
     this.#redis = options.redis ?? createRedis(options.redisOptions);
     this.#ownsRedis = !options.redis;
-    if (options.gatewayClient) {
-      this.#registry = options.registry;
-      this.#client = options.gatewayClient;
-    } else {
-      const registry = new WorkerRegistry(this.#redis);
-      this.#registry = registry;
-      this.#client = new GatewayClient(registry, this.#redis);
-    }
-    this.#readBlockMs = options.readBlockMs ?? 1_000;
-    this.#sourceAgentType =
-      options.agentReturnMode === "direct" ? "" : options.sourceAgentType ?? "BY_SUPER";
-    this.#firstEventTimeoutMs = options.firstEventTimeoutMs === 0
-      ? undefined
-      : options.firstEventTimeoutMs ?? 300_000;
-    this.#cancelConfirmationTimeoutMs = options.cancelConfirmationTimeoutMs ?? 30_000;
-    this.#promoteOutOfReasoningTextToOutput =
-      options.promoteOutOfReasoningTextToOutput === true;
+    const registry = new WorkerRegistry(this.#redis);
+    this.#client = options.gatewayClient ?? new GatewayClient(registry, this.#redis);
+    this.#callAgent =
+      options.callAgent ??
+      ((input) => frameworkCallAgent(createRedisCallAgentDeps({ redis: this.#redis, registry }), input));
+    this.#sourceAgentType = options.sourceAgentType ?? "BY_SUPER";
     this.#logger = options.logger;
   }
 
-  /**
-   * 为一次委派创建隔离子会话并投递 by-framework 任务。
-   * 返回的执行引用不包含 Beyond-Token，可安全写入后续持久化实现。
-   */
   async start(
     request: ConnectorRequest,
     context: { signal: AbortSignal },
   ): Promise<ConnectorExecution> {
-    if (context.signal.aborted) {
-      throw abortError(context.signal.reason);
-    }
-    // by-framework 入站任务必须沿用 BE 传入的 sessionId。该值同时决定被调用
-    // Agent 的会话空间目录；若继续使用 maestro:* 子会话，会错误落到
-    // /by/.sessions/maestro:.../。HTTP 等非 by-framework 入口仍保留隔离子会话。
+    context.signal.throwIfAborted();
     const childSessionId =
       request.externalSessionId ??
       ["maestro", request.userCode, request.sessionId, request.runId, request.delegationId].join(
         ":",
       );
+    const traceId = request.traceId ?? request.runId;
     const targetAgentType = this.#targetAgentTypeResolver(request);
-    const extraPayload: Record<string, unknown> = {
-      agent_id: request.agent.execution.targetId,
-      agent_name: request.agent.name,
-    };
-    if (request.agent.code) {
-      extraPayload.agent_code = request.agent.code;
-    }
+    // Delegation 根节点由 BY_SUPER 展示；子请求必须使用独立 messageId，避免与根节点
+    // orderId 冲突，同时通过 parentMessageId 把下游思考、工具和输出挂到根节点下。
+    const childRequestMessageId = `${request.delegationId}:request`;
     const metadata: Record<string, unknown> = {
       ...request.metadata,
       parent_run_id: request.runId,
       delegation_id: request.delegationId,
+      ...(request.parentMessageId
+        ? { caller_parent_message_id: request.parentMessageId }
+        : {}),
     };
-    const params: SendMessageParams = {
-      sourceAgentType: this.#sourceAgentType,
-      targetAgentType,
-      sessionId: childSessionId,
-      // 有附件时构造与 byclaw-be 一致的 {text, files} 内容；无附件保持纯字符串。
-      // by-framework 入站 Run 在投递内容末尾声明会话工作区、指明附件在工作区内的读取路径，
-      // 并提示子 agent 落盘位置；该后缀只进入 wire payload，request.task 本身不变
-      //（它是委派幂等/恢复的匹配键）。
-      content: buildByFrameworkContent(
-        withSessionWorkspaceReminder(request.task, request.externalSessionId, request.attachments),
-        request.attachments,
-      ),
-      userCode: request.userCode,
-      ...(request.userName ? { userName: request.userName } : {}),
-      requireOnlineWorker: true,
-      extraPayload,
-      metadata,
-      // 稳定 ID 让外部执行记录可按 Delegation 定位；真正重连仍走 resume，不重复 send。
-      messageId: request.delegationId,
-      traceId: request.delegationId,
-      ...(request.parentMessageId ? { parentMessageId: request.parentMessageId } : {}),
+    const extraPayload: Record<string, unknown> = {
+      agent_id: request.agent.execution.targetId,
+      agent_name: request.agent.name,
+      ...(request.agent.code ? { agent_code: request.agent.code } : {}),
     };
-    const dispatchStartedAt = Date.now();
     const dispatchFields = {
       component: "byclaw-super",
       stage: "child_agent_dispatch",
       connectorId: this.id,
       runId: request.runId,
       sessionId: request.sessionId,
-      ...(request.externalSessionId ? { externalSessionId: request.externalSessionId } : {}),
       delegationId: request.delegationId,
       agentId: request.agent.id,
       agentName: request.agent.name,
-      sourceAgentType: this.#sourceAgentType || "direct",
+      sourceAgentType: this.#sourceAgentType,
       targetAgentType,
       childSessionId,
-      messageId: request.delegationId,
-      traceId: request.delegationId,
+      messageId: childRequestMessageId,
+      traceId,
     };
-    this.#logger?.info(dispatchFields, "准备通过 by-framework 调度子 Agent");
-    let response: Awaited<ReturnType<GatewayClientLike["sendMessage"]>>;
+    const dispatchStartedAt = Date.now();
+    let response: ByFrameworkCallAgentResult;
     try {
-      response = await this.#client.sendMessage(params);
+      this.#logger?.info(dispatchFields, "准备通过 by-framework callAgent 调度子 Agent");
+      response = await this.#callAgent({
+        sessionId: childSessionId,
+        traceId,
+        sourceAgentType: this.#sourceAgentType,
+        defaultParentMessageId: request.delegationId,
+        targetAgentType,
+        content: buildByFrameworkContent(
+          withSessionWorkspaceReminder(request.task, request.externalSessionId, request.attachments),
+          request.attachments,
+        ),
+        extraPayload,
+        waitForReply: true,
+        userCode: request.userCode,
+        ...(request.userName ? { userName: request.userName } : {}),
+        metadata,
+        messageId: childRequestMessageId,
+        parentMessageId: request.delegationId,
+        routePolicy: "WAKE_AND_WAIT",
+      });
     } catch (error) {
       this.#logger?.error(
-        {
-          ...dispatchFields,
-          durationMs: Date.now() - dispatchStartedAt,
-          error: errorMessage(error),
-        },
-        "调用 by-framework 调度接口异常",
+        { ...dispatchFields, durationMs: Date.now() - dispatchStartedAt, error: errorMessage(error) },
+        "调用 by-framework callAgent 异常",
       );
       throw error;
     }
-    if (!response.success) {
-      this.#logger?.warn(
-        {
-          ...dispatchFields,
-          durationMs: Date.now() - dispatchStartedAt,
-          frameworkStatus: response.status,
-          ...(response.error_code ? { frameworkErrorCode: response.error_code } : {}),
-          ...(response.error ? { frameworkError: logPreview(response.error) } : {}),
-        },
-        "by-framework 子 Agent 调度失败",
-      );
+    if (response.status === AgentState.FAILED) {
       throw new Error(
-        `by-framework dispatch failed${response.error_code ? ` (${response.error_code})` : ""}: ${
+        `by-framework callAgent failed${response.error_code ? ` (${response.error_code})` : ""}: ${
           response.error ?? response.status
         }`,
       );
@@ -229,154 +185,51 @@ export class ByFrameworkConnector implements AgentConnector {
         ...dispatchFields,
         durationMs: Date.now() - dispatchStartedAt,
         frameworkStatus: response.status,
-        frameworkMessageId: response.message_id,
-        frameworkTraceId: response.trace_id,
+        frameworkMessageId: response.messageId,
       },
-      "by-framework 已受理子 Agent 调度",
+      "by-framework callAgent 已受理子 Agent 调度",
     );
 
-    const cancel = this.#createCancel(response.message_id, childSessionId, targetAgentType);
-    if (context.signal.aborted) {
-      await cancel("aborted before event stream started");
-      throw abortError(context.signal.reason);
-    }
-
+    const cancel = this.#createCancel(response.messageId, childSessionId, targetAgentType);
     const ref: ExternalExecutionRef = {
       connectorId: this.id,
-      executionId: response.trace_id,
+      executionId: response.messageId,
       metadata: {
         childSessionId,
-        messageId: response.message_id,
-        traceId: response.trace_id,
+        messageId: response.messageId,
+        traceId,
         targetAgentType,
         userCode: request.userCode,
         sessionId: request.sessionId,
+        delegationId: request.delegationId,
         ...(request.externalSessionId ? { externalSessionId: request.externalSessionId } : {}),
       },
     };
     return {
       ref,
-      events: this.#readEvents(
-        childSessionId,
-        response.trace_id,
-        "0-0",
-        context.signal,
-        cancel,
-        {
-          ...dispatchFields,
-          frameworkMessageId: response.message_id,
-          frameworkTraceId: response.trace_id,
-          dispatchStartedAt,
-        },
-      ),
+      events: this.#suspendedEvents(),
       cancel,
-      respondToInput: (interactionId, response, resumeToken) =>
-        this.#resumeUserInput(ref, interactionId, response, resumeToken, request.metadata),
     };
   }
 
-  /** 使用已保存的 child session、message 和 trace 从 cursor 后继续消费。 */
   async resume(
     ref: ExternalExecutionRef,
-    context: {
-      signal: AbortSignal;
-      cursor?: string;
-      metadata?: Record<string, unknown>;
-    },
+    context: { signal: AbortSignal },
   ): Promise<ConnectorExecution> {
-    if (ref.connectorId !== this.id) {
-      throw new Error(`Cannot resume a different connector: ${ref.connectorId}`);
+    context.signal.throwIfAborted();
+    const metadata = ref.metadata ?? {};
+    const childSessionId = stringMetadata(metadata, "childSessionId");
+    const targetAgentType = stringMetadata(metadata, "targetAgentType");
+    if (!childSessionId || !targetAgentType) {
+      throw new Error("by-framework externalRef is missing childSessionId or targetAgentType");
     }
-    const childSessionId = refString(ref, "childSessionId");
-    const messageId = refString(ref, "messageId");
-    const traceId = refString(ref, "traceId") || ref.executionId;
-    const targetAgentType = refString(ref, "targetAgentType");
-    const sessionId = refString(ref, "sessionId");
-    const metadataExternalSessionId = context.metadata?.externalSessionId;
-    const externalSessionId =
-      refString(ref, "externalSessionId") ||
-      (typeof metadataExternalSessionId === "string" ? metadataExternalSessionId.trim() : "");
-    if (!childSessionId || !messageId || !traceId || !targetAgentType) {
-      throw new Error("by-framework external execution reference is incomplete");
-    }
-    const cancel = this.#createCancel(messageId, childSessionId, targetAgentType);
     return {
       ref,
-      events: this.#readEvents(
-        childSessionId,
-        traceId,
-        context.cursor ?? "0-0",
-        context.signal,
-        cancel,
-        {
-          component: "byclaw-super",
-          stage: "child_agent_stream",
-          connectorId: this.id,
-          ...(sessionId ? { sessionId } : {}),
-          ...(externalSessionId ? { externalSessionId } : {}),
-          childSessionId,
-          targetAgentType,
-          frameworkMessageId: messageId,
-          frameworkTraceId: traceId,
-          dispatchStartedAt: Date.now(),
-          resumed: true,
-        },
-      ),
-      cancel,
-      respondToInput: (interactionId, response, resumeToken) =>
-        this.#resumeUserInput(ref, interactionId, response, resumeToken, context.metadata),
+      events: this.#suspendedEvents(),
+      cancel: this.#createCancel(ref.executionId, childSessionId, targetAgentType),
     };
   }
 
-  /** 把统一用户响应映射回 by-framework 的 RESUME 控制消息。 */
-  async #resumeUserInput(
-    ref: ExternalExecutionRef,
-    interactionId: string,
-    response: UserInteractionResponse,
-    resumeToken?: Record<string, JsonValue>,
-    forwardedMetadata?: Record<string, unknown>,
-  ): Promise<void> {
-    const childSessionId = refString(ref, "childSessionId");
-    const targetAgentType =
-      jsonString(resumeToken?.sourceAgentType) || refString(ref, "targetAgentType");
-    const traceId = jsonString(resumeToken?.traceId) || refString(ref, "traceId");
-    const messageId = jsonString(resumeToken?.messageId) || interactionId;
-    if (!childSessionId || !targetAgentType) {
-      throw new Error("by-framework resume reference is incomplete");
-    }
-    const content =
-      response.action === "submit"
-        ? response.text || JSON.stringify(response.answers ?? {})
-        : response.action === "skip"
-        ? "User skipped this question."
-        : "User cancelled this interaction.";
-    const result = await this.#client.sendMessage({
-      actionType: ActionType.RESUME,
-      sourceAgentType: this.#sourceAgentType,
-      targetAgentType,
-      routePolicy: "WAKE_AND_WAIT",
-      sessionId: childSessionId,
-      content,
-      messageId,
-      traceId,
-      userCode: refString(ref, "userCode"),
-      parentMessageId: jsonString(resumeToken?.parentMessageId),
-      metadata: {
-        ...(forwardedMetadata ?? {}),
-        interaction_id: interactionId,
-        ...(response.answers ? { user_answers: response.answers } : {}),
-      },
-      extraPayload: {
-        status: response.action === "cancel" ? "CANCELLED" : "RESUMED",
-        reply_data: response.answers ?? response.text ?? null,
-      },
-    });
-    if (!result.success) {
-      throw new Error(`by-framework user-input resume failed: ${result.error ?? result.status}`);
-    }
-  }
-
-  /** 检查 Connector 所依赖的 Redis 是否可达。 */
   async health(): Promise<ConnectorHealth> {
     try {
       const response = await this.#redis.ping();
@@ -386,21 +239,16 @@ export class ByFrameworkConnector implements AgentConnector {
           response === "PONG" ? "Redis is reachable" : `Unexpected Redis response: ${response}`,
       };
     } catch (error) {
-      return {
-        healthy: false,
-        message: error instanceof Error ? error.message : String(error),
-      };
+      return { healthy: false, message: errorMessage(error) };
     }
   }
 
-  /** 仅关闭本 Connector 自己创建的 Redis 连接，不处置外部注入的共享连接。 */
   async close(): Promise<void> {
     if (this.#ownsRedis && this.#redis.status !== "end") {
       await this.#redis.quit();
     }
   }
 
-  /** 创建幂等取消句柄，并确认 by-framework 中的外部 execution 已离开运行态。 */
   #createCancel(
     messageId: string,
     sessionId: string,
@@ -408,324 +256,46 @@ export class ByFrameworkConnector implements AgentConnector {
   ): (reason: string) => Promise<void> {
     let cancelPromise: Promise<void> | undefined;
     return async (reason: string): Promise<void> => {
-      cancelPromise ??= this.#cancelAndConfirm(messageId, sessionId, targetAgentType, reason);
+      cancelPromise ??= (async () => {
+        const response = await this.#client.cancelTask({
+          messageId,
+          sessionId,
+          targetAgentType,
+          reason,
+          requestedBy: "byclaw-super",
+          cancelMode: "force",
+        });
+        if (response.status === "ALREADY_FINISHED") {
+          return;
+        }
+        if (!response.success || response.status !== "CANCEL_REQUESTED") {
+          throw new Error(
+            `by-framework cancellation failed: status=${response.status}, error=${
+              response.error ?? "unknown"
+            }`,
+          );
+        }
+      })();
       await cancelPromise;
     };
   }
 
-  /** 校验取消受理结果；生产路径继续轮询 execution 终态，避免把请求受理误当成已停止。 */
-  async #cancelAndConfirm(
-    messageId: string,
-    sessionId: string,
-    targetAgentType: string,
-    reason: string,
-  ): Promise<void> {
-    const response = await this.#client.cancelTask({
-      messageId,
-      sessionId,
-      targetAgentType,
-      reason,
-      requestedBy: "byclaw-super",
-      cancelMode: "force",
-    });
-    if (response.status === "ALREADY_FINISHED") {
-      return;
-    }
-    if (!response.success || response.status !== "CANCEL_REQUESTED") {
-      throw new Error(
-        `by-framework cancellation failed: status=${response.status}, error=${
-          response.error ?? "unknown"
-        }`,
-      );
-    }
-    if (!this.#registry) {
-      return;
-    }
-
-    const deadline = Date.now() + this.#cancelConfirmationTimeoutMs;
-    while (Date.now() < deadline) {
-      const execution = await this.#registry.getExecutionByMessageId(messageId, sessionId);
-      const status = String(execution?.status ?? "");
-      if (TERMINAL_EXECUTION_STATUSES.has(status)) {
-        return;
-      }
-      await delay(Math.min(250, Math.max(1, deadline - Date.now())));
-    }
-    throw new Error(
-      `by-framework cancellation was not confirmed within ${this.#cancelConfirmationTimeoutMs}ms`,
-    );
+  async *#suspendedEvents(): AsyncIterable<ConnectorEvent> {
+    yield { type: "suspended" };
   }
+}
 
-  /**
-   * 从独立会话 Stream 持续读取事件，过滤其他 trace 和 reasoning 事件，
-   * 再映射成与具体传输无关的 ConnectorEvent。
-   */
-  async *#readEvents(
-    sessionId: string,
-    traceId: string,
-    startCursor: string,
-    signal: AbortSignal,
-    cancel: (reason: string) => Promise<void>,
-    logContext: Record<string, unknown> & { dispatchStartedAt: number },
-  ): AsyncIterable<ConnectorEvent> {
-    const stream = QueueNames.session_data_stream(sessionId);
-    let cursor = startCursor;
-    let output = "";
-    let childReasoningOpen = false;
-    const toolNames = new Map<string, string>();
-    let firstEventReceived = false;
-    const firstEventDeadline = this.#firstEventTimeoutMs === undefined
-      ? undefined
-      : Date.now() + this.#firstEventTimeoutMs;
-    while (!signal.aborted) {
-      if (
-        !firstEventReceived &&
-        firstEventDeadline !== undefined &&
-        Date.now() >= firstEventDeadline
-      ) {
-        const reason = `by-framework first event timed out after ${this.#firstEventTimeoutMs!}ms`;
-        let cancellationError: string | undefined;
-        try {
-          await cancel(reason);
-        } catch (error) {
-          cancellationError = error instanceof Error ? error.message : String(error);
-        }
-        yield {
-          type: "failed",
-          error: {
-            code: "OPENCLAW_FIRST_EVENT_TIMEOUT",
-            message: cancellationError ? `${reason}; ${cancellationError}` : reason,
-            retryable: true,
-            timedOut: true,
-          },
-        };
-        return;
-      }
-      const blockMs = firstEventReceived || firstEventDeadline === undefined
-        ? this.#readBlockMs
-        : Math.min(this.#readBlockMs, Math.max(1, firstEventDeadline - Date.now()));
-      const rows = await this.#redis.xread(
-        "COUNT",
-        50,
-        "BLOCK",
-        blockMs,
-        "STREAMS",
-        stream,
-        cursor,
-      );
-      for (const entry of parseXreadRows(rows)) {
-        cursor = entry.id;
-        const message = parseDataMessage(entry.data);
-        // 共享 Session 中可能同时存在多个执行；无 trace 或 trace 不匹配的
-        // 消息不得进入本委派，更不得用于续期。
-        if (!message || message.trace_id !== traceId) {
-          continue;
-        }
-        firstEventReceived = true;
-        const content = extractContent(message.data);
-        const contentType = extractContentType(message.data);
-        const highFrequencyTextEvent =
-          message.event_type === EventType.ANSWER_DELTA ||
-          (message.event_type === EventType.REASONING_LOG_DELTA && contentType === "1002");
-        if (!highFrequencyTextEvent) {
-          this.#logger?.info(
-            {
-              ...logContext,
-              stage: "child_agent_event",
-              cursor,
-              eventType: message.event_type,
-              contentType,
-              ...(message.message_id ? { childMessageId: message.message_id } : {}),
-              ...(message.parent_message_id
-                ? { childParentMessageId: message.parent_message_id }
-                : {}),
-              contentChars: content.length,
-              ...(content ? { contentPreview: logPreview(content) } : {}),
-              elapsedMs: Date.now() - logContext.dispatchStartedAt,
-            },
-            "收到子 Agent 事件",
-          );
-        }
-        if (message.event_type === EventType.REASONING_LOG_START) {
-          childReasoningOpen = true;
-          yield { type: "activity", cursor };
-          continue;
-        }
-        if (message.event_type === EventType.REASONING_LOG_END) {
-          childReasoningOpen = false;
-          yield { type: "activity", cursor };
-          continue;
-        }
-        if (
-          message.event_type === EventType.TASK_CREATE ||
-          message.event_type === EventType.STEP_COMPLETE
-        ) {
-          yield { type: "activity", cursor };
-          continue;
-        }
-        if (message.event_type === EventType.ANSWER_DELTA) {
-          const text = extractContent(message.data);
-          if (text) {
-            output += text;
-            yield { type: "output_delta", text, cursor };
-          }
-          continue;
-        }
-        if (message.event_type === EventType.FINAL_ANSWER) {
-          const finalAnswer = extractContent(message.data);
-          if (!finalAnswer) {
-            continue;
-          }
-          // by-framework 的 Worker 即使没有主动 emitChunk，也会在终态发送 finalAnswer。
-          // 已收到流式前缀时只补齐缺失后缀，避免把完整终态答案重复追加一遍。
-          if (!output) {
-            output = finalAnswer;
-            yield { type: "output_delta", text: finalAnswer, cursor };
-          } else if (finalAnswer.startsWith(output) && finalAnswer.length > output.length) {
-            const suffix = finalAnswer.slice(output.length);
-            output = finalAnswer;
-            yield { type: "output_delta", text: suffix, cursor };
-          } else if (finalAnswer !== output) {
-            // 终态内容与流式内容不具备前缀关系时，以终态为最终快照；
-            // 不发送会造成客户端重复拼接的 delta，Run 终态详情会返回该权威结果。
-            output = finalAnswer;
-          }
-          continue;
-        }
-        if (message.event_type === EventType.REASONING_LOG_DELTA) {
-          const input = extractUserInput(message);
-          if (input) {
-            yield {
-              type: "input_required",
-              interactionId: input.interactionId,
-              request: input.request,
-              resumeToken: input.resumeToken,
-              cursor,
-            };
-            continue;
-          }
-          const contentType = extractContentType(message.data);
-          const content = extractContent(message.data);
-          // byai-channel 为了让子会话正文显示在父会话思考树里，会把 assistant answer
-          // 编码为 reasoningLogDelta/1002，而不是 answerDelta。真正的 thinking/1002 一定
-          // 位于 reasoningLogStart..End 生命周期内；生命周期外的 1002 必须恢复为输出，
-          // 否则前端虽然能看到正文，DelegationService 和 Leader 拿到的 result.output 却为空。
-          if (
-            this.#promoteOutOfReasoningTextToOutput &&
-            contentType === "1002" &&
-            !childReasoningOpen &&
-            content
-          ) {
-            output += content;
-            yield { type: "output_delta", text: content, cursor };
-            continue;
-          }
-          const displayEvent = extractDisplayEvent(message);
-          if (displayEvent) {
-            if (displayEvent.type === "tool_started") {
-              toolNames.set(displayEvent.callId, displayEvent.toolName);
-            }
-            if (displayEvent.type === "tool_detail" && !displayEvent.toolName) {
-              const toolName = toolNames.get(displayEvent.callId);
-              yield {
-                ...displayEvent,
-                ...(toolName ? { toolName } : {}),
-                cursor,
-              };
-              continue;
-            }
-            if (
-              (displayEvent.type === "tool_completed" || displayEvent.type === "tool_failed") &&
-              !displayEvent.toolName
-            ) {
-              const toolName = toolNames.get(displayEvent.callId);
-              yield {
-                ...displayEvent,
-                ...(toolName ? { toolName } : {}),
-                cursor,
-              };
-              continue;
-            }
-            yield { ...displayEvent, cursor };
-          }
-          continue;
-        }
-        if (message.event_type === EventType.APP_STREAM_RESPONSE) {
-          const result: AgentResult = {
-            status: "completed",
-            output,
-            artifacts: [],
-          };
-          this.#logger?.info(
-            {
-              ...logContext,
-              stage: "child_agent_terminal",
-              cursor,
-              terminalEvent: EventType.APP_STREAM_RESPONSE,
-              outputChars: output.length,
-              outputPreview: logPreview(output),
-              durationMs: Date.now() - logContext.dispatchStartedAt,
-            },
-            "收到子 Agent 会话结束信号",
-          );
-          yield { type: "completed", result, cursor };
-          return;
-        }
-        if (message.event_type === "error") {
-          this.#logger?.warn(
-            {
-              ...logContext,
-              stage: "child_agent_terminal",
-              cursor,
-              terminalEvent: "error",
-              error: logPreview(extractError(message)),
-              durationMs: Date.now() - logContext.dispatchStartedAt,
-            },
-            "收到子 Agent 错误终态",
-          );
-          yield {
-            type: "failed",
-            cursor,
-            error: {
-              code: "OPENCLAW_ERROR",
-              message: extractError(message),
-              retryable: false,
-            },
-          };
-          return;
-        }
-      }
-    }
-    await cancel("connector event stream aborted").catch(() => undefined);
-    throw abortError(signal.reason);
-  }
+function stringMetadata(metadata: Record<string, JsonValue>, key: string): string {
+  const value = metadata[key];
+  return typeof value === "string" ? value : "";
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function logPreview(value: string, limit = 240): string {
-  return safeDisplayText(value)
-    .replace(
-      /(["']?(?:authorization|password|passwd|pwd|secret|token|access[_-]?token|refresh[_-]?token|api[_-]?key)["']?\s*[:=]\s*["']?)[^"',;\s}]+/gi,
-      "$1[REDACTED]",
-    )
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, limit);
-}
-
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
 export type { RedisConnectionConfig } from "@byclaw/by-framework";
 
-/**
- * 仅对 by-framework 入站 Run（externalSessionId 存在）在 task 末尾追加会话工作区提示。
- * 该后缀只进入投递内容，不回写 request.task，保证委派的幂等/恢复匹配不受影响。
- */
 function withSessionWorkspaceReminder(
   task: string,
   externalSessionId: string | undefined,
@@ -748,12 +318,6 @@ function withSessionWorkspaceReminder(
   return `${task}\n\n${lines.join("\n")}`;
 }
 
-/**
- * 列出附件在沙箱会话工作区内的读取路径。BE 投递的 `filePath`（= attachment.path）
- * 是对象存储 key，形如 `/.sessions/<sessionId>/<file>`（前导 /、不含 `..`）；沙箱将其
- * 挂在 `/by` 下，故读取路径 = `/by` + 该 key。非会话工作区 key 一律忽略。仅向子 agent
- * 提示读取位置。
- */
 function sessionWorkspaceReadPaths(attachments: readonly RunAttachment[]): string[] {
   const seen = new Set<string>();
   const paths: string[] = [];
@@ -771,18 +335,10 @@ function sessionWorkspaceReadPaths(attachments: readonly RunAttachment[]): strin
   return paths;
 }
 
-/**
- * 按 byclaw-be 兼容结构构造投递内容：无附件时为纯字符串；
- * 有附件时为 `[{role:"user", content:{text, files}}]`。
- *
- * by-framework SDK 的 `MessageFile` 类型（数字 fileId、枚举 fileType）比 byclaw-be 实际
- * 线缆格式（字符串 fileId、mimetype 等）更窄；sendMessage 只做 JSON 序列化，故按 byclaw-be
- * 线缆格式构造后安全断言回 SDK 类型。
- */
 function buildByFrameworkContent(
   task: string,
   attachments: readonly RunAttachment[],
-): SendMessageParams["content"] {
+): unknown {
   if (attachments.length === 0) {
     return task;
   }
@@ -794,13 +350,9 @@ function buildByFrameworkContent(
         files: toByFrameworkFiles(attachments),
       },
     },
-  ] as unknown as SendMessageParams["content"];
+  ];
 }
 
-/**
- * 把 RunAttachment 映射回 byclaw-be 的 MessageFileDto 字段（白名单）。
- * 不生成 fileIp；Beyond-Token 不混入文件对象，仍只走 metadata。
- */
 function toByFrameworkFiles(attachments: readonly RunAttachment[]): Record<string, unknown>[] {
   return attachments.map((attachment) => ({
     fileId: attachment.id,

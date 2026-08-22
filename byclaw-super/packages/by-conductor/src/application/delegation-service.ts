@@ -19,6 +19,7 @@ import type {
   UserInteractionResponse,
 } from "../domain/types.js";
 import { TERMINAL_DELEGATION_STATUSES } from "../domain/types.js";
+import { DelegationSuspendedError } from "./run-suspension.js";
 
 /** 表示 Leader 请求了本次 Run 授权快照之外的 Agent。 */
 export class UnauthorizedAgentError extends Error {
@@ -29,9 +30,22 @@ export class UnauthorizedAgentError extends Error {
   }
 }
 
+export interface ExternalDelegationCallback {
+  delegationId: string;
+  status: string;
+  finalAnswer: string;
+}
+
+export interface ExternalDelegationCallbackResult {
+  accepted: boolean;
+  runId?: string;
+  result?: AgentResult;
+}
+
 export interface ExecuteDelegationInput {
   session: Session;
   runId: string;
+  traceId?: string;
   agents: AgentProfile[];
   agentId: string;
   task: string;
@@ -155,7 +169,7 @@ export class DelegationService {
         .reverse()
         .find(
           (candidate) =>
-            candidate.status === "COMPLETED" &&
+            TERMINAL_DELEGATION_STATUSES.has(candidate.status) &&
             candidate.result &&
             candidate.agentId === agent.id &&
             candidate.task === input.task &&
@@ -355,6 +369,7 @@ export class DelegationService {
           ...(input.session.owner.userName ? { userName: input.session.owner.userName } : {}),
           sessionId: input.session.id,
           runId: input.runId,
+          ...(input.traceId ? { traceId: input.traceId } : {}),
           delegationId,
           agent,
           task: input.task,
@@ -647,6 +662,29 @@ export class DelegationService {
           delegation = await this.#checkpointProgress(delegation, output, event.cursor);
           continue;
         }
+        if (event.type === "suspended") {
+          try {
+            delegation = await this.#checkpointSuspension(delegation, output, event.cursor);
+          } catch (error) {
+            // 极快的子 Agent 可能在本地保存挂起点之前已经回调；数据库终态获胜时
+            // 直接把结果交还仍在运行的 Leader，不能覆盖终态或再次挂起。
+            const latest = await this.delegations.get(delegationId);
+            if (latest?.result && TERMINAL_DELEGATION_STATUSES.has(latest.status)) {
+              return structuredClone(latest.result);
+            }
+            throw error;
+          }
+          this.logger?.info(
+            {
+              ...lifecycleFields,
+              stage: "delegation_suspended",
+              delegationId,
+              externalExecutionId: execution.ref.executionId,
+            },
+            "子 Agent 已投递，释放当前执行并等待 Resume 回调",
+          );
+          throw new DelegationSuspendedError(input.runId, delegationId);
+        }
         if (event.type === "progress") {
           delegation = await this.#checkpointProgress(delegation, output, event.cursor);
           await this.#appendEvent({
@@ -716,6 +754,9 @@ export class DelegationService {
       await this.#finish(delegation, "FAILED", result);
       return result;
     } catch (error) {
+      if (error instanceof DelegationSuspendedError) {
+        throw error;
+      }
       if (controller.signal.aborted) {
         if (execution) {
           await this.#cancelExecution(
@@ -775,6 +816,48 @@ export class DelegationService {
         this.#claims.delete(input.runId);
       }
     }
+  }
+
+  /**
+   * 将 by-framework ResumeCommand 的终态直接写入 Delegation 持久化真相。
+   * 重复、迟到或已经取消的回调不会覆盖既有终态。
+   */
+  async completeFromExternalCallback(
+    callback: ExternalDelegationCallback,
+  ): Promise<ExternalDelegationCallbackResult> {
+    const delegation = await this.delegations.get(callback.delegationId);
+    if (!delegation) {
+      return { accepted: false };
+    }
+    if (TERMINAL_DELEGATION_STATUSES.has(delegation.status)) {
+      return {
+        accepted: false,
+        runId: delegation.runId,
+        ...(delegation.result ? { result: structuredClone(delegation.result) } : {}),
+      };
+    }
+    const normalizedStatus = callback.status.trim().toUpperCase();
+    const result: AgentResult = {
+      status:
+        normalizedStatus === "CANCELLED"
+          ? "cancelled"
+          : normalizedStatus === "FAILED"
+            ? "failed"
+            : "completed",
+      output: callback.finalAnswer,
+      artifacts: [],
+      ...(normalizedStatus === "FAILED" || normalizedStatus === "CANCELLED"
+        ? { error: callback.finalAnswer || `Child agent returned ${normalizedStatus}` }
+        : {}),
+    };
+    const terminalStatus: DelegationStatus =
+      normalizedStatus === "CANCELLED"
+        ? "CANCELLED"
+        : normalizedStatus === "FAILED"
+          ? "FAILED"
+          : "COMPLETED";
+    await this.#finish(delegation, terminalStatus, result);
+    return { accepted: true, runId: delegation.runId, result };
   }
 
   /** 响应一个由 Connector 发起且仍在等待的用户交互。 */
@@ -848,6 +931,25 @@ export class DelegationService {
       ...(cursor ? { connectorCursor: cursor } : {}),
       version: delegation.version + 1,
       updatedAt: this.now(),
+    };
+    await this.#saveDelegation(updated);
+    return updated;
+  }
+
+  /** callAgent 已可靠受理；持久化 Resume 截止时间后才允许 Run 进入挂起态。 */
+  async #checkpointSuspension(
+    delegation: Delegation,
+    partialOutput: string,
+    cursor: string | undefined,
+  ): Promise<Delegation> {
+    const acceptedAt = this.now();
+    const updated: Delegation = {
+      ...delegation,
+      partialOutput,
+      ...(cursor ? { connectorCursor: cursor } : {}),
+      callbackDeadlineAt: acceptedAt + this.#timeouts.firstActivityMs,
+      version: delegation.version + 1,
+      updatedAt: acceptedAt,
     };
     await this.#saveDelegation(updated);
     return updated;

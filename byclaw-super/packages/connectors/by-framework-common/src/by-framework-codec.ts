@@ -3,6 +3,7 @@ import type {
   ExternalExecutionRef,
   JsonValue,
   UserInteractionQuestion,
+  UserInteractionRequest,
 } from "@byclaw/by-conductor";
 
 type DisplayConnectorEvent = Extract<
@@ -350,20 +351,18 @@ function sanitizeJsonValue(value: unknown, depth: number): JsonValue {
   return safeDisplayText(String(value));
 }
 
-/** 识别 by-framework askUser 发出的 3013 表单，并保留恢复标识。 */
+/** 识别 by-framework askUser 发出的 3013 表单或 3014 结构化问题，并保留恢复标识。 */
 export function extractUserInput(message: DataMessage):
   | {
       interactionId: string;
-      request: {
-        questions: UserInteractionQuestion[];
-        uiPayload: Record<string, JsonValue>;
-      };
+      request: UserInteractionRequest;
       resumeToken: Record<string, JsonValue>;
     }
   | undefined {
-  if (!isRecord(message.data) || String(message.data.contentType ?? "") !== "3013") {
+  if (!isRecord(message.data)) {
     return undefined;
   }
+  const contentType = String(message.data.contentType ?? "");
   const content = extractContent(message.data);
   if (!content) {
     return undefined;
@@ -376,6 +375,35 @@ export function extractUserInput(message: DataMessage):
     }
     form = parsed;
   } catch {
+    return undefined;
+  }
+
+  const interactionId =
+    message.message_id ||
+    String(message.data.orderId ?? "") ||
+    `ask-user:${message.trace_id ?? ""}`;
+  const resumeToken = {
+    traceId: message.trace_id ?? "",
+    messageId: message.message_id ?? interactionId,
+    parentMessageId: message.parent_message_id ?? "",
+    sourceAgentType: message.source_agent_type ?? "",
+  };
+
+  if (contentType === "3014") {
+    const questions = normalizeInteractionQuestions(form.questions);
+    if (questions.length === 0) {
+      return undefined;
+    }
+    return {
+      interactionId,
+      request: {
+        kind: "questions",
+        questions,
+      },
+      resumeToken,
+    };
+  }
+  if (contentType !== "3013") {
     return undefined;
   }
 
@@ -420,10 +448,6 @@ export function extractUserInput(message: DataMessage):
             ],
     };
   });
-  const interactionId =
-    message.message_id ||
-    String(message.data.orderId ?? "") ||
-    `ask-user:${message.trace_id ?? ""}`;
   return {
     interactionId,
     request: {
@@ -450,13 +474,43 @@ export function extractUserInput(message: DataMessage):
             ],
       uiPayload: form as Record<string, JsonValue>,
     },
-    resumeToken: {
-      traceId: message.trace_id ?? "",
-      messageId: message.message_id ?? interactionId,
-      parentMessageId: message.parent_message_id ?? "",
-      sourceAgentType: message.source_agent_type ?? "",
-    },
+    resumeToken,
   };
+}
+
+function normalizeInteractionQuestions(value: unknown): UserInteractionQuestion[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(isRecord).flatMap((question) => {
+    const header = String(question.header ?? "").trim();
+    const prompt = String(question.question ?? "").trim();
+    const options = Array.isArray(question.options)
+      ? question.options
+          .filter(isRecord)
+          .map((option) => ({
+            label: String(option.label ?? option.value ?? "").trim(),
+            ...(option.value !== undefined ? { value: String(option.value) } : {}),
+            description: String(
+              option.description ?? option.label ?? option.value ?? "",
+            ).trim(),
+          }))
+          .filter((option) => option.label)
+      : [];
+    if (!prompt || options.length === 0) {
+      return [];
+    }
+    return [
+      {
+        header: header || "补充信息",
+        question: prompt,
+        options,
+        ...(typeof question.multiSelect === "boolean"
+          ? { multiSelect: question.multiSelect }
+          : {}),
+      },
+    ];
+  });
 }
 
 /** 按 metadata、状态消息、内容的优先级提取可读错误。 */

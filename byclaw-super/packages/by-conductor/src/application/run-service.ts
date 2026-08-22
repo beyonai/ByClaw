@@ -5,6 +5,7 @@ import {
 } from "../domain/attachment-inspection.js";
 import type { AttachmentResolver } from "../ports/attachment-resolver.js";
 import { DelegationService } from "./delegation-service.js";
+import { LeaderRunSuspendedError } from "./run-suspension.js";
 import type { RunIngressContextV1 } from "../domain/run-ingress-context.js";
 import type { LeaderSession, LeaderSessionFactory } from "../ports/leader.js";
 import type {
@@ -38,7 +39,10 @@ import type {
   UserInteractionQuestion,
   UserInteractionResponse,
 } from "../domain/types.js";
-import { TERMINAL_RUN_STATUSES } from "../domain/types.js";
+import {
+  TERMINAL_DELEGATION_STATUSES,
+  TERMINAL_RUN_STATUSES,
+} from "../domain/types.js";
 import { resolveAttachmentSelection } from "./attachments.js";
 import {
   createSessionContext,
@@ -132,6 +136,7 @@ export class RunService {
   readonly #taskPlans: TaskPlanGateway | undefined;
   #persistentActive = 0;
   #claimLoop: Promise<void> | undefined;
+  #callbackSweep: Promise<void> | undefined;
   #pollTimer: ReturnType<typeof setInterval> | undefined;
   #credentialCleanupTimer: ReturnType<typeof setInterval> | undefined;
   #started = false;
@@ -171,7 +176,7 @@ export class RunService {
     }
     this.#started = true;
     this.#pollTimer = setInterval(() => {
-      void this.#kickPersistentQueue();
+      void this.#sweepExpiredCallbacks().finally(() => this.#kickPersistentQueue());
     }, this.#queuePollMs);
     this.#pollTimer.unref?.();
     if (this.runtime.credentials) {
@@ -183,7 +188,7 @@ export class RunService {
       this.#credentialCleanupTimer.unref?.();
       void this.runtime.credentials.deleteExpired(this.now()).catch(() => undefined);
     }
-    void this.#kickPersistentQueue();
+    void this.#sweepExpiredCallbacks().finally(() => this.#kickPersistentQueue());
   }
 
   /** 创建会话容器；Session 本身不立即初始化模型 Session。 */
@@ -464,6 +469,105 @@ export class RunService {
   }
 
   /**
+   * 消费子 Agent 的独立终态回调，并把原 Run 从 WAITING_AGENT 重新放回执行队列。
+   * 返回的 afterEventId 供 by-framework Resume 上下文只转发暂停后的增量，避免重放旧消息。
+   */
+  async resumeDelegation(input: {
+    delegationId: string;
+    status: string;
+    finalAnswer: string;
+  }): Promise<{
+    accepted: boolean;
+    runId?: string;
+    afterEventId?: number;
+    forwardEvents?: boolean;
+  }> {
+    const normalizedStatus = input.status.trim().toUpperCase();
+    if (
+      normalizedStatus !== "COMPLETED" &&
+      normalizedStatus !== "FAILED" &&
+      normalizedStatus !== "CANCELLED"
+    ) {
+      return { accepted: false };
+    }
+    const atomicSettlement = this.runtime.executionQueue?.settleWaitingCallback;
+    if (atomicSettlement) {
+      const settled = await atomicSettlement.call(this.runtime.executionQueue, {
+        delegationId: input.delegationId,
+        status: normalizedStatus,
+        finalAnswer: input.finalAnswer,
+      });
+      if (!settled.runId) {
+        return { accepted: false };
+      }
+      const history = await this.events.list(settled.runId);
+      const suspendedEvent = history
+        .slice()
+        .reverse()
+        .find((event) => event.type === "run.suspended");
+      if (!settled.accepted) {
+        return {
+          accepted: false,
+          runId: settled.runId,
+          ...(suspendedEvent ? { afterEventId: suspendedEvent.eventId } : {}),
+        };
+      }
+      if (!settled.wakeRun) {
+        return {
+          accepted: true,
+          runId: settled.runId,
+          forwardEvents: false,
+          ...(suspendedEvent ? { afterEventId: suspendedEvent.eventId } : {}),
+        };
+      }
+      const queued = await this.runs.get(settled.runId);
+      if (queued?.status === "QUEUED") {
+        await this.#scheduleRun(queued, undefined);
+      }
+      return {
+        accepted: true,
+        runId: settled.runId,
+        forwardEvents: true,
+        ...(suspendedEvent ? { afterEventId: suspendedEvent.eventId } : {}),
+      };
+    }
+    const completed = await this.delegationService.completeFromExternalCallback(input);
+    if (!completed.runId) {
+      return { accepted: false };
+    }
+    const history = await this.events.list(completed.runId);
+    const suspendedEvent = history
+      .slice()
+      .reverse()
+      .find((event) => event.type === "run.suspended");
+    if (!completed.accepted) {
+      return {
+        accepted: false,
+        runId: completed.runId,
+        ...(suspendedEvent ? { afterEventId: suspendedEvent.eventId } : {}),
+      };
+    }
+    const run = await this.runs.get(completed.runId);
+    if (!run || TERMINAL_RUN_STATUSES.has(run.status) || run.status === "CANCELLING") {
+      return {
+        accepted: false,
+        runId: completed.runId,
+        ...(suspendedEvent ? { afterEventId: suspendedEvent.eventId } : {}),
+      };
+    }
+    const queued = await this.#setStatus(run, "QUEUED", {
+      delegationId: input.delegationId,
+      resumed: true,
+    });
+    await this.#scheduleRun(queued, undefined);
+    return {
+      accepted: true,
+      runId: queued.id,
+      ...(suspendedEvent ? { afterEventId: suspendedEvent.eventId } : {}),
+    };
+  }
+
+  /**
    * 取消排队中或执行中的 Run。
    * 执行中会先进入 CANCELLING，再同时中止 Leader、工具信号和活动 Connector。
    */
@@ -590,6 +694,23 @@ export class RunService {
       this.#claimLoop = undefined;
     });
     return this.#claimLoop;
+  }
+
+  /** 数据库是唯一计时真相；这里只触发幂等扫描，不创建进程内 Delegation 定时器。 */
+  async #sweepExpiredCallbacks(): Promise<void> {
+    const queue = this.runtime.executionQueue;
+    if (!queue?.expireWaitingCallbacks || this.#callbackSweep || this.#stopping) {
+      return this.#callbackSweep ?? Promise.resolve();
+    }
+    this.#callbackSweep = queue
+      .expireWaitingCallbacks({ limit: 100 })
+      .then(() => undefined)
+      // 数据库短暂异常时保留 WAITING_AGENT，下个轮询周期继续扫描。
+      .catch(() => undefined)
+      .finally(() => {
+        this.#callbackSweep = undefined;
+      });
+    return this.#callbackSweep;
   }
 
   async #scheduleRun(
@@ -782,6 +903,26 @@ Continue the original task using this response:
 ${JSON.stringify(response)}`;
         }
       }
+      if (recoveringStage === "CONNECTOR_WAITING") {
+        const completedDelegations = (await this.delegations.listByRun(latest.id))
+          .filter((delegation) => TERMINAL_DELEGATION_STATUSES.has(delegation.status))
+          .map((delegation) => ({
+            delegationId: delegation.id,
+            agentId: delegation.agentId,
+            agentName: delegation.agentName,
+            task: delegation.task,
+            status: delegation.status,
+            result: delegation.result,
+          }));
+        if (completedDelegations.length > 0) {
+          leaderMessage = `${latest.input}
+
+The previously requested delegateAgent call has now returned through the trusted platform callback.
+Treat the following records as completed tool results. Do not repeat an identical delegation; continue
+the original task, dispatch only work that is still genuinely missing, and synthesize the final answer.
+${JSON.stringify(completedDelegations)}`;
+        }
+      }
       current = await this.#setStatus(latest, "RUNNING");
       const taskPlanContext = this.#taskPlanContext(current, metadata);
       let taskPlanReady = false;
@@ -872,8 +1013,6 @@ ${JSON.stringify(response)}`;
         // 工具调用只进入 DelegationService，不让 Pi 接触 Connector Registry。
         delegate: async (delegationInput) => {
           runController.signal.throwIfAborted();
-          current = await this.#setStatus(current, "WAITING_AGENT");
-          runController.signal.throwIfAborted();
           // Pi 工具 signal 只代表该次工具调用；Run 级停止必须始终拥有更高优先级，
           // 不能因为工具传入了独立 signal 就丢失整轮取消。
           const delegationSignal = delegationInput.signal
@@ -882,6 +1021,7 @@ ${JSON.stringify(response)}`;
           const delegated = await this.delegationService.execute({
             session,
             runId: current.id,
+            traceId: current.ingressContext?.traceId ?? current.id,
             agents: current.agentList,
             agentId: delegationInput.agentId,
             task: delegationInput.task,
@@ -904,7 +1044,7 @@ ${JSON.stringify(response)}`;
             },
             signal: delegationSignal,
             ...(claim ? { leaseClaim: claim } : {}),
-            ...(recoveringStage === "LEADER_SYNTHESIZING"
+            ...(recoveringStage === "LEADER_SYNTHESIZING" || recoveringStage === "CONNECTOR_WAITING"
               ? { reuseCompleted: true }
               : {}),
             onInputRequired: async (interactionId) => {
@@ -1125,7 +1265,23 @@ ${JSON.stringify(response)}`;
       dirtyLeader = false;
       this.events.close(finished.id);
     } catch (error) {
-      if (controller?.signal.aborted) {
+      if (error instanceof LeaderRunSuspendedError) {
+        await this.runtime.checkpoints
+          ?.discardPending(current.id, current.attemptNo, claim)
+          .catch(() => undefined);
+        current = await this.#setStatus(current, "WAITING_AGENT", {
+          delegationId: error.delegationId,
+        });
+        await this.#appendRunEvent({
+          timestamp: this.now(),
+          runId: current.id,
+          type: "run.suspended",
+          data: {
+            status: "WAITING_AGENT",
+            delegationId: error.delegationId,
+          },
+        });
+      } else if (controller?.signal.aborted) {
         await this.#finishLocallyCancelledRun(current, "run cancelled");
       } else {
         await this.#finishFailed(current, error instanceof Error ? error.message : String(error));

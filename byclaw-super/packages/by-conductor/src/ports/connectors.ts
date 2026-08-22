@@ -15,6 +15,8 @@ export interface ConnectorRequest {
   userName?: string;
   sessionId: string;
   runId: string;
+  /** 整条 by-framework 父子调用链共用的 trace ID。 */
+  traceId?: string;
   delegationId: string;
   agent: AgentProfile;
   task: string;
@@ -97,6 +99,13 @@ export type ConnectorEvent = (
     }
   | { type: "output_delta"; text: string }
   | { type: "artifact"; artifact: ArtifactRef }
+  | {
+      /**
+       * 外部任务已经可靠投递，后续终态只会通过独立回调到达。
+       * 编排层收到后应持久暂停当前 Run，而不是继续占用调用栈等待。
+       */
+      type: "suspended";
+    }
   | {
       type: "input_required";
       interactionId: string;

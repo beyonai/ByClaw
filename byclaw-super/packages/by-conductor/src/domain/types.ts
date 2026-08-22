@@ -174,6 +174,8 @@ export interface Delegation {
   partialOutput?: string;
   /** 最近一次经 Connector 校验、属于本委派的活动时间。 */
   lastActivityAt?: number;
+  /** callAgent 已受理后等待终态 ResumeCommand 的持久截止时间。 */
+  callbackDeadlineAt?: number;
   version: number;
   result?: AgentResult;
   error?: string;
@@ -201,7 +203,7 @@ export interface UserInteractionQuestion {
 /** Agent 或 Connector 请求前端展示的结构化问题。 */
 export interface UserInteractionRequest {
   /** 交互展示类型；缺失时按既有 form 处理。 */
-  kind?: "form" | "external_page";
+  kind?: "form" | "questions" | "external_page";
   questions: UserInteractionQuestion[];
   /** 兼容既有 by-framework 3013 表单的原始 UI 数据。 */
   uiPayload?: Record<string, JsonValue>;
@@ -218,6 +220,7 @@ export type RunEventType =
   | "run.created"
   | "run.attempt"
   | "run.status"
+  | "run.suspended"
   | "leader.reasoning.delta"
   | "leader.delta"
   | "delegation.started"

@@ -1,5 +1,8 @@
 import "dotenv/config";
-import { PostgresDatabase } from "@byclaw/storage-postgres";
+import {
+  LATEST_POSTGRES_SCHEMA_VERSION,
+  PostgresDatabase,
+} from "@byclaw/storage-postgres";
 import { booleanValue, integer, requiredEnv } from "../config/env-parsers.js";
 
 const env = process.env;
@@ -15,12 +18,8 @@ const database = new PostgresDatabase({
 
 try {
   await database.migrate();
-  const status = await database.health();
-  if (!status.healthy) {
-    throw new Error(status.message ?? "PostgreSQL schema is not ready");
-  }
   console.log(
-    `PostgreSQL schema ${database.schema} is at version ${status.currentVersion}`,
+    `PostgreSQL schema ${database.schema} migrated to version ${LATEST_POSTGRES_SCHEMA_VERSION}`,
   );
 } finally {
   await database.close();

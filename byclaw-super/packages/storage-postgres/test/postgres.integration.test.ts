@@ -252,6 +252,109 @@ suite("PostgreSQL persistence integration", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("settles one expired callback exactly once across concurrent sweepers", async () => {
+    const owner = session("callback-timeout-user");
+    sessionsToDelete.push(owner.id);
+    await database.sessions.save(owner);
+    const base = queuedRun(owner.id);
+    const waiting: Run = {
+      ...base,
+      ingressContext: {
+        externalSessionId: "external-timeout-session",
+        parentMessageId: "external-timeout-message",
+        traceId: "external-timeout-trace",
+      },
+      status: "WAITING_AGENT",
+      executionStage: "CONNECTOR_WAITING",
+    };
+    await database.runs.createWithEvent?.(waiting, {
+      runId: waiting.id,
+      timestamp: Date.now(),
+      type: "run.created",
+      data: { status: "WAITING_AGENT" },
+    });
+    const delegationId = randomUUID();
+    await database.delegations.save({
+      id: delegationId,
+      runId: waiting.id,
+      agentId: "agent-timeout",
+      agentName: "Timeout Agent",
+      connectorId: "code-by-framework",
+      task: "wait for callback",
+      status: "RUNNING",
+      externalRef: { connectorId: "code-by-framework", executionId: delegationId },
+      callbackDeadlineAt: Date.now() - 1_000,
+      version: 0,
+      createdAt: Date.now() - 2_000,
+      updatedAt: Date.now() - 2_000,
+      startedAt: Date.now() - 2_000,
+    });
+
+    const [first, second] = await Promise.all([
+      database.queue.expireWaitingCallbacks({ limit: 10 }),
+      database.queue.expireWaitingCallbacks({ limit: 10 }),
+    ]);
+    expect([...first, ...second]).toEqual([{ runId: waiting.id, delegationId }]);
+    await expect(database.delegations.get(delegationId)).resolves.toMatchObject({
+      status: "TIMED_OUT",
+      result: { status: "timed_out" },
+    });
+    await expect(database.runs.get(waiting.id)).resolves.toMatchObject({
+      status: "QUEUED",
+      executionStage: "CONNECTOR_WAITING",
+    });
+    expect(
+      (await database.events.list(waiting.id)).filter(
+        (event) => event.type === "delegation.failed",
+      ),
+    ).toHaveLength(1);
+    const queued = await database.runs.get(waiting.id);
+    await database.runs.saveWithEvent?.(
+      {
+        ...queued!,
+        status: "COMPLETED",
+        executionStage: "SETTLED",
+        finalAnswer: "timeout handled",
+        version: queued!.version + 1,
+        updatedAt: Date.now(),
+        finishedAt: Date.now(),
+      },
+      {
+        runId: waiting.id,
+        timestamp: Date.now(),
+        type: "run.completed",
+        data: { status: "COMPLETED", finalAnswer: "timeout handled" },
+      },
+    );
+    const [deliveryA, deliveryB] = await Promise.all([
+      database.queue.claimCallbackTimeoutDeliveries({
+        instanceId: "delivery-a",
+        leaseMs: 30_000,
+        limit: 10,
+      }),
+      database.queue.claimCallbackTimeoutDeliveries({
+        instanceId: "delivery-b",
+        leaseMs: 30_000,
+        limit: 10,
+      }),
+    ]);
+    const deliveries = [...deliveryA, ...deliveryB];
+    expect(deliveries).toEqual([
+      expect.objectContaining({
+        runId: waiting.id,
+        finalAnswer: "timeout handled",
+        externalSessionId: "external-timeout-session",
+      }),
+    ]);
+    const deliveryOwner = deliveryA.length > 0 ? "delivery-a" : "delivery-b";
+    await expect(
+      database.queue.completeCallbackTimeoutDelivery({
+        runId: waiting.id,
+        instanceId: deliveryOwner,
+      }),
+    ).resolves.toBe(true);
+  });
+
   it("keeps PENDING Pi entries private and promotes them with revision CAS", async () => {
     const owner = session("pi-user");
     sessionsToDelete.push(owner.id);

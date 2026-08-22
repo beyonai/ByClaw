@@ -5,6 +5,7 @@ import {
   ConnectorNotFoundError,
   ConnectorRegistry,
   DelegationService,
+  DelegationSuspendedError,
   InMemoryDelegationRepository,
   InMemoryRunExecutionQueue,
   InMemoryRunEventStore,
@@ -54,6 +55,69 @@ describe("ConnectorRegistry", () => {
 });
 
 describe("DelegationService", () => {
+  it("persists a suspended dispatch and completes it idempotently from an external callback", async () => {
+    const registry = new ConnectorRegistry();
+    registry.register(
+      fakeConnector(async function* () {
+        yield { type: "suspended" };
+      }),
+    );
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const service = new DelegationService(
+      registry,
+      delegations,
+      events,
+      1_000,
+      () => 10_000,
+      () => "delegation-suspended",
+    );
+
+    await expect(
+      service.execute({
+        session: {
+          id: "session-1",
+          owner: { userCode: "user-1" },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        runId: "run-suspended",
+        agents: [agent],
+        agentId: agent.id,
+        task: "analyze later",
+        metadata: {},
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toBeInstanceOf(DelegationSuspendedError);
+
+    expect(await delegations.get("delegation-suspended")).toMatchObject({
+      status: "RUNNING",
+      externalRef: { executionId: "external" },
+      callbackDeadlineAt: 11_000,
+    });
+    await expect(
+      service.completeFromExternalCallback({
+        delegationId: "delegation-suspended",
+        status: "COMPLETED",
+        finalAnswer: "callback answer",
+      }),
+    ).resolves.toMatchObject({ accepted: true, runId: "run-suspended" });
+    expect(await delegations.get("delegation-suspended")).toMatchObject({
+      status: "COMPLETED",
+      result: { status: "completed", output: "callback answer" },
+    });
+    await expect(
+      service.completeFromExternalCallback({
+        delegationId: "delegation-suspended",
+        status: "COMPLETED",
+        finalAnswer: "duplicate",
+      }),
+    ).resolves.toMatchObject({ accepted: false, runId: "run-suspended" });
+    expect((await delegations.get("delegation-suspended"))?.result?.output).toBe(
+      "callback answer",
+    );
+  });
+
   it("logs delegation lifecycle and redacted child output previews", async () => {
     const registry = new ConnectorRegistry();
     registry.register(
@@ -957,6 +1021,131 @@ describe("DelegationService", () => {
 });
 
 describe("RunService", () => {
+  it("requeues a WAITING_AGENT Run only after its persisted callback arrives", async () => {
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const registry = new ConnectorRegistry();
+    const delegationService = new DelegationService(registry, delegations, events, 1_000);
+    const enqueue = vi.fn(async () => undefined);
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      delegationService,
+      {
+        create: vi.fn(),
+        health: vi.fn(async () => ({ healthy: true })),
+      },
+      Date.now,
+      undefined,
+      {
+        executionQueue: {
+          enqueue,
+          claimNext: vi.fn(async () => undefined),
+          heartbeat: vi.fn(async () => true),
+          release: vi.fn(async () => undefined),
+        },
+      },
+    );
+    const session = await service.createSession({ owner: { userCode: "user-1" } });
+    const waitingRun: Run = {
+      id: "run-callback",
+      sessionId: session.id,
+      input: "analyze",
+      attachments: [],
+      agentList: [agent],
+      status: "WAITING_AGENT",
+      baseContextRevision: 0,
+      attemptNo: 1,
+      executionStage: "CONNECTOR_WAITING",
+      version: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    await runs.save(waitingRun);
+    await delegations.save({
+      id: "delegation-callback",
+      runId: waitingRun.id,
+      agentId: agent.id,
+      agentName: agent.name,
+      connectorId: agent.execution.connectorId,
+      task: "analyze",
+      status: "RUNNING",
+      externalRef: { connectorId: "fake", executionId: "external-callback" },
+      version: 1,
+      createdAt: 1,
+      updatedAt: 1,
+      startedAt: 1,
+    });
+    await events.append({
+      timestamp: 2,
+      runId: waitingRun.id,
+      type: "run.suspended",
+      data: { status: "WAITING_AGENT", delegationId: "delegation-callback" },
+    });
+
+    await expect(
+      service.resumeDelegation({
+        delegationId: "delegation-callback",
+        status: "COMPLETED",
+        finalAnswer: "42",
+      }),
+    ).resolves.toMatchObject({ accepted: true, runId: waitingRun.id, afterEventId: 1 });
+    expect(await runs.get(waitingRun.id)).toMatchObject({
+      status: "QUEUED",
+      executionStage: "CONNECTOR_WAITING",
+    });
+    expect(enqueue).toHaveBeenCalledOnce();
+
+    await expect(
+      service.resumeDelegation({
+        delegationId: "delegation-callback",
+        status: "COMPLETED",
+        finalAnswer: "duplicate",
+      }),
+    ).resolves.toMatchObject({ accepted: false, runId: waitingRun.id });
+    expect(enqueue).toHaveBeenCalledOnce();
+  });
+
+  it("polls the persistent callback deadline store without creating an in-memory timer", async () => {
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const expireWaitingCallbacks = vi.fn(async () => []);
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      new DelegationService(new ConnectorRegistry(), delegations, events),
+      {
+        create: vi.fn(),
+        health: vi.fn(async () => ({ healthy: true })),
+      },
+      Date.now,
+      undefined,
+      {
+        executionQueue: {
+          enqueue: vi.fn(async () => undefined),
+          claimNext: vi.fn(async () => undefined),
+          heartbeat: vi.fn(async () => true),
+          release: vi.fn(async () => undefined),
+          expireWaitingCallbacks,
+        },
+        queuePollMs: 5,
+      },
+    );
+
+    service.start();
+    await waitFor(() => Promise.resolve(expireWaitingCallbacks.mock.calls.length > 0));
+    await service.dispose();
+    expect(expireWaitingCallbacks).toHaveBeenCalledWith({ limit: 100 });
+  });
+
   it("stores Leader reasoning separately from visible answer deltas", async () => {
     const leaderFactory: LeaderSessionFactory = {
       async create() {

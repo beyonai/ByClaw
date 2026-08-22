@@ -131,17 +131,12 @@ function createConnectors(
   const openClaw = new OpenClawByFrameworkConnector({
     redis,
     sourceAgentType: config.worker.agentType,
-    // 首次活动边界由通用 DelegationService 统一管理。
-    firstEventTimeoutMs: 0,
-    cancelConfirmationTimeoutMs: config.openClaw.cancelConfirmationTimeoutMs,
     logger,
   });
   connectors.register(openClaw);
   const code = new CodeByFrameworkConnector({
     redis,
     sourceAgentType: config.worker.agentType,
-    firstEventTimeoutMs: 0,
-    cancelConfirmationTimeoutMs: config.openClaw.cancelConfirmationTimeoutMs,
     logger,
   });
   connectors.register(code);
@@ -392,6 +387,7 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
       runService,
       runIngress,
       sessionBindings: database.bindings,
+      timeoutDeliveries: database.queue,
       agentType: config.worker.agentType,
       ...(config.worker.workerId ? { workerId: config.worker.workerId } : {}),
       maxConcurrency: config.worker.maxConcurrency,

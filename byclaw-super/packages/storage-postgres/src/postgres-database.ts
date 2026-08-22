@@ -10,6 +10,7 @@ import {
   type AgentCapabilityCardRepository,
   type AgentCapabilityCardUpsert,
   type CallerPrincipal,
+  type CallbackTimeoutDelivery,
   type Delegation,
   type DelegationRepository,
   type ExecutionCredential,
@@ -37,7 +38,6 @@ import {
   type QueryResultRow,
 } from "pg";
 import {
-  LATEST_POSTGRES_SCHEMA_VERSION,
   POSTGRES_TABLE_PREFIX,
   POSTGRES_MIGRATIONS,
 } from "./migrations.js";
@@ -51,6 +51,10 @@ const NON_TERMINAL_RUN_STATUSES = [
   "SYNTHESIZING",
   "CANCELLING",
 ] as const;
+/** WAITING_AGENT 只能由可信 Resume 回调显式改回 QUEUED，不能被轮询器空转重领。 */
+const CLAIMABLE_RUN_STATUSES = NON_TERMINAL_RUN_STATUSES.filter(
+  (status) => status !== "WAITING_AGENT",
+);
 const TERMINAL_EVENT_TYPES = new Set([
   "run.completed",
   "run.failed",
@@ -80,8 +84,6 @@ export interface PostgresDatabaseConfig {
 
 export interface PostgresSchemaStatus {
   healthy: boolean;
-  currentVersion: number;
-  expectedVersion: number;
   message?: string;
 }
 
@@ -184,29 +186,14 @@ export class PostgresDatabase {
     }
   }
 
-  /** 检查连接和 schema 版本；不在 readiness 路径自动执行 DDL。 */
+  /** 仅检查数据库连通性；表结构由发布前的运维脚本负责。 */
   async health(): Promise<PostgresSchemaStatus> {
     try {
-      const result = await this.pool.query<{ version: number | string | null }>(
-        `SELECT max(version) AS version
-           FROM ${table(this.schema, "schema_migrations")}`,
-      );
-      const currentVersion = Number(result.rows[0]?.version ?? 0);
-      return {
-        healthy: currentVersion === LATEST_POSTGRES_SCHEMA_VERSION,
-        currentVersion,
-        expectedVersion: LATEST_POSTGRES_SCHEMA_VERSION,
-        ...(currentVersion === LATEST_POSTGRES_SCHEMA_VERSION
-          ? {}
-          : {
-              message: `PostgreSQL schema version ${currentVersion}, expected ${LATEST_POSTGRES_SCHEMA_VERSION}`,
-            }),
-      };
+      await this.pool.query("SELECT 1");
+      return { healthy: true };
     } catch (error) {
       return {
         healthy: false,
-        currentVersion: 0,
-        expectedVersion: LATEST_POSTGRES_SCHEMA_VERSION,
         message: toError(error).message,
       };
     }
@@ -881,7 +868,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
               SELECT 1
                 FROM ${table(this.schema, "runs")} earlier
                WHERE earlier.session_id = r.session_id
-                 AND earlier.status = ANY($1::text[])
+                 AND earlier.status = ANY($2::text[])
                  AND (earlier.created_at, earlier.id) < (r.created_at, r.id)
             )
             AND NOT EXISTS (
@@ -893,7 +880,7 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
           ORDER BY r.created_at, r.id
           FOR UPDATE OF r SKIP LOCKED
           LIMIT 1`,
-        [NON_TERMINAL_RUN_STATUSES],
+        [CLAIMABLE_RUN_STATUSES, NON_TERMINAL_RUN_STATUSES],
       );
       const row = candidate.rows[0];
       if (!row) {
@@ -1003,6 +990,295 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
           AND fencing_token = $3`,
       [claim.sessionId, claim.ownerInstanceId, claim.fencingToken],
     );
+  }
+
+  /** 多实例安全地领取到期回调；状态、Run 唤醒和事件使用同一个数据库事务。 */
+  async expireWaitingCallbacks(input: {
+    limit: number;
+  }): Promise<Array<{ runId: string; delegationId: string }>> {
+    return transaction(this.pool, async (client) => {
+      const candidates = await client.query<{
+        delegation_id: string;
+        run_id: string;
+        agent_id: string;
+        agent_name: string | null;
+        partial_output: string | null;
+        expired_at: Date | string;
+      }>(
+        `SELECT d.id AS delegation_id, d.run_id, d.agent_id, d.agent_name,
+                d.partial_output, clock_timestamp() AS expired_at
+           FROM ${table(this.schema, "delegations")} d
+           JOIN ${table(this.schema, "runs")} r ON r.id = d.run_id
+          WHERE d.status = 'RUNNING'
+            AND d.callback_deadline_at IS NOT NULL
+            AND d.callback_deadline_at <= clock_timestamp()
+            AND r.status = 'WAITING_AGENT'
+            AND r.execution_stage = 'CONNECTOR_WAITING'
+          ORDER BY d.callback_deadline_at, d.id
+          FOR UPDATE OF d, r SKIP LOCKED
+          LIMIT $1`,
+        [input.limit],
+      );
+      const expired: Array<{ runId: string; delegationId: string }> = [];
+      for (const candidate of candidates.rows) {
+        const expiredAt = milliseconds(candidate.expired_at);
+        const error = "Delegation received no terminal ResumeCommand within its callback timeout";
+        const result = {
+          status: "timed_out",
+          output: candidate.partial_output ?? "",
+          artifacts: [],
+          error,
+        };
+        await client.query(
+          `UPDATE ${table(this.schema, "delegations")}
+              SET status = 'TIMED_OUT', result = $2::jsonb, error = $3,
+                  version = version + 1, updated_at = $4, finished_at = $4
+            WHERE id = $1 AND status = 'RUNNING'`,
+          [candidate.delegation_id, JSON.stringify(result), error, date(expiredAt)],
+        );
+        await client.query(
+          `UPDATE ${table(this.schema, "runs")}
+              SET status = 'QUEUED', version = version + 1, updated_at = $2
+            WHERE id = $1
+              AND status = 'WAITING_AGENT'
+              AND execution_stage = 'CONNECTOR_WAITING'`,
+          [candidate.run_id, date(expiredAt)],
+        );
+        await appendRunEvent(client, this.schema, {
+          timestamp: expiredAt,
+          runId: candidate.run_id,
+          type: "delegation.failed",
+          data: {
+            delegationId: candidate.delegation_id,
+            agentId: candidate.agent_id,
+            ...(candidate.agent_name ? { agentName: candidate.agent_name } : {}),
+            status: "TIMED_OUT",
+            artifactCount: 0,
+            resultStatus: "timed_out",
+            hasOutput: Boolean(candidate.partial_output),
+            error,
+          },
+        });
+        await appendRunEvent(client, this.schema, {
+          timestamp: expiredAt,
+          runId: candidate.run_id,
+          type: "run.status",
+          data: {
+            status: "QUEUED",
+            delegationId: candidate.delegation_id,
+            resumed: true,
+            timedOut: true,
+          },
+        });
+        await client.query(
+          `INSERT INTO ${table(this.schema, "callback_timeout_outbox")} (
+             run_id, created_at, updated_at
+           ) VALUES ($1, $2, $2)
+           ON CONFLICT (run_id) DO NOTHING`,
+          [candidate.run_id, date(expiredAt)],
+        );
+        await notifyRunEvent(client, this.schema, candidate.run_id);
+        expired.push({
+          runId: candidate.run_id,
+          delegationId: candidate.delegation_id,
+        });
+      }
+      if (expired.length > 0) {
+        await client.query("SELECT pg_notify($1, $2)", [
+          `byclaw_runs_${this.schema}`,
+          "callback-timeout",
+        ]);
+      }
+      return expired;
+    });
+  }
+
+  async settleWaitingCallback(input: {
+    delegationId: string;
+    status: "COMPLETED" | "FAILED" | "CANCELLED";
+    finalAnswer: string;
+  }): Promise<{ accepted: boolean; runId?: string; wakeRun?: boolean }> {
+    return transaction(this.pool, async (client) => {
+      const selected = await client.query<{
+        delegation_id: string;
+        run_id: string;
+        agent_id: string;
+        agent_name: string | null;
+        delegation_status: string;
+        run_status: string;
+        execution_stage: string;
+        callback_expired: boolean;
+        settled_at: Date | string;
+      }>(
+        `SELECT d.id AS delegation_id, d.run_id, d.agent_id, d.agent_name,
+                d.status AS delegation_status, r.status AS run_status,
+                r.execution_stage,
+                COALESCE(d.callback_deadline_at <= clock_timestamp(), false) AS callback_expired,
+                clock_timestamp() AS settled_at
+           FROM ${table(this.schema, "delegations")} d
+           JOIN ${table(this.schema, "runs")} r ON r.id = d.run_id
+          WHERE d.id = $1
+          FOR UPDATE OF d, r`,
+        [input.delegationId],
+      );
+      const row = selected.rows[0];
+      if (!row) {
+        return { accepted: false };
+      }
+      if (["COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"].includes(row.delegation_status)) {
+        return { accepted: false, runId: row.run_id };
+      }
+      // 截止时间由数据库时钟裁决；即使扫描器尚未抢到，迟到 Resume 也不能越过期限。
+      if (row.callback_expired) {
+        return { accepted: false, runId: row.run_id };
+      }
+      if (["CANCELLING", "COMPLETED", "FAILED", "CANCELLED"].includes(row.run_status)) {
+        return { accepted: false, runId: row.run_id };
+      }
+      const settledAt = milliseconds(row.settled_at);
+      const resultStatus =
+        input.status === "CANCELLED"
+          ? "cancelled"
+          : input.status === "FAILED"
+            ? "failed"
+            : "completed";
+      const error =
+        input.status === "COMPLETED"
+          ? undefined
+          : input.finalAnswer || `Child agent returned ${input.status}`;
+      const result = {
+        status: resultStatus,
+        output: input.finalAnswer,
+        artifacts: [],
+        ...(error ? { error } : {}),
+      };
+      await client.query(
+        `UPDATE ${table(this.schema, "delegations")}
+            SET status = $2, result = $3::jsonb, error = $4,
+                version = version + 1, updated_at = $5, finished_at = $5
+          WHERE id = $1`,
+        [input.delegationId, input.status, JSON.stringify(result), error ?? null, date(settledAt)],
+      );
+      await appendRunEvent(client, this.schema, {
+        timestamp: settledAt,
+        runId: row.run_id,
+        type: input.status === "COMPLETED" ? "delegation.completed" : "delegation.failed",
+        data: {
+          delegationId: row.delegation_id,
+          agentId: row.agent_id,
+          ...(row.agent_name ? { agentName: row.agent_name } : {}),
+          status: input.status,
+          artifactCount: 0,
+          resultStatus,
+          hasOutput: Boolean(input.finalAnswer),
+          ...(error ? { error } : {}),
+        },
+      });
+      const wakeRun = row.run_status === "WAITING_AGENT" && row.execution_stage === "CONNECTOR_WAITING";
+      if (wakeRun) {
+        await client.query(
+          `UPDATE ${table(this.schema, "runs")}
+              SET status = 'QUEUED', version = version + 1, updated_at = $2
+            WHERE id = $1`,
+          [row.run_id, date(settledAt)],
+        );
+        await appendRunEvent(client, this.schema, {
+          timestamp: settledAt,
+          runId: row.run_id,
+          type: "run.status",
+          data: {
+            status: "QUEUED",
+            delegationId: input.delegationId,
+            resumed: true,
+          },
+        });
+        await client.query("SELECT pg_notify($1, $2)", [
+          `byclaw_runs_${this.schema}`,
+          "callback-resume",
+        ]);
+      }
+      await notifyRunEvent(client, this.schema, row.run_id);
+      return { accepted: true, runId: row.run_id, wakeRun };
+    });
+  }
+
+  async claimCallbackTimeoutDeliveries(input: {
+    instanceId: string;
+    leaseMs: number;
+    limit: number;
+  }): Promise<CallbackTimeoutDelivery[]> {
+    return transaction(this.pool, async (client) => {
+      const selected = await client.query<{
+        run_id: string;
+        external_session_id: string | null;
+        trace_id: string | null;
+        parent_message_id: string | null;
+        run_status: "COMPLETED" | "FAILED" | "CANCELLED";
+        final_answer: string | null;
+        error_message: string | null;
+      }>(
+        `SELECT o.run_id,
+                r.ingress_context->>'externalSessionId' AS external_session_id,
+                r.ingress_context->>'traceId' AS trace_id,
+                r.ingress_context->>'parentMessageId' AS parent_message_id,
+                r.status AS run_status, r.final_answer, r.error_message
+           FROM ${table(this.schema, "callback_timeout_outbox")} o
+           JOIN ${table(this.schema, "runs")} r ON r.id = o.run_id
+          WHERE o.delivered_at IS NULL
+            AND (o.claim_expires_at IS NULL OR o.claim_expires_at <= clock_timestamp())
+            AND r.status IN ('COMPLETED', 'FAILED', 'CANCELLED')
+          ORDER BY o.created_at, o.run_id
+          FOR UPDATE OF o SKIP LOCKED
+          LIMIT $1`,
+        [input.limit],
+      );
+      const deliveries: CallbackTimeoutDelivery[] = [];
+      for (const row of selected.rows) {
+        await client.query(
+          `UPDATE ${table(this.schema, "callback_timeout_outbox")}
+              SET claimed_by = $2,
+                  claim_expires_at = clock_timestamp() + ($3 * interval '1 millisecond'),
+                  attempt_count = attempt_count + 1,
+                  updated_at = clock_timestamp()
+            WHERE run_id = $1`,
+          [row.run_id, input.instanceId, input.leaseMs],
+        );
+        if (!row.external_session_id || !row.trace_id || !row.parent_message_id) {
+          await client.query(
+            `UPDATE ${table(this.schema, "callback_timeout_outbox")}
+                SET delivered_at = clock_timestamp(), updated_at = clock_timestamp()
+              WHERE run_id = $1 AND claimed_by = $2`,
+            [row.run_id, input.instanceId],
+          );
+          continue;
+        }
+        deliveries.push({
+          runId: row.run_id,
+          externalSessionId: row.external_session_id,
+          traceId: row.trace_id,
+          parentMessageId: row.parent_message_id,
+          runStatus: row.run_status,
+          ...(row.final_answer === null ? {} : { finalAnswer: row.final_answer }),
+          ...(row.error_message === null ? {} : { error: row.error_message }),
+        });
+      }
+      return deliveries;
+    });
+  }
+
+  async completeCallbackTimeoutDelivery(input: {
+    runId: string;
+    instanceId: string;
+  }): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE ${table(this.schema, "callback_timeout_outbox")}
+          SET delivered_at = clock_timestamp(), updated_at = clock_timestamp()
+        WHERE run_id = $1
+          AND claimed_by = $2
+          AND delivered_at IS NULL`,
+      [input.runId, input.instanceId],
+    );
+    return result.rowCount === 1;
   }
 }
 
@@ -1443,6 +1719,7 @@ async function writeDelegation(
     nullableDate(delegation.finishedAt),
     delegation.agentName ?? null,
     nullableDate(delegation.lastActivityAt),
+    nullableDate(delegation.callbackDeadlineAt),
   ];
   const updated = await client.query(
     `UPDATE ${table(schema, "delegations")}
@@ -1457,7 +1734,13 @@ async function writeDelegation(
             started_at = $10,
             finished_at = $11,
             agent_name = $12,
-            last_activity_at = $13
+            last_activity_at = $13,
+            callback_deadline_at = CASE
+              WHEN $14::timestamptz IS NULL THEN NULL
+              WHEN callback_deadline_at IS NULL
+                THEN clock_timestamp() + ($14::timestamptz - $9::timestamptz)
+              ELSE callback_deadline_at
+            END
       WHERE id = $1 AND version = $8::bigint - 1`,
     [
       delegation.id,
@@ -1473,6 +1756,7 @@ async function writeDelegation(
       nullableDate(delegation.finishedAt),
       delegation.agentName ?? null,
       nullableDate(delegation.lastActivityAt),
+      nullableDate(delegation.callbackDeadlineAt),
     ],
   );
   if (updated.rowCount !== 0) {
@@ -1489,10 +1773,15 @@ async function writeDelegation(
     `INSERT INTO ${table(schema, "delegations")} (
        id, run_id, agent_id, connector_id, task, expected_output, status,
        external_ref, connector_cursor, result, partial_output, error, version,
-       created_at, updated_at, started_at, finished_at, agent_name, last_activity_at
+       created_at, updated_at, started_at, finished_at, agent_name, last_activity_at,
+       callback_deadline_at
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::jsonb, $11, $12, $13,
-       $14, $15, $16, $17, $18, $19
+       $14, $15, $16, $17, $18, $19,
+       CASE
+         WHEN $20::timestamptz IS NULL THEN NULL
+         ELSE clock_timestamp() + ($20::timestamptz - $15::timestamptz)
+       END
      )`,
     values,
   );
@@ -1845,6 +2134,9 @@ function mapDelegation(row: QueryResultRow): Delegation {
     ...(row.last_activity_at === null
       ? {}
       : { lastActivityAt: milliseconds(row.last_activity_at) }),
+    ...(row.callback_deadline_at === null
+      ? {}
+      : { callbackDeadlineAt: milliseconds(row.callback_deadline_at) }),
   };
 }
 
