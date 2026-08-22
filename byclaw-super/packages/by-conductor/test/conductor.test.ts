@@ -56,21 +56,18 @@ describe("ConnectorRegistry", () => {
 });
 
 describe("DelegationService", () => {
-  it("persists a suspended dispatch and completes it idempotently from an external callback", async () => {
+  it("persists callback completion and completes it idempotently from an external callback", async () => {
     const registry = new ConnectorRegistry();
-    registry.register(
-      fakeConnector(async function* () {
-        yield { type: "suspended" };
-      }),
-    );
+    registry.register(fakeCallbackConnector(5));
     const delegations = new InMemoryDelegationRepository();
     const events = new InMemoryRunEventStore();
+    let currentTime = 10_000;
     const service = new DelegationService(
       registry,
       delegations,
       events,
-      1_000,
-      () => 10_000,
+      { firstActivityMs: 100, idleMs: 200, callbackMs: 1_000 },
+      () => currentTime,
       () => "delegation-suspended",
     );
 
@@ -96,6 +93,28 @@ describe("DelegationService", () => {
       externalRef: { executionId: "external" },
       callbackDeadlineAt: 11_000,
     });
+
+    currentTime = 10_500;
+    await expect(
+      service.execute({
+        session: {
+          id: "session-1",
+          owner: { userCode: "user-1" },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        runId: "run-suspended",
+        agents: [agent],
+        agentId: agent.id,
+        task: "analyze later",
+        metadata: {},
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toBeInstanceOf(DelegationSuspendedError);
+    expect(await delegations.get("delegation-suspended")).toMatchObject({
+      callbackDeadlineAt: 11_000,
+    });
+
     await expect(
       service.completeFromExternalCallback({
         delegationId: "delegation-suspended",
@@ -588,6 +607,7 @@ describe("DelegationService", () => {
     registry.register({
       ...fakeConnector(async function* () {}),
       capabilities: {
+        completionMode: "events",
         streaming: true,
         cancellation: true,
         artifacts: false,
@@ -862,6 +882,7 @@ describe("DelegationService", () => {
     registry.register({
       ...fakeConnector(async function* () {}),
       capabilities: {
+        completionMode: "events",
         streaming: true,
         cancellation: true,
         artifacts: false,
@@ -915,6 +936,7 @@ describe("DelegationService", () => {
       start,
       resume,
       capabilities: {
+        completionMode: "events",
         streaming: true,
         cancellation: true,
         artifacts: false,
@@ -1028,11 +1050,7 @@ describe("RunService", () => {
     const delegations = new InMemoryDelegationRepository();
     const events = new InMemoryRunEventStore();
     const registry = new ConnectorRegistry();
-    registry.register(
-      fakeConnector(async function* () {
-        yield { type: "suspended" };
-      }),
-    );
+    registry.register(fakeCallbackConnector());
     const leaderFactory: LeaderSessionFactory = {
       async create() {
         return {
@@ -2326,15 +2344,51 @@ function fakeConnector(events: () => AsyncIterable<ConnectorEvent>): AgentConnec
   return {
     id: "fake",
     capabilities: {
+      completionMode: "events",
       streaming: true,
       cancellation: true,
       artifacts: false,
       resumable: false,
+      attachments: true,
     },
     async start() {
       return {
         ref: { connectorId: "fake", executionId: "external" },
         events: events(),
+        cancel: async () => undefined,
+      };
+    },
+    async health() {
+      return { healthy: true };
+    },
+  };
+}
+
+function fakeCallbackConnector(resumeDelayMs = 0): AgentConnector {
+  return {
+    id: "fake",
+    capabilities: {
+      completionMode: "callback",
+      streaming: false,
+      cancellation: true,
+      artifacts: false,
+      resumable: true,
+      attachments: true,
+    },
+    async start() {
+      return {
+        completionMode: "callback",
+        ref: { connectorId: "fake", executionId: "external" },
+        cancel: async () => undefined,
+      };
+    },
+    async resume(ref) {
+      if (resumeDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, resumeDelayMs));
+      }
+      return {
+        completionMode: "callback",
+        ref,
         cancel: async () => undefined,
       };
     },

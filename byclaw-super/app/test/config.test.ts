@@ -32,6 +32,7 @@ describe("应用配置", () => {
     expect(config.delegationTimeouts).toEqual({
       firstActivityMs: 300_000,
       idleMs: 900_000,
+      callbackMs: 300_000,
     });
     expect(config.openClaw).toEqual({
       cancelConfirmationTimeoutMs: 30_000,
@@ -88,6 +89,7 @@ describe("应用配置", () => {
       BYCLAW_SUPER_DISCOVERY_WEIGHT: "3",
       DELEGATION_IDLE_TIMEOUT_MS: "800000",
       DELEGATION_FIRST_ACTIVITY_TIMEOUT_MS: "240000",
+      DELEGATION_CALLBACK_TIMEOUT_MS: "600000",
       OPENCLAW_CANCEL_CONFIRM_TIMEOUT_MS: "15000",
     });
 
@@ -97,6 +99,7 @@ describe("应用配置", () => {
     expect(config.delegationTimeouts).toEqual({
       firstActivityMs: 240_000,
       idleMs: 800_000,
+      callbackMs: 600_000,
     });
     expect(config.openClaw).toEqual({
       cancelConfirmationTimeoutMs: 15_000,

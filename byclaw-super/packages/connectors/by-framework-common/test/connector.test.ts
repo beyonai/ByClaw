@@ -46,7 +46,7 @@ function createHarness(
 }
 
 describe("ByFrameworkConnector", () => {
-  it("uses callAgent, preserves the parent traceId and suspends after reliable dispatch", async () => {
+  it("uses callAgent, preserves the parent traceId and returns callback completion", async () => {
     const harness = createHarness();
     const req = request();
     const execution = await harness.connector.start(req, {
@@ -70,11 +70,8 @@ describe("ByFrameworkConnector", () => {
         }),
       }),
     );
-    const events = [];
-    for await (const event of execution.events) {
-      events.push(event);
-    }
-    expect(events).toEqual([{ type: "suspended" }]);
+    expect(execution.completionMode).toBe("callback");
+    expect(execution.events).toBeUndefined();
     expect("xread" in harness.redis).toBe(false);
   });
 
@@ -86,11 +83,8 @@ describe("ByFrameworkConnector", () => {
     const resumed = await harness.connector.resume!(execution.ref, {
       signal: new AbortController().signal,
     });
-    const events = [];
-    for await (const event of resumed.events) {
-      events.push(event);
-    }
-    expect(events).toEqual([{ type: "suspended" }]);
+    expect(resumed.completionMode).toBe("callback");
+    expect(resumed.events).toBeUndefined();
     expect(harness.callAgent).toHaveBeenCalledOnce();
   });
 
@@ -107,12 +101,9 @@ describe("ByFrameworkConnector", () => {
         provenance: "by-framework",
       },
     ];
-    const execution = await harness.connector.start(req, {
+    await harness.connector.start(req, {
       signal: new AbortController().signal,
     });
-    for await (const _event of execution.events) {
-      void _event;
-    }
 
     const input = harness.callAgent.mock.calls[0][0];
     const messages = input.content as Array<{

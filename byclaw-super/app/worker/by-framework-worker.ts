@@ -213,7 +213,30 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         replyData: null,
       });
     }
-    const childResume = parseChildAgentResume(command);
+    let childResume: ReturnType<typeof parseChildAgentResume>;
+    try {
+      childResume = parseChildAgentResume(command);
+    } catch (error) {
+      // 协议错误属于不可重试消息。若继续抛出，Redis consumer group 会反复领取同一条
+      // Resume 并阻塞后续正常回调；记录关联字段后正常 ACK，由等待中的 Delegation
+      // 按数据库截止时间收敛。
+      this.#logger?.warn(
+        {
+          ...commandLogFields(command),
+          status: command.status,
+          parentMessageId: command.header.parentMessageId,
+          delegationId: recordString(command.header.metadata, "delegation_id"),
+          error: toError(error).message,
+        },
+        "拒绝协议不完整的子 Agent Resume 回调",
+      );
+      context.setStreamFinished(true);
+      return new AgentTaskResult({
+        status: AgentState.COMPLETED,
+        content: "",
+        replyData: null,
+      });
+    }
     const resumed = childResume
       ? await this.#runService.resumeDelegation({
           delegationId: childResume.delegationId,

@@ -30,6 +30,7 @@ export interface ThirdPartyA2aConnectorOptions {
 export class ThirdPartyA2aConnector implements AgentConnector {
   readonly id = THIRD_PARTY_A2A_CONNECTOR_ID;
   readonly capabilities: ConnectorCapabilities = {
+    completionMode: "events",
     streaming: true,
     cancellation: true,
     artifacts: true,

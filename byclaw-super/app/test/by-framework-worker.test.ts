@@ -401,6 +401,51 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(emitState).toHaveBeenCalledWith({ state: AgentState.COMPLETED }, undefined);
   });
 
+  it("acknowledges a malformed child Resume instead of poisoning the Redis consumer group", async () => {
+    const resumeDelegation = vi.fn();
+    const logger = loggerMock();
+    const worker = createWorker({
+      createSessionRun: vi.fn(),
+      resumeDelegation,
+      cancelRun: vi.fn(),
+      streamEvents: () => completedEvents(),
+      logger,
+    });
+    const command = new ResumeCommand(
+      new MessageHeader("callback-message", "session-1", "trace-1", {
+        sourceAgentType: "BY_CHILD",
+        targetAgentType: "BY_SUPER",
+        parentMessageId: "delegation-1",
+        metadata: {
+          delegation_id: "delegation-1",
+          parent_run_id: "run-1",
+        },
+      }),
+      "",
+      AgentState.COMPLETED,
+      "子 Agent 最终回答",
+    );
+    const setStreamFinished = vi.fn();
+
+    const result = await worker.processCommand(command, contextMock({ setStreamFinished }));
+
+    expect(result).toMatchObject({
+      status: AgentState.COMPLETED,
+      content: "",
+      replyData: null,
+    });
+    expect(setStreamFinished).toHaveBeenCalledWith(true);
+    expect(resumeDelegation).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        delegationId: "delegation-1",
+        parentMessageId: "delegation-1",
+        error: expect.stringContaining("delegation-1:request"),
+      }),
+      "拒绝协议不完整的子 Agent Resume 回调",
+    );
+  });
+
   it("authorizes an interaction Resume before submitting the response", async () => {
     const authorizeRun = vi.fn(async () => ({
       run: run("WAITING_USER"),

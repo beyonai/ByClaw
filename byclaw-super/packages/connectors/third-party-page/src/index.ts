@@ -30,6 +30,7 @@ type DeferredResponse = {
 export class ThirdPartyPageConnector implements AgentConnector {
   readonly id = THIRD_PARTY_PAGE_CONNECTOR_ID;
   readonly capabilities: ConnectorCapabilities = {
+    completionMode: "events",
     streaming: false,
     cancellation: true,
     artifacts: false,

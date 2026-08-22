@@ -34,6 +34,7 @@ export interface AppConfig {
   delegationTimeouts: {
     firstActivityMs: number;
     idleMs: number;
+    callbackMs: number;
   };
   openClaw: {
     cancelConfirmationTimeoutMs: number;
@@ -120,6 +121,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     1,
     Number.MAX_SAFE_INTEGER,
   );
+  const delegationCallbackMs = integer(
+    env.DELEGATION_CALLBACK_TIMEOUT_MS ??
+      String(defaults.delegationTimeouts.callbackMs),
+    "DELEGATION_CALLBACK_TIMEOUT_MS",
+    1,
+    Number.MAX_SAFE_INTEGER,
+  );
   if ((env.PI_PROVIDER && !env.PI_MODEL) || (!env.PI_PROVIDER && env.PI_MODEL)) {
     throw new Error("PI_PROVIDER and PI_MODEL must be configured together");
   }
@@ -152,6 +160,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     delegationTimeouts: {
       firstActivityMs: delegationFirstActivityMs,
       idleMs: delegationIdleMs,
+      callbackMs: delegationCallbackMs,
     },
     openClaw: {
       cancelConfirmationTimeoutMs: integer(

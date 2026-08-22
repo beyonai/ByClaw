@@ -460,6 +460,7 @@ describe("Session / Run HTTP/SSE API", () => {
     const connector: AgentConnector = {
       id: "fake",
       capabilities: {
+        completionMode: "events",
         streaming: true,
         cancellation: true,
         artifacts: true,

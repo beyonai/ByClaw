@@ -76,6 +76,8 @@ export interface DelegationTimeoutOptions {
   firstActivityMs: number;
   /** 执行期间连续无任何可信活动的最长时间。 */
   idleMs: number;
+  /** callback Connector 受理后等待终态回调的绝对时限。 */
+  callbackMs: number;
 }
 
 export interface DelegationLogger {
@@ -106,15 +108,17 @@ export class DelegationService {
     private readonly createId: () => string = randomUUID,
     private readonly logger?: DelegationLogger,
   ) {
-    // number 是旧构造参数；同时作为首次活动和空闲边界。
+    // number 是测试和内存调用的简写；三个边界使用同一数值。
     this.#timeouts = typeof timeoutOptions === "number"
       ? {
           firstActivityMs: timeoutOptions,
           idleMs: timeoutOptions,
+          callbackMs: timeoutOptions,
         }
       : {
           firstActivityMs: timeoutOptions.firstActivityMs ?? 300_000,
           idleMs: timeoutOptions.idleMs ?? 900_000,
+          callbackMs: timeoutOptions.callbackMs ?? 300_000,
         };
   }
 
@@ -132,6 +136,7 @@ export class DelegationService {
     }
 
     const connector = this.connectors.require(agent.execution.connectorId);
+    const connectorCompletionMode = connector.capabilities.completionMode;
     const externalSessionId = optionalMetadataString(input.metadata, "externalSessionId");
     const lifecycleFields = {
       component: "byclaw-super",
@@ -284,6 +289,9 @@ export class DelegationService {
     const recoveryFallbackAt = this.now();
     const timeoutReason = (kind: DelegationTimeoutKind) => {
       if (kind === "first_activity") {
+        if (connectorCompletionMode === "callback") {
+          return `Callback Connector dispatch was not accepted within ${this.#timeouts.firstActivityMs}ms`;
+        }
         return `Delegation received no activity within ${this.#timeouts.firstActivityMs}ms`;
       }
       return `Delegation was idle for ${this.#timeouts.idleMs}ms`;
@@ -301,9 +309,12 @@ export class DelegationService {
           timeoutKind: kind,
           timeoutMs:
             kind === "first_activity" ? this.#timeouts.firstActivityMs : this.#timeouts.idleMs,
+          completionMode: connectorCompletionMode,
           lastActivityAt: delegation.lastActivityAt,
         },
-        "等待子 Agent 事件超时",
+        connectorCompletionMode === "callback"
+          ? "等待子 Agent 调度受理超时"
+          : "等待子 Agent 事件超时",
       );
       controller.abort(new Error(timeoutReason(kind)));
       if (execution) {
@@ -324,9 +335,11 @@ export class DelegationService {
         ? this.#timeouts.idleMs
         : this.#timeouts.firstActivityMs;
       const deadline = (
-        lastActivityAt ??
-        delegation.startedAt ??
-        (resuming ? recoveryFallbackAt : delegation.createdAt)
+        connectorCompletionMode === "callback"
+          ? recoveryFallbackAt
+          : lastActivityAt ??
+            delegation.startedAt ??
+            (resuming ? recoveryFallbackAt : delegation.createdAt)
       ) + duration;
       activityTimeout = setTimeout(
         () => triggerTimeout(lastActivityAt ? "idle" : "first_activity"),
@@ -385,6 +398,12 @@ export class DelegationService {
         );
         execution = await connector.start(request, { signal: controller.signal });
       }
+      const executionCompletionMode = execution.completionMode ?? "events";
+      if (executionCompletionMode !== connectorCompletionMode) {
+        throw new Error(
+          `Connector completion mode mismatch: ${connector.id} declares ${connectorCompletionMode} but returned ${executionCompletionMode}`,
+        );
+      }
       this.logger?.info(
         {
           ...lifecycleFields,
@@ -392,11 +411,19 @@ export class DelegationService {
           delegationId,
           externalExecutionId: execution.ref.executionId,
           resumed: resuming,
+          completionMode: executionCompletionMode,
         },
-        "子 Agent 调度已建立事件流",
+        executionCompletionMode === "callback"
+          ? "子 Agent 调度已受理，等待独立终态回调"
+          : "子 Agent 调度已建立事件流",
       );
       // Connector 一旦返回便立即纳入 Run 级取消，避免 externalRef 落库期间出现取消盲区。
       this.#track(input.runId, delegationId, execution);
+      if (execution.completionMode === "callback") {
+        // callAgent 已经可靠受理；从这一刻起只允许数据库 callbackDeadlineAt 计时。
+        // 不让 externalRef 落库耗时误触发事件流的 firstActivity 边界。
+        pauseActivityTimeout();
+      }
       if (controller.signal.aborted) {
         await this.#cancelExecution(
           input.runId,
@@ -419,6 +446,33 @@ export class DelegationService {
         await this.#saveDelegation(delegation);
       }
       let output = delegation.partialOutput ?? "";
+      if (execution.completionMode === "callback") {
+        // callback Connector 不存在可续期的事件流。callAgent 返回后由数据库截止时间
+        // 独占计时，当前进程的首次活动/空闲定时器必须立即停止。
+        try {
+          delegation = await this.#checkpointCallbackWait(delegation, output);
+        } catch (error) {
+          // 极快回调可能先于等待边界提交。终态已落库时旧 Leader 只退出，不能覆盖
+          // Resume 已经放回队列的 Run。
+          const latest = await this.delegations.get(delegationId);
+          if (latest?.result && TERMINAL_DELEGATION_STATUSES.has(latest.status)) {
+            throw new DelegationSuspendedError(input.runId, delegationId);
+          }
+          throw error;
+        }
+        this.logger?.info(
+          {
+            ...lifecycleFields,
+            stage: "delegation_waiting_callback",
+            delegationId,
+            externalExecutionId: execution.ref.executionId,
+            callbackDeadlineAt: delegation.callbackDeadlineAt,
+            callbackTimeoutMs: this.#timeouts.callbackMs,
+          },
+          "子 Agent 已投递，当前执行已释放并等待 Resume 回调",
+        );
+        throw new DelegationSuspendedError(input.runId, delegationId);
+      }
       let outputDeltaLogged = false;
       const artifacts: ArtifactRef[] = [];
       let pendingInteractionId: string | undefined;
@@ -661,29 +715,6 @@ export class DelegationService {
           artifacts.push(event.artifact);
           delegation = await this.#checkpointProgress(delegation, output, event.cursor);
           continue;
-        }
-        if (event.type === "suspended") {
-          try {
-            delegation = await this.#checkpointSuspension(delegation, output, event.cursor);
-          } catch (error) {
-            // 极快的子 Agent 可能在本地保存挂起点之前已经回调。此时 Resume 已经
-            // 将原 Run 放回队列；旧 Leader 必须结束，不能与恢复执行并行汇总。
-            const latest = await this.delegations.get(delegationId);
-            if (latest?.result && TERMINAL_DELEGATION_STATUSES.has(latest.status)) {
-              throw new DelegationSuspendedError(input.runId, delegationId);
-            }
-            throw error;
-          }
-          this.logger?.info(
-            {
-              ...lifecycleFields,
-              stage: "delegation_suspended",
-              delegationId,
-              externalExecutionId: execution.ref.executionId,
-            },
-            "子 Agent 已投递，释放当前执行并等待 Resume 回调",
-          );
-          throw new DelegationSuspendedError(input.runId, delegationId);
         }
         if (event.type === "progress") {
           delegation = await this.#checkpointProgress(delegation, output, event.cursor);
@@ -936,18 +967,18 @@ export class DelegationService {
     return updated;
   }
 
-  /** callAgent 已可靠受理；持久化 Resume 截止时间后才允许 Run 进入挂起态。 */
-  async #checkpointSuspension(
+  /** callAgent 已可靠受理；保存唯一的绝对回调截止时间，不受子流活动影响。 */
+  async #checkpointCallbackWait(
     delegation: Delegation,
     partialOutput: string,
-    cursor: string | undefined,
   ): Promise<Delegation> {
     const acceptedAt = this.now();
     const updated: Delegation = {
       ...delegation,
       partialOutput,
-      ...(cursor ? { connectorCursor: cursor } : {}),
-      callbackDeadlineAt: acceptedAt + this.#timeouts.firstActivityMs,
+      // 恢复崩溃前已可靠投递的 callback 执行时，不得把绝对截止时间向后延长。
+      callbackDeadlineAt:
+        delegation.callbackDeadlineAt ?? acceptedAt + this.#timeouts.callbackMs,
       version: delegation.version + 1,
       updatedAt: acceptedAt,
     };

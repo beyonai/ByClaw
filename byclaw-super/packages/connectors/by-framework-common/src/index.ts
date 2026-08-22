@@ -12,7 +12,6 @@ import {
 import type {
   AgentConnector,
   ConnectorCapabilities,
-  ConnectorEvent,
   ConnectorExecution,
   ConnectorHealth,
   ConnectorRequest,
@@ -71,6 +70,7 @@ export interface ByFrameworkConnectorLogger {
 export class ByFrameworkConnector implements AgentConnector {
   readonly id: string;
   readonly capabilities: ConnectorCapabilities = {
+    completionMode: "callback",
     streaming: false,
     cancellation: true,
     artifacts: false,
@@ -207,7 +207,7 @@ export class ByFrameworkConnector implements AgentConnector {
     };
     return {
       ref,
-      events: this.#suspendedEvents(),
+      completionMode: "callback",
       cancel,
     };
   }
@@ -225,7 +225,7 @@ export class ByFrameworkConnector implements AgentConnector {
     }
     return {
       ref,
-      events: this.#suspendedEvents(),
+      completionMode: "callback",
       cancel: this.#createCancel(ref.executionId, childSessionId, targetAgentType),
     };
   }
@@ -278,10 +278,6 @@ export class ByFrameworkConnector implements AgentConnector {
       })();
       await cancelPromise;
     };
-  }
-
-  async *#suspendedEvents(): AsyncIterable<ConnectorEvent> {
-    yield { type: "suspended" };
   }
 }
 
