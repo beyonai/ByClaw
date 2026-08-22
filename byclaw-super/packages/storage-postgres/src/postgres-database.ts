@@ -36,11 +36,7 @@ import {
   type PoolConfig,
   type QueryResultRow,
 } from "pg";
-import {
-  LATEST_POSTGRES_SCHEMA_VERSION,
-  POSTGRES_TABLE_PREFIX,
-  POSTGRES_MIGRATIONS,
-} from "./migrations.js";
+import { POSTGRES_TABLE_PREFIX, POSTGRES_MIGRATIONS } from "./migrations.js";
 
 const NON_TERMINAL_RUN_STATUSES = [
   "CREATED",
@@ -80,8 +76,6 @@ export interface PostgresDatabaseConfig {
 
 export interface PostgresSchemaStatus {
   healthy: boolean;
-  currentVersion: number;
-  expectedVersion: number;
   message?: string;
 }
 
@@ -184,29 +178,14 @@ export class PostgresDatabase {
     }
   }
 
-  /** 检查连接和 schema 版本；不在 readiness 路径自动执行 DDL。 */
+  /** 仅检查数据库连通性；表结构由发布前的运维脚本负责。 */
   async health(): Promise<PostgresSchemaStatus> {
     try {
-      const result = await this.pool.query<{ version: number | string | null }>(
-        `SELECT max(version) AS version
-           FROM ${table(this.schema, "schema_migrations")}`,
-      );
-      const currentVersion = Number(result.rows[0]?.version ?? 0);
-      return {
-        healthy: currentVersion === LATEST_POSTGRES_SCHEMA_VERSION,
-        currentVersion,
-        expectedVersion: LATEST_POSTGRES_SCHEMA_VERSION,
-        ...(currentVersion === LATEST_POSTGRES_SCHEMA_VERSION
-          ? {}
-          : {
-              message: `PostgreSQL schema version ${currentVersion}, expected ${LATEST_POSTGRES_SCHEMA_VERSION}`,
-            }),
-      };
+      await this.pool.query("SELECT 1");
+      return { healthy: true };
     } catch (error) {
       return {
         healthy: false,
-        currentVersion: 0,
-        expectedVersion: LATEST_POSTGRES_SCHEMA_VERSION,
         message: toError(error).message,
       };
     }

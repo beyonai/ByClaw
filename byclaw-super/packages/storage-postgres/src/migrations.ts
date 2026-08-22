@@ -1,6 +1,6 @@
 /**
  * 显式维护数据库版本。迁移只允许向前执行，生产环境由独立 migration job 调用；
- * 应用启动仅检查版本，不会擅自修改 schema。
+ * 应用启动只检查数据库连通性，不校验版本，也不会擅自修改 schema。
  */
 export interface PostgresMigration {
   version: number;
