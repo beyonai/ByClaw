@@ -8,7 +8,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@byclaw/by-framework": "1.5.2",
+    "@byclaw/by-framework": "1.5.3",
     "ioredis": "5.10.1",
     "uuid": "9.0.1",
     "zod": "4.3.6"
