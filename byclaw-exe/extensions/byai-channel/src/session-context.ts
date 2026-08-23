@@ -174,6 +174,8 @@ export interface ActiveSdkRequest {
   to: string;
   sessionId: string;
   traceId: string;
+  /** Parent id from the Gateway command that owns every root-level SDK event. */
+  parentMessageId: string;
   createdAt: number;
   firstAnswerDeltaAt?: number;
   firstVisibleResponseAt?: number;
@@ -582,18 +584,27 @@ export function withSdkEmitMetadata(
         traceId?: string;
         agentId?: string;
         agentName?: string;
+        parentMessageId?: string;
     },
 ): EmitOptions {
     const laneMetadata = buildSdkEmitMetadata(params);
-    if (Object.keys(laneMetadata).length === 0) {
-        return options ?? {};
-    }
+    const inheritedParentMessageId = params.parentMessageId?.trim();
+    const explicitParentMessageId = options?.parentMessageId?.trim();
+    const parentMessageId = explicitParentMessageId && explicitParentMessageId !== "-1"
+        ? explicitParentMessageId
+        : inheritedParentMessageId || explicitParentMessageId;
+    const hasLaneMetadata = Object.keys(laneMetadata).length > 0;
     return {
         ...(options ?? {}),
-        metadata: {
-            ...(options?.metadata ?? {}),
-            ...laneMetadata,
-        },
+        ...(parentMessageId ? { parentMessageId } : {}),
+        ...(hasLaneMetadata
+            ? {
+                metadata: {
+                    ...(options?.metadata ?? {}),
+                    ...laneMetadata,
+                },
+            }
+            : {}),
     };
 }
 
@@ -604,6 +615,7 @@ export function withActiveSdkRequestEmitMetadata(
     return withSdkEmitMetadata(options, {
         laneMetadata: request.laneMetadata,
         traceId: request.traceId,
+        parentMessageId: request.parentMessageId,
     });
 }
 
@@ -870,6 +882,7 @@ export function registerActiveSdkRequest(params: {
     to: string;
     sessionId: string;
     traceId: string;
+    parentMessageId?: string;
     createdAt?: number;
     language: Language;
     languageProvided: boolean;
@@ -906,6 +919,7 @@ export function registerActiveSdkRequest(params: {
         to: params.to,
         sessionId: params.sessionId,
         traceId: params.traceId,
+        parentMessageId: normalizeAlias(params.parentMessageId) ?? "-1",
         createdAt: params.createdAt ?? Date.now(),
         boundRunIds: new Set<string>(),
         nativeChildRuns: new Map<string, NativeChildRunRecord>(),
@@ -954,6 +968,7 @@ export function registerActiveSdkRequest(params: {
         createdAt: request.createdAt,
         fields: {
             sessionId: request.sessionId,
+            parentMessageId: request.parentMessageId,
             language: request.language,
             languageProvided: request.languageProvided,
             channelExtension: request.channelExtension,
@@ -1429,14 +1444,15 @@ export async function completeActiveSdkRequest(
             ]);
             if (result?.error) {
                 const errorText = mapAgentEndErrorForSdk(latest, result.error);
+                const errorOptions = withActiveSdkRequestEmitMetadata(latest, {
+                    eventType: EventType.ANSWER_DELTA,
+                    messageId: generateRandomId(),
+                });
                 await sdkEmitter.emitChunk(
                     latest.sessionId,
                     latest.traceId || "",
-                    errorText,
-                    {
-                        eventType: EventType.ANSWER_DELTA,
-                        messageId: generateRandomId(),
-                    },
+                    buildSdkChunkEvent(errorText, errorOptions),
+                    errorOptions,
                 );
             }
         } catch (error) {

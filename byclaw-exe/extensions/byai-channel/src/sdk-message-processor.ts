@@ -526,6 +526,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     to: To,
     sessionId: message.sessionId,
     traceId: message.traceId,
+    parentMessageId: message.parentMessageId,
     createdAt: receivedAt,
     language: message.language,
     languageProvided: message.languageProvided,
@@ -686,7 +687,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
                           buildAgentReadyTitle(message.language, sessionAgentName),
                           withSdkEmitMetadata(
                             {
-                                parentMessageId: "-1",
+                                parentMessageId: activeRequest.parentMessageId,
                                 eventType: EventType.REASONING_LOG_DELTA,
                                 contentType: SseReasonMessageType.think_title,
                               },
@@ -695,6 +696,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
                               traceId: message.traceId,
                               agentId: laneMetadata?.agentId ?? sessionAgentId,
                               agentName: laneMetadata?.agentName ?? sessionAgentName,
+                              parentMessageId: activeRequest.parentMessageId,
                             },
                           ),
                         );
@@ -705,7 +707,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
                         onCompactionStart: async () => {
                           markActiveSdkCompactionRetryPending(sessionKey, true);
                           await onReply("", {
-                            parentMessageId: "-1",
+                            parentMessageId: activeRequest.parentMessageId,
                             eventType: EventType.ANSWER_DELTA,
                             contentType: "5007",
                           });
@@ -815,7 +817,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
         // 压缩续跑后仍溢出：放弃续跑。先发终态告知（正文，完成门仍持），再释放门让 settle
         // 收尾，避免门先放开导致 APP_STREAM_RESPONSE 抢在终态文案之前发出。
         await onReply(buildContextOverflowText(message.language), {
-          parentMessageId: "-1",
+          parentMessageId: activeRequest.parentMessageId,
           eventType: EventType.ANSWER_DELTA,
         });
         markActiveSdkOverflowContinuePending(sessionKey, false);

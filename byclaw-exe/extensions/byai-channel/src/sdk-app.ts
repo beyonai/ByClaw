@@ -464,6 +464,7 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
 
     const gatewayMsg = command;
     const { sessionId, messageId, traceId, metadata } = gatewayMsg.header;
+    const parentMessageId = gatewayMsg.header.parentMessageId?.trim() || "-1";
     if (!sessionId || !messageId) {
       context.setStreamFinished(true);
       return AgentState.COMPLETED;
@@ -489,6 +490,7 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
       files,
       text,
       messageId,
+      parentMessageId,
       sessionId,
       userId: this.userCode,
       timestamp: Date.now(),
@@ -550,6 +552,7 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
         {
           laneMetadata: currentInbound.laneMetadata,
           traceId: currentInbound.traceId,
+          parentMessageId: currentInbound.parentMessageId,
         },
       );
       await this.emitter.emitState(
@@ -588,6 +591,7 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
             const emitOptions = withSdkEmitMetadata(options, {
               laneMetadata: currentInbound.laneMetadata,
               traceId: currentInbound.traceId,
+              parentMessageId: currentInbound.parentMessageId,
             });
             await this.emitter.emitChunk(
               currentInbound.sessionId,

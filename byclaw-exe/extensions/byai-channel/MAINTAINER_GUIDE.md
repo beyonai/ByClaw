@@ -82,6 +82,8 @@ SDK 输出仍通过独立注册的 `GatewayDataEmitter` 发回 Redis/SDK，而�
 
 Gateway worker 路径由 channel 在完成门闭合后先发送一次 `FINAL_ANSWER`，随后发送各 lane 的 `APP_STREAM_RESPONSE`。`processCommand` 返回相同 `content`，供 by-framework 写入回给 source agent 的 `ResumeCommand`；`AgentContext.setFinalAnswerEmitted(true)` 阻止基类重复发送 final。multi-agent batch 按原始 lane 顺序合并非空结果，使用 agent name 或 lane id 标注来源。
 
+SDK 消息树的 root parent 继承当前 Gateway command 的 `header.parentMessageId`；只有没有上游 parent 的顶层入站才回退为 `-1`。该值随 lane 写入 `ActiveSdkRequest`，因此延迟到达的正文、thinking、工具顶层消息、compaction、错误和终态事件仍属于同一个 callAgent 节点。工具输入/输出明细继续以对应 `toolCallId` 为 parent，保留工具消息内部层级。
+
 > TODO：`remote-task-watch` 与标准 `RESUME` 当前依靠发送端 `waitForReply` 语义保持路径互斥，尚未实现跨路径原子认领/幂等。未来若 tracked call 改为保留 source agent，必须先设计统一 delivery owner，禁止 watcher follow-up 与 `RESUME` 同时回灌。
 
 停止时调用 `runner.stop({ cancelActiveExecutions: true })`，先终止在途 OpenClaw dispatch 并等待 `handleMessage` 收敛，再由 runner 停 heartbeat、释放 worker lock 和关闭阻塞 reader；最后才关闭 emitter 使用的 Redis 连接。

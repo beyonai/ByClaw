@@ -126,6 +126,7 @@ describe("ByaiChannelGatewayWorker", () => {
     const command = new AskAgentCommand(
       new MessageHeader("message-ask", "session-ask", "trace-ask", {
         targetAgentType: "BYCLAW_EXE_user-test",
+        parentMessageId: "caller-message",
       }),
       "hello",
     );
@@ -139,6 +140,7 @@ describe("ByaiChannelGatewayWorker", () => {
     expect(deliverReplyToAgentViaSdk.mock.calls[0]?.[0]?.message).toEqual(
       expect.objectContaining({
         messageId: "message-ask",
+        parentMessageId: "caller-message",
         sessionId: "session-ask",
         text: "hello",
         traceId: "trace-ask",

@@ -193,7 +193,7 @@ async function emitCompactionHookNotice(
         }),
         options: {
             messageId: `${ctx.runId || request.sessionKey}:compaction:${phase}:hook`,
-            parentMessageId: "-1",
+            parentMessageId: request.parentMessageId,
             eventType: EventType.REASONING_LOG_DELTA,
             contentType: SseReasonMessageType.think_status_title,
             objectType: "compaction",
