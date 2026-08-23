@@ -10,6 +10,7 @@ import {
   markActiveSdkCompactionRetryPending,
   markActiveSdkRootLifecycleFinished,
   markActiveSdkRootLifecycleStarted,
+  recordActiveSdkRootStreamAnswer,
   resolveActiveSdkRequestBySessionKey,
   resolveActiveSdkRunBinding,
   resolveSdkEmitter,
@@ -312,6 +313,11 @@ async function handleAssistantEvent(
       : generateRandomId(),
   };
   const answerStreamKey = `${event.runId}:assistant:answer`;
+  if (!streamContext.isContinuingAnswer) {
+    // A tool/reasoning transition starts a new assistant message. finalAnswer
+    // keeps only this run's last assistant message, not earlier process chatter.
+    clearIncrementalTextSnapshot(answerStreamKey);
+  }
   const explicitDelta = stringValue(event.data?.delta);
   const cumulativeText = stringValue(event.data?.text);
   const isReplacement = event.data?.replace === true;
@@ -334,6 +340,13 @@ async function handleAssistantEvent(
         runId: event.runId,
         segmentText: getIncrementalTextSnapshot(answerStreamKey),
         isChildSession,
+      });
+    }
+    if (!isChildSession) {
+      recordActiveSdkRootStreamAnswer({
+        request,
+        runId: event.runId,
+        answer: getIncrementalTextSnapshot(answerStreamKey),
       });
     }
   };

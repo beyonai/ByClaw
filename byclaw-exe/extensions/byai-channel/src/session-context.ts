@@ -14,6 +14,18 @@ import {
 } from "./channel-request-context.js";
 import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import type { ConnectorAuthorizationMap } from "./connector-authorization.js";
+import {
+    createFrameworkFinalAnswerLedger,
+    markRootRunOverflowFragment,
+    recordRootRunAgentEnd,
+    recordRootRunLifecycleTerminal,
+    recordRootRunStarted,
+    recordRootRunStreamAnswer,
+    resolveFrameworkFinalAnswer,
+    resolveFrameworkFinalAnswerTerminalOutcome,
+    type FrameworkFinalAnswerTerminalOutcome,
+    type FrameworkFinalAnswerLedger,
+} from "./framework-final-answer.js";
 
 const CHANNEL_ID = "byai-channel" as const;
 const DEFAULT_ACCOUNT_KEY = "default";
@@ -228,6 +240,14 @@ export interface ActiveSdkRequest {
   /** 本 request 已自动续跑次数。达 MAX_OVERFLOW_AUTO_CONTINUE 后不再续，防压缩后仍溢出的死循环。 */
   overflowContinueCount: number;
   hasEmittedContent: boolean;
+  /** Root-only result ledger used to build the by-framework terminal answer. */
+  frameworkFinalAnswerLedger: FrameworkFinalAnswerLedger;
+  /** Snapshot produced only after every business completion gate has closed. */
+  frameworkFinalAnswer?: string;
+  frameworkFinalAnswerTerminalOutcome: FrameworkFinalAnswerTerminalOutcome;
+  /** Gateway workers defer APP_STREAM_RESPONSE until after FINAL_ANSWER. */
+  deferFrameworkFinalization: boolean;
+  frameworkCompletionPrepared: boolean;
   lastReasoningText: string;
   lastReasoningMessageId: string;
   language: Language;
@@ -858,6 +878,7 @@ export function registerActiveSdkRequest(params: {
     abortController?: AbortController;
     beyondToken?: string;
     laneMetadata?: ByaiLaneMetadata;
+    deferFrameworkFinalization?: boolean;
 }): ActiveSdkRequest {
     pruneStaleActiveSdkRequests();
     const existingByTarget = activeSdkRequestsByTarget.get(
@@ -904,6 +925,11 @@ export function registerActiveSdkRequest(params: {
         overflowContinuationCompactionObserved: false,
         overflowContinueCount: 0,
         hasEmittedContent: false,
+        frameworkFinalAnswerLedger: createFrameworkFinalAnswerLedger(),
+        frameworkFinalAnswer: undefined,
+        frameworkFinalAnswerTerminalOutcome: "none",
+        deferFrameworkFinalization: params.deferFrameworkFinalization === true,
+        frameworkCompletionPrepared: false,
         lastReasoningText: "",
         lastReasoningMessageId: "",
         language: params.language,
@@ -1059,6 +1085,7 @@ export function markActiveSdkRootLifecycleStarted(
         return undefined;
     }
     const normalizedRunId = normalizeAlias(runId);
+    recordRootRunStarted(request.frameworkFinalAnswerLedger, normalizedRunId);
     request.activeRootRunId = normalizedRunId;
     if (normalizedRunId && request.pendingDelegatedFollowupRunId === normalizedRunId) {
         request.pendingDelegatedFollowupRunId = undefined;
@@ -1116,6 +1143,11 @@ export function markActiveSdkRootLifecycleFinished(
     ) {
         return undefined;
     }
+    recordRootRunLifecycleTerminal(
+        request.frameworkFinalAnswerLedger,
+        normalizedRunId,
+        phase,
+    );
     request.rootLifecyclePhase = phase;
     request.activeRootRunId = undefined;
     if (!request.pendingDelegatedFollowupRunId) {
@@ -1411,6 +1443,16 @@ export async function completeActiveSdkRequest(
             console.error("Error waiting for agent end result:", error);
         }
     }
+    latest.frameworkFinalAnswer = resolveFrameworkFinalAnswer(
+        latest.frameworkFinalAnswerLedger,
+    );
+    latest.frameworkFinalAnswerTerminalOutcome = resolveFrameworkFinalAnswerTerminalOutcome(
+        latest.frameworkFinalAnswerLedger,
+    );
+    if (latest.deferFrameworkFinalization) {
+        latest.frameworkCompletionPrepared = true;
+        return true;
+    }
     const stateOptions = withActiveSdkRequestEmitMetadata(latest, {
         eventType: EventType.APP_STREAM_RESPONSE,
     });
@@ -1422,6 +1464,79 @@ export async function completeActiveSdkRequest(
     );
     clearActiveSdkRequestRecord(latest);
     return true;
+}
+
+/**
+ * Emit the lane terminator after the owning GatewayWorker has emitted the
+ * aggregate FINAL_ANSWER. Keeping these steps separate preserves event order.
+ */
+export async function finalizePreparedActiveSdkRequest(
+    request: ActiveSdkRequest | undefined,
+): Promise<boolean> {
+    if (!request || !request.frameworkCompletionPrepared) {
+        return false;
+    }
+    const latest = resolveActiveSdkRequestBySessionKey(request.sessionKey);
+    if (!latest || latest !== request) {
+        return false;
+    }
+    const sdkEmitter = resolveSdkEmitter(latest.accountId);
+    if (!sdkEmitter) {
+        throw new Error(`No active SDK emitter for account: ${latest.accountId}`);
+    }
+    const stateOptions = withActiveSdkRequestEmitMetadata(latest, {
+        eventType: EventType.APP_STREAM_RESPONSE,
+    });
+    await sdkEmitter.emitState(
+        latest.sessionId,
+        latest.traceId || "",
+        buildSdkStateEvent("", stateOptions),
+        stateOptions,
+    );
+    clearActiveSdkRequestRecord(latest);
+    return true;
+}
+
+export function recordActiveSdkRootStreamAnswer(params: {
+    request: ActiveSdkRequest;
+    runId: string | undefined;
+    answer: string;
+}): void {
+    recordRootRunStreamAnswer(
+        params.request.frameworkFinalAnswerLedger,
+        params.runId,
+        params.answer,
+    );
+}
+
+export function recordActiveSdkRootAgentEnd(params: {
+    runId: string | undefined;
+    success: boolean;
+    messages: unknown[];
+}): void {
+    const normalizedRunId = normalizeAlias(params.runId);
+    if (!normalizedRunId) {
+        return;
+    }
+    const binding = activeSdkRequestsByRun.get(normalizedRunId);
+    if (!binding || binding.sessionKey !== binding.request.sessionKey) {
+        return;
+    }
+    recordRootRunAgentEnd(binding.request.frameworkFinalAnswerLedger, params);
+}
+
+export function markActiveSdkRootRunOverflowFragment(
+    sessionKey: string | undefined,
+    runId: string | undefined,
+): void {
+    if (!sessionKey) {
+        return;
+    }
+    const request = resolveActiveSdkRequestBySessionKey(sessionKey);
+    if (!request) {
+        return;
+    }
+    markRootRunOverflowFragment(request.frameworkFinalAnswerLedger, runId);
 }
 
 export async function markActiveSdkRequestSubagentSpawned(

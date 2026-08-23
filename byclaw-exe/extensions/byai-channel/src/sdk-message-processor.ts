@@ -16,6 +16,8 @@ import type { ByaiLaneMetadata, SdkInboundFile, SdkProcessorDeps } from "./types
 import {
   bindActiveSdkRequestRunId,
   clearActiveSdkRequestByTarget,
+  finalizePreparedActiveSdkRequest,
+  markActiveSdkRootRunOverflowFragment,
   registerActiveSdkRequest,
   resolveSdkLocalFilePath,
   registerAgentRunEndPromise,
@@ -23,6 +25,7 @@ import {
   markActiveSdkOverflowContinuePending,
   resolveActiveSdkRequestBySessionKey,
   withSdkEmitMetadata,
+  type ActiveSdkRequest,
 } from "./session-context.js";
 import { recordByclawChatContextMessage } from "./chat-context-store.js";
 import { ensureSessionReasoningStream, shouldForceReasoningStream } from "./reasoning-stream.js";
@@ -36,7 +39,7 @@ import {
   summarizeConnectorAuthorization,
 } from "./connector-authorization.js";
 import {
-  runSessionDispatchExclusive,
+  runSessionDispatchExclusiveLeased,
   sessionDispatchQueueDepth,
 } from "./session-dispatch-gate.js";
 import { waitForSdkSessionDispatchSettled } from "./session-dispatch-settle.js";
@@ -327,7 +330,14 @@ async function resolveSdkInboundMediaPayload(params: {
   };
 }
 
-export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise<void> {
+export interface SdkBusinessResult {
+  finalAnswer: string;
+  finalize: () => Promise<void>;
+}
+
+export async function deliverReplyToAgentViaSdk(
+  deps: SdkProcessorDeps,
+): Promise<SdkBusinessResult> {
   const { message, account, cfg: initialCfg, log } = deps;
 
   const rt = getByaiRuntime();
@@ -376,7 +386,7 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
   });
   const sessionKey = baseSessionKey;
 
-  const { meta } = await runSessionDispatchExclusive(sessionKey, async () => {
+  const { result, meta, release } = await runSessionDispatchExclusiveLeased(sessionKey, async () => {
     const dispatchCfg = await waitForBaiyingAgentConfig({
       runtime: rt,
       cfg,
@@ -400,6 +410,23 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
       `[diagnose-sdk] session dispatch dequeued: sessionKey=${sessionKey}, queueDepthBefore=${meta.queueDepthBefore}, gateWaitMs=${meta.waitMs}`,
     );
   }
+  let finalized = false;
+  return {
+    finalAnswer: result.finalAnswer,
+    finalize: async () => {
+      if (finalized) {
+        return;
+      }
+      finalized = true;
+      try {
+        await result.finalize();
+      } finally {
+        // Keep the FIFO lease through FINAL_ANSWER and APP_STREAM_RESPONSE so the
+        // next inbound cannot take ownership of the transcript between them.
+        release();
+      }
+    },
+  };
 }
 
 type DeliverReplyUnderGateDeps = SdkProcessorDeps & {
@@ -421,7 +448,7 @@ type DeliverReplyUnderGateDeps = SdkProcessorDeps & {
 
 async function deliverReplyToAgentViaSdkUnderGate(
   deps: DeliverReplyUnderGateDeps,
-): Promise<void> {
+): Promise<SdkBusinessResult> {
   const {
     message,
     account,
@@ -507,6 +534,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     abortController: deps.abortController,
     beyondToken: message.beyondToken,
     laneMetadata,
+    deferFrameworkFinalization: true,
   });
   const connectorAuthorization = summarizeConnectorAuthorization(
     activeRequest.authConnectorList,
@@ -713,6 +741,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
   }
 
   let deferDispatchSettleToAgentEvents = false;
+  let settleTimedOut = false;
   try {
     await runOneDispatch(message.text);
     await maybeContinueAfterOverflow();
@@ -737,6 +766,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
       const settle = await waitForSdkSessionDispatchSettled(sessionKey, {
         abortSignal: deps.abortController?.signal,
       });
+      settleTimedOut = settle.timedOut;
       log?.info?.(
         `[diagnose-sdk] session dispatch settled: sessionKey=${sessionKey}, settled=${String(settle.settled)}, timedOut=${String(settle.timedOut)}, waitMs=${settle.waitMs}, rootLifecyclePhase=${settle.rootLifecyclePhase ?? "none"}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
       );
@@ -772,6 +802,8 @@ async function deliverReplyToAgentViaSdkUnderGate(
         return;
       }
       // 读取即清快照；本轮续跑的 agent_end 会按需重新置位。
+      const overflowRunId = [...request.frameworkFinalAnswerLedger.runs.keys()].at(-1);
+      markActiveSdkRootRunOverflowFragment(sessionKey, overflowRunId);
       request.lastRunOverflowLength = false;
 
       if (deps.abortController?.signal.aborted) {
@@ -812,5 +844,56 @@ async function deliverReplyToAgentViaSdkUnderGate(
         includeMedia: false,
       });
     }
+  }
+
+  if (settleTimedOut) {
+    clearActiveSdkRequestByTarget(accountId, To);
+    throw new Error(`byai-channel business completion timed out: sessionKey=${sessionKey}`);
+  }
+  if (deferDispatchSettleToAgentEvents) {
+    try {
+      await waitForPreparedFrameworkCompletion(activeRequest, deps.abortController?.signal);
+    } catch (error) {
+      clearActiveSdkRequestByTarget(accountId, To);
+      throw error;
+    }
+  }
+  if (!activeRequest.frameworkCompletionPrepared) {
+    clearActiveSdkRequestByTarget(accountId, To);
+    throw new Error(`byai-channel business completion did not prepare a result: sessionKey=${sessionKey}`);
+  }
+  if (activeRequest.frameworkFinalAnswerTerminalOutcome === "failure") {
+    clearActiveSdkRequestByTarget(accountId, To);
+    throw new Error(`byai-channel root agent run failed: sessionKey=${sessionKey}`);
+  }
+  return {
+    finalAnswer: activeRequest.frameworkFinalAnswer ?? "",
+    finalize: async () => {
+      const finalized = await finalizePreparedActiveSdkRequest(activeRequest);
+      if (!finalized) {
+        throw new Error(`byai-channel failed to finalize SDK stream: sessionKey=${sessionKey}`);
+      }
+    },
+  };
+}
+
+async function waitForPreparedFrameworkCompletion(
+  request: ActiveSdkRequest,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  const startedAt = Date.now();
+  const timeoutMs = 30 * 60 * 1000;
+  while (!request.frameworkCompletionPrepared) {
+    if (abortSignal?.aborted) {
+      throw abortSignal.reason instanceof Error
+        ? abortSignal.reason
+        : new Error(String(abortSignal.reason || "task cancelled"));
+    }
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error(
+        `byai-channel deferred business completion timed out: sessionKey=${request.sessionKey}`,
+      );
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
   }
 }
