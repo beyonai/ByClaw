@@ -226,6 +226,9 @@ Leader 和 Connector 共用 `interaction.requested` / `interaction.responded` �
 Leader system prompt 要求只在短澄清会实质改变结果、且采用默认值有风险时提问；只问消除
 歧义所需的最少问题，同一时刻只允许一个未解决交互，提问后必须等待工具结果。submit、skip、
 cancel 等生命周期动作只由 UI/runtime 发出。
+用户交互默认最多等待 15 分钟，可通过 `RUN_USER_INTERACTION_TIMEOUT_MS` 覆盖。截止时间会随
+`interaction.requested` 事件持久化，进程重启或跨实例接管后仍按原截止时间收敛；超时
+后 Run 进入 `FAILED`。
 
 ## 环境配置
 

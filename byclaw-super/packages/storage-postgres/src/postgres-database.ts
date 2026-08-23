@@ -1176,11 +1176,12 @@ export class PostgresRunExecutionQueue implements RunExecutionQueue {
             WHERE run_id = $1`,
           [candidate.run_id],
         );
+        // 同一 Run 的事件锁和 WAITING_AGENT 状态复查保证只有一个扫描事务到达这里；
+        // 使用普通 INSERT，避免 openGauss 不支持 PostgreSQL 的 ON CONFLICT 语法。
         await client.query(
           `INSERT INTO ${table(this.schema, "callback_timeout_outbox")} (
              run_id, created_at, updated_at
-           ) VALUES ($1, $2, $2)
-           ON CONFLICT (run_id) DO NOTHING`,
+           ) VALUES ($1, $2, $2)`,
           [candidate.run_id, date(expiredAt)],
         );
         await notifyRunEvent(client, this.schema, candidate.run_id);

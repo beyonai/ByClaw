@@ -88,10 +88,23 @@ type ActiveRun = { controller: AbortController; leader: LeaderSession };
 type PendingLeaderInteraction = {
   runId: string;
   resolve(response: UserInteractionResponse): void;
+  reject(error: unknown): void;
 };
 
 const DOWNSTREAM_MODEL_FAILURE_USER_MESSAGE =
   "下游模型调用异常，请切换模型或者联系管理员";
+const USER_INTERACTION_TIMEOUT_ERROR_CODE = "USER_INTERACTION_TIMEOUT";
+const USER_INTERACTION_TIMEOUT_USER_MESSAGE =
+  "等待用户操作超时，请重新发起请求";
+
+class UserInteractionTimeoutError extends Error {
+  constructor(interactionId: string, timeoutMs: number) {
+    super(
+      `${USER_INTERACTION_TIMEOUT_ERROR_CODE}: ${interactionId} exceeded ${timeoutMs}ms`,
+    );
+    this.name = "UserInteractionTimeoutError";
+  }
+}
 
 export interface RunServiceRuntimeOptions {
   executionQueue?: RunExecutionQueue;
@@ -108,6 +121,8 @@ export interface RunServiceRuntimeOptions {
   maxConcurrentRuns?: number;
   leaderCacheMaxEntries?: number;
   leaderCacheIdleTtlMs?: number;
+  /** Leader 结构化提问等待用户响应的上限；默认 15 分钟。 */
+  userInteractionTimeoutMs?: number;
   /** 清理已过期执行凭证的周期；默认 60 秒。 */
   credentialCleanupIntervalMs?: number;
   /**
@@ -136,6 +151,7 @@ export class RunService {
   readonly #leaseMs: number;
   readonly #queuePollMs: number;
   readonly #maxConcurrentRuns: number;
+  readonly #userInteractionTimeoutMs: number;
   readonly #credentialCleanupIntervalMs: number;
   readonly #attachmentResolver: AttachmentResolver | undefined;
   readonly #taskPlans: TaskPlanGateway | undefined;
@@ -163,6 +179,8 @@ export class RunService {
     this.#leaseMs = runtime.leaseMs ?? 30_000;
     this.#queuePollMs = runtime.queuePollMs ?? 500;
     this.#maxConcurrentRuns = runtime.maxConcurrentRuns ?? 10;
+    this.#userInteractionTimeoutMs =
+      runtime.userInteractionTimeoutMs ?? 900_000;
     this.#credentialCleanupIntervalMs =
       runtime.credentialCleanupIntervalMs ?? 60_000;
     this.#attachmentResolver = runtime.attachmentResolver;
@@ -926,12 +944,30 @@ export class RunService {
         if (requested?.data.source === "leader") {
           this.#persistentWaiting.add(latest.id);
           void this.#kickPersistentQueue();
-          const response = await this.#waitForInteractionResponse(
-            latest.id,
-            String(requested.data.interactionId),
-            requested.eventId,
-            runController.signal,
+          const interactionId = String(requested.data.interactionId);
+          const timing = interactionTiming(
+            requested,
+            this.#userInteractionTimeoutMs,
           );
+          let response: UserInteractionResponse;
+          try {
+            response = await this.#waitForInteractionResponse(
+              latest.id,
+              interactionId,
+              requested.eventId,
+              runController.signal,
+              timing.deadlineAt,
+              timing.timeoutMs,
+            );
+          } catch (error) {
+            if (
+              error instanceof UserInteractionTimeoutError &&
+              !runController.signal.aborted
+            ) {
+              runController.abort(error);
+            }
+            throw error;
+          }
           this.#persistentWaiting.delete(latest.id);
           leaderMessage = `${latest.input}
 
@@ -1120,17 +1156,21 @@ ${JSON.stringify(completedDelegations)}`;
         askUser: async ({ toolCallId, questions, signal }) => {
           validateInteractionQuestions(questions);
           const interactionId = `${current.id}:${toolCallId}`;
+          const requestedAt = this.now();
+          const deadlineAt = requestedAt + this.#userInteractionTimeoutMs;
           current = await this.#setStatus(current, "WAITING_USER", {
             interactionId,
             source: "leader",
           });
           const requestedEvent = await this.#appendRunEvent({
-            timestamp: this.now(),
+            timestamp: requestedAt,
             runId: current.id,
             type: "interaction.requested",
             data: {
               interactionId,
               source: "leader",
+              timeoutMs: this.#userInteractionTimeoutMs,
+              deadlineAt,
               request: {
                 questions,
                 uiPayload: toLegacyFormPayload(questions),
@@ -1154,12 +1194,18 @@ ${JSON.stringify(completedDelegations)}`;
                 interactionSignal.removeEventListener("abort", onAbort);
                 resolve(value);
               },
+              reject: (error) => {
+                interactionSignal.removeEventListener("abort", onAbort);
+                reject(error);
+              },
             });
             void this.#waitForInteractionResponse(
               current.id,
               interactionId,
               requestedEvent.eventId,
               interactionSignal,
+              deadlineAt,
+              this.#userInteractionTimeoutMs,
             )
               .then((value) => {
                 const pending = this.#pendingLeaderInteractions.get(interactionId);
@@ -1169,7 +1215,20 @@ ${JSON.stringify(completedDelegations)}`;
                 this.#pendingLeaderInteractions.delete(interactionId);
                 pending.resolve(value);
               })
-              .catch(() => undefined);
+              .catch((error: unknown) => {
+                const pending = this.#pendingLeaderInteractions.get(interactionId);
+                if (pending?.runId !== current.id) {
+                  return;
+                }
+                this.#pendingLeaderInteractions.delete(interactionId);
+                pending.reject(error);
+                if (
+                  error instanceof UserInteractionTimeoutError &&
+                  !runController.signal.aborted
+                ) {
+                  runController.abort(error);
+                }
+              });
           });
           if (!runController.signal.aborted) {
             current = await this.#setStatus(current, "RUNNING", {
@@ -1342,6 +1401,8 @@ ${JSON.stringify(completedDelegations)}`;
             },
           });
         }
+      } else if (error instanceof UserInteractionTimeoutError) {
+        await this.#finishFailed(current, error.message);
       } else if (controller?.signal.aborted) {
         await this.#finishLocallyCancelledRun(current, "run cancelled");
       } else {
@@ -1585,39 +1646,93 @@ ${JSON.stringify(completedDelegations)}`;
     interactionId: string,
     afterEventId: number,
     signal: AbortSignal,
+    deadlineAt: number,
+    timeoutMs: number,
   ): Promise<UserInteractionResponse> {
-    for await (const event of this.events.stream(runId, afterEventId, signal)) {
-      if (
-        event.type === "interaction.responded" &&
-        event.data.interactionId === interactionId
-      ) {
-        const action =
-          event.data.action === "skip" || event.data.action === "cancel"
-            ? event.data.action
-            : "submit";
-        const answers =
-          event.data.answers &&
-          typeof event.data.answers === "object" &&
-          !Array.isArray(event.data.answers)
-            ? event.data.answers
-            : undefined;
-        return {
-          action,
-          ...(answers ? { answers } : {}),
-          ...(typeof event.data.text === "string"
-            ? { text: event.data.text }
-            : {}),
-        };
+    const timeoutError = new UserInteractionTimeoutError(
+      interactionId,
+      timeoutMs,
+    );
+    const timeoutController = new AbortController();
+    const remainingMs = Math.max(0, deadlineAt - this.now());
+    const timeout = setTimeout(() => {
+      timeoutController.abort(timeoutError);
+    }, remainingMs);
+    timeout.unref?.();
+    const interactionSignal = AbortSignal.any([
+      signal,
+      timeoutController.signal,
+    ]);
+
+    try {
+      for await (const event of this.events.stream(
+        runId,
+        afterEventId,
+        interactionSignal,
+      )) {
+        if (
+          event.type === "interaction.responded" &&
+          event.data.interactionId === interactionId
+        ) {
+          const action =
+            event.data.action === "skip" || event.data.action === "cancel"
+              ? event.data.action
+              : "submit";
+          const answers =
+            event.data.answers &&
+            typeof event.data.answers === "object" &&
+            !Array.isArray(event.data.answers)
+              ? event.data.answers
+              : undefined;
+          return {
+            action,
+            ...(answers ? { answers } : {}),
+            ...(typeof event.data.text === "string"
+              ? { text: event.data.text }
+              : {}),
+          };
+        }
       }
+      if (timeoutController.signal.aborted) {
+        throw timeoutError;
+      }
+      signal.throwIfAborted();
+      throw new Error(`Interaction event stream ended: ${interactionId}`);
+    } finally {
+      clearTimeout(timeout);
     }
-    throw new Error(`Interaction event stream ended: ${interactionId}`);
   }
 }
 
 function userMessageForRunFailure(error: string): string | undefined {
-  return error.startsWith("Leader model call failed:")
-    ? DOWNSTREAM_MODEL_FAILURE_USER_MESSAGE
-    : undefined;
+  if (error.startsWith("Leader model call failed:")) {
+    return DOWNSTREAM_MODEL_FAILURE_USER_MESSAGE;
+  }
+  if (error.startsWith(`${USER_INTERACTION_TIMEOUT_ERROR_CODE}:`)) {
+    return USER_INTERACTION_TIMEOUT_USER_MESSAGE;
+  }
+  return undefined;
+}
+
+function interactionTiming(
+  requested: RunEvent,
+  defaultTimeoutMs: number,
+): { deadlineAt: number; timeoutMs: number } {
+  const storedTimeoutMs = requested.data.timeoutMs;
+  const timeoutMs =
+    typeof storedTimeoutMs === "number" &&
+    Number.isFinite(storedTimeoutMs) &&
+    storedTimeoutMs > 0
+      ? storedTimeoutMs
+      : defaultTimeoutMs;
+  const deadlineAt = requested.data.deadlineAt;
+  return {
+    deadlineAt:
+      typeof deadlineAt === "number" && Number.isFinite(deadlineAt)
+        ? deadlineAt
+        : requested.timestamp + timeoutMs,
+    timeoutMs,
+  };
 }
 
 function latestLeaderModel(run: Run) {

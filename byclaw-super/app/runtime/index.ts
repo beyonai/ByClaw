@@ -110,6 +110,7 @@ function buildRunServiceOptions(config: AppConfig, database: PostgresDatabase) {
     maxConcurrentRuns: config.worker.maxConcurrency,
     leaderCacheMaxEntries: config.piSessionCacheMaxEntries,
     leaderCacheIdleTtlMs: config.piSessionCacheIdleTtlMs,
+    userInteractionTimeoutMs: config.runUserInteractionTimeoutMs,
     credentialCleanupIntervalMs: config.runCredentialCleanupIntervalMs,
   };
 }

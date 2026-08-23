@@ -1497,6 +1497,87 @@ describe("RunService", () => {
     await service.dispose();
   });
 
+  it("fails a native Leader interaction when the user response times out", async () => {
+    const leaderFactory: LeaderSessionFactory = {
+      async create() {
+        return {
+          contextRevision: 0,
+          async run(input) {
+            await input.askUser({
+              toolCallId: "tool-timeout",
+              questions: [
+                {
+                  header: "确认",
+                  question: "是否继续？",
+                  options: [
+                    { label: "继续", description: "继续执行" },
+                    { label: "停止", description: "停止执行" },
+                  ],
+                },
+              ],
+            });
+            return { text: "unexpected" };
+          },
+          checkpoint: () => undefined,
+          markCommitted: () => undefined,
+          abort: async () => undefined,
+          dispose: () => undefined,
+        };
+      },
+      async health() {
+        return { healthy: true };
+      },
+    };
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      new DelegationService(new ConnectorRegistry(), delegations, events),
+      leaderFactory,
+      Date.now,
+      undefined,
+      { userInteractionTimeoutMs: 10 },
+    );
+    const session = await service.createSession({ owner: { userCode: "user" } });
+    const run = await service.createRun({
+      sessionId: session.id,
+      message: "等待超时",
+      agentList: [],
+    });
+
+    await waitFor(async () => (await service.getRun(run.id))?.status === "FAILED");
+
+    expect(await service.getRun(run.id)).toMatchObject({
+      status: "FAILED",
+      error: expect.stringContaining("USER_INTERACTION_TIMEOUT"),
+    });
+    const requested = (await events.list(run.id)).find(
+      (event) => event.type === "interaction.requested",
+    );
+    expect(requested?.data).toMatchObject({
+      timeoutMs: 10,
+      deadlineAt: expect.any(Number),
+    });
+    expect(
+      (await events.list(run.id)).find((event) => event.type === "run.failed")
+        ?.data,
+    ).toMatchObject({
+      userMessage: "等待用户操作超时，请重新发起请求",
+    });
+    await expect(
+      service.respondToInteraction(run.id, String(requested?.data.interactionId), {
+        action: "submit",
+        text: "迟到的回答",
+      }),
+    ).rejects.toThrow("Run is already terminal:");
+    await service.dispose();
+  });
+
   it("continues a persisted native interaction after a process restart", async () => {
     const receivedMessages: string[] = [];
     const leaderFactory: LeaderSessionFactory = {
@@ -1554,6 +1635,7 @@ describe("RunService", () => {
       data: {
         interactionId: "native-restart-interaction",
         source: "leader",
+        deadlineAt: Date.now() + 60_000,
         request: { questions: [] },
       },
     });
@@ -1584,6 +1666,94 @@ describe("RunService", () => {
     expect(receivedMessages[0]).toContain("原始任务");
     expect(receivedMessages[0]).toContain("恢复后的答案");
     expect((await service.getRun(run.id))?.finalAnswer).toBe("recovered");
+    await service.dispose();
+  });
+
+  it("expires a persisted native interaction at its original deadline", async () => {
+    let leaderRuns = 0;
+    const leaderFactory: LeaderSessionFactory = {
+      async create() {
+        return {
+          contextRevision: 0,
+          async run() {
+            leaderRuns += 1;
+            return { text: "unexpected" };
+          },
+          checkpoint: () => undefined,
+          markCommitted: () => undefined,
+          abort: async () => undefined,
+          dispose: () => undefined,
+        };
+      },
+      async health() {
+        return { healthy: true };
+      },
+    };
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const queue = new InMemoryRunExecutionQueue();
+    const session: Session = {
+      id: "session-native-expired",
+      owner: { userCode: "user-1" },
+      sessionContext: { schemaVersion: 1 },
+      sessionContextVersion: 1,
+      contextRevision: 0,
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const run: Run = {
+      id: "run-native-expired",
+      sessionId: session.id,
+      input: "原始任务",
+      thinkingLevel: "off",
+      agentList: [],
+      status: "WAITING_USER",
+      baseContextRevision: 0,
+      attemptNo: 1,
+      executionStage: "USER_INTERACTION_WAITING",
+      version: 2,
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    await sessions.save(session);
+    await runs.save(run);
+    await events.append({
+      timestamp: 100,
+      runId: run.id,
+      type: "interaction.requested",
+      data: {
+        interactionId: "native-expired-interaction",
+        source: "leader",
+        timeoutMs: 100,
+        deadlineAt: 200,
+        request: { questions: [] },
+      },
+    });
+    await queue.enqueue(run);
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      new DelegationService(new ConnectorRegistry(), delegations, events),
+      leaderFactory,
+      () => 10_000,
+      undefined,
+      {
+        executionQueue: queue,
+        leaseMs: 1_000,
+        queuePollMs: 5,
+        userInteractionTimeoutMs: 5_000,
+      },
+    );
+
+    service.start();
+    await waitFor(async () => (await service.getRun(run.id))?.status === "FAILED");
+
+    expect(leaderRuns).toBe(0);
+    expect((await service.getRun(run.id))?.error).toContain("exceeded 100ms");
     await service.dispose();
   });
 

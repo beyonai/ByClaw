@@ -64,6 +64,7 @@ export const APP_CONFIG_DEFAULTS = {
   run: {
     leaseMs: 30_000,
     queuePollMs: 500,
+    userInteractionTimeoutMs: 900_000,
     credentialMaxTtlMs: 7_200_000,
     credentialCleanupIntervalMs: 60_000,
   },

@@ -193,11 +193,11 @@ describe("Postgres Run callback locking", () => {
     expect(
       statements.filter((sql) => sql.includes("INSERT INTO") && sql.includes("run_events")),
     ).toHaveLength(2);
-    expect(
-      statements.some(
-        (sql) => sql.includes("INSERT INTO") && sql.includes("callback_timeout_outbox"),
-      ),
-    ).toBe(true);
+    const timeoutOutboxInsert = statements.find(
+      (sql) => sql.includes("INSERT INTO") && sql.includes("callback_timeout_outbox"),
+    );
+    expect(timeoutOutboxInsert).toBeDefined();
+    expect(timeoutOutboxInsert).not.toContain("ON CONFLICT");
   });
 
   it("retries a deadlocked database transaction with a fresh client", async () => {
