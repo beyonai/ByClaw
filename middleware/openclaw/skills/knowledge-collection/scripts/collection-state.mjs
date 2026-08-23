@@ -84,6 +84,43 @@ function articleIdentity({ sourceSkill = '', sourceUrl = '' } = {}) {
   return `${String(sourceSkill)}\n${String(sourceUrl)}`;
 }
 
+function normalizeDuplicateUrl(sourceUrl) {
+  let url;
+  try {
+    url = new URL(sourceUrl);
+  } catch {
+    return '';
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return '';
+  }
+  url.hash = '';
+  url.pathname = url.pathname.replace(/\/index\.html$/i, '/') || '/';
+  if (!url.pathname.endsWith('/')) {
+    url.pathname = `${url.pathname}/`;
+  }
+  url.searchParams.sort();
+  return url.toString();
+}
+
+function normalizeDuplicateGroups(metadata) {
+  let changed = false;
+  const representatives = new Map();
+  for (const item of metadata?.collection?.items || []) {
+    const normalizedUrl = normalizeDuplicateUrl(item?.sourceUrl || '');
+    const duplicateGroupKey = normalizedUrl || `source:${articleIdentity(item)}`;
+    const representative = representatives.get(duplicateGroupKey) || item.itemId;
+    representatives.set(duplicateGroupKey, representative);
+    const duplicateOf = representative === item.itemId ? null : representative;
+    if (item.duplicateGroupKey !== duplicateGroupKey || item.duplicateOf !== duplicateOf) {
+      item.duplicateGroupKey = duplicateGroupKey;
+      item.duplicateOf = duplicateOf;
+      changed = true;
+    }
+  }
+  return { changed };
+}
+
 function materializationFromCanonical(root, item) {
   const sanitizedPath = typeof item.fileName === 'string' ? item.fileName : null;
   const inferredMarkdown = sanitizedPath ? path.posix.join('markdown', path.posix.basename(sanitizedPath)) : null;
@@ -494,6 +531,7 @@ function loadSession(paths, { persistMigration = false, skipCanonicalValidation 
   const migratedMetadata = migrateMetadata(paths.root, rawMetadata, collectionResult);
   const normalized = normalizeCurrentMetadata(migratedMetadata);
   const metadata = normalized.metadata;
+  const duplicateGroups = normalizeDuplicateGroups(metadata);
   const materializations = normalizeMaterializations(paths, metadata);
   let collectionResultChanged = false;
   if (Array.isArray(collectionResult.items)) {
@@ -519,11 +557,12 @@ function loadSession(paths, { persistMigration = false, skipCanonicalValidation 
     ));
     collectionResultChanged = collectionResultChanged || collectionResult.items.length !== previousItems.length;
   }
+  collectionResultChanged = reconcileCanonicalView(collectionResult, metadata) || collectionResultChanged;
   validateMetadata(metadata);
   if (!skipCanonicalValidation) {
     validateCanonicalView(paths.root, collectionResult, metadata);
   }
-  const metadataChanged = migratedMetadata !== rawMetadata || normalized.changed || materializations.changed || migrated;
+  const metadataChanged = migratedMetadata !== rawMetadata || normalized.changed || duplicateGroups.changed || materializations.changed || migrated;
   const recoveryNeeded = materializations.recovered || migrated
     || session.collection?.schemaVersion !== '1.0';
   if (persistRecovery && ((persistMigration && metadataChanged) || recoveryNeeded)) {
@@ -580,6 +619,16 @@ function validateMetadata(metadata) {
       throw new Error(`inventory sourceSkill + sourceUrl 重复: ${identity.replace('\n', ' / ')}`);
     }
     seenArticleIdentities.add(identity);
+    const duplicateGroupKey = requireString(item?.duplicateGroupKey, `inventory ${itemId} duplicateGroupKey`);
+    if (item?.duplicateOf !== null && typeof item?.duplicateOf !== 'string') {
+      throw new Error(`inventory ${itemId} duplicateOf 必须是 itemId 或 null`);
+    }
+    if (item.duplicateOf !== null) {
+      const representative = metadata.collection.items.find((candidate) => candidate?.itemId === item.duplicateOf);
+      if (!representative || representative.duplicateGroupKey !== duplicateGroupKey) {
+        throw new Error(`inventory ${itemId} duplicateOf 必须指向同一重复组的条目`);
+      }
+    }
     if (!['materialized', 'pending', 'failed'].includes(item?.materialization?.status)) {
       throw new Error(`inventory ${itemId} materialization.status 无效`);
     }
@@ -633,6 +682,13 @@ function validateCanonicalView(root, collectionResult, metadata) {
   const materializedByPath = new Map(metadata.collection.items
     .filter((item) => item.materialization.status === 'materialized')
     .map((item) => [item.materialization.sanitizedPath, item]));
+  const canonicalByGroup = new Map();
+  for (const item of metadata.collection.items) {
+    if (item.materialization.status !== 'materialized' || canonicalByGroup.has(item.duplicateGroupKey)) {
+      continue;
+    }
+    canonicalByGroup.set(item.duplicateGroupKey, item);
+  }
   const seenPaths = new Set();
   for (const [index, item] of (Array.isArray(collectionResult.items) ? collectionResult.items : []).entries()) {
     if (!item || typeof item !== 'object' || typeof item.fileName !== 'string' || typeof item.markdown !== 'string') {
@@ -652,9 +708,14 @@ function validateCanonicalView(root, collectionResult, metadata) {
     if (item.url !== inventory.sourceUrl) {
       throw new Error(`collection-result.json canonical view URL 与 inventory 不一致: ${item.fileName}`);
     }
+    if (canonicalByGroup.get(inventory.duplicateGroupKey)?.itemId !== inventory.itemId) {
+      throw new Error(`collection-result.json canonical view 必须使用重复组主条目: ${item.fileName}`);
+    }
     validateMarkdownPath(root, item.fileName, `collection-result.json items[${index}].fileName`);
   }
-  const hiddenMaterializedPaths = [...materializedByPath.keys()].filter((sanitizedPath) => !seenPaths.has(sanitizedPath));
+  const hiddenMaterializedPaths = [...canonicalByGroup.values()]
+    .map((item) => item.materialization.sanitizedPath)
+    .filter((sanitizedPath) => !seenPaths.has(sanitizedPath));
   if (hiddenMaterializedPaths.length) {
     throw new Error(`materialized inventory 未出现在 collection-result.json canonical view: ${hiddenMaterializedPaths.join(', ')}`);
   }
@@ -684,16 +745,44 @@ function canonicalViewItem(item) {
     .map((key) => [key, item[key]]));
 }
 
+function reconcileCanonicalView(collectionResult, metadata) {
+  const existingByPath = new Map((collectionResult.items || []).map((item) => [item.fileName, canonicalViewItem(item)]));
+  const seenGroups = new Set();
+  const items = [];
+  for (const inventory of metadata.collection.items) {
+    if (inventory.materialization.status !== 'materialized' || seenGroups.has(inventory.duplicateGroupKey)) {
+      continue;
+    }
+    seenGroups.add(inventory.duplicateGroupKey);
+    const sanitizedPath = inventory.materialization.sanitizedPath;
+    items.push(existingByPath.get(sanitizedPath) || canonicalViewItem({
+      title: inventory.title,
+      url: inventory.sourceUrl,
+      author: '',
+      publishTime: '',
+      markdown: sanitizedPath,
+      fileName: sanitizedPath,
+    }));
+  }
+  const changed = JSON.stringify(items) !== JSON.stringify(collectionResult.items || []);
+  collectionResult.items = items;
+  return changed;
+}
+
 
 function metadataSummary(metadata) {
   const runs = (metadata.postProcessing?.runs || []).map((run) => runSummary(run));
+  const items = metadata.collection?.items || [];
+  const duplicateGroups = new Set(items.map((item) => item.duplicateGroupKey || item.itemId).filter(Boolean));
   return {
     schemaVersion: metadata.schemaVersion,
     collectionStatus: metadata.collection?.status,
-    items: metadata.collection?.items?.length || 0,
-    materialized: (metadata.collection?.items || []).filter((item) => item.materialization?.status === 'materialized').length,
-    pending: (metadata.collection?.items || []).filter((item) => item.materialization?.status === 'pending').length,
-    failed: (metadata.collection?.items || []).filter((item) => item.materialization?.status === 'failed').length,
+    items: items.length,
+    materialized: items.filter((item) => item.materialization?.status === 'materialized').length,
+    pending: items.filter((item) => item.materialization?.status === 'pending').length,
+    failed: items.filter((item) => item.materialization?.status === 'failed').length,
+    uniqueContentGroups: duplicateGroups.size,
+    duplicates: items.length - duplicateGroups.size,
     retention: metadata.retention,
     runs,
   };
@@ -1746,6 +1835,8 @@ export function cmdCollect(paths, args) {
     for (const update of items) {
       results.push(markOneMaterialized(paths, session, metadata, collectionResult, update));
     }
+    normalizeDuplicateGroups(metadata);
+    reconcileCanonicalView(collectionResult, metadata);
     // 登记完成后执行严格校验(与旧 init-session 后置校验语义一致)
     validateMetadata(metadata);
     validateCanonicalView(paths.root, collectionResult, metadata);
@@ -1878,12 +1969,24 @@ export function cmdExportViews(paths) {
 export function collectionStatus(paths) {
   // status 只写迁移/修复类恢复;正常 schema 2.0 读取不落盘。
   const loaded = loadSession(paths, { persistRecovery: true });
-  const { metadata, collectionResult } = loaded;
+  const { session, metadata, collectionResult } = loaded;
+  const items = metadata.collection.items;
+  const count = (status) => items.filter((item) => item.materialization?.status === status).length;
+  const materializationTarget = session.task?.materializationTarget || 'selected';
+  const pending = count('pending');
+  const failed = count('failed');
+  const duplicateGroups = new Set(items.map((item) => item.duplicateGroupKey || item.itemId).filter(Boolean));
   return {
     collectionStatus: metadata.collection.status,
-    items: metadata.collection.items.length,
-    materialized: metadata.collection.items
-      .filter((item) => item.materialization?.status === 'materialized').length,
+    items: items.length,
+    sourceRecords: items.length,
+    materialized: count('materialized'),
+    pending,
+    failed,
+    uniqueContentGroups: duplicateGroups.size,
+    duplicates: items.length - duplicateGroups.size,
+    materializationTarget,
+    deliveryComplete: materializationTarget === 'candidates' || (pending === 0 && failed === 0),
     runs: metadata.postProcessing.runs.length,
     retention: metadata.retention,
     canonicalItems: Array.isArray(collectionResult.items) ? collectionResult.items.length : 0,

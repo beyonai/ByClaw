@@ -16,22 +16,9 @@
  */
 'use strict';
 
-import { spawnSync } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import {
-  cmdInit, cmdPlan, cmdBranch, cmdAggregate, cmdReport, cmdResearchStatus,
-} from './research-state.mjs';
-import {
-  cmdCollect, cmdInspect, cmdRun, cmdCleanup, cmdUnlockStale, cmdSetRetention,
-  cmdRewriteImageLinks, cmdExportViews, collectionStatus,
-} from './collection-state.mjs';
-import {
-  cmdCrawlSeed, cmdCrawlNext, cmdCrawlMark, cmdCrawlStatus,
-} from './crawl-state.mjs';
-import { sessionPaths } from './session.mjs';
+import { executeLocalCommand } from './command-router.mjs';
+import { delegatePlatformCommand } from './platform-delegate.mjs';
 
-const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const VERSION = '2.1.0';
 
 function render(value, compact = false) {
@@ -58,6 +45,8 @@ const COMMAND_SPECS = {
       '--max-branches': '可选。正整数;研究分支总数上限',
       '--max-sources-per-branch': '可选。正整数;单分支来源数上限',
       '--max-search-rounds': '可选。正整数;检索轮数上限',
+      '--source-scope': 'JSON 数组;默认 ["public-internet"]. 可选 public-internet、dingtalk、feishu、wecom、ima',
+      '--materialization-target': 'candidates | selected(默认) | all。all 表示所有请求正文必须物化或如实标记失败/待处理',
       '--started-at': '可选。ISO 时间;缺省为当前时间',
       '--collection-result-input-file': '可选。预置 canonical collection-result.json',
       '--metadata-input-file': '可选。预置 collection metadata',
@@ -304,6 +293,151 @@ const LEGACY_ALIASES = new Map([
   ['record-run', 'run'],
 ]);
 
+const SCHEMA = {
+  absolutePath: { type: 'string', format: 'absolute-path' },
+  sessionDir: { type: 'string', format: 'absolute-path' },
+  file: { type: 'string', format: 'file-path' },
+  inputFile: { type: 'string', format: 'post-processing-input-file' },
+  jsonArray: { type: 'array', cliEncoding: 'json', items: { type: 'string' } },
+  jsonObject: { type: 'object', cliEncoding: 'json' },
+  boolean: { type: 'boolean' },
+  positiveInteger: { type: 'integer', minimum: 1 },
+};
+
+const COMMAND_SCHEMA_OVERRIDES = {
+  init: {
+    required: ['session-dir', 'query'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      query: { type: 'string', minLength: 1 },
+      mode: { type: 'string', enum: ['collection', 'research'], default: 'collection' },
+      breadth: { ...SCHEMA.positiveInteger, default: 3 },
+      depth: { ...SCHEMA.positiveInteger, default: 2 },
+      concurrency: { ...SCHEMA.positiveInteger, default: 2 },
+      'max-context-words': { ...SCHEMA.positiveInteger, default: 25000 },
+      'deadline-minutes': SCHEMA.positiveInteger,
+      'max-branches': SCHEMA.positiveInteger,
+      'max-sources-per-branch': SCHEMA.positiveInteger,
+      'max-search-rounds': SCHEMA.positiveInteger,
+      'source-scope': {
+        type: 'array', minItems: 1, uniqueItems: true, default: ['public-internet'], cliEncoding: 'json',
+        items: { type: 'string', enum: ['public-internet', 'dingtalk', 'feishu', 'wecom', 'ima'] },
+      },
+      'materialization-target': { type: 'string', enum: ['candidates', 'selected', 'all'], default: 'selected' },
+      'started-at': { type: 'string', format: 'date-time' },
+      'collection-result-input-file': SCHEMA.file,
+      'metadata-input-file': SCHEMA.file,
+    },
+  },
+  plan: {
+    required: ['session-dir', 'initial-search', 'channels'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      'initial-search': SCHEMA.jsonArray,
+      channels: SCHEMA.jsonObject,
+      followups: SCHEMA.jsonArray,
+      'combined-query': { type: 'string', minLength: 1 },
+    },
+  },
+  branch: {
+    required: ['session-dir', 'level', 'query'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      level: SCHEMA.positiveInteger,
+      query: { type: 'string', minLength: 1 },
+      'research-goal': { type: 'string', minLength: 1 },
+      learnings: SCHEMA.jsonArray,
+      citations: SCHEMA.jsonObject,
+      followups: SCHEMA.jsonArray,
+      sources: { ...SCHEMA.jsonArray, items: { type: 'string', minLength: 1, format: 'url-or-source-uri' } },
+      context: SCHEMA.jsonArray,
+      'search-queries': { type: 'array', cliEncoding: 'json', items: { type: 'object' } },
+      status: { type: 'string', enum: ['done', 'pending', 'failed'], default: 'done' },
+      reason: { type: 'string', minLength: 1 },
+      id: { type: 'string', minLength: 1 },
+      'parent-id': { type: 'string', minLength: 1 },
+    },
+    allOf: [
+      { if: { required: ['status'], properties: { status: { const: 'failed' } } }, then: { required: ['reason'] } },
+      { if: { required: ['status'], properties: { status: { enum: ['done', 'pending'] } } }, then: { required: ['research-goal'] } },
+      { if: { not: { required: ['status'] } }, then: { required: ['research-goal'] } },
+    ],
+  },
+  aggregate: { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir } },
+  report: {
+    required: ['session-dir'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      'report-path': { type: 'string', format: 'path-within-session' },
+      'stop-reason': { type: 'string', minLength: 1 },
+      'allow-incomplete': { ...SCHEMA.boolean, default: false },
+    },
+  },
+  collect: { required: ['session-dir', 'item-json-file'], properties: { 'session-dir': SCHEMA.sessionDir, 'item-json-file': SCHEMA.inputFile, 'dry-run': SCHEMA.boolean } },
+  inspect: { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir, operation: { type: 'string', enum: ['ingest', 'organize', 'external'] }, 'target-json': SCHEMA.jsonObject, 'drain-pending': SCHEMA.boolean, full: SCHEMA.boolean } },
+  run: { required: ['session-dir', 'run-json-file'], properties: { 'session-dir': SCHEMA.sessionDir, 'run-json-file': SCHEMA.inputFile, 'dry-run': SCHEMA.boolean, full: SCHEMA.boolean } },
+  cleanup: { required: ['session-dir', 'run-id'], properties: { 'session-dir': SCHEMA.sessionDir, 'run-id': { type: 'string', minLength: 1 }, 'dry-run': SCHEMA.boolean, full: SCHEMA.boolean, 'archive-deliverables': SCHEMA.boolean } },
+  'unlock-stale': { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir } },
+  'set-retention': { required: ['session-dir', 'keep'], properties: { 'session-dir': SCHEMA.sessionDir, keep: SCHEMA.boolean, 'dry-run': SCHEMA.boolean } },
+  'rewrite-image-links': {
+    required: ['session-dir'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir, 'resource-id': { type: 'string', minLength: 1 }, 'link-map-file': SCHEMA.inputFile,
+      'item-id': { type: 'array', cliEncoding: 'repeatable', items: { type: 'string', minLength: 1 } },
+      'item-ids': { type: 'array', cliEncoding: 'comma-separated', items: { type: 'string', minLength: 1 } },
+      'base-url': { type: 'string', format: 'http-origin' }, 'workspace-root': SCHEMA.absolutePath,
+      language: { type: 'string', default: 'zh-CN' }, 'dry-run': SCHEMA.boolean,
+    },
+    oneOf: [{ required: ['resource-id'] }, { required: ['link-map-file'] }],
+  },
+  'export-views': { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir } },
+  'crawl-seed': { required: ['session-dir', 'urls-file'], properties: { 'session-dir': SCHEMA.sessionDir, 'urls-file': SCHEMA.file, 'scope-prefix': { type: 'string', format: 'http-url' }, 'max-pages': SCHEMA.positiveInteger, depth: { ...SCHEMA.positiveInteger, default: 1 } } },
+  'crawl-next': { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir, limit: { ...SCHEMA.positiveInteger, default: 10 } } },
+  'crawl-mark': { required: ['session-dir', 'mark-json-file'], properties: { 'session-dir': SCHEMA.sessionDir, 'mark-json-file': SCHEMA.inputFile } },
+  'crawl-status': { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir } },
+  status: { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir, full: SCHEMA.boolean } },
+};
+
+function commandSchema() {
+  const commands = {};
+  for (const [name, spec] of Object.entries(COMMAND_SPECS)) {
+    if (spec.group === 'platform') {
+      const childScript = name === 'enterprise' ? 'enterprise-collection.mjs' : 'ingest.mjs';
+      commands[name] = {
+        type: 'delegated-command',
+        delegatedTo: {
+          script: `scripts/${childScript}`,
+          schemaCommand: `node scripts/${childScript} command-schema`,
+          command: name,
+        },
+        ...(spec.deprecated ? { deprecated: true } : {}),
+      };
+      continue;
+    }
+    const override = COMMAND_SCHEMA_OVERRIDES[name];
+    if (!override) {
+      throw new Error(`命令 ${name} 缺少 machine-readable schema`);
+    }
+    commands[name] = {
+      type: 'object',
+      additionalProperties: false,
+      required: override.required,
+      properties: override.properties,
+      schemaComplete: true,
+      ...(override.allOf ? { allOf: override.allOf } : {}),
+      ...(override.oneOf ? { oneOf: override.oneOf } : {}),
+      ...(spec.deprecated ? { deprecated: true } : {}),
+    };
+  }
+  return {
+    ok: true,
+    name: 'knowledge-collection',
+    schemaVersion: '1.0',
+    cli: { flagStyle: '--kebab-case', jsonArrayEncoding: 'JSON string array' },
+    commands,
+  };
+}
+
 function parseArgs(argv) {
   const args = {};
   const positionals = [];
@@ -413,30 +547,6 @@ function help() {
   };
 }
 
-function delegate(childScript, argv) {
-  const result = spawnSync(process.execPath, [path.join(SCRIPT_DIR, childScript), ...argv], {
-    stdio: ['inherit', 'pipe', 'pipe'],
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  if (result.stdout) {
-    process.stdout.write(result.stdout);
-  }
-  if (result.stderr) {
-    process.stderr.write(result.stderr);
-  }
-  if (result.error) {
-    if (!result.stdout && !result.stderr) {
-      process.stderr.write(`${childScript} 执行失败: ${result.error.message}\n`);
-    }
-    process.exitCode = 1;
-    return;
-  }
-  if (result.status !== 0) {
-    process.exitCode = result.status || 1;
-  }
-}
-
 function compactRequested(args) {
   return args.compact === true || args.compact === 'true' || args.compact === '1';
 }
@@ -453,14 +563,13 @@ function main() {
     render({ ok: true, name: 'knowledge-collection', version: VERSION }, compactRequested(args));
     return;
   }
-
-  // 平台维度:先委派,不得要求 --session-dir;--help 交给子脚本输出真实参数。
-  if (['list-kb', 'upload-doc', 'upload-images', 'upload-resource', 'normalize', 'store', 'ingest'].includes(command)) {
-    delegate('ingest.mjs', process.argv.slice(2));
+  if (command === 'command-schema') {
+    render(commandSchema(), compactRequested(args));
     return;
   }
-  if (command === 'enterprise') {
-    delegate('enterprise-collection.mjs', process.argv.slice(3));
+
+  // 平台维度:先委派,不得要求 --session-dir;--help 交给子脚本输出真实参数。
+  if (delegatePlatformCommand(command, process.argv.slice(2))) {
     return;
   }
 
@@ -475,107 +584,7 @@ function main() {
     throw new Error(`未知命令: ${command}`);
   }
 
-  // ── 研究维度 ──
-  if (canonical === 'init') {
-    render(cmdInit(args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'plan') {
-    render(cmdPlan(args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'branch') {
-    render(cmdBranch(args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'aggregate') {
-    render(cmdAggregate(args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'report') {
-    render(cmdReport(args), compactRequested(args));
-    return;
-  }
-
-  // ── 采集维度(需要 --session-dir) ──
-  const paths = sessionPaths(args['session-dir']);
-  if (canonical === 'collect') {
-    render(cmdCollect(paths, args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'inspect') {
-    render(cmdInspect(paths, args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'run') {
-    render(cmdRun(paths, args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'cleanup') {
-    render(cmdCleanup(paths, args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'crawl-seed') {
-    render(cmdCrawlSeed(paths, args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'crawl-next') {
-    render(cmdCrawlNext(paths, args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'crawl-mark') {
-    render(cmdCrawlMark(paths, args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'crawl-status') {
-    render(cmdCrawlStatus(paths), compactRequested(args));
-    return;
-  }
-  if (canonical === 'unlock-stale') {
-    render(cmdUnlockStale(paths), compactRequested(args));
-    return;
-  }
-  if (canonical === 'set-retention') {
-    render(cmdSetRetention(paths, args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'rewrite-image-links') {
-    render(cmdRewriteImageLinks(paths, args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'export-views') {
-    render(cmdExportViews(paths), compactRequested(args));
-    return;
-  }
-  if (canonical === 'status') {
-    const research = cmdResearchStatus(args);
-    const full = args.full === true || args.full === 'true';
-    if (full) {
-      const detail = cmdInspect(paths, { full: true });
-      render({
-        ok: true,
-        action: 'status',
-        task: research.task,
-        research: research.research,
-        collection: detail.metadata,
-        canonicalView: detail.collectionResult,
-        warnings: [...(research.warnings || []), ...(detail.warnings || [])],
-      }, compactRequested(args));
-      return;
-    }
-    const collection = collectionStatus(paths);
-    render({
-      ok: true,
-      action: 'status',
-      task: research.task,
-      research: research.research,
-      collection,
-      warnings: [...(research.warnings || []), ...(collection.warnings || [])],
-    }, compactRequested(args));
-    return;
-  }
-
-  throw new Error(`未知命令: ${command}`);
+  render(executeLocalCommand(canonical, args), compactRequested(args));
 }
 
 try {

@@ -68,10 +68,49 @@ function help() {
   };
 }
 
+function commandSchema() {
+  const source = { type: 'string', enum: ['dingtalk', 'feishu', 'wecom', 'ima'] };
+  const absolutePath = { type: 'string', format: 'absolute-path' };
+  const positiveLimit = { type: 'integer', minimum: 1, maximum: 500, default: 50 };
+  const concurrency = { type: 'integer', minimum: 1, maximum: 16, default: 4 };
+  return {
+    ok: true,
+    name: 'knowledge-collection-enterprise',
+    schemaVersion: '1.0',
+    cli: { flagStyle: '--kebab-case', commaSeparatedArrays: ['sources', 'item-ids'] },
+    commands: {
+      search: {
+        type: 'object', additionalProperties: false, required: ['source', 'query', 'output-dir'],
+        properties: { source, query: { type: 'string', minLength: 1 }, 'output-dir': absolutePath, limit: positiveLimit, concurrency, cursor: { type: 'string' }, 'metadata-only': { type: 'boolean', default: false }, 'source-options': { type: 'object', cliEncoding: 'json' } },
+      },
+      'search-all': {
+        type: 'object', additionalProperties: false, required: ['query', 'output-root'],
+        properties: { sources: { type: 'array', items: source, minItems: 1, uniqueItems: true, cliEncoding: 'comma-separated', default: ['dingtalk', 'feishu', 'wecom', 'ima'] }, query: { type: 'string', minLength: 1 }, 'output-root': absolutePath, limit: positiveLimit, concurrency, 'metadata-only': { type: 'boolean', default: true } },
+      },
+      materialize: {
+        type: 'object', additionalProperties: false, required: ['source', 'session-dir', 'item-ids', 'output-dir'],
+        properties: { source: { ...source, enum: ['dingtalk', 'feishu', 'ima'] }, 'session-dir': absolutePath, 'item-ids': { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', minLength: 1 }, cliEncoding: 'comma-separated' }, 'output-dir': absolutePath, concurrency },
+      },
+      resource: {
+        type: 'object', additionalProperties: false, required: ['source', 'url', 'output-dir'],
+        properties: { source, url: { type: 'string', format: 'http-url' }, 'output-dir': absolutePath, kb: { type: 'string', minLength: 1 }, 'minute-token': { type: 'string', minLength: 1 } },
+      },
+      'resume-resource': {
+        type: 'object', additionalProperties: false, required: ['source', 'session-dir', 'output-dir'],
+        properties: { source: { type: 'string', enum: ['wecom'] }, 'session-dir': absolutePath, 'output-dir': absolutePath },
+      },
+    },
+  };
+}
+
 async function main() {
   const { command, values } = parseArgs(process.argv.slice(2));
   if (!command || command === 'help' || command === '--help' || values.help === true || values.help === 'true') {
     render(help());
+    return;
+  }
+  if (command === 'command-schema') {
+    render(commandSchema());
     return;
   }
   if (command === 'wecom-smartpage') {

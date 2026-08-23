@@ -1,6 +1,6 @@
 {
   "name": "knowledge-collection-references",
-  "description": "knowledge-collection 的按需加载文档与子 skill 索引。子 skill 是抓取/处理战术，不可独立于采集编排器调用。",
+  "description": "knowledge-collection 的按需加载工作流、来源桥接与参数契约索引。主 SKILL.md 只负责触发、范围、交付级别与路由；子 skill 不可独立于采集编排器调用。",
   "skills": [
     {
       "name": "site-crawl",

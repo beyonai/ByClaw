@@ -11,6 +11,7 @@
   "task": { "query": "", "mode": "collection", "breadth": 3, "depth": 2, "concurrency": 2,
             "maxContextWords": 25000, "deadlineMinutes": null, "maxBranches": null,
             "maxSourcesPerBranch": null, "maxSearchRounds": null,
+            "sourceScope": ["public-internet"], "materializationTarget": "selected",
             "startedAt": "<iso-time>", "initialSearch": [], "followups": [],
             "combinedQuery": null, "stopReason": null, "status": "initialized" },
   "research": { "branches": [], "learnings": [], "citations": {},
@@ -24,6 +25,9 @@
 
 - `task` / `research`: 深化研究状态(研究问题、计划、分支、learnings、citations、context)。
   `task.mode=research` 时 cleanup 要求 report 已交付;`mode=collection` 用于单步采集。
+- `task.sourceScope`：本任务实际允许使用的来源，默认 `["public-internet"]`；企业来源只能因用户点名或明确内部语境加入。
+- `task.materializationTarget`：`candidates`、`selected` 或 `all`；`all` 要求每个请求正文已物化或明确标为 pending/failed，
+  但只有所有正文都已物化时 `deliveryComplete` 才为 `true`，才可称完整归档。
 - `collection`: 采集状态,字段与本文档其余章节描述的 metadata 完全一致(见下);
 - session.json 只能由脚本命令修改,禁止手工编辑;任何层级出现敏感字段名(token/Cookie/secrets 等)时拒绝持久化。
 
@@ -106,7 +110,11 @@ collection_filters:
 `sourceSkill`、来源 ID/URL、用户筛选和 `rawArtifacts` 组成非敏感恢复描述。缺少净化正文时，采集编排器据此先让
 原始执行器从 raw 重新净化；raw 不足时再由同一执行器补采。不得保存恢复所需的凭据。
 
-同一 `sourceSkill + sourceUrl` 视为同一篇文章；inventory 不得存在重复身份，并以最新操作为准。metadata 中的物化路径位于错误目录、文件缺失、
+同一 `sourceSkill + sourceUrl` 视为同一来源记录；inventory 不得存在相同来源身份，并以最新操作为准。HTTP(S) URL 另按去 fragment、
+去末尾 `index.html`、统一尾斜杠及 query 参数排序后的值生成 `duplicateGroupKey`。同组的所有来源记录和 provenance 必须保留，
+第一条为 provenance 主记录，其余条目以 `duplicateOf` 指向主记录；canonical view 每个重复组仅输出按 inventory 顺序选出的首个已物化代表。
+非 HTTP(S) 企业稳定 URI
+（如 `wecom-message:<message-id>`）各自独立，绝不按 URL 规则跨来源合并。metadata 中的物化路径位于错误目录、文件缺失、
 不是普通 Markdown 或与 status 矛盾时，不删除其指向的文件；状态脚本将该文章安全降级为 `pending`、清空无效当前路径、
 移出 canonical view 并返回警告，随后由原始执行器重新采集、净化。
 `sourceSkill` 与 `sourceUrl` 必须是非空、可恢复的稳定身份；没有网页 URL 的来源必须写入带来源命名空间的稳定 URI（例如

@@ -82,4 +82,4 @@ sanitized/
 `knowledge-collection` 按 [post-processing.md](../post-processing.md) 统一完成。
 ## Knowledge collection enterprise search
 
-Generic requests to collect articles, materials, or documents include DingTalk through the default `enterprise search-all` augmentation, even when the user does not name an enterprise platform. The connector reuses DWS discovery/authentication and records ranked candidates. Batch search defaults to metadata-only and isolates DWS authentication or invocation failures from other sources; use `enterprise materialize --session-dir ... --item-ids ... --output-dir <new dir>` to materialize selected pending candidates.
+Only a user-named DingTalk source or a clear internal-material request whose approved `sourceScope` includes DingTalk may invoke enterprise search. The connector reuses DWS discovery/authentication and records ranked candidates. Batch search defaults to metadata-only and isolates DWS authentication or invocation failures from selected sources; use `enterprise materialize --session-dir ... --item-ids ... --output-dir <new dir>` to materialize selected pending candidates.

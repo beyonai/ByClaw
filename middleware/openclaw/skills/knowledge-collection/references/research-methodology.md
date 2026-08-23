@@ -111,7 +111,8 @@
    「检索源分工」节)→ 读取全文(经 [agent-reach.md](agent-reach.md) 路由并委派其选中的来源执行器)
    → 过滤 → 登记采集产物。
 3. 采集产物登记: 执行器写出的 `collection-result.json` + raw/markdown/sanitized 产物,
-   经 `collect --item-json-file` 登记并物化;`sourceSkill + sourceUrl` 去重,learnings/citations 引用 `itemId`。
+   经 `collect --item-json-file` 登记并物化;同一 `sourceSkill + sourceUrl` 维持来源身份，HTTP(S) 跨来源重复项按
+   `duplicateGroupKey` 合并为一个 canonical 代表，learnings/citations 引用 `itemId`。
 4. 用 `branch --level N --query "..." --research-goal "..." --learnings "[...]" --citations "{...}"
    --followups "[...]" --sources "[...]" --search-queries "[...]" --context "[...]" --status done|pending|failed [--reason ...]`
    登记该分支,并说明失败原因。
@@ -162,16 +163,22 @@ online_search 只负责发现 URL,不得直接抓取网页:
    - 零 branch 时禁止 report;未达到配置 `depth` 时必须提供 `--stop-reason` 或 `--allow-incomplete`;
    - report 文件必须在会话目录内、非空且不能是符号链接。
 
-最终报告结构(用户未指定结构时):
+最终报告必须包含下列四个二级标题（其下可按用户需要补充分析章节）：
 
 ```markdown
 # [Title]
 
-## Executive Summary
-## Key Findings
-## Detailed Analysis
-## Open Questions / Limitations
-## References
+## 采集范围
+说明实际来源范围及其理由。
+
+## 采集成果
+说明来源记录、重复内容组、候选、已物化、pending 与 failed 数量，以及交付级别。
+
+## 来源与追溯
+列出引用、来源记录和 canonical 代表的可追溯关系。
+
+## 覆盖缺口与局限
+列出失败、未覆盖来源、pending 及其对结论的影响。
 ```
 
 ## 研究树日志

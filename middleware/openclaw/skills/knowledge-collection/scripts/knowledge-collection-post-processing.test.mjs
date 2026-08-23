@@ -6,10 +6,26 @@ import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 
 const scriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'knowledge-collection-post-processing.mjs');
+const unifiedScriptPath = resolve(dirname(new URL(import.meta.url).pathname), 'knowledge-collection.mjs');
 
 function runCli(args) {
   return new Promise((resolveRun) => {
     const child = spawn(process.execPath, [scriptPath, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('close', (code) => {
+      let json;
+      try { json = JSON.parse(stdout); } catch { json = undefined; }
+      resolveRun({ code, stdout, stderr, json });
+    });
+  });
+}
+
+function runUnifiedCli(args) {
+  return new Promise((resolveRun) => {
+    const child = spawn(process.execPath, [unifiedScriptPath, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk; });
@@ -232,6 +248,56 @@ async function testDuplicateArticleIdentityIsRejected() {
     const result = await runCli(['inspect', '--session-dir', root]);
     assert.equal(result.code, 1, result.stdout);
     assert.match(String(result.json?.error || ''), /sourceSkill.*sourceUrl.*重复/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testCrossSourceHttpContentIsGroupedWithoutDroppingProvenance() {
+  const value = metadata([inventoryItem('a'), inventoryItem('b')]);
+  value.collection.items[0].sourceUrl = 'https://example.com/docs/index.html?b=2&a=1#top';
+  value.collection.items[1].sourceUrl = 'https://example.com/docs/?a=1&b=2';
+  value.collection.items[1].sourceSkill = 'feishu';
+  value.collection.items[1].backend = 'feishu';
+  const root = await createSession(['a', 'b'], value);
+  try {
+    const collection = await readJson(join(root, 'collection-result.json'));
+    collection.items[0].url = value.collection.items[0].sourceUrl;
+    collection.items[1].url = value.collection.items[1].sourceUrl;
+    await writeFile(join(root, 'collection-result.json'), JSON.stringify(collection));
+
+    const result = await runUnifiedCli(['export-views', '--session-dir', root]);
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json.metadata.collection.items.length, 2);
+    assert.equal(result.json.collectionResult.items.length, 1);
+    const [first, second] = result.json.metadata.collection.items;
+    assert.equal(first.duplicateGroupKey, second.duplicateGroupKey);
+    assert.equal(second.duplicateOf, first.itemId);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testNonHttpEnterpriseUrisAreNotMerged() {
+  const value = metadata([inventoryItem('a'), inventoryItem('b')]);
+  value.collection.items[0].sourceUrl = 'wecom-message:123';
+  value.collection.items[1].sourceUrl = 'wecom-message:456';
+  value.collection.items[1].sourceSkill = 'wecom-cli';
+  value.collection.items[1].backend = 'wecom-cli';
+  const root = await createSession(['a', 'b'], value);
+  try {
+    const collection = await readJson(join(root, 'collection-result.json'));
+    collection.items[0].url = value.collection.items[0].sourceUrl;
+    collection.items[1].url = value.collection.items[1].sourceUrl;
+    await writeFile(join(root, 'collection-result.json'), JSON.stringify(collection));
+
+    const result = await runUnifiedCli(['export-views', '--session-dir', root]);
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json.collectionResult.items.length, 2);
+    const [first, second] = result.json.metadata.collection.items;
+    assert.notEqual(first.duplicateGroupKey, second.duplicateGroupKey);
+    assert.equal(first.duplicateOf, null);
+    assert.equal(second.duplicateOf, null);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1509,6 +1575,8 @@ await testMarkMaterializedUpdatesInventoryAndCanonicalView();
 await testRecordRunAndInspectResumeScope();
 await testSubsetSuccessRequiresResumeChoiceForUnselectedInventory();
 await testDuplicateArticleIdentityIsRejected();
+await testCrossSourceHttpContentIsGroupedWithoutDroppingProvenance();
+await testNonHttpEnterpriseUrisAreNotMerged();
 await testRecordRunRequiresExactSelectionSnapshot();
 await testRecordRunRequiresPendingEntryForEverySelectedItem();
 await testRecordRunValidatesDiscardConfirmationAndDerivedStatus();

@@ -11,11 +11,13 @@
 若该位置不可写，则回退到当前工作区的 `.by-sessions/<sessionId>/<collectionRunName>/<timestamp>/`。新 metadata
 写入 `storage.fallback`；只读兼容旧 `storageFallback`。
 
-完整文章清单全部写入 `sanitized/metadata.json`，但最多预存 10 个正文到 `sanitized/items/`。`collection-result.json.items`
-只列出当前实际存在的已物化正文，可为空数组。向用户返回已有正文的可点击预览文件链接，并明确展示完整、`partial`、
-缺失正文或失败状态；预览不得掩盖缺失正文。
+完整文章清单全部写入 `sanitized/metadata.json`。`materializationTarget=candidates` 只登记候选及元数据；`selected`
+可为用户选择或明确限定的正文预存最多 10 篇；`all` 则必须尝试物化每篇请求正文，无法取得的条目保留为 `pending` 或 `failed`。
+`collection-result.json.items` 只列出当前实际存在的已物化 canonical 正文，每个 HTTP(S) 重复组仅有一个代表，可为空数组。
+向用户返回已有正文的可点击预览文件链接，并明确展示候选/来源记录、重复组、已物化、pending、failed 和交付级别；预览不得掩盖缺失正文，
+也不得把候选或前 10 篇预存正文表述为“全部已归档”。
 canonical view 不携带 `sourceSkill` 或 `itemId`；这些字段以及物化路径的归属只由 metadata inventory 保存，状态脚本按
-`itemId` 和旧 `sanitizedPath` 更新 view，避免同 URL 的不同来源互相删除。
+`itemId` 和旧 `sanitizedPath` 更新 view，并以 `duplicateGroupKey` 保留跨来源 provenance 而不重复输出正文。
 
 ## 后处理选择
 
@@ -42,7 +44,8 @@ canonical view 不携带 `sourceSkill` 或 `itemId`；这些字段以及物化�
 已有 materialization 的路径错误、文件缺失或状态与路径矛盾时，不删除任何所指文件；脚本把该文章安全降级为 `pending`、
 移出 canonical view 并要求原始执行器重新物化。成功 run 不得建立在该无效物化状态上。
 
-采集 100 篇但只预存 10 篇时，若用户选择全部，必须在下游操作前按以上流程尝试物化其余 90 篇。
+采集 100 篇但只预存 10 篇时，`selected` 只能称为部分物化；用户要求全部或任务目标为 `all` 时，必须在交付或下游操作前
+按以上流程尝试物化其余 90 篇。任何未取得的正文保留为 pending/failed，并使 `deliveryComplete=false`。
 
 选中正文全部物化后、把正文交给任何下游操作之前，必须先改写图片链接。入库、知识整理和外部消费三条路径都消费同一批
 `sanitized/items/*.md`，都无法解析 `images/` 相对链接，因此该步骤对三者一律必要，不是入库专属。补采或重新物化产生

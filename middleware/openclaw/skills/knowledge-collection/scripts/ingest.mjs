@@ -2475,6 +2475,52 @@ async function printHelp() {
   });
 }
 
+function commandSchema() {
+  const file = { type: "string", format: "file-path" };
+  const url = { type: "string", format: "http-url" };
+  const target = {
+    "knowledge-base-resource-id": { type: "integer", minimum: 1 },
+    "knowledge-base-id": { type: "string", minLength: 1, deprecated: true },
+    "directory-path": { type: "string", minLength: 1, default: "/" },
+  };
+  const shared = {
+    "collection-result-file": file,
+    "collection-result-json": { type: "object", cliEncoding: "json", deprecated: true },
+    "markdown-file": { type: "array", items: file, minItems: 1, cliEncoding: "repeatable" },
+    "markdown-dir": { type: "string", format: "directory-path" },
+    "bycli-json-file": { ...file, deprecated: true },
+    "bycli-json": { type: "object", cliEncoding: "json", deprecated: true },
+    ...target,
+  };
+  return {
+    ok: true,
+    name: "knowledge-collection-ingest",
+    schemaVersion: "1.0",
+    cli: { flagStyle: "--kebab-case", stdin: "JSON object or Markdown text" },
+    validationNote: "This legacy executor accepts compatible input aliases. The schema lists supported inputs; command-specific runtime validation enforces target confirmation and resource safety.",
+    commands: {
+      "list-kb": { type: "object", additionalProperties: true, properties: {} },
+      normalize: { type: "object", additionalProperties: true, properties: shared },
+      "upload-doc": {
+        type: "object", additionalProperties: true, required: ["knowledge-base-resource-id", "confirmed-knowledge-base-resource-id", "confirmed-directory-path"],
+        properties: { ...target, "file-path": file, "file-url": url, "confirmed-knowledge-base-resource-id": { type: "integer", minimum: 1 }, "confirmed-directory-path": { type: "string", minLength: 1 }, "confirmed-overwrite-path": { type: "array", items: { type: "string" }, cliEncoding: "repeatable" } },
+      },
+      "upload-images": {
+        type: "object", additionalProperties: true, required: ["markdown-file", "knowledge-base-resource-id", "confirmed-knowledge-base-resource-id", "confirmed-directory-path"],
+        properties: { ...target, "markdown-file": { type: "array", minItems: 1, items: file, cliEncoding: "repeatable" }, "confirmed-knowledge-base-resource-id": { type: "integer", minimum: 1 }, "confirmed-directory-path": { type: "string", minLength: 1 } },
+      },
+      "upload-resource": {
+        type: "object", additionalProperties: true,
+        properties: { "file-url": url, "image-url": url, "resource-url": url, "file-path": file, "image-path": file, "resource-path": file, "allow-private-resource": { type: "boolean", default: false } },
+      },
+      ingest: {
+        type: "object", additionalProperties: true,
+        properties: { ...shared, "dry-run": { type: "boolean", default: false }, "confirmed-knowledge-base-resource-id": { type: "integer", minimum: 1 }, "confirmed-directory-path": { type: "string", minLength: 1 }, "confirmed-overwrite-path": { type: "array", items: { type: "string" }, cliEncoding: "repeatable" } },
+      },
+    },
+  };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const command = args._[0] || "help";
@@ -2483,6 +2529,10 @@ async function main() {
 
   if (command === "help" || args.help) {
     await printHelp();
+    return;
+  }
+  if (command === "command-schema") {
+    render(commandSchema());
     return;
   }
 

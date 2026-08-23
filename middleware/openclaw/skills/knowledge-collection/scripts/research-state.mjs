@@ -39,6 +39,9 @@ export const TREE_FILENAME = 'research-tree.md';
 export const REPORT_FILENAME = 'report.md';
 const BRANCH_STATUSES = new Set(['done', 'pending', 'failed']);
 const TASK_MODES = new Set(['research', 'collection']);
+const SOURCE_SCOPES = new Set(['public-internet', 'dingtalk', 'feishu', 'wecom', 'ima']);
+const MATERIALIZATION_TARGETS = new Set(['candidates', 'selected', 'all']);
+const REQUIRED_REPORT_HEADINGS = ['采集范围', '采集成果', '来源与追溯', '覆盖缺口与局限'];
 
 function parseJsonArg(value, fallback) {
   if (value === undefined || value === null || value === '') {
@@ -115,6 +118,57 @@ function nonEmptyStringList(value, label) {
     }
   }
   return items;
+}
+
+function sourceScope(value) {
+  const scopes = nonEmptyStringList(parseJsonArg(value, ['public-internet']), '--source-scope');
+  const seen = new Set();
+  for (const scope of scopes) {
+    if (!SOURCE_SCOPES.has(scope)) {
+      throw new Error(`--source-scope 仅支持 ${[...SOURCE_SCOPES].join(' | ')}，实际: ${scope}`);
+    }
+    if (seen.has(scope)) {
+      throw new Error(`--source-scope 不得重复: ${scope}`);
+    }
+    seen.add(scope);
+  }
+  return scopes;
+}
+
+function materializationTarget(value) {
+  const target = typeof value === 'string' && value.trim() ? value.trim() : 'selected';
+  if (!MATERIALIZATION_TARGETS.has(target)) {
+    throw new Error(`--materialization-target 必须是 ${[...MATERIALIZATION_TARGETS].join(' | ')}`);
+  }
+  return target;
+}
+
+function validateReportSections(reportPath) {
+  const report = fs.readFileSync(reportPath, 'utf8');
+  const missing = REQUIRED_REPORT_HEADINGS.filter((heading) => !new RegExp(`^##\\s+${heading}\\s*$`, 'm').test(report));
+  if (missing.length > 0) {
+    throw new Error(`报告缺少必填章节: ${missing.join('、')}`);
+  }
+}
+
+function deliverySummary(session) {
+  const items = session?.collection?.collection?.items || [];
+  const count = (status) => items.filter((item) => item?.materialization?.status === status).length;
+  const duplicateGroups = new Set(items.map((item) => item?.duplicateGroupKey || item?.itemId).filter(Boolean));
+  const materializationTarget = session?.task?.materializationTarget || 'selected';
+  const pending = count('pending');
+  const failed = count('failed');
+  return {
+    sourceScope: Array.isArray(session?.task?.sourceScope) ? session.task.sourceScope : ['public-internet'],
+    materializationTarget,
+    sourceRecords: items.length,
+    materialized: count('materialized'),
+    pending,
+    failed,
+    uniqueContentGroups: duplicateGroups.size,
+    duplicates: items.length - duplicateGroups.size,
+    deliveryComplete: materializationTarget === 'candidates' || (pending === 0 && failed === 0),
+  };
 }
 
 /** 深化研究的三个发现通道；plan 必须为每个通道显式表态。 */
@@ -471,6 +525,8 @@ export function cmdInit(args) {
   const maxBranches = optionalPositiveInt(args['max-branches'], '--max-branches', { max: 1000 });
   const maxSourcesPerBranch = optionalPositiveInt(args['max-sources-per-branch'], '--max-sources-per-branch', { max: 1000 });
   const maxSearchRounds = optionalPositiveInt(args['max-search-rounds'], '--max-search-rounds', { max: 1000 });
+  const effectiveSourceScope = sourceScope(args['source-scope']);
+  const effectiveMaterializationTarget = materializationTarget(args['materialization-target']);
   const startedAt = typeof args['started-at'] === 'string' && args['started-at'].trim()
     ? args['started-at'].trim()
     : new Date().toISOString();
@@ -501,6 +557,8 @@ export function cmdInit(args) {
       maxBranches,
       maxSourcesPerBranch,
       maxSearchRounds,
+      sourceScope: effectiveSourceScope,
+      materializationTarget: effectiveMaterializationTarget,
       startedAt,
       initialSearch: [],
       followups: [],
@@ -784,12 +842,21 @@ export function cmdReport(args) {
     if (stat.size === 0) {
       throw new Error(`报告文件不能为空: ${reportPath}`);
     }
+    validateReportSections(reportPath);
+    const summary = deliverySummary(session);
     session.research.reportPath = reportPath;
     session.task.stopReason = stopReason || null;
     session.task.status = 'complete';
     persistSession(paths, session);
     fs.writeFileSync(path.join(paths.root, TREE_FILENAME), renderTree(session), { encoding: 'utf8', mode: 0o600 });
-    return { ok: true, action: 'report', reportPath, treePath: path.join(paths.root, TREE_FILENAME), complete: maxLevel >= depth || allowIncomplete };
+    return {
+      ok: true,
+      action: 'report',
+      reportPath,
+      treePath: path.join(paths.root, TREE_FILENAME),
+      complete: maxLevel >= depth || allowIncomplete,
+      deliverySummary: summary,
+    };
   });
 }
 

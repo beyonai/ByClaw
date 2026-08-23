@@ -1,9 +1,8 @@
 ---
 name: site-crawl
 description: >
-  爬取一个产品的文档站/功能说明并产出产品解读报告。用 sitemap.xml / llms.txt 发现全站 URL，
-  用 crawl-seed / crawl-next / crawl-mark 维护 frontier，取内容仍委派 bycli web read。
-  这是 knowledge-collection 深化研究流程中的抓取战术，不可独立于采集编排器调用。
+  Use when the user asks to crawl a product documentation site or a batch of pages for a product report.
+  Do not use for one known URL; use the normal single-page collection route instead.
 triggers:
   - "爬这个产品的文档"
   - "整理这个产品的功能说明"
@@ -177,15 +176,25 @@ SaaS 控制台内的功能说明页常见 146 bytes 级别的登录墙响应，�
 ```markdown
 # [产品名] 产品解读
 
-## 一句话定位
-## 功能矩阵          <- 模块 → 能力 → 覆盖来源 itemId
-## 核心机制          <- 它靠什么做到的（架构/算法/数据流）
-## 集成与生态        <- API、SDK、CI、第三方集成
-## 定价与限制        <- 有明确来源才写，无则标注未覆盖
-## 适用场景          <- 场景 → 推荐/不推荐
-## 覆盖缺口          <- 登录墙、未抓取的路径、overCap 放弃的页数
-## References        <- itemId → sourceUrl
+## 采集范围
+说明文档站范围、来源范围、frontier 上限与筛选口径。
+
+## 采集成果
+说明来源记录、重复内容组、已物化、pending 和 failed 数量。
+
+### 一句话定位
+### 功能矩阵          <- 模块 → 能力 → 覆盖来源 itemId
+### 核心机制          <- 它靠什么做到的（架构/算法/数据流）
+### 集成与生态        <- API、SDK、CI、第三方集成
+### 定价与限制        <- 有明确来源才写，无则标注未覆盖
+### 适用场景          <- 场景 → 推荐/不推荐
+
+## 来源与追溯
+列出 `itemId → sourceUrl` 映射与 canonical 代表。
+
+## 覆盖缺口与局限
+登录墙、未抓取路径、`overCap` 放弃页数、failed 与 pending 项及其影响。
 ```
 
-`## 覆盖缺口` 是必填章节。frontier 里任何 `failed`、`skipped` 或 `overCap` 的数量都必须出现在这里，
+`## 覆盖缺口与局限` 是必填章节。frontier 里任何 `failed`、`skipped` 或 `overCap` 的数量都必须出现在这里，
 让读者能判断这份解读的完整度。
