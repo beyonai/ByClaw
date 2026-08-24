@@ -1,5 +1,5 @@
 ---
-name: online_search
+name: online-search
 description: 源码版 SearXNG 元搜索 CLI，一次调用聚合 40+ 搜索引擎结果并输出结构化 JSON。适合需要真实网页搜索结果、多引擎交叉验证、时间窗过滤（最近一天/周/月/年）、学术类别（arxiv/crossref/pubmed/openalex）或中文搜索（baidu/sogou/360search）的场景。基于 SearXNG 249 引擎元搜索内核，Python 3.12 + venv 运行，无需常驻服务。
 ---
 
@@ -7,15 +7,17 @@ description: 源码版 SearXNG 元搜索 CLI，一次调用聚合 40+ 搜索引�
 
 > **入口与使用前提（必读）**：被调用时，若本会话尚未读过本文件，**必须先打开完整通读本文**
 > （含参数表、输出格式、实测引擎可用性），再按其中命令面执行；禁止把技能名当作平台工具名调用
-> （如直接调 `online_search` 工具会报 "Tool not found"），禁止凭名称猜测 CLI 用法。
-> 本技能只负责**发现 URL**，取内容一律委派来源执行器（公共网页 `bycli`）。
+> （如直接调 `online-search` 工具会报 "Tool not found"），禁止凭名称猜测 CLI 用法。
+> 本技能只负责**发现 URL**，取内容一律委派来源执行器（公共网页 `bycli`）。通过
+> `knowledge-collection` 采集公共 URL 时，必须使用 `public-discover`，该命令会与 SearXNG
+> 并行运行 `hot_discovery`；直接运行本 CLI 仅用于独立调试。
 
 基于 SearXNG（249 引擎元搜索内核）的**进程内搜索 CLI（源码版）**：每次调用起一个进程，完成搜索后向 stdout 输出单个 JSON 对象并退出。**不启动 Web 服务、不监听端口、不写缓存**。
 
 ## 目录结构
 
 ```text
-online_search/
+online-search/
 ├── SKILL.md                     # 本技能
 ├── references/
 │   └── hot_discovery/           # ★ 热度发现子技能（与 searxng 并行，见下节）
@@ -144,7 +146,17 @@ searxng 给的是**相关性**排序，拿不到平台原生热度。需要「�
 **何时不要调用**：images / videos / music / files / dictionaries / translate / map / lyrics /
 radio / weather / icons —— 这 11 个维度**没有免登录热度源**，调用只是白跑。
 
-**并行方式**：两个进程同时起，各自输出 JSON 文件，再交给 `hot_discovery.mjs merge`：
+**独立调试时的并行方式**：两个进程同时起，各自输出 JSON 文件，再交给 `hot_discovery.mjs merge`。
+在 `knowledge-collection` 中不要手工拆开这三步，改用 `public-discover`：
+
+```bash
+node scripts/knowledge-collection.mjs public-discover \
+  --session-dir <会话目录> --query "AI agent framework" --category it
+```
+
+该命令把 `it` 传给热度发现，后者会补充 `general`；一条发现通道失败时仍保留另一条的结果。
+
+手工调试命令如下：
 
 ```bash
 # 通道 1（本技能）

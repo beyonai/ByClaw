@@ -1,10 +1,10 @@
 ---
 name: hot_discovery
-description: 通过 bycli 适配器按关键词检索并按平台原生热度排序，产出高热候选 URL。与 online_search 的 searxng 相关性检索并行使用，只负责发现 URL 与热度字段，不取正文。热度覆盖集中在 packages/science/it 维度，images/videos/music/translate/map/lyrics/radio/files/dictionaries/weather/icons 等维度无免登录热度源。
+description: 通过 bycli 适配器按关键词检索并按平台原生热度排序，产出高热候选 URL。与 online-search 的 searxng 相关性检索并行使用，只负责发现 URL 与热度字段，不取正文。热度覆盖集中在 packages/science/it 维度，images/videos/music/translate/map/lyrics/radio/files/dictionaries/weather/icons 等维度无免登录热度源。
 allowed-tools: read, exec
 ---
 
-# hot_discovery —— online_search 的热度发现通道
+# hot_discovery —— online-search 的热度发现通道
 
 > **入口前提**：本会话若未读过本文，先完整通读再执行。本子技能**只发现 URL 与热度字段，
 > 不取正文** —— 取内容一律回到 agent-reach 主路由表。
@@ -33,11 +33,13 @@ allowed-tools: read, exec
 `init` 会因目录非空直接失败，整条链断在第一步。
 
 固定顺序：**`init` → 三通道并行发现并分别写输入快照 → `merge` → 可选写 merged 快照**。
+由 `knowledge-collection` 发起公共发现时，使用 `public-discover` 完成 SearXNG 与本通道的并行和归并，
+不要手工单独运行本命令。
 
 ## 用法
 
 ```bash
-SKILL=<...>/online_search/references/hot_discovery/scripts
+SKILL=<...>/knowledge-collection/references/online-search/references/hot_discovery/scripts
 
 # ① 发现（与 searxng 并行跑）
 node $SKILL/hot_discovery.mjs search \
@@ -47,7 +49,7 @@ node $SKILL/hot_discovery.mjs search \
     --out <会话目录>/.post-processing-inputs/hot-discovery-$(date +%s).json
 
 # ② searxng 通道（另一个进程，同时跑）
-online_search/scripts/.venv/bin/python searxng_cli.py "AI agent framework" \
+<技能目录>/scripts/.venv/bin/python searxng_cli.py "AI agent framework" \
     --category it --max-results 20 > /tmp/sx.json
 
 # ③ 归并（两边都完成后）

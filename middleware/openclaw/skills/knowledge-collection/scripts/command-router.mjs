@@ -8,6 +8,7 @@ import {
 import {
   cmdCrawlSeed, cmdCrawlNext, cmdCrawlMark, cmdCrawlStatus,
 } from './crawl-state.mjs';
+import { runPublicDiscover } from './public-discovery.mjs';
 import { sessionPaths } from './session.mjs';
 
 const RESEARCH_HANDLERS = {
@@ -19,6 +20,7 @@ const RESEARCH_HANDLERS = {
 };
 
 const SESSION_HANDLERS = {
+  'public-discover': (paths, args) => runPublicDiscover(paths, args),
   collect: (paths, args) => cmdCollect(paths, args),
   inspect: (paths, args) => cmdInspect(paths, args),
   run: (paths, args) => cmdRun(paths, args),

@@ -101,7 +101,7 @@ mcporter call 'exa.web_search_exa(query: "query", numResults: 5)'
 mcporter call 'exa.get_code_context_exa(query: "code question", tokensNum: 3000)'
 ```
 
-擅长英文内容、技术文档与代码上下文搜索。中文检索优先 `online_search`
+擅长英文内容、技术文档与代码上下文搜索。中文检索优先 `online-search`
 （见 [online-search.md](online-search.md)），GitHub 仓库/代码搜索用 `gh`。
 
 ### 职场招聘

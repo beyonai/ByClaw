@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * hot_discovery.mjs — online_search 的热度发现通道
+ * hot_discovery.mjs — online-search 的热度发现通道
  *
  * 两个子命令：
  *   search --dimensions a,b --query "..." [--limit N] [--tiers 1,2] [--json]

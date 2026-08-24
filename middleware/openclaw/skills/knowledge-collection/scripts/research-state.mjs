@@ -193,7 +193,7 @@ function validateChannels(value) {
       `plan --channels 缺少通道: ${missing.join(', ')}。三个发现通道必须逐个表态：`
       + `{"builtin-routing":{"state":"used"},"searxng":{"state":"used"},"hot-discovery":{"state":"unavailable","reason":"..."}}。`
       + 'state 取值 used | unavailable | not-applicable；后两者必须带具体 reason。'
-      + '若尚未确认某通道能力边界，先通读其 SKILL.md（hot-discovery 见 online_search/references/hot_discovery/SKILL.md），'
+      + '若尚未确认某通道能力边界，先通读其 SKILL.md（hot-discovery 见 knowledge-collection/references/online-search/references/hot_discovery/SKILL.md），'
       + '或尝试调用并用实际结果作为排除依据，而非基于推测',
     );
   }

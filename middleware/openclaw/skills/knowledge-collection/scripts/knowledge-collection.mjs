@@ -30,6 +30,23 @@ function defineCommand(spec) {
 }
 
 const COMMAND_SPECS = {
+  'public-discover': defineCommand({
+    group: 'discovery',
+    title: '并行运行 SearXNG 与 hot-discovery，持久化并合并公共 URL 候选',
+    args: {
+      '--session-dir': '必填。已由 init 创建的会话目录',
+      '--query': '必填。公共互联网检索词',
+      '--category': '可选。SearXNG 类别，默认 general；同值传给 hot-discovery，后者额外补 general',
+      '--language': '可选。SearXNG 语言，默认 all',
+      '--pageno': '可选。SearXNG 页码，默认 1',
+      '--max-results': '可选。SearXNG 结果上限，默认 20',
+      '--timeout': '可选。SearXNG 超时秒数，默认 15',
+      '--time-range': '可选。SearXNG 时间范围：day | week | month | year',
+      '--tiers': '可选。hot-discovery 档位，默认 1,2,3',
+      '--limit': '可选。每个 hot-discovery 适配器的结果上限，默认 20',
+    },
+    example: 'knowledge-collection.mjs public-discover --session-dir /tmp/kc1 --query "DeepSeek Harness" --category it --language zh-CN',
+  }),
   init: defineCommand({
     group: 'research',
     title: '创建研究/采集会话骨架与 session.json',
@@ -305,6 +322,21 @@ const SCHEMA = {
 };
 
 const COMMAND_SCHEMA_OVERRIDES = {
+  'public-discover': {
+    required: ['session-dir', 'query'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      query: { type: 'string', minLength: 1 },
+      category: { type: 'string', default: 'general' },
+      language: { type: 'string', default: 'all' },
+      pageno: { ...SCHEMA.positiveInteger, default: 1 },
+      'max-results': { ...SCHEMA.positiveInteger, default: 20 },
+      timeout: { type: 'number', minimum: 0.001, default: 15 },
+      'time-range': { type: 'string', enum: ['day', 'week', 'month', 'year'] },
+      tiers: { type: 'string', default: '1,2,3' },
+      limit: { ...SCHEMA.positiveInteger, default: 20 },
+    },
+  },
   init: {
     required: ['session-dir', 'query'],
     properties: {

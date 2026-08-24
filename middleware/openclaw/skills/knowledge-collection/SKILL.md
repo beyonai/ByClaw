@@ -41,10 +41,11 @@ Read only the reference that matches the chosen workflow, plus `collection-contr
 ## 3. Execute through validated commands
 
 1. Create or load a session before discovery. Use `init` with the derived `--source-scope` and `--materialization-target`.
-2. Delegate retrieval to the selected source executor. Do not use `web_fetch`, `curl`, `wget`, `requests`, or another direct HTTP client to bypass it.
-3. Register only actual artifacts through `collect`; do not treat snippets as collected evidence or hand-edit inventory metadata.
-4. Use `status` before delivery. It distinguishes source records, duplicate groups, materialized bodies, pending bodies, failed bodies, and `deliveryComplete`.
-5. For research mode, call `report` before cleanup. For downstream processing, record the per-item result with `run` before cleanup.
+2. For public URL discovery that uses SearXNG, run `public-discover`. It always starts the relocated `online-search` and `hot_discovery` channels in parallel; hot discovery adds `general` itself and reports any unavailable coverage without suppressing SearXNG results.
+3. Delegate retrieval to the selected source executor. Do not use `web_fetch`, `curl`, `wget`, `requests`, or another direct HTTP client to bypass it.
+4. Register only actual artifacts through `collect`; do not treat snippets as collected evidence or hand-edit inventory metadata.
+5. Use `status` before delivery. It distinguishes source records, duplicate groups, materialized bodies, pending bodies, failed bodies, and `deliveryComplete`.
+6. For research mode, call `report` before cleanup. For downstream processing, record the per-item result with `run` before cleanup.
 
 Use `node scripts/knowledge-collection.mjs command-schema` for the machine-readable command contract. For a command marked `delegated-command`, read the executor schema named in `delegatedTo.schemaCommand`; `command --help` is the readable companion.
 

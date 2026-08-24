@@ -43,7 +43,7 @@ frontier 状态由 `scripts/crawl-state.mjs` 管理并落在 `session.json` 的 
 `retention=true, reason=research-report-pending`。判据落在归属上才收得住。
 
 用户给的是产品名而非文档站 URL 时（"分析 xxx 这个产品"），无论哪种 mode，
-文档站域名都由三信源初检查出（内置路由层 + `online_search` + `hot_discovery`），**不得凭产品名猜域名**。
+文档站域名都由三信源初检查出（内置路由层 + `online-search` + `hot_discovery`），**不得凭产品名猜域名**。
 `research` 模式下这步发生在 `plan` 之前；`collection` 模式下它是独立的一次发现，不需要 `plan`。
 
 `research` 模式里，"通读官方文档站"这一类分支的抓取环节才使用本文档的 sitemap + frontier 流程，
@@ -69,7 +69,7 @@ frontier 状态由 `scripts/crawl-state.mjs` 管理并落在 `session.json` 的 
 
 ## Step 1：发现全站 URL（优先 sitemap，不要靠搜索引擎）
 
-文档站的深层页面（`/docs/api/xxx`）搜索引擎大量不收录，`online_search` 的覆盖率不足以支撑「完整解读」。
+文档站的深层页面（`/docs/api/xxx`）搜索引擎大量不收录，`online-search` 的覆盖率不足以支撑「完整解读」。
 优先按以下顺序尝试，**取这些文件本身仍走 `bycli`**，不构成直连例外：
 
 ```bash

@@ -109,6 +109,11 @@ await (async () => {
   assert.equal(ih.json.command, 'init');
   assert.ok(ih.json.example.includes('--session-dir'));
 
+  const publicDiscoverHelp = await runCli(['public-discover', '--help']);
+  assert.equal(publicDiscoverHelp.json.ok, true);
+  assert.equal(publicDiscoverHelp.json.command, 'public-discover');
+  assert.match(publicDiscoverHelp.json.args['--category'], /general/);
+
   const schema = await runCli(['command-schema']);
   assert.equal(schema.code, 0, schema.stderr);
   assert.equal(schema.json.schemaVersion, '1.0');
@@ -130,6 +135,8 @@ await (async () => {
   assert.equal(schema.json.commands.run.properties['dry-run'].type, 'boolean');
   assert.equal(schema.json.commands['crawl-seed'].properties['max-pages'].type, 'integer');
   assert.equal(schema.json.commands['crawl-seed'].properties.depth.default, 1);
+  assert.deepEqual(schema.json.commands['public-discover'].required, ['session-dir', 'query']);
+  assert.equal(schema.json.commands['public-discover'].properties.category.default, 'general');
   assert.ok(schema.json.commands['rewrite-image-links'].oneOf);
   for (const [name, contract] of Object.entries(schema.json.commands)) {
     if (contract.type !== 'delegated-command') {
@@ -141,6 +148,12 @@ await (async () => {
   assert.equal(schema.json.commands.ingest.delegatedTo.schemaCommand, 'node scripts/ingest.mjs command-schema');
   assert.equal(schema.json.commands.enterprise.type, 'delegated-command');
   assert.equal(schema.json.commands.enterprise.delegatedTo.schemaCommand, 'node scripts/enterprise-collection.mjs command-schema');
+
+  const missingPublicDiscoverSession = await runCli([
+    'public-discover', '--session-dir', '/does-not-exist', '--query', 'q',
+  ]);
+  assert.equal(missingPublicDiscoverSession.code, 1);
+  assert.match(missingPublicDiscoverSession.json.error, /采集会话目录不存在/);
 
   const siteCrawlFrontmatter = readFileSync(siteCrawlSkillPath, 'utf8').split('---')[1];
   assert.match(siteCrawlFrontmatter, /Do not use for one known URL/);
@@ -300,7 +313,7 @@ await (async () => {
     '--research-goal', '找窗口内论文', '--learnings', '["AgentK"]',
     '--citations', '{"AgentK":"item-x1"}',
     '--sources', '["https://arxiv.org/abs/2608.04002"]',
-    '--search-queries', '[{"query":"arxiv ontology","skill":"online_search","engine":"arxiv","resultCount":3,"status":"success"}]']);
+    '--search-queries', '[{"query":"arxiv ontology","skill":"online-search","engine":"arxiv","resultCount":3,"status":"success"}]']);
   assert.equal(b.json.ok, true);
   assert.equal(b.json.id, 'L1-B1');
 
