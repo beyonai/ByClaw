@@ -1,0 +1,109 @@
+{
+  "action_code": "upsert_article_collection",
+  "action_name": "写入或更新文章合集",
+  "action_type": "OPERATION",
+  "action_desc": "按 id 或 (collection_name,collection_type) 业务键写入或更新合集；校验枚举、日期顺序",
+  "permission_roles": [
+    "ops",
+    "admin"
+  ],
+  "params": [
+    {
+      "paramCode": "id",
+      "paramName": "合集ID",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "collection_name",
+      "paramName": "合集名称",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "collection_type",
+      "paramName": "合集类型",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input",
+      "term_type_code": "wy93ovzs9p_article_collection_collection_type",
+      "term_data_type": "DICT_TERM"
+    },
+    {
+      "paramCode": "start_date",
+      "paramName": "业务周期开始",
+      "type": "date",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "end_date",
+      "paramName": "业务周期结束",
+      "type": "date",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "category",
+      "paramName": "核心内容赛道",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "target",
+      "paramName": "合集目标",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input",
+      "term_type_code": "wy93ovzs9p_article_collection_target",
+      "term_data_type": "DICT_TERM"
+    },
+    {
+      "paramCode": "description",
+      "paramName": "合集定位说明",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "status",
+      "paramName": "合集状态",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input",
+      "term_type_code": "wy93ovzs9p_article_collection_status",
+      "term_data_type": "DICT_TERM"
+    },
+    {
+      "paramCode": "success",
+      "paramName": "是否成功",
+      "type": "boolean",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "operation",
+      "paramName": "操作类型",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "error",
+      "paramName": "错误描述",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "code",
+      "paramName": "错误码",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    }
+  ]
+}

@@ -1,0 +1,83 @@
+{
+  "action_code": "find_collections_by_keyword",
+  "action_name": "按关键字模糊检索合集",
+  "action_type": "QUERY",
+  "action_desc": "按合集名称模糊检索（LIKE %kw%），按更新时间/创建时间倒序，支持分页；返回 collection_id、collection_name、collection_type 三列",
+  "permission_roles": [
+    "analyst",
+    "ops",
+    "admin"
+  ],
+  "params": [
+    {
+      "paramCode": "keyword",
+      "paramName": "合集名称关键字",
+      "type": "string",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "page",
+      "paramName": "页码（从 1 开始）",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "page_size",
+      "paramName": "每页条数（1-200）",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "success",
+      "paramName": "是否成功",
+      "type": "boolean",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "items",
+      "paramName": "命中合集列表",
+      "type": "array",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "total",
+      "paramName": "命中总数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "page",
+      "paramName": "当前页码",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "page_size",
+      "paramName": "每页条数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "error",
+      "paramName": "错误描述",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "code",
+      "paramName": "错误码",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    }
+  ]
+}

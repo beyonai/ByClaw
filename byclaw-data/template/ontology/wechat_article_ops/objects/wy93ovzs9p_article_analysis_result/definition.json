@@ -1,0 +1,79 @@
+{
+  "entity_code": "wy93ovzs9p_article_analysis_result",
+  "entity_name": "分析结果",
+  "entity_desc": "单篇/周报/合集三类分析的最终结果，含结构化分析 JSON、外部对标、HTML 报告、运行元数据、Reviewer 结果；run_id 为幂等键",
+  "submitted_fields": [
+    {
+      "property_code": "analysis_type",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "article_id",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "collection_id",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "period_start",
+      "data_type": "DATE"
+    },
+    {
+      "property_code": "period_end",
+      "data_type": "DATE"
+    },
+    {
+      "property_code": "stat_date",
+      "data_type": "DATE"
+    },
+    {
+      "property_code": "rating",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "structured_result",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "external_benchmarks",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "report_html",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "report_format",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "run_id",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "agent_version",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "prompt_version",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "metric_rule_version",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "input_fingerprint",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "review_result",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "status",
+      "data_type": "STRING"
+    }
+  ]
+}

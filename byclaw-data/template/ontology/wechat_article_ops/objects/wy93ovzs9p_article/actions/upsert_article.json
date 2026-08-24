@@ -1,0 +1,143 @@
+{
+  "action_code": "upsert_article",
+  "action_name": "写入或更新文章",
+  "action_type": "OPERATION",
+  "action_desc": "按 id 或 canonical_url 业务键写入/更新文章；校验 word_count 与 tags，正文变化时同步 content_hash",
+  "permission_roles": [
+    "ops",
+    "admin"
+  ],
+  "params": [
+    {
+      "paramCode": "id",
+      "paramName": "文章ID",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "title",
+      "paramName": "文章标题",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "publish_time",
+      "paramName": "发布时间",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "url",
+      "paramName": "原链接",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "canonical_url",
+      "paramName": "规范化唯一链接",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "content_text",
+      "paramName": "正文纯文本",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "content_hash",
+      "paramName": "正文版本哈希",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "category",
+      "paramName": "内容赛道",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "tags",
+      "paramName": "多标签(JSON数组字符串)",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "word_count",
+      "paramName": "字数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "has_video",
+      "paramName": "是否含视频",
+      "type": "boolean",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "has_audio",
+      "paramName": "是否含音频",
+      "type": "boolean",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "collection_id",
+      "paramName": "归属合集",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input",
+      "term_type_code": "wy93ovzs9p_article_collection_collection_name",
+      "term_data_type": "LIST_TERM"
+    },
+    {
+      "paramCode": "success",
+      "paramName": "是否成功",
+      "type": "boolean",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "operation",
+      "paramName": "操作类型",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "id",
+      "paramName": "记录ID",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "error",
+      "paramName": "错误描述",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "code",
+      "paramName": "错误码",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    }
+  ],
+  "object_references": [
+    "wy93ovzs9p_article_collection"
+  ]
+}

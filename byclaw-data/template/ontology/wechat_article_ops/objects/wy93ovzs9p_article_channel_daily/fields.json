@@ -1,0 +1,55 @@
+[
+  {
+    "property_code": "article_id",
+    "property_name": "文章ID",
+    "data_type": "INTEGER",
+    "required": true
+  },
+  {
+    "property_code": "stat_date",
+    "property_name": "统计日期",
+    "data_type": "DATE",
+    "required": true
+  },
+  {
+    "property_code": "metric_mode",
+    "property_name": "指标口径",
+    "data_type": "STRING",
+    "required": true,
+    "max_length": 20,
+    "term_values": [
+      "cumulative",
+      "daily_increment"
+    ]
+  },
+  {
+    "property_code": "channel",
+    "property_name": "渠道",
+    "data_type": "STRING",
+    "required": true,
+    "max_length": 30,
+    "term_values": [
+      "全部",
+      "公众号消息",
+      "公众号会话",
+      "朋友圈",
+      "搜一搜",
+      "公众号主页",
+      "聊天会话",
+      "推荐",
+      "其他"
+    ]
+  },
+  {
+    "property_code": "read_count",
+    "property_name": "阅读人数",
+    "data_type": "INTEGER",
+    "required": false
+  },
+  {
+    "property_code": "share_count",
+    "property_name": "分享人数",
+    "data_type": "INTEGER",
+    "required": false
+  }
+]

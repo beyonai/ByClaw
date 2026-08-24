@@ -1,0 +1,92 @@
+{
+  "action_code": "get_article_window_analysis",
+  "action_name": "get_article_window_analysis",
+  "action_type": "QUERY",
+  "permission_roles": [
+    "ops",
+    "admin"
+  ],
+  "params": [
+    {
+      "paramCode": "article_id",
+      "paramName": "文章ID",
+      "type": "integer",
+      "isRequired": true,
+      "direction": "input"
+    },
+    {
+      "paramCode": "window_days",
+      "paramName": "窗口天数",
+      "type": "array",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "as_of_date",
+      "paramName": "数据可见截止日期",
+      "type": "date",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "channel_metric_mode",
+      "paramName": "渠道口径",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "success",
+      "paramName": "是否成功",
+      "type": "boolean",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "article_id_out",
+      "paramName": "文章ID",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "publish_date",
+      "paramName": "发布日期",
+      "type": "date",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "as_of_date_out",
+      "paramName": "截止日期",
+      "type": "date",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "windows",
+      "paramName": "窗口分析列表",
+      "type": "array",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "error",
+      "paramName": "错误描述",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "code",
+      "paramName": "错误码",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    }
+  ],
+  "object_references": [
+    "wy93ovzs9p_article",
+    "wy93ovzs9p_article_channel_daily"
+  ]
+}
