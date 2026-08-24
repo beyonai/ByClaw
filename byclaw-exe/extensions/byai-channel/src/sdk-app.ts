@@ -465,6 +465,8 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
     const gatewayMsg = command;
     const { sessionId, messageId, traceId, metadata } = gatewayMsg.header;
     const parentMessageId = gatewayMsg.header.parentMessageId?.trim() || "-1";
+    const isCallAgentRequest =
+      gatewayMsg instanceof AskAgentCommand && Boolean(gatewayMsg.header.sourceAgentType?.trim());
     if (!sessionId || !messageId) {
       context.setStreamFinished(true);
       return AgentState.COMPLETED;
@@ -667,6 +669,9 @@ export class ByaiChannelGatewayWorker extends GatewayWorker {
       return new AgentTaskResult({
         status: AgentState.COMPLETED,
         content: finalAnswer,
+        // Text remains the canonical answer. Duplicate it into replyData only
+        // for callAgent callbacks whose consumers still read Resume.reply_data.
+        replyData: isCallAgentRequest ? finalAnswer : null,
       });
     } catch (err) {
       if (err instanceof TaskCancelledError || frameworkSignal?.aborted) {

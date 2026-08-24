@@ -134,6 +134,7 @@ describe("ByaiChannelGatewayWorker", () => {
     await expect(worker.processCommand(command, context as never)).resolves.toMatchObject({
       status: AgentState.COMPLETED,
       content: "final answer",
+      replyData: null,
     });
 
     expect(deliverReplyToAgentViaSdk).toHaveBeenCalledTimes(1);
@@ -155,6 +156,24 @@ describe("ByaiChannelGatewayWorker", () => {
     );
   });
 
+  it("duplicates final content into replyData for a callAgent callback", async () => {
+    const { context, worker } = createWorker();
+    const command = new AskAgentCommand(
+      new MessageHeader("message-called", "session-called", "trace-called", {
+        sourceAgentType: "BY_SUPER",
+        targetAgentType: "BYCLAW_EXE_user-test",
+        parentMessageId: "caller-message",
+      }),
+      "delegated task",
+    );
+
+    await expect(worker.processCommand(command, context as never)).resolves.toMatchObject({
+      status: AgentState.COMPLETED,
+      content: "final answer",
+      replyData: "final answer",
+    });
+  });
+
   it("dispatches RESUME content as an OpenClaw follow-up", async () => {
     const { context, worker } = createWorker();
     const command = new ResumeCommand(
@@ -169,6 +188,7 @@ describe("ByaiChannelGatewayWorker", () => {
     await expect(worker.processCommand(command, context as never)).resolves.toMatchObject({
       status: AgentState.COMPLETED,
       content: "final answer",
+      replyData: null,
     });
 
     expect(deliverReplyToAgentViaSdk).toHaveBeenCalledTimes(1);
