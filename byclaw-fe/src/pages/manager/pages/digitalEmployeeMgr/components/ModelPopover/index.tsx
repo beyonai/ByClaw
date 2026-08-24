@@ -94,6 +94,7 @@ const ModelPopover = (props) => {
       <div className={styles.headerTitle}>{intl.formatMessage({ id: 'modelPopover.QALargeModelConfiguration' })}</div>
       <Tabs
         activeKey={activeTab}
+        className={styles.scopeTabs}
         onChange={setActiveTab}
         size="small"
         items={[

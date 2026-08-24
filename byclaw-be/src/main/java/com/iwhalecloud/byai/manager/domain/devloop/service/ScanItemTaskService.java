@@ -24,6 +24,12 @@ import java.util.stream.Collectors;
 @Service
 public class ScanItemTaskService {
 
+    /** 派发已建会话但等承接人接单;确认后转 STATUS_RUNNING。 */
+    public static final String STATUS_PENDING_CONFIRM = "pending_confirm";
+
+    /** 已开工(直接启动或确认放行后)。 */
+    public static final String STATUS_RUNNING = "running";
+
     @Autowired
     private ScanItemTaskMapper scanItemTaskMapper;
 
@@ -91,7 +97,7 @@ public class ScanItemTaskService {
         ScanItemTask existing = findByRequirementRepo(requirementId, repoId);
         if (existing != null) {
             existing.setSessionId(sessionId);
-            existing.setStatus("running");
+            existing.setStatus(STATUS_RUNNING);
             existing.setUpdateBy(operatorId);
             existing.setUpdateTime(now);
             scanItemTaskMapper.updateById(existing);
@@ -103,7 +109,7 @@ public class ScanItemTaskService {
         task.setProjectId(projectId);
         task.setRepoId(repoId);
         task.setSessionId(sessionId);
-        task.setStatus("running");
+        task.setStatus(STATUS_RUNNING);
         task.setCreateBy(operatorId);
         task.setCreateTime(now);
         task.setDeleteFlag("0");
@@ -125,12 +131,65 @@ public class ScanItemTaskService {
         task.setProjectId(projectId);
         task.setRepoId(repoId);
         task.setSessionId(sessionId);
-        task.setStatus("running");
+        task.setStatus(STATUS_RUNNING);
         task.setDependsOn(dependsOn);
         task.setCreateBy(operatorId);
         task.setCreateTime(now);
         task.setDeleteFlag("0");
         scanItemTaskMapper.insert(task);
+    }
+
+    /**
+     * 派发待确认登记:会话已建但未下发提示词,承接人回确认词后才真正开工。
+     * status=pending_confirm 是「会话在等接单」的唯一标记,确认放行(markRunning)后转 running;
+     * 不存提示词,确认时按 requirement/repo/sessionId 原样重算,见 DevloopApplicationService#resolvePendingTaskPrompt。
+     */
+    public ScanItemTask upsertPendingConfirm(Long requirementId, Long projectId, Long repoId, Long sessionId,
+        Long operatorId) {
+        Date now = new Date();
+        ScanItemTask existing = findByRequirementRepo(requirementId, repoId);
+        if (existing != null) {
+            existing.setSessionId(sessionId);
+            existing.setStatus(STATUS_PENDING_CONFIRM);
+            existing.setUpdateBy(operatorId);
+            existing.setUpdateTime(now);
+            scanItemTaskMapper.updateById(existing);
+            return existing;
+        }
+        ScanItemTask task = new ScanItemTask();
+        task.setTaskId(sequenceService.nextVal());
+        task.setRequirementId(requirementId);
+        task.setProjectId(projectId);
+        task.setRepoId(repoId);
+        task.setSessionId(sessionId);
+        task.setStatus(STATUS_PENDING_CONFIRM);
+        task.setCreateBy(operatorId);
+        task.setCreateTime(now);
+        task.setDeleteFlag("0");
+        scanItemTaskMapper.insert(task);
+        return task;
+    }
+
+    /** 待确认会话:承接人确认后置 running,幂等重复确认由调用方按 status 闸门拦住。 */
+    public void markRunning(Long taskId, Long operatorId) {
+        if (taskId == null) {
+            return;
+        }
+        ScanItemTask update = new ScanItemTask();
+        update.setTaskId(taskId);
+        update.setStatus(STATUS_RUNNING);
+        update.setUpdateBy(operatorId);
+        update.setUpdateTime(new Date());
+        scanItemTaskMapper.updateById(update);
+    }
+
+    /**
+     * 会话对应的待确认子任务;没有则返回 null。
+     * 聊天主链路每条消息都会问一次,故只按已建索引的 session_id 单行命中,不做额外聚合。
+     */
+    public ScanItemTask findPendingConfirmBySession(Long sessionId) {
+        ScanItemTask task = findBySession(sessionId);
+        return task != null && STATUS_PENDING_CONFIRM.equals(task.getStatus()) ? task : null;
     }
 
     /** 唯一索引 (requirement_id, repo_id) 上的定位;repoId 可空(单仓库需求)。 */

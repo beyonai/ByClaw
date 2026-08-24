@@ -105,7 +105,7 @@ const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId
           >
             <Button
               type="text"
-              className={styles.projectActionButton}
+              className={`${styles.projectActionButton} ${styles.taskProgressButton}`}
               icon={<FundProjectionScreenOutlined />}
               loading={taskLoading}
               onClick={handleOpenTaskProgress}

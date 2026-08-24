@@ -31,6 +31,9 @@ public class OperationAccount {
     /** 登录状态：online 或 offline。 */
     private String loginStatus;
 
+    /** 自定义链接平台的登录URL，仅当 platformCode = "CustomLink" 时使用。 */
+    private String customUrl;
+
     private String config;
 
     private String metrics;

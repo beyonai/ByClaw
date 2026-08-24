@@ -40,6 +40,9 @@ type IProps = {
   lastMsg?: IMessage;
   sessionId: string;
 
+  /** 新建任务上传文件后保持输入框实例，避免接口返回 sessionId 导致已上传文件丢失。 */
+  preserveInputOnSessionChange?: boolean;
+
   onSend: (param: ISendProps) => void;
   onCancel: () => void;
 
@@ -65,6 +68,7 @@ const EasyConfirm = (props: IProps) => {
     queryInputProps,
     lastMsg,
     sessionId,
+    preserveInputOnSessionChange = false,
     onSend,
     onCancel,
     myAgentType,
@@ -188,7 +192,7 @@ const EasyConfirm = (props: IProps) => {
         <QueryInput
           // 每个会话使用独立的 Slate 编辑器实例，切换详情时避免沿用上一会话的默认 @ 员工节点。
           // 会话草稿仍由 inputDraftMap 按 sessionId 恢复，不会丢失用户已输入内容。
-          key={inputDraftKey}
+          key={preserveInputOnSessionChange ? 'new-session-input' : inputDraftKey}
           messageState={messageState}
           onCancel={onCancel}
           myAgentType={myAgentType}

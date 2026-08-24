@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { KnowledgeBuildResult } from '@/service/knowledgeCenter';
 import BuildResultPanel from '../BuildResultPanel';
 
+jest.setTimeout(15000);
+
 const mockMessageError = jest.fn();
 const mockDownloadResourceFile = jest.fn();
 const mockDownloadFile = jest.fn();

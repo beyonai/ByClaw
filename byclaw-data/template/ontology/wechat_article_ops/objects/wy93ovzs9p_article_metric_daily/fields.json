@@ -1,0 +1,142 @@
+[
+  {
+    "property_code": "article_id",
+    "property_name": "文章ID",
+    "data_type": "INTEGER",
+    "required": true
+  },
+  {
+    "property_code": "stat_date",
+    "property_name": "统计日期",
+    "data_type": "DATE",
+    "required": true
+  },
+  {
+    "property_code": "read_count",
+    "property_name": "阅读人数",
+    "data_type": "INTEGER",
+    "required": false
+  },
+  {
+    "property_code": "avg_stay_sec",
+    "property_name": "平均停留秒数",
+    "data_type": "INTEGER",
+    "required": false
+  },
+  {
+    "property_code": "finish_rate",
+    "property_name": "完读率",
+    "data_type": "FLOAT",
+    "required": false
+  },
+  {
+    "property_code": "new_follow_count",
+    "property_name": "新增关注人数",
+    "data_type": "INTEGER",
+    "required": false
+  },
+  {
+    "property_code": "share_count",
+    "property_name": "分享人数",
+    "data_type": "INTEGER",
+    "required": false
+  },
+  {
+    "property_code": "wow_count",
+    "property_name": "在看人数",
+    "data_type": "INTEGER",
+    "required": false
+  },
+  {
+    "property_code": "like_count",
+    "property_name": "点赞人数",
+    "data_type": "INTEGER",
+    "required": false
+  },
+  {
+    "property_code": "favorite_count",
+    "property_name": "收藏人数",
+    "data_type": "INTEGER",
+    "required": false
+  },
+  {
+    "property_code": "comment_count",
+    "property_name": "留言人数",
+    "data_type": "INTEGER",
+    "required": false
+  },
+  {
+    "property_code": "deliver_count",
+    "property_name": "消息送达人数",
+    "data_type": "INTEGER",
+    "required": false
+  },
+  {
+    "property_code": "msg_read_count",
+    "property_name": "消息阅读人数",
+    "data_type": "INTEGER",
+    "required": false
+  },
+  {
+    "property_code": "first_share_count",
+    "property_name": "首次分享人数",
+    "data_type": "INTEGER",
+    "required": false
+  },
+  {
+    "property_code": "share_driven_read",
+    "property_name": "分享带来阅读人数",
+    "data_type": "INTEGER",
+    "required": false
+  },
+  {
+    "property_code": "listen_full_count",
+    "property_name": "听全文人数",
+    "data_type": "INTEGER",
+    "required": false
+  },
+  {
+    "property_code": "reward_points",
+    "property_name": "赞赏积分",
+    "data_type": "INTEGER",
+    "required": false
+  },
+  {
+    "property_code": "open_rate",
+    "property_name": "打开率",
+    "data_type": "FLOAT",
+    "required": false
+  },
+  {
+    "property_code": "share_rate",
+    "property_name": "分享率",
+    "data_type": "FLOAT",
+    "required": false
+  },
+  {
+    "property_code": "follow_rate",
+    "property_name": "涨粉率",
+    "data_type": "FLOAT",
+    "required": false
+  },
+  {
+    "property_code": "virality_factor",
+    "property_name": "裂变系数",
+    "data_type": "FLOAT",
+    "required": false
+  },
+  {
+    "property_code": "source_batch_id",
+    "property_name": "数据批次ID",
+    "data_type": "STRING",
+    "required": false,
+    "max_length": 100
+  },
+  {
+    "property_code": "metric_rule_version",
+    "property_name": "指标规则版本",
+    "data_type": "STRING",
+    "required": false,
+    "max_length": 50
+  }
+]

@@ -1,0 +1,35 @@
+{
+  "entity_code": "wy93ovzs9p_article_user_profile_daily",
+  "entity_name": "文章每日用户画像",
+  "entity_desc": "每篇文章截至每日统计时点的全量读者画像（性别/年龄段/地域分布）；查询时返回请求日期之前最近一条的真实 profile_stat_date",
+  "submitted_fields": [
+    {
+      "property_code": "article_id",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "stat_date",
+      "data_type": "DATE"
+    },
+    {
+      "property_code": "gender_distribution",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "age_distribution",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "region_distribution",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "sample_size",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "source_batch_id",
+      "data_type": "STRING"
+    }
+  ]
+}

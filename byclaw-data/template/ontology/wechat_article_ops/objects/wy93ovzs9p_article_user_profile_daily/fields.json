@@ -1,0 +1,92 @@
+[
+  {
+    "property_code": "article_id",
+    "property_name": "文章ID",
+    "data_type": "INTEGER",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "link"
+      }
+    },
+    "required": true,
+    "term_type_code": "wy93ovzs9p_article_title",
+    "rel_term_codeorname": "code"
+  },
+  {
+    "property_code": "stat_date",
+    "property_name": "统计日期",
+    "data_type": "DATE",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "date"
+      }
+    },
+    "required": true
+  },
+  {
+    "property_code": "gender_distribution",
+    "property_name": "性别分布",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "description"
+      }
+    },
+    "required": false,
+    "max_length": 2000
+  },
+  {
+    "property_code": "age_distribution",
+    "property_name": "年龄段分布",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "description"
+      }
+    },
+    "required": false,
+    "max_length": 2000
+  },
+  {
+    "property_code": "region_distribution",
+    "property_name": "地域分布",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "description"
+      }
+    },
+    "required": false,
+    "max_length": 2000
+  },
+  {
+    "property_code": "sample_size",
+    "property_name": "画像有效样本量",
+    "data_type": "INTEGER",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "MEASURE",
+        "rule_type": "count"
+      }
+    },
+    "required": false
+  },
+  {
+    "property_code": "source_batch_id",
+    "property_name": "数据导入批次ID",
+    "data_type": "STRING",
+    "ext_property": {
+      "property_role_rule": {
+        "property_role": "DIMENSION",
+        "rule_type": "category"
+      }
+    },
+    "required": false,
+    "max_length": 100
+  }
+]

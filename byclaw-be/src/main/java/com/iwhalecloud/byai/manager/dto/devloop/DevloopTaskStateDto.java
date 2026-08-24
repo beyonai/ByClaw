@@ -23,6 +23,7 @@ public class DevloopTaskStateDto {
     private Integer loopCount;
     private Integer stageLoopCount;
     private List<Stage> stages;
+    private List<TaskStatusItem> taskStatuses;
     private List<Map<String, Object>> transitions;
     private Map<String, Object> pause;
     private String stateFile;
@@ -50,6 +51,18 @@ public class DevloopTaskStateDto {
         private Integer completedStages;
         private Integer totalStages;
         private String summary;
+    }
+
+    @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class TaskStatusItem {
+
+        private String dimensionName;
+        private String statusCode;
+        private String statusName;
+        private String statusDesc;
+        private Integer sortOrder;
+        private String updatedAt;
     }
 
     @Data

@@ -1,35 +1,804 @@
-.page {
+.automationPage {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  background: #fff;
+}
+
+.automationPanel,
+.runPanel,
+.editorPage {
+  width: 100%;
   height: 100%;
-  padding: 24px;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: #202124;
+  background: #fff;
+}
+
+.toolbar,
+.editorHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex: none;
+  box-sizing: border-box;
+}
+
+.toolbar {
+  min-height: 56px;
+  padding: 8px 16px;
+}
+
+.editorHeader {
+  min-height: 48px;
+  padding: 8px 20px;
+}
+
+.automationTabs,
+.batchToolbar,
+.toolbarActions,
+.editorBreadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.automationTabs {
+  padding: 2px;
+  gap: 0;
+  flex: none;
+  border-radius: 10px;
+  background: #f3f3f3;
+}
+
+// 侧边栏收起后展开按钮悬浮在内容左上角，顶部页签向右避让避免被遮挡。
+.automationTabsCollapsed {
+  margin-left: 40px;
+}
+
+.automationTab,
+.automationTabActive {
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #666;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  background: transparent;
+}
+
+.automationTabActive {
+  color: #111;
+  font-weight: 600;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.toolbarActions {
+  justify-content: flex-end;
+}
+
+.automationTitle {
+  color: #202124;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.searchInput {
+  width: 260px;
+  height: 32px;
+  border-color: transparent;
+  border-radius: 8px;
+  background: #f3f3f3;
+  box-shadow: none;
+
+  :global(.@{antPrefix}-input) {
+    background: #f3f3f3;
+  }
+}
+
+.toolbarIconButton {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-color: #e3e3e3;
+  border-radius: 8px;
+  color: #454545;
+  background: #fff;
+  box-shadow: none;
+}
+
+.toolbarIconButtonActive,
+.toolbarIconButton:hover {
+  color: #111 !important;
+  background: #f1f1f1 !important;
+}
+
+.runStatusTabs {
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 8px;
+  background: #f3f3f3;
+}
+
+.runStatusTab,
+.runStatusTabActive {
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
+}
+
+.runStatusTab:hover {
+  color: #202124;
+}
+
+.runStatusTabActive {
+  color: #202124;
+  font-weight: 500;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.sortButton {
+  min-width: 178px;
+  height: 32px;
+  padding: 0 10px;
+  border-color: #dedede;
+  border-radius: 8px;
+  color: #202124;
+  font-size: 13px;
+  background: #fff;
+  box-shadow: none;
+
+  &:hover,
+  &:focus {
+    border-color: #cfcfcf !important;
+    color: #202124 !important;
+    background: #fafafa !important;
+  }
+}
+
+.sortButtonArrow {
+  margin-left: 4px;
+  font-size: 10px;
+}
+
+.sortMenuItem {
+  min-width: 158px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.sortMenuCheck {
+  color: #22a05a;
+  font-size: 15px;
+}
+
+.listContent {
+  min-height: 0;
+  flex: 1;
+  padding: 12px 16px 24px;
   overflow: auto;
 }
 
-.header {
-  margin-bottom: 16px;
+.automationList {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
 }
 
-.title {
-  margin: 0;
-  font-weight: 600;
-  font-size: 18px;
+.taskRow {
+  position: relative;
+  min-height: 180px;
+  padding: 16px 20px 14px;
+  border: 1px solid #e5e5e5;
+  border-radius: 16px;
+  display: flex;
+  align-items: stretch;
+  flex-direction: column;
+  gap: 0;
+  box-sizing: border-box;
+  background: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-.subtitle {
-  margin-top: 4px;
-  color: rgba(0, 0, 0, 0.45);
-  font-size: 12px;
+.taskRow[role='button'] {
+  cursor: pointer;
 }
 
-.body {
+.taskRow:hover,
+.taskRowSelected {
+  border-color: #d7d7d7;
+  box-shadow: 0 8px 24px rgba(28, 32, 36, 0.06);
+}
+
+.taskTop {
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.taskSwitch {
+  flex: none;
+
+  &:global(.@{antPrefix}-switch) {
+    width: 36px;
+    min-width: 36px;
+    height: 20px;
+  }
+
+  :global(.@{antPrefix}-switch-handle) {
+    top: 3px;
+    inset-inline-start: 3px;
+    width: 14px;
+    height: 14px;
+  }
+
+  &:global(.@{antPrefix}-switch-checked) {
+    :global(.@{antPrefix}-switch-handle) {
+      inset-inline-start: 19px;
+    }
+  }
+}
+
+.taskMain {
+  min-width: 0;
+  margin-top: 14px;
+  display: block;
   flex: 1;
-  min-height: 0;
+  overflow: hidden;
 }
 
-.placeholder {
+.taskName {
+  display: block;
+  overflow: hidden;
+  color: #141414;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskDescription {
+  display: -webkit-box;
+  margin-top: 6px;
+  overflow: hidden;
+  color: #141414a6;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.taskMeta,
+.nextRun,
+.mutedText {
+  overflow: hidden;
+  color: #141414a6;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nextRun {
+  flex: none;
+  color: #141414a6;
+  font-size: 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.taskFooter {
+  min-width: 0;
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.schedulePill {
+  min-width: 0;
+  max-width: 58%;
+  padding: 5px 8px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  color: #141414a6;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #f6f6f6;
+
+  > span:first-child {
+    flex: none;
+  }
+
+  > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.rowActionButton {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 6px;
+  color: #454b54;
+  font-size: 16px;
+}
+
+.automationSkeleton {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+
+  :global(.@{antPrefix}-skeleton) {
+    min-height: 144px;
+    padding: 16px 20px;
+    border: 1px solid #e5e5e5;
+    border-radius: 16px;
+    box-sizing: border-box;
+  }
+}
+
+.runContent {
+  min-height: 0;
+  flex: 1;
+  padding: 12px 16px 24px;
+  overflow: auto;
+}
+
+.runGroups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.runGroup {
+  min-width: 0;
+}
+
+.runGroupTitle {
+  height: 30px;
+  margin: 0 0 6px;
+  padding: 0 8px;
+  border: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #aaa;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  background: transparent;
+}
+
+.runGroupArrow,
+.runGroupArrowCollapsed {
+  font-size: 10px;
+  transition: transform 0.18s ease;
+}
+
+.runGroupArrowCollapsed {
+  transform: rotate(-90deg);
+}
+
+.runList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.runRow {
+  min-height: 46px;
+  padding: 0 8px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  transition: background-color 0.18s ease;
+
+  &:hover,
+  &:focus-within {
+    background: #f5f5f5;
+  }
+}
+
+.runRowClickable {
+  cursor: pointer;
+}
+
+.runMain,
+.runMeta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.runMain {
+  gap: 12px;
+  flex: 1;
+}
+
+.runName {
+  overflow: hidden;
+  color: #202124;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runStatusText {
+  overflow: hidden;
+  color: #aaa;
+  font-size: 13px;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runMeta {
+  flex: none;
+  gap: 14px;
+  color: #aaa;
+  font-size: 13px;
+}
+
+.runStatusIcon {
+  width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.runStatusSuccess {
+  color: #aaa;
+}
+
+.runStatusFailed {
+  color: #ff3b3b;
+}
+
+.runFailureButton {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  background: transparent;
+}
+
+.runStatusRunning {
+  color: #666;
+}
+
+.runLoadingMore {
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100%;
+  color: #999;
+}
+
+.editorHeader {
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.editorBreadcrumb {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: #6b6f76;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 24px;
+  white-space: nowrap;
+
+  .editorBreadcrumbLink,
+  .editorBreadcrumbCurrent {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .editorBreadcrumbLink {
+    height: auto;
+    padding: 0;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+
+    &:hover,
+    &:focus-visible {
+      color: #14161a;
+      background: transparent;
+      text-decoration: underline;
+      outline: none;
+    }
+  }
+
+  .editorBreadcrumbCurrent {
+    color: #14161a;
+    font-weight: 500;
+  }
+
+  .editorBreadcrumbSeparator {
+    flex: 0 0 auto;
+    color: #a3a7ad;
+  }
+}
+
+.editorScroll {
+  min-height: 0;
+  flex: 1;
+  padding: 16px 26px 40px;
+  overflow: auto;
+}
+
+.editorForm {
+  width: min(1100px, 100%);
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.editorForm {
+  :global {
+    .@{antPrefix}-form-item {
+      margin-bottom: 18px;
+    }
+
+    .@{antPrefix}-form-item-label {
+      padding-bottom: 6px;
+    }
+
+    .@{antPrefix}-input,
+    .@{antPrefix}-input-number,
+    .@{antPrefix}-picker,
+    .@{antPrefix}-select-selector {
+      border-radius: 8px;
+    }
+  }
+}
+
+.optionalLabel,
+.fieldHint {
+  margin-left: 6px;
+  color: #a1a1a1;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.scheduleMode {
+  margin-bottom: 12px;
+
+  :global(.@{antPrefix}-radio-button-wrapper) {
+    min-width: 82px;
+    text-align: center;
+  }
+}
+
+.scheduleFields {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.scheduleCompactField {
+  width: 110px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  flex: 0 0 110px;
+
+  :global(.@{antPrefix}-select-selector),
+  :global(.@{antPrefix}-picker),
+  :global(.@{antPrefix}-input-number-input-wrap) {
+    height: 30px;
+  }
+}
+
+.scheduleWideField {
+  width: 320px;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+
+  :global(.@{antPrefix}-select-selector) {
+    height: 32px;
+    min-height: 32px;
+    max-height: 32px;
+  }
+}
+
+.scheduleDateTimeField {
+  width: 220px;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+}
+
+.scheduleYearlyDateTimeField {
+  width: 220px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+}
+
+.intervalField {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+
+.intervalValueItem {
+  margin-bottom: 0 !important;
+}
+
+.intervalError {
+  align-self: center;
+  flex: 0 1 auto;
+  margin-left: 12px;
+  color: #ff4d4f;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.intervalField > .fieldHint {
+  align-self: center;
+  flex: 0 1 auto;
+  margin-left: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.intervalValueField,
+.intervalUnitField {
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+}
+
+.intervalValueField {
+  width: 110px !important;
+
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+
+  :global(.@{antPrefix}-input-number-input-wrap) {
+    height: 30px;
+  }
+}
+
+.intervalUnitField {
+  width: 92px !important;
+  margin-left: -1px;
+
+  :global(.@{antPrefix}-select-selector) {
+    height: 30px;
+    min-height: 30px;
+    border-top-left-radius: 0 !important;
+    border-bottom-left-radius: 0 !important;
+  }
+}
+
+@media (max-width: 1100px) {
+  .toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .toolbarActions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .searchInput {
+    width: min(100%, 286px);
+  }
+
+  .taskMeta:nth-of-type(3) {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .automationList {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .automationSkeleton {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .taskRow {
+    min-height: 180px;
+    padding: 16px 20px 14px;
+  }
+
+  .taskFooter {
+    align-items: flex-end;
+  }
+
+  .schedulePill {
+    max-width: 55%;
+  }
+
+  .editorScroll {
+    padding: 12px 16px 32px;
+  }
+
+  .scheduleFields {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .scheduleCompactField {
+    width: 100% !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    max-height: 32px !important;
+    flex: none;
+  }
+
+  .scheduleWideField,
+  .scheduleDateTimeField,
+  .scheduleYearlyDateTimeField {
+    width: 100% !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    max-height: 32px !important;
+    flex: none;
+  }
 }

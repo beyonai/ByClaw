@@ -7,6 +7,7 @@ import { SessionContextProcessor } from "./processors/session-context.js";
 import { SessionWorkspaceProcessor } from "./processors/session-workspace.js";
 import { SupervisorPolicyProcessor } from "./processors/supervisor-policy.js";
 import { UserContextProcessor } from "./processors/user-context.js";
+import { TaskPlanProcessor } from "./processors/task-plan.js";
 import type {
   CompiledContext,
   ContextBuildInput,
@@ -41,6 +42,7 @@ export class ContextCompiler implements SystemContextCompiler {
       new SessionWorkspaceProcessor(),
       new UserContextProcessor(),
       new GroupChatContextProcessor(),
+      new TaskPlanProcessor(),
       new AuthorizedAgentsProcessor(),
       new ContextCleanupProcessor(),
     ],

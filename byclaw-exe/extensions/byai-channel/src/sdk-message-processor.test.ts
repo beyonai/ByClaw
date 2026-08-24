@@ -117,7 +117,7 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
               });
               markActiveSdkOverflowContinuePending(String(ctx.SessionKey), true);
             }
-            markActiveSdkRootLifecycleFinished(String(ctx.SessionKey), "end");
+            markActiveSdkRootLifecycleFinished(String(ctx.SessionKey), "end", runId);
             return { queuedFinal: false, counts: {} };
           },
         },
@@ -140,7 +140,7 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
       },
     } as unknown as GatewayDataEmitter);
 
-    await deliverReplyToAgentViaSdk({
+    const result = await deliverReplyToAgentViaSdk({
       account,
       cfg,
       message: {
@@ -159,6 +159,7 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
       },
       onReply: async () => {},
     });
+    await result.finalize();
 
     expect(contexts).toHaveLength(2);
     expect(contexts[0]?.MediaPath).toBe("/by/.sessions/user-media/report.png");

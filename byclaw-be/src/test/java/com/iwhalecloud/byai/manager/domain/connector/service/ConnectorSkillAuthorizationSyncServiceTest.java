@@ -24,11 +24,42 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCred
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialVerifierRegistry;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialRenewalMode;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.RedisAuthorizationSessionRepository;
 import com.iwhalecloud.byai.manager.domain.connector.manifest.InvalidConnectorManifestException;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorSkillAuthorizationSyncDto;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
 class ConnectorSkillAuthorizationSyncServiceTest {
+
+    @Test
+    void resolvesImaSkillAliasToImaOpenApiProvider() {
+        ConnectorInfo ima = activeConnector();
+        ima.setConnectorCode("ima-openapi");
+        ima.setProviderCode("ima-openapi");
+        when(connectorInfoService.findByCode("ima-openapi")).thenReturn(ima);
+        when(verifierRegistry.get("ima-openapi")).thenReturn(verifier);
+        AuthorizationStatusResult connected = result(AuthorizationStatus.CONNECTED, null);
+        when(verifier.verify(42L, ima)).thenReturn(connected);
+
+        ConnectorSkillAuthorizationSyncDto result = service.sync("ima-skill", "42");
+
+        assertThat(result.getConnectorCode()).isEqualTo("ima-skill");
+        verify(connectionStateService).saveEnabledAuthorization("42", ima, connected, null);
+    }
+
+    @Test
+    void resolvesImaAliasToImaOpenApiProvider() {
+        ConnectorInfo ima = activeConnector();
+        ima.setConnectorCode("ima-openapi");
+        ima.setProviderCode("ima-openapi");
+        AuthorizationStatusResult connected = result(AuthorizationStatus.CONNECTED, null);
+        when(connectorInfoService.findByCode("ima-openapi")).thenReturn(ima);
+        when(verifierRegistry.get("ima-openapi")).thenReturn(verifier);
+        when(verifier.verify(42L, ima)).thenReturn(connected);
+
+        assertThat(service.sync("ima", "42").getConnected()).isTrue();
+        verify(connectionStateService).saveEnabledAuthorization("42", ima, connected, null);
+    }
 
     private final ConnectorInfoService connectorInfoService = mock(ConnectorInfoService.class);
     private final ConnectorCredentialVerifierRegistry verifierRegistry =
@@ -36,6 +67,7 @@ class ConnectorSkillAuthorizationSyncServiceTest {
     private final ConnectorConnectionStateService connectionStateService =
         mock(ConnectorConnectionStateService.class);
     private final ConnectorCredentialVerifier verifier = mock(ConnectorCredentialVerifier.class);
+    private final RedisAuthorizationSessionRepository sessionRepository = mock(RedisAuthorizationSessionRepository.class);
     private SimpleMeterRegistry meterRegistry;
 
     private ConnectorSkillAuthorizationSyncService service;
@@ -43,12 +75,17 @@ class ConnectorSkillAuthorizationSyncServiceTest {
     @BeforeEach
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
+        when(sessionRepository.tryAcquireStartLock(org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any()))
+            .thenReturn(java.util.Optional.of("sync-lock"));
         service = new ConnectorSkillAuthorizationSyncService(
             connectorInfoService,
             verifierRegistry,
             connectionStateService,
             new ConnectorSkillAuthorizationSyncProperties(32, 0),
-            new ConnectorSkillAuthorizationSyncMetrics(meterRegistry)
+            new ConnectorSkillAuthorizationSyncMetrics(meterRegistry),
+            new ConnectorCredentialVerificationGuard(new ConnectorSkillAuthorizationSyncProperties(32, 0)),
+            sessionRepository
         );
     }
 
@@ -66,6 +103,21 @@ class ConnectorSkillAuthorizationSyncServiceTest {
         assertThat(result.getConnected()).isTrue();
         verify(verifier).verify(42L, connector);
         verify(connectionStateService).saveEnabledAuthorization("42", connector, connected, null);
+        verify(sessionRepository).releaseStartLock("42", connector.getConnectorId(), "sync-lock");
+    }
+
+    @Test
+    void rejectsSyncWhenAnotherConnectorOperationIsInProgress() {
+        ConnectorInfo connector = activeConnector();
+        when(connectorInfoService.findByCode("dingtalk")).thenReturn(connector);
+        when(verifierRegistry.get("dws-dingtalk")).thenReturn(verifier);
+        when(sessionRepository.tryAcquireStartLock(org.mockito.ArgumentMatchers.eq("42"),
+            org.mockito.ArgumentMatchers.eq(connector.getConnectorId()), org.mockito.ArgumentMatchers.any()))
+            .thenReturn(java.util.Optional.empty());
+
+        assertSyncError("CONNECTOR_VERIFICATION_BUSY", () -> service.sync("dingtalk", "42"));
+
+        verifyNoInteractions(verifier, connectionStateService);
     }
 
     @Test
@@ -257,7 +309,9 @@ class ConnectorSkillAuthorizationSyncServiceTest {
             verifierRegistry,
             connectionStateService,
             new ConnectorSkillAuthorizationSyncProperties(1, 0),
-            new ConnectorSkillAuthorizationSyncMetrics(meterRegistry)
+            new ConnectorSkillAuthorizationSyncMetrics(meterRegistry),
+            new ConnectorCredentialVerificationGuard(new ConnectorSkillAuthorizationSyncProperties(1, 0)),
+            sessionRepository
         );
         ConnectorInfo connector = activeConnector();
         AuthorizationStatusResult connected = result(AuthorizationStatus.CONNECTED, null);

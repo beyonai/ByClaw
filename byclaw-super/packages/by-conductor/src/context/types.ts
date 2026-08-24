@@ -2,6 +2,7 @@ import type { AgentProfile, CallerPrincipal } from "../domain/types.js";
 import type { ExpertTeamRuntimeSnapshotV1 } from "../domain/orchestrator.js";
 import type { SessionContextV1 } from "../domain/session-context.js";
 import type { GroupChatContextV1 } from "../domain/group-chat-context.js";
+import type { TaskPlanSnapshot } from "../domain/task-plan.js";
 
 /** 一次上下文编译所需的原始快照；读取外部数据应在进入编译器之前完成。 */
 export interface ContextBuildInput {
@@ -23,6 +24,9 @@ export interface ContextBuildInput {
   user?: CallerPrincipal;
   /** 缺省表示原有超级助手；存在时由编译路由选择独立 Prompt 和上下文策略。 */
   orchestrator?: ExpertTeamRuntimeSnapshotV1;
+  /** 当前执行的 BE 权威计划快照；仅在任务计划 Port 可用时注入。 */
+  activeTaskPlan?: TaskPlanSnapshot;
+  taskPlanAvailable?: boolean;
 }
 
 /** 动态追加到稳定 system prompt 后面的一个具名上下文区段。 */

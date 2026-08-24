@@ -85,6 +85,11 @@ FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 USER root
 
 ARG OPENCLAW_VERSION
+ARG HYPERFRAMES_VERSION=0.8.1
+ARG REMOTION_VERSION=4.0.512
+ARG PATCHRIGHT_VERSION=1.62.1
+ARG BY_FRAMEWORK_TS_VERSION=1.5.2
+ARG BY_FRAMEWORK_PY_VERSION=0.2.2.dev10
 # 与 byclaw-be 预下载包同源同版本(byclaw-be/docker/dws/version.md);amd64 走预下载,arm64 用此版本联网 fallback。
 ARG DWS_VERSION=v1.0.52
 # buildx 目标架构(amd64/arm64),用于选择预下载二进制或 fallback。
@@ -92,6 +97,8 @@ ARG TARGETARCH
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG WECOM_CLI_VERSION=0.1.9
 ARG LARKSUITE_CLI_VERSION=1.0.85
+ARG IMA_OPENAPI_CLI_VERSION=0.1.3
+ARG IMA_OPENAPI_CLI_INTEGRITY=sha512-ckur/WWHugygFu130u/Zmn2IU9w7Ghc2cmPPxS6lFWvETSz7Rl3lqQGjMLmhSbTY2eCIR8DvqOzozOf5rWRbHg==
 ARG INSTALL_BROWSER_STACK=true
 
 RUN chown root:root /app
@@ -109,7 +116,8 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
     OPENCLAW_BUNDLED_PLUGINS_DIR=/app/dist/extensions \
     OPENCLAW_STATE_DIR=/by/.openclaw \
     OPENCLAW_VNC_WEB_PORT=8081 \
-    OPENCLAW_VNC_PORT=5901
+    OPENCLAW_VNC_PORT=5901 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # bycli dashboard相关系统配置
 ENV BYCLI_CONFIG_DIR=/by/.bycli \
@@ -121,9 +129,22 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
     && npm config set audit false --global \
     && npm config set fetch-retries 5 --global \
     && npm config set fetch-retry-mintimeout 20000 --global \
-    && npm config set fetch-retry-maxtimeout 120000 --global
+    && npm config set fetch-retry-maxtimeout 120000 --global \
+    && cd /tmp \
+    && npm pack "ima-openapi-cli@${IMA_OPENAPI_CLI_VERSION}" \
+    && node -e 'const fs=require("fs"); const crypto=require("crypto"); const [expected,file]=process.argv.slice(1); const actual="sha512-"+crypto.createHash("sha512").update(fs.readFileSync(file)).digest("base64"); if (actual !== expected) throw new Error("IMA CLI integrity mismatch");' "${IMA_OPENAPI_CLI_INTEGRITY}" "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz" \
+    && npm install -g \
+        "hyperframes@${HYPERFRAMES_VERSION}" \
+        "@remotion/cli@${REMOTION_VERSION}" \
+        "@byclaw/by-framework@${BY_FRAMEWORK_TS_VERSION}" \
+        "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz" \
+    && test "$(ima --version)" = "${IMA_OPENAPI_CLI_VERSION}" \
+    && ima auth --help >/dev/null \
+    && ima note --help >/dev/null \
+    && ima wiki --help >/dev/null \
+    && rm -f "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz"
 
-ARG OPENCLI_VERSION=2.1.28
+ARG OPENCLI_VERSION=2.1.38
 ARG OPENCLI_EXTENSION_VERSION=2.1.18
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
@@ -230,7 +251,9 @@ RUN set -eux; \
     python3 -m pip install --no-cache-dir \
         redis \
         websockify \
-        by-framework==0.2.2.dev10; \
+        "by-framework==${BY_FRAMEWORK_PY_VERSION}" \
+        "patchright==${PATCHRIGHT_VERSION}"; \
+    patchright install chromium; \
     python3 -m pip install --no-cache-dir \
         -c /tmp/by-reach/constraints.txt \
         /tmp/by-reach; \
@@ -239,6 +262,10 @@ RUN set -eux; \
     rm -f /usr/bin/websockify; \
     ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
     websockify --help >/dev/null
+
+COPY middleware/openclaw/verify-runtime-toolchain.sh /usr/local/bin/verify-runtime-toolchain
+RUN chmod +x /usr/local/bin/verify-runtime-toolchain \
+    && /usr/local/bin/verify-runtime-toolchain
 
 COPY --from=ext-builder /build/out/ /app/dist-runtime/extensions/
 
@@ -260,6 +287,11 @@ RUN ln -s /app /app/node_modules/openclaw
 
 
 COPY middleware/openclaw/skills/ /app/skills/
+
+# 复用镜像全局 by-framework，确保文档转换脚本能按本地 node_modules 路径解析依赖。
+RUN rm -rf /app/skills/by-doc-to-markdown/scripts/node_modules/@byclaw/by-framework \
+    && mkdir -p /app/skills/by-doc-to-markdown/scripts/node_modules/@byclaw \
+    && ln -s /usr/local/lib/node_modules/@byclaw/by-framework /app/skills/by-doc-to-markdown/scripts/node_modules/@byclaw/by-framework
 
 
 COPY middleware/openclaw/linux-amd64-filebrowser/filebrowser /usr/local/bin/filebrowser

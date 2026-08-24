@@ -20,7 +20,7 @@ import styles from './index.module.less';
 import useLocateMsg from './hooks/useLocateMsg';
 
 type IProps = {
-  onNext?: (isPrev?: boolean) => void;
+  onNext?: (isPrev?: boolean) => any;
   messageList: Array<IMessage>;
   hasMore: boolean;
   inverse?: boolean;
@@ -31,6 +31,7 @@ type IProps = {
   setMultiChoicesMsgId?: React.Dispatch<React.SetStateAction<string[]>>;
 
   hideAction?: boolean;
+  previewInDetailPanel?: boolean;
   showToBottomBtn?: boolean;
   updateMessage: (message: IMessage) => IMessage;
   deleteMessage: (message: IMessage) => void;
@@ -61,6 +62,7 @@ function MessageList(props: IProps, ref: any) {
     deleteMessage,
     sessionId,
     hideAction,
+    previewInDetailPanel = false,
   } = props;
   const { multiChoicesList = emptyArr, setMultiChoicesMsgId, multiChoicesMsgId } = props;
 
@@ -71,6 +73,7 @@ function MessageList(props: IProps, ref: any) {
     updateMessage,
     deleteMessage,
     sessionId,
+    previewInDetailPanel,
   });
   const { toBottomBtnVisable, setToBottomBtnVisable } = useToBottomBtn({
     messageList,
@@ -110,9 +113,7 @@ function MessageList(props: IProps, ref: any) {
         >
           <MessageInfiniteScroll
             ref={infiniteScrollRef}
-            next={(isPrev?: boolean) => {
-              onNext?.(isPrev);
-            }}
+            next={(isPrev?: boolean) => onNext?.(isPrev)}
             hasMore={hasMore}
             loader={
               <div className="ub ub-ac ub-pc">

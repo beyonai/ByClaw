@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.project.ProjectInitService;
+import com.iwhalecloud.byai.manager.application.service.project.ProjectWorkspaceManifestService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
@@ -50,6 +51,9 @@ class ProjectApplicationServiceCreateTest {
     @Mock
     private ProjectInitService projectInitService;
 
+    @Mock
+    private ProjectWorkspaceManifestService projectWorkspaceManifestService;
+
     @BeforeEach
     void setCurrentUser() {
         LoginInfo loginInfo = new LoginInfo();
@@ -70,11 +74,12 @@ class ProjectApplicationServiceCreateTest {
         when(sequenceService.nextVal()).thenReturn(1001L);
         when(projectService.findById(1001L)).thenReturn(persistedProject);
         ProjectDTO dto = new ProjectDTO();
-        dto.setProjectName("workspace-project");
+        dto.setProjectName("workspace");
 
         service.createProject(dto);
 
         verify(projectInitService).initProjectWorkspace(1001L);
+        verify(projectWorkspaceManifestService).syncProjectGitmodules(1001L);
     }
 
     @Test
@@ -87,7 +92,7 @@ class ProjectApplicationServiceCreateTest {
         when(projectInitService.initProjectWorkspace(1001L))
             .thenThrow(new IllegalStateException("workspace unavailable"));
         ProjectDTO dto = new ProjectDTO();
-        dto.setProjectName("workspace-project");
+        dto.setProjectName("workspace");
 
         assertThatThrownBy(() -> service.createProject(dto))
             .isInstanceOf(IllegalStateException.class)
@@ -123,6 +128,7 @@ class ProjectApplicationServiceCreateTest {
         ReflectionTestUtils.setField(service, "projectResourceMapper", projectResourceMapper);
         ReflectionTestUtils.setField(service, "projectMemberService", projectMemberService);
         ReflectionTestUtils.setField(service, "projectInitService", projectInitService);
+        ReflectionTestUtils.setField(service, "projectWorkspaceManifestService", projectWorkspaceManifestService);
         return service;
     }
 }

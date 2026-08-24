@@ -16,6 +16,8 @@
                extends="BaseResultMap">
         <result column="user_code" property="userCode"/>
         <result column="user_name" property="userName"/>
+        <result column="user_number" property="userNumber"/>
+        <result column="phone" property="phone"/>
         <result column="resource_name" property="agentName"/>
     </resultMap>
 
@@ -37,6 +39,8 @@
                a.create_time,
                b.user_code,
                b.user_name,
+               b.user_number,
+               b.phone,
                c.resource_name
         FROM byai_project_member a
                  LEFT JOIN byai_project d ON a.project_id = d.project_id

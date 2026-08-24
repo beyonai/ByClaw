@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Empty, Spin, Tabs } from 'antd';
+import { Button, Empty, Spin, Tabs } from 'antd';
+import { ReloadOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import Knowledge from '@/layout/sider/components/Knowledge';
 import ModelSiderPanel from '@/layout/sider/components/ModelSiderPanel';
@@ -11,12 +12,11 @@ import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeC
 import FileResourcePanel from './FileResourcePanel';
 import ObjectFilesPanel from './ObjectFilesPanel';
 import CodesTab from '@/layout/sider/components/ProjectSpaceList/CodesTab';
-import ReposTab from '@/layout/sider/components/ProjectSpaceList/ReposTab';
 import { useChatResourceProject } from './useChatResourceProject';
 import styles from './index.module.less';
 
-type PrimaryKey = 'session' | 'employee' | 'project';
-type SecondaryState = Record<PrimaryKey, string>;
+type UpperScopeKey = 'session' | 'employee';
+type SecondaryState = Record<UpperScopeKey, string>;
 
 interface ResourcePanelProps {
   sessionId: string;
@@ -27,16 +27,17 @@ interface ResourcePanelProps {
 const EMPTY_SECONDARY_STATE: SecondaryState = {
   session: 'file',
   employee: 'knowledge',
-  project: 'file',
 };
 
 const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onOpenDetail }) => {
   const intl = useIntl();
+  const isEnglish = intl.locale.toLowerCase().startsWith('en');
   const activeEmployee = useActiveSiderAgent();
   const { project, loading: projectLoading } = useChatResourceProject(projectId);
   const { isDevelopProjectEnabled } = useProjectTypeConfig();
-  const [primaryKey, setPrimaryKey] = useState<PrimaryKey>('session');
+  const [upperScopeKey, setUpperScopeKey] = useState<UpperScopeKey>('session');
   const [secondaryState, setSecondaryState] = useState<SecondaryState>(EMPTY_SECONDARY_STATE);
+  const [sessionResourceRefreshKey, setSessionResourceRefreshKey] = useState(0);
   const resourceId = activeEmployee.resourceId || (project?.resourceId ? `${project.resourceId}` : undefined);
 
   // 代码入口只对已启用研发能力的项目开放；未明确的数据项按约定保留空态。
@@ -48,9 +49,9 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
     }
   }, [secondaryState.session, showCode]);
 
-  const secondaryItems = useMemo(() => {
+  const upperSecondaryItems = useMemo(() => {
     const label = (id: string) => intl.formatMessage({ id });
-    if (primaryKey === 'employee') {
+    if (upperScopeKey === 'employee') {
       return [
         { key: 'knowledge', label: label('chatResource.knowledge') },
         { key: 'skill', label: label('chatResource.skill') },
@@ -58,29 +59,22 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
         { key: 'model', label: label('chatResource.model') },
       ];
     }
-    if (primaryKey === 'project') {
-      return [
-        { key: 'file', label: label('chatResource.file') },
-        { key: 'knowledge', label: label('chatResource.knowledge') },
-        ...(showCode ? [{ key: 'code', label: label('chatResource.code') }] : []),
-        { key: 'ontology', label: label('chatResource.ontology') },
-      ];
-    }
     return [
-      { key: 'file', label: label('chatResource.file') },
-      ...(showCode ? [{ key: 'code', label: label('chatResource.code') }] : []),
-      { key: 'ontology', label: label('chatResource.ontology') },
+      { key: 'file', label: label('chatResource.sessionFile') },
+      { key: 'projectFile', label: label('chatResource.projectFile') },
+      { key: 'knowledge', label: label('chatResource.projectKnowledge') },
+      ...(showCode ? [{ key: 'code', label: label('chatResource.projectCode') }] : []),
     ];
-  }, [intl, primaryKey, showCode]);
+  }, [intl, showCode, upperScopeKey]);
 
-  const secondaryKey = secondaryState[primaryKey];
+  const upperSecondaryKey = secondaryState[upperScopeKey];
   const empty = (
     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'chatResource.empty' })} />
   );
 
-  const content = useMemo(() => {
-    if (primaryKey === 'session') {
-      if (secondaryKey === 'file') {
+  const upperContent = useMemo(() => {
+    if (upperScopeKey === 'session') {
+      if (upperSecondaryKey === 'file') {
         return (
           <FileResourcePanel
             scope="session"
@@ -88,26 +82,42 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
             projectId={projectId}
             project={project}
             resourceId={resourceId}
+            refreshKey={sessionResourceRefreshKey}
             onOpenDetail={onOpenDetail}
           />
         );
       }
-      if (secondaryKey === 'code' && showCode) {
+      if (upperSecondaryKey === 'projectFile') {
+        return (
+          <FileResourcePanel
+            scope="project"
+            sessionId={sessionId}
+            projectId={project?.projectId || projectId}
+            project={project}
+            refreshKey={sessionResourceRefreshKey}
+            onOpenDetail={onOpenDetail}
+          />
+        );
+      }
+      if (upperSecondaryKey === 'code' && showCode) {
         return (
           <CodesTab
             projectId={Number(project?.projectId || projectId)}
             resourceId={resourceId}
             sessionId={sessionId}
+            refreshKey={sessionResourceRefreshKey}
             codeChangesEnabled
             onOpenDetail={onOpenDetail}
           />
         );
       }
-      if (secondaryKey === 'ontology') {
+      if (upperSecondaryKey === 'knowledge') {
         return (
           <ObjectFilesPanel
+            objectType="knowledge"
             projectId={project?.projectId || projectId}
             sessionId={sessionId}
+            refreshToken={sessionResourceRefreshKey}
             onOpenDetail={onOpenDetail}
           />
         );
@@ -115,67 +125,74 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
       return empty;
     }
 
-    if (primaryKey === 'employee') {
+    if (upperScopeKey === 'employee') {
       // 右侧资源面板保留与左侧小面板一致的中心入口，但不重复展示当前数字员工栏。
-      if (secondaryKey === 'knowledge') return <Knowledge embedded showRouter />;
-      if (secondaryKey === 'skill') return <ResourceSiderPanel resourceType="SKILL" embedded showRouter />;
-      if (secondaryKey === 'ontology') return <OntologySiderPanel embedded showRouter />;
-      // 模型主菜单已移除，右侧模型列表不再提供“模型中心”跳转入口。
-      if (secondaryKey === 'model') return <ModelSiderPanel embedded />;
+      if (upperSecondaryKey === 'knowledge') return <Knowledge embedded showRouter />;
+      if (upperSecondaryKey === 'skill') return <ResourceSiderPanel resourceType="SKILL" embedded showRouter />;
+      if (upperSecondaryKey === 'ontology') return <OntologySiderPanel embedded showRouter />;
+      if (upperSecondaryKey === 'model') return <ModelSiderPanel embedded showRouter />;
       return empty;
     }
 
-    if (secondaryKey === 'file') {
-      return (
-        <FileResourcePanel
-          scope="project"
-          sessionId={sessionId}
-          projectId={projectId}
-          project={project}
-          resourceId={resourceId}
-          onOpenDetail={onOpenDetail}
-        />
-      );
-    }
-    if (secondaryKey === 'ontology') {
-      return <ObjectFilesPanel projectId={project?.projectId || projectId} onOpenDetail={onOpenDetail} />;
-    }
-    if (primaryKey === 'project' && secondaryKey === 'code' && showCode) {
-      return (
-        <ReposTab
-          projectId={Number(project?.projectId || projectId)}
-          resourceId={resourceId}
-          onOpenDetail={onOpenDetail}
-        />
-      );
-    }
     return empty;
-  }, [empty, onOpenDetail, primaryKey, project, projectId, resourceId, secondaryKey, sessionId, showCode]);
+  }, [
+    empty,
+    onOpenDetail,
+    project,
+    projectId,
+    resourceId,
+    sessionResourceRefreshKey,
+    sessionId,
+    showCode,
+    upperScopeKey,
+    upperSecondaryKey,
+  ]);
 
   return (
     <div className={styles.resourcePanel}>
-      {/* 设计稿不保留“会话资源”标题行，打开后直接展示两级筛选。 */}
-      <Tabs
-        className={styles.primaryTabs}
-        size="small"
-        activeKey={primaryKey}
-        onChange={(key) => setPrimaryKey(key as PrimaryKey)}
-        items={[
-          { key: 'session', label: intl.formatMessage({ id: 'chatResource.currentSession' }) },
-          { key: 'employee', label: intl.formatMessage({ id: 'chatResource.currentEmployee' }) },
-          { key: 'project', label: intl.formatMessage({ id: 'chatResource.currentProject' }) },
-        ]}
-      />
-      <Tabs
-        className={styles.secondaryTabs}
-        size="small"
-        activeKey={secondaryKey}
-        onChange={(key) => setSecondaryState((current) => ({ ...current, [primaryKey]: key }))}
-        items={secondaryItems}
-      />
-      <Spin spinning={projectLoading} wrapperClassName={styles.resourceSpin}>
-        <div className={styles.resourceContent}>{content}</div>
-      </Spin>
+      <section className={styles.resourceSection}>
+        <Tabs
+          className={styles.primaryTabs}
+          size="small"
+          activeKey={upperScopeKey}
+          onChange={(key) => setUpperScopeKey(key as UpperScopeKey)}
+          items={[
+            { key: 'session', label: intl.formatMessage({ id: 'chatResource.currentSession' }) },
+            { key: 'employee', label: intl.formatMessage({ id: 'chatResource.currentEmployee' }) },
+          ]}
+        />
+        <div className={styles.resourceBody}>
+          <Spin spinning={projectLoading} wrapperClassName={styles.resourceSpin}>
+            <div className={styles.resourceContent}>{upperContent}</div>
+          </Spin>
+          <aside
+            className={styles.secondaryNav}
+            aria-label={intl.formatMessage({
+              id: upperScopeKey === 'session' ? 'chatResource.currentSession' : 'chatResource.currentEmployee',
+            })}
+          >
+            {upperScopeKey === 'session' && ['file', 'projectFile', 'knowledge', 'code'].includes(upperSecondaryKey) ? (
+              <div className={styles.secondaryNavActions}>
+                <Button
+                  type="text"
+                  className={styles.resourceRefreshButton}
+                  icon={<ReloadOutlined />}
+                  aria-label={intl.formatMessage({ id: 'common.refresh' })}
+                  onClick={() => setSessionResourceRefreshKey((current) => current + 1)}
+                />
+              </div>
+            ) : null}
+            <Tabs
+              tabPosition="right"
+              className={`${styles.secondaryTabs} ${isEnglish ? styles.secondaryTabsEnglish : ''}`}
+              size="small"
+              activeKey={upperSecondaryKey}
+              onChange={(key) => setSecondaryState((current) => ({ ...current, [upperScopeKey]: key }))}
+              items={upperSecondaryItems}
+            />
+          </aside>
+        </div>
+      </section>
     </div>
   );
 };

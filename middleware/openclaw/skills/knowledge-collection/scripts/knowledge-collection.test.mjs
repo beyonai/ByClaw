@@ -1,15 +1,22 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const scriptPath = resolve(dirname(fileURLToPath(import.meta.url)), 'knowledge-collection.mjs');
+const ingestScriptPath = resolve(dirname(scriptPath), 'ingest.mjs');
+const enterpriseScriptPath = resolve(dirname(scriptPath), 'enterprise-collection.mjs');
+const routerScriptPath = resolve(dirname(scriptPath), 'command-router.mjs');
+const platformDelegatePath = resolve(dirname(scriptPath), 'platform-delegate.mjs');
+const siteCrawlSkillPath = resolve(dirname(scriptPath), '../references/site-crawl/SKILL.md');
 
-function runCli(args) {
+function runCli(args, env = {}, executable = scriptPath) {
   return new Promise((resolveRun) => {
-    const child = spawn(process.execPath, [scriptPath, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [executable, ...args], {
+      env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk; });
@@ -89,18 +96,114 @@ async function setupCollectedSession({ mode = 'collection' } = {}) {
 // ── CLI 帮助与平台委派 ──
 
 await (async () => {
+  assert.equal(existsSync(routerScriptPath), true, 'local command routing must live outside the CLI entrypoint');
+  assert.equal(existsSync(platformDelegatePath), true, 'platform command delegation must live outside the CLI entrypoint');
   const h = await runCli(['help']);
   assert.equal(h.json.ok, true);
   assert.ok(h.json.commandsByGroup.research.some((item) => item.name === 'init'));
+  const rootEnterprise = h.json.commandsByGroup.platform.find((item) => item.name === 'enterprise');
+  assert.match(rootEnterprise.title, /resume-resource/);
 
   const ih = await runCli(['init', '--help']);
   assert.equal(ih.json.ok, true);
   assert.equal(ih.json.command, 'init');
   assert.ok(ih.json.example.includes('--session-dir'));
 
+  const schema = await runCli(['command-schema']);
+  assert.equal(schema.code, 0, schema.stderr);
+  assert.equal(schema.json.schemaVersion, '1.0');
+  assert.deepEqual(schema.json.commands.init.required, ['session-dir', 'query']);
+  assert.equal(schema.json.commands.init.properties['source-scope'].type, 'array');
+  assert.deepEqual(schema.json.commands.init.properties['source-scope'].items.enum, [
+    'public-internet', 'dingtalk', 'feishu', 'wecom', 'ima',
+  ]);
+  assert.deepEqual(schema.json.commands.init.properties['source-scope'].default, ['public-internet']);
+  assert.deepEqual(schema.json.commands.init.properties['materialization-target'].enum, ['candidates', 'selected', 'all']);
+  assert.equal(schema.json.commands.init.properties['materialization-target'].default, 'selected');
+  assert.deepEqual(schema.json.commands.plan.required, ['session-dir', 'initial-search', 'channels']);
+  assert.equal(schema.json.commands.plan.properties['initial-search'].type, 'array');
+  assert.equal(schema.json.commands.plan.properties.channels.type, 'object');
+  assert.equal(schema.json.commands.branch.properties.level.type, 'integer');
+  assert.equal(schema.json.commands.branch.properties.level.minimum, 1);
+  assert.equal(schema.json.commands.branch.properties.status.default, 'done');
+  assert.equal(schema.json.commands.collect.properties['item-json-file'].format, 'post-processing-input-file');
+  assert.equal(schema.json.commands.run.properties['dry-run'].type, 'boolean');
+  assert.equal(schema.json.commands['crawl-seed'].properties['max-pages'].type, 'integer');
+  assert.equal(schema.json.commands['crawl-seed'].properties.depth.default, 1);
+  assert.ok(schema.json.commands['rewrite-image-links'].oneOf);
+  for (const [name, contract] of Object.entries(schema.json.commands)) {
+    if (contract.type !== 'delegated-command') {
+      assert.equal(contract.schemaComplete, true, `${name} schema must be explicit`);
+    }
+  }
+  assert.ok(schema.json.commands.report.required.includes('session-dir'));
+  assert.equal(schema.json.commands.ingest.type, 'delegated-command');
+  assert.equal(schema.json.commands.ingest.delegatedTo.schemaCommand, 'node scripts/ingest.mjs command-schema');
+  assert.equal(schema.json.commands.enterprise.type, 'delegated-command');
+  assert.equal(schema.json.commands.enterprise.delegatedTo.schemaCommand, 'node scripts/enterprise-collection.mjs command-schema');
+
+  const siteCrawlFrontmatter = readFileSync(siteCrawlSkillPath, 'utf8').split('---')[1];
+  assert.match(siteCrawlFrontmatter, /Do not use for one known URL/);
+
+  const ingestSchema = await runCli(['command-schema'], {}, ingestScriptPath);
+  assert.equal(ingestSchema.code, 0, ingestSchema.stderr);
+  assert.equal(ingestSchema.json.schemaVersion, '1.0');
+
+  const enterpriseSchema = await runCli(['command-schema'], {}, enterpriseScriptPath);
+  assert.equal(enterpriseSchema.code, 0, enterpriseSchema.stderr);
+  assert.equal(enterpriseSchema.json.commands['search-all'].additionalProperties, false);
+  assert.deepEqual(enterpriseSchema.json.commands['search-all'].properties.sources.default, ['dingtalk', 'feishu', 'wecom', 'ima']);
+
   const kb = await runCli(['list-kb', '--help']);
   assert.equal(kb.code, 0);
   assert.equal(kb.json.name, 'knowledge-collection-ingest');
+
+  const enterprise = await runCli(['enterprise', '--help']);
+  assert.equal(enterprise.code, 0);
+  assert.equal(enterprise.json.name, 'knowledge-collection-enterprise');
+  assert.match(enterprise.json.usage, /enterprise (search|resource)/);
+  assert.match(enterprise.json.defaults, /limit 50/);
+  assert.match(enterprise.json.defaults, /concurrency 4/);
+  assert.match(enterprise.json.defaults, /search-all defaults: sources dingtalk,feishu,wecom,ima/);
+  assert.match(enterprise.json.defaults, /search-all defaults:.*metadata-only true/);
+  assert.match(enterprise.json.commands.searchAll, /\[--sources dingtalk,feishu,wecom,ima\]/);
+
+  const enterpriseSearchHelp = await runCli(['enterprise', 'search', '--help']);
+  assert.equal(enterpriseSearchHelp.code, 0, enterpriseSearchHelp.stderr);
+  assert.equal(enterpriseSearchHelp.json.name, 'knowledge-collection-enterprise');
+
+  const unsupported = await runCli([
+    'enterprise', 'resource', '--source', 'dingtalk', '--url', 'https://example.com/document', '--output-dir', '/tmp/kc-enterprise-route',
+  ]);
+  assert.equal(unsupported.code, 0, unsupported.stderr);
+  assert.equal(unsupported.json.status, 'unsupported_capability');
+  assert.equal(unsupported.json.continuable, true);
+
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'kc-enterprise-feishu-'));
+  const fixtureBin = join(fixtureRoot, 'lark-cli');
+  const outputDir = join(fixtureRoot, 'output');
+  writeFileSync(fixtureBin, `#!/usr/bin/env node
+const { mkdirSync, writeFileSync } = require('node:fs');
+const { join } = require('node:path');
+const args = process.argv.slice(2);
+const outputDir = args[args.indexOf('--output-dir') + 1];
+if (args[0] !== 'minutes' || args[1] !== '+detail' || args[args.indexOf('--minute-tokens') + 1] !== 'minute-1') process.exit(2);
+mkdirSync(outputDir, { recursive: true });
+writeFileSync(join(outputDir, 'transcript.md'), '# Transcript\\n\\nCLI regression.\\n');
+console.log(JSON.stringify({ ok: true }));
+`);
+  chmodSync(fixtureBin, 0o700);
+  try {
+    const feishu = await runCli([
+      'enterprise', 'resource', '--source', 'feishu', '--url', 'https://example.feishu.cn/minutes/minute-1',
+      '--minute-token', 'minute-1', '--output-dir', outputDir,
+    ], { LARK_CLI_BIN: fixtureBin, LARK_HOME: join(fixtureRoot, 'lark-home') });
+    assert.equal(feishu.code, 0, feishu.stderr);
+    assert.equal(feishu.json.status, 'complete');
+    assert.match(readFileSync(join(outputDir, 'sanitized/items/transcript.md'), 'utf8'), /CLI regression/);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
   console.log('PASS cli help and platform dispatch');
 })();
 
@@ -128,6 +231,33 @@ await (async () => {
   console.log('PASS arg validation and key=value');
 })();
 
+// ── 采集范围与正文交付目标 ──
+
+await (async () => {
+  const defaultScope = await runCli(['init', '--session-dir', makeSessionDir(), '--query', '公开资料']);
+  assert.deepEqual(defaultScope.json.task.sourceScope, ['public-internet']);
+  assert.equal(defaultScope.json.task.materializationTarget, 'selected');
+
+  const explicitScope = await runCli([
+    'init', '--session-dir', makeSessionDir(), '--query', '团队方案',
+    '--source-scope', '["public-internet","feishu"]',
+    '--materialization-target', 'all',
+  ]);
+  assert.deepEqual(explicitScope.json.task.sourceScope, ['public-internet', 'feishu']);
+  assert.equal(explicitScope.json.task.materializationTarget, 'all');
+  console.log('PASS source scope and materialization target');
+})();
+
+// ── 站点爬取报告模板必须满足统一 report 契约 ──
+
+await (async () => {
+  const template = readFileSync(siteCrawlSkillPath, 'utf8');
+  for (const heading of ['采集范围', '采集成果', '来源与追溯', '覆盖缺口与局限']) {
+    assert.match(template, new RegExp(`^## ${heading}`, 'm'));
+  }
+  console.log('PASS site crawl report template contract');
+})();
+
 // ── 研究流(含 source/citation 防编造校验) ──
 
 await (async () => {
@@ -142,8 +272,29 @@ await (async () => {
   assert.equal(c.json.ok, true);
   assert.ok(!existsSync(payloadPath), 'collect 成功后应删除输入 payload');
 
-  const p = await runCli(['plan', '--session-dir', root, '--initial-search', '["arxiv"]', '--combined-query', 'q1']);
+  // plan 必须为三个发现通道逐个表态：漏传、漏通道、缺 reason、reason 笼统均须拒收。
+  const noChannels = await runCli(['plan', '--session-dir', root, '--initial-search', '["arxiv"]', '--combined-query', 'q1']);
+  assert.equal(noChannels.json.ok, false, '未传 --channels 应拒收');
+  assert.match(noChannels.json.error, /--channels/);
+
+  const partial = await runCli(['plan', '--session-dir', root, '--initial-search', '["arxiv"]',
+    '--channels', '{"builtin-routing":{"state":"used"},"searxng":{"state":"used"}}']);
+  assert.equal(partial.json.ok, false, '漏掉 hot-discovery 应拒收');
+  assert.match(partial.json.error, /hot-discovery/);
+
+  const noReason = await runCli(['plan', '--session-dir', root, '--initial-search', '["arxiv"]',
+    '--channels', '{"builtin-routing":{"state":"used"},"searxng":{"state":"used"},"hot-discovery":{"state":"unavailable"}}']);
+  assert.equal(noReason.json.ok, false, 'state 非 used 且缺 reason 应拒收');
+
+  const vague = await runCli(['plan', '--session-dir', root, '--initial-search', '["arxiv"]',
+    '--channels', '{"builtin-routing":{"state":"used"},"searxng":{"state":"used"},"hot-discovery":{"state":"unavailable","reason":"跳过"}}']);
+  assert.equal(vague.json.ok, false, 'reason 笼统应拒收');
+
+  const p = await runCli(['plan', '--session-dir', root, '--initial-search', '["arxiv"]', '--combined-query', 'q1',
+    '--channels', '{"builtin-routing":{"state":"used"},"searxng":{"state":"used"},'
+      + '"hot-discovery":{"state":"unavailable","reason":"bycli 适配器在测试环境未就绪"}}']);
   assert.equal(p.json.ok, true);
+  assert.equal(p.json.channels['hot-discovery'].state, 'unavailable');
 
   const b = await runCli(['branch', '--session-dir', root, '--level', '1', '--query', 'arXiv 论文',
     '--research-goal', '找窗口内论文', '--learnings', '["AgentK"]',
@@ -166,8 +317,19 @@ await (async () => {
   writeFileSync(join(root, 'report.md'), '# 报告\n');
   const rep = await runCli(['report', '--session-dir', root]);
   assert.equal(rep.code, 1, 'depth=2 未到层级时 report 必须要求 stop-reason');
+  const incomplete = await runCli(['report', '--session-dir', root, '--stop-reason', '时间预算用尽,仅完成第一层']);
+  assert.equal(incomplete.code, 1);
+  assert.match(incomplete.json.error, /缺少必填章节/);
+
+  writeFileSync(join(root, 'report.md'), [
+    '# 报告', '## 采集范围', '公开互联网', '## 采集成果', '1 篇正文',
+    '## 来源与追溯', 'arXiv', '## 覆盖缺口与局限', '无数据局限',
+  ].join('\n'));
   const rep2 = await runCli(['report', '--session-dir', root, '--stop-reason', '时间预算用尽,仅完成第一层']);
   assert.equal(rep2.json.ok, true);
+  assert.equal(rep2.json.deliverySummary.materialized, 1);
+  assert.equal(rep2.json.deliverySummary.uniqueContentGroups, 1);
+  assert.equal(rep2.json.deliverySummary.deliveryComplete, true);
   const tree = readFileSync(join(root, 'research-tree.md'), 'utf8');
   assert.ok(tree.includes('## Level 1'));
   assert.ok(tree.includes('AgentK'));
@@ -263,7 +425,10 @@ await (async () => {
 
 await (async () => {
   const root = makeSessionDir();
-  await runCli(['init', '--session-dir', root, '--query', 'q', '--mode', 'collection']);
+  await runCli([
+    'init', '--session-dir', root, '--query', 'q', '--mode', 'collection',
+    '--materialization-target', 'all',
+  ]);
   mkdirSync(join(root, 'markdown'), { recursive: true });
   mkdirSync(join(root, 'sanitized/items'), { recursive: true });
   mkdirSync(join(root, '.post-processing-inputs'), { recursive: true });
@@ -319,6 +484,9 @@ await (async () => {
   const status = await runCli(['status', '--session-dir', root]);
   assert.equal(status.json.ok, true);
   assert.equal(status.json.collection.materialized, 1);
+  assert.equal(status.json.collection.pending, 1);
+  assert.equal(status.json.collection.materializationTarget, 'all');
+  assert.equal(status.json.collection.deliveryComplete, false);
   console.log('PASS partial cleanup');
 })();
 

@@ -25,7 +25,6 @@ export const PROJECT_DETAIL_SECTIONS = [
   { key: 'tasks', labelId: 'projectSpace.detail.tabs.tasks' },
   { key: 'resources', labelId: 'projectSpace.detail.tabs.resources' },
   { key: 'requirements', labelId: 'projectSpace.detail.tabs.requirements' },
-  { key: 'digitalAgents', labelId: 'projectSpace.detail.tabs.digitalAgents' },
   { key: 'members', labelId: 'projectSpace.detail.tabs.members' },
   { key: 'integration', labelId: 'projectSpace.detail.tabs.integration' },
   { key: 'accounts', labelId: 'projectSpace.detail.tabs.accounts' },

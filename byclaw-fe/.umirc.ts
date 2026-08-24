@@ -16,7 +16,6 @@ const target = `http://${process.env.BE_HOST || process.env.HOST || 'localhost'}
   process.env.BE_SERVER_PORT || '8086'
 }`;
 
-
 const wsTarget = process.env.BYCLAW_PORTAL_URL_WS?.trim() || 'http://localhost:8082';
 // 本地 noVNC 同时包含页面资源和 WebSocket，需直连 OpenSandbox 网关，保持与生产 Nginx 转发方式一致。
 const sandboxTarget = process.env.BYCLAW_SANDBOX_BASE_URL?.trim() || 'http://127.0.0.1:8090';

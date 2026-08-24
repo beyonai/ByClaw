@@ -68,7 +68,10 @@ public class ModelManagementApplicationService {
 
     private static final String DEFAULT_MODEL_TYPE_LLM = "LLM";
 
-    private static final Set<String> REQUIRED_DEFAULT_MODEL_TYPES = Set.of(DEFAULT_MODEL_TYPE_LLM, "EMBEDDING");
+    private static final String DEFAULT_MODEL_TYPE_IMAGE_GENERATION = "IMAGE_GENERATION";
+
+    private static final Set<String> REQUIRED_DEFAULT_MODEL_TYPES =
+        Set.of(DEFAULT_MODEL_TYPE_LLM, "EMBEDDING", DEFAULT_MODEL_TYPE_IMAGE_GENERATION);
 
     private static final int MASK_PREFIX_LEN = 3;
 
@@ -358,7 +361,9 @@ public class ModelManagementApplicationService {
             || StringUtil.isEmpty(request.getApiToken())) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.upsert.required");
         }
-        if (request.getContextTokens() == null || request.getContextTokens() < 1) {
+        String modelType = normalizeModelType(request.getModelType(), DEFAULT_MODEL_TYPE_LLM);
+        if (!DEFAULT_MODEL_TYPE_IMAGE_GENERATION.equals(modelType)
+            && (request.getContextTokens() == null || request.getContextTokens() < 1)) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.contextTokens.required");
         }
         validateReasoningConfig(request.getReasoningConfig(), request.getMaxTokens());
@@ -744,23 +749,10 @@ public class ModelManagementApplicationService {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.modelId.required");
         }
 
-        Long tagId = modelDefault.getTagId();
         Long modelId = modelDefault.getModelId();
-        // 设置redis中默认模型信息
         ByaiAimodel target = byaiAimodelDomainService.findById(modelId);
         if (target == null) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40004, "aimodel.not.found");
-        }
-        else {
-            target.setIsDefault(1);
-            byaiAimodelDomainService.syncToRedis(target);
-        }
-
-        // 查询关联标签
-        List<ByaiTagRelation> aiModels = byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL, tagId);
-        Map<Long, ByaiTagRelation> byaiTagRelationMap = new HashMap<>(aiModels.size());
-        for (ByaiTagRelation byaiTagRelation : aiModels) {
-            byaiTagRelationMap.put(byaiTagRelation.getObjId(), byaiTagRelation);
         }
 
         String targetModelType = normalizeModelType(target.getModelType(), DEFAULT_MODEL_TYPE_LLM);
@@ -771,29 +763,6 @@ public class ModelManagementApplicationService {
         validateDefaultModelType(modelType);
         if (!ModelStatusEnum.isEnabledDb(target.getStatus())) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.default_model.enabled.required");
-        }
-
-        // 删除其他模型的默认对话标签
-        for (ByaiTagRelation tempTagRelation : byaiTagRelationMap.values()) {
-
-            Long objId = tempTagRelation.getObjId();
-            Long relationId = tempTagRelation.getRelationId();
-            byaiTagRelationService.removeById(relationId);
-
-            // 获取模型信息
-            ByaiAimodel byaiAimodel = byaiAimodelDomainService.findById(objId);
-            if (byaiAimodel == null) {
-                continue;
-            }
-
-            // 同步更新redis中的状态
-            if (ModelStatusEnum.isEnabledDb(byaiAimodel.getStatus())) {
-                byaiAimodel.setIsDefault(0);
-                byaiAimodelDomainService.syncToRedis(byaiAimodel);
-            }
-            else {
-                byaiAimodelDomainService.removeFromRedis(modelId);
-            }
         }
         assignDefaultModelForType(target, modelType);
     }
@@ -818,10 +787,12 @@ public class ModelManagementApplicationService {
         for (ByaiTagRelation relation : defaultRelations) {
             Long relationModelId = relation.getObjId();
             ByaiAimodel relationModel = byaiAimodelDomainService.getById(relationModelId);
-            boolean staleRelation = relationModel == null;
-            boolean sameTypeRelation = relationModel != null
-                && modelType.equals(normalizeModelType(relationModel.getModelType(), DEFAULT_MODEL_TYPE_LLM));
-            if (!staleRelation && !sameTypeRelation) {
+            if (relationModel == null) {
+                continue;
+            }
+            boolean sameTypeRelation = modelType
+                .equals(normalizeModelType(relationModel.getModelType(), DEFAULT_MODEL_TYPE_LLM));
+            if (!sameTypeRelation) {
                 continue;
             }
             if (target.getModelId().equals(relationModelId) && keptTargetRelation == null) {

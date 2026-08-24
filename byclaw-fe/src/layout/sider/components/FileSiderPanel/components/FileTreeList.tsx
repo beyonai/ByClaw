@@ -20,6 +20,9 @@ interface FileTreeListProps {
   items: FileBrowserItem[];
   childrenByPath: Record<string, FileBrowserItem[]>;
   expandedKeys: Key[];
+  // 受控 loadedKeys：rc-tree 内部把加载过的 key 永久记进 loadedKeys 并据此跳过 loadData，
+  // 不受控时刷新后无法重新拉子目录。传入后由调用方在缓存失效时摘掉对应 key。
+  loadedKeys?: Key[];
   currentPath: string;
   loading: boolean;
   emptyText: React.ReactNode;
@@ -60,6 +63,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
   items,
   childrenByPath,
   expandedKeys,
+  loadedKeys,
   currentPath,
   loading,
   emptyText,
@@ -88,6 +92,9 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
               selectable={false}
               treeData={treeData}
               expandedKeys={expandedKeys}
+              // 只有调用方真的接管了 loadedKeys 才透传：rc-tree 用 props.hasOwnProperty
+              // 判断受控，传 undefined 也会让它停止自己维护 loadedKeys，从而弄坏懒加载。
+              {...(loadedKeys ? { loadedKeys } : {})}
               onExpand={(keys) => onExpand(keys)}
               loadData={(node) => onLoadData(node as unknown as FileTreeItem)}
               icon={(node) => {

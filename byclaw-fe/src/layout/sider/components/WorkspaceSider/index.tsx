@@ -1,32 +1,29 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AppstoreOutlined,
-  BookOutlined,
+  BulbOutlined,
   DownOutlined,
-  EyeOutlined,
-  FileOutlined,
-  FolderOpenOutlined,
-  FolderOutlined,
   LoadingOutlined,
-  PlusCircleOutlined,
   ReloadOutlined,
   RightOutlined,
-  RobotOutlined,
-  ThunderboltOutlined,
-  ToolOutlined,
+  ShareAltOutlined,
 } from '@ant-design/icons';
 // @ts-ignore
 import { useDispatch, useIntl, useLocation, useNavigate } from '@umijs/max';
 import classNames from 'classnames';
 import dayjs from 'dayjs';
+import AntdIcon from '@/components/AntdIcon';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
+import { hydrateRunningSessions } from '@/hooks/useChat/chatRuntime';
 import useGlobal from '@/hooks/useGlobal';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
+import useAppStore from '@/models/common/useAppStore';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
-import { getArrayData, getPageTotal, normalizeProjectSession } from '@/pages/projectSpace/utils';
+import { getArrayData, getPageTotal, getProjectTagMeta, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import { listProjectSessionsByQo } from '@/service/devloop';
+import { getChatRunningStatus } from '@/service/message';
+import { chatSessionRuntimeManager, type RunningChatInfo } from '@/utils/chatSessionRuntimeManager';
 import WorkspaceSiderHeader from './WorkspaceSiderHeader';
 import WorkspaceProjectActions from './WorkspaceProjectActions';
 import WorkspaceSessionActions from './WorkspaceSessionActions';
@@ -36,14 +33,15 @@ import styles from './index.module.less';
 const PROJECT_SESSION_PAGE_SIZE = 5;
 const EXPANDED_PROJECTS_STORAGE_KEY = 'byclaw.workspaceSider.expandedProjectIds';
 
-const RESOURCE_ITEMS = [
-  { key: 'knowledge', path: '/knowledgeCenter', labelId: 'resourceTabs.knowledgeCenter', icon: <BookOutlined /> },
-  { key: 'tool', path: '/toolCenter', labelId: 'resourceTabs.toolCenter', icon: <ToolOutlined /> },
-  { key: 'view', path: '/viewCenter', labelId: 'resourceTabs.viewCenter', icon: <EyeOutlined /> },
-  { key: 'object', path: '/objectCenter', labelId: 'resourceTabs.objectCenter', icon: <AppstoreOutlined /> },
-  { key: 'ontology', path: '/ontologyCenter', labelId: 'sider.ontologyCenter', icon: <AppstoreOutlined /> },
-  { key: 'skill', path: '/skillCenter', labelId: 'resourceTabs.skillCenter', icon: <ToolOutlined /> },
-  { key: 'file', path: '/files', labelId: 'workspaceSider.fileCenter', icon: <FileOutlined /> },
+const RESOURCE_PATHS = [
+  '/resourceCenter',
+  '/knowledgeCenter',
+  '/toolCenter',
+  '/viewCenter',
+  '/objectCenter',
+  '/ontologyCenter',
+  '/skillCenter',
+  '/files',
 ] as const;
 
 type ProjectSessionState = {
@@ -147,14 +145,21 @@ const formatSessionTime = (value: string | number | undefined, intl: ReturnType<
   if (!time.isValid()) return '';
 
   const minuteDiff = dayjs().diff(time, 'minute');
-  if (minuteDiff <= 0) return intl.formatMessage({ id: 'workspaceSider.time.justNow' });
   if (minuteDiff < 60) {
-    return intl.formatMessage({ id: 'workspaceSider.time.minutesAgo' }, { count: minuteDiff });
+    return intl.formatMessage({ id: 'workspaceSider.time.minutesAgo' }, { count: Math.max(1, minuteDiff) });
   }
   if (minuteDiff < 60 * 24) {
     return intl.formatMessage({ id: 'workspaceSider.time.hoursAgo' }, { count: Math.floor(minuteDiff / 60) });
   }
-  return time.format('MM-DD');
+  const dayDiff = dayjs().diff(time, 'day');
+  if (dayDiff < 30) {
+    return intl.formatMessage({ id: 'workspaceSider.time.daysAgo' }, { count: dayDiff });
+  }
+  const monthDiff = dayjs().diff(time, 'month');
+  if (monthDiff < 12) {
+    return intl.formatMessage({ id: 'workspaceSider.time.monthsAgo' }, { count: Math.max(1, monthDiff) });
+  }
+  return intl.formatMessage({ id: 'workspaceSider.time.yearsAgo' }, { count: Math.max(1, dayjs().diff(time, 'year')) });
 };
 
 const isSameOrChildPath = (pathname: string, path: string) => pathname === path || pathname.startsWith(`${path}/`);
@@ -167,19 +172,17 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   const { EventEmitter, sessionId, setAgentId, setSessionId } = useGlobal();
   const { clearDetailPanel } = useContext(SiderContentContext);
   const { projects, loading, fetchProjects } = useProjectList();
+  const { setSiderCollapsed } = useAppStore();
   const [projectScopeId, updateProjectScopeId] = useProjectScopeId();
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(readExpandedProjectIds);
   const [sessionStateMap, setSessionStateMap] = useState<Record<string, ProjectSessionState>>({});
-  const [resourceMenuOpen, setResourceMenuOpen] = useState(false);
-  const [resourceMenuPosition, setResourceMenuPosition] = useState({ left: 0, top: 0 });
+  const [, setRuntimeVersion] = useState(0);
   const initializedProjectRef = useRef(false);
   const expandedProjectIdsRef = useRef(expandedProjectIds);
   const sessionStateMapRef = useRef(sessionStateMap);
   const sessionLoadingProjectIdsRef = useRef<Set<string>>(new Set());
-  const resourceMenuRef = useRef<HTMLDivElement>(null);
-  const resourceMenuLabelRef = useRef<HTMLSpanElement>(null);
-  const resourceMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasStoredExpandedProjectIdsRef = useRef(hasStoredExpandedProjectIds());
+  const runningSessionIdsKeyRef = useRef('');
 
   useEffect(() => {
     expandedProjectIdsRef.current = expandedProjectIds;
@@ -189,24 +192,82 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
     sessionStateMapRef.current = sessionStateMap;
   }, [sessionStateMap]);
 
-  const clearResourceMenuCloseTimer = useCallback(() => {
-    if (resourceMenuCloseTimerRef.current) {
-      clearTimeout(resourceMenuCloseTimerRef.current);
-      resourceMenuCloseTimerRef.current = null;
+  const loadedSessionIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          Object.values(sessionStateMap)
+            .flatMap((sessionState) => sessionState.sessions)
+            .map((session) => `${session.sessionId || ''}`.trim())
+            // 临时会话的运行态由本地 manager 维护，后端仅能查询已经落库的真实会话。
+            .filter((loadedSessionId) => loadedSessionId && !loadedSessionId.startsWith('pending_'))
+        )
+      ).sort(),
+    [sessionStateMap]
+  );
+  const loadedSessionIdsKey = loadedSessionIds.join(',');
+
+  const syncRunningStatus = useCallback(async () => {
+    if (!loadedSessionIdsKey) return;
+
+    try {
+      const runningInfoList: RunningChatInfo[] = await getChatRunningStatus({
+        sessionIds: loadedSessionIdsKey.split(','),
+      });
+      hydrateRunningSessions(runningInfoList || []);
+    } catch (error) {
+      console.error('Failed to synchronize workspace session running status:', error);
     }
+  }, [loadedSessionIdsKey]);
+
+  const updateDisplayedRunningSessions = useCallback(() => {
+    const nextRunningSessionIdsKey = Object.values(sessionStateMapRef.current)
+      .flatMap((sessionState) => sessionState.sessions)
+      .map((session) => `${session.sessionId || ''}`.trim())
+      .filter((loadedSessionId) => loadedSessionId && chatSessionRuntimeManager.isSessionRunning(loadedSessionId))
+      .sort()
+      .join(',');
+    if (nextRunningSessionIdsKey === runningSessionIdsKeyRef.current) return;
+
+    runningSessionIdsKeyRef.current = nextRunningSessionIdsKey;
+    setRuntimeVersion((version) => version + 1);
   }, []);
 
-  const closeResourceMenuLater = useCallback(() => {
-    clearResourceMenuCloseTimer();
-    resourceMenuCloseTimerRef.current = setTimeout(() => setResourceMenuOpen(false), 120);
-  }, [clearResourceMenuCloseTimer]);
+  useEffect(() => {
+    // 流式游标也会触发 manager 通知，仅在可见会话的 running 集合变化时刷新侧边栏。
+    return chatSessionRuntimeManager.subscribe(updateDisplayedRunningSessions);
+  }, [updateDisplayedRunningSessions]);
 
-  useEffect(
-    () => () => {
-      clearResourceMenuCloseTimer();
-    },
-    [clearResourceMenuCloseTimer]
-  );
+  useEffect(() => {
+    updateDisplayedRunningSessions();
+  }, [sessionStateMap, updateDisplayedRunningSessions]);
+
+  useEffect(() => {
+    void syncRunningStatus();
+  }, [syncRunningStatus]);
+
+  useEffect(() => {
+    if (!loadedSessionIdsKey) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void syncRunningStatus();
+      }
+    };
+    const handleOnline = () => {
+      void syncRunningStatus();
+    };
+
+    window.addEventListener('online', handleOnline);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const timer = window.setInterval(() => void syncRunningStatus(), 30000);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.clearInterval(timer);
+    };
+  }, [loadedSessionIdsKey, syncRunningStatus]);
 
   const updateProjectSessionState = useCallback((projectId: string, patch: Partial<ProjectSessionState>) => {
     const currentState = sessionStateMapRef.current[projectId] || createEmptySessionState();
@@ -345,26 +406,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
   }, [fetchProjectSessions, projectScopeId, projects, selectProject]);
 
   useEffect(() => {
-    if (!resourceMenuOpen) return undefined;
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!resourceMenuRef.current?.contains(event.target as Node)) {
-        setResourceMenuOpen(false);
-      }
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setResourceMenuOpen(false);
-    };
-
-    document.addEventListener('pointerdown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [resourceMenuOpen]);
-
-  useEffect(() => {
     const handleProjectListRefresh = (payload?: { projectId?: string | number }) => {
       const projectId = normalizeProjectId(payload?.projectId);
       void fetchProjects().then((refreshedProjects) => {
@@ -458,12 +499,13 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
     () => projects.find((project) => normalizeProjectId(project.projectId) === projectScopeId),
     [projectScopeId, projects]
   );
-  const resourceCenterActive = RESOURCE_ITEMS.some((item) => isSameOrChildPath(location.pathname, item.path));
+  const resourceCenterActive = RESOURCE_PATHS.some((path) => isSameOrChildPath(location.pathname, path));
   const newSessionActive = location.pathname === '/chat' && !sessionId;
   const projectActive = isSameOrChildPath(location.pathname, '/projectSpace');
   const employeeActive =
     isSameOrChildPath(location.pathname, '/digitalEmployees') || isSameOrChildPath(location.pathname, '/employees');
   const automationActive = isSameOrChildPath(location.pathname, '/automation');
+  const inspirationActive = isSameOrChildPath(location.pathname, '/inspiration');
 
   const handleNewSession = useCallback(() => {
     clearDetailPanel?.();
@@ -634,6 +676,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
 
   const renderProjectSessions = (project: ProjectSpace) => {
     const projectId = normalizeProjectId(project.projectId);
+    const projectTag = getProjectTagMeta(project);
     const sessionState = sessionStateMap[projectId] || createEmptySessionState();
     const hasMoreSessions = sessionState.loaded && sessionState.total > sessionState.sessions.length;
     const canCollapseSessions =
@@ -666,7 +709,19 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
         )}
 
         {sessionState.loaded && !sessionState.sessions.length && !sessionState.error && (
-          <div className={styles.sessionEmpty}>{intl.formatMessage({ id: 'workspaceSider.emptySessions' })}</div>
+          <div className={styles.sessionListAction}>
+            <span
+              className={classNames(
+                styles.projectTypeTag,
+                styles.sessionProjectTypeSpacer,
+                styles[`projectTypeTag${projectTag.classSuffix}`]
+              )}
+              aria-hidden="true"
+            >
+              {intl.formatMessage({ id: projectTag.messageId })}
+            </span>
+            <div className={styles.sessionEmpty}>{intl.formatMessage({ id: 'workspaceSider.emptySessions' })}</div>
+          </div>
         )}
 
         {sessionState.sessions.map((session) => (
@@ -678,11 +733,25 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
             )}
           >
             <button type="button" className={styles.sessionItem} onClick={() => handleOpenSession(project, session)}>
+              <span
+                className={classNames(
+                  styles.projectTypeTag,
+                  styles.sessionProjectTypeSpacer,
+                  styles[`projectTypeTag${projectTag.classSuffix}`]
+                )}
+                aria-hidden="true"
+              >
+                {intl.formatMessage({ id: projectTag.messageId })}
+              </span>
               <span className={styles.sessionName}>
                 {session.sessionName || intl.formatMessage({ id: 'workspaceSider.newSession' })}
               </span>
               <span className={styles.sessionTime}>
-                {formatSessionTime(session.updateTime || session.createTime, intl)}
+                {chatSessionRuntimeManager.isSessionRunning(`${session.sessionId}`) ? (
+                  <LoadingOutlined />
+                ) : (
+                  formatSessionTime(session.updateTime || session.createTime, intl)
+                )}
               </span>
             </button>
             <WorkspaceSessionActions
@@ -694,21 +763,45 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
         ))}
 
         {hasMoreSessions && (
-          <button
-            type="button"
-            className={styles.loadMoreSessions}
-            disabled={sessionState.loadingMore}
-            onClick={() => void fetchProjectSessions(projectId, { append: true })}
-          >
-            {sessionState.loadingMore ? <LoadingOutlined spin /> : null}
-            {intl.formatMessage({ id: 'workspaceSider.loadMore' })}
-          </button>
+          <div className={styles.sessionListAction}>
+            <span
+              className={classNames(
+                styles.projectTypeTag,
+                styles.sessionProjectTypeSpacer,
+                styles[`projectTypeTag${projectTag.classSuffix}`]
+              )}
+              aria-hidden="true"
+            >
+              {intl.formatMessage({ id: projectTag.messageId })}
+            </span>
+            <button
+              type="button"
+              className={styles.loadMoreSessions}
+              disabled={sessionState.loadingMore}
+              onClick={() => void fetchProjectSessions(projectId, { append: true })}
+            >
+              {sessionState.loadingMore ? <LoadingOutlined spin /> : null}
+              {intl.formatMessage({ id: 'workspaceSider.loadMore' })}
+            </button>
+          </div>
         )}
 
         {canCollapseSessions && (
-          <button type="button" className={styles.loadMoreSessions} onClick={handleCollapseSessions}>
-            {intl.formatMessage({ id: 'workspaceSider.collapseSessions' })}
-          </button>
+          <div className={styles.sessionListAction}>
+            <span
+              className={classNames(
+                styles.projectTypeTag,
+                styles.sessionProjectTypeSpacer,
+                styles[`projectTypeTag${projectTag.classSuffix}`]
+              )}
+              aria-hidden="true"
+            >
+              {intl.formatMessage({ id: projectTag.messageId })}
+            </span>
+            <button type="button" className={styles.loadMoreSessions} onClick={handleCollapseSessions}>
+              {intl.formatMessage({ id: 'workspaceSider.collapseSessions' })}
+            </button>
+          </div>
         )}
       </div>
     );
@@ -716,7 +809,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
 
   return (
     <aside className={classNames(styles.workspaceSider, className)} style={style} aria-label="workspace navigation">
-      <WorkspaceSiderHeader />
+      <WorkspaceSiderHeader onCollapse={() => setSiderCollapsed(true)} />
       <nav
         className={styles.primaryNavigation}
         aria-label={intl.formatMessage({ id: 'workspaceSider.primaryNavigation' })}
@@ -726,15 +819,23 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
           className={classNames(styles.primaryItem, newSessionActive && styles.primaryItemActive)}
           onClick={handleNewSession}
         >
-          <PlusCircleOutlined className={styles.primaryIcon} />
-          <span>{intl.formatMessage({ id: 'workspaceSider.newSession' })}</span>
+          <AntdIcon type="icon-xinjianduihua" className={styles.primaryIcon} />
+          <span>{intl.formatMessage({ id: 'workspaceSider.newTask' })}</span>
+        </button>
+        <button
+          type="button"
+          className={classNames(styles.primaryItem, automationActive && styles.primaryItemActive)}
+          onClick={() => navigate('/automation')}
+        >
+          <AntdIcon type="icon-a-Alarm-clocknaozhong" className={styles.primaryIcon} />
+          <span>{intl.formatMessage({ id: 'workspaceSider.scheduledTasks' })}</span>
         </button>
         <button
           type="button"
           className={classNames(styles.primaryItem, projectActive && styles.primaryItemActive)}
           onClick={() => navigate('/projectSpace', { state: { openProjectList: true } })}
         >
-          <FolderOutlined className={styles.primaryIcon} />
+          <ShareAltOutlined className={styles.primaryIcon} />
           <span>{intl.formatMessage({ id: 'sider.projectSpace' })}</span>
         </button>
         <button
@@ -742,65 +843,25 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
           className={classNames(styles.primaryItem, employeeActive && styles.primaryItemActive)}
           onClick={() => navigate('/digitalEmployees')}
         >
-          <RobotOutlined className={styles.primaryIcon} />
+          <AntdIcon type="icon-cebianlan-shuziyuangong" className={styles.primaryIcon} />
           <span>{intl.formatMessage({ id: 'workspaceSider.digitalEmployee' })}</span>
         </button>
         <button
           type="button"
-          className={classNames(styles.primaryItem, automationActive && styles.primaryItemActive)}
-          onClick={() => navigate('/automation')}
+          className={classNames(styles.primaryItem, resourceCenterActive && styles.primaryItemActive)}
+          onClick={() => navigate('/resourceCenter')}
         >
-          <ThunderboltOutlined className={styles.primaryIcon} />
-          <span>{intl.formatMessage({ id: 'sider.automation' })}</span>
+          <AntdIcon type="icon-ziyuan" className={styles.primaryIcon} />
+          <span>{intl.formatMessage({ id: 'workspaceSider.resourceCenter' })}</span>
         </button>
-        <div
-          ref={resourceMenuRef}
-          className={styles.resourceMenuWrap}
-          onMouseEnter={() => {
-            clearResourceMenuCloseTimer();
-            const labelRect = resourceMenuLabelRef.current?.getBoundingClientRect();
-            if (labelRect) {
-              setResourceMenuPosition({ left: labelRect.right + 8, top: labelRect.bottom + 4 });
-            }
-            setResourceMenuOpen(true);
-          }}
-          onMouseLeave={closeResourceMenuLater}
+        <button
+          type="button"
+          className={classNames(styles.primaryItem, inspirationActive && styles.primaryItemActive)}
+          onClick={() => navigate('/inspiration')}
         >
-          <button
-            type="button"
-            className={classNames(styles.primaryItem, resourceCenterActive && styles.primaryItemActive)}
-            aria-expanded={resourceMenuOpen}
-            aria-haspopup="menu"
-          >
-            <AppstoreOutlined className={styles.primaryIcon} />
-            <span ref={resourceMenuLabelRef}>{intl.formatMessage({ id: 'workspaceSider.resourceCenter' })}</span>
-          </button>
-          {resourceMenuOpen && (
-            <div
-              className={styles.resourceMenu}
-              role="menu"
-              style={{ left: resourceMenuPosition.left, top: resourceMenuPosition.top }}
-              onMouseEnter={clearResourceMenuCloseTimer}
-              onMouseLeave={closeResourceMenuLater}
-            >
-              {RESOURCE_ITEMS.map((item) => (
-                <button
-                  type="button"
-                  role="menuitem"
-                  key={item.key}
-                  className={styles.resourceMenuItem}
-                  onClick={() => {
-                    setResourceMenuOpen(false);
-                    navigate(item.path);
-                  }}
-                >
-                  {item.icon}
-                  <span>{intl.formatMessage({ id: item.labelId })}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+          <BulbOutlined className={styles.primaryIcon} />
+          <span>{intl.formatMessage({ id: 'workspaceSider.inspiration' })}</span>
+        </button>
       </nav>
 
       <section
@@ -825,19 +886,29 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
           {projects.map((project) => {
             const projectId = normalizeProjectId(project.projectId);
             const isExpanded = expandedProjectIds.has(projectId);
+            const projectTag = getProjectTagMeta(project);
             return (
               <div key={projectId} className={styles.projectItem} role="treeitem" aria-expanded={isExpanded}>
                 <div className={styles.projectRow}>
                   <button type="button" className={styles.projectButton} onClick={() => handleProjectClick(project)}>
-                    {isExpanded ? (
-                      <FolderOpenOutlined className={styles.projectIcon} />
-                    ) : (
-                      <FolderOutlined className={styles.projectIcon} />
-                    )}
+                    <span
+                      className={classNames(styles.projectTypeTag, styles[`projectTypeTag${projectTag.classSuffix}`])}
+                    >
+                      {intl.formatMessage({ id: projectTag.messageId })}
+                    </span>
                     <span className={styles.projectName} title={project.projectName}>
                       {project.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' })}
                     </span>
                   </button>
+                  <WorkspaceProjectActions
+                    project={project}
+                    onNewSession={handleNewProjectSession}
+                    onRefreshSessions={(currentProject) =>
+                      void fetchProjectSessions(normalizeProjectId(currentProject.projectId), { force: true })
+                    }
+                    onProjectChanged={handleProjectChanged}
+                    refreshing={Boolean(sessionStateMap[projectId]?.loading)}
+                  />
                   <button
                     type="button"
                     className={styles.projectExpandButton}
@@ -848,11 +919,6 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
                   >
                     {isExpanded ? <DownOutlined /> : <RightOutlined />}
                   </button>
-                  <WorkspaceProjectActions
-                    project={project}
-                    onNewSession={handleNewProjectSession}
-                    onProjectChanged={handleProjectChanged}
-                  />
                 </div>
                 {isExpanded && renderProjectSessions(project)}
               </div>

@@ -1,15 +1,16 @@
-import { AppstoreOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
+import { PlusOutlined, RightOutlined } from '@ant-design/icons';
 import { Button, Divider, Empty, Modal, Select, Spin, message } from 'antd';
-import { getLocale } from '@umijs/max';
-import { useEffect, useMemo, useState } from 'react';
+import { getLocale, useIntl } from '@umijs/max';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getDcSystemConfigListByStandType } from '@/service/auth';
-import { createProject, saveDefaultAgent, saveProjectMembers } from '@/service/devloop';
+import { createProject, saveProjectMembers } from '@/service/devloop';
 import { useChatResourceProject } from '@/components/ChatLayoutComp/ChatResourceWorkspace/useChatResourceProject';
 import useGlobal from '@/hooks/useGlobal';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
-import ProjectFormModal, { type ProjectFormValues } from '@/pages/projectSpace/components/ProjectFormModal';
+import ProjectOnboardingWizard from '@/pages/projectSpace/components/ProjectOnboardingWizard';
+import type { ProjectFormValues } from '@/pages/projectSpace/components/ProjectFormModal';
 import type { ProjectSpace, ProjectType } from '@/pages/projectSpace/types';
 import TaskTemplateModal from '.';
 import styles from './index.module.less';
@@ -48,6 +49,7 @@ const getSavedProjectId = (response: any) =>
 
 // 公共会话输入框统一使用该入口，再按当前会话所属项目类型切换对应模板数据。
 const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onProjectChange }) => {
+  const intl = useIntl();
   const { EventEmitter } = useGlobal();
   const [visible, setVisible] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
@@ -56,9 +58,12 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
   const [recommendedLoading, setRecommendedLoading] = useState(false);
   const [createdProjectOption, setCreatedProjectOption] = useState<ProjectOption>();
   const [selectedProjectOverride, setSelectedProjectOverride] = useState<string>();
+  const createdProjectNameRef = useRef('');
   const [selectedProjectId, updateProjectScopeId] = useProjectScopeId();
   const { projects, loading: projectsLoading, fetchProjects } = useProjectList();
   const { projectTypeOptions, projectTypeLoading } = useProjectTypeConfig();
+  const projectRequestStartedRef = useRef(projectsLoading);
+  const [projectListReady, setProjectListReady] = useState(() => projects.length > 0);
 
   const projectOptions = useMemo(() => {
     const projectMap = new Map<string, ProjectOption>(projects.map((project) => [project.projectId, project]));
@@ -68,6 +73,21 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
     return Array.from(projectMap.values());
   }, [createdProjectOption, projects]);
   const selectedProjectValue = selectedProjectOverride || selectedProjectId;
+  const selectedProjectExists = projectOptions.some(
+    (project) => `${project.projectId}` === `${selectedProjectValue || ''}`
+  );
+  const showProjectSelector =
+    projectListReady && (!projectOptions.length || !selectedProjectValue || selectedProjectExists);
+
+  useEffect(() => {
+    if (projectsLoading) {
+      projectRequestStartedRef.current = true;
+      return;
+    }
+    if (projectRequestStartedRef.current || projects.length > 0) {
+      setProjectListReady(true);
+    }
+  }, [projects.length, projectsLoading]);
 
   useEffect(() => {
     if (sessionId || !selectedProjectValue) return;
@@ -201,7 +221,9 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
         { responseCfg: { hideErrorTips: true } }
       );
       const savedProjectId = getSavedProjectId(response);
-      if (!savedProjectId) throw new Error('项目创建失败');
+      if (!savedProjectId) {
+        throw new Error(intl.formatMessage({ id: 'projectSpace.message.createFailed' }));
+      }
 
       await saveProjectMembers({
         projectId: Number(savedProjectId),
@@ -211,16 +233,13 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
             .filter((userId): userId is string | number => Boolean(userId))
           : [],
       });
-      if (values.projectType === 'develop' && values.defaultAgents) {
-        await saveDefaultAgent({ ...values.defaultAgents, projectId: Number(savedProjectId) });
-      }
-
       const refreshedProjects = await fetchProjects();
       const refreshedProject = refreshedProjects.find((project) => `${project.projectId}` === savedProjectId);
       const createdProject = refreshedProject || {
         projectId: savedProjectId,
         projectName: values.projectName.trim(),
       };
+      createdProjectNameRef.current = createdProject.projectName;
       setCreatedProjectOption(createdProject);
       setSelectedProjectOverride(savedProjectId);
       updateProjectScopeId(savedProjectId);
@@ -229,14 +248,32 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
         projectName: createdProject.projectName,
       });
       EventEmitter.emit('projectSpace-list-refresh', { projectId: savedProjectId });
-      setCreateProjectOpen(false);
-      message.success('项目创建成功');
+      message.success(intl.formatMessage({ id: 'projectSpace.message.createSuccess' }));
+      return savedProjectId;
     } catch (error: any) {
-      message.error(error?.message || '项目创建失败');
+      message.error(error?.message || intl.formatMessage({ id: 'projectSpace.message.createFailed' }));
+      return '';
     } finally {
       setCreateProjectLoading(false);
     }
   };
+
+  const handleCreateWizardFinish = useCallback(
+    (createdProjectId: string) => {
+      setCreateProjectOpen(false);
+      updateProjectScopeId(createdProjectId);
+      const createdProject =
+        projectOptions.find((project) => `${project.projectId}` === createdProjectId) || createdProjectOption;
+      const projectName = createdProject?.projectName || createdProjectNameRef.current;
+      if (projectName) {
+        onProjectChange?.({
+          projectId: createdProjectId,
+          projectName,
+        });
+      }
+    },
+    [createdProjectOption, onProjectChange, projectOptions, updateProjectScopeId]
+  );
 
   const loadingModal = (
     <Modal
@@ -258,17 +295,19 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
   return (
     <>
       <div className={styles.taskTemplateTools}>
-        {!sessionId && (
+        {!sessionId && showProjectSelector && (
           <Select
             className={styles.projectSelect}
             showSearch
             loading={projectsLoading}
             value={selectedProjectValue || undefined}
-            placeholder="选择项目"
+            placeholder={intl.formatMessage({ id: 'projectSpace.selectProject' })}
+            showArrow
+            popupMatchSelectWidth={260}
             optionFilterProp="label"
             options={projectOptions.map((item) => ({
               value: `${item.projectId}`,
-              label: item.projectName || '未命名项目',
+              label: item.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' }),
             }))}
             onChange={(value) => {
               setSelectedProjectOverride(`${value}`);
@@ -281,7 +320,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
                 });
               }
             }}
-            aria-label="选择项目"
+            aria-label={intl.formatMessage({ id: 'projectSpace.selectProject' })}
             dropdownRender={(menu) => (
               <>
                 {menu}
@@ -293,23 +332,20 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => setCreateProjectOpen(true)}
                 >
-                  新建项目
+                  {intl.formatMessage({ id: 'projectSpace.createProject' })}
                 </Button>
               </>
             )}
           />
         )}
-        <Button icon={<AppstoreOutlined />} onClick={() => setVisible(true)}>
-          任务模板
-        </Button>
       </div>
-      <ProjectFormModal
+      <ProjectOnboardingWizard
         open={createProjectOpen}
-        loading={createProjectLoading}
         projectTypeConfigOptions={projectTypeOptions}
         projectTypeLoading={projectTypeLoading}
         onCancel={() => setCreateProjectOpen(false)}
-        onSubmit={handleCreateProject}
+        onCreateProject={handleCreateProject}
+        onFinish={handleCreateWizardFinish}
       />
       {projectLoading && !project ? (
         loadingModal

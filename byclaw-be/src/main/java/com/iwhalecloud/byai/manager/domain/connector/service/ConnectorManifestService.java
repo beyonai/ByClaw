@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
@@ -42,6 +43,10 @@ public class ConnectorManifestService {
 
     public boolean upsertAndEnable(Long userId, ConnectorInfo connector) {
         requireUserAndConnector(userId, connector);
+        List<String> managedKeys = managedEnvironmentKeys(connector);
+        if (!managedKeys.isEmpty()) {
+            return upsertAndEnable(userId, connector, Map.of());
+        }
         Map<String, String> desiredEnvironment = canonicalizer.extractEnvironment(
             connector,
             connector.getRuntimeManifest()
@@ -74,12 +79,184 @@ public class ConnectorManifestService {
         return changed;
     }
 
+    /**
+     * Atomically applies a complete managed credential set and enables it. Empty input only re-enables
+     * the already stored managed values; it never creates blank credential rows.
+     */
+    public boolean upsertAndEnable(Long userId, ConnectorInfo connector, Map<String, String> credentials) {
+        requireUserAndConnector(userId, connector);
+        List<String> managedKeys = managedEnvironmentKeys(connector);
+        if (managedKeys.isEmpty()) {
+            if (credentials != null && !credentials.isEmpty()) {
+                throw new IllegalArgumentException("Connector has no managed credential keys");
+            }
+            return upsertAndEnable(userId, connector);
+        }
+        Set<String> allowedKeys = Set.copyOf(managedKeys);
+        if (credentials == null || credentials.isEmpty()) {
+            requireCompleteManagedCredentialPair(userId, connector, allowedKeys);
+            return updateManagedEnvironmentStatus(userId, connector, managedKeys, NORMAL);
+        }
+        if (!credentials.keySet().equals(allowedKeys) || credentials.values().stream().anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("Managed connector credentials must exactly match the manifest allowlist");
+        }
+        List<UserPrivateParam> currentParams = findUserParams(userId);
+        Map<String, UserPrivateParam> currentByKey = indexByKey(currentParams);
+        preflightOwnership(currentParams, connector.getConnectorCode(), credentials);
+
+        boolean changed = false;
+        for (String key : managedKeys) {
+            UserPrivateParam existing = currentByKey.get(key);
+            if (existing == null) {
+                changed |= insertOrUpdateConcurrentWinner(userId, connector, key, credentials.get(key));
+            } else {
+                changed |= updateAndEnable(existing, connector, credentials.get(key));
+            }
+        }
+        changed |= removeObsoleteManagedCredentials(currentParams, connector, allowedKeys);
+        return changed;
+    }
+
+    /** Reads only exact, connector-owned managed credential keys and decrypts them for an in-memory probe. */
+    public Map<String, String> readManagedCredentials(
+            Long userId,
+            ConnectorInfo connector,
+            Set<String> requestedKeys) {
+        requireUserAndConnector(userId, connector);
+        Set<String> allowedKeys = Set.copyOf(managedEnvironmentKeys(connector));
+        if (!allowedKeys.equals(requestedKeys)) {
+            throw new IllegalArgumentException("Requested credential keys must exactly match the manifest allowlist");
+        }
+        Map<String, String> credentials = new HashMap<>();
+        for (UserPrivateParam param : userPrivateParamMapper.selectList(new LambdaQueryWrapper<UserPrivateParam>()
+                .eq(UserPrivateParam::getUserId, userId)
+                .eq(UserPrivateParam::getParamSource, PARAM_SOURCE_CONNECTOR)
+                .eq(UserPrivateParam::getSourceRef, connector.getConnectorCode())
+                .in(UserPrivateParam::getParamKey, allowedKeys)
+                .eq(UserPrivateParam::getStatus, NORMAL)
+                .eq(UserPrivateParam::getDeleteFlag, DELETE_FLAG_NORMAL))) {
+            if (userId.equals(param.getUserId()) && ownedByConnector(param, connector.getConnectorCode())
+                    && allowedKeys.contains(param.getParamKey())) {
+                String value = decryptBestEffort(param.getParamValueCipher());
+                if (value != null) {
+                    credentials.put(param.getParamKey(), value);
+                }
+            }
+        }
+        return Map.copyOf(credentials);
+    }
+
+    /**
+     * Strict verification-only read of a complete owned managed set. NORMAL and DISABLED pairs are eligible,
+     * but every row must have the same state. This method never enables rows or writes runtime cache state.
+     */
+    public Map<String, String> readManagedCredentialsForVerification(
+            Long userId,
+            ConnectorInfo connector,
+            Set<String> requestedKeys) {
+        requireUserAndConnector(userId, connector);
+        Set<String> allowedKeys = Set.copyOf(managedEnvironmentKeys(connector));
+        if (!allowedKeys.equals(requestedKeys)) {
+            throw new IllegalArgumentException("Requested credential keys must exactly match the manifest allowlist");
+        }
+        Map<String, String> credentials = new HashMap<>();
+        Set<String> statuses = new java.util.HashSet<>();
+        for (UserPrivateParam param : userPrivateParamMapper.selectList(new LambdaQueryWrapper<UserPrivateParam>()
+                .eq(UserPrivateParam::getUserId, userId)
+                .eq(UserPrivateParam::getParamSource, PARAM_SOURCE_CONNECTOR)
+                .eq(UserPrivateParam::getSourceRef, connector.getConnectorCode())
+                .eq(UserPrivateParam::getDeleteFlag, DELETE_FLAG_NORMAL))) {
+            if (!userId.equals(param.getUserId()) || !ownedByConnector(param, connector.getConnectorCode())) {
+                continue;
+            }
+            if (!allowedKeys.contains(param.getParamKey())
+                    || (!NORMAL.equals(param.getStatus()) && !DISABLED.equals(param.getStatus()))) {
+                throw new IllegalStateException("Managed connector credential set is invalid");
+            }
+            String value = decryptBestEffort(param.getParamValueCipher());
+            if (!StringUtils.hasText(value) || credentials.putIfAbsent(param.getParamKey(), value) != null) {
+                throw new IllegalStateException("Managed connector credential set is invalid");
+            }
+            statuses.add(param.getStatus());
+        }
+        if (!credentials.keySet().equals(allowedKeys) || statuses.size() != 1) {
+            throw new IllegalStateException("Managed connector credential set is invalid");
+        }
+        return Map.copyOf(credentials);
+    }
+
+    /** Removes every connector-owned managed credential row, including keys retired by a manifest upgrade. */
+    public boolean removeManagedCredentials(Long userId, ConnectorInfo connector) {
+        requireUserAndConnector(userId, connector);
+        String connectorCode = connector.getConnectorCode();
+        boolean changed = false;
+        for (UserPrivateParam param : userPrivateParamMapper.selectList(new LambdaQueryWrapper<UserPrivateParam>()
+                .eq(UserPrivateParam::getUserId, userId)
+                .eq(UserPrivateParam::getParamSource, PARAM_SOURCE_CONNECTOR)
+                .eq(UserPrivateParam::getSourceRef, connectorCode)
+                .eq(UserPrivateParam::getDeleteFlag, DELETE_FLAG_NORMAL))) {
+            if (userId.equals(param.getUserId()) && ownedByConnector(param, connectorCode)
+                    && PARAM_SOURCE_CONNECTOR.equals(param.getParamSource())) {
+                requireSingleAffectedRow(userPrivateParamMapper.deleteById(param.getParamId()));
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    private boolean removeObsoleteManagedCredentials(
+            List<UserPrivateParam> currentParams,
+            ConnectorInfo connector,
+            Set<String> allowedKeys) {
+        boolean changed = false;
+        for (UserPrivateParam current : currentParams) {
+            if (ownedByConnector(current, connector.getConnectorCode())
+                    && !allowedKeys.contains(current.getParamKey())) {
+                requireSingleAffectedRow(userPrivateParamMapper.deleteById(current.getParamId()));
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
     public boolean disable(Long userId, ConnectorInfo connector) {
         requireUserAndConnector(userId, connector);
+        List<String> managedKeys = managedEnvironmentKeys(connector);
+        if (!managedKeys.isEmpty()) {
+            return updateManagedEnvironmentStatus(userId, connector, managedKeys, DISABLED);
+        }
         boolean changed = false;
         for (UserPrivateParam current : findUserParams(userId)) {
             if (ownedByConnector(current, connector.getConnectorCode()) && !DISABLED.equals(current.getStatus())) {
                 current.setStatus(DISABLED);
+                touch(current, userId);
+                requireSingleAffectedRow(userPrivateParamMapper.updateById(current));
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    /**
+     * 返回允许后续凭据作业写入的受管环境变量名；本服务不会从 Runtime Manifest 写入凭据值。
+     */
+    public List<String> managedEnvironmentKeys(ConnectorInfo connector) {
+        requireConnector(connector);
+        return canonicalizer.extractManagedEnvironmentKeys(connector, connector.getRuntimeManifest());
+    }
+
+    private boolean updateManagedEnvironmentStatus(
+            Long userId,
+            ConnectorInfo connector,
+            List<String> managedKeys,
+            String status) {
+        Set<String> allowedKeys = Set.copyOf(managedKeys);
+        boolean changed = false;
+        for (UserPrivateParam current : findUserParams(userId)) {
+            if (ownedByConnector(current, connector.getConnectorCode())
+                    && allowedKeys.contains(current.getParamKey())
+                    && !status.equals(current.getStatus())) {
+                current.setStatus(status);
                 touch(current, userId);
                 requireSingleAffectedRow(userPrivateParamMapper.updateById(current));
                 changed = true;
@@ -158,6 +335,38 @@ public class ConnectorManifestService {
         }
     }
 
+    private void requireCompleteManagedCredentialPair(
+            Long userId,
+            ConnectorInfo connector,
+            Set<String> allowedKeys) {
+        Set<String> storedKeys = new java.util.HashSet<>();
+        Set<String> statuses = new java.util.HashSet<>();
+        for (UserPrivateParam param : findUserParams(userId)) {
+            if (ownedByConnector(param, connector.getConnectorCode())) {
+                if (!allowedKeys.contains(param.getParamKey()) || !storedKeys.add(param.getParamKey())
+                        || (!NORMAL.equals(param.getStatus()) && !DISABLED.equals(param.getStatus()))
+                        || !StringUtils.hasText(decryptBestEffort(param.getParamValueCipher()))) {
+                    throw new IllegalStateException("Managed connector credential rows are incomplete");
+                }
+                statuses.add(param.getStatus());
+            }
+        }
+        if (!storedKeys.equals(allowedKeys) || statuses.size() != 1) {
+            throw new IllegalStateException("Managed connector credential rows are incomplete");
+        }
+    }
+
+    private void preflightOwnership(
+            List<UserPrivateParam> currentParams,
+            String connectorCode,
+            Map<String, String> desiredEnvironment) {
+        for (UserPrivateParam existing : currentParams) {
+            if (desiredEnvironment.containsKey(existing.getParamKey()) && !ownedByConnector(existing, connectorCode)) {
+                throw new ConnectorParameterConflictException(existing.getParamKey());
+            }
+        }
+    }
+
     private Map<String, UserPrivateParam> indexByKey(List<UserPrivateParam> params) {
         Map<String, UserPrivateParam> result = new HashMap<>();
         for (UserPrivateParam param : params) {
@@ -221,6 +430,10 @@ public class ConnectorManifestService {
         if (userId == null || userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
+        requireConnector(connector);
+    }
+
+    private void requireConnector(ConnectorInfo connector) {
         if (connector == null || !StringUtils.hasText(connector.getConnectorCode())) {
             throw new IllegalArgumentException("connectorCode must not be blank");
         }

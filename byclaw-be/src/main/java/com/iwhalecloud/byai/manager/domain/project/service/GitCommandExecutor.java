@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
@@ -117,6 +118,55 @@ public class GitCommandExecutor {
      * @throws BaseException 如果命令执行失败或超时
      */
     public String executeCommand(Path repoPath, long timeoutSeconds, String... command) throws BaseException {
+        return executeCommand(repoPath, timeoutSeconds, true, command);
+    }
+
+    /**
+     * 执行只读查询命令但不逐行记录标准输出，避免文件内容或大型目录树进入应用日志。
+     */
+    public String executeCommandQuietly(Path repoPath, String... command) throws BaseException {
+        return executeCommand(repoPath, getDefaultTimeout(), false, command);
+    }
+
+    /** 执行可能返回二进制内容的只读命令，原样保留标准输出字节。 */
+    public byte[] executeCommandBytesQuietly(Path repoPath, String... command) throws BaseException {
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        processBuilder.directory(repoPath.toFile());
+        processBuilder.redirectErrorStream(false);
+        Process process = null;
+        try {
+            process = processBuilder.start();
+            ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+            ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+            Thread stdoutReader = startBinaryOutputReader(process.getInputStream(), stdout);
+            Thread stderrReader = startBinaryOutputReader(process.getErrorStream(), stderr);
+            boolean completed = process.waitFor(getDefaultTimeout(), TimeUnit.SECONDS);
+            if (!completed) {
+                process.destroyForcibly();
+                throw new BaseException(50500, "Git command timeout: " + String.join(" ", command));
+            }
+            stdoutReader.join(5000);
+            stderrReader.join(5000);
+            if (process.exitValue() != 0) {
+                String error = new String(stderr.toByteArray(), StandardCharsets.UTF_8);
+                throw new BaseException(50500, "Git command failed: " + sanitizeGitCredentials(error));
+            }
+            return stdout.toByteArray();
+        }
+        catch (IOException e) {
+            throw new BaseException(50500, "Failed to execute Git command: " + e.getMessage(), e);
+        }
+        catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            if (process != null) {
+                process.destroyForcibly();
+            }
+            throw new BaseException(50500, "Git command interrupted: " + String.join(" ", command), e);
+        }
+    }
+
+    private String executeCommand(Path repoPath, long timeoutSeconds, boolean logOutput, String... command)
+        throws BaseException {
         ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.directory(repoPath.toFile());
         processBuilder.redirectErrorStream(false);
@@ -131,8 +181,8 @@ public class GitCommandExecutor {
             StringBuilder stdout = new StringBuilder();
             StringBuilder stderr = new StringBuilder();
 
-            Thread stdoutReader = startOutputReader(process.getInputStream(), stdout);
-            Thread stderrReader = startOutputReader(process.getErrorStream(), stderr);
+            Thread stdoutReader = startOutputReader(process.getInputStream(), stdout, logOutput);
+            Thread stderrReader = startOutputReader(process.getErrorStream(), stderr, logOutput);
 
             // 等待命令执行完成（带超时）
             boolean completed = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
@@ -194,7 +244,7 @@ public class GitCommandExecutor {
      * 防止输出缓冲区满导致进程阻塞
      * 同时实时打印输出到日志（对大仓库克隆尤其重要）
      */
-    private Thread startOutputReader(java.io.InputStream inputStream, StringBuilder output) {
+    private Thread startOutputReader(java.io.InputStream inputStream, StringBuilder output, boolean logOutput) {
         Thread thread = new Thread(() -> {
             try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
@@ -202,10 +252,26 @@ public class GitCommandExecutor {
                 while ((line = reader.readLine()) != null) {
                     output.append(line).append("\n");
                     // 实时打印到日志（INFO 级别，便于观察大仓库克隆进度）
-                    log.info("Git output: {}", line);
+                    if (logOutput) {
+                        log.info("Git output: {}", line);
+                    }
                 }
             } catch (IOException e) {
                 log.warn("Error reading process output: {}", e.getMessage());
+            }
+        });
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
+    }
+
+    private Thread startBinaryOutputReader(java.io.InputStream inputStream, ByteArrayOutputStream output) {
+        Thread thread = new Thread(() -> {
+            try (inputStream; output) {
+                inputStream.transferTo(output);
+            }
+            catch (IOException e) {
+                log.warn("Error reading git process output: {}", e.getMessage());
             }
         });
         thread.setDaemon(true);
@@ -478,8 +544,8 @@ public class GitCommandExecutor {
             StringBuilder stdout = new StringBuilder();
             StringBuilder stderr = new StringBuilder();
 
-            Thread stdoutReader = startOutputReader(process.getInputStream(), stdout);
-            Thread stderrReader = startOutputReader(process.getErrorStream(), stderr);
+            Thread stdoutReader = startOutputReader(process.getInputStream(), stdout, true);
+            Thread stderrReader = startOutputReader(process.getErrorStream(), stderr, true);
 
             // 等待克隆完成
             boolean completed = process.waitFor(cloneTimeout, TimeUnit.SECONDS);

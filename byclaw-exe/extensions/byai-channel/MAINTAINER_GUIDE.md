@@ -32,8 +32,9 @@ flowchart LR
   webhook["HTTP Webhook"] --> channel["byaiChannelPlugin"]
   channel --> callback["callbackUrl"]
 
-  redis["ByFramework Redis ASK_AGENT"] --> sdkApp["ByaiSdkApp"]
-  sdkApp --> processor["deliverReplyToAgentViaSdk"]
+  redis["ByFramework Redis ASK_AGENT / RESUME"] --> runner["WorkerRunner"]
+  runner --> worker["ByaiChannelGatewayWorker.processCommand"]
+  worker --> processor["deliverReplyToAgentViaSdk"]
   processor --> gate["per-session FIFO gate"]
   gate --> dispatch["OpenClaw dispatchReplyFromConfig"]
   dispatch --> gateway["Gateway agent run"]
@@ -60,15 +61,34 @@ flowchart LR
 
 ### Redis SDK：消费 ASK_AGENT，再进入 OpenClaw dispatch
 
-`ByaiSdkApp.start()` 会创建 worker、注册 Redis consumer group、启动 heartbeat，并注册 `ASK_AGENT` subscription。收到消息后，它会：
+`ByaiSdkApp.start()` 会创建 `ByaiChannelGatewayWorker` 和 `WorkerRunner`。registry、consumer group、控制流、heartbeat、execution 与 ack 都由 framework 生命周期统一管理；channel 不再单独创建 `WorkerRegistry`/`WorkerHeartbeat`，也不再用 `runner.subscribe()` 绕过 `GatewayWorker.handleMessage()`。
 
-1. 校验 `content`、`sessionId`、`messageId`，无效消息直接 ack。
-2. 保存 execution 记录，解析文本、附件、语言、trace、connector authorization 和 lane metadata。
-3. 对 multi-agent batch 做 lane fan-out；各 lane 独立调用 `deliverReplyToAgentViaSdk`，但仍由各自的 sessionKey 控制并发。
-4. 处理完成后 ack；失败时发送 SDK error state，再 ack，避免 Redis 消息永久悬挂。
-5. cancel subscription 按 traceId 查找 `ActiveSdkRequest`，触发 abort，并释放被取消 dispatch 的 session gate。
+`WorkerRunner` 先显式 `initialize()`，让 channel 有机会保留自定义 consumer group 从最新消息开始和 NOGROUP 恢复语义；之后用 `start({ initialize: false })` 启动标准消费循环，避免重复初始化。收到消息后：
 
-SDK 输出通过 `GatewayDataEmitter` 发回 Redis/SDK，而不是依赖普通 channel 的最终 outbound。普通 channel 入口通常只能看到 root agent 的流；byai-channel 的 `onAgentEvent` 订阅能同时看到 root、native subagent 和各类 stream。
+1. `WorkerRunner.processAndAck` 建立 execution；没有预建 execution 时使用 `traceId` 作为 execution id，以兼容上游 `targetExecutionId=traceId` 的取消协议。
+2. `GatewayWorker.handleMessage` 执行 framework 的 history、task hooks、RESUME 恢复、失败/取消和 callback 语义，再调用 channel 的 `processCommand`。
+3. `processCommand` 校验消息并解析文本、附件、语言、trace、connector authorization 和 lane metadata。
+4. `ASK_AGENT` 进入普通 SDK 入站；`RESUME` 在 framework 恢复状态后作为 follow-up 进入同一套 OpenClaw dispatch 和完成门，不再搁置为 pending Redis 消息。
+5. multi-agent batch 做 lane fan-out；各 lane 独立调用 `deliverReplyToAgentViaSdk`，但仍由各自的 sessionKey 控制并发。
+6. `processCommand` 必须等待每个 lane 的完整业务 settle；完成门闭合后先发送 framework `FINAL_ANSWER`，再关闭各 lane 的 SDK 流，并标记 framework `AgentContext` 已发送 final/stream terminal，避免基类重复输出。
+7. `processCommand` 返回后，runner 更新 execution 终态并 ack。失败和取消同样先完成 SDK/framework 收敛再 ack，不由 channel 手工 ack。
+8. worker control stream 的 cancel 由 runner 中止 execution signal；channel 将该 signal 桥接到 OpenClaw `AbortController`，同时清理 `ActiveSdkRequest` 并释放被取消的 session gate。
+
+SDK 输出仍通过独立注册的 `GatewayDataEmitter` 发回 Redis/SDK，而不是改由 `AgentContext` 生成正文。这样 `processCommand` 尚未返回时和 OpenClaw 异步 events/hooks 到达时使用同一个 emitter；普通 channel 入口通常只能看到 root agent 的流，而 byai-channel 的 `onAgentEvent` 订阅能同时看到 root、native subagent 和各类 stream。
+
+### Framework finalAnswer 所有权
+
+`FINAL_ANSWER` 是业务结果，不是前端展示 transcript。每个 `ActiveSdkRequest` 按 root runId 保存独立结果账本：优先读取 `agent_end.messages` 最后一条 assistant 的纯文本正文，缺失时才使用 root assistant stream 的最后一段；thinking、tool、native subagent 与 delegated task 输出不进入账本。普通多 run 只返回最后一个成功 root run，上下文溢出自动续写则只拼接被截断 run 与 continuation run。
+
+Gateway worker 路径由 channel 在完成门闭合后先发送一次 `FINAL_ANSWER`，随后发送各 lane 的 `APP_STREAM_RESPONSE`。`processCommand` 返回相同 `content`，供 by-framework 写入回给 source agent 的 `ResumeCommand`；`AgentContext.setFinalAnswerEmitted(true)` 阻止基类重复发送 final。multi-agent batch 按原始 lane 顺序合并非空结果，使用 agent name 或 lane id 标注来源。
+
+当入站是带 `sourceAgentType` 的 `ASK_AGENT`（即 callAgent callback 路径）时，`AgentTaskResult` 仍以 `content` 作为权威文本，同时把同一字符串复制到 `replyData`，兼容只读取 `ResumeCommand.reply_data` 的调用方。普通顶层请求与 `RESUME` 不做这份兼容性复制。
+
+SDK 消息树的 root parent 继承当前 Gateway command 的 `header.parentMessageId`；只有没有上游 parent 的顶层入站才回退为 `-1`。该值随 lane 写入 `ActiveSdkRequest`，因此延迟到达的正文、thinking、工具顶层消息、compaction、错误和终态事件仍属于同一个 callAgent 节点。工具输入/输出明细继续以对应 `toolCallId` 为 parent，保留工具消息内部层级。
+
+> TODO：`remote-task-watch` 与标准 `RESUME` 当前依靠发送端 `waitForReply` 语义保持路径互斥，尚未实现跨路径原子认领/幂等。未来若 tracked call 改为保留 source agent，必须先设计统一 delivery owner，禁止 watcher follow-up 与 `RESUME` 同时回灌。
+
+停止时调用 `runner.stop({ cancelActiveExecutions: true })`，先终止在途 OpenClaw dispatch 并等待 `handleMessage` 收敛，再由 runner 停 heartbeat、释放 worker lock 和关闭阻塞 reader；最后才关闭 emitter 使用的 Redis 连接。
 
 ## 一次 SDK 业务会话
 
@@ -229,44 +249,45 @@ SDK 直接由 `GatewayDataEmitter` 发 chunk/state。`agent-event.ts` 负责完�
 最小状态机回归：
 
 ```bash
-node scripts/run-vitest.mjs \
-  extensions/byai-channel/src/session-context.native-subagent.test.ts \
-  extensions/byai-channel/src/session-context.delegated-followup.test.ts \
-  extensions/byai-channel/src/session-context.overflow.test.ts \
-  extensions/byai-channel/src/session-context.compaction.test.ts \
-  extensions/byai-channel/src/session-dispatch-settle.test.ts \
-  extensions/byai-channel/src/sdk-session-completion.test.ts
+cd byclaw-exe/extensions/byai-channel
+npx vitest run \
+  src/session-context.native-subagent.test.ts \
+  src/session-context.delegated-followup.test.ts \
+  src/session-context.overflow.test.ts \
+  src/session-context.compaction.test.ts \
+  src/session-dispatch-settle.test.ts \
+  src/sdk-session-completion.test.ts
 ```
 
 如果改了入站 dispatch，再加：
 
 ```bash
-node scripts/run-vitest.mjs extensions/byai-channel/src/sdk-message-processor.test.ts
+npx vitest run src/sdk-message-processor.test.ts src/sdk-app.test.ts
 ```
 
 如果改了 remote task，再加：
 
 ```bash
-node scripts/run-vitest.mjs \
-  extensions/byai-channel/src/remote-task-watch.test.ts \
-  extensions/byai-channel/src/remote-task-watch.batch.test.ts \
-  extensions/byai-channel/src/remote-followup.test.ts
+npx vitest run \
+  src/remote-task-watch.test.ts \
+  src/remote-task-watch.batch.test.ts \
+  src/remote-followup.test.ts
 ```
 
 最后做 `git diff --check`、定向格式检查和路径/符号存在性检查。完整 extensions typecheck/lint 可能被该用户模块当前已有的依赖边界或历史类型错误阻塞；遇到这类失败，要报告具体错误，不能把它归因于 session 状态机。
 
 ## 按症状排障
 
-| 症状                                      | 先查                                                                                                         | 常见根因                                                         |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
-| SDK 只收到 root 输出，看不到 child 流     | `index.ts` 订阅、`agent-event-serial.ts` 队列、`agent-event.ts` 的 sessionKey/runId 解析                     | 事件没有进入串行队列，或 child run binding 丢失                  |
-| dispatch 已返回但前端迟迟不 done          | `session-dispatch-settle.ts`、`shouldCompleteActiveSdkRequest` 全部 gates                                    | child、announce、delegated、outbound 或 recovery gate 仍在等待   |
-| 新 child run 被旧结束事件清掉             | `nativeChildRuns` 是否以 runId 查找；hook 是否传 `event.runId`                                               | 使用 childSessionKey 单键删除状态                                |
-| subagent 结束后白等一个完整超时窗口       | `rootRunsObservedWhileChildrenPending` 抵账是否生效；child 终态是否只从 `subagent_ended` 一条通道抵达        | 依赖了 `subagent_ended -> parent follow-up` 这个不成立的隐含协议 |
-| delegated 结果回来后过早收尾              | `delegatedWorkToolCallIds`、`markActiveSdkAwaitingDelegatedFollowup`、pending follow-up runId                | 清空 delegated 集合后没有先转移到 awaiting/follow-up gate        |
-| assistant 文本重复                        | `agent-event.ts` 的 incremental snapshot 和 `channel.ts` pending message send                                | 把 outbound echo 当新 assistant 文本，或绕过 runId/text 去重     |
-| 第一个请求正常，第二个同 session takeover | `session-dispatch-gate.ts` queue depth、`waitForSdkSessionDispatchSettled`                                   | dispatch 返回就释放 gate，未等 transcript/lifecycle 终态         |
-| 模型上下文与预期不符                      | `context-snapshot`、`prompt-injection-snapshot`、`before_prompt_build` 日志                                  | snapshot 未在 dispatch 前建立，或 hook 又执行了副作用型构建      |
+| 症状                                      | 先查                                                                                                  | 常见根因                                                         |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| SDK 只收到 root 输出，看不到 child 流     | `index.ts` 订阅、`agent-event-serial.ts` 队列、`agent-event.ts` 的 sessionKey/runId 解析              | 事件没有进入串行队列，或 child run binding 丢失                  |
+| dispatch 已返回但前端迟迟不 done          | `session-dispatch-settle.ts`、`shouldCompleteActiveSdkRequest` 全部 gates                             | child、announce、delegated、outbound 或 recovery gate 仍在等待   |
+| 新 child run 被旧结束事件清掉             | `nativeChildRuns` 是否以 runId 查找；hook 是否传 `event.runId`                                        | 使用 childSessionKey 单键删除状态                                |
+| subagent 结束后白等一个完整超时窗口       | `rootRunsObservedWhileChildrenPending` 抵账是否生效；child 终态是否只从 `subagent_ended` 一条通道抵达 | 依赖了 `subagent_ended -> parent follow-up` 这个不成立的隐含协议 |
+| delegated 结果回来后过早收尾              | `delegatedWorkToolCallIds`、`markActiveSdkAwaitingDelegatedFollowup`、pending follow-up runId         | 清空 delegated 集合后没有先转移到 awaiting/follow-up gate        |
+| assistant 文本重复                        | `agent-event.ts` 的 incremental snapshot 和 `channel.ts` pending message send                         | 把 outbound echo 当新 assistant 文本，或绕过 runId/text 去重     |
+| 第一个请求正常，第二个同 session takeover | `session-dispatch-gate.ts` queue depth、`waitForSdkSessionDispatchSettled`                            | dispatch 返回就释放 gate，未等 transcript/lifecycle 终态         |
+| 模型上下文与预期不符                      | `context-snapshot`、`prompt-injection-snapshot`、`before_prompt_build` 日志                           | snapshot 未在 dispatch 前建立，或 hook 又执行了副作用型构建      |
 
 ## 相关文件
 

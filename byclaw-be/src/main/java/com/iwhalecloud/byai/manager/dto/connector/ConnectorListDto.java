@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.dto.connector;
 
 import com.alibaba.fastjson.annotation.JSONField;
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -28,6 +29,17 @@ public class ConnectorListDto {
 
     /** 连接器功能简介 */
     private String description;
+
+    /** 连接器授权方式，仅返回可安全公开的类型标识。 */
+    private String authMode;
+
+    /** 数据库存储的原始授权配置，仅用于服务端生成安全表单 DTO。 */
+    @JsonIgnore
+    @JSONField(serialize = false)
+    private String authConfig;
+
+    /** 经过服务端白名单校验的凭据表单元数据。 */
+    private ConnectorCredentialFormDto credentialForm;
 
     /** 当前用户连接启用标识：Y=开启，N=关闭；未绑定时为 null。 */
     private String enableFlag;

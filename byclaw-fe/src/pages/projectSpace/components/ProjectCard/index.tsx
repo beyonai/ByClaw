@@ -1,9 +1,9 @@
 import { Card, Tag } from 'antd';
-import { FolderOpenOutlined } from '@ant-design/icons';
+import { ShareAltOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import classNames from 'classnames';
-import { PROJECT_TYPE_MESSAGE_ID } from '../../constants';
 import type { ProjectSpace } from '../../types';
+import { getProjectTagMeta } from '../../utils';
 import styles from '../../index.module.less';
 
 interface Props {
@@ -14,9 +14,7 @@ interface Props {
 
 const ProjectCard: React.FC<Props> = ({ project, active, onSelect }) => {
   const intl = useIntl();
-  // 运营项目使用青色，与研发紫色及普通项目蓝色保持一致的类型识别。
-  const projectTagColor =
-    project.projectType === 'develop' ? 'purple' : project.projectType === 'operation' ? 'cyan' : 'blue';
+  const projectTag = getProjectTagMeta(project);
 
   return (
     <Card
@@ -26,10 +24,13 @@ const ProjectCard: React.FC<Props> = ({ project, active, onSelect }) => {
     >
       <div className={styles.projectCardHeader}>
         <span className={styles.projectIcon}>
-          <FolderOpenOutlined />
+          <ShareAltOutlined />
         </span>
-        <Tag bordered={false} color={projectTagColor}>
-          {intl.formatMessage({ id: PROJECT_TYPE_MESSAGE_ID[project.projectType] })}
+        <Tag
+          bordered={false}
+          className={classNames(styles.projectTypeTag, styles[`projectTypeTag${projectTag.classSuffix}`])}
+        >
+          {intl.formatMessage({ id: projectTag.messageId })}
         </Tag>
       </div>
       <div className={styles.projectName}>{project.projectName}</div>

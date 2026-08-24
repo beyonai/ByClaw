@@ -50,6 +50,7 @@ interface IResourceItem {
   syncError?: string;
   lastSyncTime?: string;
   useCount?: number | string;
+  ownerType?: string;
 }
 
 interface ResourceListProps {
@@ -150,32 +151,45 @@ const ResourceList: React.FC<ResourceListProps> = ({
       const keyword = `${params?.searchValue ?? searchValue ?? ''}`.trim();
       const selectedCatalogId = `${params?.catalogId ?? catalogId ?? ''}`;
       const filterParam = params?.dropdownParam ?? dropdownParam;
-      const requestFilterParam = buildResourceListFilterParam(activeTab, filterParam);
       setLoading(true);
       try {
-        const res = await listResourceUseAuth({
-          keyword,
-          pageNum,
-          pageSize,
-          ownerType: activeTab,
-          catalogId: selectedCatalogId || undefined,
-          ...requestFilterParam,
-          resourceBizTypeList: requestFilterParam.resourceBizTypeList?.length
-            ? requestFilterParam.resourceBizTypeList
-            : baseResourceBizTypeList,
-        });
+        const ownerTypes = activeTab === 'installed' ? ['personal', 'enterprise'] : [activeTab];
+        const responses = await Promise.all(
+          ownerTypes.map(async (ownerType) => {
+            const ownerFilterParam = buildResourceListFilterParam(ownerType, filterParam);
+            const response = await listResourceUseAuth({
+              keyword,
+              pageNum,
+              pageSize,
+              ownerType,
+              catalogId: selectedCatalogId || undefined,
+              ...ownerFilterParam,
+              resourceBizTypeList: ownerFilterParam.resourceBizTypeList?.length
+                ? ownerFilterParam.resourceBizTypeList
+                : baseResourceBizTypeList,
+            });
+            return { ownerType, pageData: response?.data || response || {} };
+          })
+        );
 
-        const pageData = res?.data || res || {};
-        const rows = ((pageData?.list || pageData?.rows || []) as IResourceItem[]).map((item) => ({
-          ...item,
-          resourceLogoUrl: item.resourceLogoUrl || item.avatar,
-        }));
+        const rows = responses.flatMap(({ ownerType, pageData }) =>
+          ((pageData?.list || pageData?.rows || []) as IResourceItem[]).map((item) => ({
+            ...item,
+            ownerType: item.ownerType || ownerType,
+            resourceLogoUrl: item.resourceLogoUrl || item.avatar,
+          }))
+        );
+        const total = responses.reduce((sum, { pageData }) => sum + Number(pageData?.total || 0), 0);
 
         // 个人技能 tab 首页追加“用户开发(工作空间)技能”。仅在第一页、无目录筛选时拉取，
         // 翻页只走 listResourceUseAuth；后端已按个人已资源化技能去重，前端无需再去重。
         let workspaceRows: IResourceItem[] = [];
         const shouldLoadWorkspaceSkills =
-          resourceType === 'SKILL' && activeTab === 'personal' && !append && pageNum === 1 && !selectedCatalogId;
+          resourceType === 'SKILL' &&
+          (activeTab === 'personal' || activeTab === 'installed') &&
+          !append &&
+          pageNum === 1 &&
+          !selectedCatalogId;
         if (shouldLoadWorkspaceSkills && activeDigitalEmployeeIdRef.current) {
           try {
             const workspaceRes = await queryWorkspacePersonalSkillList({
@@ -193,11 +207,16 @@ const ResourceList: React.FC<ResourceListProps> = ({
         }
 
         const nextRows = workspaceRows.length ? [...workspaceRows, ...rows] : rows;
-        setList((prev) => (append ? [...prev, ...rows] : nextRows));
+        setList((prev) => {
+          const mergedRows = append ? [...prev, ...rows] : nextRows;
+          return Array.from(
+            new Map(mergedRows.map((item) => [`${item.ownerType || ''}:${item.resourceId}`, item])).values()
+          );
+        });
         setPageInfo({
-          pageNum: Number(pageData?.pageNum || pageNum || 1),
-          pageSize: Number(pageData?.pageSize || pageSize || 30),
-          total: Number(pageData?.total || 0),
+          pageNum,
+          pageSize,
+          total,
         });
       } finally {
         setLoading(false);
@@ -303,7 +322,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
       variant={isSkillPosterMode ? 'skillPoster' : 'default'}
       onCardClick={() => onDetail(item)}
       actionConfig={{
-        scene: activeTab === 'personal' ? 'personal' : 'enterprise',
+        scene: item.ownerType === 'personal' || activeTab === 'personal' ? 'personal' : 'enterprise',
         installedResourceIds,
         canManageWorkspaceSkill: canManageActiveEmployee,
         onEdit: () => onEdit(item),
@@ -351,9 +370,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
                 className={
                   isSkillPosterMode
                     ? styles.skillPosterList
-                    : [styles.employeeList, useWideCardLayout ? styles.wideResourceList : '']
-                        .filter(Boolean)
-                        .join(' ')
+                    : [styles.employeeList, useWideCardLayout ? styles.wideResourceList : ''].filter(Boolean).join(' ')
                 }
               >
                 {list.map((item) => renderResourceCard(item))}

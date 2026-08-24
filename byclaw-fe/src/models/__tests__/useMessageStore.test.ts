@@ -14,16 +14,19 @@ jest.mock('@/utils/messgae', () => ({
 }));
 
 import { getMessages, getMessageState } from '@/service/message';
+import { hasVisibleMessageContent } from '@/utils/messgae';
 import messageStoreModel, { fetchMessage } from '../useMessageStore';
 
 const mockGetMessages = getMessages as jest.MockedFunction<typeof getMessages>;
 const mockGetMessageState = getMessageState as jest.MockedFunction<typeof getMessageState>;
+const mockHasVisibleMessageContent = hasVisibleMessageContent as jest.MockedFunction<typeof hasVisibleMessageContent>;
 
 describe('models/useMessageStore', () => {
   const reducers = (messageStoreModel as any).reducers;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockHasVisibleMessageContent.mockReturnValue(true);
   });
 
   it('fetchMessage sorts, transforms and marks history messages', async () => {
@@ -63,6 +66,60 @@ describe('models/useMessageStore', () => {
     const result = await fetchMessage({ sessionId: 's1' });
 
     expect(result.list.map((item) => item.messageId)).toEqual([10007067, 2666782070, 10007074]);
+  });
+
+  it.each([
+    { total: 20, expected: false },
+    { total: 21, expected: true },
+  ])('fetchMessage combines the raw page size and total to calculate hasMore', async ({ total, expected }) => {
+    mockGetMessages.mockResolvedValue({
+      list: Array.from({ length: 20 }, (_, index) => ({ messageId: index + 1, text: `message-${index + 1}` })),
+      pageNum: 1,
+      pageSize: 20,
+      total,
+    } as any);
+
+    const result = await fetchMessage({ sessionId: 's1' });
+
+    expect(result.hasMore).toBe(expected);
+  });
+
+  it('getMoreSessionMessage preserves hasMore calculated from the raw response list', async () => {
+    mockHasVisibleMessageContent.mockImplementation((message) => message?.messageId !== 4);
+    mockGetMessages.mockResolvedValue({
+      list: [
+        { messageId: 3, text: 'visible' },
+        { messageId: 4, text: '' },
+      ],
+      pageNum: 2,
+      pageSize: 2,
+      total: 5,
+    } as any);
+
+    const cache = {
+      list: [{ messageId: 1 }, { messageId: 2 }],
+      pageNum: 1,
+      pageSize: 2,
+      total: 5,
+      pageRange: [1, 1],
+      hasMore: true,
+    };
+    const select = jest.fn(() => new Map([['s1', cache]]));
+    const put = jest.fn((action) => action);
+    const effect = (messageStoreModel as any).effects.getMoreSessionMessage(
+      { payload: { sessionId: 's1' } },
+      { put, select }
+    );
+
+    effect.next();
+    const fetchResult = effect.next(new Map([['s1', cache]])).value;
+    const response = await fetchResult;
+    const putEffect = effect.next(response).value;
+
+    expect(response.list).toHaveLength(1);
+    expect(response.hasMore).toBe(true);
+    expect(putEffect.payload.messageListInfo.hasMore).toBe(true);
+    effect.next(putEffect);
   });
 
   it('setSessionMessage stores message info by session id', () => {

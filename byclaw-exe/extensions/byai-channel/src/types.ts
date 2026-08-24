@@ -50,6 +50,8 @@ export interface ByaiLaneMetadata {
 /** SDK 模式入站消息（来自 Redis） */
 export interface ByaiSdkInboundMessage {
   messageId: string;
+  /** Parent command message id used to preserve cross-worker callAgent nesting. */
+  parentMessageId?: string;
   sessionId: string;
   userId: string;
   text: string;

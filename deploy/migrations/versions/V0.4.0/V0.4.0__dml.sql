@@ -24,6 +24,144 @@ SET provider_code = 'github-oauth2',
     update_time = CURRENT_TIMESTAMP
 WHERE connector_code = 'github';
 
+-- IMA OpenAPI 连接器。凭据仅由后续用户私有参数流程写入，迁移仅声明前端表单与受管环境白名单。
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config, runtime_manifest, sort
+)
+SELECT nextval('byai.seq_any_table'), 'ima-openapi', 'IMA', '通过 IMA OpenAPI 连接 IMA 服务', 'SYSTEM',
+       'ima-openapi', 'ima-skill', 'AK_SK',
+       '{"credentialForm":{"helpUrl":"https://ima.qq.com/agent-interface","fields":[{"key":"clientId","label":"Client ID","inputType":"text","maxLength":256},{"key":"apiKey","label":"API Key","inputType":"password","maxLength":2048}]}}',
+       '{}',
+       '{"schemaVersion":"1.0","id":"ima-openapi","version":"1.0.0","runtime":{"type":"cli","authorizeIn":"be-auth-job","commands":{"version":[["ima","--version"]]}},"authStorage":{"mode":"managed-environment","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","managedEnvironmentKeys":["IMA_OPENAPI_CLIENTID","IMA_OPENAPI_APIKEY"],"environment":{}},"skill":{"code":"ima-skill","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+       50
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'ima-openapi'
+);
+
+-- IMA OpenAPI 内置 Skill 注册
+-- CLI 与 skill 文件随 OpenClaw 镜像提供；数据库仅注册目录、运行期快照和可发现权限。
+UPDATE byai.byai_system_config c
+SET param_value = CASE
+        WHEN rtrim(c.param_value) = '[]' THEN '['
+        ELSE left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1) || ','
+    END
+    || '{"skillName":"IMA","skillCode":"ima-skill","skillDescZh":"通过 ima-openapi-cli 管理 IMA 笔记和知识库。","skillDescEn":"Manage IMA notes and knowledge bases through ima-openapi-cli."}]'
+WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
+  AND regexp_replace(c.param_value, '\s', '', 'g')
+      NOT LIKE '%"skillCode":"ima-skill"%';
+
+INSERT INTO byai.ss_resource (
+    resource_id, system_code, resource_biz_type, resource_type, resource_name,
+    resource_desc, resource_version_id, host_type, catalog_id, man_org_id,
+    man_user_id, create_by, create_time, update_by, update_time, com_acct_id,
+    resource_status, resource_d_verid, resource_r_verid, resource_code,
+    publish_time, auth_status, publish_portal, parent_resource_id, publish_type,
+    owner_type, impl_type, worker_agent_type
+)
+SELECT
+    nextval('byai.seq_any_table'), 'BYAI', 'SKILL', 'ATOM', 'IMA',
+    '通过 ima-openapi-cli 管理 IMA 笔记和知识库。',
+    '0.1.3', 'hosted', 10, -1, '10001', 10001, CURRENT_TIMESTAMP,
+    10001, CURRENT_TIMESTAMP, 1, 2, -1, -1, 'ima-skill',
+    CURRENT_TIMESTAMP, 'passed', 1, -1, 'publish', 'enterprise', 'SKILL', 'NONE'
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.ss_resource WHERE resource_code = 'ima-skill'
+);
+
+INSERT INTO byai.ss_res_ext_skill (
+    resource_id, skill_type, source_type, version, skill_url,
+    skill_package_format, skill_original_filename, skill_package_size,
+    skill_package_hash, sync_status, sync_error, last_sync_time
+)
+SELECT
+    r.resource_id, 'inner', 'SYSTEM_BUILTIN', '0.1.3', '', 'zip', NULL, NULL, NULL,
+    'SUCCESS', NULL, CURRENT_TIMESTAMP
+FROM byai.ss_resource r
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.ss_res_ext_skill e WHERE e.resource_id = r.resource_id
+)
+  AND r.resource_code = 'ima-skill';
+
+UPDATE byai.ss_res_ext_skill e
+SET target_content = json_build_object(
+    'resourceId', r.resource_id,
+    'resourceCode', r.resource_code,
+    'resourceName', r.resource_name,
+    'resourceDesc', r.resource_desc,
+    'resourceBizType', r.resource_biz_type,
+    'resourceType', r.resource_type,
+    'ownerType', r.owner_type,
+    'sourceType', e.source_type,
+    'skillType', e.skill_type,
+    'skillUrl', e.skill_url,
+    'version', e.version,
+    'skillPackageFormat', e.skill_package_format,
+    'skillOriginalFilename', e.skill_original_filename,
+    'skillPackageSize', e.skill_package_size,
+    'skillPackageHash', e.skill_package_hash,
+    'syncStatus', e.sync_status,
+    'syncError', e.sync_error,
+    'lastSyncTime', to_char(e.last_sync_time, 'YYYY-MM-DD HH24:MI:SS')
+)::text
+FROM byai.ss_resource r
+WHERE e.resource_id = r.resource_id
+  AND r.resource_code = 'ima-skill';
+
+INSERT INTO byai.au_privilege_grant (
+    privilege_grant_id, grant_type, oper_type, grant_obj_type, grant_obj_id,
+    eff_date, exp_date, status_cd, create_staff, create_date, update_staff,
+    update_date, grant_to_type, grant_to_obj_id, grant_to_obj_type, allow_unsubscribe
+)
+SELECT
+    nextval('byai.seq_any_table'),
+    g.grant_type, g.oper_type, g.grant_obj_type, ima.resource_id,
+    g.eff_date, g.exp_date, g.status_cd, g.create_staff, g.create_date,
+    g.update_staff, g.update_date, g.grant_to_type, g.grant_to_obj_id,
+    g.grant_to_obj_type, g.allow_unsubscribe
+FROM byai.au_privilege_grant g
+CROSS JOIN (
+    SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'ima-skill'
+) ima
+CROSS JOIN (
+    SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'dws'
+) dws
+WHERE g.grant_obj_id = dws.resource_id
+  AND NOT EXISTS (
+      SELECT 1
+      FROM byai.au_privilege_grant existing
+      WHERE existing.grant_obj_id = ima.resource_id
+        AND existing.grant_type = g.grant_type
+        AND existing.grant_to_type = g.grant_to_type
+        AND existing.grant_to_obj_id = g.grant_to_obj_id
+        AND existing.grant_to_obj_type = g.grant_to_obj_type
+  );
+
+-- IMA 授权兜底：DWS 尚未初始化授权时，至少授予内置管理员使用和管理权限。
+INSERT INTO byai.au_privilege_grant (
+    privilege_grant_id, grant_type, oper_type, grant_obj_type, grant_obj_id,
+    eff_date, exp_date, status_cd, create_staff, create_date, update_staff,
+    update_date, grant_to_type, grant_to_obj_id, grant_to_obj_type, allow_unsubscribe
+)
+SELECT
+    nextval('byai.seq_any_table'), fallback.grant_type, 'READ', 'SKILL', ima.resource_id,
+    CURRENT_TIMESTAMP, NULL, 'A', 10001, CURRENT_TIMESTAMP, 10001, CURRENT_TIMESTAMP,
+    'RED', 10001, 'USER', 'Y'
+FROM (VALUES ('AVAILABLE_USE'), ('ALLOW_MANAGE')) AS fallback(grant_type)
+CROSS JOIN (
+    SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'ima-skill'
+) ima
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.au_privilege_grant existing
+    WHERE existing.grant_obj_id = ima.resource_id
+      AND existing.status_cd = 'A'
+      AND existing.grant_type = fallback.grant_type
+      AND existing.grant_to_type = 'RED'
+      AND existing.grant_to_obj_id = 10001
+      AND existing.grant_to_obj_type = 'USER'
+);
+-- IMA OpenAPI 内置 Skill 注册结束
+
 /**百应运营渠道**/
 -- 运营闭环：按运营需求类型配置独立启动提示词，避免不同类型任务携带无关字段。
 -- 后端按 operationType 分别读取采集、知识整理、对象发现、发布和分析提示词，避免不同任务类型混用字段。
@@ -509,3 +647,353 @@ Requirements:
 4. Prefer noun + verb structure, suitable for chat conversation list titles
 5. [Mandatory] Do not output tags, internal thinking or reasoning. Return only the final title', 10001, '2026-08-07 11:15:33', '2026-08-07 11:15:33', null);
 
+-- ============================================================================
+-- agent-reach 技能下线迁移（合并到 knowledge-collection 内置路由层）
+-- 2026-08-18: agent-reach skill 已合并为 knowledge-collection/references/source-routing.md
+-- ============================================================================
+
+-- 1. 从 OPENCLAW_BUNDLED_SKILLS 配置中移除 agent-reach 条目。
+--    先按空白归一化再整体替换，避免依赖交替分组等复杂正则特性。
+UPDATE byai.byai_system_config
+SET param_value = regexp_replace(
+    regexp_replace(param_value, '\s', '', 'g'),
+    ',?\{"skillName":"[^"]*","skillCode":"agent-reach","skillDescZh":"[^"]*","skillDescEn":"[^"]*"\}',
+    '',
+    'g'
+)
+WHERE param_code = 'OPENCLAW_BUNDLED_SKILLS'
+  AND regexp_replace(param_value, '\s', '', 'g') LIKE '%"skillCode":"agent-reach"%';
+
+-- 2. 清理配置 JSON 可能出现的语法问题（数组首尾多余逗号）
+UPDATE byai.byai_system_config
+SET param_value = regexp_replace(
+    regexp_replace(param_value, '\[,', '[', 'g'),
+    ',\]', ']', 'g'
+)
+WHERE param_code = 'OPENCLAW_BUNDLED_SKILLS';
+
+-- 3. 删除 agent-reach 资源的所有授权记录
+DELETE FROM byai.au_privilege_grant
+WHERE grant_obj_id IN (
+    SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'agent-reach'
+);
+
+-- 4. 删除 agent-reach 的资源扩展记录（skill 元数据）
+DELETE FROM byai.ss_res_ext_skill
+WHERE resource_id IN (
+    SELECT resource_id FROM byai.ss_resource WHERE resource_code = 'agent-reach'
+);
+
+-- 5. 删除 agent-reach 资源本体
+DELETE FROM byai.ss_resource
+WHERE resource_code = 'agent-reach';
+
+-- 验证查询（migration 执行后应各返回 0 行）
+-- SELECT * FROM byai.ss_resource WHERE resource_code = 'agent-reach';
+-- SELECT * FROM byai.byai_system_config WHERE param_code = 'OPENCLAW_BUNDLED_SKILLS' AND param_value LIKE '%agent-reach%';
+-- SELECT g.* FROM byai.au_privilege_grant g JOIN byai.ss_resource r ON r.resource_id = g.grant_obj_id WHERE r.resource_code = 'agent-reach';
+-- SELECT e.* FROM byai.ss_res_ext_skill e JOIN byai.ss_resource r ON r.resource_id = e.resource_id WHERE r.resource_code = 'agent-reach';
+
+-- ============================================================================
+-- by-skill-installer 内置技能注册
+-- 2026-08-18: 按 skillCode 查平台内置技能并绑定到数字员工，让 agent 能使用该技能
+-- 各步骤均按 resource_code 幂等执行，resource_id 由序列生成避免固定 ID 冲突
+-- ============================================================================
+
+-- 1. 追加到 OPENCLAW_BUNDLED_SKILLS，已存在同名 skillCode 时不重复追加
+UPDATE byai.byai_system_config c
+SET param_value = CASE
+        WHEN rtrim(c.param_value) = '[]' THEN '['
+        ELSE left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1) || ','
+    END
+    || '{"skillName":"by-skill-installer","skillCode":"by-skill-installer","skillDescZh":"按 skillCode 在平台查找内置技能并绑定到数字员工，让 agent 能使用该技能。","skillDescEn":"Look up built-in skills by skillCode and bind them to a digital employee so the agent can use them."}]'
+WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
+  AND regexp_replace(c.param_value, '\s', '', 'g')
+      NOT LIKE '%"skillCode":"by-skill-installer"%';
+
+-- 2. 注册资源本体
+INSERT INTO byai.ss_resource (
+    resource_id, system_code, resource_biz_type, resource_type, resource_name,
+    resource_desc, resource_version_id, host_type, catalog_id, man_org_id,
+    man_user_id, create_by, create_time, update_by, update_time, com_acct_id,
+    resource_status, resource_d_verid, resource_r_verid, resource_code,
+    publish_time, auth_status, publish_portal, parent_resource_id, publish_type,
+    owner_type, impl_type, worker_agent_type
+)
+SELECT
+    nextval('byai.seq_any_table'), 'BYAI', 'SKILL', 'ATOM', '技能安装器',
+    '按 skillCode 在平台查找内置技能并绑定到数字员工，让 agent 能使用该技能。',
+    '1.0', 'hosted', 10, -1, '10001', 10001, CURRENT_TIMESTAMP,
+    10001, CURRENT_TIMESTAMP, 1, 2, -1, -1, 'by-skill-installer',
+    CURRENT_TIMESTAMP, 'passed', 1, -1, 'publish', 'enterprise', 'SKILL', 'NONE'
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.ss_resource
+    WHERE resource_code = 'by-skill-installer'
+);
+
+-- 3. 补齐内置 Skill 扩展记录；skill_type=inner 表示随运行时镜像提供，无需下载
+INSERT INTO byai.ss_res_ext_skill (
+    resource_id, skill_type, source_type, version, skill_url,
+    skill_package_format, skill_original_filename, skill_package_size,
+    skill_package_hash, sync_status, sync_error, last_sync_time
+)
+SELECT
+    r.resource_id, 'inner', 'SYSTEM_BUILTIN', 'v0.1', '', 'zip', NULL, NULL, NULL,
+    'SUCCESS', NULL, CURRENT_TIMESTAMP
+FROM byai.ss_resource r
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.ss_res_ext_skill e WHERE e.resource_id = r.resource_id
+)
+  AND r.resource_code = 'by-skill-installer';
+
+-- 4. 重建运行期技能快照，避免资源 ID 曾被其他技能复用时残留错误 target_content
+UPDATE byai.ss_res_ext_skill e
+SET target_content = json_build_object(
+    'resourceId', r.resource_id,
+    'resourceCode', r.resource_code,
+    'resourceName', r.resource_name,
+    'resourceDesc', r.resource_desc,
+    'resourceBizType', r.resource_biz_type,
+    'resourceType', r.resource_type,
+    'ownerType', r.owner_type,
+    'sourceType', e.source_type,
+    'skillType', e.skill_type,
+    'skillUrl', e.skill_url,
+    'version', e.version,
+    'skillPackageFormat', e.skill_package_format,
+    'skillOriginalFilename', e.skill_original_filename,
+    'skillPackageSize', e.skill_package_size,
+    'skillPackageHash', e.skill_package_hash,
+    'syncStatus', e.sync_status,
+    'syncError', e.sync_error,
+    'lastSyncTime', to_char(e.last_sync_time, 'YYYY-MM-DD HH24:MI:SS')
+)::text
+FROM byai.ss_resource r
+WHERE e.resource_id = r.resource_id
+  AND r.resource_code = 'by-skill-installer';
+
+-- 5. 清理历史重复授权，保证脚本重放不会累积重复数据
+DELETE FROM byai.au_privilege_grant
+WHERE privilege_grant_id IN (
+    SELECT privilege_grant_id
+    FROM (
+        SELECT g.privilege_grant_id,
+               ROW_NUMBER() OVER (
+                   PARTITION BY g.grant_obj_id, g.grant_type, g.grant_to_type,
+                                g.grant_to_obj_id, g.grant_to_obj_type
+                   ORDER BY g.privilege_grant_id DESC
+               ) AS row_num
+        FROM byai.au_privilege_grant g
+        WHERE g.grant_obj_id = (
+            SELECT resource_id FROM byai.ss_resource
+            WHERE resource_code = 'by-skill-installer'
+        )
+    ) ranked
+    WHERE ranked.row_num > 1
+);
+
+-- 6. 复制 knowledge-collection 的可用授权，使未传 ownerType 的技能列表也能发现该技能
+INSERT INTO byai.au_privilege_grant (
+    privilege_grant_id, grant_type, oper_type, grant_obj_type, grant_obj_id,
+    eff_date, exp_date, status_cd, create_staff, create_date, update_staff,
+    update_date, grant_to_type, grant_to_obj_id, grant_to_obj_type, allow_unsubscribe
+)
+SELECT
+    nextval('byai.seq_any_table'),
+    g.grant_type, g.oper_type, g.grant_obj_type, installer.resource_id,
+    g.eff_date, g.exp_date, g.status_cd, g.create_staff, g.create_date,
+    g.update_staff, g.update_date, g.grant_to_type, g.grant_to_obj_id,
+    g.grant_to_obj_type, g.allow_unsubscribe
+FROM byai.au_privilege_grant g
+CROSS JOIN (
+    SELECT resource_id FROM byai.ss_resource
+    WHERE resource_code = 'by-skill-installer'
+) installer
+CROSS JOIN (
+    SELECT resource_id FROM byai.ss_resource
+    WHERE resource_code = 'knowledge-collection'
+) knowledge_collection
+WHERE g.grant_obj_id = knowledge_collection.resource_id
+  AND NOT EXISTS (
+      SELECT 1
+      FROM byai.au_privilege_grant existing
+      WHERE existing.grant_obj_id = installer.resource_id
+        AND existing.grant_type = g.grant_type
+        AND existing.grant_to_type = g.grant_to_type
+        AND existing.grant_to_obj_id = g.grant_to_obj_id
+        AND existing.grant_to_obj_type = g.grant_to_obj_type
+  );
+
+-- 验证查询（migration 执行后应各返回 1 行）
+-- SELECT * FROM byai.ss_resource WHERE resource_code = 'by-skill-installer';
+-- SELECT e.* FROM byai.ss_res_ext_skill e JOIN byai.ss_resource r ON r.resource_id = e.resource_id WHERE r.resource_code = 'by-skill-installer';
+
+
+-- 更新 TEMPLATE_DIGITAL_EMPLOYEE 配置，为个人助理和助手添加 by-skill-installer 技能
+UPDATE byai.byai_system_config
+SET param_value = '[
+  {
+    "name": "个人助理",
+    "key": "BYCLAW_ASSISTANT",
+    "ownerType": "personal",
+    "agentType": "001",
+    "relTools": ["*"],
+    "relSkills": ["dws","by-skill-installer"],
+    "skillPath": "",
+    "prompts": [
+      {
+        "name": "工作规范",
+        "key": "agent",
+        "enName": "Work Specification",
+        "defaultValue": ""
+      },
+      {
+        "name": "人格定义",
+        "key": "soul",
+        "enName": "Personality Definition",
+        "defaultValue": ""
+      },
+      {
+        "name": "工具规范",
+        "key": "tools",
+        "enName": "Tool Specification",
+        "defaultValue": ""
+      },
+      {
+        "name": "记忆规范",
+        "key": "memory",
+        "enName": "Memory Specification",
+        "defaultValue": ""
+      }
+    ]
+  },
+  {
+    "name": "助手",
+    "key": "BYCLAW_EXE",
+    "ownerType": "enterprise",
+    "agentType": "001",
+    "relTools": ["*"],
+    "relSkills": ["by-skill-installer"],
+    "skillPath": "",
+    "prompts": [
+      {
+        "name": "工作规范",
+        "key": "agent",
+        "enName": "Work Specification",
+        "defaultValue": ""
+      },
+      {
+        "name": "人格定义",
+        "key": "soul",
+        "enName": "",
+        "defaultValue": ""
+      },
+      {
+        "name": "工具规范",
+        "key": "tools",
+        "enName": "Tool Specification",
+        "defaultValue": ""
+      },
+      {
+        "name": "记忆规范",
+        "key": "memory",
+        "enName": "Memory Specification",
+        "defaultValue": ""
+      }
+    ]
+  },
+  {
+    "name": "问答",
+    "key": "BYCLAW_QA",
+    "ownerType": "enterprise",
+    "agentType": "006",
+    "relTools": [],
+    "relSkills": [],
+    "skillPath": "/.ByKC/{userCode}/agent_{resourceId}/skills",
+    "prompts": [
+      {
+        "name": "问题分解",
+        "key": "questionDecompose",
+        "enName": "Question Decomposition",
+        "defaultValue": "将用户的自然语言问题拆解为一个或多个独立的子查询,并标注每个子查询的推理跳数(hop count),用于后续并行调度检索。"
+      },
+      {
+        "name": "单跳问题处理",
+        "key": "singleHop",
+        "enName": "Single Hop Processing",
+        "defaultValue": "指导单跳检索代理通过多轮检索收集充分证据,生成有据可查且无引用标记的自然语言回答。"
+      },
+      {
+        "name": "多跳问题信息检索",
+        "key": "multiHopSearch",
+        "enName": "Multi-hop Search",
+        "defaultValue": "指导多跳检索代理逐跳推理、逐跳检索,通过调用 next_hop 或 finalize 链接各步结论,最终完成链式问答。"
+      },
+      {
+        "name": "多跳问题回答",
+        "key": "multiHopSummary",
+        "enName": "Multi-hop Summary",
+        "defaultValue": "将多跳推理代理的逐跳结果(子问题、证据、结论)合成为一份结构完整、证据可追溯的最终报告。"
+      },
+      {
+        "name": "复合问题回答",
+        "key": "subanswerAggregator",
+        "enName": "Composite Answer Aggregation",
+        "defaultValue": "将多个子查询的回答整合为一份逻辑连贯、无引用标记的 Markdown 格式综合回答,直接回应用户的原始问题。"
+      }
+    ]
+  },
+  {
+    "name": "问数",
+    "key": "BYCLAW_DATA",
+    "ownerType": "enterprise",
+    "agentType": "005",
+    "relTools": [],
+    "relSkills": [],
+    "skillPath": "/.ByDC/{userCode}/agent_{resourceId}/skills",
+    "prompts": [
+      {
+        "name": "工作规范",
+        "key": "agent",
+        "enName": "Work Specification",
+        "defaultValue": "请依据已有的工具进行数据查询、数据分析、数据操作。"
+      }
+    ]
+  },
+  {
+    "name": "调试",
+    "key": "BYCLAW_DEBUG",
+    "ownerType": "enterprise",
+    "agentType": "010",
+    "relTools": [],
+    "relSkills": [],
+    "skillPath": "",
+    "prompts": [
+      {
+        "name": "工作规范",
+        "key": "agent",
+        "enName": "Work Specification",
+        "defaultValue": ""
+      }
+    ]
+  },
+  {
+    "name": "编码",
+    "key": "BYCLAW_CODE",
+    "ownerType": "enterprise",
+    "agentType": "011",
+    "relTools": [],
+    "relSkills": [],
+    "skillPath": "",
+    "prompts": [
+      {
+        "name": "工作规范",
+        "key": "agent",
+        "enName": "Work Specification",
+        "defaultValue": ""
+      }
+    ]
+  }
+]',
+    update_time = CURRENT_TIMESTAMP
+WHERE param_code = 'TEMPLATE_DIGITAL_EMPLOYEE';

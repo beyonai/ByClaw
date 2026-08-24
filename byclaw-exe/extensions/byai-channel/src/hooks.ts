@@ -9,6 +9,7 @@ import {
     resolveActiveSdkRunBinding,
     resolveSdkEmitter,
     getAgentRunEndPromiseResolver,
+    recordActiveSdkRootAgentEnd,
 } from "./session-context.js";
 import {
     cancelActiveSdkCompletionCheck,
@@ -192,7 +193,7 @@ async function emitCompactionHookNotice(
         }),
         options: {
             messageId: `${ctx.runId || request.sessionKey}:compaction:${phase}:hook`,
-            parentMessageId: "-1",
+            parentMessageId: request.parentMessageId,
             eventType: EventType.REASONING_LOG_DELTA,
             contentType: SseReasonMessageType.think_status_title,
             objectType: "compaction",
@@ -777,6 +778,11 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
                 error: _error,
             });
         }
+        recordActiveSdkRootAgentEnd({
+            runId,
+            success: _success,
+            messages: event.messages,
+        });
         // agent_end 对 native child run 也会触发，且在 announce 投递之前，是与 child lifecycle
         // 互备的早期终态事实。台账按 runId 去重，root run 的 runId 不在台账里，登记会自然落空。
         reportNativeChildRunTerminal(api, {

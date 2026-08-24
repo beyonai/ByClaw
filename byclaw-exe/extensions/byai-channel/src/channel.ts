@@ -318,7 +318,7 @@ export const byaiChannelPlugin: ChannelPlugin<ResolvedByaiAccount, ByaiProbe> = 
         text,
         options: {
           eventType: EventType.ANSWER_DELTA,
-          parentMessageId: "-1",
+          parentMessageId: request.parentMessageId,
           messageId: generateRandomId(),
         },
       });

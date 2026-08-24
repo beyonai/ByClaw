@@ -13,6 +13,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.manager.domain.event.devloop.GitHubTokenConfiguredEvent;
+import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.manager.dto.users.UserPrivateParamDTO;
 import com.iwhalecloud.byai.manager.entity.users.UserPrivateParam;
 import com.iwhalecloud.byai.manager.entity.users.Users;
@@ -27,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class UserPrivateParamApplicationServiceTest {
@@ -114,6 +117,19 @@ class UserPrivateParamApplicationServiceTest {
     }
 
     @Test
+    void publishesProjectManifestSyncEventWhenGitHubTokenIsSaved() {
+        ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+        ReflectionTestUtils.setField(service, "eventPublisher", eventPublisher);
+        UserPrivateParamDTO request = new UserPrivateParamDTO();
+        request.setKey("GH_TOKEN");
+        request.setValue("token-value");
+
+        service.save(request);
+
+        verify(eventPublisher).publishEvent(any(GitHubTokenConfiguredEvent.class));
+    }
+
+    @Test
     @SuppressWarnings({ "rawtypes", "unchecked" })
     void versionedRefreshAtomicallyRejectsOlderRedisWrites() {
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
@@ -138,6 +154,33 @@ class UserPrivateParamApplicationServiceTest {
         );
         assertThat(script.getValue().getScriptAsString())
             .contains("tonumber(decoded['version']) > tonumber(ARGV[1])");
+    }
+
+    @Test
+    @SuppressWarnings({ "rawtypes", "unchecked" })
+    void privateParamCacheIncludesImaConnectorCredentialsForSandboxInjection() {
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        ReflectionTestUtils.setField(service, "stringRedisTemplate", redisTemplate);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(mapper.selectList(any())).thenReturn(List.of(
+            credential("IMA_OPENAPI_CLIENTID", "client-id"),
+            credential("IMA_OPENAPI_APIKEY", "api-key"),
+            credential("OTHER_VALUE", "kept")
+        ));
+        when(redisTemplate.execute(
+            any(RedisScript.class),
+            org.mockito.ArgumentMatchers.<List<String>>any(),
+            any(Object.class),
+            any(Object.class)
+        )).thenReturn(1L);
+
+        assertThat(service.refreshPrivateParamCacheNow(1001L, "tester", 9001L)).isTrue();
+
+        ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
+        verify(redisTemplate).execute(any(RedisScript.class), org.mockito.ArgumentMatchers.<List<String>>any(),
+            any(Object.class), payload.capture());
+        assertThat(String.valueOf(payload.getValue()))
+            .contains("OTHER_VALUE", "kept", "IMA_OPENAPI_CLIENTID", "IMA_OPENAPI_APIKEY", "client-id", "api-key");
     }
 
     @Test
@@ -181,5 +224,13 @@ class UserPrivateParamApplicationServiceTest {
         managed.setStatus("NORMAL");
         managed.setDeleteFlag("0");
         return managed;
+    }
+
+    private UserPrivateParam credential(String key, String value) {
+        UserPrivateParam param = managedParam();
+        param.setParamKey(key);
+        param.setParamValueCipher(Sm4Util.encrypt(value));
+        param.setSourceRef("ima-openapi");
+        return param;
     }
 }

@@ -468,12 +468,93 @@ def check_dws(command_runner: CommandRunner, timeout_seconds: float) -> dict[str
     }
 
 
+def check_ima(command_runner: CommandRunner, timeout_seconds: float) -> dict[str, object]:
+    version = check_cli_version(command_runner, "ima", timeout_seconds)
+    if version["status"] != "ready":
+        return version
+
+    credentials = (os.environ.get("IMA_OPENAPI_CLIENTID"), os.environ.get("IMA_OPENAPI_APIKEY"))
+    if not all(isinstance(value, str) and value.strip() for value in credentials):
+        return {
+            "status": "authorization_required",
+            "version": version["version"],
+            "installation": "ready",
+            "authorization": "required",
+        }
+
+    try:
+        auth_result = command_runner(
+            ["ima", "auth", "check", "--test", "--json"],
+            timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "status": "degraded",
+            "version": version["version"],
+            "installation": "ready",
+            "authorization": "unknown",
+            "error": {"code": "check_timeout", "message": "ima auth check timed out"},
+        }
+    except OSError:
+        return {
+            "status": "degraded",
+            "version": version["version"],
+            "installation": "ready",
+            "authorization": "unknown",
+            "error": {
+                "code": "authorization_check_failed",
+                "message": "ima auth check could not be executed",
+            },
+        }
+
+    if auth_result.returncode != 0:
+        return {
+            "status": "degraded",
+            "version": version["version"],
+            "installation": "ready",
+            "authorization": "unknown",
+            "error": {
+                "code": "authorization_check_failed",
+                "message": "ima auth check failed",
+            },
+        }
+
+    try:
+        auth_payload = json.loads(auth_result.stdout)
+    except (json.JSONDecodeError, TypeError):
+        auth_payload = None
+    checks = auth_payload.get("checks") if isinstance(auth_payload, dict) else None
+    if (
+        not isinstance(auth_payload, dict)
+        or auth_payload.get("status") != "ok"
+        or not isinstance(checks, dict)
+        or any(checks.get(key) is not True for key in ("client_id_present", "api_key_present", "token_fetch"))
+    ):
+        return {
+            "status": "degraded",
+            "version": version["version"],
+            "installation": "ready",
+            "authorization": "unknown",
+            "error": {
+                "code": "invalid_probe_output",
+                "message": "ima auth check returned an invalid JSON payload",
+            },
+        }
+    return {
+        "status": "ready",
+        "version": version["version"],
+        "installation": "ready",
+        "authorization": "ready",
+    }
+
+
 def build_report(
     by_reach: dict[str, object],
     bycli: dict[str, object],
     wecom: dict[str, object],
     lark: dict[str, object],
     dws: dict[str, object],
+    ima: dict[str, object] | None = None,
 ) -> dict[str, object]:
     enabled_states = [str(by_reach.get("status")), str(bycli.get("status"))]
     by_reach_channels = by_reach.get("channels")
@@ -502,6 +583,7 @@ def build_report(
             "wecom": wecom,
             "lark": lark,
             "dws": dws,
+            "ima": ima if ima is not None else {"status": "authorization_required", "authorization": "required"},
         },
     }
 
@@ -512,6 +594,7 @@ def collect_report(
     wecom_check: Callable[[], dict[str, object]],
     lark_check: Callable[[], dict[str, object]],
     dws_check: Callable[[], dict[str, object]],
+    ima_check: Callable[[], dict[str, object]],
 ) -> dict[str, object]:
     checks = {
         "byReach": by_reach_check,
@@ -519,6 +602,7 @@ def collect_report(
         "wecom": wecom_check,
         "lark": lark_check,
         "dws": dws_check,
+        "ima": ima_check,
     }
     results: dict[str, dict[str, object]] = {}
     with ThreadPoolExecutor(max_workers=len(checks)) as executor:
@@ -537,6 +621,7 @@ def collect_report(
         results["wecom"],
         results["lark"],
         results["dws"],
+        results["ima"],
     )
 
 
@@ -563,6 +648,7 @@ def main() -> int:
                     configuration_error,
                     configuration_error,
                     configuration_error,
+                    configuration_error,
                 ),
                 ensure_ascii=False,
             )
@@ -575,6 +661,7 @@ def main() -> int:
         lambda: check_wecom(run_command, timeout_seconds),
         lambda: check_lark(run_command, timeout_seconds),
         lambda: check_dws(run_command, timeout_seconds),
+        lambda: check_ima(run_command, timeout_seconds),
     )
     print(json.dumps(report, ensure_ascii=False))
     return 0

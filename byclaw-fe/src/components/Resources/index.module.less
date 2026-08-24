@@ -4,7 +4,43 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 30px;
+  padding: 16px 30px 30px;
+}
+
+.installedBackButton {
+  height: 35px;
+  padding: 0 8px 0 0;
+  color: #333;
+  font-size: 14px;
+
+  &:hover,
+  &:focus-visible {
+    color: #165dff;
+    background: transparent;
+  }
+}
+
+.installedTabs {
+  :global {
+    .@{antPrefix}-tabs-ink-bar {
+      display: none;
+    }
+  }
+}
+
+.secondaryTabs {
+  :global {
+    .@{antPrefix}-tabs-nav {
+      .@{antPrefix}-tabs-tab {
+        font-size: 18px;
+        line-height: 26px;
+      }
+
+      .@{antPrefix}-tabs-tab-btn {
+        font-size: 18px;
+      }
+    }
+  }
 }
 
 .wrapper {
@@ -105,6 +141,13 @@
 
 .searchInput {
   width: 200px;
+}
+
+.installedButton {
+  height: 32px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 400;
 }
 
 .menuItem {

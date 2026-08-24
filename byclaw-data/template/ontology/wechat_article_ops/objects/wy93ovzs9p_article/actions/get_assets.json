@@ -1,0 +1,118 @@
+{
+  "action_code": "get_assets",
+  "action_name": "内容资产库",
+  "action_type": "QUERY",
+  "action_desc": "按日期/合集/分类筛选文章，含每篇最近一次 metric，返回分页 items + next_cursor",
+  "permission_roles": [
+    "analyst",
+    "ops",
+    "admin"
+  ],
+  "params": [
+    {
+      "paramCode": "start",
+      "paramName": "起始日期",
+      "type": "date",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "end",
+      "paramName": "结束日期",
+      "type": "date",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "stat_date",
+      "paramName": "指标日期",
+      "type": "date",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "category",
+      "paramName": "分类数组",
+      "type": "array",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "collection_id",
+      "paramName": "合集ID",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input",
+      "term_type_code": "wy93ovzs9p_article_collection_collection_name",
+      "term_data_type": "LIST_TERM"
+    },
+    {
+      "paramCode": "cursor",
+      "paramName": "分页游标",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "limit",
+      "paramName": "每页条数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "include_latest_analysis",
+      "paramName": "是否包含最近分析",
+      "type": "boolean",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "success",
+      "paramName": "是否成功",
+      "type": "boolean",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "items",
+      "paramName": "资产列表",
+      "type": "array",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "total",
+      "paramName": "本页条数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "next_cursor",
+      "paramName": "下一页游标",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "error",
+      "paramName": "错误描述",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "code",
+      "paramName": "错误码",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    }
+  ],
+  "object_references": [
+    "wy93ovzs9p_article",
+    "wy93ovzs9p_article_collection",
+    "wy93ovzs9p_article_metric_daily"
+  ]
+}

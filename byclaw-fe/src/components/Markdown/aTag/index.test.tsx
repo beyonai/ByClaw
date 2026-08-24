@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import ATag from './index';
 import { downloadFile } from '@/utils/file';
@@ -76,5 +76,20 @@ describe('Markdown ATag file actions', () => {
         })
       );
     });
+  });
+
+  it('leaves managed session file links to the message artifact renderer', () => {
+    render(
+      <ATag
+        domNode={{
+          name: 'a',
+          attribs: { href: '/by/.sessions/101/output/report.xlsx' },
+          children: [{ type: 'text', data: 'report.xlsx' }],
+        }}
+      />
+    );
+
+    expect(screen.getByText('report.xlsx')).toBeInTheDocument();
+    expect(screen.queryByTestId('file-icon')).not.toBeInTheDocument();
   });
 });

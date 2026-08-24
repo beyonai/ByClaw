@@ -281,6 +281,14 @@ export const updateProjectRepo = (data: {
 export const listProjectRepos = (projectId: number) =>
   POST<DevloopProjectRepo[]>('/byaiService/project/repo/list', { projectId });
 
+export type ProjectSessionWorktree = {
+  found: boolean;
+  path?: string;
+};
+
+export const getProjectSessionWorktree = (projectId: number, sessionId: number) =>
+  POST<ProjectSessionWorktree>('/byaiService/project/repo/session-worktree', { projectId, sessionId });
+
 export type ProjectRepoTreeNode = {
   name: string;
   path: string;
@@ -375,8 +383,14 @@ export const updateScanSource = (data: {
 export const deleteScanSource = (sourceId: number) => POST<any>('/byaiService/devloop/source/delete', { sourceId });
 
 // 不传 projectId 表示应用级自动化页跨项目查询，后端按条件拼接 where。
-export const listScanSources = (data: { projectId?: number; keyword?: string; pageNum?: number; pageSize?: number }) =>
-  POST<any>('/byaiService/devloop/source/list', data);
+// onlyMine=true 只返回当前登录用户创建的行，自动化页用；项目渠道页不传，保持全项目可见。
+export const listScanSources = (data: {
+  projectId?: number;
+  keyword?: string;
+  onlyMine?: boolean;
+  pageNum?: number;
+  pageSize?: number;
+}) => POST<any>('/byaiService/devloop/source/list', data);
 
 export const toggleScanSource = (sourceId: number, enabled: string) =>
   POST<any>('/byaiService/devloop/source/toggle', { sourceId, enabled });
@@ -388,6 +402,14 @@ export const listScanLogs = (sourceId: number, limit = 20) =>
   POST<any>('/byaiService/devloop/log/list', { sourceId, limit });
 
 export const listScanLogItems = (logId: number) => POST<any>('/byaiService/devloop/log/items', { logId });
+
+/** 当前用户自动化的运行记录，status、keyword 为空表示不筛选。后端已按当前登录用户收窄。 */
+export const listMyAutomationRuns = (data: {
+  status?: string;
+  keyword?: string;
+  pageNum?: number;
+  pageSize?: number;
+}) => POST<any>('/byaiService/devloop/automation/run/list', data);
 
 // 按扫描源直查已收集需求(action=created)，避免按最近N条日志遍历漏掉早期需求
 export const listRequirementsBySource = (sourceId: number) =>
@@ -480,9 +502,14 @@ export const queryObjectsByKnowledge = (data: {
   pageSize?: number;
 }) => POST<any>('/byaiService/devloop/operation/queryObjectsByKnowledge', data);
 
-/** 查询会话或项目关联的本体对象文件；未传 sessionId 时按项目维度查询。 */
-export const listProjectObjectFiles = (data: { projectId?: number | string; sessionId?: number | string }) =>
-  POST<any>('/byaiService/devloop/operation/listProjectObjectFiles', data);
+export type ProjectObjectFileType = 'object' | 'knowledge';
+
+/** 查询会话或项目关联的对象/知识库文件；未传 sessionId 时按项目维度查询。 */
+export const listProjectObjectFiles = (data: {
+  projectId?: number | string;
+  sessionId?: number | string;
+  objectType: ProjectObjectFileType;
+}) => POST<any>('/byaiService/devloop/operation/listProjectObjectFiles', data);
 
 // 运营需求启动后拆解为会话任务，taskId 与 byai_session.session_id 保持一致。
 export type OperationTaskStartItem = {
@@ -541,6 +568,9 @@ export type OperationAccountPayload = {
   platformCode: string;
   accountCode: string;
   accountName: string;
+
+  /** 自定义链接平台的登录地址，仅 platformCode 为 CustomLink 时提交。 */
+  customUrl?: string;
 };
 
 export const listOperationAccounts = (projectId: number) =>

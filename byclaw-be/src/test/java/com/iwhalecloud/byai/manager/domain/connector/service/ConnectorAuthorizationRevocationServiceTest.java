@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.service;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
@@ -91,6 +92,41 @@ class ConnectorAuthorizationRevocationServiceTest {
 
         verify(connectionStateService, never()).revokeAuthorization(any(), any());
         verify(sessionRepository).releaseStartLock(USER_ID, CONNECTOR_ID, "lock-token");
+    }
+
+    @Test
+    void akSkRevokeUsesTheSharedOperationLockBeforeDeletingCredentials() {
+        connector.setAuthMode("AK_SK");
+
+        service.revoke(CONNECTOR_ID, USER_ID);
+
+        verify(connectionStateService).revokeAuthorization(USER_ID, CONNECTOR_ID);
+        verify(provider, never()).revoke(any(), any());
+        verify(sessionRepository).tryAcquireStartLock(eq(USER_ID), eq(CONNECTOR_ID), any());
+        verify(sessionRepository, never()).hasActiveSession(any(), any());
+        verify(sessionRepository).releaseStartLock(USER_ID, CONNECTOR_ID, "lock-token");
+    }
+
+    @Test
+    void akSkRevokeIsIdempotentAfterTheBindingHasAlreadyBeenRemoved() {
+        connector.setAuthMode("AK_SK");
+        when(connectionStateService.findActiveAuthorization(USER_ID, CONNECTOR_ID)).thenReturn(null);
+
+        assertThatCode(() -> service.revoke(CONNECTOR_ID, USER_ID)).doesNotThrowAnyException();
+
+        verify(connectionStateService).revokeAuthorization(USER_ID, CONNECTOR_ID);
+        verify(provider, never()).revoke(any(), any());
+    }
+
+    @Test
+    void akSkRevokeStillDelegatesCleanupAfterTheConnectorIsDisabled() {
+        connector.setAuthMode("AK_SK");
+        connector.setStatusCd("00X");
+
+        service.revoke(CONNECTOR_ID, USER_ID);
+
+        verify(connectionStateService).revokeAuthorization(USER_ID, CONNECTOR_ID);
+        verify(provider, never()).revoke(any(), any());
     }
 
     private interface RevocableProvider extends ConnectorAuthorizationProvider, ConnectorCredentialRevoker {

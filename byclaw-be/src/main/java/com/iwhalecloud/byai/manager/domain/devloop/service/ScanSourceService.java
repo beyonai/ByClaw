@@ -101,10 +101,20 @@ public class ScanSourceService {
     /** 分页查询渠道，并排除手工来源及运营需求来源，避免共享 source 表后跨模块串数据。 */
     public Page<ScanSource> listByProjectIdPage(Long projectId, String keyword, Collection<String> excludedSourceTypes,
         int pageNum, int pageSize) {
+        return listByProjectIdPage(projectId, keyword, excludedSourceTypes, null, pageNum, pageSize);
+    }
+
+    /**
+     * 分页查询渠道，可再按创建人收窄。 createBy 非空时只返回该用户建的行：应用级自动化页跨项目查询，不按创建人收窄就会互相看到别人的自动化。
+     */
+    public Page<ScanSource> listByProjectIdPage(Long projectId, String keyword, Collection<String> excludedSourceTypes,
+        String createBy, int pageNum, int pageSize) {
         LambdaQueryWrapper<ScanSource> wrapper = new LambdaQueryWrapper<>();
         // projectId 为空表示应用级自动化页跨项目查询；这里必须用条件重载，
         // 否则 eq(null) 会生成 project_id = NULL，一条都匹配不到。
         wrapper.eq(projectId != null, ScanSource::getProjectId, projectId).eq(ScanSource::getDeleteFlag, "0");
+        // create_by 是 VARCHAR，调用方统一传字符串化的用户 ID，与 requireSourceCreator 的比较口径一致。
+        wrapper.eq(org.apache.commons.lang3.StringUtils.isNotBlank(createBy), ScanSource::getCreateBy, createBy);
         if (excludedSourceTypes != null && !excludedSourceTypes.isEmpty()) {
             // 保留历史空类型渠道，仅排除明确的内部来源和运营需求来源。
             wrapper.and(query -> query.isNull(ScanSource::getSourceType).or()
@@ -132,6 +142,16 @@ public class ScanSourceService {
         }
         wrapper.orderByDesc(ScanSource::getCreateTime).orderByDesc(ScanSource::getSourceId);
         return scanSourceMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
+    }
+
+    /** 查询某用户创建的指定类型扫描源，供运行记录按「我的自动化」反查。 */
+    public List<ScanSource> listByCreateByAndType(String createBy, String sourceType) {
+        LambdaQueryWrapper<ScanSource> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ScanSource::getCreateBy, createBy)
+               .eq(ScanSource::getSourceType, sourceType)
+               .eq(ScanSource::getDeleteFlag, "0")
+               .orderByDesc(ScanSource::getCreateTime);
+        return scanSourceMapper.selectList(wrapper);
     }
 
     /** 查询所有启用且未删除的扫描源，供定时任务使用 */

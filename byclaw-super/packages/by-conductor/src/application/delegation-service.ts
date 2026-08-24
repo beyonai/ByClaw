@@ -43,10 +43,7 @@ export interface ExecuteDelegationInput {
   leaseClaim?: RunExecutionClaim;
   /** SYNTHESIZING 恢复时允许复用本 Run 已完成且参数相同的委派结果。 */
   reuseCompleted?: boolean;
-  onInputRequired?(
-    interactionId: string,
-    request: UserInteractionRequest,
-  ): Promise<void> | void;
+  onInputRequired?(interactionId: string, request: UserInteractionRequest): Promise<void> | void;
   onInputResolved?(interactionId: string): Promise<void> | void;
 }
 
@@ -60,6 +57,21 @@ type ActiveInteraction = {
   respond(response: UserInteractionResponse): Promise<void>;
 };
 
+export interface DelegationTimeoutOptions {
+  /** 从投递到首个可信 Connector 活动的最长等待时间。 */
+  firstActivityMs: number;
+  /** 执行期间连续无任何可信活动的最长时间。 */
+  idleMs: number;
+}
+
+export interface DelegationLogger {
+  info(bindings: Record<string, unknown>, message: string): void;
+  warn(bindings: Record<string, unknown>, message: string): void;
+  error(bindings: Record<string, unknown>, message: string): void;
+}
+
+type DelegationTimeoutKind = "first_activity" | "idle";
+
 /**
  * 负责一次 Agent 委派从授权校验到终态落库的完整生命周期。
  * Connector 的传输细节会在这里被归一化，Leader 只看到统一的 AgentResult。
@@ -68,16 +80,29 @@ export class DelegationService {
   readonly #active = new Map<string, Map<string, ActiveExecution>>();
   readonly #claims = new Map<string, RunExecutionClaim>();
   readonly #interactions = new Map<string, ActiveInteraction>();
+  readonly #timeouts: DelegationTimeoutOptions;
 
   /** 注入 Connector 注册表、持久化 Port 以及可替换的时间和 ID 实现。 */
   constructor(
     private readonly connectors: ConnectorRegistry,
     private readonly delegations: DelegationRepository,
     private readonly events: RunEventStore,
-    private readonly timeoutMs = 900_000,
+    timeoutOptions: number | Partial<DelegationTimeoutOptions> = {},
     private readonly now: () => number = Date.now,
     private readonly createId: () => string = randomUUID,
-  ) {}
+    private readonly logger?: DelegationLogger,
+  ) {
+    // number 是旧构造参数；同时作为首次活动和空闲边界。
+    this.#timeouts = typeof timeoutOptions === "number"
+      ? {
+          firstActivityMs: timeoutOptions,
+          idleMs: timeoutOptions,
+        }
+      : {
+          firstActivityMs: timeoutOptions.firstActivityMs ?? 300_000,
+          idleMs: timeoutOptions.idleMs ?? 900_000,
+        };
+  }
 
   /**
    * 执行一次委派，聚合流式输出并处理成功、失败、超时和上游取消。
@@ -93,11 +118,30 @@ export class DelegationService {
     }
 
     const connector = this.connectors.require(agent.execution.connectorId);
-    if (
-      input.attachments &&
-      input.attachments.length > 0 &&
-      !connector.capabilities.attachments
-    ) {
+    const externalSessionId = optionalMetadataString(input.metadata, "externalSessionId");
+    const lifecycleFields = {
+      component: "byclaw-super",
+      runId: input.runId,
+      sessionId: input.session.id,
+      ...(externalSessionId ? { externalSessionId } : {}),
+      agentId: agent.id,
+      agentName: agent.name,
+      connectorId: connector.id,
+      targetId: agent.execution.targetId,
+      ...(agent.execution.targetAgentType
+        ? { targetAgentType: agent.execution.targetAgentType }
+        : {}),
+    };
+    this.logger?.info(
+      {
+        ...lifecycleFields,
+        stage: "delegation_authorized",
+        attachmentCount: input.attachments?.length ?? 0,
+        hasExpectedOutput: Boolean(input.expectedOutput),
+      },
+      "子 Agent 委派已授权",
+    );
+    if (input.attachments && input.attachments.length > 0 && !connector.capabilities.attachments) {
       // 连接器不支持附件时明确报错，绝不静默降级为纯文本委派。
       throw new Error(
         `ATTACHMENTS_UNSUPPORTED: connector ${connector.id} cannot forward attachments`,
@@ -118,6 +162,17 @@ export class DelegationService {
             candidate.expectedOutput === input.expectedOutput,
         );
       if (completed?.result) {
+        this.logger?.info(
+          {
+            ...lifecycleFields,
+            stage: "delegation_reused",
+            delegationId: completed.id,
+            resultStatus: completed.result.status,
+            outputChars: completed.result.output.length,
+            outputPreview: delegationLogPreview(completed.result.output),
+          },
+          "复用已完成的子 Agent 委派结果",
+        );
         return structuredClone(completed.result);
       }
     }
@@ -135,20 +190,19 @@ export class DelegationService {
       );
     const delegationId = existing?.id ?? this.createId();
     const resuming = Boolean(existing?.externalRef);
-    let delegation: Delegation =
-      existing ?? {
-        id: delegationId,
-        runId: input.runId,
-        agentId: agent.id,
-        agentName: agent.name,
-        connectorId: connector.id,
-        task: input.task,
-        ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
-        status: "QUEUED",
-        version: 0,
-        createdAt: this.now(),
-        updatedAt: this.now(),
-      };
+    let delegation: Delegation = existing ?? {
+      id: delegationId,
+      runId: input.runId,
+      agentId: agent.id,
+      agentName: agent.name,
+      connectorId: connector.id,
+      task: input.task,
+      ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
+      status: "QUEUED",
+      version: 0,
+      createdAt: this.now(),
+      updatedAt: this.now(),
+    };
     if (!existing) {
       try {
         await this.#saveDelegationWithEvent(delegation, {
@@ -161,22 +215,26 @@ export class DelegationService {
             agentName: agent.name,
             connectorId: connector.id,
             task: input.task,
-            ...(input.expectedOutput
-              ? { expectedOutput: input.expectedOutput }
-              : {}),
+            ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
             ...(input.attachments?.length
               ? {
                   attachments: input.attachments.map((attachment) => ({
                     id: attachment.id,
                     name: attachment.name,
-                    ...(attachment.mediaType
-                      ? { mediaType: attachment.mediaType }
-                      : {}),
+                    ...(attachment.mediaType ? { mediaType: attachment.mediaType } : {}),
                   })),
                 }
               : {}),
           },
         });
+        this.logger?.info(
+          {
+            ...lifecycleFields,
+            stage: "delegation_created",
+            delegationId,
+          },
+          "已创建子 Agent 委派",
+        );
       } catch (error) {
         if (this.#claims.get(input.runId) === input.leaseClaim) {
           this.#claims.delete(input.runId);
@@ -189,7 +247,7 @@ export class DelegationService {
     // 投递；直接收敛为 CANCELLED，不能继续调用 Connector。
     if (input.signal.aborted) {
       try {
-        return await this.#finishAborted(delegation, false);
+        return await this.#finishAborted(delegation);
       } finally {
         if (this.#claims.get(input.runId) === input.leaseClaim) {
           this.#claims.delete(input.runId);
@@ -198,7 +256,7 @@ export class DelegationService {
     }
 
     const controller = new AbortController();
-    let timedOut = false;
+    let timeoutKind: DelegationTimeoutKind | undefined;
     let execution: ConnectorExecution | undefined;
     // 将 Run 或工具级取消转发到当前委派的独立控制器。
     const forwardAbort = () => controller.abort(input.signal.reason);
@@ -207,50 +265,90 @@ export class DelegationService {
     if (input.signal.aborted) {
       forwardAbort();
     }
-    // 外部执行超时不包含等待用户作答的时间；恢复输入后重新开始计时。
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const armTimeout = () => {
-      if (timeout) {
-        clearTimeout(timeout);
+    // 首次/空闲是滑动边界；可信活动会续期，不设绝对执行上限。
+    let activityTimeout: ReturnType<typeof setTimeout> | undefined;
+    const recoveryFallbackAt = this.now();
+    const timeoutReason = (kind: DelegationTimeoutKind) => {
+      if (kind === "first_activity") {
+        return `Delegation received no activity within ${this.#timeouts.firstActivityMs}ms`;
       }
-      timeout = setTimeout(() => {
-        timedOut = true;
-        controller.abort(new Error(`Delegation timed out after ${this.timeoutMs}ms`));
-        if (execution) {
-          void this.#cancelExecution(
-            input.runId,
-            delegationId,
-            execution,
-            "delegation timeout",
-          ).catch(() => undefined);
-        }
-      }, this.timeoutMs);
+      return `Delegation was idle for ${this.#timeouts.idleMs}ms`;
     };
-    const pauseTimeout = () => {
-      if (timeout) {
-        clearTimeout(timeout);
-        timeout = undefined;
+    const triggerTimeout = (kind: DelegationTimeoutKind) => {
+      if (timeoutKind || controller.signal.aborted) {
+        return;
+      }
+      timeoutKind = kind;
+      this.logger?.warn(
+        {
+          ...lifecycleFields,
+          stage: "delegation_timeout",
+          delegationId,
+          timeoutKind: kind,
+          timeoutMs:
+            kind === "first_activity" ? this.#timeouts.firstActivityMs : this.#timeouts.idleMs,
+          lastActivityAt: delegation.lastActivityAt,
+        },
+        "等待子 Agent 事件超时",
+      );
+      controller.abort(new Error(timeoutReason(kind)));
+      if (execution) {
+        void this.#cancelExecution(
+          input.runId,
+          delegationId,
+          execution,
+          `delegation ${kind} timeout`,
+        ).catch(() => undefined);
       }
     };
-    armTimeout();
+    const armActivityTimeout = () => {
+      if (activityTimeout) {
+        clearTimeout(activityTimeout);
+      }
+      const lastActivityAt = delegation.lastActivityAt;
+      const duration = lastActivityAt
+        ? this.#timeouts.idleMs
+        : this.#timeouts.firstActivityMs;
+      const deadline = (
+        lastActivityAt ??
+        delegation.startedAt ??
+        (resuming ? recoveryFallbackAt : delegation.createdAt)
+      ) + duration;
+      activityTimeout = setTimeout(
+        () => triggerTimeout(lastActivityAt ? "idle" : "first_activity"),
+        Math.max(0, deadline - this.now()),
+      );
+    };
+    const pauseActivityTimeout = () => {
+      if (activityTimeout) {
+        clearTimeout(activityTimeout);
+        activityTimeout = undefined;
+      }
+    };
+    const markActivity = () => {
+      delegation = { ...delegation, lastActivityAt: this.now() };
+      armActivityTimeout();
+    };
+    armActivityTimeout();
 
     try {
       if (controller.signal.aborted) {
-        return await this.#finishAborted(delegation, false);
+        return await this.#finishAborted(delegation);
       }
       if (resuming) {
         if (!connector.resume || !delegation.externalRef) {
           throw new Error(`Connector does not support persisted resume: ${connector.id}`);
         }
+        this.logger?.info(
+          { ...lifecycleFields, stage: "delegation_resuming", delegationId },
+          "正在恢复子 Agent 委派事件流",
+        );
         execution = await connector.resume(delegation.externalRef, {
           signal: controller.signal,
           metadata: input.metadata,
-          ...(delegation.connectorCursor
-            ? { cursor: delegation.connectorCursor }
-            : {}),
+          ...(delegation.connectorCursor ? { cursor: delegation.connectorCursor } : {}),
         });
       } else {
-        const externalSessionId = optionalMetadataString(input.metadata, "externalSessionId");
         const parentMessageId = optionalMetadataString(input.metadata, "parentMessageId");
         const request: ConnectorRequest = {
           userCode: input.session.owner.userCode,
@@ -266,8 +364,22 @@ export class DelegationService {
           ...(parentMessageId ? { parentMessageId } : {}),
           metadata: input.metadata,
         };
+        this.logger?.info(
+          { ...lifecycleFields, stage: "delegation_dispatching", delegationId },
+          "正在调度子 Agent",
+        );
         execution = await connector.start(request, { signal: controller.signal });
       }
+      this.logger?.info(
+        {
+          ...lifecycleFields,
+          stage: "delegation_dispatched",
+          delegationId,
+          externalExecutionId: execution.ref.executionId,
+          resumed: resuming,
+        },
+        "子 Agent 调度已建立事件流",
+      );
       // Connector 一旦返回便立即纳入 Run 级取消，避免 externalRef 落库期间出现取消盲区。
       this.#track(input.runId, delegationId, execution);
       if (controller.signal.aborted) {
@@ -275,9 +387,9 @@ export class DelegationService {
           input.runId,
           delegationId,
           execution,
-          timedOut ? "delegation timeout" : "run cancelled",
+          timeoutKind ? `delegation ${timeoutKind} timeout` : "run cancelled",
         );
-        return await this.#finishAborted(delegation, timedOut);
+        return await this.#finishAborted(delegation, timeoutKind, timeoutReason);
       }
 
       if (!resuming) {
@@ -286,12 +398,13 @@ export class DelegationService {
           status: "RUNNING",
           version: delegation.version + 1,
           externalRef: execution.ref,
-          startedAt: this.now(),
+          startedAt: delegation.startedAt ?? this.now(),
           updatedAt: this.now(),
         };
         await this.#saveDelegation(delegation);
       }
       let output = delegation.partialOutput ?? "";
+      let outputDeltaLogged = false;
       const artifacts: ArtifactRef[] = [];
       let pendingInteractionId: string | undefined;
       const registerInteraction = async (
@@ -301,7 +414,7 @@ export class DelegationService {
         requestedEventId: number,
       ) => {
         pendingInteractionId = interactionId;
-        pauseTimeout();
+        pauseActivityTimeout();
         await input.onInputRequired?.(interactionId, request);
         this.#interactions.set(interactionId, {
           runId: input.runId,
@@ -314,11 +427,12 @@ export class DelegationService {
             delegation = {
               ...delegation,
               status: "RUNNING",
+              lastActivityAt: this.now(),
               version: delegation.version + 1,
               updatedAt: this.now(),
             };
             await this.#saveDelegation(delegation);
-            armTimeout();
+            armActivityTimeout();
             await input.onInputResolved?.(interactionId);
           },
         });
@@ -353,18 +467,23 @@ export class DelegationService {
           const interactionId = String(requested.data.interactionId);
           const request = interactionRequestFromEvent(requested.data.request);
           const resumeToken = jsonRecord(requested.data.resumeToken);
-          await registerInteraction(
-            interactionId,
-            request,
-            resumeToken,
-            requested.eventId,
-          );
+          await registerInteraction(interactionId, request, resumeToken, requested.eventId);
         }
       }
 
       for await (const event of execution.events) {
         if (controller.signal.aborted) {
-          return await this.#finishAborted(delegation, timedOut);
+          return await this.#finishAborted(delegation, timeoutKind, timeoutReason);
+        }
+        if (event.type !== "completed" && event.type !== "failed") {
+          markActivity();
+        }
+        if (event.type !== "output_delta" || !outputDeltaLogged) {
+          this.logger?.info(
+            delegationEventLogFields(lifecycleFields, delegationId, event, output),
+            "收到子 Agent 归一化事件",
+          );
+          outputDeltaLogged ||= event.type === "output_delta";
         }
         if (pendingInteractionId && event.type !== "input_required") {
           const interactionId = pendingInteractionId;
@@ -420,41 +539,116 @@ export class DelegationService {
           );
           continue;
         }
+        if (event.type === "activity") {
+          delegation = await this.#checkpointProgress(delegation, output, event.cursor);
+          continue;
+        }
+        if (event.type === "display_progress") {
+          delegation = await this.#checkpointProgressWithEvent(delegation, output, event.cursor, {
+            timestamp: this.now(),
+            runId: input.runId,
+            type: "delegation.display.progress",
+            data: {
+              delegationId,
+              agentId: agent.id,
+              agentName: agent.name,
+              text: event.text,
+              ...(event.sourceMessageId ? { sourceMessageId: event.sourceMessageId } : {}),
+            },
+          });
+          continue;
+        }
+        if (event.type === "tool_started") {
+          delegation = await this.#checkpointProgressWithEvent(delegation, output, event.cursor, {
+            timestamp: this.now(),
+            runId: input.runId,
+            type: "delegation.tool.started",
+            data: {
+              delegationId,
+              agentId: agent.id,
+              agentName: agent.name,
+              callId: event.callId,
+              toolName: event.toolName,
+              ...(event.title ? { title: event.title } : {}),
+              ...(event.input !== undefined ? { input: event.input } : {}),
+            },
+          });
+          continue;
+        }
+        if (event.type === "tool_detail") {
+          delegation = await this.#checkpointProgressWithEvent(delegation, output, event.cursor, {
+            timestamp: this.now(),
+            runId: input.runId,
+            type: "delegation.tool.detail",
+            data: {
+              delegationId,
+              agentId: agent.id,
+              agentName: agent.name,
+              callId: event.callId,
+              phase: event.phase,
+              value: event.value,
+              ...(event.toolName ? { toolName: event.toolName } : {}),
+            },
+          });
+          continue;
+        }
+        if (event.type === "tool_completed") {
+          delegation = await this.#checkpointProgressWithEvent(delegation, output, event.cursor, {
+            timestamp: this.now(),
+            runId: input.runId,
+            type: "delegation.tool.completed",
+            data: {
+              delegationId,
+              agentId: agent.id,
+              agentName: agent.name,
+              callId: event.callId,
+              ...(event.toolName ? { toolName: event.toolName } : {}),
+              ...(event.title ? { title: event.title } : {}),
+              ...(event.output !== undefined ? { output: event.output } : {}),
+            },
+          });
+          continue;
+        }
+        if (event.type === "tool_failed") {
+          delegation = await this.#checkpointProgressWithEvent(delegation, output, event.cursor, {
+            timestamp: this.now(),
+            runId: input.runId,
+            type: "delegation.tool.failed",
+            data: {
+              delegationId,
+              agentId: agent.id,
+              agentName: agent.name,
+              callId: event.callId,
+              error: event.error,
+              ...(event.toolName ? { toolName: event.toolName } : {}),
+              ...(event.title ? { title: event.title } : {}),
+              ...(event.output !== undefined ? { output: event.output } : {}),
+            },
+          });
+          continue;
+        }
         if (event.type === "output_delta") {
           output += event.text;
-          delegation = await this.#checkpointProgressWithEvent(
-            delegation,
-            output,
-            event.cursor,
-            {
-              timestamp: this.now(),
-              runId: input.runId,
-              type: "delegation.output.delta",
-              data: {
-                delegationId,
-                agentId: agent.id,
-                agentName: agent.name,
-                text: event.text,
-              },
+          delegation = await this.#checkpointProgressWithEvent(delegation, output, event.cursor, {
+            timestamp: this.now(),
+            runId: input.runId,
+            type: "delegation.output.delta",
+            data: {
+              delegationId,
+              agentId: agent.id,
+              agentName: agent.name,
+              text: event.text,
             },
-          );
+          });
           continue;
         }
         if (event.type === "artifact") {
           artifacts.push(event.artifact);
-          delegation = await this.#checkpointProgress(
-            delegation,
-            output,
-            event.cursor,
-          );
+          delegation = await this.#checkpointProgress(delegation, output, event.cursor);
           continue;
         }
         if (event.type === "progress") {
-          delegation = await this.#checkpointProgress(
-            delegation,
-            output,
-            event.cursor,
-          );
+          delegation = await this.#checkpointProgress(delegation, output, event.cursor);
           await this.#appendEvent({
             timestamp: this.now(),
             runId: input.runId,
@@ -469,28 +663,19 @@ export class DelegationService {
             // 某些 Connector 只在终态给出完整答案，没有流式 output_delta。
             // 将终态正文补成持久 delta，保证所有子 Agent 输出都能独立通过 SSE 展示。
             output = completedOutput;
-            delegation = await this.#checkpointProgressWithEvent(
-              delegation,
-              output,
-              event.cursor,
-              {
-                timestamp: this.now(),
-                runId: input.runId,
-                type: "delegation.output.delta",
-                data: {
-                  delegationId,
-                  agentId: agent.id,
-                  agentName: agent.name,
-                  text: completedOutput,
-                },
+            delegation = await this.#checkpointProgressWithEvent(delegation, output, event.cursor, {
+              timestamp: this.now(),
+              runId: input.runId,
+              type: "delegation.output.delta",
+              data: {
+                delegationId,
+                agentId: agent.id,
+                agentName: agent.name,
+                text: completedOutput,
               },
-            );
+            });
           } else {
-            delegation = await this.#checkpointProgress(
-              delegation,
-              output,
-              event.cursor,
-            );
+            delegation = await this.#checkpointProgress(delegation, output, event.cursor);
           }
           const result: AgentResult = {
             ...event.result,
@@ -508,11 +693,7 @@ export class DelegationService {
           artifacts,
           error: event.error.message,
         };
-        await this.#finish(
-          delegation,
-          eventTimedOut ? "TIMED_OUT" : "FAILED",
-          result,
-        );
+        await this.#finish(delegation, eventTimedOut ? "TIMED_OUT" : "FAILED", result);
         return result;
       }
 
@@ -522,6 +703,16 @@ export class DelegationService {
         artifacts,
         error: "Connector event stream ended without a terminal event",
       };
+      this.logger?.warn(
+        {
+          ...lifecycleFields,
+          stage: "delegation_stream_ended",
+          delegationId,
+          outputChars: output.length,
+          outputPreview: delegationLogPreview(output),
+        },
+        "子 Agent 事件流未携带终态即结束",
+      );
       await this.#finish(delegation, "FAILED", result);
       return result;
     } catch (error) {
@@ -531,12 +722,22 @@ export class DelegationService {
             input.runId,
             delegationId,
             execution,
-            timedOut ? "delegation timeout" : "run cancelled",
+            timeoutKind ? `delegation ${timeoutKind} timeout` : "run cancelled",
           );
         }
-        return await this.#finishAborted(delegation, timedOut);
+        return await this.#finishAborted(delegation, timeoutKind, timeoutReason);
       }
       const message = error instanceof Error ? error.message : String(error);
+      this.logger?.error(
+        {
+          ...lifecycleFields,
+          stage: execution ? "delegation_stream_error" : "delegation_dispatch_error",
+          delegationId,
+          error: delegationLogPreview(message),
+          hasExternalExecution: Boolean(execution),
+        },
+        execution ? "处理子 Agent 事件流失败" : "调度子 Agent 失败",
+      );
       if (execution) {
         // externalRef/cursor 无法可靠持久化时停止外部任务，避免留下无人接管的执行。
         await this.#cancelExecution(
@@ -548,10 +749,7 @@ export class DelegationService {
       }
       // 保存 externalRef 或 cursor 失败时，本地 version 可能领先数据库；以真相源版本收敛终态。
       delegation = (await this.delegations.get(delegationId)) ?? delegation;
-      if (
-        TERMINAL_DELEGATION_STATUSES.has(delegation.status) &&
-        delegation.result
-      ) {
+      if (TERMINAL_DELEGATION_STATUSES.has(delegation.status) && delegation.result) {
         return structuredClone(delegation.result);
       }
       const result: AgentResult = {
@@ -563,8 +761,8 @@ export class DelegationService {
       await this.#finish(delegation, "FAILED", result);
       return result;
     } finally {
-      if (timeout) {
-        clearTimeout(timeout);
+      if (activityTimeout) {
+        clearTimeout(activityTimeout);
       }
       input.signal.removeEventListener("abort", forwardAbort);
       this.#untrack(input.runId, delegationId);
@@ -631,10 +829,7 @@ export class DelegationService {
     signal: AbortSignal,
   ): Promise<UserInteractionResponse> {
     for await (const event of this.events.stream(runId, afterEventId, signal)) {
-      if (
-        event.type === "interaction.responded" &&
-        event.data.interactionId === interactionId
-      ) {
+      if (event.type === "interaction.responded" && event.data.interactionId === interactionId) {
         return responseFromEvent(event.data);
       }
     }
@@ -647,9 +842,6 @@ export class DelegationService {
     partialOutput: string,
     cursor: string | undefined,
   ): Promise<Delegation> {
-    if (!cursor && partialOutput === (delegation.partialOutput ?? "")) {
-      return delegation;
-    }
     const updated: Delegation = {
       ...delegation,
       partialOutput,
@@ -693,38 +885,29 @@ export class DelegationService {
         delegation.externalRef &&
         !activeById.has(delegation.id),
     );
-    const results = await Promise.allSettled(
-      [
-        ...active.map(([delegationId, item]) =>
-          this.#cancelExecution(runId, delegationId, item.execution, reason),
-        ),
-        ...recoverable.map(async (delegation) => {
-          const connector = this.connectors.require(delegation.connectorId);
-          if (!connector.resume || !delegation.externalRef) {
-            throw new Error(
-              `Connector cannot resume persisted cancellation: ${delegation.connectorId}`,
-            );
-          }
-          const execution = await connector.resume(delegation.externalRef, {
-            signal: new AbortController().signal,
-            ...(delegation.connectorCursor
-              ? { cursor: delegation.connectorCursor }
-              : {}),
-          });
-          this.#track(runId, delegation.id, execution);
-          try {
-            await this.#cancelExecution(
-              runId,
-              delegation.id,
-              execution,
-              reason,
-            );
-          } finally {
-            this.#untrack(runId, delegation.id);
-          }
-        }),
-      ],
-    );
+    const results = await Promise.allSettled([
+      ...active.map(([delegationId, item]) =>
+        this.#cancelExecution(runId, delegationId, item.execution, reason),
+      ),
+      ...recoverable.map(async (delegation) => {
+        const connector = this.connectors.require(delegation.connectorId);
+        if (!connector.resume || !delegation.externalRef) {
+          throw new Error(
+            `Connector cannot resume persisted cancellation: ${delegation.connectorId}`,
+          );
+        }
+        const execution = await connector.resume(delegation.externalRef, {
+          signal: new AbortController().signal,
+          ...(delegation.connectorCursor ? { cursor: delegation.connectorCursor } : {}),
+        });
+        this.#track(runId, delegation.id, execution);
+        try {
+          await this.#cancelExecution(runId, delegation.id, execution, reason);
+        } finally {
+          this.#untrack(runId, delegation.id);
+        }
+      }),
+    ]);
     const failures = results.flatMap((result) =>
       result.status === "rejected" ? [result.reason] : [],
     );
@@ -782,13 +965,15 @@ export class DelegationService {
   /** 将 AbortSignal 的中止原因转换为取消或超时结果，并统一完成委派。 */
   async #finishAborted(
     delegation: Delegation,
-    timedOut: boolean,
+    timeoutKind?: DelegationTimeoutKind,
+    timeoutReason?: (kind: DelegationTimeoutKind) => string,
   ): Promise<AgentResult> {
+    const timedOut = timeoutKind !== undefined;
     const result: AgentResult = {
       status: timedOut ? "timed_out" : "cancelled",
       output: delegation.partialOutput ?? "",
       artifacts: [],
-      error: timedOut ? `Delegation timed out after ${this.timeoutMs}ms` : "Delegation cancelled",
+      error: timeoutKind && timeoutReason ? timeoutReason(timeoutKind) : "Delegation cancelled",
     };
     await this.#finish(delegation, timedOut ? "TIMED_OUT" : "CANCELLED", result);
     return result;
@@ -820,9 +1005,31 @@ export class DelegationService {
         status,
         artifactCount: result.artifacts.length,
         resultStatus: result.status,
+        hasOutput: Boolean(result.output),
         ...(result.error ? { error: result.error } : {}),
       },
     });
+    const fields = {
+      component: "byclaw-super",
+      stage: "delegation_finished",
+      runId: delegation.runId,
+      delegationId: delegation.id,
+      agentId: delegation.agentId,
+      ...(delegation.agentName ? { agentName: delegation.agentName } : {}),
+      connectorId: delegation.connectorId,
+      status,
+      resultStatus: result.status,
+      durationMs: finished.finishedAt! - delegation.createdAt,
+      outputChars: result.output.length,
+      outputPreview: delegationLogPreview(result.output),
+      artifactCount: result.artifacts.length,
+      ...(result.error ? { error: delegationLogPreview(result.error) } : {}),
+    };
+    if (status === "COMPLETED") {
+      this.logger?.info(fields, "子 Agent 委派结束");
+    } else {
+      this.logger?.warn(fields, "子 Agent 委派异常结束");
+    }
   }
 
   /** 持久化实现将委派快照与事件放在同一事务，内存实现保持简单回退。 */
@@ -839,10 +1046,7 @@ export class DelegationService {
   }
 
   async #saveDelegation(delegation: Delegation): Promise<void> {
-    await this.delegations.save(
-      delegation,
-      this.#claims.get(delegation.runId),
-    );
+    await this.delegations.save(delegation, this.#claims.get(delegation.runId));
   }
 
   async #appendEvent(
@@ -856,11 +1060,89 @@ export class DelegationService {
   }
 }
 
-function responseFromEvent(
-  data: Record<string, JsonValue>,
-): UserInteractionResponse {
-  const action =
-    data.action === "skip" || data.action === "cancel" ? data.action : "submit";
+function delegationEventLogFields(
+  base: Record<string, unknown>,
+  delegationId: string,
+  event: import("../ports/connectors.js").ConnectorEvent,
+  accumulatedOutput: string,
+): Record<string, unknown> {
+  const fields: Record<string, unknown> = {
+    ...base,
+    stage: "delegation_event",
+    delegationId,
+    connectorEventType: event.type,
+    outputCharsBeforeEvent: accumulatedOutput.length,
+    ...(event.cursor ? { cursor: event.cursor } : {}),
+  };
+  if (event.type === "output_delta") {
+    fields.contentChars = event.text.length;
+    fields.contentPreview = delegationLogPreview(event.text);
+  } else if (event.type === "progress") {
+    fields.contentPreview = delegationLogPreview(event.message);
+  } else if (event.type === "display_progress") {
+    fields.contentPreview = delegationLogPreview(event.text);
+  } else if (event.type === "tool_started") {
+    fields.callId = event.callId;
+    fields.toolName = event.toolName;
+    fields.contentPreview = delegationValuePreview(event.input);
+  } else if (event.type === "tool_detail") {
+    fields.callId = event.callId;
+    fields.toolName = event.toolName;
+    fields.toolPhase = event.phase;
+    fields.contentPreview = delegationValuePreview(event.value);
+  } else if (event.type === "tool_completed") {
+    fields.callId = event.callId;
+    fields.toolName = event.toolName;
+    fields.contentPreview = delegationValuePreview(event.output);
+  } else if (event.type === "tool_failed") {
+    fields.callId = event.callId;
+    fields.toolName = event.toolName;
+    fields.error = delegationLogPreview(event.error);
+    fields.contentPreview = delegationValuePreview(event.output);
+  } else if (event.type === "completed") {
+    fields.resultStatus = event.result.status;
+    fields.outputChars = event.result.output.length;
+    fields.contentPreview = delegationLogPreview(event.result.output);
+  } else if (event.type === "failed") {
+    fields.errorCode = event.error.code;
+    fields.error = delegationLogPreview(event.error.message);
+    fields.timedOut = event.error.timedOut === true;
+  } else if (event.type === "input_required") {
+    fields.interactionId = event.interactionId;
+  }
+  return fields;
+}
+
+function delegationValuePreview(value: unknown): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  try {
+    return delegationLogPreview(typeof value === "string" ? value : JSON.stringify(value));
+  } catch {
+    return "[unserializable]";
+  }
+}
+
+function delegationLogPreview(value: string, limit = 240): string {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
+    .replace(/([?&](?:token|access_token|api_key|password)=)[^&\s]+/gi, "$1[REDACTED]")
+    .replace(
+      /(["']?(?:authorization|password|passwd|pwd|secret|token|access[_-]?token|refresh[_-]?token|api[_-]?key)["']?\s*[:=]\s*["']?)[^"',;\s}]+/gi,
+      "$1[REDACTED]",
+    )
+    .replace(
+      /\b((?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/)[^\s/@:]+:[^\s/@]+@/gi,
+      "$1[REDACTED]@",
+    )
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, limit);
+}
+
+function responseFromEvent(data: Record<string, JsonValue>): UserInteractionResponse {
+  const action = data.action === "skip" || data.action === "cancel" ? data.action : "submit";
   const answers =
     data.answers && typeof data.answers === "object" && !Array.isArray(data.answers)
       ? data.answers
@@ -873,9 +1155,7 @@ function responseFromEvent(
 }
 
 function jsonRecord(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : undefined;
+  return value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
 }
 
 function interactionRequestFromEvent(value: JsonValue | undefined): UserInteractionRequest {

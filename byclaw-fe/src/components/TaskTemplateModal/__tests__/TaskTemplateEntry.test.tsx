@@ -12,6 +12,17 @@ const mockEventEmitter = {
 };
 jest.mock('@umijs/max', () => ({
   getLocale: () => 'zh-CN',
+  useIntl: () => ({
+    formatMessage: ({ id }: { id: string }) =>
+      ({
+        'projectSpace.createProject': '新建项目',
+        'projectSpace.selectProject': '请选择项目',
+        'projectSpace.unnamedProject': '未命名项目',
+        'projectSpace.message.createSuccess': '项目空间创建成功',
+        'projectSpace.message.createFailed': '项目空间创建失败',
+      }[id] || id),
+  }),
+  useNavigate: () => jest.fn(),
 }));
 
 jest.mock('@/hooks/useGlobal', () => ({
@@ -48,12 +59,10 @@ jest.mock('@/pages/projectSpace/hooks/useProjectTypeConfig', () => ({
   useProjectTypeConfig: () => ({ projectTypeOptions: [], projectTypeLoading: false }),
 }));
 
-jest.mock(
-  '@/pages/projectSpace/components/ProjectFormModal',
-  () =>
-    ({ open }: { open: boolean }) =>
-      open ? <div data-testid="project-form-modal" /> : null
-);
+jest.mock('@/pages/projectSpace/components/ProjectOnboardingWizard', () => ({
+  __esModule: true,
+  default: ({ open }: { open: boolean }) => (open ? <div data-testid="project-onboarding-wizard" /> : null),
+}));
 
 const mockUseProjectList = useProjectList as jest.MockedFunction<typeof useProjectList>;
 const mockUseProjectScopeId = useProjectScopeId as jest.MockedFunction<typeof useProjectScopeId>;
@@ -84,11 +93,29 @@ describe('TaskTemplateEntry project selector', () => {
     });
   });
 
-  it('allows switching the project beside the task template entry', async () => {
+  it('hides the project selector until the initial project request returns', () => {
+    mockUseProjectList.mockReturnValue({
+      projects: [],
+      loading: true,
+      keyword: '',
+      setKeyword: jest.fn(),
+      fetchProjects: jest.fn(),
+      hasMore: false,
+      loadMoreProjects: jest.fn(),
+    });
+
+    render(<TaskTemplateEntry onApply={jest.fn()} />);
+
+    expect(screen.queryByRole('combobox', { name: '选择项目' })).not.toBeInTheDocument();
+  });
+
+  it('allows switching the project from the chat input', async () => {
     mockUseProjectScopeId.mockReturnValue(['1', mockUpdateProjectScopeId]);
     render(<TaskTemplateEntry onApply={jest.fn()} />);
 
-    const projectSelect = screen.getByRole('combobox', { name: '选择项目' });
+    expect(screen.queryByRole('button', { name: '任务模板' })).not.toBeInTheDocument();
+
+    const projectSelect = screen.getByRole('combobox', { name: '请选择项目' });
     fireEvent.mouseDown(projectSelect);
     fireEvent.change(projectSelect, { target: { value: '项目二' } });
     fireEvent.click(await screen.findByText('项目二'));
@@ -99,9 +126,9 @@ describe('TaskTemplateEntry project selector', () => {
   it('opens the new project form in the current chat page', async () => {
     render(<TaskTemplateEntry onApply={jest.fn()} />);
 
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: '选择项目' }));
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '请选择项目' }));
     fireEvent.click(await screen.findByText('新建项目'));
 
-    expect(screen.getByTestId('project-form-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('project-onboarding-wizard')).toBeInTheDocument();
   });
 });

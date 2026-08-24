@@ -13,8 +13,6 @@ export interface ReadinessReport {
   database: {
     healthy: boolean;
     message?: string;
-    currentVersion?: number;
-    latestVersion?: number;
     listener?: { healthy: boolean; message?: string };
   };
   connectors: Record<string, ConnectorHealth>;

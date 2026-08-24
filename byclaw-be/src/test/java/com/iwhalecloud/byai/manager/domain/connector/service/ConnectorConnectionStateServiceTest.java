@@ -3,8 +3,10 @@ package com.iwhalecloud.byai.manager.domain.connector.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -21,6 +23,7 @@ import com.iwhalecloud.byai.manager.mapper.connector.ConnectorAuthMapper;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorInfoMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.util.Date;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -108,6 +111,60 @@ class ConnectorConnectionStateServiceTest {
     }
 
     @Test
+    void credentialAuthorizationRefreshesCacheEvenWhenCredentialRowsAreUnchanged() {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("ima-openapi");
+        when(connectorAuthMapper.selectOne(any())).thenReturn(null);
+        when(sequenceService.nextVal()).thenReturn(8010L);
+        when(manifestService.upsertAndEnable(eq(1001L), eq(connector), any())).thenReturn(false);
+
+        service.saveEnabledCredentialAuthorization(USER_ID, connector, new AuthorizationStatusResult(
+            AuthorizationStatus.CONNECTED, null, "IMA", null, null, null, null), "authorization-id",
+            java.util.Map.of("IMA_OPENAPI_CLIENTID", "client", "IMA_OPENAPI_APIKEY", "key"));
+
+        verify(privateParamService).refreshPrivateParamCacheAfterCommit(1001L, "tester");
+    }
+
+    @Test
+    void credentialAuthorizationPersistsSecretsBeforeBindingAndNeverStoresThemInAuthCredential() {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("ima-openapi");
+        when(connectorAuthMapper.selectOne(any())).thenReturn(null);
+        when(sequenceService.nextVal()).thenReturn(8011L);
+        when(manifestService.upsertAndEnable(eq(1001L), eq(connector), any())).thenReturn(true);
+        AuthorizationStatusResult result = new AuthorizationStatusResult(
+            AuthorizationStatus.CONNECTED, null, "IMA", null, null, null, null);
+
+        ConnectorAuth saved = service.saveEnabledCredentialAuthorization(USER_ID, connector, result, "auth-id",
+            java.util.Map.of("IMA_OPENAPI_CLIENTID", "client-secret", "IMA_OPENAPI_APIKEY", "api-secret"));
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(manifestService, connectorAuthMapper);
+        order.verify(manifestService).upsertAndEnable(eq(1001L), eq(connector), any());
+        order.verify(connectorAuthMapper).insertActiveIgnoreConflict(any());
+        String credential = Sm4Util.decrypt(saved.getAuthCredential());
+        assertThat(credential).doesNotContain("client-secret", "api-secret", "IMA_OPENAPI_CLIENTID", "IMA_OPENAPI_APIKEY");
+    }
+
+    @Test
+    void credentialPersistenceFailureDoesNotWriteBindingOrRefreshCacheAndIsTransactional() throws Exception {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("ima-openapi");
+        when(manifestService.upsertAndEnable(eq(1001L), eq(connector), any()))
+            .thenThrow(new IllegalStateException("persist failed"));
+
+        assertThatThrownBy(() -> service.saveEnabledCredentialAuthorization(USER_ID, connector, null, "id", Map.of()))
+            .isInstanceOf(IllegalStateException.class);
+        verify(connectorAuthMapper, never()).insertActiveIgnoreConflict(any());
+        verify(connectorAuthMapper, never()).updateById(any());
+        verify(privateParamService, never()).refreshPrivateParamCacheAfterCommit(any(), any());
+        org.springframework.transaction.annotation.Transactional tx = ConnectorConnectionStateService.class
+            .getMethod("saveEnabledCredentialAuthorization", String.class, ConnectorInfo.class,
+                AuthorizationStatusResult.class, String.class, Map.class)
+            .getAnnotation(org.springframework.transaction.annotation.Transactional.class);
+        assertThat(tx.rollbackFor()).containsExactly(Exception.class);
+    }
+
+    @Test
     void saveEnabledAuthorizationUpdatesConcurrentWinnerWhenInsertIsIgnored() {
         ConnectorInfo connector = connector();
         ConnectorAuth winner = activeAuth();
@@ -158,6 +215,24 @@ class ConnectorConnectionStateServiceTest {
     }
 
     @Test
+    void managedEnvironmentTogglesRefreshPrivateParameterCacheAfterEveryStateChange() {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("ima-openapi");
+        ConnectorAuth auth = activeAuth();
+        when(connectorAuthMapper.selectOne(any())).thenReturn(auth);
+        when(connectorInfoMapper.selectById(CONNECTOR_ID)).thenReturn(connector);
+        when(manifestService.upsertAndEnable(1001L, connector)).thenReturn(true);
+        when(manifestService.disable(1001L, connector)).thenReturn(true);
+        when(manifestService.readManagedCredentials(eq(1001L), eq(connector), any())).thenReturn(
+            Map.of("IMA_OPENAPI_CLIENTID", "client", "IMA_OPENAPI_APIKEY", "key"));
+
+        service.updateEnableFlag(USER_ID, CONNECTOR_ID, true);
+        service.updateEnableFlag(USER_ID, CONNECTOR_ID, false);
+
+        verify(privateParamService, times(2)).refreshPrivateParamCacheAfterCommit(1001L, "tester");
+    }
+
+    @Test
     void updateEnableFlagUsesEnableFlagEvenWhenExpirationFieldIsPast() {
         ConnectorInfo connector = connector();
         ConnectorAuth auth = activeAuth();
@@ -204,6 +279,145 @@ class ConnectorConnectionStateServiceTest {
         verify(manifestService).disable(1001L, connector);
         verify(connectorAuthMapper).updateById(auth);
         verify(privateParamService).refreshPrivateParamCacheAfterCommit(1001L, "tester");
+    }
+
+    @Test
+    void revokeAuthorizationPhysicallyDeletesManifestManagedCredentials() {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("ima-openapi");
+        ConnectorAuth auth = activeAuth();
+        when(connectorAuthMapper.selectOne(any())).thenReturn(auth);
+        when(connectorInfoMapper.selectById(CONNECTOR_ID)).thenReturn(connector);
+        when(manifestService.managedEnvironmentKeys(connector)).thenReturn(
+            java.util.List.of("IMA_OPENAPI_CLIENTID", "IMA_OPENAPI_APIKEY"));
+        when(manifestService.removeManagedCredentials(1001L, connector)).thenReturn(true);
+
+        service.revokeAuthorization(USER_ID, CONNECTOR_ID);
+
+        verify(manifestService).removeManagedCredentials(1001L, connector);
+        verify(manifestService, never()).disable(1001L, connector);
+        verify(privateParamService).refreshPrivateParamCacheAfterCommit(1001L, "tester");
+    }
+
+    @Test
+    void revokeAuthorizationDeletesAkSkCredentialsEvenWhenCurrentManifestHasNoManagedKeys() {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("ima-openapi");
+        connector.setAuthMode("AK_SK");
+        ConnectorAuth auth = activeAuth();
+        when(connectorAuthMapper.selectOne(any())).thenReturn(auth);
+        when(connectorInfoMapper.selectById(CONNECTOR_ID)).thenReturn(connector);
+        when(manifestService.removeManagedCredentials(1001L, connector)).thenReturn(true);
+
+        service.revokeAuthorization(USER_ID, CONNECTOR_ID);
+
+        verify(manifestService).removeManagedCredentials(1001L, connector);
+        verify(manifestService, never()).disable(1001L, connector);
+    }
+
+    @Test
+    void revokeAuthorizationDeletesAkSkCredentialsWhenCurrentManifestIsInvalid() {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("ima-openapi");
+        connector.setAuthMode("AK_SK");
+        when(connectorAuthMapper.selectOne(any())).thenReturn(null);
+        when(connectorInfoMapper.selectById(CONNECTOR_ID)).thenReturn(connector);
+        when(manifestService.removeManagedCredentials(1001L, connector)).thenReturn(true);
+        when(manifestService.managedEnvironmentKeys(connector))
+            .thenThrow(new InvalidConnectorManifestException("runtime_manifest is invalid"));
+
+        service.revokeAuthorization(USER_ID, CONNECTOR_ID);
+
+        verify(manifestService).removeManagedCredentials(1001L, connector);
+        verify(manifestService, never()).managedEnvironmentKeys(connector);
+    }
+
+    @Test
+    void revokeAuthorizationDeletesAkSkCredentialsAfterConnectorIsDisabled() {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("ima-openapi");
+        connector.setAuthMode("AK_SK");
+        connector.setStatusCd("00X");
+        when(connectorAuthMapper.selectOne(any())).thenReturn(null);
+        when(connectorInfoMapper.selectById(CONNECTOR_ID)).thenReturn(connector);
+        when(manifestService.removeManagedCredentials(1001L, connector)).thenReturn(true);
+
+        service.revokeAuthorization(USER_ID, CONNECTOR_ID);
+
+        verify(manifestService).removeManagedCredentials(1001L, connector);
+    }
+
+    @Test
+    void revokeAuthorizationDeletesOrphanedAkSkCredentialsWithoutAnActiveBinding() {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("ima-openapi");
+        connector.setAuthMode("AK_SK");
+        when(connectorAuthMapper.selectOne(any())).thenReturn(null);
+        when(connectorInfoMapper.selectById(CONNECTOR_ID)).thenReturn(connector);
+        when(manifestService.removeManagedCredentials(1001L, connector)).thenReturn(true);
+
+        service.revokeAuthorization(USER_ID, CONNECTOR_ID);
+
+        verify(manifestService).removeManagedCredentials(1001L, connector);
+        verify(connectorAuthMapper, never()).updateById(any());
+        verify(privateParamService).refreshPrivateParamCacheAfterCommit(1001L, "tester");
+    }
+
+    @Test
+    void managedCredentialRevocationSkipsCacheRefreshWhenDeleteReportsNoChange() {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("ima-openapi");
+        ConnectorAuth auth = activeAuth();
+        when(connectorAuthMapper.selectOne(any())).thenReturn(auth);
+        when(connectorInfoMapper.selectById(CONNECTOR_ID)).thenReturn(connector);
+        when(manifestService.managedEnvironmentKeys(connector)).thenReturn(
+            java.util.List.of("IMA_OPENAPI_CLIENTID", "IMA_OPENAPI_APIKEY"));
+        when(manifestService.removeManagedCredentials(1001L, connector)).thenReturn(false);
+
+        service.revokeAuthorization(USER_ID, CONNECTOR_ID);
+
+        verify(privateParamService, never()).refreshPrivateParamCacheAfterCommit(any(), any());
+        verify(connectorAuthMapper).updateById(auth);
+    }
+
+    @Test
+    void managedCredentialRevocationDeletesSecretsBeforeUnlinkingBinding() {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("ima-openapi");
+        ConnectorAuth auth = activeAuth();
+        when(connectorAuthMapper.selectOne(any())).thenReturn(auth);
+        when(connectorInfoMapper.selectById(CONNECTOR_ID)).thenReturn(connector);
+        when(manifestService.managedEnvironmentKeys(connector)).thenReturn(
+            java.util.List.of("IMA_OPENAPI_CLIENTID", "IMA_OPENAPI_APIKEY"));
+        when(manifestService.removeManagedCredentials(1001L, connector)).thenReturn(true);
+
+        service.revokeAuthorization(USER_ID, CONNECTOR_ID);
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(manifestService, connectorAuthMapper);
+        order.verify(manifestService).removeManagedCredentials(1001L, connector);
+        order.verify(connectorAuthMapper).updateById(auth);
+    }
+
+    @Test
+    void credentialRemovalFailureDoesNotUnlinkOrRefreshAndIsTransactional() throws Exception {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("ima-openapi");
+        ConnectorAuth auth = activeAuth();
+        when(connectorAuthMapper.selectOne(any())).thenReturn(auth);
+        when(connectorInfoMapper.selectById(CONNECTOR_ID)).thenReturn(connector);
+        when(manifestService.managedEnvironmentKeys(connector)).thenReturn(
+            java.util.List.of("IMA_OPENAPI_CLIENTID", "IMA_OPENAPI_APIKEY"));
+        when(manifestService.removeManagedCredentials(1001L, connector))
+            .thenThrow(new IllegalStateException("delete failed"));
+
+        assertThatThrownBy(() -> service.revokeAuthorization(USER_ID, CONNECTOR_ID))
+            .isInstanceOf(IllegalStateException.class);
+        verify(connectorAuthMapper, never()).updateById(any());
+        verify(privateParamService, never()).refreshPrivateParamCacheAfterCommit(any(), any());
+        org.springframework.transaction.annotation.Transactional tx = ConnectorConnectionStateService.class
+            .getMethod("revokeAuthorization", String.class, Long.class)
+            .getAnnotation(org.springframework.transaction.annotation.Transactional.class);
+        assertThat(tx.rollbackFor()).containsExactly(Exception.class);
     }
 
     private ConnectorInfo connector() {

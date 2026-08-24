@@ -19,17 +19,58 @@
 }
 
 .projectSelect {
-  width: 190px;
+  width: fit-content;
+  min-width: 100px;
+  max-width: 220px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  background: transparent;
+  cursor: pointer;
 
   :global(.@{antPrefix}-select-selector) {
-    height: 32px !important;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+
+  &:hover,
+  &:focus,
+  &:global(.@{antPrefix}-select-focused) {
+    :global(.@{antPrefix}-select-selector) {
+      border: 0 !important;
+      box-shadow: none !important;
+    }
+  }
+
+  :global(.@{antPrefix}-select-selector) {
+    height: 24px !important;
     display: flex;
     align-items: center;
+    cursor: pointer;
+  }
+
+  :global(.@{antPrefix}-select-selection-item) {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    line-height: normal;
+    cursor: pointer;
   }
 
   :global(.@{antPrefix}-select-selection-item),
   :global(.@{antPrefix}-select-item-option-selected) {
     font-weight: 400;
+  }
+
+  :global(.@{antPrefix}-select-arrow) {
+    top: 50% !important;
+    margin-top: 0 !important;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    pointer-events: none;
+    transform: translateY(-50%) !important;
   }
 }
 

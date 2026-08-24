@@ -1,12 +1,13 @@
-import React, { useRef, useState, useEffect, useMemo, useContext } from 'react';
+import React, { useRef, useState, useEffect, useMemo, useContext, useCallback } from 'react';
 import { Typography, Dropdown, Button, Popconfirm, Tooltip, message, Spin } from 'antd';
 import type { MenuProps } from 'antd';
-import { getLocale, useIntl, useSelector } from '@umijs/max';
+import { getLocale, useDispatch, useIntl, useSelector } from '@umijs/max';
 import classnames from 'classnames';
 import { debounce, noop } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
 import { queryResourceOperationPermissions, restoreResource } from '@/pages/manager/service/resources';
 import { installDigitalEmployeeRelResources } from '@/pages/manager/service/DigitalEmployeeMgr';
+import { setDefaultDigitalEmployee } from '@/service/digitalEmployees';
 import { getFileUrl } from '@/utils/file';
 import { useRequest } from '@/hooks/useRequest';
 import useGlobal from '@/hooks/useGlobal';
@@ -23,7 +24,10 @@ import styles from './index.module.less';
 const { Paragraph } = Typography;
 export type ResourceCardActionScene = 'personal' | 'enterprise';
 
+const isTruthyFlag = (value: unknown) => value === true || value === 1 || value === '1' || value === 'true';
+
 export interface IResourceCardItem {
+  id?: string | number;
   resourceId?: string;
   resourceName?: string;
   resourceCode?: string;
@@ -176,11 +180,13 @@ const BuildMenuLabel = ({
 const ConfirmMenuLabel = ({
   title,
   disabled,
+  loading,
   children,
   onConfirm,
 }: {
   title: React.ReactNode;
   disabled?: boolean;
+  loading?: boolean;
   children: React.ReactNode;
   onConfirm: () => void;
 }) => {
@@ -190,7 +196,9 @@ const ConfirmMenuLabel = ({
       title={title}
       okText={intl.formatMessage({ id: 'common.confirm' })}
       cancelText={intl.formatMessage({ id: 'common.cancel' })}
-      disabled={disabled}
+      disabled={disabled || loading}
+      okButtonProps={{ loading }}
+      cancelButtonProps={{ disabled: loading }}
       onConfirm={(event) => {
         event?.stopPropagation();
         onConfirm();
@@ -305,9 +313,11 @@ const RenderContent = (props: ResourceCardProps) => {
     onAuditUse = noop,
     onRestore = noop,
     onDelete = noop,
+    onSetDefault = noop,
   } = actionConfig || {};
 
   const intl = useIntl();
+  const dispatch = useDispatch();
   const { agentId, agentInfo, EventEmitter } = useGlobal();
   const { userInfo, defaultDigEmployeeId } = useSelector(
     ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
@@ -383,6 +393,8 @@ const RenderContent = (props: ResourceCardProps) => {
   const displayImage = resource.resourceLogoUrl || resource.avatar;
   const displayImageUrl = displayImage ? getFileUrl(displayImage) : '';
   const [displayImageLoadFailed, setDisplayImageLoadFailed] = useState(false);
+  const [settingDefault, setSettingDefault] = useState(false);
+  const settingDefaultLockRef = useRef(false);
   const creatorName =
     resource?.creatorName ||
     resource?.createUserName ||
@@ -406,9 +418,14 @@ const RenderContent = (props: ResourceCardProps) => {
     setDisplayImageLoadFailed(false);
   }, [displayImageUrl]);
 
-  const isDigitalEmployeeResource = resource.resourceBizType === resourceBizTypeMap.DIG_EMPLOYEE;
+  const isDigitalEmployeeResource =
+    resource.resourceBizType === resourceBizTypeMap.DIG_EMPLOYEE || resourceType === resourceBizTypeMap.DIG_EMPLOYEE;
+  const resourceIdentity = `${resource.resourceId ?? resource.id ?? ''}`;
+  const defaultEmployeeIdentity = `${defaultDigEmployeeId || userInfo?.defaultDigEmployeeId || ''}`;
   const isDefaultDigitalEmployee =
-    isDigitalEmployeeResource && (Boolean(resource.isDefault) || ownerType === 'personal_default');
+    isDigitalEmployeeResource &&
+    (isTruthyFlag(resource.isDefault) ||
+      (Boolean(defaultEmployeeIdentity) && resourceIdentity === defaultEmployeeIdentity));
   const isPersonalDigitalEmployee = isDigitalEmployeeResource && ownerType === 'personal';
 
   const getDisplayTopRightTag = () => {
@@ -463,38 +480,92 @@ const RenderContent = (props: ResourceCardProps) => {
   const isCardClickDisabled =
     typeof cardClickDisabled === 'function' ? cardClickDisabled(resource) : !!cardClickDisabled;
 
+  const handleSetDefault = useCallback(async () => {
+    if (settingDefaultLockRef.current) {
+      return;
+    }
+
+    const resourceId = resource.resourceId ?? resource.id;
+    if (!resourceId) {
+      return;
+    }
+
+    settingDefaultLockRef.current = true;
+    setSettingDefault(true);
+    const messageKey = `set-default-digital-employee-${resourceId}`;
+    message.loading({
+      key: messageKey,
+      content: intl.formatMessage({ id: 'common.processing' }),
+      duration: 0,
+    });
+
+    try {
+      const result: any = await setDefaultDigitalEmployee({ resourceId });
+      if (result?.success === false || (result?.code !== undefined && result.code !== 0)) {
+        throw new Error(result?.msg || intl.formatMessage({ id: 'common.operationFailed' }));
+      }
+
+      const defaultResourceId = `${result?.newResourceId ?? result?.data?.newResourceId ?? resourceId}`;
+      dispatch({
+        type: 'employees/save',
+        payload: { defaultDigEmployeeId: defaultResourceId },
+      });
+      EventEmitter?.emit('beyond-update-employee', { defaultResourceId });
+      EventEmitter?.emit('default-digital-employee-changed', { defaultResourceId });
+      onSetDefault?.();
+      message.success({
+        key: messageKey,
+        content: intl.formatMessage({ id: 'resource.setDefaultAssistantSuccess' }),
+      });
+    } catch (error: any) {
+      message.error({
+        key: messageKey,
+        content: error?.message || error || intl.formatMessage({ id: 'common.operationFailed' }),
+      });
+    } finally {
+      settingDefaultLockRef.current = false;
+      setSettingDefault(false);
+    }
+  }, [EventEmitter, dispatch, intl, onSetDefault, resource.id, resource.resourceId]);
+
+  const handleSetDefaultDebounced = useMemo(
+    () =>
+      debounce(
+        () => {
+          void handleSetDefault();
+        },
+        300,
+        { leading: true, trailing: false }
+      ),
+    [handleSetDefault]
+  );
+
+  useEffect(() => () => handleSetDefaultDebounced.cancel(), [handleSetDefaultDebounced]);
+
   const menuItems = useMemo<MenuProps['items']>(() => {
-    const { canEdit, canManageAuth, canUseAuth, canApplyUse, canAuditUse, canDelete, canRestore } = resource || {};
+    const { canEdit, canManageAuth, canUseAuth, canApplyUse, canAuditUse, canDelete, canSetDefault, canRestore } =
+      resource || {};
     const items: NonNullable<MenuProps['items']> = [];
 
-    // 设为默认
-    // if (!canSetDefault) {
-    //   items.push({
-    //     key: 'setDefaultAssistant',
-    //     label: (
-    //       <Popconfirm
-    //         title={intl.formatMessage({ id: 'resource.setDefaultAssistantConfirm' })}
-    //         onConfirm={async (e) => {
-    //           e?.stopPropagation();
-    //           setSettingDefault(true);
-    //           try {
-    //             await onSetDefault?.();
-    //           } finally {
-    //             setSettingDefault(false);
-    //           }
-    //         }}
-    //         okText={intl.formatMessage({ id: 'common.confirm' })}
-    //         cancelText={intl.formatMessage({ id: 'common.cancel' })}
-    //       >
-    //         <BuildMenuLabel
-    //           icon="icon-a-Useryonghu"
-    //           text={intl.formatMessage({ id: 'resource.setDefaultAssistant' })}
-    //           loading={settingDefault}
-    //         />
-    //       </Popconfirm>
-    //     ),
-    //   });
-    // }
+    // 后端按当前用户权限和默认员工关系返回 canSetDefault。
+    if (isDigitalEmployeeResource && canSetDefault === true) {
+      items.push({
+        key: 'setDefaultAssistant',
+        label: (
+          <ConfirmMenuLabel
+            title={intl.formatMessage({ id: 'resource.setDefaultAssistantConfirm' })}
+            loading={settingDefault}
+            onConfirm={handleSetDefaultDebounced}
+          >
+            <BuildMenuLabel
+              icon="icon-a-Useryonghu"
+              text={intl.formatMessage({ id: 'resource.setDefaultAssistant' })}
+              loading={settingDefault}
+            />
+          </ConfirmMenuLabel>
+        ),
+      });
+    }
 
     // 编辑信息
     if (canEdit && !isInnerSkill) {
@@ -539,7 +610,7 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 使用申请
+    // 使用申请与其他权限操作并列展示，由后端返回的权限字段决定其他操作是否出现。
     if (canApplyUse) {
       items.push({
         key: 'applyUse',
@@ -635,19 +706,32 @@ const RenderContent = (props: ResourceCardProps) => {
   }, [
     actionConfig,
     activeDigitalEmployeeId,
+    dispatch,
+    EventEmitter,
+    handleSetDefaultDebounced,
     handleInstall,
     intl,
-    resource?.canSetDefault,
+    isDefaultDigitalEmployee,
+    isDigitalEmployeeResource,
+    onApplyUse,
+    onAuditUse,
+    onAuth,
+    onDelete,
+    onEdit,
+    onRestore,
+    onSetDefault,
     resource?.canEdit,
     resource?.canManageAuth,
     resource?.canUseAuth,
     resource?.canApplyUse,
+    resource?.canSetDefault,
     resource?.canAuditUse,
     resource?.canDelete,
     resource?.canRestore,
     resource?.hasUsePermission,
     resource?.ownerType,
     resource?.resourceBizType,
+    resource?.id,
     resource?.resourceId,
     resource?.skillType,
     resourceType,
@@ -655,6 +739,7 @@ const RenderContent = (props: ResourceCardProps) => {
     isInstalledSkill,
     installing,
     restoring,
+    settingDefault,
   ]);
 
   // 工作空间技能用独立菜单(详情/分享/删除)，不走权限驱动的 menuItems。
@@ -934,20 +1019,35 @@ const RenderContent = (props: ResourceCardProps) => {
 function ResourceCard(props: ResourceCardProps) {
   const { resource, variant = 'default' } = props;
   const resourceCardRef = useRef<HTMLDivElement>(null);
-  const fetchedPermissionsRef = useRef(false);
+  const fetchedPermissionKeyRef = useRef<string>();
   const [resourceWithPermissions, setResourceWithPermissions] = useState<IResourceCardItem | null>(null);
+  const defaultDigEmployeeId = useSelector(
+    ({ employees, user }: any) => employees?.defaultDigEmployeeId || user?.userInfo?.defaultDigEmployeeId
+  );
+  const permissionQueryKey = `${resource.resourceId ?? ''}:${defaultDigEmployeeId ?? ''}`;
+
+  useEffect(() => {
+    setResourceWithPermissions((previous) => (previous ? { ...previous, ...resource } : previous));
+  }, [resource]);
 
   useEffect(() => {
     // 工作空间(用户开发)技能没有真实 resourceId，跳过资源权限查询，避免无效请求。
-    if (!resourceCardRef.current || fetchedPermissionsRef.current || isWorkspaceSkill(resource)) return noop;
+    if (
+      !resourceCardRef.current ||
+      !resource.resourceId ||
+      isWorkspaceSkill(resource) ||
+      fetchedPermissionKeyRef.current === permissionQueryKey
+    ) {
+      return noop;
+    }
 
     let observer: IntersectionObserver | undefined;
     let cancelled = false;
 
     const callback = debounce(async (entries: IntersectionObserverEntry[]) => {
       for (const entry of entries) {
-        if (entry.intersectionRatio > 0 && !cancelled && !fetchedPermissionsRef.current) {
-          fetchedPermissionsRef.current = true;
+        if (entry.intersectionRatio > 0 && !cancelled && fetchedPermissionKeyRef.current !== permissionQueryKey) {
+          fetchedPermissionKeyRef.current = permissionQueryKey;
           const resourceId = resource.resourceId;
           if (resourceId) {
             try {
@@ -983,7 +1083,9 @@ function ResourceCard(props: ResourceCardProps) {
                 });
               }
             } catch {
-              fetchedPermissionsRef.current = false;
+              if (fetchedPermissionKeyRef.current === permissionQueryKey) {
+                fetchedPermissionKeyRef.current = undefined;
+              }
             }
           }
           observer?.disconnect();
@@ -997,7 +1099,7 @@ function ResourceCard(props: ResourceCardProps) {
       cancelled = true;
       observer?.disconnect();
     };
-  }, [resource]);
+  }, [permissionQueryKey, resource]);
 
   const displayResource = resourceWithPermissions || resource;
   const isCancelledResource = `${displayResource?.resourceStatus ?? ''}` === '3';

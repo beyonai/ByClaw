@@ -7,6 +7,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.util.DateUtils;
@@ -15,6 +16,7 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.util.Date;
+import java.util.Locale;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,6 +24,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.MessageSource;
+import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.context.support.StaticMessageSource;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class SessionTitleServiceTest {
@@ -37,17 +43,28 @@ class SessionTitleServiceTest {
 
     private SessionTitleService sessionTitleService;
 
+    private MessageSource originalMessageSource;
+
     @BeforeEach
     void setUp() {
         sessionTitleService = new SessionTitleService(byaiSessionMapper, sessionExtService, sequenceService);
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(100L);
         CurrentUserHolder.setLoginInfo(loginInfo);
+
+        originalMessageSource = (MessageSource) ReflectionTestUtils.getField(I18nUtil.class, "messageSource");
+        StaticMessageSource messageSource = new StaticMessageSource();
+        messageSource.addMessage("session.file.upload.title", Locale.US, "File Upload {0}");
+        messageSource.addMessage("session.file.upload.title", Locale.SIMPLIFIED_CHINESE, "文件上传 {0}");
+        ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
+        LocaleContextHolder.setLocale(Locale.US);
     }
 
     @AfterEach
     void tearDown() {
         CurrentUserHolder.clearLoginInfo();
+        ReflectionTestUtils.setField(I18nUtil.class, "messageSource", originalMessageSource);
+        LocaleContextHolder.resetLocaleContext();
     }
 
     @Test

@@ -24,6 +24,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.OperationAccountDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationRequirementStartDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationTaskDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFileDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ListProjectTaskStatusDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ObjectFileGroupDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ObjectFileSaveDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
@@ -33,6 +34,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.DefaultAgentDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.TesterConfigDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.UpdateTaskStatusDto;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectObjectFile;
+import com.iwhalecloud.byai.manager.entity.devloop.ProjectTaskStatus;
 import com.iwhalecloud.byai.manager.entity.devloop.OperationTaskTemplate;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import jakarta.servlet.http.HttpServletRequest;
@@ -98,7 +100,9 @@ public class DevloopController {
         String keyword = MapParamUtil.getStringValue(params, "keyword");
         int pageNum = Math.max(1, MapParamUtil.getIntValue(params, "pageNum", 1));
         int pageSize = Math.max(1, MapParamUtil.getIntValue(params, "pageSize", 30));
-        return applicationService.listScanSources(projectId, keyword, pageNum, pageSize);
+        // 自动化页传 onlyMine=true 只看自己建的；项目渠道页不传，保持原有全项目可见口径。
+        boolean onlyMine = Boolean.parseBoolean(String.valueOf(params.get("onlyMine")));
+        return applicationService.listScanSources(projectId, keyword, onlyMine, pageNum, pageSize);
     }
 
     /**
@@ -136,6 +140,21 @@ public class DevloopController {
         Long sourceId = Long.valueOf(params.get("sourceId").toString());
         int limit = params.containsKey("limit") ? Integer.parseInt(params.get("limit").toString()) : 20;
         return applicationService.listScanLogs(sourceId, limit);
+    }
+
+    /**
+     * 分页查询当前用户自动化的运行记录
+     *
+     * @param params 包含 status、keyword（可选）、pageNum、pageSize
+     * @return 按扫描时间倒序的运行记录分页
+     */
+    @PostMapping("/automation/run/list")
+    public ResponseUtil<PageInfo<Map<String, Object>>> listMyAutomationRuns(@RequestBody Map<String, Object> params) {
+        String status = MapParamUtil.getStringValue(params, "status");
+        String keyword = MapParamUtil.getStringValue(params, "keyword");
+        int pageNum = Math.max(1, MapParamUtil.getIntValue(params, "pageNum", 1));
+        int pageSize = Math.max(1, MapParamUtil.getIntValue(params, "pageSize", 20));
+        return applicationService.listMyAutomationRuns(status, keyword, pageNum, pageSize);
     }
 
     /**
@@ -779,6 +798,18 @@ public class DevloopController {
     public ResponseUtil<Void> updateTaskStatus(@RequestBody UpdateTaskStatusDto updateTaskStatusDto) {
         applicationService.updateTaskStatus(updateTaskStatusDto);
         return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 查询项目任务状态字典，供会话扩展状态 skill 使用。
+     *
+     * @param listProjectTaskStatusDto 项目与可选维度
+     * @return 有效状态列表
+     */
+    @PostMapping("/project/taskStatuses/list")
+    public ResponseUtil<List<ProjectTaskStatus>> listProjectTaskStatuses(
+        @RequestBody ListProjectTaskStatusDto listProjectTaskStatusDto) {
+        return ResponseUtil.successResponse(applicationService.listProjectTaskStatuses(listProjectTaskStatusDto));
     }
 
 }

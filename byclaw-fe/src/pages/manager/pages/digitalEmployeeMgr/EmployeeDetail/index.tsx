@@ -29,6 +29,8 @@ import LogInfoDrawer from './components/LogInfoDrawer';
 import ConfigForm from './ConfigForm';
 import OntologyResourceSelectorDrawer, { normalizeOntologyResource } from './ConfigForm/OntologyResourceSelectorDrawer';
 import { normalizeRobotConfig } from './ConfigForm/robotConfig';
+import ImageModelSelect from './ImageModelSelect';
+import { applyImageModelId, normalizeImageModelId } from './imageModelUtils';
 import { DEFAULT_PERSONALITY_DEFINITION } from './personalityDefinitionDefault';
 import { getDigitalEmployeeTemplateParamCode } from '@/pages/manager/constants/digitalResource';
 import styles from './index.module.less';
@@ -511,6 +513,7 @@ const EmployeeDetail = ({ loading }) => {
   const showOperation = _operation === 'true';
 
   const [form] = Form.useForm();
+  const selectedImageModelId = Form.useWatch('imageModelId', { form, preserve: true });
 
   // 新建场景：根据 URL query 覆盖 ConfigForm 默认值
   useEffect(() => {
@@ -804,6 +807,7 @@ const EmployeeDetail = ({ loading }) => {
             relOntology,
             relIds: detailRelIds,
             employeeGroupMembers: detailEmployeeGroupMembers,
+            imageModelId: detailImageModelId,
           } = res || {};
 
           setEmployeeGroupMembers(
@@ -1012,6 +1016,7 @@ const EmployeeDetail = ({ loading }) => {
               catalogId: catalogId === -1 ? undefined : catalogId,
               ownerType: detailOwnerType || ownerType,
               agentType: detailAgentType || routeAgentType || agentType,
+              imageModelId: normalizeImageModelId(detailImageModelId),
               advancedSettings: advancedSettingsParsed,
               // 为受控的必填项提供初始值以回显
               coreAbility: res?.ability || '',
@@ -1410,6 +1415,7 @@ const EmployeeDetail = ({ loading }) => {
           advancedSettings = [],
         } = res;
         const queryData = omit(resultDataRef.current || {}, ['roleAttributes', 'relPrompt', 'workStandard']);
+        applyImageModelId(queryData, form.getFieldValue('imageModelId'));
         const param = {};
 
         set(queryData, 'avatar', avatar);
@@ -2059,6 +2065,16 @@ const EmployeeDetail = ({ loading }) => {
                 employeeGroupMembers={employeeGroupMembers}
                 setEmployeeGroupMembers={setEmployeeGroupMembers}
                 onOpenOntologyDrawer={() => setOntologyDrawerOpen(true)}
+                imageModelSelect={
+                  <ImageModelSelect
+                    value={selectedImageModelId}
+                    disabled={readOnly}
+                    onChange={(value) => {
+                      form.setFieldValue('imageModelId', value);
+                      onValuesChange();
+                    }}
+                  />
+                }
               />
             </div>
 

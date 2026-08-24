@@ -13,6 +13,7 @@ import DualBallLoading from '@/components/Loading/DualBallLoading';
 import WaveBallLoading from '@/components/Loading/WaveBallLoading';
 import CiteRender from '@/components/MessageList/components/CiteRender';
 import FileRender from '@/components/MessageList/components/FileRender';
+import ReplyFileArtifacts from '@/components/MessageList/components/ReplyFileArtifacts';
 import NotSupport from '@/components/NotSupport';
 
 import ThumbUpContent from './components/AnswerActions/ThumbUp/content';
@@ -58,10 +59,12 @@ export default function useRender({
   updateMessage,
   deleteMessage,
   sessionId,
+  previewInDetailPanel,
 }: {
   updateMessage: (message: IMessage) => IMessage;
   deleteMessage: (message: IMessage) => void;
   sessionId?: string;
+  previewInDetailPanel?: boolean;
 }) {
   const { ModalNode, setOpen, setMyContent, setMyTitle } = useModal({});
 
@@ -206,17 +209,32 @@ export default function useRender({
     [deleteMessage, updateMessage, canRefrence]
   );
 
-  const uploadFileRender = useCallback((fileList?: IFile[], msg?: IMessage) => {
-    if (!fileList || isEmpty(fileList)) return null;
+  const uploadFileRender = useCallback(
+    (fileList?: IFile[], msg?: IMessage, canQuote = true) => {
+      if (!fileList || isEmpty(fileList)) return null;
 
-    return (
-      <div className={classnames(styles.fileList, 'ub ub-wrap full-width gap8')} style={{ justifyContent: 'inherit' }}>
-        {fileList.map((fileItem) => {
-          return <FileRender fileItem={fileItem} key={fileItem.uid} message={msg} canQuote canCollect />;
-        })}
-      </div>
-    );
-  }, []);
+      return (
+        <div
+          className={classnames(styles.fileList, 'ub ub-wrap full-width gap8')}
+          style={{ justifyContent: 'inherit' }}
+        >
+          {fileList.map((fileItem) => {
+            return (
+              <FileRender
+                fileItem={fileItem}
+                key={fileItem.uid}
+                message={msg}
+                canQuote={canQuote}
+                canCollect
+                previewInDetailPanel={previewInDetailPanel}
+              />
+            );
+          })}
+        </div>
+      );
+    },
+    [previewInDetailPanel]
+  );
   const citeMsgRender = useCallback(
     (citeMsgList?: IMessage[]) => {
       if (!citeMsgList || isEmpty(citeMsgList)) return null;
@@ -293,14 +311,14 @@ export default function useRender({
   }, []);
 
   const attachmentListRender = useCallback(
-    (msg: IMessage) => {
+    (msg: IMessage, canInteract = true) => {
       const { fromBeyond, fromOtherUser, imageList, fileList, citeMsgList, extParams } = msg;
 
       const isLeftSide = fromBeyond || fromOtherUser;
 
       const renderList = compact([
-        uploadFileRender(imageList, msg),
-        uploadFileRender(fileList, msg),
+        uploadFileRender(imageList, msg, canInteract),
+        uploadFileRender(fileList, msg, canInteract),
         citeMsgRender(citeMsgList),
         extParamsRender(extParams, msg),
       ]);
@@ -322,7 +340,7 @@ export default function useRender({
         </div>
       );
     },
-    [citeMsgRender]
+    [citeMsgRender, extParamsRender, uploadFileRender]
   );
 
   const renderMessage = useCallback(
@@ -510,7 +528,8 @@ export default function useRender({
               <WaveBallLoading style={{ width: 20, height: 20, opacity: 0.6 }} />
             </div>
           )}
-          {attachmentListRender(msg)}
+          <ReplyFileArtifacts message={msg} sessionId={sessionId} previewInDetailPanel={previewInDetailPanel} />
+          {attachmentListRender(msg, !hideAction)}
           {!hideAction && [IMessageState.Done, IMessageState.Cancel, IMessageState.Error].includes(messageState) && (
             <div className={styles.actionsBar}>
               {isLeftSide && beyondAnswerActions(msg)}
@@ -533,6 +552,7 @@ export default function useRender({
       userQueryActions,
       insertAgentMention,
       relatedQuestionsRender,
+      previewInDetailPanel,
     ]
   );
 

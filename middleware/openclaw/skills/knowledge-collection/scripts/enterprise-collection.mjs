@@ -1,30 +1,34 @@
 #!/usr/bin/env node
 
-import crypto from 'node:crypto';
-import { chmod, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { createFeishuAdapter } from './enterprise/adapters/feishu.mjs';
+import { createWecomAdapter } from './enterprise/adapters/wecom.mjs';
+import { dispatchEnterprise, dispatchEnterpriseBatch, parseSearchBatchRequests } from './enterprise/dispatcher.mjs';
+import { createArtifactWriter } from './enterprise/shared/artifact-writer.mjs';
+import { isAbsolute } from 'node:path';
 
-const PRIVATE_DIRECTORY_MODE = 0o700;
-const PRIVATE_FILE_MODE = 0o600;
-const DEFAULT_MAX_WECOM_POLLS = 12;
-const DEFAULT_CLI_TIMEOUT_MS = 30_000;
-const DEFAULT_MAX_CLI_OUTPUT_BYTES = 10 * 1024 * 1024;
-const SENSITIVE_KEY = /(token|cookie|secret|password|authorization|credential|device[_-]?code)/i;
-
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const [command, ...rest] = argv;
   const values = {};
   for (let index = 0; index < rest.length; index += 1) {
     const token = rest[index];
-    if (!token.startsWith('--')) {
-      throw new Error(`unexpected argument: ${token}`);
-    }
+    if (!token.startsWith('--')) throw new Error(`unexpected argument: ${token}`);
     const key = token.slice(2);
-    const value = rest[index + 1];
-    if (!value || value.startsWith('--')) {
-      throw new Error(`missing value for --${key}`);
+    if (key === 'help') {
+      values.help = true;
+      continue;
     }
+    if (key === 'metadata-only') {
+      const next = rest[index + 1];
+      if (['true', 'false', '1', '0'].includes(next)) {
+        values[key] = next;
+        index += 1;
+      } else {
+        values[key] = true;
+      }
+      continue;
+    }
+    const value = rest[index + 1];
+    if (!value || value.startsWith('--')) throw new Error(`missing value for --${key}`);
     values[key] = value;
     index += 1;
   }
@@ -33,562 +37,122 @@ function parseArgs(argv) {
 
 function requireValue(values, key) {
   const value = values[key]?.trim();
-  if (!value) {
-    throw new Error(`--${key} is required`);
-  }
+  if (!value) throw new Error(`--${key} is required`);
   return value;
 }
 
-async function makeDirectory(path) {
-  await mkdir(path, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
-  await chmodPrivate(path);
+function requireAbsoluteOutputDir(values) {
+  const outputDir = requireValue(values, 'output-dir');
+  if (!isAbsolute(outputDir)) throw new Error('--output-dir must be an absolute path');
+  return outputDir;
 }
 
-async function createOutputRoot(root) {
-  await mkdir(dirname(root), { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
-  try {
-    await mkdir(root, { mode: PRIVATE_DIRECTORY_MODE });
-  } catch (error) {
-    if (error.code === 'EEXIST') {
-      throw new Error(`--output-dir must not already exist: ${root}`);
-    }
-    throw error;
-  }
-  await chmodPrivate(root);
+function render(value) {
+  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
-async function chmodPrivate(path) {
-  await chmod(path, PRIVATE_DIRECTORY_MODE);
-}
-
-async function writePrivate(path, content) {
-  await writeFile(path, content, { encoding: 'utf8', mode: PRIVATE_FILE_MODE });
-  await chmod(path, PRIVATE_FILE_MODE);
-}
-
-async function writePrivateJson(path, value) {
-  await writePrivate(path, `${JSON.stringify(sanitizeSensitive(value), null, 2)}\n`);
-}
-
-function sanitizeSensitive(value) {
-  if (Array.isArray(value)) {
-    return value.map(sanitizeSensitive);
-  }
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if ((trimmed.startsWith('{') && trimmed.endsWith('}'))
-      || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-      try {
-        const parsed = JSON.parse(value);
-        if (parsed && typeof parsed === 'object') {
-          return JSON.stringify(sanitizeSensitive(parsed));
-        }
-      } catch {}
-    }
-    return value;
-  }
-  if (!value || typeof value !== 'object') {
-    return value;
-  }
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [
-    key,
-    SENSITIVE_KEY.test(key) ? '[REDACTED]' : sanitizeSensitive(item),
-  ]));
-}
-
-function positiveEnv(name, fallback) {
-  const parsed = Number.parseInt(process.env[name] || '', 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function run(bin, args) {
-  return new Promise((resolveRun, reject) => {
-    const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    let outputBytes = 0;
-    let settled = false;
-    const timeoutMs = positiveEnv('KNOWLEDGE_COLLECTION_CLI_TIMEOUT_MS', DEFAULT_CLI_TIMEOUT_MS);
-    const maxOutputBytes = positiveEnv('KNOWLEDGE_COLLECTION_MAX_CLI_OUTPUT_BYTES', DEFAULT_MAX_CLI_OUTPUT_BYTES);
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      finish(new Error(`command timeout after ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    function finish(error, value) {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      if (error) {
-        reject(error);
-      } else {
-        resolveRun(value);
-      }
-    }
-
-    child.stdout.on('data', (chunk) => {
-      outputBytes += chunk.length;
-      if (outputBytes > maxOutputBytes) {
-        child.kill('SIGKILL');
-        finish(new Error(`command output exceeds ${maxOutputBytes} bytes`));
-      } else {
-        stdout += chunk;
-      }
-    });
-    child.stderr.on('data', (chunk) => {
-      outputBytes += chunk.length;
-      if (outputBytes > maxOutputBytes) {
-        child.kill('SIGKILL');
-        finish(new Error(`command output exceeds ${maxOutputBytes} bytes`));
-      } else {
-        stderr += chunk;
-      }
-    });
-    child.on('error', (error) => finish(error));
-    child.on('close', (code) => {
-      if (settled) {
-        return;
-      }
-      if (code === 0) {
-        finish(null, stdout);
-      } else {
-        finish(new Error(`command failed with exit ${code}`));
-      }
-    });
-  });
-}
-
-function parseWecomEnvelope(stdout) {
-  let outer;
-  try {
-    outer = JSON.parse(stdout);
-  } catch {
-    throw new Error('wecom-cli returned invalid JSON');
-  }
-  const text = outer?.result?.content?.find((item) => typeof item?.text === 'string')?.text;
-  if (!text) {
-    throw new Error('wecom-cli JSON-RPC response has no result.content[].text');
-  }
-  let business;
-  try {
-    business = JSON.parse(text);
-  } catch {
-    throw new Error('wecom-cli result.content[].text is not valid business JSON');
-  }
-  if (business.errcode !== 0) {
-    throw new Error(`wecom-cli business errcode ${business.errcode}`);
-  }
-  return { outer, business };
-}
-
-function markdown(content, url, title, source) {
-  const yamlScalar = (value) => JSON.stringify(String(value ?? ''));
-  return `---\ntitle: ${yamlScalar(title)}\nsource: ${yamlScalar(source)}\nsource_url: ${yamlScalar(url)}\ncollection_filters: {}\n---\n\n${content.trim()}\n`;
-}
-
-function collectionMetadata({ itemId, title, url, sourceItemId, sourceSkill, backend, rawArtifacts, markdownPath, sanitizedPath, sourceMetadata, collectionStatus = 'complete', materializationStatus = 'materialized', materializationReason = null }) {
+function help() {
   return {
-    schemaVersion: '1.0',
-    storage: { fallback: false },
-    collection: {
-      status: collectionStatus,
-      items: [{
-        itemId,
-        title,
-        sourceUrl: url,
-        sourceItemId,
-        sourceSkill,
-        backend,
-        collectionFilters: {},
-        rawArtifacts,
-        materialization: {
-          status: materializationStatus,
-          markdownPath: materializationStatus === 'materialized' ? markdownPath : null,
-          sanitizedPath: materializationStatus === 'materialized' ? sanitizedPath : null,
-          reason: materializationReason,
-        },
-      }],
+    ok: true,
+    name: 'knowledge-collection-enterprise',
+    usage: 'knowledge-collection.mjs enterprise search|search-all|materialize|resource|resume-resource [options]',
+    defaults: 'search defaults: limit 50, concurrency 4, cursor null, metadata-only false; search-all defaults: sources dingtalk,feishu,wecom,ima, limit 50, concurrency 4, metadata-only true',
+    commands: {
+      search: '--source dingtalk|feishu|wecom|ima --query <query> --output-dir <absolute-path> [--limit 1..500] [--concurrency 1..16] [--cursor <cursor>] [--metadata-only [true|false]] [--source-options <json>]',
+      searchAll: '[--sources dingtalk,feishu,wecom,ima] --query <query> --output-root <absolute-path> [--limit 1..500] [--concurrency 1..16] [--metadata-only [true|false]]; defaults to all sources and metadata-only; continues after a connector auth failure',
+      materialize: '--source dingtalk|feishu|ima --session-dir <metadata-only-session> --item-ids <id[,id...]> --output-dir <new-absolute-path> [--concurrency 1..16]',
+      resource: '--source dingtalk|feishu|wecom|ima --url <http(s)-url> --output-dir <absolute-path> [--kb <knowledge-base-id> for ima] [--minute-token <token> for feishu]',
+      resumeResource: '--source wecom --session-dir <partial-session> --output-dir <new-absolute-path>',
+      legacy: 'wecom-smartpage and feishu-minutes remain supported',
     },
-    retention: { auditRequired: false, userRequested: false },
-    postProcessing: { runs: [] },
-    sourceMetadata,
   };
 }
 
-async function persistWecomFailure(root, url, reason, {
-  stage = 'export-task',
-  rawArtifacts = ['raw/metadata.json'],
-} = {}) {
-  const rawDir = resolve(root, 'raw');
-  const sanitizedDir = resolve(root, 'sanitized');
-  const itemId = `wecom-smartpage-${crypto.createHash('sha256').update(url).digest('hex').slice(0, 16)}`;
-  await Promise.all([
-    writePrivateJson(resolve(rawDir, 'metadata.json'), {
-      backend: 'wecom-cli',
-      failed: true,
-      stage,
-      reason,
-    }),
-    writePrivateJson(resolve(sanitizedDir, 'metadata.json'), collectionMetadata({
-      itemId,
-      title: 'Exported WeCom Smartpage',
-      url,
-      sourceItemId: url,
-      sourceSkill: 'wecomcli',
-      backend: 'wecom-cli',
-      rawArtifacts,
-      markdownPath: null,
-      sanitizedPath: null,
-      collectionStatus: 'failed',
-      materializationStatus: 'failed',
-      materializationReason: reason,
-      sourceMetadata: { backend: 'wecom-cli', stage, reason },
-    })),
-    writePrivateJson(resolve(root, 'collection-result.json'), {
-      schemaVersion: '1.0',
-      title: 'Exported WeCom Smartpage',
-      source: 'wecom',
-      backend: 'wecom-cli',
-      url,
-      filters: {},
-      items: [],
-    }),
-  ]);
-}
-
-async function collectWecomSmartpage(values) {
-  const url = requireValue(values, 'url');
-  const outputDir = requireValue(values, 'output-dir');
-  if (!isAbsolute(outputDir)) {
-    throw new Error('--output-dir must be an absolute path');
-  }
-  const root = resolve(outputDir);
-  const rawDir = resolve(root, 'raw');
-  const markdownDir = resolve(root, 'markdown');
-  const sanitizedDir = resolve(root, 'sanitized');
-  const itemDir = resolve(sanitizedDir, 'items');
-  await createOutputRoot(root);
-  await Promise.all([makeDirectory(rawDir), makeDirectory(markdownDir), makeDirectory(sanitizedDir), makeDirectory(itemDir)]);
-
-  const bin = process.env.WECOM_CLI_BIN || 'wecom-cli';
-  let exportResult;
-  try {
-    exportResult = parseWecomEnvelope(await run(bin, ['doc', 'smartpage_export_task', JSON.stringify({ url, content_type: 1 })]));
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    await persistWecomFailure(root, url, reason);
-    throw error;
-  }
-  await writePrivateJson(resolve(rawDir, 'export-task.json'), exportResult.outer);
-  const taskId = exportResult.business.task_id;
-  if (typeof taskId !== 'string' || !taskId) {
-    const reason = 'wecom-cli export response has no task_id';
-    await persistWecomFailure(root, url, reason, {
-      stage: 'export-task-response',
-      rawArtifacts: ['raw/export-task.json', 'raw/metadata.json'],
-    });
-    throw new Error(reason);
-  }
-
-  let content;
-  let completedPoll;
-  let failureReason = '';
-  const rawArtifacts = ['raw/export-task.json'];
-  const maxPolls = positiveEnv('KNOWLEDGE_COLLECTION_MAX_WECOM_POLLS', DEFAULT_MAX_WECOM_POLLS);
-  for (let poll = 1; poll <= maxPolls; poll += 1) {
-    try {
-      const pollResult = parseWecomEnvelope(await run(bin, ['doc', 'smartpage_get_export_result', JSON.stringify({ task_id: taskId })]));
-      await writePrivateJson(resolve(rawDir, `poll-${poll}.json`), pollResult.outer);
-      rawArtifacts.push(`raw/poll-${poll}.json`);
-      if (pollResult.business.task_done === true) {
-        content = pollResult.business.content;
-        completedPoll = poll;
-        break;
-      }
-    } catch (error) {
-      failureReason = error instanceof Error ? error.message : String(error);
-      break;
-    }
-  }
-  if (typeof content !== 'string' || !content.trim()) {
-    failureReason ||= `export did not finish after ${maxPolls} polls`;
-    await writePrivateJson(resolve(rawDir, 'metadata.json'), {
-      backend: 'wecom-cli',
-      taskId,
-      partial: true,
-      lastPoll: completedPoll || maxPolls,
-      reason: failureReason,
-    });
-    await writePrivateJson(resolve(sanitizedDir, 'metadata.json'), collectionMetadata({
-      itemId: `wecom-smartpage-${taskId}`,
-      title: 'Exported WeCom Smartpage',
-      url,
-      sourceItemId: taskId,
-      sourceSkill: 'wecomcli',
-      backend: 'wecom-cli',
-      rawArtifacts,
-      markdownPath: null,
-      sanitizedPath: null,
-      collectionStatus: 'partial',
-      materializationStatus: 'pending',
-      materializationReason: failureReason,
-      sourceMetadata: {
-        backend: 'wecom-cli',
-        taskId,
-        lastPoll: completedPoll || maxPolls,
-        reason: failureReason,
-      },
-    }));
-    await writePrivateJson(resolve(root, 'collection-result.json'), {
-      schemaVersion: '1.0',
-      title: 'Exported WeCom Smartpage',
-      source: 'wecom',
-      backend: 'wecom-cli',
-      url,
-      filters: {},
-      items: [],
-    });
-    throw new Error('wecom-cli export did not finish with non-empty content');
-  }
-
-  const normalized = markdown(content, url, 'Exported WeCom Smartpage', 'wecom');
-  await Promise.all([
-    writePrivate(resolve(markdownDir, 'document.md'), normalized),
-    writePrivate(resolve(itemDir, 'document.md'), normalized),
-    writePrivateJson(resolve(rawDir, 'metadata.json'), { backend: 'wecom-cli', taskId }),
-    writePrivateJson(resolve(sanitizedDir, 'metadata.json'), collectionMetadata({
-      itemId: `wecom-smartpage-${taskId}`,
-      title: 'Exported WeCom Smartpage',
-      url,
-      sourceItemId: taskId,
-      sourceSkill: 'wecomcli',
-      backend: 'wecom-cli',
-      rawArtifacts: ['raw/export-task.json', `raw/poll-${completedPoll}.json`],
-      markdownPath: 'markdown/document.md',
-      sanitizedPath: 'sanitized/items/document.md',
-      sourceMetadata: {
-        backend: 'wecom-cli',
-        backendCliVersion: process.env.WECOM_CLI_VERSION || 'unknown',
-        scope: 'bot-visible',
-        taskId,
-      },
-    })),
-  ]);
-  await writePrivateJson(resolve(root, 'collection-result.json'), {
+function commandSchema() {
+  const source = { type: 'string', enum: ['dingtalk', 'feishu', 'wecom', 'ima'] };
+  const absolutePath = { type: 'string', format: 'absolute-path' };
+  const positiveLimit = { type: 'integer', minimum: 1, maximum: 500, default: 50 };
+  const concurrency = { type: 'integer', minimum: 1, maximum: 16, default: 4 };
+  return {
+    ok: true,
+    name: 'knowledge-collection-enterprise',
     schemaVersion: '1.0',
-    title: 'Exported WeCom Smartpage',
-    source: 'wecom',
-    backend: 'wecom-cli',
-    url,
-    filters: {},
-    items: [{
-      title: 'Exported WeCom Smartpage',
-      url,
-      author: '',
-      publishTime: '',
-      markdown: 'sanitized/items/document.md',
-      fileName: 'sanitized/items/document.md',
-    }],
-  });
-}
-
-async function filesBelow(directory) {
-  const files = [];
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    const path = resolve(directory, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...await filesBelow(path));
-    } else if (entry.isFile()) {
-      files.push(path);
-    }
-  }
-  return files;
-}
-
-async function persistFeishuIncomplete(root, {
-  minuteToken,
-  url,
-  reason,
-  stage,
-  collectionStatus,
-  materializationStatus,
-  rawArtifacts,
-}) {
-  const rawDir = resolve(root, 'raw');
-  const sanitizedDir = resolve(root, 'sanitized');
-  const title = 'Feishu Minutes Transcript';
-  await Promise.all([
-    writePrivateJson(resolve(rawDir, 'metadata.json'), {
-      backend: 'lark-cli',
-      collectionStatus,
-      stage,
-      reason,
-    }),
-    writePrivateJson(resolve(sanitizedDir, 'metadata.json'), collectionMetadata({
-      itemId: `fws-minute-${minuteToken}`,
-      title,
-      url,
-      sourceItemId: minuteToken,
-      sourceSkill: 'fws',
-      backend: 'lark-cli',
-      rawArtifacts,
-      markdownPath: null,
-      sanitizedPath: null,
-      collectionStatus,
-      materializationStatus,
-      materializationReason: reason,
-      sourceMetadata: { backend: 'lark-cli', stage, reason },
-    })),
-    writePrivateJson(resolve(root, 'collection-result.json'), {
-      schemaVersion: '1.0',
-      title,
-      source: 'fws',
-      backend: 'lark-cli',
-      url,
-      filters: {},
-      items: [],
-    }),
-  ]);
-}
-
-async function collectFeishuMinutes(values) {
-  const minuteToken = requireValue(values, 'minute-token');
-  const url = requireValue(values, 'url');
-  const outputDir = requireValue(values, 'output-dir');
-  if (!isAbsolute(outputDir)) {
-    throw new Error('--output-dir must be an absolute path');
-  }
-  const root = resolve(outputDir);
-  const rawDir = resolve(root, 'raw');
-  const minutesDir = resolve(rawDir, 'minutes');
-  const markdownDir = resolve(root, 'markdown');
-  const sanitizedDir = resolve(root, 'sanitized');
-  const itemDir = resolve(sanitizedDir, 'items');
-  await createOutputRoot(root);
-  await Promise.all([
-    makeDirectory(rawDir),
-    makeDirectory(minutesDir),
-    makeDirectory(markdownDir),
-    makeDirectory(sanitizedDir),
-    makeDirectory(itemDir),
-  ]);
-
-  let detail;
-  try {
-    const stdout = await run(process.env.LARK_CLI_BIN || 'lark-cli', [
-      'minutes', '+detail', '--minute-tokens', minuteToken, '--transcript',
-      '--output-dir', minutesDir, '--as', 'user', '--format', 'json',
-    ]);
-    detail = JSON.parse(stdout);
-    if (detail.ok !== true) {
-      throw new Error('lark-cli did not report success');
-    }
-  } catch (error) {
-    const reason = error instanceof SyntaxError
-      ? 'lark-cli returned invalid JSON'
-      : (error instanceof Error ? error.message : String(error));
-    await persistFeishuIncomplete(root, {
-      minuteToken,
-      url,
-      reason,
-      stage: 'detail',
-      collectionStatus: 'failed',
-      materializationStatus: 'failed',
-      rawArtifacts: ['raw/metadata.json'],
-    });
-    throw new Error(reason);
-  }
-  await writePrivateJson(resolve(rawDir, 'detail.json'), detail);
-
-  let transcripts = [];
-  let transcriptPath;
-  let transcript;
-  try {
-    transcripts = await filesBelow(minutesDir);
-    await Promise.all(transcripts.map((path) => chmod(path, PRIVATE_FILE_MODE)));
-    if (transcripts.length !== 1) {
-      throw new Error(`expected one CLI-created transcript file, found ${transcripts.length}`);
-    }
-    [transcriptPath] = transcripts;
-    transcript = await readFile(transcriptPath, 'utf8');
-    if (!transcript.trim()) {
-      throw new Error('CLI-created transcript file is empty');
-    }
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    const transcriptArtifacts = transcripts.map((path) => relative(root, path).split(sep).join('/'));
-    await persistFeishuIncomplete(root, {
-      minuteToken,
-      url,
-      reason,
-      stage: 'transcript',
-      collectionStatus: 'partial',
-      materializationStatus: 'pending',
-      rawArtifacts: ['raw/detail.json', 'raw/metadata.json', ...transcriptArtifacts],
-    });
-    throw error;
-  }
-  const title = 'Feishu Minutes Transcript';
-  const normalized = markdown(transcript, url, title, 'fws');
-  const transcriptRelativePath = relative(root, transcriptPath).split(sep).join('/');
-  await Promise.all([
-    writePrivate(resolve(markdownDir, 'transcript.md'), normalized),
-    writePrivate(resolve(itemDir, 'transcript.md'), normalized),
-    writePrivateJson(resolve(rawDir, 'metadata.json'), { backend: 'lark-cli' }),
-    writePrivateJson(resolve(sanitizedDir, 'metadata.json'), collectionMetadata({
-      itemId: `fws-minute-${minuteToken}`,
-      title,
-      url,
-      sourceItemId: minuteToken,
-      sourceSkill: 'fws',
-      backend: 'lark-cli',
-      rawArtifacts: ['raw/detail.json', transcriptRelativePath],
-      markdownPath: 'markdown/transcript.md',
-      sanitizedPath: 'sanitized/items/transcript.md',
-      sourceMetadata: {
-        backend: 'lark-cli',
-        backendCliVersion: process.env.LARK_CLI_VERSION || 'unknown',
-        transcriptFile: transcriptRelativePath,
+    cli: { flagStyle: '--kebab-case', commaSeparatedArrays: ['sources', 'item-ids'] },
+    commands: {
+      search: {
+        type: 'object', additionalProperties: false, required: ['source', 'query', 'output-dir'],
+        properties: { source, query: { type: 'string', minLength: 1 }, 'output-dir': absolutePath, limit: positiveLimit, concurrency, cursor: { type: 'string' }, 'metadata-only': { type: 'boolean', default: false }, 'source-options': { type: 'object', cliEncoding: 'json' } },
       },
-    })),
-  ]);
-  await writePrivateJson(resolve(root, 'collection-result.json'), {
-    schemaVersion: '1.0',
-    title,
-    source: 'fws',
-    backend: 'lark-cli',
-    url,
-    filters: {},
-    items: [{
-      title,
-      url,
-      author: '',
-      publishTime: '',
-      markdown: 'sanitized/items/transcript.md',
-      fileName: 'sanitized/items/transcript.md',
-    }],
-  });
+      'search-all': {
+        type: 'object', additionalProperties: false, required: ['query', 'output-root'],
+        properties: { sources: { type: 'array', items: source, minItems: 1, uniqueItems: true, cliEncoding: 'comma-separated', default: ['dingtalk', 'feishu', 'wecom', 'ima'] }, query: { type: 'string', minLength: 1 }, 'output-root': absolutePath, limit: positiveLimit, concurrency, 'metadata-only': { type: 'boolean', default: true } },
+      },
+      materialize: {
+        type: 'object', additionalProperties: false, required: ['source', 'session-dir', 'item-ids', 'output-dir'],
+        properties: { source: { ...source, enum: ['dingtalk', 'feishu', 'ima'] }, 'session-dir': absolutePath, 'item-ids': { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', minLength: 1 }, cliEncoding: 'comma-separated' }, 'output-dir': absolutePath, concurrency },
+      },
+      resource: {
+        type: 'object', additionalProperties: false, required: ['source', 'url', 'output-dir'],
+        properties: { source, url: { type: 'string', format: 'http-url' }, 'output-dir': absolutePath, kb: { type: 'string', minLength: 1 }, 'minute-token': { type: 'string', minLength: 1 } },
+      },
+      'resume-resource': {
+        type: 'object', additionalProperties: false, required: ['source', 'session-dir', 'output-dir'],
+        properties: { source: { type: 'string', enum: ['wecom'] }, 'session-dir': absolutePath, 'output-dir': absolutePath },
+      },
+    },
+  };
 }
 
 async function main() {
   const { command, values } = parseArgs(process.argv.slice(2));
+  if (!command || command === 'help' || command === '--help' || values.help === true || values.help === 'true') {
+    render(help());
+    return;
+  }
+  if (command === 'command-schema') {
+    render(commandSchema());
+    return;
+  }
   if (command === 'wecom-smartpage') {
-    await collectWecomSmartpage(values);
+    const url = requireValue(values, 'url');
+    const outputDir = requireAbsoluteOutputDir(values);
+    const outcome = await createWecomAdapter({
+      bin: process.env.WECOM_CLI_BIN || 'wecom-cli',
+      env: process.env,
+    }).collectResource({ url, outputDir, resourceKind: 'smartpage', legacyMode: true });
+    if (outcome.status !== 'complete') throw new Error(outcome.reason || outcome.status);
     return;
   }
   if (command === 'feishu-minutes') {
-    await collectFeishuMinutes(values);
+    const minuteToken = requireValue(values, 'minute-token');
+    const url = requireValue(values, 'url');
+    const outputDir = requireAbsoluteOutputDir(values);
+    const outcome = await createFeishuAdapter({
+      bin: process.env.LARK_CLI_BIN || 'lark-cli',
+      env: process.env,
+    }).collectResource({ resourceKind: 'minutes', minuteToken, url, outputDir, legacyMode: true });
+    if (outcome.status !== 'complete') throw new Error(outcome.reason || outcome.status);
     return;
   }
-  if (!command) {
-    throw new Error(`unsupported command: ${command || '(missing)'}`);
+  if (command === 'search' || command === 'materialize' || command === 'resource' || command === 'resume-resource') {
+    render(await dispatchEnterprise(command, values));
+    return;
   }
-  throw new Error(`unsupported command: ${command}`);
+  if (command === 'search-all') {
+    const requests = parseSearchBatchRequests(values);
+    const aggregateWriter = await createArtifactWriter(requireValue(values, 'output-root'));
+    const outcomes = await dispatchEnterpriseBatch('search', requests, { concurrency: Number(values.concurrency) || 4 });
+    const aggregatePath = 'raw/search-all.json';
+    await aggregateWriter.writeJson(aggregatePath, { command: 'search-all', outcomes });
+    render({ outputDir: requireValue(values, 'output-root'), aggregatePath, outcomes });
+    return;
+  }
+  throw new Error(`unsupported command: ${command || '(missing)'}`);
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error.message}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] === new URL(import.meta.url).pathname) {
+  main().catch((error) => {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+  });
+}

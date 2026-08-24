@@ -30,6 +30,7 @@ describe('models/useEmployees', () => {
     call: (fn: any, ...args: any[]) => ({ type: 'call', fn, args }),
     put: (action: any) => ({ type: 'put', action }),
     select: (fn: any) => ({ type: 'select', fn }),
+    all: (effectList: any[]) => ({ type: 'all', effectList }),
   };
 
   it('save reducer merges payload', () => {
@@ -96,5 +97,38 @@ describe('models/useEmployees', () => {
       },
     });
     expect(iterator.next().value).toEqual(resp);
+  });
+
+  // discover 接口不传 agentType 会排掉 017，员工组必须单独查一次并进 employeesList，
+  // 否则输入框恢复历史会话时查不到组，会兜底显示「AI 助手」。
+  it('getAllDigitalEmployees queries employee groups separately and merges them into employeesList', () => {
+    const iterator = effects.getAllDigitalEmployees({}, sagaHelpers);
+
+    const requests = iterator.next().value;
+    expect(requests.type).toEqual('all');
+    expect(requests.effectList).toHaveLength(2);
+    expect(requests.effectList[0].args[0]).not.toHaveProperty('agentType');
+    expect(requests.effectList[1].args[0]).toMatchObject({ agentType: '017' });
+
+    iterator.next([{ list: [{ id: '1', name: '员工' }] }, { list: [{ id: '9', name: '专家团', agentType: '017' }] }]);
+
+    const saved = iterator.next([]).value;
+    expect(saved.action.type).toEqual('save');
+    expect(saved.action.payload.employeesList).toEqual([
+      { id: '1', name: '员工', agentId: '1', catalogId: undefined },
+      { id: '9', name: '专家团', agentType: '017', agentId: '9', catalogId: undefined },
+    ]);
+    // 组不是 specialAgentType，不能混进默认智能体列表。
+    expect(saved.action.payload.agentList).toEqual([]);
+  });
+
+  it('getAllDigitalEmployees still works when the group query returns nothing', () => {
+    const iterator = effects.getAllDigitalEmployees({}, sagaHelpers);
+
+    iterator.next();
+    iterator.next([{ list: [{ id: '1', name: '员工' }] }, undefined]);
+
+    const saved = iterator.next([]).value;
+    expect(saved.action.payload.employeesList).toHaveLength(1);
   });
 });

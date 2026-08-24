@@ -90,7 +90,8 @@ public class InitRedisSystemConfigRunner implements ApplicationRunner {
     private void loadEnabledModelsToRedis() {
         try {
             // 查询所有启用状态的模型（OOA为启用状态的数据库代码）
-            List<ByaiAimodel> enabledModels = byaiAimodelMapper.selectByCondition("OOA", null, null, null, null, null, null, null);
+            List<ByaiAimodel> enabledModels = byaiAimodelMapper.selectByCondition("OOA", null, null, null, null, null,
+                null, null, null);
             if (enabledModels != null && !enabledModels.isEmpty()) {
                 logger.info("开始加载启用状态的模型到Redis，共{}个模型", enabledModels.size());
                 for (ByaiAimodel model : enabledModels) {

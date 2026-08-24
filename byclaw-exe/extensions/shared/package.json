@@ -9,7 +9,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@byclaw/by-framework": "1.5.2",
+    "@byclaw/by-framework": "1.5.3",
     "@opentelemetry/api": "1.9.1",
     "ioredis": "5.10.1"
   },

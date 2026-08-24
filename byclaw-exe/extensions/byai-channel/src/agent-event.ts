@@ -10,6 +10,7 @@ import {
   markActiveSdkCompactionRetryPending,
   markActiveSdkRootLifecycleFinished,
   markActiveSdkRootLifecycleStarted,
+  recordActiveSdkRootStreamAnswer,
   resolveActiveSdkRequestBySessionKey,
   resolveActiveSdkRunBinding,
   resolveSdkEmitter,
@@ -181,7 +182,7 @@ async function handleToolEvent(
         input: args,
       }), {
         messageId: toolCallId,
-        parentMessageId: "-1",
+        parentMessageId: request.parentMessageId,
         eventType: EventType.REASONING_LOG_DELTA,
         contentType: toolCallContentType,
         objectType: "tool_call",
@@ -195,7 +196,7 @@ async function handleToolEvent(
     await emitSdkChunk(request, title, {
       // 必须以toolCallId作为messageId，这个toolCallId可能会作为parentMessageId发送到其他worker(在baiying-enhance的实现)
       messageId: toolCallId,
-      parentMessageId: "-1",
+      parentMessageId: request.parentMessageId,
       eventType: EventType.REASONING_LOG_DELTA,
       contentType: SseReasonMessageType.think_status_title,
       objectType: "tool_call",
@@ -220,7 +221,7 @@ async function handleToolEvent(
         status,
       }), {
         messageId: toolCallId,
-        parentMessageId: "-1",
+        parentMessageId: request.parentMessageId,
         eventType: EventType.REASONING_LOG_DELTA,
         contentType: toolCallContentType,
         objectType: "tool_call",
@@ -233,7 +234,7 @@ async function handleToolEvent(
     }
     await emitSdkChunk(request, title, {
       messageId: toolCallId,
-      parentMessageId: "-1",
+      parentMessageId: request.parentMessageId,
       eventType: EventType.REASONING_LOG_DELTA,
       contentType: SseReasonMessageType.think_status_title,
       objectType: "tool_call",
@@ -304,7 +305,7 @@ async function handleAssistantEvent(
   }
   const previousEmit = getLastSdkEmitChunk(request.sessionKey);
   const answerOptions: EmitOptions = {
-    parentMessageId: "-1",
+    parentMessageId: request.parentMessageId,
     eventType: isChildSession ? EventType.REASONING_LOG_DELTA : EventType.ANSWER_DELTA,
     // 不是连续回复时，新增一个 messageId分组，用于前端区分显示不同段落
     messageId: streamContext.isContinuingAnswer && previousEmit?.messageId
@@ -312,6 +313,11 @@ async function handleAssistantEvent(
       : generateRandomId(),
   };
   const answerStreamKey = `${event.runId}:assistant:answer`;
+  if (!streamContext.isContinuingAnswer) {
+    // A tool/reasoning transition starts a new assistant message. finalAnswer
+    // keeps only this run's last assistant message, not earlier process chatter.
+    clearIncrementalTextSnapshot(answerStreamKey);
+  }
   const explicitDelta = stringValue(event.data?.delta);
   const cumulativeText = stringValue(event.data?.text);
   const isReplacement = event.data?.replace === true;
@@ -334,6 +340,13 @@ async function handleAssistantEvent(
         runId: event.runId,
         segmentText: getIncrementalTextSnapshot(answerStreamKey),
         isChildSession,
+      });
+    }
+    if (!isChildSession) {
+      recordActiveSdkRootStreamAnswer({
+        request,
+        runId: event.runId,
+        answer: getIncrementalTextSnapshot(answerStreamKey),
       });
     }
   };
@@ -489,7 +502,7 @@ async function handleCompactionEvent(
       phase: "start",
     }), {
       messageId: `${event.runId || activeSessionKey}:compaction:start`,
-      parentMessageId: "-1",
+      parentMessageId: request.parentMessageId,
       eventType: EventType.REASONING_LOG_DELTA,
       contentType: SseReasonMessageType.think_status_title,
       objectType: "compaction",
@@ -511,7 +524,7 @@ async function handleCompactionEvent(
       willRetry,
     }), {
       messageId: `${event.runId || activeSessionKey}:compaction:end`,
-      parentMessageId: "-1",
+      parentMessageId: request.parentMessageId,
       eventType: EventType.REASONING_LOG_DELTA,
       contentType: SseReasonMessageType.think_status_title,
       objectType: "compaction",
@@ -552,7 +565,7 @@ async function emitReasoningText(
     options.parentMessageId = previousEmit?.parentMessageId;
   } else {
     options.messageId = generateRandomId();
-    options.parentMessageId = "-1";
+    options.parentMessageId = request.parentMessageId;
     await emitSdkChunk(request, "", {
       ...options,
       eventType: EventType.REASONING_LOG_START,

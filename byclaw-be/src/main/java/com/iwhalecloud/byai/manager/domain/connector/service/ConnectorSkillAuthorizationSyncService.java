@@ -1,15 +1,16 @@
 package com.iwhalecloud.byai.manager.domain.connector.service;
 
+import java.time.Duration;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.locks.ReentrantLock;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -20,6 +21,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialVerifier;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialVerifierRegistry;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.RedisAuthorizationSessionRepository;
 import com.iwhalecloud.byai.manager.domain.connector.manifest.InvalidConnectorManifestException;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorSkillAuthorizationSyncDto;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
@@ -30,18 +32,23 @@ public class ConnectorSkillAuthorizationSyncService {
 
     private static final Logger log = LoggerFactory.getLogger(ConnectorSkillAuthorizationSyncService.class);
     private static final int MAX_RATE_LIMIT_ENTRIES = 4_096;
+    private static final Duration OPERATION_LOCK_TTL = Duration.ofMinutes(2);
     private static final Map<String, String> SKILL_CONNECTOR_PROVIDERS = Map.of(
         "dingtalk", "dws-dingtalk",
         "lark", "lark-cli",
-        "wecom", "wecom-cli"
+        "wecom", "wecom-cli",
+        "ima", "ima-openapi",
+        "ima-skill", "ima-openapi"
     );
     private static final Set<String> PUBLIC_VERIFICATION_ERRORS = Set.of(
         "CREDENTIAL_WORKSPACE_UNAVAILABLE",
         "CONNECTOR_CACHE_INVALID",
         "CONNECTOR_BUSINESS_PROBE_INVALID",
         "CONNECTOR_CREDENTIAL_INVALID",
+        "CONNECTOR_CLI_UNAVAILABLE",
         "CONNECTOR_VERIFICATION_TIMEOUT",
-        "CONNECTOR_VERIFICATION_FAILED"
+        "CONNECTOR_VERIFICATION_FAILED",
+        "PROVIDER_PROTOCOL_ERROR"
     );
 
     private final ConnectorInfoService connectorInfoService;
@@ -49,8 +56,8 @@ public class ConnectorSkillAuthorizationSyncService {
     private final ConnectorConnectionStateService connectionStateService;
     private final ConnectorSkillAuthorizationSyncProperties properties;
     private final ConnectorSkillAuthorizationSyncMetrics metrics;
-    private final Semaphore verificationPermits;
-    private final ConcurrentHashMap<String, ReentrantLock> verificationLocks = new ConcurrentHashMap<>();
+    private final ConnectorCredentialVerificationGuard verificationGuard;
+    private final RedisAuthorizationSessionRepository sessionRepository;
     private final ConcurrentHashMap<Long, Long> nextAllowedVerificationNanos = new ConcurrentHashMap<>();
 
     public ConnectorSkillAuthorizationSyncService(
@@ -59,12 +66,36 @@ public class ConnectorSkillAuthorizationSyncService {
             ConnectorConnectionStateService connectionStateService,
             ConnectorSkillAuthorizationSyncProperties properties,
             ConnectorSkillAuthorizationSyncMetrics metrics) {
+        this(connectorInfoService, verifierRegistry, connectionStateService, properties, metrics,
+            new ConnectorCredentialVerificationGuard(properties), null);
+    }
+
+    public ConnectorSkillAuthorizationSyncService(
+            ConnectorInfoService connectorInfoService,
+            ConnectorCredentialVerifierRegistry verifierRegistry,
+            ConnectorConnectionStateService connectionStateService,
+            ConnectorSkillAuthorizationSyncProperties properties,
+            ConnectorSkillAuthorizationSyncMetrics metrics,
+            ConnectorCredentialVerificationGuard verificationGuard) {
+        this(connectorInfoService, verifierRegistry, connectionStateService, properties, metrics, verificationGuard, null);
+    }
+
+    @Autowired
+    public ConnectorSkillAuthorizationSyncService(
+            ConnectorInfoService connectorInfoService,
+            ConnectorCredentialVerifierRegistry verifierRegistry,
+            ConnectorConnectionStateService connectionStateService,
+            ConnectorSkillAuthorizationSyncProperties properties,
+            ConnectorSkillAuthorizationSyncMetrics metrics,
+            ConnectorCredentialVerificationGuard verificationGuard,
+            RedisAuthorizationSessionRepository sessionRepository) {
         this.connectorInfoService = connectorInfoService;
         this.verifierRegistry = verifierRegistry;
         this.connectionStateService = connectionStateService;
         this.properties = properties;
         this.metrics = metrics;
-        this.verificationPermits = new Semaphore(properties.maxConcurrentVerifications(), true);
+        this.verificationGuard = verificationGuard;
+        this.sessionRepository = sessionRepository;
     }
 
     public ConnectorSkillAuthorizationSyncDto sync(String connectorCode, String userId) {
@@ -93,7 +124,7 @@ public class ConnectorSkillAuthorizationSyncService {
         if (expectedProviderCode == null) {
             throw failure("CONNECTOR_NOT_FOUND", "Connector is unavailable", false);
         }
-        ConnectorInfo connector = connectorInfoService.findByCode(normalizedCode);
+        ConnectorInfo connector = connectorInfoService.findByCode(resolveConnectorCode(normalizedCode));
         if (connector == null || !"00A".equals(connector.getStatusCd())) {
             throw failure("CONNECTOR_NOT_FOUND", "Connector is unavailable", false);
         }
@@ -108,7 +139,8 @@ public class ConnectorSkillAuthorizationSyncService {
             throw failure("CONNECTOR_VERIFIER_NOT_FOUND", "Connector verifier is unavailable", false);
         }
 
-        try (VerificationAdmission ignored = acquire(numericUserId, connector.getConnectorId())) {
+        Optional<String> operationLock = acquireOperationLock(userId, connector.getConnectorId());
+        try (ConnectorCredentialVerificationGuard.Admission ignored = acquire(numericUserId, connector.getConnectorCode())) {
             AuthorizationStatusResult verification = verify(verifier, numericUserId, connector);
             if (verification == null
                     || verification.status() != AuthorizationStatus.CONNECTED
@@ -125,6 +157,29 @@ public class ConnectorSkillAuthorizationSyncService {
                 throw failure("AUTH_BINDING_FAILED", "Unable to synchronize connector state", true);
             }
             return ConnectorSkillAuthorizationSyncDto.connected(normalizedCode);
+        } finally {
+            releaseOperationLock(userId, connector.getConnectorId(), operationLock);
+        }
+    }
+
+    private Optional<String> acquireOperationLock(String userId, Long connectorId) {
+        if (sessionRepository == null) {
+            return Optional.empty();
+        }
+        Optional<String> lockToken = sessionRepository.tryAcquireStartLock(userId, connectorId, OPERATION_LOCK_TTL);
+        if (lockToken.isEmpty()) {
+            throw busy();
+        }
+        return lockToken;
+    }
+
+    private void releaseOperationLock(String userId, Long connectorId, Optional<String> lockToken) {
+        if (sessionRepository != null && lockToken.isPresent()) {
+            try {
+                sessionRepository.releaseStartLock(userId, connectorId, lockToken.get());
+            } catch (RuntimeException ignored) {
+                // The bounded lock expires automatically if Redis release is temporarily unavailable.
+            }
         }
     }
 
@@ -156,6 +211,12 @@ public class ConnectorSkillAuthorizationSyncService {
         return connectorCode.trim();
     }
 
+    private String resolveConnectorCode(String skillOrConnectorCode) {
+        return "ima".equals(skillOrConnectorCode) || "ima-skill".equals(skillOrConnectorCode)
+            ? "ima-openapi"
+            : skillOrConnectorCode;
+    }
+
     private Long requireUser(String userId) {
         if (!StringUtils.hasText(userId)) {
             throw failure("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential", false);
@@ -171,27 +232,18 @@ public class ConnectorSkillAuthorizationSyncService {
         }
     }
 
-    private VerificationAdmission acquire(Long userId, Long connectorId) {
-        String key = userId + ":" + connectorId;
-        AtomicBoolean lockAcquired = new AtomicBoolean();
-        ReentrantLock lock = verificationLocks.compute(key, (ignored, current) -> {
-            ReentrantLock candidate = current == null ? new ReentrantLock() : current;
-            lockAcquired.set(!candidate.isLocked() && candidate.tryLock());
-            return candidate;
-        });
-        if (!lockAcquired.get()) {
-            throw busy();
-        }
-        if (!verificationPermits.tryAcquire()) {
-            releaseLock(key, lock);
+    private ConnectorCredentialVerificationGuard.Admission acquire(Long userId, String connectorCode) {
+        ConnectorCredentialVerificationGuard.Admission admission;
+        try {
+            admission = verificationGuard.acquire(userId, connectorCode);
+        } catch (ConnectorCredentialVerificationBusyException e) {
             throw busy();
         }
         if (!acquireUserRateLimit(userId)) {
-            verificationPermits.release();
-            releaseLock(key, lock);
+            admission.close();
             throw busy();
         }
-        return new VerificationAdmission(key, lock);
+        return admission;
     }
 
     private boolean acquireUserRateLimit(Long userId) {
@@ -215,17 +267,8 @@ public class ConnectorSkillAuthorizationSyncService {
     }
 
     private ConnectorSkillAuthorizationSyncException busy() {
-        return failure("CONNECTOR_VERIFICATION_BUSY", "Connector verification capacity is busy", true);
-    }
-
-    private void releaseLock(String key, ReentrantLock lock) {
-        verificationLocks.computeIfPresent(key, (ignored, current) -> {
-            if (current != lock) {
-                return current;
-            }
-            lock.unlock();
-            return null;
-        });
+        return failure(ConnectorCredentialVerificationBusyException.ERROR_CODE,
+            ConnectorCredentialVerificationBusyException.PUBLIC_MESSAGE, true);
     }
 
     private String safeConnectorCode(String connectorCode) {
@@ -259,25 +302,4 @@ public class ConnectorSkillAuthorizationSyncService {
         return new ConnectorSkillAuthorizationSyncException(errorCode, message, retryable);
     }
 
-    private final class VerificationAdmission implements AutoCloseable {
-
-        private final String key;
-        private final ReentrantLock lock;
-        private boolean closed;
-
-        private VerificationAdmission(String key, ReentrantLock lock) {
-            this.key = key;
-            this.lock = lock;
-        }
-
-        @Override
-        public void close() {
-            if (closed) {
-                return;
-            }
-            closed = true;
-            verificationPermits.release();
-            releaseLock(key, lock);
-        }
-    }
 }

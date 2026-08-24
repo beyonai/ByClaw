@@ -1,6 +1,6 @@
 /**
  * 显式维护数据库版本。迁移只允许向前执行，生产环境由独立 migration job 调用；
- * 应用启动仅检查版本，不会擅自修改 schema。
+ * 应用启动只检查数据库连通性，不校验版本，也不会擅自修改 schema。
  */
 export interface PostgresMigration {
   version: number;
@@ -241,6 +241,17 @@ ALTER TABLE ${POSTGRES_TABLE_PREFIX}runs
     sql: `
 ALTER TABLE ${POSTGRES_TABLE_PREFIX}runs
   ADD COLUMN ingress_context jsonb NULL;
+`,
+  },
+  {
+    version: 10,
+    name: "delegation_last_activity",
+    sql: `
+ALTER TABLE ${POSTGRES_TABLE_PREFIX}delegations
+  ADD COLUMN last_activity_at timestamptz NULL;
+UPDATE ${POSTGRES_TABLE_PREFIX}delegations
+  SET last_activity_at = updated_at
+  WHERE started_at IS NOT NULL;
 `,
   },
 ] as const;

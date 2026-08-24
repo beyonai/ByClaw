@@ -1,45 +1,22 @@
 ---
 name: knowledge-organizer-organize
-description: 在已初始化的知识整理任务中，为选定对象提交文档对象发现。适用于用户要求识别、提取或发现文档所表达的知识对象。
+description: 从指定 ByClaw 知识库文档发起 KnowledgeEntity 发现。适用于知识整理流程中的识别、提取或实体发现阶段。
 allowed-tools: read, exec
 ---
 
-# 发现文档对象
+# 发现知识实体
 
-## 选择来源和目标
+加载并遵循 `by-knowledge-manager` skill，使用 `entity-discovery` 执行本阶段。不得上传文件或发起实体补全。
 
-分别确定发现来源和发现目标：
+## 选择来源
 
-- 发现来源只从 `objects/ods/` 选择，表示从哪些原始对象中提取。
-- 发现目标只从 `objects/ads/` 选择，表示要发现哪些目标对象。
-- 用户指定来源、目标或业务范围时，选择对应对象；交互任务仍有实质歧义时再询问用户。
-- 用户未指定某一侧范围时，该侧使用当前获取到的全部对象：全部 ODS 来源或全部 ADS 目标。
-- 后台任务不要逐项确认；按以上规则直接推进，并在最终汇报中分别列出实际提交的来源和目标。
+- 使用父 Skill 已确定的知识库 `resourceId`。
+- 用户指定源文件时，原样使用知识库 `filePath`；源文件必须是 `by-knowledge-manager` 支持的类型，且不能位于 `/KnowledgeEntity/`。
+- 用户明确要求扫描整库或未限定来源时，可以省略文件路径；不要自行改为其他知识库。
+- 当前上下文有会话 ID 时显式传入。只有用户明确要求重新处理时才使用强制处理选项。
 
-此操作不要求先登记文件，也不能自动执行 `ingest`。
-
-## 执行
-
-用户指定范围时，来源使用 `--source-object-code`，目标使用 `--object-code`；多个对象分别重复传入参数：
-
-```bash
-python3 <技能目录>/scripts/knowledge_organizer.py organize \
-  --task-dir "<任务目录>" \
-  --source-object-code "<ODS来源对象编码>" \
-  --object-code "<ADS目标对象编码>"
-```
-
-某一侧未指定范围时，省略该侧参数，由 CLI 使用当前全部对应对象。两侧均未指定时：
-
-```bash
-python3 <技能目录>/scripts/knowledge_organizer.py organize \
-  --task-dir "<任务目录>"
-```
+此阶段不要求先执行资料入库，也不能自动补做上传。
 
 ## 完成标准
 
-只有命令确认受理时，才算提交成功。分别汇报来源对象和目标对象，并明确说明发现任务**已提交**。不要声称后台发现已经完成，也不要自动执行知识丰富。
-
-- 后台任务未能成功提交时，使用 `knowledge-organizer-update-task-status` 将状态设置为 `failed`。
-- 后台任务确认受理后，不得更新任务状态；后续状态由异步任务维护。
-- 普通交互任务不得更新任务状态。
+只有 `entity-discovery` 返回批次受理或复用结果时，才算提交成功。按 `by-knowledge-manager` 的规则汇报范围、批次、任务、文件路径和状态，并明确说明发现任务**已提交**，不能声称已经完成。除非父 Skill 已获得完整链路授权，否则不得继续实体补全。

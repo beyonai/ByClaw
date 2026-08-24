@@ -1,0 +1,33 @@
+{
+  "workspace_name": "wechat_article_ops",
+  "workspace_code": "wy93ovzs9p",
+  "entity_code_version": "v2",
+  "objects": {
+    "wy93ovzs9p_article_collection": {
+      "status": "submitted",
+      "business_code": "article_collection"
+    },
+    "wy93ovzs9p_article": {
+      "status": "submitted",
+      "business_code": "article"
+    },
+    "wy93ovzs9p_article_metric_daily": {
+      "status": "submitted",
+      "business_code": "article_metric_daily"
+    },
+    "wy93ovzs9p_article_channel_daily": {
+      "status": "submitted",
+      "business_code": "article_channel_daily"
+    },
+    "wy93ovzs9p_article_user_profile_daily": {
+      "status": "submitted",
+      "business_code": "article_user_profile_daily"
+    },
+    "wy93ovzs9p_article_analysis_result": {
+      "status": "submitted",
+      "business_code": "article_analysis_result"
+    }
+  },
+  "views": {},
+  "workspace_desc": "公众号文章运营分析本体：合集、文章、每日指标、每日渠道、每日用户画像、分析结果六大对象，覆盖单篇复盘/周报/合集/资产库/写入/健康检查全链路。"
+}

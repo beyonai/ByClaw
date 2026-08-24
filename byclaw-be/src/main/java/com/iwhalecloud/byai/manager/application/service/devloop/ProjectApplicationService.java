@@ -20,6 +20,7 @@ import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService;
 import com.iwhalecloud.byai.manager.application.service.project.ProjectInitService;
+import com.iwhalecloud.byai.manager.application.service.project.ProjectWorkspaceManifestService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
@@ -93,8 +94,8 @@ public class ProjectApplicationService {
 
     private static final String PROJECT_TYPE_DEFAULT = "default";
 
-    /** 项目名称前后端统一限制为 100 个字符。 */
-    private static final int PROJECT_NAME_MAX_LENGTH = 100;
+    /** 项目名称前后端统一限制为 15 个字符。 */
+    private static final int PROJECT_NAME_MAX_LENGTH = 15;
 
     /** 项目描述业务层统一限制为 500 个字符，数据库使用 TEXT 避免中文存储长度语义差异。 */
     private static final int PROJECT_DESCRIPTION_MAX_LENGTH = 500;
@@ -149,6 +150,9 @@ public class ProjectApplicationService {
 
     @Autowired
     private ProjectInitService projectInitService;
+
+    @Autowired
+    private ProjectWorkspaceManifestService projectWorkspaceManifestService;
 
     /**
      * 分页查询用户可见项目
@@ -206,6 +210,7 @@ public class ProjectApplicationService {
 
         // 工作目录属于项目创建结果的一部分，初始化失败时由事务回滚项目数据库记录。
         projectInitService.initProjectWorkspace(project.getProjectId());
+        projectWorkspaceManifestService.syncProjectGitmodules(project.getProjectId());
 
         return project;
     }
@@ -302,6 +307,7 @@ public class ProjectApplicationService {
             projectRepoMapper
                 .delete(new LambdaQueryWrapper<ProjectRepo>().eq(ProjectRepo::getProjectId, dto.getProjectId()));
             saveProjectRepos(dto.getProjectId(), dto.getRepos());
+            projectWorkspaceManifestService.syncProjectGitmodules(dto.getProjectId());
         }
         if (dto.getResources() != null) {
             saveProjectResources(dto.getProjectId(), dto.getResources());
@@ -609,7 +615,6 @@ public class ProjectApplicationService {
             .and(item -> item.isNull(ProjectResource::getDeleteFlag)
                 .or().ne(ProjectResource::getDeleteFlag, DeleteFlag.DELETED));
         List<ProjectResource> resources = projectResourceMapper.selectList(resourceWrapper);
-        List<ByaiSessionDto> sessions = projectSessionService.listSessionsByProjectId(projectId);
 
         Map<String, Object> map = new HashMap<>();
         map.put("projectId", project.getProjectId());
@@ -627,8 +632,37 @@ public class ProjectApplicationService {
         map.put("initFailReason", project.getInitFailReason());
         map.put("repos", repos);
         map.put("resources", resources);
-        map.put("sessions", sessions);
-        map.put("sessionCount", sessions.size());
+        return map;
+    }
+
+    /**
+     * 按会话反查所属项目，供只知道 sessionId 的调用方（定时任务、外部技能）解析项目。
+     * <p>
+     * 会话未绑定项目、项目已删除都返回 {@code bound=false}，不抛异常：调用方要能区分
+     * 「查不到」和「调用失败」，前者可以继续走追问兜底，后者必须重试或报错。
+     *
+     * @param sessionId 会话 ID，必填
+     * @return 含 bound、projectId、projectName、projectType
+     */
+    public Map<String, Object> resolveProjectBySession(Long sessionId) {
+        if (sessionId == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "session.id.required");
+        }
+        Map<String, Object> map = new HashMap<>();
+        map.put("sessionId", sessionId);
+        Long projectId = projectSessionService.findProjectIdBySessionId(sessionId);
+        Project project = projectId == null ? null : projectService.findById(projectId);
+        if (project == null || DeleteFlag.DELETED.equals(project.getDeleteFlag())) {
+            map.put("bound", false);
+            map.put("projectId", null);
+            map.put("projectName", null);
+            map.put("projectType", null);
+            return map;
+        }
+        map.put("bound", true);
+        map.put("projectId", project.getProjectId());
+        map.put("projectName", project.getProjectName());
+        map.put("projectType", project.getProjectType());
         return map;
     }
 
@@ -774,6 +808,7 @@ public class ProjectApplicationService {
      * @param dto 含 projectId、repoFullName
      * @return 新建仓库基本信息
      */
+    @Transactional
     public Map<String, Object> createProjectRepo(ProjectRepoDTO dto) {
         if (dto == null || dto.getProjectId() == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.id.required");
@@ -782,6 +817,7 @@ public class ProjectApplicationService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.name.required");
         }
         ProjectRepo repo = insertProjectRepo(dto.getProjectId(), dto);
+        projectWorkspaceManifestService.syncProjectGitmodules(dto.getProjectId());
         Map<String, Object> result = new HashMap<>();
         result.put("repoId", repo.getRepoId());
         result.put("repoFullName", repo.getRepoFullName());
@@ -798,6 +834,7 @@ public class ProjectApplicationService {
      *
      * <p>编辑直接更新原记录，不采用删除后重建，避免需求、任务或扫描源中保存的 repoId 失效。</p>
      */
+    @Transactional
     public Map<String, Object> updateProjectRepo(ProjectRepoDTO dto) {
         if (dto == null || dto.getRepoId() == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.id.required");
@@ -820,6 +857,7 @@ public class ProjectApplicationService {
         repo.setRepoType("workspace".equals(dto.getRepoType()) ? "workspace" : "code");
         repo.setProvider(normalizeProvider(dto.getProvider()));
         projectRepoMapper.updateById(repo);
+        projectWorkspaceManifestService.syncProjectGitmodules(repo.getProjectId());
         Map<String, Object> result = new HashMap<>();
         result.put("repoId", repo.getRepoId());
         result.put("projectId", repo.getProjectId());
@@ -845,6 +883,7 @@ public class ProjectApplicationService {
      *
      * @param repoId 仓库 ID
      */
+    @Transactional
     public void deleteProjectRepo(Long repoId) {
         if (repoId == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.id.required");
@@ -861,6 +900,9 @@ public class ProjectApplicationService {
                 I18nUtil.get("project.repo.manualRequirement.bound", manualRequirementBoundCount));
         }
         projectRepoMapper.deleteById(repoId);
+        if (repo != null) {
+            projectWorkspaceManifestService.syncProjectGitmodules(repo.getProjectId());
+        }
     }
 
     /**

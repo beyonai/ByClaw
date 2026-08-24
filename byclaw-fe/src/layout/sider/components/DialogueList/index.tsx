@@ -9,6 +9,7 @@ import { trim, debounce } from 'lodash';
 import classNames from 'classnames';
 import InfiniteScroll from '@/components/InfiniteScroll';
 import { ISession } from '@/typescript/session';
+import { isNotificationSession } from '@/utils/session';
 import DialogueCard from './DialogueCard';
 import useDialogue from './useDialogue';
 import { SessionType } from '@/constants/session';
@@ -17,11 +18,6 @@ import styles from './index.module.less';
 // import AntdIcon from '@/components/AntdIcon';
 // import useGlobal from '@/hooks/useGlobal';
 // import book from '@/assets/Book.svg';
-
-const cannotActionListMap: Record<string, string[]> = {
-  Notification: ['delete', 'edit'],
-  default: [],
-};
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -199,8 +195,7 @@ const DialogueList: React.FC = () => {
               />
             )}
             {(currentList || []).map((item: ISession) => {
-              const cannotActionList: string[] =
-                cannotActionListMap[item.objectType || 'default'] || cannotActionListMap.default;
+              const cannotActionList: string[] = isNotificationSession(item) ? ['delete', 'edit'] : [];
 
               return <DialogueCard key={item.sessionId} item={item} cannotActionList={cannotActionList} />;
             })}

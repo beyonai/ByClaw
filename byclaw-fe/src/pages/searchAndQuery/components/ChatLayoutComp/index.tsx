@@ -11,12 +11,13 @@ import MessageList from './components/MessageList';
 import ChatLayoutCompContext from '@/components/ChatLayoutComp/hooks/useContext';
 
 import useGlobal from '@/hooks/useGlobal';
-import useChat, { ISendProps } from '@/hooks/useChat';
+import useChat, { ISendConf, ISendProps } from '@/hooks/useChat';
 import useEventEmitterHooks from '@/components/ChatLayoutComp/hooks/useEventEmitterHooks';
 
 import type { IAgentType } from '@/typescript/agent';
 import type { IMessage, IResourceFromItem } from '@/typescript/message';
 import type { ISession } from '@/typescript/session';
+import { isNotificationSession } from '@/utils/session';
 
 import { IMessageState } from '@/constants/message';
 
@@ -66,6 +67,8 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     return target;
   }, [sessionId, sessionList]);
 
+  const notificationSession = isNotificationSession(currentSession);
+
   const addSession = useCallback(
     (newSession: ISession) => {
       dispatch({
@@ -108,8 +111,24 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   });
   const lastMsg = last(messageList);
 
+  const guardedSendQuery = useCallback(
+    (sendProps: ISendProps, sendConf?: ISendConf) => {
+      if (notificationSession) return;
+      return sendQuery(sendProps, sendConf);
+    },
+    [notificationSession, sendQuery]
+  );
+  const guardedDeleteMessage = useCallback(
+    (message: IMessage) => {
+      if (notificationSession) return;
+      deleteMessage(message);
+    },
+    [deleteMessage, notificationSession]
+  );
+
   const onSend = useCallback(
     async (param: ISendProps, isRetry?: boolean) => {
+      if (notificationSession) return;
       if (!isRetry) {
         Object.assign(param, { payload: { ...param.payload, ...tempParamsRef.current } });
       }
@@ -125,22 +144,23 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
         console.error(e);
       }
     },
-    [sendQuery, setIsBottom]
+    [notificationSession, sendQuery, setIsBottom]
   );
 
   const onCancel = useCallback(() => {
+    if (notificationSession) return;
     if (
       isSessionRunning ||
       [IMessageState.Query, IMessageState.Answer].includes(lastMsg?.messageState as IMessageState)
     ) {
       cancelCurrentSession();
     }
-  }, [cancelCurrentSession, isSessionRunning, lastMsg?.messageState]);
+  }, [cancelCurrentSession, isSessionRunning, lastMsg?.messageState, notificationSession]);
 
   useEventEmitterHooks({
-    sendQuery,
+    sendQuery: guardedSendQuery,
     updateMessage,
-    deleteMessage,
+    deleteMessage: guardedDeleteMessage,
     messageList,
     openDrawerSourceFromInfo,
     setMyAgentType: noop,
@@ -178,25 +198,28 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   onNext={onNext}
                   hasMore={hasMore}
                   sessionId={sessionId}
+                  hideAction={notificationSession}
                   messageList={messageList}
                   updateMessage={updateMessage}
-                  deleteMessage={deleteMessage}
+                  deleteMessage={guardedDeleteMessage}
                 />
               </div>
             )}
-            <div className={classnames(styles.queryInputWrapper)} id="queryInputWrapper">
-              <div className={classnames(styles.queryInput)} data-isbottom={isBottom}>
-                <QueryInput
-                  messageState={isSessionRunning ? IMessageState.Answer : lastMsg?.messageState}
-                  onSend={onSend}
-                  onCancel={onCancel}
-                  myAgentType={myAgentType}
-                  isBottom={isBottom}
-                  cannotAt
-                  sessionId={sessionId}
-                />
+            {!notificationSession && (
+              <div className={classnames(styles.queryInputWrapper)} id="queryInputWrapper">
+                <div className={classnames(styles.queryInput)} data-isbottom={isBottom}>
+                  <QueryInput
+                    messageState={isSessionRunning ? IMessageState.Answer : lastMsg?.messageState}
+                    onSend={onSend}
+                    onCancel={onCancel}
+                    myAgentType={myAgentType}
+                    isBottom={isBottom}
+                    cannotAt
+                    sessionId={sessionId}
+                  />
+                </div>
               </div>
-            </div>
+            )}
             {isBottom && (
               <div
                 className="ub ub-ac ub-pc"

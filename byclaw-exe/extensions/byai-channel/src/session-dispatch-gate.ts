@@ -162,6 +162,99 @@ export async function runSessionDispatchExclusive<T>(
   }
 }
 
+export type SessionDispatchGateLeaseResult<T> = {
+  result: T;
+  meta: SessionDispatchGateRunMeta;
+  /** Release is idempotent and must run after the caller's terminal side effects. */
+  release: () => void;
+};
+
+/**
+ * Variant whose FIFO lease survives the task promise. This is used when a
+ * GatewayWorker must return a prepared result to its owner, emit FINAL_ANSWER,
+ * and only then close the SDK stream and release the transcript session.
+ */
+export async function runSessionDispatchExclusiveLeased<T>(
+  sessionKey: string,
+  task: () => Promise<T>,
+): Promise<SessionDispatchGateLeaseResult<T>> {
+  const normalized = normalizeSessionKey(sessionKey);
+  if (!normalized) {
+    return {
+      result: await task(),
+      meta: {
+        sessionKey,
+        queued: false,
+        queueDepthBefore: 0,
+        waitMs: 0,
+      },
+      release: () => undefined,
+    };
+  }
+
+  const store = getGateStore();
+  const entry = getOrCreateEntry(store, normalized);
+  const queueDepthBefore = entry.activeRuns.size + entry.waiters;
+  const queued = queueDepthBefore > 0;
+  if (queued) {
+    entry.waiters += 1;
+  }
+
+  const waitStartedAt = Date.now();
+  const previous = entry.tail;
+  const runToken = Symbol(normalized);
+  let tailReleased = false;
+  let releaseTail!: () => void;
+  entry.tail = new Promise<void>((resolve) => {
+    releaseTail = () => {
+      if (!tailReleased) {
+        tailReleased = true;
+        resolve();
+      }
+    };
+  });
+
+  await previous;
+  const waitMs = Date.now() - waitStartedAt;
+  entry.activeRuns.add(runToken);
+  entry.currentRelease = releaseTail;
+  if (queued) {
+    entry.waiters = Math.max(0, entry.waiters - 1);
+  }
+
+  let leaseReleased = false;
+  const release = () => {
+    if (leaseReleased) {
+      return;
+    }
+    leaseReleased = true;
+    entry.activeRuns.delete(runToken);
+    if (entry.currentRelease === releaseTail) {
+      entry.currentRelease = undefined;
+    }
+    releaseTail();
+    if (entry.activeRuns.size === 0 && entry.waiters === 0) {
+      store.delete(normalized);
+    }
+  };
+
+  try {
+    return {
+      result: await task(),
+      meta: {
+        sessionKey: normalized,
+        queued,
+        queueDepthBefore,
+        waitMs,
+      },
+      release,
+    };
+  } catch (error) {
+    release();
+    throw error;
+  }
+}
+
 /** Reset gate state between tests. */
 export function resetSessionDispatchGateForTest(): void {
   getGateStore().clear();

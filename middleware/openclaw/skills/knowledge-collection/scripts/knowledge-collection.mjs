@@ -16,19 +16,9 @@
  */
 'use strict';
 
-import { spawnSync } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import {
-  cmdInit, cmdPlan, cmdBranch, cmdAggregate, cmdReport, cmdResearchStatus,
-} from './research-state.mjs';
-import {
-  cmdCollect, cmdInspect, cmdRun, cmdCleanup, cmdUnlockStale, cmdSetRetention,
-  cmdRewriteImageLinks, cmdExportViews, collectionStatus,
-} from './collection-state.mjs';
-import { sessionPaths } from './session.mjs';
+import { executeLocalCommand } from './command-router.mjs';
+import { delegatePlatformCommand } from './platform-delegate.mjs';
 
-const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const VERSION = '2.1.0';
 
 function render(value, compact = false) {
@@ -55,6 +45,8 @@ const COMMAND_SPECS = {
       '--max-branches': '可选。正整数;研究分支总数上限',
       '--max-sources-per-branch': '可选。正整数;单分支来源数上限',
       '--max-search-rounds': '可选。正整数;检索轮数上限',
+      '--source-scope': 'JSON 数组;默认 ["public-internet"]. 可选 public-internet、dingtalk、feishu、wecom、ima',
+      '--materialization-target': 'candidates | selected(默认) | all。all 表示所有请求正文必须物化或如实标记失败/待处理',
       '--started-at': '可选。ISO 时间;缺省为当前时间',
       '--collection-result-input-file': '可选。预置 canonical collection-result.json',
       '--metadata-input-file': '可选。预置 collection metadata',
@@ -63,14 +55,19 @@ const COMMAND_SPECS = {
   }),
   plan: defineCommand({
     group: 'research',
-    title: '记录初始检索、follow-ups 与合并起始查询',
+    title: '记录初始检索、follow-ups、合并起始查询与三通道覆盖表',
     args: {
       '--session-dir': '必填',
       '--initial-search': 'JSON 数组,必填(初始检索记录)',
+      '--channels': '必填。JSON 对象;三个发现通道 builtin-routing / searxng / hot-discovery 逐个表态,'
+        + '{"<通道>":{"state":"used|unavailable|not-applicable","reason":"非 used 时必填,须具体"}}。'
+        + '漏一个即报错;reason 笼统(如「跳过」「不适用」)或短于 8 字符即报错',
       '--followups': 'JSON 数组,可选',
       '--combined-query': '文本,可选',
     },
-    example: 'knowledge-collection.mjs plan --session-dir /tmp/kc1 --initial-search \'["arxiv", "github"]\' --combined-query "combined"',
+    example: 'knowledge-collection.mjs plan --session-dir /tmp/kc1 --initial-search \'["arxiv", "github"]\''
+      + ' --channels \'{"builtin-routing":{"state":"used"},"searxng":{"state":"used"},'
+      + '"hot-discovery":{"state":"unavailable","reason":"images 维度无免登录热度源"}}\' --combined-query "combined"',
   }),
   branch: defineCommand({
     group: 'research',
@@ -193,6 +190,42 @@ const COMMAND_SPECS = {
     args: { '--session-dir': '必填' },
     example: 'knowledge-collection.mjs export-views --session-dir /tmp/kc1',
   }),
+  'crawl-seed': defineCommand({
+    group: 'crawl',
+    title: '用发现结果建立/扩充待爬队列(不取内容)',
+    args: {
+      '--session-dir': '必填',
+      '--urls-file': '必填。含 URL 的文件;接受 sitemap XML(<loc>)、Markdown 链接或裸 URL',
+      '--scope-prefix': '可选。同域/同路径前缀白名单,超出范围的 URL 丢弃',
+      '--max-pages': '可选。正整数;frontier 容量上限,超出部分记为 overCap',
+      '--depth': '可选。正整数,默认 1;记录本次允许的最大层数',
+    },
+    example: "knowledge-collection.mjs crawl-seed --session-dir /tmp/kc1 --urls-file /tmp/sitemap.md --scope-prefix https://docs.example.com/ --max-pages 40",
+  }),
+  'crawl-next': defineCommand({
+    group: 'crawl',
+    title: '取出待抓 URL 交给来源执行器(只读)',
+    args: {
+      '--session-dir': '必填',
+      '--limit': '可选。正整数,默认 10;单批返回上限',
+    },
+    example: 'knowledge-collection.mjs crawl-next --session-dir /tmp/kc1 --limit 5',
+  }),
+  'crawl-mark': defineCommand({
+    group: 'crawl',
+    title: '登记一批抓取结果(pending → fetched/failed/skipped)',
+    args: {
+      '--session-dir': '必填',
+      '--mark-json-file': '必填。位于 .post-processing-inputs/ 内;{results:[{url,status,itemId?,reason?}]}',
+    },
+    example: 'knowledge-collection.mjs crawl-mark --session-dir /tmp/kc1 --mark-json-file /tmp/kc1/.post-processing-inputs/mark.json',
+  }),
+  'crawl-status': defineCommand({
+    group: 'crawl',
+    title: '查看 frontier 计数与范围配置',
+    args: { '--session-dir': '必填' },
+    example: 'knowledge-collection.mjs crawl-status --session-dir /tmp/kc1',
+  }),
   status: defineCommand({
     group: 'summary',
     title: '会话综合状态(研究 + 采集 + warnings)',
@@ -247,9 +280,9 @@ const COMMAND_SPECS = {
   }),
   enterprise: defineCommand({
     group: 'platform',
-    title: '企业来源采集: wecom-smartpage | feishu-minutes(委派 enterprise-collection.mjs)',
-    args: { '<subcommand>': 'wecom-smartpage 或 feishu-minutes' },
-    example: 'knowledge-collection.mjs enterprise wecom-smartpage --help',
+    title: '企业来源采集: search | search-all | materialize | resource | resume-resource；兼容 wecom-smartpage | feishu-minutes(委派 enterprise-collection.mjs)',
+    args: { '<subcommand>': 'search、search-all、materialize、resource、resume-resource、wecom-smartpage 或 feishu-minutes' },
+    example: 'knowledge-collection.mjs enterprise search --source dingtalk --query "季度计划" --output-dir /tmp/enterprise',
   }),
 };
 
@@ -259,6 +292,151 @@ const LEGACY_ALIASES = new Map([
   ['mark-materialized', 'collect'],
   ['record-run', 'run'],
 ]);
+
+const SCHEMA = {
+  absolutePath: { type: 'string', format: 'absolute-path' },
+  sessionDir: { type: 'string', format: 'absolute-path' },
+  file: { type: 'string', format: 'file-path' },
+  inputFile: { type: 'string', format: 'post-processing-input-file' },
+  jsonArray: { type: 'array', cliEncoding: 'json', items: { type: 'string' } },
+  jsonObject: { type: 'object', cliEncoding: 'json' },
+  boolean: { type: 'boolean' },
+  positiveInteger: { type: 'integer', minimum: 1 },
+};
+
+const COMMAND_SCHEMA_OVERRIDES = {
+  init: {
+    required: ['session-dir', 'query'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      query: { type: 'string', minLength: 1 },
+      mode: { type: 'string', enum: ['collection', 'research'], default: 'collection' },
+      breadth: { ...SCHEMA.positiveInteger, default: 3 },
+      depth: { ...SCHEMA.positiveInteger, default: 2 },
+      concurrency: { ...SCHEMA.positiveInteger, default: 2 },
+      'max-context-words': { ...SCHEMA.positiveInteger, default: 25000 },
+      'deadline-minutes': SCHEMA.positiveInteger,
+      'max-branches': SCHEMA.positiveInteger,
+      'max-sources-per-branch': SCHEMA.positiveInteger,
+      'max-search-rounds': SCHEMA.positiveInteger,
+      'source-scope': {
+        type: 'array', minItems: 1, uniqueItems: true, default: ['public-internet'], cliEncoding: 'json',
+        items: { type: 'string', enum: ['public-internet', 'dingtalk', 'feishu', 'wecom', 'ima'] },
+      },
+      'materialization-target': { type: 'string', enum: ['candidates', 'selected', 'all'], default: 'selected' },
+      'started-at': { type: 'string', format: 'date-time' },
+      'collection-result-input-file': SCHEMA.file,
+      'metadata-input-file': SCHEMA.file,
+    },
+  },
+  plan: {
+    required: ['session-dir', 'initial-search', 'channels'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      'initial-search': SCHEMA.jsonArray,
+      channels: SCHEMA.jsonObject,
+      followups: SCHEMA.jsonArray,
+      'combined-query': { type: 'string', minLength: 1 },
+    },
+  },
+  branch: {
+    required: ['session-dir', 'level', 'query'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      level: SCHEMA.positiveInteger,
+      query: { type: 'string', minLength: 1 },
+      'research-goal': { type: 'string', minLength: 1 },
+      learnings: SCHEMA.jsonArray,
+      citations: SCHEMA.jsonObject,
+      followups: SCHEMA.jsonArray,
+      sources: { ...SCHEMA.jsonArray, items: { type: 'string', minLength: 1, format: 'url-or-source-uri' } },
+      context: SCHEMA.jsonArray,
+      'search-queries': { type: 'array', cliEncoding: 'json', items: { type: 'object' } },
+      status: { type: 'string', enum: ['done', 'pending', 'failed'], default: 'done' },
+      reason: { type: 'string', minLength: 1 },
+      id: { type: 'string', minLength: 1 },
+      'parent-id': { type: 'string', minLength: 1 },
+    },
+    allOf: [
+      { if: { required: ['status'], properties: { status: { const: 'failed' } } }, then: { required: ['reason'] } },
+      { if: { required: ['status'], properties: { status: { enum: ['done', 'pending'] } } }, then: { required: ['research-goal'] } },
+      { if: { not: { required: ['status'] } }, then: { required: ['research-goal'] } },
+    ],
+  },
+  aggregate: { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir } },
+  report: {
+    required: ['session-dir'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir,
+      'report-path': { type: 'string', format: 'path-within-session' },
+      'stop-reason': { type: 'string', minLength: 1 },
+      'allow-incomplete': { ...SCHEMA.boolean, default: false },
+    },
+  },
+  collect: { required: ['session-dir', 'item-json-file'], properties: { 'session-dir': SCHEMA.sessionDir, 'item-json-file': SCHEMA.inputFile, 'dry-run': SCHEMA.boolean } },
+  inspect: { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir, operation: { type: 'string', enum: ['ingest', 'organize', 'external'] }, 'target-json': SCHEMA.jsonObject, 'drain-pending': SCHEMA.boolean, full: SCHEMA.boolean } },
+  run: { required: ['session-dir', 'run-json-file'], properties: { 'session-dir': SCHEMA.sessionDir, 'run-json-file': SCHEMA.inputFile, 'dry-run': SCHEMA.boolean, full: SCHEMA.boolean } },
+  cleanup: { required: ['session-dir', 'run-id'], properties: { 'session-dir': SCHEMA.sessionDir, 'run-id': { type: 'string', minLength: 1 }, 'dry-run': SCHEMA.boolean, full: SCHEMA.boolean, 'archive-deliverables': SCHEMA.boolean } },
+  'unlock-stale': { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir } },
+  'set-retention': { required: ['session-dir', 'keep'], properties: { 'session-dir': SCHEMA.sessionDir, keep: SCHEMA.boolean, 'dry-run': SCHEMA.boolean } },
+  'rewrite-image-links': {
+    required: ['session-dir'],
+    properties: {
+      'session-dir': SCHEMA.sessionDir, 'resource-id': { type: 'string', minLength: 1 }, 'link-map-file': SCHEMA.inputFile,
+      'item-id': { type: 'array', cliEncoding: 'repeatable', items: { type: 'string', minLength: 1 } },
+      'item-ids': { type: 'array', cliEncoding: 'comma-separated', items: { type: 'string', minLength: 1 } },
+      'base-url': { type: 'string', format: 'http-origin' }, 'workspace-root': SCHEMA.absolutePath,
+      language: { type: 'string', default: 'zh-CN' }, 'dry-run': SCHEMA.boolean,
+    },
+    oneOf: [{ required: ['resource-id'] }, { required: ['link-map-file'] }],
+  },
+  'export-views': { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir } },
+  'crawl-seed': { required: ['session-dir', 'urls-file'], properties: { 'session-dir': SCHEMA.sessionDir, 'urls-file': SCHEMA.file, 'scope-prefix': { type: 'string', format: 'http-url' }, 'max-pages': SCHEMA.positiveInteger, depth: { ...SCHEMA.positiveInteger, default: 1 } } },
+  'crawl-next': { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir, limit: { ...SCHEMA.positiveInteger, default: 10 } } },
+  'crawl-mark': { required: ['session-dir', 'mark-json-file'], properties: { 'session-dir': SCHEMA.sessionDir, 'mark-json-file': SCHEMA.inputFile } },
+  'crawl-status': { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir } },
+  status: { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir, full: SCHEMA.boolean } },
+};
+
+function commandSchema() {
+  const commands = {};
+  for (const [name, spec] of Object.entries(COMMAND_SPECS)) {
+    if (spec.group === 'platform') {
+      const childScript = name === 'enterprise' ? 'enterprise-collection.mjs' : 'ingest.mjs';
+      commands[name] = {
+        type: 'delegated-command',
+        delegatedTo: {
+          script: `scripts/${childScript}`,
+          schemaCommand: `node scripts/${childScript} command-schema`,
+          command: name,
+        },
+        ...(spec.deprecated ? { deprecated: true } : {}),
+      };
+      continue;
+    }
+    const override = COMMAND_SCHEMA_OVERRIDES[name];
+    if (!override) {
+      throw new Error(`命令 ${name} 缺少 machine-readable schema`);
+    }
+    commands[name] = {
+      type: 'object',
+      additionalProperties: false,
+      required: override.required,
+      properties: override.properties,
+      schemaComplete: true,
+      ...(override.allOf ? { allOf: override.allOf } : {}),
+      ...(override.oneOf ? { oneOf: override.oneOf } : {}),
+      ...(spec.deprecated ? { deprecated: true } : {}),
+    };
+  }
+  return {
+    ok: true,
+    name: 'knowledge-collection',
+    schemaVersion: '1.0',
+    cli: { flagStyle: '--kebab-case', jsonArrayEncoding: 'JSON string array' },
+    commands,
+  };
+}
 
 function parseArgs(argv) {
   const args = {};
@@ -369,30 +547,6 @@ function help() {
   };
 }
 
-function delegate(childScript, argv) {
-  const result = spawnSync(process.execPath, [path.join(SCRIPT_DIR, childScript), ...argv], {
-    stdio: ['inherit', 'pipe', 'pipe'],
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  if (result.stdout) {
-    process.stdout.write(result.stdout);
-  }
-  if (result.stderr) {
-    process.stderr.write(result.stderr);
-  }
-  if (result.error) {
-    if (!result.stdout && !result.stderr) {
-      process.stderr.write(`${childScript} 执行失败: ${result.error.message}\n`);
-    }
-    process.exitCode = 1;
-    return;
-  }
-  if (result.status !== 0) {
-    process.exitCode = result.status || 1;
-  }
-}
-
 function compactRequested(args) {
   return args.compact === true || args.compact === 'true' || args.compact === '1';
 }
@@ -409,18 +563,13 @@ function main() {
     render({ ok: true, name: 'knowledge-collection', version: VERSION }, compactRequested(args));
     return;
   }
-
-  // 平台维度:先委派,不得要求 --session-dir;--help 交给子脚本输出真实参数。
-  if (['list-kb', 'upload-doc', 'upload-images', 'upload-resource', 'normalize', 'store', 'ingest'].includes(command)) {
-    delegate('ingest.mjs', process.argv.slice(2));
+  if (command === 'command-schema') {
+    render(commandSchema(), compactRequested(args));
     return;
   }
-  if (command === 'enterprise') {
-    if (args.help === true || args.help === 'true') {
-      render(commandHelp(command), compactRequested(args));
-      return;
-    }
-    delegate('enterprise-collection.mjs', process.argv.slice(3));
+
+  // 平台维度:先委派,不得要求 --session-dir;--help 交给子脚本输出真实参数。
+  if (delegatePlatformCommand(command, process.argv.slice(2))) {
     return;
   }
 
@@ -435,91 +584,7 @@ function main() {
     throw new Error(`未知命令: ${command}`);
   }
 
-  // ── 研究维度 ──
-  if (canonical === 'init') {
-    render(cmdInit(args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'plan') {
-    render(cmdPlan(args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'branch') {
-    render(cmdBranch(args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'aggregate') {
-    render(cmdAggregate(args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'report') {
-    render(cmdReport(args), compactRequested(args));
-    return;
-  }
-
-  // ── 采集维度(需要 --session-dir) ──
-  const paths = sessionPaths(args['session-dir']);
-  if (canonical === 'collect') {
-    render(cmdCollect(paths, args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'inspect') {
-    render(cmdInspect(paths, args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'run') {
-    render(cmdRun(paths, args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'cleanup') {
-    render(cmdCleanup(paths, args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'unlock-stale') {
-    render(cmdUnlockStale(paths), compactRequested(args));
-    return;
-  }
-  if (canonical === 'set-retention') {
-    render(cmdSetRetention(paths, args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'rewrite-image-links') {
-    render(cmdRewriteImageLinks(paths, args), compactRequested(args));
-    return;
-  }
-  if (canonical === 'export-views') {
-    render(cmdExportViews(paths), compactRequested(args));
-    return;
-  }
-  if (canonical === 'status') {
-    const research = cmdResearchStatus(args);
-    const full = args.full === true || args.full === 'true';
-    if (full) {
-      const detail = cmdInspect(paths, { full: true });
-      render({
-        ok: true,
-        action: 'status',
-        task: research.task,
-        research: research.research,
-        collection: detail.metadata,
-        canonicalView: detail.collectionResult,
-        warnings: [...(research.warnings || []), ...(detail.warnings || [])],
-      }, compactRequested(args));
-      return;
-    }
-    const collection = collectionStatus(paths);
-    render({
-      ok: true,
-      action: 'status',
-      task: research.task,
-      research: research.research,
-      collection,
-      warnings: [...(research.warnings || []), ...(collection.warnings || [])],
-    }, compactRequested(args));
-    return;
-  }
-
-  throw new Error(`未知命令: ${command}`);
+  render(executeLocalCommand(canonical, args), compactRequested(args));
 }
 
 try {

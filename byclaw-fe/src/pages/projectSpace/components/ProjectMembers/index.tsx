@@ -1,4 +1,4 @@
-import { Button, Dropdown, Empty, Input, List, Modal, Spin, Tag, Typography, message } from 'antd';
+import { Button, Dropdown, Empty, Input, List, Modal, Spin, Tabs, Tag, Typography, message } from 'antd';
 import {
   DeleteOutlined,
   DisconnectOutlined,
@@ -53,6 +53,7 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
   const [agentLoading, setAgentLoading] = useState(false);
   const [agentPage, setAgentPage] = useState(1);
   const [hasMoreAgents, setHasMoreAgents] = useState(false);
+  const [agentTab, setAgentTab] = useState<'personal' | 'group'>('personal');
   const initialLoadProjectRef = useRef<string | null>(null);
   const savingMembersRef = useRef(false);
   const agentSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -181,7 +182,7 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
   }, []);
 
   const loadAgentOptions = useCallback(
-    async (page = 1, keyword = '', append = false) => {
+    async (page = 1, keyword = '', append = false, type: 'personal' | 'group' = 'personal') => {
       if (append && agentLoadingMoreRef.current) return;
 
       // 与小详情一致，使用查询版本和追加锁避免旧搜索结果覆盖新关键字。
@@ -199,6 +200,7 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
           keyword: keyword.trim(),
           pageNum: page,
           pageSize: AGENT_PAGE_SIZE,
+          ...(type === 'group' ? { agentType: '017' } : {}),
         });
         if (queryVersion !== agentQueryVersionRef.current) return;
 
@@ -257,19 +259,19 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
       // 输入停止 300ms 后查询，保持与小详情相同的搜索节奏。
       agentSearchTimerRef.current = setTimeout(() => {
         agentSearchTimerRef.current = null;
-        void loadAgentOptions(1, keyword);
+        void loadAgentOptions(1, keyword, false, agentTab);
       }, 300);
     },
-    [clearAgentSearchTimer, loadAgentOptions]
+    [agentTab, clearAgentSearchTimer, loadAgentOptions]
   );
 
   const handleAgentSearchSubmit = useCallback(
     (keyword: string) => {
       clearAgentSearchTimer();
       setAgentKeyword(keyword);
-      void loadAgentOptions(1, keyword);
+      void loadAgentOptions(1, keyword, false, agentTab);
     },
-    [clearAgentSearchTimer, loadAgentOptions]
+    [agentTab, clearAgentSearchTimer, loadAgentOptions]
   );
 
   const handleAgentListScroll = useCallback(
@@ -277,9 +279,9 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
       if (!hasMoreAgents || agentLoading || agentLoadingMoreRef.current) return;
       const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
       if (scrollHeight - scrollTop - clientHeight > 80) return;
-      void loadAgentOptions(agentPage + 1, agentKeyword, true);
+      void loadAgentOptions(agentPage + 1, agentKeyword, true, agentTab);
     },
-    [agentKeyword, agentLoading, agentPage, hasMoreAgents, loadAgentOptions]
+    [agentKeyword, agentLoading, agentPage, agentTab, hasMoreAgents, loadAgentOptions]
   );
 
   const handleCloseAgentModal = useCallback(() => {
@@ -291,6 +293,7 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
     setAgentOptions([]);
     setAgentLoading(false);
     setHasMoreAgents(false);
+    setAgentTab('personal');
   }, [clearAgentSearchTimer]);
 
   const handleOpenAgentModal = useCallback(
@@ -304,9 +307,26 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
       setAgentPage(1);
       setHasMoreAgents(false);
       setAgentLoading(false);
-      void loadAgentOptions(1, '');
+      setAgentTab('personal');
+      void loadAgentOptions(1, '', false, 'personal');
     },
     [clearAgentSearchTimer, loadAgentOptions]
+  );
+
+  const handleAgentTabChange = useCallback(
+    (tab: string) => {
+      const nextTab = tab as 'personal' | 'group';
+      setAgentTab(nextTab);
+      clearAgentSearchTimer();
+      agentQueryVersionRef.current += 1;
+      agentLoadingMoreRef.current = false;
+      setAgentOptions([]);
+      setAgentPage(1);
+      setHasMoreAgents(false);
+      setAgentLoading(false);
+      void loadAgentOptions(1, agentKeyword, false, nextTab);
+    },
+    [agentKeyword, clearAgentSearchTimer, loadAgentOptions]
   );
 
   useEffect(
@@ -598,6 +618,15 @@ const ProjectMembers: React.FC<Props> = ({ project, keyword = '', onToolbarChang
           onSearch={handleAgentSearchSubmit}
           enterButton={<SearchOutlined />}
           className={smallDetailStyles.agentSearchInput}
+        />
+        <Tabs
+          activeKey={agentTab}
+          onChange={handleAgentTabChange}
+          size="small"
+          items={[
+            { key: 'personal', label: intl.formatMessage({ id: 'projectSpace.members.agentTabPersonal' }) },
+            { key: 'group', label: intl.formatMessage({ id: 'projectSpace.members.agentTabGroup' }) },
+          ]}
         />
         <Spin spinning={agentLoading}>
           <div className={smallDetailStyles.agentList} onScroll={handleAgentListScroll}>

@@ -6,6 +6,7 @@ jest.mock('@umijs/max', () => ({
   useIntl: () => ({
     formatMessage: ({ id }: { id: string }) => id,
   }),
+  useDispatch: () => jest.fn(),
   useSelector: (selector: any) =>
     selector({
       user: {
@@ -174,6 +175,76 @@ describe('ResourceCard', () => {
     );
 
     expect(screen.getByText('resource.defaultDigitalEmployee').parentElement).toHaveClass('digitalEmployeeDefaultTag');
+  });
+
+  it('keeps permission-based actions alongside apply use for a digital employee', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: 'employee-apply',
+          resourceName: 'Apply Employee',
+          resourceBizType: 'DIG_EMPLOYEE',
+          canApplyUse: true,
+          canEdit: true,
+          canManageAuth: true,
+        }}
+        actionConfig={{ onApplyUse: jest.fn(), onEdit: jest.fn(), onAuth: jest.fn() }}
+      />
+    );
+
+    expect(screen.getByText('resource.applyUse')).toBeTruthy();
+    expect(screen.getByText('common.editInfo')).toBeTruthy();
+    expect(screen.getByText('common.manageAuthorization')).toBeTruthy();
+    expect(screen.queryByText('resource.setDefaultAssistant')).toBeNull();
+  });
+
+  it('shows set default for a usable non-default digital employee', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: 'employee-default',
+          resourceName: 'Usable Employee',
+          resourceBizType: 'DIG_EMPLOYEE',
+          canSetDefault: true,
+          isDefault: false,
+        }}
+      />
+    );
+
+    expect(screen.getByText('resource.setDefaultAssistant')).toBeTruthy();
+  });
+
+  it('does not show set default for the current default digital employee', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: 'default-agent-1',
+          resourceName: 'Default Employee',
+          resourceBizType: 'DIG_EMPLOYEE',
+          canSetDefault: false,
+          isDefault: true,
+        }}
+      />
+    );
+
+    expect(screen.queryByText('resource.setDefaultAssistant')).toBeNull();
+  });
+
+  it('does not infer set default from canApplyUse when canSetDefault is false', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: 'employee-no-default-permission',
+          resourceName: 'Unavailable Employee',
+          resourceBizType: 'DIG_EMPLOYEE',
+          canApplyUse: false,
+          canSetDefault: false,
+          isDefault: false,
+        }}
+      />
+    );
+
+    expect(screen.queryByText('resource.setDefaultAssistant')).toBeNull();
   });
 
   it('uses personal digital employee tag style for personal digital employees', () => {

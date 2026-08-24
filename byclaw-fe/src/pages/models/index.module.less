@@ -49,7 +49,14 @@
 }
 
 .grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+  gap: 16px;
   margin-bottom: 20px;
+
+  > div {
+    min-width: 0;
+  }
 }
 
 .pagination {

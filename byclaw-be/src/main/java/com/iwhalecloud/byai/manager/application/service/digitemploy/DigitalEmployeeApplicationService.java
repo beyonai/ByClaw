@@ -1943,22 +1943,14 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 左侧“全部列表项”中可见的数字员工才允许设为默认: 我创建的、我有使用授权的、或我有 ALLOW_MANAGE 管理授权的资源均可.
+     * 有使用或管理权限的数字员工均可设为默认，和资源权限接口的 canSetDefault 口径保持一致。
      */
     private boolean canCurrentUserSetAsDefault(SsResource resource, Long currentUserId) {
         if (resource == null || currentUserId == null) {
             return false;
         }
-        if (Objects.equals(resource.getCreateBy(), currentUserId)) {
-            return true;
-        }
-        List<Long> resourceIds = List.of(resource.getResourceId());
-        List<String> resourceBizTypes = List.of(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
-        if (authApplicationService.queryCurrentUserUsePermittedResourceIds(resourceIds, resourceBizTypes)
-            .contains(resource.getResourceId())) {
-            return true;
-        }
-        return authApplicationService.hasCurrentUserAllowManagePrivilege(resource);
+        return authApplicationService.hasResourceManagePermission(resource)
+            || authApplicationService.hasResourceUsePermission(resource, currentUserId);
     }
 
     private SuasSuperassist loadCurrentUserSuperassist() {
@@ -3151,6 +3143,8 @@ public class DigitalEmployeeApplicationService {
             relPrompt = digitalEmployeeDetailsDTO.getCorePersonaDefinition();
         }
         digitalEmployeeDetailsDTO.setRelPrompt(relPrompt);
+        digitalEmployeeDetailsDTO
+            .setImageModelId(parseImageModelIdFromTargetContent(digitalEmployeeDetailsDTO.getTargetContent()));
 
         // 查询记忆配置列表(根据数字员工ID和用户ID查询)
         Long userId = CurrentUserHolder.getCurrentUserId();
@@ -3328,6 +3322,9 @@ public class DigitalEmployeeApplicationService {
         }
         else if (inputDto.getCorePersonaDefinition() != null) {
             details.setRelPrompt(inputDto.getCorePersonaDefinition());
+        }
+        if (inputDto.getImageModelId() != null) {
+            details.setImageModelId(StringUtils.trimToNull(inputDto.getImageModelId()));
         }
     }
 
@@ -3610,6 +3607,15 @@ public class DigitalEmployeeApplicationService {
             return null;
         }
         return obj.getString("relPrompt");
+    }
+
+    /** 反序列化 target_content 里的 imageModelId 字符串;不存在、空白或解析失败返回 null. */
+    private String parseImageModelIdFromTargetContent(String targetContent) {
+        com.alibaba.fastjson2.JSONObject obj = parseTargetContentSafely(targetContent);
+        if (obj == null) {
+            return null;
+        }
+        return StringUtils.trimToNull(obj.getString("imageModelId"));
     }
 
     /** 通用:把 target_content 解析为 JSONObject,失败返回 null 并记 warn. */

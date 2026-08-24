@@ -1,0 +1,111 @@
+{
+  "action_code": "find_articles_by_period",
+  "action_name": "按标题模糊+发布时间范围+规范化链接检索文章",
+  "action_type": "QUERY",
+  "action_desc": "按文章标题模糊检索 + 发布时间范围过滤 + 规范化链接精确匹配，按发布时间倒序，支持分页；返回 article_id、title、publish_time、canonical_url、url",
+  "permission_roles": [
+    "analyst",
+    "ops",
+    "admin"
+  ],
+  "params": [
+    {
+      "paramCode": "title_keyword",
+      "paramName": "文章标题关键字",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "published_from",
+      "paramName": "发布时间下限（含）",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "published_to",
+      "paramName": "发布时间上限（含）",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "canonical_url",
+      "paramName": "规范化唯一链接（精确匹配）",
+      "type": "string",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "page",
+      "paramName": "页码（从 1 开始）",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "page_size",
+      "paramName": "每页条数（1-200）",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "input"
+    },
+    {
+      "paramCode": "success",
+      "paramName": "是否成功",
+      "type": "boolean",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "items",
+      "paramName": "命中文章列表",
+      "type": "array",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "total",
+      "paramName": "当前页返回条数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "total_matched",
+      "paramName": "符合条件的总条数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "page",
+      "paramName": "当前页码",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "page_size",
+      "paramName": "每页条数",
+      "type": "integer",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "error",
+      "paramName": "错误描述",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "code",
+      "paramName": "错误码",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    }
+  ]
+}

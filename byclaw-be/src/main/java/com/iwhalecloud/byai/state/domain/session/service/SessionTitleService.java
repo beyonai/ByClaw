@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.session.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.util.DateUtils;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
@@ -26,8 +27,6 @@ public class SessionTitleService {
 
     private static final String INITIAL_TITLE_PENDING_VALUE = "1";
 
-    private static final String FILE_UPLOAD_TITLE_PREFIX = "File Upload ";
-
     private static final int AUTO_TITLE_MAX_LENGTH = 10;
 
     private final ByaiSessionMapper byaiSessionMapper;
@@ -50,7 +49,7 @@ public class SessionTitleService {
      * @return 临时会话标题
      */
     public String buildFileUploadTitle(Date date) {
-        return FILE_UPLOAD_TITLE_PREFIX + DateUtils.getFormatedDateTime(date);
+        return I18nUtil.get("session.file.upload.title", DateUtils.getFormatedDateTime(date));
     }
 
     /**

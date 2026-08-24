@@ -7,11 +7,14 @@ import java.nio.file.Paths;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import com.iwhalecloud.byai.state.application.service.session.ByClawUserWorkspacePaths;
+import org.apache.commons.lang3.StringUtils;
+
 /**
  * Git 工作空间配置类
  *
  * 用于配置集成项目 Git 仓库的根目录路径
- * 根目录 = file.storage.local.path + "/projects/{projectId}/repos"
+ * 根目录 = file.storage.local.path + "/byclaw-{userCode}/projects/{projectId}/repos"
  */
 @Component
 public class GitWorkspaceConfig {
@@ -26,10 +29,13 @@ public class GitWorkspaceConfig {
      * 获取指定项目的 Git 工作空间根目录，不存在时自动创建。
      *
      * @param projectId 项目 ID
+     * @param userBucketName 项目创建者的用户桶名称
      * @return 项目下的 Git 仓库根目录路径
      */
-    public String getRoot(Long projectId) {
-        Path projectRepos = Paths.get(fileStorageLocalPath, "projects", String.valueOf(projectId), "repos");
+    public String getRoot(Long projectId, String userBucketName) {
+        String userFsRoot = StringUtils.stripStart(ByClawUserWorkspacePaths.USER_FS_OBJECT_KEY_ROOT_PREFIX, "/");
+        Path projectRepos = Paths.get(fileStorageLocalPath, userBucketName, userFsRoot, "projects",
+            String.valueOf(projectId), "repos");
         try {
             Files.createDirectories(projectRepos);
             return projectRepos.toString();

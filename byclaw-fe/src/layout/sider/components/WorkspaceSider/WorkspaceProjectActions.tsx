@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { DeleteOutlined, EditOutlined, EllipsisOutlined, PlusCircleOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EditOutlined, EllipsisOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Dropdown, Input, Modal, message } from 'antd';
 // @ts-ignore
 import { useIntl, useSelector } from '@umijs/max';
+import AntdIcon from '@/components/AntdIcon';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import { deleteProject, updateProject } from '@/service/devloop';
 import styles from './index.module.less';
@@ -10,13 +11,17 @@ import styles from './index.module.less';
 interface WorkspaceProjectActionsProps {
   project: ProjectSpace;
   onNewSession: (project: ProjectSpace) => void;
+  onRefreshSessions: (project: ProjectSpace) => void;
   onProjectChanged: (project: ProjectSpace, action: 'rename' | 'delete') => void | Promise<void>;
+  refreshing?: boolean;
 }
 
 const WorkspaceProjectActions: React.FC<WorkspaceProjectActionsProps> = ({
   project,
   onNewSession,
+  onRefreshSessions,
   onProjectChanged,
+  refreshing = false,
 }) => {
   const intl = useIntl();
   const userInfo = useSelector(({ user }: any) => user.userInfo) || {};
@@ -75,6 +80,10 @@ const WorkspaceProjectActions: React.FC<WorkspaceProjectActionsProps> = ({
 
   const handleMenuClick = ({ key, domEvent }: any) => {
     domEvent.stopPropagation();
+    if (key === 'refresh') {
+      onRefreshSessions(project);
+      return;
+    }
     if (!canManage) return;
     if (key === 'rename') {
       setRenameValue(project.projectName || '');
@@ -85,37 +94,45 @@ const WorkspaceProjectActions: React.FC<WorkspaceProjectActionsProps> = ({
 
   return (
     <div className={styles.projectActionGroup}>
-      {canManage && (
-        <Dropdown
-          trigger={['click']}
-          menu={{
-            items: [
-              {
-                key: 'rename',
-                icon: <EditOutlined />,
-                label: intl.formatMessage({ id: 'common.rename' }),
-              },
-              {
-                key: 'delete',
-                icon: <DeleteOutlined />,
-                label: intl.formatMessage({ id: 'projectSpace.message.deleteConfirmTitle' }),
-                danger: true,
-              },
-            ],
-            onClick: handleMenuClick,
-          }}
+      <Dropdown
+        trigger={['click']}
+        menu={{
+          items: [
+            {
+              key: 'refresh',
+              icon: <ReloadOutlined spin={refreshing} />,
+              label: intl.formatMessage({ id: 'common.refresh' }),
+              disabled: refreshing,
+            },
+            ...(canManage
+              ? [
+                {
+                  key: 'rename',
+                  icon: <EditOutlined />,
+                  label: intl.formatMessage({ id: 'common.rename' }),
+                },
+                {
+                  key: 'delete',
+                  icon: <DeleteOutlined />,
+                  label: intl.formatMessage({ id: 'common.delete' }),
+                  danger: true,
+                },
+              ]
+              : []),
+          ],
+          onClick: handleMenuClick,
+        }}
+      >
+        <button
+          type="button"
+          className={styles.projectActionButton}
+          aria-label={intl.formatMessage({ id: 'common.more' })}
+          title={intl.formatMessage({ id: 'common.more' })}
+          onClick={(event) => event.stopPropagation()}
         >
-          <button
-            type="button"
-            className={styles.projectActionButton}
-            aria-label={intl.formatMessage({ id: 'common.more' })}
-            title={intl.formatMessage({ id: 'common.more' })}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <EllipsisOutlined />
-          </button>
-        </Dropdown>
-      )}
+          <EllipsisOutlined />
+        </button>
+      </Dropdown>
       <button
         type="button"
         className={styles.projectActionButton}
@@ -126,7 +143,7 @@ const WorkspaceProjectActions: React.FC<WorkspaceProjectActionsProps> = ({
           onNewSession(project);
         }}
       >
-        <PlusCircleOutlined />
+        <AntdIcon type="icon-xinjianduihua" />
       </button>
 
       <Modal
@@ -141,7 +158,7 @@ const WorkspaceProjectActions: React.FC<WorkspaceProjectActionsProps> = ({
       >
         <Input
           autoFocus
-          maxLength={100}
+          maxLength={15}
           value={renameValue}
           onChange={(event) => setRenameValue(event.target.value)}
           onPressEnter={() => void handleRename()}

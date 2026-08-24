@@ -7,6 +7,7 @@ import type { PiSessionCheckpoint } from "../pi-session-checkpoint.js";
 import type { SessionContextV1 } from "../domain/session-context.js";
 import type { GroupChatContextV1 } from "../domain/group-chat-context.js";
 import type { ExpertTeamRuntimeSnapshotV1 } from "../domain/orchestrator.js";
+import type { TaskPlanSnapshot, TaskPlanUpdate } from "../domain/task-plan.js";
 import type {
   AgentProfile,
   AgentResult,
@@ -36,7 +37,16 @@ export interface LeaderRunInput {
   user?: CallerPrincipal;
   /** 当前 Run 冻结的专家团配置；缺省时保持超级助手行为。 */
   orchestrator?: ExpertTeamRuntimeSnapshotV1;
+  /** 本轮开始时从 byclaw-be 恢复的活动计划；后续工具更新会原位替换该快照。 */
+  activeTaskPlan?: TaskPlanSnapshot;
   signal: AbortSignal;
+  /** 仅用于结构化链路日志，不进入模型上下文。 */
+  observability?: {
+    runId: string;
+    sessionId: string;
+    externalSessionId?: string;
+    traceId?: string;
+  };
   /** 接收最终可见回答的文本增量。 */
   onDelta(text: string): Promise<void> | void;
   /** 接收模型思考文本增量；不进入最终可见回答。 */
@@ -58,6 +68,12 @@ export interface LeaderRunInput {
     questions: UserInteractionQuestion[];
     signal?: AbortSignal;
   }): Promise<UserInteractionResponse>;
+  /** 创建或以完整任务数组更新本轮任务计划。 */
+  updateTaskPlan?(input: {
+    toolCallId: string;
+    update: TaskPlanUpdate;
+    signal?: AbortSignal;
+  }): Promise<TaskPlanSnapshot>;
   /**
    * 受控读取当前 Run 某个附件的有界内容。仅当本轮存在附件且注入了 Resolver 时可用；
    * 工具层只能传 attachmentId，真正的附件对象由服务端从本轮附件集合解析。

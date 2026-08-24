@@ -7,6 +7,7 @@ jest.mock('@umijs/max', () => ({
   useIntl: () => ({
     formatMessage: ({ id }: { id: string }) => id,
   }),
+  useDispatch: () => jest.fn(),
   useSelector: (selector: any) =>
     selector({
       user: { userInfo: { defaultDigEmployeeId: 'agent-1' } },

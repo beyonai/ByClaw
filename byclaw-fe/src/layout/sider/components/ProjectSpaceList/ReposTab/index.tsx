@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, type Key } from 'react
 import { Button, Dropdown, Empty, Input, message } from 'antd';
 import { BranchesOutlined, DownOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
+import FilePreviewPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FilePreviewPanel';
 import { DragType } from '@/components/QueryInput/withDrag';
 import useGlobal from '@/hooks/useGlobal';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
@@ -41,14 +42,14 @@ const toFileBrowserItem = (node: ProjectRepoTreeNode) => ({
 
 const formatBranchLabel = (branch: string) => (branch.length > 10 ? `${branch.substring(0, 10)}...` : branch);
 
-const RemoteFileContent: React.FC<{ name: string; content: string; binary?: boolean }> = ({
+// 远程仓库文件只有字符串/base64，没有可下载的 resourceId+path，走 FilePreviewPanel 的 content 入口复用富预览。
+const RemoteFileContent: React.FC<{ name: string; content: string | null; binary?: boolean }> = ({
   name,
   content,
   binary,
 }) => (
-  <div style={{ height: '100%', overflow: 'auto', padding: 16 }}>
-    <div style={{ marginBottom: 8, color: '#667085', fontSize: 12 }}>{binary ? `${name} (Base64)` : name}</div>
-    <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{content}</pre>
+  <div style={{ height: '100%', overflow: 'hidden' }}>
+    <FilePreviewPanel fileName={name} content={{ data: content, binary }} />
   </div>
 );
 
@@ -72,7 +73,7 @@ const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail
   const fetchRepoTree = useCallback(
     async (repo: DevloopProjectRepo, branch?: string) => {
       const repoKey = `${repo.repoId}`;
-      const selectedBranch = branch || repo.defaultBranch || 'main';
+      const selectedBranch = branch || `${projectId}`;
       const requestSeq = (requestSeqRef.current[repoKey] || 0) + 1;
       requestSeqRef.current[repoKey] = requestSeq;
       setRepoLoadingMap((current) => ({ ...current, [repoKey]: true }));
@@ -99,22 +100,31 @@ const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail
     [projectId]
   );
 
-  const fetchBranches = useCallback(async (repo: DevloopProjectRepo) => {
-    const repoKey = `${repo.repoId}`;
-    setBranchLoadingMap((current) => ({ ...current, [repoKey]: true }));
-    try {
-      const branches = await listProjectRepoBranches(repo.repoId);
-      const defaultBranch = repo.defaultBranch || branches?.[0]?.name || 'main';
-      setBranchesMap((current) => ({ ...current, [repoKey]: branches || [] }));
-      setBranchMap((current) => ({ ...current, [repoKey]: current[repoKey] || defaultBranch }));
-    } catch (error) {
-      console.error('Failed to load remote repository branches:', error);
-      setBranchesMap((current) => ({ ...current, [repoKey]: [] }));
-      setBranchMap((current) => ({ ...current, [repoKey]: current[repoKey] || repo.defaultBranch || 'main' }));
-    } finally {
-      setBranchLoadingMap((current) => ({ ...current, [repoKey]: false }));
-    }
-  }, []);
+  const fetchBranches = useCallback(
+    async (repo: DevloopProjectRepo) => {
+      const repoKey = `${repo.repoId}`;
+      setBranchLoadingMap((current) => ({ ...current, [repoKey]: true }));
+      try {
+        const branches = await listProjectRepoBranches(repo.repoId);
+        const projectBranch = `${projectId}`;
+        const defaultBranch = branches?.some((branch) => branch.name === projectBranch)
+          ? projectBranch
+          : repo.defaultBranch || branches?.[0]?.name || 'main';
+        setBranchesMap((current) => ({ ...current, [repoKey]: branches || [] }));
+        setBranchMap((current) => ({ ...current, [repoKey]: current[repoKey] || defaultBranch }));
+        return defaultBranch;
+      } catch (error) {
+        console.error('Failed to load remote repository branches:', error);
+        setBranchesMap((current) => ({ ...current, [repoKey]: [] }));
+        const defaultBranch = repo.defaultBranch || `${projectId}`;
+        setBranchMap((current) => ({ ...current, [repoKey]: current[repoKey] || defaultBranch }));
+        return defaultBranch;
+      } finally {
+        setBranchLoadingMap((current) => ({ ...current, [repoKey]: false }));
+      }
+    },
+    [projectId]
+  );
 
   const fetchRepos = useCallback(async () => {
     if (!projectId) return;
@@ -122,8 +132,12 @@ const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail
     try {
       const nextRepos = (await listProjectRepos(projectId)) || [];
       setRepos(nextRepos);
-      await Promise.all(nextRepos.map((repo) => fetchBranches(repo)));
-      await Promise.all(nextRepos.map((repo) => fetchRepoTree(repo)));
+      await Promise.all(
+        nextRepos.map(async (repo) => {
+          const branch = await fetchBranches(repo);
+          await fetchRepoTree(repo, branch);
+        })
+      );
     } catch (error) {
       console.error('Failed to load project repositories:', error);
       setRepos([]);
@@ -214,11 +228,17 @@ const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail
       event.stopPropagation();
       if (isDirectory(node) || !onOpenDetail) return;
       const branch = branchMap[`${repo.repoId}`] || repo.defaultBranch || 'main';
+      const tabKey = `repo-remote-file:${repo.repoId}:${branch}:${node.path}`;
+      // 点击立即打开 detail panel 显示 loading，后台拉取完再刷新同一个 tab 填入真内容。
+      onOpenDetail(<RemoteFileContent name={node.name} content={null} binary={undefined} />, {
+        tabKey,
+        title: node.name,
+      });
       try {
         const file = await getProjectRepoFileContent({ repoId: repo.repoId, branch, path: node.path });
         const content = file.binary ? file.base64Content || '' : file.content || '';
-        onOpenDetail(<RemoteFileContent name={file.path || node.name} content={content} binary={file.binary} />, {
-          tabKey: `repo-remote-file:${repo.repoId}:${branch}:${node.path}`,
+        onOpenDetail(<RemoteFileContent name={node.name} content={content} binary={file.binary} />, {
+          tabKey,
           title: node.name,
         });
       } catch (error: any) {

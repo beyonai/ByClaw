@@ -2,7 +2,7 @@ import React, { useEffect, useReducer, useCallback, useState } from 'react';
 import { Skeleton, Card, Typography } from 'antd';
 import classNames from 'classnames';
 import { size } from 'lodash';
-import { useDispatch } from '@umijs/max';
+import { useDispatch, useNavigate } from '@umijs/max';
 
 import { queryRecentlySearchAsk } from '@/service/session';
 
@@ -15,6 +15,7 @@ import InfiniteScroll from '@/components/InfiniteScroll';
 import useGlobal from '@/hooks/useGlobal';
 
 import { ISession } from '@/typescript/session';
+import { isNotificationSession } from '@/utils/session';
 
 import styles from './index.module.less';
 
@@ -28,6 +29,7 @@ const DialogueCard = ({ item }: { item: ISession }) => {
   const { setSessionId, EventEmitter } = useGlobal();
 
   const dispatch = useDispatch();
+  const navigate = useNavigate();
 
   return (
     <Card
@@ -42,6 +44,14 @@ const DialogueCard = ({ item }: { item: ISession }) => {
         });
 
         setSessionId?.(`${item.sessionId}`);
+        if (isNotificationSession(item)) {
+          dispatch({
+            type: 'notice/batchReadNotice',
+            payload: { read: 'ALL' },
+          });
+          navigate('/notice');
+          return;
+        }
         EventEmitter.emit('set-sider-active-key', 'searchAndQuery');
       }}
     >

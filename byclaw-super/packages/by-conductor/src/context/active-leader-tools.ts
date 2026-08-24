@@ -2,12 +2,13 @@ import type { AgentProfile } from "../domain/types.js";
 
 export const DELEGATE_AGENT_TOOL_NAME = "delegateAgent";
 export const ASK_USER_QUESTION_TOOL_NAME = "askUserQuestion";
+export const UPDATE_TASK_PLAN_TOOL_NAME = "updateTaskPlan";
 /** Leader 读取当前 Run 附件内容的受控工具；仅允许引用本轮附件 ID。 */
 export const INSPECT_ATTACHMENT_TOOL_NAME = "inspectAttachment";
 /** Leader 把当前 Run 附件原始字节下载到会话工作区的受控工具。 */
 export const DOWNLOAD_ATTACHMENT_TOOL_NAME = "downloadAttachment";
-// Ask User 暂时下线：保留实现和协议链路，待前端交互问题修复后可集中恢复。
-export const ASK_USER_QUESTION_ENABLED = false;
+// Ask User 通过 3014 结构化问题协议与前端交互。
+export const ASK_USER_QUESTION_ENABLED = true;
 // Download Attachment 暂时下线：BE 下载接口待重新对接，期间 Leader 需要读文件时
 // 委派给专家 Agent。保留实现与注入链路，接口就绪后置 true 即可集中恢复。
 export const DOWNLOAD_ATTACHMENT_ENABLED = false;
@@ -32,7 +33,8 @@ export const LEADER_FILE_TOOL_NAMES = [
  */
 export const LEADER_CHECKPOINT_TOOL_NAMES = [
   DELEGATE_AGENT_TOOL_NAME,
-  // ASK_USER_QUESTION_TOOL_NAME,
+  ASK_USER_QUESTION_TOOL_NAME,
+  UPDATE_TASK_PLAN_TOOL_NAME,
   INSPECT_ATTACHMENT_TOOL_NAME,
   // DOWNLOAD_ATTACHMENT_TOOL_NAME,
   ...LEADER_FILE_TOOL_NAMES,
@@ -49,6 +51,7 @@ export function resolveActiveLeaderToolNames(input: {
   downloadAttachmentAvailable: boolean;
   /** 专家团团长只能委派，不能直接读取或操作附件。 */
   expertTeam: boolean;
+  taskPlanAvailable?: boolean;
 }): string[] {
   const allowDirectAttachmentTools = !input.expertTeam;
   return [
@@ -56,6 +59,7 @@ export function resolveActiveLeaderToolNames(input: {
       ? [DELEGATE_AGENT_TOOL_NAME]
       : []),
     ...(ASK_USER_QUESTION_ENABLED ? [ASK_USER_QUESTION_TOOL_NAME] : []),
+    ...(input.taskPlanAvailable ? [UPDATE_TASK_PLAN_TOOL_NAME] : []),
     ...(allowDirectAttachmentTools ? LEADER_FILE_TOOL_NAMES : []),
     ...(allowDirectAttachmentTools &&
     input.hasAttachments &&

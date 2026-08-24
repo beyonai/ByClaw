@@ -10,13 +10,7 @@ import ProjectFormModal, {
   type ProjectFormValues,
   type ProjectShareMember,
 } from '@/pages/projectSpace/components/ProjectFormModal';
-import ProjectOnboardingWizard, {
-  type ArchitectChatTarget,
-} from '@/pages/projectSpace/components/ProjectOnboardingWizard';
-import { setAgentCache } from '@/components/QueryInput/RichInput/agentCache';
-import getElementData from '@/components/QueryInput/RichInput/utils/getElementData';
-import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
-import { agentTypeMap } from '@/constants/agent';
+import ProjectOnboardingWizard from '@/pages/projectSpace/components/ProjectOnboardingWizard';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
@@ -28,14 +22,14 @@ import {
   updateProject,
 } from '@/pages/projectSpace/service';
 import type { ProjectMember, ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
-import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
-import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import {
-  saveDefaultAgent,
-  saveProjectMembers,
-  saveProjectResources,
-  type DevloopProjectSessionSearchMode,
-} from '@/service/devloop';
+  getArrayData,
+  getProjectTagMeta,
+  normalizeProjectDetail,
+  normalizeProjectSession,
+} from '@/pages/projectSpace/utils';
+import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
+import { saveProjectMembers, saveProjectResources, type DevloopProjectSessionSearchMode } from '@/service/devloop';
 import { SiderContentContext } from '../../siderContentContext';
 import DialogueCard from '../DialogueList/DialogueCard';
 import ProjectDetailPanel from './ProjectDetailModal';
@@ -158,25 +152,8 @@ const getOperationSessionDescription = (session: ProjectSession): string | undef
 };
 
 const getProjectScenes = (project: ProjectSpace, t: ProjectSpaceTranslate) => {
-  if (project.projectType === 'default') {
-    return [{ classSuffix: 'Default', text: t('scene.default') }];
-  }
-
-  // 研发项目即使强制共享，列表也优先展示业务类型标签。
-  if (project.projectType === 'develop') {
-    return [{ classSuffix: 'Development', text: t('scene.development') }];
-  }
-
-  // 运营项目优先展示业务类型；即使开启共享也不额外展示共享标签，避免项目标题区域标签过多。
-  if (project.projectType === 'operation') {
-    return [{ classSuffix: 'Operation', text: t('scene.operation') }];
-  }
-
-  if (project.sharedFlag) {
-    return [{ classSuffix: 'Shared', text: t('scene.shared') }];
-  }
-
-  return [{ classSuffix: 'Personal', text: t('scene.personal') }];
+  const projectTag = getProjectTagMeta(project);
+  return [{ classSuffix: projectTag.classSuffix, text: t(projectTag.messageId.replace('projectSpace.', '')) }];
 };
 
 // 研发项目未完成初始化(pending/initialized/initializing)时展示初始化中标签,提示尚不能建需求/启动任务。
@@ -844,10 +821,6 @@ const ProjectSpaceList: React.FC = () => {
       if (submitSharedFlag && shareMembers.length) {
         await syncProjectShareMembers(createdProjectId, shareMembers);
       }
-      // 仅研发项目落库默认员工覆盖(项目作用域);其余类型不显示该区块,也不写空覆盖行。
-      if (submitIsDevelopProject && values.defaultAgents) {
-        await saveDefaultAgent({ ...values.defaultAgents, projectId: Number(createdProjectId) });
-      }
       message.success(t('message.createSuccess'));
       const refreshedProjects = await fetchProjects();
       const createdProject = refreshedProjects.find((project) => `${project.projectId}` === createdProjectId);
@@ -858,41 +831,6 @@ const ProjectSpaceList: React.FC = () => {
       message.error(getProjectMutationErrorMessage(error, t('message.createFailed')));
       return '';
     }
-  };
-
-  const handleWizardEnterArchitectChat = (createdProjectId: string, architect?: ArchitectChatTarget) => {
-    const target = mergedProjects.find((project) => `${project.projectId}` === createdProjectId);
-    setWizardOpen(false);
-    clearDetailPanel?.();
-    // 架构员工是项目维度的,不在 redux 员工列表里,useDefaultAgentElement 查不到就兜底成「AI 助手」。
-    // agentCache 在那个 hook 里优先于 redux 查表,所以先把整份员工写进去再跳。
-    if (architect?.agentId && architect.agentName) {
-      setAgentCache(
-        getElementData(ResourceType.digitalEmployee, {
-          agentId: architect.agentId,
-          name: architect.agentName,
-          agentType: agentTypeMap.agent,
-        })
-      );
-    }
-    // 与项目详情页「查看会话」同一套:置全局会话上下文才是真正打开那条会话。
-    // 置空会落到空白新会话,且聊天页的 @ 恢复要等全局会话与 state.sessionId 对上才触发。
-    setAgentId?.(architect?.agentId || '');
-    setSessionId?.(architect?.sessionId || '');
-    // 初始化已由后端下发到架构助理的那条会话,带上 sessionId 直达该会话看进展;缺省才退化为新开会话。
-    navigate('/chat', {
-      state: {
-        keepSiderActiveKey: 'sessions',
-        from: 'projectSpace',
-        projectId: createdProjectId,
-        projectName: target?.projectName,
-        sessionId: architect?.sessionId,
-        // 聊天页据此在挂载后恢复 @ 员工。不能在这里直接 setAgentId:
-        // ChatLayoutComp 挂载时会按「无会话员工」清空一次,早设的值会被抹掉。
-        selectedAgentId: architect?.agentId,
-        selectedAgentObjectType: architect?.agentId ? 'DigEmployee' : undefined,
-      },
-    });
   };
 
   const handleNewChat = useCallback(() => {
@@ -1248,12 +1186,6 @@ const ProjectSpaceList: React.FC = () => {
           await syncProjectShareMembers(createdProjectId, shareMembers);
         }
         message.success(t('message.createSuccess'));
-      }
-      // 仅研发项目落库默认员工覆盖(项目作用域,projectId>0);后端 upsert,空串角色即清除该覆盖回退全局。
-      // 运营/普通项目不显示该区块,也不写空覆盖行。
-      const savedProjectId = editingProject ? editingProject.projectId : createdProjectId;
-      if (savedProjectId && submitIsDevelopProject && values.defaultAgents) {
-        await saveDefaultAgent({ ...values.defaultAgents, projectId: Number(savedProjectId) });
       }
       setProjectModalOpen(false);
       setEditingProject(undefined);
@@ -1729,7 +1661,6 @@ const ProjectSpaceList: React.FC = () => {
         onCancel={() => setWizardOpen(false)}
         onCreateProject={handleWizardCreateProject}
         onFinish={handleWizardFinish}
-        onEnterArchitectChat={handleWizardEnterArchitectChat}
       />
     </div>
   );

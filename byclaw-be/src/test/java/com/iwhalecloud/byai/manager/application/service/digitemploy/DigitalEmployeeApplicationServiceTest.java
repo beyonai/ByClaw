@@ -194,6 +194,7 @@ class DigitalEmployeeApplicationServiceTest {
         superassist.setDefaultDigEmployeeId(100L);
 
         when(ssResourceService.findById(200L)).thenReturn(newResource);
+        when(authApplicationService.hasResourceUsePermission(newResource, 1L)).thenReturn(true);
         when(suasSuperassistService.findById(7L)).thenReturn(superassist);
 
         SetDefaultDigitalEmployeeResultVo result = service.setDefaultDigitalEmployee(dto);
@@ -220,7 +221,7 @@ class DigitalEmployeeApplicationServiceTest {
         superassist.setDefaultDigEmployeeId(100L);
 
         when(ssResourceService.findById(200L)).thenReturn(sharedResource);
-        when(authApplicationService.queryCurrentUserUsePermittedResourceIds(any(), any())).thenReturn(Set.of(200L));
+        when(authApplicationService.hasResourceUsePermission(sharedResource, 1L)).thenReturn(true);
         when(suasSuperassistService.findById(7L)).thenReturn(superassist);
 
         SetDefaultDigitalEmployeeResultVo result = service.setDefaultDigitalEmployee(dto);
@@ -242,8 +243,7 @@ class DigitalEmployeeApplicationServiceTest {
         superassist.setDefaultDigEmployeeId(100L);
 
         when(ssResourceService.findById(201L)).thenReturn(managedResource);
-        when(authApplicationService.queryCurrentUserUsePermittedResourceIds(any(), any())).thenReturn(Set.of());
-        when(authApplicationService.hasCurrentUserAllowManagePrivilege(managedResource)).thenReturn(true);
+        when(authApplicationService.hasResourceManagePermission(managedResource)).thenReturn(true);
         when(suasSuperassistService.findById(7L)).thenReturn(superassist);
 
         SetDefaultDigitalEmployeeResultVo result = service.setDefaultDigitalEmployee(dto);
@@ -594,6 +594,7 @@ class DigitalEmployeeApplicationServiceTest {
         superassist.setDefaultDigEmployeeId(100L);
 
         when(ssResourceService.findById(100L)).thenReturn(currentDefaultResource);
+        when(authApplicationService.hasResourceUsePermission(currentDefaultResource, 1L)).thenReturn(true);
         when(suasSuperassistService.findById(7L)).thenReturn(superassist);
 
         SetDefaultDigitalEmployeeResultVo result = service.setDefaultDigitalEmployee(dto);
@@ -619,6 +620,7 @@ class DigitalEmployeeApplicationServiceTest {
         superassist.setSuperassistId(7L);
 
         when(ssResourceService.findById(200L)).thenReturn(newResource);
+        when(authApplicationService.hasResourceUsePermission(newResource, 1L)).thenReturn(true);
         when(suasSuperassistService.findById(7L)).thenReturn(superassist);
 
         SetDefaultDigitalEmployeeResultVo result = service.setDefaultDigitalEmployee(dto);
@@ -643,6 +645,7 @@ class DigitalEmployeeApplicationServiceTest {
         superassist.setSuperassistId(7L);
 
         when(ssResourceService.findById(202L)).thenReturn(newResource);
+        when(authApplicationService.hasResourceUsePermission(newResource, 1L)).thenReturn(true);
         when(suasSuperassistService.findById(7L)).thenReturn(superassist);
 
         SetDefaultDigitalEmployeeResultVo result = service.setDefaultDigitalEmployee(dto);
@@ -662,8 +665,8 @@ class DigitalEmployeeApplicationServiceTest {
 
         SsResource otherPersonalResource = buildDigitalEmployee(201L, OwnerType.PERSONAL, 2L);
         when(ssResourceService.findById(201L)).thenReturn(otherPersonalResource);
-        when(authApplicationService.queryCurrentUserUsePermittedResourceIds(any(), any())).thenReturn(Set.of());
-        when(authApplicationService.hasCurrentUserAllowManagePrivilege(otherPersonalResource)).thenReturn(false);
+        when(authApplicationService.hasResourceManagePermission(otherPersonalResource)).thenReturn(false);
+        when(authApplicationService.hasResourceUsePermission(otherPersonalResource, 1L)).thenReturn(false);
 
         assertThatThrownBy(() -> service.setDefaultDigitalEmployee(dto)).isInstanceOf(RuntimeException.class);
         verify(ssResourceService, never()).updateResourceEntity(any(SsResource.class));
@@ -1926,6 +1929,41 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
+    void findDetailsById_populatesImageModelIdFromTargetContent() {
+        DigitalEmployeeDetailsDTO result = findDetailsWithTargetContent("{\"imageModelId\":\"42\"}");
+
+        assertThat(result.getImageModelId()).isEqualTo("42");
+    }
+
+    @Test
+    void findDetailsById_returnsNullImageModelIdForLegacyTargetContent() {
+        DigitalEmployeeDetailsDTO result = findDetailsWithTargetContent("{\"relTools\":[\"tool-a\"]}");
+
+        assertThat(result.getImageModelId()).isNull();
+    }
+
+    @Test
+    void findDetailsById_returnsNullImageModelIdForJsonNull() {
+        DigitalEmployeeDetailsDTO result = findDetailsWithTargetContent("{\"imageModelId\":null}");
+
+        assertThat(result.getImageModelId()).isNull();
+    }
+
+    @Test
+    void findDetailsById_normalizesBlankImageModelIdToNull() {
+        DigitalEmployeeDetailsDTO result = findDetailsWithTargetContent("{\"imageModelId\":\"   \"}");
+
+        assertThat(result.getImageModelId()).isNull();
+    }
+
+    @Test
+    void findDetailsById_returnsNullImageModelIdForMalformedTargetContent() {
+        DigitalEmployeeDetailsDTO result = findDetailsWithTargetContent("{not-json");
+
+        assertThat(result.getImageModelId()).isNull();
+    }
+
+    @Test
     void applyInputRuntimeFieldsForResponse_allowsClearingRelPromptAndOverridingRelTools() {
         DigitalEmployeeDetailsDTO detailsDTO = new DigitalEmployeeDetailsDTO();
         detailsDTO.setRelPrompt("old-prompt");
@@ -1939,6 +1977,22 @@ class DigitalEmployeeApplicationServiceTest {
 
         assertThat(detailsDTO.getRelPrompt()).isEmpty();
         assertThat(detailsDTO.getRelTools()).isEmpty();
+    }
+
+    private DigitalEmployeeDetailsDTO findDetailsWithTargetContent(String targetContent) {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(100L);
+
+        DigitalEmployeeDetailsDTO detailsDTO = new DigitalEmployeeDetailsDTO();
+        detailsDTO.setResourceId(100L);
+        detailsDTO.setPrologue("{}");
+        detailsDTO.setTargetContent(targetContent);
+
+        when(ssResExtDigEmployeeService.findDetailsById(100L)).thenReturn(detailsDTO);
+        when(ssResourceService.findRelResource(100L)).thenReturn(List.of());
+        when(templateRuleInfoApplicationService.findMemoryConfigsByResourceIdAndUserId(100L, 1L)).thenReturn(List.of());
+
+        return service.findDetailsById(dto);
     }
 
     // generateV3 moved to MetaPromptService — see MetaPromptServiceTest

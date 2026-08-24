@@ -1,12 +1,5 @@
 import { Alert, Button, Dropdown, Input, Modal, Segmented, Tag, Typography, message } from 'antd';
-import {
-  ArrowLeftOutlined,
-  LoadingOutlined,
-  EllipsisOutlined,
-  PlusOutlined,
-  ReloadOutlined,
-  SearchOutlined,
-} from '@ant-design/icons';
+import { EllipsisOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
@@ -15,23 +8,18 @@ import {
   type OperationSelectOption,
   type OperationTaskFormValues,
 } from '@/layout/sider/components/ProjectSpaceList/operation';
-import {
-  createOperationRequirement,
-  listProjectMembers,
-  INIT_POLL_INTERVAL_MS,
-  INIT_POLL_MAX_ROUNDS,
-} from '@/service/devloop';
+import { createOperationRequirement, listProjectMembers } from '@/service/devloop';
 import { PROJECT_DETAIL_SECTIONS, type ProjectDetailSection } from '../../constants';
 import { useProjectTypeConfig } from '../../hooks/useProjectTypeConfig';
 import { checkGitHubPat, saveGitHubPat, type DevloopProjectRepo } from '@/service/devloop';
 import type { ProjectSession, ProjectSpace } from '../../types';
-import { getArrayData } from '../../utils';
+import { getArrayData, getProjectTagMeta } from '../../utils';
 import ProjectAccounts from '../ProjectAccounts';
 import ProjectMembers from '../ProjectMembers';
 import ProjectRequirements from '../ProjectRequirements';
 import ProjectResources from '../ProjectResources';
 import ProjectTasks from '../ProjectTasks';
-import ProjectDefaultAgentPanel, { type ChatWithAgentTarget } from '../ProjectDefaultAgentPanel';
+import { type ChatWithAgentTarget } from '../ProjectDefaultAgentPanel';
 import Integration from '@/layout/sider/components/ProjectSpaceList/Integration';
 import ProjectRepositoryManager from '../ProjectRepositoryManager';
 import styles from '../../index.module.less';
@@ -184,14 +172,14 @@ const ProjectDetail: React.FC<Props> = ({
     () =>
       PROJECT_DETAIL_SECTIONS.filter((item) => {
         if (item.key === 'accounts') return isOperationProject;
-        if (item.key === 'digitalAgents' || item.key === 'integration') return isDevelopProject;
+        if (item.key === 'integration') return isDevelopProject;
         if (item.key === 'sessions') return false;
         if (item.key === 'members') return showMembersSection;
         if (item.key === 'requirements') return showRequirementsSection;
         return true;
       }).sort((left, right) => {
         const order = isDevelopProject
-          ? ['tasks', 'resources', 'digitalAgents', 'members', 'integration']
+          ? ['tasks', 'resources', 'members', 'integration']
           : isOperationProject
             ? ['accounts', 'requirements', 'tasks', 'resources', 'members']
             : ['tasks', 'resources'];
@@ -235,32 +223,12 @@ const ProjectDetail: React.FC<Props> = ({
     };
   }, [isOperationProject, operationRequirementModalOpen, project?.projectId]);
 
-  // 初始化中轮询详情:架构数字员工在沙箱里干活,完成信号由后端定时任务读任务状态文件后落库。
-  // 不轮询的话横幅要等用户手动刷新才消失,建需求/启动任务也一直是禁用态。到 ready 或回退 pending 即停。
-  // 封顶后停轮询:后端收不了口时(状态文件读失败等)状态会长期停在进行中,没有上限就是无限刷 /project/get。
-  // 员工在聊那段状态一直是 initialized(只多一个会话ID),只判 initializing 会漏掉它,等不到 ready。
-  const architectChatting = project?.initStatus === 'initialized' && Number(project?.initSessionId || 0) > 0;
-  useEffect(() => {
-    if (!isDevelopProject || !onRefresh) return;
-    if (project?.initStatus !== 'initializing' && !architectChatting) return;
-    let rounds = 0;
-    const timer = setInterval(() => {
-      rounds += 1;
-      if (rounds > INIT_POLL_MAX_ROUNDS) {
-        clearInterval(timer);
-        return;
-      }
-      onRefresh();
-    }, INIT_POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, [isDevelopProject, project?.initStatus, architectChatting, onRefresh]);
-
   useEffect(() => {
     // 项目类型切换后若当前 Tab 不可见，则回退到该类型的首个业务分区。
     const currentTabHidden =
       activeSection === 'sessions' ||
       (!isOperationProject && activeSection === 'accounts') ||
-      (!isDevelopProject && (activeSection === 'digitalAgents' || activeSection === 'integration')) ||
+      (!isDevelopProject && activeSection === 'integration') ||
       (!showMembersSection && activeSection === 'members') ||
       (!showRequirementsSection && activeSection === 'requirements');
     if (currentTabHidden) {
@@ -280,22 +248,7 @@ const ProjectDetail: React.FC<Props> = ({
     return <div className={styles.detailEmpty}>{intl.formatMessage({ id: 'projectSpace.selectProject' })}</div>;
   }
 
-  // 大详情项目标签与左侧小列表使用同一套分类和短文案，普通项目继续区分个人、共享。
-  const projectTagMeta = (() => {
-    if (project.projectType === 'default') {
-      return { className: styles.detailProjectTagDefault, messageId: 'projectSpace.scene.default' };
-    }
-    if (project.projectType === 'develop') {
-      return { className: styles.detailProjectTagDevelopment, messageId: 'projectSpace.scene.development' };
-    }
-    if (project.projectType === 'operation') {
-      return { className: styles.detailProjectTagOperation, messageId: 'projectSpace.scene.operation' };
-    }
-    if (project.sharedFlag) {
-      return { className: styles.detailProjectTagShared, messageId: 'projectSpace.scene.shared' };
-    }
-    return { className: styles.detailProjectTagPersonal, messageId: 'projectSpace.scene.personal' };
-  })();
+  const projectTagMeta = getProjectTagMeta(project);
 
   const renderSectionContent = (section: ProjectDetailSection) => {
     const sectionKeyword = sectionKeywordMap[section] || '';
@@ -335,15 +288,6 @@ const ProjectDetail: React.FC<Props> = ({
           }}
         />
       );
-    }
-    if (section === 'digitalAgents') {
-      return isDevelopProject ? (
-        <ProjectDefaultAgentPanel
-          projectId={Number(project.projectId)}
-          active
-          onChatWithAgent={onNewSession ? (target) => onNewSession(target) : undefined}
-        />
-      ) : null;
     }
     if (section === 'integration') {
       return isDevelopProject ? (
@@ -424,20 +368,21 @@ const ProjectDetail: React.FC<Props> = ({
       <div className={styles.detailHeader}>
         <div className={styles.detailHeading}>
           <div className={styles.detailTitleRow}>
-            <Button type="text" className={styles.detailBackButton} icon={<ArrowLeftOutlined />} onClick={onBack}>
-              {intl.formatMessage({ id: 'projectSpace.backToList' })}
-            </Button>
-            <Typography.Title level={3} ellipsis={{ tooltip: project.projectName }}>
-              {project.projectName}
-            </Typography.Title>
-            <Tag bordered={false} className={`${styles.detailProjectTag} ${projectTagMeta.className}`}>
+            <nav className={styles.detailBreadcrumb} aria-label={intl.formatMessage({ id: 'sider.projectSpace' })}>
+              <button type="button" className={styles.detailBreadcrumbLink} onClick={onBack}>
+                {intl.formatMessage({ id: 'sider.projectSpace' })}
+              </button>
+              <span className={styles.detailBreadcrumbSeparator}>/</span>
+              <span className={styles.detailBreadcrumbCurrent} title={project.projectName}>
+                {project.projectName}
+              </span>
+            </nav>
+            <Tag
+              bordered={false}
+              className={`${styles.detailProjectTag} ${styles[`detailProjectTag${projectTagMeta.classSuffix}`]}`}
+            >
               {intl.formatMessage({ id: projectTagMeta.messageId })}
             </Tag>
-            {isDevelopProject && project.initStatus && project.initStatus !== 'ready' && (
-              <Tag bordered={false} icon={<LoadingOutlined spin />} className={styles.detailInitializingTag}>
-                {intl.formatMessage({ id: 'projectSpace.scene.initializing' })}
-              </Tag>
-            )}
             {(onEditProject || onDeleteProject) && (
               <Dropdown
                 trigger={['click']}
@@ -524,29 +469,6 @@ const ProjectDetail: React.FC<Props> = ({
           )}
         </div>
       </div>
-      {isDevelopProject && project.initStatus && project.initStatus !== 'ready' && (
-        <Alert
-          type="info"
-          showIcon
-          className={styles.projectInitAlert}
-          // 带失败原因时优先回显原因:否则用户只看到「尚未初始化」,不知道是超时回退还是从未发起。
-          // initialized 分两种:有会话=架构员工在聊,没会话=等用户去点「去跟架构聊天」。
-          // 发起入口都在项目详情弹窗,这里只做状态回显。
-          message={
-            project.initStatus === 'initializing'
-              ? intl.formatMessage({ id: 'projectSpace.detail.initGuard.bannerInitializing' })
-              : architectChatting
-                ? intl.formatMessage({ id: 'projectSpace.detail.initGuard.banner' })
-                : project.initFailReason ||
-                intl.formatMessage({
-                  id:
-                    project.initStatus === 'initialized'
-                      ? 'projectSpace.detail.initGuard.bannerInitialized'
-                      : 'projectSpace.detail.initGuard.bannerPending',
-                })
-          }
-        />
-      )}
       {isDevelopProject && !githubPatSaved && (
         <Alert
           type="warning"

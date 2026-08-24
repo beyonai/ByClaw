@@ -1,0 +1,22 @@
+{
+  "action_code": "wechat_ops_health",
+  "action_name": "健康检查",
+  "action_type": "QUERY",
+  "action_desc": "公众号运营本体健康检查；不读任何业务表，仅返回 Action 运行时可达状态",
+  "params": [
+    {
+      "paramCode": "success",
+      "paramName": "是否成功",
+      "type": "boolean",
+      "isRequired": false,
+      "direction": "output"
+    },
+    {
+      "paramCode": "status",
+      "paramName": "状态",
+      "type": "string",
+      "isRequired": false,
+      "direction": "output"
+    }
+  ]
+}

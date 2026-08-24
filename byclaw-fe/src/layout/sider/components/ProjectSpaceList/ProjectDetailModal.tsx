@@ -130,7 +130,7 @@ import {
 } from './operation';
 import { isCurrentUserTaskAssignee } from './taskAccess';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
-import { getArrayData, normalizeProjectSession } from '@/pages/projectSpace/utils';
+import { getArrayData, getProjectTagMeta, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import AntdIcon from '@/components/AntdIcon';
 import TaskTemplateModal, { type TaskTemplateApplyResult } from '@/components/TaskTemplateModal';
 import ChatAvatar from '@/components/ChatAvatar';
@@ -223,7 +223,7 @@ type RepoOption = {
   repoFullName: string;
   repoUrl?: string;
   defaultBranch?: string;
-  // 人工填写的仓库职责,给后来人和需求 AI 预拆看;存量行为空。
+  // 人工填写的仓库职责,给后来人看清这个仓库负责什么;存量行为空。
   description?: string;
   // 仓库类型:workspace 工作区(单个)/code 代码仓库(可多个);存量无值按 code 处理。
   repoType?: 'workspace' | 'code';
@@ -434,9 +434,15 @@ const normalizeOperationAccounts = (detail?: OperationProjectDetailData | null):
     .map((item, index) => ({
       id: item.id ?? item.operationAccountId ?? item.accountPkId ?? item.accountId ?? `operation-account-${index}`,
       platformId: `${item.platformId ?? item.platformCode ?? item.platform ?? item.channelId ?? ''}`,
-      accountName: item.accountName || item.name || '',
+      accountName:
+        item.accountName ||
+        item.name ||
+        (`${item.platformId ?? item.platformCode ?? item.platform ?? item.channelId ?? ''}` === 'CustomLink'
+          ? '自定义链接'
+          : ''),
       // 新接口的 accountId 是系统主键，平台侧标识优先读取 accountCode，避免卡片误展示数字主键。
       accountId: `${item.accountCode ?? item.platformAccountId ?? item.platformAccountCode ?? item.accountId ?? ''}`,
+      customUrl: item.customUrl ? `${item.customUrl}` : undefined,
       avatar: item.avatar,
       loginStatus: normalizeOperationLoginStatus(item),
       metrics: {
@@ -811,7 +817,7 @@ type RepoFormState = {
   repoFullName: string;
   repoUrl: string;
   defaultBranch: string;
-  // 仓库职责描述,可选;需求 AI 预拆靠它判断该改哪些仓库,只凭仓库名经常拆错。
+  // 仓库职责描述,可选;只凭仓库名看不出这个仓库负责什么。
   description: string;
   repoType: 'workspace' | 'code';
   provider: RepoProvider;
@@ -1271,21 +1277,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 详情标题与项目列表使用同一场景标签规则，研发项目优先于共享状态展示。
   const projectScenes = useMemo(() => {
     if (!project) return null;
-    if (projectType === 'default') {
-      return [{ classSuffix: 'Default', text: intl.formatMessage({ id: 'projectSpace.scene.default' }) }];
-    }
-    if (projectType === 'develop') {
-      return [{ classSuffix: 'Development', text: intl.formatMessage({ id: 'projectSpace.scene.development' }) }];
-    }
-    if (projectType === 'operation') {
-      // 运营标签优先于共享范围展示，详情头部只保留一个项目类型标签。
-      return [{ classSuffix: 'Operation', text: intl.formatMessage({ id: 'projectSpace.scene.operation' }) }];
-    }
-    if (project.sharedFlag) {
-      return [{ classSuffix: 'Shared', text: intl.formatMessage({ id: 'projectSpace.scene.shared' }) }];
-    }
-    return [{ classSuffix: 'Personal', text: intl.formatMessage({ id: 'projectSpace.scene.personal' }) }];
-  }, [intl, project, projectType]);
+    const projectTag = getProjectTagMeta(project);
+    return [{ classSuffix: projectTag.classSuffix, text: intl.formatMessage({ id: projectTag.messageId }) }];
+  }, [intl, project]);
   // 未配置研发项目时，即使存在历史 develop 数据也不展示研发闭环能力。
   const isDevelopProject = developProjectEnabled && projectType === 'develop';
   // 研发项目工作区初始化未就绪(pending/initializing)前禁止建需求/启动任务;普通项目与存量(无值)视为就绪。
@@ -2023,12 +2017,16 @@ const ProjectDetailPanel: React.FC<Props> = ({
       if (!projectId) return;
       setOperationAccountSaving(true);
       try {
-        const payload = {
+        const payload: any = {
           projectId,
           platformCode: values.platformId,
-          accountCode: values.accountId,
+          accountCode: values.platformId === 'CustomLink' ? '' : values.accountId,
           accountName: values.accountName,
         };
+        // 自定义链接平台需要传递 customUrl
+        if (values.platformId === 'CustomLink') {
+          payload.customUrl = values.customUrl || '';
+        }
         if (account) {
           await updateOperationAccount({ ...payload, accountId: account.id });
         } else {
@@ -2086,7 +2084,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 沙箱准备完成后立即打开远程桌面，再异步导航登录页，避免导航等待期间用户看不到扫码入口。
   const handleLoginOperationAccount = useCallback(
     async (account: OperationAccount) => {
-      const loginUrl = OPERATION_PLATFORM_LOGIN_URLS[account.platformId];
+      // 自定义链接平台使用账号自带的 customUrl，其他平台使用预设的登录地址
+      const loginUrl =
+        account.platformId === 'CustomLink' ? account.customUrl : OPERATION_PLATFORM_LOGIN_URLS[account.platformId];
       if (!loginUrl || operationAccountLoginPreparingId !== null) return;
       setOperationAccountLoginPreparingId(account.id);
       try {
@@ -6176,6 +6176,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
           canEnterSession={(task) => isCurrentUserTaskAssignee(task, userInfo)}
           onEnterSession={(task) => {
             handleOpenTaskSession(task);
+            setTaskKanbanOpen(false);
+          }}
+          onViewSession={(task) => {
+            handleOpenReadonlySession(task);
             setTaskKanbanOpen(false);
           }}
         />

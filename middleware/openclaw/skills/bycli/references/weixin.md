@@ -2,7 +2,7 @@
 
 Load this reference for every `bycli weixin` command; `--auth-source`; `WECHAT_TOKEN`, `WECHAT_COOKIE`, or `WECHAT_FINGERPRINT`; and authentication or verification failures from `mp.weixin.qq.com` or `weixin.sogou.com`.
 
-This reference tracks the Weixin command surface in `@sovovs/bycli` 2.1.25. Treat `bycli weixin --help -f yaml` and `bycli weixin <command> --help -f yaml` as the source of truth when the installed version differs. This reference only defines Weixin command execution, authentication gates, session handling, and returned records. When a caller delegates the task, return all requested records, bodies, and file metadata to that caller without choosing a canonical artifact name or storage layout.
+This reference tracks the Weixin command surface in `@sovovs/bycli` 2.1.35. Treat `bycli weixin --help -f yaml` and `bycli weixin <command> --help -f yaml` as the source of truth when the installed version differs. This reference only defines Weixin command execution, authentication gates, session handling, and returned records. When a caller delegates the task, return all requested records, bodies, and file metadata to that caller without choosing a canonical artifact name or storage layout.
 
 ## Command selection
 
@@ -18,7 +18,7 @@ This reference tracks the Weixin command surface in `@sovovs/bycli` 2.1.25. Trea
 | `download --url <article-url>` | read | Save one article as Markdown from either a direct WeChat article URL or a Sogou `/link` result; returns title, author, publish time, status, size, saved path, `source_url`, and `resolved_url`. Defaults: `--output ./weixin-articles --download-images true`. |
 | `save-articles <fakeid>` | write | Save account articles as Markdown; returns per-record status, stage, path, error, URL, `source`, and `coverage`. Supports `--name`, `--output`, `--limit`, and `--max-pages`. |
 | `download-publish-data <query>` | write | Match an exact article URL or title and save both its Excel data and Markdown analysis; returns title, publication time, URL, status, `markdownPath`, `markdownSize`, `dataPath`, `dataSize`, and error. Defaults: `--output ./weixin-publish-data --max-pages 5 --timeout 60`. |
-| `create-draft <content>` | write | Create a Weixin article draft; requires `--title`, supports `--author`, `--cover-image`, `--summary`, and `--timeout` (default 180), and returns `status` and `detail`. |
+| `create-draft [content]` | write | Create a Weixin article draft; requires `--title`, accepts inline text or `--content-file`, supports `text`, `html`, and `html-text` content formats, browser rich-text paste, official API mode, `--author`, `--cover-image`, `--summary`, `--dry-run`, and `--timeout` (default 180). Returns `status` and `detail`. |
 
 Use IDs from the corresponding list command: `accounts` supplies the `fakeid` for `articles` and `save-articles`; `collections` supplies the `collectionId` for `collection-detail`.
 
@@ -32,7 +32,7 @@ Classify discovery intent before choosing a command. A direct article URL, an al
    - **One exact match:** Select it. Return the account for identity-only requests; for listing or saving, continue with its `fakeid` and exact nickname as `--name`. The adapter may use its bounded nickname-scoped fallback under the rules below.
    - **Multiple exact matches:** Do not select one. Run `articles '<fakeid>' --limit 3 --max-pages 1` sequentially for each candidate and return numbered previews with nickname, alias, recent titles, and publication times. Preserve non-authentication preview failures; any authentication gate stops remaining previews. After the user selects a `fakeid`, omit `--name` when the selected nickname is still shared, keeping the resumed command backend-only.
    - **No exact match:** Return at most three fuzzy account suggestions from the original response and stop. Do not call `sougousearch`, select an account, or reinterpret it as topic intent. A successful empty account result is reported as no matching account and is terminal.
-4. **Article-title or topic intent starts with `sougousearch`.** Run `sougousearch '<searchQuery>' --page 1 --limit <n>` directly and return its article results. Do not run `accounts` merely because the query text could equal a nickname. A selected result passes its returned 搜狗 `/link` URL directly to `download`; return the Markdown body only after the `saved` path is readable.
+4. **Article-title or topic intent starts with `sougousearch`.** Run `sougousearch '<searchQuery>' --page 1 --limit <n>` directly and return its article results. Do not run `accounts` merely because the query text could equal a nickname. If no result title is an exact match for the requested title and only 高度相关候选 are available, return the candidate metadata and 必须先询问用户确认；未确认不得下载、不得返回 Markdown 正文。Only an explicitly confirmed candidate may pass its returned 搜狗 `/link` URL to `download`; return the Markdown body only after the `saved` path is readable.
 5. A valid empty result from either branch is a completed search outcome. Report the empty scope and stop without changing intent, retrying, or entering AutoFix. Command failures are not empty results: preserve the typed error and apply the terminal-state precedence below.
 
 ## Adapter-owned Sogou fallback identity
@@ -47,7 +47,23 @@ The internal fallback scans sequentially until an explicit empty page, an explic
 
 ## Direct command safeguards
 
-`create-draft` mutates the official account. Execute it only when the user explicitly requests draft creation and has supplied or approved the final title and body. The command validates title, body, author, and any requested cover before browser navigation. If a requested cover cannot be set or the editor does not expose a positive save confirmation, it returns `COMMAND_EXEC` and no success record. Only `status: draft saved` confirms success.
+`create-draft` mutates the official account. Execute it only when the user explicitly requests draft creation and has supplied or approved the final title and body. The command validates title, body, author, and any requested cover before performing the write.
+
+Publishing modes:
+
+- Before every real `create-draft` write, test only whether `WECHAT_APPID` and `WECHAT_APPSECRET` both exist and remain non-empty after trimming whitespace. Never print, echo, serialize, log, or return either value. If both are non-empty, pass them as `--appid "$WECHAT_APPID" --appsecret "$WECHAT_APPSECRET"` and try official API mode first. If either variable is absent or empty, pass neither API option and go directly to browser mode; a partial environment pair must never reach the command.
+- Official API mode uploads the cover and local body images through the official material API, then creates the draft with `draft/add`; `--cover-image` is required. When structured help reports `browser: conditional`, do not run `doctor`, daemon checks, Browser Bridge, `--site-session`, or `--keep-tab` before the API attempt. If an installed build reports `browser: true`, it cannot provide a browserless API attempt; update byCLI before applying this routing rule.
+- `status: draft created` is the only API success. Any API failure—including token, AppID/AppSecret, image upload, `40164` IP whitelist, `draft/add`, timeout, or missing success confirmation—automatically triggers exactly one browser-mode attempt with the same approved title, body, content format, author, summary, and cover. Preserve the API error, remove `--appid` and `--appsecret` from the fallback command, then perform `doctor` followed immediately by `daemon status` and run browser mode with `--site-session persistent --keep-tab true`. Do not ask for confirmation between the two attempts.
+- Browser mode fills the WeChat editor and saves through the logged-in browser session. `--content-format html` uses the browser's native rich-text clipboard paste path, which preserves supported inline styles, headings, lists, tables, links, and images. `--content-format html-text` keeps text and paragraph structure while discarding HTML styling. If fallback browser mode succeeds, report `draft saved` together with the preceding API failure context. If it also fails, report both failures and stop; never retry either mode or fall back from browser to API.
+- `--dry-run true` is the safety exception: always use browser mode directly, even when both environment variables are set, because API mode creates a real draft. Its only success status is `draft ready`.
+
+HTML input rules:
+
+- Use `--content-file '<article.html>' --content-format html` for a complete HTML article. Local image paths are resolved relative to the HTML file's directory and uploaded before insertion; remote HTTPS images may remain remote in browser mode. API mode requires body images to be local files so it can upload them as material before `draft/add`.
+- The HTML pipeline removes unsafe tags, event handlers, scripts, unsupported URL schemes, and unsafe style declarations. A missing, unreadable, empty, unsupported, or unuploadable image is an argument or execution failure, not a successful draft.
+- A requested cover is uploaded into the article body before it is selected as the cover in browser mode. If the requested cover cannot be confirmed, or the editor does not expose a positive save confirmation, return `COMMAND_EXEC` and no success record.
+
+Success statuses are `draft saved` for a browser save, `draft ready` for browser dry-run, and `draft created` for official API mode. Do not report success based only on navigation, a filled editor, or an HTTP request that was not confirmed by the command result.
 
 `download-publish-data` accepts an exact article URL or title. Title comparison trims and collapses whitespace but otherwise requires complete equality; title substrings are not matches. If a title matches multiple records, do not guess: rerun with the complete URL or add `--date YYYY-MM-DD` using a user-provided or already-known publication date. An absolute query URL that is not a trusted `https://mp.weixin.qq.com/s...` article URL is rejected before authentication.
 
@@ -59,6 +75,7 @@ Apply the first matching row from top to bottom. These Weixin-specific terminal 
 
 | Priority | Observed state | Required action |
 |---:|---|---|
+| 0 | The environment-selected official API attempt for `create-draft` returns anything other than `status: draft created` | Preserve the API error and automatically execute exactly one browser fallback with no `--appid` or `--appsecret`. Run browser preflight only at this point. If browser mode also fails, report both outcomes and stop. This one-way fallback overrides generic typed-error, IP-whitelist, authentication-source, timeout, and AutoFix handling for the first API attempt. |
 | 1 | An approved `download-publish-data` diagnostic rerun returned any non-success outcome, or the original command's diagnostic retry budget has already been consumed | Preserve every returned row, artifact, error, and retained trace. The rerun result is terminal; do not offer or perform another retry. For an authentication or verification outcome, freeze the browser context and report the human gate, but do not resume the original command after confirmation. |
 | 2 | `RATE_LIMITED`, or a legacy `COMMAND_EXEC` whose normalized message or combined primary context contains `freq control` or `rate limited` | Only the adapter-owned Sogou fallback may run, and only within the same command invocation under the identity rules above. Once the command returns this state, preserve it and stop. Do not run a trace rerun, do not enter AutoFix, refresh, switch authentication sources, independently call `sougousearch`, or retry by changing `--limit` or `--max-pages`. |
 | 3 | The login-gate rerun has already been consumed: the single post-confirmation login-gate rerun returned `AUTH_REQUIRED`, login `TIMEOUT` / exit code 75, a login page, CAPTCHA, or environment verification | Preserve the browser context, report the exact authentication or verification outcome, and stop. Do not ask for another confirmation or rerun the command again. |
@@ -85,7 +102,7 @@ An `EMPTY_RESULT` in this table is the final command result after any eligible a
 - Before browser commands, complete the main skill's `doctor` and `daemon status` checks. Reuse the Chrome session for `mp.weixin.qq.com` and `weixin.sogou.com`.
 - A newly leased adapter tab may begin at `about:blank`. An `mp.weixin.qq.com`-backed command navigates there and then re-reads page state; if existing cookies redirect it to an authenticated `/cgi-bin/` URL with a non-empty token, continue the command. `sougousearch` navigates to `weixin.sogou.com` instead. Do not reproduce either check with `bycli browser`.
 - If navigation reaches an authenticated `/wxamp/` URL, the connected session is a Mini Program account, not the Official Account backend required by these commands. Report the account-type mismatch and ask the user to switch to an Official Account in the same browser profile; do not call it an unauthenticated QR-login state or invoke an Official Account data endpoint.
-- Only `accounts`, `articles`, and `save-articles` support `--auth-source env`. All other Weixin commands require Browser Bridge and the logged-in browser session.
+- Only `accounts`, `articles`, and `save-articles` support `--auth-source env`. Other Weixin commands require Browser Bridge and the logged-in browser session, except the first `create-draft` attempt selected from non-empty `WECHAT_APPID` and `WECHAT_APPSECRET` when structured help reports `browser: conditional`. Its automatic fallback is browser-backed.
 - Pass only options shown by that command's structured help. In particular, `accounts`, `articles`, `sougousearch`, `collections`, `collection-detail`, `download`, and `save-articles` do not support `--timeout`; never add a generic `--timeout 180` to them.
 - Do not ask the user to extract credentials when browser authentication can satisfy the request. Do not silently switch to environment authentication after a browser, login, or verification failure.
 
@@ -103,7 +120,10 @@ bycli weixin download --url '<article-url>' --output '<directory>' --download-im
 bycli weixin save-articles '<fakeid>' --limit <n> --max-pages <n> --output '<directory>' --auth-source browser --site-session persistent --keep-tab true -f json
 bycli weixin download-publish-data '<exact article URL>' --date YYYY-MM-DD --output '<directory>' --max-pages <n> --timeout 60 --site-session persistent --keep-tab true -f json
 bycli weixin download-publish-data '<exact article title>' --output '<directory>' --max-pages <n> --timeout 60 --site-session persistent --keep-tab true -f json
-bycli weixin create-draft '<content>' --title '<title>' --author '<author>' --cover-image '<local path>' --summary '<summary>' --timeout 180 --site-session persistent --keep-tab true -f json
+bycli weixin create-draft --title '<title>' --content-file '<article.html>' --content-format html --author '<author>' --cover-image '<cover.jpg>' --summary '<summary>' --site-session persistent --keep-tab true -f json
+bycli weixin create-draft '<text body>' --title '<title>' --cover-image '<cover.jpg>' --dry-run true --site-session persistent --keep-tab true -f json
+# API mode: inject these variables locally without echoing their values.
+bycli weixin create-draft --title '<title>' --content-file '<article.html>' --content-format html --cover-image '<cover.jpg>' --appid "$WECHAT_APPID" --appsecret "$WECHAT_APPSECRET" -f json
 ```
 
 Only after `accounts` proves one unique nickname-to-`fakeid` binding for the selected `fakeid` may the corresponding account-history command include `--name` and enable the adapter-owned public fallback:
@@ -113,7 +133,7 @@ bycli weixin articles '<fakeid>' --name '<proven exact account name>' --limit <n
 bycli weixin save-articles '<fakeid>' --name '<proven exact account name>' --limit <n> --max-pages <n> --output '<directory>' --auth-source browser --site-session persistent --keep-tab true -f json
 ```
 
-Omit optional placeholders and their flags rather than passing empty strings. `--author` is limited to 8 Unicode characters and `--title` to 64 Unicode characters; oversized values return `ARGUMENT` before browser navigation. `--cover-image` must be a readable, non-empty jpg, jpeg, png, gif, or webp file. The adapter uploads it into the article body before selecting it as the cover, and failure to confirm that requested cover returns `COMMAND_EXEC`.
+Omit optional placeholders and their flags rather than passing empty strings. `--author` is limited to 8 Unicode characters and `--title` to 64 Unicode characters; oversized values return `ARGUMENT` before mode dispatch. `--cover-image` must be a readable, non-empty jpg, jpeg, png, gif, or webp file. Browser mode uploads it into the article body before selecting it as the cover; API mode uploads it as permanent image material and uses the returned media ID. A browser cover-confirmation failure returns `COMMAND_EXEC`.
 
 ## Login and verification gate
 
@@ -123,7 +143,7 @@ After the adapter's post-navigation check, treat login `AUTH_REQUIRED` / exit co
 
 An authentication outcome from an already-consumed diagnostic rerun follows terminal priority 1: freeze and preserve the browser context for the user, but do not rerun the original `download-publish-data` command after confirmation. A later execution requires a new explicit user request and starts a new original-command state; it is not a continuation of the consumed diagnostic retry.
 
-Verified for byCLI 2.1.25: `create-draft` session failures return `AUTH_REQUIRED`; both a missing backend token and an editor page that indicates an expired session enter this gate. For another installed version, follow its structured command help and typed output rather than assuming forward compatibility. Field, cover, and save-confirmation failures remain `COMMAND_EXEC` and follow their typed execution-error path.
+Verified for byCLI 2.1.35: browser-mode `create-draft` session failures return `AUTH_REQUIRED`; both a missing backend token and an editor page that indicates an expired session enter this gate. Official API mode reports token, material-upload, and draft-creation failures as typed execution errors. For another installed version, follow its structured command help and typed output rather than assuming forward compatibility. Field, cover, and save-confirmation failures remain `COMMAND_EXEC` and follow their typed execution-error path.
 
 1. Stop all tool execution immediately. Do not click, bypass, refresh, retry, navigate, focus another page, switch authentication source, or use another acquisition method.
 2. Freeze the current browser context. Do not issue another Weixin, raw browser, doctor, daemon, or browser-lifecycle command; keep the current tab and processes available for the user.
@@ -165,9 +185,11 @@ Use `--auth-source env` only when the user explicitly requests it or Browser Bri
 | `articles`, `save-articles` | `WECHAT_TOKEN` + `WECHAT_COOKIE` |
 | `accounts` | `WECHAT_TOKEN` + `WECHAT_COOKIE` + `WECHAT_FINGERPRINT` |
 
-Never use environment authentication for `sougousearch`, `collections`, `collection-detail`, `drafts`, `published`, `download`, `download-publish-data`, or `create-draft`; those commands do not expose `--auth-source`.
+Never use `--auth-source env` for `sougousearch`, `collections`, `collection-detail`, `drafts`, `published`, `download`, `download-publish-data`, or `create-draft`; those commands do not expose that option. `create-draft --appid/--appsecret` is a separate official-API mode, not Weixin environment authentication.
 
-Never mix browser-derived and environment-derived values. If variables are missing, name them without displaying their values. If all variables exist but authentication fails, ask the user to replace the complete same-session set because it may be expired or mixed across sessions.
+`WECHAT_APPID` and `WECHAT_APPSECRET` are local routing inputs only for `create-draft`. Check presence and trimmed non-emptiness without displaying values. Do not unset or modify them. Pass both only when both are valid; otherwise pass neither. Never copy their literal values into chat, traces, fixtures, committed files, or shell history.
+
+For `WECHAT_TOKEN`, `WECHAT_COOKIE`, and `WECHAT_FINGERPRINT`, never mix browser-derived and environment-derived values. If variables are missing, name them without displaying their values. If the complete set exists but authentication fails, ask the user to replace that same-session set because it may be expired or mixed across sessions. This replacement rule does not apply to `WECHAT_APPID` / `WECHAT_APPSECRET`; their failed API attempt follows the automatic browser fallback above.
 
 Never request credential values in chat. Tell the user to obtain and inject them locally:
 

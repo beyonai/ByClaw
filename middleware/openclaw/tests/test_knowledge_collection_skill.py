@@ -788,6 +788,16 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "failure to confirm that requested cover returns `COMMAND_EXEC`",
         ):
             self.assertIn(phrase, weixin)
+
+    def test_candidate_article_requires_user_confirmation_before_download(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
+
+        self.assertIn("逐字匹配", skill)
+        self.assertIn("高度相关候选", skill)
+        for text in (skill, weixin):
+            self.assertIn("必须先询问用户确认", text)
+            self.assertIn("未确认不得下载", text)
         self.assertNotIn("status: invalid URL", weixin)
         self.assertNotIn("save attempted, check browser to confirm", weixin)
 

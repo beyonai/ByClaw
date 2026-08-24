@@ -144,4 +144,5 @@ public class ConnectorController {
     private String currentUserId() {
         return String.valueOf(CurrentUserHolder.getCurrentUserId());
     }
+
 }

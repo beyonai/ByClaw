@@ -3,8 +3,11 @@ package com.iwhalecloud.byai.manager.connector;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -22,9 +25,14 @@ import com.alibaba.fastjson.JSON;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.config.JacksonConfig;
+import com.iwhalecloud.byai.manager.domain.connector.manifest.ConnectorManifestCanonicalizer;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorListDto;
+import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 @DisabledOnOs(OS.WINDOWS)
 class ConnectorSchemaTest {
+
+    private static final String IMA_OPENAPI_CLI_INTEGRITY =
+        "sha512-ckur/WWHugygFu130u/Zmn2IU9w7Ghc2cmPPxS6lFWvETSz7Rl3lqQGjMLmhSbTY2eCIR8DvqOzozOf5rWRbHg==";
 
     @Test
     void oauth2MigrationDefinesEncryptedCredentialTableAndGithubTemplateWithoutSecrets() throws Exception {
@@ -36,6 +44,101 @@ class ConnectorSchemaTest {
         assertThat(dml).contains("'github'", "'github-oauth2'", "github_oauth_client_id",
             "github_oauth_client_secret", "\"type\":\"oauth2\"", "\"mode\":\"credential-reference\"");
         assertThat(dml).doesNotContain("clientsecret\":");
+    }
+
+    @Test
+    void imaMigrationSeedsOnlyCredentialFormMetadataAndManagedEnvironmentManifest() throws Exception {
+        String sql = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql");
+        ImaConnectorSeed seed = extractImaConnectorSeed(sql);
+        JsonNode authConfig = parseJson(seed.values().get("auth_config"));
+        JsonNode runtimeManifest = parseJson(seed.values().get("runtime_manifest"));
+        JsonNode expectedAuthConfig = parseJson("""
+            {"credentialForm":{"helpUrl":"https://ima.qq.com/agent-interface","fields":[
+              {"key":"clientId","label":"Client ID","inputType":"text","maxLength":256},
+              {"key":"apiKey","label":"API Key","inputType":"password","maxLength":2048}
+            ]}}
+            """);
+        JsonNode expectedRuntimeManifest = parseJson("""
+            {"schemaVersion":"1.0","id":"ima-openapi","version":"1.0.0",
+             "runtime":{"type":"cli","authorizeIn":"be-auth-job","commands":{"version":[["ima","--version"]]}},
+             "authStorage":{"mode":"managed-environment","owner":"be-auth-job",
+               "runtimeMutation":"provider-refresh-only",
+               "managedEnvironmentKeys":["IMA_OPENAPI_CLIENTID","IMA_OPENAPI_APIKEY"],"environment":{}},
+             "skill":{"code":"ima-skill","source":"system-builtin","installScope":"user","grantScope":"agent"}}
+            """);
+        ConnectorManifestCanonicalizer canonicalizer = new ConnectorManifestCanonicalizer(OBJECT_MAPPER);
+
+        assertThat(seed.values()).containsEntry("connector_code", "ima-openapi")
+            .containsEntry("connector_name", "IMA")
+            .containsEntry("provider_code", "ima-openapi")
+            .containsEntry("skill_code", "ima-skill")
+            .containsEntry("auth_mode", "AK_SK")
+            .containsEntry("request_config", "{}")
+            .containsEntry("sort", "50");
+        assertThat(authConfig).isEqualTo(expectedAuthConfig);
+        assertThat(runtimeManifest).isEqualTo(expectedRuntimeManifest);
+        assertThat(canonicalizer.canonicalize(
+            connector("ima-openapi", "ima-skill"), seed.values().get("runtime_manifest")))
+            .contains("\"mode\":\"managed-environment\"");
+        assertThat(normalizeSql(seed.statement())).contains(
+            "WHERE NOT EXISTS ( SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'ima-openapi' )");
+    }
+
+    @Test
+    void imaSeedExtractionIgnoresOtherConnectorInsertStatements() throws Exception {
+        String sql = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql") + """
+
+            INSERT INTO byai.byai_connector_info (connector_code)
+            SELECT 'other-connector'
+            WHERE NOT EXISTS (
+                SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'other-connector'
+            );
+            """;
+
+        assertThat(extractImaConnectorSeed(sql).values())
+            .containsEntry("connector_code", "ima-openapi");
+    }
+
+    @Test
+    void imaSeedIsInV040MigrationAndMatchesFreshInit() throws Exception {
+        String migration = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql");
+        String initdb = readPreservingCase("deploy/middleware/initdb/04_dml.sql");
+
+        ImaConnectorSeed migrationSeed = extractImaConnectorSeed(migration);
+        ImaConnectorSeed initdbSeed = extractImaConnectorSeed(initdb);
+        assertThat(initdbSeed.values()).isEqualTo(migrationSeed.values());
+    }
+
+    @Test
+    void imaSkillIsRegisteredAsBuiltInInV040AndFreshInit() throws Exception {
+        String migration = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql");
+        String initdb = readPreservingCase("deploy/middleware/initdb/04_dml.sql");
+
+        String migrationSeed = extractImaBuiltInSkillSeed(migration);
+        String initdbSeed = extractImaBuiltInSkillSeed(initdb);
+        assertThat(initdbSeed).isEqualTo(migrationSeed);
+    }
+
+    @Test
+    void imaFallbackPrivilegesAreRepairedIndependently() throws Exception {
+        String migration = readPreservingCase("deploy/migrations/versions/V0.4.0/V0.4.0__dml.sql");
+        String initdb = readPreservingCase("deploy/middleware/initdb/04_dml.sql");
+
+        assertThat(normalizeSql(migration)).contains("existing.grant_type = fallback.grant_type");
+        assertThat(normalizeSql(initdb)).contains("existing.grant_type = fallback.grant_type");
+    }
+
+    @Test
+    void legacyDwsFwsAndWecomManifestsRemainCanonicalizable() throws Exception {
+        String sql = readPreservingCase("deploy/migrations/versions/V0.3.1/V0.3.1__dml.sql");
+        ConnectorManifestCanonicalizer canonicalizer = new ConnectorManifestCanonicalizer(OBJECT_MAPPER);
+
+        assertThat(canonicalizer.canonicalize(connector("dingtalk", "dws"), extractSeedManifest(sql, "dingtalk")))
+            .contains("\"mode\":\"native-home\"");
+        assertThat(canonicalizer.canonicalize(connector("lark", "fws"), extractSeedManifest(sql, "lark")))
+            .contains("\"mode\":\"native-home\"");
+        assertThat(canonicalizer.canonicalize(connector("wecom", "wecomcli"), extractSeedManifest(sql, "wecom")))
+            .contains("\"mode\":\"native-home\"");
     }
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -124,17 +227,22 @@ class ConnectorSchemaTest {
 
     @Test
     void connectorCredentialLifecycleMigrationAddsMetadataWithoutPersistingTokens() throws Exception {
-        String sql = read("deploy/migrations/versions/V0.3.2/V0.3.2__ddl.sql");
+        String ddlSql = read("deploy/migrations/versions/V0.3.2/V0.3.2__ddl.sql");
+        String dmlSql = read("deploy/migrations/versions/V0.3.2/V0.3.2__dml.sql");
 
-        assertThat(sql).contains(
+        assertThat(ddlSql).contains(
             "'access_expire_time', 'timestamp'",
             "'refresh_expire_time', 'timestamp'",
-            "'credential_state', 'varchar(32)'",
-            "'renewal_mode', 'varchar(32)'",
-            "'last_verified_at', 'timestamp'",
-            "set access_expire_time = expire_time"
+            "'credential_state', 'varchar(32) default ''unknown'''",
+            "'renewal_mode', 'varchar(32) default ''none'''",
+            "'last_verified_at', 'timestamp'"
         );
-        assertThat(sql).doesNotContain(
+        assertThat(dmlSql).contains("set access_expire_time = expire_time");
+        assertThat(ddlSql).doesNotContain(
+            "'byai_connector_auth', 'access_token'",
+            "'byai_connector_auth', 'refresh_token'"
+        );
+        assertThat(dmlSql).doesNotContain(
             "'byai_connector_auth', 'access_token'",
             "'byai_connector_auth', 'refresh_token'"
         );
@@ -255,8 +363,8 @@ class ConnectorSchemaTest {
     }
 
     @Test
-    void refreshLifecycleDdlBackfillsLarkAsARefreshTokenConnector() throws Exception {
-        String sql = read("deploy/migrations/versions/V0.3.2/V0.3.2__ddl.sql").toLowerCase(Locale.ROOT);
+    void refreshLifecycleDmlBackfillsLarkAsARefreshTokenConnector() throws Exception {
+        String sql = read("deploy/migrations/versions/V0.3.2/V0.3.2__dml.sql").toLowerCase(Locale.ROOT);
 
         assertThat(sql).contains("when 'lark-cli' then 'refresh_token'");
     }
@@ -352,10 +460,18 @@ class ConnectorSchemaTest {
         assertThat(dockerfile).contains(
             "ARG LARKSUITE_CLI_VERSION=1.0.85",
             "ARG WECOM_CLI_VERSION=0.1.9",
+            "ARG IMA_OPENAPI_CLI_VERSION=0.1.3",
+            "ARG IMA_OPENAPI_CLI_INTEGRITY=" + IMA_OPENAPI_CLI_INTEGRITY,
             "@larksuite/cli@${LARKSUITE_CLI_VERSION}",
             "@wecom/cli@${WECOM_CLI_VERSION}",
+            "ima-openapi-cli@${IMA_OPENAPI_CLI_VERSION}",
+            "${IMA_OPENAPI_CLI_INTEGRITY}",
             "lark-cli --version",
             "wecom-cli --version",
+            "test \"$(ima --version)\" = \"${IMA_OPENAPI_CLI_VERSION}\"",
+            "ima auth --help >/dev/null",
+            "ima note --help >/dev/null",
+            "ima wiki --help >/dev/null",
             "npm cache clean --force",
             "ARG DWS_VERSION=1.0.52",
             "/home/appuser/.local/bin/dws --version",
@@ -364,7 +480,27 @@ class ConnectorSchemaTest {
         );
         assertThat(dockerfile)
             .containsOnlyOnce("@larksuite/cli@${LARKSUITE_CLI_VERSION}")
-            .containsOnlyOnce("@wecom/cli@${WECOM_CLI_VERSION}");
+            .containsOnlyOnce("@wecom/cli@${WECOM_CLI_VERSION}")
+            .containsOnlyOnce("ima-openapi-cli@${IMA_OPENAPI_CLI_VERSION}");
+    }
+
+    @Test
+    void openclawImagesPinAndVerifyImaCli() throws Exception {
+        for (String path : List.of("middleware/openclaw/Dockerfile")) {
+            String dockerfile = readPreservingCase(path);
+
+            assertThat(dockerfile).contains(
+                "ARG IMA_OPENAPI_CLI_VERSION=0.1.3",
+                "ARG IMA_OPENAPI_CLI_INTEGRITY=" + IMA_OPENAPI_CLI_INTEGRITY,
+                "ima-openapi-cli@${IMA_OPENAPI_CLI_VERSION}",
+                "${IMA_OPENAPI_CLI_INTEGRITY}",
+                "test \"$(ima --version)\" = \"${IMA_OPENAPI_CLI_VERSION}\"",
+                "ima auth --help >/dev/null",
+                "ima note --help >/dev/null",
+                "ima wiki --help >/dev/null"
+            );
+            assertThat(dockerfile).containsOnlyOnce("ima-openapi-cli@${IMA_OPENAPI_CLI_VERSION}");
+        }
     }
 
     @Test
@@ -488,6 +624,146 @@ class ConnectorSchemaTest {
         return matcher.group(1);
     }
 
+    private ImaConnectorSeed extractImaConnectorSeed(String sql) {
+        String insertMarker = "INSERT INTO byai.byai_connector_info";
+        List<ImaConnectorSeed> imaSeeds = new ArrayList<>();
+        int insertStart = sql.indexOf(insertMarker);
+        while (insertStart >= 0) {
+            ImaConnectorSeed seed = extractConnectorInsert(sql, insertStart, insertMarker);
+            if ("ima-openapi".equals(seed.values().get("connector_code"))) {
+                imaSeeds.add(seed);
+            }
+            insertStart = sql.indexOf(insertMarker, insertStart + insertMarker.length());
+        }
+        assertThat(imaSeeds).as("IMA connector INSERT").hasSize(1);
+        return imaSeeds.getFirst();
+    }
+
+    private ImaConnectorSeed extractConnectorInsert(String sql, int insertStart, String insertMarker) {
+        int statementEnd = findSqlStatementEnd(sql, insertStart);
+        String statement = sql.substring(insertStart, statementEnd + 1);
+        int columnsStart = statement.indexOf('(', insertMarker.length());
+        int columnsEnd = findClosingParenthesis(statement, columnsStart);
+        int selectStart = statement.indexOf("SELECT", columnsEnd);
+        int whereStart = statement.indexOf("WHERE NOT EXISTS", selectStart);
+        assertThat(columnsStart).isGreaterThanOrEqualTo(0);
+        assertThat(selectStart).isGreaterThan(columnsEnd);
+        assertThat(whereStart).isGreaterThan(selectStart);
+
+        List<String> columns = splitSqlExpressions(statement.substring(columnsStart + 1, columnsEnd));
+        List<String> values = splitSqlExpressions(statement.substring(selectStart + "SELECT".length(), whereStart));
+        assertThat(values).hasSameSizeAs(columns);
+        Map<String, String> mapped = new LinkedHashMap<>();
+        for (int index = 0; index < columns.size(); index++) {
+            mapped.put(columns.get(index).trim(), sqlValue(values.get(index)));
+        }
+        return new ImaConnectorSeed(statement, Map.copyOf(mapped));
+    }
+
+    private int findSqlStatementEnd(String sql, int start) {
+        boolean inQuote = false;
+        for (int index = start; index < sql.length(); index++) {
+            char character = sql.charAt(index);
+            if (character == '\'') {
+                if (inQuote && index + 1 < sql.length() && sql.charAt(index + 1) == '\'') {
+                    index++;
+                }
+                else {
+                    inQuote = !inQuote;
+                }
+            }
+            else if (!inQuote && character == ';') {
+                return index;
+            }
+        }
+        throw new AssertionError("IMA connector INSERT must end with a statement delimiter");
+    }
+
+    private int findClosingParenthesis(String value, int openingIndex) {
+        int depth = 0;
+        for (int index = openingIndex; index < value.length(); index++) {
+            if (value.charAt(index) == '(') {
+                depth++;
+            }
+            else if (value.charAt(index) == ')' && --depth == 0) {
+                return index;
+            }
+        }
+        throw new AssertionError("IMA connector INSERT column list must close");
+    }
+
+    private List<String> splitSqlExpressions(String source) {
+        List<String> expressions = new ArrayList<>();
+        StringBuilder expression = new StringBuilder();
+        boolean inQuote = false;
+        int parenthesisDepth = 0;
+        for (int index = 0; index < source.length(); index++) {
+            char character = source.charAt(index);
+            if (character == '\'') {
+                expression.append(character);
+                if (inQuote && index + 1 < source.length() && source.charAt(index + 1) == '\'') {
+                    expression.append(source.charAt(++index));
+                }
+                else {
+                    inQuote = !inQuote;
+                }
+                continue;
+            }
+            if (!inQuote && character == '(') {
+                parenthesisDepth++;
+            }
+            else if (!inQuote && character == ')') {
+                parenthesisDepth--;
+            }
+            if (!inQuote && parenthesisDepth == 0 && character == ',') {
+                expressions.add(expression.toString().trim());
+                expression.setLength(0);
+                continue;
+            }
+            expression.append(character);
+        }
+        expressions.add(expression.toString().trim());
+        return expressions;
+    }
+
+    private String sqlValue(String expression) {
+        String value = expression.trim();
+        if (value.startsWith("'") && value.endsWith("'")) {
+            return value.substring(1, value.length() - 1).replace("''", "'");
+        }
+        return value;
+    }
+
+    private String normalizeSql(String value) {
+        return value.replaceAll("\\s+", " ").trim();
+    }
+
+    private String extractImaBuiltInSkillSeed(String sql) {
+        String startMarker = "-- IMA OpenAPI 内置 Skill 注册";
+        String endMarker = "-- IMA OpenAPI 内置 Skill 注册结束";
+        int start = sql.indexOf(startMarker);
+        int end = sql.indexOf(endMarker, start + startMarker.length());
+
+        assertThat(start).as("IMA built-in skill seed start marker").isGreaterThanOrEqualTo(0);
+        assertThat(end).as("IMA built-in skill seed end marker").isGreaterThan(start);
+        String section = normalizeSql(sql.substring(start, end));
+        assertThat(section).contains(
+            "OPENCLAW_BUNDLED_SKILLS",
+            "\"skillCode\":\"ima-skill\"",
+            "INSERT INTO byai.ss_resource",
+            "'ima-skill'",
+            "INSERT INTO byai.ss_res_ext_skill",
+            "'inner', 'SYSTEM_BUILTIN', '0.1.3'",
+            "UPDATE byai.ss_res_ext_skill",
+            "INSERT INTO byai.au_privilege_grant",
+            "WHERE resource_code = 'dws'",
+            "IMA 授权兜底：DWS 尚未初始化授权时，至少授予内置管理员使用和管理权限",
+            "'READ', 'SKILL', ima.resource_id",
+            "FROM (VALUES ('AVAILABLE_USE'), ('ALLOW_MANAGE')) AS fallback(grant_type)"
+        );
+        return section;
+    }
+
     private ConnectorSeed extractConnectorSeed(String sql, Pattern pattern, String label) {
         Matcher matcher = pattern.matcher(sql);
         assertThat(matcher.find()).as(label).isTrue();
@@ -506,6 +782,13 @@ class ConnectorSchemaTest {
         ConnectorListDto dto = new ConnectorListDto();
         dto.setCredentialExpiresAt(Date.from(Instant.parse("2026-08-10T04:30:00Z")));
         return dto;
+    }
+
+    private ConnectorInfo connector(String connectorCode, String skillCode) {
+        ConnectorInfo connector = new ConnectorInfo();
+        connector.setConnectorCode(connectorCode);
+        connector.setSkillCode(skillCode);
+        return connector;
     }
 
     private String read(String relativePath) throws Exception {
@@ -539,5 +822,8 @@ class ConnectorSchemaTest {
         String authConfig,
         String runtimeManifest
     ) {
+    }
+
+    private record ImaConnectorSeed(String statement, Map<String, String> values) {
     }
 }

@@ -34,6 +34,7 @@ import {
   EyeOutlined,
   ExclamationCircleOutlined,
   PlusOutlined,
+  DownOutlined,
 } from '@ant-design/icons';
 import classnames from 'classnames';
 import { compact, set, trim } from 'lodash';
@@ -661,6 +662,7 @@ const ConfigForm = (props) => {
     ontologyResourcesDirty = false,
     employeeGroupMembers = [],
     setEmployeeGroupMembers,
+    imageModelSelect,
   } = props;
 
   const intl = useIntl();
@@ -2465,11 +2467,14 @@ const ConfigForm = (props) => {
             </div>
           </div>
           <div className={classnames(styles.configurationDetails, 'full-height')}>
-            <div className={classnames('ub ub-ac', styles.marginBottom12)}>
+            <div className={styles.configurationHeader}>
               <div className={styles.fontSize16Weight500}>
                 {intl.formatMessage({ id: 'employeeDetail.configDetails' })}
               </div>
-              <div className={classnames(pStyles.topSection, 'ub-f1')}>
+            </div>
+            <div className={styles.modelConfigGrid}>
+              <div className={styles.modelConfigItem}>
+                <span className={styles.modelConfigLabel}>{intl.formatMessage({ id: 'employeeDetail.qaModel' })}</span>
                 <Popover
                   content={
                     <ModelPopover
@@ -2486,13 +2491,14 @@ const ConfigForm = (props) => {
                   placement="bottomRight"
                   arrow={false}
                 >
-                  <div className={pStyles.configBox}>
-                    <AntdIcon type="icon-a-Sphereyuanqiu1" className={styles.fontSize20} />
-                    <span className={pStyles.modelName}>{modelName}</span>
-                    <AntdIcon type="icon-a-Downxia1" />
-                  </div>
+                  <button type="button" className={styles.modelSelectTrigger} disabled={isReadOnly} title={modelName}>
+                    <AntdIcon type="icon-a-Sphereyuanqiu1" className={styles.modelSelectIcon} />
+                    <span className={styles.modelSelectValue}>{modelName || '-'}</span>
+                    <DownOutlined className={styles.modelSelectArrow} />
+                  </button>
                 </Popover>
               </div>
+              {imageModelSelect}
             </div>
 
             {/* 数字员工/数字员工组类型 */}
@@ -2541,7 +2547,11 @@ const ConfigForm = (props) => {
             </div>
 
             {/* 所属领域 */}
-            <Form.Item label={intl.formatMessage({ id: 'employeeDetail.catalogManage' })} name="catalogId">
+            <Form.Item
+              className={styles.configFieldFormItem}
+              label={intl.formatMessage({ id: 'employeeDetail.catalogManage' })}
+              name="catalogId"
+            >
               <TreeSelect
                 allowClear
                 treeData={catalogList}

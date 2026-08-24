@@ -389,7 +389,8 @@ public class FileBrowserController {
 
             return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + encodedFileName)
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .contentType(MediaType.parseMediaType("application/zip"))
                 .body(body);
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();

@@ -19,6 +19,7 @@ import com.iwhalecloud.byai.manager.domain.position.service.PositionService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.station.service.StationService;
+import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.auth.AuthDTO;
 import com.iwhalecloud.byai.manager.dto.auth.AuthRedBlackDTO;
@@ -106,10 +107,12 @@ class AuthApplicationServiceTest {
         OrganizationService organizationService = mock(OrganizationService.class);
         PositionService positionService = mock(PositionService.class);
         StationService stationService = mock(StationService.class);
+        SuasSuperassistService suasSuperassistService = mock(SuasSuperassistService.class);
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         ReflectionTestUtils.setField(service, "organizationService", organizationService);
         ReflectionTestUtils.setField(service, "positionService", positionService);
         ReflectionTestUtils.setField(service, "stationService", stationService);
+        ReflectionTestUtils.setField(service, "suasSuperassistService", suasSuperassistService);
         if (ReflectionTestUtils.getField(service, "privilegeGrantMapper") == null) {
             ReflectionTestUtils.setField(service, "privilegeGrantMapper", mock(PrivilegeGrantMapper.class));
         }
@@ -117,6 +120,7 @@ class AuthApplicationServiceTest {
         when(organizationService.findEffectiveOrganizationIdsByUserId(any())).thenReturn(Set.of());
         when(positionService.findPositionByUserId(any())).thenReturn(List.of());
         when(stationService.getStationByUserId(any())).thenReturn(null);
+        when(suasSuperassistService.findById(any())).thenReturn(null);
     }
 
     @ParameterizedTest

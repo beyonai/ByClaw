@@ -195,10 +195,42 @@
 }
 
 .authorizationModal,
-.qrModal {
+.qrModal,
+.imaCredentialModal {
   :global(.ant-modal-content) {
     border-radius: 16px;
   }
+}
+
+.imaCredentialContent {
+  text-align: center;
+
+  > .connectorIcon {
+    width: 48px;
+    height: 48px;
+    margin-bottom: 8px;
+  }
+
+  h2 {
+    margin: 8px 0;
+    color: #172033;
+    font-size: 21px;
+  }
+
+  > p {
+    margin: 0 0 12px;
+    color: #697586;
+    line-height: 22px;
+  }
+
+  > a {
+    color: #1677ff;
+  }
+}
+
+.imaCredentialForm {
+  margin-top: 20px;
+  text-align: left;
 }
 
 .authorizationContent,

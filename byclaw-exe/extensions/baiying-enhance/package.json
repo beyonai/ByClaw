@@ -5,11 +5,12 @@
   "description": "Baiying-style dynamic agent registration and dispatch for OpenClaw",
   "type": "module",
   "scripts": {
-    "build": "esbuild index.ts --bundle --splitting --platform=node --format=esm --target=node20 --outdir=dist --entry-names=[name] --chunk-names=chunks/[name]-[hash] --sourcemap --packages=external --external:openclaw --external:minio --loader:.md=text && esbuild src/aimodel-secret-resolver-cli.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/aimodel-secret-resolver-cli.js --sourcemap --packages=external --banner:js='import { createRequire } from \"node:module\"; const require = createRequire(import.meta.url);'",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && esbuild index.ts --bundle --splitting --platform=node --format=esm --target=node20 --outdir=dist --entry-names=[name] --chunk-names=chunks/[name]-[hash] --sourcemap --packages=external --external:openclaw --external:minio --loader:.md=text && esbuild src/aimodel-secret-resolver-cli.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/aimodel-secret-resolver-cli.js --sourcemap --packages=external --banner:js='import { createRequire } from \"node:module\"; const require = createRequire(import.meta.url);'",
     "test": "vitest run"
   },
   "dependencies": {
-    "@byclaw/by-framework": "1.5.2",
+    "@byclaw/by-framework": "1.5.3",
     "@opentelemetry/api": "1.9.1",
     "@sinclair/typebox": "0.34.48",
     "ioredis": "5.10.1"

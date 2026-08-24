@@ -84,25 +84,6 @@
   }
 }
 
-.projectCreateButton {
-  width: 100px;
-  height: 32px;
-  padding: 0;
-  border-color: #1f1f1f;
-  border-radius: 8px;
-  color: #fff;
-  font-size: 14px;
-  font-weight: 500;
-  background: #1f1f1f;
-
-  &:hover,
-  &:focus-visible {
-    border-color: #353535 !important;
-    color: #fff !important;
-    background: #353535 !important;
-  }
-}
-
 .projectHeroIllustration {
   min-width: 280px;
   max-width: 520px;
@@ -117,8 +98,7 @@
     width: 100%;
     height: 100%;
     object-fit: contain;
-    filter: grayscale(1);
-    opacity: 0.78;
+    opacity: 1;
   }
 }
 
@@ -153,6 +133,72 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
+}
+
+.projectSkeletonCard {
+  min-width: 0;
+  min-height: 80px;
+  padding: 14px 18px;
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  background: #fff;
+}
+
+.projectSkeletonIcon,
+.projectSkeletonTitle,
+.projectSkeletonDescription {
+  background: linear-gradient(90deg, #f1f1f1 25%, #e5e5e5 37%, #f1f1f1 63%);
+  background-size: 400% 100%;
+  animation: projectSkeletonShimmer 1.4s ease infinite;
+}
+
+.projectSkeletonIcon {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border-radius: 10px;
+}
+
+.projectSkeletonBody {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.projectSkeletonTitle {
+  width: 42%;
+  height: 14px;
+  border-radius: 7px;
+}
+
+.projectSkeletonDescription {
+  width: 72%;
+  height: 12px;
+  border-radius: 6px;
+}
+
+@keyframes projectSkeletonShimmer {
+  0% {
+    background-position: 100% 0;
+  }
+
+  100% {
+    background-position: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .projectSkeletonIcon,
+  .projectSkeletonTitle,
+  .projectSkeletonDescription {
+    animation: none;
+  }
 }
 
 .projectListCard {
@@ -198,6 +244,13 @@
   flex-direction: column;
   gap: 4px;
 
+  .projectCardTitleRow {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
   strong,
   small {
     overflow: hidden;
@@ -218,6 +271,32 @@
     font-weight: 400;
     line-height: 20px;
   }
+}
+
+.projectTypeTag {
+  height: 18px;
+  margin-inline-end: 0;
+  padding: 0 5px;
+  border-radius: 5px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.projectTypeTagNormal {
+  color: #596579;
+  background: #f1f4f8;
+}
+
+.projectTypeTagDevelopment {
+  color: #7a3fd1;
+  background: #f3ecff;
+}
+
+.projectTypeTagOperation {
+  color: #1677b8;
+  background: #e8f4fc;
 }
 
 .projectCardMore {
@@ -429,24 +508,51 @@
   align-items: center;
   gap: 6px;
   margin-bottom: 0;
-
-  h3 {
-    min-width: 0;
-  }
 }
 
-.detailBackButton {
-  height: 32px;
-  flex-shrink: 0;
-  padding: 0 8px;
-  color: #596579;
-  font-size: 14px;
+.detailBreadcrumb {
+  min-width: 0;
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  color: #6b6f76;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 24px;
+  white-space: nowrap;
+}
+
+.detailBreadcrumbLink {
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  background: transparent;
 
   &:hover,
   &:focus-visible {
-    color: #202020 !important;
-    background: #f1f3f5 !important;
+    color: #14161a;
+    text-decoration: underline;
+    outline: none;
   }
+}
+
+.detailBreadcrumbSeparator {
+  flex: 0 0 auto;
+  color: #a3a7ad;
+}
+
+.detailBreadcrumbCurrent {
+  min-width: 0;
+  overflow: hidden;
+  color: #14161a;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .detailDescription {
@@ -471,17 +577,7 @@
   line-height: 1;
 }
 
-.detailProjectTagPersonal {
-  color: #246bfe;
-  background: #eaf2ff;
-}
-
-.detailProjectTagShared {
-  color: #16835a;
-  background: #eaf8f0;
-}
-
-.detailProjectTagDefault {
+.detailProjectTagNormal {
   color: #596579;
   background: #f1f4f8;
 }
@@ -1418,6 +1514,14 @@
   }
 }
 
+.resourceObjectFilesBody {
+  height: 100%;
+  max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
 .resourceSimpleItem {
   min-width: 0;
   min-height: 56px;
@@ -1523,6 +1627,45 @@
   }
 }
 
+.resourceRepoInitAction {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.resourceRepoInitProgress {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #98a2b3;
+  font-size: 12px;
+}
+
+.resourceInitConfigBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.resourceInitConfigDescription {
+  color: #667085;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.resourceInitConfigField {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.resourceInitConfigLabel {
+  color: #333;
+  font-weight: 500;
+}
+
 .resourceSimpleItem:hover .resourceMoreButton,
 .resourceSimpleItem:focus-within .resourceMoreButton {
   opacity: 1;
@@ -1559,6 +1702,80 @@
   :global(.@{antPrefix}-typography strong) {
     font-size: 13px;
   }
+}
+
+.resourceKnowledgeGroup {
+  min-width: 0;
+  margin-bottom: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.62);
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.resourceKnowledgeHeader {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  :global(.@{antPrefix}-typography) {
+    min-width: 0;
+    flex: 1;
+    font-size: 13px;
+  }
+}
+
+.resourceKnowledgeGroupIcon {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  color: #175cd3;
+  background: #eff8ff;
+  font-size: 15px;
+}
+
+.resourceKnowledgeFiles {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  padding-left: 36px;
+}
+
+.resourceKnowledgeFile {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 5px;
+  color: #475467;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    color: #175cd3;
+    background: #f2f4f7;
+    outline: none;
+  }
+}
+
+.resourceKnowledgeFileName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .resourceRepoItem {

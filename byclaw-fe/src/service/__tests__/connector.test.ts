@@ -1,4 +1,11 @@
-import { queryAllConnectors, queryConnectorList, revokeConnectorAuthorization } from '../connector';
+import {
+  queryAllConnectors,
+  queryConnectorList,
+  revokeConnectorAuthorization,
+  startConnectorAuthorization,
+  startConnectorCredentialAuthorization,
+  type StartConnectorAuthorizationPayload,
+} from '../connector';
 
 jest.mock('@/service/common/request', () => ({
   GET: jest.fn(),
@@ -25,6 +32,67 @@ describe('connector service', () => {
     revokeConnectorAuthorization(9);
 
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/connector/authorization/revoke', { connectorId: 9 });
+  });
+
+  it('sends IMA credentials only in the start authorization request body', () => {
+    startConnectorCredentialAuthorization({
+      connectorId: 9,
+      redirectUrl: 'https://byclaw.example',
+      credentials: { clientId: 'client-id', apiKey: 'api-key' },
+    });
+
+    expect(mockPOST).toHaveBeenCalledWith(
+      '/byaiService/connector/authorization/start',
+      {
+        connectorId: 9,
+        redirectUrl: 'https://byclaw.example',
+        credentials: { clientId: 'client-id', apiKey: 'api-key' },
+      },
+      { responseCfg: { hideErrorTips: true } }
+    );
+  });
+
+  it('keeps legacy authorization requests free of credentials and request overrides', () => {
+    startConnectorAuthorization({ connectorId: 9, redirectUrl: 'https://byclaw.example' });
+
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/connector/authorization/start', {
+      connectorId: 9,
+      redirectUrl: 'https://byclaw.example',
+    });
+  });
+
+  it('passes the credential verification abort controller to the request layer', () => {
+    const cancelToken = new AbortController();
+
+    startConnectorCredentialAuthorization({
+      connectorId: 9,
+      redirectUrl: 'https://byclaw.example',
+      credentials: { clientId: 'client-id', apiKey: 'api-key' },
+      cancelToken,
+    });
+
+    expect(mockPOST).toHaveBeenCalledWith(
+      '/byaiService/connector/authorization/start',
+      {
+        connectorId: 9,
+        redirectUrl: 'https://byclaw.example',
+        credentials: { clientId: 'client-id', apiKey: 'api-key' },
+      },
+      { cancelToken, responseCfg: { hideErrorTips: true } }
+    );
+  });
+
+  it('does not allow credentials in the legacy authorization payload type', () => {
+    const payload: StartConnectorAuthorizationPayload = {
+      connectorId: 9,
+      redirectUrl: 'https://byclaw.example',
+    };
+
+    expect(payload).toEqual({ connectorId: 9, redirectUrl: 'https://byclaw.example' });
+    if (false) {
+      // @ts-expect-error Credentials must use startConnectorCredentialAuthorization.
+      startConnectorAuthorization({ ...payload, credentials: { clientId: 'client-id', apiKey: 'api-key' } });
+    }
   });
 
   it('loads every connector page and removes duplicate connector ids', async () => {

@@ -1,5 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { Modal } from 'antd';
 
 const mockMessageError = jest.fn();
 const mockMessageSuccess = jest.fn();
@@ -14,6 +15,9 @@ jest.mock('@umijs/max', () => ({
 }));
 
 jest.mock('@/components/AntdIcon', () => () => null);
+jest.mock('@umijs/max', () => ({
+  useSelector: (selector: (state: any) => unknown) => selector({ user: { userInfo: { userId: 1 } } }),
+}));
 jest.mock('@/service/connector', () => ({
   cancelConnectorAuthorization: jest.fn(),
   getConnectorAuthorization: jest.fn(),
@@ -21,6 +25,7 @@ jest.mock('@/service/connector', () => ({
   queryAllConnectors: jest.fn(),
   revokeConnectorAuthorization: jest.fn(),
   startConnectorAuthorization: jest.fn(),
+  startConnectorCredentialAuthorization: jest.fn(),
   updateConnectorEnable: jest.fn(),
 }));
 jest.mock('@umijs/max', () => ({
@@ -53,6 +58,7 @@ import {
   queryConnectorList,
   revokeConnectorAuthorization,
   startConnectorAuthorization,
+  startConnectorCredentialAuthorization,
   updateConnectorEnable,
   type ConnectorAuthorization,
 } from '@/service/connector';
@@ -73,6 +79,9 @@ const mockRevokeConnectorAuthorization = revokeConnectorAuthorization as jest.Mo
 >;
 const mockStartConnectorAuthorization = startConnectorAuthorization as jest.MockedFunction<
   typeof startConnectorAuthorization
+>;
+const mockStartConnectorCredentialAuthorization = startConnectorCredentialAuthorization as jest.MockedFunction<
+  typeof startConnectorCredentialAuthorization
 >;
 const mockUpdateConnectorEnable = updateConnectorEnable as jest.MockedFunction<typeof updateConnectorEnable>;
 
@@ -110,6 +119,7 @@ describe('ConnectorControl authorization states', () => {
     mockRevokeConnectorAuthorization.mockResolvedValue(true);
     mockUpdateConnectorEnable.mockResolvedValue(true);
     mockStartConnectorAuthorization.mockReset();
+    mockStartConnectorCredentialAuthorization.mockReset();
     mockGetConnectorAuthorization.mockReset();
     mockQueryAllConnectors.mockImplementation(async () => {
       const response = await mockQueryConnectorList({ pageNum: 1, pageSize: 100, keyword: '' });
@@ -134,6 +144,7 @@ describe('ConnectorControl authorization states', () => {
   });
 
   afterEach(() => {
+    Modal.destroyAll();
     jest.clearAllTimers();
     jest.useRealTimers();
   });
@@ -1231,7 +1242,7 @@ describe('ConnectorControl authorization states', () => {
         .getByRole('heading', { name: '连接 企业微信 作为 AI 知识库' })
         .closest('[role="dialog"]');
       expect(authorizationDialog).not.toBeNull();
-      fireEvent.click(within(authorizationDialog!).getByRole('button', { name: 'Close' }));
+      fireEvent.click(within(authorizationDialog as HTMLElement).getByRole('button', { name: 'Close' }));
 
       await act(async () => {
         resolveStartAuthorization({
@@ -1277,7 +1288,7 @@ describe('ConnectorControl authorization states', () => {
       .getByRole('heading', { name: '连接 企业微信 作为 AI 知识库' })
       .closest('[role="dialog"]');
     expect(authorizationDialog).not.toBeNull();
-    const closeButton = within(authorizationDialog!).getByRole('button', { name: 'Close' });
+    const closeButton = within(authorizationDialog as HTMLElement).getByRole('button', { name: 'Close' });
     fireEvent.click(closeButton);
     fireEvent.click(closeButton);
     jest.useFakeTimers();
@@ -1306,7 +1317,7 @@ describe('ConnectorControl authorization states', () => {
       .getByRole('heading', { name: '连接 企业微信 作为 AI 知识库' })
       .closest('[role="dialog"]');
     expect(repeatedAuthorizationDialog).not.toBeNull();
-    fireEvent.click(within(repeatedAuthorizationDialog!).getByRole('button', { name: 'Close' }));
+    fireEvent.click(within(repeatedAuthorizationDialog as HTMLElement).getByRole('button', { name: 'Close' }));
 
     await act(async () => {
       startResolvers[1]({
@@ -1582,5 +1593,656 @@ describe('ConnectorControl authorization states', () => {
 
     expect(mockMessageError).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('link', { name: '打开 企业微信 授权页' })).not.toBeInTheDocument();
+  });
+
+  it('opens the IMA credential form from validated list metadata', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 10,
+          connectorCode: 'ima-openapi',
+          connectorName: 'IMA',
+          connectorType: 'SYSTEM',
+          description: 'IMA 知识库',
+          enableFlag: null,
+          authMode: 'AK_SK',
+          credentialForm: {
+            helpUrl: 'https://ima.qq.com/openapi',
+            fields: [
+              { key: 'clientId', label: 'Client ID', inputType: 'text', maxLength: 256 },
+              { key: 'apiKey', label: 'API Key', inputType: 'password', maxLength: 2048 },
+            ],
+          },
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+
+    expect(await screen.findByRole('heading', { name: '连接 IMA' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Client ID')).toHaveAttribute('maxLength', '256');
+    expect(screen.getByLabelText('API Key')).toHaveAttribute('type', 'password');
+    expect(screen.getByLabelText('API Key')).toHaveAttribute('autocomplete', 'off');
+    expect(screen.getByRole('link', { name: '前往 IMA 获取凭据' })).toHaveAttribute(
+      'href',
+      'https://ima.qq.com/openapi'
+    );
+  });
+
+  it('does not submit an empty IMA credential form', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 10,
+          connectorCode: 'ima-openapi',
+          connectorName: 'IMA',
+          connectorType: 'SYSTEM',
+          description: 'IMA 知识库',
+          enableFlag: null,
+          authMode: 'AK_SK',
+          credentialForm: {
+            helpUrl: 'https://ima.qq.com/openapi',
+            fields: [
+              { key: 'clientId', label: 'Client ID', inputType: 'text', maxLength: 256 },
+              { key: 'apiKey', label: 'API Key', inputType: 'password', maxLength: 2048 },
+            ],
+          },
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+    fireEvent.click(await screen.findByRole('button', { name: '保存并连接' }));
+
+    await screen.findByText('请输入Client ID');
+    await waitFor(() => expect(mockStartConnectorAuthorization).not.toHaveBeenCalled());
+  });
+
+  it('submits IMA credentials once, closes on synchronous success, and refreshes the catalog', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 10,
+          connectorCode: 'ima-openapi',
+          connectorName: 'IMA',
+          connectorType: 'SYSTEM',
+          description: 'IMA 知识库',
+          enableFlag: null,
+          authMode: 'AK_SK',
+          credentialForm: {
+            helpUrl: 'https://ima.qq.com/openapi',
+            fields: [
+              { key: 'clientId', label: 'Client ID', inputType: 'text', maxLength: 256 },
+              { key: 'apiKey', label: 'API Key', inputType: 'password', maxLength: 2048 },
+            ],
+          },
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+    mockStartConnectorCredentialAuthorization.mockResolvedValue({
+      authorizationId: 'ima-authorization-10',
+      connectorId: 10,
+      status: 'connected',
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+    fireEvent.change(screen.getByLabelText('Client ID'), { target: { value: 'client-id' } });
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'api-key' } });
+    const queryCountBeforeSubmit = mockQueryAllConnectors.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: '保存并连接' }));
+
+    await waitFor(() => {
+      expect(mockStartConnectorCredentialAuthorization).toHaveBeenCalledWith({
+        connectorId: 10,
+        redirectUrl: window.location.origin,
+        credentials: { clientId: 'client-id', apiKey: 'api-key' },
+        cancelToken: expect.any(AbortController),
+      });
+    });
+    expect(mockStartConnectorAuthorization).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '连接 IMA' })).not.toBeInTheDocument());
+    await waitFor(() => expect(mockQueryAllConnectors.mock.calls.length).toBeGreaterThan(queryCountBeforeSubmit));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+    expect(await screen.findByLabelText('Client ID')).toHaveValue('');
+    expect(screen.getByLabelText('API Key')).toHaveValue('');
+    expect(mockGetConnectorAuthorization).not.toHaveBeenCalled();
+    expect(mockMessageSuccess).toHaveBeenCalledWith('IMA 已连接');
+  });
+
+  it('clears IMA credential fields when credential verification fails without exposing the request error', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 10,
+          connectorCode: 'ima-openapi',
+          connectorName: 'IMA',
+          connectorType: 'SYSTEM',
+          description: 'IMA 知识库',
+          enableFlag: null,
+          authMode: 'AK_SK',
+          credentialForm: {
+            helpUrl: 'https://ima.qq.com/openapi',
+            fields: [
+              { key: 'clientId', label: 'Client ID', inputType: 'text', maxLength: 256 },
+              { key: 'apiKey', label: 'API Key', inputType: 'password', maxLength: 2048 },
+            ],
+          },
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+    mockStartConnectorCredentialAuthorization.mockRejectedValue('api-key-must-not-be-shown');
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+    fireEvent.change(screen.getByLabelText('Client ID'), { target: { value: 'client-id' } });
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'api-key' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存并连接' }));
+
+    await waitFor(() => expect(mockMessageError).toHaveBeenCalledWith('IMA 凭据验证失败，请检查后重试'));
+    expect(mockStartConnectorCredentialAuthorization).toHaveBeenCalledTimes(1);
+    expect(mockStartConnectorAuthorization).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Client ID')).toHaveValue('');
+    expect(screen.getByLabelText('API Key')).toHaveValue('');
+    expect(screen.queryByText('api-key-must-not-be-shown')).not.toBeInTheDocument();
+  });
+
+  it('clears IMA credential fields when the credential modal is cancelled', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 10,
+          connectorCode: 'ima-openapi',
+          connectorName: 'IMA',
+          connectorType: 'SYSTEM',
+          description: 'IMA 知识库',
+          enableFlag: null,
+          authMode: 'AK_SK',
+          credentialForm: {
+            helpUrl: 'https://ima.qq.com/openapi',
+            fields: [
+              { key: 'clientId', label: 'Client ID', inputType: 'text', maxLength: 256 },
+              { key: 'apiKey', label: 'API Key', inputType: 'password', maxLength: 2048 },
+            ],
+          },
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+    fireEvent.change(screen.getByLabelText('Client ID'), { target: { value: 'client-id' } });
+    const credentialDialog = screen.getByRole('heading', { name: '连接 IMA' }).closest('[role="dialog"]');
+    expect(credentialDialog).not.toBeNull();
+    fireEvent.click(within(credentialDialog as HTMLElement).getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: '连接' }));
+
+    expect(await screen.findByLabelText('Client ID')).toHaveValue('');
+  });
+
+  it('keeps the existing OAuth authorization UI for non-IMA connectors', async () => {
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+
+    expect(await screen.findByRole('heading', { name: '连接 企业微信 作为 AI 知识库' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Client ID')).not.toBeInTheDocument();
+  });
+
+  it('does not show IMA credential UI for another AK_SK connector', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 11,
+          connectorCode: 'another-ak-sk',
+          connectorName: '其他凭据连接器',
+          connectorType: 'SYSTEM',
+          description: '其他知识库',
+          enableFlag: null,
+          authMode: 'AK_SK',
+          credentialForm: {
+            helpUrl: 'https://example.com/credentials',
+            fields: [
+              { key: 'clientId', label: 'Client ID', inputType: 'text', maxLength: 256 },
+              { key: 'apiKey', label: 'API Key', inputType: 'password', maxLength: 2048 },
+            ],
+          },
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+
+    expect(await screen.findByRole('heading', { name: '连接 其他凭据连接器 作为 AI 知识库' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '连接 IMA' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Client ID')).not.toBeInTheDocument();
+  });
+
+  it('does not show IMA revocation copy for another AK_SK connector', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 11,
+          connectorCode: 'another-ak-sk',
+          connectorName: '其他凭据连接器',
+          connectorType: 'SYSTEM',
+          description: '其他知识库',
+          enableFlag: 'Y',
+          authMode: 'AK_SK',
+          credentialForm: {
+            helpUrl: 'https://example.com/credentials',
+            fields: [
+              { key: 'clientId', label: 'Client ID', inputType: 'text', maxLength: 256 },
+              { key: 'apiKey', label: 'API Key', inputType: 'password', maxLength: 2048 },
+            ],
+          },
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '更多其他凭据连接器操作' }));
+    fireEvent.click(await screen.findByText('取消授权'));
+
+    expect(await screen.findByText('当前 CLI 登录凭证将被清除，再次使用时需要重新授权。')).toBeInTheDocument();
+    expect(screen.queryByText('仅移除 ByClaw 保存的凭据，IMA 网站上的 API Key 仍保持有效。')).not.toBeInTheDocument();
+    const refreshCount = mockQueryAllConnectors.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: '确认取消授权' }));
+    await waitFor(() => expect(mockRevokeConnectorAuthorization).toHaveBeenCalledWith(11));
+    await waitFor(() => expect(mockQueryAllConnectors.mock.calls.length).toBeGreaterThan(refreshCount));
+    Modal.destroyAll();
+  });
+
+  it('explains IMA API key revocation scope before unlinking', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 10,
+          connectorCode: 'ima-openapi',
+          connectorName: 'IMA',
+          connectorType: 'SYSTEM',
+          description: 'IMA 知识库',
+          enableFlag: 'Y',
+          authMode: 'AK_SK',
+          credentialForm: {
+            helpUrl: 'https://ima.qq.com/openapi',
+            fields: [
+              { key: 'clientId', label: 'Client ID', inputType: 'text', maxLength: 256 },
+              { key: 'apiKey', label: 'API Key', inputType: 'password', maxLength: 2048 },
+            ],
+          },
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    await screen.findByText('IMA');
+    fireEvent.click(await screen.findByRole('button', { name: '更多IMA操作' }));
+    fireEvent.click(await screen.findByText('取消授权'));
+
+    expect(await screen.findByText('仅移除 ByClaw 保存的凭据，IMA 网站上的 API Key 仍保持有效。')).toBeInTheDocument();
+    const refreshCount = mockQueryAllConnectors.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: '确认取消授权' }));
+    await waitFor(() => expect(mockRevokeConnectorAuthorization).toHaveBeenCalledWith(10));
+    await waitFor(() => expect(mockQueryAllConnectors.mock.calls.length).toBeGreaterThan(refreshCount));
+    Modal.destroyAll();
+  });
+
+  it('closes local authorization from malformed IMA metadata', async () => {
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 10,
+          connectorCode: 'ima-openapi',
+          connectorName: 'IMA',
+          connectorType: 'SYSTEM',
+          description: 'IMA 知识库',
+          enableFlag: null,
+          authMode: 'AK_SK',
+          credentialForm: {
+            helpUrl: 'https://ima.qq.com/openapi',
+            fields: [{ key: 'clientId', label: 'Client ID', inputType: 'text', maxLength: 256 }],
+          },
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: '连接 IMA 作为 AI 知识库' })).not.toBeInTheDocument()
+    );
+    expect(screen.queryByLabelText('Client ID')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '立即前往授权' })).not.toBeInTheDocument();
+  });
+
+  it.each(['', 'javascript:alert(1)', 'data:text/plain,credentials', '/ima/openapi', 'not a valid URL'])(
+    'closes local authorization when the IMA help URL is unsafe: %s',
+    async (helpUrl) => {
+      mockQueryConnectorList.mockResolvedValue({
+        list: [
+          {
+            connectorId: 10,
+            connectorCode: 'ima-openapi',
+            connectorName: 'IMA',
+            connectorType: 'SYSTEM',
+            description: 'IMA 知识库',
+            enableFlag: null,
+            authMode: 'AK_SK',
+            credentialForm: {
+              helpUrl,
+              fields: [
+                { key: 'clientId', label: 'Client ID', inputType: 'text', maxLength: 256 },
+                { key: 'apiKey', label: 'API Key', inputType: 'password', maxLength: 2048 },
+              ],
+            },
+          },
+        ],
+        pageNum: 1,
+        pageSize: 100,
+        total: 1,
+        totalPages: 1,
+      });
+
+      render(<ConnectorControl canAuthorize />);
+      fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+      fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+
+      await waitFor(() =>
+        expect(screen.queryByRole('heading', { name: '连接 IMA 作为 AI 知识库' })).not.toBeInTheDocument()
+      );
+      expect(screen.queryByLabelText('Client ID')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '立即前往授权' })).not.toBeInTheDocument();
+    }
+  );
+
+  it('submits delayed IMA credential verification only once', async () => {
+    let resolveCredentialVerification!: (authorization: ConnectorAuthorization) => void;
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 10,
+          connectorCode: 'ima-openapi',
+          connectorName: 'IMA',
+          connectorType: 'SYSTEM',
+          description: 'IMA 知识库',
+          enableFlag: null,
+          authMode: 'AK_SK',
+          credentialForm: {
+            helpUrl: 'https://ima.qq.com/openapi',
+            fields: [
+              { key: 'clientId', label: 'Client ID', inputType: 'text', maxLength: 256 },
+              { key: 'apiKey', label: 'API Key', inputType: 'password', maxLength: 2048 },
+            ],
+          },
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+    mockStartConnectorCredentialAuthorization.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCredentialVerification = resolve;
+        })
+    );
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+    fireEvent.change(screen.getByLabelText('Client ID'), { target: { value: 'client-id' } });
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'api-key' } });
+    const submitButton = screen.getByRole('button', { name: '保存并连接' });
+    await act(async () => {
+      fireEvent.click(submitButton);
+      fireEvent.click(submitButton);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(mockStartConnectorCredentialAuthorization).toHaveBeenCalledTimes(1));
+    expect(mockStartConnectorAuthorization).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveCredentialVerification({ authorizationId: 'ima-authorization-10', connectorId: 10, status: 'connected' });
+      await Promise.resolve();
+    });
+  });
+
+  it('keeps the IMA credential modal open while credential verification is in progress', async () => {
+    let resolveCredentialVerification!: (authorization: ConnectorAuthorization) => void;
+    let cancelToken: AbortController | undefined;
+    mockQueryConnectorList.mockResolvedValue({
+      list: [
+        {
+          connectorId: 10,
+          connectorCode: 'ima-openapi',
+          connectorName: 'IMA',
+          connectorType: 'SYSTEM',
+          description: 'IMA 知识库',
+          enableFlag: null,
+          authMode: 'AK_SK',
+          credentialForm: {
+            helpUrl: 'https://ima.qq.com/openapi',
+            fields: [
+              { key: 'clientId', label: 'Client ID', inputType: 'text', maxLength: 256 },
+              { key: 'apiKey', label: 'API Key', inputType: 'password', maxLength: 2048 },
+            ],
+          },
+        },
+      ],
+      pageNum: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+    });
+    mockStartConnectorCredentialAuthorization.mockImplementation((payload) => {
+      cancelToken = payload.cancelToken;
+      return new Promise((resolve) => {
+        resolveCredentialVerification = resolve;
+      });
+    });
+
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('Client ID'), { target: { value: 'client-id' } });
+      fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'api-key' } });
+      fireEvent.click(screen.getByRole('button', { name: '保存并连接' }));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(mockStartConnectorCredentialAuthorization).toHaveBeenCalledTimes(1));
+    expect(cancelToken).toBeDefined();
+
+    const messageSuccessCount = mockMessageSuccess.mock.calls.length;
+    const refreshCount = mockQueryAllConnectors.mock.calls.length;
+    const credentialDialog = screen.getByRole('heading', { name: '连接 IMA' }).closest('[role="dialog"]');
+    expect(credentialDialog).not.toBeNull();
+    const closeButton = within(credentialDialog as HTMLElement).queryByRole('button', { name: 'Close' });
+    if (closeButton) {
+      await act(async () => {
+        fireEvent.click(closeButton);
+        await Promise.resolve();
+      });
+    }
+    expect(cancelToken?.signal.aborted).toBe(false);
+    expect(screen.getByRole('heading', { name: '连接 IMA' })).toBeInTheDocument();
+
+    await act(async () => {
+      resolveCredentialVerification({ authorizationId: 'ima-authorization-10', connectorId: 10, status: 'connected' });
+      await Promise.resolve();
+    });
+    expect(mockMessageSuccess).toHaveBeenCalledTimes(messageSuccessCount + 1);
+    expect(mockQueryAllConnectors).toHaveBeenCalledTimes(refreshCount + 1);
+  });
+
+  it.each(['permission is lost', 'the component directly unmounts'])(
+    'aborts an in-flight IMA credential verification when %s',
+    async (mode) => {
+      let cancelToken: AbortController | undefined;
+      let resolveCredentialVerification!: (authorization: ConnectorAuthorization) => void;
+      mockQueryConnectorList.mockResolvedValue({
+        list: [
+          {
+            connectorId: 10,
+            connectorCode: 'ima-openapi',
+            connectorName: 'IMA',
+            connectorType: 'SYSTEM',
+            description: 'IMA 知识库',
+            enableFlag: null,
+            authMode: 'AK_SK',
+            credentialForm: {
+              helpUrl: 'https://ima.qq.com/openapi',
+              fields: [
+                { key: 'clientId', label: 'Client ID', inputType: 'text', maxLength: 256 },
+                { key: 'apiKey', label: 'API Key', inputType: 'password', maxLength: 2048 },
+              ],
+            },
+          },
+        ],
+        pageNum: 1,
+        pageSize: 100,
+        total: 1,
+        totalPages: 1,
+      });
+      mockStartConnectorCredentialAuthorization.mockImplementation((payload) => {
+        cancelToken = payload.cancelToken;
+        return new Promise((resolve) => {
+          resolveCredentialVerification = resolve;
+        });
+      });
+
+      const { rerender, unmount } = render(<ConnectorControl canAuthorize />);
+      fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+      fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+      await act(async () => {
+        fireEvent.change(screen.getByLabelText('Client ID'), { target: { value: 'client-id' } });
+        fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'api-key' } });
+        fireEvent.click(screen.getByRole('button', { name: '保存并连接' }));
+        await Promise.resolve();
+      });
+      await waitFor(() => expect(mockStartConnectorCredentialAuthorization).toHaveBeenCalledTimes(1));
+
+      const messageSuccessCount = mockMessageSuccess.mock.calls.length;
+      const refreshCount = mockQueryAllConnectors.mock.calls.length;
+      expect(cancelToken?.signal.aborted).toBe(false);
+      if (mode === 'permission is lost') {
+        rerender(<ConnectorControl canAuthorize={false} />);
+      } else {
+        unmount();
+      }
+      expect(cancelToken?.signal.aborted).toBe(true);
+      await act(async () => {
+        resolveCredentialVerification({
+          authorizationId: 'ima-authorization-10',
+          connectorId: 10,
+          status: 'connected',
+        });
+        await Promise.resolve();
+      });
+      expect(mockMessageSuccess).toHaveBeenCalledTimes(messageSuccessCount);
+      expect(mockQueryAllConnectors).toHaveBeenCalledTimes(refreshCount);
+    }
+  );
+
+  it.each([
+    ['the schema becomes invalid', { authMode: 'AK_SK', credentialForm: { helpUrl: '', fields: [] } }],
+    ['the connector is replaced', { connectorCode: 'replacement-connector', authMode: null, credentialForm: null }],
+  ])('aborts deferred IMA credentials when %s', async (_reason, update) => {
+    let resolveCredentialVerification!: (authorization: ConnectorAuthorization) => void;
+    let cancelToken: AbortController | undefined;
+    const initial = {
+      connectorId: 10,
+      connectorCode: 'ima-openapi',
+      connectorName: 'IMA',
+      connectorType: 'SYSTEM' as const,
+      description: 'IMA 知识库',
+      enableFlag: null,
+      authMode: 'AK_SK',
+      credentialForm: {
+        helpUrl: 'https://ima.qq.com/openapi',
+        fields: [
+          { key: 'clientId' as const, label: 'Client ID', inputType: 'text' as const, maxLength: 256 },
+          { key: 'apiKey' as const, label: 'API Key', inputType: 'password' as const, maxLength: 2048 },
+        ],
+      },
+    };
+    mockQueryAllConnectors
+      .mockResolvedValueOnce([initial])
+      .mockResolvedValueOnce([initial])
+      .mockResolvedValueOnce([{ ...initial, ...update }] as any);
+    mockStartConnectorCredentialAuthorization.mockImplementation((payload) => {
+      cancelToken = payload.cancelToken;
+      return new Promise((resolve) => {
+        resolveCredentialVerification = resolve;
+      });
+    });
+    render(<ConnectorControl canAuthorize />);
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '连接' }));
+    fireEvent.change(screen.getByLabelText('Client ID'), { target: { value: 'client-id' } });
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'api-key' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存并连接' }));
+    await waitFor(() => expect(cancelToken).toBeDefined());
+    const successCount = mockMessageSuccess.mock.calls.length;
+    const refreshCount = mockQueryAllConnectors.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: '连接器设置' }));
+    await waitFor(() => expect(cancelToken?.signal.aborted).toBe(true));
+    await act(async () => {
+      resolveCredentialVerification({ authorizationId: 'late', connectorId: 10, status: 'connected' });
+    });
+    expect(mockMessageSuccess).toHaveBeenCalledTimes(successCount);
+    expect(mockQueryAllConnectors).toHaveBeenCalledTimes(refreshCount + 1);
   });
 });

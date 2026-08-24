@@ -138,8 +138,11 @@
         INNER JOIN ss_res_ext_dig_employee b ON a.resource_id = b.resource_id
         WHERE a.resource_biz_type = 'DIG_EMPLOYEE'
           AND a.resource_status = '2'
-          AND b.prologue IS NOT NULL
-          AND b.prologue LIKE CONCAT('%', #{modelId}, '%')
+          AND (
+            (b.prologue IS NOT NULL AND b.prologue LIKE CONCAT('%', #{modelId}, '%'))
+            OR (b.target_content IS NOT NULL
+                AND b.target_content LIKE CONCAT('%"imageModelId":"', #{modelId}, '"%'))
+          )
     </select>
 
     <select id="selectDigitalEmployeeByQo" resultMap="digitalEmployeePageVoResultMap">

@@ -38,6 +38,7 @@ import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -46,6 +47,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.util.SpanUtil;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.spi.PendingTaskConfirmHook;
 import com.iwhalecloud.byai.state.domain.chat.dto.MessageTaskDto;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum;
 import com.iwhalecloud.byai.state.domain.chat.model.ChatInitializationDto;
@@ -122,6 +124,15 @@ public class AssistantChatService {
     @Autowired
     private TargetAgentResolver targetAgentResolver;
 
+    /**
+     * 研发派发待接单放行钩子;manager 侧实现,未装配时聊天链路不受影响。
+     * 必须延迟取:实现方 DevloopApplicationService 反过来依赖本类下发提示词,直接注入会构成 bean 环
+     * (Boot 3 默认禁止循环引用,启动即 refresh 失败)。ObjectProvider 同时保留"可缺失"语义,
+     * 换成 @Lazy + required=false 会注入一个非 null 代理,缺实现时每条消息都抛。
+     */
+    @Autowired
+    private ObjectProvider<PendingTaskConfirmHook> pendingTaskConfirmHookProvider;
+
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
@@ -175,6 +186,9 @@ public class AssistantChatService {
 
             // 处理sessionId相关逻辑,校验消息发送权限
             handleSessionLogic(outputStream, assistantChatDto);
+
+            // 研发派发的会话在等承接人接单:命中确认词才把完整任务提示词换上去下发,不命中原样放行。
+            applyPendingTaskConfirm(assistantChatDto);
 
             long time02 = System.currentTimeMillis();
             logger.info("chat time01:{}", time02 - time01);
@@ -413,6 +427,32 @@ public class AssistantChatService {
      */
     private void executeChat(AssistantChatDto assistantChatDto, OutputStream outputStream, long firstTextStartTime) {
         scriptService.executeAssistantChat(outputStream, assistantChatDto, firstTextStartTime);
+    }
+
+    /**
+     * 待接单会话放行:承接人回确认词时,把本次要发给数字员工的内容换成完整任务提示词。
+     * 必须换内容而不是补一条:RouteService#route 只把当次 chatContent 发给 openclaw,
+     * 库里那条待接单提示不在沙箱的会话历史里,数字员工只会看到"开始"两个字。
+     * 钩子未装配或返回 null 时什么都不做,普通会话零影响。
+     */
+    private void applyPendingTaskConfirm(AssistantChatDto assistantChatDto) {
+        if (assistantChatDto == null || assistantChatDto.getSessionId() == null) {
+            return;
+        }
+        PendingTaskConfirmHook hook = pendingTaskConfirmHookProvider.getIfAvailable();
+        if (hook == null) {
+            return;
+        }
+        try {
+            String prompt = hook.resolveConfirmedPrompt(assistantChatDto.getSessionId(),
+                assistantChatDto.getChatContent());
+            if (StringUtils.isNotBlank(prompt)) {
+                assistantChatDto.setChatContent(prompt);
+            }
+        } catch (Exception e) {
+            // 放行判定失败不能挡住正常聊天:退回原内容,承接人可再回一次或走前端确认入口。
+            logger.warn("待接单确认判定失败, sessionId: {}", assistantChatDto.getSessionId(), e);
+        }
     }
 
     /**

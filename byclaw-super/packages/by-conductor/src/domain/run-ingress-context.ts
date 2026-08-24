@@ -11,6 +11,8 @@ export interface RunIngressContextV1 {
   externalSessionId?: string;
   /** by-framework 入站消息 ID；后续委派将其作为 parentMessageId 建立级联取消关系。 */
   parentMessageId?: string;
+  /** by-framework 入站执行链路 ID；用于任务计划快照与 STOP_CHAT 关联。 */
+  traceId?: string;
   groupChat?: GroupChatContextV1;
   groupChatFingerprint?: string;
   /** 超级助手 Agent 目录回源失败的诊断；专家团配置失败不会创建 Run。 */

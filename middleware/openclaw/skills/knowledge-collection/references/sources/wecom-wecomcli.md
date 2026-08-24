@@ -85,3 +85,6 @@ sanitized/
   用户筛选、关联 `rawArtifacts` 和 materialization 状态；尚未生成正文的列表项仍进入 inventory，但不得进入
   `collection-result.json.items`。
 - 来源执行器不得询问或执行 `入库 / 知识整理 / 跳过`；仅由 `knowledge-collection` 在采集后执行该选择。
+## Knowledge collection enterprise search
+
+Only a user-named WeCom source or a clear internal-material request whose approved `sourceScope` includes WeCom may invoke enterprise search. The current connector has no knowledge-base or cloud-drive search capability, so `enterprise search` and `enterprise search-all` must record the explicit `unsupported_capability`; never claim that WeCom was actually searched. This status is isolated to the selected WeCom source and does not stop other selected sources or public-internet collection. The enterprise runner still preserves WeCom document, sheet, and SmartPage resource export, and a partial resource task can be continued with `enterprise resume-resource --source wecom --session-dir ... --output-dir <new dir>`.

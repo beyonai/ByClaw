@@ -8,6 +8,8 @@
         <result column="connector_name" property="connectorName"/>
         <result column="connector_type" property="connectorType"/>
         <result column="description" property="description"/>
+        <result column="auth_mode" property="authMode"/>
+        <result column="auth_config" property="authConfig"/>
         <result column="enable_flag" property="enableFlag"/>
         <result column="credential_expires_at" property="credentialExpiresAt"/>
         <result column="credential_state" property="credentialState"/>
@@ -23,6 +25,8 @@
                a.connector_name,
                a.connector_type,
                a.description,
+               a.auth_mode,
+               a.auth_config,
                b.access_expire_time AS credential_expires_at,
                b.credential_state,
                b.renewal_mode,

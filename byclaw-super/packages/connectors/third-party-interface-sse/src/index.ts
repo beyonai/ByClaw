@@ -93,32 +93,39 @@ export class ThirdPartyInterfaceSseConnector implements AgentConnector {
   ): AsyncIterable<ConnectorEvent> {
     let output = "";
     try {
-      const response = await this.#fetch(descriptor.endpoint, {
-        method: "POST",
-        headers: {
-          accept: "text/event-stream",
-          "content-type": "application/json",
-          ...descriptor.headers,
-        },
-        body: JSON.stringify({
-          chatContent: request.task,
-          sessionId: request.sessionId,
-          chatId: request.delegationId,
-          agentId: request.agent.execution.targetId,
-          stream: true,
-          redList: [],
-          blackList: [],
-          deepThink: false,
-          extParam: {},
-          language: "zh-CN",
-          histories: [],
-          versionType: 1,
-        }),
-        signal: AbortSignal.any([
-          controller.signal,
-          AbortSignal.timeout(this.#requestTimeoutMs),
-        ]),
-      });
+      const connectController = new AbortController();
+      const connectTimeout = setTimeout(
+        () => connectController.abort(new Error("Third-party INTERFACE connection timed out")),
+        this.#requestTimeoutMs,
+      );
+      let response: Response;
+      try {
+        response = await this.#fetch(descriptor.endpoint, {
+          method: "POST",
+          headers: {
+            accept: "text/event-stream",
+            "content-type": "application/json",
+            ...descriptor.headers,
+          },
+          body: JSON.stringify({
+            chatContent: request.task,
+            sessionId: request.sessionId,
+            chatId: request.delegationId,
+            agentId: request.agent.execution.targetId,
+            stream: true,
+            redList: [],
+            blackList: [],
+            deepThink: false,
+            extParam: {},
+            language: "zh-CN",
+            histories: [],
+            versionType: 1,
+          }),
+          signal: AbortSignal.any([controller.signal, connectController.signal]),
+        });
+      } finally {
+        clearTimeout(connectTimeout);
+      }
       if (!response.ok) {
         yield failed(
           "THIRD_PARTY_HTTP_ERROR",
@@ -154,6 +161,10 @@ export class ThirdPartyInterfaceSseConnector implements AgentConnector {
         if (isTerminal(parsed)) {
           yield completed(output);
           return;
+        }
+        if (!text && parsed !== undefined) {
+          // 该 HTTP 流只对应当前委派；无可展示文本的业务帧仍可证明执行活动。
+          yield { type: "activity" };
         }
       }
       if (output) {

@@ -46,12 +46,14 @@ export interface OperationAccount {
   loginStatus?: OperationLoginStatus;
   metrics?: OperationAccountMetrics;
   canEdit?: boolean;
+  customUrl?: string; // 自定义链接平台的登录URL
 }
 
 export interface OperationAccountFormValues {
   platformId: string;
   accountName: string;
   accountId: string;
+  customUrl?: string; // 自定义链接平台的登录URL
 }
 
 // 数字员工分为一个总控和多个执行者，表单始终以完整选择对象提交。

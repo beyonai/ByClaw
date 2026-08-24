@@ -11,6 +11,7 @@
   "task": { "query": "", "mode": "collection", "breadth": 3, "depth": 2, "concurrency": 2,
             "maxContextWords": 25000, "deadlineMinutes": null, "maxBranches": null,
             "maxSourcesPerBranch": null, "maxSearchRounds": null,
+            "sourceScope": ["public-internet"], "materializationTarget": "selected",
             "startedAt": "<iso-time>", "initialSearch": [], "followups": [],
             "combinedQuery": null, "stopReason": null, "status": "initialized" },
   "research": { "branches": [], "learnings": [], "citations": {},
@@ -24,6 +25,9 @@
 
 - `task` / `research`: 深化研究状态(研究问题、计划、分支、learnings、citations、context)。
   `task.mode=research` 时 cleanup 要求 report 已交付;`mode=collection` 用于单步采集。
+- `task.sourceScope`：本任务实际允许使用的来源，默认 `["public-internet"]`；企业来源只能因用户点名或明确内部语境加入。
+- `task.materializationTarget`：`candidates`、`selected` 或 `all`；`all` 要求每个请求正文已物化或明确标为 pending/failed，
+  但只有所有正文都已物化时 `deliveryComplete` 才为 `true`，才可称完整归档。
 - `collection`: 采集状态,字段与本文档其余章节描述的 metadata 完全一致(见下);
 - session.json 只能由脚本命令修改,禁止手工编辑;任何层级出现敏感字段名(token/Cookie/secrets 等)时拒绝持久化。
 
@@ -106,7 +110,11 @@ collection_filters:
 `sourceSkill`、来源 ID/URL、用户筛选和 `rawArtifacts` 组成非敏感恢复描述。缺少净化正文时，采集编排器据此先让
 原始执行器从 raw 重新净化；raw 不足时再由同一执行器补采。不得保存恢复所需的凭据。
 
-同一 `sourceSkill + sourceUrl` 视为同一篇文章；inventory 不得存在重复身份，并以最新操作为准。metadata 中的物化路径位于错误目录、文件缺失、
+同一 `sourceSkill + sourceUrl` 视为同一来源记录；inventory 不得存在相同来源身份，并以最新操作为准。HTTP(S) URL 另按去 fragment、
+去末尾 `index.html`、统一尾斜杠及 query 参数排序后的值生成 `duplicateGroupKey`。同组的所有来源记录和 provenance 必须保留，
+第一条为 provenance 主记录，其余条目以 `duplicateOf` 指向主记录；canonical view 每个重复组仅输出按 inventory 顺序选出的首个已物化代表。
+非 HTTP(S) 企业稳定 URI
+（如 `wecom-message:<message-id>`）各自独立，绝不按 URL 规则跨来源合并。metadata 中的物化路径位于错误目录、文件缺失、
 不是普通 Markdown 或与 status 矛盾时，不删除其指向的文件；状态脚本将该文章安全降级为 `pending`、清空无效当前路径、
 移出 canonical view 并返回警告，随后由原始执行器重新采集、净化。
 `sourceSkill` 与 `sourceUrl` 必须是非空、可恢复的稳定身份；没有网页 URL 的来源必须写入带来源命名空间的稳定 URI（例如
@@ -121,3 +129,123 @@ collection_filters:
 读取历史采集结果时，允许只读兼容 `bycli-output.json`、`--bycli-json-file` 和 Markdown frontmatter 中的
 `bycli_filter`。这些字段均为只读兼容入口；新写入不得使用旧格式，必须生成本文件定义的
 `collection-result.json` 和 `collection_filters`。
+
+## 已抓好一批正文后登记会话
+
+来源执行器已经把正文抓到会话外的临时目录、要登记成正式会话时（例如把外围素材交给 `tech-article`），
+用 `init` + `collect`。**不要手写 metadata inventory**——`collect` 在 inventory 缺该 `itemId` 时会按
+`canonicalItem` 自动补登条目，`sourceSkill` 从 `collectionResult.backend` 推导，`materialization`
+由脚本按文件存在性写入。手写 inventory 会让你自己承担 `rawArtifacts`、`materialization`、
+canonical view 路径形态这些字段的正确性，而这些本来是脚本的职责。
+
+```bash
+# 1. init 建空会话。items 给空数组，只声明 backend；backend 决定后续 sourceSkill
+echo '{"backend":"bycli","items":[]}' > /tmp/cr.json
+node scripts/knowledge-collection.mjs init --mode collection --session-dir <dir> \
+  --query "<采集任务>" --collection-result-input-file /tmp/cr.json
+
+# 2. 把正文拷进会话。init 要求目标目录不存在或为空,所以必须在 init 之后拷
+cp -r /tmp/harvest/markdown /tmp/harvest/sanitized <dir>/
+
+# 3. 一次 collect 登记全部正文(payload 支持 items 数组批量)
+node scripts/knowledge-collection.mjs collect --session-dir <dir> \
+  --item-json-file <dir>/.post-processing-inputs/batch.json
+```
+
+`collect` 的批量 payload。**前置依赖：会话必须已声明 `backend`**（上面第 1 步的
+`--collection-result-input-file`）。`collect` 从**会话已有的** `collectionResult.backend` 推导每个条目的
+`sourceSkill`，**不读 payload 里的 `backend` 或 `sourceSkill` 字段**——把它们写进下面的 payload 不起作用，
+会话缺 `backend` 时报 `inventory item-01 sourceSkill 必须是非空字符串`。
+该报错指向 init 阶段的遗漏，不是 payload 字段缺失，照着改 payload 无法修复。
+
+```json
+{
+  "schemaVersion": "1.0",
+  "items": [
+    {
+      "itemId": "item-01",
+      "markdownPath": "markdown/post.md",
+      "sanitizedPath": "sanitized/items/post.md",
+      "canonicalItem": {
+        "title": "Post title",
+        "url": "https://example.com/post",
+        "author": "",
+        "publishTime": "",
+        "markdown": "sanitized/items/post.md",
+        "fileName": "sanitized/items/post.md"
+      }
+    }
+  ]
+}
+```
+
+单条时也可以直接用上面 `items[]` 中的对象作为根节点（省掉 `items` 包装）。
+`canonicalItem.markdown` 与 `fileName` 必须相等且都是相对采集根的完整路径（`sanitized/items/x.md`，不是 basename）。
+
+### 什么时候才需要 `--metadata-input-file`
+
+只有一种情况：需要在建会话时就预置一份**完整清单**，其中包含尚未物化的条目——
+例如站点抓取先登记 2215 条 sitemap URL 为 `pending`、随后分批物化，或从旧会话迁移既有 inventory。
+此时 `--metadata-input-file` 整体替换 `session.collection`（`research-state.mjs` 内
+`session.collection = metadata`），所以必须提交完整子树，并自行保证：
+
+- 每个条目必填非空 `sourceSkill` 与 `sourceUrl`（身份键），以及 `rawArtifacts`（空也要写 `[]`）；
+- 已物化条目必须预声明 `materialization`——物化状态只在 `init` 时按文件存在性推导一次，
+  事后 `export-views` 不补算；
+- canonical view 的 `fileName` 必须等于 inventory 的 `materialization.sanitizedPath`。
+  （`validateCanonicalView` 用 `sanitizedPath` 建 map 却用 `fileName` 查，字段名不同但值必须一致，
+  填 basename 会报 “canonical view 路径未对应 materialized inventory”。）
+
+除此之外的场景一律走 `collect`。
+
+## 后处理 run payload
+
+`run` 是后处理运行的唯一写入入口,没有更简单的替代入口,所以这份 payload 必须自己写。以 `external` 为例：
+
+```json
+{
+  "schemaVersion": "1.0",
+  "runId": "run-tech-article-1",
+  "operation": "external",
+  "target": { "kind": "external", "id": "tech-article/jujutsu", "path": "<dir>/sanitized/items" },
+  "status": "success",
+  "sessionStatus": "success",
+  "selection": {
+    "mode": "all",
+    "itemIds": ["item-01"],
+    "discardUnselected": false,
+    "discardUnselectedConfirmed": false
+  },
+  "items": [
+    {
+      "itemId": "item-01",
+      "status": "success",
+      "stage": "completed",
+      "reason": null,
+      "downstreamRef": null,
+      "cleanupStatus": "not-started"
+    }
+  ],
+  "globalStage": { "name": null, "required": false, "status": "not-required", "reason": null }
+}
+```
+
+成功条目的 `stage` 由 operation 决定，写错即拒：
+
+| operation | success item `stage` |
+|---|---|
+| `ingest` | `build-submitted` |
+| `organize` | `ads-organized` |
+| `external` | `completed` |
+
+其余易错点：
+
+- `target.kind` 只能是 `knowledge-base` / `knowledge-organization` / `external`，
+  external 就写 `external`（不是 `external-task`）。
+- `sessionStatus` 枚举是 `success` / `partial` / `failed` / `unknown`，**没有 `complete`**
+  （`complete` 属于 `collection.status`，两个枚举不同）；且脚本会重算并校验，与提交值不一致时拒绝写入。
+- `downstreamRef` 必填，无下游引用时写 `null`（不能省略）。
+- `globalStage`：`required: false` 时 `status` 必须是 `not-required` 且 `name` 必须是 `null`；
+  `required: true` 时 `name` 必须是非空字符串且 `status` 不能是 `not-required`。
+- `selection.discardUnselected` 与 `discardUnselectedConfirmed` 必须是布尔值，
+  只有用户明确确认放弃未选文章时才能同时为 `true`。

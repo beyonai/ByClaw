@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useIntl } from '@umijs/max';
 import {
   OperationAccountPanel,
+  useOperationAccountLogin,
   type OperationAccount,
   type OperationAccountFormValues,
 } from '@/layout/sider/components/ProjectSpaceList/operation';
@@ -30,7 +31,7 @@ const normalizeLoginStatus = (account: Record<string, any>): OperationAccount['l
 };
 
 // 账号接口存在新旧字段并行返回的情况，大详情在数据入口统一转换为账号卡片结构。
-const normalizeAccounts = (source: unknown): OperationAccount[] => {
+export const normalizeAccounts = (source: unknown): OperationAccount[] => {
   if (!Array.isArray(source)) return [];
 
   return source
@@ -38,14 +39,31 @@ const normalizeAccounts = (source: unknown): OperationAccount[] => {
     .map((item, index) => ({
       id: item.id ?? item.operationAccountId ?? item.accountPkId ?? item.accountId ?? `operation-account-${index}`,
       platformId: `${item.platformId ?? item.platformCode ?? item.platform ?? item.channelId ?? ''}`,
-      accountName: item.accountName || item.name || '',
+      accountName:
+        item.accountName ||
+        item.name ||
+        (`${item.platformId ?? item.platformCode ?? item.platform ?? item.channelId ?? ''}` === 'CustomLink'
+          ? '自定义链接'
+          : ''),
       accountId: `${item.accountCode ?? item.platformAccountId ?? item.platformAccountCode ?? item.accountId ?? ''}`,
       avatar: item.avatar,
       loginStatus: normalizeLoginStatus(item),
       metrics: item.metrics,
       canEdit: item.canEdit,
+      customUrl: item.customUrl || undefined,
     }))
     .filter((item) => item.platformId && item.accountName);
+};
+
+export const buildOperationAccountPayload = (projectId: number, values: OperationAccountFormValues) => {
+  const isCustomLink = values.platformId === 'CustomLink';
+  return {
+    projectId,
+    platformCode: values.platformId,
+    accountCode: isCustomLink ? '' : values.accountId,
+    accountName: values.accountName,
+    ...(isCustomLink ? { customUrl: values.customUrl || '' } : {}),
+  };
 };
 
 const ProjectAccounts: React.FC<Props> = ({ project, keyword = '', onToolbarChange, onRefreshToolbarChange }) => {
@@ -70,16 +88,18 @@ const ProjectAccounts: React.FC<Props> = ({ project, keyword = '', onToolbarChan
     void fetchAccounts();
   }, [fetchAccounts]);
 
+  // 账号登录复用大详情的沙箱远程桌面链路，登录完成后刷新卡片状态。
+  const { loginTarget, loginPreparingAccountId, loginConfirming, handleLogin, handleConfirmLogin, closeRemoteDesktop } =
+    useOperationAccountLogin(fetchAccounts);
+
+  // 离开账号页时收起远程桌面，避免遗留遮罩层覆盖其他页签。
+  useEffect(() => closeRemoteDesktop, [closeRemoteDesktop]);
+
   const handleSave = useCallback(
     async (values: OperationAccountFormValues, account?: OperationAccount | null) => {
       setSaving(true);
       try {
-        const payload = {
-          projectId: Number(project.projectId),
-          platformCode: values.platformId,
-          accountCode: values.accountId,
-          accountName: values.accountName,
-        };
+        const payload = buildOperationAccountPayload(Number(project.projectId), values);
         if (account) {
           await updateOperationAccount({ ...payload, accountId: account.id });
         } else {
@@ -99,13 +119,15 @@ const ProjectAccounts: React.FC<Props> = ({ project, keyword = '', onToolbarChan
       setDeletingAccountId(account.id);
       try {
         await deleteOperationAccount(account.id);
+        // 删除正在登录的账号时先收起远程桌面，避免继续操作已失效账号。
+        if (`${loginTarget?.id ?? ''}` === `${account.id}`) closeRemoteDesktop();
         await fetchAccounts();
         message.success(intl.formatMessage({ id: 'projectSpace.operation.account.deleteSuccess' }));
       } finally {
         setDeletingAccountId(null);
       }
     },
-    [fetchAccounts, intl, message]
+    [closeRemoteDesktop, fetchAccounts, intl, loginTarget?.id, message]
   );
 
   return (
@@ -120,9 +142,15 @@ const ProjectAccounts: React.FC<Props> = ({ project, keyword = '', onToolbarChan
       loading={loading}
       savingAccount={saving}
       deletingAccountId={deletingAccountId}
+      loginTarget={loginTarget}
+      loginPreparingAccountId={loginPreparingAccountId}
+      loginConfirming={loginConfirming}
       onRefresh={fetchAccounts}
       onSaveAccount={handleSave}
       onDeleteAccount={handleDelete}
+      onLogin={handleLogin}
+      onConfirmLogin={handleConfirmLogin}
+      onCancelLogin={closeRemoteDesktop}
     />
   );
 };

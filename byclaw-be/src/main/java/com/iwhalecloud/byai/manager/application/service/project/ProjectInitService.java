@@ -22,6 +22,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.exception.ByAiArgumentException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.state.application.service.session.ByClawUserWorkspacePaths;
+import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.config.GitWorkspaceConfig;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.domain.project.service.GitCommandExecutor;
@@ -81,6 +83,9 @@ public class ProjectInitService {
     private ProjectService projectService;
 
     @Autowired
+    private UserBucketNamingService userBucketNamingService;
+
+    @Autowired
     private ProjectRepoMapper projectRepoMapper;
 
     @Autowired
@@ -96,7 +101,9 @@ public class ProjectInitService {
      * @return 项目工作目录
      */
     public Path initProjectWorkspace(Long projectId) {
-        Path projectWorkspace = Paths.get(fileStorageLocalPath, "projects", String.valueOf(projectId));
+        Path projectWorkspace = Paths.get(fileStorageLocalPath, resolveCurrentUserBucket(), userFsRootPathSegment(),
+            "projects",
+            String.valueOf(projectId));
         try {
             Files.createDirectories(projectWorkspace);
             return projectWorkspace;
@@ -591,8 +598,8 @@ public class ProjectInitService {
     /**
      * 构建 workspace 仓库的本地路径
      *
-     * 路径规则：{file.storage.local.path}/projects/{projectId}/repos/{workspace_repo_name}
-     * 示例：/data/projects/11038149/repos/ByClaw-Workspace
+     * 路径规则：{file.storage.local.path}/{user_bucket}/projects/{projectId}/repos/{workspace_repo_name}
+     * 示例：/data/byclaw-user001/projects/11038149/repos/ByClaw-Workspace
      *
      * @param repo ProjectRepo 实体（workspace 类型仓库）
      * @return 本地仓库路径
@@ -603,12 +610,38 @@ public class ProjectInitService {
         String repoName = extractRepoName(repo);
 
         // Git 根目录按项目隔离，避免不同项目的工作区仓库互相覆盖。
-        Path root = Paths.get(gitWorkspaceConfig.getRoot(repo.getProjectId())).toAbsolutePath().normalize();
+        Path root = Paths.get(gitWorkspaceConfig.getRoot(repo.getProjectId(), resolveCurrentUserBucket()))
+            .toAbsolutePath().normalize();
         Path repositoryPath = root.resolve(repoName).normalize();
         if (!root.equals(repositoryPath.getParent())) {
             throw new BaseException(50400, "Invalid repository name: " + repoName);
         }
         return repositoryPath;
+    }
+
+    /**
+     * 获取项目仓库在当前用户项目工作区中的实际路径。
+     *
+     * <p>仓库浏览与 worktree 解析必须和初始化流程共用同一路径规则，避免各处重复拼接用户桶、项目和仓库名。</p>
+     *
+     * @param repo 项目仓库配置
+     * @return 本地仓库的规范化绝对路径
+     */
+    public Path getProjectRepositoryPath(ProjectRepo repo) {
+        return buildRepoPath(repo).toAbsolutePath().normalize();
+    }
+
+    /**
+     * 解析当前登录用户的用户桶名称。
+     *
+     * @return 当前登录用户对应的规范化用户桶名称
+     */
+    private String resolveCurrentUserBucket() {
+        return userBucketNamingService.buildUserBucketName(CurrentUserHolder.getCurrentUserCode());
+    }
+
+    private String userFsRootPathSegment() {
+        return StringUtils.stripStart(ByClawUserWorkspacePaths.USER_FS_OBJECT_KEY_ROOT_PREFIX, "/");
     }
 
     /**

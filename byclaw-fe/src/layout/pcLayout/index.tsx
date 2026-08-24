@@ -3,10 +3,11 @@ import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import classNames from 'classnames';
 
 // @ts-ignore
-import { Outlet, useLocation, useSelector, useSearchParams } from '@umijs/max';
-import { Layout } from 'antd';
+import { Outlet, useIntl, useLocation, useSelector, useSearchParams } from '@umijs/max';
+import { Layout, Tooltip } from 'antd';
 
 import { EventEmitter$Cls } from '@/utils/eventEmitter';
+import ResourcePanelToggleIcon from '@/components/ChatLayoutComp/ChatResourceWorkspace/ResourcePanelToggleIcon';
 import Auth from '../auth';
 import AntdProvider from '../components/provider/antd';
 import Header from '../header';
@@ -79,6 +80,7 @@ if (process.env.NODE_ENV === 'development' && typeof window !== 'undefined') {
 }
 
 const PCLayout = () => {
+  const intl = useIntl();
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const { pathname } = location;
@@ -129,11 +131,19 @@ const PCLayout = () => {
     };
   }, [clearDetailPanel]);
 
-  const { setLoginModalOpen } = useAppStore();
+  const { isSiderCollapsed, setLoginModalOpen, setSiderCollapsed } = useAppStore();
   useVersionNotification(myEventEmitter);
 
   const [isClose, setIsClose] = useState(false);
   const [sessionId, setSessionId] = useState<string>('');
+
+  React.useEffect(() => {
+    if (pathname !== '/chat' || !sessionId) return;
+
+    // 会话切换可能发生在资源中心路由，通知聊天组件重新注册右侧资源工作区。
+    myEventEmitter.emit('chat-session-changed', { sessionId }, { waitForListeners: true });
+  }, [pathname, sessionId]);
+
   const [agentId, setAgentId] = useState<string>('');
   // 仅用于左侧资源联动，与实际聊天 agentId 分离。
   const [siderAgentId, setSiderAgentId] = useState<string>('');
@@ -143,7 +153,9 @@ const PCLayout = () => {
   const dragFileEventHandlerRef = useRef<DragFileEventHandler>(null);
   const layoutRef = useRef<HTMLElement>(null);
   const [layoutWidth, setLayoutWidth] = useState(0);
-  const mainContentHalfWidth = layoutWidth > 0 ? Math.max(280, Math.floor((layoutWidth - siderContentWidth) / 2)) : 450;
+  const visibleSiderContentWidth = isSiderCollapsed ? 0 : siderContentWidth;
+  const mainContentHalfWidth =
+    layoutWidth > 0 ? Math.max(280, Math.floor((layoutWidth - visibleSiderContentWidth) / 2)) : 450;
   const detailPanelBasis = (() => {
     if (detailPanelWidth === undefined) return undefined;
     if (typeof detailPanelWidth === 'number') return `${detailPanelWidth}px`;
@@ -351,26 +363,40 @@ const PCLayout = () => {
                   style={
                     {
                       padding: 0,
-                      '--sider-content-width': `${siderContentWidth}px`,
+                      '--sider-content-width': `${visibleSiderContentWidth}px`,
+                      '--layout-gap': '8px',
                     } as React.CSSProperties
                   }
                   ref={layoutRef}
                 >
                   <SiderContentContext.Provider
                     value={{
-                      siderContentWidth,
+                      siderContentWidth: visibleSiderContentWidth,
                       setSiderContentWidth,
                       setDetailPanel: openDetailPanel,
                       clearDetailPanel,
                     }}
                   >
-                    {userInfo && siderContentWidth > 0 && <WorkspaceSider />}
+                    {userInfo && siderContentWidth > 0 && !isSiderCollapsed && <WorkspaceSider />}
+                    {userInfo && siderContentWidth > 0 && isSiderCollapsed && (
+                      <Tooltip title={intl.formatMessage({ id: 'workspaceSider.expandSidebar' })} placement="bottom">
+                        <button
+                          type="button"
+                          className={styles.workspaceSiderExpandButton}
+                          aria-label={intl.formatMessage({ id: 'workspaceSider.expandSidebar' })}
+                          onClick={() => setSiderCollapsed(false)}
+                        >
+                          <ResourcePanelToggleIcon className={styles.workspaceSiderExpandIcon} />
+                        </button>
+                      </Tooltip>
+                    )}
                     <MinorDrawer />
                     <Content
                       id={pcLayoutContentId}
                       className={classNames(styles.content, {
                         [styles.opening]: !isClose,
                         [styles.closing]: isClose,
+                        [styles.siderCollapsedContent]: isSiderCollapsed,
                       })}
                     >
                       <Outlet />
@@ -381,7 +407,7 @@ const PCLayout = () => {
                           {detailPanel}
                         </aside>
                       ) : (
-                        <Resizable left limit={{ minWidth: 360, maxWidth: '70vw' }}>
+                        <Resizable left limit={{ minWidth: DEFAULT_SIDER_CONTENT_WIDTH, maxWidth: '70vw' }}>
                           <aside className={styles.detailPanel} style={detailPanelStyle}>
                             {detailPanel}
                           </aside>

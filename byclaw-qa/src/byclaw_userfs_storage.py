@@ -25,6 +25,7 @@ _HEADER_CONTEXT: ContextVar[dict[str, str]] = ContextVar(
 )
 _SYSTEM_CODE = "BYCLAW-QA"
 RESOURCE_ID_HEADER = "x-byclaw-resource-id"
+USER_CODE_HEADER = "x-user-code"
 
 
 def set_byclaw_userfs_headers(headers: Mapping[str, str]) -> Token[dict[str, str]]:
@@ -46,6 +47,52 @@ def build_byclaw_userfs_headers() -> dict[str, str]:
         "system-code": _SYSTEM_CODE,
         "beyond-token": token,
     }
+
+
+async def build_byclaw_userfs_headers_async() -> dict[str, str]:
+    """Build FS headers, resolving a missing token from the persisted user code."""
+    context = _HEADER_CONTEXT.get()
+    token = (context.get("beyond-token") or "").strip()
+    if not token:
+        user_code = (context.get(USER_CODE_HEADER) or "").strip()
+        if not user_code:
+            raise StorageAuthenticationError(
+                "missing beyond-token and X-User-Code for ByClaw UserFS storage"
+            )
+        token = await _resolve_beyond_token_from_user_code(user_code)
+        # set_byclaw_userfs_headers always installs a task-local dict. Cache the
+        # resolved token for subsequent file operations in the same task.
+        context["beyond-token"] = token
+    return {
+        "system-code": _SYSTEM_CODE,
+        "beyond-token": token,
+    }
+
+
+async def _resolve_beyond_token_from_user_code(user_code: str) -> str:
+    from redis_runtime import init_shared_redis_from_env
+
+    redis_client = init_shared_redis_from_env()
+    user_id = _redis_string(await redis_client.get(f"SHARE_BFM_USER_CODE_{user_code}"))
+    if not user_id:
+        raise StorageAuthenticationError(
+            "Redis user mapping is missing for X-User-Code"
+        )
+    token = _redis_string(
+        await redis_client.hget(
+            f"user:{user_id}:login:auth",
+            "Beyond-Token",
+        )
+    )
+    if not token:
+        raise StorageAuthenticationError("Redis login state is missing Beyond-Token")
+    return token
+
+
+def _redis_string(value: Any) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8").strip()
+    return str(value or "").strip()
 
 
 def get_byclaw_resource_id() -> str | None:
@@ -304,7 +351,7 @@ class ByClawUserFsKnowledgeStorageProvider:
     ) -> StoredObject:
         location = _normalize_location(location)
         file_path = _path_from_location(location)
-        headers = build_byclaw_userfs_headers()
+        headers = await build_byclaw_userfs_headers_async()
         response = await self._request(
             method="POST",
             path=f"{_BASE_PATH}/files/put",
@@ -327,7 +374,7 @@ class ByClawUserFsKnowledgeStorageProvider:
     async def read(self, location: StorageLocation) -> bytes:
         location = _normalize_location(location)
         file_path = _path_from_location(location)
-        headers = build_byclaw_userfs_headers()
+        headers = await build_byclaw_userfs_headers_async()
         return await self._download_bytes(
             path=f"{_BASE_PATH}/files/get",
             headers=headers,
@@ -337,7 +384,7 @@ class ByClawUserFsKnowledgeStorageProvider:
     async def delete(self, location: StorageLocation) -> None:
         location = _normalize_location(location)
         file_path = _path_from_location(location)
-        headers = build_byclaw_userfs_headers()
+        headers = await build_byclaw_userfs_headers_async()
         response = await self._request(
             method="POST",
             path=f"{_BASE_PATH}/files/delete",
@@ -363,7 +410,7 @@ class ByClawUserFsKnowledgeStorageProvider:
         target = _normalize_location(target)
         source_path = _path_from_location(source)
         target_path = _path_from_location(target)
-        headers = build_byclaw_userfs_headers()
+        headers = await build_byclaw_userfs_headers_async()
         response = await self._request(
             method="POST",
             path=f"{_BASE_PATH}/files/rename",
@@ -392,8 +439,10 @@ def build_byclaw_userfs_storage_provider():
 __all__ = [
     "ByClawUserFsKnowledgeStorageProvider",
     "RESOURCE_ID_HEADER",
+    "USER_CODE_HEADER",
     "bind_byclaw_resource_id",
     "build_byclaw_userfs_headers",
+    "build_byclaw_userfs_headers_async",
     "build_byclaw_userfs_storage_provider",
     "get_byclaw_resource_id",
     "reset_byclaw_userfs_headers",

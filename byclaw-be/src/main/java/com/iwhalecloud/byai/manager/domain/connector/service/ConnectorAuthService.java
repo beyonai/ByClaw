@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorEnableStateDto;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.RedisAuthorizationSessionRepository;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorAuthMapper;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorInfoMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,8 +16,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.Collections;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -26,6 +29,7 @@ import java.util.Set;
 public class ConnectorAuthService {
 
     private static final Set<String> CLI_AUTH_MODES = Set.of("DEVICE_FLOW", "CLI_INIT");
+    private static final Duration ENABLE_STATE_LOCK_TTL = Duration.ofMinutes(2);
     private static final Set<String> CLI_CREDENTIAL_KEYS = Set.of(
         "providerCode", "authorizationId", "credentialReference", "accountId", "accountName");
 
@@ -37,6 +41,9 @@ public class ConnectorAuthService {
 
     @Autowired
     private ConnectorConnectionStateService connectionStateService;
+
+    @Autowired
+    private RedisAuthorizationSessionRepository sessionRepository;
 
     /**
      * 新增用户连接器授权记录。
@@ -92,7 +99,24 @@ public class ConnectorAuthService {
 
     /** 更新当前用户指定连接器的全局启用状态。 */
     public void updateEnableFlag(Long connectorId, boolean enabled) {
-        connectionStateService.updateEnableFlag(currentUserId(), connectorId, enabled);
+        String userId = currentUserId();
+        Optional<String> lockToken = sessionRepository.tryAcquireStartLock(userId, connectorId, ENABLE_STATE_LOCK_TTL);
+        if (lockToken.isEmpty()) {
+            throw new IllegalStateException("当前连接器已有进行中的授权任务");
+        }
+        try {
+            connectionStateService.updateEnableFlag(userId, connectorId, enabled);
+        } finally {
+            releaseStartLockBestEffort(userId, connectorId, lockToken.get());
+        }
+    }
+
+    private void releaseStartLockBestEffort(String userId, Long connectorId, String token) {
+        try {
+            sessionRepository.releaseStartLock(userId, connectorId, token);
+        } catch (RuntimeException ignored) {
+            // The bounded lock expires automatically if Redis release is temporarily unavailable.
+        }
     }
 
     private QueryWrapper<ConnectorAuth> ownerQuery(Long authId) {

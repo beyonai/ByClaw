@@ -52,6 +52,7 @@ const ResourceTabs: React.FC<Props> = ({
   agentIds,
 }) => {
   const [activeTab, setActiveTab] = useState<string>();
+  const userSelectedTabRef = useRef(false);
   const [visibleKeys, setVisibleKeys] = useState<string[]>(defaultVisibleKeys);
   const initialKeyword = useMemo(() => trim(keyword || ''), [keyword]);
   const [searchValue, setSearchValue] = useState(initialKeyword);
@@ -392,18 +393,32 @@ const ResourceTabs: React.FC<Props> = ({
     [sharedResources]
   );
 
+  const handleTabChange = useCallback((key: string) => {
+    userSelectedTabRef.current = true;
+    setActiveTab(key);
+  }, []);
+
   useEffect(() => {
-    const visible: string[] = ['space'];
+    if (open === false) {
+      userSelectedTabRef.current = false;
+      return;
+    }
+
+    const visible: string[] = isOpenSource ? ['skill'] : [];
     if (visibleKeys.includes('knowledge')) visible.push('knowledge');
     if (visibleKeys.includes('tool')) visible.push('tool');
     if (visibleKeys.includes('view')) visible.push('view');
     if (visibleKeys.includes('object')) visible.push('object');
+    visible.push('space');
     if (isOpenSource) visible.push('file');
-    if (isOpenSource) visible.push('skill');
     if (!visible.length) return;
-    const newActiveTabValue = activeTab && visible.includes(activeTab) ? activeTab : visible[0];
-    setActiveTab(newActiveTabValue);
-  }, [activeTab, showKnowledgeTab, showSkillTab, agentIds, visibleKeys, isOpenSource]);
+    setActiveTab((current) => {
+      if (userSelectedTabRef.current && current && visible.includes(current)) {
+        return current;
+      }
+      return visible[0];
+    });
+  }, [open, showKnowledgeTab, showSkillTab, agentIds, visibleKeys, isOpenSource]);
 
   const tabItems = useMemo(() => {
     const items: {
@@ -580,7 +595,10 @@ const ResourceTabs: React.FC<Props> = ({
         ),
       });
     }
-    return items;
+    const tabOrder = isOpenSource
+      ? ['skill', 'knowledge', 'tool', 'view', 'object', 'space', 'file']
+      : ['knowledge', 'tool', 'view', 'object', 'space'];
+    return tabOrder.map((key) => items.find((item) => item.key === key)).filter(Boolean) as typeof items;
   }, [
     intl,
     onSelect,
@@ -653,7 +671,12 @@ const ResourceTabs: React.FC<Props> = ({
       return visibleKeys.includes(tab.key);
     });
 
-    return [...baseTabs, ...filteredConditionalTabs, ...(isOpenSource ? [skillTab, fileTab] : [])];
+    return [
+      ...(isOpenSource ? [skillTab] : []),
+      ...filteredConditionalTabs,
+      baseTabs[0],
+      ...(isOpenSource ? [fileTab] : []),
+    ];
   }, [agentType, intl, visibleKeys, isOpenSource]);
 
   if (!hasAnyTab) {
@@ -672,7 +695,7 @@ const ResourceTabs: React.FC<Props> = ({
           className={classNames(styles.tabButtons, 'full-width')}
           activeKey={activeTab}
           items={visibleTabs}
-          onChange={setActiveTab}
+          onChange={handleTabChange}
           size={isDebug ? 'small' : 'middle'}
           tabBarExtraContent={
             <div className={styles.searchRow}>
@@ -747,7 +770,7 @@ const ResourceTabs: React.FC<Props> = ({
       <div className={styles.tabsWrap}>
         <Tabs
           activeKey={activeTab}
-          onChange={setActiveTab}
+          onChange={handleTabChange}
           destroyInactiveTabPane
           tabBarStyle={{ display: 'none' }}
           items={tabItems.map(({ key, label, children }) => ({ key, label, children }))}

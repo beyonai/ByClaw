@@ -113,7 +113,9 @@ export function agentHandler(item: IAgent) {
       break;
   }
 
-  if (item.agentDevType?.toLowerCase() === 'openclaw') {
+  // 员工组是结构类型，openclaw 只是成员的运行沙箱类型，改写掉 017 会让下游(RichInput 的
+  // 组互斥、iframes/employee 的组调试)不再认得这是个组。
+  if (item.agentDevType?.toLowerCase() === 'openclaw' && myAgentType !== agentTypeMap.employeeGroup) {
     myAgentType = agentTypeMap.openclaw;
   }
 

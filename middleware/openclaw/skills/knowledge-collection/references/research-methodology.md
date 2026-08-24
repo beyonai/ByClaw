@@ -24,7 +24,7 @@
 - 在某一层全部失败后,继续凭空生成 follow-up 或最终内容。
 - 绕过 `scripts/knowledge-collection.mjs` 直接修改 session.json。
 - 跳过脚本命令,直接声称某一步已完成。
-- 直接抓取网页内容:任何一次取内容都必须委派来源执行器(公共网页一律 `bycli`),
+- 直接抓取网页内容:任何一次取内容都必须先经 [agent-reach.md](agent-reach.md) 路由,再委派其选中的来源执行器,
   不得使用 `web_fetch`、`curl`、`wget`、`requests` 或其他直接 HTTP 客户端。
 
 所有结论必须能回溯到已登记来源(collection inventory 的 `itemId`)。无法确认的信息必须明确标注为“未确认”或“缺口”。
@@ -51,23 +51,68 @@
 
 1. 用 `init --mode research --session-dir <dir> --query "..." [--breadth N] [--depth N]
    [--deadline-minutes M] [--max-branches N] [--max-sources-per-branch N] [--max-search-rounds N]` 创建会话。
-2. 做一次初步检索,覆盖多个角度,委派**双信源互补检索**:
-   - `agent-reach`(By-Reach 路由器): Exa 搜索、gh、RSS、站内搜索等渠道;
-   - `online_search`(searxng 多引擎技能): 时间窗(`--time-range day/week/month/year`)、
+
+2. **三信源验证与表态(强制前置)**:
+   
+   执行任何检索前,必须逐个验证三个发现通道的可用性与适用性:
+   
+   - **内置路由层** ([agent-reach.md](agent-reach.md)): Exa 搜索、gh、RSS、站内搜索等渠道。
+     **验证方式**: 通读 agent-reach.md 路由表,确认本主题是否在其覆盖范围。
+   
+   - **online_search** (searxng 多引擎技能): 时间窗(`--time-range day/week/month/year`)、
      中文引擎(baidu/sogou/360search)、学术类别(`--category science`,含 arxiv/crossref/pubmed/openalex)。
-3. 基于初步结果生成若干澄清问题或研究方面;用户没有回答时,记录合理假设继续。
-4. 用 `plan` 记录初始检索、follow-up 与合并起始查询(`--initial-search` / `--followups` 传 JSON 数组,`--combined-query` 传文本)。
+     **验证方式**: 通读 `skills/online_search/SKILL.md`,确认引擎可用性与本主题的语言/时效/学术性匹配度。
+   
+   - **hot_discovery** (热度发现通道子技能): 经 bycli 适配器取平台原生热度(`citations`/`downloads`/`stars`/`score`)，
+     与 searxng 并行跑后用其 `merge` 归并，双通道命中优先级最高。
+     **验证方式**: 通读 `skills/online_search/references/hot_discovery/SKILL.md`,检查本主题所属维度
+     (packages/science/it/q&a/repos/apps/books/movies 9 个覆盖 vs 
+      images/videos/music/files/dictionaries/translate/map/lyrics/radio/weather/icons 11 个无热度源)。
+   
+   **先验证再排除原则(Critical)**:
+   - ❌ **错误**: 仅凭文档片段或主观推测就标记为 `unavailable` / `not-applicable`
+   - ✅ **正确**: 先尝试调用(或至少通读完整 SKILL.md),用**实际结果或能力边界**作为排除依据
+   - **反例**: "B2B SaaS 不会出现在热度平台" ← 错误推测,hot_discovery 可能有 Hacker News/Reddit/Product Hunt 讨论
+   - **正例**: "hot_discovery 查询 'Lightfield' 返回 0 results,三个维度均无命中" ← 基于实际调用结果
+   
+   **通道表态约束**:
+   - `state: "used"` 无需 reason
+   - `state: "unavailable"` 需 reason 说明环境限制(如"mcporter 未安装,Exa 通道不可用")
+   - `state: "not-applicable"` 需 reason 说明主题不适用,且**必须基于实际验证**:
+     * 已通读完整 SKILL.md 并确认覆盖边界
+     * 或已尝试调用并获得空结果/错误响应
+     * 禁止基于"看起来不适合"的推测
+
+3. 做一次初步检索,覆盖多个角度,委派**三信源互补检索**。详见下方「检索源分工」节。
+
+4. 基于初步结果生成若干澄清问题或研究方面;用户没有回答时,记录合理假设继续。
+
+5. 用 `plan` 记录初始检索、follow-up、合并起始查询与**三信源表态**:
+   ```bash
+   node scripts/knowledge-collection.mjs plan --session-dir <dir> \
+     --initial-search '["query1","query2",...]' \
+     --followups '["aspect1","aspect2",...]' \
+     --combined-query "combined starting point" \
+     --channels '{"builtin-routing":{"state":"used"},"searxng":{"state":"used"},"hot-discovery":{"state":"not-applicable","reason":"实际调用 hot_discovery --query ... 返回 0 results,三个维度(repos/apps/q&a)均无匹配"}}'
+   ```
+   
+   **plan 拒绝的情况**:
+   - 缺少任一通道的表态
+   - non-`used` 通道的 reason < 8 字符
+   - reason 过于笼统(如"不适合""没用""不需要")
+   - reason 未说明是环境限制还是主题不适用
 
 ### Step 2: 递归研究(branch × 层级)
 
 对每一层每个分支:
 
 1. 生成子问题并附带 `researchGoal`,说明该检索要解决什么问题。
-2. 完整子研究: 多源检索(委派 `agent-reach` 渠道与 `online_search` 技能,分工见下方
-   「检索源分工」节)→ 读取全文(委派来源执行器,
-   公共网页一律 `bycli web read --url <URL> --stdout`)→ 过滤 → 登记采集产物。
+2. 完整子研究: 多源检索(内置路由层渠道与 `online_search` 技能,分工见下方
+   「检索源分工」节)→ 读取全文(经 [agent-reach.md](agent-reach.md) 路由并委派其选中的来源执行器)
+   → 过滤 → 登记采集产物。
 3. 采集产物登记: 执行器写出的 `collection-result.json` + raw/markdown/sanitized 产物,
-   经 `collect --item-json-file` 登记并物化;`sourceSkill + sourceUrl` 去重,learnings/citations 引用 `itemId`。
+   经 `collect --item-json-file` 登记并物化;同一 `sourceSkill + sourceUrl` 维持来源身份，HTTP(S) 跨来源重复项按
+   `duplicateGroupKey` 合并为一个 canonical 代表，learnings/citations 引用 `itemId`。
 4. 用 `branch --level N --query "..." --research-goal "..." --learnings "[...]" --citations "{...}"
    --followups "[...]" --sources "[...]" --search-queries "[...]" --context "[...]" --status done|pending|failed [--reason ...]`
    登记该分支,并说明失败原因。
@@ -79,18 +124,30 @@
    `new_breadth = max(2, breadth // 2)`,递归进入下一层。
 6. 某一层所有分支都失败: 停止递归,在报告中写明停止原因。
 
-### 检索源分工(agent-reach × online_search)
+### 检索源分工(内置路由层 × online_search × hot_discovery)
 
-两个检索信源互补并行,发现结果统一进入 learnings/citations;**取内容一律委派来源执行器**,
+三个检索信源互补并行,发现结果统一进入 learnings/citations;**取内容一律经 [agent-reach.md](agent-reach.md) 路由后委派来源执行器**,
 online_search 只负责发现 URL,不得直接抓取网页:
 
 - **时间敏感**(周报/新闻/最新动态): 优先 `online_search --category news|general --time-range week|day`
   (时间窗过滤一步到位,baidu/bing/sogou 支持);
 - **学术/标准**: 优先 `online_search --category science`(arxiv/crossref/pubmed/openalex),
   不带 `--time-range`(science 引擎不支持时间窗,传了会过滤为空);
-- **英文技术/代码**: 优先 `agent-reach`(Exa 擅长英文技术文档与代码上下文,`gh` 搜 GitHub);
-- **通用发现**: 两个信源各跑一次,同一 query 多引擎交叉验证;
-- **取内容**: 公共网页一律 `agent-reach` → `bycli web read --url <URL> --stdout`。
+- **英文技术/代码**: 优先内置路由层的 Exa(擅长英文技术文档与代码上下文)与 `gh`(搜 GitHub);
+- **热度优先**(需要「相关且高热」而非仅相关): 与 searxng **并行**跑
+  `online_search/references/hot_discovery`(子技能),它经 bycli 适配器取平台原生热度字段
+  (`citations`/`downloads`/`stars`/`score`),再用其 `merge` 子命令归并两个通道。
+  归并输出的 `groups.bothChannels` 是双通道命中,优先级最高。
+  **覆盖边界**: 热度集中在 packages/science/it/q&a/repos/apps/books/movies 9 个维度;
+  images/videos/music/files/dictionaries/translate/map/lyrics/radio/weather/icons 这 11 个维度
+  **无免登录热度源**,不要对它们调用。中文 general 主题是弱项(免登录只有虎扑,偏体育娱乐)。
+  **措辞纪律**: 33 个适配器里 30 个需本地重排,对外只能称「相关结果中较热」,不得称「平台最热」;
+  热度是时点观测,引用时须给出 `observedAt`;不造统一热度分(`downloads` 与 `citations` 不可比)。
+  **时序**: `init` 必须先于任何发现通道——`init` 拒绝非空目录,而快照目录由 `init` 自己创建。
+- **通用发现**: 三个信源各跑一次,同一 query 多引擎交叉验证;
+- **取内容**: 一律先经 [agent-reach.md](agent-reach.md) 路由,由其路由表按目标选定执行器后委派;
+  首选执行器失败时只允许路由表明确给出的一次兜底,之后停止并报告,不得自行替换执行器;
+  企业来源(钉钉/飞书/企微)按 SKILL.md「来源路由」节加载对应技能,不走公共互联网路由器。
 
 ### Step 3: 聚合去重(aggregate)
 
@@ -106,16 +163,22 @@ online_search 只负责发现 URL,不得直接抓取网页:
    - 零 branch 时禁止 report;未达到配置 `depth` 时必须提供 `--stop-reason` 或 `--allow-incomplete`;
    - report 文件必须在会话目录内、非空且不能是符号链接。
 
-最终报告结构(用户未指定结构时):
+最终报告必须包含下列四个二级标题（其下可按用户需要补充分析章节）：
 
 ```markdown
 # [Title]
 
-## Executive Summary
-## Key Findings
-## Detailed Analysis
-## Open Questions / Limitations
-## References
+## 采集范围
+说明实际来源范围及其理由。
+
+## 采集成果
+说明来源记录、重复内容组、候选、已物化、pending 与 failed 数量，以及交付级别。
+
+## 来源与追溯
+列出引用、来源记录和 canonical 代表的可追溯关系。
+
+## 覆盖缺口与局限
+列出失败、未覆盖来源、pending 及其对结论的影响。
 ```
 
 ## 研究树日志

@@ -26,6 +26,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.config.GitWorkspaceConfig;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.domain.project.service.GitCommandExecutor;
@@ -93,8 +94,8 @@ class ProjectInitServicePublicPathTest {
         when(projectService.findById(1001L)).thenReturn(project);
         when(projectRepoMapper.selectList(any()))
             .thenReturn(Collections.emptyList(), List.of(workspaceRepo));
-        Path projectRepos = tempDir.resolve("projects/1001/repos");
-        when(gitWorkspaceConfig.getRoot(1001L)).thenReturn(projectRepos.toString());
+        Path projectRepos = tempDir.resolve("byclaw-review-user/by/projects/1001/repos");
+        when(gitWorkspaceConfig.getRoot(1001L, "byclaw-review-user")).thenReturn(projectRepos.toString());
         when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get(anyString())).thenReturn("{\"params\":{\"GH_TOKEN\":\"token\"}}");
         when(gitCommandExecutor.isGitRepository(any(Path.class))).thenReturn(true);
@@ -119,6 +120,7 @@ class ProjectInitServicePublicPathTest {
         ReflectionTestUtils.setField(service, "auditService", auditService);
         ReflectionTestUtils.setField(service, "repoLockManager", repoLockManager);
         ReflectionTestUtils.setField(service, "projectService", projectService);
+        ReflectionTestUtils.setField(service, "userBucketNamingService", new UserBucketNamingService());
         ReflectionTestUtils.setField(service, "projectRepoMapper", projectRepoMapper);
         ReflectionTestUtils.setField(service, "stringRedisTemplate", stringRedisTemplate);
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());

@@ -8,6 +8,7 @@ import useGlobal from '@/hooks/useGlobal';
 import { getMyModels, getMyQuota } from '@/pages/models/service';
 import { getCompositeAppInfo } from '@/service/digitalEmployees';
 import { getModelDetail } from '@/pages/manager/service/ModelMgr';
+import chromeStyles from '@/layout/sider/components/ResourceSiderPanel/index.module.less';
 import styles from './index.module.less';
 
 function unwrapData(res: any) {
@@ -184,23 +185,23 @@ const ModelSiderPanel: React.FC<ModelSiderPanelProps> = ({ embedded = false, sho
         <>
           {!embedded && <ActiveSiderAgentBar agent={activeSiderAgent} />}
           <div
-            className={[styles.router, showRouter ? styles.routerSplit : ''].filter(Boolean).join(' ')}
+            className={[chromeStyles.router, showRouter ? chromeStyles.routerSplit : ''].filter(Boolean).join(' ')}
             onClick={toggleCenter}
           >
             {showRouter && (
               <AntdIcon
                 type={isModelsPage ? 'icon-a-Rightyou' : 'icon-a-Leftzuo'}
-                className={styles.routerBackIcon}
+                className={chromeStyles.routerBackIcon}
               />
             )}
-            <div className={styles.routerMain}>
+            <div className={chromeStyles.routerMain}>
+              <span className={chromeStyles.middle}>{intl.formatMessage({ id: 'personalModel.title' })}</span>
               <AntdIcon type="icon-a-Braindanao" />
-              <span className={styles.middle}>{intl.formatMessage({ id: 'personalModel.title' })}</span>
             </div>
             {!showRouter && (
               <AntdIcon
                 type={isModelsPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
-                style={{ fontSize: 16, marginLeft: 'auto' }}
+                className={chromeStyles.routerIcon}
               />
             )}
           </div>

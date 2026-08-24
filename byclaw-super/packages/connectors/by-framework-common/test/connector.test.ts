@@ -1,26 +1,157 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ConnectorRequest } from "@byclaw/by-conductor";
-import {
-  ByFrameworkConnector,
-  type ByFrameworkConnectorOptions,
-} from "../src/index.js";
+import { ByFrameworkConnector, type ByFrameworkConnectorOptions } from "../src/index.js";
+import { extractDisplayEvent } from "../src/by-framework-codec.js";
 
 function createConnector(
-  options: Omit<
-    ByFrameworkConnectorOptions,
-    "connectorId" | "targetAgentTypeResolver"
-  > = {},
+  options: Omit<ByFrameworkConnectorOptions, "connectorId" | "targetAgentTypeResolver"> = {},
 ): ByFrameworkConnector {
   return new ByFrameworkConnector({
     ...options,
     connectorId: "test-by-framework",
     targetAgentTypeResolver: (request) =>
-      request.agent.execution.targetAgentType?.trim() ||
-      `BYCLAW_EXE_${request.userCode}`,
+      request.agent.execution.targetAgentType?.trim() || `BYCLAW_EXE_${request.userCode}`,
   });
 }
 
 describe("ByFrameworkConnector", () => {
+  it("unwraps legacy 3009 output envelopes into a short title and a structured result", () => {
+    const output =
+      "total 40\ndrwxr-xr-x 8 byclaw byclaw 4096 Aug 18 20:08 .\n-rw-r--r-- 1 byclaw byclaw 3904 SKILL.md";
+
+    expect(
+      extractDisplayEvent({
+        message_id: "tool-legacy-1",
+        data: {
+          contentType: "3009",
+          orderId: "tool-legacy-1",
+          choices: [
+            {
+              delta: {
+                content: JSON.stringify({ output, status: "_DONE_" }),
+              },
+            },
+          ],
+        },
+      }),
+    ).toEqual({
+      type: "tool_completed",
+      callId: "tool-legacy-1",
+      toolName: "工具",
+      title: "读取目录结果",
+      output,
+    });
+
+    expect(
+      extractDisplayEvent({
+        message_id: "tool-legacy-2",
+        data: {
+          contentType: "3009",
+          orderId: "tool-legacy-2",
+          choices: [
+            {
+              delta: {
+                content: JSON.stringify({
+                  output: "Launching skill: requirements-analysis-rules:requirements-analysis-rules",
+                  status: "_DONE_",
+                }),
+              },
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      type: "tool_completed",
+      title: "加载技能：requirements-analysis-rules",
+    });
+
+    expect(
+      extractDisplayEvent({
+        message_id: "tool-legacy-3",
+        data: {
+          contentType: "3009",
+          orderId: "tool-legacy-3",
+          choices: [
+            {
+              delta: {
+                content: JSON.stringify({ output: "Exit code 2\ntotal 20", status: "_ERROR_" }),
+              },
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      type: "tool_failed",
+      title: "命令执行失败（退出码 2）",
+      error: "Exit code 2",
+    });
+  });
+
+  it("reads Byclaw-code 3015 tool cards including their inline input and output", () => {
+    expect(
+      extractDisplayEvent({
+        message_id: "tool-card-1",
+        data: {
+          contentType: "3015",
+          objectType: "tool_call",
+          orderId: "tool-card-1",
+          choices: [
+            {
+              delta: {
+                content: JSON.stringify({
+                  title: "Read",
+                  input: {
+                    file_path: "/home/byclaw/requirements.md",
+                    token: "secret-value",
+                  },
+                  status: "_START_",
+                  description: "/home/byclaw/requirements.md",
+                }),
+              },
+            },
+          ],
+        },
+      }),
+    ).toEqual({
+      type: "tool_started",
+      callId: "tool-card-1",
+      toolName: "Read",
+      title: "Read",
+      input: {
+        file_path: "/home/byclaw/requirements.md",
+        token: "[REDACTED]",
+      },
+    });
+
+    expect(
+      extractDisplayEvent({
+        message_id: "tool-card-1",
+        data: {
+          contentType: "3015",
+          objectType: "tool_call",
+          orderId: "tool-card-1",
+          choices: [
+            {
+              delta: {
+                content: JSON.stringify({
+                  title: "Read",
+                  output: "requirements content",
+                  status: "_DONE_",
+                }),
+              },
+            },
+          ],
+        },
+      }),
+    ).toEqual({
+      type: "tool_completed",
+      callId: "tool-card-1",
+      toolName: "Read",
+      title: "Read",
+      output: "requirements content",
+    });
+  });
+
   it("dispatches, normalizes answer events and ignores reasoning", async () => {
     const xread = vi
       .fn()
@@ -120,6 +251,299 @@ describe("ByFrameworkConnector", () => {
     await execution.cancel("test");
     await execution.cancel("test again");
     expect(cancelTask).toHaveBeenCalledOnce();
+  });
+
+  it("normalizes display-safe reasoning and flat tool events without forwarding child lifecycle", async () => {
+    const toolInput = JSON.stringify({
+      title: "Input",
+      json: JSON.stringify({ path: "/tmp/data", token: "secret-value" }),
+    });
+    const redis = {
+      xread: vi.fn(async () => [
+        [
+          "stream",
+          [
+            ["1-0", ["data", protocolDataMessage("reasoningLogStart", {}, "trace-1")]],
+            [
+              "2-0",
+              [
+                "data",
+                protocolDataMessage(
+                  "reasoningLogDelta",
+                  { contentType: "1002", orderId: "reason-1", content: "正在分析" },
+                  "trace-1",
+                ),
+              ],
+            ],
+            [
+              "3-0",
+              [
+                "data",
+                protocolDataMessage(
+                  "reasoningLogDelta",
+                  {
+                    contentType: "3009",
+                    objectType: "tool_call",
+                    status: "_START_",
+                    orderId: "tool-1",
+                    content: "调用工具：read",
+                  },
+                  "trace-1",
+                ),
+              ],
+            ],
+            [
+              "4-0",
+              [
+                "data",
+                protocolDataMessage(
+                  "reasoningLogDelta",
+                  {
+                    contentType: "2020",
+                    orderId: "tool-1-input",
+                    parentOrderId: "tool-1",
+                    content: toolInput,
+                  },
+                  "trace-1",
+                ),
+              ],
+            ],
+            [
+              "5-0",
+              [
+                "data",
+                protocolDataMessage(
+                  "reasoningLogDelta",
+                  {
+                    contentType: "3009",
+                    objectType: "tool_call",
+                    status: "_DONE_",
+                    orderId: "tool-1",
+                    content: "调用工具：read",
+                  },
+                  "trace-1",
+                ),
+              ],
+            ],
+            ["6-0", ["data", protocolDataMessage("reasoningLogEnd", {}, "trace-1")]],
+            [
+              "7-0",
+              [
+                "data",
+                protocolDataMessage(
+                  "reasoningLogDelta",
+                  { contentType: "1002", orderId: "child-answer-1", content: "完成" },
+                  "trace-1",
+                ),
+              ],
+            ],
+            ["8-0", ["data", dataMessage("appStreamResponse", "", "trace-1")]],
+          ],
+        ],
+      ]),
+      ping: vi.fn(async () => "PONG"),
+      quit: vi.fn(async () => "OK"),
+      status: "ready",
+    };
+    const connector = createConnector({
+      redis: redis as never,
+      gatewayClient: {
+        sendMessage: vi.fn(async () => ({
+          success: true,
+          message_id: "message-1",
+          trace_id: "trace-1",
+          target_worker_id: "worker-1",
+          timestamp: Date.now(),
+          status: "QUEUED",
+        })),
+        cancelTask: vi.fn(async () => ({ success: true })),
+      },
+      readBlockMs: 1,
+      promoteOutOfReasoningTextToOutput: true,
+    });
+
+    const execution = await connector.start(request(), {
+      signal: new AbortController().signal,
+    });
+    const events = [];
+    for await (const event of execution.events) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "activity", cursor: "1-0" },
+      {
+        type: "display_progress",
+        text: "正在分析",
+        sourceMessageId: "reason-1",
+        cursor: "2-0",
+      },
+      {
+        type: "tool_started",
+        callId: "tool-1",
+        toolName: "read",
+        title: "调用工具：read",
+        cursor: "3-0",
+      },
+      {
+        type: "tool_detail",
+        callId: "tool-1",
+        toolName: "read",
+        phase: "input",
+        value: { path: "/tmp/data", token: "[REDACTED]" },
+        cursor: "4-0",
+      },
+      {
+        type: "tool_completed",
+        callId: "tool-1",
+        toolName: "read",
+        title: "调用工具：read",
+        cursor: "5-0",
+      },
+      { type: "activity", cursor: "6-0" },
+      { type: "output_delta", text: "完成", cursor: "7-0" },
+      {
+        type: "completed",
+        result: { status: "completed", output: "完成", artifacts: [] },
+        cursor: "8-0",
+      },
+    ]);
+  });
+
+  it("collects BYCLAW_CODE child answers emitted as reasoningLogDelta without a thinking phase", async () => {
+    const redis = {
+      xread: vi.fn(async () => [
+        [
+          "stream",
+          [
+            [
+              "1-0",
+              [
+                "data",
+                protocolDataMessage(
+                  "reasoningLogDelta",
+                  { contentType: "1002", orderId: "child-answer-1", content: "需求分析" },
+                  "trace-1",
+                ),
+              ],
+            ],
+            [
+              "2-0",
+              [
+                "data",
+                protocolDataMessage(
+                  "reasoningLogDelta",
+                  { contentType: "1002", orderId: "child-answer-1", content: "已完成" },
+                  "trace-1",
+                ),
+              ],
+            ],
+            ["3-0", ["data", dataMessage("appStreamResponse", "", "trace-1")]],
+          ],
+        ],
+      ]),
+      ping: vi.fn(async () => "PONG"),
+      quit: vi.fn(async () => "OK"),
+      status: "ready",
+    };
+    const connector = createConnector({
+      redis: redis as never,
+      gatewayClient: {
+        sendMessage: vi.fn(async () => ({
+          success: true,
+          message_id: "message-1",
+          trace_id: "trace-1",
+          target_worker_id: "worker-1",
+          timestamp: Date.now(),
+          status: "QUEUED",
+        })),
+        cancelTask: vi.fn(async () => ({ success: true })),
+      },
+      readBlockMs: 1,
+      promoteOutOfReasoningTextToOutput: true,
+    });
+
+    const execution = await connector.start(request(), {
+      signal: new AbortController().signal,
+    });
+    const events = [];
+    for await (const event of execution.events) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "output_delta", text: "需求分析", cursor: "1-0" },
+      { type: "output_delta", text: "已完成", cursor: "2-0" },
+      {
+        type: "completed",
+        result: { status: "completed", output: "需求分析已完成", artifacts: [] },
+        cursor: "3-0",
+      },
+    ]);
+  });
+
+  it("keeps out-of-reasoning 1002 as display progress unless explicitly enabled", async () => {
+    const redis = {
+      xread: vi.fn(async () => [
+        [
+          "stream",
+          [
+            [
+              "1-0",
+              [
+                "data",
+                protocolDataMessage(
+                  "reasoningLogDelta",
+                  { contentType: "1002", orderId: "progress-1", content: "普通进度" },
+                  "trace-1",
+                ),
+              ],
+            ],
+            ["2-0", ["data", dataMessage("appStreamResponse", "", "trace-1")]],
+          ],
+        ],
+      ]),
+      ping: vi.fn(async () => "PONG"),
+      quit: vi.fn(async () => "OK"),
+      status: "ready",
+    };
+    const connector = createConnector({
+      redis: redis as never,
+      gatewayClient: {
+        sendMessage: vi.fn(async () => ({
+          success: true,
+          message_id: "message-1",
+          trace_id: "trace-1",
+          target_worker_id: "worker-1",
+          timestamp: Date.now(),
+          status: "QUEUED",
+        })),
+        cancelTask: vi.fn(async () => ({ success: true })),
+      },
+      readBlockMs: 1,
+    });
+
+    const execution = await connector.start(request(), {
+      signal: new AbortController().signal,
+    });
+    const events = [];
+    for await (const event of execution.events) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      {
+        type: "display_progress",
+        text: "普通进度",
+        sourceMessageId: "progress-1",
+        cursor: "1-0",
+      },
+      {
+        type: "completed",
+        result: { status: "completed", output: "", artifacts: [] },
+        cursor: "2-0",
+      },
+    ]);
   });
 
   it("rejects cancellation when by-framework does not accept it", async () => {
@@ -397,17 +821,15 @@ describe("ByFrameworkConnector", () => {
 
   it("uses by-framework finalAnswer when the worker emitted no answerDelta", async () => {
     const redis = {
-      xread: vi
-        .fn()
-        .mockResolvedValueOnce([
+      xread: vi.fn().mockResolvedValueOnce([
+        [
+          "stream",
           [
-            "stream",
-            [
-              ["1-0", ["data", dataMessage("finalAnswer", "完整子 Agent 输出", "trace-1")]],
-              ["2-0", ["data", dataMessage("appStreamResponse", "", "trace-1")]],
-            ],
+            ["1-0", ["data", dataMessage("finalAnswer", "完整子 Agent 输出", "trace-1")]],
+            ["2-0", ["data", dataMessage("appStreamResponse", "", "trace-1")]],
           ],
-        ]),
+        ],
+      ]),
       ping: vi.fn(async () => "PONG"),
       quit: vi.fn(async () => "OK"),
       status: "ready",
@@ -825,12 +1247,7 @@ describe("ByFrameworkConnector", () => {
     const connector = createConnector({
       redis: {
         xread: vi.fn(async () => [
-          [
-            "stream",
-            [
-              ["1-0", ["data", dataMessage("appStreamResponse", "", "trace-1")]],
-            ],
-          ],
+          ["stream", [["1-0", ["data", dataMessage("appStreamResponse", "", "trace-1")]]]],
         ]),
         ping: vi.fn(async () => "PONG"),
         quit: vi.fn(async () => "OK"),
@@ -906,5 +1323,28 @@ function dataMessage(eventType: string, content: string, traceId: string): strin
     trace_id: traceId,
     event_type: eventType,
     data: { choices: [{ delta: { content } }] },
+  });
+}
+
+function protocolDataMessage(
+  eventType: string,
+  input: {
+    contentType?: string;
+    orderId?: string;
+    parentOrderId?: string;
+    objectType?: string;
+    status?: string;
+    content?: string;
+  },
+  traceId: string,
+): string {
+  return JSON.stringify({
+    trace_id: traceId,
+    event_type: eventType,
+    message_id: input.orderId,
+    data: {
+      ...input,
+      choices: [{ delta: { content: input.content ?? "" } }],
+    },
   });
 }

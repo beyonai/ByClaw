@@ -20,6 +20,7 @@ import {
   DOWNLOAD_ATTACHMENT_ENABLED,
   DOWNLOAD_ATTACHMENT_TOOL_NAME,
   INSPECT_ATTACHMENT_TOOL_NAME,
+  UPDATE_TASK_PLAN_TOOL_NAME,
   LEADER_FILE_TOOL_NAMES,
   resolveActiveLeaderToolNames,
 } from "./context/active-leader-tools.js";
@@ -33,6 +34,7 @@ import {
 import { exportPiSessionCheckpoint } from "./pi-session-checkpoint.js";
 import { shouldPreflightCompact } from "./pi-compaction.js";
 import type { PiRuntimeProviderConfig } from "./pi-model-provider.js";
+import type { PiLeaderLogger } from "./pi-leader.js";
 import { adaptByclawMessageRoles } from "./pi-provider-adapters/byclaw-message-roles.js";
 import { adaptVolcengineArkResponsesPayload } from "./pi-provider-adapters/volcengine-ark.js";
 import type {
@@ -44,6 +46,7 @@ import {
   ThinkingStreamParser,
   type ThinkingStreamSegment,
 } from "./thinking-stream-parser.js";
+import { toTaskPlanModelView } from "./domain/task-plan.js";
 
 export interface PiLeaderCompactionConfig {
   enabled: boolean;
@@ -61,12 +64,14 @@ export class PiLeaderSession implements LeaderSession {
     private readonly session: AgentSession,
     contextRevision: number,
     private readonly compaction: PiLeaderCompactionConfig,
+    private readonly internalSessionId: string,
+    private readonly logger: PiLeaderLogger | undefined,
   ) {
     this.contextRevision = contextRevision;
   }
 
   /**
-   * 构造受限的 Pi Session：关闭扩展、技能和上下文文件，只注册 delegateAgent 工具。
+   * 构造受限的 Pi Session：关闭扩展、技能和上下文文件，只注册平台白名单工具。
    */
   static async create(
     runtime: Awaited<ReturnType<typeof ModelRuntime.create>>,
@@ -79,6 +84,8 @@ export class PiLeaderSession implements LeaderSession {
     requestAdapter: PiRuntimeProviderConfig["requestAdapter"],
     thinkingBudgets: PiRuntimeProviderConfig["thinkingBudgets"],
     compaction: PiLeaderCompactionConfig,
+    internalSessionId: string,
+    logger?: PiLeaderLogger,
   ): Promise<PiLeaderSession> {
     let wrapper: PiLeaderSession | undefined;
     const delegateAgent = defineTool({
@@ -86,6 +93,9 @@ export class PiLeaderSession implements LeaderSession {
       label: "Delegate Agent",
       description: "Delegate a well-scoped task to one authorized specialist agent and wait for its result.",
       promptSnippet: "Delegate work to an authorized specialist agent.",
+      // Run/Delegation 状态目前按单活动委派维护；同一轮的多个子 Agent
+      // 必须依次执行，避免 Run version、恢复匹配和交互状态竞争。
+      executionMode: "sequential",
       parameters: Type.Object({
         agentId: Type.String({ description: "Exact id from the current authorized agent list" }),
         task: Type.String({ description: "Self-contained task for the specialist" }),
@@ -158,6 +168,70 @@ export class PiLeaderSession implements LeaderSession {
         return {
           content: [{ type: "text", text }],
           details: { action: response.action },
+        };
+      },
+    });
+    const updateTaskPlan = defineTool({
+      name: UPDATE_TASK_PLAN_TOOL_NAME,
+      label: "Update Task Plan",
+      description:
+        "Create or replace the current execution task plan. Send the complete ordered task list every time progress changes. The system owns execution identity, plan identity, versions, and task IDs.",
+      promptSnippet:
+        "Create and keep a structured task plan synchronized with actual execution progress.",
+      executionMode: "sequential",
+      parameters: Type.Object({
+        title: Type.String({ minLength: 1, maxLength: 500 }),
+        explanation: Type.Optional(Type.String({ maxLength: 2000 })),
+        tasks: Type.Array(
+          Type.Object({
+            step: Type.String({ minLength: 1, maxLength: 1000 }),
+            description: Type.Optional(Type.String({ maxLength: 4000 })),
+            status: Type.Union([
+              Type.Literal("PENDING"),
+              Type.Literal("IN_PROGRESS"),
+              Type.Literal("COMPLETED"),
+              Type.Literal("FAILED"),
+              Type.Literal("SKIPPED"),
+              Type.Literal("CANCELLED"),
+            ]),
+            statusReason: Type.Optional(
+              Type.Object({
+                code: Type.String({ minLength: 1, maxLength: 64 }),
+                message: Type.Optional(Type.String({ maxLength: 500 })),
+              }),
+            ),
+          }),
+          { minItems: 1, maxItems: 100 },
+        ),
+      }),
+      execute: async (toolCallId, params, signal) => {
+        const active = wrapper?.activeInput;
+        if (!active?.updateTaskPlan) {
+          throw new Error("task plan updates are not available for this run");
+        }
+        const snapshot = await active.updateTaskPlan({
+          toolCallId,
+          update: {
+            title: params.title,
+            ...(params.explanation ? { explanation: params.explanation } : {}),
+            tasks: params.tasks.map((task) => ({
+              step: task.step,
+              ...(task.description ? { description: task.description } : {}),
+              status: task.status,
+              ...(task.statusReason ? { statusReason: task.statusReason } : {}),
+            })),
+          },
+          ...(signal ? { signal } : {}),
+        });
+        // before_agent_start 每轮都会读取 activeInput；原位替换后下一次推理立即看到最新计划。
+        active.activeTaskPlan = snapshot;
+        return {
+          content: [
+            { type: "text", text: JSON.stringify(toTaskPlanModelView(snapshot)) },
+          ],
+          details: {
+            status: snapshot.status,
+          },
         };
       },
     });
@@ -289,6 +363,10 @@ export class PiLeaderSession implements LeaderSession {
                 ...(active.orchestrator
                   ? { orchestrator: active.orchestrator }
                   : {}),
+                ...(active.activeTaskPlan
+                  ? { activeTaskPlan: active.activeTaskPlan }
+                  : {}),
+                taskPlanAvailable: Boolean(active.updateTaskPlan),
               });
               return { systemPrompt: context.systemPrompt };
             });
@@ -322,6 +400,7 @@ export class PiLeaderSession implements LeaderSession {
       tools: [
         DELEGATE_AGENT_TOOL_NAME,
         ...(ASK_USER_QUESTION_ENABLED ? [ASK_USER_QUESTION_TOOL_NAME] : []),
+        UPDATE_TASK_PLAN_TOOL_NAME,
         ...LEADER_FILE_TOOL_NAMES,
         INSPECT_ATTACHMENT_TOOL_NAME,
         ...(DOWNLOAD_ATTACHMENT_ENABLED ? [DOWNLOAD_ATTACHMENT_TOOL_NAME] : []),
@@ -329,6 +408,7 @@ export class PiLeaderSession implements LeaderSession {
       customTools: [
         delegateAgent,
         ...(ASK_USER_QUESTION_ENABLED ? [askUserQuestion] : []),
+        updateTaskPlan,
         inspectAttachment,
         ...(DOWNLOAD_ATTACHMENT_ENABLED ? [downloadAttachment] : []),
       ],
@@ -336,7 +416,13 @@ export class PiLeaderSession implements LeaderSession {
       sessionManager,
       settingsManager,
     });
-    wrapper = new PiLeaderSession(created.session, contextRevision, compaction);
+    wrapper = new PiLeaderSession(
+      created.session,
+      contextRevision,
+      compaction,
+      internalSessionId,
+      logger,
+    );
     return wrapper;
   }
 
@@ -356,6 +442,17 @@ export class PiLeaderSession implements LeaderSession {
     let thinkingParser = new ThinkingStreamParser();
     let deltaWrites = Promise.resolve();
     let checkpointWrites = Promise.resolve();
+    const runStartedAt = Date.now();
+    let turnNumber = 0;
+    let turnStartedAt: number | undefined;
+    let streamStartedAt: number | undefined;
+    let firstTokenAt: number | undefined;
+    const toolStartedAt = new Map<string, number>();
+    const logBase = () => ({
+      component: "byclaw-super",
+      internalSessionId: this.internalSessionId,
+      ...(input.observability ?? {}),
+    });
     const forwardSegments = (segments: ThinkingStreamSegment[]) => {
       for (const segment of segments) {
         if (segment.kind === "answer") {
@@ -368,7 +465,40 @@ export class PiLeaderSession implements LeaderSession {
     };
     // 标准 thinking_delta 与普通文本中的 <think> 兼容格式都归一化为独立思考增量。
     const unsubscribe = this.session.subscribe((event) => {
-      if (event.type === "message_start" && event.message.role === "assistant") {
+      if (event.type === "agent_start") {
+        this.logger?.info(
+          { ...logBase(), stage: "leader_run_started" },
+          "Leader Run 开始",
+        );
+      } else if (event.type === "turn_start") {
+        turnNumber += 1;
+        turnStartedAt = Date.now();
+        streamStartedAt = undefined;
+        firstTokenAt = undefined;
+        this.logger?.info(
+          {
+            ...logBase(),
+            stage: "leader_provider_request_started",
+            turnNumber,
+            elapsedMs: turnStartedAt - runStartedAt,
+          },
+          "Leader 模型请求开始",
+        );
+      } else if (event.type === "message_start" && event.message.role === "assistant") {
+        streamStartedAt = Date.now();
+        this.logger?.info(
+          {
+            ...logBase(),
+            stage: "leader_provider_stream_started",
+            turnNumber,
+            provider: event.message.provider,
+            model: event.message.model,
+            timeToStreamMs:
+              turnStartedAt === undefined ? undefined : streamStartedAt - turnStartedAt,
+            elapsedMs: streamStartedAt - runStartedAt,
+          },
+          "Leader 模型响应流已建立",
+        );
         currentAssistant = "";
         sawTextDelta = false;
         thinkingParser = new ThinkingStreamParser();
@@ -376,6 +506,22 @@ export class PiLeaderSession implements LeaderSession {
         event.type === "message_update" &&
         event.assistantMessageEvent.type === "text_delta"
       ) {
+        if (firstTokenAt === undefined) {
+          firstTokenAt = Date.now();
+          this.logger?.info(
+            {
+              ...logBase(),
+              stage: "leader_provider_first_token",
+              turnNumber,
+              timeToFirstTokenMs:
+                turnStartedAt === undefined ? undefined : firstTokenAt - turnStartedAt,
+              streamToFirstTokenMs:
+                streamStartedAt === undefined ? undefined : firstTokenAt - streamStartedAt,
+              elapsedMs: firstTokenAt - runStartedAt,
+            },
+            "Leader 模型收到首个文本 Token",
+          );
+        }
         sawTextDelta = true;
         forwardSegments(thinkingParser.push(event.assistantMessageEvent.delta));
       } else if (
@@ -383,9 +529,55 @@ export class PiLeaderSession implements LeaderSession {
         event.assistantMessageEvent.type === "thinking_delta" &&
         input.onReasoningDelta
       ) {
+        if (firstTokenAt === undefined) {
+          firstTokenAt = Date.now();
+          this.logger?.info(
+            {
+              ...logBase(),
+              stage: "leader_provider_first_token",
+              turnNumber,
+              tokenKind: "thinking",
+              timeToFirstTokenMs:
+                turnStartedAt === undefined ? undefined : firstTokenAt - turnStartedAt,
+              streamToFirstTokenMs:
+                streamStartedAt === undefined ? undefined : firstTokenAt - streamStartedAt,
+              elapsedMs: firstTokenAt - runStartedAt,
+            },
+            "Leader 模型收到首个思考 Token",
+          );
+        }
         const delta = event.assistantMessageEvent.delta;
         deltaWrites = deltaWrites.then(() => input.onReasoningDelta?.(delta));
       } else if (event.type === "message_end" && event.message.role === "assistant") {
+        const messageEndedAt = Date.now();
+        const responseFields = {
+          ...logBase(),
+          stage: "leader_provider_request_finished",
+          turnNumber,
+          provider: event.message.provider,
+          model: event.message.model,
+          stopReason: event.message.stopReason,
+          durationMs:
+            turnStartedAt === undefined ? undefined : messageEndedAt - turnStartedAt,
+          timeToFirstTokenMs:
+            turnStartedAt === undefined || firstTokenAt === undefined
+              ? undefined
+              : firstTokenAt - turnStartedAt,
+          inputTokens: event.message.usage.input,
+          outputTokens: event.message.usage.output,
+          reasoningTokens: event.message.usage.reasoning,
+          cacheReadTokens: event.message.usage.cacheRead,
+          totalTokens: event.message.usage.totalTokens,
+          elapsedMs: messageEndedAt - runStartedAt,
+          ...(event.message.errorMessage
+            ? { error: leaderLogPreview(event.message.errorMessage) }
+            : {}),
+        };
+        if (event.message.stopReason === "error") {
+          this.logger?.warn(responseFields, "Leader 模型请求异常结束");
+        } else {
+          this.logger?.info(responseFields, "Leader 模型请求结束");
+        }
         const finalizedText = event.message.content
           .map((content) => (content.type === "text" ? content.text : ""))
           .join("");
@@ -402,6 +594,92 @@ export class PiLeaderSession implements LeaderSession {
         // 记录错误用于把空回答转为明确失败，避免静默成功。
         if (event.message.stopReason === "error") {
           modelErrorMessage = event.message.errorMessage || "model call failed";
+        }
+      } else if (event.type === "tool_execution_start") {
+        toolStartedAt.set(event.toolCallId, Date.now());
+        this.logger?.info(
+          {
+            ...logBase(),
+            stage: "leader_tool_started",
+            turnNumber,
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            elapsedMs: Date.now() - runStartedAt,
+          },
+          "Leader 工具开始",
+        );
+      } else if (event.type === "tool_execution_end") {
+        const endedAt = Date.now();
+        const startedAt = toolStartedAt.get(event.toolCallId);
+        toolStartedAt.delete(event.toolCallId);
+        const fields = {
+          ...logBase(),
+          stage: "leader_tool_finished",
+          turnNumber,
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          isError: event.isError,
+          durationMs: startedAt === undefined ? undefined : endedAt - startedAt,
+          elapsedMs: endedAt - runStartedAt,
+        };
+        if (event.isError) {
+          this.logger?.warn(fields, "Leader 工具异常结束");
+        } else {
+          this.logger?.info(fields, "Leader 工具结束");
+        }
+      } else if (event.type === "auto_retry_start") {
+        this.logger?.warn(
+          {
+            ...logBase(),
+            stage: "leader_provider_retry_started",
+            turnNumber,
+            attempt: event.attempt,
+            maxAttempts: event.maxAttempts,
+            retryDelayMs: event.delayMs,
+            error: leaderLogPreview(event.errorMessage),
+            elapsedMs: Date.now() - runStartedAt,
+          },
+          "Leader 模型请求准备重试",
+        );
+      } else if (event.type === "auto_retry_end") {
+        const fields = {
+          ...logBase(),
+          stage: "leader_provider_retry_finished",
+          turnNumber,
+          attempt: event.attempt,
+          success: event.success,
+          ...(event.finalError ? { error: leaderLogPreview(event.finalError) } : {}),
+          elapsedMs: Date.now() - runStartedAt,
+        };
+        if (event.success) {
+          this.logger?.info(fields, "Leader 模型重试结束");
+        } else {
+          this.logger?.warn(fields, "Leader 模型重试失败");
+        }
+      } else if (event.type === "compaction_start") {
+        this.logger?.info(
+          {
+            ...logBase(),
+            stage: "leader_compaction_started",
+            reason: event.reason,
+            elapsedMs: Date.now() - runStartedAt,
+          },
+          "Leader 上下文压缩开始",
+        );
+      } else if (event.type === "compaction_end") {
+        const fields = {
+          ...logBase(),
+          stage: "leader_compaction_finished",
+          reason: event.reason,
+          aborted: event.aborted,
+          willRetry: event.willRetry,
+          ...(event.errorMessage ? { error: leaderLogPreview(event.errorMessage) } : {}),
+          elapsedMs: Date.now() - runStartedAt,
+        };
+        if (event.errorMessage) {
+          this.logger?.warn(fields, "Leader 上下文压缩异常结束");
+        } else {
+          this.logger?.info(fields, "Leader 上下文压缩结束");
         }
       } else if (event.type === "entry_appended" && input.onCheckpoint) {
         const checkpoint = exportPiSessionCheckpoint(this.session.sessionManager);
@@ -427,6 +705,7 @@ export class PiLeaderSession implements LeaderSession {
           inspectAttachmentAvailable: Boolean(input.inspectAttachment),
           downloadAttachmentAvailable: Boolean(input.downloadAttachment),
           expertTeam: Boolean(input.orchestrator),
+          taskPlanAvailable: Boolean(input.updateTaskPlan),
         }),
       );
       // 群聊只把未见过的消息作为 Pi custom message 追加；cursor 和 compaction
@@ -451,6 +730,15 @@ export class PiLeaderSession implements LeaderSession {
       }
       return { text };
     } finally {
+      this.logger?.info(
+        {
+          ...logBase(),
+          stage: "leader_run_finished",
+          turnCount: turnNumber,
+          durationMs: Date.now() - runStartedAt,
+        },
+        "Leader Run 结束",
+      );
       input.signal.removeEventListener("abort", onAbort);
       unsubscribe();
       this.activeInput = undefined;
@@ -554,4 +842,17 @@ export class PiLeaderSession implements LeaderSession {
       );
     }
   }
+}
+
+function leaderLogPreview(value: string, limit = 240): string {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
+    .replace(/([?&](?:token|access_token|api_key|password)=)[^&\s]+/gi, "$1[REDACTED]")
+    .replace(
+      /(["']?(?:authorization|password|passwd|pwd|secret|token|access[_-]?token|refresh[_-]?token|api[_-]?key)["']?\s*[:=]\s*["']?)[^"',;\s}]+/gi,
+      "$1[REDACTED]",
+    )
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, limit);
 }

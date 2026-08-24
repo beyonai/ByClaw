@@ -110,6 +110,7 @@
   top: 42px;
   bottom: 0;
   left: 0;
+  // 与全局左侧 WorkspaceSider 保持同宽，切换列表和详情时不产生宽度跳变。
   width: 280px;
   border-right: 1px solid #e5e8ed;
   box-shadow: 8px 8px 20px rgba(25, 35, 55, 0.12);
@@ -143,62 +144,15 @@
   flex-direction: column;
 }
 
-// 当前会话和当前项目的文件空间标题下展示统一入口路径，方便直接复制给数字员工使用。
-.fileSpaceHeading {
+.resourceSection {
+  min-height: 0;
   display: flex;
-  min-width: 0;
+  flex: 1;
   flex-direction: column;
-}
-
-.fileSpaceHeadingTitle {
-  color: #1f2533;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 20px;
-}
-
-.fileSpacePathRow {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 4px;
-}
-
-.fileSpacePath {
-  min-width: 0;
-  color: #8a94a6;
-  font-size: 11px;
-  font-weight: 400;
-  line-height: 16px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.fileSpacePathCopy {
-  display: inline-flex;
-  width: 16px;
-  height: 16px;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #8a94a6;
-  cursor: pointer;
-  font-size: 12px;
-  line-height: 1;
-
-  &:hover,
-  &:focus-visible {
-    color: var(--beyond-color-primary, #1677ff);
-    outline: none;
-  }
-}
-
-.primaryTabs,
-.secondaryTabs {
+.primaryTabs {
   flex: none;
   padding: 0 10px;
 
@@ -243,8 +197,25 @@
   }
 }
 
+.resourceBody {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .primaryTabs {
   :global {
+    .@{antPrefix}-tabs-nav-list {
+      width: auto;
+      gap: 20px;
+    }
+
+    .@{antPrefix}-tabs-tab {
+      flex: none;
+      justify-content: flex-start;
+    }
+
     .@{antPrefix}-tabs-ink-bar {
       display: none;
     }
@@ -261,34 +232,58 @@
 }
 
 .secondaryTabs {
-  // 与数字员工“全部 / 我常用的 / 最近添加”筛选条保持一致，使用轻量胶囊块区分选中状态。
-  // 二级筛选仅承担快速切换，缩小上下留白，避免在窄面板中占用过多内容空间。
-  padding: 4px 10px 6px;
-  border-bottom: 1px solid #eef0f3;
-
-  :global(.@{antPrefix}-tabs-tab) {
-    flex: 1;
-    min-width: 0;
-    box-sizing: border-box;
-    justify-content: center;
-    padding: 4px 5px;
-    border: 0;
-    border-radius: 28px;
-    color: rgba(112, 118, 128, 1);
-    background: #f5f5f5;
-    font-size: 13px;
-    font-weight: 400;
-    line-height: 18px;
-
-    &:hover {
-      color: var(--beyond-color-primary);
-    }
-  }
+  display: flex;
+  flex: 1;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  justify-content: center;
+  align-self: stretch;
+  box-sizing: border-box;
+  padding-right: 8px;
 
   :global {
+    .@{antPrefix}-tabs-nav {
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      margin: 0;
+      align-items: center;
+    }
+
+    .@{antPrefix}-tabs-nav-wrap {
+      width: 100%;
+      min-width: 0;
+      align-items: center;
+    }
+
     .@{antPrefix}-tabs-nav-list {
-      display: flex;
-      gap: 8px;
+      width: 100%;
+      min-width: 0;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .@{antPrefix}-tabs-tab {
+      flex: none;
+      width: 100%;
+      min-height: 84px;
+      box-sizing: border-box;
+      justify-content: center;
+      align-items: center;
+      padding: 0;
+      margin: 0 !important;
+      border: 0;
+      border-radius: 0 16px 16px 0;
+      color: rgba(112, 118, 128, 1);
+      background: #f5f5f5;
+      font-size: 13px;
+      font-weight: 400;
+      line-height: 16px;
+
+      &:hover {
+        color: var(--beyond-color-primary);
+      }
     }
 
     .@{antPrefix}-tabs-tab-active {
@@ -301,9 +296,77 @@
       color: var(--beyond-color-primary);
     }
 
-    .@{antPrefix}-tabs-ink-bar {
+    .@{antPrefix}-tabs-tab-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      max-width: 100%;
+      padding: 0;
+      overflow: visible;
+      font-size: 13px;
+      text-align: center;
+      text-overflow: clip;
+      white-space: normal;
+      word-break: break-all;
+    }
+
+    .@{antPrefix}-tabs-ink-bar,
+    .@{antPrefix}-tabs-content-holder {
       display: none;
     }
+  }
+}
+
+.secondaryTabsEnglish {
+  :global {
+    .@{antPrefix}-tabs-tab {
+      min-height: 128px;
+    }
+
+    .@{antPrefix}-tabs-tab-btn {
+      width: max-content;
+      max-width: none;
+      white-space: nowrap;
+      word-break: normal;
+      transform: rotate(90deg);
+    }
+  }
+}
+
+.secondaryNav {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  width: 36px;
+  min-height: 0;
+  padding: 0;
+  border-left: 1px solid #eef0f3;
+  overflow: hidden;
+}
+
+.secondaryNavActions {
+  display: flex;
+  flex: none;
+  justify-content: center;
+  height: 24px;
+  width: 100%;
+  box-sizing: border-box;
+  padding-right: 8px;
+  margin-bottom: 8px;
+}
+
+.resourceRefreshButton {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: #7b8799;
+
+  &:hover,
+  &:focus-visible {
+    color: #344054;
+    background: #eef0f3;
   }
 }
 
@@ -311,6 +374,7 @@
 .detailSpin {
   flex: 1;
   height: 100%;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
 

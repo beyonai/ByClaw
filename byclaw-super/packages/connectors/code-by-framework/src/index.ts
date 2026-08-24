@@ -7,7 +7,10 @@ export const CODE_BY_FRAMEWORK_CONNECTOR_ID = "code-by-framework";
 
 export type CodeByFrameworkConnectorOptions = Omit<
   ByFrameworkConnectorOptions,
-  "connectorId" | "targetAgentTypeResolver"
+  | "connectorId"
+  | "targetAgentTypeResolver"
+  | "agentReturnMode"
+  | "promoteOutOfReasoningTextToOutput"
 >;
 
 /** 通过 by-framework Gateway/Redis 协议连接当前用户的 ByClaw Code Worker。 */
@@ -17,6 +20,12 @@ export class CodeByFrameworkConnector extends ByFrameworkConnector {
       ...options,
       connectorId: CODE_BY_FRAMEWORK_CONNECTOR_ID,
       targetAgentTypeResolver: (request) => `BYCLAW_CODE_${request.userCode}`,
+      // BYCLAW_CODE 的 Agent 回调会复用外层 messageId，连续委派时会被 BY_SUPER
+      // WorkerRunner 当作已完成执行去重。改为直接结束会话流，与其直调链路一致。
+      agentReturnMode: "direct",
+      // direct 链路会正常发送 answerDelta/finalAnswer；reasoningLogDelta/1002
+      // 保持为展示过程，不能再沿用旧 callback 子会话的正文提升兼容逻辑。
+      promoteOutOfReasoningTextToOutput: false,
     });
   }
 }

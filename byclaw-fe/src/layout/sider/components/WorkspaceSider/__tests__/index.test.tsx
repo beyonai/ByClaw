@@ -1,9 +1,11 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import WorkspaceSider from '..';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import { listProjectSessionsByQo } from '@/service/devloop';
+import { getChatRunningStatus } from '@/service/message';
+import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 
 const mockNavigate = jest.fn();
 const mockDispatch = jest.fn();
@@ -46,6 +48,10 @@ jest.mock('@/service/devloop', () => ({
   listProjectSessionsByQo: jest.fn(),
 }));
 
+jest.mock('@/service/message', () => ({
+  getChatRunningStatus: jest.fn(() => Promise.resolve([])),
+}));
+
 jest.mock('@/components/ChatLayoutComp/components/EasyConfirm', () => ({
   clearEasyConfirmInputDraft: jest.fn(),
 }));
@@ -66,10 +72,15 @@ jest.mock('../WorkspaceProjectActions', () => ({ project, onNewSession }: any) =
 const mockUseProjectList = useProjectList as jest.MockedFunction<typeof useProjectList>;
 const mockUseProjectScopeId = useProjectScopeId as jest.MockedFunction<typeof useProjectScopeId>;
 const mockListProjectSessionsByQo = listProjectSessionsByQo as jest.MockedFunction<typeof listProjectSessionsByQo>;
+const mockGetChatRunningStatus = getChatRunningStatus as jest.MockedFunction<typeof getChatRunningStatus>;
 
 describe('WorkspaceSider', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    act(() => {
+      chatSessionRuntimeManager.clear();
+    });
+    mockGetChatRunningStatus.mockResolvedValue([]);
     mockUseProjectList.mockReturnValue({
       projects: [
         {
@@ -102,12 +113,28 @@ describe('WorkspaceSider', () => {
     } as any);
   });
 
+  afterEach(() => {
+    act(() => {
+      chatSessionRuntimeManager.clear();
+    });
+  });
+
   it('renders the system identity and global search above the primary navigation', () => {
     render(<WorkspaceSider />);
 
     expect(screen.getByRole('img', { name: 'messageList.defaultAIName' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'layouHeader.search' })).toBeInTheDocument();
     expect(screen.getByTestId('workspace-user-bar')).toBeInTheDocument();
+    const primaryNavigation = screen.getByRole('navigation', { name: 'workspaceSider.primaryNavigation' });
+    const navigationLabels = Array.from(primaryNavigation.querySelectorAll('button > span:last-child')).map(
+      (element) => element.textContent
+    );
+    expect(navigationLabels.slice(0, 4)).toEqual([
+      'workspaceSider.newTask',
+      'workspaceSider.scheduledTasks',
+      'sider.projectSpace',
+      'workspaceSider.digitalEmployee',
+    ]);
   });
 
   it('loads the active project sessions and opens the selected session', async () => {
@@ -128,6 +155,32 @@ describe('WorkspaceSider', () => {
       })
     );
     expect(mockNavigate).toHaveBeenCalledWith('/chat', expect.any(Object));
+  });
+
+  it('synchronizes and reacts to the running status of loaded project sessions', async () => {
+    mockGetChatRunningStatus.mockResolvedValue([
+      {
+        sessionId: '2001',
+        clientRequestId: 'request-2001',
+        running: true,
+      },
+    ] as any);
+
+    const { container } = render(<WorkspaceSider />);
+
+    await waitFor(() => {
+      expect(mockGetChatRunningStatus).toHaveBeenCalledWith({ sessionIds: ['2001'] });
+      expect(container.querySelector('.sessionTime .anticon-loading')).toBeInTheDocument();
+    });
+
+    act(() => {
+      chatSessionRuntimeManager.complete('request-2001');
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.sessionTime .anticon-loading')).not.toBeInTheDocument();
+      expect(screen.getByText(/workspaceSider\.time\.minutesAgo:/)).toBeInTheDocument();
+    });
   });
 
   it('shows edit and delete actions from the session more menu', async () => {
@@ -198,17 +251,12 @@ describe('WorkspaceSider', () => {
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
-  it('opens a resource-center entry', async () => {
+  it('opens the resource center page', () => {
     render(<WorkspaceSider />);
 
-    jest
-      .spyOn(screen.getByText('workspaceSider.resourceCenter'), 'getBoundingClientRect')
-      .mockReturnValue({ right: 180, bottom: 96 } as DOMRect);
-    fireEvent.mouseEnter(screen.getByRole('button', { name: /workspaceSider\.resourceCenter/ }));
-    expect(screen.getByRole('menu')).toHaveStyle({ left: '188px', top: '100px' });
-    fireEvent.click(screen.getByRole('menuitem', { name: /resourceTabs\.knowledgeCenter/ }));
+    fireEvent.click(screen.getByRole('button', { name: /workspaceSider\.resourceCenter/ }));
 
-    expect(mockNavigate).toHaveBeenCalledWith('/knowledgeCenter');
+    expect(mockNavigate).toHaveBeenCalledWith('/resourceCenter');
   });
 
   it('creates a new session in the project selected from the hovered action area', () => {

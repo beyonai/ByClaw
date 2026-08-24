@@ -9,12 +9,26 @@ import useGlobal from '@/hooks/useGlobal';
 import IconRender from '@/components/MessageList/components/FileRender/components/IconRender';
 
 import { downloadFile, getFileUrl } from '@/utils/file';
+import { isManagedChatFileArtifactPath } from '@/utils/chatFileArtifact';
 import { PREVIEWABLE } from '@/components/MessageList/components/FileRender';
+import { createRelativeResourceResolver } from '@/components/MessageList/components/FileRender/components/Previewer/relativeResource';
 
 import previewStyle from '@/components/MessageList/components/FileRender/components/Previewer/index.module.less';
 import styles from './index.module.less';
 
 const previewCaches: Record<string, Blob> = {};
+
+const getFileTypeFromUrl = (href?: string) => {
+  if (!href) return '';
+
+  try {
+    const url = new URL(href, window.location.origin);
+    const filePath = url.searchParams.get('filePath') || url.pathname;
+    return filePath.split('/').pop()?.split('.').pop()?.toLowerCase() || '';
+  } catch {
+    return href.split(/[?#]/, 1)[0].split('.').pop()?.toLowerCase() || '';
+  }
+};
 
 function ATag({ domNode }: { domNode: any }) {
   const intl = useIntl();
@@ -26,13 +40,14 @@ function ATag({ domNode }: { domNode: any }) {
   const [previewing, setPreviewing] = useState(false);
 
   const nameArr = name?.split('.');
-  const fileType = (nameArr?.length > 1 ? nameArr?.pop() : '') || '';
+  const fileType = ((nameArr?.length > 1 ? nameArr?.pop() : '') || getFileTypeFromUrl(href)).toLowerCase();
 
   const canPreview = !!href && PREVIEWABLE.includes(fileType.toLowerCase());
   const canDownload = !!href;
   const isLoading = previewing;
 
-  const openOnDrawer = (previewInfo: { blob: Blob | null }) => {
+  const openOnDrawer = (previewInfo: { blob: Blob | null; resourceUrl: string }) => {
+    const resolveRelativeResource = createRelativeResourceResolver(previewInfo.resourceUrl);
     EventEmitter.emit('beyond-main-driver-open-type', {
       title: name,
       width: '50vw',
@@ -45,6 +60,8 @@ function ATag({ domNode }: { domNode: any }) {
       type: fileType,
       title: name,
       className: previewStyle.preview,
+      resolveMarkdownImage: resolveRelativeResource,
+      resolveHtmlResource: resolveRelativeResource,
     });
   };
 
@@ -59,7 +76,7 @@ function ATag({ domNode }: { domNode: any }) {
     const url = getFileUrl(href);
 
     if (previewCaches[url]) {
-      openOnDrawer({ blob: previewCaches[url] });
+      openOnDrawer({ blob: previewCaches[url], resourceUrl: url });
       return;
     }
 
@@ -68,7 +85,7 @@ function ATag({ domNode }: { domNode: any }) {
       .then((res) => res.blob())
       .then((blob) => {
         previewCaches[url] = blob;
-        openOnDrawer({ blob });
+        openOnDrawer({ blob, resourceUrl: url });
       })
       .catch((error) => {
         console.error(error);
@@ -79,6 +96,8 @@ function ATag({ domNode }: { domNode: any }) {
       });
   };
 
+  // 会话产物由消息级组件统一校验并渲染，避免这里用原始路径再生成一张不可鉴权的重复卡片。
+  if (isManagedChatFileArtifactPath(href)) return <>{domToReact(domNode.children || [])}</>;
   if (!href || !canPreview) return <>{domToReact([domNode])}</>;
 
   return (

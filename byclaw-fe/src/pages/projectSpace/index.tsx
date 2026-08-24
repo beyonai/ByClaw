@@ -1,15 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Dropdown, Empty, Input, Modal, Spin, message } from 'antd';
+import { Button, Dropdown, Empty, Input, Modal, Tag, message } from 'antd';
 import {
-  ShareAltOutlined,
   DeleteOutlined,
   EditOutlined,
   MoreOutlined,
   PlusOutlined,
   SearchOutlined,
+  ShareAltOutlined,
 } from '@ant-design/icons';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
+import classNames from 'classnames';
 import useGlobal from '@/hooks/useGlobal';
 import { setAgentCache } from '@/components/QueryInput/RichInput/agentCache';
 import getElementData from '@/components/QueryInput/RichInput/utils/getElementData';
@@ -20,13 +21,12 @@ import { getPublicPath } from '@/utils';
 import {
   createProject,
   deleteProject,
-  saveDefaultAgent,
   saveProjectMembers,
   saveProjectResources,
   updateProject,
 } from '@/service/devloop';
 import ProjectFormModal, { type ProjectFormValues } from './components/ProjectFormModal';
-import ProjectOnboardingWizard, { type ArchitectChatTarget } from './components/ProjectOnboardingWizard';
+import ProjectOnboardingWizard from './components/ProjectOnboardingWizard';
 import ProjectDetail from './components/ProjectDetail';
 import { type ChatWithAgentTarget } from './components/ProjectDefaultAgentPanel';
 import { useProjectDetail } from './hooks/useProjectDetail';
@@ -34,15 +34,48 @@ import { useProjectList } from './hooks/useProjectList';
 import { useProjectScopeId } from './hooks/useProjectScopeId';
 import { useProjectTypeConfig } from './hooks/useProjectTypeConfig';
 import type { ProjectSession, ProjectSpace } from './types';
+import { getProjectTagMeta } from './utils';
 import styles from './index.module.less';
 
 const getProjectId = (value?: string | number) => `${value ?? ''}`.trim();
 
-const formatProjectCreateTime = (value?: string) => {
+interface ProjectSpaceNavigationState {
+  openProjectList?: boolean;
+  openProjectDetail?: boolean;
+  projectId?: string | number;
+}
+
+const formatProjectCreateTime = (value: string | number | undefined, intl: ReturnType<typeof useIntl>) => {
   if (!value) return '';
-  const normalizedValue = /^\d+$/.test(value) ? Number(value) : value;
+  const normalizedValue = /^\d+$/.test(`${value}`) ? Number(value) : value;
   const createTime = dayjs(normalizedValue);
-  return createTime.isValid() ? createTime.format('YYYY-MM-DD') : '';
+  const now = dayjs();
+  if (!createTime.isValid() || createTime.isAfter(now)) return '';
+
+  const minutes = Math.max(1, now.diff(createTime, 'minute'));
+  if (minutes < 60) {
+    return intl.formatMessage({ id: 'projectSpace.projectCard.addedMinutesAgo' }, { count: minutes });
+  }
+
+  const hours = now.diff(createTime, 'hour');
+  if (hours < 24) {
+    return intl.formatMessage({ id: 'projectSpace.projectCard.addedHoursAgo' }, { count: hours });
+  }
+
+  const days = now.diff(createTime, 'day');
+  if (days < 30) {
+    return intl.formatMessage({ id: 'projectSpace.projectCard.addedDaysAgo' }, { count: days });
+  }
+
+  const months = now.diff(createTime, 'month');
+  if (months < 12) {
+    return intl.formatMessage({ id: 'projectSpace.projectCard.addedMonthsAgo' }, { count: Math.max(1, months) });
+  }
+
+  return intl.formatMessage(
+    { id: 'projectSpace.projectCard.addedYearsAgo' },
+    { count: Math.max(1, now.diff(createTime, 'year')) }
+  );
 };
 
 const getProjectIdFromSaveResponse = (response: any) =>
@@ -106,12 +139,25 @@ const ProjectSpacePage: React.FC = () => {
   const [renameLoading, setRenameLoading] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [showProjectList, setShowProjectList] = useState(true);
+  const projectIdFromSearch = useMemo(
+    () => getProjectId(new URLSearchParams(location.search).get('projectId')),
+    [location.search]
+  );
 
   useEffect(() => {
-    if ((location.state as { openProjectList?: boolean } | null)?.openProjectList) {
+    const navigationState = location.state as ProjectSpaceNavigationState | null;
+    // 项目名称面包屑通过 URL 传入 projectId；即使历史路由状态残留 openProjectList，也应优先打开对应详情。
+    const detailProjectId = getProjectId(navigationState?.openProjectDetail ? navigationState.projectId : undefined);
+    const projectId = detailProjectId || projectIdFromSearch;
+    if (projectId) {
+      setSelectedProjectId(projectId);
+      setShowProjectList(false);
+      return;
+    }
+    if (navigationState?.openProjectList) {
       setShowProjectList(true);
     }
-  }, [location.key, location.state]);
+  }, [location.key, location.state, projectIdFromSearch, setSelectedProjectId]);
 
   const { activeProject, refreshProject } = useProjectDetail(projects, selectedProjectId);
   const canManageProject = useMemo(() => isProjectCreator(activeProject, userInfo), [activeProject, userInfo]);
@@ -267,10 +313,6 @@ const ProjectSpacePage: React.FC = () => {
               .filter((userId): userId is string | number => Boolean(userId))
             : [],
         });
-        if (values.projectType === 'develop' && values.defaultAgents) {
-          await saveDefaultAgent({ ...values.defaultAgents, projectId: Number(savedProjectId) });
-        }
-
         message.success(
           intl.formatMessage({
             id: editingProject ? 'projectSpace.message.updateSuccess' : 'projectSpace.message.createSuccess',
@@ -402,36 +444,6 @@ const ProjectSpacePage: React.FC = () => {
     [setSelectedProjectId]
   );
 
-  const handleWizardEnterArchitectChat = useCallback(
-    (projectId: string, target?: ArchitectChatTarget) => {
-      const project = projects.find((item) => getProjectId(item.projectId) === projectId);
-      setWizardOpen(false);
-      if (target?.agentId && target.agentName) {
-        setAgentCache(
-          getElementData(ResourceType.digitalEmployee, {
-            agentId: target.agentId,
-            name: target.agentName,
-            agentType: agentTypeMap.agent,
-          })
-        );
-      }
-      setAgentId?.(target?.agentId || '');
-      setSessionId?.(target?.sessionId || '');
-      navigate('/chat', {
-        state: {
-          keepSiderActiveKey: 'sessions',
-          from: 'projectSpace',
-          projectId,
-          projectName: project?.projectName,
-          sessionId: target?.sessionId,
-          selectedAgentId: target?.agentId,
-          selectedAgentObjectType: target?.agentId ? 'DigEmployee' : undefined,
-        },
-      });
-    },
-    [navigate, projects, setAgentId, setSessionId]
-  );
-
   const renderProjectCards = () => {
     return (
       <div className={styles.projectListPage}>
@@ -439,12 +451,12 @@ const ProjectSpacePage: React.FC = () => {
           <div className={styles.projectHeroContent}>
             <h1>{intl.formatMessage({ id: 'sider.projectSpace' })}</h1>
             <p>{intl.formatMessage({ id: 'projectSpace.heroSubtitle' })}</p>
-            <Button className={styles.projectCreateButton} icon={<PlusOutlined />} onClick={handleCreateProject}>
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateProject}>
               {intl.formatMessage({ id: 'projectSpace.createProject' })}
             </Button>
           </div>
           <div className={styles.projectHeroIllustration} aria-hidden="true">
-            <img src={`${getPublicPath()}beyond/emptyBg.png`} alt="" />
+            <img src={`${getPublicPath()}beyond/project-collaboration.svg`} alt="" />
           </div>
         </div>
         <div className={styles.projectListHeader}>
@@ -459,8 +471,16 @@ const ProjectSpacePage: React.FC = () => {
           />
         </div>
         {projectsLoading && !projects.length ? (
-          <div className={styles.projectListFeedback}>
-            <Spin />
+          <div className={styles.projectCardGrid} aria-busy="true">
+            {Array.from({ length: 9 }, (_, index) => (
+              <div key={index} className={styles.projectSkeletonCard} aria-hidden="true">
+                <span className={styles.projectSkeletonIcon} />
+                <span className={styles.projectSkeletonBody}>
+                  <span className={styles.projectSkeletonTitle} />
+                  <span className={styles.projectSkeletonDescription} />
+                </span>
+              </div>
+            ))}
           </div>
         ) : !projects.length ? (
           <div className={styles.projectListFeedback}>
@@ -476,7 +496,8 @@ const ProjectSpacePage: React.FC = () => {
           <div className={styles.projectCardGrid}>
             {projects.map((project) => {
               const canManageCard = isProjectCreator(project, userInfo);
-              const createTime = formatProjectCreateTime(project.createTime);
+              const createTime = formatProjectCreateTime(project.createTime, intl);
+              const projectTag = getProjectTagMeta(project);
               return (
                 <div
                   key={getProjectId(project.projectId)}
@@ -495,13 +516,18 @@ const ProjectSpacePage: React.FC = () => {
                     <ShareAltOutlined />
                   </span>
                   <span className={styles.projectCardBody}>
-                    <strong>{project.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' })}</strong>
-                    <small>
-                      {createTime
-                        ? intl.formatMessage({ id: 'projectSpace.projectCard.createdAt' }, { time: createTime })
-                        : project.description ||
-                          intl.formatMessage({ id: 'projectSpace.projectCard.emptyDescription' })}
-                    </small>
+                    <span className={styles.projectCardTitleRow}>
+                      <strong>
+                        {project.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' })}
+                      </strong>
+                      <Tag
+                        bordered={false}
+                        className={classNames(styles.projectTypeTag, styles[`projectTypeTag${projectTag.classSuffix}`])}
+                      >
+                        {intl.formatMessage({ id: projectTag.messageId })}
+                      </Tag>
+                    </span>
+                    {createTime && <small>{createTime}</small>}
                   </span>
                   {canManageCard && (
                     <Dropdown
@@ -624,7 +650,6 @@ const ProjectSpacePage: React.FC = () => {
         onCancel={() => setWizardOpen(false)}
         onCreateProject={handleSaveProject}
         onFinish={handleWizardFinish}
-        onEnterArchitectChat={handleWizardEnterArchitectChat}
       />
 
       <Modal
@@ -639,7 +664,7 @@ const ProjectSpacePage: React.FC = () => {
       >
         <Input
           autoFocus
-          maxLength={100}
+          maxLength={15}
           value={renameValue}
           onChange={(event) => setRenameValue(event.target.value)}
           onPressEnter={() => void handleRenameProject()}

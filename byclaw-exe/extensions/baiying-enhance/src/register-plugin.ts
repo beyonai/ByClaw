@@ -12,6 +12,9 @@ import { registerManagedAgentModelHooks } from "./managed-agent-model-hook.js";
 import { createRedisJsonStore, setSharedRedisJsonStore } from "./redis-json-store.js";
 import { loadBaiyingRedisEnvDefaults } from "./redis-env.js";
 import { createBaiyingCallToolFactory } from "./baiying-call-tool.js";
+import {
+  registerBaiyingNativeImageRouting,
+} from "./image-generation/native-image-provider.js";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
 import { loadAuthContext, resolveAuthFilePath } from "./executor/auth.js";
 import { loadPrivateParamsRuntime } from "./personal-params.js";
@@ -144,6 +147,17 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     (ctx) => baiyingCallToolFactory(ctx),
     { name: "baiying_call" },
   );
+
+  registerBaiyingNativeImageRouting({
+    api,
+    registry,
+    store: redisJsonStore,
+    loadGenerateImage: async () => {
+      const runtime = await import("openclaw/plugin-sdk/image-generation-runtime");
+      return runtime.generateImage;
+    },
+  });
+  api.logger.info("baiying-enhance: native image_generate Redis router ready");
 
   api.on("resolve_exec_env", async (event) => {
     if (event.toolName !== "exec") {

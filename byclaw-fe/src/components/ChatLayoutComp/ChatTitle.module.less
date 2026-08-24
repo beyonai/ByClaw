@@ -3,10 +3,13 @@ nav.chatTitle {
   // display: flex;
   // padding: 8px 20px;
   min-height: 48px;
+  position: relative;
+  flex: 0 0 auto;
   // align-items: center;
   // flex-direction: row;
   // box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px 0 rgba(0, 0, 0, 0.02);
   z-index: 100;
+  pointer-events: auto;
 
   .chatTitleWrap {
     padding: 8px 20px;
@@ -32,6 +35,67 @@ nav.chatTitle {
     font-style: normal;
     font-weight: 500;
     line-height: 24px;
+  }
+
+  .chatBreadcrumb {
+    position: relative;
+    z-index: 1;
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow: hidden;
+    color: #6b6f76;
+    font-size: 16px;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 24px;
+    white-space: nowrap;
+  }
+
+  // 侧边栏收起后展开按钮悬浮在内容左上角，项目会话面包屑向右避让，避免与按钮重叠。
+  .chatBreadcrumbCollapsed {
+    margin-left: 40px;
+  }
+
+  .chatBreadcrumbLink,
+  .chatBreadcrumbCurrent {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chatBreadcrumbLink {
+    position: relative;
+    z-index: 1;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    color: #6b6f76;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+    pointer-events: auto;
+
+    &:hover,
+    &:focus-visible {
+      color: #14161a;
+      text-decoration: underline;
+      outline: none;
+    }
+  }
+
+  .chatBreadcrumbCurrent {
+    color: #14161a;
+    font-weight: 500;
+  }
+
+  .chatBreadcrumbSeparator {
+    flex: 0 0 auto;
+    color: #a3a7ad;
   }
 
   .actions {
@@ -99,18 +163,42 @@ nav.chatTitle {
       }
     }
 
+    .projectActionButton.resourcePanelToggleButton {
+      color: #000;
+
+      &:hover,
+      &:focus-visible {
+        color: #000;
+      }
+    }
+
+    .projectActionButton.taskProgressButton {
+      color: #000;
+
+      &:hover,
+      &:focus-visible {
+        color: #000;
+      }
+    }
+
+    .projectActionButton.taskProgressButton :global(.@{antPrefix}-btn-icon),
+    .projectActionButton.taskProgressButton svg {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 16px;
+    }
+
     .projectActionButton.resourcePanelToggleButton :global(.@{antPrefix}-btn-icon) {
-      // Ant Design 默认图标槽为 16px；同步调整槽位，避免 19px SVG 被 flex 自动压缩。
-      width: 19px;
-      height: 19px;
-      flex: 0 0 19px;
+      // 与左侧边栏展开按钮保持相同尺寸，避免 SVG 被 flex 自动压缩。
+      width: 18px;
+      height: 18px;
+      flex: 0 0 18px;
     }
 
     .projectActionButton .resourcePanelToggleIcon {
-      // 资源列表图形线条较疏，单独放大图标以保持与任务进度图标的视觉重量一致。
-      width: 19px;
-      height: 19px;
-      flex: 0 0 19px;
+      width: 18px;
+      height: 18px;
+      flex: 0 0 18px;
     }
 
     .btn {

@@ -1,14 +1,20 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
-  WorkerRegistry,
   WorkerRunner,
   GatewayDataEmitter,
-  type AskAgentCommand,
-  WorkerHeartbeat,
-  ActionType,
+  GatewayWorker,
+  AskAgentCommand,
+  ResumeCommand,
+  AgentState,
+  AgentTaskResult,
+  EventType,
+  TaskCancelledError,
   QueueNames,
   RegistryKeys,
+  type AgentContext,
+  type GatewayCommand,
+  type ProcessCommandResult,
 } from "@byclaw/by-framework";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { resolveInboundLanguage } from "./i18n.js";
@@ -57,8 +63,8 @@ export interface ByaiSdkAppOptions {
 type ByaiSdkLogger = NonNullable<ByaiSdkAppOptions["log"]>;
 
 function metadataString(metadata: Record<string, unknown> | undefined, key: string): string {
-    const value = metadata?.[key];
-    return typeof value === "string" ? value.trim() : "";
+  const value = metadata?.[key];
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function buildLaneAssignmentLogItem(message: ByaiSdkInboundMessage, index: number) {
@@ -73,6 +79,34 @@ function buildLaneAssignmentLogItem(message: ByaiSdkInboundMessage, index: numbe
     messageId: message.messageId,
     query: message.text,
   };
+}
+
+function frameworkLaneLabel(message: ByaiSdkInboundMessage, index: number): string {
+  const lane = message.laneMetadata;
+  return (
+    lane?.agentName?.trim() ||
+    lane?.laneId?.trim() ||
+    lane?.agentCode?.trim() ||
+    lane?.agentId?.trim() ||
+    `Lane ${index + 1}`
+  );
+}
+
+function mergeFrameworkFinalAnswers(
+  messages: ByaiSdkInboundMessage[],
+  answers: string[],
+): string {
+  if (messages.length <= 1) {
+    return answers[0] ?? "";
+  }
+  return answers
+    .map((answer, index) => ({ answer, index }))
+    .filter(({ answer }) => answer.trim().length > 0)
+    .map(
+      ({ answer, index }) =>
+        `【${frameworkLaneLabel(messages[index]!, index)}】\n${answer}`,
+    )
+    .join("\n\n");
 }
 
 /** 将扩展上下文按标签包裹后追加到问题文本末尾。 */
@@ -93,7 +127,7 @@ function appendExtraPromptContexts(questionText: string, promptContextList: unkn
   return contextText ? `${questionText}\n${contextText}` : questionText;
 }
 
-async function getInboundMessageFromByFramework(data: AskAgentCommand) {
+async function getInboundMessageFromByFramework(data: AskAgentCommand | ResumeCommand) {
   let questionText = "";
   let files: SdkInboundFile[] | undefined;
   if (typeof data.content === "string") {
@@ -111,8 +145,12 @@ async function getInboundMessageFromByFramework(data: AskAgentCommand) {
       }
     });
     questionText = questionTextArr.join("\n");
-  } else {
+  } else if (data.content != null) {
     questionText = String(data.content);
+  }
+  if (!questionText && data instanceof ResumeCommand && data.replyData != null) {
+    questionText =
+      typeof data.replyData === "string" ? data.replyData : JSON.stringify(data.replyData);
   }
 
   const extParams: Record<string, any> = data.extraPayload?.ext_params || {};
@@ -140,7 +178,19 @@ async function getInboundMessageFromByFramework(data: AskAgentCommand) {
       extData?: string;
     }[] = data.extraPayload?.resource_list || [];
     const { sessionId } = data.header;
-    const baiyingCallHandledResourceTypes = ["AGENT", "TOOLKIT", "TOOL", "MCP", "OBJECT", "VIEW", "KG_DOC", "KG_DB", "KG_QA", "KG_DOC_FILE", "KG_DOC_FOLDER"];
+    const baiyingCallHandledResourceTypes = [
+      "AGENT",
+      "TOOLKIT",
+      "TOOL",
+      "MCP",
+      "OBJECT",
+      "VIEW",
+      "KG_DOC",
+      "KG_DB",
+      "KG_QA",
+      "KG_DOC_FILE",
+      "KG_DOC_FOLDER",
+    ];
     const userCode = getUserCode();
     const runtime = getByaiRuntime();
     resourceList.forEach((item) => {
@@ -168,9 +218,14 @@ async function getInboundMessageFromByFramework(data: AskAgentCommand) {
         } else if (skillExt.skillType === "hub") {
           if (userCode && skillExt.skillUrl?.includes(userCode)) {
             const normalizeAgentId = normalizeByaiAgentId(data.extraPayload?.agent_id || "main");
-            const workspaceDir = runtime.agent.resolveAgentWorkspaceDir(getRuntimeConfig(), normalizeAgentId)
+            const workspaceDir = runtime.agent.resolveAgentWorkspaceDir(
+              getRuntimeConfig(),
+              normalizeAgentId,
+            );
             if (workspaceDir) {
-              remindTextArr.push(`- skill: ${path.join(workspaceDir, "skills", item.resourceCode)}`);
+              remindTextArr.push(
+                `- skill: ${path.join(workspaceDir, "skills", item.resourceCode)}`,
+              );
             }
           } else {
             const skillsRoot = path.join(runtime.state.resolveStateDir(), "skills");
@@ -187,8 +242,7 @@ async function getInboundMessageFromByFramework(data: AskAgentCommand) {
             const { datasetId } = JSON.parse(item.resourceCode);
             // 知识库id
             resourceId = datasetId;
-          } catch (e) {
-          }
+          } catch (e) {}
           if (!resourceId) {
             console.warn(`Knowledge base resource id is empty: ${item.resourceName}`);
             return;
@@ -211,10 +265,11 @@ async function getInboundMessageFromByFramework(data: AskAgentCommand) {
     });
     if (remindTextArr.length) {
       let handleResourceTips = "";
-      if (resourceList.some((item) => baiyingCallHandledResourceTypes.includes(item.resourceType))) {
+      if (
+        resourceList.some((item) => baiyingCallHandledResourceTypes.includes(item.resourceType))
+      ) {
         if (data.extraPayload?.agent_id || data.extraPayload?.agent_code) {
-          handleResourceTips =
-            "For the resources, you can use \`baiying_call\` tool to handle them.";
+          handleResourceTips = "For the resources, you can use `baiying_call` tool to handle them.";
         } else {
           handleResourceTips = "For the resources, you can find a subagent to handle them.";
         }
@@ -250,7 +305,7 @@ function isRedisNoGroupError(err: unknown): boolean {
 
 function installNoGroupRecovery(params: {
   runner: WorkerRunner;
-  registry: WorkerRegistry;
+  registry: GatewayWorker["registry"];
   redis: RedisClient;
   workerId: string;
   agentTypes: string[];
@@ -271,7 +326,12 @@ function installNoGroupRecovery(params: {
         await registry.registerWorkerMembership(workerId, agentTypes);
         await registry.heartbeatWorker(workerId);
         await runner.setupStreams();
-        await setRunnerAgentTypeStreamsToLatest({ redis, agentTypes, runnerGroupName, log });
+        await setRunnerAgentTypeStreamsToLatest({
+          redis,
+          agentTypes,
+          runnerGroupName,
+          log,
+        });
         await runner.setupControlStreams();
         log?.info?.(`[${workerId}] byai-channel Redis stream consumer groups recovered`);
       })().finally(() => {
@@ -333,19 +393,316 @@ async function setRunnerAgentTypeStreamsToLatest(params: {
   }
 }
 
+export class ByaiChannelGatewayWorker extends GatewayWorker {
+  private readonly account: ResolvedByaiAccount;
+  private readonly agentTypes: string[];
+  private readonly emitter: GatewayDataEmitter;
+  private readonly log?: ByaiSdkLogger;
+  private readonly userCode: string;
+
+  constructor(params: {
+    workerId: string;
+    agentTypes: string[];
+    redis: RedisClient;
+    emitter: GatewayDataEmitter;
+    account: ResolvedByaiAccount;
+    userCode: string;
+    log?: ByaiSdkLogger;
+  }) {
+    super(params.workerId, undefined, params.redis as never);
+    this.account = params.account;
+    this.agentTypes = params.agentTypes;
+    this.emitter = params.emitter;
+    this.userCode = params.userCode;
+    this.log = params.log;
+  }
+
+  getAgentTypes(): ReadonlyArray<string> {
+    return this.agentTypes;
+  }
+
+  private cancelActiveRequest(traceId: string, reason: string): void {
+    const activeRequest = resolveActiveSdkRequestByTraceId(traceId);
+    if (!activeRequest?.abortController) {
+      this.log?.info?.(
+        `[${this.account.accountId}] cancel skipped: no active request for traceId ${traceId}`,
+      );
+      return;
+    }
+    if (!activeRequest.abortController.signal.aborted) {
+      activeRequest.abortController.abort(
+        new Error(`[${this.account.accountId}] task canceled, reason: ${reason}`),
+      );
+    }
+    releaseCancelledSessionDispatch(activeRequest.sessionKey);
+    clearActiveSdkRequestRecord(activeRequest);
+  }
+
+  async onCancelTask(command: unknown): Promise<void> {
+    const cancelCommand = command as {
+      reason?: string;
+      targetExecutionId?: string;
+    };
+    const traceId = cancelCommand.targetExecutionId?.trim() || "";
+    const reason = cancelCommand.reason || "task cancelled";
+    this.log?.info?.(
+      `[${this.account.accountId}] cancel task, traceId: ${traceId}, reason: ${reason}`,
+    );
+    if (traceId) {
+      this.cancelActiveRequest(traceId, reason);
+    }
+  }
+
+  async processCommand(
+    command: GatewayCommand,
+    context: AgentContext,
+  ): Promise<ProcessCommandResult> {
+    if (!(command instanceof AskAgentCommand) && !(command instanceof ResumeCommand)) {
+      context.setStreamFinished(true);
+      return AgentState.COMPLETED;
+    }
+
+    const gatewayMsg = command;
+    const { sessionId, messageId, traceId, metadata } = gatewayMsg.header;
+    const parentMessageId = gatewayMsg.header.parentMessageId?.trim() || "-1";
+    const isCallAgentRequest =
+      gatewayMsg instanceof AskAgentCommand && Boolean(gatewayMsg.header.sourceAgentType?.trim());
+    if (!sessionId || !messageId) {
+      context.setStreamFinished(true);
+      return AgentState.COMPLETED;
+    }
+
+    const traceParentSpanId =
+      gatewayMsg.header.traceParentSpanId || metadataString(metadata, "trace_parent_span_id");
+    const langfuseParentObservationId =
+      gatewayMsg.header.langfuseParentObservationId ||
+      metadataString(metadata, "langfuse_parent_observation_id");
+    const { text, files } = await getInboundMessageFromByFramework(gatewayMsg);
+    if (!text && !files?.length) {
+      context.setStreamFinished(true);
+      return AgentState.COMPLETED;
+    }
+    this.log?.info?.(`处理问题: ${text}`);
+
+    const metadataLanguage = typeof metadata?.language === "string" ? metadata.language : undefined;
+    const { language, languageProvided } = resolveInboundLanguage(metadataLanguage);
+    const batchMetadata = parseByaiMultiAgentBatchMetadata(gatewayMsg.extraPayload);
+    const laneMetadata = batchMetadata ? undefined : parseByaiLaneMetadata(gatewayMsg.extraPayload);
+    const inbound: ByaiSdkInboundMessage = {
+      files,
+      text,
+      messageId,
+      parentMessageId,
+      sessionId,
+      userId: this.userCode,
+      timestamp: Date.now(),
+      traceId: traceId || "",
+      traceParentSpanId,
+      langfuseParentObservationId,
+      accountId: this.account.accountId,
+      extraPayload: gatewayMsg.extraPayload,
+      language,
+      languageProvided,
+      channelExtension: metadata?.channelExtension as Record<string, unknown> | string | undefined,
+      authConnectorList: connectorAuthorizationFromMetadata(metadata),
+      beyondToken: metadata?.["Beyond-Token"] ?? metadata?.request_headers?.["Beyond-Token"] ?? "",
+      laneMetadata,
+    };
+    const inboundMessages = buildByaiMultiAgentLaneMessages(inbound, batchMetadata);
+    if (batchMetadata && inboundMessages.length > 1) {
+      this.log?.info?.(
+        `[${
+          this.account.accountId
+        }] byai-channel fan-out multi-agent turn: sessionId=${sessionId}, lanes=${inboundMessages
+          .map((item) => item.laneMetadata?.laneId ?? item.laneMetadata?.agentName ?? item.traceId)
+          .join(",")}`,
+      );
+      inboundMessages.forEach((message, index) => {
+        this.log?.info?.(
+          `[${
+            this.account.accountId
+          }] byai-channel multi-agent lane assignment: sessionId=${sessionId}, assignment=${JSON.stringify(
+            buildLaneAssignmentLogItem(message, index),
+          )}`,
+        );
+      });
+    }
+
+    try {
+      const runtime = getByaiRuntime();
+      const stateDir = runtime.state.resolveStateDir();
+      const sessionStorePath = path.join(stateDir, "identity", "byai_session_id.txt");
+      await fs.writeFile(sessionStorePath, sessionId, "utf8");
+      this.log?.debug?.(
+        `[${this.account.accountId}] wrote session id to ${sessionStorePath}: ${sessionId}`,
+      );
+    } catch (err) {
+      this.log?.debug?.(
+        `[${this.account.accountId}] failed to write session id file: ${String(err)}`,
+      );
+    }
+
+    const frameworkSignal = context.getCancellationSignal();
+    let emittedLaneError = false;
+    const emitSdkError = async (currentInbound: ByaiSdkInboundMessage, err: unknown) => {
+      emittedLaneError = true;
+      const errorOptions = withSdkEmitMetadata(
+        {
+          eventType: "error",
+          metadata: { error: String(err) },
+        },
+        {
+          laneMetadata: currentInbound.laneMetadata,
+          traceId: currentInbound.traceId,
+          parentMessageId: currentInbound.parentMessageId,
+        },
+      );
+      await this.emitter.emitState(
+        currentInbound.sessionId,
+        currentInbound.traceId || "",
+        buildSdkStateEvent("", errorOptions),
+        errorOptions,
+      );
+    };
+
+    const handleInbound = async (currentInbound: ByaiSdkInboundMessage) => {
+      const abortController = new AbortController();
+      const abortFromFramework = () => {
+        if (!abortController.signal.aborted) {
+          abortController.abort(frameworkSignal?.reason || "task cancelled");
+        }
+      };
+      if (frameworkSignal?.aborted) {
+        abortFromFramework();
+      } else {
+        frameworkSignal?.addEventListener("abort", abortFromFramework, {
+          once: true,
+        });
+      }
+      try {
+        const businessResult = await deliverReplyToAgentViaSdk({
+          message: currentInbound,
+          account: this.account,
+          cfg: getRuntimeConfig(),
+          abortController,
+          log: this.log,
+          onReply: async (replyText, options) => {
+            if (!replyText) {
+              return;
+            }
+            const emitOptions = withSdkEmitMetadata(options, {
+              laneMetadata: currentInbound.laneMetadata,
+              traceId: currentInbound.traceId,
+              parentMessageId: currentInbound.parentMessageId,
+            });
+            await this.emitter.emitChunk(
+              currentInbound.sessionId,
+              currentInbound.traceId,
+              buildSdkChunkEvent(replyText, emitOptions),
+              emitOptions,
+            );
+          },
+        });
+        if (abortController.signal.aborted) {
+          throw new TaskCancelledError(String(abortController.signal.reason || "task cancelled"));
+        }
+        return businessResult;
+      } catch (err) {
+        if (abortController.signal.aborted) {
+          this.cancelActiveRequest(
+            currentInbound.traceId,
+            String(abortController.signal.reason || err),
+          );
+          throw new TaskCancelledError(String(abortController.signal.reason || "task cancelled"));
+        }
+        await emitSdkError(currentInbound, err);
+        throw err;
+      } finally {
+        frameworkSignal?.removeEventListener("abort", abortFromFramework);
+      }
+    };
+
+    try {
+      const results = await Promise.allSettled(
+        inboundMessages.map((currentInbound) => handleInbound(currentInbound)),
+      );
+      const rejected = results.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      if (rejected) {
+        await Promise.allSettled(
+          results
+            .filter(
+              (result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof handleInbound>>> =>
+                result.status === "fulfilled",
+            )
+            .map((result) => result.value.finalize()),
+        );
+        throw rejected.reason;
+      }
+      const businessResults = results.map((result) => {
+        if (result.status !== "fulfilled") {
+          throw result.reason;
+        }
+        return result.value;
+      });
+      if (frameworkSignal?.aborted) {
+        await Promise.allSettled(businessResults.map((result) => result.finalize()));
+        throw new TaskCancelledError(String(frameworkSignal.reason || "task cancelled"));
+      }
+      const finalAnswer = mergeFrameworkFinalAnswers(
+        inboundMessages,
+        businessResults.map((result) => result.finalAnswer),
+      );
+      try {
+        if (finalAnswer) {
+          // FINAL_ANSWER must precede every lane APP_STREAM_RESPONSE; byclaw-super
+          // treats the latter as the terminal cursor and stops reading afterwards.
+          await context.emitChunk(finalAnswer, EventType.FINAL_ANSWER);
+          context.setFinalAnswerEmitted(true);
+        }
+      } finally {
+        await Promise.all(businessResults.map((result) => result.finalize()));
+      }
+      // Lane completion emitted APP_STREAM_RESPONSE after the aggregate final snapshot.
+      context.setStreamFinished(true);
+      return new AgentTaskResult({
+        status: AgentState.COMPLETED,
+        content: finalAnswer,
+        // Text remains the canonical answer. Duplicate it into replyData only
+        // for callAgent callbacks whose consumers still read Resume.reply_data.
+        replyData: isCallAgentRequest ? finalAnswer : null,
+      });
+    } catch (err) {
+      if (err instanceof TaskCancelledError || frameworkSignal?.aborted) {
+        this.cancelActiveRequest(traceId || "", String(frameworkSignal?.reason || err));
+        throw err instanceof TaskCancelledError
+          ? err
+          : new TaskCancelledError(String(frameworkSignal?.reason || err));
+      }
+      this.log?.error?.(
+        `[${
+          this.account.accountId
+        }] byai-channel SDK handler failed for message ${messageId}: ${String(err)}`,
+      );
+      if (!emittedLaneError) {
+        await emitSdkError(inbound, err).catch(() => undefined);
+      }
+      throw err;
+    }
+  }
+}
+
 export class ByaiSdkApp {
   private readonly account: ResolvedByaiAccount;
   private readonly log?: ByaiSdkAppOptions["log"];
-  private readonly cfg: OpenClawConfig;
 
   private runner: WorkerRunner | null = null;
-  private stopSubscription: (() => void) | null = null;
+  private runnerTask: Promise<void> | null = null;
   private redis: RedisClient | null = null;
-  private workerHeartbeat: WorkerHeartbeat | null = null;
 
   constructor(opts: ByaiSdkAppOptions) {
     this.account = opts.account;
-    this.cfg = opts.cfg;
     this.log = opts.log;
   }
 
@@ -382,43 +739,49 @@ export class ByaiSdkApp {
     const workerId = process.env.BYAI_WORKER_ID || `byai-channel-worker-${userCode}`;
     const agentTypes = [`BYCLAW_EXE_${userCode}`];
 
-    const registry = new WorkerRegistry(redis);
-
     // 为 Runner 提供独立的 Redis 连接，避免轮询时的 BLOCK 指令阻塞其他操作（如 emitChunk）
     // 关键：轮询必须拥有自己的独占连接
     const consumerGroupSuffix = process.env.BYAI_CHANNEL_CONSUMER_GROUP_SUFFIX?.trim();
     const runnerGroupName = consumerGroupSuffix
       ? `agent_engines:${agentTypes.join(",")}:${consumerGroupSuffix}`
       : undefined;
-    const runner = new WorkerRunner(
-      { workerId, agentTypes, registry },
-      {
-        redisClient: createRedisClient(redisInfo) as never,
-        ...(runnerGroupName ? { groupName: runnerGroupName } : {}),
-      },
-    );
+    const emitter = new GatewayDataEmitter(redis, {
+      sourceAgentType: agentTypes[0],
+    });
+    const worker = new ByaiChannelGatewayWorker({
+      workerId,
+      agentTypes,
+      redis,
+      emitter,
+      account: this.account,
+      userCode,
+      log: this.log,
+    });
+    const runner = new WorkerRunner(worker, {
+      // WorkerRunner 会为阻塞式 task/control poll 创建独立 duplicate 连接。
+      redisClient: redis as never,
+      ...(runnerGroupName ? { groupName: runnerGroupName } : {}),
+    });
     installNoGroupRecovery({
       runner,
-      registry,
+      registry: worker.registry,
       redis,
       workerId,
       agentTypes,
       runnerGroupName,
       log: this.log,
     });
-    const emitter = new GatewayDataEmitter(redis, {
-      sourceAgentType: agentTypes[0],
-    });
 
-    // 1. 初始化消费组等环境（内部会执行 claimWorkerId 获取独占锁）
+    // Runner 初始化统一负责 worker registry、消费组、控制流和 heartbeat。
     await runner.initialize();
-    await setRunnerAgentTypeStreamsToLatest({ redis, agentTypes, runnerGroupName, log: this.log });
-
-    // 2. 启动心跳维持组件 (Standalone Heartbeat)
-    // 必须传入同一个 registry 实例，以便复用 runner 刚刚获取的 lock token
-    const heartbeat = new WorkerHeartbeat(workerId, agentTypes, redis, registry);
-    this.workerHeartbeat = heartbeat;
-    await heartbeat.start();
+    await setRunnerAgentTypeStreamsToLatest({
+      redis,
+      agentTypes,
+      runnerGroupName,
+      log: this.log,
+    });
+    // 初始化完成后立即暴露 runner，确保冷启动等待期间收到 stop 也能释放 heartbeat 与 worker lock。
+    this.runner = runner;
 
     info?.(
       `[${this.account.accountId}] byai-channel worker registration: workerId=${workerId}, targetAgentTypes=${agentTypes}`,
@@ -433,250 +796,59 @@ export class ByaiSdkApp {
       );
       const waitMs = Number.isFinite(rawWaitMs) ? Math.max(0, rawWaitMs) : 60000;
       info?.(
-        `[${this.account.accountId}] waiting for baiying-enhance cold-start readiness before subscribing, waitMs=${waitMs}`,
+        `[${this.account.accountId}] waiting for baiying-enhance cold-start readiness before consuming, waitMs=${waitMs}`,
       );
       const readiness = await waitForBaiyingEnhanceColdStartReady(waitMs);
       if (readiness.ready) {
         info?.(
-          `[${this.account.accountId}] baiying-enhance cold-start readiness complete before subscribing, waitedMs=${readiness.waitedMs}, reason=${readiness.reason ?? "ready"}`,
+          `[${
+            this.account.accountId
+          }] baiying-enhance cold-start readiness complete before consuming, waitedMs=${
+            readiness.waitedMs
+          }, reason=${readiness.reason ?? "ready"}`,
         );
       } else {
         error?.(
-          `[${this.account.accountId}] baiying-enhance cold-start readiness not complete before subscribing, waitedMs=${readiness.waitedMs}, reason=${readiness.reason ?? "timeout"}; continuing`,
+          `[${
+            this.account.accountId
+          }] baiying-enhance cold-start readiness not complete before consuming, waitedMs=${
+            readiness.waitedMs
+          }, reason=${readiness.reason ?? "timeout"}; continuing`,
         );
       }
     }
 
-    const subscription = runner.subscribe(async ({ streamName, msgId, data }) => {
-      if (data.actionType === ActionType.RESUME) {
-        // 这里处理resume任务，目的是将原session从sessions_yield的状态中唤醒
-        return;
-      }
-      if (data.actionType !== ActionType.ASK_AGENT) {
-        // 下面只处理ASK_AGENT的消息
-        return;
-      }
-      const gatewayMsg = data as AskAgentCommand;
-      const { sessionId, messageId, traceId, metadata } = gatewayMsg.header;
-      const traceParentSpanId =
-        gatewayMsg.header.traceParentSpanId || metadataString(metadata, "trace_parent_span_id");
-      const langfuseParentObservationId =
-        gatewayMsg.header.langfuseParentObservationId ||
-        metadataString(metadata, "langfuse_parent_observation_id");
-      if (!gatewayMsg.content || !sessionId || !messageId) {
-        await runner.ack(streamName, msgId);
-        return;
-      }
-
-      await registry.saveExecution({
-        // use traceId as execution_id. Then we can use it to cancel the task.
-        execution_id: traceId || `exec-${messageId}`,
-        message_id: messageId,
-        session_id: sessionId,
-        worker_id: workerId,
-        status: "RUNNING",
-        created_at: Date.now(),
-        updated_at: Date.now(),
-      });
-      const { text, files } = await getInboundMessageFromByFramework(gatewayMsg);
-      info?.(`处理问题: ${text}`);
-
-      const metadataLanguage =
-        typeof metadata?.language === "string" ? metadata.language : undefined;
-      const { language, languageProvided } = resolveInboundLanguage(metadataLanguage);
-      const batchMetadata = parseByaiMultiAgentBatchMetadata(gatewayMsg.extraPayload);
-      const laneMetadata = batchMetadata ? undefined : parseByaiLaneMetadata(gatewayMsg.extraPayload);
-      const inbound: ByaiSdkInboundMessage = {
-        files,
-        text,
-        messageId,
-        sessionId: sessionId,
-        userId: userCode,
-        timestamp: Date.now(),
-        traceId: traceId || "",
-        traceParentSpanId,
-        langfuseParentObservationId,
-        accountId: this.account.accountId,
-        extraPayload: gatewayMsg.extraPayload,
-        language,
-        languageProvided,
-        channelExtension: metadata?.channelExtension as
-          | Record<string, unknown>
-          | string
-          | undefined,
-        authConnectorList: connectorAuthorizationFromMetadata(metadata),
-        beyondToken:
-          metadata?.["Beyond-Token"] ?? metadata?.request_headers?.["Beyond-Token"] ?? "",
-        laneMetadata,
-      };
-      const inboundMessages = buildByaiMultiAgentLaneMessages(inbound, batchMetadata);
-      if (batchMetadata && inboundMessages.length > 1) {
-        info?.(
-          `[${this.account.accountId}] byai-channel fan-out multi-agent turn: sessionId=${sessionId}, lanes=${inboundMessages
-            .map((item) => item.laneMetadata?.laneId ?? item.laneMetadata?.agentName ?? item.traceId)
-            .join(",")}`,
-        );
-        inboundMessages.forEach((message, index) => {
-          info?.(
-            `[${this.account.accountId}] byai-channel multi-agent lane assignment: sessionId=${sessionId}, assignment=${JSON.stringify(
-              buildLaneAssignmentLogItem(message, index),
-            )}`,
-          );
-        });
-      }
-
-      // 写 sessionId 到文件，供 executor.py 读取并注入 X-Session-Id header
-      try {
-        const runtime = getByaiRuntime();
-        const stateDir = runtime.state.resolveStateDir();
-        const sessionStorePath = path.join(stateDir, "identity", "byai_session_id.txt");
-        await fs.writeFile(sessionStorePath, sessionId, "utf8");
-        debug?.(
-          `[${this.account.accountId}] wrote session id to ${sessionStorePath}: ${sessionId}`,
-        );
-      } catch (err) {
-        debug?.(`[${this.account.accountId}] failed to write session id file: ${String(err)}`);
-      }
-
-      let emittedLaneError = false;
-      const emitSdkError = async (currentInbound: ByaiSdkInboundMessage, err: unknown) => {
-        emittedLaneError = true;
-        const currentLaneMetadata = currentInbound.laneMetadata;
-        const errorOptions = withSdkEmitMetadata(
-          {
-            eventType: "error",
-            metadata: { error: String(err) },
-          },
-          {
-            laneMetadata: currentLaneMetadata,
-            traceId: currentInbound.traceId,
-          },
-        );
-        await emitter.emitState(
-          currentInbound.sessionId,
-          currentInbound.traceId || "",
-          buildSdkStateEvent("", errorOptions),
-          errorOptions,
-        );
-      };
-
-      const handleInbound = async (currentInbound: ByaiSdkInboundMessage) => {
-        const abortController = new AbortController();
-        try {
-          await deliverReplyToAgentViaSdk({
-            message: currentInbound,
-            account: this.account,
-            cfg: getRuntimeConfig(),
-            abortController,
-            log: this.log,
-            onReply: async (text, options) => {
-              if (!text) {
-                return;
-              }
-              const emitOptions = withSdkEmitMetadata(options, {
-                laneMetadata: currentInbound.laneMetadata,
-                traceId: currentInbound.traceId,
-              });
-              await emitter.emitChunk(
-                currentInbound.sessionId,
-                currentInbound.traceId,
-                buildSdkChunkEvent(text, emitOptions),
-                emitOptions,
-              );
-            },
-          });
-        } catch (err) {
-          await emitSdkError(currentInbound, err);
-          throw err;
-        }
-      };
-
-      try {
-        const results = await Promise.allSettled(
-          inboundMessages.map((currentInbound) => handleInbound(currentInbound)),
-        );
-        const rejected = results.find(
-          (result): result is PromiseRejectedResult => result.status === "rejected",
-        );
-        if (rejected) {
-          throw rejected.reason;
-        }
-
-        await runner.ack(streamName, msgId);
-      } catch (err) {
-        error?.(
-          `[${this.account.accountId}] byai-channel SDK handler failed for message ${messageId}: ${String(
-            err,
-          )}`,
-        );
-        try {
-          if (!emittedLaneError) {
-            await emitSdkError(inbound, err);
-          }
-        } catch {
-          // ignore
-        }
-        await runner.ack(streamName, msgId).catch(() => undefined);
-      }
-    });
-
-    const subscriptionCancelTask = runner.subscribeCancel(async (cmd) => {
-      // targetExecutionId is traceId
-      const { reason, targetExecutionId: traceId } = cmd;
-      info?.(`[${this.account.accountId}] cancel task, traceId: ${traceId}, reason: ${reason}`);
-      const activeRequest = resolveActiveSdkRequestByTraceId(traceId);
-      if (!activeRequest?.abortController) {
-        info?.(
-          `[${this.account.accountId}] cancel skipped: no active request for traceId ${traceId}`,
-        );
-        return;
-      }
-      if (activeRequest.abortController.signal.aborted) {
-        clearActiveSdkRequestRecord(activeRequest);
-        return;
-      }
-      activeRequest.abortController.abort(
-        new Error(`[${this.account.accountId}] task canceled, reason: ${reason}`),
+    if (this.runner !== runner) {
+      return;
+    }
+    const runnerTask = runner.start({ initialize: false });
+    this.runnerTask = runnerTask;
+    void runnerTask.catch((err) => {
+      error?.(
+        `[${this.account.accountId}] byai-channel SDK runner stopped with error: ${String(err)}`,
       );
-      releaseCancelledSessionDispatch(activeRequest.sessionKey);
-      clearActiveSdkRequestRecord(activeRequest);
     });
-
-    this.runner = runner;
-    this.stopSubscription = () => {
-      subscription.stop();
-      subscriptionCancelTask.stop();
-      debug?.(`[${this.account.accountId}] byai-channel SDK subscription stopped`);
-    };
 
     info?.(`[${this.account.accountId}] byai-channel SDK app started`);
   }
 
   async stop(): Promise<void> {
     const { info, error } = this.logger();
+    const runner = this.runner;
+    const runnerTask = this.runnerTask;
 
     try {
-      this.stopSubscription?.();
+      runner?.stop({
+        cancelActiveExecutions: true,
+        reason: `[${this.account.accountId}] byai-channel SDK app stopped`,
+      });
+      if (runnerTask) {
+        await runnerTask;
+      } else if (runner) {
+        await runner.release();
+      }
     } catch (err) {
-      error?.(
-        `[${this.account.accountId}] byai-channel failed to stop SDK subscription: ${String(err)}`,
-      );
-    }
-
-    try {
-      await this.workerHeartbeat?.stop();
-    } catch (err) {
-      error?.(
-        `[${this.account.accountId}] byai-channel failed to stop worker heartbeat: ${String(err)}`,
-      );
-    }
-
-    try {
-      await this.runner?.release();
-    } catch (err) {
-      error?.(
-        `[${this.account.accountId}] byai-channel failed to release SDK runner: ${String(err)}`,
-      );
+      error?.(`[${this.account.accountId}] byai-channel failed to stop SDK runner: ${String(err)}`);
     }
 
     try {
@@ -688,9 +860,8 @@ export class ByaiSdkApp {
     }
 
     this.runner = null;
-    this.stopSubscription = null;
+    this.runnerTask = null;
     this.redis = null;
-    this.workerHeartbeat = null;
 
     info?.(`[${this.account.accountId}] byai-channel SDK app stopped`);
   }

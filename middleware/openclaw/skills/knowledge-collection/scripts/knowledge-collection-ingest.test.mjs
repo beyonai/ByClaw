@@ -10,11 +10,6 @@ import { fileURLToPath } from "node:url";
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.join(TEST_DIR, "ingest.mjs");
-const KNOWLEDGE_MANAGER_SCRIPT = path.resolve(
-  TEST_DIR,
-  "../../by-knowledge-manager/scripts/by-knowledge-manager.mjs",
-);
-
 function createServer() {
   const requests = [];
   let responseDelayMs = 0;
@@ -185,7 +180,6 @@ function runCli(args, input, port, envOverrides = {}) {
         HOST: `http://127.0.0.1:${port}`,
         REDIS_HOST: "",
         BEYOND_TOKEN: "system-token",
-        BY_KNOWLEDGE_MANAGER_SCRIPT: KNOWLEDGE_MANAGER_SCRIPT,
         ...envOverrides,
       },
       stdio: ["pipe", "pipe", "pipe"],
@@ -319,8 +313,8 @@ async function testCanonicalCollectionResultRejectsInvalidContractShapes() {
     },
     {
       name: "extra-top-level",
-      mutate(value) { value.router = "agent-reach"; },
-      error: /不支持的顶层字段.*router/,
+      mutate(value) { value.unknownField = "test-value"; },
+      error: /不支持的顶层字段.*unknownField/,
     },
     {
       name: "invalid-filters",
@@ -495,11 +489,11 @@ async function testCanonicalIngestUsesValidatedRootArtifactDespiteDirectoryOverr
       "--knowledge-base-resource-id", "90001",
     ], undefined, 0);
     assert.equal(result.code, 0, result.stderr || result.stdout);
-    assert.equal(result.json?.upload?.files?.[0]?.fileName, relativeMarkdownPath);
-    assert.equal(result.json?.upload?.files?.[0]?.source, "validated-canonical");
-    assert.equal(result.json?.upload?.files?.[0]?.existingPath, undefined);
-    assert.equal(result.json?.upload?.confirmation?.requiredArguments?.["confirmed-knowledge-base-resource-id"], 90001);
-    assert.equal(result.json?.upload?.confirmation?.requiredArguments?.["confirmed-directory-path"], "/");
+    assert.equal(result.json?.action, "ingest-handoff");
+    assert.equal(result.json?.handoff?.selection?.files?.[0]?.fileName, relativeMarkdownPath);
+    assert.equal(result.json?.handoff?.selection?.files?.[0]?.source, "validated-canonical");
+    assert.equal(result.json?.handoff?.confirmation?.requiredArguments?.["confirmed-knowledge-base-resource-id"], 90001);
+    assert.equal(result.json?.handoff?.confirmation?.requiredArguments?.["confirmed-directory-path"], "/");
     assert.doesNotMatch(result.stdout, new RegExp(fixtureDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.doesNotMatch(result.stdout, new RegExp(overrideDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.equal(result.json?.payloads, undefined);
@@ -509,7 +503,7 @@ async function testCanonicalIngestUsesValidatedRootArtifactDespiteDirectoryOverr
   }
 }
 
-async function testCanonicalActualIngestKeepsValidatedPathPrivate() {
+async function testCanonicalIngestCreatesManagerHandoffWithoutWriting() {
   const server = createServer();
   const port = await server.listen();
   const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-private-ingest-"));
@@ -535,11 +529,14 @@ async function testCanonicalActualIngestKeepsValidatedPathPrivate() {
       "--confirmed-directory-path", "/",
     ], undefined, port);
     assert.equal(result.code, 0, result.stderr || result.stdout);
-    const upload = server.requests.find((request) => request.url === "/byaiService/datasetController/uploadFiles");
-    assert.ok(upload, "expected canonical Markdown to be uploaded");
-    assert.match(upload.bodyText, /Canonical private artifact/);
-    assert.doesNotMatch(upload.bodyText, /Untrusted private override/);
-    assert.equal(result.json?.uploaded?.files?.[0]?.source, "validated-canonical");
+    assert.equal(result.json?.action, "ingest-handoff");
+    assert.equal(result.json?.handoff?.skill, "by-knowledge-manager");
+    assert.equal(result.json?.handoff?.target?.resourceId, 90001);
+    assert.equal(result.json?.handoff?.target?.directoryPath, "/");
+    assert.equal(result.json?.handoff?.selection?.files?.[0]?.fileName, relativeMarkdownPath);
+    assert.equal(result.json?.handoff?.selection?.files?.[0]?.source, "validated-canonical");
+    assert.equal(server.requests.some((request) => request.url === "/byaiService/datasetController/uploadFiles"), false);
+    assert.equal(server.requests.some((request) => request.url === "/byaiService/datasetController/build"), false);
     assert.doesNotMatch(result.stdout, /localPath/);
     assert.doesNotMatch(result.stdout, new RegExp(fixtureDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.doesNotMatch(result.stdout, new RegExp(overrideDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -801,7 +798,8 @@ async function testLegacyKnowledgeBaseIdResolvesToResourceId() {
       port,
     );
     assert.equal(resolved.code, 0, resolved.stderr || resolved.stdout);
-    assert.equal(resolved.json?.uploaded?.resourceId, 90001);
+    assert.equal(resolved.json?.handoff?.target?.resourceId, 90001);
+    assert.equal(server.requests.some((request) => request.url === "/byaiService/datasetController/uploadFiles"), false);
   } finally {
     await server.close();
   }
@@ -906,11 +904,11 @@ async function testMixedMediaAndMarkdownIngestCompletesBothPhases() {
       port,
     );
     assert.equal(result.code, 0, result.stderr || result.stdout);
-    assert.equal(result.json?.action, "ingest");
+    assert.equal(result.json?.action, "ingest-handoff");
     assert.equal(result.json?.resourceUpload?.sessionId, 42);
-    assert.equal(result.json?.knowledgeIngest?.manager?.action, "upload");
+    assert.equal(result.json?.handoff?.skill, "by-knowledge-manager");
     assert.equal(server.requests.some((request) => request.url === "/byaiService/chat/uploadFiles"), true);
-    assert.equal(server.requests.some((request) => request.url === "/byaiService/datasetController/uploadFiles"), true);
+    assert.equal(server.requests.some((request) => request.url === "/byaiService/datasetController/uploadFiles"), false);
   } finally {
     await server.close();
   }
@@ -937,11 +935,11 @@ async function testMixedStdinObjectKeepsMediaAndMarkdown() {
       port,
     );
     assert.equal(result.code, 0, result.stderr || result.stdout);
-    assert.equal(result.json?.action, "ingest");
+    assert.equal(result.json?.action, "ingest-handoff");
     assert.equal(result.json?.resourceUpload?.sessionId, 42);
-    assert.equal(result.json?.knowledgeIngest?.manager?.action, "upload");
+    assert.equal(result.json?.handoff?.skill, "by-knowledge-manager");
     assert.equal(server.requests.some((request) => request.url === "/byaiService/chat/uploadFiles"), true);
-    assert.equal(server.requests.some((request) => request.url === "/byaiService/datasetController/uploadFiles"), true);
+    assert.equal(server.requests.some((request) => request.url === "/byaiService/datasetController/uploadFiles"), false);
   } finally {
     await server.close();
   }
@@ -1311,8 +1309,8 @@ async function testUploadDocRequiresKnowledgeBaseResourceId() {
   }
 }
 
-// ③ --markdown-file 入库成功（走 ingest；内部调用 by-knowledge-manager upload/build）
-async function testMarkdownFileIngestSucceeds() {
+// ③ --markdown-file 生成 by-knowledge-manager 入库交接单，不直接写知识库。
+async function testMarkdownFileIngestCreatesManagerHandoff() {
   const server = createServer();
   const port = await server.listen();
   const mdPath = path.join(os.tmpdir(), `bycli-md-${Date.now()}.md`);
@@ -1331,13 +1329,11 @@ async function testMarkdownFileIngestSucceeds() {
     );
     assert.equal(result.code, 0, result.stderr || result.stdout);
     assert.equal(result.json?.ok, true);
-    assert.equal(result.json?.action, "ingest");
-    assert.equal(result.json?.uploaded?.manager?.action, "upload");
-    assert.equal(result.json?.uploaded?.filePaths?.[0], mdPath);
-    assert.equal(result.json?.uploaded?.reusedFiles?.[0], mdPath);
-    assert.equal(result.json?.uploaded?.generatedFiles?.length, 0);
-    assert.equal(server.requests.some((r) => r.url === "/byaiService/datasetController/uploadFiles"), true);
-    assert.equal(server.requests.some((r) => r.url === "/byaiService/datasetController/build"), true);
+    assert.equal(result.json?.action, "ingest-handoff");
+    assert.equal(result.json?.handoff?.skill, "by-knowledge-manager");
+    assert.equal(result.json?.handoff?.selection?.files?.[0]?.fileName, path.basename(mdPath));
+    assert.equal(server.requests.some((r) => r.url === "/byaiService/datasetController/uploadFiles"), false);
+    assert.equal(server.requests.some((r) => r.url === "/byaiService/datasetController/build"), false);
     assert.equal(server.requests.some((r) => r.url?.includes("/ecosystemCollection/ingestion/")), false);
   } finally {
     fs.rmSync(mdPath, { force: true });
@@ -1345,8 +1341,8 @@ async function testMarkdownFileIngestSucceeds() {
   }
 }
 
-// ④ ingest 成功路径：stdin Markdown → 临时文件 → manager upload/build
-async function testIngestInlineMarkdownUploadsThroughManager() {
+// ④ stdin Markdown 生成交接单；Agent 负责准备临时文件并调用管理器。
+async function testIngestInlineMarkdownCreatesManagerHandoff() {
   const server = createServer();
   const port = await server.listen();
   try {
@@ -1362,13 +1358,10 @@ async function testIngestInlineMarkdownUploadsThroughManager() {
     );
     assert.equal(result.code, 0, result.stderr || result.stdout);
     assert.equal(result.json?.ok, true);
-    assert.equal(result.json?.action, "ingest");
-    assert.equal(result.json?.uploaded?.reusedFiles?.length, 0);
-    assert.equal(result.json?.uploaded?.generatedFiles?.length, 1);
-    assert.match(result.json?.uploaded?.generatedFiles?.[0] || "", /knowledge-collection-ingest-/);
-    const upload = server.requests.find((r) => r.url === "/byaiService/datasetController/uploadFiles");
-    assert.ok(upload, "expected manager upload request");
-    assert.match(upload.bodyText, /filename="Article\.md"/);
+    assert.equal(result.json?.action, "ingest-handoff");
+    assert.equal(result.json?.handoff?.skill, "by-knowledge-manager");
+    assert.equal(result.json?.handoff?.selection?.files?.[0]?.fileName, "Article.md");
+    assert.equal(server.requests.some((r) => r.url === "/byaiService/datasetController/uploadFiles"), false);
     assert.equal(server.requests.some((r) => r.url?.includes("/ecosystemCollection/ingestion/")), false);
   } finally {
     await server.close();
@@ -1541,208 +1534,32 @@ async function testUploadDocRequiresConfirmedTargetBeforeWrite() {
   }
 }
 
-async function testIngestPropagatesOverwriteConfirmationAsNonTerminalState() {
-  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-conflict-manager-"));
-  const managerPath = path.join(fixtureDir, "manager.mjs");
-  fs.writeFileSync(managerPath, `
-const command = process.argv[2];
-process.stdout.write(JSON.stringify(command === "update-file" ? {
-  ok: true,
-  action: "update-file",
-  uploaded: { uploadItems: [{ filePath: "/imports/Conflict-article.md" }] },
-  builds: [{ filePath: "/imports/Conflict-article.md" }],
-} : {
-  ok: true,
-  action: "upload",
-  conflict: true,
-  needsOverwriteConfirmation: true,
-  overwritePaths: ["/imports/Conflict-article.md"],
-}));
-`);
-  let continuationFiles = [];
+async function testIngestHandoffCarriesConfirmedOverwritePolicy() {
+  const server = createServer();
+  const port = await server.listen();
   try {
     const result = await runCli(
       [
         "ingest",
-        "--check-conflicts",
-        "--knowledge-manager-script", managerPath,
-        "--knowledge-base-resource-id", "90001",
-        "--directory-path", "/imports",
-        "--confirmed-knowledge-base-resource-id", "90001",
-        "--confirmed-directory-path", "/imports",
-      ],
-      { title: "Conflict article", content: "# Conflict article" },
-      0,
-    );
-    assert.equal(result.code, 0, result.stderr || result.stdout);
-    assert.equal(result.json?.action, "confirm-overwrite");
-    assert.equal(result.json?.needsOverwriteConfirmation, true);
-    assert.deepEqual(result.json?.overwritePaths, ["/imports/Conflict-article.md"]);
-    assert.equal(result.json?.uploaded, undefined);
-    continuationFiles = result.json?.continuation?.markdownFilePaths || [];
-    assert.equal(continuationFiles.length, 1);
-    assert.equal(fs.existsSync(continuationFiles[0]), true, "conflict continuation must retain generated Markdown");
-    assert.equal(result.json?.continuation?.requiredArguments?.["knowledge-base-resource-id"], 90001);
-    assert.equal(result.json?.continuation?.requiredArguments?.["confirmed-knowledge-base-resource-id"], 90001);
-
-    const resumed = await runCli(
-      [
-        "ingest",
-        "--knowledge-manager-script", managerPath,
-        "--markdown-file", continuationFiles[0],
         "--knowledge-base-resource-id", "90001",
         "--directory-path", "/imports",
         "--confirmed-knowledge-base-resource-id", "90001",
         "--confirmed-directory-path", "/imports",
         "--confirmed-overwrite-path", "/imports/Conflict-article.md",
       ],
-      {},
-      0,
+      { title: "Conflict article", content: "# Conflict article" },
+      port,
     );
-    assert.equal(resumed.code, 0, resumed.stderr || resumed.stdout);
-    assert.equal(resumed.json?.uploaded?.manager?.action, "update-file");
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json?.action, "ingest-handoff");
+    assert.equal(result.json?.handoff?.manager?.command, "update-file");
+    assert.equal(result.json?.handoff?.manager?.checkConflicts, true);
+    assert.equal(result.json?.handoff?.manager?.oneFilePerInvocation, true);
+    assert.deepEqual(result.json?.handoff?.manager?.confirmedOverwritePaths, ["/imports/Conflict-article.md"]);
+    assert.deepEqual(result.json?.handoff?.resultContract?.requireActions, ["check-conflicts", "update-file"]);
+    assert.equal(server.requests.some((request) => request.url === "/byaiService/datasetController/uploadFiles"), false);
   } finally {
-    for (const filePath of continuationFiles) {
-      fs.rmSync(path.dirname(filePath), { recursive: true, force: true });
-    }
-    fs.rmSync(fixtureDir, { recursive: true, force: true });
-  }
-}
-
-async function testIngestChecksMarkdownConflictBeforeUploadingMediaAndDoesNotReplayIt() {
-  const server = createServer();
-  const port = await server.listen();
-  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-media-conflict-"));
-  const managerPath = path.join(fixtureDir, "manager.mjs");
-  fs.writeFileSync(managerPath, `
-const command = process.argv[2];
-const checking = process.argv.includes("--check-conflicts");
-process.stdout.write(JSON.stringify(command === "update-file" ? {
-  ok: true,
-  action: "update-file",
-  uploaded: { uploadItems: [{ fileName: "Conflict-article.md", filePath: "/imports/Conflict-article.md" }] },
-  builds: [{ filePath: "/imports/Conflict-article.md" }],
-} : checking ? {
-  ok: true,
-  action: "upload",
-  conflict: true,
-  needsOverwriteConfirmation: true,
-  overwritePaths: ["/imports/Conflict-article.md"],
-} : { ok: true, action: "upload" }));
-`);
-  const mediaUrl = `http://127.0.0.1:${port}/asset.png`;
-  let continuationFiles = [];
-  try {
-    const first = await runCli([
-      "ingest", "--check-conflicts", "--allow-private-resource",
-      "--image-url", mediaUrl,
-      "--knowledge-manager-script", managerPath,
-      "--knowledge-base-resource-id", "90001", "--directory-path", "/imports",
-      "--confirmed-knowledge-base-resource-id", "90001", "--confirmed-directory-path", "/imports",
-    ], "# Conflict article", port);
-    assert.equal(first.code, 0, first.stderr || first.stdout);
-    assert.equal(first.json?.action, "confirm-overwrite");
-    assert.equal(server.requests.filter((request) => request.url === "/byaiService/chat/uploadFiles").length, 0);
-    continuationFiles = first.json?.continuation?.markdownFilePaths || [];
-    const resumed = await runCli([
-      "ingest", "--allow-private-resource", "--image-url", mediaUrl,
-      "--knowledge-manager-script", managerPath,
-      "--markdown-file", continuationFiles[0],
-      "--knowledge-base-resource-id", "90001", "--directory-path", "/imports",
-      "--confirmed-knowledge-base-resource-id", "90001", "--confirmed-directory-path", "/imports",
-      "--confirmed-overwrite-path", "/imports/Conflict-article.md",
-    ], undefined, port);
-    assert.equal(resumed.code, 0, resumed.stderr || resumed.stdout);
-    assert.equal(server.requests.filter((request) => request.url === "/byaiService/chat/uploadFiles").length, 1);
-  } finally {
-    for (const filePath of continuationFiles) {
-      fs.rmSync(path.dirname(filePath), { recursive: true, force: true });
-    }
-    fs.rmSync(fixtureDir, { recursive: true, force: true });
     await server.close();
-  }
-}
-
-async function testIngestRejectsSuccessfulManagerExitWithoutJsonContract() {
-  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-empty-manager-"));
-  const managerPath = path.join(fixtureDir, "manager.mjs");
-  fs.writeFileSync(managerPath, "process.exitCode = 0;\n");
-  try {
-    const result = await runCli(
-      [
-        "ingest",
-        "--knowledge-manager-script", managerPath,
-        "--knowledge-base-resource-id", "90001",
-        "--confirmed-knowledge-base-resource-id", "90001",
-        "--confirmed-directory-path", "/",
-      ],
-      { content: "# Manager contract" },
-      0,
-    );
-    assert.equal(result.code, 1, result.stderr || result.stdout);
-    assert.match(String(result.json?.error || ""), /有效 JSON|返回契约/);
-  } finally {
-    fs.rmSync(fixtureDir, { recursive: true, force: true });
-  }
-}
-
-async function testIngestReturnsConservativePerItemResultsWhenBatchOutcomeIsUnmapped() {
-  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-item-results-"));
-  const managerPath = path.join(fixtureDir, "manager.mjs");
-  fs.writeFileSync(managerPath, "process.stdout.write(JSON.stringify({ ok: true, action: 'upload' }));\n");
-  try {
-    const result = await runCli(
-      [
-        "ingest",
-        "--knowledge-manager-script", managerPath,
-        "--knowledge-base-resource-id", "90001",
-        "--confirmed-knowledge-base-resource-id", "90001",
-        "--confirmed-directory-path", "/",
-        "--item-id", "item-a",
-        "--item-id", "item-b",
-      ],
-      { items: [{ title: "A", content: "# A" }, { title: "B", content: "# B" }] },
-      0,
-    );
-    assert.equal(result.code, 0, result.stderr || result.stdout);
-    assert.deepEqual(result.json?.uploaded?.itemResults, [
-      { itemId: "item-a", status: "unknown", reason: "manager-result-unmapped" },
-      { itemId: "item-b", status: "unknown", reason: "manager-result-unmapped" },
-    ]);
-    assert.deepEqual(result.json?.itemResults, result.json?.uploaded?.itemResults);
-  } finally {
-    fs.rmSync(fixtureDir, { recursive: true, force: true });
-  }
-}
-
-async function testIngestRequiresBuildToReferenceExactUploadedPath() {
-  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-item-paths-"));
-  const managerPath = path.join(fixtureDir, "manager.mjs");
-  fs.writeFileSync(managerPath, `process.stdout.write(JSON.stringify({
-    ok: true,
-    action: 'upload',
-    uploaded: { uploadItems: [{ fileName: 'a.md', filePath: '/uploaded/a.md' }] },
-    builds: [{ filePath: '/different/a.md', built: { ok: true } }]
-  }));\n`);
-  try {
-    const result = await runCli(
-      [
-        "ingest",
-        "--knowledge-manager-script", managerPath,
-        "--knowledge-base-resource-id", "90001",
-        "--confirmed-knowledge-base-resource-id", "90001",
-        "--confirmed-directory-path", "/",
-        "--item-id", "item-a",
-      ],
-      { items: [{ title: "A", fileName: "a.md", content: "# A" }] },
-      0,
-    );
-    assert.equal(result.code, 0, result.stderr || result.stdout);
-    assert.deepEqual(result.json?.uploaded?.itemResults, [
-      { itemId: "item-a", status: "unknown", reason: "manager-result-unmapped" },
-    ]);
-  } finally {
-    fs.rmSync(fixtureDir, { recursive: true, force: true });
   }
 }
 
@@ -1764,7 +1581,7 @@ await testCanonicalCollectionResultRejectsUnsafeOrMissingMarkdownPaths();
 await testCanonicalCollectionResultRejectsMismatchedMarkdownAndFileName();
 await testCollectionResultJsonIsExplicitInlineCompatibilityOnly();
 await testCanonicalIngestUsesValidatedRootArtifactDespiteDirectoryOverrides();
-await testCanonicalActualIngestKeepsValidatedPathPrivate();
+await testCanonicalIngestCreatesManagerHandoffWithoutWriting();
 await testCanonicalInputPrecedesLegacyAndLegacyRemainsSupported();
 await testLegacyInlineBycliJsonRemainsSupported();
 await testRemoteResourceRejectsPrivateAddressByDefault();
@@ -1785,6 +1602,27 @@ await testNonMediaFileSkipsUploadAndGoesToMarkdown();
 await testUploadImagesToDatasetWithoutBuild();
 await testUploadImagesSkipsUnsafeAndMissingImages();
 await testUploadImagesRequiresMarkdownAndResourceId();
+// normalize --markdown-dir：每篇正文自带的 `> 原文链接:` 决定各自 sourceUrl，
+// 批量导入不能被单个 --source-url 覆盖成同一个 URL(inventory 身份是 sourceSkill + sourceUrl)。
+async function testMarkdownDirDerivesPerFileSourceUrl() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kc-md-dir-"));
+  fs.writeFileSync(path.join(dir, "a.md"), "# A\n> 原文链接: <https://docs.example.com/a>\n\n正文 A");
+  fs.writeFileSync(path.join(dir, "b.md"), "# B\n> 原文链接: <https://docs.example.com/b>\n\n正文 B");
+  fs.writeFileSync(path.join(dir, "c.md"), "# C\n\n没有原文链接");
+  try {
+    const result = await runCli(["normalize", "--markdown-dir", dir], {}, 0);
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    const files = result.json?.summary?.files || [];
+    assert.equal(files.length, 3);
+    const byName = Object.fromEntries(files.map((f) => [f.fileName, f.sourceUrl]));
+    assert.equal(byName["a.md"], "https://docs.example.com/a");
+    assert.equal(byName["b.md"], "https://docs.example.com/b");
+    assert.equal(byName["c.md"], "", "没有原文链接的正文不得伪造 sourceUrl");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 await testUploadDocViaDatasetController();
 await testDefaultDirectoryPathUsesRunTimestamp();
 await testDefaultDirectoryPathFallsBackToRootWithoutTimestamp();
@@ -1794,8 +1632,8 @@ await testDryRunAdvertisesTimestampedConfirmationTarget();
 await testUploadDocRejectsUnsupportedType();
 await testUploadDocMissingLocalFileErrors();
 await testUploadDocRequiresKnowledgeBaseResourceId();
-await testMarkdownFileIngestSucceeds();
-await testIngestInlineMarkdownUploadsThroughManager();
+await testMarkdownFileIngestCreatesManagerHandoff();
+await testIngestInlineMarkdownCreatesManagerHandoff();
 await testUploadResourceFileKindGoesToChatFiles();
 await testUploadDocEmptyUploadItemsErrors();
 await testUploadDocAcceptsUppercaseExtension();
@@ -1803,10 +1641,7 @@ await testUploadDocReturnsPerItemPartialResults();
 await testIngestRequiresConfirmedTargetBeforeWrite();
 await testBareResourceIdFlagsCannotConfirmTarget();
 await testUploadDocRequiresConfirmedTargetBeforeWrite();
-await testIngestPropagatesOverwriteConfirmationAsNonTerminalState();
-await testIngestChecksMarkdownConflictBeforeUploadingMediaAndDoesNotReplayIt();
-await testIngestRejectsSuccessfulManagerExitWithoutJsonContract();
-await testIngestReturnsConservativePerItemResultsWhenBatchOutcomeIsUnmapped();
-await testIngestRequiresBuildToReferenceExactUploadedPath();
+await testIngestHandoffCarriesConfirmedOverwritePolicy();
 await testItemIdCountMustMatchMarkdownSelection();
+await testMarkdownDirDerivesPerFileSourceUrl();
 console.log("knowledge-collection-ingest tests passed");

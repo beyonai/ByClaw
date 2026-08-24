@@ -1,7 +1,8 @@
 import { message } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { normalizeModelType } from './modelFormUtils';
+import { hasImageGenerationPrompt, normalizeModelType } from './modelFormUtils';
 import { copyTextToClipboard } from '@/pages/manager/utils/copy';
+import { supportsManagerImageDebug } from './imageGenerationProviders';
 
 type IntlShape = {
   formatMessage: (descriptor: { id: string }, values?: Record<string, any>) => string;
@@ -11,6 +12,7 @@ type Params = {
   intl: IntlShape;
   open: boolean;
   currentModelType?: any;
+  currentProviderName?: any;
   getCurrentModelId: () => string | number | undefined;
   allowRerankTable?: boolean;
   formatDebugError?: (error: any) => string | undefined;
@@ -29,6 +31,7 @@ const useModelDebug = ({
   intl,
   open,
   currentModelType,
+  currentProviderName,
   getCurrentModelId,
   allowRerankTable = true,
   formatDebugError,
@@ -137,6 +140,15 @@ const useModelDebug = ({
       message.warning(intl.formatMessage({ id: 'modelMgr.modal.debugInputRequired' }));
       return;
     }
+    const currentType = normalizeModelType(currentModelType);
+    if (currentType === 'IMAGE_GENERATION' && !hasImageGenerationPrompt(debugInput)) {
+      message.warning(intl.formatMessage({ id: 'modelMgr.modal.imagePromptRequired' }));
+      return;
+    }
+    if (currentType === 'IMAGE_GENERATION' && !supportsManagerImageDebug(currentProviderName)) {
+      message.warning(intl.formatMessage({ id: 'modelMgr.modal.imageDebugViaOpenClaw' }));
+      return;
+    }
     if (currentModelId === null || currentModelId === undefined || currentModelId === '') {
       message.warning(intl.formatMessage({ id: 'modelMgr.modal.debugIdRequired' }));
       return;
@@ -150,8 +162,6 @@ const useModelDebug = ({
     setDebugOutput('');
     setRerankResult(null);
     setDebugOutputLoading(true);
-    const currentType = normalizeModelType(currentModelType);
-
     runDebugRequest({
       modelId: `${currentModelId}`,
       input: `${debugInput}`,
@@ -230,6 +240,11 @@ const useModelDebug = ({
         }
 
         const text = `${res?.output ?? ''}`;
+        if (currentType === 'IMAGE_GENERATION') {
+          streamDoneRef.current = true;
+          setDebugOutput(text);
+          return;
+        }
         if (!gotDeltaRef.current && text) {
           charQueueRef.current.push(...Array.from(text));
           ensureTyping();
@@ -246,6 +261,7 @@ const useModelDebug = ({
   }, [
     abortDebug,
     currentModelType,
+    currentProviderName,
     debugInput,
     ensureTyping,
     formatDebugError,

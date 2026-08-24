@@ -19,6 +19,8 @@ interface SessionOverviewDrawerProps {
   embedded?: boolean;
   canEnterSession?: (task: DevloopTaskItem) => boolean;
   onEnterSession?: (task: DevloopTaskItem) => void;
+  // 只读查看会话:非处理人从看板打开详情时走这条,看得到消息但没有输入框。
+  onViewSession?: (task: DevloopTaskItem) => void;
 }
 
 // 日期快捷选择：今天 / 本周 / 本月；自定义表示用户手动改动了 RangePicker，快捷段不再高亮。
@@ -112,6 +114,7 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
   embedded = false,
   canEnterSession,
   onEnterSession,
+  onViewSession,
 }) => {
   const intl = useIntl();
   // 保持翻译函数引用稳定，避免请求失败后的状态更新重新触发任务看板的初始查询 effect。
@@ -398,6 +401,15 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
           onEnterSession?.(task);
           setDetailTask(null);
         }}
+        // 非处理人拿不到进入会话按钮，必须透传只读入口，否则看板详情连查看会话都没有。
+        onViewSession={
+          onViewSession
+            ? (task) => {
+              onViewSession(task);
+              setDetailTask(null);
+            }
+            : undefined
+        }
       />
     </>
   );

@@ -1,0 +1,99 @@
+{
+  "entity_code": "wy93ovzs9p_article_metric_daily",
+  "entity_name": "文章每日指标",
+  "entity_desc": "每篇文章截至每日统计时点的全量后台指标和衍生指标；衍生指标由 Action 按公式计算后落库",
+  "submitted_fields": [
+    {
+      "property_code": "article_id",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "stat_date",
+      "data_type": "DATE"
+    },
+    {
+      "property_code": "read_count",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "avg_stay_sec",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "finish_rate",
+      "data_type": "FLOAT"
+    },
+    {
+      "property_code": "new_follow_count",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "share_count",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "wow_count",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "like_count",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "favorite_count",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "comment_count",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "deliver_count",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "msg_read_count",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "first_share_count",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "share_driven_read",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "listen_full_count",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "reward_points",
+      "data_type": "INTEGER"
+    },
+    {
+      "property_code": "open_rate",
+      "data_type": "FLOAT"
+    },
+    {
+      "property_code": "share_rate",
+      "data_type": "FLOAT"
+    },
+    {
+      "property_code": "follow_rate",
+      "data_type": "FLOAT"
+    },
+    {
+      "property_code": "virality_factor",
+      "data_type": "FLOAT"
+    },
+    {
+      "property_code": "source_batch_id",
+      "data_type": "STRING"
+    },
+    {
+      "property_code": "metric_rule_version",
+      "data_type": "STRING"
+    }
+  ]
+}

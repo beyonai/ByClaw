@@ -80,3 +80,6 @@ sanitized/
 
 来源执行器 `dws` 只返回采集结果，不得询问或执行 `入库 / 知识整理 / 跳过`。持久化、预览以及唯一后处理选择由
 `knowledge-collection` 按 [post-processing.md](../post-processing.md) 统一完成。
+## Knowledge collection enterprise search
+
+Only a user-named DingTalk source or a clear internal-material request whose approved `sourceScope` includes DingTalk may invoke enterprise search. The connector reuses DWS discovery/authentication and records ranked candidates. Batch search defaults to metadata-only and isolates DWS authentication or invocation failures from selected sources; use `enterprise materialize --session-dir ... --item-ids ... --output-dir <new dir>` to materialize selected pending candidates.
