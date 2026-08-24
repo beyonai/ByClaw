@@ -4,15 +4,53 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { ensureSessionSkeleton, sessionPaths } from './session.mjs';
-import { runPublicDiscover } from './public-discovery.mjs';
+import { ensureSessionSkeleton, newSession, sessionPaths } from './session.mjs';
+import * as publicDiscovery from './public-discovery.mjs';
 
-function makeInitializedSession() {
+const { runPublicDiscover } = publicDiscovery;
+
+function makeInitializedSession(sourceScope = ['public-internet']) {
   const root = mkdtempSync(join(tmpdir(), 'public-discovery-test-'));
   ensureSessionSkeleton(root);
-  writeFileSync(join(root, 'session.json'), '{}\n');
+  writeFileSync(join(root, 'session.json'), `${JSON.stringify(newSession({
+    query: 'public discovery', sourceScope, materializationTarget: 'candidates',
+  }))}\n`);
   return { root, paths: sessionPaths(root) };
 }
+
+test('public discovery requires public-internet in the parent source scope', async () => {
+  const { paths } = makeInitializedSession(['ima']);
+  let called = false;
+  await assert.rejects(
+    runPublicDiscover(paths, { query: 'q' }, {
+      runProcess: async () => { called = true; return { code: 0, stdout: '{}', stderr: '' }; },
+    }),
+    /sourceScope.*public-internet/,
+  );
+  assert.equal(called, false);
+});
+
+test('default public process runner enforces timeout bounds', async () => {
+  assert.equal(typeof publicDiscovery.runBoundedProcess, 'function');
+  await assert.rejects(
+    publicDiscovery.runBoundedProcess({
+      bin: process.execPath,
+      args: ['-e', 'setTimeout(() => {}, 100)'],
+    }, { timeoutMs: 25 }),
+    /timeout after 25ms/,
+  );
+});
+
+test('public channel runner converts a bound failure into an isolated channel failure', async () => {
+  assert.equal(typeof publicDiscovery.runPublicProcess, 'function');
+  const outcome = await publicDiscovery.runPublicProcess({
+    bin: process.execPath,
+    args: ['-e', 'setTimeout(() => {}, 100)'],
+  }, { timeoutMs: 25 });
+  assert.equal(outcome.code, 1);
+  assert.equal(outcome.stdout, '');
+  assert.match(outcome.stderr, /timeout after 25ms/);
+});
 
 test('runs SearXNG and hot discovery for every SearXNG category', async () => {
   const { paths } = makeInitializedSession();

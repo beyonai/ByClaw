@@ -1154,6 +1154,11 @@ test('writeCollectionBundle leaves metadata uncommitted on marker failure and pe
     );
 
     await rm(join(outputRoot, 'collection-result.json'), { recursive: true });
+    const uncommitted = await runNode(knowledgeCollectionScript, [
+      'status', '--session-dir', outputRoot,
+    ]);
+    assert.equal(uncommitted.code, 1);
+    assert.match(uncommitted.stdout, /uncommitted|未提交/);
     await writer.writeCollectionBundle(validBundle());
     assert.equal((await readJson(join(outputRoot, 'collection-result.json'))).title, 'Enterprise search');
   } finally {
@@ -1183,6 +1188,8 @@ test('writer bundle is accepted by real inspect and exposes sanitized handoff', 
       'status', '--session-dir', outputRoot,
     ]);
     assert.equal(status.code, 0, status.stderr || status.stdout);
+    assert.deepEqual(status.json?.task?.sourceScope, ['feishu']);
+    assert.equal(status.json?.task?.materializationTarget, 'all');
     assert.deepEqual(status.json?.downstreamInput?.files, [
       join(await realpath(outputRoot), 'sanitized/items/item-1.md'),
     ]);

@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +8,8 @@ import {
   normalizeUrl,
   parseDeclarations,
 } from '../references/online-search/references/hot_discovery/scripts/hot_discovery.mjs';
+import { runCli } from './enterprise/shared/cli-runner.mjs';
+import { loadSession } from './session.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const onlineSearchRoot = resolve(scriptDir, '../references/online-search');
@@ -32,16 +33,21 @@ function snapshotPath(inputDir, name) {
   return target;
 }
 
-function defaultRunProcess({ executable, args }) {
-  return new Promise((resolveRun) => {
-    const child = spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.on('error', () => resolveRun({ code: 1, stdout, stderr }));
-    child.on('close', (code) => resolveRun({ code: Number.isInteger(code) ? code : 1, stdout, stderr }));
-  });
+export async function runBoundedProcess({ bin, executable, args }, options = {}) {
+  const outcome = await runCli(bin || executable, args, options);
+  return {
+    code: Number.isInteger(outcome.exitCode) ? outcome.exitCode : 1,
+    stdout: outcome.stdout,
+    stderr: outcome.stderr,
+  };
+}
+
+export async function runPublicProcess(spec, options = {}) {
+  try {
+    return await runBoundedProcess(spec, options);
+  } catch (error) {
+    return { code: 1, stdout: '', stderr: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 function parseSuccess(outcome) {
@@ -77,6 +83,11 @@ async function defaultMerge({ hotDoc, sxDoc, warnings }) {
 }
 
 export async function runPublicDiscover(paths, args, options = {}) {
+  const { session } = loadSession(paths, { persistMigration: false });
+  const sourceScope = Array.isArray(session.task?.sourceScope) ? session.task.sourceScope : [];
+  if (!sourceScope.includes('public-internet')) {
+    throw new Error('session task.sourceScope 必须包含 public-internet 才能执行公共发现');
+  }
   const query = requireText(args?.query, '--query');
   const category = typeof args?.category === 'string' && args.category.trim() ? args.category.trim() : 'general';
   const language = typeof args?.language === 'string' && args.language.trim() ? args.language.trim() : 'all';
@@ -95,7 +106,7 @@ export async function runPublicDiscover(paths, args, options = {}) {
   const pythonExecutable = options.pythonExecutable
     || process.env.ONLINE_SEARCH_PYTHON
     || join(onlineSearchRoot, 'scripts/.venv/bin/python');
-  const runProcess = options.runProcess || defaultRunProcess;
+  const runProcess = options.runProcess || runPublicProcess;
 
   const [searxngOutcome, hotOutcome] = await Promise.all([
     runProcess({

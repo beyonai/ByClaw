@@ -35,6 +35,7 @@ function status(paths, args) {
   const collection = collectionStatus(paths);
   const {
     downstreamInput,
+    crawl,
     warnings: collectionWarnings = [],
     ...collectionSummary
   } = collection;
@@ -46,9 +47,10 @@ function status(paths, args) {
       action: 'status',
       task: research.task,
       research: research.research,
-      collection: detail.metadata,
+      collection: { ...detail.metadata, ...collectionSummary },
       canonicalView: detail.collectionResult,
       downstreamInput,
+      ...(crawl ? { crawl } : {}),
       warnings: [...(research.warnings || []), ...(detail.warnings || [])],
     };
   }
@@ -58,6 +60,7 @@ function status(paths, args) {
     task: research.task,
     research: research.research,
     collection: collectionSummary,
+    ...(crawl ? { crawl } : {}),
     downstreamInput,
     warnings: [...(research.warnings || []), ...collectionWarnings],
   };

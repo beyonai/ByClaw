@@ -206,6 +206,9 @@ export function loadSession(paths, { persistMigration = true } = {}) {
     if (!session.task || typeof session.task !== 'object' || Array.isArray(session.task)) {
       throw new Error('session.json task 必须是对象');
     }
+    if (session.task.publicationStatus === 'uncommitted') {
+      throw new Error('session.json 表示企业采集 bundle 未提交完成');
+    }
     if (!session.research || typeof session.research !== 'object' || Array.isArray(session.research)) {
       throw new Error('session.json research 必须是对象');
     }

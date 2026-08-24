@@ -75,6 +75,25 @@ test('max-pages 超出部分记为 overCap 而非静默丢弃', () => {
   assert.equal(out.added, 2);
   assert.equal(out.skipped.overCap, 1);
 });
+test('crawl coverage 持久化并阻止未完成的 all 交付', () => {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'kc-crawl-')), 's2-status');
+  run([
+    'init', '--session-dir', dir, '--query', 'all crawl',
+    '--source-scope', '["public-internet"]', '--materialization-target', 'all',
+  ]);
+  const file = path.join(dir, 'u.txt');
+  fs.writeFileSync(file, ['a', 'b', 'c'].map((x) => `https://ok.com/${x}`).join('\n'));
+  run(['crawl-seed', '--session-dir', dir, '--urls-file', file, '--max-pages', '2']);
+  const crawl = run(['crawl-status', '--session-dir', dir]);
+  assert.equal(crawl.coverage.overCap, 1);
+  run(['crawl-seed', '--session-dir', dir, '--urls-file', file, '--max-pages', '3']);
+  const expanded = run(['crawl-status', '--session-dir', dir]);
+  assert.equal(expanded.coverage.overCap, 0, '扩大 cap 并补入页面后应清除未覆盖计数');
+  const status = run(['status', '--session-dir', dir]);
+  assert.equal(status.crawl.pending, 3);
+  assert.equal(status.crawl.coverage.overCap, 0);
+  assert.equal(status.collection.deliveryComplete, false);
+});
 test('max-pages 偏斜警告(再现 Dify sitemap api-reference 批量入队)', () => {
   // 24 页全部来自 api-reference/annotations,其余 72 页被 overCap 放弃 → 触发警告
   const dir = makeSession('s2b');

@@ -69,6 +69,90 @@ async function createCollectedSession() {
 }
 
 await (async () => {
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-collection-fresh-'));
+  try {
+    const initialized = await runCli([
+      'init', '--session-dir', root, '--query', 'fresh collection',
+      '--source-scope', '["public-internet"]', '--materialization-target', 'all',
+    ]);
+    assert.equal(initialized.code, 0, initialized.stderr || initialized.stdout);
+    await Promise.all([
+      mkdir(join(root, 'markdown'), { recursive: true }),
+      mkdir(join(root, 'sanitized/items'), { recursive: true }),
+      mkdir(join(root, '.collection-inputs'), { recursive: true }),
+    ]);
+    await writeFile(join(root, 'markdown/fresh.md'), '# Fresh\n');
+    await writeFile(join(root, 'sanitized/items/fresh.md'), '# Fresh\n');
+    const payloadPath = join(root, '.collection-inputs/fresh.json');
+    await writeFile(payloadPath, JSON.stringify({
+      schemaVersion: '1.0', itemId: 'fresh',
+      source: 'public-internet', sourceSkill: 'bycli', backend: 'bycli',
+      markdownPath: 'markdown/fresh.md', sanitizedPath: 'sanitized/items/fresh.md',
+      canonicalItem: {
+        title: 'Fresh', url: 'https://example.com/fresh', author: '', publishTime: '',
+        markdown: 'sanitized/items/fresh.md', fileName: 'sanitized/items/fresh.md',
+      },
+    }));
+    const collected = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
+    assert.equal(collected.code, 0, collected.stderr || collected.stdout);
+    const result = JSON.parse(await readFile(join(root, 'collection-result.json'), 'utf8'));
+    assert.equal(result.source, 'public-internet');
+    assert.equal(result.backend, 'bycli');
+    const status = await runCli(['status', '--session-dir', root]);
+    assert.equal(status.json.collection.deliveryComplete, true);
+    assert.equal(status.json.downstreamInput.files.length, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS fresh init can collect with per-item source identity');
+})();
+
+await (async () => {
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-collection-failed-'));
+  try {
+    const initialized = await runCli(['init', '--session-dir', root, '--query', 'failed collection']);
+    assert.equal(initialized.code, 0, initialized.stderr || initialized.stdout);
+    const sessionPath = join(root, 'session.json');
+    const session = JSON.parse(await readFile(sessionPath, 'utf8'));
+    session.collection.collection.status = 'failed';
+    await writeFile(sessionPath, JSON.stringify(session));
+    const status = await runCli(['status', '--session-dir', root]);
+    assert.equal(status.code, 0, status.stderr || status.stdout);
+    assert.equal(status.json.collection.deliveryComplete, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS failed collection cannot report delivery complete');
+})();
+
+await (async () => {
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-collection-source-alias-'));
+  try {
+    const initialized = await runCli([
+      'init', '--session-dir', root, '--query', 'feishu collection',
+      '--source-scope', '["feishu"]', '--materialization-target', 'all',
+    ]);
+    assert.equal(initialized.code, 0, initialized.stderr || initialized.stdout);
+    await writeFile(join(root, 'markdown/feishu.md'), '# Feishu\n');
+    await writeFile(join(root, 'sanitized/items/feishu.md'), '# Feishu\n');
+    const payloadPath = join(root, '.collection-inputs/feishu.json');
+    await writeFile(payloadPath, JSON.stringify({
+      schemaVersion: '1.0', itemId: 'feishu', source: 'fws', sourceSkill: 'fws', backend: 'lark-cli',
+      markdownPath: 'markdown/feishu.md', sanitizedPath: 'sanitized/items/feishu.md',
+      canonicalItem: {
+        title: 'Feishu', url: 'https://example.feishu.cn/doc/1', author: '', publishTime: '',
+        markdown: 'sanitized/items/feishu.md', fileName: 'sanitized/items/feishu.md',
+      },
+    }));
+    const collected = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
+    assert.equal(collected.code, 0, collected.stderr || collected.stdout);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log('PASS logical enterprise source maps to authorized source scope');
+})();
+
+await (async () => {
   const schema = await runCli(['command-schema']);
   assert.equal(schema.json.commands.collect.properties['item-json-file'].format, 'collection-input-file');
   assert.deepEqual(Object.keys(schema.json.commands.inspect.properties).sort(), ['full', 'session-dir']);
@@ -98,6 +182,11 @@ await (async () => {
       files: [join(realRoot, 'sanitized/items/paper.md')],
     });
     assert.equal(status.json.collection.downstreamInput, undefined);
+
+    const fullStatus = await runCli(['status', '--session-dir', root, '--full']);
+    assert.equal(fullStatus.code, 0, fullStatus.stderr || fullStatus.stdout);
+    assert.equal(fullStatus.json.collection.deliveryComplete, true);
+    assert.equal(fullStatus.json.collection.collection.items.length, 1);
 
     const beforeInspect = await readFile(join(root, 'session.json'), 'utf8');
     const inspected = await runCli(['inspect', '--session-dir', root]);

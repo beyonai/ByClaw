@@ -22,12 +22,14 @@ import {
   readLock,
   resolveCollectionInputFile,
 } from './session.mjs';
+import { deliveryCompleteForSession, summarizeCrawlDelivery } from './delivery-state.mjs';
 
 const METADATA_VERSION = '1.0';
 const SENSITIVE_METADATA_KEY = /(token|cookie|secret|password|authorization|credential|device[_-]?code)/i;
 const COLLECTION_STATUSES = new Set(['complete', 'partial', 'failed']);
 const MATERIALIZATION_STATUSES = new Set(['materialized', 'pending', 'failed']);
 const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown']);
+const SOURCE_SCOPE_ALIAS = { dws: 'dingtalk', fws: 'feishu', wecom: 'wecom', ima: 'ima' };
 
 function stableItemId(item) {
   const identity = [item.url, item.title, item.fileName].filter(Boolean).join('\n');
@@ -483,20 +485,32 @@ function validateCanonicalItem(item, sanitizedPath) {
   }
 }
 
-function markOneMaterialized(paths, metadata, collectionResult, update) {
+function markOneMaterialized(paths, session, metadata, collectionResult, update) {
   const itemId = requireString(update.itemId, 'itemId');
   let inventory = metadata.collection.items.find((item) => item.itemId === itemId);
   if (!inventory) {
     const canonical = update.canonicalItem && typeof update.canonicalItem === 'object'
       ? update.canonicalItem : {};
     const sourceUrl = requireString(canonical.url, 'canonicalItem.url');
-    const backend = requireString(collectionResult.backend, 'collection-result.json backend');
+    const source = requireString(update.source || collectionResult.source, 'source');
+    const backend = requireString(update.backend || collectionResult.backend, 'backend');
+    const sourceSkill = requireString(update.sourceSkill || backend, 'sourceSkill');
+    const allowedSources = Array.isArray(session.task?.sourceScope) ? session.task.sourceScope : [];
+    if (!allowedSources.includes(SOURCE_SCOPE_ALIAS[source] || source)) {
+      throw new Error(`sourceScope 不允许来源 ${source}`);
+    }
+    if (!collectionResult.source) collectionResult.source = source;
+    else if (collectionResult.source !== source) collectionResult.source = 'multi-source';
+    if (!collectionResult.backend) collectionResult.backend = backend;
+    else if (collectionResult.backend !== backend) collectionResult.backend = 'multi-backend';
+    if (!collectionResult.title) collectionResult.title = session.task?.query || 'Collection';
+    if (!collectionResult.url) collectionResult.url = sourceUrl;
     inventory = {
       itemId,
       title: String(canonical.title || ''),
       sourceUrl,
       sourceItemId: null,
-      sourceSkill: backend,
+      sourceSkill,
       backend,
       collectionFilters: collectionResult.filters && typeof collectionResult.filters === 'object'
         ? clone(collectionResult.filters) : {},
@@ -552,7 +566,7 @@ export function cmdCollect(paths, args) {
       throw new Error('检测到无效 materialization，已安全降级为 pending；请先由原始执行器重新物化');
     }
     const results = items.map((item) => markOneMaterialized(
-      paths, loaded.metadata, loaded.collectionResult, item,
+      paths, loaded.session, loaded.metadata, loaded.collectionResult, item,
     ));
     validateMetadata(loaded.metadata);
     validateCanonicalView(paths.root, loaded.collectionResult, loaded.metadata);
@@ -654,7 +668,8 @@ export function collectionStatus(paths) {
     uniqueContentGroups: groups.size,
     duplicates: items.length - groups.size,
     materializationTarget,
-    deliveryComplete: materializationTarget === 'candidates' || (pending === 0 && failed === 0),
+    deliveryComplete: deliveryCompleteForSession(session),
+    crawl: summarizeCrawlDelivery(session),
     canonicalItems: collectionResult.items.length,
     downstreamInput: buildDownstreamInput(paths, collectionResult),
     warnings: loaded.warnings,

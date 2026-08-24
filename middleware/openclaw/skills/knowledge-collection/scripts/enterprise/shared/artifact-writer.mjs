@@ -12,11 +12,13 @@ import { randomUUID } from 'node:crypto';
 import { dirname, extname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
 import { removeSensitiveFields, sanitizeSensitive } from './secret-sanitizer.mjs';
 import { deriveCollectionStatus } from './status-model.mjs';
+import { newSession } from '../../session.mjs';
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
 const REQUIRED_DIRECTORIES = ['raw', 'markdown', 'sanitized', 'sanitized/items'];
 const CANONICAL_ITEM_KEYS = ['title', 'url', 'author', 'publishTime', 'markdown', 'fileName'];
+const SOURCE_SCOPE = { dws: 'dingtalk', fws: 'feishu', wecom: 'wecom', ima: 'ima' };
 
 function outsideRootError() {
   return new Error('path is outside output root');
@@ -634,13 +636,33 @@ export async function createArtifactWriter(root) {
         validateCanonicalCorrespondence(inventory, canonicalItems);
         await validateInventoryPaths(normalizedRoot, inventory);
         const status = collectionStatusFor(bundle, inventory);
-        await writePersistedJson(normalizedRoot, rootIdentity, 'sanitized/metadata.json', {
+        const metadata = {
           schemaVersion: '1.0',
           storage: { fallback: false },
           collection: { status, items: inventory },
           sourceMetadata,
+        };
+        const sourceScope = bundle.sourceScope ?? [SOURCE_SCOPE[source] || source];
+        if (!Array.isArray(sourceScope) || sourceScope.length === 0
+          || sourceScope.some((entry) => typeof entry !== 'string' || !entry.trim())) {
+          throw new TypeError('bundle.sourceScope must be a non-empty string array');
+        }
+        const materializationTarget = bundle.materializationTarget
+          ?? (bundle.metadataOnly === true ? 'candidates' : 'all');
+        if (!['candidates', 'selected', 'all'].includes(materializationTarget)) {
+          throw new TypeError('bundle.materializationTarget is invalid');
+        }
+        const session = newSession({
+          query: bundle.query || title,
+          sourceScope: [...new Set(sourceScope)],
+          materializationTarget,
+          status: status === 'failed' ? 'failed' : 'collected',
+          publicationStatus: 'uncommitted',
         });
-        // collection-result.json is the commit marker; metadata alone is an uncommitted bundle.
+        session.collection = metadata;
+        await writePersistedJson(normalizedRoot, rootIdentity, 'sanitized/metadata.json', metadata);
+        await writePersistedJson(normalizedRoot, rootIdentity, 'session.json', session);
+        // Readers reject the session until both compatibility views have been published.
         await writePersistedJson(normalizedRoot, rootIdentity, 'collection-result.json', {
           schemaVersion: '1.0',
           title,
@@ -650,6 +672,8 @@ export async function createArtifactWriter(root) {
           filters,
           items: canonicalItems,
         });
+        session.task.publicationStatus = 'committed';
+        await writePersistedJson(normalizedRoot, rootIdentity, 'session.json', session);
         publicationState = 'committed';
         await assertRootIdentity(normalizedRoot, rootIdentity);
       } catch (error) {

@@ -165,6 +165,8 @@ await (async () => {
   assert.equal(enterpriseSchema.code, 0, enterpriseSchema.stderr);
   assert.equal(enterpriseSchema.json.commands['search-all'].additionalProperties, false);
   assert.deepEqual(enterpriseSchema.json.commands['search-all'].properties.sources.default, ['dingtalk', 'feishu', 'wecom', 'ima']);
+  assert.ok(enterpriseSchema.json.commands.search.required.includes('parent-session-dir'));
+  assert.ok(enterpriseSchema.json.commands.resource.required.includes('parent-session-dir'));
 
   const enterprise = await runCli(['enterprise', '--help']);
   assert.equal(enterprise.code, 0);
@@ -180,8 +182,15 @@ await (async () => {
   assert.equal(enterpriseSearchHelp.code, 0, enterpriseSearchHelp.stderr);
   assert.equal(enterpriseSearchHelp.json.name, 'knowledge-collection-enterprise');
 
+  const enterpriseParent = makeSessionDir();
+  const enterpriseParentInit = await runCli([
+    'init', '--session-dir', enterpriseParent, '--query', 'enterprise routing',
+    '--source-scope', '["dingtalk","feishu"]', '--materialization-target', 'candidates',
+  ]);
+  assert.equal(enterpriseParentInit.code, 0, enterpriseParentInit.stderr);
   const unsupported = await runCli([
-    'enterprise', 'resource', '--source', 'dingtalk', '--url', 'https://example.com/document', '--output-dir', '/tmp/kc-enterprise-route',
+    'enterprise', 'resource', '--parent-session-dir', enterpriseParent,
+    '--source', 'dingtalk', '--url', 'https://example.com/document', '--output-dir', '/tmp/kc-enterprise-route',
   ]);
   assert.equal(unsupported.code, 0, unsupported.stderr);
   assert.equal(unsupported.json.status, 'unsupported_capability');
@@ -203,7 +212,8 @@ console.log(JSON.stringify({ ok: true }));
   chmodSync(fixtureBin, 0o700);
   try {
     const feishu = await runCli([
-      'enterprise', 'resource', '--source', 'feishu', '--url', 'https://example.feishu.cn/minutes/minute-1',
+      'enterprise', 'resource', '--parent-session-dir', enterpriseParent,
+      '--source', 'feishu', '--url', 'https://example.feishu.cn/minutes/minute-1',
       '--minute-token', 'minute-1', '--output-dir', outputDir,
     ], { LARK_CLI_BIN: fixtureBin, LARK_HOME: join(fixtureRoot, 'lark-home') });
     assert.equal(feishu.code, 0, feishu.stderr);

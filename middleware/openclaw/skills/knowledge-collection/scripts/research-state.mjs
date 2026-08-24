@@ -28,6 +28,7 @@ import {
   ensureSessionSkeleton,
   isInside,
 } from './session.mjs';
+import { deliveryCompleteForSession } from './delivery-state.mjs';
 
 export const DEFAULTS = {
   breadth: 3,
@@ -167,7 +168,7 @@ function deliverySummary(session) {
     failed,
     uniqueContentGroups: duplicateGroups.size,
     duplicates: items.length - duplicateGroups.size,
-    deliveryComplete: materializationTarget === 'candidates' || (pending === 0 && failed === 0),
+    deliveryComplete: deliveryCompleteForSession(session),
   };
 }
 

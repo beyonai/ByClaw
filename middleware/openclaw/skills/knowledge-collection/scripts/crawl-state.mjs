@@ -34,6 +34,8 @@ function emptyCrawl() {
     maxPages: null,
     maxDepth: 1,
     seededAt: null,
+    coverage: { discovered: 0, duplicate: 0, outOfScope: 0, overCap: 0 },
+    overCapUrls: [],
     entries: [],
   };
 }
@@ -49,6 +51,10 @@ function ensureCrawl(session) {
   if (!Array.isArray(session.crawl.entries)) {
     throw new Error('session.json crawl.entries 必须是数组');
   }
+  if (!session.crawl.coverage || typeof session.crawl.coverage !== 'object') {
+    session.crawl.coverage = { discovered: 0, duplicate: 0, outOfScope: 0, overCap: 0 };
+  }
+  if (!Array.isArray(session.crawl.overCapUrls)) session.crawl.overCapUrls = [];
   return session.crawl;
 }
 
@@ -174,6 +180,7 @@ export function cmdCrawlSeed(paths, args) {
     if (!crawl.seededAt) crawl.seededAt = new Date().toISOString();
 
     const known = new Set(crawl.entries.map((entry) => entry.url));
+    const overCapUrls = new Set(crawl.overCapUrls);
     let added = 0;
     let outOfScope = 0;
     let duplicate = 0;
@@ -188,15 +195,34 @@ export function cmdCrawlSeed(paths, args) {
       } catch {
         continue;
       }
-      if (!inScope(url, crawl.scopePrefix)) { outOfScope += 1; continue; }
-      if (known.has(url)) { duplicate += 1; continue; }
-      if (added >= capacity) { overflow += 1; continue; }
+      if (!inScope(url, crawl.scopePrefix)) {
+        overCapUrls.delete(url);
+        outOfScope += 1;
+        continue;
+      }
+      if (known.has(url)) {
+        overCapUrls.delete(url);
+        duplicate += 1;
+        continue;
+      }
+      if (added >= capacity) {
+        overCapUrls.add(url);
+        overflow += 1;
+        continue;
+      }
+      overCapUrls.delete(url);
       known.add(url);
       crawl.entries.push({ url, status: 'pending', depth: 0, itemId: null, reason: null });
       const group = pathGroup(url);
       addedGroups[group] = (addedGroups[group] || 0) + 1;
       added += 1;
     }
+
+    crawl.coverage.discovered = (Number(crawl.coverage.discovered) || 0) + rawUrls.length;
+    crawl.coverage.duplicate = (Number(crawl.coverage.duplicate) || 0) + duplicate;
+    crawl.coverage.outOfScope = (Number(crawl.coverage.outOfScope) || 0) + outOfScope;
+    crawl.overCapUrls = [...overCapUrls].sort();
+    crawl.coverage.overCap = crawl.overCapUrls.length;
 
     persistSession(paths, session);
     const warning = skewWarning(addedGroups, added, overflow);
@@ -286,7 +312,7 @@ export function cmdCrawlMark(paths, args) {
 export function cmdCrawlStatus(paths) {
   const { session } = loadSession(paths);
   const crawl = ensureCrawl(session);
-  return { ok: true, command: 'crawl-status', frontier: summarize(crawl) };
+  return { ok: true, command: 'crawl-status', ...summarize(crawl) };
 }
 
 function summarize(crawl) {
@@ -300,5 +326,11 @@ function summarize(crawl) {
     scopePrefix: crawl.scopePrefix,
     maxPages: crawl.maxPages,
     seededAt: crawl.seededAt,
+    coverage: {
+      discovered: Number(crawl.coverage?.discovered) || 0,
+      duplicate: Number(crawl.coverage?.duplicate) || 0,
+      outOfScope: Number(crawl.coverage?.outOfScope) || 0,
+      overCap: Number(crawl.coverage?.overCap) || 0,
+    },
   };
 }
