@@ -26,6 +26,7 @@ _HEADER_CONTEXT: ContextVar[dict[str, str]] = ContextVar(
 _SYSTEM_CODE = "BYCLAW-QA"
 RESOURCE_ID_HEADER = "x-byclaw-resource-id"
 USER_CODE_HEADER = "x-user-code"
+CHAT_SESSION_ID_HEADER = "x-chat-session-id"
 
 
 def set_byclaw_userfs_headers(headers: Mapping[str, str]) -> Token[dict[str, str]]:
@@ -35,6 +36,11 @@ def set_byclaw_userfs_headers(headers: Mapping[str, str]) -> Token[dict[str, str
 
 def reset_byclaw_userfs_headers(token: Token[dict[str, str]]) -> None:
     _HEADER_CONTEXT.reset(token)
+
+
+def get_byclaw_userfs_header_context() -> dict[str, str]:
+    """Return a snapshot of the request-scoped ByClaw header context."""
+    return dict(_HEADER_CONTEXT.get())
 
 
 def build_byclaw_userfs_headers() -> dict[str, str]:
