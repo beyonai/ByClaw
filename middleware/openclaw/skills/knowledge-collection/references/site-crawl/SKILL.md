@@ -146,7 +146,10 @@ node scripts/knowledge-collection.mjs collect --session-dir <dir> \
   --item-json-file <dir>/.collection-inputs/batch.json
 ```
 
+`batch.json` 中每个首次登记的条目都必须包含 `source: "public-internet"`、`sourceSkill: "bycli"` 和 `backend: "bycli"`。无需在 `init` 时手工创建空的 `collection-result.json`。
+
 frontier 只管覆盖面，inventory 仍是唯一的证据来源，报告引用 `itemId` 不变。
+`status.crawl.coverage` 会持久报告 `duplicate`、`outOfScope` 和 `overCap`；`all` 模式下只要仍有 pending/failed、fetched 但未物化、或 `overCap > 0`，`status.collection.deliveryComplete` 就必须为 `false`。
 
 批量登记注意：inventory 身份是 `sourceSkill + sourceUrl`，每条 `canonicalItem.url` 必须是该页自己的 URL
 （`bycli web read` 在正文头部写的 `> 原文链接: <URL>`），**不要**让多篇共用同一个 URL，否则会撞成同一条身份。

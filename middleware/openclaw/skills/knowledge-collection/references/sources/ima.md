@@ -32,4 +32,5 @@ sanitized/items/*.md
 ```
 
 `collection-result.json` 的 `source` 和 `backend` 都写 `ima`，inventory 的 `sourceSkill` 写 `ima-skill`。
+执行企业 `search`、`search-all` 或 `resource` 时必须传入已授权 IMA 的 `--parent-session-dir`；metadata-only 输出会直接带有 `sourceScope=["ima"]`、`materializationTarget=candidates` 的完整 `session.json`。
 采集完成后只交付已验证的 `sanitized/items/*.md`，然后停止。

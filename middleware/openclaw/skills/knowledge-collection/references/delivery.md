@@ -27,6 +27,8 @@
 
 `directory` 始终指向当前会话的 `sanitized/items/`。`files` 只包含验证通过的 materialized Markdown；pending 或 failed 项不得进入该数组。没有有效正文时，`files` 是空数组，采集状态及失败原因仍需照常交付。
 
+`status.collection.deliveryComplete` 是唯一完成判定。collection 为 `partial`/`failed` 时始终为 `false`；`selected`/`all` 还要求正文没有 pending/failed，且已有 crawl 时没有 pending/failed 或 fetched-but-unmaterialized 页面；`all` 另外要求 `status.crawl.coverage.overCap` 为 0。`candidates` 可以交付空正文数组，但发现阶段本身不得失败。
+
 ## 交付内容
 
 运行 `status`，并向主 Agent 返回：

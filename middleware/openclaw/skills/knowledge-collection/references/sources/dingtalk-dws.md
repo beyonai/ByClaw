@@ -82,4 +82,4 @@ sanitized/
 [delivery.md](../delivery.md) 交付 `sanitized/items/*.md` 并停止。
 ## Knowledge collection enterprise search
 
-Only a user-named DingTalk source or a clear internal-material request whose approved `sourceScope` includes DingTalk may invoke enterprise search. The connector reuses DWS discovery/authentication and records ranked candidates. Batch search defaults to metadata-only and isolates DWS authentication or invocation failures from selected sources; use `enterprise materialize --session-dir ... --item-ids ... --output-dir <new dir>` to materialize selected pending candidates.
+Only a user-named DingTalk source or a clear internal-material request whose approved `sourceScope` includes DingTalk may invoke enterprise search. Pass that initialized session as `--parent-session-dir`; the command rejects a missing or out-of-scope parent. The connector reuses DWS discovery/authentication and records ranked candidates. Batch search defaults to metadata-only and isolates DWS authentication or invocation failures from selected sources; use `enterprise materialize --session-dir ... --item-ids ... --output-dir <new dir>` to materialize selected pending candidates.

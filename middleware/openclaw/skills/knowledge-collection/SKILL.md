@@ -22,7 +22,7 @@ Before discovery, state the effective source scope and materialization target in
 | “Collect these selected items” | Task-derived scope | `selected` |
 | “Archive all” | Task-derived scope | `all` |
 
-`enterprise search-all` is a low-level batch command. In user-facing orchestration, always pass explicit `--sources` for a narrower scope; omit it only for an explicit all-enterprise request or an auditable organization policy.
+`enterprise search-all` is a low-level batch command. In user-facing orchestration, always pass explicit `--sources` for a narrower scope; omit it only for an explicit all-enterprise request or an auditable organization policy. Every enterprise `search`, `search-all`, or `resource` call must receive the initialized parent session through `--parent-session-dir`; the command rejects sources outside that session's `task.sourceScope`. The `search-all` output root is itself a canonical session and is the status/delivery target.
 
 ## 2. Select one collection workflow
 
@@ -44,7 +44,7 @@ Read only the reference that matches the chosen workflow, plus `collection-contr
 3. Delegate retrieval to the selected source executor. Do not use `web_fetch`, `curl`, `wget`, `requests`, or another direct HTTP client to bypass it.
 4. Register only actual artifacts through `collect`; do not treat snippets as collected evidence or hand-edit inventory metadata.
 5. For research mode, call `report` to generate the requested research report.
-6. Use `status` before delivery. It distinguishes source records, duplicate groups, materialized bodies, pending bodies, failed bodies, and `deliveryComplete`.
+6. Use `status` before delivery. It distinguishes source records, duplicate groups, materialized bodies, pending bodies, failed bodies, crawl coverage, and `collection.deliveryComplete`.
 
 Use `node scripts/knowledge-collection.mjs command-schema` for the machine-readable collection command contract. For a command marked `delegated-command`, read the executor schema named in `delegatedTo.schemaCommand`; `command --help` is the readable companion.
 
@@ -52,7 +52,7 @@ Use `node scripts/knowledge-collection.mjs command-schema` for the machine-reada
 
 - Preserve provenance. HTTP(S) duplicates share a normalized duplicate group but retain all source records; non-HTTP enterprise URIs are never guessed to be duplicates.
 - Do not bypass authorization, expand the source scope without user intent or policy, fabricate a result, or hide an unavailable source.
-- Treat `all` as complete only when `status.deliveryComplete=true`; pending or failed bodies must remain visible.
+- Treat `all` as complete only when `status.collection.deliveryComplete=true`; pending/failed crawl entries, fetched-but-unmaterialized pages, over-cap URLs, pending bodies, and failed bodies must remain visible.
 - A research report must contain exactly these named sections: `## 采集范围`, `## 采集成果`, `## 来源与追溯`, and `## 覆盖缺口与局限`.
 
 ## 5. 完成交付并停止

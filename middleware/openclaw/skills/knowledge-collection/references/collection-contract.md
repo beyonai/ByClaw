@@ -99,13 +99,14 @@ collection_filters:
 
 ```bash
 node scripts/knowledge-collection.mjs init --mode collection --session-dir <dir> \
-  --query "<采集任务>" --collection-result-input-file <collection-result.json>
+  --query "<采集任务>" --source-scope '["public-internet"]' \
+  --materialization-target all
 
 node scripts/knowledge-collection.mjs collect --session-dir <dir> \
-  --item-json-file <collection-item-payload.json>
+  --item-json-file <dir>/.collection-inputs/collection-item-payload.json
 ```
 
-`collect` 的批量 payload 如下。会话必须先声明 `backend`，`collect` 从会话已有的 `collectionResult.backend` 推导每个条目的 `sourceSkill`。
+`collect` 的批量 payload 如下。首次登记必须由条目显式携带 `source`、`sourceSkill` 和 `backend`；它们会建立会话的来源兼容视图。已有旧会话仍可从 `collection-result.json` 回退推导这些字段。
 
 ```json
 {
@@ -113,6 +114,9 @@ node scripts/knowledge-collection.mjs collect --session-dir <dir> \
   "items": [
     {
       "itemId": "item-01",
+      "source": "public-internet",
+      "sourceSkill": "bycli",
+      "backend": "bycli",
       "markdownPath": "markdown/post.md",
       "sanitizedPath": "sanitized/items/post.md",
       "canonicalItem": {
@@ -128,9 +132,9 @@ node scripts/knowledge-collection.mjs collect --session-dir <dir> \
 }
 ```
 
-单条时也可直接使用上面 `items[]` 中的对象作为根节点。`canonicalItem.markdown` 与 `fileName` 必须相等且都是相对采集根的完整路径。
+payload 文件必须位于当前会话的 `.collection-inputs/` 内，成功登记后会被删除。单条时也可直接使用上面 `items[]` 中的对象作为根节点。`source` 必须对应父会话的 `task.sourceScope`（`dws → dingtalk`、`fws → feishu`）；`canonicalItem.markdown` 与 `fileName` 必须相等且都是相对采集根的完整路径。
 
-只有需要在建会话时预置包含 pending 条目的完整清单，才使用 `--metadata-input-file`。除此之外一律通过 `collect` 登记。
+只有需要在建会话时预置包含 pending 条目的完整清单，才使用 `--metadata-input-file`。只有导入历史兼容视图时才需要 `--collection-result-input-file`；新会话的第一次 `collect` 不再要求预置它。除此之外一律通过 `collect` 登记。
 
 ## 交付
 
