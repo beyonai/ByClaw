@@ -434,7 +434,7 @@ public class AssistantChatApplicationService {
             baseName = fileName;
             suffix = "";
         }
-        return String.format("%s(%d)%s", baseName, count, suffix);
+        return String.format("%s(%d)%s", baseName, duplicateCount, suffix);
     }
 
 
