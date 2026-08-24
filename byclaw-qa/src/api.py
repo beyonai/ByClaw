@@ -53,19 +53,22 @@ from by_qa.knowledge_base.services.errors import (
     KnowledgeBaseValidationError,
 )
 from by_qa.knowledge_base.services.zip_batch_import_service import ZipBatchImportService
+from by_qa.knowledge_base.events import ResourceEventType, build_resource_event
 from by_qa.knowledge_base.infrastructure.storage import (
     StorageError,
     StorageNotFoundError,
     StorageOperationError,
 )
-from byclaw_knowledge_entity_callback import CALLBACK_CONTEXT_EXTRA_PARAM
-from byclaw_knowledge_entity_runner import install_byclaw_knowledge_entity_runner
+from byclaw_knowledge_event_publisher import EVENT_PUBLISHER_PROVIDER_PATH
+from byclaw_knowledge_entity_runtime import install_byclaw_knowledge_entity_runtime
 from byclaw_knowledge_storage import get_kg_doc_from_resourcefs
 from byclaw_userfs_storage import (
+    CHAT_SESSION_ID_HEADER,
     RESOURCE_ID_HEADER,
     USER_CODE_HEADER,
     bind_byclaw_resource_id,
     build_byclaw_userfs_headers_async,
+    get_byclaw_userfs_header_context,
     reset_byclaw_userfs_headers,
     set_byclaw_userfs_headers,
 )
@@ -75,78 +78,28 @@ from by_qa.main import (
     resolve_document_chunking_service,
     resolve_knowledge_item_ingestion_service,
     resolve_knowledge_item_search_service,
+    resolve_knowledge_event_publisher_invoker,
 )
 
 from redis_agent_config import get_kg_doc_from_redis
 from redis_runtime import init_shared_redis_from_env
 
-install_byclaw_knowledge_entity_runner()
+install_byclaw_knowledge_entity_runtime()
 
-_KNOWLEDGE_ENTITY_CALLBACK_PATHS = frozenset(
-    {
-        "/api/v1/knowledgeItems/entityDiscovery",
-        "/api/v1/knowledgeItems/entityEnrich",
-    }
-)
-
-
-def _inject_knowledge_entity_callback_context(
-    body: bytes,
-    *,
-    user_code: str,
-    chat_session_id: str,
-    resource_id: str,
-) -> bytes:
-    """Persist non-secret callback routing identifiers in async task input."""
-    try:
-        payload = json.loads(body)
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return body
-    if not isinstance(payload, dict):
-        return body
-
-    extra_params = payload.get("extraParams", {})
-    if not isinstance(extra_params, dict):
-        return body
-    extra_params = dict(extra_params)
-    # This namespace is server-owned. Removing it first prevents callers from
-    # spoofing callback headers through the request body.
-    extra_params.pop(CALLBACK_CONTEXT_EXTRA_PARAM, None)
-    if user_code:
-        extra_params[CALLBACK_CONTEXT_EXTRA_PARAM] = {
-            "userCode": user_code,
-            "chatSessionId": chat_session_id,
-            "resourceId": resource_id,
-        }
-    payload["extraParams"] = extra_params
-    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+# Importing the adapter installs the provider path before by-qa lazily builds
+# its shared event publisher. Keep the name referenced so linters do not treat
+# this intentional import-time registration as unused.
+_EVENT_PUBLISHER_PROVIDER_PATH = EVENT_PUBLISHER_PROVIDER_PATH
 
 
 @app.middleware("http")
 async def byclaw_storage_header_context_middleware(request, call_next):
-    if request.url.path in _KNOWLEDGE_ENTITY_CALLBACK_PATHS:
-        callback_body = _inject_knowledge_entity_callback_context(
-            await request.body(),
-            user_code=request.headers.get("x-user-code", "").strip(),
-            chat_session_id=request.headers.get("x-chat-session-id", "").strip(),
-            resource_id=request.headers.get(RESOURCE_ID_HEADER, "").strip(),
-        )
-
-        async def receive():
-            return {
-                "type": "http.request",
-                "body": callback_body,
-                "more_body": False,
-            }
-
-        request._body = callback_body
-        request._receive = receive
-
     token = set_byclaw_userfs_headers(
         {
             "beyond-token": request.headers.get("beyond-token", ""),
             RESOURCE_ID_HEADER: request.headers.get(RESOURCE_ID_HEADER, ""),
             USER_CODE_HEADER: request.headers.get(USER_CODE_HEADER, ""),
+            CHAT_SESSION_ID_HEADER: request.headers.get(CHAT_SESSION_ID_HEADER, ""),
         }
     )
     try:
@@ -242,11 +195,54 @@ async def _resolve_kn_codes(resource_ids: list[str]) -> list[str] | None:
     return codes
 
 
+async def _schedule_resource_event(
+    background_tasks: BackgroundTasks,
+    *,
+    event_type: ResourceEventType,
+    kb_code: str,
+    source_path: str | None,
+    target_path: str | None,
+    items: list[dict[str, Any]] | None = None,
+    result: dict[str, Any] | None = None,
+    resource_id: str | int | None = None,
+) -> None:
+    """Schedule a committed resource mutation from a ByResourceId route."""
+    try:
+        event = build_resource_event(
+            event_type=event_type,
+            kb_code=kb_code,
+            source_path=source_path,
+            target_path=target_path,
+            items=items or [],
+            result=result,
+        )
+        invoker = await resolve_knowledge_event_publisher_invoker()
+        callback_headers = get_byclaw_userfs_header_context()
+        if resource_id is not None:
+            callback_headers[RESOURCE_ID_HEADER] = str(resource_id)
+
+        async def _publish_with_context() -> None:
+            context_token = set_byclaw_userfs_headers(callback_headers)
+            try:
+                await invoker.publish(event)
+            finally:
+                reset_byclaw_userfs_headers(context_token)
+
+        background_tasks.add_task(_publish_with_context)
+    except Exception as exc:
+        logger.warning(
+            "knowledge event scheduling failed: event_type=%s error_type=%s",
+            event_type,
+            type(exc).__name__,
+        )
+
+
 # -- importByResourceId -------------------------------------------------------
 
 @app.post("/api/v1/knowledgeItems/importByResourceId")
 @app.post("/api/v1/knowledge-items/importByResourceId")
 async def import_by_resource_id(
+    background_tasks: BackgroundTasks,
     resource_id: str | None = Form(None, alias="resourceId"),
     file_path: str | None = Form(None, alias="filePath"),
     file_description: str | None = Form(None, alias="fileDescription"),
@@ -297,6 +293,26 @@ async def import_by_resource_id(
                 }
                 if result.post_process_errors:
                     result_object["postProcessErrors"] = result.post_process_errors
+                if result.summary.succeeded > 0:
+                    await _schedule_resource_event(
+                        background_tasks,
+                        event_type=ResourceEventType.FILE_IMPORTED,
+                        kb_code=request.kb_code,
+                        source_path=None,
+                        target_path="/" + request.file_path.strip("/"),
+                        items=[
+                            {
+                                "sourcePath": item.file_path,
+                                "targetPath": item.file_path if item.success else None,
+                                "resourceType": "file",
+                                "success": item.success,
+                                "error": item.error,
+                            }
+                            for item in result.data
+                        ],
+                        result=result.summary.model_dump(),
+                        resource_id=resource_id,
+                    )
                 return _success(result_object)
             await service.upload_file(request)
     except KnowledgeBaseConfigurationError:
@@ -310,6 +326,15 @@ async def import_by_resource_id(
         return _error("internal error")
 
     normalized_path = "/" + request.file_path.strip("/")
+    await _schedule_resource_event(
+        background_tasks,
+        event_type=ResourceEventType.FILE_IMPORTED,
+        kb_code=request.kb_code,
+        source_path=None,
+        target_path=normalized_path,
+        result={"total": 1, "succeeded": 1, "failed": 0},
+        resource_id=resource_id,
+    )
     return _success(
         {
             "data": [
@@ -427,7 +452,10 @@ async def search_by_resource_id(body: dict[str, Any] = Body(...)):
 # -- directories/createByResourceId -------------------------------------------
 
 @app.post("/api/v1/directories/createByResourceId")
-async def create_directory_by_resource_id(body: dict[str, Any] = Body(...)):
+async def create_directory_by_resource_id(
+    background_tasks: BackgroundTasks,
+    body: dict[str, Any] = Body(...),
+):
     resource_id = body.get("resourceId")
     if not resource_id:
         return _error("resourceId is required")
@@ -455,13 +483,24 @@ async def create_directory_by_resource_id(body: dict[str, Any] = Body(...)):
         logger.exception("createDirectoryByResourceId validation error: resourceId=%s", resource_id)
         return _error(str(exc))
 
+    await _schedule_resource_event(
+        background_tasks,
+        event_type=ResourceEventType.DIRECTORY_CREATED,
+        kb_code=request.kb_code,
+        source_path=None,
+        target_path="/" + request.directory_path.strip("/"),
+        resource_id=resource_id,
+    )
     return _success()
 
 
 # -- directories/updateByResourceId -------------------------------------------
 
 @app.post("/api/v1/directories/updateByResourceId")
-async def update_directory_by_resource_id(body: dict[str, Any] = Body(...)):
+async def update_directory_by_resource_id(
+    background_tasks: BackgroundTasks,
+    body: dict[str, Any] = Body(...),
+):
     resource_id = body.get("resourceId")
     if not resource_id:
         return _error("resourceId is required")
@@ -489,13 +528,31 @@ async def update_directory_by_resource_id(body: dict[str, Any] = Body(...)):
         logger.exception("updateDirectoryByResourceId validation error: resourceId=%s", resource_id)
         return _error(str(exc))
 
+    source_path = "/" + request.directory_path.strip("/")
+    parent_path = str(PurePosixPath(source_path).parent)
+    target_path = (
+        f"/{request.directory_name}"
+        if parent_path == "/"
+        else f"{parent_path}/{request.directory_name}"
+    )
+    await _schedule_resource_event(
+        background_tasks,
+        event_type=ResourceEventType.DIRECTORY_UPDATED,
+        kb_code=request.kb_code,
+        source_path=source_path,
+        target_path=target_path,
+        resource_id=resource_id,
+    )
     return _success()
 
 
 # -- directories/deleteByResourceId -------------------------------------------
 
 @app.post("/api/v1/directories/deleteByResourceId")
-async def delete_directory_by_resource_id(body: dict[str, Any] = Body(...)):
+async def delete_directory_by_resource_id(
+    background_tasks: BackgroundTasks,
+    body: dict[str, Any] = Body(...),
+):
     resource_id = body.get("resourceId")
     if not resource_id:
         return _error("resourceId is required")
@@ -523,6 +580,14 @@ async def delete_directory_by_resource_id(body: dict[str, Any] = Body(...)):
         logger.exception("deleteDirectoryByResourceId validation error: resourceId=%s", resource_id)
         return _error(str(exc))
 
+    await _schedule_resource_event(
+        background_tasks,
+        event_type=ResourceEventType.DIRECTORY_DELETED,
+        kb_code=request.kb_code,
+        source_path="/" + request.directory_path.strip("/"),
+        target_path=None,
+        resource_id=resource_id,
+    )
     return _success()
 
 
