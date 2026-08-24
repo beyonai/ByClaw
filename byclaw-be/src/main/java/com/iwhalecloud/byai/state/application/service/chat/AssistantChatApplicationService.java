@@ -5,7 +5,6 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhaleai.byai.framework.client.GatewayClient;
 import com.iwhalecloud.byai.common.constants.chat.ConversationObjectType;
-import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -14,21 +13,15 @@ import com.iwhalecloud.byai.common.message.entity.ByaiMessageRelObjDto;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageRelObjService;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
-import com.iwhalecloud.byai.common.util.DateUtils;
-import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
-import com.iwhalecloud.byai.gateway.sandbox.service.SandboxEndpointService;
 import com.iwhalecloud.byai.manager.domain.customer.service.FilesService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto;
 import com.iwhalecloud.byai.manager.dto.resource.UploadItem;
 import com.iwhalecloud.byai.manager.dto.session.SessionUploadResult;
 import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
-import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
-import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.resource.DigEmployeeExtQo;
 import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
 import com.iwhalecloud.byai.state.common.dto.MessageStructDto;
@@ -91,9 +84,6 @@ public class AssistantChatApplicationService {
 
     @Autowired
     private FilesService filesService;
-
-    @Autowired
-    private SsResourceService ssResourceService;
 
     @Autowired
     private ConversationStoragePathResolver conversationStoragePathResolver;
@@ -365,13 +355,16 @@ public class AssistantChatApplicationService {
 
             // 创建文件上传
             String originalFilename = multipartFile.getOriginalFilename();
+            String convertFileName = multipartFile.getOriginalFilename();
+
+
             long uploadCount = fileNameCountMap.getOrDefault(originalFilename, 0L);
             long dbCount = filesService.countSessionFile(sessionId, originalFilename);
 
             // 统计次数，如果已经上传过一次，防止同名覆盖，a.jpg将变成a(1).jpg
             long duplicateCount = uploadCount + dbCount;
             if (duplicateCount >= 1) {
-                originalFilename = this.renameDuplicateFileName(originalFilename, duplicateCount);
+                convertFileName = this.renameDuplicateFileName(originalFilename, duplicateCount);
             }
 
             //上传次数加1
@@ -379,7 +372,7 @@ public class AssistantChatApplicationService {
 
             String userCode = CurrentUserHolder.getCurrentUserCode();
             StorageLocation location = conversationStoragePathResolver.conversationFile(userCode,
-                String.valueOf(sessionId), originalFilename);
+                String.valueOf(sessionId), convertFileName);
 
             byte[] bytes = multipartFile.getBytes();
             String contentType = multipartFile.getContentType();
@@ -391,12 +384,12 @@ public class AssistantChatApplicationService {
                 location.getPath());
 
             // 记录文件信息
-            Files byaiFiles = filesService.createUploadFile(originalFilename, contentType, null, -1L, sessionId,
+            Files byaiFiles = filesService.createUploadFile(originalFilename, convertFileName, contentType, null, -1L, sessionId,
                 fileUrl);
 
             UploadItem uploadItem = new UploadItem();
             uploadItem.setFileId(byaiFiles.getFileId());
-            uploadItem.setFileName(byaiFiles.getFileName());
+            uploadItem.setFileName(byaiFiles.getConvertFileName());
             uploadItem.setFilePath(conversationStoragePathResolver.normalizeDisplayFilePath(location.getPath()));
             uploadItem.setFileUrl(fileUrl);
             sessionUploadResult.getUploadItems().add(uploadItem);

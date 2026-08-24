@@ -11,14 +11,12 @@ import com.iwhaleai.byai.framework.client.GatewayClient;
 import com.iwhalecloud.byai.common.constants.chat.ConversationObjectType;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.state.application.service.taskplan.TaskPlanApplicationService;
 import com.iwhalecloud.byai.manager.dto.session.SessionUploadResult;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
-import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
 import com.iwhalecloud.byai.state.domain.chat.service.TraceIdCodec;
 import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanSnapshot;
 import com.iwhalecloud.byai.state.domain.ws.service.TaskPlanWebSocketPublisher;
@@ -35,7 +33,6 @@ import org.springframework.web.multipart.MultipartFile;
 class AssistantChatApplicationServiceTest {
 
     private GatewayClient gatewayClient;
-    private SsResourceService ssResourceService;
     private RunningOutputStreamRegistry runningOutputStreamRegistry;
     private RunningChatSnapshotService runningChatSnapshotService;
 
@@ -52,7 +49,6 @@ class AssistantChatApplicationServiceTest {
     @BeforeEach
     void setUp() {
         gatewayClient = mock(GatewayClient.class);
-        ssResourceService = mock(SsResourceService.class);
         runningOutputStreamRegistry = mock(RunningOutputStreamRegistry.class);
         runningChatSnapshotService = mock(RunningChatSnapshotService.class);
         taskPlanApplicationService = mock(TaskPlanApplicationService.class);
@@ -61,12 +57,7 @@ class AssistantChatApplicationServiceTest {
         sessionTitleService = mock(SessionTitleService.class);
         byaiSystemConfigService = mock(ByaiSystemConfigService.class);
 
-        TargetAgentResolver targetAgentResolver = new TargetAgentResolver();
-        ReflectionTestUtils.setField(targetAgentResolver, "ssResourceService", ssResourceService);
-
         assistantChatApplicationService = new AssistantChatApplicationService(gatewayClient);
-        ReflectionTestUtils.setField(assistantChatApplicationService, "ssResourceService", ssResourceService);
-        ReflectionTestUtils.setField(assistantChatApplicationService, "targetAgentResolver", targetAgentResolver);
         ReflectionTestUtils.setField(assistantChatApplicationService, "runningOutputStreamRegistry",
             runningOutputStreamRegistry);
         ReflectionTestUtils.setField(assistantChatApplicationService, "runningChatSnapshotService",
@@ -96,7 +87,6 @@ class AssistantChatApplicationServiceTest {
         stopChatDto.setAgentId(30L);
         stopChatDto.setSessionId(10L);
         stopChatDto.setMessageId(20L);
-        when(ssResourceService.findById(30L)).thenReturn(null);
         TaskPlanSnapshot cancelling = new TaskPlanSnapshot();
         cancelling.setStatus("CANCELLING");
         TaskPlanSnapshot cancelled = new TaskPlanSnapshot();
@@ -123,7 +113,6 @@ class AssistantChatApplicationServiceTest {
         stopChatDto.setSessionId(10L);
         stopChatDto.setTraceId(traceId);
         stopChatDto.setLaneId("lane-a");
-        when(ssResourceService.findById(30L)).thenReturn(null);
 
         assistantChatApplicationService.stopChat(stopChatDto);
 
