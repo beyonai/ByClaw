@@ -144,7 +144,7 @@ RUN npm config set registry "${NPM_REGISTRY}" --global \
     && ima wiki --help >/dev/null \
     && rm -f "/tmp/ima-openapi-cli-${IMA_OPENAPI_CLI_VERSION}.tgz"
 
-ARG OPENCLI_VERSION=2.1.39
+ARG OPENCLI_VERSION=2.1.40
 ARG OPENCLI_EXTENSION_VERSION=2.1.19
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
