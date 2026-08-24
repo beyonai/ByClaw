@@ -1,13 +1,11 @@
 #!/usr/bin/env node
 /**
- * knowledge-collection.mjs — 知识采集一体化 CLI(单一入口)。
+ * knowledge-collection.mjs — 知识采集 CLI（单一入口）。
  *
  * 统一分派三类命令:
  *   研究维度   init / plan / branch / aggregate / report      (research-state.mjs)
- *   采集维度   collect / inspect / run / cleanup / unlock-stale /
- *              set-retention / rewrite-image-links / export-views   (collection-state.mjs)
- *   平台维度   list-kb / upload-doc / upload-images / upload-resource /
- *              normalize / ingest / store / enterprise ...   (ingest.mjs / enterprise-collection.mjs)
+ *   采集维度   collect / inspect / unlock-stale / export-views       (collection-state.mjs)
+ *   平台维度   enterprise ...                                        (enterprise-collection.mjs)
  *
  * 状态: 单一文件 <session-dir>/session.json(task + research + collection)。
  * 输出契约: stdout 单个 JSON 对象(默认缩进;--compact 输出单行);失败输出
@@ -19,7 +17,7 @@
 import { executeLocalCommand } from './command-router.mjs';
 import { delegatePlatformCommand } from './platform-delegate.mjs';
 
-const VERSION = '2.1.0';
+const VERSION = '3.0.0';
 
 function render(value, compact = false) {
   process.stdout.write(`${JSON.stringify(value, null, compact ? 0 : 2)}\n`);
@@ -146,60 +144,11 @@ const COMMAND_SPECS = {
     },
     example: 'knowledge-collection.mjs inspect --session-dir /tmp/kc1 --operation ingest --target-json \'{"kind":"knowledge-base","id":"kb-1","path":"/kb"}\'',
   }),
-  run: defineCommand({
-    group: 'collection',
-    title: '登记一次后处理运行结果(只登记,不执行下游)',
-    args: {
-      '--session-dir': '必填',
-      '--run-json-file': '必填。位于 .post-processing-inputs/ 内的 run payload',
-      '--dry-run': '可选。仅校验,不持久化',
-      '--full': '可选。返回完整 metadata',
-    },
-    example: 'knowledge-collection.mjs run --session-dir /tmp/kc1 --run-json-file /tmp/kc1/.post-processing-inputs/run.json',
-  }),
-  cleanup: defineCommand({
-    group: 'collection',
-    title: '按 run 状态清理会话(研究模式要求 report 已交付)',
-    args: {
-      '--session-dir': '必填',
-      '--run-id': '必填',
-      '--dry-run': '可选。只计算清理方案,不删除',
-      '--full': '可选。返回完整 metadata 与 collectionResult',
-      '--archive-deliverables': '可选。整体清理前把 report.md/research-tree.md 复制到 <session>.delivered/',
-    },
-    example: 'knowledge-collection.mjs cleanup --session-dir /tmp/kc1 --run-id run-1',
-  }),
   'unlock-stale': defineCommand({
     group: 'collection',
     title: '仅在锁持有 PID 已不存在时回收残留锁',
     args: { '--session-dir': '必填' },
     example: 'knowledge-collection.mjs unlock-stale --session-dir /tmp/kc1',
-  }),
-  'set-retention': defineCommand({
-    group: 'collection',
-    title: '设置是否保留会话工作副本',
-    args: {
-      '--session-dir': '必填',
-      '--keep': '必填。true | false',
-      '--dry-run': '可选。只返回将写入的值',
-    },
-    example: 'knowledge-collection.mjs set-retention --session-dir /tmp/kc1 --keep true',
-  }),
-  'rewrite-image-links': defineCommand({
-    group: 'collection',
-    title: '改写 sanitized 正文中的本地图片链接',
-    args: {
-      '--session-dir': '必填',
-      '--resource-id': '会话空间模式必填',
-      '--link-map-file': '持久化模式必填(二选一)',
-      '--item-id': '可重复。只改写指定 inventory item;缺省为全部',
-      '--item-ids': '逗号分隔的 itemId 列表',
-      '--base-url': '可选 http/https origin',
-      '--workspace-root': '可选。回退工作区根',
-      '--language': '默认 zh-CN',
-      '--dry-run': '只统计不写盘',
-    },
-    example: 'knowledge-collection.mjs rewrite-image-links --session-dir /tmp/kc1 --link-map-file /tmp/kc1/.post-processing-inputs/image-link-map.json --item-ids item-1,item-2',
   }),
   'export-views': defineCommand({
     group: 'collection',
@@ -252,49 +201,6 @@ const COMMAND_SPECS = {
     },
     example: 'knowledge-collection.mjs status --session-dir /tmp/kc1',
   }),
-  'list-kb': defineCommand({
-    group: 'platform',
-    title: '列出知识库(委派 ingest.mjs,无需 session)',
-    args: { '--help': '查看 ingest.mjs 完整参数' },
-    example: 'knowledge-collection.mjs list-kb --help',
-  }),
-  'upload-doc': defineCommand({
-    group: 'platform',
-    title: '直传文档(委派 ingest.mjs)',
-    args: { '--help': '查看 ingest.mjs 完整参数' },
-    example: 'knowledge-collection.mjs upload-doc --help',
-  }),
-  'upload-images': defineCommand({
-    group: 'platform',
-    title: '上传正文图片并生成链接映射(委派 ingest.mjs)',
-    args: { '--help': '查看 ingest.mjs 完整参数' },
-    example: 'knowledge-collection.mjs upload-images --help',
-  }),
-  'upload-resource': defineCommand({
-    group: 'platform',
-    title: '上传资源(委派 ingest.mjs)',
-    args: { '--help': '查看 ingest.mjs 完整参数' },
-    example: 'knowledge-collection.mjs upload-resource --help',
-  }),
-  normalize: defineCommand({
-    group: 'platform',
-    title: '规范化正文(委派 ingest.mjs)',
-    args: { '--help': '查看 ingest.mjs 完整参数' },
-    example: 'knowledge-collection.mjs normalize --help',
-  }),
-  ingest: defineCommand({
-    group: 'platform',
-    title: '导入/存储(委派 ingest.mjs)',
-    args: { '--help': '查看 ingest.mjs 完整参数' },
-    example: 'knowledge-collection.mjs ingest --help',
-  }),
-  store: defineCommand({
-    group: 'platform',
-    deprecated: true,
-    title: '已废弃,请使用 ingest',
-    args: {},
-    example: 'knowledge-collection.mjs ingest --help',
-  }),
   enterprise: defineCommand({
     group: 'platform',
     title: '企业来源采集: search | search-all | materialize | resource | resume-resource；兼容 wecom-smartpage | feishu-minutes(委派 enterprise-collection.mjs)',
@@ -307,7 +213,6 @@ const GLOBAL_FLAGS = new Set(['help', 'compact', 'pretty']);
 const LEGACY_ALIASES = new Map([
   ['init-session', 'init'],
   ['mark-materialized', 'collect'],
-  ['record-run', 'run'],
 ]);
 
 const SCHEMA = {
@@ -407,21 +312,7 @@ const COMMAND_SCHEMA_OVERRIDES = {
   },
   collect: { required: ['session-dir', 'item-json-file'], properties: { 'session-dir': SCHEMA.sessionDir, 'item-json-file': SCHEMA.inputFile, 'dry-run': SCHEMA.boolean } },
   inspect: { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir, operation: { type: 'string', enum: ['ingest', 'organize', 'external'] }, 'target-json': SCHEMA.jsonObject, 'drain-pending': SCHEMA.boolean, full: SCHEMA.boolean } },
-  run: { required: ['session-dir', 'run-json-file'], properties: { 'session-dir': SCHEMA.sessionDir, 'run-json-file': SCHEMA.inputFile, 'dry-run': SCHEMA.boolean, full: SCHEMA.boolean } },
-  cleanup: { required: ['session-dir', 'run-id'], properties: { 'session-dir': SCHEMA.sessionDir, 'run-id': { type: 'string', minLength: 1 }, 'dry-run': SCHEMA.boolean, full: SCHEMA.boolean, 'archive-deliverables': SCHEMA.boolean } },
   'unlock-stale': { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir } },
-  'set-retention': { required: ['session-dir', 'keep'], properties: { 'session-dir': SCHEMA.sessionDir, keep: SCHEMA.boolean, 'dry-run': SCHEMA.boolean } },
-  'rewrite-image-links': {
-    required: ['session-dir'],
-    properties: {
-      'session-dir': SCHEMA.sessionDir, 'resource-id': { type: 'string', minLength: 1 }, 'link-map-file': SCHEMA.inputFile,
-      'item-id': { type: 'array', cliEncoding: 'repeatable', items: { type: 'string', minLength: 1 } },
-      'item-ids': { type: 'array', cliEncoding: 'comma-separated', items: { type: 'string', minLength: 1 } },
-      'base-url': { type: 'string', format: 'http-origin' }, 'workspace-root': SCHEMA.absolutePath,
-      language: { type: 'string', default: 'zh-CN' }, 'dry-run': SCHEMA.boolean,
-    },
-    oneOf: [{ required: ['resource-id'] }, { required: ['link-map-file'] }],
-  },
   'export-views': { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir } },
   'crawl-seed': { required: ['session-dir', 'urls-file'], properties: { 'session-dir': SCHEMA.sessionDir, 'urls-file': SCHEMA.file, 'scope-prefix': { type: 'string', format: 'http-url' }, 'max-pages': SCHEMA.positiveInteger, depth: { ...SCHEMA.positiveInteger, default: 1 } } },
   'crawl-next': { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir, limit: { ...SCHEMA.positiveInteger, default: 10 } } },
@@ -434,7 +325,7 @@ function commandSchema() {
   const commands = {};
   for (const [name, spec] of Object.entries(COMMAND_SPECS)) {
     if (spec.group === 'platform') {
-      const childScript = name === 'enterprise' ? 'enterprise-collection.mjs' : 'ingest.mjs';
+      const childScript = 'enterprise-collection.mjs';
       commands[name] = {
         type: 'delegated-command',
         delegatedTo: {
@@ -606,7 +497,11 @@ function main() {
   }
 
   if (args.help === true || args.help === 'true') {
-    render(commandHelp(command), compactRequested(args));
+    const result = commandHelp(command);
+    if (!result.ok) {
+      throw new Error(result.error);
+    }
+    render(result, compactRequested(args));
     return;
   }
 

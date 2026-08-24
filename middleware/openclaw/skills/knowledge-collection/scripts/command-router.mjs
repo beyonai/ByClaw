@@ -2,8 +2,7 @@ import {
   cmdInit, cmdPlan, cmdBranch, cmdAggregate, cmdReport, cmdResearchStatus,
 } from './research-state.mjs';
 import {
-  cmdCollect, cmdInspect, cmdRun, cmdCleanup, cmdUnlockStale, cmdSetRetention,
-  cmdRewriteImageLinks, cmdExportViews, collectionStatus,
+  cmdCollect, cmdInspect, cmdUnlockStale, cmdExportViews, collectionStatus,
 } from './collection-state.mjs';
 import {
   cmdCrawlSeed, cmdCrawlNext, cmdCrawlMark, cmdCrawlStatus,
@@ -23,15 +22,11 @@ const SESSION_HANDLERS = {
   'public-discover': (paths, args) => runPublicDiscover(paths, args),
   collect: (paths, args) => cmdCollect(paths, args),
   inspect: (paths, args) => cmdInspect(paths, args),
-  run: (paths, args) => cmdRun(paths, args),
-  cleanup: (paths, args) => cmdCleanup(paths, args),
   'crawl-seed': (paths, args) => cmdCrawlSeed(paths, args),
   'crawl-next': (paths, args) => cmdCrawlNext(paths, args),
   'crawl-mark': (paths, args) => cmdCrawlMark(paths, args),
   'crawl-status': (paths) => cmdCrawlStatus(paths),
   'unlock-stale': (paths) => cmdUnlockStale(paths),
-  'set-retention': (paths, args) => cmdSetRetention(paths, args),
-  'rewrite-image-links': (paths, args) => cmdRewriteImageLinks(paths, args),
   'export-views': (paths) => cmdExportViews(paths),
 };
 

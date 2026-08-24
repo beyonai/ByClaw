@@ -6,7 +6,6 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const scriptPath = resolve(dirname(fileURLToPath(import.meta.url)), 'knowledge-collection.mjs');
-const ingestScriptPath = resolve(dirname(scriptPath), 'ingest.mjs');
 const enterpriseScriptPath = resolve(dirname(scriptPath), 'enterprise-collection.mjs');
 const routerScriptPath = resolve(dirname(scriptPath), 'command-router.mjs');
 const platformDelegatePath = resolve(dirname(scriptPath), 'platform-delegate.mjs');
@@ -65,22 +64,6 @@ function collectPayload(itemId = 'item-test1', url = 'https://arxiv.org/abs/2608
   };
 }
 
-function validRun(sessionDir) {
-  const session = JSON.parse(readFileSync(join(sessionDir, 'session.json'), 'utf8'));
-  const itemId = session.collection.collection.items[0].itemId;
-  return {
-    schemaVersion: '1.0',
-    runId: 'run-1',
-    operation: 'ingest',
-    target: { kind: 'knowledge-base', id: 'kb-1', path: '/kb' },
-    selection: { mode: 'all', itemIds: [itemId], discardUnselected: false, discardUnselectedConfirmed: false },
-    status: 'success',
-    sessionStatus: 'success',
-    globalStage: { name: null, required: false, status: 'not-required', reason: null },
-    items: [{ itemId, status: 'success', stage: 'build-submitted', reason: null, downstreamRef: null, cleanupStatus: 'not-started', cleanedArtifacts: [] }],
-  };
-}
-
 async function setupCollectedSession({ mode = 'collection' } = {}) {
   const root = makeSessionDir();
   const init = await runCli(['init', '--session-dir', root, '--query', 'q', '--mode', mode]);
@@ -100,6 +83,7 @@ await (async () => {
   assert.equal(existsSync(platformDelegatePath), true, 'platform command delegation must live outside the CLI entrypoint');
   const h = await runCli(['help']);
   assert.equal(h.json.ok, true);
+  assert.equal(h.json.version, '3.0.0');
   assert.ok(h.json.commandsByGroup.research.some((item) => item.name === 'init'));
   const rootEnterprise = h.json.commandsByGroup.platform.find((item) => item.name === 'enterprise');
   assert.match(rootEnterprise.title, /resume-resource/);
@@ -132,22 +116,41 @@ await (async () => {
   assert.equal(schema.json.commands.branch.properties.level.minimum, 1);
   assert.equal(schema.json.commands.branch.properties.status.default, 'done');
   assert.equal(schema.json.commands.collect.properties['item-json-file'].format, 'post-processing-input-file');
-  assert.equal(schema.json.commands.run.properties['dry-run'].type, 'boolean');
   assert.equal(schema.json.commands['crawl-seed'].properties['max-pages'].type, 'integer');
   assert.equal(schema.json.commands['crawl-seed'].properties.depth.default, 1);
   assert.deepEqual(schema.json.commands['public-discover'].required, ['session-dir', 'query']);
   assert.equal(schema.json.commands['public-discover'].properties.category.default, 'general');
-  assert.ok(schema.json.commands['rewrite-image-links'].oneOf);
   for (const [name, contract] of Object.entries(schema.json.commands)) {
     if (contract.type !== 'delegated-command') {
       assert.equal(contract.schemaComplete, true, `${name} schema must be explicit`);
     }
   }
   assert.ok(schema.json.commands.report.required.includes('session-dir'));
-  assert.equal(schema.json.commands.ingest.type, 'delegated-command');
-  assert.equal(schema.json.commands.ingest.delegatedTo.schemaCommand, 'node scripts/ingest.mjs command-schema');
   assert.equal(schema.json.commands.enterprise.type, 'delegated-command');
   assert.equal(schema.json.commands.enterprise.delegatedTo.schemaCommand, 'node scripts/enterprise-collection.mjs command-schema');
+
+  const removedCommands = [
+    'list-kb', 'normalize', 'ingest', 'store', 'upload-doc', 'upload-images', 'upload-resource',
+    'run', 'cleanup', 'set-retention', 'rewrite-image-links',
+  ];
+  for (const command of removedCommands) {
+    assert.equal(schema.json.commands[command], undefined, `${command} must not be advertised`);
+    const removedHelp = await runCli([command, '--help']);
+    assert.equal(removedHelp.code, 1, `${command} --help must fail`);
+    assert.equal(removedHelp.json.ok, false);
+    assert.match(removedHelp.json.error, /未知命令/);
+  }
+  assert.deepEqual(h.json.legacyAliases, {
+    'init-session': 'init',
+    'mark-materialized': 'collect',
+  });
+  for (const removedScript of [
+    'ingest.mjs',
+    'knowledge-collection-ingest.test.mjs',
+    'knowledge-collection-post-processing.mjs',
+  ]) {
+    assert.equal(existsSync(resolve(dirname(scriptPath), removedScript)), false, `${removedScript} must be deleted`);
+  }
 
   const missingPublicDiscoverSession = await runCli([
     'public-discover', '--session-dir', '/does-not-exist', '--query', 'q',
@@ -158,18 +161,10 @@ await (async () => {
   const siteCrawlFrontmatter = readFileSync(siteCrawlSkillPath, 'utf8').split('---')[1];
   assert.match(siteCrawlFrontmatter, /Do not use for one known URL/);
 
-  const ingestSchema = await runCli(['command-schema'], {}, ingestScriptPath);
-  assert.equal(ingestSchema.code, 0, ingestSchema.stderr);
-  assert.equal(ingestSchema.json.schemaVersion, '1.0');
-
   const enterpriseSchema = await runCli(['command-schema'], {}, enterpriseScriptPath);
   assert.equal(enterpriseSchema.code, 0, enterpriseSchema.stderr);
   assert.equal(enterpriseSchema.json.commands['search-all'].additionalProperties, false);
   assert.deepEqual(enterpriseSchema.json.commands['search-all'].properties.sources.default, ['dingtalk', 'feishu', 'wecom', 'ima']);
-
-  const kb = await runCli(['list-kb', '--help']);
-  assert.equal(kb.code, 0);
-  assert.equal(kb.json.name, 'knowledge-collection-ingest');
 
   const enterprise = await runCli(['enterprise', '--help']);
   assert.equal(enterprise.code, 0);
@@ -363,40 +358,6 @@ await (async () => {
   console.log('PASS zero-branch report rejected');
 })();
 
-// ── 采集流: 成功删除 payload、run 摘要、collection 模式清理 ──
-
-await (async () => {
-  const { root } = await setupCollectedSession({ mode: 'collection' });
-  const runPath = join(root, '.post-processing-inputs/run.json');
-  writeFileSync(runPath, JSON.stringify(validRun(root), null, 2));
-  const r = await runCli(['run', '--session-dir', root, '--run-json-file', runPath]);
-  assert.equal(r.json.ok, true);
-  assert.equal(r.json.runId, 'run-1');
-  assert.ok(r.json.summary, 'run 默认返回摘要');
-  assert.ok(!existsSync(runPath), 'run 成功后应删除输入 payload');
-
-  const cl = await runCli(['cleanup', '--session-dir', root, '--run-id', 'run-1']);
-  assert.equal(cl.json.ok, true);
-  assert.equal(cl.json.removedSession, true);
-  assert.ok(!existsSync(join(root, 'session.json')));
-  console.log('PASS collection flow and payload cleanup');
-})();
-
-// ── 研究模式未 report 时 cleanup 保留会话 ──
-
-await (async () => {
-  const { root } = await setupCollectedSession({ mode: 'research' });
-  const runPath = join(root, '.post-processing-inputs/run.json');
-  writeFileSync(runPath, JSON.stringify(validRun(root), null, 2));
-  await runCli(['run', '--session-dir', root, '--run-json-file', runPath]);
-  const cl = await runCli(['cleanup', '--session-dir', root, '--run-id', 'run-1']);
-  assert.equal(cl.json.ok, true);
-  assert.equal(cl.json.retention, true);
-  assert.equal(cl.json.reason, 'research-report-pending');
-  assert.ok(existsSync(join(root, 'session.json')));
-  console.log('PASS research-mode cleanup gate');
-})();
-
 // ── inspect 默认只读,drain-pending 显式清理 ──
 
 await (async () => {
@@ -432,75 +393,6 @@ await (async () => {
   assert.equal(r.code, 1);
   assert.ok(r.json.error.includes('敏感字段'));
   console.log('PASS sensitive init input rejected');
-})();
-
-// ── 部分清理只删除成功项,保留未选项与 raw/ ──
-
-await (async () => {
-  const root = makeSessionDir();
-  await runCli([
-    'init', '--session-dir', root, '--query', 'q', '--mode', 'collection',
-    '--materialization-target', 'all',
-  ]);
-  mkdirSync(join(root, 'markdown'), { recursive: true });
-  mkdirSync(join(root, 'sanitized/items'), { recursive: true });
-  mkdirSync(join(root, '.post-processing-inputs'), { recursive: true });
-  const cr = {
-    schemaVersion: '1.0', title: 't', source: 'public-internet', backend: 'bycli',
-    url: 'https://e.com', filters: {}, items: [
-      { title: 'A', url: 'https://e.com/a', author: '', publishTime: '', markdown: 'sanitized/items/a.md', fileName: 'sanitized/items/a.md' },
-      { title: 'B', url: 'https://e.com/b', author: '', publishTime: '', markdown: 'sanitized/items/b.md', fileName: 'sanitized/items/b.md' },
-    ],
-  };
-  writeFileSync(join(root, 'collection-result.json'), JSON.stringify(cr));
-  for (const name of ['a', 'b']) {
-    writeFileSync(join(root, 'markdown', `${name}.md`), `# ${name}`);
-    writeFileSync(join(root, 'sanitized/items', `${name}.md`), `# ${name}`);
-  }
-  const payload = {
-    schemaVersion: '1.0',
-    items: [
-      { itemId: 'item-a', markdownPath: 'markdown/a.md', sanitizedPath: 'sanitized/items/a.md', canonicalItem: cr.items[0] },
-      { itemId: 'item-b', markdownPath: 'markdown/b.md', sanitizedPath: 'sanitized/items/b.md', canonicalItem: cr.items[1] },
-    ],
-  };
-  const payloadPath = join(root, '.post-processing-inputs/items.json');
-  writeFileSync(payloadPath, JSON.stringify(payload));
-  const c = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
-  assert.equal(c.json.ok, true);
-
-  const runPayload = {
-    schemaVersion: '1.0', runId: 'run-partial', operation: 'external',
-    target: { kind: 'external', id: 'task-1' },
-    selection: { mode: 'items', itemIds: ['item-a'], discardUnselected: false, discardUnselectedConfirmed: false },
-    status: 'success', sessionStatus: 'partial',
-    globalStage: { name: null, required: false, status: 'not-required', reason: null },
-    items: [{ itemId: 'item-a', status: 'success', stage: 'completed', reason: null, downstreamRef: null, cleanupStatus: 'not-started', cleanedArtifacts: [] }],
-  };
-  const runPath = join(root, '.post-processing-inputs/run.json');
-  writeFileSync(runPath, JSON.stringify(runPayload));
-  const r = await runCli(['run', '--session-dir', root, '--run-json-file', runPath]);
-  assert.equal(r.json.ok, true);
-
-  const dry = await runCli(['cleanup', '--session-dir', root, '--run-id', 'run-partial', '--dry-run']);
-  assert.equal(dry.json.ok, true);
-  assert.equal(dry.json.plan.action, 'partial-cleanup');
-  assert.ok(existsSync(join(root, 'markdown/a.md')), 'dry-run 不得删除文件');
-
-  const cl = await runCli(['cleanup', '--session-dir', root, '--run-id', 'run-partial']);
-  assert.equal(cl.json.ok, true);
-  assert.equal(cl.json.removedSession, false);
-  assert.ok(!existsSync(join(root, 'markdown/a.md')));
-  assert.ok(!existsSync(join(root, 'sanitized/items/a.md')));
-  assert.ok(existsSync(join(root, 'markdown/b.md')));
-  assert.ok(existsSync(join(root, 'sanitized/items/b.md')));
-  const status = await runCli(['status', '--session-dir', root]);
-  assert.equal(status.json.ok, true);
-  assert.equal(status.json.collection.materialized, 1);
-  assert.equal(status.json.collection.pending, 1);
-  assert.equal(status.json.collection.materializationTarget, 'all');
-  assert.equal(status.json.collection.deliveryComplete, false);
-  console.log('PASS partial cleanup');
 })();
 
 // ── 旧会话迁移 ──
