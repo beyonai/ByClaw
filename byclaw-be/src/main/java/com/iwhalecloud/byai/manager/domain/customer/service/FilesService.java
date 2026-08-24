@@ -38,6 +38,21 @@ public class FilesService {
     }
 
     /**
+     * 查找文件信息
+     *
+     * @param sessionId 会话
+     * @param fileName  文件名
+     * @return List<Files>
+     */
+    public long countSessionFile(Long sessionId, String fileName) {
+        LambdaQueryWrapper<Files> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(Files::getChatId, sessionId);
+        queryWrapper.eq(Files::getFileName, fileName);
+        Long count = filesMapper.selectCount(queryWrapper);
+        return count != null ? count : 0L;
+    }
+
+    /**
      * 批量查找文件信息
      *
      * @param fileIds 文件标识
@@ -79,8 +94,8 @@ public class FilesService {
     /**
      * 查询匹配的文件列表
      *
-     * @param chatId 会话标识
-     * @param tags 标记
+     * @param chatId    会话标识
+     * @param tags      标记
      * @param matchMode 匹配模式
      * @return List
      */
@@ -91,16 +106,16 @@ public class FilesService {
     /**
      * 创建文件
      *
-     * @param fileName 文件名
-     * @param contentType 文件类型
-     * @param resourceId 资源标识
+     * @param fileName      文件名
+     * @param contentType   文件类型
+     * @param resourceId    资源标识
      * @param fileCollectId 资源目录
-     * @param chatId 会话标识
-     * @param fileUrl 请求地址
+     * @param chatId        会话标识
+     * @param fileUrl       请求地址
      * @return Files
      */
     public Files createUploadFile(String fileName, String contentType, Long resourceId, Long fileCollectId, Long chatId,
-        String fileUrl) {
+                                  String fileUrl) {
         Files byaiFiles = new Files();
         byaiFiles.setFileId(sequenceService.nextVal());
         byaiFiles.setFileName(fileName);
