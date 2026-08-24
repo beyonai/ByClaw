@@ -23,6 +23,11 @@ public class SystemFeedbackManageVo extends SystemFeedback {
     private String userName;
 
     /**
+     * 当前处理人名称。
+     */
+    private String processUserName;
+
+    /**
      * 有效附件数量。
      */
     private Integer attachmentCount;

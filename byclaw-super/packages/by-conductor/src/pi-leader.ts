@@ -13,7 +13,10 @@ import {
   type AgentCapabilityCompileResult,
   type AgentCapabilityCompiler,
 } from "./application/agent-capability.js";
-import { ContextCompiler } from "./context/index.js";
+import {
+  OrchestratorContextCompiler,
+  type SystemContextCompiler,
+} from "./context/index.js";
 import { SUPER_ASSISTANT_SYSTEM_PROMPT } from "./context/super-assistant-system-prompt.js";
 import type { LeaderSession, LeaderSessionFactory } from "./ports/leader.js";
 import type { LlmProviderConfig } from "./llm-provider.js";
@@ -29,7 +32,7 @@ export interface PiRuntimeConfig {
   llmProvider: LlmProviderConfig;
   cwd?: string;
   systemPrompt?: string;
-  contextCompiler?: ContextCompiler;
+  contextCompiler?: SystemContextCompiler;
   checkpointStore?: LeaderCheckpointStore;
   /** 用于隔离同一主机上的多个实例，不会直接拼入文件路径。 */
   instanceId?: string;
@@ -51,7 +54,7 @@ export class PiLeaderSessionFactory
     private readonly selectedModel: NonNullable<ReturnType<ModelRuntime["getModel"]>>,
     private readonly cwd: string,
     private readonly systemPrompt: string,
-    private readonly contextCompiler: ContextCompiler,
+    private readonly contextCompiler: SystemContextCompiler,
     private readonly capabilityCompiler: AgentCapabilityCompiler,
     private readonly checkpointStore: LeaderCheckpointStore | undefined,
     private readonly sessionCacheDirectory: string,
@@ -81,7 +84,7 @@ export class PiLeaderSessionFactory
       selectedModel,
       leaderRoot,
       config.systemPrompt ?? SUPER_ASSISTANT_SYSTEM_PROMPT,
-      config.contextCompiler ?? new ContextCompiler(),
+      config.contextCompiler ?? new OrchestratorContextCompiler(),
       new AgentCapabilityCardService(
         new PiAgentCapabilityDraftGenerator(runtime, selectedModel),
       ),

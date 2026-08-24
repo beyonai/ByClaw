@@ -12,8 +12,11 @@ importers:
         specifier: workspace:*
         version: link:packages/by-conductor
       '@byclaw/by-framework':
-        specifier: 1.5.1
-        version: 1.5.1
+        specifier: 1.5.2
+        version: 1.5.2
+      '@byclaw/connector-code-by-framework':
+        specifier: workspace:*
+        version: link:packages/connectors/code-by-framework
       '@byclaw/connector-openclaw-by-framework':
         specifier: workspace:*
         version: link:packages/connectors/openclaw-by-framework
@@ -67,7 +70,7 @@ importers:
         specifier: 1.1.38
         version: 1.1.38
 
-  packages/connectors/openclaw-by-framework:
+  packages/connectors/by-framework-common:
     dependencies:
       '@byclaw/by-conductor':
         specifier: workspace:*
@@ -75,6 +78,18 @@ importers:
       '@byclaw/by-framework':
         specifier: 1.5.1
         version: 1.5.1
+
+  packages/connectors/code-by-framework:
+    dependencies:
+      '@byclaw/connector-by-framework-common':
+        specifier: workspace:*
+        version: link:../by-framework-common
+
+  packages/connectors/openclaw-by-framework:
+    dependencies:
+      '@byclaw/connector-by-framework-common':
+        specifier: workspace:*
+        version: link:../by-framework-common
 
   packages/connectors/third-party-a2a:
     dependencies:
@@ -232,6 +247,9 @@ packages:
 
   '@byclaw/by-framework@1.5.1':
     resolution: {integrity: sha512-e9aQ0UeJCt+EXbTI2Dnsd51quO87l7LeKrkOoO7tCDjRqMr3xyW+muuM8HS5q9y5t69rsx8X52XLlL24r2RmbQ==}
+
+  '@byclaw/by-framework@1.5.2':
+    resolution: {integrity: sha512-Ojbx3HnyFEWoPFycouAh5xNdxFLJcwpf0Kdk6xuAk6eFyOb0RhxWHWYMhK2mzw6PqVRnJBTQhKEPn0Rea9K5Nw==}
 
   '@earendil-works/pi-agent-core@0.80.10':
     resolution: {integrity: sha512-nwnOR3SuLYGRFfyQm8ri4Nj5VGVAvAM9GuqQd3u7BUQj0d6hmD2F8w7OHAAjThE3CuySIdM+v8E22QJG6/RfCg==}
@@ -1954,6 +1972,15 @@ snapshots:
   '@babel/runtime@7.29.7': {}
 
   '@byclaw/by-framework@1.5.1':
+    dependencies:
+      ioredis: 5.11.1
+      uuid: 9.0.1
+    optionalDependencies:
+      langfuse: 3.38.20
+    transitivePeerDependencies:
+      - supports-color
+
+  '@byclaw/by-framework@1.5.2':
     dependencies:
       ioredis: 5.11.1
       uuid: 9.0.1

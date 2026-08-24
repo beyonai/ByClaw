@@ -35,6 +35,7 @@ from redis_runtime import init_shared_redis_from_env
 SAVE_OR_UPDATE_OBJECT_FILES_PATH = (
     "/byaiService/devloop/operation/saveOrUpdateObjectFiles"
 )
+DINGTALK_TEST_SEND_PATH = "/byaiService/open/api/v1/dingtalk/testSend"
 CALLBACK_CONTEXT_EXTRA_PARAM = "_byclawCallbackContext"
 CALLBACK_PROVIDER_PATH = (
     "byclaw_knowledge_entity_callback:build_byclaw_knowledge_entity_callback"
@@ -47,7 +48,12 @@ PostJson = Callable[
     [str, dict[str, Any], dict[str, str]],
     Mapping[str, Any] | Awaitable[Mapping[str, Any]],
 ]
+GetJson = Callable[
+    [str, dict[str, str], dict[str, str]],
+    Mapping[str, Any] | Awaitable[Mapping[str, Any]],
+]
 BeyondTokenResolver = Callable[[str], str | Awaitable[str]]
+UserIdResolver = Callable[[str], str | Awaitable[str]]
 KnowledgeBaseNameResolver = Callable[[str], str | Awaitable[str]]
 
 
@@ -78,10 +84,12 @@ class ByClawKnowledgeEntityCallbackError(RuntimeError):
 
 @dataclass(slots=True)
 class ByClawKnowledgeEntityProcessingCallback:
-    """Report file terminal states to ByClaw BE; batch events are log-only."""
+    """Report file terminal states and notify users when a batch completes."""
 
     post_json: PostJson | None = None
+    get_json: GetJson | None = None
     beyond_token_resolver: BeyondTokenResolver | None = None
+    user_id_resolver: UserIdResolver | None = None
     knowledge_base_name_resolver: KnowledgeBaseNameResolver | None = None
 
     async def on_file_completed(self, event: FileCompletedCallbackInput) -> None:
@@ -189,6 +197,22 @@ class ByClawKnowledgeEntityProcessingCallback:
             )
         return normalized
 
+    async def _resolve_user_id(self, user_code: str) -> str:
+        if self.user_id_resolver is None:
+            return await _resolve_user_id_from_redis(user_code)
+        user_id_result = self.user_id_resolver(user_code)
+        user_id = (
+            await user_id_result
+            if inspect.isawaitable(user_id_result)
+            else user_id_result
+        )
+        normalized = str(user_id or "").strip()
+        if not normalized:
+            raise ByClawKnowledgeEntityCallbackError(
+                "Redis user mapping is missing for X-User-Code"
+            )
+        return normalized
+
     async def _resolve_knowledge_base_name(self, kb_code: str) -> str:
         if self.knowledge_base_name_resolver is None:
             return await _resolve_knowledge_base_name_from_db(kb_code)
@@ -202,17 +226,108 @@ class ByClawKnowledgeEntityProcessingCallback:
         return normalized
 
     async def on_batch_completed(self, event: BatchCompletedCallbackInput) -> None:
+        started_at = time.perf_counter()
+        user_code, _, resource_id = _callback_context(event.extra_params)
+        if not user_code:
+            logger.info(
+                "byclaw knowledge_entity callback skipped: "
+                "callback_method=on_batch_completed batch_id=%s "
+                "batch_version=%s invoke_result=skipped_missing_user_code",
+                event.batch_id,
+                event.progress.version,
+            )
+            return
+
+        try:
+            user_id = await self._resolve_user_id(user_code)
+            beyond_token = await self._resolve_beyond_token(user_code)
+            params = {
+                "senderUserId": user_id,
+                "receiverUserId": user_id,
+                "content": _build_batch_notification(
+                    event,
+                    resource_id=resource_id,
+                ),
+            }
+            headers = {"Beyond-Token": beyond_token}
+            if self.get_json is None:
+                raw = await self._get_by_discovery(params=params, headers=headers)
+            else:
+                response = self.get_json(DINGTALK_TEST_SEND_PATH, params, headers)
+                raw = await response if inspect.isawaitable(response) else response
+            _validate_response(raw)
+        except Exception:
+            logger.exception(
+                "byclaw knowledge_entity callback failed: "
+                "callback_method=on_batch_completed batch_id=%s "
+                "batch_version=%s invoke_result=failed elapsed_ms=%.2f",
+                event.batch_id,
+                event.progress.version,
+                (time.perf_counter() - started_at) * 1000,
+            )
+            raise
+
         logger.info(
             "byclaw knowledge_entity callback completed: "
             "callback_method=on_batch_completed batch_id=%s batch_version=%s "
             "task_type=%s completed_count=%s total_count=%s "
-            "invoke_result=logged_only",
+            "invoke_result=success elapsed_ms=%.2f",
             event.batch_id,
             event.progress.version,
             event.task_type.value,
             event.progress.completed_count,
             event.progress.total_count,
+            (time.perf_counter() - started_at) * 1000,
         )
+
+    async def _get_by_discovery(
+        self,
+        *,
+        params: dict[str, str],
+        headers: dict[str, str],
+    ) -> Mapping[str, Any]:
+        service_name = os.getenv("BE_DOMAINNAME", "ByaiService").strip()
+        redis_client = init_shared_redis_from_env()
+        discovery_client = DiscoveryClient(
+            redis_client=redis_client,
+            cache_interval=5,
+        )
+        try:
+            instance = await discovery_client.discover(
+                service_name,
+                health_threshold_ms=-1,
+            )
+            if not instance:
+                raise ByClawKnowledgeEntityCallbackError(
+                    f"No available instances for service: {service_name}"
+                )
+            url = _build_discovered_url(instance, DINGTALK_TEST_SEND_PATH)
+            async with httpx.AsyncClient(
+                timeout=_TIMEOUT_SECONDS,
+                headers=headers,
+            ) as client:
+                response = await client.get(url, params=params)
+                try:
+                    raw = response.json()
+                except ValueError as exc:
+                    raise ByClawKnowledgeEntityCallbackError(
+                        "testSend response must be JSON"
+                    ) from exc
+                if not response.is_success:
+                    raise ByClawKnowledgeEntityCallbackError(
+                        f"testSend returned HTTP {response.status_code}: {raw}"
+                    )
+                if not isinstance(raw, Mapping):
+                    raise ByClawKnowledgeEntityCallbackError(
+                        "testSend response must be an object"
+                    )
+                return raw
+        except httpx.HTTPError as exc:
+            raise ByClawKnowledgeEntityCallbackError(
+                f"testSend HTTP error: {exc}"
+            ) from exc
+        finally:
+            await discovery_client.close()
 
     async def _post_by_discovery(
         self,
@@ -283,14 +398,10 @@ def _callback_context(extra_params: Mapping[str, Any]) -> tuple[str, str, str]:
 
 async def _resolve_beyond_token_from_redis(user_code: str) -> str:
     redis_client = init_shared_redis_from_env()
-    user_id = await _await_if_needed(
-        redis_client.get(f"SHARE_BFM_USER_CODE_{user_code}")
+    normalized_user_id = await _resolve_user_id_from_redis(
+        user_code,
+        redis_client=redis_client,
     )
-    normalized_user_id = _redis_string(user_id)
-    if not normalized_user_id:
-        raise ByClawKnowledgeEntityCallbackError(
-            "Redis user mapping is missing for X-User-Code"
-        )
     token = await _await_if_needed(
         redis_client.hget(
             f"user:{normalized_user_id}:login:auth",
@@ -303,6 +414,23 @@ async def _resolve_beyond_token_from_redis(user_code: str) -> str:
             "Redis login state is missing Beyond-Token"
         )
     return normalized_token
+
+
+async def _resolve_user_id_from_redis(
+    user_code: str,
+    *,
+    redis_client: Any | None = None,
+) -> str:
+    client = redis_client or init_shared_redis_from_env()
+    user_id = await _await_if_needed(
+        client.get(f"SHARE_BFM_USER_CODE_{user_code}")
+    )
+    normalized_user_id = _redis_string(user_id)
+    if not normalized_user_id:
+        raise ByClawKnowledgeEntityCallbackError(
+            "Redis user mapping is missing for X-User-Code"
+        )
+    return normalized_user_id
 
 
 async def _resolve_knowledge_base_name_from_db(kb_code: str) -> str:
@@ -330,6 +458,35 @@ def _redis_string(value: Any) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8").strip()
     return str(value or "").strip()
+
+
+def _build_batch_notification(
+    event: BatchCompletedCallbackInput,
+    *,
+    resource_id: str,
+) -> str:
+    task_name = {
+        ProcessingTaskType.ENTITY_DISCOVERY: "知识实体发现",
+        ProcessingTaskType.DOCUMENT_ENRICH: "知识实体整理",
+    }[event.task_type]
+    progress = event.progress
+    if progress.failed_count:
+        conclusion = "任务已完成，部分文件处理失败"
+    elif progress.skipped_count:
+        conclusion = "任务已完成，部分文件已跳过"
+    else:
+        conclusion = "任务已全部成功完成"
+    return "\n".join(
+        (
+            f"【{task_name}】{conclusion}",
+            f"知识库资源 ID：{resource_id or '未提供'}",
+            f"批次：{event.batch_id}",
+            f"总计：{progress.total_count} 个文件",
+            f"成功：{progress.succeeded_count} 个",
+            f"失败：{progress.failed_count} 个",
+            f"跳过：{progress.skipped_count} 个",
+        )
+    )
 
 
 def _build_knowledge_file(

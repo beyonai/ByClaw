@@ -49,8 +49,9 @@ public class OpenClawKnowledgeDocumentService {
 
         logger.info("OpenClaw文档入库 resourceId={}, directoryPath={}, docName={}, language={}", resourceId,
             normalizedDirectoryPath, resolvedDocName, language);
-        UploadResult uploadResult = datasetApplicationService.uploadFiles(new MultipartFile[] {multipartFile},
-            resourceId, normalizedDirectoryPath, resolvedDocName, Boolean.TRUE, Boolean.FALSE);
+        UploadResult uploadResult = datasetApplicationService.uploadFiles(new MultipartFile[] {
+            multipartFile
+        }, resourceId, normalizedDirectoryPath, resolvedDocName, Boolean.TRUE, Boolean.FALSE, false);
 
         DatasetBuild datasetBuild = new DatasetBuild();
         datasetBuild.setResourceId(resourceId);
@@ -65,8 +66,8 @@ public class OpenClawKnowledgeDocumentService {
             resolvedDocName = "openclaw-doc-" + DOC_NAME_TIME_FORMATTER.format(LocalDateTime.now()) + ".md";
         }
         resolvedDocName = resolvedDocName.replaceAll("[\\\\/]+", "-").replaceAll("[\\r\\n\\t]+", " ").trim()
-            .replaceAll("\\s+", "-").replaceAll("[^\\p{L}\\p{N}._-]+", "-")
-            .replaceAll("-+", "-").replaceAll("^-+|-+$", "");
+            .replaceAll("\\s+", "-").replaceAll("[^\\p{L}\\p{N}._-]+", "-").replaceAll("-+", "-")
+            .replaceAll("^-+|-+$", "");
         if (StringUtils.isBlank(resolvedDocName)) {
             resolvedDocName = "openclaw-doc-" + DOC_NAME_TIME_FORMATTER.format(LocalDateTime.now()) + ".md";
         }

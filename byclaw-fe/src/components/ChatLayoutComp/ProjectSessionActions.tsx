@@ -1,12 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Tooltip, message } from 'antd';
-import { FolderOpenOutlined, FundProjectionScreenOutlined } from '@ant-design/icons';
+import { FundProjectionScreenOutlined } from '@ant-design/icons';
 import { useSelector } from '@umijs/max';
 import { getProject, getTaskDetail } from '@/service/devloop';
-import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import TaskDetailDrawer from '@/layout/sider/components/ProjectSpaceList/TaskDetailDrawer';
 import { isCurrentUserTaskAssignee } from '@/layout/sider/components/ProjectSpaceList/taskAccess';
-import ProjectSessionResultDrawer from './ProjectSessionResultDrawer';
 import styles from './ChatTitle.module.less';
 
 type ProjectSessionActionsProps = {
@@ -18,13 +16,11 @@ type ProjectSessionActionsProps = {
 const getResponseData = (response: any) => response?.data ?? response;
 
 const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId, sessionId, sessionName }) => {
-  const activeSiderAgent = useActiveSiderAgent();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
   const [project, setProject] = useState<any>(null);
   const [taskDetail, setTaskDetail] = useState<any>(null);
   const [taskLoading, setTaskLoading] = useState(false);
   const [taskProgressTooltipOpen, setTaskProgressTooltipOpen] = useState(false);
-  const [resultDrawerOpen, setResultDrawerOpen] = useState(false);
 
   useEffect(() => {
     if (!projectId) {
@@ -52,10 +48,6 @@ const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId
     };
   }, [projectId]);
 
-  const resourceId = useMemo(
-    () => activeSiderAgent.resourceId || (project?.resourceId ? `${project.resourceId}` : ''),
-    [activeSiderAgent.resourceId, project?.resourceId]
-  );
   // 兼容旧环境仍返回 development 的项目类型；仅研发项目展示任务进度入口。
   const isDevelopmentProject = project?.projectType === 'develop' || project?.projectType === 'development';
   const canEnterTaskSession = useMemo(() => isCurrentUserTaskAssignee(taskDetail, userInfo), [taskDetail, userInfo]);
@@ -98,7 +90,7 @@ const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId
     setTaskProgressTooltipOpen(open && !taskLoading && !taskDetail);
   };
 
-  // 任务成果面向全部会话展示；任务进度仅在研发项目中提供。
+  // 任务成果已统一由会话资源面板承接，这里仅保留研发项目的任务进度入口。
   if (!sessionId) return null;
 
   return (
@@ -113,34 +105,19 @@ const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId
           >
             <Button
               type="text"
-              className={styles.projectActionButton}
+              className={`${styles.projectActionButton} ${styles.taskProgressButton}`}
               icon={<FundProjectionScreenOutlined />}
               loading={taskLoading}
               onClick={handleOpenTaskProgress}
             />
           </Tooltip>
         )}
-        <Tooltip title="任务成果" placement="bottom">
-          <Button
-            type="text"
-            className={styles.projectActionButton}
-            icon={<FolderOpenOutlined />}
-            onClick={() => setResultDrawerOpen(true)}
-          />
-        </Tooltip>
       </span>
       <TaskDetailDrawer
         task={taskDetail}
         onClose={() => setTaskDetail(null)}
         canEnterSession={canEnterTaskSession}
         onEnterSession={() => setTaskDetail(null)}
-      />
-      <ProjectSessionResultDrawer
-        open={resultDrawerOpen}
-        resourceId={resourceId}
-        sessionId={sessionId}
-        sessionName={sessionName}
-        onClose={() => setResultDrawerOpen(false)}
       />
     </>
   );

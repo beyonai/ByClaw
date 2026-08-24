@@ -8,7 +8,13 @@ WORKDIR /app
 RUN addgroup -g 1001 -S appgroup && \
     adduser -u 1001 -S appuser -G appgroup
 
-# 安装依赖：curl（健康检查）、bash、gcompat（dws 所需的 glibc 兼容层）、nodejs/npm（Lark/WeCom CLI）
+# 安装依赖：
+# - curl（健康检查）
+# - bash（脚本支持）
+# - gcompat（dws 所需的 glibc 兼容层）
+# - git（仓库操作）
+# - nodejs/npm（Lark/WeCom CLI + Trellis CLI）
+# - python3（Trellis init 依赖，需要 Python ≥ 3.9）
 RUN apk add --no-cache \
     curl \
     bash \
@@ -16,16 +22,39 @@ RUN apk add --no-cache \
     git \
     nodejs \
     npm \
+    python3 \
     && rm -rf /var/cache/apk/*
 
+# npm 使用国内镜像加速
+ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
+
 # 安装 Lark/WeCom CLI
-ARG LARKSUITE_CLI_VERSION=1.0.78
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG LARKSUITE_CLI_VERSION=1.0.85
 ARG WECOM_CLI_VERSION=0.1.9
-RUN npm install --global \
+RUN npm config set registry "${NPM_REGISTRY}" --global \
+    && npm config set fund false --global \
+    && npm config set audit false --global \
+    && npm config set fetch-retries 5 --global \
+    && npm config set fetch-retry-mintimeout 20000 --global \
+    && npm config set fetch-retry-maxtimeout 120000 --global \
+    && npm install --global \
         "@larksuite/cli@${LARKSUITE_CLI_VERSION}" \
         "@wecom/cli@${WECOM_CLI_VERSION}" \
     && lark-cli --version \
     && wecom-cli --version \
+    && npm cache clean --force
+
+# 复制 Trellis 离线安装包
+COPY resources/mindfoldhq-trellis-core-0.6.12.tgz /tmp/
+COPY resources/mindfoldhq-trellis-0.6.12.tgz /tmp/
+
+# 安装 Trellis CLI（离线安装）
+RUN npm install --global \
+        /tmp/mindfoldhq-trellis-core-0.6.12.tgz \
+        /tmp/mindfoldhq-trellis-0.6.12.tgz \
+    && trellis --version \
+    && rm -f /tmp/mindfoldhq-trellis-*.tgz \
     && npm cache clean --force
 
 # 安装 DWS CLI。amd64 用随仓库预下载的二进制（避免构建时网络下载）；
@@ -40,7 +69,7 @@ RUN mkdir -p /home/appuser/.local/bin \
     && if [ "$TARGETARCH" = "amd64" ]; then \
          tar -xzf /tmp/dws-amd64.tar.gz -C /home/appuser/.local/bin dws; \
        else \
-         curl -fsSL "https://registry.npmjs.org/dingtalk-workspace-cli/-/dingtalk-workspace-cli-${DWS_VERSION}.tgz" -o /tmp/dws-pkg.tgz \
+         curl -fsSL "https://registry.npmmirror.com/dingtalk-workspace-cli/-/dingtalk-workspace-cli-${DWS_VERSION}.tgz" -o /tmp/dws-pkg.tgz \
          && tar -xzf /tmp/dws-pkg.tgz -C /tmp "package/assets/dws-linux-${TARGETARCH}.tar.gz" \
          && tar -xzf "/tmp/package/assets/dws-linux-${TARGETARCH}.tar.gz" -C /home/appuser/.local/bin dws; \
        fi \

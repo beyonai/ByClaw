@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ContextCompiler,
   ContextProcessorError,
+  OrchestratorContextCompiler,
   type AgentProfile,
   type ContextProcessor,
 } from "../src/index.js";
@@ -303,5 +304,63 @@ describe("ContextCompiler", () => {
         processorName: "broken-context-source",
       }),
     );
+  });
+});
+
+describe("OrchestratorContextCompiler", () => {
+  it("uses an independent minimal pipeline and prompt for expert teams", () => {
+    const compiled = new OrchestratorContextCompiler().compile({
+      baseSystemPrompt: "You are ByClaw Super Assistant.",
+      externalSessionId: "session-1",
+      authorizedAgents: [{ ...analyst, role: "数据复核" }],
+      sessionContext: {
+        schemaVersion: 1,
+        locale: "zh-CN",
+        timezone: "Asia/Shanghai",
+      },
+      currentTime,
+      user: { userCode: "u001", userName: "张三" },
+      orchestrator: {
+        schemaVersion: "byclaw.orchestrator-runtime/v1",
+        kind: "EXPERT_TEAM",
+        id: "team-1",
+        name: "数据专家团",
+        prompt: { content: "优先安排交叉复核。", version: "8" },
+        contextProfile: "EXPERT_TEAM_MINIMAL_V1",
+        configVersion: "11",
+      },
+    });
+
+    expect(compiled.stableSystemPrompt).toContain(
+      "You are an expert-team leader whose only job is orchestration.",
+    );
+    expect(compiled.stableSystemPrompt).toContain(
+      "use askUserQuestion to ask the minimum necessary structured questions",
+    );
+    expect(compiled.stableSystemPrompt).toContain("优先安排交叉复核。");
+    expect(compiled.systemPrompt).not.toContain("ByClaw Super Assistant");
+    expect(compiled.dynamicSystemContext).toContain('"role":"数据复核"');
+    expect(compiled.dynamicSystemContext).toContain("<session_context>");
+    expect(compiled.dynamicSystemContext).not.toContain("<session_workspace>");
+    expect(compiled.dynamicSystemContext).not.toContain("<user_context>");
+    expect(compiled.diagnostics.processors.map(({ name }) => name)).toEqual([
+      "supervisor-policy",
+      "session-context",
+      "authorized-agents",
+      "context-cleanup",
+    ]);
+  });
+
+  it("keeps the existing Super Assistant pipeline when no runtime is provided", () => {
+    const compiled = new OrchestratorContextCompiler().compile({
+      baseSystemPrompt: "You are ByClaw Super Assistant.",
+      externalSessionId: "session-1",
+      authorizedAgents: [],
+      sessionContext: emptySessionContext,
+      currentTime,
+    });
+
+    expect(compiled.stableSystemPrompt).toBe("You are ByClaw Super Assistant.");
+    expect(compiled.dynamicSystemContext).toContain("<session_workspace>");
   });
 });

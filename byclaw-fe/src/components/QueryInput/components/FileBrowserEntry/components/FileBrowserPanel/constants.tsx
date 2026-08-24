@@ -96,6 +96,9 @@ export const CODE_TEXT_EXTENSIONS = [
   'conf',
   'gradle',
   'dockerfile',
+  // xml 已在 PREVIEWABLE_EXTENSIONS 和 Twins 的 langMap 里，但不在这个列表时 isTextLike 为 false，
+  // Twins 既不读文本也不给 source 页签，预览结果是空白。JUnit 测试报告就是 xml。
+  'xml',
 ];
 
 const PREVIEWABLE_EXTENSIONS = new Set([

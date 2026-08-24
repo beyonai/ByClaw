@@ -42,9 +42,7 @@ const DigitalEmployeesPage: React.FC = () => {
   const [isLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<string>(() => {
     const tabFromUrl = searchParams.get('tab');
-    return tabFromUrl === 'personal' || tabFromUrl === 'enterprise' || tabFromUrl === 'skillSquare'
-      ? tabFromUrl
-      : 'personal';
+    return tabFromUrl === 'personal' || tabFromUrl === 'enterprise' || tabFromUrl === 'group' ? tabFromUrl : 'personal';
   });
   const [keywords, setKeywords] = useState<Record<string, string>>({});
   const [dropdownParam, setDropdownParam] = useState<IOnOkParams>(getDefaultParams());
@@ -52,7 +50,17 @@ const DigitalEmployeesPage: React.FC = () => {
 
   const AllDigitalEmployeesRef = React.useRef<any>(null);
   const EmployeeRelatedToMeRef = React.useRef<any>(null);
-  const SkillSquareRef = React.useRef<any>(null);
+  const DigitalEmployeeGroupRef = React.useRef<any>(null);
+
+  const createButtonLabel = React.useMemo(() => {
+    if (activeTab === 'personal') {
+      return intl.formatMessage({ id: 'digitalEmployees.createPersonal' });
+    }
+    if (activeTab === 'group') {
+      return intl.formatMessage({ id: 'digitalEmployees.createGroup' });
+    }
+    return intl.formatMessage({ id: 'digitalEmployees.create' });
+  }, [activeTab, intl]);
 
   // 监听引导模式事件
   useEffect(() => {
@@ -72,7 +80,7 @@ const DigitalEmployeesPage: React.FC = () => {
   useEffect(() => {
     const tabFromUrl = searchParams.get('tab');
     if (
-      (tabFromUrl === 'personal' || tabFromUrl === 'enterprise' || tabFromUrl === 'skillSquare') &&
+      (tabFromUrl === 'personal' || tabFromUrl === 'enterprise' || tabFromUrl === 'group') &&
       tabFromUrl !== activeTab
     ) {
       setActiveTab(tabFromUrl);
@@ -95,8 +103,8 @@ const DigitalEmployeesPage: React.FC = () => {
       if (activeTab === 'enterprise') {
         return AllDigitalEmployeesRef.current?.getSearch?.(keywords.enterprise, otherParam || dropdownParam);
       }
-      if (activeTab === 'skillSquare') {
-        return SkillSquareRef.current?.getSearch?.(keywords.skillSquare);
+      if (activeTab === 'group') {
+        return DigitalEmployeeGroupRef.current?.getSearch?.(keywords.group, otherParam || dropdownParam);
       }
       return noop;
     }, 500),
@@ -153,6 +161,22 @@ const DigitalEmployeesPage: React.FC = () => {
         type="primary"
         icon={<PlusOutlined />}
         onClick={() => {
+          if (activeTab === 'group') {
+            const createParams = new URLSearchParams({
+              ownerType: 'enterprise',
+              digitalType: 'FROM_MANUALLY',
+              agentType: '017',
+              tab: 'group',
+            });
+            const selectedCatalogId = DigitalEmployeeGroupRef.current?.getCurrentCatalogId?.();
+            if (selectedCatalogId) {
+              createParams.set('catalogId', `${selectedCatalogId}`);
+              createParams.set('groupCatalogId', `${selectedCatalogId}`);
+            }
+            sessionStorage.setItem('EmployeeDetail_prevRoute', `${window.location.pathname}${window.location.search}`);
+            navigate(`/digitalEmployeesCreate?${createParams.toString()}`);
+            return;
+          }
           if (activeTab === 'enterprise') {
             setEmployeeModalOpen(true);
             return;
@@ -171,9 +195,7 @@ const DigitalEmployeesPage: React.FC = () => {
         }}
         id="guideStep2-6"
       >
-        {activeTab === 'personal'
-          ? intl.formatMessage({ id: 'digitalEmployees.createPersonal' })
-          : intl.formatMessage({ id: 'digitalEmployees.create' })}
+        {createButtonLabel}
       </Button>
     </Space>
   );
@@ -212,6 +234,15 @@ const DigitalEmployeesPage: React.FC = () => {
               dropdownParam={dropdownParam}
               buildFilterParam={buildDigitalEmployeeFilterParam}
               ref={AllDigitalEmployeesRef}
+            />
+          </Tabs.TabPane>
+          <Tabs.TabPane tab={intl.formatMessage({ id: 'digitalEmployees.employeeGroup' })} key="group">
+            <AllDigitalEmployees
+              searchName={keywords.group}
+              dropdownParam={dropdownParam}
+              buildFilterParam={buildDigitalEmployeeFilterParam}
+              mode="group"
+              ref={DigitalEmployeeGroupRef}
             />
           </Tabs.TabPane>
         </Tabs>

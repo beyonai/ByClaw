@@ -2,8 +2,8 @@ import { Button, Empty, Input, Spin, Tag } from 'antd';
 import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import classNames from 'classnames';
-import { PROJECT_TYPE_MESSAGE_ID } from '../../constants';
 import type { ProjectSpace } from '../../types';
+import { getProjectTagMeta } from '../../utils';
 import styles from '../../index.module.less';
 
 interface Props {
@@ -15,13 +15,6 @@ interface Props {
   onCreateProject: () => void;
   onSelectProject: (project: ProjectSpace) => void;
 }
-
-// 项目类型标签在卡片和侧栏保持同一套颜色语义，避免同一项目在不同入口识别不一致。
-const getProjectTagColor = (project: ProjectSpace) => {
-  if (project.projectType === 'develop') return 'purple';
-  if (project.projectType === 'operation') return 'cyan';
-  return 'blue';
-};
 
 const ProjectSidebar: React.FC<Props> = ({
   projects,
@@ -51,26 +44,32 @@ const ProjectSidebar: React.FC<Props> = ({
       <Spin spinning={!!loading}>
         <div className={styles.sidebarList}>
           {projects.length ? (
-            projects.map((project) => (
-              <button
-                type="button"
-                key={project.projectId}
-                className={classNames(styles.sidebarProject, {
-                  [styles.sidebarProjectActive]: project.projectId === activeProjectId,
-                })}
-                onClick={() => onSelectProject(project)}
-              >
-                <span className={styles.sidebarProjectMain}>
-                  <strong>{project.projectName}</strong>
-                  <small>
-                    {project.description || intl.formatMessage({ id: 'projectSpace.projectCard.emptyDescription' })}
-                  </small>
-                </span>
-                <Tag bordered={false} color={getProjectTagColor(project)}>
-                  {intl.formatMessage({ id: PROJECT_TYPE_MESSAGE_ID[project.projectType] })}
-                </Tag>
-              </button>
-            ))
+            projects.map((project) => {
+              const projectTag = getProjectTagMeta(project);
+              return (
+                <button
+                  type="button"
+                  key={project.projectId}
+                  className={classNames(styles.sidebarProject, {
+                    [styles.sidebarProjectActive]: project.projectId === activeProjectId,
+                  })}
+                  onClick={() => onSelectProject(project)}
+                >
+                  <span className={styles.sidebarProjectMain}>
+                    <strong>{project.projectName}</strong>
+                    <small>
+                      {project.description || intl.formatMessage({ id: 'projectSpace.projectCard.emptyDescription' })}
+                    </small>
+                  </span>
+                  <Tag
+                    bordered={false}
+                    className={classNames(styles.projectTypeTag, styles[`projectTypeTag${projectTag.classSuffix}`])}
+                  >
+                    {intl.formatMessage({ id: projectTag.messageId })}
+                  </Tag>
+                </button>
+              );
+            })
           ) : (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}

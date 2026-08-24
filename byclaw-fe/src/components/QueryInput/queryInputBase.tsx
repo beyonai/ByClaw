@@ -53,6 +53,18 @@ export type IProps = {
   inputDraft?: DefaultValueSchema;
   onInputDraftChange?: (draft: DefaultValueSchema) => void;
   contextUsed?: ContextUsed;
+
+  /** 当前会话所属项目。 */
+  projectId?: number;
+
+  /** 控制新会话项目选择入口，避免通知等复用输入框误展示。 */
+  enableTaskTemplate?: boolean;
+
+  /** 输入框外部项目选择器当前选中的项目。 */
+  selectedProject?: { projectId: string; projectName: string };
+
+  /** 新建任务上传文件生成会话后，由外层决定是否暂时保持新建任务视图。 */
+  onFileUploadSessionCreated?: (sessionId: string) => void;
 };
 
 export type IState = {
@@ -82,6 +94,12 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   autoSendRunner: NodeJS.Timeout | null = null;
 
   uploadFileRef = React.createRef<UploadFileRef>();
+
+  selectedProject?: { projectId: string; projectName: string };
+
+  handleProjectChange = (project: { projectId: string; projectName: string }) => {
+    this.selectedProject = project;
+  };
 
   constructor(props: P & IProps) {
     super(props);
@@ -115,6 +133,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     const { EventEmitter } = this.props.globalContext;
     EventEmitter.on('queryInput-push-fileList', this.pushFileList);
     EventEmitter.on('queryInput-set-value', this.setInputValue);
+    EventEmitter.on('queryInput-set-value-and-send', this.setInputValueAndSend);
     EventEmitter.on('queryInput-set-schema-imme', this.setCommonStateBySchema);
     EventEmitter.on('queryInput-paste-files', this.onPasteFiles);
     EventEmitter.emit('pcLayout-contains-chatLayout', true, { waitForListeners: true });
@@ -133,6 +152,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     const { EventEmitter } = this.props.globalContext;
     EventEmitter.off('queryInput-push-fileList', this.pushFileList);
     EventEmitter.off('queryInput-set-value', this.setInputValue);
+    EventEmitter.off('queryInput-set-value-and-send', this.setInputValueAndSend);
     EventEmitter.off('queryInput-set-schema-imme', this.setCommonStateBySchema);
     EventEmitter.off('queryInput-paste-files', this.onPasteFiles);
     EventEmitter.emit('pcLayout-contains-chatLayout', false);
@@ -362,6 +382,16 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     });
   };
 
+  // 外部任务模板入口使用该事件将生成内容写入输入框并直接发送。
+  setInputValueAndSend = (text: string) => {
+    if (!text?.trim()) return;
+    this.richInputRef.current?.setText(text);
+    this.setState({ inputValue: text }, () => {
+      this.onSendQuery();
+      this.richInputRef.current?.clearAfterSend();
+    });
+  };
+
   getSendPayload = () => {
     const currentInputPayload = this.getCurrentInputPayload();
     const inputValue = currentInputPayload?.text ?? this.state.inputValue;
@@ -382,6 +412,16 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   // 所有子类的onSend都从父类这里触发，这里需要额外加一些公共的参数
   finallySendQuery = (data: any) => {
+    // Chat、Employees 等输入框会覆盖 getSendPayload，项目选择必须在公共发送出口统一补入。
+    const selectedProject = this.props.selectedProject || this.selectedProject;
+    if (!this.props.sessionId && selectedProject) {
+      set(data, 'payload.selectedProjectId', selectedProject.projectId);
+      set(data, 'payload.selectedProjectName', selectedProject.projectName);
+    } else if (this.props.sessionId && this.props.projectId !== undefined) {
+      // 历史会话没有项目选择器，继续聊天时直接沿用当前会话所属项目。
+      set(data, 'payload.projectId', this.props.projectId);
+    }
+
     let { resourceList = [] } = this.state;
     const currentInputPayload = this.getCurrentInputPayload();
     if (currentInputPayload?.resourceList) {
@@ -642,14 +682,15 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
               : { text, resourceList };
             this.props.onInputDraftChange?.(draft);
             this.syncSiderAgent(resourceList);
-            if (!cannotAt && agentId !== currentAgentId) {
+            if (!cannotAt && `${agentId || ''}` !== `${currentAgentId || ''}`) {
               let nextAgentType = agentType;
               if (!currentAgentId && agentId) {
                 // agentId从有到无，意味着，用户在输入框内，主动删除了输入框最左侧的agent数字员工，这个时候，agentType直接转为common
                 nextAgentType = agentTypeMap.common;
               }
               setMyAgentType?.(nextAgentType as IAgentType);
-              setAgentId?.(currentAgentId || '');
+              // 全局会话员工 ID 统一使用字符串，避免 number/string 来回切换触发默认 @ 节点重建。
+              setAgentId?.(currentAgentId ? `${currentAgentId}` : '');
             }
           }}
           onSend={() => {

@@ -7,6 +7,7 @@ import {
   type PiRuntimeConfig,
 } from "@byclaw/by-conductor";
 import { createRedis } from "@byclaw/by-framework";
+import { CodeByFrameworkConnector } from "@byclaw/connector-code-by-framework";
 import { OpenClawByFrameworkConnector } from "@byclaw/connector-openclaw-by-framework";
 import { ThirdPartyA2aConnector } from "@byclaw/connector-third-party-a2a";
 import { ExecutionDescriptorClient } from "@byclaw/connector-third-party-common";
@@ -19,6 +20,7 @@ import { ByClawBeAgentCatalog } from "../business/agent-catalog.js";
 import { ByAiAttachmentResolver } from "../business/byai-attachment-resolver.js";
 import { RedisByClawBeEndpointResolver } from "../business/endpoint-resolver.js";
 import { ByClawBeGroupChatContextProvider } from "../business/group-chat-context.js";
+import { ByClawBeOrchestratorRuntimeProvider } from "../business/orchestrator-runtime.js";
 import {
   ByClawBeResourceModelResolver,
   fingerprintModelConfig,
@@ -119,6 +121,13 @@ function createConnectors(config: AppConfig) {
     cancelConfirmationTimeoutMs: config.openClaw.cancelConfirmationTimeoutMs,
   });
   connectors.register(openClaw);
+  const code = new CodeByFrameworkConnector({
+    redis,
+    sourceAgentType: config.worker.agentType,
+    firstEventTimeoutMs: config.openClaw.firstEventTimeoutMs,
+    cancelConfirmationTimeoutMs: config.openClaw.cancelConfirmationTimeoutMs,
+  });
+  connectors.register(code);
   const descriptors = new ExecutionDescriptorClient({
     ...config.byClawBe,
     pathPrefix: config.thirdPartyAgents.descriptorPath,
@@ -144,7 +153,12 @@ function createConnectors(config: AppConfig) {
     }),
   );
   connectors.register(new ThirdPartyPageConnector({ descriptors }));
-  return { connectors, redis, openClaw, endpointResolver };
+  return {
+    connectors,
+    redis,
+    byFrameworkConnectors: [openClaw, code],
+    endpointResolver,
+  };
 }
 
 /** 编排核心：委派服务 + Pi Leader + 数字员工授权目录 + 群聊/资源模型提供方。 */
@@ -194,7 +208,19 @@ function createOrchestration(input: {
     endpointResolver,
     llmProvider,
   });
-  return { delegationService, leaders, agentCatalog, groupChatContexts, resourceModels };
+  const orchestratorRuntimes = new ByClawBeOrchestratorRuntimeProvider({
+    ...config.byClawBe,
+    endpointResolver,
+    llmProvider,
+  });
+  return {
+    delegationService,
+    leaders,
+    agentCatalog,
+    groupChatContexts,
+    resourceModels,
+    orchestratorRuntimes,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -229,11 +255,18 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
   }
 
   // 2) 出站传输：Connector 与 ByClaw BE 服务发现共用同一个 Redis 连接。
-  const { connectors, redis, openClaw, endpointResolver } = createConnectors(config);
+  const { connectors, redis, byFrameworkConnectors, endpointResolver } =
+    createConnectors(config);
 
   // 3) 编排核心：委派服务 + Pi Leader + 数字员工授权目录。
-  const { delegationService, leaders, agentCatalog, groupChatContexts, resourceModels } =
-    createOrchestration({ config, database, connectors, endpointResolver, redis });
+  const {
+    delegationService,
+    leaders,
+    agentCatalog,
+    groupChatContexts,
+    resourceModels,
+    orchestratorRuntimes,
+  } = createOrchestration({ config, database, connectors, endpointResolver, redis });
 
   // 4) Run 流水线：RunService（快照授权、调度 Leader）+ 入站鉴权与 Run 创建。
   //    附件读取边界：按 fileId 经 BE 下载，凭 Run 短期凭证鉴权；契约见 .dev/attachments-be-read-contract.md。
@@ -267,6 +300,7 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     groupChatContexts,
     ingressLogger,
     resourceModels,
+    orchestratorRuntimes,
   );
 
   // 5) HTTP 入口：/ready 同时要求 Pi、全部已注册 Connector、数据库与 Worker 健康。
@@ -353,7 +387,9 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
       await runService.dispose();
       await serviceRegistrar.close();
       await app.close();
-      await openClaw.close();
+      await Promise.all(
+        byFrameworkConnectors.map((connector) => connector.close()),
+      );
       await redis.quit();
       await database.close();
     },

@@ -345,7 +345,8 @@ public class SandboxLaunchContextFactory {
                 envs.put(k, v);
             }
         });
-        LOGGER.debug("从环境变量和系统属性加载了沙箱环境变量：{}", envs);
+        LOGGER.debug("从环境变量和系统属性加载沙箱环境变量完成，envCount={}，envKeys={}",
+            envs.size(), envs.keySet());
     }
 
     private Long extractModelId(PrologueDto prologueDto) {

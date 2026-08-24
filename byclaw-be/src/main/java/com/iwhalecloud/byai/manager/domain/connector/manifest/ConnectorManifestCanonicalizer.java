@@ -84,30 +84,50 @@ public class ConnectorManifestCanonicalizer {
         requireNonBlankText(root, "version");
 
         JsonNode runtime = requireObject(root.get("runtime"), "runtime");
-        requireText(runtime, "type", "cli");
-        JsonNode commands = requireObject(runtime.get("commands"), "runtime.commands");
-        if (commands.isEmpty()) {
-            throw invalid("runtime.commands must not be empty");
-        }
-        Iterator<Map.Entry<String, JsonNode>> commandFields = commands.fields();
-        while (commandFields.hasNext()) {
-            Map.Entry<String, JsonNode> field = commandFields.next();
-            JsonNode command = field.getValue();
-            if (!command.isArray() || command.isEmpty()) {
-                throw invalid("runtime.commands." + field.getKey() + " must be a non-empty argument array");
+        String runtimeType = requireAllowedText(runtime, "type", "cli", "oauth2");
+        requireAllowedText(runtime, "authorizeIn", "be-auth-job", "user-sandbox");
+        JsonNode commands = runtime.get("commands");
+        if ("cli".equals(runtimeType)) {
+            commands = requireObject(commands, "runtime.commands");
+            if (commands.isEmpty()) {
+                throw invalid("runtime.commands must not be empty");
             }
-            for (JsonNode argument : command) {
-                if (!argument.isTextual() || !StringUtils.hasText(argument.textValue())
-                        || containsControlCharacter(argument.textValue())) {
-                    throw invalid("runtime.commands." + field.getKey() + " contains an invalid argument");
+            Iterator<Map.Entry<String, JsonNode>> commandFields = commands.fields();
+            while (commandFields.hasNext()) {
+                Map.Entry<String, JsonNode> field = commandFields.next();
+                JsonNode commandGroup = field.getValue();
+                if (!commandGroup.isArray() || commandGroup.isEmpty()) {
+                    throw invalid("runtime.commands." + field.getKey() + " must be a non-empty command group");
+                }
+                for (JsonNode command : commandGroup) {
+                    if (!command.isArray()) {
+                        throw invalid("runtime.commands." + field.getKey() + " must be two-dimensional");
+                    }
+                    if (command.isEmpty()) {
+                        throw invalid("runtime.commands." + field.getKey() + " contains an empty argv");
+                    }
+                    for (JsonNode argument : command) {
+                        if (!argument.isTextual() || !StringUtils.hasText(argument.textValue())
+                                || containsControlCharacter(argument.textValue())) {
+                            throw invalid("runtime.commands." + field.getKey() + " contains an invalid argument");
+                        }
+                    }
                 }
             }
         }
 
         JsonNode authStorage = requireObject(root.get("authStorage"), "authStorage");
-        requireText(authStorage, "mode", "native-home");
-        String nativePath = requireNonBlankText(authStorage, "nativePath");
-        validateNativePath(nativePath);
+        String storageMode = requireAllowedText(authStorage, "mode", "native-home", "credential-reference");
+        if ("cli".equals(runtimeType) != "native-home".equals(storageMode)) {
+            throw invalid("runtime.type and authStorage.mode are incompatible");
+        }
+        requireAllowedText(authStorage, "owner", "be-auth-job", "user-sandbox-auth-job");
+        requireAllowedText(authStorage, "runtimeMutation", "provider-refresh-only", "sandbox-native");
+        if ("native-home".equals(storageMode)) {
+            validateNativePath(requireNonBlankText(authStorage, "nativePath"));
+        } else if (authStorage.has("nativePath")) {
+            throw invalid("credential-reference must not define nativePath");
+        }
         JsonNode environment = requireObject(authStorage.get("environment"), "authStorage.environment");
         Iterator<Map.Entry<String, JsonNode>> environmentFields = environment.fields();
         while (environmentFields.hasNext()) {
@@ -198,6 +218,20 @@ public class ConnectorManifestCanonicalizer {
         if (!expected.equals(actual)) {
             throw invalid(field + " must equal " + expected);
         }
+    }
+
+    private String requireAllowedText(JsonNode parent, String field, String... allowed) {
+        JsonNode value = parent.get(field);
+        if (value == null) {
+            return null;
+        }
+        String actual = requireNonBlankText(parent, field);
+        for (String candidate : allowed) {
+            if (candidate.equals(actual)) {
+                return actual;
+            }
+        }
+        throw invalid(field + " contains an unsupported value");
     }
 
     private boolean containsControlCharacter(String value) {

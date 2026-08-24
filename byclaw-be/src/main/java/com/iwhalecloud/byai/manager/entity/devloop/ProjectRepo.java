@@ -25,6 +25,9 @@ public class ProjectRepo {
 
     private String defaultBranch;
 
+    /** 仓库用途描述,人工填写;供需求 AI 预拆判断职责归属,也给后来人看。可空。 */
+    private String description;
+
     /** 仓库类型 workspace工作区(单个)/code代码仓库(可多个);存量默认 code。 */
     private String repoType;
 

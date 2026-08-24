@@ -25,6 +25,10 @@ import org.apache.commons.lang3.StringUtils;
 @Setter
 public class MessageContext {
 
+    private static final String THINK_STATUS_TITLE_CONTENT_TYPE = "3009";
+
+    private static final String TOOL_CALL_CONTENT_TYPE = "3015";
+
     /**
      * 智能体类型
      */
@@ -156,6 +160,17 @@ public class MessageContext {
      */
     private Set<Long> forwardMsgIds;
 
+    /** Global segment cursor shared by inferLog and messageStruct. */
+    private long nextSegmentSeq = 1L;
+
+    private String lastSegmentEventType;
+
+    private String lastSegmentContentType;
+
+    private String lastSegmentOrderId;
+
+    private Long lastSegmentSeq;
+
     /**
      * 默认构造方法
      */
@@ -253,6 +268,12 @@ public class MessageContext {
      * @param textList 文本列表
      */
     public void recordStruct(String text, List<AnswerDelta> messageList, List<StringBuilder> textList) {
+        recordStruct(text, messageList, textList, null, false);
+    }
+
+    private synchronized AnswerDelta recordStruct(String text, List<AnswerDelta> messageList,
+        List<StringBuilder> textList,
+        String eventType, boolean assignGlobalSeq) {
         AnswerDelta answerDelta = null;
         // 把增量推理消息内容（MessagePart）转换为json格式
         try {
@@ -262,23 +283,48 @@ public class MessageContext {
             log.error("思考过程返回数据错误：{}, 数据如下：{}", e.getMessage(), text, e);
         }
         if (answerDelta == null || CollectionUtils.isEmpty(answerDelta.getChoices())) {
-            return;
+            return null;
         }
+        answerDelta.setEventType(eventType);
         try {
+            AnswerDelta updatedSegment = updateExistingSegment(messageList, textList, answerDelta);
+            if (updatedSegment != null) {
+                return updatedSegment;
+            }
             // 如果是第一次做增量数据分析，那么记录响应的消息框架
             if (messageList.isEmpty()) {
+                if (assignGlobalSeq) {
+                    assignSegmentSeq(answerDelta, eventType);
+                }
                 // 记录响应的消息框架
                 messageList.add(answerDelta);
                 // 记录消息内容
                 textList.add(new StringBuilder(answerDelta.getChoices().get(0).getDelta().getContent()));
-                return;
+                return answerDelta;
+            }
+            // Snapshots persist the segment arrays but not the transient builders.
+            // Recreate missing builders before appending resumed deltas.
+            while (textList.size() < messageList.size()) {
+                AnswerDelta item = messageList.get(textList.size());
+                String content = item.getChoices().get(0).getDelta().getContent();
+                textList.add(new StringBuilder(content == null ? "" : content));
             }
             // 获取最后一个消息内容
             AnswerDelta lastAnswerDelta = messageList.get(messageList.size() - 1);
             StringBuilder builder = textList.get(textList.size() - 1);
-            boolean ifMerge = StringUtils.equals(answerDelta.getContentType(), lastAnswerDelta.getContentType());
-            if (StringUtils.isNotBlank(answerDelta.getOrderId())) {
-                ifMerge = ifMerge && answerDelta.getOrderId().equals(lastAnswerDelta.getOrderId());
+            boolean ifMerge = StringUtils.equals(answerDelta.getContentType(), lastAnswerDelta.getContentType())
+                && StringUtils.equals(answerDelta.getEventType(), lastAnswerDelta.getEventType())
+                && StringUtils.equals(answerDelta.getOrderId(), lastAnswerDelta.getOrderId());
+            if (assignGlobalSeq) {
+                ifMerge = ifMerge
+                    && StringUtils.equals(eventType, lastSegmentEventType)
+                    && StringUtils.equals(answerDelta.getContentType(), lastSegmentContentType)
+                    && StringUtils.equals(answerDelta.getOrderId(), lastSegmentOrderId)
+                    && lastSegmentSeq != null
+                    && lastSegmentSeq.equals(lastAnswerDelta.getSeq());
+            }
+            if (assignGlobalSeq && ifMerge) {
+                answerDelta.setSeq(lastAnswerDelta.getSeq());
             }
             if (ifMerge) {
                 // 判断类型是否一致一致则内容拼接
@@ -286,6 +332,9 @@ public class MessageContext {
                 lastAnswerDelta.getChoices().get(0).getDelta().setContent(builder.toString());
             }
             else {
+                if (assignGlobalSeq) {
+                    assignSegmentSeq(answerDelta, eventType);
+                }
                 // 判断类型是否一致不一致生成新的对象
                 messageList.add(answerDelta);
                 String content = answerDelta.getChoices().get(0).getDelta().getContent();
@@ -293,10 +342,60 @@ public class MessageContext {
                     textList.add(new StringBuilder(content));
                 }
             }
+            return ifMerge ? lastAnswerDelta : answerDelta;
         }
         catch (Exception e) {
             log.error("思考过程处理数据错误：{}， 错误数据如下：{}", e.getMessage(), text, e);
+            return null;
         }
+    }
+
+    private AnswerDelta updateExistingSegment(List<AnswerDelta> messageList, List<StringBuilder> textList,
+        AnswerDelta incoming) {
+        if (!supportsInPlaceUpdate(incoming.getContentType()) || StringUtils.isBlank(incoming.getOrderId())) {
+            return null;
+        }
+        for (int i = 0; i < messageList.size(); i++) {
+            AnswerDelta existing = messageList.get(i);
+            if (!StringUtils.equals(existing.getContentType(), incoming.getContentType())
+                || !StringUtils.equals(existing.getOrderId(), incoming.getOrderId())) {
+                continue;
+            }
+            String mergedContent = mergeSegmentContent(existing.getContentType(), extractContent(existing),
+                extractContent(incoming));
+            existing.getChoices().get(0).getDelta().setContent(mergedContent);
+            existing.setStatus(incoming.getStatus());
+            while (textList.size() <= i) {
+                textList.add(new StringBuilder());
+            }
+            textList.set(i, new StringBuilder(mergedContent));
+            return existing;
+        }
+        return null;
+    }
+
+    private boolean supportsInPlaceUpdate(String contentType) {
+        return TOOL_CALL_CONTENT_TYPE.equals(contentType) || THINK_STATUS_TITLE_CONTENT_TYPE.equals(contentType);
+    }
+
+    private String mergeSegmentContent(String contentType, String existingContent, String incomingContent) {
+        if (THINK_STATUS_TITLE_CONTENT_TYPE.equals(contentType)) {
+            return incomingContent;
+        }
+        try {
+            JSONObject existing = JSONObject.parseObject(existingContent);
+            JSONObject incoming = JSONObject.parseObject(incomingContent);
+            existing.putAll(incoming);
+            return existing.toJSONString();
+        }
+        catch (Exception e) {
+            log.warn("状态型消息增量内容无法合并，保留最新内容, contentType={}", contentType, e);
+            return incomingContent;
+        }
+    }
+
+    private String extractContent(AnswerDelta answerDelta) {
+        return answerDelta.getChoices().get(0).getDelta().getContent();
     }
 
     /**
@@ -304,9 +403,10 @@ public class MessageContext {
      *
      * @param text 推理文本
      */
-    public void recordInferLog(String text) {
-        recordStruct(text, reasonMessageList, reasonList);
-        recordStruct(text, streamReasonMessageList, streamReasonList);
+    public synchronized String recordInferLog(String text) {
+        AnswerDelta segment = recordStruct(text, reasonMessageList, reasonList, "reasoningLogDelta", true);
+        recordStruct(text, streamReasonMessageList, streamReasonList, "reasoningLogDelta", false);
+        return withSegmentMetadata(text, segment, "reasoningLogDelta");
     }
 
     /**
@@ -314,9 +414,65 @@ public class MessageContext {
      *
      * @param text 回答文本
      */
-    public void recordAnswerStruct(String text) {
-        recordStruct(text, answerMessageList, answerList);
-        recordStruct(text, streamAnswerMessageList, streamAnswerList);
+    public synchronized String recordAnswerStruct(String text) {
+        AnswerDelta segment = recordStruct(text, answerMessageList, answerList, "answerDelta", true);
+        recordStruct(text, streamAnswerMessageList, streamAnswerList, "answerDelta", false);
+        return withSegmentMetadata(text, segment, "answerDelta");
+    }
+
+    private void assignSegmentSeq(AnswerDelta answerDelta, String eventType) {
+        long seq = nextSegmentSeq++;
+        answerDelta.setSeq(seq);
+        lastSegmentSeq = seq;
+        lastSegmentEventType = eventType;
+        lastSegmentContentType = answerDelta.getContentType();
+        lastSegmentOrderId = answerDelta.getOrderId();
+    }
+
+    /** Restores the cross-channel cursor after loading persisted arrays. */
+    public void restoreSegmentCursor() {
+        restoreSegmentCursor(reasonMessageList, answerMessageList);
+    }
+
+    /** Initializes the cursor from existing persisted segments before an append or rerun starts. */
+    public void restoreSegmentCursor(List<AnswerDelta> existingReasonMessages,
+        List<AnswerDelta> existingAnswerMessages) {
+        AnswerDelta latest = null;
+        for (AnswerDelta item : existingReasonMessages) {
+            if (item.getSeq() != null && (latest == null || item.getSeq() > latest.getSeq())) {
+                latest = item;
+            }
+        }
+        for (AnswerDelta item : existingAnswerMessages) {
+            if (item.getSeq() != null && (latest == null || item.getSeq() > latest.getSeq())) {
+                latest = item;
+            }
+        }
+        if (latest == null || latest.getSeq() == null) {
+            return;
+        }
+        nextSegmentSeq = latest.getSeq() + 1;
+        lastSegmentSeq = latest.getSeq();
+        lastSegmentEventType = latest.getEventType();
+        lastSegmentContentType = latest.getContentType();
+        lastSegmentOrderId = latest.getOrderId();
+    }
+
+    private String withSegmentMetadata(String text, AnswerDelta segment, String eventType) {
+        try {
+            JSONObject payload = JSONObject.parseObject(text);
+            if (segment != null) {
+                payload.put("seq", segment.getSeq());
+                payload.put("eventType", eventType);
+                // The stream marker is emitted with the first visible delta so clients can
+                // select the ordered renderer before the final message is persisted.
+                payload.put("messageRenderVersion", "v2");
+            }
+            return payload.toJSONString();
+        }
+        catch (Exception e) {
+            return text;
+        }
     }
 
     /**

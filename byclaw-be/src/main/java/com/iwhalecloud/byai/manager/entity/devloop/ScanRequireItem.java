@@ -35,7 +35,7 @@ public class ScanRequireItem {
 
     private String action;
 
-    /** 已启动会话ID：需求启动后回写，标记“已启动”并支持跳转会话 */
+    /** 已启动会话ID：需求启动后回写，标记“已启动”并支持跳转会话。拆分任务与去聊天完成两个入口共用此列 */
     private Long sessionId;
 
     /** AI综合评分 0-100 */

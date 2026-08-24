@@ -7,10 +7,6 @@ jest.mock('@/hooks/useSseSender/chatStream', () => ({
   subscribeChatStream: jest.fn(() => jest.fn()),
 }));
 
-jest.mock('@/service/message', () => ({
-  getChatRunningStatus: jest.fn(() => Promise.resolve([])),
-}));
-
 jest.mock('@/utils/websocket', () => ({
   __esModule: true,
   default: {
@@ -21,11 +17,10 @@ jest.mock('@/utils/websocket', () => ({
   },
 }));
 
-import { renderHook, act } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { useDispatch, useSelector } from '@umijs/max';
 
 import { subscribeChatStream } from '@/hooks/useSseSender/chatStream';
-import { getChatRunningStatus } from '@/service/message';
 import webSocketManager from '@/utils/websocket';
 
 import useGlobalChatRuntime from '../useGlobalChatRuntime';
@@ -33,7 +28,6 @@ import useGlobalChatRuntime from '../useGlobalChatRuntime';
 const mockUseDispatch = useDispatch as jest.Mock;
 const mockUseSelector = useSelector as jest.Mock;
 const mockSubscribeChatStream = subscribeChatStream as jest.Mock;
-const mockGetChatRunningStatus = getChatRunningStatus as jest.Mock;
 const mockWebSocketManager = webSocketManager as unknown as Record<string, jest.Mock>;
 
 describe('hooks/useGlobalChatRuntime', () => {
@@ -62,7 +56,7 @@ describe('hooks/useGlobalChatRuntime', () => {
     jest.useRealTimers();
   });
 
-  it('initializes websocket and running status after login', async () => {
+  it('initializes websocket stream handling after login', () => {
     renderHook(() => useGlobalChatRuntime());
 
     expect(mockWebSocketManager.init).toHaveBeenCalled();
@@ -74,12 +68,6 @@ describe('hooks/useGlobalChatRuntime', () => {
     );
     expect(mockWebSocketManager.onMessage).toHaveBeenCalledWith('ERROR', expect.any(Function));
     expect(mockWebSocketManager.onMessage).toHaveBeenCalledWith('NOTIFICATION', expect.any(Function));
-
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(mockGetChatRunningStatus).toHaveBeenCalledWith({ sessionIds: ['s1'] });
   });
 
   it('dispatches notification sessions only for the current user', () => {

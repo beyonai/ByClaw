@@ -4,15 +4,19 @@ import { useIntl } from '@umijs/max';
 import dayjs from 'dayjs';
 import { listOperationTasks, listTasks, type DevloopTaskItem } from '@/service/devloop';
 import TaskDetailDrawer from './TaskDetailDrawer';
+import { getDevloopTaskTypeLabelId, normalizeDevloopTaskType, type DevloopTaskType } from './devloopTaskType';
 import { getTaskDateRangePresets, type TaskDateRange } from './taskDatePresets';
 import styles from './index.module.less';
 
 interface SessionOverviewDrawerProps {
   open: boolean;
-  onClose: () => void;
+  onClose?: () => void;
   projectId?: string | number;
   // 运营任务与研发任务使用不同接口，但共享同一套状态看板交互。
   operationProject?: boolean;
+  // 内嵌模式去掉 Drawer 外壳，直接占满父容器：任务 Tab 的「视图」模式用它，
+  // 看板逻辑只有这一份实现，抽屉入口和内嵌入口看到的筛选、分页、详情行为完全一致。
+  embedded?: boolean;
   canEnterSession?: (task: DevloopTaskItem) => boolean;
   onEnterSession?: (task: DevloopTaskItem) => void;
 }
@@ -51,6 +55,15 @@ const OPERATION_TASK_STATUS_BY_COLUMN: Record<TaskColumnKey, 'todo' | 'doing' | 
   running: 'doing',
   paused: 'pendingReview',
   done: 'done',
+};
+
+// 四角色各配一组标签配色，与项目详情任务卡的类型图标同一套色值，两个入口看同一个任务时颜色一致。
+const TASK_TYPE_TAG_CLASSES: Record<DevloopTaskType, string> = {
+  architect: styles.kanbanCardTypeTagArchitect,
+  requirement: styles.kanbanCardTypeTagRequirement,
+  coder: styles.kanbanCardTypeTagCoder,
+  tester: styles.kanbanCardTypeTagTester,
+  chat: styles.kanbanCardTypeTagChat,
 };
 
 // 四个状态列各自保存分页进度，筛选条件变化时统一从第一页重新查询。
@@ -96,6 +109,7 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
   onClose,
   projectId,
   operationProject = false,
+  embedded = false,
   canEnterSession,
   onEnterSession,
 }) => {
@@ -149,7 +163,8 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
             createTimeStart,
             createTimeEnd,
             status: OPERATION_TASK_STATUS_BY_COLUMN[columnKey],
-            onlyMine: false,
+            // 运营和研发任务看板共用“只看我的”，运营接口已支持按当前负责人筛选。
+            onlyMine: queryState.onlyMine || undefined,
             pageNum,
             pageSize: TASK_PAGE_SIZE,
           })
@@ -208,7 +223,7 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
       const queryState = { ...queryRef.current, ...overrides };
       queryRef.current = queryState;
       setDateRange(queryState.dateRange);
-      setOnlyMine(operationProject ? false : queryState.onlyMine);
+      setOnlyMine(queryState.onlyMine);
       loadFailedShownRef.current = false;
       const requestVersion = requestVersionRef.current + 1;
       requestVersionRef.current = requestVersion;
@@ -225,9 +240,9 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
 
   useEffect(() => {
     if (!open) return;
-    // 每次打开重置为默认视图：研发任务默认只看我的，运营任务默认查看全部项目任务。
+    // 每次打开重置为默认视图：运营和研发任务均默认只看当前登录用户负责的任务。
     setDatePreset(DEFAULT_PRESET);
-    reloadBoard({ dateRange: getPresetRange('week'), onlyMine: !operationProject });
+    reloadBoard({ dateRange: getPresetRange('week'), onlyMine: true });
   }, [open, operationProject, reloadBoard]);
 
   const handlePresetChange = useCallback(
@@ -252,79 +267,81 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
     [columnStates, fetchColumnTasks]
   );
 
-  return (
+  const boardBody = (
     <>
-      <Drawer
-        title={t('projectSpace.taskBoard.title')}
-        className={styles.taskBoardDrawer}
-        open={open}
-        onClose={onClose}
-        width="90vw"
-      >
-        <div className={styles.kanbanToolbar}>
-          {/* 快速选择今天/本周/本月；中等尺寸页签与 32px 日期筛选高度对齐。 */}
-          <Segmented
-            size="middle"
-            value={datePreset === 'custom' ? '' : datePreset}
-            options={[
-              { label: t('projectSpace.taskBoard.preset.today'), value: 'today' },
-              { label: t('projectSpace.taskBoard.preset.week'), value: 'week' },
-              { label: t('projectSpace.taskBoard.preset.month'), value: 'month' },
-            ]}
-            onChange={(value) => handlePresetChange(value as DatePreset)}
-          />
-          <DatePicker.RangePicker
-            size="small"
-            allowClear
-            value={dateRange}
-            placeholder={[
-              t('projectSpace.taskBoard.dateStartPlaceholder'),
-              t('projectSpace.taskBoard.dateEndPlaceholder'),
-            ]}
-            presets={taskDatePresets}
-            onChange={(dates) => {
-              const nextDateRange = dates as TaskDateRange;
-              setDatePreset(getDatePresetByRange(nextDateRange));
-              reloadBoard({ dateRange: nextDateRange });
-            }}
-          />
-          {!operationProject && (
-            <Checkbox
-              checked={onlyMine}
-              onChange={(e) => {
-                reloadBoard({ onlyMine: e.target.checked });
-              }}
-            >
-              {t('projectSpace.taskBoard.onlyMine')}
-            </Checkbox>
-          )}
-        </div>
-        <div className={styles.kanbanBoard}>
-          {COLUMNS.map((column) => {
-            const columnState = columnStates[column.key];
-            return (
-              <div key={column.key} className={styles.kanbanColumn}>
-                <div className={styles.kanbanColHeader}>
-                  <span className={`${styles.kanbanColIcon} ${styles[`kanbanColIcon${column.classSuffix}`]}`}>
-                    {column.icon}
-                  </span>
-                  <span className={styles.kanbanColTitle}>{t(column.labelId)}</span>
-                  <span className={styles.kanbanColCount}>{columnState.total}</span>
-                </div>
-                <div className={styles.kanbanColumnContent} onScroll={(event) => handleColumnScroll(column.key, event)}>
-                  <Spin spinning={columnState.loading} wrapperClassName={styles.kanbanColumnSpin}>
-                    {columnState.tasks.length === 0 ? (
-                      <Empty description="" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                    ) : (
-                      columnState.tasks.map((task) => (
+      <div className={styles.kanbanToolbar}>
+        {/* 快速选择今天/本周/本月；中等尺寸页签与 32px 日期筛选高度对齐。 */}
+        <Segmented
+          size="middle"
+          value={datePreset === 'custom' ? '' : datePreset}
+          options={[
+            { label: t('projectSpace.taskBoard.preset.today'), value: 'today' },
+            { label: t('projectSpace.taskBoard.preset.week'), value: 'week' },
+            { label: t('projectSpace.taskBoard.preset.month'), value: 'month' },
+          ]}
+          onChange={(value) => handlePresetChange(value as DatePreset)}
+        />
+        <DatePicker.RangePicker
+          size="small"
+          allowClear
+          value={dateRange}
+          placeholder={[
+            t('projectSpace.taskBoard.dateStartPlaceholder'),
+            t('projectSpace.taskBoard.dateEndPlaceholder'),
+          ]}
+          presets={taskDatePresets}
+          onChange={(dates) => {
+            const nextDateRange = dates as TaskDateRange;
+            setDatePreset(getDatePresetByRange(nextDateRange));
+            reloadBoard({ dateRange: nextDateRange });
+          }}
+        />
+        <Checkbox
+          checked={onlyMine}
+          onChange={(e) => {
+            reloadBoard({ onlyMine: e.target.checked });
+          }}
+        >
+          {t('projectSpace.taskBoard.onlyMine')}
+        </Checkbox>
+      </div>
+      <div className={styles.kanbanBoard}>
+        {COLUMNS.map((column) => {
+          const columnState = columnStates[column.key];
+          return (
+            <div key={column.key} className={styles.kanbanColumn}>
+              <div className={styles.kanbanColHeader}>
+                <span className={`${styles.kanbanColIcon} ${styles[`kanbanColIcon${column.classSuffix}`]}`}>
+                  {column.icon}
+                </span>
+                <span className={styles.kanbanColTitle}>{t(column.labelId)}</span>
+                <span className={styles.kanbanColCount}>{columnState.total}</span>
+              </div>
+              <div className={styles.kanbanColumnContent} onScroll={(event) => handleColumnScroll(column.key, event)}>
+                <Spin spinning={columnState.loading} wrapperClassName={styles.kanbanColumnSpin}>
+                  {columnState.tasks.length === 0 ? (
+                    <Empty description="" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                  ) : (
+                    columnState.tasks.map((task) => {
+                      // 运营任务接口回的是 operationType，这里只给研发任务的四角色类型打标签。
+                      const taskType = operationProject ? undefined : normalizeDevloopTaskType(task);
+                      return (
                         <div
                           key={task.sessionId || task.taskId}
                           className={styles.kanbanCard}
                           onClick={() => setDetailTask(task)}
                         >
-                          <h4 className={styles.kanbanCardTitle}>
-                            {task.title || t('projectSpace.taskBoard.unnamedTask')}
-                          </h4>
+                          <div className={styles.kanbanCardHeader}>
+                            <h4 className={styles.kanbanCardTitle}>
+                              {task.title || t('projectSpace.taskBoard.unnamedTask')}
+                            </h4>
+                            {taskType && (
+                              // 类型标签固定在右上角不参与压缩，标题在左侧自行两行截断。
+                              <span className={`${styles.kanbanCardTypeTag} ${TASK_TYPE_TAG_CLASSES[taskType]}`}>
+                                {t(getDevloopTaskTypeLabelId(taskType))}
+                              </span>
+                            )}
+                          </div>
                           {task.currentStage?.stageName && (
                             <div className={styles.kanbanCardMeta}>
                               <Tag className={styles.kanbanPhaseTag} color="blue">
@@ -338,20 +355,40 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
                             <span>{task.createTime ? dayjs(task.createTime).format('M/D HH:mm') : ''}</span>
                           </div>
                         </div>
-                      ))
-                    )}
-                    {columnState.loading && columnState.tasks.length > 0 && (
-                      <div className={styles.kanbanColumnLoadingMore}>
-                        <Spin size="small" />
-                      </div>
-                    )}
-                  </Spin>
-                </div>
+                      );
+                    })
+                  )}
+                  {columnState.loading && columnState.tasks.length > 0 && (
+                    <div className={styles.kanbanColumnLoadingMore}>
+                      <Spin size="small" />
+                    </div>
+                  )}
+                </Spin>
               </div>
-            );
-          })}
-        </div>
-      </Drawer>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+
+  return (
+    <>
+      {embedded ? (
+        // 内嵌时不渲染 Drawer：open 由父级的模式切换控制，关掉就整体卸载，
+        // 下次切回来重新挂载会走 open effect 重置为默认筛选，与抽屉入口行为一致。
+        open && <div className={styles.taskBoardEmbedded}>{boardBody}</div>
+      ) : (
+        <Drawer
+          title={t('projectSpace.taskBoard.title')}
+          className={styles.taskBoardDrawer}
+          open={open}
+          onClose={onClose}
+          width="90vw"
+        >
+          {boardBody}
+        </Drawer>
+      )}
       <TaskDetailDrawer
         task={detailTask}
         onClose={() => setDetailTask(null)}

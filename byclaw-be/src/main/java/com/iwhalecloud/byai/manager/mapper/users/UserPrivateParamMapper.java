@@ -2,8 +2,11 @@ package com.iwhalecloud.byai.manager.mapper.users;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.iwhalecloud.byai.manager.entity.users.UserPrivateParam;
+import com.iwhalecloud.byai.manager.entity.users.Users;
+import java.util.List;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 /**
  * 用户个人参数配置 Mapper。
@@ -11,6 +14,23 @@ import org.apache.ibatis.annotations.Param;
  * @date 2026-06-22 00:00:00
  */
 public interface UserPrivateParamMapper extends BaseMapper<UserPrivateParam> {
+
+    @Select("""
+        SELECT DISTINCT users.user_id, users.user_code
+        FROM po_users users
+        INNER JOIN po_user_private_param param ON param.user_id = users.user_id
+        WHERE param.param_source = 'CONNECTOR'
+          AND param.delete_flag = '0'
+          AND users.user_id > #{cursorUserId}
+          AND users.user_code IS NOT NULL
+          AND users.user_code <> ''
+        ORDER BY users.user_id ASC
+        LIMIT #{limit}
+        """)
+    List<Users> selectConnectorManagedUsersAfter(
+        @Param("cursorUserId") Long cursorUserId,
+        @Param("limit") int limit
+    );
 
     /** 并发创建托管快照时忽略唯一键冲突，调用方随后查询并更新胜出记录；兼容 openGauss。 */
     @Insert("""

@@ -1,5 +1,6 @@
 import {
   completeActiveSdkRequest,
+  hasPendingNativeChildRun,
   markActiveSdkDispatchSettled,
   resolveActiveSdkRequestBySessionKey,
   shouldCompleteActiveSdkRequest,
@@ -33,7 +34,7 @@ function isAbortSettled(
   }
   return (
     request.boundRunIds.size === 0 &&
-    request.pendingChildSessionKeys.size === 0 &&
+    !hasPendingNativeChildRun(request) &&
     request.pendingOutboundCount === 0 &&
     !request.awaitingFollowup &&
     !request.followupRunStarted

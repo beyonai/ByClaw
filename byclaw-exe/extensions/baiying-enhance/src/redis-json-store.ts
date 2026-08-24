@@ -19,12 +19,21 @@ export type RedisJsonPayload = {
     hash: string;
 };
 
+export type RedisJsonReadResult =
+    | { status: "ok"; value: RedisJsonPayload }
+    | { status: "missing" }
+    | { status: "malformed" }
+    | { status: "transport-error" };
+
 export type BaiyingRedisJsonStore = {
     getJsonByKey: (key: string) => Promise<RedisJsonPayload | null>;
+    getJsonByKeyStrict?: (key: string) => Promise<RedisJsonReadResult>;
     getStringByKey?: (key: string) => Promise<string | null>;
     getHashByKey?: (key: string) => Promise<Record<string, string> | null>;
     getHashJson?: (params: { key: string; field: string }) => Promise<RedisJsonPayload | null>;
+    getHashJsonStrict?: (params: { key: string; field: string }) => Promise<RedisJsonReadResult>;
     getDigEmployeeJson: (resourceId: string) => Promise<RedisJsonPayload | null>;
+    getDigEmployeeJsonStrict?: (resourceId: string) => Promise<RedisJsonReadResult>;
     getResourceJson: (params: {
         resourceBizType: string;
         resourceId: string;
@@ -143,14 +152,14 @@ export function createRedisJsonStore(params: { logger?: LoggerLike } = {}): Baiy
         return connectPromise;
     };
 
-    const getJsonByKey = async (key: string): Promise<RedisJsonPayload | null> => {
+    const getJsonByKeyStrict = async (key: string): Promise<RedisJsonReadResult> => {
         const trimmed = key.trim();
         if (!trimmed) {
-            return null;
+            return { status: "missing" };
         }
         const client = await connect();
         if (!client) {
-            return null;
+            return { status: "transport-error" };
         }
         let content: string | null;
         try {
@@ -159,17 +168,22 @@ export function createRedisJsonStore(params: { logger?: LoggerLike } = {}): Baiy
             params.logger?.warn?.(
                 `baiying-enhance: Redis JSON GET failed key=${trimmed}: ${err instanceof Error ? err.message : String(err)}`,
             );
-            return null;
+            return { status: "transport-error" };
         }
-        if (!content) {
-            return null;
+        if (content == null) {
+            return { status: "missing" };
         }
         const parsed = parsePayload(trimmed, content);
         if (!parsed) {
             params.logger?.warn?.(`baiying-enhance: Redis JSON parse failed key=${trimmed}`);
-            return null;
+            return { status: "malformed" };
         }
-        return parsed;
+        return { status: "ok", value: parsed };
+    };
+
+    const getJsonByKey = async (key: string): Promise<RedisJsonPayload | null> => {
+        const result = await getJsonByKeyStrict(key);
+        return result.status === "ok" ? result.value : null;
     };
 
     const getStringByKey = async (key: string): Promise<string | null> => {
@@ -213,18 +227,18 @@ export function createRedisJsonStore(params: { logger?: LoggerLike } = {}): Baiy
         }
     };
 
-    const getHashJson = async (paramsIn: {
+    const getHashJsonStrict = async (paramsIn: {
         key: string;
         field: string;
-    }): Promise<RedisJsonPayload | null> => {
+    }): Promise<RedisJsonReadResult> => {
         const key = paramsIn.key.trim();
         const field = paramsIn.field.trim();
         if (!key || !field) {
-            return null;
+            return { status: "missing" };
         }
         const client = await connect();
         if (!client) {
-            return null;
+            return { status: "transport-error" };
         }
         let content: string | null;
         try {
@@ -235,27 +249,39 @@ export function createRedisJsonStore(params: { logger?: LoggerLike } = {}): Baiy
                     err instanceof Error ? err.message : String(err)
                 }`,
             );
-            return null;
+            return { status: "transport-error" };
         }
-        if (!content) {
-            return null;
+        if (content == null) {
+            return { status: "missing" };
         }
         const parsed = parsePayload(`${key}:${field}`, content);
         if (!parsed) {
             params.logger?.warn?.(
                 `baiying-enhance: Redis JSON parse failed key=${key} field=${field}`,
             );
-            return null;
+            return { status: "malformed" };
         }
-        return parsed;
+        return { status: "ok", value: parsed };
+    };
+
+    const getHashJson = async (paramsIn: {
+        key: string;
+        field: string;
+    }): Promise<RedisJsonPayload | null> => {
+        const result = await getHashJsonStrict(paramsIn);
+        return result.status === "ok" ? result.value : null;
     };
 
     return {
         getJsonByKey,
+        getJsonByKeyStrict,
         getStringByKey,
         getHashByKey,
         getHashJson,
+        getHashJsonStrict,
         getDigEmployeeJson: (resourceId) => getJsonByKey(digEmployeeRedisKey(resourceId)),
+        getDigEmployeeJsonStrict: (resourceId) =>
+            getJsonByKeyStrict(digEmployeeRedisKey(resourceId)),
         getResourceJson: ({ resourceBizType, resourceId }) =>
             getJsonByKey(resourceRedisKey(resourceBizType, resourceId)),
         close: async () => {

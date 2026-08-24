@@ -20,6 +20,8 @@ public class KbFileUpdateResult {
 
         private String knCode;
 
+        private Long resourceId;
+
         private String filePath;
 
         private Boolean success;

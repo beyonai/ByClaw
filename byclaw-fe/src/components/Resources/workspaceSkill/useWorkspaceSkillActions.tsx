@@ -131,7 +131,11 @@ export const useWorkspaceSkillActions = (params: UseWorkspaceSkillActionsParams)
             onCancel={() => clearDetailPanel?.()}
             onEdit={() => {}}
           />,
-          { width: 350 }
+          {
+            width: 350,
+            tabKey: `workspace-skill:${item.skillPath}`,
+            title: detailItem.resourceName,
+          }
         );
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));

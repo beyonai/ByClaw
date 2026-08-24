@@ -36,9 +36,8 @@ public class IntegrationSuiteService {
         if (suite.getRunner() == null) {
             suite.setRunner("pytest");
         }
-        if (suite.getSourceType() == null) {
-            suite.setSourceType("git");
-        }
+        // source_type 不再参与运行时判定(用例来源已上移到 byai_integration_env.case_source),
+        // 留空而不是补一个运行时没人认的默认值,免得后来人以为它还在决定用例从哪来。
         integrationSuiteMapper.insert(suite);
         return suite;
     }

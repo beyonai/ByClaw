@@ -89,6 +89,12 @@ describe("RunIngressService self-exclusion", () => {
       message: "hi",
       externalSessionId: "11034160",
       parentMessageId: "gateway-message-1",
+      metadata: {
+        channelExtension: { source: "byclaw-be" },
+        externalSessionId: "untrusted-session",
+        parentMessageId: "untrusted-message",
+        "Beyond-Token": "untrusted-token",
+      },
     });
 
     expect(runService.createSessionRun.mock.calls[0][0].ingressContext).toEqual({
@@ -96,8 +102,10 @@ describe("RunIngressService self-exclusion", () => {
       parentMessageId: "gateway-message-1",
     });
     expect(runService.createSessionRun.mock.calls[0][0].metadata).toMatchObject({
+      channelExtension: { source: "byclaw-be" },
       externalSessionId: "11034160",
       parentMessageId: "gateway-message-1",
+      "Beyond-Token": PRINCIPAL_TOKEN,
     });
   });
 
@@ -415,5 +423,97 @@ describe("RunIngressService group chat snapshot", () => {
       }),
       "超级助手模型绑定不可用，本次沿用最后一次有效模型",
     );
+  });
+});
+
+describe("RunIngressService expert-team orchestration", () => {
+  it("uses the BE-resolved team snapshot instead of discoverMine", async () => {
+    const runService = fakeRunService();
+    const listAuthorizedAgents = vi.fn(async () => [agent("personal-agent")]);
+    const resolve = vi.fn(async () => ({
+      orchestrator: {
+        schemaVersion: "byclaw.orchestrator-runtime/v1" as const,
+        kind: "EXPERT_TEAM" as const,
+        id: "team-1",
+        name: "专家团",
+        prompt: { content: "只负责协调。", version: "3" },
+        contextProfile: "EXPERT_TEAM_MINIMAL_V1" as const,
+        configVersion: "5",
+      },
+      agents: [agent("team-member")],
+      leaderModel: { modelId: "model-1", fingerprint: "c".repeat(64) },
+    }));
+    const ingress = new RunIngressService(
+      runService.impl,
+      async () => ({ userCode: "creator" }),
+      { listAuthorizedAgents },
+      7_200_000,
+      undefined,
+      undefined,
+      undefined,
+      { resolve },
+    );
+
+    await ingress.createSessionRun({
+      beyondToken: PRINCIPAL_TOKEN,
+      systemCode: "BYAI",
+      message: "制定营销方案",
+      sourceAgentId: "team-1",
+      orchestrator: {
+        schemaVersion: "byclaw.orchestrator-ref/v1",
+        kind: "EXPERT_TEAM",
+        id: "team-1",
+      },
+    });
+
+    expect(listAuthorizedAgents).not.toHaveBeenCalled();
+    expect(resolve).toHaveBeenCalledWith({
+      orchestrator: {
+        schemaVersion: "byclaw.orchestrator-ref/v1",
+        kind: "EXPERT_TEAM",
+        id: "team-1",
+      },
+      beyondToken: PRINCIPAL_TOKEN,
+      systemCode: "BYAI",
+    });
+    const created = runService.createSessionRun.mock.calls[0][0];
+    expect(created.agentList.map((item: AgentProfile) => item.id)).toEqual([
+      "team-member",
+    ]);
+    expect(created.ingressContext).toEqual({
+      orchestrator: expect.objectContaining({ id: "team-1", configVersion: "5" }),
+      leaderModel: { modelId: "model-1", fingerprint: "c".repeat(64) },
+    });
+  });
+
+  it("fails closed when the expert-team runtime cannot be resolved", async () => {
+    const runService = fakeRunService();
+    const ingress = new RunIngressService(
+      runService.impl,
+      async () => ({ userCode: "creator" }),
+      catalog([agent("personal-agent")]),
+      7_200_000,
+      undefined,
+      undefined,
+      undefined,
+      {
+        resolve: async () => {
+          throw new Error("team permission denied");
+        },
+      },
+    );
+
+    await expect(
+      ingress.createSessionRun({
+        beyondToken: PRINCIPAL_TOKEN,
+        message: "制定营销方案",
+        orchestrator: {
+          schemaVersion: "byclaw.orchestrator-ref/v1",
+          kind: "EXPERT_TEAM",
+          id: "team-1",
+        },
+      }),
+    ).rejects.toThrow("team permission denied");
+    expect(runService.createSessionRun).not.toHaveBeenCalled();
   });
 });

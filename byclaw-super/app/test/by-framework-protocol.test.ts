@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
 import { AttachmentInputError } from "@byclaw/by-conductor";
+import { AskAgentCommand, MessageHeader } from "@byclaw/by-framework";
+import { describe, expect, it } from "vitest";
 import {
+  commandOrchestratorRef,
   commandSessionContext,
   commandSourceAgentId,
   extractUserInput,
+  orchestratorBindingSessionId,
 } from "../worker/by-framework-protocol.js";
 
 describe("extractUserInput", () => {
@@ -145,3 +148,62 @@ describe("commandSessionContext", () => {
     ).toBeUndefined();
   });
 });
+
+describe("commandOrchestratorRef", () => {
+  it("keeps legacy requests compatible when orchestrator is absent", () => {
+    expect(commandOrchestratorRef(command({}))).toBeUndefined();
+  });
+
+  it("parses an expert-team reference and namespaces its session binding", () => {
+    const orchestrator = commandOrchestratorRef(
+      command({
+        orchestrator: {
+          schemaVersion: "byclaw.orchestrator-ref/v1",
+          kind: "EXPERT_TEAM",
+          id: 90001,
+        },
+      }),
+    );
+    expect(orchestrator).toEqual({
+      schemaVersion: "byclaw.orchestrator-ref/v1",
+      kind: "EXPERT_TEAM",
+      id: "90001",
+    });
+    expect(orchestratorBindingSessionId("session-1", orchestrator)).toBe(
+      '["orchestrator","EXPERT_TEAM","90001","session-1"]',
+    );
+  });
+
+  it("rejects malformed orchestrator declarations", () => {
+    expect(() =>
+      commandOrchestratorRef(
+        command({
+          orchestrator: {
+            schemaVersion: "v0",
+            kind: "EXPERT_TEAM",
+            id: "90001",
+          },
+        }),
+      ),
+    ).toThrow("orchestrator.schemaVersion");
+  });
+
+  it("preserves the legacy binding key for Super Assistant", () => {
+    expect(orchestratorBindingSessionId("session-1", undefined)).toBe(
+      "session-1",
+    );
+  });
+});
+
+function command(extraPayload: Record<string, unknown>): AskAgentCommand {
+  return new AskAgentCommand(
+    new MessageHeader("message-1", "session-1", "trace-1", {
+      sourceAgentType: "BY_PARENT",
+      targetAgentType: "BY_SUPER",
+      metadata: {},
+    }),
+    "hello",
+    true,
+    extraPayload,
+  );
+}

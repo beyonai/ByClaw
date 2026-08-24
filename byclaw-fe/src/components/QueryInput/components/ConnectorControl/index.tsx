@@ -3,15 +3,22 @@ import {
   ApiOutlined,
   CheckCircleFilled,
   DatabaseOutlined,
+  DisconnectOutlined,
+  EllipsisOutlined,
   FileTextOutlined,
   GlobalOutlined,
   LinkOutlined,
   LoadingOutlined,
   QrcodeOutlined,
+  ReloadOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
-import { Avatar, Button, Drawer, Empty, Modal, Spin, Switch, Tooltip, message } from 'antd';
+import { Avatar, Button, Drawer, Dropdown, Empty, Modal, Spin, Switch, Tooltip, message } from 'antd';
 import classNames from 'classnames';
+import dayjs from 'dayjs';
+import customParseFormat from 'dayjs/plugin/customParseFormat';
+import timezone from 'dayjs/plugin/timezone';
+import utc from 'dayjs/plugin/utc';
 import { useSelector } from '@umijs/max';
 
 import AntdIcon from '@/components/AntdIcon';
@@ -19,15 +26,76 @@ import {
   getConnectorAuthorization,
   cancelConnectorAuthorization,
   queryAllConnectors,
+  revokeConnectorAuthorization,
   startConnectorAuthorization,
   updateConnectorEnable,
   type ConnectorAuthorization,
+  type ConnectorCredentialState,
   type ConnectorEnableFlag,
   type ConnectorId,
   type ConnectorListItem,
+  type ConnectorRenewalMode,
 } from '@/service/connector';
 
 import styles from './index.module.less';
+
+dayjs.extend(customParseFormat);
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
+const CREDENTIAL_TIMEZONE = 'Asia/Shanghai';
+const CREDENTIAL_TIME_FORMAT = 'YYYY-MM-DD HH:mm:ss';
+const LEGACY_CREDENTIAL_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/;
+const OFFSET_CREDENTIAL_TIME_PATTERN = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(Z|[+-]\d{2}:?\d{2})$/;
+
+const hasValidOffset = (offset: string) => {
+  if (offset === 'Z') return true;
+
+  const compactOffset = offset.replace(':', '');
+  const hours = Number(compactOffset.slice(1, 3));
+  const minutes = Number(compactOffset.slice(3, 5));
+  return hours < 14 ? minutes < 60 : hours === 14 && minutes === 0;
+};
+
+export const normalizeCredentialExpirationOffset = (value: string) => value.replace(/([+-]\d{2})(\d{2})$/, '$1:$2');
+
+export const getCredentialExpirationDisplay = (
+  value: string,
+  now: string | number | Date = Date.now()
+): { formattedTime: string; expired: boolean } | undefined => {
+  const trimmedValue = value.trim();
+  let credentialExpiration;
+
+  if (LEGACY_CREDENTIAL_TIME_PATTERN.test(trimmedValue)) {
+    const normalizedValue = trimmedValue.replace('T', ' ');
+    credentialExpiration = dayjs.tz(normalizedValue, CREDENTIAL_TIME_FORMAT, CREDENTIAL_TIMEZONE);
+    if (!credentialExpiration.isValid() || credentialExpiration.format(CREDENTIAL_TIME_FORMAT) !== normalizedValue) {
+      return undefined;
+    }
+  } else {
+    const offsetMatch = OFFSET_CREDENTIAL_TIME_PATTERN.exec(trimmedValue);
+    if (!offsetMatch) return undefined;
+
+    const normalizedWallClock = `${offsetMatch[1]} ${offsetMatch[2]}`;
+    const wallClock = dayjs(normalizedWallClock, CREDENTIAL_TIME_FORMAT, true);
+    if (
+      !wallClock.isValid() ||
+      wallClock.format(CREDENTIAL_TIME_FORMAT) !== normalizedWallClock ||
+      !hasValidOffset(offsetMatch[3])
+    ) {
+      return undefined;
+    }
+    credentialExpiration = dayjs(normalizeCredentialExpirationOffset(trimmedValue));
+  }
+
+  const comparisonTime = dayjs(now);
+  if (!credentialExpiration.isValid() || !comparisonTime.isValid()) return undefined;
+
+  return {
+    formattedTime: credentialExpiration.tz(CREDENTIAL_TIMEZONE).format(CREDENTIAL_TIME_FORMAT),
+    expired: credentialExpiration.isBefore(comparisonTime),
+  };
+};
 
 // 用于分批放开聊天框入口；接口不可用时不会模拟授权成功。
 export const CONNECTOR_ENTRY_VISIBLE = true;
@@ -40,6 +108,12 @@ export type Connector = {
   authType: 'qrcode' | 'oauth';
   icon: React.ReactNode;
   enableFlag: ConnectorEnableFlag;
+  credentialState?: ConnectorCredentialState | null;
+  renewalMode?: ConnectorRenewalMode | null;
+  accessExpiresAt?: string | null;
+  refreshExpiresAt?: string | null;
+  lastVerifiedAt?: string | null;
+  credentialExpiresAt?: string | null;
 };
 
 type ConnectorControlProps = {
@@ -67,6 +141,12 @@ const mapConnectorListItem = (item: ConnectorListItem): Connector => ({
   authType: 'oauth',
   icon: getConnectorIcon(item.connectorCode),
   enableFlag: item.enableFlag,
+  credentialState: item.credentialState,
+  renewalMode: item.renewalMode,
+  accessExpiresAt: item.accessExpiresAt,
+  refreshExpiresAt: item.refreshExpiresAt,
+  lastVerifiedAt: item.lastVerifiedAt,
+  credentialExpiresAt: item.credentialExpiresAt,
 });
 
 const authorizationTerminalMessages: Partial<Record<ConnectorAuthorization['status'], string>> = {
@@ -133,6 +213,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   const [connectors, setConnectors] = useState<Connector[]>([]);
   const [loadingConnectors, setLoadingConnectors] = useState(false);
   const [updatingConnectorIds, setUpdatingConnectorIds] = useState<Set<ConnectorId>>(new Set());
+  const [revokingConnectorIds, setRevokingConnectorIds] = useState<Set<ConnectorId>>(new Set());
   const [startingAuthorization, setStartingAuthorization] = useState(false);
   const [checkingAuthorization, setCheckingAuthorization] = useState(false);
   const activeAuthorizationIdRef = useRef<string | undefined>(undefined);
@@ -142,6 +223,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   const attemptedAuthorizationOpenKeysRef = useRef<Set<string>>(new Set());
   const cancelledAuthorizationIdsRef = useRef<Set<string>>(new Set());
   const hasLoadedInitialConnectorsRef = useRef(false);
+  const connectorLoadGenerationRef = useRef(0);
 
   const clearAuthorizationTimer = useCallback(() => {
     if (authorizationTimerRef.current === undefined) return;
@@ -190,6 +272,38 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   const enabledConnectors = useMemo(() => connectors.filter((connector) => connector.enableFlag === 'Y'), [connectors]);
   const previewConnectors = useMemo(() => connectors.slice(0, 3), [connectors]);
 
+  const loadAuthorizedConnectors = useCallback(
+    async (reportAuthorizationRefreshFailure = false) => {
+      const requestGeneration = connectorLoadGenerationRef.current + 1;
+      connectorLoadGenerationRef.current = requestGeneration;
+      const hasCachedConnectors = connectors.length > 0;
+      if (hasCachedConnectors) {
+        setCatalogRefreshing(true);
+      } else {
+        setLoadingConnectors(true);
+      }
+      try {
+        const list = await queryAllConnectors();
+        if (connectorLoadGenerationRef.current !== requestGeneration) return;
+        const connectorList = list.map(mapConnectorListItem);
+        setConnectors(connectorList);
+      } catch {
+        if (connectorLoadGenerationRef.current !== requestGeneration) return;
+        if (reportAuthorizationRefreshFailure) {
+          message.warning('连接器已授权，但有效期刷新失败，请稍后重试');
+        } else if (!hasCachedConnectors) {
+          message.error('连接器列表加载失败，请稍后重试');
+        }
+      } finally {
+        if (connectorLoadGenerationRef.current === requestGeneration) {
+          setCatalogRefreshing(false);
+          setLoadingConnectors(false);
+        }
+      }
+    },
+    [connectors.length]
+  );
+
   const completeAuthorization = useCallback(
     (authorization: ConnectorAuthorization) => {
       const connector = connectors.find((item) => item.id === authorization.connectorId);
@@ -198,13 +312,19 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
       // 后端确认 connected 后，本地立即回显为全局开启状态。
       clearAuthorizationTimer();
       activeAuthorizationIdRef.current = undefined;
-      const enabledConnector = { ...connector, enableFlag: 'Y' as const };
-      setConnectors((items) => items.map((item) => (item.id === authorization.connectorId ? enabledConnector : item)));
+      setConnectors((items) =>
+        items.map((item) =>
+          item.id === authorization.connectorId
+            ? { ...item, enableFlag: 'Y' as const, credentialExpiresAt: undefined }
+            : item
+        )
+      );
       setAuthorizationSession(undefined);
       setAuthorizingConnector(undefined);
       message.success(`${connector.name} 已连接`);
+      void loadAuthorizedConnectors(true);
     },
-    [clearAuthorizationTimer, connectors]
+    [clearAuthorizationTimer, connectors, loadAuthorizedConnectors]
   );
 
   const tryOpenAuthorizationUrl = useCallback((authorization: ConnectorAuthorization, blockedMessage: string) => {
@@ -291,30 +411,6 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
     };
   }, [authorizationSession, checkAuthorizationStatus, clearAuthorizationTimer]);
 
-  const loadAuthorizedConnectors = useCallback(async () => {
-    const hasCachedConnectors = connectors.length > 0;
-    if (hasCachedConnectors) {
-      setCatalogRefreshing(true);
-    } else {
-      setLoadingConnectors(true);
-    }
-    try {
-      const list = await queryAllConnectors();
-      const connectorList = list.map(mapConnectorListItem);
-      setConnectors(connectorList);
-    } catch {
-      if (!hasCachedConnectors) {
-        message.error('连接器列表加载失败，请稍后重试');
-      }
-    } finally {
-      if (hasCachedConnectors) {
-        setCatalogRefreshing(false);
-      } else {
-        setLoadingConnectors(false);
-      }
-    }
-  }, [connectors.length]);
-
   useEffect(() => {
     if (hasLoadedInitialConnectorsRef.current || !userInfo?.userId) return;
 
@@ -325,6 +421,39 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   const openSettings = () => {
     setSettingsOpen(true);
     void loadAuthorizedConnectors();
+  };
+
+  const confirmRevokeAuthorization = (connector: Connector) => {
+    Modal.confirm({
+      title: `取消${connector.name}授权？`,
+      content: '当前 CLI 登录凭证将被清除，再次使用时需要重新授权。',
+      okText: '确认取消授权',
+      okButtonProps: { danger: true },
+      cancelText: '暂不取消',
+      centered: true,
+      onOk: async () => {
+        setRevokingConnectorIds((ids) => new Set([...ids, connector.id]));
+        try {
+          await revokeConnectorAuthorization(connector.id);
+          setConnectors((items) =>
+            items.map((item) =>
+              item.id === connector.id ? { ...item, enableFlag: null, credentialExpiresAt: undefined } : item
+            )
+          );
+          message.success(`${connector.name}授权已取消`);
+          await loadAuthorizedConnectors();
+        } catch {
+          message.error('取消授权失败，请稍后重试');
+          throw new Error('取消授权失败');
+        } finally {
+          setRevokingConnectorIds((ids) => {
+            const nextIds = new Set(ids);
+            nextIds.delete(connector.id);
+            return nextIds;
+          });
+        }
+      },
+    });
   };
 
   const beginAuthorization = (connector: Connector) => {
@@ -428,13 +557,41 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
     if (connector.enableFlag === 'Y' || connector.enableFlag === 'N') {
       const switchLabel = connector.enableFlag === 'Y' ? `停用${connector.name}` : `启用${connector.name}`;
       return (
-        <Switch
-          checked={connector.enableFlag === 'Y'}
-          aria-label={switchLabel}
-          loading={updatingConnectorIds.has(connector.id)}
-          onChange={(checked) => void updateConnectorEnableFlag(connector, checked)}
-          // size="small"
-        />
+        <>
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'reauthorize', icon: <ReloadOutlined />, label: '重新授权' },
+                { key: 'revoke', danger: true, icon: <DisconnectOutlined />, label: '取消授权' },
+              ],
+              onClick: ({ key }) => {
+                if (key === 'reauthorize') beginAuthorization(connector);
+                if (key === 'revoke') confirmRevokeAuthorization(connector);
+              },
+            }}
+            placement="bottomRight"
+            trigger={['hover', 'click']}
+          >
+            <Button
+              aria-label={`更多${connector.name}操作`}
+              className={styles.moreActionButton}
+              disabled={revokingConnectorIds.has(connector.id)}
+              loading={revokingConnectorIds.has(connector.id)}
+              icon={<EllipsisOutlined />}
+              type="text"
+            />
+          </Dropdown>
+          {(connector.enableFlag === 'Y' || connector.enableFlag === 'N') && (
+            <Switch
+              checked={connector.enableFlag === 'Y'}
+              aria-label={switchLabel}
+              disabled={revokingConnectorIds.has(connector.id)}
+              loading={updatingConnectorIds.has(connector.id) || revokingConnectorIds.has(connector.id)}
+              onChange={(checked) => void updateConnectorEnableFlag(connector, checked)}
+              // size="small"
+            />
+          )}
+        </>
       );
     }
     if (canAuthorize) {
@@ -452,12 +609,56 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
   };
 
   const renderConnectorItem = (connector: Connector, compact = false) => {
+    const usesLifecycleMetadata = Boolean(connector.credentialState);
+    const displayExpiration = usesLifecycleMetadata ? connector.refreshExpiresAt : connector.credentialExpiresAt;
+    const credentialExpiration = displayExpiration ? getCredentialExpirationDisplay(displayExpiration) : undefined;
+    const lastVerifiedAt = connector.lastVerifiedAt
+      ? getCredentialExpirationDisplay(connector.lastVerifiedAt)
+      : undefined;
+    let credentialLifecycleText: string | undefined;
+    let credentialLifecycleExpired = false;
+
+    if (connector.credentialState === 'REAUTH_REQUIRED') {
+      credentialLifecycleText = '授权已失效，请重新连接';
+      credentialLifecycleExpired = true;
+    } else if (connector.credentialState === 'UNKNOWN') {
+      credentialLifecycleText =
+        connector.renewalMode === 'REFRESH_TOKEN' ? '自动续期，授权有效期同步中' : '授权状态待同步';
+    } else if (connector.credentialState === 'REFRESH_NEEDED') {
+      credentialLifecycleText = credentialExpiration
+        ? `将在下次使用时自动续期，预计授权有效至 ${credentialExpiration.formattedTime}`
+        : '将在下次使用时自动续期';
+    } else if (usesLifecycleMetadata && credentialExpiration) {
+      credentialLifecycleText =
+        connector.credentialState === 'EXPIRING'
+          ? `授权即将失效，预计有效至 ${credentialExpiration.formattedTime}`
+          : `预计授权有效至 ${credentialExpiration.formattedTime}`;
+    } else if (usesLifecycleMetadata && connector.renewalMode === 'REFRESH_TOKEN') {
+      credentialLifecycleText = '自动续期';
+    } else if (usesLifecycleMetadata && connector.renewalMode === 'PROBE_ONLY' && lastVerifiedAt) {
+      credentialLifecycleText = `最近验证于 ${lastVerifiedAt.formattedTime}`;
+    } else if (credentialExpiration) {
+      credentialLifecycleText = credentialExpiration.expired
+        ? `授权已于 ${credentialExpiration.formattedTime} 过期`
+        : `授权有效期至 ${credentialExpiration.formattedTime}`;
+      credentialLifecycleExpired = credentialExpiration.expired;
+    }
+
     return (
       <div className={classNames(styles.connectorItem, { [styles.compactItem]: compact })} key={connector.id}>
         <ConnectorIcon connector={connector} />
         <div className={styles.connectorContent}>
           <strong>{connector.name}</strong>
           <span>{connector.description}</span>
+          {credentialLifecycleText && (
+            <span
+              className={classNames(styles.credentialExpiration, {
+                [styles.expired]: credentialLifecycleExpired,
+              })}
+            >
+              {credentialLifecycleText}
+            </span>
+          )}
         </div>
         <div className={styles.connectorAction}>{renderConnectorAction(connector)}</div>
       </div>
@@ -471,11 +672,7 @@ const ConnectorControl = ({ canAuthorize }: ConnectorControlProps) => {
         <ConnectorSelection value={enabledConnectors} onOpen={openSettings} />
       ) : (
         <Tooltip title="连接器">
-          <span
-            className={styles.trigger}
-            role="button"
-            onClick={openSettings}
-          >
+          <span aria-label="连接器设置" className={styles.trigger} role="button" onClick={openSettings}>
             <LinkOutlined />
           </span>
         </Tooltip>

@@ -9,7 +9,7 @@ import { isTopAgent, setDefaultDigitalEmployee } from '@/service/digitalEmployee
 import AntdIcon from '@/components/AntdIcon';
 import useGlobal from '@/hooks/useGlobal';
 import { IAgentCache } from '@/typescript/agent';
-import { getAgentChatAvatar, getAgentPath } from '@/utils/agent';
+import { agentHandler, getAgentChatAvatar } from '@/utils/agent';
 import EmployeesDrawer from '@/pages/employees/components/EmployeesDrawer';
 import { UnApplyButton } from '@/pages/digitalEmployees/components/AllDigitalEmployees/RenderRightBottom';
 import { ResourceTypeMap } from '@/constants/resource';
@@ -40,8 +40,7 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
   const dispatch = useDispatch();
 
   const { chatMode } = useContext(EmployeeListContext);
-  const { agentInfo, setAgentId, setSessionId, EventEmitter } = useGlobal();
-  const { agentId } = agentInfo || {};
+  const { setAgentId, setSessionId, EventEmitter } = useGlobal();
 
   const listItemRef = useRef<HTMLDivElement>(null);
 
@@ -179,11 +178,30 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
     debounce((employee: IAgentCache) => {
       trackerEmployeeClick(employee, 'siderAgentRedirect');
 
-      setAgentId?.(`${employee.agentId}`);
+      // 左侧列表接口字段并不完全一致，进入详情前统一补齐 name、agentId 等详情页依赖字段。
+      const normalizedEmployee = agentHandler(employee);
+      const targetAgentId =
+        normalizedEmployee.agentId ||
+        normalizedEmployee.resourceCode ||
+        normalizedEmployee.resourceId ||
+        normalizedEmployee.id;
+      if (!targetAgentId) return;
+      dispatch({
+        type: 'employees/updateEmployee',
+        payload: { employee: normalizedEmployee },
+      });
+      setAgentId?.(`${targetAgentId}`);
       setSessionId?.('');
-      navigate(getAgentPath(employee)); // 有可能问答报错
+      // 员工模块内统一打开员工详情，避免按员工类型分流到会话、沙箱等其他页面。
+      navigate('/employees', {
+        state: {
+          keepSiderActiveKey: 'agent',
+          selectedAgentId: `${targetAgentId}`,
+          selectedEmployee: normalizedEmployee,
+        },
+      });
     }, 300),
-    [agentId]
+    [dispatch, navigate, setAgentId, setSessionId, trackerEmployeeClick]
   );
 
   const TagRender = useCallback((item: IAgentCache) => {

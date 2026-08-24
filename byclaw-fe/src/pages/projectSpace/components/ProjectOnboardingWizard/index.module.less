@@ -1,8 +1,29 @@
-// 研发项目引导向导:三步(基本信息/仓库配置/架构初始化)贯穿一个弹窗,每步落库后可回看。
+// 研发项目引导向导:两步(基本信息/仓库配置)贯穿一个弹窗,每步落库后可回看。
+.wizardWrap {
+  // Antd Modal 默认 wrap 在内容超出视口时滚动，这里将滚动责任交给 Modal body。
+  overflow: hidden !important;
+}
+
 .wizard {
-  :global(.ant-modal-body) {
-    padding-top: 8px;
+  // 项目使用自定义 Ant Design 前缀，通过 antPrefix 变量匹配实际 Modal DOM 类名。
+  :global(.@{antPrefix}-modal-content) {
+    max-height: calc(100vh - 48px);
+    overflow: hidden;
   }
+
+  // 新建项目内容较长时只滚动弹窗主体，步骤条和底部操作按钮保持固定。
+  :global(.@{antPrefix}-modal-body) {
+    max-height: calc(100vh - 220px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-top: 8px;
+    padding-inline-end: 8px;
+  }
+}
+
+// 向导内容包裹层不单独限制高度，统一由 Modal body 处理滚动。
+.wizardScroll {
+  width: 100%;
 }
 
 // 顶部步骤条与主体之间留出呼吸空间,步骤条常驻不随内容滚动。
@@ -165,89 +186,4 @@
   text-align: center;
   color: #bfbfbf;
   font-size: 13px;
-}
-
-// step3 初始化面板:居中的状态区,长任务不静默。
-.initPanel {
-  padding: 24px 16px;
-  text-align: center;
-}
-
-.initSpinner {
-  font-size: 32px;
-  color: #1677ff;
-  margin-bottom: 12px;
-}
-
-.initTitle {
-  font-size: 15px;
-  font-weight: 600;
-  color: #1f1f1f;
-  margin-bottom: 6px;
-}
-
-.initDesc {
-  color: #8c8c8c;
-  font-size: 13px;
-  line-height: 1.7;
-  margin: 0 auto 20px;
-  max-width: 420px;
-}
-
-// checklist 固定输出位:左对齐,逐项状态图标 + 文案。
-.checklist {
-  max-width: 380px;
-  margin: 0 auto 20px;
-  padding: 14px 16px;
-  border: 1px solid #f0f0f0;
-  border-radius: 10px;
-  background: #fafafa;
-  text-align: left;
-}
-
-.checkItem {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 0;
-  font-size: 13px;
-  color: #595959;
-}
-
-.checkItemDone {
-  color: #389e0d;
-}
-
-.checkIconDone {
-  color: #52c41a;
-}
-
-.checkIconPending {
-  color: #d9d9d9;
-}
-
-.checkIconActive {
-  color: #1677ff;
-}
-
-// 建索引联动的技能包多选:radio 下方留白,label 与选择器纵向排列。
-.skillField {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-// 初始化未触发态:居中提示 + 开始按钮,与已触发的 loading 面板区分。
-.initReady {
-  padding: 24px 16px;
-  text-align: center;
-}
-
-.initReadyDesc {
-  color: #8c8c8c;
-  font-size: 13px;
-  line-height: 1.7;
-  margin: 0 auto 20px;
-  max-width: 460px;
 }

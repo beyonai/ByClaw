@@ -1,15 +1,16 @@
 ---
 name: tech-article
 description: >
-  分析 GitHub 开源项目并写成一篇适合发布的技术文章，带真实安装测试和性能数据，风格接地气、手机友好。
-  只要用户给了一个 GitHub 链接，并提到写文章、做评测、项目推荐、公众号推文、帮我介绍这个项目、
+  分析开源项目并写成一篇适合发布的技术文章，带真实安装测试和性能数据，风格接地气、手机友好。
+  支持 GitHub、Gitee、GitLab 及其他可公开 clone 的 Git 仓库。
+  只要用户给了一个仓库链接，并提到写文章、做评测、项目推荐、公众号推文、帮我介绍这个项目、
   把这个项目写成文章、安利一下这个工具，就应该触发此技能——即使用户只说"帮我写写这个"也要触发。
   生成的文章也可以直接用来制作播客视频。
 ---
 
 # 技术文章生成
 
-把 GitHub 开源项目分析变成一篇开门见山、突出优势、带实测的技术文章，适合微信公众号等内容平台发布。
+把开源项目分析变成一篇开门见山、突出优势、带实测的技术文章，适合微信公众号等内容平台发布。
 
 ## 项目目录管理
 
@@ -20,7 +21,7 @@ description: >
 
 `<当前工作空间>` 是调用此技能时所在的目录。播客视频流水线中的所有技能建议在同一个目录下调用，确保 `podcast-projects/` 始终在同一位置。
 
-**确定项目：** 从 GitHub 仓库名推断项目名（如 `markitdown-review`），向用户确认后创建目录。若用户已有进行中的项目，询问是否纳入该项目。
+**确定项目：** 从仓库名推断项目名（如 `markitdown-review`），向用户确认后创建目录。若用户已有进行中的项目，询问是否纳入该项目。
 
 **自动版本：** 读取 `<项目名>/current.txt`（不存在则初始化为 `v1`）：
 - `article.md` **已存在**于当前版本 → 创建 vN+1/ 目录，复制现有产物，再写入本次文章，更新 `current.txt`
@@ -30,10 +31,24 @@ description: >
 
 文章质量的关键在于真实数据，这些检查确保能顺利完成实测：
 
-- [ ] 用户提供了 GitHub 仓库 URL
-- [ ] URL 格式合法（以 `github.com/` 开头）
+- [ ] 用户提供了公开 Git 仓库 URL（GitHub / Gitee / GitLab / 自建均可）
+- [ ] URL 形态合法：能作为 `git clone` 的参数，且指向具体仓库而非组织或用户主页
 - [ ] 网络可达：WebFetch 测试 URL 是否返回内容
 - [ ] 项目名已向用户确认
+
+## 外围素材（可选）
+
+当用户提到"外围材料"、"相关讨论"、"作者博客"、"HN/Reddit 讨论"、"竞品对比"或提供了一个 knowledge-collection 会话目录时，从该会话的 `sanitized/items/*.md` 读取素材清单：
+
+```bash
+ls <session-dir>/sanitized/items/*.md
+```
+
+每个 `.md` 文件的头部元数据区有一行 `> 原文链接: <URL>` 标注来源，正文是来源执行器输出的可读化内容。
+该行不固定在第 2 行——不同适配器会先写 `> 作者:`、`> 发布时间:` 等字段，取来源用 `grep -m1 '原文链接'` 而不是按行号。
+用于补充：作者博客的深度解读、HN/Reddit 社区反响、竞品文档的特性对比、Stack Overflow 的常见问题。
+
+**不能取代 Phase 1/2**：外围素材只是辅助上下文，不能替代本地克隆和实测——文章的核心数据必须来自 Phase 2 的真实操作，而非引用他人的二手描述。
 
 ---
 
@@ -41,8 +56,32 @@ description: >
 
 **克隆仓库到本地：**
 ```bash
-git clone <url> /tmp/repo-analysis-<name>
+git clone --depth 1 <url> /tmp/repo-analysis-<name>
 ```
+
+**clone 是主路径，对所有 Git 托管站通用**，优先用它。
+
+**clone 失败时降级到 GitHub API**（网络受限时 git protocol 比 API 更容易断，不要反复重试 clone）。
+注意这条降级路径**仅适用于 GitHub**——`gh` 只认 GitHub：
+
+```bash
+# 完整文件树（确认 truncated 为 false，否则按目录分批取）
+gh api 'repos/<owner>/<repo>/git/trees/<default-branch>?recursive=1' \
+  --jq '.tree[] | select(.type=="blob") | "\(.size)\t\(.path)"' > /tmp/<name>-tree.txt
+
+# 单个文件内容
+gh api 'repos/<owner>/<repo>/contents/README.md' --jq '.content' | base64 -d
+
+# 仓库元数据（star / 语言 / license / 活跃度）
+gh repo view <owner>/<repo> --json name,description,stargazerCount,primaryLanguage,licenseInfo,pushedAt
+```
+
+API 路径下用文件树的 `size` 字段做体量统计，替代 `cloc`。语言分布按扩展名聚合，模块体量按目录聚合字节数。
+两条路径都不通时才反问用户；已拿到文件树就继续，不因缺少本地副本跳过 Phase 1。
+注意 zsh 会展开 `?`，`gh api` 的 URL 必须加引号。
+
+**非 GitHub 仓库 clone 失败时没有等价降级**：Gitee / GitLab / 自建站没有 `gh` 这样的现成 CLI，
+此时如实报告 clone 失败并反问，不要改用网页抓取仓库首页凑内容——那拿不到文件树，写不出有依据的架构分析。
 
 **静态分析（按优先级）：**
 - 读取 README.md、CLAUDE.md、CONTRIBUTING.md 等核心文档
@@ -132,7 +171,9 @@ npm install -g <package-name>
 - 代码块集中在「实战演练」章节
 - 所有性能数据来自实测，不编造
 - 每段不超过 4 行（手机阅读友好）
-- 不写「坑」「局限」「注意」「风险」等负面内容
+- 不写劝退向的负面段落：不专门开辟「坑」「局限」「风险」章节，也不用它们收尾
+  - 按语义判断，不按词面禁用。「注意」「不足」等词用于正面引导数据时可以保留
+  - 例：「注意这行 108% cpu，多核并行起来了」是正面解读，不算负面内容
 
 ---
 
@@ -150,8 +191,11 @@ npm install -g <package-name>
 
 | 缺失情况 | 标准反问 |
 |---|---|
-| 无 GitHub URL | "请提供 GitHub 仓库地址，例如 `https://github.com/owner/repo`。" |
+| 无仓库 URL | "请提供开源仓库地址，例如 `https://github.com/owner/repo` 或 `https://gitee.com/owner/repo`。" |
 | URL 不可达 | "该地址无法访问，请确认 URL 是否正确，或仓库是否为公开状态。" |
+| GitHub 仓库 clone 失败但 API 可用 | 不反问，直接降级到 `gh api` 取文件树与关键文件，继续 Phase 1 |
+| clone 与 API 均不可用 | "仓库内容拉取失败（git 与 API 均不可达），请确认网络或仓库可见性。" |
+| 非 GitHub 仓库 clone 失败 | "仓库 clone 失败，且该托管站没有可用的 API 降级路径，请确认网络或仓库可见性。" |
 | 安装失败 | 记录错误信息并继续基于静态分析写文章，在文章中注明「安装环境存在问题，以下实测基于文档描述」 |
 | 项目名未确认 | "这篇文章的项目名叫什么？（用于创建目录，如 `markitdown-2024`）" |
 

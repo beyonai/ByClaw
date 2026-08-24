@@ -46,8 +46,28 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
 
     private static final String THIRD_PARTY_SKILL_INSTALL_PATH = "/tool/installThirdPartySkill";
 
+    private static final String THIRD_PARTY_SKILL_MANAGEABLE_DIGITAL_EMPLOYEE_PATH =
+        "/tool/queryThirdPartySkillManageableDigitalEmployees";
+
     private static final String CONNECTOR_SKILL_COMPLETE_PATH =
         "/connector/authorization/skill-complete";
+
+    private static final String ORCHESTRATOR_RUNTIME_PATH =
+        "/internal/v1/orchestrators/resolve-runtime";
+
+    private static final String ARTIFACT_UPLOAD_PATH = "/open/api/v1/artifacts";
+
+    private static final Pattern ARTIFACT_DATA_OWNER_PATH = Pattern.compile(
+        ".*/open/api/v1/artifacts/[^/]+/data-records(?:/[^/]+)?/?$");
+
+    @Value("${artifact.preview.path-prefix:/artifact-preview}")
+    private String artifactPreviewPathPrefix;
+
+    @Value("${artifact.download.path-prefix:/artifact-download}")
+    private String artifactDownloadPathPrefix;
+
+    @Value("${artifact.data.path-prefix:/artifact-data}")
+    private String artifactDataPathPrefix;
 
     @Value("${byai.access.urlpatterns:}")
     private String urlPattenrs;
@@ -153,17 +173,42 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
             if (this.isFeishuBotEventCallback(request)) {
                 return true;
             }
-            if (this.isThirdPartySkillInstallRequest(request)) {
+            if (this.isThirdPartySkillMarketplaceRequest(request)) {
                 if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
                     return true;
                 }
-                return this.authenticateBeyondTokenOnlyRequest(request, "第三方技能安装");
+                return this.authenticateBeyondTokenOnlyRequest(request,
+                    this.isThirdPartySkillInstallRequest(request) ? "第三方技能安装" : "第三方技能可管理数字员工查询");
             }
             if (this.isConnectorSkillCompleteRequest(request)) {
                 if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
                     return true;
                 }
                 return this.authenticateBeyondTokenOnlyRequest(request, "连接器技能授权同步");
+            }
+            if (this.isOrchestratorRuntimeRequest(request)) {
+                if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+                    return true;
+                }
+                return this.authenticateBeyondTokenOnlyRequest(request, "数字员工组运行时解析");
+            }
+            // Artifact能力URL不依赖登录态；高熵accessKey、过期时间和撤销状态由业务服务校验。
+            if (this.isArtifactCapabilityRequest(request)) {
+                return true;
+            }
+            // 沙箱只持有当前用户Beyond-Token，上传时不允许Cookie覆盖Token身份。
+            if (this.isArtifactUploadRequest(request)) {
+                if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+                    return true;
+                }
+                return this.authenticateBeyondTokenOnlyRequest(request, "Artifact发布");
+            }
+            // Agent 访问 Artifact 持久化数据时只能使用沙箱注入的 Beyond-Token，不允许 Cookie 覆盖身份。
+            if (this.isArtifactDataOwnerRequest(request)) {
+                if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+                    return true;
+                }
+                return this.authenticateBeyondTokenOnlyRequest(request, "Artifact数据访问");
             }
             if (this.checkUrlByRegex(url)) {
                 return true;
@@ -212,6 +257,9 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
         }
         catch (Exception e) {
             logger.error(e.getMessage(), e);
+            if (this.isOrchestratorRuntimeRequest(request)) {
+                response.setStatus(HttpStatus.UNAUTHORIZED.value());
+            }
             this.setLoginError(response, e.getMessage());
             return false;
         }
@@ -258,15 +306,76 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
     }
 
     private boolean isThirdPartySkillInstallRequest(HttpServletRequest request) {
+        return isRequestPath(request, THIRD_PARTY_SKILL_INSTALL_PATH);
+    }
+
+    private boolean isThirdPartySkillMarketplaceRequest(HttpServletRequest request) {
+        return isThirdPartySkillInstallRequest(request)
+            || isRequestPath(request, THIRD_PARTY_SKILL_MANAGEABLE_DIGITAL_EMPLOYEE_PATH);
+    }
+
+    private boolean isRequestPath(HttpServletRequest request, String expectedPath) {
         String requestUri = request == null ? null : request.getRequestURI();
-        return StringUtils.endsWith(requestUri, THIRD_PARTY_SKILL_INSTALL_PATH)
-            || StringUtils.endsWith(requestUri, THIRD_PARTY_SKILL_INSTALL_PATH + "/");
+        return StringUtils.endsWith(requestUri, expectedPath)
+            || StringUtils.endsWith(requestUri, expectedPath + "/");
     }
 
     private boolean isConnectorSkillCompleteRequest(HttpServletRequest request) {
         String requestUri = request == null ? null : request.getRequestURI();
         return StringUtils.endsWith(requestUri, CONNECTOR_SKILL_COMPLETE_PATH)
             || StringUtils.endsWith(requestUri, CONNECTOR_SKILL_COMPLETE_PATH + "/");
+    }
+
+    private boolean isOrchestratorRuntimeRequest(HttpServletRequest request) {
+        String requestUri = request == null ? null : request.getRequestURI();
+        return StringUtils.endsWith(requestUri, ORCHESTRATOR_RUNTIME_PATH)
+            || StringUtils.endsWith(requestUri, ORCHESTRATOR_RUNTIME_PATH + "/");
+    }
+
+    private boolean isArtifactUploadRequest(HttpServletRequest request) {
+        return request != null && "POST".equalsIgnoreCase(request.getMethod())
+            && endsWithConfiguredPath(request.getRequestURI(), ARTIFACT_UPLOAD_PATH);
+    }
+
+    private boolean isArtifactDataOwnerRequest(HttpServletRequest request) {
+        if (request == null || !("GET".equalsIgnoreCase(request.getMethod())
+            || "POST".equalsIgnoreCase(request.getMethod())
+            || "PUT".equalsIgnoreCase(request.getMethod()))) {
+            return false;
+        }
+        return ARTIFACT_DATA_OWNER_PATH.matcher(StringUtils.defaultString(request.getRequestURI())).matches();
+    }
+
+    private boolean isArtifactCapabilityRequest(HttpServletRequest request) {
+        if (request == null) {
+            return false;
+        }
+        if (("GET".equalsIgnoreCase(request.getMethod()) || "POST".equalsIgnoreCase(request.getMethod())
+            || "PUT".equalsIgnoreCase(request.getMethod()))
+            && matchesConfiguredPrefix(request, artifactDataPathPrefix)) {
+            return true;
+        }
+        return ("GET".equalsIgnoreCase(request.getMethod()) || "HEAD".equalsIgnoreCase(request.getMethod()))
+            && (matchesConfiguredPrefix(request, artifactPreviewPathPrefix)
+                || matchesConfiguredPrefix(request, artifactDownloadPathPrefix));
+    }
+
+    private boolean endsWithConfiguredPath(String path, String expectedPath) {
+        if (StringUtils.isBlank(path)) {
+            return false;
+        }
+        String normalized = path.endsWith("/") ? path.substring(0, path.length() - 1) : path;
+        return normalized.endsWith(expectedPath);
+    }
+
+    private boolean matchesConfiguredPrefix(HttpServletRequest request, String prefix) {
+        if (request == null || StringUtils.isAnyBlank(request.getRequestURI(), prefix)) {
+            return false;
+        }
+        String normalizedPrefix = prefix.startsWith("/") ? prefix : "/" + prefix;
+        String endpointPrefix = StringUtils.defaultString(request.getContextPath()) + normalizedPrefix;
+        return request.getRequestURI().equals(endpointPrefix)
+            || request.getRequestURI().startsWith(endpointPrefix + "/");
     }
 
     /**

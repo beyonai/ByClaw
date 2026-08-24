@@ -1,516 +1,318 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState, type Key } from 'react';
-import { Empty, Input, Modal, Spin } from 'antd';
-import { BranchesOutlined } from '@ant-design/icons';
+import React, { useCallback, useEffect, useRef, useState, type Key } from 'react';
+import { Button, Dropdown, Empty, Input, message } from 'antd';
+import { BranchesOutlined, DownOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
+import FilePreviewPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FilePreviewPanel';
+import { DragType } from '@/components/QueryInput/withDrag';
+import useGlobal from '@/hooks/useGlobal';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
 import type { FileTreeItem } from '@/layout/sider/components/FileSiderPanel/constants';
 import {
   ensureDirectoryPath,
-  getSessionFilePath,
   isDirectory,
-  isPathIn,
   normalizeFileBrowserPath,
-  sortFileBrowserItems,
-  unwrapListResponse,
+  normalizeReferenceItem,
 } from '@/layout/sider/components/FileSiderPanel/utils';
 import {
-  getTaskChanges,
-  getTaskFileDiff,
+  getProjectRepoFileContent,
+  listProjectRepoBranches,
+  listProjectRepoTree,
   listProjectRepos,
+  searchProjectRepoTree,
   type DevloopProjectRepo,
-  type DevloopTaskChanges,
-  type DevloopTaskFileDiff,
+  type ProjectRepoBranch,
+  type ProjectRepoTreeNode,
 } from '@/service/devloop';
-import { listFiles, searchFiles, type FileBrowserItem } from '@/service/fileBrowser';
+import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import styles from '../index.module.less';
 
 interface ReposTabProps {
   projectId: number;
   resourceId?: string | number;
-  sessionId?: string | number;
-  sessionName?: string;
-  codeChangesEnabled?: boolean;
-  onNodeClick?: (event: React.MouseEvent, node: FileTreeItem) => void;
+  onOpenDetail?: (panel: React.ReactNode, options: DetailPanelOptions) => void;
 }
 
-type ProjectDetailTranslate = (id: string, values?: Record<string, string | number>) => string;
+const toFileBrowserItem = (node: ProjectRepoTreeNode) => ({
+  name: node.name,
+  // FileTreeList 使用 path 作为目录缓存键；统一补齐根斜杠，保证根节点与懒加载子节点使用同一套键格式。
+  path: normalizeFileBrowserPath(node.path),
+  isDir: node.type === 'directory',
+  size: node.size,
+});
 
-// GitHub 文件变更状态映射为 IDE 常见的新增、修改、删除和重命名标识。
-const FILE_CHANGE_META: Record<string, { letter: string; labelId: string; className: string }> = {
-  added: { letter: 'A', labelId: 'codeChanges.status.added', className: 'fileChangeAdded' },
-  modified: { letter: 'M', labelId: 'codeChanges.status.modified', className: 'fileChangeModified' },
-  changed: { letter: 'M', labelId: 'codeChanges.status.modified', className: 'fileChangeModified' },
-  removed: { letter: 'D', labelId: 'codeChanges.status.removed', className: 'fileChangeRemoved' },
-  renamed: { letter: 'R', labelId: 'codeChanges.status.renamed', className: 'fileChangeRenamed' },
-  copied: { letter: 'C', labelId: 'codeChanges.status.copied', className: 'fileChangeRenamed' },
-};
+const formatBranchLabel = (branch: string) => (branch.length > 10 ? `${branch.substring(0, 10)}...` : branch);
 
-const getFileChangeMeta = (status?: string) =>
-  FILE_CHANGE_META[(status || 'modified').toLowerCase()] || FILE_CHANGE_META.modified;
+// 远程仓库文件只有字符串/base64，没有可下载的 resourceId+path，走 FilePreviewPanel 的 content 入口复用富预览。
+const RemoteFileContent: React.FC<{ name: string; content: string | null; binary?: boolean }> = ({
+  name,
+  content,
+  binary,
+}) => (
+  <div style={{ height: '100%', overflow: 'hidden' }}>
+    <FilePreviewPanel fileName={name} content={{ data: content, binary }} />
+  </div>
+);
 
-const splitFilePath = (path: string) => {
-  const index = path.lastIndexOf('/');
-  return index >= 0 ? { name: path.slice(index + 1), dir: path.slice(0, index) } : { name: path, dir: '' };
-};
-
-type DiffLineType = 'meta' | 'hunk' | 'add' | 'del' | 'context';
-
-const classifyDiffLine = (line: string): DiffLineType => {
-  if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ')) {
-    return 'meta';
-  }
-  if (line.startsWith('@@')) return 'hunk';
-  if (line.startsWith('+')) return 'add';
-  if (line.startsWith('-')) return 'del';
-  return 'context';
-};
-
-const parseDiffLines = (diff?: string | null): { type: DiffLineType; text: string }[] => {
-  if (!diff) return [];
-  return diff.split('\n').map((text) => ({ type: classifyDiffLine(text), text }));
-};
-
-const getRepoDirectoryName = (repoFullName: string) => {
-  const normalizedName = repoFullName.trim().replace(/\/+$/, '');
-  return normalizedName.split('/').filter(Boolean).pop() || normalizedName;
-};
-
-const getRepoRootPath = (sessionId: string | number, repoFullName: string) =>
-  ensureDirectoryPath(`${getSessionFilePath(`${sessionId}`)}${getRepoDirectoryName(repoFullName)}`);
-
-const ReposTab: React.FC<ReposTabProps> = ({
-  projectId,
-  resourceId,
-  sessionId,
-  sessionName,
-  codeChangesEnabled = false,
-  onNodeClick,
-}) => {
+const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail }) => {
   const intl = useIntl();
-  const t: ProjectDetailTranslate = useCallback(
-    (id, values) => intl.formatMessage({ id: `projectSpace.detail.${id}` }, values),
-    [intl]
-  );
+  const { EventEmitter } = useGlobal();
   const [repos, setRepos] = useState<DevloopProjectRepo[]>([]);
   const [reposLoading, setReposLoading] = useState(false);
-  const [repoFilesMap, setRepoFilesMap] = useState<Record<string, FileBrowserItem[]>>({});
+  const [repoFilesMap, setRepoFilesMap] = useState<Record<string, ReturnType<typeof toFileBrowserItem>[]>>({});
   const [repoLoadingMap, setRepoLoadingMap] = useState<Record<string, boolean>>({});
+  const [childrenByRepoPath, setChildrenByRepoPath] = useState<
+    Record<string, Record<string, ReturnType<typeof toFileBrowserItem>[]>>
+  >({});
+  const [expandedKeysMap, setExpandedKeysMap] = useState<Record<string, Key[]>>({});
+  const [branchesMap, setBranchesMap] = useState<Record<string, ProjectRepoBranch[]>>({});
+  const [branchMap, setBranchMap] = useState<Record<string, string>>({});
+  const [branchLoadingMap, setBranchLoadingMap] = useState<Record<string, boolean>>({});
   const [repoSearchValueMap, setRepoSearchValueMap] = useState<Record<string, string>>({});
-  const [childrenByPath, setChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
-  const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
-  const [taskChanges, setTaskChanges] = useState<DevloopTaskChanges | null>(null);
-  const [taskChangesLoading, setTaskChangesLoading] = useState(false);
-  const [repoChangesViewMap, setRepoChangesViewMap] = useState<Record<string, boolean>>({});
-  const [diffModalFile, setDiffModalFile] = useState<string | null>(null);
-  const [diffModalData, setDiffModalData] = useState<DevloopTaskFileDiff | null>(null);
-  const [diffModalLoading, setDiffModalLoading] = useState(false);
-  const repoRequestSeqRef = useRef<Record<string, number>>({});
+  const requestSeqRef = useRef<Record<string, number>>({});
 
-  const repoRootPathMap = useMemo(
-    () =>
-      repos.reduce<Record<string, string>>((result, repo) => {
-        if (sessionId) result[`${repo.repoId}`] = getRepoRootPath(sessionId, repo.repoFullName);
-        return result;
-      }, {}),
-    [repos, sessionId]
-  );
-
-  const fetchRepoFiles = useCallback(
-    async (repo: DevloopProjectRepo) => {
-      if (!resourceId || !sessionId) return;
+  const fetchRepoTree = useCallback(
+    async (repo: DevloopProjectRepo, branch?: string) => {
       const repoKey = `${repo.repoId}`;
-      const rootPath = getRepoRootPath(sessionId, repo.repoFullName);
-      const requestSeq = (repoRequestSeqRef.current[repoKey] || 0) + 1;
-      repoRequestSeqRef.current[repoKey] = requestSeq;
+      const selectedBranch = branch || repo.defaultBranch || 'main';
+      const requestSeq = (requestSeqRef.current[repoKey] || 0) + 1;
+      requestSeqRef.current[repoKey] = requestSeq;
       setRepoLoadingMap((current) => ({ ...current, [repoKey]: true }));
       try {
-        const response = await listFiles({ resourceId, path: rootPath });
-        if (requestSeq === repoRequestSeqRef.current[repoKey]) {
-          setRepoFilesMap((current) => ({
-            ...current,
-            [repoKey]: sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(response)),
-          }));
+        const response = await listProjectRepoTree({
+          projectId,
+          repoId: repo.repoId,
+          ref: selectedBranch,
+        });
+        if (requestSeq === requestSeqRef.current[repoKey]) {
+          setRepoFilesMap((current) => ({ ...current, [repoKey]: (response || []).map(toFileBrowserItem) }));
         }
       } catch (error) {
-        // 单个仓库读取失败时保留其它仓库，刷新按钮仍可单独重试当前仓库。
-        console.error('Failed to load project repository files:', error);
-        if (requestSeq === repoRequestSeqRef.current[repoKey]) {
+        console.error('Failed to load remote repository tree:', error);
+        if (requestSeq === requestSeqRef.current[repoKey]) {
           setRepoFilesMap((current) => ({ ...current, [repoKey]: [] }));
         }
       } finally {
-        if (requestSeq === repoRequestSeqRef.current[repoKey]) {
+        if (requestSeq === requestSeqRef.current[repoKey]) {
           setRepoLoadingMap((current) => ({ ...current, [repoKey]: false }));
         }
       }
     },
-    [resourceId, sessionId]
+    [projectId]
   );
 
-  const fetchTaskChanges = useCallback(async () => {
-    if (!codeChangesEnabled || !sessionId) {
-      setTaskChanges(null);
-      return;
-    }
-    setTaskChangesLoading(true);
+  const fetchBranches = useCallback(async (repo: DevloopProjectRepo) => {
+    const repoKey = `${repo.repoId}`;
+    setBranchLoadingMap((current) => ({ ...current, [repoKey]: true }));
     try {
-      const response = await getTaskChanges(Number(sessionId));
-      setTaskChanges(response || null);
+      const branches = await listProjectRepoBranches(repo.repoId);
+      const defaultBranch = repo.defaultBranch || branches?.[0]?.name || 'main';
+      setBranchesMap((current) => ({ ...current, [repoKey]: branches || [] }));
+      setBranchMap((current) => ({ ...current, [repoKey]: current[repoKey] || defaultBranch }));
     } catch (error) {
-      console.error('Failed to load task changes:', error);
-      setTaskChanges(null);
+      console.error('Failed to load remote repository branches:', error);
+      setBranchesMap((current) => ({ ...current, [repoKey]: [] }));
+      setBranchMap((current) => ({ ...current, [repoKey]: current[repoKey] || repo.defaultBranch || 'main' }));
     } finally {
-      setTaskChangesLoading(false);
+      setBranchLoadingMap((current) => ({ ...current, [repoKey]: false }));
     }
-  }, [codeChangesEnabled, sessionId]);
+  }, []);
 
   const fetchRepos = useCallback(async () => {
     if (!projectId) return;
     setReposLoading(true);
     try {
-      const response = await listProjectRepos(projectId);
-      const nextRepos = Array.isArray(response) ? response : [];
+      const nextRepos = (await listProjectRepos(projectId)) || [];
       setRepos(nextRepos);
-      await Promise.all(nextRepos.map((repo) => fetchRepoFiles(repo)));
+      await Promise.all(nextRepos.map((repo) => fetchBranches(repo)));
+      await Promise.all(nextRepos.map((repo) => fetchRepoTree(repo)));
     } catch (error) {
       console.error('Failed to load project repositories:', error);
       setRepos([]);
     } finally {
       setReposLoading(false);
     }
-  }, [fetchRepoFiles, projectId]);
+  }, [fetchBranches, fetchRepoTree, projectId]);
 
   useEffect(() => {
     setRepos([]);
     setRepoFilesMap({});
-    setRepoLoadingMap({});
+    setChildrenByRepoPath({});
+    setExpandedKeysMap({});
+    setBranchesMap({});
+    setBranchMap({});
     setRepoSearchValueMap({});
-    setChildrenByPath({});
-    setExpandedKeys([]);
-    setRepoChangesViewMap({});
-    setDiffModalFile(null);
-    setDiffModalData(null);
-    repoRequestSeqRef.current = {};
     void fetchRepos();
   }, [fetchRepos]);
 
-  useEffect(() => {
-    setRepoChangesViewMap({});
-    void fetchTaskChanges();
-  }, [fetchTaskChanges]);
-
-  const loadRepoTreeNode = useCallback(
-    async (node: FileTreeItem) => {
-      if (!resourceId || !isDirectory(node)) return;
-      const directoryPath = ensureDirectoryPath(normalizeFileBrowserPath(node.path));
-      if (childrenByPath[directoryPath]) return;
-      try {
-        const response = await listFiles({ resourceId, path: directoryPath });
-        setChildrenByPath((current) => ({
-          ...current,
-          [directoryPath]: sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(response)),
-        }));
-      } catch (error) {
-        console.error('Failed to load project repository directory:', error);
-        setChildrenByPath((current) => ({ ...current, [directoryPath]: [] }));
-      }
-    },
-    [childrenByPath, resourceId]
-  );
-
-  const openFileDiff = useCallback(
-    async (filePath: string) => {
-      if (!sessionId) return;
-      setDiffModalFile(filePath);
-      setDiffModalData(null);
-      setDiffModalLoading(true);
-      try {
-        const response = await getTaskFileDiff(Number(sessionId), filePath);
-        setDiffModalData(response || null);
-      } catch (error) {
-        console.error('Failed to load file diff:', error);
-        setDiffModalData(null);
-      } finally {
-        setDiffModalLoading(false);
-      }
-    },
-    [sessionId]
-  );
-
-  const closeFileDiff = useCallback(() => {
-    setDiffModalFile(null);
-    setDiffModalData(null);
-  }, []);
-
-  const refreshRepo = useCallback(
-    async (repo: DevloopProjectRepo) => {
-      if (!sessionId) return;
-      const repoKey = `${repo.repoId}`;
-      const rootPath = getRepoRootPath(sessionId, repo.repoFullName);
-      setRepoSearchValueMap((current) => ({ ...current, [repoKey]: '' }));
-      setChildrenByPath((current) =>
-        Object.fromEntries(Object.entries(current).filter(([path]) => !isPathIn(path, rootPath)))
-      );
-      setExpandedKeys((current) => current.filter((key) => !isPathIn(`${key}`, rootPath)));
-      await Promise.all([fetchRepoFiles(repo), fetchTaskChanges()]);
-    },
-    [fetchRepoFiles, fetchTaskChanges, sessionId]
-  );
-
   const searchRepoFiles = useCallback(
-    async (repo: DevloopProjectRepo, keyword: string) => {
-      if (!resourceId || !sessionId) return;
+    async (repo: DevloopProjectRepo, keyword: string, branch?: string) => {
       const repoKey = `${repo.repoId}`;
-      const nextKeyword = keyword.trim();
-      if (!nextKeyword) {
-        await fetchRepoFiles(repo);
+      const selectedBranch = branch || branchMap[repoKey] || repo.defaultBranch || 'main';
+      const normalizedKeyword = keyword.trim();
+      if (!normalizedKeyword) {
+        await fetchRepoTree(repo, selectedBranch);
         return;
       }
-
-      const rootPath = getRepoRootPath(sessionId, repo.repoFullName);
-      const requestSeq = (repoRequestSeqRef.current[repoKey] || 0) + 1;
-      repoRequestSeqRef.current[repoKey] = requestSeq;
+      const requestSeq = (requestSeqRef.current[repoKey] || 0) + 1;
+      requestSeqRef.current[repoKey] = requestSeq;
       setRepoLoadingMap((current) => ({ ...current, [repoKey]: true }));
       try {
-        const response = await searchFiles({ resourceId, path: rootPath, keyword: nextKeyword });
-        if (requestSeq === repoRequestSeqRef.current[repoKey]) {
-          setRepoFilesMap((current) => ({
-            ...current,
-            [repoKey]: sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(response)),
-          }));
-          setChildrenByPath((current) =>
-            Object.fromEntries(Object.entries(current).filter(([path]) => !isPathIn(path, rootPath)))
-          );
-          setExpandedKeys((current) => current.filter((key) => !isPathIn(`${key}`, rootPath)));
+        const response = await searchProjectRepoTree({
+          projectId,
+          repoId: repo.repoId,
+          keyword: normalizedKeyword,
+          ref: selectedBranch,
+        });
+        if (requestSeq === requestSeqRef.current[repoKey]) {
+          setRepoFilesMap((current) => ({ ...current, [repoKey]: (response || []).map(toFileBrowserItem) }));
+          setChildrenByRepoPath((current) => ({ ...current, [repoKey]: {} }));
+          setExpandedKeysMap((current) => ({ ...current, [repoKey]: [] }));
         }
       } catch (error) {
-        console.error('Failed to search project repository files:', error);
-        if (requestSeq === repoRequestSeqRef.current[repoKey]) {
+        console.error('Failed to search remote repository files:', error);
+        if (requestSeq === requestSeqRef.current[repoKey]) {
           setRepoFilesMap((current) => ({ ...current, [repoKey]: [] }));
         }
       } finally {
-        if (requestSeq === repoRequestSeqRef.current[repoKey]) {
+        if (requestSeq === requestSeqRef.current[repoKey]) {
           setRepoLoadingMap((current) => ({ ...current, [repoKey]: false }));
         }
       }
     },
-    [fetchRepoFiles, resourceId, sessionId]
+    [branchMap, fetchRepoTree, projectId]
   );
 
-  const renderCodeChanges = () => {
-    const empty = (id: string, values?: Record<string, string | number>) => (
-      <div className={styles.codeChangeEmpty}>
-        {taskChangesLoading ? (
-          <Spin size="small" />
-        ) : (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t(id, values)} />
-        )}
-      </div>
-    );
+  const loadRepoTreeNode = useCallback(
+    async (repo: DevloopProjectRepo, node: FileTreeItem) => {
+      if (!isDirectory(node)) return;
+      const repoKey = `${repo.repoId}`;
+      const path = ensureDirectoryPath(normalizeFileBrowserPath(node.path));
+      if (childrenByRepoPath[repoKey]?.[path]) return;
+      try {
+        const response = await listProjectRepoTree({
+          projectId,
+          repoId: repo.repoId,
+          path,
+          ref: branchMap[repoKey] || repo.defaultBranch || 'main',
+        });
+        setChildrenByRepoPath((current) => ({
+          ...current,
+          [repoKey]: { ...(current[repoKey] || {}), [path]: (response || []).map(toFileBrowserItem) },
+        }));
+      } catch (error) {
+        console.error('Failed to load remote repository directory:', error);
+        setChildrenByRepoPath((current) => ({
+          ...current,
+          [repoKey]: { ...(current[repoKey] || {}), [path]: [] },
+        }));
+      }
+    },
+    [branchMap, childrenByRepoPath, projectId]
+  );
 
-    let body: React.ReactNode;
-    const status = taskChanges?.status;
-    if (!sessionId) {
-      body = empty('codeChanges.selectSession');
-    } else if (taskChangesLoading && !taskChanges) {
-      body = empty('codeChanges.loading');
-    } else if (!taskChanges || status === 'http_error') {
-      body = taskChanges?.message ? (
-        <div className={styles.codeChangeEmpty}>
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={taskChanges.message} />
-        </div>
-      ) : (
-        empty('codeChanges.unavailable')
-      );
-    } else if (status === 'no_repo') {
-      body = empty('codeChanges.noRepository');
-    } else if (status === 'no_token') {
-      body = empty('codeChanges.noToken');
-    } else if (status === 'branch_not_found') {
-      body = empty('codeChanges.branchNotFound', { branch: taskChanges.headBranch || '-' });
-    } else if (!taskChanges.files?.length) {
-      body = empty('codeChanges.noChanges');
-    } else {
-      body = (
-        <div className={styles.codeChangeList}>
-          {taskChanges.files.map((file) => {
-            const meta = getFileChangeMeta(file.status);
-            const { name, dir } = splitFilePath(file.filename);
-            const renamedFrom =
-              file.status?.toLowerCase() === 'renamed' && file.previousFilename ? file.previousFilename : '';
-            const isLocal = taskChanges.source === 'local';
-            const inner = (
-              <>
-                <span className={`${styles.codeChangeBadge} ${styles[meta.className]}`} title={t(meta.labelId)}>
-                  {meta.letter}
-                </span>
-                <div className={styles.codeChangeInfo}>
-                  <strong className={styles.codeChangeName}>{name}</strong>
-                  <span
-                    className={styles.codeChangePath}
-                    title={renamedFrom ? `${renamedFrom} → ${file.filename}` : file.filename}
-                  >
-                    {renamedFrom ? `${renamedFrom} → ${file.filename}` : dir || file.filename}
-                  </span>
-                </div>
-                <div className={styles.codeChangeStat}>
-                  {file.additions > 0 && <span className={styles.codeChangeAdd}>+{file.additions}</span>}
-                  {file.deletions > 0 && <span className={styles.codeChangeDel}>-{file.deletions}</span>}
-                </div>
-              </>
-            );
-            if (file.blobUrl) {
-              return (
-                <a
-                  className={`${styles.codeChangeItem} ${styles.codeChangeItemLink}`}
-                  key={file.filename}
-                  href={file.blobUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {inner}
-                </a>
-              );
-            }
-            if (isLocal) {
-              return (
-                <button
-                  type="button"
-                  aria-label={file.filename}
-                  className={`${styles.codeChangeItem} ${styles.codeChangeItemLink} ${styles.codeChangeItemButton}`}
-                  key={file.filename}
-                  onClick={() => void openFileDiff(file.filename)}
-                >
-                  {inner}
-                </button>
-              );
-            }
-            return (
-              <div className={styles.codeChangeItem} key={file.filename}>
-                {inner}
-              </div>
-            );
-          })}
-        </div>
-      );
-    }
+  const handleNodeClick = useCallback(
+    async (repo: DevloopProjectRepo, event: React.MouseEvent, node: FileTreeItem) => {
+      event.stopPropagation();
+      if (isDirectory(node) || !onOpenDetail) return;
+      const branch = branchMap[`${repo.repoId}`] || repo.defaultBranch || 'main';
+      const tabKey = `repo-remote-file:${repo.repoId}:${branch}:${node.path}`;
+      // 点击立即打开 detail panel 显示 loading，后台拉取完再刷新同一个 tab 填入真内容。
+      onOpenDetail(<RemoteFileContent name={node.name} content={null} binary={undefined} />, {
+        tabKey,
+        title: node.name,
+      });
+      try {
+        const file = await getProjectRepoFileContent({ repoId: repo.repoId, branch, path: node.path });
+        const content = file.binary ? file.base64Content || '' : file.content || '';
+        onOpenDetail(<RemoteFileContent name={node.name} content={content} binary={file.binary} />, {
+          tabKey,
+          title: node.name,
+        });
+      } catch (error: any) {
+        message.error(error?.message || '文件内容加载失败');
+      }
+    },
+    [branchMap, onOpenDetail]
+  );
 
-    const branchLabel = taskChanges?.headBranch || sessionName || '';
-    return (
-      <div className={`${styles.codeChangeCard} ${styles.repoCodeChangeCard}`}>
-        <div className={styles.codeChangeHeader}>
-          <div className={styles.codeChangeHeaderMain}>
-            <strong>{t('codeChanges.title')}</strong>
-            {branchLabel ? (
-              taskChanges?.compareUrl ? (
-                <a
-                  className={`${styles.codeChangeBranch} ${styles.codeChangeBranchLink}`}
-                  href={taskChanges.compareUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={t('codeChanges.openInGitHub')}
-                >
-                  {branchLabel}
-                </a>
-              ) : (
-                <span className={styles.codeChangeBranch}>{branchLabel}</span>
-              )
-            ) : null}
-          </div>
-          {status === 'ok' && taskChanges?.files?.length ? (
-            <span className={styles.codeChangeCount}>{taskChanges.files.length}</span>
-          ) : null}
-        </div>
-        {body}
-      </div>
-    );
-  };
+  const quoteFile = useCallback(
+    (node: FileTreeItem) => {
+      if (!resourceId) return;
+      EventEmitter.emit('queryInput-insert-item', {
+        item: normalizeReferenceItem(node, `${resourceId}`),
+        type: isDirectory(node) ? DragType.commonFolder : DragType.commonFile,
+      });
+    },
+    [EventEmitter, resourceId]
+  );
 
-  const renderFileDiffModal = () => {
-    const open = !!diffModalFile;
-    const lines = parseDiffLines(diffModalData?.diff);
-    const status = diffModalData?.status;
-    const hasDiff = status === 'ok' && lines.some((line) => line.type === 'add' || line.type === 'del');
-    const fileName = diffModalFile ? splitFilePath(diffModalFile).name : '';
-    return (
-      <Modal
-        open={open}
-        onCancel={closeFileDiff}
-        footer={null}
-        width={900}
-        title={
-          <div className={styles.diffModalTitle}>
-            <span className={styles.diffModalName}>{fileName}</span>
-            {diffModalFile ? <span className={styles.diffModalPath}>{diffModalFile}</span> : null}
-          </div>
-        }
-        className={styles.diffModal}
-      >
-        {diffModalLoading ? (
-          <div className={styles.diffModalEmpty}>
-            <Spin />
-          </div>
-        ) : !diffModalData || status !== 'ok' ? (
-          <div className={styles.diffModalEmpty}>{diffModalData?.message || t('codeChanges.diffUnavailable')}</div>
-        ) : !hasDiff ? (
-          <div className={styles.diffModalEmpty}>{t('codeChanges.diffEmpty')}</div>
-        ) : (
-          <div className={styles.diffModalBody}>
-            {lines.map((line, index) => {
-              if (line.type === 'meta') return null;
-              let className = styles.diffLineContext;
-              if (line.type === 'add') className = styles.diffLineAdd;
-              else if (line.type === 'del') className = styles.diffLineDel;
-              else if (line.type === 'hunk') className = styles.diffLineHunk;
-              return (
-                <div className={`${styles.diffLine} ${className}`} key={index}>
-                  {line.text || ' '}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Modal>
-    );
-  };
+  const refreshRepo = useCallback(
+    async (repo: DevloopProjectRepo) => {
+      const repoKey = `${repo.repoId}`;
+      setChildrenByRepoPath((current) => ({ ...current, [repoKey]: {} }));
+      setExpandedKeysMap((current) => ({ ...current, [repoKey]: [] }));
+      const keyword = repoSearchValueMap[repoKey] || '';
+      await searchRepoFiles(repo, keyword, branchMap[repoKey] || repo.defaultBranch || 'main');
+    },
+    [branchMap, repoSearchValueMap, searchRepoFiles]
+  );
+
+  const changeBranch = useCallback(
+    async (repo: DevloopProjectRepo, branch: string) => {
+      const repoKey = `${repo.repoId}`;
+      setBranchMap((current) => ({ ...current, [repoKey]: branch }));
+      setChildrenByRepoPath((current) => ({ ...current, [repoKey]: {} }));
+      setExpandedKeysMap((current) => ({ ...current, [repoKey]: [] }));
+      await searchRepoFiles(repo, repoSearchValueMap[repoKey] || '', branch);
+    },
+    [repoSearchValueMap, searchRepoFiles]
+  );
 
   if (!repos.length) {
     return (
       <div className={styles.detailResourcePanel}>
-        <div className={styles.detailReposEmpty}>
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={intl.formatMessage({
-              id: reposLoading ? 'projectSpace.detail.repo.loading' : 'projectSpace.detail.repo.emptyRepositories',
-            })}
-          />
-        </div>
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={intl.formatMessage({
+            id: reposLoading ? 'projectSpace.detail.repo.loading' : 'projectSpace.detail.repo.emptyRepositories',
+          })}
+        />
       </div>
     );
   }
 
+  const fillContainer = repos.length <= 1;
   return (
-    <div className={styles.detailResourcePanel}>
-      {repos.map((repo) => {
+    <div className={styles.detailResourcePanel} style={fillContainer ? undefined : { padding: 10 }}>
+      {repos.map((repo, idx) => {
         const repoKey = `${repo.repoId}`;
-        const currentPath = repoRootPathMap[repoKey] || '/';
-        const showChangesView = !!repoChangesViewMap[repoKey];
-        const taskChangeCount = taskChanges?.files?.length || 0;
+        const branch = branchMap[repoKey] || repo.defaultBranch || 'main';
+        const branches = branchesMap[repoKey] || [];
+        const branchItems = branches.map((item) => ({
+          key: item.name,
+          label: item.name,
+          onClick: () => void changeBranch(repo, item.name),
+        }));
         return (
           <FileSpaceBlock
             key={repoKey}
             title={repo.repoFullName}
+            fillContainer={fillContainer}
+            style={idx > 0 ? { marginTop: 10 } : undefined}
             headerExtra={
-              taskChangeCount > 0 ? (
-                <button
-                  type="button"
-                  className={`${styles.repoChangesButton} ${showChangesView ? styles.repoChangesButtonActive : ''}`}
-                  aria-label={t(showChangesView ? 'repo.showFiles' : 'repo.showCodeChanges')}
-                  onClick={() => setRepoChangesViewMap((current) => ({ ...current, [repoKey]: !current[repoKey] }))}
+              <Dropdown menu={{ items: branchItems }} trigger={['click']} overlayClassName={styles.repoBranchDropdown}>
+                <Button
+                  type="text"
+                  loading={!!branchLoadingMap[repoKey]}
+                  icon={<DownOutlined />}
+                  iconPosition="end"
+                  title={branch}
+                  style={{ paddingInline: 5 }}
                 >
                   <BranchesOutlined />
-                  <span className={styles.repoChangesCount}>{taskChangeCount}</span>
-                </button>
-              ) : null
+                  <span>{formatBranchLabel(branch)}</span>
+                </Button>
+              </Dropdown>
             }
             contentBefore={
               <div className={styles.detailRepoSearch}>
@@ -522,30 +324,26 @@ const ReposTab: React.FC<ReposTabProps> = ({
                   onChange={(event) =>
                     setRepoSearchValueMap((current) => ({ ...current, [repoKey]: event.target.value }))
                   }
-                  onSearch={(value) => void searchRepoFiles(repo, value)}
-                  onClear={() => void searchRepoFiles(repo, '')}
+                  onSearch={(value) => void searchRepoFiles(repo, value, branch)}
+                  onClear={() => void searchRepoFiles(repo, '', branch)}
                 />
               </div>
             }
-            alternateContent={renderCodeChanges()}
-            showAlternateContent={showChangesView}
-            loading={!!repoLoadingMap[repoKey] || taskChangesLoading}
+            loading={!!repoLoadingMap[repoKey]}
             items={repoFilesMap[repoKey] || []}
-            currentPath={currentPath}
-            emptyText={intl.formatMessage({
-              id: sessionId ? 'projectSpace.detail.repo.emptyFiles' : 'projectSpace.detail.repo.emptySession',
-            })}
+            currentPath="/"
+            emptyText={intl.formatMessage({ id: 'projectSpace.detail.repo.emptyFiles' })}
             resourceEmptyStyle
-            childrenByPath={childrenByPath}
-            expandedKeys={expandedKeys}
-            onRefresh={resourceId && sessionId ? () => void refreshRepo(repo) : undefined}
-            onExpand={setExpandedKeys}
-            onLoadData={loadRepoTreeNode}
-            onNodeClick={onNodeClick}
+            childrenByPath={childrenByRepoPath[repoKey] || {}}
+            expandedKeys={expandedKeysMap[repoKey] || []}
+            onRefresh={() => void refreshRepo(repo)}
+            onExpand={(keys) => setExpandedKeysMap((current) => ({ ...current, [repoKey]: keys }))}
+            onLoadData={(node) => loadRepoTreeNode(repo, node)}
+            onNodeClick={(event, node) => handleNodeClick(repo, event, node)}
+            onNodeDoubleClick={quoteFile}
           />
         );
       })}
-      {renderFileDiffModal()}
     </div>
   );
 };

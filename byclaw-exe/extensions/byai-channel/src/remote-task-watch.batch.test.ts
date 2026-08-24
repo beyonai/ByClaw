@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   dispatch: vi.fn(),
+  redisExists: vi.fn(),
+  redisQuit: vi.fn(),
   ensureRequest: vi.fn(),
   markAwaiting: vi.fn(),
   markDispatched: vi.fn(),
@@ -24,7 +26,15 @@ vi.mock("./session-context.js", () => ({
 }));
 
 vi.mock("./utils.js", () => ({
-  createRedisInstance: () => null,
+  createRedisInstance: () => ({
+    exists: mocks.redisExists,
+    quit: mocks.redisQuit,
+  }),
+}));
+
+vi.mock("../../shared/src/session-key.js", () => ({
+  resolveByaiAgentIdFromSessionKey: (sessionKey: string) =>
+    sessionKey.split(":")[1]?.replace("baiying-agent-", "") ?? "",
 }));
 
 import {
@@ -69,6 +79,8 @@ beforeEach(async () => {
   stateDir = await mkdtemp(path.join(tmpdir(), "byai-remote-batch-"));
   process.env.OPENCLAW_STATE_DIR = stateDir;
   mocks.dispatch.mockReset().mockResolvedValue({ runId: "run-followup" });
+  mocks.redisExists.mockReset().mockResolvedValue(0);
+  mocks.redisQuit.mockReset().mockResolvedValue("OK");
   mocks.ensureRequest.mockReset();
   mocks.markAwaiting.mockReset();
   mocks.markDispatched.mockReset();
@@ -155,6 +167,64 @@ describe("remote-task-watch session batches", () => {
         traceId: task.traceId,
       });
     }
+  });
+
+  it("consumes the group without dispatching when the session is delegated to an ACP agent", async () => {
+    const requesterSessionKey = "agent:baiying-agent-42:direct:s-1";
+    const state = createState([
+      { ...startedEvent("call-1", requesterSessionKey), sessionId: "1001" },
+      { ...startedEvent("call-2", requesterSessionKey), sessionId: "1001" },
+    ]);
+    const group = __remoteTaskWatchTestInternals
+      .groupActiveTasksByRequesterSessionKey(state)
+      .get(requesterSessionKey)!;
+    group.forEach((task, index) => {
+      markResultReady(task as unknown as Record<string, unknown>, `final-answer-${index + 1}`);
+    });
+    mocks.redisExists.mockResolvedValue(1);
+
+    expect(
+      await __remoteTaskWatchTestInternals.deliverReadyTaskGroup(group, {
+        retryDelayMs: 10,
+        maxAttempts: 3,
+      }),
+    ).toBe(true);
+
+    expect(mocks.redisExists).toHaveBeenCalledWith(
+      "byai:call_acp_agent:delegation:42:1001",
+    );
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(mocks.ensureRequest).not.toHaveBeenCalled();
+    expect(mocks.markAwaiting).not.toHaveBeenCalled();
+    expect(mocks.markDispatched).not.toHaveBeenCalled();
+    expect(mocks.removeDelegatedWork).toHaveBeenCalledTimes(2);
+    expect(group.every((task) => task.status === "delivered")).toBe(true);
+    expect(group.every((task) => task.deliveryAttempts === 0)).toBe(true);
+    expect(group.every((task) => task.resultFilePath === undefined)).toBe(true);
+  });
+
+  it("retries without dispatching when the ACP delegation lookup fails", async () => {
+    const state = createState([startedEvent("call-1")]);
+    const group = __remoteTaskWatchTestInternals
+      .groupActiveTasksByRequesterSessionKey(state)
+      .get("agent:main:direct:s-1")!;
+    markResultReady(group[0] as unknown as Record<string, unknown>, "final-answer");
+    mocks.redisExists.mockRejectedValue(new Error("Redis unavailable"));
+
+    await __remoteTaskWatchTestInternals.deliverReadyTaskGroup(group, {
+      retryDelayMs: 10,
+      maxAttempts: 3,
+    });
+    expect(group[0]).toMatchObject({ status: "retry", deliveryAttempts: 1 });
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+
+    group[0]!.nextAttemptAt = undefined;
+    await __remoteTaskWatchTestInternals.deliverReadyTaskGroup(group, {
+      retryDelayMs: 10,
+      maxAttempts: 3,
+    });
+    expect(group[0]).toMatchObject({ status: "retry", deliveryAttempts: 2 });
+    expect(mocks.dispatch).not.toHaveBeenCalled();
   });
 
   it("retries and completes the whole group atomically", async () => {

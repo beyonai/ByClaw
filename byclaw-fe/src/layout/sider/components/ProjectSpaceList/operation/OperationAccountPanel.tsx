@@ -1,6 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Empty, Modal, Segmented, Spin, Tag } from 'antd';
-import { ArrowLeftOutlined, DeleteOutlined, EditOutlined, LoginOutlined, PlusOutlined } from '@ant-design/icons';
+import { Button, Dropdown, Empty, Modal, Select, Segmented, Spin, Tag } from 'antd';
+import {
+  ArrowLeftOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  LoginOutlined,
+  MoreOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import OperationAccountFormModal from './OperationAccountFormModal';
 import type {
@@ -25,6 +33,12 @@ export interface OperationAccountPanelProps {
   // 由详情页“新增账号”菜单触发时，账号面板打开后自动显示新增表单。
   openCreateModal?: boolean;
   onCreateModalOpened?: () => void;
+  onRefresh?: () => void | Promise<void>;
+  // 项目大详情使用紧凑模式，标题说明和筛选栏收拢到同一行；小详情继续使用完整面板布局。
+  compact?: boolean;
+  toolbarPlacement?: 'inline' | 'external';
+  onToolbarChange?: (toolbar: React.ReactNode | null) => void;
+  onRefreshToolbarChange?: (toolbar: React.ReactNode | null) => void;
   onBack?: () => void;
   onAccountClick?: (account: OperationAccount) => void;
   onLogin?: (account: OperationAccount) => void | Promise<void>;
@@ -37,7 +51,8 @@ export interface OperationAccountPanelProps {
 // 登录状态使用固定颜色，避免接口中不同平台的状态文案直接影响视觉语义。
 const ACCOUNT_STATUS_COLOR: Record<NonNullable<OperationAccount['loginStatus']>, string> = {
   logged_in: 'success',
-  logged_out: 'default',
+  // 未登录需要提醒用户完成平台登录，使用黄色警示色与已登录状态拉开差异。
+  logged_out: 'warning',
   expired: 'warning',
   unknown: 'default',
 };
@@ -54,6 +69,11 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   deletingAccountId,
   openCreateModal = false,
   onCreateModalOpened,
+  onRefresh,
+  compact = false,
+  toolbarPlacement = 'inline',
+  onToolbarChange,
+  onRefreshToolbarChange,
   onBack,
   onAccountClick,
   onLogin,
@@ -88,6 +108,7 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
       { value: 'Xiaohongshu', label: platformT('xiaohongshu') },
       { value: 'WeChatChannels', label: platformT('video') },
       { value: 'Douyin', label: platformT('douyin') },
+      { value: 'CustomLink', label: platformT('customLink') },
     ],
     [platformT]
   );
@@ -109,6 +130,55 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   );
   // 没有管理权限或没有保存回调时，隐藏新增和编辑入口，防止出现不可完成的操作。
   const canSaveAccount = canManage && !!onSaveAccount;
+  const openAddAccountModal = useCallback(() => {
+    if (!canSaveAccount) return;
+    setEditingAccount(null);
+    setAccountFormOpen(true);
+  }, [canSaveAccount]);
+
+  useEffect(() => {
+    if (!onToolbarChange || toolbarPlacement !== 'external') return;
+    // 大详情把账号筛选和新增账号提升到页面顶部，刷新按钮单独放到最右侧。
+    onToolbarChange(
+      <div className={styles.accountPanelActions}>
+        <Select
+          className={styles.accountCompactFilter}
+          value={activePlatform}
+          options={filterOptions}
+          onChange={(value) => setActivePlatform(String(value))}
+        />
+        {canSaveAccount && (
+          // 大详情页的新增账号按钮与需求 Tab 的新增需求按钮使用统一的次级按钮样式。
+          <Button icon={<PlusOutlined />} onClick={openAddAccountModal}>
+            {t('add')}
+          </Button>
+        )}
+      </div>
+    );
+    onRefreshToolbarChange?.(
+      onRefresh ? (
+        <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void onRefresh()}>
+          {intl.formatMessage({ id: 'projectSpace.detail.common.refresh' })}
+        </Button>
+      ) : null
+    );
+    return () => {
+      onToolbarChange(null);
+      onRefreshToolbarChange?.(null);
+    };
+  }, [
+    activePlatform,
+    canSaveAccount,
+    filterOptions,
+    intl,
+    loading,
+    onRefresh,
+    onRefreshToolbarChange,
+    onToolbarChange,
+    openAddAccountModal,
+    t,
+    toolbarPlacement,
+  ]);
 
   useEffect(() => {
     // 后端刷新平台列表后，若当前筛选平台已失效则回退到全部账号。
@@ -117,12 +187,6 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
       setActivePlatform('all');
     }
   }, [activePlatform, availablePlatformOptions]);
-
-  const openAddAccountModal = useCallback(() => {
-    if (!canSaveAccount) return;
-    setEditingAccount(null);
-    setAccountFormOpen(true);
-  }, [canSaveAccount]);
 
   useEffect(() => {
     if (!openCreateModal || !canSaveAccount) return;
@@ -178,7 +242,11 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
   );
 
   return (
-    <div className={styles.accountPanel}>
+    <div
+      className={`${styles.accountPanel} ${compact ? styles.accountPanelCompact : ''} ${
+        toolbarPlacement === 'external' ? styles.accountPanelCompactExternal : ''
+      }`}
+    >
       <header className={styles.accountPanelHeader}>
         <div className={styles.accountPanelHeading}>
           {onBack && (
@@ -195,10 +263,27 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
             <p>{t('description')}</p>
           </div>
         </div>
-        {canSaveAccount && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={openAddAccountModal}>
-            {t('add')}
-          </Button>
+        {toolbarPlacement === 'inline' && (
+          <div className={styles.accountPanelActions}>
+            {compact && (
+              <Select
+                className={styles.accountCompactFilter}
+                value={activePlatform}
+                options={filterOptions}
+                onChange={(value) => setActivePlatform(String(value))}
+              />
+            )}
+            {onRefresh && (
+              <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void onRefresh()}>
+                {intl.formatMessage({ id: 'projectSpace.detail.common.refresh' })}
+              </Button>
+            )}
+            {canSaveAccount && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={openAddAccountModal}>
+                {t('add')}
+              </Button>
+            )}
+          </div>
         )}
       </header>
 
@@ -239,8 +324,12 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
             {filteredAccounts.map((account) => {
               const platform = platformOptionMap.get(account.platformId);
               const platformLabel = platform?.label || account.platformId;
+              const accountName =
+                account.accountName || (account.platformId === 'CustomLink' ? platformLabel : account.accountName);
+              const accountSubtitle =
+                account.platformId === 'CustomLink' && account.customUrl ? account.customUrl : account.accountId;
               const status = account.loginStatus || 'unknown';
-              // 当前支持的四个运营平台均通过 UI Agent 浏览器登录，历史短编码继续兼容。
+              // 当前支持的四个运营平台均通过 UI Agent 浏览器登录，历史短编码继续兼容。自定义链接平台也支持登录。
               const canLogin = [
                 'WeChatAccount',
                 'wechat',
@@ -250,7 +339,9 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
                 'video',
                 'Douyin',
                 'douyin',
+                'CustomLink',
               ].includes(account.platformId);
+              const canEditAccount = canSaveAccount && account.canEdit !== false;
               return (
                 <article
                   key={String(account.id)}
@@ -263,11 +354,42 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
                   <div className={styles.accountCardHeader}>
                     <span className={styles.accountPlatformMark}>{platform?.mark || platformLabel.slice(0, 1)}</span>
                     <div className={styles.accountCardIdentity}>
-                      <strong title={account.accountName}>{account.accountName}</strong>
-                      <span title={account.accountId}>{account.accountId}</span>
+                      <strong title={accountName}>{accountName}</strong>
+                      <span title={accountSubtitle}>{accountSubtitle}</span>
                     </div>
-                    <Tag color={ACCOUNT_STATUS_COLOR[status]}>{t(`status.${status}`)}</Tag>
+                    <Tag className={styles.accountStatusTag} color={ACCOUNT_STATUS_COLOR[status]}>
+                      {t(`status.${status}`)}
+                    </Tag>
                   </div>
+                  {canEditAccount && (
+                    <Dropdown
+                      trigger={['hover']}
+                      menu={{
+                        items: [
+                          { key: 'edit', icon: <EditOutlined />, label: t('edit') },
+                          ...(onDeleteAccount
+                            ? [{ key: 'delete', danger: true, icon: <DeleteOutlined />, label: t('delete') }]
+                            : []),
+                        ],
+                        onClick: ({ key, domEvent }) => {
+                          domEvent.stopPropagation();
+                          if (key === 'edit') openEditAccountModal(account);
+                          if (key === 'delete') handleDeleteAccount(account);
+                        },
+                      }}
+                    >
+                      {/* 编辑和删除收进悬停菜单，避免常驻按钮挤占账号信息区域。 */}
+                      <Button
+                        type="text"
+                        size="small"
+                        className={styles.accountCardMoreAction}
+                        icon={<MoreOutlined />}
+                        loading={`${deletingAccountId ?? ''}` === `${account.id}`}
+                        aria-label="账号操作"
+                        onClick={(event) => event.stopPropagation()}
+                      />
+                    </Dropdown>
+                  )}
                   <div className={styles.accountPlatformName}>{platformLabel}</div>
                   {/* 当前版本暂不展示账号指标和近 30 天统计，仅保留账号操作按钮。 */}
                   <div className={styles.accountCardFooter}>
@@ -292,35 +414,6 @@ const OperationAccountPanel: React.FC<OperationAccountPanelProps> = ({
                           }}
                         >
                           {t(status === 'logged_in' ? 'relogin' : 'login')}
-                        </Button>
-                      )}
-                      {canSaveAccount && account.canEdit !== false && (
-                        <Button
-                          type="link"
-                          size="small"
-                          icon={<EditOutlined />}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openEditAccountModal(account);
-                          }}
-                        >
-                          {t('edit')}
-                        </Button>
-                      )}
-                      {canSaveAccount && onDeleteAccount && account.canEdit !== false && (
-                        <Button
-                          danger
-                          type="link"
-                          size="small"
-                          icon={<DeleteOutlined />}
-                          loading={`${deletingAccountId ?? ''}` === `${account.id}`}
-                          disabled={deletingAccountId !== undefined && deletingAccountId !== null}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleDeleteAccount(account);
-                          }}
-                        >
-                          {t('delete')}
                         </Button>
                       )}
                     </div>

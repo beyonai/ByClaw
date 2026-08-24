@@ -3,12 +3,14 @@ import type { Dayjs } from 'dayjs';
 // 运营模块中的业务主键均兼容后端数字 ID 与字符串 ID，避免不同资源接口之间发生类型转换错误。
 export type OperationIdentifier = string | number;
 
-// 运营任务、登录状态和工作流状态为前端统一枚举；接口适配层负责兼容后端的历史取值。
-export type OperationTaskType = 'collect' | 'content' | 'analyze';
+// 运营需求按原型拆成四类；接口适配层负责兼容旧版 publish/content 等历史取值。
+export type OperationTaskType = 'collect' | 'knowledge' | 'object_discovery' | 'content' | 'analyze';
 
 export type OperationLoginStatus = 'logged_in' | 'logged_out' | 'expired' | 'unknown';
 
 export type OperationCollectionMode = 'once' | 'interval' | 'periodic';
+
+export type OperationCollectionPeriod = 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly';
 
 export type OperationAnalysisScope = 'account' | 'works';
 
@@ -44,12 +46,14 @@ export interface OperationAccount {
   loginStatus?: OperationLoginStatus;
   metrics?: OperationAccountMetrics;
   canEdit?: boolean;
+  customUrl?: string; // 自定义链接平台的登录URL
 }
 
 export interface OperationAccountFormValues {
   platformId: string;
   accountName: string;
   accountId: string;
+  customUrl?: string; // 自定义链接平台的登录URL
 }
 
 // 数字员工分为一个总控和多个执行者，表单始终以完整选择对象提交。
@@ -79,10 +83,33 @@ export interface OperationCollectConfig {
   channel?: string;
   accountOrAddress?: string;
   topic?: string;
+
+  /** 仅用于兼容旧版采集时间范围，编辑历史需求时仍可读取但不再提交。 */
   dateRange?: OperationDateRange;
   knowledgeBaseId?: OperationIdentifier;
   directoryId?: OperationIdentifier;
   mode?: OperationCollectionMode;
+
+  /** 单次采集的计划触发时间，提交前序列化为 yyyy-MM-dd HH:mm:ss。 */
+  onceTime?: Dayjs | null;
+  periodType?: OperationCollectionPeriod;
+  periodWeekdays?: number[];
+  periodMonthDays?: number[];
+  periodMonth?: number;
+  periodDay?: number;
+
+  /** 周期采集每天触发的时分，表单态使用 Dayjs。 */
+  periodTime?: Dayjs | null;
+
+  /** 每年采集在表单中合并选择月、日和时分，提交时再拆回稳定接口字段。 */
+  periodYearDateTime?: Dayjs | null;
+  intervalHours?: number;
+  intervalWeekdays?: number[];
+
+  /** 周期和间隔采集的可选生效日期区间。 */
+  effectiveDateRange?: OperationDateRange;
+
+  /** 旧版间隔字段仅用于历史配置回显。 */
   intervalValue?: number;
   intervalUnit?: 'minute' | 'hour';
 

@@ -3,10 +3,13 @@ nav.chatTitle {
   // display: flex;
   // padding: 8px 20px;
   min-height: 48px;
+  position: relative;
+  flex: 0 0 auto;
   // align-items: center;
   // flex-direction: row;
   // box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px 0 rgba(0, 0, 0, 0.02);
   z-index: 100;
+  pointer-events: auto;
 
   .chatTitleWrap {
     padding: 8px 20px;
@@ -34,6 +37,67 @@ nav.chatTitle {
     line-height: 24px;
   }
 
+  .chatBreadcrumb {
+    position: relative;
+    z-index: 1;
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow: hidden;
+    color: #6b6f76;
+    font-size: 16px;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 24px;
+    white-space: nowrap;
+  }
+
+  // 侧边栏收起后展开按钮悬浮在内容左上角，项目会话面包屑向右避让，避免与按钮重叠。
+  .chatBreadcrumbCollapsed {
+    margin-left: 40px;
+  }
+
+  .chatBreadcrumbLink,
+  .chatBreadcrumbCurrent {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chatBreadcrumbLink {
+    position: relative;
+    z-index: 1;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    color: #6b6f76;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+    pointer-events: auto;
+
+    &:hover,
+    &:focus-visible {
+      color: #14161a;
+      text-decoration: underline;
+      outline: none;
+    }
+  }
+
+  .chatBreadcrumbCurrent {
+    color: #14161a;
+    font-weight: 500;
+  }
+
+  .chatBreadcrumbSeparator {
+    flex: 0 0 auto;
+    color: #a3a7ad;
+  }
+
   .actions {
     gap: 4px;
     display: flex;
@@ -41,19 +105,43 @@ nav.chatTitle {
     flex-direction: row;
 
     .projectSessionActions {
-      // 两个项目会话操作单独留出更清晰的点击间距，不影响右侧其他标题操作。
+      // 项目会话操作保持独立容器，尺寸调整不影响右侧资源按钮。
       gap: 10px;
       display: inline-flex;
       align-items: center;
     }
 
     .projectActionButton {
-      width: 32px;
-      height: 32px;
+      width: 28px;
+      height: 28px;
+      min-width: 28px;
+      min-height: 28px;
       padding: 0;
       border: 0;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       color: #526075;
+      line-height: 1;
       box-shadow: none;
+
+      // Ant Design 图标和自定义 SVG 共用固定图标槽，确保两个标题按钮的视觉尺寸和垂直位置一致。
+      :global(.@{antPrefix}-btn-icon) {
+        width: 16px;
+        height: 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0;
+        line-height: 1;
+      }
+
+      svg {
+        width: 16px;
+        height: 16px;
+        display: block;
+      }
 
       // 鼠标点击不保留高亮，键盘聚焦时仍提供清晰的可访问性反馈。
       &:hover,
@@ -61,6 +149,56 @@ nav.chatTitle {
         color: #246bfe;
         background: #f0f5ff;
       }
+    }
+
+    // 资源浮窗打开后才显示浅灰底色，关闭状态保持设计稿中的透明按钮。
+    .projectActionButtonActive {
+      color: #14161a;
+      background: #f1f2f4;
+
+      &:hover,
+      &:focus-visible {
+        color: #14161a;
+        background: #e9ebee;
+      }
+    }
+
+    .projectActionButton.resourcePanelToggleButton {
+      color: #000;
+
+      &:hover,
+      &:focus-visible {
+        color: #000;
+      }
+    }
+
+    .projectActionButton.taskProgressButton {
+      color: #000;
+
+      &:hover,
+      &:focus-visible {
+        color: #000;
+      }
+    }
+
+    .projectActionButton.taskProgressButton :global(.@{antPrefix}-btn-icon),
+    .projectActionButton.taskProgressButton svg {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 16px;
+    }
+
+    .projectActionButton.resourcePanelToggleButton :global(.@{antPrefix}-btn-icon) {
+      // 与左侧边栏展开按钮保持相同尺寸，避免 SVG 被 flex 自动压缩。
+      width: 18px;
+      height: 18px;
+      flex: 0 0 18px;
+    }
+
+    .projectActionButton .resourcePanelToggleIcon {
+      width: 18px;
+      height: 18px;
+      flex: 0 0 18px;
     }
 
     .btn {

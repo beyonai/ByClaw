@@ -63,13 +63,7 @@ function serializeByClawSse(event: RunEvent, state: SerializerState): string {
   if (event.type === "run.failed" && stringData(event.data.userMessage)) {
     const userMessage = stringData(event.data.userMessage);
     if (state.reasoningStarted && !state.reasoningEnded) {
-      frames.push(
-        frame(
-          event,
-          "reasoningLogEnd",
-          messagePayload(event, "reasoningLogEnd", ""),
-        ),
-      );
+      frames.push(frame(event, "reasoningLogEnd", messagePayload(event, "reasoningLogEnd", "")));
       state.reasoningEnded = true;
     }
     appendAnswerDelta(frames, event, state, userMessage);
@@ -100,16 +94,19 @@ function serializeByClawSse(event: RunEvent, state: SerializerState): string {
   return frames.join("");
 }
 
-/** 把统一交互请求投影为现有前端已经支持的 3013 固定表单。 */
+/** Leader 自身的结构化提问使用 3014；子 Agent 表单继续兼容 3013。 */
 function appendInteractionFrame(frames: string[], event: RunEvent): void {
   if (event.type !== "interaction.requested") {
     return;
   }
   const interactionId = stringData(event.data.interactionId);
   const request = recordData(event.data.request);
-  const uiPayload =
-    recordData(request?.uiPayload) ??
-    ({ formStatus: 0, pluginMachineFields: [] } as Record<string, JsonValue>);
+  const leaderQuestion = stringData(event.data.source) === "leader";
+  const questions = Array.isArray(request?.questions) ? request.questions : [];
+  const content = leaderQuestion
+    ? { questions }
+    : recordData(request?.uiPayload) ??
+      ({ formStatus: 0, pluginMachineFields: [] } as Record<string, JsonValue>);
   frames.push(
     frame(event, "reasoningLogDelta", {
       event: "reasoningLogDelta",
@@ -117,13 +114,16 @@ function appendInteractionFrame(frames: string[], event: RunEvent): void {
       queryMessageId: event.runId,
       traceId: event.runId,
       sourceAgentType: "BY_SUPER",
-      contentType: "3013",
+      contentType: leaderQuestion ? "3014" : "3013",
       orderId: interactionId || event.runId,
       parentOrderId: stringData(event.data.delegationId) || "-1",
-      choices: [{ delta: { role: "assistant", content: JSON.stringify(uiPayload) } }],
+      choices: [{ delta: { role: "assistant", content: JSON.stringify(content) } }],
       metadata: {
         parent_run_id: event.runId,
         interaction_id: interactionId,
+        ...(leaderQuestion
+          ? { questions, tool_name: "AskUserQuestion" }
+          : {}),
       },
     }),
   );
@@ -135,14 +135,24 @@ function appendSubAgentFrames(frames: string[], event: RunEvent): void {
     event.type === "delegation.started"
       ? "subAgentStart"
       : event.type === "delegation.progress"
-        ? "subAgentProgress"
-        : event.type === "delegation.output.delta"
-          ? "subAgentOutputDelta"
-          : event.type === "delegation.completed"
-            ? "subAgentEnd"
-            : event.type === "delegation.failed"
-              ? "subAgentError"
-              : undefined;
+      ? "subAgentProgress"
+      : event.type === "delegation.display.progress"
+      ? "subAgentReasoningDelta"
+      : event.type === "delegation.tool.started"
+      ? "subAgentToolStart"
+      : event.type === "delegation.tool.detail"
+      ? "subAgentToolDetail"
+      : event.type === "delegation.tool.completed"
+      ? "subAgentToolEnd"
+      : event.type === "delegation.tool.failed"
+      ? "subAgentToolError"
+      : event.type === "delegation.output.delta"
+      ? "subAgentOutputDelta"
+      : event.type === "delegation.completed"
+      ? "subAgentEnd"
+      : event.type === "delegation.failed"
+      ? "subAgentError"
+      : undefined;
   if (!eventName) {
     return;
   }
@@ -152,10 +162,12 @@ function appendSubAgentFrames(frames: string[], event: RunEvent): void {
     event.type === "delegation.output.delta"
       ? stringData(event.data.text)
       : event.type === "delegation.progress"
-        ? stringData(event.data.message)
-        : event.type === "delegation.failed"
-          ? stringData(event.data.error)
-          : "";
+      ? stringData(event.data.message)
+      : event.type === "delegation.display.progress"
+      ? stringData(event.data.text)
+      : event.type === "delegation.tool.failed" || event.type === "delegation.failed"
+      ? stringData(event.data.error)
+      : "";
   frames.push(
     frame(event, eventName, {
       event: eventName,
@@ -165,11 +177,19 @@ function appendSubAgentFrames(frames: string[], event: RunEvent): void {
       delegationId,
       agentId: stringData(event.data.agentId),
       agentName: stringData(event.data.agentName),
-      status: stringData(event.data.status),
-      artifactCount:
-        typeof event.data.artifactCount === "number"
-          ? event.data.artifactCount
-          : 0,
+      status:
+        event.type === "delegation.tool.started"
+          ? "_START_"
+          : event.type === "delegation.tool.completed"
+          ? "_DONE_"
+          : event.type === "delegation.tool.failed"
+          ? "_ERROR_"
+          : stringData(event.data.status),
+      artifactCount: typeof event.data.artifactCount === "number" ? event.data.artifactCount : 0,
+      callId: stringData(event.data.callId),
+      toolName: stringData(event.data.toolName),
+      phase: stringData(event.data.phase),
+      ...(event.data.value !== undefined ? { value: event.data.value } : {}),
       contentType: "1002",
       choices: [{ delta: { content: text } }],
     }),
@@ -241,7 +261,9 @@ function progressMessage(event: RunEvent): string {
     return runStatusMessage(stringData(event.data.status));
   }
   if (event.type === "delegation.started") {
-    return `正在调用 ${stringData(event.data.agentName) || stringData(event.data.agentId) || "Agent"}`;
+    return `正在调用 ${
+      stringData(event.data.agentName) || stringData(event.data.agentId) || "Agent"
+    }`;
   }
   if (event.type === "delegation.progress") {
     return stringData(event.data.message);
@@ -280,10 +302,6 @@ function stringData(value: JsonValue | undefined): string {
   return typeof value === "string" ? value : "";
 }
 
-function recordData(
-  value: JsonValue | undefined,
-): Record<string, JsonValue> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : undefined;
+function recordData(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
 }

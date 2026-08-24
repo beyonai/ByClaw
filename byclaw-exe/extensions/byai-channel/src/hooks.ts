@@ -30,6 +30,7 @@ import {
     buildUserMdReloadPrompt,
     resolveInboundLanguage,
 } from "./i18n.js";
+import { reportNativeChildRunTerminal } from "./native-child-run.js";
 import { getByaiRuntime } from "./runtime.js";
 import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import { takePromptInjectionSnapshot } from "./prompt-injection-snapshot.js";
@@ -776,6 +777,13 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
                 error: _error,
             });
         }
+        // agent_end 对 native child run 也会触发，且在 announce 投递之前，是与 child lifecycle
+        // 互备的早期终态事实。台账按 runId 去重，root run 的 runId 不在台账里，登记会自然落空。
+        reportNativeChildRunTerminal(api, {
+            childRunId: runId,
+            childSessionKey: ctx.sessionKey,
+            source: "agent_end",
+        });
         // Intentionally no session-status write here: agent_end fires inside the
         // runner before agentCommand persists this turn's totalTokens, so reading
         // the store would publish a stale (previous-turn) value and could clobber

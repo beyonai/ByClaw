@@ -481,7 +481,8 @@ const OntologyCenter: React.FC = () => {
           resourceBizTypeList: ['VIEW', 'OBJECT'],
           systemCode: ontologySystemCode,
           keyword,
-          catalogId,
+          // “全部分类”是前端占位值，不能把 -1 传给后端当作真实目录筛选，否则会返回空列表。
+          catalogId: catalogId === ALL_CATEGORY_ID ? undefined : catalogId,
           statusList: statusFilter === 'all' ? [0, 1, 2, 3, 4, 5] : statusFilter === 'offline' ? [3] : [2],
           permission: toResourceFilterPermission(permissionFilter),
           pageNum: nextPageNum,

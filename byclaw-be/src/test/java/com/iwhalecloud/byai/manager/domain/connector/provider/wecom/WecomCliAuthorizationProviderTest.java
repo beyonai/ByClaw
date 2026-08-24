@@ -55,6 +55,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliR
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.ManagedProcess;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService.ConnectorCliWorkspace;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
 class WecomCliAuthorizationProviderTest {
@@ -63,6 +64,8 @@ class WecomCliAuthorizationProviderTest {
         List.of("wecom-cli", "init", "--noninteractive", "--no-open");
     private static final List<String> CACHE_STATUS_COMMAND =
         List.of("wecom-cli", "cache", "status");
+    private static final List<String> CACHE_CLEAR_COMMAND =
+        List.of("wecom-cli", "cache", "clear");
     private static final List<String> PROBE_COMMAND =
         List.of("wecom-cli", "contact", "get_userlist", "{}");
     private static final String VALID_CACHE_OUTPUT = "[{\"account\":\"wecom-user\"}]";
@@ -121,6 +124,19 @@ class WecomCliAuthorizationProviderTest {
     }
 
     @Test
+    void revokesWecomCredentialInIsolatedWorkspace() {
+        when(workspaceService.resolve(42L, "wecom-cli")).thenReturn(WORKSPACE);
+        when(cliRunner.run(eq(CACHE_CLEAR_COMMAND), eq(ENVIRONMENT), org.mockito.ArgumentMatchers.isNull(),
+            any(Duration.class))).thenReturn(new CliResult(0, "{}"));
+
+        provider.revoke("42", new ConnectorInfo());
+
+        verify(workspaceService).resolve(42L, "wecom-cli");
+        verify(cliRunner).run(eq(CACHE_CLEAR_COMMAND), eq(ENVIRONMENT), org.mockito.ArgumentMatchers.isNull(),
+            any(Duration.class));
+    }
+
+    @Test
     void verifiesExistingWecomCredentialWithTrustedBusinessProbe() {
         when(workspaceService.resolve(42L, "wecom-cli")).thenReturn(WORKSPACE);
         when(cliRunner.run(eq(CACHE_STATUS_COMMAND), eq(ENVIRONMENT), eq(null), any(Duration.class)))
@@ -128,9 +144,14 @@ class WecomCliAuthorizationProviderTest {
         when(cliRunner.run(eq(PROBE_COMMAND), eq(ENVIRONMENT), eq(null), any(Duration.class)))
             .thenReturn(new CliResult(0, VALID_DIRECT_PROBE_OUTPUT));
 
-        AuthorizationStatusResult result = provider.verify("42", connector(VALID_PROVIDER_STATE));
+        AuthorizationStatusResult result = provider.verify(42L, connector(VALID_PROVIDER_STATE));
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.credentialState().name()).isEqualTo("READY");
+        assertThat(result.renewalMode().name()).isEqualTo("PROBE_ONLY");
+        assertThat(result.accessExpiresAt()).isNull();
+        assertThat(result.refreshExpiresAt()).isNull();
+        assertThat(result.lastVerifiedAt()).isNotNull();
         verify(workspaceService).resolve(42L, "wecom-cli");
         verify(cliRunner).run(eq(PROBE_COMMAND), eq(ENVIRONMENT), eq(null), any(Duration.class));
     }
@@ -143,7 +164,7 @@ class WecomCliAuthorizationProviderTest {
         when(cliRunner.run(eq(PROBE_COMMAND), eq(ENVIRONMENT), eq(null), any(Duration.class)))
             .thenReturn(new CliResult(0, "{\"errcode\":40014,\"errmsg\":\"invalid token\"}"));
 
-        AuthorizationStatusResult result = provider.verify("42", connector(VALID_PROVIDER_STATE));
+        AuthorizationStatusResult result = provider.verify(42L, connector(VALID_PROVIDER_STATE));
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
         assertThat(result.errorCode()).isEqualTo("CONNECTOR_BUSINESS_PROBE_INVALID");
@@ -155,7 +176,7 @@ class WecomCliAuthorizationProviderTest {
         when(cliRunner.run(eq(CACHE_STATUS_COMMAND), eq(ENVIRONMENT), eq(null), any(Duration.class)))
             .thenReturn(new CliResult(1, "cache unavailable"));
 
-        AuthorizationStatusResult result = provider.verify("42", connector(VALID_PROVIDER_STATE));
+        AuthorizationStatusResult result = provider.verify(42L, connector(VALID_PROVIDER_STATE));
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
         assertThat(result.errorCode()).isEqualTo("CONNECTOR_CACHE_INVALID");
@@ -167,7 +188,7 @@ class WecomCliAuthorizationProviderTest {
         when(cliRunner.run(eq(CACHE_STATUS_COMMAND), eq(ENVIRONMENT), eq(null), any(Duration.class)))
             .thenReturn(new CliResult(124, "partial cache status"));
 
-        AuthorizationStatusResult result = provider.verify("42", connector(VALID_PROVIDER_STATE));
+        AuthorizationStatusResult result = provider.verify(42L, connector(VALID_PROVIDER_STATE));
 
         assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
         assertThat(result.errorCode()).isEqualTo("CONNECTOR_VERIFICATION_TIMEOUT");
@@ -188,7 +209,8 @@ class WecomCliAuthorizationProviderTest {
             .satisfies(constructor -> assertThat(constructor.getParameterTypes()).containsExactly(
                 ConnectorCliRunner.class,
                 ConnectorCredentialWorkspaceService.class,
-                ObjectMapper.class
+                ObjectMapper.class,
+                com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorManifestCommandResolver.class
             ));
     }
 
@@ -590,13 +612,13 @@ class WecomCliAuthorizationProviderTest {
             "probeCommand", snapshottedProbe
         ));
         stubValidCacheStatus();
-        when(cliRunner.run(snapshottedProbe, ENVIRONMENT, null, Duration.ofSeconds(30)))
+        when(cliRunner.run(PROBE_COMMAND, ENVIRONMENT, null, Duration.ofSeconds(30)))
             .thenReturn(new CliResult(7, "token=secret-value https://private.example.com"));
 
         AuthorizationStatusResult result = provider.queryStatus(sessionContext(authorization.result()));
 
         assertFailedStatus(result, "PROVIDER_PROBE_FAILED", "WeCom authorization probe failed");
-        verify(cliRunner).run(snapshottedProbe, ENVIRONMENT, null, Duration.ofSeconds(30));
+        verify(cliRunner).run(PROBE_COMMAND, ENVIRONMENT, null, Duration.ofSeconds(30));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -1821,7 +1843,8 @@ class WecomCliAuthorizationProviderTest {
             "wecom",
             "wecom-cli",
             null,
-            providerConfig
+            providerConfig,
+            commandCatalog()
         );
     }
 
@@ -2213,7 +2236,8 @@ class WecomCliAuthorizationProviderTest {
             "wecom-cli",
             null,
             null,
-            new Date()
+            new Date(),
+            commandCatalog()
         );
     }
 
@@ -2234,7 +2258,8 @@ class WecomCliAuthorizationProviderTest {
             "wecom-cli",
             null,
             providerState,
-            expiresAt
+            expiresAt,
+            commandCatalog()
         );
     }
 
@@ -2281,7 +2306,20 @@ class WecomCliAuthorizationProviderTest {
             "wecom-cli",
             started.providerSessionId(),
             providerState,
-            started.expiresAt()
+            started.expiresAt(),
+            commandCatalog()
+        );
+    }
+
+    private ManifestCommandCatalog commandCatalog() {
+        return new ManifestCommandCatalog(
+            Map.of(
+                "login", List.of(INIT_COMMAND),
+                "status", List.of(CACHE_STATUS_COMMAND, PROBE_COMMAND),
+                "logout", List.of(CACHE_CLEAR_COMMAND)
+            ),
+            "test-digest",
+            Map.of()
         );
     }
 

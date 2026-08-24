@@ -19,6 +19,7 @@ from by_qa.knowledge_base.services.knowledge_entity_callback import (
 
 from byclaw_knowledge_entity_callback import (
     CALLBACK_CONTEXT_EXTRA_PARAM,
+    DINGTALK_TEST_SEND_PATH,
     SAVE_OR_UPDATE_OBJECT_FILES_PATH,
     ByClawKnowledgeEntityCallbackError,
     ByClawKnowledgeEntityProcessingCallback,
@@ -349,22 +350,83 @@ async def test_callback_resolves_knowledge_base_name_from_database() -> None:
 
 
 @pytest.mark.asyncio
-async def test_batch_callback_only_logs() -> None:
-    post_json = MagicMock()
-    callback = ByClawKnowledgeEntityProcessingCallback(post_json=post_json)
+@pytest.mark.parametrize(
+    ("task_type", "task_name"),
+    [
+        (ProcessingTaskType.ENTITY_DISCOVERY, "知识实体发现"),
+        (ProcessingTaskType.DOCUMENT_ENRICH, "知识实体整理"),
+    ],
+)
+async def test_batch_callback_sends_chinese_summary_to_requesting_user(
+    task_type: ProcessingTaskType,
+    task_name: str,
+) -> None:
+    calls = []
+
+    async def get_json(path, params, headers):
+        calls.append((path, params, headers))
+        return {"resultCode": "0"}
+
+    callback = ByClawKnowledgeEntityProcessingCallback(
+        get_json=get_json,
+        user_id_resolver=lambda _user_code: "10000077",
+        beyond_token_resolver=lambda _user_code: "token-1",
+    )
     event = BatchCompletedCallbackInput(
         batch_id="batch-1",
-        task_type=ProcessingTaskType.ENTITY_DISCOVERY,
+        task_type=task_type,
         knowledge_base_id="kb-id-1",
         kb_code="kb-code-1",
-        progress=_progress(),
+        progress=BatchProgress(
+            version=3,
+            total_count=2,
+            completed_count=2,
+            succeeded_count=2,
+            failed_count=0,
+            skipped_count=0,
+        ),
         extra_params=_callback_context(),
         completed_at=datetime.now(UTC),
     )
 
     await callback.on_batch_completed(event)
 
-    post_json.assert_not_called()
+    assert calls == [
+        (
+            DINGTALK_TEST_SEND_PATH,
+            {
+                "senderUserId": "10000077",
+                "receiverUserId": "10000077",
+                "content": (
+                    f"【{task_name}】任务已全部成功完成\n"
+                    "知识库资源 ID：42\n"
+                    "批次：batch-1\n"
+                    "总计：2 个文件\n"
+                    "成功：2 个\n"
+                    "失败：0 个\n"
+                    "跳过：0 个"
+                ),
+            },
+            {"Beyond-Token": "token-1"},
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_batch_callback_skips_without_requesting_user() -> None:
+    get_json = MagicMock()
+    callback = ByClawKnowledgeEntityProcessingCallback(get_json=get_json)
+    event = BatchCompletedCallbackInput(
+        batch_id="batch-1",
+        task_type=ProcessingTaskType.DOCUMENT_ENRICH,
+        knowledge_base_id="kb-id-1",
+        kb_code="kb-code-1",
+        progress=_progress(),
+    )
+
+    await callback.on_batch_completed(event)
+
+    get_json.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -488,3 +550,56 @@ async def test_discovery_transport_uses_service_prefix_and_keeps_shared_redis_op
     )
     discovery_client.close.assert_awaited_once()
     redis_client.aclose.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_transport_sends_get_with_query_params() -> None:
+    redis_client = MagicMock()
+    discovery_client = MagicMock()
+    discovery_client.discover = AsyncMock(
+        return_value=SimpleNamespace(
+            protocol="http",
+            host="be.internal",
+            port=8080,
+            path_prefix="",
+        )
+    )
+    discovery_client.close = AsyncMock()
+    response = MagicMock(is_success=True, status_code=200)
+    response.json.return_value = {"resultCode": "0"}
+    http_client = MagicMock()
+    http_client.__aenter__ = AsyncMock(return_value=http_client)
+    http_client.__aexit__ = AsyncMock(return_value=False)
+    http_client.get = AsyncMock(return_value=response)
+    params = {
+        "senderUserId": "10000077",
+        "receiverUserId": "10000077",
+        "content": "任务已完成",
+    }
+
+    with (
+        patch(
+            "byclaw_knowledge_entity_callback.init_shared_redis_from_env",
+            return_value=redis_client,
+        ),
+        patch(
+            "byclaw_knowledge_entity_callback.DiscoveryClient",
+            return_value=discovery_client,
+        ),
+        patch(
+            "byclaw_knowledge_entity_callback.httpx.AsyncClient",
+            return_value=http_client,
+        ),
+    ):
+        callback = ByClawKnowledgeEntityProcessingCallback()
+        result = await callback._get_by_discovery(
+            params=params,
+            headers={"Beyond-Token": "token-1"},
+        )
+
+    assert result == {"resultCode": "0"}
+    http_client.get.assert_awaited_once_with(
+        "http://be.internal:8080/byaiService/open/api/v1/dingtalk/testSend",
+        params=params,
+    )
+    discovery_client.close.assert_awaited_once()

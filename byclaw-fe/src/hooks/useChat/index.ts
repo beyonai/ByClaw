@@ -21,6 +21,7 @@ import { ISessionState } from '@/models/session';
 import useAppStore from '@/models/common/useAppStore';
 
 import { createMessage, fetchMessageHandler } from '@/utils/messgae';
+import { hydrateV2RuntimeState } from '@/utils/messageV2Runtime';
 import { getFileTypeByName } from '@/utils/file';
 
 import useHandler from './useHandler';
@@ -42,6 +43,7 @@ import {
 import { IMessageState } from '@/constants/message';
 import { agentTypeMap, ROOT_AGENT_ID } from '@/constants/agent';
 import { ResourceTypeMap } from '@/constants/resource';
+import { getStoredProjectScopeId } from '@/pages/projectSpace/constants';
 
 import type { IAgentCache, IAgentType } from '@/typescript/agent';
 import type { IExtParams, IMessage, IMessageListItem } from '@/typescript/message';
@@ -87,6 +89,9 @@ type IProps = {
   chatUrl?: string;
   sessionId?: string;
   agentType?: IAgentType;
+
+  /** 编辑页调试时锁定的数字员工资源 ID。 */
+  fixedAgentId?: string;
   addSession: (newSession: ISession) => void;
 
   onBeforeSend?: () => void;
@@ -183,7 +188,7 @@ const getAgentLaneIdentity = (resource: RichInputResourceList[number]) => {
  * @returns {object} 聊天相关方法和状态
  */
 function useChat(props: IProps) {
-  const { sessionId, agentType, addSession, onBeforeSend = noop, chatUrl } = props;
+  const { sessionId, agentType, fixedAgentId, addSession, onBeforeSend = noop, chatUrl } = props;
 
   const messageListRef = useRef<IMessage[]>([]);
   const pendingProjectIdByClientRequestRef = useRef(new Map<string, string>());
@@ -453,6 +458,7 @@ function useChat(props: IProps) {
     const answerMsg = createMessage(fetchMessageHandler(snapshot));
     set(answerMsg, 'msgId', getAnswerClientMsgId(runningInfo.clientRequestId));
     set(answerMsg, 'messageState', IMessageState.Answer);
+    set(answerMsg, 'thinkDone', false);
     set(answerMsg, 'traceId', snapshot?.traceId || runningInfo.traceId);
     set(answerMsg, 'laneId', snapshot?.laneId || runningInfo.laneId);
     set(answerMsg, 'turnId', snapshot?.turnId || runningInfo.turnId);
@@ -483,6 +489,7 @@ function useChat(props: IProps) {
         })
       );
     }
+    hydrateV2RuntimeState(answerMsg);
     return answerMsg;
   });
 
@@ -747,12 +754,22 @@ function useChat(props: IProps) {
     let { resourceList } = sendProps;
 
     const myExtParams = get(payload, 'extParams');
-    const restPayload = omit(payload, ['extParams']);
+    const selectedProjectId = !sessionId
+      ? getProjectNumber(get(payload, 'selectedProjectId')) ?? getProjectNumber(getStoredProjectScopeId())
+      : undefined;
+    const selectedProjectName = !sessionId ? get(payload, 'selectedProjectName') : undefined;
+    const restPayload = omit(payload, ['extParams', 'selectedProjectId', 'selectedProjectName']);
+
+    // 新建会话以输入框当前明确选择的项目为准，本地存储只作为首次加载时的兜底。
+    if (selectedProjectId !== undefined) {
+      set(restPayload, 'projectId', selectedProjectId);
+      if (selectedProjectName) set(restPayload, 'projectName', selectedProjectName);
+    }
 
     await onBeforeSend?.();
 
     let _queryQuestion = queryQuestion;
-    let _agentId = (get(restPayload, 'agentId') || agentId) as string | undefined;
+    let _agentId = (fixedAgentId || get(restPayload, 'agentId') || agentId) as string | undefined;
     let _agentType = (get(restPayload, 'agentType') || agentType) as IAgentType | undefined;
 
     if (inheritQryMsgId) {
@@ -790,7 +807,7 @@ function useChat(props: IProps) {
     const digitalEmployeeResources = getDigitalEmployeeResources(resourceList);
     const singleInlineAgent =
       digitalEmployeeResources.length === 1 ? getAgentLaneIdentity(digitalEmployeeResources[0]) : null;
-    if (singleInlineAgent?.agentKey) {
+    if (!fixedAgentId && singleInlineAgent?.agentKey) {
       _agentId = singleInlineAgent.agentKey;
     }
 

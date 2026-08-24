@@ -1,6 +1,6 @@
 ---
 name: bycli
-description: Use when a task has already been routed to byCLI, the user explicitly asks for byCLI, Adapter, or browser execution, or a login-required or dynamic website needs a browser-backed executor.
+description: Use when a task opens, reads, searches within, collects from, scrapes, or operates any concrete website, webpage, or URL; when a task has already been routed to byCLI; or when the user explicitly asks for byCLI, Adapter, or browser execution.
 allowed-tools: Bash(bycli:*), Bash(openclaw browser:*), Bash(gh:*), Bash(node:*), Read, Edit, Write, Grep
 metadata:
   openclaw:
@@ -21,18 +21,19 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 
 常见触发：`bycli`、浏览器操作、驱动浏览器、打开网站、访问网页、登录、操作网站、搜索、查找、采集、抓取、爬取、写爬虫、adapter 坏了、写 adapter、修复命令、`browser open`、`open cli`、`autofix`、`scrape`、`crawl`、`browse`、`open URL`。
 
-## Agent Reach 边界
+## 路由边界
 
-- 公共互联网调研、搜索或读取先由 `agent-reach` skill 选择可用渠道和上游工具，不因 byCLI 也能访问网页而抢占入口。
-- Agent Reach 可以把任何需要网站执行的任务委派给 byCLI，包括 generic public webpage 读取；byCLI 是执行器，不是公共互联网任务的默认路由器。
-- 用户显式要求 byCLI、Adapter、浏览器操作、登录态网站，或 Agent Reach 选择 byCLI 作为浏览器执行层时，进入本 skill。
-- Agent Reach 选择 byCLI 后，浏览器启动、Adapter 发现、授权与执行仍完全遵守本 skill。
+- 公共互联网调研、搜索或读取先由 `knowledge-collection` 的内置路由层（`skills/knowledge-collection/references/agent-reach.md`，原 By-Reach 路由器）做意图路由；Exa、`gh` CLI、RSS、视频字幕等不打开或读取具体网页的渠道可继续使用其专用后端。
+- 任何网站、网页或 URL 的打开、读取、站内搜索、采集、抓取或操作任务，包括 generic public webpage 读取，路由层必须无条件选择并加载 `bycli` skill；公开静态页、服务端渲染页、SPA、raw URL、纯文本、Markdown 和无需登录的页面均无例外。
+- byCLI 是所有具体网页任务的唯一网站执行器，不是公共互联网非网页渠道的默认路由器。选择 byCLI 必须发生在获取网页内容之前，不能先调用任何其他网页工具试读。
+- 用户显式要求 byCLI、Adapter、浏览器操作、登录态网站，或路由层选择 byCLI 作为浏览器执行层时，进入本 skill。
+- 选中 byCLI 后，浏览器启动、Adapter 发现、授权与执行仍完全遵守本 skill。
 - `byclaw-capability-doctor` 只是被动诊断；被动诊断不得启动 Chrome，其 `available_on_demand` 状态也不得触发 Chrome。只有实际任务需要浏览器时才执行下方冷启动流程。
-- 本边界优先于下文对“所有网页任务”的一般性表述；下文规则仅约束已经路由到 byCLI 的任务。
+- byCLI 无法完成网页任务时必须停止并报告，不得回退到 `web_fetch`、Jina Reader、Web Reader MCP、`curl`、`wget`、`requests`、原站直连或其他网页获取工具。
 
 ## 委派所有权边界
 
-- 角色名称固定为：采集编排器 `knowledge-collection`、路由器 `agent-reach`、网站执行器 `bycli`、站点 Adapter、直接查询所有者（根 Agent）。
+- 角色名称固定为：采集编排器 `knowledge-collection`（含内置公共互联网路由层）、网站执行器 `bycli`、站点 Adapter、直接查询所有者（根 Agent）。
 - 采集编排器委派时，`knowledge-collection` 负责统一持久化、产物协议、后处理与入库或知识整理。
 - 网站执行器只执行或发现、修复 Adapter，并把结构化记录、正文或文件元数据返回采集编排器，不规定统一产物名称或目录。
 - 网站执行器不得反向加载 `knowledge-collection`。是否处于委派模式不改变 byCLI 的命令、授权、浏览器生命周期或 Adapter 验证规则。
@@ -61,7 +62,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 不要在 repo 根目录 / `clis/<site>/` 留临时 dump 文件（`.dbg-*.html` / `raw-*.json`）
 - AUTH_REQUIRED（exit 77）/ BROWSER_CONNECT（exit 69）/ CAPTCHA / 限流 → 不修改代码，报告用户
 - 不要把 token、SESSION、Cookie、凭据写入技能文件、命令参数或对话回复
-- 对本 skill 覆盖的网页读取、搜索、采集、抓取、网站操作或打开 URL 任务，禁止使用 `web_fetch`、通用 `browser`、`curl`、`wget`、`requests` 或其他直接 HTTP 客户端绕过 byCLI。公开可读、静态页面、raw URL、纯文本或 Markdown 内容均不是例外
+- 对任何网站、网页或 URL 的读取、站内搜索、采集、抓取或操作任务，禁止使用 `web_fetch`、Jina Reader、Web Reader MCP、通用 `browser`、`curl`、`wget`、`requests`、原站直连或其他网页获取工具绕过 byCLI。公开可读、静态页面、raw URL、纯文本或 Markdown 内容均不是例外
 - 不要因“直接 HTTP 更快”“无需登录”“不需要渲染”或类似效率判断跳过 `bycli list -f json`、现成 adapter 或 `bycli browser` 降级路径
 - 不要把 `bycli browser <session> open <url>` 或 `state` 当作浏览器冷启动、桥接健康检查或 adapter 预热命令；它们会申请 TAB 租约，缺少租约时可创建 `about:blank` TAB
 - 不要用 `bycli browser <session> ...` 检查或操作 adapter 打开的 TAB；`browser` 与 `adapter` 是不同 surface，即使 session 字符串相同也不共享 TAB 租约
@@ -78,7 +79,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 修复 adapter 时仅修改 trace `summary.md` 里 `adapterSourcePath` 指向的文件
 - 修复预算：每次失败最多 3 轮 trace → fix → retry
 - 写 adapter 后必须 `bycli browser verify` 通过 + 字段值与网页肉眼比对
-- 微信公众平台 `weixin accounts/articles/save-articles/download`、`--auth-source`、`WECHAT_TOKEN` / `WECHAT_COOKIE` / `WECHAT_FINGERPRINT` 或 `mp.weixin.qq.com` 登录、认证或环境验证任务，必须读取 [references/weixin.md](./references/weixin.md)；其微信登录/验证规则优先于本文件的通用错误处理、AutoFix 和 cleanup 规则
+- 每个 `bycli weixin` 命令（包括 `accounts/articles/sougousearch/save-articles/download`）、`--auth-source`、`WECHAT_TOKEN` / `WECHAT_COOKIE` / `WECHAT_FINGERPRINT`，以及 `mp.weixin.qq.com` 或 `weixin.sogou.com` 的登录、认证或环境验证任务，都必须读取 [references/weixin.md](./references/weixin.md)；其微信登录/验证规则优先于本文件的通用错误处理、AutoFix 和 cleanup 规则
 - 浏览器 session 结束后仅清理当前任务创建或独占拥有的资源；任务开始前已经运行或由其他任务共享的资源保持不变
 - Login/Auth/人工验证页面例外：不关闭 session、TAB、daemon 或浏览器，报告命令结果中**已知的** session name 与 URL 后立即结束本轮并等待用户下一条明确确认；若结果未返回 URL，明确说明 URL 未提供，不得为补齐信息再检查页面。等待期间不得自行检查、重试或继续任务
 
@@ -88,7 +89,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 |---------|--------|---------|
 | "bycli 有什么命令" / 不知道怎么用 | 基础用法（见下方内联） | — |
 | 运行 bycli 命令 / 单次查数据 / 执行操作 | 基础用法 | — |
-| 微信公众平台账号搜索、历史文章、批量保存或认证失败 | weixin 认证与凭据 | [references/weixin.md](./references/weixin.md) |
+| 微信公众号账号/文章搜索、历史文章、批量保存或认证失败 | weixin 检索、认证与凭据 | [references/weixin.md](./references/weixin.md) |
 | 驱动浏览器完成一次性任务 / 填表 / 爬数据 | Browser 驱动 | [browser.md](./references/browser.md) |
 | bycli 命令报错 / adapter 坏了 / 网站改版 | AutoFix 修复 | [autofix.md](./references/autofix.md) |
 | 给新站点写 adapter / 新增命令 | Adapter 编写 | [adapter-author.md](./references/adapter-author.md) |
@@ -100,7 +101,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 没有 adapter 且需要复用 → 写新 adapter
 - 现有 adapter 报错 → AutoFix
 
-收到已路由到本 skill 的**搜索 / 采集 / 抓取 / 网站操作**类任务时，按本决策树选择执行路径。网页相关任务在 adapter 缺失时必须使用 `bycli browser`，不得降级到通用网页工具。只有 byCLI 已明确报告该任务不支持或当前无法执行，且 agent 已先向用户说明 byCLI 的具体结果与无法继续的原因，才可在用户确认后使用其他工具；不得因“内容公开”“静态”“纯 Markdown”或“更高效”自行触发此例外。
+收到已路由到本 skill 的**搜索 / 采集 / 抓取 / 网站操作**类任务时，按本决策树选择执行路径。网页相关任务在 adapter 缺失时必须使用 `bycli browser`，不得降级到通用网页工具。byCLI 已明确报告该任务不支持或当前无法执行时，必须说明具体结果与无法继续的原因并停止；即使用户确认，也不得在本任务中改用 `web_fetch`、Jina Reader、Web Reader MCP 或直接 HTTP 工具。不得因“内容公开”“静态”“纯 Markdown”或“更高效”自行触发例外。
 
 ### 适配器缺失降级（强制）
 
@@ -302,7 +303,7 @@ openclaw browser --browser-profile openclaw stop
 | 文件 | 何时加载 |
 |------|---------|
 | [references/browser.md](./references/browser.md) | 需要浏览器驱动命令参考时 |
-| [references/weixin.md](./references/weixin.md) | 运行 `weixin accounts/articles/save-articles/download`、选择 `--auth-source`、处理微信 token/Cookie/fingerprint 或 `AUTH_REQUIRED` 时 |
+| [references/weixin.md](./references/weixin.md) | 运行任意 `bycli weixin` 命令、选择 `--auth-source`、处理微信 token/Cookie/fingerprint 或 `AUTH_REQUIRED` 时 |
 | [references/autofix.md](./references/autofix.md) | adapter 修复完整流程 |
 | [references/adapter-author.md](./references/adapter-author.md) | 写新 adapter 完整流程 |
 | [references/adapter-template.md](./references/adapter-template.md) | adapter 文件结构模板 |

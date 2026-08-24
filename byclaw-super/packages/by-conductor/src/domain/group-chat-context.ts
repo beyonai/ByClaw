@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import type { LeaderModelSelection } from "../ports/leader.js";
 
 export const GROUP_CHAT_REF_SCHEMA_VERSION = "byclaw.group-chat-ref/v1" as const;
 export const GROUP_CHAT_CONTEXT_SCHEMA_VERSION =
@@ -60,23 +59,6 @@ export interface GroupChatContextV1 {
     omittedMessageCount: number;
     reason?: "message_limit" | "character_limit";
   };
-}
-
-/**
- * 入口动态上下文属于 Run 的不可变快照；执行时只把尚未导入的消息增量
- * 写入 Pi 原生 transcript，原始 Run 快照仍保留用于审计和重试。
- */
-export interface RunIngressContextV1 {
-  /** by-framework 入站会话 ID，同时是子 Agent 应使用的会话空间 ID。 */
-  externalSessionId?: string;
-  /** by-framework 入站消息 ID；后续委派将其作为 parentMessageId 建立级联取消关系。 */
-  parentMessageId?: string;
-  groupChat?: GroupChatContextV1;
-  groupChatFingerprint?: string;
-  /** Agent 目录回源失败时保留的诊断；Run 仍可由 Leader 降级执行。 */
-  agentCatalogError?: string;
-  /** 入口资源在本次 Run 开始前解析的 Leader 模型快照。 */
-  leaderModel?: LeaderModelSelection;
 }
 
 export function parseGroupChatRef(value: unknown): GroupChatRefV1 {

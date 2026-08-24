@@ -1,23 +1,19 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
-import { Button, Form, Input, Modal, Select, Spin, Switch, Tooltip, message } from 'antd';
+import { Button, Form, Input, Modal, Radio, Select, Spin, Switch, Tooltip, message } from 'antd';
 import type { FormInstance } from 'antd';
 import { CloseCircleFilled, PlusOutlined } from '@ant-design/icons';
 import { useIntl, useSelector } from '@umijs/max';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
+import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import { listProjectMembers } from '@/service/devloop';
+import { listOntologyBases, pageOntologyResources } from '@/service/ontology';
+import { ResourceTypeMap } from '@/constants/resource';
+import type { ProjectResourcePayload, ProjectResourceType } from '@/service/devloop';
 import { DEFAULT_PROJECT_TYPE_OPTION, PROJECT_TYPE_OPTIONS } from '../../constants';
 import type { ProjectTypeOption } from '../../hooks/useProjectTypeConfig';
 import type { ProjectSpace } from '../../types';
-import { getDefaultAgent, type DefaultAgentConfig } from '@/service/devloop';
+import type { DefaultAgentConfig } from '@/service/devloop';
 import { useDigitalEmployeeOptions } from '../../hooks/useDigitalEmployeeOptions';
-import {
-  DEFAULT_AGENT_ROLES,
-  assignmentToPayload,
-  configToAssignment,
-  emptyAssignment,
-  type DefaultAgentAssignment,
-  type DefaultAgentRole,
-} from '../../defaultAgents';
 import styles from './index.module.less';
 
 export interface ProjectShareMember {
@@ -39,8 +35,9 @@ export interface ProjectFormValues {
   sharedFlag: boolean;
   shareMembers?: ProjectShareMember[];
   shareMembersLoaded?: boolean;
-  // 每项目默认数字员工覆盖(架构/代码/测试)已解析为后端保存入参;空值角色代表沿用全局默认。
+  // 每项目默认助理覆盖(架构/需求/研发/测试)已解析为后端保存入参;空值角色代表沿用全局默认。
   defaultAgents?: DefaultAgentConfig;
+  resources?: ProjectResourcePayload[];
 }
 
 // 供父级(单表单弹窗 / 新建向导 step1)命令式取值:校验通过返回合并后的完整表单值,失败返回 null。
@@ -95,9 +92,15 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
     const [selectedShareMembers, setSelectedShareMembers] = useState<ProjectShareMember[]>([]);
     const [shareMembersLoading, setShareMembersLoading] = useState(false);
     const [shareMembersLoaded, setShareMembersLoaded] = useState(false);
-    // 每项目默认数字员工覆盖:弹窗打开时加载可选员工 + 该项目已存覆盖 + 全局默认(placeholder 提示)。
-    const [projectDefaultAgents, setProjectDefaultAgentsDraft] = useState<DefaultAgentAssignment>(emptyAssignment());
-    const [globalDefaultAgents, setGlobalDefaultAgents] = useState<DefaultAgentConfig>({});
+    const [knowledgeResourceOptions, setKnowledgeResourceOptions] = useState<{ value: string; label: string }[]>([]);
+    const [ontologyResourceOptions, setOntologyResourceOptions] = useState<{ value: string; label: string }[]>([]);
+    const [resourceOptionsLoading, setResourceOptionsLoading] = useState(false);
+    const [selectedResources, setSelectedResources] = useState<Record<ProjectResourceType, string[]>>({
+      knowledge: [],
+      digital_employee: [],
+      ontology: [],
+    });
+    const [resourceValidationTriggered, setResourceValidationTriggered] = useState(false);
     const { options: agentOptions, loading: agentOptionsLoading } = useDigitalEmployeeOptions(open);
     const currentUserId = userInfo.userId ?? userInfo.id;
     const currentUserCode = userInfo.userCode;
@@ -195,35 +198,21 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
       form.resetFields();
       form.setFieldsValue(formInitialValues);
       setSelectedShareMembers((formInitialValues.shareMembers || []).map(normalizeProjectShareMember));
+      const initialResources = formInitialValues.resources || [];
+      setSelectedResources({
+        knowledge: initialResources
+          .filter((resource) => resource.resourceType === 'knowledge')
+          .map((resource) => `${resource.resourceId}`),
+        digital_employee: initialResources
+          .filter((resource) => resource.resourceType === 'digital_employee')
+          .map((resource) => `${resource.resourceId}`),
+        ontology: initialResources
+          .filter((resource) => resource.resourceType === 'ontology')
+          .map((resource) => `${resource.resourceId}`),
+      });
+      setResourceValidationTriggered(false);
       setShareMembersLoaded(!projectId);
     }, [form, formInitialValues, normalizeProjectShareMember, open, projectId]);
-
-    useEffect(() => {
-      if (!open) return;
-      let cancelled = false;
-      // 全局默认给 placeholder 用;编辑项目再拉该项目的覆盖行回显(新建项目无覆盖,留空即全部回退全局)。
-      getDefaultAgent()
-        .then((config) => {
-          if (!cancelled) setGlobalDefaultAgents(config || {});
-        })
-        .catch(() => {
-          if (!cancelled) setGlobalDefaultAgents({});
-        });
-      if (projectId) {
-        getDefaultAgent(Number(projectId))
-          .then((config) => {
-            if (!cancelled) setProjectDefaultAgentsDraft(configToAssignment(config));
-          })
-          .catch(() => {
-            if (!cancelled) setProjectDefaultAgentsDraft(emptyAssignment());
-          });
-      } else {
-        setProjectDefaultAgentsDraft(emptyAssignment());
-      }
-      return () => {
-        cancelled = true;
-      };
-    }, [open, projectId]);
 
     useEffect(() => {
       if (!open || projectId || !visibleProjectTypeOptions.length) return;
@@ -251,6 +240,126 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
           setShareMembersLoading(false);
         });
     }, [memberT, normalizeProjectShareMember, open, projectId]);
+
+    useEffect(() => {
+      if (!open) return;
+      let cancelled = false;
+      const getArray = (...candidates: any[]) => candidates.find((candidate) => Array.isArray(candidate)) || [];
+      const loadResourceOptions = async () => {
+        setResourceOptionsLoading(true);
+        try {
+          const knowledgeQuery = {
+            pageNum: 1,
+            pageSize: 100,
+            resourceBizTypeList: [
+              ResourceTypeMap.knowledgeBase,
+              ResourceTypeMap.knowledgeBaseQa,
+              ResourceTypeMap.knowledgeBaseTerm,
+            ],
+          };
+          const [
+            knowledgePersonal,
+            knowledgeEnterprise,
+            ontologyPersonal,
+            ontologyEnterprise,
+            ontologyResourcePersonal,
+            ontologyResourceEnterprise,
+          ] = await Promise.all([
+            // 与“知识”模块保持一致，分别加载当前账号可用的个人知识和企业知识。
+            listResourceUseAuth({
+              ...knowledgeQuery,
+              ownerType: 'personal',
+              resourceStatus: '2',
+              permission: '',
+            }),
+            listResourceUseAuth({
+              ...knowledgeQuery,
+              ownerType: 'enterprise',
+              resourceStatus: '2',
+              permission: '',
+              belong: 'ALL',
+            }),
+            listOntologyBases({ ownerType: 'personal' }),
+            listOntologyBases({ ownerType: 'enterprise' }),
+            // 本体中心卡片使用资源分页接口；同时读取该接口，覆盖本体库列表接口未返回的企业本体资源。
+            pageOntologyResources({
+              ownerType: 'personal',
+              resourceBizTypeList: ['VIEW', 'OBJECT'],
+              statusList: [0, 1, 2, 3, 4, 5],
+              pageNum: 1,
+              pageSize: 1000,
+            }),
+            pageOntologyResources({
+              ownerType: 'enterprise',
+              resourceBizTypeList: ['VIEW', 'OBJECT'],
+              statusList: [0, 1, 2, 3, 4, 5],
+              pageNum: 1,
+              pageSize: 1000,
+            }),
+          ]);
+          if (cancelled) return;
+          const knowledgeMap = new Map<string, { value: string; label: string }>();
+          [
+            ...getArray(
+              knowledgePersonal?.rows,
+              knowledgePersonal?.list,
+              knowledgePersonal?.data?.rows,
+              knowledgePersonal?.data?.list
+            ),
+            ...getArray(
+              knowledgeEnterprise?.rows,
+              knowledgeEnterprise?.list,
+              knowledgeEnterprise?.data?.rows,
+              knowledgeEnterprise?.data?.list
+            ),
+          ].forEach((item: any) => {
+            const value = item.resourceId ?? item.resourceSourcePkId ?? item.datasetId ?? item.id;
+            const label = item.resourceName || item.datasetName || item.name;
+            if (value !== undefined && value !== null && label)
+              knowledgeMap.set(`${value}`, { value: `${value}`, label });
+          });
+          const ontologyMap = new Map<string, { value: string; label: string }>();
+          [ontologyPersonal, ontologyEnterprise, ontologyResourcePersonal, ontologyResourceEnterprise].forEach(
+            (response) => {
+              // 本体模块接口可能直接返回数组，也可能包在 data/list/rows 中，统一兼容后合并个人和企业本体。
+              getArray(
+                response,
+                response?.list,
+                response?.records,
+                response?.rows,
+                response?.data,
+                response?.data?.list,
+                response?.data?.records,
+                response?.data?.rows,
+                response?.data?.data,
+                response?.data?.data?.list,
+                response?.data?.data?.records,
+                response?.data?.data?.rows
+              ).forEach((item: any) => {
+                const value = item.baseId ?? item.resourceId ?? item.id;
+                const label = item.displayName || item.resourceName || item.name;
+                if (value !== undefined && value !== null && label)
+                  ontologyMap.set(`${value}`, { value: `${value}`, label });
+              });
+            }
+          );
+          setKnowledgeResourceOptions(Array.from(knowledgeMap.values()));
+          setOntologyResourceOptions(Array.from(ontologyMap.values()));
+        } catch (error) {
+          console.error('Failed to load project resource options:', error);
+          if (!cancelled) {
+            setKnowledgeResourceOptions([]);
+            setOntologyResourceOptions([]);
+          }
+        } finally {
+          if (!cancelled) setResourceOptionsLoading(false);
+        }
+      };
+      void loadResourceOptions();
+      return () => {
+        cancelled = true;
+      };
+    }, [open]);
 
     useEffect(() => {
       if (!open || !isForcedSharedProject) return;
@@ -339,7 +448,7 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
     const agentSelectOptions = agentOptions.map((option) => ({ value: option.value, label: option.label }));
     const agentLabelById = new Map(agentOptions.map((option) => [option.value, option.label]));
 
-    // 合并表单原始值与共享成员/默认员工副本,强制校正共享标记,产出后端保存入参。
+    // 合并表单原始值与共享成员/项目资源副本,强制校正共享标记,产出后端保存入参。
     const buildSubmitValues = useCallback(
       (values: ProjectFormValues): ProjectFormValues => {
         const submitIsDevelopProject = isDevelopProjectEnabled && values.projectType === 'develop';
@@ -353,19 +462,49 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
           sharedFlag: submitSharedFlag,
           shareMembers: submitSharedFlag ? selectedShareMembers : [],
           shareMembersLoaded,
-          // 解析为后端入参并冗余带上员工名(展示列);projectId 由父级在保存时补上。
-          defaultAgents: assignmentToPayload(projectDefaultAgents, agentLabelById),
+          // 绑定项目资源仅属于运营项目；切换为普通/研发项目时不再提交旧的绑定关系。
+          resources: isOperationProject
+            ? (Object.entries(selectedResources) as [ProjectResourceType, string[]][]).flatMap(
+              ([resourceType, resourceIds]) =>
+                resourceIds.map((resourceId, index) => ({
+                  resourceType,
+                  resourceId,
+                  resourceName:
+                      (resourceType === 'digital_employee'
+                        ? agentLabelById.get(resourceId)
+                        : resourceType === 'knowledge'
+                          ? knowledgeResourceOptions.find((option) => option.value === resourceId)?.label
+                          : ontologyResourceOptions.find((option) => option.value === resourceId)?.label) || undefined,
+                  sortNo: index,
+                }))
+            )
+            : [],
         };
       },
-      [agentLabelById, isDevelopProjectEnabled, projectDefaultAgents, selectedShareMembers, shareMembersLoaded]
+      [
+        agentLabelById,
+        isDevelopProjectEnabled,
+        knowledgeResourceOptions,
+        ontologyResourceOptions,
+        selectedResources,
+        selectedShareMembers,
+        shareMembersLoaded,
+        isOperationProject,
+      ]
     );
 
     useImperativeHandle(
       ref,
       () => ({
         collectValues: async () => {
+          // 绑定资源仅在运营项目必填，其他项目类型隐藏该区域且不触发资源校验。
+          setResourceValidationTriggered(isOperationProject);
+          const hasMissingResource = (['knowledge', 'digital_employee', 'ontology'] as ProjectResourceType[]).some(
+            (resourceType) => isOperationProject && selectedResources[resourceType].length === 0
+          );
           try {
             const values = await form.validateFields();
+            if (hasMissingResource) return null;
             return buildSubmitValues(values);
           } catch {
             // 校验失败:antd 已在字段下方标红,父级据 null 中止提交。
@@ -373,21 +512,8 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
           }
         },
       }),
-      [buildSubmitValues, form]
+      [buildSubmitValues, form, isOperationProject, selectedResources]
     );
-
-    // 未为该角色指定项目覆盖时,占位提示当前生效的全局默认员工(优先冗余名,退选项名,再退id;无则提示未配置)。
-    const globalDefaultLabel = (role: DefaultAgentRole) => {
-      const idKey = `${role}AgentId` as keyof DefaultAgentConfig;
-      const nameKey = `${role}AgentName` as keyof DefaultAgentConfig;
-      const globalId = (globalDefaultAgents[idKey] as string) || '';
-      if (!globalId) return formT('defaultAgent.globalUnset');
-      const name = (globalDefaultAgents[nameKey] as string) || agentLabelById.get(globalId) || globalId;
-      return formT('defaultAgent.globalPrefix') + name;
-    };
-    const handleDefaultAgentChange = (role: DefaultAgentRole, value?: string) => {
-      setProjectDefaultAgentsDraft((prev) => ({ ...prev, [role]: value || '' }));
-    };
 
     const handleFormKeyDown = (event: React.KeyboardEvent<HTMLFormElement>) => {
       if (!onEnterSubmit) return;
@@ -399,6 +525,18 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
       }
       event.preventDefault();
       onEnterSubmit();
+    };
+
+    const handleProjectTypeChange = (value: ProjectSpace['projectType']) => {
+      const isForcedSharedType = (isDevelopProjectEnabled && value === 'develop') || value === 'operation';
+      form.setFieldValue('projectType', value);
+      if (isForcedSharedType) {
+        form.setFieldValue('sharedFlag', true);
+        return;
+      }
+      // 切回普通项目时恢复默认不共享，避免沿用强制共享项目的状态。
+      form.setFieldValue('sharedFlag', false);
+      form.setFields([{ name: 'shareMembers', errors: [] }]);
     };
 
     return (
@@ -413,30 +551,113 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
           <Form.Item
             name="projectName"
             label={formT('field.projectName')}
-            rules={[{ required: true, message: formT('validation.projectNameRequired') }]}
+            rules={[
+              { required: true, message: formT('validation.projectNameRequired') },
+              { max: 15, message: formT('validation.projectNameMaxLength') },
+            ]}
           >
-            <Input maxLength={100} placeholder={formT('placeholder.projectName')} />
+            <Input maxLength={15} showCount placeholder={formT('placeholder.projectName')} />
           </Form.Item>
-          <Form.Item name="description" label={formT('field.description')}>
-            <Input.TextArea rows={3} maxLength={500} placeholder={formT('placeholder.description')} />
+          <Form.Item
+            name="description"
+            label={formT('field.description')}
+            rules={[{ max: 500, message: formT('validation.descriptionMaxLength') }]}
+          >
+            {/* 项目描述限制 500 字，默认展示两行，避免新建项目弹窗被描述字段撑高。 */}
+            <Input.TextArea rows={2} maxLength={500} showCount placeholder={formT('placeholder.description')} />
           </Form.Item>
           <Form.Item name="projectType" label={formT('field.projectType')}>
-            <Select
-              disabled={isEditingDefaultProject}
-              loading={projectTypeLoading}
-              options={visibleProjectTypeOptions}
-              onChange={(value: ProjectSpace['projectType']) => {
-                const isForcedSharedType = (isDevelopProjectEnabled && value === 'develop') || value === 'operation';
-                if (isForcedSharedType) {
-                  form.setFieldValue('sharedFlag', true);
-                  return;
-                }
-                // 切回普通项目时恢复默认不共享，避免沿用强制共享项目的状态。
-                form.setFieldValue('sharedFlag', false);
-                form.setFields([{ name: 'shareMembers', errors: [] }]);
-              }}
+            <Radio.Group
+              className={styles.projectTypeTabs}
+              optionType="button"
+              buttonStyle="solid"
+              options={visibleProjectTypeOptions.map((option) => ({
+                value: option.value,
+                label: option.label,
+                disabled:
+                  projectTypeLoading || (isEditingDefaultProject ? option.value !== 'default' : option.disabled),
+              }))}
+              onChange={(event) => handleProjectTypeChange(event.target.value as ProjectSpace['projectType'])}
             />
           </Form.Item>
+          {isOperationProject && (
+            <Form.Item label={formT('field.resources')}>
+              {/* 三类资源共用项目绑定关系表；该配置只适用于运营项目。 */}
+              <div className={styles.projectResourceFields}>
+                <div
+                  className={
+                    resourceValidationTriggered && !selectedResources.knowledge.length
+                      ? styles.projectResourceFieldError
+                      : undefined
+                  }
+                >
+                  <div className={styles.projectResourceLabel}>{formT('resource.knowledge')}</div>
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    value={selectedResources.knowledge}
+                    options={knowledgeResourceOptions}
+                    loading={resourceOptionsLoading}
+                    placeholder={formT('resource.knowledgePlaceholder')}
+                    onChange={(value: string[]) => setSelectedResources((prev) => ({ ...prev, knowledge: value }))}
+                  />
+                  {resourceValidationTriggered && !selectedResources.knowledge.length && (
+                    <div className={styles.projectResourceError}>{formT('validation.knowledgeRequired')}</div>
+                  )}
+                </div>
+                <div
+                  className={
+                    resourceValidationTriggered && !selectedResources.digital_employee.length
+                      ? styles.projectResourceFieldError
+                      : undefined
+                  }
+                >
+                  <div className={styles.projectResourceLabel}>{formT('resource.digitalEmployee')}</div>
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    value={selectedResources.digital_employee}
+                    options={agentSelectOptions}
+                    loading={agentOptionsLoading}
+                    placeholder={formT('resource.digitalEmployeePlaceholder')}
+                    onChange={(value: string[]) =>
+                      setSelectedResources((prev) => ({ ...prev, digital_employee: value }))
+                    }
+                  />
+                  {resourceValidationTriggered && !selectedResources.digital_employee.length && (
+                    <div className={styles.projectResourceError}>{formT('validation.digitalEmployeeRequired')}</div>
+                  )}
+                </div>
+                <div
+                  className={
+                    resourceValidationTriggered && !selectedResources.ontology.length
+                      ? styles.projectResourceFieldError
+                      : undefined
+                  }
+                >
+                  <div className={styles.projectResourceLabel}>{formT('resource.ontology')}</div>
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    value={selectedResources.ontology}
+                    options={ontologyResourceOptions}
+                    loading={resourceOptionsLoading}
+                    placeholder={formT('resource.ontologyPlaceholder')}
+                    onChange={(value: string[]) => setSelectedResources((prev) => ({ ...prev, ontology: value }))}
+                  />
+                  {resourceValidationTriggered && !selectedResources.ontology.length && (
+                    <div className={styles.projectResourceError}>{formT('validation.ontologyRequired')}</div>
+                  )}
+                </div>
+              </div>
+            </Form.Item>
+          )}
           <Form.Item name="sharedFlag" label={formT('field.shared')} valuePropName="checked">
             <Switch
               disabled={isForcedSharedProject || isDefaultProject}
@@ -503,29 +724,6 @@ const ProjectBasicForm = forwardRef<ProjectBasicFormHandle, Props>(
                     </Button>
                   </div>
                 </Spin>
-              </div>
-            </Form.Item>
-          )}
-          {isDevelopProject && (
-            <Form.Item label={formT('field.defaultAgents')}>
-              {/* 默认数字员工仅研发项目可配:三种角色(架构/代码/测试)各可单独指定,留空回退全局默认。 */}
-              <div className={styles.defaultAgentField}>
-                {DEFAULT_AGENT_ROLES.map((role) => (
-                  <div className={styles.defaultAgentRow} key={role}>
-                    <span className={styles.defaultAgentLabel}>{formT(`defaultAgent.role.${role}`)}</span>
-                    <Select
-                      className={styles.defaultAgentSelect}
-                      value={projectDefaultAgents[role] || undefined}
-                      options={agentSelectOptions}
-                      loading={agentOptionsLoading}
-                      allowClear
-                      showSearch
-                      optionFilterProp="label"
-                      placeholder={globalDefaultLabel(role)}
-                      onChange={(value?: string) => handleDefaultAgentChange(role, value)}
-                    />
-                  </div>
-                ))}
               </div>
             </Form.Item>
           )}

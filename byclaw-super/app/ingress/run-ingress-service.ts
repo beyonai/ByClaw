@@ -11,6 +11,8 @@ import type {
   SessionContextInput,
   ThinkingLevel,
   LeaderModelSelection,
+  ExpertTeamRuntimeSnapshotV1,
+  OrchestratorRefV1,
 } from "@byclaw/by-conductor";
 import {
   excludeAgentFromGroupChatContext,
@@ -24,6 +26,7 @@ import {
 } from "../auth/beyond-token.js";
 import type { AuthorizedAgentCatalog } from "../business/agent-catalog.js";
 import type { GroupChatContextProvider } from "../business/group-chat-context.js";
+import type { OrchestratorRuntimeProvider } from "../business/orchestrator-runtime.js";
 import { truncateForLog } from "../log-format.js";
 
 interface RunIngressLogger {
@@ -53,6 +56,8 @@ export interface CreateSessionRunRequest extends AuthenticatedIngressRequest {
   context?: SessionContextInput;
   /** 已规范化的附件（由各入口在调用前 normalize）；缺省为空数组。 */
   attachments?: RunAttachment[];
+  /** by-framework 入站 metadata；仅在当前 Run 执行链路中透传，不写入 Run 持久化记录。 */
+  metadata?: Record<string, unknown>;
   /**
    * 当前入口 Agent ID（仅 by-framework Worker 入口提供，用于排除超级助手自身）。
    * HTTP/SSE 入口不得由调用方指定，统一走 userCode 兜底规则。
@@ -67,6 +72,8 @@ export interface CreateSessionRunRequest extends AuthenticatedIngressRequest {
   parentMessageId?: string;
   /** Gateway 只提供定位引用；正文由 Super 使用当前 Token 从 BE 权威读取。 */
   groupChatRef?: GroupChatRefV1;
+  /** by-framework 声明的编排者定位；EXPERT_TEAM 会在创建 Run 前向 BE 验权。 */
+  orchestrator?: OrchestratorRefV1;
 }
 
 export interface AppendSessionRunRequest extends CreateSessionRunRequest {
@@ -79,6 +86,13 @@ export class ResourceNotFoundError extends Error {
     super(`${resource} not found`);
     this.name = "ResourceNotFoundError";
   }
+}
+
+interface RunOrchestrationSnapshot {
+  agents: AgentProfile[];
+  agentCatalogError?: string;
+  leaderModel?: LeaderModelSelection;
+  orchestrator?: ExpertTeamRuntimeSnapshotV1;
 }
 
 /**
@@ -96,6 +110,7 @@ export class RunIngressService {
     private readonly groupChatContexts?: GroupChatContextProvider,
     private readonly logger?: RunIngressLogger,
     private readonly resourceModels?: ResourceModelResolver,
+    private readonly orchestratorRuntimes?: OrchestratorRuntimeProvider,
   ) {}
 
   /** 创建新 Session，并在其中创建首个 Run。 */
@@ -104,23 +119,33 @@ export class RunIngressService {
     const principal = authenticated.principal;
     const attachments = input.attachments ?? [];
     const message = resolveRunMessage(input.message, attachments);
-    const [catalog, loadedContext, leaderModel] = await Promise.all([
-      this.listAgentsForRun(input),
+    const [orchestration, loadedContext] = await Promise.all([
+      this.loadRunOrchestration(input),
       this.loadIngressContext(input),
-      this.loadLeaderModel(input),
     ]);
     const agentList = this.excludeSelf(
-      catalog.agents,
+      orchestration.agents,
       input.sourceAgentId,
       principal.userCode,
     );
-    const ingressContext = this.mergeIngressContext(
-      loadedContext,
-      catalog.error,
-      leaderModel,
-      input.externalSessionId,
-      input.parentMessageId,
-    );
+    const ingressContext = this.mergeIngressContext({
+      context: loadedContext,
+      ...(orchestration.agentCatalogError
+        ? { agentCatalogError: orchestration.agentCatalogError }
+        : {}),
+      ...(orchestration.leaderModel
+        ? { leaderModel: orchestration.leaderModel }
+        : {}),
+      ...(orchestration.orchestrator
+        ? { orchestrator: orchestration.orchestrator }
+        : {}),
+      ...(input.externalSessionId
+        ? { externalSessionId: input.externalSessionId }
+        : {}),
+      ...(input.parentMessageId
+        ? { parentMessageId: input.parentMessageId }
+        : {}),
+    });
     const run = await this.runService.createSessionRun({
       owner: principal,
       ...(input.context ? { context: input.context } : {}),
@@ -132,6 +157,7 @@ export class RunIngressService {
       // Token 同时写入专用短期凭证表，供其他实例在 lease 接管后恢复。
       // externalSessionId 也放入 metadata 供本实例立即执行；持久化真值在 ingressContext。
       metadata: {
+        ...(input.metadata ?? {}),
         "Beyond-Token": input.beyondToken,
         ...(input.externalSessionId
           ? { externalSessionId: input.externalSessionId }
@@ -163,23 +189,33 @@ export class RunIngressService {
     await this.requireOwnedSession(input.sessionId, principal);
     const attachments = input.attachments ?? [];
     const message = resolveRunMessage(input.message, attachments);
-    const [catalog, loadedContext, leaderModel] = await Promise.all([
-      this.listAgentsForRun(input),
+    const [orchestration, loadedContext] = await Promise.all([
+      this.loadRunOrchestration(input),
       this.loadIngressContext(input),
-      this.loadLeaderModel(input),
     ]);
     const agentList = this.excludeSelf(
-      catalog.agents,
+      orchestration.agents,
       input.sourceAgentId,
       principal.userCode,
     );
-    const ingressContext = this.mergeIngressContext(
-      loadedContext,
-      catalog.error,
-      leaderModel,
-      input.externalSessionId,
-      input.parentMessageId,
-    );
+    const ingressContext = this.mergeIngressContext({
+      context: loadedContext,
+      ...(orchestration.agentCatalogError
+        ? { agentCatalogError: orchestration.agentCatalogError }
+        : {}),
+      ...(orchestration.leaderModel
+        ? { leaderModel: orchestration.leaderModel }
+        : {}),
+      ...(orchestration.orchestrator
+        ? { orchestrator: orchestration.orchestrator }
+        : {}),
+      ...(input.externalSessionId
+        ? { externalSessionId: input.externalSessionId }
+        : {}),
+      ...(input.parentMessageId
+        ? { parentMessageId: input.parentMessageId }
+        : {}),
+    });
     const run = await this.runService.createRun({
       sessionId: input.sessionId,
       message,
@@ -189,6 +225,7 @@ export class RunIngressService {
       ...(ingressContext ? { ingressContext } : {}),
       // 追加 Run 同属 by-framework 入站时也需声明会话工作区。
       metadata: {
+        ...(input.metadata ?? {}),
         "Beyond-Token": input.beyondToken,
         ...(input.externalSessionId
           ? { externalSessionId: input.externalSessionId }
@@ -437,28 +474,67 @@ export class RunIngressService {
     }
   }
 
-  private mergeIngressContext(
-    context: Awaited<ReturnType<RunIngressService["loadIngressContext"]>>,
-    agentCatalogError: string | undefined,
-    leaderModel: LeaderModelSelection | undefined,
-    externalSessionId: string | undefined,
-    parentMessageId: string | undefined,
-  ) {
+  /** 按编排类型选择权威配置源；专家团失败必须阻断，超级助手保持既有降级语义。 */
+  private async loadRunOrchestration(
+    input: CreateSessionRunRequest,
+  ): Promise<RunOrchestrationSnapshot> {
+    if (input.orchestrator?.kind === "EXPERT_TEAM") {
+      if (!this.orchestratorRuntimes) {
+        throw new Error("Expert team runtime provider is not configured");
+      }
+      const resolved = await this.orchestratorRuntimes.resolve({
+        orchestrator: input.orchestrator,
+        beyondToken: input.beyondToken,
+        ...(input.systemCode ? { systemCode: input.systemCode } : {}),
+      });
+      return {
+        agents: resolved.agents,
+        orchestrator: resolved.orchestrator,
+        leaderModel: resolved.leaderModel,
+      };
+    }
+    const [catalog, leaderModel] = await Promise.all([
+      this.listAgentsForRun(input),
+      this.loadLeaderModel(input),
+    ]);
+    return {
+      agents: catalog.agents,
+      ...(catalog.error ? { agentCatalogError: catalog.error } : {}),
+      ...(leaderModel ? { leaderModel } : {}),
+    };
+  }
+
+  private mergeIngressContext(input: {
+    context: Awaited<ReturnType<RunIngressService["loadIngressContext"]>>;
+    agentCatalogError?: string;
+    leaderModel?: LeaderModelSelection;
+    orchestrator?: ExpertTeamRuntimeSnapshotV1;
+    externalSessionId?: string;
+    parentMessageId?: string;
+  }) {
     if (
-      !context &&
-      !agentCatalogError &&
-      !leaderModel &&
-      !externalSessionId &&
-      !parentMessageId
+      !input.context &&
+      !input.agentCatalogError &&
+      !input.leaderModel &&
+      !input.orchestrator &&
+      !input.externalSessionId &&
+      !input.parentMessageId
     ) {
       return undefined;
     }
     return {
-      ...(context ?? {}),
-      ...(externalSessionId ? { externalSessionId } : {}),
-      ...(parentMessageId ? { parentMessageId } : {}),
-      ...(agentCatalogError ? { agentCatalogError } : {}),
-      ...(leaderModel ? { leaderModel } : {}),
+      ...(input.context ?? {}),
+      ...(input.externalSessionId
+        ? { externalSessionId: input.externalSessionId }
+        : {}),
+      ...(input.parentMessageId
+        ? { parentMessageId: input.parentMessageId }
+        : {}),
+      ...(input.agentCatalogError
+        ? { agentCatalogError: input.agentCatalogError }
+        : {}),
+      ...(input.leaderModel ? { leaderModel: input.leaderModel } : {}),
+      ...(input.orchestrator ? { orchestrator: input.orchestrator } : {}),
     };
   }
 

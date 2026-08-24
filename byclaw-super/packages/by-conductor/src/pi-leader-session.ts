@@ -23,7 +23,7 @@ import {
   LEADER_FILE_TOOL_NAMES,
   resolveActiveLeaderToolNames,
 } from "./context/active-leader-tools.js";
-import { ContextCompiler } from "./context/index.js";
+import type { SystemContextCompiler } from "./context/index.js";
 import {
   formatGroupChatMemoryDelta,
   GROUP_CHAT_MEMORY_CURSOR_TYPE,
@@ -33,6 +33,7 @@ import {
 import { exportPiSessionCheckpoint } from "./pi-session-checkpoint.js";
 import { shouldPreflightCompact } from "./pi-compaction.js";
 import type { PiRuntimeProviderConfig } from "./pi-model-provider.js";
+import { adaptByclawMessageRoles } from "./pi-provider-adapters/byclaw-message-roles.js";
 import { adaptVolcengineArkResponsesPayload } from "./pi-provider-adapters/volcengine-ark.js";
 import type {
   LeaderRunInput,
@@ -65,14 +66,14 @@ export class PiLeaderSession implements LeaderSession {
   }
 
   /**
-   * 构造受限的 Pi Session：关闭扩展、技能和上下文文件，只注册 delegateAgent 工具。
+   * 构造受限的 Pi Session：关闭扩展、技能和上下文文件，只注册平台白名单工具。
    */
   static async create(
     runtime: Awaited<ReturnType<typeof ModelRuntime.create>>,
     model: NonNullable<ReturnType<ModelRuntime["getModel"]>>,
     cwd: string,
     systemPrompt: string,
-    contextCompiler: ContextCompiler,
+    contextCompiler: SystemContextCompiler,
     sessionManager: SessionManager,
     contextRevision: number,
     requestAdapter: PiRuntimeProviderConfig["requestAdapter"],
@@ -285,22 +286,26 @@ export class PiLeaderSession implements LeaderSession {
                 sessionContext: active.sessionContext,
                 currentTime: active.currentTime,
                 ...(active.user ? { user: active.user } : {}),
+                ...(active.orchestrator
+                  ? { orchestrator: active.orchestrator }
+                  : {}),
               });
               return { systemPrompt: context.systemPrompt };
             });
           },
         },
         {
-          name: "byclaw-volcengine-ark-responses",
+          name: "byclaw-provider-request",
           factory: (pi) => {
             pi.on("before_provider_request", (event, context) => {
+              const roleSafePayload = adaptByclawMessageRoles(event.payload);
               if (
                 requestAdapter !== "volcengine-ark-responses" ||
                 context.model?.provider !== model.provider
               ) {
-                return undefined;
+                return roleSafePayload === event.payload ? undefined : roleSafePayload;
               }
-              return adaptVolcengineArkResponsesPayload(event.payload);
+              return adaptVolcengineArkResponsesPayload(roleSafePayload);
             });
           },
         },
@@ -415,20 +420,15 @@ export class PiLeaderSession implements LeaderSession {
       }
       // 同一业务 Session 会复用 Pi Session；每个 Run 都必须显式覆盖上一轮的思考等级。
       this.session.setThinkingLevel(input.thinkingLevel);
-      // Ask User 暂时关闭；只有本轮存在授权 Agent 时才向模型暴露委派工具。
-      this.session.setActiveToolsByName([
-        ...resolveActiveLeaderToolNames(input.agents),
-        ...LEADER_FILE_TOOL_NAMES,
-        // 仅当本轮有附件且注入了 Resolver 时暴露 inspectAttachment；否则工具不可调用。
-        ...(input.attachments.length > 0 && input.inspectAttachment
-          ? [INSPECT_ATTACHMENT_TOOL_NAME]
-          : []),
-        ...(DOWNLOAD_ATTACHMENT_ENABLED &&
-        input.attachments.length > 0 &&
-        input.downloadAttachment
-          ? [DOWNLOAD_ATTACHMENT_TOOL_NAME]
-          : []),
-      ]);
+      this.session.setActiveToolsByName(
+        resolveActiveLeaderToolNames({
+          authorizedAgents: input.agents,
+          hasAttachments: input.attachments.length > 0,
+          inspectAttachmentAvailable: Boolean(input.inspectAttachment),
+          downloadAttachmentAvailable: Boolean(input.downloadAttachment),
+          expertTeam: Boolean(input.orchestrator),
+        }),
+      );
       // 群聊只把未见过的消息作为 Pi custom message 追加；cursor 和 compaction
       // 都由原生 checkpoint 持久化，下一轮不会重新导入或重新压缩同一段历史。
       await this.syncGroupChatMemory(input);

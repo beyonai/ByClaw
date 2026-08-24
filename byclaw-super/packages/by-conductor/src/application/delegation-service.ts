@@ -43,10 +43,7 @@ export interface ExecuteDelegationInput {
   leaseClaim?: RunExecutionClaim;
   /** SYNTHESIZING 恢复时允许复用本 Run 已完成且参数相同的委派结果。 */
   reuseCompleted?: boolean;
-  onInputRequired?(
-    interactionId: string,
-    request: UserInteractionRequest,
-  ): Promise<void> | void;
+  onInputRequired?(interactionId: string, request: UserInteractionRequest): Promise<void> | void;
   onInputResolved?(interactionId: string): Promise<void> | void;
 }
 
@@ -93,11 +90,7 @@ export class DelegationService {
     }
 
     const connector = this.connectors.require(agent.execution.connectorId);
-    if (
-      input.attachments &&
-      input.attachments.length > 0 &&
-      !connector.capabilities.attachments
-    ) {
+    if (input.attachments && input.attachments.length > 0 && !connector.capabilities.attachments) {
       // 连接器不支持附件时明确报错，绝不静默降级为纯文本委派。
       throw new Error(
         `ATTACHMENTS_UNSUPPORTED: connector ${connector.id} cannot forward attachments`,
@@ -135,20 +128,19 @@ export class DelegationService {
       );
     const delegationId = existing?.id ?? this.createId();
     const resuming = Boolean(existing?.externalRef);
-    let delegation: Delegation =
-      existing ?? {
-        id: delegationId,
-        runId: input.runId,
-        agentId: agent.id,
-        agentName: agent.name,
-        connectorId: connector.id,
-        task: input.task,
-        ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
-        status: "QUEUED",
-        version: 0,
-        createdAt: this.now(),
-        updatedAt: this.now(),
-      };
+    let delegation: Delegation = existing ?? {
+      id: delegationId,
+      runId: input.runId,
+      agentId: agent.id,
+      agentName: agent.name,
+      connectorId: connector.id,
+      task: input.task,
+      ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
+      status: "QUEUED",
+      version: 0,
+      createdAt: this.now(),
+      updatedAt: this.now(),
+    };
     if (!existing) {
       try {
         await this.#saveDelegationWithEvent(delegation, {
@@ -161,17 +153,13 @@ export class DelegationService {
             agentName: agent.name,
             connectorId: connector.id,
             task: input.task,
-            ...(input.expectedOutput
-              ? { expectedOutput: input.expectedOutput }
-              : {}),
+            ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
             ...(input.attachments?.length
               ? {
                   attachments: input.attachments.map((attachment) => ({
                     id: attachment.id,
                     name: attachment.name,
-                    ...(attachment.mediaType
-                      ? { mediaType: attachment.mediaType }
-                      : {}),
+                    ...(attachment.mediaType ? { mediaType: attachment.mediaType } : {}),
                   })),
                 }
               : {}),
@@ -244,9 +232,8 @@ export class DelegationService {
         }
         execution = await connector.resume(delegation.externalRef, {
           signal: controller.signal,
-          ...(delegation.connectorCursor
-            ? { cursor: delegation.connectorCursor }
-            : {}),
+          metadata: input.metadata,
+          ...(delegation.connectorCursor ? { cursor: delegation.connectorCursor } : {}),
         });
       } else {
         const externalSessionId = optionalMetadataString(input.metadata, "externalSessionId");
@@ -352,12 +339,7 @@ export class DelegationService {
           const interactionId = String(requested.data.interactionId);
           const request = interactionRequestFromEvent(requested.data.request);
           const resumeToken = jsonRecord(requested.data.resumeToken);
-          await registerInteraction(
-            interactionId,
-            request,
-            resumeToken,
-            requested.eventId,
-          );
+          await registerInteraction(interactionId, request, resumeToken, requested.eventId);
         }
       }
 
@@ -419,41 +401,112 @@ export class DelegationService {
           );
           continue;
         }
+        if (event.type === "display_progress") {
+          delegation = await this.#checkpointProgressWithEvent(delegation, output, event.cursor, {
+            timestamp: this.now(),
+            runId: input.runId,
+            type: "delegation.display.progress",
+            data: {
+              delegationId,
+              agentId: agent.id,
+              agentName: agent.name,
+              text: event.text,
+              ...(event.sourceMessageId ? { sourceMessageId: event.sourceMessageId } : {}),
+            },
+          });
+          continue;
+        }
+        if (event.type === "tool_started") {
+          delegation = await this.#checkpointProgressWithEvent(delegation, output, event.cursor, {
+            timestamp: this.now(),
+            runId: input.runId,
+            type: "delegation.tool.started",
+            data: {
+              delegationId,
+              agentId: agent.id,
+              agentName: agent.name,
+              callId: event.callId,
+              toolName: event.toolName,
+              ...(event.title ? { title: event.title } : {}),
+              ...(event.input !== undefined ? { input: event.input } : {}),
+            },
+          });
+          continue;
+        }
+        if (event.type === "tool_detail") {
+          delegation = await this.#checkpointProgressWithEvent(delegation, output, event.cursor, {
+            timestamp: this.now(),
+            runId: input.runId,
+            type: "delegation.tool.detail",
+            data: {
+              delegationId,
+              agentId: agent.id,
+              agentName: agent.name,
+              callId: event.callId,
+              phase: event.phase,
+              value: event.value,
+              ...(event.toolName ? { toolName: event.toolName } : {}),
+            },
+          });
+          continue;
+        }
+        if (event.type === "tool_completed") {
+          delegation = await this.#checkpointProgressWithEvent(delegation, output, event.cursor, {
+            timestamp: this.now(),
+            runId: input.runId,
+            type: "delegation.tool.completed",
+            data: {
+              delegationId,
+              agentId: agent.id,
+              agentName: agent.name,
+              callId: event.callId,
+              ...(event.toolName ? { toolName: event.toolName } : {}),
+              ...(event.title ? { title: event.title } : {}),
+              ...(event.output !== undefined ? { output: event.output } : {}),
+            },
+          });
+          continue;
+        }
+        if (event.type === "tool_failed") {
+          delegation = await this.#checkpointProgressWithEvent(delegation, output, event.cursor, {
+            timestamp: this.now(),
+            runId: input.runId,
+            type: "delegation.tool.failed",
+            data: {
+              delegationId,
+              agentId: agent.id,
+              agentName: agent.name,
+              callId: event.callId,
+              error: event.error,
+              ...(event.toolName ? { toolName: event.toolName } : {}),
+              ...(event.title ? { title: event.title } : {}),
+              ...(event.output !== undefined ? { output: event.output } : {}),
+            },
+          });
+          continue;
+        }
         if (event.type === "output_delta") {
           output += event.text;
-          delegation = await this.#checkpointProgressWithEvent(
-            delegation,
-            output,
-            event.cursor,
-            {
-              timestamp: this.now(),
-              runId: input.runId,
-              type: "delegation.output.delta",
-              data: {
-                delegationId,
-                agentId: agent.id,
-                agentName: agent.name,
-                text: event.text,
-              },
+          delegation = await this.#checkpointProgressWithEvent(delegation, output, event.cursor, {
+            timestamp: this.now(),
+            runId: input.runId,
+            type: "delegation.output.delta",
+            data: {
+              delegationId,
+              agentId: agent.id,
+              agentName: agent.name,
+              text: event.text,
             },
-          );
+          });
           continue;
         }
         if (event.type === "artifact") {
           artifacts.push(event.artifact);
-          delegation = await this.#checkpointProgress(
-            delegation,
-            output,
-            event.cursor,
-          );
+          delegation = await this.#checkpointProgress(delegation, output, event.cursor);
           continue;
         }
         if (event.type === "progress") {
-          delegation = await this.#checkpointProgress(
-            delegation,
-            output,
-            event.cursor,
-          );
+          delegation = await this.#checkpointProgress(delegation, output, event.cursor);
           await this.#appendEvent({
             timestamp: this.now(),
             runId: input.runId,
@@ -468,28 +521,19 @@ export class DelegationService {
             // 某些 Connector 只在终态给出完整答案，没有流式 output_delta。
             // 将终态正文补成持久 delta，保证所有子 Agent 输出都能独立通过 SSE 展示。
             output = completedOutput;
-            delegation = await this.#checkpointProgressWithEvent(
-              delegation,
-              output,
-              event.cursor,
-              {
-                timestamp: this.now(),
-                runId: input.runId,
-                type: "delegation.output.delta",
-                data: {
-                  delegationId,
-                  agentId: agent.id,
-                  agentName: agent.name,
-                  text: completedOutput,
-                },
+            delegation = await this.#checkpointProgressWithEvent(delegation, output, event.cursor, {
+              timestamp: this.now(),
+              runId: input.runId,
+              type: "delegation.output.delta",
+              data: {
+                delegationId,
+                agentId: agent.id,
+                agentName: agent.name,
+                text: completedOutput,
               },
-            );
+            });
           } else {
-            delegation = await this.#checkpointProgress(
-              delegation,
-              output,
-              event.cursor,
-            );
+            delegation = await this.#checkpointProgress(delegation, output, event.cursor);
           }
           const result: AgentResult = {
             ...event.result,
@@ -507,11 +551,7 @@ export class DelegationService {
           artifacts,
           error: event.error.message,
         };
-        await this.#finish(
-          delegation,
-          eventTimedOut ? "TIMED_OUT" : "FAILED",
-          result,
-        );
+        await this.#finish(delegation, eventTimedOut ? "TIMED_OUT" : "FAILED", result);
         return result;
       }
 
@@ -547,10 +587,7 @@ export class DelegationService {
       }
       // 保存 externalRef 或 cursor 失败时，本地 version 可能领先数据库；以真相源版本收敛终态。
       delegation = (await this.delegations.get(delegationId)) ?? delegation;
-      if (
-        TERMINAL_DELEGATION_STATUSES.has(delegation.status) &&
-        delegation.result
-      ) {
+      if (TERMINAL_DELEGATION_STATUSES.has(delegation.status) && delegation.result) {
         return structuredClone(delegation.result);
       }
       const result: AgentResult = {
@@ -630,10 +667,7 @@ export class DelegationService {
     signal: AbortSignal,
   ): Promise<UserInteractionResponse> {
     for await (const event of this.events.stream(runId, afterEventId, signal)) {
-      if (
-        event.type === "interaction.responded" &&
-        event.data.interactionId === interactionId
-      ) {
+      if (event.type === "interaction.responded" && event.data.interactionId === interactionId) {
         return responseFromEvent(event.data);
       }
     }
@@ -692,38 +726,29 @@ export class DelegationService {
         delegation.externalRef &&
         !activeById.has(delegation.id),
     );
-    const results = await Promise.allSettled(
-      [
-        ...active.map(([delegationId, item]) =>
-          this.#cancelExecution(runId, delegationId, item.execution, reason),
-        ),
-        ...recoverable.map(async (delegation) => {
-          const connector = this.connectors.require(delegation.connectorId);
-          if (!connector.resume || !delegation.externalRef) {
-            throw new Error(
-              `Connector cannot resume persisted cancellation: ${delegation.connectorId}`,
-            );
-          }
-          const execution = await connector.resume(delegation.externalRef, {
-            signal: new AbortController().signal,
-            ...(delegation.connectorCursor
-              ? { cursor: delegation.connectorCursor }
-              : {}),
-          });
-          this.#track(runId, delegation.id, execution);
-          try {
-            await this.#cancelExecution(
-              runId,
-              delegation.id,
-              execution,
-              reason,
-            );
-          } finally {
-            this.#untrack(runId, delegation.id);
-          }
-        }),
-      ],
-    );
+    const results = await Promise.allSettled([
+      ...active.map(([delegationId, item]) =>
+        this.#cancelExecution(runId, delegationId, item.execution, reason),
+      ),
+      ...recoverable.map(async (delegation) => {
+        const connector = this.connectors.require(delegation.connectorId);
+        if (!connector.resume || !delegation.externalRef) {
+          throw new Error(
+            `Connector cannot resume persisted cancellation: ${delegation.connectorId}`,
+          );
+        }
+        const execution = await connector.resume(delegation.externalRef, {
+          signal: new AbortController().signal,
+          ...(delegation.connectorCursor ? { cursor: delegation.connectorCursor } : {}),
+        });
+        this.#track(runId, delegation.id, execution);
+        try {
+          await this.#cancelExecution(runId, delegation.id, execution, reason);
+        } finally {
+          this.#untrack(runId, delegation.id);
+        }
+      }),
+    ]);
     const failures = results.flatMap((result) =>
       result.status === "rejected" ? [result.reason] : [],
     );
@@ -779,10 +804,7 @@ export class DelegationService {
   }
 
   /** 将 AbortSignal 的中止原因转换为取消或超时结果，并统一完成委派。 */
-  async #finishAborted(
-    delegation: Delegation,
-    timedOut: boolean,
-  ): Promise<AgentResult> {
+  async #finishAborted(delegation: Delegation, timedOut: boolean): Promise<AgentResult> {
     const result: AgentResult = {
       status: timedOut ? "timed_out" : "cancelled",
       output: delegation.partialOutput ?? "",
@@ -819,6 +841,7 @@ export class DelegationService {
         status,
         artifactCount: result.artifacts.length,
         resultStatus: result.status,
+        hasOutput: Boolean(result.output),
         ...(result.error ? { error: result.error } : {}),
       },
     });
@@ -838,10 +861,7 @@ export class DelegationService {
   }
 
   async #saveDelegation(delegation: Delegation): Promise<void> {
-    await this.delegations.save(
-      delegation,
-      this.#claims.get(delegation.runId),
-    );
+    await this.delegations.save(delegation, this.#claims.get(delegation.runId));
   }
 
   async #appendEvent(
@@ -855,11 +875,8 @@ export class DelegationService {
   }
 }
 
-function responseFromEvent(
-  data: Record<string, JsonValue>,
-): UserInteractionResponse {
-  const action =
-    data.action === "skip" || data.action === "cancel" ? data.action : "submit";
+function responseFromEvent(data: Record<string, JsonValue>): UserInteractionResponse {
+  const action = data.action === "skip" || data.action === "cancel" ? data.action : "submit";
   const answers =
     data.answers && typeof data.answers === "object" && !Array.isArray(data.answers)
       ? data.answers
@@ -872,9 +889,7 @@ function responseFromEvent(
 }
 
 function jsonRecord(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : undefined;
+  return value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
 }
 
 function interactionRequestFromEvent(value: JsonValue | undefined): UserInteractionRequest {

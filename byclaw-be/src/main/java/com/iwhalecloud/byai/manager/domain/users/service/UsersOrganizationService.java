@@ -6,12 +6,14 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.manager.mapper.users.UsersOrganizationMapper;
+import com.iwhalecloud.byai.manager.domain.event.user.UserOrganizationChangedEvent;
 import com.iwhalecloud.byai.manager.entity.users.UsersOrganization;
 import com.iwhalecloud.byai.manager.vo.users.UsersOrgPostVo;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import java.util.ArrayList;
 import java.util.HashMap;
 import org.springframework.stereotype.Service;
@@ -32,6 +34,9 @@ public class UsersOrganizationService {
 
     @Autowired
     private SequenceService SequenceService;
+
+    @Autowired
+    private ApplicationEventPublisher eventPublisher;
 
     /**
      * 用户关联组织岗位
@@ -61,6 +66,7 @@ public class UsersOrganizationService {
             usersOrganizations.add(usersOrganization);
         });
         usersOrganizationMapper.saveBatch(usersOrganizations);
+        publishOrganizationChanged(List.of(userId));
     }
 
     /**
@@ -70,7 +76,11 @@ public class UsersOrganizationService {
         if (id == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("userorg.remove.id.notnull"));
         }
+        UsersOrganization usersOrganization = usersOrganizationMapper.selectById(id);
         usersOrganizationMapper.deleteById(id);
+        if (usersOrganization != null) {
+            publishOrganizationChanged(List.of(usersOrganization.getUserId()));
+        }
     }
 
     /**
@@ -80,7 +90,9 @@ public class UsersOrganizationService {
         if (CollUtil.isEmpty(ids)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("userorg.remove.id.notnull"));
         }
+        List<UsersOrganization> usersOrganizations = usersOrganizationMapper.selectBatchIds(ids);
         usersOrganizationMapper.deleteBatchIds(ids);
+        publishOrganizationChanged(usersOrganizations.stream().map(UsersOrganization::getUserId).toList());
     }
 
     /**
@@ -154,6 +166,7 @@ public class UsersOrganizationService {
             usersOrganization.setId(SequenceService.nextVal());
         }
         usersOrganizationMapper.insert(usersOrganization);
+        publishOrganizationChanged(List.of(usersOrganization.getUserId()));
     }
 
     /**
@@ -168,6 +181,7 @@ public class UsersOrganizationService {
             }
         }
         usersOrganizationMapper.saveBatch(usersOrganizations);
+        publishOrganizationChanged(usersOrganizations.stream().map(UsersOrganization::getUserId).toList());
     }
 
     /**
@@ -176,7 +190,14 @@ public class UsersOrganizationService {
      * @param usersOrganization 组织关联关系
      */
     public void update(UsersOrganization usersOrganization) {
+        UsersOrganization history = usersOrganizationMapper.selectById(usersOrganization.getId());
         usersOrganizationMapper.updateById(usersOrganization);
+        List<Long> userIds = new ArrayList<>();
+        if (history != null) {
+            userIds.add(history.getUserId());
+        }
+        userIds.add(usersOrganization.getUserId());
+        publishOrganizationChanged(userIds);
     }
 
     /**
@@ -188,8 +209,11 @@ public class UsersOrganizationService {
         LambdaQueryWrapper<UsersOrganization> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(UsersOrganization::getOrgId, orgId);
         List<UsersOrganization> usersOrganizations = usersOrganizationMapper.selectList(queryWrapper);
-        for (UsersOrganization usersOrganization : usersOrganizations) {
-            this.removeByPrimaryKey(usersOrganization.getId());
+        if (CollUtil.isNotEmpty(usersOrganizations)) {
+            for (UsersOrganization usersOrganization : usersOrganizations) {
+                usersOrganizationMapper.deleteById(usersOrganization.getId());
+            }
+            publishOrganizationChanged(usersOrganizations.stream().map(UsersOrganization::getUserId).toList());
         }
     }
 
@@ -203,6 +227,16 @@ public class UsersOrganizationService {
         LambdaQueryWrapper<UsersOrganization> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(UsersOrganization::getOrgId, orgId);
         return usersOrganizationMapper.selectList(queryWrapper);
+    }
+
+    private void publishOrganizationChanged(List<Long> userIds) {
+        if (CollUtil.isEmpty(userIds)) {
+            return;
+        }
+        List<Long> effectiveUserIds = userIds.stream().filter(java.util.Objects::nonNull).distinct().toList();
+        if (!effectiveUserIds.isEmpty()) {
+            eventPublisher.publishEvent(new UserOrganizationChangedEvent(this, effectiveUserIds));
+        }
     }
 
 }

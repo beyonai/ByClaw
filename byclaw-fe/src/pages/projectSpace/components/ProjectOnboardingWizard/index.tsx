@@ -1,19 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Form, Input, Modal, Radio, Select, Steps, message } from 'antd';
-import {
-  CheckCircleFilled,
-  ClockCircleOutlined,
-  DeleteOutlined,
-  InfoCircleFilled,
-  LoadingOutlined,
-  PlusOutlined,
-} from '@ant-design/icons';
+import { Button, Form, Input, Modal, Steps, message } from 'antd';
+import { CheckCircleFilled, DeleteOutlined, InfoCircleFilled, PlusOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import {
   createProjectRepo,
   deleteProjectRepo,
   listProjectRepos,
-  startProjectInit,
   type DevloopProjectRepo,
   type ProjectRepoType,
 } from '@/service/devloop';
@@ -31,20 +23,22 @@ interface Props {
   onCancel: () => void;
   // 父级负责查重/建项目(按表单真实类型)/存共享成员与默认员工,返回 projectId 字符串;空串表示失败(父级已提示)。
   onCreateProject: (values: ProjectFormValues) => Promise<string>;
-  // 完成:进入该项目详情(非研发项目建完即调,研发项目走完 step3 后调)。
+  // 完成:进入该项目详情(非研发项目建完即调,研发项目配完仓库后调)。
   onFinish: (projectId: string) => void;
-  // step3 进入架构数字员工聊天做初始化。
-  onEnterArchitectChat: (projectId: string) => void;
 }
 
 const REPO_BRANCH_DEFAULT = 'main';
 const PLACEHOLDER_REPLACE = '__PLACEHOLDER__';
 
-// 架构初始化可选技能包:枚举暂时前端硬编码,后续接后端 skill 目录。
-const SKILL_PACKAGE_OPTIONS = [
-  { value: 'trellis', label: 'trellis' },
-  { value: 'superpowers', label: 'superpowers' },
-];
+// 建仓表单:工作区与代码仓库共用一份形状,新增/重置都走 emptyRepoForm,避免字面量漂移。
+// description 可选,人工填仓库职责,让后来人看清这个仓库负责什么。
+type RepoFormState = { repoFullName: string; repoUrl: string; defaultBranch: string; description: string };
+const emptyRepoForm = (): RepoFormState => ({
+  repoFullName: '',
+  repoUrl: '',
+  defaultBranch: REPO_BRANCH_DEFAULT,
+  description: '',
+});
 
 const ProjectOnboardingWizard: React.FC<Props> = ({
   open,
@@ -53,7 +47,6 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
   onCancel,
   onCreateProject,
   onFinish,
-  onEnterArchitectChat,
 }) => {
   const intl = useIntl();
   const t = useCallback((id: string) => intl.formatMessage({ id: `projectSpace.onboarding.${id}` }), [intl]);
@@ -66,21 +59,14 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
   const basicRef = useRef<ProjectBasicFormHandle>(null);
   const projectType = Form.useWatch('projectType', form);
   const isDevelopProjectEnabled = (projectTypeConfigOptions ?? []).some((option) => option.value === 'develop');
-  // 仅研发项目展开后续「仓库 → 架构初始化」两步及研发提示;其余类型 step1 填完直接建。
+  // 仅研发项目展开「仓库」这一步及研发提示;其余类型 step1 填完直接建。
   const isDevelopProject = isDevelopProjectEnabled && projectType === 'develop';
 
   // 已配置仓库:按后端 repoType 区分工作区与代码仓库(存量数据无类型时按 code 处理)。
   const [repos, setRepos] = useState<DevloopProjectRepo[]>([]);
   const [repoSaving, setRepoSaving] = useState(false);
-  const [wsForm, setWsForm] = useState({ repoFullName: '', repoUrl: '', defaultBranch: REPO_BRANCH_DEFAULT });
-  const [codeForm, setCodeForm] = useState({ repoFullName: '', repoUrl: '', defaultBranch: REPO_BRANCH_DEFAULT });
-
-  // step3 架构初始化选项:是否建索引默认否;建索引时才联动技能包多选。
-  const [buildIndex, setBuildIndex] = useState(false);
-  const [skillPackages, setSkillPackages] = useState<string[]>([]);
-  // 初始化需用户显式点击触发:未触发前展示配置,触发后才 loading 且允许关闭。
-  const [initStarted, setInitStarted] = useState(false);
-  const [initStarting, setInitStarting] = useState(false);
+  const [wsForm, setWsForm] = useState<RepoFormState>(emptyRepoForm());
+  const [codeForm, setCodeForm] = useState<RepoFormState>(emptyRepoForm());
 
   const workspaceRepo = repos.find((repo) => repo.repoType === 'workspace');
   const codeRepos = repos.filter((repo) => repo.repoType !== 'workspace');
@@ -92,12 +78,8 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
     setProjectId('');
     setCreating(false);
     setRepos([]);
-    setWsForm({ repoFullName: '', repoUrl: '', defaultBranch: REPO_BRANCH_DEFAULT });
-    setCodeForm({ repoFullName: '', repoUrl: '', defaultBranch: REPO_BRANCH_DEFAULT });
-    setBuildIndex(false);
-    setSkillPackages([]);
-    setInitStarted(false);
-    setInitStarting(false);
+    setWsForm(emptyRepoForm());
+    setCodeForm(emptyRepoForm());
   }, [open]);
 
   const refreshRepos = useCallback(async (id: string) => {
@@ -125,10 +107,7 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
     }
   };
 
-  const addRepo = async (
-    form: { repoFullName: string; repoUrl: string; defaultBranch: string },
-    isWorkspace: boolean
-  ) => {
+  const addRepo = async (form: RepoFormState, isWorkspace: boolean) => {
     if (!projectId) return;
     if (!form.repoFullName.trim()) {
       message.error(t('repo.validation.nameRequired'));
@@ -142,6 +121,7 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
         repoFullName: form.repoFullName.trim(),
         repoUrl: form.repoUrl.trim() || undefined,
         defaultBranch: form.defaultBranch.trim() || undefined,
+        description: form.description.trim() || undefined,
         repoType,
       });
       if (!res?.repoId) {
@@ -149,9 +129,8 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
         return;
       }
       message.success(t('repo.createSuccess'));
-      const reset = { repoFullName: '', repoUrl: '', defaultBranch: REPO_BRANCH_DEFAULT };
-      if (isWorkspace) setWsForm(reset);
-      else setCodeForm(reset);
+      if (isWorkspace) setWsForm(emptyRepoForm());
+      else setCodeForm(emptyRepoForm());
       await refreshRepos(projectId);
     } catch {
       message.error(t('repo.createFailed'));
@@ -179,33 +158,9 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
       },
     });
   };
-  // step3 显式触发初始化:调用后端标记 initializing 并下发建索引/技能包配置,成功后进入 loading 态。
-  const handleStartInit = async () => {
-    if (!projectId) return;
-    setInitStarting(true);
-    try {
-      await startProjectInit({
-        projectId: Number(projectId),
-        buildIndex,
-        skillPackages: buildIndex ? skillPackages : [],
-      });
-      setInitStarted(true);
-    } catch {
-      message.error(t('step3.startFailed'));
-    } finally {
-      setInitStarting(false);
-    }
-  };
 
   const renderBasicStep = () => (
     <div className={styles.stepBody}>
-      {/* 研发项目才提示后续步骤(仓库/架构初始化);其余类型 step1 即为全部,不展示研发向导提示。 */}
-      {isDevelopProject && (
-        <div className={styles.hint}>
-          <InfoCircleFilled className={styles.hintIcon} />
-          <span>{t('step1.hint')}</span>
-        </div>
-      )}
       <ProjectBasicForm
         ref={basicRef}
         open={open}
@@ -218,8 +173,8 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
   );
 
   const renderRepoForm = (
-    formState: { repoFullName: string; repoUrl: string; defaultBranch: string },
-    setForm: React.Dispatch<React.SetStateAction<{ repoFullName: string; repoUrl: string; defaultBranch: string }>>,
+    formState: RepoFormState,
+    setForm: React.Dispatch<React.SetStateAction<RepoFormState>>,
     isWorkspace: boolean
   ) => (
     <div className={styles.repoForm}>
@@ -245,6 +200,15 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
           value={formState.defaultBranch}
           placeholder={REPO_BRANCH_DEFAULT}
           onChange={(e) => setForm((prev) => ({ ...prev, defaultBranch: e.target.value }))}
+        />
+      </div>
+      <div className={styles.repoFormField}>
+        <span className={styles.repoFormLabel}>{t('repo.field.description')}</span>
+        <Input.TextArea
+          value={formState.description}
+          placeholder={t('repo.placeholder.description')}
+          rows={2}
+          onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
         />
       </div>
       <Button
@@ -316,83 +280,7 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
     </div>
   );
 
-  const renderInitStep = () => (
-    <div className={styles.stepBody}>
-      <div className={styles.hint}>
-        <InfoCircleFilled className={styles.hintIcon} />
-        <span>{t('step3.hint')}</span>
-      </div>
-
-      <div className={styles.section}>
-        <div className={styles.sectionHead}>
-          <span className={styles.sectionTitle}>{t('index.title')}</span>
-        </div>
-        <div className={styles.sectionDesc}>{t('index.desc')}</div>
-        <Radio.Group
-          value={buildIndex}
-          onChange={(e) => {
-            const next = e.target.value as boolean;
-            setBuildIndex(next);
-            // 开启建索引默认全选技能包;关闭时清空,避免残留未展示的选择项。
-            setSkillPackages(next ? SKILL_PACKAGE_OPTIONS.map((option) => option.value) : []);
-          }}
-        >
-          <Radio value={false}>{t('index.no')}</Radio>
-          <Radio value={true}>{t('index.yes')}</Radio>
-        </Radio.Group>
-        {buildIndex && (
-          <div className={styles.skillField}>
-            <span className={styles.repoFormLabel}>{t('index.skillLabel')}</span>
-            <Select
-              mode="multiple"
-              allowClear
-              style={{ width: '100%' }}
-              value={skillPackages}
-              options={SKILL_PACKAGE_OPTIONS}
-              placeholder={t('index.skillPlaceholder')}
-              onChange={(vals) => setSkillPackages(vals as string[])}
-            />
-          </div>
-        )}
-      </div>
-
-      {initStarted ? (
-        // 已触发初始化:展示 loading 与进度,允许关闭(耗时任务在后台继续)。
-        <div className={styles.initPanel}>
-          <LoadingOutlined className={styles.initSpinner} spin />
-          <div className={styles.initTitle}>{t('step3.title')}</div>
-          <div className={styles.initDesc}>{t('step3.desc')}</div>
-          <div className={styles.checklist}>
-            <div className={`${styles.checkItem} ${styles.checkItemDone}`}>
-              <CheckCircleFilled className={styles.checkIconDone} />
-              {t('step3.check.repo')}
-            </div>
-            <div className={styles.checkItem}>
-              <LoadingOutlined className={styles.checkIconActive} spin />
-              {t('step3.check.model')}
-            </div>
-            <div className={styles.checkItem}>
-              <ClockCircleOutlined className={styles.checkIconPending} />
-              {t('step3.check.push')}
-            </div>
-          </div>
-          <Button type="primary" ghost onClick={() => onEnterArchitectChat(projectId)}>
-            {t('step3.enterChat')}
-          </Button>
-        </div>
-      ) : (
-        // 未触发:仅展示配置,需用户显式点击「开始初始化」才启动耗时任务。
-        <div className={styles.initReady}>
-          <div className={styles.initReadyDesc}>{t('step3.readyDesc')}</div>
-          <Button type="primary" loading={initStarting} onClick={handleStartInit}>
-            {t('step3.start')}
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-
-  const stepPanels = [renderBasicStep, renderRepoStep, renderInitStep];
+  const stepPanels = [renderBasicStep, renderRepoStep];
 
   const renderFooter = () => {
     if (step === 0) {
@@ -406,58 +294,52 @@ const ProjectOnboardingWizard: React.FC<Props> = ({
         </Button>,
       ];
     }
-    if (step === 1) {
-      return [
-        <Button key="prev" onClick={() => setStep(0)}>
-          {t('action.prev')}
-        </Button>,
-        <Button key="next" type="primary" disabled={!workspaceRepo} onClick={() => setStep(2)}>
-          {workspaceRepo ? t('action.next') : t('action.nextNeedWorkspace')}
-        </Button>,
-      ];
-    }
-    // 未触发初始化前只能回上一步;触发后初始化在后台继续,才允许关闭。
-    if (!initStarted) {
-      return [
-        <Button key="prev" onClick={() => setStep(1)}>
-          {t('action.prev')}
-        </Button>,
-      ];
-    }
+    // 仓库是最后一步:工作区必填,配好即可完成并进入项目。
     return [
-      <Button key="later" onClick={() => onFinish(projectId)}>
-        {t('action.later')}
+      <Button key="prev" onClick={() => setStep(0)}>
+        {t('action.prev')}
       </Button>,
-      <Button key="done" type="primary" onClick={() => onFinish(projectId)}>
-        {t('action.done')}
+      <Button key="done" type="primary" disabled={!workspaceRepo} onClick={() => onFinish(projectId)}>
+        {workspaceRepo ? t('action.done') : t('action.nextNeedWorkspace')}
       </Button>,
     ];
   };
 
-  // step3 未触发初始化前禁止关闭:必须显式点击「开始初始化」或返回上一步。
-  const closeBlocked = step === 2 && !initStarted;
-
   return (
     <Modal
       className={styles.wizard}
+      // 禁止 Modal 外层 wrap 滚动，向导内容统一在弹窗主体内滚动。
+      wrapClassName={styles.wizardWrap}
       title={t('titleCreate')}
       open={open}
       width={720}
+      // 与编辑项目弹窗保持一致，始终在当前视口内上下居中展示。
+      centered
       maskClosable={false}
-      closable={!closeBlocked}
-      onCancel={closeBlocked ? undefined : onCancel}
+      onCancel={onCancel}
       footer={renderFooter()}
+      // 限制 body 高度并在弹窗内部滚动，避免页面和 Modal 外层抢滚动。
+      styles={{
+        body: {
+          maxHeight: 'calc(100vh - 220px)',
+          overflowY: 'auto',
+          paddingTop: 8,
+          paddingInlineEnd: 8,
+        },
+      }}
     >
-      {/* 仅研发项目展开多步进度条;非研发 step1 即为全部,不展示步进。 */}
-      {isDevelopProject && (
-        <Steps
-          className={styles.steps}
-          current={step}
-          size="small"
-          items={[{ title: t('step1.title') }, { title: t('step2.title') }, { title: t('step3.titleShort') }]}
-        />
-      )}
-      {stepPanels[step]()}
+      <div className={styles.wizardScroll}>
+        {/* 仅研发项目展开多步进度条;非研发 step1 即为全部,不展示步进。 */}
+        {isDevelopProject && (
+          <Steps
+            className={styles.steps}
+            current={step}
+            size="small"
+            items={[{ title: t('step1.title') }, { title: t('step2.title') }]}
+          />
+        )}
+        {stepPanels[step]()}
+      </div>
     </Modal>
   );
 };

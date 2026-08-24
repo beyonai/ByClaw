@@ -2,7 +2,7 @@ import { formatBytes } from '@/utils/file';
 import { Popconfirm } from 'antd';
 import { useIntl } from '@umijs/max';
 import classnames from 'classnames';
-import React from 'react';
+import React, { useContext } from 'react';
 import { isFunction, get } from 'lodash';
 
 import { CloseOutlined, CloudDownloadOutlined, LoadingOutlined, EnterOutlined, EyeOutlined } from '@ant-design/icons';
@@ -18,6 +18,8 @@ import type { IFile } from '@/typescript/file';
 
 import styles from './index.module.less';
 import { IMessage } from '@/typescript/message';
+import MessageFilePreviewPanel from './components/Previewer/MessageFilePreviewPanel';
+import { HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH, SiderContentContext } from '@/layout/sider/siderContentContext';
 
 export type IFileRender = {
   fileItem: IFile;
@@ -30,6 +32,7 @@ export type IProps = {
   onClose?: (fileItem: IFileRender) => void;
   rightBottomRender?: (fileItem: IFileRender) => React.ReactNode;
   message?: IMessage;
+  previewInDetailPanel?: boolean;
 } & IFileRender;
 
 export const PREVIEWABLE = [
@@ -51,15 +54,16 @@ export const PREVIEWABLE = [
 ];
 
 function FileRender(props: IProps) {
-  const { fileItem, onClose, rightBottomRender, canQuote } = props;
+  const { fileItem, onClose, rightBottomRender, canQuote, previewInDetailPanel = false } = props;
   const intl = useIntl();
   // const { messageId, collectIds = [] } = message || {};
 
   const { EventEmitter, layoutMode } = useGlobal();
+  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
   const { onPreview, previewInfo, onClosePreviewModal, previewing } = usePreview();
-  const { handleDownload, downloadFile, downloading } = useDownload();
+  const { handleDownload, handleDownloadRequest, downloadFile, downloading } = useDownload();
 
-  const { file, imgUrl, uid, status, queryFile, downloadUrl } = fileItem;
+  const { file, imgUrl, uid, status, queryFile, downloadUrl, downloadRequest } = fileItem;
 
   const size = get(queryFile, 'length') || file?.size;
   const name = get(queryFile, 'fileName') || file?.name;
@@ -70,8 +74,9 @@ function FileRender(props: IProps) {
 
   const fileType = queryFile?.fileType || nameArr?.pop();
   const fileName = nameArr?.join('.');
+  const previewTitle = name || fileName || '';
 
-  const canDownload = downloadUrl || queryFile?.fileUrl || queryFile?.fileId;
+  const canDownload = downloadRequest || downloadUrl || queryFile?.fileUrl || queryFile?.fileId;
   const canPreview = PREVIEWABLE.includes(fileType);
 
   const isLoading = status === 'uploading' || previewing || downloading;
@@ -98,7 +103,21 @@ function FileRender(props: IProps) {
           {!isLoading && canPreview && (
             <div
               className={classnames(styles.fileItemDownload, 'ub ub-ac ub-pc pointer preview')}
-              onClick={() => onPreview(fileItem)}
+              onClick={() => {
+                if (previewInDetailPanel) {
+                  setDetailPanel?.(
+                    <MessageFilePreviewPanel
+                      fileItem={fileItem}
+                      fileType={fileType || ''}
+                      fileName={previewTitle}
+                      onClose={() => clearDetailPanel?.()}
+                    />,
+                    { width: HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH }
+                  );
+                  return;
+                }
+                void onPreview(fileItem);
+              }}
               title={intl.formatMessage({ id: 'common.preview' })}
             >
               {/* 预览 */}
@@ -111,7 +130,9 @@ function FileRender(props: IProps) {
             <div
               className={classnames(styles.fileItemDownload, 'ub ub-ac ub-pc pointer download')}
               onClick={() => {
-                if (downloadUrl || queryFile?.fileUrl) {
+                if (downloadRequest) {
+                  void handleDownloadRequest(downloadRequest);
+                } else if (downloadUrl || queryFile?.fileUrl) {
                   downloadFile({
                     fileUrl: downloadUrl || queryFile?.fileUrl,
                     fileName: name,
@@ -201,12 +222,14 @@ function FileRender(props: IProps) {
           </div>
         </div>
       </div>
-      <Previewer
-        previewInfo={previewInfo}
-        onClosePreviewModal={onClosePreviewModal}
-        fileType={fileType}
-        fileName={fileName}
-      />
+      {!previewInDetailPanel && (
+        <Previewer
+          previewInfo={previewInfo}
+          onClosePreviewModal={onClosePreviewModal}
+          fileType={fileType}
+          fileName={fileName}
+        />
+      )}
     </>
   );
 }

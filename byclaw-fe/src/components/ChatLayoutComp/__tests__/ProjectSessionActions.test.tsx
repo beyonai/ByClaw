@@ -55,7 +55,8 @@ describe('ProjectSessionActions', () => {
 
     await waitFor(() => {
       expect(mockGetProject).toHaveBeenCalledWith(1001);
-      expect(screen.getAllByRole('button')).toHaveLength(2);
+      // 任务成果入口已迁移到会话资源面板，这里只保留任务进度按钮。
+      expect(screen.getAllByRole('button')).toHaveLength(1);
     });
     fireEvent.click(screen.getAllByRole('button')[0]);
 

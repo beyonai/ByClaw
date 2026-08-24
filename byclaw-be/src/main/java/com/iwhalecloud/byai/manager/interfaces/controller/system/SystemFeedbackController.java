@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.interfaces.controller.system;
 
 import com.iwhalecloud.byai.manager.application.service.system.SystemFeedbackApplicationService;
 import com.iwhalecloud.byai.manager.dto.system.SystemFeedbackDTO;
+import com.iwhalecloud.byai.manager.dto.system.SystemFeedbackStatusUpdateDTO;
 import com.iwhalecloud.byai.common.annotation.Add;
 import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -99,6 +100,20 @@ public class SystemFeedbackController {
     public ResponseUtil<SystemFeedbackManageVo> queryManageDetail(@RequestParam("feedbackId") Long feedbackId) {
         return ResponseUtil.successResponse(I18nUtil.get("systemfeedback.manage.detail.success"),
             systemFeedbackApplicationService.queryManageDetail(feedbackId));
+    }
+
+    /**
+     * 流转系统反馈状态。
+     *
+     * @param dto 状态流转参数
+     * @return 更新后的反馈详情
+     */
+    @PostMapping("/manage/status")
+    @ManageLogAnnotation(name = "系统反馈管理", description = "流转系统反馈状态")
+    public ResponseUtil<SystemFeedbackManageVo> updateManageStatus(
+        @Validated @RequestBody SystemFeedbackStatusUpdateDTO dto) {
+        return ResponseUtil.successResponse(I18nUtil.get("systemfeedback.manage.status.update.success"),
+            systemFeedbackApplicationService.updateManageStatus(dto));
     }
 
     /**

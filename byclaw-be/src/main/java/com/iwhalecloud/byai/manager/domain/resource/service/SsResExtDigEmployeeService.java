@@ -10,6 +10,7 @@ import com.iwhalecloud.byai.manager.mapper.resource.SsResExtDigEmployeeMapper;
 import com.iwhalecloud.byai.manager.qo.resource.DigEmployeeExtQo;
 import com.iwhalecloud.byai.manager.qo.resource.DigitalEmployeeQo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeePageVo;
+import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeGroupMemberDTO;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
@@ -67,6 +68,16 @@ public class SsResExtDigEmployeeService {
 
         return pageInfo;
 
+    }
+
+    /**
+     * 使用专用轻量 SQL 分页查询数字员工组成员候选。
+     */
+    public PageInfo<EmployeeGroupMemberDTO> selectEmployeeGroupMemberCandidates(DigitalEmployeeQo digitalEmployeeQo) {
+        Page<EmployeeGroupMemberDTO> page = PageHelper.startPage(digitalEmployeeQo.getPageNum(),
+            digitalEmployeeQo.getPageSize());
+        ssResExtDigEmployeeMapper.selectEmployeeGroupMemberCandidates(digitalEmployeeQo);
+        return PageHelperUtil.toPageInfo(page);
     }
 
     /**

@@ -318,6 +318,11 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
             chatMode={chatModeMap.expert}
             agentId={agentId}
             sessionId={sessionId}
+            excludedAgentIds={(this.state.resourceList || [])
+              .filter((resource) => `${resource.resourceType}` === `${ResourceTypeMap.digitalEmployee}`)
+              .flatMap((resource) =>
+                [resource.resourceId, resource.resourceCode].filter(Boolean).map((item) => `${item}`)
+              )}
             onSelect={this.onSelectMentionPopoverItem}
             popoverPos={showMentionPopoverType === '@' ? staticEmptyObject : undefined}
             onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}
@@ -375,14 +380,18 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
               }}
               onUpdate={this.onUpdateFile}
               onRemove={this.onRemoveFile}
-              setSessionId={(mySessionId: string, file: any) => {
+              setSessionId={(mySessionId: string, sessionName?: string) => {
                 if (`${mySessionId}` === `${sessionId}`) return;
+                this.props.onFileUploadSessionCreated?.(mySessionId);
                 setSessionId?.(mySessionId);
                 dispatch({
                   type: 'session/addSession',
                   payload: {
                     sessionId: mySessionId,
-                    sessionName: file?.name,
+                    sessionName,
+                    objectId: agentId,
+                    objectType: agentId ? 'DigEmployee' : undefined,
+                    agentType: this.props.myAgentType,
                   },
                 });
               }}

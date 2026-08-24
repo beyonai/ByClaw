@@ -49,6 +49,16 @@ export const DEFAULT_AGENT_TYPE_OPTIONS = [
     paramDesc: '编码',
     paramSeq: 5,
   },
+  {
+    paramId: 10002592,
+    paramGroupCode: 'DIG_EMPLOYEE_AGENT_TYPE',
+    paramGroupName: '数字员工类型',
+    paramName: '数字员工组',
+    paramEnName: 'Digital Employee Group',
+    paramValue: '017',
+    paramDesc: '数字员工组',
+    paramSeq: 6,
+  },
 ];
 
 export const AGENT_TYPE_STAND_TYPE = 'DIG_EMPLOYEE_AGENT_TYPE';

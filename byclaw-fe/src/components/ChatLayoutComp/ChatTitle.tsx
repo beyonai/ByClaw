@@ -11,10 +11,14 @@ import styles from './ChatTitle.module.less';
 import { IAgentType } from '@/typescript/agent';
 import NullableAntdCompWithAnim from '../NullableAntdCompWithAnim';
 import { isAdminVip } from '@/utils/auth';
-import { useSelector, useIntl } from '@umijs/max';
+import { Link, useSelector, useIntl } from '@umijs/max';
 import VNC from './components/VNC';
 import ProjectSessionActions from './ProjectSessionActions';
+import ResourcePanelToggleIcon from './ChatResourceWorkspace/ResourcePanelToggleIcon';
 import { sessionHandler } from '@/utils/session';
+import { Button } from 'antd';
+import { saveProjectScopeIdToStorage } from '@/pages/projectSpace/constants';
+import useAppStore from '@/models/common/useAppStore';
 
 interface ChatTitleProps {
   sessionId?: string;
@@ -23,6 +27,9 @@ interface ChatTitleProps {
   lastAnswer?: any;
   agentType: IAgentType;
   projectId?: number;
+  projectName?: string;
+  resourceWorkspaceOpen?: boolean;
+  onToggleResourceWorkspace?: () => void;
 }
 
 export default function ChatTitle(props: ChatTitleProps) {
@@ -30,6 +37,7 @@ export default function ChatTitle(props: ChatTitleProps) {
   const intl = useIntl();
   const achievementRef = useRef<TriggerRef>(null);
   const { EventEmitter } = useGlobal();
+  const { isSiderCollapsed } = useAppStore();
   const userInfo = useSelector((state: any) => state.user.userInfo);
 
   const [openTemplate, setOpenTemplate] = React.useState<boolean>(false);
@@ -58,15 +66,53 @@ export default function ChatTitle(props: ChatTitleProps) {
       sessionName: 'New Chat',
     } as ISession);
   }, [currentSession, sessionId]);
+  const projectDetailPath = props.projectId
+    ? `/projectSpace?projectId=${encodeURIComponent(`${props.projectId}`)}`
+    : '/projectSpace';
 
   return (
     <>
       <nav className={styles.chatTitle}>
         {titleSession && (
           <div className={classnames(styles.chatTitleWrap, 'ub ub-ac gap8')}>
-            <ChatAvatar session={titleSession} size={32} />
-
-            <div className={styles.chatTitle}>{titleSession.sessionName}</div>
+            {props.projectName ? (
+              <div
+                className={classnames(styles.chatBreadcrumb, isSiderCollapsed && styles.chatBreadcrumbCollapsed)}
+                title={`${props.projectName} / ${titleSession.sessionName}`}
+              >
+                <Link
+                  to="/projectSpace"
+                  state={{ openProjectList: true }}
+                  className={styles.chatBreadcrumbLink}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  {intl.formatMessage({ id: 'sider.projectSpace' })}
+                </Link>
+                <span className={styles.chatBreadcrumbSeparator}>/</span>
+                <Link
+                  to={projectDetailPath}
+                  state={
+                    props.projectId
+                      ? { openProjectDetail: true, projectId: props.projectId }
+                      : { openProjectList: true }
+                  }
+                  className={styles.chatBreadcrumbLink}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (props.projectId) saveProjectScopeIdToStorage(props.projectId);
+                  }}
+                >
+                  {props.projectName}
+                </Link>
+                <span className={styles.chatBreadcrumbSeparator}>/</span>
+                <span className={styles.chatBreadcrumbCurrent}>{titleSession.sessionName}</span>
+              </div>
+            ) : (
+              <>
+                <ChatAvatar session={titleSession} size={32} />
+                <div className={styles.chatTitle}>{titleSession.sessionName}</div>
+              </>
+            )}
             <div className={styles.actions}>
               <ProjectSessionActions
                 projectId={props.projectId}
@@ -79,6 +125,17 @@ export default function ChatTitle(props: ChatTitleProps) {
                   <AntdIcon type="icon-a-View-grid-listliebiaochakanmoshi" />
                   <span>{intl.formatMessage({ id: 'chatTitle.saveAsTemplate' })}</span>
                 </span>
+              )}
+              {props.onToggleResourceWorkspace && (
+                <Button
+                  type="text"
+                  className={classnames(styles.projectActionButton, styles.resourcePanelToggleButton, {
+                    [styles.projectActionButtonActive]: props.resourceWorkspaceOpen,
+                  })}
+                  icon={<ResourcePanelToggleIcon className={styles.resourcePanelToggleIcon} />}
+                  onClick={props.onToggleResourceWorkspace}
+                  aria-label={intl.formatMessage({ id: 'chatResource.toggleList' })}
+                />
               )}
               {/* {!isSimpleSession && (
                 <span className={styles.btn} onClick={onToggleAchievements}>

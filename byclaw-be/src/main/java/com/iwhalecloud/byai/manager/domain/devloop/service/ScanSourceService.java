@@ -24,7 +24,25 @@ import java.util.Set;
 public class ScanSourceService {
 
     /** 运营需求类型直接复用 source_type，不再增加额外记录类型字段。 */
-    public static final Set<String> OPERATION_SOURCE_TYPES = Set.of("collect", "publish", "analyze");
+    public static final String OPERATION_SOURCE_TYPE_COLLECT = "collect";
+
+    /** 运营需求中的知识整理类型，创建阶段只保存目标，启动时再拆解为具体任务。 */
+    public static final String OPERATION_SOURCE_TYPE_KNOWLEDGE = "knowledge";
+
+    public static final String OPERATION_SOURCE_TYPE_PUBLISH = "publish";
+
+    public static final String OPERATION_SOURCE_TYPE_ANALYZE = "analyze";
+
+    public static final Set<String> OPERATION_SOURCE_TYPES = Set.of(OPERATION_SOURCE_TYPE_COLLECT,
+        OPERATION_SOURCE_TYPE_KNOWLEDGE, OPERATION_SOURCE_TYPE_PUBLISH, OPERATION_SOURCE_TYPE_ANALYZE);
+
+    /**
+     * 定时聊天型自动化：config 存的是 AssistantChatDto 入参本身（agentId/chatContent 等），
+     * 到点直接发起一次 chat，不扫外部渠道、不进拆分评分与自动派生链路。
+     * 与 github_issue/dingtalk 的区别在于「没有外部数据源」，所以 config 语义完全不同，
+     * 各扫描服务按 source_type 各读自己的键，不共享 schema。
+     */
+    public static final String SOURCE_TYPE_CHAT = "chat";
 
     @Autowired
     private ScanSourceMapper scanSourceMapper;
@@ -83,8 +101,20 @@ public class ScanSourceService {
     /** 分页查询渠道，并排除手工来源及运营需求来源，避免共享 source 表后跨模块串数据。 */
     public Page<ScanSource> listByProjectIdPage(Long projectId, String keyword, Collection<String> excludedSourceTypes,
         int pageNum, int pageSize) {
+        return listByProjectIdPage(projectId, keyword, excludedSourceTypes, null, pageNum, pageSize);
+    }
+
+    /**
+     * 分页查询渠道，可再按创建人收窄。 createBy 非空时只返回该用户建的行：应用级自动化页跨项目查询，不按创建人收窄就会互相看到别人的自动化。
+     */
+    public Page<ScanSource> listByProjectIdPage(Long projectId, String keyword, Collection<String> excludedSourceTypes,
+        String createBy, int pageNum, int pageSize) {
         LambdaQueryWrapper<ScanSource> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(ScanSource::getProjectId, projectId).eq(ScanSource::getDeleteFlag, "0");
+        // projectId 为空表示应用级自动化页跨项目查询；这里必须用条件重载，
+        // 否则 eq(null) 会生成 project_id = NULL，一条都匹配不到。
+        wrapper.eq(projectId != null, ScanSource::getProjectId, projectId).eq(ScanSource::getDeleteFlag, "0");
+        // create_by 是 VARCHAR，调用方统一传字符串化的用户 ID，与 requireSourceCreator 的比较口径一致。
+        wrapper.eq(org.apache.commons.lang3.StringUtils.isNotBlank(createBy), ScanSource::getCreateBy, createBy);
         if (excludedSourceTypes != null && !excludedSourceTypes.isEmpty()) {
             // 保留历史空类型渠道，仅排除明确的内部来源和运营需求来源。
             wrapper.and(query -> query.isNull(ScanSource::getSourceType).or()
@@ -112,6 +142,16 @@ public class ScanSourceService {
         }
         wrapper.orderByDesc(ScanSource::getCreateTime).orderByDesc(ScanSource::getSourceId);
         return scanSourceMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
+    }
+
+    /** 查询某用户创建的指定类型扫描源，供运行记录按「我的自动化」反查。 */
+    public List<ScanSource> listByCreateByAndType(String createBy, String sourceType) {
+        LambdaQueryWrapper<ScanSource> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ScanSource::getCreateBy, createBy)
+               .eq(ScanSource::getSourceType, sourceType)
+               .eq(ScanSource::getDeleteFlag, "0")
+               .orderByDesc(ScanSource::getCreateTime);
+        return scanSourceMapper.selectList(wrapper);
     }
 
     /** 查询所有启用且未删除的扫描源，供定时任务使用 */

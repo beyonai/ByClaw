@@ -51,8 +51,8 @@ public class FileBrowserKnowledgeTransferApplicationService {
                 sourceFolderName)) {
                 result.setCreatedFolderCount(result.getCreatedFolderCount() + 1);
             }
-            copyDirectory(userCode, request, ensureFileBrowserDirectoryPath(result.getSourcePath()), targetDirectoryPath,
-                result);
+            copyDirectory(userCode, request, ensureFileBrowserDirectoryPath(result.getSourcePath()),
+                targetDirectoryPath, result);
         }
         else {
             copyFile(userCode, request, result.getSourcePath(), targetDirectoryPath, result);
@@ -63,8 +63,8 @@ public class FileBrowserKnowledgeTransferApplicationService {
 
     private void copyDirectory(String userCode, FileBrowserSaveToKnowledgeRequest request, String sourceDirectoryPath,
         String targetDirectoryPath, FileBrowserSaveToKnowledgeVo result) throws IOException {
-        List<FileBrowserItemVo> children =
-            fileBrowserService.list(userCode, request.getResourceId(), sourceDirectoryPath);
+        List<FileBrowserItemVo> children = fileBrowserService.list(userCode, request.getResourceId(),
+            sourceDirectoryPath);
         for (FileBrowserItemVo child : children) {
             if (child.isDir()) {
                 String childTargetDirectoryPath = joinKnowledgePath(targetDirectoryPath, child.getName());
@@ -85,9 +85,11 @@ public class FileBrowserKnowledgeTransferApplicationService {
         String fileName = getLastPathName(sourceFilePath);
         try (InputStream inputStream = fileBrowserService.download(userCode, request.getResourceId(), sourceFilePath)) {
             MultipartFile multipartFile = new MultipartFileUtil("files", fileName, null, inputStream);
-            UploadResult uploadResult = datasetApplicationService.uploadFiles(new MultipartFile[] { multipartFile },
-                request.getTargetResourceId(), targetDirectoryPath, fileName,
-                Boolean.TRUE.equals(request.getProcessFrontMatter()), Boolean.TRUE.equals(request.getOverwrite()));
+            UploadResult uploadResult = datasetApplicationService.uploadFiles(new MultipartFile[] {
+                multipartFile
+            }, request.getTargetResourceId(), targetDirectoryPath, fileName,
+                Boolean.TRUE.equals(request.getProcessFrontMatter()), Boolean.TRUE.equals(request.getOverwrite()),
+                false);
             result.setUploadedFileCount(result.getUploadedFileCount() + uploadResult.getUploadItems().size());
             for (UploadItem uploadItem : uploadResult.getUploadItems()) {
                 result.getUploadItems().add(uploadItem);

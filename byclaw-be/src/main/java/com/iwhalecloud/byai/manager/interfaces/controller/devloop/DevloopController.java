@@ -1,10 +1,18 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 
+import com.iwhalecloud.byai.common.feign.request.datacloud.Params;
+import com.iwhalecloud.byai.common.feign.request.datacloud.QueryByKnowledgeReq;
+import com.iwhalecloud.byai.common.feign.response.datacloud.InvokeActionResp;
+import com.iwhalecloud.byai.common.feign.response.datacloud.QueryByKnowledgeResp;
+import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFilePkIdDto;
+import com.iwhalecloud.byai.manager.dto.devloop.RequirementPresplitDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.RequirementPresplitResultDto;
 import com.iwhalecloud.byai.manager.dto.devloop.RequirementSplitDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
@@ -15,14 +23,24 @@ import com.iwhalecloud.byai.manager.dto.devloop.OperationRequirementDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationAccountDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationRequirementStartDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationTaskDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ListObjectFileDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ListProjectTaskStatusDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ObjectFileGroupDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ObjectFileSaveDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationEnvDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.IntegrationSuiteDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.DefaultAgentDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.TesterConfigDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.UpdateTaskStatusDto;
+import com.iwhalecloud.byai.manager.entity.devloop.ProjectObjectFile;
+import com.iwhalecloud.byai.manager.entity.devloop.ProjectTaskStatus;
+import com.iwhalecloud.byai.manager.entity.devloop.OperationTaskTemplate;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
@@ -76,11 +94,15 @@ public class DevloopController {
      */
     @PostMapping("/source/list")
     public ResponseUtil<PageInfo<Map<String, Object>>> listScanSources(@RequestBody Map<String, Object> params) {
-        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        // 单参 getLongValue 缺省返回 0L，会被下游当成「项目 0」过滤掉全部数据；
+        // 自动化页不传 projectId 表示跨项目查询，必须显式把缺省值给成 null。
+        Long projectId = MapParamUtil.getLongValue(params, "projectId", null);
         String keyword = MapParamUtil.getStringValue(params, "keyword");
         int pageNum = Math.max(1, MapParamUtil.getIntValue(params, "pageNum", 1));
         int pageSize = Math.max(1, MapParamUtil.getIntValue(params, "pageSize", 30));
-        return applicationService.listScanSources(projectId, keyword, pageNum, pageSize);
+        // 自动化页传 onlyMine=true 只看自己建的；项目渠道页不传，保持原有全项目可见口径。
+        boolean onlyMine = Boolean.parseBoolean(String.valueOf(params.get("onlyMine")));
+        return applicationService.listScanSources(projectId, keyword, onlyMine, pageNum, pageSize);
     }
 
     /**
@@ -118,6 +140,21 @@ public class DevloopController {
         Long sourceId = Long.valueOf(params.get("sourceId").toString());
         int limit = params.containsKey("limit") ? Integer.parseInt(params.get("limit").toString()) : 20;
         return applicationService.listScanLogs(sourceId, limit);
+    }
+
+    /**
+     * 分页查询当前用户自动化的运行记录
+     *
+     * @param params 包含 status、keyword（可选）、pageNum、pageSize
+     * @return 按扫描时间倒序的运行记录分页
+     */
+    @PostMapping("/automation/run/list")
+    public ResponseUtil<PageInfo<Map<String, Object>>> listMyAutomationRuns(@RequestBody Map<String, Object> params) {
+        String status = MapParamUtil.getStringValue(params, "status");
+        String keyword = MapParamUtil.getStringValue(params, "keyword");
+        int pageNum = Math.max(1, MapParamUtil.getIntValue(params, "pageNum", 1));
+        int pageSize = Math.max(1, MapParamUtil.getIntValue(params, "pageSize", 20));
+        return applicationService.listMyAutomationRuns(status, keyword, pageNum, pageSize);
     }
 
     /**
@@ -245,7 +282,7 @@ public class DevloopController {
     }
 
     /**
-     * 查询默认数字员工原始配置(某作用域)。
+     * 查询默认助理原始配置(某作用域)。
      *
      * @param params 可含 projectId:缺省/0=全局默认行,>0=该项目覆盖行
      */
@@ -255,7 +292,7 @@ public class DevloopController {
     }
 
     /**
-     * 解析项目各角色生效的默认员工(项目覆盖合并到全局默认之上)。
+     * 解析项目各角色生效的默认助理(项目覆盖合并到全局默认之上)。
      *
      * @param params 可含 projectId;缺省则仅返回全局默认
      */
@@ -265,7 +302,7 @@ public class DevloopController {
     }
 
     /**
-     * 保存默认数字员工配置(每作用域唯一,upsert)。
+     * 保存默认助理配置(每作用域唯一,upsert)。
      *
      * @param dto projectId 缺省/0=全局默认,>0=项目覆盖;各角色 agentId 为空表示不指定
      */
@@ -313,7 +350,8 @@ public class DevloopController {
      * @param params 包含 projectId
      */
     @PostMapping("/integration/requirements")
-    public ResponseUtil<List<Map<String, Object>>> listRequirementIntegrations(@RequestBody Map<String, Object> params) {
+    public ResponseUtil<List<Map<String, Object>>> listRequirementIntegrations(
+        @RequestBody Map<String, Object> params) {
         Long projectId = Long.valueOf(params.get("projectId").toString());
         return applicationService.listRequirementIntegrations(projectId);
     }
@@ -336,7 +374,9 @@ public class DevloopController {
     public ResponseUtil<Map<String, Object>> startIntegrationRun(@RequestBody Map<String, Object> params) {
         Long suiteId = Long.valueOf(params.get("suiteId").toString());
         Long envId = Long.valueOf(params.get("envId").toString());
-        return applicationService.startIntegrationRun(suiteId, envId);
+        // executorMode 可选:前端弹框按次指定 backend/tester,缺省或非法值由执行器回落全局配置。
+        Object mode = params.get("executorMode");
+        return applicationService.startIntegrationRun(suiteId, envId, mode == null ? null : mode.toString());
     }
 
     /**
@@ -351,6 +391,17 @@ public class DevloopController {
     }
 
     /**
+     * 读取一次执行的测试报告原文,供前端在线预览/下载。原文不落库,每次查看按需去环境机读取。
+     *
+     * @param params 包含 runId
+     */
+    @PostMapping("/integration/run/report")
+    public ResponseUtil<Map<String, Object>> getIntegrationRunReport(@RequestBody Map<String, Object> params) {
+        Long runId = Long.valueOf(params.get("runId").toString());
+        return applicationService.getIntegrationRunReport(runId);
+    }
+
+    /**
      * 查询某套件的历史执行列表。
      *
      * @param params 包含 suiteId
@@ -359,6 +410,17 @@ public class DevloopController {
     public ResponseUtil<List<Map<String, Object>>> listIntegrationRuns(@RequestBody Map<String, Object> params) {
         Long suiteId = Long.valueOf(params.get("suiteId").toString());
         return applicationService.listIntegrationRuns(suiteId);
+    }
+
+    /**
+     * 按环境查历史执行列表(时间倒序)。
+     *
+     * @param params 包含 envId
+     */
+    @PostMapping("/integration/run/listByEnv")
+    public ResponseUtil<List<Map<String, Object>>> listIntegrationRunsByEnv(@RequestBody Map<String, Object> params) {
+        Long envId = Long.valueOf(params.get("envId").toString());
+        return applicationService.listIntegrationRunsByEnv(envId);
     }
 
     /** 按项目一次查全部需求(时间倒序)，供需求列表直查，替代前端逐源循环 */
@@ -452,10 +514,26 @@ public class DevloopController {
         return applicationService.createTask(params);
     }
 
+    /** 需求 AI 预拆:模型按仓库清单产出子任务草稿,只读不落库,前端编辑后再调 /task/split */
+    @PostMapping("/task/presplit")
+    public ResponseUtil<RequirementPresplitResultDto> presplitRequirement(@RequestBody RequirementPresplitDTO dto) {
+        return applicationService.getRequirementPresplit(dto);
+    }
+
     /** 需求拆分为多仓库子任务(各自 repo/分支/承接员工,子任务间 DAG 依赖) */
     @PostMapping("/task/split")
     public ResponseUtil<Map<String, Object>> splitTask(@RequestBody RequirementSplitDTO dto) {
         return applicationService.splitTask(dto);
+    }
+
+    /** 需求交给需求数字员工在聊天里聊完成(与 /task/split 二选一,共用需求 sessionId 闸门) */
+    @PostMapping("/requirement/clarify")
+    public ResponseUtil<Map<String, Object>> startRequirementClarify(@RequestBody Map<String, Object> params) {
+        Object projectId = params.get("projectId");
+        Object sourceItemId = params.get("sourceItemId");
+        return applicationService.startRequirementClarify(
+            projectId == null ? null : Long.valueOf(projectId.toString()),
+            sourceItemId == null ? null : Long.valueOf(sourceItemId.toString()));
     }
 
     /** 查询项目任务列表 */
@@ -488,13 +566,14 @@ public class DevloopController {
         return applicationService.getTaskChanges(sessionId);
     }
 
-    /** 获取任务单个文件的本地 diff(unified 文本),供前端 modal 逐行渲染变更内容 */
+    /** 获取指定代码仓库中单个文件的本地 diff(unified 文本),供前端 modal 逐行渲染变更内容 */
     @PostMapping("/task/file-diff")
     public ResponseUtil<Map<String, Object>> getTaskFileDiff(@RequestBody Map<String, Object> params) {
         Long sessionId = Long.valueOf(
             params.get("sessionId") != null ? params.get("sessionId").toString() : params.get("taskId").toString());
+        Long repoId = params.get("repoId") != null ? Long.valueOf(params.get("repoId").toString()) : null;
         String filePath = params.get("filePath") != null ? params.get("filePath").toString() : "";
-        return applicationService.getTaskFileDiff(sessionId, filePath);
+        return applicationService.getTaskFileDiff(sessionId, repoId, filePath);
     }
 
     // ========== DWS 钉钉授权 ==========
@@ -518,14 +597,17 @@ public class DevloopController {
         return applicationService.checkDwsAuthStatusBySource(sourceId);
     }
 
-    /** 直接使用token授权 */
-    @PostMapping("/dws/saveToken")
-    public ResponseUtil<Void> saveDwsToken(@RequestBody Map<String, Object> params) {
-        String token = params.get("token") != null ? params.get("token").toString() : "";
-        if (token.isEmpty()) {
-            return ResponseUtil.failRes(I18nUtil.get("devloop.dws.token.required"));
-        }
-        return applicationService.saveDwsToken(token);
+    /** 查询启用的运营任务模板卡片，可按模板类型筛选。 */
+    @PostMapping("/operation/task-template/list")
+    public ResponseUtil<List<OperationTaskTemplate>> listOperationTaskTemplates(
+        @RequestBody Map<String, Object> params) {
+        return applicationService.listOperationTaskTemplates(MapParamUtil.getStringValue(params, "templateType"));
+    }
+
+    /** 查询单个运营任务模板详情。 */
+    @PostMapping("/operation/task-template/get")
+    public ResponseUtil<OperationTaskTemplate> getOperationTaskTemplate(@RequestBody Map<String, Object> params) {
+        return applicationService.getOperationTaskTemplate(MapParamUtil.getLongValue(params, "templateId"));
     }
 
     /** 创建运营需求，写入扫描源表并通过运营 source_type 与研发渠道隔离。 */
@@ -542,7 +624,8 @@ public class DevloopController {
 
     /** 分页查询运营项目需求，支持按名称忽略大小写模糊搜索。 */
     @PostMapping("/requirement/operation/list")
-    public ResponseUtil<PageInfo<Map<String, Object>>> listOperationRequirements(@RequestBody Map<String, Object> params) {
+    public ResponseUtil<PageInfo<Map<String, Object>>> listOperationRequirements(
+        @RequestBody Map<String, Object> params) {
         Long projectId = MapParamUtil.getLongValue(params, "projectId");
         String keyword = MapParamUtil.getStringValue(params, "keyword");
         int pageNum = Math.max(1, MapParamUtil.getIntValue(params, "pageNum", 1));
@@ -556,7 +639,7 @@ public class DevloopController {
         return applicationService.getOperationRequirement(MapParamUtil.getLongValue(params, "itemId"));
     }
 
-    /** 删除尚未启动的运营需求。 */
+    /** 删除运营需求；仅需求创建人可操作。 */
     @PostMapping("/requirement/operation/delete")
     public ResponseUtil<Void> deleteOperationRequirement(@RequestBody Map<String, Object> params) {
         return applicationService.deleteOperationRequirement(MapParamUtil.getLongValue(params, "itemId"));
@@ -580,14 +663,26 @@ public class DevloopController {
         String status = MapParamUtil.getStringValue(params, "status");
         int pageNum = Math.max(1, MapParamUtil.getIntValue(params, "pageNum", 1));
         int pageSize = Math.max(1, MapParamUtil.getIntValue(params, "pageSize", 30));
-        return applicationService.listOperationTasks(projectId, keyword, onlyMine, createTimeStart, createTimeEnd, status,
-            pageNum, pageSize);
+        return applicationService.listOperationTasks(projectId, keyword, onlyMine, createTimeStart, createTimeEnd,
+            status, pageNum, pageSize);
     }
 
     /** 查询单条运营任务详情。 */
     @PostMapping("/operation/task/get")
     public ResponseUtil<Map<String, Object>> getOperationTask(@RequestBody Map<String, Object> params) {
         return applicationService.getOperationTask(MapParamUtil.getLongValue(params, "taskId"));
+    }
+
+    /** 修改尚未开始的运营任务。 */
+    @PostMapping("/operation/task/update")
+    public ResponseUtil<Void> updateOperationTask(@RequestBody OperationTaskDTO dto) {
+        return applicationService.updateOperationTask(dto);
+    }
+
+    /** 删除运营任务；仅任务创建人可操作，已执行任务保留会话成果。 */
+    @PostMapping("/operation/task/delete")
+    public ResponseUtil<Void> deleteOperationTask(@RequestBody Map<String, Object> params) {
+        return applicationService.deleteOperationTask(MapParamUtil.getLongValue(params, "taskId"));
     }
 
     /** 确认执行数字员工并启动已拆解的运营任务会话。 */
@@ -626,4 +721,95 @@ public class DevloopController {
         return applicationService.loginOperationAccount(MapParamUtil.getLongValue(params, "accountId"),
             MapParamUtil.getStringValue(params, "sandboxId"));
     }
+
+    /** 根据知识库资源 ID 分页查询对象基本信息，可选按知识库目录列表和对象名称进一步过滤。返回结果不包含对象的 properties 和 actions。 */
+    @PostMapping("/operation/queryObjectsByKnowledge")
+    public ResponseUtil<QueryByKnowledgeResp> queryObjectsByKnowledge(@RequestBody QueryByKnowledgeReq paramReq) {
+        QueryByKnowledgeResp queryByKnowledgeResp = applicationService.queryObjectsByKnowledge(paramReq);
+        return ResponseUtil.successResponse(queryByKnowledgeResp);
+    }
+
+    /**
+     * 保存对象实例到知识库
+     *
+     * @param request 请求头
+     * @param params 入参
+     * @return ResponseUtil
+     */
+    @PostMapping("/operation/saveObjectInstanceToKb")
+    public ResponseUtil<InvokeActionResp> saveObjectInstanceToKb(HttpServletRequest request,
+        @RequestBody Params params) {
+
+        // 如果参数中为null,从请求头中获取
+        if (params.getSessionId() == null) {
+            String XSessionId = request.getHeader("X-Session-Id");
+            params.setSessionId(StringUtil.isNum(XSessionId) ? Long.parseLong(XSessionId) : null);
+        }
+
+        InvokeActionResp invokeActionResp = applicationService.saveObjectInstanceToKb(params);
+        return ResponseUtil.successResponse(invokeActionResp);
+    }
+
+    /**
+     * 批量保存或更新项目业务对象关联文件。
+     *
+     * @param objectFileSaveDTO 对象文件列表
+     * @return 保存后的实体列表
+     */
+    @PostMapping("/operation/saveOrUpdateObjectFiles")
+    public ResponseUtil<List<ProjectObjectFile>> saveOrUpdateObjectFiles(
+        @RequestBody ObjectFileSaveDTO objectFileSaveDTO) {
+        List<ProjectObjectFile> projectObjectFiles = applicationService.saveOrUpdateObjectFiles(objectFileSaveDTO);
+        return ResponseUtil.successResponse(projectObjectFiles);
+    }
+
+    /**
+     * 按项目与会话查询业务对象关联文件，按 objectCode、objectName 归类返回。
+     *
+     * @param listObjectFileDto 查询条件
+     * @return 归类后的文件组列表
+     */
+    @PostMapping("/operation/listProjectObjectFiles")
+    public ResponseUtil<Collection<ObjectFileGroupDTO>> listProjectObjectFiles(
+        @RequestBody ListObjectFileDto listObjectFileDto) {
+        Collection<ObjectFileGroupDTO> resultList = applicationService.listProjectObjectFiles(listObjectFileDto);
+        return ResponseUtil.successResponse(resultList);
+    }
+
+    /**
+     * 查询运营任务对象信息
+     *
+     * @param listObjectFilePkIdDto 查询入参
+     * @return ResponseUtil
+     */
+    @PostMapping("/operation/listObjectById")
+    public ResponseUtil<List<Map<String, Object>>> listObjectById(
+        @RequestBody ListObjectFilePkIdDto listObjectFilePkIdDto) {
+        List<Map<String, Object>> resultList = applicationService.listObjectById(listObjectFilePkIdDto);
+        return ResponseUtil.successResponse(resultList);
+    }
+
+    /**
+     * 更新运营任务状态
+     *
+     * @param updateTaskStatusDto 更新入参
+     */
+    @PostMapping("/operation/updateTaskStatus")
+    public ResponseUtil<Void> updateTaskStatus(@RequestBody UpdateTaskStatusDto updateTaskStatusDto) {
+        applicationService.updateTaskStatus(updateTaskStatusDto);
+        return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 查询项目任务状态字典，供会话扩展状态 skill 使用。
+     *
+     * @param listProjectTaskStatusDto 项目与可选维度
+     * @return 有效状态列表
+     */
+    @PostMapping("/project/taskStatuses/list")
+    public ResponseUtil<List<ProjectTaskStatus>> listProjectTaskStatuses(
+        @RequestBody ListProjectTaskStatusDto listProjectTaskStatusDto) {
+        return ResponseUtil.successResponse(applicationService.listProjectTaskStatuses(listProjectTaskStatusDto));
+    }
+
 }

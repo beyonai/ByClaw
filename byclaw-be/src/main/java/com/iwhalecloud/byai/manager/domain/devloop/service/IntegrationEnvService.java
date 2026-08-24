@@ -33,6 +33,10 @@ public class IntegrationEnvService {
         if (env.getOrchestrator() == null) {
             env.setOrchestrator("script");
         }
+        // 新建环境默认跟随工作区仓库:用例由测试助理写进工作区仓库,用户不用填任何用例配置。
+        if (env.getCaseSource() == null) {
+            env.setCaseSource(IntegrationRunExecutor.CASE_SOURCE_WORKSPACE);
+        }
         if (env.getConnProtocol() == null) {
             env.setConnProtocol("ssh");
         }

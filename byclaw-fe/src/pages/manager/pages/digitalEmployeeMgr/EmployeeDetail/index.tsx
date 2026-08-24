@@ -29,7 +29,10 @@ import LogInfoDrawer from './components/LogInfoDrawer';
 import ConfigForm from './ConfigForm';
 import OntologyResourceSelectorDrawer, { normalizeOntologyResource } from './ConfigForm/OntologyResourceSelectorDrawer';
 import { normalizeRobotConfig } from './ConfigForm/robotConfig';
+import ImageModelSelect from './ImageModelSelect';
+import { applyImageModelId, normalizeImageModelId } from './imageModelUtils';
 import { DEFAULT_PERSONALITY_DEFINITION } from './personalityDefinitionDefault';
+import { getDigitalEmployeeTemplateParamCode } from '@/pages/manager/constants/digitalResource';
 import styles from './index.module.less';
 import Log from './Log';
 import Manage from './Manage';
@@ -510,6 +513,7 @@ const EmployeeDetail = ({ loading }) => {
   const showOperation = _operation === 'true';
 
   const [form] = Form.useForm();
+  const selectedImageModelId = Form.useWatch('imageModelId', { form, preserve: true });
 
   // 新建场景：根据 URL query 覆盖 ConfigForm 默认值
   useEffect(() => {
@@ -635,6 +639,7 @@ const EmployeeDetail = ({ loading }) => {
   const [ontologyResourcesDirty, setOntologyResourcesDirty] = useState(false);
   const [ontologyDrawerOpen, setOntologyDrawerOpen] = useState(false);
   const [coreCompetenciesState, setCoreCompetenciesState] = useState([]);
+  const [employeeGroupMembers, setEmployeeGroupMembers] = useState([]);
   const [memoryRules, setMemoryRules] = useState([]);
 
   /** 机器人渠道配置：钉钉 / 飞书 / 企微等，随保存提交 machineChannel(JSON) */
@@ -801,7 +806,15 @@ const EmployeeDetail = ({ loading }) => {
             relTools,
             relOntology,
             relIds: detailRelIds,
+            employeeGroupMembers: detailEmployeeGroupMembers,
+            imageModelId: detailImageModelId,
           } = res || {};
+
+          setEmployeeGroupMembers(
+            Array.isArray(detailEmployeeGroupMembers)
+              ? detailEmployeeGroupMembers.map((item, index) => ({ ...item, sortOrder: index + 1 }))
+              : []
+          );
 
           // debugger;
           const {} = param || {};
@@ -1003,6 +1016,7 @@ const EmployeeDetail = ({ loading }) => {
               catalogId: catalogId === -1 ? undefined : catalogId,
               ownerType: detailOwnerType || ownerType,
               agentType: detailAgentType || routeAgentType || agentType,
+              imageModelId: normalizeImageModelId(detailImageModelId),
               advancedSettings: advancedSettingsParsed,
               // 为受控的必填项提供初始值以回显
               coreAbility: res?.ability || '',
@@ -1272,7 +1286,9 @@ const EmployeeDetail = ({ loading }) => {
     };
 
     try {
-      const res = await getDcSystemConfig({ paramCode: 'TEMPLATE_DIGITAL_EMPLOYEE' });
+      const res = await getDcSystemConfig({
+        paramCode: getDigitalEmployeeTemplateParamCode(effectiveAgentType || agentType),
+      });
       const templates = parseDigitalEmployeeTemplates(res?.paramValue || res);
       applyTemplate(templates);
     } catch (error) {
@@ -1286,7 +1302,9 @@ const EmployeeDetail = ({ loading }) => {
 
     const fetchPromptFieldMaxLength = async () => {
       try {
-        const res = await getDcSystemConfig({ paramCode: 'TEMPLATE_DIGITAL_EMPLOYEE' });
+        const res = await getDcSystemConfig({
+          paramCode: getDigitalEmployeeTemplateParamCode(effectiveAgentType || agentType),
+        });
         if (cancelled) return;
         const templates = parseDigitalEmployeeTemplates(res?.paramValue || res);
         const nextMaxLength = getDigitalEmployeeTemplateMaxLength(
@@ -1397,6 +1415,7 @@ const EmployeeDetail = ({ loading }) => {
           advancedSettings = [],
         } = res;
         const queryData = omit(resultDataRef.current || {}, ['roleAttributes', 'relPrompt', 'workStandard']);
+        applyImageModelId(queryData, form.getFieldValue('imageModelId'));
         const param = {};
 
         set(queryData, 'avatar', avatar);
@@ -1565,10 +1584,27 @@ const EmployeeDetail = ({ loading }) => {
               return robotConfigs;
             })()
           ),
+          ...(effectiveAgentType === '017' ? { employeeGroupMembers } : {}),
         };
+        if (effectiveAgentType === '017' && employeeGroupMembers.length === 0) {
+          message.error(intl.formatMessage({ id: 'employeeDetail.groupMember.required' }));
+          setSubmitLoading(false);
+          setAuditLoading(false);
+          return;
+        }
+        if (effectiveAgentType === '017' && employeeGroupMembers.some((item) => !item?.teamRole?.trim())) {
+          message.error(intl.formatMessage({ id: 'employeeDetail.groupMember.roleRequired' }));
+          setSubmitLoading(false);
+          setAuditLoading(false);
+          return;
+        }
         const overLengthField = getOverLengthDigitalEmployeeField(flattened, isEN, promptFieldMaxLength);
         if (overLengthField) {
-          const fieldName = (overLengthField.labelText || intl.formatMessage({ id: overLengthField.labelId })).replace(
+          const fieldLabelId =
+            effectiveAgentType === '017' && overLengthField.key === 'resourceDesc'
+              ? 'employeeDetail.digitalEmployeeGroupDesc'
+              : overLengthField.labelId;
+          const fieldName = (overLengthField.labelText || intl.formatMessage({ id: fieldLabelId })).replace(
             /[:：]\s*$/,
             ''
           );
@@ -1717,6 +1753,7 @@ const EmployeeDetail = ({ loading }) => {
       isFrontAccess,
       auditErrors,
       promptFieldMaxLength,
+      employeeGroupMembers,
     ]
   );
 
@@ -1881,7 +1918,12 @@ const EmployeeDetail = ({ loading }) => {
         </div>
         <span className={styles.beyondTitle}>{agentName}</span>
         <span className={styles.beyondTag}>
-          <span>{intl.formatMessage({ id: 'employeeDetail.digitalEmployee' })}</span>
+          <span>
+            {intl.formatMessage({
+              id:
+                effectiveAgentType === '017' ? 'employeeDetail.digitalEmployeeGroup' : 'employeeDetail.digitalEmployee',
+            })}
+          </span>
         </span>
       </Space>
       <div className={styles.ask}>{ask}</div>
@@ -2020,7 +2062,19 @@ const EmployeeDetail = ({ loading }) => {
                 ownerType={effectiveOwnerType}
                 savedRelOntology={savedRelOntology}
                 ontologyResourcesDirty={ontologyResourcesDirty}
+                employeeGroupMembers={employeeGroupMembers}
+                setEmployeeGroupMembers={setEmployeeGroupMembers}
                 onOpenOntologyDrawer={() => setOntologyDrawerOpen(true)}
+                imageModelSelect={
+                  <ImageModelSelect
+                    value={selectedImageModelId}
+                    disabled={readOnly}
+                    onChange={(value) => {
+                      form.setFieldValue('imageModelId', value);
+                      onValuesChange();
+                    }}
+                  />
+                }
               />
             </div>
 

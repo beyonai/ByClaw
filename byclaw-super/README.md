@@ -10,7 +10,7 @@
 - `@earendil-works/pi-coding-agent@0.80.10` Leader；
 - Pi 原生 header + append-only entries 恢复、自动 compaction 和有界 Session cache；
 - 只包含 `delegateAgent`、`askUserQuestion` 的安全工具集合；
-- `@byclaw/connector-openclaw-by-framework`；
+- `@byclaw/connector-by-framework-common` 公共传输层，以及 OpenClaw、Code 两个薄 Connector；
 - OpenClaw externalRef + Redis Stream cursor 恢复；
 - 三方数字员工根据 `discoverMine` 返回信息自动选择 `INTERFACE`、`A2A`、`PAGE` 专用 Connector；
 - 专用数据库表短期保存执行凭证，Run 终态立即删除；
@@ -39,9 +39,9 @@ app/                                         byclaw-super 业务应用源码（�
 └── runtime.ts                               应用 Composition Root
 
 packages/by-conductor/                       编排核心、Pi Leader、Connector SPI
-packages/connectors/openclaw-by-framework/
-├── src/index.ts                             OpenClaw 投递、恢复和 Redis Stream 消费
-└── src/by-framework-codec.ts                by-framework 消息解析和交互表单转换
+packages/connectors/by-framework-common/     Gateway 投递、恢复、取消、Redis Stream 与协议转换
+packages/connectors/openclaw-by-framework/   OpenClaw Connector ID 与 Worker 路由策略
+packages/connectors/code-by-framework/       Code Connector ID 与用户级 Worker 路由策略
 packages/connectors/third-party-common/       执行描述、SSE 解析和外部 URL/header 安全边界
 packages/connectors/third-party-interface-sse/普通三方 HTTP/SSE 协议
 packages/connectors/third-party-a2a/          A2A Agent Card + message/stream
@@ -59,14 +59,17 @@ workspace package，因此其中没有 `package.json`，所有应用依赖和启
 ```text
 app → by-conductor
 app → storage-postgres → by-conductor
-app → connector-openclaw-by-framework → by-conductor
-                                      → by-framework
+app → connector-openclaw-by-framework ─┐
+app → connector-code-by-framework ─────┴→ connector-by-framework-common
+                                        → by-conductor
+                                        → by-framework
 app → connector-third-party-* → by-conductor
                               → ByClaw BE execution descriptor
                               → third-party endpoint
 ```
 
-新增 Hermes、Codex 等 Runtime 时，实现新的 `AgentConnector` 包并在 `app` 注册，不修改 Pi Leader。
+新增 Hermes、Codex 等 by-framework Runtime 时，只需实现声明 Connector ID 和 Worker 路由策略的薄
+`AgentConnector` 包，复用 `connector-by-framework-common` 并在 `app` 注册，不修改 Pi Leader。
 by-framework Worker 是业务入口，因此实现在 `app/worker`；Connector 仍只负责访问外部
 Agent Runtime，二者不会放进同一个包。
 
@@ -536,6 +539,25 @@ Worker 会复用 HTTP API 的同一条 `RunIngressService` 链路：Token 验签
 `userCode`、查询授权 Agent Catalog、创建内部 Run，再把简化思考进度和 Leader 回答映射为
 by-framework 的 `reasoningLog*`、`answerDelta` 和终态事件。子 Agent 返回的 `Resume`
 只结束原子会话，不会重复创建 Run。
+
+专家团团长继续使用同一个 `BY_SUPER` Worker，但必须在 `extraPayload` 中声明编排者：
+
+```json
+{
+  "orchestrator": {
+    "schemaVersion": "byclaw.orchestrator-ref/v1",
+    "kind": "EXPERT_TEAM",
+    "id": "90001"
+  }
+}
+```
+
+Worker 会携带当前 Beyond-Token 调用
+`POST /byaiService/internal/v1/orchestrators/resolve-runtime`，由 ByClaw BE 原子完成团长权限、
+Prompt、模型和有效团员解析。专家团配置失败时本轮直接失败，不会降级为普通超级助手。
+未传 `orchestrator` 的旧请求继续使用现有 `discoverMine` 和超级助手 Prompt；专家团使用独立的
+最小 Context Pipeline。专家团 binding 额外包含 `kind + id`，同一外部 `sessionId` 不会在不同
+团长或超级助手之间共享 Pi 上下文。
 
 同一个调用者作用域中的 by-framework `sessionId` 会映射到同一个内部 Session，因此连续
 AskAgent 可以保留上下文；binding key 包含 `ownerVersion + userCode`，不同用户即使使用相同

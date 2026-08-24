@@ -21,7 +21,7 @@ export type IProps = {
 } & Omit<pIProps, 'getMessageList' | 'chatMode' | 'setChatMode' | 'globalContext' | 'userInfo'>;
 
 function QueryInput(props: IProps) {
-  const { myAgentType, queryInputRef, cannotSTT, ...rest } = props;
+  const { myAgentType, queryInputRef, cannotSTT, enableTaskTemplate = true, ...rest } = props;
 
   const onQueryInputCompMountedCallback = useRef<() => void>(undefined);
 
@@ -117,6 +117,8 @@ function QueryInput(props: IProps) {
       {/* <CleanSession /> */}
       <QueryInputComp
         {...rest}
+        // 三种会话输入框共用外部的新会话项目选择入口配置。
+        enableTaskTemplate={enableTaskTemplate}
         cannotSTT={cannotSTT || !!ENV?.includes?.('asr')}
         myAgentType={myAgentType}
         chatMode={chatMode}

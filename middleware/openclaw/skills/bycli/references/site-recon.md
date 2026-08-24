@@ -17,10 +17,10 @@ bycli browser analyze <url>
 ```json
 {
   "pattern": { "pattern": "A", "reason": "3 JSON XHR responses observed", "json_responses": 3, "auth_failures": 0 },
-  "anti_bot": { "detected": false, "vendor": null, "evidence": [], "implication": "No known anti-bot signatures. Node-side fetch may work; try COOKIE first, fall back to browser-context fetch if blocked." },
+  "anti_bot": { "detected": false, "vendor": null, "evidence": [], "implication": "No known anti-bot signatures. Continue with a byCLI browser-context probe; do not make a direct HTTP probe outside byCLI." },
   "initial_state": { "__INITIAL_STATE__": false, "__NUXT__": false, "__NEXT_DATA__": false, "__APOLLO_STATE__": false },
   "nearest_adapter": { "site": "xueqiu", "example_commands": ["xueqiu search", "xueqiu hot"], "reason": "2 existing adapters target this site — reuse strategy/cookie config" },
-  "recommended_next_step": "Pick the most specific JSON endpoint from `bycli browser network` and try a bare Node fetch with cookies; escalate to browser-context fetch only if blocked."
+  "recommended_next_step": "Pick the most specific JSON endpoint from `bycli browser network` and validate it through a byCLI browser-context operation."
 }
 ```
 
@@ -68,7 +68,7 @@ bycli browser network
 **代表**：bilibili 个人主页、小红书、微博、部分 Next.js / Nuxt 页
 
 **信号**：
-- 第一个请求（`document`）返回的 HTML 里已经含目标数据（`curl <url> | grep <某数字>`）
+- 第一个请求（`document`）返回的 HTML 里已经含目标数据（通过 byCLI 的页面 HTML 读取结果确认目标字段）
 - `window.__INITIAL_STATE__` / `window.__NEXT_DATA__` / `window.__NUXT__` 存在
 - 关 JS 仍能看到首屏数据
 

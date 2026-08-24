@@ -4,7 +4,7 @@ import { Dropdown, type MenuProps } from 'antd';
 import { EllipsisOutlined } from '@ant-design/icons';
 import type { SkillGroup } from '@/pages/manager/service/resources';
 import { getFileUrl } from '@/utils/file';
-import { SKILL_GROUP_DEFAULT_COVER } from '../skillGroupCover';
+import { getSkillGroupDefaultCover } from '../skillGroupCover';
 import styles from './index.module.less';
 
 export interface SkillGroupCardProps {
@@ -90,7 +90,7 @@ const SkillGroupCard: React.FC<SkillGroupCardProps> = ({ group, onClick, canDele
           <img
             className={styles.defaultCoverImage}
             data-testid="skill-group-default-cover"
-            src={SKILL_GROUP_DEFAULT_COVER}
+            src={getSkillGroupDefaultCover()}
             alt=""
           />
         )}

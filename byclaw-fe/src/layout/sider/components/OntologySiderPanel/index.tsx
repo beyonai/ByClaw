@@ -8,6 +8,7 @@ import { trim } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
 import { DragType } from '@/components/QueryInput/withDrag';
 import ActiveSiderAgentBar, { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
+import useResourceCenterRouter from '@/layout/sider/components/useResourceCenterRouter';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { findDetailsById } from '@/pages/manager/service/DigitalEmployeeMgr';
 import {
@@ -229,7 +230,13 @@ const StaticTablePanel = ({
  * 本体 sider 面板：直接展示当前数字员工已安装的视图 / 对象节点。
  * 单击节点名看详情、双击引用到对话，三点菜单支持详情/卸载。
  */
-const OntologySiderPanel: React.FC = () => {
+interface OntologySiderPanelProps {
+  embedded?: boolean;
+  // 嵌入右侧资源面板时仅展示本体中心入口，不重复展示当前数字员工栏。
+  showRouter?: boolean;
+}
+
+const OntologySiderPanel: React.FC<OntologySiderPanelProps> = ({ embedded = false, showRouter = false }) => {
   const intl = useIntl();
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -237,7 +244,12 @@ const OntologySiderPanel: React.FC = () => {
   const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
   const activeSiderAgent = useActiveSiderAgent();
-  const isOntologyCenterPage = pathname.startsWith('/ontologyCenter');
+  // 右侧资源面板再次点击中心入口时返回原会话，并继续保留当前资源面板。
+  const { isCenterPage: isOntologyCenterPage, toggleCenter } = useResourceCenterRouter(
+    '/ontologyCenter',
+    'ontology',
+    showRouter
+  );
   const clickTimerRef = useRef<number | null>(null);
 
   const [filterType, setFilterType] = useState<OntologyFilterType>('all');
@@ -420,7 +432,11 @@ const OntologySiderPanel: React.FC = () => {
           onReference={() => quoteLeafToChat(leaf)}
           onClose={() => clearDetailPanel?.()}
         />,
-        { width: 350 }
+        {
+          width: 350,
+          tabKey: `ontology:${leaf.resourceId || leaf.viewCode || leaf.objectCode || leaf.code}`,
+          title: leaf.name || leaf.resourceName || leaf.objectName,
+        }
       );
     },
     [clearDetailPanel, quoteLeafToChat, setDetailPanel]
@@ -436,7 +452,7 @@ const OntologySiderPanel: React.FC = () => {
           rowKey={rowKey}
           onClose={() => clearDetailPanel?.()}
         />,
-        { width }
+        { width, tabKey: `ontology-table:${title}`, title }
       );
     },
     [clearDetailPanel, setDetailPanel]
@@ -656,6 +672,7 @@ const OntologySiderPanel: React.FC = () => {
         );
       }
       const menuItems = [
+        { key: 'quote', label: intl.formatMessage({ id: 'common.quote' }) },
         { key: 'detail', label: intl.formatMessage({ id: 'common.detail' }) },
         ...bizItems,
         { key: 'unbind', label: intl.formatMessage({ id: 'ontologySider.unbind' }) },
@@ -701,6 +718,7 @@ const OntologySiderPanel: React.FC = () => {
               items: menuItems,
               onClick: ({ key, domEvent }) => {
                 domEvent.stopPropagation();
+                if (key === 'quote') quoteLeafToChat(node.leaf);
                 if (key === 'detail') openLeafDetail(node.leaf);
                 if (key === 'objects') showViewObjects(node.leaf);
                 if (key === 'actions') showObjectActions(node.leaf);
@@ -725,6 +743,7 @@ const OntologySiderPanel: React.FC = () => {
       handleUnbind,
       intl,
       openLeafDetail,
+      quoteLeafToChat,
       showObjectActions,
       showObjectRelations,
       showViewObjects,
@@ -734,23 +753,32 @@ const OntologySiderPanel: React.FC = () => {
 
   return (
     <div className={`${chromeStyles.container} ${chromeStyles.ontologySiderContainer}`}>
-      <ActiveSiderAgentBar agent={activeSiderAgent} />
-      <div
-        className={chromeStyles.router}
-        onClick={() =>
-          navigate(
-            isOntologyCenterPage ? { pathname: '/chat' } : '/ontologyCenter',
-            isOntologyCenterPage ? { state: { keepSiderActiveKey: 'ontology' } } : undefined
-          )
-        }
-      >
-        <AntdIcon type="icon-a-Boxhezioutline" />
-        <span className={chromeStyles.middle}>{intl.formatMessage({ id: 'sider.ontologyCenter' })}</span>
-        <AntdIcon
-          type={isOntologyCenterPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
-          className={chromeStyles.routerIcon}
-        />
-      </div>
+      {(!embedded || showRouter) && (
+        <>
+          {!embedded && <ActiveSiderAgentBar agent={activeSiderAgent} />}
+          <div
+            className={[chromeStyles.router, showRouter ? chromeStyles.routerSplit : ''].filter(Boolean).join(' ')}
+            onClick={toggleCenter}
+          >
+            {showRouter && (
+              <AntdIcon
+                type={isOntologyCenterPage ? 'icon-a-Rightyou' : 'icon-a-Leftzuo'}
+                className={chromeStyles.routerBackIcon}
+              />
+            )}
+            <div className={chromeStyles.routerMain}>
+              <span className={chromeStyles.middle}>{intl.formatMessage({ id: 'sider.ontologyCenter' })}</span>
+              <AntdIcon type="icon-a-Boxhezioutline" />
+            </div>
+            {!showRouter && (
+              <AntdIcon
+                type={isOntologyCenterPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
+                className={chromeStyles.routerIcon}
+              />
+            )}
+          </div>
+        </>
+      )}
 
       <Input
         className={styles.search}

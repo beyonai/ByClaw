@@ -1,3 +1,29 @@
+.projectFormModalWrap {
+  // Antd Modal 默认 wrap 在内容超出视口时滚动，这里将滚动责任交给 Modal body。
+  overflow: hidden !important;
+}
+
+.projectFormModal {
+  // 项目使用自定义 Ant Design 前缀，通过 antPrefix 变量匹配实际 Modal DOM 类名。
+  :global(.@{antPrefix}-modal-content) {
+    max-height: calc(100vh - 48px);
+    overflow: hidden;
+  }
+
+  // 项目表单较长时只滚动弹窗主体，避免把项目空间页面整体带着滚动。
+  :global(.@{antPrefix}-modal-body) {
+    max-height: calc(100vh - 220px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-inline-end: 8px;
+  }
+}
+
+// 保留独立包裹层，滚动由 Modal body 统一接管，避免内容区在 flex 高度未确定时被压成 0。
+.projectFormModalScroll {
+  width: 100%;
+}
+
 .shareTargetField {
   display: flex;
   flex-direction: column;
@@ -67,26 +93,55 @@
   font-size: 13px;
 }
 
-.defaultAgentField {
+.projectResourceFields {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  padding: 12px;
+  border: 1px solid #e4eaf3;
+  border-radius: 10px;
+  background: #f8fafc;
+
+  :global(.ant-select) {
+    width: 100%;
+  }
 }
 
-.defaultAgentRow {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.projectTypeTabs {
+  display: inline-flex;
+  max-width: 100%;
+  flex-wrap: wrap;
+
+  :global(.ant-radio-button-wrapper) {
+    flex: 0 0 auto;
+    min-width: 0;
+    padding: 5px 14px;
+    text-align: center;
+    white-space: nowrap;
+  }
 }
 
-.defaultAgentLabel {
-  flex-shrink: 0;
-  width: 72px;
-  color: #5a6b85;
+.projectResourceLabel {
+  margin-bottom: 5px;
+  color: #45546a;
   font-size: 13px;
+  font-weight: 500;
+
+  &::before {
+    margin-right: 4px;
+    color: #ff4d4f;
+    content: '*';
+  }
 }
 
-.defaultAgentSelect {
-  flex: 1;
-  min-width: 0;
+.projectResourceFieldError {
+  :global(.ant-select-selector) {
+    border-color: #ff4d4f !important;
+  }
+}
+
+.projectResourceError {
+  margin-top: 4px;
+  color: #ff4d4f;
+  font-size: 12px;
 }

@@ -16,8 +16,11 @@ META_PROMPT_SERVICE = (
     / "src/main/java/com/iwhalecloud/byai/manager/application/service/digitemploy/MetaPromptService.java"
 )
 DESCRIPTION = (
-    "Use when the user asks to collect, crawl, batch-search, archive, ingest, or organize information from internet "
-    "or enterprise sources, or wants existing collected files stored in a knowledge base."
+    "Use when the goal is to COLLECT and keep material rather than just get an answer - collect, crawl, scrape, "
+    "batch-search, archive, ingest, or organize content from internet or enterprise sources, or store "
+    "already-collected files in a knowledge base. This is the collection orchestrator and owns collection artifacts, "
+    "post-processing, and knowledge-base ingestion; prefer it over By-Reach whenever collection intent is explicit, "
+    "even for a single page or result."
 )
 INTERFACE = {
     "display_name": "知识采集",
@@ -77,6 +80,14 @@ def parse_interface(text):
     return interface
 
 
+def markdown_section(text, heading):
+    marker = f"## {heading}\n"
+    _before, separator, remainder = text.partition(marker)
+    if not separator:
+        raise AssertionError(f"missing Markdown section: {heading}")
+    return remainder.split("\n## ", 1)[0]
+
+
 
 
 class KnowledgeCollectionSkillContractTest(unittest.TestCase):
@@ -88,7 +99,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         for marker in (
             "知识采集默认绑定迁移到编排 Skill",
             '"skillCode":"knowledge-collection"',
-            "resource_id = 25",
+            '"skillCode":"bycli"',
         ):
             self.assertNotIn(marker, v030)
             self.assertIn(marker, v031)
@@ -104,7 +115,6 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertNotIn("jsonb_build_object", upgrade)
         self.assertNotIn("jsonb_agg", upgrade)
         self.assertNotIn("jsonb_array_elements", upgrade)
-        self.assertNotIn("regexp_replace", upgrade)
 
     def test_bycli_has_an_independent_platform_resource(self):
         initdb = INITDB_DML.read_text(encoding="utf-8")
@@ -115,13 +125,22 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn("resource_code IN (", initdb)
         self.assertIn("'knowledge-collection','bycli','dws'", initdb)
         self.assertIn("resource_code = 'bycli'", upgrade)
-        self.assertIn("resource_id = 25", upgrade)
-        self.assertIn("resource_id = 25", upgrade)
         self.assertIn("resourceCode', r.resource_code", upgrade)
         self.assertIn("r.resource_code = 'bycli'", upgrade)
         self.assertIn("FROM byai.au_privilege_grant g", upgrade)
-        self.assertIn("g.grant_obj_id = 14", upgrade)
-        self.assertIn("grant_obj_id = 25", upgrade)
+
+        # 升级脚本按 resource_code / resource_name 幂等定位资源，不依赖硬编码 resource_id，
+        # 新资源的 ID 由序列生成，避免与既有资源固定 ID 冲突（443fa70fe）。
+        self.assertIn("nextval('byai.seq_any_table')", upgrade)
+        collapsed = " ".join(upgrade.split())
+        for resource_code in ("bycli", "knowledge-collection"):
+            with self.subTest(resource_code=resource_code):
+                self.assertIn(
+                    f"SELECT resource_id FROM byai.ss_resource WHERE resource_code = '{resource_code}'",
+                    collapsed,
+                )
+        self.assertNotRegex(upgrade, r"resource_id = (?:14|25)\b")
+        self.assertNotRegex(upgrade, r"grant_obj_id = (?:14|25)\b")
 
     def test_meta_prompt_counts_catalog_entries_from_json(self):
         source = META_PROMPT_SERVICE.read_text(encoding="utf-8")
@@ -140,12 +159,12 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
                 r"UPDATE byai\.ss_res_ext_skill e SET target_content = "
                 r"jsonb_set\(\s*target_content::jsonb, '\{resourceCode\}', "
                 r"'\"knowledge-collection\"'::jsonb, false\s*\)::text "
-                r"WHERE e\.resource_id = 14 AND target_content IS NOT NULL "
-                r"AND target_content::jsonb ->> 'resourceCode' = 'bycli' AND EXISTS \( "
-                r"SELECT 1 FROM byai\.ss_resource r "
-                r"WHERE r\.resource_id = e\.resource_id AND r\.resource_id = 14 "
+                r"FROM byai\.ss_resource r "
+                r"WHERE e\.resource_id = r\.resource_id "
                 r"AND r\.resource_name = '知识采集' "
-                r"AND r\.resource_code = 'knowledge-collection' \);",
+                r"AND r\.resource_code = 'knowledge-collection' "
+                r"AND target_content IS NOT NULL "
+                r"AND target_content::jsonb ->> 'resourceCode' = 'bycli'",
                 re.IGNORECASE,
             ),
         )
@@ -173,11 +192,21 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn("来源执行器只负责采集并返回结果", skill)
         self.assertIn("来源执行器不得询问 `入库 / 知识整理 / 跳过`", skill)
         self.assertEqual(1, skill.count("采集结果只选择一种后处理：入库 / 知识整理 / 跳过"))
+        self.assertIn("每次后处理运行只能执行一种操作", skill)
+        self.assertIn("用户已明确指定外部消费", skill)
 
     def test_agent_reach_backends_share_one_collection_contract(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertIn("Agent Reach 直接后端与 `bycli` 后端返回的结果", skill)
+        self.assertIn("**取内容前先读这一条**：采集编排器自身永不取内容", skill)
+        self.assertIn("该结果作废，按规范流程重新采集", skill)
+        self.assertIn("不得因「一个链接」「内容公开可读」「直接抓更快」跳过路由", skill)
+        self.assertIn("采集编排器自身不取内容，取内容一律委派来源执行器", skill)
+        self.assertIn(
+            "不得使用 `web_fetch`、`curl`、`wget`、`requests` 或其他直接 HTTP 客户端绕过来源执行器",
+            skill,
+        )
+        self.assertIn("By-Reach 的首选执行器与 `bycli` 兜底返回的结果", skill)
         self.assertIn("必须统一进入同一套 collection contract", skill)
         self.assertIn("不得按执行后端分叉产物协议", skill)
 
@@ -191,9 +220,23 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
     def test_bycli_route_is_selected_by_router_or_explicit_execution_intent(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertIn("`agent-reach` 选择 `bycli`", skill)
+        self.assertIn("By-Reach 选择 `bycli`", skill)
         self.assertIn("用户显式要求 byCLI、浏览器或 Adapter", skill)
         self.assertNotIn("浏览器或 adapter 返回的结果：", skill)
+
+    def test_owned_weixin_backend_collection_routes_directly_to_bycli(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "我的公众号",
+            "后台数据",
+            "`bycli` skill",
+            "`published`",
+            "`download-publish-data`",
+            "不得询问公众号名称、原始 ID 或“数据明细”的含义",
+            "登录、验证码或环境验证",
+        ):
+            self.assertIn(phrase, skill)
 
     def test_skill_has_exact_openclaw_ui_metadata(self):
         metadata_text = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
@@ -257,6 +300,18 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
                 self.assertIn("`knowledge-collection` 负责", bridge)
                 self.assertIn("浏览器、curl、直接 HTTP/API", bridge)
 
+    def test_source_bridges_write_nested_partial_status_only(self):
+        for relative_path in (
+            "references/sources/dingtalk-dws.md",
+            "references/sources/feishu-fws.md",
+            "references/sources/wecom-wecomcli.md",
+        ):
+            with self.subTest(relative_path=relative_path):
+                bridge = (SKILL_ROOT / relative_path).read_text(encoding="utf-8")
+                self.assertIn("`collection.status: partial`", bridge)
+                self.assertIn("`sourceMetadata`", bridge)
+                self.assertNotIn("`partial: true`", bridge)
+
     def test_child_skill_routes_resolve_to_expected_frontmatter_names(self):
         for relative_path, expected_name in CHILD_SKILLS.items():
             with self.subTest(relative_path=relative_path):
@@ -296,6 +351,14 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "bycli_filter",
             "只读兼容",
             "新写入不得使用旧格式",
+            "完整文章清单",
+            "已物化正文",
+            "允许为空数组",
+            "sourceSkill",
+            "rawArtifacts",
+            "postProcessing",
+            "retention",
+            "只读兼容旧的扁平",
         ):
             self.assertIn(phrase, contract)
 
@@ -336,6 +399,57 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         ):
             self.assertIn(phrase, processing)
 
+    def test_post_processing_cleans_up_after_successful_external_consumption(self):
+        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "外部消费",
+            "`sanitized/items/*.md`",
+            "仅打开、读取或预览",
+            "不触发清理",
+            "全部成功",
+            "默认清理",
+            "失败或结果不明确时保留",
+            "部分成功时只删除成功文章的工作副本",
+            "不再询问 `入库 / 知识整理 / 跳过`",
+        ):
+            self.assertIn(phrase, processing)
+
+    def test_post_processing_defines_resumable_partial_cleanup_state_machine(self):
+        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "每次后处理运行只能执行一种操作",
+            "显式外部消费",
+            "`sanitized/items/*.md`",
+            "不得回退使用 `markdown/*.md`",
+            "`success`、`failed`、`pending` 或 `unknown`",
+            "operation + target",
+            "全部文章重新执行",
+            "仅失败/待处理文章",
+            "只删除成功文章的工作副本",
+            "保留共享 `raw/`",
+            "未选文章",
+            "cleanupStatus",
+            "knowledge-collection-post-processing.mjs",
+            "requiresGlobalStageRetry",
+            "只重试全局步骤",
+            "已有 run 的 operation、target 与 selection 不可改变",
+        ):
+            self.assertIn(phrase, processing)
+
+    def test_skip_keeps_the_session_without_creating_a_downstream_run(self):
+        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "选择跳过时",
+            "不创建 ingest、organize 或 external run",
+            "不调用 cleanup",
+            "不删除任何会话产物",
+            "结束默认三选一流程",
+        ):
+            self.assertIn(phrase, processing)
+
     def test_ingest_executor_is_discoverable_and_requires_an_explicit_target(self):
         relative_path = "references/knowledge-ingest.md"
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -345,7 +459,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn(f"]({relative_path})", skill)
         self.assertTrue(ingest_path.is_file(), relative_path)
         for phrase in (
-            "scripts/knowledge-collection-ingest.mjs",
+            "scripts/ingest.mjs",
             "list-kb",
             "normalize",
             "ingest",
@@ -359,11 +473,15 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "明确提供",
             "确认目标",
             "仅入库用户选中的范围",
-            "入库与知识整理互斥",
+            "入库与知识整理在同一次后处理运行中互斥",
             "选择 `入库`",
             "`ingest` 与 `upload-doc` 执行前",
             "默认 `/` 也必须展示",
             "获得用户明确确认",
+            "`sanitized/items/*.md`",
+            "不得使用 `markdown/*.md`",
+            "build 请求",
+            "逐篇",
         ):
             self.assertIn(phrase, ingest)
 
@@ -376,6 +494,64 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
         self.assertNotIn("token", ingest.lower())
         self.assertNotIn("cookie", ingest.lower())
+
+    def test_skill_main_entry_exposes_closed_loop_execution_order(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "建立或加载正式会话",
+            "`init`",
+            "`inspect`",
+            "`itemResults`",
+            "`run`",
+            "`cleanup`",
+            "不得直接修改正式 metadata",
+        ):
+            self.assertIn(phrase, skill)
+
+    def test_post_processing_state_helper_is_discoverable(self):
+        script = SKILL_ROOT / "scripts" / "collection-state.mjs"
+        cli = SKILL_ROOT / "scripts" / "knowledge-collection.mjs"
+        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
+
+        self.assertTrue(script.is_file())
+        self.assertTrue(cli.is_file())
+        for command in ("inspect", "collect", "run", "cleanup", "unlock-stale"):
+            self.assertIn(command, script.read_text(encoding="utf-8"))
+        self.assertIn("scripts/collection-state.mjs", processing)
+        for phrase in (
+            '"schemaVersion": "1.0"',
+            "discardUnselectedConfirmed",
+            "superseded",
+            ".post-processing-inputs/",
+            '"kind": "knowledge-base"',
+            '"kind": "knowledge-organization"',
+            '"kind": "external"',
+            "命令成功",
+            "命令失败",
+            "pid",
+            "ownerId",
+            "不能仅凭锁龄",
+        ):
+            self.assertIn(phrase, processing)
+
+    def test_post_processing_documents_post_review_recovery_contract(self):
+        contract = (SKILL_ROOT / "references" / "collection-contract.md").read_text(encoding="utf-8")
+        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
+        combined = f"{contract}\n{processing}"
+
+        for phrase in (
+            "pendingArtifactCleanup",
+            "安全降级为 `pending`",
+            "`sourceSkill + sourceUrl`",
+            "`skipped-retention`",
+            "`build-success`",
+            "`selection.mode` 只能是 `all` 或 `items`",
+            "脚本重新计算并校验 `sessionStatus`",
+            "锁内容写入失败",
+            "stale-lock 回收会在重命名前后再次检查锁内容",
+        ):
+            self.assertIn(phrase, combined)
 
     def test_bycli_is_an_executor_when_delegated_by_knowledge_collection(self):
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
@@ -470,6 +646,9 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "正文",
             "fileName",
             "可点击预览",
+            "必须串行执行",
+            "精确 URL + `--date`",
+            "Chrome 下载事件",
         ):
             self.assertIn(phrase, weixin)
         for phrase in (
@@ -481,6 +660,136 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "加载 `knowledge-collection`",
         ):
             self.assertNotIn(phrase, weixin)
+
+    def test_weixin_reference_closes_executor_terminal_states(self):
+        weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
+        discovery = markdown_section(weixin, "Official-account and article discovery")
+        fallback = markdown_section(weixin, "Adapter-owned Sogou fallback identity")
+        terminal = markdown_section(weixin, "Terminal-state precedence")
+        downloads = markdown_section(weixin, "Published-data spreadsheet downloads")
+        login = markdown_section(weixin, "Login and verification gate")
+
+        self.assertIn("@sovovs/bycli` 2.1.25", weixin)
+        self.assertIn("Explicit account identity or account-history intent starts with `accounts`", discovery)
+        self.assertIn("Article-title or topic intent starts with `sougousearch`", discovery)
+        self.assertIn("reinterpret it as topic intent", discovery)
+        self.assertIn(
+            "When a bare phrase has no explicit account-history or article-title/topic cue, ask one clarification question",
+            discovery,
+        )
+
+        for phrase in (
+            "nickname-scoped public results, not `fakeid`-proven account history",
+            "omit `--name` and keep the command backend-only",
+            "ask for the exact nickname before offering public fallback",
+            "must not be merged",
+            "Only an exact nickname from one unique `accounts` result",
+            "whose `fakeid` equals the selected `fakeid`",
+            "A user-supplied nickname beside a direct `fakeid` is not identity proof",
+        ):
+            self.assertIn(phrase, fallback)
+
+        for phrase in (
+            "Valid `EMPTY_RESULT`",
+            "Do not enter AutoFix",
+            "`status: partial` or `status: failed`",
+            "do not retry automatically",
+            "Top-level `TIMEOUT` with no terminal item row",
+            "explicit user approval",
+            "final command result after any eligible adapter-owned fallback",
+            "from `download-publish-data`",
+            "login `TIMEOUT` / exit code 75",
+            "already determined not to be a login or verification timeout",
+            "absent, unverified, mismatched, or ambiguous",
+            "diagnostic retry budget has already been consumed",
+            "diagnostic retry budget is unused",
+            "login-gate rerun has already been consumed",
+            "single post-confirmation login-gate rerun",
+            "`RATE_LIMITED`",
+            "legacy `COMMAND_EXEC`",
+            "`freq control` or `rate limited`",
+            "Do not run a trace rerun",
+            "do not enter AutoFix",
+            "changing `--limit` or `--max-pages`",
+            "same command invocation",
+            "`ret=200013` alone is not sufficient",
+        ):
+            self.assertIn(phrase, terminal)
+        self.assertLess(
+            terminal.index("login `TIMEOUT` / exit code 75"),
+            terminal.index("Top-level `TIMEOUT`"),
+        )
+        self.assertLess(
+            terminal.index("Public fallback is requested"),
+            terminal.index("Valid `EMPTY_RESULT`"),
+        )
+        self.assertLess(
+            terminal.index("`status: partial` or `status: failed`"),
+            terminal.index("Top-level `TIMEOUT`"),
+        )
+        self.assertLess(
+            terminal.index("diagnostic retry budget has already been consumed"),
+            terminal.index("diagnostic retry budget is unused"),
+        )
+        self.assertLess(
+            terminal.index("diagnostic retry budget has already been consumed"),
+            terminal.index("login `TIMEOUT` / exit code 75"),
+        )
+        self.assertLess(
+            terminal.index("login-gate rerun has already been consumed"),
+            terminal.index("login `TIMEOUT` / exit code 75"),
+        )
+        self.assertLess(
+            terminal.index("`RATE_LIMITED`"),
+            terminal.index("Another typed byCLI failure"),
+        )
+
+        self.assertIn("no terminal item row or artifact metadata", downloads)
+        self.assertIn("rerun exactly once with `--trace retain-on-failure`", downloads)
+        self.assertIn("at most once per original command", downloads)
+        self.assertIn("consumes that command's retry budget", downloads)
+        self.assertIn("including another top-level `TIMEOUT`, is terminal", downloads)
+        self.assertIn("Backend-only examples omit `--name`", weixin)
+        self.assertIn(
+            "Only after `accounts` proves one unique nickname-to-`fakeid` binding",
+            weixin,
+        )
+        self.assertIn("Verified for byCLI 2.1.25", login)
+        self.assertNotIn("2.1.25 and later", login)
+        self.assertIn("`create-draft` session failures return `AUTH_REQUIRED`", login)
+        self.assertIn(
+            "An authentication outcome from an already-consumed diagnostic rerun follows terminal priority 1",
+            login,
+        )
+
+    def test_weixin_reference_documents_resolved_download_urls_and_dual_publish_artifacts(self):
+        weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "`source_url`",
+            "`resolved_url`",
+            "搜狗 `/link`",
+            "无效 URL 会返回参数或执行错误",
+            "`markdownSize`",
+            "`dataSize`",
+            "`status: downloaded`",
+            "`status: partial`",
+            "`status: failed`",
+            "`freq control`",
+            "不是认证失败",
+            "不得立即重试",
+            "`/wxamp/`",
+            "Mini Program",
+            "Official Account",
+            "Only `status: draft saved` confirms success",
+            "title substrings are not matches",
+            "readable, non-empty regular-file validation",
+            "oversized values return `ARGUMENT` before browser navigation",
+            "failure to confirm that requested cover returns `COMMAND_EXEC`",
+        ):
+            self.assertIn(phrase, weixin)
+        self.assertNotIn("status: invalid URL", weixin)
+        self.assertNotIn("save attempted, check browser to confirm", weixin)
 
 
 if __name__ == "__main__":

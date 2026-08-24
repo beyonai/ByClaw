@@ -40,16 +40,15 @@ describe('SkillGroupCreateModal cover preview', () => {
     expect(createObjectURL).not.toHaveBeenCalled();
   });
 
-  it('prepares the normalized 3:4 file for both preview and upload', async () => {
-    const source = new File(['source'], 'source.jpg', { type: 'image/jpeg' });
-    const normalized = new File(['normalized'], 'source-3x4.png', { type: 'image/png' });
-    mockNormalizeSkillGroupCover.mockResolvedValue(normalized);
+  it('uses the unchanged 1:1 file for both preview and upload', async () => {
+    const source = new File(['square'], 'square.jpg', { type: 'image/jpeg' });
+    mockNormalizeSkillGroupCover.mockResolvedValue(source);
 
     await expect(prepareSkillGroupCover(source)).resolves.toEqual({
-      file: normalized,
+      file: source,
       previewUrl: 'blob:skill-group-cover',
     });
     expect(mockNormalizeSkillGroupCover).toHaveBeenCalledWith(source);
-    expect(createObjectURL).toHaveBeenCalledWith(normalized);
+    expect(createObjectURL).toHaveBeenCalledWith(source);
   });
 });

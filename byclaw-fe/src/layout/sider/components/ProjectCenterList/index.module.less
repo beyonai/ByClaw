@@ -1,0 +1,209 @@
+.projectCenterList {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  // 与会话模块左侧列表保持一致的紧凑留白，给项目卡片留出连续的视觉空间。
+  padding: 8px;
+  box-sizing: border-box;
+  background: #fff;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 0 0 8px;
+
+  :global(.@{antPrefix}-input-affix-wrapper) {
+    min-width: 0;
+    height: 36px;
+    flex: 1;
+  }
+}
+
+// 新建项目入口与会话模块项目下拉框右侧按钮保持一致，避免独占一整行。
+.newProjectButton {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  padding: 0;
+  border: 0;
+  color: #667085;
+  background: transparent;
+  box-shadow: none;
+
+  &:focus,
+  &:active {
+    color: #667085;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  &:hover {
+    color: #246bfe;
+    background: #eaf2ff;
+  }
+}
+
+.loading {
+  min-height: 0;
+  flex: 1;
+}
+
+.list {
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0 0 8px;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.projectItem {
+  width: 100%;
+  box-sizing: border-box;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: #14161a;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.25s, border-color 0.25s, box-shadow 0.25s;
+}
+
+.projectItem:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.projectItemActive {
+  background: #eef4ff !important;
+  border-color: transparent;
+  box-shadow: none;
+
+  // 选中项使用低对比度光带从左向右流动，卡片自身的 overflow 会将动画限制在圆角内。
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 0;
+    width: 48%;
+    pointer-events: none;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.12) 20%,
+      rgba(91, 143, 249, 0.18) 50%,
+      rgba(255, 255, 255, 0.12) 80%,
+      transparent 100%
+    );
+    transform: translateX(-110%);
+    animation: projectActiveFlow 2.4s ease-in-out infinite;
+  }
+
+  > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .projectMain strong {
+    color: #1554c5;
+    font-weight: 600;
+  }
+}
+
+@keyframes projectActiveFlow {
+  from {
+    transform: translateX(-110%);
+  }
+
+  to {
+    transform: translateX(220%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .projectItemActive::before {
+    animation: none;
+  }
+}
+
+.projectMain {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.projectTitleRow {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.projectMain strong,
+.projectMain small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projectMain strong {
+  min-width: 0;
+  flex: 1;
+  color: #14161a;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.projectMain small {
+  color: #707680;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
+}
+
+// 项目类型标签紧跟项目名称展示，尺寸、圆角和颜色与会话模块保持一致。
+.projectTag {
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-inline-end: 0;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.projectTagNormal {
+  color: #596579;
+  background: #f1f4f8;
+}
+
+.projectTagDevelopment {
+  color: #7a3fd1;
+  background: #f3ecff;
+}
+
+.projectTagOperation {
+  color: #1677b8;
+  background: #e8f4fc;
+}

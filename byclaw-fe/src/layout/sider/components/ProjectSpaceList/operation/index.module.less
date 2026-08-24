@@ -81,6 +81,107 @@
   width: 100%;
 }
 
+// 间隔小时数只输入数字，使用更紧凑的输入宽度避免占用过多表单空间。
+.operationIntervalHoursInput {
+  width: 100px;
+}
+
+// 周期类型、采集时分和年度采集日期统一占整行的四分之一，保持调度字段宽度一致。
+.operationScheduleQuarterField {
+  width: 25%;
+  min-width: 0;
+  max-width: 25%;
+  flex: 0 0 25%;
+  grid-column: 1 / -1;
+  justify-self: start;
+
+  :global {
+    .@{antPrefix}-form-item-control,
+    .@{antPrefix}-form-item-control-input,
+    .@{antPrefix}-form-item-control-input-content,
+    .@{antPrefix}-select,
+    .@{antPrefix}-picker {
+      width: 100%;
+      min-width: 0;
+    }
+  }
+}
+
+// 生效范围提示紧跟字段标题展示，以较弱的字号和颜色区分主标签与补充说明。
+.operationEffectiveDateLabel {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.operationEffectiveDateHint {
+  color: #8b95a5;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+// 知识整理区域独占新行，开关和本体列表在区域内部保持左右两列对齐。
+.operationKnowledgeOrganizationRow {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+}
+
+// 采集方式占左侧一半，周期类型和采集时分各占右侧四分之一，保证三项同一行展示。
+.operationScheduleTopRow {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  column-gap: 16px;
+  align-items: start;
+}
+
+.operationScheduleModeField {
+  grid-column: span 2;
+  min-width: 0;
+}
+
+// 单次采集时间和间隔小时数均放在采集方式右侧，保证不同采集方式切换时调度字段保持在同一行。
+.operationScheduleHalfFieldArea {
+  grid-column: span 2;
+  min-width: 0;
+}
+
+.operationScheduleOnceTimeField {
+  width: 100%;
+
+  :global {
+    .@{antPrefix}-picker {
+      width: 100%;
+    }
+  }
+}
+
+.operationScheduleIntervalField {
+  width: max-content;
+  max-width: 100%;
+}
+
+// 周期类型和采集时分（年度为采集日期和时分）只在周期采集下显示，各自占调度行的四分之一。
+.operationScheduleInlineFields {
+  grid-column: span 2;
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: flex-start;
+  gap: 16px;
+
+  .operationScheduleQuarterField {
+    width: 100%;
+    max-width: 100%;
+    flex: none;
+    grid-column: auto;
+  }
+}
+
 // 任务配置字段较多，表单主体独立滚动，底部操作区始终保留在弹窗可见区域。
 .operationTaskFormBody {
   max-height: min(68vh, 680px);
@@ -301,6 +402,34 @@
   background: #f7f9fc;
 }
 
+// 项目大详情中的账号列表直接嵌入内容区，不再重复显示账号管理标题卡片。
+.accountPanelCompact {
+  padding: 0;
+  background: transparent;
+
+  .accountPanelHeading {
+    display: none;
+  }
+
+  .accountPanelHeader {
+    align-items: center;
+    min-height: 36px;
+    margin-bottom: 12px;
+  }
+
+  .accountFilterRow {
+    display: none;
+  }
+}
+
+.accountPanelCompactExternal .accountPanelHeader {
+  display: none;
+}
+
+.accountCompactFilter {
+  min-width: 128px;
+}
+
 // 账号管理属于运营需求页入口，使用整行浅色按钮与需求列表操作区分层级。
 .operationAccountEntry {
   width: calc(100% - 8px);
@@ -382,7 +511,7 @@
   gap: 8px;
 }
 
-// 三类运营任务沿用任务卡片交互，仅用颜色和图标快速区分任务性质。
+// 四类运营任务沿用任务卡片交互，仅用颜色和图标快速区分任务性质。
 .operationTaskCard {
   &:hover {
     border-color: #e1e8f0;
@@ -403,6 +532,11 @@
 .operationTaskIconCollect {
   color: #2563b8;
   background: #e8f1ff;
+}
+
+.operationTaskIconKnowledge {
+  color: #0f766e;
+  background: #e6f7f4;
 }
 
 .operationTaskIconContent {
@@ -462,6 +596,24 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
+}
+
+.accountPanelActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+
+  // 外置到项目详情顶部的账号筛选、刷新、新增控件统一为 36px 高度。
+  :global(.@{antPrefix}-btn) {
+    height: 32px;
+  }
+
+  :global(.@{antPrefix}-select-selector) {
+    height: 32px !important;
+    display: flex;
+    align-items: center;
+  }
 }
 
 .operationBackButton {
@@ -537,22 +689,25 @@
 
 .accountCard {
   min-width: 0;
+  position: relative;
   padding: 16px;
-  border: 1px solid #e5eaf2;
+  border: 0;
   border-radius: 12px;
-  background: #fff;
-  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+  // 与需求卡片统一使用无描边浅底卡片，悬停时只加深底色，不产生上浮抖动。
+  background: #f7f9fc;
+  transition: background-color 0.2s ease;
+
+  &:hover {
+    background: #edf2f9;
+  }
 }
 
 .accountCardClickable {
   cursor: pointer;
 
-  &:hover,
   &:focus-visible {
-    border-color: #b9cdfd;
+    background: #edf2f9;
     outline: none;
-    box-shadow: 0 8px 20px rgba(31, 45, 77, 0.08);
-    transform: translateY(-1px);
   }
 }
 
@@ -568,6 +723,41 @@
       margin-inline-end: 0;
     }
   }
+}
+
+.accountStatusTag {
+  transition: opacity 0.2s ease;
+}
+
+.accountCardMoreAction {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  color: #667085;
+  transform: rotate(90deg);
+  transition: opacity 0.2s ease, background-color 0.2s ease;
+}
+
+// 项目大详情账号卡片将更多操作固定到右下角，避免遮挡右上角登录状态标签。
+.accountPanelCompact .accountCardMoreAction {
+  top: auto;
+  right: 8px;
+  bottom: 8px;
+}
+
+// 卡片悬停后以更多菜单替换状态标签，菜单展开时不会挤动账号名称和底部操作区域。
+.accountCard:hover .accountCardMoreAction,
+.accountCard:focus-within .accountCardMoreAction {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.accountPanel:not(.accountPanelCompact) .accountCard:hover .accountStatusTag,
+.accountPanel:not(.accountPanelCompact) .accountCard:focus-within .accountStatusTag {
+  opacity: 0;
 }
 
 .accountPlatformMark {
@@ -622,7 +812,7 @@
   margin-top: 8px;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 8px;
 }
 
@@ -630,7 +820,7 @@
   min-width: max-content;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 6px;
   flex-wrap: nowrap;
 

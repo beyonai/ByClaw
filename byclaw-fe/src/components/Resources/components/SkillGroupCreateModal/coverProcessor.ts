@@ -80,6 +80,8 @@ const canvasToBlob = (canvas: HTMLCanvasElement): Promise<Blob> =>
 export const normalizeSkillGroupCover = async (file: File): Promise<File> => {
   const { image, sourceUrl } = await loadImage(file);
   try {
+    if (image.naturalWidth === image.naturalHeight) return file;
+
     const canvas = document.createElement('canvas');
     canvas.width = COVER_OUTPUT_WIDTH;
     canvas.height = COVER_OUTPUT_HEIGHT;

@@ -22,6 +22,7 @@
         f.process_date,
         f.process_comment,
         u.user_name,
+        pu.user_name AS process_user_name,
         (
             SELECT COUNT(1)
             FROM byai_attach_file af
@@ -37,9 +38,19 @@
         <include refid="ManageSelectColumns"/>
         FROM byai_system_feedback f
         LEFT JOIN po_users u ON u.user_id = f.user_id
+        LEFT JOIN po_users pu ON pu.user_id = f.process_user_id
         <where>
             <if test="qo.feedbackType != null and qo.feedbackType != ''">
                 AND f.feedback_type = #{qo.feedbackType}
+            </if>
+            <if test="qo.status != null and qo.status != ''">
+                AND LOWER(f.status) = LOWER(#{qo.status})
+            </if>
+            <if test="qo.keyword != null and qo.keyword != ''">
+                AND (
+                    UPPER(f.title) LIKE CONCAT('%', UPPER(#{qo.keyword}), '%')
+                    OR UPPER(f.content) LIKE CONCAT('%', UPPER(#{qo.keyword}), '%')
+                )
             </if>
             <if test="qo.title != null and qo.title != ''">
                 AND UPPER(f.title) LIKE CONCAT('%', UPPER(#{qo.title}), '%')
@@ -48,7 +59,16 @@
                 AND UPPER(f.content) LIKE CONCAT('%', UPPER(#{qo.content}), '%')
             </if>
         </where>
-        ORDER BY f.create_date DESC, f.id DESC
+        <!-- 反馈优先按处理阶段排列，同一状态内展示最新创建的数据。 -->
+        ORDER BY CASE LOWER(COALESCE(f.status, 'pending'))
+            WHEN 'pending' THEN 1
+            WHEN 'processing' THEN 2
+            WHEN 'resolved' THEN 3
+            WHEN 'closed' THEN 4
+            ELSE 5
+        END,
+        f.create_date DESC,
+        f.id DESC
     </select>
 
     <select id="selectManageDetail"
@@ -57,6 +77,7 @@
         <include refid="ManageSelectColumns"/>
         FROM byai_system_feedback f
         LEFT JOIN po_users u ON u.user_id = f.user_id
+        LEFT JOIN po_users pu ON pu.user_id = f.process_user_id
         WHERE f.id = #{id}
     </select>
 </mapper>

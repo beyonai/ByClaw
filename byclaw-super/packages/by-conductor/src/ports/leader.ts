@@ -6,6 +6,7 @@ import type {
 import type { PiSessionCheckpoint } from "../pi-session-checkpoint.js";
 import type { SessionContextV1 } from "../domain/session-context.js";
 import type { GroupChatContextV1 } from "../domain/group-chat-context.js";
+import type { ExpertTeamRuntimeSnapshotV1 } from "../domain/orchestrator.js";
 import type {
   AgentProfile,
   AgentResult,
@@ -33,6 +34,8 @@ export interface LeaderRunInput {
   currentTime: number;
   /** 当前调用者身份；经 before_agent_start 临时注入 system prompt，不进入长期 transcript。 */
   user?: CallerPrincipal;
+  /** 当前 Run 冻结的专家团配置；缺省时保持超级助手行为。 */
+  orchestrator?: ExpertTeamRuntimeSnapshotV1;
   signal: AbortSignal;
   /** 接收最终可见回答的文本增量。 */
   onDelta(text: string): Promise<void> | void;

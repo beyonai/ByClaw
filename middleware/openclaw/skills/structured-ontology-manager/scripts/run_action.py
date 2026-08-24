@@ -7,7 +7,7 @@ I/O 协议：stdin JSON → stdout JSON
     {
         "workspace_name": "travel_reimbursement",   # 必填
         "entity_code":    "travel_application",     # 必填
-        "action_code":    "submit_application",     # 必填
+        "action_code":    "travel_application_submit",     # 必填
         "params": {"app_id": 1, "submit_time": "2026-06-25"},  # 必填，Action 入参
         "script": "def execute(params: dict) -> dict:\n    ..."  # 可选，临时覆盖（不传则读服务端工作区文件）
     }

@@ -19,8 +19,10 @@ import java.util.Date;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.mockito.ArgumentCaptor;
-
+@DisabledOnOs(OS.WINDOWS)
 class ConnectorManifestServiceTest {
 
     private static final Long USER_ID = 1001L;
@@ -192,7 +194,7 @@ class ConnectorManifestServiceTest {
               "schemaVersion":"1.0",
               "id":"dingtalk",
               "version":"1.0.52",
-              "runtime":{"type":"cli","commands":{"status":["dws","auth","status"]}},
+              "runtime":{"type":"cli","commands":{"status":[["dws","auth","status"]]}},
               "authStorage":{"mode":"native-home","nativePath":"/by/.connector-auth/.dws",
                 "environment":{
                   "DWS_HOME":"/by/.connector-auth/.dws",

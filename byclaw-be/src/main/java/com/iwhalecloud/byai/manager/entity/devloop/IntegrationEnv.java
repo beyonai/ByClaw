@@ -30,6 +30,12 @@ public class IntegrationEnv {
     /** 编排方式 script/jenkins/k8s/webhook */
     private String orchestrator;
 
+    /**
+     * 用例来源 workspace跟随工作区仓库(约定 tests/run.sh)/on_env用例已在环境机上。
+     * 与 orchestrator 正交:后者管"环境怎么部署",本字段管"用例从哪来",不可合并。
+     */
+    private String caseSource;
+
     /** 连接方式 ssh远程/local本机 */
     private String connProtocol;
 

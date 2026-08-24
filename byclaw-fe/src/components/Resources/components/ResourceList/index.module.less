@@ -35,6 +35,11 @@
   margin: 0 6px;
 }
 
+// 知识与工具卡片扩大最小列宽，窄内容区自动减少列数，不再把卡片压得过窄。
+.wideResourceList {
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+}
+
 .skillPosterList {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

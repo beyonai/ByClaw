@@ -54,6 +54,14 @@ export function appendIncrementalTextSnapshot(params: {
   streamSnapshots[params.key] = `${streamSnapshots[params.key] ?? ""}${delta}`;
 }
 
+/**
+ * 读取当前累积到的段落快照。段落被替换时（新段不以旧快照为前缀）这里跟着变，因此调用方
+ * 拿到的始终是「本段目前的全文」，而不是整个 run 的历史拼接。
+ */
+export function getIncrementalTextSnapshot(key: string): string {
+  return streamSnapshots[key] ?? "";
+}
+
 export function clearIncrementalTextSnapshot(keyOrPrefix: string) {
   Object.keys(streamSnapshots).forEach((key) => {
     if (key === keyOrPrefix || key.startsWith(keyOrPrefix)) {
@@ -178,6 +186,10 @@ export async function emitOutOfBandSdkEvent(params: {
   sessionId?: string;
   data: Record<string, any>;
   eventType: string;
+  params?: {
+    traceId?: string;
+    dataStreamName?: string;
+  }
 }) {
   const redisInfo = getRedisInfo();
   if (!redisInfo) {
@@ -193,7 +205,7 @@ export async function emitOutOfBandSdkEvent(params: {
   // 需要和 byclaw-be/src/main/java/com/iwhalecloud/byai/state/domain/chat/service/SessionEventStreamListener.java 中的 DEFAULT_STREAM_KEY 一致
   const DEFAULT_STREAM_KEY = "byai_gateway:session_event:data_stream";
   const emitter = new GatewayDataEmitter(redis, {
-    dataStreamName: DEFAULT_STREAM_KEY,
+    dataStreamName: params.params?.dataStreamName || DEFAULT_STREAM_KEY,
   });
   await emitter.emitEvent({
     data: {
@@ -205,7 +217,7 @@ export async function emitOutOfBandSdkEvent(params: {
       id: generateRandomId().toUpperCase(),
     },
     sessionId: params.sessionId || "",
-    traceId: generateRandomId(),
+    traceId: params.params?.traceId || generateRandomId(),
     eventType: params.eventType,
   });
   redis.quit();

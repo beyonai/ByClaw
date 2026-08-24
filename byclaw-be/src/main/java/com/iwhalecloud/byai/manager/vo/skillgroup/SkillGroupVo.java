@@ -30,6 +30,8 @@ public class SkillGroupVo {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long createBy;
 
+    private String creatorName;
+
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private Date createTime;
 
@@ -37,6 +39,8 @@ public class SkillGroupVo {
     private Date updateTime;
 
     private Long memberCount;
+
+    private Boolean installedByGroup;
 
     private List<SkillGroupMemberVo> members = new ArrayList<>();
 }

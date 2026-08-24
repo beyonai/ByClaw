@@ -24,4 +24,7 @@ public class OperationAccountDTO {
     /** 账号展示名称。 */
     private String accountName;
 
+    /** 自定义链接平台的登录URL，仅当 platformCode = "CustomLink" 时使用。 */
+    private String customUrl;
+
 }

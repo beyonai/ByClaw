@@ -10,7 +10,7 @@ import useGlobal from '@/hooks/useGlobal';
 import RenderRightBottom from '@/pages/digitalEmployees/components/AllDigitalEmployees/RenderRightBottom';
 import RenderRightTop from '@/pages/digitalEmployees/components/AllDigitalEmployees/RenderRightTop';
 import { IAgentCache } from '@/typescript/agent';
-import { canJumpAgent, getAgentChatAvatar, getAgentPath } from '@/utils/agent';
+import { canJumpAgent, getAgentChatAvatar } from '@/utils/agent';
 import useTracker from '@/hooks/useTracker';
 import styles from './index.module.less';
 
@@ -68,7 +68,14 @@ const RenderContent = (props: IProps) => {
 
         setAgentId?.(`${employee.agentId}`);
         setSessionId?.('');
-        navigate(getAgentPath(employee));
+        // 员工大列表卡片统一进入员工详情页，不再按员工类型跳转其他业务路由。
+        navigate('/employees', {
+          state: {
+            keepSiderActiveKey: 'agent',
+            selectedAgentId: `${employee.agentId}`,
+            selectedEmployee: employee,
+          },
+        });
       } else {
         message.destroy();
         message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));

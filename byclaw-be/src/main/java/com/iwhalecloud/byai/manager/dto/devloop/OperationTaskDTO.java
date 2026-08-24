@@ -3,10 +3,11 @@ package com.iwhalecloud.byai.manager.dto.devloop;
 import lombok.Data;
 
 import java.util.List;
+import java.util.Map;
 
 /**
- * 运营任务启动和执行参数。
- * 启动阶段由需求拆解出任务；执行阶段只允许补充数字员工，不允许篡改需求归属。
+ * 运营任务启动、编辑和执行参数。
+ * 编辑阶段只允许修改待开始任务的基础信息；执行阶段不允许篡改需求归属。
  */
 @Data
 public class OperationTaskDTO {
@@ -31,6 +32,12 @@ public class OperationTaskDTO {
 
     /** 完成时间，格式 yyyy-MM-dd HH:mm:ss。 */
     private String dueTime;
+
+    /** 用户选择的运营任务模板 ID。 */
+    private Long templateId;
+
+    /** 模板详情页补充后的结构化执行配置。 */
+    private Map<String, Object> config;
 
     /** 执行阶段选择的一个或多个数字员工。 */
     private List<Long> agentIds;

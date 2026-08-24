@@ -11,6 +11,8 @@ import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
+import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
@@ -28,6 +30,8 @@ import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEve
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.context.support.StaticMessageSource;
@@ -36,6 +40,7 @@ import org.springframework.context.i18n.LocaleContextHolder;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -46,7 +51,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-
+@DisabledOnOs(OS.WINDOWS)
 class RouteServiceTest {
 
     private GatewayClient gatewayClient;
@@ -57,6 +62,8 @@ class RouteServiceTest {
     private SequenceService sequenceService;
     private JwtService jwtService;
     private TargetAgentResolver targetAgentResolver;
+    private ProjectApplicationService projectApplicationService;
+    private UserBucketNamingService userBucketNamingService;
     private RouteService routeService;
     private StaticMessageSource messageSource;
 
@@ -70,6 +77,8 @@ class RouteServiceTest {
         sequenceService = mock(SequenceService.class);
         jwtService = mock(JwtService.class);
         targetAgentResolver = new TargetAgentResolver();
+        projectApplicationService = mock(ProjectApplicationService.class);
+        userBucketNamingService = mock(UserBucketNamingService.class);
         messageSource = new StaticMessageSource();
         messageSource.addMessage("sandbox.launch.progress.start", Locale.SIMPLIFIED_CHINESE, "个人助理正在启动中，请等待");
         messageSource.addMessage("sandbox.launch.progress.waiting", Locale.SIMPLIFIED_CHINESE, "个人助理仍在启动中，请稍等");
@@ -97,6 +106,9 @@ class RouteServiceTest {
         ReflectionTestUtils.setField(routeService, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(routeService, "jwtService", jwtService);
         ReflectionTestUtils.setField(routeService, "targetAgentResolver", targetAgentResolver);
+        ReflectionTestUtils.setField(routeService, "projectApplicationService", projectApplicationService);
+        ReflectionTestUtils.setField(routeService, "userBucketNamingService", userBucketNamingService);
+        ReflectionTestUtils.setField(routeService, "fileStorageLocalPath", "/mnt/byclaw");
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
         LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
 
@@ -304,6 +316,56 @@ class RouteServiceTest {
                         "beforeMessageId", "1"));
         org.assertj.core.api.Assertions.assertThat(metadataCaptor.getValue())
                 .containsEntry("Beyond-Token", "test-beyond-token");
+    }
+
+    @Test
+    void route_sendsActualProjectWorkspaceRelativeToCurrentUserBucket() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.getAssistantChatDto().setProjectId(123L);
+        when(userBucketNamingService.buildUserBucketName("u1")).thenReturn("byclaw-u1");
+        when(projectApplicationService.getProjectWorkspacePath(123L))
+            .thenReturn(Paths.get("/mnt/byclaw/byclaw-u1/by/projects/123"));
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+            .thenAnswer(invocation -> {
+                ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                return successResponse();
+            });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Map<String, Object>> metadataCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
+            anyString(), anyString(), anyString(), anyString(), any(), metadataCaptor.capture());
+        JSONObject projectInfo = (JSONObject) metadataCaptor.getValue().get("project_info");
+        org.assertj.core.api.Assertions.assertThat(projectInfo)
+            .containsEntry("project_id", 123L)
+            .containsEntry("workspace", "/by/projects/123");
+        verify(projectApplicationService).getProjectWorkspacePath(123L);
+    }
+
+    @Test
+    void route_keepsActualProjectWorkspaceWhenItIsOutsideCurrentUserBucket() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.getAssistantChatDto().setProjectId(123L);
+        when(userBucketNamingService.buildUserBucketName("u1")).thenReturn("byclaw-u1");
+        when(projectApplicationService.getProjectWorkspacePath(123L))
+            .thenReturn(Paths.get("/external/projects/123"));
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+            .thenAnswer(invocation -> {
+                ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                return successResponse();
+            });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Map<String, Object>> metadataCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
+            anyString(), anyString(), anyString(), anyString(), any(), metadataCaptor.capture());
+        JSONObject projectInfo = (JSONObject) metadataCaptor.getValue().get("project_info");
+        org.assertj.core.api.Assertions.assertThat(projectInfo)
+            .containsEntry("workspace", "/external/projects/123");
     }
 
     @Test

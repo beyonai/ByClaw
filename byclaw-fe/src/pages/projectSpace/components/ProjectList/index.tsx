@@ -1,4 +1,5 @@
 import { Empty, Spin } from 'antd';
+import { useIntl } from '@umijs/max';
 import ProjectCard from '../ProjectCard';
 import type { ProjectSpace } from '../../types';
 import styles from '../../index.module.less';
@@ -11,6 +12,7 @@ interface Props {
 }
 
 const ProjectList: React.FC<Props> = ({ projects, loading, activeProjectId, onSelectProject }) => {
+  const intl = useIntl();
   return (
     <Spin spinning={!!loading}>
       {projects.length ? (
@@ -25,7 +27,7 @@ const ProjectList: React.FC<Props> = ({ projects, loading, activeProjectId, onSe
           ))}
         </div>
       ) : (
-        <Empty description="暂无项目空间" />
+        <Empty description={intl.formatMessage({ id: 'projectSpace.emptyProjects' })} />
       )}
     </Spin>
   );

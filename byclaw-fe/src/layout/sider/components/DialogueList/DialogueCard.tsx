@@ -15,10 +15,12 @@ import { processSessionContent, formatTime } from './util';
 import { getAgentPath } from '@/utils/agent';
 import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 import useTracker from '@/hooks/useTracker';
+import { isNotificationSession } from '@/utils/session';
 
 import { ISession } from '@/typescript/session';
 import { IAgentCache } from '@/typescript/agent';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
+import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 
 import styles from './index.module.less';
 
@@ -74,6 +76,7 @@ const DialogueCard = ({
   onSessionDeleteOptimistic,
   onSessionDeleteRollback,
   cannotActionList = [],
+  searchKeyword,
 }: {
   item: ISession;
   onSelect?: (item: ISession) => void;
@@ -83,6 +86,9 @@ const DialogueCard = ({
   onSessionDeleteOptimistic?: (session: ISession) => void;
   onSessionDeleteRollback?: (session: ISession) => void;
   cannotActionList?: string[];
+
+  /** 项目会话高级搜索时用于突出显示结果摘要中的关键字。 */
+  searchKeyword?: string;
 }) => {
   const intl = useIntl();
   const navigate = useNavigate();
@@ -100,12 +106,19 @@ const DialogueCard = ({
   const [editName, setEditName] = React.useState('');
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [isOptimisticallyDeleted, setIsOptimisticallyDeleted] = useState(false);
-  const onRemove = useCallback((payload: { sessionId: string }): any => {
-    return dispatch({
-      type: 'session/deleteSession',
-      payload,
-    });
-  }, [dispatch]);
+  const effectiveCannotActionList = useMemo(
+    () => (isNotificationSession(item) ? ['delete', 'edit'] : cannotActionList),
+    [cannotActionList, item]
+  );
+  const onRemove = useCallback(
+    (payload: { sessionId: string }): any => {
+      return dispatch({
+        type: 'session/deleteSession',
+        payload,
+      });
+    },
+    [dispatch]
+  );
 
   const handleDelete = useCallback(() => {
     const rollbackDelete = () => {
@@ -157,18 +170,70 @@ const DialogueCard = ({
         type: 'session/editSession',
         payload,
       })
-    ).then((editedSessionId) => {
-      if (!editedSessionId) {
+    )
+      .then((editedSessionId) => {
+        if (!editedSessionId) {
+          rollbackSessionName();
+        }
+      })
+      .catch(() => {
         rollbackSessionName();
-      }
-    }).catch(() => {
-      rollbackSessionName();
-    });
+      });
   };
 
   const renderTitle = (item: ISession) => {
-    const { sessionName, sessionContent } = item;
-    const processedContent = processSessionContent(sessionContent);
+    const {
+      sessionName,
+      sessionContent,
+      matchText,
+      matchType,
+      matchedEmployeeName,
+      matchedEmployeeMatchField,
+      matchedEmployeeMatchText,
+    } = item;
+    let resultContent = matchText || sessionContent;
+    if (matchType === 'DIGITAL_EMPLOYEE') {
+      resultContent = intl.formatMessage(
+        {
+          id:
+            matchedEmployeeMatchField === 'DESCRIPTION'
+              ? 'projectSpace.searchMatch.digitalEmployeeDescription'
+              : 'projectSpace.searchMatch.digitalEmployeeName',
+        },
+        {
+          employeeName: matchedEmployeeName || '-',
+          matchText: matchedEmployeeMatchText || matchedEmployeeName || '-',
+        }
+      );
+    }
+    const processedContent = processSessionContent(resultContent);
+    const normalizedKeyword = trim(searchKeyword || '');
+    const renderProcessedContent = () => {
+      if (!normalizedKeyword || typeof processedContent !== 'string') return processedContent;
+
+      const lowerContent = processedContent.toLocaleLowerCase();
+      const lowerKeyword = normalizedKeyword.toLocaleLowerCase();
+      const parts: React.ReactNode[] = [];
+      let startIndex = 0;
+      let matchIndex = lowerContent.indexOf(lowerKeyword, startIndex);
+
+      while (matchIndex !== -1) {
+        if (matchIndex > startIndex) {
+          parts.push(processedContent.slice(startIndex, matchIndex));
+        }
+        parts.push(
+          <mark key={`${matchIndex}_${startIndex}`} className={styles.searchMatchHighlight}>
+            {processedContent.slice(matchIndex, matchIndex + normalizedKeyword.length)}
+          </mark>
+        );
+        startIndex = matchIndex + normalizedKeyword.length;
+        matchIndex = lowerContent.indexOf(lowerKeyword, startIndex);
+      }
+      if (startIndex < processedContent.length) {
+        parts.push(processedContent.slice(startIndex));
+      }
+      return parts.length ? parts : processedContent;
+    };
 
     return (
       <div
@@ -206,7 +271,12 @@ const DialogueCard = ({
             <div className={styles.dialogueItemContentBox}>
               <div>
                 <div className={classnames(styles.dialogueTitle, 'ellipsis')}>{sessionName}</div>
-                <div className={classnames(styles.dialogueDesc, 'ellipsis')}>{processedContent}</div>
+                <div
+                  className={classnames(styles.dialogueDesc, 'ellipsis')}
+                  title={typeof processedContent === 'string' ? processedContent : undefined}
+                >
+                  {renderProcessedContent()}
+                </div>
               </div>
               <div className={styles.createTime}>{formatTime(item.updateTime, item.createTime)}</div>
             </div>
@@ -220,7 +290,7 @@ const DialogueCard = ({
     const items = [];
 
     // 只有当 sessionType 不是 单聊h_h 时才显示编辑项
-    if (!cannotActionList?.includes('edit')) {
+    if (!effectiveCannotActionList?.includes('edit')) {
       items.push({
         key: 'edit',
         label: (
@@ -232,7 +302,7 @@ const DialogueCard = ({
       });
     }
 
-    if (!cannotActionList.includes('delete')) {
+    if (!effectiveCannotActionList.includes('delete')) {
       items.push({
         key: 'del',
         label: (
@@ -256,7 +326,7 @@ const DialogueCard = ({
     }
 
     return items;
-  }, [cannotActionList, delLoading, editLoading, sessionLoading, item, isOptimisticallyDeleted, handleDelete]);
+  }, [delLoading, editLoading, effectiveCannotActionList, sessionLoading, item, isOptimisticallyDeleted, handleDelete]);
 
   if (isOptimisticallyDeleted) {
     return null;
@@ -269,15 +339,17 @@ const DialogueCard = ({
         [styles.activeItem]: `${sessionId}` === `${item.sessionId}`,
       })}
       onClick={() => {
-        const { sessionId, objectId, objectType, unreadCount = 0 } = item;
+        const { sessionId, objectId, unreadCount = 0 } = item;
 
-        if (isFunction(onSelect)) {
+        if (isFunction(onSelect) && !isNotificationSession(item)) {
           onSelect(item);
           return;
         }
 
         if (editingSessionId === sessionId) return;
         clearDetailPanel?.();
+        // 普通会话列表切换时也清除目标会话旧草稿，输入框只保留当前会话详情对应的默认员工。
+        clearEasyConfirmInputDraft(sessionId);
 
         if (Array.isArray(item.sessionExts) && item.sessionExts.length > 0) {
           dispatch({
@@ -295,7 +367,7 @@ const DialogueCard = ({
         setSessionId?.(`${sessionId}`);
 
         // 通知会话
-        if (objectType === 'Notification') {
+        if (isNotificationSession(item)) {
           if (unreadCount > 0) {
             // 调用notice/batchReadNotice action，批量设置所有通知为已读
             dispatch({

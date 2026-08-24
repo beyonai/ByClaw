@@ -3,6 +3,10 @@ package com.iwhalecloud.byai.manager.domain.devloop.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 
 import java.io.FilterInputStream;
 import java.io.IOException;
@@ -35,6 +39,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.CliResult;
 
 @ExtendWith(MockitoExtension.class)
 class DwsAuthServiceProcessIsolationTest {
@@ -73,6 +79,52 @@ class DwsAuthServiceProcessIsolationTest {
     }
 
     @Test
+    void revokeCredentialUsesTheExplicitUsersIsolatedWorkspace() {
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserCode("user001");
+        when(loginApplicationService.getLoginInfo(11L)).thenReturn(loginInfo);
+        when(userBucketNamingService.buildUserBucketName("user001")).thenReturn("byclaw-user001");
+        ConnectorCliRunner cliRunner = mock(ConnectorCliRunner.class);
+        when(cliRunner.run(eq(java.util.List.of("dws", "auth", "reset", "-y")), any(), eq(null), any()))
+            .thenReturn(new CliResult(0, ""));
+        DwsAuthService service = new DwsAuthService();
+        ReflectionTestUtils.setField(service, "fileStorageRoot", tempDir.toString());
+        ReflectionTestUtils.setField(service, "loginApplicationService", loginApplicationService);
+        ReflectionTestUtils.setField(service, "userBucketNamingService", userBucketNamingService);
+        ReflectionTestUtils.setField(service, "connectorCliRunner", cliRunner);
+
+        service.revokeCredential(11L, java.util.List.of("dws", "auth", "reset", "-y"));
+
+        Path home = tempDir.toAbsolutePath().resolve("byclaw-user001/by/.connector-auth/.dws");
+        verify(cliRunner).run(
+            eq(java.util.List.of("dws", "auth", "reset", "-y")),
+            eq(Map.of(
+                "HOME", home.toString(),
+                "DWS_CONFIG_DIR", home.resolve("config").toString(),
+                "DWS_DISABLE_KEYCHAIN", "1")),
+            eq(null),
+            eq(java.time.Duration.ofSeconds(30)));
+    }
+
+    @Test
+    void credentialStatusPreservesMissingRefreshValidityField() {
+        ConnectorCliRunner cliRunner = mock(ConnectorCliRunner.class);
+        when(cliRunner.run(eq(java.util.List.of("dws", "auth", "status", "--format", "json")),
+                any(), eq(null), any()))
+            .thenReturn(new CliResult(0, "{\"authenticated\":true,\"token_valid\":true}"));
+        DwsAuthService service = isolatedService(builder -> {
+            throw new AssertionError("process launcher should not be used");
+        }, true);
+        ReflectionTestUtils.setField(service, "connectorCliRunner", cliRunner);
+
+        DwsAuthService.DwsCredentialStatus result = service.getCredentialStatus(
+            11L, java.util.List.of("dws", "auth", "status", "--format", "json"));
+
+        assertThat(result.status()).containsEntry("tokenValid", true);
+        assertThat(result.status()).doesNotContainKey("refreshTokenValid");
+    }
+
+    @Test
     void deviceFlowSuppressesCliBrowserLaunch() throws Exception {
         FakeProcess process = FakeProcess.deviceFlow("CODE-1");
         AtomicReference<java.util.List<String>> command = new AtomicReference<>();
@@ -82,7 +134,7 @@ class DwsAuthServiceProcessIsolationTest {
         };
         DwsAuthService service = isolatedService(launcher, true);
 
-        assertThat(service.startDeviceAuth(11L, AUTHORIZATION_ID).get("success")).isEqualTo(true);
+        assertThat(startDeviceAuth(service, 11L, AUTHORIZATION_ID).get("success")).isEqualTo(true);
         assertThat(command.get()).containsExactly(
             "dws", "auth", "login", "--device", "--no-browser", "--recommend", "-y");
 
@@ -96,8 +148,8 @@ class DwsAuthServiceProcessIsolationTest {
         QueueLauncher launcher = new QueueLauncher(first, unexpectedSecond);
         DwsAuthService service = isolatedService(launcher, true);
 
-        Map<String, Object> firstResult = service.startDeviceAuth(11L, AUTHORIZATION_ID);
-        Map<String, Object> secondResult = service.startDeviceAuth(11L, AUTHORIZATION_ID);
+        Map<String, Object> firstResult = startDeviceAuth(service, 11L, AUTHORIZATION_ID);
+        Map<String, Object> secondResult = startDeviceAuth(service, 11L, AUTHORIZATION_ID);
 
         assertThat(firstResult.get("success")).isEqualTo(true);
         assertThat(secondResult.get("success")).isEqualTo(false);
@@ -139,11 +191,11 @@ class DwsAuthServiceProcessIsolationTest {
         CountDownLatch secondTaskStarted = new CountDownLatch(1);
 
         Future<Map<String, Object>> firstStart = executor.submit(
-            () -> service.startDeviceAuth(11L, AUTHORIZATION_ID));
+            () -> startDeviceAuth(service, 11L, AUTHORIZATION_ID));
         assertThat(firstLaunchEntered.await(1, TimeUnit.SECONDS)).isTrue();
         Future<Map<String, Object>> secondStart = executor.submit(() -> {
             secondTaskStarted.countDown();
-            return service.startDeviceAuth(11L, AUTHORIZATION_ID);
+            return startDeviceAuth(service, 11L, AUTHORIZATION_ID);
         });
         assertThat(secondTaskStarted.await(1, TimeUnit.SECONDS)).isTrue();
 
@@ -172,8 +224,8 @@ class DwsAuthServiceProcessIsolationTest {
         QueueLauncher launcher = new QueueLauncher(first, unexpectedSecond);
         DwsAuthService service = isolatedService(launcher, true);
 
-        assertThat(service.startDeviceAuth(11L, AUTHORIZATION_ID).get("success")).isEqualTo(true);
-        Map<String, Object> secondResult = service.startDeviceAuth(22L, AUTHORIZATION_ID);
+        assertThat(startDeviceAuth(service, 11L, AUTHORIZATION_ID).get("success")).isEqualTo(true);
+        Map<String, Object> secondResult = startDeviceAuth(service, 22L, AUTHORIZATION_ID);
 
         assertThat(secondResult.get("success")).isEqualTo(false);
         assertThat(launcher.launchCount()).isEqualTo(1);
@@ -191,8 +243,8 @@ class DwsAuthServiceProcessIsolationTest {
         QueueLauncher launcher = new QueueLauncher(first, second);
         DwsAuthService service = isolatedService(launcher, true);
 
-        Map<String, Object> firstResult = service.startDeviceAuth(11L, "auth-1");
-        Map<String, Object> secondResult = service.startDeviceAuth(22L, "auth-2");
+        Map<String, Object> firstResult = startDeviceAuth(service, 11L, "auth-1");
+        Map<String, Object> secondResult = startDeviceAuth(service, 22L, "auth-2");
 
         assertThat(firstResult.get("success")).isEqualTo(true);
         assertThat(secondResult.get("success")).isEqualTo(true);
@@ -213,7 +265,7 @@ class DwsAuthServiceProcessIsolationTest {
         service.deviceFlowRegistrations.put(
             AUTHORIZATION_ID, new DwsAuthService.DeviceFlowRegistration(11L, stale));
 
-        Map<String, Object> result = service.startDeviceAuth(22L, AUTHORIZATION_ID);
+        Map<String, Object> result = startDeviceAuth(service, 22L, AUTHORIZATION_ID);
 
         assertThat(result.get("success")).isEqualTo(true);
         assertThat(launcher.launchCount()).isEqualTo(1);
@@ -228,7 +280,7 @@ class DwsAuthServiceProcessIsolationTest {
         QueueLauncher launcher = new QueueLauncher(process);
         DwsAuthService service = isolatedService(launcher, false);
 
-        Map<String, Object> result = service.startDeviceAuth(11L, AUTHORIZATION_ID);
+        Map<String, Object> result = startDeviceAuth(service, 11L, AUTHORIZATION_ID);
 
         assertThat(result.get("success")).isEqualTo(false);
         assertThat(launcher.launchCount()).isZero();
@@ -241,8 +293,8 @@ class DwsAuthServiceProcessIsolationTest {
         FakeProcess requested = FakeProcess.deviceFlow("CODE-1");
         FakeProcess sibling = FakeProcess.deviceFlow("CODE-2");
         DwsAuthService service = isolatedService(new QueueLauncher(requested, sibling), true);
-        service.startDeviceAuth(11L, "auth-1");
-        service.startDeviceAuth(11L, "auth-2");
+        startDeviceAuth(service, 11L, "auth-1");
+        startDeviceAuth(service, 11L, "auth-2");
 
         boolean cancelled = service.cancelDeviceAuth("auth-1", 11L);
 
@@ -258,7 +310,7 @@ class DwsAuthServiceProcessIsolationTest {
     void exactCancellationRejectsWrongUser() throws Exception {
         FakeProcess process = FakeProcess.deviceFlow("CODE-1");
         DwsAuthService service = isolatedService(new QueueLauncher(process), true);
-        service.startDeviceAuth(11L, AUTHORIZATION_ID);
+        startDeviceAuth(service, 11L, AUTHORIZATION_ID);
 
         boolean cancelled = service.cancelDeviceAuth(AUTHORIZATION_ID, 22L);
 
@@ -274,8 +326,8 @@ class DwsAuthServiceProcessIsolationTest {
         FakeProcess legacy = FakeProcess.deviceFlow("LEGACY");
         FakeProcess explicit = FakeProcess.deviceFlow("EXPLICIT");
         DwsAuthService service = isolatedService(new QueueLauncher(legacy, explicit), true);
-        service.startDeviceAuth(11L, "legacy-dws-user-11");
-        service.startDeviceAuth(11L, "new-auth-11");
+        startDeviceAuth(service, 11L, "legacy-dws-user-11");
+        startDeviceAuth(service, 11L, "new-auth-11");
 
         boolean cancelled = service.cancelDeviceAuth(11L);
 
@@ -292,7 +344,7 @@ class DwsAuthServiceProcessIsolationTest {
         FakeProcess original = FakeProcess.deviceFlow("ORIGINAL");
         FakeProcess replacement = FakeProcess.deviceFlow("REPLACEMENT");
         DwsAuthService service = isolatedService(new QueueLauncher(original), true);
-        service.startDeviceAuth(11L, AUTHORIZATION_ID);
+        startDeviceAuth(service, 11L, AUTHORIZATION_ID);
         DwsAuthService.DeviceFlowRegistration replacementRegistration =
             new DwsAuthService.DeviceFlowRegistration(22L, replacement);
         service.deviceFlowRegistrations.put(AUTHORIZATION_ID, replacementRegistration);
@@ -310,7 +362,7 @@ class DwsAuthServiceProcessIsolationTest {
         FakeProcess process = FakeProcess.deviceFlow("CODE-1");
         DwsAuthService service = isolatedService(new QueueLauncher(process), true);
 
-        assertThat(service.startDeviceAuth(11L, AUTHORIZATION_ID).get("success")).isEqualTo(true);
+        assertThat(startDeviceAuth(service, 11L, AUTHORIZATION_ID).get("success")).isEqualTo(true);
         process.writeOutput("continued output that must be drained\n");
         process.closeOutput();
 
@@ -324,7 +376,7 @@ class DwsAuthServiceProcessIsolationTest {
         process.closeOutput();
         DwsAuthService service = isolatedService(new QueueLauncher(process), true);
 
-        Map<String, Object> result = service.startDeviceAuth(11L, AUTHORIZATION_ID);
+        Map<String, Object> result = startDeviceAuth(service, 11L, AUTHORIZATION_ID);
 
         assertThat(result.get("success")).isEqualTo(false);
         assertThat(process.destroyCount()).isEqualTo(1);
@@ -334,6 +386,14 @@ class DwsAuthServiceProcessIsolationTest {
 
     private DwsAuthService isolatedService(DwsAuthService.DwsProcessLauncher launcher, boolean applyEnvironment) {
         return new TestDwsAuthService(launcher, applyEnvironment);
+    }
+
+    private Map<String, Object> startDeviceAuth(DwsAuthService service, Long userId, String authorizationId) {
+        return service.startDeviceAuth(
+            userId,
+            authorizationId,
+            java.util.List.of("dws", "auth", "login", "--device", "--no-browser", "--recommend", "-y")
+        );
     }
 
     private static final class TestDwsAuthService extends DwsAuthService {

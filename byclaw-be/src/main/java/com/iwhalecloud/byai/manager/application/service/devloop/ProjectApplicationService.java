@@ -19,6 +19,7 @@ import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService;
+import com.iwhalecloud.byai.manager.application.service.project.ProjectInitService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
@@ -34,6 +35,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.MemberBatchDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberSaveDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectResourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileDeleteDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileQueryDto;
@@ -44,10 +46,12 @@ import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectMember;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
+import com.iwhalecloud.byai.manager.entity.devloop.ProjectResource;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanRequireItem;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanSource;
 import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
+import com.iwhalecloud.byai.manager.mapper.devloop.ProjectResourceMapper;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
 import com.iwhalecloud.byai.state.domain.file.service.FileService;
@@ -63,6 +67,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.util.UriComponentsBuilder;
 import java.io.InputStream;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
@@ -74,7 +79,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * 项目管理应用服务。
@@ -88,6 +92,12 @@ public class ProjectApplicationService {
     private static final Logger logger = LoggerFactory.getLogger(ProjectApplicationService.class);
 
     private static final String PROJECT_TYPE_DEFAULT = "default";
+
+    /** 项目名称前后端统一限制为 15 个字符。 */
+    private static final int PROJECT_NAME_MAX_LENGTH = 15;
+
+    /** 项目描述业务层统一限制为 500 个字符，数据库使用 TEXT 避免中文存储长度语义差异。 */
+    private static final int PROJECT_DESCRIPTION_MAX_LENGTH = 500;
 
     /** 手工需求复用的内部扫描源类型，仓库关联实际保存于单条需求 JSON。 */
     private static final String MANUAL_SOURCE_TYPE = "manual";
@@ -106,6 +116,9 @@ public class ProjectApplicationService {
 
     @Autowired
     private ProjectRepoMapper projectRepoMapper;
+
+    @Autowired
+    private ProjectResourceMapper projectResourceMapper;
 
     @Autowired
     private ScanSourceService scanSourceService;
@@ -134,6 +147,9 @@ public class ProjectApplicationService {
     @Autowired
     private UserBucketNamingService userBucketNamingService;
 
+    @Autowired
+    private ProjectInitService projectInitService;
+
     /**
      * 分页查询用户可见项目
      *
@@ -151,6 +167,7 @@ public class ProjectApplicationService {
      * @param dto 项目信息
      * @return 新建项目
      */
+    @Transactional
     public Project createProject(ProjectDTO dto) {
         String projectName = normalizeProjectName(dto.getProjectName());
         if (projectName.isEmpty()) {
@@ -159,6 +176,7 @@ public class ProjectApplicationService {
         if (projectService.existsProjectName(projectName, null)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.duplicate");
         }
+        validateProjectDescription(dto.getDescription());
 
         Project project = new Project();
         project.setProjectId(sequenceService.nextVal());
@@ -177,6 +195,7 @@ public class ProjectApplicationService {
         projectService.save(project);
 
         saveProjectRepos(project.getProjectId(), dto.getRepos());
+        saveProjectResources(project.getProjectId(), dto.getResources());
         if (Constants.YES_VALUE_Y.equalsIgnoreCase(project.getIsShare())) {
             this.saveOrUpdateProjectMember(project.getProjectId(), dto.getShareTargets());
         }
@@ -185,43 +204,20 @@ public class ProjectApplicationService {
         projectMemberService.addMember(project.getProjectId(), CurrentUserHolder.getCurrentUserId(),
             MemberRole.OWNER);
 
+        // 工作目录属于项目创建结果的一部分，初始化失败时由事务回滚项目数据库记录。
+        projectInitService.initProjectWorkspace(project.getProjectId());
+
         return project;
     }
 
     /**
-     * 触发研发项目工作区初始化：置为 initializing 并记录建索引/技能包配置。
-     *
-     * @param params 含 projectId、buildIndex(Y/N)、skillPackages(数组)
-     */
-    public void startProjectInit(Map<String, Object> params) {
-        Long projectId = MapParamUtil.getLongValue(params, "projectId");
-        Project project = requireProject(projectId);
-        boolean buildIndex = Constants.YES_VALUE_Y.equalsIgnoreCase(MapParamUtil.getStringValue(params, "buildIndex"))
-            || Boolean.TRUE.equals(params.get("buildIndex"));
-        Project update = new Project();
-        update.setProjectId(project.getProjectId());
-        update.setInitStatus("initializing");
-        update.setBuildIndex(buildIndex ? Constants.YES_VALUE_Y : Constants.NO_VALUE_N);
-        // 技能包仅建索引时保留;逗号分隔,存量枚举暂由前端约束,后端只落原样。
-        update.setIndexSkills(buildIndex ? joinSkillPackages(params.get("skillPackages")) : "");
-        update.setUpdateBy(CurrentUserHolder.getCurrentUserId());
-        update.setUpdateTime(new Date());
-        projectService.update(update);
-    }
-
-    /**
-     * 标记研发项目工作区初始化完成：置为 ready。
+     * 获取项目工作目录，目录不存在时自动创建。
      *
      * @param projectId 项目 ID
+     * @return 项目工作目录
      */
-    public void completeProjectInit(Long projectId) {
-        Project project = requireProject(projectId);
-        Project update = new Project();
-        update.setProjectId(project.getProjectId());
-        update.setInitStatus("ready");
-        update.setUpdateBy(CurrentUserHolder.getCurrentUserId());
-        update.setUpdateTime(new Date());
-        projectService.update(update);
+    public Path getProjectWorkspacePath(Long projectId) {
+        return projectInitService.initProjectWorkspace(projectId);
     }
 
     private Project requireProject(Long projectId) {
@@ -233,18 +229,6 @@ public class ProjectApplicationService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.not.found");
         }
         return project;
-    }
-
-    private String joinSkillPackages(Object raw) {
-        if (!(raw instanceof List<?> list) || list.isEmpty()) {
-            return "";
-        }
-        return list.stream()
-            .filter(Objects::nonNull)
-            .map(Object::toString)
-            .map(String::trim)
-            .filter(item -> !item.isEmpty())
-            .collect(Collectors.joining(","));
     }
 
     /**
@@ -281,6 +265,7 @@ public class ProjectApplicationService {
             project.setProjectName(projectName);
         }
         if (dto.getDescription() != null) {
+            validateProjectDescription(dto.getDescription());
             project.setDescription(dto.getDescription());
         }
         if (dto.getResourceId() != null) {
@@ -317,6 +302,9 @@ public class ProjectApplicationService {
             projectRepoMapper
                 .delete(new LambdaQueryWrapper<ProjectRepo>().eq(ProjectRepo::getProjectId, dto.getProjectId()));
             saveProjectRepos(dto.getProjectId(), dto.getRepos());
+        }
+        if (dto.getResources() != null) {
+            saveProjectResources(dto.getProjectId(), dto.getResources());
         }
 
         // 如果不分享的，移除分享成员
@@ -596,6 +584,12 @@ public class ProjectApplicationService {
         projectMemberService.bindAgent(memberId, agentId);
     }
 
+    /** 解除项目成员与数字员工的绑定关系。 */
+    public void unbindMemberAgent(Map<String, Object> params) {
+        Long memberId = MapParamUtil.getLongValue(params, "memberId");
+        projectMemberService.unbindAgent(memberId);
+    }
+
     /**
      * 查询项目详情，含仓库与会话。
      *
@@ -610,7 +604,11 @@ public class ProjectApplicationService {
         LambdaQueryWrapper<ProjectRepo> repoWrapper = new LambdaQueryWrapper<>();
         repoWrapper.eq(ProjectRepo::getProjectId, projectId);
         List<ProjectRepo> repos = projectRepoMapper.selectList(repoWrapper);
-        List<ByaiSessionDto> sessions = projectSessionService.listSessionsByProjectId(projectId);
+        LambdaQueryWrapper<ProjectResource> resourceWrapper = new LambdaQueryWrapper<>();
+        resourceWrapper.eq(ProjectResource::getProjectId, projectId)
+            .and(item -> item.isNull(ProjectResource::getDeleteFlag)
+                .or().ne(ProjectResource::getDeleteFlag, DeleteFlag.DELETED));
+        List<ProjectResource> resources = projectResourceMapper.selectList(resourceWrapper);
 
         Map<String, Object> map = new HashMap<>();
         map.put("projectId", project.getProjectId());
@@ -623,9 +621,42 @@ public class ProjectApplicationService {
         map.put("initStatus", project.getInitStatus());
         map.put("buildIndex", project.getBuildIndex());
         map.put("indexSkills", project.getIndexSkills());
+        // 初始化会话ID供前端直达架构助理会话；失败原因让 pending 态能说明为何回退，而不是只显示「未初始化」。
+        map.put("initSessionId", project.getInitSessionId());
+        map.put("initFailReason", project.getInitFailReason());
         map.put("repos", repos);
-        map.put("sessions", sessions);
-        map.put("sessionCount", sessions.size());
+        map.put("resources", resources);
+        return map;
+    }
+
+    /**
+     * 按会话反查所属项目，供只知道 sessionId 的调用方（定时任务、外部技能）解析项目。
+     * <p>
+     * 会话未绑定项目、项目已删除都返回 {@code bound=false}，不抛异常：调用方要能区分
+     * 「查不到」和「调用失败」，前者可以继续走追问兜底，后者必须重试或报错。
+     *
+     * @param sessionId 会话 ID，必填
+     * @return 含 bound、projectId、projectName、projectType
+     */
+    public Map<String, Object> resolveProjectBySession(Long sessionId) {
+        if (sessionId == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "session.id.required");
+        }
+        Map<String, Object> map = new HashMap<>();
+        map.put("sessionId", sessionId);
+        Long projectId = projectSessionService.findProjectIdBySessionId(sessionId);
+        Project project = projectId == null ? null : projectService.findById(projectId);
+        if (project == null || DeleteFlag.DELETED.equals(project.getDeleteFlag())) {
+            map.put("bound", false);
+            map.put("projectId", null);
+            map.put("projectName", null);
+            map.put("projectType", null);
+            return map;
+        }
+        map.put("bound", true);
+        map.put("projectId", project.getProjectId());
+        map.put("projectName", project.getProjectName());
+        map.put("projectType", project.getProjectType());
         return map;
     }
 
@@ -648,14 +679,76 @@ public class ProjectApplicationService {
         return projectRepoMapper.selectList(repoWrapper);
     }
 
+    /** 查询项目绑定的知识库、数字员工和本体资源。 */
+    public List<ProjectResource> listProjectResources(Long projectId) {
+        requireProject(projectId);
+        LambdaQueryWrapper<ProjectResource> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ProjectResource::getProjectId, projectId)
+            .and(item -> item.isNull(ProjectResource::getDeleteFlag)
+                .or().ne(ProjectResource::getDeleteFlag, DeleteFlag.DELETED))
+            .orderByAsc(ProjectResource::getResourceType)
+            .orderByAsc(ProjectResource::getSortNo)
+            .orderByAsc(ProjectResource::getId);
+        return projectResourceMapper.selectList(wrapper);
+    }
+
+    /** 全量覆盖项目资源绑定，传空数组表示解除全部绑定。 */
+    @Transactional
+    public void saveProjectResources(Long projectId, List<ProjectResourceDTO> resources) {
+        requireProject(projectId);
+        projectResourceMapper.delete(new LambdaQueryWrapper<ProjectResource>()
+            .eq(ProjectResource::getProjectId, projectId));
+        if (resources == null || resources.isEmpty()) return;
+
+        Set<String> uniqueKeys = new HashSet<>();
+        int nextSortNo = 0;
+        for (ProjectResourceDTO dto : resources) {
+            String resourceType = StringUtils.trimToEmpty(dto.getResourceType()).toLowerCase(Locale.ROOT);
+            String resourceId = StringUtils.trimToEmpty(dto.getResourceId());
+            if (!Set.of("knowledge", "digital_employee", "ontology").contains(resourceType)
+                || resourceId.isEmpty()) {
+                throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.resource.invalid");
+            }
+            if (!uniqueKeys.add(resourceType + ":" + resourceId)) continue;
+
+            ProjectResource entity = new ProjectResource();
+            entity.setId(sequenceService.nextVal());
+            entity.setProjectId(projectId);
+            entity.setResourceType(resourceType);
+            entity.setResourceId(resourceId);
+            entity.setResourceName(StringUtils.trimToNull(dto.getResourceName()));
+            entity.setSortNo(dto.getSortNo() == null ? nextSortNo++ : dto.getSortNo());
+            entity.setCreateBy(CurrentUserHolder.getCurrentUserId());
+            entity.setCreateTime(new Date());
+            entity.setDeleteFlag(DeleteFlag.NORMAL);
+            projectResourceMapper.insert(entity);
+        }
+    }
+
     /**
      * 规范化项目名称。
      *
      * @param projectName 原始名称
-     * @return 去首尾空格后的名称
+     * @return 校验长度并去除首尾空格后的名称
      */
     private String normalizeProjectName(String projectName) {
-        return projectName == null ? "" : projectName.trim();
+        String normalizedName = projectName == null ? "" : projectName.trim();
+        // 应用层再次校验，确保未经过 @Valid 的内部或开放接口同样受长度限制。
+        if (normalizedName.length() > PROJECT_NAME_MAX_LENGTH) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.name.max.length");
+        }
+        return normalizedName;
+    }
+
+    /** 开放接口未统一启用 @Valid，因此应用层也必须拦截超长项目描述。 */
+    private void validateProjectDescription(String description) {
+        if (description == null) {
+            return;
+        }
+        int characterCount = description.codePointCount(0, description.length());
+        if (characterCount > PROJECT_DESCRIPTION_MAX_LENGTH) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.description.too.long");
+        }
     }
 
     /**
@@ -691,6 +784,8 @@ public class ProjectApplicationService {
         repo.setRepoFullName(repoDto.getRepoFullName().trim());
         repo.setRepoUrl(repoDto.getRepoUrl() != null ? repoDto.getRepoUrl().trim() : null);
         repo.setDefaultBranch(defaultBranch.isEmpty() ? "main" : defaultBranch);
+        // 描述可选,空串归一成 null,避免预拆提示词里出现空的 description= 行。
+        repo.setDescription(StringUtils.trimToNull(repoDto.getDescription()));
         // 仅接受受支持的仓库类型,其余(含空)按代码仓库处理;工作区唯一性由应用层/前端保证。
         String repoType = "workspace".equals(repoDto.getRepoType()) ? "workspace" : "code";
         repo.setRepoType(repoType);
@@ -720,6 +815,46 @@ public class ProjectApplicationService {
         result.put("repoFullName", repo.getRepoFullName());
         result.put("repoUrl", repo.getRepoUrl());
         result.put("defaultBranch", repo.getDefaultBranch());
+        result.put("description", repo.getDescription());
+        result.put("repoType", repo.getRepoType());
+        result.put("provider", repo.getProvider());
+        return result;
+    }
+
+    /**
+     * 更新单个项目仓库。
+     *
+     * <p>编辑直接更新原记录，不采用删除后重建，避免需求、任务或扫描源中保存的 repoId 失效。</p>
+     */
+    public Map<String, Object> updateProjectRepo(ProjectRepoDTO dto) {
+        if (dto == null || dto.getRepoId() == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.id.required");
+        }
+        if (dto.getProjectId() == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.id.required");
+        }
+        if (dto.getRepoFullName() == null || dto.getRepoFullName().trim().isEmpty()) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.name.required");
+        }
+        ProjectRepo repo = projectRepoMapper.selectById(dto.getRepoId());
+        if (repo == null || !dto.getProjectId().equals(repo.getProjectId())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.repo.not.found");
+        }
+        repo.setRepoFullName(dto.getRepoFullName().trim());
+        repo.setRepoUrl(StringUtils.trimToNull(dto.getRepoUrl()));
+        String defaultBranch = dto.getDefaultBranch() == null ? "" : dto.getDefaultBranch().trim();
+        repo.setDefaultBranch(defaultBranch.isEmpty() ? "main" : defaultBranch);
+        repo.setDescription(StringUtils.trimToNull(dto.getDescription()));
+        repo.setRepoType("workspace".equals(dto.getRepoType()) ? "workspace" : "code");
+        repo.setProvider(normalizeProvider(dto.getProvider()));
+        projectRepoMapper.updateById(repo);
+        Map<String, Object> result = new HashMap<>();
+        result.put("repoId", repo.getRepoId());
+        result.put("projectId", repo.getProjectId());
+        result.put("repoFullName", repo.getRepoFullName());
+        result.put("repoUrl", repo.getRepoUrl());
+        result.put("defaultBranch", repo.getDefaultBranch());
+        result.put("description", repo.getDescription());
         result.put("repoType", repo.getRepoType());
         result.put("provider", repo.getProvider());
         return result;
@@ -803,6 +938,7 @@ public class ProjectApplicationService {
             return PageHelperUtil.emptyPage(projectSessionQo.getPageNum(), projectSessionQo.getPageSize());
         }
 
+        projectSessionQo.normalizeSearchCondition();
         projectSessionQo.setCreateBy(CurrentUserHolder.getCurrentUserId());
 
         return projectSessionService.listSessionsByProject(projectSessionQo);

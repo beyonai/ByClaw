@@ -12,6 +12,7 @@ import ProjectFormModal, {
 } from '@/pages/projectSpace/components/ProjectFormModal';
 import ProjectOnboardingWizard from '@/pages/projectSpace/components/ProjectOnboardingWizard';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
+import { useProjectScopeId } from '@/pages/projectSpace/hooks/useProjectScopeId';
 import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
 import {
   createProject,
@@ -20,10 +21,15 @@ import {
   listProjectSessionsByQo,
   updateProject,
 } from '@/pages/projectSpace/service';
-import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
-import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
-import { getStoredProjectScopeId, saveProjectScopeIdToStorage } from '@/pages/projectSpace/constants';
-import { saveDefaultAgent, saveProjectMembers } from '@/service/devloop';
+import type { ProjectMember, ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
+import {
+  getArrayData,
+  getProjectTagMeta,
+  normalizeProjectDetail,
+  normalizeProjectSession,
+} from '@/pages/projectSpace/utils';
+import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
+import { saveProjectMembers, saveProjectResources, type DevloopProjectSessionSearchMode } from '@/service/devloop';
 import { SiderContentContext } from '../../siderContentContext';
 import DialogueCard from '../DialogueList/DialogueCard';
 import ProjectDetailPanel from './ProjectDetailModal';
@@ -31,11 +37,29 @@ import styles from './index.module.less';
 
 const PROJECT_SESSION_PAGE_SIZE = 30;
 
+// 请求层会把业务 code 非 0 的响应以字符串 reject；这里优先展示接口 msg，避免创建失败只显示通用文案。
+const getProjectMutationErrorMessage = (error: unknown, fallback: string) => {
+  if (typeof error === 'string' && error.trim()) return error;
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, any>;
+    return (
+      record.msg ||
+      record.data?.msg ||
+      record.response?.data?.msg ||
+      record.message ||
+      record.response?.data?.message ||
+      fallback
+    );
+  }
+  return fallback;
+};
+
 type ProjectSessionPageState = {
   pageNum: number;
   pageSize: number;
   total: number;
   keyword?: string;
+  searchMode?: DevloopProjectSessionSearchMode;
 };
 
 type ProjectSpaceTranslate = (id: string, values?: Record<string, string | number>) => string;
@@ -128,28 +152,11 @@ const getOperationSessionDescription = (session: ProjectSession): string | undef
 };
 
 const getProjectScenes = (project: ProjectSpace, t: ProjectSpaceTranslate) => {
-  if (project.projectType === 'default') {
-    return [{ classSuffix: 'Default', text: t('scene.default') }];
-  }
-
-  // 研发项目即使强制共享，列表也优先展示业务类型标签。
-  if (project.projectType === 'develop') {
-    return [{ classSuffix: 'Development', text: t('scene.development') }];
-  }
-
-  // 运营项目优先展示业务类型；即使开启共享也不额外展示共享标签，避免项目标题区域标签过多。
-  if (project.projectType === 'operation') {
-    return [{ classSuffix: 'Operation', text: t('scene.operation') }];
-  }
-
-  if (project.sharedFlag) {
-    return [{ classSuffix: 'Shared', text: t('scene.shared') }];
-  }
-
-  return [{ classSuffix: 'Personal', text: t('scene.personal') }];
+  const projectTag = getProjectTagMeta(project);
+  return [{ classSuffix: projectTag.classSuffix, text: t(projectTag.messageId.replace('projectSpace.', '')) }];
 };
 
-// 研发项目未完成初始化(pending/initializing)时展示初始化中标签,提示尚不能建需求/启动任务。
+// 研发项目未完成初始化(pending/initialized/initializing)时展示初始化中标签,提示尚不能建需求/启动任务。
 const isProjectInitializing = (project: ProjectSpace) =>
   project.projectType === 'develop' && !!project.initStatus && project.initStatus !== 'ready';
 
@@ -207,6 +214,22 @@ const normalizeProjectMember = (member: ProjectShareMember | any): ProjectShareM
   };
 };
 
+const normalizeProjectMemberRole = (role?: string): ProjectMember['role'] => {
+  const normalizedRole = `${role || ''}`.toLowerCase();
+  if (['owner', 'creator'].includes(normalizedRole)) return 'owner';
+  if (normalizedRole === 'admin') return 'admin';
+  return 'member';
+};
+
+const normalizeProjectMembers = (members: ProjectShareMember[]): ProjectMember[] =>
+  members.map((member) => {
+    const normalizedMember = normalizeProjectMember(member);
+    return {
+      ...normalizedMember,
+      role: normalizeProjectMemberRole(normalizedMember.role),
+    };
+  });
+
 const syncProjectShareMembers = async (projectId: string | number, desiredMembers: ProjectShareMember[] = []) => {
   const desiredMemberMap = new Map<string, ProjectShareMember>();
 
@@ -248,9 +271,11 @@ const ProjectSpaceList: React.FC = () => {
   // 项目类型配置决定研发、运营能力是否开放，侧栏表单和详情使用同一份结果。
   const { projectTypeOptions, projectTypeLoading, isDevelopProjectEnabled, isOperationProjectEnabled } =
     useProjectTypeConfig();
-  const [projectScopeId, setProjectScopeId] = useState<string | undefined>(() => getStoredProjectScopeId());
+  const [projectScopeId, updateProjectScopeId] = useProjectScopeId();
   const [projectScopeDropdownOpen, setProjectScopeDropdownOpen] = useState(false);
+  const projectScopeTriggerRef = useRef<HTMLDivElement>(null);
   const [sessionKeyword, setSessionKeyword] = useState('');
+  const [sessionSearchMode, setSessionSearchMode] = useState<DevloopProjectSessionSearchMode>('CHAT_CONTENT');
   const [projectDetailMap, setProjectDetailMap] = useState<Record<string, ProjectSpace>>({});
   const [detailLoadingMap, setDetailLoadingMap] = useState<Record<string, boolean>>({});
   const [projectSessionPageMap, setProjectSessionPageMap] = useState<Record<string, ProjectSessionPageState>>({});
@@ -265,16 +290,7 @@ const ProjectSpaceList: React.FC = () => {
   const projectSavingRef = useRef(false);
   const sessionSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 新建项目的列表响应可能稍后才返回，期间保留待选 ID，避免被无效本地存储回退逻辑提前清除。
-  const pendingCreatedProjectIdRef = useRef<string>();
-  // 首次进入项目空间时自动展开项目详情，避免用户每次都需要手动点击"进入项目详情"。
-  const hasAutoOpenedDetailRef = useRef(false);
-
-  const updateProjectScopeId = useCallback((projectId?: string | number) => {
-    const normalizedProjectId = `${projectId ?? ''}`.trim();
-    // 选中项目与本地存储同步更新，刷新浏览器后可以恢复上次的项目上下文。
-    setProjectScopeId(normalizedProjectId || undefined);
-    saveProjectScopeIdToStorage(normalizedProjectId);
-  }, []);
+  const pendingCreatedProjectIdRef = useRef<string | undefined>(undefined);
 
   const visibleProjects = useMemo(
     () => projects.filter((project) => !inaccessibleProjectIds.has(`${project.projectId}`)),
@@ -331,6 +347,30 @@ const ProjectSpaceList: React.FC = () => {
     }));
   }, [mergedProjects, t]);
 
+  useEffect(() => {
+    if (!projectScopeDropdownOpen || wizardOpen) return undefined;
+
+    const isProjectScopeElement = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) return false;
+      return Boolean(
+        projectScopeTriggerRef.current?.contains(target) || target.closest('[data-project-scope-dropdown="true"]')
+      );
+    };
+    const closeOnOutsideInteraction = (event: Event) => {
+      if (isProjectScopeElement(event.target)) return;
+      setProjectScopeDropdownOpen(false);
+      setProjectScopeSearchKeyword('');
+    };
+
+    // 项目选择器使用受控 open，补充点击和键盘失焦时的外部收起逻辑。
+    document.addEventListener('pointerdown', closeOnOutsideInteraction);
+    document.addEventListener('focusin', closeOnOutsideInteraction);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideInteraction);
+      document.removeEventListener('focusin', closeOnOutsideInteraction);
+    };
+  }, [projectScopeDropdownOpen, setProjectScopeSearchKeyword, wizardOpen]);
+
   const projectFormInitialValues = useMemo(() => {
     if (!editingProject) return undefined;
     return {
@@ -339,11 +379,20 @@ const ProjectSpaceList: React.FC = () => {
       projectType: editingProject.projectType,
       sharedFlag: editingProject.sharedFlag,
       shareMembers: (editingProject.members || []).map(normalizeProjectMember),
+      resources: editingProject.resources || editingProject.boundResources || [],
     };
   }, [editingProject]);
 
   const fetchProjectSessions = useCallback(
-    async (project: ProjectSpace, options: { force?: boolean; append?: boolean; keyword?: string } = {}) => {
+    async (
+      project: ProjectSpace,
+      options: {
+        force?: boolean;
+        append?: boolean;
+        keyword?: string;
+        searchMode?: DevloopProjectSessionSearchMode;
+      } = {}
+    ) => {
       const { force = false, append = false } = options;
       const projectId = project.projectId;
       if (!projectId) return project;
@@ -352,6 +401,7 @@ const ProjectSpaceList: React.FC = () => {
       const currentPage = projectSessionPageMap[projectId];
       const nextPageNum = append ? (currentPage?.pageNum || 0) + 1 : 1;
       const queryKeyword = options.keyword ?? currentPage?.keyword ?? '';
+      const querySearchMode = options.searchMode ?? currentPage?.searchMode ?? 'CHAT_CONTENT';
       const setLoadingMap = append ? setSessionMoreLoadingMap : setDetailLoadingMap;
       setLoadingMap((prev) => ({ ...prev, [projectId]: true }));
       try {
@@ -362,6 +412,7 @@ const ProjectSpaceList: React.FC = () => {
             pageNum: nextPageNum,
             pageSize: PROJECT_SESSION_PAGE_SIZE,
             keyword: queryKeyword || undefined,
+            searchMode: queryKeyword ? querySearchMode : undefined,
           },
           { responseCfg: { hideErrorTips: true } }
         );
@@ -385,6 +436,7 @@ const ProjectSpaceList: React.FC = () => {
             pageSize: Number(pageData?.pageSize || PROJECT_SESSION_PAGE_SIZE),
             total,
             keyword: queryKeyword,
+            searchMode: querySearchMode,
           },
         }));
         return nextProject;
@@ -436,8 +488,6 @@ const ProjectSpaceList: React.FC = () => {
 
   useEffect(() => {
     if (!visibleProjects.length) {
-      // 无可见项目时仅在状态实际有内容时清理，避免空对象触发 effect 重复更新。
-      setProjectScopeId((current) => current || undefined);
       setProjectSessionPageMap((current) => (Object.keys(current).length ? {} : current));
       setSessionMoreLoadingMap((current) => (Object.keys(current).length ? {} : current));
       return;
@@ -455,8 +505,15 @@ const ProjectSpaceList: React.FC = () => {
         // 新项目尚未进入列表时继续等待下一次列表刷新，暂不写入或删除本地存储。
         return;
       }
-      // 本地保存的项目已删除或无访问权限时清除旧值，随后自动回退到默认项目。
-      updateProjectScopeId();
+      if (projectScopeSearchKeyword.trim()) {
+        // 搜索结果不代表完整项目权限范围，不能据此清除其它模块刚同步过来的当前项目。
+        return;
+      }
+      if (hasMoreProjects) {
+        void loadMoreProjects();
+        return;
+      }
+      // 其它模块可能先更新共享值、后刷新列表；未命中时保留该值，删除和退出项目会显式清理。
       return;
     }
 
@@ -476,12 +533,16 @@ const ProjectSpaceList: React.FC = () => {
     updateProjectScopeId(firstProject.projectId);
     setSessionKeyword('');
     // 打开项目模块时默认选择系统默认项目，让会话列表直接可见。
-    void fetchProjectSessions(firstProject, { force: true, keyword: '' });
+    void fetchProjectSessions(firstProject, { force: true, keyword: '', searchMode: sessionSearchMode });
   }, [
     fetchProjectSessions,
+    hasMoreProjects,
     inaccessibleProjectIds,
+    loadMoreProjects,
     projectScopeId,
+    projectScopeSearchKeyword,
     projectSessionPageMap,
+    sessionSearchMode,
     updateProjectScopeId,
     visibleProjects,
   ]);
@@ -711,6 +772,9 @@ const ProjectSpaceList: React.FC = () => {
 
   // 唯一新建入口:统一向导。step1 是完整项目表单,选研发才展开后续步骤,非研发建完即完成。
   const handleOpenCreateProject = () => {
+    // 会话模块打开新建项目向导时隐藏项目切换下拉，避免下拉菜单残留在弹窗遮罩下方。
+    setProjectScopeDropdownOpen(false);
+    setProjectScopeSearchKeyword('');
     setEditingProject(undefined);
     setWizardOpen(true);
   };
@@ -736,15 +800,19 @@ const ProjectSpaceList: React.FC = () => {
       values.projectType === 'default'
         ? false
         : submitIsDevelopProject || submitIsOperationProject || values.sharedFlag;
+    const submitIsShare = submitSharedFlag ? ('Y' as const) : ('N' as const);
     const shareMembers = submitSharedFlag ? values.shareMembers || [] : [];
     try {
-      const res = await createProject({
-        projectName,
-        description: values.description?.trim(),
-        projectType: values.projectType,
-        isShare: submitSharedFlag ? 'Y' : 'N',
-        shareTargets: [],
-      });
+      const res = await createProject(
+        {
+          projectName,
+          description: values.description?.trim(),
+          projectType: values.projectType,
+          isShare: submitIsShare,
+          shareTargets: [],
+        },
+        { responseCfg: { hideErrorTips: true } }
+      );
       const createdProjectId = getProjectIdFromSaveResponse(res);
       if (!createdProjectId) {
         message.error(t('message.createFailed'));
@@ -753,10 +821,6 @@ const ProjectSpaceList: React.FC = () => {
       if (submitSharedFlag && shareMembers.length) {
         await syncProjectShareMembers(createdProjectId, shareMembers);
       }
-      // 仅研发项目落库默认员工覆盖(项目作用域);其余类型不显示该区块,也不写空覆盖行。
-      if (submitIsDevelopProject && values.defaultAgents) {
-        await saveDefaultAgent({ ...values.defaultAgents, projectId: Number(createdProjectId) });
-      }
       message.success(t('message.createSuccess'));
       const refreshedProjects = await fetchProjects();
       const createdProject = refreshedProjects.find((project) => `${project.projectId}` === createdProjectId);
@@ -764,26 +828,9 @@ const ProjectSpaceList: React.FC = () => {
       return createdProjectId;
     } catch (error) {
       console.error('Failed to create project via wizard:', error);
-      message.error(t('message.createFailed'));
+      message.error(getProjectMutationErrorMessage(error, t('message.createFailed')));
       return '';
     }
-  };
-
-  const handleWizardEnterArchitectChat = (createdProjectId: string) => {
-    const target = mergedProjects.find((project) => `${project.projectId}` === createdProjectId);
-    setWizardOpen(false);
-    clearDetailPanel?.();
-    setAgentId?.('');
-    setSessionId?.('');
-    // 复用新建会话入口进入架构员工聊天,首轮对话自动完成项目绑定后进行工作区初始化。
-    navigate('/chat', {
-      state: {
-        keepSiderActiveKey: 'sessions',
-        from: 'projectSpace',
-        projectId: createdProjectId,
-        projectName: target?.projectName,
-      },
-    });
   };
 
   const handleNewChat = useCallback(() => {
@@ -852,18 +899,6 @@ const ProjectSpaceList: React.FC = () => {
       handleOpenProjectDetail(target);
     }
   };
-
-  useEffect(() => {
-    // 研发项目首次进入项目空间时自动展开项目详情，避免用户每次都需要手动点击"进入项目详情"。
-    // ref 保证仅在组件挂载后首次选中研发项目时触发，之后用户主动返回会话列表不会被重新拉回。
-    if (hasAutoOpenedDetailRef.current || !activeScopeProject || activeScopeProject.projectType !== 'develop') return;
-    hasAutoOpenedDetailRef.current = true;
-    setDetailProject(activeScopeProject);
-    void fetchProjectFullDetail(activeScopeProject, true).then((detail) => {
-      const targetProjectId = `${activeScopeProject.projectId}`;
-      setDetailProject((current) => (`${current?.projectId || ''}` === targetProjectId ? detail : current));
-    });
-  }, [activeScopeProject, fetchProjectFullDetail]);
 
   const handleProjectSharedChange = useCallback(
     (projectId: string | number) => {
@@ -1013,7 +1048,11 @@ const ProjectSpaceList: React.FC = () => {
       const selectedProject = mergedProjects.find((project) => project.projectId === projectScopeId);
       if (selectedProject) {
         // 搜索条件只作用于当前项目的会话，不再过滤项目下拉列表。
-        void fetchProjectSessions(selectedProject, { force: true, keyword: nextKeyword });
+        void fetchProjectSessions(selectedProject, {
+          force: true,
+          keyword: nextKeyword,
+          searchMode: sessionSearchMode,
+        });
       }
       sessionSearchTimerRef.current = null;
     }, 300);
@@ -1026,7 +1065,26 @@ const ProjectSpaceList: React.FC = () => {
     }
     const selectedProject = mergedProjects.find((project) => project.projectId === projectScopeId);
     if (selectedProject) {
-      void fetchProjectSessions(selectedProject, { force: true, keyword: sessionKeyword });
+      void fetchProjectSessions(selectedProject, {
+        force: true,
+        keyword: sessionKeyword,
+        searchMode: sessionSearchMode,
+      });
+    }
+  };
+
+  const handleSessionSearchModeChange = (searchMode: DevloopProjectSessionSearchMode) => {
+    if (searchMode === sessionSearchMode) return;
+    if (sessionSearchTimerRef.current) {
+      clearTimeout(sessionSearchTimerRef.current);
+      sessionSearchTimerRef.current = null;
+    }
+
+    setSessionSearchMode(searchMode);
+    const selectedProject = mergedProjects.find((project) => project.projectId === projectScopeId);
+    if (selectedProject) {
+      // 切换方式即刻按当前关键字重新搜索；空关键字仍回到该项目的完整会话列表。
+      void fetchProjectSessions(selectedProject, { force: true, keyword: sessionKeyword, searchMode });
     }
   };
 
@@ -1057,19 +1115,25 @@ const ProjectSpaceList: React.FC = () => {
       values.projectType === 'default'
         ? false
         : submitIsDevelopProject || submitIsOperationProject || values.sharedFlag;
+    const submitIsShare = submitSharedFlag ? ('Y' as const) : ('N' as const);
     const shareMembers = submitSharedFlag ? values.shareMembers || [] : [];
     let createdProjectId = '';
     try {
       if (editingProject) {
-        const updatePayload = {
+        const updatePayload: Parameters<typeof updateProject>[0] = {
           projectId: Number(editingProject.projectId),
           projectName,
           description: values.description?.trim(),
           projectType: values.projectType,
-          isShare: submitSharedFlag ? 'Y' : 'N',
+          isShare: submitIsShare,
           shareTargets: [],
+          resources: values.resources || [],
         };
         await updateProject(updatePayload);
+        await saveProjectResources({
+          projectId: Number(editingProject.projectId),
+          resources: values.resources || [],
+        });
         if (submitSharedFlag && values.shareMembersLoaded) {
           await syncProjectShareMembers(editingProject.projectId, shareMembers);
         }
@@ -1081,12 +1145,13 @@ const ProjectSpaceList: React.FC = () => {
             projectName,
             description: values.description?.trim(),
             projectType: values.projectType,
-            isShare: submitSharedFlag ? 'Y' : 'N',
+            isShare: submitIsShare,
             sharedFlag: submitSharedFlag,
             members:
               submitSharedFlag && values.shareMembersLoaded
-                ? shareMembers.map(normalizeProjectMember)
+                ? normalizeProjectMembers(shareMembers)
                 : prev[editingProject.projectId]?.members,
+            resources: values.resources || [],
             shareTargets: [],
           },
         }));
@@ -1098,30 +1163,29 @@ const ProjectSpaceList: React.FC = () => {
             projectName,
             description: values.description?.trim(),
             projectType: values.projectType,
-            isShare: submitSharedFlag ? 'Y' : 'N',
+            isShare: submitIsShare,
             sharedFlag: submitSharedFlag,
+            resources: values.resources || [],
           };
         });
       } else {
-        const res = await createProject({
-          projectName,
-          description: values.description?.trim(),
-          // 新增项目空间只提交当前表单字段。
-          projectType: values.projectType,
-          isShare: submitSharedFlag ? 'Y' : 'N',
-          shareTargets: [],
-        });
+        const res = await createProject(
+          {
+            projectName,
+            description: values.description?.trim(),
+            // 新增项目空间只提交当前表单字段。
+            projectType: values.projectType,
+            isShare: submitIsShare,
+            shareTargets: [],
+            resources: values.resources || [],
+          },
+          { responseCfg: { hideErrorTips: true } }
+        );
         createdProjectId = getProjectIdFromSaveResponse(res);
         if (createdProjectId && submitSharedFlag && shareMembers.length) {
           await syncProjectShareMembers(createdProjectId, shareMembers);
         }
         message.success(t('message.createSuccess'));
-      }
-      // 仅研发项目落库默认员工覆盖(项目作用域,projectId>0);后端 upsert,空串角色即清除该覆盖回退全局。
-      // 运营/普通项目不显示该区块,也不写空覆盖行。
-      const savedProjectId = editingProject ? editingProject.projectId : createdProjectId;
-      if (savedProjectId && submitIsDevelopProject && values.defaultAgents) {
-        await saveDefaultAgent({ ...values.defaultAgents, projectId: Number(savedProjectId) });
       }
       setProjectModalOpen(false);
       setEditingProject(undefined);
@@ -1134,9 +1198,9 @@ const ProjectSpaceList: React.FC = () => {
         if (createdProject) {
           updateProjectScopeId(selectedProjectId);
         } else {
-          // 列表尚未返回新项目时仅保留当前会话选择，待项目可见后由 effect 写入本地存储。
+          // 列表尚未返回新项目时先同步共享项目值，待列表刷新后再完成可见性校验。
           pendingCreatedProjectIdRef.current = selectedProjectId;
-          setProjectScopeId(selectedProjectId);
+          updateProjectScopeId(selectedProjectId);
         }
         setSessionKeyword('');
         EventEmitter.emit('projectSpace-active-project-change', {
@@ -1146,7 +1210,9 @@ const ProjectSpaceList: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to create project:', error);
-      message.error(t(editingProject ? 'message.updateFailed' : 'message.createFailed'));
+      message.error(
+        getProjectMutationErrorMessage(error, t(editingProject ? 'message.updateFailed' : 'message.createFailed'))
+      );
     } finally {
       projectSavingRef.current = false;
       setProjectCreating(false);
@@ -1160,6 +1226,8 @@ const ProjectSpaceList: React.FC = () => {
     }
 
     clearDetailPanel?.();
+    // 每次打开项目会话都以该会话详情返回的员工为准，清除目标会话上次遗留的多员工输入草稿。
+    clearEasyConfirmInputDraft(session.sessionId);
 
     if (Array.isArray(session.sessionExts) && session.sessionExts.length > 0) {
       dispatch({
@@ -1180,6 +1248,9 @@ const ProjectSpaceList: React.FC = () => {
       sessionId: `${session.sessionId}`,
       sessionName: session.sessionName || t('newChatName'),
       projectId: `${project.projectId}`,
+      // 显式写回空值，避免 Redux 中同 ID 旧缓存的员工字段继续残留。
+      objectId: session.objectId,
+      objectType: session.objectType,
     };
 
     dispatch({
@@ -1194,14 +1265,17 @@ const ProjectSpaceList: React.FC = () => {
     });
 
     // 项目空间只负责切换会话上下文，右侧仍然复用原聊天页。
-    setSessionId?.(`${session.sessionId}`);
     setAgentId?.(session.objectId ? `${session.objectId}` : '');
+    setSessionId?.(`${session.sessionId}`);
     navigate('/chat', {
       state: {
         keepSiderActiveKey: 'sessions',
         projectId: project.projectId,
         projectName: project.projectName,
         from: 'projectSpace',
+        // 聊天页初始化时直接使用本次详情返回的员工，避免等待会话缓存更新期间短暂沿用旧员工。
+        selectedAgentId: session.objectId,
+        selectedAgentObjectType: session.objectType,
       },
     });
   };
@@ -1329,6 +1403,7 @@ const ProjectSpaceList: React.FC = () => {
       const loadedCount = projectDetailMap[projectId]?.sessions?.length ?? project.sessions?.length ?? 0;
       const total = sessionPage?.total ?? project.sessionCount ?? 0;
       const queryKeyword = sessionPage?.keyword ?? sessionKeyword;
+      const querySearchMode = sessionPage?.searchMode ?? sessionSearchMode;
 
       if (!sessionPage || loadedCount >= total || detailLoadingMap[projectId] || sessionMoreLoadingMap[projectId]) {
         return;
@@ -1336,7 +1411,7 @@ const ProjectSpaceList: React.FC = () => {
 
       const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
       if (scrollHeight - scrollTop - clientHeight <= 80) {
-        void fetchProjectSessions(project, { append: true, keyword: queryKeyword });
+        void fetchProjectSessions(project, { append: true, keyword: queryKeyword, searchMode: querySearchMode });
       }
     },
     [
@@ -1346,6 +1421,7 @@ const ProjectSpaceList: React.FC = () => {
       projectSessionPageMap,
       sessionKeyword,
       sessionMoreLoadingMap,
+      sessionSearchMode,
     ]
   );
 
@@ -1353,6 +1429,7 @@ const ProjectSpaceList: React.FC = () => {
     const sessions = sortProjectSessions(project.sessions || []);
     const isLoading = detailLoadingMap[project.projectId];
     const isLoadingMore = sessionMoreLoadingMap[project.projectId];
+    const searchKeyword = projectSessionPageMap[project.projectId]?.keyword || undefined;
 
     if (isLoading) {
       return (
@@ -1391,6 +1468,7 @@ const ProjectSpaceList: React.FC = () => {
               onSessionEditRollback={(payload) => handleProjectSessionNameChange(project, payload)}
               onSessionDeleteOptimistic={() => handleProjectSessionDeleteOptimistic(project, session)}
               onSessionDeleteRollback={() => handleProjectSessionDeleteRollback(project, session)}
+              searchKeyword={searchKeyword}
             />
           );
         })}
@@ -1419,47 +1497,60 @@ const ProjectSpaceList: React.FC = () => {
         <>
           <div className={styles.header}>
             <div className={styles.scopeActionRow}>
-              <Dropdown
-                // 展开状态仅由项目输入框控制，避免 Dropdown 点击触发与输入框聚焦同时切换导致闪退。
-                trigger={[]}
-                open={projectScopeDropdownOpen}
-                overlayClassName={styles.scopeDropdown}
-                onOpenChange={(open) => {
-                  setProjectScopeDropdownOpen(open);
-                  if (!open) setProjectScopeSearchKeyword('');
-                }}
-                menu={{
-                  items: projectScopeMenuItems,
-                  selectedKeys: projectScopeId ? [projectScopeId] : [],
-                  onClick: handleSelectProjectScope,
-                }}
-                dropdownRender={(menu) => (
-                  <div className={styles.scopeDropdownMenu} onScroll={handleProjectScopeMenuScroll}>
-                    {projectScopeMenuItems.length ? (
-                      menu
-                    ) : !loading ? (
-                      <Empty
-                        className={styles.scopeDropdownEmpty}
-                        image={Empty.PRESENTED_IMAGE_SIMPLE}
-                        description={t('projectSearchEmpty')}
-                      />
-                    ) : null}
-                    {loading && <Spin className={styles.scopeDropdownLoading} size="small" />}
-                  </div>
-                )}
-              >
-                {/* 项目选择框同时作为后端搜索入口，聚焦后直接输入关键词。 */}
-                <Input
-                  allowClear={projectScopeDropdownOpen}
-                  className={styles.scopeInput}
-                  placeholder={projectScopeDropdownOpen ? t('projectSearchPlaceholder') : undefined}
-                  suffix={<DownOutlined />}
-                  value={projectScopeDropdownOpen ? projectScopeSearchKeyword : scopeTitle}
-                  onFocus={() => setProjectScopeDropdownOpen(true)}
-                  onClick={() => setProjectScopeDropdownOpen(true)}
-                  onChange={(event) => setProjectScopeSearchKeyword(event.target.value)}
-                />
-              </Dropdown>
+              <div ref={projectScopeTriggerRef} className={styles.scopeDropdownTrigger}>
+                <Dropdown
+                  // 新建项目时只收起下拉菜单，保留输入框中的当前项目名称。
+                  trigger={[]}
+                  open={projectScopeDropdownOpen && !wizardOpen}
+                  overlayClassName={styles.scopeDropdown}
+                  onOpenChange={(open) => {
+                    if (wizardOpen) return;
+                    setProjectScopeDropdownOpen(open);
+                    if (!open) setProjectScopeSearchKeyword('');
+                  }}
+                  menu={{
+                    items: projectScopeMenuItems,
+                    selectedKeys: projectScopeId ? [projectScopeId] : [],
+                    onClick: handleSelectProjectScope,
+                  }}
+                  dropdownRender={(menu) => (
+                    <div
+                      className={styles.scopeDropdownMenu}
+                      data-project-scope-dropdown="true"
+                      onScroll={handleProjectScopeMenuScroll}
+                    >
+                      {projectScopeMenuItems.length ? (
+                        menu
+                      ) : !loading ? (
+                        <Empty
+                          className={styles.scopeDropdownEmpty}
+                          image={Empty.PRESENTED_IMAGE_SIMPLE}
+                          description={t('projectSearchEmpty')}
+                        />
+                      ) : null}
+                      {loading && <Spin className={styles.scopeDropdownLoading} size="small" />}
+                    </div>
+                  )}
+                >
+                  {/* 项目选择框同时作为后端搜索入口，聚焦后直接输入关键词。 */}
+                  <Input
+                    allowClear={projectScopeDropdownOpen && !wizardOpen}
+                    className={styles.scopeInput}
+                    placeholder={projectScopeDropdownOpen && !wizardOpen ? t('projectSearchPlaceholder') : undefined}
+                    suffix={<DownOutlined />}
+                    value={!wizardOpen && projectScopeDropdownOpen ? projectScopeSearchKeyword : scopeTitle}
+                    onFocus={() => {
+                      if (!wizardOpen) setProjectScopeDropdownOpen(true);
+                    }}
+                    onClick={() => {
+                      if (!wizardOpen) setProjectScopeDropdownOpen(true);
+                    }}
+                    onChange={(event) => {
+                      if (!wizardOpen) setProjectScopeSearchKeyword(event.target.value);
+                    }}
+                  />
+                </Dropdown>
+              </div>
               <Tooltip title={t('createProject')} placement="top">
                 {/* 唯一新建入口:统一向导。step1 完整表单,选研发才展开后续步骤。 */}
                 <Button className={styles.newProjectButton} icon={<PlusOutlined />} onClick={handleOpenCreateProject} />
@@ -1474,7 +1565,45 @@ const ProjectSpaceList: React.FC = () => {
               <Input
                 value={sessionKeyword}
                 prefix={<SearchOutlined onClick={handleSessionSearchSubmit} />}
-                placeholder={t('searchPlaceholder')}
+                suffix={
+                  <Dropdown
+                    trigger={['click']}
+                    menu={{
+                      selectable: true,
+                      selectedKeys: [sessionSearchMode],
+                      items: [
+                        {
+                          key: 'DIGITAL_EMPLOYEE',
+                          label: t('searchMode.digitalEmployee'),
+                        },
+                        {
+                          key: 'CHAT_CONTENT',
+                          label: t('searchMode.chatContent'),
+                        },
+                      ],
+                      onClick: ({ key }) => handleSessionSearchModeChange(key as DevloopProjectSessionSearchMode),
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className={styles.sessionSearchModeTrigger}
+                      aria-label={t('searchMode.label')}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <span>
+                        {sessionSearchMode === 'DIGITAL_EMPLOYEE'
+                          ? t('searchMode.digitalEmployeeShort')
+                          : t('searchMode.chatContentShort')}
+                      </span>
+                      <DownOutlined />
+                    </button>
+                  </Dropdown>
+                }
+                placeholder={
+                  sessionSearchMode === 'DIGITAL_EMPLOYEE'
+                    ? t('searchPlaceholderDigitalEmployee')
+                    : t('searchPlaceholderChatContent')
+                }
                 onChange={(event) => handleSessionSearchChange(event.target.value)}
                 onPressEnter={handleSessionSearchSubmit}
               />
@@ -1532,7 +1661,6 @@ const ProjectSpaceList: React.FC = () => {
         onCancel={() => setWizardOpen(false)}
         onCreateProject={handleWizardCreateProject}
         onFinish={handleWizardFinish}
-        onEnterArchitectChat={handleWizardEnterArchitectChat}
       />
     </div>
   );

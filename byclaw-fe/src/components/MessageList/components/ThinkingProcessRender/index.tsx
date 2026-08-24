@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect } from 'react';
 // @ts-ignore
-import { DownOutlined, UpOutlined } from '@ant-design/icons';
+import { DownOutlined, RightOutlined } from '@ant-design/icons';
 // @ts-ignore
 import ThinkNewRootTitle from '@/components/MessagesComp/Think/ThinkRootTitle/components/ThinkNewRootTitle';
 import { IMessageState } from '@/constants/message';
@@ -97,12 +97,12 @@ function ThinkingProcessRender(props: IProps) {
               {intl.formatMessage({ id: 'thinkingProcess.done' })}
             </span>
             {!myThinkCollapse && (
-              <UpOutlined
+              <DownOutlined
                 style={{ fontSize: '12px', marginLeft: '12px', color: 'var(--beyond-color-text-tertiary)' }}
               />
             )}
             {myThinkCollapse && (
-              <DownOutlined
+              <RightOutlined
                 style={{ fontSize: '12px', marginLeft: '12px', color: 'var(--beyond-color-text-tertiary)' }}
               />
             )}

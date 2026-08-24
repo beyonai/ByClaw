@@ -1,12 +1,23 @@
 {
   "id": "baiying-enhance",
   "name": "Baiying Enhance",
-  "description": "Sync authorized Baiying digital employee JSON from Redis into OpenClaw and expose Redis-backed resources through baiying_call.",
+  "description": "Sync authorized Baiying digital employee JSON from Redis into OpenClaw, expose Redis-backed resources through baiying_call, and route native image_generate requests through Redis-selected image models.",
   "version": "1.0.0",
   "enabledByDefault": true,
   "providers": ["baiying-aimodel"],
   "contracts": {
-    "tools": ["baiying_call"]
+    "tools": ["baiying_call"],
+    "imageGenerationProviders": ["baiying-redis-image", "volcengine"]
+  },
+  "imageGenerationProviderMetadata": {
+    "baiying-redis-image": {
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.baiying-enhance",
+          "required": ["enabled"]
+        }
+      ]
+    }
   },
   "configSchema": {
     "type": "object",

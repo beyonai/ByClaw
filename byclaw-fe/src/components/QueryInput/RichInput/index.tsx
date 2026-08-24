@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState, forwardRef, useImperativeHandle, useRef } from 'react';
-import { createEditor, Descendant, Transforms, Editor, Element, Range } from 'slate';
+import { createEditor, Descendant, Transforms, Editor, Element, Range, Path } from 'slate';
 import { Slate, Editable, withReact, ReactEditor } from 'slate-react';
 import { withHistory } from 'slate-history';
 import { useIntl } from '@umijs/max';
@@ -33,6 +33,8 @@ import { setAgentCache } from './agentCache';
 import useDefaultAgentElement from './useDefaultAgentElement';
 import useOnPaste from './useOnPaste';
 import useGlobal from '@/hooks/useGlobal';
+import { agentTypeMap } from '@/constants/agent';
+import type { MentionElementType } from './elements/mention';
 
 type SetTextParams = string | Parameters<typeof getDescendantValueByDefaultValue>[0];
 
@@ -46,6 +48,70 @@ const isAgentToolNode = (node: unknown): node is ResourceElementType => {
 
 const getAgentIdentityKeys = (node: { agentId?: string | number; resourceCode?: string }) =>
   [node.agentId, node.resourceCode].filter(Boolean).map((item) => `${item}`);
+
+const isDigitalEmployeeMentionNode = (node: unknown): node is MentionElementType => {
+  if (!node || typeof node !== 'object') {
+    return false;
+  }
+  const candidate = node as { type?: unknown; resourceType?: unknown };
+  return candidate.type === ELEMENT_MENTION && candidate.resourceType === ResourceType.digitalEmployee;
+};
+
+const isSameAgent = (node: { agentId?: string | number; resourceCode?: string }, selectedIdentityKeys: Set<string>) =>
+  getAgentIdentityKeys(node).some((identityKey) => selectedIdentityKeys.has(identityKey));
+
+/**
+ * 数字员工组与普通数字员工互斥：保留被替换节点供用户识别，但标记为不参与本轮调度。
+ * 返回已存在的同一数字员工路径，调用方可避免重复插入。
+ */
+const applyExclusiveDigitalEmployeeSelection = (editor: Editor, selectedNode: MentionElementType): Path | undefined => {
+  const selectedIdentityKeys = new Set(getAgentIdentityKeys(selectedNode));
+  if (!selectedIdentityKeys.size) {
+    return undefined;
+  }
+
+  const selectableEntries = Array.from(
+    Editor.nodes(editor, {
+      at: [],
+      match: (node) => isDigitalEmployeeMentionNode(node) || isAgentToolNode(node),
+    })
+  );
+  const selectedIsGroup = selectedNode.agentType === agentTypeMap.employeeGroup;
+  let existingSelectedPath: Path | undefined;
+
+  Editor.withoutNormalizing(editor, () => {
+    selectableEntries.forEach(([node, path]) => {
+      if (isDigitalEmployeeMentionNode(node)) {
+        const isSelectedAgent = isSameAgent(node, selectedIdentityKeys);
+        if (isSelectedAgent) {
+          existingSelectedPath = path;
+          Transforms.setNodes(editor, { isInactiveAgentSelection: false }, { at: path });
+          return;
+        }
+
+        const shouldDeactivate =
+          selectedIsGroup ||
+          (selectedNode.agentType !== agentTypeMap.employeeGroup && node.agentType === agentTypeMap.employeeGroup);
+        if (shouldDeactivate && !node.isInactiveAgentSelection) {
+          Transforms.setNodes(editor, { isInactiveAgentSelection: true }, { at: path });
+        }
+        return;
+      }
+
+      if (isAgentToolNode(node)) {
+        if (selectedIsGroup) {
+          if (!node.isInactiveAgentSelection) {
+            Transforms.setNodes(editor, { isInactiveAgentSelection: true }, { at: path });
+          }
+        } else if (isSameAgent(node, selectedIdentityKeys) && node.isInactiveAgentSelection) {
+          Transforms.setNodes(editor, { isInactiveAgentSelection: false }, { at: path });
+        }
+      }
+    });
+  });
+
+  return existingSelectedPath;
+};
 
 /** 带 aria-label 的 Editable 根元素，用于无障碍与测试定位（slate-react 未将 aria-label 透传到 DOM） */
 const EditableRootWithAria = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>((props, ref) => (
@@ -77,6 +143,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
   const isFirstAutoOnChange = useRef(true);
   const editorWrapRef = useRef<HTMLDivElement>(null);
   const lastChatModeRef = useRef(chatMode);
+  const insertItemRef = useRef<RichInputRef['insertItem']>(() => undefined);
   const { EventEmitter } = useGlobal();
 
   /**
@@ -228,10 +295,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
       Editor.nodes(editor, {
         at: [],
         mode: 'lowest',
-        match: (node) =>
-          Element.isElement(node) &&
-          node.type === ELEMENT_MENTION &&
-          node.resourceType === ResourceType.digitalEmployee,
+        match: (node) => isDigitalEmployeeMentionNode(node),
       })
     )
       .map(([node]) => node)
@@ -241,16 +305,16 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
         identityKeys.forEach((item) => mentionedEmployeeIds.add(item));
         return true;
       });
-    const resourceList = getResourceList(
-      includeQuestion
-        ? value
-        : [
-            {
-              type: 'paragraph',
-              children: mentionNodes,
-            } as ParagraphElementType,
-        ]
-    );
+    let persistentValue = value;
+    if (!includeQuestion) {
+      persistentValue = [
+        {
+          type: 'paragraph',
+          children: mentionNodes,
+        } as ParagraphElementType,
+      ];
+    }
+    const resourceList = getResourceList(persistentValue, true);
     const mentionText = mentionNodes.map((node: any) => `{{${getNodeResourceData(node).id}}}`).join('');
     const defaultMentionText = mentionNodes
       .filter((node: any) => node.isDefaultAgent)
@@ -259,7 +323,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
 
     return {
       // 普通草稿还要带上问题文本；发送后的草稿只保留数字员工 mention。
-      text: includeQuestion ? `${defaultMentionText}${getInputText(value).text}` : mentionText,
+      text: includeQuestion ? `${defaultMentionText}${getInputText(value, true).text}` : mentionText,
       resourceList,
     };
   };
@@ -370,6 +434,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
         ...node,
         // @ts-ignore
         isDefaultAgent: false,
+        isInactiveAgentSelection: false,
       };
     } else if (type === ResourceType.agentTool && isAgentToolNode(node)) {
       const hasInlineAgent =
@@ -442,6 +507,13 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
       handleCloseMention();
       return;
     }
+    if (type === ResourceType.digitalEmployee && isDigitalEmployeeMentionNode(node)) {
+      const existingSelectedPath = applyExclusiveDigitalEmployeeSelection(editor, node);
+      if (existingSelectedPath) {
+        handleCloseMention();
+        return;
+      }
+    }
     const originalPoint = editor.selection?.anchor;
     Transforms.insertNodes(editor, node);
     setTimeout(() => {
@@ -450,17 +522,20 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
     handleCloseMention();
   };
 
+  insertItemRef.current = insertItem;
+
   useEffect(() => {
     const handleInsertItem = ({ item, type }: { item: any; type: IResourceType }) => {
-      insertItem(item, type);
+      insertItemRef.current(item, type);
     };
 
+    // 会话持续输出会触发输入框频繁渲染，引用监听保持常驻，确保右侧资源列表始终可以操作和引用。
     EventEmitter.on('queryInput-insert-item', handleInsertItem);
 
     return () => {
       EventEmitter.off('queryInput-insert-item', handleInsertItem);
     };
-  });
+  }, [EventEmitter]);
 
   const onDrop = (e: React.DragEvent) => {
     // 原有的内部数据拖拽逻辑
@@ -495,7 +570,14 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
       insertNode = {
         ...node,
         isDefaultAgent: checkIsDefaultAgent(node, true),
+        isInactiveAgentSelection: false,
       };
+      if (insertNode.resourceType === ResourceType.digitalEmployee && isDigitalEmployeeMentionNode(insertNode)) {
+        const existingSelectedPath = applyExclusiveDigitalEmployeeSelection(editor, insertNode);
+        if (existingSelectedPath) {
+          return;
+        }
+      }
     }
     if (node.type === ELEMENT_RESOURCE) {
       if (!checkIfCanQuote()) return;
@@ -561,6 +643,9 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
         inputText={mentionPopoverData.inputText}
         onClose={handleCloseMention}
         chatMode={chatMode}
+        excludedAgentIds={getResourceList(value, true)
+          .filter((resource) => resource.resourceType === ResourceType.digitalEmployee)
+          .flatMap((resource) => [resource.resourceId, resource.resourceCode].filter(Boolean).map((item) => `${item}`))}
         resourceAgentIds={props.resourceAgentIds}
       />
     </div>

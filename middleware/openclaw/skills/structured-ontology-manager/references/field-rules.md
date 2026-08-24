@@ -10,6 +10,18 @@
 | `BOOLEAN` | `INTEGER` | 布尔值（0/1） |
 | `DATE` | `TEXT`    | 日期（ISO 8601） |
 
+## 术语同步字段与对象关联一致性
+
+- 每个实体对象都由平台自动生成系统主键 `id`。不要在 `fields` 中重复创建 `id`，也不要把业务字段标成系统主键。
+- 业务标识使用 `*_code`、`*_no` 或明确业务名称，例如 `event_code`、`employee_code`、`application_no`。
+- 父对象实际生效的 `term_sync.term_code_field` 是对象型 LIST_TERM 关联键的唯一事实来源；缺失或空值时默认 `id`。
+- 子对象关系目标字段必须等于 `term_code_field`，关联字段和 Action 参数的数据类型必须与该父字段一致，下拉返回的术语 code 必须原值落库。
+- `term_code_field=id` 时，子对象通常使用 `<relation>_id` + `INTEGER`，Action 使用 `select_by_id(int(value))`。
+- `term_code_field=<business_field>` 时，子对象字段和 Action 参数使用该业务字段类型，Action 使用 `Q.eq(Parent.F.<business_field>, value)`。
+- 禁止术语同步用 `id`、关系或 Action 却使用 `event_code`；也禁止术语同步用业务字段、Action 却调用 `select_by_id`。
+
+> `user_name`、`dept_name` 等系统术语有自己的 code/name 语义，不属于上述对象型 LIST_TERM；仍按术语定义选择工号、姓名、部门编码或部门名称。
+
 ## 属性角色（property_role）
 
 | 角色 | 说明 |
@@ -51,7 +63,7 @@
 
 > `rel_term_codeorname: "code"` — 字段值是编码（如工号 `EMP001`、部门编码 `D003`），系统按编码匹配术语，展示时显示对应名称。
 > `rel_term_codeorname: "name"` — 字段值直接是名称（如 `张三`、`研发部`），按名称匹配。
-> 外键场景（字段存另一对象的 `id`）通常用 `"code"`，配合父表的 `term_sync` 联动。
+> 对象关联场景使用 `"code"`，实际保存值由父对象 `term_sync.term_code_field` 决定；默认保存系统 `id`，显式配置业务字段时保存该字段值。
 
 ### 人员字段绑定示例
 

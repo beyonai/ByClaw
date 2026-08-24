@@ -641,7 +641,11 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
           loading={options.loading}
           onClose={() => clearDetailPanel?.()}
         />,
-        { overlay: true }
+        {
+          overlay: true,
+          tabKey: `knowledge-file:${dataset.resourceId}:${item.id || item.collectionId || fileName}`,
+          title: fileName,
+        }
       );
     },
     [clearDetailPanel, setDetailPanel]
@@ -926,7 +930,14 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
 
   const onMenuItemClick = useCallback(
     (key: string, item: IKnowledgeDetailTreeItem) => {
-      if (key === 'rename') {
+      if (key === 'quote') {
+        if (quoteDisabled) return;
+        // 菜单引用与双击引用复用同一事件结构，确保目录和文件都能回填当前聊天输入框。
+        EventEmitter.emit('queryInput-insert-item', {
+          item,
+          type: getTreeNodeDragType(item),
+        });
+      } else if (key === 'rename') {
         modalAction.handleShow('edit', item);
       } else if (key === 'createFolder') {
         openAddFolder(getTreeItemDirectoryPath(item));
@@ -972,7 +983,9 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
     },
     [
       dataset.resourceId,
+      EventEmitter,
       getTreeItemDirectoryPath,
+      getTreeNodeDragType,
       handlePreviewFile,
       intl,
       message,
@@ -980,6 +993,7 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
       modalAction,
       openAddFolder,
       openSaveToFileBrowser,
+      quoteDisabled,
       refreshKnowledgeDirectory,
     ]
   );
@@ -1066,6 +1080,9 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
                     return item.title;
                   }
                   const menus = [];
+                  if (!quoteDisabled) {
+                    menus.push({ key: 'quote', label: intl.formatMessage({ id: 'common.quote' }) });
+                  }
                   if (item.type === 'directory') {
                     menus.push(
                       {

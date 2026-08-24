@@ -1,14 +1,34 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import org.apache.commons.lang3.StringUtils;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
+import com.iwhalecloud.byai.manager.application.service.devloop.ProjectRepositoryService;
+import com.iwhalecloud.byai.manager.application.service.devloop.WorkspaceInitService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberSaveDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoBranchDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoFileContentDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoFileQueryDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoTreeQueryDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoTreeNodeDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectResourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileDeleteDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileQueryDto;
@@ -17,27 +37,29 @@ import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileSaveDto;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
+import com.iwhalecloud.byai.manager.entity.devloop.ProjectResource;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
-import java.util.Map;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 
 /**
  * 项目管理控制器 提供研发项目的创建、查询、修改、删除接口
  */
 @RestController
 @RequestMapping("/project")
+@Tag(name = "项目管理", description = "研发项目的创建、查询、修改、删除及初始化接口")
 public class ProjectController {
 
     @Autowired
     private ProjectApplicationService projectApplicationService;
+
+    @Autowired
+    private WorkspaceInitService workspaceInitService;
+
+    @Autowired
+    private ProjectRepositoryService projectRepositoryService;
 
     /**
      * 创建项目
@@ -46,7 +68,7 @@ public class ProjectController {
      * @return 新建项目
      */
     @PostMapping("/create")
-    public ResponseUtil<Project> createProject(@RequestBody ProjectDTO dto) {
+    public ResponseUtil<Project> createProject(@Valid @RequestBody ProjectDTO dto) {
         return ResponseUtil.successResponse(projectApplicationService.createProject(dto));
     }
 
@@ -79,7 +101,7 @@ public class ProjectController {
      * @param dto 包含 projectId（必填）、projectName、description（可选）
      */
     @PostMapping("/update")
-    public ResponseUtil<Void> updateProject(@RequestBody ProjectDTO dto) {
+    public ResponseUtil<Void> updateProject(@Valid @RequestBody ProjectDTO dto) {
         projectApplicationService.updateProject(dto);
         return ResponseUtil.successResponse();
     }
@@ -97,26 +119,41 @@ public class ProjectController {
     }
 
     /**
-     * 触发研发项目工作区初始化：置为 initializing 并记录建索引/技能包配置。
+     * 第一段：初始化研发项目工作区。服务端克隆工作区仓库、挂子模块、装技能包并提交推送，成功后项目置 initialized。
      *
-     * @param params 包含 projectId（必填）、buildIndex（Y/N，可选）、skillPackages（字符串数组，可选）
+     * <p>同步执行：前端拿到成功响应即代表工作区已建好，随后展示「去跟架构聊天」按钮走第二段。
+     *
+     * @param params 含 projectId（必填）、buildIndex（是否建索引）、skillPackages（技能包数组）
      */
     @PostMapping("/init/start")
-    public ResponseUtil<Void> startProjectInit(@RequestBody Map<String, Object> params) {
-        projectApplicationService.startProjectInit(params);
+    public ResponseUtil<Void> initProject(@RequestBody Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        boolean buildIndex = Boolean.TRUE.equals(params.get("buildIndex"))
+            || "Y".equalsIgnoreCase(MapParamUtil.getStringValue(params, "buildIndex"));
+        workspaceInitService.initWorkspace(projectId, buildIndex, params.get("skillPackages"));
         return ResponseUtil.successResponse();
     }
 
     /**
-     * 标记研发项目工作区初始化完成：置为 ready，之后方可建需求/启动任务。
+     * 第二段：下发架构数字员工聊天，把工作区骨架聊完，项目置 initializing。
      *
-     * @param params 包含 projectId（必填）
+     * <p>接口只负责下发与置 initializing，真正的完成由 DevloopWorkspaceInitJob 读会话状态文件判定后置 ready。
+     * 建索引配置不再随入参传，取第一段落在项目行上的那份。
+     *
+     * @param params 含 projectId（必填）
+     * @return 本次初始化的会话与架构员工，前端据此跳进聊天并默认 @ 到该员工
      */
-    @PostMapping("/init/complete")
-    public ResponseUtil<Void> completeProjectInit(@RequestBody Map<String, Object> params) {
+    @PostMapping("/init/chat")
+    public ResponseUtil<Map<String, Object>> startArchitectChat(@RequestBody Map<String, Object> params) {
         Long projectId = MapParamUtil.getLongValue(params, "projectId");
-        projectApplicationService.completeProjectInit(projectId);
-        return ResponseUtil.successResponse();
+        WorkspaceInitService.WorkspaceInitStarted started = workspaceInitService.startArchitectChat(projectId);
+        // 架构员工与会话一起回：项目维度员工不在前端员工列表里，只给会话ID跳过去 @ 会兜底成「AI 助手」。
+        // ID 转字符串：雪花 ID 超过 JS 安全整数，给数字前端会截断。
+        Map<String, Object> result = new HashMap<>();
+        result.put("sessionId", String.valueOf(started.sessionId()));
+        result.put("architectAgentId", String.valueOf(started.architectAgentId()));
+        result.put("architectAgentName", StringUtils.defaultString(started.architectAgentName()));
+        return ResponseUtil.successResponse(result);
     }
 
     /**
@@ -181,6 +218,13 @@ public class ProjectController {
         return ResponseUtil.successResponse();
     }
 
+    /** 解除项目成员已绑定的数字员工。 */
+    @PostMapping("/member/unbindAgent")
+    public ResponseUtil<Void> unbindMemberAgent(@RequestBody Map<String, Object> params) {
+        projectApplicationService.unbindMemberAgent(params);
+        return ResponseUtil.successResponse();
+    }
+
     /**
      * 新增项目仓库
      *
@@ -190,6 +234,12 @@ public class ProjectController {
     @PostMapping("/repo/create")
     public ResponseUtil<Map<String, Object>> createProjectRepo(@RequestBody ProjectRepoDTO dto) {
         return ResponseUtil.successResponse(projectApplicationService.createProjectRepo(dto));
+    }
+
+    /** 更新项目仓库配置，保留仓库主键以避免已有任务关联失效。 */
+    @PostMapping("/repo/update")
+    public ResponseUtil<Map<String, Object>> updateProjectRepo(@RequestBody ProjectRepoDTO dto) {
+        return ResponseUtil.successResponse(projectApplicationService.updateProjectRepo(dto));
     }
 
     /**
@@ -202,6 +252,81 @@ public class ProjectController {
     public ResponseUtil<List<ProjectRepo>> listProjectRepos(@RequestBody Map<String, Object> params) {
         Long projectId = MapParamUtil.getLongValue(params, "projectId");
         return ResponseUtil.successResponse(projectApplicationService.listProjectRepos(projectId));
+    }
+
+    /**
+     * 查询项目仓库目录的直接子节点。
+     *
+     * <p>path 为空查询仓库根目录；展开目录时将返回节点的 path 作为下一次请求的 path，
+     * 因此同一个接口即可按需查询任意层级，避免一次性拉取整个仓库。</p>
+     *
+     * @param query 包含 projectId、repoId；path、ref 可选
+     * @return 当前目录下的文件和目录
+     */
+    @PostMapping("/repo/tree")
+    public ResponseUtil<List<ProjectRepoTreeNodeDTO>> listProjectRepoTree(
+        @RequestBody ProjectRepoTreeQueryDTO query) {
+        return ResponseUtil.successResponse(projectRepositoryService.listTree(query == null ? null : query.getProjectId(),
+            query == null ? null : query.getRepoId(), query == null ? null : query.getPath(),
+            query == null ? null : query.getRef()));
+    }
+
+    /**
+     * 按指定分支搜索仓库文件名和路径。
+     *
+     * @param query 包含 projectId、repoId、keyword；ref 可选
+     * @return 匹配的文件和目录
+     */
+    @PostMapping("/repo/tree/search")
+    public ResponseUtil<List<ProjectRepoTreeNodeDTO>> searchProjectRepoTree(
+        @RequestBody ProjectRepoTreeQueryDTO query) {
+        return ResponseUtil.successResponse(projectRepositoryService.searchTree(
+            query == null ? null : query.getProjectId(), query == null ? null : query.getRepoId(),
+            query == null ? null : query.getKeyword(), query == null ? null : query.getRef()));
+    }
+
+    /**
+     * 查询仓库的全部远程分支。
+     *
+     * @param params 包含 repoId（必填）
+     * @return 远程分支列表
+     */
+    @PostMapping("/repo/branch/list")
+    public ResponseUtil<List<ProjectRepoBranchDTO>> listProjectRepoBranches(
+        @RequestBody Map<String, Object> params) {
+        Long repoId = MapParamUtil.getLongValue(params, "repoId");
+        return ResponseUtil.successResponse(projectRepositoryService.listBranches(repoId));
+    }
+
+    /**
+     * 查询指定远程分支上的文件内容。
+     *
+     * @param query 包含 repoId、branch、path，path 使用目录接口返回的文件路径
+     * @return 文件内容及元数据
+     */
+    @PostMapping("/repo/file/content")
+    public ResponseUtil<ProjectRepoFileContentDTO> getProjectRepoFileContent(
+        @RequestBody ProjectRepoFileQueryDTO query) {
+        return ResponseUtil.successResponse(projectRepositoryService.getFileContent(
+            query == null ? null : query.getRepoId(), query == null ? null : query.getBranch(),
+            query == null ? null : query.getPath()));
+    }
+
+    /** 查询项目绑定的知识库、数字员工和本体。 */
+    @PostMapping("/resource/list")
+    public ResponseUtil<List<ProjectResource>> listProjectResources(@RequestBody Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        return ResponseUtil.successResponse(projectApplicationService.listProjectResources(projectId));
+    }
+
+    /** 全量保存项目资源绑定关系。 */
+    @PostMapping("/resource/save")
+    public ResponseUtil<Void> saveProjectResources(@RequestBody Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        List<ProjectResourceDTO> resources = com.alibaba.fastjson.JSON.parseArray(
+            com.alibaba.fastjson.JSON.toJSONString(params.get("resources")), ProjectResourceDTO.class);
+        projectApplicationService.saveProjectResources(projectId, resources);
+        return ResponseUtil.successResponse();
     }
 
     /**

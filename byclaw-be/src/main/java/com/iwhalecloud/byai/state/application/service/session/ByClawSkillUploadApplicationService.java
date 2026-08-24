@@ -4,6 +4,8 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URLConnection;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -57,8 +59,11 @@ public class ByClawSkillUploadApplicationService {
 
     private static final String IGNORED_FILE_DS_STORE = ".DS_Store";
 
-    /** 兼容 Windows / 常见压缩工具未设置 UTF-8 标记时的中文 entry 名。 */
-    private static final String ZIP_ENTRY_NAME_FALLBACK_ENCODING = "GBK";
+    /** 兼容 Windows / 常见中文压缩工具未设置 UTF-8 标记时的 GBK entry 名。 */
+    private static final String ZIP_ENTRY_NAME_PRIMARY_ENCODING = "GBK";
+
+    /** 兼容 macOS 等按 UTF-8 写入 entry 名、但遗漏语言编码标志的压缩包。 */
+    private static final String ZIP_ENTRY_NAME_FALLBACK_ENCODING = StandardCharsets.UTF_8.name();
 
     @Autowired
     private UserFS userFS;
@@ -160,9 +165,34 @@ public class ByClawSkillUploadApplicationService {
     }
 
     private List<ParsedEntry> parseZipEntries(MultipartFile zipFile) {
+        List<ParsedEntry> result;
+        try {
+            result = readZipEntries(zipFile, ZIP_ENTRY_NAME_PRIMARY_ENCODING);
+        }
+        catch (CharacterCodingException primaryException) {
+            logger.debug("skill zip entry 名无法按 GBK 解码，使用 UTF-8 重试, filename={}",
+                lastPathSegment(zipFile.getOriginalFilename()));
+            try {
+                result = readZipEntries(zipFile, ZIP_ENTRY_NAME_FALLBACK_ENCODING);
+            }
+            catch (IOException fallbackException) {
+                fallbackException.addSuppressed(primaryException);
+                throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), fallbackException);
+            }
+        }
+        catch (IOException e) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), e);
+        }
+        if (result.isEmpty()) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.empty"));
+        }
+        return result;
+    }
+
+    private List<ParsedEntry> readZipEntries(MultipartFile zipFile, String entryNameEncoding) throws IOException {
         List<ParsedEntry> result = new ArrayList<>();
-        try (ZipArchiveInputStream zin = new ZipArchiveInputStream(zipFile.getInputStream(),
-            ZIP_ENTRY_NAME_FALLBACK_ENCODING, true, true)) {
+        try (ZipArchiveInputStream zin = new ZipArchiveInputStream(zipFile.getInputStream(), entryNameEncoding, true,
+            true)) {
             ArchiveEntry zipEntry;
             while ((zipEntry = zin.getNextEntry()) != null) {
                 if (zipEntry.isDirectory()) {
@@ -175,12 +205,6 @@ public class ByClawSkillUploadApplicationService {
                 byte[] content = zin.readAllBytes();
                 result.add(new ParsedEntry(normalized, content));
             }
-        }
-        catch (IOException e) {
-            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), e);
-        }
-        if (result.isEmpty()) {
-            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.empty"));
         }
         return result;
     }

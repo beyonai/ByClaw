@@ -5,12 +5,20 @@ jest.mock('@umijs/max', () => ({
 }));
 
 const mockGetSkillGroupDetail = jest.fn();
-const mockInstallSkillGroup = jest.fn();
+const mockPreflightInstallSkillGroup = jest.fn();
+const mockExecuteInstallSkillGroup = jest.fn();
+const mockPreflightUninstallSkillGroup = jest.fn();
+const mockUninstallSkillGroup = jest.fn();
+const mockRefreshSkillGroupDetail = jest.fn();
 const mockEmit = jest.fn();
 
 jest.mock('@/pages/manager/service/resources', () => ({
   getSkillGroupDetail: (...args: any[]) => mockGetSkillGroupDetail(...args),
-  installSkillGroup: (...args: any[]) => mockInstallSkillGroup(...args),
+  preflightInstallSkillGroup: (...args: any[]) => mockPreflightInstallSkillGroup(...args),
+  executeInstallSkillGroup: (...args: any[]) => mockExecuteInstallSkillGroup(...args),
+  preflightUninstallSkillGroup: (...args: any[]) => mockPreflightUninstallSkillGroup(...args),
+  uninstallSkillGroup: (...args: any[]) => mockUninstallSkillGroup(...args),
+  refreshSkillGroupDetail: (...args: any[]) => mockRefreshSkillGroupDetail(...args),
 }));
 
 jest.mock('@/hooks/useGlobal', () => ({
@@ -41,7 +49,19 @@ const detail = {
 describe('SkillGroupDetailDrawer', () => {
   beforeEach(() => {
     mockGetSkillGroupDetail.mockReset();
-    mockInstallSkillGroup.mockReset();
+    mockPreflightInstallSkillGroup.mockReset();
+    mockExecuteInstallSkillGroup.mockReset();
+    mockPreflightUninstallSkillGroup.mockReset();
+    mockUninstallSkillGroup.mockReset();
+    mockRefreshSkillGroupDetail.mockReset();
+    mockRefreshSkillGroupDetail.mockResolvedValue({ data: { ...detail, installedByGroup: false } });
+    mockPreflightUninstallSkillGroup.mockResolvedValue({
+      installedByGroup: true,
+      previewToken: 'preview-token',
+      exclusiveSkills: [],
+      sharedSkills: [],
+      affectedCount: 0,
+    });
     mockEmit.mockReset();
   });
 
@@ -72,6 +92,181 @@ describe('SkillGroupDetailDrawer', () => {
     expect(screen.getByText(detail.resourceDesc)).toBeInTheDocument();
     expect(screen.getByText('brainstorming')).toBeInTheDocument();
     expect(screen.getByText('user-research')).toBeInTheDocument();
+    expect(mockGetSkillGroupDetail).toHaveBeenCalledWith({ groupId: '101', digitalEmployeeId: '201' });
+  });
+
+  it('renders current member statuses and disables installation when every member is installed', async () => {
+    mockGetSkillGroupDetail.mockResolvedValue({
+      data: {
+        ...detail,
+        installedByGroup: true,
+        members: detail.members.map((member) => ({ ...member, memberStatus: 'INSTALLED' })),
+      },
+    });
+
+    render(<SkillGroupDetailDrawer groupId="101" digitalEmployeeId="201" onClose={jest.fn()} />);
+
+    expect(await screen.findAllByText('resource.skillGroup.memberStatus.installed')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'resource.skillGroup.installed' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'resource.skillGroup.uninstall' })).toBeInTheDocument();
+  });
+
+  it('keeps install enabled when skills are installed without this group source', async () => {
+    mockGetSkillGroupDetail.mockResolvedValue({
+      data: {
+        ...detail,
+        installedByGroup: false,
+        members: detail.members.map((member) => ({ ...member, memberStatus: 'INSTALLED' })),
+      },
+    });
+
+    render(<SkillGroupDetailDrawer groupId="101" digitalEmployeeId="201" />);
+
+    expect(await screen.findByRole('button', { name: 'resource.installSkillGroup' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'resource.skillGroup.uninstall' })).not.toBeInTheDocument();
+  });
+
+  it('shows shared sources and executes the selected force uninstall mode', async () => {
+    const installedDetail = {
+      ...detail,
+      installedByGroup: true,
+      members: detail.members.map((member) => ({ ...member, memberStatus: 'INSTALLED' })),
+    };
+    mockGetSkillGroupDetail.mockResolvedValue({ data: installedDetail });
+    mockPreflightUninstallSkillGroup.mockResolvedValue({
+      installedByGroup: true,
+      previewToken: 'preview-token',
+      exclusiveSkills: [],
+      sharedSkills: [
+        {
+          resourceId: '1',
+          resourceName: 'brainstorming',
+          manualSource: true,
+          otherGroupIds: ['202'],
+          otherGroupNames: ['渠道智采'],
+        },
+      ],
+      affectedCount: 1,
+    });
+    mockUninstallSkillGroup.mockResolvedValue({ removedSkillIds: ['1'], retainedSkillIds: [] });
+
+    render(<SkillGroupDetailDrawer groupId="101" digitalEmployeeId="201" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'resource.skillGroup.uninstall' }));
+    expect(await screen.findByText('resource.skillGroup.uninstallSharedDescription')).toBeInTheDocument();
+    expect(screen.getByText('resource.skillGroup.manualSource', { exact: false })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'resource.skillGroup.uninstallAll' }));
+    await waitFor(() =>
+      expect(mockUninstallSkillGroup).toHaveBeenCalledWith({
+        groupId: '101',
+        digitalEmployeeId: '201',
+        mode: 'REMOVE_ALL',
+        previewToken: 'preview-token',
+      })
+    );
+  });
+
+  it('uses lightweight confirmation and preserves shared sources when the preview is exclusive-only', async () => {
+    mockGetSkillGroupDetail.mockResolvedValue({
+      data: {
+        ...detail,
+        installedByGroup: true,
+        members: detail.members.map((member) => ({ ...member, memberStatus: 'INSTALLED' })),
+      },
+    });
+    mockPreflightUninstallSkillGroup.mockResolvedValue({
+      installedByGroup: true,
+      previewToken: 'preview-token',
+      exclusiveSkills: [{ resourceId: '1', manualSource: false, otherGroupIds: [], otherGroupNames: [] }],
+      sharedSkills: [],
+      affectedCount: 1,
+    });
+    mockUninstallSkillGroup.mockResolvedValue({ removedSkillIds: ['1'], retainedSkillIds: [] });
+
+    render(<SkillGroupDetailDrawer groupId="101" digitalEmployeeId="201" />);
+    const uninstallButton = await screen.findByRole('button', { name: 'resource.skillGroup.uninstall' });
+    await waitFor(() => expect(uninstallButton).toBeEnabled());
+    fireEvent.click(uninstallButton);
+    expect(await screen.findByText('resource.skillGroup.uninstallSimpleConfirm')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'common.confirm' }));
+
+    await waitFor(() =>
+      expect(mockUninstallSkillGroup).toHaveBeenCalledWith({
+        groupId: '101',
+        digitalEmployeeId: '201',
+        mode: 'PRESERVE_SHARED',
+        previewToken: undefined,
+      })
+    );
+  });
+
+  it('does not report a completed uninstall as failed when only the detail refresh fails', async () => {
+    mockGetSkillGroupDetail.mockResolvedValue({
+      data: {
+        ...detail,
+        installedByGroup: true,
+        members: detail.members.map((member) => ({ ...member, memberStatus: 'INSTALLED' })),
+      },
+    });
+    mockUninstallSkillGroup.mockResolvedValue({
+      removedSkillIds: ['1'],
+      retainedSkillIds: [],
+      summary: { members: detail.members.map((member) => ({ ...member, memberStatus: 'INSTALLABLE' })) },
+    });
+    mockRefreshSkillGroupDetail.mockRejectedValue(new Error('refresh failed'));
+
+    render(<SkillGroupDetailDrawer groupId="101" digitalEmployeeId="201" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'resource.skillGroup.uninstall' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+
+    await waitFor(() => expect(mockRefreshSkillGroupDetail).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: 'resource.skillGroup.uninstall' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'resource.installSkillGroup' })).toBeEnabled();
+  });
+
+  it('keeps the force modal open with the latest preview when the confirmation token expires', async () => {
+    mockGetSkillGroupDetail.mockResolvedValue({
+      data: {
+        ...detail,
+        installedByGroup: true,
+        members: detail.members.map((member) => ({ ...member, memberStatus: 'INSTALLED' })),
+      },
+    });
+    mockPreflightUninstallSkillGroup.mockResolvedValue({
+      installedByGroup: true,
+      previewToken: 'old-token',
+      exclusiveSkills: [],
+      sharedSkills: [
+        { resourceId: '1', resourceName: 'brainstorming', manualSource: true, otherGroupIds: [], otherGroupNames: [] },
+      ],
+      affectedCount: 1,
+    });
+    mockUninstallSkillGroup.mockResolvedValue({
+      confirmationRequired: true,
+      uninstallPreview: {
+        installedByGroup: true,
+        previewToken: 'new-token',
+        exclusiveSkills: [],
+        sharedSkills: [
+          {
+            resourceId: '2',
+            resourceName: 'user-research',
+            manualSource: true,
+            otherGroupIds: [],
+            otherGroupNames: [],
+          },
+        ],
+        affectedCount: 1,
+      },
+    });
+
+    render(<SkillGroupDetailDrawer groupId="101" digitalEmployeeId="201" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'resource.skillGroup.uninstall' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'resource.skillGroup.uninstallAll' }));
+
+    expect(await screen.findByText('user-research', { selector: 'strong' })).toBeInTheDocument();
+    expect(screen.getByText('resource.skillGroup.uninstallSharedDescription')).toBeInTheDocument();
+    expect(mockRefreshSkillGroupDetail).not.toHaveBeenCalled();
   });
 
   it('renders an empty state for a missing detail and an error state for a failed request', async () => {
@@ -91,7 +286,7 @@ describe('SkillGroupDetailDrawer', () => {
 
     expect(await screen.findByTestId('skill-group-detail-default-cover')).toHaveAttribute(
       'src',
-      '/assets/skill-groups/default-skill-group-cover-3x4.png'
+      '/assets/skill-groups/default-skill-group-cover-1x1.png'
     );
   });
 
@@ -102,11 +297,29 @@ describe('SkillGroupDetailDrawer', () => {
     expect(drawerStyles).not.toMatch(/object-fit:\s*cover/);
   });
 
-  it('disables install without an active employee and emits refresh events after success', async () => {
+  it('installs immediately when every remaining member is installable and refreshes the detail status', async () => {
     mockGetSkillGroupDetail.mockResolvedValue({ data: detail });
-    mockInstallSkillGroup.mockResolvedValue({
+    mockPreflightInstallSkillGroup.mockResolvedValue({
+      members: detail.members.map((member) => ({ ...member, memberStatus: 'INSTALLABLE' })),
+      installed: 0,
+      installable: 2,
+      applyRequired: 0,
+      applyPending: 0,
+      unavailable: 0,
+      total: 2,
+      hasPermissionBarrier: false,
+    });
+    mockExecuteInstallSkillGroup.mockResolvedValue({
       installedSkillIds: ['1', '2'],
       existingSkillIds: ['3'],
+      summary: {
+        members: detail.members.map((member) => ({ ...member, memberStatus: 'INSTALLED' })),
+        installed: 2,
+        installable: 0,
+        applyRequired: 0,
+        applyPending: 0,
+        unavailable: 0,
+      },
     });
     const onClose = jest.fn();
     const events: CustomEvent[] = [];
@@ -121,8 +334,10 @@ describe('SkillGroupDetailDrawer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'resource.installSkillGroup' }));
 
     await waitFor(() =>
-      expect(mockInstallSkillGroup).toHaveBeenCalledWith({ groupId: '101', digitalEmployeeId: '201' })
+      expect(mockPreflightInstallSkillGroup).toHaveBeenCalledWith({ groupId: '101', digitalEmployeeId: '201' })
     );
+    expect(mockExecuteInstallSkillGroup).toHaveBeenCalledWith({ groupId: '101', digitalEmployeeId: '201' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(mockEmit).toHaveBeenCalledWith('beyond-resourceList-resourceType-reload', {
       resourceType: 'SKILL',
       resetSkillFilters: false,
@@ -136,9 +351,66 @@ describe('SkillGroupDetailDrawer', () => {
     window.removeEventListener('digitalEmployeeResourceInstalled', handleInstalled);
   });
 
+  it('shows categorized permission barriers and executes install plus applications only after confirmation', async () => {
+    const mixedMembers = [
+      { ...detail.members[0], memberStatus: 'INSTALLABLE' },
+      { ...detail.members[1], resourceId: '2', resourceName: 'grill-me', memberStatus: 'APPLY_REQUIRED' },
+      { resourceId: '3', resourceName: 'blocked-skill', memberStatus: 'APPLY_UNAVAILABLE' },
+    ];
+    mockGetSkillGroupDetail.mockResolvedValue({ data: { ...detail, members: mixedMembers } });
+    mockPreflightInstallSkillGroup.mockResolvedValue({
+      members: mixedMembers,
+      installed: 0,
+      installable: 1,
+      applyRequired: 1,
+      applyPending: 0,
+      unavailable: 1,
+      total: 3,
+      hasPermissionBarrier: true,
+    });
+    mockExecuteInstallSkillGroup.mockResolvedValue({
+      installedSkillIds: ['1'],
+      existingSkillIds: [],
+      appliedSkillIds: ['2'],
+      pendingSkillIds: [],
+      unavailableSkillIds: ['3'],
+      summary: {
+        members: mixedMembers.map((member) => ({
+          ...member,
+          memberStatus:
+            member.resourceId === '1' ? 'INSTALLED' : member.resourceId === '2' ? 'APPLY_PENDING' : 'APPLY_UNAVAILABLE',
+        })),
+        installed: 1,
+        installable: 0,
+        applyRequired: 0,
+        applyPending: 1,
+        unavailable: 1,
+      },
+    });
+
+    render(<SkillGroupDetailDrawer groupId="101" digitalEmployeeId="201" onClose={jest.fn()} />);
+    await screen.findByText('grill-me');
+    fireEvent.click(screen.getByRole('button', { name: 'resource.installSkillGroup' }));
+
+    expect(await screen.findByText('resource.skillGroup.installConfirmTitle')).toBeInTheDocument();
+    expect(screen.getByText('resource.skillGroup.installableCount')).toBeInTheDocument();
+    expect(screen.getByText('resource.skillGroup.applyRequiredCount')).toBeInTheDocument();
+    expect(screen.getByText('resource.skillGroup.unavailableCount')).toBeInTheDocument();
+    expect(screen.getAllByText('blocked-skill')).toHaveLength(2);
+    expect(mockExecuteInstallSkillGroup).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.confirm' }));
+
+    await waitFor(() =>
+      expect(mockExecuteInstallSkillGroup).toHaveBeenCalledWith({ groupId: '101', digitalEmployeeId: '201' })
+    );
+    expect(await screen.findByText('resource.skillGroup.memberStatus.applyPending')).toBeInTheDocument();
+    expect(screen.getByText('resource.skillGroup.memberStatus.unavailable')).toBeInTheDocument();
+  });
+
   it('keeps members visible and reports an install error when installation fails', async () => {
     mockGetSkillGroupDetail.mockResolvedValue({ data: detail });
-    mockInstallSkillGroup.mockRejectedValue(new Error('denied'));
+    mockPreflightInstallSkillGroup.mockRejectedValue(new Error('denied'));
 
     render(<SkillGroupDetailDrawer groupId="101" digitalEmployeeId="201" onClose={jest.fn()} />);
     await screen.findByText('brainstorming');
@@ -152,7 +424,15 @@ describe('SkillGroupDetailDrawer', () => {
   it('ignores an install completion after the drawer identity changes', async () => {
     let resolveInstall!: (value: unknown) => void;
     mockGetSkillGroupDetail.mockResolvedValue({ data: detail });
-    mockInstallSkillGroup.mockReturnValue(
+    mockPreflightInstallSkillGroup.mockResolvedValue({
+      members: detail.members,
+      installed: 0,
+      installable: 2,
+      applyRequired: 0,
+      applyPending: 0,
+      unavailable: 0,
+    });
+    mockExecuteInstallSkillGroup.mockReturnValue(
       new Promise((resolve) => {
         resolveInstall = resolve;
       })
@@ -173,7 +453,15 @@ describe('SkillGroupDetailDrawer', () => {
   it('ignores an install completion after the drawer closes', async () => {
     let resolveInstall!: (value: unknown) => void;
     mockGetSkillGroupDetail.mockResolvedValue({ data: detail });
-    mockInstallSkillGroup.mockReturnValue(
+    mockPreflightInstallSkillGroup.mockResolvedValue({
+      members: detail.members,
+      installed: 0,
+      installable: 2,
+      applyRequired: 0,
+      applyPending: 0,
+      unavailable: 0,
+    });
+    mockExecuteInstallSkillGroup.mockReturnValue(
       new Promise((resolve) => {
         resolveInstall = resolve;
       })

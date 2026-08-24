@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import {
   parseGroupChatRef,
+  parseOrchestratorRef,
   type GroupChatRefV1,
+  type OrchestratorRefV1,
   THINKING_LEVELS,
   isThinkingLevel,
   normalizeRunAttachments,
@@ -12,10 +14,7 @@ import {
   type SessionContextInput,
   type ThinkingLevel,
 } from "@byclaw/by-conductor";
-import {
-  type AskAgentCommand,
-  type GatewayCommand,
-} from "@byclaw/by-framework";
+import { type AskAgentCommand, type GatewayCommand } from "@byclaw/by-framework";
 
 /**
  * by-framework 协议的解析和序列化辅助函数。
@@ -111,9 +110,7 @@ function hasTextOrFiles(node: Record<string, unknown>): boolean {
 }
 
 /** 沿 .content 下钻到承载 text/files 的节点。 */
-function resolveContentNode(
-  node: unknown,
-): Record<string, unknown> | undefined {
+function resolveContentNode(node: unknown): Record<string, unknown> | undefined {
   if (!isRecord(node)) {
     return undefined;
   }
@@ -132,8 +129,7 @@ export function commandString(
   key: string,
 ): string {
   return (
-    recordString(command.header.metadata, key) ||
-    recordString(command.extraPayload ?? {}, key)
+    recordString(command.header.metadata, key) || recordString(command.extraPayload ?? {}, key)
   );
 }
 
@@ -146,8 +142,7 @@ export function commandSessionContext(command: {
   header: { metadata: Readonly<Record<string, unknown>> };
   extraPayload?: Readonly<Record<string, unknown>>;
 }): SessionContextInput | undefined {
-  const locale =
-    commandString(command, "locale") || commandString(command, "language");
+  const locale = commandString(command, "locale") || commandString(command, "language");
   const timezone =
     commandString(command, "timezone") ||
     commandString(command, "time-zone") ||
@@ -176,20 +171,25 @@ export function commandThinkingLevel(command: AskAgentCommand): ThinkingLevel {
 }
 
 /** 只接受群聊定位引用；Gateway 透传的历史正文不会进入 Super。 */
-export function commandGroupChatRef(
-  command: AskAgentCommand,
-): GroupChatRefV1 | undefined {
+export function commandGroupChatRef(command: AskAgentCommand): GroupChatRefV1 | undefined {
   const value = command.extraPayload.groupChat;
   if (value === undefined) {
     return undefined;
   }
   const reference = parseGroupChatRef(value);
   if (reference.conversationKey !== command.header.sessionId) {
-    throw new Error(
-      "AskAgent extraPayload.groupChat.conversationKey must match header.sessionId",
-    );
+    throw new Error("AskAgent extraPayload.groupChat.conversationKey must match header.sessionId");
   }
   return reference;
+}
+
+/**
+ * 读取调用方声明的编排者定位。缺失表示旧版超级助手请求；存在时严格校验协议，
+ * 真正的专家团权限仍由 ingress 携带 Beyond-Token 向 BE 验证。
+ */
+export function commandOrchestratorRef(command: AskAgentCommand): OrchestratorRefV1 | undefined {
+  const value = command.extraPayload.orchestrator;
+  return value === undefined ? undefined : parseOrchestratorRef(value);
 }
 
 /**
@@ -201,8 +201,7 @@ export function commandSourceAgentId(command: {
   extraPayload?: Readonly<Record<string, unknown>>;
 }): string {
   const extra = command.extraPayload ?? {};
-  const raw =
-    recordScalar(extra, "agent_id") ?? recordScalar(extra, "agentId");
+  const raw = recordScalar(extra, "agent_id") ?? recordScalar(extra, "agentId");
   return raw ?? "";
 }
 
@@ -228,10 +227,7 @@ export function agentReadyTitle(agentName: string, locale?: string): string {
 }
 
 /** 从记录中读取大小写不敏感的非空字符串值。 */
-export function recordString(
-  record: Readonly<Record<string, unknown>>,
-  key: string,
-): string {
+export function recordString(record: Readonly<Record<string, unknown>>, key: string): string {
   const expected = key.toLowerCase();
   for (const [candidate, value] of Object.entries(record)) {
     if (candidate.toLowerCase() === expected && typeof value === "string") {
@@ -273,6 +269,11 @@ export function progressMessage(event: RunEvent): string {
 export function isDelegationReasoningEvent(event: RunEvent): boolean {
   return [
     "delegation.started",
+    "delegation.display.progress",
+    "delegation.tool.started",
+    "delegation.tool.detail",
+    "delegation.tool.completed",
+    "delegation.tool.failed",
     "delegation.output.delta",
     "delegation.completed",
     "delegation.failed",
@@ -291,6 +292,7 @@ export function protocolMessage(input: {
   agentName?: string;
   objectType?: string;
   status?: string;
+  role?: string;
 }): Record<string, unknown> {
   return {
     id: randomUUID().replaceAll("-", "").toUpperCase(),
@@ -309,7 +311,10 @@ export function protocolMessage(input: {
       {
         index: 0,
         finish_reason: "",
-        delta: { content: input.content },
+        delta: {
+          ...(input.role ? { role: input.role } : {}),
+          content: input.content,
+        },
       },
     ],
   };
@@ -323,14 +328,14 @@ export function stringData(value: unknown): string {
 /** 生成同一主机内稳定且便于定位的默认 Worker 实例 ID。 */
 export function defaultWorkerId(): string {
   const host =
-    hostname().trim().replace(/[^a-zA-Z0-9_.-]/g, "-") || "unknown-host";
+    hostname()
+      .trim()
+      .replace(/[^a-zA-Z0-9_.-]/g, "-") || "unknown-host";
   return `byclaw-super-${host}`;
 }
 
 /** 构造不包含消息正文和凭证的结构化日志字段。 */
-export function commandLogFields(
-  command: GatewayCommand,
-): Record<string, unknown> {
+export function commandLogFields(command: GatewayCommand): Record<string, unknown> {
   return {
     messageId: command.header.messageId,
     sessionId: command.header.sessionId,
@@ -347,10 +352,19 @@ export function externalSessionBindingKey(
   return JSON.stringify([principal.userCode, externalSessionId]);
 }
 
+/** 专家团按编排者隔离持久 Session binding；旧超级助手保持原 key，兼容既有会话。 */
+export function orchestratorBindingSessionId(
+  externalSessionId: string,
+  orchestrator: OrchestratorRefV1 | undefined,
+): string {
+  if (!orchestrator || orchestrator.kind === "SUPER_ASSISTANT") {
+    return externalSessionId;
+  }
+  return JSON.stringify(["orchestrator", orchestrator.kind, orchestrator.id, externalSessionId]);
+}
+
 /** 把未知值安全收窄为普通记录。 */
-export function recordValue(
-  value: unknown,
-): Record<string, unknown> | undefined {
+export function recordValue(value: unknown): Record<string, unknown> | undefined {
   return isRecord(value) ? value : undefined;
 }
 

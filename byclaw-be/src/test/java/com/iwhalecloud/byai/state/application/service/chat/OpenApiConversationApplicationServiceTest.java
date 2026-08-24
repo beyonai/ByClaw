@@ -14,12 +14,15 @@ import java.nio.charset.StandardCharsets;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.state.domain.file.service.ConversationFileStorage;
 import com.iwhalecloud.byai.state.domain.file.service.ConversationStoragePathResolver;
 import com.iwhalecloud.byai.state.domain.session.dto.ConversationFilePathDto;
 import com.iwhalecloud.byai.state.domain.session.qo.ConversationAppendTxtQo;
 import com.iwhalecloud.byai.state.domain.session.qo.ConversationReadQo;
 import com.iwhalecloud.byai.state.domain.session.qo.ConversationWriteTxtQo;
+import com.iwhalecloud.byai.state.domain.session.service.SessionService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionTitleService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,6 +41,12 @@ class OpenApiConversationApplicationServiceTest {
     @Mock
     private ConversationFileStorage conversationFileStorage;
 
+    @Mock
+    private SessionService sessionService;
+
+    @Mock
+    private SessionTitleService sessionTitleService;
+
     private OpenApiConversationApplicationService service;
 
     @BeforeEach
@@ -46,6 +55,8 @@ class OpenApiConversationApplicationServiceTest {
         service = new OpenApiConversationApplicationService();
         ReflectionTestUtils.setField(service, "conversationStoragePathResolver", conversationStoragePathResolver);
         ReflectionTestUtils.setField(service, "conversationFileStorage", conversationFileStorage);
+        ReflectionTestUtils.setField(service, "sessionService", sessionService);
+        ReflectionTestUtils.setField(service, "sessionTitleService", sessionTitleService);
     }
 
     @AfterEach
@@ -117,5 +128,24 @@ class OpenApiConversationApplicationServiceTest {
 
         assertThat(outputStream.toString(StandardCharsets.UTF_8)).isEqualTo("b\nc");
         assertThat(CurrentUserHolder.getLoginInfo()).isSameAs(originalLogin);
+    }
+
+    @Test
+    void updateSession_cancelsAutomaticTitleForExplicitName() {
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserId(100L);
+        CurrentUserHolder.setLoginInfo(loginInfo);
+        ByaiSession request = new ByaiSession();
+        request.setSessionId(10L);
+        request.setSessionName("开放接口标题");
+        ByaiSession existing = new ByaiSession();
+        existing.setSessionId(10L);
+        when(sessionService.findById(10L)).thenReturn(existing);
+
+        service.updateSession(request);
+
+        verify(sessionTitleService).cancelInitialTitle(10L);
+        verify(sessionService).update(existing);
+        assertThat(existing.getSessionName()).isEqualTo("开放接口标题");
     }
 }

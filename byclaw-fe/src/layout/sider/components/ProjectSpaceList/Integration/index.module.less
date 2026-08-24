@@ -332,6 +332,176 @@
   color: #1f2633;
 }
 
+// ---- 运行记录看板:筛选条 + 运行表格 ----
+
+// 可点统计卡:概览兼作筛选入口,故需要指针与焦点态(键盘可达)。
+.reqStatCardClickable {
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+
+  &:hover {
+    border-color: #c3cfe0;
+    box-shadow: 0 2px 8px rgb(31 38 51 / 8%);
+  }
+
+  &:focus-visible {
+    outline: 2px solid #1677ff;
+    outline-offset: 2px;
+  }
+}
+
+// 父级 .integrationSection 是 flex column 且已有 gap:10px,这里不能再加纵向 margin,
+// 否则筛选条上下各多出一份间距,和统计条/表格的节奏不一致。
+// 与统计卡同一套边框/圆角,读作"工具条"而不是几个散落的控件。
+.runFilterBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #e5eaf2;
+  background: #fafbfd;
+}
+
+.runFilterSuite {
+  min-width: 150px;
+}
+
+.runFilterKeyword {
+  width: 190px;
+}
+
+// 条数回显推到右侧:与筛选控件同一行但视觉分离,读作结果而非又一个控件。
+.runFilterCount {
+  margin-left: auto;
+  color: #7c8798;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.runTable {
+  :global(.ant-table) {
+    font-size: 12px;
+  }
+
+  // 密集型表格:压缩行高换取一屏更多行,符合 data-dense dashboard 取向。
+  :global(.ant-table-tbody > tr > td) {
+    padding: 6px 8px;
+  }
+
+  :global(.ant-table-thead > tr > th) {
+    padding: 7px 8px;
+    background: #f6f8fb;
+    color: #5a6b85;
+    font-size: 12px;
+    font-weight: 600;
+  }
+}
+
+// 失败行整行浅红底:扫视时先定位到需处理的行,再看细节。
+.runTableRowFailing {
+  > td {
+    background: #fff8f8;
+  }
+
+  &:hover > td {
+    background: #fff1f0 !important;
+  }
+}
+
+.runTableStatusTag {
+  margin-inline-end: 0;
+}
+
+.runTableSuiteCell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.runTableSuiteName {
+  color: #1f2633;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runTableBranch {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: #eef2f8;
+  color: #5a6b85;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runTableRateCell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  :global(.ant-progress) {
+    flex: 1;
+    margin: 0;
+    min-width: 44px;
+  }
+
+  :global(.ant-progress-inner) {
+    background: #eef2f8;
+  }
+}
+
+.runTableRateText {
+  color: #5a6b85;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+// 时间/耗时用等宽数字:纵向对齐才好比较。
+.runTableMono {
+  color: #5a6b85;
+  font-variant-numeric: tabular-nums;
+}
+
+.runTableMuted {
+  color: #b0b8c4;
+}
+
+.runTableFailDetail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.runTableFailKickback {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #fff1f0;
+  color: #cf3b38;
+  font-weight: 600;
+}
+
+.runTableFailReason {
+  flex: 1;
+  min-width: 0;
+  color: #5a6b85;
+  word-break: break-word;
+}
+
 .reqIntegrationEmpty {
   margin: 12px 0;
   padding: 20px 0;
@@ -413,10 +583,7 @@
   border: 1px solid #e5eaf2;
   background: #fff;
   overflow: hidden;
-  transition:
-    box-shadow 0.2s ease,
-    border-color 0.2s ease,
-    transform 0.2s ease;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
 
 // 左侧 3px 语义强调条:泳道里一眼扫出该卡状态,不必逐张读右上角 Tag。
@@ -602,56 +769,50 @@
   border-top: 1px solid #eef2f8;
 }
 
-// 结果目录与状态规范折叠区。
-.integrationSpec {
+// 规范现场提示条:弹框里只留「违反即坏」的硬契约,完整契约走规范页深链。
+// 用警示黄而不是折叠面板:折叠默认收起=没人点开,这里要求扫一眼就看见。
+.integrationSpecCallout {
   margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #ffe08a;
+  border-left: 3px solid #f5a623;
+  border-radius: 8px;
+  background: #fffbef;
 }
 
-.integrationSpecBody {
+.integrationSpecCalloutTitle {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.integrationSpecHint {
-  color: #526075;
-  font-size: 12px;
-  line-height: 20px;
-}
-
-.integrationSpecSubTitle {
-  margin-top: 4px;
-  color: #1f2633;
+  align-items: center;
+  gap: 6px;
+  color: #8a5a00;
   font-size: 13px;
   font-weight: 600;
-}
-
-.integrationSpecPre {
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: #0f172a;
-  color: #e2e8f0;
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre;
-  overflow-x: auto;
-}
-
-.integrationSpecEnum {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.integrationSpecEnumRow {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 12px;
-  color: #526075;
   line-height: 20px;
+}
+
+.integrationSpecCalloutRules {
+  margin: 6px 0 0;
+  padding-left: 20px;
+  color: #526075;
+  font-size: 12px;
+  line-height: 20px;
+
+  li + li {
+    margin-top: 2px;
+  }
+}
+
+.integrationSpecCalloutActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+
+  :global(.ant-btn-link) {
+    padding: 0 4px;
+    height: 22px;
+    font-size: 12px;
+  }
 }
 
 .integrationNote {
@@ -869,59 +1030,6 @@
   font-size: 12px;
 }
 
-.manualRunProgress {
-  margin-bottom: 12px;
-  font-weight: 600;
-  color: #1f2d3d;
-}
-
-.manualRunCase {
-  border: 1px solid #dfe6f0;
-  border-radius: 10px;
-  padding: 12px 14px;
-  margin-bottom: 12px;
-  background: #fbfcfe;
-}
-
-.manualRunCaseTitle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  font-size: 14px;
-}
-
-.manualRunCaseMeta {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-
-.manualRunLabel {
-  display: block;
-  color: #8a93a2;
-  font-size: 12px;
-  margin-bottom: 2px;
-}
-
-.manualRunSteps {
-  margin: 0;
-  white-space: pre-wrap;
-  font-family: inherit;
-  font-size: 13px;
-  color: #3a4a5f;
-}
-
-.manualRunExpected {
-  font-size: 13px;
-  color: #3a4a5f;
-}
-
-.manualRunShots {
-  margin-top: 10px;
-}
-
 .integrationStageCard {
   border: 1px solid #dfe6f0;
   border-radius: 10px;
@@ -971,17 +1079,22 @@
   font-size: 12px;
 }
 
-// 独立测试员工卡片说明脚注:接在三条 field 之后,与卡片 body 内边距对齐。
-.testerNote {
-  margin-top: 4px;
-  padding-top: 10px;
-  border-top: 1px dashed #e2e8f2;
-  font-size: 12px;
-  line-height: 1.6;
-  color: #7c8798;
+// 独立测试员工配置:全项目一条记录,平铺成表单原地编辑,给个卡片外观承载表单行。
+.testerForm {
+  padding: 16px;
+  border: 1px solid #e2e8f2;
+  border-radius: 8px;
+  background: #fff;
 }
 
-// 弹框里的开关行:标签在左、Switch 在右。
+// 分区标题右侧的动作区(立即执行 / 保存)。
+.integrationSectionActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+// 开关行:标签在左、Switch 在右。
 .testerFormRow {
   display: flex;
   align-items: center;

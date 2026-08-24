@@ -22,40 +22,68 @@ export const DEFAULT_PROJECT_TYPE_OPTION: { label: string; value: ProjectType } 
 
 // 独立项目详情页使用与侧栏详情一致的 Tab 标识，标签文本统一由消费组件国际化。
 export const PROJECT_DETAIL_SECTIONS = [
-  { key: 'sessions', labelId: 'projectSpace.detail.tabs.sessions' },
   { key: 'tasks', labelId: 'projectSpace.detail.tabs.tasks' },
   { key: 'resources', labelId: 'projectSpace.detail.tabs.resources' },
-  { key: 'members', labelId: 'projectSpace.detail.tabs.members' },
   { key: 'requirements', labelId: 'projectSpace.detail.tabs.requirements' },
+  { key: 'digitalAgents', labelId: 'projectSpace.detail.tabs.digitalAgents' },
+  { key: 'members', labelId: 'projectSpace.detail.tabs.members' },
+  { key: 'integration', labelId: 'projectSpace.detail.tabs.integration' },
+  { key: 'accounts', labelId: 'projectSpace.detail.tabs.accounts' },
+  // 非运营项目仍保留会话页，但按产品顺序放在业务管理页签之后。
+  { key: 'sessions', labelId: 'projectSpace.detail.tabs.sessions' },
 ] as const;
 
 export type ProjectDetailSection = (typeof PROJECT_DETAIL_SECTIONS)[number]['key'];
 
 // 当前项目仅持久化 ID，项目列表加载后会根据用户权限再次校验该值。
 export const PROJECT_SCOPE_STORAGE_KEY = 'byclaw.projectSpace.selectedProjectId';
+export const PROJECT_SCOPE_CHANGE_EVENT = 'byclaw-project-scope-change';
+let memoryProjectScopeId: string | undefined;
 
 export const getStoredProjectScopeId = () => {
   if (typeof window === 'undefined') return undefined;
 
   try {
-    return window.localStorage.getItem(PROJECT_SCOPE_STORAGE_KEY)?.trim() || undefined;
+    memoryProjectScopeId = window.localStorage.getItem(PROJECT_SCOPE_STORAGE_KEY)?.trim() || undefined;
+    return memoryProjectScopeId;
   } catch {
-    // 浏览器禁用本地存储时不影响当前会话中的项目切换。
-    return undefined;
+    // 浏览器禁用本地存储时回退到内存值，当前标签页内的项目切换仍可同步。
+    return memoryProjectScopeId;
   }
 };
 
 export const saveProjectScopeIdToStorage = (projectId?: string | number) => {
   if (typeof window === 'undefined') return;
 
+  const normalizedProjectId = `${projectId ?? ''}`.trim();
+  const nextProjectId = normalizedProjectId || undefined;
+  const previousProjectId = getStoredProjectScopeId();
+  memoryProjectScopeId = nextProjectId;
   try {
-    const normalizedProjectId = `${projectId ?? ''}`.trim();
-    if (normalizedProjectId) {
-      window.localStorage.setItem(PROJECT_SCOPE_STORAGE_KEY, normalizedProjectId);
-      return;
+    if (nextProjectId) {
+      window.localStorage.setItem(PROJECT_SCOPE_STORAGE_KEY, nextProjectId);
+    } else {
+      window.localStorage.removeItem(PROJECT_SCOPE_STORAGE_KEY);
     }
-    window.localStorage.removeItem(PROJECT_SCOPE_STORAGE_KEY);
   } catch {
     // 浏览器禁用本地存储时不影响当前会话中的项目切换。
   }
+
+  if (previousProjectId === nextProjectId) return;
+  // storage 事件不会在当前标签页触发，补充自定义事件让会话和项目模块即时同步。
+  window.dispatchEvent(new Event(PROJECT_SCOPE_CHANGE_EVENT));
+};
+
+export const subscribeProjectScopeId = (listener: () => void) => {
+  if (typeof window === 'undefined') return () => undefined;
+
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key === PROJECT_SCOPE_STORAGE_KEY) listener();
+  };
+  window.addEventListener(PROJECT_SCOPE_CHANGE_EVENT, listener);
+  window.addEventListener('storage', handleStorage);
+  return () => {
+    window.removeEventListener(PROJECT_SCOPE_CHANGE_EVENT, listener);
+    window.removeEventListener('storage', handleStorage);
+  };
 };

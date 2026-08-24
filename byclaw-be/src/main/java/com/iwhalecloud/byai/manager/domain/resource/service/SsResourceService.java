@@ -870,4 +870,16 @@ public class SsResourceService {
             new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(safePageNum, safePageSize, false);
         return ssResourceMapper.selectPage(page, queryWrapper).getRecords();
     }
+
+    /**
+     * 查询未注销的全部数字员工资源，用于按当前用户权限二次筛选的轻量列表场景。
+     */
+    public List<SsResource> listActiveDigitalEmployees() {
+        LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(SsResource::getResourceBizType, ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        queryWrapper.ne(SsResource::getResourceStatus, ResourceStatus.REMOVED.getNum());
+        queryWrapper.orderByAsc(SsResource::getResourceName);
+        queryWrapper.orderByAsc(SsResource::getResourceId);
+        return ssResourceMapper.selectList(queryWrapper);
+    }
 }

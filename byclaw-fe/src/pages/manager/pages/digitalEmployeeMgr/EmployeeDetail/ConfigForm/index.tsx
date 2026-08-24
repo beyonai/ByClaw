@@ -34,6 +34,7 @@ import {
   EyeOutlined,
   ExclamationCircleOutlined,
   PlusOutlined,
+  DownOutlined,
 } from '@ant-design/icons';
 import classnames from 'classnames';
 import { compact, set, trim } from 'lodash';
@@ -65,8 +66,13 @@ import RobotModal from './RobotModal';
 import { normalizeCatalogTree } from '@/utils/catalog';
 import { DEFAULT_AGENT_TYPE_OPTIONS, DEFAULT_TEMPLATE_DATA } from '../../constants';
 import Ellipsis from '@/pages/manager/components/Ellipsis';
-import { DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES } from '@/pages/manager/constants/digitalResource';
+import {
+  DEFAULT_DIGITAL_EMPLOYEE_GROUP_TEMPLATES,
+  DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES,
+  getDigitalEmployeeTemplateParamCode,
+} from '@/pages/manager/constants/digitalResource';
 import { normalizeRobotConfig } from './robotConfig';
+import EmployeeGroupMembers from '../EmployeeGroupMembers';
 
 const { TextArea } = Input;
 
@@ -654,11 +660,15 @@ const ConfigForm = (props) => {
     onOpenOntologyDrawer,
     savedRelOntology = [],
     ontologyResourcesDirty = false,
+    employeeGroupMembers = [],
+    setEmployeeGroupMembers,
+    imageModelSelect,
   } = props;
 
   const intl = useIntl();
   const { pick } = useFileTookit();
   const isEN = getLocale().includes('en');
+  const isEmployeeGroup = `${agentType || ''}` === '017';
   const bundledSkillListRef = useRef<HTMLDivElement | null>(null);
   const bundledSkillLoadMoreLockRef = useRef(false);
   const hydratedBundledSkillKeysRef = useRef<Set<string>>(new Set());
@@ -1092,10 +1102,12 @@ const ConfigForm = (props) => {
         const template = getDigitalEmployeeTemplate(templates, effectiveOwnerType, agentType);
         const nextMaxLength = getDigitalEmployeeTemplateMaxLength(templates, effectiveOwnerType, agentType);
         setPromptTextMaxLength(nextMaxLength);
-        const templatePrompts =
-          Array.isArray(template?.prompts) && template.prompts.length > 0
-            ? template.prompts
+        const fallbackPrompts =
+          `${agentType || ''}` === '017'
+            ? DEFAULT_DIGITAL_EMPLOYEE_GROUP_TEMPLATES
             : DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES;
+        const templatePrompts =
+          Array.isArray(template?.prompts) && template.prompts.length > 0 ? template.prompts : fallbackPrompts;
         const promptList = mapTemplatePromptsToConfigList(templatePrompts, template?.key);
         const nextTemplateData =
           Array.isArray(promptList) && promptList.length > 0 ? promptList : DEFAULT_TEMPLATE_DATA;
@@ -1131,7 +1143,7 @@ const ConfigForm = (props) => {
 
       try {
         const response = await getDcSystemConfig({
-          paramCode: 'TEMPLATE_DIGITAL_EMPLOYEE',
+          paramCode: getDigitalEmployeeTemplateParamCode(agentType),
         });
         if (cancelled) return;
         const templates = parseDigitalEmployeeTemplates(response?.paramValue || response);
@@ -1911,15 +1923,19 @@ const ConfigForm = (props) => {
           )}
         </span>
       ),
-      children: renderPromptTextArea(
-        item.key,
-        intl.formatMessage({ id: 'employeeDetail.promptField.customPlaceholder' }, { name: item.name }),
-        item.name
-      ),
     }));
 
     return tabs;
-  }, [configurableTabs, intl, renderPromptTextArea, isReadOnly]);
+  }, [configurableTabs, handleDeletePromptTab, intl, isReadOnly]);
+
+  const activePromptTab = useMemo(
+    () => configurableTabs.find((item) => item.key === activePromptTabKey),
+    [activePromptTabKey, configurableTabs]
+  );
+
+  const handlePromptTabChange = useCallback((tabKey) => {
+    setActivePromptTabKey(tabKey);
+  }, []);
 
   const handleTagAdd = (value) => {
     if (value && !tags.includes(value)) {
@@ -2265,18 +2281,28 @@ const ConfigForm = (props) => {
               />
             </Form.Item>
             <Form.Item
-              label={intl.formatMessage({ id: 'employeeDetail.digitalEmployeeDesc' })}
+              label={intl.formatMessage({
+                id: isEmployeeGroup ? 'employeeDetail.digitalEmployeeGroupDesc' : 'employeeDetail.digitalEmployeeDesc',
+              })}
               name="resourceDesc"
               rules={[
                 {
                   required: true,
-                  message: intl.formatMessage({ id: 'employeeDetail.digitalEmployeeDescRequired' }),
+                  message: intl.formatMessage({
+                    id: isEmployeeGroup
+                      ? 'employeeDetail.digitalEmployeeGroupDescRequired'
+                      : 'employeeDetail.digitalEmployeeDescRequired',
+                  }),
                 },
               ]}
             >
               <TextArea
                 rows={3}
-                placeholder={intl.formatMessage({ id: 'employeeDetail.digitalEmployeeDescPlaceholder' })}
+                placeholder={intl.formatMessage({
+                  id: isEmployeeGroup
+                    ? 'employeeDetail.digitalEmployeeGroupDescPlaceholder'
+                    : 'employeeDetail.digitalEmployeeDescPlaceholder',
+                })}
                 disabled={isReadOnly}
                 onCompositionStart={() => {
                   compositionRef.current = true;
@@ -2382,7 +2408,7 @@ const ConfigForm = (props) => {
             <div className={styles.personalityDefinitionSection}>
               <Tabs
                 activeKey={activePromptTabKey}
-                onChange={setActivePromptTabKey}
+                onChange={handlePromptTabChange}
                 items={promptTabItems}
                 tabBarExtraContent={
                   !isReadOnly
@@ -2403,6 +2429,18 @@ const ConfigForm = (props) => {
                     : undefined
                 }
               />
+              {activePromptTab && (
+                <div key={activePromptTab.key} data-prompt-tab-key={activePromptTab.key}>
+                  {renderPromptTextArea(
+                    activePromptTab.key,
+                    intl.formatMessage(
+                      { id: 'employeeDetail.promptField.customPlaceholder' },
+                      { name: activePromptTab.name }
+                    ),
+                    activePromptTab.name
+                  )}
+                </div>
+              )}
               <Modal
                 open={customPromptModalOpen}
                 title={intl.formatMessage({ id: 'employeeDetail.promptField.customModalTitle' })}
@@ -2429,11 +2467,14 @@ const ConfigForm = (props) => {
             </div>
           </div>
           <div className={classnames(styles.configurationDetails, 'full-height')}>
-            <div className={classnames('ub ub-ac', styles.marginBottom12)}>
+            <div className={styles.configurationHeader}>
               <div className={styles.fontSize16Weight500}>
                 {intl.formatMessage({ id: 'employeeDetail.configDetails' })}
               </div>
-              <div className={classnames(pStyles.topSection, 'ub-f1')}>
+            </div>
+            <div className={styles.modelConfigGrid}>
+              <div className={styles.modelConfigItem}>
+                <span className={styles.modelConfigLabel}>{intl.formatMessage({ id: 'employeeDetail.qaModel' })}</span>
                 <Popover
                   content={
                     <ModelPopover
@@ -2450,19 +2491,24 @@ const ConfigForm = (props) => {
                   placement="bottomRight"
                   arrow={false}
                 >
-                  <div className={pStyles.configBox}>
-                    <AntdIcon type="icon-a-Sphereyuanqiu1" className={styles.fontSize20} />
-                    <span className={pStyles.modelName}>{modelName}</span>
-                    <AntdIcon type="icon-a-Downxia1" />
-                  </div>
+                  <button type="button" className={styles.modelSelectTrigger} disabled={isReadOnly} title={modelName}>
+                    <AntdIcon type="icon-a-Sphereyuanqiu1" className={styles.modelSelectIcon} />
+                    <span className={styles.modelSelectValue}>{modelName || '-'}</span>
+                    <DownOutlined className={styles.modelSelectArrow} />
+                  </button>
                 </Popover>
               </div>
+              {imageModelSelect}
             </div>
 
-            {/* 数字员工类型 */}
+            {/* 数字员工/数字员工组类型 */}
             <div className={styles.rowFlexBetween}>
               <div>
-                <span>{intl.formatMessage({ id: 'employeeDetail.employeeType' })}</span>
+                <span>
+                  {intl.formatMessage({
+                    id: isEmployeeGroup ? 'employeeDetail.employeeGroupType' : 'employeeDetail.employeeType',
+                  })}
+                </span>
               </div>
               <Form.Item
                 noStyle
@@ -2501,7 +2547,11 @@ const ConfigForm = (props) => {
             </div>
 
             {/* 所属领域 */}
-            <Form.Item label={intl.formatMessage({ id: 'employeeDetail.catalogManage' })} name="catalogId">
+            <Form.Item
+              className={styles.configFieldFormItem}
+              label={intl.formatMessage({ id: 'employeeDetail.catalogManage' })}
+              name="catalogId"
+            >
               <TreeSelect
                 allowClear
                 treeData={catalogList}
@@ -2681,9 +2731,17 @@ const ConfigForm = (props) => {
             {/* )} */}
             {/* {digitalType === 'FROM_MANUALLY' && ( */}
             <>
+              {isEmployeeGroup && (
+                <EmployeeGroupMembers
+                  value={employeeGroupMembers}
+                  onChange={setEmployeeGroupMembers}
+                  disabled={isReadOnly}
+                  agentTypeOptions={agentTypeOptions}
+                />
+              )}
               {/* 配置知识 */}
               {employeeType !== '005' && (
-                <div className={styles.knowledgeSection}>
+                <div className={styles.knowledgeSection} hidden={isEmployeeGroup}>
                   <div className={styles.sectionHeader}>
                     <span className={styles.sectionTitle}>
                       {intl.formatMessage({
@@ -2761,7 +2819,7 @@ const ConfigForm = (props) => {
 
               {/* 配置工具 */}
               {employeeType !== '006' && employeeType !== '005' && (
-                <div className={styles.skillsSection}>
+                <div className={styles.skillsSection} hidden={isEmployeeGroup}>
                   <div className={styles.sectionHeader}>
                     <span className={styles.sectionTitle}>
                       {intl.formatMessage({
@@ -2851,7 +2909,7 @@ const ConfigForm = (props) => {
               )}
 
               {/* 配置本体 */}
-              <div className={styles.skillsSection}>
+              <div className={styles.skillsSection} hidden={isEmployeeGroup}>
                 <div className={styles.sectionHeader}>
                   <span className={styles.sectionTitle}>
                     {intl.formatMessage({
@@ -2936,7 +2994,7 @@ const ConfigForm = (props) => {
               </div>
 
               {/* 配置技能 */}
-              <div className={styles.skillsSection}>
+              <div className={styles.skillsSection} hidden={isEmployeeGroup}>
                 <div className={styles.sectionHeader}>
                   <span className={styles.sectionTitle}>
                     {intl.formatMessage({ id: 'employeeDetail.configureBundledSkills' })}
@@ -3002,7 +3060,7 @@ const ConfigForm = (props) => {
 
               {/* 配置机器人 */}
               {robotChannelOptions.length > 0 && (
-                <div className={styles.robotSection}>
+                <div className={styles.robotSection} hidden={isEmployeeGroup}>
                   <div className={styles.sectionHeader}>
                     <span className={styles.sectionTitle}>
                       {intl.formatMessage({ id: 'employeeDetail.robotConfig.title' })}

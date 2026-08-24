@@ -49,6 +49,35 @@
   }
 }
 
+// 高级会话搜索方式收在输入框尾部，保留详情入口的同时也不会遮挡关键词输入区域。
+.sessionSearchModeTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 76px;
+  padding: 0 2px 0 6px;
+  overflow: hidden;
+  border: 0;
+  color: #667085;
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
+
+  &:hover,
+  &:focus-visible {
+    color: #246bfe;
+    outline: 0;
+  }
+
+  :global(.anticon) {
+    font-size: 10px;
+  }
+}
+
 // 项目选择框聚焦后直接接收搜索输入，不再在下拉菜单内额外放置搜索框。
 .scopeInput {
   width: 100%;
@@ -143,6 +172,11 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) 36px;
   gap: 8px;
+}
+
+.scopeDropdownTrigger {
+  min-width: 0;
+  width: 100%;
 }
 
 // 项目详情入口与会话搜索同行：保持常规字重，悬停时仅改变背景。
@@ -399,20 +433,8 @@
   margin-left: auto;
 }
 
-// 个人项目使用蓝色标签，和左侧系统主色保持一致。
-.projectTagPersonal {
-  color: #246bfe;
-  background: #eaf2ff;
-}
-
-// 共享项目沿用统一的浅底标签样式，以绿色区分协作范围。
-.projectTagShared {
-  color: #16835a;
-  background: #eaf8f0;
-}
-
-// 默认项目使用中性灰色标签，弱化其系统兜底属性。
-.projectTagDefault {
+// 普通项目包含 normal、default 和历史共享项目。
+.projectTagNormal {
   color: #596579;
   background: #f1f4f8;
 }
@@ -770,6 +792,23 @@
 .projectInitAlert {
   flex-shrink: 0;
   margin: 10px 10px 0;
+  // 初始化引导为次要提示，弱化字号与图标突出度，避免抢占详情主内容视觉重心。
+  :global {
+    .@{antPrefix}-alert-message {
+      font-size: 12px;
+      line-height: 18px;
+      color: rgba(0, 0, 0, 0.65);
+    }
+  }
+}
+
+// 「去跟架构聊天」按钮跟在提示文案下方。按钮不放 Alert 的 description，那会触发
+// .ant-alert-with-description 把上面的 message 字号顶成 16px 加粗。
+.projectInitAlertBody {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 .detailProjectInitTag {
@@ -933,8 +972,8 @@
 .detailMemberAddButton,
 .detailManualRequirementAddButton,
 .detailRequirementRefreshButton,
-.detailTaskRefreshButton,
-.detailTaskViewButton {
+// .detailTaskViewButton
+.detailTaskRefreshButton {
   flex: 0 0 28px;
   width: 28px;
   min-width: 28px;
@@ -1746,6 +1785,32 @@
   }
 }
 
+// 待开始任务默认只展示状态；悬停卡片时再用执行按钮替换状态标签，避免操作项长期占位。
+.detailTaskCardActions .detailRequirementStartAction {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 0.2s;
+}
+
+.detailTaskCard:hover .detailTaskCardActions .detailRequirementStartAction,
+.detailTaskCard:focus-within .detailTaskCardActions .detailRequirementStartAction {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.detailTaskCard:hover .detailPendingTaskStatusTag,
+.detailTaskCard:focus-within .detailPendingTaskStatusTag {
+  opacity: 0;
+}
+
+.detailPendingTaskStatusTag {
+  transition: opacity 0.2s;
+}
+
 .detailRequirementStartedAction {
   // 已启动代表不能重复操作，使用浅灰禁用态弱化可点击感。
   // 状态标签不拦截卡片点击，用户点击标签区域时仍可打开需求详情。
@@ -1923,6 +1988,33 @@
   background: #eaf8f0;
 }
 
+// 研发任务按四角色分色，取值见后端 DevloopTaskType；卡片右侧已有状态标签，类型只靠图标表达。
+.detailTaskIconArchitect {
+  color: #7c4cb0;
+  background: #f3ecff;
+}
+
+.detailTaskIconRequirement {
+  color: #2563b8;
+  background: #e8f1ff;
+}
+
+.detailTaskIconCoder {
+  color: #0f766e;
+  background: #e6f7f4;
+}
+
+.detailTaskIconTester {
+  color: #a8556a;
+  background: #fbeef2;
+}
+
+// 普通会话不属于四角色任务，用中性灰弱化，避免跟真正的任务抢注意力。
+.detailTaskIconChat {
+  color: #64748b;
+  background: #f1f5f9;
+}
+
 .detailTaskCardHeader {
   min-width: 0;
   width: 100%;
@@ -2010,9 +2102,9 @@
 
 // 任务状态标签与任务视图使用同一状态层级，只在列表内采用紧凑尺寸。
 .detailTaskStatusPending {
-  // 待开始改为浅蓝灰，和任务卡片选中时的中性灰底色拉开层级。
-  color: #52667d;
-  background: #e8eff8;
+  // 待开始使用暖色提示，和进行中的蓝色状态明确区分。
+  color: #ad6800;
+  background: #fff3d6;
 }
 
 .detailTaskStatusRunning {
@@ -2033,6 +2125,11 @@
 .detailTaskStatusDone {
   color: #16835b;
   background: #e9f8f0;
+}
+
+.detailTaskStatusMixed {
+  color: #ad6800;
+  background: #fff7e6;
 }
 
 .detailTaskDescription {
@@ -3168,6 +3265,29 @@
   }
 }
 
+// 内嵌进任务 Tab 时没有 Drawer 撑高度，自己占满父容器并接住列的纵向滚动，
+// 否则 kanbanBoard 的 flex:1 会算在 auto 高度上、四列全被压成一行。
+.taskBoardEmbedded {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+// 内嵌模式左右留白由任务 Tab 容器给，看板自己不再补 20px。
+.taskBoardEmbedded .kanbanToolbar,
+.taskBoardEmbedded .kanbanBoard {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.taskBoardEmbedded .kanbanToolbar {
+  border-bottom: 0;
+  padding-top: 0;
+}
+
 .kanbanToolbar {
   display: flex;
   align-items: center;
@@ -3326,6 +3446,8 @@
 
 .kanbanCardTitle {
   display: -webkit-box;
+  // 作为卡片头部的 flex 子项占满标签以外的剩余宽度，min-width 让两行截断生效而不是撑破卡片。
+  flex: 1;
   min-width: 0;
   font-size: 14px;
   font-weight: 500;
@@ -3337,6 +3459,52 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
+}
+
+// 标题占满剩余宽度，类型标签固定在右上角。用 flex-start 对齐，让标签跟标题首行齐平而非垂直居中。
+.kanbanCardHeader {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+// 类型标签不参与压缩，宽度由中文字数决定，标题让位而不是把标签挤掉。
+.kanbanCardTypeTag {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  // 与标题 20px 行高对齐，保证标签和首行文字视觉齐平。
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+// 四角色配色与项目详情任务卡 detailTaskIcon* 保持同一套色值。
+.kanbanCardTypeTagArchitect {
+  color: #7c4cb0;
+  background: #f3ecff;
+}
+
+.kanbanCardTypeTagRequirement {
+  color: #2563b8;
+  background: #e8f1ff;
+}
+
+.kanbanCardTypeTagCoder {
+  color: #0f766e;
+  background: #e6f7f4;
+}
+
+.kanbanCardTypeTagTester {
+  color: #a8556a;
+  background: #fbeef2;
+}
+
+// 普通会话不属于四角色任务，用中性灰弱化，避免跟真正的任务抢注意力。
+.kanbanCardTypeTagChat {
+  color: #64748b;
+  background: #f1f5f9;
 }
 
 .kanbanCardMeta {
@@ -3411,6 +3579,116 @@
   word-break: break-word;
 }
 
+// 运营任务详情按原型使用“摘要卡 + 纵向配置字段”，不展示研发任务的仓库和阶段信息。
+.operationTaskDetailContent {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.operationTaskSummary {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #dfe7ea;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #f7fbfa;
+}
+
+.operationTaskStatusTag {
+  flex-shrink: 0;
+  margin-inline-end: 0;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.operationTaskSummaryIcon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #246bfe;
+  background: #eaf1ff;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.operationTaskSummaryMain {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+
+  small {
+    color: #8a96a8;
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  strong {
+    overflow: hidden;
+    color: #344056;
+    font-size: 16px;
+    line-height: 24px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  p {
+    margin: 2px 0 0;
+    overflow: hidden;
+    color: #75839a;
+    font-size: 13px;
+    line-height: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.operationTaskConfiguration {
+  h3 {
+    margin: 0 0 14px;
+    color: #1f2633;
+    font-size: 16px;
+    line-height: 24px;
+  }
+
+  dl {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  dl > div {
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr);
+    align-items: start;
+    gap: 14px;
+  }
+
+  dt {
+    color: #8a96a8;
+    font-size: 13px;
+    line-height: 22px;
+  }
+
+  dd {
+    min-width: 0;
+    margin: 0;
+    color: #344056;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 22px;
+    word-break: break-word;
+  }
+}
+
 /* 任务详情 - Agent 执行概览 */
 .taskHero {
   padding: 16px;
@@ -3436,6 +3714,21 @@
     font-weight: 600;
     line-height: 24px;
     color: #344056;
+  }
+}
+
+// 运营任务沿用研发任务的员工概览卡，仅以状态标签替代研发进度条。
+.operationTaskHero {
+  .taskHeroAgent {
+    margin-bottom: 0;
+  }
+
+  .operationTaskStatusTag {
+    flex-shrink: 0;
+    margin-inline-start: auto;
+    margin-inline-end: 0;
+    font-size: 12px;
+    line-height: 20px;
   }
 }
 
@@ -3512,6 +3805,15 @@
     color: #344056;
     word-break: break-word;
   }
+}
+
+// 普通/默认项目任务详情中的会话内容保留换行，长文本在抽屉内自然换行展示。
+.taskDetailText {
+  color: #526075;
+  font-size: 13px;
+  line-height: 22px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 // 关联需求跨越两列，其余上下文字段仍保持两列各占 50% 的布局。
@@ -3732,4 +4034,12 @@
 .requirementAddMenuDesc {
   font-size: 12px;
   color: #8c8c8c;
+}
+
+// 分支数量较多时限制下拉高度，避免菜单超出资源面板可视区域。
+.repoBranchDropdown {
+  :global(.@{antPrefix}-dropdown-menu) {
+    max-height: 320px;
+    overflow-y: auto;
+  }
 }

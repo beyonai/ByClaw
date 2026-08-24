@@ -31,8 +31,8 @@ type IProps = {
   setMultiChoicesMsgId?: React.Dispatch<React.SetStateAction<string[]>>;
 
   hideAction?: boolean;
+  previewInDetailPanel?: boolean;
   showToBottomBtn?: boolean;
-  captureRequirementProjectId?: number;
   updateMessage: (message: IMessage) => IMessage;
   deleteMessage: (message: IMessage) => void;
 };
@@ -58,11 +58,11 @@ function MessageList(props: IProps, ref: any) {
     hasMore = false,
     inverse = true,
     showToBottomBtn = true,
-    captureRequirementProjectId,
     updateMessage,
     deleteMessage,
     sessionId,
     hideAction,
+    previewInDetailPanel = false,
   } = props;
   const { multiChoicesList = emptyArr, setMultiChoicesMsgId, multiChoicesMsgId } = props;
 
@@ -73,7 +73,7 @@ function MessageList(props: IProps, ref: any) {
     updateMessage,
     deleteMessage,
     sessionId,
-    captureRequirementProjectId,
+    previewInDetailPanel,
   });
   const { toBottomBtnVisable, setToBottomBtnVisable } = useToBottomBtn({
     messageList,

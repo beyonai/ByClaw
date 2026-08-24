@@ -12,9 +12,13 @@ import { registerManagedAgentModelHooks } from "./managed-agent-model-hook.js";
 import { createRedisJsonStore, setSharedRedisJsonStore } from "./redis-json-store.js";
 import { loadBaiyingRedisEnvDefaults } from "./redis-env.js";
 import { createBaiyingCallToolFactory } from "./baiying-call-tool.js";
+import {
+  registerBaiyingNativeImageRouting,
+} from "./image-generation/native-image-provider.js";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
 import { loadAuthContext, resolveAuthFilePath } from "./executor/auth.js";
 import { loadPrivateParamsRuntime } from "./personal-params.js";
+import { resolveBackendServiceExecEnv } from "./backend-service-discovery.js";
 import { resolveChannelSessionIdForTool } from "./channel-session-resolve.js";
 import {
   extractFinalAssistantOutput,
@@ -144,10 +148,22 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     { name: "baiying_call" },
   );
 
+  registerBaiyingNativeImageRouting({
+    api,
+    registry,
+    store: redisJsonStore,
+    loadGenerateImage: async () => {
+      const runtime = await import("openclaw/plugin-sdk/image-generation-runtime");
+      return runtime.generateImage;
+    },
+  });
+  api.logger.info("baiying-enhance: native image_generate Redis router ready");
+
   api.on("resolve_exec_env", async (event) => {
     if (event.toolName !== "exec") {
       return {};
     }
+    let privateParams: Record<string, string> = {};
     try {
       const authContext = await loadAuthContext(resolveAuthFilePath(pluginCfg.authFilePath));
       const runtime = await loadPrivateParamsRuntime({
@@ -158,15 +174,21 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
           error: (message) => api.logger.error(message),
         },
       });
-      return runtime?.params ?? {};
+      privateParams = runtime?.params ?? {};
     } catch (err) {
       api.logger.warn(
         `baiying-enhance: resolve_exec_env private params skipped: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
-      return {};
     }
+    const backendEnv = await resolveBackendServiceExecEnv({
+      logger: { warn: (message) => api.logger.warn(message) },
+    });
+    const safePrivateParams = { ...privateParams };
+    delete safePrivateParams.BEYOND_TOKEN;
+    delete safePrivateParams.BYAI_SERVICE_BASE_URL;
+    return { ...safePrivateParams, ...backendEnv };
   });
 
   api.on("agent_end", (event, ctx) => {

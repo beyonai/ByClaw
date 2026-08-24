@@ -17,6 +17,10 @@ import {
   getApiEndpointPlaceholder,
 } from './modelFormUtils';
 import styles from './ModelFormModal.module.less';
+import {
+  getImageGenerationProvider,
+  IMAGE_GENERATION_PROVIDER_OPTIONS,
+} from './imageGenerationProviders';
 
 const { TextArea } = Input;
 
@@ -105,9 +109,28 @@ const ModelFormFields: React.FC<Props> = ({
   const intl = useIntl();
   const currentModelProtocol = Form.useWatch('modelProtocol', form);
   const currentModelType = Form.useWatch('modelType', form);
+  const currentProviderName = Form.useWatch('providerName', form);
   const reasoningConfig = Form.useWatch('reasoningConfig', form) || {};
   const apiEndpointPlaceholder = useMemo(() => getApiEndpointPlaceholder(currentModelProtocol), [currentModelProtocol]);
   const isLlmModel = `${currentModelType ?? 'LLM'}`.trim().toUpperCase() === 'LLM';
+  const isImageGenerationModel = `${currentModelType ?? 'LLM'}`.trim().toUpperCase() === 'IMAGE_GENERATION';
+  const currentImageProvider = getImageGenerationProvider(currentProviderName);
+  const modelProtocolOptions = isImageGenerationModel
+    ? currentImageProvider
+      ? [{ label: currentImageProvider.label, value: currentImageProvider.modelProtocol }]
+      : []
+    : [...MODEL_PROTOCOL_OPTIONS].filter((item) => item.value !== 'MINIMAX_IMAGE');
+  const providerOptions = isImageGenerationModel
+    ? IMAGE_GENERATION_PROVIDER_OPTIONS
+    : [
+      { label: 'OpenAI', value: 'OpenAI' },
+      { label: 'Anthropic', value: 'Anthropic' },
+      { label: 'Qwen', value: 'Qwen' },
+      { label: 'DeepSeek', value: 'DeepSeek' },
+      { label: 'OpenRouter', value: 'OpenRouter' },
+      { label: 'Together', value: 'Together' },
+      { label: 'ZAI', value: 'ZAI' },
+    ];
   const reasoningEnabled = Boolean(reasoningConfig?.enabled);
   const reasoningCapability = `${reasoningConfig?.capability ?? 'unsupported'}`;
   const thinkingLevelOptions = THINKING_LEVEL_OPTIONS.map((value) => ({ label: value, value }));
@@ -210,11 +233,29 @@ const ModelFormFields: React.FC<Props> = ({
             </Form.Item>
 
             <Form.Item
-              label={intl.formatMessage({ id: 'modelMgr.modal.modelCode' })}
+              label={intl.formatMessage({
+                id: isImageGenerationModel ? 'modelMgr.modal.minimaxModel' : 'modelMgr.modal.modelCode',
+              })}
               name="modelCode"
-              rules={[{ required: true, message: intl.formatMessage({ id: 'modelMgr.modal.modelCodePlaceholder' }) }]}
+              rules={[
+                {
+                  required: true,
+                  message: intl.formatMessage({
+                    id: isImageGenerationModel
+                      ? 'modelMgr.modal.minimaxModelRequired'
+                      : 'modelMgr.modal.modelCodePlaceholder',
+                  }),
+                },
+              ]}
             >
-              <Input placeholder="gpt-4-turbo-preview" maxLength={100} />
+              <Input
+                placeholder={
+                  isImageGenerationModel
+                    ? intl.formatMessage({ id: 'modelMgr.modal.minimaxModelPlaceholder' })
+                    : 'gpt-4-turbo-preview'
+                }
+                maxLength={100}
+              />
             </Form.Item>
 
             <Form.Item
@@ -237,8 +278,9 @@ const ModelFormFields: React.FC<Props> = ({
           <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.modelProtocol' })} name="modelProtocol">
             <Select
               allowClear
+              disabled={isImageGenerationModel}
               placeholder={intl.formatMessage({ id: 'modelMgr.modal.modelProtocolPlaceholder' })}
-              options={[...MODEL_PROTOCOL_OPTIONS]}
+              options={modelProtocolOptions}
             />
           </Form.Item>
           <Form.Item
@@ -314,80 +356,135 @@ const ModelFormFields: React.FC<Props> = ({
           open={isSectionOpen('params')}
           onToggle={() => toggleSection('params')}
         >
-          <Form.Item
-            label={intl.formatMessage({ id: 'modelMgr.modal.contextTokens' })}
-            required
-            tooltip={intl.formatMessage({ id: 'modelMgr.modal.contextTokensTooltip' })}
-          >
-            <div className={styles.tokenRow}>
+          {!isImageGenerationModel ? (
+            <>
               <Form.Item
-                name="contextTokens"
-                noStyle
-                rules={[
-                  { required: true, message: intl.formatMessage({ id: 'modelMgr.modal.contextTokensPlaceholder' }) },
-                  {
-                    type: 'number',
-                    min: MIN_CONTEXT_TOKENS,
-                    message: intl.formatMessage(
-                      { id: 'modelMgr.modal.contextTokensMin' },
-                      { min: MIN_CONTEXT_TOKENS.toLocaleString() }
-                    ),
-                  },
-                ]}
+                label={intl.formatMessage({ id: 'modelMgr.modal.contextTokens' })}
+                required
+                tooltip={intl.formatMessage({ id: 'modelMgr.modal.contextTokensTooltip' })}
               >
-                <InputNumber {...CONTEXT_TOKENS_CONFIG} className={styles.tokenInput} />
+                <div className={styles.tokenRow}>
+                  <Form.Item
+                    name="contextTokens"
+                    noStyle
+                    rules={[
+                      {
+                        required: true,
+                        message: intl.formatMessage({ id: 'modelMgr.modal.contextTokensPlaceholder' }),
+                      },
+                      {
+                        type: 'number',
+                        min: MIN_CONTEXT_TOKENS,
+                        message: intl.formatMessage(
+                          { id: 'modelMgr.modal.contextTokensMin' },
+                          { min: MIN_CONTEXT_TOKENS.toLocaleString() }
+                        ),
+                      },
+                    ]}
+                  >
+                    <InputNumber {...CONTEXT_TOKENS_CONFIG} className={styles.tokenInput} />
+                  </Form.Item>
+                  <span className={styles.hint}>tokens</span>
+                  <div className={styles.sliderWrap}>
+                    <Form.Item shouldUpdate noStyle>
+                      {() => {
+                        const v = form.getFieldValue('contextTokens') || DEFAULT_CONTEXT_TOKENS;
+                        return (
+                          <Slider
+                            {...CONTEXT_TOKENS_CONFIG}
+                            marks={tokenMarks as any}
+                            value={v}
+                            onChange={(val) => form.setFieldsValue({ contextTokens: val })}
+                          />
+                        );
+                      }}
+                    </Form.Item>
+                  </div>
+                </div>
               </Form.Item>
-              <span className={styles.hint}>tokens</span>
-              <div className={styles.sliderWrap}>
-                <Form.Item shouldUpdate noStyle>
-                  {() => {
-                    const v = form.getFieldValue('contextTokens') || DEFAULT_CONTEXT_TOKENS;
-                    return (
-                      <Slider
-                        {...CONTEXT_TOKENS_CONFIG}
-                        marks={tokenMarks as any}
-                        value={v}
-                        onChange={(val) => form.setFieldsValue({ contextTokens: val })}
-                      />
-                    );
-                  }}
-                </Form.Item>
+              <div className={styles.hintBlock}>
+                <div className={styles.hintTitle}>
+                  {intl.formatMessage({ id: 'modelMgr.modal.advancedParamTemplate' })}
+                </div>
+                <div className={styles.hint}>{intl.formatMessage({ id: 'modelMgr.modal.advancedParamDesc' })}</div>
               </div>
-            </div>
-          </Form.Item>
-          <div className={styles.hintBlock}>
-            <div className={styles.hintTitle}>{intl.formatMessage({ id: 'modelMgr.modal.advancedParamTemplate' })}</div>
-            <div className={styles.hint}>{intl.formatMessage({ id: 'modelMgr.modal.advancedParamDesc' })}</div>
-          </div>
+            </>
+          ) : null}
           <div className={styles.grid3}>
-            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.temperature' })} name="temperature">
-              <InputNumber className={styles.fullWidth} min={0} max={2} step={0.1} />
-            </Form.Item>
-            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.topP' })} name="topP">
-              <InputNumber className={styles.fullWidth} min={0} max={1} step={0.05} />
-            </Form.Item>
-            <Form.Item
-              label={intl.formatMessage({ id: 'modelMgr.modal.maxTokens' })}
-              name="maxTokens"
-              rules={[
-                {
-                  type: 'number',
-                  min: MIN_MAX_TOKENS,
-                  message: intl.formatMessage(
-                    { id: 'modelMgr.modal.maxTokensMin' },
-                    { min: MIN_MAX_TOKENS.toLocaleString() }
-                  ),
-                },
-              ]}
-            >
-              <InputNumber className={styles.fullWidth} min={MIN_MAX_TOKENS} />
-            </Form.Item>
-            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.frequencyPenalty' })} name="frequencyPenalty">
-              <InputNumber className={styles.fullWidth} min={-2} max={2} step={0.1} />
-            </Form.Item>
-            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.presencePenalty' })} name="presencePenalty">
-              <InputNumber className={styles.fullWidth} min={-2} max={2} step={0.1} />
-            </Form.Item>
+            {isImageGenerationModel ? (
+              <>
+                <Form.Item
+                  label={intl.formatMessage({ id: 'modelMgr.modal.imagePrompt' })}
+                  name="prompt"
+                  className={styles.gridColSpan3}
+                >
+                  <TextArea
+                    placeholder={intl.formatMessage({ id: 'modelMgr.modal.imagePromptPlaceholder' })}
+                    rows={3}
+                  />
+                </Form.Item>
+                <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.aspectRatio' })} name="aspectRatio">
+                  <Select
+                    options={['1:1', '16:9', '4:3', '3:2', '2:3', '3:4', '9:16'].map((value) => ({
+                      label: value,
+                      value,
+                    }))}
+                  />
+                </Form.Item>
+                <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.imageCount' })} name="imageCount">
+                  <InputNumber className={styles.fullWidth} min={1} max={9} precision={0} />
+                </Form.Item>
+                <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.responseFormat' })} name="responseFormat">
+                  <Select
+                    options={[
+                      { label: 'URL', value: 'url' },
+                      { label: 'Base64', value: 'base64' },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label={intl.formatMessage({ id: 'modelMgr.modal.promptOptimizer' })}
+                  name="promptOptimizer"
+                  valuePropName="checked"
+                >
+                  <Switch />
+                </Form.Item>
+              </>
+            ) : (
+              <>
+                <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.temperature' })} name="temperature">
+                  <InputNumber className={styles.fullWidth} min={0} max={2} step={0.1} />
+                </Form.Item>
+                <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.topP' })} name="topP">
+                  <InputNumber className={styles.fullWidth} min={0} max={1} step={0.05} />
+                </Form.Item>
+                <Form.Item
+                  label={intl.formatMessage({ id: 'modelMgr.modal.maxTokens' })}
+                  name="maxTokens"
+                  rules={[
+                    {
+                      type: 'number',
+                      min: MIN_MAX_TOKENS,
+                      message: intl.formatMessage(
+                        { id: 'modelMgr.modal.maxTokensMin' },
+                        { min: MIN_MAX_TOKENS.toLocaleString() }
+                      ),
+                    },
+                  ]}
+                >
+                  <InputNumber className={styles.fullWidth} min={MIN_MAX_TOKENS} />
+                </Form.Item>
+                <Form.Item
+                  label={intl.formatMessage({ id: 'modelMgr.modal.frequencyPenalty' })}
+                  name="frequencyPenalty"
+                >
+                  <InputNumber className={styles.fullWidth} min={-2} max={2} step={0.1} />
+                </Form.Item>
+                <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.presencePenalty' })} name="presencePenalty">
+                  <InputNumber className={styles.fullWidth} min={-2} max={2} step={0.1} />
+                </Form.Item>
+              </>
+            )}
             <Form.Item
               label={intl.formatMessage({ id: 'modelMgr.modal.provider' })}
               name="providerName"
@@ -395,15 +492,7 @@ const ModelFormFields: React.FC<Props> = ({
             >
               <Select
                 placeholder={intl.formatMessage({ id: 'modelMgr.modal.providerPlaceholder' })}
-                options={[
-                  { label: 'OpenAI', value: 'OpenAI' },
-                  { label: 'Anthropic', value: 'Anthropic' },
-                  { label: 'Qwen', value: 'Qwen' },
-                  { label: 'DeepSeek', value: 'DeepSeek' },
-                  { label: 'OpenRouter', value: 'OpenRouter' },
-                  { label: 'Together', value: 'Together' },
-                  { label: 'ZAI', value: 'ZAI' },
-                ]}
+                options={providerOptions}
               />
             </Form.Item>
             {isLlmModel ? (

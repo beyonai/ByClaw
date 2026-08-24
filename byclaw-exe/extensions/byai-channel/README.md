@@ -2,6 +2,8 @@
 
 OpenClaw 的 Web Channel 插件，支持流式输出配置。
 
+维护该模块前请先阅读 [`MAINTAINER_GUIDE.md`](./MAINTAINER_GUIDE.md)，其中说明 SDK 入站、agent events、hooks、native subagent、delegated work 和业务会话完成判定之间的关系。本 README 主要保留部署、配置和外部接入说明。
+
 ## 打包为 dist
 
 和 `baiying-enhance` 一样，`byai-channel` 通过 esbuild 产出可分发的 `dist/index.js`：

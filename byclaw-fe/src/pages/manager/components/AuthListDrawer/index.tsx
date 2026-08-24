@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { useCallback } from 'react';
-import { Row, Col, Spin, message } from 'antd';
+import { Alert, Row, Col, Spin, message } from 'antd';
 import { useIntl, useDispatch, connect } from '@umijs/max';
 import ModalDrawer from '@/pages/manager/components/ModalDrawer';
 import AuthList from './AuthList';
@@ -158,6 +158,14 @@ const AuthListDrawer = (props) => {
           </div>
         </div>
       </div>
+      {!onlyUser && (
+        <Alert
+          type="info"
+          showIcon
+          message={intl.formatMessage({ id: 'auth.organizationIncludesDescendants' })}
+          style={{ marginBottom: 16 }}
+        />
+      )}
       <Row className={styles.selectionWrap} gutter={16}>
         <Col span={24}>
           <Spin spinning={detailLoading}>

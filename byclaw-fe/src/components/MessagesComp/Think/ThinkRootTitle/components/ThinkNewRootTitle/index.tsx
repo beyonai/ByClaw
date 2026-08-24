@@ -1,6 +1,6 @@
 import React, { useRef, useState, useMemo, Suspense } from 'react';
 
-import { CheckCircleFilled, DownOutlined, InfoCircleFilled, UpOutlined } from '@ant-design/icons';
+import { CheckCircleFilled, DownOutlined, InfoCircleFilled, RightOutlined } from '@ant-design/icons';
 import classnames from 'classnames';
 import { get, isBoolean, isEmpty, size } from 'lodash';
 import { SSEMessageType } from '@/constants/message';
@@ -8,7 +8,7 @@ import { SSEMessageType } from '@/constants/message';
 import lazyHandler from '@/components/MessageList/lazyHandler';
 import ThinkingProcessItemRender from '@/components/MessageList/components/ThinkingProcessRender/components/ThinkingProcessItemRender/index';
 
-import type { IMessage, NewIMessageListItem } from '@/typescript/message';
+import type { IMessage } from '@/typescript/message';
 import type { TreeNode } from '@/components/MessageList/components/ThinkingProcessRender/typescript';
 
 import { isTextContentType } from '@/utils/messgae';
@@ -28,7 +28,7 @@ interface CollapsibleSectionProps {
   updateMessageListItemNewContent: (path: string, val: any) => IMessage;
 }
 interface CollapsibleItemProps {
-  item: NewIMessageListItem;
+  item: TreeNode;
   parentTreeNode?: TreeNode;
   message: IMessage;
   updateMessageListItemNewContent: (path: string, val: any) => IMessage;
@@ -98,7 +98,7 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = React.memo(
           {HeaderComp}
           {hasChildren && (
             <div className={classnames(styles.collapseIcon, 'ub ub-ac ub-pc')}>
-              {isParentCollapsed ? <DownOutlined /> : <UpOutlined />}
+              {isParentCollapsed ? <RightOutlined /> : <DownOutlined />}
             </div>
           )}
         </div>
@@ -110,7 +110,7 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = React.memo(
 );
 
 const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
-  ({ item, message, parentTreeNode = {}, updateMessageListItemNewContent }) => {
+  ({ item, message, parentTreeNode, updateMessageListItemNewContent }) => {
     // 在组件内部添加状态和ref
     const itemChildHeaderRef = useRef<HTMLDivElement>(null);
 
@@ -192,7 +192,7 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
             }}
           />
           {hasChildren && (
-            <div className={styles.itemCollapseIcon}>{isCollapsed ? <DownOutlined /> : <UpOutlined />}</div>
+            <div className={styles.itemCollapseIcon}>{isCollapsed ? <RightOutlined /> : <DownOutlined />}</div>
           )}
         </div>
         {needsGradient && (
@@ -217,17 +217,18 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
                 isMouseOverRef.current = true;
               }}
             >
-              {item.children?.map((child, index) => (
-                <ThinkingProcessItemRender
-                  key={`${message?.msgId}_message_${index}`}
-                  thinkListItem={child}
-                  compKey={`${message?.msgId}_message_${index}`}
-                  message={message}
-                  messageIdx={child.messageIdx}
-                  updateMessageListItem={(path: string, val: any) => {
-                    return updateMessageListItemNewContent(`${child.messageIdx}.${path}`, val);
-                  }}
-                />
+              {item.children?.map((child: TreeNode, index: number) => (
+                <div
+                  key={`${message?.msgId}_message_${child.content?.orderId || index}`}
+                  className={classnames(styles.childItem, 'overflow-hidden full-width')}
+                >
+                  <CollapsibleItem
+                    item={child}
+                    message={message}
+                    parentTreeNode={item}
+                    updateMessageListItemNewContent={updateMessageListItemNewContent}
+                  />
+                </div>
               ))}
             </div>
           )}
@@ -268,7 +269,7 @@ function ThinkNewRootTitle(props: IProps) {
           message={message}
           updateMessageListItemNewContent={updateMessageListItemContent}
         >
-          {treeNode?.children?.map?.((item: NewIMessageListItem, index: number) => {
+          {treeNode?.children?.map?.((item: TreeNode, index: number) => {
             if (
               [
                 `${SSEMessageType.thinkTaskExecute}`,
