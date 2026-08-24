@@ -234,10 +234,13 @@
 .secondaryTabs {
   display: flex;
   flex: 1;
-  width: 32px;
+  width: auto;
   height: auto;
   min-height: 0;
   justify-content: center;
+  align-self: stretch;
+  box-sizing: border-box;
+  padding-right: 8px;
 
   :global {
     .@{antPrefix}-tabs-nav {
@@ -271,10 +274,10 @@
       padding: 0;
       margin: 0 !important;
       border: 0;
-      border-radius: 12px;
+      border-radius: 0 16px 16px 0;
       color: rgba(112, 118, 128, 1);
       background: #f5f5f5;
-      font-size: 12px;
+      font-size: 13px;
       font-weight: 400;
       line-height: 16px;
 
@@ -301,6 +304,7 @@
       max-width: 100%;
       padding: 0;
       overflow: visible;
+      font-size: 13px;
       text-align: center;
       text-overflow: clip;
       white-space: normal;
@@ -310,6 +314,22 @@
     .@{antPrefix}-tabs-ink-bar,
     .@{antPrefix}-tabs-content-holder {
       display: none;
+    }
+  }
+}
+
+.secondaryTabsEnglish {
+  :global {
+    .@{antPrefix}-tabs-tab {
+      min-height: 128px;
+    }
+
+    .@{antPrefix}-tabs-tab-btn {
+      width: max-content;
+      max-width: none;
+      white-space: nowrap;
+      word-break: normal;
+      transform: rotate(90deg);
     }
   }
 }
@@ -331,6 +351,9 @@
   flex: none;
   justify-content: center;
   height: 24px;
+  width: 100%;
+  box-sizing: border-box;
+  padding-right: 8px;
   margin-bottom: 8px;
 }
 

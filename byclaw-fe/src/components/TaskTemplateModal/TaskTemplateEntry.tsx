@@ -1,6 +1,6 @@
 import { PlusOutlined, RightOutlined } from '@ant-design/icons';
 import { Button, Divider, Empty, Modal, Select, Spin, message } from 'antd';
-import { getLocale } from '@umijs/max';
+import { getLocale, useIntl } from '@umijs/max';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getDcSystemConfigListByStandType } from '@/service/auth';
 import { createProject, saveProjectMembers } from '@/service/devloop';
@@ -49,6 +49,7 @@ const getSavedProjectId = (response: any) =>
 
 // 公共会话输入框统一使用该入口，再按当前会话所属项目类型切换对应模板数据。
 const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onProjectChange }) => {
+  const intl = useIntl();
   const { EventEmitter } = useGlobal();
   const [visible, setVisible] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
@@ -220,7 +221,9 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
         { responseCfg: { hideErrorTips: true } }
       );
       const savedProjectId = getSavedProjectId(response);
-      if (!savedProjectId) throw new Error('项目创建失败');
+      if (!savedProjectId) {
+        throw new Error(intl.formatMessage({ id: 'projectSpace.message.createFailed' }));
+      }
 
       await saveProjectMembers({
         projectId: Number(savedProjectId),
@@ -245,10 +248,10 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
         projectName: createdProject.projectName,
       });
       EventEmitter.emit('projectSpace-list-refresh', { projectId: savedProjectId });
-      message.success('项目创建成功');
+      message.success(intl.formatMessage({ id: 'projectSpace.message.createSuccess' }));
       return savedProjectId;
     } catch (error: any) {
-      message.error(error?.message || '项目创建失败');
+      message.error(error?.message || intl.formatMessage({ id: 'projectSpace.message.createFailed' }));
       return '';
     } finally {
       setCreateProjectLoading(false);
@@ -298,13 +301,13 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
             showSearch
             loading={projectsLoading}
             value={selectedProjectValue || undefined}
-            placeholder="选择项目"
+            placeholder={intl.formatMessage({ id: 'projectSpace.selectProject' })}
             showArrow
             popupMatchSelectWidth={260}
             optionFilterProp="label"
             options={projectOptions.map((item) => ({
               value: `${item.projectId}`,
-              label: item.projectName || '未命名项目',
+              label: item.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' }),
             }))}
             onChange={(value) => {
               setSelectedProjectOverride(`${value}`);
@@ -317,7 +320,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
                 });
               }
             }}
-            aria-label="选择项目"
+            aria-label={intl.formatMessage({ id: 'projectSpace.selectProject' })}
             dropdownRender={(menu) => (
               <>
                 {menu}
@@ -329,7 +332,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => setCreateProjectOpen(true)}
                 >
-                  新建项目
+                  {intl.formatMessage({ id: 'projectSpace.createProject' })}
                 </Button>
               </>
             )}

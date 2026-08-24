@@ -12,6 +12,16 @@ const mockEventEmitter = {
 };
 jest.mock('@umijs/max', () => ({
   getLocale: () => 'zh-CN',
+  useIntl: () => ({
+    formatMessage: ({ id }: { id: string }) =>
+      ({
+        'projectSpace.createProject': '新建项目',
+        'projectSpace.selectProject': '请选择项目',
+        'projectSpace.unnamedProject': '未命名项目',
+        'projectSpace.message.createSuccess': '项目空间创建成功',
+        'projectSpace.message.createFailed': '项目空间创建失败',
+      }[id] || id),
+  }),
   useNavigate: () => jest.fn(),
 }));
 
@@ -105,7 +115,7 @@ describe('TaskTemplateEntry project selector', () => {
 
     expect(screen.queryByRole('button', { name: '任务模板' })).not.toBeInTheDocument();
 
-    const projectSelect = screen.getByRole('combobox', { name: '选择项目' });
+    const projectSelect = screen.getByRole('combobox', { name: '请选择项目' });
     fireEvent.mouseDown(projectSelect);
     fireEvent.change(projectSelect, { target: { value: '项目二' } });
     fireEvent.click(await screen.findByText('项目二'));
@@ -116,7 +126,7 @@ describe('TaskTemplateEntry project selector', () => {
   it('opens the new project form in the current chat page', async () => {
     render(<TaskTemplateEntry onApply={jest.fn()} />);
 
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: '选择项目' }));
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '请选择项目' }));
     fireEvent.click(await screen.findByText('新建项目'));
 
     expect(screen.getByTestId('project-onboarding-wizard')).toBeInTheDocument();

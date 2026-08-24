@@ -38,6 +38,7 @@ interface CodesTabProps {
   resourceId?: string | number;
   sessionId?: string | number;
   sessionName?: string;
+  refreshKey?: number;
   codeChangesEnabled?: boolean;
   // 提供详情回调时，仓库文件单击即在工作区页签内预览。
   onOpenDetail?: (panel: React.ReactNode, options: DetailPanelOptions) => void;
@@ -89,6 +90,7 @@ const CodesTab: React.FC<CodesTabProps> = ({
   resourceId,
   sessionId,
   sessionName,
+  refreshKey = 0,
   codeChangesEnabled = false,
   onOpenDetail,
   onNodeClick,
@@ -210,12 +212,12 @@ const CodesTab: React.FC<CodesTabProps> = ({
     setDiffModalData(null);
     repoRequestSeqRef.current = {};
     void fetchRepos();
-  }, [fetchRepos]);
+  }, [fetchRepos, refreshKey]);
 
   useEffect(() => {
     setRepoChangesViewMap({});
     void fetchTaskChanges();
-  }, [fetchTaskChanges]);
+  }, [fetchTaskChanges, refreshKey]);
 
   useEffect(
     () => () => {
@@ -325,22 +327,6 @@ const CodesTab: React.FC<CodesTabProps> = ({
     setDiffModalFile(null);
     setDiffModalData(null);
   }, []);
-
-  const refreshRepo = useCallback(
-    async (repo: DevloopProjectRepo) => {
-      if (!sessionId) return;
-      const repoKey = `${repo.repoId}`;
-      const rootPath = sessionWorktreePath;
-      if (!rootPath) return;
-      setRepoSearchValueMap((current) => ({ ...current, [repoKey]: '' }));
-      setChildrenByPath((current) =>
-        Object.fromEntries(Object.entries(current).filter(([path]) => !isPathIn(path, rootPath)))
-      );
-      setExpandedKeys((current) => current.filter((key) => !isPathIn(`${key}`, rootPath)));
-      await Promise.all([fetchRepoFiles(repo, rootPath), fetchTaskChanges()]);
-    },
-    [fetchRepoFiles, fetchTaskChanges, sessionId, sessionWorktreePath]
-  );
 
   const searchRepoFiles = useCallback(
     async (repo: DevloopProjectRepo, keyword: string) => {
@@ -630,7 +616,6 @@ const CodesTab: React.FC<CodesTabProps> = ({
             resourceEmptyStyle
             childrenByPath={childrenByPath}
             expandedKeys={expandedKeys}
-            onRefresh={resourceId && sessionId ? () => void refreshRepo(repo) : undefined}
             onExpand={setExpandedKeys}
             onLoadData={loadRepoTreeNode}
             onNodeClick={handleNodeClick}

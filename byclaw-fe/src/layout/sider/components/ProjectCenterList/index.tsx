@@ -88,7 +88,7 @@ const ProjectCenterList: React.FC = () => {
           { responseCfg: { hideErrorTips: true } }
         );
         const projectId = getProjectIdFromResponse(response);
-        if (!projectId) throw new Error('项目创建成功但未返回项目 ID');
+        if (!projectId) throw new Error(intl.formatMessage({ id: 'projectSpace.message.createFailed' }));
 
         if (isShared && values.shareMembers?.length) {
           await saveProjectMembers({

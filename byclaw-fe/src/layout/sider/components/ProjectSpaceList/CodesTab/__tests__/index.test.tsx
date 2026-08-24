@@ -170,12 +170,12 @@ describe('CodesTab', () => {
   });
 
   it('refreshes one repository and lazily loads nested directories', async () => {
-    render(<CodesTab projectId={203} resourceId="agent-9" sessionId="301" />);
+    const { rerender } = render(<CodesTab projectId={203} resourceId="agent-9" sessionId="301" refreshKey={0} />);
 
     await screen.findByTestId('repo-beyonai/ByClaw');
     mockListFiles.mockClear();
 
-    fireEvent.click(screen.getByRole('button', { name: 'refresh-beyonai/ByClaw' }));
+    rerender(<CodesTab projectId={203} resourceId="agent-9" sessionId="301" refreshKey={1} />);
     await waitFor(() =>
       expect(mockListFiles).toHaveBeenCalledWith({
         resourceId: 'agent-9',
@@ -314,14 +314,16 @@ describe('CodesTab', () => {
   });
 
   it('refreshes repository files and code changes together', async () => {
-    render(<CodesTab projectId={203} resourceId="agent-9" sessionId="301" codeChangesEnabled />);
+    const { rerender } = render(
+      <CodesTab projectId={203} resourceId="agent-9" sessionId="301" codeChangesEnabled refreshKey={0} />
+    );
 
     const repoBlock = await screen.findByTestId('repo-beyonai/ByClaw');
     await waitFor(() => expect(mockGetTaskChanges).toHaveBeenCalledWith(301));
     mockListFiles.mockClear();
     mockGetTaskChanges.mockClear();
 
-    fireEvent.click(within(repoBlock).getByRole('button', { name: 'refresh-beyonai/ByClaw' }));
+    rerender(<CodesTab projectId={203} resourceId="agent-9" sessionId="301" codeChangesEnabled refreshKey={1} />);
 
     await waitFor(() => {
       expect(mockListFiles).toHaveBeenCalledWith({

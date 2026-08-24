@@ -31,6 +31,7 @@ const EMPTY_SECONDARY_STATE: SecondaryState = {
 
 const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onOpenDetail }) => {
   const intl = useIntl();
+  const isEnglish = intl.locale.toLowerCase().startsWith('en');
   const activeEmployee = useActiveSiderAgent();
   const { project, loading: projectLoading } = useChatResourceProject(projectId);
   const { isDevelopProjectEnabled } = useProjectTypeConfig();
@@ -59,10 +60,10 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
       ];
     }
     return [
-      { key: 'file', label: label('chatResource.file') },
-      { key: 'knowledge', label: label('chatResource.knowledge') },
-      ...(showCode ? [{ key: 'code', label: label('chatResource.code') }] : []),
-      { key: 'ontology', label: label('chatResource.ontology') },
+      { key: 'file', label: label('chatResource.sessionFile') },
+      { key: 'projectFile', label: label('chatResource.projectFile') },
+      { key: 'knowledge', label: label('chatResource.projectKnowledge') },
+      ...(showCode ? [{ key: 'code', label: label('chatResource.projectCode') }] : []),
     ];
   }, [intl, showCode, upperScopeKey]);
 
@@ -86,12 +87,25 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
           />
         );
       }
+      if (upperSecondaryKey === 'projectFile') {
+        return (
+          <FileResourcePanel
+            scope="project"
+            sessionId={sessionId}
+            projectId={project?.projectId || projectId}
+            project={project}
+            refreshKey={sessionResourceRefreshKey}
+            onOpenDetail={onOpenDetail}
+          />
+        );
+      }
       if (upperSecondaryKey === 'code' && showCode) {
         return (
           <CodesTab
             projectId={Number(project?.projectId || projectId)}
             resourceId={resourceId}
             sessionId={sessionId}
+            refreshKey={sessionResourceRefreshKey}
             codeChangesEnabled
             onOpenDetail={onOpenDetail}
           />
@@ -101,17 +115,6 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
         return (
           <ObjectFilesPanel
             objectType="knowledge"
-            projectId={project?.projectId || projectId}
-            sessionId={sessionId}
-            refreshToken={sessionResourceRefreshKey}
-            onOpenDetail={onOpenDetail}
-          />
-        );
-      }
-      if (upperSecondaryKey === 'ontology') {
-        return (
-          <ObjectFilesPanel
-            objectType="object"
             projectId={project?.projectId || projectId}
             sessionId={sessionId}
             refreshToken={sessionResourceRefreshKey}
@@ -168,7 +171,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
               id: upperScopeKey === 'session' ? 'chatResource.currentSession' : 'chatResource.currentEmployee',
             })}
           >
-            {upperScopeKey === 'session' && ['file', 'knowledge', 'ontology'].includes(upperSecondaryKey) ? (
+            {upperScopeKey === 'session' && ['file', 'projectFile', 'knowledge', 'code'].includes(upperSecondaryKey) ? (
               <div className={styles.secondaryNavActions}>
                 <Button
                   type="text"
@@ -181,7 +184,7 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
             ) : null}
             <Tabs
               tabPosition="right"
-              className={styles.secondaryTabs}
+              className={`${styles.secondaryTabs} ${isEnglish ? styles.secondaryTabsEnglish : ''}`}
               size="small"
               activeKey={upperSecondaryKey}
               onChange={(key) => setSecondaryState((current) => ({ ...current, [upperScopeKey]: key }))}
