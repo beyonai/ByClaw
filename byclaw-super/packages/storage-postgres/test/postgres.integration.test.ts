@@ -127,6 +127,7 @@ suite("PostgreSQL persistence integration", () => {
       agentId: "agent-1",
       connectorId: "openclaw-by-framework",
       task: "resume-safe",
+      taskPosition: 2,
       status: "QUEUED",
       version: 0,
       createdAt: Date.now(),
@@ -148,6 +149,7 @@ suite("PostgreSQL persistence integration", () => {
     await expect(database.delegations.get(delegationId)).resolves.toMatchObject({
       connectorCursor: "3-0",
       partialOutput: "partial",
+      taskPosition: 2,
     });
     await database.runs.saveWithEvent?.(
       {

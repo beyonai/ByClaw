@@ -35,7 +35,7 @@ describe("应用配置", () => {
     expect(config.delegationTimeouts).toEqual({
       firstActivityMs: 300_000,
       idleMs: 900_000,
-      callbackMs: 300_000,
+      callbackMs: 10_800_000,
     });
     expect(config.openClaw).toEqual({
       cancelConfirmationTimeoutMs: 30_000,

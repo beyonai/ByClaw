@@ -278,6 +278,17 @@ CREATE INDEX callback_timeout_outbox_pending_idx
   WHERE delivered_at IS NULL;
 `,
   },
+  {
+    version: 12,
+    name: "delegation_task_position",
+    sql: `
+ALTER TABLE ${POSTGRES_TABLE_PREFIX}delegations
+  ADD COLUMN task_position integer NULL;
+ALTER TABLE ${POSTGRES_TABLE_PREFIX}delegations
+  ADD CONSTRAINT delegations_task_position_positive
+  CHECK (task_position IS NULL OR task_position > 0);
+`,
+  },
 ] as const;
 
 export const LATEST_POSTGRES_SCHEMA_VERSION =

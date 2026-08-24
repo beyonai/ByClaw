@@ -104,6 +104,13 @@ export class PiLeaderSession implements LeaderSession {
       parameters: Type.Object({
         agentId: Type.String({ description: "Exact id from the current authorized agent list" }),
         task: Type.String({ description: "Self-contained task for the specialist" }),
+        taskPosition: Type.Optional(
+          Type.Integer({
+            minimum: 1,
+            description:
+              "Position of the matching task in the active task plan. Required when an active task plan exists.",
+          }),
+        ),
         expectedOutput: Type.Optional(Type.String({ description: "Desired result format" })),
         attachmentIds: Type.Optional(
           Type.Array(Type.String(), {
@@ -113,16 +120,25 @@ export class PiLeaderSession implements LeaderSession {
         ),
       }),
       // 将 Pi 工具调用桥接到当前 Run 注入的 DelegationService 回调。
-      execute: async (_toolCallId, params, signal) => {
+      execute: async (toolCallId, params, signal) => {
         const active = wrapper?.activeInput;
         if (!active) {
           throw new Error("No active Leader run is available for delegation");
         }
+        if (active.activeTaskPlan?.status === "ACTIVE" && params.taskPosition === undefined) {
+          throw new Error(
+            "taskPosition is required when delegating work for an active task plan",
+          );
+        }
         let result;
         try {
           result = await active.delegate({
+            toolCallId,
             agentId: params.agentId,
             task: params.task,
+            ...(params.taskPosition !== undefined
+              ? { taskPosition: params.taskPosition }
+              : {}),
             ...(params.expectedOutput ? { expectedOutput: params.expectedOutput } : {}),
             ...(params.attachmentIds !== undefined
               ? { attachmentIds: params.attachmentIds }

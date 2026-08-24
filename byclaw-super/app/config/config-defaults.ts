@@ -26,7 +26,7 @@ export const APP_CONFIG_DEFAULTS = {
   delegationTimeouts: {
     firstActivityMs: 300_000,
     idleMs: 900_000,
-    callbackMs: 300_000,
+    callbackMs: 10_800_000,
   },
   openClaw: {
     cancelConfirmationTimeoutMs: 30_000,

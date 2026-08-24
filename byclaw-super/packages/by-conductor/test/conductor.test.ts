@@ -29,6 +29,8 @@ import {
   type Run,
   type RunAttachment,
   type Session,
+  type TaskPlanGateway,
+  type TaskPlanSnapshot,
 } from "../src/index.js";
 import { LeaderRunSuspendedError } from "../src/application/run-suspension.js";
 
@@ -83,6 +85,7 @@ describe("DelegationService", () => {
         agents: [agent],
         agentId: agent.id,
         task: "analyze later",
+        taskPosition: 1,
         metadata: {},
         signal: new AbortController().signal,
       }),
@@ -90,6 +93,7 @@ describe("DelegationService", () => {
 
     expect(await delegations.get("delegation-suspended")).toMatchObject({
       status: "RUNNING",
+      taskPosition: 1,
       externalRef: { executionId: "external" },
       callbackDeadlineAt: 11_000,
     });
@@ -107,6 +111,7 @@ describe("DelegationService", () => {
         agents: [agent],
         agentId: agent.id,
         task: "analyze later",
+        taskPosition: 1,
         metadata: {},
         signal: new AbortController().signal,
       }),
@@ -1058,6 +1063,7 @@ describe("RunService", () => {
           async run(input) {
             try {
               await input.delegate({
+                toolCallId: "delegate-suspended",
                 agentId: agent.id,
                 task: "analyze later",
               });
@@ -1320,7 +1326,7 @@ describe("RunService", () => {
     await service.dispose();
   });
 
-  it("adds a safe user message to downstream model failure events", async () => {
+  it("exposes the provider error message in downstream model failure events", async () => {
     const leaderFactory: LeaderSessionFactory = {
       async create() {
         return {
@@ -1352,7 +1358,7 @@ describe("RunService", () => {
       data: {
         status: "FAILED",
         error: "Leader model call failed: 403: sensitive provider response",
-        userMessage: "下游模型调用异常，请切换模型或者联系管理员",
+        userMessage: "403: sensitive provider response",
       },
     });
     await service.dispose();
@@ -2052,6 +2058,7 @@ describe("RunService", () => {
           run: async (input) => {
             const toolController = new AbortController();
             const result = await input.delegate({
+              toolCallId: "delegate-cancelled",
               agentId: agent.id,
               task: "wait for cancellation",
               signal: toolController.signal,
@@ -2122,6 +2129,347 @@ describe("RunService", () => {
     await waitFor(async () => (await service.getRun(run.id))?.status === "CANCELLING");
 
     expect((await service.getRun(run.id))?.status).toBe("CANCELLING");
+    await service.dispose();
+  });
+});
+
+describe("RunService task plan completion guard", () => {
+  function taskPlanSnapshot(
+    status: TaskPlanSnapshot["status"],
+    version = 1,
+  ): TaskPlanSnapshot {
+    return {
+      planId: "plan-1",
+      version,
+      title: "完成复杂任务",
+      status,
+      sessionId: "external-session-1",
+      messageId: "message-1",
+      sourceRuntime: "BYCLAW_SUPER",
+      sourceRunId: "run-1",
+      tasks: [
+        {
+          taskId: "task-1",
+          position: 1,
+          title: "执行任务",
+          status:
+            status === "ACTIVE"
+              ? "IN_PROGRESS"
+              : status === "FAILED"
+                ? "FAILED"
+                : "COMPLETED",
+        },
+      ],
+    };
+  }
+
+  function createTaskPlanService(
+    leaderRun: (input: LeaderRunInput) => Promise<{ text: string }>,
+    taskPlans: TaskPlanGateway,
+    connector?: AgentConnector,
+  ) {
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const registry = new ConnectorRegistry();
+    if (connector) {
+      registry.register(connector);
+    }
+    const leaders: LeaderSessionFactory = {
+      async create() {
+        return {
+          contextRevision: 0,
+          run: leaderRun,
+          abort: async () => undefined,
+          checkpoint: () => undefined,
+          markCommitted: () => undefined,
+          dispose: () => undefined,
+        };
+      },
+      async health() {
+        return { healthy: true };
+      },
+    };
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      new DelegationService(
+        registry,
+        delegations,
+        events,
+        1_000,
+      ),
+      leaders,
+      undefined,
+      undefined,
+      { taskPlans },
+    );
+    return { events, service };
+  }
+
+  async function createTaskPlanRun(
+    service: RunService,
+    agentList: AgentProfile[] = [],
+  ) {
+    return service.createSessionRun({
+      owner: { userCode: "user-1" },
+      message: "完成一个复杂任务",
+      agentList,
+      ingressContext: {
+        externalSessionId: "external-session-1",
+        parentMessageId: "message-1",
+      },
+      metadata: { "Beyond-Token": "secret-token" },
+    });
+  }
+
+  it("continues the Leader until the active plan reaches a terminal status", async () => {
+    const active = taskPlanSnapshot("ACTIVE");
+    const completedPlan = taskPlanSnapshot("COMPLETED", 2);
+    const taskPlans: TaskPlanGateway = {
+      loadActive: vi.fn(async () => active),
+      update: vi.fn(async () => completedPlan),
+      cancel: vi.fn(async () => undefined),
+    };
+    const messages: string[] = [];
+    const { service } = createTaskPlanService(async (input) => {
+      messages.push(input.message);
+      if (messages.length === 1) {
+        return { text: "过早结束" };
+      }
+      await input.updateTaskPlan!({
+        toolCallId: "finish-plan",
+        update: {
+          title: "完成复杂任务",
+          tasks: [{ step: "执行任务", status: "COMPLETED" }],
+        },
+      });
+      return { text: "任务已经完成" };
+    }, taskPlans);
+
+    const run = await createTaskPlanRun(service);
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
+
+    expect(messages).toHaveLength(2);
+    expect(messages[1]).toContain("task plan is still active");
+    expect(taskPlans.update).toHaveBeenCalledOnce();
+    expect((await service.getRun(run.id))?.finalAnswer).toBe("任务已经完成");
+    await service.dispose();
+  });
+
+  it("fails instead of reporting success when the Leader repeatedly ignores an active plan", async () => {
+    const taskPlans: TaskPlanGateway = {
+      loadActive: vi.fn(async () => taskPlanSnapshot("ACTIVE")),
+      update: vi.fn(async () => taskPlanSnapshot("FAILED", 2)),
+      cancel: vi.fn(async () => undefined),
+    };
+    const leaderRun = vi.fn(async () => ({ text: "仍然过早结束" }));
+    const { events, service } = createTaskPlanService(leaderRun, taskPlans);
+
+    const run = await createTaskPlanRun(service);
+    await waitFor(async () => (await service.getRun(run.id))?.status === "FAILED");
+
+    expect(leaderRun).toHaveBeenCalledTimes(4);
+    expect((await service.getRun(run.id))?.status).toBe("FAILED");
+    expect(taskPlans.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          tasks: [
+            expect.objectContaining({
+              status: "FAILED",
+              statusReason: expect.objectContaining({ code: "RUN_FAILED" }),
+            }),
+          ],
+        }),
+      }),
+    );
+    expect((await events.list(run.id)).some(({ type }) => type === "run.completed")).toBe(false);
+    await service.dispose();
+  });
+
+  it("links delegation failures to the planned task and broadcasts terminal progress", async () => {
+    let currentPlan: TaskPlanSnapshot = {
+      ...taskPlanSnapshot("ACTIVE"),
+      tasks: [
+        {
+          taskId: "task-1",
+          position: 1,
+          title: "调度数字员工",
+          status: "PENDING",
+        },
+      ],
+    };
+    const taskPlans: TaskPlanGateway = {
+      loadActive: vi.fn(async () => currentPlan),
+      update: vi.fn(async ({ update }) => {
+        const nextStatus = update.tasks.some(({ status }) => status === "FAILED")
+          ? "FAILED"
+          : "ACTIVE";
+        currentPlan = {
+          ...currentPlan,
+          version: currentPlan.version + 1,
+          status: nextStatus,
+          tasks: update.tasks.map((task, index) => ({
+            taskId: `task-${index + 1}`,
+            position: index + 1,
+            title: task.step,
+            ...(task.description ? { description: task.description } : {}),
+            status: task.status,
+            ...(task.statusReason ? { statusReason: task.statusReason } : {}),
+          })),
+        };
+        return currentPlan;
+      }),
+      cancel: vi.fn(async () => undefined),
+    };
+    const connector = fakeConnector(async function* () {
+      yield {
+        type: "failed",
+        error: {
+          code: "DIGITAL_EMPLOYEE_UNAVAILABLE",
+          message: "employee unavailable",
+          retryable: false,
+        },
+      };
+    });
+    const { service } = createTaskPlanService(async (input) => {
+      const result = await input.delegate({
+        toolCallId: "delegate-planned-task",
+        agentId: agent.id,
+        task: "调度数字员工执行任务",
+        taskPosition: 1,
+      });
+      expect(result.status).toBe("failed");
+      return { text: "数字员工调度失败，任务未完成" };
+    }, taskPlans, connector);
+
+    const run = await createTaskPlanRun(service, [agent]);
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
+
+    expect(taskPlans.update).toHaveBeenCalledTimes(2);
+    expect(taskPlans.update).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        idempotencyKey: "delegate-planned-task:task-started",
+        update: expect.objectContaining({
+          tasks: [expect.objectContaining({ status: "IN_PROGRESS" })],
+        }),
+      }),
+    );
+    expect(taskPlans.update).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        idempotencyKey: "delegate-planned-task:task-failed",
+        update: expect.objectContaining({
+          tasks: [
+            expect.objectContaining({
+              status: "FAILED",
+              statusReason: {
+                code: "DELEGATION_FAILED",
+                message: "数字员工调度失败",
+              },
+            }),
+          ],
+        }),
+      }),
+    );
+    expect(currentPlan.status).toBe("FAILED");
+    expect(currentPlan.tasks[0]?.status).toBe("FAILED");
+    await service.dispose();
+  });
+
+  it("restores the planned task link when a callback delegation fails", async () => {
+    let currentPlan: TaskPlanSnapshot = {
+      ...taskPlanSnapshot("ACTIVE"),
+      tasks: [
+        {
+          taskId: "task-1",
+          position: 1,
+          title: "等待数字员工回调",
+          status: "PENDING",
+        },
+      ],
+    };
+    const taskPlans: TaskPlanGateway = {
+      loadActive: vi.fn(async () => currentPlan),
+      update: vi.fn(async ({ update }) => {
+        currentPlan = {
+          ...currentPlan,
+          version: currentPlan.version + 1,
+          status: update.tasks.some(({ status }) => status === "FAILED")
+            ? "FAILED"
+            : "ACTIVE",
+          tasks: update.tasks.map((task, index) => ({
+            taskId: `task-${index + 1}`,
+            position: index + 1,
+            title: task.step,
+            ...(task.description ? { description: task.description } : {}),
+            status: task.status,
+            ...(task.statusReason ? { statusReason: task.statusReason } : {}),
+          })),
+        };
+        return currentPlan;
+      }),
+      cancel: vi.fn(async () => undefined),
+    };
+    let leaderAttempt = 0;
+    const { service } = createTaskPlanService(async (input) => {
+      leaderAttempt += 1;
+      if (leaderAttempt === 1) {
+        try {
+          await input.delegate({
+            toolCallId: "delegate-callback-task",
+            agentId: agent.id,
+            task: "异步执行数字员工任务",
+            taskPosition: 1,
+          });
+        } catch (error) {
+          if (error instanceof DelegationSuspendedError) {
+            throw new LeaderRunSuspendedError(error.delegationId);
+          }
+          throw error;
+        }
+        throw new Error("expected callback delegation to suspend");
+      }
+      expect(input.message).toContain("trusted platform callback");
+      return { text: "数字员工失败，任务已收口" };
+    }, taskPlans, fakeCallbackConnector());
+
+    const run = await createTaskPlanRun(service, [agent]);
+    await waitFor(async () => (await service.getRun(run.id))?.status === "WAITING_AGENT");
+    const delegation = (await service.getRunDetails(run.id))?.delegations[0];
+    expect(delegation).toMatchObject({ status: "RUNNING", taskPosition: 1 });
+
+    await expect(
+      service.resumeDelegation({
+        delegationId: delegation!.id,
+        status: "FAILED",
+        finalAnswer: "digital employee unavailable",
+      }),
+    ).resolves.toMatchObject({ accepted: true, runId: run.id });
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
+
+    expect(taskPlans.update).toHaveBeenCalledTimes(2);
+    expect(taskPlans.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        idempotencyKey: `${delegation!.id}:task-failed`,
+        update: expect.objectContaining({
+          tasks: [
+            expect.objectContaining({
+              status: "FAILED",
+              statusReason: {
+                code: "DELEGATION_FAILED",
+                message: "数字员工调度失败",
+              },
+            }),
+          ],
+        }),
+      }),
+    );
+    expect(currentPlan.status).toBe("FAILED");
     await service.dispose();
   });
 });

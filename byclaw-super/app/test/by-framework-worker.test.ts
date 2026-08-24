@@ -607,7 +607,7 @@ describe("ByClawSuperGatewayWorker", () => {
       }),
     );
   });
-  it("returns a safe answer instead of throwing when the downstream model fails", async () => {
+  it("returns the provider error instead of throwing when the downstream model fails", async () => {
     const emitChunk = vi.fn(async () => undefined);
     const worker = createWorker({
       createSessionRun: vi.fn(async () => run()),
@@ -617,9 +617,9 @@ describe("ByClawSuperGatewayWorker", () => {
 
     const result = await worker.processCommand(askCommand(), contextMock({ emitChunk }));
 
-    expect(result.content).toBe("下游模型调用异常，请切换模型或者联系管理员");
+    expect(result.content).toBe("403: sensitive provider response");
     expect(emitChunk).toHaveBeenCalledWith(
-      "下游模型调用异常，请切换模型或者联系管理员",
+      "403: sensitive provider response",
       EventType.ANSWER_DELTA,
     );
   });
@@ -1315,7 +1315,7 @@ async function* modelFailureEvents(): AsyncIterable<RunEvent> {
   yield event(1, "run.failed", {
     status: "FAILED",
     error: "Leader model call failed: 403: sensitive provider response",
-    userMessage: "下游模型调用异常，请切换模型或者联系管理员",
+    userMessage: "403: sensitive provider response",
   });
 }
 

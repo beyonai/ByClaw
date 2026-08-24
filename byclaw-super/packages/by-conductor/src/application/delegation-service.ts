@@ -49,6 +49,8 @@ export interface ExecuteDelegationInput {
   agents: AgentProfile[];
   agentId: string;
   task: string;
+  /** 关联活动任务计划中的任务位置；callback 恢复时必须持久保留。 */
+  taskPosition?: number;
   expectedOutput?: string;
   /** 本次委派选中的附件；由编排层从当前 Run 的附件集合按 ID 解析后注入。 */
   attachments?: readonly RunAttachment[];
@@ -130,6 +132,12 @@ export class DelegationService {
     // AbortSignal 不会为“注册监听前已经发生”的取消补发事件。先在任何持久化或
     // Connector 投递之前拒绝，避免已停止的 Run 仍创建并启动新委派。
     input.signal.throwIfAborted();
+    if (
+      input.taskPosition !== undefined &&
+      (!Number.isInteger(input.taskPosition) || input.taskPosition < 1)
+    ) {
+      throw new Error("taskPosition must be a positive integer");
+    }
     const agent = input.agents.find((candidate) => candidate.id === input.agentId);
     if (!agent) {
       throw new UnauthorizedAgentError(input.agentId);
@@ -178,6 +186,7 @@ export class DelegationService {
             candidate.result &&
             candidate.agentId === agent.id &&
             candidate.task === input.task &&
+            candidate.taskPosition === input.taskPosition &&
             candidate.expectedOutput === input.expectedOutput,
         );
       if (completed?.result) {
@@ -205,6 +214,7 @@ export class DelegationService {
           !TERMINAL_DELEGATION_STATUSES.has(candidate.status) &&
           candidate.agentId === agent.id &&
           candidate.task === input.task &&
+          candidate.taskPosition === input.taskPosition &&
           candidate.expectedOutput === input.expectedOutput,
       );
     const delegationId = existing?.id ?? this.createId();
@@ -216,6 +226,7 @@ export class DelegationService {
       agentName: agent.name,
       connectorId: connector.id,
       task: input.task,
+      ...(input.taskPosition !== undefined ? { taskPosition: input.taskPosition } : {}),
       ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
       status: "QUEUED",
       version: 0,
@@ -234,6 +245,7 @@ export class DelegationService {
             agentName: agent.name,
             connectorId: connector.id,
             task: input.task,
+            ...(input.taskPosition !== undefined ? { taskPosition: input.taskPosition } : {}),
             ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
             ...(input.attachments?.length
               ? {
