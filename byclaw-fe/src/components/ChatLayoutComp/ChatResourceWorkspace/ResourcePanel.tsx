@@ -158,27 +158,37 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, onO
             { key: 'employee', label: intl.formatMessage({ id: 'chatResource.currentEmployee' }) },
           ]}
         />
-        <Tabs
-          className={styles.secondaryTabs}
-          size="small"
-          activeKey={upperSecondaryKey}
-          tabBarExtraContent={
-            upperScopeKey === 'session' && ['file', 'knowledge', 'ontology'].includes(upperSecondaryKey) ? (
-              <Button
-                type="text"
-                className={styles.resourceRefreshButton}
-                icon={<ReloadOutlined />}
-                aria-label={intl.formatMessage({ id: 'common.refresh' })}
-                onClick={() => setSessionResourceRefreshKey((current) => current + 1)}
-              />
-            ) : null
-          }
-          onChange={(key) => setSecondaryState((current) => ({ ...current, [upperScopeKey]: key }))}
-          items={upperSecondaryItems}
-        />
-        <Spin spinning={projectLoading} wrapperClassName={styles.resourceSpin}>
-          <div className={styles.resourceContent}>{upperContent}</div>
-        </Spin>
+        <div className={styles.resourceBody}>
+          <Spin spinning={projectLoading} wrapperClassName={styles.resourceSpin}>
+            <div className={styles.resourceContent}>{upperContent}</div>
+          </Spin>
+          <aside
+            className={styles.secondaryNav}
+            aria-label={intl.formatMessage({
+              id: upperScopeKey === 'session' ? 'chatResource.currentSession' : 'chatResource.currentEmployee',
+            })}
+          >
+            {upperScopeKey === 'session' && ['file', 'knowledge', 'ontology'].includes(upperSecondaryKey) ? (
+              <div className={styles.secondaryNavActions}>
+                <Button
+                  type="text"
+                  className={styles.resourceRefreshButton}
+                  icon={<ReloadOutlined />}
+                  aria-label={intl.formatMessage({ id: 'common.refresh' })}
+                  onClick={() => setSessionResourceRefreshKey((current) => current + 1)}
+                />
+              </div>
+            ) : null}
+            <Tabs
+              tabPosition="right"
+              className={styles.secondaryTabs}
+              size="small"
+              activeKey={upperSecondaryKey}
+              onChange={(key) => setSecondaryState((current) => ({ ...current, [upperScopeKey]: key }))}
+              items={upperSecondaryItems}
+            />
+          </aside>
+        </div>
       </section>
     </div>
   );

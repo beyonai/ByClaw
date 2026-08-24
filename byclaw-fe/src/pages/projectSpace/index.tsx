@@ -456,7 +456,7 @@ const ProjectSpacePage: React.FC = () => {
             </Button>
           </div>
           <div className={styles.projectHeroIllustration} aria-hidden="true">
-            <img src={`${getPublicPath()}beyond/emptyBg.png`} alt="" />
+            <img src={`${getPublicPath()}beyond/project-collaboration.svg`} alt="" />
           </div>
         </div>
         <div className={styles.projectListHeader}>
