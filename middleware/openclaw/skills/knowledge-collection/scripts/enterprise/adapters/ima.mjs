@@ -223,17 +223,7 @@ export function createImaAdapter(dependencies = {}) {
   }
 
   async function collectResource(request = {}) {
-    const writer = await createArtifactWriter(request.outputDir);
-    try {
-      await authCheck(bin, env);
-      const response = await callJson(writer, bin, env, ['wiki', 'import-urls', '--kb', request.kb, request.url, '--json'], 'raw/import-urls.json');
-      await writer.writeJson('raw/metadata.json', { ...identity, operation: 'wiki.import-urls', status: 'complete', sourceMetadata: { ...identity, kb: request.kb, url: request.url } });
-      await writer.writeCollectionBundle({ title: `IMA URL import: ${request.url}`, source: identity.source, backend: identity.backend, url: request.url, filters: { kb: request.kb }, inventory: [], canonicalItems: [], sourceMetadata: { ...identity, operation: 'wiki.import-urls', kb: request.kb, imported: response }, metadataOnly: false });
-      return handledOutcome(identity.connector, 'complete', request.outputDir);
-    } catch (error) {
-      if (error.auth) return handledOutcome(identity.connector, 'auth_required', request.outputDir);
-      throw error;
-    }
+    return handledOutcome(identity.connector, 'unsupported_capability', request.outputDir);
   }
 
   async function materialize(request = {}) {
@@ -247,7 +237,7 @@ export function createImaAdapter(dependencies = {}) {
     }
     const canonicalItems = inventory.filter((item) => item.materialization.status === 'materialized').map((item) => ({ title: item.title, url: item.sourceUrl, author: '', publishTime: '', markdown: item.materialization.sanitizedPath, fileName: item.materialization.sanitizedPath }));
     const status = deriveCollectionStatus({ itemStates: inventory.map((item) => item.materialization.status) });
-    await writer.writeCollectionBundle({ title: 'IMA materialized collection', source: identity.source, backend: identity.backend, url: 'ima://materialize', filters: request.kb ? { kb: request.kb } : {}, inventory, canonicalItems, sourceMetadata: { ...identity, operation: 'materialize' }, metadataOnly: false });
+    await writer.writeCollectionBundle({ title: 'IMA materialized collection', source: identity.source, backend: identity.backend, url: 'ima://materialize', filters: {}, inventory, canonicalItems, sourceMetadata: { ...identity, operation: 'materialize' }, metadataOnly: false });
     return handledOutcome(identity.connector, status, request.outputDir, inventoryCounts(inventory));
   }
 

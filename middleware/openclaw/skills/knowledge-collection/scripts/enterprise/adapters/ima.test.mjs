@@ -15,14 +15,13 @@ if (args[0] === 'auth' && args[1] === 'check') out({ checks: { token_fetch: true
 else if (args[0] === 'note' && args[1] === 'search') out({ items: [{ doc_id: 'note-1', title: 'Roadmap', content: 'note preview' }] });
 else if (args[0] === 'wiki' && args[1] === 'search') out({ items: [{ id: 'wiki-1', title: 'Wiki roadmap', content: 'wiki body' }] });
 else if (args[0] === 'note' && args[1] === 'get') out({ content: '# Roadmap\\n\\nFull note content' });
-else if (args[0] === 'wiki' && args[1] === 'import-urls') out({ imported: [{ url: args.at(-2), status: 'accepted' }] });
 else { process.stderr.write('unexpected fixture command: ' + args.join(' ')); process.exit(2); }
 `, { mode: 0o700 });
   await chmod(bin, 0o700);
   return { root, bin };
 }
 
-test('IMA metadata-only search discovers notes and wiki entries without materializing content', async () => {
+test('IMA metadata-only search discovers notes and Wiki entries without materializing content', async () => {
   const { root, bin } = await fixture();
   try {
     const outputDir = join(root, 'search');
@@ -52,13 +51,11 @@ test('IMA search materializes note Markdown through note get', async () => {
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('IMA URL import requires a knowledge base and records the CLI result', async () => {
+test('IMA resource collection reports unsupported without writing artifacts', async () => {
   const { root, bin } = await fixture();
   try {
-    const outputDir = join(root, 'import');
-    const result = await createImaAdapter({ bin }).collectResource({ outputDir, kb: 'kb-1', url: 'https://example.com/article' });
-    assert.equal(result.status, 'complete');
-    const raw = await readFile(join(outputDir, 'raw/import-urls.json'), 'utf8');
-    assert.match(raw, /accepted/);
+    const outputDir = join(root, 'resource');
+    const result = await createImaAdapter({ bin }).collectResource({ outputDir, url: 'https://example.com/article' });
+    assert.equal(result.status, 'unsupported_capability');
   } finally { await rm(root, { recursive: true, force: true }); }
 });

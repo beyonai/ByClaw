@@ -27,7 +27,7 @@ allowed-tools: read, exec
 **这不是风格约定，是被两处代码夹死的硬约束**：
 
 - `init` 要求目标目录**不存在或为空**，非空即抛错（`research-state.mjs:425-427`）
-- 快照目录 `.post-processing-inputs/` 由 `ensureSessionSkeleton` 在 `init` **内部**以 0700 创建（`session.mjs:453-458`）
+- 快照目录 `.collection-inputs/` 由 `ensureSessionSkeleton` 在 `init` **内部**以 0700 创建
 
 两者合起来：**快照没有任何合法位置可以先于 `init` 存在**。为了先跑发现而预建目录或写文件，
 `init` 会因目录非空直接失败，整条链断在第一步。
@@ -46,7 +46,7 @@ node $SKILL/hot_discovery.mjs search \
     --query "AI agent framework" \
     --dimensions "science,it,packages,repos" \
     --tiers 1 --limit 20 \
-    --out <会话目录>/.post-processing-inputs/hot-discovery-$(date +%s).json
+    --out <会话目录>/.collection-inputs/hot-discovery-$(date +%s).json
 
 # ② searxng 通道（另一个进程，同时跑）
 <技能目录>/scripts/.venv/bin/python searxng_cli.py "AI agent framework" \
@@ -250,10 +250,8 @@ Agent 筛选时容易系统性偏向信息更多的 searxng 候选。这是已�
 **消费方读快照时必须先查 inventory。** 已登记的 URL 只允许从快照取 `popularity` /
 `discoveredBy` / `searxngRank`，`titleContext` 与 `searxngContent` 一律忽略。
 
-**`cleanup` 不会替你清掉它**：只在「完整范围全部成功」时整个会话目录进 `.trash-*`；
-**部分成功**场景下逐篇 `unlinkSync` 物化文件（`collection-state.mjs:1287`）而**不碰
-`.post-processing-inputs/`**，快照长期留存且续跑还会重新读它。这是最常见的场景，
-所以上面两条不是理论洁癖。
+采集编排器不会执行交付后清理；`.collection-inputs/` 快照会继续作为采集来源证据保留。
+因此上面两条不是理论洁癖，续跑或审计读取快照时仍必须遵守。
 
 ## popularity 必须随 `collect` 落盘
 

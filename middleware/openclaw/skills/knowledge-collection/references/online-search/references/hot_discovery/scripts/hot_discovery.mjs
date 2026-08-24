@@ -38,8 +38,8 @@
  * 压小一个量级：泄漏的是残句而非全文。
  *
  * 【生命周期】发现快照里的 titleContext 与 searxngContent 一经 collect 登记即作废
- * （inventory 里存在同 sourceUrl 即算，materialization=pending 也算）。cleanup 在部分成功
- * 场景下不清 .post-processing-inputs/，快照会长期留存，续跑还会重新读它。
+ * （inventory 里存在同 sourceUrl 即算，materialization=pending 也算）。采集编排器不会执行
+ * 交付后清理；.collection-inputs/ 快照会作为采集来源证据保留，续跑还会重新读它。
  * ==============================================================================
  */
 
@@ -1067,7 +1067,7 @@ const USAGE = `hot_discovery.mjs — 热度发现通道（只发现 URL 与热�
          [--unverified-limit 20] [--unranked-hot-limit 20]
          [--group-limit 5] [--searxng-limit 20]
 
-通用： [--out <file>]  结果同时写入该文件（供 .post-processing-inputs/ 快照）
+通用： [--out <file>]  结果同时写入该文件（供 .collection-inputs/ 快照）
 `;
 
 async function main() {
@@ -1083,7 +1083,7 @@ async function main() {
   const json = JSON.stringify(result, null, 2);
   process.stdout.write(`${json}\n`);
   // 快照落盘由编排层决定路径。注意：init 必须先于此步 —— init 要求目标目录不存在或为空，
-  // 而 .post-processing-inputs/ 由 init 内部以 0700 创建。先写快照会让 init 直接失败。
+  // 而 .collection-inputs/ 由 init 内部以 0700 创建。先写快照会让 init 直接失败。
   // 命名须避开 items.json / run.json / m.json，以免被误传给 collect --item-json-file。
   if (typeof argv.out === 'string') await writeFile(argv.out, `${json}\n`, 'utf8');
 }

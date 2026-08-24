@@ -94,7 +94,7 @@ test('重复 seed 不重置已有状态', () => {
   const file = path.join(dir, 'u.txt');
   fs.writeFileSync(file, 'https://ok.com/a\n');
   run(['crawl-seed', '--session-dir', dir, '--urls-file', file]);
-  const markFile = path.join(dir, '.post-processing-inputs', 'm.json');
+  const markFile = path.join(dir, '.collection-inputs', 'm.json');
   fs.writeFileSync(markFile, JSON.stringify({ results: [{ url: 'https://ok.com/a', status: 'fetched' }] }));
   run(['crawl-mark', '--session-dir', dir, '--mark-json-file', markFile]);
   const out = run(['crawl-seed', '--session-dir', dir, '--urls-file', file]);
@@ -116,7 +116,7 @@ test('crawl-next 只返回 pending,已 fetched 不再出队', () => {
   const file = path.join(dir, 'u.txt');
   fs.writeFileSync(file, 'https://ok.com/a\nhttps://ok.com/b\n');
   run(['crawl-seed', '--session-dir', dir, '--urls-file', file]);
-  const markFile = path.join(dir, '.post-processing-inputs', 'm.json');
+  const markFile = path.join(dir, '.collection-inputs', 'm.json');
   fs.writeFileSync(markFile, JSON.stringify({ results: [{ url: 'https://ok.com/a', status: 'fetched' }] }));
   run(['crawl-mark', '--session-dir', dir, '--mark-json-file', markFile]);
   const out = run(['crawl-next', '--session-dir', dir]);
@@ -127,7 +127,7 @@ test('status=failed 必须带 reason', () => {
   const file = path.join(dir, 'u.txt');
   fs.writeFileSync(file, 'https://ok.com/a\n');
   run(['crawl-seed', '--session-dir', dir, '--urls-file', file]);
-  const markFile = path.join(dir, '.post-processing-inputs', 'm.json');
+  const markFile = path.join(dir, '.collection-inputs', 'm.json');
   fs.writeFileSync(markFile, JSON.stringify({ results: [{ url: 'https://ok.com/a', status: 'failed' }] }));
   const out = run(['crawl-mark', '--session-dir', dir, '--mark-json-file', markFile], { expectFail: true });
   assert.match(out.error, /必须给出 reason/);
@@ -137,12 +137,12 @@ test('未入队 URL 拒绝登记', () => {
   const file = path.join(dir, 'u.txt');
   fs.writeFileSync(file, 'https://ok.com/a\n');
   run(['crawl-seed', '--session-dir', dir, '--urls-file', file]);
-  const markFile = path.join(dir, '.post-processing-inputs', 'm.json');
+  const markFile = path.join(dir, '.collection-inputs', 'm.json');
   fs.writeFileSync(markFile, JSON.stringify({ results: [{ url: 'https://other.com/x', status: 'fetched' }] }));
   const out = run(['crawl-mark', '--session-dir', dir, '--mark-json-file', markFile], { expectFail: true });
   assert.match(out.error, /不在 frontier 中/);
 });
-test('payload 必须位于 .post-processing-inputs/ 内', () => {
+test('payload 必须位于 .collection-inputs/ 内', () => {
   const dir = makeSession('n4');
   const file = path.join(dir, 'u.txt');
   fs.writeFileSync(file, 'https://ok.com/a\n');
@@ -150,14 +150,30 @@ test('payload 必须位于 .post-processing-inputs/ 内', () => {
   const outside = path.join(dir, 'm.json');
   fs.writeFileSync(outside, JSON.stringify({ results: [{ url: 'https://ok.com/a', status: 'fetched' }] }));
   const out = run(['crawl-mark', '--session-dir', dir, '--mark-json-file', outside], { expectFail: true });
-  assert.match(out.error, /必须位于 \.post-processing-inputs\//);
+  assert.match(out.error, /必须位于 \.collection-inputs\//);
+});
+test('payload 的符号链接父目录不能越出 .collection-inputs/', () => {
+  const dir = makeSession('n4b');
+  const file = path.join(dir, 'u.txt');
+  fs.writeFileSync(file, 'https://ok.com/a\n');
+  run(['crawl-seed', '--session-dir', dir, '--urls-file', file]);
+  const outsideDir = path.join(dir, 'outside-inputs');
+  fs.mkdirSync(outsideDir);
+  const outside = path.join(outsideDir, 'm.json');
+  fs.writeFileSync(outside, JSON.stringify({ results: [{ url: 'https://ok.com/a', status: 'fetched' }] }));
+  fs.symlinkSync(outsideDir, path.join(dir, '.collection-inputs', 'link'), 'dir');
+  const out = run([
+    'crawl-mark', '--session-dir', dir, '--mark-json-file', path.join(dir, '.collection-inputs/link/m.json'),
+  ], { expectFail: true });
+  assert.match(out.error, /必须位于 \.collection-inputs\//);
+  assert.equal(fs.existsSync(outside), true);
 });
 test('成功登记后删除 payload', () => {
   const dir = makeSession('n5');
   const file = path.join(dir, 'u.txt');
   fs.writeFileSync(file, 'https://ok.com/a\n');
   run(['crawl-seed', '--session-dir', dir, '--urls-file', file]);
-  const markFile = path.join(dir, '.post-processing-inputs', 'm.json');
+  const markFile = path.join(dir, '.collection-inputs', 'm.json');
   fs.writeFileSync(markFile, JSON.stringify({ results: [{ url: 'https://ok.com/a', status: 'fetched' }] }));
   run(['crawl-mark', '--session-dir', dir, '--mark-json-file', markFile]);
   assert.equal(fs.existsSync(markFile), false);

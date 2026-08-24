@@ -4,8 +4,8 @@
  *
  * 单一事实源: <session-dir>/session.json(schemaVersion 2.0)
  *   { task, research, collection }
- * collection 子树保持与旧 sanitized/metadata.json 完全相同的形状(schemaVersion 1.0),
- * 因此原有校验/状态机逻辑无需改写;sanitized/metadata.json 与 collection-result.json
+ * collection 子树只保存采集 inventory 与物化状态(schemaVersion 1.0);
+ * sanitized/metadata.json 与 collection-result.json
  * 变为由 export-views 生成的导出视图(兼容旧消费者与 fileBrowser 预览)。
  *
  * 旧会话兼容: 目录只有 collection-result.json + sanitized/metadata.json 时,
@@ -86,6 +86,32 @@ export function isInside(root, candidate) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+export function resolveCollectionInputFile(paths, rawFilePath, label) {
+  const filePath = path.resolve(requireString(rawFilePath, label));
+  const inputDir = path.resolve(paths.inputDir);
+  if (!isInside(inputDir, filePath)) {
+    throw new Error(`${label} 必须位于 .collection-inputs/ 内`);
+  }
+  if (!fs.existsSync(inputDir) || !fs.lstatSync(inputDir).isDirectory()) {
+    throw new Error('采集会话必须包含普通目录 .collection-inputs/');
+  }
+  const canonicalInputDir = path.resolve(fs.realpathSync(paths.root), '.collection-inputs');
+  const realInputDir = fs.realpathSync(inputDir);
+  if (realInputDir !== canonicalInputDir) {
+    throw new Error(`${label} 必须位于 .collection-inputs/ 内`);
+  }
+  if (!fs.existsSync(filePath)) throw new Error(`${label} 不存在: ${rawFilePath}`);
+  const stat = fs.lstatSync(filePath);
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error(`${label} 必须是普通 JSON 文件且不能是符号链接`);
+  }
+  const realFilePath = fs.realpathSync(filePath);
+  if (!isInside(realInputDir, realFilePath)) {
+    throw new Error(`${label} 必须位于 .collection-inputs/ 内`);
+  }
+  return realFilePath;
+}
+
 export function assertNoSensitiveKeys(value, currentPath = 'session.json') {
   if (Array.isArray(value)) {
     value.forEach((item, index) => assertNoSensitiveKeys(item, `${currentPath}[${index}]`));
@@ -119,7 +145,7 @@ export function sessionPaths(rawSessionDir) {
     session,
     collectionResult,
     metadata,
-    inputDir: path.join(root, '.post-processing-inputs'),
+    inputDir: path.join(root, '.collection-inputs'),
     lock: path.join(root, '.knowledge-collection.lock'),
   };
 }
@@ -129,8 +155,6 @@ export function emptyCollectionMetadata() {
     schemaVersion: COLLECTION_SCHEMA_VERSION,
     storage: { fallback: false },
     collection: { status: 'complete', items: [] },
-    retention: { auditRequired: false, userRequested: false },
-    postProcessing: { runs: [] },
   };
 }
 
@@ -169,8 +193,8 @@ export function newSession(task = {}) {
   };
 }
 
-/** 读取权威状态: 优先 session.json; 旧会话(仅 metadata+collectionResult)构建并落盘 session.json。 */
-export function loadSession(paths) {
+/** 读取权威状态: 优先 session.json; 旧会话可按调用方要求只在内存中迁移。 */
+export function loadSession(paths, { persistMigration = true } = {}) {
   if (fs.existsSync(paths.session)) {
     const session = readJson(paths.session, 'session.json');
     if (session?.schemaVersion !== SESSION_SCHEMA_VERSION) {
@@ -191,7 +215,7 @@ export function loadSession(paths) {
   const metadata = readJson(paths.metadata, 'sanitized/metadata.json');
   const session = newSession();
   session.collection = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : emptyCollectionMetadata();
-  persistSession(paths, session);
+  if (persistMigration) persistSession(paths, session);
   return { session, migrated: true };
 }
 
@@ -207,7 +231,7 @@ export function persistCollection(paths, session, collectionMetadata) {
   persistSession(paths, session);
 }
 
-// ── 会话锁(与旧 post-processing 相同的语义: pid/createdAt/ownerId/command) ──
+// ── 会话锁(pid/createdAt/ownerId/command) ──
 
 function assertLockShape(rawLock) {
   if (
@@ -453,7 +477,7 @@ export function withSessionLock(paths, command, callback) {
 /** 会话目录骨架(init 使用)。 */
 export function ensureSessionSkeleton(root) {
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
-  for (const directory of ['raw', 'markdown', 'sanitized', path.join('sanitized', 'items'), '.post-processing-inputs']) {
+  for (const directory of ['raw', 'markdown', 'sanitized', path.join('sanitized', 'items'), '.collection-inputs']) {
     fs.mkdirSync(path.join(root, directory), { recursive: true, mode: 0o700 });
     fs.chmodSync(path.join(root, directory), 0o700);
   }

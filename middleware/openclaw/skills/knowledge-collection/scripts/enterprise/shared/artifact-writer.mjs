@@ -638,8 +638,6 @@ export async function createArtifactWriter(root) {
           schemaVersion: '1.0',
           storage: { fallback: false },
           collection: { status, items: inventory },
-          retention: { auditRequired: false, userRequested: false },
-          postProcessing: { runs: [] },
           sourceMetadata,
         });
         // collection-result.json is the commit marker; metadata alone is an uncommitted bundle.

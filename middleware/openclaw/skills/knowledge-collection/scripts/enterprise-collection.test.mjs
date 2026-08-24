@@ -158,8 +158,8 @@ async function testWecomExportWritesCanonicalPrivateArtifacts() {
     assert.equal(metadata.collection.items[0].sourceSkill, 'wecomcli');
     assert.equal(metadata.collection.items[0].materialization.markdownPath, 'markdown/document.md');
     assert.equal(metadata.collection.items[0].materialization.sanitizedPath, 'sanitized/items/document.md');
-    assert.deepEqual(metadata.retention, { auditRequired: false, userRequested: false });
-    assert.deepEqual(metadata.postProcessing.runs, []);
+    assert.equal(metadata.retention, undefined);
+    assert.equal(metadata.postProcessing, undefined);
     assert.equal(metadata.sourceMetadata.scope, 'bot-visible');
     assert.ok(metadata.sourceMetadata.backendCliVersion);
     const collection = JSON.parse(await readFile(join(outputDir, 'collection-result.json'), 'utf8'));
@@ -334,7 +334,7 @@ async function testFeishuMinutesReadsCliCreatedTranscript() {
     assert.equal(metadata.collection.items[0].sourceSkill, 'fws');
     assert.equal(metadata.collection.items[0].sourceItemId, 'minute-1');
     assert.equal(metadata.collection.items[0].materialization.sanitizedPath, 'sanitized/items/transcript.md');
-    assert.deepEqual(metadata.postProcessing.runs, []);
+    assert.equal(metadata.postProcessing, undefined);
     const collection = JSON.parse(await readFile(join(outputDir, 'collection-result.json'), 'utf8'));
     assert.equal(collection.source, 'fws');
     assert.equal(collection.backend, 'lark-cli');

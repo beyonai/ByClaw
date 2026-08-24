@@ -27,7 +27,7 @@ function snapshotPath(inputDir, name) {
   const root = resolve(inputDir);
   const target = resolve(root, name);
   if (!target.startsWith(`${root}${sep}`)) {
-    throw new Error('发现快照必须位于会话 .post-processing-inputs 目录内');
+    throw new Error('发现快照必须位于会话 .collection-inputs 目录内');
   }
   return target;
 }

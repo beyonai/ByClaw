@@ -23,7 +23,7 @@ if (process.env.FIXTURE_MODE === 'structured-auth') {
   process.stderr.write(JSON.stringify({ error: { type: 'missing_scope', message: 'scope is missing' } }));
   process.exit(1);
 }
-  if (args[0] === 'drive' && args[1] === '+search') {
+if (args[0] === 'drive' && args[1] === '+search') {
   if (process.env.FIXTURE_MODE === 'rate-limit-retry' && !require('node:fs').existsSync(process.env.FIXTURE_RATE_STATE)) {
     require('node:fs').writeFileSync(process.env.FIXTURE_RATE_STATE, 'limited');
     process.stderr.write(JSON.stringify({ error: { code: 429, type: 'rate_limit', retryAfterMs: 0 } }));
@@ -37,6 +37,11 @@ if (process.env.FIXTURE_MODE === 'structured-auth') {
   } else if (process.env.FIXTURE_MODE === 'pagination-error' && token) {
     process.stderr.write('temporary search outage\\n');
     process.exit(7);
+  } else if (process.env.FIXTURE_MODE === 'materialization-auth') {
+    console.log(JSON.stringify({ ok: true, data: { docs: [
+      { token: 'doc-one', type: 'docx', title: 'One', url: 'https://acme.feishu.cn/docx/doc-one' },
+      { token: 'doc-two', type: 'docx', title: 'Two', url: 'https://acme.feishu.cn/docx/doc-two' }
+    ] } }));
   } else if (['binary-converter', 'missing-converter', 'per-item-failure', 'forbidden-continue'].includes(process.env.FIXTURE_MODE)) {
     const docs = [
       { token: 'doc-one', type: 'docx', title: 'One', url: 'https://acme.feishu.cn/docx/doc-one' },
@@ -160,7 +165,8 @@ test('FWS search preserves Drive rank, resolves Wiki nodes, and deduplicates sta
     assert.deepEqual(metadata.collection.items.map((item) => item.sourceType), ['docx', 'docx']);
     assert.deepEqual(metadata.collection.items.map((item) => item.sourceRank), [1, 2]);
     assert.deepEqual(metadata.sourceMetadata.discovery, {
-      pagesRequested: 1, pagesCompleted: 1, rawRecords: 3, duplicateRecords: 1, uniqueRecords: 2, limitReached: false, lastSafeCursor: null,
+      pagesRequested: 1, pagesCompleted: 1, rawRecords: 3, duplicateRecords: 1,
+      uniqueRecords: 2, limitReached: false, lastSafeCursor: null,
     });
     assert.equal(new Set(metadata.collection.items.map((item) => item.itemId)).size, 2);
     assert.equal(metadata.sourceMetadata.nativeOrdering, true);
@@ -290,7 +296,8 @@ test('bad FWS pagination and ordinary later-page failures preserve successful it
         assert.match(metadata.sourceMetadata.pagination.reason, /repeated|exit 7/i);
         if (mode === 'pagination-error') {
           assert.deepEqual(metadata.sourceMetadata.discovery, {
-            pagesRequested: 2, pagesCompleted: 1, rawRecords: 3, duplicateRecords: 1, uniqueRecords: 2, limitReached: false, lastSafeCursor: 'next',
+            pagesRequested: 2, pagesCompleted: 1, rawRecords: 3, duplicateRecords: 1,
+            uniqueRecords: 2, limitReached: false, lastSafeCursor: 'next',
           });
         }
       } finally { await rm(fixture.root, { recursive: true, force: true }); }

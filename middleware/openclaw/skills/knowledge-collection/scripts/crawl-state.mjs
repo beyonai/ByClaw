@@ -20,7 +20,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  loadSession, persistSession, withSessionLock, requireString, readStandaloneJson, isInside,
+  loadSession, persistSession, withSessionLock, requireString, readStandaloneJson,
+  resolveCollectionInputFile, isInside,
 } from './session.mjs';
 
 export const CRAWL_SCHEMA_VERSION = '1.0';
@@ -229,16 +230,13 @@ export function cmdCrawlNext(paths, args) {
     frontier: summarize(crawl),
     next: batch.length
       ? '对每个 URL 执行 `bycli web read --url <URL> --stdout`,再用 crawl-mark 登记结果'
-      : 'frontier 已无 pending;继续 normalize + collect 登记正文',
+      : 'frontier 已无 pending;由来源执行器转换并净化正文后用 collect 登记',
   };
 }
 
 /** crawl-mark: 登记一批抓取结果。payload: {results:[{url,status,itemId?,reason?}]} */
 export function cmdCrawlMark(paths, args) {
-  const markFile = path.resolve(requireString(args['mark-json-file'], '--mark-json-file'));
-  if (!isInside(paths.inputDir, markFile)) {
-    throw new Error('--mark-json-file 必须位于 .post-processing-inputs/ 内');
-  }
+  const markFile = resolveCollectionInputFile(paths, args['mark-json-file'], '--mark-json-file');
   const payload = readStandaloneJson(markFile, 'crawl mark payload');
   const results = Array.isArray(payload?.results) ? payload.results : null;
   if (!results || !results.length) {
@@ -280,7 +278,7 @@ export function cmdCrawlMark(paths, args) {
       command: 'crawl-mark',
       applied: applied.length,
       frontier: summarize(crawl),
-      next: 'fetched 条目经 normalize 生成 sanitized/items/*.md 后用 collect 登记 inventory',
+      next: 'fetched 条目由来源执行器转换并净化为 sanitized/items/*.md 后用 collect 登记 inventory',
     };
   });
 }

@@ -61,7 +61,7 @@ function help() {
       search: '--source dingtalk|feishu|wecom|ima --query <query> --output-dir <absolute-path> [--limit 1..500] [--concurrency 1..16] [--cursor <cursor>] [--metadata-only [true|false]] [--source-options <json>]',
       searchAll: '[--sources dingtalk,feishu,wecom,ima] --query <query> --output-root <absolute-path> [--limit 1..500] [--concurrency 1..16] [--metadata-only [true|false]]; defaults to all sources and metadata-only; continues after a connector auth failure',
       materialize: '--source dingtalk|feishu|ima --session-dir <metadata-only-session> --item-ids <id[,id...]> --output-dir <new-absolute-path> [--concurrency 1..16]',
-      resource: '--source dingtalk|feishu|wecom|ima --url <http(s)-url> --output-dir <absolute-path> [--kb <knowledge-base-id> for ima] [--minute-token <token> for feishu]',
+      resource: '--source dingtalk|feishu|wecom|ima --url <http(s)-url> --output-dir <absolute-path> [--minute-token <token> for feishu]',
       resumeResource: '--source wecom --session-dir <partial-session> --output-dir <new-absolute-path>',
       legacy: 'wecom-smartpage and feishu-minutes remain supported',
     },
@@ -93,7 +93,7 @@ function commandSchema() {
       },
       resource: {
         type: 'object', additionalProperties: false, required: ['source', 'url', 'output-dir'],
-        properties: { source, url: { type: 'string', format: 'http-url' }, 'output-dir': absolutePath, kb: { type: 'string', minLength: 1 }, 'minute-token': { type: 'string', minLength: 1 } },
+        properties: { source, url: { type: 'string', format: 'http-url' }, 'output-dir': absolutePath, 'minute-token': { type: 'string', minLength: 1 } },
       },
       'resume-resource': {
         type: 'object', additionalProperties: false, required: ['source', 'session-dir', 'output-dir'],

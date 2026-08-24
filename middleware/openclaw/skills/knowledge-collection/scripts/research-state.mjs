@@ -571,8 +571,6 @@ export function cmdInit(args) {
       schemaVersion: '1.0',
       storage: { fallback: false },
       collection: { status: 'complete', items: [] },
-      retention: { auditRequired: false, userRequested: false },
-      postProcessing: { runs: [] },
     },
   };
   const collectionResultInput = args['collection-result-input-file'];

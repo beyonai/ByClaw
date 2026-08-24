@@ -127,22 +127,19 @@ const COMMAND_SPECS = {
     title: '登记执行器抓取结果并物化(不执行抓取)',
     args: {
       '--session-dir': '必填',
-      '--item-json-file': '必填。位于 .post-processing-inputs/ 内的 payload',
+      '--item-json-file': '必填。位于 .collection-inputs/ 内的 payload',
       '--dry-run': '可选。仅校验,不持久化',
     },
-    example: 'knowledge-collection.mjs collect --session-dir /tmp/kc1 --item-json-file /tmp/kc1/.post-processing-inputs/items.json',
+    example: 'knowledge-collection.mjs collect --session-dir /tmp/kc1 --item-json-file /tmp/kc1/.collection-inputs/items.json',
   }),
   inspect: defineCommand({
     group: 'collection',
-    title: '读取会话与续跑状态(默认只读)',
+    title: '只读检查采集 inventory 与物化状态',
     args: {
       '--session-dir': '必填',
-      '--operation': '可选。ingest | organize | external',
-      '--target-json': '可选。JSON 目标对象',
-      '--drain-pending': '可选。显式清理 pendingArtifactCleanup 中的旧工作副本',
       '--full': '可选。返回完整 metadata 与 collectionResult',
     },
-    example: 'knowledge-collection.mjs inspect --session-dir /tmp/kc1 --operation ingest --target-json \'{"kind":"knowledge-base","id":"kb-1","path":"/kb"}\'',
+    example: 'knowledge-collection.mjs inspect --session-dir /tmp/kc1',
   }),
   'unlock-stale': defineCommand({
     group: 'collection',
@@ -182,9 +179,9 @@ const COMMAND_SPECS = {
     title: '登记一批抓取结果(pending → fetched/failed/skipped)',
     args: {
       '--session-dir': '必填',
-      '--mark-json-file': '必填。位于 .post-processing-inputs/ 内;{results:[{url,status,itemId?,reason?}]}',
+      '--mark-json-file': '必填。位于 .collection-inputs/ 内;{results:[{url,status,itemId?,reason?}]}',
     },
-    example: 'knowledge-collection.mjs crawl-mark --session-dir /tmp/kc1 --mark-json-file /tmp/kc1/.post-processing-inputs/mark.json',
+    example: 'knowledge-collection.mjs crawl-mark --session-dir /tmp/kc1 --mark-json-file /tmp/kc1/.collection-inputs/mark.json',
   }),
   'crawl-status': defineCommand({
     group: 'crawl',
@@ -216,10 +213,9 @@ const LEGACY_ALIASES = new Map([
 ]);
 
 const SCHEMA = {
-  absolutePath: { type: 'string', format: 'absolute-path' },
   sessionDir: { type: 'string', format: 'absolute-path' },
   file: { type: 'string', format: 'file-path' },
-  inputFile: { type: 'string', format: 'post-processing-input-file' },
+  inputFile: { type: 'string', format: 'collection-input-file' },
   jsonArray: { type: 'array', cliEncoding: 'json', items: { type: 'string' } },
   jsonObject: { type: 'object', cliEncoding: 'json' },
   boolean: { type: 'boolean' },
@@ -311,7 +307,7 @@ const COMMAND_SCHEMA_OVERRIDES = {
     },
   },
   collect: { required: ['session-dir', 'item-json-file'], properties: { 'session-dir': SCHEMA.sessionDir, 'item-json-file': SCHEMA.inputFile, 'dry-run': SCHEMA.boolean } },
-  inspect: { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir, operation: { type: 'string', enum: ['ingest', 'organize', 'external'] }, 'target-json': SCHEMA.jsonObject, 'drain-pending': SCHEMA.boolean, full: SCHEMA.boolean } },
+  inspect: { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir, full: SCHEMA.boolean } },
   'unlock-stale': { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir } },
   'export-views': { required: ['session-dir'], properties: { 'session-dir': SCHEMA.sessionDir } },
   'crawl-seed': { required: ['session-dir', 'urls-file'], properties: { 'session-dir': SCHEMA.sessionDir, 'urls-file': SCHEMA.file, 'scope-prefix': { type: 'string', format: 'http-url' }, 'max-pages': SCHEMA.positiveInteger, depth: { ...SCHEMA.positiveInteger, default: 1 } } },

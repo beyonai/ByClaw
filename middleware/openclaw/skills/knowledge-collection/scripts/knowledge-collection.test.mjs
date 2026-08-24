@@ -35,7 +35,7 @@ function makeSessionDir() {
 function writeExecutorOutputs(root, { title = 'Paper', url = 'https://arxiv.org/abs/2608.04002' } = {}) {
   mkdirSync(join(root, 'markdown'), { recursive: true });
   mkdirSync(join(root, 'sanitized/items'), { recursive: true });
-  mkdirSync(join(root, '.post-processing-inputs'), { recursive: true });
+  mkdirSync(join(root, '.collection-inputs'), { recursive: true });
   writeFileSync(join(root, 'collection-result.json'), JSON.stringify({
     schemaVersion: '1.0', title: 't', source: 'public-internet', backend: 'bycli',
     url: 'https://example.com', filters: {}, items: [{
@@ -69,7 +69,7 @@ async function setupCollectedSession({ mode = 'collection' } = {}) {
   const init = await runCli(['init', '--session-dir', root, '--query', 'q', '--mode', mode]);
   assert.equal(init.json.ok, true);
   writeExecutorOutputs(root);
-  const payloadPath = join(root, '.post-processing-inputs/items.json');
+  const payloadPath = join(root, '.collection-inputs/items.json');
   writeFileSync(payloadPath, JSON.stringify(collectPayload(), null, 2));
   const collect = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
   assert.equal(collect.json.ok, true);
@@ -115,7 +115,7 @@ await (async () => {
   assert.equal(schema.json.commands.branch.properties.level.type, 'integer');
   assert.equal(schema.json.commands.branch.properties.level.minimum, 1);
   assert.equal(schema.json.commands.branch.properties.status.default, 'done');
-  assert.equal(schema.json.commands.collect.properties['item-json-file'].format, 'post-processing-input-file');
+  assert.equal(schema.json.commands.collect.properties['item-json-file'].format, 'collection-input-file');
   assert.equal(schema.json.commands['crawl-seed'].properties['max-pages'].type, 'integer');
   assert.equal(schema.json.commands['crawl-seed'].properties.depth.default, 1);
   assert.deepEqual(schema.json.commands['public-discover'].required, ['session-dir', 'query']);
@@ -274,7 +274,7 @@ await (async () => {
   assert.equal(r.json.ok, true);
   assert.ok(r.json.task.startedAt);
   writeExecutorOutputs(root);
-  const payloadPath = join(root, '.post-processing-inputs/items.json');
+  const payloadPath = join(root, '.collection-inputs/items.json');
   writeFileSync(payloadPath, JSON.stringify(collectPayload('item-x1'), null, 2));
   const c = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
   assert.equal(c.json.ok, true);
@@ -358,7 +358,7 @@ await (async () => {
   console.log('PASS zero-branch report rejected');
 })();
 
-// ── inspect 默认只读,drain-pending 显式清理 ──
+// ── inspect 只读 ──
 
 await (async () => {
   const { root } = await setupCollectedSession({ mode: 'collection' });
@@ -371,9 +371,8 @@ await (async () => {
   assert.equal(readOnly.json.ok, true);
   assert.ok(existsSync(join(root, 'markdown/old.md')), 'inspect 默认不得删除文件');
 
-  const drain = await runCli(['inspect', '--session-dir', root, '--drain-pending']);
-  assert.equal(drain.json.ok, true);
-  assert.ok(!existsSync(join(root, 'markdown/old.md')), '--drain-pending 才清理待删文件');
+  const sessionAfter = JSON.parse(readFileSync(join(root, 'session.json'), 'utf8'));
+  assert.deepEqual(sessionAfter.collection.collection.items[0].materialization.pendingArtifactCleanup, ['markdown/old.md']);
   console.log('PASS inspect read-only default');
 })();
 
@@ -385,8 +384,6 @@ await (async () => {
   writeFileSync(meta, JSON.stringify({
     schemaVersion: '1.0', storage: { fallback: false },
     collection: { status: 'complete', items: [] },
-    retention: { auditRequired: false, userRequested: false },
-    postProcessing: { runs: [] },
     sourceMetadata: { api_token: 'secret' },
   }));
   const r = await runCli(['init', '--session-dir', root, '--query', 'q', '--metadata-input-file', meta]);
@@ -403,6 +400,9 @@ await (async () => {
   writeFileSync(join(root, 'sanitized/metadata.json'), JSON.stringify({
     partial: true, storageFallback: false, audit_required: false,
   }));
+  const inspected = await runCli(['inspect', '--session-dir', root]);
+  assert.equal(inspected.json.ok, true);
+  assert.equal(existsSync(join(root, 'session.json')), false, 'legacy inspect 不得写入迁移状态');
   const s = await runCli(['status', '--session-dir', root]);
   assert.equal(s.json.ok, true);
   assert.equal(s.json.collection.items, 1);
@@ -419,7 +419,7 @@ await (async () => {
   writeFileSync(join(root, '.knowledge-collection.lock'), JSON.stringify({
     pid: process.pid, createdAt: new Date().toISOString(), ownerId: 'x', command: 'test',
   }));
-  const payloadPath = join(root, '.post-processing-inputs/items2.json');
+  const payloadPath = join(root, '.collection-inputs/items2.json');
   writeFileSync(payloadPath, JSON.stringify(collectPayload('item-2'), null, 2));
   const c = await runCli(['collect', '--session-dir', root, '--item-json-file', payloadPath]);
   assert.equal(c.json.ok, false);

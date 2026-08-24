@@ -32,6 +32,12 @@ const SESSION_HANDLERS = {
 
 function status(paths, args) {
   const research = cmdResearchStatus(args);
+  const collection = collectionStatus(paths);
+  const {
+    downstreamInput,
+    warnings: collectionWarnings = [],
+    ...collectionSummary
+  } = collection;
   const full = args.full === true || args.full === 'true';
   if (full) {
     const detail = cmdInspect(paths, { full: true });
@@ -42,17 +48,18 @@ function status(paths, args) {
       research: research.research,
       collection: detail.metadata,
       canonicalView: detail.collectionResult,
+      downstreamInput,
       warnings: [...(research.warnings || []), ...(detail.warnings || [])],
     };
   }
-  const collection = collectionStatus(paths);
   return {
     ok: true,
     action: 'status',
     task: research.task,
     research: research.research,
-    collection,
-    warnings: [...(research.warnings || []), ...(collection.warnings || [])],
+    collection: collectionSummary,
+    downstreamInput,
+    warnings: [...(research.warnings || []), ...collectionWarnings],
   };
 }
 

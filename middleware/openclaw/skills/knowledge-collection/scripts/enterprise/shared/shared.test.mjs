@@ -945,8 +945,8 @@ test('writeCollectionBundle preserves metadata v1.0 and the exact seven-key coll
     assert.equal(metadata.collection.status, 'complete');
     assert.equal(metadata.collection.items.length, 1);
     assert.deepEqual(metadata.collection.items[0].materialization.pendingArtifactCleanup, []);
-    assert.deepEqual(metadata.retention, { auditRequired: false, userRequested: false });
-    assert.deepEqual(metadata.postProcessing, { runs: [] });
+    assert.equal(metadata.retention, undefined);
+    assert.equal(metadata.postProcessing, undefined);
     assert.equal(Object.hasOwn(metadata.sourceMetadata, 'accessToken'), false);
     assert.equal(Object.hasOwn(metadata.collection.items[0].collectionFilters, 'cookie'), false);
 
@@ -1161,7 +1161,7 @@ test('writeCollectionBundle leaves metadata uncommitted on marker failure and pe
   }
 });
 
-test('writer bundle is accepted by real inspect and ingest normalization', async () => {
+test('writer bundle is accepted by real inspect and exposes sanitized handoff', async () => {
   const { createArtifactWriter } = await import('./artifact-writer.mjs');
   const { root } = await tempCase('enterprise-bundle-integration-');
   const outputRoot = join(root, 'output-new');
@@ -1179,10 +1179,13 @@ test('writer bundle is accepted by real inspect and ingest normalization', async
     assert.equal(inspected.json?.ok, true);
     assert.equal(inspected.json?.metadata?.collection?.items?.length, 1);
 
-    const normalized = await runNode(knowledgeCollectionScript, [
-      'normalize', '--collection-result-file', join(outputRoot, 'collection-result.json'),
+    const status = await runNode(knowledgeCollectionScript, [
+      'status', '--session-dir', outputRoot,
     ]);
-    assert.equal(normalized.code, 0, normalized.stderr || normalized.stdout);
+    assert.equal(status.code, 0, status.stderr || status.stdout);
+    assert.deepEqual(status.json?.downstreamInput?.files, [
+      join(await realpath(outputRoot), 'sanitized/items/item-1.md'),
+    ]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
