@@ -2006,51 +2006,6 @@ function resultFileName(value) {
   }
 }
 
-function buildIngestItemResults(markdownFiles, managerResult) {
-  const selected = markdownFiles.filter((item) => typeof item.itemId === 'string' && item.itemId);
-  if (!selected.length) {
-    return [];
-  }
-  const explicit = asArray(managerResult?.itemResults)
-    .filter((item) => item && typeof item === 'object' && typeof item.itemId === 'string')
-    .map((item) => ({
-      itemId: item.itemId,
-      status: ['success', 'failed', 'pending', 'unknown'].includes(item.status) ? item.status : 'unknown',
-      reason: firstNonEmpty(item.reason) || null,
-    }));
-  if (explicit.length) {
-    const byId = new Map(explicit.map((item) => [item.itemId, item]));
-    return selected.map((item) => byId.get(item.itemId) || {
-      itemId: item.itemId,
-      status: 'unknown',
-      reason: 'manager-result-unmapped',
-    });
-  }
-  const uploaded = asArray(managerResult?.uploaded?.uploadItems ?? managerResult?.uploaded?.items);
-  const builds = asArray(managerResult?.builds);
-  const selectedNames = selected.map((item) => resultFileName(item.fileName || item.localPath));
-  const duplicateSelectedNames = new Set(selectedNames.filter((name, index) => name && selectedNames.indexOf(name) !== index));
-  return selected.map((item) => {
-    const expectedName = resultFileName(item.fileName || item.localPath);
-    if (duplicateSelectedNames.has(expectedName)) {
-      return { itemId: item.itemId, status: 'unknown', reason: 'ambiguous-file-name' };
-    }
-    const uploadedMatches = uploaded.filter((entry) => (
-      resultFileName(entry?.fileName || entry?.name || entry?.filePath || entry?.path) === expectedName
-    ));
-    const uploadedPath = uploadedMatches.length === 1
-      ? firstNonEmpty(uploadedMatches[0]?.filePath, uploadedMatches[0]?.path, uploadedMatches[0]?.fileUrl)
-      : '';
-    const buildMatches = builds.filter((entry) => (
-      uploadedPath && firstNonEmpty(entry?.filePath, entry?.path) === uploadedPath
-    ));
-    if (uploadedMatches.length === 1 && buildMatches.length === 1) {
-      return { itemId: item.itemId, status: 'success', reason: null };
-    }
-    return { itemId: item.itemId, status: 'unknown', reason: 'manager-result-unmapped' };
-  });
-}
-
 function assertImportReady(targetConfig) {
   if (!targetConfig.knowledgeBaseResourceId && !targetConfig.knowledgeBaseId) {
     throw new Error("导入知识库必须提供 --knowledge-base-resource-id 或 --knowledge-base-id");
@@ -2061,265 +2016,43 @@ function hasImportTarget(targetConfig) {
   return Boolean(targetConfig?.knowledgeBaseResourceId || targetConfig?.knowledgeBaseId);
 }
 
-function resolveKnowledgeManagerScript(args) {
-  const explicit = firstNonEmpty(
-    pick(args, "knowledge-manager-script"),
-    process.env.BY_KNOWLEDGE_MANAGER_SCRIPT,
-  );
-  const candidates = explicit
-    ? [explicit]
-    : [
-      path.resolve(SCRIPT_DIR, "../../by-knowledge-manager/scripts/by-knowledge-manager.mjs"),
-      path.resolve(process.cwd(), "middleware/openclaw/skills/by-knowledge-manager/scripts/by-knowledge-manager.mjs"),
-    ];
-  for (const candidate of candidates) {
-    const resolved = expandHome(candidate);
-    if (fs.existsSync(resolved)) {
-      return resolved;
-    }
-  }
-  throw new Error(`找不到 by-knowledge-manager 脚本。请设置 BY_KNOWLEDGE_MANAGER_SCRIPT 或 --knowledge-manager-script。已尝试: ${candidates.join(", ")}`);
-}
-
-function candidateSessionDirs(args, payloads) {
-  const dirs = [
-    ...asArray(args["session-dir"]),
-    pick(args, "output-dir"),
-    payloads.collectionResult?.outputDir,
-  ];
-  for (const key of ["collection-result-file", "bycli-json-file"]) {
-    const filePath = pick(args, key);
-    if (filePath && filePath !== true) {
-      dirs.push(path.dirname(expandHome(filePath)));
-    }
-  }
-  const seen = new Set();
-  return dirs
-    .map((dir) => firstNonEmpty(dir))
-    .filter(Boolean)
-    .map((dir) => path.resolve(expandHome(dir)))
-    .filter((dir) => {
-      if (seen.has(dir)) {
-        return false;
-      }
-      seen.add(dir);
-      return fs.existsSync(dir);
-    });
-}
-
-function existingMarkdownPath(item, sessionDirs) {
-  const direct = firstNonEmpty(item[CANONICAL_LOCAL_PATH], item.localPath);
-  if (direct && fs.existsSync(expandHome(direct))) {
-    return expandHome(direct);
-  }
-  const fileName = firstNonEmpty(item.fileName);
-  if (!fileName) {
-    return "";
-  }
-  if (path.isAbsolute(fileName) && fs.existsSync(fileName)) {
-    return fileName;
-  }
-  for (const dir of sessionDirs) {
-    const candidates = [
-      path.resolve(dir, fileName),
-      path.resolve(dir, path.basename(fileName)),
-    ];
-    for (const candidate of candidates) {
-      if (fs.existsSync(candidate)) {
-        return candidate;
-      }
-    }
-  }
-  return "";
-}
-
-function prepareMarkdownUploadFiles(args, payloads) {
-  const sessionDirs = candidateSessionDirs(args, payloads);
-  const filePaths = [];
-  const reusedFiles = [];
-  const generatedFiles = [];
-  let tempDir = "";
-
-  for (const [index, item] of payloads.markdownFiles.entries()) {
-    const existingPath = existingMarkdownPath(item, sessionDirs);
-    if (existingPath) {
-      filePaths.push(existingPath);
-      reusedFiles.push(existingPath);
-      continue;
-    }
-
-    if (!tempDir) {
-      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-ingest-"));
-    }
-    const fileName = sanitizeFileName(item.fileName, `knowledge-collection-output-${index + 1}.md`);
-    let filePath = path.join(tempDir, fileName);
-    if (fs.existsSync(filePath)) {
-      filePath = path.join(tempDir, `${index + 1}-${fileName}`);
-    }
-    fs.writeFileSync(filePath, item.markdown || "", "utf8");
-    filePaths.push(filePath);
-    generatedFiles.push(filePath);
-  }
-
-  return { tempDir, filePaths, reusedFiles, generatedFiles, sessionDirs };
-}
-
-function runNodeJson(scriptPath, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [scriptPath, ...args], {
-      cwd: options.cwd || process.cwd(),
-      env: { ...process.env, ...(options.env || {}) },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (data) => { stdout += data; });
-    child.stderr.on("data", (data) => { stderr += data; });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      let json;
-      try {
-        json = JSON.parse(stdout);
-      } catch {
-        json = undefined;
-      }
-      if (code !== 0 || json?.ok === false) {
-        const detail = json?.error || stderr || stdout || `exit ${code}`;
-        reject(new Error(`by-knowledge-manager upload 失败: ${detail}`));
-        return;
-      }
-      const expectedActions = options.expectedActions || ["upload"];
-      if (!json || typeof json !== "object" || Array.isArray(json) || json.ok !== true || !expectedActions.includes(json.action)) {
-        reject(new Error(`by-knowledge-manager ${args[0]} 未返回有效 JSON 返回契约`));
-        return;
-      }
-      resolve({ code, stdout, stderr, json });
-    });
-  });
-}
-
-async function uploadMarkdownWithKnowledgeManager(args, payloads) {
+function prepareMarkdownIngestHandoff(args, payloads) {
   const resourceId = toPositiveSafeInteger(payloads.targetConfig.knowledgeBaseResourceId || payloads.targetConfig.knowledgeBaseId);
   if (!resourceId) {
     throw new Error("导入知识库必须提供 --knowledge-base-resource-id 或 --knowledge-base-id");
   }
   const directoryPath = firstNonEmpty(payloads.targetConfig.directoryPath, "/");
   assertConfirmedImportTarget(args, resourceId, directoryPath);
-  const managerScript = resolveKnowledgeManagerScript(args);
-  const hasCanonicalArtifacts = payloads.markdownFiles.some((item) => Boolean(item[CANONICAL_LOCAL_PATH]));
-  if (args["dry-run"]) {
-    const sessionDirs = candidateSessionDirs(args, payloads);
-    return {
-      dryRun: true,
-      managerScript,
-      command: "upload",
-      resourceId,
-      directoryPath,
-      confirmation: confirmedImportTarget(resourceId, directoryPath),
-      files: payloads.markdownFiles.map((item) => ({
+  const confirmedOverwritePaths = [...new Set(asArray(args["confirmed-overwrite-path"])
+    .filter((item) => item !== true)
+    .map(String))].sort();
+  return {
+    schemaVersion: "1.0",
+    skill: "by-knowledge-manager",
+    operation: "ingest",
+    target: { resourceId, directoryPath },
+    selection: {
+      files: payloads.markdownFiles.map((item) => compactObject({
         fileName: item.fileName,
-        source: item[CANONICAL_LOCAL_PATH] ? "validated-canonical" : undefined,
-        existingPath: item[CANONICAL_LOCAL_PATH]
-          ? undefined
-          : existingMarkdownPath(item, sessionDirs) || undefined,
+        itemId: item.itemId,
+        source: item[CANONICAL_LOCAL_PATH] ? "validated-canonical" : "normalized-markdown",
       })),
-      ...(!hasCanonicalArtifacts ? { sessionDirs } : {}),
-    };
-  }
-
-  const { tempDir, filePaths, reusedFiles, generatedFiles, sessionDirs } = prepareMarkdownUploadFiles(args, payloads);
-  let preserveTempForContinuation = false;
-  try {
-    const baseManagerArgs = [
-      "upload",
-      "--resource-id", String(resourceId),
-      "--directory-path", directoryPath,
-    ];
-    for (const filePath of filePaths) {
-      baseManagerArgs.push("--file-path", filePath);
-    }
-    const confirmedOverwritePaths = asArray(args["confirmed-overwrite-path"])
-      .filter((item) => item !== true)
-      .map(String);
-    let result;
-    if (confirmedOverwritePaths.length) {
-      const checked = await runNodeJson(managerScript, [...baseManagerArgs, "--check-conflicts"]);
-      const actualPaths = asArray(checked.json?.overwritePaths).map(String).sort();
-      const confirmedPaths = [...new Set(confirmedOverwritePaths)].sort();
-      if (!checked.json?.needsOverwriteConfirmation || JSON.stringify(actualPaths) !== JSON.stringify(confirmedPaths)) {
-        throw new Error("--confirmed-overwrite-path 与最新冲突路径不一致，已拒绝覆盖");
-      }
-      const updateArgs = [
-        "update-file",
-        "--resource-id", String(resourceId),
-        "--directory-path", directoryPath,
-        "--skip-conflict-check",
-      ];
-      for (const filePath of filePaths) {
-        updateArgs.push("--file-path", filePath);
-      }
-      result = await runNodeJson(managerScript, updateArgs, { expectedActions: ["update-file"] });
-    } else {
-      const managerArgs = [...baseManagerArgs];
-      if (args["check-conflicts"]) {
-        managerArgs.push("--check-conflicts");
-      }
-      result = await runNodeJson(managerScript, managerArgs);
-    }
-    if (result.json?.needsOverwriteConfirmation) {
-      preserveTempForContinuation = Boolean(tempDir);
-      return {
-        action: "confirm-overwrite",
-        conflict: Boolean(result.json.conflict),
-        needsOverwriteConfirmation: true,
-        overwritePaths: asArray(result.json.overwritePaths),
-        resourceId,
-        directoryPath,
-        manager: result.json,
-        continuation: {
-          command: "ingest",
-          markdownFilePaths: filePaths,
-          resourceUploadMustNotBeReplayed: true,
-          requiredArguments: {
-            "knowledge-base-resource-id": resourceId,
-            "directory-path": directoryPath,
-            "confirmed-knowledge-base-resource-id": resourceId,
-            "confirmed-directory-path": directoryPath,
-            "confirmed-overwrite-path": asArray(result.json.overwritePaths),
-          },
-        },
-      };
-    }
-    const publicResult = {
-      managerScript,
-      resourceId,
-      directoryPath,
-      manager: result.json,
-    };
-    const itemResults = buildIngestItemResults(payloads.markdownFiles, result.json);
-    return hasCanonicalArtifacts
-      ? {
-        ...publicResult,
-        ...(itemResults.length ? { itemResults } : {}),
-        files: payloads.markdownFiles.map((item) => ({
-          fileName: item.fileName,
-          source: item[CANONICAL_LOCAL_PATH] ? "validated-canonical" : "runtime-generated",
-        })),
-      }
-      : {
-        ...publicResult,
-        ...(itemResults.length ? { itemResults } : {}),
-        tempDir,
-        filePaths,
-        reusedFiles,
-        generatedFiles,
-        sessionDirs,
-      };
-  } finally {
-    if (tempDir && !args["keep-temp"] && !preserveTempForContinuation) {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
-  }
+    },
+    manager: {
+      command: confirmedOverwritePaths.length ? "update-file" : "upload",
+      checkConflicts: Boolean(args["check-conflicts"] || confirmedOverwritePaths.length),
+      oneFilePerInvocation: confirmedOverwritePaths.length > 0,
+      confirmedOverwritePaths,
+    },
+    resultContract: {
+      requireActions: confirmedOverwritePaths.length ? ["check-conflicts", "update-file"] : ["upload"],
+      requireUploadedPathsAndBuilds: true,
+      mapResultsBy: "itemId-and-unique-fileName",
+      unresolvedItemStatus: "unknown",
+    },
+    confirmation: confirmedImportTarget(resourceId, directoryPath),
+    dryRun: Boolean(args["dry-run"]),
+  };
 }
 
 function buildListKnowledgeBasePayload(args, stdinJson = {}) {
@@ -2444,7 +2177,7 @@ async function printHelp() {
       "upload-resource": "上传图片/音频/视频到 /chat/uploadFiles（会话文件，不进知识库）",
       "upload-images": "把选中正文里的本地图片上传知识库（只 upload 不 build），返回相对链接到下载 URL 的映射",
     "upload-doc": "文件直传知识库：/datasetController/uploadFiles + build，后端解析 pdf/docx/pptx/xlsx/csv/txt/md",
-      ingest: "归一化 Markdown 后调用 by-knowledge-manager upload/build",
+      ingest: "归一化 Markdown 并生成 by-knowledge-manager 入库交接单；不直接写知识库",
     },
     inputs: [
       "--collection-result-file <file>",
@@ -2639,39 +2372,26 @@ async function main() {
     );
     const directoryPath = firstNonEmpty(payloads.targetConfig.directoryPath, "/");
     assertConfirmedImportTarget(args, resourceId, directoryPath);
+    const handoff = prepareMarkdownIngestHandoff(args, payloads);
     if (args["dry-run"]) {
-      const uploaded = await uploadMarkdownWithKnowledgeManager(args, payloads);
       const resourceUpload = mediaCandidates.length ? await uploadResources(mediaCandidates, args) : undefined;
       if (resourceUpload) {
         render({
           ok: true,
-          action: "ingest",
+          action: "ingest-handoff",
           dryRun: true,
           summary: summarizePayloads(payloads),
           resourceUpload,
-          knowledgeIngest: uploaded,
+          handoff,
         });
         return;
       }
       render({
         ok: true,
-        action: "ingest",
+        action: "ingest-handoff",
         dryRun: true,
         summary: summarizePayloads(payloads),
-        upload: uploaded,
-      });
-      return;
-    }
-    const uploaded = await uploadMarkdownWithKnowledgeManager(args, payloads);
-    if (uploaded.needsOverwriteConfirmation) {
-      render({
-        ok: true,
-        action: "confirm-overwrite",
-        conflict: uploaded.conflict,
-        needsOverwriteConfirmation: true,
-        overwritePaths: uploaded.overwritePaths,
-        summary: summarizePayloads(payloads),
-        continuation: uploaded.continuation,
+        handoff,
       });
       return;
     }
@@ -2679,20 +2399,18 @@ async function main() {
     if (resourceUpload) {
       render({
         ok: true,
-        action: "ingest",
+        action: "ingest-handoff",
         summary: summarizePayloads(payloads),
         resourceUpload,
-        knowledgeIngest: uploaded,
-        ...(uploaded.itemResults ? { itemResults: uploaded.itemResults } : {}),
+        handoff,
       });
       return;
     }
     render({
       ok: true,
-      action: "ingest",
+      action: "ingest-handoff",
       summary: summarizePayloads(payloads),
-      uploaded,
-      ...(uploaded.itemResults ? { itemResults: uploaded.itemResults } : {}),
+      handoff,
     });
     return;
   }

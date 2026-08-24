@@ -37,6 +37,15 @@ python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py <command> -
 python3 <by-knowledge-manager目录>/scripts/by_knowledge_manager.py <command> [options]
 ```
 
+## 接收 knowledge-collection 入库交接单
+
+当上游 `knowledge-collection` 返回 `action: "ingest-handoff"` 时，读取其 `handoff`，而不是自行扩大文件、知识库或目录范围。
+
+- 使用 `handoff.target.resourceId`、`handoff.target.directoryPath` 和 `handoff.selection.files`；从上游已验证的正文产物取得对应本地文件。
+- `handoff.manager.command=upload` 时执行 `upload`；`checkConflicts=true` 时按写入子 Skill 先检查冲突。
+- 有 `confirmedOverwritePaths` 时重新验证冲突路径完全一致，再按文件逐一执行 `update-file`；不得接受部分确认。
+- 返回管理器原始 JSON，使上游可依 `handoff.resultContract` 映射 `itemId`、上传路径和 build 受理状态；不能唯一映射时由上游记为 `unknown`。
+
 ## 遵守通用约束
 
 - 操作前确定目标知识库。缺少 `resourceId` 时先询问，不要猜测。
