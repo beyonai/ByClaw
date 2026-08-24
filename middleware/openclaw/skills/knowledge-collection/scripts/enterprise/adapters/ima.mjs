@@ -33,7 +33,8 @@ function records(value) {
 }
 
 function contentOf(value) {
-  const root = objectValue(value) || {};
+  const root = objectValue(value);
+  if (!root) return '';
   for (const key of ['markdown', 'content', 'text', 'body', 'noteContent']) {
     if (typeof root[key] === 'string' && root[key].trim()) return root[key].trim();
   }
@@ -45,7 +46,7 @@ function contentOf(value) {
 }
 
 function itemFromRecord(record, sourceType, kb = '') {
-  const sourceItemId = stringValue(record, ['doc_id', 'docId', 'documentId', 'id', 'uuid', 'fileId']);
+  const sourceItemId = stringValue(record, ['mediaId', 'doc_id', 'docId', 'documentId', 'id', 'uuid', 'fileId']);
   if (!sourceItemId) return null;
   const title = stringValue(record, ['title', 'name', 'fileName', 'subject']) || sourceItemId;
   const sourceUrl = stringValue(record, ['url', 'sourceUrl', 'link']) || `ima://${sourceType}/${sourceItemId}`;
@@ -55,7 +56,7 @@ function itemFromRecord(record, sourceType, kb = '') {
     title,
     sourceType,
     kb,
-    preview: contentOf(record),
+    preview: contentOf(record) || stringValue(record, ['abstract', 'introduction']),
   };
 }
 
@@ -121,12 +122,27 @@ async function callJson(writer, bin, env, args, artifact) {
   return parsed;
 }
 
-async function discover(writer, request, bin, env) {
+async function bycliKnowledgeList(writer, bycliBin, env, kb) {
+  const result = await runCli(bycliBin, ['ima', 'knowledge', kb, '-f', 'json'], { env });
+  if (result.failure || result.exitCode !== 0) {
+    throw new Error(`bycli ima knowledge failed: ${cliReason(result)}`);
+  }
+  let parsed;
+  try { parsed = JSON.parse(result.stdout); } catch { throw new Error('bycli ima knowledge returned invalid JSON'); }
+  if (!Array.isArray(parsed) && !objectValue(parsed)) {
+    throw new Error('bycli ima knowledge returned an unsupported JSON shape');
+  }
+  await writer.writeJson('raw/bycli-knowledge.json', parsed);
+  return parsed;
+}
+
+async function discover(writer, request, bin, bycliBin, env) {
   const found = [];
   const seen = new Set();
   const rawArtifacts = [];
-  const runDiscovery = async (sourceType, args, artifact) => {
-    const response = await callJson(writer, bin, env, args, artifact);
+  const fallbackReasons = [];
+  const runDiscovery = async (sourceType, artifact, load) => {
+    const response = await load();
     rawArtifacts.push(artifact);
     for (const record of records(response)) {
       const item = itemFromRecord(record, sourceType, request.kb);
@@ -140,13 +156,27 @@ async function discover(writer, request, bin, env) {
   if (request.noteMode === 'title') {
     noteArgs.splice(2, 2, '--title', request.query);
   }
-  await runDiscovery('note', noteArgs, 'raw/note-search.json');
+  await runDiscovery('note', 'raw/note-search.json', () => callJson(writer, bin, env, noteArgs, 'raw/note-search.json'));
   if (found.length < request.limit) {
-    const wikiArgs = ['wiki', 'search', request.query, '--json'];
-    if (request.kb) wikiArgs.splice(3, 0, '--kb', request.kb);
-    await runDiscovery('wiki', wikiArgs, 'raw/wiki-search.json');
+    if (request.kb) {
+      try {
+        await runDiscovery('wiki', 'raw/bycli-knowledge.json', () => bycliKnowledgeList(writer, bycliBin, env, request.kb));
+        return { found: found.slice(0, request.limit), rawArtifacts, fallbackReasons };
+      } catch (error) {
+        fallbackReasons.push(reasonOf(error));
+      }
+    }
+    const wikiArgs = ['wiki', 'search', request.query, ...(request.kb ? ['--kb', request.kb] : []), '--json'];
+    try {
+      await runDiscovery('wiki', 'raw/wiki-search.json', () => callJson(writer, bin, env, wikiArgs, 'raw/wiki-search.json'));
+    } catch (error) {
+      if (fallbackReasons.length) {
+        throw new Error(`IMA knowledge listing failed: bycli=${fallbackReasons.join('; ')}; wiki=${reasonOf(error)}`);
+      }
+      throw error;
+    }
   }
-  return { found: found.slice(0, request.limit), rawArtifacts };
+  return { found: found.slice(0, request.limit), rawArtifacts, fallbackReasons };
 }
 
 async function materializeOne(writer, item, bin, env) {
@@ -188,6 +218,7 @@ async function persistSearch(writer, request, inventory, canonicalItems, rawArti
 
 export function createImaAdapter(dependencies = {}) {
   const bin = dependencies.bin || 'ima';
+  const bycliBin = dependencies.bycliBin || 'bycli';
   const env = dependencies.env || process.env;
 
   async function search(request = {}) {
@@ -200,7 +231,7 @@ export function createImaAdapter(dependencies = {}) {
     };
     try {
       await authCheck(bin, env);
-      const discovery = await discover(writer, normalized, bin, env);
+      const discovery = await discover(writer, normalized, bin, bycliBin, env);
       const inventory = normalized.metadataOnly ? discovery.found.map((item) => inventoryItem(item, item.rawArtifacts)) : [];
       const materialized = [];
       if (!normalized.metadataOnly) {
@@ -214,7 +245,10 @@ export function createImaAdapter(dependencies = {}) {
         title: item.title, url: item.sourceUrl, author: '', publishTime: '', markdown: item.materialization.sanitizedPath, fileName: item.materialization.sanitizedPath,
       }));
       const status = deriveCollectionStatus({ metadataOnly: normalized.metadataOnly, itemStates: finalInventory.map((item) => item.materialization.status) });
-      await persistSearch(writer, normalized, finalInventory, canonicalItems, discovery.rawArtifacts, status, { discovered: finalInventory.length });
+      await persistSearch(writer, normalized, finalInventory, canonicalItems, discovery.rawArtifacts, status, {
+        discovered: finalInventory.length,
+        fallbackReasons: discovery.fallbackReasons,
+      });
       return handledOutcome(identity.connector, status, outputDir, inventoryCounts(finalInventory));
     } catch (error) {
       if (error.auth) return handledOutcome(identity.connector, 'auth_required', outputDir, { failed: 0 });

@@ -204,7 +204,11 @@ function defaultAdapters() {
     dingtalk: createDingtalkAdapter({ bin: process.env.DWS_CLI_BIN || 'dws', env: process.env }),
     feishu: createFwsAdapter({ bin: process.env.LARK_CLI_BIN || 'lark-cli', env: process.env }),
     wecom: createWecomAdapter({ bin: process.env.WECOM_CLI_BIN || 'wecom-cli', env: process.env }),
-    ima: createImaAdapter({ bin: process.env.IMA_CLI_BIN || 'ima', env: process.env }),
+    ima: createImaAdapter({
+      bin: process.env.IMA_CLI_BIN || 'ima',
+      bycliBin: process.env.BYCLI_BIN || 'bycli',
+      env: process.env,
+    }),
   };
 }
 

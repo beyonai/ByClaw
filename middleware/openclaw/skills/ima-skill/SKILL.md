@@ -13,7 +13,8 @@ upstream_shasum: "dc86270926d634bbc713d67403d537741f5a10b1"
 
 ## 最高优先级约束
 
-- 所有 IMA 业务操作只能通过通用 `exec` 执行 `ima` CLI；禁止 `curl`、手写 HTTP 请求或 `ima_api` helper。
+- 除 `knowledge-collection` 获取指定知识库文章详情列表的只读例外外，所有 IMA 业务操作只能通过通用 `exec` 执行 `ima` CLI；禁止 `curl`、手写 HTTP 请求或 `ima_api` helper。
+- 上述例外仅允许 `bycli ima knowledge <knowledgeBase> -f json`；失败后可由 `knowledge-collection` 调用一次 `ima wiki search` 兜底。不得将 byCLI 用于 IMA 写操作，不得绕过认证或凭据规则。
 - 不得读取、检查或展示 IMA 凭据或对应环境变量。凭证缺失或连接未配置时提示用户前往连接器设置重新连接。
 - 禁止执行 `ima auth config`、读取凭证文件、展示凭证，或在聊天中索取 Client ID / API Key。
 - 支持 `--json` 的命令必须带上 `--json`；根据进程退出码和 JSON 结果判断成功或失败，不能只凭文本输出判断。
@@ -34,7 +35,8 @@ upstream_shasum: "dc86270926d634bbc713d67403d537741f5a10b1"
 | 用户意图 | CLI 命令 |
 | --- | --- |
 | 搜索、读取、创建、追加笔记 | `exec` 的 `ima note … --json` |
-| 搜索或浏览知识库 | `exec` 的 `ima wiki … --json` |
+| 获取指定知识库的文章详情列表（仅 `knowledge-collection`） | `exec` 的 `bycli ima knowledge <knowledgeBase> -f json`，失败后一次 `ima wiki search` 兜底 |
+| 搜索或浏览知识库（其他场景） | `exec` 的 `ima wiki … --json` |
 | 上传文件、导入网页、关联笔记 | `exec` 的 `ima wiki … --json` |
 
 可先运行以下只读命令确认连接状态：
