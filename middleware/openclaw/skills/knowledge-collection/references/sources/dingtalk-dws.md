@@ -1,7 +1,7 @@
 # DingTalk DWS 采集桥接
 
 钉钉采集意图由 `knowledge-collection` 统一编排。命中本桥接后，先声明“委派采集模式”，再加载并遵循
-`dws` skill。`knowledge-collection` 负责采集意图、产物目录、规范化契约和后处理；`dws` 负责钉钉产品
+`dws` skill。`knowledge-collection` 负责采集意图、产物目录、规范化契约和采集交付；`dws` 负责钉钉产品
 与 URL 路由、命令与参数、ID 和 taskUuid、flags、分页、权限、认证以及危险操作确认。
 
 ## 来源路由
@@ -62,7 +62,7 @@ sanitized/
 ```
 
 - `raw/` 保存经秘密扫描与必要脱敏后的 DWS JSON；不得写入凭据或秘密。
-- `markdown/` 保留 DWS 内容转换后的 Markdown；`sanitized/items/` 保存供预览和后处理的净化 Markdown，
+- `markdown/` 保留 DWS 内容转换后的 Markdown；`sanitized/items/` 保存供预览和下游交接的净化 Markdown，
   并明确写入 `sanitized/metadata.json`。`raw/metadata.json` 与 `sanitized/metadata.json` 均遵循主契约且不含秘密。
 - `items[].fileName` 和 `items[].markdown` 使用相对于采集根目录的相对路径，且指向实际存在的规范化
   `sanitized/items/` 文件。
@@ -78,8 +78,8 @@ sanitized/
 - 部分命令或分页失败时保留成功结果，在 `sanitized/metadata.json` 中设置 `collection.status: partial`，并把失败
   步骤及分页位置写入 `sourceMetadata`；不得把 partial 结果表述为完整结果。
 
-来源执行器 `dws` 只返回采集结果，不得询问或执行 `入库 / 知识整理 / 跳过`。持久化、预览以及唯一后处理选择由
-`knowledge-collection` 按 [post-processing.md](../post-processing.md) 统一完成。
+来源执行器 `dws` 只返回采集结果。`knowledge-collection` 完成持久化、验证与预览后，按
+[delivery.md](../delivery.md) 交付 `sanitized/items/*.md` 并停止。
 ## Knowledge collection enterprise search
 
 Only a user-named DingTalk source or a clear internal-material request whose approved `sourceScope` includes DingTalk may invoke enterprise search. The connector reuses DWS discovery/authentication and records ranked candidates. Batch search defaults to metadata-only and isolates DWS authentication or invocation failures from selected sources; use `enterprise materialize --session-dir ... --item-ids ... --output-dir <new dir>` to materialize selected pending candidates.

@@ -34,7 +34,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 ## 委派所有权边界
 
 - 角色名称固定为：采集编排器 `knowledge-collection`（含内置公共互联网路由层）、网站执行器 `bycli`、站点 Adapter、直接查询所有者（根 Agent）。
-- 采集编排器委派时，`knowledge-collection` 负责统一持久化、产物协议、后处理与入库或知识整理。
+- 采集编排器委派时，`knowledge-collection` 只负责统一持久化、产物协议与采集交付；任何下游处理由根 Agent 另行委派。
 - 网站执行器只执行或发现、修复 Adapter，并把结构化记录、正文或文件元数据返回采集编排器，不规定统一产物名称或目录。
 - 网站执行器不得反向加载 `knowledge-collection`。是否处于委派模式不改变 byCLI 的命令、授权、浏览器生命周期或 Adapter 验证规则。
 - 委派模式下若浏览器降级过程值得复用，返回 `adapterCandidate` 与判断依据给采集编排器，不得直接询问用户是否保存 Adapter。

@@ -1,6 +1,6 @@
 {
   "name": "knowledge-collection-references",
-  "description": "knowledge-collection 的按需加载工作流、来源桥接与参数契约索引。主 SKILL.md 只负责触发、范围、交付级别与路由；子 skill 不可独立于采集编排器调用。",
+  "description": "knowledge-collection 的按需加载工作流、来源桥接、采集契约与交付边界索引。",
   "skills": [
     {
       "name": "site-crawl",
@@ -22,17 +22,12 @@
     {
       "name": "collection-contract",
       "path": "collection-contract.md",
-      "description": "session.json 状态契约与可照抄的 init/collect/run payload。"
+      "description": "session.json 采集状态契约与可照抄的 init/collect payload。"
     },
     {
-      "name": "post-processing",
-      "path": "post-processing.md",
-      "description": "持久化、预览、入库/知识整理/外部消费选择、逐篇状态与清理。"
-    },
-    {
-      "name": "knowledge-ingest",
-      "path": "knowledge-ingest.md",
-      "description": "知识库入库流程与目标确认。"
+      "name": "delivery",
+      "path": "delivery.md",
+      "description": "只交付已验证 sanitized/items Markdown 的终止边界。"
     },
     {
       "name": "online-search",
