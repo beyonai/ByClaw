@@ -1953,7 +1953,7 @@ export default {
   'projectSpace.resources.deleteRepoFailed': '代码仓库删除失败',
   'projectSpace.resources.boundKnowledge': '已绑定知识库',
   'projectSpace.resources.sharedEmployee': '共享数字员工',
-  'projectSpace.resources.sharedEmployeeDescription': '项目绑定的数字员工',
+  'projectSpace.resources.sharedEmployeeDescription': '绑定的数字员工',
   'projectSpace.resources.boundEmployee': '已绑定数字员工',
   'projectSpace.resources.boundOntology': '已绑定本体',
   'projectSpace.resources.bindingTitle': '绑定项目资源',

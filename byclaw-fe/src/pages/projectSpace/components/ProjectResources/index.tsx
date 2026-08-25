@@ -46,6 +46,7 @@ import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import { listOntologyBases, pageOntologyResources } from '@/service/ontology';
 import { ResourceTypeMap } from '@/constants/resource';
 import { useDigitalEmployeeOptions } from '../../hooks/useDigitalEmployeeOptions';
+import { getProjectResourceCategoryCount, supportsProjectRepositories } from '../../projectCapabilities';
 import type { ProjectBoundResource, ProjectSpace } from '../../types';
 import styles from '../../index.module.less';
 
@@ -53,7 +54,7 @@ interface Props {
   project: ProjectSpace;
   onRefreshToolbarChange?: (toolbar: React.ReactNode | null) => void;
 
-  /** 研发项目共享代码仓库新增复用项目仓库管理表单。 */
+  /** 研发、运营项目共享代码仓库新增复用项目仓库管理表单。 */
   onOpenRepositoryManager?: (repo?: DevloopProjectRepo) => void;
 
   /** 仓库新增/编辑后由详情页递增，确保资源卡片立即重新读取列表。 */
@@ -132,10 +133,10 @@ const ProjectResources: React.FC<Props> = ({
     [agentOptions]
   );
 
-  const isDevelopProject = project.projectType === 'develop';
   const isOperationProject = project.projectType === 'operation';
-  // 资源分类始终在同一行等宽铺满：研发 2 类、运营 4 类，默认和普通项目仅展示共享文件。
-  const resourceCategoryCount = isDevelopProject ? 2 : isOperationProject ? 4 : 1;
+  const repositoryProject = supportsProjectRepositories(project.projectType);
+  // 资源分类始终在同一行等宽铺满：研发 2 类、运营 5 类，默认和普通项目仅展示共享文件。
+  const resourceCategoryCount = getProjectResourceCategoryCount(project.projectType);
 
   const loadFiles = useCallback(async () => {
     setLoadingFiles(true);
@@ -150,7 +151,7 @@ const ProjectResources: React.FC<Props> = ({
   }, [intl, project.projectId]);
 
   const loadRepos = useCallback(async () => {
-    if (!isDevelopProject) return;
+    if (!repositoryProject) return;
     setLoadingRepos(true);
     try {
       setRepos((await listProjectRepos(Number(project.projectId))) || []);
@@ -160,7 +161,7 @@ const ProjectResources: React.FC<Props> = ({
     } finally {
       setLoadingRepos(false);
     }
-  }, [intl, isDevelopProject, project.projectId]);
+  }, [intl, project.projectId, repositoryProject]);
 
   const loadBoundResources = useCallback(async () => {
     if (!isOperationProject) return;
@@ -686,7 +687,7 @@ const ProjectResources: React.FC<Props> = ({
           </Spin>
         </section>
 
-        {isDevelopProject ? (
+        {repositoryProject && (
           <section className={styles.resourceCategoryCard}>
             {renderCardHeader(
               <GithubOutlined />,
@@ -698,7 +699,9 @@ const ProjectResources: React.FC<Props> = ({
               {repos.length ? repos.map(renderRepository) : !loadingRepos && empty}
             </Spin>
           </section>
-        ) : isOperationProject ? (
+        )}
+
+        {isOperationProject && (
           <section className={styles.resourceCategoryCard}>
             {renderCardHeader(
               <DatabaseOutlined />,
@@ -708,7 +711,7 @@ const ProjectResources: React.FC<Props> = ({
             )}
             {renderBoundResources(boundKnowledge, 'knowledge', <DatabaseOutlined />)}
           </section>
-        ) : null}
+        )}
 
         {isOperationProject && (
           <section className={styles.resourceCategoryCard}>
