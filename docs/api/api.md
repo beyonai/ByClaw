@@ -76,16 +76,6 @@
 | `POST` | `/api/v1/buildResult` | 查询文档最新一次构建结果、Markdown 和切片 |
 | `POST` | `/api/v1/knowledgeItems/search` | 知识检索 |
 | `GET` | `/health` | 探活 |
-| `POST` | `/api/v1/knowledgeItems/importByResourceId` | 按资源 ID 上传文档（Agent 工具） |
-| `POST` | `/api/v1/fileToMarkdownIndexByResourceId` | 按资源 ID 触发知识构建（Agent 工具） |
-| `POST` | `/api/v1/buildResultByResourceId` | 按资源 ID 查询文档构建结果（Agent 工具） |
-| `POST` | `/api/v1/knowledgeItems/searchByResourceId` | 按资源 ID 知识检索（Agent 工具） |
-| `POST` | `/api/v1/directories/createByResourceId` | 按资源 ID 创建目录（Agent 工具） |
-| `POST` | `/api/v1/directories/updateByResourceId` | 按资源 ID 修改目录（Agent 工具） |
-| `POST` | `/api/v1/directories/deleteByResourceId` | 按资源 ID 删除目录（Agent 工具） |
-| `POST` | `/api/v1/listDirByResourceId` | 按资源 ID 获取目录内容（Agent 工具） |
-| `POST` | `/api/v1/readFileByResourceId` | 按资源 ID 读取文件内容（Agent 工具） |
-| `POST` | `/api/v1/downloadFileByResourceId` | 按资源 ID 下载原始文件（Agent 工具） |
 
 ## 知识库管理
 
@@ -1300,9 +1290,9 @@ QA 原始协议透传接口。门户将请求体直接传给 QA，并原样返�
 
 结果顺序由 QA 决定，固定按 `knowledge_fs_entry.updated_at` 从旧到新排序；更新时间相同时按文件 `kid` 从小到大排序。门户不进行二次排序。
 
-## Agent 工具接口
+## 已移除的 Agent 工具接口
 
-以下接口专门提供给数字员工（Agent）作为工具调用，使用外部资源 ID（`resourceId`）代替内部知识库编码（`knCode`）。系统自动从 MinIO 配置文件读取 `resourceId` 与 `knCode` 的映射关系，调用方无需感知内部编码。
+以下 `*ByResourceId` 包装接口已经移除，保留本节仅用于识别旧调用和迁移。调用方应改用门户接口；可信服务网络内直接调用 QA 原生接口时，应传入 `knCode`，并通过 `X-Byclaw-Resource-Id` 请求头传递资源上下文。
 
 ### 接口总览
 

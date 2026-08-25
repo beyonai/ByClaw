@@ -65,35 +65,24 @@ async def test_native_resource_route_publishes_after_success_with_request_contex
     assert context[RESOURCE_ID_HEADER] == "42"
 
 
-@pytest.mark.asyncio
-async def test_resource_id_route_publishes_with_body_resource_id(client):
-    invoker = CapturingInvoker()
-    service = AsyncMock()
-    with (
-        patch("api._resolve_kn_code", new_callable=AsyncMock, return_value="kb-1"),
-        patch(
-            "api.resolve_knowledge_base_service",
-            new_callable=AsyncMock,
-            return_value=service,
-        ),
-        patch("by_qa.main._knowledge_event_publisher_invoker", invoker),
-    ):
-        response = await client.post(
-            "/api/v1/directories/createByResourceId",
-            json={"resourceId": "42", "directoryPath": "/Docs"},
-            headers={
-                "X-User-Code": "user-1",
-                "X-CHAT-SESSION-ID": "session-1",
-            },
-        )
+def test_resource_id_wrapper_routes_are_not_registered():
+    removed_paths = {
+        "/api/v1/knowledgeItems/importByResourceId",
+        "/api/v1/knowledge-items/importByResourceId",
+        "/api/v1/fileToMarkdownIndexByResourceId",
+        "/api/v1/knowledgeItems/searchByResourceId",
+        "/api/v1/knowledge-items/searchByResourceId",
+        "/api/v1/directories/createByResourceId",
+        "/api/v1/directories/updateByResourceId",
+        "/api/v1/directories/deleteByResourceId",
+        "/api/v1/listDirByResourceId",
+        "/api/v1/readFileByResourceId",
+        "/api/v1/buildResultByResourceId",
+        "/api/v1/downloadFileByResourceId",
+    }
+    registered_paths = {route.path for route in api.app.routes}
 
-    assert response.json()["resultCode"] == "0"
-    event, context = invoker.calls[0]
-    assert event.event_type == "resource.directory.created"
-    assert event.kb_code == "kb-1"
-    assert context[RESOURCE_ID_HEADER] == "42"
-    assert context[USER_CODE_HEADER] == "user-1"
-    assert context[CHAT_SESSION_ID_HEADER] == "session-1"
+    assert removed_paths.isdisjoint(registered_paths)
 
 
 @pytest.mark.asyncio
